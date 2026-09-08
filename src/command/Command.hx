@@ -16,12 +16,22 @@ class Command {
 	static function humanize(name:String):String {
 		var separator = name.indexOf(":"), group = separator < 0 ? "Command" : name.substring(0, separator),
 			action = separator < 0 ? name : name.substring(separator + 1);
-		group = capitalize(group);
+		group = groupName(group);
 		var words = action.split("-");
 		for (index in 0...words.length)
 			words[index] = capitalize(words[index]);
 		return group + ": " + words.join(" ");
 	}
+
+	static function groupName(group:String):String
+		return switch group {
+			case "doc": "Editor"; case "root": "View"; case "layout": "View"; case "workbench": "View";
+			case "files": "File"; case "file": "File"; case "folder": "File"; case "project": "Project";
+			case "workspace": "Project"; case "navigation": "Go"; case "settings": "Preferences";
+			case "keybindings": "Preferences"; case "find": "Find"; case "language": "Language";
+			case "build": "Build"; case "plugins": "Plugins"; case "recovery": "Recovery";
+			case "commands": "View"; default: capitalize(group);
+		};
 
 	static function capitalize(value:String):String {
 		if (value.length == 0) return value;

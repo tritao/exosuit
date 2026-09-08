@@ -60,7 +60,7 @@ class CommandView {
 		var width = commandWidth(windowWidth), x = Std.int((windowWidth - width) / 2), inputX = x + 12,
 			promptWidth = provider == null ? 0 : renderer.textWidth(provider.prompt),
 			caretX = inputX + promptWidth + renderer.textWidth(query.substring(0, input.selection.cursor.column));
-		return new TextInputArea(caretX, 55, 2, 24);
+		return new TextInputArea(caretX, 24, 2, 24);
 	}
 
 	public function setQuery(value:String):Void {
@@ -130,24 +130,29 @@ class CommandView {
 		var current = provider;
 		if (!active || current == null) return;
 		var width = commandWidth(windowWidth);
-		var x = Std.int((windowWidth - width) / 2), y = 48, rowHeight = 26, visible = results.length;
-		if (visible > 10) visible = 10;
+		var x = Std.int((windowWidth - width) / 2), y = 16, rowHeight = 28, sectionHeight = 22,
+			maximumVisible = Std.int((windowHeight - y - 90) / rowHeight);
+		if (maximumVisible < 1) maximumVisible = 1;
+		if (maximumVisible > 12) maximumVisible = 12;
+		var visible = results.length;
+		if (visible > maximumVisible) visible = maximumVisible;
 		var firstVisible = visibleStart(visible);
-		var height = 42 + visible * rowHeight;
+		var sectionCount = visibleSectionCount(firstVisible, visible), height = 44 + visible * rowHeight + sectionCount * sectionHeight;
 		renderer.clip(0, 0, windowWidth, windowHeight);
 		renderer.rect(0, 0, windowWidth, windowHeight, theme.overlay);
 		renderer.rect(x - 2, y - 2, width + 4, height + 4, theme.border);
-		renderer.rect(x, y, width, 40, theme.surfaceElevated);
-		var inputX = x + 12, inputY = y + 11, promptWidth = renderer.textWidth(current.prompt),
+		renderer.rect(x, y, width, height, theme.editorBackground);
+		renderer.rect(x, y, width, 42, theme.surfaceElevated);
+		var inputX = x + 14, inputY = y + 12, promptWidth = renderer.textWidth(current.prompt),
 			selectionStart = input.selection.start().column, selectionEnd = input.selection.end().column;
 		if (selectionEnd > selectionStart) {
 			var selectionX = inputX + promptWidth + renderer.textWidth(query.substring(0, selectionStart)),
 				selectionWidth = renderer.textWidth(query.substring(selectionStart, selectionEnd));
-			renderer.rect(selectionX, y + 5, selectionWidth, 28, theme.selection);
+			renderer.rect(selectionX, y + 6, selectionWidth, 28, theme.selection);
 		}
 		renderer.text(inputX, inputY, current.prompt + query, theme.caret);
 		var caretX = inputX + promptWidth + renderer.textWidth(query.substring(0, input.selection.cursor.column));
-		renderer.rect(caretX, y + 7, 2, 24, theme.caret);
+		renderer.rect(caretX, y + 8, 2, 24, theme.caret);
 		if (compositionText.length > 0) {
 			var start = utf16Column(compositionText, compositionStart), end = utf16Column(compositionText, compositionStart + compositionLength);
 			if (end > start) renderer.rect(caretX + renderer.textWidth(compositionText.substring(0, start)), y + 7,
@@ -155,14 +160,53 @@ class CommandView {
 			renderer.text(caretX, inputY, compositionText, theme.caret);
 			renderer.rect(caretX, y + 30, renderer.textWidth(compositionText), 1, theme.caret);
 		}
+		var rowY = y + 44, previousSection = "";
 		for (index in 0...visible) {
-			var resultIndex = firstVisible + index, rowY = y + 42 + index * rowHeight, entry = results[resultIndex];
+			var resultIndex = firstVisible + index, entry = results[resultIndex];
+			if (query.length == 0 && entry.section.length > 0 && entry.section != previousSection) {
+				renderer.text(x + 14, rowY + 4, entry.section, theme.foregroundMuted);
+				rowY += sectionHeight;
+			}
+			previousSection = entry.section;
 			if (resultIndex == selected) renderer.rect(x, rowY, width, rowHeight, theme.accent);
 			var foreground = resultIndex == selected ? theme.editorBackground : theme.editorForeground;
-			renderer.text(x + 12, rowY + 5, entry.label, foreground);
-			if (entry.detail.length > 0) renderer.text(x + Std.int(width * 0.55), rowY + 5, entry.detail,
+			var trailingWidth = entry.trailing.length == 0 ? 0 : renderer.textWidth(entry.trailing),
+				trailingX = x + width - 14 - trailingWidth, detailX = x + Std.int(width * 0.55),
+				labelRight = entry.detail.length > 0 ? detailX - 18 : trailingX - (trailingWidth == 0 ? 0 : 18);
+			if (labelRight < x + 15) labelRight = x + 15;
+			renderer.clip(x + 14, rowY, labelRight - x - 14, rowHeight);
+			renderer.text(x + 14, rowY + 6, entry.label, foreground);
+			if (entry.detail.length > 0) {
+				var detailRight = trailingWidth == 0 ? x + width - 14 : trailingX - 18;
+				if (detailRight < detailX + 1) detailRight = detailX + 1;
+				renderer.clip(detailX, rowY, detailRight - detailX, rowHeight);
+				renderer.text(detailX, rowY + 6, entry.detail,
+					resultIndex == selected ? theme.editorBackground : theme.foregroundMuted);
+			}
+			renderer.clip(x, y, width, height);
+			if (entry.trailing.length > 0) renderer.text(trailingX, rowY + 6, entry.trailing,
 				resultIndex == selected ? theme.editorBackground : theme.foregroundMuted);
+			rowY += rowHeight;
 		}
+		if (results.length > visible && visible > 0) {
+			var trackY = y + 46, trackHeight = height - 50, thumbHeight = Std.int(trackHeight * visible / results.length);
+			if (thumbHeight < 18) thumbHeight = 18;
+			var maximumStart = results.length - visible,
+				thumbY = trackY + (maximumStart == 0 ? 0 : Std.int((trackHeight - thumbHeight) * firstVisible / maximumStart));
+			renderer.rect(x + width - 3, thumbY, 2, thumbHeight, theme.foregroundMuted);
+		}
+		renderer.clip(0, 0, windowWidth, windowHeight);
+	}
+
+	function visibleSectionCount(start:Int, visible:Int):Int {
+		if (query.length > 0) return 0;
+		var count = 0, previous = "";
+		for (index in 0...visible) {
+			var section = results[start + index].section;
+			if (section.length > 0 && section != previous) count++;
+			previous = section;
+		}
+		return count;
 	}
 
 	public function visibleStart(visible:Int):Int {
@@ -172,8 +216,9 @@ class CommandView {
 	}
 
 	static function commandWidth(windowWidth:Int):Int {
-		var width = windowWidth - 80;
-		if (width > 640) width = 640;
+		var width = Std.int(windowWidth * 0.72);
+		if (width > 820) width = 820;
+		if (width > windowWidth - 32) width = windowWidth - 32;
 		if (width < 200) width = 200;
 		return width;
 	}
@@ -197,7 +242,8 @@ class CommandView {
 		if (provider == null) return;
 		for (index in 0...provider.entries.length) {
 			var entry = provider.entries[index];
-			var score = fuzzyScore(entry.label + " " + entry.detail, query);
+			var score = fuzzyScore(entry.label, query);
+			if (score < 0) score = fuzzyScore(entry.searchText, query);
 			if (score >= 0) {
 				entry.score = score;
 				entry.order = index;
@@ -206,6 +252,7 @@ class CommandView {
 		}
 		results.sort(function(left, right) {
 			if (left.score != right.score) return right.score - left.score;
+			if (query.length == 0) return left.order - right.order;
 			var label = Reflect.compare(left.label.toLowerCase(), right.label.toLowerCase());
 			return label != 0 ? label : left.order - right.order;
 		});

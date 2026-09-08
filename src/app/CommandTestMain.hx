@@ -27,10 +27,17 @@ class CommandTestMain {
 		require(disabled.description == "Test: Human Readable", "command description fallback was not human readable");
 		application.workbench.openCommandView();
 		var fallbackEntry = [for (entry in application.root.commandView.results) if (entry.value == "test:fallback") entry][0];
-		require(fallbackEntry.label == "Run the fallback command" && fallbackEntry.detail == "test:fallback",
-			"command palette did not show the human-readable description and stable command ID");
+		require(fallbackEntry.label == "Run the fallback command" && fallbackEntry.searchText.indexOf("test:fallback") >= 0,
+			"command palette did not show the human-readable description or retain the stable command ID for search");
 		var paletteEntry = [for (entry in application.root.commandView.results) if (entry.value == "commands:open") entry][0];
-		require(paletteEntry.detail == "commands:open  Ctrl+Shift+P", "command palette did not show the effective keyboard shortcut");
+		require(paletteEntry.trailing == "Ctrl+Shift+P", "command palette did not show the effective keyboard shortcut");
+		application.root.commandView.close();
+		application.workbench.openCommandView();
+		application.root.commandView.setQuery("fallback");
+		application.root.commandView.keyPressed(Platform.KEY_ENTER, 0);
+		application.workbench.openCommandView();
+		var recentEntry = [for (entry in application.root.commandView.results) if (entry.value == "test:fallback") entry][0];
+		require(recentEntry.section == "Recently Used", "executed palette command was not promoted to the recent section");
 		application.root.commandView.close();
 		keymap.addDirect(100, 1, ["test:disabled", "test:fallback"]);
 		require(keymap.onKeyPressed(100, 1, context) && performed == 2, "predicate fallback dispatch failed");
@@ -77,7 +84,7 @@ class CommandTestMain {
 		require(commandView.query == "fo", "command input caret editing failed");
 		commandView.keyPressed(Platform.KEY_Z, Platform.MOD_CTRL);
 		require(commandView.query == "foo", "command input undo failed");
-		commandView.keyPressed(Platform.KEY_UP, 0);
+		while (commandView.results[commandView.selected].value != "exact") commandView.keyPressed(Platform.KEY_UP, 0);
 		commandView.keyPressed(Platform.KEY_TAB, 0);
 		require(commandView.query == "foo", "command completion did not use the selected exact entry");
 		commandView.keyPressed(Platform.KEY_ENTER, 0);

@@ -1,6 +1,7 @@
 package controller;
 
 import command.CommandContext;
+import command.Command;
 import command.CommandRegistry;
 import command.Keymap;
 import commandview.CommandViewEntry;
@@ -23,6 +24,7 @@ class WorkbenchController {
 	final search:SearchController;
 	final openDocument:String->Void;
 	public var openPath:String->Void = function(path) {};
+	final recentCommands:Array<String> = [];
 
 	public function new(workspace:Workspace, root:RootView, commands:CommandRegistry, keymap:Keymap, context:CommandContext,
 		completions:CompletionRegistry, errors:ErrorLog, search:SearchController, openDocument:String->Void) {
@@ -87,17 +89,33 @@ class WorkbenchController {
 	}
 
 	public function openCommandView():Void {
+		var available = commands.availableCommands(context), entries:Array<CommandViewEntry> = [];
+		for (name in recentCommands)
+			for (command in available)
+				if (command.name == name) entries.push(commandEntry(command, "Recently Used"));
+		for (command in available)
+			if (recentCommands.indexOf(command.name) < 0) entries.push(commandEntry(command, "Other Commands"));
 		root.commandView.open(new CommandViewProvider("> ",
-			[for (command in commands.availableCommands(context)) new CommandViewEntry(command.description, commandDetail(command.name), command.name)],
+			entries,
 			function(query) {}, function(entry, query, backwards) {
 				root.commandView.close();
-				if (entry != null) commands.perform(entry.value, context);
+				if (entry != null) {
+					rememberCommand(entry.value);
+					commands.perform(entry.value, context);
+				}
 			}));
 	}
 
-	function commandDetail(name:String):String {
-		var shortcuts = keymap.shortcutsFor(name);
-		return shortcuts.length == 0 ? name : name + "  " + shortcuts.join(", ");
+	function commandEntry(command:Command, section:String):CommandViewEntry {
+		var shortcuts = keymap.shortcutsFor(command.name);
+		return new CommandViewEntry(command.description, "", command.name, shortcuts.join(", "),
+			command.description + " " + command.name + " " + shortcuts.join(" "), section);
+	}
+
+	function rememberCommand(name:String):Void {
+		recentCommands.remove(name);
+		recentCommands.unshift(name);
+		if (recentCommands.length > 5) recentCommands.pop();
 	}
 
 	public function openCompletionCommandView():Void {
