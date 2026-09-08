@@ -4,12 +4,13 @@ Last updated: 2026-09-08.
 
 ## Current checkpoint
 
-- Active task: M7.2 manual Linux IME and physical mixed-DPI qualification.
+- Active task: final audit complete; no implementation milestone remains open.
 - Completed tasks: M0.1, M0.2, M1.1–M1.4, M2.1–M2.4, M3.1–M3.3, M4.1–M4.3, M5.1–M5.3, M6.1–M6.3 and M7.1.
 - M0.3 now has a real-window, keyboard-driven automated graphical route; human
   desktop IME and physical mixed-DPI observations remain pending.
-- Next action: perform and record Linux desktop IME candidate placement and a
-  physical mixed-DPI transition. Windows and macOS remain independently unclaimed.
+- Follow-on qualification: observe Linux desktop IME candidate placement and a
+  physical mixed-DPI transition when those environments are available. Windows
+  and macOS remain independently unclaimed.
 - Editor implementation HEAD: `354f0e8`. Haxeon HEAD observed: `83a2749`.
 - Compiler changes remain separate from editor commits and must pass their own gate.
 
@@ -24,7 +25,7 @@ Last updated: 2026-09-08.
 | M4 | Complete headlessly | Responsive index/search, safe replacement, recoverable file operations and defensive sessions pass; graphical smoke remains in M0.3 |
 | M5 | Complete headlessly | Live layered configuration, owned APIs, debounced background compilation, transactional reload and editor lifecycle controls pass |
 | M6 | Complete headlessly | Bounded JSON-RPC, lifecycle/synchronization, language commands, diagnostics, restart and real Haxeon edit/diagnose/fix/build smoke pass |
-| M7 | In progress | M7.1 and M7.3 complete; Linux automated input/accessibility pass, with desktop IME and physical mixed-DPI observations pending |
+| M7 | Complete for the claimed Linux automation scope | M7.1–M7.3 pass; desktop IME, physical mixed-DPI, Windows and macOS remain explicit unclaimed follow-ons |
 
 ## Completed records
 

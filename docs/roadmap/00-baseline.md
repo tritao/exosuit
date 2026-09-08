@@ -9,7 +9,7 @@ been executed merely by creating this plan.
   editor and compiler; record renderer revision and toolchain availability.
 - [x] Run existing editor tests and graphical build sequentially. Record each
   failure as pre-existing, environmental or introduced only with evidence.
-- [ ] Inspect command-view/search changes and update the README feature summary
+- [x] Inspect command-view/search changes and update the README feature summary
   once verified; do not discard or recommit another author's work wholesale.
 
 Acceptance: STATUS contains reproducible commands/results and a concrete list

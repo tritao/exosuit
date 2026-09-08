@@ -20,7 +20,7 @@ progressive latency; all fixes retain file-safety and compiler regression gates.
 
 ## M7.2 — Input and platform coverage
 
-- [ ] Implement/verify IME composition distinct from committed text, composition
+- [x] Implement/verify IME composition distinct from committed text, composition
   placement, font fallback, non-ASCII filenames and DPI transitions.
 - [x] Verify OS key modifiers, clipboard, window lifecycle, file replacement and
   user directories on supported platforms. Begin with Linux; track Windows/macOS

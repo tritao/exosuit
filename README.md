@@ -23,3 +23,13 @@ By default the build uses sibling checkouts at `../realtime-haxe` and
 `../pragtical`. Override them with `HAXEON_ROOT` and `PRAGTICAL_ROOT`.
 
 See [the platform boundary decision](docs/architecture/0001-platform-boundary.md).
+
+## Current capabilities
+
+The editor now covers safe document persistence and recovery, multiple views and
+selections, command/file/search palettes, project indexing and replacement,
+layered live configuration, reloadable owned plugins, build tasks, and Haxeon
+language diagnostics/navigation. The SDL host supports Unicode clipboard and
+paths, distinct IME preedit state, display-scale events, shaped font fallbacks,
+and a relocatable Linux release archive. Exact qualification evidence and open
+platform limitations are recorded in `docs/release-qualification.md`.
