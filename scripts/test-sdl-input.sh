@@ -14,23 +14,32 @@ printf 'Olá 日本語 😀 Z' > "$expected"
 xvfb-run -a bash -c '
 	set -euo pipefail
 	export LD_LIBRARY_PATH="$1/vendor/hashlink${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+	export PRAGTICAL_PORTABLE="$4"
 	cd "$2/out"
-	./pragtical-haxeon --smoke-seconds=5 "$3" &
+	./pragtical-haxeon --smoke-seconds=8 "$3" &
 	pid=$!
 	window=""
 	for _ in $(seq 1 100); do
-		window=$(xdotool search --pid "$pid" 2>/dev/null | head -1 || true)
+		window=$(xdotool search --onlyvisible --pid "$pid" 2>/dev/null | head -1 || true)
 		[[ -n "$window" ]] && break
 		sleep 0.02
 	done
 	[[ -n "$window" ]]
 	printf "Olá 日本語 😀 Z" | xclip -selection clipboard
-	xdotool windowfocus --sync "$window"
+	xdotool windowfocus "$window"
 	xdotool windowsize "$window" 1120 720
+	sleep 0.1
 	xdotool key --window "$window" ctrl+a ctrl+v
-	xdotool key --window "$window" shift+Left ctrl+c
+	sleep 0.2
+	xdotool key --window "$window" shift+Left
+	sleep 0.1
+	xdotool key --window "$window" ctrl+c
+	sleep 0.2
 	[[ $(xclip -selection clipboard -o) == Z ]]
-	xdotool key --window "$window" Right ctrl+alt+Left ctrl+s
+	xdotool key --window "$window" Right ctrl+alt+Left
+	sleep 0.1
+	xdotool key --window "$window" ctrl+s
+	sleep 0.2
 	wait "$pid"
-' bash "$haxeon_root" "$root_dir" "$document"
+' bash "$haxeon_root" "$root_dir" "$document" "$fixture/state"
 cmp "$expected" "$document"

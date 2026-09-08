@@ -108,6 +108,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   bool keep_running = false;
   (void)appstate;
   if (!phx_haxeon_iterate(&keep_running)) return SDL_APP_FAILURE;
+  if (keep_running) SDL_Delay(16);
   return keep_running ? SDL_APP_CONTINUE : SDL_APP_SUCCESS;
 }
 

@@ -16,6 +16,7 @@ cp "$root_dir/plugins/example/plugin.conf" "$root_dir/plugins/example/Main.hx" "
 xvfb-run -a bash -c '
 	set -euo pipefail
 	export LD_LIBRARY_PATH="$1/vendor/hashlink${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+	export PRAGTICAL_PORTABLE="$5"
 	cd "$2/out"
 	./pragtical-haxeon --smoke-seconds=30 --plugin="$4/plugin.conf" "$3" &
 	pid=$!
@@ -26,7 +27,7 @@ xvfb-run -a bash -c '
 		sleep 0.02
 	done
 	[[ -n "$window" ]]
-	xdotool windowfocus --sync "$window"
+	xdotool windowfocus "$window"
 	sleep 0.2
 	xdotool key --window "$window" ctrl+p
 	xdotool type --window "$window" --delay 2 first.txt
@@ -61,7 +62,7 @@ xvfb-run -a bash -c '
 	sleep 0.2
 	xdotool key --window "$window" Return
 	wait "$pid"
-' bash "$haxeon_root" "$root_dir" "$project" "$plugin"
+' bash "$haxeon_root" "$root_dir" "$project" "$plugin" "$fixture/state"
 
 if [[ $(<"$project/first.txt") != "replaced alpha" ]]; then
 	echo "graphical workflow produced unexpected first.txt: $(<"$project/first.txt")" >&2
