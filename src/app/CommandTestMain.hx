@@ -94,6 +94,16 @@ class CommandTestMain {
 		require(commandView.results.length == 0, "long no-match command query retained stale results");
 		commandView.keyPressed(Platform.KEY_ESCAPE, 0);
 		require(!commandView.active, "command input cancellation failed");
+		var scrollingEntries:Array<CommandViewEntry> = [];
+		for (index in 0...12) scrollingEntries.push(new CommandViewEntry("command " + index, "", Std.string(index)));
+		commandView.open(new CommandViewProvider("> ", scrollingEntries, function(query) {}, function(entry, query, backwards) {}));
+		for (index in 0...10) commandView.keyPressed(Platform.KEY_DOWN, 0);
+		require(commandView.selected == 10 && commandView.visibleStart(10) == 1,
+			"command results did not scroll to keep a downward selection visible");
+		commandView.keyPressed(Platform.KEY_DOWN, 0);
+		commandView.keyPressed(Platform.KEY_DOWN, 0);
+		require(commandView.selected == 0 && commandView.visibleStart(10) == 0,
+			"wrapped command selection did not restore the top result window");
 		renderer.destroy();
 		Platform.require(Native.window_destroy(window), "destroy command test window");
 		Native.shutdown();

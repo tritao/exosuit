@@ -132,6 +132,7 @@ class CommandView {
 		var width = commandWidth(windowWidth);
 		var x = Std.int((windowWidth - width) / 2), y = 48, rowHeight = 26, visible = results.length;
 		if (visible > 10) visible = 10;
+		var firstVisible = visibleStart(visible);
 		var height = 42 + visible * rowHeight;
 		renderer.clip(0, 0, windowWidth, windowHeight);
 		renderer.rect(0, 0, windowWidth, windowHeight, theme.overlay);
@@ -155,13 +156,19 @@ class CommandView {
 			renderer.rect(caretX, y + 30, renderer.textWidth(compositionText), 1, theme.caret);
 		}
 		for (index in 0...visible) {
-			var rowY = y + 42 + index * rowHeight, entry = results[index];
-			if (index == selected) renderer.rect(x, rowY, width, rowHeight, theme.accent);
-			var foreground = index == selected ? theme.editorBackground : theme.editorForeground;
+			var resultIndex = firstVisible + index, rowY = y + 42 + index * rowHeight, entry = results[resultIndex];
+			if (resultIndex == selected) renderer.rect(x, rowY, width, rowHeight, theme.accent);
+			var foreground = resultIndex == selected ? theme.editorBackground : theme.editorForeground;
 			renderer.text(x + 12, rowY + 5, entry.label, foreground);
 			if (entry.detail.length > 0) renderer.text(x + Std.int(width * 0.55), rowY + 5, entry.detail,
-				index == selected ? theme.editorBackground : theme.foregroundMuted);
+				resultIndex == selected ? theme.editorBackground : theme.foregroundMuted);
 		}
+	}
+
+	public function visibleStart(visible:Int):Int {
+		if (visible <= 0 || selected < visible) return 0;
+		var start = selected - visible + 1, maximum = results.length - visible;
+		return start > maximum ? maximum : start;
 	}
 
 	static function commandWidth(windowWidth:Int):Int {
