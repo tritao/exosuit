@@ -16,6 +16,7 @@ class PlatformEventDecoder {
 			case PlatformAbi.EVENT_MOUSE_WHEEL: MouseWheel(Native.event_window(), Native.event_a(), Native.event_b());
 			case PlatformAbi.EVENT_DISPLAY_SCALE_CHANGED: DisplayScaleChanged(Native.event_window(), Native.event_a());
 			case PlatformAbi.EVENT_TEXT_EDITING: TextEditing(Native.event_window(), Native.event_text(), Native.event_a(), Native.event_b());
+			case PlatformAbi.EVENT_FILE_DROPPED: FileDropped(Native.event_window(), Native.event_text());
 			default: null;
 		};
 	}

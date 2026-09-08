@@ -570,6 +570,13 @@ bool phx_event_push_sdl(const SDL_Event *input) {
           event.a = (int32_t)(input->wheel.y * 100.0f);
           event.b = (int32_t)(-input->wheel.x * 100.0f);
           break;
+        case SDL_EVENT_DROP_FILE:
+          if (!input->drop.data || strlen(input->drop.data) >= sizeof(event.text))
+            return false;
+          event.kind = PHX_EVENT_FILE_DROPPED;
+          event.window = window_handle_from_id(input->drop.windowID);
+          store_event_text(event.text, sizeof(event.text), input->drop.data);
+          break;
         default: return false;
   }
   return phx_event_push_for_test(&event);

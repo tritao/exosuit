@@ -18,6 +18,15 @@ class TabGroup {
 		return view;
 	}
 
+	public function insert(view:View, index:Int):View {
+		views.remove(view);
+		if (index < 0) index = 0;
+		if (index > views.length) index = views.length;
+		views.insert(index, view);
+		setActive(view);
+		return view;
+	}
+
 	public function setActive(view:View):Bool {
 		if (indexOf(view) < 0)
 			return false;

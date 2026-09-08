@@ -22,6 +22,7 @@ class WorkbenchController {
 	final errors:ErrorLog;
 	final search:SearchController;
 	final openDocument:String->Void;
+	public var openPath:String->Void = function(path) {};
 
 	public function new(workspace:Workspace, root:RootView, commands:CommandRegistry, keymap:Keymap, context:CommandContext,
 		completions:CompletionRegistry, errors:ErrorLog, search:SearchController, openDocument:String->Void) {
@@ -73,6 +74,14 @@ class WorkbenchController {
 		}, null, null, function(query, entry) {
 			return entry == null ? query : entry.label;
 		}));
+	}
+
+	public function openPathCommandView(directory:Bool):Void {
+		root.commandView.open(new CommandViewProvider(directory ? "Open Project: " : "Open File: ", [], function(query) {},
+			function(entry, path, backwards) {
+				root.commandView.close();
+				if (path.length > 0) openPath(path);
+			}));
 	}
 
 	public function openCommandView():Void {

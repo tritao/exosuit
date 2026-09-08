@@ -40,6 +40,7 @@ import controller.WorkbenchController;
 import process.ProcessManager;
 import controller.BuildController;
 import controller.LanguageController;
+import session.RecentProjects;
 
 class Application {
 	public final documents:DocumentManager;
@@ -72,11 +73,12 @@ class Application {
 	public final recovery:RecoveryStore;
 	public final errors:ErrorLog;
 	public final confirmations:ConfirmationService;
+	public final recentProjects:RecentProjects;
 	public final documentMatches:Array<SearchMatch>;
 	public var documentSearchQuery(get, never):String;
 	public var quitReady(get, never):Bool;
 
-	public function new(renderer:Renderer, width:Int, height:Int, ?settings:SettingsService) {
+	public function new(renderer:Renderer, width:Int, height:Int, ?settings:SettingsService, ?recentProjects:RecentProjects) {
 		this.settings = settings == null ? new SettingsService() : settings;
 		syntaxes = new SyntaxRegistry();
 		BuiltinSyntax.install(syntaxes);
@@ -91,6 +93,7 @@ class Application {
 		root = new RootView(renderer, theme, focus, workspace, width, height, this.settings.current);
 		errors = new ErrorLog();
 		confirmations = new ConfirmationService(root.commandView);
+		this.recentProjects = recentProjects == null ? new RecentProjects(ConfigurationPaths.recentProjects()) : recentProjects;
 		root.closeRequest = function() {
 			requestCloseActiveTab();
 		};
@@ -114,6 +117,7 @@ class Application {
 		plugins = pluginController.manager;
 		workbench = new WorkbenchController(workspace, root, commands, keymap, context, completions, errors, search,
 			path -> { open(path); });
+		workbench.openPath = function(path) { openArgument(path); };
 		build = new BuildController(workspace, root, context, commands, processes, path -> open(path), reportError);
 		var languageServer = Sys.getEnv("HAXEON_LSP");
 		if (languageServer == null || languageServer.length == 0) {
@@ -127,6 +131,19 @@ class Application {
 			}
 		}
 		language = new LanguageController(workspace, root, context, commands, processes, languageServer, reportError);
+		root.welcome.recentProjects = this.recentProjects.paths;
+		root.welcome.newFile = function() { newDocument(); };
+		root.welcome.openFile = function() { workbench.openPathCommandView(false); };
+		root.welcome.openProject = function() { workbench.openPathCommandView(true); };
+		root.welcome.findFile = function() { workbench.openFileCommandView(); };
+		root.welcome.runCommand = function() { workbench.openCommandView(); };
+		root.welcome.openSettings = function() { configuration.openSettingsCommandView(); };
+		root.welcome.openPlugins = function() { pluginController.openDiagnostics(); };
+		root.welcome.openRecent = function(path) { openArgument(path); };
+		root.createFileRequest = function() { files.openCreateFile(); };
+		root.createFolderRequest = function() { files.openCreateFolder(); };
+		root.renameFileRequest = function() { files.openRenameFile(); };
+		root.deleteFileRequest = function() { files.openDeleteFile(); };
 	}
 
 	public function open(path:String):View
@@ -139,6 +156,7 @@ class Application {
 			var project = workspace.addProject(normalized, projectSettings.current.excludedNames);
 			project.setSettings(projectSettings);
 			configuration.apply(projectSettings.current);
+			recentProjects.add(normalized);
 			return null;
 		}
 		return open(path);

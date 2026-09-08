@@ -62,6 +62,13 @@ int main(void) {
 	assert(result.kind == PHX_EVENT_TEXT_EDITING && result.window == first);
 	assert(result.a == 1 && result.b == 2 && strcmp(result.text, "にほん") == 0);
 
+	phx_event dropped = {.kind = PHX_EVENT_FILE_DROPPED, .window = first};
+	snprintf(dropped.text, sizeof(dropped.text), "%s", "/tmp/dropped file.txt");
+	assert(phx_event_push_for_test(&dropped));
+	assert(phx_event_poll(&result));
+	assert(result.kind == PHX_EVENT_FILE_DROPPED && result.window == first);
+	assert(strcmp(result.text, "/tmp/dropped file.txt") == 0);
+
   assert(phx_font_destroy(font));
   assert(phx_window_destroy(first));
   assert(!phx_window_valid(first));

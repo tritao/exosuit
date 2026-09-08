@@ -13,4 +13,5 @@ enum PlatformEvent {
 	MouseWheel(window:Int, vertical:Int, horizontal:Int);
 	DisplayScaleChanged(window:Int, scaleMilli:Int);
 	TextEditing(window:Int, text:String, start:Int, length:Int);
+	FileDropped(window:Int, path:String);
 }

@@ -1,5 +1,5 @@
 {
-  "version": 16,
+  "version": 17,
   "events": {
     "NONE": { "value": 0 },
     "QUIT": { "value": 1, "constructor": "Quit", "fields": [] },
@@ -12,7 +12,8 @@
     "MOUSE_BUTTON_UP": { "value": 8, "constructor": "MouseButtonUp", "fields": [["window", "Int"], ["a", "Int", "button"], ["b", "Int", "x"], ["c", "Int", "y"], ["d", "Int", "clicks"]] },
     "MOUSE_WHEEL": { "value": 9, "constructor": "MouseWheel", "fields": [["window", "Int"], ["a", "Int", "vertical"], ["b", "Int", "horizontal"]] },
     "DISPLAY_SCALE_CHANGED": { "value": 10, "constructor": "DisplayScaleChanged", "fields": [["window", "Int"], ["a", "Int", "scaleMilli"]] },
-    "TEXT_EDITING": { "value": 11, "constructor": "TextEditing", "fields": [["window", "Int"], ["text", "String"], ["a", "Int", "start"], ["b", "Int", "length"]] }
+    "TEXT_EDITING": { "value": 11, "constructor": "TextEditing", "fields": [["window", "Int"], ["text", "String"], ["a", "Int", "start"], ["b", "Int", "length"]] },
+    "FILE_DROPPED": { "value": 12, "constructor": "FileDropped", "fields": [["window", "Int"], ["text", "String", "path"]] }
   },
   "keys": {
     "UNKNOWN": 0,
@@ -54,6 +55,7 @@
     "ALT": 4
   },
   "mouse_buttons": {
-    "LEFT": 1
+    "LEFT": 1,
+    "RIGHT": 3
   }
 }

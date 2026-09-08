@@ -9,6 +9,10 @@ class ConfigurationPaths {
 		return child(stateRoot(), "session.conf");
 	}
 
+	public static function recentProjects():String {
+		return child(stateRoot(), "recent-projects.conf");
+	}
+
 	public static function configurationRoot():String {
 		var portable = environment("PRAGTICAL_PORTABLE");
 		if (portable != null) return trim(portable);

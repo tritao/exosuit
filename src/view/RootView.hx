@@ -34,6 +34,12 @@ class RootView {
 	public final sidebar:Sidebar;
 	public final searchSidebar:SearchSidebar;
 	public final commandView:CommandView;
+	public final welcome:WelcomeView;
+	public final contextMenu:ContextMenu;
+	public var createFileRequest:Void->Void = function() {};
+	public var createFolderRequest:Void->Void = function() {};
+	public var renameFileRequest:Void->Void = function() {};
+	public var deleteFileRequest:Void->Void = function() {};
 	public var searchVisible(default, null):Bool = false;
 	public final notifications:NotificationCenter;
 	public final status:StatusView;
@@ -49,6 +55,11 @@ class RootView {
 	var draggingSidebar:Bool = false;
 	var pointerX:Int = -1;
 	var pointerY:Int = -1;
+	var draggedTabLeaf:Null<LayoutNode>;
+	var draggedTabView:Null<View>;
+	var draggedTabStartX:Int = 0;
+	var draggedTabStartY:Int = 0;
+	var draggingTab:Bool = false;
 
 	public function new(renderer:Renderer, theme:Theme, focus:FocusManager, workspace:Workspace, width:Int, height:Int, ?settings:Settings) {
 		this.renderer = renderer;
@@ -59,6 +70,8 @@ class RootView {
 		sidebar = new Sidebar(workspace);
 		searchSidebar = new SearchSidebar();
 		commandView = new CommandView();
+		welcome = new WelcomeView();
+		contextMenu = new ContextMenu();
 		notifications = new NotificationCenter();
 		pluginPanels = new PluginPanelRegistry();
 		pluginDecorations = new PluginDecorationRegistry();
@@ -261,7 +274,12 @@ class RootView {
 	}
 
 	public function mouseDown(button:Int, x:Int, y:Int, clicks:Int = 1):Void {
+		if (contextMenu.mouseDown(button, x, y)) return;
 		if (commandView.active) return;
+		if (button == 3) {
+			openContextMenu(x, y);
+			return;
+		}
 		if (button == 1 && sidebarVisible && x >= sidebar.width - 3 && x <= sidebar.width + 3) {
 			draggingSidebar = true;
 			return;
@@ -286,11 +304,20 @@ class RootView {
 		var leaf = node.leafAt(x, y);
 		if (leaf == null) return;
 		activateLeaf(leaf);
+		if (leaf.tabs.activeView == null && button == 1) {
+			welcome.mouseDown(x, y, leaf.x, leaf.y, leaf.width, leaf.height);
+			return;
+		}
 		if (button == 1 && y < leaf.y + EditorView.HEADER_HEIGHT) {
 			var start = visibleTabStart(leaf), index = start + Std.int((x - leaf.x) / TAB_WIDTH), localX = (x - leaf.x) % TAB_WIDTH;
 			if (index >= 0 && index < tabs.views.length) {
 				tabs.setActive(tabs.views[index]);
-				if (localX >= TAB_WIDTH - 22) closeRequest();
+				if (localX >= TAB_WIDTH - 22) closeRequest(); else {
+					draggedTabLeaf = leaf;
+					draggedTabView = tabs.views[index];
+					draggedTabStartX = x;
+					draggedTabStartY = y;
+				}
 			}
 			return;
 		}
@@ -300,6 +327,12 @@ class RootView {
 	public function mouseMove(x:Int, y:Int):Void {
 		pointerX = x;
 		pointerY = y;
+		welcome.mouseMove(x, y);
+		contextMenu.mouseMove(x, y);
+		if (draggedTabView != null && !draggingTab) {
+			var dx = x - draggedTabStartX, dy = y - draggedTabStartY;
+			if (dx * dx + dy * dy > 36) draggingTab = true;
+		}
 		if (draggingSidebar) {
 			setSidebarWidth(x);
 			return;
@@ -313,6 +346,10 @@ class RootView {
 
 	public function mouseUp(button:Int):Void {
 		if (button == 1) {
+			if (draggingTab) dropDraggedTab(pointerX, pointerY);
+			draggedTabLeaf = null;
+			draggedTabView = null;
+			draggingTab = false;
 			draggingDivider = null;
 			draggingSidebar = false;
 		}
@@ -328,6 +365,8 @@ class RootView {
 		drawNode(node);
 		renderer.clip(0, 0, width, height);
 		commandView.draw(renderer, theme, width, height);
+		contextMenu.draw(renderer, theme);
+		if (draggingTab) drawTabDropOverlay();
 		var notification = notifications.current();
 		if (notification != null) {
 			renderer.clip(0, 0, width, height);
@@ -341,6 +380,73 @@ class RootView {
 			renderer.text(8, notificationY + 5, notification.message, theme.caret);
 		}
 		status.draw(focus.activeView, width, height);
+	}
+
+	function dropDraggedTab(x:Int, y:Int):Void {
+		var source = draggedTabLeaf, moving = draggedTabView, target = node.leafAt(x, y);
+		if (source == null || moving == null || target == null) return;
+		var sourceTabs = source.tabs;
+		if (target == source && y < target.y + EditorView.HEADER_HEIGHT) {
+			var index = visibleTabStart(target) + Std.int((x - target.x) / TAB_WIDTH);
+			if (index > target.tabs.views.length) index = target.tabs.views.length;
+			source.tabs.detach(moving);
+			target.tabs.insert(moving, index);
+			activateLeaf(target);
+			return;
+		}
+		var edgeX = Std.int(target.width / 4), edgeY = Std.int(target.height / 4), destination = target;
+		if (x < target.x + edgeX) destination = target.split(LayoutKind.Horizontal, true);
+		else if (x >= target.x + target.width - edgeX) destination = target.split(LayoutKind.Horizontal, false);
+		else if (y < target.y + edgeY) destination = target.split(LayoutKind.Vertical, true);
+		else if (y >= target.y + target.height - edgeY) destination = target.split(LayoutKind.Vertical, false);
+		if (!sourceTabs.detach(moving)) return;
+		destination.tabs.add(moving);
+		moving.setBounds(destination.x, destination.y, destination.width, destination.height);
+		activateLeaf(destination);
+	}
+
+	function drawTabDropOverlay():Void {
+		var target = node.leafAt(pointerX, pointerY);
+		if (target == null) return;
+		var x = target.x, y = target.y, w = target.width, h = target.height, edgeX = Std.int(w / 4), edgeY = Std.int(h / 4);
+		if (pointerX < x + edgeX) w = edgeX;
+		else if (pointerX >= x + w - edgeX) { x += w - edgeX; w = edgeX; }
+		else if (pointerY < y + edgeY) h = edgeY;
+		else if (pointerY >= y + h - edgeY) { y += h - edgeY; h = edgeY; }
+		else { x += 6; y += 6; w -= 12; h -= 12; }
+		renderer.rect(x, y, w, h, theme.selection);
+	}
+
+	function openContextMenu(x:Int, y:Int):Void {
+		var items:Array<ContextMenuItem> = [];
+		if (sidebarVisible && x < sidebar.width && !searchVisible) {
+			if (!sidebar.selectAt(x, y)) return;
+			var selected = sidebar.activeNode();
+			if (selected != null && !selected.directory)
+				items.push(new ContextMenuItem("Open", function() { var path = sidebar.activate(); if (path != null) openDocument(documents.open(path)); }));
+			items.push(new ContextMenuItem("New File", createFileRequest));
+			items.push(new ContextMenuItem("New Folder", createFolderRequest));
+			if (selected != null) {
+				items.push(new ContextMenuItem("Rename / Move", renameFileRequest));
+				items.push(new ContextMenuItem("Move to Trash", deleteFileRequest));
+			}
+		} else {
+			var leaf = node.leafAt(x, y);
+			if (leaf == null) return;
+			activateLeaf(leaf);
+			if (y < leaf.y + EditorView.HEADER_HEIGHT && leaf.tabs.activeView != null) {
+				items.push(new ContextMenuItem("Close", closeRequest));
+				items.push(new ContextMenuItem("Split Right", function() { splitActive(LayoutKind.Horizontal); }));
+				items.push(new ContextMenuItem("Split Down", function() { splitActive(LayoutKind.Vertical); }));
+			} else if (leaf.tabs.activeView != null) {
+				var view = leaf.tabs.activeView;
+				items.push(new ContextMenuItem("Cut", function() { view.cut(); }));
+				items.push(new ContextMenuItem("Copy", function() { view.copy(); }));
+				items.push(new ContextMenuItem("Paste", function() { view.paste(); }));
+				items.push(new ContextMenuItem("Select All", function() { view.selectAll(); }));
+			}
+		}
+		contextMenu.open(x, y, items, width, height - StatusView.HEIGHT);
 	}
 
 	function drawPluginPanels():Void {
@@ -439,7 +545,7 @@ class RootView {
 	function drawLeaf(leaf:LayoutNode):Void {
 		renderer.clip(leaf.x, leaf.y, leaf.width, leaf.height);
 		if (leaf.tabs.activeView == null) {
-			renderer.rect(leaf.x, leaf.y, leaf.width, leaf.height, theme.editorBackground);
+			welcome.draw(renderer, theme, leaf.x, leaf.y, leaf.width, leaf.height);
 			return;
 		}
 		leaf.tabs.activeView.draw();

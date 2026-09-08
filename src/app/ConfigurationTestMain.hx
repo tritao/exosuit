@@ -67,7 +67,7 @@ class ConfigurationTestMain {
 
 		Platform.startHeadless();
 		var window = Native.window_create("configuration-test", 640, 320), renderer = new Renderer(window, "ignored-headlessly.ttf", 15),
-			application = new Application(renderer, 640, 320, service), performed = 0;
+			application = new Application(renderer, 640, 320, service, new session.RecentProjects(arguments[2] + "/recent.conf")), performed = 0;
 		require(Native.font_fallback_count(renderer.font) == service.current.fontFallbackPaths.length + 1,
 			"configured font fallback group was not installed");
 		application.commands.add("test:configured", function(context) {
@@ -139,7 +139,7 @@ class ConfigurationTestMain {
 		for (snapshot in withUntitled) if (snapshot.path == null) untitledSnapshot = snapshot;
 		require(untitledSnapshot != null && untitledSnapshot.text == "unsaved untitled", "untitled recovery identity or content was lost");
 		if (untitledSnapshot == null) throw "missing untitled recovery snapshot";
-		var recoveredApplication = new Application(renderer, 640, 320, service), recoveredSession = WorkspaceSession.capture(application);
+		var recoveredApplication = new Application(renderer, 640, 320, service, new session.RecentProjects("")), recoveredSession = WorkspaceSession.capture(application);
 		recoveredSession.restore(recoveredApplication, recovery);
 		var recoveredUntitled = false;
 		for (document in recoveredApplication.documents.documents)
@@ -180,7 +180,7 @@ class ConfigurationTestMain {
 			"malformed versioned layout records survived defensive decoding");
 		var emptyLayout = WorkspaceSession.decode("version=3\nlayout=S\t\tH\t500\nlayout=S\t1\tH\t500\n"
 			+ "layout=T\t11\t1\t0\t0\t0\t0\tR\tmissing-recovery\nlayout=A\t11\n");
-		var emptyApplication = new Application(renderer, 640, 320, service);
+		var emptyApplication = new Application(renderer, 640, 320, service, new session.RecentProjects(""));
 		emptyLayout.restore(emptyApplication, new RecoveryStore(arguments[2] + "/missing-recovery.conf"));
 		require(emptyApplication.root.node.isLeaf() && emptyApplication.root.tabs.views.length == 0,
 			"unrestorable session tabs retained an empty split topology");

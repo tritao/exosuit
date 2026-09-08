@@ -59,9 +59,16 @@ class Sidebar {
 	}
 
 	public function mouseDown(x:Int, y:Int):Null<String> {
-		if (x < 0 || x >= width || y < HEADER_HEIGHT) return null;
-		selected = Std.int((y - HEADER_HEIGHT) / ROW_HEIGHT);
+		if (!selectAt(x, y)) return null;
 		return activate();
+	}
+
+	public function selectAt(x:Int, y:Int):Bool {
+		if (x < 0 || x >= width || y < HEADER_HEIGHT) return false;
+		var index = Std.int((y - HEADER_HEIGHT) / ROW_HEIGHT), visible = nodes();
+		if (index < 0 || index >= visible.length) return false;
+		selected = index;
+		return true;
 	}
 
 	public function draw(renderer:Renderer, theme:Theme, height:Int):Void {

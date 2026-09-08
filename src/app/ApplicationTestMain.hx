@@ -16,8 +16,12 @@ class ApplicationTestMain {
 
 	static function main():Int {
 		Platform.startHeadless();
+		var welcome = new view.WelcomeView(), welcomeActions = 0;
+		welcome.newFile = function() { welcomeActions++; };
+		require(welcome.mouseDown(146, 150, 0, 0, 640, 320) && welcomeActions == 1,
+			"welcome action hit testing did not invoke its controller callback");
 		var window = Native.window_create("application-test", 640, 320), renderer = new Renderer(window, "ignored-headlessly.ttf", 15),
-			application = new Application(renderer, 640, 320), first = new Document("first", "one", application.syntaxes),
+			application = new Application(renderer, 640, 320, null, new session.RecentProjects("")), first = new Document("first", "one", application.syntaxes),
 			second = new Document("second", "two", application.syntaxes);
 		var firstView = application.add(first), secondView = application.add(second);
 		require(style.Theme.contrastRatio(application.theme.editorForeground, application.theme.editorBackground) >= 4.5
@@ -63,6 +67,17 @@ class ApplicationTestMain {
 		require(application.documents.documents.length == 2 && application.root.tabs.views.length == 2, "documents did not open as tabs");
 		require(application.root.reorderActiveTab(-1) && application.root.tabs.views[0] == secondView
 			&& application.root.reorderActiveTab(1) && application.root.tabs.views[1] == secondView, "tab reordering failed");
+		var tabY = 10, secondTabX = application.root.activeLeaf.x + view.RootView.TAB_WIDTH + 20,
+			firstTabX = application.root.activeLeaf.x + 20;
+		application.root.mouseDown(Platform.MOUSE_LEFT, secondTabX, tabY);
+		application.root.mouseMove(firstTabX, tabY);
+		application.root.mouseUp(Platform.MOUSE_LEFT);
+		require(application.root.tabs.views[0] == secondView && application.root.reorderActiveTab(1),
+			"mouse tab drag did not reorder within the pane");
+		application.root.mouseDown(Platform.MOUSE_RIGHT, application.root.activeLeaf.x + 20, editor.EditorView.HEADER_HEIGHT + 20);
+		require(application.root.contextMenu.visible, "editor right click did not open a context menu");
+		application.root.mouseDown(Platform.MOUSE_LEFT, 0, 0);
+		require(!application.root.contextMenu.visible, "outside click did not dismiss the context menu");
 		require(application.add(second) == secondView && application.root.tabs.views.length == 2, "document tab was not reused");
 		require(application.focus.activeView == secondView, "new tab did not receive focus");
 		application.commands.perform("doc:newline", application.context);

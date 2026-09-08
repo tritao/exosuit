@@ -55,6 +55,13 @@ class PluginController {
 	public function shutdown():Void
 		manager.shutdown();
 
+	public function openDiagnostics():Void {
+		var entries = [for (diagnostic in manager.diagnostics()) new CommandViewEntry("Plugin error", diagnostic, diagnostic)];
+		root.commandView.open(new CommandViewProvider("Plugin Diagnostics: ", entries, function(query) {}, function(entry, query, backwards) {
+			root.commandView.close();
+		}));
+	}
+
 	function installCommands(commands:CommandRegistry):Void {
 		commands.add("plugins:disable", context -> openAction("Disable Plugin: ", manager.enabledIds(), manager.disable),
 			context -> manager.enabledIds().length > 0);
@@ -63,10 +70,7 @@ class PluginController {
 		commands.add("plugins:reload", context -> openAction("Reload Plugin: ", manager.enabledIds(), manager.reload),
 			context -> manager.enabledIds().length > 0);
 		commands.add("plugins:show-diagnostics", function(context) {
-			var entries = [for (diagnostic in manager.diagnostics()) new CommandViewEntry("Plugin error", diagnostic, diagnostic)];
-			root.commandView.open(new CommandViewProvider("Plugin Diagnostics: ", entries, function(query) {}, function(entry, query, backwards) {
-				root.commandView.close();
-			}));
+			openDiagnostics();
 		});
 	}
 

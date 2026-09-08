@@ -27,7 +27,6 @@ class GraphicalMain {
 		renderer = new Renderer(window, defaults.fontPath, defaults.fontSize, defaults.fontFallbackPaths);
 		application = new Application(renderer, Native.window_width(window), Native.window_height(window), settings);
 		application.session.start();
-		var documentCount = 0;
 		for (argument in arguments) {
 			if (StringTools.startsWith(argument, "--plugin="))
 				application.loadPluginManifest(argument.substring(9));
@@ -35,11 +34,9 @@ class GraphicalMain {
 				smokeFrames = Std.parseInt(argument.substring(15));
 			else if (StringTools.startsWith(argument, "--smoke-seconds="))
 				smokeSeconds = Std.parseFloat(argument.substring(16));
-			else if (application.openArgument(argument) != null)
-				documentCount++;
+			else
+				application.openArgument(argument);
 		}
-		if (documentCount == 0 && application.workspace.projects.length == 0 && application.documents.documents.length == 0)
-			application.newDocument();
 		if (smokeFrames > 0)
 			application.textInput("Latin é · Ελληνικά · Кириллица · 日本語 · 😀");
 		smokeStartedAt = Sys.time();
@@ -54,6 +51,7 @@ class GraphicalMain {
 				case Quit: application.requestQuit();
 				case TextInput(_, text): application.textInput(text);
 				case TextEditing(_, text, start, length): application.setComposition(text, start, length);
+				case FileDropped(_, path): application.openArgument(path);
 				case WindowResize(_, width, height): application.root.resize(width, height);
 				case DisplayScaleChanged(_, scaleMilli): application.root.displayScaleChanged(scaleMilli);
 				case MouseWheel(_, vertical, horizontal): application.root.wheel(vertical, horizontal);
