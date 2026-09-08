@@ -29,6 +29,10 @@ SKIP_FORMAT_CHECK=1 ./scripts/test.sh
 ./scripts/run.sh
 ```
 
+`run.sh` reuses the existing SDL build while its source and toolchain inputs are
+unchanged. Set `PRAGTICAL_FORCE_REBUILD=1` to force a clean rebuild before
+launching.
+
 `SKIP_FORMAT_CHECK=1` is only needed while the inherited formatting baseline is
 being normalized; compiler, native and behavioral gates still run. Create the
 pinned local artifact and prove relocation with:
