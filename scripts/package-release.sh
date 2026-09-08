@@ -26,6 +26,20 @@ verify_revision haxeon "$haxeon_root"
 verify_revision pragtical "$pragtical_root"
 verify_revision hashlink "$haxeon_root/vendor/hashlink"
 
+if [[ -n $(git -C "$haxeon_root" status --porcelain -- src stdlib native haxeon-lsp.hxml scripts/build-runtime.sh) ]]; then
+	echo "Haxeon release inputs differ from the locked revision" >&2
+	exit 1
+fi
+if [[ -n $(git -C "$pragtical_root" status --porcelain -- src/renderer data/fonts LICENSE licenses) ]]; then
+	echo "Pragtical renderer release inputs differ from the locked revision" >&2
+	exit 1
+fi
+if [[ -n $(git -C "$haxeon_root/vendor/hashlink" status --porcelain) ]]; then
+	echo "HashLink release inputs differ from the locked revision" >&2
+	exit 1
+fi
+
+"$haxeon_root/scripts/build-runtime.sh" >&2
 "$haxeon_root/.tools/haxe/haxe" --cwd "$haxeon_root" "$haxeon_root/haxeon-lsp.hxml" >&2
 "$root_dir/scripts/build-sdl.sh" >&2
 
