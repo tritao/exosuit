@@ -62,6 +62,48 @@ show no progressive latency in the exercised cycles.
 
 ## Platform matrix
 
-Platform input and packaging evidence is recorded here as M7.2 and M7.3 close.
-Only Linux is currently under qualification. Windows and macOS remain unclaimed
-until native build and execution evidence exists.
+Only Linux x86-64 is claimed. Windows and macOS remain unclaimed until native
+build and execution evidence exists.
+
+| Route | Linux evidence | Result |
+| --- | --- | --- |
+| Committed text and composition model | ABI v16 maps SDL text-editing separately from text-input; mixed Japanese/emoji preedit tests prove no document mutation before commit and verify the UTF-16 selection and candidate rectangle | Automated pass; real desktop IME session still pending |
+| Combining text, emoji and mixed scripts | `test-sdl-smoke.sh` renders Latin combining text, Greek, Cyrillic, Japanese and emoji through the bundled primary/fallback font group | Pass under Xvfb |
+| Non-ASCII path and clipboard | `test-sdl-input.sh` opens `日本語-😀.txt`, pastes `Olá 日本語 😀 Z` through the X clipboard, selects/copies `Z`, saves and byte-compares the file | Pass under Xvfb |
+| Modifiers and keyboard navigation | The same real SDL route delivers Ctrl, Shift and Alt chords; `test-sdl-workflow.sh` performs the M0 workflow without a mouse | Pass under Xvfb |
+| Resize and logical scale | The real window is resized to 1120×720; typed event coverage routes a 1.75 display-scale transition without changing logical hit-test coordinates | Pass; physical mixed-DPI monitor transition pending |
+| Window lifecycle | Frame- and time-bounded graphical launches both execute normal callback teardown | Pass under Xvfb |
+| External replacement | Document tests cover clean reload plus dirty-buffer conflict, and replacement tests reject changed files before apply/restore | Pass headlessly |
+| User directories | Configuration tests cover portable, XDG config and XDG state roots; packaged smoke uses isolated portable state | Pass on Linux |
+| Keyboard focus and essential workflow | Real-window automation opens a project/file, edits, selects, undo/redoes, saves, splits, switches tabs, finds/replaces, searches the project and reloads a plugin | Pass under Xvfb |
+| Default text contrast | Executable WCAG relative-luminance checks require editor text, muted text and accent-selection text to meet 4.5:1 | Pass headlessly |
+
+The Linux automation cannot prove candidate-window behavior for a particular
+desktop input-method daemon or a physical transition between differently scaled
+monitors. Those two manual observations remain open. There is no screen-reader
+accessibility bridge yet, theme overrides are not automatically contrast-checked,
+and no reduced-motion or forced-colors integration is claimed.
+
+The SDL callback host originally consumed 99% CPU under Xvfb because it rendered
+without a wait when no compositor synchronized presentation. A bounded 16 ms
+cadence now keeps background jobs progressing near 60 Hz and measured 5% CPU
+(0.24 s user, 0.03 s system over five wall-clock seconds) in the same environment.
+
+## Packaging and reproducibility
+
+`release.lock` records exact Haxeon, Pragtical renderer and HashLink revisions.
+`scripts/package-release.sh` rejects revision mismatches and dirty files in those
+input paths, atomically rebuilds the Haxeon runtime, rebuilds the language server
+and graphical editor, and creates a Linux x86-64 archive under `dist/`. The
+archive contains the executable and bytecode, native modules, HashLink host and
+library, bundled language service and stdlib, primary/fallback fonts, reference
+defaults, documentation, revision manifest and license notices.
+
+`scripts/test-release.sh` extracts the archive into a fresh temporary directory,
+rejects source-tree runtime search paths, launches three graphical frames from a
+different working directory with isolated user state, then uses the bundled
+language server to diagnose an invalid Haxe edit, clear it after correction and
+build/execute the corrected fixture. This passed locally. `scripts/ci.sh` composes
+the full Haxeon compatibility gate, native/headless editor suite, SDL script
+coverage and unpacked release test. Generated `build/`, `out/` and `dist/`
+contents remain ignored.

@@ -4,28 +4,45 @@ Last updated: 2026-09-08.
 
 ## Current checkpoint
 
-- Active task: M7.2, input and platform qualification.
+- Active task: M7.2 manual Linux IME and physical mixed-DPI qualification.
 - Completed tasks: M0.1, M0.2, M1.1–M1.4, M2.1–M2.4, M3.1–M3.3, M4.1–M4.3, M5.1–M5.3, M6.1–M6.3 and M7.1.
-- M0.3 headless routes are covered; the interactive graphical smoke route remains pending.
-- Next action: implement distinct IME composition events and close the Linux
-  input, DPI, filename, clipboard, lifecycle and accessibility matrix.
-- Editor implementation HEAD: `6a605d7`. Haxeon HEAD observed: `21a996b`.
+- M0.3 now has a real-window, keyboard-driven automated graphical route; human
+  desktop IME and physical mixed-DPI observations remain pending.
+- Next action: perform and record Linux desktop IME candidate placement and a
+  physical mixed-DPI transition. Windows and macOS remain independently unclaimed.
+- Editor implementation HEAD: `354f0e8`. Haxeon HEAD observed: `83a2749`.
 - Compiler changes remain separate from editor commits and must pass their own gate.
 
 ## Milestones
 
 | Milestone | State | Evidence / remaining gate |
 | --- | --- | --- |
-| M0 | In progress | M0.1/M0.2 complete; interactive M0.3 smoke pending |
+| M0 | Complete on Linux | M0.1/M0.2 complete; `test-sdl-workflow.sh` covers the complete M0.3 route through a real SDL window |
 | M1 | Complete headlessly | Stable pathless identity, atomic persistence, Save As, unified close/quit, external conflicts and bounded recovery pass; graphical prompt smoke remains in the M0.3 manual route |
 | M2 | Complete headlessly | Everyday editing, clipboard/navigation, coding transformations and normalized multiple selections pass; graphical keyboard/mouse smoke remains in M0.3 |
 | M3 | Complete headlessly | Reusable command input, pane/tab/sidebar navigation, logical-point DPI routing, status, bounded feedback, error inspection and centralized UI roles pass; interactive M0.3 smoke remains |
 | M4 | Complete headlessly | Responsive index/search, safe replacement, recoverable file operations and defensive sessions pass; graphical smoke remains in M0.3 |
 | M5 | Complete headlessly | Live layered configuration, owned APIs, debounced background compilation, transactional reload and editor lifecycle controls pass |
 | M6 | Complete headlessly | Bounded JSON-RPC, lifecycle/synchronization, language commands, diagnostics, restart and real Haxeon edit/diagnose/fix/build smoke pass |
-| M7 | In progress | M7.1 performance/endurance complete; input/platform and packaging remain |
+| M7 | In progress | M7.1 and M7.3 complete; Linux automated input/accessibility pass, with desktop IME and physical mixed-DPI observations pending |
 
 ## Completed records
+
+### M7.2–M7.3 — Linux automation and relocatable packaging
+
+- ABI v16 distinguishes committed text from IME preedit state and owns candidate
+  placement; Pragtical font groups supply configured fallback faces. Real SDL
+  automation covers Unicode clipboard/file names, Ctrl/Shift/Alt chords, resize,
+  keyboard-only editing/navigation and the full M0 workflow including split,
+  project search and plugin reload. Default essential text roles meet WCAG 4.5:1.
+- `release.lock` pins Haxeon, Pragtical renderer and HashLink. Release builds reject
+  modified inputs, rebuild the runtime atomically, package all modules, language
+  tooling, stdlib, fonts, defaults, docs and notices, and use executable-relative
+  lookup rather than the launch cwd or a mutable sibling at runtime.
+- `scripts/test-release.sh` passed from a fresh extracted location, including the
+  bundled real Haxeon diagnose/fix/build route. `scripts/ci.sh` composes compiler,
+  headless, SDL and release gates. Windows/macOS, a real desktop IME candidate
+  session and a physical mixed-DPI transition remain explicitly unclaimed.
 
 ### M7.1 — performance and endurance
 

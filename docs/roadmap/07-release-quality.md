@@ -22,10 +22,10 @@ progressive latency; all fixes retain file-safety and compiler regression gates.
 
 - [ ] Implement/verify IME composition distinct from committed text, composition
   placement, font fallback, non-ASCII filenames and DPI transitions.
-- [ ] Verify OS key modifiers, clipboard, window lifecycle, file replacement and
+- [x] Verify OS key modifiers, clipboard, window lifecycle, file replacement and
   user directories on supported platforms. Begin with Linux; track Windows/macOS
   independently and claim support only with build and execution evidence.
-- [ ] Exercise keyboard focus, readable contrast and essential navigation without
+- [x] Exercise keyboard focus, readable contrast and essential navigation without
   a mouse. Record accessibility limitations and follow-on requirements.
 
 Acceptance: manual matrix includes composition, combining text, emoji, mixed
@@ -33,13 +33,13 @@ scripts, scaling and external file changes. Unavailable platforms stay pending.
 
 ## M7.3 — Packaging and CI
 
-- [ ] Pin or explicitly record compiler/runtime and renderer dependency revisions;
+- [x] Pin or explicitly record compiler/runtime and renderer dependency revisions;
   eliminate reliance on arbitrary mutable sibling checkouts for release builds.
-- [ ] Package executable, native modules, fonts, licenses and defaults with robust
+- [x] Package executable, native modules, fonts, licenses and defaults with robust
   resource lookup outside the working directory. Respect platform user state paths.
-- [ ] Automate native/headless tests, graphical compile and compiler compatibility
+- [x] Automate native/headless tests, graphical compile and compiler compatibility
   checks when affected. Keep generated outputs out of source control.
-- [ ] Document clean setup, launch, configuration, recovery, plugins, known limits
+- [x] Document clean setup, launch, configuration, recovery, plugins, known limits
   and the supported platform matrix. Produce a local release artifact; publication
   requires separate authorization.
 
