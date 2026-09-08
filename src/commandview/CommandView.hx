@@ -110,6 +110,37 @@ class CommandView {
 		if (selected >= results.length) selected = 0;
 	}
 
+	public function mouseMove(pointerX:Int, pointerY:Int, windowWidth:Int, windowHeight:Int):Void {
+		var index = resultAt(pointerX, pointerY, windowWidth, windowHeight);
+		if (index >= 0) select(index);
+	}
+
+	public function mouseDown(button:Int, pointerX:Int, pointerY:Int, windowWidth:Int, windowHeight:Int):Bool {
+		if (!active || button != Platform.MOUSE_LEFT) return false;
+		var index = resultAt(pointerX, pointerY, windowWidth, windowHeight);
+		if (index < 0) return false;
+		select(index);
+		accept(false);
+		return true;
+	}
+
+	public function wheel(vertical:Int):Void {
+		if (!active || results.length == 0 || vertical == 0) return;
+		var amount = Std.int((vertical < 0 ? -vertical : vertical) / 100);
+		if (amount < 1) amount = 1;
+		var target = selected + (vertical < 0 ? amount : -amount);
+		if (target < 0) target = 0;
+		if (target >= results.length) target = results.length - 1;
+		select(target);
+	}
+
+	function select(index:Int):Void {
+		if (index == selected || index < 0 || index >= results.length) return;
+		var delta = index - selected;
+		selected = index;
+		if (provider != null) provider.onMove(delta);
+	}
+
 	function accept(backwards:Bool):Void {
 		var current = provider;
 		if (current == null) return;
@@ -213,6 +244,29 @@ class CommandView {
 		if (visible <= 0 || selected < visible) return 0;
 		var start = selected - visible + 1, maximum = results.length - visible;
 		return start > maximum ? maximum : start;
+	}
+
+	public function resultAt(pointerX:Int, pointerY:Int, windowWidth:Int, windowHeight:Int):Int {
+		if (!active) return -1;
+		var width = commandWidth(windowWidth), x = Std.int((windowWidth - width) / 2), y = 16,
+			visible = visibleCount(windowHeight), first = visibleStart(visible), rowY = y + 44, previousSection = "";
+		if (pointerX < x || pointerX >= x + width) return -1;
+		for (offset in 0...visible) {
+			var index = first + offset, entry = results[index];
+			if (query.length == 0 && entry.section.length > 0 && entry.section != previousSection) rowY += 22;
+			previousSection = entry.section;
+			if (pointerY >= rowY && pointerY < rowY + 28) return index;
+			rowY += 28;
+		}
+		return -1;
+	}
+
+	function visibleCount(windowHeight:Int):Int {
+		var visible = Std.int((windowHeight - 16 - 90) / 28);
+		if (visible < 1) visible = 1;
+		if (visible > 12) visible = 12;
+		if (visible > results.length) visible = results.length;
+		return visible;
 	}
 
 	static function commandWidth(windowWidth:Int):Int {

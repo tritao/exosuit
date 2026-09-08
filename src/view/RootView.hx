@@ -271,13 +271,19 @@ class RootView {
 	}
 
 	public function wheel(vertical:Int, horizontal:Int):Void {
-		if (commandView.active) return;
+		if (commandView.active) {
+			commandView.wheel(vertical);
+			return;
+		}
 		if (tabs.activeView != null) tabs.activeView.wheel(vertical, horizontal);
 	}
 
 	public function mouseDown(button:Int, x:Int, y:Int, clicks:Int = 1):Void {
+		if (commandView.active) {
+			commandView.mouseDown(button, x, y, width, height);
+			return;
+		}
 		if (contextMenu.mouseDown(button, x, y)) return;
-		if (commandView.active) return;
 		if (button == 3) {
 			openContextMenu(x, y);
 			return;
@@ -329,6 +335,10 @@ class RootView {
 	public function mouseMove(x:Int, y:Int):Void {
 		pointerX = x;
 		pointerY = y;
+		if (commandView.active) {
+			commandView.mouseMove(x, y, width, height);
+			return;
+		}
 		welcome.mouseMove(x, y);
 		contextMenu.mouseMove(x, y);
 		if (draggedTabView != null && !draggingTab) {
@@ -347,6 +357,7 @@ class RootView {
 	}
 
 	public function mouseUp(button:Int):Void {
+		if (commandView.active) return;
 		if (button == 1) {
 			if (draggingTab) dropDraggedTab(pointerX, pointerY);
 			draggedTabLeaf = null;

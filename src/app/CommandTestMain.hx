@@ -111,6 +111,17 @@ class CommandTestMain {
 		commandView.keyPressed(Platform.KEY_DOWN, 0);
 		require(commandView.selected == 0 && commandView.visibleStart(10) == 0,
 			"wrapped command selection did not restore the top result window");
+		var clicked = "";
+		commandView.close();
+		commandView.open(new CommandViewProvider("> ", scrollingEntries, function(query) {}, function(entry, query, backwards) {
+			clicked = entry == null ? "" : entry.value;
+		}));
+		commandView.mouseMove(100, 89, 320, 200);
+		require(commandView.selected == 1, "command pointer hover did not select its result row");
+		commandView.wheel(-100);
+		require(commandView.selected == 2, "command mouse wheel did not move the selection down");
+		require(commandView.mouseDown(Platform.MOUSE_LEFT, 100, 117, 320, 200) && clicked == "2",
+			"command pointer click did not accept its result row");
 		renderer.destroy();
 		Platform.require(Native.window_destroy(window), "destroy command test window");
 		Native.shutdown();
