@@ -172,7 +172,8 @@ class ConfigurationTestMain {
 		application.newDocument();
 		require(persistence.flush(application), "controlled session shutdown flush failed");
 		File.saveContent(sessionPath, "corrupt session");
-		require(WorkspaceSession.load(sessionPath) == null, "corrupt session did not fail closed");
+		require(WorkspaceSession.load(sessionPath) == null && !FileSystem.exists(sessionPath)
+			&& FileSystem.exists(sessionPath + ".incompatible"), "corrupt session did not fail closed into quarantine");
 		File.saveContent(sessionPath, "version=3\nlayout=S\tbad-route\tH\tnot-a-number\nlayout=T\t\t1\tbad\t0\t0\t0\tP\tmissing\n");
 		var malformedLayout = WorkspaceSession.load(sessionPath);
 		require(malformedLayout != null && malformedLayout.layout.length == 0,

@@ -98,8 +98,15 @@ class WorkspaceSession {
 		try {
 			return decode(File.getContent(path));
 		} catch (error:Dynamic) {
+			quarantine(path);
 			return null;
 		}
+	}
+
+	static function quarantine(path:String):Void {
+		var candidate = path + ".incompatible", suffix = 1;
+		while (FileSystem.exists(candidate)) candidate = path + ".incompatible-" + suffix++;
+		try FileSystem.rename(path, candidate) catch (error:Dynamic) {}
 	}
 
 	public function save(path:String):Bool {
