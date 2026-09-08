@@ -54,7 +54,7 @@ hl_host_objects=(
 	-I"$root_dir/include" -I"$root_dir/native" -I"$haxeon_root/vendor/hashlink/src" -I"$pragtical_root/src" \
 	"$root_dir/native/hashlink/pragtical_hx.c" \
 	-L"$haxeon_root/vendor/hashlink" -lhl \
-	-Wl,-rpath,"$haxeon_root/vendor/hashlink" \
+	-Wl,-rpath,'$ORIGIN/tools' \
 	-o "$stage_dir/pragtical_hx.hdll"
 
 "$cc" -std=c11 -Wall -Wextra -Werror \
@@ -73,11 +73,14 @@ hl_host_objects=(
 	"$pragtical_root/src/renderer/renderer.c" \
 	"$pragtical_root/src/renderer/window.c" \
 	"${hl_host_objects[@]}" \
-	-L"$stage_dir" -Wl,-rpath,'$ORIGIN' -l:pragtical_hx.hdll \
-	-L"$haxeon_root/vendor/hashlink" -Wl,-rpath,"$haxeon_root/vendor/hashlink" -lhl \
+	-L"$stage_dir" -Wl,-rpath,'$ORIGIN:$ORIGIN/tools' -l:pragtical_hx.hdll \
+	-L"$haxeon_root/vendor/hashlink" -lhl \
 	"${sdl_libs[@]}" "${font_libs[@]}" "${shape_libs[@]}" -lm -rdynamic \
 	-o "$stage_dir/pragtical-haxeon"
 cp "$haxeon_root/out/realtime_runtime.hdll" "$stage_dir/realtime_runtime.hdll"
+if command -v patchelf >/dev/null; then
+	patchelf --set-rpath '$ORIGIN/tools' "$stage_dir/realtime_runtime.hdll"
+fi
 mv -f "$stage_dir/pragtical-haxeon.hl" "$root_dir/out/pragtical-haxeon.hl"
 mv -f "$stage_dir/pragtical_hx.hdll" "$root_dir/out/pragtical_hx.hdll"
 mv -f "$stage_dir/realtime_runtime.hdll" "$root_dir/out/realtime_runtime.hdll"

@@ -115,9 +115,18 @@ class Application {
 		workbench = new WorkbenchController(workspace, root, commands, keymap, context, completions, errors, search,
 			path -> { open(path); });
 		build = new BuildController(workspace, root, context, commands, processes, path -> open(path), reportError);
-		var haxeonRoot = Sys.getEnv("HAXEON_ROOT");
-		if (haxeonRoot == null || haxeonRoot.length == 0) haxeonRoot = "../realtime-haxe";
-		language = new LanguageController(workspace, root, context, commands, processes, haxeonRoot + "/scripts/haxeon-lsp", reportError);
+		var languageServer = Sys.getEnv("HAXEON_LSP");
+		if (languageServer == null || languageServer.length == 0) {
+			var bundled = config.ApplicationPaths.bundledLanguageServer();
+			if (sys.FileSystem.exists(bundled))
+				languageServer = bundled;
+			else {
+				var haxeonRoot = Sys.getEnv("HAXEON_ROOT");
+				if (haxeonRoot == null || haxeonRoot.length == 0) haxeonRoot = "../realtime-haxe";
+				languageServer = haxeonRoot + "/scripts/haxeon-lsp";
+			}
+		}
+		language = new LanguageController(workspace, root, context, commands, processes, languageServer, reportError);
 	}
 
 	public function open(path:String):View

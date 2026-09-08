@@ -44,3 +44,6 @@ Theme colors are signed decimal RGBA integers. The configurable roles are
 
 Files are watched by bounded polling. Valid changes replace fonts and keymaps
 live; removing an override restores the value from the next lower layer.
+Relative font paths in user or project settings resolve relative to that settings
+file. Built-in font paths resolve relative to the installed executable, so launch
+working directory does not affect packaged resources.

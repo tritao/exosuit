@@ -5,6 +5,7 @@
 #include <hlmodule.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "pragtical_hx/host.h"
 #include "pragtical_hx/platform.h"
@@ -13,6 +14,7 @@
 typedef struct phx_host {
   hl_code *code;
   hl_module *module;
+  char *module_path;
   bool haxeon_started;
   bool haxeon_stopped;
 } phx_host;
@@ -43,10 +45,18 @@ static hl_code *load_code(const char *path) {
 }
 
 static bool start_haxeon(phx_host *host, int argc, char **argv) {
+  const char *base_path;
+  static const char module_name[] = "pragtical-haxeon.hl";
   vclosure entry;
   vdynamic *result;
   bool raised = false;
-  hl_setup.file_path = "pragtical-haxeon.hl";
+  base_path = SDL_GetBasePath();
+  if (!base_path) return false;
+  host->module_path = malloc(strlen(base_path) + sizeof(module_name));
+  if (!host->module_path) return false;
+  snprintf(host->module_path, strlen(base_path) + sizeof(module_name), "%s%s",
+           base_path, module_name);
+  hl_setup.file_path = host->module_path;
   hl_setup.sys_args = (pchar **)(argv + 1);
   hl_setup.sys_nargs = argc - 1;
   hl_sys_init();
@@ -112,6 +122,7 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result) {
   if (host) {
     if (host->module) hl_module_free_shutdown(host->module);
     hl_code_destroy(host->code);
+    free(host->module_path);
     free(host);
   }
   hl_global_free();

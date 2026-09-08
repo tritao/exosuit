@@ -15,8 +15,9 @@ class SettingsCodec {
 			}
 			var key = StringTools.trim(line.substring(0, separator)), value = StringTools.trim(line.substring(separator + 1));
 			if (key == "version") version = parseBoundedInt(value, 1, Settings.VERSION, key, source, lineNumber, diagnostics);
-			else if (key == "editor.fontPath") target.fontPath = requireText(value, key, source, lineNumber, diagnostics);
-			else if (key == "editor.fontFallbacks") target.fontFallbackPaths = parseList(value);
+			else if (key == "editor.fontPath") target.fontPath = ApplicationPaths.relativeToFile(requireText(value, key, source, lineNumber,
+				diagnostics), source);
+			else if (key == "editor.fontFallbacks") target.fontFallbackPaths = [for (path in parseList(value)) ApplicationPaths.relativeToFile(path, source)];
 			else if (key == "editor.fontSize") target.fontSize = parseBoundedInt(value, 6, 96, key, source, lineNumber, diagnostics);
 			else if (key == "workbench.sidebarWidth") target.sidebarWidth = parseBoundedInt(value, 120, 600, key, source, lineNumber, diagnostics);
 			else if (key == "editor.tabWidth") target.tabWidth = parseBoundedInt(value, 1, 16, key, source, lineNumber, diagnostics);

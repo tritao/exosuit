@@ -2,9 +2,9 @@ package config;
 
 class Settings {
 	public static inline final VERSION = 1;
-	public var fontPath:String = "data/fonts/JetBrainsMono-Regular.ttf";
+	public var fontPath:String = ApplicationPaths.resource("data/fonts/JetBrainsMono-Regular.ttf");
 	public var fontFallbackPaths:Array<String> = [
-		"data/fonts/NotoSansSymbols2-Regular.ttf",
+		ApplicationPaths.resource("data/fonts/NotoSansSymbols2-Regular.ttf"),
 		"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
 		"/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
 		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"

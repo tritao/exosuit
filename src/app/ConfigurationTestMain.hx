@@ -40,7 +40,7 @@ class ConfigurationTestMain {
 		var service = new SettingsService(userPath, projectPath);
 		require(service.diagnostics.length == 0, "valid settings produced diagnostics");
 		require(service.current.fontSize == 18 && service.current.sidebarWidth == 280 && !service.current.insertSpaces, "layer precedence failed");
-		require(service.current.fontFallbackPaths.length == 2 && service.current.fontFallbackPaths[1] == "fallback-two.ttf",
+		require(service.current.fontFallbackPaths.length == 2 && StringTools.endsWith(service.current.fontFallbackPaths[1], "/fallback-two.ttf"),
 			"font fallback configuration was not layered");
 		require(service.current.keybindings.length == 1 && service.current.keybindings[0].commands[0] == "doc:redo", "project keybinding did not replace user bindings");
 		var lastGood = service.current;
