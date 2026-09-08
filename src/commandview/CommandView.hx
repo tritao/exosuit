@@ -190,7 +190,7 @@ class CommandView {
 		if (provider == null) return;
 		for (index in 0...provider.entries.length) {
 			var entry = provider.entries[index];
-			var score = fuzzyScore(entry.label, query);
+			var score = fuzzyScore(entry.label + " " + entry.detail, query);
 			if (score >= 0) {
 				entry.score = score;
 				entry.order = index;

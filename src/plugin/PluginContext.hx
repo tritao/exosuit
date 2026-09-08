@@ -49,13 +49,13 @@ class PluginContext {
 		syntaxes.add(definition, id);
 	}
 
-	public function addCommand(name:String, perform:CommandContext->Void, ?predicate:CommandContext->Bool):Void {
+	public function addCommand(name:String, perform:CommandContext->Void, ?predicate:CommandContext->Bool, ?description:String):Void {
 		requireActive();
 		if (!StringTools.startsWith(name, id + ":"))
 			throw 'plugin "$id" command must use the "$id:" namespace';
 		if (commands.contains(name))
 			throw 'command "$name" is already registered';
-		commands.add(name, perform, predicate);
+		commands.add(name, perform, predicate, description);
 		commandNames.push(name);
 	}
 

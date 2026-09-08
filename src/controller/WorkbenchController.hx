@@ -88,7 +88,8 @@ class WorkbenchController {
 
 	public function openCommandView():Void {
 		root.commandView.open(new CommandViewProvider("> ",
-			[for (name in commands.available(context)) new CommandViewEntry(name, "", name)], function(query) {}, function(entry, query, backwards) {
+			[for (command in commands.availableCommands(context)) new CommandViewEntry(command.description, command.name, command.name)],
+			function(query) {}, function(entry, query, backwards) {
 				root.commandView.close();
 				if (entry != null) commands.perform(entry.value, context);
 			}));

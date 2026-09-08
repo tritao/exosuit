@@ -5,16 +5,16 @@ class CommandRegistry {
 
 	public function new() {}
 
-	public function add(name:String, perform:CommandContext->Void, ?predicate:CommandContext->Bool):Void {
+	public function add(name:String, perform:CommandContext->Void, ?predicate:CommandContext->Bool, ?description:String):Void {
 		if (name.indexOf(":") <= 0 || name.indexOf(" ") >= 0)
 			throw "invalid command name: " + name;
 		for (index in 0...commands.length) {
 			if (commands[index].name == name) {
-				commands[index] = new Command(name, perform, predicate);
+				commands[index] = new Command(name, perform, predicate, description);
 				return;
 			}
 		}
-		commands.push(new Command(name, perform, predicate));
+		commands.push(new Command(name, perform, predicate, description));
 	}
 
 	public function contains(name:String):Bool
@@ -52,6 +52,14 @@ class CommandRegistry {
 			if (predicate(context)) result.push(command.name);
 		}
 		result.sort(Reflect.compare);
+		return result;
+	}
+
+	public function availableCommands(context:CommandContext):Array<Command> {
+		var result:Array<Command> = [];
+		for (command in commands)
+			if (command.predicate(context)) result.push(command);
+		result.sort((left, right) -> Reflect.compare(left.name, right.name));
 		return result;
 	}
 

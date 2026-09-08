@@ -19,7 +19,17 @@ class CommandTestMain {
 			application = new Application(renderer, 320, 200), registry = application.commands, keymap = application.keymap,
 			context = application.context, performed = 0;
 		registry.add("test:disabled", function(context) { performed = 1; }, context -> false);
-		registry.add("test:fallback", function(context) { performed = 2; });
+		registry.add("test:fallback", function(context) { performed = 2; }, null, "Run the fallback command");
+		var available = registry.availableCommands(context);
+		var fallback = [for (command in available) if (command.name == "test:fallback") command][0];
+		require(fallback.description == "Run the fallback command", "command description was not retained");
+		var disabled = new command.Command("test:human-readable", function(context) {});
+		require(disabled.description == "Test: Human Readable", "command description fallback was not human readable");
+		application.workbench.openCommandView();
+		var fallbackEntry = [for (entry in application.root.commandView.results) if (entry.value == "test:fallback") entry][0];
+		require(fallbackEntry.label == "Run the fallback command" && fallbackEntry.detail == "test:fallback",
+			"command palette did not show the human-readable description and stable command ID");
+		application.root.commandView.close();
 		keymap.addDirect(100, 1, ["test:disabled", "test:fallback"]);
 		require(keymap.onKeyPressed(100, 1, context) && performed == 2, "predicate fallback dispatch failed");
 		registry.add("test:override", function(context) { performed = 3; });
