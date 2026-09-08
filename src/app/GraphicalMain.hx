@@ -38,7 +38,7 @@ class GraphicalMain {
 			else if (application.openArgument(argument) != null)
 				documentCount++;
 		}
-		if (documentCount == 0 && application.workspace.projects.length == 0)
+		if (documentCount == 0 && application.workspace.projects.length == 0 && application.documents.documents.length == 0)
 			application.newDocument();
 		if (smokeFrames > 0)
 			application.textInput("Latin é · Ελληνικά · Кириллица · 日本語 · 😀");
