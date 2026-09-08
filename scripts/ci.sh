@@ -13,5 +13,6 @@ haxeon_root=${HAXEON_ROOT:-"$root_dir/../realtime-haxe"}
 	SKIP_FORMAT_CHECK=${SKIP_FORMAT_CHECK:-0} ./scripts/test.sh
 	./scripts/test-sdl-smoke.sh
 	./scripts/test-sdl-input.sh
+	./scripts/test-sdl-workflow.sh
 	./scripts/test-release.sh
 )
