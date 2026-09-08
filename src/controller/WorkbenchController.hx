@@ -40,6 +40,7 @@ class WorkbenchController {
 
 	public function keyPressed(key:Int, modifiers:Int):Bool {
 		if (root.commandView.active) return root.commandView.keyPressed(key, modifiers);
+		if (root.languagePopup.keyPressed(key, modifiers)) return true;
 		var handled = keymap.onKeyPressed(key, modifiers, context);
 		if (handled) {
 			root.cursorChanged();
@@ -49,6 +50,7 @@ class WorkbenchController {
 	}
 
 	public function textInput(text:String):Void {
+		if (root.languagePopup.visible) root.languagePopup.close();
 		if (root.commandView.active) root.commandView.textInput(text); else {
 			root.textInput(text);
 			search.editorStateChanged();

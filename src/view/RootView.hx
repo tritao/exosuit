@@ -36,6 +36,7 @@ class RootView {
 	public final commandView:CommandView;
 	public final welcome:WelcomeView;
 	public final contextMenu:ContextMenu;
+	public final languagePopup:AnchoredPopup;
 	public var createFileRequest:Void->Void = function() {};
 	public var createFolderRequest:Void->Void = function() {};
 	public var renameFileRequest:Void->Void = function() {};
@@ -72,6 +73,7 @@ class RootView {
 		commandView = new CommandView();
 		welcome = new WelcomeView();
 		contextMenu = new ContextMenu();
+		languagePopup = new AnchoredPopup();
 		notifications = new NotificationCenter();
 		pluginPanels = new PluginPanelRegistry();
 		pluginDecorations = new PluginDecorationRegistry();
@@ -365,6 +367,7 @@ class RootView {
 		drawNode(node);
 		renderer.clip(0, 0, width, height);
 		commandView.draw(renderer, theme, width, height);
+		languagePopup.draw(renderer, theme, width, height - StatusView.HEIGHT);
 		contextMenu.draw(renderer, theme);
 		if (draggingTab) drawTabDropOverlay();
 		var notification = notifications.current();

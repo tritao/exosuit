@@ -2,8 +2,6 @@ package controller;
 
 import command.CommandContext;
 import command.CommandRegistry;
-import commandview.CommandViewEntry;
-import commandview.CommandViewProvider;
 import editor.BufferPosition;
 import editor.Document;
 import language.LanguageServiceClient;
@@ -84,7 +82,8 @@ class LanguageController {
 		var service = client, view = context.activeView(), document = activeDocument();
 		if (service == null || view == null || document == null) return;
 		service.requestHover(document, new BufferPosition(view.cursorLine(), view.cursorColumn()), Sys.time(), value -> {
-			if (value != null) root.notifications.publish(value);
+			var area = root.textInputArea();
+			if (value != null && area != null && context.activeView() == view) root.languagePopup.openInformation(area, value);
 		});
 	}
 
@@ -95,11 +94,14 @@ class LanguageController {
 			from = wordStart(document, position);
 		service.requestCompletion(document, position, Sys.time(), items -> {
 			if (items.length == 0 || document.buffer.stateId != revision || context.activeView() != view) return;
-			var entries = [for (item in items) new CommandViewEntry(item.label, item.detail, item.insertText)];
-			root.commandView.open(new CommandViewProvider("Language Completion: ", entries, query -> {}, function(entry, query, backwards) {
-				root.commandView.close();
-				if (entry != null && document.buffer.stateId == revision) view.replaceRange(from, position, entry.value);
-			}));
+			var area = root.textInputArea();
+			if (area == null) return;
+			root.languagePopup.openCompletion(area, items, function(item) {
+				if (document.buffer.stateId == revision && context.activeView() == view) {
+					view.replaceRange(from, position, item.insertText);
+					view.cursorChanged();
+				}
+			});
 		});
 	}
 

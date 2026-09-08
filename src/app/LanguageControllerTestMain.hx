@@ -48,12 +48,13 @@ class LanguageControllerTestMain {
 		document.insert(selection, "x");
 		pump(controller, () -> root.pluginDecorations.forDocument(document).length == 1, 5.0);
 		require(commands.perform("language:hover", context), "hover command was not available");
-		pump(controller, () -> root.notifications.entries.length > 0, 5.0);
-		var notification = root.notifications.current();
-		require(notification != null && notification.message == "hover 😀", "hover was not surfaced through editor feedback");
+		pump(controller, () -> root.languagePopup.visible, 5.0);
+		require(root.languagePopup.visible, "hover was not surfaced through an anchored popup");
+		root.languagePopup.close();
 		require(commands.perform("language:complete", context), "completion command was not available");
-		pump(controller, () -> root.commandView.active, 5.0);
-		root.commandView.close();
+		pump(controller, () -> root.languagePopup.visible, 5.0);
+		require(root.languagePopup.visible && root.languagePopup.keyPressed(Platform.KEY_ESCAPE, 0),
+			"completion was not surfaced through an interactive anchored popup");
 		require(commands.perform("language:go-to-definition", context), "definition command was not available");
 		for (_ in 0...32) controller.update(Sys.time());
 		controller.shutdown();
