@@ -60,6 +60,16 @@ class Keymap {
 		return binding == null ? [] : copy(binding.commands);
 	}
 
+	public function shortcutsFor(command:String):Array<String> {
+		var result:Array<String> = [];
+		for (binding in configured)
+			if (contains(binding.commands, command)) result.push(binding.displayName());
+		for (binding in bindings)
+			if (findIn(configured, binding.key, binding.modifiers) == null && contains(binding.commands, command))
+				result.push(binding.displayName());
+		return result;
+	}
+
 	public function setConfigured(values:Array<KeyBinding>):Void {
 		configured.resize(0);
 		for (value in values) configured.push(new KeyBinding(value.key, value.modifiers, copy(value.commands)));

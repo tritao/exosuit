@@ -88,11 +88,16 @@ class WorkbenchController {
 
 	public function openCommandView():Void {
 		root.commandView.open(new CommandViewProvider("> ",
-			[for (command in commands.availableCommands(context)) new CommandViewEntry(command.description, command.name, command.name)],
+			[for (command in commands.availableCommands(context)) new CommandViewEntry(command.description, commandDetail(command.name), command.name)],
 			function(query) {}, function(entry, query, backwards) {
 				root.commandView.close();
 				if (entry != null) commands.perform(entry.value, context);
 			}));
+	}
+
+	function commandDetail(name:String):String {
+		var shortcuts = keymap.shortcutsFor(name);
+		return shortcuts.length == 0 ? name : name + "  " + shortcuts.join(", ");
 	}
 
 	public function openCompletionCommandView():Void {

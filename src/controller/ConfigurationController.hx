@@ -134,7 +134,8 @@ class ConfigurationController {
 	public function openKeybindingsCommandView():Void {
 		var entries:Array<CommandViewEntry> = [];
 		for (binding in effectiveSettings().keybindings)
-			entries.push(new CommandViewEntry(keyName(binding.key, binding.modifiers), binding.commands.join(", "), binding.commands[0]));
+			entries.push(new CommandViewEntry(new command.KeyBinding(binding.key, binding.modifiers, []).displayName(),
+				binding.commands.join(", "), binding.commands[0]));
 		root.commandView.open(new CommandViewProvider("Keybindings: ", entries, function(query) {}, function(entry, query, backwards) {
 			root.commandView.close();
 		}));
@@ -176,11 +177,4 @@ class ConfigurationController {
 		for (diagnostic in values) reportError("configuration", diagnostic);
 	}
 
-	function keyName(key:Int, modifiers:Int):String {
-		var result = "";
-		if (modifiers & Platform.MOD_CTRL != 0) result += "Ctrl+";
-		if (modifiers & Platform.MOD_SHIFT != 0) result += "Shift+";
-		if (modifiers & Platform.MOD_ALT != 0) result += "Alt+";
-		return result + Std.string(key);
-	}
 }

@@ -29,6 +29,8 @@ class CommandTestMain {
 		var fallbackEntry = [for (entry in application.root.commandView.results) if (entry.value == "test:fallback") entry][0];
 		require(fallbackEntry.label == "Run the fallback command" && fallbackEntry.detail == "test:fallback",
 			"command palette did not show the human-readable description and stable command ID");
+		var paletteEntry = [for (entry in application.root.commandView.results) if (entry.value == "commands:open") entry][0];
+		require(paletteEntry.detail == "commands:open  Ctrl+Shift+P", "command palette did not show the effective keyboard shortcut");
 		application.root.commandView.close();
 		keymap.addDirect(100, 1, ["test:disabled", "test:fallback"]);
 		require(keymap.onKeyPressed(100, 1, context) && performed == 2, "predicate fallback dispatch failed");
