@@ -54,6 +54,6 @@ class StatusView {
 		var y = height - HEIGHT;
 		renderer.clip(0, y, width, HEIGHT);
 		renderer.rect(0, y, width, HEIGHT, theme.accent);
-		renderer.text(8, y + 4, text(view), theme.editorForeground);
+		renderer.text(8, y + 4, text(view), theme.editorBackground);
 	}
 }

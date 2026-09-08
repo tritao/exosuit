@@ -157,8 +157,10 @@ class CommandView {
 		for (index in 0...visible) {
 			var rowY = y + 42 + index * rowHeight, entry = results[index];
 			if (index == selected) renderer.rect(x, rowY, width, rowHeight, theme.accent);
-			renderer.text(x + 12, rowY + 5, entry.label, theme.editorForeground);
-			if (entry.detail.length > 0) renderer.text(x + Std.int(width * 0.55), rowY + 5, entry.detail, theme.foregroundMuted);
+			var foreground = index == selected ? theme.editorBackground : theme.editorForeground;
+			renderer.text(x + 12, rowY + 5, entry.label, foreground);
+			if (entry.detail.length > 0) renderer.text(x + Std.int(width * 0.55), rowY + 5, entry.detail,
+				index == selected ? theme.editorBackground : theme.foregroundMuted);
 		}
 	}
 

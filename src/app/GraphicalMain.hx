@@ -14,6 +14,8 @@ class GraphicalMain {
 	static var application:Application;
 	static var smokeFrames:Int = 0;
 	static var presentedFrames:Int = 0;
+	static var smokeSeconds:Float = 0.0;
+	static var smokeStartedAt:Float = 0.0;
 
 	static function main():Void {
 		if (Native.abi_version() != Platform.ABI_VERSION)
@@ -31,6 +33,8 @@ class GraphicalMain {
 				application.loadPluginManifest(argument.substring(9));
 			else if (StringTools.startsWith(argument, "--smoke-frames="))
 				smokeFrames = Std.parseInt(argument.substring(15));
+			else if (StringTools.startsWith(argument, "--smoke-seconds="))
+				smokeSeconds = Std.parseFloat(argument.substring(16));
 			else if (application.openArgument(argument) != null)
 				documentCount++;
 		}
@@ -38,6 +42,7 @@ class GraphicalMain {
 			application.newDocument();
 		if (smokeFrames > 0)
 			application.textInput("Latin é · Ελληνικά · Кириллица · 日本語 · 😀");
+		smokeStartedAt = Sys.time();
 		application.openRecoveryCommandView();
 		Native.host_install(onEvent, iterate, quit);
 	}
@@ -72,6 +77,7 @@ class GraphicalMain {
 		renderer.present();
 		presentedFrames++;
 		if (smokeFrames > 0 && presentedFrames >= smokeFrames) return 0;
+		if (smokeSeconds > 0.0 && Sys.time() - smokeStartedAt >= smokeSeconds) return 0;
 		return application.quitReady ? 0 : 1;
 	}
 

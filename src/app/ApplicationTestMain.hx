@@ -20,6 +20,10 @@ class ApplicationTestMain {
 			application = new Application(renderer, 640, 320), first = new Document("first", "one", application.syntaxes),
 			second = new Document("second", "two", application.syntaxes);
 		var firstView = application.add(first), secondView = application.add(second);
+		require(style.Theme.contrastRatio(application.theme.editorForeground, application.theme.editorBackground) >= 4.5
+			&& style.Theme.contrastRatio(application.theme.editorBackground, application.theme.accent) >= 4.5
+			&& style.Theme.contrastRatio(application.theme.foregroundMuted, application.theme.surface) >= 4.5,
+			"default editor, active-row, or secondary text contrast was below WCAG AA");
 		application.setComposition("に😀", 1, 1);
 		var compositionArea = application.root.textInputArea();
 		require(second.buffer.text == "two" && compositionArea != null,

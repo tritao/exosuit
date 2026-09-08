@@ -38,4 +38,17 @@ class Theme {
 			case HighlightToken.LITERAL: 0xe06c75ff;
 			default: editorForeground;
 		};
+
+	public static function contrastRatio(first:Int, second:Int):Float {
+		var left = luminance(first), right = luminance(second), lighter = left > right ? left : right, darker = left > right ? right : left;
+		return (lighter + 0.05) / (darker + 0.05);
+	}
+
+	static function luminance(color:Int):Float
+		return 0.2126 * channel((color >>> 24) & 255) + 0.7152 * channel((color >>> 16) & 255) + 0.0722 * channel((color >>> 8) & 255);
+
+	static function channel(value:Int):Float {
+		var normalized = value / 255.0;
+		return normalized <= 0.04045 ? normalized / 12.92 : Math.pow((normalized + 0.055) / 1.055, 2.4);
+	}
 }
