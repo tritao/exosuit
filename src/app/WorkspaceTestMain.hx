@@ -33,6 +33,15 @@ class WorkspaceTestMain {
 		if (!condition) throw message;
 	}
 
+	static function finishSearch(application:Application):Void {
+		var turns = 0;
+		while (!application.workspaceSearch.complete && turns < 1000) {
+			application.workspace.jobs.update(32);
+			turns++;
+		}
+		require(application.workspaceSearch.complete, "workspace search did not complete within its bounded test turns");
+	}
+
 	static function main():Int {
 		var arguments = Sys.args();
 		require(arguments.length == 2, "expected project roots");
@@ -95,7 +104,7 @@ class WorkspaceTestMain {
 		require(application.keyPressed(Platform.KEY_F, Platform.MOD_CTRL + Platform.MOD_SHIFT), "Ctrl+Shift+F did not open workspace search");
 		application.textInput("needle");
 		application.workspaceSearch.flush();
-		application.workspace.jobs.update(32);
+		finishSearch(application);
 		require(application.root.searchVisible && application.root.searchSidebar.results.length == 2,
 			"workspace search did not include unsaved and multi-project matches: results="
 			+ [for (match in application.workspaceSearch.results) match.path].join(",") + ", errors="
@@ -110,20 +119,20 @@ class WorkspaceTestMain {
 		application.workspace.jobs.update(1);
 		application.workspaceSearch.request("needle", application.searchOptions, 1);
 		application.workspaceSearch.flush();
-		application.workspace.jobs.update(32);
+		finishSearch(application);
 		require(application.workspaceSearch.generation > staleGeneration && application.workspaceSearch.results.length == 1
 			&& application.workspaceSearch.capped, "replacement search published stale results or ignored its cap");
 		application.searchOptions.pathFilter = "second.txt";
 		application.workspaceSearch.request("needle", application.searchOptions, 100);
 		application.workspaceSearch.flush();
-		application.workspace.jobs.update(32);
+		finishSearch(application);
 		require(application.workspaceSearch.results.length == 1
 			&& StringTools.endsWith(application.workspaceSearch.results[0].path, "/second.txt"), "workspace path filtering failed");
 		application.searchOptions.pathFilter = "";
 		application.searchOptions.regularExpression = true;
 		application.workspaceSearch.request("nee(dle)", application.searchOptions, 100);
 		application.workspaceSearch.flush();
-		application.workspace.jobs.update(32);
+		finishSearch(application);
 		require(application.workspaceSearch.results.length == 2 && application.workspaceSearch.results[0].captures[1] == "dle",
 			"workspace regular-expression search did not preserve captures");
 		application.workspaceSearch.request("(", application.searchOptions, 100);
@@ -133,7 +142,7 @@ class WorkspaceTestMain {
 		application.searchOptions.regularExpression = false;
 		application.workspaceSearch.request("needle", application.searchOptions, 100);
 		application.workspaceSearch.flush();
-		application.workspace.jobs.update(32);
+		finishSearch(application);
 		application.keyPressed(Platform.KEY_ENTER, 0);
 		require(application.root.searchSidebar.active() != null, "workspace result activation failed");
 		application.keyPressed(Platform.KEY_ESCAPE, 0);
@@ -172,7 +181,7 @@ class WorkspaceTestMain {
 			"could not restore replacement conflict fixture");
 		application.workspaceSearch.request("needle", application.searchOptions, 100);
 		application.workspaceSearch.flush();
-		application.workspace.jobs.update(32);
+		finishSearch(application);
 		var applyPreview = replacements.preview(application.workspaceSearch, "swapped"), applyResult = replacements.apply(applyPreview),
 			backedUp = new ReplacementBackupStore(backupPath, application.workspace.fileSystem).load();
 		require(applyResult.appliedFiles == 2 && applyResult.appliedMatches == 2 && backedUp.length == 1
