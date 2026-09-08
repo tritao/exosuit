@@ -38,6 +38,7 @@ class SessionController {
 		var sessionPath = ConfigurationPaths.session();
 		var saved = WorkspaceSession.load(sessionPath);
 		if (saved != null) saved.restore(application, recovery);
+		for (diagnostic in recovery.diagnostics) reportError("recovery", diagnostic);
 		persistence = new SessionPersistence(sessionPath);
 		persistence.begin(application);
 		lastRecoverySave = Sys.time();

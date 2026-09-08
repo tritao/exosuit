@@ -41,6 +41,9 @@ class ApplicationTestMain {
 		var currentNotification = application.root.notifications.current();
 		require(application.root.notifications.entries.length == 100 && currentNotification != null
 			&& currentNotification.message == "message 119", "notification retention was not bounded");
+		if (currentNotification == null) throw "missing current notification";
+		require(application.root.notifications.current(currentNotification.createdAt + feedback.NotificationCenter.DISPLAY_SECONDS + 0.1) == null,
+			"expired notification remained pinned over the editor");
 		for (index in 0...220) application.errors.record("test", "error " + index);
 		require(application.errors.entries.length == 200 && application.errors.entries[0].message == "error 20",
 			"error-log retention was not bounded");

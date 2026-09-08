@@ -82,6 +82,23 @@ class LayoutNode {
 		setBounds(x, y, width, height);
 	}
 
+	/** Removes session branches for which no document could be restored. */
+	public function pruneEmpty():Bool {
+		if (isLeaf()) return tabs.views.length > 0;
+		var left = requireFirst(), right = requireSecond(), leftHasViews = left.pruneEmpty(), rightHasViews = right.pruneEmpty();
+		if (leftHasViews && rightHasViews) return true;
+		if (leftHasViews) {
+			adopt(left);
+			return true;
+		}
+		if (rightHasViews) {
+			adopt(right);
+			return true;
+		}
+		reset();
+		return false;
+	}
+
 	public function disposeViews():Void {
 		if (isLeaf()) {
 			for (view in tabs.views) view.dispose();

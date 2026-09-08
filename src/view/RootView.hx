@@ -529,6 +529,7 @@ class RootView {
 		focus.activate(null);
 		node.reset();
 		activeLeaf = node;
+		var requestedActive:Null<View> = null;
 		for (line in lines) {
 			var fields = line.split("\t");
 			if (fields.length == 4 && fields[0] == "S" && (fields[2] == "H" || fields[2] == "V")) {
@@ -551,28 +552,25 @@ class RootView {
 					leaf.tabs.add(view);
 					view.restoreCursor(Std.parseInt(fields[3]), Std.parseInt(fields[4]));
 					view.restoreScroll(Std.parseInt(fields[5]), Std.parseInt(fields[6]));
-					if (fields[2] == "1") leaf.tabs.setActive(view);
-				}
-			}
-		}
-		for (line in lines) {
-			var fields = line.split("\t");
-			if (fields.length == 9 && fields[0] == "T" && fields[2] == "1") {
-				var leaf = nodeAtRoute(fields[1]);
-				if (leaf != null)
-					for (view in leaf.tabs.views) {
-						var document = view.getDocument();
-						if (document != null && (fields[7] == "P" ? document.path == fields[8] : document.recoveryId == fields[8])) leaf.tabs.setActive(view);
+					if (fields[2] == "1") {
+						leaf.tabs.setActive(view);
 					}
+				}
 			}
 		}
 		for (line in lines) {
 			var fields = line.split("\t");
 			if (fields.length == 2 && fields[0] == "A") {
 				var leaf = nodeAtRoute(fields[1]);
-				if (leaf != null && leaf.isLeaf()) activateLeaf(leaf);
+				if (leaf != null && leaf.isLeaf()) requestedActive = leaf.tabs.activeView;
 			}
 		}
+		node.pruneEmpty();
+		activeLeaf = node.firstLeaf();
+		if (requestedActive != null) {
+			var requestedLeaf = leafForView(node, requestedActive);
+			if (requestedLeaf != null) activateLeaf(requestedLeaf); else focus.activate(activeLeaf.tabs.activeView);
+		} else focus.activate(activeLeaf.tabs.activeView);
 		setNodeBounds();
 	}
 

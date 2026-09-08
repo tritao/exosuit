@@ -64,7 +64,10 @@ class RecoveryStore {
 		try {
 			return decode(fileSystem.read(path));
 		} catch (error:Dynamic) {
-			diagnostics.push("Could not read recovery data: " + Std.string(error));
+			var quarantined = quarantine();
+			diagnostics.push(quarantined == null
+				? "Could not read recovery data: " + Std.string(error)
+				: 'Incompatible recovery data was preserved at "$quarantined"');
 			return [];
 		}
 	}
@@ -98,6 +101,12 @@ class RecoveryStore {
 			result.push(new RecoverySnapshot(id, title, fields[4] == "0" ? null : recoveredPath, text));
 		}
 		return result;
+	}
+
+	function quarantine():Null<String> {
+		var candidate = path + ".incompatible", suffix = 1;
+		while (fileSystem.exists(candidate)) candidate = path + ".incompatible-" + suffix++;
+		return fileSystem.rename(path, candidate) ? candidate : null;
 	}
 
 	public function restore(application:Application, snapshot:RecoverySnapshot):Bool {

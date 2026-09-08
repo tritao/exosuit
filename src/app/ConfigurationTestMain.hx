@@ -161,7 +161,9 @@ class ConfigurationTestMain {
 			"missing recovery source was silently ignored");
 		File.saveContent(recoveryPath, "pragtical-recovery=1\nnope:2:xx");
 		require(recovery.load().length == 0 && recovery.diagnostics.length > 0, "corrupt recovery lengths accepted");
-		require(!recovery.save(application) && File.getContent(recoveryPath) == "pragtical-recovery=1\nnope:2:xx", "corrupt recovery was overwritten");
+		require(!FileSystem.exists(recoveryPath) && FileSystem.exists(recoveryPath + ".incompatible")
+			&& recovery.save(application) && StringTools.startsWith(File.getContent(recoveryPath), "pragtical-recovery=3\n"),
+			"incompatible recovery was not quarantined before current state was saved");
 		var persistencePath = arguments[2] + "/state/debounced-session.conf", persistence = new SessionPersistence(persistencePath);
 		persistence.begin(application);
 		application.newDocument();
@@ -175,6 +177,13 @@ class ConfigurationTestMain {
 		var malformedLayout = WorkspaceSession.load(sessionPath);
 		require(malformedLayout != null && malformedLayout.layout.length == 0,
 			"malformed versioned layout records survived defensive decoding");
+		var emptyLayout = WorkspaceSession.decode("version=2\nsidebar=search\nlayout=S\t\tH\t500\nlayout=S\t1\tH\t500\n"
+			+ "layout=T\t11\t1\t0\t0\t0\t0\tR\tmissing-recovery\nlayout=A\t11\n");
+		var emptyApplication = new Application(renderer, 640, 320, service);
+		emptyLayout.restore(emptyApplication, new RecoveryStore(arguments[2] + "/missing-recovery.conf"));
+		require(emptyApplication.root.node.isLeaf() && emptyApplication.root.tabs.views.length == 0,
+			"unrestorable session tabs retained an empty split topology");
+		emptyApplication.shutdown();
 		application.shutdown();
 		renderer.destroy();
 		Platform.require(Native.window_destroy(window), "destroy configuration test window");
