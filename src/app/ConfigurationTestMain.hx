@@ -173,11 +173,11 @@ class ConfigurationTestMain {
 		require(persistence.flush(application), "controlled session shutdown flush failed");
 		File.saveContent(sessionPath, "corrupt session");
 		require(WorkspaceSession.load(sessionPath) == null, "corrupt session did not fail closed");
-		File.saveContent(sessionPath, "version=2\nlayout=S\tbad-route\tH\tnot-a-number\nlayout=T\t\t1\tbad\t0\t0\t0\tP\tmissing\n");
+		File.saveContent(sessionPath, "version=3\nlayout=S\tbad-route\tH\tnot-a-number\nlayout=T\t\t1\tbad\t0\t0\t0\tP\tmissing\n");
 		var malformedLayout = WorkspaceSession.load(sessionPath);
 		require(malformedLayout != null && malformedLayout.layout.length == 0,
 			"malformed versioned layout records survived defensive decoding");
-		var emptyLayout = WorkspaceSession.decode("version=2\nsidebar=search\nlayout=S\t\tH\t500\nlayout=S\t1\tH\t500\n"
+		var emptyLayout = WorkspaceSession.decode("version=3\nlayout=S\t\tH\t500\nlayout=S\t1\tH\t500\n"
 			+ "layout=T\t11\t1\t0\t0\t0\t0\tR\tmissing-recovery\nlayout=A\t11\n");
 		var emptyApplication = new Application(renderer, 640, 320, service);
 		emptyLayout.restore(emptyApplication, new RecoveryStore(arguments[2] + "/missing-recovery.conf"));

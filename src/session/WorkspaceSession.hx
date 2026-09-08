@@ -8,11 +8,10 @@ import recovery.RecoverySnapshot;
 import recovery.RecoveryStore;
 
 class WorkspaceSession {
-	public static inline final VERSION = 2;
+	public static inline final VERSION = 3;
 	public final projects:Array<String> = [];
 	public final documents:Array<String> = [];
 	public var activeDocument:String = "";
-	public var sidebar:String = "project";
 	public final layout:Array<String> = [];
 	public final expanded:Array<String> = [];
 
@@ -32,7 +31,6 @@ class WorkspaceSession {
 			var active = view.getDocument();
 			if (active != null && active.hasBackingPath()) result.activeDocument = active.requirePath();
 		}
-		result.sidebar = application.root.searchVisible ? "search" : "project";
 		for (line in application.root.sessionLines()) result.layout.push(line);
 		return result;
 	}
@@ -65,14 +63,14 @@ class WorkspaceSession {
 				if (FileSystem.exists(path) && !FileSystem.isDirectory(path)) application.open(path);
 			if (activeDocument.length > 0 && FileSystem.exists(activeDocument) && !FileSystem.isDirectory(activeDocument)) application.open(activeDocument);
 		}
-		if (sidebar == "project") application.root.showProjectSidebar(); else application.root.showSearchResults("", []);
+		application.root.showProjectSidebar();
 	}
 
 	public function encode():String {
 		var output = "version=" + VERSION + "\n";
 		for (project in projects) output += "project=" + clean(project) + "\n";
 		for (document in documents) output += "document=" + clean(document) + "\n";
-		output += "active=" + clean(activeDocument) + "\nsidebar=" + sidebar + "\n";
+		output += "active=" + clean(activeDocument) + "\n";
 		for (line in layout) output += "layout=" + clean(line) + "\n";
 		for (path in expanded) output += "expanded=" + clean(path) + "\n";
 		return output;
@@ -88,7 +86,6 @@ class WorkspaceSession {
 			else if (key == "project" && value.length > 0) result.projects.push(value);
 			else if (key == "document" && value.length > 0) result.documents.push(value);
 			else if (key == "active") result.activeDocument = value;
-			else if (key == "sidebar" && (value == "project" || value == "search")) result.sidebar = value;
 			else if (key == "layout" && validLayout(value)) result.layout.push(value);
 			else if (key == "expanded" && value.length > 0) result.expanded.push(value);
 		}
