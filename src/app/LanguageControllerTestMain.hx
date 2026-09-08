@@ -55,6 +55,10 @@ class LanguageControllerTestMain {
 		pump(controller, () -> root.languagePopup.visible, 5.0);
 		require(root.languagePopup.visible && root.languagePopup.keyPressed(Platform.KEY_ESCAPE, 0),
 			"completion was not surfaced through an interactive anchored popup");
+		require(commands.perform("language:signature-help", context), "signature-help command was not available");
+		pump(controller, () -> root.languagePopup.visible, 5.0);
+		require(root.languagePopup.visible && root.languagePopup.keyPressed(Platform.KEY_ESCAPE, 0),
+			"signature help was not surfaced through an anchored popup");
 		require(commands.perform("language:go-to-definition", context), "definition command was not available");
 		for (_ in 0...32) controller.update(Sys.time());
 		controller.shutdown();

@@ -5,6 +5,7 @@ import platform.Platform;
 import platform.TextInputArea;
 import renderer.Renderer;
 import style.Theme;
+import language.SignatureHelp;
 
 /** Caret-anchored presentation shared by completion and language information. */
 class AnchoredPopup {
@@ -15,6 +16,7 @@ class AnchoredPopup {
 	final items:Array<CompletionItem> = [];
 	var selected:Int = 0;
 	var information:String = "";
+	var emphasized:String = "";
 	var accept:CompletionItem->Void = function(item) {};
 	var anchor:Null<TextInputArea>;
 
@@ -26,6 +28,7 @@ class AnchoredPopup {
 		this.anchor = anchor;
 		this.accept = accept;
 		information = "";
+		emphasized = "";
 		selected = 0;
 		visible = items.length > 0;
 	}
@@ -34,7 +37,16 @@ class AnchoredPopup {
 		items.resize(0);
 		this.anchor = anchor;
 		information = value;
+		emphasized = "";
 		visible = value.length > 0;
+	}
+
+	public function openSignature(anchor:TextInputArea, value:SignatureHelp):Void {
+		items.resize(0);
+		this.anchor = anchor;
+		information = value.label + (value.documentation.length == 0 ? "" : "\n" + value.documentation);
+		emphasized = value.activeParameter;
+		visible = true;
 	}
 
 	public function close():Void visible = false;
@@ -85,5 +97,6 @@ class AnchoredPopup {
 	function drawInformation(renderer:Renderer, theme:Theme, x:Int, y:Int):Void {
 		var lines = information.split("\n"), count = lines.length < 3 ? lines.length : 3;
 		for (index in 0...count) renderer.text(x + 9, y + 5 + index * renderer.lineHeight, lines[index], theme.editorForeground);
+		if (emphasized.length > 0) renderer.text(x + 9, y + 5 + 2 * renderer.lineHeight, emphasized, theme.accent);
 	}
 }

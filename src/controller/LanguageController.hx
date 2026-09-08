@@ -76,6 +76,7 @@ class LanguageController {
 		commands.add("language:hover", commandContext -> hover(), commandContext -> supports("hover"));
 		commands.add("language:complete", commandContext -> complete(), commandContext -> supports("completion"));
 		commands.add("language:go-to-definition", commandContext -> definition(), commandContext -> supports("definition"));
+		commands.add("language:signature-help", commandContext -> signatureHelp(), commandContext -> supports("signature"));
 	}
 
 	function hover():Void {
@@ -116,6 +117,15 @@ class LanguageController {
 		});
 	}
 
+	function signatureHelp():Void {
+		var service = client, view = context.activeView(), document = activeDocument();
+		if (service == null || view == null || document == null) return;
+		service.requestSignatureHelp(document, new BufferPosition(view.cursorLine(), view.cursorColumn()), Sys.time(), value -> {
+			var area = root.textInputArea();
+			if (value != null && area != null && context.activeView() == view) root.languagePopup.openSignature(area, value);
+		});
+	}
+
 	function refreshDiagnostics(service:LanguageServiceClient):Void {
 		var parts:Array<String> = [];
 		for (document in workspace.documents.documents) {
@@ -140,7 +150,8 @@ class LanguageController {
 	function supports(feature:String):Bool {
 		var service = client;
 		if (service == null || !service.ready || activeDocument() == null) return false;
-		return feature == "hover" ? service.hoverSupported : feature == "completion" ? service.completionSupported : service.definitionSupported;
+		return feature == "hover" ? service.hoverSupported : feature == "completion" ? service.completionSupported
+			: feature == "signature" ? service.signatureHelpSupported : service.definitionSupported;
 	}
 
 	function activeDocument():Null<Document> {

@@ -38,7 +38,8 @@ while True:
     if method == "initialize":
         capabilities = {"positionEncoding": "utf-16", "textDocumentSync": {"openClose": True, "change": 2}}
         if not minimal:
-            capabilities.update({"hoverProvider": True, "completionProvider": {}, "definitionProvider": True})
+            capabilities.update({"hoverProvider": True, "completionProvider": {}, "definitionProvider": True,
+                                 "signatureHelpProvider": {"triggerCharacters": ["(", ","]}})
         send({"jsonrpc": "2.0", "id": message["id"], "result": {"capabilities": capabilities}})
     elif method == "initialized":
         pass
@@ -72,6 +73,10 @@ while True:
         position = message["params"]["position"]
         send({"jsonrpc": "2.0", "id": message["id"], "result": {"uri": message["params"]["textDocument"]["uri"],
             "range": {"start": position, "end": position}}})
+    elif method == "textDocument/signatureHelp":
+        send({"jsonrpc": "2.0", "id": message["id"], "result": {"activeSignature": 0, "activeParameter": 1,
+            "signatures": [{"label": "sum(left:Int, right:Int):Int", "documentation": {"kind": "markdown", "value": "Adds values"},
+                            "parameters": [{"label": "left:Int"}, {"label": "right:Int"}]}]}})
     elif method == "shutdown":
         send({"jsonrpc": "2.0", "id": message["id"], "result": None})
     elif method == "exit":

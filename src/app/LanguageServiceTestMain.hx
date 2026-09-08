@@ -6,6 +6,7 @@ import editor.BufferPosition;
 import editor.BufferSelection;
 import language.LanguageLocation;
 import language.LanguageServiceClient;
+import language.SignatureHelp;
 import platform.Native;
 import platform.Platform;
 import process.ProcessManager;
@@ -53,17 +54,21 @@ class LanguageServiceTestMain {
 		var diagnostic = client.diagnosticsFor(document)[0];
 		require(diagnostic.message == "current 😀" && diagnostic.to.column == 2, "stale or incorrectly positioned diagnostics were accepted");
 
-		var hover:Null<String> = null, completions:Null<Array<CompletionItem>> = null, definitions:Null<Array<LanguageLocation>> = null;
+		var hover:Null<String> = null, completions:Null<Array<CompletionItem>> = null, definitions:Null<Array<LanguageLocation>> = null,
+			signature:Null<SignatureHelp> = null;
 		require(client.requestHover(document, new BufferPosition(0, 2), Sys.time(), value -> hover = value), "hover request was rejected");
 		require(client.requestCompletion(document, new BufferPosition(0, 2), Sys.time(), value -> completions = value), "completion request was rejected");
 		require(client.requestDefinition(document, new BufferPosition(0, 2), Sys.time(), value -> definitions = value), "definition request was rejected");
-		pump(client, () -> hover != null && completions != null && definitions != null, 5.0);
+		require(client.requestSignatureHelp(document, new BufferPosition(0, 2), Sys.time(), value -> signature = value), "signature-help request was rejected");
+		pump(client, () -> hover != null && completions != null && definitions != null && signature != null, 5.0);
 		require(hover == "hover 😀", "hover response was not decoded");
 		pump(client, () -> document.buffer.line(0) == "😀serverx value", 5.0);
 		var completed = completionResult(completions), located = definitionResult(definitions);
 		require(completed.length == 1 && completed[0].insertText == "completion", "completion response was not decoded");
 		require(located.length == 1 && located[0].path == sourcePath && located[0].from.column == 2,
 			"definition response did not retain its UTF-16 location");
+		require(signature != null && signature.activeParameter == "right:Int" && signature.documentation == "Adds values",
+			"signature help did not decode its active parameter or documentation");
 
 		var revision = document.buffer.stateId, edit:Dynamic = {
 			range: {start: {line: 0, character: 8}, end: {line: 0, character: 9}},
@@ -84,7 +89,7 @@ class LanguageServiceTestMain {
 		var minimal = new LanguageServiceClient(manager, documents, "python3", [arguments[0], "minimal"], arguments[1]);
 		minimal.start(Sys.time());
 		pump(minimal, () -> minimal.ready, 5.0);
-		require(!minimal.hoverSupported && !minimal.completionSupported && !minimal.definitionSupported,
+		require(!minimal.hoverSupported && !minimal.completionSupported && !minimal.definitionSupported && !minimal.signatureHelpSupported,
 			"unsupported server capabilities were advertised by the client");
 		require(!minimal.requestHover(document, new BufferPosition(0, 0), Sys.time(), value -> {}),
 			"unsupported hover request was sent");

@@ -22,6 +22,7 @@ class LanguageServiceClient {
 	public var hoverSupported(default, null):Bool = false;
 	public var completionSupported(default, null):Bool = false;
 	public var definitionSupported(default, null):Bool = false;
+	public var signatureHelpSupported(default, null):Bool = false;
 	public var report:String->Void = function(message) {};
 
 	final processes:ProcessManager;
@@ -126,6 +127,25 @@ class LanguageServiceClient {
 		return requestAt("textDocument/definition", document, position, now, response -> complete(response.error == null ? locations(response.result) : []));
 	}
 
+	public function requestSignatureHelp(document:Document, position:BufferPosition, now:Float, complete:Null<SignatureHelp>->Void):Bool {
+		if (!signatureHelpSupported) return false;
+		return requestAt("textDocument/signatureHelp", document, position, now, response -> {
+			if (response.error != null || response.result == null) { complete(null); return; }
+			var signatures:Dynamic = Reflect.field(response.result, "signatures");
+			if (!Std.isOfType(signatures, Array) || cast(signatures, Array<Dynamic>).length == 0) { complete(null); return; }
+			var values:Array<Dynamic> = cast signatures, activeSignature = integer(response.result, "activeSignature", 0);
+			if (activeSignature < 0 || activeSignature >= values.length) activeSignature = 0;
+			var signature = values[activeSignature], label:Dynamic = Reflect.field(signature, "label"), documentation = text(Reflect.field(signature, "documentation"));
+			if (label == null) { complete(null); return; }
+			var parameter = "", parameters:Dynamic = Reflect.field(signature, "parameters"), activeParameter = integer(response.result, "activeParameter", integer(signature, "activeParameter", 0));
+			if (Std.isOfType(parameters, Array)) {
+				var list:Array<Dynamic> = cast parameters;
+				if (activeParameter >= 0 && activeParameter < list.length) parameter = parameterLabel(Std.string(label), Reflect.field(list[activeParameter], "label"));
+			}
+			complete(new SignatureHelp(Std.string(label), documentation, parameter));
+		});
+	}
+
 	public function applyWorkspaceEdits(document:Document, expectedRevision:Int, edits:Array<Dynamic>, selection:BufferSelection):Bool {
 		if (document.buffer.stateId != expectedRevision) return false;
 		var replacements = parseWorkspaceEdits(document, edits);
@@ -187,6 +207,7 @@ class LanguageServiceClient {
 		hoverSupported = capability(capabilities, "hoverProvider");
 		completionSupported = capability(capabilities, "completionProvider");
 		definitionSupported = capability(capabilities, "definitionProvider");
+		signatureHelpSupported = capability(capabilities, "signatureHelpProvider");
 		status = "ready";
 		restartCount = 0;
 		transport.notify("initialized", {});
@@ -299,6 +320,7 @@ class LanguageServiceClient {
 		hoverSupported = false;
 		completionSupported = false;
 		definitionSupported = false;
+		signatureHelpSupported = false;
 		for (state in states) state.release();
 		states.clear();
 		diagnostics.clear();
@@ -337,5 +359,29 @@ class LanguageServiceClient {
 		if (capabilities == null) return false;
 		var value:Dynamic = Reflect.field(capabilities, name);
 		return value != null && value != false;
+	}
+
+	static function integer(value:Dynamic, field:String, fallback:Int):Int {
+		var raw:Dynamic = value == null ? null : Reflect.field(value, field);
+		return raw == null ? fallback : Std.parseInt(Std.string(raw));
+	}
+
+	static function text(value:Dynamic):String {
+		if (value == null) return "";
+		var marked:Dynamic = Reflect.field(value, "value");
+		return marked == null ? Std.string(value) : Std.string(marked);
+	}
+
+	static function parameterLabel(signature:String, value:Dynamic):String {
+		if (value == null) return "";
+		if (Std.isOfType(value, Array)) {
+			var range:Array<Dynamic> = cast value;
+			if (range.length == 2) {
+				var from = Std.parseInt(Std.string(range[0])), to = Std.parseInt(Std.string(range[1]));
+				if (from >= 0 && to >= from && to <= signature.length) return signature.substring(from, to);
+			}
+			return "";
+		}
+		return Std.string(value);
 	}
 }
