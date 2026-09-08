@@ -25,6 +25,6 @@ at an editor update safe point. Use the command palette entries `plugins:disable
 control. Compile or activation failures retain the last working plugin.
 
 The dynamically supplied SDK currently guarantees `pragtical.Editor` and the
-language/runtime primitives used by the example. A relocatable full Haxeon stdlib
-SDK is intentionally deferred to the pinned release bundle in M7 rather than
-resolved from an arbitrary sibling checkout.
+language/runtime primitives used by the example. Release inputs and the bundled
+Haxeon language service are revision-pinned; dynamic plugin compilation remains
+limited to this deliberately exposed SDK rather than an arbitrary host checkout.
