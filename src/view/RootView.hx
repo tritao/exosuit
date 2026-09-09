@@ -20,6 +20,7 @@ import plugin.PluginPanelRegistry;
 import plugin.PluginDecorationRegistry;
 import plugin.PluginStatusRegistry;
 import platform.TextInputArea;
+import feedback.ProblemRegistry;
 
 class RootView {
 	public static inline final TAB_WIDTH = 180;
@@ -37,10 +38,12 @@ class RootView {
 	public final welcome:WelcomeView;
 	public final contextMenu:ContextMenu;
 	public final languagePopup:AnchoredPopup;
+	public final problems:ProblemRegistry;
 	public var createFileRequest:Void->Void = function() {};
 	public var createFolderRequest:Void->Void = function() {};
 	public var renameFileRequest:Void->Void = function() {};
 	public var deleteFileRequest:Void->Void = function() {};
+	public var showProblemsRequest:Void->Void = function() {};
 	public var searchVisible(default, null):Bool = false;
 	public final notifications:NotificationCenter;
 	public final status:StatusView;
@@ -74,11 +77,12 @@ class RootView {
 		welcome = new WelcomeView();
 		contextMenu = new ContextMenu();
 		languagePopup = new AnchoredPopup();
+		problems = new ProblemRegistry();
 		notifications = new NotificationCenter();
 		pluginPanels = new PluginPanelRegistry();
 		pluginDecorations = new PluginDecorationRegistry();
 		pluginStatusItems = new PluginStatusRegistry();
-		status = new StatusView(renderer, theme, settings == null ? new Settings() : settings, pluginStatusItems);
+		status = new StatusView(renderer, theme, settings == null ? new Settings() : settings, pluginStatusItems, problems);
 		closeRequest = function() {};
 		this.width = width;
 		this.height = height;
@@ -458,6 +462,7 @@ class RootView {
 				items.push(new ContextMenuItem("Copy", function() { view.copy(); }));
 				items.push(new ContextMenuItem("Paste", function() { view.paste(); }));
 				items.push(new ContextMenuItem("Select All", function() { view.selectAll(); }));
+				items.push(new ContextMenuItem("Show Problems", showProblemsRequest));
 			}
 		}
 		contextMenu.open(x, y, items, width, height - StatusView.HEIGHT);

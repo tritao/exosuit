@@ -19,6 +19,7 @@ import workspace.Project;
 import workspace.Workspace;
 
 class BuildController {
+	static inline final PROBLEM_OWNER = "build";
 	public final output:BuildOutput = new BuildOutput();
 	public var active(default, null):Null<OwnedProcess>;
 
@@ -69,6 +70,7 @@ class BuildController {
 		try {
 			cwd = workspace.fileSystem.normalize(cwd);
 			output.reset(cwd);
+			root.problems.removeOwner(PROBLEM_OWNER);
 			output.append('Running ${task.name}: ${task.executable}\n');
 			active = processes.start(task.executable, task.arguments, cwd, task.environment);
 		} catch (error:Dynamic) {
@@ -95,13 +97,24 @@ class BuildController {
 			if (stderr.length > 0) output.append(stderr);
 			received = true;
 		}
+		syncProblems();
 		if (!process.exited()) return;
 		if (received) emptyDrains = 0; else emptyDrains++;
 		if (emptyDrains < 2) return;
 		output.finish();
+		syncProblems();
 		output.append('Process exited with status ${process.exitStatus()}\n');
 		processes.release(process);
 		active = null;
+	}
+
+	function syncProblems():Void {
+		root.problems.removeOwner(PROBLEM_OWNER);
+		for (index in 0...output.lines.length) {
+			var line = output.lines[index], diagnostic = line.diagnostic;
+			if (diagnostic != null) root.problems.add(new feedback.Problem(PROBLEM_OWNER, Std.string(index), diagnostic.path,
+				diagnostic.line, diagnostic.column, diagnostic.column + 1, line.text, 1));
+		}
 	}
 
 	public function cancel():Bool {

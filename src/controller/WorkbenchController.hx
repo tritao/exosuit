@@ -11,6 +11,7 @@ import editor.Document;
 import feedback.ErrorLog;
 import platform.Platform;
 import view.RootView;
+import view.ProblemsView;
 import workspace.Workspace;
 
 class WorkbenchController {
@@ -171,6 +172,7 @@ class WorkbenchController {
 		commands.add("layout:reorder-tab-right", context -> root.reorderActiveTab(1));
 		commands.add("workbench:toggle-sidebar", context -> root.toggleSidebar());
 		commands.add("workbench:show-errors", context -> openErrorLog());
+		commands.add("workbench:show-problems", context -> openProblems());
 		commands.add("workbench:clear-notifications", context -> root.notifications.clear());
 		commands.add("doc:newline", context -> context.requireView().insertNewline(), hasDocument);
 		commands.add("doc:duplicate-line", context -> context.requireView().duplicateLines(), hasDocument);
@@ -203,6 +205,14 @@ class WorkbenchController {
 		keymap.addDirect(Platform.KEY_PAGE_UP, Platform.MOD_CTRL, ["layout:reorder-tab-left"]);
 		keymap.addDirect(Platform.KEY_PAGE_DOWN, Platform.MOD_CTRL, ["layout:reorder-tab-right"]);
 		keymap.addDirect(Platform.KEY_B, Platform.MOD_CTRL, ["workbench:toggle-sidebar"]);
+	}
+
+	public function openProblems():Void {
+		root.openAuxiliary(new ProblemsView(root.problems, root.renderer, root.theme, root.activeLeaf.width, root.activeLeaf.height, problem -> {
+			var view = root.openDocument(workspace.documents.open(problem.path));
+			view.selectRange(new editor.BufferPosition(problem.line, problem.column), new editor.BufferPosition(problem.line, problem.endColumn));
+			view.cursorChanged();
+		}));
 	}
 
 	function hasDocument(context:CommandContext):Bool

@@ -51,6 +51,12 @@ class ApplicationTestMain {
 		for (index in 0...220) application.errors.record("test", "error " + index);
 		require(application.errors.entries.length == 200 && application.errors.entries[0].message == "error 20",
 			"error-log retention was not bounded");
+		application.root.problems.add(new feedback.Problem("test", "one", "/tmp/problem.hx", 2, 3, 4, "test problem", 1));
+		require(application.commands.perform("workbench:show-problems", application.context), "problems command was not available");
+		var problemView = application.root.tabs.activeView;
+		if (problemView == null) throw "problems command did not open a view";
+		require(problemView.title == "Problems", "problem registry was not exposed through a navigable view");
+		require(application.root.closeActiveTab(true), "problems view did not close cleanly");
 		var missingPluginLoaded = application.loadPluginManifest("/missing/plugin.conf"), pluginNotification = application.root.notifications.current();
 		require(!missingPluginLoaded && application.errors.entries[199].source == "plugin"
 			&& pluginNotification != null && pluginNotification.kind == feedback.NotificationKind.Error,

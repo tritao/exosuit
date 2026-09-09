@@ -46,7 +46,7 @@ class LanguageControllerTestMain {
 		require(selection != null, "document view has no selection");
 		selection.setCursor(document.buffer, new BufferPosition(0, 2));
 		document.insert(selection, "x");
-		pump(controller, () -> root.pluginDecorations.forDocument(document).length == 1, 5.0);
+		pump(controller, () -> root.pluginDecorations.forDocument(document).length == 1 && root.problems.values().length == 1, 5.0);
 		require(commands.perform("language:hover", context), "hover command was not available");
 		pump(controller, () -> root.languagePopup.visible, 5.0);
 		require(root.languagePopup.visible, "hover was not surfaced through an anchored popup");

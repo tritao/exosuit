@@ -4,19 +4,22 @@ import config.Settings;
 import renderer.Renderer;
 import style.Theme;
 import plugin.PluginStatusRegistry;
+import feedback.ProblemRegistry;
 
 class StatusView {
 	public static inline final HEIGHT = 24;
 	final renderer:Renderer;
 	final theme:Theme;
 	final pluginItems:PluginStatusRegistry;
+	final problems:ProblemRegistry;
 	var settings:Settings;
 
-	public function new(renderer:Renderer, theme:Theme, settings:Settings, pluginItems:PluginStatusRegistry) {
+	public function new(renderer:Renderer, theme:Theme, settings:Settings, pluginItems:PluginStatusRegistry, problems:ProblemRegistry) {
 		this.renderer = renderer;
 		this.theme = theme;
 		this.settings = settings;
 		this.pluginItems = pluginItems;
+		this.problems = problems;
 	}
 
 	public function applySettings(settings:Settings):Void
@@ -47,6 +50,8 @@ class StatusView {
 			}
 		}
 		for (item in pluginItems.items()) if (item.text.length > 0) result += "  " + item.text;
+		var problemCount = problems.values().length;
+		if (problemCount > 0) result += "  Problems: " + problemCount;
 		return result;
 	}
 

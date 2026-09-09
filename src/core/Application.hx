@@ -144,6 +144,7 @@ class Application {
 		root.createFolderRequest = function() { files.openCreateFolder(); };
 		root.renameFileRequest = function() { files.openRenameFile(); };
 		root.deleteFileRequest = function() { files.openDeleteFile(); };
+		root.showProblemsRequest = function() { workbench.openProblems(); };
 	}
 
 	public function open(path:String):View

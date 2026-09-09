@@ -65,6 +65,7 @@ class LanguageController {
 		client = null;
 		diagnosticFingerprint = "";
 		root.pluginDecorations.removeOwner(OWNER);
+		root.problems.removeOwner(OWNER);
 	}
 
 	public function shutdown():Void
@@ -136,10 +137,13 @@ class LanguageController {
 		if (fingerprint == diagnosticFingerprint) return;
 		diagnosticFingerprint = fingerprint;
 		root.pluginDecorations.removeOwner(OWNER);
+		root.problems.removeOwner(OWNER);
 		for (document in workspace.documents.documents) {
 			var values = service.diagnosticsFor(document);
 			for (index in 0...values.length) {
 				var value = values[index];
+				if (document.path != null) root.problems.add(new feedback.Problem(OWNER, document.id + ":" + index, document.path,
+					value.from.line, value.from.column, value.to.column, value.message, value.severity));
 				if (value.from.line != value.to.line || value.to.column <= value.from.column) continue;
 				root.pluginDecorations.add(OWNER, document.id + ":" + index, document, value.from.line, value.from.column, value.to.column,
 					root.theme.error);
