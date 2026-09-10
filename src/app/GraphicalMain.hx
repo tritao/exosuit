@@ -7,11 +7,13 @@ import core.Application;
 import renderer.Renderer;
 import config.ConfigurationPaths;
 import config.SettingsService;
+import NativeDesktopServices;
 
 class GraphicalMain {
 	static var window:Int;
 	static var renderer:Renderer;
 	static var application:Application;
+	static var desktop:NativeDesktopServices;
 	static var smokeFrames:Int = 0;
 	static var presentedFrames:Int = 0;
 	static var smokeSeconds:Float = 0.0;
@@ -20,6 +22,7 @@ class GraphicalMain {
 	static function main():Void {
 		if (Native.abi_version() != Platform.ABI_VERSION)
 			throw "platform ABI version mismatch";
+		desktop = new NativeDesktopServices();
 		var arguments = Sys.args();
 		window = Native.window_create("Pragtical Haxeon", 960, 640);
 		Platform.require(window != 0, "create editor window");
@@ -67,6 +70,7 @@ class GraphicalMain {
 	}
 
 	static function iterate():Int {
+		desktop.poll();
 		application.update();
 		renderer.begin();
 		application.root.draw();
@@ -83,5 +87,6 @@ class GraphicalMain {
 		application.shutdown();
 		renderer.destroy();
 		Platform.require(Native.window_destroy(window), "destroy editor window");
+		desktop.shutdown();
 	}
 }
