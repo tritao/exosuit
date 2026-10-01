@@ -155,17 +155,29 @@ Last updated: 2026-10-01.
   1 MiB-codepoint line. After **every edit**, indexed clusters and properties
   match fresh Skribidi layouts; the final 1 MiB character-wrap breaks also
   match. The 1 MiB isolated nine-codepoint shape plus piece splice measured
-  p50/p95 **0.025/0.037 ms CPU** in the final verification run. This excludes
+  p50/p95 **0.026/0.032 ms CPU** in the final verification run. This excludes
   the full oracle, row geometry,
   rendering, UIKit event dispatch, and publication, so it is not a typing-frame
   result. Artifacts: `/tmp/exosuit-edit-window-results.txt` and
   `/tmp/exosuit-edit-window-build.log`.
+- Another 30-edit fixture alternates insertion and deletion at one caret.
+  Both the 4,096-codepoint and 1 MiB versions match fresh clusters and text
+  properties after every edit, including suffix offset shifts; the final
+  1 MiB character-wrap breaks match. Isolated 1 MiB text copy, shape and
+  splice measured p50/p95 **0.096/0.120 ms CPU**. A visible-row reflow
+  started one row before a 1 MiB replacement, visited 288 clusters for 12
+  rows, and matched fresh Skribidi breaks among 43,691 total rows.
+- `docs/architecture/0003-incremental-text-layout.md` records the required
+  composite snapshot boundary: `TextEngine` currently owns one `skb_layout_t`
+  and routes rendering, hit tests, carets and line queries through it. The
+  indexed pieces need a common generation and row index before UIKit can use
+  them without breaking those APIs.
 - This probe is not a correctness proof or production implementation. It
   still scans cached layouts for oracle checks and glyph-position reconstruction,
   checks only one unbroken-word wrap fixture,
   and has no general bound for Arabic joining, emoji carets, or bidi changes.
-  The mutable cluster splice handles only equal-length replacements of
-  one-codepoint clusters. Exact next: add a composite layout/render boundary
+  The mutable cluster splice handles only one-codepoint clusters; visible
+  reflow covers one unbroken ASCII word. Exact next: add a composite layout/render boundary
   over pieces, reflow row metrics lazily from the edit, and compare general word
   wrapping and caret geometry with fresh Skribidi layouts. Then integrate the
   safe Latin path into UIKit and remeasure varied 1 MiB input. A full-paragraph

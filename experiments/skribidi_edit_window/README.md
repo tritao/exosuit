@@ -56,11 +56,21 @@ character-wrap breaks match. For the 1 MiB fixture, the isolated nine-codepoint
 shape plus piece splice measured p50/p95 about 0.03/0.03 ms CPU. Fresh full
 layouts used for verification are excluded from that timing.
 
+A second 30-edit fixture alternates insertion and deletion at the same caret.
+Both the 4,096-codepoint and 1 MiB versions match fresh clusters and
+properties after every edit, including shifted suffix offsets; the final
+1 MiB character-wrap breaks match. The isolated 1 MiB text copy, shape and
+splice measured p50/p95 about 0.10/0.12 ms CPU. A visible-row check starts
+one row before a 1 MiB replacement, visits 288 clusters to generate 12 rows,
+and matches fresh Skribidi break ranges among 43,691 total rows.
+
 The guard is an experimental rejection check, **not a proof of safe reuse**.
 The probe has sampled positions and fonts. It compares one-line caret geometry
 and one character-wrap fixture, but does not implement general word wrapping,
 incremental row metrics, or general mutable cluster edits: the current mutable
-cluster splice covers equal-length replacements of one-codepoint clusters.
+cluster splice covers one-codepoint clusters for replacement, insertion, and
+deletion. The visible-row check covers an unbroken ASCII word, not general
+word wrapping or changed line heights.
 Oracle checks and glyph-position reconstruction still scan old layouts. The
 measured path excludes UIKit event handling, row layout, rendering, and
 publication, so it does not establish the 50 ms typing budget. A production
