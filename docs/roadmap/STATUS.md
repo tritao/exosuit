@@ -25,13 +25,16 @@ Last updated: 2026-10-01.
   implementations remain open. The Pragtical PTY and emulator references are
   present in the available read-only checkout.
 - Exact resume: finish M9.1 strict changed-row invalidation. The guarded
-  lowercase ASCII native edit path and visible-line background geometry meet
-  the real 1 MiB varied-key typing budget; Unicode and unsupported layouts
-  still use complete native layout rebuilds. Broaden layout reuse only with
-  differential geometry evidence.
+  lowercase ASCII native edit path, visible-line background geometry and
+  directly sealed viewport glyphs meet the real 1 MiB varied-key typing budget.
+  The changed visible row still causes an aggregate viewport rebuild and paint;
+  row-scoped render commands are the next architectural step. Unicode and
+  unsupported layouts still use complete native layout rebuilds. Broaden
+  layout reuse only with differential geometry evidence.
   Preserve M8 and both browser gates.
-- Current follow-on HEADs: Exosuit `f14d847` before this ledger commit;
-  Materia `736b3241a` carries identical-range suffix snapshot reuse. The
+- Current follow-on HEADs: Exosuit `0badde1` before this ledger commit;
+  Materia `f0688c6fb` carries identical-range suffix snapshot reuse and
+  direct viewport glyph ownership. The
   existing dirty Haxeon/NativeKit gitlinks and UIKit TextInputBridge edit in
   Materia were left untouched.
 - All further graphical tests must use disposable PRAGTICAL_PORTABLE state.
@@ -113,8 +116,27 @@ Last updated: 2026-10-01.
   gate, so performance acceptance is still open. This does not complete strict
   changed-row display-list invalidation.
 - The native `nativekit_ui_text_engine` test and real graphical decoration
-  smoke both exit 0. The next M9.1 step is to trace row-level paint invalidation
-  and stop republishing the whole viewport when only one wrapped row changes.
+  smoke both exit 0. The next slice below removes the redundant full-range
+  publication; row-level paint invalidation is the remaining M9.1 step.
+
+### M9.1 — direct viewport glyph ownership (verified slice)
+
+- Materia `f0688c6fb` removes a second, full-range glyph publication from the
+  native frame seal. The render frame now owns the already prepared visible
+  buffer. A later rebuild uses copy-on-write when a sealed frame still owns the
+  earlier buffer; atlas invalidation within a frame also rebuilds privately.
+  This retains prepared rows and avoids copying the composed glyph geometry
+  for the second publication.
+- Native `nativekit_ui_abi`, `nativekit_ui_text_engine`,
+  `nativekit_ui_frame_resources`, and `nativekit_ui_public_renderer_smoke` tests
+  exit 0. The real graphical decoration smoke passes. The 1 MiB varied-key
+  fixture delivered 30/30 frames at p50 **39.69 ms**, p95 **46.29 ms**, max
+  **46.56 ms**, under the 50 ms p95 gate; artifacts:
+  `/tmp/exosuit-m9-owned-viewport` and `.log`.
+- Strict changed-row paint invalidation remains open. A changed visible row
+  still rebuilds the aggregate viewport and changes its render-pass key.
+  Next, represent visible rows as independently keyed draw commands, retaining
+  correct clipping, styling, geometry and sealed-frame ownership.
 
 ### M12.1 — headless terminal session (initial Linux slice)
 
