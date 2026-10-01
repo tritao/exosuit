@@ -15,7 +15,9 @@ Last updated: 2026-10-01.
   C imports and pass actual Unicode edit/save/readback/URL/reload smoke. The
   browser stage is wired into composed CI through `EXOSUIT_CI_WEB=1`; absent
   toolchains remain explicitly pending.
-- Active task: **M9.1**, styled text and decorations on UIKit.
+- Active task: **M9.1**, strict changed-row invalidation on UIKit. The M12.2
+  terminal now has styled cells, cursor, scrollback controls, broader key input,
+  and a unified light/dark workbench theme (`a3f0a4a`, `f14d847`).
 - Independent M11.1 POSIX PTY, M11.2 Linux transport, M11.3 SQLiteKit, and
   an initial M11.4 TerminalKit slice are verified. M12.1's headless session
   model and direct local PTY adapter now pass in both compiler modes
@@ -28,6 +30,10 @@ Last updated: 2026-10-01.
   still use complete native layout rebuilds. Broaden layout reuse only with
   differential geometry evidence.
   Preserve M8 and both browser gates.
+- Current follow-on HEADs: Exosuit `f14d847` before this ledger commit;
+  Materia `736b3241a` carries identical-range suffix snapshot reuse. The
+  existing dirty Haxeon/NativeKit gitlinks and UIKit TextInputBridge edit in
+  Materia were left untouched.
 - All further graphical tests must use disposable PRAGTICAL_PORTABLE state.
   IME, physical mixed-DPI transitions, Windows and macOS remain unclaimed.
 - HEADs at planning: exosuit `ae2f260` (`haxeon-uikit-port`). Materia `main` is at
@@ -80,13 +86,35 @@ Last updated: 2026-10-01.
   measures the resolved pane and resizes both emulator and PTY to whole cells.
 - Clicking the pane focuses it; text input, Enter, Backspace, and Tab go to
   the PTY. Closing the panel or app closes the session and UI resources.
-  `--open-terminal` starts the pane for desktop smoke runs.
+  `--open-terminal` starts the pane for desktop smoke runs. Follow-on commits
+  `a3f0a4a` and `f14d847` added per-cell terminal colors, cursor drawing,
+  scrollback controls, broader keyboard input and matching light/dark shell,
+  panel and terminal palettes. The no-folder Explorer collapses to a narrow rail.
 - `scripts/test-terminal-ui.sh` uses disposable application state, real X11
   input, and a resized window. It verifies the dock, row canvases, 80×6
   session geometry, and shell input. The captured shell output reports
   `stty size` as `6 80`. Graphical builds pass in reference and self-hosted
   compiler modes. Styled cells, cursor, full keyboard protocol, scrollback,
-  selection, and redraw benchmark remain M12.2 work.
+  selection and redraw benchmark remain M12.2 work. The follow-on graphical
+  terminal smoke and headless tests passed; physical desktop review remains.
+
+### M9.1 — identical-range suffix snapshot reuse (in verification)
+
+- Materia `736b3241a`. UIKit's guarded ASCII edit path now compares old and new row text after an
+  offset-shifting edit. It retains a row revision only when its source range,
+  bytes and bounds agree, allowing immutable glyph snapshots to survive a
+  repeated-run insertion or deletion without exposing stale source offsets.
+  Rows whose text changes still receive a fresh revision.
+- The native text-engine regression first failed against the old invalidation
+  rule and then passed with the new rule. The real 1 MiB varied-key benchmark
+  delivered 30/30 frames: p50 43.84 ms, p95 52.70 ms, max 52.85 ms (artifacts
+  `/tmp/exosuit-m9-row-after`). The same fixture before this change measured
+  p50 39.89 ms, p95 53.26 ms, max 67.51 ms. Both p95 values exceed the 50 ms
+  gate, so performance acceptance is still open. This does not complete strict
+  changed-row display-list invalidation.
+- The native `nativekit_ui_text_engine` test and real graphical decoration
+  smoke both exit 0. The next M9.1 step is to trace row-level paint invalidation
+  and stop republishing the whole viewport when only one wrapped row changes.
 
 ### M12.1 — headless terminal session (initial Linux slice)
 
