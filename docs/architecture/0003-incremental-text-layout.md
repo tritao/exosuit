@@ -1,7 +1,31 @@
 # ADR 0003: Indexed edit-range text layout
 
-Status: proposed, 2026-10-01. The edit-range API boundary is implemented;
-composite snapshots remain experimental.
+Status: partially implemented, 2026-10-01. A guarded ASCII reuse path is
+active; indexed composite snapshots remain experimental.
+
+## Implemented slice
+
+Skribidi now accepts a bounded lowercase ASCII insertion, deletion, or
+replacement when the existing layout has one LTR run, one glyph per codepoint,
+and simple glyph positions. It reshapes a 16-codepoint context, verifies
+unchanged glyph and text-property guards at both seams, reuses the shaped
+prefix and suffix, and runs native line layout on one materialized generation.
+UIKit serves rendering, carets, hit tests, and selections from that same
+generation. Unsupported edits use the existing complete-layout path. This
+avoids whole-paragraph decoding, itemization, and shaping for the measured
+case, though copying the shaped arrays and reflowing lines still cost O(n).
+
+Whole-line background decorations now query visible row rectangles directly
+from UIKit's retained line index. This avoids per-grapheme caret geometry for
+the 1 MiB line; other decorations continue to use selection-range geometry.
+The edit API locates its UTF-8 byte range with constant extra memory.
+
+The real 1 MiB varied-key fixture delivered 30 input frames at p50 37.66 ms,
+p95 41.67 ms, and max 43.44 ms, below its 50 ms typing budget. The isolated
+native differential probe checks repeated edits, glyphs, line breaks and
+sampled carets against fresh layouts. This supports the narrow ASCII path,
+not general incremental Unicode layout. Strict changed-row invalidation and
+the broader M9.1 acceptance gate remain open.
 
 ## Context
 
@@ -94,6 +118,7 @@ Do not activate pieces through only the glyph-render path.
    checks pass. Measure delivered input frames, p50/p95 and fallback rate;
    accept M9.1's typing budget only when p95 is below 50 ms.
 
-The current probe timings cover only local shaping, piece splicing, and index
-access. They exclude row geometry, UIKit event dispatch, rendering, and
-publication. The 50 ms goal remains open.
+The original probe timings cover only local shaping, piece splicing, and index
+access. The later real-window benchmark above includes UIKit dispatch,
+rendering, and publication for the guarded ASCII case. General incremental
+Unicode geometry and changed-row publication remain open.

@@ -866,6 +866,178 @@ static int run_mutable_insert_delete(skb_temp_alloc_t *temp,
     return valid && completed == edits;
 }
 
+static int run_native_ascii_edit(skb_temp_alloc_t *temp,
+                                 const skb_layout_params_t *base_params, int length) {
+    const skb_attribute_t attributes[] = {
+        skb_attribute_make_font_size(15.f),
+        skb_attribute_make_text_wrap(SKB_WRAP_WORD_CHAR),
+    };
+    skb_layout_params_t params = *base_params;
+    params.layout_width = 200.f;
+    params.layout_attributes = SKB_ATTRIBUTE_SET_FROM_STATIC_ARRAY(attributes);
+    char *text = malloc((size_t)length + 32);
+    if (!text) return 0;
+    memset(text, 'a', (size_t)length);
+    text[length] = 0;
+    skb_layout_t *edited = skb_layout_create_utf8(temp, &params, text, -1,
+                                                    (skb_attribute_set_t){0});
+    int valid = edited != NULL;
+    double elapsed = 0.;
+    for (int edit = 0; edit < 30 && valid; ++edit) {
+        const int position = length / 2 + edit / 2;
+        int start = position, end = position;
+        const char letter = (char)('b' + (edit / 2) % 24);
+        const char replacement[] = {letter, 0};
+        const char *inserted = replacement;
+        if (edit % 2) {
+            end = position + 1;
+            inserted = "";
+            memmove(text + position, text + position + 1,
+                    (size_t)(length - position));
+            --length;
+        } else {
+            memmove(text + position + 1, text + position,
+                    (size_t)(length - position + 1));
+            text[position] = letter;
+            ++length;
+        }
+        const clock_t begin = clock();
+        valid = skb_layout_try_edit_ascii(edited, temp, start, end, inserted, -1);
+        if (!valid) printf("native ASCII rejected edit %d\n", edit);
+        elapsed += (double)(clock() - begin) * 1000. / CLOCKS_PER_SEC;
+        skb_layout_t *fresh = skb_layout_create_utf8(temp, &params, text, -1,
+                                                       (skb_attribute_set_t){0});
+        valid &= fresh && skb_layout_get_text_count(edited) == length &&
+                 skb_layout_get_lines_count(edited) == skb_layout_get_lines_count(fresh);
+        if (!valid) printf("native ASCII count: text %d/%d lines %d/%d\n",
+                           skb_layout_get_text_count(edited), length,
+                           skb_layout_get_lines_count(edited),
+                           fresh ? skb_layout_get_lines_count(fresh) : -1);
+        if (valid) {
+            const skb_layout_line_t *a = skb_layout_get_lines(edited);
+            const skb_layout_line_t *b = skb_layout_get_lines(fresh);
+            for (int row = 0; row < skb_layout_get_lines_count(fresh); ++row)
+                if (a[row].text_range.start != b[row].text_range.start ||
+                    a[row].text_range.end != b[row].text_range.end ||
+                    fabsf(a[row].baseline - b[row].baseline) > 0.001f ||
+                    fabsf(a[row].bounds.width - b[row].bounds.width) > 0.001f)
+                    { valid = 0; printf("native ASCII row %d mismatch %d:%d vs %d:%d baseline %.3f/%.3f width %.3f/%.3f\n", row,
+                        a[row].text_range.start, a[row].text_range.end,
+                        b[row].text_range.start, b[row].text_range.end,
+                        a[row].baseline, b[row].baseline,
+                        a[row].bounds.width, b[row].bounds.width); break; }
+            const skb_glyph_t *ag = skb_layout_get_glyphs(edited);
+            const skb_glyph_t *bg = skb_layout_get_glyphs(fresh);
+            valid &= skb_layout_get_glyphs_count(edited) ==
+                     skb_layout_get_glyphs_count(fresh);
+            for (int index = 0; index < length && valid; ++index)
+                if (ag[index].gid != bg[index].gid ||
+                    fabsf(ag[index].advance_x - bg[index].advance_x) > 0.001f ||
+                    fabsf(ag[index].offset_x - bg[index].offset_x) > 0.001f ||
+                    fabsf(ag[index].offset_y - bg[index].offset_y) > 0.001f)
+                    { valid = 0; printf("native ASCII glyph %d mismatch gid %u/%u advance %.3f/%.3f pos %.3f,%.3f/%.3f,%.3f\n", index,
+                        ag[index].gid, bg[index].gid, ag[index].advance_x, bg[index].advance_x,
+                        ag[index].offset_x, ag[index].offset_y, bg[index].offset_x, bg[index].offset_y); break; }
+            for (int affinity = 0; affinity < 2 && valid; ++affinity)
+                for (int offset = position - 2; offset <= position + 2 && valid; ++offset) {
+                    const skb_text_position_t pos = {offset, affinity};
+                    const skb_caret_info_t ca = skb_layout_get_caret_info_at(edited, pos);
+                    const skb_caret_info_t cb = skb_layout_get_caret_info_at(fresh, pos);
+                    if (fabsf(ca.x - cb.x) > 0.001f ||
+                        fabsf(ca.y - cb.y) > 0.001f ||
+                        fabsf(ca.ascender - cb.ascender) > 0.001f ||
+                        fabsf(ca.descender - cb.descender) > 0.001f)
+                        valid = 0;
+                }
+        }
+        skb_layout_destroy(fresh);
+        if (!valid)
+            printf("native ASCII layout mismatch after edit %d\n", edit);
+    }
+    printf("native ASCII %d-codepoint edit: 30 updates %.3f ms mean CPU, %s\n",
+           length, elapsed / 30., valid ? "valid" : "FAILED");
+    skb_layout_destroy(edited);
+    free(text);
+    return valid;
+}
+
+static int run_native_ascii_sweep(skb_temp_alloc_t *temp,
+                                  const skb_layout_params_t *base_params) {
+    const skb_attribute_t attributes[] = {
+        skb_attribute_make_font_size(15.f),
+        skb_attribute_make_text_wrap(SKB_WRAP_WORD_CHAR),
+    };
+    skb_layout_params_t params = *base_params;
+    params.layout_width = 180.f;
+    params.layout_attributes = SKB_ATTRIBUTE_SET_FROM_STATIC_ARRAY(attributes);
+    uint32_t state = 0x7a31e521u;
+    int accepted = 0, rejected = 0, equal = 1;
+    for (int sample = 0; sample < 240 && equal; ++sample) {
+        char before[320], after[320];
+        for (int i = 0; i < 256; ++i) {
+            state = state * 1664525u + 1013904223u;
+            before[i] = (state & 15u) ? 'a' : "bcdefil"[(state >> 16) % 7];
+        }
+        before[256] = 0;
+        skb_layout_t *edited = skb_layout_create_utf8(temp, &params, before, -1,
+                                                        (skb_attribute_set_t){0});
+        const int position = 16 + sample % 224;
+        const int kind = sample % 3;
+        const int old_end = position + (kind == 0 ? 0 : 1);
+        const char *replacement = kind == 2 ? "" : "b";
+        memcpy(after, before, (size_t)position);
+        int next = position;
+        if (kind != 2) after[next++] = 'b';
+        memcpy(after + next, before + old_end,
+               (size_t)(256 - old_end + 1));
+        const int count = 256 + (kind == 0 ? 1 : kind == 2 ? -1 : 0);
+        if (skb_layout_try_edit_ascii(edited, temp, position, old_end,
+                                       replacement, -1)) {
+            ++accepted;
+            skb_layout_t *fresh = skb_layout_create_utf8(temp, &params, after, -1,
+                                                           (skb_attribute_set_t){0});
+            equal = fresh && skb_layout_get_text_count(edited) == count &&
+                    skb_layout_get_glyphs_count(edited) ==
+                    skb_layout_get_glyphs_count(fresh) &&
+                    skb_layout_get_lines_count(edited) ==
+                    skb_layout_get_lines_count(fresh);
+            if (equal) {
+                const skb_glyph_t *a = skb_layout_get_glyphs(edited);
+                const skb_glyph_t *b = skb_layout_get_glyphs(fresh);
+                for (int i = 0; i < count && equal; ++i)
+                    if (a[i].gid != b[i].gid ||
+                        fabsf(a[i].advance_x - b[i].advance_x) > 0.001f ||
+                        fabsf(a[i].offset_x - b[i].offset_x) > 0.001f ||
+                        fabsf(a[i].offset_y - b[i].offset_y) > 0.001f)
+                        equal = 0;
+                const skb_layout_line_t *al = skb_layout_get_lines(edited);
+                const skb_layout_line_t *bl = skb_layout_get_lines(fresh);
+                for (int i = 0; i < skb_layout_get_lines_count(fresh) && equal; ++i)
+                    if (al[i].text_range.start != bl[i].text_range.start ||
+                        al[i].text_range.end != bl[i].text_range.end ||
+                        fabsf(al[i].baseline - bl[i].baseline) > 0.001f)
+                        equal = 0;
+            }
+            skb_layout_destroy(fresh);
+            if (!equal) printf("native ASCII sweep mismatch at sample %d\n", sample);
+        } else {
+            ++rejected;
+        }
+        skb_layout_destroy(edited);
+    }
+    skb_layout_t *unsupported = skb_layout_create_utf8(temp, &params, "a a", -1,
+                                                         (skb_attribute_set_t){0});
+    if (unsupported && !skb_layout_try_edit_ascii(unsupported, temp, 1, 2, "b", -1) &&
+        skb_layout_get_text_count(unsupported) == 3)
+        ++rejected;
+    else
+        equal = 0;
+    skb_layout_destroy(unsupported);
+    printf("native ASCII sweep: %d accepted, %d rejected, %s\n",
+           accepted, rejected, equal ? "valid" : "FAILED");
+    return equal && accepted > 0 && rejected > 0;
+}
+
 int main(void) {
     skb_temp_alloc_t *temp = skb_temp_alloc_create(1024);
     skb_font_collection_t *fonts = skb_font_collection_create();
@@ -882,6 +1054,12 @@ int main(void) {
         .font_collection = fonts, .layout_width = 1000000.f,
         .layout_attributes = SKB_ATTRIBUTE_SET_FROM_STATIC_ARRAY(attributes),
     };
+    if (getenv("SKB_NATIVE_ONLY")) {
+        int native_ok = run_native_ascii_edit(temp, &params, 4096);
+        skb_font_collection_destroy(fonts);
+        skb_temp_alloc_destroy(temp);
+        return native_ok ? 0 : 1;
+    }
     const uint32_t latin[] = {'o','f','f','i','c','e',' ','A','V',' ','f','i',' ','w','a','v','e',' '};
     const uint32_t arabic[] = {0x0644,0x0627,0x0645,0x0020,0x0633,0x0644,0x0627,0x0645};
     const uint32_t hebrew[] = {'a','b',' ',0x05e9,0x05dc,0x05d5,0x05dd,' ', 'c','d',' '};
@@ -943,6 +1121,9 @@ int main(void) {
     passed &= run_mutable_smoke(temp, &params, 1024 * 1024, 1);
     passed &= run_mutable_insert_delete(temp, &params, 4096);
     passed &= run_mutable_insert_delete(temp, &params, 1024 * 1024);
+    passed &= run_native_ascii_edit(temp, &params, 4096);
+    passed &= run_native_ascii_edit(temp, &params, 1024 * 1024);
+    passed &= run_native_ascii_sweep(temp, &params);
     passed &= mixed_passed == mixed_total;
     skb_font_collection_destroy(fonts);
     skb_temp_alloc_destroy(temp);

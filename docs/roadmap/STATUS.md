@@ -16,10 +16,11 @@ Last updated: 2026-10-01.
   browser stage is wired into composed CI through `EXOSUIT_CI_WEB=1`; absent
   toolchains remain explicitly pending.
 - Active task: **M9.1**, styled text and decorations on UIKit.
-- Exact resume: implement the composite layout/render snapshot over indexed
-  pieces and retained row geometry, then test it in UIKit on the real 1 MiB
-  typing fixture. The edit-range API and Haxe call path are wired but still
-  use complete native layout rebuilds.
+- Exact resume: finish M9.1 strict changed-row invalidation. The guarded
+  lowercase ASCII native edit path and visible-line background geometry meet
+  the real 1 MiB varied-key typing budget; Unicode and unsupported layouts
+  still use complete native layout rebuilds. Broaden layout reuse only with
+  differential geometry evidence.
   Preserve M8 and both browser gates.
 - All further graphical tests must use disposable PRAGTICAL_PORTABLE state.
   IME, physical mixed-DPI transitions, Windows and macOS remain unclaimed.
@@ -62,6 +63,34 @@ Last updated: 2026-10-01.
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M9.1 — guarded ASCII layout reuse and visible-line backgrounds (verified slice)
+
+- Commits: Skribidi `7b10d4821`; Materia `baff45a53`. The Exosuit commit
+  containing this record also pins the Materia revision in `release.lock`.
+- Skribidi's guarded edit operation reshapes a 16-codepoint window for short
+  lowercase ASCII edits in simple LTR one-glyph-per-codepoint layouts. It
+  checks both seams, reuses old prefix/suffix shaping, and materializes one
+  native layout generation for rendering and geometry. Unsupported cases
+  retain complete-layout fallback. UIKit records fast-path and fallback counts.
+- UIKit exposes retained visible-line rectangles to whole-line background
+  decorations, removing per-grapheme caret work from that paint path. Its
+  edit-range UTF-8 lookup now uses constant extra memory.
+- The real 1 MiB varied-key benchmark delivered 30 input frames: p50
+  **37.66 ms**, p95 **41.67 ms**, max **43.44 ms**, under the **50 ms** budget.
+  Artifacts: `/tmp/exosuit-m9-byte-range-typing` and `.log`. The preceding
+  traced run saw 60 guarded edits and no fallback; without the byte-range
+  change, its p95 was 63.41 ms. These runs are separate and should not be
+  combined as one sample.
+- Native ABI/text-engine tests and the UIKit Haxe framework smoke pass.
+  The full differential probe passed 240 randomized accepted cases plus
+  repeated 4,096-codepoint and 1 MiB edits against fresh native layouts.
+  The real graphical decoration smoke passes. Strict changed-row
+  invalidation remains open, so M9.1 is still active.
+- Resume with changed-row invalidation: trace retained dirty-row publication
+  during an edit that affects one wrapped row, then make rendering and paint
+  publish only the affected visible rows while retaining correct full-query
+  geometry. Keep unsupported Unicode on the complete-layout path.
 
 ### M9.1 — multi-caret keyboard navigation (verified slice)
 
