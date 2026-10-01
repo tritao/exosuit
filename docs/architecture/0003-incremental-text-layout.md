@@ -73,6 +73,14 @@ Skribidi layout path. The old full-update path handles chunk repartitioning
 and other nonlocal changes. This preserves one authoritative geometry
 generation while the composite snapshot is built and verified.
 
+The implementation boundary needs one more decision before activating pieces:
+UIKit currently calls `skb_layout_t` directly for line-range glyph iteration,
+carets, hit tests, selections, and navigation. A renderer-only composition
+would leave those answers on a different geometry source. The composite
+geometry can be owned inside Skribidi or behind a complete UIKit adapter, but
+it must supply all of those operations from the same row index and generation.
+Do not activate pieces through only the glyph-render path.
+
 ## Verification before activation
 
 1. Extend the one-codepoint replacement/insertion/deletion and repeated-edit

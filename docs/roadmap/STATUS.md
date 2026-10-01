@@ -102,7 +102,12 @@ Last updated: 2026-10-01.
   implementation currently splices text and rebuilds one Skribidi layout, so
   all rendering and geometry still share one generation. The C ABI and native
   text-engine tests pass; `check-hxi.sh` and the Haxe framework smoke pass.
-  This validates the edit boundary, not incremental layout or the 50 ms gate.
+  A native Unicode replacement/insertion/deletion regression compares its
+  caret geometry with fresh layouts. The graphical app builds, and the real
+  1 MiB varied-key fixture delivered 30 input frames: p50 **248.34 ms**, p95
+  **268.12 ms**. Artifacts are in `/tmp/exosuit-m9-edit-range-typing` and
+  `/tmp/exosuit-m9-edit-range-typing.log`. This validates the edit boundary,
+  not incremental layout or the 50 ms gate.
 
 - An opt-in temporary Skribidi phase probe on the real 1 MiB typing fixture
   measured 62 builds: median UTF-8 decode/text-property setup **41.5 ms**,
