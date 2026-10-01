@@ -11,8 +11,11 @@ Last updated: 2026-10-01.
   this is not a pass of every project and M8.1 is not yet complete.
   The reference `./scripts/build.sh` now exits 0 after Haxeon `3606bd7c`.
   The checked-in self-hosted compiler is stale and currently rejects UIKit's
-  compound shift assignment; refresh it through bootstrap convergence.
-- Exact resume: finish reference headless verification, run Haxeon's
+  compound shift assignment. Bootstrap now passes the null-array inference
+  failure after Haxeon `5f0b7671`, then fails at an unchecked nullable lookup
+  in `WasmFunctionLower.hx:1049`; correct that source and retry convergence.
+- Exact resume: reference headless verification passed. Correct the nullable
+  host lookup in `WasmFunctionLower`, rerun Haxeon's
   `./scripts/bootstrap-compiler.sh`, then test both compiler modes. Remove the
   divergent defaults and upstream-fixed directory workaround. Restore
   source-plugin embedding and remove test suppression before claiming M8.1.
@@ -45,7 +48,7 @@ Last updated: 2026-10-01.
 | M5 | Complete headlessly | Live layered configuration, owned APIs, debounced background compilation, transactional reload and editor lifecycle controls pass |
 | M6 | Complete headlessly | Bounded JSON-RPC, lifecycle/synchronization, language commands, diagnostics, restart and real Haxeon edit/diagnose/fix/build smoke pass |
 | M7 | Complete for the claimed Linux automation scope | M7.1–M7.3 pass; desktop IME, physical mixed-DPI, Windows and macOS remain explicit unclaimed follow-ons |
-| M8 | In progress | C/HXI migration `f8939de` removes native string abort; headless gating tests pass; dynamic plugin project suppressed; graphical build still hits E1005; integration/release gates pending |
+| M8 | In progress | C/HXI migration `f8939de` removes native string abort; headless gating tests pass; dynamic plugin project suppressed; reference graphical build passes; self-hosted bootstrap and integration/release gates pending |
 | M9 | Not started | Depends on M8 |
 | M10 | Not started | Depends on M8, M9.1–M9.2 |
 | M11 | Not started | Depends on M8; independent of M9/M10 |
@@ -125,6 +128,35 @@ Last updated: 2026-10-01.
   refreshed at `308231b5` (2026-09-28), before later syntax changes. Refresh and
   compare compiler modes before deciding whether another typing fix is needed.
   No self-hosted success or full M8.2 completion is claimed yet.
+
+### M8.2 — null-only local array inference (verified compiler slice)
+
+- Haxeon `5f0b7671` fixes bootstrap's `WasmCAbi.hx:90` E1009 without
+  adding annotations to the compiler application. A null-only local array,
+  including a comprehension and an alias, now receives the element type
+  required by a non-generic constructor argument before its initializer is typed.
+  Array assignability and mutation checks remain unchanged.
+- Root cause: local constraints did not visit constructors, and null-only
+  array initializers ignored later expected context. Existing call constraints
+  now also run for expression statements and unannotated initializers.
+- Registered `NullArrayContextMain` executes generated HashLink code after
+  writing a class instance into nullable array storage; it rejects incompatible
+  mutations and checks incremental/cold rejection after a constructor edit.
+  The local reference Haxe compiler accepted the independent reducer.
+- Focused regression and full Haxeon `./scripts/test.sh` exited 0, including
+  formatting, 366/366 driver cases, native/HXI/C++ package integrations,
+  differential and both Wasm gates. Log: `/tmp/haxeon-gate-null-array.log`.
+  Exosuit `./scripts/build.sh` exited 0 (`/tmp/exosuit-build-null-array.log`).
+  Reference headless gate from the preceding slice exited 0, still with the
+  explicitly suppressed dynamic-plugin test.
+- `./scripts/bootstrap-compiler.sh` exited 1. It passes the old `WasmCAbi`
+  failure and stops at `WasmFunctionLower.hx:1049` E1005: a guard checks one
+  nullable lookup result, then the body dereferences a second unchecked result.
+  The lookup writes a cache; the general type checker correctly requires
+  checking the value being consumed. Merge the call branches and check one
+  lookup result, then retry bootstrap and two-mode editor gates.
+- Pre-existing HashLink pointer and profile dump remain untouched. Bootstrap
+  has not converged; M8.1/M8.2 acceptance and GUI checks remain pending.
 
 ## Completed records
 
