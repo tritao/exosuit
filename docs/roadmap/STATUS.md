@@ -124,12 +124,29 @@ Last updated: 2026-10-01.
   window; it cannot prove that glyphs outside the window remain reusable, nor
   does it cover Unicode, bidi, carets, or line breaking. The probe lives at
   `/tmp/exosuit-shape-seam.c` and was not wired into production.
-- Exact next implementation: add an explicit edit-range shaping cache with
-  differential tests against fresh Skribidi glyphs, carets, and line breaks.
-  Reuse a suffix only after contextual and bidi equivalence is established;
-  then integrate lazy affected-row publication into UIKit and remeasure varied
-  1 MiB input. HarfBuzz's unsafe-to-concat flag alone cannot bound the edit
-  window for the measured font. M9.1 remains unaccepted.
+- A repeatable C probe in `experiments/skribidi_edit_window/` now constructs a
+  cached-prefix / newly shaped window / cached-suffix candidate and compares
+  cluster ranges, glyph IDs, advances, and vertical offsets to fresh Skribidi
+  layouts. It tests substitution, insertion, deletion, Latin ligatures, Arabic
+  joining, mixed Hebrew/Latin, emoji ZWJ, and 36 extra edit positions. Edges
+  align to old cluster boundaries; unchanged four-codepoint edge guards reject
+  every mismatching short window in the sampled cases. Arabic still mismatches
+  at a 130-codepoint window and falls back. The full-window oracle passes in
+  all cases. The probe build and executable exit 0; output is in
+  `/tmp/exosuit-edit-window-results.txt`.
+- This probe is not a correctness proof or production implementation. It
+  scans and sorts the cached clusters, omits visual-order/caret/wrap comparison,
+  and has no general bound for Arabic joining or bidi changes. Next: search
+  for false edge-guard accepts with wider randomized/script fixtures, compare
+  carets/line breaks/visual glyph positions, then design indexed cluster and
+  text-property storage with an explicit full-paragraph fallback. Do not wire
+  the cache into UIKit until those gates pass; 50 ms remains unmet.
+- Exact next implementation: extend the probe to fresh Skribidi carets, line
+  breaks, visual glyph positions, and randomized contextual/bidi edits, then
+  develop indexed edit-range shaping with a safe fallback. Only after those
+  gates should lazy affected-row publication enter UIKit and the varied 1 MiB
+  input be remeasured. HarfBuzz's unsafe-to-concat flag alone cannot bound the
+  edit window for the measured font. M9.1 remains unaccepted.
 
 ### M9.1 — visible glyph publication and long-line edit profile (verified slice)
 
