@@ -13,6 +13,134 @@ typedef struct {
     int offset;
 } signature_t;
 
+typedef struct {
+    int start, end;
+    uint32_t gid;
+    uint8_t direction, bidi_level;
+    float x, y;
+} visual_t;
+
+typedef struct {
+    visual_t *out;
+    int count, capacity, begin, end, displacement, valid;
+    float x_shift, advance;
+} visual_capture_t;
+
+static int accepted_short_windows = 0;
+static int rejected_short_windows = 0;
+
+static bool capture_visual_glyph(const skb_layout_render_glyph_t *glyph, void *opaque) {
+    visual_capture_t *capture = opaque;
+    if (glyph->text_range.end <= capture->begin ||
+        glyph->text_range.start >= capture->end) return true;
+    if (glyph->text_range.start < capture->begin ||
+        glyph->text_range.end > capture->end || capture->count >= capture->capacity) {
+        capture->valid = 0;
+        return false;
+    }
+    capture->out[capture->count++] = (visual_t){
+        glyph->text_range.start + capture->displacement,
+        glyph->text_range.end + capture->displacement,
+        glyph->glyph_id, glyph->direction, glyph->bidi_level,
+        glyph->offset_x + capture->x_shift, glyph->offset_y,
+    };
+    capture->advance += glyph->advance_x;
+    return true;
+}
+
+static int append_visual(visual_capture_t *capture, const skb_layout_t *layout,
+                         int begin, int end, int displacement, float x_shift) {
+    capture->begin = begin;
+    capture->end = end;
+    capture->displacement = displacement;
+    capture->x_shift = x_shift;
+    capture->advance = 0.f;
+    return skb_layout_iterate_render_glyphs(layout, capture_visual_glyph, capture) &&
+           capture->valid;
+}
+
+static int visual_equal(const skb_layout_t *old, const skb_layout_t *window,
+                        const skb_layout_t *fresh, int start, int old_end,
+                        int new_end, int old_length, int delta) {
+    const int capacity = skb_layout_get_glyphs_count(old) +
+                         skb_layout_get_glyphs_count(window) + 1;
+    visual_t *candidate = malloc((size_t)capacity * sizeof(*candidate));
+    visual_t *expected = malloc((size_t)(skb_layout_get_glyphs_count(fresh) + 1) *
+                                sizeof(*expected));
+    if (!candidate || !expected) {
+        free(candidate);
+        free(expected);
+        return -1;
+    }
+    visual_capture_t a = {.out = candidate, .capacity = capacity, .valid = 1};
+    visual_capture_t b = {.out = expected,
+        .capacity = skb_layout_get_glyphs_count(fresh) + 1, .valid = 1};
+    int intact = append_visual(&a, old, 0, start, 0, 0.f);
+    const float prefix_width = a.advance;
+    intact &= append_visual(&a, window, 0, new_end - start, start, prefix_width);
+    const float new_window_width = a.advance;
+    visual_t *unused = malloc((size_t)(skb_layout_get_glyphs_count(old) + 1) * sizeof(*unused));
+    visual_capture_t measure = {.out = unused,
+        .capacity = skb_layout_get_glyphs_count(old) + 1, .valid = unused != NULL};
+    if (!unused) {
+        free(candidate);
+        free(expected);
+        return -1;
+    }
+    intact &= append_visual(&measure, old, start, old_end, 0, 0.f);
+    const float suffix_shift = new_window_width - measure.advance;
+    free(unused);
+    intact &= append_visual(&a, old, old_end, old_length, delta, suffix_shift);
+    intact &= append_visual(&b, fresh, 0, old_length + delta, 0, 0.f);
+    int equal = intact && a.count == b.count;
+    for (int i = 0; i < a.count && equal; ++i) {
+        const visual_t x = a.out[i], y = b.out[i];
+        if (x.start != y.start || x.end != y.end || x.gid != y.gid ||
+            x.direction != y.direction || x.bidi_level != y.bidi_level ||
+            fabsf(x.x - y.x) > 0.02f || fabsf(x.y - y.y) > 0.02f) equal = 0;
+    }
+    free(candidate);
+    free(expected);
+    return equal;
+}
+
+static int has_rtl_run(const skb_layout_t *layout) {
+    const skb_layout_run_t *runs = skb_layout_get_layout_runs(layout);
+    for (int i = 0; i < skb_layout_get_layout_runs_count(layout); ++i)
+        if (runs[i].bidi_level & 1) return 1;
+    return 0;
+}
+
+static int text_properties_equal(const skb_layout_t *old, const skb_layout_t *window,
+                                 const skb_layout_t *fresh, int start,
+                                 int new_end, int old_length, int delta) {
+    const skb_text_property_t *a = skb_layout_get_text_properties(old);
+    const skb_text_property_t *b = skb_layout_get_text_properties(window);
+    const skb_text_property_t *c = skb_layout_get_text_properties(fresh);
+    for (int i = 0; i < old_length + delta; ++i) {
+        const skb_text_property_t value = i < start ? a[i] :
+            i < new_end ? b[i - start] : a[i - delta];
+        if (value.flags != c[i].flags || value.script != c[i].script) return 0;
+    }
+    return 1;
+}
+
+static int seam_properties_match(const skb_layout_t *old, const skb_layout_t *window,
+                                 int start, int edit, int deleted, int old_end, int delta) {
+    const skb_text_property_t *a = skb_layout_get_text_properties(old);
+    const skb_text_property_t *b = skb_layout_get_text_properties(window);
+    for (int i = start; i < start + 4 && i < edit; ++i) {
+        const skb_text_property_t x = a[i], y = b[i - start];
+        if (x.flags != y.flags || x.script != y.script) return 0;
+    }
+    for (int i = old_end - 4; i < old_end; ++i) {
+        if (i < edit + deleted || i < start) continue;
+        const skb_text_property_t x = a[i], y = b[i + delta - start];
+        if (x.flags != y.flags || x.script != y.script) return 0;
+    }
+    return 1;
+}
+
 static int signature_order(const void *left, const void *right) {
     const signature_t *a = left, *b = right;
     return (a->offset > b->offset) - (a->offset < b->offset);
@@ -159,15 +287,26 @@ static int run_case(const char *name, const uint32_t *pattern, int pattern_count
             append_range(candidate, &count, old, old_end, length, delta);
         qsort(candidate, (size_t)count, sizeof(*candidate), signature_order);
         int first_mismatch = -1;
-        const int guard = intact && seam_guard_matches(old, window, start, edit,
-                                                       deleted, old_end, delta, length);
+        const int guard = intact && !has_rtl_run(old) && !has_rtl_run(window) &&
+            seam_guard_matches(old, window, start, edit, deleted, old_end, delta, length) &&
+            seam_properties_match(old, window, start, edit, deleted, old_end, delta);
         const int equal = intact ? same_signatures(candidate, count, fresh, &first_mismatch) : 0;
-        if (verbose || (guard && equal != 1))
-            printf("%-13s edit=%-5d radius=%-5d window=%-5d %s guard=%s first=%d\n",
+        const int visual = intact ? visual_equal(old, window, fresh, start, old_end,
+                                                new_end, length, delta) : 0;
+        const int properties = text_properties_equal(old, window, fresh, start,
+                                                     new_end, length, delta);
+        if (verbose || (guard && (equal != 1 || visual != 1 || !properties)))
+            printf("%-13s edit=%-5d radius=%-5d window=%-5d %s visual=%s props=%s guard=%s first=%d\n",
                    name, edit, radii[r], new_end - start,
                    equal == 1 ? "equal" : intact ? "different" : "split-cluster",
+                   visual == 1 ? "equal" : "different",
+                   properties ? "equal" : "different",
                    guard ? "accept" : "widen", first_mismatch);
-        if (guard && equal != 1) unsafe_accept = 1;
+        if (guard && (equal != 1 || visual != 1 || !properties)) unsafe_accept = 1;
+        if (r < 3) {
+            accepted_short_windows += guard != 0;
+            rejected_short_windows += guard == 0;
+        }
         if (r == 3 && equal == 1) complete_passed = 1;
         free(candidate);
         skb_layout_destroy(window);
@@ -228,6 +367,30 @@ int main(void) {
     printf("sweep: %d/%d positions passed full-window and guard checks\n",
            sweep_passed, sweep_total);
     passed &= sweep_passed == sweep_total;
+    const uint32_t alphabet[] = {'a','b','f','i',' ',0x0644,0x0627,0x0645,
+                                  0x05e9,0x05dc,0x1f469,0x200d,0x1f4bb};
+    uint32_t mixed[128];
+    uint32_t state = 0x91b7e11u;
+    int mixed_passed = 0, mixed_total = 0;
+    for (int sample = 0; sample < 32; ++sample) {
+        for (int i = 0; i < 128; ++i) {
+            state = state * 1664525u + 1013904223u;
+            mixed[i] = alphabet[(state >> 16) % (sizeof(alphabet) / sizeof(alphabet[0]))];
+        }
+        const int position = 32 + sample * 2;
+        mixed_total += 3;
+        mixed_passed += run_case("mixed replace", mixed, 128, 1, 1, w, 1,
+                                 position, 0, temp, &params);
+        mixed_passed += run_case("mixed insert", mixed, 128, 1, 0, w, 1,
+                                 position, 0, temp, &params);
+        mixed_passed += run_case("mixed delete", mixed, 128, 1, 1, NULL, 0,
+                                 position, 0, temp, &params);
+    }
+    printf("mixed sweep: %d/%d cases passed full-window and guard checks\n",
+           mixed_passed, mixed_total);
+    printf("short windows: %d accepted, %d rejected by cluster/edge/bidi gates\n",
+           accepted_short_windows, rejected_short_windows);
+    passed &= mixed_passed == mixed_total;
     skb_font_collection_destroy(fonts);
     skb_temp_alloc_destroy(temp);
     return passed ? 0 : 1;

@@ -16,9 +16,9 @@ Last updated: 2026-10-01.
   browser stage is wired into composed CI through `EXOSUIT_CI_WEB=1`; absent
   toolchains remain explicitly pending.
 - Active task: **M9.1**, styled text and decorations on UIKit.
-- Exact resume: establish a correct edit-range shaping cache and compare its
-  glyphs/carets/wraps with fresh Skribidi layouts, then finish affected-row
-  invalidation. Preserve M8 and both browser gates.
+- Exact resume: extend the isolated edit-window probe to caret and wrapped-line
+  geometry, then design indexed storage and a proved shaping fallback before
+  UIKit integration. Preserve M8 and both browser gates.
 - All further graphical tests must use disposable PRAGTICAL_PORTABLE state.
   IME, physical mixed-DPI transitions, Windows and macOS remain unclaimed.
 - HEADs at planning: exosuit `ae2f260` (`haxeon-uikit-port`). Materia `main` is at
@@ -127,22 +127,30 @@ Last updated: 2026-10-01.
 - A repeatable C probe in `experiments/skribidi_edit_window/` now constructs a
   cached-prefix / newly shaped window / cached-suffix candidate and compares
   cluster ranges, glyph IDs, advances, and vertical offsets to fresh Skribidi
-  layouts. It tests substitution, insertion, deletion, Latin ligatures, Arabic
-  joining, mixed Hebrew/Latin, emoji ZWJ, and 36 extra edit positions. Edges
-  align to old cluster boundaries; unchanged four-codepoint edge guards reject
-  every mismatching short window in the sampled cases. Arabic still mismatches
-  at a 130-codepoint window and falls back. The full-window oracle passes in
-  all cases. The probe build and executable exit 0; output is in
+  layouts. It also compares per-codepoint text properties and glyph
+  IDs/ranges/directions/positions in one-line visual render order.
+  It tests substitution, insertion, deletion, Latin ligatures, Arabic joining,
+  mixed Hebrew/Latin, emoji ZWJ, 36 extra edit positions, and 96 deterministic
+  mixed-script edits. Edges align to old cluster boundaries; unchanged
+  four-codepoint glyph/property guards reject contextual seam changes. Matching Hebrew/Latin
+  cluster signatures still produced a different visual order, so any RTL run
+  in the old paragraph or new window conservatively rejects short reuse.
+  Arabic still mismatches at a 130-codepoint window and falls back.
+  Glyph-equivalent Latin/emoji windows also changed text properties at seams;
+  the property guard rejects them. The gates accepted 42 short windows and
+  rejected 381; all accepted windows matched the sampled fresh-layout glyphs,
+  properties, and one-line visual positions. The full-window oracle
+  passes in all cases. The probe build and executable exit 0; output is in
   `/tmp/exosuit-edit-window-results.txt`.
 - This probe is not a correctness proof or production implementation. It
-  scans and sorts the cached clusters, omits visual-order/caret/wrap comparison,
+  scans and sorts the cached clusters, omits caret and wrapped-line comparison,
   and has no general bound for Arabic joining or bidi changes. Next: search
   for false edge-guard accepts with wider randomized/script fixtures, compare
-  carets/line breaks/visual glyph positions, then design indexed cluster and
+  carets and line breaks, then design indexed cluster and
   text-property storage with an explicit full-paragraph fallback. Do not wire
   the cache into UIKit until those gates pass; 50 ms remains unmet.
-- Exact next implementation: extend the probe to fresh Skribidi carets, line
-  breaks, visual glyph positions, and randomized contextual/bidi edits, then
+- Exact next implementation: extend the probe to fresh Skribidi carets and
+  wrapped lines with broader randomized contextual/bidi edits, then
   develop indexed edit-range shaping with a safe fallback. Only after those
   gates should lazy affected-row publication enter UIKit and the varied 1 MiB
   input be remeasured. HarfBuzz's unsafe-to-concat flag alone cannot bound the
