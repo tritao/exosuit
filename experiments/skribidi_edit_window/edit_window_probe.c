@@ -920,7 +920,15 @@ static int run_native_ascii_edit(skb_temp_alloc_t *temp,
                 if (a[row].text_range.start != b[row].text_range.start ||
                     a[row].text_range.end != b[row].text_range.end ||
                     fabsf(a[row].baseline - b[row].baseline) > 0.001f ||
-                    fabsf(a[row].bounds.width - b[row].bounds.width) > 0.001f)
+                    fabsf(a[row].bounds.width - b[row].bounds.width) > 0.001f ||
+                    fabsf(a[row].culling_bounds.x - b[row].culling_bounds.x) > 0.001f ||
+                    fabsf(a[row].culling_bounds.y - b[row].culling_bounds.y) > 0.001f ||
+                    fabsf(a[row].culling_bounds.width - b[row].culling_bounds.width) > 0.001f ||
+                    fabsf(a[row].culling_bounds.height - b[row].culling_bounds.height) > 0.001f ||
+                    fabsf(a[row].common_glyph_bounds.x - b[row].common_glyph_bounds.x) > 0.001f ||
+                    fabsf(a[row].common_glyph_bounds.y - b[row].common_glyph_bounds.y) > 0.001f ||
+                    fabsf(a[row].common_glyph_bounds.width - b[row].common_glyph_bounds.width) > 0.001f ||
+                    fabsf(a[row].common_glyph_bounds.height - b[row].common_glyph_bounds.height) > 0.001f)
                     { valid = 0; printf("native ASCII row %d mismatch %d:%d vs %d:%d baseline %.3f/%.3f width %.3f/%.3f\n", row,
                         a[row].text_range.start, a[row].text_range.end,
                         b[row].text_range.start, b[row].text_range.end,

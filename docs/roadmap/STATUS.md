@@ -64,6 +64,25 @@ Last updated: 2026-10-01.
 
 ## Implementation records
 
+### M9.1 — guarded ASCII prefix culling reuse (verified native and UI slice)
+
+- Skribidi commit `bc8ae4ead`; Materia pin `f5d8ac04d`; the accompanying
+  Exosuit commit updates `release.lock` and the fresh-layout probe.
+- The guarded ASCII edit carries culling and common-glyph bounds for strict
+  prefix rows only when their source range, baseline, and box geometry match.
+  Changed or shifted rows still compute bounds from glyphs. The full probe
+  passes 240 accepted native ASCII edits and compares every row's culling
+  bounds with a freshly shaped layout, including the 1 MiB insertion/deletion
+  fixture. UIKit's native text-engine test, graphical build, and real
+  decoration pixel suite pass.
+- A temporary 300-edit native-only run measured **21.49–23.39 ms mean CPU**
+  across three runs, versus **23.74 ms** in one preceding run without this
+  change. This suggests a small gain but is not a controlled wall-clock result.
+  The real 50 ms p95 gate remains pending: unrelated compiler jobs raised
+  host load above 40 during graphical verification. Next, rerun the 1 MiB
+  varied-key fixture on an idle host, then continue reducing full-row layout
+  work if the gate remains marginal.
+
 ### M9.1 — insertion/deletion prefix-row reuse (verified slice)
 
 - Materia commit `b9f109586`; the accompanying Exosuit commit pins it in
