@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "skribidi/skb_font_collection.h"
 #include "skribidi/skb_layout.h"
 
@@ -12,6 +13,30 @@ typedef struct {
     int cluster;
     int offset;
 } signature_t;
+
+typedef struct {
+    const skb_layout_t *layout;
+    int first_cluster, count, displacement;
+} cluster_piece_t;
+
+typedef struct {
+    cluster_piece_t pieces[3];
+    int cumulative[4];
+    int piece_count, count;
+} cluster_index_t;
+
+typedef struct {
+    const skb_layout_t *layout;
+    int source_start, count;
+} property_piece_t;
+
+typedef struct {
+    property_piece_t pieces[4];
+    int cumulative[5];
+    int piece_count, count;
+} property_index_t;
+
+static int lower_cluster(const skb_layout_t *layout, int offset);
 
 typedef struct {
     int start, end;
@@ -118,6 +143,29 @@ static int has_emoji(const skb_layout_t *layout) {
     return 0;
 }
 
+static int add_property_piece(property_index_t *index, const skb_layout_t *layout,
+                              int begin, int end) {
+    if (begin == end) return 1;
+    if (begin < 0 || end > skb_layout_get_text_count(layout) ||
+        begin > end || index->piece_count == 4) return 0;
+    index->pieces[index->piece_count++] = (property_piece_t){layout, begin, end - begin};
+    index->count += end - begin;
+    index->cumulative[index->piece_count] = index->count;
+    return 1;
+}
+
+static skb_text_property_t indexed_property(const property_index_t *index, int offset) {
+    int low = 0, high = index->piece_count;
+    while (low + 1 < high) {
+        const int middle = (low + high) / 2;
+        if (index->cumulative[middle] <= offset) low = middle;
+        else high = middle;
+    }
+    const property_piece_t *piece = &index->pieces[low];
+    return skb_layout_get_text_properties(piece->layout)
+        [piece->source_start + offset - index->cumulative[low]];
+}
+
 typedef struct {
     int begin, end;
     float width;
@@ -172,19 +220,13 @@ static int caret_equal(const skb_layout_t *old, const skb_layout_t *window,
     return *first_horizontal < 0;
 }
 
-static int text_properties_equal(const skb_layout_t *old, const skb_layout_t *window,
-                                 const skb_layout_t *fresh, int start,
-                                 int new_end, int old_length, int delta,
+static int text_properties_equal(const property_index_t *candidate,
+                                 const skb_layout_t *fresh,
                                  int *first_mismatch) {
-    const skb_text_property_t *a = skb_layout_get_text_properties(old);
-    const skb_text_property_t *b = skb_layout_get_text_properties(window);
     const skb_text_property_t *c = skb_layout_get_text_properties(fresh);
-    for (int i = 0; i < old_length + delta; ++i) {
-        // The local layout marks its final codepoint as a break at an
-        // artificial text end. Retain that unchanged codepoint's old flags.
-        const skb_text_property_t value = i < start ? a[i] :
-            i == new_end - 1 && new_end < old_length + delta ? a[i - delta] :
-            i < new_end ? b[i - start] : a[i - delta];
+    if (candidate->count != skb_layout_get_text_count(fresh)) return 0;
+    for (int i = 0; i < candidate->count; ++i) {
+        const skb_text_property_t value = indexed_property(candidate, i);
         if (value.flags != c[i].flags || value.script != c[i].script) {
             *first_mismatch = i;
             return 0;
@@ -234,44 +276,81 @@ static int seam_guard_matches(const skb_layout_t *old, const skb_layout_t *windo
                               int delta, int old_length) {
     const skb_cluster_t *oc = skb_layout_get_clusters(old);
     const skb_cluster_t *wc = skb_layout_get_clusters(window);
-    const int old_count = skb_layout_get_clusters_count(old);
     const int window_count = skb_layout_get_clusters_count(window);
     int inspected_left = 0, inspected_right = 0;
-    for (int i = 0; i < old_count; ++i) {
+    for (int i = lower_cluster(old, start);
+         i < skb_layout_get_clusters_count(old) && oc[i].text_offset < start + 4; ++i) {
         const int off = oc[i].text_offset;
         const int left = off >= start && off < start + 4 && off < edit;
-        const int right = off >= old_end - 4 && off >= edit + deleted && off < old_end;
-        if (!left && !right) continue;
-        const int local_offset = off + (right ? delta : 0) - start;
-        int j = 0;
-        while (j < window_count && wc[j].text_offset < local_offset) ++j;
+        if (!left) continue;
+        const int local_offset = off - start;
+        const int j = lower_cluster(window, local_offset);
         if (j == window_count || wc[j].text_offset != local_offset ||
             !same_cluster(old, i, window, j)) return 0;
-        inspected_left += left;
-        inspected_right += right;
+        ++inspected_left;
+    }
+    for (int i = lower_cluster(old, old_end - 4);
+         i < skb_layout_get_clusters_count(old) && oc[i].text_offset < old_end; ++i) {
+        const int off = oc[i].text_offset;
+        if (off < edit + deleted) continue;
+        const int local_offset = off + delta - start;
+        const int j = lower_cluster(window, local_offset);
+        if (j == window_count || wc[j].text_offset != local_offset ||
+            !same_cluster(old, i, window, j)) return 0;
+        ++inspected_right;
     }
     return (start == 0 || inspected_left) && (old_end == old_length || inspected_right);
 }
 
-static int append_range(signature_t *out, int *count, const skb_layout_t *layout,
-                        int begin, int end, int displacement) {
+static int lower_cluster(const skb_layout_t *layout, int offset) {
     const skb_cluster_t *clusters = skb_layout_get_clusters(layout);
-    const int n = skb_layout_get_clusters_count(layout);
-    for (int i = 0; i < n; ++i) {
-        const int start = clusters[i].text_offset;
-        const int stop = start + clusters[i].text_count;
-        if (stop <= begin || start >= end) continue;
-        if (start < begin || stop > end) return 0; // seam splits a shaped cluster
-        out[(*count)++] = (signature_t){layout, i, start + displacement};
+    int low = 0, high = skb_layout_get_clusters_count(layout);
+    while (low < high) {
+        const int middle = (low + high) / 2;
+        if (clusters[middle].text_offset < offset) low = middle + 1;
+        else high = middle;
     }
+    return low;
+}
+
+static int add_piece(cluster_index_t *index, const skb_layout_t *layout,
+                     int begin, int end, int displacement) {
+    const skb_cluster_t *clusters = skb_layout_get_clusters(layout);
+    const int first = lower_cluster(layout, begin);
+    const int last = lower_cluster(layout, end);
+    if ((first > 0 && clusters[first - 1].text_offset +
+         clusters[first - 1].text_count > begin) ||
+        (last > 0 && clusters[last - 1].text_offset +
+         clusters[last - 1].text_count > end)) return 0;
+    if (first == last) return 1;
+    if (index->piece_count == 3) return 0;
+    index->pieces[index->piece_count++] = (cluster_piece_t){
+        layout, first, last - first, displacement,
+    };
+    index->count += last - first;
+    index->cumulative[index->piece_count] = index->count;
     return 1;
 }
 
-static int same_signatures(const signature_t *candidate, int count,
+static signature_t indexed_signature(const cluster_index_t *index, int position) {
+    int low = 0, high = index->piece_count;
+    while (low + 1 < high) {
+        const int middle = (low + high) / 2;
+        if (index->cumulative[middle] <= position) low = middle;
+        else high = middle;
+    }
+    const cluster_piece_t *piece = &index->pieces[low];
+    const int cluster = piece->first_cluster + position - index->cumulative[low];
+    return (signature_t){piece->layout, cluster,
+        skb_layout_get_clusters(piece->layout)[cluster].text_offset +
+        piece->displacement};
+}
+
+static int same_signatures(const cluster_index_t *candidate,
                            const skb_layout_t *oracle, int *first_mismatch) {
     const skb_cluster_t *expected = skb_layout_get_clusters(oracle);
     const int expected_count = skb_layout_get_clusters_count(oracle);
-    if (count != expected_count) {
+    if (candidate->count != expected_count) {
         *first_mismatch = -2;
         return 0;
     }
@@ -281,18 +360,19 @@ static int same_signatures(const signature_t *candidate, int count,
         sorted[i] = (signature_t){oracle, i, expected[i].text_offset};
     qsort(sorted, (size_t)expected_count, sizeof(*sorted), signature_order);
     int equal = 1;
-    for (int i = 0; i < count && equal; ++i) {
-        const signature_t *a = &candidate[i], *b = &sorted[i];
-        const skb_cluster_t ca = skb_layout_get_clusters(a->layout)[a->cluster];
+    for (int i = 0; i < candidate->count && equal; ++i) {
+        const signature_t a = indexed_signature(candidate, i);
+        const signature_t *b = &sorted[i];
+        const skb_cluster_t ca = skb_layout_get_clusters(a.layout)[a.cluster];
         const skb_cluster_t cb = skb_layout_get_clusters(b->layout)[b->cluster];
-        if (a->offset != b->offset || ca.text_count != cb.text_count ||
+        if (a.offset != b->offset || ca.text_count != cb.text_count ||
             ca.glyphs_count != cb.glyphs_count) {
-            *first_mismatch = a->offset;
+            *first_mismatch = a.offset;
             equal = 0;
             break;
         }
-        if (!same_cluster(a->layout, a->cluster, oracle, b->cluster)) {
-            *first_mismatch = a->offset;
+        if (!same_cluster(a.layout, a.cluster, oracle, b->cluster)) {
+            *first_mismatch = a.offset;
             equal = 0;
         }
     }
@@ -300,7 +380,7 @@ static int same_signatures(const signature_t *candidate, int count,
     return equal;
 }
 
-static int character_wrap_equal(const signature_t *candidate, int count,
+static int character_wrap_equal(const cluster_index_t *candidate,
                                 const uint32_t *text, int text_count,
                                 skb_temp_alloc_t *temp, const skb_layout_params_t *params) {
     const skb_attribute_t attributes[] = {
@@ -317,12 +397,13 @@ static int character_wrap_equal(const signature_t *candidate, int count,
     const int line_count = skb_layout_get_lines_count(wrapped);
     int line = 0, row_start = 0, equal = 1;
     float used = 0.f;
-    for (int i = 0; i < count && equal; ++i) {
+    for (int i = 0; i < candidate->count && equal; ++i) {
+        const signature_t sig = indexed_signature(candidate, i);
         const skb_cluster_t cluster =
-            skb_layout_get_clusters(candidate[i].layout)[candidate[i].cluster];
+            skb_layout_get_clusters(sig.layout)[sig.cluster];
         if (cluster.text_count != 1 || cluster.glyphs_count != 1 ||
-            candidate[i].offset != i) { equal = 0; break; }
-        const float advance = skb_layout_get_glyphs(candidate[i].layout)
+            sig.offset != i) { equal = 0; break; }
+        const float advance = skb_layout_get_glyphs(sig.layout)
             [cluster.glyphs_offset].advance_x;
         if (used > 0.f && used + advance > 200.001f) {
             if (line >= line_count || lines[line].text_range.start != row_start ||
@@ -347,13 +428,14 @@ static skb_layout_t *shape(skb_temp_alloc_t *temp, const skb_layout_params_t *pa
 
 static void align_window(const skb_layout_t *old, int *start, int *end) {
     const skb_cluster_t *clusters = skb_layout_get_clusters(old);
-    const int count = skb_layout_get_clusters_count(old);
-    for (int i = 0; i < count; ++i) {
-        const int first = clusters[i].text_offset;
-        const int last = first + clusters[i].text_count;
-        if (first < *start && *start < last) *start = first;
-        if (first < *end && *end < last) *end = last;
-    }
+    const int first = lower_cluster(old, *start);
+    const int last = lower_cluster(old, *end);
+    if (first > 0 && clusters[first - 1].text_offset +
+        clusters[first - 1].text_count > *start)
+        *start = clusters[first - 1].text_offset;
+    if (last > 0 && clusters[last - 1].text_offset +
+        clusters[last - 1].text_count > *end)
+        *end = clusters[last - 1].text_offset + clusters[last - 1].text_count;
 }
 
 static int run_case(const char *name, const uint32_t *pattern, int pattern_count,
@@ -376,6 +458,8 @@ static int run_case(const char *name, const uint32_t *pattern, int pattern_count
     skb_layout_t *old = shape(temp, params, old_text, length);
     skb_layout_t *fresh = shape(temp, params, new_text, new_length);
     if (!old || !fresh) return 0;
+    const int old_rtl = has_rtl_run(old);
+    const int old_emoji = has_emoji(old);
     const int radii[] = {4, 16, 64, length};
     int complete_passed = 0, unsafe_accept = 0;
     for (int r = 0; r < 4; ++r) {
@@ -385,29 +469,37 @@ static int run_case(const char *name, const uint32_t *pattern, int pattern_count
         const int new_end = old_end + delta;
         skb_layout_t *window = shape(temp, params, new_text + start, new_end - start);
         if (!window) return 0;
-        const int capacity = skb_layout_get_clusters_count(old) +
-            skb_layout_get_clusters_count(window);
-        signature_t *candidate = malloc((size_t)capacity * sizeof(*candidate));
-        if (!candidate) return 0;
-        int count = 0;
-        int intact = append_range(candidate, &count, old, 0, start, 0) &&
-            append_range(candidate, &count, window, 0, new_end - start, start) &&
-            append_range(candidate, &count, old, old_end, length, delta);
-        qsort(candidate, (size_t)count, sizeof(*candidate), signature_order);
+        cluster_index_t candidate = {0};
+        const int intact = add_piece(&candidate, old, 0, start, 0) &&
+            add_piece(&candidate, window, 0, new_end - start, start) &&
+            add_piece(&candidate, old, old_end, length, delta);
+        property_index_t property_candidate = {0};
+        int properties_intact = add_property_piece(&property_candidate, old, 0, start);
+        if (new_end < new_length) {
+            properties_intact &= add_property_piece(&property_candidate, window,
+                                                     0, new_end - start - 1);
+            // The final local codepoint has artificial end-of-input flags.
+            properties_intact &= add_property_piece(&property_candidate, old,
+                                                     old_end - 1, old_end);
+        } else {
+            properties_intact &= add_property_piece(&property_candidate, window,
+                                                     0, new_end - start);
+        }
+        properties_intact &= add_property_piece(&property_candidate, old,
+                                                 old_end, length);
         int first_mismatch = -1;
-        const int guard = intact && !has_rtl_run(old) && !has_rtl_run(window) &&
-            !has_emoji(old) && !has_emoji(window) &&
+        const int guard = intact && properties_intact && !old_rtl && !has_rtl_run(window) &&
+            !old_emoji && !has_emoji(window) &&
             seam_guard_matches(old, window, start, edit, deleted, old_end, delta, length) &&
             seam_properties_match(old, window, start, edit, deleted, old_end, delta);
-        const int equal = intact ? same_signatures(candidate, count, fresh, &first_mismatch) : 0;
+        const int equal = intact ? same_signatures(&candidate, fresh, &first_mismatch) : 0;
         const int visual = intact ? visual_equal(old, window, fresh, start, old_end,
                                                 new_end, length, delta) : 0;
         int first_property = -1;
-        const int properties = text_properties_equal(old, window, fresh, start,
-                                                     new_end, length, delta,
-                                                     &first_property);
+        const int properties = properties_intact &&
+            text_properties_equal(&property_candidate, fresh, &first_property);
         const int wrap = strcmp(name, "repeated-a") == 0 && intact ?
-            character_wrap_equal(candidate, count, new_text, new_length,
+            character_wrap_equal(&candidate, new_text, new_length,
                                  temp, params) : -1;
         int first_caret = -1, first_vertical = -1;
         const int carets = caret_equal(old, window, fresh, start, old_end,
@@ -429,7 +521,6 @@ static int run_case(const char *name, const uint32_t *pattern, int pattern_count
             rejected_short_windows += guard == 0;
         }
         if (r == 3 && equal == 1) complete_passed = 1;
-        free(candidate);
         skb_layout_destroy(window);
     }
     skb_layout_destroy(fresh);
@@ -437,6 +528,42 @@ static int run_case(const char *name, const uint32_t *pattern, int pattern_count
     free(new_text);
     free(old_text);
     return complete_passed && !unsafe_accept;
+}
+
+static int run_index_smoke(skb_temp_alloc_t *temp, const skb_layout_params_t *params) {
+    const int length = 1024 * 1024, edit = length / 2;
+    uint32_t *text = malloc((size_t)length * sizeof(*text));
+    if (!text) return 0;
+    for (int i = 0; i < length; ++i) text[i] = 'a';
+    skb_layout_t *old = shape(temp, params, text, length);
+    uint32_t changed[9] = {'a','a','a','a','W','a','a','a','a'};
+    skb_layout_t *window = shape(temp, params, changed, 9);
+    if (!old || !window) return 0;
+    cluster_index_t index = {0};
+    property_index_t properties = {0};
+    const clock_t started = clock();
+    const int built = add_piece(&index, old, 0, edit - 4, 0) &&
+        add_piece(&index, window, 0, 9, edit - 4) &&
+        add_piece(&index, old, edit + 5, length, 0) &&
+        add_property_piece(&properties, old, 0, edit - 4) &&
+        add_property_piece(&properties, window, 0, 8) &&
+        add_property_piece(&properties, old, edit + 4, edit + 5) &&
+        add_property_piece(&properties, old, edit + 5, length);
+    int valid = built && index.count == length && index.piece_count == 3 &&
+                properties.count == length && properties.piece_count == 4;
+    for (int i = 0; i < 100000 && valid; ++i) {
+        const int offset = (int)(((uint64_t)i * 7919u) % (uint64_t)length);
+        valid &= indexed_signature(&index, offset).offset == offset;
+        valid &= indexed_property(&properties, offset).script ==
+            skb_layout_get_text_properties(old)[offset].script;
+    }
+    const double ms = 1000.0 * (double)(clock() - started) / CLOCKS_PER_SEC;
+    printf("1MiB index: %d cluster and %d property pieces, 100000 paired random lookups, %.3f CPU ms, %s\n",
+           index.piece_count, properties.piece_count, ms, valid ? "valid" : "FAILED");
+    skb_layout_destroy(window);
+    skb_layout_destroy(old);
+    free(text);
+    return valid;
 }
 
 int main(void) {
@@ -511,6 +638,7 @@ int main(void) {
            mixed_passed, mixed_total);
     printf("short windows: %d accepted, %d rejected by cluster/edge/bidi gates\n",
            accepted_short_windows, rejected_short_windows);
+    passed &= run_index_smoke(temp, &params);
     passed &= mixed_passed == mixed_total;
     skb_font_collection_destroy(fonts);
     skb_temp_alloc_destroy(temp);

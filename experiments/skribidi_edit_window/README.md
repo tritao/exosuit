@@ -45,10 +45,19 @@ candidate's character-wrap breaks match fresh Skribidi at all tested radii.
 The gates rejected every sampled mismatching window, but that sample is too
 small to establish a general safety rule.
 
+Cluster and text-property candidates now use indexed references to the old
+layout and shaped window. Constructing a candidate no longer copies or sorts
+all old clusters. A separate 1 MiB smoke check makes three cluster pieces and
+four property pieces; 100,000 paired random lookups took about 3 ms of CPU
+time on the recorded host. This measures the index only, not an edited UIKit
+frame or repeated edits. The full differential oracle still walks the entire
+candidate to check correctness.
+
 The guard is an experimental rejection check, **not a proof of safe reuse**.
 The probe has sampled positions and fonts. It compares one-line caret geometry
 and one character-wrap fixture, but does not implement general word wrapping,
-incremental row metrics, or indexed storage; candidate assembly still scans
-and sorts all old clusters. It does not yet meet the 50 ms edit budget or run
-in UIKit. A production design needs indexed cluster/text-property storage,
-retained row geometry with a safe fallback, and broader differential coverage.
+incremental row metrics, or a mutable cache across consecutive edits. Oracle
+checks and glyph-position reconstruction still scan old layouts. It does not
+yet meet the 50 ms edit budget or run in UIKit. A production design needs
+mutable indexed storage, retained row geometry with a safe fallback, and
+broader differential coverage.

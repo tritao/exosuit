@@ -16,8 +16,8 @@ Last updated: 2026-10-01.
   browser stage is wired into composed CI through `EXOSUIT_CI_WEB=1`; absent
   toolchains remain explicitly pending.
 - Active task: **M9.1**, styled text and decorations on UIKit.
-- Exact resume: build indexed cluster/text-property storage and retained row
-  geometry around the tested Latin edit window, then verify against fresh
+- Exact resume: make indexed cluster/text-property pieces mutable across
+  consecutive edits and add retained row geometry, then verify against fresh
   Skribidi layouts and the real 1 MiB typing fixture before UIKit integration.
   Preserve M8 and both browser gates.
 - All further graphical tests must use disposable PRAGTICAL_PORTABLE state.
@@ -148,11 +148,18 @@ Last updated: 2026-10-01.
   The full-window oracle
   passes in all cases. The probe build and executable exit 0; output is in
   `/tmp/exosuit-edit-window-results.txt`.
+- Cluster and text-property candidates now use indexed references to old and
+  local layouts instead of copying and sorting every cached cluster. The 1 MiB
+  smoke fixture constructs three cluster and four property pieces; 100,000
+  paired random lookups take about **3 ms CPU** on this host. This isolates
+  index access only. It does not include window shaping, repeated edits, row
+  geometry, rendering, or a UIKit frame.
 - This probe is not a correctness proof or production implementation. It
-  scans and sorts cached clusters, checks only one unbroken-word wrap fixture,
+  still scans cached layouts for oracle checks and glyph-position reconstruction,
+  checks only one unbroken-word wrap fixture,
   and has no general bound for Arabic joining, emoji carets, or bidi changes.
-  Exact next: store clusters and text properties in an indexed editable
-  structure, reflow row metrics lazily from the edit, and compare general word
+  Exact next: make the indexed pieces mutable across consecutive edits,
+  reflow row metrics lazily from the edit, and compare general word
   wrapping and caret geometry with fresh Skribidi layouts. Then integrate the
   safe Latin path into UIKit and remeasure varied 1 MiB input. A full-paragraph
   fallback remains mandatory. HarfBuzz's unsafe-to-concat flag alone cannot
