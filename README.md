@@ -12,8 +12,8 @@ clipboard, file dialogs, and native services.
 
 ## Build and test
 
-Install Haxeon and place this repository alongside checkouts of `nativekit`
-and `haxeon` (UIKit and EditorKit live in `haxeon/packages/`), or set their
+Install Haxeon and place this repository alongside checkouts of `nativekit`,
+`uikit`, `editorkit` and `haxeon` (the materia workspace layout), or set their
 paths in graphical/haxeon.json:
 
 ```sh

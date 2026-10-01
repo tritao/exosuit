@@ -143,8 +143,8 @@ The headless core (`haxeon.json`, entry `app.Main`) builds without UIKit:
   "sourceRoots": ["src"],
   "dependencies": {
     "nativekit": { "path": "../nativekit" },
-    "uikit": { "path": "../haxeon/packages/uikit" },
-    "editorkit": { "path": "../haxeon/packages/editorkit" }
+    "uikit": { "path": "../uikit" },
+    "editorkit": { "path": "../editorkit" }
   },
   "native": {
     "sources": ["native/headless/platform.c", "native/hashlink/pragtical_hx.c"],

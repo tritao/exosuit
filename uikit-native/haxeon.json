@@ -11,7 +11,7 @@
 				"CMakeLists.txt",
 				"../../nativekit/CMakeLists.txt",
 				"../../nativekit/modules/gpu/CMakeLists.txt",
-				"../../haxeon/packages/uikit/CMakeLists.txt"
+				"../../uikit/CMakeLists.txt"
 			]
 		}
 	},
