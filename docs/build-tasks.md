@@ -23,6 +23,6 @@ a Build Output tab. Lines shaped like `path:line:column: message` are clickable 
 open the referenced position. Task configuration errors and launch failures are
 reported through the editor error log.
 
-This repository provides `build-headless`, `test-headless`, and `build-sdl` tasks
-in its own `.pragtical/tasks.conf`, which is also used by the automated
-self-build smoke route.
+This repository provides `build-headless`, `test-headless`, and `build-uikit` tasks
+in its own `.pragtical/tasks.conf`, which is also used by the project command palette. The real-window smoke supplies its own disposable
+task and checks process output and published diagnostics.

@@ -12,8 +12,8 @@ Last updated: 2026-10-01.
 - Active task: **M8.3**, restoring manifest-based real LSP, revision-pinned
   release packaging and a scripted UIKit window route. M8.4 documentation is
   updated, while interactive acceptance and other platforms remain unclaimed.
-- Exact resume: implement the isolated real-window input route (project,
-  edit/save, palette, problems, build output, reload), then compose and run CI.
+- Exact resume: run the restored composed CI gate, including the compiler,
+  headless projects, graphical build, real LSP, window workflow and release.
   Real LSP and unpacked UIKit release checks now pass. Use PRAGTICAL_PORTABLE
   for all graphical tests; xvfb-run and xdotool are available.
 - HEADs at planning: exosuit `ae2f260` (`haxeon-uikit-port`). Materia `main` is at
@@ -55,6 +55,36 @@ Last updated: 2026-10-01.
 | M15 | Not started | Depends on M8.1, M8.2; scheduled right after M8. Reference: materia `app/web` at `816372dd`, Haxeon `fba71015` |
 
 ## Implementation records
+
+### M8.3 — native input and source-plugin reload (verified slice)
+
+- Release slice committed as exosuit 011ea4d. The real-window workflow now uses
+  Xvfb/xdotool against built bytecode and matched native libraries. It opens a
+  project and file, edits/saves through TextArea, uses the command palette and
+  task picker, observes task diagnostics in Problems, and inspects Build Output
+  after a second host launch. Plugin reload recompiles a callback whose changed
+  body inserts a marker; the saved marker proves execution of the new guest body.
+- Graphical CLI accepts multiple paths (project then file), timed captures and
+  native event recording using existing host capabilities. Recording mode emits
+  and flushes readiness; captures include application errors and loaded plugins.
+- UIKIT_WORKFLOW_ARTIFACTS=/tmp/exosuit-uikit-workflow-queries
+  ./scripts/test-uikit-workflow.sh exits 0. Log uses the same path with .log.
+  Both captures contain Main.hx, the loaded plugin and no application errors;
+  event traces have actual native text input and no host failures. Saved text
+  contains return 42 and the reloaded callback marker. Visually inspected the
+  real Build Output screenshot. Shell syntax and diff checks pass.
+- Early disposable probe failures: Sys.println is outside the source-plugin
+  API; document subscriptions require an active document. Corrected fixtures
+  use the supported editor API and open a document before activation. The CLI
+  runner buffers forwarded child output, so the native-input driver launches
+  the built artifact directly. Palette search persists between opens; the test
+  selects/replaces the search query just as a user would. No typing evasion.
+- Project build tasks and release/getting-started documentation now describe
+  actual UIKit commands and dependencies; SDL measurements are historical.
+- Pending: composed CI and self-hosted build after CLI changes. IME, physical
+  DPI transitions and non-Linux checks remain unclaimed. Next ready task after
+  accepted M8 is M15.1 capability boundaries.
+
 
 ### M8.3 — standalone UIKit release (verified slice)
 

@@ -206,7 +206,9 @@ class ExosuitApp implements DesktopUiApplication {
 			explorerRoot: explorerRoot,
 			panels: dock.panelIds(),
 			status: statusMessage,
-			paletteCommandCount: ui.commands.ids().length
+			paletteCommandCount: ui.commands.ids().length,
+			errors: [for (entry in application.errors.entries) {source: entry.source, message: entry.message}],
+			plugins: application.plugins.enabledIds()
 		};
 	}
 

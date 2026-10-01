@@ -30,16 +30,22 @@ class GraphicalMain {
 		var pluginManifest:Null<String> = null;
 		var captureDirectory:Null<String> = null;
 		var frameLimit = 0;
-		var openPath:Null<String> = null;
+		var captureSeconds = 0.0;
+		var recordPath:Null<String> = null;
+		var openPaths:Array<String> = [];
 		for (argument in arguments) {
 			if (StringTools.startsWith(argument, "--plugin="))
 				pluginManifest = argument.substring(9);
 			else if (StringTools.startsWith(argument, "--capture-dir="))
 				captureDirectory = argument.substring(14);
+			else if (StringTools.startsWith(argument, "--capture-seconds="))
+				captureSeconds = Std.parseFloat(argument.substring(18));
+			else if (StringTools.startsWith(argument, "--record-path="))
+				recordPath = argument.substring(14);
 			else if (StringTools.startsWith(argument, "--smoke-frames="))
 				frameLimit = Std.parseInt(argument.substring(15));
 			else if (!StringTools.startsWith(argument, "--"))
-				openPath = argument;
+				openPaths.push(argument);
 		}
 		var host = new DesktopUiHostOptions();
 		host.title = "exosuit";
@@ -47,14 +53,21 @@ class GraphicalMain {
 		host.height = 840;
 		host.captureDirectory = captureDirectory;
 		host.frameLimit = frameLimit;
+		host.captureSeconds = captureSeconds;
+		host.recordPath = recordPath;
 		var app:Null<ExosuitApp> = null;
 		var session = DesktopUiHost.open(host, function(context) {
-			var instance = new ExosuitApp(context.fonts, Theme.light(), context, openPath);
+			var instance = new ExosuitApp(context.fonts, Theme.light(), context, openPaths.length == 0 ? null : openPaths[0]);
+			for (index in 1...openPaths.length) instance.application.openArgument(openPaths[index]);
 			if (pluginManifest != null && !instance.application.loadPluginManifest(pluginManifest))
 				Sys.println('exosuit: could not load plugin manifest "$pluginManifest"');
 			app = instance;
 			return instance;
 		});
+		if (recordPath != null) {
+			Sys.println("exosuit: window ready");
+			Sys.stdout().flush();
+		}
 		while (session.tick()) {}
 		var status = session.close();
 		Native.shutdown();

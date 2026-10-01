@@ -71,7 +71,7 @@ modes. Haxeon's own `./scripts/test.sh` passes.
   (`release.lock`, `scripts/test-release.sh`) to the manifest layout. Pin
   Haxeon, NativeKit, UIKit and EditorKit revisions instead of the Pragtical
   renderer.
-- [ ] Replace the deleted SDL automation with a real-window, scripted UIKit
+- [x] Replace the deleted SDL automation with a real-window, scripted UIKit
   route: open project, edit, save, palette, problems, build output, reload.
   Inspect UIKit/NativeKit for existing automation or test-input hooks before
   adding one. If no display is available, record the check as pending; do not

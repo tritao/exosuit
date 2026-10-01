@@ -3,6 +3,12 @@
 This document records evidence for the release-quality claims. Measurements are
 local development gates, not promises for other hardware or operating systems.
 
+The performance and SDL platform measurements below are historical evidence.
+They do not qualify the replacement UIKit host. Current UIKit evidence is the
+real-window project/open/edit/save/palette/problems/build-output/plugin-reload
+route in `scripts/test-uikit-workflow.sh` and the unpacked release/LSP gate in
+`scripts/test-release.sh`. IME, physical mixed-DPI, Windows and macOS remain pending.
+
 ## Performance and endurance
 
 Recorded 2026-09-08 on Linux 6.8.0-59-generic x86_64, an Intel Core i5-13600K
@@ -91,19 +97,15 @@ cadence now keeps background jobs progressing near 60 Hz and measured 5% CPU
 
 ## Packaging and reproducibility
 
-`release.lock` records exact Haxeon, Pragtical renderer and HashLink revisions.
-`scripts/package-release.sh` rejects revision mismatches and dirty files in those
-input paths, atomically rebuilds the Haxeon runtime, rebuilds the language server
-and graphical editor, and creates a Linux x86-64 archive under `dist/`. The
-archive contains the executable and bytecode, native modules, HashLink host and
-library, bundled language service and stdlib, primary/fallback fonts, reference
-defaults, documentation, revision manifest and license notices.
+`release.lock` records exact Haxeon, NativeKit, materia (UIKit/EditorKit) and
+HashLink vendor revisions. `scripts/package-release.sh` rejects mismatched or
+dirty dependency inputs, builds the matched VM/runtime and language server,
+and builds the graphical manifest. It creates a Linux x86-64 archive in `dist/`.
+The archive includes bytecode, standalone launchers, ordinary C libraries,
+HashLink and Haxeon runtime, language server, stdlib, reference defaults,
+documentation, revision manifest and native dependency license notices.
+UIKit discovers system fonts through Fontconfig.
 
-`scripts/test-release.sh` extracts the archive into a fresh temporary directory,
-rejects source-tree runtime search paths, launches three graphical frames from a
-different working directory with isolated user state, then uses the bundled
-language server to diagnose an invalid Haxe edit, clear it after correction and
-build/execute the corrected fixture. This passed locally. `scripts/ci.sh` composes
-the full Haxeon compatibility gate, native/headless editor suite, SDL script
-coverage and unpacked release test. Generated `build/`, `out/` and `dist/`
-contents remain ignored.
+`scripts/test-release.sh` extracts outside the source tree, checks ELF runtime
+search paths, launches/captures the real window with isolated portable state,
+and tests edit/diagnose/fix/save/build against the bundled server.

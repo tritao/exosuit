@@ -2,27 +2,15 @@
 
 ## Prerequisites
 
-Haxeon, NativeKit, and UIKit checkouts are required. Clone or symlink them
-beside this repository:
+Use this repository inside the materia workspace, alongside `haxeon/`,
+`nativekit/`, `uikit/` and `editorkit/`. UIKit and EditorKit belong to materia;
+Haxeon and NativeKit are submodule checkouts. Set `HAXEON_ROOT` for a different
+compiler checkout and adjust manifest dependencies for a different workspace.
 
-```sh
-cd ..
-git clone https://github.com/haxeon/haxeon.git
-git clone https://github.com/nativekit/nativekit.git
-git clone https://github.com/uikit/uikit.git
-git clone https://github.com/editorkit/editorkit.git
-cd exosuit
-```
-
-Or set paths in `graphical/haxeon.json` under `dependencies`.
-
-System libraries (Linux x86-64):
-- SDL 3 development headers
-- FreeType development headers
-- HarfBuzz development headers
-- CMake 3.24+
-- Haxe compiler (via Haxeon)
-- HashLink runtime 1.14+
+Linux x86-64 requires the NativeKit development dependencies, including
+Fontconfig/FreeType, OpenGL, GTK 3, WebKitGTK 4.1 and OpenSSL 3, plus CMake and
+Haxeon's provisioned compiler/runtime tools. `release.lock` records the inputs
+qualified by the standalone release gate.
 
 ## Build and run
 
@@ -35,14 +23,14 @@ Build the graphical application:
 Run the application:
 
 ```sh
-./scripts/run.sh [file or directory]
+./scripts/run.sh [project-directory] [file ...]
 ```
 
 For example:
 
 ```sh
 ./scripts/run.sh .
-./scripts/run.sh src/Main.hx
+./scripts/run.sh . src/app/Main.hx
 ```
 
 To pass additional arguments, append them:

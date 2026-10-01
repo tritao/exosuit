@@ -1,6 +1,6 @@
 # Exosuit
 
-Run `./exosuit [file-or-directory]` from any working directory. The archive
+Run `./exosuit [project-directory] [file ...]` from any working directory. The archive
 contains the UIKit editor, matched HashLink VM and runtime, native libraries,
 language server, standard library, reference defaults and license notices.
 
