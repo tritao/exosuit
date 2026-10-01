@@ -62,6 +62,43 @@ Last updated: 2026-10-01.
 
 ## Implementation records
 
+### M9.1 — public foreground ranges and raster invalidation (foundation delivered)
+
+- General C ABI `nkui_text_layout_set_color_ranges` copies sorted, disjoint
+  codepoint ranges and rejects invalid colors, bounds, handles and overlap
+  transactionally. Empty ranges clear; text/layout updates clear; base-color
+  changes preserve overrides. ABI version 8 and both portable HXI regenerated.
+- Typed `TextColorRange`/`TextLayout.setColorRanges` uses the existing native
+  struct-array boundary. Mutable scaled glyphs and owned immutable snapshots
+  both receive foreground ranges. Identical colors do not invalidate resources.
+- A new actual pixel recolor test initially failed (red=0, stale green=36).
+  Root cause: mutable retained text had no color revision in raster resource
+  fingerprints. A text content revision now participates in both renderer
+  bindings and advances on text/layout or color changes. The regression verifies
+  green override plus blue base, cached repaint, live red recolor and range
+  clearing on text replacement. No compiler workaround was needed.
+- Native focused gate passes 6/6, including ABI, text engine, compositor,
+  frame resources, layout render compiler and real Xvfb pixel rendering.
+  `../uikit/tools/test-haxeon.sh` exits 0: actual typed array marshaling,
+  rendered Canvas transaction, invalid overlap, unchanged measurement and
+  Settings suite (`/tmp/uikit-color-ranges-haxeon.log`).
+- Materia `f4313d4b` commits this public API slice. Exosuit root tests and both
+  graphical compiler-mode builds exit 0, serially:
+  `/tmp/exosuit-m9-color-ranges-tests.log`,
+  `/tmp/exosuit-m9-color-ranges-build.log`,
+  `/tmp/exosuit-m9-color-ranges-self-build.log`.
+- Final `EXOSUIT_CI_WEB=1 ./scripts/test-web.sh` exits 0 for both guest targets
+  with 107/104 matching imports and real Unicode edit/save/URL/fresh reload:
+  `/tmp/exosuit-m9-color-ranges-web-final.log`. The first attempt failed once
+  at reload with a guest frame error; its assertion omitted console details.
+  Added console capture to failure assertions. Same linear artifact then passed
+  the diagnostic run plus five fresh browser repetitions. That first transient's
+  root cause remains unclassified; it is not silently treated as a passing run.
+- Updated release pin to materia `f4313d4b`; new unpacked-release acceptance
+  remains pending until the editor presentation slice. Exact next action:
+  add visible retained foreground ranges and geometry-based decorations to
+  UIKit TextArea, then wire the editor's syntax/diagnostics and selections.
+
 ### M9.1 — retained foreground ranges (in progress)
 
 - Starting from accepted M15 commit `5a46f5c`, with materia `a9486f67`,

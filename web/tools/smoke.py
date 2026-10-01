@@ -80,7 +80,7 @@ def main():
             break
         time.sleep(0.25)
     if state.get("state") != "running":
-        raise AssertionError(json.dumps(state))
+        raise AssertionError(json.dumps({"state": state, "console": page.console}, ensure_ascii=False))
 
     def snapshot():
         return json.loads(page.evaluate("window.exosuit.snapshot(); JSON.stringify(window.exosuit.document)"))
@@ -169,7 +169,7 @@ def main():
     while time.monotonic() < deadline:
         state = json.loads(page.evaluate("JSON.stringify(window.exosuit || null)") or "null") or {}
         if state.get("state") == "failed":
-            raise AssertionError(json.dumps(state))
+            raise AssertionError(json.dumps({"state": state, "console": page.console}, ensure_ascii=False))
         if state.get("state") == "running" and state.get("frames", 0) >= options.frames:
             break
         time.sleep(0.25)
