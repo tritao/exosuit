@@ -126,6 +126,14 @@ Last updated: 2026-10-01.
   shaping semantics; a cache of this fixed benchmark input would not satisfy
   the general typing budget. Strict changed-row invalidation and multi-caret
   movement remain pending. M9.1 acceptance is not claimed.
+- A follow-up experiment reused Skribidi's retained buffer capacities on each
+  text update. Native text/render smoke checks passed, but two unchanged-build
+  1 MiB runs gave p50/p95 **250.41/605.90 ms** and **310.09/535.04 ms**;
+  several edit-dispatch samples exceeded 400 ms. The experiment was reverted,
+  so the committed p95 remains 313.69 ms. Artifacts:
+  `/tmp/exosuit-m9-typing-long-reuse` and
+  `/tmp/exosuit-m9-typing-long-reuse-repeat` (plus `.log`). This rules out
+  allocation reuse alone as the long-paragraph fix.
 
 ### M9.1 — large-file startup and measured typing (verified fixes, budget still partial)
 
