@@ -85,6 +85,10 @@ samples = [1000 * (frame["textInputRequestAgeSeconds"] + frame["frameSeconds"]) 
 if len(samples) < 20: raise SystemExit(f"insufficient actual text-input frames: {len(samples)}")
 samples.sort()
 p95 = samples[math.ceil(.95 * len(samples)) - 1]
+def p95_ms(field):
+    values = sorted(1000 * frame[field] for frame in input_frames
+                    if frame.get(field) is not None)
+    return values[math.ceil(.95 * len(values)) - 1] if values else None
 cpu = next((line.split(":", 1)[1].strip() for line in pathlib.Path("/proc/cpuinfo").read_text().splitlines()
             if line.startswith("model name")), platform.processor())
 result = dict(fixture=sys.argv[2], cpu=cpu, bytes=(root / "input.txt").stat().st_size,
@@ -94,6 +98,9 @@ result = dict(fixture=sys.argv[2], cpu=cpu, bytes=(root / "input.txt").stat().st
               keyDelayMs=int(os.environ.get("TYPING_UI_KEY_DELAY_MS", "120")),
               keyPattern=os.environ.get("TYPING_UI_KEY_PATTERN", "repeat"),
               p50Ms=samples[len(samples)//2], p95Ms=p95,
+              dispatchP95Ms=p95_ms("textInputDispatchSeconds"),
+              frameP95Ms=p95_ms("frameSeconds"),
+              nativeRenderP95Ms=p95_ms("nativeRenderSeconds"),
               maxMs=samples[-1], budgetMs=50, withinBudget=p95 < 50,
               platform=platform.platform())
 (root / "result.json").write_text(json.dumps(result, indent=2) + "\n")

@@ -29,12 +29,14 @@ Last updated: 2026-10-02.
   uniform-tint ASCII rows now retain their glyph revision when their source
   offsets move; their immutable source metadata is rebased on publication.
   The containing pass still recomposites rows, and shifted colored rows and
-  unsupported Unicode layouts still rebuild. Inspect those remaining cases
-  before checking M9.1. Preserve the 1 MiB, 10 MiB and graphical pixel gates.
+  unsupported Unicode layouts still rebuild. The measured parent repaint is
+  a lower-priority cost: focus next on the 1 MiB edit-dispatch path, then
+  inspect the remaining invalidation cases before checking M9.1. Preserve the
+  1 MiB, 10 MiB and graphical pixel gates.
   Preserve M8 and both browser gates.
-- Current follow-on HEADs: Exosuit `8940ae9` before this ledger commit;
-  Materia `da5afbe63` carries row-scoped glyph commands, shallow row raster
-  caching and rebased source metadata on the layout-session path. The
+- Current follow-on HEADs: Exosuit `35478bb` before this ledger commit;
+  Materia `9de8be1ab` carries row-scoped glyph commands, shallow row raster
+  caching, rebased source metadata, and a parent repaint cost regression. The
   existing dirty Haxeon/NativeKit gitlinks and UIKit TextInputBridge edit in
   Materia were left untouched.
 - All further graphical tests must use disposable PRAGTICAL_PORTABLE state.
@@ -78,6 +80,27 @@ Last updated: 2026-10-02.
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M9.1 — parent repaint cost and typing-stage attribution (measured)
+
+- Materia `9de8be1ab` records GPU draw calls in the wrapped-row regression.
+  Its first render takes 19 draws, a cache-hit render 3, and an edit to one
+  row 12. The edit still recomposites the unchanged row rasters into the
+  containing pass, but their glyph paint remains cached.
+- The 1 MiB varied-key trace from the preceding slice has p95 native render
+  **5.48 ms**, total frame **8.04 ms**, and text-input dispatch
+  **41.23 ms**. The long single-line fixture bypasses the row raster path,
+  so partial parent repaint cannot improve its narrow 50 ms gate. The 10 MiB
+  trace has p95 native render **8.37 ms** and total frame **30.82 ms**.
+  `benchmark-uikit-typing.sh` now reports those stage p95 values alongside
+  end-to-end latency; a new 30-event small-file run validates its output at
+  **20.69 ms** end-to-end p95 and **1.33 ms** dispatch p95 (artifact
+  `/tmp/exosuit-m9-parent-profile-small`).
+- Partial parent repaint would require retaining or copying the old target,
+  tracking damage across every background and decoration command, and
+  preserving in-flight frames under the 64 MiB cache cap. That extra GPU
+  transfer and bookkeeping are not justified by the current cost. Investigate
+  the 1 MiB text-input edit-dispatch work before changing the pass model.
 
 ### M9.1 — shifted source metadata for unchanged ASCII rows (verified slice)
 
