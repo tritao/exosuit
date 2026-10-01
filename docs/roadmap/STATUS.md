@@ -62,6 +62,32 @@ Last updated: 2026-10-01.
 
 ## Implementation records
 
+### M9.1 — retained foreground ranges (in progress)
+
+- Starting from accepted M15 commit `5a46f5c`, with materia `a9486f67`,
+  Haxeon `02f924ed` and NativeKit `d12dd484`. Existing submodule-pointer dirt
+  and Haxeon vendor/profile files remain outside this slice.
+- Design: retain logical codepoint cluster ranges alongside prepared glyph quads.
+  Sorted, disjoint foreground ranges recolor cached geometry using the cluster's
+  first codepoint (a shaped ligature remains one color). Published snapshots
+  include colors in their cache identity and remain immutable. Color changes
+  must neither rebuild measured layouts nor rasterize glyphs. Line snapshots
+  ignore ranges outside their logical line, preserving unaffected-row reuse.
+- Materia `59cb6eaf` delivers the internal foreground-range foundation. Native
+  tests cover geometry, clearing, immutable snapshots, unchanged-row cache reuse,
+  rejected overlapping/reversed/negative ranges and codepoint metadata for
+  accent, supplementary and RTL text.
+- `cmake --build ../nativekit/build-ui --target
+  nativekit_ui_text_engine_test nativekit_ui_frame_resources_test
+  nativekit_ui_layout_render_compiler_test nativekit_ui_compositor_test -j 4`
+  exits 0 (targets built serially in the same tree). Corresponding focused
+  `ctest --test-dir ../nativekit/build-ui` selection passes 4/4; diff check passes.
+  An initial test compile caught a duplicate local name; corrected before gates.
+- Exact next action: expose foreground ranges through the C ABI and typed
+  UIKit TextLayout/TextArea APIs, including mutable and owned renderer paths.
+  Background/underline/whole-line, editor wiring and acceptance remain pending.
+
+
 ### M15.1–M15.3 — browser editor and composed acceptance (accepted)
 
 - The shared UIKit editor now runs through BrowserUiHost with bundled fonts,
