@@ -7,6 +7,7 @@ import editor.DecorationPresentation;
 import editor.EditorCoordinates;
 import editor.CaretPresentation;
 import nativekit.ui.widgets.text.TextSelection;
+import nativekit.ui.widgets.text.TextEditIntent;
 import plugin.PluginDecorationRegistry;
 import search.SearchMatch;
 import nativekit.ui.widgets.text.TextDecoration;
@@ -30,7 +31,8 @@ import editor.BufferSelection;
  * text share a single scroll container, so they always scroll together.
  *
  * Syntax providers adapt the document's cached UTF-16 tokens to the retained
- * layout's codepoint ranges. Multi-cursor editing remains a follow-on.
+ * layout's codepoint ranges. Multiple selections paint through UIKit and
+ * delegate their mutations to the normalized buffer transaction model.
  */
 class EditorPane implements View {
 	public final document:Document;
@@ -56,6 +58,9 @@ class EditorPane implements View {
 	final selectionProvider:Void->TextSelection;
 	final selectionHandler:TextSelection->Void;
 	var widgetSelection:TextSelection;
+	final additionalProvider:Void->Array<TextSelection>;
+	final editIntentHandler:TextEditIntent->Bool;
+	final selectedTextProvider:Void->Null<String>;
 
 	public function new(document:Document, theme:Theme, onEdited:Void->Void, ?selection:BufferSelection, ?editorTheme:style.Theme,
 			?decorations:PluginDecorationRegistry, ?searchMatches:Void->Array<SearchMatch>, ?searchRevision:Void->Int) {
@@ -72,6 +77,9 @@ class EditorPane implements View {
 			EditorCoordinates.codepoint(document, this.selection.cursor));
 		selectionProvider = provideSelection;
 		selectionHandler = handleSelection;
+		additionalProvider = provideAdditionalSelections;
+		editIntentHandler = handleEditIntent;
+		selectedTextProvider = provideSelectedText;
 	}
 
 	static function color(value:Int):Color {
@@ -114,6 +122,33 @@ class EditorPane implements View {
 		}
 	}
 
+	function provideAdditionalSelections():Array<TextSelection> {
+		var ranges = selection.allRanges();
+		return [for (index in 1...ranges.length)
+			new TextSelection(EditorCoordinates.codepoint(document, ranges[index].anchor),
+				EditorCoordinates.codepoint(document, ranges[index].cursor))];
+	}
+
+	function provideSelectedText():Null<String> {
+		for (range in selection.documentRanges()) if (range.isCollapsed()) return null;
+		return [for (range in selection.documentRanges()) document.buffer.textRange(range.start(), range.end())].join("\n");
+	}
+
+	function handleEditIntent(intent:TextEditIntent):Bool {
+		if (selection.rangeCount() == 1) return false;
+		switch intent {
+			case Insert(text): document.buffer.replaceSelections(selection, [text]);
+			case Paste(text):
+				var normalized = StringTools.replace(StringTools.replace(text, "\r\n", "\n"), "\r", "\n");
+				var lines = normalized.split("\n");
+				document.buffer.replaceSelections(selection, lines.length == selection.rangeCount() ? lines : [normalized]);
+			case DeleteBackward: document.buffer.deleteSelections(selection, true);
+			case DeleteForward: document.buffer.deleteSelections(selection, false);
+		}
+		onEdited();
+		return true;
+	}
+
 	function handleEdit(transaction:EditTransaction):Void {
 		document.buffer.applyEditTransaction(selection, transaction);
 		onEdited();
@@ -132,6 +167,9 @@ class EditorPane implements View {
 		area.decorationProvider = decorationProvider;
 		area.selectionProvider = selectionProvider;
 		area.onSelectionChange = selectionHandler;
+		area.additionalSelectionProvider = additionalProvider;
+		area.onEditIntent = editIntentHandler;
+		area.selectionTextProvider = selectedTextProvider;
 		var current = [document.buffer.stateId, decorations.revision, searchRevision(),
 			editorTheme.searchMatch, editorTheme.editorForeground];
 		for (kind in 0...8) current.push(editorTheme.tokenColor(kind));

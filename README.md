@@ -60,7 +60,8 @@ Source plugins use the embedded compiler/runtime; compatible and structural
 hot reloads pass headless and real-window automation. Syntax colors, plugin
 backgrounds, diagnostic wavy underlines and search highlights render through
 retained UIKit text layouts. Bracket matches and full-width current-line
-backgrounds follow the shared primary caret.
+backgrounds follow the shared primary caret. Multiple selections/carets render,
+and multi-caret insertion, cut/paste and deletion use buffer transactions.
 
 - Strict changed-row invalidation and the restored editor typing budget remain
   pending.
@@ -69,7 +70,7 @@ backgrounds follow the shared primary caret.
 - Workspace search results are retained by the host but have no graphical panel.
 - The shell has one editor region. Split, pane focus and moving tabs between
   panes are unavailable; tab reordering and sidebar visibility are wired.
-- Multiple selections, line wrapping and right-click context menus remain gaps.
+- Multi-caret navigation, line wrapping and right-click context menus remain gaps.
 - Some legacy shortcut keys lack a UIKit key mapping; their bridged commands
   are still available from the palette.
 

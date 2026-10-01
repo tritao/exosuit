@@ -16,9 +16,9 @@ Last updated: 2026-10-01.
   browser stage is wired into composed CI through `EXOSUIT_CI_WEB=1`; absent
   toolchains remain explicitly pending.
 - Active task: **M9.1**, styled text and decorations on UIKit.
-- Exact resume: connect normalized multiple selections and multi-caret editing.
-  Finish affected-row invalidation and measure the M7.1 typing budget. Preserve
-  M8 and both browser gates.
+- Exact resume: profile large-document/long-line typing and finish affected-row
+  invalidation, then complete multi-caret movement. Preserve M8 and both browser
+  gates.
 - All further graphical tests must use disposable PRAGTICAL_PORTABLE state.
   IME, physical mixed-DPI transitions, Windows and macOS remain unclaimed.
 - HEADs at planning: exosuit `ae2f260` (`haxeon-uikit-port`). Materia `main` is at
@@ -60,6 +60,43 @@ Last updated: 2026-10-01.
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M9.1 — multiple selections/carets and delegated editing (verified slice)
+
+- Materia `d04b8e0d6` adds optional additional-selection, selected-text and typed
+  edit-intent providers to TextField/TextArea. Owners may consume insertion,
+  paste and backward/forward deletion before the widget mutates its document.
+  The widget imports the result without replaying an already-applied edit.
+  Unhandled operations retain ordinary widget behavior; secondary collapsed
+  carets participate in blink scheduling. Full framework and focused delegation
+  tests pass `/tmp/uikit-m9-multiselection-final.log`.
+- EditorPane renders normalized additional ranges and carets and delegates
+  multi-selection edits to TextBuffer's existing transactional model. Clipboard
+  text follows document order; matching clipboard lines distribute per range.
+  Cut with collapsed carets preserves the clipboard/document. Native movement
+  currently falls back to one primary caret; full multi-caret movement and
+  physical IME coverage remain pending.
+- Real-window reference and self-hosted fixtures pass Unicode replacement,
+  backward/forward deletion, cut, transactional undo with restored selection
+  sets, asynchronous clipboard distribution and visible selections/carets on
+  two rows. Logs: `/tmp/exosuit-m9-multi-final-ui.log`, self-ui.log. Pixel checks
+  account for anti-aliased one-pixel carets and adjacent selection rectangles.
+- Complete headless suite, graphical build, UIKit workflow, actual Haxeon LSP
+  and unpacked release pass `/tmp/exosuit-m9-multi-` tests, build, workflow,
+  real-lsp and release logs. Browser targets pass web-reload-final.log.
+- Browser reload probes initially reported font/host fetch failures (web.log,
+  web-font-probe.log and web-final.log). These occur after typing/save, in the
+  reload phase. The smoke test now waits for a changed performance.timeOrigin
+  before inspecting fresh-document state and explicitly requires new running
+  frames. Network failures and optional HTTP/browser logs are retained. Both
+  targets pass this stronger check; no compiler fix or conclusive diagnosis of
+  the original fetch failures is claimed. Temporary host diagnostics were removed.
+- Release lock pins materia d04b8e0d6. The syntax/decorations and multiple
+  selection rendering checklist items are checked; M9.1 remains unfinished
+  because strict affected-row invalidation and large-fixture typing budgets
+  are not accepted. Next: use real keyboard measurements to localize the
+  large-document/long-line bottlenecks, then finish row invalidation and
+  multi-caret movement.
 
 ### M9.1 — bracket/current-line highlights and glyph layering (verified slice)
 

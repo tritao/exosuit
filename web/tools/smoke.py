@@ -22,6 +22,7 @@ class Page:
         self.socket = socket
         self.next_id = 0
         self.console = []
+        self.network_failures = []
 
     def command(self, method, params=None):
         self.next_id += 1
@@ -32,6 +33,8 @@ class Page:
                 continue
             message = json.loads(payload)
             event, params_ = message.get("method"), message.get("params", {})
+            if event == "Network.loadingFailed":
+                self.network_failures.append(params_)
             if event == "Runtime.consoleAPICalled":
                 text = " ".join(str(argument.get("value", argument.get("description", "")))
                                 for argument in params_.get("args", []))
@@ -70,6 +73,7 @@ def main():
     page.command("Runtime.enable")
     page.command("Page.enable")
     page.command("Log.enable")
+    page.command("Network.enable")
     page.command("Page.bringToFront")
     deadline = time.monotonic() + options.timeout
     state = {}
@@ -80,7 +84,7 @@ def main():
             break
         time.sleep(0.25)
     if state.get("state") != "running":
-        raise AssertionError(json.dumps({"state": state, "console": page.console}, ensure_ascii=False))
+        raise AssertionError(json.dumps({"state": state, "console": page.console, "networkFailures": page.network_failures}, ensure_ascii=False))
 
     def snapshot():
         return json.loads(page.evaluate("window.exosuit.snapshot(); JSON.stringify(window.exosuit.document)"))
@@ -165,14 +169,28 @@ def main():
     })()""")
     assert opened["result"] == 0 and opened["calls"] == [["https://github.com/tritao/pragtical-haxeon", "_blank", "noopener,noreferrer"]], opened
 
+    previous_origin = page.evaluate("performance.timeOrigin")
     page.command("Page.reload", {"ignoreCache": True})
+    reloaded = False
     while time.monotonic() < deadline:
-        state = json.loads(page.evaluate("JSON.stringify(window.exosuit || null)") or "null") or {}
+        try:
+            probe = json.loads(page.evaluate("JSON.stringify({origin: performance.timeOrigin, state: window.exosuit || null})"))
+        except RuntimeError as error:
+            if "Execution context was destroyed" not in str(error) and "Cannot find context" not in str(error):
+                raise
+            time.sleep(0.25)
+            continue
+        if probe["origin"] == previous_origin:
+            time.sleep(0.25)
+            continue
+        state = probe["state"] or {}
         if state.get("state") == "failed":
-            raise AssertionError(json.dumps({"state": state, "console": page.console}, ensure_ascii=False))
+            raise AssertionError(json.dumps({"state": state, "console": page.console, "networkFailures": page.network_failures}, ensure_ascii=False))
         if state.get("state") == "running" and state.get("frames", 0) >= options.frames:
+            reloaded = True
             break
         time.sleep(0.25)
+    assert reloaded, "fresh document did not reach the requested running frames"
     restored = snapshot()
     assert restored["content"] == original and not restored["dirty"] and not restored["errors"], restored
     state = json.loads(page.evaluate("JSON.stringify(window.exosuit || null)") or "null") or {}

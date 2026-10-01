@@ -17,7 +17,7 @@ if [[ ${HAXEON_SELF_HOSTED:-0} == 1 ]]; then
 fi
 printf 'class Main { static function main():Int { return 42; } }\n' > "$fixture/Main.hx"
 "$haxeon_root/scripts/haxeon" build --project "$root_dir/tests/decoration-ui-smoke/haxeon.json" "${compiler_mode[@]}"
-for phase in decorated moved cleared selection caret caret-moved caret-empty; do
+for phase in decorated moved cleared selection caret caret-moved caret-empty multi-selected multi-typed multi-pasted; do
     PRAGTICAL_PORTABLE="$fixture/state-$phase" xvfb-run -a \
         "$haxeon_root/scripts/haxeon" run --project "$root_dir/tests/decoration-ui-smoke/haxeon.json" "${compiler_mode[@]}" \
         -- "$fixture/Main.hx" "$fixture/$phase" "$phase"

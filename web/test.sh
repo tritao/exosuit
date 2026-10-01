@@ -30,6 +30,10 @@ cleanup() {
 	fi
 	kill "${http_pid:-}" 2>/dev/null || true
 	wait "${browser_pid:-}" "${http_pid:-}" 2>/dev/null || true
+	if [[ -n ${EXOSUIT_WEB_ARTIFACTS:-} ]]; then
+		mkdir -p "$EXOSUIT_WEB_ARTIFACTS"
+		cp "$temp_dir/http.log" "$temp_dir/browser.log" "$EXOSUIT_WEB_ARTIFACTS/"
+	fi
 	rm -rf -- "${temp_dir:?}"
 }
 trap cleanup EXIT

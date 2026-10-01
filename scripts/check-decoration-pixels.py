@@ -61,3 +61,24 @@ assert len(caret_moved[1]) >= 1000 and len(caret_empty[1]) >= 1000, "empty or mo
 assert min(y for _, y in caret_empty[1]) > max(y for _, y in caret[1]), "current line did not move to empty paragraph"
 assert min(y for _, y in caret_moved[1]) > max(y for _, y in caret_empty[1]), "current line did not move to comment paragraph"
 print("PASS: actual bracket/current-line pixels, caret movement, empty paragraph and clearing")
+
+
+def green_rows(path):
+    image = Image.open(path).convert("RGB")
+    rows = {}
+    for y in range(115, min(240, image.height)):
+        count = sum(1 for x in range(225, image.width)
+                    if (lambda rgb: rgb[1] > 100 and rgb[1] > 2 * rgb[0] and rgb[1] > 2 * rgb[2])(image.getpixel((x, y))))
+        if count:
+            rows[y] = count
+    return rows
+
+
+selected = green_rows(root / "multi-selected/frame.png")
+typed = green_rows(root / "multi-typed/frame.png")
+for rows, minimum in ((selected, 10), (typed, 1)):
+    assert rows and max(rows) - min(rows) >= 35, ("selection/caret pixels do not span both text rows", rows)
+    middle = (min(rows) + max(rows)) // 2
+    assert max(count for y, count in rows.items() if y <= middle) >= minimum, "missing first selection/caret"
+    assert max(count for y, count in rows.items() if y > middle) >= minimum, "missing second selection/caret"
+print("PASS: actual additional selection and multi-caret pixels after transactional typing/undo")

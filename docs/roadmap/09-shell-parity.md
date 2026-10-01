@@ -11,10 +11,10 @@ features; do not special-case exosuit inside UIKit.
   foreground color, background, underline (wavy for diagnostics) and
   whole-line backgrounds. Reuse the measured layout and invalidate only the
   changed rows.
-- [ ] Render syntax highlighting from the existing syntax registry,
+- [x] Render syntax highlighting from the existing syntax registry,
   diagnostics from `PluginDecorationRegistry`, search matches, bracket
   matches and the current line.
-- [ ] Render multiple selections and carets from the normalized
+- [x] Render multiple selections and carets from the normalized
   multi-selection model (M2.4).
 
 Acceptance: highlighting repairs after edits at multiline boundaries.

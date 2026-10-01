@@ -18,8 +18,8 @@ import view.View;
  * EditorPane imports this view's primary selection through TextArea's
  * controlled-selection API. Keyboard and pointer movement in the widget
  * report back to the same model after text edits synchronize the buffer.
- * Additional normalized selections remain a follow-on for widget rendering
- * and multi-caret typing.
+ * Additional normalized selections render through the widget; text insertion,
+ * clipboard operations and deletion are delegated to the buffer as one undo unit.
  *
  * Mouse/wheel/draw and clipboard (`copy`/`cut`/`paste`) are left as the
  * `View` base class's no-ops: `TextArea` handles pointer input and the
