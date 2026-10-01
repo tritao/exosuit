@@ -60,6 +60,27 @@ Last updated: 2026-10-01.
 
 ## Implementation records
 
+### M15.2 — terminating assignment lowering (verified compiler slice)
+
+- Haxeon `14a02e0e` fixes CFG lowering after a throw-valued assignment.
+  Abstract constructor `this = throw "expected"` reduced the guest failure.
+  Local/captured/field/static/array/map assignments and variable initialization
+  now preserve the throw without emitting an unreachable store. Operand
+  evaluation stops when an earlier operand terminates.
+- Registered terminated-assignment executes all eight forms and verifies
+  unchanged destinations; local reference Haxe/HL exits 42 on the same behavior.
+  Full gate exits 0: 378/378, every integration, 246 Wasm parity fixtures with
+  12 existing skips, Wasmtime. Bootstrap converges and --self rebuilds identically.
+  Logs: /tmp/haxeon-gate-terminated-assignment.log,
+  /tmp/haxeon-bootstrap-terminated-assignment.log,
+  /tmp/haxeon-bootstrap-self-terminated-assignment.log.
+- Guest CFG now succeeds, exposing embedded compiler runtime imports unsupported
+  on Wasm. Browser graph work isolates desktop source-plugin implementations.
+  Shared UiHostContext and optional typed file-dialog service are in progress.
+  The new service also reduced an existing interface optional-argument metadata
+  loss to an independent fixture; its fix and qualification are pending.
+
+
 ### M15.2 — shared browser pipeline tools (verified slice)
 
 - Materia `a656e9b7` factors manifest guest arguments, portable Wasm HXI
