@@ -67,9 +67,9 @@ Last updated: 2026-10-01.
 
 ## Implementation records
 
-### M11.2 — POSIX local transport hardening (verified Linux slice)
+### M11.2 — POSIX local transport hardening (accepted Linux slice)
 
-- NativeKit commits `2574e961` and `51537156`; the accompanying Exosuit
+- NativeKit commits `2574e961`, `51537156`, and `dd905416`; the accompanying Exosuit
   commit pins the NativeKit HEAD in `release.lock`. The existing Materia
   `nativekit` gitlink was already off-pin and remains unstaged.
 - Local listeners now require a user-owned, non-symlink private parent
@@ -82,11 +82,14 @@ Last updated: 2026-10-01.
   The privileged run drops a child to uid/gid 65534, permits it to connect to
   the test socket, and verifies no accepted-peer event reaches the queue.
   Private-parent refusal, symlink refusal, regular-file preservation, stale
-  recovery, live-socket preservation and socket mode are covered. Build:
+  recovery, live-socket preservation and socket mode are covered. The contract
+  also delivers a local stream one byte at a time and rejects a payload above
+  16 MiB; both unprivileged and privileged runs pass after this addition. Build:
   `/tmp/materia-nativekit-m11-build`; logs under `/tmp/nativekit-m11-*`.
-- M11.2 remains open for byte-split framing and payload-limit tests, plus
-  Windows named pipes with a current-user-only DACL and a Windows CI build.
-  M11.1's POSIX PTY runtime is the next independent native foundation.
+- M11.2 remains open on Windows for named pipes with a current-user-only DACL
+  and a Windows CI build. Protocol framing belongs to M13 and is not supplied
+  by NativeKit's raw byte stream. M11.1's POSIX PTY runtime is the next
+  independent native foundation.
 
 ### M9.1 — equal-length suffix culling reuse (verified native and UI slice)
 
