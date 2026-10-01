@@ -16,9 +16,10 @@ Last updated: 2026-10-01.
   browser stage is wired into composed CI through `EXOSUIT_CI_WEB=1`; absent
   toolchains remain explicitly pending.
 - Active task: **M9.1**, styled text and decorations on UIKit.
-- Independent M11.2 Linux transport hardening has started while the 1 MiB
-  graphical timing gate waits for an idle host. M11.1 PTY remains pending;
-  its listed Pragtical source path is absent from the available reference checkout.
+- Independent M11.1 POSIX PTY and M11.2 Linux transport slices are verified
+  while the 1 MiB graphical timing gate waits for an idle host. Their Windows
+  implementations remain open; the listed Pragtical PTY source path is absent
+  from the available reference checkout.
 - Exact resume: finish M9.1 strict changed-row invalidation. The guarded
   lowercase ASCII native edit path and visible-line background geometry meet
   the real 1 MiB varied-key typing budget; Unicode and unsupported layouts
@@ -59,13 +60,31 @@ Last updated: 2026-10-01.
 | M8 | Accepted on Linux | Both compiler modes, mandatory source plugins, real LSP/window workflow and unpacked release; composed CI exits 0 |
 | M9 | Active: M9.1 | General styled text/decorations and editor rendering |
 | M10 | Not started | Depends on M8, M9.1–M9.2 |
-| M11 | Active: M11.2 Linux slice | Depends on M8; independent of M9/M10; M11.1 PTY remains pending |
+| M11 | Active: M11.1 POSIX and M11.2 Linux slices | Depends on M8; independent of M9/M10; Windows PTY and named pipes remain pending |
 | M12 | Not started | Depends on M9, M11.1, M11.4 |
 | M13 | Not started | Depends on M11.2 |
 | M14 | Not started | Depends on M11–M13 |
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M11.1 — POSIX PTY runtime (accepted native slice)
+
+- NativeKit `4511511b` adds generation-checked `nk_pty_*` handles on Linux and
+  macOS. Spawn accepts absolute program, argv, cwd, environment and cell size;
+  the master descriptor is nonblocking. Read and write use caller buffers
+  directly, with a 64 KiB per-call bound and no intermediate byte queue.
+  `NK_EVENT_PTY_READABLE` and `NK_EVENT_PTY_EXITED` carry no output copy; a
+  monitor wakes the UI loop, while callers drain bytes with `nk_pty_read`.
+- Native contract passes shell echo, cwd, custom environment, `stty size`
+  after spawn and resize, bounded read under a 1 MiB producer, natural exit,
+  kill, and close. The Haxe ABI importer passes Linux, Windows and both macOS
+  targets; `pty_contract` and `transport_contract` pass in
+  `/tmp/materia-nativekit-m11-build`. NativeKit source and generated HXI are
+  committed, and `release.lock` pins the commit.
+- M11.1 remains open for Windows ConPTY runtime and a platform execution
+  test. The current Windows stub reports `NK_ERROR_UNSUPPORTED`. The absent
+  Pragtical reference prevents a source-port claim.
 
 ### M11.2 — POSIX local transport hardening (accepted Linux slice)
 
@@ -88,8 +107,7 @@ Last updated: 2026-10-01.
   `/tmp/materia-nativekit-m11-build`; logs under `/tmp/nativekit-m11-*`.
 - M11.2 remains open on Windows for named pipes with a current-user-only DACL
   and a Windows CI build. Protocol framing belongs to M13 and is not supplied
-  by NativeKit's raw byte stream. M11.1's POSIX PTY runtime is the next
-  independent native foundation.
+  by NativeKit's raw byte stream. M11.1's POSIX PTY slice is recorded above.
 
 ### M9.1 — equal-length suffix culling reuse (verified native and UI slice)
 
