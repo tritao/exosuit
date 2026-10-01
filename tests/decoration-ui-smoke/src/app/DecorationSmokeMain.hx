@@ -10,6 +10,7 @@ import search.DocumentSearch;
 import search.SearchOptions;
 import editor.BufferSelection;
 import editor.BufferPosition;
+import editor.EditorCoordinates;
 import platform.Native;
 import nativekit.ui.core.RenderNode;
 import nativekit.ui.core.State;
@@ -27,17 +28,27 @@ class DecorationSmokeApp extends ExosuitApp {
 		super(context.fonts, null, context, path);
 		this.phase = phase;
 		installMarks(0);
-		if (phase == "multi-selected" || phase == "multi-typed" || phase == "multi-pasted" || phase == "multi-navigation") {
+		if (phase == "multi-selected" || phase == "multi-typed" || phase == "multi-pasted" || phase == "multi-navigation" || phase == "multi-wrapped") {
 			var view = host.activeView();
 			if (view == null) throw "multi fixture has no view";
 			host.getPluginDecorations().removeOwner("smoke");
 			host.setDocumentSearchMatches([]);
 			theme.textSelection = Color.fromBytes(0, 255, 0);
 			theme.textCaret = Color.fromBytes(0, 255, 0);
-			view.document.buffer.replaceAllText(phase == "multi-navigation" ? "é🙂 x\né🙂 y\né🙂 z" : "é🙂 x\né🙂 y", view.selection);
+			var text = phase == "multi-navigation" ? "é🙂 x\né🙂 y\né🙂 z" : "é🙂 x\né🙂 y";
+			if (phase == "multi-wrapped") {
+				text = "";
+				for (_ in 0...400) text += "a";
+			}
+			view.document.buffer.replaceAllText(text, view.selection);
 			var anchor = phase == "multi-navigation" ? 3 : 0;
-			view.selection.restore(view.document.buffer, new BufferPosition(0, 3), new BufferPosition(0, anchor));
-			view.selection.addRange(view.document.buffer, new BufferPosition(1, 3), new BufferPosition(1, anchor));
+			if (phase == "multi-wrapped") {
+				view.selection.restore(view.document.buffer, new BufferPosition(0, 2), new BufferPosition(0, 2));
+				view.selection.addRange(view.document.buffer, new BufferPosition(0, 12), new BufferPosition(0, 12));
+			} else {
+				view.selection.restore(view.document.buffer, new BufferPosition(0, 3), new BufferPosition(0, anchor));
+				view.selection.addRange(view.document.buffer, new BufferPosition(1, 3), new BufferPosition(1, anchor));
+			}
 		}
 		if (phase == "caret" || phase == "caret-moved" || phase == "caret-empty") {
 			var view = host.activeView();
@@ -103,13 +114,28 @@ class DecorationSmokeApp extends ExosuitApp {
 				throw "controlled widget edit used a stale selection or coordinate map";
 			trace("PASS: real EditorPane controlled selection, Unicode navigation and replacement");
 		}
-		if ((phase == "multi-selected" || phase == "multi-typed" || phase == "multi-pasted" || phase == "multi-navigation") && frames == 4) {
+		if ((phase == "multi-selected" || phase == "multi-typed" || phase == "multi-pasted" || phase == "multi-navigation" || phase == "multi-wrapped") && frames == 4) {
 			var view = host.activeView();
 			if (view == null) throw "multi fixture view disappeared";
 			var node = findEditor(root, "editor:" + view.document.id);
 			if (node == null) throw "multi fixture editor disappeared";
 			ui.focusWidget(node.id);
-			if (phase == "multi-navigation") {
+			if (phase == "multi-wrapped") {
+				var state:State<TextEditorState> = ui.buildContext.existingState(node.id);
+				var editor = state.value;
+				var before = view.selection.allRanges();
+				var firstY = editor.layout.caret(new TextPosition(
+					EditorCoordinates.codepoint(view.document, before[0].cursor), 0)).y;
+				var secondY = editor.layout.caret(new TextPosition(
+					EditorCoordinates.codepoint(view.document, before[1].cursor), 0)).y;
+				ui.key(UiEventKind.KeyDown, UiKey.Down);
+				var after = view.selection.allRanges();
+				if (after.length != 2 || after[0].cursor.line != 0 || after[1].cursor.line != 0 ||
+					editor.layout.caret(new TextPosition(EditorCoordinates.codepoint(view.document, after[0].cursor), 0)).y <= firstY ||
+					editor.layout.caret(new TextPosition(EditorCoordinates.codepoint(view.document, after[1].cursor), 0)).y <= secondY)
+					throw "multi-caret Down did not move both carets within a wrapped paragraph";
+				trace("PASS: real multi-caret visual navigation within one wrapped paragraph");
+			} else if (phase == "multi-navigation") {
 				ui.key(UiEventKind.KeyDown, UiKey.Left);
 				var ranges = view.selection.allRanges();
 				if (ranges.length != 2 || ranges[0].cursor.column != 1 || ranges[1].cursor.column != 1)

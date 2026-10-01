@@ -81,6 +81,10 @@ Last updated: 2026-10-01.
   reference window rerun and unpacked release check pass at
   `/tmp/exosuit-m9-multinav-final-test.log` and
   `/tmp/exosuit-m9-multinav-release-test.log`.
+- A second real-window fixture puts two carets inside one 400-character
+  paragraph and verifies that Down advances both to the next wrapped visual
+  row without changing logical lines or losing a caret. The complete reference
+  decoration suite passes (`/tmp/exosuit-m9-multiwrapped-test.log`).
 - M9.1 remains active: strict changed-row invalidation and the 1 MiB typing
   budget are still open. The next measured work is incremental shaping and
   row geometry reuse for edited long paragraphs.
