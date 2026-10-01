@@ -45,19 +45,24 @@ candidate's character-wrap breaks match fresh Skribidi at all tested radii.
 The gates rejected every sampled mismatching window, but that sample is too
 small to establish a general safety rule.
 
-Cluster and text-property candidates now use indexed references to the old
-layout and shaped window. Constructing a candidate no longer copies or sorts
-all old clusters. A separate 1 MiB smoke check makes three cluster pieces and
-four property pieces; 100,000 paired random lookups took about 3 ms of CPU
-time on the recorded host. This measures the index only, not an edited UIKit
-frame or repeated edits. The full differential oracle still walks the entire
-candidate to check correctness.
+Cluster and text-property candidates now use indexed references to old and
+new layouts. Constructing a candidate no longer copies or sorts all cached
+clusters. A 1 MiB smoke check makes three cluster pieces and four property
+pieces; 100,000 paired random lookups took about 3 ms of CPU time on the
+recorded host. A mutable fixture then applies 30 varied letter replacements
+to both 4,096-codepoint and 1 MiB lines. Every resulting cluster and text
+property stream matches a fresh Skribidi layout, and the final 1 MiB
+character-wrap breaks match. For the 1 MiB fixture, the isolated nine-codepoint
+shape plus piece splice measured p50/p95 about 0.03/0.03 ms CPU. Fresh full
+layouts used for verification are excluded from that timing.
 
 The guard is an experimental rejection check, **not a proof of safe reuse**.
 The probe has sampled positions and fonts. It compares one-line caret geometry
 and one character-wrap fixture, but does not implement general word wrapping,
-incremental row metrics, or a mutable cache across consecutive edits. Oracle
-checks and glyph-position reconstruction still scan old layouts. It does not
-yet meet the 50 ms edit budget or run in UIKit. A production design needs
-mutable indexed storage, retained row geometry with a safe fallback, and
-broader differential coverage.
+incremental row metrics, or general mutable cluster edits: the current mutable
+cluster splice covers equal-length replacements of one-codepoint clusters.
+Oracle checks and glyph-position reconstruction still scan old layouts. The
+measured path excludes UIKit event handling, row layout, rendering, and
+publication, so it does not establish the 50 ms typing budget. A production
+design needs a composite layout/render API over pieces, retained row geometry
+with a safe fallback, and broader differential coverage.

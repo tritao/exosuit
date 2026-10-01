@@ -20,8 +20,8 @@ typedef struct {
 } cluster_piece_t;
 
 typedef struct {
-    cluster_piece_t pieces[3];
-    int cumulative[4];
+    cluster_piece_t pieces[128];
+    int cumulative[129];
     int piece_count, count;
 } cluster_index_t;
 
@@ -31,8 +31,8 @@ typedef struct {
 } property_piece_t;
 
 typedef struct {
-    property_piece_t pieces[4];
-    int cumulative[5];
+    property_piece_t pieces[128];
+    int cumulative[129];
     int piece_count, count;
 } property_index_t;
 
@@ -147,7 +147,7 @@ static int add_property_piece(property_index_t *index, const skb_layout_t *layou
                               int begin, int end) {
     if (begin == end) return 1;
     if (begin < 0 || end > skb_layout_get_text_count(layout) ||
-        begin > end || index->piece_count == 4) return 0;
+        begin > end || index->piece_count == 128) return 0;
     index->pieces[index->piece_count++] = (property_piece_t){layout, begin, end - begin};
     index->count += end - begin;
     index->cumulative[index->piece_count] = index->count;
@@ -164,6 +164,45 @@ static skb_text_property_t indexed_property(const property_index_t *index, int o
     const property_piece_t *piece = &index->pieces[low];
     return skb_layout_get_text_properties(piece->layout)
         [piece->source_start + offset - index->cumulative[low]];
+}
+
+static uint32_t indexed_codepoint(const property_index_t *index, int offset) {
+    int low = 0, high = index->piece_count;
+    while (low + 1 < high) {
+        const int middle = (low + high) / 2;
+        if (index->cumulative[middle] <= offset) low = middle;
+        else high = middle;
+    }
+    const property_piece_t *piece = &index->pieces[low];
+    return skb_layout_get_text(piece->layout)
+        [piece->source_start + offset - index->cumulative[low]];
+}
+
+static int splice_properties(const property_index_t *old, int begin, int end,
+                             const skb_layout_t *replacement, int replacement_end,
+                             property_index_t *next) {
+    *next = (property_index_t){0};
+    int inserted = 0;
+    for (int i = 0; i < old->piece_count; ++i) {
+        const property_piece_t *piece = &old->pieces[i];
+        const int first = old->cumulative[i], last = old->cumulative[i + 1];
+        if (first < begin) {
+            const int keep = (last < begin ? last : begin) - first;
+            if (!add_property_piece(next, piece->layout, piece->source_start,
+                                    piece->source_start + keep)) return 0;
+        }
+        if (!inserted && last >= begin) {
+            if (!add_property_piece(next, replacement, 0, replacement_end)) return 0;
+            inserted = 1;
+        }
+        if (last > end) {
+            const int skip = (end > first ? end : first) - first;
+            if (!add_property_piece(next, piece->layout,
+                                    piece->source_start + skip,
+                                    piece->source_start + piece->count)) return 0;
+        }
+    }
+    return inserted && next->count == old->count - (end - begin) + replacement_end;
 }
 
 typedef struct {
@@ -323,13 +362,55 @@ static int add_piece(cluster_index_t *index, const skb_layout_t *layout,
         (last > 0 && clusters[last - 1].text_offset +
          clusters[last - 1].text_count > end)) return 0;
     if (first == last) return 1;
-    if (index->piece_count == 3) return 0;
+    if (index->piece_count == 128) return 0;
     index->pieces[index->piece_count++] = (cluster_piece_t){
         layout, first, last - first, displacement,
     };
     index->count += last - first;
     index->cumulative[index->piece_count] = index->count;
     return 1;
+}
+
+static int add_existing_clusters(cluster_index_t *index, const cluster_piece_t *source,
+                                 int skip, int count) {
+    if (!count) return 1;
+    if (index->piece_count == 128 || skip < 0 || count < 0 ||
+        skip + count > source->count) return 0;
+    index->pieces[index->piece_count++] = (cluster_piece_t){
+        source->layout, source->first_cluster + skip, count, source->displacement,
+    };
+    index->count += count;
+    index->cumulative[index->piece_count] = index->count;
+    return 1;
+}
+
+// The mutable smoke uses one codepoint per cluster. General edits also need
+// a text-offset index so multi-codepoint clusters cannot be split here.
+static int splice_single_codepoint_clusters(const cluster_index_t *old,
+                                             int begin, int end,
+                                             const skb_layout_t *replacement,
+                                             cluster_index_t *next) {
+    *next = (cluster_index_t){0};
+    int inserted = 0;
+    for (int i = 0; i < old->piece_count; ++i) {
+        const cluster_piece_t *piece = &old->pieces[i];
+        const int first = old->cumulative[i], last = old->cumulative[i + 1];
+        if (first < begin) {
+            const int keep = (last < begin ? last : begin) - first;
+            if (!add_existing_clusters(next, piece, 0, keep)) return 0;
+        }
+        if (!inserted && last >= begin) {
+            if (!add_piece(next, replacement, 0,
+                           skb_layout_get_text_count(replacement), begin)) return 0;
+            inserted = 1;
+        }
+        if (last > end) {
+            const int skip = (end > first ? end : first) - first;
+            if (!add_existing_clusters(next, piece, skip, piece->count - skip)) return 0;
+        }
+    }
+    return inserted && next->count == old->count - (end - begin) +
+                       skb_layout_get_clusters_count(replacement);
 }
 
 static signature_t indexed_signature(const cluster_index_t *index, int position) {
@@ -566,6 +647,78 @@ static int run_index_smoke(skb_temp_alloc_t *temp, const skb_layout_params_t *pa
     return valid;
 }
 
+static int compare_double(const void *left, const void *right) {
+    const double a = *(const double *)left, b = *(const double *)right;
+    return (a > b) - (a < b);
+}
+
+static int run_mutable_smoke(skb_temp_alloc_t *temp, const skb_layout_params_t *params,
+                             int length, int verify_each) {
+    const int edit = length / 2, edits = 30;
+    uint32_t *text = malloc((size_t)length * sizeof(*text));
+    if (!text) return 0;
+    for (int i = 0; i < length; ++i) text[i] = 'a';
+    skb_layout_t *base = shape(temp, params, text, length);
+    skb_layout_t *windows[edits];
+    cluster_index_t clusters = {0};
+    property_index_t current = {0};
+    int valid = base && add_property_piece(&current, base, 0, length) &&
+                add_piece(&clusters, base, 0, length, 0);
+    int completed = 0;
+    double edit_ms[edits];
+    for (int step = 0; step < edits && valid; ++step) {
+        const clock_t started = clock();
+        uint32_t local[9];
+        for (int i = 0; i < 9; ++i)
+            local[i] = indexed_codepoint(&current, edit - 4 + i);
+        local[4] = (uint32_t)('b' + step % 24);
+        text[edit] = local[4];
+        windows[step] = shape(temp, params, local, 9);
+        if (!windows[step]) { valid = 0; break; }
+        ++completed;
+        property_index_t next;
+        valid = splice_properties(&current, edit - 4, edit + 4,
+                                  windows[step], 8, &next);
+        if (!valid) break;
+        current = next;
+        cluster_index_t next_clusters;
+        valid = splice_single_codepoint_clusters(&clusters, edit - 4,
+                                                  edit + 5, windows[step],
+                                                  &next_clusters);
+        if (!valid) break;
+        clusters = next_clusters;
+        edit_ms[step] = 1000.0 * (double)(clock() - started) / CLOCKS_PER_SEC;
+        if (!verify_each && step + 1 != edits) continue;
+        skb_layout_t *fresh = shape(temp, params, text, length);
+        if (!fresh) { valid = 0; break; }
+        int first_property = -1;
+        valid = text_properties_equal(&current, fresh, &first_property);
+        int first_cluster = -1;
+        valid &= same_signatures(&clusters, fresh, &first_cluster) == 1;
+        for (int i = 0; i < length && valid; ++i)
+            valid &= indexed_codepoint(&current, i) == text[i];
+        if (valid && step + 1 == edits && length >= 1024 * 1024)
+            valid &= character_wrap_equal(&clusters, text, length, temp, params);
+        if (!valid)
+            printf("mutable index mismatch after edit %d at property %d cluster %d\n",
+                   step + 1, first_property, first_cluster);
+        skb_layout_destroy(fresh);
+    }
+    if (completed == edits) {
+        qsort(edit_ms, edits, sizeof(edit_ms[0]), compare_double);
+        printf("mutable %d-codepoint index: %d/%d edits, %d cluster and %d property pieces, isolated shape+splice p50 %.3f ms p95 %.3f ms, %s\n",
+               length, completed, edits, clusters.piece_count, current.piece_count,
+               edit_ms[14], edit_ms[28], valid ? "valid" : "FAILED");
+    } else {
+        printf("mutable %d-codepoint index: %d/%d edits, %s\n",
+               length, completed, edits, valid ? "valid" : "FAILED");
+    }
+    for (int i = 0; i < completed; ++i) skb_layout_destroy(windows[i]);
+    skb_layout_destroy(base);
+    free(text);
+    return valid && completed == edits;
+}
+
 int main(void) {
     skb_temp_alloc_t *temp = skb_temp_alloc_create(1024);
     skb_font_collection_t *fonts = skb_font_collection_create();
@@ -639,6 +792,8 @@ int main(void) {
     printf("short windows: %d accepted, %d rejected by cluster/edge/bidi gates\n",
            accepted_short_windows, rejected_short_windows);
     passed &= run_index_smoke(temp, &params);
+    passed &= run_mutable_smoke(temp, &params, 4096, 1);
+    passed &= run_mutable_smoke(temp, &params, 1024 * 1024, 1);
     passed &= mixed_passed == mixed_total;
     skb_font_collection_destroy(fonts);
     skb_temp_alloc_destroy(temp);
