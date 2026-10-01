@@ -10,7 +10,8 @@ native-packages/terminal/tests/run.sh
 
 The C API feeds PTY output, reports terminal modes and cursor state, encodes
 keyboard/mouse/focus replies through a callback, and saves/restores replayable
-checkpoints. `terminalkit_snapshot()` exposes a cached active-screen cell grid.
+checkpoints. `terminalkit_snapshot()` exposes a cached cell grid for the selected
+scrollback viewport.
 `terminalkit_cells()` and `terminalkit_text()` borrow the grid and UTF-8 arena
 until the next feed, resize, restore, snapshot or close. Each cell contains an
 arena offset and length, display width and packed style; row-change flags are

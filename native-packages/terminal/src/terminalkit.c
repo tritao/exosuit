@@ -145,7 +145,11 @@ int terminalkit_mouse(terminalkit_handle *kit, uint32_t x, uint32_t y,
     return kit && terminal_emulator_mouse(kit->emulator, x, y, button, event, modifiers);
 }
 void terminalkit_scrollback(terminalkit_handle *kit, int position, int *current, int *total) {
-    if (kit) terminal_emulator_scrollback(kit->emulator, position, current, total);
+    if (!kit) return;
+    int before = 0;
+    terminal_emulator_scrollback(kit->emulator, -1, &before, NULL);
+    terminal_emulator_scrollback(kit->emulator, position, current, total);
+    if (position >= 0 && current && *current != before) kit->dirty = 1;
 }
 uint64_t terminalkit_checkpoint_size(terminalkit_handle *kit) {
     return kit ? (uint64_t)terminal_emulator_checkpoint_size(kit->emulator) : 0;

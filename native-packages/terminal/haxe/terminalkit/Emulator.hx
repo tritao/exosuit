@@ -45,6 +45,12 @@ class Emulator {
         return TerminalKit.terminalkit_focus_reporting(live()) != 0;
     public function mouseMode():Int return TerminalKit.terminalkit_mouse_mode(live());
 
+    /** Scrollback position counts lines above the live viewport. */
+    public function scrollback(position:Int):{current:Int, total:Int} {
+        var result = TerminalKit.terminalkit_scrollback(live(), position);
+        return {current: result.current, total: result.total};
+    }
+
     /** Rebuilds the cached grid only after new output. Returns changed-row count. */
     public function snapshot():Int return TerminalKit.terminalkit_snapshot(live());
     public function rowChanged(row:Int):Bool

@@ -20,11 +20,13 @@ and assert the final screen and replay requests.
 
 ## M12.2 — Terminal view
 
-Initial Linux slice: a local shell opens in a dock panel. Its plain-text rows
-use separate retained UIKit canvases, and the pane resizes the PTY to its
-resolved cell grid. Click-to-focus text input, Enter, Backspace, and Tab work.
-`scripts/test-terminal-ui.sh` exercises the live dock, resize, and shell input
-under Xvfb. The checklist below remains open for full terminal behavior.
+Initial Linux slice: a local shell opens in a dock panel. Retained UIKit row
+canvases repaint changed cells with indexed and true-color foreground/background
+colors and a cursor marker. The pane resizes the PTY to its resolved cell grid.
+Text input, navigation/control keys, emulator Kitty key encoding when active,
+focus reporting, and wheel scrollback are wired. `scripts/test-terminal-ui.sh`
+exercises the live dock, resize, and shell input under Xvfb. The checklist below
+remains open for full terminal behavior and measurement.
 
 - [ ] Add a grid-rendering view on UIKit `CanvasView`. Redraw only dirty rows.
   Support bold and italic through font roles, 256-color and true color, a

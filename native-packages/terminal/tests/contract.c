@@ -70,6 +70,11 @@ int main(void) {
     int current = 0, total = 0;
     terminalkit_scrollback(kit, 1, &current, &total);
     REQUIRE(current == 1 && total > 0);
+    REQUIRE(terminalkit_snapshot(kit) > 0);
+    REQUIRE(terminalkit_snapshot(kit) == 0);
+    terminalkit_scrollback(kit, 0, &current, &total);
+    REQUIRE(current == 0 && terminalkit_snapshot(kit) > 0);
+    terminalkit_scrollback(kit, 1, &current, &total);
     uint64_t size = terminalkit_checkpoint_size(kit), written = 0;
     REQUIRE(size > 0);
     void *checkpoint = malloc((size_t)size);

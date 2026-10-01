@@ -8,6 +8,7 @@ import LayoutStyle;
 import ParagraphStyle;
 import Rect;
 import TextLayout;
+import TextColorRange;
 import TextStyle;
 import TextWrap;
 import haxe.io.Bytes;
@@ -17,12 +18,16 @@ import nativekit.ui.core.RenderNode;
 import nativekit.ui.core.UiEvent;
 import nativekit.ui.core.UiEventKind;
 import nativekit.ui.core.UiKey;
+import nativekit.ui.core.UiModifier;
 import nativekit.ui.core.View;
 import nativekit.ui.widgets.CanvasView;
 import nativekit.ui.widgets.layout.Stack;
 import nativekit.ui.widgets.layout.StackChild;
 import sys.FileSystem;
 import terminalsession.TerminalSession;
+import terminalkit.Cell;
+
+private typedef TerminalBackground = {start:Int, end:Int, color:Color};
 
 /** Retained terminal rows; each row has its own raster cache and text layout. */
 class TerminalPane implements View {
@@ -32,6 +37,7 @@ class TerminalPane implements View {
 	final layouts:Array<TextLayout> = [];
 	final texts:Array<String> = [];
 	final revisions:Array<Int> = [];
+	final backgrounds:Array<Array<TerminalBackground>> = [];
 	final foreground = Color.rgba(0.87, 0.89, 0.91, 1.0);
 	final background = Color.rgba(0.06, 0.07, 0.09, 1.0);
 	final cellWidth:Float;
@@ -40,6 +46,9 @@ class TerminalPane implements View {
 	var viewportHeight:Float = 0.0;
 	var focusRequested:Bool = false;
 	var closed:Bool = false;
+	var cursorRow:Int = -1;
+	var cursorColumn:Int = -1;
+	var cursorMode:Int = 1;
 
 	public function new(session:TerminalSession, requestFrame:Void->Void) {
 		this.session = session;
@@ -72,6 +81,7 @@ class TerminalPane implements View {
 			layouts.pop().dispose();
 			texts.pop();
 			revisions.pop();
+			backgrounds.pop();
 		}
 		while (layouts.length < count) {
 			var layout = TextLayout.create(fonts, "", 8192.0, new TextStyle(14.0), new ParagraphStyle(TextWrap.None));
@@ -79,17 +89,54 @@ class TerminalPane implements View {
 			layouts.push(layout);
 			texts.push("");
 			revisions.push(0);
+			backgrounds.push([]);
 			force = true;
 		}
 		for (row in 0...count) {
 			if (!force && !emulator.rowChanged(row)) continue;
-			var next = emulator.rowText(row);
-			if (force || next != texts[row]) {
+			var cells = emulator.rowCells(row);
+			var buffer = new StringBuf();
+			var ranges:Array<TextColorRange> = [];
+			var fills:Array<TerminalBackground> = [];
+			var offset = 0;
+			for (column in 0...cells.length) {
+				var cell:Cell = cells[column];
+				if (cell.width == 0) continue;
+				var content = cell.text.length == 0 ? " " : cell.text;
+				buffer.add(content);
+				var count = codepoints(content);
+				var fg = haxe.Int64.toInt(cell.style);
+				var bg = haxe.Int64.toInt(cell.style >>> 32);
+				if ((fg & 3) != 0) ranges.push(new TextColorRange(offset, offset + count,
+					TerminalColors.decode(fg, foreground)));
+				if ((bg & 3) != 0) fills.push({start: column, end: column + cell.width,
+					color: TerminalColors.decode(bg, background)});
+				offset += count;
+			}
+			var next = buffer.toString();
+			if (force || next != texts[row] || emulator.rowChanged(row)) {
 				layouts[row].setText(next);
+				layouts[row].setColorRanges(ranges);
 				texts[row] = next;
+				backgrounds[row] = fills;
 				revisions[row]++;
 			}
 		}
+		var cursor = emulator.cursor();
+		if (cursorRow != cursor.row || cursorColumn != cursor.column || cursorMode != cursor.mode) {
+			if (cursorRow >= 0 && cursorRow < revisions.length) revisions[cursorRow]++;
+			cursorRow = cursor.row;
+			cursorColumn = cursor.column;
+			cursorMode = cursor.mode;
+			if (cursorRow >= 0 && cursorRow < revisions.length) revisions[cursorRow]++;
+		}
+	}
+
+	static function codepoints(value:String):Int {
+		var bytes = Bytes.ofString(value);
+		var count = 0;
+		for (i in 0...bytes.length) if ((bytes.get(i) & 0xc0) != 0x80) count++;
+		return count;
 	}
 
 	public function build(context:BuildContext):RenderNode {
@@ -110,7 +157,12 @@ class TerminalPane implements View {
 			var key = 'terminal-row-$index-${revisions[index]}-${Std.int(viewportWidth)}';
 			var view = new CanvasView('terminal-row-$index', function(canvas:Canvas, geometry) {
 				canvas.fillRectIfPositive(new Rect(0.0, 0.0, geometry.width, geometry.height), background);
+				for (fill in backgrounds[index]) canvas.fillRectIfPositive(new Rect(8.0 + fill.start * cellWidth,
+					0.0, (fill.end - fill.start) * cellWidth, rowHeight), fill.color);
 				canvas.drawText(layouts[index], 8.0, 0.0);
+				if (index == cursorRow && cursorMode != 1)
+					canvas.fillRectIfPositive(new Rect(8.0 + cursorColumn * cellWidth, rowHeight - 2.0,
+						cellWidth, 2.0), foreground);
 			}, rowStyle, null, false, CachePolicy.Raster, key);
 			layers.push(new StackChild('row-$index', view, 0.0, 4.0 + index * rowHeight,
 				1, LayoutAxis.grow(), LayoutAxis.fixed(rowHeight)));
@@ -125,17 +177,64 @@ class TerminalPane implements View {
 			}
 		});
 		node.on(UiEventKind.KeyDown, handleKey);
+		node.on(UiEventKind.KeyRepeat, handleKey);
+		node.on(UiEventKind.Focus, function(_) session.emulator.focus(true));
+		node.on(UiEventKind.FocusLost, function(_) session.emulator.focus(false));
+		node.on(UiEventKind.Scroll, function(event:UiEvent) {
+			var current = session.emulator.scrollback(-1).current;
+			var step = Std.int(Math.round(event.deltaY / rowHeight * 3.0));
+			if (step == 0) step = event.deltaY > 0 ? 1 : -1;
+			session.emulator.scrollback(current + step);
+			refreshRows(true);
+			requestFrame();
+			event.preventDefault();
+		});
 		if (!focusRequested) focusRequested = context.requestFocus(node.id);
 		return node;
 	}
 
 	function handleKey(event:UiEvent):Void {
+		var name = switch event.key {
+			case UiKey.Enter: "enter";
+			case UiKey.Backspace: "backspace";
+			case UiKey.Tab: "tab";
+			case UiKey.Escape: "escape";
+			case UiKey.Up: "up";
+			case UiKey.Down: "down";
+			case UiKey.Left: "left";
+			case UiKey.Right: "right";
+			case UiKey.Home: "home";
+			case UiKey.End: "end";
+			case UiKey.PageUp: "pageup";
+			case UiKey.PageDown: "pagedown";
+			case UiKey.Delete: "delete";
+			default: null;
+		};
+		if (name != null && session.emulator.key(name, event.modifiers)) {
+			session.pollEvents();
+			event.preventDefault();
+			return;
+		}
 		var bytes = switch event.key {
 			case UiKey.Enter: "\r";
 			case UiKey.Backspace: "\x7f";
 			case UiKey.Tab: "\t";
+			case UiKey.Escape: "\x1b";
+			case UiKey.Up: "\x1b[A";
+			case UiKey.Down: "\x1b[B";
+			case UiKey.Right: "\x1b[C";
+			case UiKey.Left: "\x1b[D";
+			case UiKey.Home: "\x1b[H";
+			case UiKey.End: "\x1b[F";
+			case UiKey.Delete: "\x1b[3~";
+			case UiKey.PageUp: "\x1b[5~";
+			case UiKey.PageDown: "\x1b[6~";
 			default: null;
 		};
+		if (bytes == null && (event.modifiers & UiModifier.Control) != 0) {
+			if (event.key >= UiKey.A && event.key <= UiKey.Z)
+				bytes = String.fromCharCode(event.key - UiKey.A + 1);
+		}
 		if (bytes != null) {
 			session.write(Bytes.ofString(bytes));
 			event.preventDefault();

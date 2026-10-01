@@ -956,7 +956,8 @@ int terminal_emulator_for_each_cell(terminal_emulator_t* emulator,
   if (!terminal || terminal->closed || !callback)
     return 0;
   terminal_cell_context_t context = { terminal, callback, user_data, 0 };
-  tsm_screen_draw_scrollback(terminal->screen, 0, emit_cell, &context);
+  tsm_screen_draw_scrollback(terminal->screen, current_scrollback(terminal),
+    emit_cell, &context);
   return !context.failed;
 }
 
