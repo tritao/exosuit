@@ -16,6 +16,9 @@ Last updated: 2026-10-01.
   browser stage is wired into composed CI through `EXOSUIT_CI_WEB=1`; absent
   toolchains remain explicitly pending.
 - Active task: **M9.1**, styled text and decorations on UIKit.
+- Independent M11.2 Linux transport hardening has started while the 1 MiB
+  graphical timing gate waits for an idle host. M11.1 PTY remains pending;
+  its listed Pragtical source path is absent from the available reference checkout.
 - Exact resume: finish M9.1 strict changed-row invalidation. The guarded
   lowercase ASCII native edit path and visible-line background geometry meet
   the real 1 MiB varied-key typing budget; Unicode and unsupported layouts
@@ -56,13 +59,34 @@ Last updated: 2026-10-01.
 | M8 | Accepted on Linux | Both compiler modes, mandatory source plugins, real LSP/window workflow and unpacked release; composed CI exits 0 |
 | M9 | Active: M9.1 | General styled text/decorations and editor rendering |
 | M10 | Not started | Depends on M8, M9.1–M9.2 |
-| M11 | Not started | Depends on M8; independent of M9/M10 |
+| M11 | Active: M11.2 Linux slice | Depends on M8; independent of M9/M10; M11.1 PTY remains pending |
 | M12 | Not started | Depends on M9, M11.1, M11.4 |
 | M13 | Not started | Depends on M11.2 |
 | M14 | Not started | Depends on M11–M13 |
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M11.2 — POSIX local transport hardening (verified Linux slice)
+
+- NativeKit commits `2574e961` and `51537156`; the accompanying Exosuit
+  commit pins the NativeKit HEAD in `release.lock`. The existing Materia
+  `nativekit` gitlink was already off-pin and remains unstaged.
+- Local listeners now require a user-owned, non-symlink private parent
+  directory; create socket paths with mode 0600; preserve regular files and
+  live sockets; and remove only stale sockets owned by the current user.
+  Client and accepted sockets check peer uid using `SO_PEERCRED` on Linux
+  (`getpeereid` on macOS). Windows capability reporting no longer advertises
+  unsupported local transport.
+- The NativeKit `transport_contract` passes unprivileged and under `pkexec`.
+  The privileged run drops a child to uid/gid 65534, permits it to connect to
+  the test socket, and verifies no accepted-peer event reaches the queue.
+  Private-parent refusal, symlink refusal, regular-file preservation, stale
+  recovery, live-socket preservation and socket mode are covered. Build:
+  `/tmp/materia-nativekit-m11-build`; logs under `/tmp/nativekit-m11-*`.
+- M11.2 remains open for byte-split framing and payload-limit tests, plus
+  Windows named pipes with a current-user-only DACL and a Windows CI build.
+  M11.1's POSIX PTY runtime is the next independent native foundation.
 
 ### M9.1 — equal-length suffix culling reuse (verified native and UI slice)
 
