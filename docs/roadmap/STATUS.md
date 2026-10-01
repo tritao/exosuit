@@ -9,11 +9,13 @@ Last updated: 2026-10-01.
 - Current evidence: `./scripts/test.sh` exits 0 with Unicode native regression
   coverage, but its pre-existing dynamic-plugin failure suppression remains;
   this is not a pass of every project and M8.1 is not yet complete.
-  `./scripts/build.sh` still exits 1 at `CommandView.hx:297` E1005.
-- Exact resume: reduce nullable provider-field access in `CommandView.filter`
-  using both compiler modes, register accepted/rejected compiler regressions,
-  and fix the general rule. Restore source-plugin embedding and remove the
-  suppression before claiming the M8.1 acceptance gate.
+  The reference `./scripts/build.sh` now exits 0 after Haxeon `3606bd7c`.
+  The checked-in self-hosted compiler is stale and currently rejects UIKit's
+  compound shift assignment; refresh it through bootstrap convergence.
+- Exact resume: finish reference headless verification, run Haxeon's
+  `./scripts/bootstrap-compiler.sh`, then test both compiler modes. Remove the
+  divergent defaults and upstream-fixed directory workaround. Restore
+  source-plugin embedding and remove test suppression before claiming M8.1.
 - HEADs at planning: exosuit `ae2f260` (`haxeon-uikit-port`). Materia `main` is at
   `816372dd`, fast-forwarded 2026-10-01 for the Haxeon wasm and web fixes; it
   contains uikit and editorkit. Haxeon is at `fba71015` (on pin, fast-forwarded).
@@ -89,6 +91,40 @@ Last updated: 2026-10-01.
   host symbol through HXI, but needs registration when embedding is restored.
   This gap blocks the full M8.1 acceptance; do not count the wrapper's exit 0 as
   every project passing. No compiler defect was fixed in this slice.
+
+### M8.2 — primitive effect inference (verified compiler slice)
+
+- Haxeon `3606bd7c` on `exosuit-followon` fixes the reference build failure in
+  `CommandView.filter` without changing application types or guards. A minimal
+  nullable provider loop compiled when it only read entries and failed at the
+  same read when `results.push(value)` was added.
+- Root cause: loop effect analysis treated built-in array storage operations as
+  unknown calls, forgetting all mutable-field facts. It also failed to infer
+  primitive string helpers as pure. The syntactic effect walker now recognizes
+  declared/inferred array locals and own array fields, reports their storage
+  effects, and distinguishes primitive string operations/joins and numeric
+  conditional results from calls or object conversions that can run user code.
+- Native `StringTools` prefix/suffix comparisons now state their actual `@:pure`
+  contract. Their C implementations only read lengths and compare bytes; these
+  annotations describe an opaque native boundary, not application workarounds.
+- Registered `LoopArrayEffectsMain` covers explicit/implicit own fields,
+  annotated/inferred local arrays, rejection of user-defined `push`, sort
+  callbacks and direct field replacement. Accepted programs execute on HashLink.
+  `PrimitiveStringEffectsMain` covers string helpers and getters, execution,
+  incremental rejection after a helper gains a write, cold-build agreement and
+  acceptance after restoring the helper.
+- Focused regression runners exited 0. Haxeon's `./scripts/test.sh` exited 0
+  with formatting enabled: 365/365 test-driver cases, differential tests,
+  runtime/HXI/C++ and native-package integrations, wasm backend/parity and
+  Wasmtime GC checks passed. Exosuit reference `./scripts/build.sh` exited 0;
+  reference headless verification is in progress at this checkpoint.
+- Upstream `c59502ff` already made action-directory creation race tolerant via
+  `Directories.ensure`; exosuit's pre-creation workaround still needs removal.
+- Self-hosted graphical build still exits 1 at `IdSet.hx:565` (`E0002: Expected
+  expression`, byte offset at `size <<= 1`). Its checked-in bootstrap was last
+  refreshed at `308231b5` (2026-09-28), before later syntax changes. Refresh and
+  compare compiler modes before deciding whether another typing fix is needed.
+  No self-hosted success or full M8.2 completion is claimed yet.
 
 ## Completed records
 
