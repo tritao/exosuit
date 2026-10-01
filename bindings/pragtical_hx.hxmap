@@ -1,0 +1,10 @@
+{
+  "interface": "PragticalHx",
+  "package": "platform.ffi",
+  "modules": {
+    "functions": "NativeApi",
+    "types": "NativeTypes",
+    "constants": "NativeConstants"
+  },
+  "typePrefix": "phx_"
+}

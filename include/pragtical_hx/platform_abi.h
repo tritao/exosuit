@@ -2,7 +2,7 @@
 #ifndef PRAGTICAL_HX_PLATFORM_ABI_H
 #define PRAGTICAL_HX_PLATFORM_ABI_H
 
-#define PHX_PLATFORM_ABI_VERSION 17
+#define PHX_PLATFORM_ABI_VERSION 18
 
 typedef enum phx_event_kind {
   PHX_EVENT_NONE = 0,

@@ -1,18 +1,47 @@
 {
 	"version": 1,
-	"package": { "name": "pragtical_hx" },
+	"package": {
+		"name": "pragtical_hx"
+	},
 	"entry": "app.Main",
-	"sourceRoots": ["src"],
+	"sourceRoots": [
+		"src"
+	],
 	"scopeSourceRoots": false,
 	"dependencies": {
-		"nativekit": { "path": "../nativekit" },
-		"uikit": { "path": "../uikit" },
-		"editorkit": { "path": "../editorkit" }
+		"nativekit": {
+			"path": "../nativekit"
+		},
+		"uikit": {
+			"path": "../uikit"
+		},
+		"editorkit": {
+			"path": "../editorkit"
+		}
 	},
 	"native": {
-		"sources": ["native/headless/platform.c", "native/hashlink/pragtical_hx.c"],
-		"includeDirs": ["include"]
+		"cmake": {
+			"source": "native",
+			"target": "pragtical_hx",
+			"library": "pragtical_hx",
+			"inputs": [
+				"native/CMakeLists.txt",
+				"native/ffi/pragtical_hx.c",
+				"native/headless/platform.c",
+				"include/pragtical_hx/native.h",
+				"include/pragtical_hx/platform.h",
+				"include/pragtical_hx/platform_abi.h"
+			]
+		}
 	},
 	"target": "host",
-	"outputDir": "build"
+	"outputDir": "build",
+	"ffi": {
+		"interfaces": [
+			"bindings/pragtical_hx.hxi"
+		],
+		"projections": [
+			"bindings/pragtical_hx.hxmap"
+		]
+	}
 }

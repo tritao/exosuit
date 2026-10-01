@@ -146,13 +146,18 @@ The headless core (`haxeon.json`, entry `app.Main`) builds without UIKit:
     "uikit": { "path": "../uikit" },
     "editorkit": { "path": "../editorkit" }
   },
+  "ffi": {
+    "interfaces": ["bindings/pragtical_hx.hxi"],
+    "projections": ["bindings/pragtical_hx.hxmap"]
+  },
   "native": {
-    "sources": ["native/headless/platform.c", "native/hashlink/pragtical_hx.c"],
-    "includeDirs": ["include"]
+    "cmake": { "source": "native", "target": "pragtical_hx", "library": "pragtical_hx" }
   },
   "target": "host"
 }
 ```
+
+See [the native binding contract](native-bindings.md) for generation and callback ownership.
 
 This build targets the headless platform (no window, no GPU). The main entry
 point runs Haxe code directly without a host loop. All headless test projects

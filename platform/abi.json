@@ -1,5 +1,5 @@
 {
-  "version": 17,
+  "version": 18,
   "events": {
     "NONE": { "value": 0 },
     "QUIT": { "value": 1, "constructor": "Quit", "fields": [] },

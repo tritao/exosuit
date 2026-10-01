@@ -27,7 +27,7 @@ separate build manifests**:
 **`haxeon.json`** (headless core):
 - Entry point: `app.Main`
 - Dependencies: NativeKit, UIKit, EditorKit (as Haxe packages, no native build)
-- Native ABI: `native/headless/platform.c`, `native/hashlink/pragtical_hx.c`
+- Native ABI: `native/headless/platform.c`, `native/ffi/pragtical_hx.c`
 - Provides: Editor model, document/session, workspace, commands, plugins
 - Used by: Headless tests, 12 test projects, library consumers
 
@@ -124,7 +124,7 @@ Limitations in current UIKit TextArea:
 
 The native layer remains unchanged from 0001:
 - `native/headless/platform.c` — minimal platform ABI (file system, processes)
-- `native/hashlink/pragtical_hx.c` — FFI bindings (clipboard, shell, etc.)
+- `native/ffi/pragtical_hx.c` — FFI bindings (clipboard, shell, etc.)
 - No window management, main loop, or SDL directly referenced from Haxe
 
 Rendering and window management are now owned by `DesktopUiHost` + UIKit,

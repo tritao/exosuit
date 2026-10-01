@@ -128,6 +128,16 @@ static int32_t normalize_modifiers(SDL_Keymod modifiers) {
 
 static bool fail(const char *message) {
   snprintf(last_error, sizeof(last_error), "%s", message);
+  /* Keep a bounded diagnostic from ending inside a UTF-8 scalar. */
+  size_t length = strlen(last_error);
+  if (length > 0) {
+    size_t start = length - 1;
+    while (start > 0 && ((unsigned char)last_error[start] & 0xC0) == 0x80) start--;
+    unsigned char lead = (unsigned char)last_error[start];
+    size_t width = lead < 0x80 ? 1 : (lead & 0xE0) == 0xC0 ? 2
+      : (lead & 0xF0) == 0xE0 ? 3 : (lead & 0xF8) == 0xF0 ? 4 : 1;
+    if (length - start < width) last_error[start] = '\0';
+  }
   return false;
 }
 
@@ -831,8 +841,11 @@ bool phx_process_set_environment(phx_handle process, const char *key,
   phx_process_slot *slot = resolve_process(process);
   if (!slot) return fail("invalid or stale process handle");
   if (slot->started) return fail("process already started");
-  if (!key || key[0] == '\0' || strchr(key, '='))
-    return fail("invalid process environment key");
+  if (!key || key[0] == '\0' || strchr(key, '=')) {
+    char message[512];
+    snprintf(message, sizeof(message), "invalid process environment key: %s", key ? key : "");
+    return fail(message);
+  }
   for (int32_t index = 0; index < slot->environment_count; index++) {
     if (strcmp(slot->environment_keys[index], key) != 0) continue;
     char *replacement = strdup(value ? value : "");

@@ -1,0 +1,9 @@
+{
+	"version": 1,
+	"package": { "name": "exosuit-native-string-test" },
+	"entry": "app.NativeStringTestMain",
+	"sourceRoots": ["src"],
+	"dependencies": { "pragtical_hx": { "path": "../.." } },
+	"target": "host",
+	"outputDir": "build"
+}

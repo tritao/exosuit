@@ -1,10 +1,15 @@
 package plugin;
 
 class DynamicEditorApiSource {
+	/** Registered with the embedded compiler before compiling the SDK. */
+	public static final NATIVE_INTERFACE = 'interface PluginHost @target("portable-abi64") @library("pragtical_hx") { '
+		+ 'extern fn hostCall(operation: i32, token: utf8, a: utf8, b: utf8, c: utf8) -> utf8 '
+		+ '@symbol("pragtical_hx_plugin_api_call") @borrowed; }';
 	public static final CONTENT = "package pragtical;\n"
-		+ "@:hlNative(\"pragtical_hx\", \"plugin_api_call\") extern function hostCall(operation:Int, token:String, a:String, b:String, c:String):String;\n"
+		+ "import PluginHost;\n"
 		+ "class Editor {\n"
 		+ "  public static inline final API_VERSION = 2;\n"
+		+ "  static function hostCall(operation:Int, token:String, a:String, b:String, c:String):String return PluginHost.hostCall(operation, token, a, b, c);\n"
 		+ "  static var token:String = \"\";\n"
 		+ "  public static function connect(id:String):Void { token = hostCall(0, \"\", id, \"\", \"\"); }\n"
 		+ "  public static function activeDocumentText():String return hostCall(1, token, \"\", \"\", \"\");\n"

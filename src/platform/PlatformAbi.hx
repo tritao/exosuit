@@ -2,7 +2,7 @@
 package platform;
 
 class PlatformAbi {
-	public static inline final ABI_VERSION = 17;
+	public static inline final ABI_VERSION = 18;
 	public static inline final EVENT_NONE = 0;
 	public static inline final EVENT_QUIT = 1;
 	public static inline final EVENT_WINDOW_RESIZED = 2;

@@ -42,6 +42,7 @@ mkdir -p "$root_dir/build"
 # A plain-C check of the headless platform ABI, independent of the Haxe/Haxeon
 # toolchain.
 python3 "$root_dir/scripts/generate-platform-abi.py" --check
+"$root_dir/scripts/update-native-bindings.sh" --check
 "$cc" -std=c11 -Wall -Wextra -Werror \
 	-I"$root_dir/include" \
 	"$root_dir/native/headless/platform.c" \
@@ -60,6 +61,7 @@ mkdir -p "$root_dir/build/.haxeon/actions"
 "$haxeon" run --project "$root_dir/haxeon.json" "${self_hosted[@]}"
 echo "PASS: Haxeon headless application exercised the platform ABI"
 
+run_test native-string-test
 run_test application-test
 run_test command-test
 run_test editor-view-test
