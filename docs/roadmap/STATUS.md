@@ -4,7 +4,16 @@ Last updated: 2026-10-01.
 
 ## Current checkpoint
 
-- Active task: **M8.1** (native string convention). Follow-on roadmap M8–M15 was planned 2026-10-01.
+- Active tasks: **M8.1** acceptance gap (dynamic plugin integration) and **M8.2**
+  (compiler/build agreement). Native C/HXI migration committed as `f8939de`.
+- Current evidence: `./scripts/test.sh` exits 0 with Unicode native regression
+  coverage, but its pre-existing dynamic-plugin failure suppression remains;
+  this is not a pass of every project and M8.1 is not yet complete.
+  `./scripts/build.sh` still exits 1 at `CommandView.hx:297` E1005.
+- Exact resume: reduce nullable provider-field access in `CommandView.filter`
+  using both compiler modes, register accepted/rejected compiler regressions,
+  and fix the general rule. Restore source-plugin embedding and remove the
+  suppression before claiming the M8.1 acceptance gate.
 - HEADs at planning: exosuit `ae2f260` (`haxeon-uikit-port`). Materia `main` is at
   `816372dd`, fast-forwarded 2026-10-01 for the Haxeon wasm and web fixes; it
   contains uikit and editorkit. Haxeon is at `fba71015` (on pin, fast-forwarded).
@@ -34,7 +43,7 @@ Last updated: 2026-10-01.
 | M5 | Complete headlessly | Live layered configuration, owned APIs, debounced background compilation, transactional reload and editor lifecycle controls pass |
 | M6 | Complete headlessly | Bounded JSON-RPC, lifecycle/synchronization, language commands, diagnostics, restart and real Haxeon edit/diagnose/fix/build smoke pass |
 | M7 | Complete for the claimed Linux automation scope | M7.1–M7.3 pass; desktop IME, physical mixed-DPI, Windows and macOS remain explicit unclaimed follow-ons |
-| M8 | Not started | Headless suite aborts on native string signatures; graphical build hits E1005; SDL automation, LSP smoke and release gates are missing |
+| M8 | In progress | C/HXI migration `f8939de` removes native string abort; headless gating tests pass; dynamic plugin project suppressed; graphical build still hits E1005; integration/release gates pending |
 | M9 | Not started | Depends on M8 |
 | M10 | Not started | Depends on M8, M9.1–M9.2 |
 | M11 | Not started | Depends on M8; independent of M9/M10 |
@@ -42,6 +51,44 @@ Last updated: 2026-10-01.
 | M13 | Not started | Depends on M11.2 |
 | M14 | Not started | Depends on M11–M13 |
 | M15 | Not started | Depends on M8.1, M8.2; scheduled right after M8. Reference: materia `app/web` at `816372dd`, Haxeon `fba71015` |
+
+## Implementation records
+
+### M8.1 — native C/HXI migration (verified slice; acceptance incomplete)
+
+- Exosuit `f8939de` replaces every editor `@:hlNative` entry with a C-header
+  binding, portable `.hxi`/`.hxmap`, explicit UTF-8 strings, 32-bit booleans and
+  managed retained callbacks. ABI is now 18 (the actual run baseline was 17).
+  Unused SDL host callbacks and stale generated bridge header are removed.
+  Window/font/draw functions remain for headless model, renderer and benchmark
+  consumers; rationale and callback lifecycle are in `docs/native-bindings.md`.
+- Start state: exosuit `fc5bbee`, clean; materia `816372dd`, dirty submodule
+  pointers and untracked exosuit; Haxeon `fba71015`, pre-existing modified
+  `vendor/hashlink` pointer and untracked `hlprofile.dump`; NativeKit `2bb4c957`,
+  clean off-pin. Reference Pragtical is `/home/joao/dev/pragtical` (the default
+  sibling path does not exist), with pre-existing config/sidebar/view/settings
+  changes and untracked `scripts/lua/tests/view.lua`. No sibling or reference
+  changes were made in this slice.
+- `./scripts/test.sh` before migration exited 1 at the recorded `last_error`
+  HashLink signature mismatch. After migration it exited 0; all gating
+  projects passed. The new `native-string-test` covers Unicode clipboard,
+  copied borrowed results, callback arguments/results/errors, replacement,
+  shutdown, Unicode native errors and diagnostic truncation at scalar boundaries.
+  Existing process tests cover stdin and split UTF-8 output.
+- `./scripts/update-native-bindings.sh --check` exited 0: Clang import and
+  portable ABI audit passed for Linux x64, Windows x64, macOS x64/arm64.
+  This is ABI import evidence, not execution evidence on Windows/macOS.
+  `cc -std=c11 -Wall -Wextra -Werror -Iinclude -c
+  native/ffi/pragtical_hx.c -o /tmp/exosuit-native.o` and `git diff --check`
+  exited 0.
+- `./scripts/build.sh` exited 1 with the baseline
+  `commandview/CommandView.hx:297:16: E1005: Field "entries" requires an object`.
+  GUI/IME/mixed-DPI checks were not performed.
+- The test wrapper suppresses `dynamic-plugin-test`: the UIKit port replaced
+  source compilation with a throwing stub. Its SDK now declares the migrated
+  host symbol through HXI, but needs registration when embedding is restored.
+  This gap blocks the full M8.1 acceptance; do not count the wrapper's exit 0 as
+  every project passing. No compiler defect was fixed in this slice.
 
 ## Completed records
 
