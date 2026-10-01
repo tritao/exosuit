@@ -80,6 +80,7 @@ Run from the editor root:
 ./scripts/build.sh     # graphical/haxeon.json (UIKit host)
 ./scripts/ci.sh        # composed gate (M8.3 restores LSP and release stages)
 ./scripts/test-decoration-ui.sh # real retained decoration pixels (Xvfb + Python Pillow)
+./scripts/benchmark-uikit-typing.sh # real keyboard/frame timing; TYPING_UI_FIXTURE=small|10mb|long-line
 ./scripts/run.sh /absolute/path/to/a/disposable/project
 ```
 

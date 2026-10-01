@@ -61,6 +61,34 @@ Last updated: 2026-10-01.
 
 ## Implementation records
 
+### M9.1 — restored UIKit keyboard benchmark (initial measurements)
+
+- `scripts/benchmark-uikit-typing.sh` drives actual X11 character insertion and
+  backspace through the production editor with disposable portable state. It
+  retains capture/event timelines and reports committed TextInput-request to
+  completed-frame time, excluding OS delivery and physical display scanout.
+  Backspace restores the fixture between measured insertions. The script
+  supports the fixed small, 10 MiB and 1 MiB single-line fixtures and records
+  CPU/platform metadata. Exit 0 means valid measurements, not budget acceptance;
+  `withinBudget` explicitly reports the p95 < 50 ms result.
+- Small fixture: 4,200 bytes, 30 committed text-input frames on the i5-13600K,
+  p50 13.79 ms, p95 21.56 ms, maximum 21.93 ms. Artifacts:
+  `/tmp/exosuit-m9-typing-small-fixed`; log has the same path plus `.log`.
+  These observations are from a workstation also running other compiler work.
+- The 10 MiB run exits 137 after its HashLink process is killed, before frame
+  captures/measurements exist (`/tmp/exosuit-m9-typing-10mb.log`, artifacts at
+  the same path without `.log`). No OOM cause was established from available
+  kernel/service logs; do not classify this as a passed latency measurement.
+- The 1 MiB single-line run reaches the 180-second external timeout (124),
+  with about 100% of one CPU core and roughly 398 MiB RSS observed while stuck.
+  Only startup/window events were recorded; no input-frame measurements exist.
+  Artifacts/log: `/tmp/exosuit-m9-typing-long-line` and `.log`.
+- Large-fixture startup/typing remains an unresolved product limitation.
+  Next: profile document/highlighter creation, native shaping and the first UI
+  submission separately on reduced long-line sizes; collect peak memory for
+  the 10 MiB failure. Fix measured bottlenecks and affected-row invalidation,
+  then rerun the fixed fixtures. Do not check M9.1's overall acceptance yet.
+
 ### M9.1 — multiple selections/carets and delegated editing (verified slice)
 
 - Materia `d04b8e0d6` adds optional additional-selection, selected-text and typed

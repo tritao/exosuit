@@ -63,8 +63,8 @@ retained UIKit text layouts. Bracket matches and full-width current-line
 backgrounds follow the shared primary caret. Multiple selections/carets render,
 and multi-caret insertion, cut/paste and deletion use buffer transactions.
 
-- Strict changed-row invalidation and the restored editor typing budget remain
-  pending.
+- Strict changed-row invalidation and the large-file typing budget remain
+  pending. The 10 MiB and 1 MiB-line benchmark fixtures do not currently complete.
 - Primary caret/selection changes now flow between the widget and model, including
   command-driven placement. Language popups are not anchored to that caret.
 - Workspace search results are retained by the host but have no graphical panel.
