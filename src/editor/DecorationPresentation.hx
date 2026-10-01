@@ -30,13 +30,13 @@ class DecorationPresentation {
 		if (line < 0 || line >= buffer.lineCount()) return;
 		var first = buffer.positionAt(line, from);
 		var last = buffer.positionAt(line, to);
-		if (!first.before(last)) return;
+		if (last.before(first) || first.equals(last) && kind != WholeLineBackground) return;
 		var text = buffer.document;
 		var paragraph = text.paragraphRangeAtIndex(line);
 		var utf16Start = text.utf16OffsetForCodepoint(paragraph.start);
 		var rangeStart = text.codepointOffsetForUtf16(utf16Start + first.column);
 		var rangeEnd = text.codepointOffsetForUtf16(utf16Start + last.column);
-		if (rangeStart < end && rangeEnd > start)
+		if (rangeStart == rangeEnd ? rangeStart >= start && rangeStart <= end : rangeStart < end && rangeEnd > start)
 			result.push(new DecorationRange(rangeStart, rangeEnd, color, kind));
 	}
 }

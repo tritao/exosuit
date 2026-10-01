@@ -59,10 +59,11 @@ language commands. Hover, completion and signature-help overlays are wired.
 Source plugins use the embedded compiler/runtime; compatible and structural
 hot reloads pass headless and real-window automation. Syntax colors, plugin
 backgrounds, diagnostic wavy underlines and search highlights render through
-retained UIKit text layouts.
+retained UIKit text layouts. Bracket matches and full-width current-line
+backgrounds follow the shared primary caret.
 
-- Bracket/current-line highlights, strict changed-row invalidation and the
-  restored editor typing budget remain pending.
+- Strict changed-row invalidation and the restored editor typing budget remain
+  pending.
 - Primary caret/selection changes now flow between the widget and model, including
   command-driven placement. Language popups are not anchored to that caret.
 - Workspace search results are retained by the host but have no graphical panel.

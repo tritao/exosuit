@@ -65,6 +65,7 @@
     "../src/editor/BufferSelection.hx",
     "../src/editor/BufferSubscription.hx",
     "../src/editor/BufferTransaction.hx",
+    "../src/editor/CaretPresentation.hx",
     "../src/editor/DecorationPresentation.hx",
     "../src/editor/DecorationRange.hx",
     "../src/editor/Document.hx",

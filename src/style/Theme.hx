@@ -17,6 +17,8 @@ class Theme {
 	public var foregroundSubtle:Int = 0x777777ff;
 	public var foregroundDisabled:Int = 0x666666ff;
 	public var selection:Int = 0x264f78ff;
+	public var currentLine:Int = 0x202020ff;
+	public var bracketMatch:Int = 0x3c4b5aff;
 	public var searchMatch:Int = 0x6b5b1fff;
 	public var caret:Int = 0xffffffff;
 	public var overlay:Int = 0x00000066;

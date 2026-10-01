@@ -5,6 +5,7 @@ import TextColorRange;
 import editor.SyntaxPresentation;
 import editor.DecorationPresentation;
 import editor.EditorCoordinates;
+import editor.CaretPresentation;
 import nativekit.ui.widgets.text.TextSelection;
 import plugin.PluginDecorationRegistry;
 import search.SearchMatch;
@@ -49,6 +50,7 @@ class EditorPane implements View {
 	final searchRevision:Void->Int;
 	final foregroundProvider:(Int, Int)->Array<TextColorRange>;
 	final decorationProvider:(Int, Int)->Array<TextDecoration>;
+	final caretPresentation = new CaretPresentation();
 	var presentationRevision:Int = 0;
 	var previousPresentation:Array<Int> = [];
 	final selectionProvider:Void->TextSelection;
@@ -83,10 +85,13 @@ class EditorPane implements View {
 	}
 
 	function provideDecorations(start:Int, end:Int):Array<TextDecoration> {
-		return [for (range in DecorationPresentation.ranges(document, editorTheme,
-			decorations.forDocument(document), searchMatches(), start, end))
+		var ranges = caretPresentation.ranges(start, end);
+		for (range in DecorationPresentation.ranges(document, editorTheme,
+			decorations.forDocument(document), searchMatches(), start, end)) ranges.push(range);
+		return [for (range in ranges)
 			new TextDecoration(range.start, range.end, color(range.color), switch range.kind {
 				case Background: TextDecorationKind.Background;
+				case WholeLineBackground: TextDecorationKind.WholeLineBackground;
 				case WavyUnderline: TextDecorationKind.WavyUnderline;
 			})];
 	}
@@ -130,7 +135,8 @@ class EditorPane implements View {
 		var current = [document.buffer.stateId, decorations.revision, searchRevision(),
 			editorTheme.searchMatch, editorTheme.editorForeground];
 		for (kind in 0...8) current.push(editorTheme.tokenColor(kind));
-		var changed = current.length != previousPresentation.length;
+		var changed = caretPresentation.update(document, selection, editorTheme);
+		if (current.length != previousPresentation.length) changed = true;
 		if (!changed)
 			for (index in 0...current.length)
 				if (current[index] != previousPresentation[index]) changed = true;

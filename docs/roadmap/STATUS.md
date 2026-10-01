@@ -16,8 +16,7 @@ Last updated: 2026-10-01.
   browser stage is wired into composed CI through `EXOSUIT_CI_WEB=1`; absent
   toolchains remain explicitly pending.
 - Active task: **M9.1**, styled text and decorations on UIKit.
-- Exact resume: render bracket/current-line ranges from the now-shared primary
-  caret, then connect normalized multiple selections and multi-caret editing.
+- Exact resume: connect normalized multiple selections and multi-caret editing.
   Finish affected-row invalidation and measure the M7.1 typing budget. Preserve
   M8 and both browser gates.
 - All further graphical tests must use disposable PRAGTICAL_PORTABLE state.
@@ -61,6 +60,34 @@ Last updated: 2026-10-01.
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M9.1 — bracket/current-line highlights and glyph layering (verified slice)
+
+- CaretPresentation caches syntax-aware bracket matches by document revision,
+  primary caret, selection state and palette. EditorPane paints current-line
+  backgrounds before bracket/plugin/search backgrounds, using measured layout
+  ranges. Empty lines receive full-width backgrounds; strings/comments do not
+  produce bracket matches. Movement and edits invalidate the presentation.
+- WholeLineBackground is available in PluginDecorationRegistry; empty ranges
+  are permitted for that kind, with reversed/negative ranges rejected.
+- The expanded pixel test exposed an existing UIKit stacking error: floating
+  backgrounds painted above normal-flow glyphs. Search covered keyword glyphs;
+  whole-line backgrounds covered all text and underlines. Materia `2c1193f6`
+  separates intrinsic measurement from absolute glyph painting, preserving
+  background/selection/glyph/caret ordering. Full UIKit framework passes
+  `/tmp/uikit-m9-text-layer-order.log`.
+- Headless suite passes `/tmp/exosuit-m9-caret-marks-tests.log`; final focused
+  empty/reversed whole-line and caret tests pass
+  `/tmp/exosuit-m9-caret-marks-focused.log`. Strengthened real pixel checks pass
+  in reference and self-hosted modes (`ui-fixed.log`, `self-ui.log` under
+  `/tmp/exosuit-m9-caret-marks-`), requiring visible keyword glyphs above search,
+  underlines, bracket clearing and current-line movement onto empty paragraphs.
+- Graphical build, both browser targets, real UIKit workflow, real language
+  service and unpacked release pass their `/tmp/exosuit-m9-caret-marks-` logs:
+  build, web, workflow, real-lsp and release. Release lock pins materia 2c1193f6.
+- Next: controlled additional selection/caret painting and owner-delegated
+  multi-caret mutations; then affected-row invalidation and typing p95.
+  No M9 milestone acceptance box is checked.
 
 ### M9.1 — controlled primary caret and selection (verified slice)
 

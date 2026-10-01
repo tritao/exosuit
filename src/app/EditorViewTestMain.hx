@@ -4,6 +4,7 @@ import editor.Document;
 import editor.SyntaxPresentation;
 import editor.DecorationPresentation;
 import editor.EditorCoordinates;
+import editor.CaretPresentation;
 import plugin.PluginDecorationRegistry;
 import plugin.PluginDecorationKind;
 import editor.EditorView;
@@ -97,6 +98,41 @@ class EditorViewTestMain {
 		decorationDocument.buffer.replaceRange(new BufferSelection(), new BufferPosition(0, 0), new BufferPosition(0, 0), "x");
 		require(DecorationPresentation.ranges(decorationDocument, syntaxTheme, [], decorationMatches, 0, 8).length == 0,
 			"search decorations from a previous revision survived an edit");
+		decorationRegistry.add("plugin", "empty-line", decorationDocument, 1, 0, 0,
+			syntaxTheme.currentLine, WholeLineBackground);
+		var reversedRejected = false;
+		try {
+			decorationRegistry.add("plugin", "reversed", decorationDocument, 0, 4, 1,
+				syntaxTheme.currentLine, WholeLineBackground);
+		} catch (_:Dynamic) { reversedRejected = true; }
+		require(reversedRejected, "registry accepted reversed whole-line columns");
+		var wholeLines = DecorationPresentation.ranges(decorationDocument, syntaxTheme,
+			decorationRegistry.forDocument(decorationDocument), [], 0, decorationDocument.buffer.document.codepointCount);
+		require(wholeLines.length == 1 && wholeLines[0].start == wholeLines[0].end,
+			"whole-line presentation lost empty range or accepted reversed columns");
+		var caretDocument = new Document("caret.hx", "é🙂(x)\n\n// (ignored)", syntaxes);
+		var caretSelection = new BufferSelection(new BufferPosition(0, 3));
+		var caretPresentation = new CaretPresentation();
+		require(caretPresentation.update(caretDocument, caretSelection, syntaxTheme), "initial caret marks not built");
+		var caretMarks = caretPresentation.ranges(0, 6);
+		require(caretMarks.length == 3 && caretMarks[0].kind == WholeLineBackground
+			&& caretMarks[1].start == 2 && caretMarks[2].start == 4,
+			"caret bracket marks lost Unicode coordinates or whole-line layer");
+		require(!caretPresentation.update(caretDocument, caretSelection, syntaxTheme),
+			"unchanged caret rescanned brackets");
+		caretSelection.restore(caretDocument.buffer, new BufferPosition(1, 0), new BufferPosition(1, 0));
+		require(caretPresentation.update(caretDocument, caretSelection, syntaxTheme), "caret movement kept old marks");
+		caretMarks = caretPresentation.ranges(6, 6);
+		require(caretMarks.length == 1 && caretMarks[0].start == caretMarks[0].end,
+			"empty current line has no whole-line background");
+		caretSelection.restore(caretDocument.buffer, new BufferPosition(2, 3), new BufferPosition(2, 3));
+		caretPresentation.update(caretDocument, caretSelection, syntaxTheme);
+		require(caretPresentation.ranges(0, caretDocument.buffer.document.codepointCount).length == 1,
+			"brackets inside a comment were highlighted");
+		caretSelection.restore(caretDocument.buffer, new BufferPosition(0, 3), new BufferPosition(0, 3));
+		caretDocument.buffer.replaceRange(caretSelection, new BufferPosition(0, 5), new BufferPosition(0, 6), " ");
+		caretPresentation.update(caretDocument, caretSelection, syntaxTheme);
+		require(caretPresentation.ranges(0, 6).length == 1, "deleted closing bracket retained its match");
 		var clock = new FakeEditorClock();
 		var completionDocument = new Document("words.txt", "alpha alphabet al", syntaxes), completions = new CompletionRegistry();
 		completions.add("core", new DocumentWordCompletionProvider());

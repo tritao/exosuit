@@ -10,7 +10,9 @@ class PluginDecorationRegistry {
 
 	public function add(owner:String, id:String, document:Document, line:Int, startColumn:Int, endColumn:Int, color:Int, kind:PluginDecorationKind = Background):PluginDecoration {
 		if (id.length == 0) throw "decoration id cannot be empty";
-		if (line < 0 || startColumn < 0 || endColumn <= startColumn) throw "decoration range must be non-empty and non-negative";
+		if (line < 0 || startColumn < 0 || endColumn < startColumn ||
+			endColumn == startColumn && kind != WholeLineBackground)
+			throw "decoration range must be ordered and non-negative; only whole-line backgrounds may be empty";
 		if (find(owner, id) != null) throw 'decoration "$owner:$id" is already registered';
 		var value = new PluginDecoration(owner, id, document, line, startColumn, endColumn, color, kind);
 		values.push(value);

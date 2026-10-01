@@ -26,6 +26,16 @@ class DecorationSmokeApp extends ExosuitApp {
 		super(context.fonts, null, context, path);
 		this.phase = phase;
 		installMarks(0);
+		if (phase == "caret" || phase == "caret-moved" || phase == "caret-empty") {
+			var view = host.activeView();
+			if (view == null) throw "caret fixture has no view";
+			host.getPluginDecorations().removeOwner("smoke");
+			host.setDocumentSearchMatches([]);
+			application.theme.currentLine = 0xff00ffff;
+			application.theme.bracketMatch = 0x00ffffff;
+			view.document.buffer.replaceRange(view.selection, new BufferPosition(0, 0), view.document.buffer.endPosition(), "é🙂(x)\n\n// (ignored)");
+			view.selection.restore(view.document.buffer, new BufferPosition(0, 3), new BufferPosition(0, 3));
+		}
 	}
 
 	function installMarks(line:Int):Void {
@@ -43,7 +53,12 @@ class DecorationSmokeApp extends ExosuitApp {
 		if (frames == 4) {
 			var document = host.activeDocument();
 			if (document == null) throw "decoration fixture document disappeared";
-			if (phase == "selection") {
+			if (phase == "caret-moved" || phase == "caret-empty") {
+				var view = host.activeView();
+				if (view == null) throw "caret fixture view disappeared";
+				var position = phase == "caret-empty" ? new BufferPosition(1, 0) : new BufferPosition(2, 3);
+				view.selection.restore(document.buffer, position, position);
+			} else if (phase == "selection") {
 				var view = host.activeView();
 				if (view == null) throw "selection fixture has no view";
 				document.buffer.replaceRange(view.selection, new BufferPosition(0, 0), document.buffer.endPosition(), "a🙂bc\né");
