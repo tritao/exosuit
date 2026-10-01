@@ -14,10 +14,9 @@ Last updated: 2026-10-01.
   convergence; both reference and self-hosted graphical builds exit 0.
   The fresh self-hosted headless suite also exits 0 with the dynamic-plugin
   test explicitly suppressed. M8 acceptance remains incomplete.
-- Exact resume: finish source-plugin restoration (owned changes are pending),
-  inspecting `/tmp/exosuit-dynamic-plugin-restoration.log` / running session
-  24186. Finish the Haxeon embedding package's registered integration test,
-  then make dynamic-plugin acceptance mandatory and run both editor modes.
+- Exact resume: reduce the embedded incremental compiler's anonymous-record
+  runtime cast failure (latest checkpoint below), then finish source-plugin
+  acceptance and remove suppression. Finish the embedding package gate.
   Integration/release and interactive UIKit checks remain pending.
 - HEADs at planning: exosuit `ae2f260` (`haxeon-uikit-port`). Materia `main` is at
   `816372dd`, fast-forwarded 2026-10-01 for the Haxeon wasm and web fixes; it
@@ -58,6 +57,32 @@ Last updated: 2026-10-01.
 | M15 | Not started | Depends on M8.1, M8.2; scheduled right after M8. Reference: materia `app/web` at `816372dd`, Haxeon `fba71015` |
 
 ## Implementation records
+
+### M8.1 — dynamic restoration checkpoint (uncommitted, acceptance red)
+
+- Restored source-plugin project compiles 973 sources and executes initial
+  activation, host calls, Unicode host-error catching and command dispatch.
+  Direct run with absolute fixture arguments exits 1 at the background
+  compatible-update assertion: an AST class record cannot cast from dynobj to
+  the expected anonymous shape. Log:
+  `/tmp/exosuit-dynamic-plugin-restoration-absolute.log`. The first direct run
+  used relative fixture paths and exited 1 opening source; those paths were
+  corrected, with no code workaround.
+- Owned pending exosuit files: `haxeon.json`, `DynamicPlugin.hx`,
+  `DynamicHostRouter.hx`, `DynamicEditorApiSource.hx`,
+  `DynamicPluginTestMain.hx`. None is committed without acceptance. Callback
+  response protocol and restart regressions are included, but the restart
+  assertion has not yet been reached. Suppression in test.sh remains visible.
+- Haxeon embedding manifest/documentation and registered integration test are
+  pending verification in session 80655, log
+  `/tmp/haxeon-gate-embedding-package.log`. The initial generated-program probe
+  passes. A separate unregistered draft
+  `tests/integration/test-compiler-embedding-incremental.sh` adds an AST class
+  and recompiles changed class initialization to reduce the new runtime cast
+  failure; session 4484, log `/tmp/haxeon-embedding-incremental-before.log`.
+- Next: inspect that reducer's uncaught runtime stack, reduce the anonymous
+  representation conversion, add general compiler/runtime regressions and fix
+  the responsible layer before making dynamic-plugin acceptance mandatory.
 
 ### M8.1/M8.2 — cast context and checked opaque conversions (verified slice)
 
