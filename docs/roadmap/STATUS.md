@@ -64,6 +64,21 @@ Last updated: 2026-10-01.
 
 ## Implementation records
 
+### M9.1 — equal-length suffix culling reuse (verified native and UI slice)
+
+- Skribidi `d744d4780`, Materia pin `5b9a4c60d`; the accompanying Exosuit
+  commit updates `release.lock` and the native differential probe.
+- Guarded equal-length ASCII edits carry forward culling and common-glyph
+  bounds for rows strictly after the edit when source range, baseline, and box
+  geometry match. The 240-case native sweep now compares those bounds against
+  fresh layouts for replacements as well as insertions and deletions. The full
+  probe, UIKit native text-engine test, and real decoration pixel suite pass.
+- The host remained heavily loaded (load average around 20–23, with unrelated
+  compiler jobs), so no real typing-budget measurement is claimed. Resume by
+  running the 1 MiB varied-key graphical fixture when the host is idle. If
+  p95 remains marginal, reduce full-row native layout work; retained culling
+  alone does not eliminate it.
+
 ### M9.1 — guarded ASCII prefix culling reuse (verified native and UI slice)
 
 - Skribidi commit `bc8ae4ead`; Materia pin `f5d8ac04d`; the accompanying

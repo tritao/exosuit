@@ -866,6 +866,12 @@ static int run_mutable_insert_delete(skb_temp_alloc_t *temp,
     return valid && completed == edits;
 }
 
+static int same_bounds(skb_rect2_t a, skb_rect2_t b) {
+    return fabsf(a.x - b.x) <= 0.001f && fabsf(a.y - b.y) <= 0.001f &&
+           fabsf(a.width - b.width) <= 0.001f &&
+           fabsf(a.height - b.height) <= 0.001f;
+}
+
 static int run_native_ascii_edit(skb_temp_alloc_t *temp,
                                  const skb_layout_params_t *base_params, int length) {
     const skb_attribute_t attributes[] = {
@@ -921,14 +927,8 @@ static int run_native_ascii_edit(skb_temp_alloc_t *temp,
                     a[row].text_range.end != b[row].text_range.end ||
                     fabsf(a[row].baseline - b[row].baseline) > 0.001f ||
                     fabsf(a[row].bounds.width - b[row].bounds.width) > 0.001f ||
-                    fabsf(a[row].culling_bounds.x - b[row].culling_bounds.x) > 0.001f ||
-                    fabsf(a[row].culling_bounds.y - b[row].culling_bounds.y) > 0.001f ||
-                    fabsf(a[row].culling_bounds.width - b[row].culling_bounds.width) > 0.001f ||
-                    fabsf(a[row].culling_bounds.height - b[row].culling_bounds.height) > 0.001f ||
-                    fabsf(a[row].common_glyph_bounds.x - b[row].common_glyph_bounds.x) > 0.001f ||
-                    fabsf(a[row].common_glyph_bounds.y - b[row].common_glyph_bounds.y) > 0.001f ||
-                    fabsf(a[row].common_glyph_bounds.width - b[row].common_glyph_bounds.width) > 0.001f ||
-                    fabsf(a[row].common_glyph_bounds.height - b[row].common_glyph_bounds.height) > 0.001f)
+                    !same_bounds(a[row].culling_bounds, b[row].culling_bounds) ||
+                    !same_bounds(a[row].common_glyph_bounds, b[row].common_glyph_bounds))
                     { valid = 0; printf("native ASCII row %d mismatch %d:%d vs %d:%d baseline %.3f/%.3f width %.3f/%.3f\n", row,
                         a[row].text_range.start, a[row].text_range.end,
                         b[row].text_range.start, b[row].text_range.end,
@@ -1023,7 +1023,9 @@ static int run_native_ascii_sweep(skb_temp_alloc_t *temp,
                 for (int i = 0; i < skb_layout_get_lines_count(fresh) && equal; ++i)
                     if (al[i].text_range.start != bl[i].text_range.start ||
                         al[i].text_range.end != bl[i].text_range.end ||
-                        fabsf(al[i].baseline - bl[i].baseline) > 0.001f)
+                        fabsf(al[i].baseline - bl[i].baseline) > 0.001f ||
+                        !same_bounds(al[i].culling_bounds, bl[i].culling_bounds) ||
+                        !same_bounds(al[i].common_glyph_bounds, bl[i].common_glyph_bounds))
                         equal = 0;
             }
             skb_layout_destroy(fresh);

@@ -38,10 +38,11 @@ requires a verified source-range remap; the suffix is freshly prepared until
 that mapping is available.
 
 The guarded ASCII layout builder also carries forward culling and common
-glyph bounds for visual rows strictly before an edit when their source range,
-baseline, and box geometry match. The fresh-layout differential probe compares
-those bounds after insertion and deletion. Changed and shifted rows still
-calculate their bounds from glyphs.
+glyph bounds for visual rows strictly before an edit, and for rows after an
+equal-length edit, when their source range, baseline, and box geometry match.
+The fresh-layout differential probe compares those bounds after insertion,
+deletion, and replacement. Changed and shifted rows still calculate their
+bounds from glyphs.
 
 The real 1 MiB varied-key fixture delivered 30 input frames at p50 37.66 ms,
 p95 41.67 ms, and max 43.44 ms, below its 50 ms typing budget. The isolated
