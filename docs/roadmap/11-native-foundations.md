@@ -6,10 +6,25 @@ AF_UNIX `nk_transport` (unsupported on Windows), tasks and wake events. It has
 no PTY, ConPTY, named pipes, SQLite or terminal emulator. Haxeon's stdlib has
 MessagePack (`stdlib/haxeon/wire`) and threads.
 
-Follow the NativeKit module structure (`modules/gpu`): public C header,
-`bindings/*_import.h`, generated `.hxi`/`.hxmap`, hand-written Haxe wrappers,
-tests, and registration in `nativekit/haxeon.json`. Per `modules/README.md`,
-anything that delivers through the shared `nk` event queue belongs in core.
+Placement:
+
+- PTY (M11.1) and transport hardening (M11.2) go into NativeKit. Both deliver
+  through the shared `nk` event queue, so per `modules/README.md` they belong
+  in core.
+- SQLite (M11.3) and the terminal emulator (M11.4) stay in this repository as
+  native packages with HXI bindings only. They do not go into NativeKit.
+
+Each exosuit native package lives under `native-packages/<name>/` and has its
+own `haxeon.json`. It contains vendored C sources, a small exosuit-owned C
+header (`<name>_import.h`), a generated `.hxi`/`.hxmap` pair registered under
+the manifest's `ffi` section, and thin hand-written Haxe wrappers. Generate
+and audit the bindings with `haxeon/scripts/haxeon-ffi-import` and
+`haxeon-ffi-audit`, the same tools NativeKit's `tools/update-haxeon-hxi.sh`
+drives. Use the `utf8` string convention from `haxeon/docs/C_HEADER_FFI.md`;
+do not use `@:hlNative`. Only the manifests that need a package depend on it:
+the agent and tests for SQLite; the graphical app, the agent and tests for the
+terminal. The headless core stays free of both.
+
 Port behavior from the Pragtical C sources (MIT) rather than rewriting from
 scratch, and keep attribution in notices.
 
@@ -42,7 +57,7 @@ unauthorized-peer rejection, framing split byte-by-byte, and payload limits.
 
 ## M11.3 — Embedded storage
 
-- [ ] Add a SQLite module: vendored amalgamation, opaque handles,
+- [ ] Add `native-packages/sqlite`: vendored amalgamation, opaque handles,
   prepare/bind/step/column, transactions and a busy timeout. Workbench (M14)
   needs migrations, transactions and compare-and-swap revisions.
 
@@ -51,7 +66,8 @@ and blob round-trip tests pass.
 
 ## M11.4 — Terminal emulator
 
-- [ ] Wrap the libtsm backend used by Pragtical. That is
+- [ ] Add `native-packages/terminal`, wrapping the libtsm backend used by
+  Pragtical. That is
   `github.com/tritao/libtsm` at `7b1de2d`, via
   `subprojects/terminal/native/emulator/terminal_emulator_libtsm.c`. The wrap
   covers feed, screen cells with attributes, scrollback, cursor, modes
@@ -64,3 +80,5 @@ Acceptance: port the conformance fixtures from Pragtical
 checkpoint restored into a fresh emulator reproduces the screen.
 
 Exit: Haxe wrappers for all four are usable from a headless Haxeon test project.
+The SQLite and terminal packages build through `haxeon build` with no NativeKit
+changes.

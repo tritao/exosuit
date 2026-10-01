@@ -72,9 +72,9 @@ are independent of M9 and M10 and may proceed while those are blocked.
 
 Decisions taken by default (record any override in STATUS):
 
-- Native capabilities go into NativeKit as general modules or core (PTY,
-  transport hardening, SQLite, emulator), not into exosuit's own C sources.
-  Widget capabilities go into UIKit.
+- PTY and local transport hardening go into NativeKit core. SQLite and the
+  libtsm terminal emulator stay in exosuit as `native-packages/` with HXI
+  bindings. Widget capabilities go into UIKit.
 - Stay wire-compatible with Pragtical control protocol v1 and Workbench
   protocol 2.1, so either side's tests and binaries interoperate. Each editor
   keeps its own storage and runtime directories.

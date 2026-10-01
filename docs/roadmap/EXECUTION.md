@@ -6,7 +6,7 @@ Implementation covers this editor and necessary changes in the sibling
 workspace repositories:
 
 - Haxeon compiler, runtime and stdlib in `HAXEON_ROOT` (default `../haxeon`).
-- NativeKit (`../nativekit`) for native modules and core.
+- NativeKit (`../nativekit`) for core native capabilities (PTY, local transport).
 - UIKit (`../uikit`) for widgets and hosts.
 - EditorKit (`../editorkit`) for the text model.
 
@@ -71,8 +71,9 @@ Run from the editor root:
 
 The test script runs the platform ABI check and the headless test projects
 under `tests/`. Each new subsystem adds its own `tests/<name>/haxeon.json`
-project, wired into `test.sh`. Native modules add their own NativeKit tests and
-run that repository's test gate. Serialize builds and tests that share `build`
+project, wired into `test.sh`. NativeKit changes add their own tests and run that
+repository's test gate. Exosuit `native-packages/` carry their own tests.
+Serialize builds and tests that share `build`
 directories or the `uikit-native` CMake build; do not race them.
 
 Run `./scripts/test.sh` from the compiler root after a core compiler change.
