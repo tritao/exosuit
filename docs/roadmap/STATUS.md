@@ -62,6 +62,45 @@ Last updated: 2026-10-01.
 
 ## Implementation records
 
+### M9.1 — diagnostic/search presentation and paint revisions (verified slice)
+
+- EditorPane maps plugin-owned decorations and current search matches from
+  UTF-16 columns to codepoint ranges for visible chunks. PluginDecorationKind
+  preserves existing background defaults and adds wavy underlines. Language
+  diagnostics request severity-colored underlines, including one segment for
+  each nonempty line of a multiline range; the fingerprint includes severity.
+- Cached language diagnostics transform through BufferChange before the next
+  server publication, follow undo, and remove deleted nonempty ranges. Existing
+  version checks still reject stale server publications. Headless tests cover
+  Unicode mapping, offscreen filtering, removal, stale search revisions,
+  diagnostic movement and stopped-service clearing. Focused tests pass:
+  `/tmp/exosuit-m9-decorations-focused.log`, diagnostics-live and controller logs.
+- Added a real-window decoration fixture and pixel check using Xvfb/Pillow,
+  wired into composed CI. Initial fresh-window check passed. Strengthening it
+  to warm retained text before changing/clearing marks exposed 32 stale red
+  underline pixels after clearing (`/tmp/exosuit-m9-decoration-retained-pixels.log`).
+  A temporary fixture parse failure was a missing closing brace and was fixed.
+- Root cause: retained text painting was keyed solely by measurement/geometry.
+  Materia `23397690` adds paint-only invalidation and TextField presentation
+  revisions/provider-change detection. EditorPane retains stable provider
+  callbacks and advances its revision for text, palette, registry and search
+  changes. Display lists remain cached when presentation is unchanged.
+- Strengthened real-window pixel checks now pass
+  (`/tmp/exosuit-m9-decoration-repaint-pixels.log`): underline and search
+  background render, move after a Unicode line insertion, and clear after
+  several warm frames. UIKit full framework gate passes
+  (`/tmp/uikit-m9-presentation-revision-framework.log`), verifying repaint and
+  clearing independently of measurement version/height and unchanged-list reuse.
+- Exosuit `6c04c14` commits the editor wiring, model repair, retained pixel
+  fixture and composed-CI stage. Complete gates exit 0:
+  `/tmp/exosuit-m9-decorations-tests-final.log`, build-verified and
+  self-build-verified logs, real-lsp, workflow, release and web logs.
+  Both wasm32 and wasm-gc browser smoke routes pass. The strengthened pixel
+  fixture also passes self-hosted (`/tmp/exosuit-m9-decoration-self-pixels.log`).
+  Release lock pins materia 23397690; Haxeon/NativeKit revisions are unchanged.
+- No M9 acceptance box is checked; bracket/current-line, shared multi-selections,
+  affected-row invalidation and typing-budget measurements remain pending.
+
 ### M9.1 — editor syntax and incremental initializer adapters (verified slice)
 
 - EditorPane now requests visible syntax foreground ranges and uses the core

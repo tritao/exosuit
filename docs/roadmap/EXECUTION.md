@@ -79,6 +79,7 @@ Run from the editor root:
 ./scripts/test.sh      # headless core + tests/*/haxeon.json projects
 ./scripts/build.sh     # graphical/haxeon.json (UIKit host)
 ./scripts/ci.sh        # composed gate (M8.3 restores LSP and release stages)
+./scripts/test-decoration-ui.sh # real retained decoration pixels (Xvfb + Python Pillow)
 ./scripts/run.sh /absolute/path/to/a/disposable/project
 ```
 

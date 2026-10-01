@@ -57,11 +57,12 @@ reads live diagnostics, Build Output streams task output with clickable
 locations, and the palette exposes bridged document, project, build and
 language commands. Hover, completion and signature-help overlays are wired.
 Source plugins use the embedded compiler/runtime; compatible and structural
-hot reloads are covered by mandatory headless acceptance. Interactive acceptance
-on the UIKit host remains pending.
+hot reloads pass headless and real-window automation. Syntax colors, plugin
+backgrounds, diagnostic wavy underlines and search highlights render through
+retained UIKit text layouts.
 
-- Styled syntax spans, diagnostic/plugin decorations and search highlights
-  are not rendered in the document widget.
+- Bracket/current-line highlights, strict changed-row invalidation and the
+  restored editor typing budget remain pending.
 - Navigation updates the model selection but cannot yet move or reveal the
   widget's caret. Language popups are not anchored to that caret.
 - Workspace search results are retained by the host but have no graphical panel.
@@ -71,8 +72,8 @@ on the UIKit host remains pending.
 - Some legacy shortcut keys lack a UIKit key mapping; their bridged commands
   are still available from the palette.
 
-Compiler-mode agreement, release packaging and real-window automation are
-still being restored in [M8](docs/roadmap/08-uikit-baseline.md). See the
+Both compiler modes, release packaging and real-window automation pass the
+claimed Linux scope in [M8](docs/roadmap/08-uikit-baseline.md). See the
 [execution ledger](docs/roadmap/STATUS.md) for current verification evidence.
 
 See [docs/architecture/0002-nativekit-uikit-host.md](docs/architecture/0002-nativekit-uikit-host.md)
