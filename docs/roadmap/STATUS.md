@@ -34,9 +34,10 @@ Last updated: 2026-10-02.
   inspect the remaining invalidation cases before checking M9.1. Preserve the
   1 MiB, 10 MiB and graphical pixel gates.
   Preserve M8 and both browser gates.
-- Current follow-on HEADs: Exosuit `35478bb` before this ledger commit;
-  Materia `9de8be1ab` carries row-scoped glyph commands, shallow row raster
-  caching, rebased source metadata, and a parent repaint cost regression. The
+- Current follow-on HEADs: Exosuit `e1955d0` before this ledger commit;
+  Materia `86adb1fa9` carries row-scoped glyph commands, shallow row raster
+  caching, rebased source metadata, a parent repaint cost regression, and the
+  Skribidi bulk-copy slice. The
   existing dirty Haxeon/NativeKit gitlinks and UIKit TextInputBridge edit in
   Materia were left untouched.
 - All further graphical tests must use disposable PRAGTICAL_PORTABLE state.
@@ -80,6 +81,28 @@ Last updated: 2026-10-02.
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M9.1 — 1 MiB edit-dispatch profile and native copy slice
+
+- Opt-in timing probes on actual 1 MiB keyboard edits put document replacement
+  below 0.3 ms and paragraph slicing around 2–3 ms. The retained native
+  layout edit took roughly 27 ms median, 43 ms p95 in the short probe. Within
+  that edit, the guarded ASCII window cost about 1.7 ms, the whole-layout
+  metadata copy about 5 ms, and line layout about 12 ms on representative
+  samples. The probes were removed after measurement.
+- Skribidi now copies the unchanged prefix, local window, and unchanged suffix
+  as contiguous arrays, then adjusts the positional cluster/glyph metadata.
+  This removes source selection and four scalar data copies from every
+  codepoint of the 1 MiB paragraph. Native text-engine equivalence and the
+  graphical decoration pixel suite pass.
+- The first post-change 1 MiB varied-key run delivered all 30 frames but
+  measured 175.24 ms p95 during unrelated concurrent Wasm and compiler builds
+  (host load above 20; native render p95 rose to 39.65 ms from 5.48 ms).
+  The 10 MiB run also delivered all 30 frames at 65.05 ms p95 with host load
+  above 40 and native render p95 30.27 ms. Neither overloaded run can
+  establish a latency improvement or regression. Repeat both timing gates on
+  an idle host. Line layout is the largest measured native phase and remains
+  the main incremental-layout work.
 
 ### M9.1 — parent repaint cost and typing-stage attribution (measured)
 
