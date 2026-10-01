@@ -14,10 +14,10 @@ Last updated: 2026-10-01.
   compound shift assignment. Bootstrap now passes the null-array inference
   failure after Haxeon `5f0b7671`, then passes four nullable-source corrections in `02608ed7`. It now fails
   past colliding enum constructors after `56fc5b98`, then passes expected enum inference after `5b38eca1`. It now fails at
-  `EqualityGenerator.hx:37` on unchecked equality-request lookups, after
-  primitive map-read effects and declaration/store checks in `dd36f1c8`.
-  Check required request/type lookups and retry convergence.
-- Exact resume: reference headless verification passed. Check required request/type lookups in `EqualityGenerator`,
+  HashLink encoding on a forbidden NUL string separator in dependency
+  cache keys. Typing now passes after `5cf74eb0`; encode dependency
+  lists as collision-free text and retry convergence.
+- Exact resume: reference headless verification passed. Replace the shared dependency-cache NUL separator with a collision-free text key,
   rerun Haxeon's
   `./scripts/bootstrap-compiler.sh`, then test both compiler modes. Remove the
   divergent defaults and upstream-fixed directory workaround. Restore
@@ -321,6 +321,23 @@ Last updated: 2026-10-01.
 - Bootstrap passes those failures, then exits 1 at `EqualityGenerator.hx:37`:
   nullable request lookups are dereferenced without checks. Add checked
   required lookups, retry convergence and preserve all pending M8 gates.
+
+### M8.2 — checked equality generation (verified compiler-source slice)
+
+- Haxeon `5cf74eb0` validates required entries before consuming request
+  metadata or reachable types. One generic checked lookup preserves types and
+  reports an internal missing-key invariant rather than dereferencing null.
+- Full compiler `./scripts/test.sh` exited 0: formatting, 370/370 driver cases
+  and all native/differential/Wasm stages. Log:
+  `/tmp/haxeon-gate-equality-requests.log`.
+- Bootstrap passes typing all 443 sources and reaches encoding, then exits 1:
+  `HashLink String cannot contain NUL; use Bytes for binary data`. The two
+  source literals are dependency-cache separators in `CompilationContext` and
+  `FrontendCompilation`. They are text cache keys, not a binary payload.
+  Next: share a collision-free length-prefixed text encoder, add regressions
+  for empty components and delimiter collisions, then retry convergence.
+- M8 acceptance and both compiler modes remain pending; no writer validation
+  or language types have been weakened to bypass this failure.
 
 ## Completed records
 
