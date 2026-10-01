@@ -13,10 +13,10 @@ Last updated: 2026-10-01.
   The checked-in self-hosted compiler is stale and currently rejects UIKit's
   compound shift assignment. Bootstrap now passes the null-array inference
   failure after Haxeon `5f0b7671`, then passes four nullable-source corrections in `02608ed7`. It now fails
-  past colliding enum constructors after `56fc5b98`, then passes snapshot retention after `90776aee`. It now fails at
-  `Parser.hx:879` on an empty array whose expected enum-constructor context
-  is lost by the inference prepass. Fix expected-constructor precedence.
-- Exact resume: reference headless verification passed. Give expected enum constructors priority in the local inference prepass,
+  past colliding enum constructors after `56fc5b98`, then passes expected enum inference after `5b38eca1`. It now fails at
+  `Parser.hx:2549` because stdlib `haxe.io.BytesBuffer` is missing. Add the
+  general byte builder and retry convergence.
+- Exact resume: reference headless verification passed. Implement and test the missing stdlib `haxe.io.BytesBuffer`,
   rerun Haxeon's
   `./scripts/bootstrap-compiler.sh`, then test both compiler modes. Remove the
   divergent defaults and upstream-fixed directory workaround. Restore
@@ -243,6 +243,29 @@ Last updated: 2026-10-01.
 - Exosuit documentation slice `c03089d` completes the M8.4 text correction;
   it does not establish runtime or M8 acceptance. Sibling dirty work remains
   untouched; no refreshed bootstrap artifacts have been committed.
+
+### M8.2 — expected enum argument inference (verified compiler slice)
+
+- Haxeon `5b38eca1` aligns local inference with actual enum expression typing:
+  a bare constructor receives the expected enum's argument context before
+  falling back to imported constructors. Explicitly qualified references retain
+  their normal meaning; type relations are unchanged.
+- Root cause: the prepass used imported constructor metadata first, even when
+  expression typing selected the expected enum instead. Parser's `Switch`
+  constructor collided with the imported token enum's no-argument `Switch`,
+  leaving an empty local array without its expected element type.
+- Registered `ExpectedEnumContextMain` fails E1003 before the fix, executes
+  generated code after it, rejects incompatible pushed elements in incremental
+  and cold compiles, and executes again after restoring valid source. Reference
+  Haxe accepts and executes the independent reducer.
+- Full compiler `./scripts/test.sh` exited 0: formatting, 368/368 driver cases,
+  native/differential/Wasm stages. Log: `/tmp/haxeon-gate-expected-enum.log`.
+  Exosuit `./scripts/build.sh` exited 0 (`/tmp/exosuit-build-expected-enum.log`).
+- Bootstrap passes the parser-array failure and exits 1 at `Parser.hx:2549`:
+  missing stdlib `haxe.io.BytesBuffer`, used by Unicode scalar encoding.
+  Add reusable byte accumulation over the existing byte-output runtime;
+  retain parser types/encoding logic and rerun convergence and both modes.
+- No refreshed self-hosted artifact or full M8 acceptance is claimed.
 
 ## Completed records
 
