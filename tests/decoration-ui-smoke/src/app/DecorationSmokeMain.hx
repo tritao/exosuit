@@ -27,16 +27,17 @@ class DecorationSmokeApp extends ExosuitApp {
 		super(context.fonts, null, context, path);
 		this.phase = phase;
 		installMarks(0);
-		if (phase == "multi-selected" || phase == "multi-typed" || phase == "multi-pasted") {
+		if (phase == "multi-selected" || phase == "multi-typed" || phase == "multi-pasted" || phase == "multi-navigation") {
 			var view = host.activeView();
 			if (view == null) throw "multi fixture has no view";
 			host.getPluginDecorations().removeOwner("smoke");
 			host.setDocumentSearchMatches([]);
 			theme.textSelection = Color.fromBytes(0, 255, 0);
 			theme.textCaret = Color.fromBytes(0, 255, 0);
-			view.document.buffer.replaceAllText("é🙂 x\né🙂 y", view.selection);
-			view.selection.restore(view.document.buffer, new BufferPosition(0, 3), new BufferPosition(0, 0));
-			view.selection.addRange(view.document.buffer, new BufferPosition(1, 3), new BufferPosition(1, 0));
+			view.document.buffer.replaceAllText(phase == "multi-navigation" ? "é🙂 x\né🙂 y\né🙂 z" : "é🙂 x\né🙂 y", view.selection);
+			var anchor = phase == "multi-navigation" ? 3 : 0;
+			view.selection.restore(view.document.buffer, new BufferPosition(0, 3), new BufferPosition(0, anchor));
+			view.selection.addRange(view.document.buffer, new BufferPosition(1, 3), new BufferPosition(1, anchor));
 		}
 		if (phase == "caret" || phase == "caret-moved" || phase == "caret-empty") {
 			var view = host.activeView();
@@ -102,13 +103,36 @@ class DecorationSmokeApp extends ExosuitApp {
 				throw "controlled widget edit used a stale selection or coordinate map";
 			trace("PASS: real EditorPane controlled selection, Unicode navigation and replacement");
 		}
-		if ((phase == "multi-selected" || phase == "multi-typed" || phase == "multi-pasted") && frames == 4) {
+		if ((phase == "multi-selected" || phase == "multi-typed" || phase == "multi-pasted" || phase == "multi-navigation") && frames == 4) {
 			var view = host.activeView();
 			if (view == null) throw "multi fixture view disappeared";
 			var node = findEditor(root, "editor:" + view.document.id);
 			if (node == null) throw "multi fixture editor disappeared";
 			ui.focusWidget(node.id);
-			if (phase == "multi-pasted") {
+			if (phase == "multi-navigation") {
+				ui.key(UiEventKind.KeyDown, UiKey.Left);
+				var ranges = view.selection.allRanges();
+				if (ranges.length != 2 || ranges[0].cursor.column != 1 || ranges[1].cursor.column != 1)
+					throw "multi-caret Left split a grapheme or moved only the primary";
+				ui.key(UiEventKind.KeyDown, UiKey.Right);
+				ranges = view.selection.allRanges();
+				if (ranges[0].cursor.column != 3 || ranges[1].cursor.column != 3)
+					throw "multi-caret Right did not restore both grapheme boundaries";
+				ui.key(UiEventKind.KeyDown, UiKey.Right, UiModifier.Shift);
+				ranges = view.selection.allRanges();
+				if (ranges[0].cursor.column != 4 || ranges[0].anchor.column != 3 ||
+					ranges[1].cursor.column != 4 || ranges[1].anchor.column != 3)
+					throw "shift navigation did not extend both selections";
+				ui.key(UiEventKind.KeyDown, UiKey.End);
+				ranges = view.selection.allRanges();
+				if (ranges[0].cursor.column != 5 || ranges[1].cursor.column != 5)
+					throw "End did not move both carets";
+				ui.key(UiEventKind.KeyDown, UiKey.Down);
+				ranges = view.selection.allRanges();
+				if (ranges.length != 2 || ranges[0].cursor.line != 1 || ranges[1].cursor.line != 2)
+					throw "visual Down did not move both carets";
+				trace("PASS: real multi-caret grapheme, selection and visual-line navigation");
+			} else if (phase == "multi-pasted") {
 				ui.clipboard.writeText("α\nβ");
 				ui.key(UiEventKind.KeyDown, UiKey.V, UiModifier.Control);
 			} else if (phase == "multi-selected") {

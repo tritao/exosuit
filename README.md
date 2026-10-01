@@ -62,6 +62,7 @@ backgrounds, diagnostic wavy underlines and search highlights render through
 retained UIKit text layouts. Bracket matches and full-width current-line
 backgrounds follow the shared primary caret. Multiple selections/carets render,
 and multi-caret insertion, cut/paste and deletion use buffer transactions.
+Keyboard navigation moves all carets through UIKit's shaped layout.
 
 - Strict changed-row invalidation remains pending. Both large fixtures now open:
   10 MiB multiline typing reaches 44.3 ms p95 on a repeat run, with an
@@ -72,7 +73,7 @@ and multi-caret insertion, cut/paste and deletion use buffer transactions.
 - Workspace search results are retained by the host but have no graphical panel.
 - The shell has one editor region. Split, pane focus and moving tabs between
   panes are unavailable; tab reordering and sidebar visibility are wired.
-- Multi-caret navigation, line wrapping and right-click context menus remain gaps.
+- Line wrapping and right-click context menus remain gaps.
 - Some legacy shortcut keys lack a UIKit key mapping; their bridged commands
   are still available from the palette.
 

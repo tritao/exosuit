@@ -17,8 +17,7 @@ Last updated: 2026-10-01.
   toolchains remain explicitly pending.
 - Active task: **M9.1**, styled text and decorations on UIKit.
 - Exact resume: bound long-paragraph edit/shaping and finish affected-row
-  invalidation, then complete multi-caret movement. Preserve M8 and both browser
-  gates.
+  invalidation. Preserve M8 and both browser gates.
 - All further graphical tests must use disposable PRAGTICAL_PORTABLE state.
   IME, physical mixed-DPI transitions, Windows and macOS remain unclaimed.
 - HEADs at planning: exosuit `ae2f260` (`haxeon-uikit-port`). Materia `main` is at
@@ -60,6 +59,31 @@ Last updated: 2026-10-01.
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M9.1 — multi-caret keyboard navigation (verified slice)
+
+- Materia `ef68e734c` adds a typed UIKit navigation intent for controlled
+  fields with additional selections. Exosuit applies each key movement to the
+  full selection set using the retained shaped layout's grapheme, word,
+  paragraph, visual-line and line-boundary geometry. Shift extends every
+  selection; overlapping results are normalized by `BufferSelection`.
+  Repeated vertical movement retains each caret's requested x column and
+  resets it after an edit or pointer selection. Single-selection fields keep
+  the existing UIKit path.
+- The real decoration-window test now drives two carets across `é🙂` grapheme
+  boundaries, extends both selections, moves both to line end and then down a
+  visual line. Reference and self-hosted builds/pixel checks pass. The UIKit
+  Haxe framework smoke passes. Logs: `/tmp/exosuit-m9-multinav-build.log`,
+  `/tmp/exosuit-m9-multinav-test.log`,
+  `/tmp/exosuit-m9-multinav-self-build.log`,
+  `/tmp/exosuit-m9-multinav-self-test.log`, and
+  `/tmp/uikit-m9-multinav-framework.log`. A final unchanged-source
+  reference window rerun and unpacked release check pass at
+  `/tmp/exosuit-m9-multinav-final-test.log` and
+  `/tmp/exosuit-m9-multinav-release-test.log`.
+- M9.1 remains active: strict changed-row invalidation and the 1 MiB typing
+  budget are still open. The next measured work is incremental shaping and
+  row geometry reuse for edited long paragraphs.
 
 ### M9.1 — visible glyph publication and long-line edit profile (verified slice)
 

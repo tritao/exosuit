@@ -24,6 +24,9 @@ import nativekit.ui.widgets.text.TextArea;
 import nativekit.ui.widgets.text.EditTransaction;
 import editor.Document;
 import editor.BufferSelection;
+import editor.BufferRange;
+import nativekit.ui.widgets.text.TextEditorLayout;
+import nativekit.ui.widgets.text.TextNavigationIntent;
 
 /**
  * One editor tab: a line-number gutter next to a `TextArea` sharing the
@@ -60,7 +63,9 @@ class EditorPane implements View {
 	var widgetSelection:TextSelection;
 	final additionalProvider:Void->Array<TextSelection>;
 	final editIntentHandler:TextEditIntent->Bool;
+	final navigationIntentHandler:(TextNavigationIntent, TextEditorLayout)->Bool;
 	final selectedTextProvider:Void->Null<String>;
+	var desiredVerticalXs:Array<Float> = [];
 
 	public function new(document:Document, theme:Theme, onEdited:Void->Void, ?selection:BufferSelection, ?editorTheme:style.Theme,
 			?decorations:PluginDecorationRegistry, ?searchMatches:Void->Array<SearchMatch>, ?searchRevision:Void->Int) {
@@ -79,6 +84,7 @@ class EditorPane implements View {
 		selectionHandler = handleSelection;
 		additionalProvider = provideAdditionalSelections;
 		editIntentHandler = handleEditIntent;
+		navigationIntentHandler = handleNavigationIntent;
 		selectedTextProvider = provideSelectedText;
 	}
 
@@ -113,6 +119,7 @@ class EditorPane implements View {
 	}
 
 	function handleSelection(value:TextSelection):Void {
+		desiredVerticalXs = [];
 		widgetSelection = value;
 		var anchor = EditorCoordinates.position(document, value.anchor);
 		var cursor = EditorCoordinates.position(document, value.focus);
@@ -136,6 +143,7 @@ class EditorPane implements View {
 
 	function handleEditIntent(intent:TextEditIntent):Bool {
 		if (selection.rangeCount() == 1) return false;
+		desiredVerticalXs = [];
 		switch intent {
 			case Insert(text): document.buffer.replaceSelections(selection, [text]);
 			case Paste(text):
@@ -149,7 +157,77 @@ class EditorPane implements View {
 		return true;
 	}
 
+	function handleNavigationIntent(intent:TextNavigationIntent, layout:TextEditorLayout):Bool {
+		if (selection.rangeCount() < 2) return false;
+		var vertical = switch intent { case VisualLine(_, _): true; case _: false; };
+		if (!vertical) desiredVerticalXs = [];
+		var ranges = selection.allRanges();
+		var moved:Array<BufferRange> = [];
+		var changed = false;
+		for (index in 0...ranges.length) {
+			var range = ranges[index];
+			var focus = EditorCoordinates.codepoint(document, range.cursor);
+			var anchor = EditorCoordinates.codepoint(document, range.anchor);
+			var next = focus;
+			var extend = switch intent {
+				case Character(_, value) | Word(_, value, _) | Paragraph(_, value, _) |
+					VisualLine(_, value) | LineBoundary(_, value) | DocumentBoundary(_, value): value;
+			};
+			switch intent {
+				case Character(direction, _):
+					next = !extend && anchor != focus ? (direction < 0 ? Std.int(Math.min(anchor, focus)) : Std.int(Math.max(anchor, focus))) :
+						direction < 0 ? layout.previousGrapheme(focus) : layout.nextGrapheme(focus);
+				case Word(direction, _, macStyle):
+					next = !extend && anchor != focus ? (direction < 0 ? Std.int(Math.min(anchor, focus)) : Std.int(Math.max(anchor, focus))) :
+						layout.moveWord(focus, direction, macStyle);
+				case Paragraph(direction, _, macStyle):
+					next = !extend && anchor != focus ? (direction < 0 ? Std.int(Math.min(anchor, focus)) : Std.int(Math.max(anchor, focus))) :
+						layout.moveParagraph(focus, direction, macStyle);
+				case VisualLine(direction, _):
+					if (!extend && anchor != focus) {
+						next = direction < 0 ? Std.int(Math.min(anchor, focus)) : Std.int(Math.max(anchor, focus));
+						desiredVerticalXs = [];
+					} else {
+						var caret = layout.caret(new TextPosition(focus, 0));
+						var desiredX = index < desiredVerticalXs.length ? desiredVerticalXs[index] : caret.x;
+						desiredVerticalXs[index] = desiredX;
+						var lineStep = layout.paragraphStyle.lineHeight == null ?
+							Math.abs(caret.descender - caret.ascender) : layout.paragraphStyle.lineHeight;
+						lineStep = Math.max(1.0, lineStep);
+						for (probe in 0...5) {
+							var hit = layout.hitTest(desiredX, caret.y + direction * lineStep * (1.0 + probe * 0.25));
+							var hitCaret = layout.caret(hit);
+							if (direction < 0 ? hitCaret.y < caret.y - 0.01 : hitCaret.y > caret.y + 0.01) {
+								next = hit.offset;
+								break;
+							}
+						}
+					}
+				case LineBoundary(end, _):
+					var line = layout.lineRangeAt(focus);
+					next = end ? line.end : line.start;
+					if (end)
+						while (next > line.start) {
+							var tail = document.buffer.document.sliceCodepoints(next - 1, next);
+							if (tail != "\n" && tail != "\r") break;
+							next--;
+						}
+				case DocumentBoundary(end, _): next = end ? document.buffer.document.codepointCount : 0;
+			}
+			var nextFocus = EditorCoordinates.position(document, next);
+			var nextAnchor = extend ? range.anchor : nextFocus;
+			if (!nextFocus.equals(range.cursor) || !nextAnchor.equals(range.anchor)) changed = true;
+			moved.push(new BufferRange(nextFocus, nextAnchor));
+		}
+		if (changed) {
+			selection.setRanges(document.buffer, moved);
+			onEdited();
+		}
+		return true;
+	}
+
 	function handleEdit(transaction:EditTransaction):Void {
+		desiredVerticalXs = [];
 		document.buffer.applyEditTransaction(selection, transaction);
 		onEdited();
 	}
@@ -169,6 +247,7 @@ class EditorPane implements View {
 		area.onSelectionChange = selectionHandler;
 		area.additionalSelectionProvider = additionalProvider;
 		area.onEditIntent = editIntentHandler;
+		area.onNavigationIntent = navigationIntentHandler;
 		area.selectionTextProvider = selectedTextProvider;
 		var current = [document.buffer.stateId, decorations.revision, searchRevision(),
 			editorTheme.searchMatch, editorTheme.editorForeground];
