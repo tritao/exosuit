@@ -16,7 +16,8 @@ Last updated: 2026-10-01.
   browser stage is wired into composed CI through `EXOSUIT_CI_WEB=1`; absent
   toolchains remain explicitly pending.
 - Active task: **M9.1**, styled text and decorations on UIKit.
-- Exact resume: bound long-paragraph edit/shaping and finish affected-row
+- Exact resume: establish a correct edit-range shaping cache and compare its
+  glyphs/carets/wraps with fresh Skribidi layouts, then finish affected-row
   invalidation. Preserve M8 and both browser gates.
 - All further graphical tests must use disposable PRAGTICAL_PORTABLE state.
   IME, physical mixed-DPI transitions, Windows and macOS remain unclaimed.
@@ -88,8 +89,8 @@ Last updated: 2026-10-01.
   (`/tmp/exosuit-m9-multiwrapped-test.log` and
   `/tmp/exosuit-m9-multiwrapped-self-test.log`).
 - M9.1 remains active: strict changed-row invalidation and the 1 MiB typing
-  budget are still open. The next measured work is incremental shaping and
-  row geometry reuse for edited long paragraphs.
+  budget are still open. An isolated cluster-input row-reflow prototype now
+  exercises viewport-first delivery; edit-range shaping is the next gate.
 
 ### M9.1 — long-paragraph update reduction (diagnosis; budget still failing)
 
@@ -109,12 +110,19 @@ Last updated: 2026-10-01.
   earlier runs. On the clean native build, 30 varied delivered inputs/frames
   measured p50 **253.33 ms**, p95 **292.04 ms**, max **295.28 ms**. Artifacts:
   `/tmp/exosuit-m9-typing-long-varied` and `.log`. This still fails 50 ms.
-- Exact next implementation: retain decoded text properties and itemization
-  across edits, then introduce a contextual shaping update that verifies both
-  sides of a changed region before reusing glyphs. Reflow only affected rows
-  and verify against Unicode/bidi/contextual examples and varied input. Do not
-  treat HarfBuzz's unsafe-to-concat flag alone as a bounded edit window for the
-  current font. M9.1 remains unaccepted.
+- The uncommitted decoded-text reuse experiment was reverted. A separate
+  `experiments/incremental_wrap.py` prototype now accepts shaped clusters,
+  locates the edited row by binary search, backs up one row at boundaries, and
+  yields changed rows before scanning the suffix. Its differential tests pass
+  for 200 randomized edits, variable widths, ligature/emoji/Arabic clusters,
+  and a 1 MiB deep edit. It models character wrapping only; it does not prove
+  Skribidi shaping equivalence or reuse cached suffix rows.
+- Exact next implementation: add an explicit edit-range shaping cache with
+  differential tests against fresh Skribidi glyphs, carets, and line breaks.
+  Reuse a suffix only after contextual and bidi equivalence is established;
+  then integrate lazy affected-row publication into UIKit and remeasure varied
+  1 MiB input. HarfBuzz's unsafe-to-concat flag alone cannot bound the edit
+  window for the measured font. M9.1 remains unaccepted.
 
 ### M9.1 — visible glyph publication and long-line edit profile (verified slice)
 

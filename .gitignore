@@ -6,3 +6,4 @@
 
 /web/build/
 /web/**/__pycache__/
+**/__pycache__/
