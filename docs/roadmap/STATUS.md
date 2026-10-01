@@ -14,9 +14,10 @@ Last updated: 2026-10-01.
   compound shift assignment. Bootstrap now passes the null-array inference
   failure after Haxeon `5f0b7671`, then passes four nullable-source corrections in `02608ed7`. It now fails
   past colliding enum constructors after `56fc5b98`, then passes expected enum inference after `5b38eca1`. It now fails at
-  `Parser.hx:2549` because stdlib `haxe.io.BytesBuffer` is missing. Add the
-  general byte builder and retry convergence.
-- Exact resume: reference headless verification passed. Implement and test the missing stdlib `haxe.io.BytesBuffer`,
+  `FieldInference.hx:179` on an unchecked declaration lookup, after the
+  missing byte builder was added in `73d67796`. Check resolved declarations
+  and retry convergence.
+- Exact resume: reference headless verification passed. Check the retrieved declarations in `FieldInference`,
   rerun Haxeon's
   `./scripts/bootstrap-compiler.sh`, then test both compiler modes. Remove the
   divergent defaults and upstream-fixed directory workaround. Restore
@@ -266,6 +267,30 @@ Last updated: 2026-10-01.
   Add reusable byte accumulation over the existing byte-output runtime;
   retain parser types/encoding logic and rerun convergence and both modes.
 - No refreshed self-hosted artifact or full M8 acceptance is claimed.
+
+### M8.2 — portable byte builder (verified stdlib slice)
+
+- Haxeon `73d67796` adds `haxe.io.BytesBuffer` over the existing byte-output
+  ABI. Supported operations are byte/range append, Int32/Float64 append,
+  length and independent byte snapshots. Numeric encoding is little-endian.
+  Parser's Unicode scalar encoder is unchanged and now finds its dependency.
+- Registered `tests/programs/bytes-buffer.hx` exercises Unicode scalars,
+  embedded NUL/255, ranges, byte truncation, snapshots, numeric encoding and
+  growth across the initial capacity. Missing class failed E2001 before the
+  addition; generated HashLink execution now returns 42.
+- The first full gate exited 1 on wasm32 range errors: the underlying native
+  byte-output primitive traps on invalid ranges. Reference Haxe's BytesBuffer
+  performs its own range validation; the new library now does likewise and
+  throws before delegation, preserving the buffer. The test remains gating
+  and requires catchable failure on all targets.
+- Corrected full `./scripts/test.sh` exited 0: formatting, 369/369 driver cases,
+  native/differential integrations, both Wasm parity backends and Wasmtime GC.
+  Log: `/tmp/haxeon-gate-bytes-buffer-ranges.log`. Explicit formatter check of
+  the stdlib file (outside the script's normal source roots) also exited 0.
+- Bootstrap advances beyond the missing class and exits 1 at
+  `FieldInference.hx:179`, nullable declaration lookup dereferenced without a
+  check. Check retrieved declarations before consuming their fields, then
+  rerun bootstrap. No fresh self-hosted artifact or M8 completion is claimed.
 
 ## Completed records
 
