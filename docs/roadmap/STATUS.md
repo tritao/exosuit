@@ -60,6 +60,40 @@ Last updated: 2026-10-01.
 
 ## Implementation records
 
+### M15.1/M15.2 — typed host services and optional interfaces (verified slice)
+
+- The editor shell now accepts shared UiHostContext and an optional typed
+  HostFileDialogs service; GraphicalMain supplies NativeDesktopServices explicitly.
+  Hosts without dialogs use the existing path command view. Source compilation
+  sits behind SourcePluginLoader/NativeSourcePluginLoader; browser graph excludes
+  the embedded compiler and desktop loader, while existing plugin APIs remain.
+- Haxeon `35bd627d` preserves optional interface parameters in canonicalization
+  and uses shared TypeRepresentation to publish their nullable physical signature.
+  Reduced Service.value(required:Int, ?suffix:String) previously rejected an
+  omitted suffix. Registered cold/incremental positive and rejection coverage
+  plus inherited/numeric optional runtime cases pass. Full gate: 380/380,
+  every integration and 247 Wasm parity fixtures (12 existing skips); both
+  bootstrap commands exit 0 and self-bootstrap is identical.
+  Logs /tmp/haxeon-gate-interface-optional.log and
+  /tmp/haxeon-bootstrap[-self]-interface-optional.log.
+- NativeKit `708ac89e` makes its transitive Emscripten runtime exports configurable.
+  Its hard-coded ccall export list previously replaced the consumer's callback
+  exports. Matched host ABI checker and actual Chrome rendering now pass with
+  ccall/addFunction/removeFunction. NativeKit's original off-pin commit/branch
+  remains preserved; changes are on exosuit-followon.
+- Both complete editor test/build modes exit 0 on the final service boundary:
+  /tmp/exosuit-browser-final-boundary-{reference,self}-{tests,build}.log.
+  Real UIKit/plugin reload and standalone release also exit 0:
+  /tmp/exosuit-browser-boundary-desktop-window.log and
+  /tmp/exosuit-browser-boundary-release.log.
+- Browser startup/rendering passes with no unavailable imports, but input smoke
+  remains red. NativeKit TextEdit events arrive with a surface handle; UIKit's
+  NativeInputAdapter wrongly filters them against the window handle. Fix the
+  general routing rule in materia/uikit with distinct-handle regression, then
+  rerun browser typing/save/readback/reload on both guest targets. Browser files
+  remain experimental and are not accepted yet.
+
+
 ### M15.2 — terminating assignment lowering (verified compiler slice)
 
 - Haxeon `14a02e0e` fixes CFG lowering after a throw-valued assignment.

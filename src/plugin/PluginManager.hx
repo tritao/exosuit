@@ -40,7 +40,9 @@ class PluginManager {
 		this.processes = processes;
 		this.settings = settings;
 		this.reportDiagnostic = reportDiagnostic == null ? function(message:String) {} : reportDiagnostic;
-		if (dynamicHost) DynamicHostRouter.initialize();
+		#if !wasm
+		if (dynamicHost) new NativeSourcePluginLoader().initialize();
+		#end
 	}
 
 	public function load(plugin:Plugin):Bool {

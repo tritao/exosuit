@@ -14,7 +14,7 @@ import haxe.io.Bytes;
  * already-live `events.requests` tracker, matching how the shared UIKit
  * reference editor (`app/src/SceneFileDialogs.hx`) uses the same API.
  */
-class NativeDesktopServices {
+class NativeDesktopServices implements platform.HostFileDialogs {
 	final host:DesktopUiHostContext;
 	final pending:Array<haxe.Int64> = [];
 

@@ -21,7 +21,8 @@ import nativekit.ui.docking.DockPanelDescriptor;
 import nativekit.ui.docking.DockSplitAxis;
 import nativekit.ui.docking.DockWorkspaceModel;
 import nativekit.ui.host.DesktopUiApplication;
-import nativekit.ui.host.DesktopUiHostContext;
+import nativekit.ui.host.UiHostContext;
+import platform.HostFileDialogs;
 import nativekit.ui.icons.IconName;
 import nativekit.ui.theme.Theme;
 import nativekit.ui.widgets.KeyedView;
@@ -68,8 +69,8 @@ class ExosuitApp implements DesktopUiApplication {
 	public final application:Application;
 	public final capabilities:HostCapabilities;
 	public final host:UiWorkbenchHost;
-	final desktop:Null<NativeDesktopServices>;
-	final hostContext:Null<DesktopUiHostContext>;
+	final desktop:Null<HostFileDialogs>;
+	final hostContext:Null<UiHostContext>;
 	final dock:DockWorkspaceModel;
 	var dockPanelContents:Array<DockPanelContent>;
 	final editorPanes:Map<Int, EditorPane> = new Map();
@@ -82,13 +83,13 @@ class ExosuitApp implements DesktopUiApplication {
 	static inline var TOOLBAR_HEIGHT:Float = 40.0;
 	static inline var STATUS_HEIGHT:Float = 26.0;
 
-	public function new(?fonts:FontCollection, ?theme:Theme, ?hostContext:DesktopUiHostContext,
-			?openPath:String, ?capabilities:HostCapabilities) {
+	public function new(?fonts:FontCollection, ?theme:Theme, ?hostContext:UiHostContext,
+			?openPath:String, ?capabilities:HostCapabilities, ?fileDialogs:HostFileDialogs) {
 		this.capabilities = capabilities == null ? HostCapabilities.desktop() : capabilities;
 		this.hostContext = hostContext;
 		this.theme = theme == null ? Theme.light() : theme;
 		ui = new UiContext(null, fonts, this.theme);
-		desktop = hostContext == null ? null : new NativeDesktopServices(hostContext);
+		desktop = fileDialogs;
 		if (hostContext != null) hostContext.onCloseRequested = function(close) close();
 		dock = makeDock();
 		var capturedHost:UiWorkbenchHost = null;
@@ -395,7 +396,7 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function openFileDialog():Void {
-		if (desktop == null) { statusMessage = "File dialogs require the desktop host"; return; }
+		if (desktop == null) { application.workbench.openPathCommandView(false); requestFrame(); return; }
 		desktop.openFile(function(accepted, paths) {
 			if (accepted && paths.length > 0) application.open(paths[0]);
 			requestFrame();
@@ -403,7 +404,7 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function openFolderDialog():Void {
-		if (desktop == null) { statusMessage = "File dialogs require the desktop host"; return; }
+		if (desktop == null) { application.workbench.openPathCommandView(true); requestFrame(); return; }
 		desktop.selectDirectory(function(accepted, paths) {
 			if (accepted && paths.length > 0) {
 				explorerRoot = application.workspace.fileSystem.normalize(paths[0]);

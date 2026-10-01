@@ -9,9 +9,11 @@ import completion.CompletionRegistry;
 import config.Settings;
 import core.WorkbenchHost;
 import jobs.JobScheduler;
-import plugin.DynamicPlugin;
+#if !wasm
+import plugin.NativeSourcePluginLoader;
+#end
 import plugin.PluginManager;
-import plugin.PluginManifest;
+import plugin.SourcePluginLoader;
 import plugin.PluginPanelRegistry;
 import syntax.SyntaxRegistry;
 import process.ProcessManager;
@@ -20,27 +22,34 @@ class PluginController {
 	public final available:Bool;
 	public final manager:PluginManager;
 
+	var sourceLoader:Null<SourcePluginLoader>;
 	final root:WorkbenchHost;
 	final reportError:(String, String)->Void;
 	final reportInformation:String->Void;
 
 	public function new(commands:CommandRegistry, keymap:Keymap, context:CommandContext, syntaxes:SyntaxRegistry,
 		completions:CompletionRegistry, panels:PluginPanelRegistry, jobs:JobScheduler, settings:Void->Settings, root:WorkbenchHost,
-		processes:ProcessManager, reportError:(String, String)->Void, reportInformation:String->Void, available:Bool = true) {
-		this.available = available;
+		processes:ProcessManager, reportError:(String, String)->Void, reportInformation:String->Void, available:Bool = true, ?sourceLoader:SourcePluginLoader) {
+		this.sourceLoader = sourceLoader;
+		#if !wasm
+		if (available && this.sourceLoader == null) this.sourceLoader = new NativeSourcePluginLoader();
+		#end
+		this.available = available && this.sourceLoader != null;
 		this.root = root;
 		this.reportError = reportError;
 		this.reportInformation = reportInformation;
 		manager = new PluginManager(commands, keymap, context, syntaxes, completions, panels, root.getPluginDecorations(),
 			root.getPluginStatusItems(), jobs, processes, settings,
-			message -> reportError("plugin", message), available);
-		if (available) installCommands(commands);
+			message -> reportError("plugin", message), this.available);
+		if (this.available) installCommands(commands);
 	}
 
 	public function loadManifest(path:String):Bool {
-		if (!available) { reportError("plugin", "Source plugins are unavailable on this host"); return false; }
+		if (!this.available) { reportError("plugin", "Source plugins are unavailable on this host"); return false; }
+		var loader = sourceLoader;
+		if (loader == null) return false;
 		try {
-			return manager.load(new DynamicPlugin(new PluginManifest(path)));
+			return manager.load(loader.load(path));
 		} catch (error:Dynamic) {
 			reportError("plugin", 'Could not load "$path": ' + Std.string(error));
 			return false;

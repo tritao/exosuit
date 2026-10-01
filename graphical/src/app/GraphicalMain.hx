@@ -57,7 +57,7 @@ class GraphicalMain {
 		host.recordPath = recordPath;
 		var app:Null<ExosuitApp> = null;
 		var session = DesktopUiHost.open(host, function(context) {
-			var instance = new ExosuitApp(context.fonts, Theme.light(), context, openPaths.length == 0 ? null : openPaths[0]);
+			var instance = new ExosuitApp(context.fonts, Theme.light(), context, openPaths.length == 0 ? null : openPaths[0], null, new NativeDesktopServices(context));
 			for (index in 1...openPaths.length) instance.application.openArgument(openPaths[index]);
 			if (pluginManifest != null && !instance.application.loadPluginManifest(pluginManifest))
 				Sys.println('exosuit: could not load plugin manifest "$pluginManifest"');
