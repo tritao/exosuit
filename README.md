@@ -64,8 +64,9 @@ backgrounds follow the shared primary caret. Multiple selections/carets render,
 and multi-caret insertion, cut/paste and deletion use buffer transactions.
 
 - Strict changed-row invalidation remains pending. Both large fixtures now open:
-  10 MiB multiline typing passes the 50 ms p95 budget at 35.7 ms, while the
-  1 MiB single line still fails at 808.6 ms on the recorded Linux host.
+  10 MiB multiline typing reaches 44.3 ms p95 on a repeat run, with an
+  earlier 62.6 ms run under workstation load. The 1 MiB single line improves
+  to 313.7 ms p95 but still exceeds the 50 ms budget.
 - Primary caret/selection changes now flow between the widget and model, including
   command-driven placement. Language popups are not anchored to that caret.
 - Workspace search results are retained by the host but have no graphical panel.

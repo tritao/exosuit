@@ -16,8 +16,8 @@ Last updated: 2026-10-01.
   browser stage is wired into composed CI through `EXOSUIT_CI_WEB=1`; absent
   toolchains remain explicitly pending.
 - Active task: **M9.1**, styled text and decorations on UIKit.
-- Exact resume: bound long-paragraph edit/shaping and prepared-glyph publication,
-  finish affected-row invalidation, then complete multi-caret movement. Preserve M8 and both browser
+- Exact resume: bound long-paragraph edit/shaping and finish affected-row
+  invalidation, then complete multi-caret movement. Preserve M8 and both browser
   gates.
 - All further graphical tests must use disposable PRAGTICAL_PORTABLE state.
   IME, physical mixed-DPI transitions, Windows and macOS remain unclaimed.
@@ -60,6 +60,72 @@ Last updated: 2026-10-01.
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M9.1 — visible glyph publication and long-line edit profile (verified slice)
+
+- Skribidi `6c53759` adds half-open visual-line range iteration and glyph
+  preparation. The full-layout APIs delegate to the range APIs. A 1 MiB wrapped
+  word regression checks a middle line visits only its glyphs, empty and invalid
+  bounds, and callback termination. Its full native test suite passes.
+- Materia `2c8600fc1` carries the visible range through TextEngine, both public
+  rendering paths and immutable snapshot publication. Conservative line bounds
+  permit binary viewport lookup; native atlas refresh keeps the selected range
+  and tint. Bounded render targets use their own height; translated targets use
+  the full preparation path. A GPU regression renders a 100,000-character
+  wrapped paragraph at the top and after scrolling 5,000 pixels. The complete
+  native CTest suite passed 61/61, with the environment-dependent joystick test
+  skipped; focused renderer checks passed after the target-bounds adjustment.
+  Logs: `/tmp/skribidi-m9-line-range-test.log`,
+  `/tmp/uikit-m9-visible-range-all.log`,
+  `/tmp/uikit-m9-visible-target-tests.log`, and
+  `/tmp/uikit-m9-visible-scroll-test.log`.
+- Ordinary edits now update the retained native paragraph layout, matching the
+  already retained newline-edit path. This avoids creating a new text engine and
+  atlas on every keystroke. The framework smoke and graphical build pass.
+- The final reference and self-hosted graphical builds and real decoration
+  pixels pass. Both browser guest targets pass Unicode edit, save/readback,
+  URL and fresh reload; the unpacked release and real Haxeon LSP pass.
+  Logs use `/tmp/exosuit-m9-visible-` with `final-build`, `self-build`,
+  `ref-decoration`, `self-decoration`, `web32-test`, `webgc-test`, and
+  `release` suffixes plus `.log`.
+- The real UIKit project/open/edit/save/palette/problems/build/plugin workflow
+  passes after an initial artifact-free exit during the loaded native run; the
+  unchanged-source retry retained artifacts at
+  `/tmp/exosuit-m9-visible-workflow-artifacts` and passed
+  (`/tmp/exosuit-m9-visible-workflow-retry.log`). The first exit had no captured
+  app diagnostic, so its cause is not established.
+- A final 61-test native CTest run passed every text/UI check but saw the
+  unrelated GPU contract smoke fail. The same binary passed directly and on
+  a subsequent isolated CTest run without source changes
+  (`/tmp/uikit-m9-gpu-contract-uncontented.log`). This is recorded as an
+  intermittent test failure, not a text change regression or a clean 61/61
+  final run. The earlier full native run passed 61/61; one joystick test was
+  skipped in both runs.
+- The 1 MiB single-line fixture now has 30 delivered input events in 30 frames:
+  p50 288.47 ms, p95 **313.69 ms**, max 321.93 ms. This improves the prior
+  808.62 ms p95 but still **fails** the 50 ms budget. Mean native render fell
+  from about 401 ms to 2.2 ms; mean edit dispatch remains **236.5 ms** and
+  frame time 51.3 ms. Retained resource reuse improves p95 only modestly
+  (viewport-only p95 324.93 ms). Logs/artifacts:
+  `/tmp/exosuit-m9-typing-long-visible` and
+  `/tmp/exosuit-m9-typing-long-retained` (plus `.log`).
+- Final small fixture: 30/30 frames/events, p95 **18.14 ms** (passes).
+  The 10 MiB multiline fixture produced 30 frames/events, p95 **62.59 ms**
+  on the first run (fails), then 29 frames/events, p95 **44.30 ms** on an
+  unchanged-build repeat (passes). Both runs had one approximately 255 ms
+  outlier; the first also had a 40 ms tree/style frame. The status is
+  variable under this workstation load, so a stable 10 MiB acceptance is
+  not claimed. Artifacts: `/tmp/exosuit-m9-visible-small-final`,
+  `/tmp/exosuit-m9-visible-10mb-final`, and
+  `/tmp/exosuit-m9-visible-10mb-repeat` (plus `.log`).
+- The 100 Hz HashLink profile (`/tmp/exosuit-m9-long-edit-profile.log`) repeatedly
+  identifies `nkui_text_layout_create_styled` inside the edit path. The editor
+  still has to reshape and wrap the whole million-character paragraph after
+  every character edit. The next implementation must reuse unaffected shaping
+  and row geometry across edits while preserving Unicode, bidi and contextual
+  shaping semantics; a cache of this fixed benchmark input would not satisfy
+  the general typing budget. Strict changed-row invalidation and multi-caret
+  movement remain pending. M9.1 acceptance is not claimed.
 
 ### M9.1 — large-file startup and measured typing (verified fixes, budget still partial)
 

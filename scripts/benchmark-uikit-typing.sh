@@ -7,7 +7,11 @@ if [[ ${1:-} == --drive ]]; then
     fixture=$2
     export PRAGTICAL_PORTABLE="$fixture/state"
     export LD_LIBRARY_PATH="$haxeon_root/out:$haxeon_root/.tools/hashlink:$root_dir/graphical/build/host/native/pragtical_hx:$root_dir/graphical/build/host/native/exosuit-ui-native${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-    "$haxeon_root/.tools/hashlink/hl" "$root_dir/graphical/build/host/main.hl" \
+    hl_options=()
+    if [[ -n ${TYPING_UI_PROFILE_PORT:-} ]]; then
+        hl_options+=(--diagnostics "$TYPING_UI_PROFILE_PORT")
+    fi
+    "$haxeon_root/.tools/hashlink/hl" "${hl_options[@]}" "$root_dir/graphical/build/host/main.hl" \
         --capture-dir="$fixture/capture" --capture-seconds="${TYPING_UI_CAPTURE_SECONDS:-15}" --record-path="$fixture/events.jsonl" "$fixture/input.txt" > "$fixture/app.log" 2>&1 &
     app=$!
     trap 'kill "$app" 2>/dev/null || true' EXIT
