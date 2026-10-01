@@ -57,6 +57,32 @@ Last updated: 2026-10-01.
 
 ## Implementation records
 
+### M8.3 — manifest-based real language service (verified slice)
+
+- Exosuit `485303f` replaces removed realtime-haxe/haxeon-compile invocations
+  with a real smoke-test package and CLI build/run. The client starts the actual
+  Haxeon server, edits valid code into an invalid return, observes a diagnostic,
+  fixes and clears it, saves through Document.save, then independently builds
+  the saved package and executes it to return 42. Initial disk code returns 1,
+  so success proves the changed document was saved.
+- `./scripts/test-haxeon-lsp.sh` and
+  `HAXEON_SELF_HOSTED=1 ./scripts/test-haxeon-lsp.sh` exit 0. Logs:
+  `/tmp/exosuit-real-lsp-manifest.log`,
+  `/tmp/exosuit-real-lsp-manifest-self.log`. Shell syntax and diff checks pass.
+  External-server override is retained for unpacked release qualification.
+- Inspected existing DesktopUiHost options: native capture, frame limits,
+  event recording and app diagnostic snapshots are already available; no
+  framework hook was added. `xvfb-run -a ./scripts/run.sh --capture-dir=...`
+  with three frames and a disposable Main.hx exits 0, produces a real window
+  capture/tree/events/app state, and visually shows the file and live shell.
+  Log `/tmp/exosuit-uikit-window-smoke.log`, artifacts
+  `/tmp/exosuit-m8-window-capture`. This first capture inherited existing
+  session tabs; all further GUI checks must set PRAGTICAL_PORTABLE to a
+  disposable state directory. No existing document was edited.
+- Basic window rendering is verified; scripted edit/save/palette/problems/
+  build/reload acceptance remains pending. Next: isolate portable state and
+  drive real native inputs with xdotool, then restore pinned packaging/CI.
+
 ### M8.1/M8.2 — reflection copies and mandatory source plugins (accepted)
 
 - Haxeon `82d92ba0` fixes the reduced Reflect.copy representation failure.

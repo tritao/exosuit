@@ -51,6 +51,11 @@ string all round-trip unchanged.
   the self-hosted `SelectOption` failure to minimal cases. Add regressions in
   Haxeon and fix the general typing rule (COMPILER-TYPING). Do not rewrite
   application code to evade them.
+
+  Evidence: CommandView has a reduced effect regression. The historical
+  ConfigurationController/SelectOption failures do not reproduce after the
+  source update and converged bootstrap; both actual UIKit builds pass. See
+  STATUS for classification rather than claiming invented reducers.
 - [x] Make reference and self-hosted builds agree. Then remove the divergent
   `HAXEON_SELF_HOSTED` defaults from `test.sh` and `build.sh`, or document a
   remaining unrelated reason.
