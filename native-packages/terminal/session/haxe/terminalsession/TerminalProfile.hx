@@ -14,7 +14,7 @@ class TerminalProfile {
         this.program = program;
         this.arguments = arguments == null ? [] : arguments.copy();
         this.cwd = cwd;
-        this.environment = environment;
+        this.environment = environment == null ? null : environment.copy();
     }
 
     public static function shell(?cwd:String):TerminalProfile {
@@ -22,6 +22,9 @@ class TerminalProfile {
         if (path == null || !StringTools.startsWith(path, "/")) path = "/bin/sh";
         return new TerminalProfile(path, [], cwd);
     }
+
+    public function copy():TerminalProfile
+        return new TerminalProfile(program, arguments, cwd, environment);
 
     /** Snapshot the parent environment and apply terminal-specific settings. */
     public function childEnvironment():Array<String> {

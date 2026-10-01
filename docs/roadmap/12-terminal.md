@@ -6,12 +6,12 @@ Depends on M11.1, M11.4 and M9. The reference is Pragtical's terminal plugin
 
 ## M12.1 — Session model
 
-- [ ] Define a `TerminalSession` interface: id, status, write, resize,
+- [x] Define a `TerminalSession` abstraction: id, status, write, resize,
   pollEvents, requestReplay, terminate, detach, close, offset and
   applyCheckpoint. Output is ordered by byte offset. Drop duplicates, and
-  request a replay when there is a gap. Workbench sessions (M14) implement the
-  same interface remotely.
-- [ ] Local backend over M11.1 and M11.4. Add profiles (shell, cwd, env) and
+  request a replay when there is a gap. Workbench sessions (M14) can supply
+  another backend to the same session model.
+- [x] Local backend over M11.1 and M11.4. Add profiles (shell, cwd, env) and
   register them through the plugin API. Do not pass the host `NO_COLOR` to
   children. Set `TERM=xterm-256color`.
 

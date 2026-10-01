@@ -63,7 +63,7 @@ Last updated: 2026-10-01.
 | M9 | Active: M9.1 | General styled text/decorations and editor rendering |
 | M10 | Not started | Depends on M8, M9.1–M9.2 |
 | M11 | Active: M11.1 POSIX, M11.2 Linux, M11.3 SQLiteKit, M11.4 TerminalKit slice | Depends on M8; independent of M9/M10; Windows PTY/named pipes and M11.4 session integration remain pending |
-| M12 | Active: M12.1 headless session slice | Local PTY/session and deterministic replay tests pass; plugin profile registration, graphical view and remote backend remain |
+| M12 | M12.1 accepted headlessly on Linux | Local PTY/session, replay, and plugin-owned profile lifecycle pass; graphical view and remote backend remain |
 | M13 | Not started | Depends on M11.2 |
 | M14 | Not started | Depends on M11–M13 |
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
@@ -86,8 +86,11 @@ Last updated: 2026-10-01.
   for this; `release.lock` pins it.
 - Deterministic replay/overlap/checkpoint and real shell PTY round-trip tests
   pass in reference and self-hosted modes. The session package gate is in
-  `scripts/test.sh`. Plugin profile registration, the graphical view, remote
-  transport backend, and Windows ConPTY execution remain open.
+  `scripts/test.sh`. `TerminalProfileRegistry` accepts plugin-owned profiles
+  through the context's lifetime hook without depending on Exosuit's core
+  package. The plugin integration test launches a registered profile and
+  verifies cleanup on disable, reload, and shutdown. The graphical view,
+  remote transport backend, and Windows ConPTY execution remain open.
 
 ### M11.4 — TerminalKit emulator (initial Linux slice)
 

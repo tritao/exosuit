@@ -14,6 +14,12 @@ import completion.CompletionItem;
 import completion.CompletionProvider;
 import completion.CompletionRequest;
 import plugin.EditorApi;
+import terminalsession.TerminalProfile;
+import terminalsession.TerminalProfileRegistry;
+import terminalsession.TerminalSession;
+import terminalsession.LocalPtyBackend;
+import terminalkit.Emulator;
+import NativeKitRuntime;
 
 class SampleCompletionProvider implements CompletionProvider {
 	public function new() {}
@@ -36,8 +42,12 @@ class SamplePlugin implements Plugin {
 	public final job:SampleJob = new SampleJob();
 	public var lastApi(default, null):Null<EditorApi>;
 	final fixture:String;
+	final terminalProfiles:TerminalProfileRegistry;
 
-	public function new(fixture:String) this.fixture = fixture;
+	public function new(fixture:String, terminalProfiles:TerminalProfileRegistry) {
+		this.fixture = fixture;
+		this.terminalProfiles = terminalProfiles;
+	}
 
 	public function id():String
 		return "sample";
@@ -61,6 +71,8 @@ class SamplePlugin implements Plugin {
 		context.api.schedule(job);
 		context.api.startProcess(fixture, ["sleep"]);
 		context.addCompletionProvider(new SampleCompletionProvider());
+		terminalProfiles.add(context.id, "shell", new TerminalProfile("/bin/sh", ["-c",
+			"printf 'PROFILE:%s:%s\\r\\n' \"$TERM\" \"${NO_COLOR-unset}\""], "/tmp"), context.own);
 	}
 
 	public function deactivate(context:PluginContext):Void
@@ -83,7 +95,11 @@ class SamplePlugin implements Plugin {
 
 class BrokenPlugin implements Plugin {
 	final fixture:String;
-	public function new(fixture:String) this.fixture = fixture;
+	final terminalProfiles:TerminalProfileRegistry;
+	public function new(fixture:String, terminalProfiles:TerminalProfileRegistry) {
+		this.fixture = fixture;
+		this.terminalProfiles = terminalProfiles;
+	}
 
 	public function id():String
 		return "broken";
@@ -93,6 +109,7 @@ class BrokenPlugin implements Plugin {
 		context.api.addStatusItem("leak", "broken");
 		context.api.addDecoration("leak", 0, 0, 1, 0xFFFFFFFF);
 		context.api.startProcess(fixture, ["sleep"]);
+		terminalProfiles.add(context.id, "leak", TerminalProfile.shell(), context.own);
 		context.bind(1, 0, ["root:close"]);
 	}
 
@@ -119,6 +136,25 @@ class PluginTestMain {
 			throw message;
 	}
 
+	static function checkTerminalProfile(profiles:TerminalProfileRegistry):Void {
+		var entry = profiles.find("sample", "shell");
+		if (entry == null) throw "terminal profile lookup failed";
+		require(entry.id() == "sample:shell", "terminal profile identity failed");
+		var runtime = NativeKitRuntime.start();
+		var session = new TerminalSession(LocalPtyBackend.spawn(entry.profile, 40, 4), Emulator.open(40, 4));
+		var deadline = Sys.time() + 5;
+		while (Sys.time() < deadline && session.status != "exited") {
+			session.pollEvents();
+			Sys.sleep(0.01);
+		}
+		session.emulator.snapshot();
+		var passed = session.status == "exited" && session.exitCode == 0
+			&& session.emulator.rowText(0).indexOf("PROFILE:xterm-256color:unset") >= 0;
+		session.close();
+		runtime.dispose();
+		require(passed, "registered terminal profile did not start and exit");
+	}
+
 	static function main():Int {
 		Platform.startHeadless();
 		var arguments = Sys.args();
@@ -127,14 +163,17 @@ class PluginTestMain {
 			renderer = new Renderer(window, "ignored-headlessly.ttf", 15),
 			application = new Application((theme, focus, workspace, settings) -> new RootView(renderer, theme, focus, workspace, 320, 200, settings)),
 			root:RootView = cast application.root,
-			plugin = new SamplePlugin(arguments[0]);
+			terminalProfiles = new TerminalProfileRegistry(),
+			plugin = new SamplePlugin(arguments[0], terminalProfiles);
 		application.newDocument();
 		require(application.plugins.load(plugin), "plugin did not activate");
+		require(terminalProfiles.profiles().length == 1, "terminal profile was not registered");
+		if (Sys.systemName() != "Windows") checkTerminalProfile(terminalProfiles);
 		require(plugin.activations == 1 && application.plugins.isLoaded("sample") && application.completions.count() == 2
 			&& application.processes.activeCount() == 1,
 			"plugin activation state or completion contribution was not recorded");
 		require(application.syntaxes.find("file.sample").name == "Sample", "plugin syntax did not register");
-		require(!application.plugins.load(new SamplePlugin(arguments[0])), "duplicate plugin id was accepted");
+		require(!application.plugins.load(new SamplePlugin(arguments[0], terminalProfiles)), "duplicate plugin id was accepted");
 		require(application.keyPressed(77, 3) && plugin.performed == 1 && plugin.events == 1
 			&& application.context.requireDocument().buffer.text == "plugin", "plugin command did not perform an owned document transaction");
 		require(application.commands.perform("doc:complete-word", application.context)
@@ -158,6 +197,7 @@ class PluginTestMain {
 		require(plugin.deactivations == 1 && !application.commands.contains("sample:run") && !application.keyPressed(77, 3),
 			"plugin registrations survived disable");
 		require(application.completions.count() == 1, "plugin completion provider survived disable");
+		require(terminalProfiles.profiles().length == 0, "terminal profile survived disable");
 		require(application.processes.activeCount() == 0, "plugin-owned process survived disable");
 		var eventsAfterUnload = plugin.events;
 		application.textInput("after");
@@ -178,10 +218,12 @@ class PluginTestMain {
 		application.keyPressed(Platform.KEY_ENTER, 0);
 		require(plugin.activations == 2 && application.plugins.isLoaded("sample") && application.processes.activeCount() == 1,
 			"plugin did not enable with fresh registrations");
+		require(terminalProfiles.profiles().length == 1, "terminal profile was not restored on enable");
 		require(application.commands.perform("plugins:reload", application.context)
 			&& root.commandView.results.length == 1, "plugin reload picker did not open");
 		application.keyPressed(Platform.KEY_ENTER, 0);
 		require(plugin.activations == 3 && application.processes.activeCount() == 1, "plugin did not reload with one owned process");
+		require(terminalProfiles.profiles().length == 1, "terminal profile duplicated on reload");
 		var activeView = application.context.requireView(), activeDocument = application.context.requireDocument(), activeSelection = activeView.getSelection();
 		require(activeSelection != null, "document view did not expose its selection");
 		activeDocument.buffer.replaceAllText("alpha alphabet al", activeSelection);
@@ -192,7 +234,7 @@ class PluginTestMain {
 		require(activeDocument.buffer.text == "alpha alphabet alpha", "completion acceptance did not replace the typed prefix");
 		var failed = false;
 		try {
-			application.plugins.load(new BrokenPlugin(arguments[0]));
+			application.plugins.load(new BrokenPlugin(arguments[0], terminalProfiles));
 		} catch (error:Dynamic) {
 			failed = true;
 		}
@@ -201,10 +243,12 @@ class PluginTestMain {
 			&& !application.commands.contains("broken:leak")
 			&& application.processes.activeCount() == 1
 			&& root.pluginStatusItems.find("broken", "leak") == null
-			&& root.pluginDecorations.find("broken", "leak") == null, "failed activation leaked plugin state");
+			&& root.pluginDecorations.find("broken", "leak") == null
+			&& terminalProfiles.find("broken", "leak") == null, "failed activation leaked plugin state");
 		application.shutdown();
 		require(plugin.deactivations == 3 && application.plugins.count() == 0 && application.processes.activeCount() == 0,
 			"application shutdown did not deactivate plugins or retire their processes");
+		require(terminalProfiles.profiles().length == 0, "terminal profile survived shutdown");
 		renderer.destroy();
 		Platform.require(Native.window_destroy(window), "destroy plugin test window");
 		Native.shutdown();

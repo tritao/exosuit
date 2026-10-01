@@ -4,7 +4,8 @@
 	"entry": "app.PluginTestMain",
 	"sourceRoots": ["src"],
 	"dependencies": {
-		"pragtical_hx": { "path": "../.." }
+		"pragtical_hx": { "path": "../.." },
+		"terminalsession": { "path": "../../native-packages/terminal/session" }
 	},
 	"target": "host",
 	"outputDir": "build"

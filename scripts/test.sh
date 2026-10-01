@@ -42,6 +42,12 @@ echo "PASS: headless platform ABI"
 "$root_dir/native-packages/sqlite/tests/run.sh"
 "$root_dir/native-packages/terminal/tests/run.sh"
 "$root_dir/native-packages/terminal/session/tests/run.sh"
+terminal_native_dir="$root_dir/native-packages/terminal/session/tests/build/nativekit"
+if [[ $(uname -s) == Darwin ]]; then
+	export DYLD_LIBRARY_PATH="$terminal_native_dir${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+else
+	export LD_LIBRARY_PATH="$terminal_native_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
 
 "$cc" -std=c11 -Wall -Wextra -Werror \
 	"$root_dir/tests/process_fixture.c" \
