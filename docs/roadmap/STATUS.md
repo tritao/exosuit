@@ -24,17 +24,16 @@ Last updated: 2026-10-01.
   while the 1 MiB graphical timing gate waits for an idle host. Their Windows
   implementations remain open. The Pragtical PTY and emulator references are
   present in the available read-only checkout.
-- Exact resume: finish M9.1 strict changed-row paint invalidation. Visible
-  rows now have independent draw commands and retained glyph snapshots; a
-  changed row still causes its containing render pass to repaint. Add row-sized
-  paint caching without breaking clipping, decorations or sealed-frame ownership.
-  The guarded ASCII path meets the real 1 MiB varied-key typing budget;
-  unsupported layouts still use complete native layout rebuilds. Broaden
-  layout reuse only with differential geometry evidence.
+- Exact resume: finish M9.1 strict changed-row invalidation. The layout-session
+  editor now caches eligible visible rows in shallow raster passes: an edit in
+  one wrapped row misses that row and its containing pass while unchanged rows
+  hit. The containing pass still recomposites rows, and unsupported Unicode
+  layouts still rebuild natively. Inspect those remaining invalidation cases
+  before checking M9.1. Preserve the 1 MiB, 10 MiB and graphical pixel gates.
   Preserve M8 and both browser gates.
-- Current follow-on HEADs: Exosuit `4a97fa4` before this ledger commit;
-  Materia `83904c4b7` carries identical-range suffix reuse, direct viewport
-  ownership and row-scoped draw commands. The
+- Current follow-on HEADs: Exosuit `5230e70` before this ledger commit;
+  Materia `090ba9d31` carries row-scoped glyph commands and shallow row raster
+  caching on the layout-session path. The
   existing dirty Haxeon/NativeKit gitlinks and UIKit TextInputBridge edit in
   Materia were left untouched.
 - All further graphical tests must use disposable PRAGTICAL_PORTABLE state.
@@ -72,12 +71,37 @@ Last updated: 2026-10-01.
 | M9 | Active: M9.1 | General styled text/decorations and editor rendering |
 | M10 | Not started | Depends on M8, M9.1–M9.2 |
 | M11 | Active: M11.1 POSIX, M11.2 Linux, M11.3 SQLiteKit, M11.4 TerminalKit slice | Depends on M8; independent of M9/M10; Windows PTY/named pipes and M11.4 session integration remain pending |
-| M12 | M12.1 accepted; M12.2 initial Linux view | Local PTY/session and plugin profiles pass; docked plain-text grid, row raster reuse, input, and resize smoke pass; full styling and controls remain |
+| M12 | M12.1 accepted; M12.2 Linux view active | Local PTY/session and plugin profiles pass; docked styled grid, cursor, scrollback keys, row raster reuse, input and resize smoke pass; selection and redraw benchmark remain |
 | M13 | Not started | Depends on M11.2 |
 | M14 | Not started | Depends on M11–M13 |
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M9.1 — cached row paint on the layout-session editor (verified slice)
+
+- Materia `090ba9d31` gives eligible visible rows their own shallow cached
+  raster pass, then composites each at its original place in the parent pass.
+  The original clip remains on the composite, preserving selection and
+  decoration order. Multi-row layouts and short single-row paragraphs use
+  immutable row glyph snapshots; very long single rows, rotated text, ranges
+  above 96 rows and exhausted transient IDs retain the direct draw path.
+  The raster cache supports 128 entries within its existing 64 MiB byte cap.
+- The native layout-session regression reports nine initial cache misses,
+  nine hits on repeat, then seven hits and two misses after one wrapped-row
+  edit (the changed row and containing pass). Its 160-frame pressure case
+  verifies bounded eviction. ABI, text-engine, frame-resource, public-renderer
+  and session-render native tests pass. Real graphical decoration pixels pass.
+- The 30-event typing fixtures pass: small 4.2 KiB p95 **19.87 ms**; 10 MiB
+  p95 **27.98 ms**; 1 MiB varied-key repeat p95 **46.73 ms**, under the 50 ms
+  gate. Artifacts: `/tmp/exosuit-m9-row-cache-small`,
+  `/tmp/exosuit-m9-row-cache-10mb`, and
+  `/tmp/exosuit-m9-session-row-cache-repeat` (plus `.log`). The preceding
+  1 MiB run was **57.24 ms p95** under host variation and missed the gate;
+  report both runs. The full Exosuit headless suite exits 0.
+- M9.1 stays open: unchanged row rasters are reused, but their parent pass
+  still recomposites them. Unicode/native fallback and source-shift cases
+  remain more conservative than strict changed-row invalidation.
 
 ### M9.1 — row-scoped visible text commands (verified slice)
 
@@ -94,10 +118,9 @@ Last updated: 2026-10-01.
   delivered 30/30 frames: p50 **39.30 ms**, p95 **43.13 ms**, max **45.61 ms**,
   below the 50 ms p95 budget. Artifacts: `/tmp/exosuit-m9-row-commands` and
   `.log`.
-- M9.1 remains open: render-pass caching is still pass-wide, so one changed row
-  repaints the containing pass. Next, add row-sized paint caching with correct
-  clipping and decoration invalidation before checking strict changed-row
-  acceptance.
+- M9.1 remains open here because render-pass caching is pass-wide. The next
+  slice above adds bounded row raster caching on the editor's actual
+  layout-session path while preserving clipping and decoration order.
 
 ### M12.2 — docked terminal view (initial Linux slice)
 
@@ -117,11 +140,10 @@ Last updated: 2026-10-01.
   input, and a resized window. It verifies the dock, row canvases, 80×6
   session geometry, and shell input. The captured shell output reports
   `stty size` as `6 80`. Graphical builds pass in reference and self-hosted
-  compiler modes. Styled cells, cursor, full keyboard protocol, scrollback,
-  selection and redraw benchmark remain M12.2 work. The follow-on graphical
+  compiler modes. Selection and redraw benchmark remain M12.2 work. The follow-on graphical
   terminal smoke and headless tests passed; physical desktop review remains.
 
-### M9.1 — identical-range suffix snapshot reuse (in verification)
+### M9.1 — identical-range suffix snapshot reuse (verified slice)
 
 - Materia `736b3241a`. UIKit's guarded ASCII edit path now compares old and new row text after an
   offset-shifting edit. It retains a row revision only when its source range,
