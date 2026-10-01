@@ -14,10 +14,11 @@ Last updated: 2026-10-01.
   convergence; both reference and self-hosted graphical builds exit 0.
   The fresh self-hosted headless suite also exits 0 with the dynamic-plugin
   test explicitly suppressed. M8 acceptance remains incomplete.
-- Exact resume: continue the embedded runtime reducer after raw-byte ABI
-  fix `3f870cf7` (see latest record). Restore source plugins and
-  remove test suppression before claiming M8.1. Integration/release and
-  interactive UIKit checks remain pending.
+- Exact resume: finish source-plugin restoration (owned changes are pending),
+  inspecting `/tmp/exosuit-dynamic-plugin-restoration.log` / running session
+  24186. Finish the Haxeon embedding package's registered integration test,
+  then make dynamic-plugin acceptance mandatory and run both editor modes.
+  Integration/release and interactive UIKit checks remain pending.
 - HEADs at planning: exosuit `ae2f260` (`haxeon-uikit-port`). Materia `main` is at
   `816372dd`, fast-forwarded 2026-10-01 for the Haxeon wasm and web fixes; it
   contains uikit and editorkit. Haxeon is at `fba71015` (on pin, fast-forwarded).
@@ -57,6 +58,42 @@ Last updated: 2026-10-01.
 | M15 | Not started | Depends on M8.1, M8.2; scheduled right after M8. Reference: materia `app/web` at `816372dd`, Haxeon `fba71015` |
 
 ## Implementation records
+
+### M8.1/M8.2 — cast context and checked opaque conversions (verified slice)
+
+- Haxeon `c0e1f251` separates operand inference from the destination of an
+  untyped cast; explicit type ascriptions still guide their operands. This
+  fixes the exact E1003 reducer for Runtime.callBytes: a generic callback
+  calling a native method was incorrectly constrained by the cast destination.
+  Local reference Haxe accepts the reduced existing explicit ABI cast.
+- IR lowering now treats opaque native handles and managed Bytes as reference
+  cast types, using existing checked dynamic casts. It does not relax implicit
+  assignability. `CastContextMain` executes a Bytes -> matching opaque handle
+  -> Bytes round trip and rejects a wrong native tag at runtime. Removing the
+  explicit cast remains rejected incrementally and cold; restoration runs.
+  The initial reducer also exposed unsupported backend representation casting;
+  both responsible layers are fixed and tested.
+- Full `./scripts/test.sh` exited 0: 373/373 and every native/C++/Wasm stage
+  (`/tmp/haxeon-gate-cast-context.log`). Bootstrap and self-bootstrap exited 0,
+  converged after one stage and rebuilt identically (logs
+  `/tmp/haxeon-bootstrap-cast-context.log`,
+  `/tmp/haxeon-bootstrap-self-cast-context.log`). Owned updated bootstrap is
+  committed; pre-existing dirty Haxeon paths are unchanged.
+- The uncommitted package probe now passes in reference and self-hosted modes:
+  `/tmp/haxeon-compiler-embedding-cast-fixed-entry.log` and
+  `/tmp/haxeon-compiler-embedding-cast-self.log`, both exit 0, compile the
+  public compiler/runtime package and execute generated code returning 42.
+  The earlier probe expected `Probe.main` incorrectly; module-level functions
+  export `main`, consistent with existing runtime tests. Corrected that fixture
+  rather than changing exports. Register/document/verify the embedding package
+  before committing it.
+- Pending exosuit restoration restores the original threaded dynamic-plugin
+  implementation, configures compiler intrinsics and the portable PluginHost
+  HXI, uses checked function-ID lookups, and reinstalls retained callbacks after
+  shutdown. SDK calls use explicit ok/error responses to propagate host errors
+  within plugin code. Added disposable-fixture Unicode error-catching and
+  callback restart checks. Direct acceptance is running; no success or milestone
+  completion is claimed yet. Test suppression remains until acceptance passes.
 
 ### M8.1/M8.2 — consistent raw byte intrinsic types (verified compiler slice)
 
