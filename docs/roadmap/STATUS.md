@@ -88,10 +88,21 @@ Last updated: 2026-10-01.
   timing as a regression or claiming the budget gate.
 - Renderer trace: `prepare_visible_text` still composes visible row snapshots
   into one viewport glyph resource, and its resource binding includes the
-  layout generation, which changes on every edit. Next, measure that binding
-  and upload cost in isolation, then retain unchanged row resources across
-  generations if the measurement warrants it. Do not reuse shifted suffix
-  rows until their source ranges can be remapped and verified.
+  layout generation, which changes on every edit. That remains a changed-row
+  invalidation gap, but the saved 30-frame timelines put input dispatch at
+  roughly **35 ms median / 45 ms p95** and frame rendering at only **2–4 ms**.
+  Optimizing the viewport binding alone cannot provide a robust typing margin.
+- A temporary probe outside the repository (`/tmp/exosuit-edit-window-profile`)
+  ran 300 guarded 1 MiB native edits without full-layout oracles between edits:
+  **23.74 ms mean CPU**. A `perf` sample placed the largest edit costs in
+  `skb__layout_lines`, per-line culling bounds, and the edit's full-layout
+  materialization; the one-glyph eligibility scan was smaller. Artifacts:
+  `/tmp/exosuit-m9-native-edit-300.perf.data` and `.log`. EditorKit's
+  `TextDocument` already splits offset maps into ~2 KiB segments, so a
+  document-wide offset-map rebuild is not the likely dispatch bottleneck.
+  Next, reduce native row layout/culling work for supported guarded edits
+  while preserving full geometry and differential tests. Do not reuse shifted
+  suffix glyph rows until their source ranges are remapped and verified.
 
 ### M9.1 — retained visual-row glyph invalidation (verified slice)
 
