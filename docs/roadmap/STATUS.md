@@ -5,9 +5,13 @@ Last updated: 2026-10-01.
 ## Current checkpoint
 
 - Active task: **M8.1** (native string convention). Follow-on roadmap M8–M15 was planned 2026-10-01.
-- HEADs at planning: exosuit `ae2f260` (`haxeon-uikit-port`), haxeon `5d4fe0ff` (2 dirty),
-  nativekit `2bb4c957` (`materia-numeric-locale`), uikit and editorkit `3db05075` (4 dirty each),
-  pragtical `50644c91` (`next`, read-only reference, dirty smooth-scroll work).
+- HEADs at planning: exosuit `ae2f260` (`haxeon-uikit-port`). Materia `main` is at
+  `816372dd`, fast-forwarded 2026-10-01 for the Haxeon wasm and web fixes; it
+  contains uikit and editorkit. Haxeon is at `fba71015` (on pin, fast-forwarded).
+  NativeKit is at `2bb4c957` (`materia-numeric-locale`, off-pin, local). Pragtical
+  is at `50644c91` (`next`, read-only reference, dirty smooth-scroll work).
+- The baseline failures below were observed before the Haxeon and materia
+  fast-forward. Re-run both gates at the start of M8.
 - The UIKit port (`89d2694`, ADR 0002) invalidates M0–M7 runtime evidence for the
   graphical product. Those records stay as history; M8 re-establishes the gates.
 - Baseline failures at `ae2f260`:
@@ -37,7 +41,7 @@ Last updated: 2026-10-01.
 | M12 | Not started | Depends on M9, M11.1, M11.4 |
 | M13 | Not started | Depends on M11.2 |
 | M14 | Not started | Depends on M11–M13 |
-| M15 | Not started | Depends on M9, M10 |
+| M15 | Not started | Depends on M8.1, M8.2; scheduled right after M8. Reference: materia `app/web` at `816372dd`, Haxeon `fba71015` |
 
 ## Completed records
 

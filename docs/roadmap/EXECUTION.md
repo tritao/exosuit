@@ -3,17 +3,30 @@
 ## Scope and repository ownership
 
 Implementation covers this editor and necessary changes in the sibling
-workspace repositories:
+workspace. That is three git repositories:
 
-- Haxeon compiler, runtime and stdlib in `HAXEON_ROOT` (default `../haxeon`).
-- NativeKit (`../nativekit`) for core native capabilities (PTY, local transport).
-- UIKit (`../uikit`) for widgets and hosts.
-- EditorKit (`../editorkit`) for the text model.
+- **materia** (`..`), a monorepo. Its directories include UIKit (`uikit/`,
+  widgets and hosts), EditorKit (`editorkit/`, text model) and the reference
+  editor's web pipeline (`app/web/`). This exosuit checkout sits inside it
+  untracked.
+- **Haxeon** (`HAXEON_ROOT`, default `../haxeon`), a materia submodule: the
+  compiler, runtime and stdlib.
+- **NativeKit** (`../nativekit`), a materia submodule: core native
+  capabilities (PTY, local transport).
 
 Read the applicable repository instructions before editing any of them.
 Inspect `git status --short` in each at the start and preserve existing work.
-At the M8 planning baseline, `haxeon` had 2 modified paths and `uikit` and
-`editorkit` had 4 each; do not assume authorship of them.
+State at the M8 baseline:
+
+- materia `main` was at `816372dd` and pins Haxeon `fba71015` and NativeKit
+  `0d66103f`.
+- The Haxeon checkout matches its pin. It has a modified `vendor/hashlink`
+  pointer and an untracked `hlprofile.dump`.
+- The NativeKit checkout is off-pin at `2bb4c957`
+  (`materia-numeric-locale`), a deliberate local state.
+
+Do not assume authorship of the dirty paths, and do not move submodule
+checkouts or pins except as part of an owned, recorded change.
 
 Treat `PRAGTICAL_ROOT` (default `../pragtical`, branch `next`) as read-only
 reference input, including its uncommitted work. Read its sources and tests to

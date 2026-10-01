@@ -41,8 +41,8 @@ red has not met the goal, however many boxes are checked.
 > Update STATUS after each slice with the commands run, their outcomes,
 > commit IDs, compiler fixes and an exact resume instruction. If blocked,
 > record the evidence and continue with independent ready work (M11 and M13
-> do not depend on M9 or M10). Keep unavailable GUI, Windows and external-CLI
-> checks pending rather than claiming they passed.
+> do not depend on M9, M10 or M15). Keep unavailable GUI, Windows and
+> external-CLI checks pending rather than claiming they passed.
 >
 > At the end, report the completed task IDs, the commits in each repository,
 > verification results, unresolved failures and the next ready task.
@@ -52,9 +52,9 @@ red has not met the goal, however many boxes are checked.
 Complete M8. Start with M8.1 (native string convention) because it unblocks
 every headless test. M8.2's compiler fixes may consume most of a night; leave
 reducers, regressions and root-cause notes so the next run continues without
-guesswork. If M8 finishes, go into M9.1 (styled spans), which unblocks both
-M9 and M10. If M8.2 is blocked on the compiler, work on M11.1 (PTY) in
-NativeKit in parallel.
+guesswork. If M8 finishes, go into M15 (web target), reusing materia's
+`app/web` pipeline. After that comes M9.1 (styled spans). If M8.2 is blocked
+on the compiler, work on M11.1 (PTY) in NativeKit in parallel.
 
 ## Morning review
 

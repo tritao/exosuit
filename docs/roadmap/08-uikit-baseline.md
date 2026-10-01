@@ -26,12 +26,14 @@ Observed on 2026-10-01 at `ae2f260`:
 
 ## M8.1 — Native string convention
 
-- [ ] Choose the binding route and record why in STATUS. The preferred route
-  matches NativeKit: a C header plus generated `.hxi`/`.hxmap`, with UTF-8
-  `utf8` strings (`haxeon/docs/C_HEADER_FFI.md`). The fallback keeps
-  `@:hlNative`, uses `vstring*`/`_STRING`, and builds results with
-  `hl_alloc_string` as `haxeon/native/runtime/core.c` does. Take the fallback
-  only if the HXI route cannot express the plugin API closures.
+- [ ] Move `pragtical_hx` to the NativeKit binding convention: a C header
+  plus generated `.hxi`/`.hxmap`, with UTF-8 `utf8` strings
+  (`haxeon/docs/C_HEADER_FFI.md`). This is required, not preferred. The wasm
+  guest (M15) can only import C-ABI HXI functions, and `@:hlNative` has no
+  browser equivalent. Use Haxeon's native callback support for the plugin API
+  closures (`19fc2fd9`, "native callbacks through exported entry functions").
+  If a closure still cannot be expressed, reduce it and fix Haxeon; do not
+  keep `@:hlNative`.
 - [ ] Convert every string-carrying function in `src/platform/Native.hx` and
   the native side together. Fix UTF-8/UTF-16 handling, and remove or
   regenerate the stale `include/pragtical_hx/native_ffi.h`.
