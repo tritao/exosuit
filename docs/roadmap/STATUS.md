@@ -13,10 +13,10 @@ Last updated: 2026-10-01.
   The checked-in self-hosted compiler is stale and currently rejects UIKit's
   compound shift assignment. Bootstrap now passes the null-array inference
   failure after Haxeon `5f0b7671`, then passes four nullable-source corrections in `02608ed7`. It now fails
-  past colliding enum constructors after `56fc5b98`, then fails at
-  `HlWriterCache.hx:76` on an unchecked `ObjectMap.get` result. Correct
-  snapshot retention and retry convergence.
-- Exact resume: reference headless verification passed. Check the retrieved snapshot hash in `HlWriterCache.retainSnapshots`,
+  past colliding enum constructors after `56fc5b98`, then passes snapshot retention after `90776aee`. It now fails at
+  `Parser.hx:879` on an empty array whose expected enum-constructor context
+  is lost by the inference prepass. Fix expected-constructor precedence.
+- Exact resume: reference headless verification passed. Give expected enum constructors priority in the local inference prepass,
   rerun Haxeon's
   `./scripts/bootstrap-compiler.sh`, then test both compiler modes. Remove the
   divergent defaults and upstream-fixed directory workaround. Restore
@@ -224,6 +224,25 @@ Last updated: 2026-10-01.
   `UiDocumentView.hx`; `git diff --check` passes. No extra tests were added for
   this documentation correction. No interactive checks or M8 acceptance are
   claimed. Bootstrap/compiler agreement remains the first active task.
+
+### M8.2 — snapshot cache retention (verified compiler-source slice)
+
+- Haxeon `90776aee` retrieves each cached snapshot hash once, checks it for
+  null and retains only present entries. This fixes an unchecked nullable
+  `ObjectMap.get` result without changing type relations or map contracts.
+  Reference Haxe with strict null safety rejected the former `exists`/`get`
+  pattern. Full compiler `./scripts/test.sh` exited 0: formatting, 367/367
+  driver cases and all native/differential/Wasm stages. Log:
+  `/tmp/haxeon-gate-snapshot-retention.log`.
+- Bootstrap advances and exits 1 at `Parser.hx:879`, empty local array `cases`.
+  Reducer: the expected result enum has `Case(values:Array<Int>)`, while a
+  later imported enum has a no-argument `Case`. Actual expression typing
+  selects the expected constructor; inference selects the imported constructor
+  first and never constrains `values`. Reference Haxe accepts and executes it.
+  Next: register reducer/regressions and align the prepass with typing.
+- Exosuit documentation slice `c03089d` completes the M8.4 text correction;
+  it does not establish runtime or M8 acceptance. Sibling dirty work remains
+  untouched; no refreshed bootstrap artifacts have been committed.
 
 ## Completed records
 
