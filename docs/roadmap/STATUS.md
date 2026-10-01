@@ -14,10 +14,10 @@ Last updated: 2026-10-01.
   compound shift assignment. Bootstrap now passes the null-array inference
   failure after Haxeon `5f0b7671`, then passes four nullable-source corrections in `02608ed7`. It now fails
   past colliding enum constructors after `56fc5b98`, then passes expected enum inference after `5b38eca1`. It now fails at
-  `FieldInference.hx:179` on an unchecked declaration lookup, after the
-  missing byte builder was added in `73d67796`. Check resolved declarations
-  and retry convergence.
-- Exact resume: reference headless verification passed. Check the retrieved declarations in `FieldInference`,
+  `EqualityGenerator.hx:37` on unchecked equality-request lookups, after
+  primitive map-read effects and declaration/store checks in `dd36f1c8`.
+  Check required request/type lookups and retry convergence.
+- Exact resume: reference headless verification passed. Check required request/type lookups in `EqualityGenerator`,
   rerun Haxeon's
   `./scripts/bootstrap-compiler.sh`, then test both compiler modes. Remove the
   divergent defaults and upstream-fixed directory workaround. Restore
@@ -291,6 +291,36 @@ Last updated: 2026-10-01.
   `FieldInference.hx:179`, nullable declaration lookup dereferenced without a
   check. Check retrieved declarations before consuming their fields, then
   rerun bootstrap. No fresh self-hosted artifact or M8 completion is claimed.
+
+### M8.2 — primitive map effects and loop shadowing (verified compiler slice)
+
+- Haxeon `dd36f1c8` recognizes read-only `exists`, `get`, `keys`, `values` and
+  `size` on typed String/Int maps as operations that cannot invoke user code.
+  Facts cover own fields, arguments, annotated/inferred locals and aliases.
+  Loop analysis receives visible primitive-map metadata through Scope and
+  TypingSession. User methods and mutations remain effectful.
+- Reducer: a checked nullable provider lost its fact after a helper read its
+  own `Map.exists`. The helper is now inferred pure. A loop reading a typed
+  map parameter exposed missing outer-map metadata; it also executes correctly.
+- Rejection coverage caught an unsound loop-name collision: a loop variable
+  inherited the outer collection's classification, hiding a fake method's
+  mutation between iterations. Loop bindings now remove inherited private-map,
+  array and primitive-map metadata. Fake map/array iterations that read before
+  mutating are rejected; lexical local shadowing is also covered.
+- Registered `PrimitiveMapEffectsMain` executes field/local/alias/argument
+  and loop forms; it rejects custom `exists`, direct provider mutation,
+  incremental/cold effect edits and accepts restoration. One expanded test
+  incorrectly expected arrays from the iterator APIs and was corrected;
+  the first gate exited 1 for that fixture error. Later gates passed, and the
+  final shadowing gate exited 0: formatting, 370/370 driver cases and all
+  native/differential/Wasm stages (`/tmp/haxeon-gate-map-effects-shadowing.log`).
+  Exosuit `./scripts/build.sh` exited 0 (`/tmp/exosuit-build-map-effects.log`).
+- Source checks also retrieve/validate declarations in `FieldInference`,
+  validate store collection after an effectful walker call, and check the
+  store-mode precondition in `dottedFieldStore`. No type relations changed.
+- Bootstrap passes those failures, then exits 1 at `EqualityGenerator.hx:37`:
+  nullable request lookups are dereferenced without checks. Add checked
+  required lookups, retry convergence and preserve all pending M8 gates.
 
 ## Completed records
 
