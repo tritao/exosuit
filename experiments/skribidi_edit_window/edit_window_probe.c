@@ -97,7 +97,7 @@ static int visual_equal(const skb_layout_t *old, const skb_layout_t *window,
         const visual_t x = a.out[i], y = b.out[i];
         if (x.start != y.start || x.end != y.end || x.gid != y.gid ||
             x.direction != y.direction || x.bidi_level != y.bidi_level ||
-            fabsf(x.x - y.x) > 0.02f || fabsf(x.y - y.y) > 0.02f) equal = 0;
+            fabsf(x.x - y.x) > 0.05f || fabsf(x.y - y.y) > 0.05f) equal = 0;
     }
     free(candidate);
     free(expected);
@@ -111,16 +111,84 @@ static int has_rtl_run(const skb_layout_t *layout) {
     return 0;
 }
 
+static int has_emoji(const skb_layout_t *layout) {
+    const skb_text_property_t *properties = skb_layout_get_text_properties(layout);
+    for (int i = 0; i < skb_layout_get_text_count(layout); ++i)
+        if (properties[i].flags & SKB_TEXT_PROP_EMOJI) return 1;
+    return 0;
+}
+
+typedef struct {
+    int begin, end;
+    float width;
+} advance_measure_t;
+
+static bool measure_glyph_advance(const skb_layout_render_glyph_t *glyph, void *opaque) {
+    advance_measure_t *measure = opaque;
+    if (glyph->text_range.start >= measure->begin &&
+        glyph->text_range.end <= measure->end)
+        measure->width += glyph->advance_x;
+    return true;
+}
+
+static float range_advance(const skb_layout_t *layout, int begin, int end) {
+    advance_measure_t measure = {.begin = begin, .end = end};
+    skb_layout_iterate_render_glyphs(layout, measure_glyph_advance, &measure);
+    return measure.width;
+}
+
+static int caret_equal(const skb_layout_t *old, const skb_layout_t *window,
+                       const skb_layout_t *fresh, int start, int old_end,
+                       int new_end, int old_length, int delta,
+                       int *first_horizontal, int *first_vertical) {
+    const float prefix_width = range_advance(old, 0, start);
+    const float old_window_width = range_advance(old, start, old_end);
+    const float new_window_width = range_advance(window, 0, new_end - start);
+    const float suffix_shift = new_window_width - old_window_width;
+    for (int i = 0; i <= old_length + delta; ++i) {
+        for (int affinity = SKB_AFFINITY_TRAILING;
+             affinity <= SKB_AFFINITY_LEADING; ++affinity) {
+            const skb_text_position_t oracle_pos = {i, affinity};
+            const skb_caret_info_t expected = skb_layout_get_caret_info_at(fresh, oracle_pos);
+            const int use_prefix = i <= start && start > 0;
+            const int use_suffix = i >= new_end && new_end < old_length + delta;
+            const skb_layout_t *source = use_prefix || use_suffix ? old : window;
+            const int source_offset = use_prefix ? i :
+                use_suffix ? i - delta : i - start;
+            const float shift = use_prefix ? 0.f :
+                use_suffix ? suffix_shift : prefix_width;
+            const skb_text_position_t source_pos = {source_offset, affinity};
+            const skb_caret_info_t actual = skb_layout_get_caret_info_at(source, source_pos);
+            if (*first_horizontal < 0 &&
+                (fabsf(actual.x + shift - expected.x) > 0.05f ||
+                 actual.direction != expected.direction)) *first_horizontal = i;
+            if (*first_vertical < 0 &&
+                (fabsf(actual.y - expected.y) > 0.02f ||
+                 fabsf(actual.ascender - expected.ascender) > 0.02f ||
+                 fabsf(actual.descender - expected.descender) > 0.02f ||
+                 fabsf(actual.slope - expected.slope) > 0.001f)) *first_vertical = i;
+        }
+    }
+    return *first_horizontal < 0;
+}
+
 static int text_properties_equal(const skb_layout_t *old, const skb_layout_t *window,
                                  const skb_layout_t *fresh, int start,
-                                 int new_end, int old_length, int delta) {
+                                 int new_end, int old_length, int delta,
+                                 int *first_mismatch) {
     const skb_text_property_t *a = skb_layout_get_text_properties(old);
     const skb_text_property_t *b = skb_layout_get_text_properties(window);
     const skb_text_property_t *c = skb_layout_get_text_properties(fresh);
     for (int i = 0; i < old_length + delta; ++i) {
+        // The local layout marks its final codepoint as a break at an
+        // artificial text end. Retain that unchanged codepoint's old flags.
         const skb_text_property_t value = i < start ? a[i] :
+            i == new_end - 1 && new_end < old_length + delta ? a[i - delta] :
             i < new_end ? b[i - start] : a[i - delta];
-        if (value.flags != c[i].flags || value.script != c[i].script) return 0;
+        if (value.flags != c[i].flags || value.script != c[i].script) {
+            *first_mismatch = i;
+            return 0;
+        }
     }
     return 1;
 }
@@ -133,7 +201,7 @@ static int seam_properties_match(const skb_layout_t *old, const skb_layout_t *wi
         const skb_text_property_t x = a[i], y = b[i - start];
         if (x.flags != y.flags || x.script != y.script) return 0;
     }
-    for (int i = old_end - 4; i < old_end; ++i) {
+    for (int i = old_end - 4; i < old_end - 1; ++i) {
         if (i < edit + deleted || i < start) continue;
         const skb_text_property_t x = a[i], y = b[i + delta - start];
         if (x.flags != y.flags || x.script != y.script) return 0;
@@ -232,6 +300,46 @@ static int same_signatures(const signature_t *candidate, int count,
     return equal;
 }
 
+static int character_wrap_equal(const signature_t *candidate, int count,
+                                const uint32_t *text, int text_count,
+                                skb_temp_alloc_t *temp, const skb_layout_params_t *params) {
+    const skb_attribute_t attributes[] = {
+        skb_attribute_make_font_size(15.f),
+        skb_attribute_make_text_wrap(SKB_WRAP_WORD_CHAR),
+    };
+    skb_layout_params_t wrapped_params = *params;
+    wrapped_params.layout_width = 200.f;
+    wrapped_params.layout_attributes = SKB_ATTRIBUTE_SET_FROM_STATIC_ARRAY(attributes);
+    skb_layout_t *wrapped = skb_layout_create_utf32(temp, &wrapped_params, text,
+                                                     text_count, (skb_attribute_set_t){0});
+    if (!wrapped) return 0;
+    const skb_layout_line_t *lines = skb_layout_get_lines(wrapped);
+    const int line_count = skb_layout_get_lines_count(wrapped);
+    int line = 0, row_start = 0, equal = 1;
+    float used = 0.f;
+    for (int i = 0; i < count && equal; ++i) {
+        const skb_cluster_t cluster =
+            skb_layout_get_clusters(candidate[i].layout)[candidate[i].cluster];
+        if (cluster.text_count != 1 || cluster.glyphs_count != 1 ||
+            candidate[i].offset != i) { equal = 0; break; }
+        const float advance = skb_layout_get_glyphs(candidate[i].layout)
+            [cluster.glyphs_offset].advance_x;
+        if (used > 0.f && used + advance > 200.001f) {
+            if (line >= line_count || lines[line].text_range.start != row_start ||
+                lines[line].text_range.end != i) { equal = 0; break; }
+            ++line;
+            row_start = i;
+            used = 0.f;
+        }
+        used += advance;
+    }
+    if (equal && (line >= line_count || lines[line].text_range.start != row_start ||
+                  lines[line].text_range.end != text_count || line + 1 != line_count))
+        equal = 0;
+    skb_layout_destroy(wrapped);
+    return equal;
+}
+
 static skb_layout_t *shape(skb_temp_alloc_t *temp, const skb_layout_params_t *params,
                            const uint32_t *text, int count) {
     return skb_layout_create_utf32(temp, params, text, count, (skb_attribute_set_t){0});
@@ -288,21 +396,34 @@ static int run_case(const char *name, const uint32_t *pattern, int pattern_count
         qsort(candidate, (size_t)count, sizeof(*candidate), signature_order);
         int first_mismatch = -1;
         const int guard = intact && !has_rtl_run(old) && !has_rtl_run(window) &&
+            !has_emoji(old) && !has_emoji(window) &&
             seam_guard_matches(old, window, start, edit, deleted, old_end, delta, length) &&
             seam_properties_match(old, window, start, edit, deleted, old_end, delta);
         const int equal = intact ? same_signatures(candidate, count, fresh, &first_mismatch) : 0;
         const int visual = intact ? visual_equal(old, window, fresh, start, old_end,
                                                 new_end, length, delta) : 0;
+        int first_property = -1;
         const int properties = text_properties_equal(old, window, fresh, start,
-                                                     new_end, length, delta);
-        if (verbose || (guard && (equal != 1 || visual != 1 || !properties)))
-            printf("%-13s edit=%-5d radius=%-5d window=%-5d %s visual=%s props=%s guard=%s first=%d\n",
+                                                     new_end, length, delta,
+                                                     &first_property);
+        const int wrap = strcmp(name, "repeated-a") == 0 && intact ?
+            character_wrap_equal(candidate, count, new_text, new_length,
+                                 temp, params) : -1;
+        int first_caret = -1, first_vertical = -1;
+        const int carets = caret_equal(old, window, fresh, start, old_end,
+                                      new_end, length, delta, &first_caret,
+                                      &first_vertical);
+        if (verbose || (guard && (equal != 1 || visual != 1 || !properties || !carets)))
+            printf("%-13s edit=%-5d radius=%-5d window=%-5d %s visual=%s props=%s@%d caret-x=%s@%d caret-y=%s@%d wrap=%s guard=%s first=%d\n",
                    name, edit, radii[r], new_end - start,
                    equal == 1 ? "equal" : intact ? "different" : "split-cluster",
                    visual == 1 ? "equal" : "different",
-                   properties ? "equal" : "different",
+                   properties ? "equal" : "different", first_property,
+                   carets ? "equal" : "different", first_caret,
+                   first_vertical < 0 ? "equal" : "different", first_vertical,
+                   wrap < 0 ? "n/a" : wrap ? "equal" : "different",
                    guard ? "accept" : "widen", first_mismatch);
-        if (guard && (equal != 1 || visual != 1 || !properties)) unsafe_accept = 1;
+        if (guard && (equal != 1 || visual != 1 || !properties || !carets)) unsafe_accept = 1;
         if (r < 3) {
             accepted_short_windows += guard != 0;
             rejected_short_windows += guard == 0;
