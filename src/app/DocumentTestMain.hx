@@ -242,6 +242,19 @@ class DocumentTestMain {
 			&& unicodeBridge.document.text == "AXB", "widget-originated edit mishandled a surrogate pair codepoint offset");
 		// Document-level: a widget-originated edit must flip dirty state and
 		// undo must clear it again, exactly as a buffer-originated edit does.
+		var nestedBridge = new TextBuffer("before");
+		var nestedSelection = new BufferSelection();
+		var nestedEdited = false;
+		nestedBridge.subscribe(change -> {
+			if (!nestedEdited) {
+				nestedEdited = true;
+				nestedBridge.replaceRange(nestedSelection, nestedBridge.endPosition(), nestedBridge.endPosition(), " // plugin");
+			}
+		});
+		nestedBridge.document.replace(0, 6, "typed");
+		nestedBridge.applyEditTransaction(nestedSelection, new EditTransaction(0, 6, "typed", 5, 5));
+		require(nestedBridge.text == "typed // plugin" && nestedBridge.document.text == nestedBridge.text,
+			"nested subscriber edit during widget replay did not update the shared document");
 		var bridgedDocument = new Document("unused", "saved text", syntaxes), bridgedDocumentSelection = new BufferSelection();
 		require(!bridgedDocument.dirty, "freshly constructed document was dirty before any edit");
 		bridgedDocument.buffer.document.replace(0, 5, "typed");

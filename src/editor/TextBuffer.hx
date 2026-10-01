@@ -25,7 +25,6 @@ class TextBuffer {
 	 * is suppressed for that one call to avoid a feedback loop.
 	 */
 	public var document(default, null):TextDocument;
-	var mirrorDocumentEdits:Bool = true;
 
 	public function new(?text:String) {
 		var initial = text == null ? "" : text;
@@ -290,7 +289,7 @@ class TextBuffer {
 		return endPosition();
 	}
 
-	function replace(selection:BufferSelection, from:BufferPosition, to:BufferPosition, value:String, group:String = ""):Bool {
+	function replace(selection:BufferSelection, from:BufferPosition, to:BufferPosition, value:String, group:String = "", mirrorDocument:Bool = true):Bool {
 		var start = sanitize(from), end = sanitize(to);
 		if (end.before(start)) {
 			var swap = start;
@@ -301,7 +300,7 @@ class TextBuffer {
 			selectionBefore = selection.snapshot();
 		if (removed == value) return false;
 		var afterState = nextStateId++;
-		replaceRaw(start, end, value, beforeState, afterState);
+		replaceRaw(start, end, value, beforeState, afterState, mirrorDocument);
 		selection.collapse(this, advance(start, value), false);
 		stateId = afterState;
 		var edit = new BufferEdit(start, removed, value, beforeCursor, beforeAnchor, selection.cursor, selection.anchor, beforeState, stateId);
@@ -318,16 +317,16 @@ class TextBuffer {
 		return true;
 	}
 
-	function replaceRaw(from:BufferPosition, to:BufferPosition, value:String, stateBefore:Int, stateAfter:Int):Void {
+	function replaceRaw(from:BufferPosition, to:BufferPosition, value:String, stateBefore:Int, stateAfter:Int, mirrorDocument:Bool = true):Void {
 		var removed = textRange(from, to);
-		var startCodepoint = mirrorDocumentEdits ? codepointOffset(from) : 0;
-		var endCodepoint = mirrorDocumentEdits ? codepointOffset(to) : 0;
+		var startCodepoint = mirrorDocument ? codepointOffset(from) : 0;
+		var endCodepoint = mirrorDocument ? codepointOffset(to) : 0;
 		var replacement = splitLines(value), prefix = lines[from.line].substring(0, from.column), suffix = lines[to.line].substring(to.column);
 		replacement[0] = prefix + replacement[0];
 		replacement[replacement.length - 1] += suffix;
 		lines.splice(from.line, to.line - from.line + 1);
 		for (index in 0...replacement.length) lines.insert(from.line + index, replacement[index]);
-		if (mirrorDocumentEdits) document.replace(startCodepoint, endCodepoint, value);
+		if (mirrorDocument) document.replace(startCodepoint, endCodepoint, value);
 		var change = new BufferChange(from, removed, value, to.line - from.line, replacement.length - 1, stateBefore, stateAfter);
 		var listeners = [for (listener in changeListeners) listener];
 		for (listener in listeners) listener(change);
@@ -345,10 +344,9 @@ class TextBuffer {
 		var from = positionFromCodepointOffset(transaction.replacementStart);
 		var to = positionFromCodepointOffset(transaction.replacementEnd);
 		var value = transaction.replacementText == null ? "" : transaction.replacementText;
-		mirrorDocumentEdits = false;
-		var applied = replace(selection, from, to, value, "typing");
-		mirrorDocumentEdits = true;
-		return applied;
+		// Suppress only this replay's mirror: subscriber edits are new operations
+		// and must still update the shared document, even when they are nested.
+		return replace(selection, from, to, value, "typing", false);
 	}
 
 	/** Converts a line/column position to a codepoint offset into `document`. */
