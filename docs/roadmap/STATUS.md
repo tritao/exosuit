@@ -117,6 +117,13 @@ Last updated: 2026-10-01.
   for 200 randomized edits, variable widths, ligature/emoji/Arabic clusters,
   and a 1 MiB deep edit. It models character wrapping only; it does not prove
   Skribidi shaping equivalence or reuse cached suffix rows.
+- A disposable Skribidi probe compared local-window shaping with the matching
+  full-layout clusters for 4,096-character repeated-`a` and varied Latin
+  samples, with an edit at the midpoint. Both 4- and 64-character radii had
+  zero mismatched local cluster IDs/advances. This checks only the sampled
+  window; it cannot prove that glyphs outside the window remain reusable, nor
+  does it cover Unicode, bidi, carets, or line breaking. The probe lives at
+  `/tmp/exosuit-shape-seam.c` and was not wired into production.
 - Exact next implementation: add an explicit edit-range shaping cache with
   differential tests against fresh Skribidi glyphs, carets, and line breaks.
   Reuse a suffix only after contextual and bidi equivalence is established;
