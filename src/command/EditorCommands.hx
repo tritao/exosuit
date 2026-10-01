@@ -42,17 +42,23 @@ class EditorCommands {
 		registry.add("doc:select-page-down", context -> context.requireView().movePage(1, true), hasDocument);
 		registry.add("doc:toggle-word-wrap", context -> context.requireView().toggleWordWrap(), hasDocument);
 		registry.add("doc:toggle-fold", context -> context.requireView().toggleFold(), hasDocument);
-		registry.add("root:switch-to-next-tab", context -> context.root.tabs.switchBy(1));
-		registry.add("root:switch-to-previous-tab", context -> context.root.tabs.switchBy(-1));
-		registry.add("root:close", context -> context.root.closeActiveTab(), context -> context.focus.activeView != null);
-		registry.add("root:split-left", context -> context.root.splitActive(LayoutKind.Horizontal, true));
-		registry.add("root:split-right", context -> context.root.splitActive(LayoutKind.Horizontal));
-		registry.add("root:split-up", context -> context.root.splitActive(LayoutKind.Vertical, true));
-		registry.add("root:split-down", context -> context.root.splitActive(LayoutKind.Vertical));
-		registry.add("root:close-pane", context -> context.root.closeActivePane());
-		registry.add("project:sidebar-next", context -> context.root.sidebarMove(1));
-		registry.add("project:sidebar-previous", context -> context.root.sidebarMove(-1));
-		registry.add("project:sidebar-open", context -> context.root.sidebarActivate());
+		// These reach into the legacy split-pane RootView directly (tab strip order, pane splitting,
+		// project-tree selection) rather than through core.WorkbenchHost, so they are only meaningful
+		// - and only registered as available - when that concrete view is present. A UIKit-hosted
+		// Application leaves context.root null, so hasRoot() predicates them out everywhere they're
+		// offered (the command palette, the keymap).
+		registry.add("root:switch-to-next-tab", context -> context.requireRoot().tabs.switchBy(1), hasRoot);
+		registry.add("root:switch-to-previous-tab", context -> context.requireRoot().tabs.switchBy(-1), hasRoot);
+		registry.add("root:close", context -> context.requireRoot().closeActiveTab(),
+			context -> context.root != null && context.focus.activeView != null);
+		registry.add("root:split-left", context -> context.requireRoot().splitActive(LayoutKind.Horizontal, true), hasRoot);
+		registry.add("root:split-right", context -> context.requireRoot().splitActive(LayoutKind.Horizontal), hasRoot);
+		registry.add("root:split-up", context -> context.requireRoot().splitActive(LayoutKind.Vertical, true), hasRoot);
+		registry.add("root:split-down", context -> context.requireRoot().splitActive(LayoutKind.Vertical), hasRoot);
+		registry.add("root:close-pane", context -> context.requireRoot().closeActivePane(), hasRoot);
+		registry.add("project:sidebar-next", context -> context.requireRoot().sidebarMove(1), hasRoot);
+		registry.add("project:sidebar-previous", context -> context.requireRoot().sidebarMove(-1), hasRoot);
+		registry.add("project:sidebar-open", context -> context.requireRoot().sidebarActivate(), hasRoot);
 
 		keymap.addDirect(Platform.KEY_S, Platform.MOD_CTRL, ["doc:save"]);
 		keymap.addDirect(Platform.KEY_Z, Platform.MOD_CTRL, ["doc:undo"]);
@@ -92,6 +98,9 @@ class EditorCommands {
 
 	static function hasDocument(context:CommandContext):Bool
 		return context.focus.activeView != null && context.focus.activeView.getDocument() != null;
+
+	static function hasRoot(context:CommandContext):Bool
+		return context.root != null;
 
 	static function bindMovement(keymap:Keymap, key:Int, suffix:String):Void {
 		keymap.addDirect(key, 0, ["doc:move-to-" + suffix]);

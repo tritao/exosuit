@@ -1,0 +1,11 @@
+{
+	"version": 1,
+	"package": { "name": "exosuit-dynamic-plugin-test" },
+	"entry": "app.DynamicPluginTestMain",
+	"sourceRoots": ["src"],
+	"dependencies": {
+		"pragtical_hx": { "path": "../.." }
+	},
+	"target": "host",
+	"outputDir": "build"
+}

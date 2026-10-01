@@ -1,6 +1,5 @@
 package editor;
 
-import renderer.Renderer;
 import syntax.HighlightToken;
 import style.Theme;
 import search.SearchMatch;
@@ -15,7 +14,7 @@ class EditorView {
 	public static inline final SCROLLBAR_SIZE = 8;
 
 	public final document:Document;
-	public final renderer:Renderer;
+	public final renderer:renderer.Renderer;
 	public final theme:Theme;
 	public final selection:BufferSelection;
 	public final visualLines:VisualLineMap;
@@ -43,7 +42,7 @@ class EditorView {
 	var compositionStart:Int = 0;
 	var compositionLength:Int = 0;
 
-	public function new(document:Document, renderer:Renderer, theme:Theme, width:Int, height:Int, ?selection:BufferSelection, ?clock:EditorClock,
+	public function new(document:Document, renderer:renderer.Renderer, theme:Theme, width:Int, height:Int, ?selection:BufferSelection, ?clock:EditorClock,
 			?decorations:PluginDecorationRegistry) {
 		this.document = document;
 		this.renderer = renderer;

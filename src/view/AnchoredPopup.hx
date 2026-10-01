@@ -3,7 +3,6 @@ package view;
 import completion.CompletionItem;
 import platform.Platform;
 import platform.TextInputArea;
-import renderer.Renderer;
 import style.Theme;
 import language.SignatureHelp;
 
@@ -66,7 +65,7 @@ class AnchoredPopup {
 		return false;
 	}
 
-	public function draw(renderer:Renderer, theme:Theme, viewportWidth:Int, viewportHeight:Int):Void {
+	public function draw(renderer:renderer.Renderer, theme:Theme, viewportWidth:Int, viewportHeight:Int):Void {
 		if (!visible || anchor == null) return;
 		var x = anchor.x, y = anchor.y + anchor.height + 2;
 		var rows = items.length < MAX_ROWS ? items.length : MAX_ROWS;
@@ -94,7 +93,7 @@ class AnchoredPopup {
 		}
 	}
 
-	function drawInformation(renderer:Renderer, theme:Theme, x:Int, y:Int):Void {
+	function drawInformation(renderer:renderer.Renderer, theme:Theme, x:Int, y:Int):Void {
 		var lines = information.split("\n"), count = lines.length < 3 ? lines.length : 3;
 		for (index in 0...count) renderer.text(x + 9, y + 5 + index * renderer.lineHeight, lines[index], theme.editorForeground);
 		if (emphasized.length > 0) renderer.text(x + 9, y + 5 + 2 * renderer.lineHeight, emphasized, theme.accent);

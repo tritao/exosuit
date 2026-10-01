@@ -2,12 +2,11 @@ package view;
 
 import build.BuildOutput;
 import editor.EditorView;
-import renderer.Renderer;
 import style.Theme;
 
 class BuildOutputView extends View {
 	final output:BuildOutput;
-	final renderer:Renderer;
+	final renderer:renderer.Renderer;
 	final theme:Theme;
 	final activateDiagnostic:build.BuildDiagnostic->Void;
 	var x:Int = 0;
@@ -16,7 +15,7 @@ class BuildOutputView extends View {
 	var height:Int;
 	var scrollRow:Int = 0;
 
-	public function new(output:BuildOutput, renderer:Renderer, theme:Theme, width:Int, height:Int,
+	public function new(output:BuildOutput, renderer:renderer.Renderer, theme:Theme, width:Int, height:Int,
 			activateDiagnostic:build.BuildDiagnostic->Void) {
 		super("Build Output");
 		this.output = output;

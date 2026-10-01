@@ -9,6 +9,7 @@ import renderer.Renderer;
 import plugin.DynamicPlugin;
 import plugin.PluginManifest;
 import sys.io.File;
+import view.RootView;
 
 class ReleaseBenchmarkMain {
 	static function require(condition:Bool, message:String):Void {
@@ -27,7 +28,9 @@ class ReleaseBenchmarkMain {
 		var started = Sys.time();
 		Platform.startHeadless();
 		var window = Native.window_create("release-benchmark", 1280, 720), renderer = new Renderer(window, "ignored-headlessly.ttf", 15),
-			application = new Application(renderer, 1280, 720, new SettingsService()), startupMs = elapsed(started);
+			application = new Application((theme, focus, workspace, settings) -> new RootView(renderer, theme, focus, workspace, 1280, 720, settings),
+				new SettingsService()),
+			root:RootView = cast application.root, startupMs = elapsed(started);
 		var firstStarted = Sys.time(), view = application.open(smallPath);
 		rootFrame(application, renderer);
 		var firstDocumentMs = elapsed(firstStarted);
@@ -74,7 +77,7 @@ class ReleaseBenchmarkMain {
 			var document = application.documents.createUntitled(), temporaryView = application.add(document);
 			temporaryView.textInput("iteration " + index);
 			document.saveAs(rootPath + "/soak-" + index + ".txt");
-			application.root.closeActiveTab(true);
+			root.closeActiveTab(true);
 			soak.push(elapsed(before));
 		}
 		var soakMs = elapsed(soakStarted);
@@ -108,8 +111,9 @@ class ReleaseBenchmarkMain {
 	}
 
 	static function rootFrame(application:Application, renderer:Renderer):Void {
+		var root:RootView = cast application.root;
 		renderer.begin();
-		application.root.draw();
+		root.draw();
 		renderer.present();
 	}
 

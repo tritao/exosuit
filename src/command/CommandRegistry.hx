@@ -20,6 +20,10 @@ class CommandRegistry {
 	public function contains(name:String):Bool
 		return find(name) != null;
 
+	/** Every registered command regardless of its current predicate, for hosts that build their own command surfaces (e.g. a palette bridge) and want live enabled/disabled state rather than a filtered snapshot. */
+	public function all():Array<Command>
+		return commands.copy();
+
 	public function remove(name:String):Bool {
 		var command = find(name);
 		return command != null && commands.remove(command);

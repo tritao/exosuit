@@ -12,6 +12,7 @@ import syntax.SyntaxRegistry;
 import search.DocumentSearch;
 import search.SearchOptions;
 import editor.ExternalState;
+import nativekit.ui.widgets.text.EditTransaction;
 import sys.io.File;
 import haxe.io.Bytes;
 import sys.FileSystem;
@@ -202,6 +203,53 @@ class DocumentTestMain {
 			"multi-selection line deletion failed");
 		require(multiCoding.undo(multiCodingSelection) && multiCoding.text == "a\nb\nc" && multiCodingSelection.rangeCount() == 2,
 			"multi-selection line deletion undo failed");
+		// --- editor.TextBuffer <-> nativekit.editorkit.TextDocument bridge ---
+		// TextArea.withDocument mutates the shared TextDocument itself (see
+		// TextEditorState.applyTransaction) and hands the resulting
+		// EditTransaction to TextBuffer.applyEditTransaction, which must fold
+		// it into this buffer's own undo history without re-mirroring back
+		// into the document it was already applied to.
+		var bridged = new TextBuffer("hello world"), bridgedSelection = new BufferSelection();
+		require(bridged.document.text == "hello world", "TextDocument was not seeded with the buffer's initial text");
+		bridged.document.replace(6, 11, "haxeon"); // simulates the widget's own in-place edit
+		var widgetEdit = new EditTransaction(6, 11, "haxeon", 12, 12);
+		require(bridged.applyEditTransaction(bridgedSelection, widgetEdit) && bridged.text == "hello haxeon"
+			&& bridged.document.text == "hello haxeon", "widget-originated edit did not mirror into the buffer");
+		require(bridgedSelection.cursor.equals(new BufferPosition(0, 12)),
+			"widget-originated edit did not move the buffer selection to the replacement end");
+		require(bridged.undo(bridgedSelection) && bridged.text == "hello world" && bridged.document.text == "hello world",
+			"undoing a widget-originated edit did not restore the shared document");
+		require(bridged.redo(bridgedSelection) && bridged.text == "hello haxeon" && bridged.document.text == "hello haxeon",
+			"redoing a widget-originated edit did not restore the shared document");
+		// A buffer-originated edit right after a widget-originated one must
+		// still mirror forward (mirroring must be re-enabled afterward).
+		bridgedSelection.setCursor(bridged, bridged.endPosition());
+		bridged.insert(bridgedSelection, "!");
+		require(bridged.text == "hello haxeon!" && bridged.document.text == "hello haxeon!",
+			"a buffer-originated edit stopped mirroring into the document after a prior widget-originated edit");
+		var bridgedChanges = 0, bridgedRelease = bridged.subscribe(change -> bridgedChanges++);
+		bridged.document.replace(0, 0, "so ");
+		require(bridged.applyEditTransaction(bridgedSelection, new EditTransaction(0, 0, "so ", 3, 3)) && bridgedChanges == 1,
+			"widget-originated edit did not notify buffer subscribers exactly once");
+		bridgedRelease.release();
+		require(bridged.undo(bridgedSelection) && bridged.text == "hello haxeon!" && bridged.document.text == "hello haxeon!",
+			"undo did not roll back a widget-originated prefix edit in both the buffer and the document");
+		// Unicode: a codepoint-offset transaction from the widget must land
+		// on the correct line/column even across a surrogate pair.
+		var unicodeBridge = new TextBuffer("A😀B"), unicodeBridgeSelection = new BufferSelection();
+		unicodeBridge.document.replace(1, 2, "X");
+		require(unicodeBridge.applyEditTransaction(unicodeBridgeSelection, new EditTransaction(1, 2, "X", 2, 2)) && unicodeBridge.text == "AXB"
+			&& unicodeBridge.document.text == "AXB", "widget-originated edit mishandled a surrogate pair codepoint offset");
+		// Document-level: a widget-originated edit must flip dirty state and
+		// undo must clear it again, exactly as a buffer-originated edit does.
+		var bridgedDocument = new Document("unused", "saved text", syntaxes), bridgedDocumentSelection = new BufferSelection();
+		require(!bridgedDocument.dirty, "freshly constructed document was dirty before any edit");
+		bridgedDocument.buffer.document.replace(0, 5, "typed");
+		require(bridgedDocument.buffer.applyEditTransaction(bridgedDocumentSelection, new EditTransaction(0, 5, "typed", 5, 5))
+			&& bridgedDocument.dirty && bridgedDocument.buffer.text == "typed text", "widget-originated edit did not dirty the owning document");
+		bridgedDocument.undo(bridgedDocumentSelection);
+		require(!bridgedDocument.dirty && bridgedDocument.buffer.text == "saved text" && bridgedDocument.buffer.document.text == "saved text",
+			"undoing a widget-originated edit did not clear document dirty state");
 		var document = new Document("unused", "clean", syntaxes), documentSelection = new BufferSelection();
 		document.insert(documentSelection, " edit");
 		require(document.dirty && document.buffer.text == " editclean", "document dirty state failed");

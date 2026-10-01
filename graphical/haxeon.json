@@ -1,0 +1,15 @@
+{
+	"version": 1,
+	"package": { "name": "exosuit-graphical" },
+	"entry": "app.GraphicalMain",
+	"sourceRoots": ["src"],
+	"scopeSourceRoots": false,
+	"dependencies": {
+		"pragtical_hx": { "path": ".." },
+		"uikit": { "path": "../../haxeon/packages/uikit" },
+		"editorkit": { "path": "../../haxeon/packages/editorkit" },
+		"exosuit-ui-native": { "path": "../uikit-native" }
+	},
+	"target": "host",
+	"outputDir": "build"
+}

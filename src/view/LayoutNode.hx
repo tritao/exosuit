@@ -9,8 +9,8 @@ class LayoutNode {
 	public static inline final MIN_SIZE = 120;
 	public var kind(default, null):LayoutKind;
 	public var tabs(default, null):TabGroup;
-	public var first(default, null):Null<LayoutNode>;
-	public var second(default, null):Null<LayoutNode>;
+	public var first(default, null):Null<view.LayoutNode>;
+	public var second(default, null):Null<view.LayoutNode>;
 	public var divider(default, null):Int = 500;
 	public var x(default, null):Int = 0;
 	public var y(default, null):Int = 0;
@@ -60,10 +60,10 @@ class LayoutNode {
 		}
 	}
 
-	public function split(splitKind:LayoutKind, newFirst:Bool = false):LayoutNode {
+	public function split(splitKind:LayoutKind, newFirst:Bool = false):view.LayoutNode {
 		if (!isLeaf() || splitKind == LayoutKind.Leaf)
 			throw "only leaf nodes can be split";
-		var existing = new LayoutNode(focus, documents, tabs), created = new LayoutNode(focus, documents);
+		var existing = new view.LayoutNode(focus, documents, tabs), created = new view.LayoutNode(focus, documents);
 		first = newFirst ? created : existing;
 		second = newFirst ? existing : created;
 		tabs = new TabGroup(focus);
@@ -115,7 +115,7 @@ class LayoutNode {
 		setBounds(x, y, width, height);
 	}
 
-	public function leafAt(px:Int, py:Int):Null<LayoutNode> {
+	public function leafAt(px:Int, py:Int):Null<view.LayoutNode> {
 		if (px < x || py < y || px >= x + width || py >= y + height)
 			return null;
 		if (isLeaf()) return this;
@@ -123,7 +123,7 @@ class LayoutNode {
 		return found == null ? requireSecond().leafAt(px, py) : found;
 	}
 
-	public function dividerAt(px:Int, py:Int):Null<LayoutNode> {
+	public function dividerAt(px:Int, py:Int):Null<view.LayoutNode> {
 		if (isLeaf()) return null;
 		var left = requireFirst(), boundary = kind == LayoutKind.Horizontal ? left.x + left.width : left.y + left.height;
 		if (kind == LayoutKind.Horizontal) {
@@ -160,7 +160,7 @@ class LayoutNode {
 	public function containsDocument(document:Document):Bool
 		return findDocument(document) != null;
 
-	public function collapse(leaf:LayoutNode):Bool {
+	public function collapse(leaf:view.LayoutNode):Bool {
 		if (isLeaf()) return false;
 		if (first == leaf) {
 			adopt(requireSecond());
@@ -173,10 +173,10 @@ class LayoutNode {
 		return requireFirst().collapse(leaf) || requireSecond().collapse(leaf);
 	}
 
-	public function firstLeaf():LayoutNode
+	public function firstLeaf():view.LayoutNode
 		return isLeaf() ? this : requireFirst().firstLeaf();
 
-	function adopt(source:LayoutNode):Void {
+	function adopt(source:view.LayoutNode):Void {
 		kind = source.kind;
 		tabs = source.tabs;
 		first = source.first;
@@ -185,12 +185,12 @@ class LayoutNode {
 		setBounds(x, y, width, height);
 	}
 
-	public function requireFirst():LayoutNode {
+	public function requireFirst():view.LayoutNode {
 		if (first == null) throw "split node has no first child";
 		return first;
 	}
 
-	public function requireSecond():LayoutNode {
+	public function requireSecond():view.LayoutNode {
 		if (second == null) throw "split node has no second child";
 		return second;
 	}

@@ -7,6 +7,7 @@ import platform.Platform;
 import plugin.Plugin;
 import plugin.PluginContext;
 import renderer.Renderer;
+import view.RootView;
 import syntax.BuiltinSyntax;
 import jobs.JobTask;
 import completion.CompletionItem;
@@ -124,7 +125,8 @@ class PluginTestMain {
 		require(arguments.length == 1, "plugin test requires process fixture");
 		var window = Native.window_create("plugin-test", 320, 200),
 			renderer = new Renderer(window, "ignored-headlessly.ttf", 15),
-			application = new Application(renderer, 320, 200),
+			application = new Application((theme, focus, workspace, settings) -> new RootView(renderer, theme, focus, workspace, 320, 200, settings)),
+			root:RootView = cast application.root,
 			plugin = new SamplePlugin(arguments[0]);
 		application.newDocument();
 		require(application.plugins.load(plugin), "plugin did not activate");
@@ -136,22 +138,22 @@ class PluginTestMain {
 		require(application.keyPressed(77, 3) && plugin.performed == 1 && plugin.events == 1
 			&& application.context.requireDocument().buffer.text == "plugin", "plugin command did not perform an owned document transaction");
 		require(application.commands.perform("doc:complete-word", application.context)
-			&& application.root.commandView.results.length == 1
-			&& application.root.commandView.results[0].value == "pluginCompletion", "plugin completion provider did not contribute to word completion");
+			&& root.commandView.results.length == 1
+			&& root.commandView.results[0].value == "pluginCompletion", "plugin completion provider did not contribute to word completion");
 		application.keyPressed(Platform.KEY_ESCAPE, 0);
-		var panel = application.root.pluginPanels.find("sample", "status");
+		var panel = root.pluginPanels.find("sample", "status");
 		require(panel != null && panel.text == "plugin", "plugin panel or document event contribution was not live");
-		require(application.root.pluginStatusItems.find("sample", "mode") != null
-			&& application.root.status.text(application.context.requireView()).indexOf("Sample Ready") >= 0
-			&& application.root.pluginDecorations.find("sample", "first-word") != null,
+		require(root.pluginStatusItems.find("sample", "mode") != null
+			&& root.status.text(application.context.requireView()).indexOf("Sample Ready") >= 0
+			&& root.pluginDecorations.find("sample", "first-word") != null,
 			"plugin status item or editor decoration was not live");
 		application.openCommandView();
 		application.textInput("samplerun");
-		require(application.root.commandView.results.length == 1, "plugin command was absent from command view");
+		require(root.commandView.results.length == 1, "plugin command was absent from command view");
 		application.keyPressed(Platform.KEY_ENTER, 0);
 		require(plugin.performed == 2, "plugin command palette entry did not dispatch");
 		require(application.commands.perform("plugins:disable", application.context)
-			&& application.root.commandView.results.length == 1, "plugin disable picker did not open");
+			&& root.commandView.results.length == 1, "plugin disable picker did not open");
 		application.keyPressed(Platform.KEY_ENTER, 0);
 		require(plugin.deactivations == 1 && !application.commands.contains("sample:run") && !application.keyPressed(77, 3),
 			"plugin registrations survived disable");
@@ -159,25 +161,25 @@ class PluginTestMain {
 		require(application.processes.activeCount() == 0, "plugin-owned process survived disable");
 		var eventsAfterUnload = plugin.events;
 		application.textInput("after");
-		require(application.root.pluginPanels.find("sample", "status") == null && plugin.events == eventsAfterUnload && plugin.job.cancelled,
+		require(root.pluginPanels.find("sample", "status") == null && plugin.events == eventsAfterUnload && plugin.job.cancelled,
 			"plugin panel, event subscription, or scheduled job survived disable");
-		require(application.root.pluginStatusItems.find("sample", "mode") == null
-			&& application.root.pluginDecorations.find("sample", "first-word") == null,
+		require(root.pluginStatusItems.find("sample", "mode") == null
+			&& root.pluginDecorations.find("sample", "first-word") == null,
 			"plugin status item or editor decoration survived disable");
 		var staleApiRejected = false;
 		try plugin.lastApi.addStatusItem("stale", "leak") catch (error:Dynamic) staleApiRejected = true;
-		require(staleApiRejected && application.root.pluginStatusItems.find("sample", "stale") == null,
+		require(staleApiRejected && root.pluginStatusItems.find("sample", "stale") == null,
 			"retired plugin API accepted or leaked a new contribution");
 		require(application.syntaxes.find("file.sample").name == "Plain Text", "plugin syntax survived disable");
 		require(!application.plugins.isLoaded("sample") && application.plugins.disabledIds().indexOf("sample") >= 0,
 			"disabled plugin definition was not retained");
 		require(application.commands.perform("plugins:enable", application.context)
-			&& application.root.commandView.results.length == 1, "plugin enable picker did not open");
+			&& root.commandView.results.length == 1, "plugin enable picker did not open");
 		application.keyPressed(Platform.KEY_ENTER, 0);
 		require(plugin.activations == 2 && application.plugins.isLoaded("sample") && application.processes.activeCount() == 1,
 			"plugin did not enable with fresh registrations");
 		require(application.commands.perform("plugins:reload", application.context)
-			&& application.root.commandView.results.length == 1, "plugin reload picker did not open");
+			&& root.commandView.results.length == 1, "plugin reload picker did not open");
 		application.keyPressed(Platform.KEY_ENTER, 0);
 		require(plugin.activations == 3 && application.processes.activeCount() == 1, "plugin did not reload with one owned process");
 		var activeView = application.context.requireView(), activeDocument = application.context.requireDocument(), activeSelection = activeView.getSelection();
@@ -185,7 +187,7 @@ class PluginTestMain {
 		activeDocument.buffer.replaceAllText("alpha alphabet al", activeSelection);
 		activeSelection.setCursor(activeDocument.buffer, activeDocument.buffer.endPosition());
 		require(application.commands.perform("doc:complete-word", application.context)
-			&& application.root.commandView.results.length == 2, "built-in word completion did not open through the shared registry");
+			&& root.commandView.results.length == 2, "built-in word completion did not open through the shared registry");
 		application.keyPressed(Platform.KEY_ENTER, 0);
 		require(activeDocument.buffer.text == "alpha alphabet alpha", "completion acceptance did not replace the typed prefix");
 		var failed = false;
@@ -198,8 +200,8 @@ class PluginTestMain {
 			&& !application.plugins.isLoaded("broken")
 			&& !application.commands.contains("broken:leak")
 			&& application.processes.activeCount() == 1
-			&& application.root.pluginStatusItems.find("broken", "leak") == null
-			&& application.root.pluginDecorations.find("broken", "leak") == null, "failed activation leaked plugin state");
+			&& root.pluginStatusItems.find("broken", "leak") == null
+			&& root.pluginDecorations.find("broken", "leak") == null, "failed activation leaked plugin state");
 		application.shutdown();
 		require(plugin.deactivations == 3 && application.plugins.count() == 0 && application.processes.activeCount() == 0,
 			"application shutdown did not deactivate plugins or retire their processes");

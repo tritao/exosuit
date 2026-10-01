@@ -5,10 +5,10 @@ import commandview.CommandViewEntry;
 import commandview.CommandViewProvider;
 import config.ConfigurationPaths;
 import core.Application;
+import core.WorkbenchHost;
 import recovery.RecoveryStore;
 import session.SessionPersistence;
 import session.WorkspaceSession;
-import view.RootView;
 import workspace.Workspace;
 
 class SessionController {
@@ -16,14 +16,14 @@ class SessionController {
 
 	final application:Application;
 	final workspace:Workspace;
-	final root:RootView;
+	final root:WorkbenchHost;
 	final reportError:(String, String)->Void;
 	var persistence:Null<SessionPersistence>;
 	var lastRecoverySave:Float = 0.0;
 	var lastFileSystemCheck:Float = 0.0;
 	var started:Bool = false;
 
-	public function new(application:Application, workspace:Workspace, root:RootView, commands:CommandRegistry,
+	public function new(application:Application, workspace:Workspace, root:WorkbenchHost, commands:CommandRegistry,
 		reportError:(String, String)->Void) {
 		this.application = application;
 		this.workspace = workspace;
@@ -61,12 +61,12 @@ class SessionController {
 	}
 
 	public function openRecoveryCommandView():Bool {
-		var snapshots = recovery.load(), entries:Array<CommandViewEntry> = [];
+		var snapshots = recovery.loadPending(application), entries:Array<CommandViewEntry> = [];
 		for (index in 0...snapshots.length)
 			entries.push(new CommandViewEntry(snapshots[index].title, "Recovered unsaved buffer", Std.string(index)));
 		for (diagnostic in recovery.diagnostics) reportError("recovery", diagnostic);
 		if (entries.length == 0) return false;
-		root.commandView.open(new CommandViewProvider("Recover: ", entries, function(query) {}, function(entry, query, backwards) {
+		root.openCommandView(new CommandViewProvider("Recover: ", entries, function(query) {}, function(entry, query, backwards) {
 			if (entry != null) {
 				var selected = Std.parseInt(entry.value);
 				if (selected >= 0 && selected < snapshots.length && recovery.restore(application, snapshots[selected])) {
@@ -74,7 +74,7 @@ class SessionController {
 					recovery.save(application);
 				}
 			}
-			root.commandView.close();
+			root.closeCommandView();
 		}));
 		return true;
 	}

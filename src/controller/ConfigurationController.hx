@@ -8,17 +8,17 @@ import commandview.CommandViewEntry;
 import commandview.CommandViewProvider;
 import config.Settings;
 import config.SettingsService;
+import core.WorkbenchHost;
 import editor.Document;
 import platform.Platform;
 import style.Theme;
-import view.RootView;
 import workspace.Workspace;
 
 class ConfigurationController {
 	public final settings:SettingsService;
 
 	final workspace:Workspace;
-	final root:RootView;
+	final root:WorkbenchHost;
 	final context:CommandContext;
 	final keymap:Keymap;
 	final theme:Theme;
@@ -28,7 +28,7 @@ class ConfigurationController {
 	var appliedSettings:Null<Settings>;
 	var lastDiagnostics:String = "";
 
-	public function new(settings:SettingsService, workspace:Workspace, root:RootView, context:CommandContext, commands:CommandRegistry,
+	public function new(settings:SettingsService, workspace:Workspace, root:WorkbenchHost, context:CommandContext, commands:CommandRegistry,
 		keymap:Keymap, theme:Theme, search:SearchController, reportError:(String, String)->Void) {
 		this.settings = settings;
 		this.workspace = workspace;
@@ -46,17 +46,21 @@ class ConfigurationController {
 		var document = activeDocument();
 		if (document != null) return settingsFor(document);
 		var project = workspace.activeProject;
-		return project == null || project.settings == null ? settings.current : project.settings.current;
+		if (project == null) return settings.current;
+		var projectSettings = project.settings;
+		return projectSettings == null ? settings.current : projectSettings.current;
 	}
 
 	public function settingsFor(document:Document):Settings {
 		var value = settings.current, matchedLength = -1;
-		for (project in workspace.projects)
-			if (document.path != null && project.settings != null && StringTools.startsWith(document.path, project.root + "/")
+		for (project in workspace.projects) {
+			var projectSettings = project.settings;
+			if (projectSettings != null && document.path != null && StringTools.startsWith(document.path, project.root + "/")
 				&& project.root.length > matchedLength) {
-				value = project.settings.current;
+				value = projectSettings.current;
 				matchedLength = project.root.length;
 			}
+		}
 		return value;
 	}
 
@@ -83,11 +87,9 @@ class ConfigurationController {
 		theme.warning = value.warning;
 		theme.error = value.error;
 		theme.scrollbar = value.scrollbar;
-		root.status.applySettings(value);
 		search.applySettings(value);
-		root.setSidebarWidth(value.sidebarWidth);
 		keymap.setConfigured([for (binding in value.keybindings) new KeyBinding(binding.key, binding.modifiers, binding.commands)]);
-		if (!root.renderer.reloadFont(value.fontPath, value.fontSize, value.fontFallbackPaths)) {
+		if (!root.applySettings(value)) {
 			var diagnostic = 'could not load font "' + value.fontPath + '"';
 			settings.diagnostics.push(diagnostic);
 			reportError("configuration", diagnostic);
@@ -122,12 +124,12 @@ class ConfigurationController {
 		];
 		for (diagnostic in settings.diagnostics)
 			entries.unshift(new CommandViewEntry("Configuration error", diagnostic, diagnostic));
-		var project = workspace.activeProject;
-		if (project != null && project.settings != null)
-			for (diagnostic in project.settings.diagnostics)
+		var project = workspace.activeProject, projectSettings = project == null ? null : project.settings;
+		if (projectSettings != null)
+			for (diagnostic in projectSettings.diagnostics)
 				entries.unshift(new CommandViewEntry("Configuration error", diagnostic, diagnostic));
-		root.commandView.open(new CommandViewProvider("Settings: ", entries, function(query) {}, function(entry, query, backwards) {
-			root.commandView.close();
+		root.openCommandView(new CommandViewProvider("Settings: ", entries, function(query) {}, function(entry, query, backwards) {
+			root.closeCommandView();
 		}));
 	}
 
@@ -136,8 +138,8 @@ class ConfigurationController {
 		for (binding in effectiveSettings().keybindings)
 			entries.push(new CommandViewEntry(new command.KeyBinding(binding.key, binding.modifiers, []).displayName(),
 				binding.commands.join(", "), binding.commands[0]));
-		root.commandView.open(new CommandViewProvider("Keybindings: ", entries, function(query) {}, function(entry, query, backwards) {
-			root.commandView.close();
+		root.openCommandView(new CommandViewProvider("Keybindings: ", entries, function(query) {}, function(entry, query, backwards) {
+			root.closeCommandView();
 		}));
 	}
 
@@ -168,9 +170,11 @@ class ConfigurationController {
 
 	function reportDiagnostics():Void {
 		var values = settings.diagnostics.copy();
-		for (project in workspace.projects)
-			if (project.settings != null)
-				for (diagnostic in project.settings.diagnostics) values.push(diagnostic);
+		for (project in workspace.projects) {
+			var projectSettings = project.settings;
+			if (projectSettings != null)
+				for (diagnostic in projectSettings.diagnostics) values.push(diagnostic);
+		}
 		var identity = values.join("\n");
 		if (identity == lastDiagnostics) return;
 		lastDiagnostics = identity;

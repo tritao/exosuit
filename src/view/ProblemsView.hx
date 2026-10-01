@@ -2,12 +2,11 @@ package view;
 
 import feedback.Problem;
 import feedback.ProblemRegistry;
-import renderer.Renderer;
 import style.Theme;
 
 class ProblemsView extends View {
 	final problems:ProblemRegistry;
-	final renderer:Renderer;
+	final renderer:renderer.Renderer;
 	final theme:Theme;
 	final activateProblem:Problem->Void;
 	var x:Int = 0;
@@ -17,7 +16,7 @@ class ProblemsView extends View {
 	var selected:Int = 0;
 	var scrollRow:Int = 0;
 
-	public function new(problems:ProblemRegistry, renderer:Renderer, theme:Theme, width:Int, height:Int, activateProblem:Problem->Void) {
+	public function new(problems:ProblemRegistry, renderer:renderer.Renderer, theme:Theme, width:Int, height:Int, activateProblem:Problem->Void) {
 		super("Problems");
 		this.problems = problems; this.renderer = renderer; this.theme = theme;
 		this.width = width; this.height = height; this.activateProblem = activateProblem;

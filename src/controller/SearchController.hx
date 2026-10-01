@@ -6,6 +6,7 @@ import command.Keymap;
 import commandview.CommandViewEntry;
 import commandview.CommandViewProvider;
 import config.Settings;
+import core.WorkbenchHost;
 import editor.Document;
 import feedback.ConfirmationService;
 import platform.Platform;
@@ -17,7 +18,6 @@ import search.SearchMatch;
 import search.SearchOptions;
 import search.WorkspaceReplacement;
 import search.WorkspaceSearch;
-import view.RootView;
 import workspace.Workspace;
 
 class SearchController {
@@ -30,7 +30,7 @@ class SearchController {
 	public var replacementResult(default, null):Null<ReplacementResult>;
 
 	final workspace:Workspace;
-	final root:RootView;
+	final root:WorkbenchHost;
 	final context:CommandContext;
 	final commands:CommandRegistry;
 	final keymap:Keymap;
@@ -42,7 +42,7 @@ class SearchController {
 	var documentSearchDocument:Null<Document>;
 	var documentSearchRevision:Int = -1;
 
-	public function new(workspace:Workspace, root:RootView, context:CommandContext, commands:CommandRegistry, keymap:Keymap,
+	public function new(workspace:Workspace, root:WorkbenchHost, context:CommandContext, commands:CommandRegistry, keymap:Keymap,
 		confirmations:ConfirmationService, effectiveSettings:Void->Settings, reportError:(String, String)->Void,
 		reportInformation:String->Void, replacementBackupPath:String) {
 		this.workspace = workspace;
@@ -74,7 +74,7 @@ class SearchController {
 
 	public function openDocumentFind():Void {
 		if (activeDocument() == null) return;
-		root.commandView.open(new CommandViewProvider("Find: ", [], refreshDocumentSearch, function(entry, query, backwards) {
+		root.openCommandView(new CommandViewProvider("Find: ", [], refreshDocumentSearch, function(entry, query, backwards) {
 			navigateDocumentMatch(backwards ? -1 : 1);
 		}, function() {
 			root.setDocumentSearchMatches([]);
@@ -82,12 +82,12 @@ class SearchController {
 	}
 
 	public function openWorkspaceFind():Void {
-		root.commandView.open(new CommandViewProvider("Search: ", [], function(query) {
+		root.openCommandView(new CommandViewProvider("Search: ", [], function(query) {
 			workspaceSearch.request(query, options, effectiveSettings().searchMaxResults);
 		}, function(entry, query, backwards) {
 			if (backwards) root.searchMove(-1);
 			root.searchActivate();
-			root.commandView.close();
+			root.closeCommandView();
 		}, function() {
 			workspaceSearch.cancel();
 		}, function(delta) {
@@ -139,18 +139,18 @@ class SearchController {
 
 	function workspaceSearchChanged():Void {
 		root.showSearchResults(workspaceSearch.query, workspaceSearch.results);
-		root.searchSidebar.setStatus(workspaceSearch.complete, workspaceSearch.capped, workspaceSearch.errors.length);
+		root.setWorkspaceSearchStatus(workspaceSearch.complete, workspaceSearch.capped, workspaceSearch.errors.length);
 	}
 
 	function openWorkspaceReplace():Void {
-		root.commandView.open(new CommandViewProvider("Replace in Projects: ", [], function(query) {}, function(entry, replacement, backwards) {
+		root.openCommandView(new CommandViewProvider("Replace in Projects: ", [], function(query) {}, function(entry, replacement, backwards) {
 			if (!previewWorkspaceReplacement(replacement)) return;
 			var preview = replacementPreview;
 			if (preview == null) return;
 			confirmations.choose('Preview: ${preview.matchCount} matches in ${preview.files.length} files. Type apply to continue: ', ["apply"],
 				function(answer) {
 					applyWorkspaceReplacement();
-					root.commandView.close();
+					root.closeCommandView();
 				}, function() {
 					replacementPreview = null;
 				});
@@ -162,7 +162,7 @@ class SearchController {
 			var result = workspaceReplacement.restoreLastBackup();
 			replacementResult = result;
 			reportInformation('Restored ${result.appliedFiles} files; ${result.conflicts} conflicts, ${result.failures} failures');
-			root.commandView.close();
+			root.closeCommandView();
 		});
 	}
 
@@ -171,9 +171,9 @@ class SearchController {
 			openDocumentFind();
 			return;
 		}
-		root.commandView.open(new CommandViewProvider(all ? "Replace All: " : "Replace: ", [], function(query) {}, function(entry, replacement, backwards) {
+		root.openCommandView(new CommandViewProvider(all ? "Replace All: " : "Replace: ", [], function(query) {}, function(entry, replacement, backwards) {
 			if (all) replaceAll(replacement); else replaceCurrent(replacement);
-			root.commandView.close();
+			root.closeCommandView();
 		}));
 	}
 

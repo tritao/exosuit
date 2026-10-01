@@ -1,10 +1,17 @@
 package view;
 
+import build.BuildDiagnostic;
+import build.BuildOutput;
+import commandview.CommandViewProvider;
+import completion.CompletionItem;
 import core.DocumentManager;
+import core.FileActions;
 import core.FocusManager;
+import core.WelcomeActions;
+import core.WorkbenchHost;
 import editor.Document;
 import editor.EditorView;
-import renderer.Renderer;
+import language.SignatureHelp;
 import style.Theme;
 import workspace.Workspace;
 import commandview.CommandView;
@@ -14,6 +21,7 @@ import sys.FileSystem;
 import editor.BufferPosition;
 import feedback.NotificationCenter;
 import feedback.NotificationKind;
+import feedback.Problem;
 import config.Settings;
 import platform.Native;
 import plugin.PluginPanelRegistry;
@@ -22,12 +30,12 @@ import plugin.PluginStatusRegistry;
 import platform.TextInputArea;
 import feedback.ProblemRegistry;
 
-class RootView {
+class RootView implements WorkbenchHost {
 	public static inline final TAB_WIDTH = 180;
-	public final node:LayoutNode;
+	public final node:view.LayoutNode;
 	public var tabs(get, never):TabGroup;
-	public var activeLeaf(default, null):LayoutNode;
-	public final renderer:Renderer;
+	public var activeLeaf(default, null):view.LayoutNode;
+	public final renderer:renderer.Renderer;
 	public final theme:Theme;
 	final focus:FocusManager;
 	final documents:DocumentManager;
@@ -43,7 +51,8 @@ class RootView {
 	public var createFolderRequest:Void->Void = function() {};
 	public var renameFileRequest:Void->Void = function() {};
 	public var deleteFileRequest:Void->Void = function() {};
-	public var showProblemsRequest:Void->Void = function() {};
+	var problemActivationHandler:Problem->Void = function(problem) {};
+	var buildDiagnosticHandler:BuildDiagnostic->Void = function(diagnostic) {};
 	public var searchVisible(default, null):Bool = false;
 	public final notifications:NotificationCenter;
 	public final status:StatusView;
@@ -55,17 +64,17 @@ class RootView {
 	public var closeRequest:Void->Void;
 	var width:Int;
 	var height:Int;
-	var draggingDivider:Null<LayoutNode>;
+	var draggingDivider:Null<view.LayoutNode>;
 	var draggingSidebar:Bool = false;
 	var pointerX:Int = -1;
 	var pointerY:Int = -1;
-	var draggedTabLeaf:Null<LayoutNode>;
+	var draggedTabLeaf:Null<view.LayoutNode>;
 	var draggedTabView:Null<View>;
 	var draggedTabStartX:Int = 0;
 	var draggedTabStartY:Int = 0;
 	var draggingTab:Bool = false;
 
-	public function new(renderer:Renderer, theme:Theme, focus:FocusManager, workspace:Workspace, width:Int, height:Int, ?settings:Settings) {
+	public function new(renderer:renderer.Renderer, theme:Theme, focus:FocusManager, workspace:Workspace, width:Int, height:Int, ?settings:Settings) {
 		this.renderer = renderer;
 		this.theme = theme;
 		this.focus = focus;
@@ -87,7 +96,7 @@ class RootView {
 		this.width = width;
 		this.height = height;
 		displayScaleMilli = Native.window_display_scale_milli(renderer.window);
-		node = new LayoutNode(focus, documents);
+		node = new view.LayoutNode(focus, documents);
 		activeLeaf = node;
 		setNodeBounds();
 	}
@@ -95,7 +104,7 @@ class RootView {
 	function get_tabs():TabGroup
 		return activeLeaf.tabs;
 
-	public function activateLeaf(leaf:LayoutNode):Void {
+	public function activateLeaf(leaf:view.LayoutNode):Void {
 		if (!leaf.isLeaf()) throw "only leaf nodes can receive focus";
 		activeLeaf = leaf;
 		focus.activate(leaf.tabs.activeView);
@@ -187,7 +196,7 @@ class RootView {
 		return result;
 	}
 
-	function containsDocumentExcept(current:LayoutNode, document:Document, excluded:Array<View>):Bool {
+	function containsDocumentExcept(current:view.LayoutNode, document:Document, excluded:Array<View>):Bool {
 		if (current.isLeaf()) {
 			for (view in current.tabs.views)
 				if (excluded.indexOf(view) < 0 && view.getDocument() == document) return true;
@@ -228,7 +237,7 @@ class RootView {
 	}
 
 	public function setSidebarWidth(width:Int):Void {
-		var maximum = this.width - LayoutNode.MIN_SIZE;
+		var maximum = this.width - view.LayoutNode.MIN_SIZE;
 		if (maximum < 0) maximum = 0;
 		if (width < 120) width = 120;
 		if (width > maximum) width = maximum;
@@ -462,7 +471,7 @@ class RootView {
 				items.push(new ContextMenuItem("Copy", function() { view.copy(); }));
 				items.push(new ContextMenuItem("Paste", function() { view.paste(); }));
 				items.push(new ContextMenuItem("Select All", function() { view.selectAll(); }));
-				items.push(new ContextMenuItem("Show Problems", showProblemsRequest));
+				items.push(new ContextMenuItem("Show Problems", showProblems));
 			}
 		}
 		contextMenu.open(x, y, items, width, height - StatusView.HEIGHT);
@@ -514,7 +523,7 @@ class RootView {
 		view.setSearchMatches(results);
 	}
 
-	function clearSearchMatches(current:LayoutNode):Void {
+	function clearSearchMatches(current:view.LayoutNode):Void {
 		if (current.isLeaf()) {
 			for (view in current.tabs.views) view.setSearchMatches([]);
 			return;
@@ -526,7 +535,7 @@ class RootView {
 	public function documentRenamed(document:Document):Void
 		updateDocumentTitle(node, document);
 
-	function updateDocumentTitle(current:LayoutNode, document:Document):Void {
+	function updateDocumentTitle(current:view.LayoutNode, document:Document):Void {
 		if (current.isLeaf()) {
 			for (view in current.tabs.views) if (view.getDocument() == document) view.setTitle(document.title);
 			return;
@@ -545,7 +554,7 @@ class RootView {
 		return true;
 	}
 
-	function drawNode(current:LayoutNode):Void {
+	function drawNode(current:view.LayoutNode):Void {
 		if (current.isLeaf()) {
 			drawLeaf(current);
 			return;
@@ -556,12 +565,12 @@ class RootView {
 		renderer.clip(0, 0, width, height);
 		var first = current.requireFirst();
 		if (current.kind == LayoutKind.Horizontal)
-			renderer.rect(first.x + first.width, current.y, LayoutNode.DIVIDER_SIZE, current.height, theme.divider);
+			renderer.rect(first.x + first.width, current.y, view.LayoutNode.DIVIDER_SIZE, current.height, theme.divider);
 		else
-			renderer.rect(current.x, first.y + first.height, current.width, LayoutNode.DIVIDER_SIZE, theme.divider);
+			renderer.rect(current.x, first.y + first.height, current.width, view.LayoutNode.DIVIDER_SIZE, theme.divider);
 	}
 
-	function drawLeaf(leaf:LayoutNode):Void {
+	function drawLeaf(leaf:view.LayoutNode):Void {
 		renderer.clip(leaf.x, leaf.y, leaf.width, leaf.height);
 		if (leaf.tabs.activeView == null) {
 			welcome.draw(renderer, theme, leaf.x, leaf.y, leaf.width, leaf.height);
@@ -584,21 +593,21 @@ class RootView {
 		if (leaf == activeLeaf) renderer.rect(leaf.x, leaf.y, leaf.width, 2, theme.accent);
 	}
 
-	function visibleTabCapacity(leaf:LayoutNode):Int {
+	function visibleTabCapacity(leaf:view.LayoutNode):Int {
 		var result = Std.int(leaf.width / TAB_WIDTH);
 		return result < 1 ? 1 : result;
 	}
 
-	function visibleTabStart(leaf:LayoutNode):Int {
+	function visibleTabStart(leaf:view.LayoutNode):Int {
 		var active = leaf.tabs.activeView == null ? 0 : leaf.tabs.indexOf(leaf.tabs.activeView), capacity = visibleTabCapacity(leaf), start = active - capacity + 1;
 		if (start < 0) start = 0;
 		return start;
 	}
 
-	function neighboringLeaf(source:LayoutNode, horizontal:Int, vertical:Int):Null<LayoutNode> {
-		var leaves:Array<LayoutNode> = [];
+	function neighboringLeaf(source:view.LayoutNode, horizontal:Int, vertical:Int):Null<view.LayoutNode> {
+		var leaves:Array<view.LayoutNode> = [];
 		collectLeaves(node, leaves);
-		var sourceX = source.x + Std.int(source.width / 2), sourceY = source.y + Std.int(source.height / 2), best:Null<LayoutNode> = null,
+		var sourceX = source.x + Std.int(source.width / 2), sourceY = source.y + Std.int(source.height / 2), best:Null<view.LayoutNode> = null,
 			bestScore = 0x7fffffff;
 		for (candidate in leaves) if (candidate != source) {
 			var candidateX = candidate.x + Std.int(candidate.width / 2), candidateY = candidate.y + Std.int(candidate.height / 2),
@@ -611,14 +620,14 @@ class RootView {
 		return best;
 	}
 
-	function collectLeaves(current:LayoutNode, result:Array<LayoutNode>):Void {
+	function collectLeaves(current:view.LayoutNode, result:Array<view.LayoutNode>):Void {
 		if (current.isLeaf()) result.push(current); else {
 			collectLeaves(current.requireFirst(), result);
 			collectLeaves(current.requireSecond(), result);
 		}
 	}
 
-	function leafForView(current:LayoutNode, view:View):Null<LayoutNode> {
+	function leafForView(current:view.LayoutNode, view:View):Null<view.LayoutNode> {
 		if (current.isLeaf()) return current.tabs.indexOf(view) >= 0 ? current : null;
 		var found = leafForView(current.requireFirst(), view);
 		return found == null ? leafForView(current.requireSecond(), view) : found;
@@ -631,7 +640,7 @@ class RootView {
 		return result;
 	}
 
-	function appendSessionNode(current:LayoutNode, route:String, result:Array<String>):Void {
+	function appendSessionNode(current:view.LayoutNode, route:String, result:Array<String>):Void {
 		if (!current.isLeaf()) {
 			result.push("S\t" + route + "\t" + (current.kind == LayoutKind.Horizontal ? "H" : "V") + "\t" + current.divider);
 			appendSessionNode(current.requireFirst(), route + "0", result);
@@ -708,7 +717,7 @@ class RootView {
 		}
 	}
 
-	function nodeAtRoute(route:String):Null<LayoutNode> {
+	function nodeAtRoute(route:String):Null<view.LayoutNode> {
 		if (route.length > 64) return null;
 		var current = node;
 		for (index in 0...route.length) {
@@ -719,11 +728,94 @@ class RootView {
 		return current;
 	}
 
-	function routeFor(current:LayoutNode, target:LayoutNode, route:String):String {
+	function routeFor(current:view.LayoutNode, target:view.LayoutNode, route:String):String {
 		if (current == target) return route;
 		if (current.isLeaf()) return "";
 		var left = routeFor(current.requireFirst(), target, route + "0");
 		if (left.length > 0 || current.requireFirst() == target) return left;
 		return routeFor(current.requireSecond(), target, route + "1");
+	}
+
+	// -- core.WorkbenchHost --
+
+	public function getTheme():Theme return theme;
+	public function getProblems():ProblemRegistry return problems;
+	public function getPluginDecorations():PluginDecorationRegistry return pluginDecorations;
+	public function getPluginStatusItems():PluginStatusRegistry return pluginStatusItems;
+	public function getPluginPanels():PluginPanelRegistry return pluginPanels;
+	public function asRootView():Null<RootView> return this;
+	public function getNotifications():NotificationCenter return notifications;
+
+	public function openCommandView(provider:CommandViewProvider):Void commandView.open(provider);
+	public function closeCommandView():Void commandView.close();
+	public function isCommandViewActive():Bool return commandView.active;
+	public function commandViewKeyPressed(key:Int, modifiers:Int):Bool return commandView.keyPressed(key, modifiers);
+	public function commandViewTextInput(text:String):Void commandView.textInput(text);
+
+	public function focusedFilePath():Null<String> {
+		if (searchVisible) return null;
+		var node = sidebar.activeNode();
+		return node == null ? null : node.path;
+	}
+
+	public function canCloseActivePane():Bool return activeLeaf != node;
+
+	public function setWorkspaceSearchStatus(complete:Bool, capped:Bool, errorCount:Int):Void
+		searchSidebar.setStatus(complete, capped, errorCount);
+
+	public function setProblemActivationHandler(handler:Problem->Void):Void
+		problemActivationHandler = handler;
+
+	public function showProblems():Void {
+		openAuxiliary(new ProblemsView(problems, renderer, theme, activeLeaf.width, activeLeaf.height, problemActivationHandler));
+	}
+
+	public function setBuildDiagnosticHandler(handler:BuildDiagnostic->Void):Void
+		buildDiagnosticHandler = handler;
+
+	public function showBuildOutput(title:String, output:BuildOutput):Void {
+		var view = new BuildOutputView(output, renderer, theme, activeLeaf.width, activeLeaf.height, buildDiagnosticHandler);
+		view.setTitle(title);
+		openAuxiliary(view);
+	}
+
+	public function openLanguageInformation(area:TextInputArea, text:String):Void
+		languagePopup.openInformation(area, text);
+
+	public function openLanguageCompletion(area:TextInputArea, items:Array<CompletionItem>, accept:CompletionItem->Void):Void
+		languagePopup.openCompletion(area, items, accept);
+
+	public function openLanguageSignature(area:TextInputArea, help:SignatureHelp):Void
+		languagePopup.openSignature(area, help);
+
+	public function handleLanguagePopupKey(key:Int, modifiers:Int):Bool return languagePopup.keyPressed(key, modifiers);
+	public function dismissLanguagePopup():Void languagePopup.close();
+	public function isLanguagePopupVisible():Bool return languagePopup.visible;
+
+	/** Applies the status bar, sidebar-width, and font portions of visual settings. Color/theme fields are applied by the caller via getTheme(). */
+	public function applySettings(settings:Settings):Bool {
+		status.applySettings(settings);
+		setSidebarWidth(settings.sidebarWidth);
+		return renderer.reloadFont(settings.fontPath, settings.fontSize, settings.fontFallbackPaths);
+	}
+
+	public function configureFileActions(actions:FileActions):Void {
+		createFileRequest = actions.createFile;
+		createFolderRequest = actions.createFolder;
+		renameFileRequest = actions.renameFile;
+		deleteFileRequest = actions.deleteFile;
+		closeRequest = actions.closeTab;
+	}
+
+	public function configureWelcomeActions(actions:WelcomeActions):Void {
+		welcome.recentProjects = actions.recentProjects;
+		welcome.newFile = actions.newFile;
+		welcome.openFile = actions.openFile;
+		welcome.openProject = actions.openProject;
+		welcome.findFile = actions.findFile;
+		welcome.runCommand = actions.runCommand;
+		welcome.openSettings = actions.openSettings;
+		welcome.openPlugins = actions.openPlugins;
+		welcome.openRecent = actions.openRecent;
 	}
 }

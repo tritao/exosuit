@@ -1,0 +1,11 @@
+{
+	"version": 1,
+	"package": { "name": "exosuit-language-controller-test" },
+	"entry": "app.LanguageControllerTestMain",
+	"sourceRoots": ["src"],
+	"dependencies": {
+		"pragtical_hx": { "path": "../.." }
+	},
+	"target": "host",
+	"outputDir": "build"
+}

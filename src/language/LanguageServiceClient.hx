@@ -358,7 +358,13 @@ class LanguageServiceClient {
 	static function capability(capabilities:Dynamic, name:String):Bool {
 		if (capabilities == null) return false;
 		var value:Dynamic = Reflect.field(capabilities, name);
-		return value != null && value != false;
+		if (value == null) return false;
+		// LSP capability values are either a boolean or an options object (e.g.
+		// `"completionProvider": {}`); only explicit `false` means unsupported.
+		// Comparing a non-boolean Dynamic against a Bool literal with `!=` can
+		// throw ("Can't cast dynobj to bool") under Haxeon, so branch on the
+		// runtime type instead of relying on that comparison.
+		return !Std.isOfType(value, Bool) || cast(value, Bool);
 	}
 
 	static function integer(value:Dynamic, field:String, fallback:Int):Int {

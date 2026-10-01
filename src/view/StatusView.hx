@@ -1,20 +1,19 @@
 package view;
 
 import config.Settings;
-import renderer.Renderer;
 import style.Theme;
 import plugin.PluginStatusRegistry;
 import feedback.ProblemRegistry;
 
 class StatusView {
 	public static inline final HEIGHT = 24;
-	final renderer:Renderer;
+	final renderer:renderer.Renderer;
 	final theme:Theme;
 	final pluginItems:PluginStatusRegistry;
 	final problems:ProblemRegistry;
 	var settings:Settings;
 
-	public function new(renderer:Renderer, theme:Theme, settings:Settings, pluginItems:PluginStatusRegistry, problems:ProblemRegistry) {
+	public function new(renderer:renderer.Renderer, theme:Theme, settings:Settings, pluginItems:PluginStatusRegistry, problems:ProblemRegistry) {
 		this.renderer = renderer;
 		this.theme = theme;
 		this.settings = settings;

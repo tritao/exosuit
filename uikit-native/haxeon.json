@@ -1,0 +1,20 @@
+{
+	"version": 1,
+	"package": { "name": "exosuit-ui-native" },
+	"sourceRoots": ["src"],
+	"scopeSourceRoots": false,
+	"native": {
+		"cmake": {
+			"source": ".",
+			"target": "exosuit_ui_native",
+			"inputs": [
+				"CMakeLists.txt",
+				"../../nativekit/CMakeLists.txt",
+				"../../nativekit/modules/gpu/CMakeLists.txt",
+				"../../haxeon/packages/uikit/CMakeLists.txt"
+			]
+		}
+	},
+	"target": "host",
+	"outputDir": "build"
+}

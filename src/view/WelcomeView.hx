@@ -1,6 +1,5 @@
 package view;
 
-import renderer.Renderer;
 import style.Theme;
 
 class WelcomeView {
@@ -35,7 +34,7 @@ class WelcomeView {
 		return false;
 	}
 
-	public function draw(renderer:Renderer, theme:Theme, left:Int, top:Int, width:Int, height:Int):Void {
+	public function draw(renderer:renderer.Renderer, theme:Theme, left:Int, top:Int, width:Int, height:Int):Void {
 		renderer.rect(left, top, width, height, theme.editorBackground);
 		var title = "Pragtical Haxeon";
 		renderer.text(left + Std.int((width - renderer.textWidth(title)) / 2), top + 68, title, theme.editorForeground);

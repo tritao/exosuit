@@ -1,0 +1,11 @@
+{
+	"version": 1,
+	"package": { "name": "exosuit-process-test" },
+	"entry": "app.ProcessTestMain",
+	"sourceRoots": ["src"],
+	"dependencies": {
+		"pragtical_hx": { "path": "../.." }
+	},
+	"target": "host",
+	"outputDir": "build"
+}

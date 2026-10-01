@@ -1,17 +1,17 @@
 package feedback;
 
-import commandview.CommandView;
 import commandview.CommandViewProvider;
+import core.WorkbenchHost;
 
 class ConfirmationService {
-	final view:CommandView;
+	final host:WorkbenchHost;
 
-	public function new(view:CommandView) {
-		this.view = view;
+	public function new(host:WorkbenchHost) {
+		this.host = host;
 	}
 
 	public function choose(prompt:String, choices:Array<String>, onChoose:String->Void, ?onCancel:Void->Void):Void {
-		view.open(new CommandViewProvider(prompt, [], function(query) {}, function(entry, answer, backwards) {
+		host.openCommandView(new CommandViewProvider(prompt, [], function(query) {}, function(entry, answer, backwards) {
 			for (choice in choices)
 				if (answer == choice) {
 					onChoose(choice);

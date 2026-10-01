@@ -1,0 +1,11 @@
+{
+	"version": 1,
+	"package": { "name": "exosuit-language-service-test" },
+	"entry": "app.LanguageServiceTestMain",
+	"sourceRoots": ["src"],
+	"dependencies": {
+		"pragtical_hx": { "path": "../.." }
+	},
+	"target": "host",
+	"outputDir": "build"
+}

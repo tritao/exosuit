@@ -1,7 +1,6 @@
 package commandview;
 
 import platform.Platform;
-import renderer.Renderer;
 import style.Theme;
 import platform.TextInputArea;
 
@@ -56,7 +55,7 @@ class CommandView {
 		compositionLength = 0;
 	}
 
-	public function textInputArea(renderer:Renderer, windowWidth:Int):TextInputArea {
+	public function textInputArea(renderer:renderer.Renderer, windowWidth:Int):TextInputArea {
 		var width = commandWidth(windowWidth), x = Std.int((windowWidth - width) / 2), inputX = x + 12,
 			promptWidth = provider == null ? 0 : renderer.textWidth(provider.prompt),
 			caretX = inputX + promptWidth + renderer.textWidth(query.substring(0, input.selection.cursor.column));
@@ -157,7 +156,7 @@ class CommandView {
 		changed();
 	}
 
-	public function draw(renderer:Renderer, theme:Theme, windowWidth:Int, windowHeight:Int):Void {
+	public function draw(renderer:renderer.Renderer, theme:Theme, windowWidth:Int, windowHeight:Int):Void {
 		var current = provider;
 		if (!active || current == null) return;
 		var width = commandWidth(windowWidth);

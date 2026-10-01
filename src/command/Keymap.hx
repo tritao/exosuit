@@ -70,6 +70,10 @@ class Keymap {
 		return result;
 	}
 
+	/** All direct (non-configured) bindings, for hosts that build their own shortcut widgets from them. */
+	public function allBindings():Array<KeyBinding>
+		return bindings.copy();
+
 	public function setConfigured(values:Array<KeyBinding>):Void {
 		configured.resize(0);
 		for (value in values) configured.push(new KeyBinding(value.key, value.modifiers, copy(value.commands)));

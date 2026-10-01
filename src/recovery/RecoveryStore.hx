@@ -72,6 +72,15 @@ class RecoveryStore {
 		}
 	}
 
+	/** Snapshots not already represented by an open document. Session restoration
+		uses the same recovery identity, so these are the only snapshots that still
+		need the user's attention. */
+	public function loadPending(application:Application):Array<RecoverySnapshot> {
+		var openIds:Map<String, Bool> = [];
+		for (document in application.documents.documents) openIds.set(document.recoveryId, true);
+		return [for (snapshot in load()) if (!openIds.exists(snapshot.id)) snapshot];
+	}
+
 	public static function decode(content:String):Array<RecoverySnapshot> {
 		var marker = "pragtical-recovery=" + VERSION + "\n";
 		if (!StringTools.startsWith(content, marker)) throw "unsupported recovery version";

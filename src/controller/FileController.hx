@@ -4,10 +4,10 @@ import command.CommandContext;
 import command.CommandRegistry;
 import commandview.CommandViewProvider;
 import core.DocumentManager;
+import core.WorkbenchHost;
 import editor.Document;
 import feedback.ConfirmationService;
 import recovery.RecoveryStore;
-import view.RootView;
 import workspace.FileOperations;
 import workspace.Workspace;
 
@@ -17,7 +17,7 @@ class FileController {
 	final documents:DocumentManager;
 	final workspace:Workspace;
 	final operations:FileOperations;
-	final root:RootView;
+	final root:WorkbenchHost;
 	final context:CommandContext;
 	final confirmations:ConfirmationService;
 	final recovery:RecoveryStore;
@@ -31,7 +31,7 @@ class FileController {
 	var closeAction:Null<Void->Bool>;
 	var closePending:Bool = false;
 
-	public function new(documents:DocumentManager, workspace:Workspace, operations:FileOperations, root:RootView, context:CommandContext,
+	public function new(documents:DocumentManager, workspace:Workspace, operations:FileOperations, root:WorkbenchHost, context:CommandContext,
 		commands:CommandRegistry, confirmations:ConfirmationService, recovery:RecoveryStore, openDocument:String->Void,
 		newDocument:Void->Void, saveRecovery:Void->Void, reportError:(String, String)->Void, reportInformation:String->Void) {
 		this.documents = documents;
@@ -53,7 +53,7 @@ class FileController {
 		return beginClose(root.documentsLostByClosingActiveTab(), function() return root.closeActiveTab(true));
 
 	public function requestCloseActivePane():Bool {
-		if (root.activeLeaf == root.node) return false;
+		if (!root.canCloseActivePane()) return false;
 		return beginClose(root.documentsLostByClosingActivePane(), function() return root.closeActivePane(true));
 	}
 
@@ -69,51 +69,51 @@ class FileController {
 	}
 
 	public function openSaveAs(document:Document, ?onSuccess:Void->Void):Void {
-		root.commandView.open(new CommandViewProvider("Save As: ", [], function(query) {}, function(entry, destination, backwards) {
+		root.openCommandView(new CommandViewProvider("Save As: ", [], function(query) {}, function(entry, destination, backwards) {
 			if (documents.saveAs(document, destination)) {
 				completeSaveAs(document, onSuccess);
 			} else if (workspace.fileSystem.exists(destination)) {
-				root.commandView.open(new CommandViewProvider('Type overwrite to replace "$destination": ', [], function(query) {},
+				root.openCommandView(new CommandViewProvider('Type overwrite to replace "$destination": ', [], function(query) {},
 					function(entry, answer, backwards) {
 						if (answer == "overwrite" && documents.saveAs(document, destination, true))
 							completeSaveAs(document, onSuccess);
 					}));
 			} else {
 				reportError("file", 'Could not save as "$destination"');
-				root.commandView.close();
+				root.closeCommandView();
 			}
 		}));
 	}
 
 	public function openCreateFile():Void {
-		root.commandView.open(new CommandViewProvider("New File: ", [], function(query) {}, function(entry, path, backwards) {
+		root.openCommandView(new CommandViewProvider("New File: ", [], function(query) {}, function(entry, path, backwards) {
 			var result = operations.createFile(path);
 			if (result.success) {
 				workspace.refreshProjects();
 				if (result.destination != null) openDocument(result.destination);
 			} else reportError("file", 'Could not create file "$path": ' + result.detail);
-			root.commandView.close();
+			root.closeCommandView();
 		}));
 	}
 
 	public function openCreateFolder():Void {
-		root.commandView.open(new CommandViewProvider("New Folder: ", [], function(query) {}, function(entry, path, backwards) {
+		root.openCommandView(new CommandViewProvider("New Folder: ", [], function(query) {}, function(entry, path, backwards) {
 			var result = operations.createFolder(path);
 			if (!result.success) reportError("file", 'Could not create folder "$path": ' + result.detail);
 			workspace.refreshProjects();
-			root.commandView.close();
+			root.closeCommandView();
 		}));
 	}
 
 	public function openRenameFile():Void {
 		var source = selectedFileOperationPath();
 		if (source == null) return;
-		root.commandView.open(new CommandViewProvider("Rename/Move: ", [], function(query) {}, function(entry, destination, backwards) {
+		root.openCommandView(new CommandViewProvider("Rename/Move: ", [], function(query) {}, function(entry, destination, backwards) {
 			var result = operations.move(source, destination);
 			if (!result.success) reportError("file", 'Could not rename "$source": ' + result.detail); else
 				for (document in result.documents) root.documentRenamed(document);
 			workspace.refreshProjects();
-			root.commandView.close();
+			root.closeCommandView();
 		}));
 	}
 
@@ -128,7 +128,7 @@ class FileController {
 				reportInformation('Moved "$path" to ' + result.destination);
 				workspace.refreshProjects();
 			} else reportError("file", 'Could not safely delete "$path": ' + result.detail);
-			root.commandView.close();
+			root.closeCommandView();
 		});
 	}
 
@@ -174,7 +174,7 @@ class FileController {
 			var action = closeAction;
 			closePending = false;
 			closeAction = null;
-			root.commandView.close();
+			root.closeCommandView();
 			if (action != null) action();
 			return;
 		}
@@ -207,13 +207,13 @@ class FileController {
 		closePending = false;
 		closeDocuments.resize(0);
 		closeAction = null;
-		root.commandView.close();
+		root.closeCommandView();
 	}
 
 	function completeSaveAs(document:Document, onSuccess:Null<Void->Void>):Void {
 		root.documentRenamed(document);
 		recovery.forget(document);
-		root.commandView.close();
+		root.closeCommandView();
 		if (onSuccess != null) onSuccess();
 	}
 
@@ -223,15 +223,13 @@ class FileController {
 				recovery.forget(document);
 				reportInformation("Saved " + document.path);
 			} else reportError("file", "Could not save " + document.path);
-			root.commandView.close();
+			root.closeCommandView();
 		});
 	}
 
 	function selectedFileOperationPath():Null<String> {
-		if (!root.searchVisible) {
-			var node = root.sidebar.activeNode();
-			if (node != null) return node.path;
-		}
+		var focused = root.focusedFilePath();
+		if (focused != null) return focused;
 		var document = activeDocument();
 		return document == null || !document.hasBackingPath() ? null : document.requirePath();
 	}

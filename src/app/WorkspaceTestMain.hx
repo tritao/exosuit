@@ -14,6 +14,7 @@ import search.WorkspaceReplacement;
 import workspace.FileOperations;
 import workspace.TrashService;
 import recovery.RecoveryStore;
+import view.RootView;
 
 private class CountingJob implements JobTask {
 	public var steps:Int = 0;
@@ -47,7 +48,9 @@ class WorkspaceTestMain {
 		require(arguments.length == 2, "expected project roots");
 		Platform.startHeadless();
 		var window = Native.window_create("workspace-test", 640, 320), renderer = new Renderer(window, "ignored-headlessly.ttf", 15),
-			application = new Application(renderer, 640, 320), project = application.workspace.addProject(arguments[0], [".cache"]),
+			application = new Application((theme, focus, workspace, settings) -> new RootView(renderer, theme, focus, workspace, 640, 320, settings)),
+			root:RootView = cast application.root,
+			project = application.workspace.addProject(arguments[0], [".cache"]),
 			visible = project.visibleNodes();
 		var scheduler = new JobScheduler(), firstJob = new CountingJob(3), firstHandle = scheduler.schedule(firstJob);
 		require(scheduler.update(2) == 2 && firstJob.steps == 2 && scheduler.activeCount() == 1,
@@ -68,44 +71,44 @@ class WorkspaceTestMain {
 		application.commands.perform("project:sidebar-open", application.context);
 		require(application.documents.documents.length == 1 && application.documents.documents[0].path == visible[1].path,
 			"sidebar command did not open selected file");
-		application.root.mouseDown(Platform.MOUSE_LEFT, 20, view.Sidebar.HEADER_HEIGHT + view.Sidebar.ROW_HEIGHT * 4 + 1);
-		require(!visible[4].expanded && application.root.sidebar.selected == 4, "sidebar mouse did not select and collapse directory");
-		require(application.keyPressed(Platform.KEY_P, Platform.MOD_CTRL) && application.root.commandView.active, "Ctrl+P did not open file command view");
+		root.mouseDown(Platform.MOUSE_LEFT, 20, view.Sidebar.HEADER_HEIGHT + view.Sidebar.ROW_HEIGHT * 4 + 1);
+		require(!visible[4].expanded && root.sidebar.selected == 4, "sidebar mouse did not select and collapse directory");
+		require(application.keyPressed(Platform.KEY_P, Platform.MOD_CTRL) && root.commandView.active, "Ctrl+P did not open file command view");
 		application.textInput("main");
-		require(application.root.commandView.results.length == 1 && application.root.commandView.results[0].label == "src/Main.hx",
+		require(root.commandView.results.length == 1 && root.commandView.results[0].label == "src/Main.hx",
 			"file command view fuzzy filtering failed");
 		application.keyPressed(Platform.KEY_ENTER, 0);
-		require(application.documents.documents.length == 2 && !application.root.commandView.active, "file command view did not accept selection");
+		require(application.documents.documents.length == 2 && !root.commandView.active, "file command view did not accept selection");
 		var secondProject = application.workspace.addProject(arguments[1]);
-		application.root.tabs.activeView.textInput("needle ");
+		root.tabs.activeView.textInput("needle ");
 		require(application.keyPressed(Platform.KEY_F, Platform.MOD_CTRL), "Ctrl+F did not open document find");
 		application.textInput("needle");
-		require(application.documentMatches.length == 1 && application.root.tabs.activeView.hasSelection(),
+		require(application.documentMatches.length == 1 && root.tabs.activeView.hasSelection(),
 			"document find did not select an unsaved match");
 		application.keyPressed(Platform.KEY_ESCAPE, 0);
 		application.textInput("changed");
 		require(application.documentMatches.length == 0, "document find retained a stale match after editing");
-		application.root.tabs.activeView.undo();
+		root.tabs.activeView.undo();
 		application.commands.perform("find:next", application.context);
 		require(application.documentMatches.length == 1, "document find did not refresh after undo");
 		require(application.replaceAll("found") == 1 && application.documents.documents[1].buffer.text.indexOf("needle") < 0,
 			"replace all did not apply as one document operation");
-		application.root.tabs.activeView.undo();
+		root.tabs.activeView.undo();
 		require(application.documents.documents[1].buffer.text.indexOf("needle") >= 0, "one undo did not restore replace all");
 		application.openDocumentFind();
 		application.textInput("needle");
 		application.keyPressed(Platform.KEY_ESCAPE, 0);
-		require(application.root.tabs.activeView != null && application.root.tabs.activeView.searchMatchCount() == 0,
+		require(root.tabs.activeView != null && root.tabs.activeView.searchMatchCount() == 0,
 			"cancelled find retained transient highlights");
-		application.root.tabs.switchBy(-1);
+		root.tabs.switchBy(-1);
 		application.commands.perform("find:next", application.context);
 		require(application.documentMatches.length == 0, "document find results leaked across active documents");
-		application.root.tabs.switchBy(1);
+		root.tabs.switchBy(1);
 		require(application.keyPressed(Platform.KEY_F, Platform.MOD_CTRL + Platform.MOD_SHIFT), "Ctrl+Shift+F did not open workspace search");
 		application.textInput("needle");
 		application.workspaceSearch.flush();
 		finishSearch(application);
-		require(application.root.searchVisible && application.root.searchSidebar.results.length == 2,
+		require(root.searchVisible && root.searchSidebar.results.length == 2,
 			"workspace search did not include unsaved and multi-project matches: results="
 			+ [for (match in application.workspaceSearch.results) match.path].join(",") + ", errors="
 			+ application.workspaceSearch.errors.join(",") + ", complete=" + application.workspaceSearch.complete
@@ -144,27 +147,27 @@ class WorkspaceTestMain {
 		application.workspaceSearch.flush();
 		finishSearch(application);
 		application.keyPressed(Platform.KEY_ENTER, 0);
-		require(application.root.searchSidebar.active() != null, "workspace result activation failed");
+		require(root.searchSidebar.active() != null, "workspace result activation failed");
 		application.keyPressed(Platform.KEY_ESCAPE, 0);
 		application.commands.perform("project:show-sidebar", application.context);
-		require(!application.root.searchVisible, "workspace search could not return to the project sidebar");
+		require(!root.searchVisible, "workspace search could not return to the project sidebar");
 		application.commands.perform("project:sidebar-next", application.context);
 		require(application.keyPressed(Platform.KEY_P, Platform.MOD_CTRL + Platform.MOD_SHIFT), "Ctrl+Shift+P did not open command palette");
 		application.textInput("sidebarprevious");
-		require(application.root.commandView.results.length == 1, "command view fuzzy filtering failed");
+		require(root.commandView.results.length == 1, "command view fuzzy filtering failed");
 		application.keyPressed(Platform.KEY_ENTER, 0);
-		require(application.root.sidebar.selected == 0,
-			"command palette did not dispatch selected command: selected=" + application.root.sidebar.selected);
+		require(root.sidebar.selected == 0,
+			"command palette did not dispatch selected command: selected=" + root.sidebar.selected);
 		application.openFileCommandView();
 		application.keyPressed(Platform.KEY_ESCAPE, 0);
-		require(!application.root.commandView.active, "Escape did not cancel command view");
+		require(!root.commandView.active, "Escape did not cancel command view");
 		require(application.commands.perform("workspace:replace", application.context), "workspace replacement command was unavailable");
 		application.textInput("unused replacement");
 		application.keyPressed(Platform.KEY_ENTER, 0);
-		require(application.replacementPreview != null && application.root.commandView.active,
+		require(application.replacementPreview != null && root.commandView.active,
 			"workspace replacement did not present an explicit preview confirmation");
 		application.keyPressed(Platform.KEY_ESCAPE, 0);
-		require(application.replacementPreview == null && !application.root.commandView.active,
+		require(application.replacementPreview == null && !root.commandView.active,
 			"cancelling replacement preview retained an applicable plan");
 		var backupPath = arguments[0] + "-replacement-backup.conf", secondPath = arguments[1] + "/second.txt";
 		if (application.workspace.fileSystem.exists(backupPath)) application.workspace.fileSystem.deleteFile(backupPath);
@@ -237,7 +240,7 @@ class WorkspaceTestMain {
 		for (index in 0...16) application.workspace.refreshProjects(1);
 		require(project.files().length == 5, "incremental polling retained deleted file");
 		project.restoreExpanded([arguments[0] + "/src"]);
-		application.root.splitActive(LayoutKind.Horizontal);
+		root.splitActive(LayoutKind.Horizontal);
 		application.open(arguments[1] + "/second.txt");
 		var sessionRecovery = new RecoveryStore(arguments[0] + "-session-recovery.conf", application.workspace.fileSystem);
 		require(sessionRecovery.save(application), "session recovery snapshot save failed");
@@ -246,27 +249,27 @@ class WorkspaceTestMain {
 		session.projects.push("/missing/session-project");
 		session.layout.push("T\t1\t0\t0\t0\t0\t0\tP\t/missing/session-file");
 		session.restore(application, sessionRecovery);
-		require(application.root.sessionLines().join("\n") == expectedLayout.join("\n"), "layout tab order, active pane, cursor or scroll changed on restore");
-		require(application.workspace.projects.length == 2 && !application.root.node.isLeaf()
-			&& application.root.activeLeaf.tabs.activeView != null, "multi-root split session did not restore");
+		require(root.sessionLines().join("\n") == expectedLayout.join("\n"), "layout tab order, active pane, cursor or scroll changed on restore");
+		require(application.workspace.projects.length == 2 && !root.node.isLeaf()
+			&& root.activeLeaf.tabs.activeView != null, "multi-root split session did not restore");
 		require(project.visibleNodes().length == 7, "expanded project folders did not restore");
 		require(application.workspace.removeProject(secondProject) && application.workspace.projects.length == 1,
 			"closing a project did not retire its indexed state");
-		require(application.commands.perform("build:run-task", application.context) && application.root.commandView.active,
+		require(application.commands.perform("build:run-task", application.context) && root.commandView.active,
 			"deliberate build task command did not open the project task picker");
 		application.keyPressed(Platform.KEY_ENTER, 0);
 		var buildDeadline = Sys.time() + 5.0;
 		while (application.build.active != null && Sys.time() < buildDeadline) application.update();
 		require(application.build.active == null && application.build.output.lines.length == 3
 			&& application.build.output.lines[1].diagnostic != null, "build task did not finish with a clickable diagnostic");
-		application.root.mouseDown(Platform.MOUSE_LEFT, application.root.activeLeaf.x + 20,
-			application.root.activeLeaf.y + editor.EditorView.HEADER_HEIGHT + renderer.lineHeight + 1);
-		var buildView = application.root.tabs.activeView, buildDocument = buildView == null ? null : buildView.getDocument();
+		root.mouseDown(Platform.MOUSE_LEFT, root.activeLeaf.x + 20,
+			root.activeLeaf.y + editor.EditorView.HEADER_HEIGHT + renderer.lineHeight + 1);
+		var buildView = root.tabs.activeView, buildDocument = buildView == null ? null : buildView.getDocument();
 		require(buildView != null && buildDocument != null && buildDocument.path == arguments[0] + "/src/Main.hx"
 			&& buildView.cursorLine() == 1 && buildView.cursorColumn() == 2,
 			"clicking build output did not open the diagnostic file and position");
 		renderer.begin();
-		application.root.draw();
+		root.draw();
 		renderer.present();
 		application.shutdown();
 		renderer.destroy();

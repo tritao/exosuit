@@ -1,35 +1,72 @@
 # Pragtical Haxeon
 
-A new editor implementation with its application core written in Haxeon. The
-native host owns platform lifecycle and resources; reloadable Haxeon domains own
-editor behavior.
+An editor implementation with its application core written in Haxeon,
+built on the NativeKit UIKit desktop host and Haxeon manifest builds.
 
-The graphical backend compiles Pragtical's renderer sources directly and uses
-its font shaping, glyph atlas, dirty-region cache, and SDL surface backend behind
-the platform ABI. The editor core never receives SDL or renderer pointers.
-The document view supports measured caret placement, vertical navigation,
-line-number and selection drawing, resize-aware clipping, scrolling, and mouse
-drag selection.
-Input is routed through a Pragtical-style named command registry and ordered
-keymap with predicate-based fallbacks; text input remains a separate event path.
+The NativeKit `DesktopUiHost` owns the window, GPU context, input devices,
+and main event loop. Application code (`ExosuitApp`) implements the
+reloadable `DesktopUiApplication` interface and manages editor state,
+documents, view trees, and command dispatch. UIKit provides layout,
+text widgets, docking workspace, and platform dialogs; NativeKit provides
+clipboard, file dialogs, and native services.
 
 ## Build and test
 
+Install Haxeon and place this repository alongside checkouts of `nativekit`
+and `haxeon` (UIKit and EditorKit live in `haxeon/packages/`), or set their
+paths in graphical/haxeon.json:
+
 ```sh
-./scripts/test.sh
+cd exosuit
+./scripts/build.sh
+./scripts/run.sh [file or directory]
 ```
 
-By default the build uses sibling checkouts at `../realtime-haxe` and
-`../pragtical`. Override them with `HAXEON_ROOT` and `PRAGTICAL_ROOT`.
+The graphical application builds from `graphical/haxeon.json` (entry
+`app.GraphicalMain`). Headless tests build from `haxeon.json` (entry
+`app.Main`); see `scripts/test.sh` for the test suite.
 
-See [the platform boundary decision](docs/architecture/0001-platform-boundary.md).
+For CI or reproducible builds, pin dependency versions in haxeon.json.
 
-## Current capabilities
+See [the NativeKit UIKit host architecture](docs/architecture/0002-nativekit-uikit-host.md).
 
-The editor now covers safe document persistence and recovery, multiple views and
-selections, command/file/search palettes, project indexing and replacement,
-layered live configuration, reloadable owned plugins, build tasks, and Haxeon
-language diagnostics/navigation. The SDL host supports Unicode clipboard and
-paths, distinct IME preedit state, display-scale events, shaped font fallbacks,
-and a relocatable Linux release archive. Exact qualification evidence and open
-platform limitations are recorded in `docs/release-qualification.md`.
+## Architecture
+
+The graphical editor runs on a separate build manifest (`graphical/haxeon.json`)
+to avoid requiring every headless test project to link UIKit's GPU toolkit.
+The headless core (`haxeon.json`) provides the editor's model layer, platform
+ABI, and command infrastructure; the graphical layer adds the UI shell,
+docking workspace, and document rendering.
+
+Text editing is backed by `nativekit.editorkit.TextDocument`, which the editor's
+`TextBuffer` mirrors to enable plugin/LSP subscriber access to all edits
+regardless of whether they originate from the text widget, buffer API, or
+search/replace operations.
+
+## Known limitations and open gaps
+
+- **Dynamic plugins** are stubbed; the plugin discovery infrastructure exists,
+  but compiling and hot-loading plugins requires Haxeon's compiler/runtime
+  packages as a manifest dependency (not yet available).
+- **Language services and diagnostics** (LSP client, problem panel) are
+  structurally present but show a placeholder message; the new UI does not
+  wire them to the backend.
+- **Build output panel** is structurally present but shows a placeholder message.
+- **Multi-cursor editing** and **styled/syntax-colored text spans** are not
+  exposed by the current UIKit TextDocument/TextArea API.
+- **Context menu popups** (right-click) are not implemented.
+- **Command palette** replicates only a small set of new commands (New, Open,
+  Open Folder, Save, Close Tab, Toggle Palette); exosuit's own ~45 commands
+  (doc:*, root:*, project:*) are not ported, as they were written against
+  concepts (pane layouts, editor splits) that don't semantically map onto the
+  new DockWorkspace/Tab architecture.
+
+See [docs/architecture/0002-nativekit-uikit-host.md](docs/architecture/0002-nativekit-uikit-host.md)
+for migration notes and implementation details.
+
+## Implementation roadmap
+
+See the [implementation roadmap](docs/roadmap/README.md) for ordered milestones,
+acceptance checks and the core compiler typing policy. The
+[overnight handoff](docs/roadmap/OVERNIGHT.md) provides a launch prompt, and the
+[execution ledger](docs/roadmap/STATUS.md) tracks resumable progress.

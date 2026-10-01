@@ -2,7 +2,6 @@ package view;
 
 import editor.Document;
 import editor.EditorView;
-import renderer.Renderer;
 import style.Theme;
 import search.SearchMatch;
 import editor.BufferPosition;
@@ -18,7 +17,7 @@ class DocumentView extends View {
 	public final editor:EditorView;
 	final bufferSubscription:BufferSubscription;
 
-	public function new(document:Document, renderer:Renderer, theme:Theme, width:Int, height:Int, decorations:PluginDecorationRegistry) {
+	public function new(document:Document, renderer:renderer.Renderer, theme:Theme, width:Int, height:Int, decorations:PluginDecorationRegistry) {
 		super(document.title);
 		this.document = document;
 		editor = new EditorView(document, renderer, theme, width, height, null, null, decorations);

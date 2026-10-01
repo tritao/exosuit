@@ -6,6 +6,7 @@ import platform.Platform;
 import plugin.DynamicPlugin;
 import plugin.PluginManifest;
 import renderer.Renderer;
+import view.RootView;
 import sys.FileSystem;
 import sys.io.File;
 
@@ -21,7 +22,8 @@ class DynamicPluginTestMain {
 		Platform.startHeadless();
 		var window = Native.window_create("dynamic-plugin-test", 320, 200),
 			renderer = new Renderer(window, "ignored-headlessly.ttf", 15),
-			application = new Application(renderer, 320, 200),
+			application = new Application((theme, focus, workspace, settings) -> new RootView(renderer, theme, focus, workspace, 320, 200, settings)),
+			root:RootView = cast application.root,
 			plugin = new DynamicPlugin(new PluginManifest(arguments[0]));
 		var separator = arguments[0].lastIndexOf("/"), pluginDirectory = arguments[0].substring(0, separator), incompatiblePath = pluginDirectory + "/incompatible.conf";
 		File.saveContent(incompatiblePath, "manifestVersion=1\napiVersion=99\nid=incompatible\nversion=1.0.0\nsource=Main.hx\n");
@@ -32,9 +34,9 @@ class DynamicPluginTestMain {
 		require(application.plugins.load(plugin), "dynamic plugin did not load");
 		require(application.syntaxes.find("file.example").name == "Example", "manifest syntax did not register");
 		require(plugin.callInt("hostProbe") == 42, "dynamic plugin direct host API probe failed");
-		require(application.root.pluginPanels.find("example", "status") != null, "dynamic plugin did not invoke the host panel API during activation");
-		require(application.root.pluginStatusItems.find("example", "mode") != null
-			&& application.root.pluginDecorations.find("example", "first-character") != null,
+		require(root.pluginPanels.find("example", "status") != null, "dynamic plugin did not invoke the host panel API during activation");
+		require(root.pluginStatusItems.find("example", "mode") != null
+			&& root.pluginDecorations.find("example", "first-character") != null,
 			"dynamic plugin did not register its owned UI contributions");
 		application.context.requireView().undo();
 		var eventsBeforeCommand = plugin.callInt("eventCount");
@@ -42,7 +44,7 @@ class DynamicPluginTestMain {
 		require(plugin.callInt("current") == 1, "dynamic command did not update plugin state");
 		require(application.context.requireDocument().buffer.text == "dynamic", "dynamic command did not invoke the host document transaction API");
 		require(plugin.callInt("eventCount") == eventsBeforeCommand + 1, "dynamic document event did not invoke the plugin callback exactly once");
-		var panel = application.root.pluginPanels.find("example", "status");
+		var panel = root.pluginPanels.find("example", "status");
 		require(panel != null && panel.text == "dynamic", "dynamic plugin panel did not observe the document event");
 
 		var source = File.getContent(arguments[1]);
@@ -81,7 +83,7 @@ class DynamicPluginTestMain {
 		require(application.commands.perform("example:increment", application.context)
 			&& plugin.callInt("current") == 5
 			&& plugin.callInt("eventCount") == eventsBeforeStructuralCommand + 1
-			&& application.root.pluginPanels.find("example", "status") != null,
+			&& root.pluginPanels.find("example", "status") != null,
 			"structural reload lost state, registrations, or installed duplicate callbacks");
 
 		var structuralSource = File.getContent(arguments[1]);
@@ -139,9 +141,9 @@ class DynamicPluginTestMain {
 		Sys.sleep(0.05);
 		var textAfterUnload = application.context.requireDocument().buffer.text;
 		application.textInput("after");
-		require(application.root.pluginPanels.find("example", "status") == null
-			&& application.root.pluginStatusItems.find("example", "mode") == null
-			&& application.root.pluginDecorations.find("example", "first-character") == null
+		require(root.pluginPanels.find("example", "status") == null
+			&& root.pluginStatusItems.find("example", "mode") == null
+			&& root.pluginDecorations.find("example", "first-character") == null
 			&& application.context.requireDocument().buffer.text != textAfterUnload, "dynamic plugin panel survived unload");
 
 		application.shutdown();

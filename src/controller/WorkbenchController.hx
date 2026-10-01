@@ -7,16 +7,16 @@ import command.Keymap;
 import commandview.CommandViewEntry;
 import commandview.CommandViewProvider;
 import completion.CompletionRegistry;
+import core.WorkbenchHost;
 import editor.Document;
 import feedback.ErrorLog;
+import feedback.Problem;
 import platform.Platform;
-import view.RootView;
-import view.ProblemsView;
 import workspace.Workspace;
 
 class WorkbenchController {
 	final workspace:Workspace;
-	final root:RootView;
+	final root:WorkbenchHost;
 	final commands:CommandRegistry;
 	final keymap:Keymap;
 	final context:CommandContext;
@@ -27,7 +27,7 @@ class WorkbenchController {
 	public var openPath:String->Void = function(path) {};
 	final recentCommands:Array<String> = [];
 
-	public function new(workspace:Workspace, root:RootView, commands:CommandRegistry, keymap:Keymap, context:CommandContext,
+	public function new(workspace:Workspace, root:WorkbenchHost, commands:CommandRegistry, keymap:Keymap, context:CommandContext,
 		completions:CompletionRegistry, errors:ErrorLog, search:SearchController, openDocument:String->Void) {
 		this.workspace = workspace;
 		this.root = root;
@@ -38,12 +38,13 @@ class WorkbenchController {
 		this.errors = errors;
 		this.search = search;
 		this.openDocument = openDocument;
+		root.setProblemActivationHandler(activateProblem);
 		installCommands();
 	}
 
 	public function keyPressed(key:Int, modifiers:Int):Bool {
-		if (root.commandView.active) return root.commandView.keyPressed(key, modifiers);
-		if (root.languagePopup.keyPressed(key, modifiers)) return true;
+		if (root.isCommandViewActive()) return root.commandViewKeyPressed(key, modifiers);
+		if (root.handleLanguagePopupKey(key, modifiers)) return true;
 		var handled = keymap.onKeyPressed(key, modifiers, context);
 		if (handled) {
 			root.cursorChanged();
@@ -53,8 +54,8 @@ class WorkbenchController {
 	}
 
 	public function textInput(text:String):Void {
-		if (root.languagePopup.visible) root.languagePopup.close();
-		if (root.commandView.active) root.commandView.textInput(text); else {
+		if (root.isLanguagePopupVisible()) root.dismissLanguagePopup();
+		if (root.isCommandViewActive()) root.commandViewTextInput(text); else {
 			root.textInput(text);
 			search.editorStateChanged();
 		}
@@ -73,18 +74,18 @@ class WorkbenchController {
 				var relative = node.path.substring(project.root.length + 1);
 				entries.push(new CommandViewEntry(relative, project.name, node.path));
 			}
-		root.commandView.open(new CommandViewProvider("", entries, function(query) {}, function(entry, query, backwards) {
+		root.openCommandView(new CommandViewProvider("", entries, function(query) {}, function(entry, query, backwards) {
 			if (entry != null) openDocument(entry.value);
-			root.commandView.close();
+			root.closeCommandView();
 		}, null, null, function(query, entry) {
 			return entry == null ? query : entry.label;
 		}));
 	}
 
 	public function openPathCommandView(directory:Bool):Void {
-		root.commandView.open(new CommandViewProvider(directory ? "Open Project: " : "Open File: ", [], function(query) {},
+		root.openCommandView(new CommandViewProvider(directory ? "Open Project: " : "Open File: ", [], function(query) {},
 			function(entry, path, backwards) {
-				root.commandView.close();
+				root.closeCommandView();
 				if (path.length > 0) openPath(path);
 			}));
 	}
@@ -96,10 +97,10 @@ class WorkbenchController {
 				if (command.name == name) entries.push(commandEntry(command, "Recently Used"));
 		for (command in available)
 			if (recentCommands.indexOf(command.name) < 0) entries.push(commandEntry(command, "Other Commands"));
-		root.commandView.open(new CommandViewProvider("> ",
+		root.openCommandView(new CommandViewProvider("> ",
 			entries,
 			function(query) {}, function(entry, query, backwards) {
-				root.commandView.close();
+				root.closeCommandView();
 				if (entry != null) {
 					rememberCommand(entry.value);
 					commands.perform(entry.value, context);
@@ -125,8 +126,8 @@ class WorkbenchController {
 		var result = completions.request(document, selection.cursor), revision = document.buffer.stateId,
 			entries = [for (item in result.items) new CommandViewEntry(item.label, item.detail, item.insertText)];
 		if (entries.length == 0) return;
-		root.commandView.open(new CommandViewProvider("Complete: ", entries, function(query) {}, function(entry, query, backwards) {
-			root.commandView.close();
+		root.openCommandView(new CommandViewProvider("Complete: ", entries, function(query) {}, function(entry, query, backwards) {
+			root.closeCommandView();
 			if (entry == null || activeDocument() != document || document.buffer.stateId != revision
 				|| !selection.cursor.equals(result.replaceTo)) return;
 			if (view.replaceRange(result.replaceFrom, result.replaceTo, entry.value)) view.cursorChanged();
@@ -135,14 +136,14 @@ class WorkbenchController {
 
 	public function openGoToLine():Void {
 		if (activeDocument() == null) return;
-		root.commandView.open(new CommandViewProvider("Go to Line: ", [], function(query) {}, function(entry, query, backwards) {
+		root.openCommandView(new CommandViewProvider("Go to Line: ", [], function(query) {}, function(entry, query, backwards) {
 			var fields = query.split(":"), line = fields.length > 0 ? Std.parseInt(fields[0]) : 0,
 				column = fields.length > 1 ? Std.parseInt(fields[1]) : 1, view = context.activeView();
 			if (view != null && line > 0 && column > 0) {
 				view.restoreCursor(line - 1, column - 1);
 				view.cursorChanged();
 			}
-			root.commandView.close();
+			root.closeCommandView();
 		}));
 	}
 
@@ -150,8 +151,8 @@ class WorkbenchController {
 		var entries:Array<CommandViewEntry> = [];
 		for (error in errors.entries)
 			entries.unshift(new CommandViewEntry(error.source, error.message, error.source + ": " + error.message));
-		root.commandView.open(new CommandViewProvider("Errors: ", entries, function(query) {}, function(entry, query, backwards) {
-			root.commandView.close();
+		root.openCommandView(new CommandViewProvider("Errors: ", entries, function(query) {}, function(entry, query, backwards) {
+			root.closeCommandView();
 		}));
 	}
 
@@ -173,7 +174,7 @@ class WorkbenchController {
 		commands.add("workbench:toggle-sidebar", context -> root.toggleSidebar());
 		commands.add("workbench:show-errors", context -> openErrorLog());
 		commands.add("workbench:show-problems", context -> openProblems());
-		commands.add("workbench:clear-notifications", context -> root.notifications.clear());
+		commands.add("workbench:clear-notifications", context -> root.getNotifications().clear());
 		commands.add("doc:newline", context -> context.requireView().insertNewline(), hasDocument);
 		commands.add("doc:duplicate-line", context -> context.requireView().duplicateLines(), hasDocument);
 		commands.add("doc:move-line-up", context -> context.requireView().moveLines(-1), hasDocument);
@@ -207,12 +208,12 @@ class WorkbenchController {
 		keymap.addDirect(Platform.KEY_B, Platform.MOD_CTRL, ["workbench:toggle-sidebar"]);
 	}
 
-	public function openProblems():Void {
-		root.openAuxiliary(new ProblemsView(root.problems, root.renderer, root.theme, root.activeLeaf.width, root.activeLeaf.height, problem -> {
-			var view = root.openDocument(workspace.documents.open(problem.path));
-			view.selectRange(new editor.BufferPosition(problem.line, problem.column), new editor.BufferPosition(problem.line, problem.endColumn));
-			view.cursorChanged();
-		}));
+	public function openProblems():Void root.showProblems();
+
+	function activateProblem(problem:Problem):Void {
+		var view = root.openDocument(workspace.documents.open(problem.path));
+		view.selectRange(new editor.BufferPosition(problem.line, problem.column), new editor.BufferPosition(problem.line, problem.endColumn));
+		view.cursorChanged();
 	}
 
 	function hasDocument(context:CommandContext):Bool

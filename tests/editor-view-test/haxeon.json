@@ -1,0 +1,11 @@
+{
+	"version": 1,
+	"package": { "name": "exosuit-editor-view-test" },
+	"entry": "app.EditorViewTestMain",
+	"sourceRoots": ["src"],
+	"dependencies": {
+		"pragtical_hx": { "path": "../.." }
+	},
+	"target": "host",
+	"outputDir": "build"
+}

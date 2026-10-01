@@ -1,0 +1,18 @@
+{
+	"version": 1,
+	"package": { "name": "pragtical_hx" },
+	"entry": "app.Main",
+	"sourceRoots": ["src"],
+	"scopeSourceRoots": false,
+	"dependencies": {
+		"nativekit": { "path": "../nativekit" },
+		"uikit": { "path": "../haxeon/packages/uikit" },
+		"editorkit": { "path": "../haxeon/packages/editorkit" }
+	},
+	"native": {
+		"sources": ["native/headless/platform.c", "native/hashlink/pragtical_hx.c"],
+		"includeDirs": ["include"]
+	},
+	"target": "host",
+	"outputDir": "build"
+}

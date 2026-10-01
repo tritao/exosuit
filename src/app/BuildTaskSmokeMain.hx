@@ -4,6 +4,7 @@ import core.Application;
 import platform.Native;
 import platform.Platform;
 import renderer.Renderer;
+import view.RootView;
 
 class BuildTaskSmokeMain {
 	static function require(condition:Bool, message:String):Void {
@@ -15,10 +16,11 @@ class BuildTaskSmokeMain {
 		require(arguments.length == 1, "build task smoke requires repository root");
 		Platform.startHeadless();
 		var window = Native.window_create("build-task-smoke", 640, 320), renderer = new Renderer(window, "ignored-headlessly.ttf", 15),
-			application = new Application(renderer, 640, 320);
+			application = new Application((theme, focus, workspace, settings) -> new RootView(renderer, theme, focus, workspace, 640, 320, settings)),
+			root:RootView = cast application.root;
 		application.workspace.addProject(arguments[0]);
-		require(application.commands.perform("build:run-task", application.context) && application.root.commandView.results.length >= 2
-			&& application.root.commandView.results[0].label == "build-headless", "repository build task was not offered deliberately");
+		require(application.commands.perform("build:run-task", application.context) && root.commandView.results.length >= 2
+			&& root.commandView.results[0].label == "build-headless", "repository build task was not offered deliberately");
 		application.keyPressed(Platform.KEY_ENTER, 0);
 		var deadline = Sys.time() + 60.0;
 		while (application.build.active != null && Sys.time() < deadline) application.update();

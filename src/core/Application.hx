@@ -4,9 +4,10 @@ import command.CommandContext;
 import command.CommandRegistry;
 import command.EditorCommands;
 import command.Keymap;
+import core.FileActions;
+import core.WelcomeActions;
+import core.WorkbenchHost;
 import editor.Document;
-import renderer.Renderer;
-import view.RootView;
 import view.View;
 import plugin.PluginManager;
 import syntax.BuiltinSyntax;
@@ -47,7 +48,7 @@ class Application {
 	public final workspace:Workspace;
 	public final fileOperations:FileOperations;
 	public final focus:FocusManager;
-	public final root:RootView;
+	public final root:WorkbenchHost;
 	public final commands:CommandRegistry;
 	public final keymap:Keymap;
 	public final context:CommandContext;
@@ -78,7 +79,8 @@ class Application {
 	public var documentSearchQuery(get, never):String;
 	public var quitReady(get, never):Bool;
 
-	public function new(renderer:Renderer, width:Int, height:Int, ?settings:SettingsService, ?recentProjects:RecentProjects) {
+	public function new(hostFactory:(theme:Theme, focus:FocusManager, workspace:Workspace, settings:Settings)->WorkbenchHost,
+			?settings:SettingsService, ?recentProjects:RecentProjects) {
 		this.settings = settings == null ? new SettingsService() : settings;
 		syntaxes = new SyntaxRegistry();
 		BuiltinSyntax.install(syntaxes);
@@ -90,13 +92,10 @@ class Application {
 		fileOperations = new FileOperations(workspace, new TrashService(ConfigurationPaths.trash(), workspace.fileSystem));
 		documents = workspace.documents;
 		focus = new FocusManager();
-		root = new RootView(renderer, theme, focus, workspace, width, height, this.settings.current);
+		root = hostFactory(theme, focus, workspace, this.settings.current);
 		errors = new ErrorLog();
-		confirmations = new ConfirmationService(root.commandView);
+		confirmations = new ConfirmationService(root);
 		this.recentProjects = recentProjects == null ? new RecentProjects(ConfigurationPaths.recentProjects()) : recentProjects;
-		root.closeRequest = function() {
-			requestCloseActiveTab();
-		};
 		commands = new CommandRegistry();
 		keymap = new Keymap(commands);
 		context = new CommandContext(root, focus, documents);
@@ -112,7 +111,7 @@ class Application {
 		recovery = session.recovery;
 		files = new FileController(documents, workspace, fileOperations, root, context, commands, confirmations, recovery,
 			path -> { open(path); }, function() { newDocument(); }, function() { recovery.save(this); }, reportError, reportInformation);
-		pluginController = new PluginController(commands, keymap, context, syntaxes, completions, root.pluginPanels, workspace.jobs,
+		pluginController = new PluginController(commands, keymap, context, syntaxes, completions, root.getPluginPanels(), workspace.jobs,
 			effectiveSettings, root, processes, reportError, reportInformation);
 		plugins = pluginController.manager;
 		workbench = new WorkbenchController(workspace, root, commands, keymap, context, completions, errors, search,
@@ -126,25 +125,29 @@ class Application {
 				languageServer = bundled;
 			else {
 				var haxeonRoot = Sys.getEnv("HAXEON_ROOT");
-				if (haxeonRoot == null || haxeonRoot.length == 0) haxeonRoot = "../realtime-haxe";
+				if (haxeonRoot == null || haxeonRoot.length == 0) haxeonRoot = "../haxeon";
 				languageServer = haxeonRoot + "/scripts/haxeon-lsp";
 			}
 		}
 		language = new LanguageController(workspace, root, context, commands, processes, languageServer, reportError);
-		root.welcome.recentProjects = this.recentProjects.paths;
-		root.welcome.newFile = function() { newDocument(); };
-		root.welcome.openFile = function() { workbench.openPathCommandView(false); };
-		root.welcome.openProject = function() { workbench.openPathCommandView(true); };
-		root.welcome.findFile = function() { workbench.openFileCommandView(); };
-		root.welcome.runCommand = function() { workbench.openCommandView(); };
-		root.welcome.openSettings = function() { configuration.openSettingsCommandView(); };
-		root.welcome.openPlugins = function() { pluginController.openDiagnostics(); };
-		root.welcome.openRecent = function(path) { openArgument(path); };
-		root.createFileRequest = function() { files.openCreateFile(); };
-		root.createFolderRequest = function() { files.openCreateFolder(); };
-		root.renameFileRequest = function() { files.openRenameFile(); };
-		root.deleteFileRequest = function() { files.openDeleteFile(); };
-		root.showProblemsRequest = function() { workbench.openProblems(); };
+		root.configureWelcomeActions({
+			recentProjects: this.recentProjects.paths,
+			newFile: function() { newDocument(); },
+			openFile: function() { workbench.openPathCommandView(false); },
+			openProject: function() { workbench.openPathCommandView(true); },
+			findFile: function() { workbench.openFileCommandView(); },
+			runCommand: function() { workbench.openCommandView(); },
+			openSettings: function() { configuration.openSettingsCommandView(); },
+			openPlugins: function() { pluginController.openDiagnostics(); },
+			openRecent: function(path) { openArgument(path); }
+		});
+		root.configureFileActions({
+			createFile: function() { files.openCreateFile(); },
+			createFolder: function() { files.openCreateFolder(); },
+			renameFile: function() { files.openRenameFile(); },
+			deleteFile: function() { files.openDeleteFile(); },
+			closeTab: function() { requestCloseActiveTab(); }
+		});
 	}
 
 	public function open(path:String):View
@@ -279,11 +282,11 @@ class Application {
 		return configuration.effectiveSettings();
 
 	public function reportInformation(message:String):Void
-		root.notifications.publish(message, NotificationKind.Information);
+		root.getNotifications().publish(message, NotificationKind.Information);
 
 	public function reportError(source:String, message:String):Void {
 		errors.record(source, message);
-		root.notifications.publish(message, NotificationKind.Error);
+		root.getNotifications().publish(message, NotificationKind.Error);
 	}
 
 	public function shutdown():Void {

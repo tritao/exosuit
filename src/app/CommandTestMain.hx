@@ -4,6 +4,7 @@ import core.Application;
 import platform.Native;
 import platform.Platform;
 import renderer.Renderer;
+import view.RootView;
 import commandview.CommandView;
 import commandview.CommandViewEntry;
 import commandview.CommandViewProvider;
@@ -16,7 +17,9 @@ class CommandTestMain {
 	static function main():Int {
 		Platform.startHeadless();
 		var window = Native.window_create("command-test", 320, 200), renderer = new Renderer(window, "ignored-headlessly.ttf", 15),
-			application = new Application(renderer, 320, 200), registry = application.commands, keymap = application.keymap,
+			application = new Application((theme, focus, workspace, settings) -> new RootView(renderer, theme, focus, workspace, 320, 200, settings)),
+			root:RootView = cast application.root,
+			registry = application.commands, keymap = application.keymap,
 			context = application.context, performed = 0;
 		registry.add("test:disabled", function(context) { performed = 1; }, context -> false);
 		registry.add("test:fallback", function(context) { performed = 2; }, null, "Run the fallback command");
@@ -26,19 +29,19 @@ class CommandTestMain {
 		var disabled = new command.Command("test:human-readable", function(context) {});
 		require(disabled.description == "Test: Human Readable", "command description fallback was not human readable");
 		application.workbench.openCommandView();
-		var fallbackEntry = [for (entry in application.root.commandView.results) if (entry.value == "test:fallback") entry][0];
+		var fallbackEntry = [for (entry in root.commandView.results) if (entry.value == "test:fallback") entry][0];
 		require(fallbackEntry.label == "Run the fallback command" && fallbackEntry.searchText.indexOf("test:fallback") >= 0,
 			"command palette did not show the human-readable description or retain the stable command ID for search");
-		var paletteEntry = [for (entry in application.root.commandView.results) if (entry.value == "commands:open") entry][0];
+		var paletteEntry = [for (entry in root.commandView.results) if (entry.value == "commands:open") entry][0];
 		require(paletteEntry.trailing == "Ctrl+Shift+P", "command palette did not show the effective keyboard shortcut");
-		application.root.commandView.close();
+		root.commandView.close();
 		application.workbench.openCommandView();
-		application.root.commandView.setQuery("fallback");
-		application.root.commandView.keyPressed(Platform.KEY_ENTER, 0);
+		root.commandView.setQuery("fallback");
+		root.commandView.keyPressed(Platform.KEY_ENTER, 0);
 		application.workbench.openCommandView();
-		var recentEntry = [for (entry in application.root.commandView.results) if (entry.value == "test:fallback") entry][0];
+		var recentEntry = [for (entry in root.commandView.results) if (entry.value == "test:fallback") entry][0];
 		require(recentEntry.section == "Recently Used", "executed palette command was not promoted to the recent section");
-		application.root.commandView.close();
+		root.commandView.close();
 		keymap.addDirect(100, 1, ["test:disabled", "test:fallback"]);
 		require(keymap.onKeyPressed(100, 1, context) && performed == 2, "predicate fallback dispatch failed");
 		registry.add("test:override", function(context) { performed = 3; });

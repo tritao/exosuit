@@ -1,6 +1,5 @@
 package view;
 
-import renderer.Renderer;
 import style.Theme;
 import workspace.ProjectNode;
 import workspace.Workspace;
@@ -71,7 +70,7 @@ class Sidebar {
 		return true;
 	}
 
-	public function draw(renderer:Renderer, theme:Theme, height:Int):Void {
+	public function draw(renderer:renderer.Renderer, theme:Theme, height:Int):Void {
 		renderer.clip(0, 0, width, height);
 		renderer.rect(0, 0, width, height, theme.surface);
 		renderer.text(16, 13, "EXPLORER", theme.foregroundMuted);

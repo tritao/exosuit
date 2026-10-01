@@ -1,5 +1,7 @@
 package editor;
 
+import nativekit.editorkit.TextDocument;
+
 class TextBuffer {
 	final lines:Array<String>;
 	final changeListeners:Map<Int, BufferChangeListener> = [];
@@ -12,9 +14,23 @@ class TextBuffer {
 	final transactionEdits:Array<BufferEdit> = [];
 	var inTransaction:Bool = false;
 	public var text(get, never):String;
+	/**
+	 * The single EditorKit document backing this buffer, shared with
+	 * `TextArea.withDocument` so the UIKit editor renders and edits the exact
+	 * same text. Every mutation applied through this buffer's own API (insert,
+	 * replace, undo, redo, ...) mirrors into this document from the single
+	 * `replaceRaw` choke point. A mutation that arrives the other way, as a
+	 * widget-originated `EditTransaction` from `applyEditTransaction`, has
+	 * already been applied to this document by the widget itself, so mirroring
+	 * is suppressed for that one call to avoid a feedback loop.
+	 */
+	public var document(default, null):TextDocument;
+	var mirrorDocumentEdits:Bool = true;
 
 	public function new(?text:String) {
-		lines = splitLines(text == null ? "" : text);
+		var initial = text == null ? "" : text;
+		lines = splitLines(initial);
+		document = new TextDocument(initial);
 	}
 
 	function get_text():String
@@ -304,14 +320,73 @@ class TextBuffer {
 
 	function replaceRaw(from:BufferPosition, to:BufferPosition, value:String, stateBefore:Int, stateAfter:Int):Void {
 		var removed = textRange(from, to);
+		var startCodepoint = mirrorDocumentEdits ? codepointOffset(from) : 0;
+		var endCodepoint = mirrorDocumentEdits ? codepointOffset(to) : 0;
 		var replacement = splitLines(value), prefix = lines[from.line].substring(0, from.column), suffix = lines[to.line].substring(to.column);
 		replacement[0] = prefix + replacement[0];
 		replacement[replacement.length - 1] += suffix;
 		lines.splice(from.line, to.line - from.line + 1);
 		for (index in 0...replacement.length) lines.insert(from.line + index, replacement[index]);
+		if (mirrorDocumentEdits) document.replace(startCodepoint, endCodepoint, value);
 		var change = new BufferChange(from, removed, value, to.line - from.line, replacement.length - 1, stateBefore, stateAfter);
 		var listeners = [for (listener in changeListeners) listener];
 		for (listener in listeners) listener(change);
+	}
+
+	/**
+	 * Replays one UIKit `TextArea.withDocument` edit transaction onto this
+	 * buffer as a normal `BufferChange`/undo entry, notifying every buffer
+	 * subscriber (plugins, LSP, search, recovery). The widget's shared
+	 * `document` already holds the post-edit text, so this call does not
+	 * mirror back into it.
+	 */
+	public function applyEditTransaction(selection:BufferSelection,
+			transaction:nativekit.ui.widgets.text.EditTransaction):Bool {
+		var from = positionFromCodepointOffset(transaction.replacementStart);
+		var to = positionFromCodepointOffset(transaction.replacementEnd);
+		var value = transaction.replacementText == null ? "" : transaction.replacementText;
+		mirrorDocumentEdits = false;
+		var applied = replace(selection, from, to, value, "typing");
+		mirrorDocumentEdits = true;
+		return applied;
+	}
+
+	/** Converts a line/column position to a codepoint offset into `document`. */
+	function codepointOffset(position:BufferPosition):Int {
+		var offset = 0;
+		for (index in 0...position.line) offset += codepointCountOf(lines[index]) + 1;
+		return offset + codepointCountOf(lines[position.line].substring(0, position.column));
+	}
+
+	/** Converts a codepoint offset into `document` back to a line/column position. */
+	function positionFromCodepointOffset(offset:Int):BufferPosition {
+		var remaining = offset < 0 ? 0 : offset;
+		for (lineIndex in 0...lines.length) {
+			var count = codepointCountOf(lines[lineIndex]);
+			if (remaining <= count) return sanitize(new BufferPosition(lineIndex, codepointIndexToColumn(lines[lineIndex], remaining)));
+			remaining -= count + 1;
+		}
+		return endPosition();
+	}
+
+	static function codepointCountOf(value:String):Int {
+		var count = 0, index = 0;
+		while (index < value.length) {
+			var code = value.charCodeAt(index);
+			index += isHighSurrogate(code) && index + 1 < value.length && isLowSurrogate(value.charCodeAt(index + 1)) ? 2 : 1;
+			count++;
+		}
+		return count;
+	}
+
+	static function codepointIndexToColumn(value:String, codepointIndex:Int):Int {
+		var column = 0, count = 0;
+		while (count < codepointIndex && column < value.length) {
+			var code = value.charCodeAt(column);
+			column += isHighSurrogate(code) && column + 1 < value.length && isLowSurrogate(value.charCodeAt(column + 1)) ? 2 : 1;
+			count++;
+		}
+		return column;
 	}
 
 	function advance(start:BufferPosition, value:String):BufferPosition {

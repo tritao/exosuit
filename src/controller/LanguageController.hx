@@ -2,11 +2,11 @@ package controller;
 
 import command.CommandContext;
 import command.CommandRegistry;
+import core.WorkbenchHost;
 import editor.BufferPosition;
 import editor.Document;
 import language.LanguageServiceClient;
 import process.ProcessManager;
-import view.RootView;
 import workspace.Workspace;
 
 /** User-facing ownership and commands for the optional Haxeon language server. */
@@ -16,7 +16,7 @@ class LanguageController {
 	public var client(default, null):Null<LanguageServiceClient>;
 
 	final workspace:Workspace;
-	final root:RootView;
+	final root:WorkbenchHost;
 	final context:CommandContext;
 	final commands:CommandRegistry;
 	final processes:ProcessManager;
@@ -25,7 +25,7 @@ class LanguageController {
 	final reportError:(String, String)->Void;
 	var diagnosticFingerprint:String = "";
 
-	public function new(workspace:Workspace, root:RootView, context:CommandContext, commands:CommandRegistry, processes:ProcessManager,
+	public function new(workspace:Workspace, root:WorkbenchHost, context:CommandContext, commands:CommandRegistry, processes:ProcessManager,
 			executable:String, reportError:(String, String)->Void, ?arguments:Array<String>) {
 		this.workspace = workspace;
 		this.root = root;
@@ -64,8 +64,8 @@ class LanguageController {
 		service.stop(Sys.time());
 		client = null;
 		diagnosticFingerprint = "";
-		root.pluginDecorations.removeOwner(OWNER);
-		root.problems.removeOwner(OWNER);
+		root.getPluginDecorations().removeOwner(OWNER);
+		root.getProblems().removeOwner(OWNER);
 	}
 
 	public function shutdown():Void
@@ -85,7 +85,7 @@ class LanguageController {
 		if (service == null || view == null || document == null) return;
 		service.requestHover(document, new BufferPosition(view.cursorLine(), view.cursorColumn()), Sys.time(), value -> {
 			var area = root.textInputArea();
-			if (value != null && area != null && context.activeView() == view) root.languagePopup.openInformation(area, value);
+			if (value != null && area != null && context.activeView() == view) root.openLanguageInformation(area, value);
 		});
 	}
 
@@ -98,7 +98,7 @@ class LanguageController {
 			if (items.length == 0 || document.buffer.stateId != revision || context.activeView() != view) return;
 			var area = root.textInputArea();
 			if (area == null) return;
-			root.languagePopup.openCompletion(area, items, function(item) {
+			root.openLanguageCompletion(area, items, function(item) {
 				if (document.buffer.stateId == revision && context.activeView() == view) {
 					view.replaceRange(from, position, item.insertText);
 					view.cursorChanged();
@@ -123,7 +123,7 @@ class LanguageController {
 		if (service == null || view == null || document == null) return;
 		service.requestSignatureHelp(document, new BufferPosition(view.cursorLine(), view.cursorColumn()), Sys.time(), value -> {
 			var area = root.textInputArea();
-			if (value != null && area != null && context.activeView() == view) root.languagePopup.openSignature(area, value);
+			if (value != null && area != null && context.activeView() == view) root.openLanguageSignature(area, value);
 		});
 	}
 
@@ -136,17 +136,17 @@ class LanguageController {
 		var fingerprint = parts.join("\n");
 		if (fingerprint == diagnosticFingerprint) return;
 		diagnosticFingerprint = fingerprint;
-		root.pluginDecorations.removeOwner(OWNER);
-		root.problems.removeOwner(OWNER);
+		var problems = root.getProblems(), decorations = root.getPluginDecorations(), errorColor = root.getTheme().error;
+		decorations.removeOwner(OWNER);
+		problems.removeOwner(OWNER);
 		for (document in workspace.documents.documents) {
 			var values = service.diagnosticsFor(document);
 			for (index in 0...values.length) {
 				var value = values[index];
-				if (document.path != null) root.problems.add(new feedback.Problem(OWNER, document.id + ":" + index, document.path,
+				if (document.path != null) problems.add(new feedback.Problem(OWNER, document.id + ":" + index, document.path,
 					value.from.line, value.from.column, value.to.column, value.message, value.severity));
 				if (value.from.line != value.to.line || value.to.column <= value.from.column) continue;
-				root.pluginDecorations.add(OWNER, document.id + ":" + index, document, value.from.line, value.from.column, value.to.column,
-					root.theme.error);
+				decorations.add(OWNER, document.id + ":" + index, document, value.from.line, value.from.column, value.to.column, errorColor);
 			}
 		}
 	}

@@ -1,6 +1,5 @@
 package view;
 
-import renderer.Renderer;
 import style.Theme;
 import search.SearchMatch;
 
@@ -49,7 +48,7 @@ class SearchSidebar {
 		return active();
 	}
 
-	public function draw(renderer:Renderer, theme:Theme, height:Int):Void {
+	public function draw(renderer:renderer.Renderer, theme:Theme, height:Int):Void {
 		renderer.clip(0, 0, width, height);
 		renderer.rect(0, 0, width, height, theme.surface);
 		var state = !complete ? " searching" : capped ? " capped" : errorCount > 0 ? ' $errorCount errors' : "";

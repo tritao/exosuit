@@ -1,6 +1,5 @@
 package view;
 
-import renderer.Renderer;
 import style.Theme;
 
 class ContextMenu {
@@ -38,7 +37,7 @@ class ContextMenu {
 		return true;
 	}
 
-	public function draw(renderer:Renderer, theme:Theme):Void {
+	public function draw(renderer:renderer.Renderer, theme:Theme):Void {
 		if (!visible) return;
 		var height = items.length * ROW_HEIGHT;
 		renderer.rect(x - 1, y - 1, WIDTH + 2, height + 2, theme.border);

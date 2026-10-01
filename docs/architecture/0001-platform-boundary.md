@@ -1,6 +1,15 @@
 # ADR 0001: Own the platform API and adapt Pragtical's native backend
 
-Status: accepted
+Status: superseded
+
+Superseded by: [0002-nativekit-uikit-host.md](0002-nativekit-uikit-host.md)
+
+**Supersession note:** This decision established the layered architecture
+(custom platform ABI, opaque handles, pull-based events) that the headless
+core still uses. However, the graphical layer now relies on NativeKit's
+`DesktopUiHost` instead of a custom SDL loop, and UIKit instead of a
+Pragtical-adapted renderer. The core principles (opaque resources, clean
+boundary) remain; the implementation moved to an off-the-shelf host.
 
 ## Decision
 

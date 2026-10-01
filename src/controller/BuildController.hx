@@ -8,12 +8,11 @@ import command.CommandContext;
 import command.CommandRegistry;
 import commandview.CommandViewEntry;
 import commandview.CommandViewProvider;
+import core.WorkbenchHost;
 import process.OwnedProcess;
 import process.ProcessManager;
 import sys.FileSystem;
 import sys.io.File;
-import view.BuildOutputView;
-import view.RootView;
 import view.View;
 import workspace.Project;
 import workspace.Workspace;
@@ -24,14 +23,14 @@ class BuildController {
 	public var active(default, null):Null<OwnedProcess>;
 
 	final workspace:Workspace;
-	final root:RootView;
+	final root:WorkbenchHost;
 	final context:CommandContext;
 	final processes:ProcessManager;
 	final openDocument:String->View;
 	final reportError:(String, String)->Void;
 	var emptyDrains:Int = 0;
 
-	public function new(workspace:Workspace, root:RootView, context:CommandContext, commands:CommandRegistry, processes:ProcessManager,
+	public function new(workspace:Workspace, root:WorkbenchHost, context:CommandContext, commands:CommandRegistry, processes:ProcessManager,
 			openDocument:String->View, reportError:(String, String)->Void) {
 		this.workspace = workspace;
 		this.root = root;
@@ -39,6 +38,7 @@ class BuildController {
 		this.processes = processes;
 		this.openDocument = openDocument;
 		this.reportError = reportError;
+		root.setBuildDiagnosticHandler(activateDiagnostic);
 		commands.add("build:run-task", context -> openTaskPicker(), context -> workspace.activeProject != null);
 		commands.add("build:cancel-task", context -> cancel(), context -> active != null);
 	}
@@ -50,8 +50,8 @@ class BuildController {
 		var tasks = loadTasks(project);
 		if (tasks.length == 0) return false;
 		var entries = [for (index in 0...tasks.length) new CommandViewEntry(tasks[index].name, tasks[index].executable, Std.string(index))];
-		root.commandView.open(new CommandViewProvider("Run Task: ", entries, function(query) {}, function(entry, query, backwards) {
-			root.commandView.close();
+		root.openCommandView(new CommandViewProvider("Run Task: ", entries, function(query) {}, function(entry, query, backwards) {
+			root.closeCommandView();
 			if (entry == null) return;
 			var index = Std.parseInt(entry.value);
 			if (index >= 0 && index < tasks.length) run(project, tasks[index]);
@@ -70,7 +70,7 @@ class BuildController {
 		try {
 			cwd = workspace.fileSystem.normalize(cwd);
 			output.reset(cwd);
-			root.problems.removeOwner(PROBLEM_OWNER);
+			root.getProblems().removeOwner(PROBLEM_OWNER);
 			output.append('Running ${task.name}: ${task.executable}\n');
 			active = processes.start(task.executable, task.arguments, cwd, task.environment);
 		} catch (error:Dynamic) {
@@ -80,9 +80,7 @@ class BuildController {
 			return false;
 		}
 		emptyDrains = 0;
-		var view = new BuildOutputView(output, root.renderer, root.theme, root.activeLeaf.width, root.activeLeaf.height, activateDiagnostic);
-		view.setTitle("Build: " + task.name);
-		root.openAuxiliary(view);
+		root.showBuildOutput("Build: " + task.name, output);
 		return true;
 	}
 
@@ -109,10 +107,11 @@ class BuildController {
 	}
 
 	function syncProblems():Void {
-		root.problems.removeOwner(PROBLEM_OWNER);
+		var problems = root.getProblems();
+		problems.removeOwner(PROBLEM_OWNER);
 		for (index in 0...output.lines.length) {
 			var line = output.lines[index], diagnostic = line.diagnostic;
-			if (diagnostic != null) root.problems.add(new feedback.Problem(PROBLEM_OWNER, Std.string(index), diagnostic.path,
+			if (diagnostic != null) problems.add(new feedback.Problem(PROBLEM_OWNER, Std.string(index), diagnostic.path,
 				diagnostic.line, diagnostic.column, diagnostic.column + 1, line.text, 1));
 		}
 	}
