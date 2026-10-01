@@ -5,9 +5,12 @@ import platform.Native;
 class ProcessManager {
 	final owned:Array<OwnedProcess> = [];
 
-	public function new() {}
+	public final available:Bool;
+
+	public function new(available:Bool = true) this.available = available;
 
 	public function start(executable:String, arguments:Array<String>, cwd:String = "", ?environment:Map<String, String>):OwnedProcess {
+		if (!available) throw "Processes are unavailable on this host";
 		var id = Native.process_create(executable, cwd);
 		if (id == 0) throw Native.last_error();
 		var process = new OwnedProcess(id), configured = true;

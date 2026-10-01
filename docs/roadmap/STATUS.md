@@ -11,11 +11,13 @@ Last updated: 2026-10-01.
   stage; bootstrap converges and rebuilds identically.
 - **M8 accepted on Linux:** restored composed CI exits 0 after b76554b, and
   the changed graphical entry point builds in self-hosted mode as well.
-- Active task: **M15.1**, typed host capabilities and browser-safe boundaries.
-- Exact resume: introduce the capability-restricted application test and hide
-  unavailable process/LSP/source-plugin commands and panels; inspect the shared
-  web pipeline before implementing M15.2. Emscripten is installed under
-  nativekit/.tools/emsdk and google-chrome is available.
+- Active task: **M15.1/M15.2**, browser boundary and build. Typed capability
+  policy is delivered; guest import qualification and the browser pipeline remain.
+- Exact resume: adapt the shared web pipeline, add the browser entry and native
+  host, and compile the guest to identify remaining host-only imports. Reuse
+  typed capabilities; isolate the source-plugin compiler/thread implementation
+  behind a host service if it enters the browser graph. Emscripten and Chrome
+  are available; do not classify them as unavailable without attempting them.
 - All further graphical tests must use disposable PRAGTICAL_PORTABLE state.
   IME, physical mixed-DPI transitions, Windows and macOS remain unclaimed.
 - HEADs at planning: exosuit `ae2f260` (`haxeon-uikit-port`). Materia `main` is at
@@ -57,6 +59,61 @@ Last updated: 2026-10-01.
 | M15 | Active: M15.1 | Depends on M8.1, M8.2; scheduled right after M8. Reference: materia `app/web` at `816372dd`, Haxeon `fba71015` |
 
 ## Implementation records
+
+### M15.1 — typed host capability policy (verified slice)
+
+- M8 composed CI restoration committed as exosuit 84c2dac. This slice adds an
+  immutable typed HostCapability/HostCapabilities query (clipboard, filesystem,
+  processes, threads, IPC, terminal, language services, URL, source plugins).
+  Desktop advertises delivered services; IPC/terminal remain false until their
+  milestones. Browser policy enables session filesystem/URL with optional
+  clipboard and omits process/thread/source-plugin services.
+- Application passes policy to controllers. Unavailable build/LSP/source-plugin
+  commands are absent; clipboard commands and bindings are omitted. Process
+  start is guarded before native allocation; deliberate direct controller calls
+  return false with visible feedback. Restricted plugin managers do not install
+  the host callback. UIKit omits Build Output when processes are unavailable.
+- Host-capabilities test proves editing/undo, immutable constructor ownership,
+  service prerequisites, absent commands, clear feedback and no owned child or
+  plugin resources. Registered in test.sh with disposable portable state.
+- Both ./scripts/test.sh and ./scripts/build.sh pass in reference and explicit
+  self-hosted modes after these changes; graphical builds compile 987 sources.
+  Logs /tmp/exosuit-test-capabilities-reference.log,
+  /tmp/exosuit-build-capabilities-reference.log,
+  /tmp/exosuit-test-capabilities-self.log,
+  /tmp/exosuit-build-capabilities-self.log. Focused original test exits 0:
+  /tmp/exosuit-capabilities-focused-fixed.log.
+- Actual LSP, UIKit edit/task/plugin-reload route and unpacked release all exit 0:
+  /tmp/exosuit-capabilities-real-lsp.log, /tmp/exosuit-capabilities-window.log,
+  /tmp/exosuit-capabilities-release.log. Package pins the compiler correction
+  below. Diff and shell syntax checks pass; no sibling dirt was staged.
+- Browser guest/native host do not exist yet; no browser execution is claimed.
+  Continue M15.2 using the shared pipeline, qualifying M15.1's import boundary.
+
+### M15.1 compiler issue — array enum lookup context and representation
+
+- Haxeon 39c27f9a fixes Array.indexOf/contains argument typing: supply the known
+  element type just as push/remove do. The unmodified capability query passed
+  local reference Haxe, while the independent reducer failed E1005 before the
+  correction (/tmp/haxeon-array-lookup-before.log). Runtime probing then exposed
+  separately allocated nullary constructors being missed by reference lookup.
+- Shared IR lowering scans nullary enum variants by constructor index, retaining
+  reference lookup for payload constructors and null. It preserves first-match
+  order and nullable arrays, and uses the same CFG on native/Wasm backends.
+  Reference Haxe/HL confirms distinct Value(7) instances do not match, but a
+  retained instance does. No permissive assignability or application rewrite.
+- Registered ArrayLookupContextMain covers contextual bare constructors,
+  conflicting imports, unrelated enum rejection, cold/incremental builds and
+  restoration. Registered array-enum-lookup covers duplicate nullary instances,
+  payload identity, nulls, empty arrays and actual execution.
+- Full compiler gate exits 0: 377/377 and all native/C++/integration stages;
+  245 Wasm parity fixtures (12 pre-existing skips), Wasmtime. Bootstrap converges
+  after one stage and --self rebuilds identically; refreshed artifacts committed.
+  Logs /tmp/haxeon-gate-array-enum-lookup.log,
+  /tmp/haxeon-bootstrap-array-enum-lookup.log,
+  /tmp/haxeon-bootstrap-self-array-enum-lookup.log. Original editor capability
+  test and both complete editor mode gates pass after the fix.
+
 
 ### M8.3 — restored composed CI (accepted)
 

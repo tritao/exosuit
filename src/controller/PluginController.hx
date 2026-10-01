@@ -17,6 +17,7 @@ import syntax.SyntaxRegistry;
 import process.ProcessManager;
 
 class PluginController {
+	public final available:Bool;
 	public final manager:PluginManager;
 
 	final root:WorkbenchHost;
@@ -25,17 +26,19 @@ class PluginController {
 
 	public function new(commands:CommandRegistry, keymap:Keymap, context:CommandContext, syntaxes:SyntaxRegistry,
 		completions:CompletionRegistry, panels:PluginPanelRegistry, jobs:JobScheduler, settings:Void->Settings, root:WorkbenchHost,
-		processes:ProcessManager, reportError:(String, String)->Void, reportInformation:String->Void) {
+		processes:ProcessManager, reportError:(String, String)->Void, reportInformation:String->Void, available:Bool = true) {
+		this.available = available;
 		this.root = root;
 		this.reportError = reportError;
 		this.reportInformation = reportInformation;
 		manager = new PluginManager(commands, keymap, context, syntaxes, completions, panels, root.getPluginDecorations(),
 			root.getPluginStatusItems(), jobs, processes, settings,
-			message -> reportError("plugin", message));
-		installCommands(commands);
+			message -> reportError("plugin", message), available);
+		if (available) installCommands(commands);
 	}
 
 	public function loadManifest(path:String):Bool {
+		if (!available) { reportError("plugin", "Source plugins are unavailable on this host"); return false; }
 		try {
 			return manager.load(new DynamicPlugin(new PluginManifest(path)));
 		} catch (error:Dynamic) {

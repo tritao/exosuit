@@ -27,7 +27,7 @@ class PluginManager {
 
 	public function new(commands:CommandRegistry, keymap:Keymap, commandContext:CommandContext, syntaxes:SyntaxRegistry,
 			completions:CompletionRegistry, panels:PluginPanelRegistry, decorations:PluginDecorationRegistry,
-			statusItems:PluginStatusRegistry, jobs:JobScheduler, processes:ProcessManager, settings:Void->Settings, ?reportDiagnostic:String->Void) {
+			statusItems:PluginStatusRegistry, jobs:JobScheduler, processes:ProcessManager, settings:Void->Settings, ?reportDiagnostic:String->Void, dynamicHost:Bool = true) {
 		this.commands = commands;
 		this.keymap = keymap;
 		this.commandContext = commandContext;
@@ -40,7 +40,7 @@ class PluginManager {
 		this.processes = processes;
 		this.settings = settings;
 		this.reportDiagnostic = reportDiagnostic == null ? function(message:String) {} : reportDiagnostic;
-		DynamicHostRouter.initialize();
+		if (dynamicHost) DynamicHostRouter.initialize();
 	}
 
 	public function load(plugin:Plugin):Bool {

@@ -41,6 +41,8 @@ import nativekit.ui.widgets.layout.Stack;
 import nativekit.ui.widgets.layout.StackChild;
 import nativekit.ui.widgets.text.Text;
 import core.Application;
+import platform.HostCapabilities;
+import platform.HostCapability;
 import feedback.NotificationKind;
 import ui.BuildOutputPanel;
 import ui.ProblemsPanel;
@@ -64,6 +66,7 @@ class ExosuitApp implements DesktopUiApplication {
 	public final ui:UiContext;
 	public final theme:Theme;
 	public final application:Application;
+	public final capabilities:HostCapabilities;
 	public final host:UiWorkbenchHost;
 	final desktop:Null<NativeDesktopServices>;
 	final hostContext:Null<DesktopUiHostContext>;
@@ -80,7 +83,8 @@ class ExosuitApp implements DesktopUiApplication {
 	static inline var STATUS_HEIGHT:Float = 26.0;
 
 	public function new(?fonts:FontCollection, ?theme:Theme, ?hostContext:DesktopUiHostContext,
-			?openPath:String) {
+			?openPath:String, ?capabilities:HostCapabilities) {
+		this.capabilities = capabilities == null ? HostCapabilities.desktop() : capabilities;
 		this.hostContext = hostContext;
 		this.theme = theme == null ? Theme.light() : theme;
 		ui = new UiContext(null, fonts, this.theme);
@@ -96,7 +100,7 @@ class ExosuitApp implements DesktopUiApplication {
 				activateBuild: function() dock.activate("build")
 			});
 			return capturedHost;
-		});
+		}, null, null, this.capabilities);
 		host = capturedHost;
 		installCommands();
 		application.session.start();
@@ -108,17 +112,20 @@ class ExosuitApp implements DesktopUiApplication {
 		model.register(new DockPanelDescriptor("explorer", "Explorer", false, true, IconName.FolderOpen));
 		model.register(new DockPanelDescriptor("editor", "Editor", false, true, IconName.NewFile));
 		model.register(new DockPanelDescriptor("problems", "Problems", true, true));
-		model.register(new DockPanelDescriptor("build", "Build Output", true, true, IconName.Terminal));
+		if (capabilities.supports(Processes))
+			model.register(new DockPanelDescriptor("build", "Build Output", true, true, IconName.Terminal));
 		dockPanelContents = [
 			new DockPanelContent("explorer", function(_) return explorerPanel()),
 			new DockPanelContent("editor", function(_) return editorPanel()),
-			new DockPanelContent("problems", function(_) return new ProblemsPanel(host)),
-			new DockPanelContent("build", function(_) return new BuildOutputPanel(host))
+			new DockPanelContent("problems", function(_) return new ProblemsPanel(host))
 		];
+		if (capabilities.supports(Processes))
+			dockPanelContents.push(new DockPanelContent("build", function(_) return new BuildOutputPanel(host)));
+		var bottom = capabilities.supports(Processes) ? DockNode.Tabs(["problems", "build"], "problems") : DockNode.Panel("problems");
 		var main = DockNode.Split(DockSplitAxis.Horizontal, 0.22,
 			DockNode.Panel("explorer"),
 			DockNode.Split(DockSplitAxis.Vertical, 0.72, DockNode.Panel("editor"),
-				DockNode.Tabs(["problems", "build"], "problems")));
+				bottom));
 		model.setDefaultLayout(main);
 		return model;
 	}

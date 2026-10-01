@@ -1,5 +1,7 @@
 package core;
 
+import platform.HostCapabilities;
+import platform.HostCapability;
 import command.CommandContext;
 import command.CommandRegistry;
 import command.EditorCommands;
@@ -44,6 +46,7 @@ import controller.LanguageController;
 import session.RecentProjects;
 
 class Application {
+	public final capabilities:HostCapabilities;
 	public final documents:DocumentManager;
 	public final workspace:Workspace;
 	public final fileOperations:FileOperations;
@@ -80,7 +83,8 @@ class Application {
 	public var quitReady(get, never):Bool;
 
 	public function new(hostFactory:(theme:Theme, focus:FocusManager, workspace:Workspace, settings:Settings)->WorkbenchHost,
-			?settings:SettingsService, ?recentProjects:RecentProjects) {
+			?settings:SettingsService, ?recentProjects:RecentProjects, ?capabilities:HostCapabilities) {
+		this.capabilities = capabilities == null ? HostCapabilities.desktop() : capabilities;
 		this.settings = settings == null ? new SettingsService() : settings;
 		syntaxes = new SyntaxRegistry();
 		BuiltinSyntax.install(syntaxes);
@@ -88,7 +92,7 @@ class Application {
 		completions.add("core", new DocumentWordCompletionProvider());
 		theme = new Theme();
 		workspace = new Workspace(syntaxes);
-		processes = new ProcessManager();
+		processes = new ProcessManager(this.capabilities.supports(Processes));
 		fileOperations = new FileOperations(workspace, new TrashService(ConfigurationPaths.trash(), workspace.fileSystem));
 		documents = workspace.documents;
 		focus = new FocusManager();
@@ -99,7 +103,7 @@ class Application {
 		commands = new CommandRegistry();
 		keymap = new Keymap(commands);
 		context = new CommandContext(root, focus, documents);
-		EditorCommands.install(commands, keymap);
+		EditorCommands.install(commands, keymap, this.capabilities.supports(Clipboard));
 		search = new SearchController(workspace, root, context, commands, keymap, confirmations, effectiveSettings, reportError,
 			reportInformation, ConfigurationPaths.replacementBackup());
 		searchOptions = search.options;
@@ -112,12 +116,12 @@ class Application {
 		files = new FileController(documents, workspace, fileOperations, root, context, commands, confirmations, recovery,
 			path -> { open(path); }, function() { newDocument(); }, function() { recovery.save(this); }, reportError, reportInformation);
 		pluginController = new PluginController(commands, keymap, context, syntaxes, completions, root.getPluginPanels(), workspace.jobs,
-			effectiveSettings, root, processes, reportError, reportInformation);
+			effectiveSettings, root, processes, reportError, reportInformation, this.capabilities.supports(SourcePlugins));
 		plugins = pluginController.manager;
 		workbench = new WorkbenchController(workspace, root, commands, keymap, context, completions, errors, search,
 			path -> { open(path); });
 		workbench.openPath = function(path) { openArgument(path); };
-		build = new BuildController(workspace, root, context, commands, processes, path -> open(path), reportError);
+		build = new BuildController(workspace, root, context, commands, processes, path -> open(path), reportError, this.capabilities.supports(Processes));
 		var languageServer = Sys.getEnv("HAXEON_LSP");
 		if (languageServer == null || languageServer.length == 0) {
 			var bundled = config.ApplicationPaths.bundledLanguageServer();
@@ -129,7 +133,7 @@ class Application {
 				languageServer = haxeonRoot + "/scripts/haxeon-lsp";
 			}
 		}
-		language = new LanguageController(workspace, root, context, commands, processes, languageServer, reportError);
+		language = new LanguageController(workspace, root, context, commands, processes, languageServer, reportError, null, this.capabilities.supports(LanguageServices));
 		root.configureWelcomeActions({
 			recentProjects: this.recentProjects.paths,
 			newFile: function() { newDocument(); },

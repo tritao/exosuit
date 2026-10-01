@@ -1,0 +1,9 @@
+{
+	"version": 1,
+	"package": { "name": "exosuit-host-capabilities-test" },
+	"entry": "app.HostCapabilitiesTestMain",
+	"sourceRoots": ["src"],
+	"dependencies": { "pragtical_hx": { "path": "../.." } },
+	"target": "host",
+	"outputDir": "build"
+}

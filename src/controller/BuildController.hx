@@ -19,6 +19,7 @@ import workspace.Workspace;
 
 class BuildController {
 	static inline final PROBLEM_OWNER = "build";
+	public final available:Bool;
 	public final output:BuildOutput = new BuildOutput();
 	public var active(default, null):Null<OwnedProcess>;
 
@@ -31,7 +32,8 @@ class BuildController {
 	var emptyDrains:Int = 0;
 
 	public function new(workspace:Workspace, root:WorkbenchHost, context:CommandContext, commands:CommandRegistry, processes:ProcessManager,
-			openDocument:String->View, reportError:(String, String)->Void) {
+			openDocument:String->View, reportError:(String, String)->Void, available:Bool = true) {
+		this.available = available && processes.available;
 		this.workspace = workspace;
 		this.root = root;
 		this.context = context;
@@ -39,12 +41,15 @@ class BuildController {
 		this.openDocument = openDocument;
 		this.reportError = reportError;
 		root.setBuildDiagnosticHandler(activateDiagnostic);
-		commands.add("build:run-task", context -> openTaskPicker(), context -> workspace.activeProject != null);
-		commands.add("build:cancel-task", context -> cancel(), context -> active != null);
+		if (this.available) {
+			commands.add("build:run-task", context -> openTaskPicker(), context -> workspace.activeProject != null);
+			commands.add("build:cancel-task", context -> cancel(), context -> active != null);
+		}
 	}
 
 	/** Reads project-defined tasks only after this deliberate user command. */
 	public function openTaskPicker():Bool {
+		if (!available) { reportError("build", "Build tasks are unavailable on this host"); return false; }
 		var project = workspace.activeProject;
 		if (project == null) return false;
 		var tasks = loadTasks(project);
@@ -60,6 +65,7 @@ class BuildController {
 	}
 
 	public function run(project:Project, task:BuildTask):Bool {
+		if (!available) { reportError("build", "Build tasks are unavailable on this host"); return false; }
 		var previous = active;
 		if (previous != null) {
 			previous.cancel();

@@ -29,7 +29,7 @@ guest compiler arguments from the manifest. Pragtical's `docs/web.md` and
   `@:hlNative` (`pragtical_hx`) code remains after M8.1, migrate it, or keep it
   behind a host-only interface that the browser build replaces. The browser
   host provides no processes, PTY, local IPC, SQLite or threads.
-- [ ] Add a typed capability query (clipboard, filesystem, processes,
+- [x] Add a typed capability query (clipboard, filesystem, processes,
   threads, local IPC, terminal, language services, url). Hide or disable
   commands, panels and sidebar modes whose capability is missing; never let
   them throw at use time. The reference app shows the pattern:

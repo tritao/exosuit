@@ -4,7 +4,7 @@ import platform.Platform;
 import view.LayoutKind;
 
 class EditorCommands {
-	public static function install(registry:CommandRegistry, keymap:Keymap):Void {
+	public static function install(registry:CommandRegistry, keymap:Keymap, clipboard:Bool = true):Void {
 		registry.add("doc:save", context -> context.requireDocument().save(), hasDocument);
 		registry.add("doc:undo", context -> context.requireView().undo(), hasDocument);
 		registry.add("doc:redo", context -> context.requireView().redo(), hasDocument);
@@ -13,9 +13,11 @@ class EditorCommands {
 		registry.add("doc:delete", context -> context.requireView().deleteForward(), hasDocument);
 		registry.add("doc:newline", context -> context.requireView().textInput("\n"), hasDocument);
 		registry.add("doc:indent", context -> context.requireView().textInput("\t"), hasDocument);
-		registry.add("doc:copy", context -> context.requireView().copy(), hasDocument);
-		registry.add("doc:cut", context -> context.requireView().cut(), hasDocument);
-		registry.add("doc:paste", context -> context.requireView().paste(), hasDocument);
+		if (clipboard) {
+			registry.add("doc:copy", context -> context.requireView().copy(), hasDocument);
+			registry.add("doc:cut", context -> context.requireView().cut(), hasDocument);
+			registry.add("doc:paste", context -> context.requireView().paste(), hasDocument);
+		}
 		registry.add("doc:move-to-previous-char", context -> context.requireView().moveHorizontal(-1, false), hasDocument);
 		registry.add("doc:move-to-next-char", context -> context.requireView().moveHorizontal(1, false), hasDocument);
 		registry.add("doc:move-to-previous-line", context -> context.requireView().moveVertical(-1, false), hasDocument);
@@ -73,9 +75,11 @@ class EditorCommands {
 		keymap.addDirect(Platform.KEY_BACKSPACE, Platform.MOD_SHIFT, ["doc:backspace"]);
 		keymap.addDirect(Platform.KEY_DELETE, 0, ["doc:delete"]);
 		keymap.addDirect(Platform.KEY_DELETE, Platform.MOD_SHIFT, ["doc:delete"]);
-		keymap.addDirect(Platform.KEY_C, Platform.MOD_CTRL, ["doc:copy"]);
-		keymap.addDirect(Platform.KEY_X, Platform.MOD_CTRL, ["doc:cut"]);
-		keymap.addDirect(Platform.KEY_V, Platform.MOD_CTRL, ["doc:paste"]);
+		if (clipboard) {
+			keymap.addDirect(Platform.KEY_C, Platform.MOD_CTRL, ["doc:copy"]);
+			keymap.addDirect(Platform.KEY_X, Platform.MOD_CTRL, ["doc:cut"]);
+			keymap.addDirect(Platform.KEY_V, Platform.MOD_CTRL, ["doc:paste"]);
+		}
 		bindMovement(keymap, Platform.KEY_LEFT, "previous-char");
 		bindMovement(keymap, Platform.KEY_RIGHT, "next-char");
 		bindMovement(keymap, Platform.KEY_UP, "previous-line");

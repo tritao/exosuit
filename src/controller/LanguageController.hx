@@ -13,6 +13,7 @@ import workspace.Workspace;
 class LanguageController {
 	static inline final OWNER = "language:haxeon";
 
+	public final available:Bool;
 	public var client(default, null):Null<LanguageServiceClient>;
 
 	final workspace:Workspace;
@@ -26,7 +27,8 @@ class LanguageController {
 	var diagnosticFingerprint:String = "";
 
 	public function new(workspace:Workspace, root:WorkbenchHost, context:CommandContext, commands:CommandRegistry, processes:ProcessManager,
-			executable:String, reportError:(String, String)->Void, ?arguments:Array<String>) {
+			executable:String, reportError:(String, String)->Void, ?arguments:Array<String>, available:Bool = true) {
+		this.available = available && processes.available;
 		this.workspace = workspace;
 		this.root = root;
 		this.context = context;
@@ -35,10 +37,11 @@ class LanguageController {
 		this.executable = executable;
 		this.arguments = arguments == null ? [] : arguments.copy();
 		this.reportError = reportError;
-		installCommands();
+		if (this.available) installCommands();
 	}
 
 	public function start():Bool {
+		if (!available) { reportError("language", "Language services are unavailable on this host"); return false; }
 		if (client != null) return true;
 		var project = workspace.activeProject;
 		if (project == null) {
