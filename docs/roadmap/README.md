@@ -64,7 +64,7 @@ onto Haxeon, NativeKit and UIKit; Lua code is not reused.
 | M11 | [Native foundations](11-native-foundations.md) | M8 | PTY, hardened local IPC, SQLite, emulator |
 | M12 | [Terminal](12-terminal.md) | M9, M11.1, M11.4 | Integrated terminal |
 | M13 | [Control plane](13-control-plane.md) | M11.2 | `exosuit-ctl` and launch forwarding |
-| M14 | [Workbench](14-workbench.md) | M11–M13 | Workspaces, terminals, agent supervision |
+| M14 | [Workbench](14-workbench.md) | M11–M13 | Workspaces, terminals, Claude Code agent supervision |
 | M15 | [Web target](15-web.md) | M8.1, M8.2 | Browser build with capability guards |
 
 Ready-work order: M8 → M15 → M9 → M10 → M11 → M13 → M12 → M14. The web
@@ -83,7 +83,8 @@ Decisions taken by default (record any override in STATUS):
   keeps its own storage and runtime directories.
 - Vendor SQLite and libtsm (`tritao/libtsm@7b1de2d`). Before vendoring,
   confirm both licenses and record the notices in packaging.
-- Opt-in tests that need external CLIs (Codex, opencode, Chromium) record
+- Claude Code is the first agent provider; Codex and opencode are deferred.
+- Opt-in tests that need external CLIs (Claude Code, Chromium) record
   "pending" when the tool is absent. They are never skipped silently.
 
 Still out of scope: SCM/diff UI, debugger UI, and Lua plugin compatibility.

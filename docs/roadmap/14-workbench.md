@@ -60,22 +60,50 @@ covered. Pragtical's client must interoperate with `exosuit-agent`.
 
 ## M14.4 — Providers, policy and supervision
 
+Claude Code is the primary agent provider. Pragtical has no Claude provider,
+so this one is new. Port the CLI-in-a-PTY pattern from Pragtical's
+`provider/agent_cli.lua` (written for Codex). Before implementing, check the
+flags against `claude --help` for the installed version (2.1.286 at planning).
+
 - [ ] Provider registry with the lifecycle contract (available, create,
   attach, recover, start, stop, restart, send_input, action, refresh_status,
-  capabilities, shutdown). Built-in providers are `shell`, `codex` (CLI in a
-  PTY with model, sandbox, approval and profile mapping) and `opencode`
-  (HTTP+SSE, optionally a managed `opencode serve`, reattach by
-  `external_session_id`).
-- [ ] Policy: approval, sandbox and per-permission deny/prompt/allow, merged
-  with runtime overrides and mapped per provider.
+  capabilities, shutdown). Ship `shell` and `claude`.
+- [ ] `claude` provider: run the interactive `claude` CLI in a PTY so the
+  user can watch and take over in the terminal view. `TERM=xterm-256color`,
+  scrollback 10000, and cwd is the task's project directory.
+  - Create generates a UUID, passes it with `--session-id`, and stores it as
+    `external_session_id`. Recover and restart use `--resume <id>`, so the
+    conversation survives agent or editor restarts.
+  - Map `--model`, `--add-dir`, `--allowedTools` and an initial prompt from
+    the resource config.
+  - Status comes from Claude Code hooks, not screen-scraping. Pass a
+    per-runtime `--settings` file whose hooks (session start, prompt submit,
+    stop, notification or permission request) run
+    `exosuit-ctl workbench agent event <runtime> <kind>`. This reports
+    working, idle, needs-permission and completed states to the agent, and
+    `agent.wait` relies on it. If the hook command fails or is missing, fall
+    back to process state only and surface a degraded-status warning.
+- [ ] Policy mapping for `claude`. Approval `prompt` maps to
+  `--permission-mode manual`. `auto` maps to `acceptEdits`, or to `auto` when
+  the policy also allows process execution. Sandbox `read-only` maps to
+  `plan`. `bypassPermissions` only applies with sandbox `full` and every
+  permission `allow`, and the UI requires explicit confirmation for it.
+  Merge per-runtime overrides as Pragtical's `policy.lua` does.
 - [ ] Supervision commands: `agent.list/status/create/prompt/read/stop/restart/
-  delete/wait`. `read` uses a durable `read_offset`, and `wait` is held by the
-  daemon. Expose them as `exosuit-ctl workbench ...` (M13.3) and in the UI.
+  delete/wait`. `prompt` starts the runtime if needed, otherwise it sends the
+  prompt as PTY input. `read` uses a durable `read_offset`, and `wait` is held
+  by the daemon until the hooks report a terminal state. Expose them as
+  `exosuit-ctl workbench ...` (M13.3) and in the UI, including a
+  "New Claude Code agent" command.
+- [ ] Follow-on providers, out of scope for M14 unless separately scheduled:
+  `codex`, a port of Pragtical's provider, and `opencode` (HTTP+SSE).
 
-Acceptance: fake-provider tests cover the lifecycle, recovery and policy
-mapping, and the HTTP/SSE parser handles chunked bodies, SSE and deadlines.
-Real Codex and opencode runs are opt-in and recorded as pending when the CLIs
-are unavailable.
+Acceptance: a fake `claude` executable on `PATH` records its argv and emits
+scripted output plus hook invocations. The tests built on it cover create,
+resume after an agent restart, policy-to-flag mapping, hook-driven status, a
+`wait` timeout, and a missing hook. A real Claude Code run is opt-in: create,
+prompt, wait, read, restart with resume. Record it as pending when `claude`
+is unavailable or not authenticated.
 
 ## M14.5 — Sakura import
 
