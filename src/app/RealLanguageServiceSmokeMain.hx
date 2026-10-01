@@ -24,7 +24,7 @@ class RealLanguageServiceSmokeMain {
 	static function main():Int {
 		Platform.startHeadless();
 		var arguments = Sys.args(), project = arguments[1], source = project + "/Main.hx";
-		File.saveContent(source, "function main():Int return 42;\n");
+		File.saveContent(source, "function main():Int return 1;\n");
 		var syntaxes = new SyntaxRegistry();
 		BuiltinSyntax.install(syntaxes);
 		var documents = new DocumentManager(syntaxes), document = documents.open(source), processes = new ProcessManager(),
@@ -36,6 +36,7 @@ class RealLanguageServiceSmokeMain {
 		pump(client, () -> client.diagnosticsFor(document).length > 0, 30.0);
 		document.buffer.replaceAllText("function main():Int return 42;\n", selection);
 		pump(client, () -> client.diagnosticsFor(document).length == 0, 30.0);
+		require(document.save() && File.getContent(source) == document.buffer.text, "fixed language-service document did not save");
 		client.stop(Sys.time());
 		pump(client, () -> client.status == "stopped", 5.0);
 		processes.shutdown();

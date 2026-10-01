@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "package": { "name": "exosuit-real-language-service-smoke" },
+  "entry": "app.RealLanguageServiceSmokeMain",
+  "sourceRoots": ["src"],
+  "dependencies": { "pragtical_hx": { "path": "../.." } },
+  "target": "host",
+  "outputDir": "build"
+}

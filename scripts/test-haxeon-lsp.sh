@@ -2,35 +2,37 @@
 set -euo pipefail
 
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-haxeon_root=${HAXEON_ROOT:-"$root_dir/../realtime-haxe"}
+haxeon_root=${HAXEON_ROOT:-"$root_dir/../haxeon"}
+haxeon=${HAXEON_BIN:-"$haxeon_root/scripts/haxeon"}
 language_server=${HAXEON_LSP:-"$haxeon_root/scripts/haxeon-lsp"}
-smoke_dir=$(mktemp -d)
-trap 'rm -rf "$smoke_dir"' EXIT
+smoke_dir=$(mktemp -d "${TMPDIR:-/tmp}/exosuit-real-lsp.XXXXXX")
+trap 'rm -rf -- "$smoke_dir"' EXIT
+compiler_mode=()
+if [[ ${HAXEON_SELF_HOSTED:-0} == 1 ]]; then
+    compiler_mode+=(--self-hosted)
+fi
 
-"$root_dir/scripts/build.sh"
+cat > "$smoke_dir/haxeon.json" <<'JSON'
+{
+  "version": 1,
+  "package": { "name": "real-language-service-fixture" },
+  "entry": "Main",
+  "sourceRoots": ["."],
+  "scopeSourceRoots": false,
+  "target": "host",
+  "outputDir": "build"
+}
+JSON
 
-mapfile -t sources < <(find "$root_dir/src" -type f -name '*.hx' -print | LC_ALL=C sort)
-mapfile -t stdlib_sources < <(find "$haxeon_root/stdlib" -type f -name '*.hx' -print | LC_ALL=C sort)
-mapfile -t compiler_sources < <(find "$haxeon_root/src/compiler" "$haxeon_root/src/runtime" -type f -name '*.hx' -print | LC_ALL=C sort)
-
-"$root_dir/scripts/haxeon-compile.sh" \
-	--output="$root_dir/out/real-language-service-smoke.hl" --entry=app.RealLanguageServiceSmokeMain \
-	--root="$root_dir/src" --root="$haxeon_root/src" --root="$haxeon_root/stdlib" \
-	"${sources[@]}" "${compiler_sources[@]}" "${stdlib_sources[@]}"
-
-LD_LIBRARY_PATH="$root_dir/out:$haxeon_root/out:$haxeon_root/vendor/hashlink${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-	"$haxeon_root/vendor/hashlink/hl" "$root_dir/out/real-language-service-smoke.hl" "$language_server" "$smoke_dir"
-
-"$root_dir/scripts/haxeon-compile.sh" \
-	--output="$smoke_dir/Main.hl" --entry=Main --root="$smoke_dir" --root="$haxeon_root/stdlib" \
-	"$smoke_dir/Main.hx" "${stdlib_sources[@]}"
+"$haxeon" run --project "$root_dir/tests/real-language-service-smoke/haxeon.json" \
+    "${compiler_mode[@]}" -- "$language_server" "$smoke_dir"
+"$haxeon" build --project "$smoke_dir/haxeon.json" "${compiler_mode[@]}"
 set +e
-LD_LIBRARY_PATH="$haxeon_root/out:$haxeon_root/vendor/hashlink${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-	"$haxeon_root/vendor/hashlink/hl" "$smoke_dir/Main.hl"
+"$haxeon" run --project "$smoke_dir/haxeon.json" "${compiler_mode[@]}"
 status=$?
 set -e
 if [[ $status -ne 42 ]]; then
-	echo "fixed language-service fixture exited with $status, expected 42" >&2
-	exit 1
+    echo "fixed language-service fixture exited with $status, expected 42" >&2
+    exit 1
 fi
-echo "PASS: fixed source built and executed after the real language-service cycle"
+echo "PASS: real language-service edit, diagnose, fix, save, build and execution"
