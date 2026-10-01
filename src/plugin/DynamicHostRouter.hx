@@ -13,15 +13,13 @@ class DynamicHostRouter {
 	static inline final ADD_STATUS_ITEM = 7;
 	static inline final SET_STATUS_ITEM_TEXT = 8;
 	static inline final ADD_DECORATION = 9;
-	static var installed:Bool = false;
 	static var nextToken:Int = 1;
 	static var registrations:Map<Int, DynamicHostRegistration> = [];
 	static var activating:Null<DynamicHostRegistration>;
 
 	public static function initialize():Void {
-		if (installed) return;
+		// The native facade replaces and retires retained callbacks, including after shutdown.
 		Native.plugin_api_install(dispatch);
-		installed = true;
 	}
 
 	public static function begin(context:PluginContext, plugin:DynamicPlugin):Void {
@@ -37,6 +35,14 @@ class DynamicHostRouter {
 		activating = null;
 
 	static function dispatch(operation:Int, token:String, a:String, b:String, c:String):String {
+		try {
+			return "ok:" + dispatchCall(operation, token, a, b, c);
+		} catch (error:Dynamic) {
+			return "error:" + Std.string(error);
+		}
+	}
+
+	static function dispatchCall(operation:Int, token:String, a:String, b:String, c:String):String {
 		if (operation == CONNECT) {
 			var registration = activating;
 			if (registration == null || registration.context.id != a) throw 'plugin "$a" is not being activated';

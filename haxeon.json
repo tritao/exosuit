@@ -17,6 +17,9 @@
 		},
 		"editorkit": {
 			"path": "../editorkit"
+		},
+		"haxeon-compiler": {
+			"path": "../haxeon/embed"
 		}
 	},
 	"native": {

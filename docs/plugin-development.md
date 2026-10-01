@@ -12,7 +12,7 @@ directly with `--plugin=/absolute/path/plugin.conf`, or discovered by adding its
 parent directory to the colon-separated `PRAGTICAL_PLUGIN_DIRS` environment
 variable.
 
-A version-1 manifest declares `manifestVersion=1`, `apiVersion=1`, a stable plugin
+A version-1 manifest declares `manifestVersion=1`, `apiVersion=2`, a stable plugin
 ID and semantic plugin version, an entry module and its sources. Commands and
 syntax contributions are data in the manifest; host capabilities are accessed by
 importing `pragtical.Editor`. See `plugins/example/` for the complete lifecycle and
@@ -28,3 +28,8 @@ The dynamically supplied SDK currently guarantees `pragtical.Editor` and the
 language/runtime primitives used by the example. Release inputs and the bundled
 Haxeon language service are revision-pinned; dynamic plugin compilation remains
 limited to this deliberately exposed SDK rather than an arbitrary host checkout.
+
+Host API failures are raised inside plugin code, with UTF-8 messages intact, so
+plugins can catch them. Failed activation still rolls back owned contributions.
+The host dispatch uses a checked response internally; plugin code uses the same
+`pragtical.Editor` methods. Retired host tokens cannot access a later session.

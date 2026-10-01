@@ -99,23 +99,10 @@ printf 'needle in second project\n' >"$workspace_other/second.txt"
 run_test workspace-test "$workspace_root" "$workspace_other"
 chmod 600 "$workspace_root/unreadable.txt"
 
-# DynamicPluginTestMain exercises source-compiled, hot-reloadable plugins.
-# That machinery depends on Haxeon's own compiler and runtime packages
-# (compiler.Compiler, runtime.Runtime) embedded as a library; the haxeon.json
-# package model has no dependency path to those yet (see
-# src/plugin/DynamicPlugin.hx). Until that's wired up, plugin.DynamicPlugin is
-# a stub and this test is expected to fail at the first plugin load - build it
-# so regressions elsewhere are still caught, but don't fail the suite on it.
+# Source compilation, compatible patches, structural reloads and failure rollback are mandatory.
 dynamic_plugin_dir="$root_dir/build/dynamic-plugin"
 mkdir -p "$dynamic_plugin_dir"
 cp "$root_dir/plugins/example/plugin.conf" "$root_dir/plugins/example/Main.hx" "$dynamic_plugin_dir/"
-"$haxeon" build --project "$root_dir/tests/dynamic-plugin-test/haxeon.json" "${self_hosted[@]}"
-echo "== dynamic-plugin-test (known limitation, not gating) =="
-if "$haxeon" run --project "$root_dir/tests/dynamic-plugin-test/haxeon.json" "${self_hosted[@]}" -- \
-	"$dynamic_plugin_dir/plugin.conf" "$dynamic_plugin_dir/Main.hx"; then
-	echo "PASS: dynamic-plugin-test"
-else
-	echo "SKIP (known limitation): dynamic-plugin-test needs Haxeon's compiler/runtime embedded as a package dependency"
-fi
+run_test dynamic-plugin-test "$dynamic_plugin_dir/plugin.conf" "$dynamic_plugin_dir/Main.hx"
 
 echo "PASS: exosuit headless test suite"

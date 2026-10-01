@@ -49,10 +49,10 @@ The UIKit shell uses the shared application controllers. The Problems panel
 reads live diagnostics, Build Output streams task output with clickable
 locations, and the palette exposes bridged document, project, build and
 language commands. Hover, completion and signature-help overlays are wired.
-Interactive acceptance on the UIKit host remains pending.
+Source plugins use the embedded compiler/runtime; compatible and structural
+hot reloads are covered by mandatory headless acceptance. Interactive acceptance
+on the UIKit host remains pending.
 
-- Dynamic source plugins are stubbed pending embedded compiler/runtime wiring;
-  their headless integration test is currently suppressed.
 - Styled syntax spans, diagnostic/plugin decorations and search highlights
   are not rendered in the document widget.
 - Navigation updates the model selection but cannot yet move or reveal the

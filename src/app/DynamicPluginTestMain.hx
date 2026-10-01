@@ -4,6 +4,7 @@ import core.Application;
 import platform.Native;
 import platform.Platform;
 import plugin.DynamicPlugin;
+import plugin.DynamicHostRouter;
 import plugin.PluginManifest;
 import renderer.Renderer;
 import view.RootView;
@@ -19,6 +20,9 @@ class DynamicPluginTestMain {
 	static function main():Int {
 		var arguments = Sys.args();
 		require(arguments.length == 2, "expected manifest and source paths");
+		// Extend only the disposable fixture to exercise SDK errors caught inside plugin code.
+		File.saveContent(arguments[1], File.getContent(arguments[1])
+			+ "\nfunction hostErrorProbe():Int { try { Editor.connect(\"missing-é😀\"); } catch (error:Dynamic) return error == 'plugin \"missing-é😀\" is not being activated' ? 1 : 2; return 0; }\n");
 		Platform.startHeadless();
 		var window = Native.window_create("dynamic-plugin-test", 320, 200),
 			renderer = new Renderer(window, "ignored-headlessly.ttf", 15),
@@ -33,6 +37,7 @@ class DynamicPluginTestMain {
 		application.newDocument();
 		require(application.plugins.load(plugin), "dynamic plugin did not load");
 		require(application.syntaxes.find("file.example").name == "Example", "manifest syntax did not register");
+		require(plugin.callInt("hostErrorProbe") == 1, "host callback error did not reach the plugin with Unicode intact");
 		require(plugin.callInt("hostProbe") == 42, "dynamic plugin direct host API probe failed");
 		require(root.pluginPanels.find("example", "status") != null, "dynamic plugin did not invoke the host panel API during activation");
 		require(root.pluginStatusItems.find("example", "mode") != null
@@ -149,6 +154,11 @@ class DynamicPluginTestMain {
 		application.shutdown();
 		renderer.destroy();
 		Platform.require(Native.window_destroy(window), "destroy dynamic plugin test window");
+		Native.shutdown();
+		Platform.startHeadless();
+		DynamicHostRouter.initialize();
+		require(Native.plugin_api_call(1, "1", "", "", "") == "error:dynamic plugin host token is invalid or retired",
+			"host callback did not reinstall after shutdown or retained an unloaded token");
 		Native.shutdown();
 		Sys.println("PASS: manifest plugin loading and compatible hot reload");
 		return 0;

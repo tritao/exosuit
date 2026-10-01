@@ -26,7 +26,7 @@ Observed on 2026-10-01 at `ae2f260`:
 
 ## M8.1 — Native string convention
 
-- [ ] Move `pragtical_hx` to the NativeKit binding convention: a C header
+- [x] Move `pragtical_hx` to the NativeKit binding convention: a C header
   plus generated `.hxi`/`.hxmap`, with UTF-8 `utf8` strings
   (`haxeon/docs/C_HEADER_FFI.md`). This is required, not preferred. The wasm
   guest (M15) can only import C-ABI HXI functions, and `@:hlNative` has no
@@ -34,10 +34,10 @@ Observed on 2026-10-01 at `ae2f260`:
   closures (`19fc2fd9`, "native callbacks through exported entry functions").
   If a closure still cannot be expressed, reduce it and fix Haxeon; do not
   keep `@:hlNative`.
-- [ ] Convert every string-carrying function in `src/platform/Native.hx` and
+- [x] Convert every string-carrying function in `src/platform/Native.hx` and
   the native side together. Fix UTF-8/UTF-16 handling, and remove or
   regenerate the stale `include/pragtical_hx/native_ffi.h`.
-- [ ] Delete externs that the UIKit host made dead (window, font and draw), or
+- [x] Delete externs that the UIKit host made dead (window, font and draw), or
   record why they stay. Keep `platform/abi.json` and its `--check` gate
   consistent, and bump the ABI version if compatibility changes.
 
@@ -47,14 +47,14 @@ string all round-trip unchanged.
 
 ## M8.2 — Compiler defects behind the build split
 
-- [ ] Reduce `CommandView.hx:297` E1005, `ConfigurationController.hx:1886` and
+- [x] Reduce `CommandView.hx:297` E1005, `ConfigurationController.hx:1886` and
   the self-hosted `SelectOption` failure to minimal cases. Add regressions in
   Haxeon and fix the general typing rule (COMPILER-TYPING). Do not rewrite
   application code to evade them.
-- [ ] Make reference and self-hosted builds agree. Then remove the divergent
+- [x] Make reference and self-hosted builds agree. Then remove the divergent
   `HAXEON_SELF_HOSTED` defaults from `test.sh` and `build.sh`, or document a
   remaining unrelated reason.
-- [ ] Fix the action-directory creation race in Haxeon's executor and drop the
+- [x] Fix the action-directory creation race in Haxeon's executor and drop the
   `mkdir -p` sidestep.
 
 Acceptance: `./scripts/build.sh` and `./scripts/test.sh` pass with both compiler

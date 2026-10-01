@@ -9,7 +9,7 @@ class DynamicEditorApiSource {
 		+ "import PluginHost;\n"
 		+ "class Editor {\n"
 		+ "  public static inline final API_VERSION = 2;\n"
-		+ "  static function hostCall(operation:Int, token:String, a:String, b:String, c:String):String return PluginHost.hostCall(operation, token, a, b, c);\n"
+		+ "  static function hostCall(operation:Int, token:String, a:String, b:String, c:String):String { var result = PluginHost.hostCall(operation, token, a, b, c); if (result.substring(0, 3) == \"ok:\") return result.substring(3); if (result.substring(0, 6) == \"error:\") throw result.substring(6); throw \"invalid plugin host response\"; }\n"
 		+ "  static var token:String = \"\";\n"
 		+ "  public static function connect(id:String):Void { token = hostCall(0, \"\", id, \"\", \"\"); }\n"
 		+ "  public static function activeDocumentText():String return hostCall(1, token, \"\", \"\", \"\");\n"

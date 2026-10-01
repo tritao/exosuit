@@ -154,7 +154,6 @@ Remaining graphical gaps:
 - Workspace search stores results but has no visible results panel.
 - One editor region means split, pane focus and moving tabs between panes are unavailable.
 - Right-click context menus, wrapping and multiple selections are not exposed.
-- Dynamic source plugins remain a throwing stub pending compiler/runtime embedding.
 
 Tab reordering and sidebar visibility are wired. Layout-only legacy commands
 are excluded by `CommandBridge`; other commands are bridged, with some shortcut
@@ -191,20 +190,21 @@ safe point.
 
 ## Compiler and acceptance state
 
-The reference graphical build passes after general compiler effect inference
-and import-resolution fixes. The checked-in self-hosted compiler is stale;
-bootstrap convergence and two-mode agreement are still in progress. The
-scripts retain divergent compiler defaults until that agreement is verified.
+Both reference and self-hosted graphical builds pass. Haxeon's compiler now
+bootstraps to identical output. Build, run and test use the CLI's reference
+compiler default with a verified self-hosted override. The upstream action
+directory fix (`c59502ff`) is used directly; the pre-creation workaround is gone.
 
-Haxeon fixed action-directory creation upstream (`c59502ff`). The editor's
-pre-creation workaround remains until clean-output builds in both modes are
-verified. Compiler/runtime changes are part of the implementation scope.
+Source plugins embed the public compiler/runtime package, compile on a worker,
+and publish at editor updates. Their SDK registers a portable host HXI and
+propagates host callback errors through checked responses. Shutdown retires
+callbacks and tokens; initialization reinstalls callbacks after restart.
 
-The native binding and gating headless tests pass, but the dynamic-plugin test
-is suppressed; this is an acceptance gap. Release packaging, the real LSP
-smoke gate and UIKit window automation still need restoration. The
-[execution ledger](../roadmap/STATUS.md) records exact commands and remaining
-failures; a graphical compile does not establish interactive behavior.
+Every headless project, including mandatory source-plugin acceptance, passes in
+both compiler modes. Release packaging, the real LSP smoke gate and UIKit window
+automation still need restoration. The [execution ledger](../roadmap/STATUS.md)
+records commands and remaining checks; graphical builds do not establish
+interactive behavior.
 
 ## Trade-offs and follow-on work
 
