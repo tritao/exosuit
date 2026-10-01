@@ -20,6 +20,17 @@ from UIKit's retained line index. This avoids per-grapheme caret geometry for
 the 1 MiB line; other decorations continue to use selection-range geometry.
 The edit API locates its UTF-8 byte range with constant extra memory.
 
+The next slice retains per-visual-row glyph snapshots across equal-length
+guarded ASCII edits. A row keeps its revision only when its logical range and
+layout bounds match and it lies strictly outside the edited range. UIKit's
+scene compiler uses that row's publication key for text resource identity,
+and the editor's multi-row viewport composes visible row snapshots while
+holding them across edits. Single-row viewports use direct preparation to
+avoid a needless copy. Insertions, deletions, changed wrap boundaries,
+unsupported scripts, font/atlas changes, and changed foreground colors
+invalidate conservatively. All document geometry still comes from the one
+authoritative native layout generation.
+
 The real 1 MiB varied-key fixture delivered 30 input frames at p50 37.66 ms,
 p95 41.67 ms, and max 43.44 ms, below its 50 ms typing budget. The isolated
 native differential probe checks repeated edits, glyphs, line breaks and

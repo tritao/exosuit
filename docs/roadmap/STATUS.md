@@ -64,6 +64,31 @@ Last updated: 2026-10-01.
 
 ## Implementation records
 
+### M9.1 — retained visual-row glyph invalidation (verified slice)
+
+- Materia commit `558499f54`; the accompanying Exosuit commit records this
+  result and pins the revision in `release.lock`.
+- For an equal-length guarded ASCII edit, UIKit now retains a visual row's
+  prepared glyph snapshot only when its codepoint range, bounds, font atlas,
+  and foreground publication key remain valid. The edited row gets a new
+  revision; native tests prove rows before and after reuse their immutable
+  snapshots and an insertion invalidates them conservatively.
+- The scene compiler uses the retained snapshot directly, removing its second
+  glyph preparation pass. The editor's multi-row viewport composes visible
+  row snapshots and retains them across edits. Single-row viewports keep direct
+  preparation, which avoids copying a very long row.
+- C ABI, text-engine, and scene-compiler tests pass. The real graphical
+  decoration suite passes. The first 1 MiB run with unconditional row
+  composition regressed to **54.26 ms p95**. After the single-row bypass, a
+  fresh 30-frame varied-key run measured p50 **40.57 ms**, p95 **49.03 ms**,
+  max **53.62 ms**, under the **50 ms** p95 budget. Artifacts:
+  `/tmp/exosuit-m9-row-single-typing` and `.log`.
+- M9.1 remains active: insertions/deletions shift logical row offsets and still
+  invalidate conservatively, and the display-list renderer redraws the visible
+  viewport even when its unchanged row snapshots are reused. Next, measure
+  changed-row publication for offset-shifting edits and update the row index
+  and source ranges before claiming strict changed-row invalidation.
+
 ### M9.1 — guarded ASCII layout reuse and visible-line backgrounds (verified slice)
 
 - Commits: Skribidi `7b10d4821`; Materia `baff45a53`. The Exosuit commit
