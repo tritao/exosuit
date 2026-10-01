@@ -9,7 +9,8 @@ Deliver a lightweight, responsive, configurable desktop coding editor with
 Pragtical-like editing, project navigation, search, extensibility and polish.
 Keep the Haxeon application core and the platform boundary in
 [ADR 0001](../architecture/0001-platform-boundary.md). Reuse the sibling
-Pragtical renderer. Lua plugin binary/source compatibility is not assumed.
+NativeKit/UIKit host in [ADR 0002](../architecture/0002-nativekit-uikit-host.md).
+Lua plugin binary/source compatibility is not assumed.
 
 ## Execution order
 

@@ -2,8 +2,11 @@
 set -euo pipefail
 
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-
-# Release packaging and the LSP smoke test still target the old realtime-haxe
-# layout and are not part of this build/test setup yet.
+haxeon_root=${HAXEON_ROOT:-"$root_dir/../haxeon"}
+# Shared compiler/native output trees require serial stages.
+(cd "$haxeon_root" && ./scripts/test.sh)
 "$root_dir/scripts/test.sh"
 "$root_dir/scripts/build.sh"
+"$root_dir/scripts/test-haxeon-lsp.sh"
+"$root_dir/scripts/test-uikit-workflow.sh"
+"$root_dir/scripts/test-release.sh"

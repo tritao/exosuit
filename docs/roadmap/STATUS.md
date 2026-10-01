@@ -9,13 +9,15 @@ Last updated: 2026-10-01.
   Graphical builds and all headless projects exit 0 in reference and refreshed
   self-hosted modes. Haxeon `82d92ba0` passes 375/375 and every integration/Wasm
   stage; bootstrap converges and rebuilds identically.
-- Active task: **M8.3**, restoring manifest-based real LSP, revision-pinned
-  release packaging and a scripted UIKit window route. M8.4 documentation is
-  updated, while interactive acceptance and other platforms remain unclaimed.
-- Exact resume: run the restored composed CI gate, including the compiler,
-  headless projects, graphical build, real LSP, window workflow and release.
-  Real LSP and unpacked UIKit release checks now pass. Use PRAGTICAL_PORTABLE
-  for all graphical tests; xvfb-run and xdotool are available.
+- **M8 accepted on Linux:** restored composed CI exits 0 after b76554b, and
+  the changed graphical entry point builds in self-hosted mode as well.
+- Active task: **M15.1**, typed host capabilities and browser-safe boundaries.
+- Exact resume: introduce the capability-restricted application test and hide
+  unavailable process/LSP/source-plugin commands and panels; inspect the shared
+  web pipeline before implementing M15.2. Emscripten is installed under
+  nativekit/.tools/emsdk and google-chrome is available.
+- All further graphical tests must use disposable PRAGTICAL_PORTABLE state.
+  IME, physical mixed-DPI transitions, Windows and macOS remain unclaimed.
 - HEADs at planning: exosuit `ae2f260` (`haxeon-uikit-port`). Materia `main` is at
   `816372dd`, fast-forwarded 2026-10-01 for the Haxeon wasm and web fixes; it
   contains uikit and editorkit. Haxeon is at `fba71015` (on pin, fast-forwarded).
@@ -45,16 +47,39 @@ Last updated: 2026-10-01.
 | M5 | Complete headlessly | Live layered configuration, owned APIs, debounced background compilation, transactional reload and editor lifecycle controls pass |
 | M6 | Complete headlessly | Bounded JSON-RPC, lifecycle/synchronization, language commands, diagnostics, restart and real Haxeon edit/diagnose/fix/build smoke pass |
 | M7 | Complete for the claimed Linux automation scope | M7.1–M7.3 pass; desktop IME, physical mixed-DPI, Windows and macOS remain explicit unclaimed follow-ons |
-| M8 | In progress | M8.1/M8.2 accepted in both compiler modes (`95a3b08`); source plugins mandatory; M8.3 release/LSP/window gates pending |
+| M8 | Accepted on Linux | Both compiler modes, mandatory source plugins, real LSP/window workflow and unpacked release; composed CI exits 0 |
 | M9 | Not started | Depends on M8 |
 | M10 | Not started | Depends on M8, M9.1–M9.2 |
 | M11 | Not started | Depends on M8; independent of M9/M10 |
 | M12 | Not started | Depends on M9, M11.1, M11.4 |
 | M13 | Not started | Depends on M11.2 |
 | M14 | Not started | Depends on M11–M13 |
-| M15 | Not started | Depends on M8.1, M8.2; scheduled right after M8. Reference: materia `app/web` at `816372dd`, Haxeon `fba71015` |
+| M15 | Active: M15.1 | Depends on M8.1, M8.2; scheduled right after M8. Reference: materia `app/web` at `816372dd`, Haxeon `fba71015` |
 
 ## Implementation records
+
+### M8.3 — restored composed CI (accepted)
+
+- Real native-input slice committed as exosuit b76554b. scripts/ci.sh now runs
+  the compiler gate, all headless projects, graphical build, real LSP smoke,
+  real UIKit workflow and unpacked release serially. Package creation explicitly
+  rejects unsupported host architectures. Workflow also asserts the task exit
+  status is shown, so a partial output drain cannot satisfy the check.
+- ./scripts/ci.sh exits 0; log /tmp/exosuit-ci-restored.log. Compiler/runtime
+  tests and all native/C++/Wasm/Wasmtime integration stages exit 0, followed by
+  every editor project and the actual LSP/window/unpacked-artifact routes.
+  Expected failure fixtures in the compiler's test-framework checks are their
+  own passing negative tests, not unresolved failures.
+- HAXEON_SELF_HOSTED=1 ./scripts/build.sh exits 0 after the graphical CLI and
+  diagnostics changes; 984 sources. Log /tmp/exosuit-m8-final-self-build.log.
+  Earlier full headless self-hosted acceptance at 95a3b08 still applies: no
+  headless application source changed in these window/release slices.
+- Shell syntax and diff checks pass. Haxeon retains only initial vendor/hashlink
+  pointer modification and hlprofile.dump; NativeKit and materia dirty/off-pin
+  states are preserved. No publishing. M8.1–M8.4 accepted for the stated Linux
+  automated scope. Physical IME/DPI and non-Linux remain pending.
+- Continue M15.1 next; the goal still covers every follow-on milestone.
+
 
 ### M8.3 — native input and source-plugin reload (verified slice)
 
@@ -1032,7 +1057,7 @@ These commits satisfy only the behaviors evidenced by their tests; they do not m
 
 ## Blockers and pending manual checks
 
-- M8.1/M8.2 gates pass in both modes; M8.3 release/LSP/window gates remain pending.
+- M8 gates pass, including real LSP, UIKit workflow and unpacked release.
 - The SDL-era graphical route (M0.3) and its automation scripts were removed by the
   UIKit port; M8.3 replaces them. Desktop IME and physical mixed-DPI checks stay pending.
 - Windows (ConPTY, named pipes, atomic publication) and macOS are unclaimed.

@@ -76,7 +76,7 @@ modes. Haxeon's own `./scripts/test.sh` passes.
   Inspect UIKit/NativeKit for existing automation or test-input hooks before
   adding one. If no display is available, record the check as pending; do not
   fake it.
-- [ ] `scripts/ci.sh` composes the compiler, headless, graphical-build,
+- [x] `scripts/ci.sh` composes the compiler, headless, graphical-build,
   LSP-smoke and release gates again.
 
 Acceptance: `./scripts/ci.sh` exits 0 on Linux. The graphical route passes

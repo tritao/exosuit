@@ -116,6 +116,7 @@ grep -F 'UIKit window diagnostic' "$fixture/problems/ui-tree.txt"
 xvfb-run -a "$0" --drive "$fixture" output
 grep -F 'Main.hx' "$fixture/output/app-state.json"
 grep -F 'Running window-check' "$fixture/output/ui-tree.txt"
+grep -F 'Process exited with status 1' "$fixture/output/ui-tree.txt"
 grep -F 'UIKit window diagnostic' "$fixture/output/ui-tree.txt"
 python3 - "$fixture" <<'CHECK'
 import json, pathlib, sys

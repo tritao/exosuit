@@ -5,6 +5,7 @@ root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 haxeon_root=${HAXEON_ROOT:-"$root_dir/../haxeon"}
 materia_root=$(cd "$root_dir/.." && pwd)
 lock="$root_dir/release.lock"
+[[ $(uname -s) == Linux && $(uname -m) == x86_64 ]] || { echo "Release packaging currently supports Linux x86-64" >&2; exit 1; }
 
 locked_revision() { sed -n "s/^$1=//p" "$lock"; }
 verify_revision() {
