@@ -27,8 +27,16 @@ if [[ ${1:-} == --drive ]]; then
     xdotool mousemove --window "$window" 450 132 click 1
     sleep .5
     python3 -c 'import time,sys; open(sys.argv[1],"w").write(str(time.time()))' "$fixture/start.txt"
-    for _ in {1..30}; do
-        xdotool key --clearmodifiers --delay "${TYPING_UI_KEY_DELAY_MS:-120}" a BackSpace
+    key_pattern=${TYPING_UI_KEY_PATTERN:-repeat}
+    if [[ $key_pattern != repeat && $key_pattern != varied ]]; then
+        echo "TYPING_UI_KEY_PATTERN must be repeat or varied" >&2
+        exit 1
+    fi
+    alphabet=abcdefghijklmnopqrstuvwxyz
+    for ((index=0; index<30; index++)); do
+        key=a
+        if [[ $key_pattern == varied ]]; then key=${alphabet:index%26:1}; fi
+        xdotool key --clearmodifiers --delay "${TYPING_UI_KEY_DELAY_MS:-120}" "$key" BackSpace
     done
     python3 -c 'import time,sys; open(sys.argv[1],"w").write(str(time.time()))' "$fixture/end.txt"
     wait "$app"
@@ -84,6 +92,7 @@ result = dict(fixture=sys.argv[2], cpu=cpu, bytes=(root / "input.txt").stat().st
               inputFrames=len(samples), inputEvents=sum(frame["textInputCount"] for frame in input_frames),
               captureSeconds=int(os.environ.get("TYPING_UI_CAPTURE_SECONDS", "15")),
               keyDelayMs=int(os.environ.get("TYPING_UI_KEY_DELAY_MS", "120")),
+              keyPattern=os.environ.get("TYPING_UI_KEY_PATTERN", "repeat"),
               p50Ms=samples[len(samples)//2], p95Ms=p95,
               maxMs=samples[-1], budgetMs=50, withinBudget=p95 < 50,
               platform=platform.platform())

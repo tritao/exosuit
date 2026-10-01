@@ -91,6 +91,31 @@ Last updated: 2026-10-01.
   budget are still open. The next measured work is incremental shaping and
   row geometry reuse for edited long paragraphs.
 
+### M9.1 — long-paragraph update reduction (diagnosis; budget still failing)
+
+- An opt-in temporary Skribidi phase probe on the real 1 MiB typing fixture
+  measured 62 builds: median UTF-8 decode/text-property setup **41.5 ms**,
+  itemization **16.4 ms**, shaping and cluster construction **122.3 ms**, and
+  line layout **12.0 ms**. The probe was removed after measurement; no diagnostic
+  code or native behavior change is retained. Artifacts:
+  `/tmp/exosuit-m9-phase-long` and `/tmp/exosuit-m9-phase-long.log`.
+- A conservative HarfBuzz unsafe-to-concat boundary experiment on a 4,096-`a`
+  single run found no interior safe boundary. It was reverted because it would
+  still reshape the entire measured line. Reusing glyphs alone also cannot
+  meet 50 ms while full decoding and itemization take roughly 58 ms combined.
+- `scripts/benchmark-uikit-typing.sh` now accepts
+  `TYPING_UI_KEY_PATTERN=varied`, typing different letters at the same caret
+  between deletions; the default repeated-key fixture remains comparable to
+  earlier runs. On the clean native build, 30 varied delivered inputs/frames
+  measured p50 **253.33 ms**, p95 **292.04 ms**, max **295.28 ms**. Artifacts:
+  `/tmp/exosuit-m9-typing-long-varied` and `.log`. This still fails 50 ms.
+- Exact next implementation: retain decoded text properties and itemization
+  across edits, then introduce a contextual shaping update that verifies both
+  sides of a changed region before reusing glyphs. Reflow only affected rows
+  and verify against Unicode/bidi/contextual examples and varied input. Do not
+  treat HarfBuzz's unsafe-to-concat flag alone as a bounded edit window for the
+  current font. M9.1 remains unaccepted.
+
 ### M9.1 — visible glyph publication and long-line edit profile (verified slice)
 
 - Skribidi `6c53759` adds half-open visual-line range iteration and glyph
