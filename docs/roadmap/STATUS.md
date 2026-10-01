@@ -13,11 +13,14 @@ Last updated: 2026-10-01.
   the changed graphical entry point builds in self-hosted mode as well.
 - Active task: **M15.1/M15.2**, browser boundary and build. Typed capability
   policy is delivered; guest import qualification and the browser pipeline remain.
-- Exact resume: adapt the shared web pipeline, add the browser entry and native
-  host, and compile the guest to identify remaining host-only imports. Reuse
-  typed capabilities; isolate the source-plugin compiler/thread implementation
-  behind a host service if it enters the browser graph. Emscripten and Chrome
-  are available; do not classify them as unavailable without attempting them.
+- Exact resume: finish M15 browser qualification. Haxeon `6a86c528`
+  fixes generic callable ABI adapters and generated static-initializer ownership;
+  the Wasm GC browser passes ASCII typing/save/URL/reload. The expanded Unicode
+  smoke fails: inserting `é🙂`, then `!` and Enter places later input before the
+  emoji. `/tmp/haxeon-unicode-caret/Main.hx` independently rejects the expected
+  UTF-16 string length on Wasm GC. Verify reference semantics, reduce and fix the
+  responsible representation rule; retain the Unicode acceptance test. Current
+  root reference gates are running; requalify both modes after final changes.
 - All further graphical tests must use disposable PRAGTICAL_PORTABLE state.
   IME, physical mixed-DPI transitions, Windows and macOS remain unclaimed.
 - HEADs at planning: exosuit `ae2f260` (`haxeon-uikit-port`). Materia `main` is at
@@ -59,6 +62,42 @@ Last updated: 2026-10-01.
 | M15 | Active: M15.1 | Depends on M8.1, M8.2; scheduled right after M8. Reference: materia `app/web` at `816372dd`, Haxeon `fba71015` |
 
 ## Implementation records
+
+### M15.2 — generic callable ABI and initializer ownership (verified compiler slice)
+
+- Haxeon `6a86c528` adapts callable argument/result signatures at generic
+  semantic/physical boundaries, including nested callables. Nullable callbacks
+  evaluate once and preserve null. Generated adapters in initializer pseudo-bodies
+  now reuse the declaring class's module ownership rule.
+- Independent registered `generic-callable-abi` execution covers nominal,
+  integer, float and higher-order storage, assignment, null fallback, evaluation
+  count and static initialization. Registered compiler coverage checks execution,
+  incremental body edits/restoration and cold/incremental incompatible callbacks.
+  Static initialization failed before the ownership change with
+  `No source module owns typed function "$function-adapter:Functions.__init:0"`;
+  focused execution passes afterward.
+- `../haxeon/scripts/test.sh` exits 0, including formatting, runtime/compiler,
+  integrations and Wasm parity/Wasmtime stages:
+  `/tmp/haxeon-gate-generic-callable.log`. Bootstrap converges in one stage and
+  self-bootstrap is identical (both exit 0):
+  `/tmp/haxeon-bootstrap-generic-callable.log` and
+  `/tmp/haxeon-bootstrap-self-generic-callable.log`.
+- Actual Wasm GC editor builds with 104 matching imports:
+  `/tmp/exosuit-web-gc-initializer-fixed-build.log` (0). ASCII browser typing,
+  ordinary character input, Enter, dirty tracking, Ctrl-S/save/readback, native
+  URL opening and fresh-session reload pass:
+  `/tmp/exosuit-web-gc-callback-ascii-final.log` (0). Disposable Chrome process
+  groups prevent child processes racing profile cleanup.
+- Toolkit fixes already verified and committed separately: materia `a9486f67`
+  routes transactional text by surface; NativeKit `97938edb` forwards focused
+  hidden-input shortcuts while retaining DOM text/composition delivery. NativeKit's
+  four browser integration pages passed in
+  `/tmp/nativekit-web-key-routing-gate.log` (0).
+- Full Unicode smoke remains red (`/tmp/exosuit-web-gc-unicode-probe.log`);
+  source/test changes under `web/` remain uncommitted until acceptance passes.
+  M15 is not accepted. Existing vendor gitlink/profile dump and parent submodule
+  dirt remain preserved. No publication performed.
+
 
 ### M15.1/M15.2 — typed host services and optional interfaces (verified slice)
 
