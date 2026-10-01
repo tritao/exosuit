@@ -63,12 +63,30 @@ Last updated: 2026-10-01.
 | M9 | Active: M9.1 | General styled text/decorations and editor rendering |
 | M10 | Not started | Depends on M8, M9.1–M9.2 |
 | M11 | Active: M11.1 POSIX, M11.2 Linux, M11.3 SQLiteKit, M11.4 TerminalKit slice | Depends on M8; independent of M9/M10; Windows PTY/named pipes and M11.4 session integration remain pending |
-| M12 | M12.1 accepted headlessly on Linux | Local PTY/session, replay, and plugin-owned profile lifecycle pass; graphical view and remote backend remain |
+| M12 | M12.1 accepted; M12.2 initial Linux view | Local PTY/session and plugin profiles pass; docked plain-text grid, row raster reuse, input, and resize smoke pass; full styling and controls remain |
 | M13 | Not started | Depends on M11.2 |
 | M14 | Not started | Depends on M11–M13 |
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M12.2 — docked terminal view (initial Linux slice)
+
+- The graphical package now depends on `terminalsession` and opens a local
+  shell in an on-demand Terminal dock panel. `TerminalPane` owns dedicated
+  terminal font resources and one retained canvas per emulator row. It updates
+  row text layouts only when the emulator reports changed rows, and uses
+  per-row raster keys so unchanged rows keep their paint cache. The backdrop
+  measures the resolved pane and resizes both emulator and PTY to whole cells.
+- Clicking the pane focuses it; text input, Enter, Backspace, and Tab go to
+  the PTY. Closing the panel or app closes the session and UI resources.
+  `--open-terminal` starts the pane for desktop smoke runs.
+- `scripts/test-terminal-ui.sh` uses disposable application state, real X11
+  input, and a resized window. It verifies the dock, row canvases, 80×6
+  session geometry, and shell input. The captured shell output reports
+  `stty size` as `6 80`. Graphical builds pass in reference and self-hosted
+  compiler modes. Styled cells, cursor, full keyboard protocol, scrollback,
+  selection, and redraw benchmark remain M12.2 work.
 
 ### M12.1 — headless terminal session (initial Linux slice)
 

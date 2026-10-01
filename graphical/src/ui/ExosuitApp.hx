@@ -49,6 +49,10 @@ import ui.BuildOutputPanel;
 import ui.ProblemsPanel;
 import ui.UiDocumentView;
 import ui.UiWorkbenchHost;
+import terminalsession.TerminalProfile;
+import terminalsession.TerminalSession;
+import terminalsession.LocalPtyBackend;
+import terminalkit.Emulator;
 
 /**
  * exosuit's graphical shell: `DesktopUiHost` owns the window, GPU, and frame
@@ -74,6 +78,7 @@ class ExosuitApp implements DesktopUiApplication {
 	final dock:DockWorkspaceModel;
 	var dockPanelContents:Array<DockPanelContent>;
 	final editorPanes:Map<Int, EditorPane> = new Map();
+	var terminalPane:Null<TerminalPane>;
 	var explorerRoot:Null<String>;
 	var explorerModel:Null<DirectoryTreeModel>;
 	var statusMessage:String = "Ready";
@@ -115,6 +120,8 @@ class ExosuitApp implements DesktopUiApplication {
 		model.register(new DockPanelDescriptor("problems", "Problems", true, true));
 		if (capabilities.supports(Processes))
 			model.register(new DockPanelDescriptor("build", "Build Output", true, true, IconName.Terminal));
+		if (capabilities.supports(Processes))
+			model.register(new DockPanelDescriptor("terminal", "Terminal", true, true, IconName.Terminal));
 		dockPanelContents = [
 			new DockPanelContent("explorer", function(_) return explorerPanel()),
 			new DockPanelContent("editor", function(_) return editorPanel()),
@@ -122,6 +129,8 @@ class ExosuitApp implements DesktopUiApplication {
 		];
 		if (capabilities.supports(Processes))
 			dockPanelContents.push(new DockPanelContent("build", function(_) return new BuildOutputPanel(host)));
+		if (capabilities.supports(Processes))
+			dockPanelContents.push(new DockPanelContent("terminal", function(_) return terminalPanel()));
 		var bottom = capabilities.supports(Processes) ? DockNode.Tabs(["problems", "build"], "problems") : DockNode.Panel("problems");
 		var main = DockNode.Split(DockSplitAxis.Horizontal, 0.22,
 			DockNode.Panel("explorer"),
@@ -133,6 +142,36 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function toggleExplorerVisible():Bool
 		return dock.isOpen("explorer") ? dock.close("explorer") : dock.open("explorer");
+
+	public function openTerminal():Void {
+		if (!capabilities.supports(Processes)) return;
+		if (terminalPane == null) {
+			var profile = TerminalProfile.shell(explorerRoot == null ? Sys.getCwd() : explorerRoot);
+			var backend = LocalPtyBackend.spawn(profile, 80, 24);
+			try {
+				var session = new TerminalSession(backend, Emulator.open(80, 24));
+				try terminalPane = new TerminalPane(session, requestFrame)
+				catch (error:Dynamic) { session.close(); throw error; }
+			} catch (error:Dynamic) { backend.close(); throw error; }
+		}
+		if (!dock.isOpen("terminal")) dock.open("terminal", "build");
+		dock.activate("terminal");
+		requestFrame();
+	}
+
+	function toggleTerminal():Void {
+		if (dock.isOpen("terminal")) {
+			dock.close("terminal");
+			if (terminalPane != null) {
+				terminalPane.close();
+				terminalPane = null;
+			}
+			requestFrame();
+		} else openTerminal();
+	}
+
+	function terminalPanel():View
+		return terminalPane == null ? placeholderPanel("Terminal is closed.") : terminalPane;
 
 	function installCommands():Void {
 		// UiKey has no N/O/W/P constants, so these follow the raw-ASCII-code
@@ -153,6 +192,9 @@ class ExosuitApp implements DesktopUiApplication {
 			new Shortcut(87 /* W */, UiModifier.Control)));
 		ui.commands.register(new Command("view.toggle-palette", "Toggle Command Palette",
 			togglePalette, new Shortcut(80 /* P */, UiModifier.Control | UiModifier.Shift)));
+		if (capabilities.supports(Processes))
+			ui.commands.register(new Command("view.terminal", "Toggle Terminal", toggleTerminal,
+				new Shortcut(96 /* ` */, UiModifier.Control)));
 		CommandBridge.install(ui.commands, application.commands, application.keymap, application.context);
 	}
 
@@ -194,12 +236,28 @@ class ExosuitApp implements DesktopUiApplication {
 	 */
 	function pumpApplication():Void {
 		application.update();
+		if (terminalPane != null) {
+			if (!dock.isOpen("terminal")) {
+				terminalPane.close();
+				terminalPane = null;
+			} else try {
+				terminalPane.poll();
+			} catch (error:Dynamic) {
+				statusMessage = "Terminal: " + Std.string(error);
+				terminalPane.close();
+				terminalPane = null;
+			}
+		}
 		if (application.build.active != null || application.language.client != null) requestFrame();
 	}
 
 	public function context():UiContext return ui;
 
 	public function dispose():Void {
+		if (terminalPane != null) {
+			terminalPane.close();
+			terminalPane = null;
+		}
 		application.shutdown();
 		if (desktop != null) desktop.shutdown();
 		ui.dispose();
@@ -216,7 +274,10 @@ class ExosuitApp implements DesktopUiApplication {
 			status: statusMessage,
 			paletteCommandCount: ui.commands.ids().length,
 			errors: [for (entry in application.errors.entries) {source: entry.source, message: entry.message}],
-			plugins: application.plugins.enabledIds()
+			plugins: application.plugins.enabledIds(),
+			terminal: terminalPane == null ? "closed" : terminalPane.session.status,
+			terminalColumns: terminalPane == null ? 0 : terminalPane.session.emulator.columns(),
+			terminalRows: terminalPane == null ? 0 : terminalPane.session.emulator.rows()
 		};
 	}
 
@@ -239,12 +300,14 @@ class ExosuitApp implements DesktopUiApplication {
 			new KeyedView("open-folder", toolbarButton("Open Folder", IconName.FolderOpen,
 				openFolderDialog)),
 			new KeyedView("save", toolbarButton("Save", IconName.Save,
-				function() application.commands.perform("doc:save", application.context))),
-			new KeyedView("space", new Spacer("toolbar-space", LayoutAxis.grow(), LayoutAxis.fixed(1.0))),
-			new KeyedView("status", new Text(statusMessage, null, theme.tokens.textSecondary,
-				TextStyleOverride.text(12.0))),
-			new KeyedView("palette", toolbarButton("Commands", IconName.Terminal, togglePalette))
+				function() application.commands.perform("doc:save", application.context)))
 		];
+		if (capabilities.supports(Processes))
+			items.push(new KeyedView("terminal", toolbarButton("Terminal", IconName.Terminal, toggleTerminal)));
+		items.push(new KeyedView("space", new Spacer("toolbar-space", LayoutAxis.grow(), LayoutAxis.fixed(1.0))));
+		items.push(new KeyedView("status", new Text(statusMessage, null, theme.tokens.textSecondary,
+			TextStyleOverride.text(12.0))));
+		items.push(new KeyedView("palette", toolbarButton("Commands", IconName.Terminal, togglePalette)));
 		return new Row("exosuit-toolbar", items, style);
 	}
 

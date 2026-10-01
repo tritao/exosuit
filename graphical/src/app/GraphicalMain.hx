@@ -32,6 +32,7 @@ class GraphicalMain {
 		var frameLimit = 0;
 		var captureSeconds = 0.0;
 		var recordPath:Null<String> = null;
+		var openTerminal = false;
 		var openPaths:Array<String> = [];
 		for (argument in arguments) {
 			if (StringTools.startsWith(argument, "--plugin="))
@@ -44,6 +45,8 @@ class GraphicalMain {
 				recordPath = argument.substring(14);
 			else if (StringTools.startsWith(argument, "--smoke-frames="))
 				frameLimit = Std.parseInt(argument.substring(15));
+			else if (argument == "--open-terminal")
+				openTerminal = true;
 			else if (!StringTools.startsWith(argument, "--"))
 				openPaths.push(argument);
 		}
@@ -68,6 +71,7 @@ class GraphicalMain {
 		var session = DesktopUiHost.open(host, function(context) {
 			var instance = new ExosuitApp(context.fonts, Theme.light(), context, openPaths.length == 0 ? null : openPaths[0], null, new NativeDesktopServices(context));
 			for (index in 1...openPaths.length) instance.application.openArgument(openPaths[index]);
+			if (openTerminal) instance.openTerminal();
 			if (pluginManifest != null && !instance.application.loadPluginManifest(pluginManifest))
 				Sys.println('exosuit: could not load plugin manifest "$pluginManifest"');
 			app = instance;
