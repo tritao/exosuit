@@ -24,17 +24,17 @@ Last updated: 2026-10-01.
   while the 1 MiB graphical timing gate waits for an idle host. Their Windows
   implementations remain open. The Pragtical PTY and emulator references are
   present in the available read-only checkout.
-- Exact resume: finish M9.1 strict changed-row invalidation. The guarded
-  lowercase ASCII native edit path, visible-line background geometry and
-  directly sealed viewport glyphs meet the real 1 MiB varied-key typing budget.
-  The changed visible row still causes an aggregate viewport rebuild and paint;
-  row-scoped render commands are the next architectural step. Unicode and
+- Exact resume: finish M9.1 strict changed-row paint invalidation. Visible
+  rows now have independent draw commands and retained glyph snapshots; a
+  changed row still causes its containing render pass to repaint. Add row-sized
+  paint caching without breaking clipping, decorations or sealed-frame ownership.
+  The guarded ASCII path meets the real 1 MiB varied-key typing budget;
   unsupported layouts still use complete native layout rebuilds. Broaden
   layout reuse only with differential geometry evidence.
   Preserve M8 and both browser gates.
-- Current follow-on HEADs: Exosuit `0badde1` before this ledger commit;
-  Materia `f0688c6fb` carries identical-range suffix snapshot reuse and
-  direct viewport glyph ownership. The
+- Current follow-on HEADs: Exosuit `4a97fa4` before this ledger commit;
+  Materia `83904c4b7` carries identical-range suffix reuse, direct viewport
+  ownership and row-scoped draw commands. The
   existing dirty Haxeon/NativeKit gitlinks and UIKit TextInputBridge edit in
   Materia were left untouched.
 - All further graphical tests must use disposable PRAGTICAL_PORTABLE state.
@@ -78,6 +78,26 @@ Last updated: 2026-10-01.
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M9.1 — row-scoped visible text commands (verified slice)
+
+- Materia `83904c4b7` splits a multi-row visible text command into independently
+  keyed draw commands. Each command binds an immutable per-row glyph snapshot;
+  unchanged rows retain that snapshot across edits instead of rebuilding an
+  aggregate viewport. The row commands retain the original clip and transform,
+  place glyphs using measured row bounds, and refresh a row privately if atlas
+  preparation invalidates it before sealing. One-row and resource-limit cases
+  continue through the bounded aggregate path.
+- Native UIKit ABI, text-engine, frame-resource and public renderer smoke tests
+  pass. The real graphical decoration smoke passes, including wrapped-paragraph
+  navigation, selection and diagnostic pixels. The 1 MiB varied-key fixture
+  delivered 30/30 frames: p50 **39.30 ms**, p95 **43.13 ms**, max **45.61 ms**,
+  below the 50 ms p95 budget. Artifacts: `/tmp/exosuit-m9-row-commands` and
+  `.log`.
+- M9.1 remains open: render-pass caching is still pass-wide, so one changed row
+  repaints the containing pass. Next, add row-sized paint caching with correct
+  clipping and decoration invalidation before checking strict changed-row
+  acceptance.
 
 ### M12.2 — docked terminal view (initial Linux slice)
 
