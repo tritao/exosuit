@@ -10,18 +10,15 @@ Last updated: 2026-10-01.
   coverage, but its pre-existing dynamic-plugin failure suppression remains;
   this is not a pass of every project and M8.1 is not yet complete.
   The reference `./scripts/build.sh` now exits 0 after Haxeon `3606bd7c`.
-  The checked-in self-hosted compiler is stale and currently rejects UIKit's
-  compound shift assignment. Bootstrap now passes the null-array inference
-  failure after Haxeon `5f0b7671`, then passes four nullable-source corrections in `02608ed7`. It now fails
-  past colliding enum constructors after `56fc5b98`, then passes expected enum inference after `5b38eca1`. It now fails at
-  HashLink encoding on a forbidden NUL string separator in dependency
-  cache keys. Typing now passes after `5cf74eb0`; encode dependency
-  lists as collision-free text and retry convergence.
-- Exact resume: reference headless verification passed. Replace the shared dependency-cache NUL separator with a collision-free text key,
-  rerun Haxeon's
-  `./scripts/bootstrap-compiler.sh`, then test both compiler modes. Remove the
-  divergent defaults and upstream-fixed directory workaround. Restore
-  source-plugin embedding and remove test suppression before claiming M8.1.
+  Haxeon `58be9a62` refreshes the checked-in compiler after successful bootstrap
+  convergence; both reference and self-hosted graphical builds exit 0.
+  The fresh self-hosted headless suite also exits 0 with the dynamic-plugin
+  test explicitly suppressed. M8 acceptance remains incomplete.
+- Exact resume: check comprehension loop-binding shadowing in effect analysis,
+  then remove divergent wrapper defaults and the upstream-fixed directory
+  workaround with both modes verified. Restore source-plugin embedding and
+  remove test suppression before claiming M8.1. Integration/release and
+  interactive UIKit checks remain pending.
 - HEADs at planning: exosuit `ae2f260` (`haxeon-uikit-port`). Materia `main` is at
   `816372dd`, fast-forwarded 2026-10-01 for the Haxeon wasm and web fixes; it
   contains uikit and editorkit. Haxeon is at `fba71015` (on pin, fast-forwarded).
@@ -51,7 +48,7 @@ Last updated: 2026-10-01.
 | M5 | Complete headlessly | Live layered configuration, owned APIs, debounced background compilation, transactional reload and editor lifecycle controls pass |
 | M6 | Complete headlessly | Bounded JSON-RPC, lifecycle/synchronization, language commands, diagnostics, restart and real Haxeon edit/diagnose/fix/build smoke pass |
 | M7 | Complete for the claimed Linux automation scope | M7.1–M7.3 pass; desktop IME, physical mixed-DPI, Windows and macOS remain explicit unclaimed follow-ons |
-| M8 | In progress | C/HXI migration `f8939de` removes native string abort; headless gating tests pass; dynamic plugin project suppressed; reference graphical build passes; self-hosted bootstrap and integration/release gates pending |
+| M8 | In progress | C/HXI migration `f8939de` removes native string abort; headless gating tests pass; dynamic plugin project suppressed; both compiler graphical builds pass; bootstrap converges; dynamic plugin and integration/release gates pending |
 | M9 | Not started | Depends on M8 |
 | M10 | Not started | Depends on M8, M9.1–M9.2 |
 | M11 | Not started | Depends on M8; independent of M9/M10 |
@@ -61,6 +58,40 @@ Last updated: 2026-10-01.
 | M15 | Not started | Depends on M8.1, M8.2; scheduled right after M8. Reference: materia `app/web` at `816372dd`, Haxeon `fba71015` |
 
 ## Implementation records
+
+### M8.2 — text dependency keys and converged bootstrap (verified slice)
+
+- Haxeon `58be9a62` replaces the forbidden NUL dependency separator with a
+  shared length-prefixed text key, preserving component boundaries, empty
+  components and order. Both reachability-cache producers and consumers use
+  it. The HashLink String NUL prohibition remains intact.
+- Registered `DependencyKeyMain` fails against the original separator and
+  passes with stable, distinct keys for empty lists/components, ambiguous
+  concatenations, delimiters and Unicode. Refreshed owned bootstrap artifacts
+  are committed with the source; pre-existing `vendor/hashlink` and
+  `hlprofile.dump` changes remain untouched.
+- Haxeon `./scripts/bootstrap-compiler.sh` exited 0 and converged after one
+  self-hosted stage. `./scripts/bootstrap-compiler.sh --self` subsequently
+  printed `PASS: checked-in compiler rebuilt itself identically`; its terminal
+  status was lost during context handoff, so only that explicit result is
+  claimed. Logs: `/tmp/haxeon-bootstrap-dependency-keys.log` and
+  `/tmp/haxeon-bootstrap-self-dependency-keys.log`.
+- Haxeon `./scripts/test.sh` exited 0: 371/371 compiler-driver cases and every
+  integration stage, including native/C++ and both Wasm parity/Wasmtime gates.
+  Log: `/tmp/haxeon-gate-dependency-keys.log`. `git diff --check` passed.
+- Exosuit `HAXEON_SELF_HOSTED=1 ./scripts/build.sh` and
+  `HAXEON_SELF_HOSTED=0 ./scripts/build.sh` exited 0, compiling 618 sources.
+  The stale shift-assignment and historical `SelectOption` failures no longer
+  reproduce. Logs: `/tmp/exosuit-build-fresh-bootstrap.log` and
+  `/tmp/exosuit-build-reference-dependency-keys.log`.
+- `HAXEON_SELF_HOSTED=1 ./scripts/test.sh` exited 0; all gating headless
+  projects passed. Dynamic source-plugin acceptance was explicitly skipped
+  because its implementation is still a stub. Log:
+  `/tmp/exosuit-test-fresh-bootstrap.log`. No graphical interaction or
+  cross-platform execution is claimed.
+- Next: reduce the suspected comprehension collection-shadowing case before
+  further compiler changes; remove stale script defaults/workarounds, then
+  restore embedded source-plugin compilation and make its test gating.
 
 ### M8.1 — native C/HXI migration (verified slice; acceptance incomplete)
 
