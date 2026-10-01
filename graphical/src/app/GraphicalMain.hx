@@ -55,6 +55,15 @@ class GraphicalMain {
 		host.frameLimit = frameLimit;
 		host.captureSeconds = captureSeconds;
 		host.recordPath = recordPath;
+		var reportedFirstFrame = false;
+		host.captureReady = function() {
+			if (recordPath != null && !reportedFirstFrame) {
+				reportedFirstFrame = true;
+				Sys.println("exosuit: first frame ready");
+				Sys.stdout().flush();
+			}
+			return true;
+		};
 		var app:Null<ExosuitApp> = null;
 		var session = DesktopUiHost.open(host, function(context) {
 			var instance = new ExosuitApp(context.fonts, Theme.light(), context, openPaths.length == 0 ? null : openPaths[0], null, new NativeDesktopServices(context));

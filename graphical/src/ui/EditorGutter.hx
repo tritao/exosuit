@@ -1,29 +1,23 @@
 package ui;
 
 import Color;
-import Insets;
+import FontCollection;
 import LayoutAxis;
-import LayoutDirection;
 import LayoutStyle;
+import LayoutVisualKind;
+import LayoutMeasuredContent;
+import LayoutMeasureResult;
+import LayoutRenderableContent;
+import TextLayout;
+import TextStyle;
+import ParagraphStyle;
+import TextWrap;
 import nativekit.ui.core.BuildContext;
 import nativekit.ui.core.RenderNode;
 import nativekit.ui.core.View;
-import nativekit.ui.core.TextStyleOverride;
-import nativekit.ui.widgets.KeyedView;
-import nativekit.ui.widgets.layout.Column;
-import nativekit.ui.widgets.text.Text;
 import editor.TextBuffer;
 
-/**
- * Line-number gutter for the EditorKit-backed editor pane.
- *
- * This is a plain rebuilt column of line-number labels, not a virtualized or
- * independently-scrolled rail: `EditorPane` places it next to `TextArea` in
- * one shared `ScrollView`, so both scroll together by construction rather
- * than through an explicit scroll-position handshake. UIKit does not expose
- * per-widget scroll offsets to synchronize against directly; this sidesteps
- * that gap instead of working around it.
- */
+/** Retained visible line-number labels, sharing the editor scroll transform. */
 class EditorGutter implements View {
 	final key:String;
 	final buffer:TextBuffer;
@@ -38,32 +32,83 @@ class EditorGutter implements View {
 	}
 
 	public function build(context:BuildContext):RenderNode {
-		var count = buffer.lineCount();
-		var digits = Std.string(count == 0 ? 1 : count).length;
-		var rows:Array<KeyedView> = [];
-		for (index in 0...count) {
-			var label = padLeft(Std.string(index + 1), digits);
-			var rowStyle = new LayoutStyle();
-			// The enclosing Column below sizes itself with LayoutAxis.fit(), i.e.
-			// to its children's own intrinsic width. A `stretch()` (100% of the
-			// parent) row width is circular against that and resolves to zero,
-			// which was collapsing every line-number label to an invisible
-			// zero-width box. `fit()` lets each label size to its own text.
-			rowStyle.width = LayoutAxis.fit();
-			rowStyle.direction = LayoutDirection.LeftToRight;
-			rows.push(new KeyedView("line:" + index, new Text(label, rowStyle, foreground,
-				TextStyleOverride.text(13.0))));
-		}
-		var columnStyle = new LayoutStyle();
-		columnStyle.width = LayoutAxis.fit();
-		columnStyle.padding = new Insets(6.0, 4.0, 6.0, 0.0);
-		if (background != null) columnStyle.background = background;
-		return new Column(key, rows, columnStyle).build(context);
+		var fonts = context.fonts;
+		if (fonts == null || fonts.isDisposed()) throw "Editor gutters require fonts";
+		var id = context.id(key);
+		var labels = context.resourceState(id, function() return new GutterLabels(fonts),
+			function(value) { value.dispose(); }).value;
+		labels.update(buffer.lineCount(), foreground);
+		var style = new LayoutStyle();
+		style.width = LayoutAxis.fit();
+		style.height = LayoutAxis.fit();
+		if (background != null) style.background = background;
+		var node = new RenderNode(id, LayoutVisualKind.Custom, style);
+		node.hitTestSelf = false;
+		node.layout.intrinsicContent = labels.content;
+		return node;
+	}
+}
+
+/** Measures the rail once and shapes only labels intersecting the viewport. */
+private class GutterLabels {
+	public final content:LayoutRenderableContent;
+	final layout:TextLayout;
+	final measurement:LayoutMeasuredContent;
+	var count:Int = -1;
+	var digits:Int = 1;
+	var width:Float = 0.0;
+	var rowHeight:Float = 1.0;
+	var visibleFirst:Int = -1;
+	var visibleEnd:Int = -1;
+	var color:Null<Color> = null;
+
+	public function new(fonts:FontCollection) {
+		layout = TextLayout.create(fonts, "", 1.0, new TextStyle(13.0), new ParagraphStyle(TextWrap.None));
+		measurement = new LayoutMeasuredContent(function(_) {
+			return new LayoutMeasureResult(width + 12.0, rowHeight * count + 4.0);
+		});
+		content = new LayoutRenderableContent(measurement, function(canvas, geometry) {
+			var visible = geometry.visibleLocalBounds();
+			var first = Std.int(Math.max(0, Math.floor((visible.y - 4.0) / rowHeight) - 1));
+			var end = Std.int(Math.min(count, Math.ceil((visible.y + visible.height - 4.0) / rowHeight) + 1));
+			if (end <= first) return;
+			if (first != visibleFirst || end != visibleEnd) {
+				var labels:Array<String> = [];
+				for (index in first...end) {
+					var label = Std.string(index + 1);
+					while (label.length < digits) label = " " + label;
+					labels.push(label);
+				}
+				layout.setText(labels.join("\n"));
+				visibleFirst = first;
+				visibleEnd = end;
+			}
+			canvas.drawText(layout, 6.0, 4.0 + first * rowHeight);
+		});
 	}
 
-	static function padLeft(value:String, width:Int):String {
-		var result = value;
-		while (result.length < width) result = " " + result;
-		return result;
+	public function update(nextCount:Int, nextColor:Color):Void {
+		if (count != nextCount) {
+			digits = Std.string(nextCount == 0 ? 1 : nextCount).length;
+			layout.setText(Std.string(nextCount == 0 ? 1 : nextCount));
+			var metrics = layout.measure();
+			width = metrics.width;
+			rowHeight = Math.max(1.0, metrics.height);
+			count = nextCount;
+			visibleFirst = -1;
+			visibleEnd = -1;
+			measurement.invalidate();
+		}
+		if (color == null || color.red != nextColor.red || color.green != nextColor.green ||
+			color.blue != nextColor.blue || color.alpha != nextColor.alpha) {
+			layout.setColor(nextColor);
+			color = nextColor;
+			content.invalidatePaint();
+		}
+	}
+
+	public function dispose():Void {
+		content.dispose();
+		layout.dispose();
 	}
 }

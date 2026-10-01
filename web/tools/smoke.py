@@ -172,6 +172,7 @@ def main():
     previous_origin = page.evaluate("performance.timeOrigin")
     page.command("Page.reload", {"ignoreCache": True})
     reloaded = False
+    probe = None
     while time.monotonic() < deadline:
         try:
             probe = json.loads(page.evaluate("JSON.stringify({origin: performance.timeOrigin, state: window.exosuit || null})"))
@@ -190,7 +191,9 @@ def main():
             reloaded = True
             break
         time.sleep(0.25)
-    assert reloaded, "fresh document did not reach the requested running frames"
+    assert reloaded, json.dumps({"message": "fresh document did not reach the requested running frames",
+                                 "probe": probe, "console": page.console,
+                                 "networkFailures": page.network_failures}, ensure_ascii=False)
     restored = snapshot()
     assert restored["content"] == original and not restored["dirty"] and not restored["errors"], restored
     state = json.loads(page.evaluate("JSON.stringify(window.exosuit || null)") or "null") or {}

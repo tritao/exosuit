@@ -80,7 +80,8 @@ Run from the editor root:
 ./scripts/build.sh     # graphical/haxeon.json (UIKit host)
 ./scripts/ci.sh        # composed gate (M8.3 restores LSP and release stages)
 ./scripts/test-decoration-ui.sh # real retained decoration pixels (Xvfb + Python Pillow)
-./scripts/benchmark-uikit-typing.sh # real keyboard/frame timing; TYPING_UI_FIXTURE=small|10mb|long-line
+./scripts/benchmark-uikit-typing.sh # delivered input through completed frame; small|10mb|long-line
+./scripts/profile-uikit-startup.py --fixture long-line --artifacts /tmp/exosuit-startup-new
 ./scripts/run.sh /absolute/path/to/a/disposable/project
 ```
 
@@ -109,3 +110,9 @@ fixes satisfy their own gate; no unexplained failures or workaround debt are
 hidden. Record unperformed platform/manual checks explicitly. Later milestones
 may proceed around independent pending checks, but milestone completion cannot
 be claimed until its required checks pass.
+
+Typing measurements include edit dispatch and retain input attribution through
+coalesced caret frames. `TYPING_UI_CAPTURE_SECONDS` and `TYPING_UI_KEY_DELAY_MS`
+override fixture defaults (small: 15 s/120 ms, multiline: 45 s/400 ms,
+single line: 90 s/1,200 ms). Results record both settings.
+Benchmark exit 0 means valid samples; inspect `withinBudget` separately.

@@ -16,8 +16,8 @@ Last updated: 2026-10-01.
   browser stage is wired into composed CI through `EXOSUIT_CI_WEB=1`; absent
   toolchains remain explicitly pending.
 - Active task: **M9.1**, styled text and decorations on UIKit.
-- Exact resume: profile large-document/long-line typing and finish affected-row
-  invalidation, then complete multi-caret movement. Preserve M8 and both browser
+- Exact resume: bound long-paragraph edit/shaping and prepared-glyph publication,
+  finish affected-row invalidation, then complete multi-caret movement. Preserve M8 and both browser
   gates.
 - All further graphical tests must use disposable PRAGTICAL_PORTABLE state.
   IME, physical mixed-DPI transitions, Windows and macOS remain unclaimed.
@@ -61,7 +61,88 @@ Last updated: 2026-10-01.
 
 ## Implementation records
 
+### M9.1 — large-file startup and measured typing (verified fixes, budget still partial)
+
+- Haxeon `460e10d7` fixes generic factory/disposer callback inference for implicit
+  static and instance methods. Non-lambda arguments and known callback contexts
+  bind type parameters progressively; reversed callbacks are revisited rather
+  than defaulting their receivers to Dynamic. Class/expected-result substitutions
+  remain intact. The reduced resource factory now compiles without annotations.
+  Accepted execution and rejected missing-method/wrong-type regressions pass;
+  all 384 compiler tests, integration/Wasm gates, bootstrap convergence and
+  identical self-hosted rebuild pass. Logs: `/tmp/haxeon-m9-callback-gate-verified.log`,
+  `/tmp/haxeon-m9-callback-bootstrap.log` and `-bootstrap-self.log`.
+- Skribidi `889e644` caches remaining word lookahead across character-wrapped
+  rows, eliminating quadratic rescanning. Tab-dependent widths are not cached;
+  short tails retain original width accumulation. The new 1 MiB wrapped-word
+  regression times out at 20 seconds before the fix and passes in 1.149 CPU
+  seconds afterward; the complete native Skribidi suite passes.
+- Materia `065eb34cf`: UIKit defers glyph preparation until rendering, culls offscreen transformed
+  glyph quads before bounded GPU upload, and starts TextEditorState with an
+  unconstrained provisional width. A 100,000-character native rendering regression
+  verifies upload succeeds; the framework regression checks initial measurement
+  followed by real-width wrapping. EditorKit skips Unicode property scans for
+  ASCII pairs while preserving CRLF and Unicode adjacency; exhaustive representable
+  ASCII-pair and incremental/Unicode regressions pass.
+- Exosuit's gutter retains one layout and shapes only viewport labels, instead
+  of allocating a view/layout for every logical line. This avoids both resource
+  exhaustion and repeated traversal of tens of thousands of offscreen labels.
+  No Clay change was needed. Existing wrapped-row/gutter alignment is not claimed
+  as fixed by this performance work.
+- Capture metadata now records delivered text-input count, oldest delivery time
+  and edit-dispatch duration before the adapter mutates the document. Coalesced
+  caret requests retain the input attribution. The benchmark waits for the actual
+  first rendered frame and measures delivered input through completed frame,
+  including edit dispatch, excluding OS delivery and physical display scanout.
+  Earlier request-reason filtering missed coalesced inputs and excluded dispatch;
+  those historical measurements are not directly comparable.
+- Final Linux i5-13600K measurements, 30 input events in 30 measured frames each:
+  small (4,200 bytes) p50 **17.47 ms**, p95 **20.03 ms**, max **22.82 ms**;
+  original 10 MiB multiline fixture p50 **26.31 ms**, p95 **36.86 ms**,
+  max **46.92 ms**; 1 MiB single line p50 **705.83 ms**, p95 **808.62 ms**,
+  max **824.02 ms**. The small and multiline cases pass the 50 ms budget;
+  the single line fails. Artifact directories are `/tmp/exosuit-m9-typing-small-traced`,
+  `/tmp/exosuit-m9-typing-10mb-viewport`, `/tmp/exosuit-m9-typing-long-line-traced`;
+  logs use the same names plus `.log`. Multiline inputs were paced at 400 ms
+  and single-line inputs at 1,200 ms to collect distinct frames; small uses 120 ms.
+- Final benchmark-default verification also passes: 10 MiB, 30 frames/events,
+  p50 26.35 ms, p95 **35.74 ms**, max 40.61 ms, 45-second capture/400 ms pacing,
+  with both settings recorded in `/tmp/exosuit-m9-typing-10mb-defaults/result.json`.
+- Single-line mean edit dispatch is 254 ms, custom paint 32 ms and native render
+  401 ms. Whole-paragraph shaping/prepared-glyph generation and traversal remain
+  the measured next targets. In particular, TextEngine line publication passes
+  a codepoint range to its callback but still prepares/iterates the whole native
+  layout before filtering. Bound that work to visible lines, then remeasure the
+  remaining edit dispatch. Both large fixtures now open and accept input;
+  **M9.1 remains active**, including strict changed-row invalidation and multi-caret
+  movement. Do not mark overall acceptance complete.
+- `scripts/profile-uikit-startup.py` retains startup samples, native profiler output
+  and sampled HashLink peak RSS with disposable portable state. The unconstrained
+  startup/ASCII run of the original multiline fixture used about 2,090,884 KiB
+  peak RSS and completed three frames in 10.22 seconds, before the final viewport
+  gutter optimization; this is not a final startup-memory acceptance claim.
+
+- Verification for this slice: native CTest has 61/61 passing checks across the
+  full run and four framework reruns, plus the added large-upload regression;
+  EditorKit DocCheck passes. Reference and self-hosted decoration pixels and
+  graphical builds and complete headless suites pass in both compiler modes
+  (`/tmp/exosuit-m9-large-headless.log` and `-headless-self.log`).
+  Real UIKit workflow, actual Haxeon LSP and unpacked
+  release pass. Both browser targets pass edit/save/readback/URL/fresh reload.
+  Logs use `/tmp/exosuit-m9-large-` with `decoration`, `decoration-self`,
+  `self-build`, `workflow`, `lsp`, `release`, `web32-retry`, `webgc-test` suffixes
+  and `.log`; native evidence is `/tmp/uikit-m9-large-native-tests.log`,
+  `/tmp/uikit-m9-large-framework-verified.log`, `/tmp/uikit-m9-large-render.log`.
+- The first browser reload attempt timed out after successful edit/save; an
+  unchanged-build retry passed. Failure output now retains the final fresh-page
+  probe, console and network failures. Cause remains unresolved; do not claim a
+  browser product fix. Four initial framework wrappers failed during an invalid
+  incidental compiler-formatting intermediate; formatting was restored and all
+  four pass with the final committed compiler. No test was removed or suppressed.
+
 ### M9.1 — restored UIKit keyboard benchmark (initial measurements)
+
+Historical measurements before the startup fixes recorded above.
 
 - `scripts/benchmark-uikit-typing.sh` drives actual X11 character insertion and
   backspace through the production editor with disposable portable state. It
