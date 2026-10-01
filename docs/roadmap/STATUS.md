@@ -1,18 +1,22 @@
 # Execution ledger
 
-Last updated: 2026-09-08.
+Last updated: 2026-10-01.
 
 ## Current checkpoint
 
-- Active task: final audit complete; no implementation milestone remains open.
-- Completed tasks: M0.1, M0.2, M1.1–M1.4, M2.1–M2.4, M3.1–M3.3, M4.1–M4.3, M5.1–M5.3, M6.1–M6.3 and M7.1.
-- M0.3 now has a real-window, keyboard-driven automated graphical route; human
-  desktop IME and physical mixed-DPI observations remain pending.
-- Follow-on qualification: observe Linux desktop IME candidate placement and a
-  physical mixed-DPI transition when those environments are available. Windows
-  and macOS remain independently unclaimed.
-- Editor implementation HEAD: `354f0e8`. Haxeon HEAD observed: `83a2749`.
-- Compiler changes remain separate from editor commits and must pass their own gate.
+- Active task: **M8.1** (native string convention). Follow-on roadmap M8–M15 was planned 2026-10-01.
+- HEADs at planning: exosuit `ae2f260` (`haxeon-uikit-port`), haxeon `5d4fe0ff` (2 dirty),
+  nativekit `2bb4c957` (`materia-numeric-locale`), uikit and editorkit `3db05075` (4 dirty each),
+  pragtical `50644c91` (`next`, read-only reference, dirty smooth-scroll work).
+- The UIKit port (`89d2694`, ADR 0002) invalidates M0–M7 runtime evidence for the
+  graphical product. Those records stay as history; M8 re-establishes the gates.
+- Baseline failures at `ae2f260`:
+  - `./scripts/test.sh`: the headless core compiles, then HashLink aborts with
+    `Invalid signature for function pragtical_hx@last_error : P_OBi_ required but
+    P_B found in hdll`. Every `String` extern has the same mismatch (M8.1).
+  - `./scripts/build.sh`: `commandview/CommandView.hx:297:16: E1005: Field
+    "entries" requires an object` in the reference compiler (M8.2).
+- Previous checkpoint (M0–M7 complete headlessly on the SDL host): editor `354f0e8`, Haxeon `83a2749`.
 
 ## Milestones
 
@@ -26,6 +30,14 @@ Last updated: 2026-09-08.
 | M5 | Complete headlessly | Live layered configuration, owned APIs, debounced background compilation, transactional reload and editor lifecycle controls pass |
 | M6 | Complete headlessly | Bounded JSON-RPC, lifecycle/synchronization, language commands, diagnostics, restart and real Haxeon edit/diagnose/fix/build smoke pass |
 | M7 | Complete for the claimed Linux automation scope | M7.1–M7.3 pass; desktop IME, physical mixed-DPI, Windows and macOS remain explicit unclaimed follow-ons |
+| M8 | Not started | Headless suite aborts on native string signatures; graphical build hits E1005; SDL automation, LSP smoke and release gates are missing |
+| M9 | Not started | Depends on M8 |
+| M10 | Not started | Depends on M8, M9.1–M9.2 |
+| M11 | Not started | Depends on M8; independent of M9/M10 |
+| M12 | Not started | Depends on M9, M11.1, M11.4 |
+| M13 | Not started | Depends on M11.2 |
+| M14 | Not started | Depends on M11–M13 |
+| M15 | Not started | Depends on M9, M10 |
 
 ## Completed records
 
@@ -389,9 +401,10 @@ These commits satisfy only the behaviors evidenced by their tests; they do not m
 
 ## Blockers and pending manual checks
 
-- Interactive M0.3 graphical smoke route is pending.
-- Windows atomic publication is implemented but has not been executed on Windows; do not claim platform qualification before M7 evidence.
-- No current blocker prevents headless roadmap implementation.
+- M8 gates are red (see Current checkpoint); every follow-on milestone waits on M8.
+- The SDL-era graphical route (M0.3) and its automation scripts were removed by the
+  UIKit port; M8.3 replaces them. Desktop IME and physical mixed-DPI checks stay pending.
+- Windows (ConPTY, named pipes, atomic publication) and macOS are unclaimed.
 
 ## Record template
 

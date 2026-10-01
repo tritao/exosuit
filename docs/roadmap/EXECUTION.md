@@ -2,18 +2,30 @@
 
 ## Scope and repository ownership
 
-Implementation covers this editor and necessary compiler/runtime/stdlib fixes
-in the checkout selected by `HAXEON_ROOT` (default `../realtime-haxe`). Read
-applicable repository instructions before editing either repository. Inspect
-`git status --short` and diffs in both at the start and preserve existing work.
-The planning inspection found extensive editor changes and an untracked
-`tests/driver/TestCatalog.hx` in the compiler repository; do not assume authorship.
+Implementation covers this editor and necessary changes in the sibling
+workspace repositories:
 
-Treat `PRAGTICAL_ROOT` (default `../pragtical`) as renderer/reference input.
-Do not alter it unless a demonstrated backend defect requires separately scoped
-work. No publishing, pushes, PR mutations or destructive cleanup are part of
-this plan. No commit is required for a checkpoint. If commits are separately
-authorized, stage only owned hunks and record both repositories' commit IDs.
+- Haxeon compiler, runtime and stdlib in `HAXEON_ROOT` (default `../haxeon`).
+- NativeKit (`../nativekit`) for native modules and core.
+- UIKit (`../uikit`) for widgets and hosts.
+- EditorKit (`../editorkit`) for the text model.
+
+Read the applicable repository instructions before editing any of them.
+Inspect `git status --short` in each at the start and preserve existing work.
+At the M8 planning baseline, `haxeon` had 2 modified paths and `uikit` and
+`editorkit` had 4 each; do not assume authorship of them.
+
+Treat `PRAGTICAL_ROOT` (default `../pragtical`, branch `next`) as read-only
+reference input, including its uncommitted work. Read its sources and tests to
+port behavior. You may build it and run its binaries for interoperability
+tests, using a separate build directory. Do not modify it.
+
+No publishing, pushes, PR mutations or destructive cleanup are part of this
+plan. Commit each verified slice on the current branch of the repository it
+belongs to. In a sibling repository, first create a branch named
+`exosuit-followon`, and never commit to `main`. Stage only owned hunks. Use
+the commit attribution the session requires, and record every repository's
+commit IDs in STATUS.
 
 ## Work loop
 
@@ -51,16 +63,17 @@ when a real product decision or unavailable authority is required.
 Run from the editor root:
 
 ```sh
-./scripts/test.sh
-./scripts/build-sdl.sh
+./scripts/test.sh      # headless core + tests/*/haxeon.json projects
+./scripts/build.sh     # graphical/haxeon.json (UIKit host)
+./scripts/ci.sh        # composed gate (M8.3 restores LSP and release stages)
 ./scripts/run.sh /absolute/path/to/a/disposable/project
 ```
 
-The test script builds a headless application and exercises platform, command,
-view, application, document, plugin, workspace and dynamic-plugin entry points.
-The graphical build overwrites the shared output backend; run it after headless
-tests before interactive checking. `run.sh` rebuilds and discovers plugin manifests.
-Serialize builds/tests that share `out` or `build`; do not race them.
+The test script runs the platform ABI check and the headless test projects
+under `tests/`. Each new subsystem adds its own `tests/<name>/haxeon.json`
+project, wired into `test.sh`. Native modules add their own NativeKit tests and
+run that repository's test gate. Serialize builds and tests that share `build`
+directories or the `uikit-native` CMake build; do not race them.
 
 Run `./scripts/test.sh` from the compiler root after a core compiler change.
 Its current stages include formatting, runtime bridge build, differential tests

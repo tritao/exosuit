@@ -46,12 +46,45 @@ directly to the destination; workspace search reads files synchronously;
 plugin refresh rereads source files every update; cursor/anchor live in the buffer.
 Validate these observations again before changing their implementation.
 
-## Scope after M7
+## Follow-on: UIKit host and Pragtical fork features
 
-Terminal/PTY, SCM and diff UI, control CLI, workbench/agent features, web target
-and Lua compatibility are separate follow-on plans. The sibling Pragtical
-checkout includes features beyond the initial destination. Record additions
-explicitly instead of silently expanding a milestone.
+Planning baseline: 2026-10-01 at `ae2f260` (branch `haxeon-uikit-port`). ADR
+0002 moved the editor onto the NativeKit UIKit host and haxeon.json manifests,
+so the M0–M7 evidence no longer describes the running product. The sibling
+Pragtical fork (`../pragtical`, branch `next`, `50644c91`) adds Workbench
+agents, an integrated terminal, a local control plane, Haxeon LSP, sidebar
+modes and a web build. These stages port that work. They are behavioral ports
+onto Haxeon, NativeKit and UIKit; Lua code is not reused.
+
+| Stage | Plan | Depends on | Result |
+| --- | --- | --- | --- |
+| M8 | [UIKit baseline](08-uikit-baseline.md) | M7, port | Green gates on the new toolchain |
+| M9 | [Shell parity](09-shell-parity.md) | M8 | Styled text, panes, sidebar modes, smooth scroll |
+| M10 | [Haxeon language](10-haxeon-language.md) | M8, M9.1–M9.2 | Language features usable in the UI |
+| M11 | [Native foundations](11-native-foundations.md) | M8 | PTY, hardened local IPC, SQLite, emulator |
+| M12 | [Terminal](12-terminal.md) | M9, M11.1, M11.4 | Integrated terminal |
+| M13 | [Control plane](13-control-plane.md) | M11.2 | `exosuit-ctl` and launch forwarding |
+| M14 | [Workbench](14-workbench.md) | M11–M13 | Workspaces, terminals, agent supervision |
+| M15 | [Web target](15-web.md) | M9, M10 | Browser build with capability guards |
+
+Ready-work order: M8 → M9 → M10 → M11 → M13 → M12 → M14 → M15. M11 and M13
+are independent of M9 and M10 and may proceed while those are blocked.
+
+Decisions taken by default (record any override in STATUS):
+
+- Native capabilities go into NativeKit as general modules or core (PTY,
+  transport hardening, SQLite, emulator), not into exosuit's own C sources.
+  Widget capabilities go into UIKit.
+- Stay wire-compatible with Pragtical control protocol v1 and Workbench
+  protocol 2.1, so either side's tests and binaries interoperate. Each editor
+  keeps its own storage and runtime directories.
+- Vendor SQLite and libtsm (`tritao/libtsm@7b1de2d`). Before vendoring,
+  confirm both licenses and record the notices in packaging.
+- Opt-in tests that need external CLIs (Codex, opencode, Chromium) record
+  "pending" when the tool is absent. They are never skipped silently.
+
+Still out of scope: SCM/diff UI, debugger UI, and Lua plugin compatibility.
+Record any other addition explicitly instead of silently expanding a milestone.
 
 ## Release gates
 
