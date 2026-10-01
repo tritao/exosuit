@@ -14,8 +14,8 @@ Last updated: 2026-10-01.
   convergence; both reference and self-hosted graphical builds exit 0.
   The fresh self-hosted headless suite also exits 0 with the dynamic-plugin
   test explicitly suppressed. M8 acceptance remains incomplete.
-- Exact resume: finish both-mode verification of the wrapper defaults and
-  directory-workaround removal (running session 85344; logs below). Restore source-plugin embedding and
+- Exact resume: wrapper verification is complete (`18e1ad5`). Restore
+  source-plugin embedding and
   remove test suppression before claiming M8.1. Integration/release and
   interactive UIKit checks remain pending.
 - HEADs at planning: exosuit `ae2f260` (`haxeon-uikit-port`). Materia `main` is at
@@ -57,6 +57,29 @@ Last updated: 2026-10-01.
 | M15 | Not started | Depends on M8.1, M8.2; scheduled right after M8. Reference: materia `app/web` at `816372dd`, Haxeon `fba71015` |
 
 ## Implementation records
+
+### M8.2 — consistent wrappers without action-directory workaround (verified slice)
+
+- Exosuit `18e1ad5` aligns build, run and test with the standard CLI
+  reference-compiler default. `HAXEON_SELF_HOSTED=1` remains an explicitly
+  verified mode. Removed the stale pre-created action directories; upstream
+  Haxeon `c59502ff` owns the general concurrent directory-creation fix.
+- Serialized graphical builds using each compiler and new output paths exited
+  0 (`/tmp/exosuit-fresh-reference-actions.log`,
+  `/tmp/exosuit-fresh-self-actions.log`). Both headless modes then exited 0
+  (`/tmp/exosuit-test-wrapper-reference.log`,
+  `/tmp/exosuit-test-wrapper-self.log`), still explicitly skipping source-plugin
+  acceptance. No test suppression was added or expanded.
+- Additional graphical manifests in temporary directories used absolute
+  references to the unchanged real packages and empty build/action caches.
+  Both reference and self-hosted builds exited 0, including native builds;
+  logs `/tmp/exosuit-empty-actions-reference.log` and
+  `/tmp/exosuit-empty-actions-self.log`. No directory pre-creation was used.
+- `bash -n scripts/build.sh scripts/run.sh scripts/test.sh` and
+  `git diff --check` exited 0. Interactive run, GUI and other platforms remain
+  pending. Next: expose Haxeon's compiler/runtime package, restore source
+  plugins with callback-error propagation/lifecycle coverage, then make the
+  dynamic-plugin test mandatory.
 
 ### M8.2 — comprehension collection shadowing (verified slice)
 
