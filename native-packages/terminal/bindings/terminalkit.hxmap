@@ -1,0 +1,13 @@
+{
+  "interface": "TerminalKit",
+  "package": "terminalkit.ffi",
+  "modules": {
+    "functions": "TerminalKit",
+    "types": "TerminalKitTypes",
+    "constants": "TerminalKitConstants"
+  },
+  "typeNames": {
+    "terminalkit_handle": "TerminalHandle",
+    "terminalkit_cell": "TerminalCell"
+  }
+}

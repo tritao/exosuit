@@ -1,0 +1,31 @@
+cmake_minimum_required(VERSION 3.21)
+project(terminalkit LANGUAGES C)
+
+set(LIBTSM vendor/libtsm)
+add_library(terminalkit SHARED
+    src/terminalkit.c
+    vendor/pragtical/terminal_emulator_libtsm.c
+    ${LIBTSM}/src/tsm/tsm-render.c
+    ${LIBTSM}/src/tsm/tsm-screen.c
+    ${LIBTSM}/src/tsm/tsm-selection.c
+    ${LIBTSM}/src/tsm/tsm-unicode.c
+    ${LIBTSM}/src/tsm/tsm-vte-charsets.c
+    ${LIBTSM}/src/tsm/tsm-vte.c
+    ${LIBTSM}/src/shared/shl-htable.c
+    ${LIBTSM}/external/wcwidth/wcwidth.c)
+target_compile_features(terminalkit PRIVATE c_std_11)
+target_compile_definitions(terminalkit PRIVATE TERMINALKIT_BUILDING=1 TSM_STATIC=1)
+target_include_directories(terminalkit PUBLIC include PRIVATE
+    vendor/pragtical ${LIBTSM}/src/tsm ${LIBTSM}/src/shared
+    ${LIBTSM}/external/wcwidth ${LIBTSM}/external)
+set_target_properties(terminalkit PROPERTIES C_VISIBILITY_PRESET hidden)
+
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    include(CTest)
+    if(BUILD_TESTING)
+        add_executable(terminalkit_contract tests/contract.c)
+        target_compile_features(terminalkit_contract PRIVATE c_std_11)
+        target_link_libraries(terminalkit_contract PRIVATE terminalkit)
+        add_test(NAME terminal_contract COMMAND terminalkit_contract)
+    endif()
+endif()

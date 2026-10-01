@@ -16,11 +16,11 @@ Last updated: 2026-10-01.
   browser stage is wired into composed CI through `EXOSUIT_CI_WEB=1`; absent
   toolchains remain explicitly pending.
 - Active task: **M9.1**, styled text and decorations on UIKit.
-- Independent M11.1 POSIX PTY, M11.2 Linux transport, and M11.3 SQLiteKit
-  slices are verified
+- Independent M11.1 POSIX PTY, M11.2 Linux transport, M11.3 SQLiteKit, and
+  an initial M11.4 TerminalKit slice are verified
   while the 1 MiB graphical timing gate waits for an idle host. Their Windows
-  implementations remain open; the listed Pragtical PTY source path is absent
-  from the available reference checkout.
+  implementations remain open. The Pragtical PTY and emulator references are
+  present in the available read-only checkout.
 - Exact resume: finish M9.1 strict changed-row invalidation. The guarded
   lowercase ASCII native edit path and visible-line background geometry meet
   the real 1 MiB varied-key typing budget; Unicode and unsupported layouts
@@ -61,13 +61,42 @@ Last updated: 2026-10-01.
 | M8 | Accepted on Linux | Both compiler modes, mandatory source plugins, real LSP/window workflow and unpacked release; composed CI exits 0 |
 | M9 | Active: M9.1 | General styled text/decorations and editor rendering |
 | M10 | Not started | Depends on M8, M9.1–M9.2 |
-| M11 | Active: M11.1 POSIX, M11.2 Linux, M11.3 SQLiteKit | Depends on M8; independent of M9/M10; M11.4 emulator and Windows PTY/named pipes remain pending |
+| M11 | Active: M11.1 POSIX, M11.2 Linux, M11.3 SQLiteKit, M11.4 TerminalKit slice | Depends on M8; independent of M9/M10; Windows PTY/named pipes and M11.4 session integration remain pending |
 | M12 | Not started | Depends on M9, M11.1, M11.4 |
 | M13 | Not started | Depends on M11.2 |
 | M14 | Not started | Depends on M11–M13 |
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M11.4 — TerminalKit emulator (initial Linux slice)
+
+- `native-packages/terminal` is a reusable Haxeon package with a native C
+  library, generated HXI/HXMAP, thin Haxe `Emulator` wrapper, and native plus
+  Haxe smoke tests. The Pragtical libtsm backend is vendored with MIT
+  attribution. libtsm itself is a Git submodule pinned to
+  `tritao/libtsm` commit `a676fa19`, published on
+  `terminalkit-scrollback-draw`; the commit adds Pragtical's scrollback
+  viewport API with a focused upstream test. The existing dirty Pragtical
+  subproject checkout was not modified.
+- The native API feeds PTY bytes, reports dimensions/cursor/modes/title,
+  navigates scrollback, encodes keyboard/mouse/focus replies through a borrowed
+  callback, and writes/restores replayable checkpoints. Active-screen
+  snapshots expose borrowed typed cells and a UTF-8 arena. Changed-row flags
+  hash rendered content because libtsm row IDs identify lines but do not
+  change on every write. Haxe copies a row only when `rowText()` is called.
+- The native contract ports emulator fixtures for screen text, style, cursor,
+  scrollback, focus, mouse, keyboard, synchronized output, and checkpoint
+  restore into a differently sized emulator. That restore test exposed stale
+  attributes outside the constructor width; the vendored backend now clears
+  the resized grid before replay. A long combining sequence confirms the
+  pinned libtsm limit of ten code points per cell. Four-target HXI audit,
+  native contract, and Haxeon smoke pass in reference and self-hosted modes.
+  The fork's Meson library builds; its own unit suite could not run because
+  the host lacks `check`.
+- M11.4 remains open for fuller Haxe input/output and cell-style wrappers,
+  Pragtical Lua session fixture port, graphical integration, and Windows/macOS
+  native execution. The package gate is included in `scripts/test.sh`.
 
 ### M11.3 — SQLiteKit embedded storage (accepted Linux slice)
 
@@ -97,8 +126,7 @@ Last updated: 2026-10-01.
   The importer fixture passes, and Haxeon's full suite passes 384/384 driver
   cases plus integrations/Wasm. `release.lock` pins that Haxeon HEAD; its
   pre-existing dirty `vendor/hashlink` pointer remains unstaged.
-- Next independent native foundation is M11.4 terminal emulation. M9.1's
-  graphical timing gate and Windows ConPTY/named-pipe work remain open.
+- M9.1's graphical timing gate and Windows ConPTY/named-pipe work remain open.
 
 ### M11.1 — POSIX PTY runtime (accepted native slice)
 
@@ -117,8 +145,9 @@ Last updated: 2026-10-01.
   `/tmp/materia-nativekit-m11-build`. NativeKit source and generated HXI are
   committed, and `release.lock` pins the commit.
 - M11.1 remains open for Windows ConPTY runtime and a platform execution
-  test. The current Windows stub reports `NK_ERROR_UNSUPPORTED`. The absent
-  Pragtical reference prevents a source-port claim.
+  test. The current Windows stub reports `NK_ERROR_UNSUPPORTED`. The
+  Pragtical runtime reference was located after this slice and can inform
+  the remaining ConPTY implementation.
 
 ### M11.2 — POSIX local transport hardening (accepted Linux slice)
 

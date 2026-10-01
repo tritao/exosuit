@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "package": { "name": "terminalkit-test" },
+  "entry": "app.Main",
+  "sourceRoots": ["haxe"],
+  "dependencies": { "terminalkit": { "path": ".." } },
+  "target": "host",
+  "outputDir": "build"
+}

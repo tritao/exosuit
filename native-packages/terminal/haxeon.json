@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "package": { "name": "terminalkit" },
+  "sourceRoots": ["haxe"],
+  "scopeSourceRoots": false,
+  "native": {
+    "cmake": {
+      "source": ".",
+      "target": "terminalkit",
+      "library": "terminalkit",
+      "inputs": ["CMakeLists.txt", "include/terminalkit.h", "include/terminalkit_cells.h", "src/terminalkit.c",
+        "vendor/pragtical/terminal_emulator.h", "vendor/pragtical/terminal_emulator_libtsm.c",
+        "vendor/libtsm/src", "vendor/libtsm/external"]
+    }
+  },
+  "ffi": {
+    "interfaces": ["bindings/terminalkit.hxi"],
+    "projections": ["bindings/terminalkit.hxmap"]
+  },
+  "target": "host"
+}

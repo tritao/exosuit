@@ -1,0 +1,84 @@
+#ifndef TERMINALKIT_H
+#define TERMINALKIT_H
+#include <stdint.h>
+
+#if defined(_WIN32)
+# if defined(TERMINALKIT_BUILDING)
+#  define TERMINALKIT_API __declspec(dllexport)
+# else
+#  define TERMINALKIT_API __declspec(dllimport)
+# endif
+#else
+# define TERMINALKIT_API __attribute__((visibility("default")))
+#endif
+#if defined(__clang__)
+# define TK_OPAQUE __attribute__((annotate("hxi:opaque")))
+# define TK_OUT __attribute__((annotate("hxi:out")))
+# define TK_BORROWED __attribute__((annotate("hxi:borrowed")))
+# define TK_UTF8 __attribute__((annotate("hxi:utf8")))
+# define TK_RETURNS_BORROWED_UTF8 __attribute__((annotate("hxi:returns_borrowed_utf8")))
+# define TK_OUT_BUFFER(size) __attribute__((annotate("hxi:out_buffer")))
+# define TK_INOUT __attribute__((annotate("hxi:inout")))
+# define TK_NULLABLE _Nullable
+#else
+# define TK_OPAQUE
+# define TK_OUT
+# define TK_BORROWED
+# define TK_UTF8
+# define TK_RETURNS_BORROWED_UTF8
+# define TK_OUT_BUFFER(size)
+# define TK_INOUT
+# define TK_NULLABLE
+#endif
+
+typedef struct terminalkit_handle terminalkit_handle TK_OPAQUE;
+typedef struct terminalkit_cell terminalkit_cell TK_OPAQUE;
+/* Reply bytes are borrowed for the callback duration and can go to a PTY. */
+typedef void (*terminalkit_output_callback)(const char *bytes, int length, void *user_data);
+
+/* The returned handle is owned by the caller. */
+TERMINALKIT_API int terminalkit_open(int columns, int rows, int scrollback_limit,
+    const char *term TK_UTF8,
+    terminalkit_handle * TK_NULLABLE *out_kit TK_OUT TK_BORROWED);
+TERMINALKIT_API void terminalkit_close(terminalkit_handle *kit);
+TERMINALKIT_API int terminalkit_feed(terminalkit_handle *kit, const uint8_t *bytes, uint64_t size);
+TERMINALKIT_API void terminalkit_resize(terminalkit_handle *kit, int columns, int rows);
+TERMINALKIT_API int terminalkit_columns(terminalkit_handle *kit);
+TERMINALKIT_API int terminalkit_rows(terminalkit_handle *kit);
+TERMINALKIT_API int terminalkit_cursor(terminalkit_handle *kit, int *column TK_OUT,
+    int *row TK_OUT, int *mode TK_OUT);
+TERMINALKIT_API int terminalkit_mouse_mode(terminalkit_handle *kit);
+TERMINALKIT_API int terminalkit_focus_reporting(terminalkit_handle *kit);
+TERMINALKIT_API int terminalkit_synchronized_output(terminalkit_handle *kit);
+TERMINALKIT_API const char *terminalkit_title(terminalkit_handle *kit) TK_RETURNS_BORROWED_UTF8;
+TERMINALKIT_API void terminalkit_focus(terminalkit_handle *kit, int focused);
+TERMINALKIT_API void terminalkit_set_output_callback(terminalkit_handle *kit,
+    terminalkit_output_callback callback, void *user_data);
+TERMINALKIT_API int terminalkit_keyboard(terminalkit_handle *kit,
+    const char *key_name TK_UTF8, uint32_t modifiers, uint32_t unicode);
+TERMINALKIT_API int terminalkit_mouse(terminalkit_handle *kit, uint32_t x, uint32_t y,
+    uint32_t button, uint32_t event, uint8_t modifiers);
+TERMINALKIT_API void terminalkit_scrollback(terminalkit_handle *kit, int position,
+    int *current TK_OUT, int *total TK_OUT);
+
+/* Checkpoints use caller storage and can restore into a fresh handle. */
+TERMINALKIT_API uint64_t terminalkit_checkpoint_size(terminalkit_handle *kit);
+TERMINALKIT_API int terminalkit_checkpoint(terminalkit_handle *kit, void *buffer,
+    uint64_t capacity, uint64_t *written TK_OUT);
+TERMINALKIT_API int terminalkit_restore(terminalkit_handle *kit, const void *data, uint64_t size);
+
+/* Refresh cached active-screen cells. A zero return means no row changed. */
+TERMINALKIT_API int terminalkit_snapshot(terminalkit_handle *kit);
+TERMINALKIT_API int terminalkit_row_changed(terminalkit_handle *kit, int row);
+TERMINALKIT_API uint64_t terminalkit_row_id(terminalkit_handle *kit, int row);
+/* Borrowed until the next feed, resize, restore, snapshot or close. */
+TERMINALKIT_API const terminalkit_cell *terminalkit_cells(terminalkit_handle *kit)
+    TK_BORROWED;
+TERMINALKIT_API const uint8_t *terminalkit_text(terminalkit_handle *kit)
+    TK_BORROWED;
+TERMINALKIT_API uint64_t terminalkit_text_size(terminalkit_handle *kit);
+/* Convenience copy for language bindings; native clients can borrow cells/text. */
+TERMINALKIT_API int terminalkit_row_text_copy(terminalkit_handle *kit, int row,
+    uint8_t *buffer TK_OUT_BUFFER(inout_size), uint32_t *inout_size TK_INOUT);
+
+#endif

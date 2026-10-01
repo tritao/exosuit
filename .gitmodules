@@ -1,0 +1,3 @@
+[submodule "native-packages/terminal/vendor/libtsm"]
+	path = native-packages/terminal/vendor/libtsm
+	url = https://github.com/tritao/libtsm.git
