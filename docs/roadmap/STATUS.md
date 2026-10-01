@@ -13,9 +13,11 @@ Last updated: 2026-10-01.
   The checked-in self-hosted compiler is stale and currently rejects UIKit's
   compound shift assignment. Bootstrap now passes the null-array inference
   failure after Haxeon `5f0b7671`, then passes four nullable-source corrections in `02608ed7`. It now fails
-  on colliding enum constructors at `WasmGcModuleBuilder.hx:605`; fix import
-  precedence and retry convergence.
-- Exact resume: reference headless verification passed. Fix imported enum constructor precedence (later import wins), rerun Haxeon's
+  past colliding enum constructors after `56fc5b98`, then fails at
+  `HlWriterCache.hx:76` on an unchecked `ObjectMap.get` result. Correct
+  snapshot retention and retry convergence.
+- Exact resume: reference headless verification passed. Check the retrieved snapshot hash in `HlWriterCache.retainSnapshots`,
+  rerun Haxeon's
   `./scripts/bootstrap-compiler.sh`, then test both compiler modes. Remove the
   divergent defaults and upstream-fixed directory workaround. Restore
   source-plugin embedding and remove test suppression before claiming M8.1.
@@ -182,6 +184,32 @@ Last updated: 2026-10-01.
   import-order precedence, rerun compiler gate and bootstrap convergence.
 - No refreshed bootstrap artifact or two-mode success is claimed. All
   pre-existing sibling changes remain preserved; editor worktree is clean.
+
+### M8.2 — enum constructor import precedence (verified compiler slice)
+
+- Haxeon `56fc5b98` resolves colliding constructor names from separate
+  explicit imports in source order: the later import supplies the default,
+  matching reference Haxe. Explicit expected enum types still take priority;
+  collisions within one module import keep their existing ambiguity rule.
+- Root cause: semantic assembly discarded constructor aliases for every
+  collision, allowing unrelated global enum abstracts to produce misleading
+  ambiguity errors in an inferred array of Wasm enum values.
+- Registered `EnumImportOrderMain` checks forward/reversed imports, explicit
+  expected type priority, incompatible nominal argument rejection, generated
+  execution, incremental import edits and cold-build agreement. Reducer failed
+  with E1005 before the fix and ran after it; reference Haxe chose the later
+  import in the independent fixture.
+- Full compiler `./scripts/test.sh` exited 0, with formatting, 367/367 driver
+  cases and all native/differential/Wasm stages. Log:
+  `/tmp/haxeon-gate-enum-imports.log`. Exosuit `./scripts/build.sh` exited 0
+  (`/tmp/exosuit-build-enum-imports.log`).
+- Bootstrap exits 1 after passing the old enum failure, now at
+  `HlWriterCache.hx:76`: `ObjectMap.get` returns nullable even following
+  `exists`. Reference Haxe with strict null safety rejects this pattern too.
+  Retrieve and check the snapshot hash once, then retry convergence; no
+  compiler assignability or map-presence rules need weakening.
+- M8 remains incomplete, including dynamic-plugin integration, refreshed
+  self-hosted agreement and release gates. Sibling dirty work is preserved.
 
 ## Completed records
 
