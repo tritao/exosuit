@@ -64,6 +64,29 @@ Last updated: 2026-10-01.
 
 ## Implementation records
 
+### M9.1 — insertion/deletion prefix-row reuse (verified slice)
+
+- Materia commit `b9f109586`; the accompanying Exosuit commit pins it in
+  `release.lock`.
+- UIKit preserves prepared glyph snapshots for visual rows strictly before a
+  guarded ASCII insertion or deletion when their range and bounds match. The
+  native text-engine regression proves prefix identity survives both edits
+  while a later wrapped row is invalidated. The real decoration-window suite
+  passes.
+- A trial suffix rebase was rejected: in a continuously wrapped word, an
+  inserted codepoint can leave later pixels looking the same while the row's
+  source range no longer maps to one old row. Reusing the old snapshot would
+  publish stale codepoint metadata. Suffix rows still reprepare, and M9.1's
+  strict changed-row gate remains open for a source-aware remap and retained
+  display-list raster invalidation.
+- The isolated native text-engine test passes after rebuilding against the
+  reverted Skribidi experiment. Two valid 30-frame, 1 MiB varied-key runs
+  measured **51.93 ms** and **50.31 ms p95**, above the 50 ms target
+  (`/tmp/exosuit-m9-prefix-row-typing` and `-repeat`). A further graphical
+  run was discarded because another `run.sh` rebuilt the shared output while
+  the benchmark app started. Re-run in an idle build window before treating
+  timing as a regression or claiming the budget gate.
+
 ### M9.1 — retained visual-row glyph invalidation (verified slice)
 
 - Materia commit `558499f54`; the accompanying Exosuit commit records this
@@ -72,7 +95,7 @@ Last updated: 2026-10-01.
   prepared glyph snapshot only when its codepoint range, bounds, font atlas,
   and foreground publication key remain valid. The edited row gets a new
   revision; native tests prove rows before and after reuse their immutable
-  snapshots and an insertion invalidates them conservatively.
+  snapshots for equal-length edits.
 - The scene compiler uses the retained snapshot directly, removing its second
   glyph preparation pass. The editor's multi-row viewport composes visible
   row snapshots and retains them across edits. Single-row viewports keep direct
@@ -83,8 +106,8 @@ Last updated: 2026-10-01.
   fresh 30-frame varied-key run measured p50 **40.57 ms**, p95 **49.03 ms**,
   max **53.62 ms**, under the **50 ms** p95 budget. Artifacts:
   `/tmp/exosuit-m9-row-single-typing` and `.log`.
-- M9.1 remains active: insertions/deletions shift logical row offsets and still
-  invalidate conservatively, and the display-list renderer redraws the visible
+- M9.1 remains active: insertions/deletions still invalidate shifted suffix
+  rows conservatively, and the display-list renderer redraws the visible
   viewport even when its unchanged row snapshots are reused. Next, measure
   changed-row publication for offset-shifting edits and update the row index
   and source ranges before claiming strict changed-row invalidation.

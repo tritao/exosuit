@@ -26,10 +26,16 @@ layout bounds match and it lies strictly outside the edited range. UIKit's
 scene compiler uses that row's publication key for text resource identity,
 and the editor's multi-row viewport composes visible row snapshots while
 holding them across edits. Single-row viewports use direct preparation to
-avoid a needless copy. Insertions, deletions, changed wrap boundaries,
-unsupported scripts, font/atlas changes, and changed foreground colors
-invalidate conservatively. All document geometry still comes from the one
-authoritative native layout generation.
+avoid a needless copy. Insertions and deletions retain matching prefix rows
+but invalidate the edited row and shifted suffix conservatively. Changed wrap
+boundaries, unsupported scripts, font/atlas changes, and changed foreground
+colors also invalidate conservatively. All document geometry still comes from
+the one authoritative native layout generation.
+
+A wrapped suffix can have identical pixels after an insertion while its
+codepoint spans cross different old row boundaries. Reusing those snapshots
+requires a verified source-range remap; the suffix is freshly prepared until
+that mapping is available.
 
 The real 1 MiB varied-key fixture delivered 30 input frames at p50 37.66 ms,
 p95 41.67 ms, and max 43.44 ms, below its 50 ms typing budget. The isolated
