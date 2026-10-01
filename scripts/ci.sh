@@ -10,3 +10,5 @@ haxeon_root=${HAXEON_ROOT:-"$root_dir/../haxeon"}
 "$root_dir/scripts/test-haxeon-lsp.sh"
 "$root_dir/scripts/test-uikit-workflow.sh"
 "$root_dir/scripts/test-release.sh"
+
+"$root_dir/scripts/test-web.sh"

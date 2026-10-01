@@ -40,7 +40,7 @@ class PluginController {
 		this.reportInformation = reportInformation;
 		manager = new PluginManager(commands, keymap, context, syntaxes, completions, panels, root.getPluginDecorations(),
 			root.getPluginStatusItems(), jobs, processes, settings,
-			message -> reportError("plugin", message), this.available);
+			message -> reportError("plugin", message), this.available, this.sourceLoader);
 		if (this.available) installCommands(commands);
 	}
 

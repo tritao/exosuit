@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>exosuit</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root { color-scheme: light dark; font: 14px system-ui, sans-serif; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: Canvas; }
+    #canvas { display: block; width: 100vw; height: 100vh; outline: none; }
+    #status { position: fixed; inset: auto 16px 16px 16px; margin: 0; padding: 8px 12px; border-radius: 6px;
+      background: color-mix(in srgb, Canvas 90%, CanvasText); color: CanvasText; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas" tabindex="0" aria-label="exosuit editor"></canvas>
+  <p id="status" role="status">Loading exosuit…</p>
+  <script src="haxeon-host.js"></script>
+  <script src="exosuit.js"></script>
+  <script src="exosuit_web.js"></script>
+</body>
+</html>

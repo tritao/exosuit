@@ -25,7 +25,7 @@ guest compiler arguments from the manifest. Pragtical's `docs/web.md` and
 
 ## M15.1 — Native boundary and capability guards
 
-- [ ] Everything the guest imports must be C-ABI HXI bindings. If any
+- [x] Everything the guest imports must be C-ABI HXI bindings. If any
   `@:hlNative` (`pragtical_hx`) code remains after M8.1, migrate it, or keep it
   behind a host-only interface that the browser build replaces. The browser
   host provides no processes, PTY, local IPC, SQLite or threads.
@@ -41,7 +41,7 @@ search are absent or degrade with a clear message.
 
 ## M15.2 — Browser build
 
-- [ ] Add a `web/` directory to exosuit. It needs:
+- [x] Add a `web/` directory to exosuit. It needs:
   - an `app.WebMain` entry point with `@:expose` `configure`, `main` and
     `frame`, hosted by `BrowserUiHost`;
   - `build.sh` that generates wasm32 HXI interfaces for the kits, compiles the
@@ -53,13 +53,13 @@ search are absent or degrade with a clear message.
   `generate-wasm-hxi.sh`) out of `app/web/tools` into a shared location rather
   than copying it, if materia accepts that change. Otherwise vendor it with a
   note.
-- [ ] Use an in-memory filesystem seeded with a sample project. Open URLs with
+- [x] Use an in-memory filesystem seeded with a sample project. Open URLs with
   `window.open`. Bundle fonts as `BrowserUiFontAsset`s.
-- [ ] Build both `wasm32` and `wasm-gc` guests; `wasm32` is the default.
+- [x] Build both `wasm32` and `wasm-gc` guests; `wasm32` is the default.
 
 ## M15.3 — Browser smoke
 
-- [ ] Add `web/test.sh`, modeled on `app/web/test.sh`: headless Chrome on
+- [x] Add `web/test.sh`, modeled on `app/web/test.sh`: headless Chrome on
   SwiftShader. Extend it with Pragtical's checks: type text, save, verify the
   file in the in-memory filesystem, reload, and fail on any console or page
   error.

@@ -43,6 +43,13 @@ Text editing is backed by `nativekit.editorkit.TextDocument`, which the editor's
 regardless of whether they originate from the text widget, buffer API, or
 search/replace operations.
 
+## Browser build
+
+`./web/build.sh` builds the editor with a session filesystem in the browser.
+`./web/test.sh` checks real keyboard editing and saving through headless Chrome.
+Both Wasm targets are supported; see [web/README.md](web/README.md) for setup,
+capabilities and the opt-in CI stage.
+
 ## Known limitations and open gaps
 
 The UIKit shell uses the shared application controllers. The Problems panel

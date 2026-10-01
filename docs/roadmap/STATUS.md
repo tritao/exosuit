@@ -11,16 +11,15 @@ Last updated: 2026-10-01.
   stage; bootstrap converges and rebuilds identically.
 - **M8 accepted on Linux:** restored composed CI exits 0 after b76554b, and
   the changed graphical entry point builds in self-hosted mode as well.
-- Active task: **M15.1/M15.2**, browser boundary and build. Typed capability
-  policy is delivered; guest import qualification and the browser pipeline remain.
-- Exact resume: finish M15 browser qualification. Haxeon `6a86c528`
-  fixes generic callable ABI adapters and generated static-initializer ownership;
-  the Wasm GC browser passes ASCII typing/save/URL/reload. The expanded Unicode
-  smoke fails: inserting `é🙂`, then `!` and Enter places later input before the
-  emoji. `/tmp/haxeon-unicode-caret/Main.hx` independently rejects the expected
-  UTF-16 string length on Wasm GC. Verify reference semantics, reduce and fix the
-  responsible representation rule; retain the Unicode acceptance test. Current
-  root reference gates are running; requalify both modes after final changes.
+- **M15 accepted on Linux/Chrome:** both guest targets build with matching
+  C imports and pass actual Unicode edit/save/readback/URL/reload smoke. The
+  browser stage is wired into composed CI through `EXOSUIT_CI_WEB=1`; absent
+  toolchains remain explicitly pending.
+- Active task: **M9.1**, styled text and decorations on UIKit.
+- Exact resume: add general styled/decorated text ranges to retained UIKit text
+  layout, with affected-row invalidation, and wire existing syntax, diagnostics,
+  search/bracket/current-line and normalized multi-selection models into the
+  editor. Preserve M8 and both browser gates; measure the M7.1 typing budget.
 - All further graphical tests must use disposable PRAGTICAL_PORTABLE state.
   IME, physical mixed-DPI transitions, Windows and macOS remain unclaimed.
 - HEADs at planning: exosuit `ae2f260` (`haxeon-uikit-port`). Materia `main` is at
@@ -53,15 +52,118 @@ Last updated: 2026-10-01.
 | M6 | Complete headlessly | Bounded JSON-RPC, lifecycle/synchronization, language commands, diagnostics, restart and real Haxeon edit/diagnose/fix/build smoke pass |
 | M7 | Complete for the claimed Linux automation scope | M7.1–M7.3 pass; desktop IME, physical mixed-DPI, Windows and macOS remain explicit unclaimed follow-ons |
 | M8 | Accepted on Linux | Both compiler modes, mandatory source plugins, real LSP/window workflow and unpacked release; composed CI exits 0 |
-| M9 | Not started | Depends on M8 |
+| M9 | Active: M9.1 | General styled text/decorations and editor rendering |
 | M10 | Not started | Depends on M8, M9.1–M9.2 |
 | M11 | Not started | Depends on M8; independent of M9/M10 |
 | M12 | Not started | Depends on M9, M11.1, M11.4 |
 | M13 | Not started | Depends on M11.2 |
 | M14 | Not started | Depends on M11–M13 |
-| M15 | Active: M15.1 | Depends on M8.1, M8.2; scheduled right after M8. Reference: materia `app/web` at `816372dd`, Haxeon `fba71015` |
+| M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M15.1–M15.3 — browser editor and composed acceptance (accepted)
+
+- The shared UIKit editor now runs through BrowserUiHost with bundled fonts,
+  seeded session MemoryFS and native window.open URL handling. Typed host
+  services isolate file dialogs and source-plugin compilation. Injected plugin
+  loaders initialize through their actual service instance; missing browser
+  processes/LSP/build/plugins/terminal/control capabilities omit those commands.
+- `web/build.sh` reuses materia `tools/web`, derives the source graph from its
+  manifest, generates portable ABI HXI and a checked memory contract, builds the
+  guest and Emscripten host, audits import signatures and assembles the site.
+  Compile failures propagate; artifact trees are separate per target. All runtime
+  export lists include ccall/addFunction/removeFunction consistently.
+- `web/test.sh` drives real Chrome keyboard and pointer input, accent/emoji and
+  ordinary characters, Enter, Ctrl-S/save/readback, dirty transitions, URL opening
+  and fresh-session reload. It rejects console, exception and page/network errors.
+  Bounded model/focus waits report actual failure state. Disposable browser process
+  groups retire before profile cleanup. Edited/fresh screenshots are optional.
+- `EXOSUIT_CI_WEB=1 ./scripts/test-web.sh` exits 0 on both targets:
+  `/tmp/exosuit-web-final-ci.log`. Wasm32 has 107 imports and GC has 104;
+  all host-bound signatures match and unavailable imports are empty. This stage
+  joins `scripts/ci.sh`. Unselected or missing-Emscripten/Chrome branches print
+  PENDING and were independently checked. GUI qualification is Chrome/SwiftShader
+  on Linux; other browsers and platforms are unclaimed.
+- Final desktop gates exit 0 at the release pins:
+  `/tmp/exosuit-web-final-reference-tests.log`,
+  `/tmp/exosuit-web-final-reference-build.log`,
+  `/tmp/exosuit-web-final-self-tests.log`,
+  `/tmp/exosuit-web-final-self-build.log`,
+  `/tmp/exosuit-web-final-release.log`. Mandatory source plugins and unpacked real
+  LSP remain passing. Real UIKit project/edit/save/palette/Problems/BuildOutput and
+  live source-plugin reload passed in `/tmp/exosuit-web-accepted-desktop-window.log`.
+  Edited browser screenshot `/tmp/exosuit-web-final-gc-edited.png` was inspected;
+  it displays the saved accent/emoji text and a clean fresh line.
+- Haxeon `02f924ed` copies borrowed C UTF-8 results into managed linear strings,
+  preserves null on both targets and declares GC linear memory for result-only
+  string imports. The registered ABI fixture verifies Unicode operations and
+  survival after native storage is overwritten. It failed before the fix and
+  passes both targets afterward. This resolves the actual linear browser
+  `NativeKitError.messageFor` error-path crash without hiding platform errors.
+- Compiler gate `/tmp/haxeon-gate-utf8-results-final.log` exits 0 with 383/383 and
+  all integration/Wasm stages. Bootstrap converges in one stage and self-bootstrap
+  is identical (both 0): `/tmp/haxeon-bootstrap-utf8-results-final.log` and
+  `/tmp/haxeon-bootstrap-self-utf8-results-final.log`. The initial missing-helper
+  lookup was an owned implementation error; the required nullable guard corrected
+  it before committing. No typing workaround or diagnostics suppression added.
+- Release pins: Haxeon `02f924ed`, materia `a9486f67`, NativeKit `d12dd484`,
+  deliberately preserved HashLink vendor `40a4782`. Shared materia web tooling is
+  `a656e9b7`; UIKit surface routing is `a9486f67`; NativeKit runtime callback exports
+  are `708ac89e`, focused-input keys `97938edb`, pointer capture `d12dd484`.
+  Haxeon prerequisite fixes are `14a02e0e` (terminated assignments), `35bd627d`
+  (optional interfaces), `6a86c528` (callable ABI/initializer ownership),
+  `642863b4` (UTF-16 string coordinates) and `02f924ed` (borrowed UTF-8 results).
+- Pre-existing vendor gitlink/profile dump and parent submodule dirt are preserved.
+  No pushes or publication. M15 checkboxes are accepted; continue directly with
+  M9.1 rather than stopping at this milestone.
+
+
+### M15.2 — UTF-16 string coordinates and browser pointer capture (verified slices)
+
+- Haxeon `642863b4` keeps UTF-8 storage and ABI transfer while making length,
+  charCodeAt, charAt and substring use UTF-16 coordinates on both Wasm targets.
+  Selected surrogate halves survive through WTF-8. Internal byte slicing for
+  split/case conversion remains byte based. EReg/Regex match positions now use
+  UTF-16 and scalar iteration handles surrogate pairs consistently.
+- The formerly skipped `string-utf16-length` fixture passes on both targets and
+  is required. Registered `string-utf16-slices` covers Bytes roundtrip, BMP and
+  astral text, individual surrogate halves, negative/outside charAt, clamping
+  and empty slices. Reference Haxe/HashLink returns 42. Regex coverage includes
+  whole-emoji matching, UTF-16 match ranges and terminating zero-width replacement.
+- Full gate exits 0 with 383/383 and all integration/Wasm stages:
+  `/tmp/haxeon-gate-utf16-slices-final.log`. Bootstrap converges in one stage and
+  self-bootstrap is identical (both 0): `/tmp/haxeon-bootstrap-utf16.log` and
+  `/tmp/haxeon-bootstrap-self-utf16.log`.
+- NativeKit `d12dd484` uses DOM pointer capture for ordinary interaction rather
+  than deferred relative pointer lock. A missing active pointer returns the
+  declared unsupported result without changing mode. Its browser integration
+  gate passes all four pages: `/tmp/nativekit-web-capture-gate.log` (0).
+- Actual GC browser Unicode editing/save/URL/reload passes with no errors:
+  `/tmp/exosuit-web-gc-pointer-capture-window.log` (0). Screenshot inspected:
+  `/tmp/exosuit-web-gc-pointer-capture.png` shows the editor, project and Problems.
+  Linear smoke passed standalone in `/tmp/exosuit-web-linear-selection-probe.log`,
+  but composed CI remains red; no M15 acceptance is claimed.
+- Composed failure is now reduced to a native UTF-8 result being treated as a
+  managed string in linear Wasm. `/tmp/exosuit-web-ci-utf16-final.log` fails
+  after pointer input in `__string_length` via `NativeKitError.messageFor`.
+  New registered Wasm backend regression `tests/ffi/wasm-utf8-result.hx` fails
+  before correction (exit 1 instead of 42), then passes both targets with owned
+  uncommitted interop fixes. It verifies UTF-16 use, null preservation and native
+  storage mutation after a result was returned. The GC-only reduction also
+  revealed a missing memory declaration for result-only C string imports.
+- Pending exact action: finish full gate/bootstrap for the borrowed UTF-8 result
+  correction, run the actual opt-in browser CI stage on both targets and commit
+  the verified compiler and browser slices. Current sessions: compiler gate in
+  `/tmp/haxeon-gate-utf8-results.log`, browser CI in
+  `/tmp/exosuit-web-ci-managed-utf8.log`. Browser smoke uses bounded state waits;
+  do not mask page errors or count an earlier standalone pass as composed CI.
+- Desktop requalification at `642863b4` passed reference and actual self-hosted
+  tests/builds, real UIKit window/plugin reload and unpacked release:
+  `/tmp/exosuit-web-accepted-{reference,self}-{tests,build}.log`,
+  `/tmp/exosuit-web-accepted-desktop-window.log`,
+  `/tmp/exosuit-web-accepted-release.log` (all 0). Later interop changes still
+  require final pins and relevant requalification.
 
 ### M15.2 — generic callable ABI and initializer ownership (verified compiler slice)
 

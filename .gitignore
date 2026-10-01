@@ -3,3 +3,6 @@
 /dist/
 /graphical/build/
 /uikit-native/build/
+
+/web/build/
+/web/**/__pycache__/

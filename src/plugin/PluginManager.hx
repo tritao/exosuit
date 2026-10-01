@@ -27,7 +27,7 @@ class PluginManager {
 
 	public function new(commands:CommandRegistry, keymap:Keymap, commandContext:CommandContext, syntaxes:SyntaxRegistry,
 			completions:CompletionRegistry, panels:PluginPanelRegistry, decorations:PluginDecorationRegistry,
-			statusItems:PluginStatusRegistry, jobs:JobScheduler, processes:ProcessManager, settings:Void->Settings, ?reportDiagnostic:String->Void, dynamicHost:Bool = true) {
+			statusItems:PluginStatusRegistry, jobs:JobScheduler, processes:ProcessManager, settings:Void->Settings, ?reportDiagnostic:String->Void, dynamicHost:Bool = true, ?sourceLoader:SourcePluginLoader) {
 		this.commands = commands;
 		this.keymap = keymap;
 		this.commandContext = commandContext;
@@ -40,9 +40,11 @@ class PluginManager {
 		this.processes = processes;
 		this.settings = settings;
 		this.reportDiagnostic = reportDiagnostic == null ? function(message:String) {} : reportDiagnostic;
+		var loader = sourceLoader;
 		#if !wasm
-		if (dynamicHost) new NativeSourcePluginLoader().initialize();
+		if (dynamicHost && loader == null) loader = new NativeSourcePluginLoader();
 		#end
+		if (dynamicHost && loader != null) loader.initialize();
 	}
 
 	public function load(plugin:Plugin):Bool {
