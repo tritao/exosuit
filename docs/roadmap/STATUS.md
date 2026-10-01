@@ -14,8 +14,8 @@ Last updated: 2026-10-01.
   convergence; both reference and self-hosted graphical builds exit 0.
   The fresh self-hosted headless suite also exits 0 with the dynamic-plugin
   test explicitly suppressed. M8 acceptance remains incomplete.
-- Exact resume: wrapper verification is complete (`18e1ad5`). Restore
-  source-plugin embedding and
+- Exact resume: continue the embedded runtime reducer after raw-byte ABI
+  fix `3f870cf7` (see latest record). Restore source plugins and
   remove test suppression before claiming M8.1. Integration/release and
   interactive UIKit checks remain pending.
 - HEADs at planning: exosuit `ae2f260` (`haxeon-uikit-port`). Materia `main` is at
@@ -57,6 +57,43 @@ Last updated: 2026-10-01.
 | M15 | Not started | Depends on M8.1, M8.2; scheduled right after M8. Reference: materia `app/web` at `816372dd`, Haxeon `fba71015` |
 
 ## Implementation records
+
+### M8.1/M8.2 — consistent raw byte intrinsic types (verified compiler slice)
+
+- Haxeon `3f870cf7` makes `Bytes.getData()` and the primitive String byte
+  accessor return the same raw `THlBytes` ABI type that declared `hl.Bytes`
+  parameters resolve to. The former nominal abstract wrapper caused E1009
+  in ordinary identity calls and embedded `Runtime.inspectPatch`.
+- Registered `RawBytePointerMain` fails before the fix, then passes actual
+  native UTF-16 length calls, annotated raw pointer assignments and identity
+  calls. Passing managed Bytes directly remains rejected in incremental and
+  cold compiles; restoration executes correctly. Local reference Haxe
+  accepts the reduced getData/identity/annotated-pointer program (exit 0).
+- Focused expanded regression exited 0; full `./scripts/test.sh` exited 0
+  with 372/372 driver cases and every integration/Wasm stage. Both bootstrap
+  commands exited 0, converged after one stage and self-rebuilt identically.
+  Bootstrap artifacts did not change. Logs:
+  `/tmp/haxeon-raw-byte-pointer-before.log`,
+  `/tmp/haxeon-raw-byte-pointer-expanded.log`,
+  `/tmp/haxeon-gate-raw-byte-pointer.log`,
+  `/tmp/haxeon-bootstrap-raw-byte-pointer.log`,
+  `/tmp/haxeon-bootstrap-self-raw-byte-pointer.log`.
+- Owned, uncommitted Haxeon embedding work: `embed/haxeon.json`, package probe
+  `tests/integration/test-compiler-embedding.sh`, and an unregistered draft
+  `tests/compiler/CastContextMain.hx`. The real package probe compiles the
+  public compiler and Runtime, generates a 42-returning program and invokes
+  it. Before the fix it failed at Runtime.hx:108 with E1009; afterward it
+  reaches Runtime.hx:139 with E1003 in the existing `callBytes` boundary.
+  Logs: `/tmp/haxeon-compiler-embedding-reference.log` and
+  `/tmp/haxeon-compiler-embedding-raw-pointer.log` (both exit 1).
+- The draft cast reducer reaches a distinct backend diagnostic:
+  `Unsupported cast from Abstract(realtime_bytes) to ManagedBytes`. Reference
+  Haxe accepts the existing explicit ABI cast through a generic callback;
+  the reducer does not yet reproduce the precise E1003 from Runtime, and no
+  cast/inference fix is claimed. Do not introduce application casts or
+  weaken assignability. Next: reduce both the Runtime callBytes typing and
+  managed-byte representation boundary, fix general capabilities with tests,
+  then finish the embedding package and restore the dynamic plugin test.
 
 ### M8.2 — consistent wrappers without action-directory workaround (verified slice)
 
