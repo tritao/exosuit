@@ -86,6 +86,12 @@ Last updated: 2026-10-01.
   run was discarded because another `run.sh` rebuilt the shared output while
   the benchmark app started. Re-run in an idle build window before treating
   timing as a regression or claiming the budget gate.
+- Renderer trace: `prepare_visible_text` still composes visible row snapshots
+  into one viewport glyph resource, and its resource binding includes the
+  layout generation, which changes on every edit. Next, measure that binding
+  and upload cost in isolation, then retain unchanged row resources across
+  generations if the measurement warrants it. Do not reuse shifted suffix
+  rows until their source ranges can be remapped and verified.
 
 ### M9.1 — retained visual-row glyph invalidation (verified slice)
 
