@@ -1,0 +1,13 @@
+{
+  "interface": "SqliteKit",
+  "package": "sqlitekit.ffi",
+  "modules": {
+    "functions": "SqliteKit",
+    "types": "SqliteKitTypes",
+    "constants": "SqliteKitConstants"
+  },
+  "typeNames": {
+    "sqlitekit_db": "DatabaseHandle",
+    "sqlitekit_stmt": "StatementHandle"
+  }
+}

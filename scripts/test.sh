@@ -39,6 +39,8 @@ python3 "$root_dir/scripts/generate-platform-abi.py" --check
 "$root_dir/build/platform-test"
 echo "PASS: headless platform ABI"
 
+"$root_dir/native-packages/sqlite/tests/run.sh"
+
 "$cc" -std=c11 -Wall -Wextra -Werror \
 	"$root_dir/tests/process_fixture.c" \
 	-o "$root_dir/build/process-fixture"

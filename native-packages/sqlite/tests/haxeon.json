@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "package": { "name": "sqlitekit-test" },
+  "entry": "app.Main",
+  "sourceRoots": ["haxe"],
+  "dependencies": { "sqlitekit": { "path": ".." } },
+  "target": "host",
+  "outputDir": "build"
+}

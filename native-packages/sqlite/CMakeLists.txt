@@ -1,0 +1,22 @@
+cmake_minimum_required(VERSION 3.21)
+project(sqlitekit LANGUAGES C)
+
+add_library(sqlitekit SHARED src/sqlitekit.c vendor/sqlite3.c)
+target_compile_features(sqlitekit PRIVATE c_std_11)
+target_compile_definitions(sqlitekit PRIVATE SQLITEKIT_BUILDING=1
+    SQLITE_THREADSAFE=1 SQLITE_OMIT_LOAD_EXTENSION=1 SQLITE_DEFAULT_MEMSTATUS=0)
+target_include_directories(sqlitekit PUBLIC include PRIVATE vendor)
+set_target_properties(sqlitekit PROPERTIES C_VISIBILITY_PRESET hidden)
+if(NOT WIN32)
+    target_link_libraries(sqlitekit PRIVATE ${CMAKE_DL_LIBS} m)
+endif()
+
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    include(CTest)
+    if(BUILD_TESTING)
+        add_executable(sqlitekit_contract tests/contract.c)
+        target_link_libraries(sqlitekit_contract PRIVATE sqlitekit)
+        target_compile_features(sqlitekit_contract PRIVATE c_std_11)
+        add_test(NAME sqlite_contract COMMAND sqlitekit_contract)
+    endif()
+endif()

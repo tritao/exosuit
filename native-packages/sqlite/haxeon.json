@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "package": { "name": "sqlitekit" },
+  "sourceRoots": ["haxe"],
+  "scopeSourceRoots": false,
+  "native": {
+    "cmake": {
+      "source": ".",
+      "target": "sqlitekit",
+      "library": "sqlitekit",
+      "inputs": [
+        "CMakeLists.txt",
+        "include/sqlitekit.h",
+        "src/sqlitekit.c",
+        "vendor/sqlite3.c",
+        "vendor/sqlite3.h"
+      ]
+    }
+  },
+  "ffi": {
+    "interfaces": ["bindings/sqlitekit.hxi"],
+    "projections": ["bindings/sqlitekit.hxmap"]
+  },
+  "target": "host"
+}
