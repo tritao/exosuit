@@ -14,9 +14,8 @@ Last updated: 2026-10-01.
   convergence; both reference and self-hosted graphical builds exit 0.
   The fresh self-hosted headless suite also exits 0 with the dynamic-plugin
   test explicitly suppressed. M8 acceptance remains incomplete.
-- Exact resume: check comprehension loop-binding shadowing in effect analysis,
-  then remove divergent wrapper defaults and the upstream-fixed directory
-  workaround with both modes verified. Restore source-plugin embedding and
+- Exact resume: finish both-mode verification of the wrapper defaults and
+  directory-workaround removal (running session 85344; logs below). Restore source-plugin embedding and
   remove test suppression before claiming M8.1. Integration/release and
   interactive UIKit checks remain pending.
 - HEADs at planning: exosuit `ae2f260` (`haxeon-uikit-port`). Materia `main` is at
@@ -58,6 +57,34 @@ Last updated: 2026-10-01.
 | M15 | Not started | Depends on M8.1, M8.2; scheduled right after M8. Reference: materia `app/web` at `816372dd`, Haxeon `fba71015` |
 
 ## Implementation records
+
+### M8.2 — comprehension collection shadowing (verified slice)
+
+- Haxeon `24ad2048` passes comprehension binding names through loop effect
+  analysis, preventing a shadowed outer map/array from lending its primitive
+  read-only classification to a user object. The reducer previously accepted
+  a field read on a later iteration after a fake `exists` cleared that field;
+  it now rejects the code with E1005.
+- `PrimitiveMapEffectsMain` covers array and map comprehensions shadowing a
+  primitive map, array shadowing, and accepted/executed unshadowed map reads.
+  Focused before-fix regression exited 1; corrected expanded checks exited 0.
+  Initial focused invocation lacked the runtime library path; the recorded
+  regression rerun supplied `LD_LIBRARY_PATH=out:.tools/hashlink`.
+- `./scripts/test.sh` exited 0 (371/371 plus all native/C++ and Wasm stages),
+  `/tmp/haxeon-gate-comprehension-shadow.log`. Both
+  `./scripts/bootstrap-compiler.sh` and `./scripts/bootstrap-compiler.sh --self`
+  exited 0: convergence after one stage and identical self-rebuild. Logs:
+  `/tmp/haxeon-bootstrap-comprehension-shadow.log` and
+  `/tmp/haxeon-bootstrap-self-comprehension-shadow.log`. Updated bootstrap
+  artifacts are committed. Pre-existing dirty Haxeon paths remain untouched.
+- Exosuit wrapper edits are not yet committed: uniform reference-compiler
+  default with explicit self-hosted override, stale action-directory workaround
+  removed. Serialized checks are running: fresh graphical outputs in
+  `/tmp/exosuit-m8-fresh-reference` and `/tmp/exosuit-m8-fresh-self`, then both
+  headless modes. Logs: `/tmp/exosuit-fresh-reference-actions.log`,
+  `/tmp/exosuit-fresh-self-actions.log`,
+  `/tmp/exosuit-test-wrapper-reference.log`, `/tmp/exosuit-test-wrapper-self.log`.
+  Dynamic-plugin suppression remains explicit; M8 acceptance is incomplete.
 
 ### M8.2 — text dependency keys and converged bootstrap (verified slice)
 
