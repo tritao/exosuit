@@ -12,11 +12,10 @@ Last updated: 2026-10-01.
 - Active task: **M8.3**, restoring manifest-based real LSP, revision-pinned
   release packaging and a scripted UIKit window route. M8.4 documentation is
   updated, while interactive acceptance and other platforms remain unclaimed.
-- Exact resume: port `scripts/test-haxeon-lsp.sh` to a smoke-test manifest and
-  verify edit/diagnose/fix/build against the actual server. Port packaging and
-  inspect existing UIKit capture/record hooks for the real-window route.
-  `xvfb-run`, `xdotool` and DISPLAY=:0 are available; do not assume GUI checks
-  are unavailable without testing the real host.
+- Exact resume: implement the isolated real-window input route (project,
+  edit/save, palette, problems, build output, reload), then compose and run CI.
+  Real LSP and unpacked UIKit release checks now pass. Use PRAGTICAL_PORTABLE
+  for all graphical tests; xvfb-run and xdotool are available.
 - HEADs at planning: exosuit `ae2f260` (`haxeon-uikit-port`). Materia `main` is at
   `816372dd`, fast-forwarded 2026-10-01 for the Haxeon wasm and web fixes; it
   contains uikit and editorkit. Haxeon is at `fba71015` (on pin, fast-forwarded).
@@ -56,6 +55,26 @@ Last updated: 2026-10-01.
 | M15 | Not started | Depends on M8.1, M8.2; scheduled right after M8. Reference: materia `app/web` at `816372dd`, Haxeon `fba71015` |
 
 ## Implementation records
+
+### M8.3 — standalone UIKit release (verified slice)
+
+- Replaced SDL/Pragtical packaging with manifest output, ordinary C libraries,
+  Haxeon runtime and matching VM built from vendor/hashlink. release.lock pins
+  Haxeon 82d92ba0, NativeKit 2bb4c957, materia 816372dd (UIKit/EditorKit), and
+  HashLink 40a4782b. Preserved initial sibling dirty paths and off-pin state.
+- Standalone launchers resolve libraries and the bundled LSP relative to the
+  installation, preserving the caller's working directory/file arguments.
+  Staged ELF runpaths use $ORIGIN; original build artifacts are untouched.
+  UIKit uses system Fontconfig fonts; removed obsolete bundled-font defaults.
+  Native dependency notices and standard library accompany the archive.
+- ./scripts/test-release.sh exits 0, log /tmp/exosuit-release-uikit.log:
+  unpacked archive renders/captures outside the source tree using disposable
+  portable state; ELF search paths contain no source directories; bundled LSP
+  diagnoses/fixes/saves the edited source, then CLI build/run returns 42.
+  Shell syntax and git diff --check pass. An initial attempt exposed the native
+  build wrapper's cwd requirement; package invocation now enters Haxeon first.
+- Pending: scripted native input route and composed CI; M8 remains in progress.
+
 
 ### M8.3 — manifest-based real language service (verified slice)
 

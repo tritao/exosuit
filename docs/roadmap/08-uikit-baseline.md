@@ -67,7 +67,7 @@ modes. Haxeon's own `./scripts/test.sh` passes.
 
 ## M8.3 — Restore release and integration gates
 
-- [ ] Port `scripts/test-haxeon-lsp.sh` and the release packaging
+- [x] Port `scripts/test-haxeon-lsp.sh` and the release packaging
   (`release.lock`, `scripts/test-release.sh`) to the manifest layout. Pin
   Haxeon, NativeKit, UIKit and EditorKit revisions instead of the Pragtical
   renderer.

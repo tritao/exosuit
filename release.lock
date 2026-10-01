@@ -1,4 +1,5 @@
 # Release inputs. scripts/package-release.sh rejects any other revision.
-haxeon=83a27495b87f2acf3013e20131fa71e97f8f2abb
-pragtical=50644c9121c1f03d09143fbe4e6369f9051fd035
-hashlink=d49663eb03cdd8ba0deb2411e3d90a088b086368
+haxeon=82d92ba0a4ffb35c0a559a43212581bad45dd68d
+materia=816372dd0701732c6a0a89bf3e956888de04ca3f
+nativekit=2bb4c9578a03d6ec56262093f512b12cfc6733ff
+hashlink=40a4782baaabea2790942dde0857747016b7fce3

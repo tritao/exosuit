@@ -2,16 +2,11 @@
 set -euo pipefail
 
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-haxeon_root=${HAXEON_ROOT:-"$root_dir/../realtime-haxe"}
-pragtical_root=${PRAGTICAL_ROOT:-"$root_dir/../pragtical"}
-platform=linux-x86_64
+haxeon_root=${HAXEON_ROOT:-"$root_dir/../haxeon"}
+materia_root=$(cd "$root_dir/.." && pwd)
 lock="$root_dir/release.lock"
 
-locked_revision() {
-	local name=$1
-	sed -n "s/^$name=//p" "$lock"
-}
-
+locked_revision() { sed -n "s/^$1=//p" "$lock"; }
 verify_revision() {
 	local name=$1 directory=$2 expected actual
 	expected=$(locked_revision "$name")
@@ -21,58 +16,63 @@ verify_revision() {
 		exit 1
 	fi
 }
-
 verify_revision haxeon "$haxeon_root"
-verify_revision pragtical "$pragtical_root"
+verify_revision materia "$materia_root"
+verify_revision nativekit "$materia_root/nativekit"
 verify_revision hashlink "$haxeon_root/vendor/hashlink"
-
-if [[ -n $(git -C "$haxeon_root" status --porcelain -- src stdlib native haxeon-lsp.hxml scripts/build-runtime.sh) ]]; then
-	echo "Haxeon release inputs differ from the locked revision" >&2
-	exit 1
-fi
-if [[ -n $(git -C "$pragtical_root" status --porcelain -- src/renderer data/fonts LICENSE licenses) ]]; then
-	echo "Pragtical renderer release inputs differ from the locked revision" >&2
-	exit 1
-fi
-if [[ -n $(git -C "$haxeon_root/vendor/hashlink" status --porcelain) ]]; then
-	echo "HashLink release inputs differ from the locked revision" >&2
-	exit 1
-fi
-
-"$haxeon_root/scripts/build-runtime.sh" >&2
+for spec in "$haxeon_root:src stdlib native embed CMakeLists.txt scripts" "$materia_root:uikit editorkit" "$materia_root/nativekit:." "$haxeon_root/vendor/hashlink:."; do
+	directory=${spec%%:*}
+	read -r -a paths <<< "${spec#*:}"
+	if [[ -n $(git -C "$directory" status --porcelain -- "${paths[@]}") ]]; then
+		echo "Release inputs differ from the locked revision: $directory" >&2
+		exit 1
+	fi
+done
+# CMake builds both the VM and runtime from vendor/hashlink, regardless of
+# historical checkout metadata left in the .tools output directory.
+(cd "$haxeon_root" && ./scripts/build-native.sh) >&2
 "$haxeon_root/.tools/haxe/haxe" --cwd "$haxeon_root" "$haxeon_root/haxeon-lsp.hxml" >&2
-"$root_dir/scripts/build-sdl.sh" >&2
+"$root_dir/scripts/build.sh" >&2
 
 short_revision=$(git -C "$root_dir" rev-parse --short=12 HEAD)
-name="pragtical-haxeon-$short_revision-$platform"
+name="exosuit-$short_revision-linux-x86_64"
+mkdir -p "$root_dir/out" "$root_dir/dist"
 stage_parent=$(mktemp -d "$root_dir/out/.package.XXXXXX")
 stage="$stage_parent/$name"
-trap 'find "$stage_parent" -depth -delete' EXIT
-mkdir -p "$stage/tools" "$stage/data/fonts" "$stage/defaults" "$stage/docs" "$stage/licenses" "$stage/stdlib"
-
-cp "$root_dir/out/pragtical-haxeon" "$root_dir/out/pragtical-haxeon.hl" \
-	"$root_dir/out/pragtical_hx.hdll" "$root_dir/out/realtime_runtime.hdll" "$stage/"
-cp "$haxeon_root/vendor/hashlink/hl" "$haxeon_root/vendor/hashlink/libhl.so" "$stage/tools/"
+trap 'rm -rf "$stage_parent"' EXIT
+mkdir -p "$stage/tools" "$stage/lib" "$stage/defaults" "$stage/docs" "$stage/licenses" "$stage/stdlib"
+cp "$root_dir/graphical/build/host/main.hl" "$stage/exosuit.hl"
+cp "$haxeon_root/.tools/hashlink/hl" "$stage/tools/"
+cp -L "$haxeon_root/.tools/hashlink/libhl.so" "$stage/lib/libhl.so.1"
+ln -s libhl.so.1 "$stage/lib/libhl.so"
+cp "$haxeon_root/out/haxeon_runtime.hdll" "$stage/lib/"
+cp "$root_dir/graphical/build/host/native/pragtical_hx/libpragtical_hx.so" "$stage/lib/"
+cp -a "$root_dir/graphical/build/host/native/exosuit-ui-native/"*.so* "$stage/lib/"
+# Relocate only staged binaries; source build output retains its build paths.
+patchelf --set-rpath '$ORIGIN/../lib' "$stage/tools/hl"
+for library in "$stage/lib/"*.so* "$stage/lib/"*.hdll; do
+	[[ -L "$library" ]] || patchelf --set-rpath '$ORIGIN' "$library"
+done
 cp "$haxeon_root/out/haxeon-lsp.hl" "$stage/tools/"
 cp -R "$haxeon_root/stdlib/." "$stage/stdlib/"
 cp "$root_dir/packaging/haxeon-lsp" "$stage/tools/"
-cp "$root_dir/out/data/fonts/JetBrainsMono-Regular.ttf" "$root_dir/out/data/fonts/NotoSansSymbols2-Regular.ttf" "$stage/data/fonts/"
-cp "$root_dir/packaging/settings.conf" "$stage/defaults/settings.conf"
+cp "$root_dir/packaging/exosuit" "$stage/exosuit"
+cp "$root_dir/packaging/settings.conf" "$stage/defaults/"
 cp "$root_dir/packaging/README.md" "$stage/README.md"
-cp "$root_dir/docs/getting-started.md" "$root_dir/docs/configuration.md" "$root_dir/docs/recovery.md" \
-	"$root_dir/docs/build-tasks.md" "$root_dir/docs/plugin-api.md" "$root_dir/docs/plugin-development.md" \
-	"$root_dir/docs/release-qualification.md" "$stage/docs/"
-cp "$pragtical_root/LICENSE" "$stage/licenses/Pragtical-LICENSE"
-cp "$pragtical_root/licenses/licenses.md" "$stage/licenses/Pragtical-third-party.md"
+cp "$root_dir/docs/"*.md "$stage/docs/"
+cp "$materia_root/nativekit/LICENSE" "$stage/licenses/NativeKit-LICENSE"
 cp "$haxeon_root/vendor/hashlink/LICENSE" "$stage/licenses/HashLink-LICENSE"
 cp "$haxeon_root/stdlib/LICENSE" "$stage/licenses/Haxe-stdlib-LICENSE"
-printf '%s\n' \
-	"pragtical-haxeon=$(git -C "$root_dir" rev-parse HEAD)" \
-	"haxeon=$(locked_revision haxeon)" \
-	"pragtical=$(locked_revision pragtical)" \
-	"hashlink=$(locked_revision hashlink)" > "$stage/REVISIONS"
-
-mkdir -p "$root_dir/dist"
+# Preserve native dependency notices with their original names and hierarchy.
+for toolkit in nativekit uikit; do
+	while IFS= read -r -d '' notice; do
+		relative=${notice#"$materia_root/"}
+		mkdir -p "$stage/licenses/$(dirname "$relative")"
+		cp "$notice" "$stage/licenses/$relative"
+	done < <(find "$materia_root/$toolkit/vendor" -type f -iname '*license*' -print0)
+done
+printf 'exosuit=%s\n' "$(git -C "$root_dir" rev-parse HEAD)" > "$stage/REVISIONS"
+cat "$lock" >> "$stage/REVISIONS"
 archive="$root_dir/dist/$name.tar.gz"
 tar -C "$stage_parent" -czf "$archive" "$name"
 echo "$archive"

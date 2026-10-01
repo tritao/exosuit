@@ -2,6 +2,6 @@
 set -euo pipefail
 
 tool_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-export LD_LIBRARY_PATH="$tool_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH="$tool_dir/../lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 cd "$tool_dir/.."
 exec "$tool_dir/hl" "$tool_dir/haxeon-lsp.hl"
