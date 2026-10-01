@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define TERMINALKIT_REPLY_LIMIT (1024u * 1024u)
+
 struct terminalkit_handle {
     terminal_emulator_t *emulator;
     int columns, rows, snapshot_valid, snapshot_failed, dirty;
@@ -13,7 +15,37 @@ struct terminalkit_handle {
     uint8_t *changed;
     uint8_t *text;
     size_t text_size, text_capacity;
+    terminalkit_output_callback output_callback;
+    void *output_user_data;
+    uint8_t *replies;
+    uint32_t reply_size, reply_capacity;
+    int reply_overflow;
 };
+
+static void emit_reply(const char *bytes, int length, void *user_data) {
+    terminalkit_handle *kit = user_data;
+    if (!kit || !bytes || length <= 0) return;
+    if (kit->output_callback) {
+        kit->output_callback(bytes, length, kit->output_user_data);
+        return;
+    }
+    if ((uint32_t)length > TERMINALKIT_REPLY_LIMIT - kit->reply_size) {
+        kit->reply_overflow = 1;
+        return;
+    }
+    uint32_t needed = kit->reply_size + (uint32_t)length;
+    if (needed > kit->reply_capacity) {
+        uint32_t capacity = kit->reply_capacity ? kit->reply_capacity : 256;
+        while (capacity < needed)
+            capacity = capacity > TERMINALKIT_REPLY_LIMIT / 2
+                ? TERMINALKIT_REPLY_LIMIT : capacity * 2;
+        uint8_t *grown = realloc(kit->replies, capacity);
+        if (!grown) { kit->reply_overflow = 1; return; }
+        kit->replies = grown; kit->reply_capacity = capacity;
+    }
+    memcpy(kit->replies + kit->reply_size, bytes, (size_t)length);
+    kit->reply_size = needed;
+}
 
 static int allocate_grid(terminalkit_handle *kit, int columns, int rows) {
     if (columns < 1 || rows < 1 || (size_t)columns > SIZE_MAX / (size_t)rows ||
@@ -43,6 +75,7 @@ int terminalkit_open(int columns, int rows, int scrollback_limit,
     kit->emulator = terminal_emulator_new(columns, rows, scrollback_limit,
         term ? term : "xterm-256color");
     if (!kit->emulator) { terminalkit_close(kit); return 0; }
+    terminal_emulator_set_input_callback(kit->emulator, emit_reply, kit);
     *out_kit = kit;
     return 1;
 }
@@ -51,7 +84,7 @@ void terminalkit_close(terminalkit_handle *kit) {
     if (!kit) return;
     terminal_emulator_free(kit->emulator);
     free(kit->cells); free(kit->row_ids); free(kit->row_hashes);
-    free(kit->changed); free(kit->text);
+    free(kit->changed); free(kit->text); free(kit->replies);
     free(kit);
 }
 int terminalkit_feed(terminalkit_handle *kit, const uint8_t *bytes, uint64_t size) {
@@ -81,6 +114,9 @@ int terminalkit_focus_reporting(terminalkit_handle *kit) {
 int terminalkit_synchronized_output(terminalkit_handle *kit) {
     return kit && terminal_emulator_synchronized_output(kit->emulator);
 }
+int terminalkit_alternate_screen(terminalkit_handle *kit) {
+    return kit && terminal_emulator_alternate_screen(kit->emulator);
+}
 const char *terminalkit_title(terminalkit_handle *kit) {
     return kit ? terminal_emulator_name(kit->emulator) : NULL;
 }
@@ -89,7 +125,9 @@ void terminalkit_focus(terminalkit_handle *kit, int focused) {
 }
 void terminalkit_set_output_callback(terminalkit_handle *kit,
     terminalkit_output_callback callback, void *user_data) {
-    if (kit) terminal_emulator_set_input_callback(kit->emulator, callback, user_data);
+    if (!kit) return;
+    kit->output_callback = callback;
+    kit->output_user_data = user_data;
 }
 int terminalkit_keyboard(terminalkit_handle *kit, const char *key_name,
     uint32_t modifiers, uint32_t unicode) {
@@ -218,5 +256,54 @@ int terminalkit_row_text_copy(terminalkit_handle *kit, int row,
             offset += cell->text_length;
         } else buffer[offset++] = ' ';
     }
+    return 0;
+}
+
+static void write_u32(uint8_t *buffer, uint32_t value) {
+    for (int i = 0; i < 4; ++i) buffer[i] = (uint8_t)(value >> (8 * i));
+}
+static void write_u64(uint8_t *buffer, uint64_t value) {
+    for (int i = 0; i < 8; ++i) buffer[i] = (uint8_t)(value >> (8 * i));
+}
+int terminalkit_row_cells_copy(terminalkit_handle *kit, int row,
+    uint8_t *buffer, uint32_t *inout_size) {
+    if (!kit || !inout_size || row < 0 || row >= kit->rows || !kit->snapshot_valid)
+        return -1;
+    uint64_t needed = (uint64_t)kit->columns * 16;
+    for (int col = 0; col < kit->columns; ++col)
+        needed += kit->cells[(size_t)row * kit->columns + col].text_length;
+    if (needed > UINT32_MAX) return -1;
+    uint32_t available = *inout_size;
+    *inout_size = (uint32_t)needed;
+    if (!buffer || available < needed) return 1;
+    uint32_t offset = 0;
+    for (int col = 0; col < kit->columns; ++col) {
+        const terminalkit_cell *cell = &kit->cells[(size_t)row * kit->columns + col];
+        write_u64(buffer + offset, cell->style);
+        write_u32(buffer + offset + 8, cell->width);
+        write_u32(buffer + offset + 12, cell->text_length);
+        offset += 16;
+        if (cell->text_length) {
+            memcpy(buffer + offset, kit->text + cell->text_offset, cell->text_length);
+            offset += cell->text_length;
+        }
+    }
+    return 0;
+}
+int terminalkit_take_replies(terminalkit_handle *kit,
+    uint8_t *buffer, uint32_t *inout_size) {
+    if (!kit || !inout_size) return -1;
+    if (kit->reply_overflow) {
+        kit->reply_overflow = 0;
+        kit->reply_size = 0;
+        *inout_size = 0;
+        return -2;
+    }
+    uint32_t available = *inout_size;
+    *inout_size = kit->reply_size;
+    if (kit->reply_size == 0) return 0;
+    if (!buffer || available < kit->reply_size) return 1;
+    memcpy(buffer, kit->replies, kit->reply_size);
+    kit->reply_size = 0;
     return 0;
 }

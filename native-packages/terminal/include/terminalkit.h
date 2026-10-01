@@ -33,7 +33,8 @@
 
 typedef struct terminalkit_handle terminalkit_handle TK_OPAQUE;
 typedef struct terminalkit_cell terminalkit_cell TK_OPAQUE;
-/* Reply bytes are borrowed for the callback duration and can go to a PTY. */
+/* Reply bytes are borrowed for the callback duration and can go to a PTY.
+ * Replies queued before installing a callback remain available to drain. */
 typedef void (*terminalkit_output_callback)(const char *bytes, int length, void *user_data);
 
 /* The returned handle is owned by the caller. */
@@ -50,6 +51,7 @@ TERMINALKIT_API int terminalkit_cursor(terminalkit_handle *kit, int *column TK_O
 TERMINALKIT_API int terminalkit_mouse_mode(terminalkit_handle *kit);
 TERMINALKIT_API int terminalkit_focus_reporting(terminalkit_handle *kit);
 TERMINALKIT_API int terminalkit_synchronized_output(terminalkit_handle *kit);
+TERMINALKIT_API int terminalkit_alternate_screen(terminalkit_handle *kit);
 TERMINALKIT_API const char *terminalkit_title(terminalkit_handle *kit) TK_RETURNS_BORROWED_UTF8;
 TERMINALKIT_API void terminalkit_focus(terminalkit_handle *kit, int focused);
 TERMINALKIT_API void terminalkit_set_output_callback(terminalkit_handle *kit,
@@ -79,6 +81,14 @@ TERMINALKIT_API const uint8_t *terminalkit_text(terminalkit_handle *kit)
 TERMINALKIT_API uint64_t terminalkit_text_size(terminalkit_handle *kit);
 /* Convenience copy for language bindings; native clients can borrow cells/text. */
 TERMINALKIT_API int terminalkit_row_text_copy(terminalkit_handle *kit, int row,
+    uint8_t *buffer TK_OUT_BUFFER(inout_size), uint32_t *inout_size TK_INOUT);
+/* Packed row: for each column, little-endian u64 style, u32 width,
+ * u32 UTF-8 byte length, followed by the cell's UTF-8 bytes. */
+TERMINALKIT_API int terminalkit_row_cells_copy(terminalkit_handle *kit, int row,
+    uint8_t *buffer TK_OUT_BUFFER(inout_size), uint32_t *inout_size TK_INOUT);
+/* Without a direct callback, emulator replies queue up to 1 MiB. A return of
+ * -2 means the queue overflowed and at least one reply was lost. */
+TERMINALKIT_API int terminalkit_take_replies(terminalkit_handle *kit,
     uint8_t *buffer TK_OUT_BUFFER(inout_size), uint32_t *inout_size TK_INOUT);
 
 #endif

@@ -900,6 +900,12 @@ int terminal_emulator_synchronized_output(terminal_emulator_t* emulator) {
     && tsm_vte_get_synchronized_output(terminal->vte);
 }
 
+int terminal_emulator_alternate_screen(terminal_emulator_t* emulator) {
+  terminal_t* terminal = (terminal_t*)emulator;
+  return terminal && !terminal->closed
+    && (tsm_screen_get_flags(terminal->screen) & TSM_SCREEN_ALTERNATE) != 0;
+}
+
 uint64_t terminal_emulator_row_id(terminal_emulator_t* emulator, int row) {
   terminal_t* terminal = (terminal_t*)emulator;
   if (!terminal || terminal->closed || row < 0 || row >= terminal->rows)

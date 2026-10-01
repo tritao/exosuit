@@ -15,11 +15,18 @@ checkpoints. `terminalkit_snapshot()` exposes a cached active-screen cell grid.
 until the next feed, resize, restore, snapshot or close. Each cell contains an
 arena offset and length, display width and packed style; row-change flags are
 computed from rendered content. Native callers can consume those arrays
-without an additional copy. The thin Haxe `Emulator.rowText()` makes a safe
-copy when a managed string is needed.
+without an additional copy. The Haxe `Emulator.rowCells()` copies only a row
+requested by the caller into managed cells with style, width and UTF-8 text.
+`rowText()` remains a simpler text-only copy. The Haxe wrapper can encode
+keyboard, mouse and focus input and drain terminal replies from a bounded
+1 MiB queue. Native callers can route replies directly to a PTY through a
+borrowed callback without that queue. Checkpoints are available from Haxe as
+owned byte buffers.
 
 The package gate audits four C targets, runs a native conformance contract,
 and launches a headless Haxeon smoke in either compiler mode. The native
 contract covers screen cells, styles, modes, scrollback, input encoding,
-checkpoint replay and the pinned libtsm combining-mark limit. The Pragtical
-Lua terminal session fixtures still need a port after session integration.
+checkpoint replay and the pinned libtsm combining-mark limit. On POSIX, a
+separate smoke feeds a real PTY stream into the emulator and sends input back.
+NativeKit `nk_pty` session integration and the Pragtical Lua terminal session
+fixtures remain for M12.

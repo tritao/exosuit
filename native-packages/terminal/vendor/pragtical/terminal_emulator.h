@@ -102,6 +102,7 @@ uint64_t terminal_emulator_row_id(terminal_emulator_t* emulator, int row);
 int terminal_emulator_for_each_cell(terminal_emulator_t* emulator,
   terminal_emulator_cell_callback callback, void* user_data);
 int terminal_emulator_synchronized_output(terminal_emulator_t* emulator);
+int terminal_emulator_alternate_screen(terminal_emulator_t* emulator);
 /* Modifier bits: shift=1, lock=2, control=4, alt=8, logo=16. */
 int terminal_emulator_keyboard(terminal_emulator_t* emulator,
   const char* key_name, unsigned int modifiers, uint32_t unicode);

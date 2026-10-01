@@ -94,9 +94,17 @@ Last updated: 2026-10-01.
   native contract, and Haxeon smoke pass in reference and self-hosted modes.
   The fork's Meson library builds; its own unit suite could not run because
   the host lacks `check`.
-- M11.4 remains open for fuller Haxe input/output and cell-style wrappers,
-  Pragtical Lua session fixture port, graphical integration, and Windows/macOS
-  native execution. The package gate is included in `scripts/test.sh`.
+- The package gate is included in `scripts/test.sh`.
+- Follow-up TerminalKit work exposes styled cells through one packed copy per
+  requested Haxe row, a bounded Haxe reply queue, Haxe keyboard/mouse/focus and
+  checkpoint methods, and explicit alternate-screen state. Native PTY callers
+  still use a borrowed direct reply callback and borrowed snapshot storage.
+  The native contract and Haxe smoke cover these APIs in reference and
+  self-hosted compiler modes. A POSIX `forkpty` smoke feeds a real stream into
+  the emulator and sends input back; it passed 20 consecutive runs. This is
+  an emulator/OS-PTY boundary test, not yet a NativeKit `nk_pty` session.
+  M11.4 remains open for wider Pragtical conformance and Windows/macOS native
+  execution; M12 will connect NativeKit PTY to the session model and view.
 
 ### M11.3 — SQLiteKit embedded storage (accepted Linux slice)
 

@@ -95,12 +95,15 @@ int main(void) {
     REQUIRE(!strcmp(replies, "\x1b[I\x1b[O"));
     clear_replies();
     REQUIRE(feed(protocol, "\x1b[?1049h\x1b[?1007h") >= 0);
+    REQUIRE(terminalkit_alternate_screen(protocol));
     REQUIRE(terminalkit_mouse(protocol, 0, 0, 64, 1, 0));
     REQUIRE(!strcmp(replies, "\x1b[A"));
     REQUIRE(feed(protocol, "\x1b[>7u") >= 0);
     clear_replies();
     REQUIRE(terminalkit_keyboard(protocol, "c", 4, UINT32_MAX));
     REQUIRE(!strcmp(replies, "\x1b[99;5:1u"));
+    REQUIRE(feed(protocol, "\x1b[?1049l") >= 0);
+    REQUIRE(!terminalkit_alternate_screen(protocol));
     terminalkit_close(protocol);
     terminalkit_handle *unicode = NULL;
     REQUIRE(terminalkit_open(20, 2, 0, "xterm-256color", &unicode));
