@@ -60,6 +60,26 @@ Last updated: 2026-10-01.
 
 ## Implementation records
 
+### M15.2 — shared browser pipeline tools (verified slice)
+
+- Materia `a656e9b7` factors manifest guest arguments, portable Wasm HXI
+  generation and host import signature checking into `tools/web`. The reference
+  app keeps compatibility entry points and owns its toolkit generator list.
+- Before/after generated HXI files and manifest arguments compare identically
+  (`/tmp/materia-web-tools-before.log`, `/tmp/materia-web-tools-after.log`).
+  Shared and compatibility import checkers give identical results for matching
+  and deliberately mismatched Wasm ABI fixtures (exit 0 and 1 respectively).
+  Shell syntax, Node syntax and Python compilation checks pass.
+- Materia is on `exosuit-followon`; its pre-existing Haxeon/NativeKit gitlink
+  changes and untracked exosuit remain untouched. Release pin now includes
+  the shared tools. Browser entry/build experiments remain uncommitted.
+- First actual 988-source browser guest exposed a general CFG lowering crash:
+  generated unsupported UTF-8 callback constructor assigns a throw expression
+  to abstract `this`. Reduced independently to `this = throw "expected"`.
+  Fix and runtime regressions are underway in Haxeon; browser acceptance remains
+  pending. Resume with that compiler gate, then qualify the guest and native host.
+
+
 ### M15.1 — typed host capability policy (verified slice)
 
 - M8 composed CI restoration committed as exosuit 84c2dac. This slice adds an
