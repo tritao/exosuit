@@ -62,6 +62,29 @@ Last updated: 2026-10-01.
 
 ## Implementation records
 
+### M9.1 — TextArea presentation (in progress)
+
+- Next design: a typed foreground provider receives each visible retained chunk's
+  absolute codepoint range. This bounds syntax work to visible chunks and keeps
+  provider results local; unchanged colors reuse native resource revisions.
+  Backgrounds and underlines will reuse existing measured range rectangles.
+- Materia `cfe3e241` adds the visible foreground provider to TextField/TextArea
+  and retained editor layouts. Values clip to local codepoint ranges, unchanged
+  colors avoid native updates, reshaped chunks reapply styles. Single-line fields
+  retain styled content when a provider is set and keep placeholder behavior.
+- Framework gate exits 0: `/tmp/uikit-text-area-colors-framework-final.log`.
+  Coverage uses a 150-line accent/emoji fixture, verifies only the visible chunk
+  requests colors, clipping and recoloring preserve measurement, overlap rejects
+  and clearing works. Existing 4,000-node/input regressions pass.
+- Both graphical compiler-mode builds exit 0:
+  `/tmp/exosuit-m9-text-area-colors-build.log` and
+  `/tmp/exosuit-m9-text-area-colors-self-build.log`. No compiler change.
+- Exact next action: add background/underline/whole-line geometry decorations,
+  then wire syntax/diagnostics into EditorPane and rerun both browser targets.
+  Native retained layouts still group up to 64 paragraphs; strict changed-row
+  invalidation and M7.1 measurements remain acceptance work, not a claimed pass.
+
+
 ### M9.1 — public foreground ranges and raster invalidation (foundation delivered)
 
 - General C ABI `nkui_text_layout_set_color_ranges` copies sorted, disjoint
