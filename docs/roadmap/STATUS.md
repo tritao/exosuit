@@ -4,20 +4,19 @@ Last updated: 2026-10-01.
 
 ## Current checkpoint
 
-- Active tasks: **M8.1** acceptance gap (dynamic plugin integration) and **M8.2**
-  (compiler/build agreement). Native C/HXI migration committed as `f8939de`.
-- Current evidence: `./scripts/test.sh` exits 0 with Unicode native regression
-  coverage, but its pre-existing dynamic-plugin failure suppression remains;
-  this is not a pass of every project and M8.1 is not yet complete.
-  The reference `./scripts/build.sh` now exits 0 after Haxeon `3606bd7c`.
-  Haxeon `58be9a62` refreshes the checked-in compiler after successful bootstrap
-  convergence; both reference and self-hosted graphical builds exit 0.
-  The fresh self-hosted headless suite also exits 0 with the dynamic-plugin
-  test explicitly suppressed. M8 acceptance remains incomplete.
-- Exact resume: reduce the embedded incremental compiler's anonymous-record
-  runtime cast failure (latest checkpoint below), then finish source-plugin
-  acceptance and remove suppression. Finish the embedding package gate.
-  Integration/release and interactive UIKit checks remain pending.
+- **M8.1 and M8.2 accepted headlessly in both compiler modes.** Exosuit
+  `95a3b08` restores source plugins and makes their full test mandatory.
+  Graphical builds and all headless projects exit 0 in reference and refreshed
+  self-hosted modes. Haxeon `82d92ba0` passes 375/375 and every integration/Wasm
+  stage; bootstrap converges and rebuilds identically.
+- Active task: **M8.3**, restoring manifest-based real LSP, revision-pinned
+  release packaging and a scripted UIKit window route. M8.4 documentation is
+  updated, while interactive acceptance and other platforms remain unclaimed.
+- Exact resume: port `scripts/test-haxeon-lsp.sh` to a smoke-test manifest and
+  verify edit/diagnose/fix/build against the actual server. Port packaging and
+  inspect existing UIKit capture/record hooks for the real-window route.
+  `xvfb-run`, `xdotool` and DISPLAY=:0 are available; do not assume GUI checks
+  are unavailable without testing the real host.
 - HEADs at planning: exosuit `ae2f260` (`haxeon-uikit-port`). Materia `main` is at
   `816372dd`, fast-forwarded 2026-10-01 for the Haxeon wasm and web fixes; it
   contains uikit and editorkit. Haxeon is at `fba71015` (on pin, fast-forwarded).
@@ -47,7 +46,7 @@ Last updated: 2026-10-01.
 | M5 | Complete headlessly | Live layered configuration, owned APIs, debounced background compilation, transactional reload and editor lifecycle controls pass |
 | M6 | Complete headlessly | Bounded JSON-RPC, lifecycle/synchronization, language commands, diagnostics, restart and real Haxeon edit/diagnose/fix/build smoke pass |
 | M7 | Complete for the claimed Linux automation scope | M7.1–M7.3 pass; desktop IME, physical mixed-DPI, Windows and macOS remain explicit unclaimed follow-ons |
-| M8 | In progress | C/HXI migration `f8939de` removes native string abort; headless gating tests pass; dynamic plugin project suppressed; both compiler graphical builds pass; bootstrap converges; dynamic plugin and integration/release gates pending |
+| M8 | In progress | M8.1/M8.2 accepted in both compiler modes (`95a3b08`); source plugins mandatory; M8.3 release/LSP/window gates pending |
 | M9 | Not started | Depends on M8 |
 | M10 | Not started | Depends on M8, M9.1–M9.2 |
 | M11 | Not started | Depends on M8; independent of M9/M10 |
@@ -57,6 +56,59 @@ Last updated: 2026-10-01.
 | M15 | Not started | Depends on M8.1, M8.2; scheduled right after M8. Reference: materia `app/web` at `816372dd`, Haxeon `fba71015` |
 
 ## Implementation records
+
+### M8.1/M8.2 — reflection copies and mandatory source plugins (accepted)
+
+- Haxeon `82d92ba0` fixes the reduced Reflect.copy representation failure.
+  Native reflection clones typed object layouts without constructors, preserves
+  declared null field types and shallow references, and retires interface-cache
+  slots. Existing HashLink dynamic/virtual copying is reused. Wasm generates
+  per-layout shallow copying through ObjectReflection; dynamic objects retain
+  their explicit field-copy path. No assignability weakening, editor special
+  cases or test skips were introduced.
+- Before-fix typed-record reducer exited 1 with the same dynobj cast failure.
+  A stock HashLink copy was insufficient for object-backed records, and copying
+  to dynobj still lost nominal layout; the final adapter preserves the layout.
+  The local reference Haxe record test exits 42. New native/Wasm regressions
+  cover nullable fields, copy independence, shallow arrays, null input,
+  inherited class fields, constructor counts and interface dispatch. The
+  embedding test now recompiles a method body on a worker with publication
+  tracking, exercising the semantic body-reuse path.
+- The first full reflection gate failed both Wasm backends on the new test
+  (`/tmp/haxeon-gate-reflect-copy.log`, exit 1). The general Wasm helper fixes
+  both: focused parity exits 0 with 244 fixtures/12 pre-existing skips; final
+  full gate exits 0, 375/375 plus every integration/native/C++/Wasm/Wasmtime
+  stage (`/tmp/haxeon-gate-reflect-copy-complete.log`). Both bootstrap commands
+  exit 0, converge after one stage and rebuild identically; logs
+  `/tmp/haxeon-bootstrap-reflect-copy-complete.log` and
+  `/tmp/haxeon-bootstrap-self-reflect-copy-complete.log`. Stdlib formatting
+  checked explicitly. Temporary compiler stack logging and reducer files are
+  removed. Pre-existing dirty Haxeon paths remain untouched.
+- Exosuit `95a3b08` restores threaded source compilation, publication,
+  compatible patching, structural reload/state transfer, rollback and unload
+  handling. It registers compiler intrinsics and PluginHost HXI. SDK host
+  callbacks return checked success/error responses; Unicode errors can be
+  caught inside plugin code. Initialization reinstalls managed callbacks after
+  shutdown, and retired tokens are rejected. Unexpected compiler failures keep
+  exception stacks in plugin diagnostics.
+- Acceptance extends the disposable fixture with Unicode host-error catching
+  and checks shutdown/reinstall/retired-token handling. The full existing
+  compatible/structural reload, source failure, activation rollback, state
+  version and unload-race test is mandatory again; suppression is removed.
+- Serialized `./scripts/build.sh`, `HAXEON_SELF_HOSTED=1 ./scripts/build.sh`,
+  `./scripts/test.sh`, `HAXEON_SELF_HOSTED=1 ./scripts/test.sh` all exit 0.
+  Graphical builds compile 984 sources; every headless project, including
+  dynamic plugins, passes. Logs:
+  `/tmp/exosuit-build-plugin-restored-reference.log`,
+  `/tmp/exosuit-build-plugin-restored-self.log`,
+  `/tmp/exosuit-test-plugin-restored-reference.log`,
+  `/tmp/exosuit-test-plugin-restored-self.log`.
+- CommandView's defect has dedicated effect regressions. The historical
+  ConfigurationController/SelectOption claims no longer reproduce in the
+  updated source/compiler; bootstrap refresh and actual two-mode UIKit builds
+  establish resolution without invented reducers. README/ADR reflect current
+  implementation; plugin docs use the actual API version 2. Interactive GUI,
+  release and real-server integration are still pending in M8.3.
 
 ### M8.1 — reusable compiler/runtime package (verified slice)
 
@@ -905,7 +957,7 @@ These commits satisfy only the behaviors evidenced by their tests; they do not m
 
 ## Blockers and pending manual checks
 
-- M8 gates are red (see Current checkpoint); every follow-on milestone waits on M8.
+- M8.1/M8.2 gates pass in both modes; M8.3 release/LSP/window gates remain pending.
 - The SDL-era graphical route (M0.3) and its automation scripts were removed by the
   UIKit port; M8.3 replaces them. Desktop IME and physical mixed-DPI checks stay pending.
 - Windows (ConPTY, named pipes, atomic publication) and macOS are unclaimed.
