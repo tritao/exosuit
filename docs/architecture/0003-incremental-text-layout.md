@@ -1,6 +1,7 @@
 # ADR 0003: Indexed edit-range text layout
 
-Status: proposed, 2026-10-01.
+Status: proposed, 2026-10-01. The edit-range API boundary is implemented;
+composite snapshots remain experimental.
 
 ## Context
 
@@ -64,6 +65,13 @@ the new fast path; guessing the edit range by comparing two 1 MiB strings
 would put an unbounded scan back on every keypress. `TextEngine` dispatches
 rendering, caret, hit-test, selection, and line-range requests through the
 composite snapshot rather than directly through one `skb_layout_t`.
+
+The first production slice adds `nkui_text_layout_edit` and routes ordinary
+same-chunk editor replacements to it with chunk-relative codepoint offsets.
+It currently splices the retained UTF-8 text and calls the existing complete
+Skribidi layout path. The old full-update path handles chunk repartitioning
+and other nonlocal changes. This preserves one authoritative geometry
+generation while the composite snapshot is built and verified.
 
 ## Verification before activation
 

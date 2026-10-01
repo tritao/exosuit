@@ -16,8 +16,10 @@ Last updated: 2026-10-01.
   browser stage is wired into composed CI through `EXOSUIT_CI_WEB=1`; absent
   toolchains remain explicitly pending.
 - Active task: **M9.1**, styled text and decorations on UIKit.
-- Exact resume: design a composite layout/render API over indexed pieces and
-  retained row geometry, then test it in UIKit on the real 1 MiB typing fixture.
+- Exact resume: implement the composite layout/render snapshot over indexed
+  pieces and retained row geometry, then test it in UIKit on the real 1 MiB
+  typing fixture. The edit-range API and Haxe call path are wired but still
+  use complete native layout rebuilds.
   Preserve M8 and both browser gates.
 - All further graphical tests must use disposable PRAGTICAL_PORTABLE state.
   IME, physical mixed-DPI transitions, Windows and macOS remain unclaimed.
@@ -93,6 +95,14 @@ Last updated: 2026-10-01.
   exercises viewport-first delivery; edit-range shaping is the next gate.
 
 ### M9.1 — long-paragraph update reduction (diagnosis; budget still failing)
+
+- Materia `32e3748df` exposes `nkui_text_layout_edit` with a half-open codepoint range
+  and UTF-8 replacement. `TextEditorLayout.setTextAfterEdit` forwards the known
+  edit for a stable chunk; repartitioning still uses full update. The native
+  implementation currently splices text and rebuilds one Skribidi layout, so
+  all rendering and geometry still share one generation. The C ABI and native
+  text-engine tests pass; `check-hxi.sh` and the Haxe framework smoke pass.
+  This validates the edit boundary, not incremental layout or the 50 ms gate.
 
 - An opt-in temporary Skribidi phase probe on the real 1 MiB typing fixture
   measured 62 builds: median UTF-8 decode/text-property setup **41.5 ms**,
@@ -172,9 +182,9 @@ Last updated: 2026-10-01.
   and routes rendering, hit tests, carets and line queries through it. The
   indexed pieces need a common generation and row index before UIKit can use
   them without breaking those APIs. The Haxe `setTextAfterEdit` path already
-  carries old/new document offsets, but changed records call
-  `TextLayout.update` with the entire chunk; that is the exact place to pass
-  chunk-relative edit ranges into a future native composite update.
+  carries old/new document offsets; stable changed records now call
+  `TextLayout.edit` with chunk-relative ranges. The native call still uses
+  complete layout and awaits the composite snapshot implementation.
 - This probe is not a correctness proof or production implementation. It
   still scans cached layouts for oracle checks and glyph-position reconstruction,
   checks only one unbroken-word wrap fixture,
