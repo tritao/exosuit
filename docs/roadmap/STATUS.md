@@ -1,6 +1,6 @@
 # Execution ledger
 
-Last updated: 2026-10-01.
+Last updated: 2026-10-02.
 
 ## Current checkpoint
 
@@ -25,15 +25,16 @@ Last updated: 2026-10-01.
   implementations remain open. The Pragtical PTY and emulator references are
   present in the available read-only checkout.
 - Exact resume: finish M9.1 strict changed-row invalidation. The layout-session
-  editor now caches eligible visible rows in shallow raster passes: an edit in
-  one wrapped row misses that row and its containing pass while unchanged rows
-  hit. The containing pass still recomposites rows, and unsupported Unicode
-  layouts still rebuild natively. Inspect those remaining invalidation cases
+  editor caches eligible visible rows in shallow raster passes. Unchanged
+  uniform-tint ASCII rows now retain their glyph revision when their source
+  offsets move; their immutable source metadata is rebased on publication.
+  The containing pass still recomposites rows, and shifted colored rows and
+  unsupported Unicode layouts still rebuild. Inspect those remaining cases
   before checking M9.1. Preserve the 1 MiB, 10 MiB and graphical pixel gates.
   Preserve M8 and both browser gates.
-- Current follow-on HEADs: Exosuit `5230e70` before this ledger commit;
-  Materia `090ba9d31` carries row-scoped glyph commands and shallow row raster
-  caching on the layout-session path. The
+- Current follow-on HEADs: Exosuit `8940ae9` before this ledger commit;
+  Materia `da5afbe63` carries row-scoped glyph commands, shallow row raster
+  caching and rebased source metadata on the layout-session path. The
   existing dirty Haxeon/NativeKit gitlinks and UIKit TextInputBridge edit in
   Materia were left untouched.
 - All further graphical tests must use disposable PRAGTICAL_PORTABLE state.
@@ -77,6 +78,26 @@ Last updated: 2026-10-01.
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M9.1 — shifted source metadata for unchanged ASCII rows (verified slice)
+
+- Materia `da5afbe63` keeps a row's glyph revision after a guarded ASCII edit
+  when its bytes and placement match, even if its codepoint range moves.
+  Publication copies the small immutable row snapshot and rebases its source
+  ranges; frames holding the old snapshot keep valid metadata. The row's
+  source start is part of currency validation. Rows with absolute color ranges
+  rebuild so their tint follows current source positions.
+- Native tests cover insertion and deletion that move a wrapped suffix row by
+  three codepoints, old-snapshot invalidation, rebased source ranges, and
+  absolute color-range correctness. Text-engine, ABI, frame-resource and
+  session-render smoke pass. The graphical decoration pixel smoke passes.
+- The 1 MiB varied-key typing fixture passed over 30 actual input frames at
+  **49.61 ms p95** against the 50 ms budget; artifact
+  `/tmp/exosuit-m9-source-rebase-1mb`. The 10 MiB repeat-key fixture passed
+  at **46.49 ms p95** over 30 frames, with a 210.25 ms worst-frame outlier;
+  artifact `/tmp/exosuit-m9-source-rebase-10mb`. The 1 MiB margin is narrow
+  under host variation. M9.1 remains active for colored rows, Unicode fallback
+  and parent-pass recomposition. The full Exosuit headless suite exits 0.
 
 ### M9.1 — cached row paint on the layout-session editor (verified slice)
 
