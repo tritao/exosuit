@@ -38,21 +38,26 @@ class TerminalPane implements View {
 	final texts:Array<String> = [];
 	final revisions:Array<Int> = [];
 	final backgrounds:Array<Array<TerminalBackground>> = [];
-	final foreground = Color.rgba(0.87, 0.89, 0.91, 1.0);
-	final background = Color.rgba(0.06, 0.07, 0.09, 1.0);
+	final palette:TerminalPalette;
+	final foreground:Color;
+	final background:Color;
 	final cellWidth:Float;
 	final rowHeight:Float;
 	var viewportWidth:Float = 0.0;
 	var viewportHeight:Float = 0.0;
 	var focusRequested:Bool = false;
+	var focused:Bool = false;
 	var closed:Bool = false;
 	var cursorRow:Int = -1;
 	var cursorColumn:Int = -1;
 	var cursorMode:Int = 1;
 
-	public function new(session:TerminalSession, requestFrame:Void->Void) {
+	public function new(session:TerminalSession, requestFrame:Void->Void, palette:TerminalPalette) {
 		this.session = session;
 		this.requestFrame = requestFrame;
+		this.palette = palette;
+		foreground = palette.foreground;
+		background = palette.background;
 		fonts = FontCollection.create();
 		var mono = Sys.getEnv("EXOSUIT_TERMINAL_FONT");
 		if (mono == null || mono.length == 0)
@@ -108,9 +113,9 @@ class TerminalPane implements View {
 				var fg = haxe.Int64.toInt(cell.style);
 				var bg = haxe.Int64.toInt(cell.style >>> 32);
 				if ((fg & 3) != 0) ranges.push(new TextColorRange(offset, offset + count,
-					TerminalColors.decode(fg, foreground)));
+					TerminalColors.decode(fg, foreground, palette, false)));
 				if ((bg & 3) != 0) fills.push({start: column, end: column + cell.width,
-					color: TerminalColors.decode(bg, background)});
+					color: TerminalColors.decode(bg, background, palette, true)});
 				offset += count;
 			}
 			var next = buffer.toString();
@@ -145,6 +150,7 @@ class TerminalPane implements View {
 		fill.height = LayoutAxis.grow();
 		var backdrop = new CanvasView("terminal-backdrop", function(canvas:Canvas, geometry) {
 			canvas.fillRectIfPositive(new Rect(0.0, 0.0, geometry.width, geometry.height), background);
+			if (focused) canvas.fillRectIfPositive(new Rect(0.0, 0.0, geometry.width, 2.0), palette.cursor);
 			resizeToViewport(geometry.width, geometry.height);
 		}, fill, "Terminal", true);
 		var layers:Array<StackChild> = [new StackChild("background", backdrop, 0.0, 0.0, 0,
@@ -162,7 +168,7 @@ class TerminalPane implements View {
 				canvas.drawText(layouts[index], 8.0, 0.0);
 				if (index == cursorRow && cursorMode != 1)
 					canvas.fillRectIfPositive(new Rect(8.0 + cursorColumn * cellWidth, rowHeight - 2.0,
-						cellWidth, 2.0), foreground);
+						cellWidth, 2.0), palette.cursor);
 			}, rowStyle, null, false, CachePolicy.Raster, key);
 			layers.push(new StackChild('row-$index', view, 0.0, 4.0 + index * rowHeight,
 				1, LayoutAxis.grow(), LayoutAxis.fixed(rowHeight)));
@@ -178,8 +184,16 @@ class TerminalPane implements View {
 		});
 		node.on(UiEventKind.KeyDown, handleKey);
 		node.on(UiEventKind.KeyRepeat, handleKey);
-		node.on(UiEventKind.Focus, function(_) session.emulator.focus(true));
-		node.on(UiEventKind.FocusLost, function(_) session.emulator.focus(false));
+		node.on(UiEventKind.Focus, function(_) {
+			focused = true;
+			session.emulator.focus(true);
+			requestFrame();
+		});
+		node.on(UiEventKind.FocusLost, function(_) {
+			focused = false;
+			session.emulator.focus(false);
+			requestFrame();
+		});
 		node.on(UiEventKind.Scroll, function(event:UiEvent) {
 			var current = session.emulator.scrollback(-1).current;
 			var step = Std.int(Math.round(event.deltaY / rowHeight * 3.0));

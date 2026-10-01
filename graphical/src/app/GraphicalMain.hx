@@ -2,10 +2,12 @@ package app;
 
 import nativekit.ui.host.DesktopUiHost;
 import nativekit.ui.host.DesktopUiHostOptions;
-import nativekit.ui.theme.Theme;
+import nativekit.ffi.NativeKit;
+import nativekit.ffi.NativeKitTypes;
 import platform.Native;
 import platform.Platform;
 import ui.ExosuitApp;
+import ui.ExosuitPalette;
 
 /**
  * Graphical entry point: `DesktopUiHost` owns the window, GPU, and frame
@@ -33,6 +35,7 @@ class GraphicalMain {
 		var captureSeconds = 0.0;
 		var recordPath:Null<String> = null;
 		var openTerminal = false;
+		var themeChoice = "system";
 		var openPaths:Array<String> = [];
 		for (argument in arguments) {
 			if (StringTools.startsWith(argument, "--plugin="))
@@ -47,6 +50,8 @@ class GraphicalMain {
 				frameLimit = Std.parseInt(argument.substring(15));
 			else if (argument == "--open-terminal")
 				openTerminal = true;
+			else if (StringTools.startsWith(argument, "--theme="))
+				themeChoice = argument.substring(8);
 			else if (!StringTools.startsWith(argument, "--"))
 				openPaths.push(argument);
 		}
@@ -69,7 +74,10 @@ class GraphicalMain {
 		};
 		var app:Null<ExosuitApp> = null;
 		var session = DesktopUiHost.open(host, function(context) {
-			var instance = new ExosuitApp(context.fonts, Theme.light(), context, openPaths.length == 0 ? null : openPaths[0], null, new NativeDesktopServices(context));
+			var dark = prefersDark(themeChoice);
+			var instance = new ExosuitApp(context.fonts, ExosuitPalette.theme(dark), context,
+				openPaths.length == 0 ? null : openPaths[0], null,
+				new NativeDesktopServices(context), dark);
 			for (index in 1...openPaths.length) instance.application.openArgument(openPaths[index]);
 			if (openTerminal) instance.openTerminal();
 			if (pluginManifest != null && !instance.application.loadPluginManifest(pluginManifest))
@@ -85,5 +93,19 @@ class GraphicalMain {
 		var status = session.close();
 		Native.shutdown();
 		return status;
+	}
+
+	static function prefersDark(choice:String):Bool {
+		if (choice == "dark") return true;
+		if (choice == "light") return false;
+		if (choice != "system") throw 'Unknown theme "$choice" (use system, light, or dark)';
+		try {
+			var appearance = new SystemAppearance();
+			appearance.set_struct_size(32);
+			NativeKit.nk_system_get_appearance(appearance);
+			return Std.int(appearance.get_color_scheme()) != 1;
+		} catch (_:Dynamic) {
+			return true;
+		}
 	}
 }

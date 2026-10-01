@@ -23,6 +23,7 @@ and assert the final screen and replay requests.
 Initial Linux slice: a local shell opens in a dock panel. Retained UIKit row
 canvases repaint changed cells with indexed and true-color foreground/background
 colors and a cursor marker. The pane resizes the PTY to its resolved cell grid.
+Default and ANSI colors now follow paired workbench light/dark palettes.
 Text input, navigation/control keys, emulator Kitty key encoding when active,
 focus reporting, and wheel scrollback are wired. `scripts/test-terminal-ui.sh`
 exercises the live dock, resize, and shell input under Xvfb. The checklist below

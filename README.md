@@ -22,6 +22,10 @@ cd exosuit
 ./scripts/run.sh [file or directory]
 ```
 
+The graphical workbench follows the system light/dark preference on launch.
+Use `./scripts/run.sh --theme=dark` or `--theme=light` to override it.
+When no folder is open, the Explorer collapses to an Open Folder rail.
+
 The graphical application builds from `graphical/haxeon.json` (entry
 `app.GraphicalMain`). Headless tests build from `haxeon.json` (entry
 `app.Main`); see `scripts/test.sh` for the test suite.

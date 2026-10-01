@@ -3,6 +3,7 @@ package style;
 import syntax.HighlightToken;
 
 class Theme {
+	public var lightSyntax:Bool = false;
 	public var editorBackground:Int = 0x181818ff;
 	public var editorForeground:Int = 0xe6e6e6ff;
 	public var accent:Int = 0x4f8fccff;
@@ -32,7 +33,17 @@ class Theme {
 	public function new() {}
 
 	public function tokenColor(kind:Int):Int
-		return switch kind {
+		if (lightSyntax) return switch kind {
+			case HighlightToken.KEYWORD: 0x7b3fb3ff;
+			case HighlightToken.TYPE: 0x146b8aff;
+			case HighlightToken.NUMBER: 0x9b4d13ff;
+			case HighlightToken.STRING: 0x247a37ff;
+			case HighlightToken.COMMENT: 0x66758aff;
+			case HighlightToken.OPERATOR: 0x425064ff;
+			case HighlightToken.LITERAL: 0xb33e4bff;
+			default: editorForeground;
+		};
+		else return switch kind {
 			case HighlightToken.KEYWORD: 0xc678ddff;
 			case HighlightToken.TYPE: 0x56b6c2ff;
 			case HighlightToken.NUMBER: 0xd19a66ff;

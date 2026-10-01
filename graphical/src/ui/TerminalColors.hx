@@ -4,7 +4,8 @@ import Color;
 
 /** Decodes the compact colors emitted by terminalkit/libtsm. */
 class TerminalColors {
-	public static function decode(packed:Int, fallback:Color):Color {
+	public static function decode(packed:Int, fallback:Color, palette:TerminalPalette,
+			background:Bool):Color {
 		var mode = packed & 3;
 		if (mode == 0) return fallback;
 		if (mode == 3) return Color.rgba(((packed >>> 8) & 255) / 255.0,
@@ -12,10 +13,7 @@ class TerminalColors {
 		var index = (packed >>> 8) & 255;
 		var rgb:Array<Int>;
 		if (index < 16) {
-			var base = [0x000000, 0xcd0000, 0x00cd00, 0xcdcd00, 0x0000ee, 0xcd00cd,
-				0x00cdcd, 0xe5e5e5, 0x7f7f7f, 0xff0000, 0x00ff00, 0xffff00,
-				0x5c5cff, 0xff00ff, 0x00ffff, 0xffffff][index];
-			rgb = [(base >>> 16) & 255, (base >>> 8) & 255, base & 255];
+			return background ? palette.ansiBackground[index] : palette.ansi[index];
 		} else if (index < 232) {
 			var cube = [0, 95, 135, 175, 215, 255];
 			var n = index - 16;

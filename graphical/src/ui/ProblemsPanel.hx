@@ -38,7 +38,8 @@ class ProblemsPanel implements View {
 		style.height = LayoutAxis.grow();
 		if (values.length == 0) {
 			style.padding = new Insets(16.0, 16.0, 16.0, 16.0);
-			return new Text("No problems reported.", style, Color.rgba(0.6, 0.6, 0.65, 1.0), TextStyleOverride.text(13.0)).build(context);
+			return new Text("No problems reported.", style, context.theme.tokens.textSecondary,
+				TextStyleOverride.text(13.0)).build(context);
 		}
 		var rows:Array<KeyedView> = [];
 		for (index in 0...values.length)

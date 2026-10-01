@@ -44,14 +44,15 @@ trap cleanup EXIT
 "$root_dir/scripts/build.sh" >/dev/null
 xvfb-run -a timeout 40 "$0" --drive "$fixture"
 python3 - "$fixture" <<'CHECK'
-import json, pathlib, sys
+import json, pathlib, re, sys
 root = pathlib.Path(sys.argv[1])
 state = json.loads((root / 'capture/app-state.json').read_text())
 assert state['terminal'] == 'running', state
-assert 70 <= state['terminalColumns'] <= 90, state
+assert 95 <= state['terminalColumns'] <= 105, state
 assert 5 <= state['terminalRows'] <= 8, state
 assert not state['errors'], state
 tree = (root / 'capture/ui-tree.txt').read_text()
+assert re.search(r'Box \[8,48 40x36\].*label="Open Folder"', tree), tree
 assert tree.count('type=canvas z=1') >= state['terminalRows'], state
 assert (root / 'capture/frame.png').stat().st_size > 1000
 events = (root / 'events.jsonl').read_text()

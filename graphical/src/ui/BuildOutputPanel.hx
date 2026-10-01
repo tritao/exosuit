@@ -39,23 +39,24 @@ class BuildOutputPanel implements View {
 		if (output == null || output.lines.length == 0) {
 			style.padding = new Insets(16.0, 16.0, 16.0, 16.0);
 			return new Text("No build has run. Use \"Run Task\" from the command palette.", style,
-				Color.rgba(0.6, 0.6, 0.65, 1.0), TextStyleOverride.text(13.0)).build(context);
+				context.theme.tokens.textSecondary, TextStyleOverride.text(13.0)).build(context);
 		}
 		var rows:Array<KeyedView> = [];
 		for (index in 0...output.lines.length)
-			rows.push(new KeyedView("line" + index, buildRow(output.lines[index], index)));
+			rows.push(new KeyedView("line" + index,
+				buildRow(output.lines[index], index, context.theme.tokens.textPrimary)));
 		var listStyle = new LayoutStyle();
 		listStyle.width = LayoutAxis.grow();
 		var list = new Column("build-output-list", rows, listStyle);
 		return new ScrollView("build-output-scroll", list, style).build(context);
 	}
 
-	function buildRow(line:BuildOutputLine, index:Int):View {
+	function buildRow(line:BuildOutputLine, index:Int, foreground:Color):View {
 		var diagnostic = line.diagnostic;
 		if (diagnostic == null) {
 			var style = new LayoutStyle();
 			style.width = LayoutAxis.grow();
-			return new Text(line.text, style, Color.rgba(0.82, 0.82, 0.85, 1.0), TextStyleOverride.text(12.0));
+			return new Text(line.text, style, foreground, TextStyleOverride.text(12.0));
 		}
 		var button = new Button(line.text, null, function() host.activateBuildDiagnostic(diagnostic), "build-line" + index);
 		button.variant = ButtonVariant.Secondary;

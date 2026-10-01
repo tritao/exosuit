@@ -19,12 +19,14 @@ import nativekit.ui.core.TextStyleOverride;
 import nativekit.ui.docking.DockNode;
 import nativekit.ui.docking.DockPanelDescriptor;
 import nativekit.ui.docking.DockSplitAxis;
+import nativekit.ui.docking.DockDropZone;
 import nativekit.ui.docking.DockWorkspaceModel;
 import nativekit.ui.host.DesktopUiApplication;
 import nativekit.ui.host.UiHostContext;
 import platform.HostFileDialogs;
 import nativekit.ui.icons.IconName;
 import nativekit.ui.theme.Theme;
+import nativekit.ui.style.EnvironmentColorScheme;
 import nativekit.ui.widgets.KeyedView;
 import nativekit.ui.widgets.controls.Button;
 import nativekit.ui.widgets.controls.ButtonVariant;
@@ -70,6 +72,9 @@ import terminalkit.Emulator;
 class ExosuitApp implements DesktopUiApplication {
 	public final ui:UiContext;
 	public final theme:Theme;
+	final darkPalette:Bool;
+	final editorPalette:style.Theme;
+	final terminalPalette:TerminalPalette;
 	public final application:Application;
 	public final capabilities:HostCapabilities;
 	public final host:UiWorkbenchHost;
@@ -89,14 +94,19 @@ class ExosuitApp implements DesktopUiApplication {
 	static inline var STATUS_HEIGHT:Float = 26.0;
 
 	public function new(?fonts:FontCollection, ?theme:Theme, ?hostContext:UiHostContext,
-			?openPath:String, ?capabilities:HostCapabilities, ?fileDialogs:HostFileDialogs) {
+			?openPath:String, ?capabilities:HostCapabilities, ?fileDialogs:HostFileDialogs,
+			?dark:Bool) {
 		this.capabilities = capabilities == null ? HostCapabilities.desktop() : capabilities;
 		this.hostContext = hostContext;
-		this.theme = theme == null ? Theme.light() : theme;
+		darkPalette = dark == null ? true : dark;
+		this.theme = theme == null ? ExosuitPalette.theme(darkPalette) : theme;
+		terminalPalette = new TerminalPalette(darkPalette);
 		ui = new UiContext(null, fonts, this.theme);
+		ui.buildContext.environment.colorScheme = darkPalette ? EnvironmentColorScheme.Dark : EnvironmentColorScheme.Light;
 		desktop = fileDialogs;
 		if (hostContext != null) hostContext.onCloseRequested = function(close) close();
 		dock = makeDock();
+		if (openPath == null) dock.close("explorer");
 		var capturedHost:UiWorkbenchHost = null;
 		application = new Application(function(exosuitTheme, focus, workspace, settings) {
 			capturedHost = new UiWorkbenchHost(exosuitTheme, focus, workspace, settings, requestFrame, {
@@ -108,6 +118,7 @@ class ExosuitApp implements DesktopUiApplication {
 			return capturedHost;
 		}, null, null, this.capabilities);
 		host = capturedHost;
+		editorPalette = darkPalette ? application.theme : ExosuitPalette.lightEditor();
 		installCommands();
 		application.session.start();
 		if (openPath != null) openArgument(openPath);
@@ -115,7 +126,7 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function makeDock():DockWorkspaceModel {
 		var model = new DockWorkspaceModel();
-		model.register(new DockPanelDescriptor("explorer", "Explorer", false, true, IconName.FolderOpen));
+		model.register(new DockPanelDescriptor("explorer", "Explorer", true, true, IconName.FolderOpen));
 		model.register(new DockPanelDescriptor("editor", "Editor", false, true, IconName.NewFile));
 		model.register(new DockPanelDescriptor("problems", "Problems", true, true));
 		if (capabilities.supports(Processes))
@@ -140,8 +151,17 @@ class ExosuitApp implements DesktopUiApplication {
 		return model;
 	}
 
-	function toggleExplorerVisible():Bool
-		return dock.isOpen("explorer") ? dock.close("explorer") : dock.open("explorer");
+	function toggleExplorerVisible():Bool {
+		if (explorerRoot == null) { openFolderDialog(); return true; }
+		return dock.isOpen("explorer") ? dock.close("explorer") : openExplorer();
+	}
+
+	function openExplorer():Bool {
+		if (dock.isOpen("explorer")) return dock.activate("explorer");
+		if (!dock.dock("explorer", "editor", DockDropZone.Left)) return false;
+		dock.setSplitRatio([0], 0.22);
+		return true;
+	}
 
 	public function openTerminal():Void {
 		if (!capabilities.supports(Processes)) return;
@@ -150,7 +170,7 @@ class ExosuitApp implements DesktopUiApplication {
 			var backend = LocalPtyBackend.spawn(profile, 80, 24);
 			try {
 				var session = new TerminalSession(backend, Emulator.open(80, 24));
-				try terminalPane = new TerminalPane(session, requestFrame)
+				try terminalPane = new TerminalPane(session, requestFrame, terminalPalette)
 				catch (error:Dynamic) { session.close(); throw error; }
 			} catch (error:Dynamic) { backend.close(); throw error; }
 		}
@@ -201,8 +221,12 @@ class ExosuitApp implements DesktopUiApplication {
 	public function view():View {
 		var workspaceView = new DockWorkspace("exosuit-workspace", dock, dockPanelContents);
 		workspaceView.availableHeight = Math.max(0.0, viewportHeight - TOOLBAR_HEIGHT - STATUS_HEIGHT);
+		var workspace:View = explorerRoot == null && !dock.isOpen("explorer")
+			? new Row("workspace-with-rail", [new KeyedView("rail", explorerRail()),
+				new KeyedView("workspace", workspaceView)], fillStyle())
+			: workspaceView;
 		var body = new Column("exosuit-body", [
-			new KeyedView("workspace", workspaceView),
+			new KeyedView("workspace", workspace),
 			new KeyedView("status", statusBar())
 		], fillStyle());
 		var shellStyle = fillStyle();
@@ -342,8 +366,15 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function explorerPanel():View {
-		if (explorerRoot == null) return placeholderPanel(
-			"No folder is open. Use \"Open Folder...\" or run with a directory argument.");
+		if (explorerRoot == null) {
+			var open = new Button("Open", null, openFolderDialog, "explorer-open-folder");
+			open.variant = ButtonVariant.Secondary;
+			open.leadingIcon = IconName.FolderOpen;
+			var compact = new LayoutStyle();
+			compact.width = LayoutAxis.grow();
+			compact.padding = new Insets(4.0, 8.0, 4.0, 8.0);
+			return new Column("explorer-empty", [new KeyedView("open", open)], compact);
+		}
 		if (explorerModel == null) explorerModel = new DirectoryTreeModel(explorerRoot, theme);
 		var viewportStyle = new LayoutStyle();
 		viewportStyle.width = LayoutAxis.grow();
@@ -352,6 +383,21 @@ class ExosuitApp implements DesktopUiApplication {
 			null, [explorerRoot], function(key) { host.setSelectedExplorerPath(key); }, function(key) {
 				if (!FileSystem.isDirectory(key)) application.open(key);
 			}, null, null);
+	}
+
+	function explorerRail():View {
+		var railStyle = new LayoutStyle();
+		railStyle.width = LayoutAxis.fixed(56.0);
+		railStyle.height = LayoutAxis.grow();
+		railStyle.padding = new Insets(8.0, 8.0, 8.0, 8.0);
+		railStyle.background = theme.tokens.surfaceRaised;
+		var buttonStyle = new LayoutStyle();
+		buttonStyle.width = LayoutAxis.fixed(40.0);
+		buttonStyle.height = LayoutAxis.fixed(36.0);
+		var open = new Button("", buttonStyle, openFolderDialog, "rail-open-folder");
+		open.leadingIcon = IconName.FolderOpen;
+		open.accessibilityLabel = "Open Folder";
+		return new Column("explorer-rail", [new KeyedView("open", open)], railStyle);
 	}
 
 	function editorPanel():View {
@@ -366,7 +412,7 @@ class ExosuitApp implements DesktopUiApplication {
 			// doc comment) persists between edits instead of resetting.
 			var pane = editorPanes.get(document.id);
 			if (pane == null) {
-				pane = new EditorPane(document, theme, requestFrame, documentView.selection, application.theme,
+				pane = new EditorPane(document, theme, requestFrame, documentView.selection, editorPalette,
 					host.getPluginDecorations(), documentView.decorationSearchMatches, documentView.searchDecorationRevision);
 				editorPanes.set(document.id, pane);
 			}
@@ -452,13 +498,16 @@ class ExosuitApp implements DesktopUiApplication {
 		if (FileSystem.exists(path) && FileSystem.isDirectory(path)) {
 			explorerRoot = application.workspace.fileSystem.normalize(path);
 			explorerModel = null;
+			openExplorer();
 			application.openArgument(path);
-			dock.activate("explorer");
 			return;
 		}
 		if (explorerRoot == null) {
 			var slash = path.lastIndexOf("/");
-			if (slash > 0) explorerRoot = path.substring(0, slash);
+			if (slash > 0) {
+				explorerRoot = path.substring(0, slash);
+				openExplorer();
+			}
 		}
 		application.openArgument(path);
 		statusMessage = "Opened " + path;
@@ -478,8 +527,8 @@ class ExosuitApp implements DesktopUiApplication {
 			if (accepted && paths.length > 0) {
 				explorerRoot = application.workspace.fileSystem.normalize(paths[0]);
 				explorerModel = null;
+				openExplorer();
 				application.openArgument(paths[0]);
-				dock.activate("explorer");
 			}
 			requestFrame();
 		});
