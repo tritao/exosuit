@@ -58,6 +58,30 @@ Last updated: 2026-10-01.
 
 ## Implementation records
 
+### M8.1 — reusable compiler/runtime package (verified slice)
+
+- Haxeon `70d697ed` exposes the existing public compiler/runtime APIs through
+  `embed/haxeon.json` (`haxeon-compiler`), documents ownership/configuration,
+  and registers `test-compiler-embedding.sh` in the standard gate. Consumers
+  keep compiler/runtime namespaces and configure intrinsics/host HXI explicitly.
+  No compiler sources are copied into the editor.
+- Registered integration builds a real package consumer, compiles a guest
+  program, executes its stable exported function returning 42, and disposes
+  the module. Direct runner exits 0; the full compiler gate exits 0 with
+  373/373 and every integration/Wasm stage, including embedding. Logs:
+  `/tmp/haxeon-embedding-integration-direct.log`,
+  `/tmp/haxeon-gate-embedding-package.log`. Prior focused package runs also
+  passed reference and self-hosted modes after `c0e1f251`.
+- The separate draft incremental probe with a single field-only class passes
+  (exit 0, `/tmp/haxeon-embedding-incremental-before.log`), so it does not yet
+  reduce the plugin's failure. A stronger variant enables publication tracking,
+  acknowledges its first revision, and adds another module with a default
+  argument; running session 36638, log
+  `/tmp/haxeon-embedding-incremental-publication.log`.
+- Source-plugin restoration remains uncommitted and acceptance red at the
+  original AST record cast failure. Next: reduce that failure using the stronger
+  probe; do not claim a fix from the simpler incremental case passing.
+
 ### M8.1 — dynamic restoration checkpoint (uncommitted, acceptance red)
 
 - Restored source-plugin project compiles 973 sources and executes initial
