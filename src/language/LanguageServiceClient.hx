@@ -245,6 +245,15 @@ class LanguageServiceClient {
 		if (!ready || states.get(state.document.id) != state) return;
 		state.version++;
 		state.revision = change.stateAfter;
+		var previous = diagnostics.get(state.uri);
+		if (previous != null) {
+			var moved:Array<LanguageDiagnostic> = [];
+			for (diagnostic in previous) {
+				var value = diagnostic.afterEdit(change);
+				if (value != null) moved.push(value);
+			}
+			diagnostics.set(state.uri, moved);
+		}
 		transport.notify("textDocument/didChange", {
 			textDocument: {uri: state.uri, version: state.version},
 			contentChanges: [{range: {start: LspPositionCodec.encode(change.start), end: LspPositionCodec.encode(LspPositionCodec.advance(change.start, change.removed))}, rangeLength: change.removed.length, text: change.inserted}]

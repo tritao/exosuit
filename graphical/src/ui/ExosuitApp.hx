@@ -303,7 +303,8 @@ class ExosuitApp implements DesktopUiApplication {
 			// doc comment) persists between edits instead of resetting.
 			var pane = editorPanes.get(document.id);
 			if (pane == null) {
-				pane = new EditorPane(document, theme, requestFrame, documentView.selection, application.theme);
+				pane = new EditorPane(document, theme, requestFrame, documentView.selection, application.theme,
+					host.getPluginDecorations(), documentView.decorationSearchMatches, documentView.searchDecorationRevision);
 				editorPanes.set(document.id, pane);
 			}
 			items.push(new TabItem("doc:" + document.id, (document.dirty ? "* " : "") + document.title,

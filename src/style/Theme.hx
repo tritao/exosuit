@@ -23,6 +23,8 @@ class Theme {
 	public var information:Int = 0x29435cff;
 	public var warning:Int = 0x66521fff;
 	public var error:Int = 0x4c3030ff;
+	public var diagnosticError:Int = 0xe06c75ff;
+	public var diagnosticWarning:Int = 0xe5c07bff;
 	public var scrollbar:Int = 0x606060ff;
 
 	public function new() {}

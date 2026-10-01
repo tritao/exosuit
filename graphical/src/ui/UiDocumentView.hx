@@ -33,6 +33,7 @@ class UiDocumentView extends View {
 	public final document:Document;
 	public final selection:BufferSelection;
 	final matches:Array<SearchMatch> = [];
+	var searchRevision:Int = 0;
 
 	public function new(document:Document, selection:BufferSelection) {
 		super(document.title);
@@ -128,9 +129,13 @@ class UiDocumentView extends View {
 	override public function restoreScroll(x:Int, y:Int):Void {}
 
 	override public function setSearchMatches(matches:Array<SearchMatch>):Void {
+		searchRevision++;
 		this.matches.resize(0);
 		for (match in matches) this.matches.push(match);
 	}
+
+	public function decorationSearchMatches():Array<SearchMatch> return matches.copy();
+	public function searchDecorationRevision():Int return searchRevision;
 
 	override public function searchMatchCount():Int
 		return matches.length;

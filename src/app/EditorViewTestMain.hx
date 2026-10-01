@@ -2,6 +2,9 @@ package app;
 
 import editor.Document;
 import editor.SyntaxPresentation;
+import editor.DecorationPresentation;
+import plugin.PluginDecorationRegistry;
+import plugin.PluginDecorationKind;
 import editor.EditorView;
 import platform.Native;
 import platform.Platform;
@@ -65,6 +68,26 @@ class EditorViewTestMain {
 			symbolDocument.buffer.document.codepointCount);
 		require(symbolColors.length == 3 && symbolColors[0].start == 0 && symbolColors[0].end == 1,
 			"syntax token boundaries split an astral character outside a string");
+		var decorationDocument = new Document("marks.hx", "é🙂value\nsecond", syntaxes);
+		var decorationRegistry = new PluginDecorationRegistry();
+		var diagnosticDecoration = decorationRegistry.add("language", "error", decorationDocument, 0, 3, 8,
+			syntaxTheme.diagnosticError, WavyUnderline);
+		var decorationMatches = DocumentSearch.find(decorationDocument, "🙂", new SearchOptions());
+		var presented = DecorationPresentation.ranges(decorationDocument, syntaxTheme,
+			decorationRegistry.forDocument(decorationDocument), decorationMatches, 0, 7);
+		require(presented.length == 2 && presented[0].start == 2 && presented[0].end == 7
+			&& presented[0].kind == WavyUnderline && presented[1].start == 1 && presented[1].end == 2,
+			"decoration conversion confused Unicode columns or lost diagnostic/search layers");
+		require(DecorationPresentation.ranges(decorationDocument, syntaxTheme,
+			decorationRegistry.forDocument(decorationDocument), decorationMatches, 8, 10).length == 0,
+			"offscreen decorations were returned for another visible chunk");
+		decorationRegistry.remove(diagnosticDecoration);
+		require(DecorationPresentation.ranges(decorationDocument, syntaxTheme,
+			decorationRegistry.forDocument(decorationDocument), [], 0, 7).length == 0,
+			"removed diagnostic decoration survived presentation");
+		decorationDocument.buffer.replaceRange(new BufferSelection(), new BufferPosition(0, 0), new BufferPosition(0, 0), "x");
+		require(DecorationPresentation.ranges(decorationDocument, syntaxTheme, [], decorationMatches, 0, 8).length == 0,
+			"search decorations from a previous revision survived an edit");
 		var clock = new FakeEditorClock();
 		var completionDocument = new Document("words.txt", "alpha alphabet al", syntaxes), completions = new CompletionRegistry();
 		completions.add("core", new DocumentWordCompletionProvider());

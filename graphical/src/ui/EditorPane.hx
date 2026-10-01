@@ -3,6 +3,11 @@ package ui;
 import Color;
 import TextColorRange;
 import editor.SyntaxPresentation;
+import editor.DecorationPresentation;
+import plugin.PluginDecorationRegistry;
+import search.SearchMatch;
+import nativekit.ui.widgets.text.TextDecoration;
+import nativekit.ui.widgets.text.TextDecorationKind;
 import LayoutAxis;
 import LayoutDirection;
 import LayoutStyle;
@@ -37,9 +42,22 @@ class EditorPane implements View {
 	public final selection:BufferSelection;
 	final onEdited:Void->Void;
 	final editorTheme:style.Theme;
+	final decorations:PluginDecorationRegistry;
+	final searchMatches:Void->Array<SearchMatch>;
+	final searchRevision:Void->Int;
+	final foregroundProvider:(Int, Int)->Array<TextColorRange>;
+	final decorationProvider:(Int, Int)->Array<TextDecoration>;
+	var presentationRevision:Int = 0;
+	var previousPresentation:Array<Int> = [];
 
-	public function new(document:Document, theme:Theme, onEdited:Void->Void, ?selection:BufferSelection, ?editorTheme:style.Theme) {
+	public function new(document:Document, theme:Theme, onEdited:Void->Void, ?selection:BufferSelection, ?editorTheme:style.Theme,
+			?decorations:PluginDecorationRegistry, ?searchMatches:Void->Array<SearchMatch>, ?searchRevision:Void->Int) {
 		this.document = document;
+		this.decorations = decorations == null ? new PluginDecorationRegistry() : decorations;
+		this.searchMatches = searchMatches == null ? function() return [] : searchMatches;
+		this.searchRevision = searchRevision == null ? function() return 0 : searchRevision;
+		foregroundProvider = provideForeground;
+		decorationProvider = provideDecorations;
 		this.onEdited = onEdited;
 		this.editorTheme = editorTheme == null ? new style.Theme() : editorTheme;
 		this.selection = selection == null ? new BufferSelection() : selection;
@@ -48,6 +66,20 @@ class EditorPane implements View {
 	static function color(value:Int):Color {
 		return Color.fromBytes((value >>> 24) & 255, (value >>> 16) & 255,
 			(value >>> 8) & 255, value & 255);
+	}
+
+	function provideForeground(start:Int, end:Int):Array<TextColorRange> {
+		return [for (range in SyntaxPresentation.foreground(document, editorTheme, start, end))
+			new TextColorRange(range.start, range.end, color(range.color))];
+	}
+
+	function provideDecorations(start:Int, end:Int):Array<TextDecoration> {
+		return [for (range in DecorationPresentation.ranges(document, editorTheme,
+			decorations.forDocument(document), searchMatches(), start, end))
+			new TextDecoration(range.start, range.end, color(range.color), switch range.kind {
+				case Background: TextDecorationKind.Background;
+				case WavyUnderline: TextDecorationKind.WavyUnderline;
+			})];
 	}
 
 	function handleEdit(transaction:EditTransaction):Void {
@@ -64,10 +96,20 @@ class EditorPane implements View {
 		editorStyle.background = color(editorTheme.editorBackground);
 		var area = TextArea.withDocument("editor:" + document.id, document.buffer.document,
 			handleEdit, editorStyle, null, null, color(editorTheme.editorForeground));
-		area.colorRangeProvider = function(start, end) {
-			return [for (range in SyntaxPresentation.foreground(document, editorTheme, start, end))
-				new TextColorRange(range.start, range.end, color(range.color))];
-		};
+		area.colorRangeProvider = foregroundProvider;
+		area.decorationProvider = decorationProvider;
+		var current = [document.buffer.stateId, decorations.revision, searchRevision(),
+			editorTheme.searchMatch, editorTheme.editorForeground];
+		for (kind in 0...8) current.push(editorTheme.tokenColor(kind));
+		var changed = current.length != previousPresentation.length;
+		if (!changed)
+			for (index in 0...current.length)
+				if (current[index] != previousPresentation[index]) changed = true;
+		if (changed) {
+			presentationRevision++;
+			previousPresentation = current;
+		}
+		area.presentationRevision = presentationRevision;
 		var rowStyle = new LayoutStyle();
 		rowStyle.width = LayoutAxis.grow();
 		rowStyle.height = LayoutAxis.fit();

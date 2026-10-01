@@ -134,12 +134,12 @@ class LanguageController {
 		var parts:Array<String> = [];
 		for (document in workspace.documents.documents) {
 			for (value in service.diagnosticsFor(document))
-				parts.push('${document.id}:${value.from.line}:${value.from.column}:${value.to.line}:${value.to.column}:${value.message}');
+				parts.push('${document.id}:${value.from.line}:${value.from.column}:${value.to.line}:${value.to.column}:${value.severity}:${value.message}');
 		}
 		var fingerprint = parts.join("\n");
 		if (fingerprint == diagnosticFingerprint) return;
 		diagnosticFingerprint = fingerprint;
-		var problems = root.getProblems(), decorations = root.getPluginDecorations(), errorColor = root.getTheme().error;
+		var problems = root.getProblems(), decorations = root.getPluginDecorations(), theme = root.getTheme();
 		decorations.removeOwner(OWNER);
 		problems.removeOwner(OWNER);
 		for (document in workspace.documents.documents) {
@@ -148,8 +148,14 @@ class LanguageController {
 				var value = values[index];
 				if (document.path != null) problems.add(new feedback.Problem(OWNER, document.id + ":" + index, document.path,
 					value.from.line, value.from.column, value.to.column, value.message, value.severity));
-				if (value.from.line != value.to.line || value.to.column <= value.from.column) continue;
-				decorations.add(OWNER, document.id + ":" + index, document, value.from.line, value.from.column, value.to.column, errorColor);
+				for (line in value.from.line...value.to.line + 1) {
+					var from = line == value.from.line ? value.from.column : 0;
+					var to = line == value.to.line ? value.to.column : document.buffer.line(line).length;
+					if (to <= from) continue;
+					decorations.add(OWNER, document.id + ":" + index + ":" + line, document, line, from, to,
+						value.severity == 2 ? theme.diagnosticWarning : theme.diagnosticError,
+						plugin.PluginDecorationKind.WavyUnderline);
+				}
 			}
 		}
 	}

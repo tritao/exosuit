@@ -5,6 +5,8 @@ import core.DocumentManager;
 import editor.BufferPosition;
 import editor.BufferSelection;
 import language.LanguageLocation;
+import language.LanguageDiagnostic;
+import editor.BufferChange;
 import language.LanguageServiceClient;
 import language.SignatureHelp;
 import platform.Native;
@@ -54,6 +56,12 @@ class LanguageServiceTestMain {
 		var diagnostic = client.diagnosticsFor(document)[0];
 		require(diagnostic.message == "current 😀" && diagnostic.to.column == 2, "stale or incorrectly positioned diagnostics were accepted");
 
+		var anchored = new LanguageDiagnostic(new BufferPosition(0, 3), new BufferPosition(0, 8), "pending", 1);
+		var moved = anchored.afterEdit(new BufferChange(new BufferPosition(0, 0), "", "é🙂\n", 0, 1, 0, 1));
+		require(moved != null && moved.from.equals(new BufferPosition(1, 3)) && moved.to.equals(new BufferPosition(1, 8)),
+			"pending diagnostic did not move through a Unicode multiline insertion");
+		require(anchored.afterEdit(new BufferChange(new BufferPosition(0, 3), "value", "", 0, 0, 0, 1)) == null,
+			"deleted diagnostic range did not clear");
 		var hover:Null<String> = null, completions:Null<Array<CompletionItem>> = null, definitions:Null<Array<LanguageLocation>> = null,
 			signature:Null<SignatureHelp> = null;
 		require(client.requestHover(document, new BufferPosition(0, 2), Sys.time(), value -> hover = value), "hover request was rejected");
@@ -80,6 +88,15 @@ class LanguageServiceTestMain {
 		document.undo(selection);
 		require(document.buffer.line(0) == "😀serverx value", "workspace edit was not one undo transaction");
 
+		for (uri in client.diagnostics.keys()) client.diagnostics.set(uri, [anchored]);
+		document.buffer.replaceRange(selection, new BufferPosition(0, 0), new BufferPosition(0, 0), "x");
+		var pending = client.diagnosticsFor(document);
+		require(pending.length == 1 && pending[0].from.column == 4 && pending[0].to.column == 9,
+			"live diagnostics did not follow an edit before server publication");
+		document.undo(selection);
+		pending = client.diagnosticsFor(document);
+		require(pending.length == 1 && pending[0].from.column == 3 && pending[0].to.column == 8,
+			"live diagnostic range did not follow undo");
 		selection.setCursor(document.buffer, document.buffer.endPosition());
 		document.insert(selection, "CRASH");
 		pump(client, () -> !client.ready, 5.0);
