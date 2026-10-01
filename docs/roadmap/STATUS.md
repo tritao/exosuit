@@ -70,7 +70,7 @@ Last updated: 2026-10-01.
 
 ### M11.1 — POSIX PTY runtime (accepted native slice)
 
-- NativeKit `4511511b` adds generation-checked `nk_pty_*` handles on Linux and
+- NativeKit `4511511b` and `b5f5ab4d` add generation-checked `nk_pty_*` handles on Linux and
   macOS. Spawn accepts absolute program, argv, cwd, environment and cell size;
   the master descriptor is nonblocking. Read and write use caller buffers
   directly, with a 64 KiB per-call bound and no intermediate byte queue.
@@ -78,7 +78,9 @@ Last updated: 2026-10-01.
   monitor wakes the UI loop, while callers drain bytes with `nk_pty_read`.
 - Native contract passes shell echo, cwd, custom environment, `stty size`
   after spawn and resize, bounded read under a 1 MiB producer, natural exit,
-  kill, and close. The Haxe ABI importer passes Linux, Windows and both macOS
+  kill, and close. A fork race on immediate close is covered by process-group
+  termination with a child-PID fallback; 20 consecutive native contract runs
+  pass. The Haxe ABI importer passes Linux, Windows and both macOS
   targets; `pty_contract` and `transport_contract` pass in
   `/tmp/materia-nativekit-m11-build`. NativeKit source and generated HXI are
   committed, and `release.lock` pins the commit.
