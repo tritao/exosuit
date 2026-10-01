@@ -303,12 +303,17 @@ class ExosuitApp implements DesktopUiApplication {
 			// doc comment) persists between edits instead of resetting.
 			var pane = editorPanes.get(document.id);
 			if (pane == null) {
-				pane = new EditorPane(document, theme, requestFrame, documentView.selection);
+				pane = new EditorPane(document, theme, requestFrame, documentView.selection, application.theme);
 				editorPanes.set(document.id, pane);
 			}
 			items.push(new TabItem("doc:" + document.id, (document.dirty ? "* " : "") + document.title,
 				pane));
 		}
+		var tabsStyle = new LayoutStyle();
+		tabsStyle.width = LayoutAxis.grow();
+		tabsStyle.height = LayoutAxis.grow();
+		tabsStyle.direction = LayoutDirection.TopToBottom;
+		tabsStyle.childGap = 8.0;
 		var active = host.activeDocument();
 		return new Tabs("exosuit-editor-tabs", items, active == null ? "" : "doc:" + active.id, function(key) {
 			var id = Std.parseInt(StringTools.replace(key, "doc:", ""));
@@ -318,7 +323,7 @@ class ExosuitApp implements DesktopUiApplication {
 					host.activateTab(documentView.document);
 					return;
 				}
-		});
+		}, tabsStyle);
 	}
 
 	function pruneStaleEditorPanes(tabs:Array<UiDocumentView>):Void {

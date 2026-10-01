@@ -72,6 +72,8 @@
     "../src/editor/ExternalState.hx",
     "../src/editor/FoldRegion.hx",
     "../src/editor/SelectionSnapshot.hx",
+    "../src/editor/SyntaxColorRange.hx",
+    "../src/editor/SyntaxPresentation.hx",
     "../src/editor/TextBuffer.hx",
     "../src/editor/VisualLine.hx",
     "../src/editor/VisualLineMap.hx",

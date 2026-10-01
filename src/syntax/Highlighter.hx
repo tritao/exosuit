@@ -124,6 +124,11 @@ class Highlighter {
 					} else {
 						kind = HighlightToken.OPERATOR;
 						index++;
+						// Keep token boundaries outside UTF-16 surrogate pairs.
+						if (code >= 0xd800 && code <= 0xdbff && index < text.length) {
+							var next = text.charCodeAt(index);
+							if (next >= 0xdc00 && next <= 0xdfff) index++;
+						}
 					}
 				}
 			}

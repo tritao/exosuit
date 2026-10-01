@@ -62,6 +62,97 @@ Last updated: 2026-10-01.
 
 ## Implementation records
 
+### M9.1 — editor syntax and incremental initializer adapters (verified slice)
+
+- EditorPane now requests visible syntax foreground ranges and uses the core
+  editor palette for text, gutter and background. SyntaxPresentation maps the
+  existing highlighter's UTF-16 tokens to absolute codepoint ranges, clips to
+  requested chunks and omits normal tokens. Focused tests cover accents/emoji,
+  clipping and multiline state repair after edits. The tokenizer now keeps
+  operator-token boundaries outside surrogate pairs (astral characters outside
+  strings previously split into invalid codepoint boundaries).
+- Full headless gate exits 0 (`/tmp/exosuit-m9-syntax-tests.log`). Final reference
+  and self-hosted graphical builds both exit 0 (the corresponding
+  `/tmp/exosuit-m9-syntax-*-build-final.log` files).
+- Desktop workflow rebuild failed before launching: cached compilation pruned
+  `$function-adapter-env:nativekit.ui.style.StyleProperty.__init:0`, causing IR
+  verification failure in `__init$part5`. Original failure log:
+  `/tmp/exosuit-m9-syntax-desktop.log`. No desktop/release/browser success is
+  claimed for this slice yet.
+- Reduced to separate Values/Main modules: a static generic comparator passes
+  cold, then a consumer-only edit fails with missing Values.__init adapter.
+  Root cause: generated-function retention recognizes ordinary function origins
+  but not initializer pseudo-bodies. Haxeon `a3b26edb` resolves initializer
+  retention and invalidation through the owning class constructor, using
+  existing ownership rules. Focused execution passes consumer edits, initializer
+  replacement/restoration and existing invalid callable rejection cases.
+  Compiler gate exits 0, 383/383 plus all integration/Wasm stages:
+  `/tmp/haxeon-m9-static-adapter-gate.log`. Bootstrap converges after one
+  self-host stage and rebuilds identically (the corresponding bootstrap logs).
+- The repaired repeated desktop build passed, then plugin-driven editing
+  exposed stale shared text during syntax painting. Widget replay globally
+  disabled buffer-to-document mirroring while notifying subscribers; a nested
+  plugin edit therefore updated buffer lines but not the shared TextDocument.
+  A failing headless reducer confirms it (`/tmp/exosuit-m9-nested-edit-before.log`).
+  Exosuit `18597b1` replaces mutable global suppression with an operation-local
+  mirror argument, preserving nested edits. Focused document test exits 0
+  (`/tmp/exosuit-m9-nested-edit-final.log`); full headless gate exits 0
+  (`/tmp/exosuit-m9-syntax-tests-final.log`). Initial focused run used a relative
+  fixture argument and failed file lookup; rerun uses the required absolute path.
+- Desktop edit/save/plugin-reload and unpacked release gates pass after the
+  repair (`/tmp/exosuit-m9-syntax-desktop-final.log` and release log). Both
+  browser targets pass (`/tmp/exosuit-m9-syntax-web.log`). Captured pixels show
+  actual syntax colors but exposed a light text-field background and fit-height
+  tabs. Added explicit editor background and grow-height editor tabs; final
+  palette gates all exit 0:
+  `/tmp/exosuit-m9-syntax-palette.log`, `-self.log`, `-release.log`, `-web.log`.
+  Both wasm32 and wasm-gc smoke routes pass. Inspected final desktop output
+  frame: readable colored tokens, configured dark background, full-height pane.
+  Release lock now pins Haxeon a3b26edb and materia 267bfa07.
+- No M9 acceptance boxes are checked. Strict affected-row invalidation and
+  p95 typing measurements remain pending. Cached highlighter state can require
+  scanning preceding unvalidated lines; native retained chunks contain up to
+  64 paragraphs. Next: wire diagnostics/search/bracket/current-line decorations
+  and shared normalized selections/carets into the editor, with edit repair and
+  clearing regressions, then affected-row invalidation and typing measurements.
+
+### M9.1 — geometry decorations and missing-glyph carets (in progress)
+
+- Added geometry-based background, whole-line background, straight and wavy
+  underline capabilities. Background nodes precede selections; wavy paths clip
+  to the horizontal viewport and decoration providers query visible chunks.
+- Initial E1007 was an application flow error: an impure callback could replace
+  the mutable nullable provider between loop iterations. Existing LoopFlowMain
+  requires invalidating such field facts. Each paint layer now retains one
+  provider for its entire pass; a regression replaces the field during the pass
+  and verifies all three chunks still use that retained provider. No typing rule
+  or application cast changed. Also corrected an absent overlay-style helper.
+- Unicode geometry initially failed at an unsupported emoji: caret offset 3
+  returned x=0, while neighboring carets were x=17.824 and x=25.872. The fixture
+  loaded only IBM Plex Sans. Adding bundled NotoEmoji with FontFamily.Emoji
+  makes the focused decoration test and complete framework gate pass:
+  `/tmp/uikit-decorations-emoji-family.log` (0). Loading emoji as Default was
+  insufficient because the shaping library requests the Emoji family.
+- Missing-glyph caret behavior is a real independent native issue, now covered
+  by a failing UIKit text-engine regression. Skribidi found style metadata but
+  no caret position and skipped its nearest-run fallback. Its clean baseline
+  is `7c31390` on nativekit-atlas-api; created exosuit-followon before the fix.
+  Running the existing run-boundary fallback alone still failed when one run
+  spanned the missing character. The fix retains the nearest canonical insertion
+  position from the existing caret iterator, while preserving known style data.
+  Skribidi `76a337e` includes its own unsupported-emoji regression; the complete
+  `skribidi_test` suite exits 0 (`/tmp/skribidi-caret-tests.log`). Materia
+  `254d2dbc` pins it and adds the UIKit regression. Four native checks pass:
+  text_engine, compositor, frame_resources and layout_render_compiler.
+  No baseline vendor edits existed.
+- Materia `267bfa07` commits the decoration API and focused Unicode geometry,
+  all four paint kinds, edit movement and provider snapshot coverage. Full
+  framework gate exits 0 (`/tmp/uikit-decorations-caret-final.log`).
+- Editor syntax wiring is in progress. The headless focused editor-view test
+  passes (`/tmp/exosuit-m9-syntax-focused.log`), including UTF-16/codepoint
+  conversion, visible clipping and multiline state invalidation after edits.
+  The syntax slice and final native/browser gates are recorded above.
+
 ### M9.1 — TextArea presentation (in progress)
 
 - Next design: a typed foreground provider receives each visible retained chunk's

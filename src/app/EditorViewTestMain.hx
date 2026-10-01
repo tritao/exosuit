@@ -1,6 +1,7 @@
 package app;
 
 import editor.Document;
+import editor.SyntaxPresentation;
 import editor.EditorView;
 import platform.Native;
 import platform.Platform;
@@ -35,6 +36,35 @@ class EditorViewTestMain {
 		Platform.startHeadless();
 		var syntaxes = new SyntaxRegistry();
 		BuiltinSyntax.install(syntaxes);
+		var syntaxDocument = new Document("colors.hx", "var s = \"é🙂\"; // comment\n/* first\nsecond */ var n = 42;", syntaxes);
+		var syntaxTheme = new Theme();
+		var syntaxColors = SyntaxPresentation.foreground(syntaxDocument, syntaxTheme, 0,
+			syntaxDocument.buffer.document.codepointCount);
+		var stringFound = false;
+		for (range in syntaxColors) {
+			if (range.color == syntaxTheme.tokenColor(syntax.HighlightToken.STRING)) {
+				stringFound = true;
+				require(range.start == 8 && range.end == 12, "syntax string range confused UTF-16 with codepoints");
+			}
+		}
+		require(stringFound, "syntax presentation omitted the Unicode string");
+		var clippedColors = SyntaxPresentation.foreground(syntaxDocument, syntaxTheme, 9, 11);
+		require(clippedColors.length == 1 && clippedColors[0].start == 9 && clippedColors[0].end == 11,
+			"syntax foreground did not clip to the visible range");
+		var thirdLine = syntaxDocument.buffer.document.paragraphRangeAtIndex(2);
+		var continuedColors = SyntaxPresentation.foreground(syntaxDocument, syntaxTheme, thirdLine.start, thirdLine.end);
+		require(continuedColors.length > 0 && continuedColors[0].color == syntaxTheme.tokenColor(syntax.HighlightToken.COMMENT),
+			"syntax viewport lost multiline comment state");
+		syntaxDocument.buffer.replaceRange(new BufferSelection(), new BufferPosition(1, 0), new BufferPosition(1, 2), "  ");
+		thirdLine = syntaxDocument.buffer.document.paragraphRangeAtIndex(2);
+		continuedColors = SyntaxPresentation.foreground(syntaxDocument, syntaxTheme, thirdLine.start, thirdLine.end);
+		require(continuedColors.length > 0 && continuedColors[0].color != syntaxTheme.tokenColor(syntax.HighlightToken.COMMENT),
+			"syntax presentation retained stale multiline state after an edit");
+		var symbolDocument = new Document("symbols.hx", "🙂 + 42", syntaxes);
+		var symbolColors = SyntaxPresentation.foreground(symbolDocument, syntaxTheme, 0,
+			symbolDocument.buffer.document.codepointCount);
+		require(symbolColors.length == 3 && symbolColors[0].start == 0 && symbolColors[0].end == 1,
+			"syntax token boundaries split an astral character outside a string");
 		var clock = new FakeEditorClock();
 		var completionDocument = new Document("words.txt", "alpha alphabet al", syntaxes), completions = new CompletionRegistry();
 		completions.add("core", new DocumentWordCompletionProvider());

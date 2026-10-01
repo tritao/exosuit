@@ -1,6 +1,8 @@
 package ui;
 
 import Color;
+import TextColorRange;
+import editor.SyntaxPresentation;
 import LayoutAxis;
 import LayoutDirection;
 import LayoutStyle;
@@ -19,11 +21,8 @@ import editor.BufferSelection;
  * active document's `TextBuffer.document` EditorKit document. Gutter and
  * text share a single scroll container, so they always scroll together.
  *
- * Multi-cursor editing, syntax-colored spans, and independent gutter/text
- * scroll-position sync are not implemented; `TextArea` and `TextDocument`
- * do not currently expose the per-widget scroll offset or styled-span API
- * that would need, and this keeps to the "record the gap; don't hack UIKit"
- * guidance rather than reaching around the widget for it.
+ * Syntax providers adapt the document's cached UTF-16 tokens to the retained
+ * layout's codepoint ranges. Multi-cursor editing remains a follow-on.
  */
 class EditorPane implements View {
 	public final document:Document;
@@ -36,14 +35,19 @@ class EditorPane implements View {
 	 * ad-hoc panes) may omit it and get a private one, as before.
 	 */
 	public final selection:BufferSelection;
-	final theme:Theme;
 	final onEdited:Void->Void;
+	final editorTheme:style.Theme;
 
-	public function new(document:Document, theme:Theme, onEdited:Void->Void, ?selection:BufferSelection) {
+	public function new(document:Document, theme:Theme, onEdited:Void->Void, ?selection:BufferSelection, ?editorTheme:style.Theme) {
 		this.document = document;
-		this.theme = theme;
 		this.onEdited = onEdited;
+		this.editorTheme = editorTheme == null ? new style.Theme() : editorTheme;
 		this.selection = selection == null ? new BufferSelection() : selection;
+	}
+
+	static function color(value:Int):Color {
+		return Color.fromBytes((value >>> 24) & 255, (value >>> 16) & 255,
+			(value >>> 8) & 255, value & 255);
 	}
 
 	function handleEdit(transaction:EditTransaction):Void {
@@ -53,12 +57,17 @@ class EditorPane implements View {
 
 	public function build(context:nativekit.ui.core.BuildContext):nativekit.ui.core.RenderNode {
 		var gutter = new EditorGutter("gutter:" + document.id, document.buffer,
-			theme.tokens.textSecondary, theme.tokens.surface);
+			color(editorTheme.foregroundMuted), color(editorTheme.surface));
 		var editorStyle = new LayoutStyle();
 		editorStyle.width = LayoutAxis.grow();
 		editorStyle.height = LayoutAxis.fit();
+		editorStyle.background = color(editorTheme.editorBackground);
 		var area = TextArea.withDocument("editor:" + document.id, document.buffer.document,
-			handleEdit, editorStyle, null, null, theme.tokens.textPrimary);
+			handleEdit, editorStyle, null, null, color(editorTheme.editorForeground));
+		area.colorRangeProvider = function(start, end) {
+			return [for (range in SyntaxPresentation.foreground(document, editorTheme, start, end))
+				new TextColorRange(range.start, range.end, color(range.color))];
+		};
 		var rowStyle = new LayoutStyle();
 		rowStyle.width = LayoutAxis.grow();
 		rowStyle.height = LayoutAxis.fit();
@@ -70,7 +79,7 @@ class EditorPane implements View {
 		var scrollStyle = new LayoutStyle();
 		scrollStyle.width = LayoutAxis.grow();
 		scrollStyle.height = LayoutAxis.grow();
-		scrollStyle.background = theme.tokens.surfaceSunken;
+		scrollStyle.background = color(editorTheme.editorBackground);
 		return new ScrollView("editor-scroll:" + document.id, row, scrollStyle).build(context);
 	}
 }
