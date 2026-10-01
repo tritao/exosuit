@@ -15,14 +15,11 @@ import view.View;
  * `command.CommandContext.requireView()` (undo, redo, select-all, indent,
  * line operations, ...) mutate the same buffer state the widget displays.
  *
- * What this does NOT do: move the actual on-screen caret. `TextArea`/
- * `TextField` (uikit) own their own internal caret/selection
- * (`TextEditorState`) and expose no API to place it from outside the widget
- * tree, so `restoreCursor`/`selectRange`/`cursorChanged` below update this
- * view's `BufferSelection` bookkeeping (used by session save and by anything
- * that reads `getSelection()`) but cannot scroll the widget to or highlight
- * that position. Opening the document (which this class's owner always does
- * first) still brings the right tab to the front.
+ * EditorPane imports this view's primary selection through TextArea's
+ * controlled-selection API. Keyboard and pointer movement in the widget
+ * report back to the same model after text edits synchronize the buffer.
+ * Additional normalized selections remain a follow-on for widget rendering
+ * and multi-caret typing.
  *
  * Mouse/wheel/draw and clipboard (`copy`/`cut`/`paste`) are left as the
  * `View` base class's no-ops: `TextArea` handles pointer input and the

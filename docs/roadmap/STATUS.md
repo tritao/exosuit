@@ -16,10 +16,10 @@ Last updated: 2026-10-01.
   browser stage is wired into composed CI through `EXOSUIT_CI_WEB=1`; absent
   toolchains remain explicitly pending.
 - Active task: **M9.1**, styled text and decorations on UIKit.
-- Exact resume: add general styled/decorated text ranges to retained UIKit text
-  layout, with affected-row invalidation, and wire existing syntax, diagnostics,
-  search/bracket/current-line and normalized multi-selection models into the
-  editor. Preserve M8 and both browser gates; measure the M7.1 typing budget.
+- Exact resume: render bracket/current-line ranges from the now-shared primary
+  caret, then connect normalized multiple selections and multi-caret editing.
+  Finish affected-row invalidation and measure the M7.1 typing budget. Preserve
+  M8 and both browser gates.
 - All further graphical tests must use disposable PRAGTICAL_PORTABLE state.
   IME, physical mixed-DPI transitions, Windows and macOS remain unclaimed.
 - HEADs at planning: exosuit `ae2f260` (`haxeon-uikit-port`). Materia `main` is at
@@ -61,6 +61,34 @@ Last updated: 2026-10-01.
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M9.1 — controlled primary caret and selection (verified slice)
+
+- Materia `83e797af` adds UIKit `TextSelection`, preserving anchor/focus direction
+  and native affinities. TextField/TextArea optionally import selection from a
+  provider and report widget changes after edit callbacks synchronize the owner.
+  Unchanged selections do not re-place the caret or reset preferred navigation.
+- EditorPane connects this API to its shared BufferSelection. EditorCoordinates
+  converts buffer UTF-16 positions to layout codepoints and back, preserving
+  emoji, combining marks, line boundaries and the final empty paragraph.
+  Model-driven placement and native navigation now share the primary caret.
+  Additional selections and multi-caret typing remain pending.
+- Full UIKit framework passes `/tmp/uikit-m9-controlled-selection-focused.log`,
+  including backward Unicode replacement, callback ordering, keyboard reporting
+  and persistence across rebuilds. Complete headless suite passes
+  `/tmp/exosuit-m9-controlled-selection-tests.log`; graphical build passes
+  `/tmp/exosuit-m9-controlled-selection-build.log`.
+- The real EditorPane fixture passes in reference and self-hosted modes:
+  `/tmp/exosuit-m9-controlled-selection-ui.log` and self-ui.log. It warms the
+  retained widget, imports a backward model selection, extends across emoji,
+  replaces text and checks the shared UTF-16 caret. Existing diagnostic/search
+  pixel movement and clearing remain green in both modes.
+- Both browser targets pass `/tmp/exosuit-m9-controlled-selection-web.log`,
+  including actual Unicode edit/save/readback/URL/fresh-reload routes.
+- Release lock advances to materia 83e797af; compiler/native pins are unchanged.
+  No M9 acceptance box is checked. Next: cache caret-dependent bracket/current-line
+  ranges, render them through the measured layout, then add multi-selection
+  ownership/rendering and affected-row/typing-budget evidence.
 
 ### M9.1 — diagnostic/search presentation and paint revisions (verified slice)
 

@@ -3,6 +3,7 @@ package app;
 import editor.Document;
 import editor.SyntaxPresentation;
 import editor.DecorationPresentation;
+import editor.EditorCoordinates;
 import plugin.PluginDecorationRegistry;
 import plugin.PluginDecorationKind;
 import editor.EditorView;
@@ -39,6 +40,14 @@ class EditorViewTestMain {
 		Platform.startHeadless();
 		var syntaxes = new SyntaxRegistry();
 		BuiltinSyntax.install(syntaxes);
+		var coordinates = new Document(null, "é🙂x\ná🙂\n", syntaxes);
+		for (offset in 0...coordinates.buffer.document.codepointCount + 1) {
+			var position = EditorCoordinates.position(coordinates, offset);
+			require(EditorCoordinates.codepoint(coordinates, position) == offset,
+				"caret coordinate roundtrip failed at " + offset);
+		}
+		require(EditorCoordinates.position(coordinates, 2).column == 3,
+			"emoji caret must use UTF-16 buffer columns");
 		var syntaxDocument = new Document("colors.hx", "var s = \"é🙂\"; // comment\n/* first\nsecond */ var n = 42;", syntaxes);
 		var syntaxTheme = new Theme();
 		var syntaxColors = SyntaxPresentation.foreground(syntaxDocument, syntaxTheme, 0,

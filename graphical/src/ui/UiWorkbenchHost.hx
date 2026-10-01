@@ -274,7 +274,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 	/** Tab labels are read live from `Document.title`/`.dirty` each frame by `ExosuitApp.editorPanel`; there is no cached title to refresh. */
 	public function documentRenamed(document:Document):Void {}
 
-	/** `TextArea`/`TextField` own their caret internally; see `UiDocumentView`'s doc comment for why this host cannot force it. */
+	/** EditorPane imports the active view's primary selection on the next UI rebuild. */
 	public function cursorChanged():Void {}
 
 	public function textInput(text:String):Void {

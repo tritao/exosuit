@@ -70,6 +70,7 @@
     "../src/editor/Document.hx",
     "../src/editor/EditorActions.hx",
     "../src/editor/EditorClock.hx",
+    "../src/editor/EditorCoordinates.hx",
     "../src/editor/EditorView.hx",
     "../src/editor/ExternalState.hx",
     "../src/editor/FoldRegion.hx",

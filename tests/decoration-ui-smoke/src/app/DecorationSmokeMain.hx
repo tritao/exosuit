@@ -10,6 +10,12 @@ import search.SearchOptions;
 import editor.BufferSelection;
 import editor.BufferPosition;
 import platform.Native;
+import nativekit.ui.core.RenderNode;
+import nativekit.ui.core.State;
+import nativekit.ui.core.UiEventKind;
+import nativekit.ui.core.UiKey;
+import nativekit.ui.core.UiModifier;
+import nativekit.ui.widgets.text.TextEditorState;
 
 /** Warms the editor's retained layout before editing or clearing its decorations. */
 class DecorationSmokeApp extends ExosuitApp {
@@ -37,7 +43,12 @@ class DecorationSmokeApp extends ExosuitApp {
 		if (frames == 4) {
 			var document = host.activeDocument();
 			if (document == null) throw "decoration fixture document disappeared";
-			if (phase == "moved") {
+			if (phase == "selection") {
+				var view = host.activeView();
+				if (view == null) throw "selection fixture has no view";
+				document.buffer.replaceRange(view.selection, new BufferPosition(0, 0), document.buffer.endPosition(), "a🙂bc\né");
+				view.selection.restore(document.buffer, new BufferPosition(0, 1), new BufferPosition(0, 5));
+			} else if (phase == "moved") {
 				document.buffer.replaceRange(new BufferSelection(), new BufferPosition(0, 0), new BufferPosition(0, 0), "// inserted é🙂\n");
 				installMarks(1);
 			} else if (phase == "cleared") {
@@ -45,7 +56,34 @@ class DecorationSmokeApp extends ExosuitApp {
 				host.setDocumentSearchMatches([]);
 			}
 		}
-		return super.submit(frame);
+		var root = super.submit(frame);
+		if (phase == "selection" && frames == 4) {
+			var view = host.activeView();
+			if (view == null) throw "selection fixture view disappeared";
+			var node = findEditor(root, "editor:" + view.document.id);
+			if (node == null) throw "selection fixture editor disappeared";
+			var state:State<TextEditorState> = ui.buildContext.existingState(node.id);
+			var editor:TextEditorState = state.value;
+			if (editor.selectionAnchor != 4 || editor.selectionFocus != 1)
+				throw "model backward selection did not reach the real widget";
+			ui.focusWidget(node.id);
+			ui.key(UiEventKind.KeyDown, UiKey.Right, UiModifier.Shift);
+			if (view.selection.anchor.column != 5 || view.selection.cursor.column != 3)
+				throw "widget emoji navigation did not update shared UTF-16 selection";
+			ui.text(UiEventKind.TextInput, "x");
+			if (view.document.buffer.text != "a🙂x\né" || view.selection.cursor.column != 4)
+				throw "controlled widget edit used a stale selection or coordinate map";
+			trace("PASS: real EditorPane controlled selection, Unicode navigation and replacement");
+		}
+		return root;
+	}
+	static function findEditor(node:RenderNode, key:String):Null<RenderNode> {
+		if (node.styleKey == key) return node;
+		for (child in node.children) {
+			var found = findEditor(child, key);
+			if (found != null) return found;
+		}
+		return null;
 	}
 }
 

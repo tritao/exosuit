@@ -4,6 +4,8 @@ import Color;
 import TextColorRange;
 import editor.SyntaxPresentation;
 import editor.DecorationPresentation;
+import editor.EditorCoordinates;
+import nativekit.ui.widgets.text.TextSelection;
 import plugin.PluginDecorationRegistry;
 import search.SearchMatch;
 import nativekit.ui.widgets.text.TextDecoration;
@@ -49,6 +51,9 @@ class EditorPane implements View {
 	final decorationProvider:(Int, Int)->Array<TextDecoration>;
 	var presentationRevision:Int = 0;
 	var previousPresentation:Array<Int> = [];
+	final selectionProvider:Void->TextSelection;
+	final selectionHandler:TextSelection->Void;
+	var widgetSelection:TextSelection;
 
 	public function new(document:Document, theme:Theme, onEdited:Void->Void, ?selection:BufferSelection, ?editorTheme:style.Theme,
 			?decorations:PluginDecorationRegistry, ?searchMatches:Void->Array<SearchMatch>, ?searchRevision:Void->Int) {
@@ -61,6 +66,10 @@ class EditorPane implements View {
 		this.onEdited = onEdited;
 		this.editorTheme = editorTheme == null ? new style.Theme() : editorTheme;
 		this.selection = selection == null ? new BufferSelection() : selection;
+		widgetSelection = new TextSelection(EditorCoordinates.codepoint(document, this.selection.anchor),
+			EditorCoordinates.codepoint(document, this.selection.cursor));
+		selectionProvider = provideSelection;
+		selectionHandler = handleSelection;
 	}
 
 	static function color(value:Int):Color {
@@ -82,6 +91,24 @@ class EditorPane implements View {
 			})];
 	}
 
+	function provideSelection():TextSelection {
+		var anchor = EditorCoordinates.codepoint(document, selection.anchor);
+		var focus = EditorCoordinates.codepoint(document, selection.cursor);
+		if (widgetSelection.anchor != anchor || widgetSelection.focus != focus)
+			widgetSelection = new TextSelection(anchor, focus);
+		return widgetSelection;
+	}
+
+	function handleSelection(value:TextSelection):Void {
+		widgetSelection = value;
+		var anchor = EditorCoordinates.position(document, value.anchor);
+		var cursor = EditorCoordinates.position(document, value.focus);
+		if (!selection.anchor.equals(anchor) || !selection.cursor.equals(cursor)) {
+			selection.restore(document.buffer, cursor, anchor);
+			onEdited();
+		}
+	}
+
 	function handleEdit(transaction:EditTransaction):Void {
 		document.buffer.applyEditTransaction(selection, transaction);
 		onEdited();
@@ -98,6 +125,8 @@ class EditorPane implements View {
 			handleEdit, editorStyle, null, null, color(editorTheme.editorForeground));
 		area.colorRangeProvider = foregroundProvider;
 		area.decorationProvider = decorationProvider;
+		area.selectionProvider = selectionProvider;
+		area.onSelectionChange = selectionHandler;
 		var current = [document.buffer.stateId, decorations.revision, searchRevision(),
 			editorTheme.searchMatch, editorTheme.editorForeground];
 		for (kind in 0...8) current.push(editorTheme.tokenColor(kind));
