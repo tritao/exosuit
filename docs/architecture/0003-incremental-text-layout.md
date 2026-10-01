@@ -12,6 +12,13 @@ the 50 ms budget. Native phase measurements put median decoding/properties at
 41.5 ms, itemization at 16.4 ms, shaping/clusters at 122.3 ms, and line layout
 at 12.0 ms. Whole-paragraph work must leave the foreground edit path.
 
+The Haxe editor already knows the edit range:
+`TextEditorLayout.setTextAfterEdit` receives old and new document offsets.
+When a chunk changes, it currently calls `record.layout.update` with the
+entire chunk, which reaches `nkui_text_layout_update` and rebuilds the one
+native layout. The new native edit call can receive chunk-relative offsets
+from that existing path; it does not need to rediscover a diff.
+
 The isolated `experiments/skribidi_edit_window/` probe retains old shaped
 cluster and text-property pieces, shapes a small changed window, and compares
 their composition against fresh Skribidi layouts. In a 1 MiB repeated-`a`

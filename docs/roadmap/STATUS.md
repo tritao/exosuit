@@ -171,7 +171,10 @@ Last updated: 2026-10-01.
   composite snapshot boundary: `TextEngine` currently owns one `skb_layout_t`
   and routes rendering, hit tests, carets and line queries through it. The
   indexed pieces need a common generation and row index before UIKit can use
-  them without breaking those APIs.
+  them without breaking those APIs. The Haxe `setTextAfterEdit` path already
+  carries old/new document offsets, but changed records call
+  `TextLayout.update` with the entire chunk; that is the exact place to pass
+  chunk-relative edit ranges into a future native composite update.
 - This probe is not a correctness proof or production implementation. It
   still scans cached layouts for oracle checks and glyph-position reconstruction,
   checks only one unbroken-word wrap fixture,
