@@ -211,6 +211,20 @@ Last updated: 2026-10-01.
 - M8 remains incomplete, including dynamic-plugin integration, refreshed
   self-hosted agreement and release gates. Sibling dirty work is preserved.
 
+### M8.4 — truthful graphical documentation (documentation slice)
+
+- README and ADR 0002 now describe the live Problems and Build Output panels,
+  shared-controller command bridge and wired language overlays. They distinguish
+  document activation/model selection from visible widget caret movement.
+- Remaining gaps explicitly include styled text, decorations, search highlights
+  and results panel, caret anchoring, pane operations, context menus and source
+  plugins. The ADR describes C/HXI ABI 18 and the retained headless renderer APIs.
+- Verified claims against `graphical/src/ui/ExosuitApp.hx`, `CommandBridge.hx`,
+  `ProblemsPanel.hx`, `BuildOutputPanel.hx`, `UiWorkbenchHost.hx` and
+  `UiDocumentView.hx`; `git diff --check` passes. No extra tests were added for
+  this documentation correction. No interactive checks or M8 acceptance are
+  claimed. Bootstrap/compiler agreement remains the first active task.
+
 ## Completed records
 
 ### M7.2–M7.3 — Linux automation and relocatable packaging

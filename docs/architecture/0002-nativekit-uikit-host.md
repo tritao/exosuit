@@ -29,7 +29,7 @@ separate build manifests**:
 - Dependencies: NativeKit, UIKit, EditorKit (as Haxe packages, no native build)
 - Native ABI: `native/headless/platform.c`, `native/ffi/pragtical_hx.c`
 - Provides: Editor model, document/session, workspace, commands, plugins
-- Used by: Headless tests, 12 test projects, library consumers
+- Used by: Headless test projects and library consumers
 
 **`graphical/haxeon.json`** (graphical application):
 - Entry point: `app.GraphicalMain`
@@ -72,7 +72,7 @@ model and behavior testing; the graphical layer is entirely opt-in.
     └───────────────────────────────────────────────────────────┘
 ```
 
-Application code (`ExosuitApp`, in `src/ui/ExosuitApp.hx`) owns only the view
+Application code (`ExosuitApp`, in `graphical/src/ui/ExosuitApp.hx`) owns only the view
 tree, model bindings, and command dispatch. It does not own window, rendering,
 or layout—those are handled by `DesktopUiHost` and UIKit. The host calls:
 - `app.view()` to build the current UI tree
@@ -115,40 +115,50 @@ Both gutter and TextArea are children of a single `ScrollView`, so they scroll
 in sync by construction.
 
 Limitations in current UIKit TextArea:
-- **Syntax highlighting** requires manual span insertion (not implemented)
+- **Syntax highlighting** is not wired to the document widget
 - **Line wrapping** is not supported
-- **Multi-cursor editing** is not exposed by the API
+- **Multi-cursor editing** is not exposed by the editor widget
 - **Context menus** (right-click) are not implemented
 
 ### Native ABI and platform decoupling
 
-The native layer remains unchanged from 0001:
-- `native/headless/platform.c` — minimal platform ABI (file system, processes)
-- `native/ffi/pragtical_hx.c` — FFI bindings (clipboard, shell, etc.)
-- No window management, main loop, or SDL directly referenced from Haxe
+The editor bridge uses ordinary C symbols declared in
+`include/pragtical_hx/native.h`, with generated `.hxi`/`.hxmap` bindings,
+explicit UTF-8 strings, 32-bit booleans and retained callback ownership.
+The ABI is version 18. See [native-bindings.md](../native-bindings.md).
 
-Rendering and window management are now owned by `DesktopUiHost` + UIKit,
-not by custom native code. The old SDL rendering paths (`native/host/main.c`,
-`native/pragtical/renderer_backend.c`) are deleted.
+`native/headless/platform.c` implements deterministic platform services for
+model tests, including window/font/draw APIs still consumed by the headless
+renderer and benchmarks. `native/ffi/pragtical_hx.c` exposes those services
+through the portable C ABI. The graphical host owns its actual window, input,
+clipboard and GPU rendering. The previous custom SDL host and renderer are
+removed.
 
 ### Command palette and UI shell
 
-The graphical UI provides:
-- **AppShell** — top-level layout (title bar, menubar, status bar)
-- **DockWorkspace** — docking panels (Explorer, Editor tabs, Problems, Build Output)
-- **TextArea + EditorGutter** — text editor in tabs
-- **Command palette** — a small set of new commands (New, Open, Save, etc.)
+The graphical UI provides an `AppShell`, `DockWorkspace`, document tabs,
+`TextArea`/gutter editing, and a command palette. `ExosuitApp` pumps the shared
+`core.Application` controllers each frame. `CommandBridge` exposes their
+commands with live enabled states and supported shortcuts.
 
-**Not ported (documented scope cut):**
-- Language services (LSP client, problem panel) — structurally present, shows placeholder
-- Build tasks output — structurally present, shows placeholder
-- ~45 existing commands (doc:*, root:*, project:*) — require LayoutNode/pane concepts
-  that don't map to DockWorkspace/Tab architecture
-- Dynamic plugins — discovery exists, but compilation is stubbed
-- Completion, context menus, multi-cursor editing — not supported by current UIKit API
+Problems reads the shared diagnostic registry; Build Output reads the running
+task's output and exposes diagnostic activation. Hover, completion and
+signature-help overlays are wired to the language controller. Activation opens
+the relevant document, but model selection does not yet move or reveal the
+widget's caret. These connections are compile-verified; real-window acceptance
+remains pending in M8.3.
 
-The new UI is a working graphical shell that replicates the core editing
-experience; it is not a 1:1 port of the old renderer-driven architecture.
+Remaining graphical gaps:
+- Syntax spans, diagnostic/plugin decorations and search highlighting are not rendered.
+- Language overlays have no caret anchor.
+- Workspace search stores results but has no visible results panel.
+- One editor region means split, pane focus and moving tabs between panes are unavailable.
+- Right-click context menus, wrapping and multiple selections are not exposed.
+- Dynamic source plugins remain a throwing stub pending compiler/runtime embedding.
+
+Tab reordering and sidebar visibility are wired. Layout-only legacy commands
+are excluded by `CommandBridge`; other commands are bridged, with some shortcut
+keys unavailable in the current UIKit key mapping.
 
 ## Migration from 0001
 
@@ -179,39 +189,28 @@ Callbacks from native code flow through `DesktopUiHostContext`, never directly
 into application code. Events are pulled on the host's main thread at a defined
 safe point.
 
-## Known Haxeon tool issues and workarounds
+## Compiler and acceptance state
 
-Two pre-existing, external Haxeon bugs were discovered and worked around:
+The reference graphical build passes after general compiler effect inference
+and import-resolution fixes. The checked-in self-hosted compiler is stale;
+bootstrap convergence and two-mode agreement are still in progress. The
+scripts retain divergent compiler defaults until that agreement is verified.
 
-1. **Generic resolution bug in --self-hosted mode**: Haxeon's precompiled
-   bootstrap (compiler.hl) has a confirmed bug when resolving generics through
-   `nativekit.ui.widgets.text.TextField` → `ComboBox`'s `Array<SelectOption<T>>`
-   ("Type \"SelectOption\" does not accept type arguments"). The graphical build
-   uses the normal reference-Haxe bootstrap instead (now reliable after a WIP
-   compiler change landed). Headless tests use --self-hosted (default) to avoid
-   a separate reference-compiler bug in ConfigurationController.hx:1886.
+Haxeon fixed action-directory creation upstream (`c59502ff`). The editor's
+pre-creation workaround remains until clean-output builds in both modes are
+verified. Compiler/runtime changes are part of the implementation scope.
 
-2. **Directory-creation race in Haxeon's executor**: Haxeon's parallel action
-   executor can race two worker threads creating `build/.haxeon/actions` on the
-   first build, causing a hang. Pre-creating the directory in build.sh/run.sh/test.sh
-   sidesteps this entirely. This is an external, read-only tool issue.
+The native binding and gating headless tests pass, but the dynamic-plugin test
+is suppressed; this is an acceptance gap. Release packaging, the real LSP
+smoke gate and UIKit window automation still need restoration. The
+[execution ledger](../roadmap/STATUS.md) records exact commands and remaining
+failures; a graphical compile does not establish interactive behavior.
 
-## Trade-offs and limitations
+## Trade-offs and follow-on work
 
-- **Not a 1:1 port**: The new graphical UI prioritizes a working shell over
-  preserving every legacy feature. Commands, plugins, and language services are
-  present but not wired to the old architecture.
-- **No automatic command migration**: Existing commands were rewritten to assume
-  UIKit widget semantics; automatic translation would have been incorrect.
-- **UIKit API limitations**: Syntax highlighting, multi-cursor, and context menus
-  are constrained by what the current TextArea/TextDocument expose.
-- **Build cost trade-off**: Using separate manifests adds some maintenance burden
-  but preserves test suite speed and clarity of intent (core vs. graphical).
-
-## Future work
-
-- Wire language services and build output to the Problems and Build Output panels
-- Implement context menus and code completion popups
-- Port remaining commands once DockWorkspace/Tab semantics are fully understood
-- Support syntax highlighting via TextDocument span insertion
-- Embed Haxeon's compiler/runtime to enable dynamic plugin compilation
+Separate manifests keep model tests independent of UIKit's native GPU build.
+The shared controllers preserve editor behavior while host adapters expose
+it through widgets. M9/M10 complete styled text, visible selection/navigation,
+pane operations, search surfaces and language UI behavior. Compiler/runtime
+embedding restores source plugins in M8; M8.3 restores release and integration
+gates. See the [roadmap](../roadmap/README.md) for dependencies and acceptance.

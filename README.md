@@ -45,21 +45,28 @@ search/replace operations.
 
 ## Known limitations and open gaps
 
-- **Dynamic plugins** are stubbed; the plugin discovery infrastructure exists,
-  but compiling and hot-loading plugins requires Haxeon's compiler/runtime
-  packages as a manifest dependency (not yet available).
-- **Language services and diagnostics** (LSP client, problem panel) are
-  structurally present but show a placeholder message; the new UI does not
-  wire them to the backend.
-- **Build output panel** is structurally present but shows a placeholder message.
-- **Multi-cursor editing** and **styled/syntax-colored text spans** are not
-  exposed by the current UIKit TextDocument/TextArea API.
-- **Context menu popups** (right-click) are not implemented.
-- **Command palette** replicates only a small set of new commands (New, Open,
-  Open Folder, Save, Close Tab, Toggle Palette); exosuit's own ~45 commands
-  (doc:*, root:*, project:*) are not ported, as they were written against
-  concepts (pane layouts, editor splits) that don't semantically map onto the
-  new DockWorkspace/Tab architecture.
+The UIKit shell uses the shared application controllers. The Problems panel
+reads live diagnostics, Build Output streams task output with clickable
+locations, and the palette exposes bridged document, project, build and
+language commands. Hover, completion and signature-help overlays are wired.
+Interactive acceptance on the UIKit host remains pending.
+
+- Dynamic source plugins are stubbed pending embedded compiler/runtime wiring;
+  their headless integration test is currently suppressed.
+- Styled syntax spans, diagnostic/plugin decorations and search highlights
+  are not rendered in the document widget.
+- Navigation updates the model selection but cannot yet move or reveal the
+  widget's caret. Language popups are not anchored to that caret.
+- Workspace search results are retained by the host but have no graphical panel.
+- The shell has one editor region. Split, pane focus and moving tabs between
+  panes are unavailable; tab reordering and sidebar visibility are wired.
+- Multiple selections, line wrapping and right-click context menus remain gaps.
+- Some legacy shortcut keys lack a UIKit key mapping; their bridged commands
+  are still available from the palette.
+
+Compiler-mode agreement, release packaging and real-window automation are
+still being restored in [M8](docs/roadmap/08-uikit-baseline.md). See the
+[execution ledger](docs/roadmap/STATUS.md) for current verification evidence.
 
 See [docs/architecture/0002-nativekit-uikit-host.md](docs/architecture/0002-nativekit-uikit-host.md)
 for migration notes and implementation details.

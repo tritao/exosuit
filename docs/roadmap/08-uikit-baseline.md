@@ -79,7 +79,7 @@ under a real or virtual display, or is recorded as pending with the reason.
 
 ## M8.4 — Truthful documentation
 
-- [ ] Update README "Known limitations" and ADR 0002 to match the code. The
+- [x] Update README "Known limitations" and ADR 0002 to match the code. The
   problems panel, build output and LSP commands are wired. Decorations, caret
   anchoring, the search panel, pane operations and context menus are not.
 
