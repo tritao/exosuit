@@ -41,6 +41,7 @@ echo "PASS: headless platform ABI"
 
 "$root_dir/native-packages/sqlite/tests/run.sh"
 "$root_dir/native-packages/terminal/tests/run.sh"
+"$root_dir/native-packages/terminal/session/tests/run.sh"
 
 "$cc" -std=c11 -Wall -Wextra -Werror \
 	"$root_dir/tests/process_fixture.c" \

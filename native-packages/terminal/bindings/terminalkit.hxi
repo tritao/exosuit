@@ -8,6 +8,7 @@ interface TerminalKit @target("portable-abi64") @library("terminalkit") {
 	extern fn terminalkit_columns(kit: ptr<terminalkit_handle>) -> c_int;
 	extern fn terminalkit_cursor(kit: ptr<terminalkit_handle>, column: ptr<c_int> @out, row: ptr<c_int> @out, mode: ptr<c_int> @out) -> c_int;
 	extern fn terminalkit_feed(kit: ptr<terminalkit_handle>, bytes: ptr<const<u8>>, size: u64) -> c_int;
+	extern fn terminalkit_feed_range(kit: ptr<terminalkit_handle>, bytes: ptr<const<u8>>, buffer_size: u64, offset: u64, size: u64) -> c_int;
 	extern fn terminalkit_focus(kit: ptr<terminalkit_handle>, focused: c_int) -> void;
 	extern fn terminalkit_focus_reporting(kit: ptr<terminalkit_handle>) -> c_int;
 	extern fn terminalkit_keyboard(kit: ptr<terminalkit_handle>, key_name: utf8, modifiers: u32, unicode: u32) -> c_int;

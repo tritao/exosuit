@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "package": { "name": "terminalsession" },
+  "sourceRoots": ["haxe"],
+  "scopeSourceRoots": false,
+  "dependencies": {
+    "terminalkit": { "path": ".." },
+    "nativekit": { "path": "../../../../nativekit" }
+  },
+  "target": "host"
+}

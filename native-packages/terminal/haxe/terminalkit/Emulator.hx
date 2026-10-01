@@ -21,6 +21,13 @@ class Emulator {
     public function feed(bytes:haxe.io.Bytes):Int
         return TerminalKit.terminalkit_feed(live(), bytes, bytes.length);
 
+    /** Feed a slice of caller storage without allocating a temporary Bytes. */
+    public function feedRange(bytes:haxe.io.Bytes, offset:Int, length:Int):Int {
+        if (offset < 0 || length < 0 || offset > bytes.length || length > bytes.length - offset)
+            throw "Terminal feed range is outside the buffer";
+        return TerminalKit.terminalkit_feed_range(live(), bytes, bytes.length, offset, length);
+    }
+
     public function feedString(text:String):Int
         return feed(haxe.io.Bytes.ofString(text));
 

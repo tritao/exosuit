@@ -17,7 +17,8 @@ Last updated: 2026-10-01.
   toolchains remain explicitly pending.
 - Active task: **M9.1**, styled text and decorations on UIKit.
 - Independent M11.1 POSIX PTY, M11.2 Linux transport, M11.3 SQLiteKit, and
-  an initial M11.4 TerminalKit slice are verified
+  an initial M11.4 TerminalKit slice are verified. M12.1's headless session
+  model and direct local PTY adapter now pass in both compiler modes
   while the 1 MiB graphical timing gate waits for an idle host. Their Windows
   implementations remain open. The Pragtical PTY and emulator references are
   present in the available read-only checkout.
@@ -62,12 +63,31 @@ Last updated: 2026-10-01.
 | M9 | Active: M9.1 | General styled text/decorations and editor rendering |
 | M10 | Not started | Depends on M8, M9.1–M9.2 |
 | M11 | Active: M11.1 POSIX, M11.2 Linux, M11.3 SQLiteKit, M11.4 TerminalKit slice | Depends on M8; independent of M9/M10; Windows PTY/named pipes and M11.4 session integration remain pending |
-| M12 | Not started | Depends on M9, M11.1, M11.4 |
+| M12 | Active: M12.1 headless session slice | Local PTY/session and deterministic replay tests pass; plugin profile registration, graphical view and remote backend remain |
 | M13 | Not started | Depends on M11.2 |
 | M14 | Not started | Depends on M11–M13 |
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M12.1 — headless terminal session (initial Linux slice)
+
+- `native-packages/terminal/session` defines byte-offset output and lifecycle
+  events, a backend interface, terminal profile, and a `TerminalSession` that
+  owns the emulator. It trims duplicate/overlapping output, buffers bounded
+  gaps, requests replay, handles status before trailing output, and restores
+  checkpoints. A borrowed output event is fed through `terminalkit_feed_range`
+  without allocating a prefix copy; only queued out-of-order data is copied.
+- `LocalPtyBackend` launches the profile program directly through NativeKit,
+  drains into a reused 64 KiB buffer, bounds queued input at 1 MiB, and
+  forwards resize, exit, and termination. `TerminalProfile` snapshots the
+  parent environment, removes `NO_COLOR`, forces `TERM=xterm-256color`, then
+  applies valid overrides. Haxeon `bf7e7150` adds generic `Sys.environment()`
+  for this; `release.lock` pins it.
+- Deterministic replay/overlap/checkpoint and real shell PTY round-trip tests
+  pass in reference and self-hosted modes. The session package gate is in
+  `scripts/test.sh`. Plugin profile registration, the graphical view, remote
+  transport backend, and Windows ConPTY execution remain open.
 
 ### M11.4 — TerminalKit emulator (initial Linux slice)
 

@@ -92,6 +92,13 @@ int terminalkit_feed(terminalkit_handle *kit, const uint8_t *bytes, uint64_t siz
     if (size) kit->dirty = 1;
     return terminal_emulator_feed(kit->emulator, (const char *)bytes, (size_t)size);
 }
+int terminalkit_feed_range(terminalkit_handle *kit, const uint8_t *bytes,
+    uint64_t buffer_size, uint64_t offset, uint64_t size) {
+    if (!kit || (!bytes && buffer_size) || offset > buffer_size ||
+        size > buffer_size - offset || offset > SIZE_MAX || size > SIZE_MAX)
+        return -1;
+    return terminalkit_feed(kit, bytes ? bytes + (size_t)offset : NULL, size);
+}
 void terminalkit_resize(terminalkit_handle *kit, int columns, int rows) {
     if (!kit || columns < 1 || rows < 1 || !allocate_grid(kit, columns, rows)) return;
     terminal_emulator_resize(kit->emulator, columns, rows);

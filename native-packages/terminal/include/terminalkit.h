@@ -43,6 +43,9 @@ TERMINALKIT_API int terminalkit_open(int columns, int rows, int scrollback_limit
     terminalkit_handle * TK_NULLABLE *out_kit TK_OUT TK_BORROWED);
 TERMINALKIT_API void terminalkit_close(terminalkit_handle *kit);
 TERMINALKIT_API int terminalkit_feed(terminalkit_handle *kit, const uint8_t *bytes, uint64_t size);
+/* Feed a checked slice of a caller-owned buffer without making a byte copy. */
+TERMINALKIT_API int terminalkit_feed_range(terminalkit_handle *kit,
+    const uint8_t *bytes, uint64_t buffer_size, uint64_t offset, uint64_t size);
 TERMINALKIT_API void terminalkit_resize(terminalkit_handle *kit, int columns, int rows);
 TERMINALKIT_API int terminalkit_columns(terminalkit_handle *kit);
 TERMINALKIT_API int terminalkit_rows(terminalkit_handle *kit);

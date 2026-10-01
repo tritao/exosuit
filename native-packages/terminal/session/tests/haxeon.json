@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "package": { "name": "terminalsession-test" },
+  "entry": "app.Main",
+  "sourceRoots": ["haxe"],
+  "dependencies": { "terminalsession": { "path": ".." } },
+  "target": "host",
+  "outputDir": "build"
+}

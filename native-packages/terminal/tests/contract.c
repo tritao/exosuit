@@ -85,6 +85,10 @@ int main(void) {
     REQUIRE(current == 1 && total > 0);
     terminalkit_handle *protocol = NULL;
     REQUIRE(terminalkit_open(20, 4, 8, "xterm-256color", &protocol));
+    REQUIRE(terminalkit_feed_range(protocol, (const uint8_t *)"xYz", 3, 1, 1) >= 0);
+    REQUIRE(terminalkit_feed_range(protocol, (const uint8_t *)"xYz", 3, 2, 2) < 0);
+    REQUIRE(terminalkit_snapshot(protocol) > 0);
+    REQUIRE(terminalkit_text(protocol)[terminalkit_cells(protocol)[0].text_offset] == 'Y');
     terminalkit_set_output_callback(protocol, collect_reply, NULL);
     REQUIRE(feed(protocol, "\x1b[?u") >= 0);
     REQUIRE(!strcmp(replies, "\x1b[?0u"));
