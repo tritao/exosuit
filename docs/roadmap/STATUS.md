@@ -12,10 +12,10 @@ Last updated: 2026-10-01.
   The reference `./scripts/build.sh` now exits 0 after Haxeon `3606bd7c`.
   The checked-in self-hosted compiler is stale and currently rejects UIKit's
   compound shift assignment. Bootstrap now passes the null-array inference
-  failure after Haxeon `5f0b7671`, then fails at an unchecked nullable lookup
-  in `WasmFunctionLower.hx:1049`; correct that source and retry convergence.
-- Exact resume: reference headless verification passed. Correct the nullable
-  host lookup in `WasmFunctionLower`, rerun Haxeon's
+  failure after Haxeon `5f0b7671`, then passes four nullable-source corrections in `02608ed7`. It now fails
+  on colliding enum constructors at `WasmGcModuleBuilder.hx:605`; fix import
+  precedence and retry convergence.
+- Exact resume: reference headless verification passed. Fix imported enum constructor precedence (later import wins), rerun Haxeon's
   `./scripts/bootstrap-compiler.sh`, then test both compiler modes. Remove the
   divergent defaults and upstream-fixed directory workaround. Restore
   source-plugin embedding and remove test suppression before claiming M8.1.
@@ -157,6 +157,31 @@ Last updated: 2026-10-01.
   lookup result, then retry bootstrap and two-mode editor gates.
 - Pre-existing HashLink pointer and profile dump remain untouched. Bootstrap
   has not converged; M8.1/M8.2 acceptance and GUI checks remain pending.
+
+### M8.2 — checked Wasm source lookups (verified compiler-source slice)
+
+- Haxeon `02608ed7` corrects four nullable-source errors exposed while
+  bootstrap checks recent Wasm code. Call lowering now checks and consumes
+  one host lookup; dynamic-array helper calls and GC `Std.string` definitions
+  report a missing registered function instead of passing a nullable index.
+  Fixed-record scratch allocation checks the nullable layout directly.
+- These were source errors rather than typing defects. In particular,
+  reference Haxe with `@:nullSafety(Strict)` rejects using a stored boolean
+  as proof that an unrelated nullable value can be dereferenced. No compiler
+  typing rules, annotations or casts were changed for this slice.
+- Focused `WasmBackendMain` and full `./scripts/test.sh` exited 0:
+  366/366 driver cases, formatting, native integrations, Wasm backend,
+  parity and Wasmtime GC execution passed. Log:
+  `/tmp/haxeon-gate-wasm-null-checks.log`.
+- Bootstrap advances past these failures and exits 1 at
+  `WasmGcModuleBuilder.hx:605`, ambiguous bare `I32` in an inferred array.
+  Independent reducer: two imported enums both define `Item`; Haxeon rejects
+  unannotated `var value = Item`, whereas reference Haxe chooses the later
+  import. Existing semantic assembly discards aliases for all collisions.
+  Next: register accepted/rejected/runtime/incremental regressions, implement
+  import-order precedence, rerun compiler gate and bootstrap convergence.
+- No refreshed bootstrap artifact or two-mode success is claimed. All
+  pre-existing sibling changes remain preserved; editor worktree is clean.
 
 ## Completed records
 
