@@ -9,14 +9,10 @@ root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 haxeon_root=${HAXEON_ROOT:-"$root_dir/../haxeon"}
 haxeon=${HAXEON_BIN:-"$haxeon_root/scripts/haxeon"}
 
-# See scripts/build.sh for why --self-hosted is NOT the default here.
+# Match scripts/build.sh and the Haxeon CLI compiler default.
 extra=()
 if [[ "${HAXEON_SELF_HOSTED:-0}" == "1" ]]; then
 	extra+=(--self-hosted)
 fi
-
-# Sidesteps a Haxeon executor race on a clean checkout; see run_test() in
-# scripts/test.sh for the full explanation.
-mkdir -p "$root_dir/graphical/build/.haxeon/actions"
 
 exec "$haxeon" run --project "$root_dir/graphical/haxeon.json" "${extra[@]}" -- "$@"

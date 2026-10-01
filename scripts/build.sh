@@ -14,22 +14,10 @@ root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 haxeon_root=${HAXEON_ROOT:-"$root_dir/../haxeon"}
 haxeon=${HAXEON_BIN:-"$haxeon_root/scripts/haxeon"}
 
-# The reference-Haxe bootstrap of Haxeon's own compiler is reliable again (the
-# in-progress change under haxeon/src/compiler that used to break it has
-# landed), so this defaults to the normal reference-compiler build.
-# --self-hosted (Haxeon's precompiled bootstrap/compiler.hl) is available as an
-# override, but is NOT the default here: it has a confirmed generic-resolution
-# bug reached through this project's graphical entry (app.GraphicalMain ->
-# nativekit.ui.widgets.text.TextField -> ComboBox's Array<SelectOption<T>>,
-# "Type \"SelectOption\" does not accept type arguments"), which the
-# reference-compiler build does not hit.
+# Match the Haxeon CLI default; set HAXEON_SELF_HOSTED=1 to use the verified bootstrap.
 extra=()
 if [[ "${HAXEON_SELF_HOSTED:-0}" == "1" ]]; then
 	extra+=(--self-hosted)
 fi
-
-# Sidesteps a Haxeon executor race on a clean checkout; see run_test() in
-# scripts/test.sh for the full explanation.
-mkdir -p "$root_dir/graphical/build/.haxeon/actions"
 
 exec "$haxeon" build --project "$root_dir/graphical/haxeon.json" "${extra[@]}" "$@"

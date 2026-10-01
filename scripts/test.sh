@@ -12,14 +12,9 @@ haxeon_root=${HAXEON_ROOT:-"$root_dir/../haxeon"}
 haxeon=${HAXEON_BIN:-"$haxeon_root/scripts/haxeon"}
 cc=${CC:-cc}
 
-# These are headless-only projects (none depend on uikit), so --self-hosted
-# (Haxeon's precompiled bootstrap/compiler.hl) is the default here: it avoids
-# a pre-existing reference-compiler typing bug in this WIP tree unrelated to
-# exosuit (controller/ConfigurationController.hx:1886, "Field \"current\"
-# requires an object"). See scripts/build.sh for why the *graphical* build
-# uses the opposite default.
+# Match build/run and the Haxeon CLI; both compiler modes are verified.
 self_hosted=()
-if [[ "${HAXEON_SELF_HOSTED:-1}" == "1" ]]; then
+if [[ "${HAXEON_SELF_HOSTED:-0}" == "1" ]]; then
 	self_hosted+=(--self-hosted)
 fi
 
@@ -27,13 +22,6 @@ run_test() {
 	local name=$1
 	shift
 	echo "== $name =="
-	# Haxeon's parallel action executor can race two of its own worker threads
-	# creating "build/.haxeon/actions" the first time (SysError: Failed to
-	# create directory ...), which then hangs that build rather than failing
-	# it. Pre-creating it here, before Haxeon ever needs to, sidesteps that
-	# race entirely; it is an external, read-only tool bug, not one in this
-	# project.
-	mkdir -p "$root_dir/tests/$name/build/.haxeon/actions"
 	"$haxeon" run --project "$root_dir/tests/$name/haxeon.json" "${self_hosted[@]}" -- "$@"
 }
 
@@ -56,8 +44,6 @@ echo "PASS: headless platform ABI"
 	-o "$root_dir/build/process-fixture"
 
 # The core headless application (app.Main) builds and exercises the platform ABI.
-# See run_test() above for why this directory is pre-created.
-mkdir -p "$root_dir/build/.haxeon/actions"
 "$haxeon" run --project "$root_dir/haxeon.json" "${self_hosted[@]}"
 echo "PASS: Haxeon headless application exercised the platform ABI"
 
@@ -123,7 +109,6 @@ chmod 600 "$workspace_root/unreadable.txt"
 dynamic_plugin_dir="$root_dir/build/dynamic-plugin"
 mkdir -p "$dynamic_plugin_dir"
 cp "$root_dir/plugins/example/plugin.conf" "$root_dir/plugins/example/Main.hx" "$dynamic_plugin_dir/"
-mkdir -p "$root_dir/tests/dynamic-plugin-test/build/.haxeon/actions"
 "$haxeon" build --project "$root_dir/tests/dynamic-plugin-test/haxeon.json" "${self_hosted[@]}"
 echo "== dynamic-plugin-test (known limitation, not gating) =="
 if "$haxeon" run --project "$root_dir/tests/dynamic-plugin-test/haxeon.json" "${self_hosted[@]}" -- \
