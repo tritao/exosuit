@@ -2,6 +2,88 @@
 
 Last updated: 2026-10-02.
 
+## M9.1 — typing verification correction, 2026-10-02
+
+- The earlier delivered-input typing captures do not validate the recent native
+  revisions: the benchmark launched an existing GraphicalMain build without
+  rebuilding it. Its loaded UIKit library was built at 04:28:37, before the
+  indexed reflow, affected-row and indexed-query commits. Historical results
+  below are retained as observations, but their revision-specific typing gate
+  claims are withdrawn. Decoration smoke builds a separate test application.
+- Exosuit `5812357` makes the benchmark rebuild GraphicalMain before capture,
+  records repository
+  revisions and source/binary hashes, and checks the actual UIKit mapping in
+  `/proc/<pid>/maps` against that build before delivering input.
+- A fresh 1 MiB varied-key capture fails the 50 ms budget: 85.46 ms p95,
+  76.14 ms input-dispatch p95, 9.89 ms frame p95. Artifacts:
+  `/tmp/exosuit-shared-rows-1mb-fresh`. Loaded UIKit SHA-256:
+  `f2d27d62a3ca4f024f934e1281ae56226d5b34bcaa797eaf60939cb4026f05d0`.
+- A diagnostic trace confirms incremental ASCII shaping succeeds for the real
+  fixture (approximately 9,710 rows); full-layout fallback is not the cause.
+  Temporary phase instrumentation measured native edits at roughly 42–53 ms,
+  text assembly at 0.07–0.26 ms and row publication at 0.16–0.19 ms
+  (`/tmp/exosuit-shared-rows-phases`). The diagnostic capture still fails at
+  81.88 ms p95; instrumentation was removed after measurement. M9.1 remains
+  incomplete. Resume by profiling the native changed-wrap line builder and
+  remaining editor dispatch; row publication is not the dominant native cost.
+- Native line-builder instrumentation confirms the real insert/delete fixture
+  rebuilds all 9,710 rows with no prefix/suffix reuse. Wrap measurement costs
+  roughly 32–46 ms, culling 6.4 ms and alignment 0.16 ms, measuring about
+  2.1 million clusters per edit. Artifacts:
+  `/tmp/exosuit-shared-rows-native-phases`. The diagnostic capture fails at
+  68.39 ms p95; this shorter capture is not a matched speedup claim.
+  Instrumentation was removed. Next: reduce changed-wrap measurement and
+  support exact suffix reuse when edits shift row boundaries/counts, preserving
+  fresh-layout equivalence and the general Unicode fallback.
+- The guarded WORD_CHAR reflow now ends lookahead at the first full-row
+  overflow instead of measuring two row widths. Beyond that point the word
+  must split, so further measurement cannot change the decision. The full
+  differential probe passes, including 240 accepted edits and 100-generation
+  variable-width checks with 692 moved wraps; native 1 MiB mixed edits measure
+  18.79 ms mean CPU (`/tmp/exosuit-one-row-lookahead.log`). Vendor units and
+  ASan/leak checks pass (`/tmp/exosuit-one-row-units.log`,
+  `/tmp/exosuit-one-row-asan.log`). Actual rebuilt-app typing is still pending
+  in `/tmp/exosuit-one-row-lookahead-1mb`; no budget pass is claimed.
+- A sequential measurement cursor reads cluster, advance, text and flags
+  from one immutable shape piece instead of independently looking up each
+  value. It checks both boundaries when lookahead restarts and retains the
+  general non-indexed path. No shape buffers are flattened or copied.
+  Full differential checks, vendor units and ASan/leaks pass
+  (`/tmp/exosuit-shape-cursor-probe.log`, `/tmp/exosuit-shape-cursor-unit.log`,
+  `/tmp/exosuit-shape-cursor-asan.log`). Native 1 MiB mixed edits measure
+  12.05 ms mean CPU. The fresh 90-second varied-key app capture fails at
+  60.29 ms p95 (`/tmp/exosuit-shape-cursor-1mb`); the 50 ms gate remains red.
+  both browser targets build and pass typing, save/readback, URL and reload
+  (`/tmp/exosuit-shared-rows-web.log`, exit 0).
+- Temporary Haxe editor-phase instrumentation measures document mutation at
+  approximately 0.1–0.7 ms and retained-layout update at 18–41 ms in the
+  short varied-key diagnostic (`/tmp/exosuit-editor-edit-phases`). It does not
+  explain the complete dispatch time. The diagnostic fails at 70.78 ms p95;
+  it is not comparable to the 90-second gate. Instrumentation was removed.
+  Resume by profiling the remaining input callbacks/selection path and the
+  layout update's text slicing/native call separately; document segment
+  mutation is not the dominant measured cost.
+- Post-edit publication instrumentation identifies the buffer replay callback
+  at roughly 10–14 ms; selection and refresh each cost below 0.1 ms
+  (`/tmp/exosuit-publish-edit-phases`). Temporary tracing was removed.
+  `TextBuffer.positionFromCodepointOffset` now walks only through the requested
+  codepoint instead of counting the whole destination line first. Surrogate
+  pairs and completed preceding lines retain the previous semantics.
+  Document tests pass, including new insertion replay/undo/redo checks at
+  every boundary of a multiline string containing emoji and an empty line.
+  The full headless suite passes
+  (`/tmp/exosuit-bounded-buffer-offset-tests.log`, exit 0). The fresh 90-second
+  varied-key 1 MiB typing capture passes: 39.47 ms p95, 51.24 ms maximum
+  (`/tmp/exosuit-bounded-buffer-offset-1mb`, exit 0). This single capture does
+  not complete M9 or replace the remaining fixture and general-text checks.
+  The buffer conversion and regression checks are committed as Exosuit
+  `d52a490`; shared-row/native reflow work remains uncommitted.
+- Uncommitted shared-row storage passes vendor units, native differential
+  checks, ASan/leaks and UIKit native tests. Equal-advance edits retain prefix
+  and suffix blocks and rebuild four private rows for both 4 KiB and 1 MiB
+  probes. Changed-wrap edits still rebuild full row arrays. These checks do
+  not establish the app typing budget or complete M9.
+
 ## M9.1 — indexed native geometry queries, 2026-10-02
 
 - Skribidi `441e2bc`, pinned by Materia `dc660f975`, migrates native
