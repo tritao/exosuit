@@ -213,6 +213,17 @@ alignment/publication still visit rows. Reflow counters measure wrapping work,
 not total edit work. Sharing row metadata and bounding pending-row reflow and
 publication remain open.
 
+Row and layout-run value reads now have the same indexed boundary as shape
+reads. UIKit uses `skb_layout_get_line_at` and
+`skb_layout_get_layout_run_at` for intrinsic metrics, layout publication and
+row equivalence, rather than borrowing complete arrays. Skribidi editor
+navigation and rich-layout hit testing use indexed rows as well. The bulk
+getters remain compatibility APIs. This migration does not yet share row
+storage: the builder and internal native geometry queries still use owned
+contiguous rows. Move those internal readers behind the boundary before
+installing retained row blocks, so caret, selection, culling and rendering
+cannot silently force whole-row materialization.
+
 ## Verification before activation
 
 1. Extend the one-codepoint replacement/insertion/deletion and repeated-edit

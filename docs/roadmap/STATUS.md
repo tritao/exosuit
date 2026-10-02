@@ -2,6 +2,44 @@
 
 Last updated: 2026-10-02.
 
+## M9.1 — indexed row access boundary, 2026-10-02
+
+- Skribidi `7c00226`, pinned by Materia `05db38b2a`, adds value-returning
+  `skb_layout_get_line_at` and
+  `skb_layout_get_layout_run_at`. UIKit intrinsic metrics, initial and edited
+  layout publication, and fallback row-equivalence checks no longer borrow
+  complete native row/run arrays. Vendor editor navigation and rich-layout
+  hit testing also use indexed rows. Bulk getters remain compatible.
+- The full native differential probe passes
+  (`/tmp/exosuit-indexed-row-api-probe.log`), including 240 accepted/one rejected
+  ASCII sweep and both 100-generation lifetime/geometry sequences with 692
+  moved wraps. Those repeated-generation row/culling/hit comparisons now use
+  indexed row reads; RTL-run checks use indexed run reads.
+- Final vendor unit suite passes (`/tmp/exosuit-indexed-row-api-unit-final.log`),
+  ASan/leak native-only checks pass (`/tmp/exosuit-indexed-row-api-asan.log`),
+  UIKit native tests pass 3/3 (`/tmp/exosuit-indexed-row-api-uikit-final.log`),
+  and actual decoration/multi-caret navigation/typing/undo passes
+  (`/tmp/exosuit-indexed-row-api-decoration.log`). Both browser targets build
+  with matching imports and pass real typing, save/readback, URL and reload
+  (`/tmp/exosuit-indexed-row-api-web-final.log`).
+- Exosuit `0cd5b71` fixes reload observation: track main-frame loader IDs and
+  lifecycle load events before checking fresh-document application state.
+  The initial browser gate failed during reload with canceled font requests
+  (`/tmp/exosuit-indexed-row-api-web.log`), following the preceding slice's
+  canceled-script failure. The old harness could observe outgoing-document
+  callbacks while navigation was replacing the execution context. New-document
+  failures remain fatal: a temporary copy of the built site deliberately
+  fails on its first reloaded frame and the gate exits 1 with that exact error
+  (`/tmp/exosuit-indexed-row-api-reload-negative.log`). The wasm32 recheck and
+  complete two-target gate pass after the harness correction; product startup
+  code is unchanged.
+- This is an access-boundary migration, not shared row storage or a speedup.
+  Next migrate internal read-only line/run geometry consumers behind indexed
+  access, then retain immutable row blocks for verified prefix/suffix ranges.
+  Builders keep mutable owned rows; public bulk compatibility reads must not
+  be requested by caret/render/hit/selection queries. UIKit result/revision
+  vectors and row publication still require bounded work. M9.1 remains open.
+
 ## M9.1 — affected-row reflow, 2026-10-02
 
 - Skribidi `702daa6`, pinned by Materia `6a6a640c0`, implements guarded ASCII

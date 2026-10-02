@@ -133,9 +133,8 @@ static int visual_equal(const skb_layout_t *old, const skb_layout_t *window,
 }
 
 static int has_rtl_run(const skb_layout_t *layout) {
-    const skb_layout_run_t *runs = skb_layout_get_layout_runs(layout);
     for (int i = 0; i < skb_layout_get_layout_runs_count(layout); ++i)
-        if (runs[i].bidi_level & 1) return 1;
+        if (skb_layout_get_layout_run_at(layout, i).bidi_level & 1) return 1;
     return 0;
 }
 
@@ -1209,17 +1208,17 @@ static int same_indexed_geometry(const skb_layout_t *indexed, const skb_layout_t
                     x.ascender == y.ascender && x.descender == y.descender;
         }
     }
-    const skb_layout_line_t *a = skb_layout_get_lines(indexed);
-    const skb_layout_line_t *b = skb_layout_get_lines(fresh);
     for (int row = 0; row < skb_layout_get_lines_count(indexed) && valid; ++row) {
-        valid = a[row].text_range.start == b[row].text_range.start &&
-                a[row].text_range.end == b[row].text_range.end &&
-                same_bounds(a[row].bounds, b[row].bounds) &&
-                same_bounds(a[row].culling_bounds, b[row].culling_bounds) &&
-                same_bounds(a[row].common_glyph_bounds, b[row].common_glyph_bounds);
-        for (float x = a[row].bounds.x - 1; x <= a[row].bounds.x + a[row].bounds.width + 1 && valid; x += 7) {
-            const skb_text_position_t p = skb_layout_hit_test(indexed, SKB_MOVEMENT_CARET, x, a[row].baseline);
-            const skb_text_position_t q = skb_layout_hit_test(fresh, SKB_MOVEMENT_CARET, x, b[row].baseline);
+        const skb_layout_line_t a = skb_layout_get_line_at(indexed, row);
+        const skb_layout_line_t b = skb_layout_get_line_at(fresh, row);
+        valid = a.text_range.start == b.text_range.start &&
+                a.text_range.end == b.text_range.end &&
+                same_bounds(a.bounds, b.bounds) &&
+                same_bounds(a.culling_bounds, b.culling_bounds) &&
+                same_bounds(a.common_glyph_bounds, b.common_glyph_bounds);
+        for (float x = a.bounds.x - 1; x <= a.bounds.x + a.bounds.width + 1 && valid; x += 7) {
+            const skb_text_position_t p = skb_layout_hit_test(indexed, SKB_MOVEMENT_CARET, x, a.baseline);
+            const skb_text_position_t q = skb_layout_hit_test(fresh, SKB_MOVEMENT_CARET, x, b.baseline);
             valid = p.offset == q.offset && p.affinity == q.affinity;
         }
     }
