@@ -190,8 +190,12 @@
     "../graphical/src/ui/EditorGutter.hx",
     "../graphical/src/ui/EditorPane.hx",
     "../graphical/src/ui/ExosuitApp.hx",
+    "../graphical/src/ui/ExosuitPalette.hx",
     "../graphical/src/ui/KeyCaptureView.hx",
     "../graphical/src/ui/ProblemsPanel.hx",
+    "../graphical/src/ui/TerminalColors.hx",
+    "../graphical/src/ui/TerminalPalette.hx",
+    "../graphical/src/ui/TerminalPanel.hx",
     "../graphical/src/ui/UiDocumentView.hx",
     "../graphical/src/ui/UiWorkbenchHost.hx"
   ],

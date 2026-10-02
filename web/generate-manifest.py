@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-excluded = {"NativeDesktopServices.hx", "plugin/DynamicPlugin.hx",
+excluded = {"NativeDesktopServices.hx", "ui/TerminalPane.hx", "plugin/DynamicPlugin.hx",
             "plugin/DynamicHostRouter.hx", "plugin/DynamicHostRegistration.hx",
             "plugin/DynamicCompileCompletion.hx", "plugin/NativeSourcePluginLoader.hx"}
 sources = ["src/app/WebMain.hx"]

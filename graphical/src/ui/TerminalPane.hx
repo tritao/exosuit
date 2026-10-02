@@ -30,7 +30,7 @@ import terminalkit.Cell;
 private typedef TerminalBackground = {start:Int, end:Int, color:Color};
 
 /** Retained terminal rows; each row has its own raster cache and text layout. */
-class TerminalPane implements View {
+class TerminalPane implements TerminalPanel {
 	public final session:TerminalSession;
 	final requestFrame:Void->Void;
 	final fonts:FontCollection;
@@ -51,6 +51,32 @@ class TerminalPane implements View {
 	var cursorRow:Int = -1;
 	var cursorColumn:Int = -1;
 	var cursorMode:Int = 1;
+
+	public static function open(cwd:String, requestFrame:Void->Void, palette:TerminalPalette):TerminalPanel {
+		var profile = terminalsession.TerminalProfile.shell(cwd);
+		var backend = terminalsession.LocalPtyBackend.spawn(profile, 80, 24);
+		try {
+			var session = new TerminalSession(backend, terminalkit.Emulator.open(80, 24));
+			try {
+				return new TerminalPane(session, requestFrame, palette);
+			} catch (error:Dynamic) {
+				session.close();
+				throw error;
+			}
+		} catch (error:Dynamic) {
+			backend.close();
+			throw error;
+		}
+	}
+
+	public function status():String
+		return session.status;
+
+	public function columns():Int
+		return session.emulator.columns();
+
+	public function rows():Int
+		return session.emulator.rows();
 
 	public function new(session:TerminalSession, requestFrame:Void->Void, palette:TerminalPalette) {
 		this.session = session;

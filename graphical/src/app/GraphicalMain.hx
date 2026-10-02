@@ -77,7 +77,7 @@ class GraphicalMain {
 			var dark = prefersDark(themeChoice);
 			var instance = new ExosuitApp(context.fonts, ExosuitPalette.theme(dark), context,
 				openPaths.length == 0 ? null : openPaths[0], null,
-				new NativeDesktopServices(context), dark);
+				new NativeDesktopServices(context), dark, ui.TerminalPane.open);
 			for (index in 1...openPaths.length) instance.application.openArgument(openPaths[index]);
 			if (openTerminal) instance.openTerminal();
 			if (pluginManifest != null && !instance.application.loadPluginManifest(pluginManifest))

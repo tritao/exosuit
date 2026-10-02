@@ -2,7 +2,44 @@
 
 Last updated: 2026-10-02.
 
-## In-progress browser binding repair — 2026-10-02
+## Browser host streams and terminal boundary — 2026-10-02
+
+- Haxeon `47c35ea0` supplies typed Wasm `Sys.stdout()`/`Sys.stderr()`
+  streams through the shared C-ABI host interface. Each stream buffers
+  independently; `flush()` publishes partial lines. Browser hosts may supply
+  `printError` separately from `print`. Documentation: `ca658504`.
+- The reduced existing `wasm-host-services.hx` fixture failed before the fix
+  on `Sys.sysStderr` (`/tmp/exosuit-wasm-stream-before.log`). It now executes
+  Unicode stdout/stderr writes and flushes on both targets. The registered
+  Wasm runner also executes the shipped browser adapter with imported memory
+  and checks exact output/routing with no unavailable imports. The complete
+  compiler gate exits 0: 384/384 plus every native, integration and Wasm stage
+  (`/tmp/exosuit-wasm-stream-compiler-gate.log`).
+- Shared `ExosuitApp` now accepts a typed `TerminalPanel` factory. Desktop
+  GraphicalMain supplies the real TerminalPane, which owns PTY/emulator creation
+  and failure cleanup. Browser compilation includes the lifecycle/view contract
+  and excludes the desktop implementation. No platform-only emulator imports
+  remain in the shared shell; capability-based commands/panels are preserved.
+- Both browser targets build and pass real Unicode typing, dirty tracking,
+  save/readback, URL and fresh-session reload checks, with no unavailable
+  imports (`/tmp/exosuit-terminal-boundary-web-final.log`). The desktop terminal
+  dock, row canvases, actual PTY input and resize pass
+  (`/tmp/exosuit-terminal-boundary-ui.log`, artifacts
+  `/tmp/exosuit-terminal-boundary-ui`). Full editor headless suite exits 0
+  (`/tmp/exosuit-terminal-boundary-headless.log`). Real decoration pixels,
+  movement, clearing, multi-caret typing and undo also pass
+  (`/tmp/exosuit-terminal-boundary-decoration.log`).
+- Preserve pre-existing Materia gitlinks/TextInputBridge diagnostics and Haxeon
+  HashLink gitlink/untracked files. Composed release remains unavailable with
+  that dirty UIKit input; these passing individual gates do not claim composed
+  release acceptance. IME/mixed-DPI/Windows/macOS remain pending.
+- Resume M9.1: implement indexed changed-wrap reflow
+  and bounded row verification/publication. The prior shared-shape differential
+  fixture remains the mandatory lifetime/geometry/render reference.
+
+## Counted-input repair checkpoint — 2026-10-02
+
+The later browser host/terminal record above supersedes pending checks here.
 
 - NativeKit counted function inputs used field-oriented borrowed annotations.
   Accessibility range/removal inputs and transport bytes now use `NK_IN_ARRAY`;
@@ -70,9 +107,9 @@ Last updated: 2026-10-02.
   The native differential fixture uses shared storage for 20 of 30 edits;
   changed-wrap edits still materialize for full reflow. Per-paragraph property,
   width and glyph verification and row-index copying remain O(n); native edit
-  CPU time has not substantially improved. Immediate integration prerequisite:
-  correct NativeKit's rejected input-array annotation and rerun both browser
-  targets. Then implement indexed changed-wrap row reflow and bounded row
+  CPU time has not substantially improved. Browser annotation, counted-buffer
+  compiler, standard-stream and desktop terminal dependency repairs are verified
+  above. Next implement indexed changed-wrap row reflow and bounded row
   verification/publication.
 - Unchanged ASCII/color-equivalent rows retain publication revisions after
   source rebasing. Full Unicode fallback maps unchanged prefix/suffix source
@@ -87,8 +124,8 @@ Last updated: 2026-10-02.
   Prior failures remain recorded. These samples do not establish a universal
   latency bound. Preserve graphical pixels, M8 and both browser gates; missed
   p95 budgets still produce nonzero benchmark exits.
-- Current follow-on HEADs: Exosuit `3f692b4` before this ledger commit;
-  Materia `40fae154a` carries row-scoped glyph commands, shallow row raster
+- Current follow-on HEADs: Exosuit `a3fdc8e` before this ledger commit;
+  Haxeon `ca658504`, NativeKit `9cc4bd3a`; Materia `44fa1a4ea` carries row-scoped glyph commands, shallow row raster
   caching, rebased source metadata, a parent repaint cost regression, and the
   Skribidi bulk-copy and guarded variable-width row-geometry reuse slices. The
   existing dirty Haxeon/NativeKit gitlinks and UIKit TextInputBridge edit in

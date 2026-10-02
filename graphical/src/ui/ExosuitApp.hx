@@ -51,10 +51,6 @@ import ui.BuildOutputPanel;
 import ui.ProblemsPanel;
 import ui.UiDocumentView;
 import ui.UiWorkbenchHost;
-import terminalsession.TerminalProfile;
-import terminalsession.TerminalSession;
-import terminalsession.LocalPtyBackend;
-import terminalkit.Emulator;
 
 /**
  * exosuit's graphical shell: `DesktopUiHost` owns the window, GPU, and frame
@@ -83,7 +79,8 @@ class ExosuitApp implements DesktopUiApplication {
 	final dock:DockWorkspaceModel;
 	var dockPanelContents:Array<DockPanelContent>;
 	final editorPanes:Map<Int, EditorPane> = new Map();
-	var terminalPane:Null<TerminalPane>;
+	var terminalPane:Null<TerminalPanel>;
+	final createTerminal:Null<(String, Void->Void, TerminalPalette)->TerminalPanel>;
 	var explorerRoot:Null<String>;
 	var explorerModel:Null<DirectoryTreeModel>;
 	var statusMessage:String = "Ready";
@@ -95,7 +92,8 @@ class ExosuitApp implements DesktopUiApplication {
 
 	public function new(?fonts:FontCollection, ?theme:Theme, ?hostContext:UiHostContext,
 			?openPath:String, ?capabilities:HostCapabilities, ?fileDialogs:HostFileDialogs,
-			?dark:Bool) {
+			?dark:Bool, ?createTerminal:(String, Void->Void, TerminalPalette)->TerminalPanel) {
+		this.createTerminal = createTerminal;
 		this.capabilities = capabilities == null ? HostCapabilities.desktop() : capabilities;
 		this.hostContext = hostContext;
 		darkPalette = dark == null ? true : dark;
@@ -166,13 +164,9 @@ class ExosuitApp implements DesktopUiApplication {
 	public function openTerminal():Void {
 		if (!capabilities.supports(Processes)) return;
 		if (terminalPane == null) {
-			var profile = TerminalProfile.shell(explorerRoot == null ? Sys.getCwd() : explorerRoot);
-			var backend = LocalPtyBackend.spawn(profile, 80, 24);
-			try {
-				var session = new TerminalSession(backend, Emulator.open(80, 24));
-				try terminalPane = new TerminalPane(session, requestFrame, terminalPalette)
-				catch (error:Dynamic) { session.close(); throw error; }
-			} catch (error:Dynamic) { backend.close(); throw error; }
+			if (createTerminal == null) return;
+			terminalPane = createTerminal(explorerRoot == null ? Sys.getCwd() : explorerRoot,
+				requestFrame, terminalPalette);
 		}
 		if (!dock.isOpen("terminal")) dock.open("terminal", "build");
 		dock.activate("terminal");
@@ -299,9 +293,9 @@ class ExosuitApp implements DesktopUiApplication {
 			paletteCommandCount: ui.commands.ids().length,
 			errors: [for (entry in application.errors.entries) {source: entry.source, message: entry.message}],
 			plugins: application.plugins.enabledIds(),
-			terminal: terminalPane == null ? "closed" : terminalPane.session.status,
-			terminalColumns: terminalPane == null ? 0 : terminalPane.session.emulator.columns(),
-			terminalRows: terminalPane == null ? 0 : terminalPane.session.emulator.rows()
+			terminal: terminalPane == null ? "closed" : terminalPane.status(),
+			terminalColumns: terminalPane == null ? 0 : terminalPane.columns(),
+			terminalRows: terminalPane == null ? 0 : terminalPane.rows()
 		};
 	}
 
