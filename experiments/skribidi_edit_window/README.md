@@ -21,6 +21,9 @@ differs from the fresh layout causes the probe to fail.
 Build and run from the Exosuit root:
 
 ```sh
+./scripts/test-skribidi-layout.sh # required in composed CI
+
+# Or build the probe directly:
 cmake -S experiments/skribidi_edit_window -B /tmp/exosuit-edit-window-build \
   -DSKRIBIDI_SOURCE="$(realpath ../uikit/vendor/skribidi)" \
   -DCMAKE_BUILD_TYPE=Release
@@ -73,6 +76,32 @@ deletion. The visible-row check covers an unbroken ASCII word, not general
 word wrapping or changed line heights.
 Oracle checks and glyph-position reconstruction still scan old layouts. The
 measured path excludes UIKit event handling, row layout, rendering, and
-publication, so it does not establish the 50 ms typing budget. A production
-design needs a composite layout/render API over pieces, retained row geometry
-with a safe fallback, and broader differential coverage.
+publication, so those isolated timings do not establish the 50 ms typing budget.
+
+## Production native snapshot regressions
+
+The probe also exercises Skribidi's guarded native edit API. Stable-row ASCII
+edits now retain immutable shape blocks through indexed ranges. Changed-wrap
+edits still materialize for full row reflow; unsupported scripts use full layout.
+Rendering and geometry read the same generation. These native checks are
+separate from the experimental piece-splice timings above.
+
+Repeated 4,096- and 1 MiB-codepoint fixtures compare accepted native edits with
+fresh layouts, including cluster metadata, glyph positions, culling bounds and
+sampled carets. The variable-advance sweep includes accepted edits and rejection.
+A retained-generation fixture verifies source independence across subsequent
+mutations and source destruction.
+
+A further 100 dispersed edits test shared production storage. Every generation
+matches fresh codepoints, properties, glyphs, clusters, both caret affinities,
+hit tests, selection rectangles, render callbacks and row bounds. The test checks
+that unchanged prefixes retain the actual source block, and that geometry reads
+leave all four bulk compatibility caches empty. Original-source ellipsis and
+rebuild operations preserve descendants, which survive source destruction.
+Explicit bulk array calls remain supported afterward.
+
+Set `SKB_NATIVE_ONLY=1` to run the small native/lifetime fixtures without the
+large contextual-script sweeps. The native subset is also run under AddressSanitizer
+with leak detection. Real-window typing measurements and acceptance limits are
+recorded in `docs/roadmap/STATUS.md`; shared shapes alone do not remove paragraph
+scans, full row-index copying or general Unicode shaping.

@@ -78,6 +78,7 @@ Run from the editor root:
 ```sh
 ./scripts/test.sh      # headless core + tests/*/haxeon.json projects
 ./scripts/build.sh     # graphical/haxeon.json (UIKit host)
+./scripts/test-skribidi-layout.sh # native layout differential + immutable/shared lifetimes
 ./scripts/ci.sh        # composed gate (M8.3 restores LSP and release stages)
 ./scripts/test-decoration-ui.sh # real retained decoration pixels (Xvfb + Python Pillow)
 ./scripts/benchmark-uikit-typing.sh # delivered input through completed frame; small|10mb|long-line

@@ -24,44 +24,34 @@ Last updated: 2026-10-02.
   while the 1 MiB graphical timing gate waits for an idle host. Their Windows
   implementations remain open. The Pragtical PTY and emulator references are
   present in the available read-only checkout.
-- Exact resume: finish M9.1 strict changed-row invalidation. The layout-session
-  editor caches eligible visible rows in shallow raster passes. Unchanged
-  uniform-tint ASCII rows now retain their glyph revision when their source
-  offsets move; their immutable source metadata is rebased on publication.
-  Colored rows also retain publication identity when relative color coverage
-  stays unchanged. The containing pass still recomposites rows, and
-  fresh Unicode layouts retain glyph-equivalent row publications. The measured
-  parent repaint is
-  a lower-priority cost: guarded same-advance and stable-wrap ASCII edits
-  now reuse row geometry, while changed wrap boundaries still reflow. Recheck the
-  remaining invalidation cases after both standard typing gates passed. Full
-  Unicode edits retain equivalent rows, including source-mapped suffix rows
-  after newline insertion/deletion when exact row-local geometry agrees.
-  Frame bindings now retain persistent text source identity, and row rasters
-  canonicalize local translation so verified moved rows hit the GPU cache.
-  Both ordinary and newline Haxe edits now use one source-mapped chunk
-  window. Unaffected chunk boundaries stay stable; affected chunks grow to
-  128 paragraphs before local splitting. Native phase profiling now identifies
-  array splicing/index repair as the largest measured edit phase. Redundant
-  whole-layout glyph-origin writes were removed; final standard gates pass
-  at 47.24 ms p95 (1 MiB) and 33.59 ms (10 MiB). Earlier failures remain
-  recorded. Native edits now publish independently owned generations, retained
-  through read-only shared owners in UIKit. The ownership gate passes at
-  46.07 ms p95 (1 MiB) and 34.86 ms (10 MiB). Continue the indexed
-  snapshot storage work from ADR 0003. Rendering and geometry now share
-  indexed text/property/glyph/cluster reads inside Skribidi; UIKit row equality
-  and navigation no longer borrow those full arrays. Next: replace the read
-  boundary's materialized arrays with immutable shared shape blocks and pieces,
-  while keeping rendering, caret, hit-test and selection queries on one
-  generation. Then
-  resume fractional-origin, actual app newline raster and decoration audits.
-  Splits still move some rows between native layouts; exact native equality
-  conservatively rejects fractional-origin differences. Preserve the typing,
-  graphical pixel, M8 and browser gates. The benchmark exits nonzero on a
-  missed p95 budget.
-  Preserve M8 and both browser gates.
-- Current follow-on HEADs: Exosuit `b90b309` before this ledger commit;
-  Materia `19d7bc46d` carries row-scoped glyph commands, shallow row raster
+- Exact resume: finish **M9.1**, continuing indexed row geometry and strict
+  changed-row invalidation. Stable-row ASCII edits now retain immutable shape
+  blocks through indexed pieces. Rendering, carets, hit tests, selection and
+  navigation read that same native snapshot. Editor queries do not materialize
+  bulk text/property/glyph/cluster arrays; explicit legacy bulk getters populate
+  separate compatibility caches. Mutations detach shared buffers before writes.
+  The native differential fixture uses shared storage for 20 of 30 edits;
+  changed-wrap edits still materialize for full reflow. Per-paragraph property,
+  width and glyph verification and row-index copying remain O(n); native edit
+  CPU time has not substantially improved. Immediate integration prerequisite:
+  correct NativeKit's rejected input-array annotation and rerun both browser
+  targets. Then implement indexed changed-wrap row reflow and bounded row
+  verification/publication.
+- Unchanged ASCII/color-equivalent rows retain publication revisions after
+  source rebasing. Full Unicode fallback maps unchanged prefix/suffix source
+  ranges and compares exact row-local geometry. Persistent frame text identity
+  and canonical row translation retain verified moved-row rasters. Ordinary and
+  newline edits share a source-mapped chunk window; unaffected chunk boundaries
+  stay stable, with local growth to 128 paragraphs before splitting. Splits still
+  move rows between native layouts. Fractional-origin reuse, actual application
+  newline raster attribution and the strict decoration audit remain open.
+- Current standard typing gates pass: **47.22 ms p95** (1 MiB varied-key) and
+  **47.55 ms p95** (10 MiB repeat-key), each across 30 actual input frames.
+  Prior failures remain recorded. These samples do not establish a universal
+  latency bound. Preserve graphical pixels, M8 and both browser gates; missed
+  p95 budgets still produce nonzero benchmark exits.
+- Current follow-on HEADs: Exosuit `3f692b4` before this ledger commit;
+  Materia `40fae154a` carries row-scoped glyph commands, shallow row raster
   caching, rebased source metadata, a parent repaint cost regression, and the
   Skribidi bulk-copy and guarded variable-width row-geometry reuse slices. The
   existing dirty Haxeon/NativeKit gitlinks and UIKit TextInputBridge edit in
@@ -107,6 +97,73 @@ Last updated: 2026-10-02.
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M9.1 — shared immutable shape storage on stable-row edits
+
+- Skribidi `b552598` retains decoded text, properties, glyphs and clusters in
+  reference-counted shape blocks. Indexed generations retain block ranges,
+  coalesce adjacent ranges into the same block and rebase glyph/cluster indexes
+  during reads. No complete ancestor layout is retained by a piece. The native
+  geometry boundary serves rendering, carets, hit tests, selections and navigation
+  from the current row index and shared shapes. Materia `40fae154a` pins the fork.
+- Validated unchanged-advance or stable-wrap ASCII edits leave the complete
+  text/property/glyph/cluster arrays absent. Renderer and culling walks use row
+  cursors; advance-only geometry avoids calculating unused glyph origins.
+  Explicit bulk compatibility calls populate separate caches, preserving the
+  existing array API. Changed-wrap edits still materialize for full line reflow,
+  and unsupported Unicode still uses the complete-layout path.
+- Mutable rebuilds release shared storage before writing and reuse unique
+  buffers. The internal ellipsis operation also preserves shared buffers through
+  copy-on-write, including its reallocations. The constructor's public lifetime
+  contract now permits shared buffers while guaranteeing source independence.
+- The production differential regression performs **100 dispersed edits**, with
+  replacements, insertions and deletions. It compares indexed text/properties,
+  clusters, glyph positions, both caret affinities, hit tests, selections,
+  rendered glyphs, row metrics and culling bounds with fresh layouts. It checks
+  actual prefix-block identity and absent bulk caches after geometry queries;
+  sources are destroyed after edits, and the original is mutated by ellipsis
+  and rebuilt while descendants survive. Legacy bulk calls also remain valid.
+- Native-only AddressSanitizer/leak detection passes, including the shared
+  ellipsis regression: `/tmp/exosuit-shared-shape-ellipsis-asan.log`. Native
+  text-engine, ABI, frame resources and renderer checks pass. Graphical build
+  and real decoration pixels pass, including typing/undo and wrapped navigation:
+  `/tmp/exosuit-shared-shape-final-render.log`,
+  `/tmp/exosuit-shared-shape-final-decoration.log`.
+- The full differential probe passes 240 accepted/one rejected sweep cases,
+  immutable lifetime checks and repeated 4,096-/1 MiB-codepoint edits. Of 30
+  edits in each repeated fixture, **20 share shape storage**, while 10 require
+  materialization. The 1 MiB native edit averages **16.53 ms CPU**, comparable
+  to the prior materialized probe's 15.85 ms; this is not a speedup claim.
+  Artifact: `/tmp/exosuit-shared-shape-final-probe.log`.
+- Standard gates pass across 30 input frames each: 1 MiB varied-key
+  **47.22 ms p95**, 57.87 ms maximum, `/tmp/exosuit-shared-shape-1mb`;
+  10 MiB repeat-key **47.55 ms p95**, 52.11 ms maximum,
+  `/tmp/exosuit-shared-shape-10mb`. Earlier failures remain recorded.
+- `scripts/test-skribidi-layout.sh` now builds and runs the full differential
+  probe from a fresh default build directory. It passes and is required by
+  composed CI after the graphical build. Shell syntax checks pass. Artifact:
+  `/tmp/exosuit-shared-shape-required-test.log`.
+- The composed gate passes compiler, headless, graphical, real LSP, workflow
+  and decoration stages, then exits nonzero at release input validation. The
+  only dirty path within Materia's release-checked UIKit/EditorKit scope is the
+  pre-existing `uikit/haxe/nativekit/ui/core/TextInputBridge.hx`; it remains
+  untouched. Artifact: `/tmp/exosuit-shared-shape-ci.log`. This run does not
+  reaccept the complete composed/release gate.
+- The independent browser gate fails before guest/host compilation at NativeKit
+  interface generation. Direct wasm32 audit exposes `E3001` at
+  `nativekit_accessibility.h:494`: parameter `ranges` uses the field-oriented
+  `NK_BORROWED_ARRAY(range_count)` annotation, while function input arrays have
+  the distinct `NK_IN_ARRAY(count)` contract. The current header fails on both
+  wasm32 targets before UIKit/Skribidi are reached. No compiler or NativeKit
+  source workaround was added. Artifacts:
+  `/tmp/exosuit-shared-shape-web.log`,
+  `/tmp/exosuit-shared-shape-nativekit-audit.log`.
+- Next: correct and verify the NativeKit input-array annotation to restore the
+  browser gate, then remove materialization from changed-wrap reflow and bound
+  row work.
+  Full row verification/index copying, prepared-vector rebasing, Unicode
+  incremental shaping and strict invalidation remain unfinished. M9.1 and the
+  complete follow-on goal remain open.
 
 ### M9.1 — common indexed reads for native geometry and rendering
 

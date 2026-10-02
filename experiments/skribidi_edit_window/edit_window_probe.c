@@ -7,6 +7,7 @@
 #include <time.h>
 #include "skribidi/skb_font_collection.h"
 #include "skribidi/skb_layout.h"
+#include "skb_layout_internal.h"
 
 typedef struct {
     const skb_layout_t *layout;
@@ -902,6 +903,7 @@ static int run_native_ascii_edit(skb_temp_alloc_t *temp,
                                                     (skb_attribute_set_t){0});
     int valid = edited != NULL;
     double elapsed = 0.;
+    int shared_edits = 0;
     for (int edit = 0; edit < 30 && valid; ++edit) {
         const int position = length / 2 + edit / 2;
         int start = position, end = position;
@@ -924,6 +926,10 @@ static int run_native_ascii_edit(skb_temp_alloc_t *temp,
         valid = skb_layout_try_edit_ascii(edited, temp, start, end, inserted, -1);
         if (!valid) printf("native ASCII rejected edit %d\n", edit);
         elapsed += (double)(clock() - begin) * 1000. / CLOCKS_PER_SEC;
+        if (edited->shape_pieces_count) {
+            ++shared_edits;
+            valid &= !edited->glyphs && !edited->clusters && !edited->text && !edited->text_props;
+        }
         skb_layout_t *fresh = skb_layout_create_utf8(temp, &params, text, -1,
                                                        (skb_attribute_set_t){0});
         valid &= fresh && same_cluster_metadata(edited, fresh) &&
@@ -976,8 +982,8 @@ static int run_native_ascii_edit(skb_temp_alloc_t *temp,
         if (!valid)
             printf("native ASCII layout mismatch after edit %d\n", edit);
     }
-    printf("native ASCII %d-codepoint edit: 30 updates %.3f ms mean CPU, %s\n",
-           length, elapsed / 30., valid ? "valid" : "FAILED");
+    printf("native ASCII %d-codepoint edit: 30 updates, %d shared, %.3f ms mean CPU, %s\n",
+           length, shared_edits, elapsed / 30., valid ? "valid" : "FAILED");
     skb_layout_destroy(edited);
     free(text);
     return valid;
@@ -1168,6 +1174,129 @@ static int run_immutable_ascii_generations(skb_temp_alloc_t *temp,
     return valid;
 }
 
+typedef struct {
+    skb_rect2_t rectangles[64];
+    int count, valid;
+} selection_capture_t;
+
+static void capture_selection(skb_rect2_t rect, void *context) {
+    selection_capture_t *capture = context;
+    if (capture->count == 64) { capture->valid = 0; return; }
+    capture->rectangles[capture->count++] = rect;
+}
+
+static int same_indexed_geometry(const skb_layout_t *indexed, const skb_layout_t *fresh) {
+    int valid = same_cluster_metadata(indexed, fresh) &&
+                skb_layout_get_text_count(indexed) == skb_layout_get_text_count(fresh) &&
+                skb_layout_get_lines_count(indexed) == skb_layout_get_lines_count(fresh);
+    const int count = skb_layout_get_text_count(indexed);
+    for (int i = 0; i < count && valid; ++i) {
+        const skb_glyph_t a = skb_layout_get_glyph_at(indexed, i);
+        const skb_glyph_t b = skb_layout_get_glyphs(fresh)[i];
+        const skb_text_property_t p = skb_layout_get_text_property_at(indexed, i);
+        const skb_text_property_t q = skb_layout_get_text_properties(fresh)[i];
+        valid = skb_layout_get_text_at(indexed, i) == skb_layout_get_text(fresh)[i] &&
+                a.gid == b.gid && a.cluster_idx == b.cluster_idx &&
+                a.advance_x == b.advance_x && fabsf(a.offset_x - b.offset_x) < .001f &&
+                fabsf(a.offset_y - b.offset_y) < .001f &&
+                p.flags == q.flags && p.script == q.script;
+        for (int affinity = SKB_AFFINITY_TRAILING; affinity <= SKB_AFFINITY_LEADING && valid; ++affinity) {
+            const skb_text_position_t position = {i, affinity};
+            const skb_caret_info_t x = skb_layout_get_caret_info_at(indexed, position);
+            const skb_caret_info_t y = skb_layout_get_caret_info_at(fresh, position);
+            valid = fabsf(x.x - y.x) < .001f && fabsf(x.y - y.y) < .001f &&
+                    x.ascender == y.ascender && x.descender == y.descender;
+        }
+    }
+    const skb_layout_line_t *a = skb_layout_get_lines(indexed);
+    const skb_layout_line_t *b = skb_layout_get_lines(fresh);
+    for (int row = 0; row < skb_layout_get_lines_count(indexed) && valid; ++row) {
+        valid = a[row].text_range.start == b[row].text_range.start &&
+                a[row].text_range.end == b[row].text_range.end &&
+                same_bounds(a[row].bounds, b[row].bounds) &&
+                same_bounds(a[row].culling_bounds, b[row].culling_bounds) &&
+                same_bounds(a[row].common_glyph_bounds, b[row].common_glyph_bounds);
+        for (float x = a[row].bounds.x - 1; x <= a[row].bounds.x + a[row].bounds.width + 1 && valid; x += 7) {
+            const skb_text_position_t p = skb_layout_hit_test(indexed, SKB_MOVEMENT_CARET, x, a[row].baseline);
+            const skb_text_position_t q = skb_layout_hit_test(fresh, SKB_MOVEMENT_CARET, x, b[row].baseline);
+            valid = p.offset == q.offset && p.affinity == q.affinity;
+        }
+    }
+    visual_t actual[320], expected[320];
+    visual_capture_t ac = {.out=actual, .capacity=320, .valid=1};
+    visual_capture_t bc = {.out=expected, .capacity=320, .valid=1};
+    valid &= append_visual(&ac, indexed, 0, count, 0, 0) &&
+             append_visual(&bc, fresh, 0, count, 0, 0) && ac.count == bc.count;
+    for (int i = 0; i < ac.count && valid; ++i)
+        valid = actual[i].start == expected[i].start && actual[i].end == expected[i].end &&
+                actual[i].gid == expected[i].gid && fabsf(actual[i].x - expected[i].x) < .001f &&
+                fabsf(actual[i].y - expected[i].y) < .001f;
+    const skb_text_range_t range = {{13, SKB_AFFINITY_TRAILING}, {count - 17, SKB_AFFINITY_LEADING}};
+    selection_capture_t sc = {.valid=1}, tc = {.valid=1};
+    skb_layout_iterate_text_range_bounds(indexed, range, capture_selection, &sc);
+    skb_layout_iterate_text_range_bounds(fresh, range, capture_selection, &tc);
+    valid &= sc.valid && tc.valid && sc.count == tc.count;
+    for (int i = 0; i < sc.count && valid; ++i)
+        valid = same_bounds(sc.rectangles[i], tc.rectangles[i]);
+    return valid;
+}
+
+static int run_shared_shape_generations(skb_temp_alloc_t *temp, const skb_layout_params_t *base) {
+    skb_layout_params_t params = *base;
+    const skb_attribute_t attrs[] = {skb_attribute_make_font_size(15.f),
+                                     skb_attribute_make_text_wrap(SKB_WRAP_WORD_CHAR)};
+    params.layout_attributes = SKB_ATTRIBUTE_SET_FROM_STATIC_ARRAY(attrs);
+    params.layout_width = 143.f;
+    char text[320]; memset(text, 'b', 250); text[250] = 0;
+    int length = 250, valid = 1;
+    skb_layout_t *original = skb_layout_create_utf8(temp, &params, text, -1, (skb_attribute_set_t){0});
+    skb_layout_t *current = original;
+    for (int step = 0; step < 100 && valid; ++step) {
+        const int start = (step * 83) % (length - 1);
+        const int end = start + (step % 3 == 1 ? 0 : 1);
+        const char *replacement = step % 3 == 2 ? "" : (step % 3 == 0 ? "d" : "b");
+        const int inserted = (int)strlen(replacement);
+        memmove(text + start + inserted, text + end, (size_t)(length - end + 1));
+        memcpy(text + start, replacement, (size_t)inserted);
+        length += inserted - (end - start);
+        const skb__shape_block_t *prefix_block = current->shape_pieces_count
+            ? current->shape_pieces[0].block : current->shape_block;
+        skb_layout_t *next = skb_layout_create_ascii_edit(current, temp, start, end, replacement, -1);
+        valid = next && next->shape_pieces_count > 0 && !next->glyphs && !next->clusters &&
+                !next->text && !next->text_props;
+        if (valid && start > 16)
+            valid = next->shape_pieces[0].block == prefix_block;
+        if (current != original) skb_layout_destroy(current);
+        current = next;
+        if (step == 0) valid &= skb_layout_add_ellipsis_to_last_line(original);
+        if (step == 50) skb_layout_set_utf8(original, temp, &params, "rebuilt", -1, (skb_attribute_set_t){0});
+        skb_layout_t *fresh = skb_layout_create_utf8(temp, &params, text, -1, (skb_attribute_set_t){0});
+        if (valid) valid = same_indexed_geometry(current, fresh);
+        if (valid) valid = !current->shape_cache->text && !current->shape_cache->properties &&
+                           !current->shape_cache->glyphs && !current->shape_cache->clusters;
+        if (!valid) printf("shared native shape failed at step %d, pieces=%d\n", step,
+                           current ? current->shape_pieces_count : -1);
+        skb_layout_destroy(fresh);
+    }
+    skb_layout_destroy(original);
+    if (valid) {
+        skb_layout_t *fresh = skb_layout_create_utf8(temp, &params, text, -1, (skb_attribute_set_t){0});
+        valid = same_indexed_geometry(current, fresh);
+        const skb_glyph_t *bulk = skb_layout_get_glyphs(current);
+        valid &= bulk == skb_layout_get_glyphs(current) && same_cluster_metadata(current, fresh);
+        for (int i = 0; i < length && valid; ++i)
+            valid = bulk[i].gid == skb_layout_get_glyphs(fresh)[i].gid &&
+                    skb_layout_get_text(current)[i] == (uint8_t)text[i] &&
+                    skb_layout_get_clusters(current)[i].text_offset == i &&
+                    skb_layout_get_text_properties(current)[i].flags ==
+                        skb_layout_get_text_properties(fresh)[i].flags;
+        skb_layout_destroy(fresh);
+    }
+    skb_layout_destroy(current);
+    printf("shared native shape generations: 100 dispersed edits, %s\n", valid ? "valid" : "FAILED");
+    return valid;
+}
+
 int main(void) {
     skb_temp_alloc_t *temp = skb_temp_alloc_create(1024);
     skb_font_collection_t *fonts = skb_font_collection_create();
@@ -1186,7 +1315,8 @@ int main(void) {
     };
     if (getenv("SKB_NATIVE_ONLY")) {
         int native_ok = run_native_ascii_edit(temp, &params, 4096) &&
-                        run_immutable_ascii_generations(temp, &params);
+                        run_immutable_ascii_generations(temp, &params) &&
+                        run_shared_shape_generations(temp, &params);
         skb_font_collection_destroy(fonts);
         skb_temp_alloc_destroy(temp);
         return native_ok ? 0 : 1;
@@ -1256,6 +1386,7 @@ int main(void) {
     passed &= run_native_ascii_edit(temp, &params, 1024 * 1024);
     passed &= run_native_ascii_sweep(temp, &params);
     passed &= run_immutable_ascii_generations(temp, &params);
+    passed &= run_shared_shape_generations(temp, &params);
     passed &= mixed_passed == mixed_total;
     skb_font_collection_destroy(fonts);
     skb_temp_alloc_destroy(temp);

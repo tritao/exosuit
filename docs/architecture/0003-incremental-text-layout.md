@@ -1,7 +1,7 @@
 # ADR 0003: Indexed edit-range text layout
 
 Status: partially implemented, 2026-10-02. A guarded ASCII reuse path is
-active; indexed composite snapshots remain experimental.
+active; indexed shared shape storage is active for validated stable-row ASCII edits.
 
 ## Implemented slice
 
@@ -9,11 +9,13 @@ Skribidi now accepts a bounded lowercase ASCII insertion, deletion, or
 replacement when the existing layout has one LTR run, one glyph per codepoint,
 and simple glyph positions. It reshapes a 16-codepoint context, verifies
 unchanged glyph and text-property guards at both seams, reuses the shaped
-prefix and suffix, and runs native line layout on one materialized generation.
-UIKit serves rendering, carets, hit tests, and selections from that same
-generation. Unsupported edits use the existing complete-layout path. This
+prefix and suffix, and publishes one native generation. Validated stable-row
+edits retain indexed ranges into immutable shape blocks; edits requiring full
+line reflow still materialize the shaped arrays. UIKit serves rendering, carets,
+hit tests, and selections from that same generation. Unsupported edits use the existing complete-layout path. This
 avoids whole-paragraph decoding, itemization, and shaping for the measured
-case, though copying the shaped arrays and reflowing lines still cost O(n).
+case. Stable-row edits avoid full shaped-array copies, but row verification
+and row-index copying still cost O(n); changed-wrap edits still materialize.
 
 The guarded path can also reuse wrapped row geometry. An equal-length edit
 retains it when the local shaped window has identical advances and break
@@ -25,17 +27,23 @@ Moved wrap boundaries still use full line reflow. The splice repairs cluster
 indexes only when a copied span changes its offset. Successful geometry reuse
 avoids clearing all glyph origins beforehand; equal-length reuse restores only
 the contextual window's origins. A failed guard clears shaping-local origins
-before complete line reflow. Both cases
-continue to materialize a complete native layout generation; indexed
-composite snapshots remain the zero-copy direction.
+before complete line reflow. Successful row guards now retain indexed shape
+pieces instead of materializing full shape arrays. Shifted glyph and cluster
+indexes are calculated at read time. Row geometry remains per generation,
+and the full-reflow case still materializes.
 
 The guarded constructor now returns a new owned generation without mutating
 its source. UIKit retains each native generation through a read-only shared
 owner that also retains the font collection for native destruction. Legacy
 mutable source rebuilds and edits cannot change descendants, and descendants
-remain usable after their sources are destroyed. All current geometry queries
-still read one materialized native generation. This ownership boundary is a
-prerequisite for indexed pieces; it does not yet share shaped-array storage.
+remain usable after their sources are destroyed. All geometry queries read
+one native generation. Indexed stable-row snapshots retain shape blocks
+directly, including small contextual windows, rather than retaining ancestors.
+Legacy rebuilds detach shared buffers before writes. Ellipsis preserves existing
+content by copying shared flat buffers before mutation; discarded-content
+rebuilds simply release their references. Bulk array getters populate separate
+compatibility caches on explicit request. Editor rendering and geometry queries
+do not populate those caches.
 
 Whole-line background decorations now query visible row rectangles directly
 from UIKit's retained line index. This avoids per-grapheme caret geometry for
@@ -113,11 +121,11 @@ without changing cluster glyphs. Emoji windows can change caret geometry.
 
 ## Decision
 
-Introduce an edit-range update boundary and a composite retained layout in
-UIKit. The editor supplies the changed UTF-8 byte range and replacement bytes;
+Introduce an edit-range update boundary and a composite native layout in
+Skribidi, retained by UIKit. The editor supplies the changed UTF-8 byte range and replacement bytes;
 the native side translates it to codepoint boundaries using its indexed text
 storage. A composite snapshot owns immutable text/property pieces, shaped
-cluster pieces, a visual-row index, and the Skribidi layouts that back those
+cluster pieces, a visual-row index, and the immutable blocks that back those
 pieces. All rendering and geometry methods read the same snapshot generation.
 
 An edit first splices the text and shapes a contextual window. The fast path
@@ -160,12 +168,31 @@ internal indexed boundary. Public value-returning indexed reads serve UIKit's
 row equivalence checks, navigation and diagnostics without borrowing array
 elements. Line and run geometry remain owned by the same native generation.
 
-The boundary currently reads materialized arrays. Next, immutable shape blocks
-and indexed pieces must replace the underlying reads; mutable legacy rebuilds
-must detach from shared blocks before writes. The existing bulk array getters
+The boundary reads either materialized arrays or indexed immutable shape blocks.
+Stable-row edits use indexed pieces; mutable legacy rebuilds detach from shared
+blocks before writes. Changed-wrap edits still materialize for full reflow. The existing bulk array getters
 remain compatibility operations, and the UIKit text engine no longer uses them
 for text, properties, glyphs or clusters. Do not activate pieces through only
 the glyph-render path or retain a complete previous layout for each row.
+
+## Shared storage implementation boundary
+
+Shape blocks own decoded codepoints, text properties, glyphs and clusters.
+An indexed ASCII snapshot holds retained ranges into those blocks rather than
+retaining complete ancestor layouts. Adjacent ranges into the same block
+coalesce. Mutable legacy rebuilds detach shared buffers before writing;
+reference counts release blocks when no snapshot needs them. The validated
+one-glyph-per-codepoint case rebases logical cluster indexes during reads.
+
+Row geometry remains per generation. For the initial activation, unchanged
+advances or verified stable wrap boundaries permit shared shape storage;
+other accepted ASCII edits materialize for the existing full line reflow.
+Unsupported Unicode continues through full layout. Indexed glyph positions
+come from the snapshot's row index and advances, not a previous generation's
+absolute glyph origins. Bulk array compatibility reads may populate a separate
+cache; rendering and geometry must not request that cache. Differential tests
+must prove both answers and absence of full shape arrays on indexed queries.
+This initial activation does not implement pending-row reflow or complete M9.1.
 
 ## Verification before activation
 

@@ -7,6 +7,7 @@ haxeon_root=${HAXEON_ROOT:-"$root_dir/../haxeon"}
 (cd "$haxeon_root" && ./scripts/test.sh)
 "$root_dir/scripts/test.sh"
 "$root_dir/scripts/build.sh"
+"$root_dir/scripts/test-skribidi-layout.sh"
 "$root_dir/scripts/test-haxeon-lsp.sh"
 "$root_dir/scripts/test-uikit-workflow.sh"
 "$root_dir/scripts/test-decoration-ui.sh"
