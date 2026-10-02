@@ -82,3 +82,24 @@ for rows, minimum in ((selected, 10), (typed, 1)):
     assert max(count for y, count in rows.items() if y <= middle) >= minimum, "missing first selection/caret"
     assert max(count for y, count in rows.items() if y > middle) >= minimum, "missing second selection/caret"
 print("PASS: actual additional selection and multi-caret pixels after transactional typing/undo")
+
+# Closing a multiline comment must repair the following keyword row. Undo
+# restores its comment color after both generations have been rendered.
+def keyword_rows(path):
+    image = Image.open(path).convert("RGB")
+    rows = {}
+    for y in range(115, min(300, image.height)):
+        count = sum(1 for x in range(225, image.width)
+                    if (lambda rgb: rgb[0] > 130 and rgb[1] < 160 and rgb[2] > 150
+                        and rgb[2] > rgb[1] * 1.2)(image.getpixel((x, y))))
+        if count >= 2:
+            rows[y] = count
+    return rows
+
+syntax_open = keyword_rows(root / "syntax-open/frame.png")
+syntax_closed = keyword_rows(root / "syntax-closed/frame.png")
+syntax_restored = keyword_rows(root / "syntax-restored/frame.png")
+assert syntax_open and syntax_closed, "missing syntax keyword pixels"
+assert min(syntax_closed) < min(syntax_open) - 20, "closing comment did not recolor the following row"
+assert syntax_restored == syntax_open, "undo left stale keyword colors inside the multiline comment"
+print("PASS: actual multiline syntax colors repair after boundary edit and undo")

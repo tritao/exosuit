@@ -28,6 +28,14 @@ class DecorationSmokeApp extends ExosuitApp {
 		super(context.fonts, null, context, path);
 		this.phase = phase;
 		installMarks(0);
+		if (phase == "syntax-open" || phase == "syntax-closed" || phase == "syntax-restored") {
+			var view = host.activeView();
+			if (view == null) throw "syntax fixture has no view";
+			host.getPluginDecorations().removeOwner("smoke");
+			host.setDocumentSearchMatches([]);
+			view.document.buffer.replaceAllText("/*\nreturn 42;\n*/\nreturn 43;", view.selection);
+		}
+
 		if (phase == "multi-selected" || phase == "multi-typed" || phase == "multi-pasted" || phase == "multi-navigation" || phase == "multi-wrapped") {
 			var view = host.activeView();
 			if (view == null) throw "multi fixture has no view";
@@ -94,6 +102,16 @@ class DecorationSmokeApp extends ExosuitApp {
 				host.getPluginDecorations().removeOwner("smoke");
 				host.setDocumentSearchMatches([]);
 			}
+		}
+		if (frames == 4 && (phase == "syntax-closed" || phase == "syntax-restored")) {
+			var view = host.activeView();
+			if (view == null) throw "syntax fixture disappeared";
+			view.document.buffer.replaceRange(view.selection, new BufferPosition(0, 2), new BufferPosition(0, 2), " */");
+		}
+		if (frames == 5 && phase == "syntax-restored") {
+			var view = host.activeView();
+			if (view == null) throw "syntax undo fixture disappeared";
+			view.undo();
 		}
 		var root = super.submit(frame);
 		if (phase == "selection" && frames == 4) {

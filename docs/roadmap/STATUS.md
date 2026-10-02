@@ -2,6 +2,17 @@
 
 Last updated: 2026-10-02.
 
+## M9.1 — multiline syntax acceptance fixture in progress, 2026-10-02
+
+- The real decoration fixture now warms a multiline comment, closes its
+  opening boundary, and renders undo in a separate phase. Pixel assertions
+  require the following row's keyword color to appear after the boundary edit
+  and return to the original comment-colored rendering after undo.
+- Verification passes (`/tmp/exosuit-multiline-syntax-ui.log`, exit 0), with
+  artifacts retained in `/tmp/exosuit-multiline-syntax-ui`. Actual multiline
+  keyword pixels repair after the edit and undo, alongside all previous
+  decoration checks. Resume with the M9.1 requirement audit, then M9.2.
+
 ## M9.1 — row color invalidation audit, 2026-10-02
 
 - Final decoration smoke passes (`/tmp/exosuit-shared-rows-decoration-final.log`,
