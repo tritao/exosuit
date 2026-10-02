@@ -23,6 +23,18 @@ if [[ ${1:-} == --drive ]]; then
         sleep .1
     done
     rg -q 'exosuit: first frame ready' "$fixture/app.log"
+    python3 - "$fixture" "$app" "$root_dir" <<'PY_RUNTIME'
+import hashlib, json, pathlib, sys
+fixture, process, source = pathlib.Path(sys.argv[1]), sys.argv[2], pathlib.Path(sys.argv[3])
+expected = (source / "graphical/build/host/native/exosuit-ui-native/libnativekit_ui.so").resolve()
+paths = {line.split(maxsplit=5)[-1].strip() for line in pathlib.Path(f"/proc/{process}/maps").read_text().splitlines()
+         if "libnativekit_ui.so" in line}
+assert str(expected) in paths and len(paths) == 1, f"unexpected loaded UIKit library: {paths}"
+digest = hashlib.sha256(expected.read_bytes()).hexdigest()
+inputs = json.loads((fixture / "build-inputs.json").read_text())
+assert digest == inputs["binaries"]["uikit"]["sha256"], "UIKit binary changed during launch"
+(fixture / "loaded-runtime.json").write_text(json.dumps({"uikit": {"path": str(expected), "sha256": digest}}, indent=2) + "\n")
+PY_RUNTIME
     xdotool windowfocus --sync "$window"
     xdotool mousemove --window "$window" 450 132 click 1
     sleep .5
@@ -50,6 +62,25 @@ cleanup() {
     rm -rf -- "$fixture"
 }
 trap cleanup EXIT
+# The decoration test builds a separate app; always refresh this measured app.
+"$root_dir/scripts/build.sh" > "$fixture/build.log" 2>&1
+python3 - "$fixture" "$root_dir" <<'PY_BUILD'
+import hashlib, json, pathlib, subprocess, sys
+fixture, source = map(pathlib.Path, sys.argv[1:])
+def revision(directory):
+    return {"head": subprocess.check_output(["git", "-C", str(directory), "rev-parse", "HEAD"], text=True).strip(),
+            "dirty": bool(subprocess.check_output(["git", "-C", str(directory), "status", "--porcelain"], text=True))}
+def artifact(path):
+    path = path.resolve()
+    return {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+vendor = source.parent / "uikit/vendor/skribidi"
+inputs = {"repositories": {"exosuit": revision(source), "materia": revision(source.parent), "skribidi": revision(vendor)},
+          "binaries": {"bytecode": artifact(source / "graphical/build/host/main.hl"),
+                       "uikit": artifact(source / "graphical/build/host/native/exosuit-ui-native/libnativekit_ui.so")},
+          "layoutSources": {name: artifact(vendor / name) for name in
+                            ("src/skb_layout.c", "src/skb_layout_internal.h", "include/skribidi/skb_layout.h")}}
+(fixture / "build-inputs.json").write_text(json.dumps(inputs, indent=2) + "\n")
+PY_BUILD
 size=${TYPING_UI_FIXTURE:-small}
 # Keep enough capture time and distinct frames for each measured fixture.
 case "$size" in
@@ -103,7 +134,9 @@ result = dict(fixture=sys.argv[2], cpu=cpu, bytes=(root / "input.txt").stat().st
               nativeRenderP95Ms=p95_ms("nativeRenderSeconds"),
               frameGcP95Ms=p95_ms("frameGcSeconds"),
               maxMs=samples[-1], budgetMs=50, withinBudget=p95 < 50,
-              platform=platform.platform())
+              platform=platform.platform(),
+              build=json.loads((root / "build-inputs.json").read_text()),
+              loadedRuntime=json.loads((root / "loaded-runtime.json").read_text()))
 (root / "result.json").write_text(json.dumps(result, indent=2) + "\n")
 print(json.dumps(result, indent=2))
 if not result["withinBudget"]:
