@@ -75,7 +75,6 @@ class UiWorkbenchHost implements WorkbenchHost {
 	final pluginStatusItems:PluginStatusRegistry = new PluginStatusRegistry();
 	final pluginPanels:PluginPanelRegistry = new PluginPanelRegistry();
 	final notifications:NotificationCenter = new NotificationCenter();
-	final selections:Map<Int, BufferSelection> = new Map();
 	final tabList:Array<UiDocumentView> = [];
 	public var tabs(get, never):Array<UiDocumentView>;
 	public var activeIndex(default, null):Int = -1;
@@ -132,6 +131,12 @@ class UiWorkbenchHost implements WorkbenchHost {
 	function get_tabs():Array<UiDocumentView>
 		return tabList;
 
+	public function dispose():Void {
+		for (view in tabList) view.dispose();
+		tabList.resize(0);
+		activeIndex = -1;
+	}
+
 	public function activeView():Null<UiDocumentView>
 		return activeIndex >= 0 && activeIndex < tabList.length ? tabList[activeIndex] : null;
 
@@ -155,13 +160,6 @@ class UiWorkbenchHost implements WorkbenchHost {
 			}
 	}
 
-	function selectionFor(document:Document):BufferSelection {
-		var existing = selections.get(document.id);
-		if (existing != null) return existing;
-		var created = new BufferSelection();
-		selections.set(document.id, created);
-		return created;
-	}
 
 	public function setSelectedExplorerPath(path:Null<String>):Void
 		selectedExplorerPath = path;
@@ -271,7 +269,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 				setActiveIndex(index);
 				return tabList[index];
 			}
-		var view = new UiDocumentView(document, selectionFor(document));
+		var view = new UiDocumentView(document, new BufferSelection());
 		tabList.push(view);
 		setActiveIndex(tabList.length - 1);
 		return view;
@@ -315,7 +313,8 @@ class UiWorkbenchHost implements WorkbenchHost {
 
 	public function closeActiveTab(force:Bool = false):Bool {
 		if (activeIndex < 0) return false;
-		tabList.splice(activeIndex, 1);
+		var removed = tabList.splice(activeIndex, 1);
+		removed[0].dispose();
 		activeIndex = tabList.length == 0 ? -1 : (activeIndex >= tabList.length ? tabList.length - 1 : activeIndex);
 		focus.activate(activeView());
 		requestFrame();
@@ -340,6 +339,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 	}
 
 	public function restoreSessionLines(lines:Array<String>, ?resolver:(String, String) -> Null<Document>):Void {
+		for (view in tabList) view.dispose();
 		tabList.resize(0);
 		activeIndex = -1;
 		var restoreActive = -1;
@@ -348,7 +348,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 			if (fields.length != 9 || fields[0] != "T") continue;
 			var document = resolver == null ? null : resolver(fields[7], fields[8]);
 			if (document == null) continue;
-			var view = new UiDocumentView(document, selectionFor(document));
+			var view = new UiDocumentView(document, new BufferSelection());
 			var line = Std.parseInt(fields[3]), column = Std.parseInt(fields[4]);
 			if (line != null && column != null) view.restoreCursor(line, column);
 			tabList.push(view);

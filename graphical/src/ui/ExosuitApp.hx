@@ -122,7 +122,7 @@ class ExosuitApp implements DesktopUiApplication {
 		}, null, null, this.capabilities);
 		host = capturedHost;
 		host.caretRectProvider = function() {
-			var active = host.activeDocument();
+			var active = host.activeView();
 			if (active == null) return null;
 			var pane = editorPanes.get(active.id);
 			return pane == null ? null : pane.caretRect;
@@ -293,6 +293,7 @@ class ExosuitApp implements DesktopUiApplication {
 			terminalPane = null;
 		}
 		application.shutdown();
+		host.dispose();
 		if (desktop != null) desktop.shutdown();
 		ui.dispose();
 	}
@@ -431,7 +432,7 @@ class ExosuitApp implements DesktopUiApplication {
 			// Reused across frames (not rebuilt each `view()` call) so its
 			// `BufferSelection` (shared with `documentView`, see `UiDocumentView`'s
 			// doc comment) persists between edits instead of resetting.
-			var pane = editorPanes.get(document.id);
+			var pane = editorPanes.get(documentView.id);
 			if (pane == null) {
 				pane = new EditorPane(document, theme, requestFrame, documentView.selection, editorPalette,
 					host.getPluginDecorations(), documentView.decorationSearchMatches, documentView.searchDecorationRevision);
@@ -454,7 +455,7 @@ class ExosuitApp implements DesktopUiApplication {
 						else requestFrame();
 					}
 				};
-				editorPanes.set(document.id, pane);
+				editorPanes.set(documentView.id, pane);
 			}
 			items.push(new TabItem("doc:" + document.id, (document.dirty ? "* " : "") + document.title,
 				pane));
@@ -517,7 +518,7 @@ class ExosuitApp implements DesktopUiApplication {
 	function pruneStaleEditorPanes(tabs:Array<UiDocumentView>):Void {
 		for (id in editorPanes.keys()) {
 			var stillOpen = false;
-			for (documentView in tabs) if (documentView.document.id == id) { stillOpen = true; break; }
+			for (documentView in tabs) if (documentView.id == id) { stillOpen = true; break; }
 			if (!stillOpen) editorPanes.remove(id);
 		}
 	}

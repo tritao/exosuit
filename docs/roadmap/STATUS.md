@@ -2,6 +2,52 @@
 
 Last updated: 2026-10-02.
 
+## M9.2 — split-pane ownership foundation verified, 2026-10-02
+
+- Exosuit was clean at `c3fe35e` before this slice. Menus are committed as
+  `5f1c320`; NativeKit `5067eba0` and Materia `5cebf86d6` gates passed.
+- Removed the host's document-global selection map. Each UiDocumentView owns
+  its selection and a buffer subscription, following the existing DocumentView
+  passive change transformation. Shared text stays in the Document buffer.
+  Active edit cursor placement remains owned by TextBuffer's transaction.
+- Closing a tab, restoring sessions and shutting down release the subscriptions;
+  disposal is idempotent. A real UI fixture exercises independent views on one
+  document, active/passive cursor behavior across multiline insert and undo,
+  and retirement of the disposed view's callback.
+- Selection ownership UI gate passed under handle 96154 (exit 0), log
+  `/tmp/exosuit-pane-selection-model-ui.log`. Added stable UiDocumentView IDs
+  and switched retained EditorPane/caret lookup and retirement to view IDs.
+  The identity fixture also asserts two views sharing a document differ in ID.
+- Identity-only UI and graphical build passed. Review caught an over-broad
+  replacement in the tab-selection callback: tab keys encode document IDs,
+  not view IDs. Stopped the unfinished headless chain (handle 11475, exit 143)
+  before source edits; restored `documentView.document.id == id`.
+- Extended the fixture to reopen a document after creating/discarding extra
+  views, then activate that tab with real pointer events. It requires active
+  view ID and document ID to differ, so equal counters cannot conceal the bug.
+- Reopened-view pointer regression passes, followed by the complete UI suite
+  and final graphical build. Headless suite and Wasm32 browser smoke pass;
+  final Wasm-GC browser check also passes (handle 1276, exit 0). Logs
+  `/tmp/exosuit-pane-ownership-final-{ui,build,headless,web}.log`, UI artifacts
+  `/tmp/exosuit-pane-ownership-final-ui`. All handles are terminal.
+  Split-pane checklist remains open: this verifies ownership, not visible splits.
+- Next: add pane tab membership and scope widget identity per pane, render editor
+  DockWorkspace splits, route split commands through WorkbenchHost, and implement
+  directional focus/movement and close confirmation. WorkspaceSession currently
+  validates only legacy S/T/A lines; DockWorkspace persistence needs an explicit,
+  validated format extension and migration of existing single-pane sessions.
+- Pane audit: UiDocumentView.scrollX/scrollY return zero and restoreScroll is a
+  no-op. Wire retained ScrollController offsets to each view/session. Directional
+  focus must use actual resolved editor-pane rectangles; pane close must retain
+  FileController confirmation and exclude documents still shown in other panes.
+  Dock chrome must not bypass lifecycle confirmation. Keep shared buffers and
+  independent view state; do not duplicate document text for splits/persistence.
+- Use the existing shell DockWorkspaceModel for additional editor panels, rather
+  than nesting a second workspace. The renderer already computes pane widths
+  from the outer split tree; one dock snapshot also preserves sidebar/tool
+  geometry consistently. Keep the last active editor pane while a tool/sidebar
+  has focus. Register dynamic editor panel content lazily from pane membership.
+
 ## M9.2 — editor/tab/tree command menus verified, 2026-10-02
 
 - Implemented CommandMenu/CommandMenuEntry with current registry predicates,

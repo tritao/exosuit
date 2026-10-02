@@ -1,6 +1,7 @@
 package ui;
 
 import editor.BufferPosition;
+import editor.BufferSubscription;
 import editor.BufferSelection;
 import editor.Document;
 import editor.EditorActions;
@@ -27,16 +28,26 @@ import view.View;
  * pointer-dispatched to directly (uikit renders `EditorPane`, not this).
  */
 class UiDocumentView extends View {
+	static var nextId:Int = 1;
+	/** Stable identity for this view, independent of the shared document. */
+	public final id:Int;
 	public final document:Document;
 	public final selection:BufferSelection;
+	final bufferSubscription:BufferSubscription;
 	final matches:Array<SearchMatch> = [];
 	var searchRevision:Int = 0;
 
 	public function new(document:Document, selection:BufferSelection) {
 		super(document.title);
+		id = nextId++;
 		this.document = document;
 		this.selection = selection;
+		bufferSubscription = document.buffer.subscribe(function(change) {
+			this.selection.transform(document.buffer, change);
+		});
 	}
+
+	override public function dispose():Void bufferSubscription.release();
 
 	override public function isDirty():Bool
 		return document.dirty;

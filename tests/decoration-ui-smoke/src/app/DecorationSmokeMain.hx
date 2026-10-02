@@ -33,6 +33,34 @@ class DecorationSmokeApp extends ExosuitApp {
 		super(context.fonts, null, context, path);
 		this.phase = phase;
 		installMarks(0);
+		if (phase == "pane-selection-model") {
+			var document = new editor.Document(null, "abc\ndef", new syntax.SyntaxRegistry());
+			var first = new ui.UiDocumentView(document, new BufferSelection());
+			var second = new ui.UiDocumentView(document, new BufferSelection());
+			if (first.id == second.id) throw "shared-document views have the same identity";
+			first.selection.restore(document.buffer, new BufferPosition(0, 1), new BufferPosition(0, 1));
+			second.selection.restore(document.buffer, new BufferPosition(1, 2), new BufferPosition(1, 2));
+			first.textInput("X\n");
+			if (second.cursorLine() != 2 || second.cursorColumn() != 2)
+				throw "passive pane caret did not follow shared edit";
+			if (first.cursorLine() != 1 || first.cursorColumn() != 0)
+				throw "active pane caret was transformed twice";
+			first.undo();
+			if (second.cursorLine() != 1 || second.cursorColumn() != 2)
+				throw "passive pane caret did not follow shared undo";
+			second.dispose();
+			first.selection.restore(document.buffer, new BufferPosition(0, 0), new BufferPosition(0, 0));
+			first.textInput("\n");
+			if (second.cursorLine() != 1 || second.cursorColumn() != 2)
+				throw "disposed pane kept a buffer subscription";
+			first.dispose();
+			menuDocument = host.activeDocument();
+			var reopened = menuDocument;
+			if (reopened == null) throw "identity fixture has no document";
+			host.closeActiveTab(true);
+			host.openDocument(reopened);
+			application.newDocument();
+		}
 		if (StringTools.startsWith(phase, "menu-")) {
 			menuDocument = host.activeDocument();
 			if (menuDocument == null) throw "menu fixture has no document";
@@ -118,6 +146,20 @@ class DecorationSmokeApp extends ExosuitApp {
 
 	override public function submit(frame:LayoutFrame):nativekit.ui.core.RenderNode {
 		frames++;
+		if (phase == "pane-selection-model" && frames == 4) {
+			var previousRoot = ui.root, document = menuDocument;
+			if (previousRoot == null || document == null) throw "identity fixture has no tab";
+			var tab = findEditor(previousRoot, "doc:" + document.id);
+			var geometry = tab == null ? null : tab.resolved;
+			if (geometry == null) throw "identity fixture tab is unresolved";
+			var x = geometry.x + 10.0, y = geometry.y + 8.0;
+			ui.pointerDown(x, y, 0);
+			ui.pointerUp(x, y, 0);
+			var active = host.activeView();
+			if (active == null || active.document != document || active.id == document.id)
+				throw "tab selection confused view identity with document identity";
+			trace("PASS: independent shared-document selections, disposal and reopened-view tab activation");
+		}
 		if (StringTools.startsWith(phase, "menu-") && frames == 4) {
 			var previousRoot = ui.root;
 			var document = menuDocument;
