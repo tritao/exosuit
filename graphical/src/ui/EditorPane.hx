@@ -52,6 +52,7 @@ class EditorPane implements View {
 	public final selection:BufferSelection;
 	final onEdited:Void->Void;
 	public var caretRect(default, null):Null<Rect> = null;
+	public var onContextMenu:Null<nativekit.ui.core.UiEvent->Void> = null;
 	public var onCaretRectChanged:Null<Void->Void> = null;
 	final editorTheme:style.Theme;
 	final decorations:PluginDecorationRegistry;
@@ -286,6 +287,20 @@ class EditorPane implements View {
 		scrollStyle.width = LayoutAxis.grow();
 		scrollStyle.height = LayoutAxis.grow();
 		scrollStyle.background = color(editorTheme.editorBackground);
-		return new ScrollView("editor-scroll:" + document.id, row, scrollStyle).build(context);
+		var node = new ScrollView("editor-scroll:" + document.id, row, scrollStyle).build(context);
+		var requestMenu = function(event:nativekit.ui.core.UiEvent) {
+			var handler = onContextMenu;
+			if (handler == null) return;
+			handler(event);
+			event.preventDefault();
+			event.stopPropagation();
+		};
+		node.on(nativekit.ui.core.UiEventKind.PointerDown, function(event) {
+			if (event.button == 1) requestMenu(event);
+		});
+		node.on(nativekit.ui.core.UiEventKind.KeyDown, function(event) {
+			if (nativekit.ui.core.UiKey.isContextMenuRequest(event.key, event.modifiers)) requestMenu(event);
+		});
+		return node;
 	}
 }

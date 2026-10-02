@@ -2,6 +2,75 @@
 
 Last updated: 2026-10-02.
 
+## M9.2 — editor/tab/tree command menus verified, 2026-10-02
+
+- Implemented CommandMenu/CommandMenuEntry with current registry predicates,
+  omission of unregistered commands and target validation immediately before
+  activation. Editor retains selection; tabs activate their document; tree
+  targets its selected file/project. Stale document/path/project targets retire.
+  Editor, tab and tree support Shift+F10 and Menu; pointer opens on the right button.
+- Exosuit editor Tabs now uses existing Controlled selection mode so context
+  activation of an inactive tab changes the displayed page as well as the core
+  active document. Actions include edit/clipboard/find, tab save/close and tree
+  create/rename/delete, routed through existing confirmation and controller
+  flows. Only command metadata is copied, not document text.
+- Generic UIKit Menu fits viewport width/height, scrolls oversized content and
+  clamps/flips its measured popup. Menu navigation handles arrows before the
+  scroll container, starts on a command and reveals keyboard destinations in
+  transformed coordinates. All-disabled menus retain an Escape target.
+  BuildContext/UiContext provide validated focus-after-layout requests for
+  newly revealed widgets. Queue is cleared on consumption/disposal.
+- Real UI coverage adds 14 menu scenarios, including a retained visual capture,
+  editor/tab/tree pointer and keyboard delivery, document switch, stale action,
+  changed predicate, viewport edge, Escape/outside and dirty-close confirmation.
+  Bounds assertions locate the measured popup panel, not its fullscreen root.
+- Initial fixture/source compilation failures (missing import/fields, nullable
+  resolved geometry reused across pointer callbacks) were corrected using
+  declared fields and checked geometry snapshots; no casts or typing changes.
+  The oversized-menu regression exposed layout/screen coordinate confusion;
+  fixed conversion and assert every navigation step, final visibility and action.
+- Final desktop UI (14 menu scenarios plus existing decoration/popup checks),
+  graphical build and headless suite passed. Updated UIKit framework and all
+  four NativeKit browser integration programs also pass, including ContextMenu
+  key normalization and canvas handoff without stealing external control focus.
+- The stronger composed browser regression exposed two DOM focus issues:
+  deactivating the hidden IME left focus on BODY; returning from the menu to
+  the IME then reported canvas blur as native window focus loss. Select All
+  ran and visibly selected the document, but that spurious event cleared the
+  restored toolkit focus. NativeKit now hands inactive IME focus to canvas and
+  observes non-capturing window focus/blur rather than canvas DOM focus/blur.
+- Fresh composed Wasm32/Wasm-GC verification of this latest focus change is
+  passed under handle 74371 (exit 0), log
+  `/tmp/exosuit-command-menu-window-focus-web.log`, including Select All,
+  ContextMenu-key Escape, resumed typing, save and fresh-session reload.
+- Window focus listeners now have one shared lifetime and broadcast actual
+  window focus to live surfaces; removing a surface does not remove the other
+  surfaces' listener. NativeKit regression checks internal canvas/IME handoffs
+  produce no inactive window state and actual window blur/focus changes state.
+  The first regression compile caught a duplicate fixture-local name; renamed
+  it. Synthetic blur also queues released keys/window events, exhausting a
+  later request test's bounded poll loop; the fixture now consumes its events.
+- Final serial NativeKit browser gate, graphical build and both fresh browser
+  targets pass (handle 8293, exit 0). Logs
+  `/tmp/nativekit-menu-window-focus-tests.log`,
+  `/tmp/exosuit-menu-window-focus-build.log` and
+  `/tmp/exosuit-menu-window-focus-final-web.log`. The headless gate passed
+  `/tmp/exosuit-command-menu-headless.log`; final UIKit and real UI logs are
+  `/tmp/uikit-context-menu-browser-focus-framework.log` and
+  `/tmp/exosuit-command-menu-browser-focus-ui.log`. The retained menu capture
+  was visually reviewed. All handles are terminal.
+- NativeKit `5067eba0` commits browser keys/focus and regressions. Materia
+  `5cebf86d6` commits the seven owned UIKit files; TextInputBridge and existing
+  submodule dirt remain untouched. release.lock pins both owned commits.
+  Context-menu checklist is complete. Chrome 136 reload compatibility remains
+  unresolved; passing Chrome 154 checks do not prove that older-browser case.
+- Next: M9.2 DockWorkspace split panes, directional focus, tab movement and pane
+  close, with session restoration. Existing split commands require legacy
+  RootView and must be moved to the WorkbenchHost boundary. Each pane needs its
+  own UiDocumentView/selection and widget identity while sharing the Document
+  buffer; persistence must restore dock geometry, pane membership and active
+  view. Keep lifecycle confirmations and shared-document close semantics.
+
 ## M9.2 — tab context-menu foundation verified, 2026-10-02
 
 - Caret popup slice committed as Exosuit `4b594bf`; browser harness diagnostics

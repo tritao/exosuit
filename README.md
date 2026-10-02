@@ -77,7 +77,7 @@ Keyboard navigation moves all carets through UIKit's shaped layout.
 - Workspace search results are retained by the host but have no graphical panel.
 - The shell has one editor region. Split, pane focus and moving tabs between
   panes are unavailable; tab reordering and sidebar visibility are wired.
-- Line wrapping and right-click context menus remain gaps.
+- Line wrapping remains a gap. Editor, tab and file-tree command menus support right-click, Shift+F10 and the Menu key.
 - Some legacy shortcut keys lack a UIKit key mapping; their bridged commands
   are still available from the palette.
 

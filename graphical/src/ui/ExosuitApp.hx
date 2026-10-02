@@ -12,6 +12,8 @@ import nativekit.ui.core.Command;
 import nativekit.ui.core.RenderNode;
 import nativekit.ui.core.Shortcut;
 import nativekit.ui.core.UiContext;
+import nativekit.ui.core.UiEvent;
+import nativekit.ui.core.UiEventKind;
 import nativekit.ui.core.UiKey;
 import nativekit.ui.core.UiModifier;
 import nativekit.ui.core.View;
@@ -32,6 +34,8 @@ import nativekit.ui.widgets.controls.Button;
 import nativekit.ui.widgets.controls.ButtonVariant;
 import nativekit.ui.widgets.controls.TabItem;
 import nativekit.ui.widgets.controls.Tabs;
+import nativekit.ui.widgets.controls.TabsOptions;
+import nativekit.ui.widgets.controls.TabsSelectionMode;
 import nativekit.ui.widgets.collections.TreeView;
 import nativekit.ui.widgets.commands.CommandPalette;
 import nativekit.ui.widgets.docking.DockPanelContent;
@@ -85,6 +89,7 @@ class ExosuitApp implements DesktopUiApplication {
 	var explorerModel:Null<DirectoryTreeModel>;
 	var statusMessage:String = "Ready";
 	var paletteVisible:Bool = false;
+	var contextMenu:Null<CommandMenu> = null;
 	var viewportWidth:Float = 1280.0;
 	var viewportHeight:Float = 840.0;
 	static inline var TOOLBAR_HEIGHT:Float = 40.0;
@@ -241,6 +246,11 @@ class ExosuitApp implements DesktopUiApplication {
 		}
 		var overlay = host.overlayView();
 		if (overlay != null) layers.push(new StackChild("host-overlay", overlay, 0.0, 0.0, 30));
+		var menu = contextMenu;
+		if (menu != null) {
+			if (!menu.isCurrent()) contextMenu = null;
+			else layers.push(new StackChild("context-menu", menu, 0.0, 0.0, 40));
+		}
 		return new Stack("exosuit-overlay-host", layers);
 	}
 
@@ -379,10 +389,21 @@ class ExosuitApp implements DesktopUiApplication {
 		var viewportStyle = new LayoutStyle();
 		viewportStyle.width = LayoutAxis.grow();
 		viewportStyle.height = LayoutAxis.grow();
-		return new TreeView("exosuit-explorer-tree", explorerModel, viewportStyle, null, 640.0,
+		var tree = new TreeView("exosuit-explorer-tree", explorerModel, viewportStyle, null, 640.0,
 			null, [explorerRoot], function(key) { host.setSelectedExplorerPath(key); }, function(key) {
 				if (!FileSystem.isDirectory(key)) application.open(key);
 			}, null, null);
+		tree.onItemContextMenu = function(path, event) {
+			var menuRoot = explorerRoot;
+			host.setSelectedExplorerPath(path);
+			showContextMenu([
+				new CommandMenuEntry("file:new", "New File…"),
+				new CommandMenuEntry("folder:new", "New Folder…"),
+				new CommandMenuEntry("file:rename", "Rename…"),
+				new CommandMenuEntry("file:delete", "Delete…")
+			], event, function() return explorerRoot == menuRoot && host.focusedFilePath() == path && FileSystem.exists(path));
+		};
+		return tree;
 	}
 
 	function explorerRail():View {
@@ -414,6 +435,19 @@ class ExosuitApp implements DesktopUiApplication {
 			if (pane == null) {
 				pane = new EditorPane(document, theme, requestFrame, documentView.selection, editorPalette,
 					host.getPluginDecorations(), documentView.decorationSearchMatches, documentView.searchDecorationRevision);
+				pane.onContextMenu = function(event) {
+					host.activateTab(document);
+					showContextMenu([
+						new CommandMenuEntry("doc:undo", "Undo"),
+						new CommandMenuEntry("doc:redo", "Redo"),
+						new CommandMenuEntry("doc:cut", "Cut"),
+						new CommandMenuEntry("doc:copy", "Copy"),
+						new CommandMenuEntry("doc:paste", "Paste"),
+						new CommandMenuEntry("doc:select-all", "Select All"),
+						new CommandMenuEntry("find:open", "Find…"),
+						new CommandMenuEntry("find:replace", "Replace…")
+					], event, function() return host.activeDocument() == document);
+				};
 				pane.onCaretRectChanged = function() {
 					if (host.isLanguagePopupVisible()) {
 						if (host.textInputArea() == null) host.dismissLanguagePopup();
@@ -431,7 +465,10 @@ class ExosuitApp implements DesktopUiApplication {
 		tabsStyle.direction = LayoutDirection.TopToBottom;
 		tabsStyle.childGap = 8.0;
 		var active = host.activeDocument();
-		return new Tabs("exosuit-editor-tabs", items, active == null ? "" : "doc:" + active.id, function(key) {
+		var options = new TabsOptions();
+		options.style = tabsStyle;
+		options.selectionMode = TabsSelectionMode.Controlled;
+		var widget = Tabs.withOptions("exosuit-editor-tabs", items, active == null ? "" : "doc:" + active.id, function(key) {
 			var id = Std.parseInt(StringTools.replace(key, "doc:", ""));
 			if (id == null) return;
 			for (documentView in tabs)
@@ -439,7 +476,42 @@ class ExosuitApp implements DesktopUiApplication {
 					host.activateTab(documentView.document);
 					return;
 				}
-		}, tabsStyle);
+		}, options);
+		widget.onTabContextMenu = function(key, event) {
+			for (view in host.tabs) {
+				var document = view.document;
+				if (key != "doc:" + document.id) continue;
+				host.activateTab(document);
+				showContextMenu([
+					new CommandMenuEntry("doc:save", "Save"),
+					new CommandMenuEntry("doc:save-as", "Save As…"),
+					new CommandMenuEntry("root:close", "Close Tab")
+				], event, function() return host.activeDocument() == document);
+				return;
+			}
+		};
+		return widget;
+	}
+
+	function showContextMenu(entries:Array<CommandMenuEntry>, event:UiEvent, valid:Void->Bool):Void {
+		var x = event.x, y = event.y;
+		if (event.kind == UiEventKind.KeyDown && ui.root != null) {
+			var node = ui.root.find(event.target);
+			if (node != null && node.resolved != null) {
+				var bounds = node.globalBounds();
+				x = bounds.x;
+				y = bounds.y + bounds.height;
+				if (node.semantics != null && node.semantics.role == nativekit.ui.semantics.AccessibilityRole.TextField) {
+					var caret = host.textInputArea();
+					if (caret != null) { x = caret.x; y = caret.y + caret.height; }
+				}
+			}
+		}
+		paletteVisible = false;
+		host.dismissLanguagePopup();
+		contextMenu = new CommandMenu(application.commands, application.context, entries, x, y, valid,
+			function() { contextMenu = null; requestFrame(); });
+		requestFrame();
 	}
 
 	function pruneStaleEditorPanes(tabs:Array<UiDocumentView>):Void {
@@ -541,6 +613,7 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function togglePalette():Void {
+		contextMenu = null;
 		paletteVisible = !paletteVisible;
 		requestFrame();
 	}

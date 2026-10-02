@@ -186,6 +186,8 @@
     "../src/workspace/Workspace.hx",
     "../graphical/src/ui/BuildOutputPanel.hx",
     "../graphical/src/ui/CommandBridge.hx",
+    "../graphical/src/ui/CommandMenu.hx",
+    "../graphical/src/ui/CommandMenuEntry.hx",
     "../graphical/src/ui/DirectoryTreeModel.hx",
     "../graphical/src/ui/EditorGutter.hx",
     "../graphical/src/ui/EditorPane.hx",

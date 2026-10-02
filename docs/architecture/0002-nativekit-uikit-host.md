@@ -153,7 +153,9 @@ Remaining graphical gaps:
 - Language overlays have no caret anchor.
 - Workspace search stores results but has no visible results panel.
 - One editor region means split, pane focus and moving tabs between panes are unavailable.
-- Right-click context menus, wrapping and multiple selections are not exposed.
+- Editor, tab and file-tree command menus use UIKit popups and CommandRegistry.
+  Right-click, Shift+F10 and the Menu key open them; targets and predicates are
+  checked again before activation. Wrapping remains a gap.
 
 Tab reordering and sidebar visibility are wired. Layout-only legacy commands
 are excluded by `CommandBridge`; other commands are bridged, with some shortcut

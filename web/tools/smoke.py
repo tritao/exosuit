@@ -214,6 +214,36 @@ def main():
     while page.evaluate("window.exosuit.frames") < focus_frame and time.monotonic() < focus_limit:
         time.sleep(0.1)
     assert page.evaluate("window.exosuit.frames") >= focus_frame, page.evaluate("JSON.stringify(window.exosuit)")
+
+    def menu_key(name, code, virtual_key, modifiers=0):
+        for kind in ("keyDown", "keyUp"):
+            page.command("Input.dispatchKeyEvent", {"type": kind, "key": name, "code": code,
+                "windowsVirtualKeyCode": virtual_key, "modifiers": modifiers if kind == "keyDown" else 0})
+
+    def wait_active(identifier):
+        limit = time.monotonic() + 15
+        while time.monotonic() < limit:
+            if page.evaluate("document.activeElement.id") == identifier:
+                return
+            time.sleep(0.1)
+        raise AssertionError("keyboard focus did not reach " + identifier + ": " +
+                             page.evaluate("document.activeElement.outerHTML"))
+
+    # Exercise the custom menu through real DOM keys. Deactivating the IME must
+    # hand keyboard focus back to the canvas, then restore the editor on close.
+    assert "doc:copy" not in initial["commands"], "browser menu order assumes unavailable native clipboard commands are omitted"
+    menu_key("F10", "F10", 121, 8)
+    wait_active("canvas")
+    menu_key("ArrowDown", "ArrowDown", 40)
+    menu_key("ArrowDown", "ArrowDown", 40)
+    menu_key("Enter", "Enter", 13)
+    wait_active("__nativekit_text_input")
+    assert page.evaluate("(() => {const e=document.activeElement;return e.selectionStart===0 && e.selectionEnd===e.value.length;})()"), "context-menu Select All did not reach the editor"
+    menu_key("ContextMenu", "ContextMenu", 93)
+    wait_active("canvas")
+    menu_key("Escape", "Escape", 27)
+    wait_active("__nativekit_text_input")
+
     key("A")
     selection_deadline = time.monotonic() + 15
     while time.monotonic() < selection_deadline:
@@ -301,7 +331,7 @@ def main():
     failures = [line for line in page.console if line.startswith(("[error]", "[exception]", "[assert]"))]
     if failures:
         raise AssertionError("Browser errors:\n" + "\n".join(failures))
-    print("PASS: browser typing, dirty tracking, save/readback, URL and fresh session reload")
+    print("PASS: browser context menus, typing, dirty tracking, save/readback, URL and fresh session reload")
     return 0
 
 

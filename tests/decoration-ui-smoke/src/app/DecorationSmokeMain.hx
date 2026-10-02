@@ -23,6 +23,9 @@ import nativekit.ui.widgets.text.TextEditorState;
 class DecorationSmokeApp extends ExosuitApp {
 	final phase:String;
 	var frames = 0;
+	var menuRuns:Int = 0;
+	var menuAllowed:Bool = true;
+	var menuDocument:Null<editor.Document> = null;
 	var firstPopupY:Float = -1.0;
 	var popupScrollController:Null<nativekit.ui.widgets.scroll.ScrollController> = null;
 
@@ -30,6 +33,21 @@ class DecorationSmokeApp extends ExosuitApp {
 		super(context.fonts, null, context, path);
 		this.phase = phase;
 		installMarks(0);
+		if (StringTools.startsWith(phase, "menu-")) {
+			menuDocument = host.activeDocument();
+			if (menuDocument == null) throw "menu fixture has no document";
+			if (phase == "menu-tab" || phase == "menu-tab-keyboard" || phase == "menu-dirty-close") {
+				application.newDocument();
+				if (phase == "menu-dirty-close") {
+					var first = menuDocument;
+					if (first == null) throw "missing first menu document";
+					first.buffer.replaceAllText("unsaved", null);
+				}
+			}
+			if (phase == "menu-predicate" || phase == "menu-stale")
+				application.commands.add("doc:select-all", function(_) { menuRuns++; }, function(_) return menuAllowed);
+		}
+
 		if (StringTools.startsWith(phase, "popup-")) {
 			var view = host.activeView();
 			if (view == null) throw "popup fixture has no view";
@@ -100,6 +118,57 @@ class DecorationSmokeApp extends ExosuitApp {
 
 	override public function submit(frame:LayoutFrame):nativekit.ui.core.RenderNode {
 		frames++;
+		if (StringTools.startsWith(phase, "menu-") && frames == 4) {
+			var previousRoot = ui.root;
+			var document = menuDocument;
+			if (previousRoot == null || document == null) throw "menu fixture has no resolved target";
+			var target:Null<RenderNode> = null;
+			if (phase == "menu-tab" || phase == "menu-tab-keyboard" || phase == "menu-dirty-close")
+				target = findEditor(previousRoot, "doc:" + document.id);
+			else if (phase == "menu-tree" || phase == "menu-tree-keyboard")
+				target = findTreeFile(previousRoot);
+			else target = findEditor(previousRoot, "editor:" + document.id);
+			if (target == null) throw "menu fixture target is missing";
+			var targetGeometry = target.resolved;
+			if (targetGeometry == null) throw "menu fixture target is unresolved";
+			if (phase == "menu-keyboard" || phase == "menu-tab-keyboard" || phase == "menu-tree-keyboard") {
+				if (!ui.focusWidget(target.id)) throw "could not focus context-menu target";
+				ui.key(UiEventKind.KeyDown, phase == "menu-tree-keyboard" ? UiKey.Menu : UiKey.F10,
+					phase == "menu-tree-keyboard" ? 0 : UiModifier.Shift);
+			} else {
+				var x = phase == "menu-edge" ? frame.width - 12.0 : targetGeometry.x + 10.0;
+				var y = targetGeometry.y + 8.0;
+				ui.pointerDown(x, y, 1);
+				ui.pointerUp(x, y, 1);
+			}
+		}
+		if (phase == "menu-escape" && frames == 5) ui.key(UiEventKind.KeyDown, UiKey.Escape);
+		if (phase == "menu-outside" && frames == 5) {
+			ui.pointerDown(10.0, 10.0, 0);
+			ui.pointerUp(10.0, 10.0, 0);
+		}
+		if (phase == "menu-switch" && frames == 5) application.newDocument();
+		if (StringTools.startsWith(phase, "menu-") && frames == 5 && phase != "menu-switch" && phase != "menu-capture" && phase != "menu-escape" && phase != "menu-outside") {
+			var previousRoot = ui.root;
+			if (previousRoot == null) throw "missing menu root";
+			if (phase == "menu-stale") application.newDocument();
+			if (phase == "menu-predicate") menuAllowed = false;
+			var command = phase == "menu-tab" || phase == "menu-tab-keyboard" || phase == "menu-dirty-close" ? "root:close" :
+				phase == "menu-tree" || phase == "menu-tree-keyboard" ? "file:rename" : "doc:select-all";
+			if (phase == "menu-keyboard" || phase == "menu-tab-keyboard") {
+				// The editor menu starts at Undo. Navigate to Select All with the keyboard.
+				for (_ in 0...(phase == "menu-tab-keyboard" ? 2 : 5)) ui.key(UiEventKind.KeyDown, UiKey.Down);
+				ui.key(UiEventKind.KeyDown, UiKey.Enter);
+			} else {
+				var button = findEditor(previousRoot, command);
+				if (button == null) throw "missing command menu item " + command;
+				var buttonGeometry = button.resolved;
+				if (buttonGeometry == null) throw "unresolved command menu item " + command;
+				ui.pointerDown(buttonGeometry.x + 8.0, buttonGeometry.y + 8.0, 0);
+				ui.pointerUp(buttonGeometry.x + 8.0, buttonGeometry.y + 8.0, 0);
+			}
+		}
+
 		if (frames == 4) {
 			var document = host.activeDocument();
 			if (document == null) throw "decoration fixture document disappeared";
@@ -283,8 +352,66 @@ class DecorationSmokeApp extends ExosuitApp {
 				trace("PASS: resolved language popup " + phase);
 			}
 		}
+		if (StringTools.startsWith(phase, "menu-")) {
+			var panel = findContextPanel(root);
+			if (frames == 4) {
+				if (panel == null || panel.resolved == null) throw "context menu did not open";
+				if ((phase == "menu-tab" || phase == "menu-tab-keyboard" || phase == "menu-dirty-close") &&
+					(menuDocument == null || findEditor(root, "editor:" + menuDocument.id) == null))
+					throw "tab menu target did not become the visible editor";
+				var bounds = panel.resolved;
+				if (bounds.x < -0.1 || bounds.y < -0.1 || bounds.x + bounds.width > frame.width + 0.1 ||
+					bounds.y + bounds.height > frame.height + 0.1) throw "context menu escaped viewport";
+			}
+			if (frames == 6 && phase == "menu-capture") {
+				if (panel == null) throw "context menu disappeared before capture";
+				trace("PASS: retained context-menu visual capture");
+			}
+			if (frames == 6 && phase != "menu-capture") {
+				if (panel != null) throw "context menu did not retire after activation";
+				if (phase == "menu-predicate" || phase == "menu-stale" || phase == "menu-switch" || phase == "menu-escape" || phase == "menu-outside") {
+					if (menuRuns != 0) throw "context command ran against an invalid predicate/target";
+				} else if (phase == "menu-tab" || phase == "menu-tab-keyboard") {
+					if (host.tabs.length != 1 || host.activeDocument() == menuDocument) throw "tab menu closed the wrong document";
+				} else if (phase == "menu-dirty-close") {
+					if (host.tabs.length != 2 || !host.commandView.active) throw "tab menu bypassed dirty-close confirmation";
+				} else if (phase == "menu-tree" || phase == "menu-tree-keyboard") {
+					if (!host.commandView.active || menuDocument == null || host.focusedFilePath() != menuDocument.path)
+						throw "tree menu did not dispatch rename for its selected file";
+				} else {
+					var active = host.activeView();
+					if (active == null || !active.selection.anchor.equals(new BufferPosition(0, 0)) ||
+						!active.selection.cursor.equals(active.document.buffer.endPosition())) throw "menu Select All did not reach the registry";
+				}
+				trace("PASS: routed command context menu " + phase);
+			}
+		}
 		return root;
 	}
+	static function findContextPanel(node:RenderNode):Null<RenderNode> {
+		if (node.styleType == "popup-content" && node.styleKey == "command-context-menu") return node;
+		for (child in node.children) {
+			var found = findContextPanel(child);
+			if (found != null) return found;
+		}
+		return null;
+	}
+
+	static function findTreeFile(node:RenderNode):Null<RenderNode> {
+		if (node.semantics != null && node.semantics.role == nativekit.ui.semantics.AccessibilityRole.TreeItem && hasFileLabel(node)) return node;
+		for (child in node.children) {
+			var found = findTreeFile(child);
+			if (found != null) return found;
+		}
+		return null;
+	}
+
+	static function hasFileLabel(node:RenderNode):Bool {
+		if (node.semantics != null && node.semantics.label != null && StringTools.endsWith(node.semantics.label, "Main.hx")) return true;
+		for (child in node.children) if (hasFileLabel(child)) return true;
+		return false;
+	}
+
 	static function findPopup(node:RenderNode):Null<RenderNode> {
 		if (node.styleType == "popup-content" && node.styleKey == "language-popup") return node;
 		for (child in node.children) {
