@@ -35,13 +35,16 @@ Last updated: 2026-10-02.
   a lower-priority cost: guarded same-advance and stable-wrap ASCII edits
   now reuse row geometry, while changed wrap boundaries still reflow. Recheck the
   remaining invalidation cases after both standard typing gates passed. Full
-  Unicode edits now retain equivalent rows at matching row indexes. Newline
-  edits that change row indexes still need a source-range mapping before
-  those suffix publications can retain identity. Preserve the
+  Unicode edits retain equivalent rows, including source-mapped suffix rows
+  after newline insertion/deletion when exact row-local geometry agrees.
+  Next: preserve stable text resource identity through frame bindings so
+  moved rows retain raster-cache identity; runtime resource hashing currently
+  includes temporary binding IDs. Fractional-origin cancellation also remains
+  a conservative native reuse fallback. Preserve the
   1 MiB, 10 MiB and graphical pixel gates.
   Preserve M8 and both browser gates.
-- Current follow-on HEADs: Exosuit `912f701` before this ledger commit;
-  Materia `e9404a073` carries row-scoped glyph commands, shallow row raster
+- Current follow-on HEADs: Exosuit `0359311` before this ledger commit;
+  Materia `fe3f5e7c0` carries row-scoped glyph commands, shallow row raster
   caching, rebased source metadata, a parent repaint cost regression, and the
   Skribidi bulk-copy and guarded variable-width row-geometry reuse slices. The
   existing dirty Haxeon/NativeKit gitlinks and UIKit TextInputBridge edit in
@@ -87,6 +90,33 @@ Last updated: 2026-10-02.
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M9.1 — source-mapped native row reuse after newline edits
+
+- Full Unicode edit fallback maps unchanged prefix/suffix source ranges to
+  their prior rows, independently of row index. Exact comparisons use row-local
+  bounds, baselines, run geometry, glyphs, fonts and cluster ranges. Single-row
+  keys omit row index; immutable publication metadata rebases layout ID, row
+  index and source ranges. Old snapshots remain unchanged.
+- Native mixed combining/emoji/bidi regression covers newline insertion and
+  deletion, moved foreground ranges, publication identity, vertex equality,
+  source rebasing and snapshot validity with explicit 24-point row spacing.
+  Fractional-origin cancellation can still reject exact equivalence; this
+  intentionally rebuilds rather than assuming approximate paint equality.
+- Text-engine, ABI, frame-resource and existing renderer smoke pass. Graphical
+  build and decoration pixel suite pass. A temporary renderer movement test
+  failed: runtime hashing includes ephemeral prepared-resource IDs, so stable
+  native publication does not yet guarantee moved-row raster reuse. That test
+  and an insufficient transform-only experiment were removed; next implement
+  explicit stable source identity in frame bindings and restore that regression.
+- Standard 1 MiB varied-key typing gate passes across 30 input frames:
+  **49.72 ms p95**, 59.75 ms maximum, artifact
+  `/tmp/exosuit-moved-rows-1mb`. The narrow margin remains visible; this gate
+  measures typing, not the unimplemented moved-row raster reuse. The standard
+  10 MiB repeat-key gate also passes across 30 input frames: **30.40 ms p95**,
+  31.49 ms maximum, artifact `/tmp/exosuit-moved-rows-10mb`.
+- Materia commit `fe3f5e7c0`. M9.1 remains active; this is native publication
+  reuse, not completion of renderer invalidation or zero-copy snapshots.
 
 ### M9.1 — unchanged Unicode row publications after full shaping
 
