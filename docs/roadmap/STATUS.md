@@ -45,7 +45,10 @@ Last updated: 2026-10-02.
   array splicing/index repair as the largest measured edit phase. Redundant
   whole-layout glyph-origin writes were removed; final standard gates pass
   at 47.24 ms p95 (1 MiB) and 33.59 ms (10 MiB). Earlier failures remain
-  recorded. Next: build the common indexed snapshot/geometry boundary from
+  recorded. Native edits now publish independently owned generations, retained
+  through read-only shared owners in UIKit. The ownership gate passes at
+  46.07 ms p95 (1 MiB) and 34.86 ms (10 MiB). Next: build the common
+  indexed snapshot/geometry boundary from
   ADR 0003 to remove full shaped-array materialization while keeping all
   rendering, caret, hit-test and selection queries on one generation. Then
   resume fractional-origin, actual app newline raster and decoration audits.
@@ -54,8 +57,8 @@ Last updated: 2026-10-02.
   graphical pixel, M8 and browser gates. The benchmark exits nonzero on a
   missed p95 budget.
   Preserve M8 and both browser gates.
-- Current follow-on HEADs: Exosuit `68e01ab` before this ledger commit;
-  Materia `65e70e840` carries row-scoped glyph commands, shallow row raster
+- Current follow-on HEADs: Exosuit `31d01ec` before this ledger commit;
+  Materia `19f2f9222` carries row-scoped glyph commands, shallow row raster
   caching, rebased source metadata, a parent repaint cost regression, and the
   Skribidi bulk-copy and guarded variable-width row-geometry reuse slices. The
   existing dirty Haxeon/NativeKit gitlinks and UIKit TextInputBridge edit in
@@ -101,6 +104,39 @@ Last updated: 2026-10-02.
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M9.1 — immutable native ownership prerequisite
+
+- Skribidi `6e22891` adds `skb_layout_create_ascii_edit`, returning a new
+  owned generation while preserving the source on success and rejection.
+  The legacy mutating API delegates to that constructor. This still copies
+  complete shaped arrays; shared shape storage is not activated.
+- Materia `19f2f9222` adopts native generations through
+  `shared_ptr<const skb_layout_t>`. Every geometry and rendering call reads
+  the current read-only owner. The native deleter retains its font collection,
+  so native destruction precedes font retirement. Ordinary edits publish a new
+  owner instead of mutating the previous native layout.
+- The differential probe retains ten generations across beginning, middle and
+  end edits and compares text, cluster metadata, glyph positions and carets
+  with fresh layouts. Rejection preserves the latest generation. Rebuilding
+  the original and mutating its first descendant preserves later descendants;
+  the latest generation remains queryable after source destruction. Native-only
+  AddressSanitizer with leak detection passes, including the source mutation
+  regression: `/tmp/exosuit-immutable-source-mutation-asan.log`.
+- Native text-engine, ABI, frame-resource and renderer checks pass, including
+  moved-row cache hits and restored framebuffer pixels. The graphical build,
+  decoration pixel suite and full edit-window differential probe pass. Logs:
+  `/tmp/exosuit-immutable-layout-final-build.log`,
+  `/tmp/exosuit-immutable-layout-decoration.log`,
+  `/tmp/exosuit-immutable-probe-final.log`.
+- Standard typing gates each capture 30 input frames and exit zero: 1 MiB
+  varied-key **46.07 ms p95**, 46.37 ms maximum, artifact
+  `/tmp/exosuit-immutable-layout-1mb`; 10 MiB repeat-key **34.86 ms p95**,
+  38.91 ms maximum, artifact `/tmp/exosuit-immutable-layout-10mb`.
+- Next: extract validated local shape pieces and implement the common indexed
+  snapshot/geometry boundary. No renderer-only composition is enabled. Native
+  arrays and rebased prepared glyph vectors remain materialized. M9.1 and the
+  full follow-on plan remain open.
 
 ### M9.1 — measured ASCII splice cost and redundant writes removed
 

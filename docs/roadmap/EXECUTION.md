@@ -115,6 +115,7 @@ Typing measurements include edit dispatch and retain input attribution through
 coalesced caret frames. `TYPING_UI_CAPTURE_SECONDS` and `TYPING_UI_KEY_DELAY_MS`
 override fixture defaults (small: 15 s/120 ms, multiline: 45 s/400 ms,
 single line: 90 s/1,200 ms). Results record both settings.
-Benchmark exit 0 means valid samples; inspect `withinBudget` separately.
+Benchmark exit 0 means valid samples within the p95 budget. A missed budget
+exits nonzero after preserving the result artifact, including `withinBudget`.
 Set `TYPING_UI_PROFILE_PORT` to expose HashLink diagnostics during a benchmark
 for an independently started `hlprof-live` sampler.

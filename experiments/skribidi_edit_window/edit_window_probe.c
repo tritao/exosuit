@@ -1062,6 +1062,103 @@ static int run_native_ascii_sweep(skb_temp_alloc_t *temp,
     return equal && accepted > 0 && rejected > 0;
 }
 
+static int run_immutable_ascii_generations(skb_temp_alloc_t *temp,
+                                          const skb_layout_params_t *base) {
+    enum { count = 10 };
+    skb_layout_t *roots[count] = {0};
+    char texts[count][320];
+    int lengths[count];
+    skb_layout_params_t params = *base;
+    const skb_attribute_t attrs[] = {skb_attribute_make_text_wrap(SKB_WRAP_WORD_CHAR)};
+    params.layout_width = 143.f;
+    params.layout_attributes = SKB_ATTRIBUTE_SET_FROM_STATIC_ARRAY(attrs);
+    memset(texts[0], 'a', 256);
+    texts[0][256] = 0;
+    lengths[0] = 256;
+    roots[0] = skb_layout_create_utf8(temp, &params, texts[0], -1, (skb_attribute_set_t){0});
+    int valid = roots[0] != NULL;
+    const uint64_t first_generation = valid ? skb_layout_get_generation(roots[0]) : 0;
+    for (int step = 1; step < count && valid; ++step) {
+        const int start = step == 1 ? 0 : (step == 2 ? lengths[step - 1] : 17 + step);
+        const int end = start + (step % 3 == 0 ? 1 : 0);
+        const char *replacement = step % 3 == 0 ? "" : (step % 3 == 1 ? "b" : "cc");
+        const int inserted = (int)strlen(replacement);
+        lengths[step] = lengths[step - 1] + inserted - (end - start);
+        memcpy(texts[step], texts[step - 1], (size_t)start);
+        memcpy(texts[step] + start, replacement, (size_t)inserted);
+        memcpy(texts[step] + start + inserted, texts[step - 1] + end,
+               (size_t)(lengths[step - 1] - end + 1));
+        roots[step] = skb_layout_create_ascii_edit(roots[step - 1], temp,
+                                                   start, end, replacement, -1);
+        valid = roots[step] != NULL;
+        for (int saved = 0; saved <= step && valid; ++saved) {
+            skb_layout_t *fresh = skb_layout_create_utf8(temp, &params, texts[saved], -1,
+                                                          (skb_attribute_set_t){0});
+            valid = fresh && same_cluster_metadata(roots[saved], fresh) &&
+                    skb_layout_get_generation(roots[saved]) == first_generation + saved &&
+                    skb_layout_get_text_count(roots[saved]) == lengths[saved] &&
+                    skb_layout_get_lines_count(roots[saved]) == skb_layout_get_lines_count(fresh);
+            const skb_glyph_t *a = skb_layout_get_glyphs(roots[saved]);
+            const skb_glyph_t *b = fresh ? skb_layout_get_glyphs(fresh) : NULL;
+            for (int i = 0; i < lengths[saved] && valid; ++i) {
+                if (skb_layout_get_text(roots[saved])[i] != (uint8_t)texts[saved][i] ||
+                    a[i].gid != b[i].gid || a[i].cluster_idx != b[i].cluster_idx ||
+                    fabsf(a[i].offset_x - b[i].offset_x) > .001f ||
+                    fabsf(a[i].offset_y - b[i].offset_y) > .001f)
+                    valid = 0;
+                const skb_text_position_t position = {i, SKB_AFFINITY_LEADING};
+                const skb_caret_info_t x = skb_layout_get_caret_info_at(roots[saved], position);
+                const skb_caret_info_t y = skb_layout_get_caret_info_at(fresh, position);
+                if (fabsf(x.x - y.x) > .001f || fabsf(x.y - y.y) > .001f)
+                    valid = 0;
+            }
+            skb_layout_destroy(fresh);
+        }
+    }
+    if (valid) {
+        const uint64_t generation = skb_layout_get_generation(roots[count - 1]);
+        skb_layout_t *rejected = skb_layout_create_ascii_edit(roots[count - 1], temp,
+                                                               0, 0, "é", -1);
+        valid = rejected == NULL &&
+                skb_layout_get_generation(roots[count - 1]) == generation &&
+                skb_layout_get_text_count(roots[count - 1]) == lengths[count - 1];
+        skb_layout_destroy(rejected);
+    }
+    // Legacy mutable APIs must not alter descendants of an older generation.
+    // This also guards the required copy-on-write boundary for future shared data.
+    if (valid) {
+        skb_layout_set_utf8(roots[0], temp, &params, "rebuilt", -1,
+                            (skb_attribute_set_t){0});
+        valid = skb_layout_try_edit_ascii(roots[1], temp, 0, 1, "z", -1);
+        for (int saved = 2; saved < count && valid; ++saved) {
+            skb_layout_t *fresh = skb_layout_create_utf8(temp, &params, texts[saved], -1,
+                                                        (skb_attribute_set_t){0});
+            valid = fresh && same_cluster_metadata(roots[saved], fresh) &&
+                    skb_layout_get_generation(roots[saved]) == first_generation + saved;
+            const skb_glyph_t *a = skb_layout_get_glyphs(roots[saved]);
+            const skb_glyph_t *b = fresh ? skb_layout_get_glyphs(fresh) : NULL;
+            for (int i = 0; i < lengths[saved] && valid; ++i) {
+                if (skb_layout_get_text(roots[saved])[i] != (uint8_t)texts[saved][i] ||
+                    a[i].gid != b[i].gid || a[i].cluster_idx != b[i].cluster_idx ||
+                    fabsf(a[i].offset_x - b[i].offset_x) > .001f ||
+                    fabsf(a[i].offset_y - b[i].offset_y) > .001f)
+                    valid = 0;
+            }
+            skb_layout_destroy(fresh);
+        }
+    }
+    // Every returned generation remains usable after its sources are destroyed.
+    for (int i = 0; i < count - 1; ++i) skb_layout_destroy(roots[i]);
+    if (valid) {
+        const skb_text_position_t position = {20, SKB_AFFINITY_TRAILING};
+        const skb_caret_info_t caret = skb_layout_get_caret_info_at(roots[count - 1], position);
+        valid = isfinite(caret.x) && isfinite(caret.y);
+    }
+    skb_layout_destroy(roots[count - 1]);
+    printf("immutable native ASCII generations: %s\n", valid ? "valid" : "FAILED");
+    return valid;
+}
+
 int main(void) {
     skb_temp_alloc_t *temp = skb_temp_alloc_create(1024);
     skb_font_collection_t *fonts = skb_font_collection_create();
@@ -1079,7 +1176,8 @@ int main(void) {
         .layout_attributes = SKB_ATTRIBUTE_SET_FROM_STATIC_ARRAY(attributes),
     };
     if (getenv("SKB_NATIVE_ONLY")) {
-        int native_ok = run_native_ascii_edit(temp, &params, 4096);
+        int native_ok = run_native_ascii_edit(temp, &params, 4096) &&
+                        run_immutable_ascii_generations(temp, &params);
         skb_font_collection_destroy(fonts);
         skb_temp_alloc_destroy(temp);
         return native_ok ? 0 : 1;
@@ -1148,6 +1246,7 @@ int main(void) {
     passed &= run_native_ascii_edit(temp, &params, 4096);
     passed &= run_native_ascii_edit(temp, &params, 1024 * 1024);
     passed &= run_native_ascii_sweep(temp, &params);
+    passed &= run_immutable_ascii_generations(temp, &params);
     passed &= mixed_passed == mixed_total;
     skb_font_collection_destroy(fonts);
     skb_temp_alloc_destroy(temp);

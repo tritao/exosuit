@@ -1,6 +1,6 @@
 # ADR 0003: Indexed edit-range text layout
 
-Status: partially implemented, 2026-10-01. A guarded ASCII reuse path is
+Status: partially implemented, 2026-10-02. A guarded ASCII reuse path is
 active; indexed composite snapshots remain experimental.
 
 ## Implemented slice
@@ -28,6 +28,14 @@ the contextual window's origins. A failed guard clears shaping-local origins
 before complete line reflow. Both cases
 continue to materialize a complete native layout generation; indexed
 composite snapshots remain the zero-copy direction.
+
+The guarded constructor now returns a new owned generation without mutating
+its source. UIKit retains each native generation through a read-only shared
+owner that also retains the font collection for native destruction. Legacy
+mutable source rebuilds and edits cannot change descendants, and descendants
+remain usable after their sources are destroyed. All current geometry queries
+still read one materialized native generation. This ownership boundary is a
+prerequisite for indexed pieces; it does not yet share shaped-array storage.
 
 Whole-line background decorations now query visible row rectangles directly
 from UIKit's retained line index. This avoids per-grapheme caret geometry for
