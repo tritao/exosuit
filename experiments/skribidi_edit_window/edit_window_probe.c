@@ -1248,7 +1248,7 @@ static int run_shared_shape_generations(skb_temp_alloc_t *temp, const skb_layout
     params.layout_attributes = SKB_ATTRIBUTE_SET_FROM_STATIC_ARRAY(attrs);
     params.layout_width = 143.f;
     char text[320]; memset(text, 'b', 250); text[250] = 0;
-    int length = 250, valid = 1, moved_wraps = 0;
+    int length = 250, valid = 1, moved_wraps = 0, shared_rows = 0;
     skb_layout_t *original = skb_layout_create_utf8(temp, &params, text, -1, (skb_attribute_set_t){0});
     skb_layout_t *current = original;
     for (int step = 0; step < 100 && valid; ++step) {
@@ -1271,7 +1271,7 @@ static int run_shared_shape_generations(skb_temp_alloc_t *temp, const skb_layout
             const int rows = next->lines_count < current->lines_count ? next->lines_count : current->lines_count;
             moved_wraps += next->lines_count != current->lines_count;
             for (int row = 0; row + 1 < rows; ++row)
-                moved_wraps += next->lines[row].text_range.end != current->lines[row].text_range.end;
+                moved_wraps += skb_layout_get_line_at(next, row).text_range.end != skb_layout_get_line_at(current, row).text_range.end;
         }
         if (current != original) skb_layout_destroy(current);
         current = next;
@@ -1281,6 +1281,11 @@ static int run_shared_shape_generations(skb_temp_alloc_t *temp, const skb_layout
         if (valid) valid = same_indexed_geometry(current, fresh);
         if (valid) valid = !current->shape_cache->text && !current->shape_cache->properties &&
                            !current->shape_cache->glyphs && !current->shape_cache->clusters;
+        if (valid && current->row_pieces_count) {
+            ++shared_rows;
+            valid = !current->lines && !current->layout_runs &&
+                    !current->row_cache->lines && !current->row_cache->runs;
+        }
         if (!valid) printf("shared native shape failed at step %d, pieces=%d\n", step,
                            current ? current->shape_pieces_count : -1);
         skb_layout_destroy(fresh);
@@ -1301,8 +1306,73 @@ static int run_shared_shape_generations(skb_temp_alloc_t *temp, const skb_layout
     }
     skb_layout_destroy(current);
     if (variable_width) valid &= moved_wraps > 0;
-    printf("shared native shape generations: 100 %s edits, %d moved wraps, %s\n",
-           variable_width ? "variable-width" : "equal-advance", moved_wraps, valid ? "valid" : "FAILED");
+    printf("shared native shape generations: 100 %s edits, %d moved wraps, %d shared-row snapshots, %s\n",
+           variable_width ? "variable-width" : "equal-advance", moved_wraps, shared_rows, valid ? "valid" : "FAILED");
+    return valid;
+}
+
+static int run_shared_row_storage(skb_temp_alloc_t *temp, const skb_layout_params_t *base, int length) {
+    const skb_attribute_t attrs[] = {skb_attribute_make_font_size(15.f),
+                                    skb_attribute_make_text_wrap(SKB_WRAP_WORD_CHAR)};
+    skb_layout_params_t params = *base;
+    params.layout_width = 143.f;
+    params.layout_attributes = SKB_ATTRIBUTE_SET_FROM_STATIC_ARRAY(attrs);
+    char *text = malloc((size_t)length + 1);
+    if (!text) return 0;
+    memset(text, 'b', (size_t)length); text[length] = 0;
+    skb_layout_t *original = skb_layout_create_utf8(temp, &params, text, -1, (skb_attribute_set_t){0});
+    skb_layout_t *current = original;
+    const skb__row_block_t *root = original ? original->row_block : NULL;
+    int valid = root != NULL, max_private_rows = 0;
+    double elapsed = 0.;
+    for (int step = 0; step < 30 && valid; ++step) {
+        const int offset = length / 2 + step;
+        const clock_t begin = clock();
+        skb_layout_t *next = skb_layout_create_ascii_edit(current, temp, offset, offset + 1, "d", 1);
+        elapsed += (double)(clock() - begin) * 1000. / CLOCKS_PER_SEC;
+        text[offset] = 'd';
+        valid = next && next->row_pieces_count > 0 && !next->lines && !next->layout_runs &&
+                !next->row_cache->lines && !next->row_cache->runs && next->row_pieces[0].block == root;
+        int private_rows = 0;
+        for (int piece = 0; valid && piece < next->row_pieces_count; ++piece)
+            if (next->row_pieces[piece].block != root) private_rows += next->row_pieces[piece].count;
+        if (private_rows > max_private_rows) max_private_rows = private_rows;
+        valid &= private_rows <= 16;
+        if (current != original) skb_layout_destroy(current);
+        current = next;
+    }
+    if (valid) {
+        skb_layout_add_ellipsis_to_last_line(original);
+        skb_layout_set_utf8(original, temp, &params, "rebuilt", -1, (skb_attribute_set_t){0});
+    }
+    if (current == original) current = NULL;
+    skb_layout_destroy(original);
+    skb_layout_t *fresh = skb_layout_create_utf8(temp, &params, text, -1, (skb_attribute_set_t){0});
+    valid &= current && fresh && current->lines_count == fresh->lines_count;
+    for (int row = 0; valid && row < current->lines_count; ++row) {
+        const skb_layout_line_t a = skb_layout_get_line_at(current, row), b = skb_layout_get_line_at(fresh, row);
+        valid = a.text_range.start == b.text_range.start && a.text_range.end == b.text_range.end &&
+                same_bounds(a.bounds, b.bounds) && same_bounds(a.culling_bounds, b.culling_bounds) &&
+                same_bounds(a.common_glyph_bounds, b.common_glyph_bounds) && a.baseline == b.baseline;
+    }
+    for (int i = 0; valid && i < length; ++i) {
+        const skb_glyph_t a = skb_layout_get_glyph_at(current, i), b = skb_layout_get_glyph_at(fresh, i);
+        valid = a.gid == b.gid && a.cluster_idx == b.cluster_idx &&
+                a.offset_x == b.offset_x && a.offset_y == b.offset_y;
+    }
+    if (valid) valid = !current->row_cache->lines && !current->row_cache->runs;
+    if (valid) {
+        const skb_layout_line_t *lines = skb_layout_get_lines(current);
+        const skb_layout_run_t *runs = skb_layout_get_layout_runs(current);
+        valid = lines && runs && !current->lines && !current->layout_runs &&
+                lines[current->lines_count - 1].text_range.end == length &&
+                runs[current->layout_runs_count - 1].glyph_range.end == length;
+        skb_layout_set_utf8(current, temp, &params, "UPPERCASE", -1, (skb_attribute_set_t){0});
+        valid &= !current->row_cache && !current->row_pieces_count && !current->row_block;
+    }
+    printf("shared native rows %d-codepoint edit: 30 snapshots, at most %d private rows, %.3f ms mean CPU, %s\n",
+           length, max_private_rows, elapsed / 30., valid ? "valid" : "FAILED");
+    skb_layout_destroy(current); skb_layout_destroy(fresh); free(text);
     return valid;
 }
 
@@ -1323,7 +1393,8 @@ int main(void) {
         .layout_attributes = SKB_ATTRIBUTE_SET_FROM_STATIC_ARRAY(attributes),
     };
     if (getenv("SKB_NATIVE_ONLY")) {
-        int native_ok = run_native_ascii_edit(temp, &params, 4096) &&
+        int native_ok = run_shared_row_storage(temp, &params, 4096) &&
+                        run_native_ascii_edit(temp, &params, 4096) &&
                         run_immutable_ascii_generations(temp, &params) &&
                         run_shared_shape_generations(temp, &params, false) &&
                         run_shared_shape_generations(temp, &params, true);
@@ -1392,6 +1463,8 @@ int main(void) {
     passed &= run_mutable_smoke(temp, &params, 1024 * 1024, 1);
     passed &= run_mutable_insert_delete(temp, &params, 4096);
     passed &= run_mutable_insert_delete(temp, &params, 1024 * 1024);
+    passed &= run_shared_row_storage(temp, &params, 4096);
+    passed &= run_shared_row_storage(temp, &params, 1024 * 1024);
     passed &= run_native_ascii_edit(temp, &params, 4096);
     passed &= run_native_ascii_edit(temp, &params, 1024 * 1024);
     passed &= run_native_ascii_sweep(temp, &params);

@@ -2,6 +2,32 @@
 
 Last updated: 2026-10-02.
 
+## M9.1 — shared rows and measured edit costs, 2026-10-02
+
+- Skribidi `572e8c8`, pinned by Materia `30b65a472`, retains immutable
+  prefix/suffix row blocks for equal-advance edits and rebuilds only affected
+  rows. Bulk compatibility caches are separate; indexed reads stay allocation
+  free. Source mutation, ellipsis, destruction, child generations and explicit
+  bulk-cache/reset lifetime checks pass. Shape measurement uses a sequential
+  piece cursor and stops word lookahead after the first full-row overflow.
+- Native differential probe, vendor units and ASan/leaks pass (the
+  `/tmp/exosuit-shape-cursor-{probe,unit,asan}.log` artifacts). Native 1 MiB
+  mixed edits measure 12.05 ms mean CPU; stable edits rebuild at most four rows.
+  Final UIKit native checks pass 3/3
+  (`/tmp/exosuit-shared-rows-uikit-final.log`). Both browser gates pass
+  (`/tmp/exosuit-shared-rows-web.log`). Full headless tests pass
+  (`/tmp/exosuit-bounded-buffer-offset-tests.log`). Graphical build passes as
+  part of each benchmark, with actual loaded UIKit hashes recorded.
+- Fresh typing captures pass across 30 input frames each: small Unicode
+  37.79 ms p95 (`/tmp/exosuit-shared-rows-small`), 1 MiB varied-key long line
+  39.47 ms p95 (`/tmp/exosuit-bounded-buffer-offset-1mb`), and 10 MiB
+  30.96 ms p95 (`/tmp/exosuit-shared-rows-10mb`). These are single captures;
+  they do not establish universal latency or complete the milestone.
+- Resume M9.1 by checking final decoration behavior and the remaining
+  changed-row invalidation requirements. Changed wrapping still owns full row
+  arrays; general styled Unicode uses the correct fallback. Do not mark M9
+  complete from the guarded ASCII or these typing fixtures alone.
+
 ## M9.1 — typing verification correction, 2026-10-02
 
 - The earlier delivered-input typing captures do not validate the recent native
