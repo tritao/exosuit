@@ -36,6 +36,16 @@ class DecorationSmokeApp extends ExosuitApp {
 		super(context.fonts, null, context, path, null, null, null, DecorationSmokeMain.createTerminal);
 		this.phase = phase;
 		installMarks(0);
+		if (phase == "ime-selection-affinity") {
+			var view = host.activeView();
+			if (view == null) throw "IME regression has no document";
+			var text = "";
+			for (_ in 0...5) text += "ab é á 👩‍💻 אבג العربية ﬁ ffi\t0123456789 long wrapping text long wrapping text\n";
+			view.document.buffer.replaceAllText(text, view.selection);
+			host.getPluginDecorations().removeOwner("smoke");
+			host.setDocumentSearchMatches([]);
+		}
+
 		if (phase == "gutter-aligned") {
 			var view = host.activeView();
 			if (view == null) throw "gutter fixture has no view";
@@ -171,6 +181,27 @@ class DecorationSmokeApp extends ExosuitApp {
 
 	override public function submit(frame:LayoutFrame):nativekit.ui.core.RenderNode {
 		frames++;
+		if (phase == "ime-selection-affinity" && frames == 4) {
+			var view = host.activeView(), previous = ui.root;
+			if (view == null || previous == null) throw "IME regression lost editor";
+			var node = findEditor(previous, "editor:" + view.document.id);
+			if (node == null) throw "IME regression missing text field";
+			ui.focusWidget(node.id);
+			var bounds = node.globalBounds();
+			ui.pointerDown(bounds.x + 198, bounds.y + 105, 0);
+			ui.pointerMove(bounds.x + 89, bounds.y + 48);
+			ui.pointerUp(bounds.x + 89, bounds.y + 48, 0);
+			var state:State<TextEditorState> = ui.buildContext.existingState(node.id);
+			var editor = state.value;
+			if (editor.selectionStart == editor.selectionEnd ||
+				editor.focusPosition().offset == editor.selectionStart)
+				throw "IME regression did not exercise visual affinity";
+			var rects = editor.layout.selectionRangeRects(editor.anchorPosition(), editor.focusPosition());
+			if (rects.length == 0) throw "IME regression discarded geometry";
+			for (rect in rects) if (rect.start < editor.selectionStart || rect.end > editor.selectionEnd)
+				throw "IME range rectangle falls outside logical selection";
+		}
+
 		if (phase == "terminal-editor-transfer" && frames == 4) {
 			openTerminal();
 			transferredTerminal = host.activePanelTerminal();
@@ -429,6 +460,8 @@ class DecorationSmokeApp extends ExosuitApp {
             ui.pointerUp(bounds.x + 20, bounds.y + 20, 1);
         }
 		var root = super.submit(frame);
+		if (phase == "ime-selection-affinity" && frames == 5)
+			trace("PASS: real GTK pointer selection publishes logical IME range tags with visual affinity");
 
 
 		if (phase == "terminal-group-migrate" && frames == 6) {

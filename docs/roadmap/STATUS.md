@@ -2,6 +2,56 @@
 
 Last updated: 2026-10-02.
 
+## IME range affinity correction, 2026-10-02
+
+- Fixed TextLayout.selectionRangeRects to derive logical insertion offsets
+  through offsetFromPosition, while retaining original visual positions and
+  affinity for the endpoint carets. Intermediate rectangles use canonical
+  logical boundaries. No text copy or empty-geometry recovery was added.
+- TextEditorLayout normalizes logical range ordering before chunk/viewport
+  clipping and retains visual positions in the cache key. At a chunk boundary,
+  a visual endpoint from the preceding chunk uses this chunk's canonical edge.
+- Added UIKit regressions for forward/reverse affinity endpoints, geometry
+  preservation, repeated cached editor queries and the preceding-chunk edge.
+  App UI regression ime-selection-affinity reproduces the original GTK drag
+  and requires nonempty geometry entirely inside the logical selection.
+- Reduced GTK reproducer now passes (21074, exit 0), log
+  `/tmp/exosuit-ime-affinity-fixed-run.log`. First full app UI/pixel run passed
+  (44806), log `/tmp/exosuit-ime-affinity-ui.log`, before final boundary handling.
+- Broader framework initially hit a Skribidi property lookup assertion.
+  Repeating with original committed UIKit files also aborted (57760, exit 134),
+  log `/tmp/uikit-ime-affinity-baseline.log`. Initial whole-empty-document guard
+  did not address it and was removed. Actual defect: hit-testing an empty final
+  line in a nonempty newline-terminated layout reads text properties at count.
+- Vendor regression reproduced that assertion (before exit 134) and full
+  Skribidi unit suite passed after fix (50371), logs
+  `/tmp/skribidi-ime-final-line-before.log` and
+  `/tmp/skribidi-ime-final-line-after.log`. Vendor commit e1c33fe bounds-checks
+  control-EOL character pruning without changing document-end insertion carets.
+  Native text-engine regression passed (77303), log
+  `/tmp/uikit-ime-final-line-native.log`, fresh/replaced empty and trailing-newline
+  documents at left/center/right coordinates.
+- Complete UIKit framework gate passed (13552, exit 0), log
+  `/tmp/uikit-ime-affinity-complete-framework.log`, including new affinity/cache/
+  chunk-edge regressions and all existing 4,000-node/input-routing cases.
+  Boundary regression initially assumed selection excluded its preceding newline;
+  corrected expectation after observing model grapheme alignment (255..259)
+  versus the three visible letter rectangles (256..259).
+- Final full app UI/pixel gate passed (44376, exit 0), log
+  `/tmp/exosuit-ime-affinity-ui-final.log`, artifacts
+  `/tmp/exosuit-ime-affinity-ui-final`. Desktop build passed (94479, exit 0),
+  log `/tmp/exosuit-ime-affinity-desktop.log`. Both browser targets passed
+  (15245, exit 0, Chrome Testing 154), log `/tmp/exosuit-ime-affinity-web.log`.
+- Materia commit 168c0f7a2 owns the two geometry implementations, framework/native
+  regressions and Skribidi pin e1c33fe. Exosuit pins that Materia revision and
+  includes the GTK pointer regression in its regular UI suite. No fallback or
+  diagnostic logging reintroduced into TextInputBridge. No compiler changes
+  made; pre-existing Haxeon/NativeKit gitlink dirt preserved.
+- Next: manual graphical acceptance/relaunch when requested; continue remaining
+  M9.2 restart and legacy/corrupt session checks. This fixes the reproduced
+  geometry rejection; no broader physical IME acceptance claimed.
+  Physical desktop IME and non-Linux acceptance remain unclaimed.
+
 ## IME geometry fallback reverted and rejection reproduced, 2026-10-02
 
 - User requested reverting the pre-existing uncommitted TextInputBridge retry.
@@ -30,7 +80,7 @@ Last updated: 2026-10-02.
   visual offset plus affinity separately from the logical offset returned by
   offsetFromPosition. TextField builds IME range rectangles with those visual
   endpoints; TextLayout.selectionRangeRects tags rectangles using raw offsets.
-  With a trailing-affinity endpoint, tags can precede the logical selection.
+  With an affinity-bearing endpoint, tags can precede the logical selection.
   NativeKit correctly rejects range tags outside the state selection.
 - Next: add a retained regression for this endpoint/affinity mismatch and fix
   logical range tagging while preserving shaped visual geometry. Keep native
