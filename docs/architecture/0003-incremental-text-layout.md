@@ -200,7 +200,18 @@ absolute glyph origins. Bulk array compatibility reads may populate a separate
 cache; rendering and geometry must not request that cache. Differential tests
 must prove both answers and absence of full shape arrays on indexed queries.
 This does not implement bounded pending-row reflow or complete M9.1.
-Whole-paragraph verification and row rebuilding remain open.
+For the guarded lowercase ASCII, left-aligned character-wrapping case, snapshot
+installation records shape and row eligibility. Edits reuse that immutable
+metadata instead of rescanning the original paragraph. Reflow starts at the
+first affected row and can reuse a suffix when its source boundary and row
+number recover. Matching row numbers preserve exact vertical geometry; a row
+count shift currently continues reflow through the remaining tail. Lookahead
+is limited to a small multiple of the row width on this path.
+
+Unchanged row and run metadata are still copied into each generation, and final
+alignment/publication still visit rows. Reflow counters measure wrapping work,
+not total edit work. Sharing row metadata and bounding pending-row reflow and
+publication remain open.
 
 ## Verification before activation
 

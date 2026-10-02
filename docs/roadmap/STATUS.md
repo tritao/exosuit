@@ -2,6 +2,49 @@
 
 Last updated: 2026-10-02.
 
+## M9.1 — affected-row reflow, 2026-10-02
+
+- Skribidi `702daa6`, pinned by Materia `6a6a640c0`, implements guarded ASCII
+  reflow starting at the first affected row and reuses a recovered
+  suffix only when its source boundary and row number match. Cached snapshot
+  eligibility avoids scanning the source again at the first edit. Unchanged
+  font metrics are reused; row-count changes conservatively reflow the tail.
+  Row/run arrays are still copied and final alignment/publication visit rows.
+- Reduced regression fails before on missing prefix/suffix reuse
+  (`/tmp/exosuit-bounded-row-before.log`) and passes after: 60 prefix rows,
+  10 rebuilt rows, 954 suffix rows, 100 measured wrapping clusters. It also
+  compares all glyphs for a row-count-changing insertion and invalidates cached
+  eligibility after an uppercase source rebuild. Full vendor unit suite passes
+  (`/tmp/exosuit-bounded-row-certificate-unit.log`). Counters exclude copying,
+  alignment and publication and do not imply bounded total edit work.
+- Full native differential/lifetime probe passes: 30/30 shared edits at both
+  4,096 and 1 MiB, 240 accepted/one rejected sweep, both 100-generation sequences
+  and 692 moved internal wrap boundaries. Native 1 MiB mean CPU is 24.73 ms,
+  versus the preceding slice's 27.41 ms
+  (`/tmp/exosuit-bounded-row-certificate-probe.log`). An intermediate version
+  repeated unchanged-row font work and regressed to 33.93 ms before correction
+  (`/tmp/exosuit-bounded-row-probe.log`).
+- ASan/leak native-only gate passes (`/tmp/exosuit-bounded-row-asan.log`),
+  UIKit native tests pass 3/3 (`/tmp/exosuit-bounded-row-uikit.log`), real editor
+  decoration/navigation/typing/undo passes
+  (`/tmp/exosuit-bounded-row-decoration.log`), and full headless suite passes
+  (`/tmp/exosuit-bounded-row-headless.log`).
+- Delivered-input gates pass across 30 frames: 1 MiB varied-key 48.56 ms p95,
+  50.48 ms maximum (`/tmp/exosuit-bounded-row-1mb`); 10 MiB repeat-key 43.06 ms
+  p95, 46.63 ms maximum (`/tmp/exosuit-bounded-row-10mb`). Both are slower than
+  the preceding captures (44.59/30.85 ms p95); isolated native CPU improvement
+  does not establish end-to-end improvement. The gate applies to p95, not max.
+- Both browser targets build with matching imports. Wasm32 passes all typing,
+  save/readback, URL and reload checks. The first Wasm-GC reload failed with
+  `HaxeonWasmHost is not defined` and canceled script requests
+  (`/tmp/exosuit-bounded-row-web.log`); two fresh runs of the same built target
+  pass without changes (`/tmp/exosuit-bounded-row-web-gc-recheck.log`,
+  `/tmp/exosuit-bounded-row-web-gc-repeat.log`). The intermittent reload issue
+  is unresolved; these passes do not erase the original composed gate failure.
+- Next: shared row metadata and bounded publication, then bounded
+  pending tail reflow. M9.1/full goal remain open; pre-existing dirty inputs
+  and unavailable platform gates remain preserved.
+
 ## M9.1 — indexed changed-wrap reflow, 2026-10-02
 
 - Skribidi `b9a4ad9` adapts the existing line builder to read clusters,

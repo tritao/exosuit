@@ -88,6 +88,15 @@ unsupported scripts use full layout.
 Rendering and geometry read the same generation. These native checks are
 separate from the experimental piece-splice timings above.
 
+The vendor unit regression `test_incremental_row_work` additionally checks
+affected-row reflow. Its equal-length variable-width edit reuses 60 prefix
+rows and 954 suffix rows, rebuilds 10 rows, and measures 100 clusters during
+wrapping. It compares every glyph against a fresh layout. An insertion that
+changes the row count verifies conservative tail reflow, and rebuilding the
+source to uppercase verifies that cached ASCII eligibility is invalidated.
+These counters exclude unchanged-row copying, alignment and publication;
+they do not establish bounded total edit cost.
+
 Repeated 4,096- and 1 MiB-codepoint fixtures compare accepted native edits with
 fresh layouts, including cluster metadata, glyph positions, culling bounds and
 sampled carets. The variable-advance sweep includes accepted edits and rejection.
