@@ -17,6 +17,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../../nativeki
 from web_smoke import WebSocket, wait_for_page  # noqa: E402
 
 
+class ContextUnavailable(RuntimeError):
+    """The browser replaced a document while a protocol evaluation was pending."""
+
+
 class Page:
     def __init__(self, socket):
         self.socket = socket
@@ -24,6 +28,9 @@ class Page:
         self.console = []
         self.network_failures = []
         self.loaded_documents = set()
+        self.default_contexts = {}
+        self.main_frame_id = None
+        self.navigation_events = []
 
     def command(self, method, params=None):
         self.next_id += 1
@@ -34,6 +41,24 @@ class Page:
                 continue
             message = json.loads(payload)
             event, params_ = message.get("method"), message.get("params", {})
+            if event == "Runtime.executionContextCreated":
+                context = params_["context"]
+                aux = context.get("auxData", {})
+                if aux.get("isDefault") and aux.get("frameId"):
+                    self.default_contexts[aux["frameId"]] = context
+            elif event == "Runtime.executionContextDestroyed":
+                unique_id = params_.get("executionContextUniqueId")
+                self.default_contexts = {frame: context for frame, context in self.default_contexts.items()
+                                         if (context["uniqueId"] != unique_id if unique_id
+                                             else context["id"] != params_["executionContextId"])}
+            elif event == "Runtime.executionContextsCleared":
+                self.default_contexts.clear()
+            elif event == "Page.frameNavigated" and not params_["frame"].get("parentId"):
+                self.main_frame_id = params_["frame"]["id"]
+            if event in ("Runtime.executionContextCreated", "Runtime.executionContextDestroyed",
+                         "Runtime.executionContextsCleared", "Page.frameNavigated", "Page.lifecycleEvent"):
+                self.navigation_events.append({"event": event, "params": params_})
+                self.navigation_events = self.navigation_events[-32:]
             if event == "Page.lifecycleEvent" and params_.get("name") == "load":
                 self.loaded_documents.add((params_["frameId"], params_["loaderId"]))
             if event == "Network.loadingFailed":
@@ -52,11 +77,19 @@ class Page:
                     self.console.append("[error] " + entry.get("text", ""))
             if message.get("id") == self.next_id:
                 if "error" in message:
-                    raise RuntimeError(json.dumps(message["error"]))
+                    error = message["error"]
+                    if method == "Runtime.evaluate" and any(text in error.get("message", "") for text in
+                            ("Execution context was destroyed", "Cannot find context", "uniqueContextId not found")):
+                        raise ContextUnavailable(json.dumps(error))
+                    raise RuntimeError(json.dumps(error))
                 return message.get("result", {})
 
     def evaluate(self, expression):
-        result = self.command("Runtime.evaluate", {"expression": expression, "returnByValue": True})
+        context = self.default_contexts.get(self.main_frame_id)
+        if not context:
+            raise ContextUnavailable("Cannot find context for the main frame")
+        result = self.command("Runtime.evaluate", {"expression": expression, "returnByValue": True,
+                                                    "uniqueContextId": context["uniqueId"]})
         if result.get("exceptionDetails"):
             raise RuntimeError(json.dumps(result["exceptionDetails"]))
         return result.get("result", {}).get("value")
@@ -79,16 +112,21 @@ def main():
     page.command("Log.enable")
     page.command("Network.enable")
     page.command("Page.bringToFront")
+    page.main_frame_id = page.command("Page.getFrameTree")["frameTree"]["frame"]["id"]
     deadline = time.monotonic() + options.timeout
     state = {}
     while time.monotonic() < deadline:
-        state = page.evaluate("JSON.stringify(window.exosuit || null)")
+        try:
+            state = page.evaluate("JSON.stringify(window.exosuit || null)")
+        except ContextUnavailable:
+            time.sleep(0.25)
+            continue
         state = (json.loads(state) if state else None) or {}
         if state.get("state") in ("failed", "stopped") or state.get("frames", 0) >= options.frames:
             break
         time.sleep(0.25)
     if state.get("state") != "running":
-        raise AssertionError(json.dumps({"state": state, "console": page.console, "networkFailures": page.network_failures}, ensure_ascii=False))
+        raise AssertionError(json.dumps({"state": state, "console": page.console, "networkFailures": page.network_failures, "navigation": page.navigation_events}, ensure_ascii=False))
 
     def snapshot():
         return json.loads(page.evaluate("window.exosuit.snapshot(); JSON.stringify(window.exosuit.document)"))
@@ -190,9 +228,7 @@ def main():
             continue
         try:
             probe = json.loads(page.evaluate("JSON.stringify({origin: performance.timeOrigin, state: window.exosuit || null})"))
-        except RuntimeError as error:
-            if "Execution context was destroyed" not in str(error) and "Cannot find context" not in str(error):
-                raise
+        except ContextUnavailable:
             time.sleep(0.25)
             continue
         if probe["origin"] == previous_origin:
@@ -200,7 +236,7 @@ def main():
             continue
         state = probe["state"] or {}
         if state.get("state") == "failed":
-            raise AssertionError(json.dumps({"state": state, "console": page.console, "networkFailures": page.network_failures}, ensure_ascii=False))
+            raise AssertionError(json.dumps({"state": state, "console": page.console, "networkFailures": page.network_failures, "navigation": page.navigation_events}, ensure_ascii=False))
         if state.get("state") == "running" and state.get("frames", 0) >= options.frames:
             reloaded = True
             break

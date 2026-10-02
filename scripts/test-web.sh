@@ -24,6 +24,11 @@ if [[ -z "$browser" ]] || ! command -v "$browser" >/dev/null 2>&1; then
 	echo "PENDING: browser gate (Chrome unavailable)"
 	exit 0
 fi
+# Emscripten supplies Node even when it is not on the invoking shell's PATH.
+(
+    source "$emsdk_dir/emsdk_env.sh" >/dev/null 2>&1
+    "${EXOSUIT_WEB_NODE:-node}" "$root_dir/web/tools/test-launcher-lifecycle.cjs"
+)
 for target in wasm32 wasm-gc; do
 	build_dir="$root_dir/build/web-ci-$target"
 	EXOSUIT_WEB_TARGET="$target" EXOSUIT_WEB_BUILD_DIR="$build_dir" "$root_dir/web/build.sh"

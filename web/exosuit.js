@@ -8,8 +8,11 @@ const statusLine = document.getElementById("status");
 const report = window.exosuit = {state: "loading", frames: 0, error: null, unavailable: []};
 let hostMemory = null;
 let guest = null;
+let departing = false;
+window.addEventListener("pagehide", () => { departing = true; });
 
 function fail(message) {
+  if (departing) return;
   report.state = "failed";
   report.error = message;
   statusLine.textContent = message;
@@ -41,6 +44,7 @@ function hostContract() {
 }
 
 function frame(time) {
+  if (departing) return;
   try {
     const result = guest["app.WebMain.frame"](time);
     if (result < 0) {
@@ -60,11 +64,13 @@ function frame(time) {
 }
 
 async function startGuest() {
+  if (departing) return;
   const started = await HaxeonWasmHost.instantiate(fetch("exosuit_guest.wasm"),
     {emscripten: Module, memory: hostMemory, contract: hostContract(), print: text => {
       if (text.startsWith("exosuit-state:")) report.document = JSON.parse(text.slice("exosuit-state:".length));
       else console.log(text);
     }});
+  if (departing) return;
   guest = started.exports;
   report.snapshot = () => guest["app.WebMain.snapshot"]();
   report.openDocumentation = () => guest["app.WebMain.openDocumentation"]();
@@ -81,18 +87,24 @@ var Module = {
   instantiateWasm(imports, receiveInstance) {
     WebAssembly.instantiateStreaming(fetch("exosuit_web.wasm"), imports)
       .then(result => {
+        if (departing) return;
         hostMemory = Object.values(result.instance.exports).find(value => value instanceof WebAssembly.Memory);
         receiveInstance(result.instance);
       })
-      .catch(error => fail("The NativeKit host failed to load: " + error.message));
+      .catch(error => {
+        if (!departing) fail("The NativeKit host failed to load: " + error.message);
+      });
     return {};
   },
   onRuntimeInitialized() {
+    if (departing) return;
     if (!hostMemory) {
       fail("The NativeKit host did not export its memory");
       return;
     }
-    startGuest().catch(error => fail("The editor failed to start: " + (error.stack || error.message)));
+    startGuest().catch(error => {
+      if (!departing) fail("The editor failed to start: " + (error.stack || error.message));
+    });
   },
   print: text => console.log(text),
   printErr: text => console.error(text)
