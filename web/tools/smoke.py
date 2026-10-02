@@ -27,6 +27,7 @@ class Page:
         self.next_id = 0
         self.console = []
         self.network_failures = []
+        self.network_requests = {}
         self.loaded_documents = set()
         self.default_contexts = {}
         self.main_frame_id = None
@@ -61,8 +62,21 @@ class Page:
                 self.navigation_events = self.navigation_events[-32:]
             if event == "Page.lifecycleEvent" and params_.get("name") == "load":
                 self.loaded_documents.add((params_["frameId"], params_["loaderId"]))
-            if event == "Network.loadingFailed":
-                self.network_failures.append(params_)
+            if event == "Network.requestWillBeSent":
+                request = params_["request"]
+                self.network_requests[params_["requestId"]] = {
+                    "url": request["url"], "method": request["method"],
+                    "loaderId": params_.get("loaderId"), "frameId": params_.get("frameId"),
+                    "documentURL": params_.get("documentURL"), "initiator": params_.get("initiator"),
+                }
+                if len(self.network_requests) > 256:
+                    self.network_requests.pop(next(iter(self.network_requests)))
+            elif event == "Network.loadingFinished":
+                self.network_requests.pop(params_["requestId"], None)
+            elif event == "Network.loadingFailed":
+                failure = dict(params_)
+                failure["request"] = self.network_requests.pop(params_["requestId"], None)
+                self.network_failures.append(failure)
             if event == "Runtime.consoleAPICalled":
                 text = " ".join(str(argument.get("value", argument.get("description", "")))
                                 for argument in params_.get("args", []))
@@ -102,15 +116,44 @@ def main():
     parser.add_argument("--frames", type=int, default=30)
     parser.add_argument("--timeout", type=float, default=120.0)
     parser.add_argument("--screenshot")
+    parser.add_argument("--trace-lifecycle", action="store_true", help="Record reload lifecycle and fetch timing for diagnosis")
     options = parser.parse_args()
 
     target = wait_for_page(options.debug_port, options.page_url, 30)
     page = Page(WebSocket(target["webSocketDebuggerUrl"]))
+    # Startup compilation/rendering can occupy the renderer beyond the socket
+    # connection timeout. Bound protocol waits within the requested smoke budget.
+    page.socket.socket.settimeout(min(30.0, options.timeout))
     page.command("Runtime.enable")
     page.command("Page.enable")
     page.command("Page.setLifecycleEventsEnabled", {"enabled": True})
     page.command("Log.enable")
     page.command("Network.enable")
+    if options.trace_lifecycle:
+        page.command("Page.addScriptToEvaluateOnNewDocument", {"source": """
+          (() => {
+            const trace = window.__exosuitLifecycleTrace = [];
+            const record = (event, detail) => {
+              trace.push({event, detail, time: performance.now(), origin: performance.timeOrigin,
+                          ready: document.readyState});
+              if (trace.length > 128) trace.shift();
+            };
+            for (const name of ['beforeunload', 'pagehide', 'pageshow', 'load'])
+              window.addEventListener(name, event => record(name, {persisted: event.persisted}));
+            const original = window.fetch;
+            window.fetch = function(...args) {
+              const url = String(args[0]);
+              record('fetch-start', url);
+              return original.apply(this, args).then(response => {
+                record('fetch-response', {url, status: response.status});
+                return response;
+              }, error => {
+                record('fetch-error', {url, name: error.name, message: error.message});
+                throw error;
+              });
+            };
+          })();
+        """})
     page.command("Page.bringToFront")
     page.main_frame_id = page.command("Page.getFrameTree")["frameTree"]["frame"]["id"]
     deadline = time.monotonic() + options.timeout
@@ -227,7 +270,7 @@ def main():
             time.sleep(0.25)
             continue
         try:
-            probe = json.loads(page.evaluate("JSON.stringify({origin: performance.timeOrigin, state: window.exosuit || null})"))
+            probe = json.loads(page.evaluate("JSON.stringify({origin: performance.timeOrigin, state: window.exosuit || null, trace: window.__exosuitLifecycleTrace || null})"))
         except ContextUnavailable:
             time.sleep(0.25)
             continue
@@ -236,7 +279,7 @@ def main():
             continue
         state = probe["state"] or {}
         if state.get("state") == "failed":
-            raise AssertionError(json.dumps({"state": state, "console": page.console, "networkFailures": page.network_failures, "navigation": page.navigation_events}, ensure_ascii=False))
+            raise AssertionError(json.dumps({"probe": probe, "state": state, "console": page.console, "networkFailures": page.network_failures, "navigation": page.navigation_events}, ensure_ascii=False))
         if state.get("state") == "running" and state.get("frames", 0) >= options.frames:
             reloaded = True
             break

@@ -25,6 +25,9 @@ opening and a fresh page reload. Any console or page error fails the check.
 `EXOSUIT_WEB_SITE_DIR` selects a previously built site; `EXOSUIT_WEB_BROWSER`
 selects Chrome. `--screenshot PATH` preserves the fresh session and a `-edited` capture of the
 Unicode document before reload.
+`--trace-lifecycle` adds bounded fetch and page-lifecycle timing to reload
+failure reports. Protocol calls wait at most 30 seconds within the requested
+`--timeout` budget. Active-document startup errors still fail immediately.
 
 The loader's `window.exosuit` report includes lifecycle, frame count, unavailable
 imports and a snapshot function. The snapshot crosses the host boundary as
