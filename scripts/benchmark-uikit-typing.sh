@@ -106,4 +106,6 @@ result = dict(fixture=sys.argv[2], cpu=cpu, bytes=(root / "input.txt").stat().st
               platform=platform.platform())
 (root / "result.json").write_text(json.dumps(result, indent=2) + "\n")
 print(json.dumps(result, indent=2))
+if not result["withinBudget"]:
+    raise SystemExit(f"typing p95 {p95:.2f} ms exceeds the {result['budgetMs']} ms budget")
 PY

@@ -43,13 +43,15 @@ Last updated: 2026-10-02.
   window. Unaffected chunk boundaries stay stable; affected chunks grow to
   128 paragraphs before local splitting. Next: audit fractional-origin
   cancellation and actual app newline raster reuse, then finish the decoration
-  invalidation matrix. First run a matched previous-implementation typing
-  control: the new chunk slice has two failed 1 MiB timing runs, so the current
-  performance gate is not accepted. Splits still move some rows between native layouts. Exact native
+  invalidation matrix. A matched previous-implementation control also failed at 59.27 ms p95,
+  while the restored current implementation passed at 40.61 ms. Preserve the
+  earlier failures; next profile long-line edit dispatch and native-render
+  variability before claiming consistent performance. The benchmark now exits
+  nonzero when its p95 budget is missed. Splits still move some rows between native layouts. Exact native
   equivalence still conservatively rejects fractional-origin differences. Preserve the
   1 MiB, 10 MiB and graphical pixel gates.
   Preserve M8 and both browser gates.
-- Current follow-on HEADs: Exosuit `d56d2ae` before this ledger commit;
+- Current follow-on HEADs: Exosuit `9284b95` before this ledger commit;
   Materia `33d36d62a` carries row-scoped glyph commands, shallow row raster
   caching, rebased source metadata, a parent repaint cost regression, and the
   Skribidi bulk-copy and guarded variable-width row-geometry reuse slices. The
@@ -96,6 +98,33 @@ Last updated: 2026-10-02.
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M9.1 — matched chunk control and enforced timing budget
+
+- Built the previous `TextEditorLayout.hx` from Materia `f084a2837` with all
+  other current inputs unchanged, restored the source, and ran the standard
+  1 MiB varied-key workload. The control fails at **59.27 ms p95**, 70.40 ms
+  maximum, artifact `/tmp/exosuit-chunk-control-1mb`. Rebuilt the current
+  `33d36d62a` implementation and ran the same workload: **40.61 ms p95**,
+  41.88 ms maximum, artifact `/tmp/exosuit-chunk-candidate-1mb`. Both have
+  30 actual input frames. Sources and the built app were restored to current
+  before completion; unrelated parent changes remain untouched.
+- These runs show that the chunk change is not necessary for the timing
+  failure. One pair does not establish equal performance or explain every
+  earlier outlier. The slower control frame includes 62.81 ms of edit dispatch
+  and 5.24 ms of native rendering. Scheduler samples are preserved in
+  `/tmp/exosuit-chunk-scheduler.jsonl`; their windows are too coarse for exact
+  phase attribution, so they do not prove host load caused the failures.
+- The benchmark formerly printed `withinBudget: false` but still exited zero.
+  It now saves/prints its result and exits nonzero on a missed p95 budget.
+  Replaying the final result parser against copied real control/candidate
+  captures verifies exit 1/0 respectively and retained result artifacts;
+  `bash -n` and diff checks pass. No new renderer or chunk source change was
+  needed for this control.
+- M9.1 stays active. Next attribute long-line dispatch/copying cost and
+  native-render variability, preserving the stable chunk design. Then resume
+  fractional-origin, actual newline raster and decoration-invalidation audits.
+  The full M9–M15 goal is unchanged.
 
 ### M9.1 — stable bounded chunk windows for all local edits
 
