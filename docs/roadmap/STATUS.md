@@ -2,6 +2,41 @@
 
 Last updated: 2026-10-02.
 
+## IME geometry fallback reverted and rejection reproduced, 2026-10-02
+
+- User requested reverting the pre-existing uncommitted TextInputBridge retry.
+  Restored only that file to its index version; UIKit has no pending file change.
+  Original strict NativeKit geometry validation remains enabled.
+- Full existing UI/pixel gate passed without fallback (10478, exit 0), log
+  `/tmp/exosuit-ime-repro-ui.log`, artifacts `/tmp/exosuit-ime-repro-ui`.
+  This gate alone did not reproduce the original geometry defect.
+- Separate 91-frame GTK pointer/composition stress fixture reproduced error -2
+  before composition cases ran (21366 and diagnostic rerun 45601, exit 1).
+  Diagnostic log `/tmp/exosuit-ime-geometry-stress-run2.log` shows frame 54:
+  logical selection 181..345, visual endpoints 345..180 with affinities 1..2;
+  generated range rect 180..181 lies outside the logical selection.
+- Reduced to one pointer drag on frame 4, then to a standalone 67-line app
+  with five repeated mixed Unicode lines; reproducer build passed (64338),
+  run failed as expected (66704, exit 1). Logs
+  `/tmp/exosuit-ime-geometry-minimal-build.log` and
+  `/tmp/exosuit-ime-geometry-minimal-run.log`. Source and manifest preserved
+  at `/tmp/exosuit-ime-geometry-stress/src/app/DecorationSmokeMain.hx` and
+  `/tmp/exosuit-ime-geometry-stress/haxeon.json`. No production code changed.
+- Exact repeat: isolated PRAGTICAL_PORTABLE, xvfb-run haxeon run --project
+  /tmp/exosuit-ime-geometry-stress/haxeon.json --
+  /tmp/exosuit-ime-geometry-stress/project/Main.hx <capture directory>.
+  Window 900x600; drag in the text field from local (198,105) to (89,48).
+- Root-cause evidence: TextEditorState.placeCaretAt retains the shaping-engine
+  visual offset plus affinity separately from the logical offset returned by
+  offsetFromPosition. TextField builds IME range rectangles with those visual
+  endpoints; TextLayout.selectionRangeRects tags rectangles using raw offsets.
+  With a trailing-affinity endpoint, tags can precede the logical selection.
+  NativeKit correctly rejects range tags outside the state selection.
+- Next: add a retained regression for this endpoint/affinity mismatch and fix
+  logical range tagging while preserving shaped visual geometry. Keep native
+  validation and avoid empty-geometry retry. Actual desktop IME input is still
+  unclaimed; failure reproduced with ordinary pointer selection before IME use.
+
 ## Shared terminal and document editor tabs, 2026-10-02
 
 - Implemented typed UiEditorTab variants for document views and owned terminal
