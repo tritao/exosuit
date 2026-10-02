@@ -240,6 +240,23 @@ class DocumentTestMain {
 		unicodeBridge.document.replace(1, 2, "X");
 		require(unicodeBridge.applyEditTransaction(unicodeBridgeSelection, new EditTransaction(1, 2, "X", 2, 2)) && unicodeBridge.text == "AXB"
 			&& unicodeBridge.document.text == "AXB", "widget-originated edit mishandled a surrogate pair codepoint offset");
+		// Replay at every boundary across complete lines and surrogate pairs,
+		// including line ends and the document end, then round-trip history.
+		var replaySource = "A😀B\n\nC😀D";
+		var replayCount = new TextBuffer(replaySource).document.codepointCount;
+		for (offset in 0...replayCount + 1) {
+			var replay = new TextBuffer(replaySource), replaySelection = new BufferSelection();
+			var expected = replay.document.sliceCodepoints(0, offset) + "X" +
+				replay.document.sliceCodepoints(offset, replayCount);
+			replay.document.replace(offset, offset, "X");
+			require(replay.applyEditTransaction(replaySelection, new EditTransaction(offset, offset, "X", offset + 1, offset + 1)) &&
+				replay.text == expected && replay.document.text == expected,
+				"widget replay at multiline Unicode boundary failed");
+			require(replay.undo(replaySelection) && replay.text == replaySource && replay.document.text == replaySource,
+				"multiline Unicode replay undo failed");
+			require(replay.redo(replaySelection) && replay.text == expected && replay.document.text == expected,
+				"multiline Unicode replay redo failed");
+		}
 		// Document-level: a widget-originated edit must flip dirty state and
 		// undo must clear it again, exactly as a buffer-originated edit does.
 		var nestedBridge = new TextBuffer("before");

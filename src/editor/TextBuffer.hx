@@ -360,8 +360,17 @@ class TextBuffer {
 	function positionFromCodepointOffset(offset:Int):BufferPosition {
 		var remaining = offset < 0 ? 0 : offset;
 		for (lineIndex in 0...lines.length) {
-			var count = codepointCountOf(lines[lineIndex]);
-			if (remaining <= count) return sanitize(new BufferPosition(lineIndex, codepointIndexToColumn(lines[lineIndex], remaining)));
+			var value = lines[lineIndex];
+			var count = 0, column = 0;
+			// Stop at the requested offset rather than counting the entire
+			// line first. Earlier complete lines still contribute their length.
+			while (count < remaining && column < value.length) {
+				var code = value.charCodeAt(column);
+				column += isHighSurrogate(code) && column + 1 < value.length &&
+					isLowSurrogate(value.charCodeAt(column + 1)) ? 2 : 1;
+				count++;
+			}
+			if (count == remaining) return sanitize(new BufferPosition(lineIndex, column));
 			remaining -= count + 1;
 		}
 		return endPosition();
@@ -375,16 +384,6 @@ class TextBuffer {
 			count++;
 		}
 		return count;
-	}
-
-	static function codepointIndexToColumn(value:String, codepointIndex:Int):Int {
-		var column = 0, count = 0;
-		while (count < codepointIndex && column < value.length) {
-			var code = value.charCodeAt(column);
-			column += isHighSurrogate(code) && column + 1 < value.length && isLowSurrogate(value.charCodeAt(column + 1)) ? 2 : 1;
-			count++;
-		}
-		return column;
 	}
 
 	function advance(start:BufferPosition, value:String):BufferPosition {
