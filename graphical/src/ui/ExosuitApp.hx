@@ -83,7 +83,8 @@ class ExosuitApp implements DesktopUiApplication {
 	final dock:DockWorkspaceModel;
 	var dockPanelContents:Array<DockPanelContent>;
 	final editorPanes:Map<Int, EditorPane> = new Map();
-	var terminalPane:Null<TerminalPanel>;
+	var nextTerminalId:Int = 1;
+	var pendingTerminalFocus:Bool = false;
 	final createTerminal:Null<(String, Void->Void, TerminalPalette)->TerminalPanel>;
 	var explorerRoot:Null<String>;
 	var explorerModel:Null<DirectoryTreeModel>;
@@ -113,14 +114,21 @@ class ExosuitApp implements DesktopUiApplication {
 		var capturedHost:UiWorkbenchHost = null;
 		application = new Application(function(exosuitTheme, focus, workspace, settings) {
 			capturedHost = new UiWorkbenchHost(exosuitTheme, focus, workspace, settings, requestFrame, {
+				model: dock,
+				focusEditor: function(id) { ui.buildContext.requestFocusAfterLayout(id); requestFrame(); },
 				toggleSidebar: toggleExplorerVisible,
-				activateExplorer: function() dock.activate("explorer"),
+				activateExplorer: function() {
+					if (explorerRoot == null && application.workspace.projects.length > 0)
+						explorerRoot = application.workspace.projects[0].root;
+					openExplorer();
+				},
 				activateProblems: function() dock.activate("problems"),
 				activateBuild: function() dock.activate("build")
 			});
 			return capturedHost;
 		}, null, null, this.capabilities);
 		host = capturedHost;
+		if (this.createTerminal != null) host.restoreTerminal = restoreTerminalTab;
 		host.caretRectProvider = function() {
 			var active = host.activeView();
 			if (active == null) return null;
@@ -130,21 +138,22 @@ class ExosuitApp implements DesktopUiApplication {
 		editorPalette = darkPalette ? application.theme : ExosuitPalette.lightEditor();
 		installCommands();
 		application.session.start();
+		if (dock.isOpen("terminal") && host.panelTerminals.length == 0) openTerminal();
 		if (openPath != null) openArgument(openPath);
 	}
 
 	function makeDock():DockWorkspaceModel {
 		var model = new DockWorkspaceModel();
-		model.register(new DockPanelDescriptor("explorer", "Explorer", true, true, IconName.FolderOpen));
-		model.register(new DockPanelDescriptor("editor", "Editor", false, true, IconName.NewFile));
-		model.register(new DockPanelDescriptor("problems", "Problems", true, true));
+		model.register(new DockPanelDescriptor("explorer", "Explorer", true, true, IconName.FolderOpen, nativekit.ui.docking.DockPanelHeaderMode.Dock, new nativekit.ui.docking.DockPanelGrouping("sidebar")));
+		model.register(new DockPanelDescriptor("editor", "Editor", false, true, IconName.NewFile, nativekit.ui.docking.DockPanelHeaderMode.Content, new nativekit.ui.docking.DockPanelGrouping("editors", false)));
+		model.register(new DockPanelDescriptor("problems", "Problems", true, true, null, nativekit.ui.docking.DockPanelHeaderMode.Dock, new nativekit.ui.docking.DockPanelGrouping("tools")));
 		if (capabilities.supports(Processes))
-			model.register(new DockPanelDescriptor("build", "Build Output", true, true, IconName.Terminal));
+			model.register(new DockPanelDescriptor("build", "Build Output", true, true, IconName.Terminal, nativekit.ui.docking.DockPanelHeaderMode.Dock, new nativekit.ui.docking.DockPanelGrouping("tools")));
 		if (capabilities.supports(Processes))
-			model.register(new DockPanelDescriptor("terminal", "Terminal", true, true, IconName.Terminal));
+			model.register(new DockPanelDescriptor("terminal", "Terminal", true, true, IconName.Terminal, nativekit.ui.docking.DockPanelHeaderMode.Dock, new nativekit.ui.docking.DockPanelGrouping("tools")));
 		dockPanelContents = [
 			new DockPanelContent("explorer", function(_) return explorerPanel()),
-			new DockPanelContent("editor", function(_) return editorPanel()),
+			new DockPanelContent("editor", function(_) return editorPanel("editor")),
 			new DockPanelContent("problems", function(_) return new ProblemsPanel(host))
 		];
 		if (capabilities.supports(Processes))
@@ -167,36 +176,124 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function openExplorer():Bool {
 		if (dock.isOpen("explorer")) return dock.activate("explorer");
-		if (!dock.dock("explorer", "editor", DockDropZone.Left)) return false;
+		if (!dock.dock("explorer", host.activePane.id, DockDropZone.Left)) return false;
 		dock.setSplitRatio([0], 0.22);
 		return true;
 	}
 
 	public function openTerminal():Void {
 		if (!capabilities.supports(Processes)) return;
-		if (terminalPane == null) {
-			if (createTerminal == null) return;
-			terminalPane = createTerminal(explorerRoot == null ? Sys.getCwd() : explorerRoot,
-				requestFrame, terminalPalette);
+		if (host.panelTerminals.length == 0) {
+			var terminal = newTerminalTab();
+			if (terminal == null) return;
+			host.panelTerminals.push(terminal);
+			host.activePanelTerminalIndex = 0;
 		}
-		if (!dock.isOpen("terminal")) dock.open("terminal", "build");
+		if (!dock.isOpen("terminal")) {
+			if (dock.isOpen("build")) dock.open("terminal", "build");
+			else if (dock.isOpen("problems")) dock.open("terminal", "problems");
+			else dock.dock("terminal", host.activePane.id, DockDropZone.Bottom);
+		}
 		dock.activate("terminal");
+		pendingTerminalFocus = true;
 		requestFrame();
+	}
+
+	function newTerminalTab():Null<UiTerminalTab> {
+		var number = nextTerminalId++;
+		return restoreTerminalTab("terminal-" + number, "Terminal " + number,
+			explorerRoot == null ? Sys.getCwd() : explorerRoot);
+	}
+
+	function restoreTerminalTab(id:String, title:String, cwd:String):Null<UiTerminalTab> {
+		var create = createTerminal;
+		if (create == null) return null;
+		var number = StringTools.startsWith(id, "terminal-") ? Std.parseInt(id.substring(9)) : null;
+		if (number != null && number >= nextTerminalId) nextTerminalId = number + 1;
+		var directory = FileSystem.exists(cwd) && FileSystem.isDirectory(cwd) ? cwd : Sys.getCwd();
+		try {
+			return new UiTerminalTab(id, title, cwd, create(directory, requestFrame, terminalPalette));
+		} catch (error:Dynamic) {
+			statusMessage = "Terminal: " + Std.string(error);
+			return null;
+		}
+	}
+
+	public function moveTerminalToEditor():Bool {
+		openTerminal();
+		var terminal = host.activePanelTerminal();
+		if (terminal == null) return false;
+		host.panelTerminals.splice(host.activePanelTerminalIndex, 1);
+		host.activePanelTerminalIndex = Std.int(Math.min(host.activePanelTerminalIndex, host.panelTerminals.length - 1));
+		if (host.panelTerminals.length == 0) dock.close("terminal");
+		host.attachTerminal(terminal);
+		pendingTerminalFocus = false;
+		requestFrame();
+		return true;
+	}
+
+	public function moveTerminalToPanel():Bool {
+		var item = host.activeTab();
+		var terminal = item == null ? null : UiEditorTabs.terminal(item);
+		if (terminal == null || !host.detachTerminal(terminal)) return false;
+		host.panelTerminals.push(terminal);
+		host.activePanelTerminalIndex = host.panelTerminals.length - 1;
+		openTerminal();
+		return true;
 	}
 
 	function toggleTerminal():Void {
 		if (dock.isOpen("terminal")) {
 			dock.close("terminal");
-			if (terminalPane != null) {
-				terminalPane.close();
-				terminalPane = null;
-			}
+			closePanelTerminals();
 			requestFrame();
 		} else openTerminal();
 	}
 
-	function terminalPanel():View
-		return terminalPane == null ? placeholderPanel("Terminal is closed.") : terminalPane;
+	function closePanelTerminals():Void {
+		for (terminal in host.panelTerminals) terminal.dispose();
+		host.panelTerminals.resize(0);
+		host.activePanelTerminalIndex = -1;
+	}
+
+	function terminalPanel():View {
+		if (host.panelTerminals.length == 0) return placeholderPanel("Terminal is closed.");
+		var items:Array<TabItem> = [];
+		for (terminal in host.panelTerminals) {
+			var view = new TerminalTabView(terminal, function() {
+				host.deactivateDocumentFocus();
+			}, function(_, id) {
+				if (pendingTerminalFocus && host.activePanelTerminal() == terminal) {
+					ui.buildContext.requestFocusAfterLayout(id);
+					pendingTerminalFocus = false;
+				}
+			}, function(event) {
+				host.activePanelTerminalIndex = host.panelTerminals.indexOf(terminal);
+				showContextMenu([new CommandMenuEntry("terminal:move-to-editor", "Move Terminal to Editor")],
+					event, function() return host.activePanelTerminal() == terminal && !terminal.disposed);
+			});
+			if (host.panelTerminals.length == 1) return view;
+			items.push(new TabItem("terminal:" + terminal.id, terminal.title, view));
+		}
+		var active = host.activePanelTerminal();
+		return Tabs.withOptions("terminal-sessions", items, active == null ? "" : "terminal:" + active.id, function(key) {
+			for (index in 0...host.panelTerminals.length) if (key == "terminal:" + host.panelTerminals[index].id) {
+				host.activePanelTerminalIndex = index;
+				pendingTerminalFocus = true;
+				requestFrame();
+			}
+		}, terminalTabsOptions());
+	}
+
+	function terminalTabsOptions():TabsOptions {
+		var options = new TabsOptions();
+		options.selectionMode = TabsSelectionMode.Controlled;
+		var style = new LayoutStyle();
+		style.width = LayoutAxis.grow();
+		style.height = LayoutAxis.grow();
+		options.style = style;
+		return options;
+	}
 
 	function installCommands():Void {
 		// UiKey has no N/O/W/P constants, so these follow the raw-ASCII-code
@@ -220,10 +317,25 @@ class ExosuitApp implements DesktopUiApplication {
 		if (capabilities.supports(Processes))
 			ui.commands.register(new Command("view.terminal", "Toggle Terminal", toggleTerminal,
 				new Shortcut(96 /* ` */, UiModifier.Control)));
+		if (capabilities.supports(Processes)) {
+			application.commands.add("terminal:move-to-editor", function(_) moveTerminalToEditor(),
+				function(_) return host.activePanelTerminal() != null);
+			application.commands.add("terminal:move-to-panel", function(_) moveTerminalToPanel(),
+				function(_) { var tab = host.activeTab(); return tab != null && UiEditorTabs.terminal(tab) != null; });
+		}
 		CommandBridge.install(ui.commands, application.commands, application.keymap, application.context);
 	}
 
 	public function view():View {
+		pruneStaleEditorPanes(host.allViews());
+		for (pane in host.panes) {
+			var found = false;
+			for (content in dockPanelContents) if (content.panelId == pane.id) { found = true; break; }
+			if (!found) {
+				var paneId = pane.id;
+				dockPanelContents.push(new DockPanelContent(paneId, function(_) return editorPanel(paneId)));
+			}
+		}
 		var workspaceView = new DockWorkspace("exosuit-workspace", dock, dockPanelContents);
 		workspaceView.availableHeight = Math.max(0.0, viewportHeight - TOOLBAR_HEIGHT - STATUS_HEIGHT);
 		var workspace:View = explorerRoot == null && !dock.isOpen("explorer")
@@ -270,16 +382,21 @@ class ExosuitApp implements DesktopUiApplication {
 	 */
 	function pumpApplication():Void {
 		application.update();
-		if (terminalPane != null) {
-			if (!dock.isOpen("terminal")) {
-				terminalPane.close();
-				terminalPane = null;
-			} else try {
-				terminalPane.poll();
-			} catch (error:Dynamic) {
+		if (!dock.isOpen("terminal")) closePanelTerminals();
+		for (terminal in host.allTerminalTabs()) {
+			if (terminal.disposed) continue;
+			try { terminal.panel.poll(); } catch (error:Dynamic) {
 				statusMessage = "Terminal: " + Std.string(error);
-				terminalPane.close();
-				terminalPane = null;
+				terminal.dispose();
+				host.detachTerminal(terminal);
+				var index = host.panelTerminals.indexOf(terminal);
+				if (index >= 0) {
+					host.panelTerminals.splice(index, 1);
+					if (host.activePanelTerminalIndex > index) host.activePanelTerminalIndex--;
+					else if (host.activePanelTerminalIndex == index)
+						host.activePanelTerminalIndex = Std.int(Math.min(index, host.panelTerminals.length - 1));
+				}
+				requestFrame();
 			}
 		}
 		if (application.build.active != null || application.language.client != null) requestFrame();
@@ -288,10 +405,6 @@ class ExosuitApp implements DesktopUiApplication {
 	public function context():UiContext return ui;
 
 	public function dispose():Void {
-		if (terminalPane != null) {
-			terminalPane.close();
-			terminalPane = null;
-		}
 		application.shutdown();
 		host.dispose();
 		if (desktop != null) desktop.shutdown();
@@ -300,8 +413,12 @@ class ExosuitApp implements DesktopUiApplication {
 
 	public function diagnosticState():Dynamic {
 		var active = host.activeDocument();
+		var tab = host.activeTab();
+		var terminal = tab == null ? null : UiEditorTabs.terminal(tab);
+		if (terminal == null) terminal = host.activePanelTerminal();
+		var panel = terminal == null ? null : terminal.panel;
 		return {
-			documents: [for (view in host.tabs) view.document.title],
+			documents: [for (view in host.allViews()) view.document.title],
 			active: active == null ? -1 : active.id,
 			documentsSource: "core.Application (via UiWorkbenchHost)",
 			explorerRoot: explorerRoot,
@@ -310,9 +427,9 @@ class ExosuitApp implements DesktopUiApplication {
 			paletteCommandCount: ui.commands.ids().length,
 			errors: [for (entry in application.errors.entries) {source: entry.source, message: entry.message}],
 			plugins: application.plugins.enabledIds(),
-			terminal: terminalPane == null ? "closed" : terminalPane.status(),
-			terminalColumns: terminalPane == null ? 0 : terminalPane.columns(),
-			terminalRows: terminalPane == null ? 0 : terminalPane.rows()
+			terminal: panel == null ? "closed" : panel.status(),
+			terminalColumns: panel == null ? 0 : panel.columns(),
+			terminalRows: panel == null ? 0 : panel.rows()
 		};
 	}
 
@@ -362,10 +479,12 @@ class ExosuitApp implements DesktopUiApplication {
 		style.padding = new Insets(10.0, 2.0, 10.0, 2.0);
 		style.background = theme.tokens.surfaceRaised;
 		var active = host.activeDocument();
-		var label = active == null ? "No document open" :
+		var tab = host.activeTab();
+		var terminal = tab == null ? null : UiEditorTabs.terminal(tab);
+		var label = active == null ? (terminal == null ? "No document open" : terminal.title) :
 			(active.title + (active.dirty ? " *" : "") + " - " + active.encodingLabel());
 		var notification = application.root.getNotifications().current();
-		var trailing = notification == null ? '${host.tabs.length} open' : notification.message;
+		var trailing = notification == null ? '${host.activePane.items.length} open' : notification.message;
 		return new Row("exosuit-status", [
 			new KeyedView("document", new Text(label, null, theme.tokens.textSecondary,
 				TextStyleOverride.text(12.0))),
@@ -422,12 +541,24 @@ class ExosuitApp implements DesktopUiApplication {
 		return new Column("explorer-rail", [new KeyedView("open", open)], railStyle);
 	}
 
-	function editorPanel():View {
-		var tabs = host.tabs;
-		if (tabs.length == 0) return welcomePanel();
-		pruneStaleEditorPanes(tabs);
+	function editorPanel(paneId:String):View {
+		var editorPane = host.paneById(paneId);
+		if (editorPane == null) return welcomePanel();
+		var tabs = editorPane.tabs;
+		if (editorPane.items.length == 0) return welcomePanel();
+		pruneStaleEditorPanes(host.allViews());
 		var items:Array<TabItem> = [];
-		for (documentView in tabs) {
+		for (item in editorPane.items) {
+			var terminal = UiEditorTabs.terminal(item);
+			if (terminal != null) {
+				var terminalKey = UiEditorTabs.key(item);
+				items.push(new TabItem(terminalKey, terminal.title, new TerminalTabView(terminal,
+					function() host.activateEditorTab(terminalKey, paneId),
+					function(bounds, id) host.editorResolved(paneId, bounds, id))));
+				continue;
+			}
+			var documentView = UiEditorTabs.document(item);
+			if (documentView == null) continue;
 			var document = documentView.document;
 			// Reused across frames (not rebuilt each `view()` call) so its
 			// `BufferSelection` (shared with `documentView`, see `UiDocumentView`'s
@@ -435,28 +566,30 @@ class ExosuitApp implements DesktopUiApplication {
 			var pane = editorPanes.get(documentView.id);
 			if (pane == null) {
 				pane = new EditorPane(document, theme, requestFrame, documentView.selection, editorPalette,
-					host.getPluginDecorations(), documentView.decorationSearchMatches, documentView.searchDecorationRevision);
-				pane.onContextMenu = function(event) {
-					host.activateTab(document);
-					showContextMenu([
-						new CommandMenuEntry("doc:undo", "Undo"),
-						new CommandMenuEntry("doc:redo", "Redo"),
-						new CommandMenuEntry("doc:cut", "Cut"),
-						new CommandMenuEntry("doc:copy", "Copy"),
-						new CommandMenuEntry("doc:paste", "Paste"),
-						new CommandMenuEntry("doc:select-all", "Select All"),
-						new CommandMenuEntry("find:open", "Find…"),
-						new CommandMenuEntry("find:replace", "Replace…")
-					], event, function() return host.activeDocument() == document);
-				};
-				pane.onCaretRectChanged = function() {
-					if (host.isLanguagePopupVisible()) {
-						if (host.textInputArea() == null) host.dismissLanguagePopup();
-						else requestFrame();
-					}
-				};
+					host.getPluginDecorations(), documentView.decorationSearchMatches, documentView.searchDecorationRevision, documentView.scrollController);
 				editorPanes.set(documentView.id, pane);
 			}
+			pane.onResolvedEditor = function(bounds, id) host.editorResolved(paneId, bounds, id);
+			pane.onActivated = function() host.activateTab(document, paneId);
+			pane.onContextMenu = function(event) {
+				host.activateTab(document, paneId);
+				showContextMenu([
+					new CommandMenuEntry("doc:undo", "Undo"),
+					new CommandMenuEntry("doc:redo", "Redo"),
+					new CommandMenuEntry("doc:cut", "Cut"),
+					new CommandMenuEntry("doc:copy", "Copy"),
+					new CommandMenuEntry("doc:paste", "Paste"),
+					new CommandMenuEntry("doc:select-all", "Select All"),
+					new CommandMenuEntry("find:open", "Find…"),
+					new CommandMenuEntry("find:replace", "Replace…")
+				], event, function() return host.activeView() == documentView);
+			};
+			pane.onCaretRectChanged = function() {
+				if (host.isLanguagePopupVisible()) {
+					if (host.textInputArea() == null) host.dismissLanguagePopup();
+					else requestFrame();
+				}
+			};
 			items.push(new TabItem("doc:" + document.id, (document.dirty ? "* " : "") + document.title,
 				pane));
 		}
@@ -465,29 +598,32 @@ class ExosuitApp implements DesktopUiApplication {
 		tabsStyle.height = LayoutAxis.grow();
 		tabsStyle.direction = LayoutDirection.TopToBottom;
 		tabsStyle.childGap = 8.0;
-		var active = host.activeDocument();
+		var active = editorPane.activeTab();
 		var options = new TabsOptions();
 		options.style = tabsStyle;
 		options.selectionMode = TabsSelectionMode.Controlled;
-		var widget = Tabs.withOptions("exosuit-editor-tabs", items, active == null ? "" : "doc:" + active.id, function(key) {
-			var id = Std.parseInt(StringTools.replace(key, "doc:", ""));
-			if (id == null) return;
-			for (documentView in tabs)
-				if (documentView.document.id == id) {
-					host.activateTab(documentView.document);
-					return;
-				}
-		}, options);
+		var widget = Tabs.withOptions("exosuit-editor-tabs:" + paneId, items, active == null ? "" : UiEditorTabs.key(active),
+			function(key) host.activateEditorTab(key, paneId), options);
 		widget.onTabContextMenu = function(key, event) {
-			for (view in host.tabs) {
+			for (item in editorPane.items) {
+				var terminal = UiEditorTabs.terminal(item);
+				if (terminal == null || key != UiEditorTabs.key(item)) continue;
+				host.activateEditorTab(key, paneId);
+				showContextMenu([
+					new CommandMenuEntry("terminal:move-to-panel", "Move Terminal to Panel"),
+					new CommandMenuEntry("root:close", "Close Terminal")
+				], event, function() return host.activeTab() == item);
+				return;
+			}
+			for (view in tabs) {
 				var document = view.document;
 				if (key != "doc:" + document.id) continue;
-				host.activateTab(document);
+				host.activateTab(document, paneId);
 				showContextMenu([
 					new CommandMenuEntry("doc:save", "Save"),
 					new CommandMenuEntry("doc:save-as", "Save As…"),
 					new CommandMenuEntry("root:close", "Close Tab")
-				], event, function() return host.activeDocument() == document);
+				], event, function() return host.activeView() == view);
 				return;
 			}
 		};

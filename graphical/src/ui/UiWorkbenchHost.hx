@@ -28,6 +28,13 @@ import search.SearchMatch;
 import style.Theme;
 import view.RootView;
 import view.View;
+import view.LayoutKind;
+import nativekit.ui.docking.DockWorkspaceModel;
+import nativekit.ui.docking.DockPanelDescriptor;
+import nativekit.ui.docking.DockDropZone;
+import nativekit.ui.docking.DockNode;
+import nativekit.ui.docking.DockNodeTools;
+import nativekit.ui.core.WidgetId;
 import workspace.Workspace;
 
 import Color;
@@ -69,17 +76,43 @@ class UiWorkbenchHost implements WorkbenchHost {
 	final workspace:Workspace;
 	final requestFrame:Void->Void;
 	final dockActions:DockActions;
+	final defaultDockLayout:DockNode;
 
 	final problems:ProblemRegistry = new ProblemRegistry();
 	final pluginDecorations:PluginDecorationRegistry = new PluginDecorationRegistry();
 	final pluginStatusItems:PluginStatusRegistry = new PluginStatusRegistry();
 	final pluginPanels:PluginPanelRegistry = new PluginPanelRegistry();
 	final notifications:NotificationCenter = new NotificationCenter();
-	final tabList:Array<UiDocumentView> = [];
+	public final panes:Array<UiEditorPane> = [];
+	public var activePane(default, null):UiEditorPane;
+	var nextPaneId:Int = 1;
+	var pendingEditorFocus:Bool = false;
+	var tabList(get, never):Array<UiDocumentView>;
+	function get_tabList():Array<UiDocumentView> return activePane.tabs;
 	public var tabs(get, never):Array<UiDocumentView>;
-	public var activeIndex(default, null):Int = -1;
+	public var activeIndex(get, set):Int;
+	function get_activeIndex():Int return activePane.activeIndex;
+	function set_activeIndex(value:Int):Int return activePane.activeIndex = value;
 	public var fileActions(default, null):Null<FileActions>;
 	public var welcomeActions(default, null):Null<WelcomeActions>;
+	public var restoreTerminal:Null<(String, String, String)->Null<UiTerminalTab>>;
+	public final panelTerminals:Array<UiTerminalTab> = [];
+	public var activePanelTerminalIndex:Int = -1;
+
+	public function activePanelTerminal():Null<UiTerminalTab>
+		return activePanelTerminalIndex >= 0 && activePanelTerminalIndex < panelTerminals.length ?
+			panelTerminals[activePanelTerminalIndex] : null;
+
+	public function allTerminalTabs():Array<UiTerminalTab> {
+		var result = panelTerminals.copy();
+		for (pane in panes) for (item in pane.items) {
+			var terminal = UiEditorTabs.terminal(item);
+			if (terminal != null) result.push(terminal);
+		}
+		return result;
+	}
+
+	public function deactivateDocumentFocus():Void focus.activate(null);
 
 	var problemActivationHandler:Problem->Void = function(problem) {};
 	var buildDiagnosticHandler:BuildDiagnostic->Void = function(diagnostic) {};
@@ -122,6 +155,9 @@ class UiWorkbenchHost implements WorkbenchHost {
 		this.workspace = workspace;
 		this.requestFrame = requestFrame;
 		this.dockActions = dockActions;
+		defaultDockLayout = DockNodeTools.clone(dockActions.model.defaultRoot);
+		activePane = new UiEditorPane("editor");
+		panes.push(activePane);
 		commandViewCapture = new KeyCaptureView(buildCommandViewContent(), commandViewKeyPressed, commandViewTextInput);
 		// Mirrors controller.WorkbenchController.textInput's headless behavior: typing while a
 		// language popup is open dismisses it rather than being swallowed silently.
@@ -131,14 +167,101 @@ class UiWorkbenchHost implements WorkbenchHost {
 	function get_tabs():Array<UiDocumentView>
 		return tabList;
 
+	public function allViews():Array<UiDocumentView> {
+		var result:Array<UiDocumentView> = [];
+		for (pane in panes) for (view in pane.tabs) result.push(view);
+		return result;
+	}
+
+	public function paneById(id:String):Null<UiEditorPane> {
+		for (pane in panes) if (pane.id == id) return pane;
+		return null;
+	}
+
 	public function dispose():Void {
-		for (view in tabList) view.dispose();
-		tabList.resize(0);
-		activeIndex = -1;
+		for (terminal in panelTerminals) terminal.dispose();
+		panelTerminals.resize(0);
+		for (pane in panes) {
+			for (item in pane.items) UiEditorTabs.dispose(item);
+			pane.items.resize(0);
+			pane.activeIndex = -1;
+		}
+	}
+
+	public function splitActive(kind:LayoutKind, newFirst:Bool = false):Bool {
+		if (kind == LayoutKind.Leaf) return false;
+		var source = activeView();
+		var created = new UiEditorPane("editor-pane-" + nextPaneId++);
+		dockActions.model.register(new DockPanelDescriptor(created.id, "Editor", false, true, null, nativekit.ui.docking.DockPanelHeaderMode.Content, new nativekit.ui.docking.DockPanelGrouping("editors", false)));
+		var zone = kind == LayoutKind.Horizontal ?
+			(newFirst ? DockDropZone.Left : DockDropZone.Right) :
+			(newFirst ? DockDropZone.Top : DockDropZone.Bottom);
+		if (!dockActions.model.dock(created.id, activePane.id, zone)) return false;
+		if (source != null) {
+			var selection = new BufferSelection();
+			selection.restoreSnapshot(source.document.buffer, source.selection.snapshot(), false);
+			created.items.push(UiEditorTab.Document(new UiDocumentView(source.document, selection)));
+			created.activeIndex = 0;
+		}
+		panes.push(created);
+		activePane = created;
+		pendingEditorFocus = true;
+		focus.activate(activeView());
+		requestFrame();
+		return true;
 	}
 
 	public function activeView():Null<UiDocumentView>
-		return activeIndex >= 0 && activeIndex < tabList.length ? tabList[activeIndex] : null;
+		return activePane.activeView();
+
+	public function activeTab():Null<UiEditorTab> return activePane.activeTab();
+	public function canCloseActiveTab():Bool return activeTab() != null;
+
+	public function terminalPaneFor(terminal:UiTerminalTab):Null<UiEditorPane> {
+		for (pane in panes) for (item in pane.items)
+			if (UiEditorTabs.terminal(item) == terminal) return pane;
+		return null;
+	}
+
+	public function attachTerminal(terminal:UiTerminalTab):Void {
+		var pane = terminalPaneFor(terminal);
+		if (pane == null) { pane = activePane; pane.items.push(UiEditorTab.Terminal(terminal)); }
+		activateEditorTab("terminal:" + terminal.id, pane.id);
+	}
+
+	public function detachTerminal(terminal:UiTerminalTab):Bool {
+		var pane = terminalPaneFor(terminal);
+		if (pane == null) return false;
+		for (index in 0...pane.items.length) if (UiEditorTabs.terminal(pane.items[index]) == terminal) {
+			pane.items.splice(index, 1);
+			if (pane.activeIndex > index) pane.activeIndex--;
+			else if (pane.activeIndex == index) pane.activeIndex = Std.int(Math.min(index, pane.items.length - 1));
+			if (pane == activePane) focus.activate(activeView());
+			requestFrame();
+			return true;
+		}
+		return false;
+	}
+
+	public function activateEditorTab(key:String, paneId:String):Void {
+		var pane = paneById(paneId);
+		if (pane == null) return;
+		for (index in 0...pane.items.length) if (UiEditorTabs.key(pane.items[index]) == key) {
+			activePane = pane;
+			dockActions.model.activate(pane.id);
+			setActiveIndex(index);
+			pendingEditorFocus = true;
+			return;
+		}
+	}
+
+	public function switchActiveTab(delta:Int):Bool {
+		if (activePane.items.length == 0) return false;
+		var count = activePane.items.length;
+		setActiveIndex((activeIndex + delta % count + count) % count);
+		pendingEditorFocus = true;
+		return true;
+	}
 
 	public function activeDocument():Null<Document> {
 		var view = activeView();
@@ -152,12 +275,20 @@ class UiWorkbenchHost implements WorkbenchHost {
 	}
 
 	/** Called by `ExosuitApp`'s `Tabs` widget when the user clicks a different tab. */
-	public function activateTab(document:Document):Void {
-		for (index in 0...tabList.length)
-			if (tabList[index].document == document) {
+	public function activateTab(document:Document, ?paneId:String):Void {
+		if (paneId != null) {
+			var pane = paneById(paneId);
+			if (pane == null) return;
+			activePane = pane;
+			dockActions.model.activate(pane.id);
+		}
+		for (index in 0...activePane.items.length) {
+			var view = UiEditorTabs.document(activePane.items[index]);
+			if (view != null && view.document == document) {
 				setActiveIndex(index);
 				return;
 			}
+		}
 	}
 
 
@@ -204,21 +335,77 @@ class UiWorkbenchHost implements WorkbenchHost {
 
 	// -- core.WorkbenchHost: focus & navigation requests --
 
-	/**
-	 * No pane geometry to search: this shell's `DockWorkspace` has exactly
-	 * one editor region, so there is nothing to focus into or move a tab
-	 * toward yet (a future split-editing feature would need to teach this
-	 * host the dock's pane adjacency).
-	 */
-	public function focusPane(horizontal:Int, vertical:Int):Bool return false;
-	public function moveActiveTab(horizontal:Int, vertical:Int):Bool return false;
+	public function editorResolved(paneId:String, bounds:Rect, target:WidgetId):Void {
+		var pane = paneById(paneId);
+		if (pane == null) return;
+		pane.bounds = bounds;
+		pane.focusTarget = target;
+		if (pendingEditorFocus && pane == activePane) {
+			pendingEditorFocus = false;
+			dockActions.focusEditor(target);
+		}
+	}
+
+	function activatePane(pane:UiEditorPane):Void {
+		activePane = pane;
+		dockActions.model.activate(pane.id);
+		focus.activate(activeView());
+		pendingEditorFocus = true;
+		if (pane.focusTarget != null) dockActions.focusEditor(pane.focusTarget);
+		requestFrame();
+	}
+
+	function neighboringPane(horizontal:Int, vertical:Int):Null<UiEditorPane> {
+		var source = activePane.bounds;
+		if (source == null || (horizontal == 0 && vertical == 0)) return null;
+		var best:Null<UiEditorPane> = null, bestScore:Float = Math.POSITIVE_INFINITY;
+		for (pane in panes) {
+			var bounds = pane.bounds;
+			if (pane == activePane || bounds == null || !dockActions.model.isOpen(pane.id)) continue;
+			var dx = bounds.x + bounds.width / 2.0 - source.x - source.width / 2.0;
+			var dy = bounds.y + bounds.height / 2.0 - source.y - source.height / 2.0;
+			if (horizontal < 0 && dx >= 0 || horizontal > 0 && dx <= 0 ||
+				vertical < 0 && dy >= 0 || vertical > 0 && dy <= 0) continue;
+			var primary = horizontal == 0 ? Math.abs(dy) : Math.abs(dx);
+			var secondary = horizontal == 0 ? Math.abs(dx) : Math.abs(dy);
+			var score = primary * 10000.0 + secondary;
+			if (score < bestScore) { bestScore = score; best = pane; }
+		}
+		return best;
+	}
+
+	public function focusPane(horizontal:Int, vertical:Int):Bool {
+		var target = neighboringPane(horizontal, vertical);
+		if (target == null) return false;
+		activatePane(target);
+		return true;
+	}
+
+	public function moveActiveTab(horizontal:Int, vertical:Int):Bool {
+		var target = neighboringPane(horizontal, vertical), moving = activeTab();
+		if (target == null || moving == null) return false;
+		var source = activePane;
+		source.items.splice(source.activeIndex, 1);
+		source.activeIndex = source.items.length == 0 ? -1 : Std.int(Math.min(source.activeIndex, source.items.length - 1));
+		var duplicate = -1;
+		var documentView = UiEditorTabs.document(moving);
+		if (documentView != null) for (index in 0...target.items.length) {
+			var candidate = UiEditorTabs.document(target.items[index]);
+			if (candidate != null && candidate.document == documentView.document) { duplicate = index; break; }
+		}
+		if (duplicate >= 0) { UiEditorTabs.dispose(moving); target.activeIndex = duplicate; }
+		else { target.items.push(moving); target.activeIndex = target.items.length - 1; }
+		target.focusTarget = null;
+		activatePane(target);
+		return true;
+	}
 
 	public function reorderActiveTab(delta:Int):Bool {
 		if (activeIndex < 0) return false;
 		var target = activeIndex + delta;
-		if (target < 0 || target >= tabList.length) return false;
-		var view = tabList.splice(activeIndex, 1)[0];
-		tabList.insert(target, view);
+		if (target < 0 || target >= activePane.items.length) return false;
+		var view = activePane.items.splice(activeIndex, 1)[0];
+		activePane.items.insert(target, view);
 		activeIndex = target;
 		requestFrame();
 		return true;
@@ -259,19 +446,21 @@ class UiWorkbenchHost implements WorkbenchHost {
 	 * strip (see `focusPane`'s doc comment), so there is nothing for
 	 * "close pane" to collapse into.
 	 */
-	public function canCloseActivePane():Bool return false;
+	public function canCloseActivePane():Bool return panes.length > 1;
 
 	// -- core.WorkbenchHost: open/activate document & active-editor input --
 
 	public function openDocument(document:Document):View {
-		for (index in 0...tabList.length)
-			if (tabList[index].document == document) {
+		for (index in 0...activePane.items.length) {
+			var existing = UiEditorTabs.document(activePane.items[index]);
+			if (existing != null && existing.document == document) {
 				setActiveIndex(index);
-				return tabList[index];
+				return existing;
 			}
+		}
 		var view = new UiDocumentView(document, new BufferSelection());
-		tabList.push(view);
-		setActiveIndex(tabList.length - 1);
+		activePane.items.push(UiEditorTab.Document(view));
+		setActiveIndex(activePane.items.length - 1);
 		return view;
 	}
 
@@ -308,55 +497,191 @@ class UiWorkbenchHost implements WorkbenchHost {
 
 	public function documentsLostByClosingActiveTab():Array<Document> {
 		var view = activeView();
-		return view == null ? [] : [view.document];
+		if (view == null) return [];
+		for (other in allViews()) if (other != view && other.document == view.document) return [];
+		return [view.document];
 	}
 
 	public function closeActiveTab(force:Bool = false):Bool {
 		if (activeIndex < 0) return false;
-		var removed = tabList.splice(activeIndex, 1);
-		removed[0].dispose();
-		activeIndex = tabList.length == 0 ? -1 : (activeIndex >= tabList.length ? tabList.length - 1 : activeIndex);
+		var lost = documentsLostByClosingActiveTab();
+		if (!force) for (document in lost) if (document.dirty) return false;
+		var removed = activePane.items.splice(activeIndex, 1);
+		UiEditorTabs.dispose(removed[0]);
+		for (document in lost) workspace.documents.close(document, true);
+		activeIndex = activePane.items.length == 0 ? -1 : Std.int(Math.min(activeIndex, activePane.items.length - 1));
 		focus.activate(activeView());
 		requestFrame();
 		return true;
 	}
 
-	public function documentsLostByClosingActivePane():Array<Document> return [];
-	public function closeActivePane(force:Bool = false):Bool return false;
+	public function documentsLostByClosingActivePane():Array<Document> {
+		var result:Array<Document> = [];
+		if (!canCloseActivePane()) return result;
+		for (view in activePane.tabs) {
+			var shared = false;
+			for (pane in panes) if (pane != activePane)
+				for (other in pane.tabs) if (other.document == view.document) shared = true;
+			if (!shared && !result.contains(view.document)) result.push(view.document);
+		}
+		return result;
+	}
+
+	public function closeActivePane(force:Bool = false):Bool {
+		if (!canCloseActivePane()) return false;
+		var lost = documentsLostByClosingActivePane();
+		if (!force) for (document in lost) if (document.dirty) return false;
+		var removed = activePane;
+		panes.remove(removed);
+		dockActions.model.unregister(removed.id);
+		for (item in removed.items) UiEditorTabs.dispose(item);
+		removed.items.resize(0);
+		for (document in lost) workspace.documents.close(document, true);
+		activatePane(panes[0]);
+		return true;
+	}
 
 	public function sessionLines():Array<String> {
 		var result:Array<String> = [];
-		for (index in 0...tabList.length) {
-			var view = tabList[index], document = view.document,
-				reference = document.dirty || !document.hasBackingPath() ? document.recoveryId : document.requirePath(),
-				kind = document.dirty || !document.hasBackingPath() ? "R" : "P";
-			if (reference.indexOf("\t") >= 0 || reference.indexOf("\n") >= 0) continue;
-			result.push("T\t\t" + (index == activeIndex ? "1" : "0") + "\t" + view.cursorLine() + "\t" + view.cursorColumn()
-				+ "\t0\t0\t" + kind + "\t" + reference);
+		result.push("D\tdock\t1\t" + dockActions.model.snapshotJson());
+		result.push("Q\t" + activePane.id);
+		for (index in 0...panelTerminals.length) {
+			var terminal = panelTerminals[index];
+			if (!terminal.disposed && terminal.cwd.indexOf("\t") < 0 && terminal.cwd.indexOf("\n") < 0)
+				result.push("Y\t" + (index == activePanelTerminalIndex ? "1" : "0") + "\t" +
+					terminal.id + "\t" + terminal.title + "\t" + terminal.cwd);
+		}
+		for (pane in panes) {
+			result.push("P\t" + pane.id);
+			for (index in 0...pane.items.length) {
+				var item = pane.items[index];
+				var terminal = UiEditorTabs.terminal(item);
+				if (terminal != null) {
+					if (!terminal.disposed && terminal.cwd.indexOf("\t") < 0 && terminal.cwd.indexOf("\n") < 0)
+						result.push("X\t" + pane.id + "\t" + (index == pane.activeIndex ? "1" : "0") + "\t" +
+							terminal.id + "\t" + terminal.title + "\t" + terminal.cwd);
+					continue;
+				}
+				var view = UiEditorTabs.document(item);
+				if (view == null) continue;
+				var document = view.document;
+				var reference = document.dirty || !document.hasBackingPath() ? document.recoveryId : document.requirePath();
+				var kind = document.dirty || !document.hasBackingPath() ? "R" : "P";
+				if (reference.indexOf("\t") >= 0 || reference.indexOf("\n") >= 0) continue;
+				var location = "\t" + view.cursorLine() + "\t" + view.cursorColumn() + "\t" + view.scrollX() + "\t" + view.scrollY() + "\t" + kind + "\t" + reference;
+				result.push("V\t" + pane.id + "\t" + (index == pane.activeIndex ? "1" : "0") + location);
+				// Older session readers retain every document through their flat tab format.
+				result.push("T\t\t" + (view == activeView() ? "1" : "0") + location);
+			}
 		}
 		result.push("A\t");
 		return result;
 	}
 
+	function validEditorPaneId(id:String):Bool {
+		if (id == "editor") return true;
+		if (!StringTools.startsWith(id, "editor-pane-")) return false;
+		var suffix = id.substring(12), number = Std.parseInt(suffix);
+		return number != null && number > 0 && Std.string(number) == suffix;
+	}
+
+	function fallbackDockLayout(node:DockNode, editorId:String):DockNode {
+		return switch node {
+			case DockNode.Panel(id): DockNode.Panel(id == "editor" ? editorId : id);
+			case DockNode.Split(axis, ratio, first, second):
+				DockNode.Split(axis, ratio, fallbackDockLayout(first, editorId), fallbackDockLayout(second, editorId));
+			case DockNode.Tabs(ids, selected):
+				DockNode.Tabs([for (id in ids) id == "editor" ? editorId : id], selected == "editor" ? editorId : selected);
+			case DockNode.Empty: DockNode.Empty;
+		};
+	}
+
 	public function restoreSessionLines(lines:Array<String>, ?resolver:(String, String) -> Null<Document>):Void {
-		for (view in tabList) view.dispose();
-		tabList.resize(0);
-		activeIndex = -1;
-		var restoreActive = -1;
+		var retainedTerminals:Map<String, UiTerminalTab> = [];
+		for (terminal in allTerminalTabs()) retainedTerminals.set(terminal.id, terminal);
+		panelTerminals.resize(0);
+		activePanelTerminalIndex = -1;
+		focus.activate(null);
+		for (view in allViews()) view.dispose();
+		for (pane in panes) dockActions.model.unregister(pane.id);
+		panes.resize(0);
+		var modern = false;
+		var snapshot:Null<String> = null, selectedPane:Null<String> = null;
 		for (raw in lines) {
 			var fields = raw.split("\t");
-			if (fields.length != 9 || fields[0] != "T") continue;
+			if (fields.length == 4 && fields[0] == "D" && fields[1] == "dock" && fields[2] == "1") snapshot = fields[3];
+			if (fields.length == 2 && fields[0] == "Q") selectedPane = fields[1];
+			if (fields.length != 2 || fields[0] != "P" || !validEditorPaneId(fields[1]) || paneById(fields[1]) != null) continue;
+			modern = true;
+			var pane = new UiEditorPane(fields[1]);
+			panes.push(pane);
+			dockActions.model.register(new DockPanelDescriptor(pane.id, "Editor", false, true, null, nativekit.ui.docking.DockPanelHeaderMode.Content, new nativekit.ui.docking.DockPanelGrouping("editors", false)));
+			if (pane.id != "editor") {
+				var number = Std.parseInt(pane.id.substring(12));
+				if (number != null && number >= nextPaneId) nextPaneId = number + 1;
+			}
+		}
+		if (panes.length == 0) {
+			var pane = new UiEditorPane("editor");
+			panes.push(pane);
+			dockActions.model.register(new DockPanelDescriptor(pane.id, "Editor", false, true, null, nativekit.ui.docking.DockPanelHeaderMode.Content, new nativekit.ui.docking.DockPanelGrouping("editors", false)));
+		}
+		activePane = panes[0];
+		for (raw in lines) {
+			var fields = raw.split("\t");
+			if (fields.length == 5 && fields[0] == "Y") {
+				var terminal = resolveTerminal(fields[2], fields[3], fields[4], retainedTerminals);
+				if (terminal != null) {
+					panelTerminals.push(terminal);
+					if (fields[1] == "1" || activePanelTerminalIndex < 0) activePanelTerminalIndex = panelTerminals.length - 1;
+				}
+				continue;
+			}
+			if (modern && fields.length == 6 && fields[0] == "X") {
+				var pane = paneById(fields[1]);
+				var terminal = pane == null ? null : resolveTerminal(fields[3], fields[4], fields[5], retainedTerminals);
+				if (pane != null && terminal != null) {
+					pane.items.push(UiEditorTab.Terminal(terminal));
+					if (fields[2] == "1" || pane.activeIndex < 0) pane.activeIndex = pane.items.length - 1;
+				}
+				continue;
+			}
+			if (fields.length != 9 || fields[0] != (modern ? "V" : "T")) continue;
+			var pane = modern ? paneById(fields[1]) : panes[0];
+			if (pane == null) continue;
 			var document = resolver == null ? null : resolver(fields[7], fields[8]);
 			if (document == null) continue;
 			var view = new UiDocumentView(document, new BufferSelection());
 			var line = Std.parseInt(fields[3]), column = Std.parseInt(fields[4]);
 			if (line != null && column != null) view.restoreCursor(line, column);
-			tabList.push(view);
-			if (fields[2] == "1") restoreActive = tabList.length - 1;
+			var scrollX = Std.parseInt(fields[5]), scrollY = Std.parseInt(fields[6]);
+			if (scrollX != null && scrollY != null) view.restoreScroll(scrollX, scrollY);
+			pane.items.push(UiEditorTab.Document(view));
+			if (fields[2] == "1" || pane.activeIndex < 0) pane.activeIndex = pane.items.length - 1;
 		}
-		activeIndex = restoreActive >= 0 ? restoreActive : (tabList.length > 0 ? 0 : -1);
+		for (terminal in retainedTerminals) terminal.dispose();
+		dockActions.model.setDefaultLayout(fallbackDockLayout(defaultDockLayout, panes[0].id));
+		if (snapshot != null) dockActions.model.restoreJson(snapshot);
+		// Invalid/older layouts still reopen every resolved pane and document.
+		for (pane in panes) if (!dockActions.model.isOpen(pane.id)) dockActions.model.open(pane.id);
+		var requested = selectedPane == null ? null : paneById(selectedPane);
+		if (requested != null) activePane = requested;
+		dockActions.model.activate(activePane.id);
+		pendingEditorFocus = true;
 		focus.activate(activeView());
 		requestFrame();
+	}
+
+	function resolveTerminal(id:String, title:String, cwd:String, retained:Map<String, UiTerminalTab>):Null<UiTerminalTab> {
+		for (terminal in allTerminalTabs()) if (terminal.id == id) return null;
+		var existing = retained.get(id);
+		if (existing != null) {
+			retained.remove(id);
+			if (!existing.disposed && existing.cwd == cwd && existing.title == title) return existing;
+			existing.dispose();
+		}
+		var create = restoreTerminal;
+		return create == null ? null : create(id, title, cwd);
 	}
 
 	// -- core.WorkbenchHost: problem / build-output publishing --
@@ -590,6 +915,8 @@ private class OverlayBuilderView implements NkView {
  * into the host, just in the other direction).
  */
 typedef DockActions = {
+	model:DockWorkspaceModel,
+	focusEditor:WidgetId->Void,
 	toggleSidebar:Void->Bool,
 	activateExplorer:Void->Void,
 	activateProblems:Void->Void,

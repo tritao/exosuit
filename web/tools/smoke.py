@@ -201,12 +201,16 @@ def main():
                                                    "code": "Key" + letter, "windowsVirtualKeyCode": ord(letter)})
 
     for kind in ("mousePressed", "mouseReleased"):
-        page.command("Input.dispatchMouseEvent", {"type": kind, "x": 550, "y": 130,
+        page.command("Input.dispatchMouseEvent", {"type": kind, "x": 550, "y": 95,
                                                  "button": "left", "clickCount": 1})
+    if options.screenshot:
+        shot = page.command("Page.captureScreenshot", {"format": "png"})
+        with open(options.screenshot, "wb") as handle:
+            handle.write(base64.b64decode(shot["data"]))
     focus_deadline = time.monotonic() + 10
     while time.monotonic() < focus_deadline and page.evaluate("document.activeElement.id") != "__nativekit_text_input":
         time.sleep(0.1)
-    assert page.evaluate("document.activeElement.id") == "__nativekit_text_input", page.evaluate("document.activeElement.outerHTML")
+    assert page.evaluate("document.activeElement.id") == "__nativekit_text_input", {"element": page.evaluate("document.activeElement.outerHTML"), "snapshot": snapshot(), "console": page.console}
     # DOM focus can precede the guest consuming the queued pointer event.
     # Wait for complete event-pump frames before sending the shortcut.
     focus_frame = page.evaluate("window.exosuit.frames") + 2

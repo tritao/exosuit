@@ -44,19 +44,15 @@ class EditorCommands {
 		registry.add("doc:select-page-down", context -> context.requireView().movePage(1, true), hasDocument);
 		registry.add("doc:toggle-word-wrap", context -> context.requireView().toggleWordWrap(), hasDocument);
 		registry.add("doc:toggle-fold", context -> context.requireView().toggleFold(), hasDocument);
-		// These reach into the legacy split-pane RootView directly (tab strip order, pane splitting,
-		// project-tree selection) rather than through core.WorkbenchHost, so they are only meaningful
-		// - and only registered as available - when that concrete view is present. A UIKit-hosted
-		// Application leaves context.root null, so hasRoot() predicates them out everywhere they're
-		// offered (the command palette, the keymap).
-		registry.add("root:switch-to-next-tab", context -> context.requireRoot().tabs.switchBy(1), hasRoot);
-		registry.add("root:switch-to-previous-tab", context -> context.requireRoot().tabs.switchBy(-1), hasRoot);
+		// Shared host operations support both document and terminal editor tabs.
+		registry.add("root:switch-to-next-tab", context -> context.host.switchActiveTab(1), context -> context.host.canCloseActiveTab());
+		registry.add("root:switch-to-previous-tab", context -> context.host.switchActiveTab(-1), context -> context.host.canCloseActiveTab());
 		registry.add("root:close", context -> context.requireRoot().closeActiveTab(),
 			context -> context.root != null && context.focus.activeView != null);
-		registry.add("root:split-left", context -> context.requireRoot().splitActive(LayoutKind.Horizontal, true), hasRoot);
-		registry.add("root:split-right", context -> context.requireRoot().splitActive(LayoutKind.Horizontal), hasRoot);
-		registry.add("root:split-up", context -> context.requireRoot().splitActive(LayoutKind.Vertical, true), hasRoot);
-		registry.add("root:split-down", context -> context.requireRoot().splitActive(LayoutKind.Vertical), hasRoot);
+		registry.add("root:split-left", context -> context.host.splitActive(LayoutKind.Horizontal, true), hasDocument);
+		registry.add("root:split-right", context -> context.host.splitActive(LayoutKind.Horizontal), hasDocument);
+		registry.add("root:split-up", context -> context.host.splitActive(LayoutKind.Vertical, true), hasDocument);
+		registry.add("root:split-down", context -> context.host.splitActive(LayoutKind.Vertical), hasDocument);
 		registry.add("root:close-pane", context -> context.requireRoot().closeActivePane(), hasRoot);
 		registry.add("project:sidebar-next", context -> context.requireRoot().sidebarMove(1), hasRoot);
 		registry.add("project:sidebar-previous", context -> context.requireRoot().sidebarMove(-1), hasRoot);

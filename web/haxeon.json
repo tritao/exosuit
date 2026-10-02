@@ -198,7 +198,12 @@
     "../graphical/src/ui/TerminalColors.hx",
     "../graphical/src/ui/TerminalPalette.hx",
     "../graphical/src/ui/TerminalPanel.hx",
+    "../graphical/src/ui/TerminalTabView.hx",
     "../graphical/src/ui/UiDocumentView.hx",
+    "../graphical/src/ui/UiEditorPane.hx",
+    "../graphical/src/ui/UiEditorTab.hx",
+    "../graphical/src/ui/UiEditorTabs.hx",
+    "../graphical/src/ui/UiTerminalTab.hx",
     "../graphical/src/ui/UiWorkbenchHost.hx"
   ],
   "dependencies": {

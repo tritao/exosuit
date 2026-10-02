@@ -2,6 +2,7 @@ package ui;
 
 import editor.BufferPosition;
 import editor.BufferSubscription;
+import nativekit.ui.widgets.scroll.ScrollController;
 import editor.BufferSelection;
 import editor.Document;
 import editor.EditorActions;
@@ -33,6 +34,7 @@ class UiDocumentView extends View {
 	public final id:Int;
 	public final document:Document;
 	public final selection:BufferSelection;
+	public final scrollController:ScrollController = new ScrollController();
 	final bufferSubscription:BufferSubscription;
 	final matches:Array<SearchMatch> = [];
 	var searchRevision:Int = 0;
@@ -129,12 +131,9 @@ class UiDocumentView extends View {
 	override public function restoreCursor(line:Int, column:Int):Void
 		selection.setCursor(document.buffer, new BufferPosition(line, column));
 
-	override public function scrollX():Int return 0;
-	override public function scrollY():Int return 0;
-	// TextArea owns its own scroll offset and does not expose it; a restored
-	// session reopens this document and restores its cursor, but cannot
-	// reproduce the exact scroll position (see class doc comment).
-	override public function restoreScroll(x:Int, y:Int):Void {}
+	override public function scrollX():Int return Std.int(scrollController.offsetX);
+	override public function scrollY():Int return Std.int(scrollController.offsetY);
+	override public function restoreScroll(x:Int, y:Int):Void scrollController.jumpTo(x, y);
 
 	override public function setSearchMatches(matches:Array<SearchMatch>):Void {
 		searchRevision++;

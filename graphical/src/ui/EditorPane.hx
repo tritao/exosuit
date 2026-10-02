@@ -1,6 +1,8 @@
 package ui;
 
 import Rect;
+import nativekit.ui.widgets.scroll.ScrollController;
+import nativekit.ui.widgets.scroll.ScrollAxis;
 
 import Color;
 import TextColorRange;
@@ -50,8 +52,11 @@ class EditorPane implements View {
 	 * ad-hoc panes) may omit it and get a private one, as before.
 	 */
 	public final selection:BufferSelection;
+	final scrollController:ScrollController;
 	final onEdited:Void->Void;
 	public var caretRect(default, null):Null<Rect> = null;
+	public var onResolvedEditor:Null<Rect->nativekit.ui.core.WidgetId->Void> = null;
+	public var onActivated:Null<Void->Void> = null;
 	public var onContextMenu:Null<nativekit.ui.core.UiEvent->Void> = null;
 	public var onCaretRectChanged:Null<Void->Void> = null;
 	final editorTheme:style.Theme;
@@ -73,8 +78,9 @@ class EditorPane implements View {
 	var desiredVerticalXs:Array<Float> = [];
 
 	public function new(document:Document, theme:Theme, onEdited:Void->Void, ?selection:BufferSelection, ?editorTheme:style.Theme,
-			?decorations:PluginDecorationRegistry, ?searchMatches:Void->Array<SearchMatch>, ?searchRevision:Void->Int) {
+			?decorations:PluginDecorationRegistry, ?searchMatches:Void->Array<SearchMatch>, ?searchRevision:Void->Int, ?scrollController:ScrollController) {
 		this.document = document;
+		this.scrollController = scrollController == null ? new ScrollController() : scrollController;
 		this.decorations = decorations == null ? new PluginDecorationRegistry() : decorations;
 		this.searchMatches = searchMatches == null ? function() return [] : searchMatches;
 		this.searchRevision = searchRevision == null ? function() return 0 : searchRevision;
@@ -249,6 +255,7 @@ class EditorPane implements View {
 		area.colorRangeProvider = foregroundProvider;
 		area.decorationProvider = decorationProvider;
 		area.selectionProvider = selectionProvider;
+		area.onLayoutResolved = function(layout, geometry) gutter.resolveTextLayout(layout, geometry);
 		area.onCaretRect = function(rect) {
 			var previous = caretRect;
 			caretRect = rect;
@@ -287,7 +294,18 @@ class EditorPane implements View {
 		scrollStyle.width = LayoutAxis.grow();
 		scrollStyle.height = LayoutAxis.grow();
 		scrollStyle.background = color(editorTheme.editorBackground);
-		var node = new ScrollView("editor-scroll:" + document.id, row, scrollStyle).build(context);
+		var node = new ScrollView("editor-scroll:" + document.id, row, scrollStyle, ScrollAxis.Vertical, scrollController).build(context);
+		node.onResolved(function(_) {
+			var handler = onResolvedEditor;
+			if (handler == null) return;
+			node.walk(function(child) {
+				if (child.focusable && child.styleKey == "editor:" + document.id)
+					handler(node.globalBounds(), child.id);
+			});
+		});
+		var activate = function(event:nativekit.ui.core.UiEvent) { if (onActivated != null) onActivated(); };
+		node.on(nativekit.ui.core.UiEventKind.Focus, activate, "capture");
+		node.on(nativekit.ui.core.UiEventKind.PointerDown, activate, "capture");
 		var requestMenu = function(event:nativekit.ui.core.UiEvent) {
 			var handler = onContextMenu;
 			if (handler == null) return;

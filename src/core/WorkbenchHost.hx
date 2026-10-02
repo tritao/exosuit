@@ -18,6 +18,7 @@ import search.SearchMatch;
 import style.Theme;
 import view.RootView;
 import view.View;
+import view.LayoutKind;
 
 /**
  * The UI-independent surface `controller.*` and `core.Application` use
@@ -50,9 +51,12 @@ interface WorkbenchHost {
 	function commandViewTextInput(text:String):Void;
 
 	// -- Focus & navigation requests --
+	function splitActive(kind:LayoutKind, ?newFirst:Bool):Bool;
 	function focusPane(horizontal:Int, vertical:Int):Bool;
 	function moveActiveTab(horizontal:Int, vertical:Int):Bool;
 	function reorderActiveTab(delta:Int):Bool;
+	function switchActiveTab(delta:Int):Bool;
+	function canCloseActiveTab():Bool;
 	function toggleSidebar():Bool;
 	function showProjectSidebar():Void;
 	function searchMove(delta:Int):Bool;

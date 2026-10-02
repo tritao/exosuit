@@ -45,6 +45,8 @@ class TerminalPane implements TerminalPanel {
 	final rowHeight:Float;
 	var viewportWidth:Float = 0.0;
 	var viewportHeight:Float = 0.0;
+	var resolvedWidth:Float = 0.0;
+	var resolvedHeight:Float = 0.0;
 	var focusRequested:Bool = false;
 	var focused:Bool = false;
 	var closed:Bool = false;
@@ -171,13 +173,14 @@ class TerminalPane implements TerminalPanel {
 	}
 
 	public function build(context:BuildContext):RenderNode {
+		// Resize before creating row painters; painting must not invalidate this frame.
+		resizeToViewport(resolvedWidth, resolvedHeight);
 		var fill = new LayoutStyle();
 		fill.width = LayoutAxis.grow();
 		fill.height = LayoutAxis.grow();
 		var backdrop = new CanvasView("terminal-backdrop", function(canvas:Canvas, geometry) {
 			canvas.fillRectIfPositive(new Rect(0.0, 0.0, geometry.width, geometry.height), background);
 			if (focused) canvas.fillRectIfPositive(new Rect(0.0, 0.0, geometry.width, 2.0), palette.cursor);
-			resizeToViewport(geometry.width, geometry.height);
 		}, fill, "Terminal", true);
 		var layers:Array<StackChild> = [new StackChild("background", backdrop, 0.0, 0.0, 0,
 			LayoutAxis.grow(), LayoutAxis.grow())];
@@ -200,7 +203,17 @@ class TerminalPane implements TerminalPanel {
 				1, LayoutAxis.grow(), LayoutAxis.fixed(rowHeight)));
 		}
 		var node = new Stack("terminal-pane", layers, fill).build(context);
+		node.onResolved(function(_) {
+			var bounds = node.globalBounds();
+			if (bounds.width != resolvedWidth || bounds.height != resolvedHeight) {
+				resolvedWidth = bounds.width;
+				resolvedHeight = bounds.height;
+				requestFrame();
+			}
+		});
 		node.focusable = true;
+		// Size the grid from resolved layout, not from paint, so rows match the frame.
+		node.onResolved(function(item) resizeToViewport(item.width, item.height));
 		node.on(UiEventKind.PointerDown, function(_) context.requestFocus(node.id));
 		node.on(UiEventKind.TextInput, function(event:UiEvent) {
 			if (event.text != null && event.text.length > 0) {
@@ -290,6 +303,8 @@ class TerminalPane implements TerminalPanel {
 		var rows = Std.int(Math.max(1.0, Math.min(256.0, Math.floor((height - 8.0) / rowHeight))));
 		if (columns != session.emulator.columns() || rows != session.emulator.rows()) {
 			session.resize(columns, rows);
+			// Re-render all rows now; waiting for PTY output leaves stale/missing rows while dragging.
+			refreshRows(true);
 			requestFrame();
 		}
 	}

@@ -1,6 +1,7 @@
 package app;
 
 import ui.ExosuitApp;
+import ui.UiEditorTabs;
 import LayoutFrame;
 import Color;
 import nativekit.ui.host.DesktopUiHost;
@@ -23,16 +24,40 @@ import nativekit.ui.widgets.text.TextEditorState;
 class DecorationSmokeApp extends ExosuitApp {
 	final phase:String;
 	var frames = 0;
+	var transferredTerminal:Null<ui.UiTerminalTab> = null;
 	var menuRuns:Int = 0;
 	var menuAllowed:Bool = true;
 	var menuDocument:Null<editor.Document> = null;
 	var firstPopupY:Float = -1.0;
+	var savedPaneLines:Array<String> = [];
 	var popupScrollController:Null<nativekit.ui.widgets.scroll.ScrollController> = null;
 
 	public function new(context:nativekit.ui.host.DesktopUiHostContext, path:String, phase:String) {
-		super(context.fonts, null, context, path);
+		super(context.fonts, null, context, path, null, null, null, DecorationSmokeMain.createTerminal);
 		this.phase = phase;
 		installMarks(0);
+		if (phase == "gutter-aligned") {
+			var view = host.activeView();
+			if (view == null) throw "gutter fixture has no view";
+			var text = "x\nx\n\n";
+			for (_ in 0...300) text += "x";
+			text += "\n\n";
+			for (_ in 0...40) text += "x\n";
+			view.document.buffer.replaceAllText(text, view.selection);
+			application.theme.foregroundMuted = 0xff0000ff;
+			host.getPluginDecorations().removeOwner("smoke");
+			host.setDocumentSearchMatches([]);
+		}
+		if (phase == "selection-clipped") {
+			var view = host.activeView();
+			if (view == null) throw "clipping fixture has no view";
+			var text = "";
+			for (_ in 0...100) text += "selected text beyond the viewport\n";
+			view.document.buffer.replaceAllText(text, view.selection);
+			theme.textSelection = Color.fromBytes(0, 255, 0);
+			theme.textSelectionInactive = Color.fromBytes(0, 255, 0);
+			view.selectAll();
+		}
 		if (phase == "pane-selection-model") {
 			var document = new editor.Document(null, "abc\ndef", new syntax.SyntaxRegistry());
 			var first = new ui.UiDocumentView(document, new BufferSelection());
@@ -146,6 +171,72 @@ class DecorationSmokeApp extends ExosuitApp {
 
 	override public function submit(frame:LayoutFrame):nativekit.ui.core.RenderNode {
 		frames++;
+		if (phase == "terminal-editor-transfer" && frames == 4) {
+			openTerminal();
+			transferredTerminal = host.activePanelTerminal();
+			if (transferredTerminal == null || !moveTerminalToEditor()) throw "terminal transfer failed";
+			var tab = host.activeTab();
+			if (tab == null || UiEditorTabs.terminal(tab) != transferredTerminal || host.activeView() != null)
+				throw "terminal editor tab lost ownership or document isolation";
+			if (host.panelTerminals.length != 0 || (transferredTerminal == null || transferredTerminal.disposed)) throw "transfer closed terminal";
+		}
+		if (phase == "terminal-editor-transfer" && frames == 5) {
+			if (!host.switchActiveTab(-1) || host.activeView() == null) throw "cannot switch to document";
+			if (!host.switchActiveTab(1) || host.activeView() != null) throw "cannot switch to terminal";
+			var saved = session.WorkspaceSession.decode(session.WorkspaceSession.capture(application).encode());
+			saved.restore(application);
+			var tab = host.activeTab();
+			if (tab == null || UiEditorTabs.terminal(tab) != transferredTerminal)
+				throw "session restore replaced live terminal";
+			if (!moveTerminalToPanel() || host.activePanelTerminal() != transferredTerminal)
+				throw "return to panel lost terminal";
+		}
+		if (phase == "terminal-editor-transfer" && frames == 6) {
+			if (!moveTerminalToEditor()) throw "second transfer failed";
+			openTerminal();
+			if (host.activePanelTerminal() == transferredTerminal) throw "new terminal reused moved owner";
+			if (!moveTerminalToPanel() || host.panelTerminals.length != 2) throw "multiple panel terminals lost";
+			if (DecorationSmokeMain.terminalStarts != 2 || transferredTerminal == null || (transferredTerminal == null || transferredTerminal.disposed))
+				throw "terminal transfer restarted session";
+			if (!moveTerminalToEditor() || !host.canCloseActiveTab()) throw "terminal cannot close";
+			application.requestCloseActiveTab();
+			if (!(transferredTerminal == null || transferredTerminal.disposed) || host.allViews().length != 1 || host.panelTerminals.length != 1)
+				throw "terminal close damaged document or another session";
+			trace("PASS: live terminal transfers, typed tab switching, session restore, multiple owners and close");
+		}
+		if (StringTools.startsWith(phase, "terminal-group-") && frames == 4) {
+			var saved = session.WorkspaceSession.capture(application);
+			var editor = nativekit.ui.docking.DockNode.Panel("editor");
+			var layout = phase == "terminal-group-no-tools" ? editor :
+				nativekit.ui.docking.DockNode.Split(nativekit.ui.docking.DockSplitAxis.Vertical, 0.72,
+					editor, nativekit.ui.docking.DockNode.Panel("problems"));
+			if (phase == "terminal-group-migrate") {
+				openTerminal();
+				saved = session.WorkspaceSession.capture(application);
+				layout = nativekit.ui.docking.DockNode.Tabs(["editor", "terminal"], "terminal");
+			}
+			var snapshot = new nativekit.ui.docking.DockWorkspaceSnapshot(layout, "editor");
+			for (index in 0...saved.layout.length) if (StringTools.startsWith(saved.layout[index], "D\t"))
+				saved.layout[index] = "D\tdock\t1\t" + nativekit.ui.docking.DockWorkspaceSnapshotCodec.encode(snapshot);
+			saved.restore(application);
+			openTerminal();
+		}
+		if (phase == "gutter-aligned" && frames == 5) {
+			var view = host.activeView();
+			if (view == null) throw "gutter fixture lost its view";
+			view.restoreScroll(0, 80);
+		}
+		if (phase == "gutter-aligned" && frames == 6) {
+			var view = host.activeView();
+			if (view == null) throw "gutter fixture lost its view";
+			view.restoreCursor(0, 0);
+			view.textInput("\n");
+		}
+		if ((StringTools.startsWith(phase, "pane-split-") || StringTools.startsWith(phase, "pane-close-") || StringTools.startsWith(phase, "pane-move-") || phase == "pane-session-roundtrip") && frames == 4) {
+			var direction = phase == "pane-split-down" ? "down" : "right";
+			if (!application.commands.perform("root:split-" + direction, application.context))
+				throw "UIKit split command was unavailable";
+		}
 		if (phase == "pane-selection-model" && frames == 4) {
 			var previousRoot = ui.root, document = menuDocument;
 			if (previousRoot == null || document == null) throw "identity fixture has no tab";
@@ -211,7 +302,7 @@ class DecorationSmokeApp extends ExosuitApp {
 			}
 		}
 
-		if (frames == 4) {
+		if (frames == 4 && phase != "terminal-editor-transfer") {
 			var document = host.activeDocument();
 			if (document == null) throw "decoration fixture document disappeared";
 			if (phase == "caret-moved" || phase == "caret-empty") {
@@ -267,7 +358,203 @@ class DecorationSmokeApp extends ExosuitApp {
 			} else if (phase != "popup-edge" && phase != "popup-large")
 				view.selection.restore(view.document.buffer, new BufferPosition(0, 7), new BufferPosition(0, 7));
 		}
+		if (StringTools.startsWith(phase, "pane-close-") && frames == 5) {
+			if (phase != "pane-close-shared") application.newDocument();
+			var active = host.activeView();
+			if (active == null) throw "pane close fixture has no active view";
+			active.textInput("unsaved");
+			menuDocument = active.document;
+			if (!application.requestCloseActivePane()) throw "pane close request was unavailable";
+			if (phase == "pane-close-shared") {
+				if (host.panes.length != 1 || host.commandView.active || host.activeDocument() != menuDocument ||
+					!application.documents.documents.contains(active.document)) throw "shared dirty document was lost or prompted";
+			} else if (host.panes.length != 2 || !host.commandView.active) throw "unique dirty pane bypassed confirmation";
+		}
+		if (StringTools.startsWith(phase, "pane-close-") && phase != "pane-close-shared" && frames == 6) {
+			if (phase == "pane-close-cancel") ui.key(UiEventKind.KeyDown, UiKey.Escape);
+			else { ui.text(UiEventKind.TextInput, "discard"); ui.key(UiEventKind.KeyDown, UiKey.Enter); }
+		}
+		if (StringTools.startsWith(phase, "pane-move-") && frames == 5) {
+			if (phase == "pane-move-unique") application.newDocument();
+			var active = host.activeView();
+			if (active == null) throw "pane move fixture has no active view";
+			menuDocument = active.document;
+			var sourceId = active.id;
+			if (!host.moveActiveTab(-1, 0) || host.activePane != host.panes[0]) throw "tab movement missed destination pane";
+			var moved = host.activeView();
+			if (moved == null || moved.document != menuDocument) throw "tab movement changed document";
+			if (phase == "pane-move-unique" ? moved.id != sourceId : moved.id == sourceId)
+				throw "tab movement did not preserve or deduplicate the view correctly";
+		}
+		if (phase == "pane-session-roundtrip" && frames == 5) {
+			var first = host.panes[0].activeView(), second = host.panes[1].activeView();
+			if (first == null || second == null) throw "session fixture lost split views";
+			var text = "";
+			for (_ in 0...100) text += "return 42;\n";
+			first.document.buffer.replaceAllText(text, first.selection);
+			first.restoreCursor(10, 3);
+			second.restoreCursor(14, 2);
+		}
+		if (phase == "pane-session-roundtrip" && frames == 6) {
+			var first = host.panes[0].activeView(), second = host.panes[1].activeView();
+			if (first == null || second == null) throw "session fixture lost scroll owners";
+			first.restoreScroll(0, 120);
+			second.restoreScroll(0, 240);
+			savedPaneLines = host.sessionLines();
+			var portable = Sys.getEnv("PRAGTICAL_PORTABLE");
+			if (portable == null) throw "session fixture has no isolated storage";
+			var recovery = new recovery.RecoveryStore(portable + "/pane-recovery.conf", application.workspace.fileSystem);
+			if (!recovery.save(application)) throw "session recovery snapshot did not save";
+			var session = session.WorkspaceSession.decode(session.WorkspaceSession.capture(application).encode());
+			session.restore(application, recovery);
+		}
+        if (phase == "terminal-editor-transfer" && frames == 8) {
+            var previous = ui.root;
+            var button = previous == null ? null : findEditor(previous, "terminal:move-to-editor");
+            if (button == null) throw "terminal transfer context action is missing";
+            var bounds = button.globalBounds();
+            ui.pointerDown(bounds.x + 8, bounds.y + 8, 0);
+            ui.pointerUp(bounds.x + 8, bounds.y + 8, 0);
+            var tab = host.activeTab();
+            if (tab == null || UiEditorTabs.terminal(tab) == null || host.panelTerminals.length != 0 || DecorationSmokeMain.terminalStarts != 2)
+                throw "context transfer replaced or lost terminal";
+            trace("PASS: terminal panel pointer context menu transfers existing session");
+        }
+        if (phase == "terminal-editor-transfer" && frames == 7) {
+            var previous = ui.root;
+            var terminal = previous == null ? null : findEditor(previous, "terminal-backdrop");
+            if (terminal == null) throw "terminal panel backdrop missing";
+            var bounds = terminal.globalBounds();
+            ui.pointerDown(bounds.x + 20, bounds.y + 20, 1);
+            ui.pointerUp(bounds.x + 20, bounds.y + 20, 1);
+        }
 		var root = super.submit(frame);
+
+
+		if (phase == "terminal-group-migrate" && frames == 6) {
+			var terminalTab:Null<RenderNode> = null;
+			root.walk(function(node) {
+				if (node.semantics != null && node.semantics.role == nativekit.ui.semantics.AccessibilityRole.Tab &&
+					node.semantics.label == "Terminal") terminalTab = node;
+			});
+			var bounds = host.activePane.bounds;
+			if (terminalTab == null || bounds == null) throw "grouping drag fixture has no resolved target";
+			var header = terminalTab.globalBounds();
+			var before = host.sessionLines()[0];
+			ui.pointerDown(header.x + header.width / 2.0, header.y + header.height / 2.0, 0);
+			ui.pointerMove(bounds.x + bounds.width / 2.0, bounds.y + bounds.height / 2.0);
+			ui.pointerUp(bounds.x + bounds.width / 2.0, bounds.y + bounds.height / 2.0, 0);
+			if (host.sessionLines()[0] != before) throw "terminal drag regrouped the editor dock pane";
+			trace("PASS: incompatible terminal-to-editor tab drop leaves layout unchanged");
+		}
+		if ((phase == "editor-header" || StringTools.startsWith(phase, "terminal-group-") || StringTools.startsWith(phase, "pane-split-")) && frames == 7) {
+			var dockEditorTabs = 0, documentTabs = 0;
+			root.walk(function(node) {
+				if (node.semantics != null && node.semantics.role == nativekit.ui.semantics.AccessibilityRole.Tab &&
+					node.semantics.label == "Editor") dockEditorTabs++;
+				if (node.styleKey != null && StringTools.startsWith(node.styleKey, "doc:")) documentTabs++;
+			});
+			if (dockEditorTabs != 0 || documentTabs != host.allViews().length)
+				throw "editor panes must expose document tabs without a redundant dock header";
+			trace("PASS: editor panes have one document tab row and no redundant dock header");
+			if (StringTools.startsWith(phase, "terminal-group-")) {
+				var terminalTabs = 0;
+				root.walk(function(node) {
+					if (node.semantics != null && node.semantics.role == nativekit.ui.semantics.AccessibilityRole.Tab &&
+						node.semantics.label == "Terminal") terminalTabs++;
+				});
+				if (terminalTabs != 1) throw "terminal did not reopen in its tool group";
+				if (DecorationSmokeMain.terminalStarts != 1)
+					throw "layout restoration restarted the terminal session";
+				trace("PASS: terminal tool grouping " + phase);
+			}
+		}
+		if (phase == "gutter-aligned" && frames == 7) {
+			var view = host.activeView();
+			if (view == null) throw "gutter fixture lost its view";
+			var node = findEditor(root, "editor:" + view.document.id);
+			if (node == null) throw "gutter fixture lost its editor";
+			var state:State<TextEditorState> = ui.buildContext.existingState(node.id);
+			var editor = state.value;
+			var bounds = host.activePane.bounds;
+			if (bounds == null) throw "gutter fixture has no viewport";
+			var baselines:Array<Float> = [];
+			// EditorPane supplies a field style with no text padding.
+			for (index in 0...editor.layout.paragraphCount) {
+				var y = bounds.y + editor.layout.paragraphCaret(index).y - view.scrollY();
+				if (y > bounds.y + 14.0 && y < bounds.y + bounds.height) baselines.push(y);
+			}
+			var portable = Sys.getEnv("PRAGTICAL_PORTABLE");
+			if (portable == null) throw "gutter fixture has no storage";
+			if (!sys.FileSystem.exists(portable)) sys.FileSystem.createDirectory(portable);
+			sys.io.File.saveContent(portable + "/gutter-baselines.json", haxe.Json.stringify({
+				baselines: baselines, left: bounds.x, right: bounds.x + 34.0
+			}));
+		}
+		if (phase == "selection-clipped" && frames == 7) {
+			var bounds = host.activePane.bounds;
+			if (bounds == null) throw "clipping fixture has no resolved editor viewport";
+			var portable = Sys.getEnv("PRAGTICAL_PORTABLE");
+			if (portable == null) throw "clipping fixture has no storage";
+			if (!sys.FileSystem.exists(portable)) sys.FileSystem.createDirectory(portable);
+			sys.io.File.saveContent(portable + "/editor-bounds.json", haxe.Json.stringify({
+				x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height
+			}));
+		}
+		if (phase == "pane-session-roundtrip" && frames == 7) {
+			var first = host.panes[0].activeView(), second = host.panes[1].activeView();
+			if (host.panes.length != 2 || first == null || second == null || first.document != second.document ||
+				first.selection == second.selection || first.cursorLine() != 10 || second.cursorLine() != 14 ||
+				first.scrollY() != 120 || second.scrollY() != 240 || host.activePane != host.panes[1])
+				throw "session lost pane membership, active view, shared buffer, caret or scroll";
+			if (host.sessionLines().join("\n") != savedPaneLines.join("\n")) {
+				trace("session before restore:\n" + savedPaneLines.join("\n"));
+				trace("session after restore:\n" + host.sessionLines().join("\n"));
+				throw "dock snapshot or session metadata changed on restore";
+			}
+			trace("PASS: dock split, shared dirty recovery, independent carets/scroll and active pane survive session roundtrip");
+		}
+
+		if (StringTools.startsWith(phase, "pane-close-") && frames == 7) {
+			if (host.commandView.active) throw "pane confirmation did not finish";
+			if (phase == "pane-close-cancel") {
+				if (host.panes.length != 2 || host.activeDocument() != menuDocument) throw "cancel lost pane or document";
+			} else if (host.panes.length != 1) throw "confirmed pane did not collapse";
+			if (phase == "pane-close-discard" && menuDocument != null && application.documents.documents.contains(menuDocument))
+				throw "discarded unique document stayed registered";
+			trace("PASS: pane close lifecycle " + phase);
+		}
+		if (StringTools.startsWith(phase, "pane-move-") && frames == 6) {
+			var active = host.activeView();
+			if (active == null) throw "moved view disappeared";
+			var editorNode = findEditor(root, "editor:" + active.document.id);
+			if (editorNode == null || !ui.focusWidget(editorNode.id)) throw "moved editor did not accept real focus";
+			if (host.activePane != host.panes[0] || host.activeDocument() != menuDocument)
+				throw "moved editor retained source-pane callbacks";
+			trace("PASS: tab movement and destination focus " + phase);
+		}
+
+		if (StringTools.startsWith(phase, "pane-split-") && frames == 5) {
+			var editors:Array<RenderNode> = [];
+			root.walk(function(node) {
+				if (node.focusable && node.styleKey != null && StringTools.startsWith(node.styleKey, "editor:")) editors.push(node);
+			});
+			if (editors.length != 2 || host.panes.length != 2) throw "split did not render two editor controls";
+			var first = host.panes[0].activeView(), second = host.panes[1].activeView();
+			if (first == null || second == null || first.document != second.document || first.selection == second.selection)
+				throw "split copied document text or shared selection state";
+			var left = host.panes[0].bounds, right = host.panes[1].bounds;
+			if (left == null || right == null) throw "split editor geometry was not reported";
+			if (phase == "pane-split-down" ? right.y <= left.y : right.x <= left.x)
+				throw "split orientation does not match command";
+			if (!host.focusPane(phase == "pane-split-down" ? 0 : -1, phase == "pane-split-down" ? -1 : 0))
+				throw "directional focus missed neighboring pane";
+			if (host.activeView() != first) throw "pane focus did not activate its core view";
+			first.textInput("X");
+			if (second.document.buffer != first.document.buffer || second.cursorColumn() == first.cursorColumn())
+				throw "shared edit collapsed independent pane selections";
+			trace("PASS: visible split orientation, shared buffer, independent selections and directional focus");
+		}
 		if (phase == "selection" && frames == 4) {
 			var view = host.activeView();
 			if (view == null) throw "selection fixture view disappeared";
@@ -370,8 +657,9 @@ class DecorationSmokeApp extends ExosuitApp {
 				if (active == null) throw "popup fixture lost document";
 				var editorNode = findEditor(root, "editor-scroll:" + active.id);
 				if (editorNode == null) throw "popup fixture lost editor node";
-				var stored:State<nativekit.ui.widgets.scroll.ScrollController> = ui.buildContext.existingState(editorNode.id);
-				popupScrollController = stored.value;
+				var activeView = host.activeView();
+				if (activeView == null) throw "popup fixture lost editor view";
+				popupScrollController = activeView.scrollController;
 			}
 			if (frames == 6) {
 				if (phase == "popup-switch" || phase == "popup-clipped") {
@@ -474,6 +762,15 @@ class DecorationSmokeApp extends ExosuitApp {
 
 /** Real renderer coverage for the EditorPane's public presentation providers. */
 class DecorationSmokeMain {
+	public static var terminalStarts:Int = 0;
+
+	public static function createTerminal(cwd:String, requestFrame:Void->Void,
+			palette:ui.TerminalPalette):ui.TerminalPanel {
+		var terminal = ui.TerminalPane.open(cwd, requestFrame, palette);
+		terminalStarts++;
+		return terminal;
+	}
+
 	static function main():Int {
 		var args = Sys.args();
 		if (args.length != 3) throw "expected source path, capture directory and phase";
@@ -482,7 +779,7 @@ class DecorationSmokeMain {
 		options.width = 900;
 		options.height = 600;
 		options.captureDirectory = args[1];
-		options.frameLimit = 7;
+		options.frameLimit = args[2] == "terminal-editor-transfer" ? 9 : 7;
 		var status = DesktopUiHost.run(options, function(context) {
 			return new DecorationSmokeApp(context, args[0], args[2]);
 		});

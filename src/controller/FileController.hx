@@ -149,7 +149,7 @@ class FileController {
 			newDocument();
 		});
 		commands.add("doc:save-as", context -> openSaveAs(context.requireDocument()), context -> activeDocument() != null);
-		commands.add("root:close", context -> requestCloseActiveTab(), context -> context.activeView() != null);
+		commands.add("root:close", context -> requestCloseActiveTab(), context -> root.canCloseActiveTab());
 		commands.add("root:close-pane", context -> requestCloseActivePane());
 		commands.add("folder:new", context -> openCreateFolder());
 		commands.add("file:rename", context -> openRenameFile(), context -> selectedFileOperationPath() != null);

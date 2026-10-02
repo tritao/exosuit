@@ -16,6 +16,9 @@ import nativekit.ui.core.BuildContext;
 import nativekit.ui.core.RenderNode;
 import nativekit.ui.core.View;
 import editor.TextBuffer;
+import nativekit.ui.widgets.text.TextEditorLayout;
+import ResolvedLayoutItem;
+import TextPosition;
 
 /** Retained visible line-number labels, sharing the editor scroll transform. */
 class EditorGutter implements View {
@@ -23,6 +26,14 @@ class EditorGutter implements View {
 	final buffer:TextBuffer;
 	final foreground:Color;
 	final background:Null<Color>;
+	var labels:Null<GutterLabels>;
+	var node:Null<RenderNode>;
+	var context:Null<BuildContext>;
+
+	public function resolveTextLayout(layout:TextEditorLayout, geometry:ResolvedLayoutItem):Void {
+		if (labels == null || node == null || node.resolved == null || context == null) return;
+		if (labels.resolve(layout, geometry.y - node.resolved.y)) context.requestLayoutFeedback();
+	}
 
 	public function new(key:String, buffer:TextBuffer, foreground:Color, ?background:Color) {
 		this.key = key;
@@ -32,20 +43,23 @@ class EditorGutter implements View {
 	}
 
 	public function build(context:BuildContext):RenderNode {
+		this.context = context;
 		var fonts = context.fonts;
 		if (fonts == null || fonts.isDisposed()) throw "Editor gutters require fonts";
 		var id = context.id(key);
-		var labels = context.resourceState(id, function() return new GutterLabels(fonts),
+		var retained = context.resourceState(id, function() return new GutterLabels(fonts),
 			function(value) { value.dispose(); }).value;
-		labels.update(buffer.lineCount(), foreground);
+		labels = retained;
+		retained.update(buffer.lineCount(), foreground);
 		var style = new LayoutStyle();
 		style.width = LayoutAxis.fit();
 		style.height = LayoutAxis.fit();
 		if (background != null) style.background = background;
-		var node = new RenderNode(id, LayoutVisualKind.Custom, style);
-		node.hitTestSelf = false;
-		node.layout.intrinsicContent = labels.content;
-		return node;
+		var built = new RenderNode(id, LayoutVisualKind.Custom, style);
+		node = built;
+		built.hitTestSelf = false;
+		built.layout.intrinsicContent = retained.content;
+		return built;
 	}
 }
 
@@ -54,37 +68,57 @@ private class GutterLabels {
 	public final content:LayoutRenderableContent;
 	final layout:TextLayout;
 	final measurement:LayoutMeasuredContent;
+	final fonts:FontCollection;
+	final visibleLabels:Array<TextLayout> = [];
+	var editorLayout:Null<TextEditorLayout>;
+	var originY:Float = 0.0;
+	var height:Float = 4.0;
 	var count:Int = -1;
 	var digits:Int = 1;
 	var width:Float = 0.0;
-	var rowHeight:Float = 1.0;
-	var visibleFirst:Int = -1;
-	var visibleEnd:Int = -1;
 	var color:Null<Color> = null;
 
 	public function new(fonts:FontCollection) {
+		this.fonts = fonts;
 		layout = TextLayout.create(fonts, "", 1.0, new TextStyle(13.0), new ParagraphStyle(TextWrap.None));
 		measurement = new LayoutMeasuredContent(function(_) {
-			return new LayoutMeasureResult(width + 12.0, rowHeight * count + 4.0);
+			return new LayoutMeasureResult(width + 12.0, height);
 		});
 		content = new LayoutRenderableContent(measurement, function(canvas, geometry) {
+			var editor = editorLayout;
+			if (editor == null || editor.paragraphCount == 0) return;
 			var visible = geometry.visibleLocalBounds();
-			var first = Std.int(Math.max(0, Math.floor((visible.y - 4.0) / rowHeight) - 1));
-			var end = Std.int(Math.min(count, Math.ceil((visible.y + visible.height - 4.0) / rowHeight) + 1));
+			var first = Std.int(Math.max(0, editor.paragraphIndexAtY(visible.y - originY) - 1));
+			var end = Std.int(Math.min(editor.paragraphCount,
+				editor.paragraphIndexAtY(visible.y + visible.height - originY) + 2));
 			if (end <= first) return;
-			if (first != visibleFirst || end != visibleEnd) {
-				var labels:Array<String> = [];
-				for (index in first...end) {
-					var label = Std.string(index + 1);
-					while (label.length < digits) label = " " + label;
-					labels.push(label);
-				}
-				layout.setText(labels.join("\n"));
-				visibleFirst = first;
-				visibleEnd = end;
+			for (index in first...end) {
+				var slot = index - first;
+				if (slot == visibleLabels.length)
+					visibleLabels.push(TextLayout.create(fonts, "", 1.0,
+						new TextStyle(13.0), new ParagraphStyle(TextWrap.None)));
+				var label = Std.string(index + 1);
+				while (label.length < digits) label = " " + label;
+				var number = visibleLabels[slot];
+				number.setText(label);
+				if (color != null) number.setColor(color);
+				var baseline = number.caret(new TextPosition(0, 0)).y;
+				canvas.drawText(number, 6.0, originY + editor.paragraphCaret(index).y - baseline);
 			}
-			canvas.drawText(layout, 6.0, 4.0 + first * rowHeight);
 		});
+	}
+
+	public function resolve(editor:TextEditorLayout, nextOriginY:Float):Bool {
+		editorLayout = editor;
+		originY = nextOriginY;
+		var nextHeight = Math.max(0.0, originY + editor.measure().height);
+		var changed = height != nextHeight;
+		if (changed) {
+			height = nextHeight;
+			measurement.invalidate();
+		}
+		content.invalidatePaint();
+		return changed;
 	}
 
 	public function update(nextCount:Int, nextColor:Color):Void {
@@ -93,10 +127,7 @@ private class GutterLabels {
 			layout.setText(Std.string(nextCount == 0 ? 1 : nextCount));
 			var metrics = layout.measure();
 			width = metrics.width;
-			rowHeight = Math.max(1.0, metrics.height);
 			count = nextCount;
-			visibleFirst = -1;
-			visibleEnd = -1;
 			measurement.invalidate();
 		}
 		if (color == null || color.red != nextColor.red || color.green != nextColor.green ||
@@ -110,5 +141,6 @@ private class GutterLabels {
 	public function dispose():Void {
 		content.dispose();
 		layout.dispose();
+		for (label in visibleLabels) label.dispose();
 	}
 }

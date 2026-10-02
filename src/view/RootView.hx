@@ -179,6 +179,13 @@ class RootView implements WorkbenchHost {
 		return true;
 	}
 
+	public function canCloseActiveTab():Bool return tabs.activeView != null;
+	public function switchActiveTab(delta:Int):Bool {
+		if (tabs.activeView == null) return false;
+		tabs.switchBy(delta);
+		return true;
+	}
+
 	public function documentsLostByClosingActiveTab():Array<Document> {
 		var view = tabs.activeView;
 		if (view == null) return [];

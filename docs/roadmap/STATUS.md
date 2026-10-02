@@ -2,6 +2,288 @@
 
 Last updated: 2026-10-02.
 
+## Shared terminal and document editor tabs, 2026-10-02
+
+- Implemented typed UiEditorTab variants for document views and owned terminal
+  sessions. UiEditorPane.items owns ordered tabs; document-only projections
+  continue to serve document controllers without exposing terminal content.
+- Move Terminal to Editor and Move Terminal to Panel transfer the same
+  UiTerminalTab/TerminalPanel owner, preserving PTY, emulator and scrollback.
+  Commands are available in the palette; panel context menus offer transfer
+  to editor and editor terminal tab menus offer transfer back and close.
+  Multiple terminals can live in either location. Tab switching, movement,
+  reordering and closing operate on typed tabs; document actions have no
+  active document while a terminal is selected.
+- X/Y session records persist editor/panel terminal profiles and placement.
+  Same-process restoration reuses live owners by ID/profile. Restart launches
+  new shells from profiles; running processes do not survive app shutdown.
+- Fixed a renderer defect exposed by transferring terminals: the backdrop
+  painter resized emulator rows and invalidated later painters in that frame.
+  Resolved dimensions now schedule resize before constructing the next frame.
+- Focused real PTY regression passed, log
+  `/tmp/exosuit-terminal-transfer-run.log`: repeated transfers, typed tab
+  switching, same-process session restoration, two session owners, isolated
+  terminal close. Factory counts prove transfer does not spawn replacement PTYs.
+- Full UI/pixel gate passed (11102, exit 0), all 53 phases, log
+  `/tmp/exosuit-terminal-tabs-full2.log`, artifacts
+  `/tmp/exosuit-terminal-tabs-full2`. Initial fixture failures: the generic
+  decoration fixture assumed a document remained selected; legacy migration
+  fixture captured before creating its terminal. Both fixtures corrected.
+  Resize crash was an application bug fixed above, no compiler workaround.
+- Headless gate passed (26728, exit 0), log
+  `/tmp/exosuit-terminal-tabs-headless.log`; desktop build passed (62248,
+  exit 0), log `/tmp/exosuit-terminal-tabs-desktop-build.log`.
+- Browser wasm32 build passed but initial focus test clicked the old y=130
+  after the document row moved up with header removal. Screenshot confirmed
+  normal rendering and clean application state. Updated click to y=95, added
+  failure diagnostics/early screenshots; focused browser gate passed (19553).
+  Both-target composed gate passed (4441, exit 0), log
+  `/tmp/exosuit-terminal-tabs-web-final.log` (Chrome Testing 154). Browser
+  manifest regenerated; older Chrome 136 baseline remains pending.
+- Final review corrected the panel context handler to UIKit right button=1.
+  Extended focused PTY regression passed (43107, exit 0), log
+  `/tmp/exosuit-terminal-menu-run.log`, with real pointer opening and selecting
+  Move Terminal to Editor and no extra session creation. Screenshot visually
+  reviewed at `/tmp/exosuit-terminal-transfer/capture-menu2/frame.png`: Main.hx
+  and Terminal 2 share one content-owned tab row. This final pointer-only
+  correction was checked with the focused gate; prior full UI/headless/web
+  gates above passed before it. Desktop final rebuild passed (21909, exit 0),
+  log `/tmp/exosuit-terminal-tabs-desktop-final.log`. Verified pane/terminal
+  slice committed locally; no publication. User live app left running.
+  M9.2 remains open for actual process restart, keyboard-only acceptance and
+  corrupt/legacy/missing session cases; do not mark the milestone complete.
+
+## Editor/tool grouping policy in progress, 2026-10-02
+
+- User's live screenshot still had Editor | Terminal above document tabs:
+  singleton header suppression does not fix a mixed dock group. Added general
+  DockPanelGrouping metadata (named group, shared tabs or standalone pane).
+  Exosuit editor panes are standalone members of editors; tools share tools;
+  Explorer belongs to sidebar. UIKit contains no editor-specific IDs or rules.
+- Model enforces policy for Center/TabBefore/TabAfter; side splits remain valid.
+  Drag preview filters unsupported drops. open selects a compatible group or
+  a side split. Terminal explicitly targets Build, then Problems, then a bottom
+  split beside the active editor, avoiding the old first-panel fallback.
+- Layout installation and restore migrate incompatible tab groups into split
+  groups, preserving IDs, within-group ordering/selection and active panel.
+  Already valid layout snapshots roundtrip unchanged. No content is copied or
+  panel provider retired by grouping normalization.
+- UIKit framework passed (51472, exit 0), log
+  `/tmp/exosuit-group-policy-framework.log`; covers prohibited tab merges,
+  allowed side splits, compatible open fallback, legacy group migration and
+  idempotent persistence. Initial fixture compile needed a missing class qualifier.
+- Full UI gate runs under handle 29820, log `/tmp/exosuit-group-policy-ui.log`,
+  artifacts `/tmp/exosuit-group-policy-ui`. New real PTY fixtures cover reopening
+  with Build closed, with all tool panels closed, legacy Editor/Terminal layout
+  migration and pointer drag rejection. Poll before UI/build source edits.
+  Full UI gate passed (29820, exit 0), including all previous UI/pixel cases.
+  Migrated terminal screenshot visually reviewed. Added a terminal factory
+  counter; focused migration/drag rerun passed (97113, exit 0), confirming only
+  one terminal session is created through migration/reopening. Log
+  `/tmp/exosuit-group-policy-terminal-once.log`.
+- UIKit grouping policy committed in Materia as `314dabd14`; release.lock updated.
+  Exosuit integration remains with pending pane slice. Graphical rebuild passed
+  (42808, exit 0), log `/tmp/exosuit-group-policy-desktop-build.log`. Restart the
+  live app to load it; preserve user edits when restarting.
+
+## Single editor tab row in progress, 2026-10-02
+
+- Added UIKit DockPanelHeaderMode (Dock/Content) as descriptor metadata.
+  Singleton content-owned panels render their own header without a redundant
+  dock tab row. Multi-panel groups retain their dock tabs for panel selection.
+  Pane cache keys include header mode; model IDs/layout persistence are unchanged.
+- All Exosuit editor registrations (initial, split and restored panes) use
+  Content mode. Tool panels retain normal dock chrome. Added real UI assertions
+  for one document tab row in single/split editor panes.
+- UIKit framework passed (41527, exit 0), log
+  `/tmp/exosuit-content-header-framework.log`; covers singleton suppression,
+  mixed-group tabs, return to singleton, plus existing docking interactions.
+- Full UI gate runs under handle 19731, log `/tmp/exosuit-content-header-ui.log`,
+  artifacts `/tmp/exosuit-content-header-ui`; poll before source edits/shared
+  builds. Full UI gate passed (19731, exit 0), including singleton/split header
+  assertions, dock/session roundtrip, pane lifecycle/movement/focus, menus,
+  popups and all pixel regressions. Singleton screenshot visually reviewed.
+  Pixel checks now derive editor bounds from captured layout rather than assume
+  the removed header's old vertical offset. UIKit change committed in Materia
+  as `7db5e52bd`; release.lock updated. Exosuit registrations/regressions remain
+  with the pending pane slice. Running user app needs a restart; preserve edits.
+
+## Gutter alignment regression in progress, 2026-10-02
+
+- User screenshot exposed independently measured gutter rows: 13 px labels
+  estimated document height from a single number while TextArea used themed,
+  wrapped text. Replaced fixed row spacing with borrowed editor shaping geometry.
+- UIKit TextEditorLayout exposes paragraphCaret and paragraphIndexAtY; TextField
+  publishes borrowed text geometry through onLayoutResolved. No document text is
+  copied. Exosuit gutter shapes only visible number labels and aligns their
+  baselines with actual logical paragraph starts, including wrapped/blank rows.
+  Intrinsic gutter height follows the measured text height through layout feedback.
+- Focused build/render passed; screenshot visually verified wrapped paragraphs,
+  blank rows and subsequent numbered lines after scroll and a newline insertion.
+  Added pixel regression against actual paragraph caret baselines.
+- Full UI gate runs under handle 31286, log
+  `/tmp/exosuit-gutter-alignment-full.log`, artifacts
+  `/tmp/exosuit-gutter-alignment-full`. All runtime phases passed; final checker
+  initially rejected thin antialiased digits (red channel 168 versus threshold
+  200). Corrected the classifier to red >120, green/blue <50; rerunning the full
+  pixel checker on the captured artifacts passed all invariants. No product
+  inputs changed between runtime run and pixel recheck.
+- UIKit framework gate runs under handle 48936, log
+  `/tmp/exosuit-gutter-uikit-framework.log`; passed (exit 0), including paragraph
+  geometry against fresh shaping after edits. UIKit API/regression committed in
+  Materia as `11ed9b914`; release.lock updated. Exosuit gutter integration and
+  rendered regressions remain with the pending pane slice. Existing app stays open
+  with its old loaded code to preserve unsaved edits.
+
+## Selection viewport clipping regression, 2026-10-02
+
+- User screenshot showed selection leaking into the lower tool panel. A real
+  long-document UI fixture reproduces it: text clips but the floating custom
+  selection layer paints below the editor viewport.
+- UIKit native render compiler now intersects the custom node's resolved
+  inherited clip with the command clip stack, including raster-subtree and
+  composite paths. Floating layers cannot rely solely on surrounding scissor
+  commands. Added a native regression with inherited clip and no scissor stack.
+- Native test rebuilt and passed:
+  `/tmp/materia-uikit-layout-test/nativekit_ui_layout_render_compiler_test`.
+  Focused rendered fixture has 59,153 selection pixels and zero outside the
+  resolved viewport. Added that pixel invariant to the full UI suite.
+- First full UI run (8074) failed because the fixture wrote bounds before its
+  isolated state directory existed. Fixed fixture directory creation.
+- Full UI gate runs under handle 97563, log
+  `/tmp/exosuit-selection-clip-full-fixed.log`, artifacts
+  `/tmp/exosuit-selection-clip-full-fixed`. Poll before UI/native source edits or
+  shared builds. Full UI gate passed (97563, exit 0), including the new pixel
+  assertion and every prior pane/menu/decoration/multi-caret/popup case.
+- Five native compositor/layout tests passed after building their executables.
+  Extended the native regression to raster-subtree clipping, verified in
+  cache-local coordinates; final render compiler test passed. UIKit fix
+  committed in Materia as `1189e5635`; release.lock updated. Exosuit fixture
+  remains part of the pending pane slice.
+- The user's live app retains its old loaded library; do not close it or discard
+  unsaved documents to reload the fix.
+
+## M9.2 — visible DockWorkspace splits in progress, 2026-10-02
+
+- Latest session roundtrip exposed a real ordering defect: WorkspaceSession
+  showed the sidebar after restoring the dock, replacing saved editor panel
+  activation with Explorer activation. Initialize the sidebar before restoring
+  layout so saved selection/focus wins. The strict fixture already verified
+  shared dirty recovery, independent carets/scroll and active editor membership.
+  Full UI rerun: handle 98867, log `/tmp/exosuit-dock-session-fixed.log`, artifacts
+  `/tmp/exosuit-dock-session-fixed`; poll before edits to UI/build inputs.
+  The complete UI gate passed (handle 98867, exit 0), including strict session
+  roundtrip with exact dock snapshot/session metadata equality and all previous
+  pane lifecycle, movement, menu, decoration, multi-caret and popup cases.
+- Haxeon String ordering fix committed as `6d8593d5`. Full
+  `../haxeon/scripts/test.sh` passed (handle 81286, exit 0), log
+  `/tmp/haxeon-string-ordering-full-gate.log`, including typing rejection tests,
+  registered runtime regression and Wasm gates. Greater-than preserves source
+  operand evaluation order through the existing string comparator intrinsic.
+- UIKit explicit scroll ownership committed in Materia as `cc2ae8dcc`; framework
+  and full UI passed under handle 15686. Updated release.lock for both verified
+  dependency commits. Pre-existing sibling/submodule dirt remains untouched.
+
+- Ownership foundation committed as Exosuit `d49d640`; UI, graphical,
+  headless and both fresh browser targets pass. Started this slice clean.
+- Added UiEditorPane tab/active-view membership and made host tab/index access
+  refer to the active pane. Additional editor panels register in the existing
+  shell dock, share Documents and clone only selection snapshots on split.
+- Split commands now call WorkbenchHost; UIKit CommandBridge includes them.
+  Editor panel content is registered lazily, tabs render per-pane selection,
+  and editor focus/pointer events activate their pane before commands run.
+  Dock pane descriptors are non-closable so chrome cannot bypass confirmations.
+- First compile caught unsupported default-value syntax in an interface method;
+  changed the declaration to an optional parameter. The next compile required
+  an explicit UiEvent type on a local callback with no function context; added
+  it. Visible split graphical build passed (handle 29114, exit 0), log
+  `/tmp/exosuit-visible-splits-build.log`.
+- Added resolved pane rectangles and text-control focus targets. Directional
+  focus selects neighboring editor panes; tab movement preserves a view or
+  retires a duplicate when the destination already shows its Document.
+  Newly revealed panes request validated focus after layout. Compilation runs
+  passed under handle 49001 (exit 0), log
+  `/tmp/exosuit-pane-navigation-build.log`. Runtime behavior is not verified.
+- Added right/down split UI fixtures checking two resolved text controls,
+  orientation, shared Document/buffer, independent selection and directional
+  core focus. UI gate runs under handle 23268, log
+  `/tmp/exosuit-visible-split-ui.log`, artifacts `/tmp/exosuit-visible-split-ui`.
+  Both split fixtures pass; retained right-split image visually reviewed.
+  The full UI gate then failed at the file-tree menu: captures/state folders
+  accumulated inside the project and clipped Main.hx out of the tree viewport.
+  Moved the input project into its own directory, separate from artifacts/state.
+- Implemented pane/tab loss calculations across views, dirty guards and pane
+  retirement via DockWorkspaceModel.unregister. Shared documents remain open;
+  unique documents close through the document manager after lifecycle approval.
+  Menus now validate exact view identity across shared-document panes. Explorer
+  reopening targets the surviving active editor pane.
+- Updated full UI gate runs under handle 75831, log
+  `/tmp/exosuit-pane-safe-close-ui.log`, artifacts `/tmp/exosuit-pane-safe-close-ui`.
+  This full UI gate passes (handle 75831, exit 0), including prior menus,
+  decorations, multi-carets and caret popups.
+- Rebind retained EditorPane focus/geometry/context callbacks when a view moves
+  between panes; old callbacks must not activate its former pane. Added real UI
+  cases for shared dirty-pane close without a prompt, unique dirty close with
+  Escape cancellation/discard, unique view movement and duplicate retirement,
+  followed by focus on the destination's rendered editor.
+- Expanded UI gate runs under handle 38424, log
+  `/tmp/exosuit-pane-lifecycle-ui.log`, artifacts `/tmp/exosuit-pane-lifecycle-ui`.
+  This gate passes (handle 38424, exit 0), including all lifecycle/movement
+  cases and the prior UI suite. This slice remains uncommitted.
+- Per-view ScrollController ownership now follows tabs across pane moves;
+  UiDocumentView reads/restores offsets and passes the controller to EditorPane.
+  UIKit ScrollView honors an explicitly supplied controller instead of replacing
+  it with a previous widget instance's stored controller. Implicit controllers
+  retain existing state behavior. Framework tests replace a supplied controller
+  at the same widget key and assert the correct object and offset survive.
+- First scroll compile caught a stale, unused State parameter in the scrollbar
+  helper; removed it. Updated popup fixture to use the view-owned controller
+  rather than inspect implicit widget state. UIKit/framework followed by full
+  UI runs under handle 15686, logs `/tmp/uikit-owned-scroll-controller.log` and
+  `/tmp/exosuit-owned-scroll-ui.log`. Poll before source edits/shared builds.
+  Materia now has two owned dirty UIKit files (ScrollView and FrameworkSmoke),
+  in addition to preserved TextInputBridge/submodule dirt.
+  UIKit/framework and full UI pass (handle 15686, exit 0).
+- Added host session records for pane membership (P), per-pane views (V), last
+  active editor pane (Q) and versioned dock snapshot (D/dock/1). WorkspaceSession
+  validates field/identity/coordinate bounds without depending on UIKit; the
+  dock snapshot codec validates its own payload during host restore. Existing
+  T/A records remain as a flat document fallback for older readers, and old
+  single-pane sessions still restore through T records. Only metadata is added.
+- Restore retires every old view/pane, registers saved pane identities, resolves
+  shared Documents through the existing session resolver cache, restores each
+  caret/scroll offset, then applies the dock snapshot. Invalid/missing layout
+  payloads reopen resolved panes rather than lose document views.
+- First session compile rejected relational comparisons of String characters
+  (E1011). Pane IDs require ASCII ordinal ranges, so validation now uses numeric
+  charCodeAt ranges. Follow COMPILER-TYPING to reduce and compare the String
+  operator semantics with the local Haxe reference before classifying a compiler
+  defect; do not silently dismiss valid typing defects.
+- Session graphical build passes (handle 69878, exit 0), log
+  `/tmp/exosuit-dock-session-build.log`.
+- COMPILER-TYPING audit confirms String relational operators are valid Haxe:
+  local `.tools/haxe/haxe --interp` returns true for a character range reducer.
+  Haxeon compareTyped currently permits String equality but sends ordering to
+  numeric-only validation. Fix the general rule using existing
+  `__string_compare_full`, preserving original left/right evaluation order even
+  for reversed greater-than operators; keep mixed/non-numeric invalid cases.
+  Native, Wasm32 and Wasm-GC already implement the comparator intrinsic.
+- Added registered runtime regression `tests/programs/string-ordering.hx` with
+  dynamically produced strings, equality boundaries, prefix/Unicode ordering and
+  side-effect order. Its pre-fix compile runs under handle 8935, log
+  `/tmp/exosuit-string-ordering-before.log`; poll before compiler source edits.
+  Haxeon pre-existing hashlink/.claude/hlprofile dirt remains untouched.
+  Restart/corrupt/missing-file/legacy session tests and final composed gates
+  remain pending. Audit fallback dock geometry/defaultRoot after unregister,
+  active-pane visibility in dock tab groups, and empty-pane keyboard focus.
+- Next: fix compile failures, add a real UI split fixture proving two resolved
+  editors with independent selections on shared text, then directional focus,
+  tab move, lifecycle pane close and session/dock/scroll persistence. Current
+  restore/dispose/loss calculations still need the multi-pane audit. The
+  split-pane checklist remains open. Also audit menu guards against exact view
+  identity: switching panes that show the same Document must retire old targets.
+  Audit tab-switch commands, pane visibility and diagnostics across all views.
+
 ## M9.2 — split-pane ownership foundation verified, 2026-10-02
 
 - Exosuit was clean at `c3fe35e` before this slice. Menus are committed as

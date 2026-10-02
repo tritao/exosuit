@@ -1,0 +1,36 @@
+package ui;
+
+import Rect;
+import nativekit.ui.core.BuildContext;
+import nativekit.ui.core.RenderNode;
+import nativekit.ui.core.UiEventKind;
+import nativekit.ui.core.UiEvent;
+import nativekit.ui.core.View;
+import nativekit.ui.core.WidgetId;
+
+/** Mounts an owned terminal in either host without recreating its session. */
+class TerminalTabView implements View {
+	final terminal:UiTerminalTab;
+	final activate:Void->Void;
+	final resolved:Rect->WidgetId->Void;
+	final contextMenu:Null<UiEvent->Void>;
+
+	public function new(terminal:UiTerminalTab, activate:Void->Void, resolved:Rect->WidgetId->Void, ?contextMenu:UiEvent->Void) {
+		this.terminal = terminal;
+		this.activate = activate;
+		this.resolved = resolved;
+		this.contextMenu = contextMenu;
+	}
+
+	public function build(context:BuildContext):RenderNode {
+		var node = terminal.panel.build(context);
+		node.on(UiEventKind.Focus, function(_) activate(), "capture");
+		node.on(UiEventKind.PointerDown, function(event) {
+			activate();
+			var menu = contextMenu;
+			if (event.button == 1 && menu != null) { menu(event); event.preventDefault(); event.stopPropagation(); }
+		}, "capture");
+		node.onResolved(function(_) resolved(node.globalBounds(), node.id));
+		return node;
+	}
+}

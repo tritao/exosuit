@@ -21,18 +21,14 @@ import platform.Platform;
  * on every palette open/keystroke, so disabling e.g. `doc:save` when there
  * is no active document flows through automatically.
  *
- * `layoutOnlyCommands` are excluded: `command.EditorCommands` installs them
- * gated on `context.root != null` (`command.CommandContext.requireRoot()`),
- * meaningful only for the legacy split-pane `view.RootView` this host never
- * builds (see `core.WorkbenchHost.asRootView`'s doc comment). `duplicates`
+ * `layoutOnlyCommands` are legacy project-tree navigation commands. `duplicates`
  * are excluded because `ExosuitApp` already exposes the same action under
  * its own `file.*`/`view.toggle-palette` ids, retargeted to call these same
  * exosuit commands (see `ExosuitApp.installCommands`).
  */
 class CommandBridge {
 	static final layoutOnlyCommands:Array<String> = [
-		"root:switch-to-next-tab", "root:switch-to-previous-tab", "root:split-left", "root:split-right",
-		"root:split-up", "root:split-down", "root:close-pane", "project:sidebar-next", "project:sidebar-previous",
+		"project:sidebar-next", "project:sidebar-previous",
 		"project:sidebar-open"
 	];
 	static final duplicates:Array<String> = ["file:new", "doc:save", "root:close"];

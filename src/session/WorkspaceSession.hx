@@ -39,6 +39,8 @@ class WorkspaceSession {
 		for (root in projects)
 			if (FileSystem.exists(root) && FileSystem.isDirectory(root)) application.openArgument(root);
 		for (project in application.workspace.projects) project.restoreExpanded(expanded);
+		// Populate the sidebar before restoring the saved dock selection and focus.
+		application.root.showProjectSidebar();
 		if (layout.length > 0) {
 			var snapshots:Map<String, RecoverySnapshot> = [], restored:Map<String, Document> = [];
 			if (recovery != null)
@@ -63,7 +65,6 @@ class WorkspaceSession {
 				if (FileSystem.exists(path) && !FileSystem.isDirectory(path)) application.open(path);
 			if (activeDocument.length > 0 && FileSystem.exists(activeDocument) && !FileSystem.isDirectory(activeDocument)) application.open(activeDocument);
 		}
-		application.root.showProjectSidebar();
 	}
 
 	public function encode():String {
@@ -129,6 +130,20 @@ class WorkspaceSession {
 
 	static function validLayout(value:String):Bool {
 		var fields = value.split("\t");
+		if (fields.length == 6 && fields[0] == "X")
+			return validPaneId(fields[1]) && (fields[2] == "0" || fields[2] == "1") &&
+				validPaneId(fields[3]) && fields[4].length > 0 && fields[4].length <= 256 && fields[5].length > 0;
+		if (fields.length == 5 && fields[0] == "Y")
+			return (fields[1] == "0" || fields[1] == "1") && validPaneId(fields[2]) &&
+				fields[3].length > 0 && fields[3].length <= 256 && fields[4].length > 0;
+		if (fields.length == 2 && (fields[0] == "P" || fields[0] == "Q")) return validPaneId(fields[1]);
+		if (fields.length == 4 && fields[0] == "D")
+			return fields[1] == "dock" && fields[2] == "1" && fields[3].length > 0 && fields[3].length <= 1048576;
+		if (fields.length == 9 && fields[0] == "V") {
+			if (!validPaneId(fields[1]) || (fields[2] != "0" && fields[2] != "1") || (fields[7] != "P" && fields[7] != "R") || fields[8].length == 0) return false;
+			for (index in 3...7) if (!nonNegativeInteger(fields[index])) return false;
+			return true;
+		}
 		if (fields.length == 2 && fields[0] == "A") return validRoute(fields[1]);
 		if (fields.length == 4 && fields[0] == "S")
 			return validRoute(fields[1]) && (fields[2] == "H" || fields[2] == "V") && nonNegativeInteger(fields[3]);
@@ -139,6 +154,17 @@ class WorkspaceSession {
 			return true;
 		}
 		return false;
+	}
+
+	/** Stable host-owned pane identity; document references remain separate fields. */
+	static function validPaneId(value:String):Bool {
+		if (value.length == 0 || value.length > 128) return false;
+		for (index in 0...value.length) {
+			var code = value.charCodeAt(index);
+			if (!(code >= 97 && code <= 122 || code >= 65 && code <= 90 ||
+				code >= 48 && code <= 57 || code == 45 || code == 95)) return false;
+		}
+		return true;
 	}
 
 	static function validRoute(value:String):Bool {
