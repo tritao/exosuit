@@ -64,6 +64,9 @@ Last updated: 2026-10-02.
   submodule dirt remain untouched. release.lock pins both owned commits.
   Context-menu checklist is complete. Chrome 136 reload compatibility remains
   unresolved; passing Chrome 154 checks do not prove that older-browser case.
+- Exosuit `5f1c320` commits the integrated menus, UI/browser regressions and
+  release inputs. README and architecture known gaps now reflect delivered
+  menu/caret/styled-text behavior.
 - Next: M9.2 DockWorkspace split panes, directional focus, tab movement and pane
   close, with session restoration. Existing split commands require legacy
   RootView and must be moved to the WorkbenchHost boundary. Each pane needs its

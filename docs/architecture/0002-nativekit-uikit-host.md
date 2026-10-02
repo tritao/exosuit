@@ -149,8 +149,10 @@ widget's caret. These connections are compile-verified; real-window acceptance
 remains pending in M8.3.
 
 Remaining graphical gaps:
-- Syntax spans, diagnostic/plugin decorations and search highlighting are not rendered.
-- Language overlays have no caret anchor.
+- Syntax spans, diagnostics, search/bracket/current-line decorations and multiple
+  selections/carets are rendered; the M9.1 acceptance evidence is in STATUS.
+- Language overlays follow the visible caret, flip/clamp to the viewport and
+  dismiss on document switch or caret clipping.
 - Workspace search stores results but has no visible results panel.
 - One editor region means split, pane focus and moving tabs between panes are unavailable.
 - Editor, tab and file-tree command menus use UIKit popups and CommandRegistry.

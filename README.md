@@ -73,7 +73,8 @@ Keyboard navigation moves all carets through UIKit's shaped layout.
   earlier 62.6 ms run under workstation load. The 1 MiB single line improves
   to 313.7 ms p95 but still exceeds the 50 ms budget.
 - Primary caret/selection changes now flow between the widget and model, including
-  command-driven placement. Language popups are not anchored to that caret.
+  command-driven placement. Language popups follow the visible caret and dismiss
+  when scrolling clips it or the active document changes.
 - Workspace search results are retained by the host but have no graphical panel.
 - The shell has one editor region. Split, pane focus and moving tabs between
   panes are unavailable; tab reordering and sidebar visibility are wired.
