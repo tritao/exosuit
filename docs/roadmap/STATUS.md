@@ -30,16 +30,18 @@ Last updated: 2026-10-02.
   offsets move; their immutable source metadata is rebased on publication.
   Colored rows also retain publication identity when relative color coverage
   stays unchanged. The containing pass still recomposites rows, and
-  unsupported Unicode layouts still rebuild. The measured parent repaint is
+  fresh Unicode layouts retain glyph-equivalent row publications. The measured
+  parent repaint is
   a lower-priority cost: guarded same-advance and stable-wrap ASCII edits
   now reuse row geometry, while changed wrap boundaries still reflow. Recheck the
   remaining invalidation cases after both standard typing gates passed. Full
-  Unicode edits still rebuild every row publication; verify actual glyph
-  equivalence before retaining those unchanged rows. Preserve the
+  Unicode edits now retain equivalent rows at matching row indexes. Newline
+  edits that change row indexes still need a source-range mapping before
+  those suffix publications can retain identity. Preserve the
   1 MiB, 10 MiB and graphical pixel gates.
   Preserve M8 and both browser gates.
-- Current follow-on HEADs: Exosuit `acec08f` before this ledger commit;
-  Materia `9da04df56` carries row-scoped glyph commands, shallow row raster
+- Current follow-on HEADs: Exosuit `912f701` before this ledger commit;
+  Materia `e9404a073` carries row-scoped glyph commands, shallow row raster
   caching, rebased source metadata, a parent repaint cost regression, and the
   Skribidi bulk-copy and guarded variable-width row-geometry reuse slices. The
   existing dirty Haxeon/NativeKit gitlinks and UIKit TextInputBridge edit in
@@ -85,6 +87,28 @@ Last updated: 2026-10-02.
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M9.1 — unchanged Unicode row publications after full shaping
+
+- The full-layout edit fallback compares matching rows' codepoints, layout
+  runs, fonts, glyph IDs, glyph positions, and relative cluster source ranges
+  against the prior generation. Equivalent rows retain their globally unique
+  row revision. Single-row publication keys use that revision independently
+  of the layout ID; a cache hit republishes immutable metadata for the new
+  layout and source offset while retaining paint identity.
+- Geometry queries continue to read the freshly shaped native layout. Native
+  tests cover combining marks, emoji, bidi text, relative foreground colors,
+  shifted source offsets, changed-row invalidation, and retained old snapshot
+  lifetime. The renderer smoke confirms a Unicode edit produces exactly two
+  misses (changed row and parent pass) while unchanged rows hit. Native
+  text-engine, ABI, frame-resource, session-render, graphical build, and
+  decoration pixel checks pass. Newline edits that shift row indexes remain
+  conservative; general Unicode shaping is still a full-layout operation.
+- Final standard typing gates pass across 30 input frames each: 1 MiB
+  varied-key **43.39 ms p95**, artifact `/tmp/exosuit-unicode-rows-1mb`;
+  10 MiB repeat-key **30.70 ms p95**, artifact
+  `/tmp/exosuit-unicode-rows-10mb`. Both remain below 50 ms. The 10 MiB maximum
+  was 41.07 ms in this final run.
 
 ### M9.1 — collection attribution and 10 MiB rerun
 
