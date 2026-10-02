@@ -7,7 +7,7 @@ features; do not special-case exosuit inside UIKit.
 
 ## M9.1 — Styled text and decorations
 
-- [ ] Add styled spans or decoration ranges to UIKit `TextArea`/`TextLayout`:
+- [x] Add styled spans or decoration ranges to UIKit `TextArea`/`TextLayout`:
   foreground color, background, underline (wavy for diagnostics) and
   whole-line backgrounds. Reuse the measured layout and invalidate only the
   changed rows.

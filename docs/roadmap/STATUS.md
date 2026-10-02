@@ -2,6 +2,28 @@
 
 Last updated: 2026-10-02.
 
+## M9.1 acceptance audit complete; M9.2 active, 2026-10-02
+
+- Styled foreground, background, underline/wavy underline and whole-line
+  backgrounds are implemented through UIKit's typed ranges/decorations.
+  Native row-publication tests prove unchanged ASCII and general-Unicode rows
+  preserve their publication identity; isolated color changes preserve other
+  row objects and measured geometry (`/tmp/exosuit-row-color-invalidation.log`).
+- Real-editor pixels verify multiline syntax repair and undo, diagnostic
+  movement/clearing, search, brackets/current line, multiple selections and
+  caret rendering. Transactional multi-caret typing, paste, undo and wrapped
+  navigation pass (`/tmp/exosuit-multiline-syntax-ui.log`, Exosuit `22001d1`).
+- The rebuilt/runtime-verified typing captures pass the M7.1 p95 budget on
+  small Unicode, 1 MiB long line and 10 MiB fixtures (37.79, 39.47 and 30.96 ms).
+  Native correctness/lifetime, browser and headless gates pass as recorded
+  above. M9.1's checklist is complete; full M9 and M8–M15 remain incomplete.
+- Active task: M9.2 caret-anchored hover, completion and signature popups.
+  Replace fixed host coordinates with current logical screen-space caret
+  geometry. Add a dedicated typed widget callback rather than depending on
+  diagnostic reporting; popup anchors must refresh after scrolling, selection
+  changes, layout, and active-document switches. Verify actual rendered popup
+  placement and edge clamping before marking the item complete.
+
 ## M9.1 — multiline syntax acceptance fixture in progress, 2026-10-02
 
 - The real decoration fixture now warms a multiline comment, closes its
