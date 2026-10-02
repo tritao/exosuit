@@ -23,6 +23,7 @@ class Page:
         self.next_id = 0
         self.console = []
         self.network_failures = []
+        self.loaded_documents = set()
 
     def command(self, method, params=None):
         self.next_id += 1
@@ -33,6 +34,8 @@ class Page:
                 continue
             message = json.loads(payload)
             event, params_ = message.get("method"), message.get("params", {})
+            if event == "Page.lifecycleEvent" and params_.get("name") == "load":
+                self.loaded_documents.add((params_["frameId"], params_["loaderId"]))
             if event == "Network.loadingFailed":
                 self.network_failures.append(params_)
             if event == "Runtime.consoleAPICalled":
@@ -72,6 +75,7 @@ def main():
     page = Page(WebSocket(target["webSocketDebuggerUrl"]))
     page.command("Runtime.enable")
     page.command("Page.enable")
+    page.command("Page.setLifecycleEventsEnabled", {"enabled": True})
     page.command("Log.enable")
     page.command("Network.enable")
     page.command("Page.bringToFront")
@@ -170,10 +174,20 @@ def main():
     assert opened["result"] == 0 and opened["calls"] == [["https://github.com/tritao/pragtical-haxeon", "_blank", "noopener,noreferrer"]], opened
 
     previous_origin = page.evaluate("performance.timeOrigin")
+    previous_frame = page.command("Page.getFrameTree")["frameTree"]["frame"]
     page.command("Page.reload", {"ignoreCache": True})
     reloaded = False
     probe = None
     while time.monotonic() < deadline:
+        # A reload cancels requests in the outgoing document. Its callbacks may
+        # report failure before Chrome replaces the execution context. Inspect
+        # application state only after the new main-frame loader commits and
+        # emits load; failures in that document remain fatal below.
+        current_frame = page.command("Page.getFrameTree")["frameTree"]["frame"]
+        loaded = (current_frame["id"], current_frame["loaderId"]) in page.loaded_documents
+        if current_frame["loaderId"] == previous_frame["loaderId"] or not loaded:
+            time.sleep(0.25)
+            continue
         try:
             probe = json.loads(page.evaluate("JSON.stringify({origin: performance.timeOrigin, state: window.exosuit || null})"))
         except RuntimeError as error:
