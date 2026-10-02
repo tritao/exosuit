@@ -151,13 +151,21 @@ Skribidi layout path. The old full-update path handles chunk repartitioning
 and other nonlocal changes. This preserves one authoritative geometry
 generation while the composite snapshot is built and verified.
 
-The implementation boundary needs one more decision before activating pieces:
-UIKit currently calls `skb_layout_t` directly for line-range glyph iteration,
-carets, hit tests, selections, and navigation. A renderer-only composition
-would leave those answers on a different geometry source. The composite
-geometry can be owned inside Skribidi or behind a complete UIKit adapter, but
-it must supply all of those operations from the same row index and generation.
-Do not activate pieces through only the glyph-render path.
+Composite geometry will be owned inside Skribidi, with UIKit retaining the
+immutable native generation. Skribidi already implements contextual caret
+iteration, hit tests, selections and navigation; retaining that implementation
+avoids duplicating those semantics in a second UIKit geometry engine. Rendering
+and those queries now read glyphs, clusters and text properties through one
+internal indexed boundary. Public value-returning indexed reads serve UIKit's
+row equivalence checks, navigation and diagnostics without borrowing array
+elements. Line and run geometry remain owned by the same native generation.
+
+The boundary currently reads materialized arrays. Next, immutable shape blocks
+and indexed pieces must replace the underlying reads; mutable legacy rebuilds
+must detach from shared blocks before writes. The existing bulk array getters
+remain compatibility operations, and the UIKit text engine no longer uses them
+for text, properties, glyphs or clusters. Do not activate pieces through only
+the glyph-render path or retain a complete previous layout for each row.
 
 ## Verification before activation
 

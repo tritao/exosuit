@@ -869,12 +869,13 @@ static int run_mutable_insert_delete(skb_temp_alloc_t *temp,
 static int same_cluster_metadata(const skb_layout_t *edited, const skb_layout_t *fresh) {
     const int count = skb_layout_get_clusters_count(edited);
     if (count != skb_layout_get_clusters_count(fresh)) return 0;
-    const skb_cluster_t *a = skb_layout_get_clusters(edited);
     const skb_cluster_t *b = skb_layout_get_clusters(fresh);
-    for (int i = 0; i < count; ++i)
-        if (a[i].text_offset != b[i].text_offset || a[i].glyphs_offset != b[i].glyphs_offset ||
-            a[i].text_count != b[i].text_count || a[i].glyphs_count != b[i].glyphs_count)
+    for (int i = 0; i < count; ++i) {
+        const skb_cluster_t a = skb_layout_get_cluster_at(edited, i);
+        if (a.text_offset != b[i].text_offset || a.glyphs_offset != b[i].glyphs_offset ||
+            a.text_count != b[i].text_count || a.glyphs_count != b[i].glyphs_count)
             return 0;
+    }
     return 1;
 }
 
@@ -1098,13 +1099,17 @@ static int run_immutable_ascii_generations(skb_temp_alloc_t *temp,
                     skb_layout_get_generation(roots[saved]) == first_generation + saved &&
                     skb_layout_get_text_count(roots[saved]) == lengths[saved] &&
                     skb_layout_get_lines_count(roots[saved]) == skb_layout_get_lines_count(fresh);
-            const skb_glyph_t *a = skb_layout_get_glyphs(roots[saved]);
             const skb_glyph_t *b = fresh ? skb_layout_get_glyphs(fresh) : NULL;
             for (int i = 0; i < lengths[saved] && valid; ++i) {
-                if (skb_layout_get_text(roots[saved])[i] != (uint8_t)texts[saved][i] ||
-                    a[i].gid != b[i].gid || a[i].cluster_idx != b[i].cluster_idx ||
-                    fabsf(a[i].offset_x - b[i].offset_x) > .001f ||
-                    fabsf(a[i].offset_y - b[i].offset_y) > .001f)
+                const skb_glyph_t a = skb_layout_get_glyph_at(roots[saved], i);
+                const skb_text_property_t property = skb_layout_get_text_property_at(roots[saved], i);
+                const skb_text_property_t expected = skb_layout_get_text_properties(fresh)[i];
+                if (property.flags != expected.flags || property.script != expected.script)
+                    valid = 0;
+                if (skb_layout_get_text_at(roots[saved], i) != (uint8_t)texts[saved][i] ||
+                    a.gid != b[i].gid || a.cluster_idx != b[i].cluster_idx ||
+                    fabsf(a.offset_x - b[i].offset_x) > .001f ||
+                    fabsf(a.offset_y - b[i].offset_y) > .001f)
                     valid = 0;
                 const skb_text_position_t position = {i, SKB_AFFINITY_LEADING};
                 const skb_caret_info_t x = skb_layout_get_caret_info_at(roots[saved], position);
@@ -1135,13 +1140,17 @@ static int run_immutable_ascii_generations(skb_temp_alloc_t *temp,
                                                         (skb_attribute_set_t){0});
             valid = fresh && same_cluster_metadata(roots[saved], fresh) &&
                     skb_layout_get_generation(roots[saved]) == first_generation + saved;
-            const skb_glyph_t *a = skb_layout_get_glyphs(roots[saved]);
             const skb_glyph_t *b = fresh ? skb_layout_get_glyphs(fresh) : NULL;
             for (int i = 0; i < lengths[saved] && valid; ++i) {
-                if (skb_layout_get_text(roots[saved])[i] != (uint8_t)texts[saved][i] ||
-                    a[i].gid != b[i].gid || a[i].cluster_idx != b[i].cluster_idx ||
-                    fabsf(a[i].offset_x - b[i].offset_x) > .001f ||
-                    fabsf(a[i].offset_y - b[i].offset_y) > .001f)
+                const skb_glyph_t a = skb_layout_get_glyph_at(roots[saved], i);
+                const skb_text_property_t property = skb_layout_get_text_property_at(roots[saved], i);
+                const skb_text_property_t expected = skb_layout_get_text_properties(fresh)[i];
+                if (property.flags != expected.flags || property.script != expected.script)
+                    valid = 0;
+                if (skb_layout_get_text_at(roots[saved], i) != (uint8_t)texts[saved][i] ||
+                    a.gid != b[i].gid || a.cluster_idx != b[i].cluster_idx ||
+                    fabsf(a.offset_x - b[i].offset_x) > .001f ||
+                    fabsf(a.offset_y - b[i].offset_y) > .001f)
                     valid = 0;
             }
             skb_layout_destroy(fresh);

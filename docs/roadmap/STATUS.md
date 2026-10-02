@@ -47,18 +47,21 @@ Last updated: 2026-10-02.
   at 47.24 ms p95 (1 MiB) and 33.59 ms (10 MiB). Earlier failures remain
   recorded. Native edits now publish independently owned generations, retained
   through read-only shared owners in UIKit. The ownership gate passes at
-  46.07 ms p95 (1 MiB) and 34.86 ms (10 MiB). Next: build the common
-  indexed snapshot/geometry boundary from
-  ADR 0003 to remove full shaped-array materialization while keeping all
-  rendering, caret, hit-test and selection queries on one generation. Then
+  46.07 ms p95 (1 MiB) and 34.86 ms (10 MiB). Continue the indexed
+  snapshot storage work from ADR 0003. Rendering and geometry now share
+  indexed text/property/glyph/cluster reads inside Skribidi; UIKit row equality
+  and navigation no longer borrow those full arrays. Next: replace the read
+  boundary's materialized arrays with immutable shared shape blocks and pieces,
+  while keeping rendering, caret, hit-test and selection queries on one
+  generation. Then
   resume fractional-origin, actual app newline raster and decoration audits.
   Splits still move some rows between native layouts; exact native equality
   conservatively rejects fractional-origin differences. Preserve the typing,
   graphical pixel, M8 and browser gates. The benchmark exits nonzero on a
   missed p95 budget.
   Preserve M8 and both browser gates.
-- Current follow-on HEADs: Exosuit `31d01ec` before this ledger commit;
-  Materia `19f2f9222` carries row-scoped glyph commands, shallow row raster
+- Current follow-on HEADs: Exosuit `b90b309` before this ledger commit;
+  Materia `19d7bc46d` carries row-scoped glyph commands, shallow row raster
   caching, rebased source metadata, a parent repaint cost regression, and the
   Skribidi bulk-copy and guarded variable-width row-geometry reuse slices. The
   existing dirty Haxeon/NativeKit gitlinks and UIKit TextInputBridge edit in
@@ -104,6 +107,50 @@ Last updated: 2026-10-02.
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M9.1 — common indexed reads for native geometry and rendering
+
+- Skribidi `a8987d8` adds value-returning indexed reads for codepoints,
+  text properties, glyphs and clusters. Its renderer, grapheme/word navigation,
+  caret iterator, caret placement, hit tests and selection bounds now use the
+  same internal read boundary. The current boundary still reads flat arrays;
+  this is preparation for shared storage, not zero-copy activation.
+- Materia `19d7bc46d` carries the UIKit text engine's indexed API for
+  row equivalence, word/paragraph
+  navigation and diagnostics. It no longer borrows bulk text, property, glyph
+  or cluster arrays. Lines and runs remain in the current native generation.
+  ADR 0003 records Skribidi as the composite geometry owner, preserving its
+  existing Unicode geometry semantics instead of duplicating them in UIKit.
+- The differential probe compares indexed edited cluster/glyph/property/text
+  reads with a fresh layout's bulk arrays, including retained generations,
+  source mutation and destruction. Native text-engine, ABI, frame resources,
+  renderer, full differential and native-only ASan/leak checks pass. Graphical
+  build and real decoration pixels pass. Artifacts:
+  `/tmp/exosuit-indexed-reads-probe-final.log`,
+  `/tmp/exosuit-indexed-reads-asan.log`,
+  `/tmp/exosuit-indexed-reads-render-final.log`,
+  `/tmp/exosuit-indexed-reads-decoration.log`.
+- The first standard 1 MiB varied-key run fails at **74.25 ms p95**,
+  3,403.97 ms maximum, artifact `/tmp/exosuit-indexed-reads-1mb`.
+  Its longest frame records 2,854.20 ms frame duration and 549.54 ms dispatch;
+  individual frame phase measurements account for only a small fraction of
+  that duration. This leaves attribution unresolved. The 10 MiB repeat-key
+  gate passes at **32.18 ms p95**, 179.35 ms maximum, artifact
+  `/tmp/exosuit-indexed-reads-10mb`. Both capture 30 actual input frames.
+- A matched prior-source control (`6e22891` native, `19f2f9222` UIKit) passes
+  at **40.73 ms p95**, 45.87 ms maximum, artifact
+  `/tmp/exosuit-indexed-reads-control-1mb`. All four candidate source files and
+  the built app were restored before the candidate repeat. The initial failure
+  remains recorded; the control alone does not establish its cause.
+- The restored candidate repeat passes at **48.25 ms p95**, 62.71 ms
+  maximum, across 30 input frames, artifact
+  `/tmp/exosuit-indexed-reads-candidate-1mb`. One control/candidate pair does
+  not establish a latency bound or explain the initial failure. No instrumentation
+  was left in production. The release pin advances to Materia `19d7bc46d`.
+- Next: immutable shared shape blocks with indexed piece ranges. Legacy
+  mutations must detach before writes, and the renderer and all geometry must
+  remain on the same generation. Full-array materialization and strict M9.1
+  invalidation remain unfinished; preserve the complete follow-on plan.
 
 ### M9.1 — immutable native ownership prerequisite
 
