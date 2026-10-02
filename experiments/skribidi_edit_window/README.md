@@ -80,9 +80,11 @@ publication, so those isolated timings do not establish the 50 ms typing budget.
 
 ## Production native snapshot regressions
 
-The probe also exercises Skribidi's guarded native edit API. Stable-row ASCII
-edits now retain immutable shape blocks through indexed ranges. Changed-wrap
-edits still materialize for full row reflow; unsupported scripts use full layout.
+The probe also exercises Skribidi's guarded native edit API. Supported ASCII
+edits retain immutable shape blocks through indexed ranges, including edits
+that change wrap boundaries. Reflow reads shared advances and stores positions
+in row geometry. Truncation and other shape-mutating cases still materialize;
+unsupported scripts use full layout.
 Rendering and geometry read the same generation. These native checks are
 separate from the experimental piece-splice timings above.
 
@@ -92,7 +94,9 @@ sampled carets. The variable-advance sweep includes accepted edits and rejection
 A retained-generation fixture verifies source independence across subsequent
 mutations and source destruction.
 
-A further 100 dispersed edits test shared production storage. Every generation
+Two further sequences of 100 dispersed edits test shared production storage,
+including variable-width replacements, insertions and deletions that move wrap
+boundaries. Every generation
 matches fresh codepoints, properties, glyphs, clusters, both caret affinities,
 hit tests, selection rectangles, render callbacks and row bounds. The test checks
 that unchanged prefixes retain the actual source block, and that geometry reads

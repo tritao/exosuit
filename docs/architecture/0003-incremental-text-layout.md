@@ -1,7 +1,8 @@
 # ADR 0003: Indexed edit-range text layout
 
 Status: partially implemented, 2026-10-02. A guarded ASCII reuse path is
-active; indexed shared shape storage is active for validated stable-row ASCII edits.
+active; indexed shared shape storage supports validated ASCII edits, including
+changed-wrap reflow without truncation.
 
 ## Implemented slice
 
@@ -10,12 +11,13 @@ replacement when the existing layout has one LTR run, one glyph per codepoint,
 and simple glyph positions. It reshapes a 16-codepoint context, verifies
 unchanged glyph and text-property guards at both seams, reuses the shaped
 prefix and suffix, and publishes one native generation. Validated stable-row
-edits retain indexed ranges into immutable shape blocks; edits requiring full
-line reflow still materialize the shaped arrays. UIKit serves rendering, carets,
+edits retain indexed ranges into immutable shape blocks. Supported full line
+reflow also reads those blocks directly; shape-mutating overflow paths still
+materialize the arrays. UIKit serves rendering, carets,
 hit tests, and selections from that same generation. Unsupported edits use the existing complete-layout path. This
 avoids whole-paragraph decoding, itemization, and shaping for the measured
-case. Stable-row edits avoid full shaped-array copies, but row verification
-and row-index copying still cost O(n); changed-wrap edits still materialize.
+case. Supported edits avoid full shaped-array copies, but row verification,
+reflow and row-index copying still cost O(n).
 
 The guarded path can also reuse wrapped row geometry. An equal-length edit
 retains it when the local shaped window has identical advances and break
@@ -26,18 +28,19 @@ It recalculates glyph bounds only for rows whose glyph IDs or positions change.
 Moved wrap boundaries still use full line reflow. The splice repairs cluster
 indexes only when a copied span changes its offset. Successful geometry reuse
 avoids clearing all glyph origins beforehand; equal-length reuse restores only
-the contextual window's origins. A failed guard clears shaping-local origins
-before complete line reflow. Successful row guards now retain indexed shape
+the contextual window's origins. A failed geometry guard can reflow directly
+from indexed shape data; materialized overflow paths clear shaping-local origins
+before complete line reflow. Successful row guards retain indexed shape
 pieces instead of materializing full shape arrays. Shifted glyph and cluster
 indexes are calculated at read time. Row geometry remains per generation,
-and the full-reflow case still materializes.
+and supported full reflow keeps shared shape pieces.
 
 The guarded constructor now returns a new owned generation without mutating
 its source. UIKit retains each native generation through a read-only shared
 owner that also retains the font collection for native destruction. Legacy
 mutable source rebuilds and edits cannot change descendants, and descendants
 remain usable after their sources are destroyed. All geometry queries read
-one native generation. Indexed stable-row snapshots retain shape blocks
+one native generation. Indexed snapshots retain shape blocks
 directly, including small contextual windows, rather than retaining ancestors.
 Legacy rebuilds detach shared buffers before writes. Ellipsis preserves existing
 content by copying shared flat buffers before mutation; discarded-content
@@ -169,8 +172,10 @@ row equivalence checks, navigation and diagnostics without borrowing array
 elements. Line and run geometry remain owned by the same native generation.
 
 The boundary reads either materialized arrays or indexed immutable shape blocks.
-Stable-row edits use indexed pieces; mutable legacy rebuilds detach from shared
-blocks before writes. Changed-wrap edits still materialize for full reflow. The existing bulk array getters
+Supported ASCII edits use indexed pieces; mutable legacy rebuilds detach from
+shared blocks before writes. Changed-wrap reflow reads immutable advances and
+publishes positions in row geometry. Truncation retains the materialized path.
+The existing bulk array getters
 remain compatibility operations, and the UIKit text engine no longer uses them
 for text, properties, glyphs or clusters. Do not activate pieces through only
 the glyph-render path or retain a complete previous layout for each row.
@@ -184,15 +189,18 @@ coalesce. Mutable legacy rebuilds detach shared buffers before writing;
 reference counts release blocks when no snapshot needs them. The validated
 one-glyph-per-codepoint case rebases logical cluster indexes during reads.
 
-Row geometry remains per generation. For the initial activation, unchanged
-advances or verified stable wrap boundaries permit shared shape storage;
-other accepted ASCII edits materialize for the existing full line reflow.
+Row geometry remains per generation. Unchanged advances or verified stable
+wrap boundaries reuse geometry. Changed wrapping now uses the existing line
+builder with indexed cluster/property/advance reads; it does not write
+positions into retained glyph blocks. Shape-mutating overflow modes still
+materialize before invoking that builder.
 Unsupported Unicode continues through full layout. Indexed glyph positions
 come from the snapshot's row index and advances, not a previous generation's
 absolute glyph origins. Bulk array compatibility reads may populate a separate
 cache; rendering and geometry must not request that cache. Differential tests
 must prove both answers and absence of full shape arrays on indexed queries.
-This initial activation does not implement pending-row reflow or complete M9.1.
+This does not implement bounded pending-row reflow or complete M9.1.
+Whole-paragraph verification and row rebuilding remain open.
 
 ## Verification before activation
 

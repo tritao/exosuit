@@ -2,6 +2,51 @@
 
 Last updated: 2026-10-02.
 
+## M9.1 — indexed changed-wrap reflow, 2026-10-02
+
+- Skribidi `b9a4ad9` adapts the existing line builder to read clusters,
+  properties and advances from immutable indexed shape blocks. Row geometry
+  owns positions, so reflow does not mutate retained glyphs. Non-truncating
+  supported ASCII edits retain pieces when wrap boundaries change; truncation
+  and other shape-mutating paths retain materialization. Unicode fallback is
+  unchanged. Materia `cd9e2fee1` pins the verified vendor revision.
+- The repeated 4,096-/1 MiB native edit regression failed before the fix on
+  lost shared storage (`/tmp/exosuit-indexed-reflow-before.log`). Both fixtures
+  now retain shared shapes for all 30 edits. Two 100-generation sequences
+  compare geometry/render/caret/hit/selection behavior and empty bulk caches
+  against fresh layouts. The variable-width sequence moves 692 internal wrap
+  boundaries; sources are destroyed, mutated with ellipsis, and rebuilt while
+  children retain original blocks. Full sweep: 240 accepted, one rejected.
+  Gate exits 0: `/tmp/exosuit-indexed-reflow-final-probe.log`.
+- Standalone Skribidi unit coverage verifies moved wrapping, source destruction,
+  absent arrays/cache, uppercase rejection and materialized overflow fallback.
+  Full vendor unit suite exits 0 (`/tmp/exosuit-indexed-reflow-final-unit.log`).
+  Native-only ASan/leak detection exits 0, including both 100-generation
+  sequences (`/tmp/exosuit-indexed-reflow-final-asan.log`). UIKit text engine,
+  frame resources and renderer pass 3/3 (`/tmp/exosuit-indexed-reflow-uikit.log`).
+- Graphical build and real decoration pixels/typing/undo pass
+  (`/tmp/exosuit-indexed-reflow-decoration.log`). Full editor headless suite
+  exits 0 (`/tmp/exosuit-indexed-reflow-headless.log`). Both browser targets
+  rebuild and pass Unicode typing, save/readback, URL and fresh-session reload
+  with no unavailable imports (`/tmp/exosuit-indexed-reflow-web.log`).
+- Actual delivered-input gates pass across 30 frames each: small varied-key
+  28.04 ms p95 (`/tmp/exosuit-indexed-reflow-small`); 1 MiB single-line varied-key
+  44.59 ms p95, 49.70 ms maximum (`/tmp/exosuit-indexed-reflow-1mb`, 90 s capture,
+  1,200 ms key delay); 10 MiB repeat-key 30.85 ms p95, 32.09 ms maximum
+  (`/tmp/exosuit-indexed-reflow-10mb`, 45 s capture, 400 ms key delay).
+  Samples do not establish a universal latency bound or a matched speedup.
+- The sequential native 1 MiB paragraph probe averages 27.41 ms CPU versus
+  the earlier shared/materialized slice's 16.53 ms; this is a CPU regression,
+  despite removing copied shape arrays (`/tmp/exosuit-indexed-reflow-generations.log`).
+  Reflow and property/width/eligibility checks still scan the paragraph; indexed
+  reads add lookup work. Row arrays and prepared glyph publication remain O(n).
+- Exact resume: bound unchanged-row verification and publication, and reflow
+  from the first affected row until an unchanged suffix boundary is recovered.
+  Retain this differential/lifetime and real-frame evidence as required gates.
+  M9.1 and the full M8–M15 goal remain open. Pre-existing Materia gitlinks and
+  TextInputBridge diagnostics remain preserved; composed release still rejects
+  the dirty UIKit input. Physical IME/mixed-DPI/Windows/macOS remain pending.
+
 ## Browser host streams and terminal boundary — 2026-10-02
 
 - Haxeon `47c35ea0` supplies typed Wasm `Sys.stdout()`/`Sys.stderr()`
@@ -104,13 +149,12 @@ The later browser host/terminal record above supersedes pending checks here.
   navigation read that same native snapshot. Editor queries do not materialize
   bulk text/property/glyph/cluster arrays; explicit legacy bulk getters populate
   separate compatibility caches. Mutations detach shared buffers before writes.
-  The native differential fixture uses shared storage for 20 of 30 edits;
-  changed-wrap edits still materialize for full reflow. Per-paragraph property,
+  The native differential fixture uses shared storage for all 30 edits;
+  changed-wrap edits now retain shared shapes through reflow. Per-paragraph property,
   width and glyph verification and row-index copying remain O(n); native edit
   CPU time has not substantially improved. Browser annotation, counted-buffer
   compiler, standard-stream and desktop terminal dependency repairs are verified
-  above. Next implement indexed changed-wrap row reflow and bounded row
-  verification/publication.
+  above. Next bound row verification, reflow and publication.
 - Unchanged ASCII/color-equivalent rows retain publication revisions after
   source rebasing. Full Unicode fallback maps unchanged prefix/suffix source
   ranges and compares exact row-local geometry. Persistent frame text identity
@@ -119,13 +163,13 @@ The later browser host/terminal record above supersedes pending checks here.
   stay stable, with local growth to 128 paragraphs before splitting. Splits still
   move rows between native layouts. Fractional-origin reuse, actual application
   newline raster attribution and the strict decoration audit remain open.
-- Current standard typing gates pass: **47.22 ms p95** (1 MiB varied-key) and
-  **47.55 ms p95** (10 MiB repeat-key), each across 30 actual input frames.
+- Current standard typing gates pass: **44.59 ms p95** (1 MiB varied-key) and
+  **30.85 ms p95** (10 MiB repeat-key), each across 30 actual input frames.
   Prior failures remain recorded. These samples do not establish a universal
   latency bound. Preserve graphical pixels, M8 and both browser gates; missed
   p95 budgets still produce nonzero benchmark exits.
-- Current follow-on HEADs: Exosuit `a3fdc8e` before this ledger commit;
-  Haxeon `ca658504`, NativeKit `9cc4bd3a`; Materia `44fa1a4ea` carries row-scoped glyph commands, shallow row raster
+- Current follow-on HEADs: Exosuit `e7a9b76` before this ledger commit;
+  Haxeon `ca658504`, NativeKit `9cc4bd3a`; Materia `cd9e2fee1` carries row-scoped glyph commands, shallow row raster
   caching, rebased source metadata, a parent repaint cost regression, and the
   Skribidi bulk-copy and guarded variable-width row-geometry reuse slices. The
   existing dirty Haxeon/NativeKit gitlinks and UIKit TextInputBridge edit in
