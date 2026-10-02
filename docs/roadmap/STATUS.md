@@ -2,6 +2,43 @@
 
 Last updated: 2026-10-02.
 
+## In-progress browser binding repair — 2026-10-02
+
+- NativeKit counted function inputs used field-oriented borrowed annotations.
+  Accessibility range/removal inputs and transport bytes now use `NK_IN_ARRAY`;
+  desktop and browser HXI regeneration/audits pass. UIKit accessibility calls
+  now let the generated wrapper derive the removal-byte count.
+- A reduced accepted `ptr<const<void>> @in_array` case first crashed projection
+  (`Void has no value ABI`). The emitter now projects it as managed bytes.
+  Signed count rejection remains covered on portable 32/64-bit ABI targets.
+- Actual execution then exposed an independent IR assumption: byte-buffer
+  counts were restricted to I32 despite accepted unsigned 64-bit HXI counts.
+  IR and Wasm GC validation now share an I32/I64 count rule; non-integer
+  metadata remains rejected. The native checksum regression exercises populated
+  and empty buffers with inferred u64 counts.
+- Focused parser and native-call integration pass, including the real checksum
+  and existing ABI rejection cases (`/tmp/exosuit-void-array-parser-final.log`,
+  `/tmp/exosuit-void-array-runtime-after.log`). The compiler gate's 384 cases
+  pass; the complete compiler gate exits 0, including native FFI and Wasm
+  execution (`/tmp/exosuit-void-array-compiler-gate.log`). Haxeon repair commit:
+  `6a309543`. NativeKit smoke exits 0, including counted structure and byte
+  input calls (`/tmp/exosuit-counted-input-nativekit-final.log`); NativeKit
+  commit `9cc4bd3a`. UIKit accessibility call repair is Materia `44fa1a4ea`.
+- Browser rebuild initially exposed direct desktop terminal imports in shared
+  ExosuitApp. Uncommitted work injects a host-owned `TerminalPanel` factory;
+  desktop creation retains PTY/emulator failure cleanup and browser graph
+  excludes only the desktop implementation. Graphical build exits 0
+  (`/tmp/exosuit-terminal-boundary-graphical.log`). Interaction checks pending.
+- Browser now reaches lowering and fails on unsupported `Sys.sysStderr`
+  (`build/web-ci-wasm32/guest-compile.log`,
+  `/tmp/exosuit-terminal-boundary-web.log`). The call is from the pre-existing
+  dirty UIKit TextInputBridge diagnostic. Preserve that edit; supply general
+  Wasm stderr support in Haxeon with reduced execution coverage, then rerun
+  both browser targets and graphical interaction checks. No test handles live.
+- Terminal boundary remains uncommitted. Release pins reflect the three verified
+  sibling commits; composed release still rejects pre-existing Materia dirt.
+  M9.1 indexed changed-wrap reflow remains the next layout task.
+
 ## Current checkpoint
 
 - **M8.1 and M8.2 accepted headlessly in both compiler modes.** Exosuit
