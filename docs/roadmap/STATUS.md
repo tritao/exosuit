@@ -41,18 +41,21 @@ Last updated: 2026-10-02.
   canonicalize local translation so verified moved rows hit the GPU cache.
   Both ordinary and newline Haxe edits now use one source-mapped chunk
   window. Unaffected chunk boundaries stay stable; affected chunks grow to
-  128 paragraphs before local splitting. Next: audit fractional-origin
-  cancellation and actual app newline raster reuse, then finish the decoration
-  invalidation matrix. A matched previous-implementation control also failed at 59.27 ms p95,
-  while the restored current implementation passed at 40.61 ms. Preserve the
-  earlier failures; next profile long-line edit dispatch and native-render
-  variability before claiming consistent performance. The benchmark now exits
-  nonzero when its p95 budget is missed. Splits still move some rows between native layouts. Exact native
-  equivalence still conservatively rejects fractional-origin differences. Preserve the
-  1 MiB, 10 MiB and graphical pixel gates.
+  128 paragraphs before local splitting. Native phase profiling now identifies
+  array splicing/index repair as the largest measured edit phase. Redundant
+  whole-layout glyph-origin writes were removed; final standard gates pass
+  at 47.24 ms p95 (1 MiB) and 33.59 ms (10 MiB). Earlier failures remain
+  recorded. Next: build the common indexed snapshot/geometry boundary from
+  ADR 0003 to remove full shaped-array materialization while keeping all
+  rendering, caret, hit-test and selection queries on one generation. Then
+  resume fractional-origin, actual app newline raster and decoration audits.
+  Splits still move some rows between native layouts; exact native equality
+  conservatively rejects fractional-origin differences. Preserve the typing,
+  graphical pixel, M8 and browser gates. The benchmark exits nonzero on a
+  missed p95 budget.
   Preserve M8 and both browser gates.
-- Current follow-on HEADs: Exosuit `9284b95` before this ledger commit;
-  Materia `33d36d62a` carries row-scoped glyph commands, shallow row raster
+- Current follow-on HEADs: Exosuit `68e01ab` before this ledger commit;
+  Materia `65e70e840` carries row-scoped glyph commands, shallow row raster
   caching, rebased source metadata, a parent repaint cost regression, and the
   Skribidi bulk-copy and guarded variable-width row-geometry reuse slices. The
   existing dirty Haxeon/NativeKit gitlinks and UIKit TextInputBridge edit in
@@ -98,6 +101,39 @@ Last updated: 2026-10-02.
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M9.1 — measured ASCII splice cost and redundant writes removed
+
+- Temporary real-window timers covered 60 insertion/deletion edits of the
+  1 MiB varied-key fixture. Guard median/p95: **2.48/8.45 ms**; local shape
+  **0.045/0.130 ms**; array splice/index repair **6.62/20.01 ms**; geometry
+  **3.29/12.55 ms**. Full native edit median/p95: **13.09/40.53 ms**;
+  UTF-8 string copy and result metadata medians were 0.10/0.16 ms. This
+  instrumented 45-second probe missed the frame budget at 62.06 ms p95; it is
+  attribution evidence, not a standard acceptance run. Raw artifacts:
+  `/tmp/exosuit-edit-phases`, `/tmp/exosuit-edit-phase-summary.json`.
+- Skribidi `cc3b8e2` repairs indexes only in copied spans whose source and
+  destination differ. Successful geometry reuse no longer zeroes every glyph
+  origin before restoring it; equal-length reuse restores only its contextual
+  window. Failed geometry guards still reset shaping-local origins before full
+  reflow. Materialized arrays remain O(n), and zero-copy composite snapshots
+  remain unfinished. All temporary timing probes were removed.
+- Materia `65e70e840` pins that fork change. Native text-engine, ABI,
+  frame-resource and renderer checks pass; graphical build and decoration
+  pixel suite pass. The differential probe compares cluster offsets/counts,
+  glyph cluster indexes, geometry, culling and sampled carets against fresh
+  layouts. Repeated 4,096- and 1 MiB-codepoint edits pass, as do 240 accepted
+  variable-advance sweep cases and the rejection fixture. Probe logs:
+  `/tmp/exosuit-ascii-index-probe-final-results.log`.
+- Final standard typing gates pass across 30 actual input frames each:
+  1 MiB varied-key **47.24 ms p95**, 47.80 ms maximum, artifact
+  `/tmp/exosuit-ascii-index-1mb`; 10 MiB repeat-key **33.59 ms p95**,
+  40.10 ms maximum, artifact `/tmp/exosuit-ascii-index-10mb`. Prior failures
+  remain recorded; these samples do not establish a universal latency bound.
+- ADR 0003 now describes current source rebasing, moved-row raster identity
+  and stable chunk windows. General Unicode shaping, fractional-origin reuse,
+  actual newline raster attribution and strict decoration invalidation remain
+  open. Preserve the full M9–M15 goal.
 
 ### M9.1 — matched chunk control and enforced timing budget
 

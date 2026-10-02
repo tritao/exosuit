@@ -866,6 +866,18 @@ static int run_mutable_insert_delete(skb_temp_alloc_t *temp,
     return valid && completed == edits;
 }
 
+static int same_cluster_metadata(const skb_layout_t *edited, const skb_layout_t *fresh) {
+    const int count = skb_layout_get_clusters_count(edited);
+    if (count != skb_layout_get_clusters_count(fresh)) return 0;
+    const skb_cluster_t *a = skb_layout_get_clusters(edited);
+    const skb_cluster_t *b = skb_layout_get_clusters(fresh);
+    for (int i = 0; i < count; ++i)
+        if (a[i].text_offset != b[i].text_offset || a[i].glyphs_offset != b[i].glyphs_offset ||
+            a[i].text_count != b[i].text_count || a[i].glyphs_count != b[i].glyphs_count)
+            return 0;
+    return 1;
+}
+
 static int same_bounds(skb_rect2_t a, skb_rect2_t b) {
     return fabsf(a.x - b.x) <= 0.001f && fabsf(a.y - b.y) <= 0.001f &&
            fabsf(a.width - b.width) <= 0.001f &&
@@ -913,7 +925,8 @@ static int run_native_ascii_edit(skb_temp_alloc_t *temp,
         elapsed += (double)(clock() - begin) * 1000. / CLOCKS_PER_SEC;
         skb_layout_t *fresh = skb_layout_create_utf8(temp, &params, text, -1,
                                                        (skb_attribute_set_t){0});
-        valid &= fresh && skb_layout_get_text_count(edited) == length &&
+        valid &= fresh && same_cluster_metadata(edited, fresh) &&
+                 skb_layout_get_text_count(edited) == length &&
                  skb_layout_get_lines_count(edited) == skb_layout_get_lines_count(fresh);
         if (!valid) printf("native ASCII count: text %d/%d lines %d/%d\n",
                            skb_layout_get_text_count(edited), length,
@@ -939,7 +952,7 @@ static int run_native_ascii_edit(skb_temp_alloc_t *temp,
             valid &= skb_layout_get_glyphs_count(edited) ==
                      skb_layout_get_glyphs_count(fresh);
             for (int index = 0; index < length && valid; ++index)
-                if (ag[index].gid != bg[index].gid ||
+                if (ag[index].gid != bg[index].gid || ag[index].cluster_idx != bg[index].cluster_idx ||
                     fabsf(ag[index].advance_x - bg[index].advance_x) > 0.001f ||
                     fabsf(ag[index].offset_x - bg[index].offset_x) > 0.001f ||
                     fabsf(ag[index].offset_y - bg[index].offset_y) > 0.001f)
@@ -1004,7 +1017,8 @@ static int run_native_ascii_sweep(skb_temp_alloc_t *temp,
             ++accepted;
             skb_layout_t *fresh = skb_layout_create_utf8(temp, &params, after, -1,
                                                            (skb_attribute_set_t){0});
-            equal = fresh && skb_layout_get_text_count(edited) == count &&
+            equal = fresh && same_cluster_metadata(edited, fresh) &&
+                    skb_layout_get_text_count(edited) == count &&
                     skb_layout_get_glyphs_count(edited) ==
                     skb_layout_get_glyphs_count(fresh) &&
                     skb_layout_get_lines_count(edited) ==
@@ -1013,7 +1027,7 @@ static int run_native_ascii_sweep(skb_temp_alloc_t *temp,
                 const skb_glyph_t *a = skb_layout_get_glyphs(edited);
                 const skb_glyph_t *b = skb_layout_get_glyphs(fresh);
                 for (int i = 0; i < count && equal; ++i)
-                    if (a[i].gid != b[i].gid ||
+                    if (a[i].gid != b[i].gid || a[i].cluster_idx != b[i].cluster_idx ||
                         fabsf(a[i].advance_x - b[i].advance_x) > 0.001f ||
                         fabsf(a[i].offset_x - b[i].offset_x) > 0.001f ||
                         fabsf(a[i].offset_y - b[i].offset_y) > 0.001f)

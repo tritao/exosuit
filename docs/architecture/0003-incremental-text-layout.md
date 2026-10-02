@@ -21,7 +21,11 @@ properties; glyph bounds in the local shaping context are recalculated. A
 one-letter insertion or deletion in an ASCII word also retains row geometry
 when the existing wrap boundaries remain valid under the new glyph advances.
 It recalculates glyph bounds only for rows whose glyph IDs or positions change.
-Moved wrap boundaries still use full line reflow. Both cases
+Moved wrap boundaries still use full line reflow. The splice repairs cluster
+indexes only when a copied span changes its offset. Successful geometry reuse
+avoids clearing all glyph origins beforehand; equal-length reuse restores only
+the contextual window's origins. A failed guard clears shaping-local origins
+before complete line reflow. Both cases
 continue to materialize a complete native layout generation; indexed
 composite snapshots remain the zero-copy direction.
 
@@ -30,22 +34,30 @@ from UIKit's retained line index. This avoids per-grapheme caret geometry for
 the 1 MiB line; other decorations continue to use selection-range geometry.
 The edit API locates its UTF-8 byte range with constant extra memory.
 
-The next slice retains per-visual-row glyph snapshots across equal-length
-guarded ASCII edits. A row keeps its revision only when its logical range and
-layout bounds match and it lies strictly outside the edited range. UIKit's
-scene compiler uses that row's publication key for text resource identity,
-and the editor's multi-row viewport composes visible row snapshots while
-holding them across edits. Single-row viewports use direct preparation to
-avoid a needless copy. Insertions and deletions retain matching prefix rows
-but invalidate the edited row and shifted suffix conservatively. Changed wrap
-boundaries, unsupported scripts, font/atlas changes, and changed foreground
-colors also invalidate conservatively. All document geometry still comes from
-the one authoritative native layout generation.
+Per-visual-row glyph publications now retain revisions across verified edits.
+Single-row publication identity does not depend on layout ID, row index, or
+absolute source offset. Foreground ranges enter the key relative to their row.
+Cache hits republish immutable metadata for the new layout, row index and source
+range. Whole-layout Unicode fallback maps unchanged prefix/suffix source ranges
+and compares text, runs, fonts, glyphs and row-local geometry before retaining a
+revision. Exact geometry comparison conservatively rejects floating-point
+cancellation after some fractional row movements.
 
-A wrapped suffix can have identical pixels after an insertion while its
-codepoint spans cross different old row boundaries. Reusing those snapshots
-requires a verified source-range remap; the suffix is freshly prepared until
-that mapping is available.
+Frame bindings carry persistent text source identity separately from temporary
+prepared-resource slots. Row raster commands canonicalize local vertical
+translation; verified whole-pixel movement can reuse the raster while parent
+composition moves it. Font/atlas generations and foreground coverage remain
+part of validity. The containing pass still recomposites rows. Rebased prepared
+snapshots currently copy CPU vectors; this publication reuse does not implement
+zero-copy composite text storage.
+
+Haxe ordinary and newline edits use one source-mapped chunk window. Unaffected
+chunks keep their existing boundaries. Initial chunks target 64 paragraphs;
+local edits may grow one to 128 before splitting the affected window. This keeps
+local newlines from redistributing neighboring chunks and keeps subsequent
+ordinary typing from reconstructing fixed global chunk groups. Splits still move
+some rows between native layouts, and one giant paragraph is not byte-bounded.
+Width/style changes retain the full-update boundary.
 
 The guarded ASCII layout builder also carries forward culling and common
 glyph bounds for visual rows strictly before an edit, and for rows after an
