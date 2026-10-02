@@ -39,13 +39,15 @@ Last updated: 2026-10-02.
   after newline insertion/deletion when exact row-local geometry agrees.
   Frame bindings now retain persistent text source identity, and row rasters
   canonicalize local translation so verified moved rows hit the GPU cache.
-  Next: audit fractional-origin cancellation and Haxe paragraph-chunk
-  repartitioning, then finish the decoration invalidation matrix. Exact native
+  Haxe newline chunk updates now use source-mapped native replacements to
+  retain eligible unchanged prefixes/suffixes. Next: preserve unchanged middle
+  rows when chunk redistribution changes both ends, audit fractional-origin
+  cancellation, then finish the decoration invalidation matrix. Exact native
   equivalence still conservatively rejects fractional-origin differences. Preserve the
   1 MiB, 10 MiB and graphical pixel gates.
   Preserve M8 and both browser gates.
-- Current follow-on HEADs: Exosuit `838987a` before this ledger commit;
-  Materia `b8411cd4e` carries row-scoped glyph commands, shallow row raster
+- Current follow-on HEADs: Exosuit `8ac02fc` before this ledger commit;
+  Materia `f084a2837` carries row-scoped glyph commands, shallow row raster
   caching, rebased source metadata, a parent repaint cost regression, and the
   Skribidi bulk-copy and guarded variable-width row-geometry reuse slices. The
   existing dirty Haxeon/NativeKit gitlinks and UIKit TextInputBridge edit in
@@ -91,6 +93,34 @@ Last updated: 2026-10-02.
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M9.1 — Haxe newline chunks use native edit invalidation
+
+- `setTextAfterParagraphEdit` now receives old/new edit boundaries and computes
+  unchanged source-mapped prefixes/suffixes for each reused chunk. Changed
+  chunks use `TextLayout.edit` instead of full `update`, enabling native row
+  identity preservation. New chunks still allocate their own layout; styles
+  and width remain those of the existing edit session. The replacement is
+  sliced directly from the indexed document without another text-diff scan.
+- Framework regression starts with 220 mixed-Unicode lines, inserts at the
+  beginning and around paragraph 63, deletes across the 64-paragraph boundary,
+  and inserts near paragraph 190. After each operation it compares every
+  codepoint caret and measured size against an independently rebuilt layout.
+  The full Haxe UIKit framework passes, as do the graphical build and complete
+  decoration pixel suite (including diagnostic movement after newline edits).
+- Standard 1 MiB varied-key typing gate passes across 30 input frames:
+  **44.86 ms p95**, 44.87 ms maximum, artifact
+  `/tmp/exosuit-newline-chunks-1mb`. This is a typing regression gate, not a
+  measurement of newline chunk reuse. Standard 10 MiB repeat-key typing
+  also passes across 30 frames: **32.24 ms p95**, 32.90 ms maximum, artifact
+  `/tmp/exosuit-newline-chunks-10mb`.
+- Materia commit `f084a2837`. M9.1 stays active: existing neighborhood
+  rebalancing can change both ends of a reused chunk, leaving unchanged middle
+  rows outside this one-replacement preservation guard. Next inspect stable
+  bounded chunk boundaries that repair/split only the affected chunks, and
+  verify actual raster reuse through a newline transaction. Do not claim all
+  unchanged rows survive repartitioning. Fractional-origin equality
+  and rebased CPU glyph-vector copying also remain open.
 
 ### M9.1 — persistent source identity for moved row rasters
 
