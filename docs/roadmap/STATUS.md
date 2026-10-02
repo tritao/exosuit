@@ -2,6 +2,59 @@
 
 Last updated: 2026-10-02.
 
+## M9.1 — indexed native geometry queries, 2026-10-02
+
+- Skribidi `441e2bc`, pinned by Materia `dc660f975`, migrates native
+  hit/content tests, content bounds, caret iteration/style, word/line
+  navigation, selections, rendering and indexed glyph positions now read rows
+  and runs through the indexed value boundary. Bulk glyph compatibility caches
+  use it too. Row lookup by text offset uses binary search with the previous
+  last-start-at-or-before semantics; empty/before-first defaults remain zero.
+  Builder, retained-source reuse and snapshot eligibility still own/read flat
+  arrays. Shared row storage is not installed yet.
+- Full native probe passes (`/tmp/exosuit-indexed-row-queries-probe.log`),
+  including 240 accepted/one rejected and both 100-generation sequences with
+  692 moved wraps. Vendor units pass (`/tmp/exosuit-indexed-row-queries-unit.log`);
+  an added regression compares lookup with the prior linear semantics at every
+  offset from before the text through beyond its end on the variable-width
+  changed-wrap snapshot. Overflow/empty and general script tests remain green.
+- ASan/leak native-only passes (`/tmp/exosuit-indexed-row-queries-asan.log`),
+  UIKit native tests pass 3/3 (`/tmp/exosuit-indexed-row-queries-uikit.log`),
+  actual decoration/multi-caret navigation/typing/undo passes
+  (`/tmp/exosuit-indexed-row-queries-decoration.log`). The 1 MiB varied-key
+  delivered-input gate passes across 30 frames: 48.04 ms p95, 50.14 ms max
+  (`/tmp/exosuit-indexed-row-queries-1mb`). This is not a matched speedup claim.
+- The 10 MiB repeat-key gate also passes across 30 frames: 42.01 ms p95,
+  42.68 ms max (`/tmp/exosuit-indexed-row-queries-10mb`). Both browser targets
+  build with matching imports and pass typing, save/readback, URL and reload
+  (`/tmp/exosuit-indexed-row-queries-web-final.log`).
+- Exosuit `a2afe46` retires browser startup completions/rejections and queued
+  frames on `pagehide`. The registered controlled-promise regression fails
+  against the old launcher when a departing host rejection publishes failure
+  (`/tmp/exosuit-browser-lifecycle-before.log`) and passes after, also checking
+  active host/guest failures and late guest completion/frame retirement
+  (`/tmp/exosuit-browser-lifecycle-after.log`). A temporary built site that
+  deliberately fails its new document still exits 1 with the exact error
+  (`/tmp/exosuit-browser-lifecycle-negative.log`).
+- The preceding loader-only harness change was insufficient: the initial query
+  browser gate fails on canceled host fetch during Wasm-GC reload
+  (`/tmp/exosuit-indexed-row-queries-web.log`). Explicit execution-context
+  tracking alone also leaves an intermittent wasm32 canceled-font failure
+  (`/tmp/exosuit-row-context-32-3.log`). The harness now selects the current
+  main-frame context by unique ID, tracks committed/loaded documents, and
+  retries only protocol context retirement while waiting for navigation.
+  Application failures remain fatal. After departure guards, three fresh
+  runs per target pass (`/tmp/exosuit-row-lifecycle-{32,gc}-{1,2,3}.log`), followed
+  by the complete registered gate above. Preserve these failed logs; the initial
+  harness-only diagnosis did not resolve the full lifecycle problem.
+- Next install retained row
+  blocks with lifetime/COW tests and indexed source-prefix/suffix reads; remove
+  stable-row array copies, prefix/suffix aggregation scans and full alignment.
+  UIKit result/revision publication remains a separate O(rows) cost. M9.1 and
+  the full goal stay open. Pre-existing Materia gitlinks/TextInputBridge and
+  Haxeon HashLink/untracked diagnostics remain preserved. Composed release and
+  physical IME/mixed-DPI/Windows/macOS checks remain pending.
+
 ## M9.1 — indexed row access boundary, 2026-10-02
 
 - Skribidi `7c00226`, pinned by Materia `05db38b2a`, adds value-returning

@@ -218,11 +218,23 @@ reads. UIKit uses `skb_layout_get_line_at` and
 `skb_layout_get_layout_run_at` for intrinsic metrics, layout publication and
 row equivalence, rather than borrowing complete arrays. Skribidi editor
 navigation and rich-layout hit testing use indexed rows as well. The bulk
-getters remain compatibility APIs. This migration does not yet share row
-storage: the builder and internal native geometry queries still use owned
-contiguous rows. Move those internal readers behind the boundary before
-installing retained row blocks, so caret, selection, culling and rendering
-cannot silently force whole-row materialization.
+getters remain compatibility APIs. Native caret iteration, hit testing, word
+navigation, selection bounds, glyph positioning and rendering now use indexed
+row/run reads too. Row lookup by text offset uses a binary search that retains
+the previous boundary semantics, including duplicate row starts.
+
+This migration does not yet share row storage: the builder still owns
+contiguous rows. Its source-prefix/suffix reuse and eligibility checks must
+understand retained row blocks before installing them. Caret, selection,
+culling and rendering must continue to avoid whole-row materialization.
+
+The remaining builder changes must also remove the full `lines`/`layout_runs`
+copies in stable-geometry reuse. Retained row ranges must own immutable blocks,
+not ancestor layouts, and rebase text/cluster/glyph ranges on indexed reads.
+Changed rows need mutable storage during construction; legacy mutations need
+copy-on-write detachment. Prefix/suffix size aggregation and final alignment
+must use retained metadata without traversing unchanged rows. Merely replacing
+arrays with shared blocks after a full rebuild would preserve the edit cost.
 
 ## Verification before activation
 
