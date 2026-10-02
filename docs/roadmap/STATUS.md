@@ -37,14 +37,15 @@ Last updated: 2026-10-02.
   remaining invalidation cases after both standard typing gates passed. Full
   Unicode edits retain equivalent rows, including source-mapped suffix rows
   after newline insertion/deletion when exact row-local geometry agrees.
-  Next: preserve stable text resource identity through frame bindings so
-  moved rows retain raster-cache identity; runtime resource hashing currently
-  includes temporary binding IDs. Fractional-origin cancellation also remains
-  a conservative native reuse fallback. Preserve the
+  Frame bindings now retain persistent text source identity, and row rasters
+  canonicalize local translation so verified moved rows hit the GPU cache.
+  Next: audit fractional-origin cancellation and Haxe paragraph-chunk
+  repartitioning, then finish the decoration invalidation matrix. Exact native
+  equivalence still conservatively rejects fractional-origin differences. Preserve the
   1 MiB, 10 MiB and graphical pixel gates.
   Preserve M8 and both browser gates.
-- Current follow-on HEADs: Exosuit `0359311` before this ledger commit;
-  Materia `fe3f5e7c0` carries row-scoped glyph commands, shallow row raster
+- Current follow-on HEADs: Exosuit `838987a` before this ledger commit;
+  Materia `b8411cd4e` carries row-scoped glyph commands, shallow row raster
   caching, rebased source metadata, a parent repaint cost regression, and the
   Skribidi bulk-copy and guarded variable-width row-geometry reuse slices. The
   existing dirty Haxeon/NativeKit gitlinks and UIKit TextInputBridge edit in
@@ -90,6 +91,37 @@ Last updated: 2026-10-02.
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M9.1 — persistent source identity for moved row rasters
+
+- Frame text bindings carry optional persistent source identity separately
+  from temporary prepared-resource slots. Runtime cache hashes use that
+  identity with complete content generation. Owned bindings retain the same
+  identity without copying glyph payloads; default bindings preserve their
+  prior resource identity. Aliased bindings require nonzero content generation
+  and a text-layout source ID. Rebinding and reset restore the default contract.
+- Row raster commands combine vertical translation into one local transform.
+  Whole-pixel movement therefore leaves local raster geometry unchanged while
+  parent composition uses the new row position. Fractional pixel phase remains
+  part of geometry and cannot be silently reused.
+- Newline insertion/deletion renderer regression passes: **5 hits / 2 misses**
+  after insertion, **6 hits / 2 misses** after deletion. It verifies moved-row
+  pixels translate by 24 points and deletion restores the exact prior complete
+  framebuffer. Existing changed-row and Unicode edits still produce two misses.
+  Native text-engine, ABI, frame-resource and renderer smoke pass; graphical
+  build and full decoration pixel suite pass.
+- Standard 1 MiB varied-key typing gate passes across 30 frames:
+  **45.56 ms p95**, 63.28 ms maximum, artifact
+  `/tmp/exosuit-stable-bind-1mb`. The standard 10 MiB repeat-key gate also
+  passes across 30 frames: **36.03 ms p95**, 37.76 ms maximum, artifact
+  `/tmp/exosuit-stable-bind-10mb`.
+- Materia commit `b8411cd4e`. M9.1 remains active: native fractional-origin
+  equality, cross-chunk paragraph movement and the broader decoration matrix
+  still require audit. The Haxe newline path (`setTextAfterParagraphEdit`)
+  currently calls `record.layout.update` when repartitioning changes chunk
+  text, bypassing native `edit` identity reuse; inspect and fix this next.
+  Rebased glyph snapshots still copy CPU vectors; stable
+  frame binding does not claim that remaining zero-copy work is complete.
 
 ### M9.1 — source-mapped native row reuse after newline edits
 
