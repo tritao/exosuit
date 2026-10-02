@@ -2,6 +2,30 @@
 
 Last updated: 2026-10-02.
 
+## M9.2 — tab context-menu foundation verified, 2026-10-02
+
+- Caret popup slice committed as Exosuit `4b594bf`; browser harness diagnostics
+  are `7dc2d29`, UIKit geometry is Materia `c781ddac6`. Exosuit was clean before
+  starting this next slice.
+- Generic Tabs now offers onTabContextMenu, also through TabsOptions. Enabled
+  headers report right-pointer presses and Shift+F10 without changing page
+  selection; consumers decide which tab becomes the command target. Disabled
+  headers remain inert and pointer drag keeps its primary-button behavior.
+- Framework coverage exercises pointer target identity, unchanged selected
+  page/change count, Shift+F10 versus unmodified F10, and disabled headers.
+  `/tmp/uikit-tab-context-menu-framework-final.log` passes, exit 0. First
+  compile caught an ordinary duplicate local fixture name; renamed scoped
+  test locals, with no compiler workaround or compiler change.
+- Graphical build and both fresh browser target smokes pass, exit 0:
+  `/tmp/exosuit-tab-context-{build,web}.log`. Browser smoke uses isolated
+  Chrome for Testing 154; Chrome 136 compatibility remains unresolved. All
+  handles are terminal. Materia commit `acc270e7a` contains only Tabs,
+  TabsOptions and its framework regression; release.lock pins that commit.
+- Resume by implementing editor/tab/tree command-menu surfaces. Commands must be enabled
+  from current CommandRegistry predicates and validated again on activation;
+  menus must retire if their target document/path is no longer current.
+  M9.2 context-menu checkbox remains open until all three surfaces work.
+
 ## M9.2 — caret-anchored language popups verified, 2026-10-02
 
 - UIKit exposes a dedicated nullable visible caret rectangle callback and
