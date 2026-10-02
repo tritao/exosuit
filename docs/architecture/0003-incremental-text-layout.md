@@ -15,6 +15,16 @@ generation. Unsupported edits use the existing complete-layout path. This
 avoids whole-paragraph decoding, itemization, and shaping for the measured
 case, though copying the shaped arrays and reflowing lines still cost O(n).
 
+The guarded path can also reuse wrapped row geometry. An equal-length edit
+retains it when the local shaped window has identical advances and break
+properties; only the edited row's glyph bounds are recalculated. A one-letter
+insertion or deletion in a uniform-width ASCII word retains all full rows
+when the last row can absorb the change without changing the row count. It
+recalculates glyph bounds from the edit through the suffix because glyph IDs
+may shift between rows. Other edits still use full line reflow. Both cases
+continue to materialize a complete native layout generation; indexed
+composite snapshots remain the zero-copy direction.
+
 Whole-line background decorations now query visible row rectangles directly
 from UIKit's retained line index. This avoids per-grapheme caret geometry for
 the 1 MiB line; other decorations continue to use selection-range geometry.

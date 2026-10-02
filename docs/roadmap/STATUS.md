@@ -30,14 +30,16 @@ Last updated: 2026-10-02.
   offsets move; their immutable source metadata is rebased on publication.
   The containing pass still recomposites rows, and shifted colored rows and
   unsupported Unicode layouts still rebuild. The measured parent repaint is
-  a lower-priority cost: focus next on the 1 MiB edit-dispatch path, then
-  inspect the remaining invalidation cases before checking M9.1. Preserve the
+  a lower-priority cost: guarded same-advance and uniform-width ASCII edits
+  now reuse row geometry, while variable-width edits still reflow. Recheck the
+  1 MiB and 10 MiB timing gates on an idle host, then inspect the remaining
+  invalidation cases before checking M9.1. Preserve the
   1 MiB, 10 MiB and graphical pixel gates.
   Preserve M8 and both browser gates.
-- Current follow-on HEADs: Exosuit `e1955d0` before this ledger commit;
-  Materia `86adb1fa9` carries row-scoped glyph commands, shallow row raster
+- Current follow-on HEADs: Exosuit `7cf790d` before this ledger commit;
+  Materia `1dcdc2539` carries row-scoped glyph commands, shallow row raster
   caching, rebased source metadata, a parent repaint cost regression, and the
-  Skribidi bulk-copy slice. The
+  Skribidi bulk-copy and guarded row-geometry reuse slices. The
   existing dirty Haxeon/NativeKit gitlinks and UIKit TextInputBridge edit in
   Materia were left untouched.
 - All further graphical tests must use disposable PRAGTICAL_PORTABLE state.
@@ -81,6 +83,25 @@ Last updated: 2026-10-02.
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M9.1 — guarded wrapped-row geometry reuse
+
+- Skribidi reuses wrapped row geometry after a guarded equal-length ASCII
+  edit when advances and break properties in the local window match. It
+  recalculates the changed row's glyph bounds. For a uniform-width ASCII word,
+  a one-codepoint insertion or deletion can also retain full-row geometry if
+  the final row absorbs the length change; bounds are recalculated from the
+  edit onward. All other edits retain full line reflow.
+- Native differential tests compare the reuse path with fresh layouts for
+  wrapped row ranges, bounds, carets, and visible rows using a monospaced
+  font. The native text-engine test and graphical decoration pixel suite pass.
+  A temporary trace verified that the insertion/deletion test reached the
+  reuse branch; the trace was removed.
+- The 1 MiB varied-key timing run made before the insertion/deletion branch
+  measured 170.83 ms p95 with host load near 20 and native render p95 36.23
+  ms. It is not a valid latency comparison. Final 1 MiB and 10 MiB timing
+  gates still require an idle host. The retained generation still copies full
+  shaped arrays, and general variable-width edits still reflow all lines.
 
 ### M9.1 — 1 MiB edit-dispatch profile and native copy slice
 
