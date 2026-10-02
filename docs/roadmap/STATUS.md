@@ -33,12 +33,13 @@ Last updated: 2026-10-02.
   unsupported Unicode layouts still rebuild. The measured parent repaint is
   a lower-priority cost: guarded same-advance and stable-wrap ASCII edits
   now reuse row geometry, while changed wrap boundaries still reflow. Recheck the
-  10 MiB timing gate and attribute its long frame-boundary pauses, then inspect the remaining
-  invalidation cases before checking M9.1. Preserve the
+  remaining invalidation cases after both standard typing gates passed. Full
+  Unicode edits still rebuild every row publication; verify actual glyph
+  equivalence before retaining those unchanged rows. Preserve the
   1 MiB, 10 MiB and graphical pixel gates.
   Preserve M8 and both browser gates.
-- Current follow-on HEADs: Exosuit `d432f02` before this ledger commit;
-  Materia `b07df420b` carries row-scoped glyph commands, shallow row raster
+- Current follow-on HEADs: Exosuit `acec08f` before this ledger commit;
+  Materia `9da04df56` carries row-scoped glyph commands, shallow row raster
   caching, rebased source metadata, a parent repaint cost regression, and the
   Skribidi bulk-copy and guarded variable-width row-geometry reuse slices. The
   existing dirty Haxeon/NativeKit gitlinks and UIKit TextInputBridge edit in
@@ -84,6 +85,18 @@ Last updated: 2026-10-02.
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M9.1 — collection attribution and 10 MiB rerun
+
+- Capture timelines now include `frameGcSeconds`; the typing benchmark
+  reports `frameGcP95Ms` without excluding collections from total latency.
+  Timing calls run only while capture is enabled.
+- The 10 MiB rerun passed across 30 input frames at **36.40 ms p95**;
+  artifact `/tmp/exosuit-frame-gc-10mb`. Frame-boundary collection p95 and
+  maximum were about **0.0012 ms**. A 302 ms worst input sample therefore
+  does not support the prior GC hypothesis. The earlier failing run remains
+  recorded; no collection-policy change was made. The graphical app built,
+  and the real-window run verified the new benchmark field.
 
 ### M9.1 — shifted colored rows and standard typing gates
 

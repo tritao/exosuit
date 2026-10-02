@@ -101,6 +101,7 @@ result = dict(fixture=sys.argv[2], cpu=cpu, bytes=(root / "input.txt").stat().st
               dispatchP95Ms=p95_ms("textInputDispatchSeconds"),
               frameP95Ms=p95_ms("frameSeconds"),
               nativeRenderP95Ms=p95_ms("nativeRenderSeconds"),
+              frameGcP95Ms=p95_ms("frameGcSeconds"),
               maxMs=samples[-1], budgetMs=50, withinBudget=p95 < 50,
               platform=platform.platform())
 (root / "result.json").write_text(json.dumps(result, indent=2) + "\n")
