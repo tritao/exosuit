@@ -23,11 +23,29 @@ import nativekit.ui.widgets.text.TextEditorState;
 class DecorationSmokeApp extends ExosuitApp {
 	final phase:String;
 	var frames = 0;
+	var firstPopupY:Float = -1.0;
+	var popupScrollController:Null<nativekit.ui.widgets.scroll.ScrollController> = null;
 
 	public function new(context:nativekit.ui.host.DesktopUiHostContext, path:String, phase:String) {
 		super(context.fonts, null, context, path);
 		this.phase = phase;
 		installMarks(0);
+		if (StringTools.startsWith(phase, "popup-")) {
+			var view = host.activeView();
+			if (view == null) throw "popup fixture has no view";
+			host.getPluginDecorations().removeOwner("smoke");
+			host.setDocumentSearchMatches([]);
+			var text = "return 1;\nreturn 2;\nreturn 3;";
+			if (phase == "popup-edge" || phase == "popup-scroll" || phase == "popup-clipped") {
+				text = "";
+				for (_ in 0...30) text += "return aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa;\n";
+			}
+			view.document.buffer.replaceAllText(text, view.selection);
+			var position = phase == "popup-edge" ? new BufferPosition(3, 70) :
+				(phase == "popup-scroll" || phase == "popup-clipped") ? new BufferPosition(3, 3) : new BufferPosition(2, 3);
+			view.selection.restore(view.document.buffer, position, position);
+		}
+
 		if (phase == "syntax-open" || phase == "syntax-closed" || phase == "syntax-restored") {
 			var view = host.activeView();
 			if (view == null) throw "syntax fixture has no view";
@@ -112,6 +130,31 @@ class DecorationSmokeApp extends ExosuitApp {
 			var view = host.activeView();
 			if (view == null) throw "syntax undo fixture disappeared";
 			view.undo();
+		}
+		if (frames == 4 && StringTools.startsWith(phase, "popup-")) {
+			var area = host.textInputArea();
+			if (area == null) throw "popup fixture lacks resolved caret geometry";
+			if (phase == "popup-completion")
+				host.openLanguageCompletion(area, [new completion.CompletionItem("example")], function(_) {});
+			else if (phase == "popup-signature")
+				host.openLanguageSignature(area, new language.SignatureHelp("example(value:Int)", "signature documentation", "value"));
+			else {
+				var information = "hover information";
+				if (phase == "popup-large")
+					for (_ in 0...80) information += "\nadditional documentation";
+				host.openLanguageInformation(area, information);
+			}
+		}
+		if (frames == 5 && StringTools.startsWith(phase, "popup-")) {
+			var view = host.activeView();
+			if (view == null) throw "popup fixture lost active document";
+			if (phase == "popup-switch")
+				host.openDocument(new editor.Document(null, "other", application.syntaxes));
+			else if (phase == "popup-scroll" || phase == "popup-clipped") {
+				if (popupScrollController == null || !popupScrollController.scrollBy(0.0, phase == "popup-clipped" ? 350.0 : 24.0))
+					throw "popup fixture could not scroll retained editor";
+			} else if (phase != "popup-edge" && phase != "popup-large")
+				view.selection.restore(view.document.buffer, new BufferPosition(0, 7), new BufferPosition(0, 7));
 		}
 		var root = super.submit(frame);
 		if (phase == "selection" && frames == 4) {
@@ -208,7 +251,47 @@ class DecorationSmokeApp extends ExosuitApp {
 				throw "asynchronous multi-selection paste did not distribute clipboard lines";
 			trace("PASS: real asynchronous multi-selection clipboard distribution");
 		}
+		if (StringTools.startsWith(phase, "popup-")) {
+			var panel = findPopup(root);
+			if (frames == 4 && panel != null && panel.resolved != null) {
+				firstPopupY = panel.resolved.y;
+				var active = host.activeDocument();
+				if (active == null) throw "popup fixture lost document";
+				var editorNode = findEditor(root, "editor-scroll:" + active.id);
+				if (editorNode == null) throw "popup fixture lost editor node";
+				var stored:State<nativekit.ui.widgets.scroll.ScrollController> = ui.buildContext.existingState(editorNode.id);
+				popupScrollController = stored.value;
+			}
+			if (frames == 6) {
+				if (phase == "popup-switch" || phase == "popup-clipped") {
+					if (host.isLanguagePopupVisible() || panel != null) throw "popup survived document switch";
+				} else {
+					var area = host.textInputArea();
+					if (panel == null || panel.resolved == null || area == null) throw "missing resolved popup or caret";
+					var bounds = panel.resolved;
+					if (bounds.width <= 0 || bounds.height <= 0 || bounds.x < -0.1 || bounds.y < -0.1 ||
+						bounds.x + bounds.width > frame.width + 0.1 || bounds.y + bounds.height > frame.height + 0.1)
+						throw "popup escaped viewport bounds";
+					var expectedY:Float = area.y + area.height;
+					if (expectedY + bounds.height > frame.height) expectedY = area.y - bounds.height;
+					expectedY = Math.max(0.0, Math.min(expectedY, frame.height - bounds.height));
+					if (phase == "popup-large" && bounds.height < frame.height / 2) throw "large popup was truncated instead of scroll-constrained";
+					if (Math.abs(bounds.y - expectedY) > 1.1) throw "popup is detached from caret";
+					if (phase != "popup-edge" && phase != "popup-large" && (firstPopupY < 0 || Math.abs(bounds.y - firstPopupY) < 10))
+						throw "popup did not track caret movement";
+				}
+				trace("PASS: resolved language popup " + phase);
+			}
+		}
 		return root;
+	}
+	static function findPopup(node:RenderNode):Null<RenderNode> {
+		if (node.styleType == "popup-content" && node.styleKey == "language-popup") return node;
+		for (child in node.children) {
+			var found = findPopup(child);
+			if (found != null) return found;
+		}
+		return null;
 	}
 	static function findEditor(node:RenderNode, key:String):Null<RenderNode> {
 		if (node.styleKey == key) return node;

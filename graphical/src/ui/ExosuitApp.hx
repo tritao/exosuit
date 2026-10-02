@@ -116,6 +116,12 @@ class ExosuitApp implements DesktopUiApplication {
 			return capturedHost;
 		}, null, null, this.capabilities);
 		host = capturedHost;
+		host.caretRectProvider = function() {
+			var active = host.activeDocument();
+			if (active == null) return null;
+			var pane = editorPanes.get(active.id);
+			return pane == null ? null : pane.caretRect;
+		};
 		editorPalette = darkPalette ? application.theme : ExosuitPalette.lightEditor();
 		installCommands();
 		application.session.start();
@@ -408,6 +414,12 @@ class ExosuitApp implements DesktopUiApplication {
 			if (pane == null) {
 				pane = new EditorPane(document, theme, requestFrame, documentView.selection, editorPalette,
 					host.getPluginDecorations(), documentView.decorationSearchMatches, documentView.searchDecorationRevision);
+				pane.onCaretRectChanged = function() {
+					if (host.isLanguagePopupVisible()) {
+						if (host.textInputArea() == null) host.dismissLanguagePopup();
+						else requestFrame();
+					}
+				};
 				editorPanes.set(document.id, pane);
 			}
 			items.push(new TabItem("doc:" + document.id, (document.dirty ? "* " : "") + document.title,

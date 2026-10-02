@@ -2,6 +2,259 @@
 
 Last updated: 2026-10-02.
 
+## M9.2 — caret-anchored language popups verified, 2026-10-02
+
+- UIKit exposes a dedicated nullable visible caret rectangle callback and
+  measures popup placement against live logical-screen anchors. Popups flip
+  above the caret or clamp to viewport bounds using bounded layout feedback.
+  Materia commit `c781ddac6` contains only the two owned widget files;
+  pre-existing TextInputBridge and submodule dirt remain untouched.
+- Exosuit follows the active document's resolved caret for hover, completion
+  and signature help, supports scrolling oversized content, and dismisses on
+  document switch or when scrolling clips the caret. No text materialization
+  or document copy is introduced for anchoring. M9.2's first checklist item is
+  complete; menus and pane operations are still open.
+- Real graphical fixtures pass all eight popup scenarios (hover, completion,
+  signature, edge placement, document switch, large content, scrolling and
+  clipped dismissal), plus prior decoration/multiline pixel regressions:
+  `/tmp/exosuit-caret-visibility-ui.log`, exit 0.
+- Final source `./scripts/build.sh` and `./scripts/test.sh` pass, logs
+  `/tmp/exosuit-caret-popup-final-{build,headless}.log`. Fresh composed
+  `EXOSUIT_CI_WEB=1 EXOSUIT_WEB_BROWSER=/tmp/exosuit-chrome-testing/chrome-linux64/chrome
+  ./scripts/test-web.sh` passes both Wasm32 and Wasm-GC with Chrome for Testing
+  154.0.8037.92 (`/tmp/exosuit-caret-popup-current-chrome-web.log`, exit 0).
+  UIKit `tools/test-haxeon-framework.sh` also passes
+  (`/tmp/uikit-caret-popup-framework.log`, exit 0). All handles are terminal.
+- Browser diagnostics/protocol wait budget committed as Exosuit `7dc2d29`.
+  Installed Chrome 136's cancellation failure remains unresolved; current
+  browser qualification does not prove older-browser compatibility. Physical
+  IME/mixed-DPI/Windows/macOS checks and release composition with pre-existing
+  dirt remain pending. No full milestone or full roadmap completion claimed.
+- Resume with M9.2 editor/tab/file-tree context menus through CommandRegistry.
+  TreeView already has onItemContextMenu; inspect Tabs' missing tab hook and
+  reuse UIKit Menu keyboard handling with bounded placement. Preserve the
+  Chrome 136 evidence and investigate it separately from popup geometry.
+
+## Browser reload — interaction and browser-version isolation, 2026-10-02
+
+- Diagnostic variants use existing built Wasm-GC assets, not final-source
+  validation. Startup-only, focus-only, selection-only and Unicode insertion
+  each pass 12 fresh sessions. Adding the ordinary `!` keyboard event fails
+  in session 1 (`/tmp/exosuit-character-reload-1.log`), canceling both fonts.
+  Text insertion/character/newline without save fails in session 4; removing
+  documentation URL interception fails in session 1. Ordinary `location.reload()`
+  also fails in session 12. None of these narrow passes supersedes the failures.
+- A standalone textarea with the same input/key sequence and large simulated
+  guest/resource fetches passes 100 edit/reload cycles
+  (`/tmp/exosuit-minimal-reload-character.log`, exit 0). Earlier plain-page
+  40-cycle run completed its observations but exited 1 during profile cleanup;
+  corrected subsequent 100-cycle runs exit 0. Key-event tracing confirms editor
+  Ctrl+A, Enter and Ctrl+S keydowns prevent browser defaults.
+- Complete Chrome NetLog retained at `/tmp/exosuit-complete-netlog-3.json`:
+  new-document canceled script requests do not reach its network request log.
+  Renderer/browser ownership remains an investigation direction, not a proven
+  root cause.
+- Isolated official Chrome for Testing 154.0.8037.92 passes 12 full interaction
+  and reload sessions (session 1 `/tmp/exosuit-new-chrome-longtimeout.log`,
+  sessions 2–12 `/tmp/exosuit-new-chrome-N.log`). Installed Chrome
+  136.0.7103.92 retains its reproduced cancellation issue; it has not been
+  fixed or suppressed, and no installed browser was replaced.
+- First Chrome 154 run hit the connector's five-second socket observation
+  timeout during startup. Diagnostic protocol waits bounded at 30 seconds
+  pass. Smoke now sets protocol timeout to min(30 seconds, requested overall
+  budget), retaining active-document error assertions and all interaction
+  checks. Optional lifecycle tracing remains diagnostic only.
+- Fresh GraphicalMain build, headless suite, then both browser targets with
+  Chrome 154 are running serially under process handle 75947; logs
+  `/tmp/exosuit-caret-popup-final-{build,headless}.log` and
+  `/tmp/exosuit-caret-popup-current-chrome-web.log`. Poll this handle before
+  starting shared builds. Older-browser compatibility stays unresolved.
+
+## Browser reload — script cancellation also reproduced, 2026-10-02
+
+- Optional `web/tools/smoke.py --trace-lifecycle` records bounded fetch and
+  document lifecycle timing in newly created documents without changing pass
+  criteria. Python compilation passes. Existing built assets were used only
+  for diagnosis, not current-source validation.
+- `/tmp/exosuit-reload-lifecycle-1.log` passes; sessions 2 and 5 fail with
+  `ReferenceError: HaxeonWasmHost is not defined` in the new reload document.
+  Sessions 3–4 pass. Both serial diagnostic batches stopped at their first
+  failure; all process handles are terminal.
+- Session 2 attributes canceled requests for `haxeon-host.js`, `exosuit.js`
+  and `exosuit_web.js` to the new loader. Its lifecycle trace reaches load
+  and pageshow, then completes the host Wasm fetch; it contains no pagehide
+  or beforeunload. This broadens the failure beyond NativeKit font loading;
+  do not implement font retry or suppress startup errors as a fix.
+- Resume by investigating reload request cancellation across scripts and
+  resources, using retained `/tmp/exosuit-reload-lifecycle-{2,5}` artifacts.
+  Determine the source of cancellation before changing application resource
+  lifetime. Popup source remains uncommitted; fresh final-source desktop and
+  both browser gates remain required.
+
+## Browser reload — active-document font cancellation reproduced, 2026-10-02
+
+- Diagnostic sessions 1–2 pass; session 3 fails
+  (`/tmp/exosuit-reload-attribution-3.log`, exit 1). Attribution identifies
+  canceled `assets/IBMPlexSans-Regular.ttf` and `assets/NotoEmoji-Regular.ttf`
+  fetches in loader `A712096E96A0F0CE69C1D2696548F983`, the newly committed
+  reload document. Initiator is `nk_web_fetch_resource` through
+  BrowserUiHost.loadFonts/initialize/start and WebMain.main.
+- That document reports failed after one frame, with "The editor stopped with
+  an error". Server/browser logs are retained in
+  `/tmp/exosuit-reload-attribution-3`. This is an active-document resource
+  failure, not evidence that the existing pagehide retirement is insufficient.
+- Resume by tracing NativeKit browser resource cancellation and BrowserUiHost
+  startup/frame lifetime. Preserve real active-document errors; do not swallow
+  canceled requests or turn passing retries into completion evidence.
+
+## Browser reload — request attribution investigation, 2026-10-02
+
+- Smoke diagnostics now correlate canceled requests with URL, document URL,
+  loader/frame identity and initiator, retaining at most 256 pending entries
+  and dropping completed requests. This changes failure evidence only.
+- A diagnostic run of the already-built Wasm-GC site passes
+  (`/tmp/exosuit-reload-request-attribution.log`); it does not explain or
+  supersede the earlier canceled-fetch failure, or validate the newer clipped
+  caret code. Fresh sessions are running serially, stopping at the first
+  failure (up to 12), with logs `/tmp/exosuit-reload-attribution-N.log` and
+  server/browser artifacts `/tmp/exosuit-reload-attribution-N`.
+- Resume by polling that diagnostic process. On reproduction inspect the
+  attributed request and loader before changing lifecycle code. Final source
+  rebuilds and composed browser gates remain required.
+
+## M9.2 — clipped caret implementation in verification, 2026-10-02
+
+- TextField's dedicated caret callback now accepts nullable geometry and
+  checks resolved visibility plus intersection with the editor's clip bounds.
+  EditorPane retains null for a clipped caret; ExosuitApp dismisses a visible
+  language popup when its current anchor becomes unavailable.
+- Fixtures now choose visible caret positions for normal/edge cases and cover
+  both a 24-pixel outer-controller scroll with unchanged selection and a larger
+  scroll that removes the caret from view. The full capture suite passes
+  (`/tmp/exosuit-caret-visibility-ui.log`, exit 0), retaining
+  `/tmp/exosuit-caret-visibility-ui` artifacts. Resume by verifying
+  GraphicalMain/browser behavior and diagnosing the reload failure.
+- Browser reload still needs diagnosis. The launcher already retires callbacks
+  on pagehide, and the harness waits for a committed/loaded new main-frame
+  context. The failure reports a canceled guest fetch in the new state.
+  Gather request URL/loader attribution before altering lifecycle behavior;
+  preserve failure of genuine active-document startup errors.
+
+## M9.2 — visual review and clipped caret follow-up, 2026-10-02
+
+- Headless suite and actual GraphicalMain build pass
+  (`/tmp/exosuit-caret-popup-headless.log`,
+  `/tmp/exosuit-caret-popup-build-final.log`). Both browser targets build, but
+  the Wasm-GC smoke gate fails on a canceled guest fetch during reload
+  (`/tmp/exosuit-caret-popup-web.log`, chain exit 1). Investigate the reload
+  lifecycle/context evidence; do not discard the failure as a passing retry.
+- Visual inspection of
+  `/tmp/exosuit-caret-popup-scroll-ui/popup-scroll/frame.png` exposes a missing
+  lifecycle case: its caret lies outside the outer editor clip, yet the popup
+  remains visible over another panel. Existing bounds assertions do not cover
+  anchor visibility. Do not commit/complete this slice from those tests alone.
+- Next: publish nullable caret geometry when outside ResolvedLayoutItem's
+  clipBounds, retire language popups whose current anchor is unavailable, and
+  test both a visible retained-controller scroll and scrolling the caret out
+  of view. Make the edge fixture reveal its caret before opening a popup.
+  Re-run focused captures and relevant build/browser gates after that change.
+- The read-only Pragtical reference is `/home/joao/dev/pragtical`, branch
+  `next`, rather than the missing default sibling. Its context-menu plugin
+  dispatches registered commands and provides keyboard activation/navigation;
+  preserve its uncommitted sidebar/scroll work for the later roadmap items.
+
+## M9.2 — caret popup functional gate passes, 2026-10-02
+
+- Final unchanged-script run passes all popup phases, including hover,
+  completion and signature following caret movement, measured edge placement,
+  an 80-line scroll-constrained result, document-switch retirement and the
+  real outer editor ScrollController moving the popup while selection stays
+  unchanged (`/tmp/exosuit-caret-popup-scroll-ui.log`, exit 0).
+  Previous decoration, multicaret and multiline syntax pixel checks pass too.
+- Integration gates are running sequentially: headless
+  `/tmp/exosuit-caret-popup-headless.log`, actual GraphicalMain build
+  `/tmp/exosuit-caret-popup-build-final.log`, then both browser targets
+  `/tmp/exosuit-caret-popup-web.log`. Do not claim the latter gates until
+  their final outputs and chain exit are checked.
+- Owned changes remain uncommitted in UIKit Popup/TextField and Exosuit's
+  EditorPane, ExosuitApp, UiWorkbenchHost and decoration test fixture/script.
+  Preserve pre-existing TextInputBridge and sibling gitlink dirt. Resume by
+  polling this gate chain, reviewing the diff and committing the verified
+  UIKit slice, its release pin and Exosuit integration. Then proceed to M9.2
+  editor/tab/file-tree context menus through CommandRegistry.
+
+## M9.2 — final capture rerun, 2026-10-02
+
+- The large-result phase passes, but its first suite run exits 2 because the
+  executing shell script was edited while Bash was reading it. That run does
+  not validate the scroll phase. The finalized script passes `bash -n` and is
+  rerunning unchanged in `/tmp/exosuit-caret-popup-final-ui.log`, retaining
+  `/tmp/exosuit-caret-popup-final-ui` artifacts.
+- Inspection shows EditorPane scrolls its gutter and TextArea through an
+  outer ScrollView; the new scroll fixture currently targets TextEditorState's
+  internal scroll. If it fails for lack of internal overflow, fix the fixture
+  to exercise the real outer controller and retain the unchanged selection.
+  The rerun exits 1 with "popup fixture could not scroll retained editor".
+  The fixture is corrected to use the real outer ScrollController, keeping
+  selection unchanged. A new unchanged-script run is live in
+  `/tmp/exosuit-caret-popup-scroll-ui.log` with artifacts under
+  `/tmp/exosuit-caret-popup-scroll-ui`. Resume by checking this process/log.
+  Do not edit a running script or shared build inputs during the rerun.
+
+## M9.2 — popup capture results and content bounds, 2026-10-02
+
+- Initial real-editor popup captures pass hover/completion/signature caret
+  movement, viewport-edge placement and document-switch retirement
+  (`/tmp/exosuit-caret-popup-ui.log`, exit 0). All earlier decoration and
+  multiline syntax pixel checks also pass.
+- Language content now uses a viewport-bounded ScrollView; panel width is
+  limited to available viewport width. Overlay builders receive BuildContext
+  directly so limits follow the current viewport instead of cached dimensions.
+- Additional fixture phases cover an 80-line hover result and a retained
+  editor scroll without changing its selection. Verification is running in
+  `/tmp/exosuit-caret-popup-large-ui.log`; artifacts are retained under
+  `/tmp/exosuit-caret-popup-large-ui`. Edits remain uncommitted. Resume by
+  checking this handle/log, verifying the newly added scroll phase ran on the
+  final compiled fixture, then completing functional/headless/browser gates.
+
+## M9.2 — measured anchor placement in progress, 2026-10-02
+
+- Generic Popup has an optional live logical-screen anchor provider. After
+  its panel resolves, placement uses its actual width/height, flips above
+  when below would overflow, clamps against its parent bounds and requests
+  native layout feedback only when the position changes.
+- Language popups use this provider and retire when the active document
+  changes; dismissal clears retained anchor state. These changes remain
+  uncommitted and require rendered lifecycle/placement tests, including
+  oversized content and scroll behavior.
+- Initial compilation rejected calling a nullable mutable provider field
+  inside the deferred handler. The handler now reads and checks its provider
+  locally when invoked, so changes between build and resolve are handled.
+  This is a corrected nullable lifecycle check, not a compiler change.
+  GraphicalMain rebuild passes
+  (`/tmp/exosuit-anchored-popup-build-final.log`, exit 0).
+- Real-editor phases now assert resolved hover/completion/signature bounds
+  track caret movement, edge anchors stay within the viewport and popups
+  retire on document switch. The complete capture suite is running in
+  `/tmp/exosuit-caret-popup-ui.log`, retaining artifacts under
+  `/tmp/exosuit-caret-popup-ui`. Resume by checking that process/log and
+  fixing failures; scroll and oversized-content cases still need coverage.
+
+## M9.2 — caret geometry plumbing in progress, 2026-10-02
+
+- UIKit TextField now has an optional typed `onCaretRect` callback publishing
+  logical screen-space bounds when its text geometry resolves. EditorPane
+  retains that rectangle separately from diagnostic reporting.
+- These edits are uncommitted; GraphicalMain compilation is running in
+  `/tmp/exosuit-caret-geometry-build.log`. Resume by checking compilation,
+  wiring active-pane geometry to UiWorkbenchHost and Popup placement, then
+  testing movement, scrolling, tab switches and edge placement. The host's
+  fixed coordinates have now been replaced: the host queries the active pane,
+  popups use its caret bottom, and geometry changes request a refresh only
+  while a popup is visible. GraphicalMain compilation passes
+  (`/tmp/exosuit-caret-popup-build.log`, exit 0). Edge placement, active-document
+  retirement and rendered behavioral tests remain; M9.2 is not complete.
+
 ## M9.1 acceptance audit complete; M9.2 active, 2026-10-02
 
 - Styled foreground, background, underline/wavy underline and whole-line

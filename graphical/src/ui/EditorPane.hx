@@ -1,5 +1,7 @@
 package ui;
 
+import Rect;
+
 import Color;
 import TextColorRange;
 import editor.SyntaxPresentation;
@@ -49,6 +51,8 @@ class EditorPane implements View {
 	 */
 	public final selection:BufferSelection;
 	final onEdited:Void->Void;
+	public var caretRect(default, null):Null<Rect> = null;
+	public var onCaretRectChanged:Null<Void->Void> = null;
 	final editorTheme:style.Theme;
 	final decorations:PluginDecorationRegistry;
 	final searchMatches:Void->Array<SearchMatch>;
@@ -244,6 +248,14 @@ class EditorPane implements View {
 		area.colorRangeProvider = foregroundProvider;
 		area.decorationProvider = decorationProvider;
 		area.selectionProvider = selectionProvider;
+		area.onCaretRect = function(rect) {
+			var previous = caretRect;
+			caretRect = rect;
+			var changed = previous == null ? rect != null : rect == null ||
+				previous.x != rect.x || previous.y != rect.y || previous.width != rect.width || previous.height != rect.height;
+			if (changed && onCaretRectChanged != null)
+				onCaretRectChanged();
+		};
 		area.onSelectionChange = selectionHandler;
 		area.additionalSelectionProvider = additionalProvider;
 		area.onEditIntent = editIntentHandler;

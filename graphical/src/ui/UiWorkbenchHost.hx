@@ -19,6 +19,7 @@ import feedback.ProblemRegistry;
 import language.SignatureHelp;
 import platform.Platform;
 import platform.TextInputArea;
+import Rect;
 import plugin.PluginDecorationRegistry;
 import plugin.PluginPanelRegistry;
 import plugin.PluginStatusRegistry;
@@ -95,6 +96,9 @@ class UiWorkbenchHost implements WorkbenchHost {
 	static inline var LANG_INFO = 1;
 	static inline var LANG_COMPLETION = 2;
 	static inline var LANG_SIGNATURE = 3;
+	public var caretRectProvider:Null<Void->Null<Rect>>;
+	var languageArea:Null<TextInputArea>;
+	var languageDocumentId:Int = -1;
 	var languageKind:Int = LANG_NONE;
 	var languageInfoText:String = "";
 	var languageItems:Array<CompletionItem> = [];
@@ -112,6 +116,8 @@ class UiWorkbenchHost implements WorkbenchHost {
 
 	public function new(theme:Theme, focus:FocusManager, workspace:Workspace, settings:Settings, requestFrame:Void->Void,
 			dockActions:DockActions) {
+		this.caretRectProvider = null;
+		this.languageArea = null;
 		this.theme = theme;
 		this.focus = focus;
 		this.workspace = workspace;
@@ -373,10 +379,17 @@ class UiWorkbenchHost implements WorkbenchHost {
 
 	// -- core.WorkbenchHost: language popups --
 
-	public function textInputArea():Null<TextInputArea>
-		return activeView() == null ? null : new TextInputArea(24, 64, 2, 20);
+	public function textInputArea():Null<TextInputArea> {
+		if (activeView() == null || caretRectProvider == null) return null;
+		var rect = caretRectProvider();
+		return rect == null ? null : new TextInputArea(Std.int(Math.floor(rect.x)),
+			Std.int(Math.floor(rect.y)), Std.int(Math.ceil(rect.width)), Std.int(Math.ceil(rect.height)));
+	}
 
 	public function openLanguageInformation(area:TextInputArea, text:String):Void {
+		languageArea = area;
+		var active = activeDocument();
+		languageDocumentId = active == null ? -1 : active.id;
 		languageInfoText = text;
 		languageItems = [];
 		languageSignature = null;
@@ -386,6 +399,9 @@ class UiWorkbenchHost implements WorkbenchHost {
 	}
 
 	public function openLanguageCompletion(area:TextInputArea, items:Array<CompletionItem>, accept:CompletionItem->Void):Void {
+		languageArea = area;
+		var active = activeDocument();
+		languageDocumentId = active == null ? -1 : active.id;
 		languageItems = items;
 		languageAccept = accept;
 		languageSelected = 0;
@@ -397,6 +413,9 @@ class UiWorkbenchHost implements WorkbenchHost {
 	}
 
 	public function openLanguageSignature(area:TextInputArea, help:SignatureHelp):Void {
+		languageArea = area;
+		var active = activeDocument();
+		languageDocumentId = active == null ? -1 : active.id;
 		languageSignature = help;
 		languageItems = [];
 		languageInfoText = "";
@@ -433,6 +452,8 @@ class UiWorkbenchHost implements WorkbenchHost {
 
 	public function dismissLanguagePopup():Void {
 		languageKind = LANG_NONE;
+		languageArea = null;
+		languageDocumentId = -1;
 		requestFrame();
 	}
 
@@ -456,12 +477,16 @@ class UiWorkbenchHost implements WorkbenchHost {
 	/** The command-view or language-popup overlay to render this frame, or null for neither. */
 	public function overlayView():Null<NkView> {
 		if (commandView.active) return commandViewCapture;
-		if (languageKind != LANG_NONE) return languageCapture;
+		if (languageKind != LANG_NONE) {
+			var active = activeDocument();
+			if (active == null || active.id != languageDocumentId) dismissLanguagePopup();
+			else return languageCapture;
+		}
 		return null;
 	}
 
 	function buildCommandViewContent():NkView {
-		return new OverlayBuilderView(function() {
+		return new OverlayBuilderView(function(context) {
 			var rows:Array<KeyedView> = [];
 			for (index in 0...commandView.results.length) {
 				var entry = commandView.results[index], provider = commandViewProvider;
@@ -498,10 +523,10 @@ class UiWorkbenchHost implements WorkbenchHost {
 	}
 
 	function buildLanguagePopupContent():NkView {
-		return new OverlayBuilderView(function() {
+		return new OverlayBuilderView(function(context) {
 			var rows:Array<NkView> = [];
 			var panelStyle = new LayoutStyle();
-			panelStyle.width = LayoutAxis.fixed(380.0);
+			panelStyle.width = LayoutAxis.fixed(Math.max(1.0, Math.min(380.0, context.viewportWidth - 16.0)));
 			panelStyle.padding = new Insets(10.0, 8.0, 10.0, 8.0);
 			panelStyle.background = Color.rgba(0.11, 0.11, 0.13, 0.98);
 			panelStyle.direction = LayoutDirection.TopToBottom;
@@ -532,21 +557,30 @@ class UiWorkbenchHost implements WorkbenchHost {
 			}
 			var keyed:Array<KeyedView> = [for (index in 0...rows.length) new KeyedView("row" + index, rows[index])];
 			var content = new Column("lang-content", keyed, panelStyle);
-			return new Popup("language-popup", content, 24.0, 84.0, null, dismissLanguagePopup);
+			var area = textInputArea();
+			if (area == null) area = languageArea;
+			var scrollStyle = new LayoutStyle();
+			scrollStyle.width = panelStyle.width;
+			scrollStyle.height = LayoutAxis.fit(0.0, Math.max(1.0, context.viewportHeight - 16.0));
+			var scroll = new ScrollView("language-scroll", content, scrollStyle);
+			var popup = new Popup("language-popup", scroll, area == null ? 0.0 : area.x,
+				area == null ? 0.0 : area.y + area.height, null, dismissLanguagePopup);
+			popup.anchorRectProvider = caretRectProvider;
+			return popup;
 		});
 	}
 }
 
-/** One-time-rebuild bridge from a `Void->View` factory to a `View` the framework can `build()` fresh every frame. */
+/** Rebuild an overlay with the current viewport and retained UI context each frame. */
 private class OverlayBuilderView implements NkView {
-	final factory:Void->NkView;
+	final factory:nativekit.ui.core.BuildContext->NkView;
 
-	public function new(factory:Void->NkView) {
+	public function new(factory:nativekit.ui.core.BuildContext->NkView) {
 		this.factory = factory;
 	}
 
 	public function build(context:nativekit.ui.core.BuildContext):nativekit.ui.core.RenderNode
-		return factory().build(context);
+		return factory(context).build(context);
 }
 
 /**

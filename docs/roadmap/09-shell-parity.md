@@ -23,7 +23,7 @@ visible and correct. Typing p95 stays within the M7.1 budget.
 
 ## M9.2 — Editor surfaces
 
-- [ ] Anchor hover, completion and signature popups to the real caret
+- [x] Anchor hover, completion and signature popups to the real caret
   rectangle instead of the fixed `TextInputArea` in `UiWorkbenchHost.hx`.
 - [ ] Add context menus for the editor, tabs and the file tree using UIKit
   popups. Their commands go through `CommandRegistry`.
