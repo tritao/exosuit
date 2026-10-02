@@ -2,6 +2,22 @@
 
 Last updated: 2026-10-02.
 
+## M9.1 — row color invalidation audit, 2026-10-02
+
+- Final decoration smoke passes (`/tmp/exosuit-shared-rows-decoration-final.log`,
+  exit 0), including actual pixels for diagnostic movement/clearing, search,
+  brackets/current line, additional selections, multi-caret typing/undo and
+  wrapped navigation.
+- Materia `8feeec885` adds an explicit general-Unicode foreground regression:
+  changing only the middle row's colors preserves the first/last published
+  objects, does not rebuild measured layout, leaves vertex geometry unchanged,
+  and restores the original middle publication when colors are removed.
+  The native TextEngine gate passes (`/tmp/exosuit-row-color-invalidation.log`).
+- M9.1 remains open pending a direct multiline syntax repair acceptance check.
+  Resume by adding a real-editor multiline syntax edit fixture and verifying
+  its repaired colors, then audit the first M9.1 checklist item against all
+  evidence before moving to M9.2 caret-anchored popups.
+
 ## M9.1 — shared rows and measured edit costs, 2026-10-02
 
 - Skribidi `572e8c8`, pinned by Materia `30b65a472`, retains immutable
