@@ -39,15 +39,18 @@ Last updated: 2026-10-02.
   after newline insertion/deletion when exact row-local geometry agrees.
   Frame bindings now retain persistent text source identity, and row rasters
   canonicalize local translation so verified moved rows hit the GPU cache.
-  Haxe newline chunk updates now use source-mapped native replacements to
-  retain eligible unchanged prefixes/suffixes. Next: preserve unchanged middle
-  rows when chunk redistribution changes both ends, audit fractional-origin
-  cancellation, then finish the decoration invalidation matrix. Exact native
+  Both ordinary and newline Haxe edits now use one source-mapped chunk
+  window. Unaffected chunk boundaries stay stable; affected chunks grow to
+  128 paragraphs before local splitting. Next: audit fractional-origin
+  cancellation and actual app newline raster reuse, then finish the decoration
+  invalidation matrix. First run a matched previous-implementation typing
+  control: the new chunk slice has two failed 1 MiB timing runs, so the current
+  performance gate is not accepted. Splits still move some rows between native layouts. Exact native
   equivalence still conservatively rejects fractional-origin differences. Preserve the
   1 MiB, 10 MiB and graphical pixel gates.
   Preserve M8 and both browser gates.
-- Current follow-on HEADs: Exosuit `8ac02fc` before this ledger commit;
-  Materia `f084a2837` carries row-scoped glyph commands, shallow row raster
+- Current follow-on HEADs: Exosuit `d56d2ae` before this ledger commit;
+  Materia `33d36d62a` carries row-scoped glyph commands, shallow row raster
   caching, rebased source metadata, a parent repaint cost regression, and the
   Skribidi bulk-copy and guarded variable-width row-geometry reuse slices. The
   existing dirty Haxeon/NativeKit gitlinks and UIKit TextInputBridge edit in
@@ -93,6 +96,39 @@ Last updated: 2026-10-02.
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M9.1 — stable bounded chunk windows for all local edits
+
+- Ordinary and newline edits now share one incremental source-range window.
+  Chunks outside the actual edit keep their text/layout and mapped boundaries;
+  the path no longer reslices neighboring chunks or reconstructs fixed global
+  64-paragraph groups on the next ordinary keystroke. An affected chunk can
+  grow locally to 128 paragraphs; overflow splits only that window, targeting
+  64-paragraph pieces. Edits spanning chunks repair their combined window.
+- The framework fixture compares every caret and measurement against fresh
+  layouts across seven transactions: initial newline, boundary insertion,
+  deletion across chunks, later insertion, ordinary Unicode typing, insertion
+  of 140 extra paragraphs (local overflow), and whole-document clearing.
+  Paint-provider ranges prove initial newline and subsequent ordinary typing
+  preserve unrelated boundaries; every emitted chunk stays within 128
+  paragraphs. The complete framework and graphical decoration suites pass.
+- Initial standard 1 MiB varied-key run misses the 50 ms budget:
+  **50.86 ms p95**, 58.45 ms maximum, 30 input frames, artifact
+  `/tmp/exosuit-stable-chunks-1mb`. Dispatch p95 is 41.17 ms and frame p95
+  10.75 ms; this failure is not dismissed as host load. Further timing
+  verification remains required. A second unchanged-code run also fails at
+  **76.46 ms p95**, 103.47 ms maximum, artifact
+  `/tmp/exosuit-stable-chunks-1mb-rerun`. Its native-render p95 is 32.70 ms,
+  dispatch p95 39.96 ms, and measured GC p95 0.0012 ms. Next run a matched
+  previous-implementation control rather than attributing this to host load or
+  claiming performance acceptance. Standard 10 MiB repeat-key typing passes
+  across 30 frames at **39.56 ms p95**, with a **289.66 ms maximum** outlier,
+  artifact `/tmp/exosuit-stable-chunks-10mb`.
+- Materia commit `33d36d62a`. Remaining M9.1 work includes fractional-origin
+  cancellation, actual app newline raster attribution and the decoration
+  invalidation matrix. Overflow splitting still moves some unchanged rows to
+  different native layouts, so cross-layout identity is not claimed. Rebased
+  CPU glyph snapshots still copy vectors. Preserve the full M9–M15 roadmap.
 
 ### M9.1 — Haxe newline chunks use native edit invalidation
 
