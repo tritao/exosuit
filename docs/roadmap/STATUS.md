@@ -28,16 +28,17 @@ Last updated: 2026-10-02.
   editor caches eligible visible rows in shallow raster passes. Unchanged
   uniform-tint ASCII rows now retain their glyph revision when their source
   offsets move; their immutable source metadata is rebased on publication.
-  The containing pass still recomposites rows, and shifted colored rows and
+  Colored rows also retain publication identity when relative color coverage
+  stays unchanged. The containing pass still recomposites rows, and
   unsupported Unicode layouts still rebuild. The measured parent repaint is
   a lower-priority cost: guarded same-advance and stable-wrap ASCII edits
   now reuse row geometry, while changed wrap boundaries still reflow. Recheck the
-  1 MiB and 10 MiB timing gates on an idle host, then inspect the remaining
+  10 MiB timing gate and attribute its long frame-boundary pauses, then inspect the remaining
   invalidation cases before checking M9.1. Preserve the
   1 MiB, 10 MiB and graphical pixel gates.
   Preserve M8 and both browser gates.
-- Current follow-on HEADs: Exosuit `385f1b7` before this ledger commit;
-  Materia `49205deb9` carries row-scoped glyph commands, shallow row raster
+- Current follow-on HEADs: Exosuit `d432f02` before this ledger commit;
+  Materia `b07df420b` carries row-scoped glyph commands, shallow row raster
   caching, rebased source metadata, a parent repaint cost regression, and the
   Skribidi bulk-copy and guarded variable-width row-geometry reuse slices. The
   existing dirty Haxeon/NativeKit gitlinks and UIKit TextInputBridge edit in
@@ -83,6 +84,23 @@ Last updated: 2026-10-02.
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M9.1 — shifted colored rows and standard typing gates
+
+- Single-row publication keys now describe clipped foreground ranges relative
+  to their row. Unchanged color coverage keeps the publication key when the
+  row's source offset moves; publication rebases immutable source metadata.
+  Fixed absolute ranges still rebuild when their relative coverage changes.
+  Native tests cover both cases, preserved vertex colors and old-snapshot
+  invalidation. Native text-engine and graphical decoration pixel tests pass.
+- The standard 90-second 1 MiB varied-key fixture delivered 30 input frames
+  at **47.27 ms p95**, within the 50 ms budget; artifact
+  `/tmp/exosuit-stable-break-final-1mb`. The 45-second 10 MiB fixture delivered
+  30 frames at **91.40 ms p95** and missed the budget; artifact
+  `/tmp/exosuit-stable-break-final-10mb`. Its worst frame was 3.17 seconds,
+  while submit and rendering accounted for only about 157 ms. The frame host
+  calls its garbage-collection scheduler outside those stages. Attribute that
+  unaccounted interval before accepting the 10 MiB gate or changing layout.
 
 ### M9.1 — stable wrap boundaries for variable-width ASCII edits
 
