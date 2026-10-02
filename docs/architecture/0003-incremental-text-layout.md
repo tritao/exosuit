@@ -17,11 +17,11 @@ case, though copying the shaped arrays and reflowing lines still cost O(n).
 
 The guarded path can also reuse wrapped row geometry. An equal-length edit
 retains it when the local shaped window has identical advances and break
-properties; only the edited row's glyph bounds are recalculated. A one-letter
-insertion or deletion in a uniform-width ASCII word retains all full rows
-when the last row can absorb the change without changing the row count. It
-recalculates glyph bounds from the edit through the suffix because glyph IDs
-may shift between rows. Other edits still use full line reflow. Both cases
+properties; glyph bounds in the local shaping context are recalculated. A
+one-letter insertion or deletion in an ASCII word also retains row geometry
+when the existing wrap boundaries remain valid under the new glyph advances.
+It recalculates glyph bounds only for rows whose glyph IDs or positions change.
+Moved wrap boundaries still use full line reflow. Both cases
 continue to materialize a complete native layout generation; indexed
 composite snapshots remain the zero-copy direction.
 

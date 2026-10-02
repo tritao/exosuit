@@ -30,16 +30,16 @@ Last updated: 2026-10-02.
   offsets move; their immutable source metadata is rebased on publication.
   The containing pass still recomposites rows, and shifted colored rows and
   unsupported Unicode layouts still rebuild. The measured parent repaint is
-  a lower-priority cost: guarded same-advance and uniform-width ASCII edits
-  now reuse row geometry, while variable-width edits still reflow. Recheck the
+  a lower-priority cost: guarded same-advance and stable-wrap ASCII edits
+  now reuse row geometry, while changed wrap boundaries still reflow. Recheck the
   1 MiB and 10 MiB timing gates on an idle host, then inspect the remaining
   invalidation cases before checking M9.1. Preserve the
   1 MiB, 10 MiB and graphical pixel gates.
   Preserve M8 and both browser gates.
-- Current follow-on HEADs: Exosuit `7cf790d` before this ledger commit;
-  Materia `1dcdc2539` carries row-scoped glyph commands, shallow row raster
+- Current follow-on HEADs: Exosuit `385f1b7` before this ledger commit;
+  Materia `49205deb9` carries row-scoped glyph commands, shallow row raster
   caching, rebased source metadata, a parent repaint cost regression, and the
-  Skribidi bulk-copy and guarded row-geometry reuse slices. The
+  Skribidi bulk-copy and guarded variable-width row-geometry reuse slices. The
   existing dirty Haxeon/NativeKit gitlinks and UIKit TextInputBridge edit in
   Materia were left untouched.
 - All further graphical tests must use disposable PRAGTICAL_PORTABLE state.
@@ -83,6 +83,31 @@ Last updated: 2026-10-02.
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
 
 ## Implementation records
+
+### M9.1 — stable wrap boundaries for variable-width ASCII edits
+
+- A short real-window 1 MiB varied-key probe confirmed that all 60
+  insertion/deletion edits used guarded ASCII shaping, but the earlier
+  uniform-width row-geometry path covered only 4. Exosuit's active editor
+  font has variable advances in this fixture.
+- Skribidi now verifies each existing row boundary against the new glyph
+  advances. If every row still fits and the next glyph would overflow, it
+  reuses row positions and recomputes only changed row widths and glyph
+  bounds. A moved boundary uses the complete line builder. The uniform-only
+  insertion path was removed. A second short real-window probe reached this
+  new path in 52 of 60 edits; temporary traces were removed afterward.
+- A temporary in-process phase timer on another 60-edit real-window run
+  measured the retained row path at 4.78 ms median, 7.98 ms p95 (56 edits),
+  against 20.99 ms median, 23.64 ms p95 for four full-line fallbacks in that
+  same run. Host load was around 17, so this is evidence about the native line
+  phase only, not an end-to-end latency acceptance result. The timer was
+  removed.
+- Native text-engine differential tests compare line ranges, bounds, caret
+  geometry, and visible rows with fresh layouts. The graphical decoration
+  pixel suite passes. The short probes ran at host load around 14–18, and
+  their latency p95 values are not an acceptance comparison. The full 1 MiB
+  and 10 MiB typing gates remain pending on an idle host. This path still
+  copies shaped arrays; composite snapshots remain the zero-copy direction.
 
 ### M9.1 — guarded wrapped-row geometry reuse
 
