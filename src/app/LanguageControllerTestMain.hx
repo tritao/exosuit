@@ -35,13 +35,24 @@ class LanguageControllerTestMain {
 		BuiltinSyntax.install(syntaxes);
 		var workspace = new Workspace(syntaxes);
 		workspace.addProject(arguments[1]);
+		var serverSettings = new config.Settings();
+		serverSettings.haxeonCommand = ["python3", arguments[0]];
+		serverSettings.haxeonVerbose = true;
 		var document = workspace.documents.open(sourcePath), focus = new FocusManager(), window = Native.window_create("language-controller", 640, 320),
 			renderer = new Renderer(window, "ignored-headlessly.ttf", 15), root = new RootView(renderer, new Theme(), focus, workspace, 640, 320),
 			view = root.openDocument(document), commands = new CommandRegistry(), context = new CommandContext(root, focus, workspace.documents),
 			processes = new ProcessManager(), failures:Array<String> = [], controller = new LanguageController(workspace, root, context, commands, processes,
-				"python3", (source, message) -> failures.push(source + ":" + message), [arguments[0]]);
+				"python3", (source, message) -> failures.push(source + ":" + message), [arguments[0]], true, () -> serverSettings);
+		var protocol:Array<String> = [];
+		serverSettings.haxeonEnabled = false;
+		require(!controller.start() && processes.activeCount() == 0, "disabled service launched a process");
+		failures.resize(0); serverSettings.haxeonEnabled = true;
 		require(commands.perform("language:haxeon-start", context), "language start command was not installed");
+		var started = controller.client;
+		if (started == null) throw "controller failed to create configured client";
+		started.log = message -> protocol.push(message);
 		pump(controller, () -> controller.client != null && controller.client.ready, 5.0);
+		require(protocol.length > 0 && protocol[0].indexOf("Haxeon LSP") == 0, "verbose protocol was not logged");
 		var selection = view.getSelection();
 		require(selection != null, "document view has no selection");
 		selection.setCursor(document.buffer, new BufferPosition(0, 2));

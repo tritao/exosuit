@@ -29,6 +29,9 @@ editor.tabWidth=4
 editor.insertSpaces=true
 editor.scroll_animation_type=smooth
 editor.scroll_animation_duration=0.12
+plugins.haxeon.enabled=true
+plugins.haxeon.command=[]
+plugins.haxeon.verbose=false
 workbench.sidebarWidth=220
 files.exclude=.git,.hg,.svn,.devstack,build,out,node_modules
 search.caseSensitive=false
@@ -56,3 +59,13 @@ Smooth motion covers 99% of the distance in that duration and snaps within
 0.5 logical pixels. Wheel reversals respond immediately. Scrollbar dragging,
 session restoration use immediate offsets. These settings
 reload for existing and future document panes.
+
+Haxeon language-server commands are JSON arrays of executable and arguments;
+for example `plugins.haxeon.command=["/path with spaces/haxeon-lsp", "--stdio"]`.
+An empty array uses `$HAXEON_LSP`, then the bundled server, then
+`$HAXEON_ROOT/scripts/haxeon-lsp` (`HAXEON_ROOT` defaults to `../haxeon`).
+Environment overrides name one executable and are never shell-split. The compiler
+root fallback resolves against the editor launch directory before the server
+starts in the project directory. `plugins.haxeon.enabled=false` disables
+server startup. `plugins.haxeon.verbose=true` logs protocol messages to the
+launch console, limited to 2,048 characters per message.

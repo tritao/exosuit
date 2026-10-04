@@ -20,6 +20,7 @@ class JsonRpcTransport {
 		return new JsonRpcResponse(null, "Method not found");
 	};
 	public var failed:String->Void = function(message) {};
+	public var trace:Null<(String, String)->Void>;
 	public var failure(default, null):Null<String>;
 	public var stderr(default, null):String = "";
 
@@ -104,6 +105,7 @@ class JsonRpcTransport {
 		if (length > frameLimit) return false;
 		var frame = 'Content-Length: $length\r\n\r\n$payload', size = Bytes.ofString(frame).length;
 		if (size > queueLimit - outboundBytes) return false;
+		if (trace != null) trace("send", payload);
 		outbound.push(frame);
 		outboundBytes += size;
 		return true;
@@ -159,6 +161,7 @@ class JsonRpcTransport {
 	}
 
 	function dispatch(payload:String):Void {
+		if (trace != null) trace("receive", payload);
 		var message:Dynamic;
 		try {
 			message = Json.parse(payload);

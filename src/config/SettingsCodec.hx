@@ -30,7 +30,10 @@ class SettingsCodec {
 				if (!~/^[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?$/.match(value) || !Math.isFinite(duration) || duration < 0 || duration > 0.3)
 					diagnostics.push(source + ":" + (lineNumber + 1) + ": scroll_animation_duration must be seconds from 0 to 0.3");
 				else target.scrollAnimationDuration = duration;
-			} else if (key == "files.exclude") target.excludedNames = parseList(value);
+			} else if (key == "plugins.haxeon.enabled") target.haxeonEnabled = parseBool(value, key, source, lineNumber, diagnostics);
+			else if (key == "plugins.haxeon.verbose") target.haxeonVerbose = parseBool(value, key, source, lineNumber, diagnostics);
+			else if (key == "plugins.haxeon.command") target.haxeonCommand = parseCommand(value, source, lineNumber, diagnostics);
+			else if (key == "files.exclude") target.excludedNames = parseList(value);
 			else if (key == "search.caseSensitive") target.searchCaseSensitive = parseBool(value, key, source, lineNumber, diagnostics);
 			else if (key == "search.wholeWord") target.searchWholeWord = parseBool(value, key, source, lineNumber, diagnostics);
 			else if (key == "search.maxResults") target.searchMaxResults = parseBoundedInt(value, 1, 1000000, key, source, lineNumber, diagnostics);
@@ -117,6 +120,23 @@ class SettingsCodec {
 			case "home": Platform.KEY_HOME; case "end": Platform.KEY_END; case "pageup": Platform.KEY_PAGE_UP;
 			case "pagedown": Platform.KEY_PAGE_DOWN; case "slash": Platform.KEY_SLASH; default: 0;
 		};
+
+	static function parseCommand(value:String, source:String, line:Int, diagnostics:Array<String>):Array<String> {
+		var result:Array<String> = [];
+		try {
+			var raw:Dynamic = haxe.Json.parse(value);
+			if (!Std.isOfType(raw, Array)) throw "expected an array";
+			for (item in cast(raw, Array<Dynamic>)) {
+				if (!Std.isOfType(item, String)) throw "arguments must be strings";
+				result.push(cast(item, String));
+			}
+			if (result.length > 0 && StringTools.trim(result[0]).length == 0) throw "executable must not be empty";
+		} catch (error:Dynamic) {
+			diagnostics.push(source + ":" + (line + 1) + ": plugins.haxeon.command must be a JSON string array: " + Std.string(error));
+			return [];
+		}
+		return result;
+	}
 
 	static function parseList(value:String):Array<String> {
 		var result:Array<String> = [];

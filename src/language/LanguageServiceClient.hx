@@ -23,6 +23,8 @@ class LanguageServiceClient {
 	public var completionSupported(default, null):Bool = false;
 	public var definitionSupported(default, null):Bool = false;
 	public var signatureHelpSupported(default, null):Bool = false;
+	public var verbose:Bool = false;
+	public var log:String->Void = function(message) Sys.println(message);
 	public var report:String->Void = function(message) {};
 
 	final processes:ProcessManager;
@@ -56,6 +58,9 @@ class LanguageServiceClient {
 		}
 		var session = new JsonRpcTransport(process);
 		transport = session;
+		if (verbose) session.trace = function(direction, payload) {
+			log("Haxeon LSP " + direction + ": " + (payload.length > 2048 ? payload.substring(0, 2048) + " [truncated]" : payload));
+		};
 		session.notification = receiveNotification;
 		session.serverRequest = receiveServerRequest;
 		session.failed = message -> scheduleRestart(Sys.time(), session.stderr.length == 0 ? message : message + ": " + session.stderr);

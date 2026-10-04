@@ -7,7 +7,7 @@ lifecycle and UI. The reference behavior is Pragtical's
 
 ## M10.1 — Configuration and lifecycle
 
-- [ ] Add `plugins.haxeon`-equivalent configuration: `enabled`, `command`
+- [x] Add `plugins.haxeon`-equivalent configuration: `enabled`, `command`
   (argument list), `verbose`. Keep the resolution order: config, then
   `$HAXEON_LSP`, then the bundled server, then
   `$HAXEON_ROOT/scripts/haxeon-lsp`. `HAXEON_ROOT` defaults to `../haxeon`.

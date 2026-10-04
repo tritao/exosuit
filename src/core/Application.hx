@@ -122,18 +122,9 @@ class Application {
 			path -> { open(path); });
 		workbench.openPath = function(path) { openArgument(path); };
 		build = new BuildController(workspace, root, context, commands, processes, path -> open(path), reportError, this.capabilities.supports(Processes));
-		var languageServer = Sys.getEnv("HAXEON_LSP");
-		if (languageServer == null || languageServer.length == 0) {
-			var bundled = config.ApplicationPaths.bundledLanguageServer();
-			if (sys.FileSystem.exists(bundled))
-				languageServer = bundled;
-			else {
-				var haxeonRoot = Sys.getEnv("HAXEON_ROOT");
-				if (haxeonRoot == null || haxeonRoot.length == 0) haxeonRoot = "../haxeon";
-				languageServer = haxeonRoot + "/scripts/haxeon-lsp";
-			}
-		}
-		language = new LanguageController(workspace, root, context, commands, processes, languageServer, reportError, null, this.capabilities.supports(LanguageServices));
+		var languageCommand = config.LanguageServerCommand.current(this.settings.current);
+		language = new LanguageController(workspace, root, context, commands, processes, languageCommand[0], reportError,
+			languageCommand.slice(1), this.capabilities.supports(LanguageServices), effectiveSettings);
 		root.configureWelcomeActions({
 			recentProjects: this.recentProjects.paths,
 			newFile: function() { newDocument(); },

@@ -37,6 +37,7 @@
     "../src/config/ApplicationPaths.hx",
     "../src/config/ConfigurationPaths.hx",
     "../src/config/ConfiguredKeyBinding.hx",
+    "../src/config/LanguageServerCommand.hx",
     "../src/config/Settings.hx",
     "../src/config/SettingsCodec.hx",
     "../src/config/SettingsLayer.hx",

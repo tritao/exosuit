@@ -80,6 +80,26 @@ class ConfigurationTestMain {
 		require(service.reload() && service.current.scrollAnimationType == "smooth" && service.current.scrollAnimationDuration == 0.12,
 			"removed scroll override did not restore defaults");
 
+		File.saveContent(projectPath, 'version=1\nplugins.haxeon.enabled=false\nplugins.haxeon.verbose=true\nplugins.haxeon.command=["/server with spaces", "--stdio", "", "comma,arg"]\n');
+		require(service.reload() && !service.current.haxeonEnabled && service.current.haxeonVerbose && service.current.haxeonCommand.length == 4,
+			"typed language configuration failed");
+		var copied = service.current.copy(); copied.haxeonCommand[0] = "changed";
+		require(service.current.haxeonCommand[0] == "/server with spaces", "settings copy aliased command arguments");
+		for (invalid in ['"server"', '[1]', '[null]', '[""]', '["server",false]', '[broken']) {
+			File.saveContent(projectPath, "version=1\nplugins.haxeon.command=" + invalid + "\n");
+			require(!service.reload() && service.current.haxeonCommand[0] == "/server with spaces", "invalid argv replaced last good configuration");
+		}
+		var configured = ["configured executable", "arg with spaces", ""];
+		var selected = config.LanguageServerCommand.resolve(configured, "environment", "bundled", true, "/compiler");
+		require(selected.length == 3 && selected[1] == "arg with spaces" && selected[2] == "", "configured argv was shell-split");
+		selected[0] = "changed"; require(configured[0] == "configured executable", "resolver changed configured argv");
+		require(config.LanguageServerCommand.resolve([], "environment path", "bundled", true, "/compiler")[0] == "environment path", "environment precedence failed");
+		require(config.LanguageServerCommand.resolve([], "", "bundled", true, "/compiler")[0] == "bundled", "bundled precedence failed");
+		require(config.LanguageServerCommand.resolve([], null, "bundled", false, "/compiler")[0] == "/compiler/scripts/haxeon-lsp", "compiler fallback failed");
+		File.saveContent(projectPath, "version=1\neditor.fontSize=19\n");
+		require(service.reload() && service.current.haxeonEnabled && !service.current.haxeonVerbose && service.current.haxeonCommand.length == 0,
+			"removed language overrides did not restore defaults");
+
 		Platform.startHeadless();
 		var window = Native.window_create("configuration-test", 640, 320), renderer = new Renderer(window, "ignored-headlessly.ttf", 15),
 			application = new Application((theme, focus, workspace, settings) -> new RootView(renderer, theme, focus, workspace, 640, 320, settings),

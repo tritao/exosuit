@@ -15,6 +15,9 @@ class Settings {
 	public var insertSpaces:Bool = true;
 	public var scrollAnimationType:String = "smooth";
 	public var scrollAnimationDuration:Float = 0.12;
+	public var haxeonEnabled:Bool = true;
+	public var haxeonCommand:Array<String> = [];
+	public var haxeonVerbose:Bool = false;
 	public var excludedNames:Array<String> = [".git", ".hg", ".svn", ".devstack", "build", "out", "node_modules"];
 	public var searchCaseSensitive:Bool = false;
 	public var searchWholeWord:Bool = false;
@@ -54,6 +57,9 @@ class Settings {
 		result.insertSpaces = insertSpaces;
 		result.scrollAnimationType = scrollAnimationType;
 		result.scrollAnimationDuration = scrollAnimationDuration;
+		result.haxeonEnabled = haxeonEnabled;
+		result.haxeonCommand = copyStrings(haxeonCommand);
+		result.haxeonVerbose = haxeonVerbose;
 		result.excludedNames = copyStrings(excludedNames);
 		result.searchCaseSensitive = searchCaseSensitive;
 		result.searchWholeWord = searchWholeWord;

@@ -2,6 +2,41 @@
 
 Last updated: 2026-10-04.
 
+## M10.1 — language configuration foundation, 2026-10-04
+
+- Added typed plugins.haxeon.enabled (true), command (JSON string argv array,
+  empty means automatic resolution) and verbose (false). Invalid JSON,
+  non-string arguments and empty executable values reject the settings layer;
+  last-good values survive. Command arrays preserve spaces, commas and empty
+  arguments and are copied at ownership boundaries.
+- LanguageServerCommand resolves config, HAXEON_LSP, the bundled server, then
+  HAXEON_ROOT/scripts/haxeon-lsp (default root ../haxeon). No shell parsing is
+  involved. The root fallback is resolved before spawning in the project cwd.
+  Controller starts use effective settings, including project overrides.
+  Disabled startup launches no process. Running-service reconfiguration is
+  part of the remaining lifecycle work.
+- Added optional transport trace callbacks using the already encoded payload;
+  verbose clients log send/receive messages to the launch console, bounded to
+  2,048 characters per message. Default logging is off. Settings command view
+  includes these fields and the M9.4 motion fields. Packaging/docs list defaults.
+- Core tests cover invalid reload rollback, command-copy independence, all four
+  resolution priorities, exact argv, disabled launch and verbose protocol
+  output from a configured fake server. Full headless and desktop checks passed
+  (13653, exit 0); /tmp/exosuit-language-config-{headless,build}.log.
+- Existing real-server edit/diagnose/fix/save/build/run smoke passed;
+  /tmp/exosuit-language-config-real-lsp.log. Both wasm32 and wasm-gc browser
+  behavior passed in serial process 59437 (exit 0);
+  /tmp/exosuit-language-config-web.log. git diff --check passes.
+  web/haxeon.json source inventory is regenerated for LanguageServerCommand.
+- Configuration foundation committed with this ledger (git log identifies SHA).
+  No compiler/NativeKit changes or pin updates were made in this slice.
+- M10.1 remains unfinished. Next exact action: repair shutdown ownership
+  (LanguageController currently drops a client before its asynchronous shutdown
+  response is pumped), then add automatic startup for project .hx documents,
+  last-document/project-change stop, restart backoff, visible status/problems,
+  wrong-command recovery and external-kill/single-server acceptance tests.
+  M10.2 symbols/references/rename and real-repository UI cycle remain later work.
+
 ## M9.4 — time-based editor scrolling, 2026-10-04
 
 - Read the uncommitted Pragtical view/config/settings diff and deterministic

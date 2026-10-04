@@ -23,12 +23,14 @@ class LanguageController {
 	final processes:ProcessManager;
 	final executable:String;
 	final arguments:Array<String>;
+	final settings:Null<Void->config.Settings>;
 	final reportError:(String, String)->Void;
 	var diagnosticFingerprint:String = "";
 
 	public function new(workspace:Workspace, root:WorkbenchHost, context:CommandContext, commands:CommandRegistry, processes:ProcessManager,
-			executable:String, reportError:(String, String)->Void, ?arguments:Array<String>, available:Bool = true) {
+			executable:String, reportError:(String, String)->Void, ?arguments:Array<String>, available:Bool = true, ?settings:Void->config.Settings) {
 		this.available = available && processes.available;
+		this.settings = settings;
 		this.workspace = workspace;
 		this.root = root;
 		this.context = context;
@@ -42,13 +44,17 @@ class LanguageController {
 
 	public function start():Bool {
 		if (!available) { reportError("language", "Language services are unavailable on this host"); return false; }
+		var value = settings == null ? null : settings();
+		if (value != null && !value.haxeonEnabled) { reportError("language", "Haxeon language services are disabled in settings"); return false; }
 		if (client != null) return true;
 		var project = workspace.activeProject;
 		if (project == null) {
 			reportError("language", "Open a project before starting the Haxeon language server");
 			return false;
 		}
-		var service = new LanguageServiceClient(processes, workspace.documents, executable, arguments, project.root);
+		var command = value == null ? [executable].concat(arguments) : config.LanguageServerCommand.current(value);
+		var service = new LanguageServiceClient(processes, workspace.documents, command[0], command.slice(1), project.root);
+		service.verbose = value != null && value.haxeonVerbose;
 		service.report = message -> reportError("language", message);
 		client = service;
 		return service.start(Sys.time());
