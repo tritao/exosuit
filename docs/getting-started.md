@@ -26,6 +26,11 @@ Run the application:
 ./scripts/run.sh [project-directory] [file ...]
 ```
 
+The launcher enables native crash core dumps up to the shell's hard limit.
+On Linux with systemd-coredump, inspect them with `coredumpctl list` and
+`coredumpctl debug <PID>`. Caught application errors that shut down normally
+do not produce a core dump.
+
 For example:
 
 ```sh

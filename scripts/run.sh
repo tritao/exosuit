@@ -5,6 +5,9 @@
 # Extra arguments after the script's own are forwarded to the running program.
 set -euo pipefail
 
+# Let native crashes produce a core dump, up to the inherited hard limit.
+ulimit -S -c "$(ulimit -H -c)"
+
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 haxeon_root=${HAXEON_ROOT:-"$root_dir/../haxeon"}
 haxeon=${HAXEON_BIN:-"$haxeon_root/scripts/haxeon"}
