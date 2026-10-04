@@ -86,3 +86,10 @@ Ctrl+Shift+G for document symbols, Ctrl+Shift+H for references, and Ctrl+Alt+H
 for rename. Symbols and references use a searchable picker; Enter navigates
 and Escape dismisses. Rename asks for a new name and updates managed buffers
 without saving them. Undo each affected document to reverse its changes.
+
+In the graphical Explorer, a single file click opens a preview in the active
+editor pane. Each pane reuses its one preview tab when another file is clicked.
+Double-click a file or its tab to keep it open. Editing, moving, or reordering
+a preview also keeps it open; undoing an edit does not make it temporary again.
+Folder labels expand or collapse on double-click; disclosure arrows use one
+click. Right-click selects a tree item and opens its menu without previewing it.

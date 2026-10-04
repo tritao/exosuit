@@ -380,13 +380,15 @@ class UiWorkbenchHost implements WorkbenchHost {
 		var target = neighboringPane(horizontal, vertical), moving = activeTab();
 		if (target == null || moving == null) return false;
 		var source = activePane;
+		var movingDocument = UiEditorTabs.document(moving);
+		if (movingDocument != null) movingDocument.preview = false;
 		source.items.splice(source.activeIndex, 1);
 		source.activeIndex = source.items.length == 0 ? -1 : Std.int(Math.min(source.activeIndex, source.items.length - 1));
 		var duplicate = -1;
 		var documentView = UiEditorTabs.document(moving);
 		if (documentView != null) for (index in 0...target.items.length) {
 			var candidate = UiEditorTabs.document(target.items[index]);
-			if (candidate != null && candidate.document == documentView.document) { duplicate = index; break; }
+			if (candidate != null && candidate.document == documentView.document) { candidate.preview = false; duplicate = index; break; }
 		}
 		if (duplicate >= 0) { UiEditorTabs.dispose(moving); target.activeIndex = duplicate; }
 		else { target.items.push(moving); target.activeIndex = target.items.length - 1; }
@@ -400,6 +402,8 @@ class UiWorkbenchHost implements WorkbenchHost {
 		var target = activeIndex + delta;
 		if (target < 0 || target >= activePane.items.length) return false;
 		var view = activePane.items.splice(activeIndex, 1)[0];
+		var documentView = UiEditorTabs.document(view);
+		if (documentView != null) documentView.preview = false;
 		activePane.items.insert(target, view);
 		activeIndex = target;
 		requestFrame();
@@ -446,19 +450,44 @@ class UiWorkbenchHost implements WorkbenchHost {
 
 	// -- core.WorkbenchHost: open/activate document & active-editor input --
 
-	public function openDocument(document:Document):View {
+	public function openDocument(document:Document):View return openDocumentTab(document, false);
+
+	public function openPreview(document:Document):View return openDocumentTab(document, true);
+
+	public function keepDocument(document:Document, ?paneId:String):Void {
+		var pane = paneId == null ? activePane : paneById(paneId);
+		if (pane == null) return;
+		for (view in pane.tabs) if (view.document == document) view.preview = false;
+		requestFrame();
+	}
+
+	function openDocumentTab(document:Document, preview:Bool):View {
 		for (index in 0...activePane.items.length) {
 			var existing = UiEditorTabs.document(activePane.items[index]);
 			if (existing != null && existing.document == document) {
+				if (!preview) existing.preview = false;
 				setActiveIndex(index);
 				return existing;
 			}
 		}
+		var insertion = activePane.items.length;
+		if (preview) for (index in 0...activePane.items.length) {
+			var candidate = UiEditorTabs.document(activePane.items[index]);
+			if (candidate == null || !candidate.preview) continue;
+			if (candidate.document.dirty) { candidate.preview = false; continue; }
+			activePane.items.splice(index, 1); insertion = index; candidate.dispose();
+			var shared = false;
+			for (other in allViews()) if (other.document == candidate.document) shared = true;
+			if (!shared) workspace.documents.close(candidate.document, true);
+			break;
+		}
 		var view = new UiDocumentView(document, new BufferSelection(), scrollSettings);
-		activePane.items.push(UiEditorTab.Document(view));
-		setActiveIndex(activePane.items.length - 1);
+		view.preview = preview && !document.dirty;
+		activePane.items.insert(insertion, UiEditorTab.Document(view));
+		setActiveIndex(insertion);
 		return view;
 	}
+
 
 	/** Tab labels are read live from `Document.title`/`.dirty` each frame by `ExosuitApp.editorPanel`; there is no cached title to refresh. */
 	public function documentRenamed(document:Document):Void {}

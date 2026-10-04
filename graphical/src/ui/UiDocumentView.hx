@@ -34,6 +34,8 @@ class UiDocumentView extends View {
 	public final id:Int;
 	public final document:Document;
 	public final selection:BufferSelection;
+	/** Preview is view-local and permanently clears on the first buffer edit. */
+	public var preview:Bool = false;
 	public final scrollController:ScrollController = new ScrollController();
 	final bufferSubscription:BufferSubscription;
 	final matches:Array<SearchMatch> = [];
@@ -46,6 +48,7 @@ class UiDocumentView extends View {
 		this.selection = selection;
 		applyScrollSettings(settings == null ? new config.Settings() : settings);
 		bufferSubscription = document.buffer.subscribe(function(change) {
+			preview = false;
 			this.selection.transform(document.buffer, change);
 		});
 	}

@@ -62,3 +62,9 @@ with open(sys.argv[1], "w") as settings:
     settings.write("version=1\nplugins.haxeon.command=" + json.dumps(["python3", sys.argv[2], "--events", sys.argv[3]]) + "\n")
 PYLANG
 run_phase language-folder language-folder "$fixture/sidebar-project/Main.hx"
+
+mkdir -p "$fixture/explorer-project/folder"
+printf 'a\n' > "$fixture/explorer-project/folder/A.txt"
+printf 'b\n' > "$fixture/explorer-project/folder/B.txt"
+printf 'c\n' > "$fixture/explorer-project/folder/C.txt"
+run_phase explorer-preview explorer-preview "$fixture/explorer-project/Main.hx"

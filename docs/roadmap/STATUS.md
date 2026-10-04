@@ -2,6 +2,31 @@
 
 Last updated: 2026-10-04.
 
+## Explorer previews and folder double-click, 2026-10-04
+
+- Fix the graphical tree's selection-only mouse click path: single primary file
+  clicks open previews, while activation/Enter and double-click open permanent
+  tabs. Folder labels toggle expansion on double-click; disclosure controls
+  retain single-click expansion. Context selection does not open a file.
+- UIKit exposes a row-click callback independently of selection changes, so
+  clicking an already selected file still promotes it. A retained, typed click
+  sequence recognizes same-item, primary-button double clicks with time and
+  distance bounds across render rebuilds. Tree activation also toggles branches.
+- Preview belongs to a document view, one per editor pane, sharing the existing
+  document/buffer rather than copying text. Replacing a clean preview disposes
+  its view and closes the document only when no other view owns it. Dirty
+  documents remain permanent. Buffer edits permanently promote every preview
+  view of that document, including after undo; explicit opens, tab double-click,
+  moves and reorders also promote. Moving onto an existing tab preserves that
+  tab and avoids duplicates. Preview labels show `(preview)`.
+- UIKit commit `145d29cbf` owns only the click sequence, tree callback/activation
+  and timing regressions. The framework suite passes, including its layout and
+  input routing checks. App gates pass: native workspace smoke (actual tree
+  and tab pointer events, preview replacement, promotion/undo, pane isolation
+  and shared buffers), desktop build, and wasm32/wasm-gc browser acceptance.
+  Concurrent scrollbar-resize edits and parent dependency pins were preserved.
+- Next: completion filtering and remaining language shortcuts in M10.2.
+
 ## M10.2 — symbols, references and rename, 2026-10-04
 
 - Reuse the searchable command-view picker for document symbols and references,

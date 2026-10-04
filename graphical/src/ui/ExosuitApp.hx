@@ -91,6 +91,7 @@ class ExosuitApp implements DesktopUiApplication {
 	public final sidebar = new nativekit.ui.widgets.sidebar.SidebarModel();
 	var explorerRoot:Null<String>;
 	var explorerModel:Null<DirectoryTreeModel>;
+	final tabClicks = new nativekit.ui.core.PointerClickSequence();
 	var statusMessage:String = "Ready";
 	var paletteVisible:Bool = false;
 	var contextMenu:Null<CommandMenu> = null;
@@ -558,6 +559,10 @@ class ExosuitApp implements DesktopUiApplication {
 			null, [explorerRoot], function(key) { host.setSelectedExplorerPath(key); }, function(key) {
 				if (!FileSystem.isDirectory(key)) application.open(key);
 			}, null, null);
+		tree.onItemClicked = function(path, count) {
+			if (count != 1 || FileSystem.isDirectory(path)) return;
+			try host.openPreview(application.workspace.documents.open(path)) catch (error:Dynamic) application.reportError("files", "Could not open file: " + Std.string(error));
+		};
 		tree.onItemContextMenu = function(path, event) {
 			var menuRoot = explorerRoot;
 			host.setSelectedExplorerPath(path);
@@ -637,7 +642,7 @@ class ExosuitApp implements DesktopUiApplication {
 					else requestFrame();
 				}
 			};
-			items.push(new TabItem("doc:" + document.id, (document.dirty ? "* " : "") + document.title,
+			items.push(new TabItem("doc:" + document.id, (document.dirty ? "* " : "") + document.title + (documentView.preview ? " (preview)" : ""),
 				pane));
 		}
 		var tabsStyle = new LayoutStyle();
@@ -651,6 +656,12 @@ class ExosuitApp implements DesktopUiApplication {
 		options.selectionMode = TabsSelectionMode.Controlled;
 		var widget = Tabs.withOptions("exosuit-editor-tabs:" + paneId, items, active == null ? "" : UiEditorTabs.key(active),
 			function(key) host.activateEditorTab(key, paneId), options);
+		widget.onTabHeaderBuilt = function(key, node) {
+			node.on(nativekit.ui.core.UiEventKind.Click, function(event) {
+				if (event.button != 0 || tabClicks.register(paneId + ":" + key, event) != 2) return;
+				for (view in tabs) if (key == "doc:" + view.document.id) host.keepDocument(view.document, paneId);
+			});
+		};
 		widget.onTabContextMenu = function(key, event) {
 			for (item in editorPane.items) {
 				var terminal = UiEditorTabs.terminal(item);

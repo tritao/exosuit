@@ -21,7 +21,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	var languageOriginal = "";
 
 	public function new(context:nativekit.ui.host.DesktopUiHostContext, path:String, phase:String) {
-		super(context.fonts, null, context, phase == "language-folder" || phase == "editor-scroll" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
+		super(context.fonts, null, context, phase == "explorer-preview" ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-scroll" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
 			null, null, null, WorkspaceSmokeMain.createTerminal);
 		this.phase = phase;
 		this.path = path;
@@ -38,6 +38,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	override public function submit(frame:LayoutFrame):nativekit.ui.core.RenderNode {
 		frames++;
 		if (phase == "language-folder") languageStep();
+		if (phase == "explorer-preview") explorerStep();
 		if (phase == "editor-scroll") {
 			frame.deltaSeconds = 1.0 / 60.0;
 			var view = host.activeView();
@@ -185,6 +186,74 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		var bounds = node(key).globalBounds();
 		ui.pointerDown(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
 		ui.pointerUp(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+	}
+	static function treeRow(root:nativekit.ui.core.RenderNode, path:String):Null<nativekit.ui.core.RenderNode> {
+		if (root.semantics != null && root.semantics.role == nativekit.ui.semantics.AccessibilityRole.TreeItem && root.semantics.label == path) return root;
+		for (child in root.children) { var found = treeRow(child, path); if (found != null) return found; }
+		return null;
+	}
+	function clickTree(path:String):Void {
+		var row = treeRow(ui.root, path);
+		require(row != null, "explorer row missing: " + path);
+		var bounds = row.globalBounds();
+		// Click the label, away from the independent disclosure control.
+		ui.pointerDown(bounds.x + bounds.width - 10, bounds.y + bounds.height / 2, 0);
+		ui.pointerUp(bounds.x + bounds.width - 10, bounds.y + bounds.height / 2, 0);
+	}
+	function activePreview():Bool { var view = host.activeView(); return view != null && view.preview; }
+	function explorerStep():Void {
+		var root = path.substring(0, path.lastIndexOf("/"));
+		if (frames == 3) { clickTree(root + "/folder"); clickTree(root + "/folder"); }
+		if (frames == 4) {
+			require(treeRow(ui.root, root + "/folder/A.txt") != null, "folder double click did not expand");
+			clickTree(root + "/folder/A.txt");
+			require(activePreview() && host.tabs.length == 1, "single click did not open preview");
+		}
+		if (frames == 5) {
+			clickTree(root + "/folder/B.txt");
+			require(host.activeDocument().requirePath() == root + "/folder/B.txt" && host.tabs.length == 1, "preview did not replace previous file");
+			clickTree(root + "/folder/B.txt");
+			require(!activePreview(), "second click did not keep selected preview");
+		}
+		if (frames == 6) {
+			clickTree(root + "/folder/A.txt");
+			require(host.tabs.length == 2 && activePreview(), "permanent file was replaced");
+			host.activeView().textInput("edit");
+			require(!activePreview(), "edit did not promote preview");
+			host.activeView().undo();
+			require(!activePreview(), "undo demoted permanent tab");
+		}
+		if (frames == 7) {
+			clickTree(root + "/folder/C.txt");
+			require(host.tabs.length == 3 && activePreview(), "edited then undone tab was replaced");
+		}
+		if (frames == 8) {
+			var document = host.activeDocument();
+			if (document == null) throw "preview document missing";
+			var tab = node("doc:" + document.id).globalBounds();
+			for (_ in 0...2) { ui.pointerDown(tab.x + tab.width / 2, tab.y + tab.height / 2, 0); ui.pointerUp(tab.x + tab.width / 2, tab.y + tab.height / 2, 0); }
+			require(!activePreview(), "tab double click did not keep preview");
+		}
+		if (frames == 9) {
+			clickTree(root + "/folder"); clickTree(root + "/folder");
+		}
+		if (frames == 10) {
+			require(treeRow(ui.root, root + "/folder/A.txt") == null, "folder double click did not collapse");
+			require(host.splitActive(view.LayoutKind.Horizontal), "preview pane split failed");
+			host.openPreview(application.workspace.documents.open(root + "/folder/A.txt"));
+			host.openPreview(application.workspace.documents.open(root + "/folder/B.txt"));
+			require(host.tabs.length == 2 && host.panes[0].tabs.length == 3, "preview replacement affected another pane");
+			var shared = application.workspace.documents.open(root + "/folder/B.txt");
+			host.activeView().textInput("edit");
+			for (other in host.allViews()) if (other.document == shared) require(!other.preview, "shared edit left another preview replaceable");
+			host.activeView().undo();
+			host.openPreview(application.workspace.documents.open(root + "/folder/A.txt"));
+		}
+		if (frames == 11) {
+			require(host.moveActiveTab(-1, 0), "preview move to neighboring pane failed");
+			require(!activePreview() && host.tabs.length == 3, "moving preview duplicated or demoted existing permanent tab");
+			trace("PASS: explorer folder double click, file preview replacement, keep by double click and edit, pane ownership and shared edits");
+		}
 	}
 	function sidebarStep():Void {
 		if (phase == "sidebar-write") {
@@ -377,7 +446,7 @@ class WorkspaceSmokeMain {
 		options.title = "exosuit workspace acceptance";
 		options.width = 900; options.height = 600;
 		options.captureDirectory = args[1];
-		options.frameLimit = args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
+		options.frameLimit = args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
 		var status = DesktopUiHost.run(options, context -> new WorkspaceSmokeApp(context, args[0], args[2]));
 		platform.Native.shutdown();
 		return status;
