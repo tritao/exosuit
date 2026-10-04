@@ -63,8 +63,16 @@ class GraphicalMain {
 		host.frameLimit = frameLimit;
 		host.captureSeconds = captureSeconds;
 		host.recordPath = recordPath;
+		var allocationProfile = Sys.getEnv("EXOSUIT_ALLOCATION_PROFILE");
+		var profileFrames = 0;
 		var reportedFirstFrame = false;
 		host.captureReady = function() {
+			if (allocationProfile != null) {
+				profileFrames++;
+				// Skip warm-up and exclude serialization of capture diagnostics.
+				if (profileFrames == 20) hl.Gc.censusReset();
+				if (frameLimit > 0 && profileFrames >= frameLimit) hl.Gc.censusStop();
+			}
 			if (recordPath != null && !reportedFirstFrame) {
 				reportedFirstFrame = true;
 				Sys.println("exosuit: first frame ready");
@@ -89,7 +97,16 @@ class GraphicalMain {
 			Sys.println("exosuit: window ready");
 			Sys.stdout().flush();
 		}
+		// Optional allocation census, excluding window/application construction.
+		if (allocationProfile != null) hl.Gc.censusStart(16384);
 		while (session.tick()) {}
+		if (allocationProfile != null) {
+			hl.Gc.censusStop();
+			var encoded = haxe.io.Bytes.ofString(allocationProfile);
+			var terminated = haxe.io.Bytes.alloc(encoded.length + 1);
+			terminated.blit(0, encoded, 0, encoded.length);
+			hl.Gc.censusDump(AllocationProfileBytes.data(terminated));
+		}
 		var status = session.close();
 		Native.shutdown();
 		return status;
@@ -108,4 +125,9 @@ class GraphicalMain {
 			return true;
 		}
 	}
+}
+
+private extern class AllocationProfileBytes {
+	@:hlNative("haxeon_runtime", "__bytes_get_data")
+	public static function data(bytes:haxe.io.Bytes):hl.Bytes;
 }
