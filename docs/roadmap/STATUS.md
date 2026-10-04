@@ -1,6 +1,52 @@
 # Execution ledger
 
-Last updated: 2026-10-04.
+Last updated: 2026-10-05.
+
+## Clay clipping and persistent-state capacity, 2026-10-05
+
+- GDB captured the reported shutdown before cleanup, preserving a core in
+  `/tmp/exosuit-clay-debug/clay-error.core`. The failing call was adding a
+  scroll-container record in ConfigureOpenElementPtr: the persistent table had
+  length/capacity 100/100. Clay's generic bounds message obscured exhaustion;
+  this was not an OS signal crash, so ordinary core-dump enablement alone did
+  not capture it.
+- Clay now provides per-context clipping-only mode. UIKit opts out of native
+  scroll tracking because ScrollController owns offsets/input/lifetime.
+  Clipping, explicit child offsets, scissor commands and resolved geometry
+  remain active; clipped labels no longer consume persistent scroll records.
+  Native tracking remains enabled by default for standalone Clay users.
+- Scroll retirement is a separate pass before target selection. Swapback
+  replacements are all examined and no selected target is invalidated by
+  subsequent removal. Scroll and transition tables scale with declared element
+  capacity, allowing previous/current overlap. Long-lived exiting transitions
+  still count toward the supported capacity; exhaustion is a typed resource
+  error, never a mutable default-record write or generic bounds error.
+- Capacity diagnostics name the table, capacity and element via a supplementary
+  query, preserving Clay's existing error-callback ABI and UIKit's public ABI.
+  Failed capacity frames return no commands; the next layout resets diagnostics.
+  Transition completion also examines swapback replacements. A pre-existing
+  C++ reference in paragraph layout was changed to a borrowed pointer to restore
+  C compatibility, with a permanent C11 compile target.
+- Regressions pass: 3,000 clipped nodes with full ID replacement; standalone
+  tracking beyond 100 records and native wheel scrolling; complete stale-cache
+  retirement; transition churn beyond 200 records; forced exhaustion of both
+  tables without default-record mutation; recovery on the next frame. Native
+  layout/invariants/render/Clay gates (7 tests), C/C++ compilation, ASan/UBSan,
+  existing framework/input/4,000-node regressions, and the captured app build
+  running 180 frames with the final native library all pass.
+- Isolated app snapshot desktop build and wasm32/wasm-gc browser acceptance pass.
+  The working-tree browser click test hit newly added breadcrumbs at its old
+  editor coordinates; the final working-tree desktop rebuild was blocked by
+  concurrent Preferences.hx:94 (`sys.FileSystem.stat` not recognized). Those
+  unrelated changes are preserved. A verified app artifact and matching native
+  libraries remain under `/tmp/exosuit-clay-fixed/verified-main.hl` and
+  `verified-native/`; the temporary source checkout was removed.
+- Commits: Clay `0897847` and ABI-compatible follow-up `af7fa05`; UIKit/materia
+  `f377215dc` and `aef4b8c35`, including the Clay dependency pin. Existing Haxeon
+  and NativeKit pins and unrelated UIKit/app edits remain untouched. No document
+  buffers are copied and no editor-specific clipping cache is introduced.
+- Next roadmap task remains M10.2 completion filtering/language shortcuts;
+  concurrent preferences and breadcrumb integration need their own validation.
 
 ## Editor scrollbar at the outer pane edge, 2026-10-04
 
