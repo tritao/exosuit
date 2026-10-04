@@ -36,3 +36,6 @@ if [[ $status -ne 42 ]]; then
     exit 1
 fi
 echo "PASS: real language-service edit, diagnose, fix, save, build and execution"
+
+"$haxeon" run --project "$root_dir/tests/real-language-service-smoke/haxeon.json" \
+    "${compiler_mode[@]}" -- "$language_server" "$root_dir" repository

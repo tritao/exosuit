@@ -6,6 +6,9 @@ import core.WorkbenchHost;
 import editor.BufferPosition;
 import editor.Document;
 import language.LanguageServiceClient;
+import language.LanguageLocation;
+import commandview.CommandViewProvider;
+import commandview.CommandViewEntry;
 import process.ProcessManager;
 import workspace.Workspace;
 
@@ -202,6 +205,9 @@ class LanguageController {
 		commands.add("language:complete", commandContext -> complete(), commandContext -> supports("completion"));
 		commands.add("language:go-to-definition", commandContext -> definition(), commandContext -> supports("definition"));
 		commands.add("language:signature-help", commandContext -> signatureHelp(), commandContext -> supports("signature"));
+		commands.add("language:document-symbols", commandContext -> symbols(), commandContext -> supports("symbols"));
+		commands.add("language:find-references", commandContext -> references(), commandContext -> supports("references"));
+		commands.add("language:rename-symbol", commandContext -> rename(), commandContext -> supports("rename"));
 	}
 
 	function hover():Void {
@@ -251,6 +257,73 @@ class LanguageController {
 		});
 	}
 
+	function symbols():Void {
+		var service = client, document = activeDocument(), view = context.activeView();
+		if (service == null || document == null || view == null) return;
+		var revision = document.buffer.stateId;
+		service.requestSymbols(document, Sys.time(), items -> {
+			if (client != service || context.activeView() != view || document.buffer.stateId != revision) return;
+			var entries:Array<CommandViewEntry> = [], locations:Array<LanguageLocation> = [];
+			for (item in items) {
+				entries.push(new CommandViewEntry(item.name, item.detail, Std.string(locations.length), locationLabel(item.location)));
+				locations.push(item.location);
+			}
+			openLocations("Document Symbols: ", entries, locations, service, document, revision);
+		});
+	}
+
+	function references():Void {
+		var service = client, document = activeDocument(), view = context.activeView();
+		if (service == null || document == null || view == null) return;
+		var revision = document.buffer.stateId;
+		service.requestReferences(document, new BufferPosition(view.cursorLine(), view.cursorColumn()), Sys.time(), locations -> {
+			if (client != service || context.activeView() != view || document.buffer.stateId != revision) return;
+			var entries:Array<CommandViewEntry> = [];
+			for (index in 0...locations.length) {
+				var location = locations[index];
+				entries.push(new CommandViewEntry(location.path, locationLabel(location), Std.string(index)));
+			}
+			openLocations("References: ", entries, locations, service, document, revision);
+		});
+	}
+
+	function openLocations(prompt:String, entries:Array<CommandViewEntry>, locations:Array<LanguageLocation>, service:LanguageServiceClient,
+			document:Document, revision:Int):Void {
+		if (entries.length == 0) { root.getNotifications().publish("No " + prompt.toLowerCase().substring(0, prompt.length - 2) + " found"); return; }
+		root.openCommandView(new CommandViewProvider(prompt, entries, query -> {}, (entry, query, backwards) -> {
+			if (entry == null) return;
+			root.closeCommandView();
+			if (client != service || document.buffer.stateId != revision) { reportError("language", "Navigation result is stale; run the command again"); return; }
+			var index = Std.parseInt(entry.value);
+			if (index < 0 || index >= locations.length) return;
+			var location = locations[index];
+			try {
+				var target = root.openDocument(workspace.documents.open(location.path));
+				target.selectRange(location.from, location.to); target.cursorChanged();
+			} catch (error:Dynamic) reportError("language", "Could not open language result: " + Std.string(error));
+		}));
+	}
+
+	function rename():Void {
+		var service = client, document = activeDocument(), view = context.activeView();
+		if (service == null || document == null || view == null) return;
+		var revision = document.buffer.stateId, position = new BufferPosition(view.cursorLine(), view.cursorColumn());
+		root.openCommandView(new CommandViewProvider("Rename Symbol To: ", [], query -> {}, (entry, query, backwards) -> {
+			var name = StringTools.trim(query);
+			if (name.length == 0) return;
+			root.closeCommandView();
+			if (client != service || context.activeView() != view || document.buffer.stateId != revision) { reportError("language", "Rename cancelled: document changed while naming the symbol"); return; }
+			if (!service.requestRename(document, position, name, Sys.time(), result -> {
+				if (!result.applied) { reportError("language", result.error); return; }
+				for (changed in result.documents) root.openDocument(changed);
+				root.openDocument(document).cursorChanged();
+				root.getNotifications().publish("Renamed symbol in " + result.documents.length + " document(s)");
+			})) reportError("language", "Rename is unavailable for this document");
+		}));
+	}
+
+	static function locationLabel(location:LanguageLocation):String return (location.from.line + 1) + ":" + (location.from.column + 1);
+
 	function refreshDiagnostics(entry:FolderLanguageSession):Void {
 		var service = entry.service, owner = entry.owner;
 		var parts:Array<String> = [];
@@ -283,10 +356,11 @@ class LanguageController {
 	}
 
 	function supports(feature:String):Bool {
-		var service = client;
-		if (service == null || !service.ready || activeDocument() == null) return false;
+		var service = client, document = activeDocument();
+		if (service == null || !service.ready || document == null || !service.accepts(document)) return false;
 		return feature == "hover" ? service.hoverSupported : feature == "completion" ? service.completionSupported
-			: feature == "signature" ? service.signatureHelpSupported : service.definitionSupported;
+			: feature == "signature" ? service.signatureHelpSupported : feature == "symbols" ? service.symbolsSupported
+			: feature == "references" ? service.referencesSupported : feature == "rename" ? service.renameSupported : service.definitionSupported;
 	}
 
 	function activeDocument():Null<Document> {

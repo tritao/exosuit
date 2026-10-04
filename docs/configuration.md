@@ -79,3 +79,10 @@ session with no documents. Explicit Stop suppresses automatic startup for that
 folder until Start is used or the folder is removed. Failures appear in status and Problems;
 restarts back off by 0.25, 0.5 and 1 second, then require recovery via settings
 or Start. Thirty seconds of healthy operation resets the retry count.
+
+Language commands appear in the command palette when the active document's
+server supports them. Default shortcuts are Ctrl+Space for completion,
+Ctrl+Shift+G for document symbols, Ctrl+Shift+H for references, and Ctrl+Alt+H
+for rename. Symbols and references use a searchable picker; Enter navigates
+and Escape dismisses. Rename asks for a new name and updates managed buffers
+without saving them. Undo each affected document to reverse its changes.

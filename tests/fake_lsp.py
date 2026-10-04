@@ -33,6 +33,7 @@ def send(message):
 
 
 held = None
+held_rename = None
 documents = {}
 while True:
     message = read_message()
@@ -49,7 +50,7 @@ while True:
         capabilities = {"positionEncoding": "utf-8" if "bad-encoding" in sys.argv else "utf-16", "textDocumentSync": {"openClose": True, "change": 2}}
         if not minimal:
             capabilities.update({"hoverProvider": True, "completionProvider": {}, "definitionProvider": True,
-                                 "signatureHelpProvider": {"triggerCharacters": ["(", ","]}})
+                                 "signatureHelpProvider": {"triggerCharacters": ["(", ","]}, "documentSymbolProvider": True, "referencesProvider": True, "renameProvider": {}})
         send({"jsonrpc": "2.0", "id": message["id"], "result": {"capabilities": capabilities}})
     elif method == "initialized":
         pass
@@ -67,6 +68,9 @@ while True:
         send({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {
             "uri": item["uri"], "version": item["version"], "diagnostics": [{"severity": 2,
                 "message": "current 😀", "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 2}}}]}})
+        if held_rename is not None:
+            send(held_rename)
+            held_rename = None
         if message["params"]["contentChanges"][0]["text"] == "CRASH":
             sys.exit(7)
     elif method == "textDocument/didClose":
@@ -87,6 +91,30 @@ while True:
         send({"jsonrpc": "2.0", "id": message["id"], "result": {"activeSignature": 0, "activeParameter": 1,
             "signatures": [{"label": "sum(left:Int, right:Int):Int", "documentation": {"kind": "markdown", "value": "Adds values"},
                             "parameters": [{"label": "left:Int"}, {"label": "right:Int"}]}]}})
+    elif method == "textDocument/documentSymbol":
+        span = {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 2}}
+        send({"jsonrpc": "2.0", "id": message["id"], "result": [{"name": "Main", "kind": 5, "range": span, "selectionRange": span,
+              "children": [{"name": "value", "kind": 13, "detail": "Int", "range": span, "selectionRange": span}]}]})
+    elif method == "textDocument/references":
+        span = {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 1}}
+        send({"jsonrpc": "2.0", "id": message["id"], "result": [
+              {"uri": message["params"]["textDocument"]["uri"], "range": {"start": message["params"]["position"], "end": message["params"]["position"]}},
+              {"uri": root_uri + "/Other.hx", "range": span}]})
+    elif method == "textDocument/rename":
+        item = documents[message["params"]["textDocument"]["uri"]]
+        name = message["params"]["newName"]
+        origin = {"textDocument": {"uri": item["uri"], "version": item["version"]},
+                  "edits": [{"range": {"start": message["params"]["position"], "end": message["params"]["position"]}, "newText": name}]}
+        changes = [origin]
+        if name in ("multi", "overlap"):
+            span = {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 1}}
+            edits = [{"range": span, "newText": "other"}]
+            if name == "overlap": edits.append({"range": span, "newText": "conflict"})
+            changes.append({"textDocument": {"uri": root_uri + "/Other.hx", "version": None}, "edits": edits})
+        if name == "version-conflict": origin["textDocument"]["version"] -= 1
+        response = {"jsonrpc": "2.0", "id": message["id"], "result": {"documentChanges": changes}}
+        if name == "stale": held_rename = response
+        else: send(response)
     elif method == "shutdown":
         send({"jsonrpc": "2.0", "id": message["id"], "result": None})
     elif method == "exit":

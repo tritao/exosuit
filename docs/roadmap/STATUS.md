@@ -2,6 +2,43 @@
 
 Last updated: 2026-10-04.
 
+## M10.2 — symbols, references and rename, 2026-10-04
+
+- Reuse the searchable command-view picker for document symbols and references,
+  including hierarchical symbols and navigation to unopened files. Rename uses
+  the same text prompt and leaves changed managed buffers unsaved, one undo
+  transaction per document. All commands depend on negotiated capabilities and
+  owning-folder document eligibility; the existing command bridge supplies
+  palette entries and keyboard shortcuts.
+- Capture document identities, paths, revisions and protocol versions when
+  requesting rename. Validate all target edits before mutation, reject delayed
+  results after typing/session changes, and share validation with server-driven
+  workspace/applyEdit. Unopened, unversioned targets are loaded as managed
+  documents on response; creating/renaming/deleting files is outside text rename.
+  Full filesystem transactions and cross-document undo are not claimed.
+- Focused fake-server and controller tests pass; real Haxeon fixture completes,
+  resolves definition/symbols/references, renames a local declaration and use,
+  then builds/runs with exit 42. Native graphical acceptance covers searchable
+  symbols, references to a closed file, rename input and transactional undo.
+- Real repository acceptance uses unsaved overlays of
+  `src/config/ApplicationPaths.hx`: diagnose/fix, completion, definition, symbols,
+  references, local rename and undo, with unchanged disk contents. This exposed
+  three general Haxeon issues fixed in sibling commit `6f948557`: discover
+  `haxeon.json` roots and local dependencies through existing project discovery;
+  analyze libraries without requiring executable `main` while retaining body
+  checking and executable entry validation; display omitted inferred annotations
+  in syntax indexes without a null access. Before/after regressions cover each,
+  plus invalid-body recovery and executable rejection after an analysis cache.
+  Both compiler language-service and standard LSP suites pass. Existing unrelated
+  Haxeon changes and parent dependency pins were preserved.
+- Final gates pass: full headless suite, desktop build, native workspace UI
+  smoke, real Haxeon fixture plus repository overlays, and browser acceptance
+  on wasm32 and wasm-gc. Updated the browser source inventory for the two new
+  typed language-result modules.
+- Next: finish completion filtering and remaining language-command shortcuts,
+  then the graphical real-repository edit/build/diagnose/fix acceptance. This
+  slice does not claim complete foreign-binding/package-scope LSP coverage.
+
 ## M10.1 — workspace-folder language sessions, 2026-10-04
 
 - User-approved scope replaces the earlier single-client/last-document-stop

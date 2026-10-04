@@ -17,6 +17,8 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	var sidebarWidth = 0.0;
 	var languageStage = 0;
 	var languageSettings = "";
+	var languageFeatureStage = 0;
+	var languageOriginal = "";
 
 	public function new(context:nativekit.ui.host.DesktopUiHostContext, path:String, phase:String) {
 		super(context.fonts, null, context, phase == "language-folder" || phase == "editor-scroll" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
@@ -305,8 +307,47 @@ class WorkspaceSmokeApp extends ExosuitApp {
 			languageStage = 3;
 			trace("PASS: real window starts folder server, renders wrong-command status/Problems and recovers from settings reload");
 		}
-		if (frames == 120) require(languageStage == 3, "language folder UI acceptance did not complete: stage=" + languageStage + ", status=" + application.language.statusLabel() + ", problems=" + [for (problem in host.getProblems().values()) problem.message].join("; "));
+		if (languageStage == 3) languageFeatures();
+		if (frames == 120) require(languageStage == 3 && languageFeatureStage == 9, "language folder UI acceptance did not complete: stage=" + languageStage + ", feature=" + languageFeatureStage + ", status=" + application.language.statusLabel() + ", problems=" + [for (problem in host.getProblems().values()) problem.message].join("; "));
 	}
+	function languageFeatures():Void {
+		if (languageFeatureStage == 0) {
+			require(ui.commands.shortcutsFor("exosuit.language:document-symbols").length == 1 &&
+				ui.commands.shortcutsFor("exosuit.language:find-references").length == 1 &&
+				ui.commands.shortcutsFor("exosuit.language:rename-symbol").length == 1, "language shortcuts were not bridged");
+			require(ui.commands.execute("exosuit.language:document-symbols"), "graphical symbols command unavailable");
+			languageFeatureStage = 1;
+		} else if (languageFeatureStage == 1 && host.isCommandViewActive() && hasText(node("cv-content"), "Document Symbols")) {
+			ui.text(UiEventKind.TextInput, "value"); languageFeatureStage = 2;
+		} else if (languageFeatureStage == 2 && node("cv-rows").children.length == 1 && hasText(node("cv-row-0"), "value")) {
+			ui.key(UiEventKind.KeyDown, UiKey.Enter, 0); languageFeatureStage = 3;
+		} else if (languageFeatureStage == 3 && !host.isCommandViewActive()) {
+			require(ui.commands.execute("exosuit.language:find-references"), "graphical references command unavailable"); languageFeatureStage = 4;
+		} else if (languageFeatureStage == 4 && host.isCommandViewActive() && hasText(node("cv-content"), "References")) {
+			require(node("cv-rows").children.length == 2, "graphical references omitted closed file");
+			ui.text(UiEventKind.TextInput, "Other.hx"); languageFeatureStage = 5;
+		} else if (languageFeatureStage == 5 && node("cv-rows").children.length == 1 && hasText(node("cv-row-0"), "Other.hx")) {
+			ui.key(UiEventKind.KeyDown, UiKey.Enter, 0); languageFeatureStage = 6;
+		} else if (languageFeatureStage == 6 && !host.isCommandViewActive()) {
+			var referenced = host.activeDocument();
+			require(referenced != null && StringTools.endsWith(referenced.requirePath(), "/Other.hx"), "graphical reference did not navigate");
+			application.openArgument(path);
+			var document = host.activeDocument(); if (document == null) throw "rename fixture lost document";
+			languageOriginal = document.buffer.text;
+			require(ui.commands.execute("exosuit.language:rename-symbol"), "graphical rename command unavailable"); languageFeatureStage = 7;
+		} else if (languageFeatureStage == 7 && host.isCommandViewActive() && hasText(node("cv-content"), "Rename Symbol To")) {
+			ui.text(UiEventKind.TextInput, "renamed"); ui.key(UiEventKind.KeyDown, UiKey.Enter, 0); languageFeatureStage = 8;
+		} else if (languageFeatureStage == 8) {
+			var document = host.activeDocument();
+			if (document != null && document.buffer.text.indexOf("renamed") >= 0) {
+				require(!host.isCommandViewActive(), "rename prompt remained open");
+				require(application.commands.perform("doc:undo", application.context) && document.buffer.text == languageOriginal, "graphical rename did not undo as one transaction");
+				languageFeatureStage = 9;
+				trace("PASS: graphical capability-gated symbol filtering, closed-file references, rename input and transactional undo");
+			}
+		}
+	}
+
 	static function hasText(node:nativekit.ui.core.RenderNode, value:String):Bool {
 		if (node.layout.text != null && node.layout.text.toLowerCase().indexOf(value.toLowerCase()) >= 0) return true;
 		for (child in node.children) if (hasText(child, value)) return true;

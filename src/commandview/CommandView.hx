@@ -21,6 +21,7 @@ class CommandView {
 
 	public function open(provider:CommandViewProvider):Void {
 		this.provider = provider;
+		results.resize(0);
 		input.reset();
 		clearComposition();
 		selected = 0;

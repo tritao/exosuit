@@ -54,6 +54,7 @@ run_phase sidebar-stale-preview sidebar-stale-preview "$fixture/sidebar-project/
 
 run_phase editor-scroll editor-scroll "$fixture/sidebar-project/Main.hx"
 
+printf 'old\n' > "$fixture/sidebar-project/Other.hx"
 mkdir -p "$fixture/state-language-folder"
 python3 - "$fixture/state-language-folder/settings.conf" "$root_dir/tests/fake_lsp.py" "$fixture/language-events.jsonl" <<'PYLANG'
 import json, sys

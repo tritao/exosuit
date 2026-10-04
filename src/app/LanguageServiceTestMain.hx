@@ -9,6 +9,8 @@ import language.LanguageDiagnostic;
 import editor.BufferChange;
 import language.LanguageServiceClient;
 import language.SignatureHelp;
+import language.LanguageSymbol;
+import language.LanguageEditResult;
 import platform.Native;
 import platform.Platform;
 import process.ProcessManager;
@@ -43,6 +45,7 @@ class LanguageServiceTestMain {
 		require(arguments.length == 2, "language service test requires fake server and project paths");
 		var sourcePath = arguments[1] + "/Main.hx";
 		File.saveContent(sourcePath, "😀 value\n");
+		File.saveContent(arguments[1] + "/Other.hx", "old\n");
 		var syntaxes = new SyntaxRegistry();
 		BuiltinSyntax.install(syntaxes);
 		var documents = new DocumentManager(syntaxes), document = documents.open(sourcePath), manager = new ProcessManager(),
@@ -88,6 +91,37 @@ class LanguageServiceTestMain {
 		document.undo(selection);
 		require(document.buffer.line(0) == "😀serverx value", "workspace edit was not one undo transaction");
 
+		var symbols:Null<Array<LanguageSymbol>> = null, references:Null<Array<LanguageLocation>> = null;
+		require(client.requestSymbols(document, Sys.time(), value -> symbols = value), "symbols request was rejected");
+		require(client.requestReferences(document, new BufferPosition(0, 2), Sys.time(), value -> references = value), "references request was rejected");
+		pump(client, () -> symbols != null && references != null, 5);
+		require(symbols != null && symbols.length == 2 && symbols[1].name == "value" && symbols[1].detail == "Main / Int", "nested document symbols were not decoded");
+		require(references != null && references.length == 2 && references[1].path == arguments[1] + "/Other.hx", "references omitted unopened document");
+		var renamed:Null<LanguageEditResult> = null;
+		require(client.requestRename(document, new BufferPosition(0, 2), "multi", Sys.time(), value -> renamed = value), "rename request rejected");
+		pump(client, () -> renamed != null, 5);
+		require(renamed != null && renamed.applied && renamed.documents.length == 2, "multi-document rename failed");
+		var other = documents.open(arguments[1] + "/Other.hx");
+		require(document.buffer.line(0) == "😀multiserverx value" && other.buffer.line(0) == "otherld" && other.dirty,
+			"rename did not edit managed unsaved buffers");
+		document.undo(selection); other.undo(new BufferSelection());
+		require(document.buffer.line(0) == "😀serverx value" && other.buffer.line(0) == "old", "rename was not one undo transaction per document");
+		renamed = null;
+		require(client.requestRename(document, new BufferPosition(0, 2), "stale", Sys.time(), value -> renamed = value), "stale rename request rejected before response");
+		selection.setCursor(document.buffer, document.buffer.endPosition()); document.insert(selection, "pending");
+		pump(client, () -> renamed != null, 5);
+		require(renamed != null && !renamed.applied && document.buffer.text.indexOf("stale") < 0 && document.buffer.text.indexOf("pending") >= 0,
+			"delayed rename overwrote newer typing");
+		document.undo(selection);
+		for (name in ["overlap", "version-conflict"]) {
+			renamed = null;
+			require(client.requestRename(document, new BufferPosition(0, 2), name, Sys.time(), value -> renamed = value), "invalid rename request was not sent");
+			pump(client, () -> renamed != null, 5);
+			require(renamed != null && !renamed.applied && document.buffer.line(0) == "😀serverx value" && other.buffer.line(0) == "old",
+				"invalid rename batch partially applied: " + name);
+		}
+		Sys.println("PASS: symbols, unopened references, multi-file rename, per-document undo, delayed rename and invalid-batch rejection");
+
 		for (uri in client.diagnostics.keys()) client.diagnostics.set(uri, [anchored]);
 		document.buffer.replaceRange(selection, new BufferPosition(0, 0), new BufferPosition(0, 0), "x");
 		var pending = client.diagnosticsFor(document);
@@ -106,10 +140,14 @@ class LanguageServiceTestMain {
 		var minimal = new LanguageServiceClient(manager, documents, "python3", [arguments[0], "minimal"], arguments[1]);
 		minimal.start(Sys.time());
 		pump(minimal, () -> minimal.ready, 5.0);
-		require(!minimal.hoverSupported && !minimal.completionSupported && !minimal.definitionSupported && !minimal.signatureHelpSupported,
+		require(!minimal.hoverSupported && !minimal.completionSupported && !minimal.definitionSupported && !minimal.signatureHelpSupported && !minimal.symbolsSupported && !minimal.referencesSupported && !minimal.renameSupported,
 			"unsupported server capabilities were advertised by the client");
 		require(!minimal.requestHover(document, new BufferPosition(0, 0), Sys.time(), value -> {}),
 			"unsupported hover request was sent");
+		require(!minimal.requestSymbols(document, Sys.time(), value -> {}) &&
+			!minimal.requestReferences(document, new BufferPosition(0, 0), Sys.time(), value -> {}) &&
+			!minimal.requestRename(document, new BufferPosition(0, 0), "newName", Sys.time(), value -> {}), "unsupported language requests were sent");
+
 		minimal.stop(Sys.time());
 		pump(minimal, () -> minimal.status == "stopped", 5.0);
 		manager.shutdown();

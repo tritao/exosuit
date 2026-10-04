@@ -120,6 +120,7 @@ class LanguageControllerTestMain {
 		Platform.startHeadless();
 		var arguments = Sys.args(), sourcePath = arguments[1] + "/Controller.hx";
 		File.saveContent(sourcePath, "😀 value\n");
+		File.saveContent(arguments[1] + "/Other.hx", "old\n");
 		var syntaxes = new SyntaxRegistry();
 		BuiltinSyntax.install(syntaxes);
 		var workspace = new Workspace(syntaxes);
@@ -163,6 +164,24 @@ class LanguageControllerTestMain {
 			"signature help was not surfaced through an anchored popup");
 		require(commands.perform("language:go-to-definition", context), "definition command was not available");
 		for (_ in 0...32) controller.update(Sys.time());
+		require(commands.perform("language:document-symbols", context), "symbols command unavailable");
+		pump(controller, () -> root.commandView.active, 5);
+		root.commandView.setQuery("value");
+		require(root.commandView.results.length == 1 && root.commandView.results[0].label == "value", "symbol picker did not filter");
+		root.commandView.keyPressed(Platform.KEY_ENTER, 0);
+		require(!root.commandView.active && view.getSelection().hasSelection(), "symbol picker did not navigate");
+		require(commands.perform("language:find-references", context), "references command unavailable");
+		pump(controller, () -> root.commandView.active, 5);
+		require(root.commandView.results.length == 2 && root.commandView.selected == 0, "references picker lost closed-file result");
+		root.commandView.setQuery("Other.hx"); root.commandView.keyPressed(Platform.KEY_ENTER, 0);
+		require(context.requireDocument().path == arguments[1] + "/Other.hx", "references picker did not open selected file");
+		root.openDocument(document);
+		require(commands.perform("language:rename-symbol", context), "rename command unavailable");
+		root.commandView.setQuery("renamed"); root.commandView.keyPressed(Platform.KEY_ENTER, 0);
+		pump(controller, () -> document.buffer.text.indexOf("renamed") >= 0, 5);
+		document.undo(view.getSelection());
+		Sys.println("PASS: searchable symbols, reference navigation to closed files and rename prompt");
+
 		controller.stop();
 		pump(controller, () -> processes.activeCount() == 0, 2.0);
 		require(controller.start(), "service did not restart after graceful stop");

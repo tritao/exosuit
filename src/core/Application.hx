@@ -43,6 +43,7 @@ import controller.WorkbenchController;
 import process.ProcessManager;
 import controller.BuildController;
 import controller.LanguageController;
+import platform.Platform;
 import session.RecentProjects;
 
 class Application {
@@ -125,6 +126,11 @@ class Application {
 		var languageCommand = config.LanguageServerCommand.current(this.settings.current);
 		language = new LanguageController(workspace, root, context, commands, processes, languageCommand[0], reportError,
 			languageCommand.slice(1), this.capabilities.supports(LanguageServices), () -> this.settings.current);
+		keymap.add(Platform.KEY_G, Platform.MOD_CTRL | Platform.MOD_SHIFT, ["language:document-symbols"]);
+		keymap.add(Platform.KEY_H, Platform.MOD_CTRL | Platform.MOD_SHIFT, ["language:find-references"]);
+		keymap.add(Platform.KEY_H, Platform.MOD_CTRL | Platform.MOD_ALT, ["language:rename-symbol"]);
+		keymap.add(Platform.KEY_SPACE, Platform.MOD_CTRL, ["language:complete"]);
+
 		root.configureWelcomeActions({
 			recentProjects: this.recentProjects.paths,
 			newFile: function() { newDocument(); },

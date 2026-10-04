@@ -27,10 +27,11 @@ leave other folders' sessions running.
 
 - [ ] Completion list UI with filtering, accept and dismiss. Hover and
   signature help popups (M9.2 anchoring).
-- [ ] Gate document symbols, find references and rename on negotiated
+- [x] Gate document symbols, find references and rename on negotiated
   capabilities. Show references in a navigable list. Apply rename through the
   existing revision-checked transactional workspace edits.
-- [ ] Bridge these commands into the palette with shortcuts.
+- [ ] Bridge these commands into the palette with shortcuts. Symbols, references,
+  rename and completion have defaults; remaining language shortcuts are pending.
 
 Acceptance: the fake-server tests are extended to symbols, references and
 rename, including a stale-revision rename that is rejected. The real Haxeon
