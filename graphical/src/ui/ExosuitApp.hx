@@ -424,6 +424,7 @@ class ExosuitApp implements DesktopUiApplication {
 	 */
 	function pumpApplication():Void {
 		application.update();
+		ui.buildContext.environment.scrollbarVisibility = host.scrollbarVisibility;
 		if (!dock.isOpen("terminal")) closePanelTerminals();
 		for (terminal in host.allTerminalTabs()) {
 			if (terminal.disposed) continue;

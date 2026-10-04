@@ -20,6 +20,10 @@ class SettingsCodec {
 			else if (key == "editor.fontFallbacks") target.fontFallbackPaths = [for (path in parseList(value)) ApplicationPaths.relativeToFile(path, source)];
 			else if (key == "editor.fontSize") target.fontSize = parseBoundedInt(value, 6, 96, key, source, lineNumber, diagnostics);
 			else if (key == "workbench.sidebarWidth") target.sidebarWidth = parseBoundedInt(value, 120, 600, key, source, lineNumber, diagnostics);
+			else if (key == "workbench.scrollbarVisibility") {
+				if (value == "auto" || value == "always" || value == "hidden") target.scrollbarVisibility = value;
+				else diagnostics.push(source + ":" + (lineNumber + 1) + ": scrollbarVisibility must be auto, always or hidden");
+			}
 			else if (key == "editor.tabWidth") target.tabWidth = parseBoundedInt(value, 1, 16, key, source, lineNumber, diagnostics);
 			else if (key == "editor.insertSpaces") target.insertSpaces = parseBool(value, key, source, lineNumber, diagnostics);
 			else if (key == "editor.scroll_animation_type") {

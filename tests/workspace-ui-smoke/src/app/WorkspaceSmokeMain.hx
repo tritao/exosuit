@@ -21,7 +21,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	var languageOriginal = "";
 
 	public function new(context:nativekit.ui.host.DesktopUiHostContext, path:String, phase:String) {
-		super(context.fonts, null, context, phase == "explorer-preview" ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-scroll" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
+		super(context.fonts, null, context, phase == "scrollbar-visibility" ? path : phase == "explorer-preview" ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-scroll" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
 			null, null, null, WorkspaceSmokeMain.createTerminal);
 		this.phase = phase;
 		this.path = path;
@@ -37,6 +37,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 
 	override public function submit(frame:LayoutFrame):nativekit.ui.core.RenderNode {
 		frames++;
+		if (phase == "scrollbar-visibility") return scrollbarStep(frame);
 		if (phase == "language-folder") languageStep();
 		if (phase == "explorer-preview") explorerStep();
 		if (phase == "editor-scroll") {
@@ -164,6 +165,40 @@ class WorkspaceSmokeApp extends ExosuitApp {
 			}
 		}
 		return super.submit(frame);
+	}
+	function scrollbarStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+		frame.deltaSeconds = frames == 5 ? 0.49 : frames == 6 ? 0.1 : frames == 7 ? 0.2 : 0;
+		var view = host.activeView();
+		if (view == null) throw "scrollbar acceptance missing editor";
+		if (frames == 3) {
+			var scroll = node("editor-scroll:" + view.document.id);
+			var track = scroll.children[1].globalBounds();
+			var color = scroll.children[1].children[0].layout.style.background;
+			require(color != null && color.alpha == 0, "idle editor scrollbar is visible");
+			ui.pointerMove(track.x + track.width / 2, track.y + track.height / 2);
+		}
+		if (frames == 4) ui.pointerMove(0, 0);
+		if (frames == 8) {
+			var bounds = node("editor-scroll:" + view.document.id).globalBounds();
+			ui.scroll(bounds.x + 40, bounds.y + 40, 0, 50);
+		}
+		if (frames == 9 || frames == 10 || frames == 11) {
+			var settings = application.settings.current.copy();
+			settings.scrollbarVisibility = frames == 9 ? "always" : frames == 10 ? "hidden" : "auto";
+			host.applySettings(settings);
+		}
+		var result = super.submit(frame);
+		var scroll = node("editor-scroll:" + view.document.id);
+		if (frames == 10) require(scroll.children.length == 1, "hidden policy retains scrollbar or hit target");
+		else if (frames >= 3) {
+			var color = scroll.children[1].children[0].layout.style.background;
+			if (color == null) throw "scrollbar has no paint";
+			if (frames == 3 || frames == 4 || frames == 5 || frames == 8 || frames == 9) require(color.alpha == 1, "hover/scroll/always did not reveal scrollbar");
+			if (frames == 6) require(color.alpha > 0 && color.alpha < 1, "scrollbar did not fade");
+			if (frames == 7 || frames == 11) require(color.alpha == 0, "idle scrollbar or restored auto did not hide");
+		}
+		if (frames == 11) trace("PASS: real editor scrollbar idle, edge hover, delayed fade, wheel reveal and live visibility settings");
+		return result;
 	}
 	function node(key:String):nativekit.ui.core.RenderNode {
 		var root = ui.root;
@@ -448,7 +483,7 @@ class WorkspaceSmokeMain {
 		options.title = "exosuit workspace acceptance";
 		options.width = 900; options.height = 600;
 		options.captureDirectory = args[1];
-		options.frameLimit = args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
+		options.frameLimit = args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
 		var status = DesktopUiHost.run(options, context -> new WorkspaceSmokeApp(context, args[0], args[2]));
 		platform.Native.shutdown();
 		return status;

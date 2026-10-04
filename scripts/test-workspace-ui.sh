@@ -53,6 +53,7 @@ run_phase sidebar-preview sidebar-preview "$fixture/sidebar-project/Main.hx"
 run_phase sidebar-stale-preview sidebar-stale-preview "$fixture/sidebar-project/Main.hx"
 
 run_phase editor-scroll editor-scroll "$fixture/sidebar-project/Main.hx"
+run_phase scrollbar-visibility scrollbar-visibility "$fixture/sidebar-project/Main.hx"
 
 printf 'old\n' > "$fixture/sidebar-project/Other.hx"
 mkdir -p "$fixture/state-language-folder"

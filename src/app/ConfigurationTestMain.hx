@@ -80,6 +80,16 @@ class ConfigurationTestMain {
 		require(service.reload() && service.current.scrollAnimationType == "smooth" && service.current.scrollAnimationDuration == 0.12,
 			"removed scroll override did not restore defaults");
 
+		for (mode in ["auto", "always", "hidden"]) {
+			File.saveContent(projectPath, "version=1\nworkbench.scrollbarVisibility=" + mode + "\n");
+			require(service.reload() && service.current.scrollbarVisibility == mode && service.current.copy().scrollbarVisibility == mode,
+				"scrollbar visibility setting or copy failed");
+		}
+		File.saveContent(projectPath, "version=1\nworkbench.scrollbarVisibility=invalid\n");
+		require(!service.reload() && service.current.scrollbarVisibility == "hidden", "invalid scrollbar policy replaced last good settings");
+		File.saveContent(projectPath, "version=1\neditor.fontSize=19\n");
+		require(service.reload() && service.current.scrollbarVisibility == "auto", "removed scrollbar policy did not restore auto");
+
 		File.saveContent(projectPath, 'version=1\nplugins.haxeon.enabled=false\nplugins.haxeon.verbose=true\nplugins.haxeon.command=["/server with spaces", "--stdio", "", "comma,arg"]\n');
 		require(service.reload() && !service.current.haxeonEnabled && service.current.haxeonVerbose && service.current.haxeonCommand.length == 4,
 			"typed language configuration failed");

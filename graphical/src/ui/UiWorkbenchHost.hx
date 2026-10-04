@@ -139,6 +139,12 @@ class UiWorkbenchHost implements WorkbenchHost {
 	public var searchErrorCount(default, null):Int = 0;
 
 	var scrollSettings:Settings;
+	public var scrollbarVisibility(get, never):Int;
+	function get_scrollbarVisibility():Int return switch scrollSettings.scrollbarVisibility {
+		case "always": nativekit.ui.widgets.scroll.ScrollbarVisibility.Always;
+		case "hidden": nativekit.ui.widgets.scroll.ScrollbarVisibility.Hidden;
+		default: nativekit.ui.widgets.scroll.ScrollbarVisibility.Auto;
+	};
 
 	public function new(theme:Theme, focus:FocusManager, workspace:Workspace, settings:Settings, requestFrame:Void->Void,
 			dockActions:DockActions) {

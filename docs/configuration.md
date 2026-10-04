@@ -33,6 +33,7 @@ plugins.haxeon.enabled=true
 plugins.haxeon.command=[]
 plugins.haxeon.verbose=false
 workbench.sidebarWidth=220
+workbench.scrollbarVisibility=auto
 files.exclude=.git,.hg,.svn,.devstack,build,out,node_modules
 search.caseSensitive=false
 search.wholeWord=false
@@ -93,3 +94,13 @@ Double-click a file or its tab to keep it open. Editing, moving, or reordering
 a preview also keeps it open; undoing an edit does not make it temporary again.
 Folder labels and disclosure arrows expand or collapse on a single click.
 A double-click on a folder label toggles it once. Right-click selects a tree item and opens its menu without previewing it.
+
+Graphical scrollbar visibility is shared by UIKit scroll views.
+`workbench.scrollbarVisibility=auto` (default) keeps the bar transparent until
+its narrow edge control is hovered or the content is scrolled. It remains
+visible during hover, dragging, or keyboard focus, then waits 500 ms and fades
+over 200 ms. UIKit's reduced-motion preference skips the fade.
+Use `always` to keep overflowing scrollbars visible, or `hidden` to remove both
+the bar and its pointer target while retaining wheel and keyboard scrolling.
+Changes apply live across scrollable panels. Bars overlay content without
+changing viewport size.

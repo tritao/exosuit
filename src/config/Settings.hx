@@ -11,6 +11,7 @@ class Settings {
 	];
 	public var fontSize:Int = 15;
 	public var sidebarWidth:Int = 220;
+	public var scrollbarVisibility:String = "auto";
 	public var tabWidth:Int = 4;
 	public var insertSpaces:Bool = true;
 	public var scrollAnimationType:String = "smooth";
@@ -53,6 +54,7 @@ class Settings {
 		result.fontFallbackPaths = copyStrings(fontFallbackPaths);
 		result.fontSize = fontSize;
 		result.sidebarWidth = sidebarWidth;
+		result.scrollbarVisibility = scrollbarVisibility;
 		result.tabWidth = tabWidth;
 		result.insertSpaces = insertSpaces;
 		result.scrollAnimationType = scrollAnimationType;

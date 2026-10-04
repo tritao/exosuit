@@ -2,6 +2,37 @@
 
 Last updated: 2026-10-04.
 
+## Shared automatic scrollbar visibility, 2026-10-04
+
+- UIKit ScrollView owns a persistent visibility controller and retires its
+  scheduler registration on unmount or controller replacement. Bars are
+  transparent while idle; only the existing narrow overlay edge target remains.
+  Hover and scroll reveal immediately; dragging and keyboard focus keep them
+  visible. Leaving waits 500 ms, then fades for 200 ms. Re-entry cancels the
+  fade. Pointer focus during a drag does not keep the bar visible forever.
+- Reveal/fade changes persistent widget state so retained paint caches see
+  alpha changes; viewport and content geometry do not shift. No text copies,
+  per-panel timers, native ABI additions, or separate visibility rules in the
+  editor and Explorer. Reduced motion retains the delay and skips interpolation.
+- `workbench.scrollbarVisibility=auto|always|hidden` is validated, copied and
+  reloaded live into UIKit's shared environment. ScrollView can override the
+  policy locally; its existing showScrollbar=false opt-out remains supported.
+  Hidden removes the control/hit target, preserving wheel/keyboard scrolling.
+  This applies to existing vertical ScrollView bars; horizontal bars and
+  terminal scrollback controls are separate existing scope.
+- Toolkit regressions pass: deterministic timing, hover interruption, drag
+  hold, reduced motion, policies, actual hit routing/paint alpha and unmount.
+  Smooth-scroll lifetime checks now account for the separate fade animation
+  and still require all registrations to retire. Retained-rendering checks
+  verify thumb paint revisions change on reveal and fade. UIKit is committed
+  as `717261eba`, excluding concurrent resize and icon work.
+- App gates pass in an isolated HEAD snapshot with this owned change: full
+  headless suite (including setting validation/copy/reset), native workspace
+  smoke (real editor hover, delay/fade, wheel reveal and live policies), desktop
+  build, and wasm32/wasm-gc browser acceptance. Concurrent icon and resize
+  changes and parent dependency pins remain untouched.
+- Next: completion filtering and remaining language shortcuts in M10.2.
+
 ## Explorer folder single-click, 2026-10-04
 
 - Folder labels now expand/collapse immediately on a single primary click.
