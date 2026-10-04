@@ -80,10 +80,16 @@ class CommandBridge {
 			case Platform.KEY_V: UiKey.V;
 			case Platform.KEY_X: UiKey.X;
 			case Platform.KEY_SPACE: UiKey.Space;
-			// KEY_W/P/F/H/K/J/SLASH/D/G/B have no UiKey counterpart today; a
-			// binding on one of those keys is simply not offered as a
-			// uikit Shortcut (the command itself is still bridged and
-			// reachable from the palette).
+			case Platform.KEY_SLASH: UiKey.Slash;
+			case Platform.KEY_W: UiKey.W;
+			case Platform.KEY_P: UiKey.P;
+			case Platform.KEY_F: UiKey.F;
+			case Platform.KEY_H: UiKey.H;
+			case Platform.KEY_K: UiKey.K;
+			case Platform.KEY_J: UiKey.J;
+			case Platform.KEY_D: UiKey.D;
+			case Platform.KEY_G: UiKey.G;
+			case Platform.KEY_B: UiKey.B;
 			default: -1;
 		};
 

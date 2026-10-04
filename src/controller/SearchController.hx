@@ -38,6 +38,7 @@ class SearchController {
 	final effectiveSettings:Void->Settings;
 	final reportError:(String, String)->Void;
 	final reportInformation:String->Void;
+	var observedWorkspaceRevisions:Map<Int, Int> = [];
 	var documentMatchIndex:Int = -1;
 	var documentSearchDocument:Null<Document>;
 	var documentSearchRevision:Int = -1;
@@ -64,8 +65,21 @@ class SearchController {
 		if (documentSearchQuery.length > 0) ensureDocumentSearchFresh();
 	}
 
-	public function update(now:Float):Void
+	public function update(now:Float):Void {
+		if (workspaceSearch.query.length > 0) {
+			var changed = false;
+			for (document in workspace.documents.documents) {
+				var previous = observedWorkspaceRevisions.get(document.id);
+				if (previous != null ? previous != document.buffer.stateId : document.dirty) changed = true;
+				observedWorkspaceRevisions.set(document.id, document.buffer.stateId);
+			}
+			if (changed) {
+				replacementPreview = null;
+				workspaceSearch.request(workspaceSearch.query, options, effectiveSettings().searchMaxResults);
+			}
+		}
 		workspaceSearch.update(now);
+	}
 
 	public function applySettings(value:Settings):Void {
 		options.caseSensitive = value.searchCaseSensitive;
@@ -95,6 +109,8 @@ class SearchController {
 		}));
 	}
 
+	public function clearReplacementPreview():Void replacementPreview = null;
+
 	public function previewWorkspaceReplacement(replacement:String):Bool {
 		try {
 			replacementPreview = workspaceReplacement.preview(workspaceSearch, replacement);
@@ -108,6 +124,11 @@ class SearchController {
 	public function applyWorkspaceReplacement():Bool {
 		var preview = replacementPreview;
 		if (preview == null) return false;
+		if (preview.searchGeneration != workspaceSearch.generation) {
+			replacementPreview = null;
+			reportError("search", "Search changed after preview; preview again before applying.");
+			return false;
+		}
 		try {
 			var result = workspaceReplacement.apply(preview);
 			replacementResult = result;

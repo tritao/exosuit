@@ -68,20 +68,22 @@ backgrounds follow the shared primary caret. Multiple selections/carets render,
 and multi-caret insertion, cut/paste and deletion use buffer transactions.
 Keyboard navigation moves all carets through UIKit's shaped layout.
 
-- Strict changed-row invalidation remains pending. Both large fixtures now open:
-  10 MiB multiline typing reaches 44.3 ms p95 on a repeat run, with an
-  earlier 62.6 ms run under workstation load. The 1 MiB single line improves
-  to 313.7 ms p95 but still exceeds the 50 ms budget.
+- M9.1's accepted Linux typing runs measured 37.79 ms p95 for small Unicode,
+  39.47 ms for a 1 MiB single line and 30.96 ms for 10 MiB multiline text.
+  Unchanged shaped rows retain their identity; see the execution ledger for scope.
 - Primary caret/selection changes now flow between the widget and model, including
   command-driven placement. Language popups follow the visible caret and dismiss
   when scrolling clips it or the active document changes.
-- Workspace search results are retained by the host but have no graphical panel.
+- Files and Search share a sidebar with persisted mode, visibility and separate
+  widths. Search provides virtualized results, navigation and transactional
+  replacement previews, and refreshes after open-document edits.
 - Documents and terminals share editor tab bars across DockWorkspace splits.
   Pane focus, tab movement and pane closure are available through commands;
   sessions preserve pane membership, selections, scroll and terminal profiles.
-- Line wrapping remains a gap. Editor, tab and file-tree command menus support right-click, Shift+F10 and the Menu key.
-- Some legacy shortcut keys lack a UIKit key mapping; their bridged commands
-  are still available from the palette.
+- Wrapped text shares its shaped geometry with the gutter and selection. Editor,
+  tab and file-tree command menus support right-click, Shift+F10 and the Menu key.
+- Smooth scrolling is the next M9 task. Physical IME and non-Linux acceptance
+  remain pending.
 
 Both compiler modes, release packaging and real-window automation pass the
 claimed Linux scope in [M8](docs/roadmap/08-uikit-baseline.md). See the

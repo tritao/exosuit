@@ -20,7 +20,7 @@ project="$root_dir/tests/workspace-ui-smoke/haxeon.json"
 run_phase() {
     PRAGTICAL_PORTABLE="$fixture/state-$2" xvfb-run -a \
         "$haxeon_root/scripts/haxeon" run --project "$project" "${compiler_mode[@]}" \
-        -- "$fixture/project/Main.hx" "$fixture/$1" "$1"
+        -- "${3:-$fixture/project/Main.hx}" "$fixture/$1" "$1"
 }
 # Distinct host processes exercise actual shutdown persistence and startup recovery.
 run_phase write restart
@@ -35,3 +35,19 @@ printf 'version=999\ninvalid session\n' > "$fixture/state-corrupt/session.conf"
 printf 'version=3\nlayout=P\teditor\nlayout=D\tdock\t1\t{broken\nlayout=V\teditor\t1\t0\t3\t0\t0\tP\t%s\n' \
     "$fixture/project/Main.hx" > "$fixture/state-invalid-dock/session.conf"
 for phase in legacy corrupt missing invalid-dock; do run_phase "$phase" "$phase"; done
+
+mkdir -p "$fixture/sidebar-project" "$fixture/state-sidebar" "$fixture/state-sidebar-search"
+python3 - "$fixture/sidebar-project/Main.hx" <<'PYFIXTURE'
+import sys
+with open(sys.argv[1], "w") as source:
+    source.write("needle match\n" * 100)
+from pathlib import Path
+for index in range(24):
+    Path(sys.argv[1]).with_name(f"tree-row-{index:02d}.txt").write_text("")
+PYFIXTURE
+run_phase sidebar-write sidebar "$fixture/sidebar-project/Main.hx"
+run_phase sidebar-read sidebar "$fixture/sidebar-project/Main.hx"
+run_phase sidebar-hidden-read sidebar "$fixture/sidebar-project/Main.hx"
+run_phase sidebar-search sidebar-search "$fixture/sidebar-project/Main.hx"
+run_phase sidebar-preview sidebar-preview "$fixture/sidebar-project/Main.hx"
+run_phase sidebar-stale-preview sidebar-stale-preview "$fixture/sidebar-project/Main.hx"

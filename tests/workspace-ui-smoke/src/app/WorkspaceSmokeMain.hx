@@ -14,12 +14,14 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	var frames = 0;
 	var oldColumns = 0;
 	var paletteCommand = "";
+	var sidebarWidth = 0.0;
 
 	public function new(context:nativekit.ui.host.DesktopUiHostContext, path:String, phase:String) {
-		super(context.fonts, null, context, phase == "write" || phase == "keyboard" ? path : null,
+		super(context.fonts, null, context, phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
 			null, null, null, WorkspaceSmokeMain.createTerminal);
 		this.phase = phase;
 		this.path = path;
+		if (phase == "sidebar-write" || phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) application.openArgument(path.substring(0, path.lastIndexOf("/")));
 	}
 
 	function require(value:Bool, message:String):Void { if (!value) throw message; }
@@ -31,6 +33,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 
 	override public function submit(frame:LayoutFrame):nativekit.ui.core.RenderNode {
 		frames++;
+		if (StringTools.startsWith(phase, "sidebar-")) sidebarStep();
 		if (phase == "write") {
 			if (frames == 3) {
 				var first = host.activeView();
@@ -134,6 +137,141 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		}
 		return super.submit(frame);
 	}
+	function node(key:String):nativekit.ui.core.RenderNode {
+		var root = ui.root;
+		if (root == null) throw "sidebar has no resolved UI";
+		var found = find(root, key);
+		if (found == null) throw "sidebar widget missing: " + key;
+		return found;
+	}
+	static function find(root:nativekit.ui.core.RenderNode, key:String):Null<nativekit.ui.core.RenderNode> {
+		if (root.styleKey == key) return root;
+		for (child in root.children) { var found = find(child, key); if (found != null) return found; }
+		return null;
+	}
+	static function findTree(root:nativekit.ui.core.RenderNode):Null<nativekit.ui.core.RenderNode> {
+		if (root.semantics != null && root.semantics.role == nativekit.ui.semantics.AccessibilityRole.Tree) return root;
+		for (child in root.children) { var found = findTree(child); if (found != null) return found; }
+		return null;
+	}
+	function click(key:String):Void {
+		var bounds = node(key).globalBounds();
+		ui.pointerDown(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+		ui.pointerUp(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+	}
+	function sidebarStep():Void {
+		if (phase == "sidebar-write") {
+			if (frames == 3) ui.key(UiEventKind.KeyDown, UiKey.F, UiModifier.Control | UiModifier.Shift);
+			if (frames == 4) { require(sidebar.activeId == "search", "search shortcut did not select mode"); click("files"); }
+			if (frames == 5) {
+				require(sidebar.activeId == "files", "Files tab click did not select mode");
+				sidebarWidth = node("sidebar-modes").globalBounds().width;
+				var tree = findTree(ui.root);
+				require(tree != null, "Files tree missing");
+				var bounds = tree.globalBounds();
+				ui.scroll(bounds.x + 20, bounds.y + 40, 0, 180);
+				resizeSidebar(30);
+			}
+			if (frames == 7) {
+				require(filesScroll.offsetY > 0, "wheel did not reach Files tree");
+				var files = sidebar.find("files");
+				require(files != null && files.width > sidebarWidth + 20, "Files divider width was not retained");
+				click("search");
+			}
+			if (frames == 8) {
+				require(sidebar.activeId == "search", "Search tab click failed");
+				require(Math.abs(node("sidebar-modes").globalBounds().width - 320) < 1, "mode did not restore its own width");
+				resizeSidebar(40);
+			}
+			if (frames == 10) {
+				var search = sidebar.find("search");
+				require(search != null && search.width > 350, "Search divider width lost");
+				sys.io.File.saveContent(config.ConfigurationPaths.stateRoot() + "/expected-sidebar.txt", sidebar.encode());
+				trace("PASS: sidebar commands, pointer tabs and independent dragged widths");
+			}
+		} else if ((phase == "sidebar-read" || phase == "sidebar-hidden-read") && frames == 5) {
+			require(sidebar.activeId == "search", "restart lost sidebar mode");
+			require(sidebar.encode() == sys.io.File.getContent(config.ConfigurationPaths.stateRoot() + "/expected-sidebar.txt"),
+				"restart lost sidebar visibility or mode widths");
+			if (phase == "sidebar-read") {
+				require(sidebar.visible, "restart hid sidebar");
+				application.commands.perform("workbench:toggle-sidebar", application.context);
+				host.sessionLines();
+				sys.io.File.saveContent(config.ConfigurationPaths.stateRoot() + "/expected-sidebar.txt", sidebar.encode());
+			} else { require(!sidebar.visible, "hidden sidebar reopened"); node("rail-search"); }
+			trace("PASS: " + phase + " restores selected mode, visibility and per-mode widths");
+		} else if (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) {
+			if (frames == 3) ui.key(UiEventKind.KeyDown, UiKey.F, UiModifier.Control | UiModifier.Shift);
+			if (frames == 4) ui.text(UiEventKind.TextInput, "needle");
+			if (frames == 5) {
+				application.search.workspaceSearch.flush();
+				for (_ in 0...100) if (!application.search.workspaceSearch.complete) application.workspace.jobs.update(32);
+			}
+			if (frames == 6) {
+				require(host.workspaceSearchResults.length == 100, "sidebar search lost cooperative results");
+				var bounds = node("workspace-search-result-0").globalBounds();
+				ui.scroll(bounds.x + 20, bounds.y + 10, 0, 180);
+			}
+			if (frames == 8) {
+				require(searchPanel.scroll.offsetY > 0, "wheel did not reach search results");
+				searchPanel.scroll.jumpTo(0, 0);
+			}
+			if (frames == 9) click("workspace-search-result-0");
+			if (frames == 10) {
+				var view = host.activeView();
+				if (view == null) throw "search navigation lost document";
+				require(view.cursorLine() == 0, "result click did not navigate");
+				view.restoreCursor(0, 0); view.textInput("new first line\n");
+			}
+			if (frames == 12) {
+				application.search.workspaceSearch.flush();
+				for (_ in 0...100) if (!application.search.workspaceSearch.complete) application.workspace.jobs.update(32);
+			}
+			if (frames == 13) {
+				require(host.workspaceSearchResults.length == 100 && host.workspaceSearchResults[0].line == 1,
+					"search results did not repair after edit");
+				click("workspace-search-result-0");
+			}
+			if (frames == 14) {
+				var view = host.activeView();
+				require(view != null && view.cursorLine() == 1, "updated search result navigated to stale position");
+				var input = node("workspace-search-replacement"); ui.focusWidget(input.id);
+				ui.text(UiEventKind.TextInput, "replacement");
+			}
+			if (frames == 15) click("workspace-search-preview");
+			if (frames == 17) {
+				var preview = application.search.replacementPreview;
+				require(preview != null && preview.matchCount == 100 && searchPanel.previewVisible, "replacement preview missing");
+				var view = host.activeView();
+				require(view != null && view.document.buffer.text.indexOf("needle") >= 0, "preview changed text before apply");
+				if (phase == "sidebar-search") click("workspace-search-apply");
+				if (phase == "sidebar-stale-preview") {
+					searchPanel.search("match"); application.search.workspaceSearch.flush();
+					for (_ in 0...100) if (!application.search.workspaceSearch.complete) application.workspace.jobs.update(32);
+					require(searchPanel.preview("new proposal"), "stale button fixture could not create newer proposal");
+					click("workspace-search-apply");
+				}
+			}
+			if (frames == 19) {
+				var view = host.activeView();
+				if (phase == "sidebar-stale-preview") {
+					require(view != null && view.document.buffer.text.indexOf("needle match") >= 0 &&
+						view.document.buffer.text.indexOf("new proposal") < 0, "stale Apply button applied a different proposal");
+					trace("PASS: stale replacement UI cannot apply a newer proposal");
+					return;
+				}
+				require(view != null && view.document.buffer.text.indexOf("needle") < 0 &&
+					view.document.buffer.text.indexOf("replacement") >= 0, "preview apply did not use transactional replacement");
+				trace("PASS: search input, virtualized wheel, result clicks, edit repair and preview/apply");
+			}
+		}
+	}
+	function resizeSidebar(delta:Float):Void {
+		var bounds = node("sidebar-modes").globalBounds();
+		var x = bounds.x + bounds.width + 4, y = bounds.y + bounds.height / 2;
+		ui.pointerDown(x, y, 0); ui.pointerMove(x + delta, y); ui.pointerUp(x + delta, y, 0);
+	}
+
 }
 
 class WorkspaceSmokeMain {
@@ -150,7 +288,7 @@ class WorkspaceSmokeMain {
 		options.title = "exosuit workspace acceptance";
 		options.width = 900; options.height = 600;
 		options.captureDirectory = args[1];
-		options.frameLimit = args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
+		options.frameLimit = args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
 		var status = DesktopUiHost.run(options, context -> new WorkspaceSmokeApp(context, args[0], args[2]));
 		platform.Native.shutdown();
 		return status;

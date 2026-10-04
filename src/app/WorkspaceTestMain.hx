@@ -271,6 +271,31 @@ class WorkspaceTestMain {
 		renderer.begin();
 		root.draw();
 		renderer.present();
+		var refreshDocument = application.documents.open(arguments[0] + "/alpha.txt");
+		refreshDocument.buffer.replaceAllText("unique_sidebar_search\n", null);
+		application.workspaceSearch.request("unique_sidebar_search", application.searchOptions, 100);
+		application.search.update(Sys.time());
+		application.workspaceSearch.flush(); finishSearch(application);
+		require(application.workspaceSearch.results.length == 1 && application.workspaceSearch.results[0].line == 0,
+			"search refresh fixture did not find dirty content");
+		require(application.search.previewWorkspaceReplacement("replacement"), "search preview fixture failed");
+		application.workspaceSearch.request("other query", application.searchOptions, 100);
+		require(!application.search.applyWorkspaceReplacement() && refreshDocument.buffer.text == "unique_sidebar_search\n",
+			"replacement applied a preview from another search generation");
+		application.workspaceSearch.request("unique_sidebar_search", application.searchOptions, 100);
+		application.workspaceSearch.flush(); finishSearch(application);
+		require(application.search.previewWorkspaceReplacement("replacement"), "second search preview fixture failed");
+		refreshDocument.buffer.replaceAllText("new line\nunique_sidebar_search\n", null);
+		application.search.update(Sys.time());
+		require(application.search.replacementPreview == null && !application.workspaceSearch.complete,
+			"document edit did not invalidate preview and schedule fresh search");
+		application.workspaceSearch.flush(); finishSearch(application);
+		require(application.workspaceSearch.results.length == 1 && application.workspaceSearch.results[0].line == 1,
+			"search refresh used stale line positions after edit");
+		root.searchActivate();
+		var refreshedView = root.activeLeaf.tabs.activeView;
+		require(refreshedView != null && refreshedView.cursorLine() == 1,
+			"refreshed result did not navigate to edited position");
 		application.shutdown();
 		renderer.destroy();
 		Platform.require(Native.window_destroy(window), "destroy workspace test window");

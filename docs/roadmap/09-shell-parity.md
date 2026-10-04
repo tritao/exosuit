@@ -41,13 +41,13 @@ acceptance are separate follow-ons.
 
 ## M9.3 — Sidebar modes and search
 
-- [ ] Port the Pragtical shared sidebar idea onto DockWorkspace: a
+- [x] Port the Pragtical shared sidebar idea onto DockWorkspace: a
   registerable sidebar host with modes (`register(mode, provider, {label,
   order, visible, width})`), lazy providers, a tab strip, and persisted mode,
   visibility and per-mode width. Files becomes the first mode.
-- [ ] Add a Search mode that renders `workspaceSearchResults`, with
+- [x] Add a Search mode that renders `workspaceSearchResults`, with
   navigation and replace preview. Workbench registers its own mode in M14.
-- [ ] Mouse-wheel scrolling must reach scrollable panels; this mirrors the
+- [x] Mouse-wheel scrolling must reach scrollable panels; this mirrors the
   Pragtical fix.
 
 Acceptance: modes switch by command and click. Restart restores mode and width.

@@ -128,12 +128,15 @@ class UiWorkbenchHost implements WorkbenchHost {
 	var languageSignature:Null<SignatureHelp>;
 	final languageCapture:KeyCaptureView;
 
-	var workspaceSearchQuery:String = "";
-	var workspaceSearchResults:Array<SearchMatch> = [];
+	public var activateSearch:Void->Void = function() {};
+	public var captureSidebar:Null<Void->String>;
+	public var restoreSidebar:Null<Array<String>->Void>;
+	public var workspaceSearchQuery(default, null):String = "";
+	public var workspaceSearchResults(default, null):Array<SearchMatch> = [];
 	var searchSelected:Int = -1;
-	var searchComplete:Bool = false;
-	var searchCapped:Bool = false;
-	var searchErrorCount:Int = 0;
+	public var searchComplete(default, null):Bool = false;
+	public var searchCapped(default, null):Bool = false;
+	public var searchErrorCount(default, null):Int = 0;
 
 	public function new(theme:Theme, focus:FocusManager, workspace:Workspace, settings:Settings, requestFrame:Void->Void,
 			dockActions:DockActions) {
@@ -418,13 +421,18 @@ class UiWorkbenchHost implements WorkbenchHost {
 
 	public function searchActivate():Bool {
 		if (searchSelected < 0 || searchSelected >= workspaceSearchResults.length) return true;
-		var match = workspaceSearchResults[searchSelected];
-		var view = openDocument(workspace.documents.open(match.path));
-		var document = view.getDocument();
-		if (document != null && DocumentSearch.valid(document, match)) {
-			view.selectRange(new BufferPosition(match.line, match.column), new BufferPosition(match.line, match.column + match.length));
-			view.cursorChanged();
-		}
+		return activateSearchResult(searchSelected);
+	}
+
+	public function activateSearchResult(index:Int):Bool {
+		if (index < 0 || index >= workspaceSearchResults.length) return false;
+		searchSelected = index;
+		var match = workspaceSearchResults[index];
+		var document = workspace.documents.open(match.path);
+		if (!DocumentSearch.valid(document, match)) return false;
+		var view = openDocument(document);
+		view.selectRange(new BufferPosition(match.line, match.column), new BufferPosition(match.line, match.column + match.length));
+		view.cursorChanged(); requestFrame();
 		return true;
 	}
 
@@ -469,8 +477,10 @@ class UiWorkbenchHost implements WorkbenchHost {
 	}
 
 	public function showSearchResults(query:String, results:Array<SearchMatch>):Void {
+		if (workspaceSearchQuery != query) activateSearch();
 		workspaceSearchQuery = query;
-		workspaceSearchResults = results.copy();
+		workspaceSearchResults = results;
+		requestFrame();
 		searchSelected = results.length > 0 ? 0 : -1;
 	}
 
@@ -478,6 +488,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		searchComplete = complete;
 		searchCapped = capped;
 		searchErrorCount = errorCount;
+		requestFrame();
 	}
 
 	public function documentsLostByClosingActiveTab():Array<Document> {
@@ -530,6 +541,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		var result:Array<String> = [];
 		result.push("D\tdock\t1\t" + dockActions.model.snapshotJson());
 		result.push("Q\t" + activePane.id);
+		if (captureSidebar != null) result.push(captureSidebar());
 		for (index in 0...panelTerminals.length) {
 			var terminal = panelTerminals[index];
 			if (!terminal.disposed && terminal.cwd.indexOf("\t") < 0 && terminal.cwd.indexOf("\n") < 0)
@@ -647,6 +659,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		for (terminal in retainedTerminals) terminal.dispose();
 		dockActions.model.setDefaultLayout(fallbackDockLayout(defaultDockLayout, panes[0].id));
 		if (snapshot != null) dockActions.model.restoreJson(snapshot);
+		if (restoreSidebar != null) restoreSidebar(lines);
 		// Invalid/older layouts still reopen every resolved pane and document.
 		for (pane in panes) if (!dockActions.model.isOpen(pane.id)) dockActions.model.open(pane.id);
 		var requested = selectedPane == null ? null : paneById(selectedPane);

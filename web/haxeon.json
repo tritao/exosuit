@@ -204,7 +204,8 @@
     "../graphical/src/ui/UiEditorTab.hx",
     "../graphical/src/ui/UiEditorTabs.hx",
     "../graphical/src/ui/UiTerminalTab.hx",
-    "../graphical/src/ui/UiWorkbenchHost.hx"
+    "../graphical/src/ui/UiWorkbenchHost.hx",
+    "../graphical/src/ui/WorkspaceSearchPanel.hx"
   ],
   "dependencies": {
     "nativekit": {

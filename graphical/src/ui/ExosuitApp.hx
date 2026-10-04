@@ -86,6 +86,9 @@ class ExosuitApp implements DesktopUiApplication {
 	var nextTerminalId:Int = 1;
 	var pendingTerminalFocus:Bool = false;
 	final createTerminal:Null<(String, Void->Void, TerminalPalette)->TerminalPanel>;
+	public var searchPanel(default, null):WorkspaceSearchPanel;
+	public final filesScroll = new nativekit.ui.widgets.scroll.ScrollController();
+	public final sidebar = new nativekit.ui.widgets.sidebar.SidebarModel();
 	var explorerRoot:Null<String>;
 	var explorerModel:Null<DirectoryTreeModel>;
 	var statusMessage:String = "Ready";
@@ -109,6 +112,9 @@ class ExosuitApp implements DesktopUiApplication {
 		ui.buildContext.environment.colorScheme = darkPalette ? EnvironmentColorScheme.Dark : EnvironmentColorScheme.Light;
 		desktop = fileDialogs;
 		if (hostContext != null) hostContext.onCloseRequested = function(close) close();
+		sidebar.register("files", explorerPanel, new nativekit.ui.widgets.sidebar.SidebarModeOptions("Files", 0, true, 240.0));
+		sidebar.register("search", function() return searchPanel,
+			new nativekit.ui.widgets.sidebar.SidebarModeOptions("Search", 10, true, 320.0));
 		dock = makeDock();
 		if (openPath == null) dock.close("explorer");
 		var capturedHost:UiWorkbenchHost = null;
@@ -128,6 +134,17 @@ class ExosuitApp implements DesktopUiApplication {
 			return capturedHost;
 		}, null, null, this.capabilities);
 		host = capturedHost;
+		sidebar.setVisible(dock.isOpen("explorer"));
+		sidebar.onChange = syncSidebar;
+		searchPanel = new WorkspaceSearchPanel(application, host, requestFrame);
+		host.captureSidebar = function() {
+			sidebar.setVisible(dock.isOpen("explorer"));
+			return "B\tsidebar\t1\t" + sidebar.encode();
+		};
+		host.restoreSidebar = function(lines) {
+			for (line in lines) if (StringTools.startsWith(line, "B\tsidebar\t1\t")) sidebar.restore(line.substring(12));
+		};
+		host.activateSearch = function() showSidebarMode("search");
 		if (this.createTerminal != null) host.restoreTerminal = restoreTerminalTab;
 		host.caretRectProvider = function() {
 			var active = host.activeView();
@@ -144,7 +161,7 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function makeDock():DockWorkspaceModel {
 		var model = new DockWorkspaceModel();
-		model.register(new DockPanelDescriptor("explorer", "Explorer", true, true, IconName.FolderOpen, nativekit.ui.docking.DockPanelHeaderMode.Dock, new nativekit.ui.docking.DockPanelGrouping("sidebar")));
+		model.register(new DockPanelDescriptor("explorer", "Sidebar", true, true, IconName.FolderOpen, nativekit.ui.docking.DockPanelHeaderMode.Content, new nativekit.ui.docking.DockPanelGrouping("sidebar")));
 		model.register(new DockPanelDescriptor("editor", "Editor", false, true, IconName.NewFile, nativekit.ui.docking.DockPanelHeaderMode.Content, new nativekit.ui.docking.DockPanelGrouping("editors", false)));
 		model.register(new DockPanelDescriptor("problems", "Problems", true, true, null, nativekit.ui.docking.DockPanelHeaderMode.Dock, new nativekit.ui.docking.DockPanelGrouping("tools")));
 		if (capabilities.supports(Processes))
@@ -152,7 +169,7 @@ class ExosuitApp implements DesktopUiApplication {
 		if (capabilities.supports(Processes))
 			model.register(new DockPanelDescriptor("terminal", "Terminal", true, true, IconName.Terminal, nativekit.ui.docking.DockPanelHeaderMode.Dock, new nativekit.ui.docking.DockPanelGrouping("tools")));
 		dockPanelContents = [
-			new DockPanelContent("explorer", function(_) return explorerPanel()),
+			new DockPanelContent("explorer", function(_) return new nativekit.ui.widgets.sidebar.SidebarHost("sidebar-modes", sidebar, function(id) { showSidebarMode(id); })),
 			new DockPanelContent("editor", function(_) return editorPanel("editor")),
 			new DockPanelContent("problems", function(_) return new ProblemsPanel(host))
 		];
@@ -170,15 +187,30 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function toggleExplorerVisible():Bool {
-		if (explorerRoot == null) { openFolderDialog(); return true; }
-		return dock.isOpen("explorer") ? dock.close("explorer") : openExplorer();
+		if (dock.isOpen("explorer")) { sidebar.setVisible(false); return !dock.isOpen("explorer"); }
+		var selected = sidebar.selected();
+		return showSidebarMode(selected == null ? "files" : selected.id);
 	}
 
-	function openExplorer():Bool {
-		if (dock.isOpen("explorer")) return dock.activate("explorer");
-		if (!dock.dock("explorer", host.activePane.id, DockDropZone.Left)) return false;
-		dock.setSplitRatio([0], 0.22);
-		return true;
+	function openExplorer():Bool return showSidebarMode("files");
+
+	public function showSidebarMode(id:String):Bool {
+		if (!sidebar.select(id)) return false;
+		if (!dock.isOpen("explorer")) return false;
+		if (id == "search") searchPanel.focusQuery = true;
+		dock.activate("explorer"); requestFrame(); return true;
+	}
+
+	function syncSidebar():Void {
+		if (!sidebar.visible) {
+			if (dock.isOpen("explorer")) dock.close("explorer");
+		} else {
+			if (!dock.isOpen("explorer")) dock.dock("explorer", host.activePane.id, DockDropZone.Left);
+			var mode = sidebar.selected();
+			if (mode != null) dock.setPanelWidth("explorer", mode.width, viewportWidth,
+				DockWorkspace.DividerExtent, DockWorkspace.MinimumHorizontalExtent);
+		}
+		requestFrame();
 	}
 
 	public function openTerminal():Void {
@@ -323,6 +355,9 @@ class ExosuitApp implements DesktopUiApplication {
 			application.commands.add("terminal:move-to-panel", function(_) moveTerminalToPanel(),
 				function(_) { var tab = host.activeTab(); return tab != null && UiEditorTabs.terminal(tab) != null; });
 		}
+		application.commands.add("workspace:search", function(_) showSidebarMode("search"));
+		application.commands.add("sidebar:files", function(_) showSidebarMode("files"));
+		application.commands.add("sidebar:search", function(_) showSidebarMode("search"));
 		CommandBridge.install(ui.commands, application.commands, application.keymap, application.context);
 	}
 
@@ -338,7 +373,7 @@ class ExosuitApp implements DesktopUiApplication {
 		}
 		var workspaceView = new DockWorkspace("exosuit-workspace", dock, dockPanelContents);
 		workspaceView.availableHeight = Math.max(0.0, viewportHeight - TOOLBAR_HEIGHT - STATUS_HEIGHT);
-		var workspace:View = explorerRoot == null && !dock.isOpen("explorer")
+		var workspace:View = !dock.isOpen("explorer")
 			? new Row("workspace-with-rail", [new KeyedView("rail", explorerRail()),
 				new KeyedView("workspace", workspaceView)], fillStyle())
 			: workspaceView;
@@ -367,8 +402,14 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	public function submit(frame:LayoutFrame):RenderNode {
+		var widthChanged = viewportWidth != frame.width;
 		viewportWidth = frame.width;
 		viewportHeight = frame.height;
+		if (widthChanged && dock.isOpen("explorer")) {
+			var mode = sidebar.selected();
+			if (mode != null) dock.setPanelWidth("explorer", mode.width, viewportWidth,
+				DockWorkspace.DividerExtent, DockWorkspace.MinimumHorizontalExtent);
+		}
 		pumpApplication();
 		return ui.submit(view(), frame);
 	}
@@ -399,7 +440,8 @@ class ExosuitApp implements DesktopUiApplication {
 				requestFrame();
 			}
 		}
-		if (application.build.active != null || application.language.client != null) requestFrame();
+		if (application.build.active != null || application.language.client != null ||
+			!application.search.workspaceSearch.complete || application.workspace.jobs.activeCount() > 0) requestFrame();
 	}
 
 	public function context():UiContext return ui;
@@ -422,6 +464,8 @@ class ExosuitApp implements DesktopUiApplication {
 			active: active == null ? -1 : active.id,
 			documentsSource: "core.Application (via UiWorkbenchHost)",
 			explorerRoot: explorerRoot,
+			sidebarMode: sidebar.activeId,
+			sidebarState: sidebar.encode(),
 			panels: dock.panelIds(),
 			status: statusMessage,
 			paletteCommandCount: ui.commands.ids().length,
@@ -509,7 +553,7 @@ class ExosuitApp implements DesktopUiApplication {
 		var viewportStyle = new LayoutStyle();
 		viewportStyle.width = LayoutAxis.grow();
 		viewportStyle.height = LayoutAxis.grow();
-		var tree = new TreeView("exosuit-explorer-tree", explorerModel, viewportStyle, null, 640.0,
+		var tree = new TreeView("exosuit-explorer-tree", explorerModel, viewportStyle, filesScroll, 640.0,
 			null, [explorerRoot], function(key) { host.setSelectedExplorerPath(key); }, function(key) {
 				if (!FileSystem.isDirectory(key)) application.open(key);
 			}, null, null);
@@ -535,10 +579,12 @@ class ExosuitApp implements DesktopUiApplication {
 		var buttonStyle = new LayoutStyle();
 		buttonStyle.width = LayoutAxis.fixed(40.0);
 		buttonStyle.height = LayoutAxis.fixed(36.0);
-		var open = new Button("", buttonStyle, openFolderDialog, "rail-open-folder");
+		var open = new Button("", buttonStyle, function() showSidebarMode("files"), "rail-open-folder");
 		open.leadingIcon = IconName.FolderOpen;
-		open.accessibilityLabel = "Open Folder";
-		return new Column("explorer-rail", [new KeyedView("open", open)], railStyle);
+		open.accessibilityLabel = "Files";
+		var search = new Button("", buttonStyle, function() showSidebarMode("search"), "rail-search");
+		search.leadingIcon = IconName.Search; search.accessibilityLabel = "Search";
+		return new Column("explorer-rail", [new KeyedView("open", open), new KeyedView("search", search)], railStyle);
 	}
 
 	function editorPanel(paneId:String):View {
@@ -713,6 +759,7 @@ class ExosuitApp implements DesktopUiApplication {
 		if (FileSystem.exists(path) && FileSystem.isDirectory(path)) {
 			explorerRoot = application.workspace.fileSystem.normalize(path);
 			explorerModel = null;
+			filesScroll.jumpTo(0, 0);
 			openExplorer();
 			application.openArgument(path);
 			return;
@@ -742,6 +789,7 @@ class ExosuitApp implements DesktopUiApplication {
 			if (accepted && paths.length > 0) {
 				explorerRoot = application.workspace.fileSystem.normalize(paths[0]);
 				explorerModel = null;
+				filesScroll.jumpTo(0, 0);
 				openExplorer();
 				application.openArgument(paths[0]);
 			}
