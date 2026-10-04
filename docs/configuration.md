@@ -91,5 +91,5 @@ In the graphical Explorer, a single file click opens a preview in the active
 editor pane. Each pane reuses its one preview tab when another file is clicked.
 Double-click a file or its tab to keep it open. Editing, moving, or reordering
 a preview also keeps it open; undoing an edit does not make it temporary again.
-Folder labels expand or collapse on double-click; disclosure arrows use one
-click. Right-click selects a tree item and opens its menu without previewing it.
+Folder labels and disclosure arrows expand or collapse on a single click.
+A double-click on a folder label toggles it once. Right-click selects a tree item and opens its menu without previewing it.

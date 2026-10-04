@@ -203,13 +203,15 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	function activePreview():Bool { var view = host.activeView(); return view != null && view.preview; }
 	function explorerStep():Void {
 		var root = path.substring(0, path.lastIndexOf("/"));
-		if (frames == 3) { clickTree(root + "/folder"); clickTree(root + "/folder"); }
+		if (frames == 3) clickTree(root + "/folder");
 		if (frames == 4) {
-			require(treeRow(ui.root, root + "/folder/A.txt") != null, "folder double click did not expand");
+			require(treeRow(ui.root, root + "/folder/A.txt") != null, "folder single click did not expand");
+			clickTree(root + "/folder");
 			clickTree(root + "/folder/A.txt");
 			require(activePreview() && host.tabs.length == 1, "single click did not open preview");
 		}
 		if (frames == 5) {
+			require(treeRow(ui.root, root + "/folder/A.txt") != null, "second click toggled folder twice");
 			clickTree(root + "/folder/B.txt");
 			require(host.activeDocument().requirePath() == root + "/folder/B.txt" && host.tabs.length == 1, "preview did not replace previous file");
 			clickTree(root + "/folder/B.txt");
@@ -252,7 +254,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		if (frames == 11) {
 			require(host.moveActiveTab(-1, 0), "preview move to neighboring pane failed");
 			require(!activePreview() && host.tabs.length == 3, "moving preview duplicated or demoted existing permanent tab");
-			trace("PASS: explorer folder double click, file preview replacement, keep by double click and edit, pane ownership and shared edits");
+			trace("PASS: explorer folder single click and double-click suppression, file preview replacement, keep by double click and edit, pane ownership and shared edits");
 		}
 	}
 	function sidebarStep():Void {

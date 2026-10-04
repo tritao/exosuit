@@ -2,6 +2,23 @@
 
 Last updated: 2026-10-04.
 
+## Explorer folder single-click, 2026-10-04
+
+- Folder labels now expand/collapse immediately on a single primary click.
+  Double-clicking toggles once, including when the tree rebuilds between the
+  first and second click. Disclosure arrows retain their single-click behavior.
+- UIKit exposes an opt-in `expandOnSingleClick` policy; Exosuit enables it
+  without changing other tree consumers' double-click defaults. File preview
+  and permanence behavior remains the same.
+- Graphical acceptance now checks visibility after the first click, ignores
+  the second click across a rebuild, and checks double-click collapse.
+- Validation: full native workspace smoke and desktop build pass in an
+  isolated HEAD snapshot with this app/test change; the working checkout's
+  initial compile hit concurrent in-progress Seti icon sources. The snapshot
+  excluded those app sources and preserved their work. UIKit policy is committed
+  as `0810b21b9`.
+- Next: completion filtering and remaining language shortcuts in M10.2.
+
 ## Explorer previews and folder double-click, 2026-10-04
 
 - Fix the graphical tree's selection-only mouse click path: single primary file

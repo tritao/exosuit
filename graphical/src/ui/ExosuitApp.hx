@@ -559,6 +559,7 @@ class ExosuitApp implements DesktopUiApplication {
 			null, [explorerRoot], function(key) { host.setSelectedExplorerPath(key); }, function(key) {
 				if (!FileSystem.isDirectory(key)) application.open(key);
 			}, null, null);
+		tree.expandOnSingleClick = true;
 		tree.onItemClicked = function(path, count) {
 			if (count != 1 || FileSystem.isDirectory(path)) return;
 			try host.openPreview(application.workspace.documents.open(path)) catch (error:Dynamic) application.reportError("files", "Could not open file: " + Std.string(error));
