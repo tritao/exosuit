@@ -85,7 +85,9 @@ class LanguageServiceClient {
 	}
 
 	public function stop(now:Float):Void {
+		if (stopping) return;
 		stopping = true;
+		ready = false;
 		restartAt = -1;
 		var session = transport;
 		if (session == null) {
@@ -98,6 +100,15 @@ class LanguageServiceClient {
 			session.update(Sys.time());
 			retireSession();
 		});
+	}
+
+	/** Releases process and subscriptions immediately when the owning application exits. */
+	public function shutdown():Void {
+		stopping = true; ready = false; restartAt = -1;
+		var session = transport;
+		transport = null;
+		if (session != null) session.close();
+		retireSession();
 	}
 
 	public function requestHover(document:Document, position:BufferPosition, now:Float, complete:Null<String>->Void):Bool {
@@ -199,6 +210,7 @@ class LanguageServiceClient {
 	public function restartAttempts():Int return restartCount;
 
 	function initialized(response:JsonRpcResponse):Void {
+		if (stopping) return;
 		if (response.error != null || response.result == null) {
 			scheduleRestart(Sys.time(), response.error == null ? "language server returned no initialize result" : response.error);
 			return;

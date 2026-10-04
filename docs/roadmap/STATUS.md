@@ -2,6 +2,33 @@
 
 Last updated: 2026-10-04.
 
+## M10.1 — stopping-client ownership, 2026-10-04
+
+- Added a regression that stops the configured fake server, pumps the controller
+  until ProcessManager owns zero processes, restarts it, and shuts down while
+  initialization is still pending. The pre-fix run failed with a controller
+  timeout (/tmp/exosuit-language-stop-before.log, 14218, exit 1).
+- LanguageController retains stopping clients and advances them until their
+  asynchronous shutdown finishes. An explicit restart retires any prior stopping
+  clients before launching another. Application shutdown explicitly closes the
+  transport and releases process/subscriptions without waiting for another frame.
+- LanguageServiceClient marks stopping sessions unready and ignores late
+  initialization responses, preventing initialization from reopening documents
+  or scheduling retries during teardown. Cleanup is idempotent.
+- Focused regression, full headless and desktop checks passed in serial process
+  57305 (exit 0); /tmp/exosuit-language-stop-after.log and
+  /tmp/exosuit-language-stop-{headless,build}.log. Real Haxeon server smoke
+  and both wasm32/wasm-gc browser gates passed in process 92824 (exit 0);
+  /tmp/exosuit-language-stop-{real,web}.log. git diff --check passes.
+- Slice committed with this ledger; git log identifies its SHA. Only Exosuit
+  files changed; pre-existing Haxeon/NativeKit work and release pins preserved.
+- M10.1 remains unfinished. Next is automatic project-scoped startup, stopping
+  on last .hx close/project change, configuration reapplication, crash backoff
+  and visible failure/status acceptance. Preserve explicit Stop in automatic
+  mode; restrict server synchronization to its project root. Retry timing must
+  use the supplied update clock and retire failed initialization sessions.
+  No automatic startup is claimed yet.
+
 ## M10.1 — language configuration foundation, 2026-10-04
 
 - Added typed plugins.haxeon.enabled (true), command (JSON string argv array,

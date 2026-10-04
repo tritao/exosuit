@@ -74,7 +74,11 @@ class LanguageControllerTestMain {
 			"signature help was not surfaced through an anchored popup");
 		require(commands.perform("language:go-to-definition", context), "definition command was not available");
 		for (_ in 0...32) controller.update(Sys.time());
+		controller.stop();
+		pump(controller, () -> processes.activeCount() == 0, 2.0);
+		require(controller.start(), "service did not restart after graceful stop");
 		controller.shutdown();
+		require(processes.activeCount() == 0, "shutdown retained language process");
 		require(root.pluginDecorations.forDocument(document).length == 0,
 			"stopped language service left diagnostic decorations behind");
 		processes.shutdown();

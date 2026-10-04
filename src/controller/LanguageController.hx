@@ -26,6 +26,7 @@ class LanguageController {
 	final settings:Null<Void->config.Settings>;
 	final reportError:(String, String)->Void;
 	var diagnosticFingerprint:String = "";
+	final retiring:Array<LanguageServiceClient> = [];
 
 	public function new(workspace:Workspace, root:WorkbenchHost, context:CommandContext, commands:CommandRegistry, processes:ProcessManager,
 			executable:String, reportError:(String, String)->Void, ?arguments:Array<String>, available:Bool = true, ?settings:Void->config.Settings) {
@@ -47,6 +48,9 @@ class LanguageController {
 		var value = settings == null ? null : settings();
 		if (value != null && !value.haxeonEnabled) { reportError("language", "Haxeon language services are disabled in settings"); return false; }
 		if (client != null) return true;
+		// Explicit restart retires any prior stopping session before opening another.
+		for (previous in retiring) previous.shutdown();
+		retiring.resize(0);
 		var project = workspace.activeProject;
 		if (project == null) {
 			reportError("language", "Open a project before starting the Haxeon language server");
@@ -61,6 +65,12 @@ class LanguageController {
 	}
 
 	public function update(now:Float):Void {
+		var index = retiring.length;
+		while (index > 0) {
+			index--;
+			var previous = retiring[index]; previous.update(now);
+			if (previous.status == "stopped") retiring.splice(index, 1);
+		}
 		var service = client;
 		if (service == null) return;
 		service.update(now);
@@ -70,15 +80,19 @@ class LanguageController {
 	public function stop():Void {
 		var service = client;
 		if (service == null) return;
-		service.stop(Sys.time());
 		client = null;
+		service.stop(Sys.time());
+		if (service.status != "stopped") retiring.push(service);
 		diagnosticFingerprint = "";
 		root.getPluginDecorations().removeOwner(OWNER);
 		root.getProblems().removeOwner(OWNER);
 	}
 
-	public function shutdown():Void
+	public function shutdown():Void {
 		stop();
+		for (service in retiring) service.shutdown();
+		retiring.resize(0);
+	}
 
 	function installCommands():Void {
 		commands.add("language:haxeon-start", commandContext -> start());
