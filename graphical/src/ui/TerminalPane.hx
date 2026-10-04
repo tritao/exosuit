@@ -212,8 +212,6 @@ class TerminalPane implements TerminalPanel {
 			}
 		});
 		node.focusable = true;
-		// Size the grid from resolved layout, not from paint, so rows match the frame.
-		node.onResolved(function(item) resizeToViewport(item.width, item.height));
 		node.on(UiEventKind.PointerDown, function(_) context.requestFocus(node.id));
 		node.on(UiEventKind.TextInput, function(event:UiEvent) {
 			if (event.text != null && event.text.length > 0) {

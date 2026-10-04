@@ -76,8 +76,9 @@ Keyboard navigation moves all carets through UIKit's shaped layout.
   command-driven placement. Language popups follow the visible caret and dismiss
   when scrolling clips it or the active document changes.
 - Workspace search results are retained by the host but have no graphical panel.
-- The shell has one editor region. Split, pane focus and moving tabs between
-  panes are unavailable; tab reordering and sidebar visibility are wired.
+- Documents and terminals share editor tab bars across DockWorkspace splits.
+  Pane focus, tab movement and pane closure are available through commands;
+  sessions preserve pane membership, selections, scroll and terminal profiles.
 - Line wrapping remains a gap. Editor, tab and file-tree command menus support right-click, Shift+F10 and the Menu key.
 - Some legacy shortcut keys lack a UIKit key mapping; their bridged commands
   are still available from the palette.

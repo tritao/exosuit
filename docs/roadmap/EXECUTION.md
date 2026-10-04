@@ -81,6 +81,7 @@ Run from the editor root:
 ./scripts/test-skribidi-layout.sh # native layout differential + immutable/shared lifetimes
 ./scripts/ci.sh        # composed gate (M8.3 restores LSP and release stages)
 ./scripts/test-decoration-ui.sh # real retained decoration pixels (Xvfb + Python Pillow)
+./scripts/test-workspace-ui.sh # separate-process restart, keyboard panes and session recovery
 ./scripts/benchmark-uikit-typing.sh # delivered input through completed frame; small|10mb|long-line
 ./scripts/profile-uikit-startup.py --fixture long-line --artifacts /tmp/exosuit-startup-new
 ./scripts/run.sh /absolute/path/to/a/disposable/project

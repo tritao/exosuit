@@ -54,21 +54,10 @@ import nativekit.ui.widgets.text.Text;
 import nativekit.ui.core.TextStyleOverride;
 
 /**
- * `core.WorkbenchHost` reachable through the everyday `Void->Bool`-ish
- * headless call shapes the eight controllers already call (see that
- * interface's doc comment), backed by uikit widgets instead of
- * `view.RootView`'s pixel-drawn split-pane tree. Owns the one thing this
- * shell's editor region actually has - an ordered list of open document
- * tabs and which one is active - and the state machines for the two
- * overlay surfaces (the command view, and hover/completion/signature
- * "language popups"), which `ui.ExosuitApp.view()` renders each frame via
- * `overlayView()` and drives via `KeyCaptureView`.
- *
- * `focusPane`/`moveActiveTab` are no-ops (see their doc comments): this
- * shell's `DockWorkspace` has exactly one editor region today, so there is
- * no second pane for either to act on yet. `reorderActiveTab` and
- * `toggleSidebar` are real. `applySettings` has nothing to apply (uikit's
- * fonts are owned by `DesktopUiHostContext`, set up once at host startup).
+ * UIKit workbench host owning document and terminal tabs in DockWorkspace
+ * editor panes. Each document view owns its selection and scroll position;
+ * terminal tabs retain their session while moving between panes and tools.
+ * Command and language overlays are rendered by ExosuitApp.overlayView().
  */
 class UiWorkbenchHost implements WorkbenchHost {
 	final theme:Theme;
@@ -441,11 +430,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 
 	public function focusedFilePath():Null<String> return selectedExplorerPath;
 
-	/**
-	 * No separate "pane" yet distinct from the one editor region's tab
-	 * strip (see `focusPane`'s doc comment), so there is nothing for
-	 * "close pane" to collapse into.
-	 */
+	/** The last editor pane remains available even when its tabs are empty. */
 	public function canCloseActivePane():Bool return panes.length > 1;
 
 	// -- core.WorkbenchHost: open/activate document & active-editor input --

@@ -1,6 +1,57 @@
 # Execution ledger
 
-Last updated: 2026-10-02.
+Last updated: 2026-10-04.
+
+## M9.2 — restart and keyboard acceptance, 2026-10-04
+
+- Reviewed pre-existing TerminalPane diff: it removes a duplicate resolved-layout
+  callback that resized the grid immediately. Adopted this reviewed correction in the app slice; the
+  remaining callback records geometry and schedules resize before row painters
+  are built. Real PTY transfer regression verifies wider panel columns, return
+  to the original editor grid, and unchanged session creation count.
+- Added standalone workspace-ui-smoke host and scripts/test-workspace-ui.sh.
+  Writer and reader run in separate processes using isolated portable storage:
+  actual shutdown/startup preserves split panes, shared recovered dirty text,
+  independent caret/scroll positions, active terminal and one recreated shell.
+  Terminal processes restart from profiles; they do not survive process exit.
+- Added real keyboard-only palette split/close and default directional focus/tab
+  movement checks. Initial failure: focused TextField consumed Ctrl+Alt arrows
+  as text navigation before application shortcuts. UIKit regression reproduces
+  caret movement and verifies all eight arrow/Shift chords reach commands
+  without altering selection. TextField leaves these chords for command routing.
+- Before-fix framework regression failed with "application arrow chord changed
+  text selection" (/tmp/uikit-pane-shortcut-before.log). Complete framework
+  after fix passed (/tmp/uikit-pane-shortcut-after.log).
+- Second palette operation initially retained the prior query; the test now
+  selects existing query text with Ctrl+A before entering the next command.
+- Legacy version-3 flat T records reopen surviving files and skip missing ones.
+  Unsupported/corrupt session files are quarantined; missing session and invalid
+  dock JSON leave a workspace that can create and edit documents.
+- Initial complete workspace gate passed:
+  WORKSPACE_UI_ARTIFACTS=/tmp/exosuit-workspace-acceptance-fixed2
+  ./scripts/test-workspace-ui.sh, log /tmp/exosuit-workspace-acceptance-fixed2.log.
+  Restart screenshot reviewed. Final exact dock snapshot assertion also passes:
+  WORKSPACE_UI_ARTIFACTS=/tmp/exosuit-workspace-acceptance-final2
+  ./scripts/test-workspace-ui.sh (44340, exit 0), log
+  /tmp/exosuit-workspace-acceptance-final2.log. The new expected-snapshot file
+  initially needed its isolated state directory created before shutdown; fixed
+  fixture setup, without production changes.
+- Broader serial verification (18425, exit 0): ./scripts/test.sh,
+  ./scripts/build.sh, DECORATION_UI_ARTIFACTS=/tmp/exosuit-workspace-decoration
+  ./scripts/test-decoration-ui.sh, EXOSUIT_CI_WEB=1
+  EXOSUIT_WEB_BROWSER=/tmp/exosuit-chrome-testing/chrome-linux64/chrome
+  ./scripts/test-web.sh. Logs /tmp/exosuit-workspace-{headless,desktop,decoration,web}.log.
+  Both wasm32 and wasm-gc pass real browser behavior. git diff --check passes.
+- UIKit committed as Materia 5f279c4a6 (only TextField and FrameworkSmoke).
+  Exosuit release pin updated to that revision; pre-existing parent CadKit
+  commits remain intact. No compiler/NativeKit edits or pin changes made.
+  App acceptance slice committed with this ledger; git log identifies its SHA.
+- Added workspace acceptance to composed CI; corrected outdated single-pane
+  host documentation and README. No live user app was closed or relaunched.
+- M9.2 checklist complete for the claimed Linux automated document-pane scope.
+  M9 and the full roadmap remain unfinished. Resume at M9.3: registerable sidebar
+  modes with Files first, then graphical workspace search. Physical IME,
+  non-Linux platforms, and keyboard transfer of terminal tabs remain unclaimed.
 
 ## IME range affinity correction, 2026-10-02
 

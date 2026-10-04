@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "package": {
+    "name": "exosuit-workspace-ui-smoke"
+  },
+  "entry": "app.WorkspaceSmokeMain",
+  "sourceRoots": [
+    "src"
+  ],
+  "scopeSourceRoots": false,
+  "dependencies": {
+    "exosuit-graphical": {
+      "path": "../../graphical"
+    }
+  },
+  "target": "host",
+  "outputDir": "build"
+}

@@ -27,12 +27,17 @@ visible and correct. Typing p95 stays within the M7.1 budget.
   rectangle instead of the fixed `TextInputArea` in `UiWorkbenchHost.hx`.
 - [x] Add context menus for the editor, tabs and the file tree using UIKit
   popups. Their commands go through `CommandRegistry`.
-- [ ] Implement `focusPane`, `moveActiveTab` and `closeActivePane` with
+- [x] Implement `focusPane`, `moveActiveTab` and `closeActivePane` with
   DockWorkspace splits. Persist the layout through DockWorkspace persistence
   and the session.
 
 Acceptance: keyboard-only split, focus, move and close works. Layout and open
 tabs restore after restart. Popups track the caret while scrolling.
+
+Verified for Linux automation on 2026-10-04; see STATUS for separate-process
+restart, keyboard-only document panes, terminal grid resizing and session
+recovery evidence. Terminal-tab keyboard transfer and physical IME/non-Linux
+acceptance are separate follow-ons.
 
 ## M9.3 — Sidebar modes and search
 
