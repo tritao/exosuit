@@ -24,6 +24,7 @@ class SettingsCodec {
 				if (value == "auto" || value == "always" || value == "hidden") target.scrollbarVisibility = value;
 				else diagnostics.push(source + ":" + (lineNumber + 1) + ": scrollbarVisibility must be auto, always or hidden");
 			}
+			else if (key == "editor.minimapEnabled") target.minimapEnabled = parseBool(value, key, source, lineNumber, diagnostics);
 			else if (key == "editor.tabWidth") target.tabWidth = parseBoundedInt(value, 1, 16, key, source, lineNumber, diagnostics);
 			else if (key == "editor.insertSpaces") target.insertSpaces = parseBool(value, key, source, lineNumber, diagnostics);
 			else if (key == "editor.scroll_animation_type") {

@@ -41,6 +41,31 @@ class EditorViewTestMain {
 		Platform.startHeadless();
 		var syntaxes = new SyntaxRegistry();
 		BuiltinSyntax.install(syntaxes);
+		var preview = new editor.MinimapModel();
+		var previewDocument = new Document("preview.hx", "class Main {\n\t🙂x\n}", syntaxes);
+		preview.update(previewDocument);
+		require(preview.rows.length == 3 && preview.rows[1].spans[0].start == 4 && preview.rows[1].spans[0].length == 1 && preview.rows[1].spans[1].start == 5,
+			"minimap tabs or Unicode columns are incorrect");
+		require(preview.rows[0].spans[0].kind == syntax.HighlightToken.KEYWORD, "minimap lost syntax colors");
+		var retainedRow = preview.rows[0];
+		preview.update(previewDocument);
+		require(preview.rows[0] == retainedRow, "unchanged minimap rebuilt its spans");
+		previewDocument.buffer.replaceAllText("x", new BufferSelection());
+		preview.update(previewDocument);
+		require(preview.rows.length == 1 && preview.rows[0].spans[0].length == 1, "minimap edit left stale rows");
+		previewDocument.buffer.undo(new BufferSelection());
+		preview.update(previewDocument);
+		require(preview.rows.length == 3, "minimap undo did not restore rows");
+		var largePreview = new Document("large.hx", [for (_ in 0...10000) "class Main {}"].join("\n"), syntaxes);
+		preview.update(largePreview);
+		require(preview.rows.length == editor.MinimapModel.MAX_ROWS && preview.rows[511].line == 9999,
+			"large minimap is unbounded or misses the end of the file");
+		require(preview.rows[0].spans[0].kind == 0, "large minimap unnecessarily requests syntax highlighting");
+		require(editor.MinimapModel.scrollTarget(0, 100, 1000, 200) == 0 &&
+			editor.MinimapModel.scrollTarget(100, 100, 1000, 200) == 800 &&
+			editor.MinimapModel.scrollTarget(50, 100, 1000, 200) == 400 &&
+			editor.MinimapModel.scrollTarget(50, 100, 50, 200) == 0,
+			"minimap navigation is not centered or clamped");
 		var coordinates = new Document(null, "é🙂x\ná🙂\n", syntaxes);
 		for (offset in 0...coordinates.buffer.document.codepointCount + 1) {
 			var position = EditorCoordinates.position(coordinates, offset);

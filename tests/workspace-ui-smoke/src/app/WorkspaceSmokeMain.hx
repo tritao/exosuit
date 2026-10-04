@@ -21,7 +21,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	var languageOriginal = "";
 
 	public function new(context:nativekit.ui.host.DesktopUiHostContext, path:String, phase:String) {
-		super(context.fonts, null, context, phase == "scrollbar-visibility" ? path : phase == "explorer-preview" ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-scroll" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
+		super(context.fonts, null, context, phase == "scrollbar-visibility" ? path : phase == "explorer-preview" ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-minimap" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
 			null, null, null, WorkspaceSmokeMain.createTerminal);
 		this.phase = phase;
 		this.path = path;
@@ -38,6 +38,8 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	override public function submit(frame:LayoutFrame):nativekit.ui.core.RenderNode {
 		frames++;
 		if (phase == "scrollbar-visibility") return scrollbarStep(frame);
+		if (phase == "editor-resize") return resizeStep(frame);
+		if (phase == "editor-minimap") return minimapStep(frame);
 		if (phase == "language-folder") languageStep();
 		if (phase == "explorer-preview") explorerStep();
 		if (phase == "editor-scroll") {
@@ -166,6 +168,82 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		}
 		return super.submit(frame);
 	}
+	function resizeStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+		var view = host.activeView();
+		if (view == null) throw "resize acceptance missing document";
+		if (frames == 1) {
+			var text = "";
+			for (_ in 0...60) text += "Repeated wrapping text with enough words to cross the editor width while resizing the window.\n";
+			view.document.buffer.replaceAllText(text, view.selection);
+		}
+		var sizes = [[1100, 760], [640, 480], [900, 600], [420, 320], [1200, 900], [700, 450]];
+		var size = sizes[(frames - 1) % sizes.length];
+		frame.setViewport(size[0], size[1]);
+		if (frames > 1) view.scrollController.jumpTo(0, view.scrollController.maxScrollY);
+		var result = super.submit(frame);
+		var scroll = editorViewport(view.document.id);
+		var controller = view.scrollController;
+		var trackNode = editorScrollbar(view.document.id);
+		var track:ResolvedLayoutItem = cast trackNode.resolved;
+		var thumb:ResolvedLayoutItem = cast trackNode.children[0].resolved;
+		require(Math.abs(track.height - Math.max(0, controller.viewportHeight - 4)) < 0.01, "resize left stale scrollbar track");
+		require(controller.offsetY <= controller.maxScrollY, "resize left scroll beyond content");
+		var expectedThumbY = track.y + (controller.maxScrollY == 0 ? 0 : controller.offsetY / controller.maxScrollY * (track.height - thumb.height));
+		require(Math.abs(thumb.y - expectedThumbY) < 0.01, "resize left stale scrollbar thumb");
+		var height = controller.contentHeight;
+		var offset = controller.offsetY;
+		result = super.submit(frame);
+		require(Math.abs(controller.contentHeight - height) < 0.01 && Math.abs(controller.offsetY - offset) < 0.01,
+			"editor layout did not settle on first resize frame: " + height + " -> " + controller.contentHeight);
+		if (frames == 7) trace("PASS: repeated editor resizes settle wrapped content, offsets and scrollbar geometry in one frame");
+		return result;
+	}
+
+	function minimapStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+		var view = host.activeView();
+		if (view == null) throw "minimap acceptance missing editor";
+		if (frames == 2) {
+			view.document.buffer.replaceAllText([for (index in 0...200)
+				"class Line" + index + " { var text = \"wrapped 🙂 preview \"; } // " + [for (_ in 0...12) "long text "].join("")].join("\n"), view.selection);
+		}
+		if (frames == 3) {
+			var bounds = node("editor-minimap:" + view.document.id).globalBounds();
+			var y = Math.min(bounds.height, 400) - 4;
+			ui.pointerDown(bounds.x + 30, bounds.y + y, 0);
+			ui.pointerUp(bounds.x + 30, bounds.y + y, 0);
+			var expected = editor.MinimapModel.scrollTarget(y, Math.min(bounds.height, 400),
+				view.scrollController.contentHeight, view.scrollController.viewportHeight);
+			require(Math.abs(view.scrollController.offsetY - expected) < 0.01, "minimap click did not use wrapped content metrics");
+		}
+		if (frames == 4) {
+			view.scrollController.jumpTo(0, 0);
+			var bounds = node("editor-minimap:" + view.document.id).globalBounds();
+			ui.pointerDown(bounds.x + 30, bounds.y + 2, 0);
+			ui.pointerMove(bounds.x + 30, bounds.y + 150);
+			ui.pointerUp(bounds.x + 30, bounds.y + 150, 0);
+			require(view.scrollController.offsetY > 0, "minimap viewport drag did not scroll");
+		}
+		frame.setViewport(frames == 5 ? 420 : 900, 600);
+		if (frames == 6) application.settings.current.minimapEnabled = false;
+		if (frames == 7) application.settings.current.minimapEnabled = true;
+		if (frames == 8) view.document.buffer.replaceAllText("", view.selection);
+		if (frames == 9) view.document.undo(view.selection);
+		if (frames == 10) view.scrollController.jumpTo(0, 0);
+		var result = super.submit(frame);
+		if (frames == 2 || frames == 7) {
+			var preview = node("editor-minimap:" + view.document.id).globalBounds();
+			var scroll = editorViewport(view.document.id).globalBounds();
+			require(preview.width == 88 && preview.x >= scroll.x + scroll.width - 0.01, "minimap is not fixed to editor right edge");
+		}
+		if (frames == 5) require(node("editor-minimap:" + view.document.id).globalBounds().width == 0, "narrow editor retained minimap width");
+		if (frames == 6) require(find(ui.root, "editor-minimap:" + view.document.id) == null, "disabled minimap retained its node");
+		if (frames == 8) {
+			require(view.scrollController.offsetY == 0, "empty document retained minimap scroll offset");
+			trace("PASS: editor minimap right placement, wrapped navigation, pointer drag, narrow layout, live settings and empty document");
+		}
+		return result;
+	}
+
 	static function findViewport(root:nativekit.ui.core.RenderNode, documentId:Int):Null<nativekit.ui.core.RenderNode> {
 		if (root.styleType == "scroll-view" && root.styleKey == "editor-scroll:" + documentId) return root;
 		for (child in root.children) { var found = findViewport(child, documentId); if (found != null) return found; }
@@ -509,7 +587,7 @@ class WorkspaceSmokeMain {
 		options.title = "exosuit workspace acceptance";
 		options.width = 900; options.height = 600;
 		options.captureDirectory = args[1];
-		options.frameLimit = args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
+		options.frameLimit = args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
 		var status = DesktopUiHost.run(options, context -> new WorkspaceSmokeApp(context, args[0], args[2]));
 		platform.Native.shutdown();
 		return status;

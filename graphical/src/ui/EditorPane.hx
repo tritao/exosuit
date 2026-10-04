@@ -53,6 +53,8 @@ class EditorPane implements View {
 	 */
 	public final selection:BufferSelection;
 	final scrollController:ScrollController;
+	final minimap:EditorMinimap;
+	public var minimapEnabled:Bool = true;
 	final onEdited:Void->Void;
 	public var caretRect(default, null):Null<Rect> = null;
 	public var onResolvedEditor:Null<Rect->nativekit.ui.core.WidgetId->Void> = null;
@@ -88,6 +90,7 @@ class EditorPane implements View {
 		decorationProvider = provideDecorations;
 		this.onEdited = onEdited;
 		this.editorTheme = editorTheme == null ? new style.Theme() : editorTheme;
+		minimap = new EditorMinimap(document, this.scrollController, this.editorTheme, new editor.MinimapModel());
 		this.selection = selection == null ? new BufferSelection() : selection;
 		widgetSelection = new TextSelection(EditorCoordinates.codepoint(document, this.selection.anchor),
 			EditorCoordinates.codepoint(document, this.selection.cursor));
@@ -255,7 +258,10 @@ class EditorPane implements View {
 		area.colorRangeProvider = foregroundProvider;
 		area.decorationProvider = decorationProvider;
 		area.selectionProvider = selectionProvider;
-		area.onLayoutResolved = function(layout, geometry) gutter.resolveTextLayout(layout, geometry);
+		area.onLayoutResolved = function(layout, geometry) {
+			gutter.resolveTextLayout(layout, geometry);
+			minimap.resolveTextLayout(layout);
+		};
 		area.onCaretRect = function(rect) {
 			var previous = caretRect;
 			caretRect = rect;
@@ -300,10 +306,10 @@ class EditorPane implements View {
 		containerStyle.direction = LayoutDirection.LeftToRight;
 		var container = new nativekit.ui.core.RenderNode(context.id("editor-container:" + document.id), LayoutVisualKind.Box, containerStyle);
 		container.setStyleIdentity("editor-container", "editor-container:" + document.id);
-		container.setStyleIdentity("editor-container", "editor-container:" + document.id);
 		var viewport = new ScrollView("editor-scroll:" + document.id, row, scrollStyle, ScrollAxis.Vertical, scrollController);
 		viewport.scrollbarOverlayHost = container;
 		var node = viewport.build(context);
+
 		node.onResolved(function(_) {
 			var handler = onResolvedEditor;
 			if (handler == null) return;
@@ -329,6 +335,17 @@ class EditorPane implements View {
 			if (nativekit.ui.core.UiKey.isContextMenuRequest(event.key, event.modifiers)) requestMenu(event);
 		});
 		container.add(node);
+		if (!minimapEnabled) return container;
+		var preview = minimap.build(context);
+		container.add(preview);
+		container.onResolved(function(geometry) {
+			var width = geometry.width >= 480 ? 88.0 : 0.0;
+			if (preview.layout.style.width.value != width) {
+				preview.layout.style.width = LayoutAxis.fixed(width);
+				context.requestLayoutFeedback();
+			}
+			preview.hitTestSelf = width > 0;
+		});
 		return container;
 	}
 }

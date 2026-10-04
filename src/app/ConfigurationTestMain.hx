@@ -80,6 +80,14 @@ class ConfigurationTestMain {
 		require(service.reload() && service.current.scrollAnimationType == "smooth" && service.current.scrollAnimationDuration == 0.12,
 			"removed scroll override did not restore defaults");
 
+		File.saveContent(projectPath, "version=1\neditor.minimapEnabled=false\n");
+		require(service.reload() && !service.current.minimapEnabled && !service.current.copy().minimapEnabled,
+			"minimap setting or copy failed");
+		File.saveContent(projectPath, "version=1\neditor.minimapEnabled=invalid\n");
+		require(!service.reload() && !service.current.minimapEnabled, "invalid minimap setting replaced last good settings");
+		File.saveContent(projectPath, "version=1\n");
+		require(service.reload() && service.current.minimapEnabled, "removed minimap setting did not restore default");
+
 		for (mode in ["auto", "always", "hidden"]) {
 			File.saveContent(projectPath, "version=1\nworkbench.scrollbarVisibility=" + mode + "\n");
 			require(service.reload() && service.current.scrollbarVisibility == mode && service.current.copy().scrollbarVisibility == mode,

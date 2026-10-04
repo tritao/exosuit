@@ -623,6 +623,7 @@ class ExosuitApp implements DesktopUiApplication {
 					host.getPluginDecorations(), documentView.decorationSearchMatches, documentView.searchDecorationRevision, documentView.scrollController);
 				editorPanes.set(documentView.id, pane);
 			}
+			pane.minimapEnabled = application.settings.current.minimapEnabled;
 			pane.onResolvedEditor = function(bounds, id) host.editorResolved(paneId, bounds, id);
 			pane.onActivated = function() host.activateTab(document, paneId);
 			pane.onContextMenu = function(event) {

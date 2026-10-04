@@ -27,6 +27,7 @@ editor.fontFallbacks=data/fonts/NotoSansSymbols2-Regular.ttf,/usr/share/fonts/op
 editor.fontSize=15
 editor.tabWidth=4
 editor.insertSpaces=true
+editor.minimapEnabled=true
 editor.scroll_animation_type=smooth
 editor.scroll_animation_duration=0.12
 plugins.haxeon.enabled=true
@@ -104,3 +105,8 @@ Use `always` to keep overflowing scrollbars visible, or `hidden` to remove both
 the bar and its pointer target while retaining wheel and keyboard scrolling.
 Changes apply live across scrollable panels. Bars overlay content without
 changing viewport size.
+
+`editor.minimapEnabled` shows a file overview on the right of graphical and web editors.
+Click to jump or drag its viewport to scroll. It hides below 480 logical pixels of
+editor width. Previews sample at most 512 lines and 80 columns; large files use
+neutral strokes to avoid forcing full-document syntax highlighting.
