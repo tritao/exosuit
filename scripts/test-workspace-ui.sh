@@ -53,3 +53,11 @@ run_phase sidebar-preview sidebar-preview "$fixture/sidebar-project/Main.hx"
 run_phase sidebar-stale-preview sidebar-stale-preview "$fixture/sidebar-project/Main.hx"
 
 run_phase editor-scroll editor-scroll "$fixture/sidebar-project/Main.hx"
+
+mkdir -p "$fixture/state-language-folder"
+python3 - "$fixture/state-language-folder/settings.conf" "$root_dir/tests/fake_lsp.py" "$fixture/language-events.jsonl" <<'PYLANG'
+import json, sys
+with open(sys.argv[1], "w") as settings:
+    settings.write("version=1\nplugins.haxeon.command=" + json.dumps(["python3", sys.argv[2], "--events", sys.argv[3]]) + "\n")
+PYLANG
+run_phase language-folder language-folder "$fixture/sidebar-project/Main.hx"

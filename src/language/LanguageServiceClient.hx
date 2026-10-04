@@ -38,6 +38,10 @@ class LanguageServiceClient {
 	var restartAt:Float = -1;
 	var restartCount:Int = 0;
 	var stopping:Bool = false;
+	var clock:Float = 0;
+	var readySince:Float = -1;
+	var failureScheduled:Bool = false;
+	public var includesDocument:Document->Bool;
 
 	public function new(processes:ProcessManager, documents:DocumentManager, executable:String, arguments:Array<String>, rootPath:String) {
 		this.processes = processes;
@@ -45,11 +49,13 @@ class LanguageServiceClient {
 		this.executable = executable;
 		this.arguments = arguments.copy();
 		this.rootPath = rootPath;
+		includesDocument = document -> document.path != null && StringTools.startsWith(document.path, StringTools.endsWith(rootPath, "/") ? rootPath : rootPath + "/");
 	}
 
 	public function start(now:Float):Bool {
+		clock = now;
 		if (transport != null) return true;
-		stopping = false;
+		stopping = false; failureScheduled = false; readySince = -1;
 		try {
 			process = processes.start(executable, arguments, rootPath);
 		} catch (error:Dynamic) {
@@ -63,7 +69,7 @@ class LanguageServiceClient {
 		};
 		session.notification = receiveNotification;
 		session.serverRequest = receiveServerRequest;
-		session.failed = message -> scheduleRestart(Sys.time(), session.stderr.length == 0 ? message : message + ": " + session.stderr);
+		session.failed = message -> scheduleRestart(clock, session.stderr.length == 0 ? message : message + ": " + session.stderr);
 		status = "initializing";
 		session.request("initialize", {
 			processId: null,
@@ -75,10 +81,12 @@ class LanguageServiceClient {
 	}
 
 	public function update(now:Float):Void {
+		clock = now;
+		if (ready && readySince >= 0 && now - readySince >= 30) restartCount = 0;
 		var session = transport;
 		if (session != null) {
 			session.update(now);
-			if (session.failure != null) retireSession();
+			if (session.failure != null || status == "failed" || status == "disabled after repeated failures") retireSession();
 		}
 		if (transport == null && !stopping && restartAt >= 0 && now >= restartAt) start(now);
 		if (ready) synchronizeDocuments();
@@ -86,6 +94,7 @@ class LanguageServiceClient {
 
 	public function stop(now:Float):Void {
 		if (stopping) return;
+		clock = now;
 		stopping = true;
 		ready = false;
 		restartAt = -1;
@@ -97,7 +106,7 @@ class LanguageServiceClient {
 		status = "stopping";
 		session.request("shutdown", null, now, 1.0, response -> {
 			session.notify("exit", null);
-			session.update(Sys.time());
+			session.update(clock);
 			retireSession();
 		});
 	}
@@ -212,12 +221,12 @@ class LanguageServiceClient {
 	function initialized(response:JsonRpcResponse):Void {
 		if (stopping) return;
 		if (response.error != null || response.result == null) {
-			scheduleRestart(Sys.time(), response.error == null ? "language server returned no initialize result" : response.error);
+			scheduleRestart(clock, response.error == null ? "language server returned no initialize result" : response.error);
 			return;
 		}
 		var capabilities:Dynamic = Reflect.field(response.result, "capabilities"), encoding:Dynamic = capabilities == null ? null : Reflect.field(capabilities, "positionEncoding");
 		if (encoding != null && Std.string(encoding).toLowerCase() != "utf-16") {
-			scheduleRestart(Sys.time(), "language server does not support UTF-16 positions");
+			scheduleRestart(clock, "language server does not support UTF-16 positions");
 			return;
 		}
 		ready = true;
@@ -226,7 +235,7 @@ class LanguageServiceClient {
 		definitionSupported = capability(capabilities, "definitionProvider");
 		signatureHelpSupported = capability(capabilities, "signatureHelpProvider");
 		status = "ready";
-		restartCount = 0;
+		readySince = clock;
 		transport.notify("initialized", {});
 		synchronizeDocuments();
 	}
@@ -234,7 +243,7 @@ class LanguageServiceClient {
 	function synchronizeDocuments():Void {
 		var live:Map<Int, Bool> = [];
 		for (document in documents.documents) {
-			if (!eligible(document)) continue;
+			if (!eligible(document) || !includesDocument(document)) continue;
 			live.set(document.id, true);
 			var documentUri = uri(document.requirePath()), state = states.get(document.id);
 			if (state == null) openDocument(document, documentUri); else if (state.uri != documentUri) {
@@ -328,7 +337,8 @@ class LanguageServiceClient {
 	}
 
 	function scheduleRestart(now:Float, message:String):Void {
-		if (stopping) return;
+		if (stopping || failureScheduled) return;
+		failureScheduled = true;
 		ready = false;
 		status = "failed";
 		report("Language server: " + message);
@@ -338,7 +348,7 @@ class LanguageServiceClient {
 			return;
 		}
 		restartCount++;
-		restartAt = now + RESTART_DELAY;
+		restartAt = now + RESTART_DELAY * Math.pow(2, restartCount - 1);
 	}
 
 	function retireSession():Void {

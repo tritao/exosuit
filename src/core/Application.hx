@@ -124,7 +124,7 @@ class Application {
 		build = new BuildController(workspace, root, context, commands, processes, path -> open(path), reportError, this.capabilities.supports(Processes));
 		var languageCommand = config.LanguageServerCommand.current(this.settings.current);
 		language = new LanguageController(workspace, root, context, commands, processes, languageCommand[0], reportError,
-			languageCommand.slice(1), this.capabilities.supports(LanguageServices), effectiveSettings);
+			languageCommand.slice(1), this.capabilities.supports(LanguageServices), () -> this.settings.current);
 		root.configureWelcomeActions({
 			recentProjects: this.recentProjects.paths,
 			newFile: function() { newDocument(); },

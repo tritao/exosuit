@@ -2,6 +2,51 @@
 
 Last updated: 2026-10-04.
 
+## M10.1 — workspace-folder language sessions, 2026-10-04
+
+- User-approved scope replaces the earlier single-client/last-document-stop
+  proposal: lazily launch one server per workspace folder, route nested files
+  to their longest matching root, retain sessions across tab changes and the
+  last document closing, and stop only on folder removal, disablement or
+  explicit Stop. Folder-local configuration changes restart only that session,
+  including warm sessions with no open documents. Explicit Stop suppresses
+  automatic startup until Start or folder removal.
+- LanguageController owns root-indexed sessions and independently owned
+  diagnostics/failure Problems. It pumps all live and retiring sessions rather
+  than just the selected document's client. Settings use each owning folder's
+  layers; configuration polling reloads every folder. The graphical shell now
+  loads user settings from the existing settings path, and the development
+  launcher exports the selected compiler's absolute root for server fallback.
+- Retry callbacks use the supplied update clock, schedule one retry per
+  failed attempt, retire failed initialization transports, and back off by
+  0.25/0.5/1 seconds. Three retries exhaust automatic recovery; thirty healthy
+  seconds reset the count. Failure status and Problems clear after recovery,
+  and a ready notification replaces the earlier failure notification.
+- Headless regression covers two/nested folders, one initial process per root,
+  isolated settings, active-folder switches, retained sessions, warm-session
+  reconfiguration, folder removal, explicit Stop/Start, external SIGKILL,
+  wrong-command recovery, unsupported initialization encoding and disablement.
+  The real-window phase verifies automatic startup and visible status/Problems
+  with file-based settings recovery. It initially exposed missing process
+  initialization in the test harness and missing user-settings loading in the
+  shell; both are corrected. Linux checks only; other platforms remain pending.
+- Verification: serial process 5550 passed (exit 0): workspace UI, full
+  headless, desktop build, real Haxeon LSP and both wasm32/wasm-gc browser
+  targets. Logs: /tmp/exosuit-folder-lsp-ui4.log,
+  /tmp/exosuit-folder-lsp-{headless,desktop}-final.log and
+  /tmp/exosuit-folder-lsp-{real,web}.log. The development launcher also passed
+  a real-server window capture (35975, exit 0), with initialize, didOpen and
+  empty diagnostics in /tmp/exosuit-folder-launch-smoke-capture.log. Its first
+  trial lacked capture mode, so the host did not honor the frame limit; only
+  that isolated test app/server were terminated before the bounded rerun.
+  bash -n and git diff --check pass. No compiler/native/ABI edits.
+- M10.1 accepted. Slice committed with this ledger; git log identifies its SHA.
+  Only owned Exosuit paths changed; pre-existing Haxeon/NativeKit dirt and
+  materia pins remain unchanged. No publishing or user-app relaunch.
+- Next: M10.2 negotiated symbols, references and rename UI,
+  including stale-revision rejection and real-server feature acceptance.
+  Prior M10.1 last-document-stop instructions below are superseded.
+
 ## M10.1 — stopping-client ownership, 2026-10-04
 
 - Added a regression that stops the configured fake server, pumps the controller

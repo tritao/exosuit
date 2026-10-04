@@ -8,6 +8,9 @@ set -euo pipefail
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 haxeon_root=${HAXEON_ROOT:-"$root_dir/../haxeon"}
 haxeon=${HAXEON_BIN:-"$haxeon_root/scripts/haxeon"}
+# The CLI launches the app from the graphical project's directory. Keep the
+# development server fallback anchored to the compiler selected by this wrapper.
+export HAXEON_ROOT="$(cd "$haxeon_root" && pwd)"
 
 # Match scripts/build.sh and the Haxeon CLI compiler default.
 extra=()

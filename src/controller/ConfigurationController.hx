@@ -98,6 +98,7 @@ class ConfigurationController {
 
 	public function update():Void {
 		settings.reload();
+		for (project in workspace.projects) { var local = project.settings; if (local != null) local.reload(); }
 		var effective = effectiveSettings();
 		if (effective != appliedSettings) apply(effective);
 		reportDiagnostics();

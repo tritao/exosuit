@@ -69,3 +69,13 @@ root fallback resolves against the editor launch directory before the server
 starts in the project directory. `plugins.haxeon.enabled=false` disables
 server startup. `plugins.haxeon.verbose=true` logs protocol messages to the
 launch console, limited to 2,048 characters per message.
+
+Haxeon sessions belong to workspace folders. The first backed `.hx` document
+starts that folder's server; nested folders own their documents in preference
+to outer folders. Tab switches and closing the last document keep the session
+warm. Removing a folder or disabling its server retires that session. Changing
+its server configuration restarts only that folder's session, including a warm
+session with no documents. Explicit Stop suppresses automatic startup for that
+folder until Start is used or the folder is removed. Failures appear in status and Problems;
+restarts back off by 0.25, 0.5 and 1 second, then require recovery via settings
+or Start. Thirty seconds of healthy operation resets the retry count.

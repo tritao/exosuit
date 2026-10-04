@@ -15,13 +15,15 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	var oldColumns = 0;
 	var paletteCommand = "";
 	var sidebarWidth = 0.0;
+	var languageStage = 0;
+	var languageSettings = "";
 
 	public function new(context:nativekit.ui.host.DesktopUiHostContext, path:String, phase:String) {
-		super(context.fonts, null, context, phase == "editor-scroll" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
+		super(context.fonts, null, context, phase == "language-folder" || phase == "editor-scroll" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
 			null, null, null, WorkspaceSmokeMain.createTerminal);
 		this.phase = phase;
 		this.path = path;
-		if (phase == "sidebar-write" || phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) application.openArgument(path.substring(0, path.lastIndexOf("/")));
+		if (phase == "language-folder" || phase == "sidebar-write" || phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) application.openArgument(path.substring(0, path.lastIndexOf("/")));
 	}
 
 	function require(value:Bool, message:String):Void { if (!value) throw message; }
@@ -33,6 +35,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 
 	override public function submit(frame:LayoutFrame):nativekit.ui.core.RenderNode {
 		frames++;
+		if (phase == "language-folder") languageStep();
 		if (phase == "editor-scroll") {
 			frame.deltaSeconds = 1.0 / 60.0;
 			var view = host.activeView();
@@ -288,6 +291,28 @@ class WorkspaceSmokeApp extends ExosuitApp {
 			}
 		}
 	}
+	function languageStep():Void {
+		var service = application.language.client;
+		var settingsPath = config.ConfigurationPaths.userSettings();
+		if (languageStage == 0 && service != null && service.ready && ui.root != null && hasText(node("exosuit-status"), "Haxeon: ready")) {
+			languageSettings = sys.io.File.getContent(settingsPath);
+			sys.io.File.saveContent(settingsPath, "version=1\nplugins.haxeon.command=" + haxe.Json.stringify([path + "/missing-server"]) + "\n");
+			languageStage = 1;
+		} else if (languageStage == 1 && host.getProblems().values().length > 0 && ui.root != null && hasText(node("exosuit-status"), "language server")) {
+			require(hasText(node("problems-scroll"), "language server"), "language failure did not render in Problems");
+			sys.io.File.saveContent(settingsPath, languageSettings); languageStage = 2;
+		} else if (languageStage == 2 && service != null && service.ready && host.getProblems().values().length == 0 && ui.root != null && hasText(node("exosuit-status"), "ready")) {
+			languageStage = 3;
+			trace("PASS: real window starts folder server, renders wrong-command status/Problems and recovers from settings reload");
+		}
+		if (frames == 120) require(languageStage == 3, "language folder UI acceptance did not complete: stage=" + languageStage + ", status=" + application.language.statusLabel() + ", problems=" + [for (problem in host.getProblems().values()) problem.message].join("; "));
+	}
+	static function hasText(node:nativekit.ui.core.RenderNode, value:String):Bool {
+		if (node.layout.text != null && node.layout.text.toLowerCase().indexOf(value.toLowerCase()) >= 0) return true;
+		for (child in node.children) if (hasText(child, value)) return true;
+		return false;
+	}
+
 	function resizeSidebar(delta:Float):Void {
 		var bounds = node("sidebar-modes").globalBounds();
 		var x = bounds.x + bounds.width + 4, y = bounds.y + bounds.height / 2;
@@ -304,13 +329,14 @@ class WorkspaceSmokeMain {
 		return panel;
 	}
 	static function main():Int {
+		platform.Platform.startHeadless();
 		var args = Sys.args();
 		if (args.length != 3) throw "expected source path, capture directory and phase";
 		var options = new DesktopUiHostOptions();
 		options.title = "exosuit workspace acceptance";
 		options.width = 900; options.height = 600;
 		options.captureDirectory = args[1];
-		options.frameLimit = args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
+		options.frameLimit = args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
 		var status = DesktopUiHost.run(options, context -> new WorkspaceSmokeApp(context, args[0], args[2]));
 		platform.Native.shutdown();
 		return status;

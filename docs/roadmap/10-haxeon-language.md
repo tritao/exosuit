@@ -11,13 +11,17 @@ lifecycle and UI. The reference behavior is Pragtical's
   (argument list), `verbose`. Keep the resolution order: config, then
   `$HAXEON_LSP`, then the bundled server, then
   `$HAXEON_ROOT/scripts/haxeon-lsp`. `HAXEON_ROOT` defaults to `../haxeon`.
-- [ ] Start the server automatically when a `.hx` document opens in a
-  project, and stop it when the last one closes or the project changes.
+- [x] Start one server lazily per workspace folder when its first `.hx` document
+  opens. Route documents/settings by owning root, including nested roots.
+  Keep sessions across tab switches and last-document closure; stop on folder
+  removal or explicit Stop. Reconfigure only the affected folder.
   Restart on crash with backoff, and surface failures in status and problems.
 
 Acceptance: opening a `.hx` file starts exactly one server. Killing it
 externally leads to a visible restart. A wrong command produces a clear,
-recoverable error.
+recoverable error. Multiple and nested folders route documents independently;
+last-document closure retains sessions and folder-local configuration changes
+leave other folders' sessions running.
 
 ## M10.2 — Feature UI
 

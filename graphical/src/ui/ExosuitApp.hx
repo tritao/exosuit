@@ -132,7 +132,7 @@ class ExosuitApp implements DesktopUiApplication {
 				activateBuild: function() dock.activate("build")
 			});
 			return capturedHost;
-		}, null, null, this.capabilities);
+		}, new config.SettingsService(config.ConfigurationPaths.userSettings()), null, this.capabilities);
 		host = capturedHost;
 		sidebar.setVisible(dock.isOpen("explorer"));
 		sidebar.onChange = syncSidebar;
@@ -440,7 +440,7 @@ class ExosuitApp implements DesktopUiApplication {
 				requestFrame();
 			}
 		}
-		if (application.build.active != null || application.language.client != null ||
+		if (application.build.active != null || application.language.hasPendingWork() ||
 			!application.search.workspaceSearch.complete || application.workspace.jobs.activeCount() > 0) requestFrame();
 	}
 
@@ -528,7 +528,8 @@ class ExosuitApp implements DesktopUiApplication {
 		var label = active == null ? (terminal == null ? "No document open" : terminal.title) :
 			(active.title + (active.dirty ? " *" : "") + " - " + active.encodingLabel());
 		var notification = application.root.getNotifications().current();
-		var trailing = notification == null ? '${host.activePane.items.length} open' : notification.message;
+		var languageStatus = application.language.statusLabel();
+		var trailing = notification == null && languageStatus.length > 0 ? languageStatus : notification == null ? '${host.activePane.items.length} open' : notification.message;
 		return new Row("exosuit-status", [
 			new KeyedView("document", new Text(label, null, theme.tokens.textSecondary,
 				TextStyleOverride.text(12.0))),

@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 import json
 import sys
+import os
+
+events_path = sys.argv[sys.argv.index("--events") + 1] if "--events" in sys.argv else None
+root_uri = ""
 
 minimal = len(sys.argv) > 1 and sys.argv[1] == "minimal"
 
@@ -36,7 +40,13 @@ while True:
         break
     method = message.get("method")
     if method == "initialize":
-        capabilities = {"positionEncoding": "utf-16", "textDocumentSync": {"openClose": True, "change": 2}}
+        root_uri = message["params"]["rootUri"]
+    if events_path:
+        with open(events_path, "a") as events:
+            events.write(json.dumps({"pid": os.getpid(), "root": root_uri, "method": method,
+                                     "params": message.get("params")}) + "\n")
+    if method == "initialize":
+        capabilities = {"positionEncoding": "utf-8" if "bad-encoding" in sys.argv else "utf-16", "textDocumentSync": {"openClose": True, "change": 2}}
         if not minimal:
             capabilities.update({"hoverProvider": True, "completionProvider": {}, "definitionProvider": True,
                                  "signatureHelpProvider": {"triggerCharacters": ["(", ","]}})
