@@ -2,6 +2,7 @@ package app;
 
 import ui.ExosuitApp;
 import ui.UiEditorTabs;
+import ui.SetiIconData;
 import nativekit.ui.host.DesktopUiHost;
 import nativekit.ui.host.DesktopUiHostOptions;
 import nativekit.ui.core.UiEventKind;
@@ -21,7 +22,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	var languageOriginal = "";
 
 	public function new(context:nativekit.ui.host.DesktopUiHostContext, path:String, phase:String) {
-		super(context.fonts, null, context, phase == "scrollbar-visibility" ? path : phase == "explorer-preview" ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-minimap" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
+		super(context.fonts, null, context, (phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-tabs" || phase == "editor-minimap" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
 			null, null, null, WorkspaceSmokeMain.createTerminal);
 		this.phase = phase;
 		this.path = path;
@@ -40,6 +41,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		if (phase == "scrollbar-visibility") return scrollbarStep(frame);
 		if (phase == "editor-resize") return resizeStep(frame);
 		if (phase == "editor-minimap") return minimapStep(frame);
+		if (phase == "editor-tabs") return tabsStep(frame);
 		if (phase == "language-folder") languageStep();
 		if (phase == "explorer-preview") explorerStep();
 		if (phase == "editor-scroll") {
@@ -166,7 +168,81 @@ class WorkspaceSmokeApp extends ExosuitApp {
 				trace("PASS: keyboard-only split, directional focus, tab move and pane close");
 			}
 		}
-		return super.submit(frame);
+		if (phase == "explorer-icons") {
+			if (frames == 1) {
+				var root = path.substring(0, path.lastIndexOf("/"));
+				application.openArgument(root + "/Main.hx");
+				application.openArgument(root + "/data.json");
+			}
+			if (frames == 4) { resizeSidebar(-80); frame.setViewport(500.0, 600.0); }
+			if (frames >= 6) frame.setViewport(1400.0, 600.0);
+			if (frames == 7) resizeSidebar(650);
+			var addedPath = path.substring(0, path.lastIndexOf("/")) + "/added-after-render.txt";
+			if (frames == 9) sys.io.File.saveContent(addedPath, "new file");
+			if (frames == 11) sys.FileSystem.deleteFile(addedPath);
+		}
+		var result = super.submit(frame);
+		if (phase == "explorer-icons" && (frames == 10 || frames == 12)) {
+			var addedPath = path.substring(0, path.lastIndexOf("/")) + "/added-after-render.txt";
+			var row = treeRow(ui.root, addedPath);
+			require(frames == 10 ? row != null : row == null, "cached explorer did not reflect external file change");
+			if (frames == 12) trace("PASS: retained explorer reflects external file creation and deletion");
+		}
+
+		if (phase == "explorer-icons" && (frames == 5 || frames == 8)) {
+			var filename = "language-controller-test-with-an-extra-long-filename.hl";
+			var root = path.substring(0, path.lastIndexOf("/"));
+			var row = treeRow(ui.root, root + "/" + filename);
+			var checked = false;
+			row.walk(function(child) {
+				if (child.layout.visualKind == LayoutVisualKind.Text && child.semantics != null && child.semantics.label == filename) {
+					checked = true;
+					if (frames == 5) require(StringTools.endsWith(child.layout.text, "…"), "narrow tree label has no ellipsis");
+					else require(child.layout.text == filename, "wide tree label did not restore full filename: " + child.layout.text + " width=" + child.globalBounds().width);
+				}
+			});
+			require(checked, "ellipsized label lost its full accessible filename");
+			if (frames == 8) trace("PASS: tree ellipsis follows sidebar width and restores full filenames");
+		}
+
+		if (phase == "explorer-icons" && (frames == 3 || frames == 4)) {
+			var root = path.substring(0, path.lastIndexOf("/"));
+			var names = ["Main.hx", "data.json", "notes.md", "README.md", "tool.py", "Dockerfile", "mystery.wibble", "language-controller-test-with-an-extra-long-filename.hl"];
+			var ids = ["_haxe", "_json", "_markdown", "_info", "_python", "_docker", "_default", "_default"];
+			for (index in 0...names.length) {
+				var row = treeRow(ui.root, root + "/" + names[index]);
+				require(row != null, "icon row missing: " + names[index]);
+				var found = false;
+				row.walk(function(child) {
+					if (child.styleType == "file-icon" && child.styleKey == ids[index]) found = true;
+					if (child.layout.visualKind == LayoutVisualKind.Text && child.resolved != null)
+						require(child.resolved.height <= row.globalBounds().height, "filename wrapped into neighboring rows: " + names[index]);
+				});
+				require(found, "wrong or missing Seti icon: " + names[index]);
+				require(Math.abs(row.globalBounds().height - 26.0) < 0.01, "explorer row height regressed");
+			}
+			for (view in host.allViews()) {
+				var tab = node("doc:" + view.document.id);
+				var expected = SetiIconData.iconId(view.document.title);
+				var found = false;
+				tab.walk(function(child) { if (child.styleType == "file-icon" && child.styleKey == expected) found = true; });
+				require(found, "document tab missing file icon: " + view.document.title);
+				if (frames == 4 && view.document.title == "Main.hx") {
+					tab.walk(function(child) {
+						if (child.styleType == "file-icon") {
+							var bounds = child.globalBounds();
+							ui.pointerDown(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+							ui.pointerUp(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+						}
+					});
+					var activeDocument = host.activeDocument();
+					require(activeDocument != null && activeDocument.title == "Main.hx", "clicking the tab icon did not activate its document");
+				}
+			}
+			if (frames == 3) host.activeView().textInput("dirty");
+			if (frames == 4) trace("PASS: tree labels stay on one line after resize and document tabs retain file icons after edits");
+		}
+		return result;
 	}
 	function resizeStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
 		var view = host.activeView();
@@ -196,6 +272,63 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		require(Math.abs(controller.contentHeight - height) < 0.01 && Math.abs(controller.offsetY - offset) < 0.01,
 			"editor layout did not settle on first resize frame: " + height + " -> " + controller.contentHeight);
 		if (frames == 7) trace("PASS: repeated editor resizes settle wrapped content, offsets and scrollbar geometry in one frame");
+		return result;
+	}
+
+	function tabsStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+		if (frames == 1) sidebar.setVisible(false);
+		frame.setViewport(frames == 7 ? 640 : 900, 600);
+		if (frames == 2) {
+			var folder = path.substring(0, path.lastIndexOf("/"));
+			for (name in ["NativeDesktopPlatform.hx", "Platform.hx", "README.md", "a-very-long-Unicode-🙂-filename-that-needs-an-ellipsis.hx", "Last.hx"])
+				application.openArgument(folder + "/" + name);
+		}
+		if (frames == 4) {
+			var scroll = node("editor-tab-scroll");
+			var bounds = scroll.globalBounds();
+			ui.scroll(bounds.x + 20, bounds.y + 10, 0, -10000);
+		}
+		if (frames == 5) host.activateTab(host.allViews()[0].document);
+		if (frames == 9) {
+			var tabs = node("editor-tab-scroll").children[0].children[0].children;
+			var bounds = tabs[tabs.length - 2].children[0].globalBounds();
+			ui.pointerMove(bounds.x + 40, bounds.y + 10);
+		}
+		if (frames == 6) {
+			var views = host.allViews();
+			host.activateTab(views[views.length - 1].document);
+		}
+		var result = super.submit(frame);
+		if (frames >= 3) {
+			var scroll = node("editor-tab-scroll");
+			var content = scroll.children[0].children[0];
+			var previousRight = -100000.0;
+			var truncated = false;
+			for (tooltip in content.children) {
+				var header = tooltip.children[0];
+				var bounds = header.globalBounds();
+				require(bounds.x >= previousRight - 0.01, "editor tab headers overlap");
+				previousRight = bounds.x + bounds.width;
+				header.walk(function(child) {
+					if (child.layout.visualKind == LayoutVisualKind.Text) {
+						require(child.globalBounds().width <= 181, "tab label exceeds width cap");
+						if (child.layout.text.indexOf("…") >= 0) truncated = true;
+					}
+				});
+				var semantics = header.children[0].semantics;
+				if (semantics == null) throw "tab lost its accessible filename";
+				require(tooltip.children[1].children[0].layout.text == semantics.label, "tooltip lost full filename");
+			}
+			require(truncated, "long filename was not ellipsized");
+			if (frames == 5) require(content.children[0].globalBounds().x >= scroll.globalBounds().x - 1, "vertical wheel did not scroll tab rail back");
+			if (frames == 8) {
+				var last = content.children[content.children.length - 1].children[0].globalBounds();
+				var bounds = scroll.globalBounds();
+				require(last.x >= bounds.x - 1 && last.x + last.width <= bounds.x + bounds.width + 1,
+					"active tab was not revealed after selection/resize");
+				trace("PASS: crowded editor tabs do not overlap, long Unicode labels ellipsize, tooltips preserve filenames, wheel scrolling and active reveal work");
+			}
+		}
 		return result;
 	}
 
@@ -587,7 +720,7 @@ class WorkspaceSmokeMain {
 		options.title = "exosuit workspace acceptance";
 		options.width = 900; options.height = 600;
 		options.captureDirectory = args[1];
-		options.frameLimit = args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
+		options.frameLimit = args[2] == "editor-tabs" ? 10 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
 		var status = DesktopUiHost.run(options, context -> new WorkspaceSmokeApp(context, args[0], args[2]));
 		platform.Native.shutdown();
 		return status;

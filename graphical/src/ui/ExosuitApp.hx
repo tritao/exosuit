@@ -91,6 +91,7 @@ class ExosuitApp implements DesktopUiApplication {
 	public final sidebar = new nativekit.ui.widgets.sidebar.SidebarModel();
 	var explorerRoot:Null<String>;
 	var explorerModel:Null<DirectoryTreeModel>;
+	var explorerTree:Null<TreeView>;
 	final tabClicks = new nativekit.ui.core.PointerClickSequence();
 	var statusMessage:String = "Ready";
 	var paletteVisible:Bool = false;
@@ -553,9 +554,12 @@ class ExosuitApp implements DesktopUiApplication {
 			return new Column("explorer-empty", [new KeyedView("open", open)], compact);
 		}
 		if (explorerModel == null) explorerModel = new DirectoryTreeModel(explorerRoot, theme);
+		explorerModel.refresh();
+		if (explorerTree != null) return new ExplorerTreeView(explorerTree, explorerModel, darkPalette);
 		var viewportStyle = new LayoutStyle();
 		viewportStyle.width = LayoutAxis.grow();
 		viewportStyle.height = LayoutAxis.grow();
+		viewportStyle.clipHorizontal = true;
 		var tree = new TreeView("exosuit-explorer-tree", explorerModel, viewportStyle, filesScroll, 640.0,
 			null, [explorerRoot], function(key) { host.setSelectedExplorerPath(key); }, function(key) {
 				if (!FileSystem.isDirectory(key)) application.open(key);
@@ -575,7 +579,8 @@ class ExosuitApp implements DesktopUiApplication {
 				new CommandMenuEntry("file:delete", "Delete…")
 			], event, function() return explorerRoot == menuRoot && host.focusedFilePath() == path && FileSystem.exists(path));
 		};
-		return tree;
+		explorerTree = tree;
+		return new ExplorerTreeView(tree, explorerModel, darkPalette);
 	}
 
 	function explorerRail():View {
@@ -602,13 +607,14 @@ class ExosuitApp implements DesktopUiApplication {
 		if (editorPane.items.length == 0) return welcomePanel();
 		pruneStaleEditorPanes(host.allViews());
 		var items:Array<TabItem> = [];
+		var filenames:Map<String, String> = new Map();
 		for (item in editorPane.items) {
 			var terminal = UiEditorTabs.terminal(item);
 			if (terminal != null) {
 				var terminalKey = UiEditorTabs.key(item);
 				items.push(new TabItem(terminalKey, terminal.title, new TerminalTabView(terminal,
 					function() host.activateEditorTab(terminalKey, paneId),
-					function(bounds, id) host.editorResolved(paneId, bounds, id))));
+					function(bounds, id) host.editorResolved(paneId, bounds, id)), true, IconName.Terminal));
 				continue;
 			}
 			var documentView = UiEditorTabs.document(item);
@@ -645,6 +651,7 @@ class ExosuitApp implements DesktopUiApplication {
 					else requestFrame();
 				}
 			};
+			filenames.set("doc:" + document.id, document.title);
 			items.push(new TabItem("doc:" + document.id, (document.dirty ? "* " : "") + document.title + (documentView.preview ? " (preview)" : ""),
 				pane));
 		}
@@ -688,7 +695,7 @@ class ExosuitApp implements DesktopUiApplication {
 				return;
 			}
 		};
-		return widget;
+		return new EditorTabsView(widget, filenames, darkPalette);
 	}
 
 	function showContextMenu(entries:Array<CommandMenuEntry>, event:UiEvent, valid:Void->Bool):Void {
@@ -774,6 +781,7 @@ class ExosuitApp implements DesktopUiApplication {
 		if (FileSystem.exists(path) && FileSystem.isDirectory(path)) {
 			explorerRoot = application.workspace.fileSystem.normalize(path);
 			explorerModel = null;
+			explorerTree = null;
 			filesScroll.jumpTo(0, 0);
 			openExplorer();
 			application.openArgument(path);
@@ -804,6 +812,7 @@ class ExosuitApp implements DesktopUiApplication {
 			if (accepted && paths.length > 0) {
 				explorerRoot = application.workspace.fileSystem.normalize(paths[0]);
 				explorerModel = null;
+			explorerTree = null;
 				filesScroll.jumpTo(0, 0);
 				openExplorer();
 				application.openArgument(paths[0]);

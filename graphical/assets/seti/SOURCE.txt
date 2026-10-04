@@ -1,0 +1,12 @@
+Seti icon font, file associations and VS Code bundled language associations from Microsoft VS Code
+https://github.com/microsoft/vscode/tree/a11e4a544c9c19643f08fb400d8659ebb84cbc8f/extensions/theme-seti
+
+Run scripts/generate-seti-icons.py to regenerate the embedded font and lookup table.
+
+The font is converted from WOFF to TrueType for native FreeType compatibility.
+The generated Haxe source embeds the converted bytes; runtime asset paths are not required.
+The generator requires Python fonttools.
+
+Language extension and filename associations come from contributes.languages in
+https://github.com/microsoft/vscode/tree/a11e4a544c9c19643f08fb400d8659ebb84cbc8f/extensions
+Seti-specific filename and extension mappings take precedence over language defaults.

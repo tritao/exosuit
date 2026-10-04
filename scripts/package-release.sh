@@ -64,6 +64,8 @@ cp "$root_dir/docs/"*.md "$stage/docs/"
 cp "$materia_root/nativekit/LICENSE" "$stage/licenses/NativeKit-LICENSE"
 cp "$haxeon_root/vendor/hashlink/LICENSE" "$stage/licenses/HashLink-LICENSE"
 cp "$haxeon_root/stdlib/LICENSE" "$stage/licenses/Haxe-stdlib-LICENSE"
+mkdir -p "$stage/licenses/seti"
+cp "$root_dir/graphical/assets/seti/LICENSE.txt" "$root_dir/graphical/assets/seti/ThirdPartyNotices.txt" "$root_dir/graphical/assets/seti/SOURCE.txt" "$stage/licenses/seti/"
 # Preserve native dependency notices with their original names and hierarchy.
 for toolkit in nativekit uikit; do
 	while IFS= read -r -d '' notice; do
