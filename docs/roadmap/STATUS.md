@@ -2,6 +2,27 @@
 
 Last updated: 2026-10-04.
 
+## Editor scrollbar at the outer pane edge, 2026-10-04
+
+- ScrollView accepts an optional enclosing overlay host. The editor supplies its
+  outer pane, placing its single scrollbar after the fixed minimap at the far
+  right edge. Content keeps its original viewport and scroll controller; no
+  document copies or separate visibility controller are introduced.
+- The relocated control forwards wheel and keyboard input to the same controller.
+  Pane activation captures input on the enclosing pane. Existing hover, delayed
+  fade, captured drag and visibility settings continue to apply.
+- UIKit framework regressions pass, including an external host with a fixed
+  sibling, far-right geometry, wheel, keyboard, drag outside, fade and unmount.
+  Real app checks with the minimap pass for visibility, smooth scrolling,
+  minimap navigation, narrow/disabled layouts and repeated resizing. The full
+  native workspace suite and desktop build also pass in an isolated snapshot
+  containing only the placement slice, avoiding concurrent icon/tab edits.
+- Commits: UIKit `650d116ec`; editor placement `eb0bfec`. Concurrent minimap
+  integration is separately committed as `4da728a`; remaining icon/tab changes
+  and dependency pins are preserved.
+- Next roadmap task: completion filtering and remaining language shortcuts in
+  M10.2.
+
 ## Shared automatic scrollbar visibility, 2026-10-04
 
 - UIKit ScrollView owns a persistent visibility controller and retires its
