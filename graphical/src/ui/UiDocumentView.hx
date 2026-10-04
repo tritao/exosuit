@@ -39,17 +39,23 @@ class UiDocumentView extends View {
 	final matches:Array<SearchMatch> = [];
 	var searchRevision:Int = 0;
 
-	public function new(document:Document, selection:BufferSelection) {
+	public function new(document:Document, selection:BufferSelection, ?settings:config.Settings) {
 		super(document.title);
 		id = nextId++;
 		this.document = document;
 		this.selection = selection;
+		applyScrollSettings(settings == null ? new config.Settings() : settings);
 		bufferSubscription = document.buffer.subscribe(function(change) {
 			this.selection.transform(document.buffer, change);
 		});
 	}
 
-	override public function dispose():Void bufferSubscription.release();
+	public function applyScrollSettings(settings:config.Settings):Void
+		scrollController.configureAnimation(settings.scrollAnimationType == "smooth", settings.scrollAnimationDuration);
+
+	override public function dispose():Void {
+		bufferSubscription.release(); scrollController.cancelAnimation();
+	}
 
 	override public function isDirty():Bool
 		return document.dirty;

@@ -17,7 +17,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	var sidebarWidth = 0.0;
 
 	public function new(context:nativekit.ui.host.DesktopUiHostContext, path:String, phase:String) {
-		super(context.fonts, null, context, phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
+		super(context.fonts, null, context, phase == "editor-scroll" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
 			null, null, null, WorkspaceSmokeMain.createTerminal);
 		this.phase = phase;
 		this.path = path;
@@ -33,6 +33,28 @@ class WorkspaceSmokeApp extends ExosuitApp {
 
 	override public function submit(frame:LayoutFrame):nativekit.ui.core.RenderNode {
 		frames++;
+		if (phase == "editor-scroll") {
+			frame.deltaSeconds = 1.0 / 60.0;
+			var view = host.activeView();
+			if (view == null) throw "scroll acceptance missing document";
+			if (frames == 3) {
+				view.restoreScroll(0, 0);
+				var bounds = node("editor-scroll:" + view.document.id).globalBounds();
+				ui.scroll(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0, 100);
+				require(view.scrollController.offsetY == 0, "smooth wheel jumped immediately");
+			}
+			if (frames == 5) require(view.scrollController.offsetY > 40 && view.scrollController.offsetY < 100, "editor wheel did not animate");
+			if (frames == 12) {
+				require(view.scrollController.offsetY >= 99, "editor scroll did not settle");
+				var settings = application.settings.current.copy(); settings.scrollAnimationType = "none";
+				host.applySettings(settings);
+				view.scrollController.scrollBy(0, 100);
+				require(view.scrollController.offsetY >= 199, "live scroll setting did not become immediate");
+				view.restoreScroll(0, 20);
+				require(view.scrollController.offsetY == 20, "restored scroll was animated");
+				trace("PASS: real editor wheel animates and motion configuration applies live");
+			}
+		}
 		if (StringTools.startsWith(phase, "sidebar-")) sidebarStep();
 		if (phase == "write") {
 			if (frames == 3) {
@@ -288,7 +310,7 @@ class WorkspaceSmokeMain {
 		options.title = "exosuit workspace acceptance";
 		options.width = 900; options.height = 600;
 		options.captureDirectory = args[1];
-		options.frameLimit = args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
+		options.frameLimit = args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
 		var status = DesktopUiHost.run(options, context -> new WorkspaceSmokeApp(context, args[0], args[2]));
 		platform.Native.shutdown();
 		return status;

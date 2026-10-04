@@ -138,11 +138,14 @@ class UiWorkbenchHost implements WorkbenchHost {
 	public var searchCapped(default, null):Bool = false;
 	public var searchErrorCount(default, null):Int = 0;
 
+	var scrollSettings:Settings;
+
 	public function new(theme:Theme, focus:FocusManager, workspace:Workspace, settings:Settings, requestFrame:Void->Void,
 			dockActions:DockActions) {
 		this.caretRectProvider = null;
 		this.languageArea = null;
 		this.theme = theme;
+		scrollSettings = settings.copy();
 		this.focus = focus;
 		this.workspace = workspace;
 		this.requestFrame = requestFrame;
@@ -192,7 +195,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		if (source != null) {
 			var selection = new BufferSelection();
 			selection.restoreSnapshot(source.document.buffer, source.selection.snapshot(), false);
-			created.items.push(UiEditorTab.Document(new UiDocumentView(source.document, selection)));
+			created.items.push(UiEditorTab.Document(new UiDocumentView(source.document, selection, scrollSettings)));
 			created.activeIndex = 0;
 		}
 		panes.push(created);
@@ -451,7 +454,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 				return existing;
 			}
 		}
-		var view = new UiDocumentView(document, new BufferSelection());
+		var view = new UiDocumentView(document, new BufferSelection(), scrollSettings);
 		activePane.items.push(UiEditorTab.Document(view));
 		setActiveIndex(activePane.items.length - 1);
 		return view;
@@ -648,7 +651,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 			if (pane == null) continue;
 			var document = resolver == null ? null : resolver(fields[7], fields[8]);
 			if (document == null) continue;
-			var view = new UiDocumentView(document, new BufferSelection());
+			var view = new UiDocumentView(document, new BufferSelection(), scrollSettings);
 			var line = Std.parseInt(fields[3]), column = Std.parseInt(fields[4]);
 			if (line != null && column != null) view.restoreCursor(line, column);
 			var scrollX = Std.parseInt(fields[5]), scrollY = Std.parseInt(fields[6]);
@@ -784,13 +787,12 @@ class UiWorkbenchHost implements WorkbenchHost {
 
 	// -- core.WorkbenchHost: settings & one-time wiring --
 
-	/**
-	 * uikit's fonts are loaded once into `DesktopUiHostContext.fonts` at host
-	 * startup (see `app.GraphicalMain`); this host has no hook to hot-reload
-	 * a different font path/size from `Settings`, so there is nothing to
-	 * apply and nothing that can fail to apply.
-	 */
-	public function applySettings(settings:Settings):Bool return true;
+	/** Updates motion settings for existing and future document panes. */
+	public function applySettings(settings:Settings):Bool {
+		scrollSettings = settings.copy();
+		for (view in allViews()) view.applyScrollSettings(scrollSettings);
+		return true;
+	}
 
 	public function configureFileActions(actions:FileActions):Void fileActions = actions;
 	public function configureWelcomeActions(actions:WelcomeActions):Void welcomeActions = actions;

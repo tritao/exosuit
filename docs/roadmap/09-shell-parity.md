@@ -55,7 +55,7 @@ Project search results navigate to the correct positions after edits.
 
 ## M9.4 — Smooth scrolling
 
-- [ ] Port the uncommitted Pragtical change (`data/core/view.lua`,
+- [x] Port the uncommitted Pragtical change (`data/core/view.lua`,
   `config.lua`, `settings.lua` in `../pragtical`). Use a frame-rate-independent
   exponential approach, `1 - 0.01^(dt/duration)`, with a default duration of
   0.12 s that snaps within 0.5 px. Expose `scroll_animation_type` and the
@@ -68,3 +68,7 @@ duration. Reversing direction keeps no momentum.
 
 Exit: README known-gaps no longer lists styled text, multi-cursor rendering,
 context menus or pane operations.
+
+M9.4 Linux automated acceptance passed on 2026-10-04: deterministic motion
+and lifetime tests, real editor wheel input, live configuration, headless,
+desktop, pixel UI and both browser targets. See STATUS for exact evidence.

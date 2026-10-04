@@ -51,3 +51,5 @@ run_phase sidebar-hidden-read sidebar "$fixture/sidebar-project/Main.hx"
 run_phase sidebar-search sidebar-search "$fixture/sidebar-project/Main.hx"
 run_phase sidebar-preview sidebar-preview "$fixture/sidebar-project/Main.hx"
 run_phase sidebar-stale-preview sidebar-stale-preview "$fixture/sidebar-project/Main.hx"
+
+run_phase editor-scroll editor-scroll "$fixture/sidebar-project/Main.hx"

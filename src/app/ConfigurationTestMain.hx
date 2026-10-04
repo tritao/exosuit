@@ -66,6 +66,20 @@ class ConfigurationTestMain {
 		var unreadable = new SettingsService(arguments[2]);
 		require(unreadable.diagnostics.length > 0, "settings read failure did not become a diagnostic");
 
+		File.saveContent(projectPath, "version=1\neditor.scroll_animation_type=none\neditor.scroll_animation_duration=0.2\n");
+		require(service.reload() && service.current.scrollAnimationType == "none" && service.current.scrollAnimationDuration == 0.2,
+			"scroll settings did not load");
+		require(service.current.copy().scrollAnimationDuration == 0.2, "scroll settings copy lost duration");
+		for (invalid in ["NaN", "Infinity", "0.12oops", "-0.1", "0.31"]) {
+			File.saveContent(projectPath, "version=1\neditor.scroll_animation_duration=" + invalid + "\n");
+			require(!service.reload() && service.current.scrollAnimationDuration == 0.2, "invalid duration replaced last good settings");
+		}
+		File.saveContent(projectPath, "version=1\neditor.scroll_animation_type=unknown\n");
+		require(!service.reload() && service.current.scrollAnimationType == "none", "invalid scroll type replaced last good settings");
+		File.saveContent(projectPath, "version=1\neditor.fontSize=19\n");
+		require(service.reload() && service.current.scrollAnimationType == "smooth" && service.current.scrollAnimationDuration == 0.12,
+			"removed scroll override did not restore defaults");
+
 		Platform.startHeadless();
 		var window = Native.window_create("configuration-test", 640, 320), renderer = new Renderer(window, "ignored-headlessly.ttf", 15),
 			application = new Application((theme, focus, workspace, settings) -> new RootView(renderer, theme, focus, workspace, 640, 320, settings),

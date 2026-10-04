@@ -82,8 +82,8 @@ Keyboard navigation moves all carets through UIKit's shaped layout.
   sessions preserve pane membership, selections, scroll and terminal profiles.
 - Wrapped text shares its shaped geometry with the gutter and selection. Editor,
   tab and file-tree command menus support right-click, Shift+F10 and the Menu key.
-- Smooth scrolling is the next M9 task. Physical IME and non-Linux acceptance
-  remain pending.
+- Editor wheel scrolling uses configurable time-based smooth motion. Physical
+  IME and non-Linux acceptance remain pending.
 
 Both compiler modes, release packaging and real-window automation pass the
 claimed Linux scope in [M8](docs/roadmap/08-uikit-baseline.md). See the

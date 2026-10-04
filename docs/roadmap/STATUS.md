@@ -2,6 +2,53 @@
 
 Last updated: 2026-10-04.
 
+## M9.4 — time-based editor scrolling, 2026-10-04
+
+- Read the uncommitted Pragtical view/config/settings diff and deterministic
+  tests from /home/joao/dev/pragtical without modifying that checkout.
+- UIKit ScrollController approaches a target with 0.01^(dt/duration), default
+  0.12 seconds, and snaps within 0.5 logical pixels. Same-direction wheel
+  events accumulate the target; reversals discard the old pending direction.
+  Motion stores only offsets and targets; content and text layouts are retained.
+- Smooth motion is opt-in for general UIKit scroll views and enabled for editor
+  panes. jumpTo, scrollbar dragging and session restoration remain immediate.
+  Exosuit exposes editor.scroll_animation_type (smooth/none) and
+  editor.scroll_animation_duration (0..0.3 seconds; zero is immediate).
+  Existing, split, reopened and restored panes receive effective settings.
+- Mount-owned ScrollBinding releases callbacks and scheduler registrations on
+  replacement/unmount. A regression reproduced old viewport cleanup detaching
+  the same controller after it moved to a new viewport. Bindings now check
+  ownership before detaching, and retire a previous scheduler when rebinding.
+  Before-fix /tmp/uikit-smooth-transfer-before.log (85687, exit 1) reports
+  "old scroll mount detached replacement binding". After-fix framework passed
+  /tmp/uikit-smooth-transfer-after.log in serial gate 35747.
+- Deterministic framework tests cover >40% first-frame motion, >=99% at the
+  rounded-up duration, equal elapsed time at 30/120 fps, immediate reversal,
+  jump cancellation, zero duration, disabling motion, replacement, transfer
+  and unmount cleanup. Configuration tests reject malformed/nonfinite/out-of-
+  range values and preserve last-good settings; removing overrides restores
+  defaults. The new window test initially omitted activeView's null check;
+  corrected invalid test code, with no compiler changes.
+- Initial UIKit framework passed /tmp/uikit-smooth-scroll2.log (30213).
+  Serial gate 87534 passed workspace UI, ./scripts/test.sh, ./scripts/build.sh
+  and the full decoration/pixel suite; logs
+  /tmp/exosuit-smooth-scroll-{ui,headless,build,decoration}.log. Real editor wheel
+  input advances over frames, settings apply live, and restored offsets jump.
+  Reviewed /tmp/exosuit-smooth-scroll-ui/editor-scroll/frame.png.
+- Final transfer fix: framework, all workspace UI phases and desktop build
+  passed in gate 35747 (exit 0); /tmp/uikit-smooth-transfer-after.log,
+  /tmp/exosuit-smooth-scroll-final.log and
+  /tmp/exosuit-smooth-scroll-build-final.log. Both wasm32 and wasm-gc
+  browser behavior passed in the same process;
+  /tmp/exosuit-smooth-scroll-web.log. git diff --check passes.
+- UIKit committed as Materia 5934be0a3; release pin follows that commit.
+  Haxeon/NativeKit pins and pre-existing checkout changes were preserved. App
+  slice is committed with this ledger (git log identifies its SHA).
+- M9.4 accepted for Linux automation. Next exact action: implement M10.1
+  configuration and automatic project-scoped language-server lifecycle.
+  Physical IME, non-Linux and terminal-tab keyboard transfer remain pending.
+  Full roadmap goal remains active.
+
 ## M9.3 — registered sidebar and graphical search, 2026-10-04
 
 - UIKit owns generic SidebarModel/SidebarHost: registered, ordered modes with

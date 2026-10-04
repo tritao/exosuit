@@ -27,6 +27,8 @@ editor.fontFallbacks=data/fonts/NotoSansSymbols2-Regular.ttf,/usr/share/fonts/op
 editor.fontSize=15
 editor.tabWidth=4
 editor.insertSpaces=true
+editor.scroll_animation_type=smooth
+editor.scroll_animation_duration=0.12
 workbench.sidebarWidth=220
 files.exclude=.git,.hg,.svn,.devstack,build,out,node_modules
 search.caseSensitive=false
@@ -47,3 +49,10 @@ live; removing an override restores the value from the next lower layer.
 Relative font paths in user or project settings resolve relative to that settings
 file. Built-in font paths resolve relative to the installed executable, so launch
 working directory does not affect packaged resources.
+
+Editor scrolling uses `smooth` (default) or `none` (immediate).
+`editor.scroll_animation_duration` is seconds from 0 to 0.3; 0 is immediate.
+Smooth motion covers 99% of the distance in that duration and snaps within
+0.5 logical pixels. Wheel reversals respond immediately. Scrollbar dragging,
+session restoration use immediate offsets. These settings
+reload for existing and future document panes.

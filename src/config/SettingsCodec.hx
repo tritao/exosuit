@@ -22,7 +22,15 @@ class SettingsCodec {
 			else if (key == "workbench.sidebarWidth") target.sidebarWidth = parseBoundedInt(value, 120, 600, key, source, lineNumber, diagnostics);
 			else if (key == "editor.tabWidth") target.tabWidth = parseBoundedInt(value, 1, 16, key, source, lineNumber, diagnostics);
 			else if (key == "editor.insertSpaces") target.insertSpaces = parseBool(value, key, source, lineNumber, diagnostics);
-			else if (key == "files.exclude") target.excludedNames = parseList(value);
+			else if (key == "editor.scroll_animation_type") {
+				if (value == "smooth" || value == "none") target.scrollAnimationType = value;
+				else diagnostics.push(source + ":" + (lineNumber + 1) + ": scroll_animation_type must be smooth or none");
+			} else if (key == "editor.scroll_animation_duration") {
+				var duration = Std.parseFloat(value);
+				if (!~/^[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?$/.match(value) || !Math.isFinite(duration) || duration < 0 || duration > 0.3)
+					diagnostics.push(source + ":" + (lineNumber + 1) + ": scroll_animation_duration must be seconds from 0 to 0.3");
+				else target.scrollAnimationDuration = duration;
+			} else if (key == "files.exclude") target.excludedNames = parseList(value);
 			else if (key == "search.caseSensitive") target.searchCaseSensitive = parseBool(value, key, source, lineNumber, diagnostics);
 			else if (key == "search.wholeWord") target.searchWholeWord = parseBool(value, key, source, lineNumber, diagnostics);
 			else if (key == "search.maxResults") target.searchMaxResults = parseBoundedInt(value, 1, 1000000, key, source, lineNumber, diagnostics);

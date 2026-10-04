@@ -13,6 +13,8 @@ class Settings {
 	public var sidebarWidth:Int = 220;
 	public var tabWidth:Int = 4;
 	public var insertSpaces:Bool = true;
+	public var scrollAnimationType:String = "smooth";
+	public var scrollAnimationDuration:Float = 0.12;
 	public var excludedNames:Array<String> = [".git", ".hg", ".svn", ".devstack", "build", "out", "node_modules"];
 	public var searchCaseSensitive:Bool = false;
 	public var searchWholeWord:Bool = false;
@@ -50,6 +52,8 @@ class Settings {
 		result.sidebarWidth = sidebarWidth;
 		result.tabWidth = tabWidth;
 		result.insertSpaces = insertSpaces;
+		result.scrollAnimationType = scrollAnimationType;
+		result.scrollAnimationDuration = scrollAnimationDuration;
 		result.excludedNames = copyStrings(excludedNames);
 		result.searchCaseSensitive = searchCaseSensitive;
 		result.searchWholeWord = searchWholeWord;
