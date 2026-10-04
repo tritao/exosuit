@@ -294,7 +294,16 @@ class EditorPane implements View {
 		scrollStyle.width = LayoutAxis.grow();
 		scrollStyle.height = LayoutAxis.grow();
 		scrollStyle.background = color(editorTheme.editorBackground);
-		var node = new ScrollView("editor-scroll:" + document.id, row, scrollStyle, ScrollAxis.Vertical, scrollController).build(context);
+		var containerStyle = new LayoutStyle();
+		containerStyle.width = LayoutAxis.grow();
+		containerStyle.height = LayoutAxis.grow();
+		containerStyle.direction = LayoutDirection.LeftToRight;
+		var container = new nativekit.ui.core.RenderNode(context.id("editor-container:" + document.id), LayoutVisualKind.Box, containerStyle);
+		container.setStyleIdentity("editor-container", "editor-container:" + document.id);
+		container.setStyleIdentity("editor-container", "editor-container:" + document.id);
+		var viewport = new ScrollView("editor-scroll:" + document.id, row, scrollStyle, ScrollAxis.Vertical, scrollController);
+		viewport.scrollbarOverlayHost = container;
+		var node = viewport.build(context);
 		node.onResolved(function(_) {
 			var handler = onResolvedEditor;
 			if (handler == null) return;
@@ -304,8 +313,8 @@ class EditorPane implements View {
 			});
 		});
 		var activate = function(event:nativekit.ui.core.UiEvent) { if (onActivated != null) onActivated(); };
-		node.on(nativekit.ui.core.UiEventKind.Focus, activate, "capture");
-		node.on(nativekit.ui.core.UiEventKind.PointerDown, activate, "capture");
+		container.on(nativekit.ui.core.UiEventKind.Focus, activate, "capture");
+		container.on(nativekit.ui.core.UiEventKind.PointerDown, activate, "capture");
 		var requestMenu = function(event:nativekit.ui.core.UiEvent) {
 			var handler = onContextMenu;
 			if (handler == null) return;
@@ -319,6 +328,7 @@ class EditorPane implements View {
 		node.on(nativekit.ui.core.UiEventKind.KeyDown, function(event) {
 			if (nativekit.ui.core.UiKey.isContextMenuRequest(event.key, event.modifiers)) requestMenu(event);
 		});
-		return node;
+		container.add(node);
+		return container;
 	}
 }

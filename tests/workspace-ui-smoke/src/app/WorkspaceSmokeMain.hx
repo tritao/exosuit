@@ -46,7 +46,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 			if (view == null) throw "scroll acceptance missing document";
 			if (frames == 3) {
 				view.restoreScroll(0, 0);
-				var bounds = node("editor-scroll:" + view.document.id).globalBounds();
+				var bounds = editorViewport(view.document.id).globalBounds();
 				ui.scroll(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0, 100);
 				require(view.scrollController.offsetY == 0, "smooth wheel jumped immediately");
 			}
@@ -166,20 +166,41 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		}
 		return super.submit(frame);
 	}
+	static function findViewport(root:nativekit.ui.core.RenderNode, documentId:Int):Null<nativekit.ui.core.RenderNode> {
+		if (root.styleType == "scroll-view" && root.styleKey == "editor-scroll:" + documentId) return root;
+		for (child in root.children) { var found = findViewport(child, documentId); if (found != null) return found; }
+		return null;
+	}
+	function editorViewport(documentId:Int):nativekit.ui.core.RenderNode {
+		var viewport = findViewport(ui.root, documentId);
+		if (viewport == null) throw "editor viewport missing";
+		return viewport;
+	}
+	static function findScrollbar(root:nativekit.ui.core.RenderNode, documentId:Int):Null<nativekit.ui.core.RenderNode> {
+		if (root.styleType == "scrollbar-track" && root.styleKey == "editor-scroll:" + documentId) return root;
+		for (child in root.children) { var found = findScrollbar(child, documentId); if (found != null) return found; }
+		return null;
+	}
+	function editorScrollbar(documentId:Int):nativekit.ui.core.RenderNode {
+		var track = findScrollbar(ui.root, documentId);
+		if (track == null) throw "editor scrollbar missing";
+		return track;
+	}
 	function scrollbarStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
 		frame.deltaSeconds = frames == 5 ? 0.49 : frames == 6 ? 0.1 : frames == 7 ? 0.2 : 0;
 		var view = host.activeView();
 		if (view == null) throw "scrollbar acceptance missing editor";
 		if (frames == 3) {
-			var scroll = node("editor-scroll:" + view.document.id);
-			var track = scroll.children[1].globalBounds();
-			var color = scroll.children[1].children[0].layout.style.background;
+			var scroll = editorViewport(view.document.id);
+			var trackNode = editorScrollbar(view.document.id);
+			var track = trackNode.globalBounds();
+			var color = editorScrollbar(view.document.id).children[0].layout.style.background;
 			require(color != null && color.alpha == 0, "idle editor scrollbar is visible");
 			ui.pointerMove(track.x + track.width / 2, track.y + track.height / 2);
 		}
 		if (frames == 4) ui.pointerMove(0, 0);
 		if (frames == 8) {
-			var bounds = node("editor-scroll:" + view.document.id).globalBounds();
+			var bounds = editorViewport(view.document.id).globalBounds();
 			ui.scroll(bounds.x + 40, bounds.y + 40, 0, 50);
 		}
 		if (frames == 9 || frames == 10 || frames == 11) {
@@ -188,10 +209,15 @@ class WorkspaceSmokeApp extends ExosuitApp {
 			host.applySettings(settings);
 		}
 		var result = super.submit(frame);
-		var scroll = node("editor-scroll:" + view.document.id);
-		if (frames == 10) require(scroll.children.length == 1, "hidden policy retains scrollbar or hit target");
+		var scroll = editorViewport(view.document.id);
+		if (frames == 10) require(findScrollbar(ui.root, view.document.id) == null, "hidden policy retains scrollbar or hit target");
 		else if (frames >= 3) {
-			var color = scroll.children[1].children[0].layout.style.background;
+			var trackNode = editorScrollbar(view.document.id);
+			var bounds = trackNode.globalBounds();
+			var pane = node("editor-container:" + view.document.id).globalBounds();
+			require(Math.abs(bounds.x + bounds.width - (pane.x + pane.width - 2)) < 0.01, "scrollbar is not at editor pane right edge");
+			require(scroll.children.length == 1, "duplicate scrollbar remains inside text viewport");
+			var color = trackNode.children[0].layout.style.background;
 			if (color == null) throw "scrollbar has no paint";
 			if (frames == 3 || frames == 4 || frames == 5 || frames == 8 || frames == 9) require(color.alpha == 1, "hover/scroll/always did not reveal scrollbar");
 			if (frames == 6) require(color.alpha > 0 && color.alpha < 1, "scrollbar did not fade");
