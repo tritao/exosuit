@@ -22,9 +22,11 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	var languageFeatureStage = 0;
 	var languageOriginal = "";
 	var settingsTerminalColumns = 0;
+	var selectionDragOffset:Float = 0.0;
+	var selectionStoppedOffset:Float = 0.0;
 
 	public function new(context:nativekit.ui.host.DesktopUiHostContext, path:String, phase:String) {
-		super(context.fonts, null, context, (phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-tabs" || phase == "zoom" || phase == "word-delete" || phase == "settings" || phase == "editor-minimap" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
+		super(context.fonts, null, context, (phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-tabs" || phase == "zoom" || phase == "word-delete" || phase == "selection" || phase == "settings" || phase == "editor-minimap" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
 			null, null, null, WorkspaceSmokeMain.createTerminal);
 		this.phase = phase;
 		this.testFonts = context.fonts;
@@ -48,6 +50,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		if (phase == "settings") return settingsStep(frame);
 		if (phase == "zoom") return zoomStep(frame);
 		if (phase == "word-delete") return wordDeleteStep(frame);
+		if (phase == "selection") return selectionStep(frame);
 		if (phase == "language-folder") languageStep();
 		if (phase == "explorer-preview") explorerStep();
 		if (phase == "editor-scroll") {
@@ -334,6 +337,40 @@ class WorkspaceSmokeApp extends ExosuitApp {
 					"active tab was not revealed after selection/resize");
 				trace("PASS: crowded editor tabs do not overlap, long Unicode labels ellipsize, tooltips preserve filenames, wheel scrolling and active reveal work");
 			}
+		}
+		return result;
+	}
+
+	function selectionStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+		frame.deltaSeconds = 0.05;
+		var view = host.activeView();
+		if (view == null) throw "Selection test missing editor";
+		if (frames == 2) {
+			setApplicationZoom(125);
+			view.document.buffer.replaceAllText([for (line in 0...80) "row " + line].join("\n"), view.selection);
+			view.selection.setCursor(view.document.buffer, new editor.BufferPosition(0, 0));
+			view.scrollController.jumpTo(0, 0);
+		}
+		if (frames == 3) {
+			var editorNode = node("editor:" + view.document.id);
+			var bounds = editorNode.resolved;
+			if (bounds == null) throw "Selection editor not resolved";
+			var clip = bounds.clipBounds;
+			var pointerX = Math.max(clip.x, editorNode.globalBounds().x) + 20;
+			ui.pointerDown(pointerX, clip.y + 10, 0);
+			ui.pointerMove(pointerX, clip.y + clip.height + 20);
+			selectionDragOffset = view.scrollController.offsetY;
+		}
+		var result = super.submit(frame);
+		if (frames == 7) {
+			require(view.scrollController.offsetY > selectionDragOffset && view.selection.hasSelection(), "zoomed editor stationary drag did not scroll or extend selection");
+			ui.pointerUp(0, 0, 0);
+			selectionStoppedOffset = view.scrollController.offsetY;
+		}
+		if (frames == 9) {
+			require(view.scrollController.offsetY == selectionStoppedOffset, "editor drag scrolling did not stop on release");
+			setApplicationZoom(100);
+			trace("PASS: selection drag scrolls external editor viewport at fractional zoom and stops on release");
 		}
 		return result;
 	}
@@ -847,7 +884,7 @@ class WorkspaceSmokeMain {
 		options.title = "exosuit workspace acceptance";
 		options.width = 900; options.height = 600;
 		options.captureDirectory = args[1];
-		options.frameLimit = args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 10 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
+		options.frameLimit = args[2] == "selection" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 10 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
 		var status = DesktopUiHost.run(options, context -> new WorkspaceSmokeApp(context, args[0], args[2]));
 		platform.Native.shutdown();
 		return status;

@@ -284,6 +284,7 @@ class EditorPane implements View {
 		};
 		area.onSelectionChange = selectionHandler;
 		area.additionalSelectionProvider = additionalProvider;
+		area.onSelectionDragScroll = function(delta) return scrollController.jumpTo(scrollController.offsetX, scrollController.offsetY + delta);
 		area.historyManagedExternally = true;
 		area.onEditIntent = editIntentHandler;
 		area.onNavigationIntent = navigationIntentHandler;
