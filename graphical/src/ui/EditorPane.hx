@@ -8,6 +8,7 @@ import nativekit.ui.widgets.scroll.ScrollAxis;
 
 import Color;
 import Point;
+import Insets;
 import TextColorRange;
 import editor.SyntaxPresentation;
 import editor.DecorationPresentation;
@@ -56,6 +57,7 @@ class EditorPane implements View {
 	 */
 	public final selection:BufferSelection;
 	final scrollController:ScrollController;
+	var caretScrollMargin:Float = 0.0;
 	final minimap:EditorMinimap;
 	public var minimapEnabled:Bool = true;
 	public var fontSize:Float = 15.0;
@@ -262,6 +264,7 @@ class EditorPane implements View {
 
 	public function build(context:nativekit.ui.core.BuildContext):nativekit.ui.core.RenderNode {
 		var viewportNode:Null<nativekit.ui.core.RenderNode> = null;
+		var contentNode:Null<nativekit.ui.core.RenderNode> = null;
 		var gutter = new EditorGutter("gutter:" + document.id, document.buffer,
 			color(editorTheme.foregroundMuted), color(editorTheme.surface), fontSize);
 		var editorStyle = new LayoutStyle();
@@ -276,14 +279,25 @@ class EditorPane implements View {
 		area.onLayoutResolved = function(layout, geometry) {
 			gutter.resolveTextLayout(layout, geometry);
 			minimap.resolveTextLayout(layout);
-			if (viewportNode != null && viewportNode.resolved != null && scrollController.viewportHeight > 0 && consumeCursorReveal()) {
-				var caret = layout.caret(new TextPosition(EditorCoordinates.codepoint(document, selection.cursor), 0));
-				var top = geometry.localToViewport(new Point(0.0, caret.y + Math.min(caret.ascender, caret.descender))).y;
-				var bottom = geometry.localToViewport(new Point(0.0, caret.y + Math.max(caret.ascender, caret.descender))).y;
-				var bounds = viewportNode.globalBounds();
-				var delta = top < bounds.y ? top - bounds.y : bottom > bounds.y + bounds.height ? bottom - bounds.y - bounds.height : 0.0;
-				if (delta != 0 && scrollController.jumpTo(scrollController.offsetX, scrollController.offsetY + delta)) context.requestLayoutFeedback();
+			if (viewportNode == null || viewportNode.resolved == null || scrollController.viewportHeight <= 0) return;
+			var caret = layout.caret(new TextPosition(EditorCoordinates.codepoint(document, selection.cursor), 0));
+			var bounds = viewportNode.globalBounds();
+			var lineHeight = layout.paragraphStyle.lineHeight == null ? Math.abs(caret.descender - caret.ascender) : layout.paragraphStyle.lineHeight;
+			var trailingSpace = 5 * Math.max(1, lineHeight);
+			var margin = Math.min(trailingSpace, Math.max(0, (bounds.height - Math.abs(caret.descender - caret.ascender)) / 2));
+			// Trailing space lets the last line keep the same margin as other lines.
+			if (Math.abs(caretScrollMargin - trailingSpace) > 0.01 && contentNode != null) {
+				caretScrollMargin = trailingSpace;
+				contentNode.layout.style.padding = new Insets(0, 0, 0, trailingSpace);
+				context.requestLayoutFeedback();
+				return; // Reveal after the scroll range includes the new trailing space.
 			}
+			if (!consumeCursorReveal()) return;
+			var top = geometry.localToViewport(new Point(0.0, caret.y + Math.min(caret.ascender, caret.descender))).y;
+			var bottom = geometry.localToViewport(new Point(0.0, caret.y + Math.max(caret.ascender, caret.descender))).y;
+			var delta = top < bounds.y + margin ? top - bounds.y - margin :
+				bottom > bounds.y + bounds.height - margin ? bottom - bounds.y - bounds.height + margin : 0.0;
+			if (delta != 0 && scrollController.jumpTo(scrollController.offsetX, scrollController.offsetY + delta)) context.requestLayoutFeedback();
 		};
 		area.onCaretRect = function(rect) {
 			var previous = caretRect;
@@ -317,6 +331,7 @@ class EditorPane implements View {
 		rowStyle.width = LayoutAxis.grow();
 		rowStyle.height = LayoutAxis.fit();
 		rowStyle.direction = LayoutDirection.LeftToRight;
+		rowStyle.padding = new Insets(0, 0, 0, caretScrollMargin);
 		var row = new Row("editor-row:" + document.id, [
 			new KeyedView("gutter", gutter),
 			new KeyedView("text", area)
@@ -335,6 +350,7 @@ class EditorPane implements View {
 		viewport.scrollbarOverlayHost = container;
 		var node = viewport.build(context);
 		viewportNode = node;
+		contentNode = node.children[0].children[0];
 
 		node.onResolved(function(_) {
 			var handler = onResolvedEditor;

@@ -2,6 +2,7 @@ package app;
 
 import ui.ExosuitApp;
 import ui.UiEditorTabs;
+import ui.UiDocumentView;
 import ui.SetiIconData;
 import nativekit.ui.host.DesktopUiHost;
 import nativekit.ui.host.DesktopUiHostOptions;
@@ -17,19 +18,30 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	var diagnosticActions = 0;
 	var oldColumns = 0;
 	var paletteCommand = "";
+	var pointerCommand = "";
+	var exitCount = 0;
+	var saveAsSuccesses = 0;
+	var saveAsCancellations = 0;
+	final closeContext:nativekit.ui.host.DesktopUiHostContext;
+	var pointerX:Float = 0;
+	var pointerY:Float = 0;
 	var sidebarWidth = 0.0;
 	var languageStage = 0;
 	var languageSettings = "";
 	var languageFeatureStage = 0;
 	var languageOriginal = "";
 	var settingsTerminalColumns = 0;
+	var closePrimary:UiDocumentView;
+	var closeOther:UiDocumentView;
+	var closeWidth:Float = 0;
 	var selectionDragOffset:Float = 0.0;
 	var selectionStoppedOffset:Float = 0.0;
 
 	public function new(context:nativekit.ui.host.DesktopUiHostContext, path:String, phase:String) {
-		super(context.fonts, null, context, (phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-font" || phase == "editor-tabs" || phase == "zoom" || phase == "word-delete" || phase == "selection" || phase == "settings" || phase == "editor-minimap" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
+		super(context.fonts, null, context, (phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-font" || phase == "editor-tabs" || phase == "zoom" || phase == "word-delete" || phase == "selection" || phase == "tab-close" || phase == "pointer-actions" || phase == "caret-follow" || phase == "exit-confirmation" || phase == "save-as" || phase == "tab-close-paint" || phase == "settings" || phase == "editor-minimap" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
 			null, null, null, WorkspaceSmokeMain.createTerminal);
 		this.phase = phase;
+		closeContext = context;
 		this.testFonts = context.fonts;
 		this.path = path;
 		if (phase == "language-folder" || phase == "sidebar-write" || phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) application.openArgument(path.substring(0, path.lastIndexOf("/")));
@@ -55,6 +67,37 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		if (phase == "zoom") return zoomStep(frame);
 		if (phase == "word-delete") return wordDeleteStep(frame);
 		if (phase == "selection") return selectionStep(frame);
+		if (phase == "tab-close") return tabCloseStep(frame);
+		if (phase == "pointer-actions") return pointerActionsStep(frame);
+		if (phase == "caret-follow") return caretFollowStep(frame);
+		if (phase == "exit-confirmation") return exitConfirmationStep(frame);
+		if (phase == "save-as") return saveAsStep(frame);
+		if (phase == "tab-close-paint") {
+			if (frames >= 2) {
+				var view = host.activeView();
+				if (view == null) throw "close paint missing document";
+				var bounds = node((frames == 5 ? "tab-close:doc:" : "doc:") + view.document.id).globalBounds();
+				ui.pointerMove(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+			}
+			var result = super.submit(frame);
+			if (frames >= 3) {
+				var view = host.activeView();
+				if (view == null) throw "close paint missing document";
+				var close = node("tab-close:doc:" + view.document.id);
+				require((close.layout.style.background.alpha > 0) == (frames == 5), "close background must appear only over its own hit target");
+			}
+			if (frames == 6) {
+				var view = host.activeView();
+				if (view == null) throw "close paint missing document";
+				var close = node("tab-close:doc:" + view.document.id);
+				require(close.layout.style.visible, "hover close is not visible during pixel capture");
+				var bounds = close.children[0].globalBounds();
+				sys.FileSystem.createDirectory(config.ConfigurationPaths.stateRoot());
+				sys.io.File.saveContent(config.ConfigurationPaths.stateRoot() + "/close-icon-bounds.json",
+					haxe.Json.stringify({x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height}));
+			}
+			return result;
+		}
 		if (phase == "language-folder") languageStep();
 		if (phase == "explorer-preview") explorerStep();
 		if (phase == "editor-scroll") {
@@ -337,7 +380,10 @@ class WorkspaceSmokeApp extends ExosuitApp {
 						if (child.layout.text.indexOf("…") >= 0) truncated = true;
 					}
 				});
-				var semantics = header.children[0].semantics;
+				var semantics:Null<nativekit.ui.semantics.Semantics> = null;
+				header.walk(function(child) {
+					if (child.semantics != null && child.semantics.role == nativekit.ui.semantics.AccessibilityRole.Tab) semantics = child.semantics;
+				});
 				if (semantics == null) throw "tab lost its accessible filename";
 				require(tooltip.children[1].children[0].layout.text == semantics.label, "tooltip lost full filename");
 			}
@@ -352,6 +398,198 @@ class WorkspaceSmokeApp extends ExosuitApp {
 			}
 		}
 		return result;
+	}
+
+	function pointerActionsStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+		if (frames == 2) {
+			application.commands.add("test:pointer-first", function(_) pointerCommand = "first", null, "Pointer palette first");
+			application.commands.add("test:pointer-second", function(_) pointerCommand = "second", null, "Pointer palette second");
+			ui.key(UiEventKind.KeyDown, UiKey.P, UiModifier.Control | UiModifier.Shift);
+		}
+		if (frames == 3) ui.text(UiEventKind.TextInput, "Pointer palette");
+		if (frames == 4) {
+			var bounds = node("cv-row-1").globalBounds();
+			pointerX = bounds.x + 20; pointerY = bounds.y + bounds.height / 2;
+			ui.pointerDown(pointerX, pointerY, 0, 0, 42);
+		}
+		if (frames == 5) {
+			ui.pointerUp(pointerX, pointerY, 0, 0, 42);
+			require(pointerCommand == "second" && !host.isCommandViewActive(), "pointer did not execute the clicked palette entry: " + pointerCommand);
+			trace("PASS: command palette mouse click executes the requested entry across rendered frames");
+		}
+		var result = super.submit(frame);
+		return result;
+	}
+
+	function saveAsStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+		var destination = path + ".saved";
+		if (frames == 2) {
+			sys.io.File.saveContent(destination, "existing content");
+			closeOther = cast host.openDocument(application.documents.createUntitled());
+			closeOther.document.buffer.replaceAllText("saved through chooser", closeOther.selection);
+			application.files.openSaveAs(closeOther.document, function() saveAsSuccesses++, function() saveAsCancellations++);
+		}
+		if (frames == 3 || frames == 7) {
+			require(saveAsDestination != null && !host.isCommandViewActive(), "Save As used command input instead of a dialog");
+			ui.focusWidget(node("save-as-path").id);
+			ui.key(UiEventKind.KeyDown, UiKey.A, UiModifier.Control);
+			ui.text(UiEventKind.TextInput, destination);
+		}
+		if (frames == 4 || frames == 8) {
+			click("save-as-save");
+			require(saveAsDestination != null && sys.io.File.getContent(destination) == "existing content",
+				"Save As overwrote before confirmation");
+		}
+		if (frames == 5) {
+			click("save-as-cancel");
+			require(saveAsDestination == null && saveAsCancellations == 1 && closeOther.document.dirty && !closeOther.document.hasBackingPath(),
+				"Save As cancellation changed the document");
+		}
+		if (frames == 6)
+			application.files.openSaveAs(closeOther.document, function() saveAsSuccesses++, function() saveAsCancellations++);
+		if (frames == 9) {
+			click("save-as-save");
+			require(saveAsDestination == null && saveAsSuccesses == 1 && !closeOther.document.dirty &&
+				closeOther.document.requirePath() == destination && sys.io.File.getContent(destination) == "saved through chooser",
+				"confirmed Save As did not update the file and document identity");
+			trace("PASS: button-based Save As, overwrite confirmation, cancellation, retry, persisted content and document identity");
+		}
+		return super.submit(frame);
+	}
+
+	function requestTestExit():Void {
+		var handler = closeContext.onCloseRequested;
+		if (handler == null) throw "missing application close interception";
+		handler(function() exitCount++);
+	}
+
+	function exitConfirmationStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+		if (frames == 2) {
+			closePrimary = host.activeView();
+			closePrimary.document.buffer.replaceAllText("saved on exit\n", closePrimary.selection);
+			closeOther = cast host.openDocument(application.documents.createUntitled());
+			closeOther.document.buffer.replaceAllText("unsaved untitled", closeOther.selection);
+			application.recovery.save(application);
+		}
+		if (frames == 3 || frames == 5 || frames == 9) requestTestExit();
+		if (frames == 3) requestTestExit(); // A repeated window close must not duplicate the transaction.
+		if (frames == 4) {
+			require(saveConfirmation != null && exitCount == 0, "window close skipped unsaved confirmation");
+			click("save-confirmation-cancel");
+			require(exitCount == 0 && !application.files.quitReady && closePrimary.document.dirty, "cancel did not keep the app and edits");
+		}
+		if (frames == 6) {
+			click("save-confirmation-save");
+			require(!closePrimary.document.dirty && sys.io.File.getContent(path) == "saved on exit\n", "exit Save did not write the backing file");
+			require(exitCount == 0 && saveConfirmation != null, "exit did not wait for all dirty documents");
+		}
+		if (frames == 7) {
+			click("save-confirmation-save");
+			require(saveAsDestination != null && !host.isCommandViewActive() && exitCount == 0, "untitled exit Save skipped Save As");
+		}
+		if (frames == 8) {
+			ui.key(UiEventKind.KeyDown, UiKey.Escape);
+			require(saveAsDestination == null && exitCount == 0 && !application.files.quitReady,
+				"cancelling Save As did not cancel exit");
+		}
+		if (frames == 10) {
+			click("save-confirmation-discard");
+			require(exitCount == 1 && application.files.quitReady && saveConfirmation == null, "confirmed exit did not close exactly once");
+			application.session.shutdown();
+			require(application.recovery.load().length == 0, "discarded exit changes were recreated by shutdown recovery");
+			trace("PASS: window exit confirms dirty documents, Cancel and Save As cancellation preserve edits, Save/Discard closes once without restoring discarded recovery");
+		}
+		return super.submit(frame);
+	}
+
+	function caretFollowStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+		var view = host.activeView();
+		if (view == null) throw "caret follow missing editor";
+		if (frames == 2) {
+			setApplicationZoom(125);
+			ui.focusWidget(node("editor:" + view.document.id).id);
+			ui.key(UiEventKind.KeyDown, UiKey.End, UiModifier.Control);
+		}
+		if (frames >= 3 && frames <= 5) {
+			for (_ in 0...35) ui.key(UiEventKind.KeyDown, UiKey.Enter);
+		}
+		if (frames == 6) view.scrollController.jumpTo(0, 0);
+		var result = super.submit(frame);
+		if (frames >= 3 && frames <= 5) {
+			require(view.scrollController.offsetY > 0, "new lines did not scroll the editor");
+			var caret = host.textInputArea();
+			var bounds = node("editor-scroll:" + view.document.id).globalBounds();
+			require(caret != null && caret.y >= bounds.y - 1 && caret.y + caret.height <= bounds.y + bounds.height + 2,
+				"caret left the viewport after repeated Enter: frame=" + frames + ", caret=" + (caret == null ? "null" : caret.y + ":" + caret.height) + ", viewport=" + bounds.y + ":" + bounds.height + ", offset=" + view.scrollController.offsetY);
+			require(caret != null && bounds.y + bounds.height - caret.y - caret.height >= Math.min(caret.height * 4, bounds.height * 0.35) - 2,
+				"repeated Enter did not leave several visible lines below the caret");
+		}
+		if (frames == 6) {
+			require(view.scrollController.offsetY == 0, "caret margin overrode manual scrolling");
+			trace("PASS: repeated Enter keeps a five-line caret margin at fractional zoom and preserves manual scrolling");
+		}
+		return result;
+	}
+
+	function closeHeaderWidth(target:nativekit.ui.core.RenderNode):Float {
+		var slot = target.parent;
+		if (slot == null) throw "close target missing slot";
+		var row = slot.parent;
+		if (row == null) throw "close target missing row";
+		return row.globalBounds().width;
+	}
+	function tabCloseStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+		if (frames == 2) {
+			setApplicationZoom(125);
+			closePrimary = host.activeView();
+			if (closePrimary == null) throw "close test missing primary";
+			closeOther = cast host.openDocument(application.documents.createUntitled());
+			host.activateTab(closePrimary.document);
+		}
+		if (frames == 5) {
+			require(host.allViews().length == 1, "clean inactive tab did not close");
+			closeOther = cast host.openDocument(application.documents.createUntitled());
+			closeOther.document.buffer.replaceAllText("unsaved", closeOther.selection);
+			host.activateTab(closePrimary.document);
+			super.submit(frame);
+		}
+		if (frames == 3 || frames == 5 || frames == 8) {
+			var target = node("tab-close:doc:" + closeOther.document.id);
+			var bounds = target.globalBounds();
+			closeWidth = closeHeaderWidth(target);
+			ui.pointerMove(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+		}
+		if (frames == 4 || frames == 6 || frames == 9) {
+			var target = node("tab-close:doc:" + closeOther.document.id);
+			require(target.layout.style.visible && closeHeaderWidth(target) == closeWidth, "close hover changed width or failed to show at frame " + frames + ": visible=" + target.layout.style.visible + ", width=" + closeHeaderWidth(target) + ", previous=" + closeWidth);
+			if (frames == 4 || frames == 6) {
+				var bounds = node("doc:" + closeOther.document.id).globalBounds();
+				ui.pointerDown(bounds.x + 20, bounds.y + bounds.height / 2, 2);
+				ui.pointerUp(bounds.x + 20, bounds.y + bounds.height / 2, 2);
+			} else click("tab-close:doc:" + closeOther.document.id);
+			require(host.activeView() == closePrimary, "inactive tab close changed active editor");
+		}
+		if (frames == 7) {
+			require(saveConfirmation != null && host.allViews().length == 2, "dirty close did not ask before removing tab");
+			ui.key(UiEventKind.KeyDown, UiKey.Escape);
+			require(saveConfirmation == null && host.allViews().length == 2, "cancel did not preserve dirty tab");
+		}
+		if (frames == 10) {
+			require(saveConfirmation != null, "second dirty close did not ask");
+			click("save-confirmation-discard");
+			require(host.allViews().length == 1 && host.activeView() == closePrimary, "discard closed the wrong tab");
+			setApplicationZoom(100);
+		}
+		if (frames == 11) {
+			var bounds = node("tab-close:doc:" + closePrimary.document.id).globalBounds();
+			ui.pointerMove(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+		}
+		if (frames == 12) {
+			click("tab-close:doc:" + closePrimary.document.id);
+			require(host.allViews().length == 0 && host.activeView() == null, "closing the last active file did not clear the editor");
+			trace("PASS: zoomed hover close, stable width, inactive tab closing, dirty cancel/discard and last active tab closing");
+		}
+		return super.submit(frame);
 	}
 
 	function selectionStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
@@ -1000,7 +1238,7 @@ class WorkspaceSmokeMain {
 		options.title = "exosuit workspace acceptance";
 		options.width = 900; options.height = 600;
 		options.captureDirectory = args[1];
-		options.frameLimit = args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 10 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
+		options.frameLimit = args[2] == "save-as" ? 10 : args[2] == "exit-confirmation" ? 11 : args[2] == "tab-close" ? 13 : args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 10 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
 		var status = DesktopUiHost.run(options, context -> new WorkspaceSmokeApp(context, args[0], args[2]));
 		platform.Native.shutdown();
 		return status;

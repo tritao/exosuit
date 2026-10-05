@@ -22,6 +22,26 @@ class NativeDesktopServices implements platform.HostFileDialogs {
 		this.host = host;
 	}
 
+	public function confirmSaveChanges(filename:String, handler:String->Void):Void {
+		var options = new MessageDialogOptions();
+		options.set_title("exosuit");
+		options.set_kind(MessageKind.Warning);
+		options.set_buttons(MessageButtons.Save | MessageButtons.DontSave | MessageButtons.Cancel);
+		options.set_message('Do you want to save the changes you made to "' + filename + '"?\n\nYour changes will be lost if you don’t save them.');
+		var request = NativeKit.nk_dialog_message_checked(parentHandle(), options);
+		pending.push(request);
+		host.events.requests.track(request, function(value) {
+			pending.remove(request);
+			var answer = switch value {
+				case DialogMessage(_, result, button) if (result == Result.Ok):
+					button == MessageResult.Yes ? "save" : button == MessageResult.No ? "discard" : "cancel";
+				case _: "cancel";
+			};
+			handler(answer);
+			host.requestFrame();
+		});
+	}
+
 	public function openFile(handler:Bool->Array<String>->Void, ?title:String,
 			?initialPath:String, ?allowMultiple:Bool):haxe.Int64
 		return chooseResource(false, title == null ? "Open" : title, null, initialPath,

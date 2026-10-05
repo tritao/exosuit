@@ -54,7 +54,7 @@ class SessionController {
 		if (!started) return;
 		var activePersistence = persistence;
 		if (activePersistence != null) activePersistence.update(application, now);
-		if (now - lastRecoverySave >= 2.0) {
+		if (!application.quitReady && now - lastRecoverySave >= 2.0) {
 			recovery.save(application);
 			lastRecoverySave = now;
 		}
@@ -81,7 +81,7 @@ class SessionController {
 
 	public function shutdown():Void {
 		if (!started) return;
-		recovery.save(application);
+		if (!application.quitReady) recovery.save(application);
 		var activePersistence = persistence;
 		if (activePersistence != null) activePersistence.flush(application);
 		started = false;

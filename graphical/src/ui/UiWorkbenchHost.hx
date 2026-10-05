@@ -545,24 +545,40 @@ class UiWorkbenchHost implements WorkbenchHost {
 		requestFrame();
 	}
 
-	public function documentsLostByClosingActiveTab():Array<Document> {
-		var view = activeView();
+	public function documentsLostByClosingTab(item:UiEditorTab):Array<Document> {
+		var view = UiEditorTabs.document(item);
 		if (view == null) return [];
 		for (other in allViews()) if (other != view && other.document == view.document) return [];
 		return [view.document];
 	}
 
-	public function closeActiveTab(force:Bool = false):Bool {
-		if (activeIndex < 0) return false;
-		var lost = documentsLostByClosingActiveTab();
+	public function documentsLostByClosingActiveTab():Array<Document> {
+		var item = activeTab();
+		return item == null ? [] : documentsLostByClosingTab(item);
+	}
+
+	/** Close by identity so confirmation cannot accidentally close a different active tab. */
+	public function closeTab(item:UiEditorTab, paneId:String, force:Bool = false):Bool {
+		var pane = paneById(paneId);
+		if (pane == null) return false;
+		var index = pane.items.indexOf(item);
+		if (index < 0) return false;
+		var lost = documentsLostByClosingTab(item);
 		if (!force) for (document in lost) if (document.dirty) return false;
-		var removed = activePane.items.splice(activeIndex, 1);
-		UiEditorTabs.dispose(removed[0]);
+		pane.items.splice(index, 1);
+		UiEditorTabs.dispose(item);
 		for (document in lost) workspace.documents.close(document, true);
-		activeIndex = activePane.items.length == 0 ? -1 : Std.int(Math.min(activeIndex, activePane.items.length - 1));
-		focus.activate(activeView());
+		if (index < pane.activeIndex) pane.activeIndex--;
+		else if (index == pane.activeIndex)
+			pane.activeIndex = pane.items.length == 0 ? -1 : Std.int(Math.min(index, pane.items.length - 1));
+		if (pane == activePane) focus.activate(activeView());
 		requestFrame();
 		return true;
+	}
+
+	public function closeActiveTab(force:Bool = false):Bool {
+		var item = activeTab();
+		return item != null && closeTab(item, activePane.id, force);
 	}
 
 	public function documentsLostByClosingActivePane():Array<Document> {

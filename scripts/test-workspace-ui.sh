@@ -59,6 +59,27 @@ run_phase editor-scroll editor-scroll "$fixture/sidebar-project/Main.hx"
 run_phase scrollbar-visibility scrollbar-visibility "$fixture/sidebar-project/Main.hx"
 run_phase editor-resize editor-resize "$fixture/sidebar-project/Main.hx"
 run_phase editor-minimap editor-minimap "$fixture/sidebar-project/Main.hx"
+printf 'exit fixture\n' > "$fixture/project/Exit.hx"
+run_phase save-as save-as "$fixture/project/Exit.hx"
+run_phase exit-confirmation exit-confirmation "$fixture/project/Exit.hx"
+run_phase caret-follow caret-follow "$fixture/project/Main.hx"
+run_phase pointer-actions pointer-actions "$fixture/sidebar-project/Main.hx"
+run_phase tab-close tab-close "$fixture/sidebar-project/Main.hx"
+run_phase tab-close-paint tab-close-paint "$fixture/sidebar-project/Main.hx"
+python3 - "$fixture/tab-close-paint/frame.png" "$fixture/state-tab-close-paint/close-icon-bounds.json" <<'PYPIXELS'
+import json, sys
+from PIL import Image
+bounds = json.load(open(sys.argv[2]))
+x, y = round(bounds['x']), round(bounds['y'])
+w, h = round(bounds['width']), round(bounds['height'])
+assert w >= 10 and h >= 10, 'close icon has no usable geometry'
+image = Image.open(sys.argv[1]).convert('RGB')
+background = image.getpixel((x, y))
+pixels = list(image.crop((x, y, x + w, y + h)).getdata())
+ink = sum(sum(abs(a - b) for a, b in zip(pixel, background)) >= 90 for pixel in pixels)
+assert ink >= 8, f'hover close icon was not painted: {ink} contrasting pixels'
+print('PASS: hidden close icon paints visible pixels after hover')
+PYPIXELS
 run_phase selection selection "$fixture/sidebar-project/Main.hx"
 run_phase word-delete word-delete "$fixture/sidebar-project/Main.hx"
 run_phase zoom zoom "$fixture/sidebar-project/Main.hx"

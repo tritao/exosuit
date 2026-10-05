@@ -82,6 +82,11 @@ class ExosuitApp implements DesktopUiApplication {
 	public final capabilities:HostCapabilities;
 	public final host:UiWorkbenchHost;
 	final desktop:Null<HostFileDialogs>;
+	public var saveConfirmation(default, null):Null<String>;
+	var saveConfirmationHandler:Null<String->Void>;
+	public var saveAsDestination(default, null):Null<String>;
+	var saveAsReplace:Bool = false;
+	var saveAsHandler:Null<(Null<String>, Bool)->Void>;
 	final hostContext:Null<UiHostContext>;
 	final dock:DockWorkspaceModel;
 	var dockPanelContents:Array<DockPanelContent>;
@@ -143,7 +148,6 @@ class ExosuitApp implements DesktopUiApplication {
 		ui = new UiContext(null, fonts, this.theme);
 		ui.buildContext.environment.colorScheme = darkPalette ? EnvironmentColorScheme.Dark : EnvironmentColorScheme.Light;
 		desktop = fileDialogs;
-		if (hostContext != null) hostContext.onCloseRequested = function(close) close();
 		registerSidebarDestination("files", IconName.FolderOpen, explorerPanel, new nativekit.ui.widgets.sidebar.SidebarModeOptions("Files", 0, true));
 		registerSidebarDestination("search", IconName.Search, function() return searchPanel,
 			new nativekit.ui.widgets.sidebar.SidebarModeOptions("Search", 10, true));
@@ -171,6 +175,37 @@ class ExosuitApp implements DesktopUiApplication {
 			return capturedHost;
 		}, preferences, null, this.capabilities);
 		host = capturedHost;
+		if (hostContext != null) hostContext.onCloseRequested = function(close) {
+			application.files.requestQuit(close);
+			requestFrame();
+		};
+		application.confirmations.saveChangesPrompt = function(filename, handler) {
+			if (desktop != null) {
+				try { desktop.confirmSaveChanges(filename, handler); return; }
+				catch (_:Dynamic) {} // Unsupported native dialogs use the same button-based modal.
+			}
+			saveConfirmation = filename;
+			saveConfirmationHandler = handler;
+			requestFrame();
+		};
+		application.files.chooseSaveDestination = function(document, handler) {
+			var initial = document.hasBackingPath() ? haxe.io.Path.directory(document.requirePath()) :
+				application.workspace.projects.length == 0 ? "" : application.workspace.projects[0].root;
+			var name = document.hasBackingPath() ? haxe.io.Path.withoutDirectory(document.requirePath()) : document.title;
+			if (desktop != null) {
+				try {
+					desktop.saveFile(function(accepted, paths) {
+						handler(accepted && paths.length > 0 ? paths[0] : null, accepted);
+						requestFrame();
+					}, "Save As", initial, name);
+					return;
+				} catch (_:Dynamic) {} // Unsupported native choosers use the themed dialog.
+			}
+			saveAsDestination = initial.length == 0 ? name : haxe.io.Path.join([initial, name]);
+			saveAsReplace = false;
+			saveAsHandler = handler;
+			requestFrame();
+		};
 		if (hostContext != null) hostContext.onPoll = pollBackground;
 		sidebar.setVisible(dock.isOpen("explorer"));
 		sidebar.onChange = syncSidebar;
@@ -437,6 +472,32 @@ class ExosuitApp implements DesktopUiApplication {
 		CommandBridge.install(ui.commands, application.commands, application.keymap, application.context);
 	}
 
+	function resolveSaveConfirmation(answer:String):Void {
+		var handler = saveConfirmationHandler;
+		saveConfirmationHandler = null;
+		saveConfirmation = null;
+		if (handler != null) handler(answer);
+		requestFrame();
+	}
+
+	function resolveSaveAs(cancel:Bool = false):Void {
+		var handler = saveAsHandler;
+		var destination = saveAsDestination;
+		if (handler == null) return;
+		if (!cancel && (destination == null || StringTools.trim(destination).length == 0)) return;
+		if (!cancel && !saveAsReplace && application.workspace.fileSystem.exists(destination)) {
+			saveAsReplace = true;
+			requestFrame();
+			return;
+		}
+		var overwrite = saveAsReplace;
+		saveAsHandler = null;
+		saveAsDestination = null;
+		saveAsReplace = false;
+		handler(cancel ? null : destination, overwrite);
+		requestFrame();
+	}
+
 	public function view():View {
 		pruneStaleEditorPanes(host.allViews());
 		for (pane in host.panes) {
@@ -486,6 +547,43 @@ class ExosuitApp implements DesktopUiApplication {
 			var dialog = new nativekit.ui.widgets.overlays.Dialog("settings-dialog", "Settings", content, dismiss,
 				Math.max(240.0, Math.min(860.0, viewportWidth - 48.0)));
 			layers.push(new StackChild("settings", dialog, 0.0, 0.0, 50, LayoutAxis.grow(), LayoutAxis.grow()));
+		}
+		if (saveConfirmation != null) {
+			var content = new Column("save-confirmation-content", [
+				new KeyedView("message", new Text('Do you want to save the changes you made to "' + saveConfirmation + '"?')),
+				new KeyedView("detail", new Text("Your changes will be lost if you don’t save them.")),
+				new KeyedView("actions", new Row("save-confirmation-actions", [
+					new KeyedView("discard", new Button("Don’t Save", null, function() resolveSaveConfirmation("discard"), "save-confirmation-discard")),
+					new KeyedView("cancel", new Button("Cancel", null, function() resolveSaveConfirmation("cancel"), "save-confirmation-cancel")),
+					new KeyedView("save", new Button("Save", null, function() resolveSaveConfirmation("save"), "save-confirmation-save"))
+				]))
+			]);
+			var dialog = new nativekit.ui.widgets.overlays.Dialog("save-confirmation", "Unsaved Changes", content,
+				function() resolveSaveConfirmation("cancel"), Math.max(240, Math.min(540, viewportWidth - 48)));
+			dialog.dismissOnOutside = false;
+			layers.push(new StackChild("save-confirmation", dialog, 0, 0, 60, LayoutAxis.grow(), LayoutAxis.grow()));
+		}
+		if (saveAsHandler != null) {
+			var controls:Array<KeyedView> = [];
+			if (saveAsReplace) {
+				controls.push(new KeyedView("message", new Text('Replace "' + saveAsDestination + '"?')));
+				controls.push(new KeyedView("detail", new Text("The existing file will be overwritten.")));
+			} else {
+				var field = new nativekit.ui.widgets.text.TextField("save-as-path", saveAsDestination, function(value) {
+					saveAsDestination = value;
+					requestFrame();
+				}, null, "File path");
+				field.onSubmit = function(_) resolveSaveAs();
+				controls.push(new KeyedView("path", field));
+			}
+			controls.push(new KeyedView("actions", new Row("save-as-actions", [
+				new KeyedView("cancel", new Button("Cancel", null, function() resolveSaveAs(true), "save-as-cancel")),
+				new KeyedView("save", new Button(saveAsReplace ? "Replace" : "Save", null, function() resolveSaveAs(), "save-as-save"))
+			])));
+			var dialog = new nativekit.ui.widgets.overlays.Dialog("save-as-dialog", "Save As", new Column("save-as-content", controls),
+				function() resolveSaveAs(true), Math.max(240, Math.min(540, viewportWidth - 48)));
+			dialog.dismissOnOutside = false;
+			layers.push(new StackChild("save-as", dialog, 0, 0, 70, LayoutAxis.grow(), LayoutAxis.grow()));
 		}
 		var overlay = host.overlayView();
 		if (overlay != null) layers.push(new StackChild("host-overlay", overlay, 0.0, 0.0, 30));
@@ -753,9 +851,11 @@ class ExosuitApp implements DesktopUiApplication {
 			var terminal = UiEditorTabs.terminal(item);
 			if (terminal != null) {
 				var terminalKey = UiEditorTabs.key(item);
-				items.push(new TabItem(terminalKey, terminal.title, new TerminalTabView(terminal,
+				var terminalTab = new TabItem(terminalKey, terminal.title, new TerminalTabView(terminal,
 					function() host.activateEditorTab(terminalKey, paneId),
-					function(bounds, id) host.editorResolved(paneId, bounds, id)), true, IconName.Terminal));
+					function(bounds, id) host.editorResolved(paneId, bounds, id)), true, IconName.Terminal);
+				terminalTab.onClose = function() host.closeTab(item, paneId, true);
+				items.push(terminalTab);
 				continue;
 			}
 			var documentView = UiEditorTabs.document(item);
@@ -766,7 +866,10 @@ class ExosuitApp implements DesktopUiApplication {
 			// doc comment) persists between edits instead of resetting.
 			var pane = editorPanes.get(documentView.id);
 			if (pane == null) {
-				pane = new EditorPane(document, theme, requestFrame, documentView.selection, editorPalette,
+				pane = new EditorPane(document, theme, function() {
+					documentView.cursorChanged();
+					requestFrame();
+				}, documentView.selection, editorPalette,
 					host.getPluginDecorations(), documentView.decorationSearchMatches, documentView.searchDecorationRevision, documentView.scrollController);
 				editorPanes.set(documentView.id, pane);
 			}
@@ -814,8 +917,10 @@ class ExosuitApp implements DesktopUiApplication {
 					function(path, event) showBreadcrumbMenu(document, paneId, path, event))),
 				new KeyedView("editor", pane)
 			], contentStyle);
-			items.push(new TabItem("doc:" + document.id, (document.dirty ? "* " : "") + document.title + (documentView.preview ? " (preview)" : ""),
-				content));
+			var fileTab = new TabItem("doc:" + document.id, (document.dirty ? "* " : "") + document.title + (documentView.preview ? " (preview)" : ""), content);
+			fileTab.onClose = function() application.files.requestCloseTab(host.documentsLostByClosingTab(item),
+				function() return host.closeTab(item, paneId, true));
+			items.push(fileTab);
 		}
 		var tabsStyle = new LayoutStyle();
 		tabsStyle.width = LayoutAxis.grow();

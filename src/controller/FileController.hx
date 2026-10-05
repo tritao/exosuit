@@ -13,6 +13,9 @@ import workspace.Workspace;
 
 class FileController {
 	public var quitReady(default, null):Bool = false;
+	/** A graphical host supplies an asynchronous destination chooser. */
+	public var chooseSaveDestination:Null<(Document, (Null<String>, Bool)->Void)->Void>;
+	var saveAsPending:Bool = false;
 
 	final documents:DocumentManager;
 	final workspace:Workspace;
@@ -50,25 +53,52 @@ class FileController {
 	}
 
 	public function requestCloseActiveTab():Bool
-		return beginClose(root.documentsLostByClosingActiveTab(), function() return root.closeActiveTab(true));
+		return requestCloseTab(root.documentsLostByClosingActiveTab(), function() return root.closeActiveTab(true));
+
+	/** Confirm losses before closing a stable tab target supplied by a UI host. */
+	public function requestCloseTab(documentsLost:Array<Document>, close:Void->Bool):Bool
+		return beginClose(documentsLost, close);
 
 	public function requestCloseActivePane():Bool {
 		if (!root.canCloseActivePane()) return false;
 		return beginClose(root.documentsLostByClosingActivePane(), function() return root.closeActivePane(true));
 	}
 
-	public function requestQuit():Bool {
-		if (quitReady) return true;
+	public function requestQuit(?onReady:Void->Void):Bool {
+		if (quitReady) {
+			if (onReady != null) onReady();
+			return true;
+		}
 		var dirty:Array<Document> = [];
 		for (document in documents.documents)
 			if (document.dirty && dirty.indexOf(document) < 0) dirty.push(document);
 		return beginClose(dirty, function() {
+			// Recovery may have run while earlier documents were being confirmed.
+			for (document in closeDocuments) recovery.forget(document);
 			quitReady = true;
+			if (onReady != null) onReady();
 			return true;
 		});
 	}
 
-	public function openSaveAs(document:Document, ?onSuccess:Void->Void):Void {
+	public function openSaveAs(document:Document, ?onSuccess:Void->Void, ?onCancel:Void->Void):Void {
+		if (chooseSaveDestination != null) {
+			if (saveAsPending) return;
+			saveAsPending = true;
+			chooseSaveDestination(document, function(destination, overwrite) {
+				if (!saveAsPending) return;
+				saveAsPending = false;
+				if (destination == null) {
+					if (onCancel != null) onCancel();
+				} else if (documents.saveAs(document, destination, overwrite)) {
+					completeSaveAs(document, onSuccess);
+				} else {
+					reportError("file", 'Could not save as "' + destination + '"; destination may already be open or unwritable');
+					if (onCancel != null) onCancel();
+				}
+			});
+			return;
+		}
 		root.openCommandView(new CommandViewProvider("Save As: ", [], function(query) {}, function(entry, destination, backwards) {
 			if (documents.saveAs(document, destination)) {
 				completeSaveAs(document, onSuccess);
@@ -77,12 +107,13 @@ class FileController {
 					function(entry, answer, backwards) {
 						if (answer == "overwrite" && documents.saveAs(document, destination, true))
 							completeSaveAs(document, onSuccess);
-					}));
+					}, onCancel));
 			} else {
 				reportError("file", 'Could not save as "$destination"');
 				root.closeCommandView();
+				if (onCancel != null) onCancel();
 			}
-		}));
+		}, onCancel));
 	}
 
 	public function openCreateFile():Void {
@@ -179,7 +210,7 @@ class FileController {
 			return;
 		}
 		var document = closeDocuments[closeIndex];
-		confirmations.choose('Save changes to "' + document.title + '"? Type save, discard, or cancel: ', ["save", "discard", "cancel"],
+		confirmations.saveChanges(document.title,
 			function(answer) {
 				if (answer == "cancel") cancelClose();
 				else if (answer == "discard") advanceClose(document);
@@ -192,7 +223,7 @@ class FileController {
 					} else openSaveAs(document, function() {
 						closeIndex++;
 						continueClose();
-					});
+					}, cancelClose);
 				}
 			}, cancelClose);
 	}

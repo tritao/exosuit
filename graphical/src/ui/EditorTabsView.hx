@@ -43,7 +43,7 @@ class EditorTabsView implements View {
 				for (item in tabs.items) {
 					var filename = filenames.get(item.key);
 					revision += ":" + item.key.length + ":" + item.key + ":" + item.label.length + ":" + item.label +
-						":" + item.enabled + ":" + item.icon + ":" + filename;
+						":" + item.enabled + ":" + item.icon + ":" + filename + ":" + (item.onClose != null);
 				}
 				return revision;
 			};
@@ -75,6 +75,7 @@ class EditorTabsView implements View {
 					memo.set(cacheKey, label);
 				}
 				var displayed = new nativekit.ui.widgets.controls.TabItem(item.key, item.label, item.content, item.enabled, item.icon, label);
+				displayed.onClose = item.onClose;
 				displayed.iconView = item.iconView;
 			displayed.badgeCount = item.badgeCount;
 				tabs.items[index] = displayed;
