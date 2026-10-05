@@ -11,14 +11,17 @@ import nativekit.ui.widgets.controls.Button;
 import nativekit.ui.widgets.layout.Column;
 import nativekit.ui.widgets.layout.Row;
 import nativekit.ui.widgets.text.Text;
-import workspace.client.WorkspaceTerminalCatalogClient;
+import workspace.client.WorkspaceWorkbenchClient;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceTerminalProtocol;
 
 class WorkbenchPanel implements View {
-	final client:WorkspaceTerminalCatalogClient;
+	final client:WorkspaceWorkbenchClient;
 	final open:TerminalRecord->Bool;
 	final createTerminal:String->Void;
+	final openAgent:String->Void;
+	var agentKey = -1;
+	var attachThread = "";
 	final edit:(WorkspaceGroup, Bool) -> Void;
 	final openFolder:String->Void;
 	final manage:Void->Void;
@@ -29,9 +32,10 @@ class WorkbenchPanel implements View {
 
 	var catalogRevision:Int = -1;
 
-	public function new(client:WorkspaceTerminalCatalogClient, open:TerminalRecord->Bool, createTerminal:String->Void, edit:(WorkspaceGroup, Bool) -> Void,
-			openFolder:String->Void, manage:Void->Void, requestFrame:Void->Void) {
+	public function new(client:WorkspaceWorkbenchClient, open:TerminalRecord->Bool, createTerminal:String->Void, edit:(WorkspaceGroup, Bool) -> Void,
+			openFolder:String->Void, manage:Void->Void, requestFrame:Void->Void, openAgent:String->Void) {
 		this.client = client;
+		this.openAgent = openAgent;
 		this.open = open;
 		this.createTerminal = createTerminal;
 		this.edit = edit;
@@ -45,6 +49,10 @@ class WorkbenchPanel implements View {
 		tree.expandOnSingleClick = true;
 		tree.onSelectionChanged = function(_) requestFrame();
 		tree.onItemClicked = function(key, _) {
+			if (StringTools.startsWith(key, "a:")) {
+				client.agentService().agentAction(key.substring(2), "read", "", null);
+				openAgent(key.substring(2));
+			}
 			if (StringTools.startsWith(key, "t:")) {
 				var t = model.terminals.get(key.substring(2));
 				if (t != null)
@@ -63,13 +71,21 @@ class WorkbenchPanel implements View {
 			if (t != null)
 				return model.groups.get(t.group);
 		}
+		if (key != null && StringTools.startsWith(key, "a:")) {
+			var a = model.agents.get(key.substring(2));
+			if (a != null)
+				return model.groups.get(a.group);
+		}
 		return model.groups.get("work");
 	}
 
 	public function build(context:BuildContext):RenderNode {
-		if (catalogRevision != client.terminalCatalogRevision()) {
+		var agents = client.agentService().agents(),
+			nextAgentKey = client.agentService().agentRevision();
+		if (catalogRevision != client.terminalCatalogRevision() || nextAgentKey != agentKey) {
+			agentKey = nextAgentKey;
 			catalogRevision = client.terminalCatalogRevision();
-			model.update(client.terminalCatalog());
+			model.update(client.terminalCatalog(), agents);
 		}
 		var selected = selectedGroup();
 		var newGroup = new Button("New group", null, function() {
@@ -105,6 +121,46 @@ class WorkbenchPanel implements View {
 			new KeyedView("create", new Row("workbench-create", [new KeyedView("group", newGroup), new KeyedView("terminal", newTerminal)])),
 			new KeyedView("edit", new Row("workbench-edit", [new KeyedView("group", editButton), new KeyedView("folder", folder)]))
 		];
+		var agentButton = new Button("New Codex", null, function() {
+			if (selected != null)
+				client.agentService().createAgent(selected.id, null, openAgent);
+		}, "workbench-new-codex");
+		agentButton.enabled = selected != null && client.agentService().canControlAgents() && !client.agentService().agentBusy();
+		rows.push(new KeyedView("new-codex", agentButton));
+		var threadField = new nativekit.ui.widgets.text.TextField("workbench-attach-thread", attachThread, function(v) {
+			attachThread = v;
+			requestFrame();
+		});
+		threadField.label = "Existing Codex thread id";
+		rows.push(new KeyedView("thread-id", threadField));
+		rows.push(new KeyedView("attach-codex", new Button("Attach Codex thread", null, function() {
+			if (selected != null && attachThread != "")
+				client.agentService().createAgent(selected.id, attachThread, openAgent);
+		}, "workbench-attach-codex")));
+		rows.push(new KeyedView("discover-codex", new Button("Find Codex threads", null, function() {
+			if (selected != null)
+				client.agentService().discoverAgents(selected.id, null);
+		}, "workbench-find-codex")));
+		var found = client.agentService().discoveredAgents();
+		if (found != null) {
+			for (thread in found.threads) {
+				var t = thread;
+				rows.push(new KeyedView("thread-" + t.id, new Button(t.title == "" ? t.id : t.title, null, function() {
+					if (selected != null)
+						client.agentService().createAgent(selected.id, t.id, openAgent);
+				})));
+			}
+			if (found.next != null)
+				rows.push(new KeyedView("more-threads", new Button("More threads", null, function() {
+					if (selected != null)
+						client.agentService().discoverAgents(selected.id, found.next);
+				})));
+		}
+		if (agents != null)
+			rows.push(new KeyedView("provider", new Text(agents.status)));
+		if (client.agentService().agentError() != null)
+			rows.push(new KeyedView("agent-error", new Text(client.agentService().agentError())));
+
 		var error = client.terminalCatalogError();
 		if (error != null)
 			rows.push(new KeyedView("error", new Text(error)));

@@ -1,0 +1,40 @@
+{
+  "cli": "0.160.0",
+  "servers": [
+    "0.160.0",
+    "0.160.1"
+  ],
+  "schemas": {
+    "CommandExecutionRequestApprovalParams": "16a71816c2d66e319c2c4aa83dd636dfdc43c61e72b6d5475e421ce08d8e6558",
+    "CommandExecutionRequestApprovalResponse": "6d0767113e22f311381809b6b236b0dde2b99b01992879c26bf7b1ea0e003cb7",
+    "FileChangeRequestApprovalParams": "13848b26814c286ad6425a20d01c1691c86790e1f9e2529399677a8a22fe0d18",
+    "FileChangeRequestApprovalResponse": "b95b03ee6be674e25cee2e863cc135a28620e1070addd2f34685aadee27cde08",
+    "ToolRequestUserInputParams": "fda15b62e7446105b59c8ed85c908abed2a47db70653e57c92c47a2f204fa77a",
+    "ToolRequestUserInputResponse": "5073b245f741fa8ce62ec52e4dd1809b7831f9c4284c279a78abc9b171f8e3f2",
+    "v1/InitializeParams": "b55124e7c0f36a1789396daa5578217a92be67f053903696236686e59f6f212e",
+    "v1/InitializeResponse": "62ad689c2cb6379913c1d72749cfd8de5089d35760214123518eb92eef11acc9",
+    "v2/AgentMessageDeltaNotification": "996e6c0ea65e57bed5a00f410b94381fe5ebf804333e5d00c2b6e6d47e5c55f6",
+    "v2/CommandExecutionOutputDeltaNotification": "841fa94098ddb63a71acf1bf5f9e3fac1b0491f4ed3fa8ef86f9a6ca1260b539",
+    "v2/ItemCompletedNotification": "d04b9153de38cd8302a2a418a44a65e8265d4c7586d46ea2cc801b594c6acf5b",
+    "v2/ItemStartedNotification": "7574788d2a352747f50d44be3ef649011cb8de8069da4c655faff14d0aee32c4",
+    "v2/ServerRequestResolvedNotification": "4f03d586a5af04edd912cad08cc97eceb658e7e06744565e6d41a93e04a55966",
+    "v2/ThreadItemsListParams": "d5cf9784413f1d1abba756e04e48b273a9d12ab2c5675442e91b6a4ee55e19f0",
+    "v2/ThreadItemsListResponse": "bc8a8dcb9a48d9ca38b0a5faa89b80ec2fd57398cd3a8dcc15097776153f6c74",
+    "v2/ThreadListParams": "bf5abcb5363c177f8d6b60e6193c76ad8807d6452b67a73ee2f1d77dfe427ac9",
+    "v2/ThreadListResponse": "bb5721fb42f3b95b4b66ba5a114665e58b221eef5308a9e20890dda26b3894fb",
+    "v2/ThreadReadParams": "dfe040c6ac71d30795b8be3f3ff232e66f362a37f883b491e5d1ea367f470db4",
+    "v2/ThreadReadResponse": "3a0aaf9cff80796d07130b85723ca825f9203796d15c878f452083cf9f9a6f0a",
+    "v2/ThreadResumeParams": "c818e26d830ac4430791eab7d4a872d2384fa6006b14c505d8caf46e7e093527",
+    "v2/ThreadResumeResponse": "e7751c8dba039fa5f55971307e89e8b8541f2853840650ea8968bad8c23698d6",
+    "v2/ThreadStartParams": "e9c6d3cc18d049bfbc0249add3808fb8e5a27e1a0b5a423767aafbc3859a9428",
+    "v2/ThreadStartResponse": "70d9c9a3a064edb76662ec7cd066d142ed9252b768272bc3a7d00788386755c0",
+    "v2/ThreadStatusChangedNotification": "26f3c60c1b73f7fa2d31c74429cdc36f8746c76c33e3d314b3fb61d3661f05f6",
+    "v2/ThreadTurnsListParams": "2a8b93d7d4437cc25e16a1dde16d8db3c338d39e16c5eece2a56e943a21577d7",
+    "v2/ThreadTurnsListResponse": "8db83d38553204a223cf349680c59b0cc674ba95a4637e1995bfeabd73c80219",
+    "v2/TurnCompletedNotification": "016870158603b0f84bd9f8f65f927161c9fd5128e5ec632087616462dc44e085",
+    "v2/TurnInterruptParams": "6dff382dae73d1dbc58406ed045605f647e7a49660e2540fbd2c6c24d60c5f2b",
+    "v2/TurnStartParams": "2dfcf68705896fadc344ccfeb2e9fe5a6bcbbb8b9a90cf449ce232b636daf05a",
+    "v2/TurnStartResponse": "12c5151421bb061297c9790ff795a44aa4b9bdb91fbb68012dcf0a08cf4198b1",
+    "v2/TurnStartedNotification": "2e9a109ee549c1e266223304c9e0580075cda03feb65473363b124f18e9a3769"
+  }
+}

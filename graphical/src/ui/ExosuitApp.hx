@@ -82,11 +82,14 @@ class ExosuitApp implements DesktopUiApplication {
 	public final capabilities:HostCapabilities;
 	public final host:UiWorkbenchHost;
 	final desktop:Null<HostFileDialogs>;
-	var terminalCatalogClient:Null<workspace.client.WorkspaceTerminalCatalogClient>;
+	var workbenchClient:Null<workspace.client.WorkspaceWorkbenchClient>;
 	var terminalBrowserVisible:Bool = false;
 	var terminalBrowserRevision:Int = -1;
 	var terminalBrowserPanel:Null<WorkspaceTerminalsPanel>;
 	var workbenchPanel:Null<WorkbenchPanel>;
+
+ var codexPoll:Float=0;
+ var agentRevision=-1;
 	var groupEditor:Null<GroupEditorPanel>;
 	var workspaceAttachment:Null<workspace.client.WorkspaceAttachment>;
 	var workspaceStatus:String = "";
@@ -230,7 +233,8 @@ class ExosuitApp implements DesktopUiApplication {
 			for (line in lines) if (StringTools.startsWith(line, "B\tsidebar\t1\t")) sidebar.restore(line.substring(12));
 		};
 		host.activateSearch = function() showSidebarMode("search");
-		if (this.createTerminal != null) host.restoreTerminal = restoreTerminalTab;
+		host.restoreAgent=makeAgentTab;
+  if (this.createTerminal != null) host.restoreTerminal = restoreTerminalTab;
 		host.caretRectProvider = function() {
 			var active = host.activeView();
 			if (active == null) return null;
@@ -562,6 +566,7 @@ class ExosuitApp implements DesktopUiApplication {
             layers.push(new StackChild("workspace-terminals",new nativekit.ui.widgets.overlays.Dialog("workspace-terminals-dialog","Workspace Terminals",content,dismiss,
                 Math.max(240.0,Math.min(640.0,viewportWidth-48.0))),0.0,0.0,50,LayoutAxis.grow(),LayoutAxis.grow()));
         }
+
 		if (groupEditor != null) {
 			var dismiss = function() { groupEditor = null; requestFrame(); };
 			layers.push(new StackChild("workbench-group-dialog", new nativekit.ui.widgets.overlays.Dialog(
@@ -670,17 +675,29 @@ class ExosuitApp implements DesktopUiApplication {
 		return ui.submitCached(view, frame, key);
 	}
 
-	public function attachTerminalCatalog(client:workspace.client.WorkspaceTerminalCatalogClient):Void {
-		terminalCatalogClient = client;
+	public function attachWorkbench(client:workspace.client.WorkspaceWorkbenchClient):Void {
+		workbenchClient = client;
 		terminalBrowserPanel = new WorkspaceTerminalsPanel(client, openCatalogTerminal, forgetCatalogTerminal, requestFrame);
 		workbenchPanel = new WorkbenchPanel(client, openCatalogTerminal, newGroupedTerminal, editWorkspaceGroup,
-			function(path) application.openArgument(path), openWorkspaceTerminals, requestFrame);
+			function(path) application.openArgument(path), openWorkspaceTerminals, requestFrame, openCodexAgent);
 		registerSidebarDestination("workbench", IconName.Terminal, function() return workbenchPanel == null ? new Text("Workspace disconnected") : workbenchPanel,
 			new nativekit.ui.widgets.sidebar.SidebarModeOptions("Workbench", 20, true));
 	}
 
+ function makeAgentTab(id:String,resource:String,root:String,title:String):UiAgentTab {
+  return new UiAgentTab(id,resource,root,title,new CodexSessionPanel(function() return workbenchClient==null?null:workbenchClient.agentService(),resource,root,requestFrame));
+ }
+ function openCodexAgent(resource:String):Void {
+  var client=workbenchClient, catalog=client==null?null:client.agentService().agents();
+  if(catalog==null) return;
+  for(record in catalog.records) if(record.id==resource) {
+   var id=ResourceViewIdentity.view(catalog.root,resource,"agent");
+   host.attachAgent(makeAgentTab(id,resource,catalog.root,record.name));requestFrame();return;
+  }
+ }
+
 	function newGroupedTerminal(group:String):Void {
-		var client = terminalCatalogClient;
+		var client = workbenchClient;
 		var catalog = client == null ? null : client.terminalCatalog();
 		if (catalog == null || workbenchPanel == null) return;
 		var selected = workbenchPanel.model.groups.get(group);
@@ -691,21 +708,21 @@ class ExosuitApp implements DesktopUiApplication {
 		if (catalog.workspaceRoot != root) return;
 		var cwd = workbenchPanel.model.directory(selected);
 		var resource = workspace.client.LocalTerminalIds.create(nextTerminalId++);
-		var terminal = createTerminalTab(TerminalViewIdentity.view(root, resource), "Terminal", cwd == null ? root : cwd, false, true, resource, root, group);
+		var terminal = createTerminalTab(ResourceViewIdentity.view(root, resource), "Terminal", cwd == null ? root : cwd, false, true, resource, root, group);
 		if (terminal == null) return;
 		host.panelTerminals.push(terminal); host.activePanelTerminalIndex = host.panelTerminals.length - 1;
 		dock.open("terminal"); dock.activate("terminal"); pendingTerminalFocus = true; requestFrame();
 	}
 
 	function editWorkspaceGroup(group:workspace.service.WorkspaceProtocol.WorkspaceGroup, create:Bool):Void {
-		if (terminalCatalogClient == null) return;
-		groupEditor = new GroupEditorPanel(terminalCatalogClient, group, create, function() { groupEditor = null; requestFrame(); }, requestFrame);
+		if (workbenchClient == null) return;
+		groupEditor = new GroupEditorPanel(workbenchClient, group, create, function() { groupEditor = null; requestFrame(); }, requestFrame);
 		requestFrame();
 	}
 
 	public function openWorkspaceTerminals():Void {
 		terminalBrowserVisible = true;
-		if (terminalCatalogClient != null) terminalCatalogClient.refreshTerminals(true);
+		if (workbenchClient != null) workbenchClient.refreshTerminals(true);
 		requestFrame();
 	}
 
@@ -725,7 +742,7 @@ class ExosuitApp implements DesktopUiApplication {
 			requestFrame();
 			return true;
 		}
-		var terminal = createTerminalTab(TerminalViewIdentity.view(record.workspaceRoot == null ? record.cwd : record.workspaceRoot, record.id), record.name, record.cwd, true, true, record.id, record.workspaceRoot);
+		var terminal = createTerminalTab(ResourceViewIdentity.view(record.workspaceRoot == null ? record.cwd : record.workspaceRoot, record.id), record.name, record.cwd, true, true, record.id, record.workspaceRoot);
 		if (terminal == null) return false;
 		host.panelTerminals.push(terminal);
 		host.activePanelTerminalIndex = host.panelTerminals.length - 1;
@@ -738,8 +755,8 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function forgetCatalogTerminal(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Void {
-		if (terminalCatalogClient == null || record.state == "running" || record.state == "starting") return;
-		terminalCatalogClient.forgetTerminal(record);
+		if (workbenchClient == null || record.state == "running" || record.state == "starting") return;
+		workbenchClient.forgetTerminal(record);
 		for (tab in host.allTerminalTabs()) if (tab.remote && tab.resourceId == record.id && tab.workspaceRoot == record.workspaceRoot) {
 			host.detachTerminal(tab);
 			var index = host.panelTerminals.indexOf(tab);
@@ -769,10 +786,16 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function pumpApplication():Void {
 		nextBackgroundPoll = Sys.time() + 0.05;
-        if((terminalBrowserVisible || groupEditor != null || (sidebar.visible && sidebar.activeId == "workbench")) && terminalCatalogClient!=null) terminalCatalogClient.refreshTerminals(false);
-        if(terminalCatalogClient!=null && terminalCatalogClient.terminalCatalogRevision()!=terminalBrowserRevision) {
-            terminalBrowserRevision=terminalCatalogClient.terminalCatalogRevision();
-            var catalog=terminalCatalogClient.terminalCatalog();
+        if(workbenchClient!=null && ((sidebar.visible && sidebar.activeId=="workbench")|| (host.activeTab()!=null&&UiEditorTabs.agent(host.activeTab())!=null))) {
+   workbenchClient.agentService().refreshAgents();
+   if(agentRevision!=workbenchClient.agentService().agentRevision()) {agentRevision=workbenchClient.agentService().agentRevision();requestFrame();}
+   var active=host.activeTab(), agent=active==null?null:UiEditorTabs.agent(active), catalog=workbenchClient.agentService().agents();
+   if(agent!=null && catalog!=null && agent.workspaceRoot==catalog.root && Sys.time()>=codexPoll) {codexPoll=Sys.time()+1;workbenchClient.agentService().agentAction(agent.resource,"read","",null);}
+  }
+        if((terminalBrowserVisible || groupEditor != null || (sidebar.visible && sidebar.activeId == "workbench")) && workbenchClient!=null) workbenchClient.refreshTerminals(false);
+        if(workbenchClient!=null && workbenchClient.terminalCatalogRevision()!=terminalBrowserRevision) {
+            terminalBrowserRevision=workbenchClient.terminalCatalogRevision();
+            var catalog=workbenchClient.terminalCatalog();
             if(catalog!=null) for(record in catalog.terminals) for(tab in host.allTerminalTabs())
                 if(tab.remote && tab.resourceId==record.id && tab.workspaceRoot==record.workspaceRoot) { tab.title=record.name; tab.cwd=record.cwd; }
             requestFrame();
@@ -864,7 +887,9 @@ class ExosuitApp implements DesktopUiApplication {
 			terminalIds: [for (terminal in host.allTerminalTabs()) terminal.id],
 			terminalResourceIds: [for (terminal in host.allTerminalTabs()) terminal.resourceId],
 			terminalBrowserVisible: terminalBrowserVisible,
-			terminalCatalog: terminalCatalogClient == null ? null : terminalCatalogClient.terminalCatalog(),
+			agentCatalog:workbenchClient==null?null:workbenchClient.agentService().agents(),
+   agentTabs:host.agentResourceIds(),
+   terminalCatalog: workbenchClient == null ? null : workbenchClient.terminalCatalog(),
 			terminal: panel == null ? "closed" : panel.status(),
 			terminalColumns: panel == null ? 0 : panel.columns(),
 			terminalRows: panel == null ? 0 : panel.rows()
@@ -1006,6 +1031,13 @@ class ExosuitApp implements DesktopUiApplication {
 		var items:Array<TabItem> = [];
 		var filenames:Map<String, String> = new Map();
 		for (item in editorPane.items) {
+   var agent=UiEditorTabs.agent(item);
+   if(agent!=null) {
+    var key=UiEditorTabs.key(item), tab=new TabItem(key,agent.title,agent.panel,true,IconName.Terminal);
+    tab.onClose=function() host.closeTab(item,paneId,true);
+    items.push(tab);continue;
+   }
+
 			var terminal = UiEditorTabs.terminal(item);
 			if (terminal != null) {
 				var terminalKey = UiEditorTabs.key(item);

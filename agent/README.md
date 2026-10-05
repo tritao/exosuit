@@ -162,3 +162,6 @@ nested directory creation and subdirectory terminal restoration. It accepts a
 staged runtime directory as its optional argument for relocation acceptance with
 source compilation disabled. Terminal fixtures also cover two-client updates,
 permissions, cycle/stale-edit rejection and Unicode storage/message bounds.
+
+Codex conversations use a separate structured provider adapter, not terminal
+bytes. See [CODEX.md](CODEX.md) for version support, controls, bounds and recovery.

@@ -10,6 +10,7 @@ import workspace.service.WorkspaceTerminalProtocol;
 /** Projection only: grouping/status belong to the service, expansion/selection to TreeView. */
 class WorkbenchTreeModel implements TreeViewModel {
 	public final groups:Map<String, WorkspaceGroup> = [];
+	public final agents:Map<String, workspace.service.WorkspaceAgentProtocol.AgentRecord> = [];
 	public final terminals:Map<String, TerminalRecord> = [];
 
 	final children:Map<String, Array<String>> = [];
@@ -19,7 +20,8 @@ class WorkbenchTreeModel implements TreeViewModel {
 
 	public function new() {}
 
-	public function update(catalog:Null<TerminalCatalog>):Void {
+	public function update(catalog:Null<TerminalCatalog>, ?agentCatalog:workspace.service.WorkspaceAgentProtocol.AgentCatalog):Void {
+		agents.clear();
 		groups.clear();
 		terminals.clear();
 		children.clear();
@@ -48,6 +50,13 @@ class WorkbenchTreeModel implements TreeViewModel {
 			if (siblings != null)
 				siblings.push("t:" + t.id);
 		}
+		if (agentCatalog != null)
+			for (a in agentCatalog.records) {
+				agents.set(a.id, a);
+				var siblings = children.get("g:" + a.group);
+				if (siblings != null)
+					siblings.push("a:" + a.id);
+			}
 	}
 
 	public function rootCount():Int
@@ -109,6 +118,10 @@ class WorkbenchTreeModel implements TreeViewModel {
 			}
 			return new Text(group.name + (running > 0 ? " · " + running + " running" : "") + (group.cwd == null ? "" : " · " + group.cwd));
 		}
+		if (StringTools.startsWith(key, "a:")) {
+			var a = agents.get(key.substring(2));
+			return new Text(a == null ? "" : a.name + " · " + a.state);
+		}
 		var terminal = terminals.get(key.substring(2));
 		return new Text(terminal == null ? "" : terminal.name + " · " + terminal.state);
 	}
@@ -122,9 +135,12 @@ class WorkbenchTreeModel implements TreeViewModel {
 		}
 		return workspaceRoot;
 	}
+
 	public function nextOrder(parent:Null<String>):Int {
 		var next = 0;
-		for (g in groups) if (g.parent == parent) next = Std.int(Math.max(next, WorkspaceProtocol.order(g.order) + 1));
+		for (g in groups)
+			if (g.parent == parent)
+				next = Std.int(Math.max(next, WorkspaceProtocol.order(g.order) + 1));
 		return Std.int(Math.min(1000000, next));
 	}
 }

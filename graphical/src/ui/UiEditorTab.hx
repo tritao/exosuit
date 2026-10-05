@@ -4,4 +4,5 @@ package ui;
 enum UiEditorTab {
 	Document(view:UiDocumentView);
 	Terminal(terminal:UiTerminalTab);
+ Agent(agent:UiAgentTab);
 }

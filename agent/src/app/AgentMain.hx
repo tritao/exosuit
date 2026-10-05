@@ -26,6 +26,8 @@ class AgentMain {
 			throw "Invalid session credential file size";
 		var token = sys.io.File.getContent(args[2]);
 		SessionPreflight.validateToken(token);
+		platform.Platform.startHeadless();
+		var processes = new process.ProcessManager();
 		var runtime = NativeKitRuntime.start(),
 			hub = new NativeRpcHub(runtime.events);
 		var clock = function() return NativeKit.nk_time_seconds() * 1000;
@@ -42,7 +44,9 @@ class AgentMain {
 		var store = args.length >= 5 ? new WorkspaceSqliteStore(args[4], "workspace", seed.snapshot(), 32, directories.root) : null;
 		var service = new WorkspaceService("workspace", args[3], seed.snapshot().groups, 32, 256, 16, store, directories.resolve);
 		var terminals = new WorkspaceTerminalManager("workspace", args.length >= 7 ? args[6] : args[3], directories.root,16777216,store,function() return service.snapshot().groups);
-		var server = new WorkspaceRpcServer(service, clock, null, args.length >= 7 ? {workspace: "workspace", root: directories.root, instance: args[6]} : null, terminals);
+		var executable = Sys.getEnv("EXOSUIT_CODEX_BIN");
+		var agents = new workspace.provider.CodexProvider("workspace", args.length >= 7 ? args[6] : args[3], directories, function() return service.snapshot().groups, processes, clock, store, executable == null ? "codex" : executable, Sys.getEnv("EXOSUIT_CODEX_PROXY_LAUNCHER"));
+		var server = new WorkspaceRpcServer(service, clock, null, args.length >= 7 ? {workspace: "workspace", root: directories.root, instance: args[6]} : null, terminals, agents);
 		var local = hub.listen(NativeRpcHub.local(args[0]), server.acceptLocal);
 		var websocket = hub.listen(NativeRpcHub.websocket(port, "/workspace", true), function(transport) {
 			server.acceptWebSocket(transport, token);
@@ -57,15 +61,19 @@ class AgentMain {
 			server.poll();
 			// Runtime ownership survives client disconnects.
 			terminals.poll();
-			if (lifetime.shouldStop(clock(), server.clientCount(), terminals.activeCount()))
+			agents.poll();
+			if (lifetime.shouldStop(clock(), server.clientCount(), terminals.activeCount() + agents.activeCount()))
 				break;
 		}
+		agents.dispose();
+		processes.shutdown();
 		terminals.dispose();
 		server.dispose();
 		hub.dispose();
 		if (store != null)
 			store.close();
 		runtime.dispose();
+		platform.Native.shutdown();
 		Sys.println("STOPPED: exosuit-agent idle");
 		Sys.stdout().flush();
 	}

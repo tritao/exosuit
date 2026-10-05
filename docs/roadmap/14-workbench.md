@@ -216,6 +216,18 @@ The [official app-server documentation](https://learn.chatgpt.com/docs/app-serve
 covers the protocol; daemon/proxy commands are verified from local CLI help.
 Their multi-client lifecycle and reconnect behavior still need acceptance tests.
 
+Delivered first Codex slice: a daemon-owned adapter for installed CLI 0.160.0 (server 0.160.0/0.160.1) uses
+shared daemon start/proxy and per-connection initialize. Typed workspace methods
+120–123 cover catalog, create/explicit attach, conversation controls and directory
+filtered discovery. SQLite v4 preserves external thread IDs/reservations. Native
+Workbench agents appear beside terminals and use the same editor tab rail; saved
+resource scope restores views without owning the shared server. Streamed activity,
+approve-once/decline, question-ID input, interruption and bounded recent-history
+reconciliation are implemented. See [provider details](../../agent/CODEX.md).
+The full provider milestone remains open: the generic registry, Claude, richer
+renderers/request kinds, full paged history, resource metadata controls,
+supervision CLI/wait and opt-in real inference/shared-daemon acceptance.
+
 - [ ] Provider registry with the lifecycle contract (available, create,
   attach, recover, start, stop, restart, send_input, action, refresh_status,
   capabilities, shutdown). Ship `shell`, `claude` and `codex`.

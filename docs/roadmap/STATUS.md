@@ -2,6 +2,47 @@
 
 Last updated: 2026-10-05.
 
+## M14.4 — first Codex provider and conversation tabs, 2026-10-05
+
+Daemon-owned Codex adapter uses the installed 0.160.0 CLI / 0.160.1 shared app-server proxy.
+Version/initialize checks precede requests. Typed optional agent read/control
+capabilities expose catalog/create/action/discovery (120–123); Codex JSONL stays
+inside the host adapter. The CLI proxy forwards raw Unix-socket bytes; a bounded
+WebSocket/JSONL bridge performs upgrade, masking, fragmentation/control handling
+and output draining. Two real shared-daemon clients initialize and query metadata;
+one continues querying after its sibling disconnects. Direct JSONL to the raw
+proxy was rejected during implementation. New sessions inherit the selected group directory;
+explicit discovery is directory-filtered and attachment verifies cwd before
+resuming. New-thread sandbox/approval requests are workspace-write/on-request;
+existing thread policy and global Codex configuration are preserved.
+
+SQLite v4 migrates existing data and adds bounded agent rows. Reservations precede
+thread creation; uncertain creates retain identity. Prompts are never replayed on
+ambiguous failure. Reconnect reads metadata, resumes, reconciles the latest active
+turn and reads eight recent persisted items. Resolved requests and stale service
+instances are fenced. Oversized requests cannot be approved from truncated
+summaries; unsupported request kinds remain visible. Catalog pages, activity,
+requests, transport queues and per-poll work are bounded.
+
+Workbench groups project terminals and agents together. Conversations use normal
+editor-group tabs, including saved resource scope and ordinary close behavior.
+Closing a view/editor never interrupts a turn or owns the Codex shared server.
+Terminal and agent client contracts remain separate behind a Workbench composition.
+The shared host-services package owns the existing platform/process FFI/build once;
+both executables consume it without duplicate bindings or daemon UI dependencies.
+
+Deterministic native acceptance covers lazy startup/version checks, streamed items,
+approvals/input, read-only fencing, duplicate approval rejection, oversized frames,
+large UTF-8 prompts, ambiguous-loss reconciliation, recent history, interruption,
+external cwd refusal and SQLite thread identity. The full core suite passes,
+including native, Wasm32 and Wasm-GC wire vectors. Self-hosted provider tests pass.
+Relocated desktop checks cover conversation creation, prompts, approvals/input,
+saved tabs and view closure, plus existing terminal restoration and group cwd.
+Real authenticated inference and two-client shared Codex active-turn survival remain pending; no claim is based on
+CLI/schema inspection alone. Full history browsing, richer requests/renderers,
+agent metadata controls, supervision CLI/wait and Claude remain open.
+
+
 ## M14.1/M14.3 — named directory groups and Workbench tree, 2026-10-05
 
 Haxeon `3e8014be` fixes incremental shared-helper ownership. Required wire/JSON

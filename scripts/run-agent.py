@@ -17,6 +17,8 @@ import sys
 import time
 import urllib.parse
 
+os.environ.setdefault("EXOSUIT_CODEX_PROXY_LAUNCHER", str(Path(__file__).resolve().with_name("run-codex-proxy.py")))
+
 REPO = Path(__file__).resolve().parent.parent
 
 

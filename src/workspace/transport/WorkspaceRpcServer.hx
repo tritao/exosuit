@@ -14,6 +14,7 @@ class WorkspaceRpcServer {
 	final clock:Void->Float;
 	final identity:Null<WorkspaceIdentity>;
 	final terminals:Null<WorkspaceTerminals>;
+	final agents:Null<workspace.service.WorkspaceAgents>;
 	final peers:Array<Peer> = [];
 
 	public final options:RpcPeerOptions;
@@ -27,9 +28,10 @@ class WorkspaceRpcServer {
 		return count;
 	}
 
-	public function new(service:WorkspaceService, clock:Void->Float, ?capabilities:Array<String>, ?identity:WorkspaceIdentity, ?terminals:WorkspaceTerminals) {
+	public function new(service:WorkspaceService, clock:Void->Float, ?capabilities:Array<String>, ?identity:WorkspaceIdentity, ?terminals:WorkspaceTerminals, ?agents:workspace.service.WorkspaceAgents) {
 		this.service = service;
 		this.terminals = terminals;
+		this.agents = agents;
 		this.clock = clock;
 		this.identity = identity == null ? null : {workspace: identity.workspace, root: identity.root, instance: identity.instance};
 		if (identity != null && (identity.workspace != service.id || identity.root.length == 0 || identity.instance.length == 0))
@@ -41,6 +43,10 @@ class WorkspaceRpcServer {
 			defaults.push(WorkspaceTerminalProtocol.READ);
             defaults.push(WorkspaceTerminalProtocol.CATALOG);
 			defaults.push(WorkspaceTerminalProtocol.CONTROL);
+		}
+		if (agents != null) {
+			defaults.push(workspace.service.WorkspaceAgentProtocol.READ);
+			defaults.push(workspace.service.WorkspaceAgentProtocol.CONTROL);
 		}
 		options = new RpcPeerOptions("exosuit-agent/1", capabilities == null ? defaults : capabilities, [], 5000, 262144, 32, 1048576);
 	}
@@ -118,6 +124,7 @@ class WorkspaceRpcServer {
 						});
 					service.bind(peer.connection, grants);
 					if (terminals != null) terminals.bind(peer.connection, grants);
+					if (agents != null) agents.bind(peer.connection, grants);
 				}
 			}
 			if (peer.connection != null)

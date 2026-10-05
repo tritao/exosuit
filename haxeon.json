@@ -9,6 +9,7 @@
 	],
 	"scopeSourceRoots": false,
 	"dependencies": {
+		"hostservices": { "path": "native-packages/host" },
 		"haxeon-platform": { "path": "../haxeon/packages/platform" },
 		"haxeon-gpu": { "path": "../haxeon/packages/gpu" },
 		"uikit": {
@@ -24,29 +25,6 @@
 			"path": "native-packages/terminal/session"
 		}
 	},
-	"native": {
-		"cmake": {
-			"source": "native",
-			"target": "pragtical_hx",
-			"library": "pragtical_hx",
-			"inputs": [
-				"native/CMakeLists.txt",
-				"native/ffi/pragtical_hx.c",
-				"native/headless/platform.c",
-				"include/pragtical_hx/native.h",
-				"include/pragtical_hx/platform.h",
-				"include/pragtical_hx/platform_abi.h"
-			]
-		}
-	},
 	"target": "host",
-	"outputDir": "build",
-	"ffi": {
-		"interfaces": [
-			"bindings/pragtical_hx.hxi"
-		],
-		"projections": [
-			"bindings/pragtical_hx.hxmap"
-		]
-	}
+	"outputDir": "build"
 }

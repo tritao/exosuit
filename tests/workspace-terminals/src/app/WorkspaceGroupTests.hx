@@ -224,7 +224,7 @@ class WorkspaceGroupTests {
 		var legacyStore = new WorkspaceSqliteStore(root + "/legacy-root.sqlite", "w", seed.snapshot());
 		legacyStore.close();
 		var legacyDb = sqlitekit.Database.open(root + "/legacy-root.sqlite");
-		legacyDb.exec("ALTER TABLE workspace_meta DROP COLUMN root; PRAGMA user_version=2");
+		legacyDb.exec("DROP TABLE workspace_agents; ALTER TABLE workspace_meta DROP COLUMN root; PRAGMA user_version=2");
 		legacyDb.close();
 		var rejectedLegacy = false;
 		try {

@@ -6,6 +6,7 @@ import haxeon.wire.MessagePack;
 import haxeon.wire.MessagePackFrame;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceTerminalProtocol;
+import workspace.service.WorkspaceAgentProtocol;
 
 /** Frozen independent MessagePack vectors: both bytes and semantic decode are checked. */
 class RpcCompatibilityTests {
@@ -39,6 +40,25 @@ class RpcCompatibilityTests {
 	}
 
 	public static function run():Void {
+
+  var agentCreate:AgentCreate={workspace:"w",instance:"i",id:"a",group:"g",name:"Codex",thread:null};
+  require(WorkspaceAgentProtocol.CREATE.encodeRequest(agentCreate).compare(bytes("8601a17702a16903a16104a16705a5436f64657806c0"))==0,"Agent create vector changed");
+  var agentAction:AgentAction={workspace:"w",instance:"i",id:"a",action:"prompt",text:"hi",request:null};
+  require(WorkspaceAgentProtocol.ACTION.encodeRequest(agentAction).compare(bytes("8601a17702a16903a16104a670726f6d707405a2686906c0"))==0,"Agent prompt vector changed");
+  var agentWideRoot="";for(_ in 0...1024) agentWideRoot+="😀";
+  var agentWideName="";for(_ in 0...256) agentWideName+="😀";
+  var agents:Array<AgentRecord> = [];
+  for(i in 0...6) agents.push({id:"a"+i,name:agentWideName,group:"g",cwd:agentWideRoot,thread:"t",state:"needs-attention",turn:"turn",workspaceRoot:agentWideRoot});
+  var page:AgentCatalog={instance:"i",root:agentWideRoot,records:agents,status:"connected",next:"a5"};
+  var agentBytes=WorkspaceAgentProtocol.LIST.encodeResponse(page);
+  require(RpcProtocol.encode(Response(1,agentBytes),262144).length<=262144,"Agent page exceeded message bound");
+  require(WorkspaceAgentProtocol.LIST.decodeResponse(agentBytes).records.length==6,"Agent page decode lost records");
+  var activity="";for(_ in 0...16384) activity+="😀";
+  var detail="";for(_ in 0...2048) detail+="😀";
+  var requests:Array<AgentRequest> = [];
+  for(i in 0...16) requests.push({id:"request"+i,method:"item/commandExecution/requestApproval",detail:detail,reviewable:true});
+  var agentView:AgentView={record:agents[0],activity:activity,requests:requests,error:detail};
+  require(RpcProtocol.encode(Response(1,WorkspaceAgentProtocol.ACTION.encodeResponse(agentView)),262144).length<=262144,"Agent activity view exceeded message bound");
 		var error:RpcError = {code: "unknown_method", message: "unknown_method", ambiguous: false};
 		var query = WorkspaceProtocol.QUERY.encodeRequest({workspace: "w"});
 		vector(Hello(1, 1, "test/1", [WorkspaceProtocol.READ]), "8101940101a6746573742f3191ae776f726b73706163652e72656164");

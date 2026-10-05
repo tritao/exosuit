@@ -1,0 +1,9 @@
+{
+ "version":1,
+ "package":{"name":"exosuit-workspace-agents-test"},
+ "entry":"app.AgentProviderTestMain",
+ "sourceRoots":["src"],
+ "scopeSourceRoots":false,
+ "dependencies":{"exosuit-agent":{"path":"../../agent"}},
+ "target":"host","outputDir":"build"
+}

@@ -10,6 +10,7 @@
   ],
   "scopeSourceRoots": false,
   "dependencies": {
+    "hostservices": { "path": "../native-packages/host" },
     "haxeon-platform": { "path": "../../haxeon/packages/platform" },
     "haxeon-gpu": { "path": "../../haxeon/packages/gpu" },
     "sqlitekit": {

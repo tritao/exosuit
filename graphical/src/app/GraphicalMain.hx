@@ -112,7 +112,7 @@ class GraphicalMain {
 					workspaceClient = new workspace.client.LocalWorkspaceClient(context.events, instance.application.processes,
 						workspace.client.LocalWorkspaceClient.findLauncher(), function() return NativeKit.nk_time_seconds() * 1000);
 					instance.attachWorkspace(workspaceClient);
-					instance.attachTerminalCatalog(workspaceClient);
+					instance.attachWorkbench(workspaceClient);
 				}
 				catch (failure:Dynamic)
 					instance.application.reportError("workspace", Std.string(failure));

@@ -313,3 +313,26 @@ transactionally; subsequent group directory changes do not alter that root. A
 failed root migration rolls back so the correct owner can reopen the old schema. Group revisions/sequences keep the original bounded Int protocol in this
 first service; terminal metadata/stream positions use Int64. The broader durable
 domain, operation-retention lifecycle and multi-root authorization remain planned.
+
+
+## Structured agent sessions — first Codex slice
+
+Optional `workspace.agents.read` and `workspace.agents.control` capabilities
+gate methods 120 (catalog), 121 (create/explicit attach), 122 (read, connect,
+prompt, stop or answer) and 123 (directory-filtered Codex thread discovery).
+These records are distinct from terminal bytes. Agent IDs are workspace-scoped;
+external thread and active-turn IDs are provider-owned. Catalogs identify the
+workspace instance/root, use six-record pages and contain at most 32 resources.
+
+The native provider resolves group directories on the authorized machine.
+Creation reserves metadata before issuing the external request. Only explicit,
+unambiguous startup refusals allow bounded same-ID retry; ambiguous prompts and
+approval replies are never automatically replayed. Per-request IDs are local to
+the current provider connection and disappear on resolution/disconnect. Stop
+interrupts the attached resource's active turn; view closing stops no runtime.
+
+SQLite schema v4 adds agent metadata while preserving group/terminal data and
+the pinned root. Thread history remains in Codex. Current read/recovery returns
+bounded recent items plus live activity, not a complete history cursor API.
+See [Codex adapter](../../agent/CODEX.md) for its version, request support and
+remaining acceptance requirements.

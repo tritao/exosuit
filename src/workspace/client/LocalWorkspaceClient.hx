@@ -11,6 +11,7 @@ import workspace.transport.NativeRpcConnector;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceTerminalProtocol;
 import workspace.service.WorkspaceReplica;
+import workspace.service.WorkspaceAgentProtocol;
 
 @:wire typedef LocalWorkspaceEndpoint = {@: id(1) var version: Int;
 @:id(2) var protocol:Int;
@@ -25,7 +26,7 @@ import workspace.service.WorkspaceReplica;
 }
 
 /** Nonblocking native attachment. Closing a client never owns/stops the shared daemon. */
-class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceTerminalCatalogClient {
+class LocalWorkspaceClient implements WorkspaceAttachment implements workspace.client.WorkspaceWorkbenchClient implements workspace.client.WorkspaceAgentClient {
   public var root(default, null):Null<String>;
   public var error(default, null):Null<String>;
   public var instance(default, null):String = "";
@@ -60,6 +61,100 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceTe
   var catalogNext:Float = 0;
   var catalogKey:String = "";
 
+  public function agentService():workspace.client.WorkspaceAgentClient return this;
+  public function canReadAgents():Bool return ready && client!=null && client.capabilities().indexOf(WorkspaceAgentProtocol.READ)>=0;
+  public function canControlAgents():Bool return canReadAgents() && client!=null && client.capabilities().indexOf(WorkspaceAgentProtocol.CONTROL)>=0;
+  public function agentBusy():Bool return agentMutation;
+  var agentCatalog:Null<AgentCatalog>;
+  var agentConnection:Null<RpcConnection>;
+  var discovery:Null<AgentDiscovery>;
+  public function discoveredAgents():Null<AgentDiscovery> return discovery;
+  public function discoverAgents(group:String,cursor:Null<String>):Void {
+    var c=rpc();if(c==null) return;
+    c.call(WorkspaceAgentProtocol.DISCOVER,{workspace:"workspace",instance:instance,group:group,cursor:cursor},20000,function(v) {if(rpc()!=c) return;discovery=v;agentsError=null;agentsRevision++;},function(e) {if(rpc()==c) {agentsError=e.message;agentsRevision++;}});
+  }
+  var agentViews:Map<String,AgentView> = [];
+  var agentTokens:Map<String,Int> = [];
+  var agentsError:Null<String>;
+  var agentsPending=false;
+  var agentsNext:Float=0;
+  var agentMutation=false;
+  var agentSelection=0;
+  var agentsRevision=0;
+  public function agentRevision():Int return agentsRevision;
+  public function agents():Null<AgentCatalog> return agentCatalog;
+  public function agentError():Null<String> return agentsError;
+  public function agentView(id:String):Null<AgentView> return agentViews.get(id);
+  public function refreshAgents():Void {
+    var c=rpc();
+    if(c==null||agentsPending||clock()<agentsNext||client==null||client.capabilities().indexOf(WorkspaceAgentProtocol.READ)<0) return;
+    agentsPending=true;agentsNext=clock()+1000;
+    agentPage(c,null,[]);
+  }
+  function agentPage(c:RpcConnection,after:Null<String>,records:Array<AgentRecord>):Void {
+    c.call(WorkspaceAgentProtocol.LIST,{workspace:"workspace",instance:instance,after:after},3000,function(v) {
+      if(rpc()!=c) return;
+      if(v.root!=root||v.instance!=instance||v.records.length>6||records.length+v.records.length>32) {
+        agentsPending=false;agentsError="Invalid agent catalog";agentsRevision++;return;
+      }
+      var last=after;
+      for(r in v.records) {
+        if(r.workspaceRoot!=root||(last!=null&&Reflect.compare(r.id,last)<=0)) {agentsPending=false;agentsError="Invalid agent scope or page";agentsRevision++;return;}
+        records.push(r);last=r.id;
+      }
+      if(v.next!=null) {
+        if(v.records.length==0||v.next!=last) {agentsPending=false;agentsError="Invalid agent cursor";agentsRevision++;return;}
+        agentPage(c,v.next,records);return;
+      }
+      agentsPending=false;agentsRevision++;v.records=records;agentCatalog=v;
+    },function(e) {if(rpc()==c) {agentsPending=false;agentsError=e.message;agentsRevision++;}});
+  }
+
+  var pendingAgentCreate:Null<AgentCreate>;
+  var agentCreated:Null<String->Void>;
+  var createNext:Float=0;
+  var createDeadline:Float=0;
+  public function createAgent(group:String,thread:Null<String>,?created:String->Void):Void {
+    if(rpc()==null||agentMutation) return;
+    agentMutation=true;agentsError=null;agentCreated=created;
+    pendingAgentCreate={workspace:"workspace",instance:instance,id:WorkspaceIds.create("agent"),group:group,name:"Codex",thread:thread};
+    createDeadline=clock()+60000;createNext=0;
+    continueAgentCreate();
+  }
+  function continueAgentCreate():Void {
+    var c=rpc(), q=pendingAgentCreate;
+    if(c==null||q==null||clock()<createNext) return;
+    if(clock()>=createDeadline||q.instance!=instance) {pendingAgentCreate=null;agentMutation=false;agentsError="Codex startup did not complete";agentsRevision++;return;}
+    createNext=createDeadline;
+    c.call(WorkspaceAgentProtocol.CREATE,q,20000,function(r) {
+      if(rpc()!=c) return;
+      pendingAgentCreate=null;agentMutation=false;agentsNext=0;agentsRevision++;
+      if(r.workspaceRoot!=root) {agentsError="Invalid created agent scope";return;}
+      agentsError=null;
+      if(agentCatalog!=null) {
+       var found=false;for(index in 0...agentCatalog.records.length) if(agentCatalog.records[index].id==r.id) {agentCatalog.records[index]=r;found=true;break;}
+       if(!found) agentCatalog.records.push(r);
+      }
+      var created=agentCreated;agentCreated=null;if(created!=null) created(r.id);
+      agentAction(r.id,"read","",null);
+    },function(e) {
+      if(rpc()!=c) return;
+      if(e.code=="provider_starting"&&!e.ambiguous) {createNext=clock()+500;agentsError=e.message;agentsRevision++;return;}
+      pendingAgentCreate=null;agentMutation=false;agentsError=e.message;agentsNext=0;agentsRevision++;
+    });
+  }
+  public function agentAction(id:String,action:String,text:String,request:Null<String>):Void {
+    var c=rpc();if(c==null||agentMutation) return;
+    var mutate=action!="read";if(mutate) agentMutation=true;
+    var selected=++agentSelection;agentTokens.set(id,selected);
+    if(action!="read") agentsError=null;
+    c.call(WorkspaceAgentProtocol.ACTION,{workspace:"workspace",instance:instance,id:id,action:action,text:text,request:request},20000,function(v) {
+      if(rpc()!=c||agentTokens.get(id)!=selected) return;
+      if(mutate) agentMutation=false;
+      if(v.record.workspaceRoot!=root||v.record.id!=id) {agentsError="Invalid agent view";return;}
+      agentViews.set(id,v);agentsNext=0;agentsRevision++;
+    },function(e) {if(rpc()==c&&agentTokens.get(id)==selected) {if(mutate) agentMutation=false;agentsError=e.message;agentsRevision++;}});
+  }
   public function new(
     events:NativeKitEvents,
     processes:ProcessManager,
@@ -331,6 +426,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceTe
 
   function stopConnection():Void {
     catalog = null;
+    agentConnection=null;agentCatalog=null;discovery=null;agentViews.clear();agentTokens.clear();agentsError=null;agentsPending=false;agentMutation=false;pendingAgentCreate=null;agentCreated=null;agentsNext=0;agentSelection++;agentsRevision++;
     catalogPending = false;
     catalogMutation = false;
     catalogKey = "";
@@ -389,6 +485,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceTe
     caps.push(WorkspaceProtocol.WRITE);
     caps.push(WorkspaceProtocol.TREE);
     caps.push(WorkspaceTerminalProtocol.CATALOG);
+    caps.push(WorkspaceAgentProtocol.READ);
+    caps.push(WorkspaceAgentProtocol.CONTROL);
     caps.push(WorkspaceTerminalProtocol.READ);
     caps.push(WorkspaceTerminalProtocol.CONTROL);
     deadline = clock() + 12000;
@@ -440,7 +538,18 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceTe
     }, 100, 1000, 2000);
   }
 
+  function fenceAgentConnection():Void {
+    var current=rpc();
+    if(current==agentConnection) return;
+    var lost=agentConnection!=null;
+    agentConnection=current;
+    agentsPending=false;agentMutation=false;pendingAgentCreate=null;agentCreated=null;
+    agentCatalog=null;discovery=null;agentViews.clear();agentTokens.clear();agentsNext=0;agentsRevision++;
+    if(lost) agentsError="Workspace connection changed; reconcile the agent before retrying";
+  }
   public function poll():Void {
+    fenceAgentConnection();
+    continueAgentCreate();
     if (disposed || root == null || error != null) return;
     var now = clock(), process = helper;
     if (!wasReady && now >= startupDeadline) {
@@ -487,6 +596,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceTe
       return;
     }
     current.poll();
+    fenceAgentConnection();
     if (client != current || error != null) return;
     if (current.state == Closed) {
       fail(current.lastError == null ? "Workspace connection closed" : current.lastError.code);

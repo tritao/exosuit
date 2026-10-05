@@ -101,3 +101,13 @@ overloading method 102's rename behavior.
 
 Native, Wasm32 and Wasm GC also encode a conservative maximum-Unicode catalog with
 32 groups and six terminal records and assert its size stays within 262144 bytes.
+
+
+Agent create (method 121), fields workspace/instance/id/group/name/thread:
+`8601a17702a16903a16104a16705a5436f64657806c0`.
+
+Agent prompt (method 122), fields workspace/instance/id/action/text/request:
+`8601a17702a16903a16104a670726f6d707405a2686906c0`.
+
+Native and portable fixtures also check six-record Unicode agent catalog pages
+and maximum bounded activity/request views against the 262144-byte envelope cap.

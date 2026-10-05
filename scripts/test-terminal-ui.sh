@@ -6,7 +6,7 @@ haxeon_root=${HAXEON_ROOT:-"$root_dir/../haxeon"}
 if [[ ${1:-} == --drive ]]; then
 	fixture=$2
 	export PRAGTICAL_PORTABLE="$fixture/state"
-	export LD_LIBRARY_PATH="$haxeon_root/out:$haxeon_root/.tools/hashlink:$root_dir/graphical/build/host/native/pragtical_hx:$root_dir/graphical/build/host/native/exosuit-ui-native:$root_dir/graphical/build/host/native/terminalkit${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+	export LD_LIBRARY_PATH="$haxeon_root/out:$haxeon_root/.tools/hashlink:$root_dir/graphical/build/host/native/hostservices:$root_dir/graphical/build/host/native/exosuit-ui-native:$root_dir/graphical/build/host/native/terminalkit${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 	LIBGL_ALWAYS_SOFTWARE=1 "$haxeon_root/.tools/hashlink/hl" "$root_dir/graphical/build/host/main.hl" \
 		--open-terminal --capture-dir="$fixture/capture" --capture-seconds=16 \
 		--record-path="$fixture/events.jsonl" > "$fixture/app.log" 2>&1 &

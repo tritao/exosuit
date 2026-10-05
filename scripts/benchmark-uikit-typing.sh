@@ -6,7 +6,7 @@ haxeon_root=${HAXEON_ROOT:-"$root_dir/../haxeon"}
 if [[ ${1:-} == --drive ]]; then
     fixture=$2
     export PRAGTICAL_PORTABLE="$fixture/state"
-    export LD_LIBRARY_PATH="$haxeon_root/out:$haxeon_root/.tools/hashlink:$root_dir/graphical/build/host/native/pragtical_hx:$root_dir/graphical/build/host/native/exosuit-ui-native${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    export LD_LIBRARY_PATH="$haxeon_root/out:$haxeon_root/.tools/hashlink:$root_dir/graphical/build/host/native/hostservices:$root_dir/graphical/build/host/native/exosuit-ui-native${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     hl_options=()
     if [[ -n ${TYPING_UI_PROFILE_PORT:-} ]]; then
         hl_options+=(--diagnostics "$TYPING_UI_PROFILE_PORT")

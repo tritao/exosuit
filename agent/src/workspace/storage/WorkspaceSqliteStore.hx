@@ -12,7 +12,7 @@ import workspace.service.WorkspaceTerminalProtocol;
 
 /** Agent-owned schema; small typed rows, not a copied full-catalog checkpoint.
  * The manager owns the exclusive process lock. SQL cursor/revision CAS fences stale writers. */
-class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceTerminalPersistence {
+class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceTerminalPersistence implements workspace.service.WorkspaceAgentPersistence {
 	final db:Database;
 	final workspace:String;
 	final historyLimit:Int;
@@ -34,7 +34,7 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
 					throw "Missing SQLite schema version";
 				version = integer(row.columnInt64(0));
 			});
-			if (version != 0 && version != 1 && version != 2 && version != 3)
+			if (version != 0 && version != 1 && version != 2 && version != 3 && version != 4)
 				throw "Unsupported workspace schema version";
 			if (version == 0) {
 				var count = 0;
@@ -66,7 +66,7 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
 					if (!missing && (integer(row.columnInt64(2)) > 4096 || row.columnText(3) != expectedRoot)) throw "Workspace database root mismatch";
 				});
 				if (missing) {
-					if (version == 3) throw "Unscoped workspace database";
+					if (version >= 3) throw "Unscoped workspace database";
 					// Older managed schemas represented this identity with their single initial group.
 					// Check that migration evidence once; subsequent identity is independent of group edits.
 					if (version != 0) statement("SELECT payload,length(payload) FROM workspace_groups ORDER BY id LIMIT 2", function(row) {
@@ -79,6 +79,11 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
 					});
 				}
 			});
+   if(version<4) transaction(function() {
+    db.exec("CREATE TABLE workspace_agents (id TEXT PRIMARY KEY, payload BLOB NOT NULL)");
+    db.exec("PRAGMA user_version=4");
+   });
+
 		} catch (error:Dynamic) {
 			db.close();
 			throw error;
@@ -264,6 +269,27 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
  public function removeTerminal(id:String):Void {
   transaction(function() {
    statement("DELETE FROM workspace_terminals WHERE id=?1",function(row) {row.bindText(1,id);row.step();});
+  });
+ }
+
+ public function loadAgents():Array<workspace.service.WorkspaceAgentProtocol.AgentRecord> {
+  var records:Array<workspace.service.WorkspaceAgentProtocol.AgentRecord> = [];
+  statement("SELECT id,payload,length(payload) FROM workspace_agents ORDER BY id LIMIT 33",function(row) {
+   while(row.step()) {
+    var r:workspace.service.WorkspaceAgentProtocol.AgentRecord=MessagePack.decode(blob(row,1,integer(row.columnInt64(2)),16384));
+    if(r.id!=row.columnText(0)) throw "Agent identity mismatch";
+    records.push(r);
+   }
+  });
+  if(records.length>32) throw "Agent catalog exceeds limit";
+  return records;
+ }
+ public function saveAgent(record:workspace.service.WorkspaceAgentProtocol.AgentRecord):Void {
+  var bytes=MessagePack.encode(record);if(bytes.length>16384) throw "Agent record exceeds bound";
+  transaction(function() {
+   statement("INSERT INTO workspace_agents(id,payload) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload",function(row) {
+    row.bindText(1,record.id);row.bindBlob(2,bytes);row.step();
+   });
   });
  }
 

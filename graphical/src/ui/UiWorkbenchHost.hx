@@ -92,6 +92,12 @@ class UiWorkbenchHost implements WorkbenchHost {
 		return activePanelTerminalIndex >= 0 && activePanelTerminalIndex < panelTerminals.length ?
 			panelTerminals[activePanelTerminalIndex] : null;
 
+ public function agentResourceIds():Array<String> {
+  var result:Array<String> =[];
+  for(pane in panes) for(item in pane.items) {var agent=UiEditorTabs.agent(item);if(agent!=null) result.push(agent.resource);}
+  return result;
+ }
+
 	public function allTerminalTabs():Array<UiTerminalTab> {
 		var result = panelTerminals.copy();
 		for (pane in panes) for (item in pane.items) {
@@ -235,6 +241,12 @@ class UiWorkbenchHost implements WorkbenchHost {
 			if (UiEditorTabs.terminal(item) == terminal) return pane;
 		return null;
 	}
+
+ public function attachAgent(agent:UiAgentTab):Void {
+  for(pane in panes) for(item in pane.items) {var a=UiEditorTabs.agent(item);if(a!=null&&a.id==agent.id) {activateEditorTab("agent:"+a.id,pane.id);return;}}
+  activePane.items.push(UiEditorTab.Agent(agent));activateEditorTab("agent:"+agent.id,activePane.id);
+ }
+ public var restoreAgent:Null<(String,String,String,String)->UiAgentTab>;
 
 	public function attachTerminal(terminal:UiTerminalTab):Void {
 		var pane = terminalPaneFor(terminal);
@@ -616,17 +628,19 @@ class UiWorkbenchHost implements WorkbenchHost {
 			var terminal = panelTerminals[index];
 			if (!terminal.disposed && terminal.cwd.indexOf("\t") < 0 && terminal.cwd.indexOf("\n") < 0)
 				result.push("Y\t" + (index == activePanelTerminalIndex ? "1" : "0") + "\t" +
-					terminal.id + "\t" + terminal.title + "\t" + terminal.cwd + "\t" + (terminal.remote ? "1" : "0") + "\t" + TerminalViewIdentity.encode(terminal.resourceId, terminal.workspaceRoot));
+					terminal.id + "\t" + terminal.title + "\t" + terminal.cwd + "\t" + (terminal.remote ? "1" : "0") + "\t" + ResourceViewIdentity.encode(terminal.resourceId, terminal.workspaceRoot));
 		}
 		for (pane in panes) {
 			result.push("P\t" + pane.id);
 			for (index in 0...pane.items.length) {
 				var item = pane.items[index];
-				var terminal = UiEditorTabs.terminal(item);
+				var agent=UiEditorTabs.agent(item);
+    if(agent!=null) {result.push("C\t"+pane.id+"\t"+(index==pane.activeIndex?"1":"0")+"\t"+ResourceViewIdentity.encode(agent.resource,agent.workspaceRoot)+"\t"+agent.id+"\t"+agent.title);continue;}
+    var terminal = UiEditorTabs.terminal(item);
 				if (terminal != null) {
 					if (!terminal.disposed && terminal.cwd.indexOf("\t") < 0 && terminal.cwd.indexOf("\n") < 0)
 						result.push("X\t" + pane.id + "\t" + (index == pane.activeIndex ? "1" : "0") + "\t" +
-							terminal.id + "\t" + terminal.title + "\t" + terminal.cwd + "\t" + (terminal.remote ? "1" : "0") + "\t" + TerminalViewIdentity.encode(terminal.resourceId, terminal.workspaceRoot));
+							terminal.id + "\t" + terminal.title + "\t" + terminal.cwd + "\t" + (terminal.remote ? "1" : "0") + "\t" + ResourceViewIdentity.encode(terminal.resourceId, terminal.workspaceRoot));
 					continue;
 				}
 				var view = UiEditorTabs.document(item);
@@ -696,8 +710,17 @@ class UiWorkbenchHost implements WorkbenchHost {
 		activePane = panes[0];
 		for (raw in lines) {
 			var fields = raw.split("\t");
+   if(fields[0]=="C" && fields.length==6) {
+    var pane=paneById(fields[1]), reference=ResourceViewIdentity.decode(fields[3]), restore=restoreAgent;
+    if(pane!=null&&reference!=null&&reference.workspaceRoot!=null&&restore!=null) {
+     pane.items.push(UiEditorTab.Agent(restore(fields[4],reference.resource,reference.workspaceRoot,fields[5])));
+     if(fields[2]=="1"||pane.activeIndex<0) pane.activeIndex=pane.items.length-1;
+    }
+    continue;
+   }
+
 			if ((fields.length == 5 || fields.length == 6 || fields.length == 7) && fields[0] == "Y") {
-				var reference:Null<TerminalViewIdentity.TerminalReference> = fields.length == 7 ? TerminalViewIdentity.decode(fields[6]) : {resource: fields[2], workspaceRoot: fields[4]};
+				var reference:Null<ResourceViewIdentity.ResourceReference> = fields.length == 7 ? ResourceViewIdentity.decode(fields[6]) : {resource: fields[2], workspaceRoot: fields[4]};
 				if (reference == null) continue;
 				var terminal = resolveTerminal(fields[2], fields[3], fields[4], fields.length >= 6 ? fields[5] == "1" : StringTools.startsWith(fields[2], "workspace-terminal-"), reference.resource, reference.workspaceRoot == null ? fields[4] : reference.workspaceRoot, retainedTerminals);
 				if (terminal != null) {
@@ -708,7 +731,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 			}
 			if (modern && (fields.length == 6 || fields.length == 7 || fields.length == 8) && fields[0] == "X") {
 				var pane = paneById(fields[1]);
-				var reference:Null<TerminalViewIdentity.TerminalReference> = fields.length == 8 ? TerminalViewIdentity.decode(fields[7]) : {resource: fields[3], workspaceRoot: fields[5]};
+				var reference:Null<ResourceViewIdentity.ResourceReference> = fields.length == 8 ? ResourceViewIdentity.decode(fields[7]) : {resource: fields[3], workspaceRoot: fields[5]};
 				if (reference == null) continue;
 				var terminal = pane == null ? null : resolveTerminal(fields[3], fields[4], fields[5], fields.length >= 7 ? fields[6] == "1" : StringTools.startsWith(fields[3], "workspace-terminal-"), reference.resource, reference.workspaceRoot == null ? fields[5] : reference.workspaceRoot, retainedTerminals);
 				if (pane != null && terminal != null) {
