@@ -45,7 +45,7 @@ for run in range(1, args.runs + 1):
         env['EXOSUIT_WORKLOAD_HEAP_DUMP'] = '1'
     env.update(PRAGTICAL_PORTABLE=str(state), HAXEON_ROOT=str(haxeon),
                LD_LIBRARY_PATH=':'.join([str(haxeon / 'out'), str(haxeon / '.tools/hashlink')] +
-               [str(project / 'build/host/native' / item) for item in ['exosuit-ui-native', 'pragtical_hx', 'terminalkit']]))
+               [str(project / 'build/host/native' / item) for item in ['exosuit-ui-native', 'pluginhost', 'terminalkit']]))
     started = time.monotonic()
     with (directory / 'app.log').open('w') as log:
         process = subprocess.Popen([str(haxeon / '.tools/hashlink/hl'), str(project / 'build/host/main.hl'),

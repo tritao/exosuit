@@ -16,24 +16,10 @@ import plugin.PluginPanelRegistry;
 import plugin.PluginStatusRegistry;
 import search.SearchMatch;
 import style.Theme;
-import view.RootView;
 import view.View;
 import view.LayoutKind;
 
-/**
- * The UI-independent surface `controller.*` and `core.Application` use
- * instead of depending on `view.RootView` concretely: confirmations and text
- * prompts (the command-view primitive), notifications, focus/navigation
- * requests, opening/activating documents, and publishing problems/build
- * output, plus the handful of other host-owned concerns (visual settings
- * application, language popups, and one-time UI wiring) that the same eight
- * controllers turned out to need once every `RootView` call site was read.
- *
- * `view.RootView` implements this directly, so the headless/native path is
- * unchanged. A UIKit host (see `ui.ExosuitApp`) implements it with its own
- * Dialog/Popup overlays and live panels so `core.Application` - and every
- * controller it owns - can run unmodified in the graphical app.
- */
+/** UI-independent application surface, implemented by the hosted UI and model test host. */
 interface WorkbenchHost {
 	// -- Shared, UI-independent state the controllers read or mutate directly --
 	function getTheme():Theme;
@@ -107,11 +93,6 @@ interface WorkbenchHost {
 	function configureFileActions(actions:FileActions):Void;
 	function configureWelcomeActions(actions:WelcomeActions):Void;
 
-	/**
-	 * Non-null only when this host happens to be the legacy split-pane
-	 * `RootView` (the headless/native path). Backs `command.CommandContext.root`,
-	 * which gates the layout-only `root:*`/`project:sidebar-*` commands that
-	 * reach into that concrete view directly - a UIKit host returns null.
-	 */
-	function asRootView():Null<RootView>;
+	function sidebarMove(delta:Int):Bool;
+	function sidebarActivate():Bool;
 }

@@ -7,13 +7,8 @@ if(NOT DEFINED HAXEON_NATIVE_OUTPUT_DIR OR HAXEON_NATIVE_OUTPUT_DIR STREQUAL "")
 endif()
 file(MAKE_DIRECTORY "${HAXEON_NATIVE_OUTPUT_DIR}")
 
-# This package owns the DesktopUiHost dependency chain for exosuit's
-# graphical shell. NativeKit and UIKit remain ordinary CMake projects; this
-# is the one Haxeon native provider that configures and builds their runtime
-# together, the same role app/native/CMakeLists.txt plays for the reference
-# editor. exosuit's own custom native ABI (pragtical_hx) is unrelated and
-# stays on the "native.sources" build path in the root haxeon.json, since a
-# single package cannot combine "sources" and "cmake" providers.
+# This package builds the NativeKit and UIKit runtime for DesktopUiHost.
+# The plugin callback bridge is provided by the separate plugin-host package.
 set(NK_BUILD_SHARED ON CACHE BOOL "Build shared NativeKit libraries" FORCE)
 set(NK_BUILD_GPU ON CACHE BOOL "Build NativeKit GPU" FORCE)
 set(NK_BUILD_TESTS OFF CACHE BOOL "Disable dependency tests in the exosuit build" FORCE)

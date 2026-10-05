@@ -13,7 +13,7 @@ class AttachmentTestMain {
 
   static function main():Void {
     var args = Sys.args(), mode = args[0], root = args[1], launcher = args[2];
-    Platform.startHeadless();
+
     var runtime = NativeKitRuntime.start(), processes = new ProcessManager();
     var clock = function() return NativeKit.nk_time_seconds() * 1000;
     var a = new LocalWorkspaceClient(runtime.events, processes, launcher, clock);
@@ -55,7 +55,7 @@ class AttachmentTestMain {
         b.dispose();
         processes.shutdown();
         runtime.dispose();
-        platform.Native.shutdown();
+
         return;
       }
       var previousInstance = a.instance, previousEpoch = a.epoch();
@@ -91,6 +91,6 @@ class AttachmentTestMain {
     processes.shutdown();
     require(processes.activeCount() == 0, "Attachment helper leaked");
     runtime.dispose();
-    platform.Native.shutdown();
+
   }
 }

@@ -1,0 +1,10 @@
+{
+  "interface": "ExosuitPluginHost",
+  "package": "plugin.host.ffi",
+  "modules": {
+    "functions": "PluginHostApi",
+    "types": "PluginHostTypes",
+    "constants": "PluginHostConstants"
+  },
+  "typePrefix": "eph_"
+}

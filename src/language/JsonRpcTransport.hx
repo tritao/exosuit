@@ -9,7 +9,7 @@ class JsonRpcTransport {
 	public static inline final MAX_FRAME_BYTES = 1024 * 1024;
 	public static inline final MAX_QUEUED_BYTES = 1024 * 1024;
 	public static inline final MAX_STDERR_BYTES = 64 * 1024;
-	static inline final WRITE_CHARS = 512;
+	static inline final WRITE_BYTES = 4096;
 	static inline final IO_STEPS = 16;
 
 	public final process:OwnedProcess;
@@ -24,7 +24,7 @@ class JsonRpcTransport {
 	public var failure(default, null):Null<String>;
 	public var stderr(default, null):String = "";
 
-	final outbound:Array<String> = [];
+	final outbound:Array<Bytes> = [];
 	final pending:Map<Int, JsonRpcPending> = [];
 	var inbound:String = "";
 	var outboundOffset:Int = 0;
@@ -103,7 +103,7 @@ class JsonRpcTransport {
 		if (failure != null) return false;
 		var payload = Json.stringify(message), length = Bytes.ofString(payload).length;
 		if (length > frameLimit) return false;
-		var frame = 'Content-Length: $length\r\n\r\n$payload', size = Bytes.ofString(frame).length;
+		var frame = Bytes.ofString('Content-Length: $length\r\n\r\n$payload'), size = frame.length;
 		if (size > queueLimit - outboundBytes) return false;
 		if (trace != null) trace("send", payload);
 		outbound.push(frame);
@@ -114,26 +114,20 @@ class JsonRpcTransport {
 	function flush():Void {
 		for (_ in 0...IO_STEPS) {
 			if (outbound.length == 0) return;
-			var frame = outbound[0], end = outboundOffset + WRITE_CHARS;
-			if (end > frame.length) end = frame.length;
-			if (end < frame.length && isHighSurrogate(frame.charCodeAt(end - 1))) end--;
-			var chunk = frame.substring(outboundOffset, end), expected = Bytes.ofString(chunk).length;
+			var frame = outbound[0], remaining = frame.length - outboundOffset;
+			var count = remaining > WRITE_BYTES ? WRITE_BYTES : remaining;
 			var written:Int;
 			try {
-				written = process.writeStdin(chunk);
+				written = process.writeBytes(frame, outboundOffset, count);
 			} catch (error:Dynamic) {
 				terminate("could not write to language server: " + Std.string(error));
 				return;
 			}
 			if (written == 0) return;
-			if (written != expected) {
-				terminate("language server accepted a partial atomic write");
-				return;
-			}
-			outboundOffset = end;
+			outboundOffset += written;
 			if (outboundOffset == frame.length) {
 				outbound.shift();
-				outboundBytes -= Bytes.ofString(frame).length;
+				outboundBytes -= frame.length;
 				outboundOffset = 0;
 			}
 		}

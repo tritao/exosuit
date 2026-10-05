@@ -26,7 +26,6 @@ import plugin.PluginStatusRegistry;
 import search.DocumentSearch;
 import search.SearchMatch;
 import style.Theme;
-import view.RootView;
 import view.View;
 import view.LayoutKind;
 import haxeon.ui.docking.DockWorkspaceModel;
@@ -168,6 +167,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		this.focus = focus;
 		this.workspace = workspace;
 		this.requestFrame = requestFrame;
+		commandView.onChanged = requestFrame;
 		this.dockActions = dockActions;
 		defaultDockLayout = DockNodeTools.clone(dockActions.model.defaultRoot);
 		activePane = new UiEditorPane("editor");
@@ -328,7 +328,10 @@ class UiWorkbenchHost implements WorkbenchHost {
 	public function getPluginStatusItems():PluginStatusRegistry return pluginStatusItems;
 	public function getPluginPanels():PluginPanelRegistry return pluginPanels;
 	public function getNotifications():NotificationCenter return notifications;
-	public function asRootView():Null<RootView> return null;
+	public var moveExplorerSelection:Int->Bool = function(delta) return false;
+	public var activateExplorerSelection:Void->Bool = function() return false;
+	public function sidebarMove(delta:Int):Bool return moveExplorerSelection(delta);
+	public function sidebarActivate():Bool return activateExplorerSelection();
 
 	// -- core.WorkbenchHost: command-view / confirmations --
 

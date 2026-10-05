@@ -45,16 +45,12 @@ fi
 mkdir -p "$build_dir" "$site_dir/assets"
 
 echo "== wasm32 FFI interfaces"
-HAXEON_DIR="$haxeon_dir" NATIVEKIT_DIR="$haxeon_dir/vendor/nativekit" "$materia_dir/tools/web/generate-wasm-hxi.sh" "$build_dir/hxi" \
+HAXEON_DIR="$haxeon_dir" NATIVEKIT_DIR="$haxeon_dir/vendor/nativekit" "$app_dir/web/generate-wasm-hxi.sh" "$build_dir/hxi" \
  "$(realpath --relative-to="$materia_dir" "$haxeon_dir")/packages/platform/tools/audit-haxeon-abi.sh:nativekit.hxi:--output=" \
  "$(realpath --relative-to="$materia_dir" "$haxeon_dir")/packages/gpu/tools/check-hxi.sh:nativekit-gpu.hxi" \
  "$(realpath --relative-to="$materia_dir" "$haxeon_dir")/packages/ui/tools/check-hxi.sh:nativekit-ui.hxi" \
  "scenekit/scene/tools/check-hxi.sh:nativekit-scene.hxi" \
  "scenekit/scene_render/tools/check-hxi.sh:nativekit-scene-render.hxi"
-"$haxeon_dir/scripts/haxeon-ffi-audit" \
- --target=wasm32-unknown-wasi --target=wasm32-unknown-emscripten --profile=portable-abi32 \
- --library=pragtical_hx --interface=PragticalHx --source-label=include/pragtical_hx/native.h \
- --output="$build_dir/hxi/pragtical_hx.hxi" "$app_dir/include/pragtical_hx/native.h"
 
 echo "== Haxeon $guest_target guest"
 contract="$build_dir/memory_contract.json"
@@ -91,7 +87,7 @@ exports="$build_dir/exports.json"
 node - "$guest" "$exports" <<'NODE'
 const fs = require("fs");
 const [guestPath, exportsPath] = process.argv.slice(2);
-const linked = new Set(["nativekit", "nativekit_gpu", "nativekit_ui", "nativekit_scene", "nativekit_scene_render", "pragtical_hx"]);
+const linked = new Set(["nativekit", "nativekit_gpu", "nativekit_ui", "nativekit_scene", "nativekit_scene_render"]);
 const module = new WebAssembly.Module(fs.readFileSync(guestPath));
 const names = new Set(["_main", "_nk_last_error", "_nkgpu_last_error", "_nkui_haxeon_memory_contract_status",
   "_nkui_haxeon_memory_contract_version", "_nkui_haxeon_memory_contract_page_size",

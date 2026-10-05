@@ -4,4 +4,5 @@ package plugin;
 interface SourcePluginLoader {
  public function initialize():Void;
  public function load(path:String):Plugin;
+ public function shutdown():Void;
 }

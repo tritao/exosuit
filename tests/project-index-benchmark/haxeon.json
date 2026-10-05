@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "package": {
+    "name": "exosuit-project-index-benchmark"
+  },
+  "entry": "app.ProjectIndexBenchmarkMain",
+  "sourceRoots": [
+    "src"
+  ],
+  "dependencies": {
+    "pragtical_hx": {
+      "path": "../.."
+    }
+  },
+  "target": "host",
+  "outputDir": "build"
+}

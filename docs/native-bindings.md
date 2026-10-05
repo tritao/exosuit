@@ -1,34 +1,34 @@
 # Editor native bindings
 
-`include/pragtical_hx/native.h` is the editor's public C binding contract.
-`scripts/update-native-bindings.sh` generates `bindings/pragtical_hx.hxi`
-through Haxeon's Clang importer and audits identical ABI layouts across
-Linux, Windows and both macOS architectures. `--check` verifies the committed
-binding; the headless suite runs this check. The projection map exposes
-`platform.ffi.NativeApi` and `NativeTypes`.
+The editor-specific C contract is `native-packages/plugin-host/include/exosuit_plugin_host.h`.
+`scripts/update-plugin-host-bindings.sh` generates and checks its portable HXI binding
+across Linux, Windows, and both macOS architectures. The projection exposes
+`plugin.host.ffi.PluginHostApi` and `PluginHostTypes`.
 
-ABI 18 replaces the HashLink-specific bridge with an ordinary C shared library.
-Strings use explicit NUL-terminated UTF-8 contracts. Results are borrowed and
-copied by Haxeon before returning to application code; process output retains
-partial scalars across native reads. Boolean inputs and results use an annotated
-32-bit representation, matching NativeKit's portable convention. Runtime
-platform checks still reject incompatible ABI versions.
+`plugin.host.PluginHost` owns the retained dispatch callback. Replacement installs
+the new pointer before closing the old handle; shutdown unregisters before closure.
+Callback failures reach application code as exceptions without unwinding through C.
+Plugin managers share ownership and release the bridge after unloading their plugins.
+The source SDK retains `pragtical.Editor` and API version 2 for compatibility,
+while its host calls target the independent `exosuit_plugin_host` library.
 
-`platform.Native` retains the plugin dispatch callback handle while C holds its
-function pointer. Replacement installs the new pointer before closing the old
-handle. Shutdown unregisters it before closure. Callback failures are polled and
-converted from managed UTF-8 bytes into application exceptions; they never
-unwind through C. The dynamic SDK declares the same C symbol through HXI;
-embedding and restoring the plugin compiler remains a separate baseline task.
+Processes use Haxeon's `sys.io.Process.spawn` and `sys.io.ChildProcess`, with
+nonblocking byte pipes, partial writes, exit polling, cancellation, and cleanup.
+The editor adapter retains incomplete UTF-8 scalars across output reads, and
+JSON-RPC queues bytes so partial writes cannot duplicate or split a frame incorrectly.
+Existing blocking Haxeon process APIs remain compatible. Streaming subprocesses
+currently have a POSIX backend; Windows spawn reports that it is unsupported.
 
-The unused SDL host callbacks and `host.h` are removed. Window, font, frame,
-event and drawing functions remain because the model tests, deterministic
-renderer and performance fixtures exercise them. They describe the headless
-model, while UIKit owns graphical windows, input, clipboard and painting.
-Removing these APIs requires migrating their consumers, not deleting coverage.
+UIKit and NativeKit own real windows, fonts, drawing, events, and clipboard access.
+Command input receives asynchronous clipboard callbacks from the UI host and
+rejects completions after prompt closure, replacement, or intervening edits.
+`platform.Platform` is only an application key vocabulary translated by the UI bridge.
 
-The retention annotation precedes nullable callback parameters. Clang 18's JSON
-AST replaces `CB _Nullable` with the trailing annotation macro's name when that
-macro follows the parameter; placing the annotation first preserves its original
-semantics and yields `nullable<CB> @retained` in the generated interface.
-The platform audit validates the emitted declaration on all four targets.
+The old platform C implementation, renderer, native bindings, and build dependency
+are removed. Test-only models live under `tests/support/haxe/testing/model` and
+use deterministic text metrics rather than simulated native windows or fonts.
+Application test entries live in their own projects. Rendering coverage uses
+hosted UIKit smoke tests rather than the model test host.
+
+The retention annotation precedes nullable callback parameters so Clang preserves
+the original callback type and emits `nullable<CB> @retained` in the interface.

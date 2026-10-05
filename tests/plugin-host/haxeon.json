@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "package": { "name": "exosuit-plugin-host-test" },
+  "entry": "PluginHostTestMain",
+  "sourceRoots": ["src"],
+  "dependencies": { "pluginhost": { "path": "../../native-packages/plugin-host" } },
+  "target": "host",
+  "outputDir": "build"
+}

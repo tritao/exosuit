@@ -47,16 +47,16 @@ class EditorCommands {
 		// Shared host operations support both document and terminal editor tabs.
 		registry.add("root:switch-to-next-tab", context -> context.host.switchActiveTab(1), context -> context.host.canCloseActiveTab());
 		registry.add("root:switch-to-previous-tab", context -> context.host.switchActiveTab(-1), context -> context.host.canCloseActiveTab());
-		registry.add("root:close", context -> context.requireRoot().closeActiveTab(),
-			context -> context.root != null && context.focus.activeView != null);
+		registry.add("root:close", context -> context.host.closeActiveTab(false),
+			context -> context.host.canCloseActiveTab());
 		registry.add("root:split-left", context -> context.host.splitActive(LayoutKind.Horizontal, true), hasDocument);
 		registry.add("root:split-right", context -> context.host.splitActive(LayoutKind.Horizontal), hasDocument);
 		registry.add("root:split-up", context -> context.host.splitActive(LayoutKind.Vertical, true), hasDocument);
 		registry.add("root:split-down", context -> context.host.splitActive(LayoutKind.Vertical), hasDocument);
-		registry.add("root:close-pane", context -> context.requireRoot().closeActivePane(), hasRoot);
-		registry.add("project:sidebar-next", context -> context.requireRoot().sidebarMove(1), hasRoot);
-		registry.add("project:sidebar-previous", context -> context.requireRoot().sidebarMove(-1), hasRoot);
-		registry.add("project:sidebar-open", context -> context.requireRoot().sidebarActivate(), hasRoot);
+		registry.add("root:close-pane", context -> context.host.closeActivePane(false), hasRoot);
+		registry.add("project:sidebar-next", context -> context.host.sidebarMove(1), hasRoot);
+		registry.add("project:sidebar-previous", context -> context.host.sidebarMove(-1), hasRoot);
+		registry.add("project:sidebar-open", context -> context.host.sidebarActivate(), hasRoot);
 
 		keymap.addDirect(Platform.KEY_S, Platform.MOD_CTRL, ["doc:save"]);
 		keymap.addDirect(Platform.KEY_Z, Platform.MOD_CTRL, ["doc:undo"]);
@@ -100,7 +100,7 @@ class EditorCommands {
 		return context.focus.activeView != null && context.focus.activeView.getDocument() != null;
 
 	static function hasRoot(context:CommandContext):Bool
-		return context.root != null;
+		return true;
 
 	static function bindMovement(keymap:Keymap, key:Int, suffix:String):Void {
 		keymap.addDirect(key, 0, ["doc:move-to-" + suffix]);

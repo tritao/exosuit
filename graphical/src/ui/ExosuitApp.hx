@@ -68,7 +68,7 @@ import ui.UiWorkbenchHost;
  * (constructed with `UiWorkbenchHost` as its `core.WorkbenchHost`), so open,
  * save, close, dirty tracking, session restore/recovery, search, build
  * tasks, and the Haxeon language client all run through the same
- * controllers the 14 headless tests exercise against `view.RootView` - just
+ * controllers exercised by the headless model tests, alongside
  * against this uikit-backed host instead. See `UiWorkbenchHost`'s doc
  * comment for what it owns on `Application`'s behalf (the open document
  * tabs, and the command-view/language-popup overlays this class renders
@@ -654,6 +654,10 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	public function submit(frame:LayoutFrame):RenderNode {
+		if (host.commandView.input.readClipboard == null) {
+			host.commandView.input.readClipboard = function(handler) { ui.clipboard.readText(handler); };
+			host.commandView.input.writeClipboard = function(value) { ui.clipboard.writeText(value); return true; };
+		}
 		if (hostContext != null && hostContext.repaintOnly && submittedBuildKey != null)
 			return ui.submitCached(view, frame, submittedBuildKey);
 		var widthChanged = viewportWidth != frame.width;

@@ -30,7 +30,7 @@ class TerminalRpcTestMain {
   }
   static function main():Void {
     var args = Sys.args(), mode = args[0], root = args[1], launcher = args[2];
-    Platform.startHeadless();
+
     var runtime = NativeKitRuntime.start(), processes = new ProcessManager();
     if (mode == "contracts") {
       TerminalServiceTests.run(root);
@@ -38,7 +38,7 @@ class TerminalRpcTestMain {
       WorkspaceGroupTests.run(root);
       processes.shutdown();
       runtime.dispose();
-      platform.Native.shutdown();
+
       return;
     }
     var clock = function() return NativeKit.nk_time_seconds() * 1000;
@@ -46,7 +46,7 @@ class TerminalRpcTestMain {
     client.select(root);
     if(mode=="catalog") {
       TerminalCatalogClientTests.run(client,runtime);
-      client.dispose();processes.shutdown();runtime.dispose();platform.Native.shutdown();return;
+      client.dispose();processes.shutdown();runtime.dispose();return;
     }
     var backend = new RpcTerminalBackend(function() return client, "test-terminal", root, mode == "create");
     var session = new TerminalSession(backend, Emulator.open(80, 24), false);
@@ -111,6 +111,6 @@ class TerminalRpcTestMain {
     client.dispose();
     processes.shutdown();
     runtime.dispose();
-    platform.Native.shutdown();
+
   }
 }

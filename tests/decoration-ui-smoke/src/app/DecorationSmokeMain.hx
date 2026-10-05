@@ -14,7 +14,6 @@ import search.SearchOptions;
 import editor.BufferSelection;
 import editor.BufferPosition;
 import editor.EditorCoordinates;
-import platform.Native;
 import haxeon.ui.core.RenderNode;
 import haxeon.ui.core.State;
 import haxeon.ui.core.UiEventKind;
@@ -862,7 +861,7 @@ class DecorationSmokeMain {
 		var status = DesktopUiHost.run(options, function(context) {
 			return new DecorationSmokeApp(context, args[0], args[2]);
 		});
-		Native.shutdown();
+
 		return status;
 	}
 }

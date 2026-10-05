@@ -13,7 +13,7 @@ import platform.Platform;
  * Wraps an overlay's content so `UiWorkbenchHost`'s command-view / language
  * popup state machines - both plain `Int` key/modifier state machines
  * written for the headless host - can drive uikit input the same way they
- * drive `platform.Native` key events there. Requests keyboard focus for its
+ * dispatch application key values there. Requests keyboard focus for its
  * child on first build (so the overlay - not whatever editor tab was
  * focused before it opened - receives the keys) and forwards every
  * `KeyDown`/`KeyRepeat`/`TextInput` uikit dispatches to it to `onKey`/`onText`,

@@ -1,30 +1,36 @@
 {
-	"version": 1,
-	"package": {
-		"name": "pragtical_hx"
-	},
-	"entry": "app.Main",
-	"sourceRoots": [
-		"src"
-	],
-	"scopeSourceRoots": false,
-	"dependencies": {
-		"hostservices": { "path": "native-packages/host" },
-		"haxeon-platform": { "path": "haxeon/packages/platform" },
-		"haxeon-gpu": { "path": "haxeon/packages/gpu" },
-		"haxeon-ui": {
-			"path": "haxeon/packages/ui"
-		},
-		"haxeon-editor": {
-			"path": "haxeon/packages/editor"
-		},
-		"haxeon-compiler": {
-			"path": "haxeon/embed"
-		},
-		"terminalsession": {
-			"path": "native-packages/terminal/session"
-		}
-	},
-	"target": "host",
-	"outputDir": "build"
+  "version": 1,
+  "package": {
+    "name": "pragtical_hx"
+  },
+  "entry": "app.Main",
+  "sourceRoots": [
+    "src"
+  ],
+  "scopeSourceRoots": false,
+  "dependencies": {
+    "pluginhost": {
+      "path": "native-packages/plugin-host"
+    },
+    "haxeon-platform": {
+      "path": "haxeon/packages/platform"
+    },
+    "haxeon-gpu": {
+      "path": "haxeon/packages/gpu"
+    },
+    "haxeon-ui": {
+      "path": "haxeon/packages/ui"
+    },
+    "haxeon-editor": {
+      "path": "haxeon/packages/editor"
+    },
+    "haxeon-compiler": {
+      "path": "haxeon/embed"
+    },
+    "terminalsession": {
+      "path": "native-packages/terminal/session"
+    }
+  },
+  "target": "host",
+  "outputDir": "build"
 }

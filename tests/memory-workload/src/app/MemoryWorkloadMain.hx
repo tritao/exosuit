@@ -79,7 +79,7 @@ class MemoryWorkloadMain {
 		if (cycles == null || cycles < 1 || cycles > 1000) throw "cycle count must be between 1 and 1000";
 		var workloadEnd = 21 + cycles * 30;
 		var finalFrame = workloadEnd + 60;
-		platform.Platform.startHeadless();
+
 		var options = new DesktopUiHostOptions();
 		options.title = "Exosuit memory workload";
 		options.width = 1280; options.height = 840;
@@ -107,7 +107,7 @@ class MemoryWorkloadMain {
 			return true;
 		};
 		var status = DesktopUiHost.run(options, context -> app = new MemoryWorkloadApp(context, args[0], cycles));
-		platform.Native.shutdown();
+
 		return status;
 	}
 }

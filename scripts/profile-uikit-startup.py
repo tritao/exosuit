@@ -35,7 +35,7 @@ def main():
     env = os.environ.copy()
     env["PRAGTICAL_PORTABLE"] = str(artifacts / "state")
     libraries = [haxeon / "out", haxeon / ".tools/hashlink",
-                 root / "graphical/build/host/native/hostservices",
+                 root / "graphical/build/host/native/pluginhost",
                  root / "graphical/build/host/native/exosuit-ui-native"]
     env["LD_LIBRARY_PATH"] = ":".join(map(str, libraries)) + (
         ":" + env["LD_LIBRARY_PATH"] if env.get("LD_LIBRARY_PATH") else "")

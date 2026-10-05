@@ -4,32 +4,14 @@ import haxeon.ui.host.DesktopUiHost;
 import haxeon.ui.host.DesktopUiHostOptions;
 import nativekit.ffi.NativeKit;
 import nativekit.ffi.NativeKitTypes;
-import platform.Native;
-import platform.Platform;
 import ui.ExosuitApp;
 import ui.ExosuitPalette;
 
-/**
- * Graphical entry point: `DesktopUiHost` owns the window, GPU, and frame
- * loop; `ui.ExosuitApp` only supplies the view tree. This replaces the old
- * hand-rolled `Native.window_create` + `renderer.Renderer` + `Native.host_install`
- * loop, which drove the legacy pixel-drawn `view.RootView` shell that this
- * package's graphical path no longer uses (see `ui.ExosuitApp`'s doc comment).
- *
- * `ExosuitApp` now owns a `core.Application`, whose `process.ProcessManager`
- * (used by the build controller and the Haxeon language client) is backed
- * by `platform.Native`'s process functions - the same headless platform
- * layer the 14 headless tests initialize with `Platform.startHeadless()`,
- * independent of `DesktopUiHost`'s own native window/GPU layer. Without
- * this call those native process functions fail (they check the same
- * "platform is not initialized" guard a real window would), so build tasks
- * and the language server could never start.
- */
+/** Hosted desktop entry. UIKit owns the window, GPU, and frame loop. */
 class GraphicalMain {
 	static function main():Int {
 		var startupMemory = Sys.getEnv("EXOSUIT_STARTUP_MEMORY_DIR");
 		if (startupMemory != null) StartupMemory.sample(startupMemory, "01-runtime");
-		Platform.startHeadless();
 		var arguments = Sys.args();
 		var pluginManifest:Null<String> = null;
 		var captureDirectory:Null<String> = null;
@@ -142,7 +124,6 @@ class GraphicalMain {
 			hl.Gc.censusDump(AllocationProfileBytes.data(terminated));
 		}
 		var status = session.close();
-		Native.shutdown();
 		return status;
 	}
 

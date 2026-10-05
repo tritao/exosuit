@@ -1,11 +1,20 @@
 {
-	"version": 1,
-	"package": { "name": "exosuit-configuration-test" },
-	"entry": "app.ConfigurationTestMain",
-	"sourceRoots": ["src"],
-	"dependencies": {
-		"pragtical_hx": { "path": "../.." }
-	},
-	"target": "host",
-	"outputDir": "build"
+  "version": 1,
+  "package": {
+    "name": "exosuit-configuration-test"
+  },
+  "entry": "app.ConfigurationTestMain",
+  "sourceRoots": [
+    "src"
+  ],
+  "dependencies": {
+    "pragtical_hx": {
+      "path": "../.."
+    },
+    "exosuit-model-tests": {
+      "path": "../support"
+    }
+  },
+  "target": "host",
+  "outputDir": "build"
 }

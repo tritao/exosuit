@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "package": {
+    "name": "exosuit-command-clipboard"
+  },
+  "entry": "app.CommandClipboardTestMain",
+  "sourceRoots": [
+    "src"
+  ],
+  "dependencies": {
+    "pragtical_hx": {
+      "path": "../.."
+    }
+  },
+  "target": "host",
+  "outputDir": "build"
+}

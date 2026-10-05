@@ -26,7 +26,6 @@ class AgentMain {
 			throw "Invalid session credential file size";
 		var token = sys.io.File.getContent(args[2]);
 		SessionPreflight.validateToken(token);
-		platform.Platform.startHeadless();
 		var processes = new process.ProcessManager();
 		var runtime = NativeKitRuntime.start(),
 			hub = new NativeRpcHub(runtime.events);
@@ -73,7 +72,6 @@ class AgentMain {
 		if (store != null)
 			store.close();
 		runtime.dispose();
-		platform.Native.shutdown();
 		Sys.println("STOPPED: exosuit-agent idle");
 		Sys.stdout().flush();
 	}

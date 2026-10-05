@@ -23,8 +23,6 @@ manifest = {
         "haxeon-ui": {"path": "../haxeon/packages/ui"},
         "haxeon-editor": {"path": "../haxeon/packages/editor"},
     },
-    "ffi": {"interfaces": ["../bindings/pragtical_hx.hxi"],
-            "projections": ["../bindings/pragtical_hx.hxmap"]},
     "target": "wasm32", "outputDir": "build"
 }
 (root / "web/haxeon.json").write_text(json.dumps(manifest, indent=2) + "\n")

@@ -2,7 +2,6 @@ package commandview;
 
 import editor.BufferSelection;
 import editor.TextBuffer;
-import platform.Native;
 
 class CommandInput {
 	public var buffer(default, null):TextBuffer;
@@ -11,12 +10,18 @@ class CommandInput {
 	var historyIndex:Int = 0;
 	var draft:String = "";
 
+	public var writeClipboard:Null<String->Bool>;
+	public var readClipboard:Null<(String->Void)->Void>;
+	public var onAsyncEdit:Void->Void = function() {};
+	var clipboardGeneration:Int = 0;
+	public function invalidateClipboard():Void clipboardGeneration++;
 	public function new() reset();
 
 	public var text(get, never):String;
 	function get_text():String return buffer.text;
 
 	public function reset():Void {
+		invalidateClipboard();
 		buffer = new TextBuffer();
 		selection = new BufferSelection();
 		historyIndex = history.length;
@@ -41,16 +46,27 @@ class CommandInput {
 	public function moveEnd(extend:Bool):Void selection.moveDocumentEnd(buffer, extend);
 
 	public function copy():Bool
-		return selection.hasSelection() && Native.clipboard_set(selection.selectedText(buffer));
+		{
+		var write:Null<String->Bool> = writeClipboard;
+		return selection.hasSelection() && write != null && write(selection.selectedText(buffer));
+	}
 
 	public function cut():Bool
 		return copy() && buffer.insert(selection, "");
 
 	public function paste():Bool {
-		var value = Native.clipboard_get();
-		value = StringTools.replace(StringTools.replace(value, "\r\n", "\n"), "\r", "\n");
-		value = StringTools.replace(value, "\n", " ");
-		return buffer.insert(selection, value);
+		var read:Null<(String->Void)->Void> = readClipboard;
+		if (read == null) return false;
+		var target = buffer, revision = buffer.stateId, generation = ++clipboardGeneration;
+		var cursor = selection.cursor.column, anchor = selection.anchor.column;
+		read(function(value) {
+			if (generation != clipboardGeneration || buffer != target || buffer.stateId != revision
+				|| selection.cursor.column != cursor || selection.anchor.column != anchor) return;
+			value = StringTools.replace(StringTools.replace(value, "\r\n", "\n"), "\r", "\n");
+			value = StringTools.replace(value, "\n", " ");
+			if (buffer.insert(selection, value)) onAsyncEdit();
+		});
+		return true;
 	}
 
 	public function remember():Void {

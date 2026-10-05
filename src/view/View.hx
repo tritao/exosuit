@@ -79,5 +79,4 @@ class View {
 	public function mouseMove(x:Int, y:Int):Void {}
 	public function mouseUp(button:Int):Void {}
 	public function dispose():Void {}
-	public function draw():Void {}
 }

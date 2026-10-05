@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "package": {
+    "name": "exosuit-model-tests"
+  },
+  "sourceRoots": [
+    "haxe"
+  ],
+  "scopeSourceRoots": false,
+  "dependencies": {
+    "pragtical_hx": {
+      "path": "../.."
+    }
+  },
+  "target": "host"
+}

@@ -1,6 +1,8 @@
 package process;
 
-import platform.Native;
+#if !wasm
+import sys.io.Process;
+#end
 
 class ProcessManager {
 	final owned:Array<OwnedProcess> = [];
@@ -11,27 +13,17 @@ class ProcessManager {
 
 	public function start(executable:String, arguments:Array<String>, cwd:String = "", ?environment:Map<String, String>):OwnedProcess {
 		if (!available) throw "Processes are unavailable on this host";
-		var id = Native.process_create(executable, cwd);
-		if (id == 0) throw Native.last_error();
-		var process = new OwnedProcess(id), configured = true;
-		for (argument in arguments)
-			if (!Native.process_add_argument(id, argument)) {
-				configured = false;
-				break;
-			}
-		if (configured && environment != null)
-			for (key => value in environment)
-				if (!Native.process_set_environment(id, key, value)) {
-					configured = false;
-					break;
-				}
-		if (!configured || !Native.process_start(id)) {
-			var message = Native.last_error();
-			process.dispose();
-			throw message;
-		}
+		#if wasm
+		throw "Processes are unavailable on this host";
+		#else
+		var keys:Array<String> = [], values:Array<String> = [];
+		if (environment != null)
+			for (key => value in environment) { keys.push(key); values.push(value); }
+		var child = Process.spawn(executable, arguments, cwd, keys, values);
+		var process = new OwnedProcess(child);
 		owned.push(process);
 		return process;
+		#end
 	}
 
 	public function release(process:OwnedProcess):Bool {

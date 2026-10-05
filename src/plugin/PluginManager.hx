@@ -22,6 +22,7 @@ class PluginManager {
 	final processes:ProcessManager;
 	final settings:Void->Settings;
 	final reportDiagnostic:String->Void;
+	var ownedSourceLoader:Null<SourcePluginLoader>;
 	final entries:Array<PluginEntry> = [];
 	final reportedDiagnostics:Map<String, String> = [];
 
@@ -44,7 +45,10 @@ class PluginManager {
 		#if !wasm
 		if (dynamicHost && loader == null) loader = new NativeSourcePluginLoader();
 		#end
-		if (dynamicHost && loader != null) loader.initialize();
+		if (dynamicHost && loader != null) {
+			loader.initialize();
+			ownedSourceLoader = loader;
+		}
 	}
 
 	public function load(plugin:Plugin):Bool {
@@ -145,6 +149,9 @@ class PluginManager {
 				}
 			}
 		}
+		var loader = ownedSourceLoader;
+		ownedSourceLoader = null;
+		if (loader != null) loader.shutdown();
 		if (failed)
 			throw failure;
 	}

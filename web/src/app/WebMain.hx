@@ -11,7 +11,6 @@ import haxeon.ui.host.BrowserUiHostSession;
 import haxeon.ui.host.UiHostSession.UiHostLifecycle;
 import haxeon.ui.theme.Theme;
 import platform.HostCapabilities;
-import platform.Platform;
 import sys.FileSystem;
 import sys.io.File;
 import ui.ExosuitApp;
@@ -30,7 +29,6 @@ class WebMain {
 	}
 
 	@:expose public static function main():Int {
-		Platform.startHeadless();
 		FileSystem.createDirectory("/workspace");
 		File.saveContent("/workspace/Main.hx", "class Main { static function main():Int { return 1; } }\n");
 		var options = new BrowserUiHostOptions();

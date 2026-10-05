@@ -1242,7 +1242,6 @@ class WorkspaceSmokeMain {
 		return panel;
 	}
 	static function main():Int {
-		platform.Platform.startHeadless();
 		var args = Sys.args();
 		if (args.length != 3) throw "expected source path, capture directory and phase";
 		var options = new DesktopUiHostOptions();
@@ -1251,7 +1250,6 @@ class WorkspaceSmokeMain {
 		options.captureDirectory = args[1];
 		options.frameLimit = args[2] == "save-as" ? 10 : args[2] == "exit-confirmation" ? 11 : args[2] == "tab-close" ? 13 : args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 10 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
 		var status = DesktopUiHost.run(options, context -> new WorkspaceSmokeApp(context, args[0], args[2]));
-		platform.Native.shutdown();
 		return status;
 	}
 }

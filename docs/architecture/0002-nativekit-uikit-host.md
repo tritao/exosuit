@@ -27,7 +27,7 @@ separate build manifests**:
 **`haxeon.json`** (headless core):
 - Entry point: `app.Main`
 - Dependencies: NativeKit, UIKit, EditorKit (as Haxe packages, no native build)
-- Native ABI: `native/headless/platform.c`, `native/ffi/pragtical_hx.c`
+- Native contract: independent plugin-host package; subprocesses use the Haxeon runtime
 - Provides: Editor model, document/session, workspace, commands, plugins
 - Used by: Headless test projects and library consumers
 
@@ -122,17 +122,16 @@ Limitations in current UIKit TextArea:
 
 ### Native ABI and platform decoupling
 
-The editor bridge uses ordinary C symbols declared in
-`include/pragtical_hx/native.h`, with generated `.hxi`/`.hxmap` bindings,
-explicit UTF-8 strings, 32-bit booleans and retained callback ownership.
-The ABI is version 18. See [native-bindings.md](../native-bindings.md).
+The editor-specific bridge uses ordinary C symbols from the independent
+`native-packages/plugin-host` package, with UTF-8 strings and retained callback
+ownership. Processes use Haxeon's nonblocking runtime API. See
+[native-bindings.md](../native-bindings.md).
 
-`native/headless/platform.c` implements deterministic platform services for
-model tests, including window/font/draw APIs still consumed by the headless
-renderer and benchmarks. `native/ffi/pragtical_hx.c` exposes those services
-through the portable C ABI. The graphical host owns its actual window, input,
-clipboard and GPU rendering. The previous custom SDL host and renderer are
-removed.
+The legacy platform C library, FFI bindings, and drawing renderer are removed.
+Test-only workbench/viewport models retain document, command, and layout checks
+without native handles or painting. Hosted UIKit smoke tests cover real rendering.
+The graphical host owns window, input, asynchronous clipboard, fonts, and GPU rendering.
+Application interfaces no longer expose a concrete legacy root view.
 
 ### Command palette and UI shell
 

@@ -3,7 +3,7 @@
 #
 # The core project (haxeon.json) and each tests/<name>/haxeon.json project are
 # built and launched with `haxeon build`/`haxeon run`. Fixture setup for tests
-# that need files on disk lives here, matching what each *TestMain in src/app
+# that need files on disk lives here, matching what each project test entry
 # expects on Sys.args().
 set -euo pipefail
 
@@ -27,17 +27,7 @@ run_test() {
 
 mkdir -p "$root_dir/build"
 
-# A plain-C check of the headless platform ABI, independent of the Haxe/Haxeon
-# toolchain.
-python3 "$root_dir/scripts/generate-platform-abi.py" --check
-"$root_dir/scripts/update-native-bindings.sh" --check
-"$cc" -std=c11 -Wall -Wextra -Werror \
-	-I"$root_dir/include" \
-	"$root_dir/native/headless/platform.c" \
-	"$root_dir/tests/platform_test.c" \
-	-o "$root_dir/build/platform-test"
-"$root_dir/build/platform-test"
-echo "PASS: headless platform ABI"
+"$root_dir/scripts/update-plugin-host-bindings.sh" --check
 
 "$root_dir/native-packages/sqlite/tests/run.sh"
 "$root_dir/native-packages/terminal/tests/run.sh"
@@ -53,11 +43,12 @@ fi
 	"$root_dir/tests/process_fixture.c" \
 	-o "$root_dir/build/process-fixture"
 
-# The core headless application (app.Main) builds and exercises the platform ABI.
+# The core entry checks shared document editing without a simulated native host.
 "$haxeon" run --project "$root_dir/haxeon.json" "${self_hosted[@]}"
-echo "PASS: Haxeon headless application exercised the platform ABI"
+echo "PASS: Haxeon headless application exercised the core document model"
 
-run_test native-string-test
+run_test plugin-host
+run_test command-clipboard
 run_test haxeon-rpc
 bash "$root_dir/scripts/test-workspace-transport.sh"
 bash "$root_dir/scripts/test-workspace-persistence.sh"

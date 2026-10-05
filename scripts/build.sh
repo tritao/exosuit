@@ -2,12 +2,7 @@
 # Thin wrapper around the haxeon CLI: builds the graphical app
 # (graphical/haxeon.json, entry app.GraphicalMain).
 #
-# The headless core (haxeon.json, entry app.Main) that the test suite
-# exercises is a separate, lighter manifest - see scripts/test.sh. Splitting
-# these keeps every headless test project (each depends on the core manifest
-# as "pragtical_hx") from also having to build and link NativeKit/UIKit's
-# whole native GPU toolkit, which only the graphical app actually needs; see
-# graphical/haxeon.json's "exosuit-ui-native" dependency.
+# Core and test manifests compile shared models without building the graphical GPU host.
 set -euo pipefail
 
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)

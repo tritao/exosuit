@@ -94,7 +94,7 @@ class RealLanguageUiApp extends ExosuitApp {
 
 class RealLanguageUiSmokeMain {
 	static function main():Int {
-		platform.Platform.startHeadless();
+
 		var args = Sys.args();
 		if (args.length < 1 || args.length > 2) throw "expected language project and optional repository mode";
 		var options = new DesktopUiHostOptions();
@@ -105,7 +105,7 @@ class RealLanguageUiSmokeMain {
 			app = new RealLanguageUiApp(context, args[0], args.length == 2 && args[1] == "repository");
 			return app;
 		});
-		platform.Native.shutdown();
+
 		if (status == 0 && (app == null || !app.completed)) throw "real language UI closed before acceptance";
 		return status;
 	}

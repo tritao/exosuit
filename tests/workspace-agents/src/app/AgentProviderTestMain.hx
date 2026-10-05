@@ -54,7 +54,7 @@ class AgentProviderTestMain {
 
 	static function main():Void {
 		conversationTests();
-		Platform.startHeadless();
+
 		var root = Sys.args()[0],
 			executable = Sys.args()[1], bridge=Sys.args()[2],
 			clock = function() return Sys.time() * 1000;
@@ -254,7 +254,7 @@ class AgentProviderTestMain {
 		badClient.close();
 		badServer.close();
 		processes.shutdown();
-		platform.Native.shutdown();
+
 		Sys.println("PASS: Codex shared proxy, lazy/version handshake, create idempotence, streamed items, permission fencing, approval races, input, ambiguous prompt reconciliation, history, interruption and persisted thread identity");
 	}
 }

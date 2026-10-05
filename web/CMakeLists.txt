@@ -51,10 +51,8 @@ configure_file("${EXOSUIT_HAXEON_ROOT}/packages/ui/cmake/wasm_memory_contract.h.
 
 add_executable(exosuit_web
     host.cpp
-    "${CMAKE_CURRENT_SOURCE_DIR}/../native/headless/platform.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../native/ffi/pragtical_hx.c"
     "${EXOSUIT_HAXEON_ROOT}/packages/ui/src/platform/wasm/haxeon_memory_contract.cpp")
-target_include_directories(exosuit_web PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/../include")
+target_include_directories(exosuit_web PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 target_link_libraries(exosuit_web PRIVATE
     NativeKit::nativekit NativeKit::gpu NativeKit::ui NativeKit::scene NativeKit::scene_render
     NativeKit::wasm_host_allocator)

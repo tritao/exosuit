@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "package": { "name": "pluginhost" },
+  "sourceRoots": ["haxe"],
+  "scopeSourceRoots": false,
+  "native": {
+    "cmake": {
+      "source": ".",
+      "target": "exosuit_plugin_host",
+      "library": "exosuit_plugin_host",
+      "inputs": ["CMakeLists.txt", "include/exosuit_plugin_host.h", "src/exosuit_plugin_host.c"]
+    }
+  },
+  "ffi": {
+    "interfaces": ["bindings/exosuit_plugin_host.hxi"],
+    "projections": ["bindings/exosuit_plugin_host.hxmap"]
+  },
+  "target": "host"
+}

@@ -2,9 +2,9 @@ package plugin;
 
 class DynamicEditorApiSource {
 	/** Registered with the embedded compiler before compiling the SDK. */
-	public static final NATIVE_INTERFACE = 'interface PluginHost @target("portable-abi64") @library("pragtical_hx") { '
+	public static final NATIVE_INTERFACE = 'interface PluginHost @target("portable-abi64") @library("exosuit_plugin_host") { '
 		+ 'extern fn hostCall(operation: i32, token: utf8, a: utf8, b: utf8, c: utf8) -> utf8 '
-		+ '@symbol("pragtical_hx_plugin_api_call") @borrowed; }';
+		+ '@symbol("exosuit_plugin_host_call") @borrowed; }';
 	public static final CONTENT = "package pragtical;\n"
 		+ "import PluginHost;\n"
 		+ "class Editor {\n"

@@ -1,6 +1,6 @@
 package plugin;
 
-import platform.Native;
+import plugin.host.PluginHost;
 
 class DynamicHostRouter {
 	static inline final CONNECT = 0;
@@ -14,12 +14,22 @@ class DynamicHostRouter {
 	static inline final SET_STATUS_ITEM_TEXT = 8;
 	static inline final ADD_DECORATION = 9;
 	static var nextToken:Int = 1;
+	static var owners:Int = 0;
 	static var registrations:Map<Int, DynamicHostRegistration> = [];
 	static var activating:Null<DynamicHostRegistration>;
 
 	public static function initialize():Void {
-		// The native facade replaces and retires retained callbacks, including after shutdown.
-		Native.plugin_api_install(dispatch);
+		if (owners == 0) PluginHost.install(dispatch);
+		owners++;
+	}
+
+	public static function shutdown():Void {
+		if (owners == 0) return;
+		owners--;
+		if (owners != 0) return;
+		PluginHost.close();
+		activating = null;
+		registrations = [];
 	}
 
 	public static function begin(context:PluginContext, plugin:DynamicPlugin):Void {
