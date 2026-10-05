@@ -3,7 +3,6 @@
 	"package": { "name": "exosuit-command-test" },
 	"entry": "app.CommandTestMain",
 	"sourceRoots": ["src"],
-	"workspace": ["../../haxeon/packages/platform", "../../haxeon/packages/gpu"],
 	"dependencies": {
 		"pragtical_hx": { "path": "../.." }
 	},

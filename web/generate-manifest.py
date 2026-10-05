@@ -18,11 +18,10 @@ manifest = {
     "version": 1, "package": {"name": "exosuit-web"}, "entry": "app.WebMain",
     "sourceRoots": ["src", "../src", "../graphical/src"],
     "scopeSourceRoots": False, "sources": sources,
-    "workspace": ["../haxeon/packages/platform", "../haxeon/packages/gpu"],
     "dependencies": {
         "haxeon-platform": {"path": "../haxeon/packages/platform"},
         "haxeon-ui": {"path": "../haxeon/packages/ui"},
-        "editorkit": {"path": "../../editorkit"},
+        "haxeon-editor": {"path": "../haxeon/packages/editor"},
     },
     "ffi": {"interfaces": ["../bindings/pragtical_hx.hxi"],
             "projections": ["../bindings/pragtical_hx.hxmap"]},

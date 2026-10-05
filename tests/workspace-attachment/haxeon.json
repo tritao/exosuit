@@ -8,7 +8,6 @@
     "src"
   ],
   "scopeSourceRoots": false,
-  "workspace": ["../../haxeon/packages/platform", "../../haxeon/packages/gpu"],
   "dependencies": {
     "exosuit-agent": {
       "path": "../../agent"

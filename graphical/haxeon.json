@@ -4,11 +4,10 @@
 	"entry": "app.GraphicalMain",
 	"sourceRoots": ["src"],
 	"scopeSourceRoots": false,
-	"workspace": ["../haxeon/packages/platform", "../haxeon/packages/gpu"],
 	"dependencies": {
 		"pragtical_hx": { "path": ".." },
 		"haxeon-ui": { "path": "../haxeon/packages/ui" },
-		"editorkit": { "path": "../../editorkit" },
+		"haxeon-editor": { "path": "../haxeon/packages/editor" },
 		"exosuit-ui-native": { "path": "../uikit-native" },
 		"terminalsession": { "path": "../native-packages/terminal/session" }
 	},

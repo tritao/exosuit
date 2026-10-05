@@ -22,12 +22,10 @@ git submodule update --init --recursive
 (cd haxeon && ./scripts/build-native.sh)
 ```
 
-EditorKit and SceneKit still come from sibling Materia directories:
-`../editorkit` and `../scenekit`. The `editorkit` symlink connects
-Haxeon's UI package to that same EditorKit checkout. Keep Exosuit in the
-Materia workspace for these dependencies and the browser build helpers.
-Manifests use Haxeon workspace entries to resolve SceneKit’s transitive
-platform and GPU dependencies from this same Haxeon checkout.
+The text model is supplied by `haxeon/packages/editor` (`haxeon.editor`).
+The desktop build uses the Haxeon submodule and its nested native dependencies.
+The browser build still uses Materia’s SceneKit and browser build helpers.
+
 `HAXEON_ROOT` and `HAXEON_BIN` can override the compiler used by scripts;
 package manifests remain pinned to the submodule sources.
 
@@ -57,7 +55,7 @@ The headless core (`haxeon.json`) provides the editor's model layer, platform
 ABI, and command infrastructure; the graphical layer adds the UI shell,
 docking workspace, and document rendering.
 
-Text editing is backed by `nativekit.editorkit.TextDocument`, which the editor's
+Text editing is backed by `haxeon.editor.TextDocument`, which the editor's
 `TextBuffer` mirrors to enable plugin/LSP subscriber access to all edits
 regardless of whether they originate from the text widget, buffer API, or
 search/replace operations.

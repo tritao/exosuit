@@ -3,7 +3,6 @@
 	"package": { "name": "exosuit-problems-test" },
 	"entry": "app.ProblemTestMain",
 	"sourceRoots": ["src"],
-	"workspace": ["../../haxeon/packages/platform", "../../haxeon/packages/gpu"],
 	"dependencies": {
 		"pragtical_hx": { "path": "../.." }
 	},

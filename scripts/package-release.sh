@@ -18,10 +18,9 @@ verify_revision() {
 	fi
 }
 verify_revision haxeon "$haxeon_root"
-verify_revision materia "$materia_root"
 verify_revision nativekit "$haxeon_root/vendor/nativekit"
 verify_revision hashlink "$haxeon_root/vendor/hashlink"
-for spec in "$haxeon_root:src stdlib native embed packages CMakeLists.txt scripts" "$materia_root:editorkit" "$haxeon_root/vendor/nativekit:." "$haxeon_root/vendor/hashlink:."; do
+for spec in "$haxeon_root:src stdlib native embed packages CMakeLists.txt scripts" "$haxeon_root/vendor/nativekit:." "$haxeon_root/vendor/hashlink:."; do
 	directory=${spec%%:*}
 	read -r -a paths <<< "${spec#*:}"
 	if [[ -n $(git -C "$directory" status --porcelain -- "${paths[@]}") ]]; then

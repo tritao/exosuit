@@ -3,7 +3,6 @@
 	"package": { "name": "exosuit-host-capabilities-test" },
 	"entry": "app.HostCapabilitiesTestMain",
 	"sourceRoots": ["src"],
-	"workspace": ["../../haxeon/packages/platform", "../../haxeon/packages/gpu"],
 	"dependencies": { "pragtical_hx": { "path": "../.." } },
 	"target": "host",
 	"outputDir": "build"

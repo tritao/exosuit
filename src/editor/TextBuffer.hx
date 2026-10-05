@@ -1,6 +1,6 @@
 package editor;
 
-import nativekit.editorkit.TextDocument;
+import haxeon.editor.TextDocument;
 
 class TextBuffer {
 	final lines:Array<String>;

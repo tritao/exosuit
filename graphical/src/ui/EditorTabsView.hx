@@ -6,7 +6,7 @@ import haxeon.ui.LayoutAxis;
 import haxeon.ui.LayoutStyle;
 import haxeon.ui.TextLayout;
 import haxeon.ui.TextWrap;
-import nativekit.editorkit.TextDocument;
+import haxeon.editor.TextDocument;
 import haxeon.ui.core.BuildContext;
 import haxeon.ui.core.Key;
 import haxeon.ui.core.RenderNode;

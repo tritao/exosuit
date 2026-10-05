@@ -144,7 +144,7 @@ The headless core (`haxeon.json`, entry `app.Main`) builds without UIKit:
   "dependencies": {
     "nativekit": { "path": "../nativekit" },
     "haxeon-ui": { "path": "haxeon/packages/ui" },
-    "editorkit": { "path": "../editorkit" }
+    "haxeon-editor": { "path": "haxeon/packages/editor" }
   },
   "ffi": {
     "interfaces": ["bindings/pragtical_hx.hxi"],

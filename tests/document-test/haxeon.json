@@ -3,7 +3,6 @@
 	"package": { "name": "exosuit-document-test" },
 	"entry": "app.DocumentTestMain",
 	"sourceRoots": ["src"],
-	"workspace": ["../../haxeon/packages/platform", "../../haxeon/packages/gpu"],
 	"dependencies": {
 		"pragtical_hx": { "path": "../.." }
 	},
