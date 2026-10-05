@@ -119,14 +119,23 @@ class TextBuffer {
 		return replaceSelectionRanges(selection, ranges, values);
 	}
 
-	public function deleteSelections(selection:BufferSelection, backwards:Bool):Bool {
+	/** Deletes selected text or ranges from an optional navigation boundary, retaining one undo unit. */
+	public function deleteSelections(selection:BufferSelection, backwards:Bool,
+			?boundary:(BufferPosition, Int)->BufferPosition):Bool {
 		var ranges:Array<BufferRange> = [];
 		for (range in selection.allRanges()) {
 			if (!range.isCollapsed()) ranges.push(range);
 			else {
-				var other = positionOffset(range.cursor, backwards ? -1 : 1);
+				var direction = backwards ? -1 : 1;
+				var other = boundary == null ? positionOffset(range.cursor, direction) : boundary(range.cursor, direction);
 				ranges.push(backwards ? new BufferRange(range.cursor, other) : new BufferRange(other, range.cursor));
 			}
+		}
+		// Word ranges from nearby carets can overlap; delete their union once.
+		if (boundary != null) {
+			var expanded = new BufferSelection();
+			expanded.setRanges(this, ranges, 0, false);
+			ranges = expanded.allRanges();
 		}
 		return replaceSelectionRanges(selection, ranges, [""]);
 	}

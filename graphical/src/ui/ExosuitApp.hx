@@ -168,6 +168,7 @@ class ExosuitApp implements DesktopUiApplication {
 		var previousSidebarWidth = application.settings.current.sidebarWidth;
 		sidebar.rememberWidth("files", previousSidebarWidth);
 		application.settings.subscribe(function(value) {
+			if (hostContext != null) hostContext.zoom = value.applicationZoom / 100.0;
 			terminalPalette.fontSize = value.terminalFontSize;
 			if (value.sidebarWidth != previousSidebarWidth) {
 				previousSidebarWidth = value.sidebarWidth;
@@ -357,7 +358,21 @@ class ExosuitApp implements DesktopUiApplication {
 		requestFrame();
 	}
 
+	public function setApplicationZoom(percent:Int):Void {
+		application.settings.store.set("appearance/workbench/zoom_percent",
+			nativekit.ui.properties.PropertyValue.Int(Std.int(Math.max(70, Math.min(200, percent)))));
+	}
+
 	function installCommands():Void {
+		var modifier = Sys.systemName() == "Mac" ? UiModifier.Super : UiModifier.Control;
+		var zoomIn = new Command("view.zoom-in", "Zoom In", function() setApplicationZoom(application.settings.current.applicationZoom + 10), new Shortcut(61, modifier));
+		zoomIn.addShortcut(new Shortcut(61, modifier | UiModifier.Shift));
+		zoomIn.addShortcut(new Shortcut(43, modifier));
+		zoomIn.addShortcut(new Shortcut(334, modifier));
+		ui.commands.register(zoomIn);
+		ui.commands.register(new Command("view.zoom-out", "Zoom Out", function() setApplicationZoom(application.settings.current.applicationZoom - 10), new Shortcut(45, modifier)).addShortcut(new Shortcut(333, modifier)));
+		ui.commands.register(new Command("view.zoom-reset", "Reset Zoom", function() setApplicationZoom(100), new Shortcut(48, modifier)).addShortcut(new Shortcut(320, modifier)));
+
 		// UiKey has no N/O/W/P constants, so these follow the raw-ASCII-code
 		// convention the canonical reference (app/src/Main.hx) uses for the same
 		// keys.

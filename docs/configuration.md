@@ -101,3 +101,18 @@ bounded even for dense files.
 
 
 The sidebar uses one shared width across Activity Bar destinations. Resizing, collapsing, and reopening retain that width. Older sessions migrate from the selected destination’s saved width.
+
+Application zoom is stored as `appearance/workbench/zoom_percent` (default 100,
+range 70–200). Ctrl+= or Ctrl+Shift+= zooms in, Ctrl+- zooms out, and Ctrl+0
+resets to 100%; macOS uses Cmd. Each step changes zoom by 10 percentage points.
+Zoom scales the whole interface and is independent of editor/terminal font size
+and monitor pixel density. It applies immediately and persists across launches.
+
+Text fields and the editor support Ctrl+Backspace/Delete to delete the previous/next
+word (Option on macOS). Selected text is deleted as-is. Editor word deletion works
+with multiple carets and restores the original carets on undo.
+
+Text fields keep their own undo history: Ctrl+Z undoes, Ctrl+Shift+Z or Ctrl+Y
+redoes (Cmd+Z/Shift+Z on macOS). Typing groups end at navigation, focus changes,
+spaces, or a one-second pause. Paste, word deletion, and IME composition have
+separate undo steps. The code editor keeps its document-owned history.

@@ -56,6 +56,8 @@ run_phase editor-scroll editor-scroll "$fixture/sidebar-project/Main.hx"
 run_phase scrollbar-visibility scrollbar-visibility "$fixture/sidebar-project/Main.hx"
 run_phase editor-resize editor-resize "$fixture/sidebar-project/Main.hx"
 run_phase editor-minimap editor-minimap "$fixture/sidebar-project/Main.hx"
+run_phase word-delete word-delete "$fixture/sidebar-project/Main.hx"
+run_phase zoom zoom "$fixture/sidebar-project/Main.hx"
 run_phase settings settings "$fixture/sidebar-project/Main.hx"
 mkdir -p "$fixture/tab-project"
 for name in Main.hx NativeDesktopPlatform.hx Platform.hx README.md a-very-long-Unicode-🙂-filename-that-needs-an-ellipsis.hx Last.hx; do

@@ -203,6 +203,16 @@ class DocumentTestMain {
 			"multi-selection line deletion failed");
 		require(multiCoding.undo(multiCodingSelection) && multiCoding.text == "a\nb\nc" && multiCodingSelection.rangeCount() == 2,
 			"multi-selection line deletion undo failed");
+		var wordDeletes = new TextBuffer("hello world"), wordSelections = new BufferSelection(new BufferPosition(0, 8));
+		wordSelections.addRange(wordDeletes, new BufferPosition(0, 11), new BufferPosition(0, 11));
+		require(wordDeletes.deleteSelections(wordSelections, true, function(position, direction) {
+			var cursor = new BufferSelection(position);
+			cursor.moveWord(wordDeletes, direction);
+			return cursor.cursor;
+		}) && wordDeletes.text == "hello ", "overlapping word deletion ranges were not merged");
+		require(wordDeletes.undo(wordSelections) && wordDeletes.text == "hello world" && wordSelections.rangeCount() == 2,
+			"word deletion undo did not restore text and original carets");
+		require(wordDeletes.redo(wordSelections) && wordDeletes.text == "hello ", "word deletion redo failed");
 		// --- editor.TextBuffer <-> nativekit.editorkit.TextDocument bridge ---
 		// TextArea.withDocument mutates the shared TextDocument itself (see
 		// TextEditorState.applyTransaction) and hands the resulting

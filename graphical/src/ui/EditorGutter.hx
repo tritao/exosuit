@@ -26,6 +26,7 @@ class EditorGutter implements View {
 	final buffer:TextBuffer;
 	final foreground:Color;
 	final background:Null<Color>;
+	final fontSize:Float;
 	var labels:Null<GutterLabels>;
 	var node:Null<RenderNode>;
 	var context:Null<BuildContext>;
@@ -35,11 +36,12 @@ class EditorGutter implements View {
 		if (labels.resolve(layout, geometry.y - node.resolved.y)) context.requestLayoutFeedback();
 	}
 
-	public function new(key:String, buffer:TextBuffer, foreground:Color, ?background:Color) {
+	public function new(key:String, buffer:TextBuffer, foreground:Color, ?background:Color, fontSize:Float = 15.0) {
 		this.key = key;
 		this.buffer = buffer;
 		this.foreground = foreground;
 		this.background = background;
+		this.fontSize = fontSize;
 	}
 
 	public function build(context:BuildContext):RenderNode {
@@ -50,12 +52,13 @@ class EditorGutter implements View {
 		var retained = context.resourceState(id, function() return new GutterLabels(fonts),
 			function(value) { value.dispose(); }).value;
 		labels = retained;
-		retained.update(buffer.lineCount(), foreground);
+		retained.update(buffer.lineCount(), foreground, fontSize);
 		var style = new LayoutStyle();
 		style.width = LayoutAxis.fit();
 		style.height = LayoutAxis.fit();
 		if (background != null) style.background = background;
 		var built = new RenderNode(id, LayoutVisualKind.Custom, style);
+		built.styleKey = key;
 		node = built;
 		built.hitTestSelf = false;
 		built.layout.intrinsicContent = retained.content;
@@ -77,10 +80,11 @@ private class GutterLabels {
 	var digits:Int = 1;
 	var width:Float = 0.0;
 	var color:Null<Color> = null;
+	var fontSize:Float = 15.0;
 
 	public function new(fonts:FontCollection) {
 		this.fonts = fonts;
-		layout = TextLayout.create(fonts, "", 1.0, new TextStyle(13.0), new ParagraphStyle(TextWrap.None));
+		layout = TextLayout.create(fonts, "", 1.0, new TextStyle(fontSize), new ParagraphStyle(TextWrap.None));
 		measurement = new LayoutMeasuredContent(function(_) {
 			return new LayoutMeasureResult(width + 12.0, height);
 		});
@@ -96,7 +100,7 @@ private class GutterLabels {
 				var slot = index - first;
 				if (slot == visibleLabels.length)
 					visibleLabels.push(TextLayout.create(fonts, "", 1.0,
-						new TextStyle(13.0), new ParagraphStyle(TextWrap.None)));
+						new TextStyle(fontSize), new ParagraphStyle(TextWrap.None)));
 				var label = Std.string(index + 1);
 				while (label.length < digits) label = " " + label;
 				var number = visibleLabels[slot];
@@ -121,7 +125,15 @@ private class GutterLabels {
 		return changed;
 	}
 
-	public function update(nextCount:Int, nextColor:Color):Void {
+	public function update(nextCount:Int, nextColor:Color, nextFontSize:Float):Void {
+		if (fontSize != nextFontSize) {
+			fontSize = nextFontSize;
+			var style = new TextStyle(fontSize);
+			layout.update(layout.text, 1.0, style, layout.paragraphStyle);
+			for (label in visibleLabels) label.update(label.text, 1.0, style, label.paragraphStyle);
+			count = -1;
+			content.invalidatePaint();
+		}
 		if (count != nextCount) {
 			digits = Std.string(nextCount == 0 ? 1 : nextCount).length;
 			layout.setText(Std.string(nextCount == 0 ? 1 : nextCount));

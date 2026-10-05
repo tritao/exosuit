@@ -31,6 +31,13 @@ class PreferencesRegistry {
 		}
 		{
 			var options = new SettingOptions();
+			options.minimum = 70; options.maximum = 200; options.step = 10;
+			options.tooltip = "Scale the whole application independently of editor font size.";
+			if (!projectOnly) registry.define("appearance/workbench/zoom_percent", PropertyType.Int, PropertyValue.Int(defaults.applicationZoom), options);
+		}
+
+		{
+			var options = new SettingOptions();
 			options.minimum = 100; options.maximum = 1200;
 			if (!projectOnly) registry.define("appearance/workbench/sidebar_width", PropertyType.Int, PropertyValue.Int(defaults.sidebarWidth), options);
 		}
@@ -214,6 +221,7 @@ class PreferencesRegistry {
 
 	public static function snapshot(store:SettingsStore, ?base:Settings):Settings {
 		var value = base == null ? new Settings() : base.copy();
+		if (store.registry.exists("appearance/workbench/zoom_percent") && (base == null || !store.isDefault("appearance/workbench/zoom_percent"))) value.applicationZoom = store.getInt("appearance/workbench/zoom_percent");
 		if (store.registry.exists("editor/fonts/font_path") && (base == null || !store.isDefault("editor/fonts/font_path"))) value.fontPath = store.getString("editor/fonts/font_path");
 		if (store.registry.exists("editor/fonts/font_fallback_paths") && (base == null || !store.isDefault("editor/fonts/font_fallback_paths"))) value.fontFallbackPaths = strings(store.getString("editor/fonts/font_fallback_paths"));
 		if (store.registry.exists("editor/fonts/font_size") && (base == null || !store.isDefault("editor/fonts/font_size"))) value.fontSize = store.getInt("editor/fonts/font_size");

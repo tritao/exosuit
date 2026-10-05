@@ -8,6 +8,7 @@ class Settings {
 		"/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
 		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 	];
+	public var applicationZoom:Int = 100;
 	public var fontSize:Int = 15;
 	public var sidebarWidth:Int = 220;
 	public var scrollbarVisibility:String = "auto";
@@ -53,6 +54,7 @@ class Settings {
 		var result = new Settings();
 		result.fontPath = fontPath;
 		result.fontFallbackPaths = copyStrings(fontFallbackPaths);
+		result.applicationZoom = applicationZoom;
 		result.fontSize = fontSize;
 		result.sidebarWidth = sidebarWidth;
 		result.scrollbarVisibility = scrollbarVisibility;

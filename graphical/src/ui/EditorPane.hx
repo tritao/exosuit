@@ -77,7 +77,7 @@ class EditorPane implements View {
 	final selectionHandler:TextSelection->Void;
 	var widgetSelection:TextSelection;
 	final additionalProvider:Void->Array<TextSelection>;
-	final editIntentHandler:TextEditIntent->Bool;
+	final editIntentHandler:(TextEditIntent, TextEditorLayout)->Bool;
 	final navigationIntentHandler:(TextNavigationIntent, TextEditorLayout)->Bool;
 	final selectedTextProvider:Void->Null<String>;
 	var desiredVerticalXs:Array<Float> = [];
@@ -158,7 +158,7 @@ class EditorPane implements View {
 		return [for (range in selection.documentRanges()) document.buffer.textRange(range.start(), range.end())].join("\n");
 	}
 
-	function handleEditIntent(intent:TextEditIntent):Bool {
+	function handleEditIntent(intent:TextEditIntent, layout:TextEditorLayout):Bool {
 		if (selection.rangeCount() == 1) return false;
 		desiredVerticalXs = [];
 		switch intent {
@@ -169,9 +169,18 @@ class EditorPane implements View {
 				document.buffer.replaceSelections(selection, lines.length == selection.rangeCount() ? lines : [normalized]);
 			case DeleteBackward: document.buffer.deleteSelections(selection, true);
 			case DeleteForward: document.buffer.deleteSelections(selection, false);
+			case DeleteWordBackward(macStyle): deleteWords(layout, true, macStyle);
+			case DeleteWordForward(macStyle): deleteWords(layout, false, macStyle);
 		}
 		onEdited();
 		return true;
+	}
+
+	function deleteWords(layout:TextEditorLayout, backwards:Bool, macStyle:Bool):Void {
+		document.buffer.deleteSelections(selection, backwards, function(position, direction) {
+			return EditorCoordinates.position(document, layout.moveWord(
+				EditorCoordinates.codepoint(document, position), direction, macStyle));
+		});
 	}
 
 	function handleNavigationIntent(intent:TextNavigationIntent, layout:TextEditorLayout):Bool {
@@ -251,7 +260,7 @@ class EditorPane implements View {
 
 	public function build(context:nativekit.ui.core.BuildContext):nativekit.ui.core.RenderNode {
 		var gutter = new EditorGutter("gutter:" + document.id, document.buffer,
-			color(editorTheme.foregroundMuted), color(editorTheme.surface));
+			color(editorTheme.foregroundMuted), color(editorTheme.surface), fontSize);
 		var editorStyle = new LayoutStyle();
 		editorStyle.width = LayoutAxis.grow();
 		editorStyle.height = LayoutAxis.fit();
@@ -275,6 +284,7 @@ class EditorPane implements View {
 		};
 		area.onSelectionChange = selectionHandler;
 		area.additionalSelectionProvider = additionalProvider;
+		area.historyManagedExternally = true;
 		area.onEditIntent = editIntentHandler;
 		area.onNavigationIntent = navigationIntentHandler;
 		area.selectionTextProvider = selectedTextProvider;

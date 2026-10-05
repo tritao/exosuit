@@ -11,6 +11,7 @@ import nativekit.ui.core.UiModifier;
 
 class WorkspaceSmokeApp extends ExosuitApp {
 	final phase:String;
+	final testFonts:FontCollection;
 	final path:String;
 	var frames = 0;
 	var oldColumns = 0;
@@ -23,9 +24,10 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	var settingsTerminalColumns = 0;
 
 	public function new(context:nativekit.ui.host.DesktopUiHostContext, path:String, phase:String) {
-		super(context.fonts, null, context, (phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-tabs" || phase == "settings" || phase == "editor-minimap" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
+		super(context.fonts, null, context, (phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-tabs" || phase == "zoom" || phase == "word-delete" || phase == "settings" || phase == "editor-minimap" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
 			null, null, null, WorkspaceSmokeMain.createTerminal);
 		this.phase = phase;
+		this.testFonts = context.fonts;
 		this.path = path;
 		if (phase == "language-folder" || phase == "sidebar-write" || phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) application.openArgument(path.substring(0, path.lastIndexOf("/")));
 	}
@@ -44,6 +46,8 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		if (phase == "editor-minimap") return minimapStep(frame);
 		if (phase == "editor-tabs") return tabsStep(frame);
 		if (phase == "settings") return settingsStep(frame);
+		if (phase == "zoom") return zoomStep(frame);
+		if (phase == "word-delete") return wordDeleteStep(frame);
 		if (phase == "language-folder") languageStep();
 		if (phase == "explorer-preview") explorerStep();
 		if (phase == "editor-scroll") {
@@ -334,6 +338,61 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		return result;
 	}
 
+	function wordDeleteStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+		var view = host.activeView();
+		if (view == null) throw "Word deletion test missing editor";
+		if (frames == 2) {
+			view.document.buffer.replaceAllText("hello world\nhello world", view.selection);
+			view.selection.setCursor(view.document.buffer, new editor.BufferPosition(0, 11));
+			view.selection.addRange(view.document.buffer, new editor.BufferPosition(1, 11), new editor.BufferPosition(1, 11));
+		}
+		if (frames == 3) {
+			ui.focusWidget(node("editor:" + view.document.id).id);
+			ui.key(UiEventKind.KeyDown, UiKey.Backspace, Sys.systemName() == "Mac" ? UiModifier.Alt : UiModifier.Control);
+		}
+		if (frames == 4) {
+			require(view.document.buffer.text == "hello \nhello ", "multi-caret word backspace failed");
+			view.document.undo(view.selection);
+			require(view.document.buffer.text == "hello world\nhello world" &&
+				view.selection.rangeCount() == 2 && view.selection.cursor.column == 11, "word deletion undo lost text or carets");
+		}
+		if (frames == 5) {
+			view.document.redo(view.selection);
+			require(view.document.buffer.text == "hello \nhello ", "word deletion redo failed");
+			trace("PASS: editor multi-caret word deletion, undo and redo");
+		}
+		return super.submit(frame);
+	}
+
+	function zoomStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+		var modifier = Sys.systemName() == "Mac" ? UiModifier.Super : UiModifier.Control;
+		if (frames == 2) ui.key(UiEventKind.KeyDown, 61, modifier);
+		if (frames == 3) {
+			require(application.settings.current.applicationZoom == 110, "zoom in shortcut failed");
+			require(Math.abs(frame.width - 900 / 1.1) < 0.01, "zoom did not change host layout viewport");
+			require(new config.Preferences(config.ConfigurationPaths.userSettings()).current.applicationZoom == 110, "zoom did not persist");
+			ui.key(UiEventKind.KeyDown, 61, modifier | UiModifier.Shift);
+		}
+		if (frames == 4) {
+			require(application.settings.current.applicationZoom == 120, "shift plus shortcut failed");
+			ui.key(UiEventKind.KeyDown, 45, modifier);
+		}
+		if (frames == 5) {
+			require(application.settings.current.applicationZoom == 110, "zoom out shortcut failed");
+			ui.key(UiEventKind.KeyDown, 48, modifier);
+		}
+		if (frames == 6) {
+			require(application.settings.current.applicationZoom == 100 && Math.abs(frame.width - 900) < 0.01, "zoom reset failed");
+			setApplicationZoom(500);
+			require(application.settings.current.applicationZoom == 200, "zoom upper bound failed");
+			setApplicationZoom(10);
+			require(application.settings.current.applicationZoom == 70, "zoom lower bound failed");
+			setApplicationZoom(100);
+			trace("PASS: application zoom shortcuts, host viewport, persistence, reset and bounds");
+		}
+		return super.submit(frame);
+	}
+
 	function settingsStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
 		frame.setViewport(1100, 760);
 		var activeSettingsView = host.activeView();
@@ -371,6 +430,14 @@ class WorkspaceSmokeApp extends ExosuitApp {
 				if (child.layout.visualKind == LayoutVisualKind.Custom && child.layout.textStyle.fontSize == 22 && child.layout.intrinsicContent != null) fontApplied = true;
 			});
 			require(fontApplied, "editor font size did not apply live");
+			var gutter = node("gutter:" + activeSettingsView.document.id);
+			var gutterProbe = TextLayout.create(testFonts, Std.string(activeSettingsView.document.buffer.lineCount()), 1.0,
+				new TextStyle(22.0), new ParagraphStyle(TextWrap.None));
+			var gutterGeometry = gutter.resolved;
+			if (gutterGeometry == null) throw "Settings test missing gutter geometry";
+			require(Math.abs(gutterGeometry.width - (gutterProbe.measure().width + 12.0)) < 0.01,
+				"gutter font size did not follow editor font size");
+			gutterProbe.dispose();
 			require(find(ui.root, "settings-dialog") == null, "Close did not dismiss settings");
 			application.settings.store.reset("editor/display/minimap_enabled");
 			var terminal = host.activePanelTerminal();
