@@ -2,6 +2,46 @@
 
 Last updated: 2026-10-05.
 
+## M14.4 — structured conversation projection, 2026-10-05
+
+The provider now projects message, reasoning, command/output, file-change and
+fallback items into typed workspace data. Identity combines turn and item ID;
+completion replaces streamed content, duplicate completion is idempotent, and
+late updates cannot reopen a finished item. Recent history ordering uses the
+server page while preserving new live items and newer streamed text across the
+asynchronous history read.
+
+Views retain at most 32 items and 8192 total characters across item fields.
+Message text is capped at 4096 and tool details at 2048 characters. Truncation and
+older-item omission are explicit; approvals keep their existing reviewability
+fence. Optional view fields 5/6 preserve legacy decoding. Conservative combined
+Unicode views still fit the 262144-byte RPC envelope on native, Wasm32 and Wasm-GC.
+
+Desktop conversation messages identify the speaker; tools show command/path and
+status, with details behind a toggle. Raw activity is available as diagnostics.
+Pending requests appear first and show readable command/context or input options
+without transport IDs. Their original size and displayed size both fence
+reviewability. Paragraphs use the available width, and the prompt has a visible
+placeholder. Conversation/request content scrolls independently of the prompt controls.
+Expanded-item state is pruned with the retained window. Core and self-hosted
+provider checks pass; relocated desktop qualification covers duplicate-free
+messages, command/file entries, detail expansion and existing approval/input,
+restoration and close-view behavior. The desktop fixture also verifies wrapped
+paragraph height, and visual review confirms request lines no longer overlap
+controls. Markdown, a dedicated diff viewer, full paged history and additional
+request kinds remain follow-on work.
+
+Visual review exposed a Clay/paragraph-engine integration defect: external line
+positions were ignored, so a multiline paragraph’s intrinsic height became the
+render loop’s per-line advance. The native paragraph’s bounds were correct while
+its rendered lines overlapped later widgets or were prematurely culled. Clay
+`bf73c7b` uses external x/y coordinates independently of a retained layout ID and
+leaves builtin text positioning intact. Materia `3bc5f73aa` passes Skribidi’s y
+coordinates through UIKit and registers the reduced regression. The reduced
+case fails before the fix; C compatibility plus nine Clay/UIKit native checks
+pass after it, including multiline render geometry, layout invariants, session
+rendering and the Clay benchmark. Pre-existing UIKit/Haxeon edits are preserved.
+
 ## M14.4 — first Codex provider and conversation tabs, 2026-10-05
 
 Daemon-owned Codex adapter uses the installed 0.160.0 CLI / 0.160.1 shared app-server proxy.

@@ -336,3 +336,11 @@ the pinned root. Thread history remains in Codex. Current read/recovery returns
 bounded recent items plus live activity, not a complete history cursor API.
 See [Codex adapter](../../agent/CODEX.md) for its version, request support and
 remaining acceptance requirements.
+
+Agent views now optionally include structured items at field 5 and an older-item
+omission flag at field 6. Existing record/activity/request/error fields keep their
+IDs. Clients can fall back to activity when items are absent. Item IDs are paired
+with turn IDs; provider-specific interpretation stays in the host adapter. The
+projection retains at most 32 items and 8192 total characters across their fields,
+with explicit truncation. Legacy decoding, typed round trips and conservative
+Unicode envelope bounds are checked on native, Wasm32 and Wasm-GC targets.

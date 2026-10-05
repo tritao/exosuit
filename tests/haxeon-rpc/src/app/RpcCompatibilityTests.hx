@@ -58,6 +58,13 @@ class RpcCompatibilityTests {
   var requests:Array<AgentRequest> = [];
   for(i in 0...16) requests.push({id:"request"+i,method:"item/commandExecution/requestApproval",detail:detail,reviewable:true});
   var agentView:AgentView={record:agents[0],activity:activity,requests:requests,error:detail};
+  var legacyView=WorkspaceAgentProtocol.ACTION.decodeResponse(WorkspaceAgentProtocol.ACTION.encodeResponse(agentView));
+  require(legacyView.items==null,"Legacy view unexpectedly requires structured items");
+  var itemText="";for(_ in 0...8192) itemText+="😀";
+  agentView.items=[{id:"message",turn:"turn",kind:"agentMessage",title:"Codex",text:itemText,detail:"",state:"completed",truncated:true}];
+  agentView.itemsOmitted=true;
+  var structuredView=WorkspaceAgentProtocol.ACTION.decodeResponse(WorkspaceAgentProtocol.ACTION.encodeResponse(agentView));
+  require(structuredView.items!=null&&structuredView.items[0].text==itemText&&structuredView.itemsOmitted==true,"Structured view round trip lost data");
   require(RpcProtocol.encode(Response(1,WorkspaceAgentProtocol.ACTION.encodeResponse(agentView)),262144).length<=262144,"Agent activity view exceeded message bound");
 		var error:RpcError = {code: "unknown_method", message: "unknown_method", ambiguous: false};
 		var query = WorkspaceProtocol.QUERY.encodeRequest({workspace: "w"});

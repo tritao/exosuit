@@ -22,7 +22,7 @@ with tempfile.TemporaryDirectory(prefix='excodexui-') as temporary:
   subprocess.run(['xdotool','key','--clearmodifiers','ctrl+a'],check=True)
   subprocess.run(['xdotool','type','--clearmodifiers','--delay','1',value],check=True)
  try:
-  for index in range(7):
+  for index in range(8):
    capture=fixture/str(index)
    with (fixture/('app-'+str(index)+'.log')).open('w') as log:
     app=subprocess.Popen([*RUNNER,str(project),'--open-workbench','--capture-dir='+str(capture),'--capture-seconds=10'],env=env,cwd=ROOT,stdout=log,stderr=subprocess.STDOUT)
@@ -39,9 +39,10 @@ with tempfile.TemporaryDirectory(prefix='excodexui-') as temporary:
     elif index==5:
      field(window,nodes(4),'choice=yes')
      click(window,locate(nodes(4),'Answer using prompt (id=value per line)'))
-    elif index==6:
+    elif index==6: click(window,locate(nodes(5),'Show details'))
+    elif index==7:
      # Restored agent shares the editor rail; close its view through the tab button.
-     layout=nodes(5)
+     layout=nodes(6)
      close=[n for n in layout if n.get('label')=='Close Codex' and n['visible']]
      if close: click(window,close[0]['bounds'])
      else: subprocess.run(['xdotool','key','--clearmodifiers','ctrl+w'],check=True)
@@ -50,13 +51,22 @@ with tempfile.TemporaryDirectory(prefix='excodexui-') as temporary:
    diagnostic=json.loads((capture/'app-state.json').read_text())
    if index>=1:
     assert len(diagnostic['agentCatalog']['records'])==1,diagnostic
-   if 2<=index<=5:
+   if 2<=index<=6:
     assert len(diagnostic['agentTabs'])==1,diagnostic
    if index==5: assert diagnostic['agentCatalog']['records'][0]['state']=='completed',diagnostic
-   if index==6: assert diagnostic['agentTabs']==[],diagnostic
+   if index==3:
+    labels=[(n.get('label') or '') for n in nodes(index) if n['visible']]
+    assert labels.count('Hello streamed world')==1,labels
+    assert 'echo test' in labels and 'update README.md' in labels,labels
+    assert 'Show diagnostics' in labels and not any('item/completed' in label for label in labels),labels
+    wrapped=[n for n in nodes(index) if (n.get('label') or '').startswith('Wrapped conversation text')]
+    assert len(wrapped)==1 and wrapped[0]['bounds']['height']>30,wrapped
+   if index==6:
+    assert any('Exit code: 0' in (n.get('label') or '') for n in nodes(index) if n['visible']),nodes(index)
+   if index==7: assert diagnostic['agentTabs']==[],diagnostic
   result=json.loads((project/'fake-codex.json').read_text())
   assert result['starts']==1 and result['prompts']==1,result
-  print('PASS: one-click Codex creation, shared editor tab, streamed prompt, approval/input controls, saved resource restoration and close-view lifecycle')
+  print('PASS: one-click Codex creation, shared editor tab, structured messages/commands/files, folded tool details, approval/input controls, saved resource restoration and close-view lifecycle')
  except Exception:
   for path in sorted(fixture.glob('app-*.log')): print(path.name+'\n'+path.read_text()[-3500:])
   raise

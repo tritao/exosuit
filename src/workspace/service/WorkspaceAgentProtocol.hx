@@ -60,6 +60,20 @@ import haxeon.wire.MessagePack;
 	@:id(2) var activity:String;
 	@:id(3) var requests:Array<AgentRequest>;
 	@:id(4) var error:Null<String>;
+	@:optional @:id(5) var items:Null<Array<AgentActivityItem>>;
+	@:optional @:id(6) var itemsOmitted:Null<Bool>;
+}
+
+/** Bounded presentation data; provider protocol and policy stay on the host. */
+@:wire typedef AgentActivityItem = {
+	@:id(1) var id:String;
+	@:id(2) var turn:String;
+	@:id(3) var kind:String;
+	@:id(4) var title:String;
+	@:id(5) var text:String;
+	@:id(6) var detail:String;
+	@:id(7) var state:String;
+	@:id(8) var truncated:Bool;
 }
 
 @:wire typedef AgentDiscoveryQuery = {

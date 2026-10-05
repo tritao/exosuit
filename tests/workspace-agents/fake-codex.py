@@ -92,7 +92,12 @@ for line in messages():
    send_payload(b'x'*300000);continue
   reply(i,{'turn':turn})
   event('turn/started',{'threadId':t['id'],'turn':turn})
+  event('item/started',{'threadId':t['id'],'turnId':turn['id'],'item':{'id':'message','type':'agentMessage','text':''}})
   event('item/agentMessage/delta',{'threadId':t['id'],'turnId':turn['id'],'itemId':'message','delta':'Hello streamed world'})
+  for _ in range(2): event('item/completed',{'threadId':t['id'],'turnId':turn['id'],'item':{'id':'message','type':'agentMessage','text':'Hello streamed world'}})
+  event('item/completed',{'threadId':t['id'],'turnId':turn['id'],'item':{'id':'command-output','type':'commandExecution','command':'echo test','cwd':t['cwd'],'aggregatedOutput':'test','exitCode':0,'status':'completed'}})
+  event('item/completed',{'threadId':t['id'],'turnId':turn['id'],'item':{'id':'file-change','type':'fileChange','changes':[{'path':'README.md','kind':{'type':'update'},'diff':'+fixture line'}],'status':'completed'}})
+  event('item/completed',{'threadId':t['id'],'turnId':turn['id'],'item':{'id':'wrapped-message','type':'agentMessage','text':'Wrapped conversation text exercises paragraph measurement. '*12}})
   send({'id':799,'method':'item/commandExecution/requestApproval','params':{'threadId':'another-clients-thread','turnId':'foreign-turn','itemId':'foreign-command','command':'unrelated'}})
   pending[700]={'threadId':t['id'],'turnId':turn['id'],'itemId':'command','command':'echo test','cwd':t['cwd'],'reason':'Fixture approval'}
   send({'id':700,'method':'item/commandExecution/requestApproval','params':pending[700]})

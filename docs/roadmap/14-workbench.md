@@ -226,8 +226,11 @@ Workbench agents appear beside terminals and use the same editor tab rail; saved
 resource scope restores views without owning the shared server. Streamed activity,
 approve-once/decline, question-ID input, interruption and bounded recent-history
 reconciliation are implemented. See [provider details](../../agent/CODEX.md).
-The full provider milestone remains open: the generic registry, Claude, richer
-renderers/request kinds, full paged history, resource metadata controls,
+Structured conversation rendering now covers messages, command output and file
+changes with stable turn/item identity, folded details and explicit retention
+limits. The prompt stays outside the scrolling conversation. The full provider
+milestone remains open: the generic registry, Claude, Markdown/diff rendering,
+additional request kinds, full paged history, resource metadata controls,
 supervision CLI/wait and broader real desktop/shared-daemon qualification.
 
 - [ ] Provider registry with the lifecycle contract (available, create,

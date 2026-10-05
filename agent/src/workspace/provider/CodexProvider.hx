@@ -15,6 +15,7 @@ import haxeon.rpc.RpcContext;
 private typedef Session = {
 	var record:AgentRecord;
 	var activity:String;
+	var conversation:CodexConversation;
 	var error:Null<String>;
 	var attached:Bool;
 	var busy:Bool;
@@ -71,6 +72,7 @@ class CodexProvider implements WorkspaceAgents {
 				sessions.set(r.id, {
 					record: r,
 					activity: "",
+					conversation: new CodexConversation(),
 					error: null,
 					attached: false,
 					busy: false,
@@ -110,6 +112,8 @@ class CodexProvider implements WorkspaceAgents {
 		return {
 			record: copy(s.record),
 			activity: s.activity,
+			items: s.conversation.items(),
+			itemsOmitted: s.conversation.omitted,
 			requests: [
 				for (id => r in s.requests)
 					{
@@ -279,8 +283,9 @@ class CodexProvider implements WorkspaceAgents {
 			return;
 		}
 		var key = instance + "-" + (++serial);
-		var detail = Json.stringify(params);
-		var reviewable = detail.length <= 2048;
+		var raw = Json.stringify(params);
+		var detail = raw.length > 2048 ? raw : requestDetail(method, params);
+		var reviewable = raw.length <= 2048 && detail.length <= 2048;
 		var questions:Array<String> = [];
 		if (method == "item/tool/requestUserInput") {
 			var data:Array<Dynamic> = Reflect.field(params, "questions");
@@ -299,6 +304,34 @@ class CodexProvider implements WorkspaceAgents {
 		});
 		s.record.state = "needs-attention";
 		append(s, "\n" + method + "\n" + detail + "\n");
+	}
+
+	/** Keep decision data visible without transport identity clutter. */
+	static function requestDetail(method:String, params:Dynamic):String {
+		var parts:Array<String> = [];
+		var fields = Reflect.fields(params);
+		fields.sort(Reflect.compare);
+		for (field in fields) {
+			if (field == "threadId" || field == "turnId" || field == "itemId") continue;
+			var value = Reflect.field(params, field);
+			if (field == "questions" && method == "item/tool/requestUserInput") {
+				var questions:Array<Dynamic> = value;
+				if (questions != null) for (question in questions) {
+					parts.push(string(question, "id") + " — " + string(question, "header") + "\n" + string(question, "question"));
+					var options:Array<Dynamic> = Reflect.field(question, "options");
+					if (options != null) for (option in options)
+						parts.push(string(option, "label") + ": " + string(option, "description"));
+					// Unknown question attributes remain visible, including input/privacy flags.
+					for (key in Reflect.fields(question))
+						if (key != "id" && key != "header" && key != "question" && key != "options")
+							parts.push(key + ": " + Json.stringify(Reflect.field(question, key)));
+				}
+			} else {
+				var label = field == "cwd" ? "Working directory" : field == "command" ? "Command" : field == "reason" ? "Reason" : field;
+				parts.push(label + ": " + (Std.isOfType(value, String) ? Std.string(value) : Json.stringify(value, null, "  ")));
+			}
+		}
+		return parts.join("\n");
 	}
 
 	function requestCount(s:Session):Int {
@@ -338,6 +371,7 @@ class CodexProvider implements WorkspaceAgents {
 			var state = string(t, "status");
 			if (state != "completed" && state != "failed" && state != "interrupted")
 				throw "Invalid completed Codex turn";
+			s.conversation.finish(string(t, "id"), state);
 			s.record.state = state;
 			s.requests.clear();
 			s.busy = false;
@@ -349,9 +383,11 @@ class CodexProvider implements WorkspaceAgents {
 				s.record.state = s.requests.keys().hasNext() ? "needs-attention" : "working";
 			else if (type == "idle" && s.record.turn == null)
 				s.record.state = "idle";
-		} else if (method == "item/agentMessage/delta" || method == "item/commandExecution/outputDelta")
+		} else if (method == "item/agentMessage/delta" || method == "item/commandExecution/outputDelta") {
+			s.conversation.delta(string(params, "turnId"), string(params, "itemId"), method == "item/agentMessage/delta" ? "agentMessage" : "commandExecution", string(params, "delta"));
 			append(s, string(params, "delta"));
-		else if (method == "item/completed" || method == "item/started" || method == "error") {
+		} else if (method == "item/completed" || method == "item/started" || method == "error") {
+			if (method != "error") s.conversation.put(string(params, "turnId"), Reflect.field(params, "item"), method == "item/completed");
 			var text = Json.stringify(params);
 			append(s, "\n" + method + "\n" + (text.length > 4096 ? text.substring(0, 4096) + "…" : text) + "\n");
 		}
@@ -414,11 +450,15 @@ class CodexProvider implements WorkspaceAgents {
 							s.record.state = "working";
 						}
 						save(s);
+						var historyBaseline = s.conversation.historyBaseline();
 						call("thread/items/list", {threadId: s.record.thread, limit: 8, sortDirection: "desc"}, function(items) {
 							if (items.error != null) {
 								done(items);
 								return;
 							}
+							var recent:Array<Dynamic> = Reflect.field(items.result, "data");
+							s.conversation.history(recent == null ? [] : recent, s.record.turn, historyBaseline);
+							if (Reflect.field(items.result, "nextCursor") != null) s.conversation.noteOmitted();
 							var text = Json.stringify(Reflect.field(items.result, "data"));
 							append(s, "\nRecent history (latest 8 items):\n" + (text.length > 8192 ? text.substring(0, 8192) + "…" : text) + "\n");
 							done(resumed);
@@ -560,6 +600,7 @@ class CodexProvider implements WorkspaceAgents {
 					workspaceRoot: directories.root
 				},
 				activity: "",
+				conversation: new CodexConversation(),
 				error: null,
 				attached: false,
 				busy: true,

@@ -111,3 +111,9 @@ Agent prompt (method 122), fields workspace/instance/id/action/text/request:
 
 Native and portable fixtures also check six-record Unicode agent catalog pages
 and maximum bounded activity/request views against the 262144-byte envelope cap.
+
+The maximum agent-view check includes optional structured items (field 5) and
+older-item omission (field 6). It also checks legacy views with no items and a
+structured round trip on each supported wire target. Item retention is capped at
+8192 total characters across fields, in addition to the existing activity and
+request bounds.
