@@ -2,7 +2,7 @@ package config;
 
 class ConfigurationPaths {
 	public static function userSettings():String {
-		return child(configurationRoot(), "settings.conf");
+		return child(configurationRoot(), "settings.json");
 	}
 
 	public static function session():String {
@@ -56,7 +56,7 @@ class ConfigurationPaths {
 	}
 
 	public static function projectSettings(root:String):String
-		return root + "/.pragtical/settings.conf";
+		return root + "/.exosuit/project.json";
 
 	static function environment(name:String):Null<String> {
 		var value = Sys.getEnv(name);

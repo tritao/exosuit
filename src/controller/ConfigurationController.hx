@@ -7,7 +7,7 @@ import command.Keymap;
 import commandview.CommandViewEntry;
 import commandview.CommandViewProvider;
 import config.Settings;
-import config.SettingsService;
+import config.Preferences;
 import core.WorkbenchHost;
 import editor.Document;
 import platform.Platform;
@@ -15,7 +15,7 @@ import style.Theme;
 import workspace.Workspace;
 
 class ConfigurationController {
-	public final settings:SettingsService;
+	public final settings:Preferences;
 
 	final workspace:Workspace;
 	final root:WorkbenchHost;
@@ -28,7 +28,7 @@ class ConfigurationController {
 	var appliedSettings:Null<Settings>;
 	var lastDiagnostics:String = "";
 
-	public function new(settings:SettingsService, workspace:Workspace, root:WorkbenchHost, context:CommandContext, commands:CommandRegistry,
+	public function new(settings:Preferences, workspace:Workspace, root:WorkbenchHost, context:CommandContext, commands:CommandRegistry,
 		keymap:Keymap, theme:Theme, search:SearchController, reportError:(String, String)->Void) {
 		this.settings = settings;
 		this.workspace = workspace;

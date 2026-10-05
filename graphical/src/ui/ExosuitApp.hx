@@ -95,6 +95,7 @@ class ExosuitApp implements DesktopUiApplication {
 	final tabClicks = new nativekit.ui.core.PointerClickSequence();
 	var statusMessage:String = "Ready";
 	var paletteVisible:Bool = false;
+	var settingsPanel:Null<nativekit.ui.widgets.settings.SettingsPanel>;
 	var contextMenu:Null<CommandMenu> = null;
 	var viewportWidth:Float = 1280.0;
 	var viewportHeight:Float = 840.0;
@@ -110,6 +111,14 @@ class ExosuitApp implements DesktopUiApplication {
 		darkPalette = dark == null ? true : dark;
 		this.theme = theme == null ? ExosuitPalette.theme(darkPalette) : theme;
 		terminalPalette = new TerminalPalette(darkPalette);
+		var preferences = new config.Preferences(config.ConfigurationPaths.userSettings());
+		if (fonts != null) {
+			for (path in [preferences.current.fontPath].concat(preferences.current.fontFallbackPaths)) {
+				if (FileSystem.exists(path) && !FileSystem.isDirectory(path)) {
+					try fonts.add(path) catch (error:Dynamic) { statusMessage = "Font: " + Std.string(error); }
+				}
+			}
+		}
 		ui = new UiContext(null, fonts, this.theme);
 		ui.buildContext.environment.colorScheme = darkPalette ? EnvironmentColorScheme.Dark : EnvironmentColorScheme.Light;
 		desktop = fileDialogs;
@@ -134,7 +143,7 @@ class ExosuitApp implements DesktopUiApplication {
 				activateBuild: function() dock.activate("build")
 			});
 			return capturedHost;
-		}, new config.SettingsService(config.ConfigurationPaths.userSettings()), null, this.capabilities);
+		}, preferences, null, this.capabilities);
 		host = capturedHost;
 		sidebar.setVisible(dock.isOpen("explorer"));
 		sidebar.onChange = syncSidebar;
@@ -156,6 +165,18 @@ class ExosuitApp implements DesktopUiApplication {
 		};
 		editorPalette = darkPalette ? application.theme : ExosuitPalette.lightEditor();
 		installCommands();
+		var previousSidebarWidth = application.settings.current.sidebarWidth;
+		sidebar.rememberWidth("files", previousSidebarWidth);
+		application.settings.subscribe(function(value) {
+			terminalPalette.fontSize = value.terminalFontSize;
+			if (value.sidebarWidth != previousSidebarWidth) {
+				previousSidebarWidth = value.sidebarWidth;
+				sidebar.rememberWidth("files", value.sidebarWidth);
+				syncSidebar();
+			}
+			CommandBridge.refreshShortcuts(ui.commands, application.commands, application.keymap);
+			requestFrame();
+		});
 		application.session.start();
 		if (dock.isOpen("terminal") && host.panelTerminals.length == 0) openTerminal();
 		if (openPath != null) openArgument(openPath);
@@ -329,6 +350,13 @@ class ExosuitApp implements DesktopUiApplication {
 		return options;
 	}
 
+	public function openSettings():Void {
+		paletteVisible = false;
+		host.closeCommandView();
+		settingsPanel = new nativekit.ui.widgets.settings.SettingsPanel("exosuit-settings", application.settings.store, requestFrame);
+		requestFrame();
+	}
+
 	function installCommands():Void {
 		// UiKey has no N/O/W/P constants, so these follow the raw-ASCII-code
 		// convention the canonical reference (app/src/Main.hx) uses for the same
@@ -360,6 +388,9 @@ class ExosuitApp implements DesktopUiApplication {
 		application.commands.add("workspace:search", function(_) showSidebarMode("search"));
 		application.commands.add("sidebar:files", function(_) showSidebarMode("files"));
 		application.commands.add("sidebar:search", function(_) showSidebarMode("search"));
+		application.commands.add("settings:open", function(_) openSettings());
+		ui.commands.register(new Command("preferences.open", "Settings…", openSettings,
+			new Shortcut(UiKey.Comma, UiModifier.Control)));
 		CommandBridge.install(ui.commands, application.commands, application.keymap, application.context);
 	}
 
@@ -392,6 +423,24 @@ class ExosuitApp implements DesktopUiApplication {
 				ui.commandContext, 320.0, 120.0, "", function() { paletteVisible = false; },
 				function(_) { paletteVisible = false; });
 			layers.push(new StackChild("palette", palette, 0.0, 0.0, 20));
+		}
+		if (settingsPanel != null) {
+			if (settingsPanel.catalog.store != application.settings.store) {
+				var filter = settingsPanel.filter, advanced = settingsPanel.showAdvanced, category = settingsPanel.selectedCategory;
+				settingsPanel = new nativekit.ui.widgets.settings.SettingsPanel("exosuit-settings", application.settings.store, requestFrame);
+				settingsPanel.setShowAdvanced(advanced);
+				settingsPanel.setFilter(filter);
+				if (category != null) settingsPanel.select(category);
+			}
+			var settingsStyle = new LayoutStyle();
+			settingsStyle.width = LayoutAxis.grow();
+			settingsStyle.height = LayoutAxis.fixed(Math.max(180.0, Math.min(560.0, viewportHeight - 160.0)));
+			var dismiss = function() { settingsPanel = null; requestFrame(); };
+			var content = new Column("settings-content", [new KeyedView("panel", settingsPanel),
+				new KeyedView("close", new Button("Close", null, dismiss, "settings-close"))], settingsStyle);
+			var dialog = new nativekit.ui.widgets.overlays.Dialog("settings-dialog", "Settings", content, dismiss,
+				Math.max(240.0, Math.min(860.0, viewportWidth - 48.0)));
+			layers.push(new StackChild("settings", dialog, 0.0, 0.0, 50, LayoutAxis.grow(), LayoutAxis.grow()));
 		}
 		var overlay = host.overlayView();
 		if (overlay != null) layers.push(new StackChild("host-overlay", overlay, 0.0, 0.0, 30));
@@ -630,6 +679,7 @@ class ExosuitApp implements DesktopUiApplication {
 				editorPanes.set(documentView.id, pane);
 			}
 			pane.minimapEnabled = application.settings.current.minimapEnabled;
+			pane.fontSize = application.settings.current.fontSize;
 			pane.onResolvedEditor = function(bounds, id) host.editorResolved(paneId, bounds, id);
 			pane.onActivated = function() host.activateTab(document, paneId);
 			pane.onContextMenu = function(event) {

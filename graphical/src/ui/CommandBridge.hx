@@ -31,7 +31,7 @@ class CommandBridge {
 		"project:sidebar-next", "project:sidebar-previous",
 		"project:sidebar-open"
 	];
-	static final duplicates:Array<String> = ["file:new", "doc:save", "root:close"];
+	static final duplicates:Array<String> = ["file:new", "doc:save", "root:close", "settings:open"];
 
 	public static function install(target:UiCommandRegistry, source:CommandRegistry, keymap:Keymap, context:CommandContext):Void {
 		for (command in source.all()) {
@@ -46,6 +46,15 @@ class CommandBridge {
 	/** `nativekit.ui.core.CommandRegistry` ids are namespaced separately from `ExosuitApp`'s own dotted ids; the colon survives untouched since nothing else uses it. */
 	static function bridgedId(name:String):String
 		return "exosuit." + name;
+
+	public static function refreshShortcuts(target:UiCommandRegistry, source:CommandRegistry, keymap:Keymap):Void {
+		for (command in source.all()) {
+			var id = "exosuit." + command.name;
+			if (target.get(id) == null) continue;
+			var shortcut = shortcutFor(keymap, command.name);
+			target.setShortcuts(id, shortcut == null ? [] : [shortcut]);
+		}
+	}
 
 	static function shortcutFor(keymap:Keymap, name:String):Null<Shortcut> {
 		for (binding in keymap.allBindings())

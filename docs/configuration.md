@@ -1,76 +1,61 @@
 # Configuration
 
-Pragtical Haxeon reads versioned `key=value` data. Built-in defaults are applied
-first, then user settings, then the active project's `.pragtical/settings.conf`.
-Project configuration is parsed only as data and is never executed. A file with an
-unknown key, unsupported version or invalid value is rejected as a whole; the last
-valid effective settings remain active and the error is shown in the editor.
+Open **Settings…** from the command palette or press **Ctrl+,**. UIKit's settings
+panel provides category navigation, search, an Advanced switch, validation and
+per-setting reset controls. Changes save automatically and apply to open editors.
+Font file and fallback changes marked with an asterisk require an application restart.
 
-The user settings file is stored at:
+Preferences use UIKit's JSON settings store. Only values that differ from their
+registered defaults are saved; resetting a preference restores its default.
+Unknown module settings survive saves. Legacy `settings.conf` files are ignored.
 
-- Linux and BSD: `$XDG_CONFIG_HOME/pragtical-haxeon/settings.conf`, falling back
-  to `~/.config/pragtical-haxeon/settings.conf`.
-- macOS: `~/Library/Application Support/Pragtical Haxeon/settings.conf`.
-- Windows: `%APPDATA%/Pragtical Haxeon/settings.conf`.
+The user file is `settings.json` in the existing application configuration directory:
 
-Session, recovery, replacement-backup and trash data use `$XDG_STATE_HOME` on
-Linux/BSD, `~/Library/Application Support` on macOS and `%LOCALAPPDATA%` on
-Windows. Setting `PRAGTICAL_PORTABLE` makes that directory authoritative for both
-configuration and state, independent of the host platform.
+- Linux/BSD: `$XDG_CONFIG_HOME/pragtical-haxeon`, or `~/.config/pragtical-haxeon`.
+- macOS: `~/Library/Application Support/Pragtical Haxeon`.
+- Windows: `%APPDATA%/Pragtical Haxeon`.
 
-Every non-empty file starts with `version=1`. Supported settings are:
+`PRAGTICAL_PORTABLE` overrides both configuration and state directories. Session,
+recovery and other workspace state retain their existing storage formats and locations.
 
-```text
-version=1
-editor.fontPath=data/fonts/JetBrainsMono-Regular.ttf
-editor.fontFallbacks=data/fonts/NotoSansSymbols2-Regular.ttf,/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc,/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf,/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
-editor.fontSize=15
-editor.tabWidth=4
-editor.insertSpaces=true
-editor.minimapEnabled=true
-editor.scroll_animation_type=smooth
-editor.scroll_animation_duration=0.12
-plugins.haxeon.enabled=true
-plugins.haxeon.command=[]
-plugins.haxeon.verbose=false
-workbench.sidebarWidth=220
-workbench.scrollbarVisibility=auto
-files.exclude=.git,.hg,.svn,.devstack,build,out,node_modules
-search.caseSensitive=false
-search.wholeWord=false
-search.maxResults=10000
-keybinding=Ctrl+Shift+P|commands:open
+```json
+{
+  "version": 1,
+  "values": {
+    "editor/fonts/font_size": 16,
+    "editor/display/minimap_enabled": true,
+    "editor/display/scrollbar_visibility": "auto",
+    "editor/display/scroll_animation_type": "smooth",
+    "editor/display/scroll_animation_duration": 0.12,
+    "editor/indentation/tab_width": 4,
+    "editor/indentation/insert_spaces": true,
+    "terminal/fonts/font_size": 14
+  },
+  "state": {}
+}
 ```
 
-Theme colors are signed decimal RGBA integers. The configurable roles are
-`editorBackground`, `editorForeground`, `accent`, `surface`, `surfaceElevated`,
-`surfaceActive`, `surfaceInactive`, `surfaceHover`, `border`, `divider`,
-`foregroundMuted`, `foregroundSubtle`, `foregroundDisabled`, `selection`,
-`searchMatch`, `caret`, `overlay`, `information`, `warning`, `error`, and
-`scrollbar`, each prefixed with `theme.`.
+Scroll animation accepts `smooth` or `none`; duration is 0–0.3 seconds.
+Scrollbar visibility accepts `auto`, `always` or `hidden`. The minimap hides on
+narrow editor panes. Font paths should be absolute; built-in defaults resolve
+relative to the installed application. Theme colors under `appearance/colors`
+are signed RGBA integers and appear under Advanced settings.
 
-Files are watched by bounded polling. Valid changes replace fonts and keymaps
-live; removing an override restores the value from the next lower layer.
-Relative font paths in user or project settings resolve relative to that settings
-file. Built-in font paths resolve relative to the installed executable, so launch
-working directory does not affect packaged resources.
-
-Editor scrolling uses `smooth` (default) or `none` (immediate).
-`editor.scroll_animation_duration` is seconds from 0 to 0.3; 0 is immediate.
-Smooth motion covers 99% of the distance in that duration and snaps within
-0.5 logical pixels. Wheel reversals respond immediately. Scrollbar dragging,
-session restoration use immediate offsets. These settings
-reload for existing and future document panes.
-
-Haxeon language-server commands are JSON arrays of executable and arguments;
-for example `plugins.haxeon.command=["/path with spaces/haxeon-lsp", "--stdio"]`.
+Array preferences are JSON strings containing arrays. For example, the value of
+`languages/haxeon/command` is `"[\"/path with spaces/haxeon-lsp\",\"--stdio\"]"`.
 An empty array uses `$HAXEON_LSP`, then the bundled server, then
-`$HAXEON_ROOT/scripts/haxeon-lsp` (`HAXEON_ROOT` defaults to `../haxeon`).
-Environment overrides name one executable and are never shell-split. The compiler
-root fallback resolves against the editor launch directory before the server
-starts in the project directory. `plugins.haxeon.enabled=false` disables
-server startup. `plugins.haxeon.verbose=true` logs protocol messages to the
-launch console, limited to 2,048 characters per message.
+`$HAXEON_ROOT/scripts/haxeon-lsp`. Arguments are passed directly without shell splitting.
+Advanced keyboard overrides use the same array representation, with entries such
+as `"Ctrl+A|doc:select-all"` under `editor/keyboard/keybindings`.
+
+Project configuration is separate, in `.exosuit/project.json`. It uses the same
+JSON envelope and supports `languages/haxeon/enabled`, `languages/haxeon/command`,
+`languages/haxeon/verbose` and `files/explorer/excluded_names`. Other preferences
+remain user-wide. Project values that differ from defaults override user values;
+resetting a project value resumes inheritance. External JSON edits are checked
+at most twice per second while the application updates. Malformed JSON leaves
+the last valid settings active; saved values outside their registered type or
+range fall back to defaults, following UIKit's store policy.
 
 Haxeon sessions belong to workspace folders. The first backed `.hx` document
 starts that folder's server; nested folders own their documents in preference
@@ -106,10 +91,13 @@ the bar and its pointer target while retaining wheel and keyboard scrolling.
 Changes apply live across scrollable panels. Bars overlay content without
 changing viewport size.
 
-`editor.minimapEnabled` shows a file overview on the right of graphical and web editors.
+`editor/display/minimap_enabled` shows a file overview on the right of graphical and web editors.
 Click to jump or drag its viewport to scroll. It hides below 480 logical pixels of
-editor width. Previews keep a consistent miniature scale and scroll with the editor
-instead of compressing the whole file. Cached pages contain at most 512 lines
-and 80 columns; large files use neutral strokes to avoid forcing full-document
-syntax highlighting. An 80-column bitmap with at most 1,024 pixel rows keeps GPU
-geometry and bitmap memory bounded even for dense files.
+editor width. Previews keep a consistent miniature scale and scroll with the editor instead of
+compressing the whole file. Cached pages contain at most 512 lines and 80 columns; large files use
+neutral strokes to avoid forcing full-document syntax highlighting. The preview
+is cached as an 80-column bitmap with at most 1,024 rows, keeping GPU geometry
+bounded even for dense files.
+
+
+The sidebar uses one shared width across Activity Bar destinations. Resizing, collapsing, and reopening retain that width. Older sessions migrate from the selected destination’s saved width.

@@ -27,7 +27,7 @@ import search.ReplacementPreview;
 import search.ReplacementResult;
 import config.ConfigurationPaths;
 import config.Settings;
-import config.SettingsService;
+import config.Preferences;
 import recovery.RecoveryStore;
 import feedback.ErrorLog;
 import feedback.ConfirmationService;
@@ -74,7 +74,7 @@ class Application {
 	public final workspaceReplacement:WorkspaceReplacement;
 	public var replacementPreview(get, never):Null<ReplacementPreview>;
 	public var replacementResult(get, never):Null<ReplacementResult>;
-	public final settings:SettingsService;
+	public final settings:Preferences;
 	public final recovery:RecoveryStore;
 	public final errors:ErrorLog;
 	public final confirmations:ConfirmationService;
@@ -84,9 +84,9 @@ class Application {
 	public var quitReady(get, never):Bool;
 
 	public function new(hostFactory:(theme:Theme, focus:FocusManager, workspace:Workspace, settings:Settings)->WorkbenchHost,
-			?settings:SettingsService, ?recentProjects:RecentProjects, ?capabilities:HostCapabilities) {
+			?settings:Preferences, ?recentProjects:RecentProjects, ?capabilities:HostCapabilities) {
 		this.capabilities = capabilities == null ? HostCapabilities.desktop() : capabilities;
-		this.settings = settings == null ? new SettingsService() : settings;
+		this.settings = settings == null ? new Preferences() : settings;
 		syntaxes = new SyntaxRegistry();
 		BuiltinSyntax.install(syntaxes);
 		completions = new CompletionRegistry();

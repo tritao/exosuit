@@ -3,7 +3,7 @@ package app;
 import command.CommandRegistry;
 import command.KeyBinding;
 import command.Keymap;
-import config.SettingsService;
+import config.Preferences;
 import config.ConfigurationPaths;
 import core.Application;
 import platform.Native;
@@ -26,97 +26,55 @@ class ConfigurationTestMain {
 		var arguments = Sys.args(), userPath = arguments[0], projectPath = arguments[1];
 		var oldPortable = Sys.getEnv("PRAGTICAL_PORTABLE"), oldConfig = Sys.getEnv("XDG_CONFIG_HOME"), oldState = Sys.getEnv("XDG_STATE_HOME");
 		Sys.putEnv("PRAGTICAL_PORTABLE", arguments[2] + "/portable/");
-		require(ConfigurationPaths.userSettings() == arguments[2] + "/portable/settings.conf"
+		require(ConfigurationPaths.userSettings() == arguments[2] + "/portable/settings.json"
 			&& ConfigurationPaths.session() == arguments[2] + "/portable/session.conf", "portable data root was not authoritative");
 		Sys.putEnv("PRAGTICAL_PORTABLE", "");
 		if (Sys.systemName() != "Windows" && Sys.systemName() != "Mac") {
 			Sys.putEnv("XDG_CONFIG_HOME", arguments[2] + "/xdg-config");
 			Sys.putEnv("XDG_STATE_HOME", arguments[2] + "/xdg-state");
-			require(ConfigurationPaths.userSettings() == arguments[2] + "/xdg-config/pragtical-haxeon/settings.conf"
+			require(ConfigurationPaths.userSettings() == arguments[2] + "/xdg-config/pragtical-haxeon/settings.json"
 				&& ConfigurationPaths.session() == arguments[2] + "/xdg-state/pragtical-haxeon/session.conf", "XDG data roots were not respected");
 		}
 		Sys.putEnv("PRAGTICAL_PORTABLE", oldPortable == null ? "" : oldPortable);
 		Sys.putEnv("XDG_CONFIG_HOME", oldConfig == null ? "" : oldConfig);
 		Sys.putEnv("XDG_STATE_HOME", oldState == null ? "" : oldState);
-		var service = new SettingsService(userPath, projectPath);
-		require(service.diagnostics.length == 0, "valid settings produced diagnostics");
-		require(service.current.fontSize == 18 && service.current.sidebarWidth == 280 && !service.current.insertSpaces, "layer precedence failed");
-		require(service.current.fontFallbackPaths.length == 2 && StringTools.endsWith(service.current.fontFallbackPaths[1], "/fallback-two.ttf"),
-			"font fallback configuration was not layered");
-		require(service.current.keybindings.length == 1 && service.current.keybindings[0].commands[0] == "doc:redo", "project keybinding did not replace user bindings");
+		// UIKit persists only overrides, validates edits and preserves unknown module keys.
+		if (FileSystem.exists(userPath)) FileSystem.deleteFile(userPath);
+		var service = new Preferences(userPath);
+		var store = service.store;
+		var notifications = 0, release = service.subscribe(function(_) notifications++);
+		require(notifications == 1, "initial preference notification missing");
+		require(store.set("editor/fonts/font_size", nativekit.ui.properties.PropertyValue.Int(18)) == null,
+			"valid font size rejected");
+		require(service.current.fontSize == 18 && notifications == 2, "preference did not apply immediately");
+		require(store.set("editor/fonts/font_size", nativekit.ui.properties.PropertyValue.Int(0)) != null
+			&& service.current.fontSize == 18 && notifications == 2, "invalid preference changed the snapshot");
+		require(store.set("languages/haxeon/command", nativekit.ui.properties.PropertyValue.Text("[1]")) != null,
+			"invalid language argv accepted");
+		require(store.set("editor/keyboard/keybindings", nativekit.ui.properties.PropertyValue.Text('["Ctrl+A|doc:undo"]')) == null,
+			"valid keybinding rejected");
+		require(new Preferences(userPath).current.fontSize == 18, "preferences did not survive restart");
+		store.set("editor/display/minimap_enabled", nativekit.ui.properties.PropertyValue.Bool(false));
+		require(!service.current.minimapEnabled && !service.current.copy().minimapEnabled, "minimap did not apply");
+		store.reset("editor/display/minimap_enabled");
+		require(service.current.minimapEnabled, "reset did not restore default");
+		for (mode in ["auto", "always", "hidden"])
+			require(store.set("editor/display/scrollbar_visibility", nativekit.ui.properties.PropertyValue.Enum(mode)) == null
+				&& service.current.scrollbarVisibility == mode, "scrollbar choice did not apply");
+		require(store.set("editor/display/scroll_animation_duration", nativekit.ui.properties.PropertyValue.Float(0.31)) != null,
+			"out of range scroll duration accepted");
+		release(); release();
+		var count = notifications;
+		store.set("editor/indentation/tab_width", nativekit.ui.properties.PropertyValue.Int(8));
+		require(notifications == count, "released listener retained");
+		store.resetUnder("");
+		File.saveContent(userPath, "invalid JSON");
 		var lastGood = service.current;
-		File.saveContent(projectPath, "version=1\neditor.fontSize=broken\n");
-		require(!service.reload() && service.current == lastGood && service.diagnostics.length > 0, "invalid reload replaced last good settings");
-		File.saveContent(projectPath, "version=1\neditor.fontSize=19\n");
-		require(service.reload() && service.current.fontSize == 19 && service.current.sidebarWidth == 240 && service.current.insertSpaces,
-			"fixed reload did not reapply layered settings and defaults");
-		var notifications = 0, release = service.subscribe(function(value) {
-			notifications++;
-		});
-		require(notifications == 1 && !service.reload(), "subscription or unchanged reload was not stable");
-		release();
-		release();
-		File.saveContent(projectPath, "version=1\neditor.fontSize=20\n");
-		require(service.reload() && notifications == 1, "released settings subscription was retained");
-		FileSystem.deleteFile(projectPath);
-		require(service.reload() && service.current.fontSize == 16 && service.current.sidebarWidth == 240,
-			"removing the project layer did not reset to user/default values");
-		File.saveContent(projectPath, "version=1\neditor.fontSize=19\n");
-		require(service.reload(), "could not restore project settings after reset test");
-		var unreadable = new SettingsService(arguments[2]);
-		require(unreadable.diagnostics.length > 0, "settings read failure did not become a diagnostic");
-
-		File.saveContent(projectPath, "version=1\neditor.scroll_animation_type=none\neditor.scroll_animation_duration=0.2\n");
-		require(service.reload() && service.current.scrollAnimationType == "none" && service.current.scrollAnimationDuration == 0.2,
-			"scroll settings did not load");
-		require(service.current.copy().scrollAnimationDuration == 0.2, "scroll settings copy lost duration");
-		for (invalid in ["NaN", "Infinity", "0.12oops", "-0.1", "0.31"]) {
-			File.saveContent(projectPath, "version=1\neditor.scroll_animation_duration=" + invalid + "\n");
-			require(!service.reload() && service.current.scrollAnimationDuration == 0.2, "invalid duration replaced last good settings");
-		}
-		File.saveContent(projectPath, "version=1\neditor.scroll_animation_type=unknown\n");
-		require(!service.reload() && service.current.scrollAnimationType == "none", "invalid scroll type replaced last good settings");
-		File.saveContent(projectPath, "version=1\neditor.fontSize=19\n");
-		require(service.reload() && service.current.scrollAnimationType == "smooth" && service.current.scrollAnimationDuration == 0.12,
-			"removed scroll override did not restore defaults");
-
-		File.saveContent(projectPath, "version=1\neditor.minimapEnabled=false\n");
-		require(service.reload() && !service.current.minimapEnabled && !service.current.copy().minimapEnabled,
-			"minimap setting or copy failed");
-		File.saveContent(projectPath, "version=1\neditor.minimapEnabled=invalid\n");
-		require(!service.reload() && !service.current.minimapEnabled, "invalid minimap setting replaced last good settings");
-		File.saveContent(projectPath, "version=1\n");
-		require(service.reload() && service.current.minimapEnabled, "removed minimap setting did not restore default");
-
-		for (mode in ["auto", "always", "hidden"]) {
-			File.saveContent(projectPath, "version=1\nworkbench.scrollbarVisibility=" + mode + "\n");
-			require(service.reload() && service.current.scrollbarVisibility == mode && service.current.copy().scrollbarVisibility == mode,
-				"scrollbar visibility setting or copy failed");
-		}
-		File.saveContent(projectPath, "version=1\nworkbench.scrollbarVisibility=invalid\n");
-		require(!service.reload() && service.current.scrollbarVisibility == "hidden", "invalid scrollbar policy replaced last good settings");
-		File.saveContent(projectPath, "version=1\neditor.fontSize=19\n");
-		require(service.reload() && service.current.scrollbarVisibility == "auto", "removed scrollbar policy did not restore auto");
-
-		File.saveContent(projectPath, 'version=1\nplugins.haxeon.enabled=false\nplugins.haxeon.verbose=true\nplugins.haxeon.command=["/server with spaces", "--stdio", "", "comma,arg"]\n');
-		require(service.reload() && !service.current.haxeonEnabled && service.current.haxeonVerbose && service.current.haxeonCommand.length == 4,
-			"typed language configuration failed");
-		var copied = service.current.copy(); copied.haxeonCommand[0] = "changed";
-		require(service.current.haxeonCommand[0] == "/server with spaces", "settings copy aliased command arguments");
-		for (invalid in ['"server"', '[1]', '[null]', '[""]', '["server",false]', '[broken']) {
-			File.saveContent(projectPath, "version=1\nplugins.haxeon.command=" + invalid + "\n");
-			require(!service.reload() && service.current.haxeonCommand[0] == "/server with spaces", "invalid argv replaced last good configuration");
-		}
-		var configured = ["configured executable", "arg with spaces", ""];
-		var selected = config.LanguageServerCommand.resolve(configured, "environment", "bundled", true, "/compiler");
-		require(selected.length == 3 && selected[1] == "arg with spaces" && selected[2] == "", "configured argv was shell-split");
-		selected[0] = "changed"; require(configured[0] == "configured executable", "resolver changed configured argv");
-		require(config.LanguageServerCommand.resolve([], "environment path", "bundled", true, "/compiler")[0] == "environment path", "environment precedence failed");
-		require(config.LanguageServerCommand.resolve([], "", "bundled", true, "/compiler")[0] == "bundled", "bundled precedence failed");
-		require(config.LanguageServerCommand.resolve([], null, "bundled", false, "/compiler")[0] == "/compiler/scripts/haxeon-lsp", "compiler fallback failed");
-		File.saveContent(projectPath, "version=1\neditor.fontSize=19\n");
-		require(service.reload() && service.current.haxeonEnabled && !service.current.haxeonVerbose && service.current.haxeonCommand.length == 0,
-			"removed language overrides did not restore defaults");
+		require(!service.reload(true) && service.current == lastGood && service.diagnostics.length > 0,
+			"malformed JSON replaced last good snapshot");
+		store.save();
+		service.reload(true);
+		var liveStore = service.store;
 
 		Platform.startHeadless();
 		var window = Native.window_create("configuration-test", 640, 320), renderer = new Renderer(window, "ignored-headlessly.ttf", 15),
@@ -128,52 +86,32 @@ class ConfigurationTestMain {
 			performed += 1;
 		});
 		var previousFont = renderer.font;
-		File.saveContent(projectPath, "version=1\neditor.fontSize=21\ntheme.selection=123456\nkeybinding=Ctrl+A|test:configured\n");
+		liveStore.batch(function() {
+			liveStore.set("editor/fonts/font_size", nativekit.ui.properties.PropertyValue.Int(21));
+			liveStore.set("appearance/colors/selection", nativekit.ui.properties.PropertyValue.Int(123456));
+			liveStore.set("editor/keyboard/keybindings", nativekit.ui.properties.PropertyValue.Text('["Ctrl+A|test:configured"]'));
+		});
 		application.update();
 		require(renderer.fontSize == 21 && renderer.font != previousFont && Native.font_height(previousFont) == -1,
 			"live font replacement leaked the retired font handle");
-		require(application.theme.selection == 123456, "live semantic theme update was not applied");
-		require(application.keyPressed(Platform.KEY_A, Platform.MOD_CTRL) && performed == 1,
-			"live configured binding was missing or duplicated");
-		File.saveContent(projectPath, "version=1\n");
-		application.update();
-		var defaultSettings = new config.Settings();
-		require(renderer.fontSize == 16 && application.theme.selection == defaultSettings.selection,
-			"live settings reset did not restore layered defaults");
-		require(application.keymap.commandsFor(Platform.KEY_A, Platform.MOD_CTRL)[0] == "doc:undo",
-			"settings reset did not restore the user-layer binding");
-		performed = 0;
-		application.keymap.setConfigured([new KeyBinding(Platform.KEY_A, Platform.MOD_CTRL, ["test:configured"])]);
-		require(application.keyPressed(Platform.KEY_A, Platform.MOD_CTRL) && performed == 1, "configured binding did not override defaults");
-		application.keymap.setConfigured([]);
-		require(application.keymap.commandsFor(Platform.KEY_A, Platform.MOD_CTRL)[0] == "doc:select-all", "clearing configured bindings lost defaults");
-		var projectSettingsDirectory = arguments[2] + "/.pragtical", workspaceSettingsPath = projectSettingsDirectory + "/settings.conf";
-		if (!FileSystem.exists(projectSettingsDirectory)) FileSystem.createDirectory(projectSettingsDirectory);
-		File.saveContent(workspaceSettingsPath, "version=1\neditor.fontSize=22\ntheme.accent=654321\nfiles.exclude=.git,generated\n");
+		require(application.theme.selection == 123456, "live theme update missing");
+		require(application.keyPressed(Platform.KEY_A, Platform.MOD_CTRL) && performed == 1, "configured shortcut missing");
+		liveStore.resetUnder(""); application.update();
+		require(renderer.fontSize == 15 && application.theme.selection == new config.Settings().selection,
+			"preference reset did not restore defaults");
+		require(application.keymap.commandsFor(Platform.KEY_A, Platform.MOD_CTRL)[0] == "doc:select-all", "reset lost default shortcut");
+		var workspaceSettingsPath = ConfigurationPaths.projectSettings(arguments[2]);
+		var projectPreferences = service.forProject(workspaceSettingsPath);
+		projectPreferences.store.set("languages/haxeon/enabled", nativekit.ui.properties.PropertyValue.Bool(false));
+		require(!projectPreferences.registry.exists("editor/fonts/font_size"), "user preferences leaked into project configuration");
 		application.openArgument(arguments[2]);
-		require(renderer.fontSize == 22 && application.theme.accent == 654321,
-			"opening a project did not apply its layered settings");
-		File.saveContent(workspaceSettingsPath, "version=1\neditor.fontSize=23\ntheme.accent=765432\nfiles.exclude=.git,generated\n");
-		var activeProject = application.workspace.activeProject;
-		if (activeProject == null) throw "active project has no settings service";
-		var projectSettings = activeProject.settings;
-		if (projectSettings == null) throw "active project has no settings service";
-		projectSettings.reload();
+		var configuredProject = application.workspace.activeProject;
+		if (configuredProject == null || configuredProject.settings == null) throw "Project configuration missing";
+		require(!configuredProject.settings.current.haxeonEnabled, "project language configuration not loaded");
+		liveStore.set("editor/fonts/font_size", nativekit.ui.properties.PropertyValue.Int(23));
 		application.update();
-		require(renderer.fontSize == 23 && application.theme.accent == 765432,
-			"live project setting changes were not applied through the active layer");
-		var projectLastGood = projectSettings.current, errorsBeforeInvalidProject = application.errors.entries.length;
-		File.saveContent(workspaceSettingsPath, "version=1\nrun=untrusted-project-code\n");
-		require(!projectSettings.reload() && projectSettings.current == projectLastGood,
-			"project configuration was not treated as validated data");
-		application.update();
-		require(application.errors.entries.length > errorsBeforeInvalidProject,
-			"project configuration diagnostics were not visible in the editor");
-		File.saveContent(workspaceSettingsPath, "version=1\neditor.fontSize=23\ntheme.accent=765432\nfiles.exclude=.git,generated\n");
-		require(projectSettings.reload(), "valid project configuration did not recover after a diagnostic");
-		application.open(arguments[3]);
-		application.update();
-		require(renderer.fontSize == 16, "leaving the project did not restore user-layer settings");
+		require(renderer.fontSize == 23, "project configuration blocked live user preferences");
+		application.open(arguments[3]); application.update();
 		var sessionPath = arguments[2] + "/state/nested/session.conf", session = WorkspaceSession.capture(application);
 		require(session.save(sessionPath), "session did not create its state directory");
 		var loaded = WorkspaceSession.load(sessionPath);
@@ -250,7 +188,7 @@ class ConfigurationTestMain {
 		renderer.destroy();
 		Platform.require(Native.window_destroy(window), "destroy configuration test window");
 		Native.shutdown();
-		Sys.println("PASS: typed layered settings, invalid reload rollback, and keybinding overlays");
+		Sys.println("PASS: UIKit preference persistence, validation, live updates, resets and project configuration");
 		return 0;
 	}
 }

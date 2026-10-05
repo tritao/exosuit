@@ -41,8 +41,10 @@ class TerminalPane implements TerminalPanel {
 	final palette:TerminalPalette;
 	final foreground:Color;
 	final background:Color;
-	final cellWidth:Float;
-	final rowHeight:Float;
+	var cellWidth:Float;
+	var rowHeight:Float;
+	var fontSize:Float;
+	var fontRevision:Int = 0;
 	var viewportWidth:Float = 0.0;
 	var viewportHeight:Float = 0.0;
 	var resolvedWidth:Float = 0.0;
@@ -92,18 +94,32 @@ class TerminalPane implements TerminalPanel {
 			mono = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf";
 		if (FileSystem.exists(mono)) fonts.add(mono);
 		fonts.addSystemFallbacks();
-		var probe = TextLayout.create(fonts, "M", 64.0, new TextStyle(14.0), new ParagraphStyle(TextWrap.None));
-		var metrics = probe.measure();
-		cellWidth = Math.max(1.0, metrics.width);
-		rowHeight = Math.max(1.0, Math.ceil(metrics.height + 2.0));
-		probe.dispose();
+		updateFontSize();
 		refreshRows(true);
 	}
 
 	public function poll():Void {
 		if (closed) return;
+		if (fontSize != palette.fontSize) {
+			updateFontSize();
+			resizeToViewport(resolvedWidth, resolvedHeight);
+			requestFrame();
+		}
 		session.pollEvents();
 		refreshRows(false);
+	}
+
+	function updateFontSize():Void {
+		fontSize = palette.fontSize;
+		var probe = TextLayout.create(fonts, "M", 64.0, new TextStyle(fontSize), new ParagraphStyle(TextWrap.None));
+		var metrics = probe.measure();
+		cellWidth = Math.max(1.0, metrics.width);
+		rowHeight = Math.max(1.0, Math.ceil(metrics.height + 2.0));
+		probe.dispose();
+		for (revision in revisions) if (revision >= fontRevision) fontRevision = revision + 1;
+		for (layout in layouts) layout.dispose();
+		viewportWidth = -1; viewportHeight = -1;
+		layouts.resize(0); texts.resize(0); revisions.resize(0); backgrounds.resize(0);
 	}
 
 	function refreshRows(force:Bool):Void {
@@ -117,11 +133,11 @@ class TerminalPane implements TerminalPanel {
 			backgrounds.pop();
 		}
 		while (layouts.length < count) {
-			var layout = TextLayout.create(fonts, "", 8192.0, new TextStyle(14.0), new ParagraphStyle(TextWrap.None));
+			var layout = TextLayout.create(fonts, "", 8192.0, new TextStyle(fontSize), new ParagraphStyle(TextWrap.None));
 			layout.setColor(foreground);
 			layouts.push(layout);
 			texts.push("");
-			revisions.push(0);
+			revisions.push(fontRevision);
 			backgrounds.push([]);
 			force = true;
 		}

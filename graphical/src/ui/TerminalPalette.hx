@@ -4,6 +4,7 @@ import Color;
 
 /** Terminal defaults and the first 16 ANSI colors for each workbench scheme. */
 class TerminalPalette {
+	public var fontSize:Float = 14.0;
 	public final foreground:Color;
 	public final background:Color;
 	public final cursor:Color;

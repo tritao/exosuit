@@ -1,7 +1,6 @@
 package config;
 
 class Settings {
-	public static inline final VERSION = 1;
 	public var fontPath:String = ApplicationPaths.resource("data/fonts/JetBrainsMono-Regular.ttf");
 	public var fontFallbackPaths:Array<String> = [
 		ApplicationPaths.resource("data/fonts/NotoSansSymbols2-Regular.ttf"),
@@ -13,6 +12,7 @@ class Settings {
 	public var sidebarWidth:Int = 220;
 	public var scrollbarVisibility:String = "auto";
 	public var minimapEnabled:Bool = true;
+	public var terminalFontSize:Int = 14;
 	public var tabWidth:Int = 4;
 	public var insertSpaces:Bool = true;
 	public var scrollAnimationType:String = "smooth";
@@ -57,6 +57,7 @@ class Settings {
 		result.sidebarWidth = sidebarWidth;
 		result.scrollbarVisibility = scrollbarVisibility;
 		result.minimapEnabled = minimapEnabled;
+		result.terminalFontSize = terminalFontSize;
 		result.tabWidth = tabWidth;
 		result.insertSpaces = insertSpaces;
 		result.scrollAnimationType = scrollAnimationType;

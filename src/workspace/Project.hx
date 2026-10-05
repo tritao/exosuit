@@ -7,7 +7,7 @@ class Project {
 	public final root:String;
 	public final name:String;
 	public var tree(default, null):ProjectNode;
-	public var settings(default, null):Null<config.SettingsService>;
+	public var settings(default, null):Null<config.Preferences>;
 	public final diagnostics:Array<String> = [];
 	final fileSystem:FileSystemService;
 	final scheduler:JobScheduler;
@@ -41,7 +41,7 @@ class Project {
 		startScan();
 	}
 
-	public function setSettings(service:config.SettingsService):Void {
+	public function setSettings(service:config.Preferences):Void {
 		if (releaseSettings != null) releaseSettings();
 		settings = service;
 		releaseSettings = service.subscribe(value -> setIgnored(value.excludedNames));

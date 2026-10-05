@@ -20,9 +20,10 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	var languageSettings = "";
 	var languageFeatureStage = 0;
 	var languageOriginal = "";
+	var settingsTerminalColumns = 0;
 
 	public function new(context:nativekit.ui.host.DesktopUiHostContext, path:String, phase:String) {
-		super(context.fonts, null, context, (phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-tabs" || phase == "editor-minimap" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
+		super(context.fonts, null, context, (phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-tabs" || phase == "settings" || phase == "editor-minimap" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
 			null, null, null, WorkspaceSmokeMain.createTerminal);
 		this.phase = phase;
 		this.path = path;
@@ -42,6 +43,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		if (phase == "editor-resize") return resizeStep(frame);
 		if (phase == "editor-minimap") return minimapStep(frame);
 		if (phase == "editor-tabs") return tabsStep(frame);
+		if (phase == "settings") return settingsStep(frame);
 		if (phase == "language-folder") languageStep();
 		if (phase == "explorer-preview") explorerStep();
 		if (phase == "editor-scroll") {
@@ -328,6 +330,62 @@ class WorkspaceSmokeApp extends ExosuitApp {
 					"active tab was not revealed after selection/resize");
 				trace("PASS: crowded editor tabs do not overlap, long Unicode labels ellipsize, tooltips preserve filenames, wheel scrolling and active reveal work");
 			}
+		}
+		return result;
+	}
+
+	function settingsStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+		frame.setViewport(1100, 760);
+		var activeSettingsView = host.activeView();
+		if (activeSettingsView == null) throw "Settings test missing editor";
+		if (frames == 2) ui.key(UiEventKind.KeyDown, UiKey.Comma, UiModifier.Control);
+		if (frames == 3) {
+			require(node("settings-dialog") != null, "settings shortcut did not open modal");
+			// The panel chooses a category from the user's search, as it does during typing.
+			settingsPanel.setFilter("minimap");
+		}
+		if (frames == 4) click("editor:editor/display/minimap_enabled");
+		if (frames == 5) {
+			require(!application.settings.current.minimapEnabled, "settings checkbox did not apply immediately");
+			require(!new config.Preferences(config.ConfigurationPaths.userSettings()).current.minimapEnabled,
+				"settings checkbox did not persist");
+			require(find(ui.root, "editor-minimap:" + activeSettingsView.document.id) == null, "minimap remained after preference edit");
+			ui.key(UiEventKind.KeyDown, UiKey.Escape, 0);
+		}
+		if (frames == 6) {
+			require(find(ui.root, "settings-dialog") == null, "Escape did not dismiss settings");
+			application.commands.perform("settings:open", application.context);
+			settingsPanel.setFilter("font size");
+		}
+		if (frames == 7) {
+			var store = application.settings.store;
+			store.set("editor/fonts/font_size", nativekit.ui.properties.PropertyValue.Int(22));
+			click("settings-close");
+			openTerminal();
+		}
+		var result = super.submit(frame);
+		if (frames == 8) {
+			var editor = node("editor:" + activeSettingsView.document.id);
+			var fontApplied = false;
+			editor.walk(function(child) {
+				if (child.layout.visualKind == LayoutVisualKind.Custom && child.layout.textStyle.fontSize == 22 && child.layout.intrinsicContent != null) fontApplied = true;
+			});
+			require(fontApplied, "editor font size did not apply live");
+			require(find(ui.root, "settings-dialog") == null, "Close did not dismiss settings");
+			application.settings.store.reset("editor/display/minimap_enabled");
+			var terminal = host.activePanelTerminal();
+			if (terminal == null) throw "Settings test missing terminal";
+			settingsTerminalColumns = terminal.panel.columns();
+			application.settings.store.set("terminal/fonts/font_size", nativekit.ui.properties.PropertyValue.Int(28));
+		}
+		if (frames == 9) {
+			require(find(ui.root, "editor-minimap:" + activeSettingsView.document.id) != null, "reset did not restore minimap");
+		}
+		if (frames == 10) {
+			var terminal = host.activePanelTerminal();
+			if (terminal == null) throw "Settings test lost terminal";
+			require(terminal.panel.columns() < settingsTerminalColumns, "terminal font size did not resize live");
+			trace("PASS: settings shortcut, searchable panel, checkbox persistence, live editor and terminal font size, reset and modal dismissal");
 		}
 		return result;
 	}
@@ -642,11 +700,12 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		var settingsPath = config.ConfigurationPaths.userSettings();
 		if (languageStage == 0 && service != null && service.ready && ui.root != null && hasText(node("exosuit-status"), "Haxeon: ready")) {
 			languageSettings = sys.io.File.getContent(settingsPath);
-			sys.io.File.saveContent(settingsPath, "version=1\nplugins.haxeon.command=" + haxe.Json.stringify([path + "/missing-server"]) + "\n");
+			sys.io.File.saveContent(settingsPath, invalidServerSettings(path + "/missing-server"));
+			application.settings.reload(true);
 			languageStage = 1;
 		} else if (languageStage == 1 && host.getProblems().values().length > 0 && ui.root != null && hasText(node("exosuit-status"), "language server")) {
 			require(hasText(node("problems-scroll"), "language server"), "language failure did not render in Problems");
-			sys.io.File.saveContent(settingsPath, languageSettings); languageStage = 2;
+			sys.io.File.saveContent(settingsPath, languageSettings); application.settings.reload(true); languageStage = 2;
 		} else if (languageStage == 2 && service != null && service.ready && host.getProblems().values().length == 0 && ui.root != null && hasText(node("exosuit-status"), "ready")) {
 			languageStage = 3;
 			trace("PASS: real window starts folder server, renders wrong-command status/Problems and recovers from settings reload");
@@ -721,7 +780,7 @@ class WorkspaceSmokeMain {
 		options.title = "exosuit workspace acceptance";
 		options.width = 900; options.height = 600;
 		options.captureDirectory = args[1];
-		options.frameLimit = args[2] == "editor-tabs" ? 10 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
+		options.frameLimit = args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 10 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
 		var status = DesktopUiHost.run(options, context -> new WorkspaceSmokeApp(context, args[0], args[2]));
 		platform.Native.shutdown();
 		return status;

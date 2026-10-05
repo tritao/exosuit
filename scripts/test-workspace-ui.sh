@@ -56,6 +56,7 @@ run_phase editor-scroll editor-scroll "$fixture/sidebar-project/Main.hx"
 run_phase scrollbar-visibility scrollbar-visibility "$fixture/sidebar-project/Main.hx"
 run_phase editor-resize editor-resize "$fixture/sidebar-project/Main.hx"
 run_phase editor-minimap editor-minimap "$fixture/sidebar-project/Main.hx"
+run_phase settings settings "$fixture/sidebar-project/Main.hx"
 mkdir -p "$fixture/tab-project"
 for name in Main.hx NativeDesktopPlatform.hx Platform.hx README.md a-very-long-Unicode-🙂-filename-that-needs-an-ellipsis.hx Last.hx; do
     printf 'tab fixture\n' > "$fixture/tab-project/$name"
@@ -64,10 +65,10 @@ run_phase editor-tabs editor-tabs "$fixture/tab-project/Main.hx"
 
 printf 'old\n' > "$fixture/sidebar-project/Other.hx"
 mkdir -p "$fixture/state-language-folder"
-python3 - "$fixture/state-language-folder/settings.conf" "$root_dir/tests/fake_lsp.py" "$fixture/language-events.jsonl" <<'PYLANG'
+python3 - "$fixture/state-language-folder/settings.json" "$root_dir/tests/fake_lsp.py" "$fixture/language-events.jsonl" <<'PYLANG'
 import json, sys
 with open(sys.argv[1], "w") as settings:
-    settings.write("version=1\nplugins.haxeon.command=" + json.dumps(["python3", sys.argv[2], "--events", sys.argv[3]]) + "\n")
+    json.dump({"version": 1, "values": {"languages/haxeon/command": json.dumps(["python3", sys.argv[2], "--events", sys.argv[3]])}, "state": {}}, settings)
 PYLANG
 run_phase language-folder language-folder "$fixture/sidebar-project/Main.hx"
 

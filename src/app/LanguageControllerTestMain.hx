@@ -44,9 +44,9 @@ class LanguageControllerTestMain {
 		var project = workspace.addProject(nested), child = workspace.documents.open(nested + "/Child.hx");
 		root.openDocument(child);
 		pump(controller, () -> { var service = controller.sessionFor(nested); return service != null && service.ready; }, 5);
-		var settingsPath = nested + "/server-settings.conf";
-		File.saveContent(settingsPath, "version=1\nplugins.haxeon.command=" + haxe.Json.stringify(["python3", fake, "--events", log, "--profile", "nested"]) + "\n");
-		var layer = new config.SettingsService(null, settingsPath); project.setSettings(layer);
+		var settingsPath = nested + "/server-settings.json";
+		var layer = new config.Preferences(null, settingsPath); project.setSettings(layer);
+		layer.store.set("languages/haxeon/command", nativekit.ui.properties.PropertyValue.Text(haxe.Json.stringify(["python3", fake, "--events", log, "--profile", "nested"])));
 		var originalChild = controller.sessionFor(nested);
 		pump(controller, () -> { var service = controller.sessionFor(nested); return service != null && service != originalChild && service.ready; }, 5);
 		require(controller.sessionFor(directory) == parent && processes.activeCount() == 2, "folder settings restarted unrelated root");
@@ -59,8 +59,7 @@ class LanguageControllerTestMain {
 		for (document in workspace.documents.documents.copy()) workspace.documents.close(document, true);
 		controller.update(Sys.time());
 		require(controller.sessionFor(directory) == parent && controller.sessionFor(nested) == childService, "last-document closure tore down session");
-		File.saveContent(settingsPath, "version=1\nplugins.haxeon.command=" + haxe.Json.stringify(["python3", fake, "--events", log, "--profile", "warm"]) + "\n");
-		layer.reload();
+		layer.store.set("languages/haxeon/command", nativekit.ui.properties.PropertyValue.Text(haxe.Json.stringify(["python3", fake, "--events", log, "--profile", "warm"])));
 		pump(controller, () -> { var service = controller.sessionFor(nested); return service != null && service != childService && service.ready; }, 5);
 		require(controller.sessionFor(directory) == parent && processes.activeCount() == 2, "warm-session configuration change affected unrelated root");
 		workspace.removeProject(project);

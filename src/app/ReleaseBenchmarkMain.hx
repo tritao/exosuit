@@ -1,6 +1,6 @@
 package app;
 
-import config.SettingsService;
+import config.Preferences;
 import core.Application;
 import editor.BufferPosition;
 import platform.Native;
@@ -29,7 +29,7 @@ class ReleaseBenchmarkMain {
 		Platform.startHeadless();
 		var window = Native.window_create("release-benchmark", 1280, 720), renderer = new Renderer(window, "ignored-headlessly.ttf", 15),
 			application = new Application((theme, focus, workspace, settings) -> new RootView(renderer, theme, focus, workspace, 1280, 720, settings),
-				new SettingsService()),
+				new Preferences()),
 			root:RootView = cast application.root, startupMs = elapsed(started);
 		var firstStarted = Sys.time(), view = application.open(smallPath);
 		rootFrame(application, renderer);
