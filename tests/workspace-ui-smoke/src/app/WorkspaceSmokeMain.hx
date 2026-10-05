@@ -1,14 +1,25 @@
 package app;
 
+import haxeon.ui.FontCollection;
+import haxeon.ui.FontFamily;
+import haxeon.ui.LayoutFrame;
+import haxeon.ui.LayoutVisualKind;
+import haxeon.ui.ParagraphStyle;
+import haxeon.ui.Path;
+import haxeon.ui.ResolvedLayoutItem;
+import haxeon.ui.TextLayout;
+import haxeon.ui.TextStyle;
+import haxeon.ui.TextWrap;
+
 import ui.ExosuitApp;
 import ui.UiEditorTabs;
 import ui.UiDocumentView;
 import ui.SetiIconData;
-import nativekit.ui.host.DesktopUiHost;
-import nativekit.ui.host.DesktopUiHostOptions;
-import nativekit.ui.core.UiEventKind;
-import nativekit.ui.core.UiKey;
-import nativekit.ui.core.UiModifier;
+import haxeon.ui.host.DesktopUiHost;
+import haxeon.ui.host.DesktopUiHostOptions;
+import haxeon.ui.core.UiEventKind;
+import haxeon.ui.core.UiKey;
+import haxeon.ui.core.UiModifier;
 
 class WorkspaceSmokeApp extends ExosuitApp {
 	final phase:String;
@@ -22,7 +33,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	var exitCount = 0;
 	var saveAsSuccesses = 0;
 	var saveAsCancellations = 0;
-	final closeContext:nativekit.ui.host.DesktopUiHostContext;
+	final closeContext:haxeon.ui.host.DesktopUiHostContext;
 	var pointerX:Float = 0;
 	var pointerY:Float = 0;
 	var sidebarWidth = 0.0;
@@ -37,7 +48,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	var selectionDragOffset:Float = 0.0;
 	var selectionStoppedOffset:Float = 0.0;
 
-	public function new(context:nativekit.ui.host.DesktopUiHostContext, path:String, phase:String) {
+	public function new(context:haxeon.ui.host.DesktopUiHostContext, path:String, phase:String) {
 		super(context.fonts, null, context, (phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-font" || phase == "editor-tabs" || phase == "zoom" || phase == "word-delete" || phase == "selection" || phase == "tab-close" || phase == "pointer-actions" || phase == "caret-follow" || phase == "exit-confirmation" || phase == "save-as" || phase == "tab-close-paint" || phase == "settings" || phase == "editor-minimap" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
 			null, null, null, WorkspaceSmokeMain.createTerminal);
 		this.phase = phase;
@@ -54,7 +65,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		ui.key(UiEventKind.KeyDown, UiKey.P, UiModifier.Control | UiModifier.Shift);
 	}
 
-	override public function submit(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+	override public function submit(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		frames++;
 		if (phase == "editor-font") return editorFontStep(frame);
 		if (phase == "problems") return problemsStep(frame);
@@ -309,7 +320,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		}
 		return result;
 	}
-	function resizeStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+	function resizeStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		var view = host.activeView();
 		if (view == null) throw "resize acceptance missing document";
 		if (frames == 1) {
@@ -340,7 +351,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		return result;
 	}
 
-	function tabsStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+	function tabsStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		if (frames == 1) sidebar.setVisible(false);
 		frame.setViewport(frames == 7 ? 640 : 900, 600);
 		if (frames == 2) {
@@ -380,9 +391,9 @@ class WorkspaceSmokeApp extends ExosuitApp {
 						if (child.layout.text.indexOf("…") >= 0) truncated = true;
 					}
 				});
-				var semantics:Null<nativekit.ui.semantics.Semantics> = null;
+				var semantics:Null<haxeon.ui.semantics.Semantics> = null;
 				header.walk(function(child) {
-					if (child.semantics != null && child.semantics.role == nativekit.ui.semantics.AccessibilityRole.Tab) semantics = child.semantics;
+					if (child.semantics != null && child.semantics.role == haxeon.ui.semantics.AccessibilityRole.Tab) semantics = child.semantics;
 				});
 				if (semantics == null) throw "tab lost its accessible filename";
 				require(tooltip.children[1].children[0].layout.text == semantics.label, "tooltip lost full filename");
@@ -400,7 +411,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		return result;
 	}
 
-	function pointerActionsStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+	function pointerActionsStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		if (frames == 2) {
 			application.commands.add("test:pointer-first", function(_) pointerCommand = "first", null, "Pointer palette first");
 			application.commands.add("test:pointer-second", function(_) pointerCommand = "second", null, "Pointer palette second");
@@ -421,7 +432,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		return result;
 	}
 
-	function saveAsStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+	function saveAsStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		var destination = path + ".saved";
 		if (frames == 2) {
 			sys.io.File.saveContent(destination, "existing content");
@@ -463,7 +474,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		handler(function() exitCount++);
 	}
 
-	function exitConfirmationStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+	function exitConfirmationStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		if (frames == 2) {
 			closePrimary = host.activeView();
 			closePrimary.document.buffer.replaceAllText("saved on exit\n", closePrimary.selection);
@@ -502,7 +513,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		return super.submit(frame);
 	}
 
-	function caretFollowStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+	function caretFollowStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		var view = host.activeView();
 		if (view == null) throw "caret follow missing editor";
 		if (frames == 2) {
@@ -531,14 +542,14 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		return result;
 	}
 
-	function closeHeaderWidth(target:nativekit.ui.core.RenderNode):Float {
+	function closeHeaderWidth(target:haxeon.ui.core.RenderNode):Float {
 		var slot = target.parent;
 		if (slot == null) throw "close target missing slot";
 		var row = slot.parent;
 		if (row == null) throw "close target missing row";
 		return row.globalBounds().width;
 	}
-	function tabCloseStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+	function tabCloseStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		if (frames == 2) {
 			setApplicationZoom(125);
 			closePrimary = host.activeView();
@@ -592,7 +603,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		return super.submit(frame);
 	}
 
-	function selectionStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+	function selectionStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		frame.deltaSeconds = 0.05;
 		var view = host.activeView();
 		if (view == null) throw "Selection test missing editor";
@@ -626,7 +637,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		return result;
 	}
 
-	function wordDeleteStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+	function wordDeleteStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		var view = host.activeView();
 		if (view == null) throw "Word deletion test missing editor";
 		if (frames == 2) {
@@ -652,7 +663,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		return super.submit(frame);
 	}
 
-	function zoomStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+	function zoomStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		var modifier = Sys.systemName() == "Mac" ? UiModifier.Super : UiModifier.Control;
 		if (frames == 2) ui.key(UiEventKind.KeyDown, 61, modifier);
 		if (frames == 3) {
@@ -681,7 +692,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		return super.submit(frame);
 	}
 
-	function settingsStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+	function settingsStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		frame.setViewport(1100, 760);
 		var activeSettingsView = host.activeView();
 		if (activeSettingsView == null) throw "Settings test missing editor";
@@ -706,7 +717,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		}
 		if (frames == 7) {
 			var store = application.settings.store;
-			store.set("editor/fonts/font_size", nativekit.ui.properties.PropertyValue.Int(22));
+			store.set("editor/fonts/font_size", haxeon.ui.properties.PropertyValue.Int(22));
 			click("settings-close");
 			openTerminal();
 		}
@@ -731,7 +742,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 			var terminal = host.activePanelTerminal();
 			if (terminal == null) throw "Settings test missing terminal";
 			settingsTerminalColumns = terminal.panel.columns();
-			application.settings.store.set("terminal/fonts/font_size", nativekit.ui.properties.PropertyValue.Int(28));
+			application.settings.store.set("terminal/fonts/font_size", haxeon.ui.properties.PropertyValue.Int(28));
 		}
 		if (frames == 9) {
 			require(find(ui.root, "editor-minimap:" + activeSettingsView.document.id) != null, "reset did not restore minimap");
@@ -745,7 +756,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		return result;
 	}
 
-	function minimapStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+	function minimapStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		var view = host.activeView();
 		if (view == null) throw "minimap acceptance missing editor";
 		if (frames == 2) {
@@ -791,27 +802,27 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		return result;
 	}
 
-	static function findViewport(root:nativekit.ui.core.RenderNode, documentId:Int):Null<nativekit.ui.core.RenderNode> {
+	static function findViewport(root:haxeon.ui.core.RenderNode, documentId:Int):Null<haxeon.ui.core.RenderNode> {
 		if (root.styleType == "scroll-view" && root.styleKey == "editor-scroll:" + documentId) return root;
 		for (child in root.children) { var found = findViewport(child, documentId); if (found != null) return found; }
 		return null;
 	}
-	function editorViewport(documentId:Int):nativekit.ui.core.RenderNode {
+	function editorViewport(documentId:Int):haxeon.ui.core.RenderNode {
 		var viewport = findViewport(ui.root, documentId);
 		if (viewport == null) throw "editor viewport missing";
 		return viewport;
 	}
-	static function findScrollbar(root:nativekit.ui.core.RenderNode, documentId:Int):Null<nativekit.ui.core.RenderNode> {
+	static function findScrollbar(root:haxeon.ui.core.RenderNode, documentId:Int):Null<haxeon.ui.core.RenderNode> {
 		if (root.styleType == "scrollbar-track" && root.styleKey == "editor-scroll:" + documentId) return root;
 		for (child in root.children) { var found = findScrollbar(child, documentId); if (found != null) return found; }
 		return null;
 	}
-	function editorScrollbar(documentId:Int):nativekit.ui.core.RenderNode {
+	function editorScrollbar(documentId:Int):haxeon.ui.core.RenderNode {
 		var track = findScrollbar(ui.root, documentId);
 		if (track == null) throw "editor scrollbar missing";
 		return track;
 	}
-	function scrollbarStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+	function scrollbarStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		frame.deltaSeconds = frames == 5 ? 0.49 : frames == 6 ? 0.1 : frames == 7 ? 0.2 : 0;
 		var view = host.activeView();
 		if (view == null) throw "scrollbar acceptance missing editor";
@@ -851,20 +862,20 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		if (frames == 11) trace("PASS: real editor scrollbar idle, edge hover, delayed fade, wheel reveal and live visibility settings");
 		return result;
 	}
-	function node(key:String):nativekit.ui.core.RenderNode {
+	function node(key:String):haxeon.ui.core.RenderNode {
 		var root = ui.root;
 		if (root == null) throw "sidebar has no resolved UI";
 		var found = find(root, key);
 		if (found == null) throw "sidebar widget missing: " + key;
 		return found;
 	}
-	static function find(root:nativekit.ui.core.RenderNode, key:String):Null<nativekit.ui.core.RenderNode> {
+	static function find(root:haxeon.ui.core.RenderNode, key:String):Null<haxeon.ui.core.RenderNode> {
 		if (root.styleKey == key) return root;
 		for (child in root.children) { var found = find(child, key); if (found != null) return found; }
 		return null;
 	}
-	static function findTree(root:nativekit.ui.core.RenderNode):Null<nativekit.ui.core.RenderNode> {
-		if (root.semantics != null && root.semantics.role == nativekit.ui.semantics.AccessibilityRole.Tree) return root;
+	static function findTree(root:haxeon.ui.core.RenderNode):Null<haxeon.ui.core.RenderNode> {
+		if (root.semantics != null && root.semantics.role == haxeon.ui.semantics.AccessibilityRole.Tree) return root;
 		for (child in root.children) { var found = findTree(child); if (found != null) return found; }
 		return null;
 	}
@@ -873,8 +884,8 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		ui.pointerDown(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
 		ui.pointerUp(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
 	}
-	static function treeRow(root:nativekit.ui.core.RenderNode, path:String):Null<nativekit.ui.core.RenderNode> {
-		if (root.semantics != null && root.semantics.role == nativekit.ui.semantics.AccessibilityRole.TreeItem && root.semantics.label == path) return root;
+	static function treeRow(root:haxeon.ui.core.RenderNode, path:String):Null<haxeon.ui.core.RenderNode> {
+		if (root.semantics != null && root.semantics.role == haxeon.ui.semantics.AccessibilityRole.TreeItem && root.semantics.label == path) return root;
 		for (child in root.children) { var found = treeRow(child, path); if (found != null) return found; }
 		return null;
 	}
@@ -943,7 +954,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 			trace("PASS: explorer folder single click and double-click suppression, file preview replacement, keep by double click and edit, pane ownership and shared edits");
 		}
 	}
-	function editorFontStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+	function editorFontStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		var result = super.submit(frame);
 		if (frames == 3) {
 			var fonts = ui.buildContext.fonts;
@@ -968,7 +979,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		return result;
 	}
 
-	function problemsStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+	function problemsStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		frame.deltaSeconds = 1.0;
 		var file = new feedback.Problem("test", "file", path, 2, 1, 3, "File warning", 2, null, "Test");
 		var project = feedback.Problem.scoped("test", "project", feedback.ProblemScope.Project(haxe.io.Path.directory(path)), "Project issue", 1, "Test");
@@ -1013,13 +1024,13 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		return result;
 	}
 
-	function activityBarStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+	function activityBarStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		if (frames == 3) click("activity:files");
 		if (frames == 4) click("activity:search");
 		if (frames == 5) {
-			registerSidebarDestination("sessions", nativekit.ui.icons.IconName.Terminal,
-				function() return new nativekit.ui.widgets.text.Text("Session list"),
-				new nativekit.ui.widgets.sidebar.SidebarModeOptions("Sessions", 20));
+			registerSidebarDestination("sessions", haxeon.ui.icons.IconName.Terminal,
+				function() return new haxeon.ui.widgets.text.Text("Session list"),
+				new haxeon.ui.widgets.sidebar.SidebarModeOptions("Sessions", 20));
 			activateSidebarDestination("sessions");
 		}
 		if (frames == 6) click("activity:sessions");
@@ -1209,7 +1220,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		}
 	}
 
-	static function hasText(node:nativekit.ui.core.RenderNode, value:String):Bool {
+	static function hasText(node:haxeon.ui.core.RenderNode, value:String):Bool {
 		if (node.layout.text != null && node.layout.text.toLowerCase().indexOf(value.toLowerCase()) >= 0) return true;
 		for (child in node.children) if (hasText(child, value)) return true;
 		return false;

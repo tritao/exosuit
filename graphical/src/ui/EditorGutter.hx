@@ -1,24 +1,26 @@
 package ui;
 
-import Color;
-import FontCollection;
-import LayoutAxis;
-import LayoutStyle;
-import LayoutVisualKind;
-import LayoutMeasuredContent;
-import LayoutMeasureResult;
-import LayoutRenderableContent;
-import TextLayout;
-import TextStyle;
-import ParagraphStyle;
-import TextWrap;
-import nativekit.ui.core.BuildContext;
-import nativekit.ui.core.RenderNode;
-import nativekit.ui.core.View;
+import haxeon.ui.FontFamily;
+
+import haxeon.ui.Color;
+import haxeon.ui.FontCollection;
+import haxeon.ui.LayoutAxis;
+import haxeon.ui.LayoutStyle;
+import haxeon.ui.LayoutVisualKind;
+import haxeon.ui.LayoutMeasuredContent;
+import haxeon.ui.LayoutMeasureResult;
+import haxeon.ui.LayoutRenderableContent;
+import haxeon.ui.TextLayout;
+import haxeon.ui.TextStyle;
+import haxeon.ui.ParagraphStyle;
+import haxeon.ui.TextWrap;
+import haxeon.ui.core.BuildContext;
+import haxeon.ui.core.RenderNode;
+import haxeon.ui.core.View;
 import editor.TextBuffer;
-import nativekit.ui.widgets.text.TextEditorLayout;
-import ResolvedLayoutItem;
-import TextPosition;
+import haxeon.ui.widgets.text.TextEditorLayout;
+import haxeon.ui.ResolvedLayoutItem;
+import haxeon.ui.TextLayout.TextPosition;
 
 /** Retained visible line-number labels, sharing the editor scroll transform. */
 class EditorGutter implements View {

@@ -2,8 +2,8 @@ package ui;
 
 import nativekit.ffi.NativeKit;
 import nativekit.ffi.NativeKitTypes;
-import NativeKitEvents;
-import NativeKitEvents.NativeKitEventSubscription;
+import haxeon.platform.NativeKitEvents;
+import haxeon.platform.NativeKitEvents.NativeKitEventSubscription;
 
 /** Observes visited directories so stable explorers need no filesystem scans. */
 class ExplorerDirectoryWatch {

@@ -2,7 +2,7 @@ package app;
 
 import ui.TabHoverDelay;
 import ui.TabTooltip;
-import nativekit.ui.animation.AnimationScheduler;
+import haxeon.ui.animation.AnimationScheduler;
 import config.Settings;
 
 class TabTooltipTestMain {

@@ -21,7 +21,7 @@ verify_revision haxeon "$haxeon_root"
 verify_revision materia "$materia_root"
 verify_revision nativekit "$materia_root/nativekit"
 verify_revision hashlink "$haxeon_root/vendor/hashlink"
-for spec in "$haxeon_root:src stdlib native embed CMakeLists.txt scripts" "$materia_root:uikit editorkit" "$materia_root/nativekit:." "$haxeon_root/vendor/hashlink:."; do
+for spec in "$haxeon_root:src stdlib native embed packages CMakeLists.txt scripts" "$materia_root:editorkit" "$materia_root/nativekit:." "$haxeon_root/vendor/hashlink:."; do
 	directory=${spec%%:*}
 	read -r -a paths <<< "${spec#*:}"
 	if [[ -n $(git -C "$directory" status --porcelain -- "${paths[@]}") ]]; then
@@ -54,7 +54,7 @@ sed -n '31,42p' "$root_dir/native-packages/sqlite/vendor/sqlite3.c" > "$stage/li
 mkdir -p "$stage/licenses/seti"
 cp "$root_dir/graphical/assets/seti/LICENSE.txt" "$root_dir/graphical/assets/seti/ThirdPartyNotices.txt" "$root_dir/graphical/assets/seti/SOURCE.txt" "$stage/licenses/seti/"
 # Preserve native dependency notices with their original names and hierarchy.
-for toolkit in nativekit uikit exosuit/native-packages/terminal; do
+for toolkit in nativekit haxeon/packages/ui exosuit/native-packages/terminal; do
 	while IFS= read -r -d '' notice; do
 		relative=${notice#"$materia_root/"}
 		mkdir -p "$stage/licenses/$(dirname "$relative")"

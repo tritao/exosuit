@@ -1,6 +1,6 @@
 package app;
 
-import NativeKitRuntime;
+import haxeon.platform.NativeKitRuntime;
 import nativekit.ffi.NativeKit;
 import platform.Platform;
 import process.ProcessManager;

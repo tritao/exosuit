@@ -1,25 +1,25 @@
 package ui;
 
-import Color;
-import Insets;
-import LayoutAxis;
-import LayoutAlignmentY;
-import nativekit.ui.widgets.Icon;
-import nativekit.ui.icons.IconName;
-import nativekit.ui.core.UiEvent;
-import nativekit.ui.core.UiEventKind;
-import LayoutStyle;
-import TextWrap;
+import haxeon.ui.Color;
+import haxeon.ui.Insets;
+import haxeon.ui.LayoutAxis;
+import haxeon.ui.LayoutAlignmentY;
+import haxeon.ui.widgets.Icon;
+import haxeon.ui.icons.IconName;
+import haxeon.ui.core.UiEvent;
+import haxeon.ui.core.UiEventKind;
+import haxeon.ui.LayoutStyle;
+import haxeon.ui.TextWrap;
 import editor.Document;
-import nativekit.ui.core.BuildContext;
-import nativekit.ui.core.RenderNode;
-import nativekit.ui.core.RetainedView;
-import nativekit.ui.core.TextStyleOverride;
-import nativekit.ui.core.View;
-import nativekit.ui.widgets.layout.Row;
-import nativekit.ui.widgets.scroll.ScrollAxis;
-import nativekit.ui.widgets.scroll.ScrollView;
-import nativekit.ui.widgets.text.Text;
+import haxeon.ui.core.BuildContext;
+import haxeon.ui.core.RenderNode;
+import haxeon.ui.core.RetainedView;
+import haxeon.ui.core.TextStyleOverride;
+import haxeon.ui.core.View;
+import haxeon.ui.widgets.layout.Row;
+import haxeon.ui.widgets.scroll.ScrollAxis;
+import haxeon.ui.widgets.scroll.ScrollView;
+import haxeon.ui.widgets.text.Text;
 
 /** Project-relative file path, kept above the editor's scrolling content. */
 class EditorBreadcrumbs implements View {
@@ -88,7 +88,7 @@ class EditorBreadcrumbs implements View {
 		rowStyle.childGap = 5;
 		rowStyle.childAlignY = LayoutAlignmentY.Center;
 		return new Row("breadcrumb-path:" + document.id,
-			[for (index in 0...children.length) new nativekit.ui.widgets.KeyedView("crumb:" + index, children[index])], rowStyle);
+			[for (index in 0...children.length) new haxeon.ui.widgets.KeyedView("crumb:" + index, children[index])], rowStyle);
 	}
 }
 
@@ -104,10 +104,10 @@ private class BreadcrumbLabel implements View {
 		var activate = onClick;
 		if (activate != null) {
 			node.on(UiEventKind.Click, function(event) { if (event.button == 0) activate(event); });
-			node.semantics = new nativekit.ui.semantics.Semantics(nativekit.ui.semantics.AccessibilityRole.Button, label);
+			node.semantics = new haxeon.ui.semantics.Semantics(haxeon.ui.semantics.AccessibilityRole.Button, label);
 			node.focusable = true;
 			node.on(UiEventKind.KeyDown, function(event) {
-				if (event.key == nativekit.ui.core.UiKey.Enter || event.key == nativekit.ui.core.UiKey.Space) { activate(event); event.preventDefault(); }
+				if (event.key == haxeon.ui.core.UiKey.Enter || event.key == haxeon.ui.core.UiKey.Space) { activate(event); event.preventDefault(); }
 			});
 		}
 		return node;

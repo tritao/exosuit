@@ -1,6 +1,6 @@
 package ui;
 
-import nativekit.ui.core.View;
+import haxeon.ui.core.View;
 
 /** Host-supplied terminal view and its owned session lifecycle. */
 interface TerminalPanel extends View {

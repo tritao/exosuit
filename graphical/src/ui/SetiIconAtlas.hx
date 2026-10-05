@@ -1,10 +1,10 @@
 package ui;
 
-import FontCollection;
-import TextLayout;
-import TextStyle;
-import ParagraphStyle;
-import TextWrap;
+import haxeon.ui.FontCollection;
+import haxeon.ui.TextLayout;
+import haxeon.ui.TextStyle;
+import haxeon.ui.ParagraphStyle;
+import haxeon.ui.TextWrap;
 
 /** One isolated font collection per mounted icon group, with shared retained glyph layouts. */
 class SetiIconAtlas {

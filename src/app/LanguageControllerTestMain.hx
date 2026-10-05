@@ -46,7 +46,7 @@ class LanguageControllerTestMain {
 		pump(controller, () -> { var service = controller.sessionFor(nested); return service != null && service.ready; }, 5);
 		var settingsPath = nested + "/server-settings.json";
 		var layer = new config.Preferences(null, settingsPath); project.setSettings(layer);
-		layer.store.set("languages/haxeon/command", nativekit.ui.properties.PropertyValue.Text(haxe.Json.stringify(["python3", fake, "--events", log, "--profile", "nested"])));
+		layer.store.set("languages/haxeon/command", haxeon.ui.properties.PropertyValue.Text(haxe.Json.stringify(["python3", fake, "--events", log, "--profile", "nested"])));
 		var originalChild = controller.sessionFor(nested);
 		pump(controller, () -> { var service = controller.sessionFor(nested); return service != null && service != originalChild && service.ready; }, 5);
 		require(controller.sessionFor(directory) == parent && processes.activeCount() == 2, "folder settings restarted unrelated root");
@@ -59,7 +59,7 @@ class LanguageControllerTestMain {
 		for (document in workspace.documents.documents.copy()) workspace.documents.close(document, true);
 		controller.update(Sys.time());
 		require(controller.sessionFor(directory) == parent && controller.sessionFor(nested) == childService, "last-document closure tore down session");
-		layer.store.set("languages/haxeon/command", nativekit.ui.properties.PropertyValue.Text(haxe.Json.stringify(["python3", fake, "--events", log, "--profile", "warm"])));
+		layer.store.set("languages/haxeon/command", haxeon.ui.properties.PropertyValue.Text(haxe.Json.stringify(["python3", fake, "--events", log, "--profile", "warm"])));
 		pump(controller, () -> { var service = controller.sessionFor(nested); return service != null && service != childService && service.ready; }, 5);
 		require(controller.sessionFor(directory) == parent && processes.activeCount() == 2, "warm-session configuration change affected unrelated root");
 		workspace.removeProject(project);

@@ -1,16 +1,16 @@
 package ui;
 
-import LayoutAxis;
-import LayoutStyle;
-import nativekit.ui.core.BuildContext;
-import nativekit.ui.core.RenderNode;
-import nativekit.ui.core.View;
-import nativekit.ui.widgets.KeyedView;
-import nativekit.ui.widgets.collections.TreeView;
-import nativekit.ui.widgets.controls.Button;
-import nativekit.ui.widgets.layout.Column;
-import nativekit.ui.widgets.layout.Row;
-import nativekit.ui.widgets.text.Text;
+import haxeon.ui.LayoutAxis;
+import haxeon.ui.LayoutStyle;
+import haxeon.ui.core.BuildContext;
+import haxeon.ui.core.RenderNode;
+import haxeon.ui.core.View;
+import haxeon.ui.widgets.KeyedView;
+import haxeon.ui.widgets.collections.TreeView;
+import haxeon.ui.widgets.controls.Button;
+import haxeon.ui.widgets.layout.Column;
+import haxeon.ui.widgets.layout.Row;
+import haxeon.ui.widgets.text.Text;
 import workspace.client.WorkspaceTerminalCatalogClient;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceTerminalProtocol;

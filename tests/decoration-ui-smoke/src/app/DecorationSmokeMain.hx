@@ -1,11 +1,13 @@
 package app;
 
+import haxeon.ui.TextLayout.TextPosition;
+
 import ui.ExosuitApp;
 import ui.UiEditorTabs;
-import LayoutFrame;
-import Color;
-import nativekit.ui.host.DesktopUiHost;
-import nativekit.ui.host.DesktopUiHostOptions;
+import haxeon.ui.LayoutFrame;
+import haxeon.ui.Color;
+import haxeon.ui.host.DesktopUiHost;
+import haxeon.ui.host.DesktopUiHostOptions;
 import plugin.PluginDecorationKind;
 import search.DocumentSearch;
 import search.SearchOptions;
@@ -13,14 +15,14 @@ import editor.BufferSelection;
 import editor.BufferPosition;
 import editor.EditorCoordinates;
 import platform.Native;
-import nativekit.ui.core.RenderNode;
-import nativekit.ui.core.State;
-import nativekit.ui.core.UiEventKind;
-import nativekit.ui.core.UiKey;
-import nativekit.ui.core.UiModifier;
-import nativekit.ui.widgets.text.TextEditorState;
+import haxeon.ui.core.RenderNode;
+import haxeon.ui.core.State;
+import haxeon.ui.core.UiEventKind;
+import haxeon.ui.core.UiKey;
+import haxeon.ui.core.UiModifier;
+import haxeon.ui.widgets.text.TextEditorState;
 import nativekit.ffi.NativeKitTypes.TextEditAction;
-import NativeKitEventValue.NativeKitTextEdit;
+import haxeon.platform.NativeKitEventValue.NativeKitTextEdit;
 
 /** Warms the editor's retained layout before editing or clearing its decorations. */
 class DecorationSmokeApp extends ExosuitApp {
@@ -32,9 +34,9 @@ class DecorationSmokeApp extends ExosuitApp {
 	var menuDocument:Null<editor.Document> = null;
 	var firstPopupY:Float = -1.0;
 	var savedPaneLines:Array<String> = [];
-	var popupScrollController:Null<nativekit.ui.widgets.scroll.ScrollController> = null;
+	var popupScrollController:Null<haxeon.ui.widgets.scroll.ScrollController> = null;
 
-	public function new(context:nativekit.ui.host.DesktopUiHostContext, path:String, phase:String) {
+	public function new(context:haxeon.ui.host.DesktopUiHostContext, path:String, phase:String) {
 		super(context.fonts, null, context, path, null, null, null, DecorationSmokeMain.createTerminal);
 		this.phase = phase;
 		installMarks(0);
@@ -181,7 +183,7 @@ class DecorationSmokeApp extends ExosuitApp {
 		host.setDocumentSearchMatches(DocumentSearch.find(document, "return", new SearchOptions()));
 	}
 
-	override public function submit(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+	override public function submit(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		frames++;
 		if (phase == "ime-selection-affinity" && frames == 4) {
 			var view = host.activeView(), previous = ui.root;
@@ -239,18 +241,18 @@ class DecorationSmokeApp extends ExosuitApp {
 		}
 		if (StringTools.startsWith(phase, "terminal-group-") && frames == 4) {
 			var saved = session.WorkspaceSession.capture(application);
-			var editor = nativekit.ui.docking.DockNode.Panel("editor");
+			var editor = haxeon.ui.docking.DockNode.Panel("editor");
 			var layout = phase == "terminal-group-no-tools" ? editor :
-				nativekit.ui.docking.DockNode.Split(nativekit.ui.docking.DockSplitAxis.Vertical, 0.72,
-					editor, nativekit.ui.docking.DockNode.Panel("problems"));
+				haxeon.ui.docking.DockNode.Split(haxeon.ui.docking.DockSplitAxis.Vertical, 0.72,
+					editor, haxeon.ui.docking.DockNode.Panel("problems"));
 			if (phase == "terminal-group-migrate") {
 				openTerminal();
 				saved = session.WorkspaceSession.capture(application);
-				layout = nativekit.ui.docking.DockNode.Tabs(["editor", "terminal"], "terminal");
+				layout = haxeon.ui.docking.DockNode.Tabs(["editor", "terminal"], "terminal");
 			}
-			var snapshot = new nativekit.ui.docking.DockWorkspaceSnapshot(layout, "editor");
+			var snapshot = new haxeon.ui.docking.DockWorkspaceSnapshot(layout, "editor");
 			for (index in 0...saved.layout.length) if (StringTools.startsWith(saved.layout[index], "D\t"))
-				saved.layout[index] = "D\tdock\t1\t" + nativekit.ui.docking.DockWorkspaceSnapshotCodec.encode(snapshot);
+				saved.layout[index] = "D\tdock\t1\t" + haxeon.ui.docking.DockWorkspaceSnapshotCodec.encode(snapshot);
 			saved.restore(application);
 			openTerminal();
 		}
@@ -501,7 +503,7 @@ class DecorationSmokeApp extends ExosuitApp {
 		if (phase == "terminal-group-migrate" && frames == 6) {
 			var terminalTab:Null<RenderNode> = null;
 			root.walk(function(node) {
-				if (node.semantics != null && node.semantics.role == nativekit.ui.semantics.AccessibilityRole.Tab &&
+				if (node.semantics != null && node.semantics.role == haxeon.ui.semantics.AccessibilityRole.Tab &&
 					node.semantics.label == "Terminal") terminalTab = node;
 			});
 			var bounds = host.activePane.bounds;
@@ -517,7 +519,7 @@ class DecorationSmokeApp extends ExosuitApp {
 		if ((phase == "editor-header" || StringTools.startsWith(phase, "terminal-group-") || StringTools.startsWith(phase, "pane-split-")) && frames == 7) {
 			var dockEditorTabs = 0, documentTabs = 0;
 			root.walk(function(node) {
-				if (node.semantics != null && node.semantics.role == nativekit.ui.semantics.AccessibilityRole.Tab &&
+				if (node.semantics != null && node.semantics.role == haxeon.ui.semantics.AccessibilityRole.Tab &&
 					node.semantics.label == "Editor") dockEditorTabs++;
 				if (node.styleKey != null && StringTools.startsWith(node.styleKey, "doc:")) documentTabs++;
 			});
@@ -527,7 +529,7 @@ class DecorationSmokeApp extends ExosuitApp {
 			if (StringTools.startsWith(phase, "terminal-group-")) {
 				var terminalTabs = 0;
 				root.walk(function(node) {
-					if (node.semantics != null && node.semantics.role == nativekit.ui.semantics.AccessibilityRole.Tab &&
+					if (node.semantics != null && node.semantics.role == haxeon.ui.semantics.AccessibilityRole.Tab &&
 						node.semantics.label == "Terminal") terminalTabs++;
 				});
 				if (terminalTabs != 1) throw "terminal did not reopen in its tool group";
@@ -805,7 +807,7 @@ class DecorationSmokeApp extends ExosuitApp {
 	}
 
 	static function findTreeFile(node:RenderNode):Null<RenderNode> {
-		if (node.semantics != null && node.semantics.role == nativekit.ui.semantics.AccessibilityRole.TreeItem && hasFileLabel(node)) return node;
+		if (node.semantics != null && node.semantics.role == haxeon.ui.semantics.AccessibilityRole.TreeItem && hasFileLabel(node)) return node;
 		for (child in node.children) {
 			var found = findTreeFile(child);
 			if (found != null) return found;

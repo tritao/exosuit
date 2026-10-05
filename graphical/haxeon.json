@@ -6,7 +6,7 @@
 	"scopeSourceRoots": false,
 	"dependencies": {
 		"pragtical_hx": { "path": ".." },
-		"uikit": { "path": "../../uikit" },
+		"haxeon-ui": { "path": "../../haxeon/packages/ui" },
 		"editorkit": { "path": "../../editorkit" },
 		"exosuit-ui-native": { "path": "../uikit-native" },
 		"terminalsession": { "path": "../native-packages/terminal/session" }

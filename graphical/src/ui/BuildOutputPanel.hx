@@ -1,20 +1,20 @@
 package ui;
 
-import Color;
-import Insets;
-import LayoutAxis;
-import LayoutStyle;
+import haxeon.ui.Color;
+import haxeon.ui.Insets;
+import haxeon.ui.LayoutAxis;
+import haxeon.ui.LayoutStyle;
 import build.BuildOutputLine;
-import nativekit.ui.core.BuildContext;
-import nativekit.ui.core.RenderNode;
-import nativekit.ui.core.TextStyleOverride;
-import nativekit.ui.core.View;
-import nativekit.ui.widgets.KeyedView;
-import nativekit.ui.widgets.controls.Button;
-import nativekit.ui.widgets.controls.ButtonVariant;
-import nativekit.ui.widgets.layout.Column;
-import nativekit.ui.widgets.scroll.ScrollView;
-import nativekit.ui.widgets.text.Text;
+import haxeon.ui.core.BuildContext;
+import haxeon.ui.core.RenderNode;
+import haxeon.ui.core.TextStyleOverride;
+import haxeon.ui.core.View;
+import haxeon.ui.widgets.KeyedView;
+import haxeon.ui.widgets.controls.Button;
+import haxeon.ui.widgets.controls.ButtonVariant;
+import haxeon.ui.widgets.layout.Column;
+import haxeon.ui.widgets.scroll.ScrollView;
+import haxeon.ui.widgets.text.Text;
 
 /**
  * The dock's "Build Output" panel, rebuilt fresh from

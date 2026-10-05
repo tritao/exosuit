@@ -1,7 +1,7 @@
 package app;
 
 import haxe.io.Bytes;
-import NativeKitRuntime;
+import haxeon.platform.NativeKitRuntime;
 import haxeon.rpc.*;
 import haxeon.wire.MessagePack;
 import workspace.service.*;

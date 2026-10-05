@@ -19,7 +19,7 @@ import terminalsession.TerminalProfileRegistry;
 import terminalsession.TerminalSession;
 import terminalsession.LocalPtyBackend;
 import terminalkit.Emulator;
-import NativeKitRuntime;
+import haxeon.platform.NativeKitRuntime;
 
 class SampleCompletionProvider implements CompletionProvider {
 	public function new() {}

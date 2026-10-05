@@ -1,15 +1,15 @@
 package ui;
 
-import nativekit.ui.core.BuildContext;
-import nativekit.ui.core.RenderNode;
-import nativekit.ui.core.View;
-import nativekit.ui.widgets.KeyedView;
-import nativekit.ui.widgets.controls.Button;
-import nativekit.ui.widgets.controls.ComboBox;
-import nativekit.ui.widgets.controls.SelectOption;
-import nativekit.ui.widgets.layout.Column;
-import nativekit.ui.widgets.text.Text;
-import nativekit.ui.widgets.text.TextField;
+import haxeon.ui.core.BuildContext;
+import haxeon.ui.core.RenderNode;
+import haxeon.ui.core.View;
+import haxeon.ui.widgets.KeyedView;
+import haxeon.ui.widgets.controls.Button;
+import haxeon.ui.widgets.controls.ComboBox;
+import haxeon.ui.widgets.controls.SelectOption;
+import haxeon.ui.widgets.layout.Column;
+import haxeon.ui.widgets.text.Text;
+import haxeon.ui.widgets.text.TextField;
 import workspace.client.WorkspaceTerminalCatalogClient;
 import workspace.service.WorkspaceProtocol;
 

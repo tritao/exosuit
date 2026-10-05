@@ -1,13 +1,13 @@
 package config;
 
-import nativekit.ui.settings.SettingsRegistry;
-import nativekit.ui.settings.SettingOptions;
-import nativekit.ui.settings.SettingsStore;
-import nativekit.ui.settings.SettingDefinition;
+import haxeon.ui.settings.SettingsRegistry;
+import haxeon.ui.settings.SettingOptions;
+import haxeon.ui.settings.SettingsStore;
+import haxeon.ui.settings.SettingDefinition;
 import platform.Platform;
-import nativekit.ui.properties.PropertyType;
-import nativekit.ui.properties.PropertyValue;
-import nativekit.ui.properties.PropertyOption;
+import haxeon.ui.properties.PropertyType;
+import haxeon.ui.properties.PropertyValue;
+import haxeon.ui.properties.PropertyOption;
 
 /** Exosuit definitions and typed snapshots over UIKit settings. */
 class PreferencesRegistry {

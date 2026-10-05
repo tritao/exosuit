@@ -4,10 +4,10 @@ import haxeon.rpc.RpcConnectAttempt;
 import haxeon.rpc.RpcConnectResult;
 import nativekit.ffi.NativeKit;
 import nativekit.ffi.NativeKitTypes;
-import NativeKitEvents;
-import NativeKitEvents.NativeKitEventSubscription;
-import NativeKitEventValue;
-import NativeKitEventBytes;
+import haxeon.platform.NativeKitEvents;
+import haxeon.platform.NativeKitEvents.NativeKitEventSubscription;
+import haxeon.platform.NativeKitEventValue;
+import haxeon.platform.NativeKitEventBytes;
 
 private class CompletedAttempt implements RpcConnectAttempt {
 	public function new() {}

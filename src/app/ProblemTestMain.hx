@@ -31,8 +31,8 @@ class ProblemTestMain {
 		registry.replaceOwner("language", []); require(registry.values().length == 2, "producer clear removed another producer");
 		require(project.forAction(project.actions[0]).location == null && project.forAction(project.actions[0]).actions[0].command == "build:show-output", "action request lost command");
 		require(file.key() != new Problem("other", "one", "/project/Main.hx", 0, 0, 0, "Other", 1).key(), "producer identities collided");
-		var dock = new nativekit.ui.docking.DockWorkspaceModel();
-		dock.register(new nativekit.ui.docking.DockPanelDescriptor("problems", "Problems"));
+		var dock = new haxeon.ui.docking.DockWorkspaceModel();
+		dock.register(new haxeon.ui.docking.DockPanelDescriptor("problems", "Problems"));
 		require(dock.setPanelBadge("problems", 3), "badge update rejected");
 		var badgeRevision = dock.revision;
 		require(!dock.setPanelBadge("problems", 3) && dock.revision == badgeRevision, "identical badge invalidated layout");

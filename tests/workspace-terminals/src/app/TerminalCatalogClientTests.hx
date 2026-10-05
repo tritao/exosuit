@@ -1,7 +1,7 @@
 package app;
 import workspace.client.LocalWorkspaceClient;
 import workspace.service.WorkspaceTerminalProtocol;
-import NativeKitRuntime;
+import haxeon.platform.NativeKitRuntime;
 import nativekit.ffi.NativeKit;
 
 /** Real native client aggregation and metadata actions across multiple RPC pages. */

@@ -25,7 +25,7 @@ Build and run from the Exosuit root:
 
 # Or build the probe directly:
 cmake -S experiments/skribidi_edit_window -B /tmp/exosuit-edit-window-build \
-  -DSKRIBIDI_SOURCE="$(realpath ../uikit/vendor/skribidi)" \
+  -DSKRIBIDI_SOURCE="$(realpath ../haxeon/packages/ui/vendor/skribidi)" \
   -DCMAKE_BUILD_TYPE=Release
 cmake --build /tmp/exosuit-edit-window-build --target edit_window_probe -j 8
 /tmp/exosuit-edit-window-build/edit_window_probe

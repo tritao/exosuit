@@ -1,40 +1,45 @@
 package ui;
 
-import TextStyle;
+import haxeon.ui.TextLayout.TextPosition;
 
-import Rect;
-import nativekit.ui.widgets.scroll.ScrollController;
-import nativekit.ui.widgets.scroll.ScrollAxis;
+import haxeon.ui.FontFamily;
+import haxeon.ui.LayoutVisualKind;
 
-import Color;
-import Point;
-import Insets;
-import TextColorRange;
+import haxeon.ui.TextStyle;
+
+import haxeon.ui.Rect;
+import haxeon.ui.widgets.scroll.ScrollController;
+import haxeon.ui.widgets.scroll.ScrollAxis;
+
+import haxeon.ui.Color;
+import haxeon.ui.Point;
+import haxeon.ui.Insets;
+import haxeon.ui.TextColorRange;
 import editor.SyntaxPresentation;
 import editor.DecorationPresentation;
 import editor.EditorCoordinates;
 import editor.CaretPresentation;
-import nativekit.ui.widgets.text.TextSelection;
-import nativekit.ui.widgets.text.TextEditIntent;
+import haxeon.ui.widgets.text.TextSelection;
+import haxeon.ui.widgets.text.TextEditIntent;
 import plugin.PluginDecorationRegistry;
 import search.SearchMatch;
-import nativekit.ui.widgets.text.TextDecoration;
-import nativekit.ui.widgets.text.TextDecorationKind;
-import LayoutAxis;
-import LayoutDirection;
-import LayoutStyle;
-import nativekit.ui.core.View;
-import nativekit.ui.theme.Theme;
-import nativekit.ui.widgets.KeyedView;
-import nativekit.ui.widgets.layout.Row;
-import nativekit.ui.widgets.scroll.ScrollView;
-import nativekit.ui.widgets.text.TextArea;
-import nativekit.ui.widgets.text.EditTransaction;
+import haxeon.ui.widgets.text.TextDecoration;
+import haxeon.ui.widgets.text.TextDecorationKind;
+import haxeon.ui.LayoutAxis;
+import haxeon.ui.LayoutDirection;
+import haxeon.ui.LayoutStyle;
+import haxeon.ui.core.View;
+import haxeon.ui.theme.Theme;
+import haxeon.ui.widgets.KeyedView;
+import haxeon.ui.widgets.layout.Row;
+import haxeon.ui.widgets.scroll.ScrollView;
+import haxeon.ui.widgets.text.TextArea;
+import haxeon.ui.widgets.text.EditTransaction;
 import editor.Document;
 import editor.BufferSelection;
 import editor.BufferRange;
-import nativekit.ui.widgets.text.TextEditorLayout;
-import nativekit.ui.widgets.text.TextNavigationIntent;
+import haxeon.ui.widgets.text.TextEditorLayout;
+import haxeon.ui.widgets.text.TextNavigationIntent;
 
 /**
  * One editor tab: a line-number gutter next to a `TextArea` sharing the
@@ -63,9 +68,9 @@ class EditorPane implements View {
 	public var fontSize:Float = 15.0;
 	final onEdited:Void->Void;
 	public var caretRect(default, null):Null<Rect> = null;
-	public var onResolvedEditor:Null<Rect->nativekit.ui.core.WidgetId->Void> = null;
+	public var onResolvedEditor:Null<Rect->haxeon.ui.core.WidgetId->Void> = null;
 	public var onActivated:Null<Void->Void> = null;
-	public var onContextMenu:Null<nativekit.ui.core.UiEvent->Void> = null;
+	public var onContextMenu:Null<haxeon.ui.core.UiEvent->Void> = null;
 	public var onCaretRectChanged:Null<Void->Void> = null;
 	public var consumeCursorReveal:Void->Bool = function() return false;
 	final editorTheme:style.Theme;
@@ -262,9 +267,9 @@ class EditorPane implements View {
 		onEdited();
 	}
 
-	public function build(context:nativekit.ui.core.BuildContext):nativekit.ui.core.RenderNode {
-		var viewportNode:Null<nativekit.ui.core.RenderNode> = null;
-		var contentNode:Null<nativekit.ui.core.RenderNode> = null;
+	public function build(context:haxeon.ui.core.BuildContext):haxeon.ui.core.RenderNode {
+		var viewportNode:Null<haxeon.ui.core.RenderNode> = null;
+		var contentNode:Null<haxeon.ui.core.RenderNode> = null;
 		var gutter = new EditorGutter("gutter:" + document.id, document.buffer,
 			color(editorTheme.foregroundMuted), color(editorTheme.surface), fontSize);
 		var editorStyle = new LayoutStyle();
@@ -344,7 +349,7 @@ class EditorPane implements View {
 		containerStyle.width = LayoutAxis.grow();
 		containerStyle.height = LayoutAxis.grow();
 		containerStyle.direction = LayoutDirection.LeftToRight;
-		var container = new nativekit.ui.core.RenderNode(context.id("editor-container:" + document.id), LayoutVisualKind.Box, containerStyle);
+		var container = new haxeon.ui.core.RenderNode(context.id("editor-container:" + document.id), LayoutVisualKind.Box, containerStyle);
 		container.setStyleIdentity("editor-container", "editor-container:" + document.id);
 		var viewport = new ScrollView("editor-scroll:" + document.id, row, scrollStyle, ScrollAxis.Vertical, scrollController);
 		viewport.scrollbarOverlayHost = container;
@@ -360,21 +365,21 @@ class EditorPane implements View {
 					handler(node.globalBounds(), child.id);
 			});
 		});
-		var activate = function(event:nativekit.ui.core.UiEvent) { if (onActivated != null) onActivated(); };
-		container.on(nativekit.ui.core.UiEventKind.Focus, activate, "capture");
-		container.on(nativekit.ui.core.UiEventKind.PointerDown, activate, "capture");
-		var requestMenu = function(event:nativekit.ui.core.UiEvent) {
+		var activate = function(event:haxeon.ui.core.UiEvent) { if (onActivated != null) onActivated(); };
+		container.on(haxeon.ui.core.UiEventKind.Focus, activate, "capture");
+		container.on(haxeon.ui.core.UiEventKind.PointerDown, activate, "capture");
+		var requestMenu = function(event:haxeon.ui.core.UiEvent) {
 			var handler = onContextMenu;
 			if (handler == null) return;
 			handler(event);
 			event.preventDefault();
 			event.stopPropagation();
 		};
-		node.on(nativekit.ui.core.UiEventKind.PointerDown, function(event) {
+		node.on(haxeon.ui.core.UiEventKind.PointerDown, function(event) {
 			if (event.button == 1) requestMenu(event);
 		});
-		node.on(nativekit.ui.core.UiEventKind.KeyDown, function(event) {
-			if (nativekit.ui.core.UiKey.isContextMenuRequest(event.key, event.modifiers)) requestMenu(event);
+		node.on(haxeon.ui.core.UiEventKind.KeyDown, function(event) {
+			if (haxeon.ui.core.UiKey.isContextMenuRequest(event.key, event.modifiers)) requestMenu(event);
 		});
 		container.add(node);
 		if (!minimapEnabled) return container;

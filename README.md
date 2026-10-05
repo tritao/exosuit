@@ -13,8 +13,9 @@ clipboard, file dialogs, and native services.
 ## Build and test
 
 Install Haxeon and place this repository alongside checkouts of `nativekit`,
-`uikit`, `editorkit` and `haxeon` (the materia workspace layout), or set their
-paths in graphical/haxeon.json:
+`editorkit` and `haxeon` (the materia workspace layout), or set their
+paths in graphical/haxeon.json. UI, platform, and GPU libraries live under
+Haxeon’s `packages/` directory:
 
 ```sh
 cd exosuit

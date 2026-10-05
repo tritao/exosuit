@@ -1,6 +1,6 @@
 package ui;
 
-import Color;
+import haxeon.ui.Color;
 
 /** Decodes the compact colors emitted by terminalkit/libtsm. */
 class TerminalColors {

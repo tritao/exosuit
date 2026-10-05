@@ -1,7 +1,7 @@
 package ui;
 
-import nativekit.ui.animation.Animation;
-import nativekit.ui.animation.AnimationScheduler;
+import haxeon.ui.animation.Animation;
+import haxeon.ui.animation.AnimationScheduler;
 
 class TabHoverDelay implements Animation {
 	final scheduler:AnimationScheduler;

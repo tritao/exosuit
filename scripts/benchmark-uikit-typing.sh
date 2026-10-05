@@ -73,7 +73,7 @@ def revision(directory):
 def artifact(path):
     path = path.resolve()
     return {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
-vendor = source.parent / "uikit/vendor/skribidi"
+vendor = source.parent / "haxeon/packages/ui/vendor/skribidi"
 inputs = {"repositories": {"exosuit": revision(source), "materia": revision(source.parent), "skribidi": revision(vendor)},
           "binaries": {"bytecode": artifact(source / "graphical/build/host/main.hl"),
                        "uikit": artifact(source / "graphical/build/host/native/exosuit-ui-native/libnativekit_ui.so")},

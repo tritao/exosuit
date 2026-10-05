@@ -1,6 +1,6 @@
 package ui;
 
-import Color;
+import haxeon.ui.Color;
 
 class SetiIconDefinition {
 	public final glyph:String;

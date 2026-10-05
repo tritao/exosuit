@@ -3,18 +3,18 @@ package ui;
 import command.CommandContext;
 import command.CommandRegistry;
 import command.Keymap;
-import nativekit.ui.core.Command;
-import nativekit.ui.core.CommandRegistry as UiCommandRegistry;
-import nativekit.ui.core.Shortcut;
-import nativekit.ui.core.UiKey;
-import nativekit.ui.core.UiModifier;
+import haxeon.ui.core.Command;
+import haxeon.ui.core.CommandRegistry as UiCommandRegistry;
+import haxeon.ui.core.Shortcut;
+import haxeon.ui.core.UiKey;
+import haxeon.ui.core.UiModifier;
 import platform.Platform;
 
 /**
  * Registers every `command.CommandRegistry` command (the exosuit domain
  * commands `controller.*`/`command.EditorCommands` install: `doc:*`,
  * `file:*`, `workbench:*`, `build:*`, `language:*`, ...) onto `ui.commands`
- * (the `nativekit.ui.core.CommandRegistry` `ExosuitApp`'s `CommandPalette`
+ * (the `haxeon.ui.core.CommandRegistry` `ExosuitApp`'s `CommandPalette`
  * already reads), so that palette lists them alongside `ExosuitApp`'s own
  * `file.*`/`view.toggle-palette` entries. Each bridged command's enabled
  * state and action re-check the exosuit registry live (through `context`)
@@ -43,7 +43,7 @@ class CommandBridge {
 		}
 	}
 
-	/** `nativekit.ui.core.CommandRegistry` ids are namespaced separately from `ExosuitApp`'s own dotted ids; the colon survives untouched since nothing else uses it. */
+	/** `haxeon.ui.core.CommandRegistry` ids are namespaced separately from `ExosuitApp`'s own dotted ids; the colon survives untouched since nothing else uses it. */
 	static function bridgedId(name:String):String
 		return "exosuit." + name;
 

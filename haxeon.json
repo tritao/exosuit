@@ -11,8 +11,8 @@
 	"dependencies": {
 		"haxeon-platform": { "path": "../haxeon/packages/platform" },
 		"haxeon-gpu": { "path": "../haxeon/packages/gpu" },
-		"uikit": {
-			"path": "../uikit"
+		"haxeon-ui": {
+			"path": "../haxeon/packages/ui"
 		},
 		"editorkit": {
 			"path": "../editorkit"

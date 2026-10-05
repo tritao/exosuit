@@ -12,7 +12,7 @@ import syntax.SyntaxRegistry;
 import search.DocumentSearch;
 import search.SearchOptions;
 import editor.ExternalState;
-import nativekit.ui.widgets.text.EditTransaction;
+import haxeon.ui.widgets.text.EditTransaction;
 import sys.io.File;
 import haxe.io.Bytes;
 import sys.FileSystem;

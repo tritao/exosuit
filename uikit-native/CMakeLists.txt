@@ -22,7 +22,8 @@ set(NKUI_ENABLE_SECTION_GC ON CACHE BOOL "Keep UIKit section garbage collection 
 
 get_filename_component(EXOSUIT_MATERIA_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
 add_subdirectory("${EXOSUIT_MATERIA_ROOT}/nativekit" nativekit)
-add_subdirectory("${EXOSUIT_MATERIA_ROOT}/uikit" uikit)
+set(NKUI_NATIVEKIT_DIR "${EXOSUIT_MATERIA_ROOT}/nativekit" CACHE PATH "NativeKit source for the UI package" FORCE)
+add_subdirectory("${EXOSUIT_MATERIA_ROOT}/haxeon/packages/ui" uikit)
 
 set(EXOSUIT_UI_RUNTIME_TARGETS nativekit nativekit_gpu nativekit_ui)
 foreach(target_name IN LISTS EXOSUIT_UI_RUNTIME_TARGETS)

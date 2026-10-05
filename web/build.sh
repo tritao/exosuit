@@ -46,9 +46,9 @@ mkdir -p "$build_dir" "$site_dir/assets"
 
 echo "== wasm32 FFI interfaces"
 "$materia_dir/tools/web/generate-wasm-hxi.sh" "$build_dir/hxi" \
- "nativekit/tools/audit-haxeon-abi.sh:nativekit.hxi:--output=" \
- "nativekit/modules/gpu/tools/check-hxi.sh:nativekit-gpu.hxi" \
- "uikit/tools/check-hxi.sh:nativekit-ui.hxi" \
+ "haxeon/packages/platform/tools/audit-haxeon-abi.sh:nativekit.hxi:--output=" \
+ "haxeon/packages/gpu/tools/check-hxi.sh:nativekit-gpu.hxi" \
+ "haxeon/packages/ui/tools/check-hxi.sh:nativekit-ui.hxi" \
  "scenekit/scene/tools/check-hxi.sh:nativekit-scene.hxi" \
  "scenekit/scene_render/tools/check-hxi.sh:nativekit-scene-render.hxi"
 "$haxeon_dir/scripts/haxeon-ffi-audit" \
@@ -113,7 +113,7 @@ node "$materia_dir/tools/web/check-imports.js" "$guest" "$build_dir/host/exosuit
 echo "== Site"
 cp "$build_dir/host/exosuit_web.js" "$build_dir/host/exosuit_web.wasm" "$guest" "$site_dir/"
 cp "$app_dir/web/index.html" "$app_dir/web/exosuit.js" "$haxeon_dir/stdlib/haxeon/wasm/haxeon-host.js" "$site_dir/"
-fonts="$materia_dir/uikit/vendor/skribidi/example/data"
+fonts="$materia_dir/haxeon/packages/ui/vendor/skribidi/example/data"
 cp "$fonts/IBMPlexSans-Regular.ttf" "$fonts/IBMPlexMono-Regular.ttf" "$fonts/NotoEmoji-Regular.ttf" "$site_dir/assets/"
 mkdir -p "$site_dir/licenses/seti"
 cp "$app_dir/graphical/assets/seti/LICENSE.txt" "$app_dir/graphical/assets/seti/ThirdPartyNotices.txt" "$app_dir/graphical/assets/seti/SOURCE.txt" "$site_dir/licenses/seti/"

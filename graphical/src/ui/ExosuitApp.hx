@@ -1,55 +1,58 @@
 package ui;
 
-import Color;
+import haxeon.ui.FontFamily;
+import haxeon.ui.Path;
 
-import Insets;
-import LayoutAxis;
-import LayoutDirection;
-import LayoutAlignmentY;
-import LayoutFrame;
-import LayoutStyle;
-import FontCollection;
+import haxeon.ui.Color;
+
+import haxeon.ui.Insets;
+import haxeon.ui.LayoutAxis;
+import haxeon.ui.LayoutDirection;
+import haxeon.ui.LayoutAlignmentY;
+import haxeon.ui.LayoutFrame;
+import haxeon.ui.LayoutStyle;
+import haxeon.ui.FontCollection;
 import sys.FileSystem;
-import nativekit.ui.core.Command;
-import nativekit.ui.core.RenderNode;
-import nativekit.ui.core.RetainedView;
-import nativekit.ui.core.Shortcut;
-import nativekit.ui.core.UiContext;
-import nativekit.ui.core.UiEvent;
-import nativekit.ui.core.UiEventKind;
-import nativekit.ui.core.UiKey;
-import nativekit.ui.core.UiModifier;
-import nativekit.ui.core.View;
-import nativekit.ui.core.TextStyleOverride;
-import nativekit.ui.docking.DockNode;
-import nativekit.ui.docking.DockPanelDescriptor;
-import nativekit.ui.docking.DockSplitAxis;
-import nativekit.ui.docking.DockDropZone;
-import nativekit.ui.docking.DockWorkspaceModel;
-import nativekit.ui.host.DesktopUiApplication;
-import nativekit.ui.host.UiHostContext;
+import haxeon.ui.core.Command;
+import haxeon.ui.core.RenderNode;
+import haxeon.ui.core.RetainedView;
+import haxeon.ui.core.Shortcut;
+import haxeon.ui.core.UiContext;
+import haxeon.ui.core.UiEvent;
+import haxeon.ui.core.UiEventKind;
+import haxeon.ui.core.UiKey;
+import haxeon.ui.core.UiModifier;
+import haxeon.ui.core.View;
+import haxeon.ui.core.TextStyleOverride;
+import haxeon.ui.docking.DockNode;
+import haxeon.ui.docking.DockPanelDescriptor;
+import haxeon.ui.docking.DockSplitAxis;
+import haxeon.ui.docking.DockDropZone;
+import haxeon.ui.docking.DockWorkspaceModel;
+import haxeon.ui.host.DesktopUiApplication;
+import haxeon.ui.host.UiHostContext;
 import platform.HostFileDialogs;
-import nativekit.ui.icons.IconName;
-import nativekit.ui.theme.Theme;
-import nativekit.ui.style.EnvironmentColorScheme;
-import nativekit.ui.widgets.KeyedView;
-import nativekit.ui.widgets.controls.Button;
-import nativekit.ui.widgets.controls.ButtonVariant;
-import nativekit.ui.widgets.controls.TabItem;
-import nativekit.ui.widgets.controls.Tabs;
-import nativekit.ui.widgets.controls.TabsOptions;
-import nativekit.ui.widgets.controls.TabsSelectionMode;
-import nativekit.ui.widgets.collections.TreeView;
-import nativekit.ui.widgets.commands.CommandPalette;
-import nativekit.ui.widgets.docking.DockPanelContent;
-import nativekit.ui.widgets.docking.DockWorkspace;
-import nativekit.ui.widgets.layout.AppShell;
-import nativekit.ui.widgets.layout.Column;
-import nativekit.ui.widgets.layout.Row;
-import nativekit.ui.widgets.layout.Spacer;
-import nativekit.ui.widgets.layout.Stack;
-import nativekit.ui.widgets.layout.StackChild;
-import nativekit.ui.widgets.text.Text;
+import haxeon.ui.icons.IconName;
+import haxeon.ui.theme.Theme;
+import haxeon.ui.style.EnvironmentColorScheme;
+import haxeon.ui.widgets.KeyedView;
+import haxeon.ui.widgets.controls.Button;
+import haxeon.ui.widgets.controls.ButtonVariant;
+import haxeon.ui.widgets.controls.TabItem;
+import haxeon.ui.widgets.controls.Tabs;
+import haxeon.ui.widgets.controls.TabsOptions;
+import haxeon.ui.widgets.controls.TabsSelectionMode;
+import haxeon.ui.widgets.collections.TreeView;
+import haxeon.ui.widgets.commands.CommandPalette;
+import haxeon.ui.widgets.docking.DockPanelContent;
+import haxeon.ui.widgets.docking.DockWorkspace;
+import haxeon.ui.widgets.layout.AppShell;
+import haxeon.ui.widgets.layout.Column;
+import haxeon.ui.widgets.layout.Row;
+import haxeon.ui.widgets.layout.Spacer;
+import haxeon.ui.widgets.layout.Stack;
+import haxeon.ui.widgets.layout.StackChild;
+import haxeon.ui.widgets.text.Text;
 import core.Application;
 import platform.HostCapabilities;
 import platform.HostCapability;
@@ -105,16 +108,16 @@ class ExosuitApp implements DesktopUiApplication {
 	final createWorkspaceTerminal:Null<(String, String, Bool, Void->Void, TerminalPalette, Null<String>, Null<String>)->TerminalPanel>;
 	final createTerminal:Null<(String, Void->Void, TerminalPalette)->TerminalPanel>;
 	public var searchPanel(default, null):WorkspaceSearchPanel;
-	public final filesScroll = new nativekit.ui.widgets.scroll.ScrollController();
+	public final filesScroll = new haxeon.ui.widgets.scroll.ScrollController();
 	final activityIcons:Map<String, IconName> = [];
-	public final sidebar = new nativekit.ui.widgets.sidebar.SidebarModel();
+	public final sidebar = new haxeon.ui.widgets.sidebar.SidebarModel();
 	var explorerRoot:Null<String>;
 	var explorerModel:Null<DirectoryTreeModel>;
 	var explorerTree:Null<TreeView>;
-	final tabClicks = new nativekit.ui.core.PointerClickSequence();
+	final tabClicks = new haxeon.ui.core.PointerClickSequence();
 	var statusMessage:String = "Ready";
 	var paletteVisible:Bool = false;
-	var settingsPanel:Null<nativekit.ui.widgets.settings.SettingsPanel>;
+	var settingsPanel:Null<haxeon.ui.widgets.settings.SettingsPanel>;
 	var contextMenu:Null<CommandMenu> = null;
 	var viewRevision:Int = 0;
 	var submittedBuildKey:Null<String>;
@@ -160,9 +163,9 @@ class ExosuitApp implements DesktopUiApplication {
 		ui = new UiContext(null, fonts, this.theme);
 		ui.buildContext.environment.colorScheme = darkPalette ? EnvironmentColorScheme.Dark : EnvironmentColorScheme.Light;
 		desktop = fileDialogs;
-		registerSidebarDestination("files", IconName.FolderOpen, explorerPanel, new nativekit.ui.widgets.sidebar.SidebarModeOptions("Files", 0, true));
+		registerSidebarDestination("files", IconName.FolderOpen, explorerPanel, new haxeon.ui.widgets.sidebar.SidebarModeOptions("Files", 0, true));
 		registerSidebarDestination("search", IconName.Search, function() return searchPanel,
-			new nativekit.ui.widgets.sidebar.SidebarModeOptions("Search", 10, true));
+			new haxeon.ui.widgets.sidebar.SidebarModeOptions("Search", 10, true));
 		dock = makeDock();
 		if (openPath == null) dock.close("explorer");
 		var capturedHost:UiWorkbenchHost = null;
@@ -259,15 +262,15 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function makeDock():DockWorkspaceModel {
 		var model = new DockWorkspaceModel();
-		model.register(new DockPanelDescriptor("explorer", "Sidebar", true, true, IconName.FolderOpen, nativekit.ui.docking.DockPanelHeaderMode.Content, new nativekit.ui.docking.DockPanelGrouping("sidebar")));
-		model.register(new DockPanelDescriptor("editor", "Editor", false, true, IconName.NewFile, nativekit.ui.docking.DockPanelHeaderMode.Content, new nativekit.ui.docking.DockPanelGrouping("editors", false)));
-		model.register(new DockPanelDescriptor("problems", "Problems", true, true, IconName.AlertTriangle, nativekit.ui.docking.DockPanelHeaderMode.Dock, new nativekit.ui.docking.DockPanelGrouping("tools")));
+		model.register(new DockPanelDescriptor("explorer", "Sidebar", true, true, IconName.FolderOpen, haxeon.ui.docking.DockPanelHeaderMode.Content, new haxeon.ui.docking.DockPanelGrouping("sidebar")));
+		model.register(new DockPanelDescriptor("editor", "Editor", false, true, IconName.NewFile, haxeon.ui.docking.DockPanelHeaderMode.Content, new haxeon.ui.docking.DockPanelGrouping("editors", false)));
+		model.register(new DockPanelDescriptor("problems", "Problems", true, true, IconName.AlertTriangle, haxeon.ui.docking.DockPanelHeaderMode.Dock, new haxeon.ui.docking.DockPanelGrouping("tools")));
 		if (capabilities.supports(Processes))
-			model.register(new DockPanelDescriptor("build", "Build Output", true, true, IconName.Terminal, nativekit.ui.docking.DockPanelHeaderMode.Dock, new nativekit.ui.docking.DockPanelGrouping("tools")));
+			model.register(new DockPanelDescriptor("build", "Build Output", true, true, IconName.Terminal, haxeon.ui.docking.DockPanelHeaderMode.Dock, new haxeon.ui.docking.DockPanelGrouping("tools")));
 		if (capabilities.supports(Processes))
-			model.register(new DockPanelDescriptor("terminal", "Terminal", true, true, IconName.Terminal, nativekit.ui.docking.DockPanelHeaderMode.Dock, new nativekit.ui.docking.DockPanelGrouping("tools")));
+			model.register(new DockPanelDescriptor("terminal", "Terminal", true, true, IconName.Terminal, haxeon.ui.docking.DockPanelHeaderMode.Dock, new haxeon.ui.docking.DockPanelGrouping("tools")));
 		dockPanelContents = [
-			new DockPanelContent("explorer", function(_) return new nativekit.ui.widgets.sidebar.SidebarHost("sidebar-modes", sidebar, function(id) { showSidebarMode(id); }, function(id) return activityIcons.get(id))),
+			new DockPanelContent("explorer", function(_) return new haxeon.ui.widgets.sidebar.SidebarHost("sidebar-modes", sidebar, function(id) { showSidebarMode(id); }, function(id) return activityIcons.get(id))),
 			new DockPanelContent("editor", function(_) return editorPanel("editor")),
 			new DockPanelContent("problems", function(_) return new ProblemsPanel(host, [for (project in application.workspace.projects) project.root]))
 		];
@@ -432,13 +435,13 @@ class ExosuitApp implements DesktopUiApplication {
 	public function openSettings():Void {
 		paletteVisible = false;
 		host.closeCommandView();
-		settingsPanel = new nativekit.ui.widgets.settings.SettingsPanel("exosuit-settings", application.settings.store, requestFrame);
+		settingsPanel = new haxeon.ui.widgets.settings.SettingsPanel("exosuit-settings", application.settings.store, requestFrame);
 		requestFrame();
 	}
 
 	public function setApplicationZoom(percent:Int):Void {
 		application.settings.store.set("appearance/workbench/zoom_percent",
-			nativekit.ui.properties.PropertyValue.Int(Std.int(Math.max(70, Math.min(200, percent)))));
+			haxeon.ui.properties.PropertyValue.Int(Std.int(Math.max(70, Math.min(200, percent)))));
 	}
 
 	function installCommands():Void {
@@ -559,12 +562,12 @@ class ExosuitApp implements DesktopUiApplication {
             var browser:View=terminalBrowserPanel==null ? new Text("Workspace terminals are not connected") : terminalBrowserPanel;
             var content=new Column("workspace-terminals-content",[new KeyedView("browser",browser),
                 new KeyedView("close",new Button("Close",null,dismiss,"workspace-terminals-close"))],browserStyle);
-            layers.push(new StackChild("workspace-terminals",new nativekit.ui.widgets.overlays.Dialog("workspace-terminals-dialog","Workspace Terminals",content,dismiss,
+            layers.push(new StackChild("workspace-terminals",new haxeon.ui.widgets.overlays.Dialog("workspace-terminals-dialog","Workspace Terminals",content,dismiss,
                 Math.max(240.0,Math.min(640.0,viewportWidth-48.0))),0.0,0.0,50,LayoutAxis.grow(),LayoutAxis.grow()));
         }
 		if (groupEditor != null) {
 			var dismiss = function() { groupEditor = null; requestFrame(); };
-			layers.push(new StackChild("workbench-group-dialog", new nativekit.ui.widgets.overlays.Dialog(
+			layers.push(new StackChild("workbench-group-dialog", new haxeon.ui.widgets.overlays.Dialog(
 				"workbench-group-dialog", "Group", groupEditor, dismiss, Math.max(240.0, Math.min(520.0, viewportWidth - 48.0))),
 				0.0, 0.0, 60, LayoutAxis.grow(), LayoutAxis.grow()));
 		}
@@ -572,7 +575,7 @@ class ExosuitApp implements DesktopUiApplication {
 		if (settingsPanel != null) {
 			if (settingsPanel.catalog.store != application.settings.store) {
 				var filter = settingsPanel.filter, advanced = settingsPanel.showAdvanced, category = settingsPanel.selectedCategory;
-				settingsPanel = new nativekit.ui.widgets.settings.SettingsPanel("exosuit-settings", application.settings.store, requestFrame);
+				settingsPanel = new haxeon.ui.widgets.settings.SettingsPanel("exosuit-settings", application.settings.store, requestFrame);
 				settingsPanel.setShowAdvanced(advanced);
 				settingsPanel.setFilter(filter);
 				if (category != null) settingsPanel.select(category);
@@ -583,7 +586,7 @@ class ExosuitApp implements DesktopUiApplication {
 			var dismiss = function() { settingsPanel = null; requestFrame(); };
 			var content = new Column("settings-content", [new KeyedView("panel", settingsPanel),
 				new KeyedView("close", new Button("Close", null, dismiss, "settings-close"))], settingsStyle);
-			var dialog = new nativekit.ui.widgets.overlays.Dialog("settings-dialog", "Settings", content, dismiss,
+			var dialog = new haxeon.ui.widgets.overlays.Dialog("settings-dialog", "Settings", content, dismiss,
 				Math.max(240.0, Math.min(860.0, viewportWidth - 48.0)));
 			layers.push(new StackChild("settings", dialog, 0.0, 0.0, 50, LayoutAxis.grow(), LayoutAxis.grow()));
 		}
@@ -597,7 +600,7 @@ class ExosuitApp implements DesktopUiApplication {
 					new KeyedView("save", new Button("Save", null, function() resolveSaveConfirmation("save"), "save-confirmation-save"))
 				]))
 			]);
-			var dialog = new nativekit.ui.widgets.overlays.Dialog("save-confirmation", "Unsaved Changes", content,
+			var dialog = new haxeon.ui.widgets.overlays.Dialog("save-confirmation", "Unsaved Changes", content,
 				function() resolveSaveConfirmation("cancel"), Math.max(240, Math.min(540, viewportWidth - 48)));
 			dialog.dismissOnOutside = false;
 			layers.push(new StackChild("save-confirmation", dialog, 0, 0, 60, LayoutAxis.grow(), LayoutAxis.grow()));
@@ -608,7 +611,7 @@ class ExosuitApp implements DesktopUiApplication {
 				controls.push(new KeyedView("message", new Text('Replace "' + saveAsDestination + '"?')));
 				controls.push(new KeyedView("detail", new Text("The existing file will be overwritten.")));
 			} else {
-				var field = new nativekit.ui.widgets.text.TextField("save-as-path", saveAsDestination, function(value) {
+				var field = new haxeon.ui.widgets.text.TextField("save-as-path", saveAsDestination, function(value) {
 					saveAsDestination = value;
 					requestFrame();
 				}, null, "File path");
@@ -619,7 +622,7 @@ class ExosuitApp implements DesktopUiApplication {
 				new KeyedView("cancel", new Button("Cancel", null, function() resolveSaveAs(true), "save-as-cancel")),
 				new KeyedView("save", new Button(saveAsReplace ? "Replace" : "Save", null, function() resolveSaveAs(), "save-as-save"))
 			])));
-			var dialog = new nativekit.ui.widgets.overlays.Dialog("save-as-dialog", "Save As", new Column("save-as-content", controls),
+			var dialog = new haxeon.ui.widgets.overlays.Dialog("save-as-dialog", "Save As", new Column("save-as-content", controls),
 				function() resolveSaveAs(true), Math.max(240, Math.min(540, viewportWidth - 48)));
 			dialog.dismissOnOutside = false;
 			layers.push(new StackChild("save-as", dialog, 0, 0, 70, LayoutAxis.grow(), LayoutAxis.grow()));
@@ -676,7 +679,7 @@ class ExosuitApp implements DesktopUiApplication {
 		workbenchPanel = new WorkbenchPanel(client, openCatalogTerminal, newGroupedTerminal, editWorkspaceGroup,
 			function(path) application.openArgument(path), openWorkspaceTerminals, requestFrame);
 		registerSidebarDestination("workbench", IconName.Terminal, function() return workbenchPanel == null ? new Text("Workspace disconnected") : workbenchPanel,
-			new nativekit.ui.widgets.sidebar.SidebarModeOptions("Workbench", 20, true));
+			new haxeon.ui.widgets.sidebar.SidebarModeOptions("Workbench", 20, true));
 	}
 
 	function newGroupedTerminal(group:String):Void {
@@ -986,7 +989,7 @@ class ExosuitApp implements DesktopUiApplication {
 
 	/** Register a destination once; the Activity Bar follows the sidebar's order and visibility. */
 	public function registerSidebarDestination(id:String, icon:IconName, provider:Void->View,
-			options:nativekit.ui.widgets.sidebar.SidebarModeOptions):Void {
+			options:haxeon.ui.widgets.sidebar.SidebarModeOptions):Void {
 		sidebar.register(id, provider, options);
 		activityIcons.set(id, icon);
 	}
@@ -1092,7 +1095,7 @@ class ExosuitApp implements DesktopUiApplication {
 		var widget = Tabs.withOptions("exosuit-editor-tabs:" + paneId, items, active == null ? "" : UiEditorTabs.key(active),
 			function(key) host.activateEditorTab(key, paneId), options);
 		widget.onTabHeaderBuilt = function(key, node) {
-			node.on(nativekit.ui.core.UiEventKind.Click, function(event) {
+			node.on(haxeon.ui.core.UiEventKind.Click, function(event) {
 				if (event.button != 0 || tabClicks.register(paneId + ":" + key, event) != 2) return;
 				for (view in tabs) if (key == "doc:" + view.document.id) host.keepDocument(view.document, paneId);
 			});
@@ -1125,7 +1128,7 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function showBreadcrumbMenu(document:editor.Document, paneId:String, path:String, event:UiEvent):Void {
 		var directory = haxe.io.Path.directory(path);
-		var items:Array<nativekit.ui.widgets.overlays.MenuItem> = [];
+		var items:Array<haxeon.ui.widgets.overlays.MenuItem> = [];
 		try {
 			var entries = FileSystem.readDirectory(directory);
 			entries.sort(function(a, b) {
@@ -1135,7 +1138,7 @@ class ExosuitApp implements DesktopUiApplication {
 			for (name in entries) {
 				var target = directory + "/" + name;
 				var folder = FileSystem.isDirectory(target);
-				items.push(new nativekit.ui.widgets.overlays.MenuItem(target, name + (folder ? "  ›" : ""), function() {
+				items.push(new haxeon.ui.widgets.overlays.MenuItem(target, name + (folder ? "  ›" : ""), function() {
 					contextMenu = null;
 					if (folder) showBreadcrumbMenu(document, paneId, target + "/_", event);
 					else { host.activateTab(document, paneId); application.open(target); }
@@ -1171,7 +1174,7 @@ class ExosuitApp implements DesktopUiApplication {
 				var bounds = node.globalBounds();
 				x = bounds.x;
 				y = bounds.y + bounds.height;
-				if (node.semantics != null && node.semantics.role == nativekit.ui.semantics.AccessibilityRole.TextField) {
+				if (node.semantics != null && node.semantics.role == haxeon.ui.semantics.AccessibilityRole.TextField) {
 					var caret = host.textInputArea();
 					if (caret != null) { x = caret.x; y = caret.y + caret.height; }
 				}

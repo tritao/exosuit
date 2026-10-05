@@ -1,20 +1,20 @@
 package ui;
 
-import LayoutAxis;
-import LayoutStyle;
-import Insets;
+import haxeon.ui.LayoutAxis;
+import haxeon.ui.LayoutStyle;
+import haxeon.ui.Insets;
 import core.Application;
-import nativekit.ui.core.BuildContext;
-import nativekit.ui.core.RenderNode;
-import nativekit.ui.core.View;
-import nativekit.ui.widgets.KeyedView;
-import nativekit.ui.widgets.controls.Button;
-import nativekit.ui.widgets.controls.SearchField;
-import nativekit.ui.widgets.text.TextField;
-import nativekit.ui.widgets.text.Text;
-import nativekit.ui.widgets.layout.Column;
-import nativekit.ui.widgets.collections.VirtualList;
-import nativekit.ui.widgets.scroll.ScrollController;
+import haxeon.ui.core.BuildContext;
+import haxeon.ui.core.RenderNode;
+import haxeon.ui.core.View;
+import haxeon.ui.widgets.KeyedView;
+import haxeon.ui.widgets.controls.Button;
+import haxeon.ui.widgets.controls.SearchField;
+import haxeon.ui.widgets.text.TextField;
+import haxeon.ui.widgets.text.Text;
+import haxeon.ui.widgets.layout.Column;
+import haxeon.ui.widgets.collections.VirtualList;
+import haxeon.ui.widgets.scroll.ScrollController;
 
 /** Presentation of the existing cooperative search and transactional replacement. */
 class WorkspaceSearchPanel implements View {
@@ -110,7 +110,7 @@ class WorkspaceSearchPanel implements View {
 		return path;
 	}
 	static function findQuery(node:RenderNode):Null<RenderNode> {
-		if (node.semantics != null && node.semantics.role == nativekit.ui.semantics.AccessibilityRole.TextField &&
+		if (node.semantics != null && node.semantics.role == haxeon.ui.semantics.AccessibilityRole.TextField &&
 			node.semantics.label == "Search in projects") return node;
 		for (child in node.children) { var found = findQuery(child); if (found != null) return found; }
 		return null;

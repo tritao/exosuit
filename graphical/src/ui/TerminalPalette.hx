@@ -1,6 +1,6 @@
 package ui;
 
-import Color;
+import haxeon.ui.Color;
 
 /** Terminal defaults and the first 16 ANSI colors for each workbench scheme. */
 class TerminalPalette {

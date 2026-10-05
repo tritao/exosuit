@@ -1,15 +1,17 @@
 package ui;
 
-import Insets;
-import LayoutAxis;
-import LayoutPositioning;
-import LayoutStyle;
-import LayoutVisualKind;
-import nativekit.ui.core.BuildContext;
-import nativekit.ui.core.Key;
-import nativekit.ui.core.RenderNode;
-import nativekit.ui.core.UiEventKind;
-import nativekit.ui.core.View;
+import haxeon.ui.Rect;
+
+import haxeon.ui.Insets;
+import haxeon.ui.LayoutAxis;
+import haxeon.ui.LayoutPositioning;
+import haxeon.ui.LayoutStyle;
+import haxeon.ui.LayoutVisualKind;
+import haxeon.ui.core.BuildContext;
+import haxeon.ui.core.Key;
+import haxeon.ui.core.RenderNode;
+import haxeon.ui.core.UiEventKind;
+import haxeon.ui.core.View;
 
 /** A tab-only tooltip that appears after a deliberate hover. */
 class TabTooltip implements View {

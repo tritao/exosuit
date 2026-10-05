@@ -1,7 +1,7 @@
 package ui;
 
-import Rect;
-import nativekit.ui.core.WidgetId;
+import haxeon.ui.Rect;
+import haxeon.ui.core.WidgetId;
 
 /** One editor pane owns tab order and active view, while documents stay shared. */
 class UiEditorPane {

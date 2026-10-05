@@ -1,7 +1,7 @@
 package config;
 
-import nativekit.ui.settings.SettingsStore;
-import nativekit.ui.settings.SettingsRegistry;
+import haxeon.ui.settings.SettingsStore;
+import haxeon.ui.settings.SettingsRegistry;
 import sys.FileSystem;
 
 /** Application adapter: UIKit owns validation, storage and change notifications. */

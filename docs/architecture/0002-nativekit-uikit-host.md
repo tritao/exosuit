@@ -48,7 +48,7 @@ model and behavior testing; the graphical layer is entirely opt-in.
 
 ```
 ┌───────────────────────────────────────────────────────────┐
-│ DesktopUiHost (nativekit.ui.host)                         │
+│ DesktopUiHost (haxeon.ui.host)                         │
 │ • Window, GPU, input, main loop lifecycle                │
 │ • Runs app.GraphicalMain                                 │
 └────────────────────┬────────────────────────────────────┬─┘

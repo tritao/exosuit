@@ -2635,7 +2635,7 @@ The later browser host/terminal record above supersedes pending checks here.
 - The composed gate passes compiler, headless, graphical, real LSP, workflow
   and decoration stages, then exits nonzero at release input validation. The
   only dirty path within Materia's release-checked UIKit/EditorKit scope is the
-  pre-existing `uikit/haxe/nativekit/ui/core/TextInputBridge.hx`; it remains
+  pre-existing `haxeon/packages/ui/haxe/haxeon/ui/core/TextInputBridge.hx`; it remains
   untouched. Artifact: `/tmp/exosuit-shared-shape-ci.log`. This run does not
   reaccept the complete composed/release gate.
 - The independent browser gate fails before guest/host compilation at NativeKit
@@ -3897,7 +3897,7 @@ Historical measurements before the startup fixes recorded above.
   and self-hosted graphical builds both exit 0 (the corresponding
   `/tmp/exosuit-m9-syntax-*-build-final.log` files).
 - Desktop workflow rebuild failed before launching: cached compilation pruned
-  `$function-adapter-env:nativekit.ui.style.StyleProperty.__init:0`, causing IR
+  `$function-adapter-env:haxeon.ui.style.StyleProperty.__init:0`, causing IR
   verification failure in `__init$part5`. Original failure log:
   `/tmp/exosuit-m9-syntax-desktop.log`. No desktop/release/browser success is
   claimed for this slice yet.
@@ -4015,7 +4015,7 @@ Historical measurements before the startup fixes recorded above.
   clearing on text replacement. No compiler workaround was needed.
 - Native focused gate passes 6/6, including ABI, text engine, compositor,
   frame resources, layout render compiler and real Xvfb pixel rendering.
-  `../uikit/tools/test-haxeon.sh` exits 0: actual typed array marshaling,
+  `../haxeon/packages/ui/tools/test-haxeon.sh` exits 0: actual typed array marshaling,
   rendered Canvas transaction, invalid overlap, unchanged measurement and
   Settings suite (`/tmp/uikit-color-ranges-haxeon.log`).
 - Materia `f4313d4b` commits this public API slice. Exosuit root tests and both
