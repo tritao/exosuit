@@ -110,6 +110,18 @@ int main(void) {
     REQUIRE(terminalkit_paste(protocol, pasted, 1024u * 1024u + 1) == -1 && reply_size == 0);
     REQUIRE(terminalkit_paste(protocol, NULL, 0) == 0 && reply_size == 0);
     REQUIRE(feed(protocol, "\x1b[?2004l") >= 0);
+    REQUIRE(feed(protocol, "\x1b[?1006h") >= 0);
+    REQUIRE(terminalkit_mouse_mode(protocol) == 0);
+    REQUIRE(!terminalkit_mouse(protocol, 0, 0, 0, 1, 0) && reply_size == 0);
+    REQUIRE(feed(protocol, "\x1b[?1000h") >= 0);
+    REQUIRE(terminalkit_mouse_mode(protocol) == 2);
+    REQUIRE(terminalkit_mouse(protocol, 0, 0, 0, 1, 0));
+    REQUIRE(!strcmp(replies, "\x1b[<0;1;1M"));
+    clear_replies();
+    REQUIRE(!terminalkit_mouse(protocol, 1, 1, 32, 4, 0) && reply_size == 0);
+    REQUIRE(feed(protocol, "\x1b[?1000l") >= 0);
+    REQUIRE(terminalkit_mouse_mode(protocol) == 0);
+    REQUIRE(!terminalkit_mouse(protocol, 0, 0, 0, 2, 0) && reply_size == 0);
     REQUIRE(feed(protocol, "\x1b[?u") >= 0);
     REQUIRE(!strcmp(replies, "\x1b[?0u"));
     clear_replies();

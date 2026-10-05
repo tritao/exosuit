@@ -27,9 +27,12 @@ class TerminalTabView implements View {
 		node.on(UiEventKind.Focus, function(_) activate(), "capture");
 		node.on(UiEventKind.PointerDown, function(event) {
 			activate();
+		}, "capture");
+		node.on(UiEventKind.PointerDown, function(event) {
+			if (event.defaultPrevented) return;
 			var menu = contextMenu;
 			if (event.button == 1 && menu != null) { menu(event); event.preventDefault(); event.stopPropagation(); }
-		}, "capture");
+		});
 		node.onResolved(function(_) resolved(node.globalBounds(), node.id));
 		return node;
 	}

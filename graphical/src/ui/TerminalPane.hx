@@ -53,6 +53,8 @@ class TerminalPane implements TerminalPanel {
 	var focused:Bool = false;
 	var focusGeneration:Int = 0;
 	var closed:Bool = false;
+	var mouseButton:Int = -1;
+	var mousePointer:Int = -1;
 	var cursorRow:Int = -1;
 	var cursorColumn:Int = -1;
 	var cursorMode:Int = 1;
@@ -229,7 +231,37 @@ class TerminalPane implements TerminalPanel {
 			}
 		});
 		node.focusable = true;
-		node.on(UiEventKind.PointerDown, function(_) context.requestFocus(node.id));
+		node.on(UiEventKind.PointerDown, function(event) {
+			context.requestFocus(node.id);
+			if (closed || (event.modifiers & UiModifier.Shift) != 0 || session.emulator.mouseMode() == 0) return;
+			var button = switch event.button {
+				case 0: 0;
+				case 1: 2;
+				case 2: 1;
+				default: -1;
+			};
+			if (button < 0 || mouseButton >= 0) return;
+			if (reportMouse(event, button, 1)) {
+				mouseButton = button;
+				mousePointer = event.pointerId;
+				event.capturePointer();
+			}
+		});
+		node.on(UiEventKind.PointerMove, function(event) {
+			if (mouseButton >= 0 && event.pointerId != mousePointer) return;
+			if ((event.modifiers & UiModifier.Shift) != 0 && mouseButton < 0) return;
+			if (!closed && session.emulator.mouseMode() != 0)
+				reportMouse(event, mouseButton >= 0 ? mouseButton + 32 : 0, 4);
+		});
+		var releaseMouse = function(event:UiEvent) {
+			if (mouseButton < 0 || event.pointerId != mousePointer) return;
+			if (!closed) reportMouse(event, mouseButton, 2);
+			mouseButton = -1;
+			mousePointer = -1;
+			event.releasePointer();
+		};
+		node.on(UiEventKind.PointerUp, releaseMouse);
+		node.on(UiEventKind.PointerCancel, releaseMouse);
 		node.on(UiEventKind.TextInput, function(event:UiEvent) {
 			if (event.text != null && event.text.length > 0) {
 				session.write(Bytes.ofString(event.text));
@@ -265,6 +297,11 @@ class TerminalPane implements TerminalPanel {
 			requestFrame();
 		});
 		node.on(UiEventKind.Scroll, function(event:UiEvent) {
+			if (event.deltaY == 0 || closed) return;
+			if ((event.modifiers & UiModifier.Shift) == 0) {
+				var button = event.deltaY < 0 ? 64 : 65;
+				if (reportMouse(event, button, 1)) return;
+			}
 			var current = session.emulator.scrollback(-1).current;
 			var step = Std.int(Math.round(event.deltaY / rowHeight * 3.0));
 			if (step == 0) step = event.deltaY > 0 ? 1 : -1;
@@ -275,6 +312,24 @@ class TerminalPane implements TerminalPanel {
 		});
 		if (!focusRequested) focusRequested = context.requestFocus(node.id);
 		return node;
+	}
+
+	/** UIKit button/modifier values differ from the terminal wire protocol. */
+	function reportMouse(event:UiEvent, button:Int, kind:Int):Bool {
+		var column = Std.int(Math.floor((event.localX - 8.0) / cellWidth));
+		var row = Std.int(Math.floor((event.localY - 4.0) / rowHeight));
+		column = Std.int(Math.max(0, Math.min(session.emulator.columns() - 1, column)));
+		row = Std.int(Math.max(0, Math.min(session.emulator.rows() - 1, row)));
+		var modifiers = 0;
+		if ((event.modifiers & UiModifier.Shift) != 0) modifiers |= 4;
+		if ((event.modifiers & UiModifier.Alt) != 0) modifiers |= 8;
+		if ((event.modifiers & UiModifier.Control) != 0) modifiers |= 16;
+		if (!session.emulator.mouse(column, row, button, kind, modifiers)) return false;
+		session.pollEvents();
+		event.preventDefault();
+		event.stopPropagation();
+		requestFrame();
+		return true;
 	}
 
 	function handleKey(event:UiEvent):Void {

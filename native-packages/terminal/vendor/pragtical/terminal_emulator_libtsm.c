@@ -786,6 +786,7 @@ void terminal_emulator_modes(terminal_emulator_t* emulator,
   unsigned int flags = tsm_vte_get_flags(terminal->vte);
   unsigned int mouse_mode = tsm_vte_get_mouse_mode(terminal->vte);
   unsigned int mouse_event = tsm_vte_get_mouse_event(terminal->vte);
+  unsigned int mouse_tracking = tsm_vte_get_mouse_tracking(terminal->vte);
   if (cursor_keys_mode)
     *cursor_keys_mode = flags & TSM_VTE_FLAG_CURSOR_KEY_MODE
       ? TERMINAL_EMULATOR_KEYS_APPLICATION : TERMINAL_EMULATOR_KEYS_NORMAL;
@@ -793,9 +794,9 @@ void terminal_emulator_modes(terminal_emulator_t* emulator,
     *keypad_keys_mode = flags & TSM_VTE_FLAG_KEYPAD_APPLICATION_MODE
       ? TERMINAL_EMULATOR_KEYS_APPLICATION : TERMINAL_EMULATOR_KEYS_NORMAL;
   if (mouse_tracking_mode) {
-    if (mouse_mode == TSM_VTE_MOUSE_MODE_X10)
+    if (mouse_tracking == TSM_VTE_MOUSE_MODE_X10)
       *mouse_tracking_mode = TERMINAL_EMULATOR_MOUSE_X10;
-    else if (mouse_mode == TSM_VTE_MOUSE_MODE_VT200)
+    else if (mouse_tracking == TSM_VTE_MOUSE_MODE_VT200)
       *mouse_tracking_mode = TERMINAL_EMULATOR_MOUSE_NORMAL;
     else if (mouse_event == TSM_VTE_MOUSE_EVENT_BTN)
       *mouse_tracking_mode = TERMINAL_EMULATOR_MOUSE_BUTTON;

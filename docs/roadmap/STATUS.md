@@ -2,6 +2,40 @@
 
 Last updated: 2026-10-05.
 
+## M12.2 — mouse reporting and tracking ownership, 2026-10-05
+
+Vendored libtsm commit **40a8945** separates active tracking (9/1000/1002/1003)
+from encoding (1006/1016). Encoding alone cannot enable reporting; disabling
+tracking leaves encoding configured, and disabling encoding falls back to legacy
+reports without disabling tracking. Normal tracking rejects drag/motion, button
+tracking accepts drags, and all-motion tracking preserves hover modifiers.
+Alternate-scroll arrow emulation applies only when tracking is disabled.
+The bridge now reads the explicit tracking state instead of inferring it from
+encoding. Checkpoint replay reconstructs these states through the existing
+recorded output stream; no checkpoint format change was needed.
+
+TerminalPane maps UIKit buttons/modifiers and local padded geometry to bounded
+terminal cells. Pointer capture keeps drag/release paired outside the pane.
+Wheel input first offers the event to the emulator (including alternate scroll),
+then falls back to local scrollback if unhandled. Shift bypasses pointer reports.
+TerminalTabView activates during capture but offers its context menu only after
+terminal handlers, respecting consumed events. Its previous capture-phase menu
+intercepted application right-clicks and subsequent input.
+
+Verified: libtsm mouse suite including the new tracking/encoding regression;
+native terminal contract and PTY bridge; Haxe session tests; graphical build;
+real X11 raw-PTY test asserting SGR left/middle/right, release, drag, hover,
+wheel, Control-click and coordinate bounds, plus clipboard command execution.
+The complete libtsm Meson build still fails on a selection-test dlist macro and
+internal symbol linkage in VTE/symbol tests. Both failures reproduced from an
+unchanged HEAD archive; they are not attributed to this change. Test dependency
+packages were extracted under /tmp rather than installed system-wide.
+
+M12 remains open. Next: preserve native pointer move/wheel modifiers in UIKit,
+then selection/copy/search and the remaining rendering/process/performance gates.
+The pane's Shift-wheel branch exists, but native wheel modifier delivery is not
+qualified until that adapter fix lands. Pixel-precision 1016 remains unqualified.
+
 ## M12.2 — clipboard and bracketed paste, 2026-10-05
 
 Terminal panes now accept Ctrl+Shift+V through UIKit's asynchronous clipboard
