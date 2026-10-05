@@ -2,6 +2,17 @@
 
 Last updated: 2026-10-05.
 
+## M10.2 — reveal keyboard-selected completion rows, 2026-10-05
+
+The UIKit completion popup now retains its scroll controller, uses explicit
+24-pixel rows with 4-pixel gaps and bounds its viewport to 236 pixels (or the
+available window height). Up/Down reveal the selected row, including wrapping
+from first to last. Opening a new popup resets the offset. Xvfb tests navigate
+40 suggestions using routed key events and inspect the selected row against
+the actual clipping viewport. Long-list, wrap, live typing, large information
+and hover phases passed. IME and real-server graphical qualification remain
+open; the milestone is not yet accepted.
+
 ## M10.2 — live completion interaction, 2026-10-05
 
 Added shared `ActiveCompletion` ownership of the replacement range, provider

@@ -117,6 +117,10 @@ class UiWorkbenchHost implements WorkbenchHost {
 	static inline var LANG_INFO = 1;
 	static inline var LANG_COMPLETION = 2;
 	static inline var LANG_SIGNATURE = 3;
+	static inline var COMPLETION_ROW_HEIGHT = 24.0;
+	static inline var COMPLETION_ROW_GAP = 4.0;
+	static inline var COMPLETION_PADDING = 8.0;
+	static inline var COMPLETION_MAX_HEIGHT = 236.0;
 	public var caretRectProvider:Null<Void->Null<Rect>>;
 	var languageArea:Null<TextInputArea>;
 	var languageDocumentId:Int = -1;
@@ -125,6 +129,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 	var languageItems:Array<CompletionItem> = [];
 	var languageAccept:CompletionItem->Void = function(item) {};
 	var languageSelected:Int = 0;
+	final languageScroll = new nativekit.ui.widgets.scroll.ScrollController();
 	var languageInput:Null<String->Void>;
 	var languageKey:Null<(Int, Int)->Bool>;
 	var languageSignature:Null<SignatureHelp>;
@@ -752,6 +757,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 	}
 
 	public function openLanguageInformation(area:TextInputArea, text:String):Void {
+		languageScroll.jumpTo(0.0, 0.0);
 		languageInput = null;
 		languageKey = null;
 		languageAccept = function(item) {};
@@ -775,6 +781,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		languageItems = items;
 		languageAccept = accept;
 		languageSelected = 0;
+		languageScroll.jumpTo(0.0, 0.0);
 		languageInfoText = "";
 		languageSignature = null;
 		languageKind = items.length == 0 ? LANG_NONE : LANG_COMPLETION;
@@ -783,6 +790,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 	}
 
 	public function openLanguageSignature(area:TextInputArea, help:SignatureHelp):Void {
+		languageScroll.jumpTo(0.0, 0.0);
 		languageInput = null;
 		languageKey = null;
 		languageAccept = function(item) {};
@@ -807,11 +815,13 @@ class UiWorkbenchHost implements WorkbenchHost {
 		if (languageKey != null && languageKey(key, modifiers)) return true;
 		if (key == Platform.KEY_DOWN) {
 			languageSelected = (languageSelected + 1) % languageItems.length;
+			revealLanguageSelection();
 			requestFrame();
 			return true;
 		}
 		if (key == Platform.KEY_UP) {
 			languageSelected = (languageSelected + languageItems.length - 1) % languageItems.length;
+			revealLanguageSelection();
 			requestFrame();
 			return true;
 		}
@@ -823,6 +833,13 @@ class UiWorkbenchHost implements WorkbenchHost {
 			return true;
 		}
 		return false;
+	}
+
+	function revealLanguageSelection():Void {
+		var top = COMPLETION_PADDING + languageSelected * (COMPLETION_ROW_HEIGHT + COMPLETION_ROW_GAP), bottom = top + COMPLETION_ROW_HEIGHT;
+		if (top < languageScroll.offsetY) languageScroll.jumpTo(0.0, top);
+		else if (bottom > languageScroll.offsetY + languageScroll.viewportHeight)
+			languageScroll.jumpTo(0.0, bottom - languageScroll.viewportHeight);
 	}
 
 	public function dismissLanguagePopup():Void {
@@ -911,16 +928,17 @@ class UiWorkbenchHost implements WorkbenchHost {
 			var rows:Array<NkView> = [];
 			var panelStyle = new LayoutStyle();
 			panelStyle.width = LayoutAxis.fixed(Math.max(1.0, Math.min(380.0, context.viewportWidth - 16.0)));
-			panelStyle.padding = new Insets(10.0, 8.0, 10.0, 8.0);
+			panelStyle.padding = new Insets(10.0, COMPLETION_PADDING, 10.0, COMPLETION_PADDING);
 			panelStyle.background = Color.rgba(0.11, 0.11, 0.13, 0.98);
 			panelStyle.direction = LayoutDirection.TopToBottom;
-			panelStyle.childGap = 4.0;
+			panelStyle.childGap = COMPLETION_ROW_GAP;
 			switch languageKind {
 				case LANG_COMPLETION:
 					for (index in 0...languageItems.length) {
 						var item = languageItems[index];
 						var rowStyle = new LayoutStyle();
 						rowStyle.width = LayoutAxis.grow();
+						rowStyle.height = LayoutAxis.fixed(COMPLETION_ROW_HEIGHT);
 						rowStyle.direction = LayoutDirection.LeftToRight;
 						var color = index == languageSelected ? Color.rgba(1.0, 1.0, 1.0, 1.0) : Color.rgba(0.75, 0.75, 0.78, 1.0);
 						rows.push(new Row("lang-row-" + index,
@@ -945,8 +963,10 @@ class UiWorkbenchHost implements WorkbenchHost {
 			if (area == null) area = languageArea;
 			var scrollStyle = new LayoutStyle();
 			scrollStyle.width = panelStyle.width;
-			scrollStyle.height = LayoutAxis.fit(0.0, Math.max(1.0, context.viewportHeight - 16.0));
-			var scroll = new ScrollView("language-scroll", content, scrollStyle);
+			var maxHeight = Math.max(1.0, context.viewportHeight - 16.0);
+			if (languageKind == LANG_COMPLETION) maxHeight = Math.min(COMPLETION_MAX_HEIGHT, maxHeight);
+			scrollStyle.height = LayoutAxis.fit(0.0, maxHeight);
+			var scroll = new ScrollView("language-scroll", content, scrollStyle, nativekit.ui.widgets.scroll.ScrollAxis.Vertical, languageScroll);
 			var popup = new Popup("language-popup", scroll, area == null ? 0.0 : area.x,
 				area == null ? 0.0 : area.y + area.height, null, dismissLanguagePopup);
 			popup.anchorRectProvider = caretRectProvider;

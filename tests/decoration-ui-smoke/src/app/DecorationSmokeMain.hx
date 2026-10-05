@@ -374,6 +374,10 @@ class DecorationSmokeApp extends ExosuitApp {
 				view.restoreCursor(0, 0);
 				new completion.ActiveCompletion(host, view, view.document, new BufferPosition(0, 0), new BufferPosition(0, 0),
 					[new completion.CompletionItem("alpha"), new completion.CompletionItem("beta")], () -> host.activeView() == view).show();
+			} else if ((phase == "popup-completion-long" || phase == "popup-completion-wrap")) {
+				var items:Array<completion.CompletionItem> = [];
+				for (index in 0...40) items.push(new completion.CompletionItem("suggestion" + index));
+				host.openLanguageCompletion(area, items, function(_) {});
 			} else if (phase == "popup-completion")
 				host.openLanguageCompletion(area, [new completion.CompletionItem("example")], function(_) {});
 			else if (phase == "popup-signature")
@@ -386,6 +390,8 @@ class DecorationSmokeApp extends ExosuitApp {
 			}
 		}
 		if (frames == 5 && StringTools.startsWith(phase, "popup-")) {
+			if ((phase == "popup-completion-long" || phase == "popup-completion-wrap"))
+				for (_ in 0...(phase == "popup-completion-wrap" ? 1 : 39)) ui.key(UiEventKind.KeyDown, phase == "popup-completion-wrap" ? UiKey.Up : UiKey.Down);
 			var view = host.activeView();
 			if (view == null) throw "popup fixture lost active document";
 			if (phase == "popup-live-completion") {
@@ -719,6 +725,16 @@ class DecorationSmokeApp extends ExosuitApp {
 					var area = host.textInputArea();
 					if (panel == null || panel.resolved == null || area == null) throw "missing resolved popup or caret";
 					var bounds = panel.resolved;
+					if ((phase == "popup-completion-long" || phase == "popup-completion-wrap")) {
+						var selected = findEditor(root, "lang-row-39");
+						var viewport = findEditor(root, "language-scroll");
+						if (selected == null || viewport == null) throw "completion lost selected row or scroll viewport";
+						var row = selected.globalBounds();
+						var visible = viewport.globalBounds();
+						if (row.y < visible.y - 0.1 || row.y + row.height > visible.y + visible.height + 0.1)
+							throw "keyboard-selected completion escaped popup viewport";
+						if (visible.height > 236.1) throw "completion list exceeded bounded height: " + visible.height;
+					}
 					if (bounds.width <= 0 || bounds.height <= 0 || bounds.x < -0.1 || bounds.y < -0.1 ||
 						bounds.x + bounds.width > frame.width + 0.1 || bounds.y + bounds.height > frame.height + 0.1)
 						throw "popup escaped viewport bounds";
