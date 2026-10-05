@@ -34,6 +34,7 @@ done
 (cd "$haxeon_root" && ./scripts/build-native.sh) >&2
 "$haxeon_root/.tools/haxe/haxe" --cwd "$haxeon_root" "$haxeon_root/haxeon-lsp.hxml" >&2
 "$root_dir/scripts/build.sh" >&2
+"$haxeon_root/scripts/haxeon" build --project "$root_dir/agent/haxeon.json" >&2
 
 short_revision=$(git -C "$root_dir" rev-parse --short=12 HEAD)
 name="exosuit-$short_revision-linux-x86_64"
@@ -41,29 +42,15 @@ mkdir -p "$root_dir/out" "$root_dir/dist"
 stage_parent=$(mktemp -d "$root_dir/out/.package.XXXXXX")
 stage="$stage_parent/$name"
 trap 'rm -rf "$stage_parent"' EXIT
-mkdir -p "$stage/tools" "$stage/lib" "$stage/defaults" "$stage/docs" "$stage/licenses" "$stage/stdlib"
-cp "$root_dir/graphical/build/host/main.hl" "$stage/exosuit.hl"
-cp "$haxeon_root/.tools/hashlink/hl" "$stage/tools/"
-cp -L "$haxeon_root/.tools/hashlink/libhl.so" "$stage/lib/libhl.so.1"
-ln -s libhl.so.1 "$stage/lib/libhl.so"
-cp "$haxeon_root/out/haxeon_runtime.hdll" "$stage/lib/"
-cp "$root_dir/graphical/build/host/native/pragtical_hx/libpragtical_hx.so" "$stage/lib/"
-cp -a "$root_dir/graphical/build/host/native/exosuit-ui-native/"*.so* "$stage/lib/"
-# Relocate only staged binaries; source build output retains its build paths.
-patchelf --set-rpath '$ORIGIN/../lib' "$stage/tools/hl"
-for library in "$stage/lib/"*.so* "$stage/lib/"*.hdll; do
-	[[ -L "$library" ]] || patchelf --set-rpath '$ORIGIN' "$library"
-done
-cp "$haxeon_root/out/haxeon-lsp.hl" "$stage/tools/"
-cp -R "$haxeon_root/stdlib/." "$stage/stdlib/"
-cp "$root_dir/packaging/haxeon-lsp" "$stage/tools/"
-cp "$root_dir/packaging/exosuit" "$stage/exosuit"
+"$root_dir/scripts/stage-runtime.sh" "$stage"
+mkdir -p "$stage/defaults" "$stage/docs" "$stage/licenses"
 cp "$root_dir/packaging/settings.json" "$stage/defaults/"
 cp "$root_dir/packaging/README.md" "$stage/README.md"
 cp "$root_dir/docs/"*.md "$stage/docs/"
 cp "$materia_root/nativekit/LICENSE" "$stage/licenses/NativeKit-LICENSE"
 cp "$haxeon_root/vendor/hashlink/LICENSE" "$stage/licenses/HashLink-LICENSE"
 cp "$haxeon_root/stdlib/LICENSE" "$stage/licenses/Haxe-stdlib-LICENSE"
+sed -n '31,42p' "$root_dir/native-packages/sqlite/vendor/sqlite3.c" > "$stage/licenses/SQLite-NOTICE"
 mkdir -p "$stage/licenses/seti"
 cp "$root_dir/graphical/assets/seti/LICENSE.txt" "$root_dir/graphical/assets/seti/ThirdPartyNotices.txt" "$root_dir/graphical/assets/seti/SOURCE.txt" "$stage/licenses/seti/"
 # Preserve native dependency notices with their original names and hierarchy.

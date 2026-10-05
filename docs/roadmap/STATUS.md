@@ -2,6 +2,47 @@
 
 Last updated: 2026-10-05.
 
+## M14 — idle service lifetime and runtime bundle, 2026-10-05
+
+Catalog-only workspace daemons now stop after 60 seconds without authenticated,
+fully negotiated clients. Every client or owned-session interval resets the grace;
+startup gets the same grace. Raw sockets and unauthenticated/preflight peers do not
+retain a daemon. The shared typed lifetime policy accepts an active-session count
+for the future runtime manager; no daemon-owned terminals/providers exist yet, so
+AgentMain currently supplies zero. Closing the UI only closes its client; a sibling
+or browser keeps the service alive. Explicit `--always-available`, or
+`EXOSUIT_AGENT_ALWAYS_AVAILABLE=1`, disables idle shutdown for new daemons. Existing
+service policy is not changed by reconnecting clients. An explicit service-stop UI
+and live policy changes are not delivered by this slice.
+
+Idle stop closes clients/listeners, SQLite and NativeKit, then reports completion;
+the manager removes its owned descriptor, retires the process group, reaps inherited
+lock holders and exits 0. Catalog/credentials remain for restart. Short real-manager
+acceptance covers an unnegotiated socket, two authenticated clients with one closing,
+a fresh grace after last disconnect, retained catalog, restart and detached opt-in
+availability. Policy tests cover the exact default deadline and future session
+retention; local and authenticated WebSocket tests check negotiated client counts.
+
+Release staging now copies the Python manager, matched agent bytecode/runner and
+SQLite library alongside the desktop VM/runtime. The installed editor selects its
+own manager; the manager executes its adjacent bundled runner instead of compiling
+sources. `stage-runtime.sh` centralizes the runtime copies and staged RPATH changes
+used by production packaging and developer relocation acceptance. A moved bundle
+(with spaces in installation/project paths) starts and reuses its service with
+source/compiler paths disabled, then stops after the default one-minute idle grace
+and retains its catalog. Runtime and managed-startup prerequisites are documented.
+
+Reference and self-hosted lifecycle acceptance both pass. Real native local and
+authenticated WebSocket client-count coverage passes; the relocated desktop
+acceptance covers actual default idle shutdown and shared reuse. The full Exosuit
+headless suite passes, including both portable Wasm compatibility gates.
+
+Release revision/dirty-input guards are preserved. The release archive command
+refuses the stale Haxeon pin (expected `6d8593d5`, current `5baacfb2`); no pins were
+changed and no release archive was published. Relocated current-build acceptance
+uses the same staging routine without bypassing those publication guards. M14.3
+runtime/provider ownership, checkpoints and resource reconciliation remain open.
+
 ## M14 — Linux desktop service attachment, 2026-10-05
 
 The repository desktop now discovers or starts a detached daemon for the active

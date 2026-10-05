@@ -24,6 +24,7 @@ class RpcTestMain {
 	}
 
 	static function main():Void {
+		WorkspaceLifetimeTests.run();
 		RpcCompatibilityTests.run();
 		Sys.println("PASS: frozen RPC wire vectors, schema evolution and explicit method errors");
 		WorkspaceRpcTests.run();

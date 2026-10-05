@@ -26,7 +26,8 @@ and credential file path. The credential itself is never included. Discovery
 is verified by the Linux editor through negotiated capabilities and a typed
 identity query before catalog subscription. Opening a folder through
 `scripts/run.sh` discovers or starts the detached daemon; switching folders
-selects the corresponding service. Closing a window leaves it running. To stop, send SIGTERM to the descriptor's `managerPid`. Normal stop
+selects the corresponding service. Closing a window closes only its client;
+the daemon stops after a minute without authenticated clients. To stop, send SIGTERM to the descriptor's `managerPid`. Normal stop
 removes owned discovery and stops the child process group while retaining the
 database and credential. Replaced/missing storage stops the daemon rather than
 silently opening a fresh catalog. Linux startup is tested; Windows management is
@@ -37,7 +38,7 @@ For direct fixtures, build with
 Run arguments are:
 
 ```text
-PRIVATE_SOCKET LOOPBACK_WS_PORT TOKEN_FILE SEED_EPOCH [DATABASE [WORKSPACE_ROOT [INSTANCE]]]
+PRIVATE_SOCKET LOOPBACK_WS_PORT TOKEN_FILE SEED_EPOCH [DATABASE [WORKSPACE_ROOT [INSTANCE [IDLE_MILLISECONDS]]]]
 ```
 
 The caller supplies a private owner-only directory, a 0600 credential file
@@ -54,9 +55,23 @@ planned authenticated secure relay and endpoint/session authorization.
 `--discover` validates existing private discovery without starting a daemon;
 exit 4 means no discovery. `--wire` emits the typed JsonWire profile for the
 native client. The launcher is selected with `EXOSUIT_AGENT_LAUNCHER`, or found
-from a repository launch directory. Release bundle installation of the launcher
-and daemon is not yet delivered.
+from a repository launch directory. Release bundles install the manager beside a matched `exosuit-agent` runner and
+bytecode, so managed startup does not compile sources or require Haxeon.
 
+The default idle grace is 60 seconds, including initial startup. `--idle-seconds N`
+changes it for new managed daemons; `--always-available` (or
+`EXOSUIT_AGENT_ALWAYS_AVAILABLE=1`) explicitly disables idle shutdown. Unnegotiated
+or unauthenticated sockets do not keep it alive. The future runtime manager must
+supply its active session count to the shared lifetime policy before terminals or
+providers are hosted. Existing policies are not changed by client attachment.
+Normal idle stop closes clients/listeners, releases SQLite and the native runtime,
+then the manager retires discovery and its lifetime lock with exit 0. Explicit
+SIGTERM stop uses the same owned-process cleanup. There is no session-stop UI yet.
+
+Run `python3 scripts/test-agent-idle.py` for real idle shutdown, client retention,
+restart and detached availability. `bash scripts/test-runtime-bundle.sh` exercises
+already-built assets through the production staging routine after relocation,
+without publishing a release or modifying locked revisions.
 Run `bash scripts/test-workspace-attachment.sh` for discovery, identity, shared
 reuse and stale restart acceptance. `python3 scripts/test-workspace-attachment-ui.py`
 checks actual desktop attachment and reuse across windows under Xvfb.

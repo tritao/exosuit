@@ -15,6 +15,15 @@ class WorkspaceRpcServer {
 
 	public final options:RpcPeerOptions;
 
+	/** Only authenticated, fully negotiated connections keep the daemon alive. */
+	public function clientCount():Int {
+		var count = 0;
+		for (peer in peers)
+			if (peer.connection != null && peer.connection.isOpen())
+				count++;
+		return count;
+	}
+
 	public function new(service:WorkspaceService, clock:Void->Float, ?capabilities:Array<String>, ?identity:WorkspaceIdentity) {
 		this.service = service;
 		this.clock = clock;

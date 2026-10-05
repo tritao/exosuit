@@ -9,7 +9,8 @@ completed connection churn, slow-consumer isolation and frozen native/Wasm
 compatibility vectors now pass. The first catalog also has durable SQLite state,
 operation outcomes and replay history, plus managed POSIX startup. The Linux
 repository desktop validates typed daemon identity and automatically reuses or
-starts its local service. Release bundle wiring remains pending. Terminal/agent
+starts its local service. Release staging includes the manager and daemon; idle policy stops an unused
+catalog-only service after one minute, with explicit always-available opt-in. Terminal/agent
 resource reconciliation remains tied to M14 runtime delivery. See
 [WORKSPACE-RPC.md](WORKSPACE-RPC.md) for the consumer's exact guarantees and limits.
 Required by the Exosuit workspace service in [M14](14-workbench.md). This plan

@@ -83,6 +83,7 @@ class TransportTestMain {
 				require(clock() < deadline, "Real handshake/query timed out");
 				step();
 			}
+			require(server.clientCount() == 1, "Authenticated client missing from daemon lifetime count");
 			var connection = client.current();
 			if (connection == null)
 				throw "Missing connection";

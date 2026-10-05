@@ -113,12 +113,22 @@ Identity fields 1/2/3 are workspace, canonical root and manager instance. Dispat
 requires read and identity grants; manually configured servers without identity
 do not advertise that capability. Wrong roots fail closed; instance changes cause
 rediscovery. Folder changes retire old callbacks and select the corresponding
-daemon; closing a window only closes its client. Stale discovery triggers safe
+daemon; closing a window only closes its client. After 60 seconds without authenticated
+clients the catalog-only daemon closes listeners, SQLite and its native runtime,
+then the manager removes owned discovery and exits successfully. Handshake-only
+or unauthenticated sockets do not reset the idle grace. Explicit
+`--always-available` or `EXOSUIT_AGENT_ALWAYS_AVAILABLE=1` disables that timeout
+for newly started daemons. Future daemon-owned terminal/provider sessions must
+contribute to the lifetime policy before those resources are delivered. Stale discovery triggers safe
 exclusive startup, with exit 3 handled by rediscovery. Attachment uses the existing
 background poll and does not force continuous redraws.
 
 `scripts/run.sh` supplies the repository launcher; `EXOSUIT_AGENT_LAUNCHER` can
-override its path. Release bundles still need launcher/daemon installation.
+override its path. Release staging installs the Python manager, matched daemon bytecode/runner and
+SQLite library beside the desktop runtime. The installed launcher selects its own
+manager; discovery uses the same protocol. Relocation acceptance runs without
+source/compiler access and observes the default one-minute shutdown. Release
+revision checks remain enforced by `package-release.sh`.
 Runtime/provider supervision, history files/checkpoints and volatile terminal
 operation on storage loss remain M14.3 work. The manager currently stops on
 catalog storage loss rather than providing that future terminal fallback.

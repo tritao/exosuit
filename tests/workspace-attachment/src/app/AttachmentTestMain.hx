@@ -43,6 +43,21 @@ class AttachmentTestMain {
         a.ready && b.ready && a.instance == b.instance && a.view()[0].cwd == sys.FileSystem.fullPath(root),
         "Concurrent clients did not attach to one validated daemon"
       );
+      if (mode == "hold") {
+        var holdUntil = clock() + 6000;
+        while (clock() < holdUntil) {
+          if (clock() >= holdUntil - 3000) a.dispose();
+          step();
+          require(b.ready && b.error == null, "Connected sibling lost during idle grace");
+        }
+        Sys.println("PASS: authenticated clients keep daemon alive beyond its idle timeout");
+        a.dispose();
+        b.dispose();
+        processes.shutdown();
+        runtime.dispose();
+        platform.Native.shutdown();
+        return;
+      }
       var previousInstance = a.instance, previousEpoch = a.epoch();
       a.dispose();
       for (_ in 0...8) step();

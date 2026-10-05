@@ -2,5 +2,6 @@
 set -euo pipefail
 install_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 export LD_LIBRARY_PATH="$install_dir/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export EXOSUIT_AGENT_LAUNCHER="${EXOSUIT_AGENT_LAUNCHER:-$install_dir/tools/run-agent.py}"
 export HAXEON_LSP="${HAXEON_LSP:-$install_dir/tools/haxeon-lsp}"
 exec "$install_dir/tools/hl" "$install_dir/exosuit.hl" "$@"

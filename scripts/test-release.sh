@@ -26,5 +26,7 @@ portable="$fixture/portable state"
 [[ -s "$fixture/capture/app-state.json" ]]
 echo "PASS: unpacked graphical artifact launched outside the source tree"
 
+python3 "$root_dir/scripts/test-bundled-workspace.py" "$install_dir"
+
 HAXEON_LSP="$install_dir/tools/haxeon-lsp" "$root_dir/scripts/test-haxeon-lsp.sh"
 echo "PASS: unpacked artifact completed the real Haxeon language-service route"

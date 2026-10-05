@@ -126,13 +126,15 @@ def main():
     parser.add_argument('--state-dir', type=Path)
     parser.add_argument('--wire', action='store_true', help='Emit typed JsonWire discovery output for native clients')
     parser.add_argument('--port', type=int, default=0)
+    parser.add_argument('--idle-seconds', type=int, default=60, help='Stop after this many seconds without authenticated clients (default: 60)')
+    parser.add_argument('--always-available', action='store_true', default=os.environ.get('EXOSUIT_AGENT_ALWAYS_AVAILABLE') == '1', help='Keep the service running without clients for remote availability')
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument('--discover', action='store_true', help='Read private discovery hints without launching or trusting daemon identity')
     modes.add_argument('--detach', action='store_true', help='Wait for discovery readiness, then leave the manager running')
     args = parser.parse_args()
     root = args.workspace.resolve(strict=True)
-    if not root.is_dir() or not 0 <= args.port <= 65535:
-        raise RuntimeError('Expected a workspace directory and a valid loopback port')
+    if not root.is_dir() or not 0 <= args.port <= 65535 or not 1 <= args.idle_seconds <= 86400:
+        raise RuntimeError('Expected a workspace directory, a valid port and idle seconds in 1..86400')
     os.umask(0o077)
     key = hashlib.sha256(os.fsencode(root)).hexdigest()[:20]
     base = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state'))
@@ -153,6 +155,9 @@ def main():
             return 4
     if args.detach:
         command = [sys.executable, str(Path(__file__).resolve()), str(root), '--state-dir', str(directory), '--port', str(args.port)]
+        command.extend(['--idle-seconds', str(args.idle_seconds)])
+        if args.always_available:
+            command.append('--always-available')
         # Discovery must belong to this manager, not a stale descriptor from an earlier launch.
         log_path = directory / 'manager.log'
         fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
@@ -229,7 +234,12 @@ def main():
                 port = probe.getsockname()[1]
         haxeon = os.environ.get('HAXEON_BIN', str(Path(os.environ.get('HAXEON_ROOT', str(REPO.parent / 'haxeon'))) / 'scripts/haxeon'))
         compiler_mode = ['--self-hosted'] if os.environ.get('HAXEON_SELF_HOSTED') == '1' else []
-        command = [haxeon, 'run', '--project', str(REPO / 'agent/haxeon.json'), *compiler_mode, '--', str(address), str(port), str(credential), secrets.token_hex(16), str(database), str(root), generation]
+        daemon_args = [str(address), str(port), str(credential), secrets.token_hex(16), str(database), str(root), generation, str(0 if args.always_available else args.idle_seconds * 1000)]
+        bundled_runner = Path(__file__).resolve().with_name('exosuit-agent')
+        if bundled_runner.is_file():
+            command = [str(bundled_runner), *daemon_args]
+        else:
+            command = [haxeon, 'run', '--project', str(REPO / 'agent/haxeon.json'), *compiler_mode, '--', *daemon_args]
         # The child inherits the lifetime lock: killing the manager alone cannot unlock a live daemon.
         child = subprocess.Popen(command, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True, pass_fds=(lock,))
         with selectors.DefaultSelector() as selector:
@@ -238,6 +248,7 @@ def main():
             pending = b''
             ready = False
             database_identity = None
+            idle_shutdown = False
             while not stopping:
                 for event, _ in selector.select(0.1):
                     chunk = os.read(event.fileobj.fileno(), 65536)
@@ -249,6 +260,8 @@ def main():
                     while b'\n' in pending:
                         line, pending = pending.split(b'\n', 1)
                         print(line.decode(errors='replace'), flush=True)
+                        if line == b'STOPPED: exosuit-agent idle':
+                            idle_shutdown = True
                         if line.startswith(b'READY: exosuit-agent') and not ready:
                             info = private_file(database)
                             database_identity = (info.st_dev, info.st_ino)
@@ -257,6 +270,8 @@ def main():
                             emit_discovery(descriptor, args.wire)
                             ready = True
                 if child.poll() is not None:
+                    if child.returncode == 0 and idle_shutdown:
+                        return 0
                     raise RuntimeError(f'Workspace daemon exited with status {child.returncode}')
                 if not ready and time.monotonic() >= deadline:
                     raise RuntimeError('Workspace daemon did not become ready')
