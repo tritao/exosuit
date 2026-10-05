@@ -70,10 +70,34 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements workspace.c
   var agentCatalog:Null<AgentCatalog>;
   var agentConnection:Null<RpcConnection>;
   var discovery:Null<AgentDiscovery>;
+  var discoveryToken=0;
+  var pendingDiscovery:Null<AgentDiscoveryQuery>;
+  var discoveryNext:Float=0;
+  var discoveryDeadline:Float=0;
   public function discoveredAgents():Null<AgentDiscovery> return discovery;
   public function discoverAgents(group:String,cursor:Null<String>):Void {
-    var c=rpc();if(c==null) return;
-    c.call(WorkspaceAgentProtocol.DISCOVER,{workspace:"workspace",instance:instance,group:group,cursor:cursor},20000,function(v) {if(rpc()!=c) return;discovery=v;agentsError=null;agentsRevision++;},function(e) {if(rpc()==c) {agentsError=e.message;agentsRevision++;}});
+    if(rpc()==null) return;
+    discoveryToken++;discovery=null;agentsError=null;agentsRevision++;
+    pendingDiscovery={workspace:"workspace",instance:instance,group:group,cursor:cursor};
+    discoveryDeadline=clock()+60000;discoveryNext=0;
+    continueDiscovery();
+  }
+  function continueDiscovery():Void {
+    var c=rpc(),q=pendingDiscovery;
+    if(c==null||q==null||clock()<discoveryNext) return;
+    if(clock()>=discoveryDeadline||q.instance!=instance) {
+      pendingDiscovery=null;agentsError="Codex thread discovery did not complete";agentsRevision++;return;
+    }
+    var token=discoveryToken;discoveryNext=discoveryDeadline;
+    c.call(WorkspaceAgentProtocol.DISCOVER,q,20000,function(v) {
+      if(rpc()!=c||token!=discoveryToken) return;
+      pendingDiscovery=null;discovery=v;agentsError=null;agentsRevision++;
+    },function(e) {
+      if(rpc()!=c||token!=discoveryToken) return;
+      // Discovery is read-only; a starting provider can be retried without duplicating a session or turn.
+      if(e.code=="provider_starting"&&!e.ambiguous) {discoveryNext=clock()+500;return;}
+      pendingDiscovery=null;agentsError=e.message;agentsRevision++;
+    });
   }
   var agentViews:Map<String,AgentView> = [];
   var agentTokens:Map<String,Int> = [];
@@ -428,7 +452,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements workspace.c
 
   function stopConnection():Void {
     catalog = null;
-    agentConnection=null;agentCatalog=null;discovery=null;agentViews.clear();agentTokens.clear();agentsError=null;agentsPending=false;agentMutation=false;pendingAgentCreate=null;agentCreated=null;agentsNext=0;agentSelection++;agentsRevision++;
+    agentConnection=null;agentCatalog=null;discovery=null;pendingDiscovery=null;discoveryToken++;agentViews.clear();agentTokens.clear();agentsError=null;agentsPending=false;agentMutation=false;pendingAgentCreate=null;agentCreated=null;agentsNext=0;agentSelection++;agentsRevision++;
     catalogPending = false;
     catalogMutation = false;
     catalogKey = "";
@@ -546,11 +570,12 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements workspace.c
     var lost=agentConnection!=null;
     agentConnection=current;
     agentsPending=false;agentMutation=false;pendingAgentCreate=null;agentCreated=null;
-    agentCatalog=null;discovery=null;agentViews.clear();agentTokens.clear();agentsNext=0;agentsRevision++;
+    agentCatalog=null;discovery=null;pendingDiscovery=null;discoveryToken++;agentViews.clear();agentTokens.clear();agentsNext=0;agentsRevision++;
     if(lost) agentsError="Workspace connection changed; reconcile the agent before retrying";
   }
   public function poll():Void {
     fenceAgentConnection();
+    continueDiscovery();
     continueAgentCreate();
     if (disposed || root == null || error != null) return;
     var now = clock(), process = helper;

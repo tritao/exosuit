@@ -46,7 +46,8 @@ with tempfile.TemporaryDirectory(prefix="exgroupsui-") as temporary:
                 time.sleep(2)
                 if index in (1, 2):
                     layout = json.loads((fixture / "0/layout.json").read_text())
-                    click(window, locate(layout, "New group")); time.sleep(0.5)
+                    click(window, locate(layout, "Workbench actions")); time.sleep(0.3)
+                    subprocess.run(["xdotool", "key", "--clearmodifiers", "Home", "Return"], check=True); time.sleep(0.5)
                     if index == 2:
                         editor = json.loads((fixture / "1/layout.json").read_text())
                         field(window, editor, "Group name", "Tools")

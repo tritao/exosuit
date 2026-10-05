@@ -94,6 +94,7 @@ class ExosuitApp implements DesktopUiApplication {
  var codexPoll:Float=0;
  var agentRevision=-1;
 	var groupEditor:Null<GroupEditorPanel>;
+	var agentAttach:Null<AgentAttachPanel>;
 	var workspaceAttachment:Null<workspace.client.WorkspaceAttachment>;
 	var workspaceStatus:String = "";
 	var workspaceError:Null<String>;
@@ -577,6 +578,16 @@ class ExosuitApp implements DesktopUiApplication {
 				0.0, 0.0, 60, LayoutAxis.grow(), LayoutAxis.grow()));
 		}
 
+		if (agentAttach != null) {
+			if (!agentAttach.isCurrent()) agentAttach = null;
+			else {
+				var dismiss = function() { agentAttach = null; requestFrame(); };
+				layers.push(new StackChild("attach-agent-dialog", new haxeon.ui.widgets.overlays.Dialog(
+					"attach-agent-dialog", "Attach Codex thread", agentAttach, dismiss,
+					Math.max(240, Math.min(560, viewportWidth - 48))), 0, 0, 60, LayoutAxis.grow(), LayoutAxis.grow()));
+			}
+		}
+
 		if (settingsPanel != null) {
 			if (settingsPanel.catalog.store != application.settings.store) {
 				var filter = settingsPanel.filter, advanced = settingsPanel.showAdvanced, category = settingsPanel.selectedCategory;
@@ -682,7 +693,7 @@ class ExosuitApp implements DesktopUiApplication {
 		workbenchClient = client;
 		terminalBrowserPanel = new WorkspaceTerminalsPanel(client, openCatalogTerminal, forgetCatalogTerminal, requestFrame);
 		workbenchPanel = new WorkbenchPanel(client, openCatalogTerminal, newGroupedTerminal, editWorkspaceGroup,
-			function(path) application.openArgument(path), openWorkspaceTerminals, requestFrame, openCodexAgent);
+			function(path) application.openArgument(path), openWorkspaceTerminals, requestFrame, openCodexAgent, showWorkbenchMenu, attachCodexThread);
 		registerSidebarDestination("workbench", IconName.Terminal, function() return workbenchPanel == null ? new Text("Workspace disconnected") : workbenchPanel,
 			new haxeon.ui.widgets.sidebar.SidebarModeOptions("Workbench", 20, true));
 	}
@@ -715,6 +726,35 @@ class ExosuitApp implements DesktopUiApplication {
 		if (terminal == null) return;
 		host.panelTerminals.push(terminal); host.activePanelTerminalIndex = host.panelTerminals.length - 1;
 		dock.open("terminal"); dock.activate("terminal"); pendingTerminalFocus = true; requestFrame();
+	}
+
+	function attachCodexThread(group:workspace.service.WorkspaceProtocol.WorkspaceGroup):Void {
+		if (workbenchClient == null || workbenchPanel == null) return;
+		var cwd = workbenchPanel.model.directory(group);
+		if (cwd == null) return;
+		agentAttach = new AgentAttachPanel(workbenchClient, group, cwd,
+			function() { agentAttach = null; requestFrame(); }, openCodexAgent, requestFrame);
+		requestFrame();
+	}
+
+	function showWorkbenchMenu(items:Array<haxeon.ui.widgets.overlays.MenuItem>, event:UiEvent, valid:Void->Bool):Void {
+		var x = event.x, y = event.y;
+		var node = ui.root == null ? null : ui.root.find(event.target);
+		if (node != null && node.resolved != null) {
+			var bounds = node.globalBounds(); x = bounds.x; y = bounds.y + bounds.height;
+		}
+		var actions:Array<haxeon.ui.widgets.overlays.MenuItem> = [];
+		for (item in items) {
+			var action = item;
+			actions.push(new haxeon.ui.widgets.overlays.MenuItem(item.key, item.label, function() {
+				contextMenu = null;
+				if (valid() && action.enabled) action.onSelect();
+				requestFrame();
+			}, item.enabled));
+		}
+		contextMenu = new CommandMenu(application.commands, application.context, [], x, y, valid,
+			function() { contextMenu = null; requestFrame(); }, actions);
+		requestFrame();
 	}
 
 	function editWorkspaceGroup(group:workspace.service.WorkspaceProtocol.WorkspaceGroup, create:Bool):Void {

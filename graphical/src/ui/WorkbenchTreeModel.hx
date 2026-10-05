@@ -116,7 +116,7 @@ class WorkbenchTreeModel implements TreeViewModel {
 					parent = ancestor == null ? null : ancestor.parent;
 				}
 			}
-			return new Text(group.name + (running > 0 ? " · " + running + " running" : "") + (group.cwd == null ? "" : " · " + group.cwd));
+			return new WorkbenchGroupLabel(group.name, directory(group), workspaceRoot, running);
 		}
 		if (StringTools.startsWith(key, "a:")) {
 			var a = agents.get(key.substring(2));

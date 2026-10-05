@@ -2,6 +2,27 @@
 
 Last updated: 2026-10-05.
 
+## Workbench navigation cleanup, 2026-10-05
+
+Workbench now puts the named group/session tree below a compact toolbar for new
+terminals, new Codex sessions and additional actions. Group creation/editing,
+opening the directory, existing-thread attachment and terminal management live
+in toolbar/group context menus. Group names remain prominent while directory
+labels are shortened and muted; full directory paths remain in accessibility
+labels. Codex's lazy state is presented as a quiet “on demand” footer.
+
+Existing-thread attachment opens a modal pinned to the selected group and
+workspace instance, with directory-scoped discovery, title filtering and an
+explicit thread-ID field. Discovery waits through provider startup with bounded,
+read-only retries; request generations fence stale results and connection changes.
+Failures expose Retry, and attachment keeps the existing create/idempotence flow.
+
+Desktop acceptance passes for compact navigation, group actions, scoped discovery,
+search, existing-thread attachment, group/terminal creation and restoration, and
+the existing Codex conversation/approval flow. The new discovery/attachment check
+ran in an isolated snapshot to avoid concurrent process/plugin-host edits changing
+native build inputs. A narrow-pane capture confirms the toolbar and tree fit.
+
 ## Haxeon package migration and sidebar overflow, 2026-10-05
 
 Merged Exosuit remote main `5906e84` while preserving the local Codex milestones.
