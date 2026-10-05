@@ -24,6 +24,7 @@ class RpcTestMain {
 	}
 
 	static function main():Void {
+		RpcLifecycleTests.run();
 		RpcDispatchTests.run();
 		var hello:RpcEnvelope = Hello(1, 1, "exosuit-test", ["workspace.read", "workspace.events"]);
 		var encoded = RpcProtocol.encode(hello, 1024);

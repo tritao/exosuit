@@ -1,9 +1,9 @@
 # Haxeon typed RPC foundation
 
 Status: RPC.1 in progress; envelopes, framing, bounded transport and typed
-asynchronous dispatch with deadlines/cancellation pass native consumer tests.
-Handshake/reconnect and workspace integration remain pending. Required by the
-Exosuit workspace service in [M14](14-workbench.md). This plan authorizes a
+asynchronous dispatch, handshake and reconnect pass native consumer tests.
+Workspace queries, subscription recovery and mutation reconciliation remain
+pending. Required by the Exosuit workspace service in [M14](14-workbench.md). This plan authorizes a
 small general-purpose Haxeon library, developed alongside real workspace
 methods, rather than an Exosuit-specific framework or a new serialization layer.
 
@@ -25,7 +25,7 @@ outside the RPC core. Codex's app-server protocol stays inside its adapter.
 
 ## RPC.1 — Runtime and reconnect, first delivery
 
-- [ ] Define typed request/response, notification, cancellation and structured
+- [x] Define typed request/response, notification, cancellation and structured
   error envelopes, protocol/capability negotiation and connection-scoped ids.
   Distinguish application version from framing/codec version. Capability-gate
   new enum variants; validate required values after decoding.
@@ -36,13 +36,13 @@ outside the RPC core. Codex's app-server protocol stays inside its adapter.
   transport. Local streams use bounded incremental HMPK assembly; binary
   WebSocket messages supply their own boundaries. Bound allocation before
   assembling payloads, pending calls, queued bytes and work per poll.
-- [ ] Include connection lifecycle and reconnect in the first slice: explicit
+- [x] Include connection lifecycle and reconnect in the first slice: explicit
   connecting/handshaking/connected/disconnected/closed states, bounded backoff
   with jitter, cancellable attempts and a fresh handshake on each connection.
   Inject clock/scheduler/randomness for deterministic tests. Explicit close
   disables reconnect; incompatible protocol or authentication refusal is
   surfaced rather than retried indefinitely.
-- [ ] Fence responses, callbacks and subscriptions by connection generation.
+- [x] Fence responses, callbacks and subscriptions by connection generation.
   Disconnect completes pending calls with an explicit failure; if a request
   may have reached the server, preserve that ambiguity. Never silently replay
   pending requests or widen capabilities/policy during reconnect.

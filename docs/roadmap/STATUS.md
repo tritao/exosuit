@@ -2,6 +2,49 @@
 
 Last updated: 2026-10-05.
 
+## Haxeon RPC.1 — handshake and reconnect, 2026-10-05
+
+Haxeon **51eaaa6a** adds immutable peer options, bounded client/server
+handshake and a reconnecting client over an asynchronous connector contract.
+Protocol and codec versions are independent from the application version.
+Capability negotiation intersects offers, checks requirements and rejects
+unoffered capabilities. Reconnect can reduce the accepted capability ceiling;
+regaining permissions requires an explicit new client/policy decision. Adapter
+transport authentication precedes the handshake; service authorization runs
+before any privileged connection is published.
+
+Every attempt has a fresh generation. Stale transport completions are closed,
+old response contexts cannot respond and accepted calls fail with ambiguity on
+disconnect. No request is replayed. Explicit close cancels attempts and disables
+retry; connect/handshake deadlines, exponential capped backoff and injected jitter
+are deterministic. Authentication and compatibility refusals terminate retries.
+The host owns its scheduler, polls on readiness and uses `nextWakeAt()` to arm
+its timer. The ready hook exposes the fresh generation for explicit application
+resource attachment or subscription restoration; application cursors and gap
+recovery are still pending.
+
+Native consumer tests cover synchronous and delayed connection completion,
+timeouts, cancellation, duplicate/stale callbacks, refusal delivery, independent
+codec/version checks, capability loss/widening, backoff/jitter and an accepted
+mutation interrupted before reply. A portable lifecycle fixture also freezes a
+Hello MessagePack vector and exercises typed calls and reconnect.
+
+The first full gate exposed a Wasm GC compiler defect: a native static function
+used as a callback (`Bytes.ofString`) had no emitted closure target, although its
+direct calls worked. A standalone `native-static-codec` reducer covers this valid
+code. Haxeon **b7a7672f** makes Wasm GC emit wrappers for address-taken runtime natives, preserving
+their declared names and lowering their ABI symbols; the RPC API needs no shim.
+The final normal Haxeon `./scripts/test.sh` passes formatting, native build,
+**485 compiler/runtime cases**, integrations, both Wasm parity targets and
+Wasmtime. The registered Exosuit RPC consumer also passes. Evidence:
+`/tmp/haxeon-rpc-lifecycle-full-final.log` and `/tmp/exosuit-rpc-lifecycle.log`.
+The failing initial Wasm gate is preserved in `/tmp/haxeon-rpc-lifecycle-full.log`.
+
+Next: consume the runtime with an Exosuit read-only workspace query, sequenced
+subscription with cursor/gap recovery and an operation-id mutation whose lost
+reply is reconciled without duplicate execution. RPC.1 is not yet complete;
+real local/WebSocket adapters and daemon deployment remain later slices.
+
 ## Haxeon RPC.1 — typed asynchronous dispatch, 2026-10-05
 
 Haxeon **cb337303** adds typed `RpcMethod<Request, Response>` descriptors,
