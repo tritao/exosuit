@@ -30,8 +30,10 @@ leave other folders' sessions running.
 - [x] Gate document symbols, find references and rename on negotiated
   capabilities. Show references in a navigable list. Apply rename through the
   existing revision-checked transactional workspace edits.
-- [ ] Bridge these commands into the palette with shortcuts. Symbols, references,
-  rename and completion have defaults; remaining language shortcuts are pending.
+- [x] Bridge these commands into the palette with shortcuts. Completion uses
+  Ctrl+Space, hover Ctrl+Alt+Space, signature help Ctrl+Shift+Space, definition
+  Ctrl+Alt+G, symbols Ctrl+Shift+G, references Ctrl+Shift+H and rename Ctrl+Alt+H.
+  Unsupported commands leave keyboard input unconsumed.
 
 Acceptance: the fake-server tests are extended to symbols, references and
 rename, including a stale-revision rename that is rejected. The real Haxeon

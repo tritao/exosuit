@@ -130,6 +130,9 @@ class Application {
 		keymap.add(Platform.KEY_H, Platform.MOD_CTRL | Platform.MOD_SHIFT, ["language:find-references"]);
 		keymap.add(Platform.KEY_H, Platform.MOD_CTRL | Platform.MOD_ALT, ["language:rename-symbol"]);
 		keymap.add(Platform.KEY_SPACE, Platform.MOD_CTRL, ["language:complete"]);
+		keymap.add(Platform.KEY_SPACE, Platform.MOD_CTRL | Platform.MOD_ALT, ["language:hover"]);
+		keymap.add(Platform.KEY_SPACE, Platform.MOD_CTRL | Platform.MOD_SHIFT, ["language:signature-help"]);
+		keymap.add(Platform.KEY_G, Platform.MOD_CTRL | Platform.MOD_ALT, ["language:go-to-definition"]);
 
 		root.configureWelcomeActions({
 			recentProjects: this.recentProjects.paths,

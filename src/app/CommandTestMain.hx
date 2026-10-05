@@ -21,6 +21,18 @@ class CommandTestMain {
 			root:RootView = cast application.root,
 			registry = application.commands, keymap = application.keymap,
 			context = application.context, performed = 0;
+		var languageShortcuts = [
+			{key: Platform.KEY_SPACE, modifiers: Platform.MOD_CTRL | Platform.MOD_ALT, command: "language:hover"},
+			{key: Platform.KEY_SPACE, modifiers: Platform.MOD_CTRL | Platform.MOD_SHIFT, command: "language:signature-help"},
+			{key: Platform.KEY_G, modifiers: Platform.MOD_CTRL | Platform.MOD_ALT, command: "language:go-to-definition"}
+		];
+		for (shortcut in languageShortcuts) {
+			require(!keymap.onKeyPressed(shortcut.key, shortcut.modifiers, context), "unsupported language shortcut consumed input");
+			var invoked = false;
+			registry.add(shortcut.command, function(context) { invoked = true; });
+			require(keymap.onKeyPressed(shortcut.key, shortcut.modifiers, context) && invoked, "language shortcut did not dispatch " + shortcut.command);
+			registry.add(shortcut.command, function(context) {}, context -> false);
+		}
 		registry.add("test:disabled", function(context) { performed = 1; }, context -> false);
 		registry.add("test:fallback", function(context) { performed = 2; }, null, "Run the fallback command");
 		var available = registry.availableCommands(context);

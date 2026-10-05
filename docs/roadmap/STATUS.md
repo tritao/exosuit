@@ -2,6 +2,16 @@
 
 Last updated: 2026-10-05.
 
+## M10.2 — remaining language shortcuts, 2026-10-05
+
+Added hover (Ctrl+Alt+Space), signature help (Ctrl+Shift+Space) and definition
+(Ctrl+Alt+G) defaults to the common keymap. The existing UIKit bridge maps
+these keys/modifiers into its command registry. The command test verifies
+dispatch and that unavailable language services do not consume these keys.
+`../haxeon/scripts/haxeon run --project tests/command-test/haxeon.json` passed.
+Completion filtering and the real-server graphical acceptance remain open;
+this check proves headless dispatch, not graphical interaction.
+
 ## Workbench UX — named groups with working directories, 2026-10-05
 
 User requires Sakura-style named groups associated with working directories.
