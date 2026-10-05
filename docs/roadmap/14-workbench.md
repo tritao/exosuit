@@ -120,6 +120,12 @@ from terminal sessions: a Codex conversation is a thread with turns and items,
 not a terminal byte stream. Before implementing, check installed CLI help and
 generate the Codex protocol schema for that exact version.
 
+Sakura is useful reference input for workspace ownership, terminal replay,
+bounded queues and failure tests. Its Codex integration predates the shared
+app-server and is explicitly excluded as a provider reference. Base the Codex
+adapter on current official protocol documentation, installed CLI/schema and
+shared-daemon acceptance tests; do not port Sakura's Codex helpers or hooks.
+
 Research baseline, 2026-10-05: installed `codex-cli 0.160.0` exposes
 `app-server daemon`, `app-server proxy`, `agents`, `--remote` and `--no-daemon`.
 Its generated stable schema includes thread start/list/read/resume, turn

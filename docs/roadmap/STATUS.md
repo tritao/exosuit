@@ -2,6 +2,15 @@
 
 Last updated: 2026-10-05.
 
+## Codex reference correction, 2026-10-05
+
+User explicitly excludes Sakura's Codex integration: it predates the shared
+app-server. Recorded the exclusion in M14. Generic Sakura workspace/terminal
+ownership, replay/backpressure and failure tests remain useful references;
+Codex helpers/hooks/provider lifecycle do not. Current official protocol,
+installed version-matched schema and shared-daemon tests define our Codex
+integration. Documentation diff checked; no source implementation changed.
+
 ## Shared workspace protocol contract, 2026-10-05
 
 Recorded one compact WORKSPACE-PROTOCOL.md rather than expanding into separate
