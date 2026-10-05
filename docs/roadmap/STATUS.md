@@ -2,6 +2,25 @@
 
 Last updated: 2026-10-05.
 
+## M12.2 — native move/wheel modifiers, 2026-10-05
+
+UIKit/materia commit **f05fce913** preserves the window's ordered modifier state
+for NativeKit move/wheel events, whose payloads omit modifiers. Key and pointer
+button snapshots update the adapter state; modifier-key actions normalize
+pre-action (GTK) and post-action snapshots. Held left/right modifier keys are
+tracked independently so releasing one Shift does not release the other.
+Foreign-window input cannot update state. Focus loss and detach clear it.
+No NativeKit ABI change or per-event allocation was required.
+
+Verified the complete UIKit framework smoke, including press/release,
+left/right Shift, foreign source, focus-loss and detach regressions. Extended
+`scripts/test-terminal-ui.sh` checks real X11 Shift-wheel produces no application
+wheel report, while Control-wheel and Control-hover carry their expected SGR
+bits through the PTY. Existing button/drag/release/coordinate and clipboard
+assertions also passed. Preserved unrelated materia edits, staging only the
+adapter and the owned framework-test hunk. Other-platform runtime remains
+unqualified. Next terminal selection/copy through the native screen model.
+
 ## M12.2 — mouse reporting and tracking ownership, 2026-10-05
 
 Vendored libtsm commit **40a8945** separates active tracking (9/1000/1002/1003)

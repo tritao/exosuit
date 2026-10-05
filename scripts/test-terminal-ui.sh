@@ -51,7 +51,10 @@ if [[ ${1:-} == --drive ]]; then
     sleep .15
     xdotool click 5
     xdotool keydown ctrl click 1 keyup ctrl
+    xdotool keydown shift click 4 keyup shift
+    xdotool keydown ctrl click 4
     xdotool mousemove --window "$window" 500 600
+    xdotool keyup ctrl
     sleep 1
     touch "$fixture/mouse-stop"
 	wait "$app"
@@ -101,7 +104,8 @@ mouse = (root / 'mouse-bytes').read_bytes()
 reports = re.findall(rb'\x1b\[<(\d+);(\d+);(\d+)([Mm])', mouse)
 assert reports, mouse
 buttons = {int(report[0]) for report in reports}
-assert {0, 1, 2, 16, 32, 35, 64, 65} <= buttons, (buttons, mouse)
+assert {0, 1, 2, 16, 32, 35, 51, 64, 65, 80} <= buttons, (buttons, mouse)
+assert 68 not in buttons, ('Shift-wheel should use local scrollback', mouse)
 assert any(report[0] == b'0' and report[3] == b'm' for report in reports), mouse
 assert all(1 <= int(x) <= state['terminalColumns'] and 1 <= int(y) <= state['terminalRows']
            for _, x, y, _ in reports), (reports, state)
