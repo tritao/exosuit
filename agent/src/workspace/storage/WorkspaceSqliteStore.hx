@@ -7,10 +7,12 @@ import haxeon.wire.MessagePack;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspacePersistence;
 import workspace.service.WorkspaceService;
+import workspace.service.WorkspaceTerminalPersistence;
+import workspace.service.WorkspaceTerminalProtocol;
 
 /** Agent-owned schema; small typed rows, not a copied full-catalog checkpoint.
  * The manager owns the exclusive process lock. SQL cursor/revision CAS fences stale writers. */
-class WorkspaceSqliteStore implements WorkspacePersistence {
+class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceTerminalPersistence {
 	final db:Database;
 	final workspace:String;
 	final historyLimit:Int;
@@ -30,7 +32,7 @@ class WorkspaceSqliteStore implements WorkspacePersistence {
 					throw "Missing SQLite schema version";
 				version = integer(row.columnInt64(0));
 			});
-			if (version != 0 && version != 1)
+			if (version != 0 && version != 1 && version != 2)
 				throw "Unsupported workspace schema version";
 			if (version == 0) {
 				var count = 0;
@@ -45,6 +47,10 @@ class WorkspaceSqliteStore implements WorkspacePersistence {
 			db.exec("PRAGMA synchronous=FULL");
 			if (version == 0)
 				initialize(seed);
+            if (version < 2) transaction(function() {
+                db.exec("CREATE TABLE workspace_terminals (id TEXT PRIMARY KEY, payload BLOB NOT NULL)");
+                db.exec("PRAGMA user_version=2");
+            });
 		} catch (error:Dynamic) {
 			db.close();
 			throw error;
@@ -199,6 +205,32 @@ class WorkspaceSqliteStore implements WorkspacePersistence {
 			});
 		});
 	}
+
+ public function loadTerminals():Array<TerminalRecord> {
+  var result:Array<TerminalRecord> =[];
+  statement("SELECT id,payload,length(payload),length(CAST(id AS BLOB)) FROM workspace_terminals ORDER BY id LIMIT 257",function(row) {
+   while(row.step()) {
+    if(integer(row.columnInt64(3))>512) throw "Oversized terminal identity";
+    var record:TerminalRecord=haxeon.wire.MessagePack.decode(blob(row,1,integer(row.columnInt64(2))));
+    if(record.id!=row.columnText(0)) throw "Terminal identity mismatch";
+    result.push(record);
+   }
+  });
+  if(result.length>256) throw "Terminal catalog exceeds limit";
+  return result;
+ }
+ public function saveTerminal(record:TerminalRecord):Void {
+  transaction(function() {
+   statement("INSERT INTO workspace_terminals(id,payload) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload",function(row) {
+    row.bindText(1,record.id);row.bindBlob(2,MessagePack.encode(record));row.step();
+   });
+  });
+ }
+ public function removeTerminal(id:String):Void {
+  transaction(function() {
+   statement("DELETE FROM workspace_terminals WHERE id=?1",function(row) {row.bindText(1,id);row.step();});
+  });
+ }
 
 	public function close():Void
 		db.close();

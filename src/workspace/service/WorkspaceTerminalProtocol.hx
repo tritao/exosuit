@@ -46,10 +46,64 @@ import haxeon.wire.MessagePack;
 @:id(2) var instance:String;
 @:id(3) var id:String;
 }
+@:wire typedef TerminalCatalogQuery = {@: id(1) var workspace: String;
+@:id(2) var instance:String;
+@:id(3) var after:Null<String>;
+}
+@:wire typedef TerminalRecord = {@: id(1) var id: String;
+@:id(2) var name:String;
+@:id(3) var group:String;
+@:id(4) var cwd:String;
+@:id(5) var instance:String;
+@:id(6) var state:String;
+@:id(7) var exitCode:Int;
+@:id(8) var available:Bool;
+@:id(9) var revision:Int64;
+}
+@:wire typedef TerminalCatalog = {@: id(1) var instance: String;
+@:id(2) var groups:Array<workspace.service.WorkspaceProtocol.WorkspaceGroup>;
+@:id(3) var terminals:Array<TerminalRecord>;
+@:id(4) var next:Null<String>;
+}
+@:wire typedef TerminalRename = {@: id(1) var workspace: String;
+@:id(2) var instance:String;
+@:id(3) var id:String;
+@:id(4) var name:String;
+@:id(5) var group:String;
+@:id(6) var expectedRevision:Int64;
+}
+@:wire typedef TerminalForget = {@: id(1) var workspace: String;
+@:id(2) var instance:String;
+@:id(3) var id:String;
+@:id(4) var resourceInstance:String;
+@:id(5) var expectedRevision:Int64;
+}
 /** Permanent method ids; output offsets count bytes. Input is never retried across connections. */
 class WorkspaceTerminalProtocol {
+  public static inline final CATALOG = "workspace.terminals.catalog";
   public static inline final READ = "workspace.terminals.read";
   public static inline final CONTROL = "workspace.terminals.control";
+  public static final LIST = new RpcMethod<TerminalCatalogQuery, TerminalCatalog>(
+    115,
+    function(v:TerminalCatalogQuery) return MessagePack.encode(v),
+    function(b:Bytes):TerminalCatalogQuery return MessagePack.decode(b),
+    function(v:TerminalCatalog) return MessagePack.encode(v),
+    function(b:Bytes):TerminalCatalog return MessagePack.decode(b)
+  );
+  public static final RENAME = new RpcMethod<TerminalRename, TerminalRecord>(
+    116,
+    function(v:TerminalRename) return MessagePack.encode(v),
+    function(b:Bytes):TerminalRename return MessagePack.decode(b),
+    function(v:TerminalRecord) return MessagePack.encode(v),
+    function(b:Bytes):TerminalRecord return MessagePack.decode(b)
+  );
+  public static final FORGET = new RpcMethod<TerminalForget, TerminalTarget>(
+    117,
+    function(v:TerminalForget) return MessagePack.encode(v),
+    function(b:Bytes):TerminalForget return MessagePack.decode(b),
+    function(v:TerminalTarget) return MessagePack.encode(v),
+    function(b:Bytes):TerminalTarget return MessagePack.decode(b)
+  );
   public static final OPEN = new RpcMethod<TerminalOpen, TerminalInfo>(
     110,
     function(v:TerminalOpen) return MessagePack.encode(v),

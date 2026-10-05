@@ -132,11 +132,11 @@ class WorkspaceSession {
 		var fields = value.split("\t");
 		if (fields.length == 4 && fields[0] == "B")
 			return fields[1] == "sidebar" && fields[2] == "1" && fields[3].length <= 65536;
-		if (fields.length == 6 && fields[0] == "X")
+		if ((fields.length == 6 || fields.length == 7 || fields.length == 8) && fields[0] == "X")
 			return validPaneId(fields[1]) && (fields[2] == "0" || fields[2] == "1") &&
-				validPaneId(fields[3]) && fields[4].length > 0 && fields[4].length <= 256 && fields[5].length > 0;
-		if (fields.length == 5 && fields[0] == "Y")
-			return (fields[1] == "0" || fields[1] == "1") && validPaneId(fields[2]) &&
+				(fields.length == 6 || fields[6] == "0" || fields[6] == "1") && (fields.length < 8 || fields[7].length > 0 && fields[7].length <= 4096) && validPaneId(fields[3]) && fields[4].length > 0 && fields[4].length <= 256 && fields[5].length > 0;
+		if ((fields.length == 5 || fields.length == 6 || fields.length == 7) && fields[0] == "Y")
+			return (fields[1] == "0" || fields[1] == "1") && (fields.length == 5 || fields[5] == "0" || fields[5] == "1") && (fields.length < 7 || fields[6].length > 0 && fields[6].length <= 4096) && validPaneId(fields[2]) &&
 				fields[3].length > 0 && fields[3].length <= 256 && fields[4].length > 0;
 		if (fields.length == 2 && (fields[0] == "P" || fields[0] == "Q")) return validPaneId(fields[1]);
 		if (fields.length == 4 && fields[0] == "D")

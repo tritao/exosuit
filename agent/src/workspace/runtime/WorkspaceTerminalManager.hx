@@ -5,6 +5,8 @@ import haxe.Int64;
 import haxeon.rpc.*;
 import workspace.service.WorkspaceTerminalProtocol;
 import workspace.service.WorkspaceTerminals;
+import workspace.service.WorkspaceTerminalPersistence;
+import workspace.service.WorkspaceProtocol.WorkspaceGroup;
 import terminalsession.LocalPtyBackend;
 import terminalsession.TerminalProfile;
 import terminalkit.Emulator;
@@ -45,13 +47,87 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
   final terminals:Map<String, RuntimeTerminal> = [];
   final historyLimit:Int;
   var count:Int = 0;
+  final catalog:Map<String, TerminalRecord> = [];
+  final persistence:Null<WorkspaceTerminalPersistence>;
+  final groups:Void -> Array<WorkspaceGroup>;
+  var storageFailed:Bool = false;
 
-  public function new(workspace:String, instance:String, root:String, historyLimit:Int = 16777216) {
+  public function new(
+    workspace:String,
+    instance:String,
+    root:String,
+    historyLimit:Int = 16777216,
+    ? persistence:WorkspaceTerminalPersistence,
+    ? groups:Void -> Array<WorkspaceGroup>
+  ) {
     this.workspace = workspace;
     this.instance = instance;
     this.root = root;
+    if (workspace == null || workspace.length == 0
+      || workspace.length > 128 || instance == null || instance.length == 0 || instance.length > 128
+      || root == null || root.length == 0 || root.length > 1024) throw "Invalid terminal workspace identity";
     if (historyLimit < 65536 || historyLimit > 16777216) throw "Invalid terminal history limit";
     this.historyLimit = historyLimit;
+    this.persistence = persistence;
+    this.groups = groups == null ? function() return [{id : "work", name : "Work", cwd : root, revision : 1}
+    ]:groups;
+    var stored = persistence == null ?[] : persistence.loadTerminals();
+    if (stored.length > 256) throw "Terminal catalog exceeds limit";
+    if (persistence != null) for (record in stored) {
+      if (!validRecord(record) || catalog.exists(record.id)) throw "Invalid persisted terminal record";
+      if (record.instance != instance &&(record.state == "running" || record.state == "starting")) {
+        record.state = "lost";
+        record.revision += 1;
+        persistence.saveTerminal(record);
+      }
+      record.available = false;
+      catalog.set(record.id, record);
+    }
+  }
+  function knownGroup(id:String):Bool {
+    for (group in groups()) if (group.id == id) return true;
+    return false;
+  }
+  function validName(name:String):Bool return name != null && StringTools.trim(name).length > 0
+    && name.length <= 128 && name.indexOf("\t") < 0 && name.indexOf("\n") < 0 && name.indexOf("\r") < 0;
+  function validRecord(r:TerminalRecord):Bool return r != null && r.id != null && r.id.length > 0
+    && r.id.length <= 128 && validName(r.name) && knownGroup(r.group) && r.cwd == root && r.instance != null
+    && r.instance.length > 0 && r.instance.length <= 128 && r.revision > 0 && r.revision < Int64.make(
+      0x7fffffff,
+      0xffffffff
+    ) &&[
+      "starting",
+      "running",
+      "exited",
+      "failed",
+      "lost"
+    ].indexOf(r.state) >= 0;
+  function copy(r:TerminalRecord):TerminalRecord return {
+    id: r.id,
+    name: r.name,
+    group: r.group,
+    cwd: r.cwd,
+    instance: r.instance,
+    state: r.state,
+    exitCode: r.exitCode,
+    available: terminals.exists(r.id) && r.instance == instance,
+    revision: r.revision
+  };
+  function save(r:TerminalRecord):Void {
+    if (storageFailed) throw "Terminal metadata storage unavailable";
+    r.available = false;
+    try {
+      if (persistence != null) persistence.saveTerminal(r);
+    } catch (e:Dynamic) {
+      storageFailed = true;
+      throw e;
+    }
+    catalog.set(r.id, r);
+  }
+  public function snapshot():TerminalCatalog {
+    var records = [for (r in catalog) copy(r)];
+    records.sort(function(a, b) return Reflect.compare(a.id, b.id));
+    return {instance: instance, groups: groups(), terminals: records, next: null};
   }
   function info(t:RuntimeTerminal):TerminalInfo return {
     id: t.id,
@@ -70,6 +146,114 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
   public function bind(connection:RpcConnection, capabilities:Array<String>):Void {
     var read = capabilities.indexOf(WorkspaceTerminalProtocol.READ) >= 0;
     var control = capabilities.indexOf(WorkspaceTerminalProtocol.CONTROL) >= 0;
+    var catalogGrant = capabilities.indexOf(WorkspaceTerminalProtocol.CATALOG) >= 0;
+    connection.register(WorkspaceTerminalProtocol.LIST, function(r, c) {
+      if (!read || !catalogGrant) {
+        c.fail(error("unauthorized"));
+        return;
+      }
+      if (r.workspace != workspace || r.instance != instance) {
+        c.fail(error("invalid_request"));
+        return;
+      }
+      if (storageFailed) {
+        c.fail(error("storage_unavailable"));
+        return;
+      }
+      if (r.after != null && r.after.length > 128) {
+        c.fail(error("invalid_request"));
+        return;
+      }
+      var ids = [for (id in catalog.keys()) id];
+      ids.sort(Reflect.compare);
+      var records:Array<TerminalRecord> = [];
+      var more = false;
+      for (id in ids) if (r.after == null || Reflect.compare(id, r.after) > 0) {
+        if (records.length == 8) {
+          more = true;
+          break;
+        }
+        records.push(copy(catalog.get(id)));
+      }
+      c.respond({
+        instance: instance,
+        groups: groups(),
+        terminals: records,
+        next: more ? records[records.length - 1].id : null
+      }
+      );
+    }
+    );
+    connection.register(WorkspaceTerminalProtocol.RENAME, function(r, c) {
+      if (!control || !catalogGrant) {
+        c.fail(error("unauthorized"));
+        return;
+      }
+      if (!valid(r.workspace, r.instance, r.id) || !validName(r.name) || !knownGroup(r.group)) {
+        c.fail(error("invalid_request"));
+        return;
+      }
+      var old = catalog.get(r.id);
+      if (old == null) {
+        c.fail(error("unknown_terminal"));
+        return;
+      }
+      if (old.revision != r.expectedRevision || old.revision >= Int64.make(0x7fffffff, 0xfffffffe)) {
+        c.fail(error("stale_revision"));
+        return;
+      }
+      var updated = copy(old);
+      updated.name = StringTools.trim(r.name);
+      updated.group = r.group;
+      updated.revision += 1;
+      try {
+        save(updated);
+        c.respond(copy(updated));
+      } catch (_:Dynamic) {
+        c.fail({code: "storage_failed", message: "Terminal metadata requires recovery", ambiguous: true}
+        );
+      }
+    }
+    );
+    connection.register(WorkspaceTerminalProtocol.FORGET, function(r, c) {
+      if (!control || !catalogGrant) {
+        c.fail(error("unauthorized"));
+        return;
+      }
+      if (!valid(r.workspace, r.instance, r.id)) {
+        c.fail(error("invalid_request"));
+        return;
+      }
+      var existing = catalog.get(r.id);
+      if (existing != null &&(existing.instance != r.resourceInstance || existing.revision != r.expectedRevision)) {
+        c.fail(error("stale_revision"));
+        return;
+      }
+      var t = terminals.get(r.id);
+      if (t != null && t.state == "running") {
+        c.fail(error("terminal_running"));
+        return;
+      }
+      try {
+        if (storageFailed) throw "Terminal metadata storage unavailable";
+        if (persistence != null) persistence.removeTerminal(r.id);
+        catalog.remove(r.id);
+      } catch (_:Dynamic) {
+        storageFailed = true;
+        c.fail({code: "storage_failed", message: "Terminal metadata requires recovery", ambiguous: true}
+        );
+        return;
+      }
+      if (t != null) {
+        t.backend.close();
+        t.emulator.close();
+        terminals.remove(r.id);
+        count--;
+      }
+      c.respond({workspace: r.workspace, instance: r.instance, id: r.id}
+      );
+    }
+    );
     // Input sequence is per authenticated connection, never a persisted global client counter.
     var inputSequence:Map<String, Int> = [];
     connection.register(WorkspaceTerminalProtocol.OPEN, function(r, c) {
@@ -87,23 +271,80 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
           c.fail(error("unknown_terminal"));
           return;
         }
+        if (catalog.exists(r.id)) {
+          c.fail(error("terminal_unavailable"));
+          return;
+        }
+        if (storageFailed) {
+          c.fail(error("storage_unavailable"));
+          return;
+        }
+        if ([for (_ in catalog) 1].length >= 256) {
+          c.fail(error("catalog_limit"));
+          return;
+        }
         if (count >= 16) {
           c.fail(error("terminal_limit"));
           return;
         }
+        var groupList = groups();
+        if (groupList.length == 0) {
+          c.fail(error("unknown_group"));
+          return;
+        }
+        var record:TerminalRecord = {
+          id: r.id,
+          name: "Terminal " +(count + 1),
+          group: knownGroup("work") ? "work" : groupList[0].id,
+          cwd : root,
+          instance : instance,
+          state : "starting",
+          exitCode : 0,
+          available : false,
+          revision : 1
+        };
         try {
-          t = new RuntimeTerminal(
+          save(record);
+        } catch (_:Dynamic) {
+          c.fail({code: "storage_failed", message: "Terminal creation requires recovery", ambiguous: true}
+          );
+          return;
+        }
+        var created:RuntimeTerminal;
+        try {
+          created = new RuntimeTerminal(
             r.id,
             LocalPtyBackend.spawn(TerminalProfile.shell(root), r.columns, r.rows),
             r.columns,
             r.rows
           );
-          terminals.set(r.id, t);
-          count++;
         } catch (_:Dynamic) {
-          c.fail(error("terminal_spawn_failed"));
+          var failed = copy(record);
+          failed.state = "failed";
+          failed.revision += 1;
+          try save(failed) catch (_:Dynamic) {
+          }
+          c.fail({
+            code: storageFailed ? "storage_failed" : "terminal_spawn_failed",
+            message : "Terminal creation failed",
+            ambiguous : storageFailed
+          }
+          );
           return;
         }
+        var running = copy(record);
+        running.state = "running";
+        running.revision += 1;
+        try save(running) catch (_:Dynamic) {
+          created.backend.close();
+          created.emulator.close();
+          c.fail({code: "storage_failed", message: "Terminal creation requires recovery", ambiguous: true}
+          );
+          return;
+        }
+        t = created;
+        terminals.set(r.id, created);
+        count++;
       }
       c.respond(info(t));
     }
@@ -256,6 +497,16 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
       ) catch (_:Dynamic) {
         t.state = "failed";
         t.backend.close();
+      }
+      if (t.state != "running") t.backend.close();
+      var record = catalog.get(t.id);
+      if (record != null &&(record.state != t.state || record.exitCode != t.exitCode) && !storageFailed) {
+        var updated = copy(record);
+        updated.state = t.state;
+        updated.exitCode = t.exitCode;
+        updated.revision += 1;
+        try save(updated) catch (_:Dynamic) {
+        }
       }
     }
   }

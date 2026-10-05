@@ -238,11 +238,41 @@ Running resources count toward service lifetime even without clients.
 
 The service owns VT query responses, while replaying client parsers suppress them.
 Explicit key/paste/mouse input still flushes. Terminal resources are currently
-folder-scoped shell instances, not yet catalog tasks/named-group resources. Durable
-history, state checkpoints, listing/deletion and full reconciliation remain next work.
+folder-scoped shell instances with named-group metadata, not yet task resources. Durable
+history, state checkpoints and full reconciliation remain next work; listing and metadata deletion are delivered by the catalog capability below.
 
 
 Current replay is a raw byte history at the view's current dimensions; it does not
 reconstruct a historical resize timeline or guarantee an identical restored grid.
-Closing an individual view also detaches; without the pending runtime browser,
-terminate its session before discarding the last saved view if it should stop.
+Closing an individual view also detaches; use the workspace terminal browser to reopen or stop a detached session.
+
+
+## Durable terminal metadata and discovery
+
+Capability `workspace.terminals.catalog` enables methods 115 LIST, 116 RENAME and
+117 FORGET. LIST additionally requires terminal read; mutations require control.
+It returns current named groups and at most eight records with an opaque next/after
+ID cursor. The client validates increasing cursors and aggregates at most 256 rows.
+Listings are eventually consistent across pages; concurrent changes are reconciled
+by refresh and mutation revision checks, without a new subscription/event protocol.
+
+Records contain ID, name, group ID, canonical cwd, originating runtime instance,
+state/exit code, computed availability and Int64 metadata revision. Availability is
+recomputed from owned runtime state, never trusted from persisted data. The SQL
+schema migrates v1 to v2 in place and shares the agent's connection/lifetime lock.
+Starting metadata commits before spawn; running metadata commits before the reply.
+An uncommitted runtime is closed, and storage failure fences further metadata access.
+Old active records become lost on restart; surviving metadata cannot resurrect a PTY.
+
+Rename/move supplies an expected revision. Forget supplies both the originating
+resource instance and expected revision; it refuses running resources and prevents
+stale removal of a replacement resource. Missing records acknowledge repeated
+removal. Mutations are never automatically retried after ambiguous delivery; clients
+refresh before a deliberate retry. Removing a finished record releases its retained
+PTY/emulator/history and makes a runtime slot available. Output durability, exact
+state checkpoints, tasks and group creation/nesting remain pending.
+
+Desktop view IDs and resource IDs are separate. Catalog views have a deterministic
+key scoped to cwd/resource identity; saved layouts carry explicit remote ownership
+and a typed JsonWire resource reference. Older rows still restore with their legacy
+ID/ownership inference. Resource identity is not an authorization credential.

@@ -34,6 +34,7 @@ class TerminalRpcTestMain {
     var runtime = NativeKitRuntime.start(), processes = new ProcessManager();
     if (mode == "contracts") {
       TerminalServiceTests.run(root);
+      TerminalCatalogTests.run(root);
       processes.shutdown();
       runtime.dispose();
       platform.Native.shutdown();
@@ -42,6 +43,10 @@ class TerminalRpcTestMain {
     var clock = function() return NativeKit.nk_time_seconds() * 1000;
     var client = new LocalWorkspaceClient(runtime.events, processes, launcher, clock);
     client.select(root);
+    if(mode=="catalog") {
+      TerminalCatalogClientTests.run(client,runtime);
+      client.dispose();processes.shutdown();runtime.dispose();platform.Native.shutdown();return;
+    }
     var backend = new RpcTerminalBackend(function() return client, "test-terminal", root, mode == "create");
     var session = new TerminalSession(backend, Emulator.open(80, 24), false);
     var step = function() {

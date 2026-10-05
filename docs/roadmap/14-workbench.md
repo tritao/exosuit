@@ -133,6 +133,13 @@ lifecycle transitions, transactions, rollback, event trimming).
 
 ## M14.3 — Headless agent daemon
 
+Delivered terminal metadata slice: SQLite records preserve names/group membership
+and reconcile old active sessions as lost. Capability-gated discovery pages,
+revision-checked metadata editing/removal and the desktop “Workspace Terminals…”
+browser allow detached sessions to be found and reattached independently of tabs.
+The browser uses existing named groups; new/nested group creation and task/provider
+catalog integration remain pending. Output history is still volatile.
+
 Delivered first terminal slice: the Linux desktop attaches folder-scoped terminals
 through typed RPC to daemon-owned PTYs. Saved IDs restore the same shell across
 window shutdown; ongoing shell execution retains the daemon. Explicit termination,
@@ -140,7 +147,7 @@ read/control grants, bounded byte replay, input ambiguity fencing and VT respons
 ownership are implemented. Source startup separates compilation from the lock-owning
 runtime, and PTY child descriptors are isolated in NativeKit. Real client-process
 and desktop reopen fixtures cover ownership. This does not complete M14.3: durable
-history/state checkpoints, resource catalog/list/delete/reconciliation, named-group
+history/state checkpoints, full task/provider resource catalog and durable runtime recovery, named-group
 integration and provider supervision remain pending.
 
 

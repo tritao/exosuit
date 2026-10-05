@@ -39,6 +39,7 @@ class WorkspaceRpcServer {
 			defaults.push(WorkspaceProtocol.IDENTITY_CAPABILITY);
 		if (terminals != null) {
 			defaults.push(WorkspaceTerminalProtocol.READ);
+            defaults.push(WorkspaceTerminalProtocol.CATALOG);
 			defaults.push(WorkspaceTerminalProtocol.CONTROL);
 		}
 		options = new RpcPeerOptions("exosuit-agent/1", capabilities == null ? defaults : capabilities, [], 5000, 262144, 32, 1048576);

@@ -75,3 +75,13 @@ MessagePack vectors (workspace `w`, instance `i`, terminal `t`):
 Terminal methods use IDs 110–114; field IDs are permanent in
 `WorkspaceTerminalProtocol.hx`. These vectors extend the catalog compatibility
 fixtures without changing existing method or field identities.
+
+
+Terminal catalog vectors (methods 115–117 use permanent identities):
+
+- First page query, workspace `w`, instance `i`, null after cursor:
+  `8301a17702a16903c0`.
+- Rename terminal `t` to `N`, group `w`, expected Int64 revision 4294967298:
+  `8601a17702a16903a17404a14e05a17706d30000000100000002`.
+
+These run in the same native, Wasm32 and Wasm GC compatibility fixtures.

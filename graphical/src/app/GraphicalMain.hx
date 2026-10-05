@@ -37,6 +37,7 @@ class GraphicalMain {
 		var captureSeconds = 0.0;
 		var recordPath:Null<String> = null;
 		var openTerminal = false;
+		var openTerminalBrowser = false;
 		var themeChoice = "system";
 		var openPaths:Array<String> = [];
 		for (argument in arguments) {
@@ -50,6 +51,8 @@ class GraphicalMain {
 				recordPath = argument.substring(14);
 			else if (StringTools.startsWith(argument, "--smoke-frames="))
 				frameLimit = Std.parseInt(argument.substring(15));
+			else if (argument == "--open-workspace-terminals")
+				openTerminalBrowser = true;
 			else if (argument == "--open-terminal")
 				openTerminal = true;
 			else if (StringTools.startsWith(argument, "--theme="))
@@ -106,12 +109,14 @@ class GraphicalMain {
 					workspaceClient = new workspace.client.LocalWorkspaceClient(context.events, instance.application.processes,
 						workspace.client.LocalWorkspaceClient.findLauncher(), function() return NativeKit.nk_time_seconds() * 1000);
 					instance.attachWorkspace(workspaceClient);
+					instance.attachTerminalCatalog(workspaceClient);
 				}
 				catch (failure:Dynamic)
 					instance.application.reportError("workspace", Std.string(failure));
 			}
 			for (index in 1...openPaths.length) instance.application.openArgument(openPaths[index]);
 			if (openTerminal) instance.openTerminal();
+			if (openTerminalBrowser) instance.openWorkspaceTerminals();
 			if (pluginManifest != null && !instance.application.loadPluginManifest(pluginManifest))
 				Sys.println('exosuit: could not load plugin manifest "$pluginManifest"');
 			app = instance;

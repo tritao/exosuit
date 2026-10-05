@@ -25,7 +25,7 @@ import workspace.service.WorkspaceReplica;
 }
 
 /** Nonblocking native attachment. Closing a client never owns/stops the shared daemon. */
-class LocalWorkspaceClient implements WorkspaceAttachment {
+class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceTerminalCatalogClient {
   public var root(default, null):Null<String>;
   public var error(default, null):Null<String>;
   public var instance(default, null):String = "";
@@ -52,6 +52,13 @@ class LocalWorkspaceClient implements WorkspaceAttachment {
   var wasReady:Bool = false;
   var spawned:Bool = false;
   var disposed:Bool = false;
+  var catalog:Null<workspace.service.WorkspaceTerminalProtocol.TerminalCatalog>;
+  var catalogError:Null<String>;
+  var catalogRevision:Int = 0;
+  var catalogPending:Bool = false;
+  var catalogMutation:Bool = false;
+  var catalogNext:Float = 0;
+  var catalogKey:String = "";
 
   public function new(
     events:NativeKitEvents,
@@ -75,7 +82,176 @@ class LocalWorkspaceClient implements WorkspaceAttachment {
 
   public function view():Array < WorkspaceGroup > return ready && replica != null ? replica.view() :[];
 
-  public function rpc():Null<RpcConnection> return ready && client != null ? client.current() : null;
+  public function rpc():Null < RpcConnection > return ready && client != null ? client.current() : null;
+
+  public function terminalCatalog():Null < workspace.service.WorkspaceTerminalProtocol.TerminalCatalog > return catalog;
+  public function terminalCatalogError():Null < String > return catalogError;
+  public function terminalCatalogRevision():Int return catalogRevision;
+  public function terminalCatalogBusy():Bool return catalogMutation;
+  public function refreshTerminals(force:Bool):Void {
+    if (root == null) {
+      if (force) {
+        catalogError = "Open a folder to view workspace terminals";
+        catalogRevision++;
+      }
+      return;
+    }
+    var c = rpc();
+    if (c == null || catalogPending ||(!force && clock() < catalogNext)) return;
+    if (client == null || client.capabilities().indexOf(WorkspaceTerminalProtocol.CATALOG) < 0) {
+      if (catalogError == null) {
+        catalogError = "This workspace service does not support terminal discovery";
+        catalogRevision++;
+      }
+      return;
+    }
+    if (force) catalogError = null;
+    catalogPending = true;
+    catalogNext = clock() + 1000;
+    catalogPage(c, null, []);
+  }
+  function catalogPage(
+    c:haxeon.rpc.RpcConnection,
+    after:Null<String>,
+    records:Array<workspace.service.WorkspaceTerminalProtocol.TerminalRecord>
+  ):Void {
+    c.call(WorkspaceTerminalProtocol.LIST,
+      {workspace: "workspace", instance: instance, after: after}, 2000, function(value) {
+      if (rpc() != c) return;
+      if (value.instance != instance || value.terminals.length > 8 || records.length + value.terminals.length > 256) {
+        catalogPending = false;
+        catalogError = "Invalid terminal catalog";
+        catalogRevision++;
+        return;
+      }
+      var last = after;
+      for (record in value.terminals) {
+        if (record.cwd != root || record.id == null ||(last != null && Reflect.compare(record.id, last) <= 0)) {
+          catalogPending = false;
+          catalogError = "Invalid terminal catalog page";
+          catalogRevision++;
+          return;
+        }
+        records.push(record);
+        last = record.id;
+      }
+      if (value.next != null) {
+        if (value.terminals.length == 0 || value.next != last) {
+          catalogPending = false;
+          catalogError = "Invalid terminal catalog cursor";
+          catalogRevision++;
+          return;
+        }
+        catalogPage(c, value.next, records);
+        return;
+      }
+      catalogPending = false;
+      value.terminals = records;
+      var key = value.instance;
+      for (g in value.groups) key += "|g:" + g.id + ":" + g.revision;
+      for (r in records) key += "|t:" + r.id + ":" + r.revision + ":" + r.available;
+      catalog = value;
+      if (key != catalogKey) {
+        catalogKey = key;
+        catalogRevision++;
+      }
+    }, function(e) {
+      if (rpc() == c) {
+        catalogPending = false;
+        catalogError = e.message;
+        catalogRevision++;
+      }
+    }
+    );
+  }
+
+  function catalogReady():Bool {
+    if (catalogMutation) return false;
+    if (rpc() == null || client == null || client.capabilities().indexOf(WorkspaceTerminalProtocol.CATALOG) < 0) {
+      catalogError = "Workspace terminals are not connected";
+      catalogRevision++;
+      return false;
+    }
+    catalogError = null;
+    catalogMutation = true;
+    catalogRevision++;
+    return true;
+  }
+  function catalogCompleted(c:haxeon.rpc.RpcConnection):Void {
+    if (rpc() != c) return;
+    catalogMutation = false;
+    catalogNext = 0;
+    catalogRevision++;
+    refreshTerminals(false);
+  }
+  function catalogFailed(c:haxeon.rpc.RpcConnection, e:haxeon.rpc.RpcError):Void {
+    if (rpc() != c) return;
+    catalogMutation = false;
+    catalogError = e.ambiguous ? "Session change may have completed; refresh before retrying"
+      : e.code == "stale_revision" ? "This session changed. Reload its name/group before saving." : e.message;
+    catalogNext = 0;
+    catalogRevision++;
+    refreshTerminals(false);
+  }
+  public function renameTerminal(
+    record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord,
+    name:String,
+    group:String
+  ):Void {
+    var c = rpc();
+    if (record.cwd != root || c == null || !catalogReady()) return;
+    c.call(
+      WorkspaceTerminalProtocol.RENAME,
+      {
+      workspace: "workspace",
+      instance: instance,
+      id: record.id,
+      name: name,
+      group: group,
+      expectedRevision: record.revision
+    },
+      2000,
+      function(_) catalogCompleted(c),
+      function(e) catalogFailed(
+        c,
+        e
+      )
+    );
+  }
+  public function stopTerminal(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Void {
+    var c = rpc();
+    if (record.cwd != root || c == null || !catalogReady()) return;
+    c.call(
+      WorkspaceTerminalProtocol.TERMINATE,
+      {workspace: "workspace", instance: instance, id: record.id},
+      2000,
+      function(_) catalogCompleted(c),
+      function(e) catalogFailed(
+        c,
+        e
+      )
+    );
+  }
+  public function forgetTerminal(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Void {
+    var c = rpc();
+    if (record.cwd != root || c == null || !catalogReady()) return;
+    c.call(
+      WorkspaceTerminalProtocol.FORGET,
+      {
+      workspace: "workspace",
+      instance: instance,
+      id: record.id,
+      resourceInstance: record.instance,
+      expectedRevision: record.revision
+    },
+      2000,
+      function(_) catalogCompleted(c),
+      function(e) catalogFailed(
+        c,
+        e
+      )
+    );
+  }
 
   public function failure():Null < String > return error;
 
@@ -134,6 +310,13 @@ class LocalWorkspaceClient implements WorkspaceAttachment {
   }
 
   function stopConnection():Void {
+    catalog = null;
+    catalogPending = false;
+    catalogMutation = false;
+    catalogKey = "";
+    catalogNext = 0;
+    catalogError = null;
+    catalogRevision++;
     if (client != null) client.close();
     client = null;
     verified = false;
@@ -183,6 +366,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment {
     if (replica == null) replica = new WorkspaceReplica("workspace", 2000);
     var required = [WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS, WorkspaceProtocol.IDENTITY_CAPABILITY];
     var caps = required.copy();
+    caps.push(WorkspaceTerminalProtocol.CATALOG);
     caps.push(WorkspaceTerminalProtocol.READ);
     caps.push(WorkspaceTerminalProtocol.CONTROL);
     deadline = clock() + 12000;

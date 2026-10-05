@@ -34,7 +34,7 @@ with tempfile.TemporaryDirectory(prefix='extty-') as temporary:
                 assert time.monotonic()<deadline
                 time.sleep(.05)
             descriptor=json.loads(endpoints()[0].read_text())
-            for mode in ['create','attach']:
+            for mode in ['catalog','create','attach']:
                 subprocess.run([*RUNNER,mode,str(root),str(MANAGER)],env=environment,check=True,timeout=40)
                 if mode=='create':
                     time.sleep(5)

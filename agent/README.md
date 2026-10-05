@@ -95,8 +95,7 @@ The first runtime slice permits 16 terminal records per daemon instance, includi
 exited records. Each retains at most 16 MiB of output in owned 64 KiB chunks, with
 64-bit byte cursors. Replay reads and input batches are bounded to 64 KiB. Restoring
 beyond retained history reports a replay gap; daemon restart reports a lost session.
-No durable terminal history, checkpoint rotation, runtime listing/deletion or
-provider sessions are delivered yet. Terminals are rooted at the canonical project
+No durable terminal history, checkpoint rotation, provider sessions are delivered yet. Terminals are rooted at the canonical project
 folder, use the default user shell and accept dimensions up to 512 columns × 256 rows.
 
 Only the daemon responds to VT queries. Client emulators replay output without
@@ -117,5 +116,24 @@ close/reopen, continued execution while detached and restored shell identity.
 
 A restored grid replays raw bytes at its current size; exact historical resize
 reconstruction awaits state checkpoints. Closing an individual tab also detaches.
-Until runtime listing is delivered, terminate before discarding the last saved
-view when the shell should stop.
+Use Workspace Terminals to reopen or stop a detached session.
+
+
+### Terminal catalog
+
+“Workspace Terminals…” lists service resources even with no saved/open view. Open
+reattaches the same runtime, name/group editing changes durable metadata, Stop kills
+its PTY and Remove forgets an exited, failed or lost record. Running sessions cannot
+be forgotten. Removal releases replay/emulator retention and runtime slots.
+
+The existing database migrates from schema 1 to 2 and stores at most 256 terminal
+records; discovery returns eight per page. Names/group membership and last known
+state survive service restart, but old active records become lost and cannot open
+or silently respawn. Output remains volatile. Sixteen runtime/replay records can be
+held at once; removing finished records makes room for new terminals.
+
+The catalog uses current workspace groups. New/nested group creation, tasks and
+provider resources are later work. Run `xvfb-run -a python3
+scripts/test-workspace-terminal-catalog-ui.py` to discover a shell created by a
+separate process, reopen it without a saved tab and restore that view on a third
+launch. An optional installation directory exercises the relocated bundle.

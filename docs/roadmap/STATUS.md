@@ -2,6 +2,54 @@
 
 Last updated: 2026-10-05.
 
+## M14.3 — discoverable terminal catalog, 2026-10-05
+
+Terminals now have agent-owned durable metadata in the existing SQLite database:
+resource ID, name, group, canonical working directory, originating service instance,
+state/exit code and Int64 revision. Schema v1 migrates transactionally to v2 without
+resetting group data. Creation commits a starting record before spawning, then a
+running record before acknowledgement. Storage failure fences metadata access and
+closes any unpublished PTY. Startup marks old running/starting records lost; it never
+claims a process survived the daemon. Terminal bytes/checkpoints remain volatile.
+
+The optional `workspace.terminals.catalog` capability supplies list, rename/move
+and forget (method IDs 115–117). Eight records per page keep messages bounded,
+including long names/directories; clients aggregate at most 256 records. Pages are
+an eventually consistent listing, not an atomic catalog snapshot. Rename/move uses
+Int64 revision CAS. Forget also checks resource instance/revision, refuses running
+resources, releases retained runtime slots and is safe to repeat after removal.
+Read-only peers can list but cannot change records. Group membership refers to the
+existing named groups; new/nested group creation and tasks remain pending.
+
+The desktop command “Workspace Terminals…” opens a virtualized browser with Open,
+name/group editing, Stop and Remove. Listing is independent of saved/open tabs;
+Open attaches or focuses a single view. View IDs are scoped to working directory
+and resource identity. Saved layouts persist explicit remote ownership and a typed,
+escaped resource reference, with compatibility for older terminal rows. This also
+allows resource IDs that do not match the application's generated ID prefix.
+
+Haxeon `99893ce3` fixed an inference defect: later optional-constructor uses contextually erased
+a nullable concrete initializer to one interface, rejecting another interface
+implemented by that class. BodyTyper now lets concrete conditional/switch branches
+supply their own type; context still types empty/null-only literals. The reduced
+positive runtime case and missing-interface rejection pass with the full compiler
+suite (489 runtime cases plus integration/Wasm checks). No casts/type weakening.
+
+Validation: native persistence/detach/permissions/CAS/forget/restart tests; injected
+metadata failure before and after PTY spawn; multi-page native-client aggregation;
+real desktop discovery/reopen of an unsaved resource; and native/Wasm schema vectors.
+The full application core suite passes. Reference and refreshed self-hosted terminal
+fixtures pass, as do real saved-tab restoration and a relocated runtime bundle
+with spaces in its path and source/compiler access disabled. Bootstrap stages
+converged. A broader UI run passed session, editor and zoom phases but stalled at
+the language references filter (stage 5); a repeat hit a glyph-atlas upload failure
+instead. The committed graphical baseline passed the isolated language phase.
+Switching baseline/current source in the same compiler worker then exposed an
+incremental wire-helper IR verification failure; the current isolated language
+phase passes with a fresh worker. That incremental transition needs a compiler
+reducer/fix separately. Neither broad UI run is claimed as a full-suite pass.
+Release pins and unrelated edits remain unchanged.
+
 ## M14.3 — daemon-owned terminals, 2026-10-05
 
 The Linux folder workspace now opens terminal views through the verified typed RPC

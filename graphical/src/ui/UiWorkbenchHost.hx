@@ -84,7 +84,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 	function set_activeIndex(value:Int):Int return activePane.activeIndex = value;
 	public var fileActions(default, null):Null<FileActions>;
 	public var welcomeActions(default, null):Null<WelcomeActions>;
-	public var restoreTerminal:Null<(String, String, String)->Null<UiTerminalTab>>;
+	public var restoreTerminal:Null<(String, String, String, Bool, String)->Null<UiTerminalTab>>;
 	public final panelTerminals:Array<UiTerminalTab> = [];
 	public var activePanelTerminalIndex:Int = -1;
 
@@ -616,7 +616,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 			var terminal = panelTerminals[index];
 			if (!terminal.disposed && terminal.cwd.indexOf("\t") < 0 && terminal.cwd.indexOf("\n") < 0)
 				result.push("Y\t" + (index == activePanelTerminalIndex ? "1" : "0") + "\t" +
-					terminal.id + "\t" + terminal.title + "\t" + terminal.cwd);
+					terminal.id + "\t" + terminal.title + "\t" + terminal.cwd + "\t" + (terminal.remote ? "1" : "0") + "\t" + TerminalViewIdentity.encode(terminal.resourceId));
 		}
 		for (pane in panes) {
 			result.push("P\t" + pane.id);
@@ -626,7 +626,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 				if (terminal != null) {
 					if (!terminal.disposed && terminal.cwd.indexOf("\t") < 0 && terminal.cwd.indexOf("\n") < 0)
 						result.push("X\t" + pane.id + "\t" + (index == pane.activeIndex ? "1" : "0") + "\t" +
-							terminal.id + "\t" + terminal.title + "\t" + terminal.cwd);
+							terminal.id + "\t" + terminal.title + "\t" + terminal.cwd + "\t" + (terminal.remote ? "1" : "0") + "\t" + TerminalViewIdentity.encode(terminal.resourceId));
 					continue;
 				}
 				var view = UiEditorTabs.document(item);
@@ -696,17 +696,21 @@ class UiWorkbenchHost implements WorkbenchHost {
 		activePane = panes[0];
 		for (raw in lines) {
 			var fields = raw.split("\t");
-			if (fields.length == 5 && fields[0] == "Y") {
-				var terminal = resolveTerminal(fields[2], fields[3], fields[4], retainedTerminals);
+			if ((fields.length == 5 || fields.length == 6 || fields.length == 7) && fields[0] == "Y") {
+				var resource = fields.length == 7 ? TerminalViewIdentity.decode(fields[6]) : fields[2];
+				if (resource == null) continue;
+				var terminal = resolveTerminal(fields[2], fields[3], fields[4], fields.length >= 6 ? fields[5] == "1" : StringTools.startsWith(fields[2], "workspace-terminal-"), resource, retainedTerminals);
 				if (terminal != null) {
 					panelTerminals.push(terminal);
 					if (fields[1] == "1" || activePanelTerminalIndex < 0) activePanelTerminalIndex = panelTerminals.length - 1;
 				}
 				continue;
 			}
-			if (modern && fields.length == 6 && fields[0] == "X") {
+			if (modern && (fields.length == 6 || fields.length == 7 || fields.length == 8) && fields[0] == "X") {
 				var pane = paneById(fields[1]);
-				var terminal = pane == null ? null : resolveTerminal(fields[3], fields[4], fields[5], retainedTerminals);
+				var resource = fields.length == 8 ? TerminalViewIdentity.decode(fields[7]) : fields[3];
+				if (resource == null) continue;
+				var terminal = pane == null ? null : resolveTerminal(fields[3], fields[4], fields[5], fields.length >= 7 ? fields[6] == "1" : StringTools.startsWith(fields[3], "workspace-terminal-"), resource, retainedTerminals);
 				if (pane != null && terminal != null) {
 					pane.items.push(UiEditorTab.Terminal(terminal));
 					if (fields[2] == "1" || pane.activeIndex < 0) pane.activeIndex = pane.items.length - 1;
@@ -740,16 +744,16 @@ class UiWorkbenchHost implements WorkbenchHost {
 		requestFrame();
 	}
 
-	function resolveTerminal(id:String, title:String, cwd:String, retained:Map<String, UiTerminalTab>):Null<UiTerminalTab> {
+	function resolveTerminal(id:String, title:String, cwd:String, remote:Bool, resource:String, retained:Map<String, UiTerminalTab>):Null<UiTerminalTab> {
 		for (terminal in allTerminalTabs()) if (terminal.id == id) return null;
 		var existing = retained.get(id);
 		if (existing != null) {
 			retained.remove(id);
-			if (!existing.disposed && existing.cwd == cwd && existing.title == title) return existing;
+			if (!existing.disposed && existing.cwd == cwd && existing.remote == remote && existing.resourceId == resource && existing.title == title) return existing;
 			existing.dispose();
 		}
 		var create = restoreTerminal;
-		return create == null ? null : create(id, title, cwd);
+		return create == null ? null : create(id, title, cwd, remote, resource);
 	}
 
 	// -- core.WorkbenchHost: problem / build-output publishing --

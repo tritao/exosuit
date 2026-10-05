@@ -65,6 +65,13 @@ class RpcCompatibilityTests {
 		require(WorkspaceTerminalProtocol.OUTPUT.decodeRequest(terminalReadBytes).offset==haxe.Int64.make(1,2),"64-bit terminal offset truncated");
 		var terminalInput:TerminalInput={workspace:"w",instance:"i",id:"t",sequence:1,data:bytes("0001")};
 		require(WorkspaceTerminalProtocol.INPUT.encodeRequest(terminalInput).compare(bytes("8501a17702a16903a174040105c4020001"))==0,"Terminal binary input vector changed");
+        var catalogQuery:TerminalCatalogQuery={workspace:"w",instance:"i",after:null};
+        require(WorkspaceTerminalProtocol.LIST.encodeRequest(catalogQuery).compare(bytes("8301a17702a16903c0"))==0,"Terminal catalog query vector changed");
+        var renameTerminal:TerminalRename={workspace:"w",instance:"i",id:"t",name:"N",group:"w",expectedRevision:haxe.Int64.make(1,2)};
+        var renameTerminalBytes=bytes("8601a17702a16903a17404a14e05a17706d30000000100000002");
+        require(WorkspaceTerminalProtocol.RENAME.encodeRequest(renameTerminal).compare(renameTerminalBytes)==0,"Terminal metadata vector changed");
+        require(WorkspaceTerminalProtocol.RENAME.decodeRequest(renameTerminalBytes).expectedRevision==haxe.Int64.make(1,2),"Terminal revision truncated");
+
 		var snapshot:WorkspaceSnapshot = {
 			epoch: "e",
 			cursor: 0,
