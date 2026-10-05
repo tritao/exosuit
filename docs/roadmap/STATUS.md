@@ -2,6 +2,54 @@
 
 Last updated: 2026-10-05.
 
+## Haxeon RPC.2 — real transports and headless bootstrap, 2026-10-05
+
+Delivered `src/workspace/transport/`, a headless `agent/haxeon.json`, real native
+socket/WebSocket consumers and a Chrome fixture using the same typed Haxeon client
+on Wasm32 and Wasm GC. Shared NativeKit event observation owns/adopts opaque
+handles; cancellation removes attempts before late events. Framing and per-poll
+work are bounded. Same-user local admission and loopback credential preflight
+precede RPC negotiation and capability-gated service dispatch. Credential and
+public epoch are independent; each process restart receives a fresh epoch.
+
+NativeKit `01bbc511` annotates the mutable receive buffer and derives its capacity
+from the managed buffer. Before this fix, GC Wasm copied an unannotated pointer's
+bytes into native scratch memory without copying native writes back; framing then
+saw unchanged bytes and disconnected. Existing Haxeon mutable-counted-buffer
+support handles the correction; no compiler change or alternate browser protocol
+was needed. The first browser run also rejected a listener-only address-reuse flag
+on outbound WebSockets; the adapter now sets that flag only for listeners.
+
+Validation: `bash scripts/test.sh` passes, including the newly registered real
+transport consumer and portable Wasm service tests. Native cancellation churn,
+same-user socket and authenticated WebSocket reconnection, event-cursor restoration,
+ambiguous committed rename/outcome lookup without mutation replay, and terminal
+credential refusal pass. `bash scripts/test-workspace-rpc-browser.sh` passes all
+four Chrome scenarios on both Wasm targets: initialization, authenticated snapshot,
+suspend/reconnect preserving epoch, then daemon process restart restoring a fresh
+snapshot. NativeKit `tools/test-haxe-bindings.sh` passes ABI32/ABI64 drift checks,
+core lifecycle and GPU rendering smoke. Fresh native CMake/CTest passes 28 tests
+with one environment-dependent joystick/uinput test skipped (29 registered). The old NativeKit build
+cache referred to its former checkout path; tests used a fresh /tmp build instead.
+Owned Haxe format, shell syntax, Python syntax and diff checks pass.
+
+Receive feeding avoids temporary slices and transfers assembled payload ownership.
+Framing, native send queues and GC/native memory bridging still copy; no network
+zero-copy claim. Bootstrap caller owns private directory/credential configuration.
+The editor/web product is not yet connected to this daemon. Persistent storage,
+workspace lock/discovery, runtime/provider supervision, Android/relay qualification,
+resource reconciliation and compatibility vectors remain. RPC.2's first adapter
+item is accepted; RPC.2 overall and M14.3 remain open. Exact next action: finish
+RPC.2 lifecycle/capability/slow-consumer and evolution-vector acceptance before
+building durable workspace/runtime ownership on these verified transports.
+
+Repository ownership: Exosuit stays on `haxeon-uikit-port`; NativeKit's existing
+`exosuit-followon` branch was fast-forwarded to its current main HEAD before the
+owned binding commit. Haxeon remains `46b32640`, unchanged. Existing UI/confirmation
+work, NativeKit dialog changes and unrelated untracked files were preserved;
+only owned binding hunks were staged. No pushes or parent submodule pin changes.
+Exosuit commit: this ledger is included in the real-transport/bootstrap slice.
+
 ## Haxeon RPC.1 — first workspace consumer, 2026-10-05
 
 `src/workspace/service/` now consumes Haxeon RPC with a headless named-group

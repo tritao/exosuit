@@ -3,7 +3,8 @@
 The transport-independent implementation lives in `src/workspace/service/`.
 It is a headless catalog of named group metadata with optional cwd association;
 renaming preserves cwd. It does not yet implement the full nested group model,
-project/file access, terminal/agent operations, persistence or a running daemon.
+project/file access, terminal/agent operations or persistence. A running bootstrap
+daemon now hosts this catalog; full daemon supervision/discovery remains pending.
 The native and Wasm tests consume the same service, client replica and wire types.
 
 ## Methods and permissions
@@ -73,3 +74,45 @@ network delivery guarantee is claimed.
 Run `haxeon run --project tests/haxeon-rpc/haxeon.json` for the native consumer and
 `bash scripts/test-workspace-rpc-wasm.sh` for the same workspace scenarios on both
 Wasm targets. Both checks are registered in `scripts/test.sh`.
+
+## Real transport boundary (RPC.2 first slice)
+
+`src/workspace/transport/` adapts NativeKit local sockets and native/browser
+WebSockets to the same Haxeon `MessageTransport`/`RpcClient` API. NativeKit exposes
+ordered bytes even for WebSockets, so every payload uses HMPK framing. A shared
+NativeKit event subscription transfers accepted/connected owned handles; it never
+runs a competing event pump. Canceled attempts are removed before closing the
+handle, completed attempts no longer own their transferred transport, and stale
+handle generations cannot publish a new connection.
+
+Local listener admission uses NativeKit's private-path/same-user checks. Browser
+and native WebSocket admission first exchanges a caller-generated 256-bit session
+credential and an acknowledgement in framed payloads. The service creates its RPC
+handshake only after authentication, then binds only negotiated capabilities.
+Invalid credentials are a terminal refusal; disconnect/timeouts remain retryable.
+WebSockets bind only to loopback here. This is not encrypted remote authentication,
+relay authorization or browser-origin policy for a shipped remote endpoint.
+
+Limits: 32 hub streams, four listeners, 16 server peers, 256 KiB messages,
+1 MiB native send/receive queues, 16 KiB reusable receive storage, 32 KiB consumed
+per transport receive call, and 32 RPC messages/256 KiB per peer poll. Authentication
+expires after five seconds. A rejected peer cannot consume a privileged RPC slot.
+Browser send admission accounts for `WebSocket.bufferedAmount`; buffering internal
+to the browser remains outside application control.
+
+Receive feeding uses the reusable buffer directly, retaining unread offsets and
+transferring completed payload ownership without an extra framing copy. Framing
+still allocates the assembled payload; outgoing framing and native send queues
+copy. GC Wasm additionally bridges mutable receive storage between GC and native
+linear memory. NativeKit's receive buffer annotation makes capacity implicit and
+ensures writes are copied back; an unannotated pointer was insufficient on GC Wasm.
+No end-to-end zero-copy claim is made.
+
+The native test verifies socket/WebSocket query, cursor recovery, ambiguous lost
+mutation reply and outcome lookup without replaying the mutation, plus canceled
+connection churn and terminal credential refusal. The Chrome fixture uses the
+same Haxeon client on Wasm32 and Wasm GC against a separate headless agent process:
+initial snapshot, suspension/reconnect in the same epoch, then process restart
+with a fresh epoch and snapshot restoration. See [agent/README.md](../../agent/README.md)
+for commands and bootstrap limits. Android, wide-area relay access, durable
+outcomes, runtime resource reconciliation and frozen evolution vectors remain.

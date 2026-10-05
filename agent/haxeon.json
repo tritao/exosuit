@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "package": {
+    "name": "exosuit-agent"
+  },
+  "entry": "app.AgentMain",
+  "sourceRoots": [
+    "src",
+    "../src"
+  ],
+  "scopeSourceRoots": false,
+  "dependencies": {
+    "nativekit": {
+      "path": "../../nativekit"
+    }
+  },
+  "native": {
+    "cmake": {
+      "source": "native",
+      "target": "exosuit_agent_native",
+      "inputs": [
+        "native/CMakeLists.txt",
+        "../../nativekit/CMakeLists.txt"
+      ]
+    }
+  },
+  "target": "host",
+  "outputDir": "build"
+}

@@ -127,6 +127,13 @@ lifecycle transitions, transactions, rollback, event trimming).
 
 ## M14.3 — Headless agent daemon
 
+First bootstrap delivered in `agent/haxeon.json`: a headless NativeKit loop hosts
+an in-memory group catalog over same-user local sockets and authenticated loopback
+WebSockets. Real Chrome Wasm32/Wasm GC clients recover across connection and agent
+process restarts. This covers the manifest/server-loop foundation only; the lock,
+persistence, runtime/provider supervision and managed discovery below remain open.
+See [WORKSPACE-RPC.md](WORKSPACE-RPC.md) for limits and test evidence.
+
 - [ ] Add an `exosuit-agent` headless manifest. It takes an exclusive
   workspace lock (exit 3 `workspace_in_use`). Its single-threaded server loop
   accepts, processes clients, polls runtimes and providers, and flushes. Per

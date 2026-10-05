@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "package": {
+    "name": "exosuit-workspace-transport-test"
+  },
+  "entry": "app.TransportTestMain",
+  "sourceRoots": [
+    "src"
+  ],
+  "scopeSourceRoots": false,
+  "dependencies": {
+    "exosuit-agent": {
+      "path": "../../agent"
+    }
+  },
+  "target": "host",
+  "outputDir": "build"
+}

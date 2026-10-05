@@ -1,0 +1,13 @@
+cmake_minimum_required(VERSION 3.21)
+project(workspace_rpc_browser LANGUAGES C CXX)
+set(NK_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(NK_BUILD_GPU OFF CACHE BOOL "" FORCE)
+set(NK_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(NK_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(NK_WASM_HOST_HEAP_LIMIT 33554432 CACHE STRING "" FORCE)
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../../nativekit" nativekit)
+add_executable(workspace_rpc_host main.cpp)
+target_link_libraries(workspace_rpc_host PRIVATE NativeKit::nativekit NativeKit::wasm_host_allocator)
+target_link_options(workspace_rpc_host PRIVATE "-sINITIAL_MEMORY=134217728" "-sALLOW_MEMORY_GROWTH=0" "-sEXPORTED_FUNCTIONS=@${RPC_EXPORTS}" "-sEXPORTED_RUNTIME_METHODS=addFunction,removeFunction" "-sALLOW_TABLE_GROWTH=1" "-sNO_EXIT_RUNTIME=1")
+
+set_property(TARGET workspace_rpc_host APPEND PROPERTY LINK_DEPENDS "${RPC_EXPORTS}")

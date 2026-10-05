@@ -2,8 +2,10 @@
 
 Status: RPC.1 accepted for the transport-independent runtime and first in-memory
 workspace consumer. Native, Wasm32 and Wasm GC tests pass, including handshake,
-reconnect, subscription recovery and lost-mutation reconciliation. Real transport
-adapters are next in RPC.2; durable daemon storage remains Exosuit work. See
+reconnect, subscription recovery and lost-mutation reconciliation. RPC.2 now has
+real local sockets and authenticated loopback WebSockets, including Chrome
+Wasm32/Wasm GC reconnect and daemon-restart tests. Resource reconciliation,
+compatibility vectors and durable daemon storage remain. See
 [WORKSPACE-RPC.md](WORKSPACE-RPC.md) for the consumer's exact guarantees and limits.
 Required by the Exosuit workspace service in [M14](14-workbench.md). This plan
 authorizes a small general-purpose Haxeon library developed alongside real
@@ -72,7 +74,7 @@ poll budgets. Codec fixtures agree across native and Wasm targets.
 
 ## RPC.2 — Transport integration and compatibility
 
-- [ ] Implement local socket and browser-compatible WebSocket adapters using
+- [x] Implement local socket and browser-compatible WebSocket adapters using
   the same typed runtime. Keep authentication/session establishment at the
   adapter/service boundary and verify it before privileged dispatch.
 - [ ] Exercise service restart, mobile-style suspend/resume, connection churn,
