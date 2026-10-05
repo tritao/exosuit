@@ -2,6 +2,56 @@
 
 Last updated: 2026-10-05.
 
+## M14 — durable catalog and managed startup, 2026-10-05
+
+Delivered a typed `WorkspacePersistence` boundary and agent-owned SQLite schema
+version 1 using generic `sqlitekit`. Each rename commits its group/revision,
+cursor, operation request/outcome and event atomically before replying or publishing;
+event trimming is in the same transaction. WAL/FULL durability and per-row typed
+MessagePack blobs avoid full-catalog serialization on each rename. Startup restores
+the stored epoch, bounded snapshot, all 256 retained outcomes and last 32 events.
+Idempotent retries and operation lookup survive process restart; saturation refuses
+new operations without discarding old outcomes. Corruption, unknown/unversioned
+schemas and stale cursor/revision writes are refused. An ambiguous storage failure
+fences subsequent RPC access until reopening.
+
+`scripts/run-agent.py` adds qualified Linux managed startup with canonical-root
+identity, private credential/state files, an inherited lifetime lock, exit 3
+`workspace_in_use`, generation-tagged discovery after readiness and optional
+detached startup. The descriptor publishes a credential path, never the secret.
+Normal stop removes owned discovery and retires the process group; abrupt manager
+kill cannot unlock its still-live daemon. Device/inode storage replacement stops
+the daemon. A full-suite run exposed launcher/child shutdown ordering: cleanup now
+waits for the independently owned database lock to release before reporting stop,
+so an immediate restart cannot race a surviving child.
+
+Two Haxeon defects were fixed in `7f3f28ce`. Imported named calls now retain their
+source receiver path, so a field named after an introduced package root cannot
+shadow the imported type. The reference-Haxe reducer passes; regressions preserve
+actual source-value shadowing and incremental reanalysis. Running child stdout/
+stderr is flushed while forwarding; a blocking-child integration test requires
+its readiness message before allowing exit. No application rename/type weakening
+was used to bypass either defect.
+
+Validation: full Exosuit `scripts/test.sh`; real SQLite restart, idempotence,
+outcome lookup, replay trimming, late-transaction rollback, stale writer/CAS,
+retention saturation, corrupt blob and schema refusal; real manager discovery,
+duplicate startup, immediate restart, abrupt kill, detached readiness, root
+identity and storage replacement. Chrome Wasm GC and Wasm32 clients commit a rename,
+reconnect, restart a separate daemon and recover the same durable epoch/revision.
+The full Haxeon gate passes: 487 tests, differential/integration checks, both Wasm
+backends/parity and Wasmtime. The self-hosted compiler was rebuilt from current
+source; the persistence and managed-startup acceptance also passes through it.
+Owned format/syntax/diff checks pass. Unrelated web/
+editor changes remain untouched; no push, PR or submodule pin changes.
+
+This accepts the first durable catalog/startup slice, not all M14.2/M14.3 domain
+or runtime work. Next: typed local descriptor validation and seamless editor
+attachment/auto-spawn, then actual terminal/provider lifetime reconciliation.
+Nested groups, domain batches, terminal histories/checkpoints, runtime supervision
+and volatile terminal mode on storage loss remain open. See
+[WORKSPACE-RPC.md](WORKSPACE-RPC.md) and [agent/README.md](../../agent/README.md).
+
 ## Haxeon RPC.2 — lifecycle isolation and frozen vectors, 2026-10-05
 
 Real socket admission now verifies reduced capabilities after service policy

@@ -1,32 +1,58 @@
-# Headless workspace bootstrap
+# Headless workspace catalog
 
-This first daemon hosts the typed in-memory group catalog over a same-user local
-socket and an authenticated **loopback-only** WebSocket. It has no UIKit or GPU
-dependency. It does not yet supervise terminals/providers, persist workspace
-state, acquire the workspace storage lock, discover existing agents or auto-spawn
-from the editor. Every restart uses a fresh epoch; prior mutation outcomes become
-unknown. Do not treat it as the completed M14 daemon or a remote deployment.
+The daemon hosts a durable named-group catalog over a same-user local socket and
+an authenticated **loopback-only** WebSocket. SQLite persists groups, revisions,
+cursor, operation outcomes and trimmed replay events atomically; restart preserves
+the catalog epoch and mutation idempotency. It has no UIKit or GPU dependency.
+Terminal/provider supervision, editor auto-spawn/reuse and remote deployment
+remain M14 work.
 
-Build with `../haxeon/scripts/haxeon build --project agent/haxeon.json`.
-The run arguments are `PRIVATE_SOCKET LOOPBACK_WS_PORT TOKEN_FILE FRESH_EPOCH`.
-The caller must create a private owner-only directory (0700), keep the credential
-file owner-only (0600), and supply a cryptographically generated 256-bit credential
-as exactly 64 lowercase hex digits. Generate the epoch independently on every
-startup; it is public protocol metadata and must never contain the credential.
-Credentials are read from a file rather than command arguments and are not logged.
-The bootstrap assumes this caller-controlled configuration; it is not yet the
-managed credential/discovery lifecycle needed by the shipped application.
+Start it on Linux with:
+
+```sh
+python3 scripts/run-agent.py /path/to/workspace --detach
+```
+
+Without `--detach`, the manager runs in the foreground. It creates private state
+under `$XDG_STATE_HOME/exosuit/workspaces/ROOT_HASH`, or `--state-dir DIRECTORY`.
+The directory must be owned by this user with mode 0700; files are mode 0600.
+`--port PORT` chooses the loopback WebSocket port; the default selects a free port
+and refuses startup if another listener wins the bind race.
+
+The manager holds an exclusive lifetime lock inherited by the daemon and returns
+exit 3 `workspace_in_use` for a duplicate start. It writes `endpoint.json` after
+readiness, with the canonical workspace root, manager PID/generation, endpoints
+and credential file path. The credential itself is never included. Discovery
+must be verified by a client handshake before reuse; editor integration is still
+pending. To stop, send SIGTERM to the descriptor's `managerPid`. Normal stop
+removes owned discovery and stops the child process group while retaining the
+database and credential. Replaced/missing storage stops the daemon rather than
+silently opening a fresh catalog. Linux startup is tested; Windows management is
+not delivered by this POSIX launcher.
+
+For direct fixtures, build with
+`../haxeon/scripts/haxeon build --project agent/haxeon.json`.
+Run arguments are:
+
+```text
+PRIVATE_SOCKET LOOPBACK_WS_PORT TOKEN_FILE SEED_EPOCH [DATABASE [WORKSPACE_ROOT]]
+```
+
+The caller supplies a private owner-only directory, a 0600 credential file
+containing exactly 64 lowercase hex digits generated from 256 random bits, and an
+independently generated public seed epoch. The seed epoch initializes a new
+catalog; an existing database restores its stored epoch. Omitting `DATABASE`
+selects ephemeral fixture mode, which requires a fresh epoch on every restart.
 
 NativeKit enforces private-path/same-user checks on the local listener. WebSocket
 clients prove possession of the credential before RPC negotiation or dispatch.
-Plain loopback WebSocket has no network encryption. Remote access still requires
-the planned authenticated secure relay and endpoint/session authorization.
+Plain loopback WebSocket has no network encryption. Remote access requires the
+planned authenticated secure relay and endpoint/session authorization.
 
-Run the real transport tests with `bash scripts/test-workspace-transport.sh`.
-For each `wasm-gc` and `wasm32`, run
-`bash scripts/build-workspace-rpc-browser.sh TARGET` followed by
-`python3 scripts/test-workspace-rpc-browser.py`. The browser fixture needs the
-sibling Emsdk installation and Chrome/Chromium. It starts a separate daemon,
-authenticates, suspends/reconnects, restarts the daemon with a fresh epoch, and
-verifies snapshot restoration. Temporary credentials and child processes are
-cleaned up. The browser page is a test client, not the Exosuit web application.
+Run `bash scripts/test-workspace-persistence.sh` for storage and managed lifecycle
+acceptance, and `bash scripts/test-workspace-transport.sh` for real transports.
+`bash scripts/test-workspace-rpc-browser.sh` builds and runs Chrome fixtures on
+both Wasm GC and Wasm32 (using the sibling Emsdk installation). A browser commits
+a rename, suspends/reconnects, then observes its durable state after daemon restart.
+Temporary credentials and child processes are cleaned up. The browser page is a
+test client; the Exosuit web application's connection UX remains pending.

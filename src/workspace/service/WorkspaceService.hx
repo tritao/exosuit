@@ -2,15 +2,19 @@ package workspace.service;
 
 import haxeon.rpc.RpcConnection;
 import workspace.service.WorkspaceProtocol;
+import workspace.service.WorkspacePersistence;
 
 private typedef StoredOperation = {var request:RenameGroup; var outcome:RenameResult;}
 private typedef Observer = {var connection:RpcConnection; var watching:Bool; var granted:Bool;}
 
 /** Bounded single-event-loop catalog. State and operation outcomes share one epoch.
- * A future durable store must commit both atomically before responding/publishing. */
+ * Optional persistence commits state and outcomes before responding/publishing. */
 class WorkspaceService {
 	public final id:String;
 	public final epoch:String;
+
+	final persistence:Null<WorkspacePersistence>;
+	var storageFailed:Bool = false;
 
 	final groups:Map<String, WorkspaceGroup> = [];
 	final operations:Map<String, StoredOperation> = [];
@@ -22,7 +26,14 @@ class WorkspaceService {
 	var operationCount:Int = 0;
 	var sequence:Int = 0;
 
-	public function new(id:String, epoch:String, initial:Array<WorkspaceGroup>, historyLimit:Int = 32, operationLimit:Int = 256, clientLimit:Int = 16) {
+	public function new(id:String, epoch:String, initial:Array<WorkspaceGroup>, historyLimit:Int = 32, operationLimit:Int = 256, clientLimit:Int = 16,
+			?persistence:WorkspacePersistence) {
+		this.persistence = persistence;
+		var stored = persistence == null ? null : persistence.load();
+		if (stored != null) {
+			epoch = stored.snapshot.epoch;
+			initial = stored.snapshot.groups;
+		}
 		if (!validId(id) || !validId(epoch) || initial == null || initial.length > 32 || historyLimit < 1 || historyLimit > 32 || operationLimit < 1
 			|| clientLimit < 1)
 			throw "Invalid workspace service limits";
@@ -36,6 +47,70 @@ class WorkspaceService {
 				|| groups.exists(group.id))
 				throw "Invalid workspace group";
 			groups.set(group.id, WorkspaceProtocol.copyGroup(group));
+		}
+		if (stored != null)
+			restore(stored);
+	}
+
+	function restore(stored:WorkspaceStoredState):Void {
+		if (stored.snapshot.cursor < 0
+			|| stored.operations == null
+			|| stored.events == null
+			|| stored.operations.length > operationLimit
+			|| stored.events.length > historyLimit
+			|| stored.operations.length != stored.snapshot.cursor)
+			throw "Invalid persisted workspace bounds";
+		var latest:Map<String, WorkspaceGroup> = [];
+		var expected = 1;
+		for (entry in stored.operations) {
+			if (entry == null || entry.request == null || entry.outcome == null || entry.outcome.group == null)
+				throw "Missing persisted operation";
+			var request = entry.request, outcome = entry.outcome;
+			var previous = latest.get(request.group);
+			if (request.workspace != id
+				|| request.epoch != epoch
+				|| !validId(request.operation)
+				|| !validId(request.group)
+				|| !validName(request.name)
+				|| request.expectedRevision < 1
+				|| request.expectedRevision == 0x7fffffff
+				|| outcome.epoch != epoch
+				|| outcome.operation != request.operation
+				|| outcome.sequence != expected
+				|| outcome.group.id != request.group
+				|| outcome.group.name != request.name
+				|| outcome.group.revision != request.expectedRevision + 1
+				|| operations.exists(request.operation)
+				|| !groups.exists(request.group)
+				|| outcome.group.cwd != groups.get(request.group).cwd
+				|| previous != null
+				&& request.expectedRevision != previous.revision)
+				throw "Invalid persisted operation";
+			operations.set(request.operation, {request: request, outcome: outcome});
+			latest.set(request.group, outcome.group);
+			expected++;
+		}
+		for (groupId => last in latest) {
+			var group = groups.get(groupId);
+			if (group == null || group.name != last.name || group.revision != last.revision)
+				throw "Persisted group does not match its latest outcome";
+		}
+		sequence = stored.snapshot.cursor;
+		operationCount = stored.operations.length;
+		expected = sequence - stored.events.length + 1;
+		if (stored.events.length != (sequence < historyLimit ? sequence : historyLimit))
+			throw "Invalid persisted event retention";
+		for (event in stored.events) {
+			if (event == null || event.group == null || event.epoch != epoch || event.sequence != expected)
+				throw "Invalid persisted event sequence";
+			var outcome = stored.operations[expected - 1].outcome;
+			if (event.group.id != outcome.group.id
+				|| event.group.name != outcome.group.name
+				|| event.group.cwd != outcome.group.cwd
+				|| event.group.revision != outcome.group.revision)
+				throw "Invalid persisted event sequence";
+			history.push(event);
+			expected++;
 		}
 	}
 
@@ -64,6 +139,10 @@ class WorkspaceService {
 		var events = capabilities.indexOf(WorkspaceProtocol.EVENTS) >= 0;
 		var write = capabilities.indexOf(WorkspaceProtocol.WRITE) >= 0;
 		connection.register(WorkspaceProtocol.QUERY, function(request, context) {
+			if (storageFailed) {
+				context.fail({code: "storage_unavailable", message: "Workspace storage requires recovery", ambiguous: true});
+				return;
+			}
 			if (!observer.granted || !read) {
 				context.fail({code: "unauthorized", message: "Read denied", ambiguous: false});
 				return;
@@ -79,6 +158,10 @@ class WorkspaceService {
 			context.respond(snapshot());
 		});
 		connection.register(WorkspaceProtocol.WATCH, function(request, context) {
+			if (storageFailed) {
+				context.fail({code: "storage_unavailable", message: "Workspace storage requires recovery", ambiguous: true});
+				return;
+			}
 			if (!observer.granted || !read || !events) {
 				context.fail({code: "unauthorized", message: "Watch denied", ambiguous: false});
 				return;
@@ -104,6 +187,10 @@ class WorkspaceService {
 			});
 		});
 		connection.register(WorkspaceProtocol.RENAME, function(request, context) {
+			if (storageFailed) {
+				context.fail({code: "storage_unavailable", message: "Workspace storage requires recovery", ambiguous: true});
+				return;
+			}
 			if (!observer.granted || !write) {
 				context.fail({code: "unauthorized", message: "Rename denied", ambiguous: false});
 				return;
@@ -156,7 +243,18 @@ class WorkspaceService {
 				sequence: sequence + 1,
 				group: updated
 			};
-			// No callback or I/O splits this commit in the single service event loop.
+			var event:WorkspaceEvent = {epoch: epoch, sequence: outcome.sequence, group: updated};
+			if (persistence != null) {
+				try
+					persistence.commit(request, outcome, event)
+				catch (_:Dynamic) {
+					storageFailed = true;
+					context.fail({code: "storage_failed", message: "Workspace commit failed; reopen storage to reconcile", ambiguous: true});
+					return;
+				}
+			}
+			// Durable commit precedes every in-memory update, reply and event.
+
 			groups.set(updated.id, updated);
 			sequence++;
 			operationCount++;
@@ -171,7 +269,6 @@ class WorkspaceService {
 				},
 				outcome: outcome
 			});
-			var event:WorkspaceEvent = {epoch: epoch, sequence: sequence, group: updated};
 			history.push(event);
 			if (history.length > historyLimit)
 				history.shift();
@@ -183,6 +280,10 @@ class WorkspaceService {
 					watcher.connection.notify(WorkspaceProtocol.CHANGED, event, WorkspaceProtocol.encodeEvent);
 		});
 		connection.register(WorkspaceProtocol.OPERATION, function(request, context) {
+			if (storageFailed) {
+				context.fail({code: "storage_unavailable", message: "Workspace storage requires recovery", ambiguous: true});
+				return;
+			}
 			if (!observer.granted || !read) {
 				context.fail({code: "unauthorized", message: "Outcome lookup denied", ambiguous: false});
 				return;

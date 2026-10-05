@@ -122,16 +122,26 @@ correct replay. No Pragtical binary is required.
   compatibility is not required. Typed MessagePack blobs. Refuse unknown
   schema versions.
 
+First catalog slice delivered: schema v1 persists groups, cursor, operation
+requests/outcomes and trimmed events atomically through generic SQLite. Restart
+preserves the epoch and idempotency; failed storage fences the service. Unknown
+schemas/corrupt bounded records are refused. Full domain/lifecycle/batch storage
+and later migrations remain open.
+
 Acceptance: port the service and persistence tests (revisions, idempotency,
 lifecycle transitions, transactions, rollback, event trimming).
 
 ## M14.3 — Headless agent daemon
 
 First bootstrap delivered in `agent/haxeon.json`: a headless NativeKit loop hosts
-an in-memory group catalog over same-user local sockets and authenticated loopback
-WebSockets. Real Chrome Wasm32/Wasm GC clients recover across connection and agent
-process restarts. This covers the manifest/server-loop foundation only; the lock,
-persistence, runtime/provider supervision and managed discovery below remain open.
+a durable group catalog over same-user local sockets and authenticated loopback
+WebSockets. Real Chrome Wasm32/Wasm GC clients recover a saved rename across
+connection and agent process restarts. `scripts/run-agent.py` adds qualified Linux
+startup, an inherited exclusive lock (exit 3), private generation-tagged discovery,
+detached readiness and device/inode storage-replacement fencing. Client descriptor
+handshake validation/auto-spawn, runtime/provider supervision and volatile terminal
+mode remain open. Catalog connection limits are the stricter existing RPC.2
+bounds documented below, not the future runtime-manager budget.
 See [WORKSPACE-RPC.md](WORKSPACE-RPC.md) for limits and test evidence.
 
 - [ ] Add an `exosuit-agent` headless manifest. It takes an exclusive

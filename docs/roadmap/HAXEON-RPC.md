@@ -6,8 +6,9 @@ reconnect, subscription recovery and lost-mutation reconciliation. RPC.2 now has
 real local sockets and authenticated loopback WebSockets, including Chrome
 Wasm32/Wasm GC reconnect and daemon-restart tests. Real capability reduction,
 completed connection churn, slow-consumer isolation and frozen native/Wasm
-compatibility vectors now pass. Terminal/agent resource reconciliation and durable
-daemon storage remain tied to M14 runtime delivery. See
+compatibility vectors now pass. The first catalog also has durable SQLite state,
+operation outcomes and replay history, plus managed POSIX startup. Terminal/agent
+resource reconciliation remains tied to M14 runtime delivery. See
 [WORKSPACE-RPC.md](WORKSPACE-RPC.md) for the consumer's exact guarantees and limits.
 Required by the Exosuit workspace service in [M14](14-workbench.md). This plan
 authorizes a small general-purpose Haxeon library developed alongside real

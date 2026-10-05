@@ -3,8 +3,9 @@
 The transport-independent implementation lives in `src/workspace/service/`.
 It is a headless catalog of named group metadata with optional cwd association;
 renaming preserves cwd. It does not yet implement the full nested group model,
-project/file access, terminal/agent operations or persistence. A running bootstrap
-daemon now hosts this catalog; full daemon supervision/discovery remains pending.
+project/file access or terminal/agent operations. The native daemon persists this
+catalog through an agent-owned SQLite store; a POSIX manager provides private
+discovery and exclusive startup. Editor auto-spawn/attachment remains pending.
 The native and Wasm tests consume the same service, client replica and wire types.
 
 ## Methods and permissions
@@ -65,11 +66,54 @@ After a lost reply, query the operation outcome. Unknown means execution remains
 uncertain, especially across a service restart; it never means safe to repeat
 blindly. The service keeps all committed outcomes for its epoch and rejects new
 mutations with `operation_limit` when retention is full, rather than evicting
-outcomes silently. Storage is currently in memory. Restart must use a new opaque
-epoch, invalidating old mutation requests and replay cursors. The daemon's durable
-store must atomically persist state and outcomes and define retention before this
-becomes a durable workspace mutation API. No process-restart or exactly-once
-network delivery guarantee is claimed.
+outcomes silently. The pure service can still run without persistence; that mode
+must receive a fresh opaque epoch on restart. The managed native daemon reopens
+its stored epoch, groups, cursor, retained events and all operation outcomes.
+Identical retries after process restart return the original outcome, including
+when the 256-outcome retention limit is full. This does not promise exactly-once
+network delivery.
+
+## Durable catalog and managed startup
+
+`WorkspacePersistence` is a typed native-independent boundary. The agent's
+`WorkspaceSqliteStore` uses the generic `sqlitekit` package, with Exosuit-owned
+schema version 1 and typed MessagePack row blobs. A rename updates one group,
+cursor, operation request/outcome and event in one `BEGIN IMMEDIATE` transaction,
+then trims event history. WAL and synchronous FULL are enabled. No full catalog
+checkpoint is encoded on each mutation. Blob binding copies across managed/native
+lifetimes; loading reconstructs an owned bounded catalog once at startup.
+
+The store refuses unknown schema versions and nonempty unversioned databases.
+Loading checks bounded blob/text sizes before copying, identity and revision
+agreement, contiguous outcomes/events and the snapshot's latest outcomes. The
+SQLite wrapper holds an exclusive database lifetime lock; cursor and group CAS
+also refuse stale writes. A commit exception returns ambiguous `storage_failed`
+and fences further RPC access as `storage_unavailable` until reopening, since a
+failed commit acknowledgement cannot prove whether it reached durable storage.
+No state or event is published before a successful commit.
+
+`python3 scripts/run-agent.py WORKSPACE [--detach]` selects private state under
+`$XDG_STATE_HOME/exosuit/workspaces/ROOT_HASH` (or `--state-dir`). The POSIX manager
+holds an inherited lifetime lock, rejects duplicate starts with exit 3
+`workspace_in_use`, validates the canonical root, creates a private 256-bit
+credential file and publishes `endpoint.json` only after daemon readiness.
+Discovery includes the manager PID/generation, local socket, loopback WebSocket
+and credential **path**, never the secret. The lock stays held by the live daemon
+if the manager is killed abruptly. Normal stop removes owned discovery, stops the
+process group and retains catalog/credential files. Replaced/missing storage
+stops the daemon; there is no silent switch to an empty catalog.
+
+This launcher is qualified on Linux. Existing descriptors are discovery hints;
+client handshake validation and editor auto-spawn/reuse still need integration.
+Runtime/provider supervision, history files/checkpoints and volatile terminal
+operation on storage loss remain M14.3 work. The manager currently stops on
+catalog storage loss rather than providing that future terminal fallback.
+
+`bash scripts/test-workspace-persistence.sh` verifies real SQLite restart,
+idempotence/outcome lookup, trimmed event replay, rollback after a late transaction
+failure, storage fencing, stale cursor rejection, exclusive ownership, retention
+saturation, corruption/schema refusal and real manager lifecycle. It is included
+in `scripts/test.sh`.
 
 Run `haxeon run --project tests/haxeon-rpc/haxeon.json` for the native consumer and
 `bash scripts/test-workspace-rpc-wasm.sh` for the same workspace scenarios on both
@@ -113,9 +157,9 @@ mutation reply and outcome lookup without replaying the mutation, plus canceled
 connection churn and terminal credential refusal. The Chrome fixture uses the
 same Haxeon client on Wasm32 and Wasm GC against a separate headless agent process:
 initial snapshot, suspension/reconnect in the same epoch, then process restart
-with a fresh epoch and snapshot restoration. See [agent/README.md](../../agent/README.md)
-for commands and bootstrap limits. Android, wide-area relay access, durable
-outcomes, runtime resource reconciliation and frozen evolution vectors remain.
+with the durable epoch, committed browser rename and snapshot restoration. See [agent/README.md](../../agent/README.md)
+for commands and current limits. Android, wide-area relay access and runtime
+resource reconciliation remain.
 
 ## Lifecycle isolation and schema compatibility
 

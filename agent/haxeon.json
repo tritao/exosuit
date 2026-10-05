@@ -12,6 +12,9 @@
   "dependencies": {
     "nativekit": {
       "path": "../../nativekit"
+    },
+    "sqlitekit": {
+      "path": "../native-packages/sqlite"
     }
   },
   "native": {

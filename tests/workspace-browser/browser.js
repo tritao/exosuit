@@ -9,6 +9,8 @@ function tick() {
     window.rpcTest.diagnostic = guest["app.BrowserRpcMain.diagnostic"]();
     window.rpcTest.generations = state;
     window.rpcTest.epochs = guest["app.BrowserRpcMain.epochChanges"]();
+    window.rpcTest.savedRevision = guest["app.BrowserRpcMain.savedRevision"]();
+    window.rpcTest.renameDone = !!guest["app.BrowserRpcMain.renameDone"]();
   } catch (error) {
     window.rpcTest.error = String(error);
     return;
@@ -22,6 +24,7 @@ window.startRpcTest = (port, token) => {
   guest["app.BrowserRpcMain.start"](port);
   tick();
 };
+window.renameRpcTest = () => guest["app.BrowserRpcMain.rename"]();
 window.suspendRpcTest = () => guest["app.BrowserRpcMain.suspend"]();
 
 var Module = {

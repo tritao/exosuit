@@ -60,6 +60,7 @@ echo "PASS: Haxeon headless application exercised the platform ABI"
 run_test native-string-test
 run_test haxeon-rpc
 bash "$root_dir/scripts/test-workspace-transport.sh"
+bash "$root_dir/scripts/test-workspace-persistence.sh"
 bash "$root_dir/scripts/test-workspace-rpc-wasm.sh"
 run_test application-test
 run_test problems

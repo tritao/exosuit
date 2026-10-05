@@ -58,7 +58,7 @@ with tempfile.TemporaryDirectory(prefix='exosuit-browser-rpc-') as temporary:
     log = open(directory / 'agent.log', 'w+')
 
     def start_agent():
-        process = subprocess.Popen([HAXEON, 'run', '--project', str(ROOT / 'agent/haxeon.json'), '--', str(directory / 'agent.sock'), str(port), str(credential), secrets.token_hex(16)], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+        process = subprocess.Popen([HAXEON, 'run', '--project', str(ROOT / 'agent/haxeon.json'), '--', str(directory / 'agent.sock'), str(port), str(credential), secrets.token_hex(16), str(directory / 'catalog.sqlite')], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         return process
 
     def evaluate(expression):
@@ -94,12 +94,14 @@ with tempfile.TemporaryDirectory(prefix='exosuit-browser-rpc-') as temporary:
         wait_state(lambda state: state['ready'], 'browser guest initialized')
         evaluate(f'window.startRpcTest({port}, {json.dumps(token)})')
         wait_state(lambda state: state['generations'] >= 1 and state['epochs'] == 1, 'browser authenticated workspace snapshot')
+        evaluate('window.renameRpcTest()')
+        wait_state(lambda state: state['renameDone'] and state['savedRevision'] == 2, 'browser mutation committed and observed')
         evaluate('window.suspendRpcTest()')
         wait_state(lambda state: state['generations'] >= 2 and state['epochs'] == 1, 'browser reconnect preserves epoch')
         stop(agent)
         time.sleep(0.2)
         agent = start_agent()
-        wait_state(lambda state: state['generations'] >= 3 and state['epochs'] == 2, 'daemon restart restores fresh-epoch snapshot')
+        wait_state(lambda state: state['generations'] >= 3 and state['epochs'] == 1 and state['savedRevision'] == 2, 'daemon restart preserves durable epoch and browser mutation')
         if cdp.errors:
             raise RuntimeError('\n'.join(cdp.errors))
     finally:
