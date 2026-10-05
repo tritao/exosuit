@@ -12,12 +12,24 @@ clipboard, file dialogs, and native services.
 
 ## Build and test
 
-Install Haxeon and place this repository alongside checkouts of `nativekit`,
-`uikit`, `editorkit` and `haxeon` (the materia workspace layout), or set their
-paths in graphical/haxeon.json:
+Haxeon is pinned as a submodule at `haxeon`, including its UI,
+platform, GPU, and NativeKit dependencies. Initialize the submodules and
+bootstrap the compiler before building:
 
 ```sh
-cd exosuit
+git submodule update --init --recursive
+./haxeon/scripts/bootstrap-tools.sh
+(cd haxeon && ./scripts/build-native.sh)
+```
+
+The text model is supplied by `haxeon/packages/editor` (`haxeon.editor`).
+The desktop build uses the Haxeon submodule and its nested native dependencies.
+The browser build still uses Materia’s SceneKit and browser build helpers.
+
+`HAXEON_ROOT` and `HAXEON_BIN` can override the compiler used by scripts;
+package manifests remain pinned to the submodule sources.
+
+```sh
 ./scripts/build.sh
 ./scripts/run.sh [file or directory]
 ```
@@ -30,7 +42,8 @@ The graphical application builds from `graphical/haxeon.json` (entry
 `app.GraphicalMain`). Headless tests build from `haxeon.json` (entry
 `app.Main`); see `scripts/test.sh` for the test suite.
 
-For CI or reproducible builds, pin dependency versions in haxeon.json.
+Haxeon and its nested dependencies are pinned by Git submodule commits.
+Use `git submodule update --init --recursive` after pulling dependency updates.
 
 See [the NativeKit UIKit host architecture](docs/architecture/0002-nativekit-uikit-host.md).
 
@@ -42,7 +55,7 @@ The headless core (`haxeon.json`) provides the editor's model layer, platform
 ABI, and command infrastructure; the graphical layer adds the UI shell,
 docking workspace, and document rendering.
 
-Text editing is backed by `nativekit.editorkit.TextDocument`, which the editor's
+Text editing is backed by `haxeon.editor.TextDocument`, which the editor's
 `TextBuffer` mirrors to enable plugin/LSP subscriber access to all edits
 regardless of whether they originate from the text widget, buffer API, or
 search/replace operations.

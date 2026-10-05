@@ -1,8 +1,10 @@
 package app;
 
-import nativekit.ui.host.DesktopUiHost;
-import nativekit.ui.host.DesktopUiHostOptions;
-import nativekit.ui.host.DesktopUiHostContext;
+import haxeon.ui.LayoutFrame;
+
+import haxeon.ui.host.DesktopUiHost;
+import haxeon.ui.host.DesktopUiHostOptions;
+import haxeon.ui.host.DesktopUiHostContext;
 import ui.ExosuitApp;
 
 /** Repeatable real UI workload; fixtures and settings must live outside user data. */
@@ -32,7 +34,7 @@ class MemoryWorkloadApp extends ExosuitApp {
 		StartupMemory.sample(directory, stage);
 	}
 
-	override public function submit(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+	override public function submit(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		frames++;
 		var step = (frames - 21) % 30;
 		if (frames >= 21 && frames < workloadEnd) {

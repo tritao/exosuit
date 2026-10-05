@@ -44,28 +44,28 @@ class ConfigurationTestMain {
 		var store = service.store;
 		var notifications = 0, release = service.subscribe(function(_) notifications++);
 		require(notifications == 1, "initial preference notification missing");
-		require(store.set("editor/fonts/font_size", nativekit.ui.properties.PropertyValue.Int(18)) == null,
+		require(store.set("editor/fonts/font_size", haxeon.ui.properties.PropertyValue.Int(18)) == null,
 			"valid font size rejected");
 		require(service.current.fontSize == 18 && notifications == 2, "preference did not apply immediately");
-		require(store.set("editor/fonts/font_size", nativekit.ui.properties.PropertyValue.Int(0)) != null
+		require(store.set("editor/fonts/font_size", haxeon.ui.properties.PropertyValue.Int(0)) != null
 			&& service.current.fontSize == 18 && notifications == 2, "invalid preference changed the snapshot");
-		require(store.set("languages/haxeon/command", nativekit.ui.properties.PropertyValue.Text("[1]")) != null,
+		require(store.set("languages/haxeon/command", haxeon.ui.properties.PropertyValue.Text("[1]")) != null,
 			"invalid language argv accepted");
-		require(store.set("editor/keyboard/keybindings", nativekit.ui.properties.PropertyValue.Text('["Ctrl+A|doc:undo"]')) == null,
+		require(store.set("editor/keyboard/keybindings", haxeon.ui.properties.PropertyValue.Text('["Ctrl+A|doc:undo"]')) == null,
 			"valid keybinding rejected");
 		require(new Preferences(userPath).current.fontSize == 18, "preferences did not survive restart");
-		store.set("editor/display/minimap_enabled", nativekit.ui.properties.PropertyValue.Bool(false));
+		store.set("editor/display/minimap_enabled", haxeon.ui.properties.PropertyValue.Bool(false));
 		require(!service.current.minimapEnabled && !service.current.copy().minimapEnabled, "minimap did not apply");
 		store.reset("editor/display/minimap_enabled");
 		require(service.current.minimapEnabled, "reset did not restore default");
 		for (mode in ["auto", "always", "hidden"])
-			require(store.set("editor/display/scrollbar_visibility", nativekit.ui.properties.PropertyValue.Enum(mode)) == null
+			require(store.set("editor/display/scrollbar_visibility", haxeon.ui.properties.PropertyValue.Enum(mode)) == null
 				&& service.current.scrollbarVisibility == mode, "scrollbar choice did not apply");
-		require(store.set("editor/display/scroll_animation_duration", nativekit.ui.properties.PropertyValue.Float(0.31)) != null,
+		require(store.set("editor/display/scroll_animation_duration", haxeon.ui.properties.PropertyValue.Float(0.31)) != null,
 			"out of range scroll duration accepted");
 		release(); release();
 		var count = notifications;
-		store.set("editor/indentation/tab_width", nativekit.ui.properties.PropertyValue.Int(8));
+		store.set("editor/indentation/tab_width", haxeon.ui.properties.PropertyValue.Int(8));
 		require(notifications == count, "released listener retained");
 		store.resetUnder("");
 		File.saveContent(userPath, "invalid JSON");
@@ -87,9 +87,9 @@ class ConfigurationTestMain {
 		});
 		var previousFont = renderer.font;
 		liveStore.batch(function() {
-			liveStore.set("editor/fonts/font_size", nativekit.ui.properties.PropertyValue.Int(21));
-			liveStore.set("appearance/colors/selection", nativekit.ui.properties.PropertyValue.Int(123456));
-			liveStore.set("editor/keyboard/keybindings", nativekit.ui.properties.PropertyValue.Text('["Ctrl+A|test:configured"]'));
+			liveStore.set("editor/fonts/font_size", haxeon.ui.properties.PropertyValue.Int(21));
+			liveStore.set("appearance/colors/selection", haxeon.ui.properties.PropertyValue.Int(123456));
+			liveStore.set("editor/keyboard/keybindings", haxeon.ui.properties.PropertyValue.Text('["Ctrl+A|test:configured"]'));
 		});
 		application.update();
 		require(renderer.fontSize == 21 && renderer.font != previousFont && Native.font_height(previousFont) == -1,
@@ -102,13 +102,13 @@ class ConfigurationTestMain {
 		require(application.keymap.commandsFor(Platform.KEY_A, Platform.MOD_CTRL)[0] == "doc:select-all", "reset lost default shortcut");
 		var workspaceSettingsPath = ConfigurationPaths.projectSettings(arguments[2]);
 		var projectPreferences = service.forProject(workspaceSettingsPath);
-		projectPreferences.store.set("languages/haxeon/enabled", nativekit.ui.properties.PropertyValue.Bool(false));
+		projectPreferences.store.set("languages/haxeon/enabled", haxeon.ui.properties.PropertyValue.Bool(false));
 		require(!projectPreferences.registry.exists("editor/fonts/font_size"), "user preferences leaked into project configuration");
 		application.openArgument(arguments[2]);
 		var configuredProject = application.workspace.activeProject;
 		if (configuredProject == null || configuredProject.settings == null) throw "Project configuration missing";
 		require(!configuredProject.settings.current.haxeonEnabled, "project language configuration not loaded");
-		liveStore.set("editor/fonts/font_size", nativekit.ui.properties.PropertyValue.Int(23));
+		liveStore.set("editor/fonts/font_size", haxeon.ui.properties.PropertyValue.Int(23));
 		application.update();
 		require(renderer.fontSize == 23, "project configuration blocked live user preferences");
 		application.open(arguments[3]); application.update();

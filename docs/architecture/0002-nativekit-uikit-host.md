@@ -48,7 +48,7 @@ model and behavior testing; the graphical layer is entirely opt-in.
 
 ```
 ┌───────────────────────────────────────────────────────────┐
-│ DesktopUiHost (nativekit.ui.host)                         │
+│ DesktopUiHost (haxeon.ui.host)                         │
 │ • Window, GPU, input, main loop lifecycle                │
 │ • Runs app.GraphicalMain                                 │
 └────────────────────┬────────────────────────────────────┬─┘
@@ -86,7 +86,7 @@ The editor's document is split between two layers:
 - **TextBuffer** (exosuit's native model, `src/editor/TextBuffer.hx`) — maintains
   undo/redo history, document state, and notifies subscribers (plugins, LSP
   clients) of edits.
-- **TextDocument** (UIKit's text widget model, `nativekit.editorkit.TextDocument`)
+- **TextDocument** (UIKit's text widget model, `haxeon.editor.TextDocument`)
   — the text value shown and edited in `TextArea`.
 
 When a user types in the text widget:

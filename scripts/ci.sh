@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-haxeon_root=${HAXEON_ROOT:-"$root_dir/../haxeon"}
+haxeon_root=${HAXEON_ROOT:-"$root_dir/haxeon"}
 # Shared compiler/native output trees require serial stages.
 (cd "$haxeon_root" && ./scripts/test.sh)
 "$root_dir/scripts/test.sh"

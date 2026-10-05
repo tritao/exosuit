@@ -2,7 +2,7 @@
 # Real X11 keyboard input. Measures delivered text input to completed frame, not OS/display latency.
 set -euo pipefail
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-haxeon_root=${HAXEON_ROOT:-"$root_dir/../haxeon"}
+haxeon_root=${HAXEON_ROOT:-"$root_dir/haxeon"}
 if [[ ${1:-} == --drive ]]; then
     fixture=$2
     export PRAGTICAL_PORTABLE="$fixture/state"
@@ -73,7 +73,7 @@ def revision(directory):
 def artifact(path):
     path = path.resolve()
     return {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
-vendor = source.parent / "uikit/vendor/skribidi"
+vendor = source / "haxeon/packages/ui/vendor/skribidi"
 inputs = {"repositories": {"exosuit": revision(source), "materia": revision(source.parent), "skribidi": revision(vendor)},
           "binaries": {"bytecode": artifact(source / "graphical/build/host/main.hl"),
                        "uikit": artifact(source / "graphical/build/host/native/exosuit-ui-native/libnativekit_ui.so")},

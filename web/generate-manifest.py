@@ -18,7 +18,11 @@ manifest = {
     "version": 1, "package": {"name": "exosuit-web"}, "entry": "app.WebMain",
     "sourceRoots": ["src", "../src", "../graphical/src"],
     "scopeSourceRoots": False, "sources": sources,
-    "dependencies": {name: {"path": "../../" + name} for name in ("nativekit", "uikit", "editorkit")},
+    "dependencies": {
+        "haxeon-platform": {"path": "../haxeon/packages/platform"},
+        "haxeon-ui": {"path": "../haxeon/packages/ui"},
+        "haxeon-editor": {"path": "../haxeon/packages/editor"},
+    },
     "ffi": {"interfaces": ["../bindings/pragtical_hx.hxi"],
             "projections": ["../bindings/pragtical_hx.hxmap"]},
     "target": "wasm32", "outputDir": "build"

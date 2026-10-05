@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-haxeon_root=${HAXEON_ROOT:-"$root_dir/../haxeon"}
+haxeon_root=${HAXEON_ROOT:-"$root_dir/haxeon"}
 output="$root_dir/bindings/pragtical_hx.hxi"
 destination=$output
 if [[ ${1:-} == --check ]]; then

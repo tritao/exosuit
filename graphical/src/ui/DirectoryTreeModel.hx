@@ -1,20 +1,20 @@
 package ui;
 
 import sys.FileSystem;
-import LayoutStyle;
-import LayoutAxis;
-import LayoutAlignmentY;
-import TextWrap;
-import nativekit.ui.widgets.Icon;
-import nativekit.ui.icons.IconName;
-import nativekit.ui.widgets.KeyedView;
-import nativekit.ui.widgets.layout.Row;
-import nativekit.ui.core.View;
-import nativekit.ui.core.TextStyleOverride;
-import nativekit.ui.theme.Theme;
-import nativekit.ui.widgets.collections.TreeRootMetadata;
-import nativekit.ui.widgets.collections.TreeViewModel;
-import nativekit.ui.widgets.text.MiddleEllipsisText;
+import haxeon.ui.LayoutStyle;
+import haxeon.ui.LayoutAxis;
+import haxeon.ui.LayoutAlignmentY;
+import haxeon.ui.TextWrap;
+import haxeon.ui.widgets.Icon;
+import haxeon.ui.icons.IconName;
+import haxeon.ui.widgets.KeyedView;
+import haxeon.ui.widgets.layout.Row;
+import haxeon.ui.core.View;
+import haxeon.ui.core.TextStyleOverride;
+import haxeon.ui.theme.Theme;
+import haxeon.ui.widgets.collections.TreeRootMetadata;
+import haxeon.ui.widgets.collections.TreeViewModel;
+import haxeon.ui.widgets.text.MiddleEllipsisText;
 
 /** Synchronous, on-demand directory listing for the explorer's `TreeView`. */
 class DirectoryTreeModel implements TreeViewModel {

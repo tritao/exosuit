@@ -7,7 +7,7 @@ import terminalsession.TerminalEvent;
 import terminalsession.TerminalSession;
 import terminalsession.LocalPtyBackend;
 import terminalsession.TerminalProfile;
-import NativeKitRuntime;
+import haxeon.platform.NativeKitRuntime;
 
 class FakeBackend implements TerminalBackend {
     public function id():String return "remote-test";

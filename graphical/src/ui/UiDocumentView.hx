@@ -2,7 +2,7 @@ package ui;
 
 import editor.BufferPosition;
 import editor.BufferSubscription;
-import nativekit.ui.widgets.scroll.ScrollController;
+import haxeon.ui.widgets.scroll.ScrollController;
 import editor.BufferSelection;
 import editor.Document;
 import editor.EditorActions;

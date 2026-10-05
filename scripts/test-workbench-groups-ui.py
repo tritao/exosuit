@@ -10,7 +10,7 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parent.parent
-HAXEON = str(ROOT.parent / "haxeon/scripts/haxeon")
+HAXEON = str(ROOT / "haxeon/scripts/haxeon")
 INSTALL = Path(sys.argv[1]).resolve(strict=True) if len(sys.argv) > 1 else None
 RUNNER = [str(INSTALL / "exosuit")] if INSTALL else [HAXEON, "run", "--project", str(ROOT / "graphical/haxeon.json"), "--"]
 with tempfile.TemporaryDirectory(prefix="exgroupsui-") as temporary:

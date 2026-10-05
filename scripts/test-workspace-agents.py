@@ -3,7 +3,7 @@
 import os,subprocess,tempfile,json
 from pathlib import Path
 ROOT=Path(__file__).resolve().parent.parent
-HAXEON=ROOT.parent/'haxeon'
+HAXEON=ROOT/'haxeon'
 project=ROOT/'tests/workspace-agents/haxeon.json'
 mode=['--self-hosted'] if os.environ.get('HAXEON_SELF_HOSTED')=='1' else []
 subprocess.run([str(HAXEON/'scripts/haxeon'),'build','--project',str(project),*mode],check=True)

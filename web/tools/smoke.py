@@ -13,7 +13,7 @@ import os
 import sys
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../../nativekit/tools"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../haxeon/vendor/nativekit/tools"))
 from web_smoke import WebSocket, wait_for_page  # noqa: E402
 
 

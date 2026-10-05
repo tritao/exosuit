@@ -1,9 +1,9 @@
 package ui;
 
-import nativekit.ui.core.View;
-import nativekit.ui.widgets.collections.TreeViewModel;
-import nativekit.ui.widgets.collections.TreeRootMetadata;
-import nativekit.ui.widgets.text.Text;
+import haxeon.ui.core.View;
+import haxeon.ui.widgets.collections.TreeViewModel;
+import haxeon.ui.widgets.collections.TreeRootMetadata;
+import haxeon.ui.widgets.text.Text;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceTerminalProtocol;
 

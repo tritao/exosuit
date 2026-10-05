@@ -19,7 +19,7 @@ import feedback.ProblemRegistry;
 import language.SignatureHelp;
 import platform.Platform;
 import platform.TextInputArea;
-import Rect;
+import haxeon.ui.Rect;
 import plugin.PluginDecorationRegistry;
 import plugin.PluginPanelRegistry;
 import plugin.PluginStatusRegistry;
@@ -29,29 +29,29 @@ import style.Theme;
 import view.RootView;
 import view.View;
 import view.LayoutKind;
-import nativekit.ui.docking.DockWorkspaceModel;
-import nativekit.ui.docking.DockPanelDescriptor;
-import nativekit.ui.docking.DockDropZone;
-import nativekit.ui.docking.DockNode;
-import nativekit.ui.docking.DockNodeTools;
-import nativekit.ui.core.WidgetId;
+import haxeon.ui.docking.DockWorkspaceModel;
+import haxeon.ui.docking.DockPanelDescriptor;
+import haxeon.ui.docking.DockDropZone;
+import haxeon.ui.docking.DockNode;
+import haxeon.ui.docking.DockNodeTools;
+import haxeon.ui.core.WidgetId;
 import workspace.Workspace;
 
-import Color;
-import Insets;
-import LayoutAxis;
-import LayoutDirection;
-import LayoutStyle;
-import nativekit.ui.core.View as NkView;
-import nativekit.ui.widgets.KeyedView;
-import nativekit.ui.widgets.controls.Button;
-import nativekit.ui.widgets.controls.ButtonVariant;
-import nativekit.ui.widgets.layout.Column;
-import nativekit.ui.widgets.layout.Row;
-import nativekit.ui.widgets.overlays.Popup;
-import nativekit.ui.widgets.scroll.ScrollView;
-import nativekit.ui.widgets.text.Text;
-import nativekit.ui.core.TextStyleOverride;
+import haxeon.ui.Color;
+import haxeon.ui.Insets;
+import haxeon.ui.LayoutAxis;
+import haxeon.ui.LayoutDirection;
+import haxeon.ui.LayoutStyle;
+import haxeon.ui.core.View as NkView;
+import haxeon.ui.widgets.KeyedView;
+import haxeon.ui.widgets.controls.Button;
+import haxeon.ui.widgets.controls.ButtonVariant;
+import haxeon.ui.widgets.layout.Column;
+import haxeon.ui.widgets.layout.Row;
+import haxeon.ui.widgets.overlays.Popup;
+import haxeon.ui.widgets.scroll.ScrollView;
+import haxeon.ui.widgets.text.Text;
+import haxeon.ui.core.TextStyleOverride;
 
 /**
  * UIKit workbench host owning document and terminal tabs in DockWorkspace
@@ -135,7 +135,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 	var languageItems:Array<CompletionItem> = [];
 	var languageAccept:CompletionItem->Void = function(item) {};
 	var languageSelected:Int = 0;
-	final languageScroll = new nativekit.ui.widgets.scroll.ScrollController();
+	final languageScroll = new haxeon.ui.widgets.scroll.ScrollController();
 	var languageInput:Null<String->Void>;
 	var languageKey:Null<(Int, Int)->Bool>;
 	var languageSignature:Null<SignatureHelp>;
@@ -154,9 +154,9 @@ class UiWorkbenchHost implements WorkbenchHost {
 	var scrollSettings:Settings;
 	public var scrollbarVisibility(get, never):Int;
 	function get_scrollbarVisibility():Int return switch scrollSettings.scrollbarVisibility {
-		case "always": nativekit.ui.widgets.scroll.ScrollbarVisibility.Always;
-		case "hidden": nativekit.ui.widgets.scroll.ScrollbarVisibility.Hidden;
-		default: nativekit.ui.widgets.scroll.ScrollbarVisibility.Auto;
+		case "always": haxeon.ui.widgets.scroll.ScrollbarVisibility.Always;
+		case "hidden": haxeon.ui.widgets.scroll.ScrollbarVisibility.Hidden;
+		default: haxeon.ui.widgets.scroll.ScrollbarVisibility.Auto;
 	};
 
 	public function new(theme:Theme, focus:FocusManager, workspace:Workspace, settings:Settings, requestFrame:Void->Void,
@@ -211,7 +211,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		if (kind == LayoutKind.Leaf) return false;
 		var source = activeView();
 		var created = new UiEditorPane("editor-pane-" + nextPaneId++);
-		dockActions.model.register(new DockPanelDescriptor(created.id, "Editor", false, true, null, nativekit.ui.docking.DockPanelHeaderMode.Content, new nativekit.ui.docking.DockPanelGrouping("editors", false)));
+		dockActions.model.register(new DockPanelDescriptor(created.id, "Editor", false, true, null, haxeon.ui.docking.DockPanelHeaderMode.Content, new haxeon.ui.docking.DockPanelGrouping("editors", false)));
 		var zone = kind == LayoutKind.Horizontal ?
 			(newFirst ? DockDropZone.Left : DockDropZone.Right) :
 			(newFirst ? DockDropZone.Top : DockDropZone.Bottom);
@@ -696,7 +696,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 			modern = true;
 			var pane = new UiEditorPane(fields[1]);
 			panes.push(pane);
-			dockActions.model.register(new DockPanelDescriptor(pane.id, "Editor", false, true, null, nativekit.ui.docking.DockPanelHeaderMode.Content, new nativekit.ui.docking.DockPanelGrouping("editors", false)));
+			dockActions.model.register(new DockPanelDescriptor(pane.id, "Editor", false, true, null, haxeon.ui.docking.DockPanelHeaderMode.Content, new haxeon.ui.docking.DockPanelGrouping("editors", false)));
 			if (pane.id != "editor") {
 				var number = Std.parseInt(pane.id.substring(12));
 				if (number != null && number >= nextPaneId) nextPaneId = number + 1;
@@ -705,7 +705,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		if (panes.length == 0) {
 			var pane = new UiEditorPane("editor");
 			panes.push(pane);
-			dockActions.model.register(new DockPanelDescriptor(pane.id, "Editor", false, true, null, nativekit.ui.docking.DockPanelHeaderMode.Content, new nativekit.ui.docking.DockPanelGrouping("editors", false)));
+			dockActions.model.register(new DockPanelDescriptor(pane.id, "Editor", false, true, null, haxeon.ui.docking.DockPanelHeaderMode.Content, new haxeon.ui.docking.DockPanelGrouping("editors", false)));
 		}
 		activePane = panes[0];
 		for (raw in lines) {
@@ -1017,7 +1017,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 			var maxHeight = Math.max(1.0, context.viewportHeight - 16.0);
 			if (languageKind == LANG_COMPLETION) maxHeight = Math.min(COMPLETION_MAX_HEIGHT, maxHeight);
 			scrollStyle.height = LayoutAxis.fit(0.0, maxHeight);
-			var scroll = new ScrollView("language-scroll", content, scrollStyle, nativekit.ui.widgets.scroll.ScrollAxis.Vertical, languageScroll);
+			var scroll = new ScrollView("language-scroll", content, scrollStyle, haxeon.ui.widgets.scroll.ScrollAxis.Vertical, languageScroll);
 			var popup = new Popup("language-popup", scroll, area == null ? 0.0 : area.x,
 				area == null ? 0.0 : area.y + area.height, null, dismissLanguagePopup);
 			popup.modal = false;
@@ -1029,13 +1029,13 @@ class UiWorkbenchHost implements WorkbenchHost {
 
 /** Rebuild an overlay with the current viewport and retained UI context each frame. */
 private class OverlayBuilderView implements NkView {
-	final factory:nativekit.ui.core.BuildContext->NkView;
+	final factory:haxeon.ui.core.BuildContext->NkView;
 
-	public function new(factory:nativekit.ui.core.BuildContext->NkView) {
+	public function new(factory:haxeon.ui.core.BuildContext->NkView) {
 		this.factory = factory;
 	}
 
-	public function build(context:nativekit.ui.core.BuildContext):nativekit.ui.core.RenderNode
+	public function build(context:haxeon.ui.core.BuildContext):haxeon.ui.core.RenderNode
 		return factory(context).build(context);
 }
 
@@ -1048,7 +1048,7 @@ private class OverlayBuilderView implements NkView {
 typedef DockActions = {
 	model:DockWorkspaceModel,
 	focusEditor:WidgetId->Void,
-	editorPreedit:(WidgetId, nativekit.ui.core.UiEvent)->Void,
+	editorPreedit:(WidgetId, haxeon.ui.core.UiEvent)->Void,
 	toggleSidebar:Void->Bool,
 	activateExplorer:Void->Void,
 	activateProblems:Void->Void,

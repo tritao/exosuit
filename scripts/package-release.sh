@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-haxeon_root=${HAXEON_ROOT:-"$root_dir/../haxeon"}
+haxeon_root=${HAXEON_ROOT:-"$root_dir/haxeon"}
 materia_root=$(cd "$root_dir/.." && pwd)
 lock="$root_dir/release.lock"
 [[ $(uname -s) == Linux && $(uname -m) == x86_64 ]] || { echo "Release packaging currently supports Linux x86-64" >&2; exit 1; }
@@ -18,10 +18,9 @@ verify_revision() {
 	fi
 }
 verify_revision haxeon "$haxeon_root"
-verify_revision materia "$materia_root"
-verify_revision nativekit "$materia_root/nativekit"
+verify_revision nativekit "$haxeon_root/vendor/nativekit"
 verify_revision hashlink "$haxeon_root/vendor/hashlink"
-for spec in "$haxeon_root:src stdlib native embed CMakeLists.txt scripts" "$materia_root:uikit editorkit" "$materia_root/nativekit:." "$haxeon_root/vendor/hashlink:."; do
+for spec in "$haxeon_root:src stdlib native embed packages CMakeLists.txt scripts" "$haxeon_root/vendor/nativekit:." "$haxeon_root/vendor/hashlink:."; do
 	directory=${spec%%:*}
 	read -r -a paths <<< "${spec#*:}"
 	if [[ -n $(git -C "$directory" status --porcelain -- "${paths[@]}") ]]; then
@@ -47,19 +46,19 @@ mkdir -p "$stage/defaults" "$stage/docs" "$stage/licenses"
 cp "$root_dir/packaging/settings.json" "$stage/defaults/"
 cp "$root_dir/packaging/README.md" "$stage/README.md"
 cp "$root_dir/docs/"*.md "$stage/docs/"
-cp "$materia_root/nativekit/LICENSE" "$stage/licenses/NativeKit-LICENSE"
+cp "$haxeon_root/vendor/nativekit/LICENSE" "$stage/licenses/NativeKit-LICENSE"
 cp "$haxeon_root/vendor/hashlink/LICENSE" "$stage/licenses/HashLink-LICENSE"
 cp "$haxeon_root/stdlib/LICENSE" "$stage/licenses/Haxe-stdlib-LICENSE"
 sed -n '31,42p' "$root_dir/native-packages/sqlite/vendor/sqlite3.c" > "$stage/licenses/SQLite-NOTICE"
 mkdir -p "$stage/licenses/seti"
 cp "$root_dir/graphical/assets/seti/LICENSE.txt" "$root_dir/graphical/assets/seti/ThirdPartyNotices.txt" "$root_dir/graphical/assets/seti/SOURCE.txt" "$stage/licenses/seti/"
 # Preserve native dependency notices with their original names and hierarchy.
-for toolkit in nativekit uikit exosuit/native-packages/terminal; do
+for toolkit in "$haxeon_root/vendor/nativekit" "$haxeon_root/packages/ui" "$root_dir/native-packages/terminal"; do
 	while IFS= read -r -d '' notice; do
 		relative=${notice#"$materia_root/"}
 		mkdir -p "$stage/licenses/$(dirname "$relative")"
 		cp "$notice" "$stage/licenses/$relative"
-	done < <(find "$materia_root/$toolkit/vendor" -type f \( -iname '*license*' -o -iname 'copying*' \) -print0)
+	done < <(find "$toolkit/vendor" -type f \( -iname '*license*' -o -iname 'copying*' \) -print0)
 done
 printf 'exosuit=%s\n' "$(git -C "$root_dir" rev-parse HEAD)" > "$stage/REVISIONS"
 cat "$lock" >> "$stage/REVISIONS"

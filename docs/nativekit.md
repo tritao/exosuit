@@ -54,7 +54,7 @@ This design ensures:
 
 ## Application integration
 
-Create an application class implementing `nativekit.ui.host.DesktopUiApplication`:
+Create an application class implementing `haxeon.ui.host.DesktopUiApplication`:
 
 ```hx
 class ExosuitApp implements DesktopUiApplication {
@@ -143,8 +143,8 @@ The headless core (`haxeon.json`, entry `app.Main`) builds without UIKit:
   "sourceRoots": ["src"],
   "dependencies": {
     "nativekit": { "path": "../nativekit" },
-    "uikit": { "path": "../uikit" },
-    "editorkit": { "path": "../editorkit" }
+    "haxeon-ui": { "path": "haxeon/packages/ui" },
+    "haxeon-editor": { "path": "haxeon/packages/editor" }
   },
   "ffi": {
     "interfaces": ["bindings/pragtical_hx.hxi"],

@@ -1,6 +1,6 @@
 package editor;
 
-import nativekit.editorkit.TextDocument;
+import haxeon.editor.TextDocument;
 
 class TextBuffer {
 	final lines:Array<String>;
@@ -349,7 +349,7 @@ class TextBuffer {
 	 * mirror back into it.
 	 */
 	public function applyEditTransaction(selection:BufferSelection,
-			transaction:nativekit.ui.widgets.text.EditTransaction):Bool {
+			transaction:haxeon.ui.widgets.text.EditTransaction):Bool {
 		var from = positionFromCodepointOffset(transaction.replacementStart);
 		var to = positionFromCodepointOffset(transaction.replacementEnd);
 		var value = transaction.replacementText == null ? "" : transaction.replacementText;

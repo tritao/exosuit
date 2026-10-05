@@ -7,15 +7,15 @@
   "sourceRoots": [
     "src",
     "../../src",
-    "../../../nativekit/bindings/haxe"
+    "../../haxeon/packages/platform/src"
   ],
   "scopeSourceRoots": false,
   "ffi": {
     "interfaces": [
-      "../../../nativekit/bindings/haxe/nativekit-wasm.hxi"
+      "../../haxeon/packages/platform/bindings/nativekit-wasm.hxi"
     ],
     "projections": [
-      "../../../nativekit/bindings/haxe/nativekit.hxmap"
+      "../../haxeon/packages/platform/bindings/nativekit.hxmap"
     ]
   },
   "target": "wasm-gc",

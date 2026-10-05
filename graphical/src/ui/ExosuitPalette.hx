@@ -1,7 +1,7 @@
 package ui;
 
-import Color;
-import nativekit.ui.theme.Theme;
+import haxeon.ui.Color;
+import haxeon.ui.theme.Theme;
 
 /** Shared workbench colors. Keep terminal defaults and chrome in one scheme. */
 class ExosuitPalette {

@@ -10,10 +10,10 @@ import time
 
 ROOT=Path(__file__).resolve().parent.parent
 MANAGER=ROOT/'scripts/run-agent.py'
-HAXEON=os.environ.get('HAXEON_BIN',str(Path(os.environ.get('HAXEON_ROOT',str(ROOT.parent/'haxeon')))/'scripts/haxeon'))
+HAXEON=os.environ.get('HAXEON_BIN',str(Path(os.environ.get('HAXEON_ROOT',str(ROOT/'haxeon')))/'scripts/haxeon'))
 MODE=['--self-hosted'] if os.environ.get('HAXEON_SELF_HOSTED')=='1' else []
 PROJECT=ROOT/'tests/workspace-terminals/haxeon.json'
-HAXEON_ROOT=Path(os.environ.get('HAXEON_ROOT',str(ROOT.parent/'haxeon'))).resolve()
+HAXEON_ROOT=Path(os.environ.get('HAXEON_ROOT',str(ROOT/'haxeon'))).resolve()
 OUTPUT=PROJECT.parent/'build/host'
 RUNNER=[str(HAXEON_ROOT/'.tools/hashlink/hl'),str(OUTPUT/'main.hl')]
 subprocess.run([HAXEON,'build','--project',str(PROJECT),*MODE],check=True)

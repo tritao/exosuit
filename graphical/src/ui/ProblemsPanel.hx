@@ -1,22 +1,25 @@
 package ui;
 
-import Insets;
-import LayoutAxis;
-import LayoutStyle;
-import LayoutAlignmentY;
+import haxeon.ui.Color;
+import haxeon.ui.Path;
+
+import haxeon.ui.Insets;
+import haxeon.ui.LayoutAxis;
+import haxeon.ui.LayoutStyle;
+import haxeon.ui.LayoutAlignmentY;
 import feedback.Problem;
-import nativekit.ui.core.BuildContext;
-import nativekit.ui.core.RenderNode;
-import nativekit.ui.core.TextStyleOverride;
-import nativekit.ui.core.View;
-import nativekit.ui.icons.IconName;
-import nativekit.ui.widgets.KeyedView;
-import nativekit.ui.widgets.controls.Button;
-import nativekit.ui.widgets.controls.ButtonVariant;
-import nativekit.ui.widgets.layout.Column;
-import nativekit.ui.widgets.layout.Row;
-import nativekit.ui.widgets.scroll.ScrollView;
-import nativekit.ui.widgets.text.Text;
+import haxeon.ui.core.BuildContext;
+import haxeon.ui.core.RenderNode;
+import haxeon.ui.core.TextStyleOverride;
+import haxeon.ui.core.View;
+import haxeon.ui.icons.IconName;
+import haxeon.ui.widgets.KeyedView;
+import haxeon.ui.widgets.controls.Button;
+import haxeon.ui.widgets.controls.ButtonVariant;
+import haxeon.ui.widgets.layout.Column;
+import haxeon.ui.widgets.layout.Row;
+import haxeon.ui.widgets.scroll.ScrollView;
+import haxeon.ui.widgets.text.Text;
 
 /** Scope grouping is independent of the producer; state follows stable diagnostic IDs. */
 class ProblemsPanel implements View {
@@ -37,7 +40,7 @@ class ProblemsPanel implements View {
 	public function build(context:BuildContext):RenderNode {
 		var values = host.getProblems().values();
 		var atlas = context.resourceState(context.id("problem-file-icons"), function() return new SetiIconAtlas(), function(value) value.dispose()).value;
-		var dark = context.environment.colorScheme == nativekit.ui.style.EnvironmentColorScheme.Dark;
+		var dark = context.environment.colorScheme == haxeon.ui.style.EnvironmentColorScheme.Dark;
 		var selected = context.state(context.id("problem-selection"), "");
 		var collapsed = context.state(context.id("problem-groups"), new Map<String, Bool>());
 		var groups:Map<String, Array<Problem>> = [];
@@ -80,17 +83,17 @@ class ProblemsPanel implements View {
 			header.variant = ButtonVariant.Navigation;
 			var icon:View = switch problems[0].scope {
 				case feedback.ProblemScope.File(path): new SetiFileIcon(atlas, haxe.io.Path.withoutDirectory(path), dark);
-				case feedback.ProblemScope.Project(_): new nativekit.ui.widgets.Icon("scope-icon", IconName.FolderOpen, 16, context.theme.tokens.textSecondary);
-				case feedback.ProblemScope.Workspace: new nativekit.ui.widgets.Icon("scope-icon", IconName.Hierarchy, 16, context.theme.tokens.textSecondary);
+				case feedback.ProblemScope.Project(_): new haxeon.ui.widgets.Icon("scope-icon", IconName.FolderOpen, 16, context.theme.tokens.textSecondary);
+				case feedback.ProblemScope.Workspace: new haxeon.ui.widgets.Icon("scope-icon", IconName.Hierarchy, 16, context.theme.tokens.textSecondary);
 			};
 			var iconsStyle = new LayoutStyle(); iconsStyle.childAlignY = LayoutAlignmentY.Center; iconsStyle.childGap = 5;
 			header.leadingView = new Row("group-icons", [
-				new KeyedView("chevron", new nativekit.ui.widgets.Icon("chevron", hidden ? IconName.ChevronRight : IconName.ChevronDown, 14, context.theme.tokens.textSecondary)),
+				new KeyedView("chevron", new haxeon.ui.widgets.Icon("chevron", hidden ? IconName.ChevronRight : IconName.ChevronDown, 14, context.theme.tokens.textSecondary)),
 				new KeyedView("file", icon)
 			], iconsStyle);
 			header.trailingView = new Row("group-metadata", [
 				new KeyedView("folder", new Text(folder, null, context.theme.tokens.textSecondary, TextStyleOverride.text(12))),
-				new KeyedView("count", new nativekit.ui.widgets.controls.CountBadge(problems.length))
+				new KeyedView("count", new haxeon.ui.widgets.controls.CountBadge(problems.length))
 			], iconsStyle);
 			header.accessibilityLabel = problems[0].scopeLabel() + ", " + problems.length + " problems";
 			rows.push(new KeyedView("group:" + key, new FlatProblemControl(header)));
@@ -111,7 +114,7 @@ class ProblemsPanel implements View {
 				button.selected = selected.value == problem.key();
 				var severity = problem.severity <= 1 ? "Error" : problem.severity == 2 ? "Warning" : "Information";
 				button.accessibilityLabel = severity + ": " + problem.message;
-				button.leadingView = new nativekit.ui.widgets.Icon("severity", problem.severity <= 1 ? IconName.ErrorCircle : problem.severity == 2 ? IconName.AlertTriangle : IconName.InfoCircle, 16,
+				button.leadingView = new haxeon.ui.widgets.Icon("severity", problem.severity <= 1 ? IconName.ErrorCircle : problem.severity == 2 ? IconName.AlertTriangle : IconName.InfoCircle, 16,
 					problem.severity <= 1 ? context.theme.tokens.danger : problem.severity == 2 ? context.theme.tokens.warning : context.theme.tokens.info);
 				var metadata = problem.source + (problem.code == "" ? "" : " (" + problem.code + ")");
 				if (problem.location != null) metadata += "  [" + (problem.line + 1) + ", " + (problem.column + 1) + "]";
@@ -147,7 +150,7 @@ private class FlatProblemControl implements View {
 	public function new(button:Button) this.button = button;
 	public function build(context:BuildContext):RenderNode {
 		var node = button.build(context);
-		var hovered = nativekit.ui.style.StyleStateUtil.contains(node.states, nativekit.ui.style.StyleState.Hovered);
+		var hovered = haxeon.ui.style.StyleStateUtil.contains(node.states, haxeon.ui.style.StyleState.Hovered);
 		node.layout.style.background = button.selected ? context.theme.tokens.selection : hovered ? context.theme.tokens.surfaceHover : Color.rgba(0, 0, 0, 0);
 		node.layout.style.radiusTopLeft = node.layout.style.radiusTopRight = node.layout.style.radiusBottomLeft = node.layout.style.radiusBottomRight = 0;
 		return node;

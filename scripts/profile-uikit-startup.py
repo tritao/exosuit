@@ -25,7 +25,7 @@ def main():
         return subprocess.call(["xvfb-run", "-a", sys.executable, str(Path(__file__).resolve()),
                                 *sys.argv[1:], "--drive"])
     root = Path(__file__).resolve().parent.parent
-    haxeon = Path(os.environ.get("HAXEON_ROOT", root.parent / "haxeon")).resolve()
+    haxeon = Path(os.environ.get("HAXEON_ROOT", root / "haxeon")).resolve()
     artifacts = args.artifacts.resolve()
     artifacts.mkdir(parents=True, exist_ok=False)
     unit = ("ordinary editable text with é🙂 " * 6 + "\n").encode()

@@ -2,11 +2,11 @@ package ui;
 
 import command.CommandContext;
 import command.CommandRegistry;
-import nativekit.ui.core.BuildContext;
-import nativekit.ui.core.RenderNode;
-import nativekit.ui.core.View;
-import nativekit.ui.widgets.overlays.Menu;
-import nativekit.ui.widgets.overlays.MenuItem;
+import haxeon.ui.core.BuildContext;
+import haxeon.ui.core.RenderNode;
+import haxeon.ui.core.View;
+import haxeon.ui.widgets.overlays.Menu;
+import haxeon.ui.widgets.overlays.MenuItem;
 
 /** A contextual command surface whose target and predicates stay live. */
 class CommandMenu implements View {

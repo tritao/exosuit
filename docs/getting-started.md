@@ -2,10 +2,10 @@
 
 ## Prerequisites
 
-Use this repository inside the materia workspace, alongside `haxeon/`,
-`nativekit/`, `uikit/` and `editorkit/`. UIKit and EditorKit belong to materia;
-Haxeon and NativeKit are submodule checkouts. Set `HAXEON_ROOT` for a different
-compiler checkout and adjust manifest dependencies for a different workspace.
+Initialize the root `haxeon/` submodule with `git submodule update --init --recursive`.
+UI, editor, platform, and GPU packages live inside that checkout, together with
+its NativeKit submodule. `HAXEON_ROOT` can select a different compiler checkout;
+package manifests use the pinned submodule sources.
 
 Linux x86-64 requires the NativeKit development dependencies, including
 Fontconfig/FreeType, OpenGL, GTK 3, WebKitGTK 4.1 and OpenSSL 3, plus CMake and

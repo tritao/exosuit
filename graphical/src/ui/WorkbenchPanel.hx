@@ -1,16 +1,16 @@
 package ui;
 
-import LayoutAxis;
-import LayoutStyle;
-import nativekit.ui.core.BuildContext;
-import nativekit.ui.core.RenderNode;
-import nativekit.ui.core.View;
-import nativekit.ui.widgets.KeyedView;
-import nativekit.ui.widgets.collections.TreeView;
-import nativekit.ui.widgets.controls.Button;
-import nativekit.ui.widgets.layout.Column;
-import nativekit.ui.widgets.layout.Row;
-import nativekit.ui.widgets.text.Text;
+import haxeon.ui.LayoutAxis;
+import haxeon.ui.LayoutStyle;
+import haxeon.ui.core.BuildContext;
+import haxeon.ui.core.RenderNode;
+import haxeon.ui.core.View;
+import haxeon.ui.widgets.KeyedView;
+import haxeon.ui.widgets.collections.TreeView;
+import haxeon.ui.widgets.controls.Button;
+import haxeon.ui.widgets.layout.Column;
+import haxeon.ui.widgets.layout.Row;
+import haxeon.ui.widgets.text.Text;
 import workspace.client.WorkspaceWorkbenchClient;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceTerminalProtocol;
@@ -117,9 +117,13 @@ class WorkbenchPanel implements View {
 			}
 		}, "workbench-open-folder");
 		folder.enabled = selected != null && model.directory(selected) != null;
+		var actionStyle = new LayoutStyle();
+		actionStyle.width = LayoutAxis.grow();
+		actionStyle.wrapMode = haxeon.ui.LayoutWrapMode.Wrap;
+		actionStyle.rowGap = 4;
 		var rows:Array<KeyedView> = [
-			new KeyedView("create", new Row("workbench-create", [new KeyedView("group", newGroup), new KeyedView("terminal", newTerminal)])),
-			new KeyedView("edit", new Row("workbench-edit", [new KeyedView("group", editButton), new KeyedView("folder", folder)]))
+			new KeyedView("create", new Row("workbench-create", [new KeyedView("group", newGroup), new KeyedView("terminal", newTerminal)], actionStyle)),
+			new KeyedView("edit", new Row("workbench-edit", [new KeyedView("group", editButton), new KeyedView("folder", folder)], actionStyle))
 		];
 		var agentButton = new Button("New Codex", null, function() {
 			if (selected != null)
@@ -127,7 +131,7 @@ class WorkbenchPanel implements View {
 		}, "workbench-new-codex");
 		agentButton.enabled = selected != null && client.agentService().canControlAgents() && !client.agentService().agentBusy();
 		rows.push(new KeyedView("new-codex", agentButton));
-		var threadField = new nativekit.ui.widgets.text.TextField("workbench-attach-thread", attachThread, function(v) {
+		var threadField = new haxeon.ui.widgets.text.TextField("workbench-attach-thread", attachThread, function(v) {
 			attachThread = v;
 			requestFrame();
 		});

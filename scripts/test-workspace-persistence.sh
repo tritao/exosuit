@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-haxeon=${HAXEON_BIN:-"${HAXEON_ROOT:-$root_dir/../haxeon}/scripts/haxeon"}
+haxeon=${HAXEON_BIN:-"${HAXEON_ROOT:-$root_dir/haxeon}/scripts/haxeon"}
 directory=$(mktemp -d /tmp/exosuit-persistence.XXXXXX)
 trap 'rm -rf -- "$directory"' EXIT
 self_hosted=()

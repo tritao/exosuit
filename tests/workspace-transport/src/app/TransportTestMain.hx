@@ -1,6 +1,6 @@
 package app;
 
-import NativeKitRuntime;
+import haxeon.platform.NativeKitRuntime;
 import nativekit.ffi.NativeKit;
 import workspace.transport.*;
 import workspace.service.*;

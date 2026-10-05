@@ -1,11 +1,11 @@
 package ui;
 
-import LayoutAxis;
-import LayoutStyle;
-import LayoutVisualKind;
-import nativekit.ui.core.BuildContext;
-import nativekit.ui.core.RenderNode;
-import nativekit.ui.core.View;
+import haxeon.ui.LayoutAxis;
+import haxeon.ui.LayoutStyle;
+import haxeon.ui.LayoutVisualKind;
+import haxeon.ui.core.BuildContext;
+import haxeon.ui.core.RenderNode;
+import haxeon.ui.core.View;
 
 /** Decorative glyph; the containing tree item or tab owns the accessible filename. */
 class SetiFileIcon implements View {

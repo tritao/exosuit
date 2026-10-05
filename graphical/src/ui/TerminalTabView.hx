@@ -1,12 +1,12 @@
 package ui;
 
-import Rect;
-import nativekit.ui.core.BuildContext;
-import nativekit.ui.core.RenderNode;
-import nativekit.ui.core.UiEventKind;
-import nativekit.ui.core.UiEvent;
-import nativekit.ui.core.View;
-import nativekit.ui.core.WidgetId;
+import haxeon.ui.Rect;
+import haxeon.ui.core.BuildContext;
+import haxeon.ui.core.RenderNode;
+import haxeon.ui.core.UiEventKind;
+import haxeon.ui.core.UiEvent;
+import haxeon.ui.core.View;
+import haxeon.ui.core.WidgetId;
 
 /** Mounts an owned terminal in either host without recreating its session. */
 class TerminalTabView implements View {

@@ -13,8 +13,8 @@ set -euo pipefail
 
 app_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 materia_dir=$(dirname "$app_dir")
-haxeon_dir=${HAXEON_DIR:-${HAXEON_ROOT:-"$materia_dir/haxeon"}}
-emsdk_dir=${EMSDK_DIR:-"$materia_dir/nativekit/.tools/emsdk"}
+haxeon_dir=${HAXEON_DIR:-${HAXEON_ROOT:-"$app_dir/haxeon"}}
+emsdk_dir=${EMSDK_DIR:-"$haxeon_dir/vendor/nativekit/.tools/emsdk"}
 build_dir=${EXOSUIT_WEB_BUILD_DIR:-"$app_dir/build/web"}
 build_type=${CMAKE_BUILD_TYPE:-Release}
 # wasm32 keeps Haxe values in linear memory; wasm-gc keeps them as Wasm GC objects. The host is the same.
@@ -45,10 +45,10 @@ fi
 mkdir -p "$build_dir" "$site_dir/assets"
 
 echo "== wasm32 FFI interfaces"
-"$materia_dir/tools/web/generate-wasm-hxi.sh" "$build_dir/hxi" \
- "nativekit/tools/audit-haxeon-abi.sh:nativekit.hxi:--output=" \
- "nativekit/modules/gpu/tools/check-hxi.sh:nativekit-gpu.hxi" \
- "uikit/tools/check-hxi.sh:nativekit-ui.hxi" \
+HAXEON_DIR="$haxeon_dir" NATIVEKIT_DIR="$haxeon_dir/vendor/nativekit" "$materia_dir/tools/web/generate-wasm-hxi.sh" "$build_dir/hxi" \
+ "$(realpath --relative-to="$materia_dir" "$haxeon_dir")/packages/platform/tools/audit-haxeon-abi.sh:nativekit.hxi:--output=" \
+ "$(realpath --relative-to="$materia_dir" "$haxeon_dir")/packages/gpu/tools/check-hxi.sh:nativekit-gpu.hxi" \
+ "$(realpath --relative-to="$materia_dir" "$haxeon_dir")/packages/ui/tools/check-hxi.sh:nativekit-ui.hxi" \
  "scenekit/scene/tools/check-hxi.sh:nativekit-scene.hxi" \
  "scenekit/scene_render/tools/check-hxi.sh:nativekit-scene-render.hxi"
 "$haxeon_dir/scripts/haxeon-ffi-audit" \
@@ -103,7 +103,7 @@ for (const entry of WebAssembly.Module.imports(module))
 fs.writeFileSync(exportsPath, JSON.stringify([...names].sort()));
 NODE
 source "$emsdk_dir/emsdk_env.sh" >/dev/null 2>&1
-emcmake cmake -S "$app_dir/web" -B "$build_dir/host" -G Ninja -DCMAKE_BUILD_TYPE="$build_type" \
+emcmake cmake -S "$app_dir/web" -DEXOSUIT_HAXEON_ROOT="$haxeon_dir" -B "$build_dir/host" -G Ninja -DCMAKE_BUILD_TYPE="$build_type" \
 	-DEXOSUIT_WEB_GUEST_WASM="$guest" -DEXOSUIT_WEB_EXPORTS_FILE="$exports" \
 	-DNK_WASM_HOST_HEAP_LIMIT="$host_limit" -DEXOSUIT_WEB_GUEST_MEMORY_LIMIT="$memory_size" >/dev/null
 cmake --build "$build_dir/host" --target exosuit_web
@@ -113,7 +113,7 @@ node "$materia_dir/tools/web/check-imports.js" "$guest" "$build_dir/host/exosuit
 echo "== Site"
 cp "$build_dir/host/exosuit_web.js" "$build_dir/host/exosuit_web.wasm" "$guest" "$site_dir/"
 cp "$app_dir/web/index.html" "$app_dir/web/exosuit.js" "$haxeon_dir/stdlib/haxeon/wasm/haxeon-host.js" "$site_dir/"
-fonts="$materia_dir/uikit/vendor/skribidi/example/data"
+fonts="$haxeon_dir/packages/ui/vendor/skribidi/example/data"
 cp "$fonts/IBMPlexSans-Regular.ttf" "$fonts/IBMPlexMono-Regular.ttf" "$fonts/NotoEmoji-Regular.ttf" "$site_dir/assets/"
 mkdir -p "$site_dir/licenses/seti"
 cp "$app_dir/graphical/assets/seti/LICENSE.txt" "$app_dir/graphical/assets/seti/ThirdPartyNotices.txt" "$app_dir/graphical/assets/seti/SOURCE.txt" "$site_dir/licenses/seti/"

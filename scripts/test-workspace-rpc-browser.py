@@ -16,8 +16,8 @@ import threading
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-HAXEON = os.environ.get('HAXEON_BIN', str(pathlib.Path(os.environ.get('HAXEON_ROOT', str(ROOT.parent / 'haxeon'))) / 'scripts/haxeon'))
-sys.path.insert(0, str(ROOT.parent / 'nativekit/tools'))
+HAXEON = os.environ.get('HAXEON_BIN', str(pathlib.Path(os.environ.get('HAXEON_ROOT', str(ROOT / 'haxeon'))) / 'scripts/haxeon'))
+sys.path.insert(0, str(ROOT / 'haxeon/vendor/nativekit/tools'))
 from web_smoke import WebSocket, wait_for_page
 
 

@@ -10,7 +10,7 @@ import tempfile
 import time
 
 ROOT=Path(__file__).resolve().parent.parent
-HAXEON=os.environ.get('HAXEON_BIN',str(Path(os.environ.get('HAXEON_ROOT',str(ROOT.parent/'haxeon')))/'scripts/haxeon'))
+HAXEON=os.environ.get('HAXEON_BIN',str(Path(os.environ.get('HAXEON_ROOT',str(ROOT/'haxeon')))/'scripts/haxeon'))
 INSTALL=Path(sys.argv[1]).resolve(strict=True) if len(sys.argv)>1 else None
 MODE=['--self-hosted'] if os.environ.get('HAXEON_SELF_HOSTED')=='1' else []
 with tempfile.TemporaryDirectory(prefix='exttyui-') as temporary:

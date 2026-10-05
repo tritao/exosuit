@@ -11,8 +11,8 @@
   "scopeSourceRoots": false,
   "dependencies": {
     "hostservices": { "path": "../native-packages/host" },
-    "haxeon-platform": { "path": "../../haxeon/packages/platform" },
-    "haxeon-gpu": { "path": "../../haxeon/packages/gpu" },
+    "haxeon-platform": { "path": "../haxeon/packages/platform" },
+    "haxeon-gpu": { "path": "../haxeon/packages/gpu" },
     "sqlitekit": {
       "path": "../native-packages/sqlite"
     },
@@ -26,7 +26,7 @@
       "target": "exosuit_agent_native",
       "inputs": [
         "native/CMakeLists.txt",
-        "../../nativekit/CMakeLists.txt"
+        "../haxeon/vendor/nativekit/CMakeLists.txt"
       ]
     }
   },

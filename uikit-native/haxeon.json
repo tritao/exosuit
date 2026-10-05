@@ -9,9 +9,9 @@
 			"target": "exosuit_ui_native",
 			"inputs": [
 				"CMakeLists.txt",
-				"../../nativekit/CMakeLists.txt",
-				"../../nativekit/modules/gpu/CMakeLists.txt",
-				"../../uikit/CMakeLists.txt"
+				"../haxeon/vendor/nativekit/CMakeLists.txt",
+				"../haxeon/vendor/nativekit/modules/gpu/CMakeLists.txt",
+				"../haxeon/packages/ui/CMakeLists.txt"
 			]
 		}
 	},

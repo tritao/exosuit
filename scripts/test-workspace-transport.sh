@@ -4,7 +4,7 @@ root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 python3 - "$root_dir" <<'PY'
 import os, pathlib, secrets, socket, subprocess, sys, tempfile
 root=pathlib.Path(sys.argv[1])
-haxeon=os.environ.get('HAXEON_BIN', str(pathlib.Path(os.environ.get('HAXEON_ROOT', str(root.parent/'haxeon')))/'scripts/haxeon'))
+haxeon=os.environ.get('HAXEON_BIN', str(pathlib.Path(os.environ.get('HAXEON_ROOT', str(root/'haxeon')))/'scripts/haxeon'))
 with tempfile.TemporaryDirectory(prefix="exosuit-rpc-") as temporary:
  directory=pathlib.Path(temporary); os.chmod(directory,0o700)
  token=directory/'credential'; token.write_text(secrets.token_hex(32)); os.chmod(token,0o600)

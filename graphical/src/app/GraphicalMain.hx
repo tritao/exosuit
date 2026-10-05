@@ -1,7 +1,7 @@
 package app;
 
-import nativekit.ui.host.DesktopUiHost;
-import nativekit.ui.host.DesktopUiHostOptions;
+import haxeon.ui.host.DesktopUiHost;
+import haxeon.ui.host.DesktopUiHostOptions;
 import nativekit.ffi.NativeKit;
 import nativekit.ffi.NativeKitTypes;
 import platform.Native;

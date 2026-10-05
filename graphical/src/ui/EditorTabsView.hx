@@ -1,21 +1,23 @@
 package ui;
 
-import LayoutAxis;
-import LayoutStyle;
-import TextLayout;
-import TextWrap;
-import nativekit.editorkit.TextDocument;
-import nativekit.ui.core.BuildContext;
-import nativekit.ui.core.Key;
-import nativekit.ui.core.RenderNode;
-import nativekit.ui.core.TextStyleOverride;
-import nativekit.ui.core.View;
-import nativekit.ui.theme.TextRole;
-import nativekit.ui.widgets.controls.Tabs;
-import nativekit.ui.widgets.scroll.ScrollAxis;
-import nativekit.ui.widgets.scroll.ScrollController;
-import nativekit.ui.widgets.scroll.ScrollView;
-import nativekit.ui.widgets.text.Text;
+import haxeon.ui.Rect;
+
+import haxeon.ui.LayoutAxis;
+import haxeon.ui.LayoutStyle;
+import haxeon.ui.TextLayout;
+import haxeon.ui.TextWrap;
+import haxeon.editor.TextDocument;
+import haxeon.ui.core.BuildContext;
+import haxeon.ui.core.Key;
+import haxeon.ui.core.RenderNode;
+import haxeon.ui.core.TextStyleOverride;
+import haxeon.ui.core.View;
+import haxeon.ui.theme.TextRole;
+import haxeon.ui.widgets.controls.Tabs;
+import haxeon.ui.widgets.scroll.ScrollAxis;
+import haxeon.ui.widgets.scroll.ScrollController;
+import haxeon.ui.widgets.scroll.ScrollView;
+import haxeon.ui.widgets.text.Text;
 
 /** Editor headers keep their natural widths inside a horizontally scrollable rail. */
 class EditorTabsView implements View {
@@ -74,7 +76,7 @@ class EditorTabsView implements View {
 					if ([for (_ in memo.keys()) 1].length > 128) memo.clear();
 					memo.set(cacheKey, label);
 				}
-				var displayed = new nativekit.ui.widgets.controls.TabItem(item.key, item.label, item.content, item.enabled, item.icon, label);
+				var displayed = new haxeon.ui.widgets.controls.TabItem(item.key, item.label, item.content, item.enabled, item.icon, label);
 				displayed.onClose = item.onClose;
 				displayed.iconView = item.iconView;
 			displayed.badgeCount = item.badgeCount;
@@ -113,7 +115,7 @@ class EditorTabsView implements View {
 		};
 		viewport = scroll.build(context);
 		viewport.setStyleIdentity("scroll-view", "editor-tab-scroll");
-		viewport.onResolved(function(_) {
+		if (active != null) active.onResolved(function(_) {
 			if (active == null || viewport.resolved == null || active.resolved == null) return;
 			var bounds = viewport.globalBounds();
 			if (state.selected == tabs.selectedKey && state.width == bounds.width) return;

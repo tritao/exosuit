@@ -1,17 +1,21 @@
 package ui;
 
-import Color;
-import Rect;
-import LayoutAxis;
-import LayoutStyle;
-import LayoutVisualKind;
-import nativekit.ui.core.BuildContext;
-import nativekit.ui.core.RenderNode;
-import nativekit.ui.core.UiEvent;
-import nativekit.ui.core.UiEventKind;
-import nativekit.ui.core.View;
-import nativekit.ui.widgets.scroll.ScrollController;
-import nativekit.ui.widgets.text.TextEditorLayout;
+import haxeon.ui.Image;
+import haxeon.ui.ImageFilter;
+import haxeon.ui.ImageFormat;
+
+import haxeon.ui.Color;
+import haxeon.ui.Rect;
+import haxeon.ui.LayoutAxis;
+import haxeon.ui.LayoutStyle;
+import haxeon.ui.LayoutVisualKind;
+import haxeon.ui.core.BuildContext;
+import haxeon.ui.core.RenderNode;
+import haxeon.ui.core.UiEvent;
+import haxeon.ui.core.UiEventKind;
+import haxeon.ui.core.View;
+import haxeon.ui.widgets.scroll.ScrollController;
+import haxeon.ui.widgets.text.TextEditorLayout;
 import editor.Document;
 import editor.MinimapModel;
 

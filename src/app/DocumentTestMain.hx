@@ -12,7 +12,7 @@ import syntax.SyntaxRegistry;
 import search.DocumentSearch;
 import search.SearchOptions;
 import editor.ExternalState;
-import nativekit.ui.widgets.text.EditTransaction;
+import haxeon.ui.widgets.text.EditTransaction;
 import sys.io.File;
 import haxe.io.Bytes;
 import sys.FileSystem;
@@ -213,7 +213,7 @@ class DocumentTestMain {
 		require(wordDeletes.undo(wordSelections) && wordDeletes.text == "hello world" && wordSelections.rangeCount() == 2,
 			"word deletion undo did not restore text and original carets");
 		require(wordDeletes.redo(wordSelections) && wordDeletes.text == "hello ", "word deletion redo failed");
-		// --- editor.TextBuffer <-> nativekit.editorkit.TextDocument bridge ---
+		// --- editor.TextBuffer <-> haxeon.editor.TextDocument bridge ---
 		// TextArea.withDocument mutates the shared TextDocument itself (see
 		// TextEditorState.applyTransaction) and hands the resulting
 		// EditTransaction to TextBuffer.applyEditTransaction, which must fold

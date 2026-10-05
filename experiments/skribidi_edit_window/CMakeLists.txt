@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 project(exosuit_edit_window_probe LANGUAGES C CXX)
 
 if(NOT DEFINED SKRIBIDI_SOURCE)
-  message(FATAL_ERROR "Pass -DSKRIBIDI_SOURCE=/path/to/uikit/vendor/skribidi")
+  message(FATAL_ERROR "Pass -DSKRIBIDI_SOURCE=/path/to/haxeon/packages/ui/vendor/skribidi")
 endif()
 
 add_subdirectory("${SKRIBIDI_SOURCE}" skribidi)

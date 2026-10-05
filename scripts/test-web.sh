@@ -6,7 +6,7 @@ if [[ ${EXOSUIT_CI_WEB:-0} != 1 ]]; then
 	echo "PENDING: browser gate (set EXOSUIT_CI_WEB=1)"
 	exit 0
 fi
-emsdk_dir=${EMSDK_DIR:-"$root_dir/../nativekit/.tools/emsdk"}
+emsdk_dir=${EMSDK_DIR:-"$root_dir/haxeon/vendor/nativekit/.tools/emsdk"}
 if [[ ! -f "$emsdk_dir/emsdk_env.sh" ]]; then
 	echo "PENDING: browser gate (Emscripten unavailable at $emsdk_dir)"
 	exit 0

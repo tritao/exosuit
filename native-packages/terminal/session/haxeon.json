@@ -5,8 +5,8 @@
   "scopeSourceRoots": false,
   "dependencies": {
     "terminalkit": { "path": ".." },
-    "haxeon-platform": { "path": "../../../../haxeon/packages/platform" },
-    "haxeon-gpu": { "path": "../../../../haxeon/packages/gpu" }
+    "haxeon-platform": { "path": "../../../haxeon/packages/platform" },
+    "haxeon-gpu": { "path": "../../../haxeon/packages/gpu" }
   },
   "target": "host"
 }

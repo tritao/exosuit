@@ -1,11 +1,13 @@
 package workspace.client;
 
+import haxeon.ui.Path;
+
 import haxeon.rpc.*;
 import haxeon.wire.JsonWire;
 import process.ProcessManager;
 import process.OwnedProcess;
 import sys.FileSystem;
-import NativeKitEvents;
+import haxeon.platform.NativeKitEvents;
 import workspace.transport.NativeRpcHub;
 import workspace.transport.NativeRpcConnector;
 import workspace.service.WorkspaceProtocol;

@@ -34,7 +34,7 @@ silently opening a fresh catalog. Linux startup is tested; Windows management is
 not delivered by this POSIX launcher.
 
 For direct fixtures, build with
-`../haxeon/scripts/haxeon build --project agent/haxeon.json`.
+`haxeon/scripts/haxeon build --project agent/haxeon.json`.
 Run arguments are:
 
 ```text
