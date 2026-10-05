@@ -94,7 +94,11 @@ while True:
             "edits": [{"range": {"start": {"line": 0, "character": 2}, "end": {"line": 0, "character": 2}}, "newText": "server"}]}]}}})
         send({"jsonrpc": "2.0", "id": message["id"], "result": {"contents": {"kind": "markdown", "value": "hover 😀"}}})
     elif method == "textDocument/completion":
-        send({"jsonrpc": "2.0", "id": message["id"], "result": {"items": [{"label": "completed", "detail": "fake", "insertText": "completion", "filterText": "completion"}]}})
+        response = {"jsonrpc": "2.0", "id": message["id"], "result": {"items": [{"label": "completed", "detail": "fake", "insertText": "completion", "filterText": "completion"}]}}
+        if "--slow-completion" in sys.argv:
+            threading.Timer(6.0, send, args=(response,)).start()
+        else:
+            send(response)
     elif method == "textDocument/definition":
         position = message["params"]["position"]
         send({"jsonrpc": "2.0", "id": message["id"], "result": {"uri": message["params"]["textDocument"]["uri"],

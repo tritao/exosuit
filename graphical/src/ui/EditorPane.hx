@@ -7,6 +7,7 @@ import nativekit.ui.widgets.scroll.ScrollController;
 import nativekit.ui.widgets.scroll.ScrollAxis;
 
 import Color;
+import Point;
 import TextColorRange;
 import editor.SyntaxPresentation;
 import editor.DecorationPresentation;
@@ -64,6 +65,7 @@ class EditorPane implements View {
 	public var onActivated:Null<Void->Void> = null;
 	public var onContextMenu:Null<nativekit.ui.core.UiEvent->Void> = null;
 	public var onCaretRectChanged:Null<Void->Void> = null;
+	public var consumeCursorReveal:Void->Bool = function() return false;
 	final editorTheme:style.Theme;
 	final decorations:PluginDecorationRegistry;
 	final searchMatches:Void->Array<SearchMatch>;
@@ -259,6 +261,7 @@ class EditorPane implements View {
 	}
 
 	public function build(context:nativekit.ui.core.BuildContext):nativekit.ui.core.RenderNode {
+		var viewportNode:Null<nativekit.ui.core.RenderNode> = null;
 		var gutter = new EditorGutter("gutter:" + document.id, document.buffer,
 			color(editorTheme.foregroundMuted), color(editorTheme.surface), fontSize);
 		var editorStyle = new LayoutStyle();
@@ -273,6 +276,14 @@ class EditorPane implements View {
 		area.onLayoutResolved = function(layout, geometry) {
 			gutter.resolveTextLayout(layout, geometry);
 			minimap.resolveTextLayout(layout);
+			if (viewportNode != null && viewportNode.resolved != null && scrollController.viewportHeight > 0 && consumeCursorReveal()) {
+				var caret = layout.caret(new TextPosition(EditorCoordinates.codepoint(document, selection.cursor), 0));
+				var top = geometry.localToViewport(new Point(0.0, caret.y + Math.min(caret.ascender, caret.descender))).y;
+				var bottom = geometry.localToViewport(new Point(0.0, caret.y + Math.max(caret.ascender, caret.descender))).y;
+				var bounds = viewportNode.globalBounds();
+				var delta = top < bounds.y ? top - bounds.y : bottom > bounds.y + bounds.height ? bottom - bounds.y - bounds.height : 0.0;
+				if (delta != 0 && scrollController.jumpTo(scrollController.offsetX, scrollController.offsetY + delta)) context.requestLayoutFeedback();
+			}
 		};
 		area.onCaretRect = function(rect) {
 			var previous = caretRect;
@@ -323,6 +334,7 @@ class EditorPane implements View {
 		var viewport = new ScrollView("editor-scroll:" + document.id, row, scrollStyle, ScrollAxis.Vertical, scrollController);
 		viewport.scrollbarOverlayHost = container;
 		var node = viewport.build(context);
+		viewportNode = node;
 
 		node.onResolved(function(_) {
 			var handler = onResolvedEditor;

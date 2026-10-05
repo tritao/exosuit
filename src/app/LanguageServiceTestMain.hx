@@ -151,6 +151,15 @@ class LanguageServiceTestMain {
 
 		minimal.stop(Sys.time());
 		pump(minimal, () -> minimal.status == "stopped", 5.0);
+		var slow = new LanguageServiceClient(manager, documents, "python3", [arguments[0], "--slow-completion"], arguments[1]);
+		slow.start(Sys.time());
+		pump(slow, () -> slow.ready, 5.0);
+		var delayed:Null<Array<CompletionItem>> = null;
+		require(slow.requestCompletion(document, new BufferPosition(0, 0), Sys.time(), value -> delayed = value), "slow completion request unavailable");
+		pump(slow, () -> delayed != null, 10.0);
+		require(completionResult(delayed).length == 1, "interactive completion expired at the lifecycle deadline");
+		slow.stop(Sys.time());
+		pump(slow, () -> slow.status == "stopped", 5.0);
 		manager.shutdown();
 		Native.shutdown();
 		Sys.println("PASS: LSP lifecycle, synchronization, stale diagnostics, requests, edits, and restart");

@@ -40,6 +40,19 @@ class UiDocumentView extends View {
 	final bufferSubscription:BufferSubscription;
 	final matches:Array<SearchMatch> = [];
 	var searchRevision:Int = 0;
+	public var cursorRevealRevision(default, null):Int = 0;
+	var cursorRevealPending:Bool = false;
+
+	override public function cursorChanged():Void {
+		cursorRevealPending = true;
+		cursorRevealRevision++;
+	}
+
+	public function consumeCursorReveal():Bool {
+		var pending = cursorRevealPending;
+		cursorRevealPending = false;
+		return pending;
+	}
 
 	public function new(document:Document, selection:BufferSelection, ?settings:config.Settings) {
 		super(document.title);

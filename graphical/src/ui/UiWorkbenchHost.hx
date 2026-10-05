@@ -511,7 +511,11 @@ class UiWorkbenchHost implements WorkbenchHost {
 	public function documentRenamed(document:Document):Void {}
 
 	/** EditorPane imports the active view's primary selection on the next UI rebuild. */
-	public function cursorChanged():Void {}
+	public function cursorChanged():Void {
+		var view = activeView();
+		if (view != null) view.cursorChanged();
+		requestFrame();
+	}
 
 	public function textInput(text:String):Void {
 		var view = activeView();

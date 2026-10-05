@@ -13,6 +13,8 @@ import process.ProcessManager;
 /** One restartable LSP session, owning synchronization for backed Haxe documents. */
 class LanguageServiceClient {
 	public static inline final REQUEST_TIMEOUT = 5.0;
+	/** Editing a large project may queue analysis before an interactive reply. */
+	public static inline final FEATURE_REQUEST_TIMEOUT = 30.0;
 	public static inline final RESTART_DELAY = 0.25;
 	public static inline final MAX_RESTARTS = 3;
 
@@ -180,7 +182,7 @@ class LanguageServiceClient {
 	public function requestSymbols(document:Document, now:Float, complete:Array<LanguageSymbol>->Void):Bool {
 		var state = states.get(document.id), session = transport, revision = document.buffer.stateId;
 		if (!symbolsSupported || !ready || !accepts(document) || state == null || session == null) return false;
-		session.request("textDocument/documentSymbol", {textDocument: {uri: state.uri}}, now, REQUEST_TIMEOUT, response -> {
+		session.request("textDocument/documentSymbol", {textDocument: {uri: state.uri}}, now, FEATURE_REQUEST_TIMEOUT, response -> {
 			var result:Array<LanguageSymbol> = [];
 			if (response.error == null && document.buffer.stateId == revision && transport == session && accepts(document))
 				decodeSymbols(document, response.result, "", result);
@@ -193,7 +195,7 @@ class LanguageServiceClient {
 		var state = states.get(document.id), session = transport, revision = document.buffer.stateId;
 		if (!referencesSupported || !ready || !accepts(document) || state == null || session == null) return false;
 		session.request("textDocument/references", {textDocument: {uri: state.uri}, position: LspPositionCodec.encode(position), context: {includeDeclaration: true}},
-			now, REQUEST_TIMEOUT, response -> complete(response.error == null && transport == session && document.buffer.stateId == revision && accepts(document)
+			now, FEATURE_REQUEST_TIMEOUT, response -> complete(response.error == null && transport == session && document.buffer.stateId == revision && accepts(document)
 				? locations(response.result) : []));
 		return true;
 	}
@@ -203,7 +205,7 @@ class LanguageServiceClient {
 		if (!renameSupported || !ready || !accepts(document) || state == null || session == null || name.length == 0) return false;
 		var revision = document.buffer.stateId, captured = captureDocuments();
 		session.request("textDocument/rename", {textDocument: {uri: state.uri}, position: LspPositionCodec.encode(position), newName: name},
-			now, REQUEST_TIMEOUT, response -> {
+			now, FEATURE_REQUEST_TIMEOUT, response -> {
 			if (response.error != null) { complete(new LanguageEditResult(false, response.error)); return; }
 			if (transport != session || !ready || !accepts(document) || documents.documents.indexOf(document) < 0 || document.buffer.stateId != revision) {
 				complete(new LanguageEditResult(false, "Rename rejected: document or language session changed")); return;
@@ -402,7 +404,7 @@ class LanguageServiceClient {
 	function requestAt(method:String, document:Document, position:BufferPosition, now:Float, complete:JsonRpcResponse->Void):Bool {
 		var state = states.get(document.id), session = transport;
 		if (!ready || !accepts(document) || state == null || session == null || state.revision != document.buffer.stateId) return false;
-		session.request(method, {textDocument: {uri: state.uri}, position: LspPositionCodec.encode(position)}, now, REQUEST_TIMEOUT, complete);
+		session.request(method, {textDocument: {uri: state.uri}, position: LspPositionCodec.encode(position)}, now, FEATURE_REQUEST_TIMEOUT, complete);
 		return true;
 	}
 

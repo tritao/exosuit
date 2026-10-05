@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "package": { "name": "exosuit-real-language-ui-smoke" },
+  "entry": "app.RealLanguageUiSmokeMain",
+  "sourceRoots": ["src"],
+  "dependencies": { "exosuit-graphical": { "path": "../../graphical" } },
+  "target": "host",
+  "outputDir": "build"
+}

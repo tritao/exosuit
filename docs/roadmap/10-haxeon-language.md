@@ -25,7 +25,7 @@ leave other folders' sessions running.
 
 ## M10.2 — Feature UI
 
-- [ ] Completion list UI with filtering, accept and dismiss. Hover and
+- [x] Completion list UI with filtering, accept and dismiss. Hover and
   signature help popups (M9.2 anchoring).
 - [x] Gate document symbols, find references and rename on negotiated
   capabilities. Show references in a navigable list. Apply rename through the
@@ -42,3 +42,13 @@ completes, goes to definition and renames a local symbol.
 
 Exit: the edit/build/diagnose/fix cycle works on this repository inside the
 graphical editor.
+
+Linux automation accepted: `scripts/test-real-language-ui.sh` drives the real
+server through graphical diagnosis, prefix completion, definition navigation,
+rename, transactional undo/redo and saving a disposable fixture. The fixture
+then builds and exits with 42. A second run exercises repository source through
+unsaved overlays and verifies that the file on disk remains unchanged. This
+gate is included in `scripts/ci.sh`. Fake-server and popup regressions cover
+capabilities, stale edits, filtering, long-list navigation and normalized
+composition handoff. Physical OS IME and other-platform qualification remain
+outside this Linux automation claim.

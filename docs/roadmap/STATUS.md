@@ -2,6 +2,31 @@
 
 Last updated: 2026-10-05.
 
+## M10 — real-server graphical acceptance on Linux, 2026-10-05
+
+Added `scripts/test-real-language-ui.sh` and its hosted graphical test project
+to CI. The real server diagnoses invalid source, completes a typed prefix,
+navigates to the definition and renames through routed palette text/key events.
+Undo/redo verifies the rename transaction. A disposable fixture saves, builds
+and executes with exit 42. Repository `ApplicationPaths.hx` undergoes the same
+diagnose/fix/completion/navigation/rename cycle through unsaved overlays; undo
+restores the buffer and the test verifies unchanged disk content.
+
+This exposed two application defects. Interactive requests shared the five-second
+lifecycle deadline; a traced repository completion arrived after 8.8 seconds.
+They now use a separate 30-second deadline, with a six-second fake-server
+regression. Initialization retains its five-second deadline. Programmatic cursor
+changes were no-ops in UIKit, leaving the line-25 completion anchor offscreen.
+Views now request reveal explicitly, and EditorPane uses resolved caret/viewport
+geometry and its existing scroll controller. Native layout feedback applies the
+offset. Ordinary scrolling still preserves the viewport and dismisses a clipped
+popup. No compiler or server changes were needed.
+
+The language-service test, clipped/scroll/live-completion/IME popup phases and
+both real-server graphical runs passed. M10 is accepted for Linux automation;
+physical OS IME and other-platform qualification remain unclaimed. Next is
+the outstanding M11/M12 foundation and terminal acceptance work.
+
 ## M10.2 — native composition handoff and real-server regression, 2026-10-05
 
 Language popups are now nonmodal. Overlay capture requests focus after layout,
@@ -1883,7 +1908,7 @@ The later browser host/terminal record above supersedes pending checks here.
 | M7 | Complete for the claimed Linux automation scope | M7.1–M7.3 pass; desktop IME, physical mixed-DPI, Windows and macOS remain explicit unclaimed follow-ons |
 | M8 | Accepted on Linux | Both compiler modes, mandatory source plugins, real LSP/window workflow and unpacked release; composed CI exits 0 |
 | M9 | Active: M9.1 | General styled text/decorations and editor rendering |
-| M10 | Not started | Depends on M8, M9.1–M9.2 |
+| M10 | Accepted on Linux automation | Real-server graphical fixture and repository overlays, completion/navigation/rename, transactional undo and fixture build/execution pass; physical IME and other platforms remain unclaimed |
 | M11 | Active: M11.1 POSIX, M11.2 Linux, M11.3 SQLiteKit, M11.4 TerminalKit slice | Depends on M8; independent of M9/M10; Windows PTY/named pipes and M11.4 session integration remain pending |
 | M12 | M12.1 accepted; M12.2 Linux view active | Local PTY/session and plugin profiles pass; docked styled grid, cursor, scrollback keys, row raster reuse, input and resize smoke pass; selection and redraw benchmark remain |
 | M13 | Not started | Depends on M11.2 |

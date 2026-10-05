@@ -517,6 +517,7 @@ class ExosuitApp implements DesktopUiApplication {
 		var activeView = host.activeView();
 		key += ":active=" + (activeView == null ? -1 : activeView.id);
 		for (view in host.allViews()) {
+			key += ":reveal=" + view.cursorRevealRevision;
 			var selection = view.selection;
 			key += ":" + view.id + ":" + view.document.buffer.stateId + ":" +
 				selection.anchor.line + ":" + selection.anchor.column + ":" +
@@ -770,6 +771,7 @@ class ExosuitApp implements DesktopUiApplication {
 				editorPanes.set(documentView.id, pane);
 			}
 			pane.minimapEnabled = application.settings.current.minimapEnabled;
+			pane.consumeCursorReveal = documentView.consumeCursorReveal;
 			pane.fontSize = application.settings.current.fontSize;
 			pane.onResolvedEditor = function(bounds, id) host.editorResolved(paneId, bounds, id);
 			pane.onActivated = function() host.activateTab(document, paneId);
