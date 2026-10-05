@@ -1,6 +1,7 @@
 #include "terminalkit_cells.h"
 #include "terminal_emulator.h"
 #include <limits.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -165,6 +166,21 @@ int terminalkit_keyboard(terminalkit_handle *kit, const char *key_name,
 int terminalkit_mouse(terminalkit_handle *kit, uint32_t x, uint32_t y,
     uint32_t button, uint32_t event, uint8_t modifiers) {
     return kit && terminal_emulator_mouse(kit->emulator, x, y, button, event, modifiers);
+}
+int terminalkit_selection(terminalkit_handle *kit, uint32_t column, uint32_t row, int operation) {
+    if (!kit) return -1;
+    int status = terminal_emulator_selection(kit->emulator, column, row, operation);
+    if (!status) kit->dirty = 1;
+    return status;
+}
+int terminalkit_selection_copy(terminalkit_handle *kit, uint8_t *buffer, uint32_t *inout_size) {
+    if (!kit || !inout_size) return -1;
+    size_t written = 0;
+    int status = terminal_emulator_selection_copy(kit->emulator, (char *)buffer, *inout_size, &written);
+    if (written > UINT32_MAX) return -1;
+    *inout_size = (uint32_t)written;
+    if (status == -ENOENT) return -2;
+    return status < 0 ? -1 : status;
 }
 void terminalkit_scrollback(terminalkit_handle *kit, int position, int *current, int *total) {
     if (!kit) return;

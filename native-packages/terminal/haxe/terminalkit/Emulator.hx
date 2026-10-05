@@ -109,6 +109,24 @@ class Emulator {
     public function mouse(x:Int, y:Int, button:Int, event:Int, modifiers:Int = 0):Bool
         return TerminalKit.terminalkit_mouse(live(), x, y, button, event, modifiers) != 0;
 
+    private function selection(column:Int, row:Int, operation:Int):Void {
+        if (TerminalKit.terminalkit_selection(live(), column, row, operation) != 0)
+            throw "Invalid terminal selection";
+    }
+
+    public function selectionStart(column:Int, row:Int):Void selection(column, row, 1);
+    public function selectionTarget(column:Int, row:Int):Void selection(column, row, 2);
+    public function selectionWord(column:Int, row:Int):Void selection(column, row, 3);
+    public function selectionClear():Void selection(0, 0, 0);
+
+    /** Copies the native selection directly into binding-owned UTF-8 storage. */
+    public function selectionText():Null<String> {
+        var copied = TerminalKit.terminalkit_selection_copy(live());
+        if (copied.status == -2) return null;
+        if (copied.status != 0) throw "Terminal selection copy failed";
+        return copied.buffer.toString();
+    }
+
     public function focus(focused:Bool):Void
         TerminalKit.terminalkit_focus(live(), focused ? 1 : 0);
 

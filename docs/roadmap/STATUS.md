@@ -2,6 +2,48 @@
 
 Last updated: 2026-10-05.
 
+## M12.2 — native selection and clipboard copy, 2026-10-05
+
+Vendored libtsm **1902b63** fixes a reproduced heap-buffer overflow in selection
+copy: the old four-bytes-per-cell allocation underestimated cells with combining
+marks. An unchanged-fork ASan reproducer overflows with a 19-byte single-cell
+selection; the same reproducer passes after the fix. Selection copy now measures
+UTF-8 and checks arithmetic before writing. New `tsm_screen_selection_copy_into`
+uses caller storage, leaves undersized buffers unchanged, and emits neither a
+terminator nor the final separator. The original allocating API delegates to it.
+Selection endpoints on wide continuation cells snap to the complete glyph.
+The selection test's broken dlist macro was fixed. Baseline-reproduced stale VTE
+expectations were corrected: copied text omits its final separator, and Kitty
+subtracting bit 2 (not bit 1) from 7 produces the asserted 5.
+
+TerminalKit exposes native screen selections and copies directly into binding
+storage, without an intermediate native string allocation. TerminalPane captures
+left-button drags, uses native highlighting, and copies with Ctrl+Shift+C.
+Shift-drag selects while an application owns mouse reporting. A click without a
+drag clears selection; copy repeats are consumed without sending Control-C.
+Ordinary Control-C still reaches the program. Text/key input and paste return
+from scrollback to the live viewport. Selection follows native line identities
+when output pushes selected text into history. Checkpoints do not persist this
+client-local selection.
+
+Highlighting exposed another defect: inverse default foreground/background
+both packed as the same unset value, so swapping them had no effect. The bridge
+now emits the existing opposite-default color marker, and TerminalColors decodes
+it against the current palette. Explicit ANSI/RGB inversion remains unchanged.
+
+Verified portable ABI audit; native contract/PTY bridge; Haxe session binding;
+graphical build; real X11/PTY mouse, paste and selection/copy test. The latter
+asserts clipboard text for a first-line and reversed multiline Japanese selection
+with application mouse reporting enabled, and differing highlight/background
+pixels. Native tests cover reverse, wide-continuation, multiline, scrollback,
+clearing and insufficient-buffer behavior. All six functional libtsm static
+suites pass under ASan/UBSan. Its intentional leaking Valgrind fixture also
+passes separately with leak detection disabled for that fixture only. Shared
+Meson test linkage of internal symbols remains a pre-existing build limitation;
+no public internal-symbol exports were added. Other platforms remain unqualified.
+Next: scrollback search, followed by remaining terminal rendering roles,
+process controls and full-screen/performance acceptance.
+
 ## M12.2 — native move/wheel modifiers, 2026-10-05
 
 UIKit/materia commit **f05fce913** preserves the window's ordered modifier state

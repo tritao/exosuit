@@ -8,7 +8,7 @@ if [[ ${1:-} == --drive ]]; then
 	export PRAGTICAL_PORTABLE="$fixture/state"
 	export LD_LIBRARY_PATH="$haxeon_root/out:$haxeon_root/.tools/hashlink:$root_dir/graphical/build/host/native/pragtical_hx:$root_dir/graphical/build/host/native/exosuit-ui-native:$root_dir/graphical/build/host/native/terminalkit${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 	LIBGL_ALWAYS_SOFTWARE=1 "$haxeon_root/.tools/hashlink/hl" "$root_dir/graphical/build/host/main.hl" \
-		--open-terminal --capture-dir="$fixture/capture" --capture-seconds=10 \
+		--open-terminal --capture-dir="$fixture/capture" --capture-seconds=16 \
 		--record-path="$fixture/events.jsonl" > "$fixture/app.log" 2>&1 &
 	app=$!
 	trap 'kill "$app" 2>/dev/null || true' EXIT
@@ -57,6 +57,30 @@ if [[ ${1:-} == --drive ]]; then
     xdotool keyup ctrl
     sleep 1
     touch "$fixture/mouse-stop"
+    for attempt in {1..100}; do
+        [[ -f "$fixture/mouse-bytes" ]] && break
+        sleep .02
+    done
+    xdotool type --clearmodifiers --delay 1 "python3 '$fixture/selection.py' '$fixture'"
+    xdotool key Return
+    for attempt in {1..100}; do
+        [[ -f "$fixture/selection-ready" ]] && break
+        sleep .02
+    done
+    [[ -f "$fixture/selection-ready" ]]
+    sleep .5
+    xdotool keydown shift
+    xdotool mousemove --window "$window" 68 535 mousedown 1
+    xdotool mousemove --window "$window" 100 535 mouseup 1
+    xdotool keyup shift
+    xdotool key --clearmodifiers ctrl+shift+c
+    timeout 3 xclip -selection clipboard -o > "$fixture/copied-line"
+    xdotool keydown shift
+    xdotool mousemove --window "$window" 110 554 mousedown 1
+    xdotool mousemove --window "$window" 68 535 mouseup 1
+    xdotool keyup shift
+    xdotool key --clearmodifiers ctrl+shift+c
+    timeout 3 xclip -selection clipboard -o > "$fixture/copied-multiline"
 	wait "$app"
 	trap - EXIT
 	exit 0
@@ -93,6 +117,20 @@ finally:
     termios.tcsetattr(fd, termios.TCSANOW, saved)
     (root / 'mouse-bytes').write_bytes(data)
 MOUSE
+cat > "$fixture/selection.py" <<'SELECTION'
+import pathlib, sys, termios, time, tty
+root = pathlib.Path(sys.argv[1])
+fd = sys.stdin.fileno()
+saved = termios.tcgetattr(fd)
+try:
+    tty.setraw(fd)
+    sys.stdout.write('\x1b[?1006h\x1b[?1003h\x1b[2J\x1b[Hhello\r\n日本語')
+    sys.stdout.flush()
+    (root / 'selection-ready').touch()
+    time.sleep(20)
+finally:
+    termios.tcsetattr(fd, termios.TCSANOW, saved)
+SELECTION
 "$root_dir/scripts/build.sh" >/dev/null
 xvfb-run -a timeout 40 "$0" --drive "$fixture"
 python3 - "$fixture" <<'CHECK'
@@ -109,6 +147,13 @@ assert 68 not in buttons, ('Shift-wheel should use local scrollback', mouse)
 assert any(report[0] == b'0' and report[3] == b'm' for report in reports), mouse
 assert all(1 <= int(x) <= state['terminalColumns'] and 1 <= int(y) <= state['terminalRows']
            for _, x, y, _ in reports), (reports, state)
+assert (root / 'copied-line').read_text() == 'hello', repr((root / 'copied-line').read_text())
+assert (root / 'copied-multiline').read_text() == 'hello\n日本語', repr((root / 'copied-multiline').read_text())
+from PIL import Image
+image = Image.open(root / 'capture/frame.png').convert('RGB')
+selected = image.getpixel((68, 531))
+plain = image.getpixel((200, 573))
+assert sum(abs(a - b) for a, b in zip(selected, plain)) > 100, (selected, plain)
 assert state['terminal'] == 'running', state
 assert 95 <= state['terminalColumns'] <= 105, state
 assert 5 <= state['terminalRows'] <= 8, state
@@ -119,5 +164,5 @@ assert tree.count('type=canvas z=1') >= state['terminalRows'], state
 assert (root / 'capture/frame.png').stat().st_size > 1000
 events = (root / 'events.jsonl').read_text()
 assert 'SurfaceResize' in events and '900,680' in events, events
-print('PASS: terminal dock, row canvases, live PTY resize, clipboard paste, and application mouse reports')
+print('PASS: terminal dock, row canvases, live PTY resize, clipboard paste, application mouse reports, and Unicode selection/copy')
 CHECK

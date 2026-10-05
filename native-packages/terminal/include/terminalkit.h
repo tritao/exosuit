@@ -67,6 +67,13 @@ TERMINALKIT_API int terminalkit_keyboard(terminalkit_handle *kit,
     const char *key_name TK_UTF8, uint32_t modifiers, uint32_t unicode);
 TERMINALKIT_API int terminalkit_mouse(terminalkit_handle *kit, uint32_t x, uint32_t y,
     uint32_t button, uint32_t event, uint8_t modifiers);
+/* Viewport selection: 0 reset, 1 start, 2 target, 3 word. Returns 0 or -1.
+ * Selection follows native screen/scrollback lines and affects snapshot styles. */
+TERMINALKIT_API int terminalkit_selection(terminalkit_handle *kit, uint32_t column,
+    uint32_t row, int operation);
+/* UTF-8 without a terminator. 0 success, 1 need storage, -2 no selection, -1 failure. */
+TERMINALKIT_API int terminalkit_selection_copy(terminalkit_handle *kit,
+    uint8_t *buffer TK_OUT_BUFFER(inout_size), uint32_t *inout_size TK_INOUT);
 TERMINALKIT_API void terminalkit_scrollback(terminalkit_handle *kit, int position,
     int *current TK_OUT, int *total TK_OUT);
 

@@ -415,6 +415,11 @@ static uint64_t style_from_attr(const terminal_t* terminal,
   terminal_color_t background = color_from_attr(terminal, attr->bccode, attr->br,
     attr->bg, attr->bb, 0);
   if (attr->inverse) {
+    /* Defaults need an explicit opposite-role marker after swapping. */
+    if (foreground.parts.attributes == TERMINAL_ATTRIBUTE_UNSET_COLOR)
+      foreground.parts.attributes = TERMINAL_ATTRIBUTE_INVERSE_COLOR;
+    if (background.parts.attributes == TERMINAL_ATTRIBUTE_UNSET_COLOR)
+      background.parts.attributes = TERMINAL_ATTRIBUTE_INVERSE_COLOR;
     terminal_color_t swapped = foreground;
     foreground = background;
     background = swapped;
@@ -893,6 +898,28 @@ int terminal_emulator_for_each_line(terminal_emulator_t* emulator,
   free(context.pending_text);
   int rows = last_row - first_row + 1;
   return context.emitted < rows ? context.emitted : rows;
+}
+
+int terminal_emulator_selection(terminal_emulator_t* emulator,
+    unsigned int column, unsigned int row, int operation) {
+  terminal_t* terminal = (terminal_t*)emulator;
+  if (!terminal || terminal->closed || operation < 0 || operation > 3) return -1;
+  if (operation == 0) {
+    tsm_screen_selection_reset(terminal->screen);
+    return 0;
+  }
+  if (column >= (unsigned int)terminal->columns || row >= (unsigned int)terminal->rows) return -1;
+  if (operation == 1) tsm_screen_selection_start(terminal->screen, column, row);
+  else if (operation == 2) tsm_screen_selection_target(terminal->screen, column, row);
+  else tsm_screen_selection_word(terminal->screen, column, row);
+  return 0;
+}
+
+int terminal_emulator_selection_copy(terminal_emulator_t* emulator, char* buffer,
+    size_t capacity, size_t* written) {
+  terminal_t* terminal = (terminal_t*)emulator;
+  if (!terminal || terminal->closed) return -1;
+  return tsm_screen_selection_copy_into(terminal->screen, buffer, capacity, written);
 }
 
 int terminal_emulator_synchronized_output(terminal_emulator_t* emulator) {

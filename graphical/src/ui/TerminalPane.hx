@@ -53,6 +53,11 @@ class TerminalPane implements TerminalPanel {
 	var focused:Bool = false;
 	var focusGeneration:Int = 0;
 	var closed:Bool = false;
+	var selectionPointer:Int = -1;
+	var selectionColumn:Int = 0;
+	var selectionRow:Int = 0;
+	var selectionMoved:Bool = false;
+	var hasSelection:Bool = false;
 	var mouseButton:Int = -1;
 	var mousePointer:Int = -1;
 	var cursorRow:Int = -1;
@@ -233,7 +238,23 @@ class TerminalPane implements TerminalPanel {
 		node.focusable = true;
 		node.on(UiEventKind.PointerDown, function(event) {
 			context.requestFocus(node.id);
-			if (closed || (event.modifiers & UiModifier.Shift) != 0 || session.emulator.mouseMode() == 0) return;
+			if (closed) return;
+			if ((event.modifiers & UiModifier.Shift) != 0 || session.emulator.mouseMode() == 0) {
+				if (event.button != 0 || selectionPointer >= 0) return;
+				var cell = pointerCell(event);
+				selectionPointer = event.pointerId;
+				selectionColumn = cell.column;
+				selectionRow = cell.row;
+				selectionMoved = false;
+				session.emulator.selectionStart(cell.column, cell.row);
+				hasSelection = true;
+				refreshRows(false);
+				requestFrame();
+				event.capturePointer();
+				event.preventDefault();
+				event.stopPropagation();
+				return;
+			}
 			var button = switch event.button {
 				case 0: 0;
 				case 1: 2;
@@ -248,12 +269,26 @@ class TerminalPane implements TerminalPanel {
 			}
 		});
 		node.on(UiEventKind.PointerMove, function(event) {
+			if (selectionPointer >= 0) {
+				if (event.pointerId != selectionPointer || closed) return;
+				updateSelection(event);
+				return;
+			}
 			if (mouseButton >= 0 && event.pointerId != mousePointer) return;
 			if ((event.modifiers & UiModifier.Shift) != 0 && mouseButton < 0) return;
 			if (!closed && session.emulator.mouseMode() != 0)
 				reportMouse(event, mouseButton >= 0 ? mouseButton + 32 : 0, 4);
 		});
 		var releaseMouse = function(event:UiEvent) {
+			if (selectionPointer == event.pointerId) {
+				if (!closed && event.kind != UiEventKind.PointerCancel) updateSelection(event);
+				selectionPointer = -1;
+				if (!selectionMoved) clearSelection();
+				event.releasePointer();
+				event.preventDefault();
+				event.stopPropagation();
+				return;
+			}
 			if (mouseButton < 0 || event.pointerId != mousePointer) return;
 			if (!closed) reportMouse(event, mouseButton, 2);
 			mouseButton = -1;
@@ -264,11 +299,20 @@ class TerminalPane implements TerminalPanel {
 		node.on(UiEventKind.PointerCancel, releaseMouse);
 		node.on(UiEventKind.TextInput, function(event:UiEvent) {
 			if (event.text != null && event.text.length > 0) {
+				prepareInput();
 				session.write(Bytes.ofString(event.text));
 				event.preventDefault();
 			}
 		});
 		node.on(UiEventKind.KeyDown, function(event) {
+			if (event.key == UiKey.C &&
+				(event.modifiers & (UiModifier.Control | UiModifier.Shift)) ==
+				(UiModifier.Control | UiModifier.Shift)) {
+				var selected = session.emulator.selectionText();
+				if (selected != null && selected.length > 0) context.clipboard.writeText(selected);
+				event.preventDefault();
+				return;
+			}
 			var paste = event.key == UiKey.V &&
 				(event.modifiers & (UiModifier.Control | UiModifier.Shift)) ==
 				(UiModifier.Control | UiModifier.Shift);
@@ -276,6 +320,7 @@ class TerminalPane implements TerminalPanel {
 				var generation = focusGeneration;
 				context.clipboard.readText(function(text) {
 					if (closed || !focused || generation != focusGeneration || session.status != "running" || text.length == 0) return;
+					prepareInput();
 					session.emulator.paste(Bytes.ofString(text));
 					session.pollEvents();
 					requestFrame();
@@ -314,17 +359,48 @@ class TerminalPane implements TerminalPanel {
 		return node;
 	}
 
-	/** UIKit button/modifier values differ from the terminal wire protocol. */
-	function reportMouse(event:UiEvent, button:Int, kind:Int):Bool {
+	function pointerCell(event:UiEvent):{column:Int, row:Int} {
 		var column = Std.int(Math.floor((event.localX - 8.0) / cellWidth));
 		var row = Std.int(Math.floor((event.localY - 4.0) / rowHeight));
 		column = Std.int(Math.max(0, Math.min(session.emulator.columns() - 1, column)));
 		row = Std.int(Math.max(0, Math.min(session.emulator.rows() - 1, row)));
+		return {column: column, row: row};
+	}
+
+	function prepareInput():Void {
+		clearSelection();
+		if (session.emulator.scrollback(-1).current == 0) return;
+		session.emulator.scrollback(0);
+		refreshRows(true);
+		requestFrame();
+	}
+
+	function clearSelection():Void {
+		if (!hasSelection || closed) return;
+		session.emulator.selectionClear();
+		hasSelection = false;
+		refreshRows(false);
+		requestFrame();
+	}
+
+	function updateSelection(event:UiEvent):Void {
+		var cell = pointerCell(event);
+		if (cell.column != selectionColumn || cell.row != selectionRow) selectionMoved = true;
+		session.emulator.selectionTarget(cell.column, cell.row);
+		refreshRows(false);
+		requestFrame();
+		event.preventDefault();
+		event.stopPropagation();
+	}
+
+	/** UIKit button/modifier values differ from the terminal wire protocol. */
+	function reportMouse(event:UiEvent, button:Int, kind:Int):Bool {
+		var cell = pointerCell(event);
 		var modifiers = 0;
 		if ((event.modifiers & UiModifier.Shift) != 0) modifiers |= 4;
 		if ((event.modifiers & UiModifier.Alt) != 0) modifiers |= 8;
 		if ((event.modifiers & UiModifier.Control) != 0) modifiers |= 16;
-		if (!session.emulator.mouse(column, row, button, kind, modifiers)) return false;
+		if (!session.emulator.mouse(cell.column, cell.row, button, kind, modifiers)) return false;
 		session.pollEvents();
 		event.preventDefault();
 		event.stopPropagation();
@@ -333,7 +409,7 @@ class TerminalPane implements TerminalPanel {
 	}
 
 	function handleKey(event:UiEvent):Void {
-		if (event.key == UiKey.V &&
+		if ((event.key == UiKey.V || event.key == UiKey.C) &&
 			(event.modifiers & (UiModifier.Control | UiModifier.Shift)) ==
 			(UiModifier.Control | UiModifier.Shift)) {
 			event.preventDefault();
@@ -355,6 +431,7 @@ class TerminalPane implements TerminalPanel {
 			case UiKey.Delete: "delete";
 			default: null;
 		};
+		if (name != null) prepareInput();
 		if (name != null && session.emulator.key(name, event.modifiers)) {
 			session.pollEvents();
 			event.preventDefault();
@@ -381,6 +458,7 @@ class TerminalPane implements TerminalPanel {
 				bytes = String.fromCharCode(event.key - UiKey.A + 1);
 		}
 		if (bytes != null) {
+			prepareInput();
 			session.write(Bytes.ofString(bytes));
 			event.preventDefault();
 		}

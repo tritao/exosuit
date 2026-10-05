@@ -65,6 +65,11 @@ class Main {
         session.emulator.snapshot();
         if (session.offset != 12 || session.emulator.rowText(0).substr(0, 12) != "hello world!")
             throw "duplicate or overlapping output was misapplied";
+        session.emulator.selectionStart(0, 0);
+        session.emulator.selectionTarget(4, 0);
+        if (session.emulator.selectionText() != "hello") throw "native selection binding lost text";
+        session.emulator.selectionClear();
+        if (session.emulator.selectionText() != null) throw "cleared selection should be absent";
         backend.events.push(TerminalEvent.status("exited", 7));
         backend.events.push(output(12, " after"));
         session.pollEvents();

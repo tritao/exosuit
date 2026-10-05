@@ -28,7 +28,10 @@ Text input, navigation/control keys, emulator Kitty key encoding when active,
 focus reporting, Ctrl+Shift+V clipboard paste with DEC 2004 bracketed-paste
 encoding, application mouse reports (click/release/drag/hover/wheel), and wheel
 scrollback are wired. Shift-wheel scrollback bypass and Control-wheel/hover modifiers are verified
-on Linux; pixel-precision mouse reporting still needs qualification. `scripts/test-terminal-ui.sh`
+on Linux; pixel-precision mouse reporting still needs qualification. Left-drag
+selection (Shift-drag during application mouse reporting), native highlighting
+and Ctrl+Shift+C clipboard copy are implemented and verified with reversed
+multiline Japanese text. Search, links and font roles remain open. `scripts/test-terminal-ui.sh`
 exercises the live dock, resize, and shell input under Xvfb. The checklist below
 remains open for full terminal behavior and measurement.
 

@@ -104,6 +104,11 @@ int terminal_emulator_for_each_cell(terminal_emulator_t* emulator,
 int terminal_emulator_synchronized_output(terminal_emulator_t* emulator);
 int terminal_emulator_alternate_screen(terminal_emulator_t* emulator);
 /* Modifier bits: shift=1, lock=2, control=4, alt=8, logo=16. */
+/* Selection operation: 0 reset, 1 start, 2 target, 3 word. */
+int terminal_emulator_selection(terminal_emulator_t* emulator, unsigned int column,
+  unsigned int row, int operation);
+int terminal_emulator_selection_copy(terminal_emulator_t* emulator, char* buffer,
+  size_t capacity, size_t* written);
 int terminal_emulator_keyboard(terminal_emulator_t* emulator,
   const char* key_name, unsigned int modifiers, uint32_t unicode);
 int terminal_emulator_mouse(

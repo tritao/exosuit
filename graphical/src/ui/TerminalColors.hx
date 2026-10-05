@@ -8,6 +8,7 @@ class TerminalColors {
 			background:Bool):Color {
 		var mode = packed & 3;
 		if (mode == 0) return fallback;
+		if (mode == 1) return background ? palette.foreground : palette.background;
 		if (mode == 3) return Color.rgba(((packed >>> 8) & 255) / 255.0,
 			((packed >>> 16) & 255) / 255.0, ((packed >>> 24) & 255) / 255.0, 1.0);
 		var index = (packed >>> 8) & 255;
