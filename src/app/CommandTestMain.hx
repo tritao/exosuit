@@ -16,6 +16,12 @@ class CommandTestMain {
 
 	static function main():Int {
 		Platform.startHeadless();
+		var suggestions = [new completion.CompletionItem("Alpha"), new completion.CompletionItem("display", "", "inserted", "alphabet"), new completion.CompletionItem("Beta")];
+		var matches = completion.CompletionItem.matching(suggestions, "AL");
+		require(matches.length == 2 && matches[0] == suggestions[0] && matches[1] == suggestions[1], "completion filtering lost ranking, identity or filterText");
+		require(completion.CompletionItem.matching(suggestions, "").length == 3 && completion.CompletionItem.matching(suggestions, "missing").length == 0,
+			"completion filtering mishandled empty or unmatched prefixes");
+		require(completion.CompletionItem.matching([new completion.CompletionItem("日本語")], "日").length == 1, "completion filtering lost Unicode prefixes");
 		var window = Native.window_create("command-test", 320, 200), renderer = new Renderer(window, "ignored-headlessly.ttf", 15),
 			application = new Application((theme, focus, workspace, settings) -> new RootView(renderer, theme, focus, workspace, 320, 200, settings)),
 			root:RootView = cast application.root,

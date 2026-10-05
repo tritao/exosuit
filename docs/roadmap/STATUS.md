@@ -2,6 +2,19 @@
 
 Last updated: 2026-10-05.
 
+## M10.2 — completion prefix filtering, 2026-10-05
+
+Completion requests now narrow suggestions to the word before the caret,
+case-insensitively, using LSP `filterText` with a label fallback. Filtering
+preserves provider order and item identity, including insertion text. Empty
+prefixes retain all results; unmatched prefixes do not open a popup. Results
+from a retired server are rejected before presentation as well as acceptance.
+The command test covers ordering, alternate filter text, empty/no matches and
+Unicode prefixes. Fake-server decoding and language-controller tests passed;
+`scripts/build.sh` passed against the current graphical checkout.
+Live narrowing while typing and real-server graphical acceptance remain open;
+this is prefix filtering at request time, not a completed M10.2 acceptance.
+
 ## M10.2 — remaining language shortcuts, 2026-10-05
 
 Added hover (Ctrl+Alt+Space), signature help (Ctrl+Shift+Space) and definition

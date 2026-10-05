@@ -76,6 +76,7 @@ class LanguageServiceTestMain {
 		pump(client, () -> document.buffer.line(0) == "😀serverx value", 5.0);
 		var completed = completionResult(completions), located = definitionResult(definitions);
 		require(completed.length == 1 && completed[0].insertText == "completion", "completion response was not decoded");
+		require(completed[0].filterText == "completion", "completion filterText was not decoded");
 		require(located.length == 1 && located[0].path == sourcePath && located[0].from.column == 2,
 			"definition response did not retain its UTF-16 location");
 		require(signature != null && signature.activeParameter == "right:Int" && signature.documentation == "Adds values",

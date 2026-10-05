@@ -153,6 +153,7 @@ class LanguageControllerTestMain {
 		pump(controller, () -> root.languagePopup.visible, 5.0);
 		require(root.languagePopup.visible, "hover was not surfaced through an anchored popup");
 		root.languagePopup.close();
+		selection.setCursor(document.buffer, new BufferPosition(0, 0));
 		require(commands.perform("language:complete", context), "completion command was not available");
 		pump(controller, () -> root.languagePopup.visible, 5.0);
 		require(root.languagePopup.visible && root.languagePopup.keyPressed(Platform.KEY_ESCAPE, 0),
