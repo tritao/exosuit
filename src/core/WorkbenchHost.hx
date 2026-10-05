@@ -93,7 +93,8 @@ interface WorkbenchHost {
 	// -- Language popups (hover / completion / signature help) --
 	function textInputArea():Null<TextInputArea>;
 	function openLanguageInformation(area:TextInputArea, text:String):Void;
-	function openLanguageCompletion(area:TextInputArea, items:Array<CompletionItem>, accept:CompletionItem->Void):Void;
+	function openLanguageCompletion(area:TextInputArea, items:Array<CompletionItem>, accept:CompletionItem->Void, ?input:String->Void, ?key:(Int, Int)->Bool):Void;
+	function handleLanguagePopupText(text:String):Bool;
 	function openLanguageSignature(area:TextInputArea, help:SignatureHelp):Void;
 	function handleLanguagePopupKey(key:Int, modifiers:Int):Bool;
 	function dismissLanguagePopup():Void;

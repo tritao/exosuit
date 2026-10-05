@@ -224,16 +224,8 @@ class LanguageController {
 			from = wordStart(document, position);
 		service.requestCompletion(document, position, Sys.time(), items -> {
 			if (items.length == 0 || document.buffer.stateId != revision || context.activeView() != view) return;
-			items = completion.CompletionItem.matching(items, document.buffer.line(position.line).substring(from.column, position.column));
-			if (items.length == 0 || client != service) return;
-			var area = root.textInputArea();
-			if (area == null) return;
-			root.openLanguageCompletion(area, items, function(item) {
-				if (document.buffer.stateId == revision && context.activeView() == view && client == service) {
-					view.replaceRange(from, position, item.insertText);
-					view.cursorChanged();
-				}
-			});
+			new completion.ActiveCompletion(root, view, document, from, position, items,
+				() -> context.activeView() == view && client == service).show();
 		});
 	}
 

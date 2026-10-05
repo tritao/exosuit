@@ -789,8 +789,9 @@ class RootView implements WorkbenchHost {
 	public function openLanguageInformation(area:TextInputArea, text:String):Void
 		languagePopup.openInformation(area, text);
 
-	public function openLanguageCompletion(area:TextInputArea, items:Array<CompletionItem>, accept:CompletionItem->Void):Void
-		languagePopup.openCompletion(area, items, accept);
+	public function openLanguageCompletion(area:TextInputArea, items:Array<CompletionItem>, accept:CompletionItem->Void, ?input:String->Void, ?key:(Int, Int)->Bool):Void
+		languagePopup.openCompletion(area, items, accept, input, key);
+	public function handleLanguagePopupText(text:String):Bool return languagePopup.textInput(text);
 
 	public function openLanguageSignature(area:TextInputArea, help:SignatureHelp):Void
 		languagePopup.openSignature(area, help);

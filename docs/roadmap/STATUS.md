@@ -2,6 +2,20 @@
 
 Last updated: 2026-10-05.
 
+## M10.2 — live completion interaction, 2026-10-05
+
+Added shared `ActiveCompletion` ownership of the replacement range, provider
+items and document revision. Both hosts narrow the original results as committed
+text edits the document; Backspace re-expands from the original results. Accept
+replaces the updated prefix. Unrelated edits, cursor changes, document switches
+and retired providers invalidate acceptance. Unmatched prefixes dismiss without
+losing typed text. Popup closure releases its callbacks and item references.
+Headless command tests cover live edits, acceptance, stale edits, Unicode
+Backspace and no matches. Language-controller tests passed. A focused Xvfb
+smoke uses routed UIKit text/Backspace/Enter events; hover, completion and
+signature popup regression phases also passed. This does not yet qualify IME,
+long-list selected-row scrolling or the real-server graphical acceptance.
+
 ## M10.2 — completion prefix filtering, 2026-10-05
 
 Completion requests now narrow suggestions to the word before the caret,

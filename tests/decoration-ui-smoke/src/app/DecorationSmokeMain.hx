@@ -367,7 +367,14 @@ class DecorationSmokeApp extends ExosuitApp {
 		if (frames == 4 && StringTools.startsWith(phase, "popup-")) {
 			var area = host.textInputArea();
 			if (area == null) throw "popup fixture lacks resolved caret geometry";
-			if (phase == "popup-completion")
+			if (phase == "popup-live-completion") {
+				var view = host.activeView();
+				if (view == null) throw "live completion lacks editor";
+				view.document.buffer.replaceAllText("", view.selection);
+				view.restoreCursor(0, 0);
+				new completion.ActiveCompletion(host, view, view.document, new BufferPosition(0, 0), new BufferPosition(0, 0),
+					[new completion.CompletionItem("alpha"), new completion.CompletionItem("beta")], () -> host.activeView() == view).show();
+			} else if (phase == "popup-completion")
 				host.openLanguageCompletion(area, [new completion.CompletionItem("example")], function(_) {});
 			else if (phase == "popup-signature")
 				host.openLanguageSignature(area, new language.SignatureHelp("example(value:Int)", "signature documentation", "value"));
@@ -381,13 +388,24 @@ class DecorationSmokeApp extends ExosuitApp {
 		if (frames == 5 && StringTools.startsWith(phase, "popup-")) {
 			var view = host.activeView();
 			if (view == null) throw "popup fixture lost active document";
-			if (phase == "popup-switch")
+			if (phase == "popup-live-completion") {
+				ui.text(UiEventKind.TextInput, "al");
+				if (view.document.buffer.line(0) != "al" || !host.isLanguagePopupVisible()) throw "graphical completion lost typed prefix";
+				ui.key(UiEventKind.KeyDown, UiKey.Backspace);
+				if (view.document.buffer.line(0) != "a") throw "graphical completion lost backspace";
+			} else if (phase == "popup-switch")
 				host.openDocument(new editor.Document(null, "other", application.syntaxes));
 			else if (phase == "popup-scroll" || phase == "popup-clipped") {
 				if (popupScrollController == null || !popupScrollController.scrollBy(0.0, phase == "popup-clipped" ? 350.0 : 24.0))
 					throw "popup fixture could not scroll retained editor";
 			} else if (phase != "popup-edge" && phase != "popup-large")
 				view.selection.restore(view.document.buffer, new BufferPosition(0, 7), new BufferPosition(0, 7));
+		}
+		if (frames == 6 && phase == "popup-live-completion") {
+			var view = host.activeView();
+			ui.key(UiEventKind.KeyDown, UiKey.Enter);
+			if (view == null || view.document.buffer.line(0) != "alpha" || host.isLanguagePopupVisible())
+				throw "graphical completion failed to accept narrowed suggestion";
 		}
 		if (StringTools.startsWith(phase, "pane-close-") && frames == 5) {
 			if (phase != "pane-close-shared") application.newDocument();
@@ -695,7 +713,7 @@ class DecorationSmokeApp extends ExosuitApp {
 				popupScrollController = activeView.scrollController;
 			}
 			if (frames == 6) {
-				if (phase == "popup-switch" || phase == "popup-clipped") {
+				if (phase == "popup-switch" || phase == "popup-clipped" || phase == "popup-live-completion") {
 					if (host.isLanguagePopupVisible() || panel != null) throw "popup survived document switch";
 				} else {
 					var area = host.textInputArea();

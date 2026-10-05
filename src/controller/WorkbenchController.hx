@@ -54,6 +54,7 @@ class WorkbenchController {
 	}
 
 	public function textInput(text:String):Void {
+		if (root.handleLanguagePopupText(text)) { search.editorStateChanged(); return; }
 		if (root.isLanguagePopupVisible()) root.dismissLanguagePopup();
 		if (root.isCommandViewActive()) root.commandViewTextInput(text); else {
 			root.textInput(text);

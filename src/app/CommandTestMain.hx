@@ -27,6 +27,33 @@ class CommandTestMain {
 			root:RootView = cast application.root,
 			registry = application.commands, keymap = application.keymap,
 			context = application.context, performed = 0;
+		application.newDocument();
+		var completionView = context.activeView(), completionDocument = completionView == null ? null : completionView.getDocument();
+		if (completionView == null || completionDocument == null) throw "completion test lacks document";
+		var live = new completion.ActiveCompletion(root, completionView, completionDocument,
+			new editor.BufferPosition(0, 0), new editor.BufferPosition(0, 0), suggestions, () -> context.activeView() == completionView);
+		live.show();
+		require(root.handleLanguagePopupText("Al") && completionDocument.buffer.line(0) == "Al" && root.isLanguagePopupVisible(),
+			"live completion swallowed typing or closed matching suggestions");
+		require(root.handleLanguagePopupKey(Platform.KEY_BACKSPACE, 0) && completionDocument.buffer.line(0) == "A" && root.isLanguagePopupVisible(),
+			"completion backspace failed to update the document and suggestions");
+		require(root.handleLanguagePopupKey(Platform.KEY_ENTER, 0) && completionDocument.buffer.line(0) == "Alpha" && !root.isLanguagePopupVisible(),
+			"completion acceptance failed to replace the updated prefix");
+		var stale = new completion.ActiveCompletion(root, completionView, completionDocument,
+			new editor.BufferPosition(0, 0), new editor.BufferPosition(0, 5), suggestions, () -> true);
+		stale.show();
+		completionView.textInput("!");
+		root.handleLanguagePopupKey(Platform.KEY_ENTER, 0);
+		require(completionDocument.buffer.line(0) == "Alpha!", "stale completion overwrote an unrelated document edit");
+		completionView.replaceAllText("");
+		completionView.restoreCursor(0, 0);
+		new completion.ActiveCompletion(root, completionView, completionDocument, new editor.BufferPosition(0, 0), new editor.BufferPosition(0, 0),
+			[new completion.CompletionItem("日😀語")], () -> true).show();
+		root.handleLanguagePopupText("日😀");
+		root.handleLanguagePopupKey(Platform.KEY_BACKSPACE, 0);
+		require(completionDocument.buffer.line(0) == "日" && root.isLanguagePopupVisible(), "completion backspace split a Unicode scalar");
+		root.handleLanguagePopupText("x");
+		require(completionDocument.buffer.line(0) == "日x" && !root.isLanguagePopupVisible(), "unmatched completion prefix lost input or retained stale suggestions");
 		var languageShortcuts = [
 			{key: Platform.KEY_SPACE, modifiers: Platform.MOD_CTRL | Platform.MOD_ALT, command: "language:hover"},
 			{key: Platform.KEY_SPACE, modifiers: Platform.MOD_CTRL | Platform.MOD_SHIFT, command: "language:signature-help"},

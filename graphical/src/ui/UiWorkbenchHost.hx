@@ -125,6 +125,8 @@ class UiWorkbenchHost implements WorkbenchHost {
 	var languageItems:Array<CompletionItem> = [];
 	var languageAccept:CompletionItem->Void = function(item) {};
 	var languageSelected:Int = 0;
+	var languageInput:Null<String->Void>;
+	var languageKey:Null<(Int, Int)->Bool>;
 	var languageSignature:Null<SignatureHelp>;
 	final languageCapture:KeyCaptureView;
 
@@ -160,9 +162,11 @@ class UiWorkbenchHost implements WorkbenchHost {
 		activePane = new UiEditorPane("editor");
 		panes.push(activePane);
 		commandViewCapture = new KeyCaptureView(buildCommandViewContent(), commandViewKeyPressed, commandViewTextInput);
-		// Mirrors controller.WorkbenchController.textInput's headless behavior: typing while a
-		// language popup is open dismisses it rather than being swallowed silently.
-		languageCapture = new KeyCaptureView(buildLanguagePopupContent(), handleLanguagePopupKey, function(text) dismissLanguagePopup());
+		// Completion owns its revision-checked input callback; informational popups
+		// dismiss and forward committed text to the active editor.
+		languageCapture = new KeyCaptureView(buildLanguagePopupContent(), handleLanguagePopupKey, function(text) {
+			if (!handleLanguagePopupText(text)) { dismissLanguagePopup(); textInput(text); }
+		});
 	}
 
 	function get_tabs():Array<UiDocumentView>
@@ -748,6 +752,9 @@ class UiWorkbenchHost implements WorkbenchHost {
 	}
 
 	public function openLanguageInformation(area:TextInputArea, text:String):Void {
+		languageInput = null;
+		languageKey = null;
+		languageAccept = function(item) {};
 		languageArea = area;
 		var active = activeDocument();
 		languageDocumentId = active == null ? -1 : active.id;
@@ -759,7 +766,9 @@ class UiWorkbenchHost implements WorkbenchHost {
 		requestFrame();
 	}
 
-	public function openLanguageCompletion(area:TextInputArea, items:Array<CompletionItem>, accept:CompletionItem->Void):Void {
+	public function openLanguageCompletion(area:TextInputArea, items:Array<CompletionItem>, accept:CompletionItem->Void, ?input:String->Void, ?key:(Int, Int)->Bool):Void {
+		languageInput = input;
+		languageKey = key;
 		languageArea = area;
 		var active = activeDocument();
 		languageDocumentId = active == null ? -1 : active.id;
@@ -774,6 +783,9 @@ class UiWorkbenchHost implements WorkbenchHost {
 	}
 
 	public function openLanguageSignature(area:TextInputArea, help:SignatureHelp):Void {
+		languageInput = null;
+		languageKey = null;
+		languageAccept = function(item) {};
 		languageArea = area;
 		var active = activeDocument();
 		languageDocumentId = active == null ? -1 : active.id;
@@ -792,6 +804,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 			return true;
 		}
 		if (languageKind != LANG_COMPLETION || languageItems.length == 0) return false;
+		if (languageKey != null && languageKey(key, modifiers)) return true;
 		if (key == Platform.KEY_DOWN) {
 			languageSelected = (languageSelected + 1) % languageItems.length;
 			requestFrame();
@@ -804,14 +817,19 @@ class UiWorkbenchHost implements WorkbenchHost {
 		}
 		if (key == Platform.KEY_ENTER || key == Platform.KEY_TAB) {
 			var item = languageItems[languageSelected];
+			var accept = languageAccept;
 			dismissLanguagePopup();
-			languageAccept(item);
+			accept(item);
 			return true;
 		}
 		return false;
 	}
 
 	public function dismissLanguagePopup():Void {
+		languageItems = [];
+		languageAccept = function(item) {};
+		languageInput = null;
+		languageKey = null;
 		languageKind = LANG_NONE;
 		languageArea = null;
 		languageDocumentId = -1;
@@ -819,6 +837,12 @@ class UiWorkbenchHost implements WorkbenchHost {
 	}
 
 	public function isLanguagePopupVisible():Bool return languageKind != LANG_NONE;
+
+	public function handleLanguagePopupText(text:String):Bool {
+		if (languageKind != LANG_COMPLETION || languageInput == null) return false;
+		languageInput(text);
+		return true;
+	}
 
 	// -- core.WorkbenchHost: settings & one-time wiring --
 
