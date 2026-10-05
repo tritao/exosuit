@@ -2,6 +2,22 @@
 
 Last updated: 2026-10-05.
 
+## M10.2 — native composition handoff and real-server regression, 2026-10-05
+
+Language popups are now nonmodal. Overlay capture requests focus after layout,
+when its node is registered; the former immediate request could fail silently.
+Dismissal restores editor focus. A native TextEdit event dismisses the language
+popup, focuses the existing editor and forwards the original payload through
+UIKit's normal composition transaction handler. A failed focus request stops
+forwarding to avoid recursively redispatching into the overlay.
+The routed Xvfb regression composes Japanese text and commits a replacement,
+checking that completion closes and committed text is neither lost nor duplicated.
+IME, live completion, long-list, hover, menu Escape and palette cancellation
+phases passed. `scripts/test-haxeon-lsp.sh` passed fixture diagnostics/fix,
+navigation/rename, save/build/execution and repository unsaved-overlay checks.
+These prove normalized native-event handling and real-server headless behavior;
+actual OS IME qualification and a real-server graphical workflow remain open.
+
 ## M10.2 — reveal keyboard-selected completion rows, 2026-10-05
 
 The UIKit completion popup now retains its scroll controller, uses explicit

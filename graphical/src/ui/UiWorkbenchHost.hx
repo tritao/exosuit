@@ -171,6 +171,9 @@ class UiWorkbenchHost implements WorkbenchHost {
 		// dismiss and forward committed text to the active editor.
 		languageCapture = new KeyCaptureView(buildLanguagePopupContent(), handleLanguagePopupKey, function(text) {
 			if (!handleLanguagePopupText(text)) { dismissLanguagePopup(); textInput(text); }
+		}, function(event) {
+			dismissLanguagePopup();
+			if (activePane.focusTarget != null) dockActions.editorPreedit(activePane.focusTarget, event);
 		});
 	}
 
@@ -843,6 +846,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 	}
 
 	public function dismissLanguagePopup():Void {
+		if (languageKind != LANG_NONE && activePane.focusTarget != null) dockActions.focusEditor(activePane.focusTarget);
 		languageItems = [];
 		languageAccept = function(item) {};
 		languageInput = null;
@@ -969,6 +973,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 			var scroll = new ScrollView("language-scroll", content, scrollStyle, nativekit.ui.widgets.scroll.ScrollAxis.Vertical, languageScroll);
 			var popup = new Popup("language-popup", scroll, area == null ? 0.0 : area.x,
 				area == null ? 0.0 : area.y + area.height, null, dismissLanguagePopup);
+			popup.modal = false;
 			popup.anchorRectProvider = caretRectProvider;
 			return popup;
 		});
@@ -996,6 +1001,7 @@ private class OverlayBuilderView implements NkView {
 typedef DockActions = {
 	model:DockWorkspaceModel,
 	focusEditor:WidgetId->Void,
+	editorPreedit:(WidgetId, nativekit.ui.core.UiEvent)->Void,
 	toggleSidebar:Void->Bool,
 	activateExplorer:Void->Void,
 	activateProblems:Void->Void,

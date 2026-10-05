@@ -154,6 +154,11 @@ class ExosuitApp implements DesktopUiApplication {
 			capturedHost = new UiWorkbenchHost(exosuitTheme, focus, workspace, settings, requestFrame, {
 				model: dock,
 				focusEditor: function(id) { ui.buildContext.requestFocusAfterLayout(id); requestFrame(); },
+				editorPreedit: function(id, event) {
+					if (!ui.focusWidget(id)) return;
+					ui.text(UiEventKind.TextEdit, event.text == null ? "" : event.text, event.data);
+					requestFrame();
+				},
 				toggleSidebar: toggleExplorerVisible,
 				activateExplorer: function() {
 					if (explorerRoot == null && application.workspace.projects.length > 0)

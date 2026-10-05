@@ -19,6 +19,8 @@ import nativekit.ui.core.UiEventKind;
 import nativekit.ui.core.UiKey;
 import nativekit.ui.core.UiModifier;
 import nativekit.ui.widgets.text.TextEditorState;
+import nativekit.ffi.NativeKitTypes.TextEditAction;
+import NativeKitEventValue.NativeKitTextEdit;
 
 /** Warms the editor's retained layout before editing or clearing its decorations. */
 class DecorationSmokeApp extends ExosuitApp {
@@ -367,7 +369,7 @@ class DecorationSmokeApp extends ExosuitApp {
 		if (frames == 4 && StringTools.startsWith(phase, "popup-")) {
 			var area = host.textInputArea();
 			if (area == null) throw "popup fixture lacks resolved caret geometry";
-			if (phase == "popup-live-completion") {
+			if (phase == "popup-live-completion" || phase == "popup-ime") {
 				var view = host.activeView();
 				if (view == null) throw "live completion lacks editor";
 				view.document.buffer.replaceAllText("", view.selection);
@@ -394,7 +396,10 @@ class DecorationSmokeApp extends ExosuitApp {
 				for (_ in 0...(phase == "popup-completion-wrap" ? 1 : 39)) ui.key(UiEventKind.KeyDown, phase == "popup-completion-wrap" ? UiKey.Up : UiKey.Down);
 			var view = host.activeView();
 			if (view == null) throw "popup fixture lost active document";
-			if (phase == "popup-live-completion") {
+			if (phase == "popup-ime") {
+				ui.text(UiEventKind.TextEdit, "日", new NativeKitTextEdit(TextEditAction.Compose, "日", 0, 0, 1, 1, 0, 1));
+				if (host.isLanguagePopupVisible() || view.document.buffer.line(0) != "日") throw "completion popup lost IME composition handoff: visible=" + host.isLanguagePopupVisible() + " text=" + view.document.buffer.line(0);
+			} else if (phase == "popup-live-completion") {
 				ui.text(UiEventKind.TextInput, "al");
 				if (view.document.buffer.line(0) != "al" || !host.isLanguagePopupVisible()) throw "graphical completion lost typed prefix";
 				ui.key(UiEventKind.KeyDown, UiKey.Backspace);
@@ -412,6 +417,11 @@ class DecorationSmokeApp extends ExosuitApp {
 			ui.key(UiEventKind.KeyDown, UiKey.Enter);
 			if (view == null || view.document.buffer.line(0) != "alpha" || host.isLanguagePopupVisible())
 				throw "graphical completion failed to accept narrowed suggestion";
+		}
+		if (frames == 6 && phase == "popup-ime") {
+			ui.text(UiEventKind.TextEdit, "日本", new NativeKitTextEdit(TextEditAction.Commit, "日本", 0, 1, 2, 2, -1, -1));
+			var view = host.activeView();
+			if (view == null || view.document.buffer.line(0) != "日本") throw "IME handoff lost or duplicated committed text";
 		}
 		if (StringTools.startsWith(phase, "pane-close-") && frames == 5) {
 			if (phase != "pane-close-shared") application.newDocument();
@@ -719,7 +729,7 @@ class DecorationSmokeApp extends ExosuitApp {
 				popupScrollController = activeView.scrollController;
 			}
 			if (frames == 6) {
-				if (phase == "popup-switch" || phase == "popup-clipped" || phase == "popup-live-completion") {
+				if (phase == "popup-switch" || phase == "popup-clipped" || phase == "popup-live-completion" || phase == "popup-ime") {
 					if (host.isLanguagePopupVisible() || panel != null) throw "popup survived document switch";
 				} else {
 					var area = host.textInputArea();

@@ -23,12 +23,14 @@ class KeyCaptureView implements View {
 	final child:View;
 	final onKey:(Int, Int) -> Bool;
 	final onText:String->Void;
+	final onPreedit:Null<UiEvent->Void>;
 	var requestedFocus:Bool = false;
 
-	public function new(child:View, onKey:(Int, Int) -> Bool, onText:String->Void) {
+	public function new(child:View, onKey:(Int, Int) -> Bool, onText:String->Void, ?onPreedit:UiEvent->Void) {
 		this.child = child;
 		this.onKey = onKey;
 		this.onText = onText;
+		this.onPreedit = onPreedit;
 	}
 
 	public function build(context:BuildContext):RenderNode {
@@ -44,8 +46,12 @@ class KeyCaptureView implements View {
 			if (event.text != null && event.text.length > 0) onText(event.text);
 			event.preventDefault();
 		});
+		if (onPreedit != null) node.on(UiEventKind.TextEdit, function(event:UiEvent) {
+			if (onPreedit != null) onPreedit(event);
+			event.preventDefault();
+		});
 		if (!requestedFocus) {
-			context.requestFocus(node.id);
+			context.requestFocusAfterLayout(node.id);
 			requestedFocus = true;
 		}
 		return node;
