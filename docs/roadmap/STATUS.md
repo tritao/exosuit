@@ -2,6 +2,22 @@
 
 Last updated: 2026-10-05.
 
+## M16 relay selection — Cloudflare Workers free tier, 2026-10-05
+
+User selects Cloudflare Workers for the relay plan. M16 now specifies a thin
+Worker/router plus a SQLite-backed Durable Object per opaque machine identity,
+both endpoints connecting inbound to the object, hibernation/attachment
+recovery, bounded encrypted forwarding and minimal metadata. Start on Free;
+no paid upgrade is authorized. Record actual quota/duration/Worker usage and
+explicit limit failures; do not promise free operation for arbitrary workloads.
+
+Checked official hibernation/pricing/Wrangler documentation. No Wrangler
+executable or relay project was found locally. Local implementation needs no
+Cloudflare account input. Live deployment later needs account selection/local
+Wrangler authentication and final approval under EXECUTION.md; workers.dev
+is the default so a custom domain is optional. No credentials requested or
+read, no account changes, no remote deployment. Documentation diff checked.
+
 ## M16 scope — existing web build first, 2026-10-05
 
 User requires remote access from the existing web build immediately, including

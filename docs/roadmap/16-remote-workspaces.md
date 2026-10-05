@@ -22,6 +22,63 @@ terminal and agent availability must not be confused with browser-native OS
 capabilities. No local PTY, provider credential or native IPC is required in the
 browser. Clearly identify saved files versus any later desktop draft feature.
 
+## Relay deployment decision — Cloudflare Workers
+
+Cloudflare Workers plus SQLite-backed Durable Objects is the planned initial
+relay implementation. Start on Workers Free; do not enable paid billing or
+change account plans without user approval. Keep transport configurable so a
+self-hosted relay or direct authenticated endpoint remains possible. Cloudflare
+Tunnel/Access is an optional deployment alternative, not a prerequisite.
+
+A thin Worker routes registration/pairing/connection requests to one Durable
+Object per opaque registered machine identity. Both the machine and browsers
+initiate secure WebSocket connections into the object. Use the Hibernation
+WebSocket API (`acceptWebSocket`), reconstruct routing from connection
+attachments after wake, and use automatic keepalive responses where suitable.
+Avoid outbound object connections, background timers and periodic storage
+writes that prevent idle hibernation. No connected viewers means no forwarding
+of routine terminal/agent output; history stays on the development machine.
+
+The relay authenticates connection roles and destination grants, forwards
+bounded encrypted payloads and records only minimal registration/revocation
+metadata. Never place provider secrets, file contents, terminal history or
+workspace encryption keys in relay storage/logs. Workspace service validates
+device permissions independently. Define opaque machine ids and authenticated
+routing; possession of an id alone must not grant access.
+
+Free-tier daily limits can interrupt operations, so report quota exhaustion
+explicitly and back off reconnect attempts. Measure request counts, active
+GB-seconds, stored rows and representative output workloads before choosing
+paid deployment. Application admission/rate/size limits bound abuse; do not
+claim that billing alerts impose a hard spend cap. Worker request/CPU usage
+also counts independently of Durable Object usage.
+
+Reference documentation checked 2026-10-05:
+[WebSocket hibernation](https://developers.cloudflare.com/durable-objects/best-practices/websockets/),
+[Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/),
+[Wrangler commands](https://developers.cloudflare.com/workers/wrangler/commands/).
+
+### Implementation and deployment inputs
+
+Local implementation needs no user account access: keep a project-local pinned
+Wrangler toolchain/configuration and local relay tests. No Wrangler executable
+or relay project was found in this checkout during planning. Implement the
+reviewable relay/client/service slice before requesting publication approval.
+
+For live cross-network qualification, the user supplies a Cloudflare account
+with Workers enabled and authenticates Wrangler locally (interactive login,
+or a narrowly scoped credential installed outside repository/chat). Select the
+account if more than one is available. Start with a workers.dev endpoint;
+custom domain/DNS is optional. Keep native identity/encryption verification
+working with that endpoint. Check actual account free-tier eligibility before
+deployment. Never request raw tokens in chat or commit credentials.
+
+Remote deployment remains a final approval step under EXECUTION.md. Report the
+exact Worker/namespace/assets being published, endpoint, expected cost tier
+and verification plan for review. Real Android qualification also needs an
+available phone/browser, which can wait until the connected slice is ready.
+No account setup is required merely to proceed with local implementation.
+
 ## M16.1 — Browser connection, pairing and relay
 
 - [ ] Add Connect to machine and paired-machine selection to the existing web
@@ -30,7 +87,10 @@ browser. Clearly identify saved files versus any later desktop draft feature.
   invitation; scanning its QR code or opening its URL enters the same web UI.
   Require explicit desktop pairing confirmation. Persist revocable device
   identity and workspace-scoped grants, not reusable credentials in URLs.
-- [ ] Provide an outbound connection from the workspace service to a relay.
+- [ ] Implement the Worker/router and SQLite-backed machine Durable Object,
+  including role authentication, hibernation recovery, forwarding limits,
+  quota behavior and local fault-injection tests.
+- [ ] Provide an outbound connection from the workspace service to that relay.
   The browser connects over secure WebSocket through that relay so remote use
   does not require an inbound public port, manual port forwarding or a VPN.
   Keep direct/local transport optional under the same client interface.
@@ -47,7 +107,8 @@ browser. Clearly identify saved files versus any later desktop draft feature.
 
 Acceptance: load the normal web build on a separate network, pair with a
 running development machine and reconnect without inbound port forwarding.
-Verify invitation expiry/reuse rejection, device revocation, workspace grants,
+Verify hibernation/wake routing, bounded overload and free-tier usage evidence,
+invitation expiry/reuse rejection, device revocation, workspace grants,
 relay restart, machine offline and network changes. This slice includes an
 actual outbound-relay/browser path, not a mocked LAN-only demonstration.
 Deployment/publication requires separate authorization under EXECUTION.md.
