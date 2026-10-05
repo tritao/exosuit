@@ -2,6 +2,34 @@
 
 Last updated: 2026-10-05.
 
+## Haxeon RPC.1 — envelope and framing foundation, 2026-10-05
+
+Haxeon **b1bf3d0c** adds permanent-id typed MessagePack/JsonWire envelopes,
+structured errors, required-value validation and independent protocol/codec
+versions. The bounded message transport specifies ownership transfer; its
+in-memory implementation injects accepted message loss without copying payloads.
+The incremental HMPK reader bounds payload allocation, queued bytes, queued
+messages and input consumed per feed. Callers retain unconsumed input under
+backpressure; taking a completed payload transfers it without another copy.
+Malformed headers poison the reader until a fresh connection. Frame length
+validation now rejects unsigned overflow before allocation, and pack/unpack
+arithmetic avoids overflowing the addressable frame length.
+
+Exosuit's `tests/haxeon-rpc` is registered in `scripts/test.sh`. Its native
+consumer run passes typed and diagnostic round trips, malformed/oversized
+envelopes, every frame split point, coalesced and empty frames, message/byte
+backpressure, feed budgets, oversized headers, sticky framing failures, bounded
+transport queues, injected loss and peer closure. Owned-file formatting and
+diff checks pass. The repository-wide Haxeon format check fails on three
+unchanged HEAD files: HlAssemblerStateCodec.hx, DebugMetadataMain.hx and
+HotReloadMain.hx. No compiler implementation changes were needed for this slice.
+
+RPC.1 remains active: next implement typed descriptors and asynchronous
+dispatch with bounded pending calls, deadlines and cooperative cancellation,
+then generation-fenced handshake/reconnect and Exosuit query/event/mutation
+reconciliation. Native/Wasm codec agreement and full runtime acceptance remain
+pending. This foundation does not claim zero-copy serialization or networking.
+
 ## M12.2 — native selection and clipboard copy, 2026-10-05
 
 Vendored libtsm **1902b63** fixes a reproduced heap-buffer overflow in selection

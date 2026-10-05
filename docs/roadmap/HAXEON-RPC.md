@@ -1,6 +1,8 @@
 # Haxeon typed RPC foundation
 
-Status: planned; implementation and acceptance are pending. Required by the
+Status: RPC.1 in progress; envelope, framing and bounded in-memory transport
+foundation passes native consumer tests. Dispatch, deadlines, reconnect and
+workspace integration remain pending. Required by the
 Exosuit workspace service in [M14](14-workbench.md). This plan authorizes a
 small general-purpose Haxeon library, developed alongside real workspace
 methods, rather than an Exosuit-specific framework or a new serialization layer.

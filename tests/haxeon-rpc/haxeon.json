@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "package": {"name": "exosuit-rpc-test"},
+  "entry": "app.RpcTestMain",
+  "sourceRoots": ["src"],
+  "target": "host",
+  "outputDir": "build"
+}
