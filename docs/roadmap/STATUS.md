@@ -2,6 +2,49 @@
 
 Last updated: 2026-10-05.
 
+## Haxeon RPC.2 — lifecycle isolation and frozen vectors, 2026-10-05
+
+Real socket admission now verifies reduced capabilities after service policy
+replacement, denies attempted writes, and retains that reduction when server write
+support returns. Forty completed reconnects exceed the hub's 32-stream and service's
+16-client limits without retaining dead slots. Completed-attempt cancellation leaves
+the adopted socket open. A real non-draining peer is overloaded with bounded 64 KiB
+messages; its queues retire while a sibling's pending and subsequent queries succeed.
+`WorkspaceRpcServer` now accepts an optional copied capability policy while retaining
+its established framing, message and work limits.
+
+`RpcCompatibilityTests` and [RPC-VECTORS.md](RPC-VECTORS.md) freeze all eight envelope
+variants plus query, snapshot, rename and framed query. Independently constructed
+MessagePack bytes are checked for encoding and decode/re-encoding on native,
+Wasm32 and Wasm GC. Evolution coverage includes nested unknown fields, map order,
+missing nullable/primitive/collection fields, required structured objects, null and
+wrong-type fields, trailing bytes, unsupported constructors/arity, framing flags,
+protocol/codec refusals and explicit method errors with a usable connection afterward.
+
+Compatibility tests exposed an application validation gap, not a compiler defect:
+missing primitive strings intentionally decode to empty strings in Haxeon's wire
+profile. Query now rejects an invalid workspace id. Rename rejects missing/invalid
+workspace and epoch ids as non-ambiguous `invalid_request` before stale-epoch handling;
+operation lookup requires a valid epoch too. Missing rename revision still fails
+existing domain validation. Granted malformed requests retire without changing
+cursor/revision. Complete requests with obsolete epochs retain their prior semantics.
+No Dynamic/cast bypass or compiler/runtime change was introduced.
+
+Validation: native RPC compatibility and real lifecycle consumers pass;
+`test-workspace-rpc-wasm.sh` passes the same compatibility/service fixtures on both
+Wasm targets; `test-workspace-rpc-browser.sh` passes both real Chrome clients through
+authentication, suspend/reconnect and agent process restart. `scripts/test.sh` and
+owned-file format/syntax/diff checks pass. Unrelated UI/confirmation edits remain
+untouched. Repository bases: Exosuit `f59fca9`, Haxeon `46b32640`, NativeKit `01bbc511`;
+only Exosuit changes in this slice, with no pushes or submodule pin changes.
+
+RPC.2 transport lifecycle and compatibility items are accepted. Its terminal/agent
+resource reconciliation item stays open for M14.3; a catalog connection test is not
+PTY/provider lifetime evidence. The plan now separates that prerequisite explicitly.
+Next: durable workspace catalog/storage ownership and managed daemon lifecycle,
+then real terminal/provider attachment and reconciliation. Method generation and
+streaming remain optional until a consumer demonstrates the need.
+
 ## Haxeon RPC.2 — real transports and headless bootstrap, 2026-10-05
 
 Delivered `src/workspace/transport/`, a headless `agent/haxeon.json`, real native

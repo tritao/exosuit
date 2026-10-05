@@ -28,6 +28,6 @@ for (const target of ["wasm32", "wasm-gc"]) {
  let result;
  try { result=instance.exports.main(); } catch(error) { if (error instanceof ProgramExit) result=error.code; else throw error; }
  if (result !== 42) throw new Error(`${target}: workspace fixture failed (${result})`);
- console.log(`PASS: workspace query, replay/gap recovery and mutation reconciliation on ${target}`);
+ console.log(`PASS: frozen RPC compatibility vectors, version/method errors, workspace recovery and mutation reconciliation on ${target}`);
 }
 JS

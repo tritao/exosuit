@@ -14,11 +14,11 @@ class WorkspaceRpcServer {
 
 	public final options:RpcPeerOptions;
 
-	public function new(service:WorkspaceService, clock:Void->Float) {
+	public function new(service:WorkspaceService, clock:Void->Float, ?capabilities:Array<String>) {
 		this.service = service;
 		this.clock = clock;
-		options = new RpcPeerOptions("exosuit-agent/1", [WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS, WorkspaceProtocol.WRITE], [], 5000, 262144, 32,
-			1048576);
+		options = new RpcPeerOptions("exosuit-agent/1",
+			capabilities == null ? [WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS, WorkspaceProtocol.WRITE] : capabilities, [], 5000, 262144, 32, 1048576);
 	}
 
 	/** NativeKit validates same-user peers and private paths on local sockets. */

@@ -146,6 +146,7 @@ class TransportTestMain {
 			server.closeClients();
 			Sys.println(websocket ? "PASS: authenticated real WebSocket RPC, reconnect, cursor resume and outcome lookup" : "PASS: same-user local socket RPC, reconnect, cursor resume and outcome lookup");
 		}
+		NetworkLifecycleTests.run(runtime, hub, args[0] + ".life", clock);
 		// Wrong credentials terminate reconnect and never expose a privileged connection.
 		var bad = new SessionRpcConnector(new NativeRpcConnector(hub, NativeRpcHub.websocket(Std.parseInt(args[1]))), StringTools.lpad("", "0", 64), clock);
 		var rejected = new RpcClient(bad, clock, function() return 1.0, new RpcPeerOptions("test/1", [WorkspaceProtocol.READ], [], 1000, 262144, 32, 1048576),

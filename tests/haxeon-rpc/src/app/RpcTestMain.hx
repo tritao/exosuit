@@ -24,6 +24,8 @@ class RpcTestMain {
 	}
 
 	static function main():Void {
+		RpcCompatibilityTests.run();
+		Sys.println("PASS: frozen RPC wire vectors, schema evolution and explicit method errors");
 		WorkspaceRpcTests.run();
 		Sys.println("PASS: workspace RPC query, snapshot race, event resume/gap recovery, permissions and lost-mutation reconciliation");
 		RpcLifecycleTests.run();

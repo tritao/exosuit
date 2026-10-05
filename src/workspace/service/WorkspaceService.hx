@@ -68,7 +68,11 @@ class WorkspaceService {
 				context.fail({code: "unauthorized", message: "Read denied", ambiguous: false});
 				return;
 			}
-			if (request == null || request.workspace != id) {
+			if (request == null || !validId(request.workspace)) {
+				context.fail({code: "invalid_request", message: "Invalid workspace query", ambiguous: false});
+				return;
+			}
+			if (request.workspace != id) {
 				context.fail({code: "unknown_workspace", message: "Unknown workspace", ambiguous: false});
 				return;
 			}
@@ -104,7 +108,11 @@ class WorkspaceService {
 				context.fail({code: "unauthorized", message: "Rename denied", ambiguous: false});
 				return;
 			}
-			if (request == null || request.workspace != id || request.epoch != epoch) {
+			if (request == null || !validId(request.workspace) || !validId(request.epoch)) {
+				context.fail({code: "invalid_request", message: "Invalid rename identity", ambiguous: false});
+				return;
+			}
+			if (request.workspace != id || request.epoch != epoch) {
 				context.fail({code: "stale_epoch", message: "Workspace epoch changed", ambiguous: true});
 				return;
 			}
@@ -179,7 +187,7 @@ class WorkspaceService {
 				context.fail({code: "unauthorized", message: "Outcome lookup denied", ambiguous: false});
 				return;
 			}
-			if (request == null || request.workspace != id || !validId(request.operation)) {
+			if (request == null || request.workspace != id || !validId(request.epoch) || !validId(request.operation)) {
 				context.fail({code: "invalid_request", message: "Invalid operation query", ambiguous: false});
 				return;
 			}

@@ -4,8 +4,10 @@ Status: RPC.1 accepted for the transport-independent runtime and first in-memory
 workspace consumer. Native, Wasm32 and Wasm GC tests pass, including handshake,
 reconnect, subscription recovery and lost-mutation reconciliation. RPC.2 now has
 real local sockets and authenticated loopback WebSockets, including Chrome
-Wasm32/Wasm GC reconnect and daemon-restart tests. Resource reconciliation,
-compatibility vectors and durable daemon storage remain. See
+Wasm32/Wasm GC reconnect and daemon-restart tests. Real capability reduction,
+completed connection churn, slow-consumer isolation and frozen native/Wasm
+compatibility vectors now pass. Terminal/agent resource reconciliation and durable
+daemon storage remain tied to M14 runtime delivery. See
 [WORKSPACE-RPC.md](WORKSPACE-RPC.md) for the consumer's exact guarantees and limits.
 Required by the Exosuit workspace service in [M14](14-workbench.md). This plan
 authorizes a small general-purpose Haxeon library developed alongside real
@@ -37,9 +39,10 @@ outside the RPC core. Codex's app-server protocol stays inside its adapter.
   Handlers receive cancellation/deadline context and may respond asynchronously.
   Use existing asynchronous abstractions where suitable; do not block the loop.
 - [x] Define a message transport interface and an in-memory fault-injecting
-  transport. Local streams use bounded incremental HMPK assembly; binary
-  WebSocket messages supply their own boundaries. Bound allocation before
-  assembling payloads, pending calls, queued bytes and work per poll.
+  transport. Adapters exposing byte streams use bounded incremental HMPK
+  assembly, including NativeKit WebSockets whose frame boundaries are hidden.
+  Bound allocation before assembling payloads, pending calls, queued bytes and
+  work per poll.
 - [x] Include connection lifecycle and reconnect in the first slice: explicit
   connecting/handshaking/connected/disconnected/closed states, bounded backoff
   with jitter, cancellable attempts and a fresh handshake on each connection.
@@ -77,11 +80,19 @@ poll budgets. Codec fixtures agree across native and Wasm targets.
 - [x] Implement local socket and browser-compatible WebSocket adapters using
   the same typed runtime. Keep authentication/session establishment at the
   adapter/service boundary and verify it before privileged dispatch.
-- [ ] Exercise service restart, mobile-style suspend/resume, connection churn,
-  slow consumers and capability changes. Reconcile Exosuit terminal and agent
-  resources without stopping unrelated sessions.
-- [ ] Freeze documented protocol vectors and evolution rules. Test added and
+- [x] Exercise service restart, mobile-style suspend/resume, connection churn,
+  slow consumers and capability changes. Completed socket reconnects retire hub
+  and service slots; revoked grants stay revoked and an overloaded real peer
+  cannot stop its sibling. Browser restart/suspend tests run on both Wasm targets.
+- [ ] Reconcile Exosuit terminal and agent resources without stopping unrelated
+  sessions, once M14.3 provides those resources. Socket/catalog isolation tests
+  do not claim PTY/provider supervision or durable session restoration.
+- [x] Freeze documented protocol vectors and evolution rules. Test added and
   missing fields, unsupported variants/versions and explicit method errors.
+
+Vectors: [RPC-VECTORS.md](RPC-VECTORS.md), checked on native, Wasm32 and Wasm GC.
+Missing wire defaults are validated by the application; incomplete identities fail
+as non-ambiguous `invalid_request` without mutating state.
 
 Acceptance: real local and browser connections recover through the same
 client API. Interrupted requests retain their documented failure semantics;

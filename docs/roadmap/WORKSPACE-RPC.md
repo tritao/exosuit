@@ -116,3 +116,30 @@ initial snapshot, suspension/reconnect in the same epoch, then process restart
 with a fresh epoch and snapshot restoration. See [agent/README.md](../../agent/README.md)
 for commands and bootstrap limits. Android, wide-area relay access, durable
 outcomes, runtime resource reconciliation and frozen evolution vectors remain.
+
+## Lifecycle isolation and schema compatibility
+
+`WorkspaceRpcServer` accepts an optional capability policy; `RpcPeerOptions`
+copies it and the policy stays fixed for each server generation. New handshakes
+intersect the service policy with the client's retained ceiling. Reconnecting
+can reduce permissions, but restoring server write support cannot silently regain
+a permission the client has lost. The real socket test verifies denied rename
+requests have no side effects and performs 40 completed reconnects, exceeding both
+the service's 16-client and hub's 32-stream limits without leaking their slots.
+
+A second real-socket test floods a non-draining peer with bounded 64 KiB messages.
+The peer's RPC/native queue limits retire it and clear its RPC backlog while a
+sibling's pending and subsequent workspace queries complete. This proves client
+connection isolation; terminal/provider resources do not yet exist in this service
+and their independent lifetime still needs M14.3 acceptance.
+
+[RPC-VECTORS.md](RPC-VECTORS.md) freezes all eight envelope variants plus query,
+snapshot, rename and HMPK framing bytes. Native and both Wasm targets check encoding,
+semantic decoding, unknown nested fields, reordered maps, nullable/defaulted fields,
+wrong types, null non-null values, missing structured objects, trailing bytes,
+constructor arity, unknown variants, version/codec refusals and method errors.
+The wire layer supplies empty-string and zero defaults for omitted primitive fields;
+the service rejects incomplete query/rename/operation identities and missing rename
+revision before they can mutate state. Missing rename identity is `invalid_request`
+with ambiguity false, rather than the `stale_epoch` response reserved for a complete
+request carrying an obsolete epoch.
