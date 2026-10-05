@@ -79,9 +79,10 @@ Decisions taken by default (record any override in STATUS):
 - PTY and local transport hardening go into NativeKit core. SQLite and the
   libtsm terminal emulator stay in exosuit as `native-packages/` with HXI
   bindings. Widget capabilities go into UIKit.
-- Stay wire-compatible with Pragtical control protocol v1 and Workbench
-  protocol 2.1, so either side's tests and binaries interoperate. Each editor
-  keeps its own storage and runtime directories.
+- M13 retains Pragtical control protocol v1 compatibility. M14 uses an
+  Exosuit-owned workspace protocol built on Haxeon typed wire codecs;
+  Pragtical Workbench is reference input only. Keep Exosuit storage and
+  runtime directories separate.
 - Vendor SQLite and libtsm (`tritao/libtsm@7b1de2d`). Before vendoring,
   confirm both licenses and record the notices in packaging.
 - Claude Code and Codex are required M14 agent providers; opencode is deferred.

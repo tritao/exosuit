@@ -2,6 +2,27 @@
 
 Last updated: 2026-10-05.
 
+## M14 protocol ownership — Haxeon wire, 2026-10-05
+
+User removes Pragtical agent dependency; it is reference input only. Updated
+M14.1 to target an initial Exosuit service and removed Workbench 2.1 wire,
+Pragtical-client and database schema compatibility requirements. M13's separate
+local editor-control compatibility remains unchanged.
+
+Inspected Haxeon's MESSAGEPACK.md, JSON_WIRE.md, MessagePackFrame and reader.
+Use shared @:wire records/stable @:id fields, typed MessagePack codecs and
+optional same-schema JsonWire diagnostics. Local streams use HMPK framing with
+bounded incremental assembly; WebSocket uses message boundaries. Define
+application version/capability negotiation separately from frame version,
+explicit RPC/replay semantics, Int64 counters, domain validation and bounded
+queues. Unknown enum variants require negotiated capabilities. Current frame
+helpers copy payloads; no zero-copy claim. Generic buffer-slice improvements
+belong in Haxeon if measured and required.
+
+Recorded connected web/Android service boundary without claiming remote support
+implemented or expanding standalone M15 acceptance. This is a documentation
+scope/design change; protocol and service implementation remain pending.
+
 ## M14 scope — Codex shared app-server provider, 2026-10-05
 
 User overrides the original Claude-only scope: Codex is required alongside
