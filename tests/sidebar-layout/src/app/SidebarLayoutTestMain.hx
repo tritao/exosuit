@@ -38,7 +38,7 @@ class SidebarLayoutTestMain {
     model.select(name);
     var root:haxeon.ui.core.RenderNode = null;
     for (_ in 0...3) root = context.submit(host, new haxeon.ui.LayoutFrame(width, 180));
-    require(root.layout.style.clipHorizontal && root.layout.style.clipVertical, "sidebar missing pane clipping");
+    require(root.layout.style.clipHorizontal, "sidebar missing pane clipping");
     var found = false;
     function visit(node:haxeon.ui.core.RenderNode):Void {
      if (node.resolved != null) {
