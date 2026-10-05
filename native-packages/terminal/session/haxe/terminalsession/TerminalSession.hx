@@ -12,14 +12,16 @@ class TerminalSession {
     public var offset(default, null):haxe.Int64 = 0;
 
     final backend:TerminalBackend;
+    final respondToQueries:Bool;
     final pending:Array<TerminalEvent> = [];
     var pendingBytes:Int = 0;
     var replayAt:haxe.Int64 = -1;
     var closed:Bool = false;
 
-    public function new(backend:TerminalBackend, emulator:Emulator) {
+    public function new(backend:TerminalBackend, emulator:Emulator, respondToQueries:Bool = true) {
         if (backend == null || emulator == null) throw "Terminal session needs a backend and emulator";
         this.backend = backend;
+        this.respondToQueries = respondToQueries;
         this.emulator = emulator;
         id = backend.id();
     }
@@ -37,7 +39,13 @@ class TerminalSession {
         ensureOpen();
         backend.pollEvents(applyEvent);
         var replies = emulator.takeReplies();
-        if (replies.length > 0) backend.write(replies);
+        if (respondToQueries && replies.length > 0) backend.write(replies);
+    }
+    /** Send explicit keyboard/paste replies even when server owns VT query responses. */
+    public function flushInput():Void {
+        ensureOpen();
+        var bytes = emulator.takeReplies();
+        if (bytes.length > 0) backend.write(bytes);
     }
     public function requestReplay(from:haxe.Int64):Void {
         ensureOpen();

@@ -63,6 +63,7 @@ bash "$root_dir/scripts/test-workspace-transport.sh"
 bash "$root_dir/scripts/test-workspace-persistence.sh"
 bash "$root_dir/scripts/test-workspace-attachment.sh"
 python3 "$root_dir/scripts/test-agent-idle.py"
+python3 "$root_dir/scripts/test-workspace-terminals.py"
 bash "$root_dir/scripts/test-workspace-rpc-wasm.sh"
 run_test application-test
 run_test problems

@@ -96,7 +96,16 @@ class Main {
         session.close();
         if (backend.closes != 1 || session.status != "closed")
             throw "session close was not idempotent";
+        var remoteBackend = new FakeBackend();
+        var remote = new TerminalSession(remoteBackend,Emulator.open(20,4),false);
+        remoteBackend.events.push(output(0,"\x1b[6n"));
+        remote.pollEvents();
+        if(remoteBackend.writes.length!=0) throw "Remote renderer replied to server-owned VT query";
+        remote.emulator.paste(Bytes.ofString("paste")); remote.flushInput();
+        if(remoteBackend.writes.length!=1 || remoteBackend.writes[0]!="paste") throw "Remote paste was suppressed with query replies";
+        remote.close();
         localPtySmoke();
+        drainExitSmoke();
     }
 
     static function localPtySmoke():Void {
@@ -126,4 +135,22 @@ class Main {
         runtime.dispose();
         if (!okay) throw "NativeKit PTY terminal session did not round-trip";
     }
+    static function drainExitSmoke():Void {
+        var runtime=NativeKitRuntime.start();
+        var backend=LocalPtyBackend.spawn(new TerminalProfile("/usr/bin/python3",["-c",
+            "import os; os.write(1,b'x'*262144+b'END'); raise SystemExit(7)"],"/tmp"),80,24);
+        var received=0, exited=false, code=0;
+        var deadline=Sys.time()+10;
+        while(!exited && Sys.time()<deadline) {
+            backend.pollEvents(function(event) {
+                if(event.kind=="output") received+=event.length;
+                else if(event.kind=="status") {exited=true;code=event.exitCode;}
+            });
+            Sys.sleep(0.005);
+        }
+        backend.close(); runtime.dispose();
+        if(!exited || code!=7 || received!=262147) throw "PTY exit overtook final bounded output drain";
+        Sys.println("PASS: PTY exit follows complete burst output; remote query suppression preserves explicit input");
+    }
+
 }

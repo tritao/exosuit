@@ -58,16 +58,18 @@ class LocalPtyBackend implements TerminalBackend {
     public function pollEvents(emit:TerminalEvent->Void):Void {
         ensureOpen();
         flushWrites();
+        var drained = false;
         for (_ in 0...4) {
             var read = NativeKit.nk_pty_read(pty.borrow(), readBuffer, readBuffer.length);
-            if (read.status == 1 || read.status == -12) break;
+            if (read.status == 1 || read.status == -12) { drained = true; break; }
             check(read.status, "read");
             var count = haxe.Int64.toInt(read.out_read);
-            if (count <= 0) break;
+            if (count <= 0) { drained = true; break; }
             emit(TerminalEvent.output(streamOffset, readBuffer, count));
             streamOffset += count;
         }
-        if (!exited) {
+        // Exit status must follow all queued output, including a final burst beyond this poll budget.
+        if (!exited && drained) {
             var result = NativeKit.nk_pty_exit_status(pty.borrow());
             if (result.status == 0) {
                 exited = true;

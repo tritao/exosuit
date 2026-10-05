@@ -61,12 +61,10 @@ bytecode, so managed startup does not compile sources or require Haxeon.
 The default idle grace is 60 seconds, including initial startup. `--idle-seconds N`
 changes it for new managed daemons; `--always-available` (or
 `EXOSUIT_AGENT_ALWAYS_AVAILABLE=1`) explicitly disables idle shutdown. Unnegotiated
-or unauthenticated sockets do not keep it alive. The future runtime manager must
-supply its active session count to the shared lifetime policy before terminals or
-providers are hosted. Existing policies are not changed by client attachment.
+or unauthenticated sockets do not keep it alive. Running daemon-owned terminals also retain the service, even with no attached clients. Existing policies are not changed by client attachment.
 Normal idle stop closes clients/listeners, releases SQLite and the native runtime,
 then the manager retires discovery and its lifetime lock with exit 0. Explicit
-SIGTERM stop uses the same owned-process cleanup. There is no session-stop UI yet.
+SIGTERM stop uses the same owned-process cleanup. The desktop command palette offers “Terminate Active Terminal”; closing a window only detaches.
 
 Run `python3 scripts/test-agent-idle.py` for real idle shutdown, client retention,
 restart and detached availability. `bash scripts/test-runtime-bundle.sh` exercises
@@ -82,3 +80,42 @@ both Wasm GC and Wasm32 (using the sibling Emsdk installation). A browser commit
 a rename, suspends/reconnects, then observes its durable state after daemon restart.
 Temporary credentials and child processes are cleaned up. The browser page is a
 test client; the Exosuit web application's connection UX remains pending.
+
+
+### Daemon-owned desktop terminals
+
+With a folder open on Linux, terminals use the verified workspace RPC connection.
+Their opaque IDs are saved in the editor session. Restoring a view attaches to the
+same shell, environment and PID; it never silently starts a replacement shell.
+Folderless terminals retain the existing local backend. Hiding the terminal panel
+keeps its tabs, and closing the editor detaches its views. Running terminals keep
+the daemon alive; the idle grace resumes after all terminals exit and clients leave.
+
+The first runtime slice permits 16 terminal records per daemon instance, including
+exited records. Each retains at most 16 MiB of output in owned 64 KiB chunks, with
+64-bit byte cursors. Replay reads and input batches are bounded to 64 KiB. Restoring
+beyond retained history reports a replay gap; daemon restart reports a lost session.
+No durable terminal history, checkpoint rotation, runtime listing/deletion or
+provider sessions are delivered yet. Terminals are rooted at the canonical project
+folder, use the default user shell and accept dimensions up to 512 columns × 256 rows.
+
+Only the daemon responds to VT queries. Client emulators replay output without
+responding to queries, but still send explicit keyboard/paste/mouse input. Both
+remote parsers disable the generic emulator's optional checkpoint event log to
+avoid retaining another unbounded copy of output. Retained PTY bytes require one
+ownership copy; RPC encoding and transport are not claimed to be zero copy.
+
+Development startup builds without passing the workspace lock into the compiler,
+then launches HashLink directly with the lock. Persistent compiler workers cannot
+retain it. NativeKit isolates PTY children from host descriptors. Installed bundles
+run their already-built agent and include its terminal libraries.
+
+Run `python3 scripts/test-workspace-terminals.py` for permission checks, open retry,
+input sequencing, bounded replay, same-shell reattachment and idle ownership.
+Run `xvfb-run -a python3 scripts/test-workspace-terminal-ui.py` for real desktop
+close/reopen, continued execution while detached and restored shell identity.
+
+A restored grid replays raw bytes at its current size; exact historical resize
+reconstruction awaits state checkpoints. Closing an individual tab also detaches.
+Until runtime listing is delivered, terminate before discarding the last saved
+view when the shell should stop.

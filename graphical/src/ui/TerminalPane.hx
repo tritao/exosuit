@@ -81,6 +81,16 @@ class TerminalPane implements TerminalPanel {
 		}
 	}
 
+	public static function openRemote(provider:Void->Null<workspace.client.LocalWorkspaceClient>, id:String, cwd:String, restored:Bool,
+		requestFrame:Void->Void, palette:TerminalPalette):TerminalPanel {
+		var backend = new workspace.client.RpcTerminalBackend(provider,id,cwd,!restored);
+		var session = new TerminalSession(backend,terminalkit.Emulator.open(80,24,1000,"xterm-256color",false),false);
+		try return new TerminalPane(session,requestFrame,palette)
+		catch (failure:Dynamic) { session.close(); throw failure; }
+	}
+
+	public function terminate(force:Bool):Void session.terminate(force);
+
 	public function status():String
 		return session.status;
 
@@ -322,6 +332,7 @@ class TerminalPane implements TerminalPanel {
 					if (closed || !focused || generation != focusGeneration || session.status != "running" || text.length == 0) return;
 					prepareInput();
 					session.emulator.paste(Bytes.ofString(text));
+					session.flushInput();
 					session.pollEvents();
 					requestFrame();
 				});
@@ -333,12 +344,14 @@ class TerminalPane implements TerminalPanel {
 			focused = true;
 			focusGeneration++;
 			session.emulator.focus(true);
+			session.flushInput();
 			requestFrame();
 		});
 		node.on(UiEventKind.FocusLost, function(_) {
 			focused = false;
 			focusGeneration++;
 			session.emulator.focus(false);
+			session.flushInput();
 			requestFrame();
 		});
 		node.on(UiEventKind.Scroll, function(event:UiEvent) {
@@ -401,6 +414,7 @@ class TerminalPane implements TerminalPanel {
 		if ((event.modifiers & UiModifier.Alt) != 0) modifiers |= 8;
 		if ((event.modifiers & UiModifier.Control) != 0) modifiers |= 16;
 		if (!session.emulator.mouse(cell.column, cell.row, button, kind, modifiers)) return false;
+		session.flushInput();
 		session.pollEvents();
 		event.preventDefault();
 		event.stopPropagation();
@@ -433,6 +447,7 @@ class TerminalPane implements TerminalPanel {
 		};
 		if (name != null) prepareInput();
 		if (name != null && session.emulator.key(name, event.modifiers)) {
+			session.flushInput();
 			session.pollEvents();
 			event.preventDefault();
 			return;

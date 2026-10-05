@@ -78,6 +78,8 @@ TERMINALKIT_API void terminalkit_scrollback(terminalkit_handle *kit, int positio
     int *current TK_OUT, int *total TK_OUT);
 
 /* Checkpoints use caller storage and can restore into a fresh handle. */
+/* Drops the replay log and disables checkpoint export/restore; live VT state remains. */
+TERMINALKIT_API void terminalkit_disable_checkpoints(terminalkit_handle *kit);
 TERMINALKIT_API uint64_t terminalkit_checkpoint_size(terminalkit_handle *kit);
 TERMINALKIT_API int terminalkit_checkpoint(terminalkit_handle *kit, void *buffer,
     uint64_t capacity, uint64_t *written TK_OUT);

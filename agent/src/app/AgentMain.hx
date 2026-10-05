@@ -8,6 +8,7 @@ import workspace.transport.SessionPreflight;
 import workspace.service.WorkspaceService;
 import workspace.service.WorkspaceLifetime;
 import workspace.storage.WorkspaceSqliteStore;
+import workspace.runtime.WorkspaceTerminalManager;
 
 /** Catalog daemon. The managed launcher owns exclusive startup and discovery. */
 class AgentMain {
@@ -41,7 +42,8 @@ class AgentMain {
 		var service = store == null ? seed : new WorkspaceService("workspace", args[3], seed.snapshot().groups, 32, 256, 16, store);
 		if (args.length >= 6 && (service.snapshot().groups.length != 1 || service.snapshot().groups[0].cwd != args[5]))
 			throw "Workspace database root mismatch";
-		var server = new WorkspaceRpcServer(service, clock, null, args.length >= 7 ? {workspace: "workspace", root: args[5], instance: args[6]} : null);
+		var terminals = new WorkspaceTerminalManager("workspace", args.length >= 7 ? args[6] : args[3], args.length >= 6 ? args[5] : Sys.getCwd());
+		var server = new WorkspaceRpcServer(service, clock, null, args.length >= 7 ? {workspace: "workspace", root: args[5], instance: args[6]} : null, terminals);
 		var local = hub.listen(NativeRpcHub.local(args[0]), server.acceptLocal);
 		var websocket = hub.listen(NativeRpcHub.websocket(port, "/workspace", true), function(transport) {
 			server.acceptWebSocket(transport, token);
@@ -54,10 +56,12 @@ class AgentMain {
 				if (!runtime.events.poll())
 					break;
 			server.poll();
-			// Catalog-only today. The runtime manager must supply its owned session count here.
-			if (lifetime.shouldStop(clock(), server.clientCount(), 0))
+			// Runtime ownership survives client disconnects.
+			terminals.poll();
+			if (lifetime.shouldStop(clock(), server.clientCount(), terminals.activeCount()))
 				break;
 		}
+		terminals.dispose();
 		server.dispose();
 		hub.dispose();
 		if (store != null)

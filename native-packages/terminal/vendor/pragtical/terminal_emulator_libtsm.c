@@ -108,6 +108,7 @@ typedef struct terminal_history {
   uint8_t* data;
   size_t length;
   size_t capacity;
+  int disabled;
 } terminal_history_t;
 
 typedef struct terminal_emulator {
@@ -208,6 +209,7 @@ static int history_reserve(terminal_history_t* history, size_t amount) {
 
 static int history_append(terminal_history_t* history, unsigned int type,
     const void* data, size_t length) {
+  if (history->disabled) return 1;
   if (length > UINT32_MAX || history->length > SIZE_MAX - 5 - length)
     return 0;
   size_t required = history->length + 5 + length;
@@ -606,9 +608,19 @@ int terminal_emulator_feed(terminal_emulator_t* emulator,
   return terminal_emulator_feed_internal((terminal_t*)emulator, data, length, 1);
 }
 
+void terminal_emulator_disable_checkpoints(terminal_emulator_t* emulator) {
+  terminal_t* terminal = (terminal_t*)emulator;
+  if (!terminal || terminal->closed) return;
+  free(terminal->history.data);
+  terminal->history.data = NULL;
+  terminal->history.length = 0;
+  terminal->history.capacity = 0;
+  terminal->history.disabled = 1;
+}
+
 size_t terminal_emulator_checkpoint_size(terminal_emulator_t* emulator) {
   terminal_t* terminal = (terminal_t*)emulator;
-  if (!terminal || terminal->closed || terminal->history.length
+  if (!terminal || terminal->closed || terminal->history.disabled || terminal->history.length
       > SIZE_MAX - TERMINAL_CHECKPOINT_HEADER_SIZE)
     return 0;
   return TERMINAL_CHECKPOINT_HEADER_SIZE + terminal->history.length;
@@ -638,7 +650,7 @@ int terminal_emulator_checkpoint(terminal_emulator_t* emulator, void* data,
 int terminal_emulator_restore_checkpoint(terminal_emulator_t* emulator,
     const void* data, size_t size) {
   terminal_t* terminal = (terminal_t*)emulator;
-  if (!terminal || terminal->closed || !data
+  if (!terminal || terminal->closed || terminal->history.disabled || !data
       || size < TERMINAL_CHECKPOINT_HEADER_SIZE)
     return 0;
   const uint8_t* input = (const uint8_t*)data;

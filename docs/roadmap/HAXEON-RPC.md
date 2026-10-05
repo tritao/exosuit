@@ -137,3 +137,11 @@ RPC.1 includes reconnect; application persistence/replay is implemented alongsid
 it rather than deferred behind a transport-only demonstration. Stages RPC.3
 and RPC.4 do not block initial workspace delivery unless measured consumer
 requirements make them necessary.
+
+
+The first Exosuit terminal runtime now consumes the existing typed RPC API without
+adding terminal-specific machinery to Haxeon. Its service owns stable IDs, instance
+checks, byte replay bounds and input sequencing/ambiguity. Methods 110–114 and the
+binary/Int64 compatibility vectors are documented in WORKSPACE-RPC and RPC-VECTORS.
+The runtime uses pull reads initially; output subscriptions and durable replay
+remain application work rather than new RPC core abstractions.

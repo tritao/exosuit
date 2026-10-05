@@ -211,3 +211,38 @@ the service rejects incomplete query/rename/operation identities and missing ren
 revision before they can mutate state. Missing rename identity is `invalid_request`
 with ambiguity false, rather than the `stale_epoch` response reserved for a complete
 request carrying an obsolete epoch.
+
+
+## Terminal runtime first slice
+
+Typed terminal methods 110–114 are open/attach, output, input, resize and terminate.
+All carry workspace, service instance and opaque terminal ID. Grants are
+`workspace.terminals.read` and `workspace.terminals.control`. Creating a terminal,
+input, resize and terminate require control; output and attach require read.
+Capabilities are optional for catalog-only clients and advertised only when a
+runtime manager is configured.
+
+Open is idempotent within an instance for the same ID; `create:false` only attaches.
+A stale instance is refused. Output reads use Int64 byte offsets and return at most
+64 KiB with current bounds/state. Offsets before retained history return `replay_gap`;
+future offsets return `invalid_offset`. Each terminal retains at most 16 MiB in
+fixed chunks. This is bounded volatile replay, not durable recovery after service
+restart. The first implementation uses pull reads, not output notifications.
+
+Input batches carry a strictly increasing per-connection sequence and at most
+64 KiB. The service reserves the sequence before writing; an uncertain prefix is
+never resent. Clients fence input after ambiguous delivery/disconnect. Open and
+resize can retry transient transport failures; input cannot automatically retry.
+Close/detach is local view disposal; terminate explicitly kills the owned PTY.
+Running resources count toward service lifetime even without clients.
+
+The service owns VT query responses, while replaying client parsers suppress them.
+Explicit key/paste/mouse input still flushes. Terminal resources are currently
+folder-scoped shell instances, not yet catalog tasks/named-group resources. Durable
+history, state checkpoints, listing/deletion and full reconciliation remain next work.
+
+
+Current replay is a raw byte history at the view's current dimensions; it does not
+reconstruct a historical resize timeline or guarantee an identical restored grid.
+Closing an individual view also detaches; without the pending runtime browser,
+terminate its session before discarding the last saved view if it should stop.

@@ -20,6 +20,9 @@
 		},
 		"haxeon-compiler": {
 			"path": "../haxeon/embed"
+		},
+		"terminalsession": {
+			"path": "native-packages/terminal/session"
 		}
 	},
 	"native": {

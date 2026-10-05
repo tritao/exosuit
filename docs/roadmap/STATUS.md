@@ -2,6 +2,37 @@
 
 Last updated: 2026-10-05.
 
+## M14.3 — daemon-owned terminals, 2026-10-05
+
+The Linux folder workspace now opens terminal views through the verified typed RPC
+connection. The daemon owns PTYs; saved stable IDs attach the same shell after editor
+shutdown. Restored views never silently spawn a replacement. Active PTYs retain the
+service without clients; explicit terminal termination permits normal idle shutdown.
+Hiding the panel retains its tabs. Folderless terminals still use the local backend.
+
+Methods 110–114 enforce read/control grants, instance identity, idempotent open,
+per-connection input sequence and explicit ambiguous-input fencing. Output uses
+64-bit offsets, 64 KiB reads and at most 16 MiB retained per terminal. Sixteen records
+are permitted per daemon lifetime. Borrowed native output is copied once into owned
+chunks; encoding/network copies remain. Server VT responses are centralized, and
+remote parser checkpoint event logs are disabled to avoid duplicate history.
+
+Two ownership defects were fixed: source startup passed the lifetime lock into a
+persistent compiler worker, preventing immediate restart; it now builds without the
+lock and launches the VM directly. NativeKit PTY children now close host descriptors
+before exec. The local session also drains the final bounded output reads before
+reporting exit, preventing truncation of a large final burst.
+
+Durable terminal history/checkpoints, runtime listing/deletion, named task/group
+integration, daemon-crash reconciliation and AI providers remain pending. Release
+pins are unchanged. Validation passes: the full headless suite; reference and self-hosted terminal
+contracts (all control grants, stale instance, lost-open retry, duplicate input,
+replay gap and explicit termination); two-process reattachment across the idle
+interval; actual Xvfb desktop continued execution/reopen; native PTY descriptor
+isolation; and native/both portable Wasm binary/Int64 vectors. The relocated bundle
+also restores the same shell with source/compiler paths disabled. NativeKit fix:
+`6cf89618`. No compiler typing changes were required by this slice.
+
 ## M14 — idle service lifetime and runtime bundle, 2026-10-05
 
 Catalog-only workspace daemons now stop after 60 seconds without authenticated,

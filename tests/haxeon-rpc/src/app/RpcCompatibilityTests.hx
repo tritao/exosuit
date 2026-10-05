@@ -5,6 +5,7 @@ import haxeon.rpc.*;
 import haxeon.wire.MessagePack;
 import haxeon.wire.MessagePackFrame;
 import workspace.service.WorkspaceProtocol;
+import workspace.service.WorkspaceTerminalProtocol;
 
 /** Frozen independent MessagePack vectors: both bytes and semantic decode are checked. */
 class RpcCompatibilityTests {
@@ -56,6 +57,14 @@ class RpcCompatibilityTests {
 		require(WorkspaceProtocol.IDENTITY.encodeResponse(identity).compare(identityBytes) == 0, "Identity response vector changed");
 		var identified = WorkspaceProtocol.IDENTITY.decodeResponse(identityBytes);
 		require(identified.workspace == "w" && identified.root == "/w" && identified.instance == "i", "Identity decode changed");
+		var target:TerminalTarget = {workspace:"w",instance:"i",id:"t"};
+		require(WorkspaceTerminalProtocol.TERMINATE.encodeRequest(target).compare(bytes("8301a17702a16903a174"))==0,"Terminal target vector changed");
+		var terminalRead:TerminalRead = {workspace:"w",instance:"i",id:"t",offset:haxe.Int64.make(1,2)};
+		var terminalReadBytes=bytes("8401a17702a16903a17404d30000000100000002");
+		require(WorkspaceTerminalProtocol.OUTPUT.encodeRequest(terminalRead).compare(terminalReadBytes)==0,"Terminal byte-offset vector changed");
+		require(WorkspaceTerminalProtocol.OUTPUT.decodeRequest(terminalReadBytes).offset==haxe.Int64.make(1,2),"64-bit terminal offset truncated");
+		var terminalInput:TerminalInput={workspace:"w",instance:"i",id:"t",sequence:1,data:bytes("0001")};
+		require(WorkspaceTerminalProtocol.INPUT.encodeRequest(terminalInput).compare(bytes("8501a17702a16903a174040105c4020001"))==0,"Terminal binary input vector changed");
 		var snapshot:WorkspaceSnapshot = {
 			epoch: "e",
 			cursor: 0,

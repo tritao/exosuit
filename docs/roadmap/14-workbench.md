@@ -133,6 +133,17 @@ lifecycle transitions, transactions, rollback, event trimming).
 
 ## M14.3 — Headless agent daemon
 
+Delivered first terminal slice: the Linux desktop attaches folder-scoped terminals
+through typed RPC to daemon-owned PTYs. Saved IDs restore the same shell across
+window shutdown; ongoing shell execution retains the daemon. Explicit termination,
+read/control grants, bounded byte replay, input ambiguity fencing and VT response
+ownership are implemented. Source startup separates compilation from the lock-owning
+runtime, and PTY child descriptors are isolated in NativeKit. Real client-process
+and desktop reopen fixtures cover ownership. This does not complete M14.3: durable
+history/state checkpoints, resource catalog/list/delete/reconciliation, named-group
+integration and provider supervision remain pending.
+
+
 First bootstrap delivered in `agent/haxeon.json`: a headless NativeKit loop hosts
 a durable group catalog over same-user local sockets and authenticated loopback
 WebSockets. Real Chrome Wasm32/Wasm GC clients recover a saved rename across
@@ -142,8 +153,7 @@ detached readiness and device/inode storage-replacement fencing. Linux repositor
 desktop discovery, typed identity validation and detached auto-spawn/reuse are
 delivered, including release staging of the matched daemon/manager. An idle
 catalog-only service stops after one minute without authenticated clients; explicit
-always-available mode disables that timeout. Runtime/provider supervision and
-volatile terminal mode remain open. Catalog connection limits are the stricter existing RPC.2
+always-available mode disables that timeout. Durable runtime recovery and provider supervision remain open. Catalog connection limits are the stricter existing RPC.2
 bounds documented below, not the future runtime-manager budget.
 See [WORKSPACE-RPC.md](WORKSPACE-RPC.md) for limits and test evidence.
 

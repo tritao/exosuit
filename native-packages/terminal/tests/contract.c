@@ -210,6 +210,13 @@ int main(void) {
     /* This pinned libtsm stores at most ten code points per cell. */
     REQUIRE(terminalkit_cells(unicode)[0].text_length == 19);
     terminalkit_close(unicode);
+    terminalkit_disable_checkpoints(restored);
+    REQUIRE(terminalkit_checkpoint_size(restored) == 0);
+    REQUIRE(!terminalkit_checkpoint(restored, checkpoint, size, &written));
+    REQUIRE(!terminalkit_restore(restored, checkpoint, size));
+    REQUIRE(feed(restored, "\x1b[Hlive") >= 0);
+    terminalkit_snapshot(restored);
+    REQUIRE(strstr((const char*)terminalkit_text(restored), "live") != NULL);
     terminalkit_close(restored);
     terminalkit_close(kit);
     free(checkpoint);

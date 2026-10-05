@@ -3,6 +3,8 @@ package workspace.transport;
 import haxeon.rpc.*;
 import workspace.service.WorkspaceService;
 import workspace.service.WorkspaceProtocol;
+import workspace.service.WorkspaceTerminals;
+import workspace.service.WorkspaceTerminalProtocol;
 
 private typedef Peer = {var transport:NativeRpcTransport; var preflight:Null<SessionPreflight>; var handshake:Null<RpcHandshake>; var connection:Null<RpcConnection>;}
 
@@ -11,6 +13,7 @@ class WorkspaceRpcServer {
 	final service:WorkspaceService;
 	final clock:Void->Float;
 	final identity:Null<WorkspaceIdentity>;
+	final terminals:Null<WorkspaceTerminals>;
 	final peers:Array<Peer> = [];
 
 	public final options:RpcPeerOptions;
@@ -24,8 +27,9 @@ class WorkspaceRpcServer {
 		return count;
 	}
 
-	public function new(service:WorkspaceService, clock:Void->Float, ?capabilities:Array<String>, ?identity:WorkspaceIdentity) {
+	public function new(service:WorkspaceService, clock:Void->Float, ?capabilities:Array<String>, ?identity:WorkspaceIdentity, ?terminals:WorkspaceTerminals) {
 		this.service = service;
+		this.terminals = terminals;
 		this.clock = clock;
 		this.identity = identity == null ? null : {workspace: identity.workspace, root: identity.root, instance: identity.instance};
 		if (identity != null && (identity.workspace != service.id || identity.root.length == 0 || identity.instance.length == 0))
@@ -33,6 +37,10 @@ class WorkspaceRpcServer {
 		var defaults = [WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS, WorkspaceProtocol.WRITE];
 		if (identity != null)
 			defaults.push(WorkspaceProtocol.IDENTITY_CAPABILITY);
+		if (terminals != null) {
+			defaults.push(WorkspaceTerminalProtocol.READ);
+			defaults.push(WorkspaceTerminalProtocol.CONTROL);
+		}
 		options = new RpcPeerOptions("exosuit-agent/1", capabilities == null ? defaults : capabilities, [], 5000, 262144, 32, 1048576);
 	}
 
@@ -108,6 +116,7 @@ class WorkspaceRpcServer {
 							context.respond({workspace: currentIdentity.workspace, root: currentIdentity.root, instance: currentIdentity.instance});
 						});
 					service.bind(peer.connection, grants);
+					if (terminals != null) terminals.bind(peer.connection, grants);
 				}
 			}
 			if (peer.connection != null)

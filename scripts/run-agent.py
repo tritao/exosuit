@@ -232,14 +232,33 @@ def main():
             with socket.socket() as probe:
                 probe.bind(('127.0.0.1', 0))
                 port = probe.getsockname()[1]
-        haxeon = os.environ.get('HAXEON_BIN', str(Path(os.environ.get('HAXEON_ROOT', str(REPO.parent / 'haxeon'))) / 'scripts/haxeon'))
+        haxeon_root = Path(os.environ.get('HAXEON_ROOT', str(REPO.parent / 'haxeon'))).resolve()
+        haxeon = os.environ.get('HAXEON_BIN', str(haxeon_root / 'scripts/haxeon'))
         compiler_mode = ['--self-hosted'] if os.environ.get('HAXEON_SELF_HOSTED') == '1' else []
         daemon_args = [str(address), str(port), str(credential), secrets.token_hex(16), str(database), str(root), generation, str(0 if args.always_available else args.idle_seconds * 1000)]
         bundled_runner = Path(__file__).resolve().with_name('exosuit-agent')
         if bundled_runner.is_file():
             command = [str(bundled_runner), *daemon_args]
         else:
-            command = [haxeon, 'run', '--project', str(REPO / 'agent/haxeon.json'), *compiler_mode, '--', *daemon_args]
+            # Compiler workers may outlive the build and start their own session.
+            # Never expose the workspace lifetime lock to the build process tree.
+            child = subprocess.Popen([haxeon, 'build', '--project', str(REPO / 'agent/haxeon.json'), *compiler_mode], cwd=root, start_new_session=True)
+            deadline = time.monotonic() + 90
+            while child.poll() is None:
+                if stopping:
+                    return 0
+                if time.monotonic() >= deadline:
+                    raise RuntimeError('Workspace daemon build timed out')
+                time.sleep(0.05)
+            if child.returncode != 0:
+                raise RuntimeError(f'Workspace daemon build failed with status {child.returncode}')
+            child = None
+            output = REPO / 'agent/build/host'
+            libraries = [haxeon_root / 'out', haxeon_root / '.tools/hashlink']
+            libraries.extend(sorted(path for path in (output / 'native').iterdir() if path.is_dir()))
+            existing = os.environ.get('LD_LIBRARY_PATH')
+            os.environ['LD_LIBRARY_PATH'] = ':'.join(str(path) for path in libraries) + (':' + existing if existing else '')
+            command = [str(haxeon_root / '.tools/hashlink/hl'), str(output / 'main.hl'), *daemon_args]
         # The child inherits the lifetime lock: killing the manager alone cannot unlock a live daemon.
         child = subprocess.Popen(command, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True, pass_fds=(lock,))
         with selectors.DefaultSelector() as selector:

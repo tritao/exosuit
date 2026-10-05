@@ -95,13 +95,18 @@ class GraphicalMain {
 		var app:Null<ExosuitApp> = null;
 		var session = DesktopUiHost.open(host, function(context) {
 			var dark = prefersDark(themeChoice);
+			var workspaceClient:Null<workspace.client.LocalWorkspaceClient> = null;
 			var instance = new ExosuitApp(context.fonts, ExosuitPalette.theme(dark), context,
 				openPaths.length == 0 ? null : openPaths[0], null,
-				new NativeDesktopServices(context), dark, ui.TerminalPane.open);
+				new NativeDesktopServices(context), dark, ui.TerminalPane.open,
+				Sys.systemName() == "Linux" ? function(id,cwd,restored,requestFrame,palette)
+					return ui.TerminalPane.openRemote(function() return workspaceClient,id,cwd,restored,requestFrame,palette) : null);
 			if (Sys.systemName() == "Linux") {
-				try
-					instance.attachWorkspace(new workspace.client.LocalWorkspaceClient(context.events, instance.application.processes,
-						workspace.client.LocalWorkspaceClient.findLauncher(), function() return NativeKit.nk_time_seconds() * 1000))
+				try {
+					workspaceClient = new workspace.client.LocalWorkspaceClient(context.events, instance.application.processes,
+						workspace.client.LocalWorkspaceClient.findLauncher(), function() return NativeKit.nk_time_seconds() * 1000);
+					instance.attachWorkspace(workspaceClient);
+				}
 				catch (failure:Dynamic)
 					instance.application.reportError("workspace", Std.string(failure));
 			}

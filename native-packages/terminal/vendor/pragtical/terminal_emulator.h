@@ -49,6 +49,8 @@ int terminal_emulator_feed(
   size_t length
 );
 /* Checkpoints are versioned, little-endian emulator state snapshots. */
+/* Permanently disables checkpoint recording without changing live VT state. */
+void terminal_emulator_disable_checkpoints(terminal_emulator_t* emulator);
 size_t terminal_emulator_checkpoint_size(terminal_emulator_t* emulator);
 int terminal_emulator_checkpoint(
   terminal_emulator_t* emulator,

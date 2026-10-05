@@ -59,3 +59,19 @@ JSON is a diagnostic representation and does not redefine these MessagePack byte
 
 These are frozen vectors for the first catalog schema, not a promise that new
 terminal/file/provider schemas already exist. Future schemas add their own vectors.
+
+
+## Terminal records
+
+The native and both portable Wasm fixtures freeze these independently specified
+MessagePack vectors (workspace `w`, instance `i`, terminal `t`):
+
+- Target: `8301a17702a16903a174`.
+- Output request at Int64 offset 4294967298:
+  `8401a17702a16903a17404d30000000100000002`.
+- Input sequence 1 with binary bytes 00 01:
+  `8501a17702a16903a174040105c4020001`.
+
+Terminal methods use IDs 110–114; field IDs are permanent in
+`WorkspaceTerminalProtocol.hx`. These vectors extend the catalog compatibility
+fixtures without changing existing method or field identities.

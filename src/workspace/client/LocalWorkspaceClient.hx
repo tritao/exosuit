@@ -9,6 +9,7 @@ import NativeKitEvents;
 import workspace.transport.NativeRpcHub;
 import workspace.transport.NativeRpcConnector;
 import workspace.service.WorkspaceProtocol;
+import workspace.service.WorkspaceTerminalProtocol;
 import workspace.service.WorkspaceReplica;
 
 @:wire typedef LocalWorkspaceEndpoint = {@: id(1) var version: Int;
@@ -73,6 +74,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment {
     && client != null && client.current() != null && replica != null && replica.ready;
 
   public function view():Array < WorkspaceGroup > return ready && replica != null ? replica.view() :[];
+
+  public function rpc():Null<RpcConnection> return ready && client != null ? client.current() : null;
 
   public function failure():Null < String > return error;
 
@@ -178,13 +181,16 @@ class LocalWorkspaceClient implements WorkspaceAttachment {
     instance = expectedInstance;
     verified = false;
     if (replica == null) replica = new WorkspaceReplica("workspace", 2000);
-    var caps = [WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS, WorkspaceProtocol.IDENTITY_CAPABILITY];
+    var required = [WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS, WorkspaceProtocol.IDENTITY_CAPABILITY];
+    var caps = required.copy();
+    caps.push(WorkspaceTerminalProtocol.READ);
+    caps.push(WorkspaceTerminalProtocol.CONTROL);
     deadline = clock() + 12000;
     client = new RpcClient(new NativeRpcConnector(hub,
       NativeRpcHub.local(endpoint.socket)), clock, function() return Math.random(), new RpcPeerOptions(
         "exosuit-editor/1",
         caps,
-        caps,
+        required,
         2000,
         262144,
         32,

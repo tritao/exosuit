@@ -189,6 +189,9 @@ void terminalkit_scrollback(terminalkit_handle *kit, int position, int *current,
     terminal_emulator_scrollback(kit->emulator, position, current, total);
     if (position >= 0 && current && *current != before) kit->dirty = 1;
 }
+void terminalkit_disable_checkpoints(terminalkit_handle *kit) {
+    if (kit) terminal_emulator_disable_checkpoints(kit->emulator);
+}
 uint64_t terminalkit_checkpoint_size(terminalkit_handle *kit) {
     return kit ? (uint64_t)terminal_emulator_checkpoint_size(kit->emulator) : 0;
 }

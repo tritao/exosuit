@@ -54,12 +54,12 @@ sed -n '31,42p' "$root_dir/native-packages/sqlite/vendor/sqlite3.c" > "$stage/li
 mkdir -p "$stage/licenses/seti"
 cp "$root_dir/graphical/assets/seti/LICENSE.txt" "$root_dir/graphical/assets/seti/ThirdPartyNotices.txt" "$root_dir/graphical/assets/seti/SOURCE.txt" "$stage/licenses/seti/"
 # Preserve native dependency notices with their original names and hierarchy.
-for toolkit in nativekit uikit; do
+for toolkit in nativekit uikit exosuit/native-packages/terminal; do
 	while IFS= read -r -d '' notice; do
 		relative=${notice#"$materia_root/"}
 		mkdir -p "$stage/licenses/$(dirname "$relative")"
 		cp "$notice" "$stage/licenses/$relative"
-	done < <(find "$materia_root/$toolkit/vendor" -type f -iname '*license*' -print0)
+	done < <(find "$materia_root/$toolkit/vendor" -type f \( -iname '*license*' -o -iname 'copying*' \) -print0)
 done
 printf 'exosuit=%s\n' "$(git -C "$root_dir" rev-parse HEAD)" > "$stage/REVISIONS"
 cat "$lock" >> "$stage/REVISIONS"

@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "package": {
+    "name": "exosuit-workspace-terminals-test"
+  },
+  "entry": "app.TerminalRpcTestMain",
+  "sourceRoots": [
+    "src"
+  ],
+  "scopeSourceRoots": false,
+  "dependencies": {
+    "exosuit-agent": {
+      "path": "../../agent"
+    },
+    "pragtical_hx": {
+      "path": "../.."
+    }
+  },
+  "target": "host",
+  "outputDir": "build"
+}

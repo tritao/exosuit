@@ -96,6 +96,7 @@ class ExosuitApp implements DesktopUiApplication {
 	final editorPanes:Map<Int, EditorPane> = new Map();
 	var nextTerminalId:Int = 1;
 	var pendingTerminalFocus:Bool = false;
+	final createWorkspaceTerminal:Null<(String, String, Bool, Void->Void, TerminalPalette)->TerminalPanel>;
 	final createTerminal:Null<(String, Void->Void, TerminalPalette)->TerminalPanel>;
 	public var searchPanel(default, null):WorkspaceSearchPanel;
 	public final filesScroll = new nativekit.ui.widgets.scroll.ScrollController();
@@ -120,8 +121,10 @@ class ExosuitApp implements DesktopUiApplication {
 
 	public function new(?fonts:FontCollection, ?theme:Theme, ?hostContext:UiHostContext,
 			?openPath:String, ?capabilities:HostCapabilities, ?fileDialogs:HostFileDialogs,
-			?dark:Bool, ?createTerminal:(String, Void->Void, TerminalPalette)->TerminalPanel) {
+			?dark:Bool, ?createTerminal:(String, Void->Void, TerminalPalette)->TerminalPanel,
+			?createWorkspaceTerminal:(String, String, Bool, Void->Void, TerminalPalette)->TerminalPanel) {
 		this.createTerminal = createTerminal;
+		this.createWorkspaceTerminal = createWorkspaceTerminal;
 		this.capabilities = capabilities == null ? HostCapabilities.desktop() : capabilities;
 		this.hostContext = hostContext;
 		darkPalette = dark == null ? true : dark;
@@ -244,8 +247,8 @@ class ExosuitApp implements DesktopUiApplication {
 			requestFrame();
 		});
 		application.session.start();
-		if (dock.isOpen("terminal") && host.panelTerminals.length == 0) openTerminal();
 		if (openPath != null) openArgument(openPath);
+		if (dock.isOpen("terminal") && host.panelTerminals.length == 0) openTerminal();
 	}
 
 	function makeDock():DockWorkspaceModel {
@@ -323,18 +326,27 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function newTerminalTab():Null<UiTerminalTab> {
 		var number = nextTerminalId++;
-		return restoreTerminalTab("terminal-" + number, "Terminal " + number,
-			explorerRoot == null ? Sys.getCwd() : explorerRoot);
+		var id = "terminal-" + number;
+		if (createWorkspaceTerminal != null && application.workspace.activeProject != null)
+			id = workspace.client.LocalTerminalIds.create(number);
+		return createTerminalTab(id, "Terminal " + number,
+			explorerRoot == null ? Sys.getCwd() : explorerRoot, false);
 	}
 
-	function restoreTerminalTab(id:String, title:String, cwd:String):Null<UiTerminalTab> {
+	function restoreTerminalTab(id:String, title:String, cwd:String):Null<UiTerminalTab>
+		return createTerminalTab(id,title,cwd,true);
+
+	function createTerminalTab(id:String, title:String, cwd:String, restored:Bool):Null<UiTerminalTab> {
 		var create = createTerminal;
 		if (create == null) return null;
 		var number = StringTools.startsWith(id, "terminal-") ? Std.parseInt(id.substring(9)) : null;
 		if (number != null && number >= nextTerminalId) nextTerminalId = number + 1;
 		var directory = FileSystem.exists(cwd) && FileSystem.isDirectory(cwd) ? cwd : Sys.getCwd();
 		try {
-			return new UiTerminalTab(id, title, cwd, create(directory, requestFrame, terminalPalette));
+			var remote = createWorkspaceTerminal;
+			var panel = remote != null && StringTools.startsWith(id,"workspace-terminal-") ?
+				remote(id,cwd,restored,requestFrame,terminalPalette) : create(directory,requestFrame,terminalPalette);
+			return new UiTerminalTab(id, title, cwd, panel);
 		} catch (error:Dynamic) {
 			statusMessage = "Terminal: " + Std.string(error);
 			return null;
@@ -367,15 +379,8 @@ class ExosuitApp implements DesktopUiApplication {
 	function toggleTerminal():Void {
 		if (dock.isOpen("terminal")) {
 			dock.close("terminal");
-			closePanelTerminals();
 			requestFrame();
 		} else openTerminal();
-	}
-
-	function closePanelTerminals():Void {
-		for (terminal in host.panelTerminals) terminal.dispose();
-		host.panelTerminals.resize(0);
-		host.activePanelTerminalIndex = -1;
 	}
 
 	function terminalPanel():View {
@@ -461,6 +466,12 @@ class ExosuitApp implements DesktopUiApplication {
 			ui.commands.register(new Command("view.terminal", "Toggle Terminal", toggleTerminal,
 				new Shortcut(96 /* ` */, UiModifier.Control)));
 		if (capabilities.supports(Processes)) {
+			ui.commands.register(new Command("terminal:terminate", "Terminate Active Terminal", function() {
+				var active = host.activeTab();
+				var terminal = active == null ? null : UiEditorTabs.terminal(active);
+				if (terminal == null) terminal = host.activePanelTerminal();
+				if (terminal != null) { terminal.panel.terminate(true); requestFrame(); }
+			}));
 			application.commands.add("terminal:move-to-editor", function(_) moveTerminalToEditor(),
 				function(_) return host.activePanelTerminal() != null);
 			application.commands.add("terminal:move-to-panel", function(_) moveTerminalToPanel(),
@@ -684,11 +695,11 @@ class ExosuitApp implements DesktopUiApplication {
 			requestFrame();
 		visibleNotification = host.getNotifications().current();
 		ui.buildContext.environment.scrollbarVisibility = host.scrollbarVisibility;
-		if (!dock.isOpen("terminal")) closePanelTerminals();
 		for (terminal in host.allTerminalTabs()) {
 			if (terminal.disposed) continue;
 			try { terminal.panel.poll(); } catch (error:Dynamic) {
 				statusMessage = "Terminal: " + Std.string(error);
+				if (StringTools.startsWith(terminal.id,"workspace-terminal-")) { requestFrame(); continue; }
 				terminal.dispose();
 				host.detachTerminal(terminal);
 				var index = host.panelTerminals.indexOf(terminal);
@@ -735,6 +746,7 @@ class ExosuitApp implements DesktopUiApplication {
 			paletteCommandCount: ui.commands.ids().length,
 			errors: [for (entry in application.errors.entries) {source: entry.source, message: entry.message}],
 			plugins: application.plugins.enabledIds(),
+			terminalIds: [for (terminal in host.allTerminalTabs()) terminal.id],
 			terminal: panel == null ? "closed" : panel.status(),
 			terminalColumns: panel == null ? 0 : panel.columns(),
 			terminalRows: panel == null ? 0 : panel.rows()
