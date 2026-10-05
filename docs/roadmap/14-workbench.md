@@ -43,7 +43,9 @@ Keep encoding, transport and service semantics separate:
 
 Remote web/Android clients connect through an authenticated HTTPS/WebSocket
 boundary to this same service. Project file browsing/watching, persistent
-terminals and agent resources are service modules. Device UI state stays local.
+terminals and agent resources are service modules. The
+[filesystem API plan](WORKSPACE-FILES.md) specifies root-scoped reads, revisions,
+watch recovery and search. Device UI state stays local.
 Codex's own protocol remains behind its provider adapter. Standalone browser
 mode remains available without a server; connected capabilities are negotiated
 with the service. Remote deployment and mobile acceptance are tracked in

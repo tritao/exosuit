@@ -115,6 +115,9 @@ Deployment/publication requires separate authorization under EXECUTION.md.
 
 ## M16.2 — Files, agents and terminals in the web build
 
+- [ ] Deliver [filesystem protocol F1–F5](WORKSPACE-FILES.md): typed root-relative
+  addressing, coherent revision-checked reads, paginated directories, recoverable
+  watches and cancellable file/content search through the shared service.
 - [ ] Browse allowed project roots and view saved files with bounded reads,
   paginated listings, syntax display and change notifications. Handle path
   traversal/symlinks under the service's workspace access policy.

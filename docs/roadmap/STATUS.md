@@ -2,6 +2,21 @@
 
 Last updated: 2026-10-05.
 
+## Workspace filesystem API — read/watch/search plan, 2026-10-05
+
+Added WORKSPACE-FILES.md and linked M14/M16. Defines root-relative typed
+addressing, per-operation grants, race-resistant path containment, paginated
+listings, opaque revision/epoch tokens, bounded owner-scoped read handles,
+watch cursor recovery and cancellable file/content search. Initial view shows
+saved files, not desktop unsaved drafts. Streaming reads must prove coherent
+content or fail explicitly; read handles alone are not immutable snapshots.
+
+F1–F5 acceptance includes symlink swaps/revocation, concurrent and preserved-mtime
+writes, multibyte chunks, watcher overflow/restart/replay gaps, search budgets
+and Unicode coordinates, plus native/browser integration. File writes remain
+outside initial scope. Reuses existing filesystem/index/search/watch engines;
+no implementation or runtime acceptance is claimed. Documentation diff checked.
+
 ## M16 relay selection — Cloudflare Workers free tier, 2026-10-05
 
 User selects Cloudflare Workers for the relay plan. M16 now specifies a thin
