@@ -2,6 +2,22 @@
 
 Last updated: 2026-10-05.
 
+## Haxeon RPC delivery plan — reconnect included, 2026-10-05
+
+Recorded the agreed RPC scope in HAXEON-RPC.md and linked it from M14 and the
+roadmap index. RPC.1 includes typed calls, deferred handlers, deadlines,
+cancellation, bounded dispatch, connection generations, handshake and reconnect
+with backoff/jitter. Explicit resumable subscription hooks use application-owned
+cursors. Exosuit demonstrates durable replay/snapshot fallback and operation-id
+reconciliation after lost mutation replies. No automatic mutation resend or
+exactly-once delivery claim. Explicit close disables reconnect.
+
+Later slices add real transport qualification, generation over proven method
+descriptors, and bounded streaming/buffer ownership. General RPC mechanics go
+in Haxeon; authentication policy, workspace persistence and provider semantics
+remain outside the core. Implementation is pending. Documentation diff checked;
+no runtime tests or shared builds were needed for this plan-only change.
+
 ## M14 protocol ownership — Haxeon wire, 2026-10-05
 
 User removes Pragtical agent dependency; it is reference input only. Updated

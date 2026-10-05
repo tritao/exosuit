@@ -68,6 +68,10 @@ onto Haxeon, NativeKit and UIKit; Lua code is not reused.
 | M14 | [Workbench](14-workbench.md) | M11–M13 | Workspaces, terminals, Claude Code and Codex agent supervision |
 | M15 | [Web target](15-web.md) | M8.1, M8.2 | Browser build with capability guards |
 
+M14 uses the [Haxeon RPC foundation plan](HAXEON-RPC.md): typed wire codecs,
+bounded dispatch and reconnect in the first slice, with Exosuit-owned durable
+replay and mutation reconciliation.
+
 Ready-work order: M8 → M15 → M9 → M10 → M11 → M13 → M12 → M14. The web
 target comes right after the baseline, to use the current Haxeon wasm work
 (materia `app/web`). M11 and M13 are independent of M9, M10 and M15, so they

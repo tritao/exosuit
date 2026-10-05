@@ -8,6 +8,10 @@ disabled or the agent is missing.
 
 ## Protocol and client boundary
 
+The [Haxeon RPC plan](HAXEON-RPC.md) supplies typed calls, bounded dispatch
+and connection lifecycle, including reconnect from the first delivery. Exosuit
+owns operation deduplication, durable replay and resource reconciliation.
+
 Use Haxeon's `haxeon.wire` typed codecs for shared protocol records. Define
 `@:wire` records with permanent `@:id` field identities in a shared package
 used by the headless agent and desktop/browser clients. Use MessagePack as
@@ -30,7 +34,8 @@ Keep encoding, transport and service semantics separate:
   Validate required identifiers and domain constraints after decoding: missing
   scalar fields otherwise receive codec defaults.
 - Apply protocol-specific byte/container/depth limits, bounded queues and work
-  budgets. Haxeon wire supplies serialization, not RPC, auth or backpressure.
+  budgets. Haxeon wire supplies serialization; the planned Haxeon RPC layer supplies
+  calls/reconnect/backpressure, while service adapters enforce authentication.
 - The current frame pack/unpack helpers allocate and copy payloads. Initially
   use the verified helpers; add reusable generic slice/stream APIs in Haxeon
   if measurements justify them, with explicit buffer lifetimes. Do not claim
@@ -46,6 +51,8 @@ follow-on milestone beyond the existing standalone M15 gates.
 
 ## M14.1 — Shared protocol, client and initial service
 
+- [ ] Deliver Haxeon RPC.1 with an Exosuit consumer, including reconnect,
+  explicit subscription recovery and lost-reply mutation reconciliation.
 - [ ] Define and test the shared schemas, hello/capability negotiation,
   requests/responses/events, errors and bounded local transport assembly.
 - [ ] Build an async client with cancellable requests, a 10 s default timeout,
