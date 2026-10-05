@@ -1,8 +1,8 @@
 # Haxeon typed RPC foundation
 
-Status: RPC.1 in progress; envelope, framing and bounded in-memory transport
-foundation passes native consumer tests. Dispatch, deadlines, reconnect and
-workspace integration remain pending. Required by the
+Status: RPC.1 in progress; envelopes, framing, bounded transport and typed
+asynchronous dispatch with deadlines/cancellation pass native consumer tests.
+Handshake/reconnect and workspace integration remain pending. Required by the
 Exosuit workspace service in [M14](14-workbench.md). This plan authorizes a
 small general-purpose Haxeon library, developed alongside real workspace
 methods, rather than an Exosuit-specific framework or a new serialization layer.
@@ -29,10 +29,10 @@ outside the RPC core. Codex's app-server protocol stays inside its adapter.
   error envelopes, protocol/capability negotiation and connection-scoped ids.
   Distinguish application version from framing/codec version. Capability-gate
   new enum variants; validate required values after decoding.
-- [ ] Implement typed method descriptors, client calls and handler dispatch.
+- [x] Implement typed method descriptors, client calls and handler dispatch.
   Handlers receive cancellation/deadline context and may respond asynchronously.
   Use existing asynchronous abstractions where suitable; do not block the loop.
-- [ ] Define a message transport interface and an in-memory fault-injecting
+- [x] Define a message transport interface and an in-memory fault-injecting
   transport. Local streams use bounded incremental HMPK assembly; binary
   WebSocket messages supply their own boundaries. Bound allocation before
   assembling payloads, pending calls, queued bytes and work per poll.

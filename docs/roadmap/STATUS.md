@@ -2,6 +2,65 @@
 
 Last updated: 2026-10-05.
 
+## Haxeon RPC.1 — typed asynchronous dispatch, 2026-10-05
+
+Haxeon **cb337303** adds typed `RpcMethod<Request, Response>` descriptors,
+`RpcConnection` client/server dispatch and retained asynchronous response contexts.
+The registry stores byte-oriented closures while the public APIs keep static
+request/response typing. Clock injection supplies monotonic millisecond deadlines.
+Completion is at most once; cancellation is cooperative, and expired/disconnected
+contexts cannot send late responses. The runtime never replays calls. A zero call
+id means definitely not dispatched; accepted requests retain uncertainty on
+timeout, cancellation or disconnect. Method errors distinguish unknown methods,
+overload, invalid payloads and private handler failures.
+
+Limits cover pending callers, active handlers, encoded messages, queued bytes and
+message counts, plus work in each poll direction. Handler-generated replies and
+notifications share the outgoing poll budget. One bounded incoming message can be
+held until the next byte budget. Queue overflow closes the connection rather than
+silently losing replies. Failure callback exceptions remain visible after all
+disconnect waiters are retired. Each connection is a lifetime boundary; handshake,
+reconnect, capability negotiation and application restoration are not yet wired.
+Usage and ownership are documented in Haxeon's `docs/RPC.md`; this does not claim
+zero-copy encoding or transport.
+
+Three valid-code compiler defects were reduced and fixed, without weakening RPC
+types or introducing Dynamic dispatch:
+
+- **4e55fcca**: result-annotated lambdas such as `function(value):Void` are represented
+  by parser-generated local bindings. Generic callback inference did not recognize
+  that wrapper and lost the expected parameter type. Shared lambda recognition and
+  contextual parameter resolution preserve explicit result annotations, optional
+  parameters and inferred generic results. Positive/negative, fresh and incremental
+  checks pass; the reduced positive case agrees with reference Haxe.
+- **6be72179**: lexical capture planning ignored method receivers and function
+  callees. A mutable local captured only through calls acquired storage too late,
+  losing reassignments made before that capture. The reduced RPC case returned 3
+  before the fix and 42 after it. Capture analysis now treats those bindings as
+  reads and plans their cells at declaration. Native and Wasm parity cover a
+  standalone receiver/callee reassignment fixture; immutable receivers stay direct.
+- **74b014cd**: persisted incremental builds pruned nested wire helpers by a single
+  recorded origin even when unchanged codecs still called them. The standalone
+  integration fixture fails before the fix with an unknown nested decoder call.
+  Existing transitive equality-helper retention now also covers MessagePack/JSON
+  helpers; both encodings execute correctly after editing the unrelated caller.
+
+Haxeon **a7f80cdd** separately repairs formatting in three unchanged HEAD files
+that blocked the required gate. The final normal `./scripts/test.sh` passes:
+formatting, native build, differential checks, **483 compiler/runtime cases**,
+all integrations, Wasm backend/parity and Wasmtime. Exosuit graphical build and
+the registered RPC consumer run also pass. Consumer scenarios include deferred
+responses, at-most-once completion, deadline/cancellation races, late queued replies,
+accepted reply loss, disconnect before/after dispatch, independent caller/handler
+limits, slow consumers, malformed payloads, typed events and incoming/outgoing poll
+budgets. Baseline/final logs are under `/tmp/exosuit-rpc-*`,
+`/tmp/exosuit-wire-incremental-*` and `/tmp/haxeon-rpc-full-final.log`.
+
+Next: implement a fresh version/capability handshake and explicit client lifecycle,
+bounded reconnect backoff/jitter, cancellable attempts and generation fencing; then
+Exosuit query/events plus operation-id mutation reconciliation. RPC codec fixtures
+across native/Wasm and the complete RPC.1 acceptance matrix remain pending.
+
 ## Haxeon RPC.1 — envelope and framing foundation, 2026-10-05
 
 Haxeon **b1bf3d0c** adds permanent-id typed MessagePack/JsonWire envelopes,
