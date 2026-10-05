@@ -4,10 +4,10 @@ Create a directory under `plugins/` containing `plugin.conf` and one or more Hax
 sources. The bundled example is runnable as-is:
 
 ```sh
-./scripts/run.sh
+python scripts/run.py
 ```
 
-`run.sh` discovers `plugins/*/plugin.conf`. An external manifest can be loaded
+`run.py` discovers `plugins/*/plugin.conf`. An external manifest can be loaded
 directly with `--plugin=/absolute/path/plugin.conf`, or discovered by adding its
 parent directory to the colon-separated `PRAGTICAL_PLUGIN_DIRS` environment
 variable.

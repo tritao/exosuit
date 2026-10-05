@@ -10,7 +10,7 @@ plugin_dir="$fixture/plugin"
 mkdir "$plugin_dir"
 cp "$root_dir/plugins/example/plugin.conf" "$root_dir/plugins/example/Main.hx" "$plugin_dir/"
 
-"$root_dir/scripts/build.sh"
+python3 "$root_dir/scripts/build.py"
 
 mapfile -t sources < <(find "$root_dir/src" -type f -name '*.hx' -print | LC_ALL=C sort)
 mapfile -t stdlib_sources < <(find "$haxeon_root/stdlib" -type f -name '*.hx' -print | LC_ALL=C sort)

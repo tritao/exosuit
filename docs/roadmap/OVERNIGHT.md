@@ -24,7 +24,7 @@ red has not met the goal, however many boxes are checked.
 > keep going through successive tasks. Deliver working, verified slices; do
 > not stop at another plan or at a milestone boundary. M8 comes first and is
 > mandatory: nothing later may be claimed while `./scripts/test.sh` or
-> `./scripts/build.sh` is red.
+> `python scripts/build.py` is red.
 >
 > `../pragtical` is a read-only reference, including its uncommitted diff.
 > Port behavior and tests from it; never modify it. Necessary Haxeon

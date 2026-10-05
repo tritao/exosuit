@@ -6,7 +6,7 @@ haxeon_root=${HAXEON_ROOT:-"$repo_root/../realtime-haxe"}
 fixture=$(mktemp -d)
 trap 'find "$fixture" -type f -delete; find "$fixture" -depth -type d -empty -delete' EXIT
 
-"$repo_root/scripts/build.sh"
+python3 "$repo_root/scripts/build.py"
 
 for directory in $(seq 0 99); do
 	mkdir "$fixture/directory-$directory"

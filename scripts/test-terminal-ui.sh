@@ -131,7 +131,7 @@ try:
 finally:
     termios.tcsetattr(fd, termios.TCSANOW, saved)
 SELECTION
-"$root_dir/scripts/build.sh" >/dev/null
+python3 "$root_dir/scripts/build.py" >/dev/null
 xvfb-run -a timeout 40 "$0" --drive "$fixture"
 python3 - "$fixture" <<'CHECK'
 import json, pathlib, re, sys

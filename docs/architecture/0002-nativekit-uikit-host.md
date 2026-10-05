@@ -36,7 +36,7 @@ separate build manifests**:
 - Dependencies: headless core (`pragtical_hx`), UIKit, EditorKit, native UIKit
   toolkit (`exosuit-ui-native`)
 - Provides: Complete editor shell with docking workspace, tabs, text editing
-- Built via: `scripts/build.sh` and `scripts/run.sh`
+- Built via: `python scripts/build.py` and `python scripts/run.py`
 
 This split was a deliberate deviation from the literal instruction to switch
 the root manifest's own entry: doing that would have required every test

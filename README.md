@@ -30,12 +30,20 @@ The browser build still uses Materia’s SceneKit and browser build helpers.
 package manifests remain pinned to the submodule sources.
 
 ```sh
-./scripts/build.sh
-./scripts/run.sh [file or directory]
+python scripts/build.py
+python scripts/run.py [file or directory]
+```
+
+On Windows, point `HAXEON_BIN` to the native Haxeon executable:
+
+```powershell
+$env:HAXEON_BIN = 'C:\path\to\haxeon.exe'
+python scripts/build.py
+python scripts/run.py
 ```
 
 The graphical workbench follows the system light/dark preference on launch.
-Use `./scripts/run.sh --theme=dark` or `--theme=light` to override it.
+Use `python scripts/run.py --theme=dark` or `--theme=light` to override it.
 When no folder is open, the Explorer collapses to an Open Folder rail.
 
 The graphical application builds from `graphical/haxeon.json` (entry

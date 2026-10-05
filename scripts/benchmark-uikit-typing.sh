@@ -63,7 +63,7 @@ cleanup() {
 }
 trap cleanup EXIT
 # The decoration test builds a separate app; always refresh this measured app.
-"$root_dir/scripts/build.sh" > "$fixture/build.log" 2>&1
+python3 "$root_dir/scripts/build.py" > "$fixture/build.log" 2>&1
 python3 - "$fixture" "$root_dir" <<'PY_BUILD'
 import hashlib, json, pathlib, subprocess, sys
 fixture, source = map(pathlib.Path, sys.argv[1:])

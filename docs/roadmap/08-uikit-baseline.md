@@ -57,13 +57,13 @@ string all round-trip unchanged.
   source update and converged bootstrap; both actual UIKit builds pass. See
   STATUS for classification rather than claiming invented reducers.
 - [x] Make reference and self-hosted builds agree. Then remove the divergent
-  `HAXEON_SELF_HOSTED` defaults from `test.sh` and `build.sh`, or document a
+  `HAXEON_SELF_HOSTED` defaults from `test.sh` and `build.py`, or document a
   remaining unrelated reason.
 - [x] Fix the action-directory creation race in Haxeon's executor and drop the
   `mkdir -p` sidestep.
 
-Acceptance: `./scripts/build.sh` and `./scripts/test.sh` pass with both compiler
-modes. Haxeon's own `./scripts/test.sh` passes.
+Acceptance: `python scripts/build.py` and `./scripts/test.sh` pass with both
+compiler modes. Haxeon's own `./scripts/test.sh` passes.
 
 ## M8.3 — Restore release and integration gates
 

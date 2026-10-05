@@ -17,31 +17,31 @@ qualified by the standalone release gate.
 Build the graphical application:
 
 ```sh
-./scripts/build.sh
+python scripts/build.py
 ```
 
 Run the application:
 
 ```sh
-./scripts/run.sh [project-directory] [file ...]
+python scripts/run.py [project-directory] [file ...]
 ```
 
-The launcher enables native crash core dumps up to the shell's hard limit.
-On Linux with systemd-coredump, inspect them with `coredumpctl list` and
+On Linux, the launcher enables native crash core dumps up to the inherited hard
+limit. With systemd-coredump, inspect them with `coredumpctl list` and
 `coredumpctl debug <PID>`. Caught application errors that shut down normally
 do not produce a core dump.
 
 For example:
 
 ```sh
-./scripts/run.sh .
-./scripts/run.sh . src/app/Main.hx
+python scripts/run.py .
+python scripts/run.py . src/app/Main.hx
 ```
 
 To pass additional arguments, append them:
 
 ```sh
-./scripts/run.sh --smoke-frames=60 --capture-dir=/tmp myfile.txt
+python scripts/run.py --smoke-frames=60 --capture-dir=/tmp myfile.txt
 ```
 
 ## Development
@@ -49,7 +49,7 @@ To pass additional arguments, append them:
 For iterative development, rebuild and rerun:
 
 ```sh
-./scripts/build.sh && ./scripts/run.sh
+python scripts/build.py && python scripts/run.py
 ```
 
 ## Headless tests (no UI, no window)
