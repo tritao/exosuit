@@ -2,6 +2,29 @@
 
 Last updated: 2026-10-05.
 
+## M14 scope — Codex shared app-server provider, 2026-10-05
+
+User overrides the original Claude-only scope: Codex is required alongside
+Claude Code in M14.4; only opencode remains deferred. README and M14 now agree.
+Read the official app-server protocol documentation and verified installed
+`codex-cli 0.160.0` help for daemon management, stdio proxy, shared agent
+browsing and remote attachment. Generated its stable JSON schema under
+`/tmp/exosuit-codex-protocol-0160`; confirmed thread/turn methods, status
+notifications and approval request types. No daemon was started, stopped or
+restarted; no existing Codex thread was modified and no inference was run.
+
+Design: the Workbench agent owns a provider connection and local projection;
+Codex owns its daemon and thread history. Use structured protocol events for
+status, approvals and conversation UI, with thread identity persisted for
+recovery. Resource stop interrupts its turn, never the shared daemon. Define
+provider-specific read cursors and reconciliation after ambiguous prompt
+submission. Verify multi-client approval ownership and subscriber lifetime
+before claiming active work survives client disconnect.
+
+This is a researched plan change, not implemented M14 functionality. Provider
+acceptance includes fake protocol tests and opt-in real daemon/reconnect tests.
+M10.2 and the existing terminal/control-plane prerequisites remain pending.
+
 ## Clay clipping and persistent-state capacity, 2026-10-05
 
 - GDB captured the reported shutdown before cleanup, preserving a core in
