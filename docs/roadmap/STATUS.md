@@ -2,6 +2,21 @@
 
 Last updated: 2026-10-05.
 
+## M16 scope — existing web build first, 2026-10-05
+
+User requires remote access from the existing web build immediately, including
+away-from-home connectivity. Added M16 with browser pairing, outbound relay,
+authenticated/end-to-end encrypted workspace transport, file browsing, both
+agent providers and terminal attachment/control. Android uses the responsive
+web client first. Standalone M15 remains accepted separately; connected
+capabilities come from the service, not browser-native PTY/process support.
+
+Real cross-network relay/browser acceptance and Android suspend/network-switch
+qualification are explicit gates. Crypto protocol/library selection and browser
+key/client-delivery trust need verification before implementation. No relay
+was deployed, remote access enabled or device paired by this documentation
+change. Diff checked; implementation remains pending.
+
 ## Haxeon RPC delivery plan — reconnect included, 2026-10-05
 
 Recorded the agreed RPC scope in HAXEON-RPC.md and linked it from M14 and the

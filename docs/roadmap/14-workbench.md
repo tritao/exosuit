@@ -46,8 +46,9 @@ boundary to this same service. Project file browsing/watching, persistent
 terminals and agent resources are service modules. Device UI state stays local.
 Codex's own protocol remains behind its provider adapter. Standalone browser
 mode remains available without a server; connected capabilities are negotiated
-with the service. Remote deployment and mobile acceptance need a separate
-follow-on milestone beyond the existing standalone M15 gates.
+with the service. Remote deployment and mobile acceptance are tracked in
+[M16](16-remote-workspaces.md), using the existing web build first and including
+away-from-home relay access from initial delivery.
 
 ## M14.1 — Shared protocol, client and initial service
 

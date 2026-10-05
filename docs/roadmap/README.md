@@ -67,6 +67,7 @@ onto Haxeon, NativeKit and UIKit; Lua code is not reused.
 | M13 | [Control plane](13-control-plane.md) | M11.2 | `exosuit-ctl` and launch forwarding |
 | M14 | [Workbench](14-workbench.md) | M11–M13 | Workspaces, terminals, Claude Code and Codex agent supervision |
 | M15 | [Web target](15-web.md) | M8.1, M8.2 | Browser build with capability guards |
+| M16 | [Remote workspaces](16-remote-workspaces.md) | M14, M15, Haxeon RPC | Existing web build and Android browser access from anywhere |
 
 M14 uses the [Haxeon RPC foundation plan](HAXEON-RPC.md): typed wire codecs,
 bounded dispatch and reconnect in the first slice, with Exosuit-owned durable

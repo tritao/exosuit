@@ -1,7 +1,9 @@
 # M15 — Web target
 
-Depends on M8.1 and M8.2. M9 and M10 are not required. M12–M14 features are
-disabled in the browser.
+Depends on M8.1 and M8.2. M9 and M10 are not required. M12–M14 native features are
+disabled in standalone browser mode. [M16](16-remote-workspaces.md) extends
+this same web build with connected workspace capabilities, including
+away-from-home access; its acceptance is separate from the M15 baseline.
 
 Reuse the pipeline from materia's reference editor rather than inventing one:
 
