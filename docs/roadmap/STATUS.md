@@ -2,6 +2,23 @@
 
 Last updated: 2026-10-05.
 
+## Haxeon package migration and sidebar overflow, 2026-10-05
+
+Merged Exosuit remote main `5906e84` while preserving the local Codex milestones.
+The app now uses its root Haxeon submodule, `haxeon.ui` and `haxeon.editor`, with
+NativeKit and UI dependencies owned by Haxeon. Haxeon remote main `b11cac26` is
+included; local `45e74313` carries the authoritative paragraph/Clay fix into the
+imported UI package and `5120b60f` adds constrained sidebar tabs and scroll-clamp
+layout feedback. Existing uncommitted key-cache changes are preserved in the
+moved package and remain uncommitted, as do the pre-existing Web manifest edits.
+
+Sidebar content clips at its pane boundary. Its tab rail scrolls horizontally
+and reveals the selected tab on selection or resize; Workbench action rows wrap.
+Editor tab reveal now runs after header geometry resolves. Narrow-pane regression
+checks clipping, hit boundaries, selection and resize; all nine native UI/Clay
+checks, the full headless suite, fake-Codex desktop flow and relocated editor/daemon
+startup with source/compiler paths disabled pass.
+
 ## M14.4 — structured conversation projection, 2026-10-05
 
 The provider now projects message, reasoning, command/output, file-change and
