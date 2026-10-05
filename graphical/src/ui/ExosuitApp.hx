@@ -739,8 +739,8 @@ class ExosuitApp implements DesktopUiApplication {
 		var editorPane = host.paneById(paneId);
 		if (editorPane == null) return welcomePanel();
 		var tabs = editorPane.tabs;
-		if (editorPane.items.length == 0) return welcomePanel();
 		pruneStaleEditorPanes(host.allViews());
+		if (editorPane.items.length == 0) return welcomePanel();
 		var items:Array<TabItem> = [];
 		var filenames:Map<String, String> = new Map();
 		for (item in editorPane.items) {

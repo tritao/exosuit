@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "package": {
+    "name": "exosuit-memory-workload"
+  },
+  "entry": "app.MemoryWorkloadMain",
+  "sourceRoots": [
+    "src"
+  ],
+  "scopeSourceRoots": false,
+  "dependencies": {
+    "exosuit-graphical": {
+      "path": "../../graphical"
+    }
+  },
+  "target": "host",
+  "outputDir": "build"
+}

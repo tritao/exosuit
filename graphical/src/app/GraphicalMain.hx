@@ -27,6 +27,8 @@ import ui.ExosuitPalette;
  */
 class GraphicalMain {
 	static function main():Int {
+		var startupMemory = Sys.getEnv("EXOSUIT_STARTUP_MEMORY_DIR");
+		if (startupMemory != null) StartupMemory.sample(startupMemory, "01-runtime");
 		Platform.startHeadless();
 		var arguments = Sys.args();
 		var pluginManifest:Null<String> = null;
@@ -66,7 +68,17 @@ class GraphicalMain {
 		var allocationProfile = Sys.getEnv("EXOSUIT_ALLOCATION_PROFILE");
 		var profileFrames = 0;
 		var reportedFirstFrame = false;
+		var memoryFrames = 0;
 		host.captureReady = function() {
+			if (startupMemory != null) {
+				memoryFrames++;
+				if (memoryFrames == 1) StartupMemory.sample(startupMemory, "03-first-frame");
+				if (memoryFrames == 20) {
+					StartupMemory.sample(startupMemory, "04-warm-startup");
+					StartupMemory.dump(startupMemory);
+					StartupMemory.sample(startupMemory, "05-after-gc-dump");
+				}
+			}
 			if (allocationProfile != null) {
 				profileFrames++;
 				// Skip warm-up and exclude serialization of capture diagnostics.
@@ -91,6 +103,7 @@ class GraphicalMain {
 			if (pluginManifest != null && !instance.application.loadPluginManifest(pluginManifest))
 				Sys.println('exosuit: could not load plugin manifest "$pluginManifest"');
 			app = instance;
+			if (startupMemory != null) StartupMemory.sample(startupMemory, "02-app-created");
 			return instance;
 		});
 		if (recordPath != null) {
