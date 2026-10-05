@@ -58,8 +58,11 @@ This is a first Codex slice: full paged history browsing, richer item renderers,
 the remaining request kinds, agent rename/move/remove, supervision CLI/wait and
 Claude are still planned. Two real shared-daemon clients initialize and query
 metadata through the WebSocket bridge; one continues querying after the other
-disconnects. Authenticated inference and active-turn lifecycle acceptance remain opt-in; deterministic fake-provider tests do not establish
-model access or real active-turn survival.
+disconnects. Opt-in real inference also passed: the same turn completed after
+both attached fixture clients disconnected, and reconnect/resume read its
+assistant response from persisted history. The first attempt refused attachment
+and cleanup interrupted only its test turn; the next fresh attempt passed. The
+initial refusal is unclassified. Desktop acceptance still uses the fake provider.
 
 ## Tests
 
@@ -72,3 +75,10 @@ Codex. Passing an installed runtime directory tests relocation.
 `python3 scripts/test-codex-shared-metadata.py` checks two clients against an
 already-running real shared daemon. It does not start the daemon, create threads
 or send inference prompts.
+
+`python3 scripts/test-codex-shared-lifecycle.py --run` opts in to one real model
+turn in an isolated read-only directory. It checks two-client attachment, active
+turn survival after both clients disconnect, same-turn recovery and persisted
+history. It sends no approval replies, never replays the prompt and never
+stops/restarts the shared daemon. Failure cleanup interrupts only its test turn.
+The persistent test thread is printed and retained for inspection.

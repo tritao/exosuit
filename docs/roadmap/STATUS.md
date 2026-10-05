@@ -38,9 +38,18 @@ external cwd refusal and SQLite thread identity. The full core suite passes,
 including native, Wasm32 and Wasm-GC wire vectors. Self-hosted provider tests pass.
 Relocated desktop checks cover conversation creation, prompts, approvals/input,
 saved tabs and view closure, plus existing terminal restoration and group cwd.
-Real authenticated inference and two-client shared Codex active-turn survival remain pending; no claim is based on
-CLI/schema inspection alone. Full history browsing, richer requests/renderers,
+Real authenticated inference and same-turn recovery after both attached clients
+disconnect pass in an isolated read-only thread; the response is read back from
+persisted history. This qualifies the real shared transport, while desktop
+automation still uses the fake provider. The first real attempt refused attachment
+and its fixture turn was interrupted during cleanup; a fresh attempt passed. The
+initial refusal remains unclassified, so this is not a reliability guarantee. Full history browsing, richer requests/renderers,
 agent metadata controls, supervision CLI/wait and Claude remain open.
+
+The opt-in `scripts/test-codex-shared-lifecycle.py --run` uses existing authentication,
+creates one persistent test thread and sends one prompt per invocation. It never
+replays a prompt or stops/restarts the shared daemon. Failure cleanup interrupts
+only the fixture turn; test threads remain available in Codex history.
 
 
 ## M14.1/M14.3 — named directory groups and Workbench tree, 2026-10-05

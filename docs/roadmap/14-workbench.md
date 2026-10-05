@@ -214,7 +214,9 @@ Its generated stable schema includes thread start/list/read/resume, turn
 start/interrupt, status notifications and server-initiated approval requests.
 The [official app-server documentation](https://learn.chatgpt.com/docs/app-server)
 covers the protocol; daemon/proxy commands are verified from local CLI help.
-Their multi-client lifecycle and reconnect behavior still need acceptance tests.
+Real two-client metadata and opt-in inference checks now pass, including same-turn
+recovery and persisted history after both fixture clients disconnect. An initial
+attachment refusal remains unclassified; see the execution ledger.
 
 Delivered first Codex slice: a daemon-owned adapter for installed CLI 0.160.0 (server 0.160.0/0.160.1) uses
 shared daemon start/proxy and per-connection initialize. Typed workspace methods
@@ -226,7 +228,7 @@ approve-once/decline, question-ID input, interruption and bounded recent-history
 reconciliation are implemented. See [provider details](../../agent/CODEX.md).
 The full provider milestone remains open: the generic registry, Claude, richer
 renderers/request kinds, full paged history, resource metadata controls,
-supervision CLI/wait and opt-in real inference/shared-daemon acceptance.
+supervision CLI/wait and broader real desktop/shared-daemon qualification.
 
 - [ ] Provider registry with the lifecycle contract (available, create,
   attach, recover, start, stop, restart, send_input, action, refresh_status,
