@@ -3,7 +3,7 @@
 # Used by relocation acceptance without publishing an archive or altering release pins.
 set -euo pipefail
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-haxeon_root=${HAXEON_ROOT:-"$root_dir/../haxeon"}
+haxeon_root=${HAXEON_ROOT:-"$root_dir/haxeon"}
 [[ $# == 1 ]] || { echo "Usage: stage-runtime.sh EMPTY_DIRECTORY" >&2; exit 1; }
 mkdir -p "$1"
 [[ -z $(ls -A "$1") ]] || { echo "Runtime stage must be empty" >&2; exit 1; }

@@ -1,3 +1,6 @@
 [submodule "native-packages/terminal/vendor/libtsm"]
 	path = native-packages/terminal/vendor/libtsm
 	url = https://github.com/tritao/libtsm.git
+[submodule "haxeon"]
+	path = haxeon
+	url = https://github.com/tritao/haxeon.git

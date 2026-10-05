@@ -3,6 +3,7 @@
 	"package": { "name": "exosuit-native-string-test" },
 	"entry": "app.NativeStringTestMain",
 	"sourceRoots": ["src"],
+	"workspace": ["../../haxeon/packages/platform", "../../haxeon/packages/gpu"],
 	"dependencies": { "pragtical_hx": { "path": "../.." } },
 	"target": "host",
 	"outputDir": "build"

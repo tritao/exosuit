@@ -18,7 +18,7 @@ args = parser.parse_args()
 if not 1 <= args.cycles <= 1000 or args.runs < 1:
     parser.error("cycles must be 1..1000 and runs must be positive")
 root = Path(__file__).resolve().parents[1]
-haxeon = Path(os.environ.get('HAXEON_ROOT', root.parent / 'haxeon'))
+haxeon = Path(os.environ.get('HAXEON_ROOT', root / 'haxeon'))
 project = root / 'tests/memory-workload'
 output = args.output.resolve()
 output.mkdir(parents=True, exist_ok=False)

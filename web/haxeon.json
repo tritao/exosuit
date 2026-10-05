@@ -226,12 +226,13 @@
     "../graphical/src/ui/UiWorkbenchHost.hx",
     "../graphical/src/ui/WorkspaceSearchPanel.hx"
   ],
+  "workspace": ["../haxeon/packages/platform", "../haxeon/packages/gpu"],
   "dependencies": {
-    "nativekit": {
-      "path": "../../nativekit"
+    "haxeon-platform": {
+      "path": "../haxeon/packages/platform"
     },
     "haxeon-ui": {
-      "path": "../../haxeon/packages/ui"
+      "path": "../haxeon/packages/ui"
     },
     "editorkit": {
       "path": "../../editorkit"

@@ -17,6 +17,8 @@ if(NOT EXISTS "${EXOSUIT_WEB_GUEST_WASM}" OR NOT EXISTS "${EXOSUIT_WEB_EXPORTS_F
     message(FATAL_ERROR "Build the browser editor with exosuit/web/build.sh, which compiles the guest first")
 endif()
 
+set(EXOSUIT_HAXEON_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../haxeon" CACHE PATH "Haxeon source directory")
+
 get_filename_component(MATERIA_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
 
 set(NK_BUILD_SHARED OFF CACHE BOOL "Emscripten links one static host" FORCE)
@@ -25,11 +27,11 @@ set(NK_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(NK_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(NK_SOKOL_BACKEND gles3 CACHE STRING "WebGL2" FORCE)
 set(NK_WEB_EXPORTED_RUNTIME_METHODS "ccall,addFunction,removeFunction" CACHE STRING "Guest callback runtime" FORCE)
-add_subdirectory("${MATERIA_SOURCE_ROOT}/nativekit" nativekit)
-set(NKUI_NATIVEKIT_DIR "${MATERIA_SOURCE_ROOT}/nativekit" CACHE PATH "NativeKit source for the UI package" FORCE)
-add_subdirectory("${MATERIA_SOURCE_ROOT}/haxeon/packages/ui" uikit)
+add_subdirectory("${EXOSUIT_HAXEON_ROOT}/vendor/nativekit" nativekit)
+set(NKUI_NATIVEKIT_DIR "${EXOSUIT_HAXEON_ROOT}/vendor/nativekit" CACHE PATH "NativeKit source for the UI package" FORCE)
+add_subdirectory("${EXOSUIT_HAXEON_ROOT}/packages/ui" uikit)
 
-set(NKSCENE_NATIVEKIT_DIR "${MATERIA_SOURCE_ROOT}/nativekit")
+set(NKSCENE_NATIVEKIT_DIR "${EXOSUIT_HAXEON_ROOT}/vendor/nativekit")
 set(NK_LIBRARY_TYPE STATIC)
 add_subdirectory("${MATERIA_SOURCE_ROOT}/scenekit/scene" scene)
 add_subdirectory("${MATERIA_SOURCE_ROOT}/scenekit/scene_render" scene_render)
@@ -44,14 +46,14 @@ set(NKUI_HAXEON_HOST_HEAP_LIMIT ${NK_WASM_HOST_HEAP_LIMIT})
 set(NKUI_HAXEON_GUEST_MEMORY_BASE ${NKUI_HAXEON_HOST_HEAP_LIMIT})
 set(NKUI_HAXEON_GUEST_MEMORY_LIMIT ${EXOSUIT_WEB_GUEST_MEMORY_LIMIT})
 set(NKUI_HAXEON_MEMORY_LIMIT ${EXOSUIT_WEB_GUEST_MEMORY_LIMIT})
-configure_file("${MATERIA_SOURCE_ROOT}/haxeon/packages/ui/cmake/wasm_memory_contract.h.in"
+configure_file("${EXOSUIT_HAXEON_ROOT}/packages/ui/cmake/wasm_memory_contract.h.in"
     "${CMAKE_CURRENT_BINARY_DIR}/nativekit_haxeon_memory_contract.h" @ONLY)
 
 add_executable(exosuit_web
     host.cpp
     "${CMAKE_CURRENT_SOURCE_DIR}/../native/headless/platform.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/../native/ffi/pragtical_hx.c"
-    "${MATERIA_SOURCE_ROOT}/haxeon/packages/ui/src/platform/wasm/haxeon_memory_contract.cpp")
+    "${EXOSUIT_HAXEON_ROOT}/packages/ui/src/platform/wasm/haxeon_memory_contract.cpp")
 target_include_directories(exosuit_web PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/../include")
 target_link_libraries(exosuit_web PRIVATE
     NativeKit::nativekit NativeKit::gpu NativeKit::ui NativeKit::scene NativeKit::scene_render

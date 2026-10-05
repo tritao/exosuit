@@ -12,13 +12,26 @@ clipboard, file dialogs, and native services.
 
 ## Build and test
 
-Install Haxeon and place this repository alongside checkouts of `nativekit`,
-`editorkit` and `haxeon` (the materia workspace layout), or set their
-paths in graphical/haxeon.json. UI, platform, and GPU libraries live under
-Haxeon’s `packages/` directory:
+Haxeon is pinned as a submodule at `haxeon`, including its UI,
+platform, GPU, and NativeKit dependencies. Initialize the submodules and
+bootstrap the compiler before building:
 
 ```sh
-cd exosuit
+git submodule update --init --recursive
+./haxeon/scripts/bootstrap-tools.sh
+(cd haxeon && ./scripts/build-native.sh)
+```
+
+EditorKit and SceneKit still come from sibling Materia directories:
+`../editorkit` and `../scenekit`. The `editorkit` symlink connects
+Haxeon's UI package to that same EditorKit checkout. Keep Exosuit in the
+Materia workspace for these dependencies and the browser build helpers.
+Manifests use Haxeon workspace entries to resolve SceneKit’s transitive
+platform and GPU dependencies from this same Haxeon checkout.
+`HAXEON_ROOT` and `HAXEON_BIN` can override the compiler used by scripts;
+package manifests remain pinned to the submodule sources.
+
+```sh
 ./scripts/build.sh
 ./scripts/run.sh [file or directory]
 ```
@@ -31,7 +44,8 @@ The graphical application builds from `graphical/haxeon.json` (entry
 `app.GraphicalMain`). Headless tests build from `haxeon.json` (entry
 `app.Main`); see `scripts/test.sh` for the test suite.
 
-For CI or reproducible builds, pin dependency versions in haxeon.json.
+Haxeon and its nested dependencies are pinned by Git submodule commits.
+Use `git submodule update --init --recursive` after pulling dependency updates.
 
 See [the NativeKit UIKit host architecture](docs/architecture/0002-nativekit-uikit-host.md).
 

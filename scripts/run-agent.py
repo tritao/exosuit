@@ -232,7 +232,7 @@ def main():
             with socket.socket() as probe:
                 probe.bind(('127.0.0.1', 0))
                 port = probe.getsockname()[1]
-        haxeon_root = Path(os.environ.get('HAXEON_ROOT', str(REPO.parent / 'haxeon'))).resolve()
+        haxeon_root = Path(os.environ.get('HAXEON_ROOT', str(REPO / 'haxeon'))).resolve()
         haxeon = os.environ.get('HAXEON_BIN', str(haxeon_root / 'scripts/haxeon'))
         compiler_mode = ['--self-hosted'] if os.environ.get('HAXEON_SELF_HOSTED') == '1' else []
         daemon_args = [str(address), str(port), str(credential), secrets.token_hex(16), str(database), str(root), generation, str(0 if args.always_available else args.idle_seconds * 1000)]

@@ -15,7 +15,7 @@ are bundled through BrowserUiFontAsset.
 
 Set `EXOSUIT_WEB_TARGET=wasm-gc` to select the GC guest. Set
 `EXOSUIT_WEB_BUILD_DIR` to keep each target's artifacts separately. The toolchain
-comes from `../haxeon` and `../nativekit/.tools/emsdk`, with `HAXEON_DIR` and
+comes from `haxeon` and `haxeon/vendor/nativekit/.tools/emsdk`, with `HAXEON_DIR` and
 `EMSDK_DIR` overrides. Guest compile errors terminate the build; stale output
 cannot qualify a failed compile.
 

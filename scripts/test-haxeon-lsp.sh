@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-haxeon_root=${HAXEON_ROOT:-"$root_dir/../haxeon"}
+haxeon_root=${HAXEON_ROOT:-"$root_dir/haxeon"}
 haxeon=${HAXEON_BIN:-"$haxeon_root/scripts/haxeon"}
 language_server=${HAXEON_LSP:-"$haxeon_root/scripts/haxeon-lsp"}
 smoke_dir=$(mktemp -d "${TMPDIR:-/tmp}/exosuit-real-lsp.XXXXXX")

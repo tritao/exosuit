@@ -7,7 +7,7 @@ class LanguageServerCommand {
 	public static function current(settings:Settings):Array<String> {
 		var bundled = ApplicationPaths.bundledLanguageServer();
 		var root = Sys.getEnv("HAXEON_ROOT");
-		if (root == null || root.length == 0) root = "../haxeon";
+		if (root == null || root.length == 0) root = "haxeon";
 		return resolve(settings.haxeonCommand, Sys.getEnv("HAXEON_LSP"), bundled,
 			FileSystem.exists(bundled) && !FileSystem.isDirectory(bundled), FileSystem.absolutePath(root));
 	}

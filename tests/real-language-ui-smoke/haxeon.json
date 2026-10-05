@@ -3,6 +3,7 @@
   "package": { "name": "exosuit-real-language-ui-smoke" },
   "entry": "app.RealLanguageUiSmokeMain",
   "sourceRoots": ["src"],
+  "workspace": ["../../haxeon/packages/platform", "../../haxeon/packages/gpu"],
   "dependencies": { "exosuit-graphical": { "path": "../../graphical" } },
   "target": "host",
   "outputDir": "build"

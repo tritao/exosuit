@@ -3,6 +3,7 @@
 	"package": { "name": "exosuit-json-rpc-transport-test" },
 	"entry": "app.JsonRpcTransportTestMain",
 	"sourceRoots": ["src"],
+	"workspace": ["../../haxeon/packages/platform", "../../haxeon/packages/gpu"],
 	"dependencies": {
 		"pragtical_hx": { "path": "../.." }
 	},

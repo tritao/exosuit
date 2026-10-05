@@ -20,10 +20,11 @@ set(NK_BUILD_TESTS OFF CACHE BOOL "Disable dependency tests in the exosuit build
 set(NK_BUILD_EXAMPLES OFF CACHE BOOL "Disable dependency examples in the exosuit build" FORCE)
 set(NKUI_ENABLE_SECTION_GC ON CACHE BOOL "Keep UIKit section garbage collection enabled" FORCE)
 
-get_filename_component(EXOSUIT_MATERIA_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
-add_subdirectory("${EXOSUIT_MATERIA_ROOT}/nativekit" nativekit)
-set(NKUI_NATIVEKIT_DIR "${EXOSUIT_MATERIA_ROOT}/nativekit" CACHE PATH "NativeKit source for the UI package" FORCE)
-add_subdirectory("${EXOSUIT_MATERIA_ROOT}/haxeon/packages/ui" uikit)
+get_filename_component(EXOSUIT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+set(EXOSUIT_HAXEON_ROOT "${EXOSUIT_ROOT}/haxeon" CACHE PATH "Haxeon source directory")
+add_subdirectory("${EXOSUIT_HAXEON_ROOT}/vendor/nativekit" nativekit)
+set(NKUI_NATIVEKIT_DIR "${EXOSUIT_HAXEON_ROOT}/vendor/nativekit" CACHE PATH "NativeKit source for the UI package" FORCE)
+add_subdirectory("${EXOSUIT_HAXEON_ROOT}/packages/ui" uikit)
 
 set(EXOSUIT_UI_RUNTIME_TARGETS nativekit nativekit_gpu nativekit_ui)
 foreach(target_name IN LISTS EXOSUIT_UI_RUNTIME_TARGETS)

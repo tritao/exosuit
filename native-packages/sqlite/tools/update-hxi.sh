@@ -2,7 +2,7 @@
 set -euo pipefail
 
 package_dir=$(cd "$(dirname "$0")/.." && pwd)
-haxeon_root=${HAXEON_ROOT:-"$package_dir/../../../haxeon"}
+haxeon_root=${HAXEON_ROOT:-"$package_dir/../../haxeon"}
 output="$package_dir/bindings/sqlitekit.hxi"
 if [[ ${1:-} == --check ]]; then
     output=$(mktemp)

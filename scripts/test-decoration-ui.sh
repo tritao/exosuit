@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-haxeon_root=${HAXEON_ROOT:-"$root_dir/../haxeon"}
+haxeon_root=${HAXEON_ROOT:-"$root_dir/haxeon"}
 fixture=$(mktemp -d)
 cleanup() {
     if [[ -n ${DECORATION_UI_ARTIFACTS:-} ]]; then

@@ -3,6 +3,7 @@
 	"package": { "name": "exosuit-configuration-test" },
 	"entry": "app.ConfigurationTestMain",
 	"sourceRoots": ["src"],
+	"workspace": ["../../haxeon/packages/platform", "../../haxeon/packages/gpu"],
 	"dependencies": {
 		"pragtical_hx": { "path": "../.." }
 	},

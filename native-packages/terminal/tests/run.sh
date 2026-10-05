@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 package_dir=$(cd "$(dirname "$0")/.." && pwd)
-haxeon_root=${HAXEON_ROOT:-"$package_dir/../../../haxeon"}
+haxeon_root=${HAXEON_ROOT:-"$package_dir/../../haxeon"}
 build_dir="$package_dir/tests/build/native"
 "$package_dir/tools/update-hxi.sh" --check
 cmake -S "$package_dir" -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Debug
