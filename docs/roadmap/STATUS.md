@@ -2,6 +2,16 @@
 
 Last updated: 2026-10-05.
 
+## Shared workspace protocol contract, 2026-10-05
+
+Recorded one compact WORKSPACE-PROTOCOL.md rather than expanding into separate
+terminal/agent specifications, per user's request to avoid overengineering.
+Defines ownership, permission checks, mutation outcome reconciliation, cursor
+recovery, terminal controller leases and uncertain input, agent approval races,
+capabilities and bounded queues. Implement with real M14 consumers; no additional
+framework or prerequisite implementation is claimed. Diff checked. Resume
+existing delivery order with M10.2 completion filtering/language shortcuts.
+
 ## Workspace filesystem API — read/watch/search plan, 2026-10-05
 
 Added WORKSPACE-FILES.md and linked M14/M16. Defines root-relative typed

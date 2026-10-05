@@ -8,6 +8,9 @@ disabled or the agent is missing.
 
 ## Protocol and client boundary
 
+Follow the compact [workspace protocol contract](WORKSPACE-PROTOCOL.md) for
+ownership, permissions, mutations, subscriptions, terminals and agents.
+
 The [Haxeon RPC plan](HAXEON-RPC.md) supplies typed calls, bounded dispatch
 and connection lifecycle, including reconnect from the first delivery. Exosuit
 owns operation deduplication, durable replay and resource reconciliation.
