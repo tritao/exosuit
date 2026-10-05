@@ -6,7 +6,7 @@ haxeon_root=${HAXEON_ROOT:-"$root_dir/haxeon"}
 # Shared compiler/native output trees require serial stages.
 (cd "$haxeon_root" && ./scripts/test.sh)
 "$root_dir/scripts/test.sh"
-"$root_dir/scripts/build.sh"
+python3 "$root_dir/scripts/build.py"
 "$root_dir/scripts/test-skribidi-layout.sh"
 "$root_dir/scripts/test-haxeon-lsp.sh"
 "$root_dir/scripts/test-real-language-ui.sh"

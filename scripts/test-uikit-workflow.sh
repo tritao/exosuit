@@ -107,7 +107,7 @@ function changed(text:String):Void {
 	}
 }
 PLUGIN
-"$root_dir/scripts/build.sh"
+python3 "$root_dir/scripts/build.py"
 xvfb-run -a "$0" --drive "$fixture" problems
 grep -qF 'return 42;' "$fixture/project/Main.hx"
 grep -qF '// UIKIT_PLUGIN_V2' "$fixture/project/Main.hx"

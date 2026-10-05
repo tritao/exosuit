@@ -32,7 +32,7 @@ done
 # historical checkout metadata left in the .tools output directory.
 (cd "$haxeon_root" && ./scripts/build-native.sh) >&2
 "$haxeon_root/.tools/haxe/haxe" --cwd "$haxeon_root" "$haxeon_root/haxeon-lsp.hxml" >&2
-"$root_dir/scripts/build.sh" >&2
+python3 "$root_dir/scripts/build.py" >&2
 "$haxeon_root/scripts/haxeon" build --project "$root_dir/agent/haxeon.json" >&2
 
 short_revision=$(git -C "$root_dir" rev-parse --short=12 HEAD)

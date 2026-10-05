@@ -123,7 +123,7 @@ contribute to the lifetime policy before those resources are delivered. Stale di
 exclusive startup, with exit 3 handled by rediscovery. Attachment uses the existing
 background poll and does not force continuous redraws.
 
-`scripts/run.sh` supplies the repository launcher; `EXOSUIT_AGENT_LAUNCHER` can
+`scripts/run.py` supplies the repository launcher; `EXOSUIT_AGENT_LAUNCHER` can
 override its path. Release staging installs the Python manager, matched daemon bytecode/runner and
 SQLite library beside the desktop runtime. The installed launcher selects its own
 manager; discovery uses the same protocol. Relocation acceptance runs without
