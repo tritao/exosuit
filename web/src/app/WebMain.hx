@@ -86,6 +86,6 @@ class WebMain {
 	}
 
 	@:expose public static function openDocumentation():Int {
-		return NativeKit.nk_shell_open_url("https://github.com/tritao/pragtical-haxeon") == Result.Ok ? 0 : 1;
+		return NativeKit.nk_shell_open_url("https://github.com/tritao/exosuit") == Result.Ok ? 0 : 1;
 	}
 }

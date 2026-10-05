@@ -286,7 +286,7 @@ def main():
       try { return {result: window.exosuit.openDocumentation(), calls}; }
       finally { window.open = previous; }
     })()""")
-    assert opened["result"] == 0 and opened["calls"] == [["https://github.com/tritao/pragtical-haxeon", "_blank", "noopener,noreferrer"]], opened
+    assert opened["result"] == 0 and opened["calls"] == [["https://github.com/tritao/exosuit", "_blank", "noopener,noreferrer"]], opened
 
     previous_origin = page.evaluate("performance.timeOrigin")
     previous_frame = page.command("Page.getFrameTree")["frameTree"]["frame"]
