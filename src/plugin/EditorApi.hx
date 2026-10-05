@@ -75,14 +75,14 @@ class EditorApi {
 	public function setStatusItemText(id:String, text:String):Bool {
 		var item = statusItems.find(owner, id);
 		if (item == null) return false;
-		item.text = text;
+		if (item.text != text) { item.text = text; statusItems.changed(); }
 		return true;
 	}
 
 	public function setPanelText(id:String, text:String):Bool {
 		var panel = panels.find(owner, id);
 		if (panel == null) return false;
-		panel.text = text;
+		if (panel.text != text) { panel.text = text; panels.changed(); }
 		return true;
 	}
 

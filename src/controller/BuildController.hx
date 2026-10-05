@@ -30,6 +30,7 @@ class BuildController {
 	final openDocument:String->View;
 	final reportError:(String, String)->Void;
 	var emptyDrains:Int = 0;
+	var activeProjectRoot:String = "";
 
 	public function new(workspace:Workspace, root:WorkbenchHost, context:CommandContext, commands:CommandRegistry, processes:ProcessManager,
 			openDocument:String->View, reportError:(String, String)->Void, available:Bool = true) {
@@ -42,6 +43,7 @@ class BuildController {
 		this.reportError = reportError;
 		root.setBuildDiagnosticHandler(activateDiagnostic);
 		if (this.available) {
+			commands.add("build:show-output", context -> root.showBuildOutput("Build Output", output));
 			commands.add("build:run-task", context -> openTaskPicker(), context -> workspace.activeProject != null);
 			commands.add("build:cancel-task", context -> cancel(), context -> active != null);
 		}
@@ -75,6 +77,7 @@ class BuildController {
 		var cwd = task.cwd.length == 0 ? project.root : StringTools.startsWith(task.cwd, "/") ? task.cwd : project.root + "/" + task.cwd;
 		try {
 			cwd = workspace.fileSystem.normalize(cwd);
+			activeProjectRoot = project.root;
 			output.reset(cwd);
 			root.getProblems().removeOwner(PROBLEM_OWNER);
 			output.append('Running ${task.name}: ${task.executable}\n');
@@ -82,6 +85,8 @@ class BuildController {
 		} catch (error:Dynamic) {
 			output.reset(project.root);
 			output.append('Could not start task: ${Std.string(error)}\n');
+			root.getProblems().replaceOwner(PROBLEM_OWNER, [feedback.Problem.scoped(PROBLEM_OWNER, "start",
+				feedback.ProblemScope.Project(project.root), "Could not start task: " + Std.string(error), 1, "Build")]);
 			reportError("build", Std.string(error));
 			return false;
 		}
@@ -114,12 +119,23 @@ class BuildController {
 
 	function syncProblems():Void {
 		var problems = root.getProblems();
-		problems.removeOwner(PROBLEM_OWNER);
+		var published:Array<feedback.Problem> = [];
+		var identities:Map<String, Int> = [];
 		for (index in 0...output.lines.length) {
 			var line = output.lines[index], diagnostic = line.diagnostic;
-			if (diagnostic != null) problems.add(new feedback.Problem(PROBLEM_OWNER, Std.string(index), diagnostic.path,
-				diagnostic.line, diagnostic.column, diagnostic.column + 1, line.text, 1));
+			if (diagnostic != null) {
+				var identity = diagnostic.path + ":" + diagnostic.line + ":" + diagnostic.column + ":" + line.text;
+				var occurrence = identities.exists(identity) ? identities.get(identity) : 0;
+				identities.set(identity, occurrence + 1);
+				published.push(new feedback.Problem(PROBLEM_OWNER, identity + ":" + occurrence, diagnostic.path,
+					diagnostic.line, diagnostic.column, diagnostic.column + 1, line.text, 1, null, "Build"));
+			}
 		}
+		var process = active;
+		if (published.length == 0 && process != null && process.exited() && process.exitStatus() != 0)
+			published.push(feedback.Problem.scoped(PROBLEM_OWNER, "exit", feedback.ProblemScope.Project(activeProjectRoot),
+				"Build failed with status " + process.exitStatus(), 1, "Build", [new feedback.ProblemAction("Show build output", "build:show-output")]));
+		problems.replaceOwner(PROBLEM_OWNER, published);
 	}
 
 	public function cancel():Bool {
@@ -145,6 +161,8 @@ class BuildController {
 		try {
 			return BuildTaskCodec.parse(File.getContent(path));
 		} catch (error:Dynamic) {
+			root.getProblems().replaceOwner(PROBLEM_OWNER, [feedback.Problem.scoped(PROBLEM_OWNER, "start",
+				feedback.ProblemScope.Project(project.root), "Could not start task: " + Std.string(error), 1, "Build")]);
 			reportError("build", Std.string(error));
 			return [];
 		}

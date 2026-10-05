@@ -49,7 +49,7 @@ class ProblemsView extends View {
 			var problem = values[index], rowY = y + editor.EditorView.HEADER_HEIGHT + (index - scrollRow) * renderer.lineHeight;
 			if (index == selected) renderer.rect(x, rowY, width, renderer.lineHeight, theme.surfaceActive);
 			var color = problem.severity <= 1 ? theme.error : problem.severity == 2 ? theme.warning : theme.foregroundMuted;
-			renderer.text(x + 8, rowY, problem.message + "  " + problem.path + ":" + (problem.line + 1), color);
+			renderer.text(x + 8, rowY, problem.message + "  " + (problem.location == null ? problem.scopeLabel() : problem.path + ":" + (problem.line + 1)), color);
 		}
 	}
 	function activateSelected():Void { var values = problems.values(); if (selected >= 0 && selected < values.length) activateProblem(values[selected]); }

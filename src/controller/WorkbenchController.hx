@@ -211,8 +211,13 @@ class WorkbenchController {
 	public function openProblems():Void root.showProblems();
 
 	function activateProblem(problem:Problem):Void {
-		var view = root.openDocument(workspace.documents.open(problem.path));
-		view.selectRange(new editor.BufferPosition(problem.line, problem.column), new editor.BufferPosition(problem.line, problem.endColumn));
+		var location = problem.location;
+		if (location == null) {
+			if (problem.actions.length > 0) commands.perform(problem.actions[0].command, context);
+			return;
+		}
+		var view = root.openDocument(workspace.documents.open(location.path));
+		view.selectRange(new editor.BufferPosition(location.line, location.column), new editor.BufferPosition(location.line, location.endColumn));
 		view.cursorChanged();
 	}
 

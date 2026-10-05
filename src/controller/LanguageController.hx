@@ -112,10 +112,8 @@ class LanguageController {
 			if (sessions.get(project.root) != entry) return;
 			entry.failure = message;
 			failedRoots.set(project.root, true);
-			root.getProblems().removeOwner(entry.owner + ":status");
-			var location = project.root + "/haxeon.json";
-			for (document in workspace.documents.documents) { var owner = projectFor(document); if (owner != null && owner.root == project.root && document.path != null) { location = document.path; break; } }
-			root.getProblems().add(new feedback.Problem(entry.owner + ":status", "server", location, 0, 0, 0, message, 1));
+			root.getProblems().replaceOwner(entry.owner + ":status", [feedback.Problem.scoped(entry.owner + ":status", "server",
+				feedback.ProblemScope.Project(project.root), message, 1, "Language server")]);
 			reportError("language", project.name + ": " + message);
 		};
 		sessions.set(project.root, entry);
@@ -336,13 +334,17 @@ class LanguageController {
 		entry.diagnostics = fingerprint;
 		var problems = root.getProblems(), decorations = root.getPluginDecorations(), theme = root.getTheme();
 		decorations.removeOwner(owner);
-		problems.removeOwner(owner);
+		var published:Array<feedback.Problem> = [];
+		var identities:Map<String, Int> = [];
 		for (document in workspace.documents.documents) {
 			var values = service.diagnosticsFor(document);
 			for (index in 0...values.length) {
 				var value = values[index];
-				if (document.path != null) problems.add(new feedback.Problem(owner, document.id + ":" + index, document.path,
-					value.from.line, value.from.column, value.to.column, value.message, value.severity));
+				var identity = document.path + ":" + value.from.line + ":" + value.from.column + ":" + value.message;
+				var occurrence = identities.exists(identity) ? identities.get(identity) : 0;
+				identities.set(identity, occurrence + 1);
+				if (document.path != null) published.push(new feedback.Problem(owner, identity + ":" + occurrence, document.path,
+					value.from.line, value.from.column, value.to.column, value.message, value.severity, null, "Language server"));
 				for (line in value.from.line...value.to.line + 1) {
 					var from = line == value.from.line ? value.from.column : 0;
 					var to = line == value.to.line ? value.to.column : document.buffer.line(line).length;
@@ -353,6 +355,7 @@ class LanguageController {
 				}
 			}
 		}
+		problems.replaceOwner(owner, published);
 	}
 
 	function supports(feature:String):Bool {

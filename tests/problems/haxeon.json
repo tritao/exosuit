@@ -1,0 +1,11 @@
+{
+	"version": 1,
+	"package": { "name": "exosuit-problems-test" },
+	"entry": "app.ProblemTestMain",
+	"sourceRoots": ["src"],
+	"dependencies": {
+		"pragtical_hx": { "path": "../.." }
+	},
+	"target": "host",
+	"outputDir": "build"
+}
