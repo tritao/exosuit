@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "package": {
+    "name": "exosuit-workspace-attachment-test"
+  },
+  "entry": "app.AttachmentTestMain",
+  "sourceRoots": [
+    "src"
+  ],
+  "scopeSourceRoots": false,
+  "dependencies": {
+    "exosuit-agent": {
+      "path": "../../agent"
+    },
+    "pragtical_hx": {
+      "path": "../.."
+    }
+  },
+  "target": "host",
+  "outputDir": "build"
+}

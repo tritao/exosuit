@@ -47,7 +47,7 @@ class BrowserRpcMain {
 		var clock = function() return NativeKit.nk_time_seconds() * 1000;
 		connector = new SessionRpcConnector(new NativeRpcConnector(hub, NativeRpcHub.websocket(port)), key.toString(), clock);
 		replica = new WorkspaceReplica("workspace", 1000);
-		client = new RpcClient(connector, clock, function() return 0.5,
+		client = new RpcClient(connector, clock, function() return Math.random(),
 			new RpcPeerOptions("browser-test/1", [WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS, WorkspaceProtocol.WRITE], [], 1000, 262144, 32, 1048576),
 			function(connection, generation, _) {
 				starts++;

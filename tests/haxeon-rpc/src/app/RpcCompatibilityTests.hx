@@ -50,6 +50,12 @@ class RpcCompatibilityTests {
 		vector(Notification(200, Bytes.alloc(0)), "810892ccc8c400");
 		require(query.compare(bytes("8101a177")) == 0, "Workspace query vector changed");
 		require(WorkspaceProtocol.QUERY.decodeRequest(bytes("8101a177")).workspace == "w", "Workspace query decode changed");
+		var identity:WorkspaceIdentity = {workspace: "w", root: "/w", instance: "i"};
+		var identityBytes = bytes("8301a17702a22f7703a169");
+		require(WorkspaceProtocol.IDENTITY.encodeRequest({workspace: "w"}).compare(query) == 0, "Identity request vector changed");
+		require(WorkspaceProtocol.IDENTITY.encodeResponse(identity).compare(identityBytes) == 0, "Identity response vector changed");
+		var identified = WorkspaceProtocol.IDENTITY.decodeResponse(identityBytes);
+		require(identified.workspace == "w" && identified.root == "/w" && identified.instance == "i", "Identity decode changed");
 		var snapshot:WorkspaceSnapshot = {
 			epoch: "e",
 			cursor: 0,

@@ -4,7 +4,7 @@ The daemon hosts a durable named-group catalog over a same-user local socket and
 an authenticated **loopback-only** WebSocket. SQLite persists groups, revisions,
 cursor, operation outcomes and trimmed replay events atomically; restart preserves
 the catalog epoch and mutation idempotency. It has no UIKit or GPU dependency.
-Terminal/provider supervision, editor auto-spawn/reuse and remote deployment
+Terminal/provider supervision and remote deployment
 remain M14 work.
 
 Start it on Linux with:
@@ -23,8 +23,10 @@ The manager holds an exclusive lifetime lock inherited by the daemon and returns
 exit 3 `workspace_in_use` for a duplicate start. It writes `endpoint.json` after
 readiness, with the canonical workspace root, manager PID/generation, endpoints
 and credential file path. The credential itself is never included. Discovery
-must be verified by a client handshake before reuse; editor integration is still
-pending. To stop, send SIGTERM to the descriptor's `managerPid`. Normal stop
+is verified by the Linux editor through negotiated capabilities and a typed
+identity query before catalog subscription. Opening a folder through
+`scripts/run.sh` discovers or starts the detached daemon; switching folders
+selects the corresponding service. Closing a window leaves it running. To stop, send SIGTERM to the descriptor's `managerPid`. Normal stop
 removes owned discovery and stops the child process group while retaining the
 database and credential. Replaced/missing storage stops the daemon rather than
 silently opening a fresh catalog. Linux startup is tested; Windows management is
@@ -35,7 +37,7 @@ For direct fixtures, build with
 Run arguments are:
 
 ```text
-PRIVATE_SOCKET LOOPBACK_WS_PORT TOKEN_FILE SEED_EPOCH [DATABASE [WORKSPACE_ROOT]]
+PRIVATE_SOCKET LOOPBACK_WS_PORT TOKEN_FILE SEED_EPOCH [DATABASE [WORKSPACE_ROOT [INSTANCE]]]
 ```
 
 The caller supplies a private owner-only directory, a 0600 credential file
@@ -49,6 +51,15 @@ clients prove possession of the credential before RPC negotiation or dispatch.
 Plain loopback WebSocket has no network encryption. Remote access requires the
 planned authenticated secure relay and endpoint/session authorization.
 
+`--discover` validates existing private discovery without starting a daemon;
+exit 4 means no discovery. `--wire` emits the typed JsonWire profile for the
+native client. The launcher is selected with `EXOSUIT_AGENT_LAUNCHER`, or found
+from a repository launch directory. Release bundle installation of the launcher
+and daemon is not yet delivered.
+
+Run `bash scripts/test-workspace-attachment.sh` for discovery, identity, shared
+reuse and stale restart acceptance. `python3 scripts/test-workspace-attachment-ui.py`
+checks actual desktop attachment and reuse across windows under Xvfb.
 Run `bash scripts/test-workspace-persistence.sh` for storage and managed lifecycle
 acceptance, and `bash scripts/test-workspace-transport.sh` for real transports.
 `bash scripts/test-workspace-rpc-browser.sh` builds and runs Chrome fixtures on

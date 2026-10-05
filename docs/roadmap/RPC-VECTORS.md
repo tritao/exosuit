@@ -18,6 +18,7 @@ on native, Wasm32 and Wasm GC. Both encode and decode/re-encode must agree.
 | cancel | `81079101` |
 | notification | `810892ccc8c400` |
 | query w | `8101a177` |
+| identity w, /w, i (method 104 response) | `8301a17702a22f7703a169` |
 | snapshot e, cursor 0, group g/Work/null/1 | `8301a165020003918401a16702a4576f726b03c00401` |
 | rename w/e/op/g/1/New | `8601a17702a16503a26f7004a167050106a34e6577` |
 | framed query | `484d504b0100000000048101a177` |

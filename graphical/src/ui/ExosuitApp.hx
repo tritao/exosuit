@@ -82,6 +82,9 @@ class ExosuitApp implements DesktopUiApplication {
 	public final capabilities:HostCapabilities;
 	public final host:UiWorkbenchHost;
 	final desktop:Null<HostFileDialogs>;
+	var workspaceAttachment:Null<workspace.client.WorkspaceAttachment>;
+	var workspaceStatus:String = "";
+	var workspaceError:Null<String>;
 	public var saveConfirmation(default, null):Null<String>;
 	var saveConfirmationHandler:Null<String->Void>;
 	public var saveAsDestination(default, null):Null<String>;
@@ -631,6 +634,13 @@ class ExosuitApp implements DesktopUiApplication {
 		return ui.submitCached(view, frame, key);
 	}
 
+	public function attachWorkspace(attachment:workspace.client.WorkspaceAttachment):Void {
+		if (workspaceAttachment != null)
+			workspaceAttachment.dispose();
+		workspaceAttachment = attachment;
+		requestFrame();
+	}
+
 	/** Drain services without requesting a render merely because they are running. */
 	function pollBackground():Void {
 		var now = Sys.time();
@@ -650,6 +660,20 @@ class ExosuitApp implements DesktopUiApplication {
 		var previousPluginStatus = host.getPluginStatusItems().revision;
 		var previousPluginPanels = host.getPluginPanels().revision;
 		application.update();
+		var attachment = workspaceAttachment;
+		if (attachment != null) {
+			var project = application.workspace.activeProject;
+			attachment.select(project == null ? null : project.root);
+			attachment.poll();
+			var failure = attachment.failure();
+			if (failure != null && failure != workspaceError) application.reportError("workspace", failure);
+			workspaceError = failure;
+			var label = attachment.statusLabel();
+			if (workspaceStatus != label) {
+				workspaceStatus = label;
+				requestFrame();
+			}
+		}
 		if (previousLanguageStatus != application.language.statusLabel() ||
 			previousProblems != host.getProblems().revision ||
 			previousNotification != host.getNotifications().current() ||
@@ -684,6 +708,7 @@ class ExosuitApp implements DesktopUiApplication {
 
 	public function dispose():Void {
 		if (hostContext != null) hostContext.onPoll = null;
+		if (workspaceAttachment != null) workspaceAttachment.dispose();
 		application.shutdown();
 		host.dispose();
 		if (desktop != null) desktop.shutdown();
@@ -706,6 +731,7 @@ class ExosuitApp implements DesktopUiApplication {
 			sidebarState: sidebar.encode(),
 			panels: dock.panelIds(),
 			status: statusMessage,
+			workspaceConnection: workspaceStatus,
 			paletteCommandCount: ui.commands.ids().length,
 			errors: [for (entry in application.errors.entries) {source: entry.source, message: entry.message}],
 			plugins: application.plugins.enabledIds(),
@@ -717,7 +743,7 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function topBar():View {
 		return new RetainedView("toolbar", function(_) return buildTopBar(),
-			function() return statusMessage + ":" + ui.animations.revision);
+			function() return statusMessage + ":" + workspaceStatus + ":" + ui.animations.revision);
 	}
 
 	function buildTopBar():View {
@@ -744,6 +770,8 @@ class ExosuitApp implements DesktopUiApplication {
 		if (capabilities.supports(Processes))
 			items.push(new KeyedView("terminal", toolbarButton("Terminal", IconName.Terminal, toggleTerminal)));
 		items.push(new KeyedView("space", new Spacer("toolbar-space", LayoutAxis.grow(), LayoutAxis.fixed(1.0))));
+		if (workspaceStatus.length > 0)
+			items.push(new KeyedView("workspace-status", new Text(workspaceStatus, null, theme.tokens.textSecondary, TextStyleOverride.text(12.0))));
 		items.push(new KeyedView("status", new Text(statusMessage, null, theme.tokens.textSecondary,
 			TextStyleOverride.text(12.0))));
 		items.push(new KeyedView("palette", toolbarButton("Commands", IconName.Terminal, togglePalette)));

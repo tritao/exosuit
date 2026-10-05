@@ -65,11 +65,18 @@ import haxeon.wire.MessagePack;
 	@:id(2) var outcome:Null<RenameResult>;
 }
 
+@:wire typedef WorkspaceIdentity = {
+	@:id(1) var workspace:String;
+	@:id(2) var root:String;
+	@:id(3) var instance:String;
+}
+
 /** Permanent ids for the first workspace service methods; never reuse ids. */
 class WorkspaceProtocol {
 	public static inline final READ = "workspace.read";
 	public static inline final EVENTS = "workspace.events";
 	public static inline final WRITE = "workspace.groups.write";
+	public static inline final IDENTITY_CAPABILITY = "workspace.identity";
 	public static inline final CHANGED = 200;
 	public static final QUERY = new RpcMethod<WorkspaceQuery, WorkspaceSnapshot>(100, function(value:WorkspaceQuery) return MessagePack.encode(value),
 		function(bytes:Bytes):WorkspaceQuery return MessagePack.decode(bytes), function(value:WorkspaceSnapshot) return MessagePack.encode(value),
@@ -83,6 +90,10 @@ class WorkspaceProtocol {
 	public static final OPERATION = new RpcMethod<OperationQuery, OperationResult>(103, function(value:OperationQuery) return MessagePack.encode(value),
 		function(bytes:Bytes):OperationQuery return MessagePack.decode(bytes), function(value:OperationResult) return MessagePack.encode(value),
 		function(bytes:Bytes):OperationResult return MessagePack.decode(bytes));
+
+	public static final IDENTITY = new RpcMethod<WorkspaceQuery, WorkspaceIdentity>(104, function(value:WorkspaceQuery) return MessagePack.encode(value),
+		function(bytes:Bytes):WorkspaceQuery return MessagePack.decode(bytes), function(value:WorkspaceIdentity) return MessagePack.encode(value),
+		function(bytes:Bytes):WorkspaceIdentity return MessagePack.decode(bytes));
 
 	public static function encodeEvent(value:WorkspaceEvent):Bytes
 		return MessagePack.encode(value);

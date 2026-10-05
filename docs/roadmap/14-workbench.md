@@ -138,9 +138,10 @@ a durable group catalog over same-user local sockets and authenticated loopback
 WebSockets. Real Chrome Wasm32/Wasm GC clients recover a saved rename across
 connection and agent process restarts. `scripts/run-agent.py` adds qualified Linux
 startup, an inherited exclusive lock (exit 3), private generation-tagged discovery,
-detached readiness and device/inode storage-replacement fencing. Client descriptor
-handshake validation/auto-spawn, runtime/provider supervision and volatile terminal
-mode remain open. Catalog connection limits are the stricter existing RPC.2
+detached readiness and device/inode storage-replacement fencing. Linux repository
+desktop discovery, typed identity validation and detached auto-spawn/reuse are
+delivered. Release bundle wiring, runtime/provider supervision and volatile
+terminal mode remain open. Catalog connection limits are the stricter existing RPC.2
 bounds documented below, not the future runtime-manager budget.
 See [WORKSPACE-RPC.md](WORKSPACE-RPC.md) for limits and test evidence.
 
@@ -155,7 +156,8 @@ See [WORKSPACE-RPC.md](WORKSPACE-RPC.md) for limits and test evidence.
   256 KiB (max 4 MiB), written atomically. Crash reconciliation. Volatile mode
   on storage loss.
 - [ ] Discovery descriptors with handshake validation. The client auto-spawns
-  the agent detached when none is live.
+  the agent detached when none is live. Linux repository desktop accepted; release
+  bundle launcher/daemon installation remains.
 
 Acceptance: port the agent, agent_reconnect, agent_terminal, agent_stress and
 agent_fault scenarios. A PTY survives client reconnect, checkpoints restore,

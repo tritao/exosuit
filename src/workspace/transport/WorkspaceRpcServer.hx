@@ -10,15 +10,21 @@ private typedef Peer = {var transport:NativeRpcTransport; var preflight:Null<Ses
 class WorkspaceRpcServer {
 	final service:WorkspaceService;
 	final clock:Void->Float;
+	final identity:Null<WorkspaceIdentity>;
 	final peers:Array<Peer> = [];
 
 	public final options:RpcPeerOptions;
 
-	public function new(service:WorkspaceService, clock:Void->Float, ?capabilities:Array<String>) {
+	public function new(service:WorkspaceService, clock:Void->Float, ?capabilities:Array<String>, ?identity:WorkspaceIdentity) {
 		this.service = service;
 		this.clock = clock;
-		options = new RpcPeerOptions("exosuit-agent/1",
-			capabilities == null ? [WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS, WorkspaceProtocol.WRITE] : capabilities, [], 5000, 262144, 32, 1048576);
+		this.identity = identity == null ? null : {workspace: identity.workspace, root: identity.root, instance: identity.instance};
+		if (identity != null && (identity.workspace != service.id || identity.root.length == 0 || identity.instance.length == 0))
+			throw "Invalid daemon identity";
+		var defaults = [WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS, WorkspaceProtocol.WRITE];
+		if (identity != null)
+			defaults.push(WorkspaceProtocol.IDENTITY_CAPABILITY);
+		options = new RpcPeerOptions("exosuit-agent/1", capabilities == null ? defaults : capabilities, [], 5000, 262144, 32, 1048576);
 	}
 
 	/** NativeKit validates same-user peers and private paths on local sockets. */
@@ -77,8 +83,23 @@ class WorkspaceRpcServer {
 					continue;
 				peer.handshake = null;
 				peer.connection = handshake.connection;
-				if (peer.connection != null)
-					service.bind(peer.connection, handshake.capabilities());
+				if (peer.connection != null) {
+					var grants = handshake.capabilities();
+					var currentIdentity = identity;
+					if (currentIdentity != null)
+						peer.connection.register(WorkspaceProtocol.IDENTITY, function(request, context) {
+							if (grants.indexOf(WorkspaceProtocol.READ) < 0 || grants.indexOf(WorkspaceProtocol.IDENTITY_CAPABILITY) < 0) {
+								context.fail({code: "unauthorized", message: "Identity query denied", ambiguous: false});
+								return;
+							}
+							if (request.workspace != service.id) {
+								context.fail({code: "invalid_request", message: "Invalid workspace identity query", ambiguous: false});
+								return;
+							}
+							context.respond({workspace: currentIdentity.workspace, root: currentIdentity.root, instance: currentIdentity.instance});
+						});
+					service.bind(peer.connection, grants);
+				}
 			}
 			if (peer.connection != null)
 				peer.connection.poll(32, 262144);

@@ -21,4 +21,5 @@ if [[ "${HAXEON_SELF_HOSTED:-0}" == "1" ]]; then
 	extra+=(--self-hosted)
 fi
 
+export EXOSUIT_AGENT_LAUNCHER="$root_dir/scripts/run-agent.py"
 exec "$haxeon" run --project "$root_dir/graphical/haxeon.json" "${extra[@]}" -- "$@"

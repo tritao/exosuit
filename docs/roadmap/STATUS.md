@@ -2,6 +2,39 @@
 
 Last updated: 2026-10-05.
 
+## M14 — Linux desktop service attachment, 2026-10-05
+
+The repository desktop now discovers or starts a detached daemon for the active
+canonical project directory. Private discovery is validated by a read-only helper
+and decoded through typed JsonWire. Negotiation requires read/events/identity;
+permanent method 104 verifies workspace, canonical root and manager instance before
+snapshot/replay subscription. Wrong roots fail closed; changed instances rediscover.
+Concurrent windows share ownership; switching folders retires stale callbacks and
+reuses the correct daemon. Closing a client leaves its daemon alive. Status/error
+changes use the existing background poll and only request frames when needed.
+Release bundles still need launcher/daemon installation; terminal/provider resources
+and their lifetime reconciliation remain the next domain work.
+
+Real native acceptance covers concurrent startup, shared reuse, folder switching,
+client-independent lifetime, a socket proxy serving the wrong workspace, invalid
+private hints and stale-descriptor restart. Reference and self-hosted clients pass.
+The actual desktop under Xvfb connects and reuses the same daemon across two windows
+with bounded frame counts. Chrome Wasm GC and Wasm32 retain authenticated mutation,
+reconnect and durable restart coverage; native and portable identity vectors agree.
+
+Haxeon standard-library `Math.random()` was missing. Commit `5baacfb2` adds the
+portable effectful API using the existing integer RNG, preserving explicit purity
+on existing Math methods. A failing reducer preceded range, variation and arity
+regressions. The full Haxeon gate passes (488 compiler tests plus backend/integration
+checks). No application type weakening or fixed-jitter workaround was used.
+
+An immediate manager restart in the full gate exposed a descendant shutdown race:
+the database lock could release before the inherited lifetime lock. Linux managers
+now adopt and reap owned launcher descendants after retiring the process group,
+before reporting shutdown. The existing immediate-restart/lifetime-lock acceptance
+passes with that lifecycle fix. The full Exosuit headless suite passes after
+the fix, including native and both portable Wasm compatibility gates.
+
 ## M14 — durable catalog and managed startup, 2026-10-05
 
 Delivered a typed `WorkspacePersistence` boundary and agent-owned SQLite schema

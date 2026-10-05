@@ -5,7 +5,8 @@ It is a headless catalog of named group metadata with optional cwd association;
 renaming preserves cwd. It does not yet implement the full nested group model,
 project/file access or terminal/agent operations. The native daemon persists this
 catalog through an agent-owned SQLite store; a POSIX manager provides private
-discovery and exclusive startup. Editor auto-spawn/attachment remains pending.
+discovery and exclusive startup. The Linux repository desktop discovers, validates
+and attaches to that service asynchronously, spawning it detached when absent.
 The native and Wasm tests consume the same service, client replica and wire types.
 
 ## Methods and permissions
@@ -21,6 +22,7 @@ and removes its observer; directory associations never grant filesystem access.
 | 101 | Watch/resume | `workspace.read`, `workspace.events` | Cursor, retained events or snapshot-reset flag |
 | 102 | Rename group | `workspace.groups.write` | Recorded operation outcome and updated group |
 | 103 | Lookup operation | `workspace.read` | Known outcome or explicit unknown |
+| 104 | Daemon identity | `workspace.read`, `workspace.identity` | Workspace, canonical root and manager instance |
 | 200 | Group changed notification | Established watch | Epoch, sequence and updated group |
 
 Field ids are declared beside the records in `WorkspaceProtocol.hx`; ids are
@@ -103,8 +105,20 @@ if the manager is killed abruptly. Normal stop removes owned discovery, stops th
 process group and retains catalog/credential files. Replaced/missing storage
 stops the daemon; there is no silent switch to an empty catalog.
 
-This launcher is qualified on Linux. Existing descriptors are discovery hints;
-client handshake validation and editor auto-spawn/reuse still need integration.
+This launcher is qualified on Linux. Existing descriptors are discovery hints.
+The native client validates private metadata through `--discover --wire`, negotiates
+`workspace.read`, `workspace.events` and `workspace.identity`, then calls permanent
+method 104 (`WorkspaceQuery` → `WorkspaceIdentity`) before accepting catalog data.
+Identity fields 1/2/3 are workspace, canonical root and manager instance. Dispatch
+requires read and identity grants; manually configured servers without identity
+do not advertise that capability. Wrong roots fail closed; instance changes cause
+rediscovery. Folder changes retire old callbacks and select the corresponding
+daemon; closing a window only closes its client. Stale discovery triggers safe
+exclusive startup, with exit 3 handled by rediscovery. Attachment uses the existing
+background poll and does not force continuous redraws.
+
+`scripts/run.sh` supplies the repository launcher; `EXOSUIT_AGENT_LAUNCHER` can
+override its path. Release bundles still need launcher/daemon installation.
 Runtime/provider supervision, history files/checkpoints and volatile terminal
 operation on storage loss remain M14.3 work. The manager currently stops on
 catalog storage loss rather than providing that future terminal fallback.

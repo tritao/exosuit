@@ -98,6 +98,13 @@ class GraphicalMain {
 			var instance = new ExosuitApp(context.fonts, ExosuitPalette.theme(dark), context,
 				openPaths.length == 0 ? null : openPaths[0], null,
 				new NativeDesktopServices(context), dark, ui.TerminalPane.open);
+			if (Sys.systemName() == "Linux") {
+				try
+					instance.attachWorkspace(new workspace.client.LocalWorkspaceClient(context.events, instance.application.processes,
+						workspace.client.LocalWorkspaceClient.findLauncher(), function() return NativeKit.nk_time_seconds() * 1000))
+				catch (failure:Dynamic)
+					instance.application.reportError("workspace", Std.string(failure));
+			}
 			for (index in 1...openPaths.length) instance.application.openArgument(openPaths[index]);
 			if (openTerminal) instance.openTerminal();
 			if (pluginManifest != null && !instance.application.loadPluginManifest(pluginManifest))
