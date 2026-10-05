@@ -14,6 +14,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	final testFonts:FontCollection;
 	final path:String;
 	var frames = 0;
+	var diagnosticActions = 0;
 	var oldColumns = 0;
 	var paletteCommand = "";
 	var sidebarWidth = 0.0;
@@ -26,7 +27,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	var selectionStoppedOffset:Float = 0.0;
 
 	public function new(context:nativekit.ui.host.DesktopUiHostContext, path:String, phase:String) {
-		super(context.fonts, null, context, (phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-tabs" || phase == "zoom" || phase == "word-delete" || phase == "selection" || phase == "settings" || phase == "editor-minimap" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
+		super(context.fonts, null, context, (phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-font" || phase == "editor-tabs" || phase == "zoom" || phase == "word-delete" || phase == "selection" || phase == "settings" || phase == "editor-minimap" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
 			null, null, null, WorkspaceSmokeMain.createTerminal);
 		this.phase = phase;
 		this.testFonts = context.fonts;
@@ -43,6 +44,9 @@ class WorkspaceSmokeApp extends ExosuitApp {
 
 	override public function submit(frame:LayoutFrame):nativekit.ui.core.RenderNode {
 		frames++;
+		if (phase == "editor-font") return editorFontStep(frame);
+		if (phase == "problems") return problemsStep(frame);
+		if (phase == "activity-bar") return activityBarStep(frame);
 		if (phase == "scrollbar-visibility") return scrollbarStep(frame);
 		if (phase == "editor-resize") return resizeStep(frame);
 		if (phase == "editor-minimap") return minimapStep(frame);
@@ -191,6 +195,15 @@ class WorkspaceSmokeApp extends ExosuitApp {
 			if (frames == 11) sys.FileSystem.deleteFile(addedPath);
 		}
 		var result = super.submit(frame);
+		if (phase == "explorer-icons" && (frames == 4 || frames == 5)) {
+			var status = node("exosuit-status"), updated = false;
+			status.walk(function(child) {
+				if (child.layout.visualKind == LayoutVisualKind.Text &&
+					StringTools.startsWith(child.layout.text, frames == 4 ? "data.json * - " : "Main.hx - ")) updated = true;
+			});
+			require(updated, "retained status bar did not update after editing or switching tabs");
+		}
+
 		if (phase == "explorer-icons" && (frames == 10 || frames == 12)) {
 			var addedPath = path.substring(0, path.lastIndexOf("/")) + "/added-after-render.txt";
 			var row = treeRow(ui.root, addedPath);
@@ -469,7 +482,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 			require(fontApplied, "editor font size did not apply live");
 			var gutter = node("gutter:" + activeSettingsView.document.id);
 			var gutterProbe = TextLayout.create(testFonts, Std.string(activeSettingsView.document.buffer.lineCount()), 1.0,
-				new TextStyle(22.0), new ParagraphStyle(TextWrap.None));
+				new TextStyle(22.0, FontFamily.Monospace), new ParagraphStyle(TextWrap.None));
 			var gutterGeometry = gutter.resolved;
 			if (gutterGeometry == null) throw "Settings test missing gutter geometry";
 			require(Math.abs(gutterGeometry.width - (gutterProbe.measure().width + 12.0)) < 0.01,
@@ -692,8 +705,105 @@ class WorkspaceSmokeApp extends ExosuitApp {
 			trace("PASS: explorer folder single click and double-click suppression, file preview replacement, keep by double click and edit, pane ownership and shared edits");
 		}
 	}
+	function editorFontStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+		var result = super.submit(frame);
+		if (frames == 3) {
+			var fonts = ui.buildContext.fonts;
+			if (fonts == null) throw "font acceptance missing font collection";
+			var narrow = TextLayout.create(fonts, "iiii", 1000, new TextStyle(15, FontFamily.Monospace), new ParagraphStyle(TextWrap.None));
+			var wide = TextLayout.create(fonts, "WWWW", 1000, new TextStyle(15, FontFamily.Monospace), new ParagraphStyle(TextWrap.None));
+			require(Math.abs(narrow.measure().width - wide.measure().width) < 0.01 && narrow.measure().width > 0, "editor font is not fixed width");
+			narrow.dispose(); wide.dispose();
+			var narrowUi = TextLayout.create(fonts, "iiii", 1000, new TextStyle(15), new ParagraphStyle(TextWrap.None));
+			var wideUi = TextLayout.create(fonts, "WWWW", 1000, new TextStyle(15), new ParagraphStyle(TextWrap.None));
+			require(Math.abs(narrowUi.measure().width - wideUi.measure().width) > 1, "editor font replaced proportional UI font");
+			narrowUi.dispose(); wideUi.dispose();
+			var view = host.activeView();
+			if (view == null) throw "font acceptance missing document";
+			var monospace = false;
+			node("editor:" + view.document.id).walk(function(child) {
+				if (child.layout.textStyle.font == FontFamily.Monospace) monospace = true;
+			});
+			require(monospace, "editor widget did not request monospace family");
+			trace("PASS: explicit fixed-width editor family, proportional UI family, native monospace shaping");
+		}
+		return result;
+	}
+
+	function problemsStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+		frame.deltaSeconds = 1.0;
+		var file = new feedback.Problem("test", "file", path, 2, 1, 3, "File warning", 2, null, "Test");
+		var project = feedback.Problem.scoped("test", "project", feedback.ProblemScope.Project(haxe.io.Path.directory(path)), "Project issue", 1, "Test");
+		var workspace = feedback.Problem.scoped("test", "workspace", feedback.ProblemScope.Workspace, "Workspace issue", 1, "Test",
+			[new feedback.ProblemAction("Show status", "test:problem-action")]);
+		if (frames == 2) {
+			application.commands.add("test:problem-action", function(_) diagnosticActions++);
+			host.getProblems().replaceOwner("test", [file, project, workspace]);
+			host.showProblems();
+		}
+		if (frames == 3 || frames == 5) {
+			var bounds = node("problems-scroll").globalBounds();
+			ui.scroll(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0, frames == 3 ? 10000 : -10000);
+		}
+		if (frames == 4) click("problem:" + workspace.key());
+		if (frames == 6) click("problem-group:" + file.scopeKey());
+		if (frames == 7) host.getProblems().replaceOwner("test", [project, workspace, file, feedback.Problem.scoped("test", "extra", feedback.ProblemScope.Workspace, "Another workspace issue", 2)]);
+		if (frames == 8) click("problem-group:" + file.scopeKey());
+		if (frames == 9) click("problem:" + file.key());
+		var result = super.submit(frame);
+		if (frames == 2 || frames == 7) {
+			var foundBadge = false;
+			ui.root.walk(function(child) {
+				if (child.styleKey == "count-badge" && child.children.length > 0 && child.children[0].layout.text == Std.string(frames == 2 ? 3 : 4)) foundBadge = true;
+			});
+			require(foundBadge, "Problems count did not render/update as a badge");
+		}
+		if (frames >= 2) { node("problem-group:" + project.scopeKey()); node("problem-group:workspace"); }
+		if (frames == 4) {
+			require(diagnosticActions == 1 && host.activeView() == null, "workspace action/navigation failed: " + diagnosticActions);
+			node("problem-action:0");
+		}
+		if (frames == 7) {
+			require(find(ui.root, "problem:" + file.key()) == null, "diagnostic refresh lost collapsed group");
+			node("problem-action:0");
+		}
+		if (frames == 10) {
+			var view = host.activeView();
+			require(view != null && view.document.path == path && view.selection.cursor.line == 2, "file diagnostic navigation lost location");
+			trace("PASS: scoped Problems groups, workspace actions, stable selection/collapse, file navigation");
+		}
+		return result;
+	}
+
+	function activityBarStep(frame:LayoutFrame):nativekit.ui.core.RenderNode {
+		if (frames == 3) click("activity:files");
+		if (frames == 4) click("activity:search");
+		if (frames == 5) {
+			registerSidebarDestination("sessions", nativekit.ui.icons.IconName.Terminal,
+				function() return new nativekit.ui.widgets.text.Text("Session list"),
+				new nativekit.ui.widgets.sidebar.SidebarModeOptions("Sessions", 20));
+			activateSidebarDestination("sessions");
+		}
+		if (frames == 6) click("activity:sessions");
+		if (frames == 7) click("activity:sessions");
+		var result = super.submit(frame);
+		node("activity:files"); node("activity:search");
+		if (frames == 2) require(!sidebar.visible, "empty startup unexpectedly opened sidebar");
+		if (frames == 3) require(sidebar.visible && sidebar.activeId == "files", "activity bar did not open Files");
+		if (frames == 4) require(sidebar.visible && sidebar.activeId == "search", "activity bar did not switch to Search");
+		if (frames >= 5) node("activity:sessions");
+		if (frames == 5) require(sidebar.visible && sidebar.activeId == "sessions", "registered destination did not activate");
+		if (frames == 6) require(!sidebar.visible, "active destination did not collapse sidebar");
+		if (frames == 7) {
+			require(sidebar.visible && sidebar.activeId == "sessions", "collapsed destination did not reopen");
+			trace("PASS: permanent Activity Bar opens, switches, collapses, reopens and follows destination registration");
+		}
+		return result;
+	}
+
 	function sidebarStep():Void {
 		if (phase == "sidebar-write") {
+			if (frames >= 2) { node("activity:files"); node("activity:search"); }
 			if (frames == 3) ui.key(UiEventKind.KeyDown, UiKey.F, UiModifier.Control | UiModifier.Shift);
 			if (frames == 4) { require(sidebar.activeId == "search", "search shortcut did not select mode"); click("files"); }
 			if (frames == 5) {
@@ -708,31 +818,32 @@ class WorkspaceSmokeApp extends ExosuitApp {
 			if (frames == 7) {
 				require(filesScroll.offsetY > 0, "wheel did not reach Files tree");
 				var files = sidebar.find("files");
-				require(files != null && files.width > sidebarWidth + 20, "Files divider width was not retained");
+				require(files != null && sidebar.width > sidebarWidth + 20, "Files divider width was not retained");
+				sidebarWidth = sidebar.width;
 				click("search");
 			}
 			if (frames == 8) {
 				require(sidebar.activeId == "search", "Search tab click failed");
-				require(Math.abs(node("sidebar-modes").globalBounds().width - 320) < 1, "mode did not restore its own width");
+				require(Math.abs(node("sidebar-modes").globalBounds().width - sidebarWidth) < 1, "destination switch changed shared width: " + node("sidebar-modes").globalBounds().width);
 				resizeSidebar(40);
 			}
 			if (frames == 10) {
 				var search = sidebar.find("search");
-				require(search != null && search.width > 350, "Search divider width lost");
+				require(search != null && sidebar.width > sidebarWidth + 30, "Search divider width lost");
 				sys.io.File.saveContent(config.ConfigurationPaths.stateRoot() + "/expected-sidebar.txt", sidebar.encode());
-				trace("PASS: sidebar commands, pointer tabs and independent dragged widths");
+				trace("PASS: sidebar commands, pointer tabs and shared dragged width");
 			}
 		} else if ((phase == "sidebar-read" || phase == "sidebar-hidden-read") && frames == 5) {
 			require(sidebar.activeId == "search", "restart lost sidebar mode");
 			require(sidebar.encode() == sys.io.File.getContent(config.ConfigurationPaths.stateRoot() + "/expected-sidebar.txt"),
-				"restart lost sidebar visibility or mode widths");
+				"restart lost sidebar visibility or shared width");
 			if (phase == "sidebar-read") {
 				require(sidebar.visible, "restart hid sidebar");
 				application.commands.perform("workbench:toggle-sidebar", application.context);
 				host.sessionLines();
 				sys.io.File.saveContent(config.ConfigurationPaths.stateRoot() + "/expected-sidebar.txt", sidebar.encode());
-			} else { require(!sidebar.visible, "hidden sidebar reopened"); node("rail-search"); }
-			trace("PASS: " + phase + " restores selected mode, visibility and per-mode widths");
+			} else { require(!sidebar.visible, "hidden sidebar reopened"); node("activity:search"); }
+			trace("PASS: " + phase + " restores selected mode, visibility and shared width");
 		} else if (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) {
 			if (frames == 3) ui.key(UiEventKind.KeyDown, UiKey.F, UiModifier.Control | UiModifier.Shift);
 			if (frames == 4) ui.text(UiEventKind.TextInput, "needle");
@@ -798,6 +909,11 @@ class WorkspaceSmokeApp extends ExosuitApp {
 				trace("PASS: search input, virtualized wheel, result clicks, edit repair and preview/apply");
 			}
 		}
+	}
+	static function invalidServerSettings(executable:String):String {
+		var values:Dynamic = {};
+		Reflect.setField(values, "languages/haxeon/command", haxe.Json.stringify([executable]));
+		return haxe.Json.stringify({version: 1, values: values, state: {}});
 	}
 	function languageStep():Void {
 		var service = application.language.client;
@@ -884,7 +1000,7 @@ class WorkspaceSmokeMain {
 		options.title = "exosuit workspace acceptance";
 		options.width = 900; options.height = 600;
 		options.captureDirectory = args[1];
-		options.frameLimit = args[2] == "selection" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 10 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
+		options.frameLimit = args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 10 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
 		var status = DesktopUiHost.run(options, context -> new WorkspaceSmokeApp(context, args[0], args[2]));
 		platform.Native.shutdown();
 		return status;

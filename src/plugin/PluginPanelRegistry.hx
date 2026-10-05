@@ -3,6 +3,9 @@ package plugin;
 class PluginPanelRegistry {
 	final registered:Array<PluginPanel> = [];
 
+	public var revision(default, null):Int = 0;
+	public function changed():Void revision++;
+
 	public function new() {}
 
 	public function add(owner:String, id:String, title:String, text:String):PluginPanel {
@@ -10,6 +13,7 @@ class PluginPanelRegistry {
 		if (find(owner, id) != null) throw 'plugin panel "$owner:$id" is already registered';
 		var panel = new PluginPanel(owner, id, title, text);
 		registered.push(panel);
+		revision++;
 		return panel;
 	}
 
@@ -18,14 +22,15 @@ class PluginPanelRegistry {
 		return null;
 	}
 
-	public function remove(panel:PluginPanel):Void
-		registered.remove(panel);
+	public function remove(panel:PluginPanel):Void {
+		if (registered.remove(panel)) revision++;
+	}
 
 	public function removeOwner(owner:String):Void {
 		var index = registered.length;
 		while (index > 0) {
 			index--;
-			if (registered[index].owner == owner) registered.splice(index, 1);
+			if (registered[index].owner == owner) { registered.splice(index, 1); revision++; }
 		}
 	}
 

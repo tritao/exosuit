@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "package": { "name": "exosuit-sidebar-layout-test" },
+  "entry": "app.SidebarLayoutTestMain",
+  "sourceRoots": ["src"],
+  "scopeSourceRoots": false,
+  "dependencies": { "exosuit-graphical": { "path": "../../graphical" } },
+  "target": "host",
+  "outputDir": "build"
+}

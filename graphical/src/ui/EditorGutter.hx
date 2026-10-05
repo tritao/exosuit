@@ -72,7 +72,7 @@ private class GutterLabels {
 	final layout:TextLayout;
 	final measurement:LayoutMeasuredContent;
 	final fonts:FontCollection;
-	final visibleLabels:Array<TextLayout> = [];
+	final visibleLabels:Array<GutterLabel> = [];
 	var editorLayout:Null<TextEditorLayout>;
 	var originY:Float = 0.0;
 	var height:Float = 4.0;
@@ -84,7 +84,7 @@ private class GutterLabels {
 
 	public function new(fonts:FontCollection) {
 		this.fonts = fonts;
-		layout = TextLayout.create(fonts, "", 1.0, new TextStyle(fontSize), new ParagraphStyle(TextWrap.None));
+		layout = TextLayout.create(fonts, "", 1.0, new TextStyle(fontSize, FontFamily.Monospace), new ParagraphStyle(TextWrap.None));
 		measurement = new LayoutMeasuredContent(function(_) {
 			return new LayoutMeasureResult(width + 12.0, height);
 		});
@@ -98,16 +98,28 @@ private class GutterLabels {
 			if (end <= first) return;
 			for (index in first...end) {
 				var slot = index - first;
-				if (slot == visibleLabels.length)
-					visibleLabels.push(TextLayout.create(fonts, "", 1.0,
-						new TextStyle(fontSize), new ParagraphStyle(TextWrap.None)));
-				var label = Std.string(index + 1);
-				while (label.length < digits) label = " " + label;
-				var number = visibleLabels[slot];
-				number.setText(label);
-				if (color != null) number.setColor(color);
-				var baseline = number.caret(new TextPosition(0, 0)).y;
-				canvas.drawText(number, 6.0, originY + editor.paragraphCaret(index).y - baseline);
+				if (slot == visibleLabels.length) {
+					var number = TextLayout.create(fonts, "", 1.0,
+						new TextStyle(fontSize, FontFamily.Monospace), new ParagraphStyle(TextWrap.None));
+					if (color != null) number.setColor(color);
+					visibleLabels.push(new GutterLabel(number));
+				}
+				var label = visibleLabels[slot];
+				if (label.index != index || label.digits != digits) {
+					var text = Std.string(index + 1);
+					while (text.length < digits) text = " " + text;
+					label.layout.setText(text);
+					label.baseline = label.layout.caret(new TextPosition(0, 0)).y;
+					label.index = index;
+					label.digits = digits;
+					label.editor = null;
+				}
+				if (label.editor != editor || label.revision != editor.geometryRevision) {
+					label.y = editor.paragraphCaret(index).y;
+					label.editor = editor;
+					label.revision = editor.geometryRevision;
+				}
+				canvas.drawText(label.layout, 6.0, originY + label.y - label.baseline);
 			}
 		});
 	}
@@ -128,9 +140,12 @@ private class GutterLabels {
 	public function update(nextCount:Int, nextColor:Color, nextFontSize:Float):Void {
 		if (fontSize != nextFontSize) {
 			fontSize = nextFontSize;
-			var style = new TextStyle(fontSize);
+			var style = new TextStyle(fontSize, FontFamily.Monospace);
 			layout.update(layout.text, 1.0, style, layout.paragraphStyle);
-			for (label in visibleLabels) label.update(label.text, 1.0, style, label.paragraphStyle);
+			for (label in visibleLabels) {
+				label.layout.update(label.layout.text, 1.0, style, label.layout.paragraphStyle);
+				label.index = -1;
+			}
 			count = -1;
 			content.invalidatePaint();
 		}
@@ -146,6 +161,7 @@ private class GutterLabels {
 			color.blue != nextColor.blue || color.alpha != nextColor.alpha) {
 			layout.setColor(nextColor);
 			color = nextColor;
+			for (label in visibleLabels) label.layout.setColor(nextColor);
 			content.invalidatePaint();
 		}
 	}
@@ -153,6 +169,21 @@ private class GutterLabels {
 	public function dispose():Void {
 		content.dispose();
 		layout.dispose();
-		for (label in visibleLabels) label.dispose();
+		for (label in visibleLabels) label.layout.dispose();
+	}
+}
+
+/** Geometry belongs to a particular editor layout and its current revision. */
+private class GutterLabel {
+	public final layout:TextLayout;
+	public var index:Int = -1;
+	public var digits:Int = -1;
+	public var baseline:Float = 0.0;
+	public var y:Float = 0.0;
+	public var editor:Null<TextEditorLayout>;
+	public var revision:Int = -1;
+
+	public function new(layout:TextLayout) {
+		this.layout = layout;
 	}
 }

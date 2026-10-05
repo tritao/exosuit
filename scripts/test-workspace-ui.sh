@@ -45,6 +45,9 @@ from pathlib import Path
 for index in range(24):
     Path(sys.argv[1]).with_name(f"tree-row-{index:02d}.txt").write_text("")
 PYFIXTURE
+run_phase editor-font editor-font "$fixture/sidebar-project/Main.hx"
+run_phase problems problems "$fixture/sidebar-project/Main.hx"
+run_phase activity-bar activity-bar "$fixture/sidebar-project/Main.hx"
 run_phase sidebar-write sidebar "$fixture/sidebar-project/Main.hx"
 run_phase sidebar-read sidebar "$fixture/sidebar-project/Main.hx"
 run_phase sidebar-hidden-read sidebar "$fixture/sidebar-project/Main.hx"

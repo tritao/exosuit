@@ -25,6 +25,12 @@ class DirectoryTreeModel implements TreeViewModel {
 	var listings:Map<String, Array<String>> = [];
 	var directories:Map<String, Bool> = [];
 	var directoryKindsChanged:Bool = false;
+	public var watchChanges:Bool = false;
+	public var observeDirectory:Null<String->Void>;
+	var changesPending:Bool = true;
+
+	public function markChanged():Void changesPending = true;
+	public function visitedDirectories():Array<String> return [for (path in listings.keys()) path];
 
 	public function new(root:String, theme:Theme) {
 		this.root = root;
@@ -85,6 +91,8 @@ class DirectoryTreeModel implements TreeViewModel {
 
 	/** Scan each previously visited directory once, rather than once per child lookup. */
 	public function refresh():Void {
+		if (watchChanges && !changesPending) return;
+		changesPending = false;
 		var changed = false;
 		directoryKindsChanged = false;
 		for (directory => previous in listings) {
@@ -107,6 +115,7 @@ class DirectoryTreeModel implements TreeViewModel {
 		if (cached != null) return cached;
 		var names = readEntries(directory);
 		listings.set(directory, names);
+		if (observeDirectory != null) observeDirectory(directory);
 		return names;
 	}
 

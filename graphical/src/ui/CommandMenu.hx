@@ -17,10 +17,12 @@ class CommandMenu implements View {
 	final dismiss:Void->Void;
 	final x:Float;
 	final y:Float;
+	final customItems:Null<Array<MenuItem>>;
 
 	public function new(registry:CommandRegistry, commandContext:CommandContext,
 			entries:Array<CommandMenuEntry>, x:Float, y:Float,
-			targetIsCurrent:Void->Bool, dismiss:Void->Void) {
+			targetIsCurrent:Void->Bool, dismiss:Void->Void, ?customItems:Array<MenuItem>) {
+		this.customItems = customItems;
 		this.registry = registry;
 		this.commandContext = commandContext;
 		this.entries = entries.copy();
@@ -33,7 +35,7 @@ class CommandMenu implements View {
 	public function isCurrent():Bool return targetIsCurrent();
 
 	public function build(context:BuildContext):RenderNode {
-		var items:Array<MenuItem> = [];
+		var items:Array<MenuItem> = customItems == null ? [] : customItems.copy();
 		var targetValid = isCurrent();
 		for (entry in entries) {
 			if (!registry.contains(entry.command)) continue;

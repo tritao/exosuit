@@ -2,16 +2,24 @@ package config;
 
 class Settings {
 	public var fontPath:String = ApplicationPaths.resource("data/fonts/JetBrainsMono-Regular.ttf");
-	public var fontFallbackPaths:Array<String> = [
-		ApplicationPaths.resource("data/fonts/NotoSansSymbols2-Regular.ttf"),
-		"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-		"/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
-		"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-	];
+	public var fontFallbackPaths:Array<String> = defaultFontFallbackPaths();
+
+	/** Small application-owned symbol coverage, independent of platform font discovery. */
+	public static function bundledFontFallbackPaths():Array<String>
+		return [ApplicationPaths.resource("data/fonts/NotoSansSymbols2-Regular.ttf")];
+
+	static function defaultFontFallbackPaths():Array<String> {
+		var paths = bundledFontFallbackPaths();
+		paths.push("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc");
+		paths.push("/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf");
+		paths.push("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
+		return paths;
+	}
 	public var applicationZoom:Int = 100;
 	public var fontSize:Int = 15;
 	public var sidebarWidth:Int = 220;
 	public var scrollbarVisibility:String = "auto";
+	public var tabTooltipDelay:Float = 0.8;
 	public var minimapEnabled:Bool = true;
 	public var terminalFontSize:Int = 14;
 	public var tabWidth:Int = 4;
@@ -58,6 +66,7 @@ class Settings {
 		result.fontSize = fontSize;
 		result.sidebarWidth = sidebarWidth;
 		result.scrollbarVisibility = scrollbarVisibility;
+		result.tabTooltipDelay = tabTooltipDelay;
 		result.minimapEnabled = minimapEnabled;
 		result.terminalFontSize = terminalFontSize;
 		result.tabWidth = tabWidth;

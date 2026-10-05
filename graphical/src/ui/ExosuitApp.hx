@@ -1,5 +1,7 @@
 package ui;
 
+import Color;
+
 import Insets;
 import LayoutAxis;
 import LayoutDirection;
@@ -10,6 +12,7 @@ import FontCollection;
 import sys.FileSystem;
 import nativekit.ui.core.Command;
 import nativekit.ui.core.RenderNode;
+import nativekit.ui.core.RetainedView;
 import nativekit.ui.core.Shortcut;
 import nativekit.ui.core.UiContext;
 import nativekit.ui.core.UiEvent;
@@ -88,6 +91,7 @@ class ExosuitApp implements DesktopUiApplication {
 	final createTerminal:Null<(String, Void->Void, TerminalPalette)->TerminalPanel>;
 	public var searchPanel(default, null):WorkspaceSearchPanel;
 	public final filesScroll = new nativekit.ui.widgets.scroll.ScrollController();
+	final activityIcons:Map<String, IconName> = [];
 	public final sidebar = new nativekit.ui.widgets.sidebar.SidebarModel();
 	var explorerRoot:Null<String>;
 	var explorerModel:Null<DirectoryTreeModel>;
@@ -97,6 +101,10 @@ class ExosuitApp implements DesktopUiApplication {
 	var paletteVisible:Bool = false;
 	var settingsPanel:Null<nativekit.ui.widgets.settings.SettingsPanel>;
 	var contextMenu:Null<CommandMenu> = null;
+	var viewRevision:Int = 0;
+	var submittedBuildKey:Null<String>;
+	var nextBackgroundPoll:Float = 0.0;
+	var visibleNotification:Null<feedback.Notification>;
 	var viewportWidth:Float = 1280.0;
 	var viewportHeight:Float = 840.0;
 	static inline var TOOLBAR_HEIGHT:Float = 40.0;
@@ -113,19 +121,32 @@ class ExosuitApp implements DesktopUiApplication {
 		terminalPalette = new TerminalPalette(darkPalette);
 		var preferences = new config.Preferences(config.ConfigurationPaths.userSettings());
 		if (fonts != null) {
-			for (path in [preferences.current.fontPath].concat(preferences.current.fontFallbackPaths)) {
-				if (FileSystem.exists(path) && !FileSystem.isDirectory(path)) {
-					try fonts.add(path) catch (error:Dynamic) { statusMessage = "Font: " + Std.string(error); }
-				}
+			var loaded = false;
+			var candidates = [preferences.current.fontPath,
+				"/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+				"/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf",
+				"/System/Library/Fonts/Menlo.ttc", "C:/Windows/Fonts/consola.ttf"];
+			for (path in candidates) {
+				if (loaded || !FileSystem.exists(path) || FileSystem.isDirectory(path)) continue;
+				try { fonts.add(path, FontFamily.Monospace); loaded = true; }
+				catch (error:Dynamic) { statusMessage = "Editor font: " + Std.string(error); }
+			}
+			// DesktopUiHost resolves default script and emoji fallbacks on demand.
+			// Explicit lists retain their configured font order and family.
+			var fallbacks = preferences.store.isDefault("editor/fonts/font_fallback_paths")
+				? config.Settings.bundledFontFallbackPaths() : preferences.current.fontFallbackPaths;
+			for (path in fallbacks) {
+				if (FileSystem.exists(path) && !FileSystem.isDirectory(path))
+					try fonts.add(path, FontFamily.Monospace) catch (error:Dynamic) { statusMessage = "Editor fallback: " + Std.string(error); }
 			}
 		}
 		ui = new UiContext(null, fonts, this.theme);
 		ui.buildContext.environment.colorScheme = darkPalette ? EnvironmentColorScheme.Dark : EnvironmentColorScheme.Light;
 		desktop = fileDialogs;
 		if (hostContext != null) hostContext.onCloseRequested = function(close) close();
-		sidebar.register("files", explorerPanel, new nativekit.ui.widgets.sidebar.SidebarModeOptions("Files", 0, true, 240.0));
-		sidebar.register("search", function() return searchPanel,
-			new nativekit.ui.widgets.sidebar.SidebarModeOptions("Search", 10, true, 320.0));
+		registerSidebarDestination("files", IconName.FolderOpen, explorerPanel, new nativekit.ui.widgets.sidebar.SidebarModeOptions("Files", 0, true));
+		registerSidebarDestination("search", IconName.Search, function() return searchPanel,
+			new nativekit.ui.widgets.sidebar.SidebarModeOptions("Search", 10, true));
 		dock = makeDock();
 		if (openPath == null) dock.close("explorer");
 		var capturedHost:UiWorkbenchHost = null;
@@ -145,6 +166,7 @@ class ExosuitApp implements DesktopUiApplication {
 			return capturedHost;
 		}, preferences, null, this.capabilities);
 		host = capturedHost;
+		if (hostContext != null) hostContext.onPoll = pollBackground;
 		sidebar.setVisible(dock.isOpen("explorer"));
 		sidebar.onChange = syncSidebar;
 		searchPanel = new WorkspaceSearchPanel(application, host, requestFrame);
@@ -166,13 +188,13 @@ class ExosuitApp implements DesktopUiApplication {
 		editorPalette = darkPalette ? application.theme : ExosuitPalette.lightEditor();
 		installCommands();
 		var previousSidebarWidth = application.settings.current.sidebarWidth;
-		sidebar.rememberWidth("files", previousSidebarWidth);
+		sidebar.rememberWidth(previousSidebarWidth);
 		application.settings.subscribe(function(value) {
 			if (hostContext != null) hostContext.zoom = value.applicationZoom / 100.0;
 			terminalPalette.fontSize = value.terminalFontSize;
 			if (value.sidebarWidth != previousSidebarWidth) {
 				previousSidebarWidth = value.sidebarWidth;
-				sidebar.rememberWidth("files", value.sidebarWidth);
+				sidebar.rememberWidth(value.sidebarWidth);
 				syncSidebar();
 			}
 			CommandBridge.refreshShortcuts(ui.commands, application.commands, application.keymap);
@@ -187,15 +209,15 @@ class ExosuitApp implements DesktopUiApplication {
 		var model = new DockWorkspaceModel();
 		model.register(new DockPanelDescriptor("explorer", "Sidebar", true, true, IconName.FolderOpen, nativekit.ui.docking.DockPanelHeaderMode.Content, new nativekit.ui.docking.DockPanelGrouping("sidebar")));
 		model.register(new DockPanelDescriptor("editor", "Editor", false, true, IconName.NewFile, nativekit.ui.docking.DockPanelHeaderMode.Content, new nativekit.ui.docking.DockPanelGrouping("editors", false)));
-		model.register(new DockPanelDescriptor("problems", "Problems", true, true, null, nativekit.ui.docking.DockPanelHeaderMode.Dock, new nativekit.ui.docking.DockPanelGrouping("tools")));
+		model.register(new DockPanelDescriptor("problems", "Problems", true, true, IconName.AlertTriangle, nativekit.ui.docking.DockPanelHeaderMode.Dock, new nativekit.ui.docking.DockPanelGrouping("tools")));
 		if (capabilities.supports(Processes))
 			model.register(new DockPanelDescriptor("build", "Build Output", true, true, IconName.Terminal, nativekit.ui.docking.DockPanelHeaderMode.Dock, new nativekit.ui.docking.DockPanelGrouping("tools")));
 		if (capabilities.supports(Processes))
 			model.register(new DockPanelDescriptor("terminal", "Terminal", true, true, IconName.Terminal, nativekit.ui.docking.DockPanelHeaderMode.Dock, new nativekit.ui.docking.DockPanelGrouping("tools")));
 		dockPanelContents = [
-			new DockPanelContent("explorer", function(_) return new nativekit.ui.widgets.sidebar.SidebarHost("sidebar-modes", sidebar, function(id) { showSidebarMode(id); })),
+			new DockPanelContent("explorer", function(_) return new nativekit.ui.widgets.sidebar.SidebarHost("sidebar-modes", sidebar, function(id) { showSidebarMode(id); }, function(id) return activityIcons.get(id))),
 			new DockPanelContent("editor", function(_) return editorPanel("editor")),
-			new DockPanelContent("problems", function(_) return new ProblemsPanel(host))
+			new DockPanelContent("problems", function(_) return new ProblemsPanel(host, [for (project in application.workspace.projects) project.root]))
 		];
 		if (capabilities.supports(Processes))
 			dockPanelContents.push(new DockPanelContent("build", function(_) return new BuildOutputPanel(host)));
@@ -226,12 +248,13 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function syncSidebar():Void {
+		viewRevision++;
 		if (!sidebar.visible) {
 			if (dock.isOpen("explorer")) dock.close("explorer");
 		} else {
 			if (!dock.isOpen("explorer")) dock.dock("explorer", host.activePane.id, DockDropZone.Left);
 			var mode = sidebar.selected();
-			if (mode != null) dock.setPanelWidth("explorer", mode.width, viewportWidth,
+			if (mode != null) dock.setPanelWidth("explorer", sidebar.width, Math.max(0, viewportWidth - ActivityBar.WIDTH),
 				DockWorkspace.DividerExtent, DockWorkspace.MinimumHorizontalExtent);
 		}
 		requestFrame();
@@ -420,11 +443,13 @@ class ExosuitApp implements DesktopUiApplication {
 			}
 		}
 		var workspaceView = new DockWorkspace("exosuit-workspace", dock, dockPanelContents);
+		workspaceView.availableWidth = Math.max(0, viewportWidth - ActivityBar.WIDTH);
 		workspaceView.availableHeight = Math.max(0.0, viewportHeight - TOOLBAR_HEIGHT - STATUS_HEIGHT);
-		var workspace:View = !dock.isOpen("explorer")
-			? new Row("workspace-with-rail", [new KeyedView("rail", explorerRail()),
-				new KeyedView("workspace", workspaceView)], fillStyle())
-			: workspaceView;
+		var workspace:View = new Row("workspace-with-activity-bar", [
+			new KeyedView("activity-bar", new ActivityBar(sidebar, activityIcons, activateSidebarDestination,
+				application.settings.current.tabTooltipDelay)),
+			new KeyedView("workspace", workspaceView)
+		], fillStyle());
 		var body = new Column("exosuit-body", [
 			new KeyedView("workspace", workspace),
 			new KeyedView("status", statusBar())
@@ -468,27 +493,68 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	public function submit(frame:LayoutFrame):RenderNode {
+		if (hostContext != null && hostContext.repaintOnly && submittedBuildKey != null)
+			return ui.submitCached(view, frame, submittedBuildKey);
 		var widthChanged = viewportWidth != frame.width;
 		viewportWidth = frame.width;
 		viewportHeight = frame.height;
 		if (widthChanged && dock.isOpen("explorer")) {
 			var mode = sidebar.selected();
-			if (mode != null) dock.setPanelWidth("explorer", mode.width, viewportWidth,
+			if (mode != null) dock.setPanelWidth("explorer", sidebar.width, Math.max(0, viewportWidth - ActivityBar.WIDTH),
 				DockWorkspace.DividerExtent, DockWorkspace.MinimumHorizontalExtent);
 		}
 		pumpApplication();
-		return ui.submit(view(), frame);
+		dock.setPanelBadge("problems", host.getProblems().values().length);
+		if (explorerModel != null) explorerModel.refresh();
+		var key = viewRevision + ":" + dock.revision + ":" +
+			(explorerModel == null ? -1 : explorerModel.revision()) + ":" +
+			application.settings.current.minimapEnabled + ":problems=" + host.getProblems().revision + ":prefs=" + application.settings.store.revision;
+		var activeView = host.activeView();
+		key += ":active=" + (activeView == null ? -1 : activeView.id);
+		for (view in host.allViews()) {
+			var selection = view.selection;
+			key += ":" + view.id + ":" + view.document.buffer.stateId + ":" +
+				selection.anchor.line + ":" + selection.anchor.column + ":" +
+				selection.cursor.line + ":" + selection.cursor.column + ":" +
+				view.scrollController.offsetX + ":" + view.scrollController.offsetY + ":" +
+				view.searchDecorationRevision() + ":" + view.preview + ":" + view.document.dirty + ":" +
+				view.document.title + ":" + view.document.path;
+			if (selection.rangeCount() > 1) for (range in selection.allRanges())
+				key += ":range=" + range.anchor.line + ":" + range.anchor.column + ":" +
+					range.cursor.line + ":" + range.cursor.column;
+		}
+		submittedBuildKey = key;
+		return ui.submitCached(view, frame, key);
 	}
 
-	/**
-	 * Runs `Application.update()` (settings reload, search jobs, session
-	 * autosave/recovery, plugin/build/language polling) every rendered frame,
-	 * and asks the host for another frame while a build task or the language
-	 * server has work outstanding, so that work keeps draining even if
-	 * `DesktopUiHost` would otherwise wait for the next input event.
-	 */
+	/** Drain services without requesting a render merely because they are running. */
+	function pollBackground():Void {
+		var now = Sys.time();
+		if (now < nextBackgroundPoll) return;
+		nextBackgroundPoll = now + 0.05;
+		pumpApplication();
+	}
+
 	function pumpApplication():Void {
+		nextBackgroundPoll = Sys.time() + 0.05;
+		var previousLanguageStatus = application.language.statusLabel();
+		var previousProblems = host.getProblems().revision;
+		var previousNotification = visibleNotification;
+		var previousBuildBytes = application.build.output.byteCount;
+		var previousBuild = application.build.active;
+		var previousDecorations = host.getPluginDecorations().revision;
+		var previousPluginStatus = host.getPluginStatusItems().revision;
+		var previousPluginPanels = host.getPluginPanels().revision;
 		application.update();
+		if (previousLanguageStatus != application.language.statusLabel() ||
+			previousProblems != host.getProblems().revision ||
+			previousNotification != host.getNotifications().current() ||
+			previousBuildBytes != application.build.output.byteCount || previousBuild != application.build.active ||
+			previousDecorations != host.getPluginDecorations().revision ||
+			previousPluginStatus != host.getPluginStatusItems().revision ||
+			previousPluginPanels != host.getPluginPanels().revision)
+			requestFrame();
+		visibleNotification = host.getNotifications().current();
 		ui.buildContext.environment.scrollbarVisibility = host.scrollbarVisibility;
 		if (!dock.isOpen("terminal")) closePanelTerminals();
 		for (terminal in host.allTerminalTabs()) {
@@ -507,13 +573,13 @@ class ExosuitApp implements DesktopUiApplication {
 				requestFrame();
 			}
 		}
-		if (application.build.active != null || application.language.hasPendingWork() ||
-			!application.search.workspaceSearch.complete || application.workspace.jobs.activeCount() > 0) requestFrame();
+
 	}
 
 	public function context():UiContext return ui;
 
 	public function dispose():Void {
+		if (hostContext != null) hostContext.onPoll = null;
 		application.shutdown();
 		host.dispose();
 		if (desktop != null) desktop.shutdown();
@@ -531,6 +597,7 @@ class ExosuitApp implements DesktopUiApplication {
 			active: active == null ? -1 : active.id,
 			documentsSource: "core.Application (via UiWorkbenchHost)",
 			explorerRoot: explorerRoot,
+			explorerWatching: explorerModel != null && explorerModel.watchChanges,
 			sidebarMode: sidebar.activeId,
 			sidebarState: sidebar.encode(),
 			panels: dock.panelIds(),
@@ -545,6 +612,11 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function topBar():View {
+		return new RetainedView("toolbar", function(_) return buildTopBar(),
+			function() return statusMessage + ":" + ui.animations.revision);
+	}
+
+	function buildTopBar():View {
 		var style = new LayoutStyle();
 		style.width = LayoutAxis.grow();
 		style.height = LayoutAxis.fixed(TOOLBAR_HEIGHT);
@@ -582,13 +654,6 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function statusBar():View {
-		var style = new LayoutStyle();
-		style.width = LayoutAxis.grow();
-		style.height = LayoutAxis.fixed(STATUS_HEIGHT);
-		style.direction = LayoutDirection.LeftToRight;
-		style.childAlignY = LayoutAlignmentY.Center;
-		style.padding = new Insets(10.0, 2.0, 10.0, 2.0);
-		style.background = theme.tokens.surfaceRaised;
 		var active = host.activeDocument();
 		var tab = host.activeTab();
 		var terminal = tab == null ? null : UiEditorTabs.terminal(tab);
@@ -597,14 +662,24 @@ class ExosuitApp implements DesktopUiApplication {
 		var notification = application.root.getNotifications().current();
 		var languageStatus = application.language.statusLabel();
 		var trailing = notification == null && languageStatus.length > 0 ? languageStatus : notification == null ? '${host.activePane.items.length} open' : notification.message;
-		return new Row("exosuit-status", [
-			new KeyedView("document", new Text(label, null, theme.tokens.textSecondary,
-				TextStyleOverride.text(12.0))),
-			new KeyedView("space", new Spacer("status-space", LayoutAxis.grow(), LayoutAxis.fixed(1.0))),
-			new KeyedView("notification", new Text(trailing, null,
-				notification != null && notification.kind == NotificationKind.Error ? theme.tokens.text : theme.tokens.textSecondary,
-				TextStyleOverride.text(12.0)))
-		], style);
+		var error = notification != null && notification.kind == NotificationKind.Error;
+		return new RetainedView("status-bar", function(_) {
+			var style = new LayoutStyle();
+			style.width = LayoutAxis.grow();
+			style.height = LayoutAxis.fixed(STATUS_HEIGHT);
+			style.direction = LayoutDirection.LeftToRight;
+			style.childAlignY = LayoutAlignmentY.Center;
+			style.padding = new Insets(10.0, 2.0, 10.0, 2.0);
+			style.background = theme.tokens.surfaceRaised;
+			return new Row("exosuit-status", [
+				new KeyedView("document", new Text(label, null, theme.tokens.textSecondary,
+					TextStyleOverride.text(12.0))),
+				new KeyedView("space", new Spacer("status-space", LayoutAxis.grow(), LayoutAxis.fixed(1.0))),
+				new KeyedView("notification", new Text(trailing, null,
+					error ? theme.tokens.text : theme.tokens.textSecondary,
+					TextStyleOverride.text(12.0)))
+			], style);
+		}, function() return label.length + ":" + label + trailing.length + ":" + trailing + ":" + error + ":" + ui.animations.revision);
 	}
 
 	function explorerPanel():View {
@@ -619,7 +694,7 @@ class ExosuitApp implements DesktopUiApplication {
 		}
 		if (explorerModel == null) explorerModel = new DirectoryTreeModel(explorerRoot, theme);
 		explorerModel.refresh();
-		if (explorerTree != null) return new ExplorerTreeView(explorerTree, explorerModel, darkPalette);
+		if (explorerTree != null) return new ExplorerTreeView(explorerTree, explorerModel, darkPalette, hostContext == null ? null : hostContext.events);
 		var viewportStyle = new LayoutStyle();
 		viewportStyle.width = LayoutAxis.grow();
 		viewportStyle.height = LayoutAxis.grow();
@@ -644,24 +719,20 @@ class ExosuitApp implements DesktopUiApplication {
 			], event, function() return explorerRoot == menuRoot && host.focusedFilePath() == path && FileSystem.exists(path));
 		};
 		explorerTree = tree;
-		return new ExplorerTreeView(tree, explorerModel, darkPalette);
+		return new ExplorerTreeView(tree, explorerModel, darkPalette, hostContext == null ? null : hostContext.events);
 	}
 
-	function explorerRail():View {
-		var railStyle = new LayoutStyle();
-		railStyle.width = LayoutAxis.fixed(56.0);
-		railStyle.height = LayoutAxis.grow();
-		railStyle.padding = new Insets(8.0, 8.0, 8.0, 8.0);
-		railStyle.background = theme.tokens.surfaceRaised;
-		var buttonStyle = new LayoutStyle();
-		buttonStyle.width = LayoutAxis.fixed(40.0);
-		buttonStyle.height = LayoutAxis.fixed(36.0);
-		var open = new Button("", buttonStyle, function() showSidebarMode("files"), "rail-open-folder");
-		open.leadingIcon = IconName.FolderOpen;
-		open.accessibilityLabel = "Files";
-		var search = new Button("", buttonStyle, function() showSidebarMode("search"), "rail-search");
-		search.leadingIcon = IconName.Search; search.accessibilityLabel = "Search";
-		return new Column("explorer-rail", [new KeyedView("open", open), new KeyedView("search", search)], railStyle);
+	/** Register a destination once; the Activity Bar follows the sidebar's order and visibility. */
+	public function registerSidebarDestination(id:String, icon:IconName, provider:Void->View,
+			options:nativekit.ui.widgets.sidebar.SidebarModeOptions):Void {
+		sidebar.register(id, provider, options);
+		activityIcons.set(id, icon);
+	}
+
+	public function activateSidebarDestination(id:String):Void {
+		if (sidebar.find(id) == null) return;
+		if (dock.isOpen("explorer") && sidebar.activeId == id) sidebar.setVisible(false);
+		else showSidebarMode(id);
 	}
 
 	function editorPanel(paneId:String):View {
@@ -717,14 +788,33 @@ class ExosuitApp implements DesktopUiApplication {
 				}
 			};
 			filenames.set("doc:" + document.id, document.title);
+			var breadcrumbRoot:Null<String> = null;
+			if (document.path != null) for (project in application.workspace.projects) {
+				var root = StringTools.replace(project.root, "\\", "/");
+				var path = StringTools.replace(document.path, "\\", "/");
+				var prefix = StringTools.endsWith(root, "/") ? root : root + "/";
+				if (StringTools.startsWith(path, prefix) && (breadcrumbRoot == null || root.length > breadcrumbRoot.length))
+					breadcrumbRoot = root;
+			}
+			var contentStyle = new LayoutStyle();
+			contentStyle.width = LayoutAxis.grow();
+			contentStyle.height = LayoutAxis.grow();
+			var content = new Column("document-content:" + documentView.id, [
+				new KeyedView("breadcrumbs", new EditorBreadcrumbs(document, breadcrumbRoot,
+					theme.tokens.textSecondary, Color.fromBytes((editorPalette.editorBackground >>> 24) & 255,
+						(editorPalette.editorBackground >>> 16) & 255, (editorPalette.editorBackground >>> 8) & 255,
+						editorPalette.editorBackground & 255), darkPalette,
+					function(path, event) showBreadcrumbMenu(document, paneId, path, event))),
+				new KeyedView("editor", pane)
+			], contentStyle);
 			items.push(new TabItem("doc:" + document.id, (document.dirty ? "* " : "") + document.title + (documentView.preview ? " (preview)" : ""),
-				pane));
+				content));
 		}
 		var tabsStyle = new LayoutStyle();
 		tabsStyle.width = LayoutAxis.grow();
 		tabsStyle.height = LayoutAxis.grow();
 		tabsStyle.direction = LayoutDirection.TopToBottom;
-		tabsStyle.childGap = 8.0;
+		tabsStyle.childGap = 0.0;
 		var active = editorPane.activeTab();
 		var options = new TabsOptions();
 		options.style = tabsStyle;
@@ -760,7 +850,47 @@ class ExosuitApp implements DesktopUiApplication {
 				return;
 			}
 		};
-		return new EditorTabsView(widget, filenames, darkPalette);
+		return new EditorTabsView(widget, filenames, darkPalette, application.settings.current.tabTooltipDelay);
+	}
+
+	function showBreadcrumbMenu(document:editor.Document, paneId:String, path:String, event:UiEvent):Void {
+		var directory = haxe.io.Path.directory(path);
+		var items:Array<nativekit.ui.widgets.overlays.MenuItem> = [];
+		try {
+			var entries = FileSystem.readDirectory(directory);
+			entries.sort(function(a, b) {
+				var ad = FileSystem.isDirectory(directory + "/" + a), bd = FileSystem.isDirectory(directory + "/" + b);
+				return ad != bd ? (ad ? -1 : 1) : Reflect.compare(a.toLowerCase(), b.toLowerCase());
+			});
+			for (name in entries) {
+				var target = directory + "/" + name;
+				var folder = FileSystem.isDirectory(target);
+				items.push(new nativekit.ui.widgets.overlays.MenuItem(target, name + (folder ? "  ›" : ""), function() {
+					contextMenu = null;
+					if (folder) showBreadcrumbMenu(document, paneId, target + "/_", event);
+					else { host.activateTab(document, paneId); application.open(target); }
+					requestFrame();
+				}));
+			}
+		} catch (error:Dynamic) { application.reportError("files", "Could not list folder: " + Std.string(error)); return; }
+		var x = event.x, y = event.y;
+		if (ui.root != null) {
+			var anchor = ui.root.find(event.target);
+			if (anchor != null && anchor.resolved != null) { var bounds = anchor.globalBounds(); x = bounds.x; y = bounds.y + bounds.height + 4; }
+		}
+		paletteVisible = false;
+		host.dismissLanguagePopup();
+		var breadcrumbMenu:CommandMenu = null;
+		breadcrumbMenu = new CommandMenu(application.commands, application.context, [], x, y,
+			function() {
+				var pane = host.paneById(paneId);
+				if (pane == null) return false;
+				var view = pane.activeView();
+				return view != null && view.document == document;
+			},
+			function() { if (contextMenu == breadcrumbMenu) contextMenu = null; requestFrame(); }, items);
+		contextMenu = breadcrumbMenu;
+		requestFrame();
 	}
 
 	function showContextMenu(entries:Array<CommandMenuEntry>, event:UiEvent, valid:Void->Bool):Void {
@@ -893,6 +1023,7 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function requestFrame():Void {
+		viewRevision++;
 		if (hostContext != null) hostContext.requestFrame();
 	}
 }

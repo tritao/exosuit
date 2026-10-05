@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "package": { "name": "exosuit-tab-tooltip-test" },
+  "entry": "app.TabTooltipTestMain",
+  "sourceRoots": ["src"],
+  "scopeSourceRoots": false,
+  "dependencies": { "exosuit-graphical": { "path": "../../graphical" } },
+  "target": "host",
+  "outputDir": "build"
+}

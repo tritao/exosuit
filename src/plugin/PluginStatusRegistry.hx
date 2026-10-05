@@ -3,6 +3,9 @@ package plugin;
 class PluginStatusRegistry {
 	final values:Array<PluginStatusItem> = [];
 
+	public var revision(default, null):Int = 0;
+	public function changed():Void revision++;
+
 	public function new() {}
 
 	public function add(owner:String, id:String, text:String, priority:Int = 0):PluginStatusItem {
@@ -10,6 +13,7 @@ class PluginStatusRegistry {
 		if (find(owner, id) != null) throw 'status item "$owner:$id" is already registered';
 		var value = new PluginStatusItem(owner, id, text, priority);
 		values.push(value);
+		revision++;
 		return value;
 	}
 
@@ -27,12 +31,16 @@ class PluginStatusRegistry {
 		return result;
 	}
 
-	public function remove(value:PluginStatusItem):Bool return values.remove(value);
+	public function remove(value:PluginStatusItem):Bool {
+		if (!values.remove(value)) return false;
+		revision++;
+		return true;
+	}
 	public function removeOwner(owner:String):Void {
 		var index = values.length;
 		while (index > 0) {
 			index--;
-			if (values[index].owner == owner) values.splice(index, 1);
+			if (values[index].owner == owner) { values.splice(index, 1); revision++; }
 		}
 	}
 }

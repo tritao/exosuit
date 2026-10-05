@@ -59,11 +59,14 @@ echo "PASS: Haxeon headless application exercised the platform ABI"
 
 run_test native-string-test
 run_test application-test
+run_test problems
 capabilities_state=$(mktemp -d)
 PRAGTICAL_PORTABLE="$capabilities_state" run_test host-capabilities-test
 rm -rf "$capabilities_state"
 run_test command-test
 run_test editor-view-test
+run_test tab-tooltip
+run_test sidebar-layout
 
 mkdir -p "$root_dir/build/process cwd"
 run_test process-test "$root_dir/build/process-fixture" "$root_dir/build/process cwd"

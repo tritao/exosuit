@@ -2,6 +2,9 @@
 import json
 import sys
 import os
+import threading
+
+output_lock = threading.Lock()
 
 events_path = sys.argv[sys.argv.index("--events") + 1] if "--events" in sys.argv else None
 root_uri = ""
@@ -27,9 +30,10 @@ def read_message():
 
 def send(message):
     body = json.dumps(message, ensure_ascii=False, separators=(",", ":")).encode()
-    sys.stdout.buffer.write(f"Content-Length: {len(body)}\r\n\r\n".encode())
-    sys.stdout.buffer.write(body)
-    sys.stdout.buffer.flush()
+    with output_lock:
+        sys.stdout.buffer.write(f"Content-Length: {len(body)}\r\n\r\n".encode())
+        sys.stdout.buffer.write(body)
+        sys.stdout.buffer.flush()
 
 
 held = None
@@ -57,6 +61,14 @@ while True:
     elif method == "textDocument/didOpen":
         item = message["params"]["textDocument"]
         documents[item["uri"]] = item
+        if "--idle-diagnostic" in sys.argv:
+            notification = {"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {
+                "uri": item["uri"], "version": item["version"], "diagnostics": [{"severity": 1,
+                    "message": "Idle background diagnostic", "range": {
+                        "start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 5}}}]}}
+            timer = threading.Timer(2.0, send, args=[notification])
+            timer.daemon = True
+            timer.start()
         send({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {
             "uri": item["uri"], "version": item["version"], "diagnostics": []}})
     elif method == "textDocument/didChange":

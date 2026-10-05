@@ -41,6 +41,10 @@ narrow editor panes. Font paths should be absolute; built-in defaults resolve
 relative to the installed application. Theme colors under `appearance/colors`
 are signed RGBA integers and appear under Advanced settings.
 
+The graphical editor resolves default script and emoji fallback fonts from the
+platform when needed. An explicit `editor/fonts/font_fallback_paths` list is loaded
+at startup in its configured order.
+
 Array preferences are JSON strings containing arrays. For example, the value of
 `languages/haxeon/command` is `"[\"/path with spaces/haxeon-lsp\",\"--stdio\"]"`.
 An empty array uses `$HAXEON_LSP`, then the bundled server, then
@@ -99,8 +103,11 @@ neutral strokes to avoid forcing full-document syntax highlighting. The preview
 is cached as an 80-column bitmap with at most 1,024 rows, keeping GPU geometry
 bounded even for dense files.
 
+`editor/display/tab_tooltip_delay` controls the tab tooltip hover delay in seconds (default `0.8`, range `0`–`5`). Tooltips hide when leaving or clicking a tab.
 
 The sidebar uses one shared width across Activity Bar destinations. Resizing, collapsing, and reopening retain that width. Older sessions migrate from the selected destination’s saved width.
+
+Editor text and line numbers request a dedicated monospace font family. The configured editor font is loaded into that family, with a system monospace fallback if unavailable. Workbench labels retain their proportional UI font. The browser bundles IBM Plex Mono for code and IBM Plex Sans for UI.
 
 Application zoom is stored as `appearance/workbench/zoom_percent` (default 100,
 range 70–200). Ctrl+= or Ctrl+Shift+= zooms in, Ctrl+- zooms out, and Ctrl+0

@@ -39,6 +39,7 @@ class WebMain {
 		options.height = height;
 		options.fonts = [
 			new BrowserUiFontAsset("IBMPlexSans-Regular", "assets/IBMPlexSans-Regular.ttf", "/assets/IBMPlexSans-Regular.ttf", FontFamily.Default),
+			new BrowserUiFontAsset("IBMPlexMono-Regular", "assets/IBMPlexMono-Regular.ttf", "/assets/IBMPlexMono-Regular.ttf", FontFamily.Monospace),
 			new BrowserUiFontAsset("NotoEmoji-Regular", "assets/NotoEmoji-Regular.ttf", "/assets/NotoEmoji-Regular.ttf", FontFamily.Emoji)
 		];
 		var started = BrowserUiHost.start(options, function(context) {

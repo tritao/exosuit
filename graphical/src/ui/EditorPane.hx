@@ -266,7 +266,7 @@ class EditorPane implements View {
 		editorStyle.height = LayoutAxis.fit();
 		editorStyle.background = color(editorTheme.editorBackground);
 		var area = TextArea.withDocument("editor:" + document.id, document.buffer.document,
-			handleEdit, editorStyle, null, new TextStyle(fontSize), color(editorTheme.editorForeground));
+			handleEdit, editorStyle, null, new TextStyle(fontSize, FontFamily.Monospace), color(editorTheme.editorForeground));
 		area.colorRangeProvider = foregroundProvider;
 		area.decorationProvider = decorationProvider;
 		area.selectionProvider = selectionProvider;

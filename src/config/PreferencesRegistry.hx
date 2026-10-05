@@ -35,7 +35,6 @@ class PreferencesRegistry {
 			options.tooltip = "Scale the whole application independently of editor font size.";
 			if (!projectOnly) registry.define("appearance/workbench/zoom_percent", PropertyType.Int, PropertyValue.Int(defaults.applicationZoom), options);
 		}
-
 		{
 			var options = new SettingOptions();
 			options.minimum = 100; options.maximum = 1200;
@@ -49,6 +48,11 @@ class PreferencesRegistry {
 		{
 			var options = new SettingOptions();
 			if (!projectOnly) registry.define("editor/display/minimap_enabled", PropertyType.Bool, PropertyValue.Bool(defaults.minimapEnabled), options);
+		}
+		{
+			var options = new SettingOptions();
+			options.minimum = 0; options.maximum = 5;
+			if (!projectOnly) registry.define("editor/display/tab_tooltip_delay", PropertyType.Float, PropertyValue.Float(defaults.tabTooltipDelay), options);
 		}
 
 		{
@@ -228,6 +232,7 @@ class PreferencesRegistry {
 		if (store.registry.exists("appearance/workbench/sidebar_width") && (base == null || !store.isDefault("appearance/workbench/sidebar_width"))) value.sidebarWidth = store.getInt("appearance/workbench/sidebar_width");
 		if (store.registry.exists("editor/display/scrollbar_visibility") && (base == null || !store.isDefault("editor/display/scrollbar_visibility"))) value.scrollbarVisibility = store.getString("editor/display/scrollbar_visibility");
 		if (store.registry.exists("editor/display/minimap_enabled") && (base == null || !store.isDefault("editor/display/minimap_enabled"))) value.minimapEnabled = store.getBool("editor/display/minimap_enabled");
+		if (store.registry.exists("editor/display/tab_tooltip_delay") && (base == null || !store.isDefault("editor/display/tab_tooltip_delay"))) value.tabTooltipDelay = store.getFloat("editor/display/tab_tooltip_delay");
 		if (store.registry.exists("editor/indentation/tab_width") && (base == null || !store.isDefault("editor/indentation/tab_width"))) value.tabWidth = store.getInt("editor/indentation/tab_width");
 		if (store.registry.exists("editor/indentation/insert_spaces") && (base == null || !store.isDefault("editor/indentation/insert_spaces"))) value.insertSpaces = store.getBool("editor/indentation/insert_spaces");
 		if (store.registry.exists("editor/display/scroll_animation_type") && (base == null || !store.isDefault("editor/display/scroll_animation_type"))) value.scrollAnimationType = store.getString("editor/display/scroll_animation_type");
