@@ -55,7 +55,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		closeContext = context;
 		this.testFonts = context.fonts;
 		this.path = path;
-		if (phase == "language-folder" || phase == "sidebar-write" || phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) application.openArgument(path.substring(0, path.lastIndexOf("/")));
+		if (phase == "zoom" || phase == "language-folder" || phase == "sidebar-write" || phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) application.openArgument(path.substring(0, path.lastIndexOf("/")));
 	}
 
 	function require(value:Bool, message:String):Void { if (!value) throw message; }
@@ -241,7 +241,9 @@ class WorkspaceSmokeApp extends ExosuitApp {
 				application.openArgument(root + "/Main.hx");
 				application.openArgument(root + "/data.json");
 			}
-			if (frames == 4) { resizeSidebar(-80); frame.setViewport(500.0, 600.0); }
+			// Resolve the resized layout before injecting the tab-icon click on
+			// frame 4; hit testing still uses the preceding submitted frame.
+			if (frames == 3) { resizeSidebar(-80); frame.setViewport(500.0, 600.0); }
 			if (frames >= 6) frame.setViewport(1400.0, 600.0);
 			if (frames == 7) resizeSidebar(650);
 			var addedPath = path.substring(0, path.lastIndexOf("/")) + "/added-after-render.txt";
@@ -664,30 +666,49 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	}
 
 	function zoomStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
+		// Allow the native window's initial scale/size events to settle before
+		// checking viewport ratios. GDK_SCALE can resize it after the first frame.
+		if (frames <= 6) return super.submit(frame);
+		if (frames == 7) WorkspaceSmokeMain.zoomWidth = Std.int(frame.width);
+		var zoomFrame = frames - 6;
 		var modifier = Sys.systemName() == "Mac" ? UiModifier.Super : UiModifier.Control;
-		if (frames == 2) ui.key(UiEventKind.KeyDown, 61, modifier);
-		if (frames == 3) {
+		if (zoomFrame == 2) ui.key(UiEventKind.KeyDown, 61, modifier);
+		if (zoomFrame == 3) {
 			require(application.settings.current.applicationZoom == 110, "zoom in shortcut failed");
-			require(Math.abs(frame.width - 900 / 1.1) < 0.01, "zoom did not change host layout viewport");
+			require(Math.abs(frame.width - WorkspaceSmokeMain.zoomWidth / 1.1) < 0.01, "zoom did not change host layout viewport");
 			require(new config.Preferences(config.ConfigurationPaths.userSettings()).current.applicationZoom == 110, "zoom did not persist");
 			ui.key(UiEventKind.KeyDown, 61, modifier | UiModifier.Shift);
 		}
-		if (frames == 4) {
+		if (zoomFrame == 4) {
 			require(application.settings.current.applicationZoom == 120, "shift plus shortcut failed");
 			ui.key(UiEventKind.KeyDown, 45, modifier);
 		}
-		if (frames == 5) {
+		if (zoomFrame == 5) {
 			require(application.settings.current.applicationZoom == 110, "zoom out shortcut failed");
 			ui.key(UiEventKind.KeyDown, 48, modifier);
 		}
-		if (frames == 6) {
-			require(application.settings.current.applicationZoom == 100 && Math.abs(frame.width - 900) < 0.01, "zoom reset failed");
+		if (zoomFrame == 6) {
+			// GTK can deliver an initial HiDPI resize while these shortcuts run.
+			// Reset must restore host zoom without forcing the window's old size.
+			require(application.settings.current.applicationZoom == 100 && closeContext.zoom == 1.0 && frame.width > 0,
+				"zoom reset failed: percent=" + application.settings.current.applicationZoom + ", viewport=" + frame.width);
 			setApplicationZoom(500);
 			require(application.settings.current.applicationZoom == 200, "zoom upper bound failed");
 			setApplicationZoom(10);
 			require(application.settings.current.applicationZoom == 70, "zoom lower bound failed");
 			setApplicationZoom(100);
 			trace("PASS: application zoom shortcuts, host viewport, persistence, reset and bounds");
+		}
+		if (zoomFrame >= 7 && zoomFrame < 67) {
+			var step = (zoomFrame - 7) % 30;
+			ui.key(UiEventKind.KeyDown, step < 15 ? 61 : 45, modifier);
+			var percent = application.settings.current.applicationZoom;
+			require(percent >= 70 && percent <= 200, "repeated zoom escaped supported bounds");
+			trace("zoom stress frame=" + zoomFrame + " percent=" + percent);
+		}
+		if (zoomFrame == 67) {
+			ui.key(UiEventKind.KeyDown, 48, modifier);
+			trace("PASS: repeated zoom shortcuts render both limits and recover");
 		}
 		return super.submit(frame);
 	}
@@ -1065,7 +1086,9 @@ class WorkspaceSmokeApp extends ExosuitApp {
 				resizeSidebar(30);
 			}
 			if (frames == 7) {
-				require(filesScroll.offsetY > 0, "wheel did not reach Files tree");
+				require(filesScroll.offsetY > 0, "wheel did not reach Files tree: viewport=" +
+					filesScroll.viewportHeight + ", content=" + filesScroll.contentHeight +
+					", maximum=" + filesScroll.maxScrollY);
 				var files = sidebar.find("files");
 				require(files != null && sidebar.width > sidebarWidth + 20, "Files divider width was not retained");
 				sidebarWidth = sidebar.width;
@@ -1236,20 +1259,30 @@ class WorkspaceSmokeApp extends ExosuitApp {
 
 class WorkspaceSmokeMain {
 	public static var terminalStarts = 0;
+	public static var zoomWidth = 900;
 	public static function createTerminal(cwd:String, requestFrame:Void->Void, palette:ui.TerminalPalette):ui.TerminalPanel {
 		var panel = ui.TerminalPane.open(cwd, requestFrame, palette);
 		terminalStarts++;
 		return panel;
 	}
 	static function main():Int {
+
 		var args = Sys.args();
 		if (args.length != 3) throw "expected source path, capture directory and phase";
 		var options = new DesktopUiHostOptions();
 		options.title = "exosuit workspace acceptance";
 		options.width = 900; options.height = 600;
+		if (args[2] == "zoom") {
+			var width = Sys.getEnv("EXOSUIT_ZOOM_TEST_WIDTH");
+			var height = Sys.getEnv("EXOSUIT_ZOOM_TEST_HEIGHT");
+			if (width != null) options.width = Std.parseInt(width);
+			if (height != null) options.height = Std.parseInt(height);
+			zoomWidth = options.width;
+		}
 		options.captureDirectory = args[1];
-		options.frameLimit = args[2] == "save-as" ? 10 : args[2] == "exit-confirmation" ? 11 : args[2] == "tab-close" ? 13 : args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 10 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
+		options.frameLimit = args[2] == "zoom" ? 75 : args[2] == "save-as" ? 10 : args[2] == "exit-confirmation" ? 11 : args[2] == "tab-close" ? 13 : args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 10 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
 		var status = DesktopUiHost.run(options, context -> new WorkspaceSmokeApp(context, args[0], args[2]));
+
 		return status;
 	}
 }
