@@ -2,6 +2,28 @@
 
 Last updated: 2026-10-05.
 
+## M12.2 — clipboard and bracketed paste, 2026-10-05
+
+Terminal panes now accept Ctrl+Shift+V through UIKit's asynchronous clipboard
+service. A focus generation prevents a pending read from reaching a pane after
+focus leaves and returns; closed panes and exited sessions reject delivery.
+Key repeats consume the paste shortcut instead of sending Control-V to the PTY.
+TerminalKit emits length-delimited input using the emulator's current DEC 2004
+mode. Its callback path borrows the caller's bytes without concatenating the
+paste wrappers. The queued path reserves the whole message before emission;
+over-limit/allocation failures cannot leave an unmatched opening wrapper.
+The existing one-MiB pending-reply bound applies to queued paste.
+
+Verified: portable ABI audit for Linux/Windows/macOS triples; native contract
+and PTY bridge tests; Haxe terminal-session tests for plain and Unicode
+bracketed paste; graphical build; real X11 clipboard shortcut executing a
+command through the PTY and writing an asserted fixture marker. Updated the
+terminal smoke's stale Open Folder coordinate assertion to check button
+presence. Cross-platform runtime and physical IME qualification remain open.
+M12 is incomplete: mouse reporting, selection/copy/search, rendering roles,
+process controls and full-screen/performance acceptance are still required.
+Next implement mouse reporting through the existing emulator/session path.
+
 ## M10 — real-server graphical acceptance on Linux, 2026-10-05
 
 Added `scripts/test-real-language-ui.sh` and its hosted graphical test project

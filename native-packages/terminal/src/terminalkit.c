@@ -136,6 +136,28 @@ void terminalkit_set_output_callback(terminalkit_handle *kit,
     kit->output_callback = callback;
     kit->output_user_data = user_data;
 }
+int terminalkit_paste(terminalkit_handle *kit, const uint8_t *bytes, uint64_t size) {
+    if (!kit || (!bytes && size) || size > TERMINALKIT_REPLY_LIMIT) return -1;
+    if (!size) return 0;
+    int mode = 0;
+    terminal_emulator_modes(kit->emulator, NULL, NULL, NULL, NULL, &mode, NULL);
+    uint32_t needed = (uint32_t)size + (mode ? 12u : 0u);
+    if (!kit->output_callback) {
+        if (kit->reply_overflow || needed > TERMINALKIT_REPLY_LIMIT - kit->reply_size)
+            return -1;
+        needed += kit->reply_size;
+        if (needed > kit->reply_capacity) {
+            uint8_t *grown = realloc(kit->replies, needed);
+            if (!grown) return -1;
+            kit->replies = grown;
+            kit->reply_capacity = needed;
+        }
+    }
+    if (mode) emit_reply("\033[200~", 6, kit);
+    emit_reply((const char *)bytes, (int)size, kit);
+    if (mode) emit_reply("\033[201~", 6, kit);
+    return 0;
+}
 int terminalkit_keyboard(terminalkit_handle *kit, const char *key_name,
     uint32_t modifiers, uint32_t unicode) {
     return kit && terminal_emulator_keyboard(kit->emulator, key_name, modifiers, unicode);

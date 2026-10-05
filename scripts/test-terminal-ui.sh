@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Real X11 terminal dock, PTY input, and viewport resize smoke.
+# Real X11 terminal dock, clipboard paste, PTY input, and viewport resize smoke.
 set -euo pipefail
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 haxeon_root=${HAXEON_ROOT:-"$root_dir/../haxeon"}
@@ -24,7 +24,9 @@ if [[ ${1:-} == --drive ]]; then
 	xdotool windowsize "$window" 900 680
 	sleep .4
 	xdotool mousemove --window "$window" 450 560 click 1
-	xdotool type --clearmodifiers --delay 12 'stty size'
+	printf '%s' "stty size; printf pasted > '$fixture/paste-ok'" | xclip -selection clipboard
+	xdotool key --clearmodifiers ctrl+shift+v
+	sleep .2
 	xdotool key Return
 	wait "$app"
 	trap - EXIT
@@ -47,15 +49,16 @@ python3 - "$fixture" <<'CHECK'
 import json, pathlib, re, sys
 root = pathlib.Path(sys.argv[1])
 state = json.loads((root / 'capture/app-state.json').read_text())
+assert (root / 'paste-ok').read_text() == 'pasted', 'clipboard command was not executed by the PTY'
 assert state['terminal'] == 'running', state
 assert 95 <= state['terminalColumns'] <= 105, state
 assert 5 <= state['terminalRows'] <= 8, state
 assert not state['errors'], state
 tree = (root / 'capture/ui-tree.txt').read_text()
-assert re.search(r'Box \[8,48 40x36\].*label="Open Folder"', tree), tree
+assert re.search(r'type=button.*label="Open Folder"', tree), tree
 assert tree.count('type=canvas z=1') >= state['terminalRows'], state
 assert (root / 'capture/frame.png').stat().st_size > 1000
 events = (root / 'events.jsonl').read_text()
 assert 'SurfaceResize' in events and '900,680' in events, events
-print('PASS: terminal dock, row canvases, live PTY resize, and shell input')
+print('PASS: terminal dock, row canvases, live PTY resize, and clipboard paste')
 CHECK

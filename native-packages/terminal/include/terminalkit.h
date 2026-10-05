@@ -59,6 +59,10 @@ TERMINALKIT_API const char *terminalkit_title(terminalkit_handle *kit) TK_RETURN
 TERMINALKIT_API void terminalkit_focus(terminalkit_handle *kit, int focused);
 TERMINALKIT_API void terminalkit_set_output_callback(terminalkit_handle *kit,
     terminalkit_output_callback callback, void *user_data);
+/** Emits length-delimited paste through the output callback or reply queue.
+ * Returns 0 on success, -1 for invalid input, allocation failure or queue limit.
+ * Callback bytes are borrowed only for the duration of each invocation. */
+TERMINALKIT_API int terminalkit_paste(terminalkit_handle *kit, const uint8_t *bytes, uint64_t size);
 TERMINALKIT_API int terminalkit_keyboard(terminalkit_handle *kit,
     const char *key_name TK_UTF8, uint32_t modifiers, uint32_t unicode);
 TERMINALKIT_API int terminalkit_mouse(terminalkit_handle *kit, uint32_t x, uint32_t y,

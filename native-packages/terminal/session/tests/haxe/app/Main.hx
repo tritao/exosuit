@@ -40,6 +40,16 @@ class Main {
     static function main():Void {
         var backend = new FakeBackend();
         var session = new TerminalSession(backend, Emulator.open(20, 4, 8));
+        session.emulator.feedString("\x1b[?2004h");
+        session.emulator.paste(Bytes.ofString("hello\n日本語"));
+        session.pollEvents();
+        if (backend.writes.length != 1 || backend.writes[0] != "\x1b[200~hello\n日本語\x1b[201~")
+            throw "bracketed paste was not delivered to the backend";
+        session.emulator.feedString("\x1b[?2004l");
+        session.emulator.paste(Bytes.ofString("plain"));
+        session.pollEvents();
+        if (backend.writes.length != 2 || backend.writes[1] != "plain")
+            throw "plain paste was not delivered to the backend";
         backend.events.push(output(6, "world"));
         session.pollEvents();
         if (session.offset != 0 || backend.replays.length != 1 || backend.replays[0] != 0)
@@ -66,7 +76,7 @@ class Main {
         session.resize(30, 5);
         session.detach();
         session.terminate(true);
-        if (backend.writes.length != 1 || backend.writes[0] != "input" ||
+        if (backend.writes.length != 3 || backend.writes[2] != "input" ||
                 backend.resizes != 1 || backend.detaches != 1 || backend.terminations != 1)
             throw "backend operations were not forwarded";
         var checkpoint = session.emulator.checkpoint();

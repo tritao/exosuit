@@ -15,6 +15,12 @@ interface TerminalKit @target("portable-abi64") @library("terminalkit") {
 	extern fn terminalkit_mouse(kit: ptr<terminalkit_handle>, x: u32, y: u32, button: u32, event: u32, modifiers: u8) -> c_int;
 	extern fn terminalkit_mouse_mode(kit: ptr<terminalkit_handle>) -> c_int;
 	extern fn terminalkit_open(columns: c_int, rows: c_int, scrollback_limit: c_int, term: utf8, out_kit: ptr<nullable<ptr<terminalkit_handle>>> @out @borrowed) -> c_int;
+	/**
+	 * Emits length-delimited paste through the output callback or reply queue.
+	 * Returns 0 on success, -1 for invalid input, allocation failure or queue limit.
+	 * Callback bytes are borrowed only for the duration of each invocation.
+	 */
+	extern fn terminalkit_paste(kit: ptr<terminalkit_handle>, bytes: ptr<const<u8>>, size: u64) -> c_int;
 	extern fn terminalkit_resize(kit: ptr<terminalkit_handle>, columns: c_int, rows: c_int) -> void;
 	extern fn terminalkit_restore(kit: ptr<terminalkit_handle>, data: ptr<const<void>>, size: u64) -> c_int;
 	extern fn terminalkit_row_cells_copy(kit: ptr<terminalkit_handle>, row: c_int, buffer: nullable<ptr<u8>> @out_buffer("inout_size"), inout_size: ptr<u32> @inout) -> c_int;

@@ -51,6 +51,7 @@ class TerminalPane implements TerminalPanel {
 	var resolvedHeight:Float = 0.0;
 	var focusRequested:Bool = false;
 	var focused:Bool = false;
+	var focusGeneration:Int = 0;
 	var closed:Bool = false;
 	var cursorRow:Int = -1;
 	var cursorColumn:Int = -1;
@@ -235,15 +236,31 @@ class TerminalPane implements TerminalPanel {
 				event.preventDefault();
 			}
 		});
-		node.on(UiEventKind.KeyDown, handleKey);
+		node.on(UiEventKind.KeyDown, function(event) {
+			var paste = event.key == UiKey.V &&
+				(event.modifiers & (UiModifier.Control | UiModifier.Shift)) ==
+				(UiModifier.Control | UiModifier.Shift);
+			if (paste) {
+				var generation = focusGeneration;
+				context.clipboard.readText(function(text) {
+					if (closed || !focused || generation != focusGeneration || session.status != "running" || text.length == 0) return;
+					session.emulator.paste(Bytes.ofString(text));
+					session.pollEvents();
+					requestFrame();
+				});
+				event.preventDefault();
+			} else handleKey(event);
+		});
 		node.on(UiEventKind.KeyRepeat, handleKey);
 		node.on(UiEventKind.Focus, function(_) {
 			focused = true;
+			focusGeneration++;
 			session.emulator.focus(true);
 			requestFrame();
 		});
 		node.on(UiEventKind.FocusLost, function(_) {
 			focused = false;
+			focusGeneration++;
 			session.emulator.focus(false);
 			requestFrame();
 		});
@@ -261,6 +278,12 @@ class TerminalPane implements TerminalPanel {
 	}
 
 	function handleKey(event:UiEvent):Void {
+		if (event.key == UiKey.V &&
+			(event.modifiers & (UiModifier.Control | UiModifier.Shift)) ==
+			(UiModifier.Control | UiModifier.Shift)) {
+			event.preventDefault();
+			return;
+		}
 		var name = switch event.key {
 			case UiKey.Enter: "enter";
 			case UiKey.Backspace: "backspace";

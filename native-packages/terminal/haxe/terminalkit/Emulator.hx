@@ -97,6 +97,12 @@ class Emulator {
         return copied.buffer;
     }
 
+    /** Encodes paste using the application's current bracketed-paste mode. */
+    public function paste(bytes:haxe.io.Bytes):Void {
+        if (TerminalKit.terminalkit_paste(live(), bytes, bytes.length) != 0)
+            throw "Terminal paste exceeds the pending input limit";
+    }
+
     public function key(name:String, modifiers:Int = 0, unicode:Int = -1):Bool
         return TerminalKit.terminalkit_keyboard(live(), name, modifiers, unicode) != 0;
 
