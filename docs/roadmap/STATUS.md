@@ -2,6 +2,70 @@
 
 Last updated: 2026-10-05.
 
+## Haxeon RPC.1 — first workspace consumer, 2026-10-05
+
+`src/workspace/service/` now consumes Haxeon RPC with a headless named-group
+metadata catalog, typed query, explicit watch/resume, group-change notifications,
+expected-revision rename and operation-outcome lookup. Permanent method/field ids
+and capability checks live with the service schema. Renames preserve cwd; this
+slice does not complete nested groups, project files, terminal/agent operations,
+durable persistence or a daemon. Details and usage: [WORKSPACE-RPC.md](WORKSPACE-RPC.md).
+
+The client replica explicitly restores after handshake using a generation guard.
+It resumes retained events; a new epoch or expired/future cursor establishes live
+watch delivery before snapshot fetching and reconciles bounded concurrent events.
+A live sequence gap makes the view unready and explicit recovery fetches fresh
+state. Old-generation and superseded recovery callbacks cannot replace the view.
+A disconnected replica keeps its last snapshot/cursor but reports unready.
+
+Rename commits the metadata, sequence and operation outcome together in one
+non-interleaved service event-loop action before replying/publishing. Identical
+operation retries return the original outcome without a second revision/event;
+different semantic payloads with the same id fail. Lost replies are reconciled by
+outcome lookup. All committed outcomes remain until the epoch ends; retention
+saturation rejects new mutations rather than evicting uncertain outcomes. Unknown
+outcomes, including after restart, remain ambiguous. Restart requires a new epoch
+and rejects old-epoch mutations. This is in-memory atomicity, not durable storage
+or an exactly-once delivery guarantee; the daemon store must persist metadata and
+outcomes atomically and define retention before durable deployment.
+
+Two valid-code compiler defects were fixed without weakening workspace types:
+
+- Haxeon **1116631b**: field inference accepted only literal array elements. Arrays of statically typed
+  constants failed before ordinary expression typing could resolve them. Field
+  initializer resolution now recurses through arrays using existing static-field
+  and call-result resolution, structural signature comparison and cycle detection.
+  A portable nested-array fixture passes, while mixed-element/cyclic arrays still
+  fail. Existing compiler signature utilities keep the fix self-hostable.
+- Haxeon **46b32640**: incremental pruning retained generic lambdas but dropped nested function adapters
+  and their capture environments. `NestedAdapterRetentionMain` reproduces the
+  missing IR object on the old compiler and passes after the fix. Retention now
+  follows generated-function ownership transitively, excluding children superseded
+  by retyping. The reducer also checks that removing the caller prunes descendants.
+
+Native and both Wasm consumer tests cover snapshot races, live events, retained
+resume, expired history/snapshot recovery, epoch changes, stale callbacks,
+permissions/revocation, ambiguous lost replies, same/different operation-id reuse,
+revision conflicts, bounded outcome retention and slow-observer overflow while
+another client commits normally. The Wasm consumer is registered alongside the
+native suite in `scripts/test.sh`. The final Haxeon `./scripts/test.sh` passes formatting, native build,
+**487 compiler/runtime cases**, all integrations, Wasm backend/parity and
+Wasmtime. Exosuit native RPC consumer, both Wasm workspace consumers, graphical
+build, owned-file format checks and shell syntax checks pass. RPC.1 is accepted
+for this transport-independent/in-memory first delivery; M14 and durable daemon
+work are not complete. Evidence: `/tmp/haxeon-workspace-rpc-verified.log`,
+`/tmp/exosuit-workspace-rpc-final.log`,
+`/tmp/exosuit-workspace-rpc-wasm-final.log` and
+`/tmp/exosuit-workspace-rpc-graphical.log`. Reduced old-compiler failures:
+`/tmp/haxeon-static-array-baseline.log` and
+`/tmp/haxeon-nested-adapter-baseline.log`; the static-array example also passes
+reference Haxe (`/tmp/haxeon-static-array-reference.log`).
+
+Next: RPC.2 local socket and browser WebSocket adapters, authentication before
+privileged dispatch and actual restart/suspend/churn recovery. Build the headless
+agent entrypoint around the same service; add durable storage before claiming
+persisted group metadata or mutation reconciliation across process restarts.
+
 ## Haxeon RPC.1 — handshake and reconnect, 2026-10-05
 
 Haxeon **51eaaa6a** adds immutable peer options, bounded client/server

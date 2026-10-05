@@ -1,6 +1,7 @@
 # Workspace protocol contract
 
-Status: planned. Shared rules for M14/M16, implemented through Haxeon RPC.
+Status: first in-memory group catalog/query/watch/rename consumer implemented;
+durable daemon, project/file and terminal/agent methods remain planned. Shared rules for M14/M16, implemented through Haxeon RPC.
 Keep one service and typed client API across local sockets and remote transport.
 Add methods only as the delivery slices need them; no separate protocol framework.
 
@@ -71,4 +72,5 @@ unsupported version/capability. File specifics are in WORKSPACE-FILES.md.
 Deliver these rules alongside actual M14 methods. The first workspace/RPC slice
 proves hello, one query, one recoverable subscription and one reconciled mutation.
 Separate generation, generic streaming extensions and advanced transports wait
-until a working consumer needs them. Current roadmap next remains M10.2.
+until a working consumer needs them. The first consumer is documented in [WORKSPACE-RPC.md](WORKSPACE-RPC.md);
+real local/WebSocket adapters are the next RPC slice.

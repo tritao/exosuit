@@ -1,11 +1,13 @@
 # Haxeon typed RPC foundation
 
-Status: RPC.1 in progress; envelopes, framing, bounded transport and typed
-asynchronous dispatch, handshake and reconnect pass native consumer tests.
-Workspace queries, subscription recovery and mutation reconciliation remain
-pending. Required by the Exosuit workspace service in [M14](14-workbench.md). This plan authorizes a
-small general-purpose Haxeon library, developed alongside real workspace
-methods, rather than an Exosuit-specific framework or a new serialization layer.
+Status: RPC.1 accepted for the transport-independent runtime and first in-memory
+workspace consumer. Native, Wasm32 and Wasm GC tests pass, including handshake,
+reconnect, subscription recovery and lost-mutation reconciliation. Real transport
+adapters are next in RPC.2; durable daemon storage remains Exosuit work. See
+[WORKSPACE-RPC.md](WORKSPACE-RPC.md) for the consumer's exact guarantees and limits.
+Required by the Exosuit workspace service in [M14](14-workbench.md). This plan
+authorizes a small general-purpose Haxeon library developed alongside real
+workspace methods, with the existing serialization layer.
 
 ## Ownership
 
@@ -46,11 +48,11 @@ outside the RPC core. Codex's app-server protocol stays inside its adapter.
   Disconnect completes pending calls with an explicit failure; if a request
   may have reached the server, preserve that ambiguity. Never silently replay
   pending requests or widen capabilities/policy during reconnect.
-- [ ] Provide explicit subscription restoration hooks. A resumable subscription
+- [x] Provide explicit subscription restoration hooks. A resumable subscription
   supplies an application-owned cursor and resume request after handshake.
   Surface replay gaps to the application, which chooses a fresh snapshot.
   Do not automatically repeat arbitrary resource-creating subscription calls.
-- [ ] Use the initial runtime immediately with Exosuit hello, a read-only
+- [x] Use the initial runtime immediately with Exosuit hello, a read-only
   workspace query and one sequenced subscription. Add a mutation with an
   Exosuit operation id to demonstrate safe reconciliation after a lost reply.
 

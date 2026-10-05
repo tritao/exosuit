@@ -24,6 +24,8 @@ class RpcTestMain {
 	}
 
 	static function main():Void {
+		WorkspaceRpcTests.run();
+		Sys.println("PASS: workspace RPC query, snapshot race, event resume/gap recovery, permissions and lost-mutation reconciliation");
 		RpcLifecycleTests.run();
 		RpcDispatchTests.run();
 		var hello:RpcEnvelope = Hello(1, 1, "exosuit-test", ["workspace.read", "workspace.events"]);
