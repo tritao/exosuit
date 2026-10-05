@@ -108,5 +108,8 @@ changing viewport size.
 
 `editor.minimapEnabled` shows a file overview on the right of graphical and web editors.
 Click to jump or drag its viewport to scroll. It hides below 480 logical pixels of
-editor width. Previews sample at most 512 lines and 80 columns; large files use
-neutral strokes to avoid forcing full-document syntax highlighting.
+editor width. Previews keep a consistent miniature scale and scroll with the editor
+instead of compressing the whole file. Cached pages contain at most 512 lines
+and 80 columns; large files use neutral strokes to avoid forcing full-document
+syntax highlighting. An 80-column bitmap with at most 1,024 pixel rows keeps GPU
+geometry and bitmap memory bounded even for dense files.

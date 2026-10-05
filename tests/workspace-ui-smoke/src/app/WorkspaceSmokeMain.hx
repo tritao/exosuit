@@ -344,8 +344,9 @@ class WorkspaceSmokeApp extends ExosuitApp {
 			var y = Math.min(bounds.height, 400) - 4;
 			ui.pointerDown(bounds.x + 30, bounds.y + y, 0);
 			ui.pointerUp(bounds.x + 30, bounds.y + y, 0);
-			var expected = editor.MinimapModel.scrollTarget(y, Math.min(bounds.height, 400),
-				view.scrollController.contentHeight, view.scrollController.viewportHeight);
+			var scale = 2.0 / (application.settings.current.fontSize * 1.4);
+			var expected = Math.max(0, Math.min(view.scrollController.contentHeight - view.scrollController.viewportHeight,
+				y / scale - view.scrollController.viewportHeight / 2));
 			require(Math.abs(view.scrollController.offsetY - expected) < 0.01, "minimap click did not use wrapped content metrics");
 		}
 		if (frames == 4) {

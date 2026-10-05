@@ -61,11 +61,34 @@ class EditorViewTestMain {
 		require(preview.rows.length == editor.MinimapModel.MAX_ROWS && preview.rows[511].line == 9999,
 			"large minimap is unbounded or misses the end of the file");
 		require(preview.rows[0].spans[0].kind == 0, "large minimap unnecessarily requests syntax highlighting");
+		preview.update(largePreview, 9000, 9255);
+		require(preview.rows.length == 256 && preview.rows[0].line == 9000 && preview.rows[255].line == 9255,
+			"proportional minimap page skips nearby lines");
+		var retainedPage = preview.rows[0];
+		preview.update(largePreview, 9000, 9255);
+		require(preview.rows[0] == retainedPage, "unchanged minimap page rebuilt");
+		preview.update(largePreview, 9744, 9999);
+		require(preview.rows[255].line == 9999, "minimap page cannot reach the file end");
 		require(editor.MinimapModel.scrollTarget(0, 100, 1000, 200) == 0 &&
 			editor.MinimapModel.scrollTarget(100, 100, 1000, 200) == 800 &&
 			editor.MinimapModel.scrollTarget(50, 100, 1000, 200) == 400 &&
 			editor.MinimapModel.scrollTarget(50, 100, 50, 200) == 0,
 			"minimap navigation is not centered or clamped");
+		var densePreview = new Document("dense.hx", [for (_ in 0...512)
+			[for (_ in 0...40) "x "].join("")].join("\n"), syntaxes);
+		preview.update(densePreview);
+		var bitmap = preview.rasterize([for (_ in 0...8) 0x123456ff], [], 10000, 10000);
+		require(bitmap.width == 80 && bitmap.height == 1024 && bitmap.pixels.length == 80 * 1024 * 4,
+			"dense minimap exceeds its bitmap memory bound");
+		require(bitmap.pixels.get(0) == 0x12 && bitmap.pixels.get(1) == 0x34 && bitmap.pixels.get(2) == 0x56
+			&& bitmap.pixels.get(3) == 178 && bitmap.pixels.get(7) == 0,
+			"minimap bitmap lost color, opacity or whitespace");
+		bitmap = preview.rasterize([for (_ in 0...8) 0x123456ff], [for (index in 0...512) index * 20.0], 10240, 512);
+		require(bitmap.pixels.get((511 * 80) * 4 + 3) == 178,
+			"minimap bitmap did not use wrapped row positions");
+		preview.update(new Document(null, "", syntaxes));
+		bitmap = preview.rasterize([for (_ in 0...8) 0x123456ff], [], 1, 1);
+		require(bitmap.height == 1 && bitmap.pixels.get(3) == 0, "empty minimap paints phantom strokes");
 		var coordinates = new Document(null, "é🙂x\ná🙂\n", syntaxes);
 		for (offset in 0...coordinates.buffer.document.codepointCount + 1) {
 			var position = EditorCoordinates.position(coordinates, offset);

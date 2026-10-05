@@ -56,13 +56,22 @@ class EditorMinimap implements View {
 	static function color(value:Int, alpha:Float = 1):Color
 		return Color.fromBytes((value >>> 24) & 255, (value >>> 16) & 255, (value >>> 8) & 255, Std.int((value & 255) * alpha));
 
-	function mapHeight(height:Float):Float {
-		var count = document.buffer.lineCount();
-		return Math.max(1, Math.min(height, count * 2.0));
+	var dragMapOffset:Float = 0;
+
+	function mapScale():Float {
+		var layout = resolvedLayout;
+		return 2.0 / Math.max(1, layout == null ? 20 : layout.textStyle.fontSize * 1.4);
+	}
+
+	function mapOffset(height:Float):Float {
+		var scale = mapScale();
+		var travel = Math.max(0, scroll.contentHeight * scale - height);
+		var scrollTravel = Math.max(1, scroll.contentHeight - scroll.viewportHeight);
+		return travel * scroll.offsetY / scrollTravel;
 	}
 
 	public function build(context:BuildContext):RenderNode {
-		model.update(document);
+		if (resolvedLayout == null) model.update(document);
 		var layoutStyle = new LayoutStyle();
 		layoutStyle.width = LayoutAxis.fixed(88);
 		layoutStyle.height = LayoutAxis.grow();
@@ -75,45 +84,40 @@ class EditorMinimap implements View {
 		var painting = context.resourceState(built.id, function() return new MinimapPainting(), function(value) value.dispose()).value;
 		built.onPaint(function(canvas, geometry) {
 			if (geometry.width <= 0 || geometry.height <= 0) return;
-			var height = mapHeight(geometry.height);
-			var contentHeight = Math.max(1, scroll.contentHeight);
-			var unit = Math.max(0, geometry.width - 8) / MinimapModel.MAX_COLUMNS;
-			if (unit <= 0) return;
+			var height = geometry.height;
+			var scale = mapScale();
+			var offset = mapOffset(height);
+			// Cache a page with a scroll margin, rather than compressing the whole file.
+			var tileTop = Math.floor(offset / 256) * 256;
+			var tileHeight = Math.ceil(height + 256);
+			var layout = resolvedLayout;
+			if (layout != null && layout.paragraphCount > 0) {
+				var origin = layout.paragraphCaret(0).y;
+				model.update(document, layout.paragraphIndexAtY(tileTop / scale + origin),
+					layout.paragraphIndexAtY((tileTop + tileHeight) / scale + origin));
+				resolveTextLayout(layout);
+			}
 			var colors = [for (kind in 0...8) theme.tokenColor(kind)];
-			var key = model.generation + ":" + positionRevision + ":" + geometry.width + ":" + height + ":" + contentHeight + ":" + colors.join(",");
+			var key = model.generation + ":" + positionRevision + ":" + tileTop + ":" + tileHeight + ":" + scale + ":" + colors.join(",");
 			if (painting.key != key) {
 				painting.dispose();
-				var paths = [for (_ in 0...8) new PathBuilder()];
-				var used = [for (_ in 0...8) false];
-				for (index in 0...model.rows.length) {
-					var row = model.rows[index];
-					var y = index < rowPositions.length ?
-						rowPositions[index] / contentHeight * height :
-						row.line / Math.max(1, document.buffer.lineCount()) * height;
-					for (span in row.spans) {
-						var x = 4 + span.start * unit, right = x + span.length * unit;
-						paths[span.kind].moveTo(x, y).lineTo(right, y).lineTo(right, y + 1).lineTo(x, y + 1).close();
-						used[span.kind] = true;
-					}
-				}
-				for (kind in 0...8)
-					if (used[kind]) {
-						painting.paths.push(paths[kind].build());
-						painting.paints.push(Paint.SolidPaint.create(color(colors[kind], 0.7)));
-					}
+				var positions = [for (position in rowPositions) position * scale - tileTop];
+				var bitmap = model.rasterize(colors, positions, tileHeight, tileHeight);
+				painting.image = Image.create(bitmap.width, bitmap.height, ImageFormat.RGBA8,
+					bitmap.pixels, ImageFilter.Nearest);
 				painting.key = key;
 			}
-			for (index in 0...painting.paths.length) canvas.fill(painting.paths[index], painting.paints[index]);
-			var top = scroll.offsetY / contentHeight * height;
-			var visible = Math.min(height, scroll.viewportHeight / contentHeight * height);
+			var previewImage = painting.image;
+			if (previewImage != null) canvas.drawImage(previewImage, new Rect(4, tileTop - offset, geometry.width - 8, tileHeight));
+			var top = scroll.offsetY * scale - offset;
+			var visible = Math.min(height, scroll.viewportHeight * scale);
 			canvas.fillRectIfPositive(new Rect(0, top, geometry.width, Math.max(2, visible)), color(theme.scrollbar, 0.25));
 			canvas.fillRectIfPositive(new Rect(0, top, 2, Math.max(2, visible)), color(theme.scrollbar, 0.8));
 		});
 		var navigate = function(event:UiEvent) {
 			if (built.resolved == null) return;
-			var height = mapHeight(built.resolved.height);
-			var target = dragging ? (event.localY - dragOffset) / height * scroll.contentHeight :
-				MinimapModel.scrollTarget(event.localY, height, scroll.contentHeight, scroll.viewportHeight);
+			var offset = dragging ? dragMapOffset : mapOffset(built.resolved.height);
+			var target = (event.localY + offset - (dragging ? dragOffset : scroll.viewportHeight * mapScale() / 2)) / mapScale();
 			scroll.jumpTo(scroll.offsetX, target);
 			context.commands.refresh();
 			event.preventDefault();
@@ -121,14 +125,15 @@ class EditorMinimap implements View {
 		};
 		built.on(UiEventKind.PointerDown, function(event) {
 			if (event.button != 0 || built.resolved == null) return;
-			var height = mapHeight(built.resolved.height);
-			var top = scroll.offsetY / Math.max(1, scroll.contentHeight) * height;
-			var visible = scroll.viewportHeight / Math.max(1, scroll.contentHeight) * height;
+			var offset = mapOffset(built.resolved.height);
+			var top = scroll.offsetY * mapScale() - offset;
+			var visible = scroll.viewportHeight * mapScale();
 			if (event.localY >= top && event.localY <= top + visible) dragOffset = event.localY - top;
 			else {
 				navigate(event);
-				dragOffset = event.localY - scroll.offsetY / Math.max(1, scroll.contentHeight) * height;
+				dragOffset = event.localY + offset - scroll.offsetY * mapScale();
 			}
+			dragMapOffset = offset;
 			dragging = true;
 			event.capturePointer();
 			event.preventDefault();
@@ -147,17 +152,15 @@ class EditorMinimap implements View {
 	}
 }
 
-/** Owns at most eight batched paths; viewport scrolling only repaints the overlay. */
+/** One bounded bitmap; scrolling only repaints the viewport overlay. */
 private class MinimapPainting {
 	public var key:String = "";
-	public final paths:Array<Path> = [];
-	public final paints:Array<Paint> = [];
+	public var image:Null<Image>;
 	public function new() {}
 	public function dispose():Void {
-		for (path in paths) path.dispose();
-		for (paint in paints) paint.dispose();
-		paths.resize(0);
-		paints.resize(0);
+		var retainedImage = image;
+		if (retainedImage != null) retainedImage.dispose();
+		image = null;
 		key = "";
 	}
 }
