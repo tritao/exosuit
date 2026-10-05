@@ -1,15 +1,25 @@
+#ifndef _WIN32
 #define _POSIX_C_SOURCE 200809L
+#endif
 #include "pragtical_hx/platform.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <wchar.h>
+#include <limits.h>
+#else
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
 
 #ifdef PHX_WITH_SDL
 #include <SDL3/SDL.h>
@@ -53,10 +63,17 @@ typedef struct phx_process_slot {
   bool started;
   bool running;
   int32_t exit_status;
+#ifdef _WIN32
+  HANDLE process_handle;
+  HANDLE stdin_handle;
+  HANDLE stdout_handle;
+  HANDLE stderr_handle;
+#else
   pid_t pid;
   int stdin_fd;
   int stdout_fd;
   int stderr_fd;
+#endif
   char *executable;
   char *cwd;
   char *arguments[PHX_MAX_PROCESS_ARGS];
@@ -76,8 +93,10 @@ static uint32_t event_read;
 static uint32_t event_count;
 static char last_error[256];
 static char *clipboard_text;
+#ifndef _WIN32
 static struct sigaction previous_sigpipe;
 static bool sigpipe_ignored;
+#endif
 
 #ifdef PHX_WITH_SDL
 static int32_t normalize_key(SDL_Keycode key) {
@@ -140,6 +159,225 @@ static bool fail(const char *message) {
   }
   return false;
 }
+
+#ifdef _WIN32
+static bool fail_windows(const char *operation) {
+  DWORD error = GetLastError();
+  char message[256];
+  snprintf(message, sizeof(message), "%s failed (Windows error %lu)",
+           operation, (unsigned long)error);
+  return fail(message);
+}
+
+static wchar_t *wide_from_utf8(const char *text) {
+  if (!text) text = "";
+  int length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, -1,
+                                   NULL, 0);
+  if (length <= 0) return NULL;
+  wchar_t *wide = (wchar_t *)malloc((size_t)length * sizeof(*wide));
+  if (!wide) return NULL;
+  if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text, -1, wide,
+                           length)) {
+    free(wide);
+    return NULL;
+  }
+  return wide;
+}
+
+static wchar_t *wide_copy(const wchar_t *text) {
+  size_t length = wcslen(text) + 1;
+  wchar_t *copy = (wchar_t *)malloc(length * sizeof(*copy));
+  if (copy) memcpy(copy, text, length * sizeof(*copy));
+  return copy;
+}
+
+static bool append_wide_char(wchar_t **buffer, size_t *length,
+                             size_t *capacity, wchar_t value) {
+  if (*length + 1 >= *capacity) {
+    size_t next = *capacity ? *capacity * 2 : 128;
+    if (next <= *length + 1) next = *length + 2;
+    wchar_t *replacement = (wchar_t *)realloc(*buffer, next * sizeof(**buffer));
+    if (!replacement) return false;
+    *buffer = replacement;
+    *capacity = next;
+  }
+  (*buffer)[(*length)++] = value;
+  (*buffer)[*length] = L'\0';
+  return true;
+}
+
+static bool append_wide_text(wchar_t **buffer, size_t *length,
+                             size_t *capacity, const wchar_t *text) {
+  while (*text)
+    if (!append_wide_char(buffer, length, capacity, *text++)) return false;
+  return true;
+}
+
+static bool append_wide_repeated(wchar_t **buffer, size_t *length,
+                                 size_t *capacity, wchar_t value,
+                                 size_t count) {
+  while (count--)
+    if (!append_wide_char(buffer, length, capacity, value)) return false;
+  return true;
+}
+
+static bool append_windows_argument(wchar_t **buffer, size_t *length,
+                                    size_t *capacity, const wchar_t *argument) {
+  bool quote = argument[0] == L'\0' || wcspbrk(argument, L" \t\n\v\"") != NULL;
+  if (!quote) return append_wide_text(buffer, length, capacity, argument);
+  if (!append_wide_char(buffer, length, capacity, L'"')) return false;
+  size_t slashes = 0;
+  for (const wchar_t *at = argument; ; ++at) {
+    if (*at == L'\\') {
+      slashes++;
+      continue;
+    }
+    if (*at == L'"') {
+      if (!append_wide_repeated(buffer, length, capacity, L'\\', slashes * 2 + 1)
+          || !append_wide_char(buffer, length, capacity, L'"'))
+        return false;
+      slashes = 0;
+      continue;
+    }
+    if (*at == L'\0') {
+      if (!append_wide_repeated(buffer, length, capacity, L'\\', slashes * 2)
+          || !append_wide_char(buffer, length, capacity, L'"'))
+        return false;
+      return true;
+    }
+    if (!append_wide_repeated(buffer, length, capacity, L'\\', slashes)
+        || !append_wide_char(buffer, length, capacity, *at))
+      return false;
+    slashes = 0;
+  }
+}
+
+typedef struct phx_environment_override {
+  wchar_t *key;
+  wchar_t *entry;
+  bool used;
+} phx_environment_override;
+
+static int compare_environment_entries(const void *left, const void *right) {
+  const wchar_t *const *a = (const wchar_t *const *)left;
+  const wchar_t *const *b = (const wchar_t *const *)right;
+  return _wcsicmp(*a, *b);
+}
+
+static wchar_t *make_environment_block(const phx_process_slot *slot) {
+  if (slot->environment_count == 0) return NULL;
+  phx_environment_override *overrides = (phx_environment_override *)calloc(
+      (size_t)slot->environment_count, sizeof(*overrides));
+  if (!overrides) {
+    SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+    return NULL;
+  }
+  for (int32_t index = 0; index < slot->environment_count; ++index) {
+    overrides[index].key = wide_from_utf8(slot->environment_keys[index]);
+    wchar_t *value = wide_from_utf8(slot->environment_values[index]);
+    if (!overrides[index].key || !value) {
+      free(value);
+      SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+      goto cleanup_overrides;
+    }
+    size_t key_length = wcslen(overrides[index].key);
+    size_t value_length = wcslen(value);
+    overrides[index].entry = (wchar_t *)malloc(
+        (key_length + value_length + 2) * sizeof(wchar_t));
+    if (!overrides[index].entry) {
+      free(value);
+      SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+      goto cleanup_overrides;
+    }
+    memcpy(overrides[index].entry, overrides[index].key,
+           key_length * sizeof(wchar_t));
+    overrides[index].entry[key_length] = L'=';
+    memcpy(overrides[index].entry + key_length + 1, value,
+           (value_length + 1) * sizeof(wchar_t));
+    free(value);
+  }
+
+  LPWCH inherited = GetEnvironmentStringsW();
+  if (!inherited) goto cleanup_overrides;
+  size_t capacity = (size_t)slot->environment_count;
+  for (const wchar_t *entry = inherited; *entry; entry += wcslen(entry) + 1)
+    capacity++;
+  wchar_t **entries = (wchar_t **)calloc(capacity + 1, sizeof(*entries));
+  if (!entries) {
+    FreeEnvironmentStringsW(inherited);
+    SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+    goto cleanup_overrides;
+  }
+
+  size_t count = 0;
+  for (const wchar_t *entry = inherited; *entry; entry += wcslen(entry) + 1) {
+    const wchar_t *key = entry + (entry[0] == L'=' ? 1 : 0);
+    const wchar_t *separator = wcschr(key, L'=');
+    size_t key_length = separator ? (size_t)(separator - key) : 0;
+    int32_t match = -1;
+    for (int32_t index = 0; index < slot->environment_count; ++index)
+      if (key_length == wcslen(overrides[index].key)
+          && _wcsnicmp(key, overrides[index].key, key_length) == 0) {
+        match = index;
+        break;
+      }
+    entries[count] = wide_copy(match >= 0 ? overrides[match].entry : entry);
+    if (!entries[count]) {
+      for (size_t index = 0; index < count; ++index) free(entries[index]);
+      free(entries);
+      FreeEnvironmentStringsW(inherited);
+      SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+      goto cleanup_overrides;
+    }
+    count++;
+    if (match >= 0) overrides[match].used = true;
+  }
+  FreeEnvironmentStringsW(inherited);
+  for (int32_t index = 0; index < slot->environment_count; ++index)
+    if (!overrides[index].used) {
+      entries[count] = wide_copy(overrides[index].entry);
+      if (!entries[count]) {
+        for (size_t item = 0; item < count; ++item) free(entries[item]);
+        free(entries);
+        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        goto cleanup_overrides;
+      }
+      count++;
+    }
+
+  qsort(entries, count, sizeof(*entries), compare_environment_entries);
+  size_t total = 1;
+  for (size_t index = 0; index < count; ++index)
+    total += wcslen(entries[index]) + 1;
+  wchar_t *block = (wchar_t *)calloc(total, sizeof(wchar_t));
+  if (block) {
+    wchar_t *cursor = block;
+    for (size_t index = 0; index < count; ++index) {
+      size_t length = wcslen(entries[index]) + 1;
+      memcpy(cursor, entries[index], length * sizeof(wchar_t));
+      cursor += length;
+    }
+  } else {
+    SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+  }
+  for (size_t index = 0; index < count; ++index) free(entries[index]);
+  free(entries);
+  for (int32_t index = 0; index < slot->environment_count; ++index) {
+    free(overrides[index].key);
+    free(overrides[index].entry);
+  }
+  free(overrides);
+  return block;
+
+cleanup_overrides:
+  for (int32_t index = 0; index < slot->environment_count; ++index) {
+    free(overrides[index].key);
+    free(overrides[index].entry);
+  }
+  free(overrides);
+  return NULL;
+}
+#endif
 
 static bool store_clipboard(const char *text) {
   const char *value = text ? text : "";
@@ -230,26 +468,53 @@ static void free_process_configuration(phx_process_slot *slot) {
 
 static void reap_process(phx_process_slot *slot) {
   if (!slot->started || !slot->running) return;
+#ifdef _WIN32
+  if (WaitForSingleObject(slot->process_handle, 0) != WAIT_OBJECT_0) return;
+  DWORD status = 0;
+  if (GetExitCodeProcess(slot->process_handle, &status))
+    slot->exit_status = (int32_t)status;
+  else
+    slot->exit_status = -1;
+  slot->running = false;
+#else
   int status = 0;
   pid_t result = waitpid(slot->pid, &status, WNOHANG);
   if (result != slot->pid) return;
   slot->running = false;
   slot->exit_status = WIFEXITED(status) ? WEXITSTATUS(status)
     : WIFSIGNALED(status) ? 128 + WTERMSIG(status) : -1;
+#endif
 }
 
 static void close_process_pipes(phx_process_slot *slot) {
+#ifdef _WIN32
+  if (slot->stdin_handle) CloseHandle(slot->stdin_handle);
+  if (slot->stdout_handle) CloseHandle(slot->stdout_handle);
+  if (slot->stderr_handle) CloseHandle(slot->stderr_handle);
+  slot->stdin_handle = NULL;
+  slot->stdout_handle = NULL;
+  slot->stderr_handle = NULL;
+#else
   if (slot->stdin_fd >= 0) close(slot->stdin_fd);
   if (slot->stdout_fd >= 0) close(slot->stdout_fd);
   if (slot->stderr_fd >= 0) close(slot->stderr_fd);
   slot->stdin_fd = -1;
   slot->stdout_fd = -1;
   slot->stderr_fd = -1;
+#endif
 }
 
 static void terminate_process(phx_process_slot *slot) {
   reap_process(slot);
   if (slot->running) {
+#ifdef _WIN32
+    TerminateProcess(slot->process_handle, 1);
+    WaitForSingleObject(slot->process_handle, INFINITE);
+    DWORD status = 0;
+    slot->exit_status = GetExitCodeProcess(slot->process_handle, &status)
+      ? (int32_t)status : -1;
+    slot->running = false;
+#else
     int status = 0;
     kill(slot->pid, SIGTERM);
     pid_t result = waitpid(slot->pid, &status, WNOHANG);
@@ -260,9 +525,11 @@ static void terminate_process(phx_process_slot *slot) {
     slot->running = false;
     slot->exit_status = result == slot->pid && WIFEXITED(status) ? WEXITSTATUS(status)
       : result == slot->pid && WIFSIGNALED(status) ? 128 + WTERMSIG(status) : -1;
+#endif
   }
 }
 
+#ifndef _WIN32
 static bool process_pipe(int descriptors[2]) {
   if (pipe(descriptors) != 0) return false;
   if (fcntl(descriptors[0], F_SETFD, FD_CLOEXEC) < 0 ||
@@ -289,6 +556,10 @@ static void restore_sigpipe(void) {
   if (sigpipe_ignored) sigaction(SIGPIPE, &previous_sigpipe, NULL);
   sigpipe_ignored = false;
 }
+#else
+static bool ignore_sigpipe(void) { return true; }
+static void restore_sigpipe(void) {}
+#endif
 
 #ifdef PHX_WITH_SDL
 static RenColor renderer_color(int32_t rgba) {
@@ -323,11 +594,13 @@ bool phx_platform_init(bool headless) {
   memset(windows, 0, sizeof(windows));
   memset(fonts, 0, sizeof(fonts));
   memset(processes, 0, sizeof(processes));
+#ifndef _WIN32
   for (uint32_t index = 0; index < PHX_MAX_PROCESSES; index++) {
     processes[index].stdin_fd = -1;
     processes[index].stdout_fd = -1;
     processes[index].stderr_fd = -1;
   }
+#endif
   memset(events, 0, sizeof(events));
   event_read = 0;
   event_count = 0;
@@ -348,6 +621,10 @@ void phx_platform_shutdown(void) {
     if (!slot->occupied) continue;
     terminate_process(slot);
     close_process_pipes(slot);
+#ifdef _WIN32
+    if (slot->process_handle) CloseHandle(slot->process_handle);
+    slot->process_handle = NULL;
+#endif
     free_process_configuration(slot);
     slot->occupied = false;
   }
@@ -806,9 +1083,11 @@ phx_handle phx_process_create(const char *executable, const char *cwd) {
     if (generation == 0) generation = 1;
     memset(slot, 0, sizeof(*slot));
     slot->generation = generation;
+#ifndef _WIN32
     slot->stdin_fd = -1;
     slot->stdout_fd = -1;
     slot->stderr_fd = -1;
+#endif
     slot->exit_status = -1;
     slot->executable = strdup(executable);
     slot->cwd = cwd && cwd[0] != '\0' ? strdup(cwd) : NULL;
@@ -873,6 +1152,110 @@ bool phx_process_start(phx_handle process) {
   phx_process_slot *slot = resolve_process(process);
   if (!slot) return fail("invalid or stale process handle");
   if (slot->started) return fail("process already started");
+#ifdef _WIN32
+  SECURITY_ATTRIBUTES security = {sizeof(security), NULL, TRUE};
+  HANDLE child_stdin = NULL, parent_stdin = NULL;
+  HANDLE parent_stdout = NULL, child_stdout = NULL;
+  HANDLE parent_stderr = NULL, child_stderr = NULL;
+  wchar_t *application = NULL, *working_directory = NULL;
+  wchar_t *command_line = NULL, *environment_block = NULL;
+  size_t command_length = 0, command_capacity = 0;
+  PROCESS_INFORMATION process_info = {0};
+  DWORD failure_error = ERROR_SUCCESS;
+
+  if (!CreatePipe(&child_stdin, &parent_stdin, &security, 0)
+      || !CreatePipe(&parent_stdout, &child_stdout, &security, 0)
+      || !CreatePipe(&parent_stderr, &child_stderr, &security, 0)) {
+    failure_error = GetLastError();
+    goto windows_process_start_failed;
+  }
+  if (!SetHandleInformation(parent_stdin, HANDLE_FLAG_INHERIT, 0)
+      || !SetHandleInformation(parent_stdout, HANDLE_FLAG_INHERIT, 0)
+      || !SetHandleInformation(parent_stderr, HANDLE_FLAG_INHERIT, 0)) {
+    failure_error = GetLastError();
+    goto windows_process_start_failed;
+  }
+
+  application = wide_from_utf8(slot->executable);
+  if (slot->cwd) working_directory = wide_from_utf8(slot->cwd);
+  if (!application || (slot->cwd && !working_directory)) {
+    failure_error = ERROR_NO_UNICODE_TRANSLATION;
+    goto windows_process_start_failed;
+  }
+  if (!append_windows_argument(&command_line, &command_length,
+                               &command_capacity, application)) {
+    failure_error = ERROR_NOT_ENOUGH_MEMORY;
+    goto windows_process_start_failed;
+  }
+  for (int32_t index = 0; index < slot->argument_count; ++index) {
+    wchar_t *argument = wide_from_utf8(slot->arguments[index]);
+    if (!argument) {
+      failure_error = ERROR_NO_UNICODE_TRANSLATION;
+      goto windows_process_start_failed;
+    }
+    bool appended = append_wide_char(&command_line, &command_length,
+                                     &command_capacity, L' ')
+      && append_windows_argument(&command_line, &command_length,
+                                 &command_capacity, argument);
+    free(argument);
+    if (!appended) {
+      failure_error = ERROR_NOT_ENOUGH_MEMORY;
+      goto windows_process_start_failed;
+    }
+  }
+  if (slot->environment_count > 0) {
+    environment_block = make_environment_block(slot);
+    if (!environment_block) {
+      failure_error = GetLastError();
+      goto windows_process_start_failed;
+    }
+  }
+
+  STARTUPINFOW startup = {0};
+  startup.cb = sizeof(startup);
+  startup.dwFlags = STARTF_USESTDHANDLES;
+  startup.hStdInput = child_stdin;
+  startup.hStdOutput = child_stdout;
+  startup.hStdError = child_stderr;
+  DWORD creation_flags = environment_block ? CREATE_UNICODE_ENVIRONMENT : 0;
+  if (!CreateProcessW(application, command_line, NULL, NULL, TRUE,
+                      creation_flags, environment_block, working_directory,
+                      &startup, &process_info)) {
+    failure_error = GetLastError();
+    goto windows_process_start_failed;
+  }
+
+  CloseHandle(child_stdin);
+  CloseHandle(child_stdout);
+  CloseHandle(child_stderr);
+  child_stdin = child_stdout = child_stderr = NULL;
+  free(application);
+  free(working_directory);
+  free(command_line);
+  free(environment_block);
+  CloseHandle(process_info.hThread);
+  slot->process_handle = process_info.hProcess;
+  slot->stdin_handle = parent_stdin;
+  slot->stdout_handle = parent_stdout;
+  slot->stderr_handle = parent_stderr;
+  slot->started = true;
+  slot->running = true;
+  return true;
+
+windows_process_start_failed:
+  if (child_stdin) CloseHandle(child_stdin);
+  if (parent_stdin) CloseHandle(parent_stdin);
+  if (parent_stdout) CloseHandle(parent_stdout);
+  if (child_stdout) CloseHandle(child_stdout);
+  if (parent_stderr) CloseHandle(parent_stderr);
+  if (child_stderr) CloseHandle(child_stderr);
+  free(application);
+  free(working_directory);
+  free(command_line);
+  free(environment_block);
+  SetLastError(failure_error ? failure_error : ERROR_GEN_FAILURE);
+  return fail_windows("CreateProcessW");
+#else
   int stdin_pipe[2], stdout_pipe[2], stderr_pipe[2];
   if (!process_pipe(stdin_pipe)) return fail(strerror(errno));
   if (!process_pipe(stdout_pipe)) {
@@ -940,11 +1323,25 @@ bool phx_process_start(phx_handle process) {
   slot->started = true;
   slot->running = true;
   return true;
+#endif
 }
 
 int32_t phx_process_write(phx_handle process, const char *data, int32_t length) {
   phx_process_slot *slot = resolve_process(process);
   if (!slot || !slot->started) { fail("invalid or unstarted process handle"); return -1; }
+#ifdef _WIN32
+  if (!slot->stdin_handle) { fail("process stdin is closed"); return -1; }
+  if (!data || length <= 0) return 0;
+  DWORD requested = (DWORD)(length > 4096 ? 4096 : length);
+  DWORD written = 0;
+  if (WriteFile(slot->stdin_handle, data, requested, &written, NULL))
+    return (int32_t)written;
+  DWORD error = GetLastError();
+  if (error == ERROR_NO_DATA || error == ERROR_PIPE_BUSY) return 0;
+  SetLastError(error);
+  fail_windows("writing process stdin");
+  return -1;
+#else
   if (slot->stdin_fd < 0) { fail("process stdin is closed"); return -1; }
   if (!data || length <= 0) return 0;
   long atomic_limit = fpathconf(slot->stdin_fd, _PC_PIPE_BUF);
@@ -957,13 +1354,19 @@ int32_t phx_process_write(phx_handle process, const char *data, int32_t length) 
   if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) return 0;
   fail(strerror(errno));
   return -1;
+#endif
 }
 
 bool phx_process_close_stdin(phx_handle process) {
   phx_process_slot *slot = resolve_process(process);
   if (!slot || !slot->started) return fail("invalid or unstarted process handle");
+#ifdef _WIN32
+  if (slot->stdin_handle) CloseHandle(slot->stdin_handle);
+  slot->stdin_handle = NULL;
+#else
   if (slot->stdin_fd >= 0) close(slot->stdin_fd);
   slot->stdin_fd = -1;
+#endif
   return true;
 }
 
@@ -972,6 +1375,37 @@ int32_t phx_process_read(phx_handle process, bool standard_error,
   phx_process_slot *slot = resolve_process(process);
   if (!slot) { fail("invalid or stale process handle"); return -1; }
   if (!slot->started || !buffer || capacity <= 0) return 0;
+#ifdef _WIN32
+  HANDLE pipe = standard_error ? slot->stderr_handle : slot->stdout_handle;
+  if (!pipe) return 0;
+  DWORD available = 0;
+  if (!PeekNamedPipe(pipe, NULL, 0, NULL, &available, NULL)) {
+    DWORD error = GetLastError();
+    if (error == ERROR_BROKEN_PIPE || error == ERROR_PIPE_NOT_CONNECTED) {
+      CloseHandle(pipe);
+      if (standard_error) slot->stderr_handle = NULL;
+      else slot->stdout_handle = NULL;
+      return 0;
+    }
+    SetLastError(error);
+    fail_windows("checking process output");
+    return -1;
+  }
+  if (available == 0) return 0;
+  DWORD requested = (DWORD)(capacity < (int32_t)available ? capacity : available);
+  DWORD count = 0;
+  if (ReadFile(pipe, buffer, requested, &count, NULL)) return (int32_t)count;
+  DWORD error = GetLastError();
+  if (error == ERROR_BROKEN_PIPE || error == ERROR_PIPE_NOT_CONNECTED) {
+    CloseHandle(pipe);
+    if (standard_error) slot->stderr_handle = NULL;
+    else slot->stdout_handle = NULL;
+    return 0;
+  }
+  SetLastError(error);
+  fail_windows("reading process output");
+  return -1;
+#else
   int fd = standard_error ? slot->stderr_fd : slot->stdout_fd;
   if (fd < 0) return 0;
   ssize_t count = read(fd, buffer, (size_t)capacity);
@@ -984,6 +1418,7 @@ int32_t phx_process_read(phx_handle process, bool standard_error,
   if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) return 0;
   fail(strerror(errno));
   return -1;
+#endif
 }
 
 int32_t phx_process_state(phx_handle process) {
@@ -1005,7 +1440,16 @@ bool phx_process_cancel(phx_handle process) {
   if (!slot || !slot->started) return fail("invalid or unstarted process handle");
   reap_process(slot);
   if (!slot->running) return true;
+#ifdef _WIN32
+  if (TerminateProcess(slot->process_handle, 1)) return true;
+  if (WaitForSingleObject(slot->process_handle, 0) == WAIT_OBJECT_0) {
+    reap_process(slot);
+    return true;
+  }
+  return fail_windows("cancelling process");
+#else
   return kill(slot->pid, SIGTERM) == 0 || errno == ESRCH;
+#endif
 }
 
 bool phx_process_destroy(phx_handle process) {
@@ -1013,6 +1457,10 @@ bool phx_process_destroy(phx_handle process) {
   if (!slot) return fail("invalid or stale process handle");
   terminate_process(slot);
   close_process_pipes(slot);
+#ifdef _WIN32
+  if (slot->process_handle) CloseHandle(slot->process_handle);
+  slot->process_handle = NULL;
+#endif
   free_process_configuration(slot);
   slot->occupied = false;
   return true;
