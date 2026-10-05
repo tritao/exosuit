@@ -29,6 +29,14 @@ Add methods only as the delivery slices need them; no separate protocol framewor
 - Logs record request/resource ids and outcomes, excluding credentials,
   encryption keys, file contents and terminal/conversation payloads by default.
 
+## Named groups
+
+Persist a named nested group hierarchy with optional working-directory
+references and sibling order. New sessions inherit the nearest group directory
+unless explicitly overridden, and retain the resolved cwd thereafter. Group
+moves/renames never restart sessions; directory associations do not grant access.
+Use the same group tree across clients, with client-local expansion/selection.
+
 ## Terminals
 
 Many clients may watch. One explicit controller owns input and resize through

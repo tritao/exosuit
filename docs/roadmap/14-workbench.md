@@ -55,6 +55,40 @@ with the service. Remote deployment and mobile acceptance are tracked in
 [M16](16-remote-workspaces.md), using the existing web build first and including
 away-from-home relay access from initial delivery.
 
+## Named groups and working directories
+
+Preserve Sakura-style named, nested groups as a first-class Workbench feature.
+Use one group concept (the UI name for collections), not parallel group and
+collection hierarchies. A group has a stable id, name, optional parent,
+optional working-directory reference and sibling order. Duplicate display
+names are allowed; identity is the id. Persist groups in the workspace service
+and project them into the same tree on desktop and connected web/mobile.
+
+- Groups contain child groups, agent sessions and terminals. Support create,
+  rename, reorder and move; reject cycles. A flat Agents list may be a filtered
+  view of this tree, not a separate storage model.
+- Show directory hints and aggregated attention/activity badges. Keep tree
+  expansion/selection per client. Selecting a group does not automatically
+  replace the editor project or change another client's view. Offer an explicit
+  Open folder action for its directory.
+- New terminals/agents use an explicit session directory override, otherwise
+  the nearest ancestor group's directory, otherwise the workspace default.
+  Resolve and validate it on the machine, then persist the chosen session cwd.
+  Remote clients select authorized directory references, not arbitrary host
+  paths; assigning a group directory never grants access by itself.
+- Moving a running session or changing a group directory affects organization
+  and future launches only, never silently changes cwd or restarts work. Restart
+  retains the session's persisted cwd unless explicitly changed. Missing or
+  inaccessible directories fail visibly instead of falling back elsewhere.
+- New terminal/New agent actions target the selected group, with provider choice
+  for agents. Preserve nesting, names, order and directory associations during
+  Sakura import; map directories into authorized roots explicitly.
+
+Acceptance: nested directory inheritance, explicit overrides, duplicate names,
+cycle rejection, move/rename without runtime disruption, invalid directories,
+service restart and two-client synchronization. Desktop and phone display the
+same hierarchy; selecting/expanding it remains independent.
+
 ## M14.1 — Shared protocol, client and initial service
 
 - [ ] Deliver Haxeon RPC.1 with an Exosuit consumer, including reconnect,
@@ -65,10 +99,10 @@ away-from-home relay access from initial delivery.
   snapshot plus subscribe with an event cursor, reconnect/replay and endpoint
   resolution. A minimal Exosuit headless service supplies this slice; it does
   not connect to Pragtical's agent.
-- [ ] Add a tree projection of snapshots and events into collections, tasks
-  and resources, with client-owned expanded state.
+- [ ] Add the named-group tree above, projecting snapshots/events into nested
+  groups and session resources, with client-owned expanded state.
 - [ ] Register the Workbench sidebar mode (M9.3): open, toggle, refresh,
-  create-collection, create-task and create-terminal. Terminal resources open
+  create-group, rename/move-group, create-task and create-terminal. Terminal resources open
   as M12 sessions backed by service input/resize/replay operations.
 
 Acceptance: deterministic protocol fixtures verify schema evolution, missing

@@ -2,6 +2,16 @@
 
 Last updated: 2026-10-05.
 
+## Workbench UX — named groups with working directories, 2026-10-05
+
+User requires Sakura-style named groups associated with working directories.
+Recorded one nested group model in M14 and the common protocol contract, using
+stable ids, order, directory inheritance and explicit session overrides. Existing
+sessions retain cwd on group moves/directory changes. Groups persist/share across
+clients, while selection/expansion is local. Directory association never grants
+filesystem access or silently switches the editor project. Sakura import must
+preserve this structure. Documentation checked; implementation remains pending.
+
 ## Codex reference correction, 2026-10-05
 
 User explicitly excludes Sakura's Codex integration: it predates the shared
