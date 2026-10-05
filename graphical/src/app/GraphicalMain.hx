@@ -38,6 +38,7 @@ class GraphicalMain {
 		var recordPath:Null<String> = null;
 		var openTerminal = false;
 		var openTerminalBrowser = false;
+		var openWorkbench = false;
 		var themeChoice = "system";
 		var openPaths:Array<String> = [];
 		for (argument in arguments) {
@@ -51,6 +52,8 @@ class GraphicalMain {
 				recordPath = argument.substring(14);
 			else if (StringTools.startsWith(argument, "--smoke-frames="))
 				frameLimit = Std.parseInt(argument.substring(15));
+			else if (argument == "--open-workbench")
+				openWorkbench = true;
 			else if (argument == "--open-workspace-terminals")
 				openTerminalBrowser = true;
 			else if (argument == "--open-terminal")
@@ -102,8 +105,8 @@ class GraphicalMain {
 			var instance = new ExosuitApp(context.fonts, ExosuitPalette.theme(dark), context,
 				openPaths.length == 0 ? null : openPaths[0], null,
 				new NativeDesktopServices(context), dark, ui.TerminalPane.open,
-				Sys.systemName() == "Linux" ? function(id,cwd,restored,requestFrame,palette)
-					return ui.TerminalPane.openRemote(function() return workspaceClient,id,cwd,restored,requestFrame,palette) : null);
+				Sys.systemName() == "Linux" ? function(id,cwd,restored,requestFrame,palette,group,directory)
+					return ui.TerminalPane.openRemote(function() return workspaceClient,id,cwd,restored,requestFrame,palette,group,directory) : null);
 			if (Sys.systemName() == "Linux") {
 				try {
 					workspaceClient = new workspace.client.LocalWorkspaceClient(context.events, instance.application.processes,
@@ -117,6 +120,7 @@ class GraphicalMain {
 			for (index in 1...openPaths.length) instance.application.openArgument(openPaths[index]);
 			if (openTerminal) instance.openTerminal();
 			if (openTerminalBrowser) instance.openWorkspaceTerminals();
+			if (openWorkbench) instance.showSidebarMode("workbench");
 			if (pluginManifest != null && !instance.application.loadPluginManifest(pluginManifest))
 				Sys.println('exosuit: could not load plugin manifest "$pluginManifest"');
 			app = instance;

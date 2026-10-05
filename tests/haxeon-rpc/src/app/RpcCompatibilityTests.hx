@@ -84,7 +84,7 @@ class RpcCompatibilityTests {
 				}
 			]
 		};
-		require(WorkspaceProtocol.QUERY.encodeResponse(snapshot).compare(bytes("8301a165020003918401a16702a4576f726b03c00401")) == 0,
+		require(WorkspaceProtocol.QUERY.encodeResponse(snapshot).compare(bytes("8301a165020003918601a16702a4576f726b03c0040105c006c0")) == 0,
 			"Snapshot vector changed");
 		var decoded = WorkspaceProtocol.QUERY.decodeResponse(bytes("8301a165020003918401a16702a4576f726b03c00401"));
 		require(decoded.epoch == "e" && decoded.groups.length == 1 && decoded.groups[0].cwd == null, "Snapshot decode changed");
@@ -96,8 +96,27 @@ class RpcCompatibilityTests {
 			expectedRevision: 1,
 			name: "New"
 		};
-		require(WorkspaceProtocol.RENAME.encodeRequest(rename).compare(bytes("8601a17702a16503a26f7004a167050106a34e6577")) == 0, "Rename vector changed");
+		require(WorkspaceProtocol.RENAME.encodeRequest(rename).compare(bytes("8a01a17702a16503a26f7004a167050106a34e657707c008c009c00ac0")) == 0, "Rename vector changed");
 		require(WorkspaceProtocol.RENAME.decodeRequest(bytes("8601a17702a16503a26f7004a167050106a34e6577")).expectedRevision == 1, "Rename decode changed");
+		// Conservative UTF-8 upper bounds: every bounded character can occupy four bytes.
+		var wideName="",wideRoot="";
+		for (_ in 0...126) wideName += "😀";
+		for (_ in 0...1024) wideRoot += "😀";
+		var wideGroups:Array<WorkspaceGroup> = [for (i in 0...32) {
+			id:wideName+StringTools.lpad(Std.string(i),"0",2),name:wideName+"00",cwd:wideRoot,revision:0x7fffffff,parent:wideName+"00",order:1000000
+		}];
+		var wideRecords:Array<TerminalRecord> = [for (i in 0...WorkspaceTerminalProtocol.CATALOG_PAGE_LIMIT) {
+			id:wideName+"00",name:wideName+"00",group:wideName+"00",cwd:wideRoot,instance:wideName+"00",
+			state:"running",exitCode:0x7fffffff,available:true,revision:haxe.Int64.make(0x7fffffff,0xffffffff),workspaceRoot:wideRoot
+		}];
+		var wideCatalog:TerminalCatalog={instance:wideName+"00",groups:wideGroups,terminals:wideRecords,next:wideName+"00",workspaceRoot:wideRoot};
+		require(WorkspaceTerminalProtocol.LIST.encodeResponse(wideCatalog).length<=262144,"Maximum Unicode catalog page exceeds RPC budget");
+
+		var createGroup:RenameGroup={workspace:"w",epoch:"e",operation:"op",group:"g",expectedRevision:0,name:"N",action:"create",parent:"work",cwd:null,order:2};
+		require(WorkspaceProtocol.GROUP.encodeRequest(createGroup).compare(bytes("8a01a17702a16503a26f7004a167050006a14e07a663726561746508a4776f726b09c00a02"))==0,"Group tree mutation vector changed");
+		var groupedOpen:TerminalOpen={workspace:"w",instance:"i",id:"t",create:true,columns:80,rows:24,group:"g",directory:"/w"};
+		require(WorkspaceTerminalProtocol.OPEN.encodeRequest(groupedOpen).compare(bytes("8801a17702a16903a17404c30550061807a16708a22f77"))==0,"Grouped terminal open vector changed");
+
 		require(MessagePackFrame.pack(query).compare(bytes("484d504b0100000000048101a177")) == 0, "Frame vector changed");
 		// Unknown map fields are skipped even when they contain nested values; scalar/collection wire defaults remain domain-validated.
 		require(WorkspaceProtocol.QUERY.decodeRequest(bytes("8201a17763928101a17892c301")).workspace == "w", "Unknown field was not skipped");

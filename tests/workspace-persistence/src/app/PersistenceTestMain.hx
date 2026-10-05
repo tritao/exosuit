@@ -237,7 +237,7 @@ class PersistenceTestMain {
 			corrupt.close();
 		}, "Oversized corrupt payload accepted");
 		admin = Database.open(path);
-		admin.exec("PRAGMA user_version=3");
+		admin.exec("PRAGMA user_version=4");
 		admin.close();
 		rejects(function() {
 			var unsupported = new WorkspaceSqliteStore(path, "workspace", seed());

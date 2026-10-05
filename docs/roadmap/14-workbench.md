@@ -111,6 +111,14 @@ An Exosuit client lists, creates and drives a shell runtime against the initial
 Exosuit service. The runtime survives an editor restart and reconnects with
 correct replay. No Pragtical binary is required.
 
+Group/terminal tree slice delivered: the native Workbench sidebar uses UIKit's
+virtual TreeView and client-owned expansion/selection. A group editor creates and
+updates parent, name, canonical directory and sibling order. Duplicate names are
+accepted; cycles and stale edits are refused. Current authorization is one project
+root, with explicit folder opening independent of tree selection. Service events
+synchronize group changes between clients. Agent resources, drag-and-drop, group
+deletion, saved tree presentation and connected web/mobile UI remain open.
+
 ## M14.2 — Service and storage
 
 - [ ] Port the domain service: validation limits (from `service/validation.lua`),
@@ -137,8 +145,10 @@ Delivered terminal metadata slice: SQLite records preserve names/group membershi
 and reconcile old active sessions as lost. Capability-gated discovery pages,
 revision-checked metadata editing/removal and the desktop “Workspace Terminals…”
 browser allow detached sessions to be found and reattached independently of tabs.
-The browser uses existing named groups; new/nested group creation and task/provider
-catalog integration remain pending. Output history is still volatile.
+The Workbench sidebar now supports named nested groups, directory inheritance,
+revision-checked create/edit/move/order changes and grouped terminal creation.
+Directories are scoped to the current authorized project root. Task/provider
+catalog integration and a multi-project root registry remain pending. Output history is still volatile.
 
 Delivered first terminal slice: the Linux desktop attaches folder-scoped terminals
 through typed RPC to daemon-owned PTYs. Saved IDs restore the same shell across

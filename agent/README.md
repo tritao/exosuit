@@ -126,14 +126,39 @@ reattaches the same runtime, name/group editing changes durable metadata, Stop k
 its PTY and Remove forgets an exited, failed or lost record. Running sessions cannot
 be forgotten. Removal releases replay/emulator retention and runtime slots.
 
-The existing database migrates from schema 1 to 2 and stores at most 256 terminal
-records; discovery returns eight per page. Names/group membership and last known
+The existing database migrates from schema 1/2 to 3 and stores at most 256 terminal
+records; discovery returns six per page. Names/group membership and last known
 state survive service restart, but old active records become lost and cannot open
 or silently respawn. Output remains volatile. Sixteen runtime/replay records can be
 held at once; removing finished records makes room for new terminals.
 
-The catalog uses current workspace groups. New/nested group creation, tasks and
+The catalog uses current workspace groups. Tasks and
 provider resources are later work. Run `xvfb-run -a python3
 scripts/test-workspace-terminal-catalog-ui.py` to discover a shell created by a
 separate process, reopen it without a saved tab and restore that view on a third
 launch. An optional installation directory exercises the relocated bundle.
+
+
+### Workbench directory groups
+
+The Workbench sidebar supports nested named groups, duplicate names, editing,
+parent moves and sibling order. New terminal uses the selected group. Its launch
+directory comes from an explicit override, the nearest ancestor directory, or the
+workspace root. The daemon canonicalizes existing directories and refuses targets
+outside that root, including symlink escapes. Moving a running session/group never
+changes its cwd. Group selection is local UI state; Open folder is an explicit
+editor action.
+
+This slice uses one authorized project root. The authorized root is pinned in workspace metadata, independently of editable
+group directories; groups may inherit or select subdirectories. Multi-project roots,
+group deletion, drag-and-drop and saved tree expansion/selection are later work.
+Group changes reuse durable revisions, operation IDs and the event journal; schema
+3 migrates older catalogs and refuses unknown schemas. Bounds remain 32 groups and
+256 retained operations. Names/group metadata and terminal owner scope persist;
+output replay stays volatile.
+
+Run `xvfb-run -a python3 scripts/test-workbench-groups-ui.py` for real controls,
+nested directory creation and subdirectory terminal restoration. It accepts a
+staged runtime directory as its optional argument for relocation acceptance with
+source compilation disabled. Terminal fixtures also cover two-client updates,
+permissions, cycle/stale-edit rejection and Unicode storage/message bounds.

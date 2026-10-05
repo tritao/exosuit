@@ -13,6 +13,8 @@ import workspace.service.WorkspaceTerminalProtocol;
 class RpcTerminalBackend implements TerminalBackend {
   final terminalId:String;
   final root:String;
+  final group:Null<String>;
+  final directory:Null<String>;
   final provider:Void -> Null<LocalWorkspaceClient>;
   var create:Bool;
   var connection:Null<RpcConnection>;
@@ -33,11 +35,13 @@ class RpcTerminalBackend implements TerminalBackend {
   var output:Array<TerminalEvent> = [];
   var nextRead:Float = 0;
 
-  public function new(provider:Void -> Null<LocalWorkspaceClient>, terminalId:String, root:String, create:Bool) {
+  public function new(provider:Void -> Null<LocalWorkspaceClient>, terminalId:String, root:String, create:Bool, ?group:String, ?directory:String) {
     this.provider = provider;
     this.terminalId = terminalId;
     this.root = sys.FileSystem.fullPath(root);
     this.create = create;
+    this.group = group;
+    this.directory = directory;
   }
   public function id():String return terminalId;
   public function isAttached():Bool return attached;
@@ -160,6 +164,7 @@ class RpcTerminalBackend implements TerminalBackend {
       }
       instance = client.instance;
       if (!attached) {
+        if (create && (group != null || directory != null) && !client.hasGroupTree()) { fail("Workspace service does not support grouped terminals"); return; }
         pending = true;
         c.call(WorkspaceTerminalProtocol.OPEN, {
           workspace: "workspace",
@@ -167,7 +172,8 @@ class RpcTerminalBackend implements TerminalBackend {
           id: terminalId,
           create: create,
           columns: columns,
-          rows: rows
+          rows: rows,
+          group: group, directory: directory
         }, 2000, function(info) {
           if (closed || connection != c) return;
           pending = false;

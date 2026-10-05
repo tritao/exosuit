@@ -17,9 +17,11 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
 	final workspace:String;
 	final historyLimit:Int;
 
-	public function new(path:String, workspace:String, seed:WorkspaceSnapshot, historyLimit:Int = 32) {
+	public function new(path:String, workspace:String, seed:WorkspaceSnapshot, historyLimit:Int = 32, ?root:String) {
 		if (seed == null || seed.cursor != 0 || historyLimit < 1 || historyLimit > 32)
 			throw "Invalid workspace storage seed or history limit";
+		if (root != null && (root.length == 0 || root.length > 1024)) throw "Invalid authorized workspace root";
+		var expectedRoot = root == null ? "" : root;
 		// Validate domain identities before creating any schema or rows.
 		new WorkspaceService(workspace, seed.epoch, seed.groups, historyLimit);
 		this.workspace = workspace;
@@ -32,7 +34,7 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
 					throw "Missing SQLite schema version";
 				version = integer(row.columnInt64(0));
 			});
-			if (version != 0 && version != 1 && version != 2)
+			if (version != 0 && version != 1 && version != 2 && version != 3)
 				throw "Unsupported workspace schema version";
 			if (version == 0) {
 				var count = 0;
@@ -51,6 +53,32 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
                 db.exec("CREATE TABLE workspace_terminals (id TEXT PRIMARY KEY, payload BLOB NOT NULL)");
                 db.exec("PRAGMA user_version=2");
             });
+			if (version < 3 || expectedRoot.length > 0) transaction(function() {
+				if (version < 3) {
+					db.exec("ALTER TABLE workspace_meta ADD COLUMN root TEXT");
+					db.exec("PRAGMA user_version=3");
+				}
+				if (expectedRoot.length == 0) return;
+				var missing = false;
+				statement("SELECT workspace,root IS NULL,length(CAST(root AS BLOB)),root FROM workspace_meta WHERE id=1", function(row) {
+					if (!row.step() || row.columnText(0) != workspace) throw "Workspace database identity mismatch";
+					missing = integer(row.columnInt64(1)) == 1;
+					if (!missing && (integer(row.columnInt64(2)) > 4096 || row.columnText(3) != expectedRoot)) throw "Workspace database root mismatch";
+				});
+				if (missing) {
+					if (version == 3) throw "Unscoped workspace database";
+					// Older managed schemas represented this identity with their single initial group.
+					// Check that migration evidence once; subsequent identity is independent of group edits.
+					if (version != 0) statement("SELECT payload,length(payload) FROM workspace_groups ORDER BY id LIMIT 2", function(row) {
+						if (!row.step()) throw "Missing legacy workspace root";
+						var legacy:WorkspaceGroup = MessagePack.decode(blob(row, 0, integer(row.columnInt64(1))));
+						if (legacy.cwd != expectedRoot || row.step()) throw "Legacy workspace root mismatch";
+					});
+					statement("UPDATE workspace_meta SET root=?1 WHERE id=1 AND root IS NULL", function(row) {
+						row.bindText(1, expectedRoot); row.step();
+					});
+				}
+			});
 		} catch (error:Dynamic) {
 			db.close();
 			throw error;
@@ -111,8 +139,8 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
 		});
 	}
 
-	function blob(row:Statement, column:Int, size:Int):haxe.io.Bytes {
-		if (size < 1 || size > 8192)
+	function blob(row:Statement, column:Int, size:Int, limit:Int = 8192):haxe.io.Bytes {
+		if (size < 1 || size > limit)
 			throw "Persisted workspace blob exceeds limit";
 		return row.columnBlob(column);
 	}
@@ -178,7 +206,12 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
 			});
 			if (db.changes() != Int64.ofInt(1))
 				throw "Stale workspace writer";
-			statement("UPDATE workspace_groups SET revision=?1,payload=?2 WHERE id=?3 AND revision=?4", function(row) {
+			if (request.action == "create") statement("INSERT INTO workspace_groups VALUES(?1,?2,?3)", function(row) {
+				row.bindText(1, outcome.group.id);
+				row.bindInt64(2, Int64.ofInt(outcome.group.revision));
+				row.bindBlob(3, MessagePack.encode(outcome.group)); row.step();
+			});
+			else statement("UPDATE workspace_groups SET revision=?1,payload=?2 WHERE id=?3 AND revision=?4", function(row) {
 				row.bindInt64(1, Int64.ofInt(outcome.group.revision));
 				row.bindBlob(2, MessagePack.encode(outcome.group));
 				row.bindText(3, outcome.group.id);
@@ -211,7 +244,7 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
   statement("SELECT id,payload,length(payload),length(CAST(id AS BLOB)) FROM workspace_terminals ORDER BY id LIMIT 257",function(row) {
    while(row.step()) {
     if(integer(row.columnInt64(3))>512) throw "Oversized terminal identity";
-    var record:TerminalRecord=haxeon.wire.MessagePack.decode(blob(row,1,integer(row.columnInt64(2))));
+    var record:TerminalRecord=haxeon.wire.MessagePack.decode(blob(row,1,integer(row.columnInt64(2)),16384));
     if(record.id!=row.columnText(0)) throw "Terminal identity mismatch";
     result.push(record);
    }
@@ -220,9 +253,11 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
   return result;
  }
  public function saveTerminal(record:TerminalRecord):Void {
+  var payload = MessagePack.encode(record);
+  if (payload.length > 16384) throw "Terminal metadata exceeds storage budget";
   transaction(function() {
    statement("INSERT INTO workspace_terminals(id,payload) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload",function(row) {
-    row.bindText(1,record.id);row.bindBlob(2,MessagePack.encode(record));row.step();
+    row.bindText(1,record.id);row.bindBlob(2,payload);row.step();
    });
   });
  }

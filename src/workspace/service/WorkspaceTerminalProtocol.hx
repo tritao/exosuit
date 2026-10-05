@@ -11,6 +11,8 @@ import haxeon.wire.MessagePack;
 @:id(4) var create:Bool;
 @:id(5) var columns:Int;
 @:id(6) var rows:Int;
+@:optional @:id(7) var group:Null<String>;
+@:optional @:id(8) var directory:Null<String>;
 }
 @:wire typedef TerminalInfo = {@: id(1) var id: String;
 @:id(2) var cwd:String;
@@ -59,11 +61,13 @@ import haxeon.wire.MessagePack;
 @:id(7) var exitCode:Int;
 @:id(8) var available:Bool;
 @:id(9) var revision:Int64;
+@:optional @:id(10) var workspaceRoot:Null<String>;
 }
 @:wire typedef TerminalCatalog = {@: id(1) var instance: String;
 @:id(2) var groups:Array<workspace.service.WorkspaceProtocol.WorkspaceGroup>;
 @:id(3) var terminals:Array<TerminalRecord>;
 @:id(4) var next:Null<String>;
+@:optional @:id(5) var workspaceRoot:Null<String>;
 }
 @:wire typedef TerminalRename = {@: id(1) var workspace: String;
 @:id(2) var instance:String;
@@ -80,6 +84,7 @@ import haxeon.wire.MessagePack;
 }
 /** Permanent method ids; output offsets count bytes. Input is never retried across connections. */
 class WorkspaceTerminalProtocol {
+  public static inline final CATALOG_PAGE_LIMIT = 6;
   public static inline final CATALOG = "workspace.terminals.catalog";
   public static inline final READ = "workspace.terminals.read";
   public static inline final CONTROL = "workspace.terminals.control";

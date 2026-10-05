@@ -2,6 +2,71 @@
 
 Last updated: 2026-10-05.
 
+## M14.1/M14.3 — named directory groups and Workbench tree, 2026-10-05
+
+Haxeon `3e8014be` fixes incremental shared-helper ownership. Required wire/JSON
+helpers can remain stored under a source module that becomes unreachable after an
+edit; IR assembly previously dropped that module despite calls from retained codecs.
+The compiler now closes the generated-helper dependency graph over cached modules,
+includes required helper owners in artifact assembly and still prunes unrelated
+functions. The reduced MessagePack/JsonWire edit, caller removal/restoration and
+changed-schema rejection cases pass, as does the original current/baseline/current
+graphical transition in one worker. The full compiler gate passes and refreshed
+bootstrap stages converge. No application type weakening or cache-reset workaround.
+
+Workspace groups now carry nullable parent IDs and sibling order. The optional
+`workspace.groups.tree` capability gates method 105 for create/full update; method
+102 remains rename-only and preserves hierarchy/directory metadata. Existing
+revision CAS, operation-id reconciliation, events and SQLite transactions are reused.
+Schema v3 accepts existing v1/v2 data and prevents older agents from opening the
+expanded mutation journal and independently pinned authorization root. Creation uses expected revision zero. Duplicate names
+are allowed; missing parents, cycles, invalid directories and stale writes fail.
+The bounded first service still retains at most 32 groups/256 operation outcomes;
+the broader domain retention/batch work remains open.
+
+The Workbench sidebar projects groups and terminal resources into UIKit's virtual
+TreeView. New group and Edit group support name, parent, directory and sibling
+order. New terminal targets the selected group. Open folder explicitly changes the
+editor project; group selection alone does not. Tree expansion/selection belong to
+the client. The terminal browser remains the metadata/Stop/Remove view.
+
+The owning machine resolves launch directories: explicit override, nearest ancestor
+directory, then workspace root. Canonical existing directories must remain within
+that root, including symlink resolution; missing/outside paths fail visibly.
+Current service authorization is one project root, not arbitrary host filesystem
+access or a multi-project registry. Moving groups/resources affects organization
+and future launches; existing terminals retain their actual cwd. Schema v3 pins the authorized root in
+workspace metadata independently of every
+group directory. Legacy managed roots are verified/backfilled once during migration;
+a failed root migration rolls back, and later group edits cannot redirect ownership.
+
+Terminal records/catalogs identify their owning workspace separately from actual
+cwd. Remote view keys, backend attachment and saved typed resource references use
+workspace scope, so subdirectory sessions restore against the original daemon.
+Older saved references still load. Group drafts pin their service instance/revision
+so folder switching cannot apply an old edit to a different workspace.
+
+Six records per catalog page leave room for 32 groups with parents and worst-case
+Unicode directories under the 262144-byte message cap. Native/Wasm vectors exercise
+that upper bound. Terminal metadata alone has a 16 KiB blob budget; group/journal
+blobs retain 8 KiB. Unicode metadata roundtrip and paged aggregation are tested.
+
+Validation: full core suite; native group/terminal persistence, idempotency,
+permissions, cycles, stale revisions, two-client events, directory inheritance,
+explicit overrides, unchanged running cwd and restart recovery; native/Wasm32/
+Wasm-GC wire fixtures; real desktop group creation and subdirectory terminal restore.
+Reference and refreshed self-hosted terminal/group fixtures pass, including root
+identity independence and rollback of a rejected legacy-root migration. Relocated
+runtime qualification passes from a renamed path containing spaces with source
+compiler/tree access disabled: real group creation, subdirectory launch, restored
+resource scope, catalog discovery without saved tabs and existing-shell reattachment.
+NativeKit bindings were extracted during qualification; affected Exosuit, UIKit and
+SceneKit consumers now use Haxeon platform/GPU packages (Materia `213d24ef9`).
+Unrelated pending web manifest edits and repository pins were preserved.
+Codex/provider sessions, multi-project roots, group deletion/drag-and-drop, persistent
+tree presentation across launches and durable terminal checkpoints remain open.
+
+
 ## M14.3 — discoverable terminal catalog, 2026-10-05
 
 Terminals now have agent-owned durable metadata in the existing SQLite database:

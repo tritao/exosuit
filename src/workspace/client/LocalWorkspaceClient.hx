@@ -84,6 +84,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceTe
 
   public function rpc():Null < RpcConnection > return ready && client != null ? client.current() : null;
 
+  public function hasGroupTree():Bool return client != null && client.capabilities().indexOf(WorkspaceProtocol.TREE) >= 0;
+  public function canEditGroups():Bool return ready && client != null && hasGroupTree() && client.capabilities().indexOf(WorkspaceProtocol.WRITE) >= 0;
   public function terminalCatalog():Null < workspace.service.WorkspaceTerminalProtocol.TerminalCatalog > return catalog;
   public function terminalCatalogError():Null < String > return catalogError;
   public function terminalCatalogRevision():Int return catalogRevision;
@@ -118,7 +120,11 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceTe
     c.call(WorkspaceTerminalProtocol.LIST,
       {workspace: "workspace", instance: instance, after: after}, 2000, function(value) {
       if (rpc() != c) return;
-      if (value.instance != instance || value.terminals.length > 8 || records.length + value.terminals.length > 256) {
+      if (value.workspaceRoot == null && !hasGroupTree()) {
+        value.workspaceRoot = root;
+        for (record in value.terminals) if (record.workspaceRoot == null && record.cwd == root) record.workspaceRoot = root;
+      }
+      if (value.instance != instance || value.workspaceRoot != root || value.terminals.length > WorkspaceTerminalProtocol.CATALOG_PAGE_LIMIT || value.groups.length > 32 || records.length + value.terminals.length > 256) {
         catalogPending = false;
         catalogError = "Invalid terminal catalog";
         catalogRevision++;
@@ -126,7 +132,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceTe
       }
       var last = after;
       for (record in value.terminals) {
-        if (record.cwd != root || record.id == null ||(last != null && Reflect.compare(record.id, last) <= 0)) {
+        if (record.workspaceRoot != root || record.id == null ||(last != null && Reflect.compare(record.id, last) <= 0)) {
           catalogPending = false;
           catalogError = "Invalid terminal catalog page";
           catalogRevision++;
@@ -199,7 +205,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceTe
     group:String
   ):Void {
     var c = rpc();
-    if (record.cwd != root || c == null || !catalogReady()) return;
+    if (record.workspaceRoot != root || c == null || !catalogReady()) return;
     c.call(
       WorkspaceTerminalProtocol.RENAME,
       {
@@ -218,9 +224,23 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceTe
       )
     );
   }
+  public function changeGroup(owner:String, group:WorkspaceGroup, name:String, parent:Null<String>, cwd:Null<String>, order:Int, create:Bool):Void {
+    var c = rpc();
+    var view = replica;
+    if (owner != instance) { catalogError = "Workspace changed; reopen the group editor"; catalogRevision++; return; }
+    if (c == null || view == null || !catalogReady()) return;
+    if (client == null || client.capabilities().indexOf(WorkspaceProtocol.TREE) < 0) {
+      catalogFailed(c, {code: "unsupported", message: "Group editing is not supported", ambiguous: false}); return;
+    }
+    c.call(WorkspaceProtocol.GROUP, {
+      workspace: "workspace", epoch: view.epoch, operation: WorkspaceIds.create("operation"),
+      group: group.id, expectedRevision: create ? 0 : group.revision, name: name,
+      action: create ? "create" : "update", parent: parent, cwd: cwd, order: order
+    }, 2000, function(_) catalogCompleted(c), function(e) catalogFailed(c, e));
+  }
   public function stopTerminal(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Void {
     var c = rpc();
-    if (record.cwd != root || c == null || !catalogReady()) return;
+    if (record.workspaceRoot != root || c == null || !catalogReady()) return;
     c.call(
       WorkspaceTerminalProtocol.TERMINATE,
       {workspace: "workspace", instance: instance, id: record.id},
@@ -234,7 +254,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceTe
   }
   public function forgetTerminal(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Void {
     var c = rpc();
-    if (record.cwd != root || c == null || !catalogReady()) return;
+    if (record.workspaceRoot != root || c == null || !catalogReady()) return;
     c.call(
       WorkspaceTerminalProtocol.FORGET,
       {
@@ -366,6 +386,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceTe
     if (replica == null) replica = new WorkspaceReplica("workspace", 2000);
     var required = [WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS, WorkspaceProtocol.IDENTITY_CAPABILITY];
     var caps = required.copy();
+    caps.push(WorkspaceProtocol.WRITE);
+    caps.push(WorkspaceProtocol.TREE);
     caps.push(WorkspaceTerminalProtocol.CATALOG);
     caps.push(WorkspaceTerminalProtocol.READ);
     caps.push(WorkspaceTerminalProtocol.CONTROL);

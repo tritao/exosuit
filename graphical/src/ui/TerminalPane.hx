@@ -82,8 +82,8 @@ class TerminalPane implements TerminalPanel {
 	}
 
 	public static function openRemote(provider:Void->Null<workspace.client.LocalWorkspaceClient>, id:String, cwd:String, restored:Bool,
-		requestFrame:Void->Void, palette:TerminalPalette):TerminalPanel {
-		var backend = new workspace.client.RpcTerminalBackend(provider,id,cwd,!restored);
+		requestFrame:Void->Void, palette:TerminalPalette, ?group:String, ?directory:String):TerminalPanel {
+		var backend = new workspace.client.RpcTerminalBackend(provider,id,cwd,!restored,group,directory);
 		var session = new TerminalSession(backend,terminalkit.Emulator.open(80,24,1000,"xterm-256color",false),false);
 		try return new TerminalPane(session,requestFrame,palette)
 		catch (failure:Dynamic) { session.close(); throw failure; }

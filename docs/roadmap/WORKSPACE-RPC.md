@@ -251,7 +251,7 @@ Closing an individual view also detaches; use the workspace terminal browser to 
 
 Capability `workspace.terminals.catalog` enables methods 115 LIST, 116 RENAME and
 117 FORGET. LIST additionally requires terminal read; mutations require control.
-It returns current named groups and at most eight records with an opaque next/after
+It returns current named groups and at most six records with an opaque next/after
 ID cursor. The client validates increasing cursors and aggregates at most 256 rows.
 Listings are eventually consistent across pages; concurrent changes are reconciled
 by refresh and mutation revision checks, without a new subscription/event protocol.
@@ -259,7 +259,7 @@ by refresh and mutation revision checks, without a new subscription/event protoc
 Records contain ID, name, group ID, canonical cwd, originating runtime instance,
 state/exit code, computed availability and Int64 metadata revision. Availability is
 recomputed from owned runtime state, never trusted from persisted data. The SQL
-schema migrates v1 to v2 in place and shares the agent's connection/lifetime lock.
+schema migrates v1/v2 to v3 in place and shares the agent's connection/lifetime lock.
 Starting metadata commits before spawn; running metadata commits before the reply.
 An uncommitted runtime is closed, and storage failure fences further metadata access.
 Old active records become lost on restart; surviving metadata cannot resurrect a PTY.
@@ -270,9 +270,46 @@ stale removal of a replacement resource. Missing records acknowledge repeated
 removal. Mutations are never automatically retried after ambiguous delivery; clients
 refresh before a deliberate retry. Removing a finished record releases its retained
 PTY/emulator/history and makes a runtime slot available. Output durability, exact
-state checkpoints, tasks and group creation/nesting remain pending.
+state checkpoints and task/provider integration remain pending.
 
 Desktop view IDs and resource IDs are separate. Catalog views have a deterministic
 key scoped to cwd/resource identity; saved layouts carry explicit remote ownership
 and a typed JsonWire resource reference. Older rows still restore with their legacy
 ID/ownership inference. Resource identity is not an authorization credential.
+
+
+## Named group tree and directory-aware creation
+
+`workspace.groups.tree` advertises method 105, using the existing mutation record
+and result with added nullable fields: action (7), parent (8), cwd (9), order (10).
+Action is create or update; create expects revision zero. Group records add parent
+(5) and optional order (6), with omitted order normalized to zero. Method 102 remains
+rename-only; it rejects tree mutation fields and preserves the existing directory,
+parent and order. Method 103 reconciles durable outcomes for either mutation.
+Create/update reuse CAS, operation digests, transaction-before-publication and event
+200. Read-only peers can observe creation/moves but cannot mutate groups.
+
+Terminal OPEN adds optional group (7) and directory override (8), used only with the
+tree capability. The daemon resolves the nearest ancestor's directory, otherwise
+the authorized workspace root, then canonicalizes and validates the result before
+committing starting metadata or spawning. It refuses nonexistent/outside targets;
+organization changes do not change a running cwd. Current authorization permits
+one canonical project root and its descendants, not arbitrary client host paths.
+
+Terminal record field 10 and catalog field 5 carry nullable workspaceRoot. The tree
+capability guarantees their current scoped semantics. Clients may infer the verified
+connection root for legacy unscoped records only when the tree capability is absent
+and the old record cwd matches that root. New group drafts pin the service instance;
+folder switches cannot redirect a pending edit to another workspace. View keys and
+saved references include workspace ownership independently of actual cwd.
+
+Catalog pages contain at most six records plus up to 32 groups, with a conservative
+maximum-Unicode fixture proving the 262144-byte limit. Aggregation remains bounded
+to 256 records. Typed terminal metadata uses a separate 16 KiB SQL blob budget;
+the existing 8 KiB group/outcome/event budget remains unchanged. Schema 3 marks
+the extended mutation journal and adds a nullable authorized root to workspace
+metadata. Managed v1/v2 migration verifies the old root evidence once and pins it
+transactionally; subsequent group directory changes do not alter that root. A
+failed root migration rolls back so the correct owner can reopen the old schema. Group revisions/sequences keep the original bounded Int protocol in this
+first service; terminal metadata/stream positions use Int64. The broader durable
+domain, operation-retention lifecycle and multi-root authorization remain planned.

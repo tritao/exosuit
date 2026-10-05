@@ -86,6 +86,8 @@ class ExosuitApp implements DesktopUiApplication {
 	var terminalBrowserVisible:Bool = false;
 	var terminalBrowserRevision:Int = -1;
 	var terminalBrowserPanel:Null<WorkspaceTerminalsPanel>;
+	var workbenchPanel:Null<WorkbenchPanel>;
+	var groupEditor:Null<GroupEditorPanel>;
 	var workspaceAttachment:Null<workspace.client.WorkspaceAttachment>;
 	var workspaceStatus:String = "";
 	var workspaceError:Null<String>;
@@ -100,7 +102,7 @@ class ExosuitApp implements DesktopUiApplication {
 	final editorPanes:Map<Int, EditorPane> = new Map();
 	var nextTerminalId:Int = 1;
 	var pendingTerminalFocus:Bool = false;
-	final createWorkspaceTerminal:Null<(String, String, Bool, Void->Void, TerminalPalette)->TerminalPanel>;
+	final createWorkspaceTerminal:Null<(String, String, Bool, Void->Void, TerminalPalette, Null<String>, Null<String>)->TerminalPanel>;
 	final createTerminal:Null<(String, Void->Void, TerminalPalette)->TerminalPanel>;
 	public var searchPanel(default, null):WorkspaceSearchPanel;
 	public final filesScroll = new nativekit.ui.widgets.scroll.ScrollController();
@@ -126,7 +128,7 @@ class ExosuitApp implements DesktopUiApplication {
 	public function new(?fonts:FontCollection, ?theme:Theme, ?hostContext:UiHostContext,
 			?openPath:String, ?capabilities:HostCapabilities, ?fileDialogs:HostFileDialogs,
 			?dark:Bool, ?createTerminal:(String, Void->Void, TerminalPalette)->TerminalPanel,
-			?createWorkspaceTerminal:(String, String, Bool, Void->Void, TerminalPalette)->TerminalPanel) {
+			?createWorkspaceTerminal:(String, String, Bool, Void->Void, TerminalPalette, Null<String>, Null<String>)->TerminalPanel) {
 		this.createTerminal = createTerminal;
 		this.createWorkspaceTerminal = createWorkspaceTerminal;
 		this.capabilities = capabilities == null ? HostCapabilities.desktop() : capabilities;
@@ -337,21 +339,21 @@ class ExosuitApp implements DesktopUiApplication {
 			explorerRoot == null ? Sys.getCwd() : explorerRoot, false);
 	}
 
-	function restoreTerminalTab(id:String, title:String, cwd:String, remote:Bool,resource:String):Null<UiTerminalTab>
-		return createTerminalTab(id,title,cwd,true,remote,resource);
+	function restoreTerminalTab(id:String, title:String, cwd:String, remote:Bool,resource:String, workspaceRoot:String):Null<UiTerminalTab>
+		return createTerminalTab(id,title,cwd,true,remote,resource,workspaceRoot);
 
-	function createTerminalTab(id:String, title:String, cwd:String, restored:Bool, ?remoteOwner:Bool, ?resource:String):Null<UiTerminalTab> {
+	function createTerminalTab(id:String, title:String, cwd:String, restored:Bool, ?remoteOwner:Bool, ?resource:String, ?workspaceRoot:String, ?group:String, ?directory:String):Null<UiTerminalTab> {
 		var create = createTerminal;
 		if (create == null) return null;
 		var number = StringTools.startsWith(id, "terminal-") ? Std.parseInt(id.substring(9)) : null;
 		if (number != null && number >= nextTerminalId) nextTerminalId = number + 1;
-		var directory = FileSystem.exists(cwd) && FileSystem.isDirectory(cwd) ? cwd : Sys.getCwd();
+		var localDirectory = FileSystem.exists(cwd) && FileSystem.isDirectory(cwd) ? cwd : Sys.getCwd();
 		try {
 			var remote = createWorkspaceTerminal;
 			var isRemote = remoteOwner == null ? StringTools.startsWith(id,"workspace-terminal-") : remoteOwner;
 			var panel = remote != null && isRemote ?
-				remote(resource==null ? id : resource,cwd,restored,requestFrame,terminalPalette) : create(directory,requestFrame,terminalPalette);
-			return new UiTerminalTab(id, title, cwd, panel,isRemote,resource);
+				remote(resource==null ? id : resource,workspaceRoot == null ? cwd : workspaceRoot,restored,requestFrame,terminalPalette,group,directory) : create(localDirectory,requestFrame,terminalPalette);
+			return new UiTerminalTab(id, title, cwd, panel,isRemote,resource,workspaceRoot);
 		} catch (error:Dynamic) {
 			statusMessage = "Terminal: " + Std.string(error);
 			return null;
@@ -560,6 +562,13 @@ class ExosuitApp implements DesktopUiApplication {
             layers.push(new StackChild("workspace-terminals",new nativekit.ui.widgets.overlays.Dialog("workspace-terminals-dialog","Workspace Terminals",content,dismiss,
                 Math.max(240.0,Math.min(640.0,viewportWidth-48.0))),0.0,0.0,50,LayoutAxis.grow(),LayoutAxis.grow()));
         }
+		if (groupEditor != null) {
+			var dismiss = function() { groupEditor = null; requestFrame(); };
+			layers.push(new StackChild("workbench-group-dialog", new nativekit.ui.widgets.overlays.Dialog(
+				"workbench-group-dialog", "Group", groupEditor, dismiss, Math.max(240.0, Math.min(520.0, viewportWidth - 48.0))),
+				0.0, 0.0, 60, LayoutAxis.grow(), LayoutAxis.grow()));
+		}
+
 		if (settingsPanel != null) {
 			if (settingsPanel.catalog.store != application.settings.store) {
 				var filter = settingsPanel.filter, advanced = settingsPanel.showAdvanced, category = settingsPanel.selectedCategory;
@@ -664,6 +673,34 @@ class ExosuitApp implements DesktopUiApplication {
 	public function attachTerminalCatalog(client:workspace.client.WorkspaceTerminalCatalogClient):Void {
 		terminalCatalogClient = client;
 		terminalBrowserPanel = new WorkspaceTerminalsPanel(client, openCatalogTerminal, forgetCatalogTerminal, requestFrame);
+		workbenchPanel = new WorkbenchPanel(client, openCatalogTerminal, newGroupedTerminal, editWorkspaceGroup,
+			function(path) application.openArgument(path), openWorkspaceTerminals, requestFrame);
+		registerSidebarDestination("workbench", IconName.Terminal, function() return workbenchPanel == null ? new Text("Workspace disconnected") : workbenchPanel,
+			new nativekit.ui.widgets.sidebar.SidebarModeOptions("Workbench", 20, true));
+	}
+
+	function newGroupedTerminal(group:String):Void {
+		var client = terminalCatalogClient;
+		var catalog = client == null ? null : client.terminalCatalog();
+		if (catalog == null || workbenchPanel == null) return;
+		var selected = workbenchPanel.model.groups.get(group);
+		if (selected == null) return;
+		var project = application.workspace.activeProject;
+		if (project == null) return;
+		var root = project.root;
+		if (catalog.workspaceRoot != root) return;
+		var cwd = workbenchPanel.model.directory(selected);
+		var resource = workspace.client.LocalTerminalIds.create(nextTerminalId++);
+		var terminal = createTerminalTab(TerminalViewIdentity.view(root, resource), "Terminal", cwd == null ? root : cwd, false, true, resource, root, group);
+		if (terminal == null) return;
+		host.panelTerminals.push(terminal); host.activePanelTerminalIndex = host.panelTerminals.length - 1;
+		dock.open("terminal"); dock.activate("terminal"); pendingTerminalFocus = true; requestFrame();
+	}
+
+	function editWorkspaceGroup(group:workspace.service.WorkspaceProtocol.WorkspaceGroup, create:Bool):Void {
+		if (terminalCatalogClient == null) return;
+		groupEditor = new GroupEditorPanel(terminalCatalogClient, group, create, function() { groupEditor = null; requestFrame(); }, requestFrame);
+		requestFrame();
 	}
 
 	public function openWorkspaceTerminals():Void {
@@ -674,7 +711,7 @@ class ExosuitApp implements DesktopUiApplication {
 
 	public function openCatalogTerminal(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Bool {
 		if (!record.available) return false;
-		for (tab in host.allTerminalTabs()) if (tab.resourceId == record.id && tab.cwd == record.cwd && tab.remote && !tab.disposed) {
+		for (tab in host.allTerminalTabs()) if (tab.resourceId == record.id && tab.workspaceRoot == record.workspaceRoot && tab.remote && !tab.disposed) {
 			tab.title = record.name;
 			var pane = host.terminalPaneFor(tab);
 			if (pane != null) host.attachTerminal(tab);
@@ -688,7 +725,7 @@ class ExosuitApp implements DesktopUiApplication {
 			requestFrame();
 			return true;
 		}
-		var terminal = createTerminalTab(TerminalViewIdentity.view(record.cwd, record.id), record.name, record.cwd, true, true, record.id);
+		var terminal = createTerminalTab(TerminalViewIdentity.view(record.workspaceRoot == null ? record.cwd : record.workspaceRoot, record.id), record.name, record.cwd, true, true, record.id, record.workspaceRoot);
 		if (terminal == null) return false;
 		host.panelTerminals.push(terminal);
 		host.activePanelTerminalIndex = host.panelTerminals.length - 1;
@@ -703,7 +740,7 @@ class ExosuitApp implements DesktopUiApplication {
 	function forgetCatalogTerminal(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Void {
 		if (terminalCatalogClient == null || record.state == "running" || record.state == "starting") return;
 		terminalCatalogClient.forgetTerminal(record);
-		for (tab in host.allTerminalTabs()) if (tab.remote && tab.resourceId == record.id && tab.cwd == record.cwd) {
+		for (tab in host.allTerminalTabs()) if (tab.remote && tab.resourceId == record.id && tab.workspaceRoot == record.workspaceRoot) {
 			host.detachTerminal(tab);
 			var index = host.panelTerminals.indexOf(tab);
 			if (index >= 0) {
@@ -732,12 +769,12 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function pumpApplication():Void {
 		nextBackgroundPoll = Sys.time() + 0.05;
-        if(terminalBrowserVisible && terminalCatalogClient!=null) terminalCatalogClient.refreshTerminals(false);
+        if((terminalBrowserVisible || groupEditor != null || (sidebar.visible && sidebar.activeId == "workbench")) && terminalCatalogClient!=null) terminalCatalogClient.refreshTerminals(false);
         if(terminalCatalogClient!=null && terminalCatalogClient.terminalCatalogRevision()!=terminalBrowserRevision) {
             terminalBrowserRevision=terminalCatalogClient.terminalCatalogRevision();
             var catalog=terminalCatalogClient.terminalCatalog();
             if(catalog!=null) for(record in catalog.terminals) for(tab in host.allTerminalTabs())
-                if(tab.remote && tab.resourceId==record.id && tab.cwd==record.cwd) tab.title=record.name;
+                if(tab.remote && tab.resourceId==record.id && tab.workspaceRoot==record.workspaceRoot) { tab.title=record.name; tab.cwd=record.cwd; }
             requestFrame();
         }
 		var previousLanguageStatus = application.language.statusLabel();

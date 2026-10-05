@@ -92,7 +92,7 @@ class TerminalCatalogTests {
     store.close();
     var admin = Database.open(path);
     admin.exec("DROP TABLE workspace_terminals");
-    admin.exec("PRAGMA user_version=1");
+    admin.exec("ALTER TABLE workspace_meta DROP COLUMN root; PRAGMA user_version=1");
     admin.close();
     store = new WorkspaceSqliteStore(path, "w", seed);
     var service = new WorkspaceService("w", "ignored", groups, 32, 256, 16, store);
@@ -308,7 +308,7 @@ class TerminalCatalogTests {
       done = false;
       client.call(WorkspaceTerminalProtocol.LIST,
         {workspace: "w", instance: "third", after: after}, 1000, function(page) {
-        require(page.terminals.length <= 8, "Catalog page exceeded budget");
+        require(page.terminals.length <= WorkspaceTerminalProtocol.CATALOG_PAGE_LIMIT, "Catalog page exceeded budget");
         seen += page.terminals.length;
         pages++;
         after = page.next;
@@ -321,7 +321,7 @@ class TerminalCatalogTests {
       step();
       require(done, "Catalog page missing");
     } while (after != null);
-    require(seen == 20 && pages == 3, "Catalog pagination lost or duplicated records");
+    require(seen == 20 && pages == 4, "Catalog pagination lost or duplicated records");
     client.close();
     server.close();
     manager.dispose();

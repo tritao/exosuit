@@ -164,10 +164,8 @@ class WorkspaceReplica {
 		if (cursor == 0x7fffffff || event.sequence != cursor + 1)
 			return false;
 		var previous = groups.get(event.group.id);
-		if (previous == null
-			|| previous.revision == 0x7fffffff
-			|| event.group.revision != previous.revision + 1
-			|| event.group.cwd != previous.cwd)
+		if (previous == null ? event.group.revision != 1 || view().length >= 32
+			: previous.revision == 0x7fffffff || event.group.revision != previous.revision + 1)
 			return false;
 		groups.set(event.group.id, WorkspaceProtocol.copyGroup(event.group));
 		cursor = event.sequence;

@@ -9,6 +9,8 @@ import haxeon.wire.MessagePack;
 	@:id(2) var name:String;
 	@:id(3) var cwd:Null<String>;
 	@:id(4) var revision:Int;
+	@:optional @:id(5) var parent:Null<String>;
+	@:optional @:id(6) var order:Int;
 }
 
 @:wire typedef WorkspaceQuery = {@:id(1) var workspace:String;}
@@ -45,6 +47,10 @@ import haxeon.wire.MessagePack;
 	@:id(4) var group:String;
 	@:id(5) var expectedRevision:Int;
 	@:id(6) var name:String;
+	@:optional @:id(7) var action:Null<String>;
+	@:optional @:id(8) var parent:Null<String>;
+	@:optional @:id(9) var cwd:Null<String>;
+	@:optional @:id(10) var order:Int;
 }
 
 @:wire typedef RenameResult = {
@@ -75,6 +81,7 @@ import haxeon.wire.MessagePack;
 class WorkspaceProtocol {
 	public static inline final READ = "workspace.read";
 	public static inline final EVENTS = "workspace.events";
+	public static inline final TREE = "workspace.groups.tree";
 	public static inline final WRITE = "workspace.groups.write";
 	public static inline final IDENTITY_CAPABILITY = "workspace.identity";
 	public static inline final CHANGED = 200;
@@ -87,6 +94,7 @@ class WorkspaceProtocol {
 	public static final RENAME = new RpcMethod<RenameGroup, RenameResult>(102, function(value:RenameGroup) return MessagePack.encode(value),
 		function(bytes:Bytes):RenameGroup return MessagePack.decode(bytes), function(value:RenameResult) return MessagePack.encode(value),
 		function(bytes:Bytes):RenameResult return MessagePack.decode(bytes));
+	public static final GROUP = new RpcMethod<RenameGroup, RenameResult>(105, RENAME.encodeRequest, RENAME.decodeRequest, RENAME.encodeResponse, RENAME.decodeResponse);
 	public static final OPERATION = new RpcMethod<OperationQuery, OperationResult>(103, function(value:OperationQuery) return MessagePack.encode(value),
 		function(bytes:Bytes):OperationQuery return MessagePack.decode(bytes), function(value:OperationResult) return MessagePack.encode(value),
 		function(bytes:Bytes):OperationResult return MessagePack.decode(bytes));
@@ -101,13 +109,23 @@ class WorkspaceProtocol {
 	public static function decodeEvent(bytes:Bytes):WorkspaceEvent
 		return MessagePack.decode(bytes);
 
+	public static function order(value:Null<Int>):Int return value == null ? 0 : value;
+
 	public static function copyGroup(value:WorkspaceGroup):WorkspaceGroup
 		return {
 			id: value.id,
 			name: value.name,
 			cwd: value.cwd,
-			revision: value.revision
+			revision: value.revision,
+			parent: value.parent,
+			order: order(value.order)
 		};
+
+	public static function copyMutation(value:RenameGroup):RenameGroup return {
+		workspace: value.workspace, epoch: value.epoch, operation: value.operation, group: value.group,
+		expectedRevision: value.expectedRevision, name: value.name, action: value.action,
+		parent: value.parent, cwd: value.cwd, order: value.order
+	};
 
 	public static function copyOutcome(value:RenameResult):RenameResult
 		return {

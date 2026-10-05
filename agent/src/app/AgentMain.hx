@@ -29,21 +29,20 @@ class AgentMain {
 		var runtime = NativeKitRuntime.start(),
 			hub = new NativeRpcHub(runtime.events);
 		var clock = function() return NativeKit.nk_time_seconds() * 1000;
+		var directories = new workspace.runtime.WorkspaceDirectories(args.length >= 6 ? args[5] : Sys.getCwd());
 		// The seed epoch is used only when creating a new catalog. Reopening preserves it.
 		var seed = new WorkspaceService("workspace", args[3], [
 			{
 				id: "work",
 				name: "Work",
-				cwd: args.length >= 6 ? args[5] : Sys.getCwd(),
+				cwd: directories.root,
 				revision: 1
 			}
 		]);
-		var store = args.length >= 5 ? new WorkspaceSqliteStore(args[4], "workspace", seed.snapshot()) : null;
-		var service = store == null ? seed : new WorkspaceService("workspace", args[3], seed.snapshot().groups, 32, 256, 16, store);
-		if (args.length >= 6 && (service.snapshot().groups.length != 1 || service.snapshot().groups[0].cwd != args[5]))
-			throw "Workspace database root mismatch";
-		var terminals = new WorkspaceTerminalManager("workspace", args.length >= 7 ? args[6] : args[3], args.length >= 6 ? args[5] : Sys.getCwd(),16777216,store,function() return service.snapshot().groups);
-		var server = new WorkspaceRpcServer(service, clock, null, args.length >= 7 ? {workspace: "workspace", root: args[5], instance: args[6]} : null, terminals);
+		var store = args.length >= 5 ? new WorkspaceSqliteStore(args[4], "workspace", seed.snapshot(), 32, directories.root) : null;
+		var service = new WorkspaceService("workspace", args[3], seed.snapshot().groups, 32, 256, 16, store, directories.resolve);
+		var terminals = new WorkspaceTerminalManager("workspace", args.length >= 7 ? args[6] : args[3], directories.root,16777216,store,function() return service.snapshot().groups);
+		var server = new WorkspaceRpcServer(service, clock, null, args.length >= 7 ? {workspace: "workspace", root: directories.root, instance: args[6]} : null, terminals);
 		var local = hub.listen(NativeRpcHub.local(args[0]), server.acceptLocal);
 		var websocket = hub.listen(NativeRpcHub.websocket(port, "/workspace", true), function(transport) {
 			server.acceptWebSocket(transport, token);

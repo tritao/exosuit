@@ -19,8 +19,8 @@ on native, Wasm32 and Wasm GC. Both encode and decode/re-encode must agree.
 | notification | `810892ccc8c400` |
 | query w | `8101a177` |
 | identity w, /w, i (method 104 response) | `8301a17702a22f7703a169` |
-| snapshot e, cursor 0, group g/Work/null/1 | `8301a165020003918401a16702a4576f726b03c00401` |
-| rename w/e/op/g/1/New | `8601a17702a16503a26f7004a167050106a34e6577` |
+| snapshot e, cursor 0, group g/Work/null/1, nullable parent/order | `8301a165020003918601a16702a4576f726b03c0040105c006c0` |
+| rename w/e/op/g/1/New, nullable tree fields | `8a01a17702a16503a26f7004a167050106a34e657707c008c009c00ac0` |
 | framed query | `484d504b0100000000048101a177` |
 
 Hello uses protocol/codec 1, application `test/1`, capability `workspace.read`;
@@ -85,3 +85,19 @@ Terminal catalog vectors (methods 115–117 use permanent identities):
   `8601a17702a16903a17404a14e05a17706d30000000100000002`.
 
 These run in the same native, Wasm32 and Wasm GC compatibility fixtures.
+
+
+## Group tree extension
+
+The legacy four-field group/six-field rename vectors still decode. Current codecs
+also encode the nullable tree fields; legacy decoders skip those unknown IDs.
+Method 105 requires `workspace.groups.tree` and uses create/update rather than
+overloading method 102's rename behavior.
+
+| Value | Canonical hex |
+| --- | --- |
+| create group w/e/op/g/0/N, parent work, cwd null, order 2 | `8a01a17702a16503a26f7004a167050006a14e07a663726561746508a4776f726b09c00a02` |
+| open terminal w/i/t, create, 80×24, group g, directory /w | `8801a17702a16903a17404c30550061807a16708a22f77` |
+
+Native, Wasm32 and Wasm GC also encode a conservative maximum-Unicode catalog with
+32 groups and six terminal records and assert its size stays within 262144 bytes.

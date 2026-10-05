@@ -34,7 +34,7 @@ class WorkspaceRpcServer {
 		this.identity = identity == null ? null : {workspace: identity.workspace, root: identity.root, instance: identity.instance};
 		if (identity != null && (identity.workspace != service.id || identity.root.length == 0 || identity.instance.length == 0))
 			throw "Invalid daemon identity";
-		var defaults = [WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS, WorkspaceProtocol.WRITE];
+		var defaults = [WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS, WorkspaceProtocol.WRITE, WorkspaceProtocol.TREE];
 		if (identity != null)
 			defaults.push(WorkspaceProtocol.IDENTITY_CAPABILITY);
 		if (terminals != null) {

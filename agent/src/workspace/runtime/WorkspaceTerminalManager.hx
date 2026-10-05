@@ -6,7 +6,7 @@ import haxeon.rpc.*;
 import workspace.service.WorkspaceTerminalProtocol;
 import workspace.service.WorkspaceTerminals;
 import workspace.service.WorkspaceTerminalPersistence;
-import workspace.service.WorkspaceProtocol.WorkspaceGroup;
+import workspace.service.WorkspaceProtocol;
 import terminalsession.LocalPtyBackend;
 import terminalsession.TerminalProfile;
 import terminalkit.Emulator;
@@ -17,6 +17,7 @@ var length:Int;
 }
 private class RuntimeTerminal {
   public final id:String;
+  public final cwd:String;
   public final backend:LocalPtyBackend;
   public final emulator:Emulator;
   public var columns:Int;
@@ -27,8 +28,9 @@ private class RuntimeTerminal {
   public var end:Int64 = 0;
   public var retained:Int = 0;
   public final output:Array<OutputChunk> = [];
-  public function new(id:String, backend:LocalPtyBackend, columns:Int, rows:Int) {
+  public function new(id:String, cwd:String, backend:LocalPtyBackend, columns:Int, rows:Int) {
     this.id = id;
+    this.cwd = cwd;
     this.backend = backend;
     try emulator = Emulator.open(columns, rows, 1000, "xterm-256color", false) catch (failure:Dynamic) {
       backend.close();
@@ -74,6 +76,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
     var stored = persistence == null ?[] : persistence.loadTerminals();
     if (stored.length > 256) throw "Terminal catalog exceeds limit";
     if (persistence != null) for (record in stored) {
+      if (record.workspaceRoot == null) record.workspaceRoot = root;
       if (!validRecord(record) || catalog.exists(record.id)) throw "Invalid persisted terminal record";
       if (record.instance != instance &&(record.state == "running" || record.state == "starting")) {
         record.state = "lost";
@@ -91,7 +94,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
   function validName(name:String):Bool return name != null && StringTools.trim(name).length > 0
     && name.length <= 128 && name.indexOf("\t") < 0 && name.indexOf("\n") < 0 && name.indexOf("\r") < 0;
   function validRecord(r:TerminalRecord):Bool return r != null && r.id != null && r.id.length > 0
-    && r.id.length <= 128 && validName(r.name) && knownGroup(r.group) && r.cwd == root && r.instance != null
+    && r.id.length <= 128 && validName(r.name) && knownGroup(r.group) && r.workspaceRoot == root && r.cwd != null && r.cwd.length > 0 && r.cwd.length <= 1024 && r.instance != null
     && r.instance.length > 0 && r.instance.length <= 128 && r.revision > 0 && r.revision < Int64.make(
       0x7fffffff,
       0xffffffff
@@ -111,7 +114,8 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
     state: r.state,
     exitCode: r.exitCode,
     available: terminals.exists(r.id) && r.instance == instance,
-    revision: r.revision
+    revision: r.revision,
+    workspaceRoot: root
   };
   function save(r:TerminalRecord):Void {
     if (storageFailed) throw "Terminal metadata storage unavailable";
@@ -127,11 +131,11 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
   public function snapshot():TerminalCatalog {
     var records = [for (r in catalog) copy(r)];
     records.sort(function(a, b) return Reflect.compare(a.id, b.id));
-    return {instance: instance, groups: groups(), terminals: records, next: null};
+    return {instance: instance, groups: groups(), terminals: records, next: null, workspaceRoot: root};
   }
   function info(t:RuntimeTerminal):TerminalInfo return {
     id: t.id,
-    cwd: root,
+    cwd: t.cwd,
     state: t.state,
     exitCode: t.exitCode,
     columns: t.columns,
@@ -169,7 +173,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
       var records:Array<TerminalRecord> = [];
       var more = false;
       for (id in ids) if (r.after == null || Reflect.compare(id, r.after) > 0) {
-        if (records.length == 8) {
+        if (records.length == WorkspaceTerminalProtocol.CATALOG_PAGE_LIMIT) {
           more = true;
           break;
         }
@@ -179,7 +183,8 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         instance: instance,
         groups: groups(),
         terminals: records,
-        next: more ? records[records.length - 1].id : null
+        next: more ? records[records.length - 1].id : null,
+        workspaceRoot: root
       }
       );
     }
@@ -261,6 +266,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         c.fail(error("unauthorized"));
         return;
       }
+      if ((r.group != null || r.directory != null) && capabilities.indexOf(WorkspaceProtocol.TREE) < 0) { c.fail(error("unsupported")); return; }
       if (!valid(r.workspace, r.instance, r.id) || !size(r.columns, r.rows)) {
         c.fail(error("invalid_request"));
         return;
@@ -292,11 +298,27 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
           c.fail(error("unknown_group"));
           return;
         }
+        var selectedGroup = r.group == null ? (knownGroup("work") ? "work" : groupList[0].id) : r.group;
+        if (!knownGroup(selectedGroup)) { c.fail(error("unknown_group")); return; }
+        var directory = r.directory;
+        var parent:Null<String> = selectedGroup;
+        var visited:Map<String, Bool> = [];
+        while (directory == null && parent != null) {
+          if (visited.exists(parent)) { c.fail(error("invalid_group")); return; }
+          visited.set(parent, true);
+          var group = Lambda.find(groupList, function(g) return g.id == parent);
+          if (group == null) { c.fail(error("unknown_group")); return; }
+          directory = group.cwd;
+          parent = group.parent;
+        }
+        var resolved = new WorkspaceDirectories(root).resolve(directory == null ? root : directory);
+        if (resolved == null) { c.fail(error("invalid_directory")); return; }
         var record:TerminalRecord = {
           id: r.id,
           name: "Terminal " +(count + 1),
-          group: knownGroup("work") ? "work" : groupList[0].id,
-          cwd : root,
+          group: selectedGroup,
+          cwd : resolved,
+          workspaceRoot: root,
           instance : instance,
           state : "starting",
           exitCode : 0,
@@ -314,7 +336,8 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         try {
           created = new RuntimeTerminal(
             r.id,
-            LocalPtyBackend.spawn(TerminalProfile.shell(root), r.columns, r.rows),
+            resolved,
+            LocalPtyBackend.spawn(TerminalProfile.shell(resolved), r.columns, r.rows),
             r.columns,
             r.rows
           );

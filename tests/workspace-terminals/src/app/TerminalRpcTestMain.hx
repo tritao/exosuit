@@ -35,6 +35,7 @@ class TerminalRpcTestMain {
     if (mode == "contracts") {
       TerminalServiceTests.run(root);
       TerminalCatalogTests.run(root);
+      WorkspaceGroupTests.run(root);
       processes.shutdown();
       runtime.dispose();
       platform.Native.shutdown();
