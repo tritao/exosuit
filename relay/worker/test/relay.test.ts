@@ -41,6 +41,23 @@ describe("machine enrollment and browser origin checks", () => {
     expect(claimant.status).toBe(409);
   });
 
+  it("requires a one-use HTTPS ticket for the machine WebSocket", async () => {
+    const id = nextMachineId();
+    const machineToken = secret(35);
+    await registerMachine(id, machineToken);
+
+    const direct = await call(id, "connect", {
+      headers: websocketHeaders(machineToken),
+    });
+    expect(direct.status).toBe(401);
+
+    const ticket = await issueMachineTicket(id, machineToken);
+    const connected = await connectSocket(id, ticket);
+    expect(connected.status).toBe(101);
+    socketOf(connected);
+    expect((await connectSocket(id, ticket)).status).toBe(401);
+  });
+
   it("requires an allowed browser origin for ticket exchange and preflight", async () => {
     const id = nextMachineId();
     const noOrigin = await call(id, "tickets", {
@@ -48,7 +65,14 @@ describe("machine enrollment and browser origin checks", () => {
       headers: bearer(secret(3)),
       body: JSON.stringify({}),
     });
-    expect(noOrigin.status).toBe(403);
+    expect(noOrigin.status).toBe(401);
+
+    await registerMachine(id, secret(3));
+    const nativeTicket = await call(id, "tickets", {
+      method: "POST",
+      headers: bearer(secret(3)),
+    });
+    expect(nativeTicket.status).toBe(201);
 
     const wrongOrigin = await call(id, "tickets", {
       method: "POST",
@@ -341,9 +365,8 @@ async function createPairing(
 }
 
 async function openMachine(id: string, machineToken: string): Promise<WebSocket> {
-  const response = await call(id, "connect", {
-    headers: websocketHeaders(machineToken),
-  });
+  const ticket = await issueMachineTicket(id, machineToken);
+  const response = await connectSocket(id, ticket);
   expect(response.status).toBe(101);
   return socketOf(response);
 }
@@ -379,10 +402,23 @@ async function issueTicket(id: string, deviceToken: string): Promise<string> {
 }
 
 function connectDevice(id: string, ticket: string): Promise<Response> {
+  return connectSocket(id, ticket, ORIGIN);
+}
+
+function connectSocket(id: string, ticket: string, origin?: string): Promise<Response> {
   return worker.fetch(new Request(
     `${machinePath(id, "connect")}?ticket=${ticket}`,
-    { headers: websocketHeaders(undefined, ORIGIN) },
+    { headers: websocketHeaders(undefined, origin) },
   ), env);
+}
+
+async function issueMachineTicket(id: string, machineToken: string): Promise<string> {
+  const response = await call(id, "tickets", {
+    method: "POST",
+    headers: bearer(machineToken),
+  });
+  expect(response.status).toBe(201);
+  return (await response.json() as { ticket: string }).ticket;
 }
 
 function websocketHeaders(token?: string, origin?: string): Record<string, string> {

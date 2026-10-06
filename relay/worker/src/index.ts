@@ -5,7 +5,7 @@ const MAX_FRAME_BYTES = 64 * 1024;
 const MAX_PAIRING_TTL_SECONDS = 5 * 60;
 const SOCKET_TICKET_TTL_SECONDS = 60;
 const MAX_PENDING_PAIRINGS = 8;
-const MAX_PENDING_TICKETS_PER_DEVICE = 8;
+const MAX_PENDING_TICKETS_PER_PRINCIPAL = 8;
 const MAX_ACTIVE_DEVICES = 128;
 const MAX_CONNECTED_CLIENTS = 8;
 const FRAME_HEADER_BYTES = 17;
@@ -51,7 +51,8 @@ interface PairingRow {
 
 interface TicketRow {
   [key: string]: SqlStorageValue;
-  device_id: string;
+  role: "machine" | "device";
+  device_id: string | null;
   expires_at: number;
 }
 
@@ -80,9 +81,9 @@ const worker = {
     }
 
     const browserRequest = route.action === "pairing" ||
-      (route.action === "connect" && !request.headers.has("Authorization")) ||
-      isTicketRoute;
-    if (browserRequest && !isAllowedOrigin(origin, env)) {
+      ((route.action === "connect" || isTicketRoute) && origin !== null);
+    if ((route.action === "pairing" && !origin) ||
+      (browserRequest && !isAllowedOrigin(origin, env))) {
       return jsonResponse({ error: "origin_not_allowed" }, 403);
     }
 
@@ -107,7 +108,7 @@ export class MachineRelay extends DurableObject<Env> {
       "CREATE TABLE IF NOT EXISTS device (device_id TEXT PRIMARY KEY, token_hash TEXT, revoked_at INTEGER)",
     );
     ctx.storage.sql.exec(
-      "CREATE TABLE IF NOT EXISTS socket_ticket (token_hash TEXT PRIMARY KEY, device_id TEXT NOT NULL, expires_at INTEGER NOT NULL)",
+      "CREATE TABLE IF NOT EXISTS socket_ticket (token_hash TEXT PRIMARY KEY, role TEXT NOT NULL, device_id TEXT, expires_at INTEGER NOT NULL)",
     );
   }
 
@@ -141,11 +142,7 @@ export class MachineRelay extends DurableObject<Env> {
         if (request.method === "POST") return this.createSocketTicket(request);
         break;
       case "connect":
-        if (request.method === "GET") {
-          return request.headers.has("Authorization")
-            ? this.connectMachine(request)
-            : this.connectDevice(request);
-        }
+        if (request.method === "GET") return this.connectTicket(request);
         break;
       case "pairing":
         if (request.method === "GET") return this.connectPairing(request, route.objectId ?? "");
@@ -334,38 +331,46 @@ export class MachineRelay extends DurableObject<Env> {
     const token = readBearer(request);
     if (!token) return jsonResponse({ error: "unauthorized" }, 401);
     const tokenHash = await sha256Hex(token);
-    const device = this.ctx.storage.sql.exec<{ device_id: string }>(
+    const machine = this.ctx.storage.sql.exec<{ token_hash: string }>(
+      "SELECT token_hash FROM machine_credential WHERE singleton = 1",
+    ).toArray()[0];
+    let role: "machine" | "device";
+    let deviceId: string | null = null;
+    if (machine && constantTimeEqual(machine.token_hash, tokenHash)) {
+      role = "machine";
+    } else {
+      const device = this.ctx.storage.sql.exec<{ device_id: string }>(
       "SELECT device_id FROM device WHERE token_hash = ? AND revoked_at IS NULL",
       tokenHash,
-    ).toArray()[0];
-    if (!device) return jsonResponse({ error: "unauthorized" }, 401);
+      ).toArray()[0];
+      if (!device) return jsonResponse({ error: "unauthorized" }, 401);
+      role = "device";
+      deviceId = device.device_id;
+    }
 
     const rawTicket = randomHex(32);
     const ticketHash = await sha256Hex(rawTicket);
     const expiresAt = Date.now() + SOCKET_TICKET_TTL_SECONDS * 1000;
     this.ctx.storage.sql.exec("DELETE FROM socket_ticket WHERE expires_at <= ?", Date.now());
-    const pendingCount = this.ctx.storage.sql.exec<{ total: number }>(
-      "SELECT COUNT(*) AS total FROM socket_ticket WHERE device_id = ?",
-      device.device_id,
-    ).toArray()[0]?.total ?? 0;
-    if (pendingCount >= MAX_PENDING_TICKETS_PER_DEVICE) {
+    const pendingCount = role === "machine"
+      ? this.ctx.storage.sql.exec<{ total: number }>(
+        "SELECT COUNT(*) AS total FROM socket_ticket WHERE role = 'machine'",
+      ).toArray()[0]?.total ?? 0
+      : this.ctx.storage.sql.exec<{ total: number }>(
+        "SELECT COUNT(*) AS total FROM socket_ticket WHERE device_id = ?",
+        deviceId,
+      ).toArray()[0]?.total ?? 0;
+    if (pendingCount >= MAX_PENDING_TICKETS_PER_PRINCIPAL) {
       return jsonResponse({ error: "ticket_limit" }, 429);
     }
     this.ctx.storage.sql.exec(
-      "INSERT INTO socket_ticket (token_hash, device_id, expires_at) VALUES (?, ?, ?)",
+      "INSERT INTO socket_ticket (token_hash, role, device_id, expires_at) VALUES (?, ?, ?, ?)",
       ticketHash,
-      device.device_id,
+      role,
+      deviceId,
       expiresAt,
     );
     return jsonResponse({ ticket: rawTicket, expiresInSeconds: SOCKET_TICKET_TTL_SECONDS }, 201);
-  }
-
-  private async connectMachine(request: Request): Promise<Response> {
-    if (!(await this.authorizeMachine(request))) {
-      return jsonResponse({ error: "unauthorized" }, 401);
-    }
-    if (!isWebSocketUpgrade(request)) return jsonResponse({ error: "websocket_required" }, 426);
-    return this.acceptConnection(request, { role: "machine" });
   }
 
   private async connectPairing(request: Request, channelId: string): Promise<Response> {
@@ -389,13 +394,13 @@ export class MachineRelay extends DurableObject<Env> {
     });
   }
 
-  private async connectDevice(request: Request): Promise<Response> {
+  private async connectTicket(request: Request): Promise<Response> {
     if (!isWebSocketUpgrade(request)) return jsonResponse({ error: "websocket_required" }, 426);
     const rawTicket = new URL(request.url).searchParams.get("ticket");
     if (!rawTicket || !isHexSecret(rawTicket)) return jsonResponse({ error: "invalid_ticket" }, 401);
     const ticketHash = await sha256Hex(rawTicket);
     const ticket = this.ctx.storage.sql.exec<TicketRow>(
-      "SELECT device_id, expires_at FROM socket_ticket WHERE token_hash = ?",
+      "SELECT role, device_id, expires_at FROM socket_ticket WHERE token_hash = ?",
       ticketHash,
     ).toArray()[0];
     if (!ticket || ticket.expires_at <= Date.now()) {
@@ -403,6 +408,14 @@ export class MachineRelay extends DurableObject<Env> {
       return jsonResponse({ error: "invalid_ticket" }, 401);
     }
 
+    if (ticket.role === "machine") {
+      return this.acceptConnection(request, { role: "machine" }, () => {
+        this.ctx.storage.sql.exec("DELETE FROM socket_ticket WHERE token_hash = ?", ticketHash);
+      });
+    }
+
+    if (!this.hasMachineSocket()) return jsonResponse({ error: "machine_offline" }, 503);
+    if (!ticket.device_id) return jsonResponse({ error: "invalid_ticket" }, 401);
     const device = this.ctx.storage.sql.exec<{ token_hash: string | null; revoked_at: number | null }>(
       "SELECT token_hash, revoked_at FROM device WHERE device_id = ?",
       ticket.device_id,
@@ -412,7 +425,6 @@ export class MachineRelay extends DurableObject<Env> {
       return jsonResponse({ error: "device_revoked" }, 401);
     }
 
-    if (!this.hasMachineSocket()) return jsonResponse({ error: "machine_offline" }, 503);
     return this.acceptConnection(request, {
       role: "device",
       deviceId: ticket.device_id,

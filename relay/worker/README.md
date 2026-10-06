@@ -16,8 +16,8 @@ The machine service selects a channel for every outgoing frame. Pairing and
 device sockets may send only on their attached channel. This lets the Worker
 unicast frames without reading Noise or workspace RPC contents. Frames are
 limited to 64 KiB, there may be eight connected browser/device channels per
-machine, eight outstanding invitations, eight outstanding tickets per device
-and 128 active devices per machine.
+machine, eight outstanding invitations, eight outstanding tickets for each
+device or machine service, and 128 active devices per machine.
 
 The planned service generates 16-byte machine, device and channel IDs and
 32-byte secrets with its OS cryptographic random source, then keeps the machine
@@ -58,14 +58,15 @@ random 16-byte value encoded as lowercase hex.
 | Pairing socket | `wss://…/pair/{channelId}?secret={secret}` | Browser presents the single-use invitation capability. Requires an allowed `Origin` and an online machine socket. |
 | Register approved device | `PUT /devices/{deviceId}`, machine bearer, JSON `{token}` | Stores a hash after the service has completed Noise verification and desktop approval. |
 | Revoke device | `DELETE /devices/{deviceId}`, machine bearer | Tombstones the device, deletes its pending tickets and closes its live socket. |
-| Request socket ticket | `POST /tickets`, device bearer | Returns a 60-second, single-use ticket. Requires an allowed browser origin. |
-| Machine socket | `wss://…/connect`, machine bearer | Persistent outbound connection from the workspace service. |
+| Request socket ticket | `POST /tickets`, machine or device bearer | Returns a 60-second, single-use ticket. Browser requests require an allowed origin. |
+| Machine socket | `wss://…/connect?ticket={ticket}` | Workspace service exchanges its machine bearer over HTTPS, then upgrades with the one-use ticket. |
 | Device socket | `wss://…/connect?ticket={ticket}` | Browser exchanges its stored device bearer for a one-use ticket, then upgrades. |
 
-Invitation capabilities and socket tickets appear in WebSocket query strings
-because browser WebSocket APIs cannot set an Authorization header. They are
-random, short-lived and single-use; reusable machine and device bearers never
-go in URLs. All external use requires HTTPS/WSS.
+Invitation capabilities and one-use socket tickets appear in WebSocket query
+strings because WebSocket APIs do not provide the same Authorization-header
+control as HTTPS requests. They are random, short-lived and single-use;
+reusable machine and device bearers never go in URLs. All external use requires
+HTTPS/WSS.
 
 The first machine registration is a high-entropy, first-claim capability rather
 than an account-backed registration flow. Provision the machine ID and bearer
