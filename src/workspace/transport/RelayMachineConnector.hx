@@ -32,36 +32,46 @@ class RelayMachineConnector {
 			return attempt;
 		}
 		attempts.push(attempt);
-		var ticketAttempt = tickets.request(endpoint, machineToken, function(ticket, error) {
+		var registrationAttempt = tickets.register(endpoint, machineToken, function(error) {
 			if (!attempt.isActive())
 				return;
-			if (ticket == null) {
+			if (error != null) {
 				if (attempt.finish())
-					complete(null, error == null ? "ticket_request_failed" : error);
+					complete(null, error);
 				return;
 			}
-			// Keep the connect attempt cancellable until NativeKit reports WSS ready.
-			var options = NativeRpcHub.websocketUrl(endpoint.websocketUrl(ticket));
-			var socketAttempt = hub.connectBytes(options, function(stream, connectError) {
-				if (stream == null) {
+			var ticketAttempt = tickets.request(endpoint, machineToken, function(ticket, ticketError) {
+				if (!attempt.isActive())
+					return;
+				if (ticket == null) {
 					if (attempt.finish())
-						complete(null, connectError == null ? "relay_connect_failed" : connectError);
+						complete(null, ticketError == null ? "ticket_request_failed" : ticketError);
 					return;
 				}
-				if (!attempt.finish()) {
-					stream.close();
-					return;
-				}
-				try
-					complete(new RelaySocketLink(stream), null)
-				catch (failure:Dynamic) {
-					stream.close();
-					throw failure;
-				}
+				// Keep the connect attempt cancellable until NativeKit reports WebSocket ready.
+				var options = NativeRpcHub.websocketUrl(endpoint.websocketUrl(ticket));
+				var socketAttempt = hub.connectBytes(options, function(stream, connectError) {
+					if (stream == null) {
+						if (attempt.finish())
+							complete(null, connectError == null ? "relay_connect_failed" : connectError);
+						return;
+					}
+					if (!attempt.finish()) {
+						stream.close();
+						return;
+					}
+					try
+						complete(new RelaySocketLink(stream), null)
+					catch (failure:Dynamic) {
+						stream.close();
+						throw failure;
+					}
+				});
+				attempt.useSocket(socketAttempt);
 			});
-			attempt.useSocket(socketAttempt);
+			attempt.useTicket(ticketAttempt);
 		});
-		attempt.useTicket(ticketAttempt);
+		attempt.useTicket(registrationAttempt);
 		return attempt;
 	}
 

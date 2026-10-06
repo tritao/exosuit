@@ -46,12 +46,12 @@ with tempfile.TemporaryDirectory(prefix='exidle-') as temporary:
             database = Path(first['credentialFile']).parent / 'catalog.sqlite'
             assert database.exists(), 'Idle shutdown discarded persistent catalog'
             # A fresh instance reopens the same durable database. Clients reset grace.
-            process = subprocess.Popen([sys.executable, str(MANAGER), str(root), '--idle-seconds', '4'], env=environment, stdout=log, stderr=subprocess.STDOUT)
+            process = subprocess.Popen([sys.executable, str(MANAGER), str(root), '--idle-seconds', '10'], env=environment, stdout=log, stderr=subprocess.STDOUT)
             second = ready(process)
             assert first['generation'] != second['generation']
             subprocess.run([HAXEON, 'run', '--project', str(PROJECT), *MODE, '--', 'hold', str(root), str(MANAGER)], env=environment, check=True, timeout=120)
             assert process.poll() is None and endpoint() is not None, 'Last disconnect had no grace'
-            assert process.wait(timeout=12) == 0 and endpoint() is None
+            assert process.wait(timeout=15) == 0 and endpoint() is None
             # Explicit availability propagates through the detached manager boundary.
             subprocess.run([sys.executable, str(MANAGER), str(root), '--detach', '--idle-seconds', '1', '--always-available'], env=environment, check=True, timeout=90)
             descriptor = json.loads(endpoint().read_text())

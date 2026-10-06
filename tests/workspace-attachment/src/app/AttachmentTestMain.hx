@@ -44,9 +44,9 @@ class AttachmentTestMain {
         "Concurrent clients did not attach to one validated daemon"
       );
       if (mode == "hold") {
-        var holdUntil = clock() + 6000;
+        var holdUntil = clock() + 12000;
         while (clock() < holdUntil) {
-          if (clock() >= holdUntil - 3000) a.dispose();
+          if (clock() >= holdUntil - 6000) a.dispose();
           step();
           require(b.ready && b.error == null, "Connected sibling lost during idle grace");
         }

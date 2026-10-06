@@ -16,7 +16,7 @@ import nativekit.ffi.NativeKitTypes.Result;
 
 private typedef TicketPending = {
 	var attempt:RelayTicketAttempt;
-	var complete:Null<RelaySocketTicket>->Null<String>->Void;
+	var complete:Null<haxeon.platform.NativeKitHttpResponse>->Null<String>->Void;
 }
 
 /** Fetches short-lived relay WebSocket tickets without exposing reusable credentials in URLs. */
@@ -41,6 +41,27 @@ class RelayTicketClient {
 		subscription = events.listen(onEvent);
 	}
 
+	/** Enrolls the bearer once; Worker registration is idempotent for the same key. */
+	public function register(endpoint:RelayMachineEndpoint, machineToken:String, complete:Null<String>->Void):RelayTicketAttempt {
+		if (complete == null)
+			throw "Relay registration callback cannot be null";
+		return post(endpoint, machineToken, endpoint == null ? "" : endpoint.registrationUrl(), function(response, error) {
+			if (error != null) {
+				complete(error);
+				return;
+			}
+			if (response == null) {
+				complete("ticket_transport_failed");
+				return;
+			}
+			if (response.statusCode == 201 || response.statusCode == 204) {
+				complete(null);
+				return;
+			}
+			complete(statusError(response.statusCode));
+		});
+	}
+
 	/**
 		Starts one authenticated POST. The machine bearer is copied into the request
 		header by NativeKit and is never put into the WebSocket URL or diagnostics.
@@ -49,6 +70,32 @@ class RelayTicketClient {
 		complete:Null<RelaySocketTicket>->Null<String>->Void):RelayTicketAttempt {
 		if (complete == null)
 			throw "Relay ticket completion callback cannot be null";
+		return post(endpoint, machineToken, endpoint == null ? "" : endpoint.ticketUrl(), function(response, error) {
+			if (error != null) {
+				complete(null, error);
+				return;
+			}
+			if (response == null) {
+				complete(null, "ticket_transport_failed");
+				return;
+			}
+			if (response.statusCode != 201) {
+				complete(null, statusError(response.statusCode));
+				return;
+			}
+			var ticket:Null<RelaySocketTicket> = null;
+			try
+				ticket = RelaySocketTicket.parse(response.body)
+			catch (_:Dynamic) {
+				complete(null, "invalid_relay_ticket");
+				return;
+			}
+			complete(ticket, null);
+		});
+	}
+
+	function post(endpoint:RelayMachineEndpoint, machineToken:String, url:String,
+		complete:Null<haxeon.platform.NativeKitHttpResponse>->Null<String>->Void):RelayTicketAttempt {
 		var requestId:Null<haxe.Int64> = null;
 		var key:Null<String> = null;
 		var attempt = new RelayTicketAttempt(function() {
@@ -62,7 +109,7 @@ class RelayTicketClient {
 			complete(null, "ticket_client_closed");
 			return attempt;
 		}
-		if (endpoint == null || machineToken == null || !RelaySocketTicket.isToken(machineToken)) {
+		if (endpoint == null || machineToken == null || !RelaySocketTicket.isToken(machineToken) || url == "") {
 			attempt.finish();
 			complete(null, "invalid_relay_credentials");
 			return attempt;
@@ -88,7 +135,7 @@ class RelayTicketClient {
 			contentType.set_value_bytes(Bytes.ofString("application/json"));
 			var requestOptions = new HttpRequestOptions();
 			requestOptions.set_method(HttpMethod.Post);
-			requestOptions.set_url(endpoint.ticketUrl());
+			requestOptions.set_url(url);
 			requestOptions.set_headers([authorization, contentType]);
 			requestOptions.set_body_bytes(Bytes.ofString("{}"));
 			requestOptions.set_mode(HttpRequestMode.Buffered);
@@ -112,6 +159,12 @@ class RelayTicketClient {
 		return attempt;
 	}
 
+	static function statusError(status:Int):String
+		return status == 401 || status == 403 ? "relay_unauthorized"
+			: status == 409 ? "machine_identity_conflict"
+			: status == 429 ? "relay_rate_limited"
+			: status >= 500 ? "relay_unavailable" : "relay_rejected";
+
 	function pendingCount():Int {
 		var count = 0;
 		for (_ in pending)
@@ -134,21 +187,7 @@ class RelayTicketClient {
 					item.complete(null, "ticket_transport_failed");
 					return;
 				}
-				if (response.statusCode != 201) {
-					var code = response.statusCode == 401 || response.statusCode == 403 ? "relay_unauthorized"
-						: response.statusCode == 429 ? "relay_rate_limited"
-						: response.statusCode >= 500 ? "relay_unavailable" : "ticket_rejected";
-					item.complete(null, code);
-					return;
-				}
-				var ticket:Null<RelaySocketTicket> = null;
-				try
-					ticket = RelaySocketTicket.parse(response.body)
-				catch (_:Dynamic) {
-					item.complete(null, "invalid_relay_ticket");
-					return;
-				}
-				item.complete(ticket, null);
+				item.complete(response, null);
 			default:
 		}
 	}

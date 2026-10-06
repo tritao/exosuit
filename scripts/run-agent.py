@@ -48,6 +48,35 @@ def atomic_json(path, value):
         temporary.unlink(missing_ok=True)
 
 
+def make_relay_bootstrap(directory):
+    origin = os.environ.get('EXOSUIT_RELAY_ORIGIN')
+    if not origin:
+        return None
+    identity_path = directory / 'relay-machine.json'
+    if identity_path.exists() or identity_path.is_symlink():
+        private_file(identity_path)
+        value = json.loads(identity_path.read_text())
+        if not isinstance(value, dict):
+            raise RuntimeError('Invalid workspace relay identity')
+        machine_id = value.get('machineId')
+        if value.get('version') != 1 or not isinstance(machine_id, str) or len(machine_id) != 32 or any(c not in '0123456789abcdef' for c in machine_id):
+            raise RuntimeError('Invalid workspace relay identity')
+    else:
+        machine_id = secrets.token_hex(16)
+        atomic_json(identity_path, {'version': 1, 'machineId': machine_id})
+    bootstrap = directory / 'relay-bootstrap.json'
+    if bootstrap.exists() or bootstrap.is_symlink():
+        private_file(bootstrap)
+        bootstrap.unlink()
+    atomic_json(bootstrap, {
+        'version': 1,
+        'origin': origin,
+        'machineId': machine_id,
+        'bootstrapToken': secrets.token_hex(32),
+    })
+    return bootstrap
+
+
 # Permanent ids for the native client's typed helper output; endpoint.json remains human-readable.
 DISCOVERY_FIELDS = ['version', 'protocol', 'codec', 'workspace', 'root', 'managerPid', 'generation', 'socket', 'websocket', 'credentialFile']
 
@@ -192,6 +221,7 @@ def main():
         return 3
     adopt_children()
     child = None
+    relay_bootstrap = None
     generation = secrets.token_hex(16)
     stopping = False
 
@@ -222,6 +252,7 @@ def main():
                 output.write(secrets.token_hex(32))
                 output.flush()
                 os.fsync(output.fileno())
+        relay_bootstrap = make_relay_bootstrap(directory)
         database = directory / 'catalog.sqlite'
         for path in [database, directory / 'catalog.sqlite-wal', directory / 'catalog.sqlite-shm', directory / 'catalog.sqlite.sqlitekit-lock']:
             if path.exists() or path.is_symlink():
@@ -238,6 +269,8 @@ def main():
         haxeon = os.environ.get('HAXEON_BIN', str(haxeon_root / 'scripts/haxeon'))
         compiler_mode = ['--self-hosted'] if os.environ.get('HAXEON_SELF_HOSTED') == '1' else []
         daemon_args = [str(address), str(port), str(credential), secrets.token_hex(16), str(database), str(root), generation, str(0 if args.always_available else args.idle_seconds * 1000)]
+        if relay_bootstrap is not None:
+            daemon_args.append(str(relay_bootstrap))
         bundled_runner = Path(__file__).resolve().with_name('exosuit-agent')
         if bundled_runner.is_file():
             command = [str(bundled_runner), *daemon_args]
@@ -324,6 +357,8 @@ def main():
                     finally:
                         os.close(fd)
         finally:
+            if relay_bootstrap is not None:
+                relay_bootstrap.unlink(missing_ok=True)
             try:
                 if json.loads(endpoint.read_text()).get('generation') == generation:
                     endpoint.unlink()

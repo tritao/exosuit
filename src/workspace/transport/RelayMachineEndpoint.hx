@@ -28,6 +28,9 @@ class RelayMachineEndpoint {
 	public function ticketUrl():String
 		return origin + "/v1/machines/" + machineId + "/tickets";
 
+	public function registrationUrl():String
+		return origin + "/v1/machines/" + machineId + "/register";
+
 	public function websocketUrl(ticket:RelaySocketTicket):String {
 		if (ticket == null)
 			throw "Relay socket ticket is required";

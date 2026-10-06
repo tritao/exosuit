@@ -2,11 +2,26 @@
 set -euo pipefail
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 python3 - "$root_dir" <<'PY'
-import json, os, pathlib, secrets, socket, subprocess, sys, tempfile, time, urllib.error, urllib.request
+import importlib.util, json, os, pathlib, secrets, socket, stat, subprocess, sys, tempfile, time, urllib.error, urllib.request
 root=pathlib.Path(sys.argv[1])
 haxeon=os.environ.get('HAXEON_BIN', str(pathlib.Path(os.environ.get('HAXEON_ROOT', str(root/'haxeon')))/'scripts/haxeon'))
 with tempfile.TemporaryDirectory(prefix="exosuit-rpc-") as temporary:
  directory=pathlib.Path(temporary); os.chmod(directory,0o700)
+ spec=importlib.util.spec_from_file_location('exosuit_run_agent', root/'scripts/run-agent.py')
+ run_agent=importlib.util.module_from_spec(spec); spec.loader.exec_module(run_agent)
+ previous_origin=os.environ.get('EXOSUIT_RELAY_ORIGIN')
+ os.environ['EXOSUIT_RELAY_ORIGIN']='https://relay.example.test'
+ managed_state=directory/'managed-state'; managed_state.mkdir(mode=0o700)
+ first_bootstrap=run_agent.make_relay_bootstrap(managed_state)
+ first_config=json.loads(first_bootstrap.read_text())
+ assert stat.S_IMODE(first_bootstrap.stat().st_mode)==0o600
+ first_bootstrap.unlink()
+ second_bootstrap=run_agent.make_relay_bootstrap(managed_state)
+ second_config=json.loads(second_bootstrap.read_text())
+ assert first_config['machineId']==second_config['machineId'] and first_config['bootstrapToken']!=second_config['bootstrapToken']
+ second_bootstrap.unlink()
+ if previous_origin is None: os.environ.pop('EXOSUIT_RELAY_ORIGIN',None)
+ else: os.environ['EXOSUIT_RELAY_ORIGIN']=previous_origin
  token=directory/'credential'; token.write_text(secrets.token_hex(32)); os.chmod(token,0o600)
  def free_port():
   with socket.socket() as probe:

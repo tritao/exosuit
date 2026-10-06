@@ -83,9 +83,32 @@ Wrangler Worker. `scripts/test-relay.sh` passes TypeScript checking and all 14
 Worker/SQLite tests. The earlier `machine_offline` probe closed the machine
 socket before attempting the device connection; a combined live-session test
 now keeps it open and verifies routing in both directions. Forced Durable Object
-hibernation remains unqualified. The connector is not yet attached to workspace
-service lifecycle, credential persistence, Noise, or the web client. Nothing
-was deployed and the sibling Haxeon/NativeKit commits remain local.
+hibernation remains unqualified. At the M16.1 connector checkpoint, managed
+workspace lifecycle, credential persistence, Noise and the web client were
+still pending. Nothing was deployed and the sibling Haxeon/NativeKit commits
+remain local.
+
+## M16 relay host lifecycle and credentials, 2026-10-06
+
+The workspace manager now enables relay hosting only when
+`EXOSUIT_RELAY_ORIGIN` is set. It persists a stable opaque machine ID in the
+private per-workspace state directory and passes a one-shot mode-0600 bootstrap
+file to the daemon. The daemon moves the reusable bearer into NativeKit's
+current-user OS credential store, removes the bootstrap, enrolls the machine,
+and reconnects with bounded exponential backoff. Opt-in hosting counts as
+workspace activity, so closing local editor windows does not make a configured
+remote workspace disappear. The setting remains opt-in; without it, daemon idle
+behavior is unchanged.
+
+Inbound relay channels are closed until the selected Noise handshake and device
+grants are implemented. This work establishes host lifecycle and secret storage;
+it does not yet allow remote RPC or make the web build a usable remote client.
+`scripts/test-workspace-transport.sh` verifies bootstrap identity/token handling,
+OS-store adapter compilation, Worker enrollment/connection and bidirectional
+routing. `scripts/test-relay.sh` passes all 14 Worker/SQLite tests.
+`python3 -m py_compile scripts/run-agent.py` passes. Linux builds need
+`libsecret-1-dev`; runtime requires an available user-session Secret Service.
+No relay was deployed.
 
 ## Workbench navigation cleanup, 2026-10-05
 

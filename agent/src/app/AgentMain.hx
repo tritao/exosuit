@@ -9,14 +9,16 @@ import workspace.service.WorkspaceService;
 import workspace.service.WorkspaceLifetime;
 import workspace.storage.WorkspaceSqliteStore;
 import workspace.runtime.WorkspaceTerminalManager;
+import workspace.runtime.WorkspaceRelayHost;
+import workspace.runtime.WorkspaceRelaySettings;
 
 /** Catalog daemon. The managed launcher owns exclusive startup and discovery. */
 class AgentMain {
 	static function main():Void {
 		var args = Sys.args();
-		if (args.length < 4 || args.length > 8)
-			throw "Usage: exosuit-agent PRIVATE_SOCKET LOOPBACK_WS_PORT TOKEN_FILE SEED_EPOCH [DATABASE [WORKSPACE_ROOT [INSTANCE [IDLE_MILLISECONDS]]]]";
-		var idleMilliseconds = args.length == 8 ? Std.parseInt(args[7]) : 60000;
+		if (args.length < 4 || args.length > 9)
+			throw "Usage: exosuit-agent PRIVATE_SOCKET LOOPBACK_WS_PORT TOKEN_FILE SEED_EPOCH [DATABASE [WORKSPACE_ROOT [INSTANCE [IDLE_MILLISECONDS [RELAY_BOOTSTRAP]]]]]";
+		var idleMilliseconds = args.length >= 8 ? Std.parseInt(args[7]) : 60000;
 		if (idleMilliseconds == null || idleMilliseconds < 0)
 			throw "Invalid workspace idle timeout";
 		var lifetime = new WorkspaceLifetime(idleMilliseconds);
@@ -30,6 +32,9 @@ class AgentMain {
 		var runtime = NativeKitRuntime.start(),
 			hub = new NativeRpcHub(runtime.events);
 		var clock = function() return NativeKit.nk_time_seconds() * 1000;
+		var relayHost:Null<WorkspaceRelayHost> = args.length == 9
+			? new WorkspaceRelayHost(runtime.events, hub, WorkspaceRelaySettings.loadBootstrap(args[8]))
+			: null;
 		var directories = new workspace.runtime.WorkspaceDirectories(args.length >= 6 ? args[5] : Sys.getCwd());
 		// The seed epoch is used only when creating a new catalog. Reopening preserves it.
 		var seed = new WorkspaceService("workspace", args[3], [
@@ -61,9 +66,14 @@ class AgentMain {
 			// Runtime ownership survives client disconnects.
 			terminals.poll();
 			agents.poll();
-			if (lifetime.shouldStop(clock(), server.clientCount(), terminals.activeCount() + agents.activeCount()))
+			if (relayHost != null)
+				relayHost.poll(clock());
+			var remoteAccess = relayHost == null ? 0 : relayHost.activeCount();
+			if (lifetime.shouldStop(clock(), server.clientCount(), terminals.activeCount() + agents.activeCount() + remoteAccess))
 				break;
 		}
+		if (relayHost != null)
+			relayHost.dispose();
 		agents.dispose();
 		processes.shutdown();
 		terminals.dispose();

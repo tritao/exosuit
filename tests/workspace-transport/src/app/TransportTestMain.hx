@@ -6,6 +6,9 @@ import nativekit.ffi.NativeKit;
 import workspace.transport.*;
 import workspace.service.*;
 import workspace.service.WorkspaceProtocol;
+import workspace.runtime.WorkspaceRelayHost;
+import workspace.runtime.WorkspaceRelaySettings;
+import workspace.runtime.WorkspaceCredentialStore;
 import haxeon.rpc.*;
 
 class TransportTestMain {
@@ -193,27 +196,51 @@ class TransportTestMain {
 		require(ticketError == null && ticketValue != null,
 			"NativeKit could not obtain a machine ticket from the local Worker: " + Std.string(ticketError));
 		Sys.println("PASS: NativeKit authenticated HTTP ticket exchange with local Worker");
-		var relayConnector = new RelayMachineConnector(runtime.events, hub, true),
-			relayDone = false,
-			relayLink:Null<RelaySocketLink> = null,
-			relayError:Null<String> = null;
-		relayConnector.connect(relayEndpoint, Reflect.field(relayConfig, "machineToken"), function(link, error) {
-			relayLink = link;
-			relayError = error;
-			relayDone = true;
-		});
+		var credentialStore = new MemoryWorkspaceCredentialStore(),
+			relayBootstrapPath = args[3] + ".bootstrap",
+			bootstrapToken:String = Reflect.field(relayConfig, "machineToken");
+		sys.io.File.saveContent(relayBootstrapPath, haxe.Json.stringify({
+			version: 1,
+			origin: relayEndpoint.origin,
+			machineId: relayEndpoint.machineId,
+			bootstrapToken: bootstrapToken
+		}));
+		var relaySettings = WorkspaceRelaySettings.loadBootstrap(relayBootstrapPath, credentialStore);
+		require(!sys.FileSystem.exists(relayBootstrapPath), "Relay bootstrap secret file was not removed");
+		require(relaySettings.machineToken == bootstrapToken, "Relay bootstrap bearer was not stored");
+		sys.io.File.saveContent(relayBootstrapPath, haxe.Json.stringify({
+			version: 1,
+			origin: relayEndpoint.origin,
+			machineId: relayEndpoint.machineId,
+			bootstrapToken: StringTools.lpad("", "b", 64)
+		}));
+		relaySettings = WorkspaceRelaySettings.loadBootstrap(relayBootstrapPath, credentialStore);
+		require(relaySettings.machineToken == bootstrapToken, "A new bootstrap token replaced the saved machine credential");
+		var otherRelayBootstrapToken = StringTools.lpad("", "c", 64);
+		sys.io.File.saveContent(relayBootstrapPath, haxe.Json.stringify({
+			version: 1,
+			origin: "https://relay.example.test",
+			machineId: relayEndpoint.machineId,
+			bootstrapToken: otherRelayBootstrapToken
+		}));
+		var otherRelaySettings = WorkspaceRelaySettings.loadBootstrap(relayBootstrapPath, credentialStore);
+		require(otherRelaySettings.machineToken == otherRelayBootstrapToken,
+			"A relay credential was reused across different relay origins");
+		var relayHost = new WorkspaceRelayHost(runtime.events, hub,
+			relaySettings, true),
+			machineChannel:Null<RelayChannel> = null;
+		relayHost.onChannel = function(channel) machineChannel = channel;
 		deadline = clock() + 20000;
-		while (!relayDone) {
-			require(clock() < deadline, "NativeKit relay ticket and WebSocket handshake timed out");
+		while (!relayHost.connected) {
+			require(clock() < deadline, "Workspace relay host enrollment and connection timed out: " + Std.string(relayHost.lastError));
 			runtime.events.wait(0.001);
 			for (_ in 0...128)
 				if (!runtime.events.poll())
 					break;
 			server.poll();
+			relayHost.poll(clock());
 		}
-		require(relayError == null && relayLink != null && relayLink.isOpen(),
-			"NativeKit could not exchange a machine ticket and connect to the local Worker: " + Std.string(relayError));
-		relayConnector.dispose();
+		require(relayHost.activeCount() == 1, "Configured relay host did not retain workspace lifetime");
 		Sys.println("PASS: NativeKit machine ticket exchange and WebSocket connect to local Worker");
 		var deviceTicketClient = new RelayTicketClient(runtime.events, true),
 			deviceTicketDone = false,
@@ -256,7 +283,6 @@ class TransportTestMain {
 			"NativeKit could not connect the device WebSocket while the machine is live: " + Std.string(deviceConnectError));
 		var deviceLink = new RelaySocketLink(deviceStream),
 			deviceId:String = Reflect.field(relayConfig, "deviceId"),
-			machineChannel = relayLink.openChannel(deviceId),
 			deviceChannel = deviceLink.openChannel(deviceId);
 		require(deviceChannel.send(Bytes.ofString("device-to-machine")), "Device relay send failed");
 		var atMachine:Null<Bytes> = null;
@@ -268,10 +294,14 @@ class TransportTestMain {
 				if (!runtime.events.poll())
 					break;
 			server.poll();
-			atMachine = machineChannel.receive();
+			relayHost.poll(clock());
+			if (machineChannel != null)
+				atMachine = machineChannel.receive();
 			deviceChannel.receive();
 		}
 		require(atMachine.toString() == "device-to-machine", "Worker corrupted device-to-machine data");
+		if (machineChannel == null)
+			throw "Device route did not create a machine channel";
 		require(machineChannel.send(Bytes.ofString("machine-to-device")), "Machine relay send failed");
 		var atDevice:Null<Bytes> = null;
 		deadline = clock() + 5000;
@@ -282,12 +312,13 @@ class TransportTestMain {
 				if (!runtime.events.poll())
 					break;
 			server.poll();
+			relayHost.poll(clock());
 			atDevice = deviceChannel.receive();
 			machineChannel.receive();
 		}
 		require(atDevice.toString() == "machine-to-device", "Worker corrupted machine-to-device data");
 		deviceLink.close();
-		relayLink.close();
+		relayHost.dispose();
 		Sys.println("PASS: NativeKit machine and device sockets route bounded binary data bidirectionally through local Worker");
 		server.dispose();
 		hub.forget(local);
@@ -295,5 +326,26 @@ class TransportTestMain {
 		hub.dispose();
 		runtime.dispose();
 		Sys.println("PASS: authentication refusal is terminal before privileged dispatch");
+	}
+}
+
+private class MemoryWorkspaceCredentialStore implements WorkspaceCredentialStore {
+	final values:Map<String, Bytes> = [];
+
+	public function new() {}
+
+	public function read(account:String):Null<Bytes> {
+		var value = values.get(account);
+		if (value == null)
+			return null;
+		var copy = Bytes.alloc(value.length);
+		copy.blit(0, value, 0, value.length);
+		return copy;
+	}
+
+	public function write(account:String, secret:Bytes):Void {
+		var copy = Bytes.alloc(secret.length);
+		copy.blit(0, secret, 0, secret.length);
+		values.set(account, copy);
 	}
 }

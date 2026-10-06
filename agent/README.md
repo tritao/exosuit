@@ -4,8 +4,6 @@ The daemon hosts a durable named-group catalog over a same-user local socket and
 an authenticated **loopback-only** WebSocket. SQLite persists groups, revisions,
 cursor, operation outcomes and trimmed replay events atomically; restart preserves
 the catalog epoch and mutation idempotency. It has no UIKit or GPU dependency.
-Terminal/provider supervision and remote deployment
-remain M14 work.
 
 Start it on Linux with:
 
@@ -33,6 +31,18 @@ database and credential. Replaced/missing storage stops the daemon rather than
 silently opening a fresh catalog. Linux startup is tested; Windows management is
 not delivered by this POSIX launcher.
 
+Remote relay hosting is opt-in. Set `EXOSUIT_RELAY_ORIGIN` to an HTTPS relay
+origin before starting the manager. It creates one stable opaque relay identity
+for that workspace service and a private, one-shot bearer bootstrap. The daemon
+moves the bearer into NativeKit's OS credential store, keyed by relay origin and
+machine identity, enrolls it with the Worker, and keeps the daemon alive while
+relay hosting is enabled. Linux builds
+need `libsecret-1-dev`; a user-session Secret Service must be available at runtime.
+The relay socket is outbound, so no inbound port needs to be exposed. Incoming
+device channels are currently closed until Noise authentication and device grants
+are connected to the workspace RPC service; this opt-in currently provides the
+host lifecycle and credential foundation, not a usable remote workspace client.
+
 For direct fixtures, build with
 `haxeon/scripts/haxeon build --project agent/haxeon.json`.
 Run arguments are:
@@ -50,7 +60,8 @@ selects ephemeral fixture mode, which requires a fresh epoch on every restart.
 NativeKit enforces private-path/same-user checks on the local listener. WebSocket
 clients prove possession of the credential before RPC negotiation or dispatch.
 Plain loopback WebSocket has no network encryption. Remote access requires the
-planned authenticated secure relay and endpoint/session authorization.
+authenticated secure relay and endpoint/session authorization described in
+`docs/roadmap/16-remote-workspaces.md`.
 
 `--discover` validates existing private discovery without starting a daemon;
 exit 4 means no discovery. `--wire` emits the typed JsonWire profile for the

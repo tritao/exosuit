@@ -1,9 +1,10 @@
 # M16 — Connected web workspaces and away-from-home access
 
-Status: in progress. M16.1 has a local relay prototype, a NativeKit machine
-ticket/WebSocket connector, and a selected/tested secure-channel design. The
-workspace-service lifecycle, browser client and cross-network qualification
-remain unimplemented. It depends on Haxeon RPC.1/RPC.2 and the
+Status: in progress. M16.1 has a local relay prototype and bidirectional
+NativeKit connector. A follow-up slice adds opt-in hosting in the
+workspace-daemon lifecycle and NativeKit OS credential storage for the reusable
+machine bearer. The browser client, Noise channel integration and cross-network
+qualification remain unimplemented. It depends on Haxeon RPC.1/RPC.2 and the
 M14 workspace service; terminal and provider features depend on their M12/M14
 acceptance. Use the existing M15 web build as the first remote client. Android
 uses the same responsive web application; a native Android app is not required
@@ -173,11 +174,16 @@ protocol and browser key-storage contracts.
   local Wrangler Worker. Keep the machine socket alive while the test device
   obtains its ticket and connects; the test covers bounded channel framing in
   both directions.
-- [ ] Integrate the connector with workspace-service lifecycle and the browser
-  client, then qualify across networks. The browser must connect over secure
-  WebSocket through the relay so remote use needs no inbound public port,
-  manual port forwarding or VPN. Keep direct/local transport optional under the
-  same client interface.
+- [x] Integrate opt-in machine hosting with the workspace-daemon lifecycle.
+  `EXOSUIT_RELAY_ORIGIN` enables it; the managed launcher creates a stable
+  per-workspace machine identity and a private one-shot bootstrap, and the
+  daemon stores the bearer with NativeKit credentials, enrolls and reconnects
+  with backoff. Explicit relay hosting keeps the daemon alive. Inbound channels
+  close until authenticated Noise/device-grant dispatch is implemented.
+- [ ] Add the browser client and qualify across networks. The browser must
+  connect over secure WebSocket through the relay so remote use needs no inbound
+  public port, manual port forwarding or VPN. Keep direct/local transport
+  optional under the same client interface.
 - [x] Select and prototype-test the browser-compatible Noise XX suite and
   NativeKit/WebCrypto key-custody design documented above. Do not invent
   cryptography or treat relay TLS as end-to-end encryption.
