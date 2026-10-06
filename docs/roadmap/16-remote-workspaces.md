@@ -169,11 +169,13 @@ protocol and browser key-storage contracts.
 - [x] Add the NativeKit machine connector: exchange the reusable machine bearer
   over HTTP Authorization, then connect with the one-use socket ticket. The
   local Wrangler test verifies ticket exchange and machine WebSocket upgrade.
-- [ ] Integrate the connector with workspace-service lifecycle and qualify
-  bidirectional device routing. A local Wrangler probe currently reports
-  `machine_offline` after the native client completes the machine upgrade, even
-  though the Worker Vitest routing tests pass. The browser must connect over
-  secure WebSocket through the relay so remote use needs no inbound public port,
+- [x] Verify bidirectional NativeKit machine/device data routing through the
+  local Wrangler Worker. Keep the machine socket alive while the test device
+  obtains its ticket and connects; the test covers bounded channel framing in
+  both directions.
+- [ ] Integrate the connector with workspace-service lifecycle and the browser
+  client, then qualify across networks. The browser must connect over secure
+  WebSocket through the relay so remote use needs no inbound public port,
   manual port forwarding or VPN. Keep direct/local transport optional under the
   same client interface.
 - [x] Select and prototype-test the browser-compatible Noise XX suite and

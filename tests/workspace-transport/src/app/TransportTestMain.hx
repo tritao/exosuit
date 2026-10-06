@@ -1,5 +1,6 @@
 package app;
 
+import haxe.io.Bytes;
 import haxeon.platform.NativeKitRuntime;
 import nativekit.ffi.NativeKit;
 import workspace.transport.*;
@@ -213,8 +214,81 @@ class TransportTestMain {
 		require(relayError == null && relayLink != null && relayLink.isOpen(),
 			"NativeKit could not exchange a machine ticket and connect to the local Worker: " + Std.string(relayError));
 		relayConnector.dispose();
+		Sys.println("PASS: NativeKit machine ticket exchange and WebSocket connect to local Worker");
+		var deviceTicketClient = new RelayTicketClient(runtime.events, true),
+			deviceTicketDone = false,
+			deviceTicket:Null<RelaySocketTicket> = null,
+			deviceTicketError:Null<String> = null;
+		deviceTicketClient.request(relayEndpoint, Reflect.field(relayConfig, "deviceToken"), function(ticket, error) {
+			deviceTicket = ticket;
+			deviceTicketError = error;
+			deviceTicketDone = true;
+		});
+		deadline = clock() + 5000;
+		while (!deviceTicketDone) {
+			require(clock() < deadline, "NativeKit device ticket request timed out");
+			runtime.events.wait(0.001);
+			for (_ in 0...128)
+				if (!runtime.events.poll())
+					break;
+		}
+		deviceTicketClient.dispose();
+		require(deviceTicketError == null && deviceTicket != null,
+			"NativeKit could not obtain a device ticket from the local Worker: " + Std.string(deviceTicketError));
+		var deviceConnectDone = false,
+			deviceStream:Null<NativeKitByteStream> = null,
+			deviceConnectError:Null<String> = null;
+		hub.connectBytes(NativeRpcHub.websocketUrl(relayEndpoint.websocketUrl(deviceTicket)), function(stream, error) {
+			deviceStream = stream;
+			deviceConnectError = error;
+			deviceConnectDone = true;
+		});
+		deadline = clock() + 20000;
+		while (!deviceConnectDone) {
+			require(clock() < deadline, "NativeKit device WebSocket handshake timed out");
+			runtime.events.wait(0.001);
+			for (_ in 0...128)
+				if (!runtime.events.poll())
+					break;
+			server.poll();
+		}
+		require(deviceConnectError == null && deviceStream != null && deviceStream.isOpen(),
+			"NativeKit could not connect the device WebSocket while the machine is live: " + Std.string(deviceConnectError));
+		var deviceLink = new RelaySocketLink(deviceStream),
+			deviceId:String = Reflect.field(relayConfig, "deviceId"),
+			machineChannel = relayLink.openChannel(deviceId),
+			deviceChannel = deviceLink.openChannel(deviceId);
+		require(deviceChannel.send(Bytes.ofString("device-to-machine")), "Device relay send failed");
+		var atMachine:Null<Bytes> = null;
+		deadline = clock() + 5000;
+		while (atMachine == null) {
+			require(clock() < deadline, "Worker did not route device data to the machine");
+			runtime.events.wait(0.001);
+			for (_ in 0...128)
+				if (!runtime.events.poll())
+					break;
+			server.poll();
+			atMachine = machineChannel.receive();
+			deviceChannel.receive();
+		}
+		require(atMachine.toString() == "device-to-machine", "Worker corrupted device-to-machine data");
+		require(machineChannel.send(Bytes.ofString("machine-to-device")), "Machine relay send failed");
+		var atDevice:Null<Bytes> = null;
+		deadline = clock() + 5000;
+		while (atDevice == null) {
+			require(clock() < deadline, "Worker did not route machine data to the device");
+			runtime.events.wait(0.001);
+			for (_ in 0...128)
+				if (!runtime.events.poll())
+					break;
+			server.poll();
+			atDevice = deviceChannel.receive();
+			machineChannel.receive();
+		}
+		require(atDevice.toString() == "machine-to-device", "Worker corrupted machine-to-device data");
+		deviceLink.close();
 		relayLink.close();
-		Sys.println("PASS: NativeKit HTTPS ticket exchange and machine WebSocket connect to local Worker");
+		Sys.println("PASS: NativeKit machine and device sockets route bounded binary data bidirectionally through local Worker");
 		server.dispose();
 		hub.forget(local);
 		hub.forget(ws);

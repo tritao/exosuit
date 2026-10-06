@@ -13,11 +13,14 @@ with tempfile.TemporaryDirectory(prefix="exosuit-rpc-") as temporary:
    probe.bind(('127.0.0.1',0)); return probe.getsockname()[1]
  agent_port=free_port(); relay_port=free_port()
  machine_id=secrets.token_hex(16); machine_token=secrets.token_hex(32)
+ device_id=secrets.token_hex(16); device_token=secrets.token_hex(32)
  relay_config=directory/'relay-config.json'
  relay_config.write_text(json.dumps({
   'origin':f'http://127.0.0.1:{relay_port}',
   'machineId':machine_id,
   'machineToken':machine_token,
+  'deviceId':device_id,
+  'deviceToken':device_token,
  }))
  os.chmod(relay_config,0o600)
  worker_log=(directory/'worker.log').open('w+')
@@ -39,6 +42,12 @@ with tempfile.TemporaryDirectory(prefix="exosuit-rpc-") as temporary:
      data=b'',headers={'Authorization':'Bearer '+machine_token},method='POST')
     with urllib.request.urlopen(request,timeout=1) as response:
      if response.status != 201: raise RuntimeError(f'machine enrollment returned {response.status}')
+    request=urllib.request.Request(
+     f'{origin}/v1/machines/{machine_id}/devices/{device_id}',
+     data=json.dumps({'token':device_token}).encode(),
+     headers={'Authorization':'Bearer '+machine_token,'Content-Type':'application/json'},method='PUT')
+    with urllib.request.urlopen(request,timeout=1) as response:
+     if response.status != 201: raise RuntimeError(f'device enrollment returned {response.status}')
     break
    except (urllib.error.URLError, TimeoutError, ConnectionError):
     if time.monotonic() >= deadline:

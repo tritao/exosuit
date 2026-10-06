@@ -87,10 +87,10 @@ for public deployment.
 - There is no per-IP/global admission control or measured Cloudflare quota
   policy yet. Per-machine state and frame limits are local bounds, not a claim
   of protection from public abuse or arbitrary usage costs.
-- Exosuit has a NativeKit machine connector that passes a local Wrangler ticket
-  exchange and WebSocket-upgrade smoke test. A separate device-forwarding smoke
-  got `503 machine_offline` after that upgrade, so live Worker/native-client
-  routing remains unqualified even though Worker Vitest covers bidirectional
-  forwarding. The connector is not yet part of workspace-service lifecycle.
+- Exosuit has a NativeKit machine connector. Its local Wrangler test keeps the
+  machine socket live while a device connects, then verifies bounded binary
+  channel data in both directions. An earlier `machine_offline` result came
+  from closing the machine socket before attempting the device connection. The
+  connector is not yet part of workspace-service lifecycle.
 - Noise integration, device-grant lifecycle, browser persistence and
   cross-network deployment are still open.

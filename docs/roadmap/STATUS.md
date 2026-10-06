@@ -77,14 +77,13 @@ The Exosuit release lock now pins Haxeon `614954a4` and its NativeKit
 `99cd0ca3`; full release packaging still needs clean-checkout qualification.
 
 `scripts/test-workspace-transport.sh` passes the frame codec, existing local
-RPC/network lifecycle suite, a ticket exchange against a local Wrangler Worker,
-and the machine WebSocket upgrade. `scripts/test-relay.sh` passes TypeScript
-checking and all 14 Worker/SQLite tests. A separate local device-forwarding
-probe received `503 machine_offline` after the native client reported a
-successful machine WebSocket upgrade; the Durable Object listed no live machine
-socket. Worker Vitest tests do pass bidirectional channel forwarding, but this
-local Wrangler/native-client gap means real device-to-machine forwarding and
-hibernation remain unqualified. The connector is not yet attached to workspace
+RPC/network lifecycle suite, authenticated machine and device ticket exchange,
+both WebSocket upgrades, and bidirectional channel data through a live local
+Wrangler Worker. `scripts/test-relay.sh` passes TypeScript checking and all 14
+Worker/SQLite tests. The earlier `machine_offline` probe closed the machine
+socket before attempting the device connection; a combined live-session test
+now keeps it open and verifies routing in both directions. Forced Durable Object
+hibernation remains unqualified. The connector is not yet attached to workspace
 service lifecycle, credential persistence, Noise, or the web client. Nothing
 was deployed and the sibling Haxeon/NativeKit commits remain local.
 
