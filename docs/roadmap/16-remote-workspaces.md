@@ -1,7 +1,9 @@
 # M16 — Connected web workspaces and away-from-home access
 
-Status: planned, not implemented. Depends on Haxeon RPC.1/RPC.2 and the M14
-workspace service; terminal and provider features depend on their M12/M14
+Status: in progress. M16.1 has a local relay prototype and a selected/tested
+secure-channel design; the workspace service, browser client and cross-network
+qualification remain unimplemented. It depends on Haxeon RPC.1/RPC.2 and the
+M14 workspace service; terminal and provider features depend on their M12/M14
 acceptance. Use the existing M15 web build as the first remote client. Android
 uses the same responsive web application; a native Android app is not required
 for initial delivery. Away-from-home access is part of initial remote delivery,
@@ -46,6 +48,13 @@ workspace encryption keys in relay storage/logs. Workspace service validates
 device permissions independently. Define opaque machine ids and authenticated
 routing; possession of an id alone must not grant access.
 
+The local Worker prototype lives in [`relay/worker/`](../../relay/worker/README.md).
+It uses one-use invitation capabilities and browser socket tickets, hashed
+credentials, a 16-byte per-channel routing prefix and bounded binary forwarding.
+It does not inspect Noise or RPC payloads. Machine/device credential creation,
+secure key storage, global abuse control, measured quotas and remote deployment
+remain open. Browser routes require an exact configured origin allowlist.
+
 Free-tier daily limits can interrupt operations, so report quota exhaustion
 explicitly and back off reconnect attempts. Measure request counts, active
 GB-seconds, stored rows and representative output workloads before choosing
@@ -60,10 +69,10 @@ Reference documentation checked 2026-10-05:
 
 ### Implementation and deployment inputs
 
-Local implementation needs no user account access: keep a project-local pinned
-Wrangler toolchain/configuration and local relay tests. No Wrangler executable
-or relay project was found in this checkout during planning. Implement the
-reviewable relay/client/service slice before requesting publication approval.
+Local implementation needs no user account access. The project-local Worker,
+pinned Wrangler toolchain and runtime tests now live in `relay/worker/`; use
+them to build the reviewable service/client slice before requesting publication
+approval. Local development and tests do not authenticate or deploy.
 
 For live cross-network qualification, the user supplies a Cloudflare account
 with Workers enabled and authenticates Wrangler locally (interactive login,
@@ -145,20 +154,28 @@ protocol and browser key-storage contracts.
   invitation; scanning its QR code or opening its URL enters the same web UI.
   Require explicit desktop pairing confirmation. Persist revocable device
   identity and workspace-scoped grants, not reusable credentials in URLs.
-- [ ] Implement the Worker/router and SQLite-backed machine Durable Object,
-  including role authentication, hibernation recovery, forwarding limits,
-  quota behavior and local fault-injection tests.
+- [ ] Finish Worker/router and SQLite Durable Object qualification for
+  hibernation recovery, forwarding limits, quota behavior and fault injection.
+- [x] Create an account-free local Worker/SQLite prototype with machine claim,
+  device registration/revocation, expiring single-use pairing, one-use socket
+  tickets, origin checks, bounded binary frames and channel-scoped unicast.
+  Local tests cover replay, expiry, revocation, offline pairing, overload caps,
+  frame limits and bidirectional delivery. Forced Durable Object eviction with
+  live sockets still needs qualification; quota behavior and global admission
+  controls are not implemented.
 - [ ] Provide an outbound connection from the workspace service to that relay.
   The browser connects over secure WebSocket through that relay so remote use
   does not require an inbound public port, manual port forwarding or a VPN.
   Keep direct/local transport optional under the same client interface.
-- [ ] Keep workspace traffic end-to-end encrypted between paired browser and
-  service. Select an established browser-compatible protocol/library before
-  implementation, validate pairing identity binding and browser key storage,
-  and test it; do not invent cryptography or treat relay TLS as end-to-end
-  encryption. Serve client assets over HTTPS. Relay handles routing/discovery,
-  not workspace history or provider credentials. Document relay trust/metadata
-  and web-client delivery trust. Keep relay deployment self-hostable.
+- [x] Select and prototype-test the browser-compatible Noise XX suite and
+  NativeKit/WebCrypto key-custody design documented above. Do not invent
+  cryptography or treat relay TLS as end-to-end encryption.
+- [ ] Integrate the selected Noise channel into NativeKit/Haxeon and the web
+  host, validate pairing identity binding and browser key storage, and test the
+  complete handshake. Serve client assets over HTTPS. Relay handles
+  routing/discovery, not workspace history or provider credentials. Document
+  relay trust/metadata and web-client delivery trust. Keep relay deployment
+  self-hostable.
 - [ ] Use RPC reconnect with fresh authenticated handshakes and Exosuit-owned
   resource/cursor recovery. Machine sleep/offline and revoked devices produce
   clear states rather than stale connected indicators.

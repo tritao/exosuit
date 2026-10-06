@@ -8,9 +8,9 @@ Added the M16.1 secure-channel and device-key decision to
 `16-remote-workspaces.md`: Noise XX with a fixed suite, a short authentication
 string plus explicit desktop approval on first pairing, NativeKit OS storage
 for the service identity, and WebCrypto-wrapped browser identity in IndexedDB.
-The relay remains an opaque bounded forwarder. The proposed shared C
-implementation is still gated on Emscripten entropy and native/Wasm interop
-tests; do not claim remote security acceptance yet.
+The relay remains an opaque bounded forwarder. Production channel integration,
+explicit entropy selection and native/Wasm interop remain gates; do not claim
+remote security acceptance yet.
 
 Noise-C at `cfe2541` was built with its built-in backend. Its core unit tests and
 all 1392 Noise vectors pass on Linux. The same sources compiled to Wasm using
@@ -18,14 +18,47 @@ the pinned Emscripten 6.0.9 toolchain; unit tests passed in Node and headless
 Chrome, and all 1392 vectors passed in Node. This prototype used the Emscripten
 `/dev/urandom` bridge and did not alter the NativeKit module. The complete
 upstream `make check` stops at the unrelated tools/protoc stage because `yacc`
-is unavailable. Production channel integration and explicit entropy selection
-remain open; the archived `noise-c.wasm` wrapper is not selected.
+is unavailable. NativeKit/Haxeon Noise integration, explicit production entropy
+selection, browser key persistence and a full Web host handshake remain open;
+the archived `noise-c.wasm` wrapper is not selected.
 
 Credential groundwork is committed on sibling-repository branch
 `exosuit-followon`: NativeKit `aed3f570` adds the optional OS credential-store
 module, and Haxeon `d0de1b4b` adds the generic Haxe package and smoke test. The
 module round-trip, Haxe smoke test, ABI/package checks and installed CMake
 consumer passed in the prior validation run. No remote deployment occurred.
+
+## M16.1 local relay prototype, 2026-10-06
+
+`5a22af6` adds `relay/worker/`, a project-local Wrangler 4.147.0 Worker with
+SQLite-backed per-machine Durable Objects. Machine claim, device registration
+and revocation, short-lived one-use pairing capabilities, one-use browser socket
+tickets, exact origin allowlisting, 64 KiB binary frames and per-machine
+pairing/device/connection caps are implemented. The relay stores credential
+hashes and revocation metadata; channel-scoped frames carry only an opaque
+16-byte route prefix plus the opaque Noise/RPC payload. No workspace contents
+are parsed or retained. The Worker contract and current limitations are in
+`relay/worker/README.md`.
+
+Validation: `scripts/test-relay.sh` passed TypeScript checking and 13 local
+Cloudflare Worker/SQLite tests for enrollment, origin checks, invite expiry and
+replay, machine-offline behavior, device ticket replay and bounds, revocation,
+channel isolation, frame size and connection limits. `wrangler deploy --dry-run`
+bundled successfully; account-free `wrangler dev` smoke requests returned 201,
+201 and 204. `npm audit --audit-level=high` reported zero known advisories after
+pinning a patched transitive Sharp version. No account was accessed and nothing
+was deployed.
+
+The Worker uses `acceptWebSocket` and serialized connection attachments, but a
+Vitest `evictDurableObject` attempt with live sockets did not complete within 20
+seconds. Hibernation/wake recovery is not qualified. Global admission control,
+quota measurement/reporting, actual service/browser clients, Noise integration
+and cross-network deployment also remain open; this commit is only the local
+transport foundation.
+
+Next: inspect the existing Haxeon RPC and M14 transport seams, then add an
+outbound workspace-service connection and browser ticket exchange against this
+Worker with a local end-to-end transport test.
 
 ## Workbench navigation cleanup, 2026-10-05
 
