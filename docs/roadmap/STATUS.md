@@ -56,9 +56,16 @@ quota measurement/reporting, actual service/browser clients, Noise integration
 and cross-network deployment also remain open; this commit is only the local
 transport foundation.
 
-Next: inspect the existing Haxeon RPC and M14 transport seams, then add an
-outbound workspace-service connection and browser ticket exchange against this
-Worker with a local end-to-end transport test.
+`7bef9f9` changes both machine and device WebSocket admission to one-use,
+60-second tickets exchanged over HTTPS. This keeps reusable credentials out of
+WebSocket URLs and fits NativeKit's existing WebSocket client options, which do
+not expose arbitrary Authorization headers. The same 14-test suite and TypeScript
+check pass; Wrangler dry-run still bundles. The Exosuit service has not yet been
+wired to the HTTPS ticket exchange.
+
+Next: expose NativeKit's generic HTTP request/response events through Haxeon's
+platform package, then use that API to obtain the desktop ticket and connect its
+existing RPC transport to this Worker in a local end-to-end test.
 
 ## Workbench navigation cleanup, 2026-10-05
 

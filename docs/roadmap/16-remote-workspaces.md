@@ -49,7 +49,7 @@ device permissions independently. Define opaque machine ids and authenticated
 routing; possession of an id alone must not grant access.
 
 The local Worker prototype lives in [`relay/worker/`](../../relay/worker/README.md).
-It uses one-use invitation capabilities and browser socket tickets, hashed
+It uses one-use invitation capabilities and machine/device socket tickets, hashed
 credentials, a 16-byte per-channel routing prefix and bounded binary forwarding.
 It does not inspect Noise or RPC payloads. Machine/device credential creation,
 secure key storage, global abuse control, measured quotas and remote deployment
