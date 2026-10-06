@@ -81,6 +81,64 @@ No account setup is required merely to proceed with local implementation.
 
 ## M16.1 — Browser connection, pairing and relay
 
+### Secure channel and device-key decision
+
+Use the Noise Protocol Framework `XX` handshake with the fixed suite
+`Noise_XX_25519_ChaChaPoly_SHA256`. XX fits first pairing because neither side
+knows the other's static key in advance; after the handshake each side has
+authenticated possession of the key it received, while the first-pairing UI
+still has to establish whether that key belongs to the intended person/device.
+The desktop and browser compare a short authentication string derived from the
+Noise handshake hash before the desktop owner approves the device. The Noise
+prologue binds a versioned, canonical encoding of machine ID, device ID and
+initiator/responder roles. It contains no secret material.
+
+Use the same pinned C Noise implementation in the NativeKit native module and
+the Emscripten web host. The initial candidate is
+[Noise-C](https://github.com/rweather/noise-c), pinned at `cfe2541` for the
+prototype. It is MIT-licensed and its upstream core unit and Noise vector suites
+pass on Linux. Do not use the archived `noise-c.wasm` wrapper. Noise-C's default
+random source only handles Linux/macOS and Windows; the NativeKit integration
+must select the Emscripten `/dev/urandom` bridge explicitly and fail closed if
+entropy is unavailable. A prototype using that bridge passes in headless
+Chrome; the production module still needs its own browser test before the
+channel can be accepted. Noise-C describes
+itself as a reference implementation, and this choice is not a claim of an
+independent security audit. Reassess the pinned implementation if portability,
+maintenance or review raises a material concern.
+
+The workspace service creates a persistent static key once and stores its
+private bytes in the NativeKit OS credential store. The database stores its
+public identity, device public keys, revocation state and workspace-scoped
+grants. A browser keeps its static private key encrypted at rest in
+origin-scoped IndexedDB: a non-extractable WebCrypto AES-GCM wrapping key is
+stored there as a `CryptoKey`, with the Noise private key stored only as
+ciphertext. The browser holds the decrypted Noise key only while establishing
+the channel. This protects copied browser storage at rest; same-origin script
+execution remains inside the web-client trust boundary.
+
+The QR/deep link carries only a short-lived, single-use pairing capability and
+opaque routing ID; it never carries a reusable device credential or workspace
+key. Consuming the invitation only admits a pending handshake. No workspace
+method is enabled until the user compares the authentication string and
+approves the device. The service then pins that device's static public key and
+its explicit workspace grants; later connections perform a fresh XX handshake
+against the pinned identities. The relay forwards bounded opaque handshake and
+ciphertext frames and stores no private keys, workspace keys or decrypted RPC.
+
+Investigation on 2026-10-06 verified Noise-C's core unit suite and all 1392
+upstream vectors at `cfe2541` on Linux. The same source compiled to Wasm with the
+pinned Emscripten 6.0.9 toolchain; its unit suite passed in Node and headless
+Chrome, and all 1392 vectors passed in Node. This proves the prototype's
+Emscripten `/dev/urandom` path uses a working browser entropy source. The
+complete upstream `make check` could not run because this environment lacks
+`yacc`. NativeKit/Haxeon channel integration, explicit Emscripten entropy
+selection, the browser key store and the full Web host handshake remain
+acceptance gates. See the
+[Noise specification](https://noiseprotocol.org/noise.html) and the
+[Web Crypto specification](https://www.w3.org/TR/WebCryptoAPI/) for the
+protocol and browser key-storage contracts.
+
 - [ ] Add Connect to machine and paired-machine selection to the existing web
   entry point. Show connection state, machine availability and permissions.
 - [ ] Desktop/service Remote Access creates a short-lived single-use pairing

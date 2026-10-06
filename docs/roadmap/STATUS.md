@@ -1,6 +1,31 @@
 # Execution ledger
 
-Last updated: 2026-10-05.
+Last updated: 2026-10-06.
+
+## M16.1 security groundwork, 2026-10-06
+
+Added the M16.1 secure-channel and device-key decision to
+`16-remote-workspaces.md`: Noise XX with a fixed suite, a short authentication
+string plus explicit desktop approval on first pairing, NativeKit OS storage
+for the service identity, and WebCrypto-wrapped browser identity in IndexedDB.
+The relay remains an opaque bounded forwarder. The proposed shared C
+implementation is still gated on Emscripten entropy and native/Wasm interop
+tests; do not claim remote security acceptance yet.
+
+Noise-C at `cfe2541` was built with its built-in backend. Its core unit tests and
+all 1392 Noise vectors pass on Linux. The same sources compiled to Wasm using
+the pinned Emscripten 6.0.9 toolchain; unit tests passed in Node and headless
+Chrome, and all 1392 vectors passed in Node. This prototype used the Emscripten
+`/dev/urandom` bridge and did not alter the NativeKit module. The complete
+upstream `make check` stops at the unrelated tools/protoc stage because `yacc`
+is unavailable. Production channel integration and explicit entropy selection
+remain open; the archived `noise-c.wasm` wrapper is not selected.
+
+Credential groundwork is committed on sibling-repository branch
+`exosuit-followon`: NativeKit `aed3f570` adds the optional OS credential-store
+module, and Haxeon `d0de1b4b` adds the generic Haxe package and smoke test. The
+module round-trip, Haxe smoke test, ABI/package checks and installed CMake
+consumer passed in the prior validation run. No remote deployment occurred.
 
 ## Workbench navigation cleanup, 2026-10-05
 
