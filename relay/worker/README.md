@@ -19,15 +19,15 @@ limited to 64 KiB, there may be eight connected browser/device channels per
 machine, eight outstanding invitations, eight outstanding tickets for each
 device or machine service, and 128 active devices per machine.
 
-The planned service generates 16-byte machine, device and channel IDs and
-32-byte secrets with its OS cryptographic random source, then keeps the machine
-bearer and each device bearer in NativeKit's OS credential store. This Worker
-stores only SHA-256 hashes of those bearer values, invitation capabilities and
-one-use WebSocket tickets. The device bearer is delivered to the browser only
-inside the approved Noise channel; encrypted browser persistence is part of the
-client integration, which is still pending. Noise identity checks, user
-approval, workspace grants and RPC authorization remain service
-responsibilities.
+The service will generate 16-byte machine, device and channel IDs and 32-byte
+secrets with its OS cryptographic random source, then keep reusable bearers in
+NativeKit's OS credential store. The generic NativeKit credential module and
+Haxeon wrapper are implemented, but Exosuit has not connected them to the
+workspace service. This Worker stores only SHA-256 hashes of bearer values,
+invitation capabilities and one-use WebSocket tickets. The device bearer is
+delivered to the browser only inside the approved Noise channel; encrypted
+browser persistence is still pending. Noise identity checks, user approval,
+workspace grants and RPC authorization remain service responsibilities.
 
 ## Local development
 
@@ -87,6 +87,10 @@ for public deployment.
 - There is no per-IP/global admission control or measured Cloudflare quota
   policy yet. Per-machine state and frame limits are local bounds, not a claim
   of protection from public abuse or arbitrary usage costs.
-- The service/browser client, NativeKit relay transport, actual Noise channel
-  integration, device-grant lifecycle and cross-network deployment are not
-  wired to this prototype yet.
+- Exosuit has a NativeKit machine connector that passes a local Wrangler ticket
+  exchange and WebSocket-upgrade smoke test. A separate device-forwarding smoke
+  got `503 machine_offline` after that upgrade, so live Worker/native-client
+  routing remains unqualified even though Worker Vitest covers bidirectional
+  forwarding. The connector is not yet part of workspace-service lifecycle.
+- Noise integration, device-grant lifecycle, browser persistence and
+  cross-network deployment are still open.

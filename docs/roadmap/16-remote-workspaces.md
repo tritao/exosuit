@@ -1,8 +1,9 @@
 # M16 — Connected web workspaces and away-from-home access
 
-Status: in progress. M16.1 has a local relay prototype and a selected/tested
-secure-channel design; the workspace service, browser client and cross-network
-qualification remain unimplemented. It depends on Haxeon RPC.1/RPC.2 and the
+Status: in progress. M16.1 has a local relay prototype, a NativeKit machine
+ticket/WebSocket connector, and a selected/tested secure-channel design. The
+workspace-service lifecycle, browser client and cross-network qualification
+remain unimplemented. It depends on Haxeon RPC.1/RPC.2 and the
 M14 workspace service; terminal and provider features depend on their M12/M14
 acceptance. Use the existing M15 web build as the first remote client. Android
 uses the same responsive web application; a native Android app is not required
@@ -51,9 +52,11 @@ routing; possession of an id alone must not grant access.
 The local Worker prototype lives in [`relay/worker/`](../../relay/worker/README.md).
 It uses one-use invitation capabilities and machine/device socket tickets, hashed
 credentials, a 16-byte per-channel routing prefix and bounded binary forwarding.
-It does not inspect Noise or RPC payloads. Machine/device credential creation,
-secure key storage, global abuse control, measured quotas and remote deployment
-remain open. Browser routes require an exact configured origin allowlist.
+The Exosuit desktop now has a ticketed machine connector and bounded HMPK channel
+multiplexer. It does not inspect Noise or RPC payloads. Machine/device credential
+creation and storage in the service, global abuse control, measured quotas and
+remote deployment remain open. Browser routes require an exact configured origin
+allowlist.
 
 Free-tier daily limits can interrupt operations, so report quota exhaustion
 explicitly and back off reconnect attempts. Measure request counts, active
@@ -163,10 +166,16 @@ protocol and browser key-storage contracts.
   frame limits and bidirectional delivery. Forced Durable Object eviction with
   live sockets still needs qualification; quota behavior and global admission
   controls are not implemented.
-- [ ] Provide an outbound connection from the workspace service to that relay.
-  The browser connects over secure WebSocket through that relay so remote use
-  does not require an inbound public port, manual port forwarding or a VPN.
-  Keep direct/local transport optional under the same client interface.
+- [x] Add the NativeKit machine connector: exchange the reusable machine bearer
+  over HTTP Authorization, then connect with the one-use socket ticket. The
+  local Wrangler test verifies ticket exchange and machine WebSocket upgrade.
+- [ ] Integrate the connector with workspace-service lifecycle and qualify
+  bidirectional device routing. A local Wrangler probe currently reports
+  `machine_offline` after the native client completes the machine upgrade, even
+  though the Worker Vitest routing tests pass. The browser must connect over
+  secure WebSocket through the relay so remote use needs no inbound public port,
+  manual port forwarding or VPN. Keep direct/local transport optional under the
+  same client interface.
 - [x] Select and prototype-test the browser-compatible Noise XX suite and
   NativeKit/WebCrypto key-custody design documented above. Do not invent
   cryptography or treat relay TLS as end-to-end encryption.

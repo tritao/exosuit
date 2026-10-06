@@ -16,12 +16,12 @@ private class CompletedAttempt implements RpcConnectAttempt {
 }
 
 private class NativeAttempt implements RpcConnectAttempt {
-	final transport:NativeRpcTransport;
+	final transport:NativeKitByteStream;
 	final remove:Void->Void;
 
 	public var complete:Bool = false;
 
-	public function new(transport:NativeRpcTransport, remove:Void->Void) {
+	public function new(transport:NativeKitByteStream, remove:Void->Void) {
 		this.transport = transport;
 		this.remove = remove;
 	}
@@ -35,11 +35,11 @@ private class NativeAttempt implements RpcConnectAttempt {
 	}
 }
 
-private typedef Pending = {var attempt:NativeAttempt; var done:RpcConnectResult->Void;}
+private typedef Pending = {var attempt:NativeAttempt; var done:NativeKitByteStream->Null<String>->Void;}
 
 /** Observes the shared NativeKit event pump; never steals another subsystem's events. */
 class NativeRpcHub {
-	final streams:Map<Int, NativeRpcTransport> = [];
+	final streams:Map<Int, NativeKitByteStream> = [];
 	final pending:Map<Int, Pending> = [];
 	final listeners:Map<Int, {owned:OwnedListenerHandle, callback:NativeRpcTransport->Void}> = [];
 	final subscription:NativeKitEventSubscription;
@@ -50,14 +50,25 @@ class NativeRpcHub {
 	}
 
 	public function connect(options:TransportOptions, done:RpcConnectResult->Void):RpcConnectAttempt {
+		return connectBytes(options, function(stream, error) {
+			if (stream == null) {
+				done(Failed({code: error == null ? "connect_failed" : error, message: error == null ? "Connect failed" : error, ambiguous: false}, true));
+				return;
+			}
+			done(Opened(new NativeRpcTransport(stream)));
+		});
+	}
+
+	/** Opens a raw native byte stream for protocols which add their own framing. */
+	public function connectBytes(options:TransportOptions, done:NativeKitByteStream->Null<String>->Void):RpcConnectAttempt {
 		if (disposed || streamsCount() >= 32)
 			throw "RPC transport hub unavailable";
 		var opened = NativeKit.nk_transport_connect(options);
 		if (opened.status != 0) {
-			done(Failed({code: "connect_failed", message: "Connect failed", ambiguous: false}, true));
+			done(null, "connect_failed");
 			return new CompletedAttempt();
 		}
-		var stream = new NativeRpcTransport(opened.out_transport),
+		var stream = new NativeKitByteStream(opened.out_transport),
 			key = opened.out_transport.borrow().rawValue(),
 			attempt = new NativeAttempt(stream, function() {
 				streams.remove(key);
@@ -107,37 +118,37 @@ class NativeRpcHub {
 						handle.close();
 						return;
 					}
-					var stream = new NativeRpcTransport(handle);
-					stream.connected = true;
-					streams.set(handle.borrow().rawValue(), stream);
+					var byteStream = new NativeKitByteStream(handle);
+					byteStream.markConnected();
+					streams.set(handle.borrow().rawValue(), byteStream);
 					try
-						callback.callback(stream)
+						callback.callback(new NativeRpcTransport(byteStream))
 					catch (error:Dynamic) {
-						stream.close();
+						byteStream.close();
 						throw error;
 					}
 					return;
 				}
-				var stream = streams.get(key);
-				if (stream == null)
+				var byteStream = streams.get(key);
+				if (byteStream == null)
 					return;
 				var connecting = pending.get(key);
-				if (kind == EventKind.TransportConnected && !stream.terminal) {
-					stream.connected = true;
+				if (kind == EventKind.TransportConnected && !byteStream.terminal) {
+					byteStream.markConnected();
 					if (connecting != null && !connecting.attempt.complete) {
 						pending.remove(key);
 						connecting.attempt.complete = true;
-						connecting.done(Opened(stream));
+						connecting.done(byteStream, null);
 					}
 				} else if (kind == EventKind.TransportFailed || kind == EventKind.TransportClosed) {
 					pending.remove(key);
 					if (connecting != null && !connecting.attempt.complete) {
 						pending.remove(key);
 						connecting.attempt.complete = true;
-						stream.close();
-						connecting.done(Failed({code: "connect_failed", message: "Connect failed", ambiguous: false}, true));
+						byteStream.close();
+						connecting.done(null, "connect_failed");
 					} else
-						stream.close();
+						byteStream.close();
 					streams.remove(key);
 				}
 			default:
@@ -160,7 +171,7 @@ class NativeRpcHub {
 		for (item in callbacks)
 			if (!item.attempt.complete) {
 				item.attempt.complete = true;
-				item.done(Failed({code: "connector_closed", message: "Connector closed", ambiguous: false}, false));
+				item.done(null, "connector_closed");
 			}
 	}
 
@@ -187,6 +198,30 @@ class NativeRpcHub {
 		options.set_receive_buffer_size(1048576);
 		options.set_send_buffer_size(1048576);
 		options.set_timeout_ms(5000);
+		return options;
+	}
+
+	/** Parses an absolute ws:// or wss:// endpoint into NativeKit options. */
+	public static function websocketUrl(url:String, subprotocols:String = ""):TransportOptions {
+		var pattern = ~/^(wss?):\/\/([A-Za-z0-9.-]+)(?::([0-9]{1,5}))?(\/[^#]*)?$/i;
+		if (url == null || !pattern.match(url))
+			throw "Invalid WebSocket URL";
+		var secure = StringTools.startsWith(url.toLowerCase(), "wss://");
+		var portText = pattern.matched(3);
+		var port = portText == null || portText == "" ? (secure ? 443 : 80) : Std.parseInt(portText);
+		if (port == null || port < 1 || port > 65535)
+			throw "Invalid WebSocket port";
+		var options = new TransportOptions();
+		options.set_kind(TransportKind.Websocket);
+		options.set_flags(TransportFlags.NoDelay | (secure ? TransportFlags.Secure : 0));
+		options.set_host(pattern.matched(2));
+		options.set_port(port);
+		var path = pattern.matched(4);
+		options.set_path(path == null || path == "" ? "/" : path);
+		options.set_subprotocols(subprotocols);
+		options.set_receive_buffer_size(1048576);
+		options.set_send_buffer_size(1048576);
+		options.set_timeout_ms(10000);
 		return options;
 	}
 }

@@ -14,10 +14,12 @@ class TransportTestMain {
 	}
 
 	static function main():Void {
+		RelayProtocolTests.run();
 		var args = Sys.args();
-		if (args.length != 3)
-			throw "Expected private socket, port and credential file";
+		if (args.length != 4)
+			throw "Expected private socket, port, credential file and private relay config";
 		var token = sys.io.File.getContent(args[2]);
+		var relayConfig:Dynamic = haxe.Json.parse(sys.io.File.getContent(args[3]));
 		var runtime = NativeKitRuntime.start(),
 			hub = new NativeRpcHub(runtime.events);
 		var clock = function() return NativeKit.nk_time_seconds() * 1000;
@@ -166,8 +168,53 @@ class TransportTestMain {
 			rejected.poll();
 		}
 		require(rejected.lastError != null && rejected.lastError.code == "authentication_refused" && rejected.generation == 1,
-			"Authentication refusal retried");
+				"Authentication refusal retried");
 		bad.dispose();
+		var relayEndpoint = new RelayMachineEndpoint(Reflect.field(relayConfig, "origin"), Reflect.field(relayConfig, "machineId")),
+			ticketClient = new RelayTicketClient(runtime.events, true),
+			ticketDone = false,
+			ticketValue:Null<RelaySocketTicket> = null,
+			ticketError:Null<String> = null;
+		ticketClient.request(relayEndpoint, Reflect.field(relayConfig, "machineToken"), function(ticket, error) {
+			ticketValue = ticket;
+			ticketError = error;
+			ticketDone = true;
+		});
+		deadline = clock() + 5000;
+		while (!ticketDone) {
+			require(clock() < deadline, "NativeKit relay ticket HTTP request timed out");
+			runtime.events.wait(0.001);
+			for (_ in 0...128)
+				if (!runtime.events.poll())
+					break;
+		}
+		ticketClient.dispose();
+		require(ticketError == null && ticketValue != null,
+			"NativeKit could not obtain a machine ticket from the local Worker: " + Std.string(ticketError));
+		Sys.println("PASS: NativeKit authenticated HTTP ticket exchange with local Worker");
+		var relayConnector = new RelayMachineConnector(runtime.events, hub, true),
+			relayDone = false,
+			relayLink:Null<RelaySocketLink> = null,
+			relayError:Null<String> = null;
+		relayConnector.connect(relayEndpoint, Reflect.field(relayConfig, "machineToken"), function(link, error) {
+			relayLink = link;
+			relayError = error;
+			relayDone = true;
+		});
+		deadline = clock() + 20000;
+		while (!relayDone) {
+			require(clock() < deadline, "NativeKit relay ticket and WebSocket handshake timed out");
+			runtime.events.wait(0.001);
+			for (_ in 0...128)
+				if (!runtime.events.poll())
+					break;
+			server.poll();
+		}
+		require(relayError == null && relayLink != null && relayLink.isOpen(),
+			"NativeKit could not exchange a machine ticket and connect to the local Worker: " + Std.string(relayError));
+		relayConnector.dispose();
+		relayLink.close();
+		Sys.println("PASS: NativeKit HTTPS ticket exchange and machine WebSocket connect to local Worker");
 		server.dispose();
 		hub.forget(local);
 		hub.forget(ws);

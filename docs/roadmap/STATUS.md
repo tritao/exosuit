@@ -23,10 +23,12 @@ selection, browser key persistence and a full Web host handshake remain open;
 the archived `noise-c.wasm` wrapper is not selected.
 
 Credential groundwork is committed on sibling-repository branch
-`exosuit-followon`: NativeKit `aed3f570` adds the optional OS credential-store
-module, and Haxeon `d0de1b4b` adds the generic Haxe package and smoke test. The
-module round-trip, Haxe smoke test, ABI/package checks and installed CMake
-consumer passed in the prior validation run. No remote deployment occurred.
+`exosuit-followon`, rebased locally onto current upstream main: NativeKit
+`9835ea76` adds the optional OS credential-store module and `99cd0ca3` fixes
+HTTP byte-span headers and line endings; Haxeon `63b0bc28` adds the generic
+credentials package and `614954a4` exposes managed NativeKit HTTP events. The
+credential module round-trip, Haxe smoke test, ABI/package checks and installed
+CMake consumer passed. These branch commits have not been pushed.
 
 ## M16.1 local relay prototype, 2026-10-06
 
@@ -57,15 +59,34 @@ and cross-network deployment also remain open; this commit is only the local
 transport foundation.
 
 `7bef9f9` changes both machine and device WebSocket admission to one-use,
-60-second tickets exchanged over HTTPS. This keeps reusable credentials out of
-WebSocket URLs and fits NativeKit's existing WebSocket client options, which do
-not expose arbitrary Authorization headers. The same 14-test suite and TypeScript
-check pass; Wrangler dry-run still bundles. The Exosuit service has not yet been
-wired to the HTTPS ticket exchange.
+60-second tickets exchanged over HTTPS. NativeKit's existing WebSocket client
+does not expose arbitrary Authorization headers, so reusable credentials stay
+in the HTTP `Authorization` header and only the short-lived ticket appears in
+the socket URL.
 
-Next: expose NativeKit's generic HTTP request/response events through Haxeon's
-platform package, then use that API to obtain the desktop ticket and connect its
-existing RPC transport to this Worker in a local end-to-end test.
+## M16.1 NativeKit machine connector, 2026-10-06
+
+Haxeon's managed HTTP events are now used by Exosuit's `RelayTicketClient` to
+request machine tickets. The connector validates HTTPS origins (allowing HTTP
+only for explicit loopback development), opens one outbound machine WebSocket,
+and multiplexes bounded binary channels using the Worker envelope around HMPK
+frames. NativeKit's Linux CMake build enables its system-curl backend so the
+ticket request works on the desktop host. Request completion is correlated by
+NativeKit's global request ID; buffered HTTP events use a zero source handle.
+The Exosuit release lock now pins Haxeon `614954a4` and its NativeKit
+`99cd0ca3`; full release packaging still needs clean-checkout qualification.
+
+`scripts/test-workspace-transport.sh` passes the frame codec, existing local
+RPC/network lifecycle suite, a ticket exchange against a local Wrangler Worker,
+and the machine WebSocket upgrade. `scripts/test-relay.sh` passes TypeScript
+checking and all 14 Worker/SQLite tests. A separate local device-forwarding
+probe received `503 machine_offline` after the native client reported a
+successful machine WebSocket upgrade; the Durable Object listed no live machine
+socket. Worker Vitest tests do pass bidirectional channel forwarding, but this
+local Wrangler/native-client gap means real device-to-machine forwarding and
+hibernation remain unqualified. The connector is not yet attached to workspace
+service lifecycle, credential persistence, Noise, or the web client. Nothing
+was deployed and the sibling Haxeon/NativeKit commits remain local.
 
 ## Workbench navigation cleanup, 2026-10-05
 
