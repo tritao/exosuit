@@ -11,6 +11,10 @@ import workspace.storage.WorkspaceSqliteStore;
 import workspace.runtime.WorkspaceTerminalManager;
 import workspace.runtime.WorkspaceRelayHost;
 import workspace.runtime.WorkspaceRelaySettings;
+import workspace.runtime.NativeWorkspaceCredentialStore;
+import workspace.runtime.WorkspaceNoiseIdentity;
+import workspace.transport.NoiseMessageTransport;
+import workspace.runtime.WorkspacePairingManager;
 
 /** Catalog daemon. The managed launcher owns exclusive startup and discovery. */
 class AgentMain {
@@ -50,7 +54,29 @@ class AgentMain {
 		var terminals = new WorkspaceTerminalManager("workspace", args.length >= 7 ? args[6] : args[3], directories.root,16777216,store,function() return service.snapshot().groups);
 		var executable = Sys.getEnv("EXOSUIT_CODEX_BIN");
 		var agents = new workspace.provider.CodexProvider("workspace", args.length >= 7 ? args[6] : args[3], directories, function() return service.snapshot().groups, processes, clock, store, executable == null ? "codex" : executable, Sys.getEnv("EXOSUIT_CODEX_PROXY_LAUNCHER"));
-		var server = new WorkspaceRpcServer(service, clock, null, args.length >= 7 ? {workspace: "workspace", root: directories.root, instance: args[6]} : null, terminals, agents);
+		var noiseIdentity:Null<WorkspaceNoiseIdentity> = relayHost == null ? null
+			: new WorkspaceNoiseIdentity(relayHost.endpoint.machineId, new NativeWorkspaceCredentialStore());
+		if (relayHost != null && (store == null || noiseIdentity == null))
+			throw "Remote workspace access requires persistent device storage";
+		var serverRef:Null<WorkspaceRpcServer> = null;
+		var pairingManager:Null<WorkspacePairingManager> = null;
+		if (relayHost != null && store != null && noiseIdentity != null) {
+			var activeStore = store, activeRelay = relayHost, activeIdentity = noiseIdentity;
+			pairingManager = new WorkspacePairingManager(activeStore, activeRelay, activeIdentity.privateKeyForHandshake(),
+				function() return serverRef == null ? [] : serverRef.options.offered(), clock,
+				function(secure, grants) {
+					var current = serverRef;
+					if (current == null)
+						secure.close();
+					else
+						current.acceptRemote(secure, grants);
+				});
+			relayHost.onChannel = function(channel) pairingManager.acceptChannel(channel.channelId, channel);
+		}
+		var server = new WorkspaceRpcServer(service, clock, null,
+			args.length >= 7 ? {workspace: "workspace", root: directories.root, instance: args[6]} : null,
+			terminals, agents, pairingManager);
+		serverRef = server;
 		var local = hub.listen(NativeRpcHub.local(args[0]), server.acceptLocal);
 		var websocket = hub.listen(NativeRpcHub.websocket(port, "/workspace", true), function(transport) {
 			server.acceptWebSocket(transport, token);
@@ -66,12 +92,17 @@ class AgentMain {
 			// Runtime ownership survives client disconnects.
 			terminals.poll();
 			agents.poll();
-			if (relayHost != null)
+			if (relayHost != null) {
 				relayHost.poll(clock());
+				if (pairingManager != null)
+					pairingManager.poll();
+			}
 			var remoteAccess = relayHost == null ? 0 : relayHost.activeCount();
 			if (lifetime.shouldStop(clock(), server.clientCount(), terminals.activeCount() + agents.activeCount() + remoteAccess))
 				break;
 		}
+		if (pairingManager != null)
+			pairingManager.dispose();
 		if (relayHost != null)
 			relayHost.dispose();
 		agents.dispose();
@@ -81,6 +112,8 @@ class AgentMain {
 		hub.dispose();
 		if (store != null)
 			store.close();
+		if (noiseIdentity != null)
+			noiseIdentity.dispose();
 		runtime.dispose();
 		Sys.println("STOPPED: exosuit-agent idle");
 		Sys.stdout().flush();

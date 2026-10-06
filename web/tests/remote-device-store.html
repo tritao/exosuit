@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Running browser credential-store checks</title></head>
+<body>
+<p id="result">Running browser credential-store checks…</p>
+<script src="../remote-device-store.js"></script>
+<script>
+window.testPromise = (async () => {
+  const store = window.ExosuitRemoteDeviceStore;
+  const mark = phase => { document.getElementById("result").textContent = phase; };
+  const machineId = "0123456789abcdef0123456789abcdef";
+  const deviceId = "abcdef0123456789abcdef0123456789";
+  const credentials = {staticPrivateKey: "a".repeat(64), deviceToken: "f".repeat(64), machineStaticPublicKey: "b".repeat(64)};
+
+  mark("Clearing prior test data…");
+  await store.clear();
+  mark("Saving encrypted credentials…");
+  await store.save(machineId, deviceId, credentials);
+  const loaded = await store.load(machineId, deviceId);
+  if (JSON.stringify(loaded) !== JSON.stringify(credentials)) throw new Error("credential round trip failed");
+  const records = await store.list();
+  if (records.length !== 1 || records[0].deviceId !== deviceId) throw new Error("metadata list failed");
+
+  mark("Checking the non-extractable wrapping key…");
+  const opening = indexedDB.open("exosuit-remote-devices-v1", 1);
+  const database = await new Promise((resolve, reject) => {
+    opening.onsuccess = () => resolve(opening.result);
+    opening.onerror = () => reject(opening.error);
+  });
+  const read = database.transaction("meta", "readonly").objectStore("meta").get("noise-device-wrap-v1");
+  const key = await new Promise((resolve, reject) => {
+    read.onsuccess = () => resolve(read.result.key);
+    read.onerror = () => reject(read.error);
+  });
+  if (key.extractable || key.algorithm.name !== "AES-GCM") throw new Error("wrapping key is not non-extractable AES-GCM");
+
+  mark("Checking tamper rejection…");
+  const transaction = database.transaction("devices", "readwrite");
+  const request = transaction.objectStore("devices").get(machineId + ":" + deviceId);
+  await new Promise((resolve, reject) => {
+    request.onsuccess = () => {
+      const record = request.result;
+      new Uint8Array(record.ciphertext)[0] ^= 1;
+      transaction.objectStore("devices").put(record);
+      resolve();
+    };
+    request.onerror = () => reject(request.error);
+  });
+  await new Promise((resolve, reject) => {
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error);
+  });
+  let tamperRejected = false;
+  try { await store.load(machineId, deviceId); } catch (_error) { tamperRejected = true; }
+  if (!tamperRejected) throw new Error("tampered credentials were accepted");
+
+  mark("Checking device removal…");
+  await store.remove(machineId, deviceId);
+  if ((await store.list()).length !== 0) throw new Error("device credential removal failed");
+  await store.clear();
+  return "PASS: non-extractable wrapping key, encrypted credentials, tamper rejection, and device removal";
+})().then(message => {
+  document.title = "PASS";
+  document.getElementById("result").textContent = message;
+}).catch(error => {
+  document.title = "FAIL";
+  document.getElementById("result").textContent = "FAIL: " + error.stack;
+});
+</script>
+</body>
+</html>

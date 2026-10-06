@@ -86,6 +86,9 @@ class ExosuitApp implements DesktopUiApplication {
 	public final host:UiWorkbenchHost;
 	final desktop:Null<HostFileDialogs>;
 	var workbenchClient:Null<workspace.client.WorkspaceWorkbenchClient>;
+	var pairingClient:Null<workspace.client.WorkspacePairingClient>;
+	var remoteAccessPanel:Null<RemoteAccessPanel>;
+	var pairingRevision:Int = -1;
 	var terminalBrowserVisible:Bool = false;
 	var terminalBrowserRevision:Int = -1;
 	var terminalBrowserPanel:Null<WorkspaceTerminalsPanel>;
@@ -702,6 +705,18 @@ class ExosuitApp implements DesktopUiApplication {
 			new haxeon.ui.widgets.sidebar.SidebarModeOptions("Workbench", 20, true));
 	}
 
+	public function attachRemoteAccess(client:workspace.client.WorkspacePairingClient):Void {
+		pairingClient = client;
+		remoteAccessPanel = new RemoteAccessPanel(client, requestFrame, function(value) {
+			try {
+				ui.clipboard.writeText(value);
+				return true;
+			} catch (_:Dynamic) return false;
+		});
+		registerSidebarDestination("remote-access", IconName.Radar, function() return remoteAccessPanel,
+			new haxeon.ui.widgets.sidebar.SidebarModeOptions("Remote Access", 30, true));
+	}
+
  function makeAgentTab(id:String,resource:String,root:String,title:String):UiAgentTab {
   return new UiAgentTab(id,resource,root,title,new CodexSessionPanel(function() return workbenchClient==null?null:workbenchClient.agentService(),resource,root,requestFrame));
  }
@@ -867,6 +882,13 @@ class ExosuitApp implements DesktopUiApplication {
 			var label = attachment.statusLabel();
 			if (workspaceStatus != label) {
 				workspaceStatus = label;
+				requestFrame();
+			}
+		}
+		if (pairingClient != null) {
+			if (sidebar.visible && sidebar.activeId == "remote-access") pairingClient.refreshPairings(false);
+			if (pairingRevision != pairingClient.pairingRevision()) {
+				pairingRevision = pairingClient.pairingRevision();
 				requestFrame();
 			}
 		}

@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "package": { "name": "noisekit-tests" },
+  "entry": "app.Main",
+  "sourceRoots": ["src"],
+  "scopeSourceRoots": false,
+  "dependencies": {
+    "noisekit": { "path": ".." }
+  },
+  "target": "host",
+  "outputDir": "build"
+}

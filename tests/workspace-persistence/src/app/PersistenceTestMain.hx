@@ -5,6 +5,8 @@ import sqlitekit.Database;
 import workspace.storage.WorkspaceSqliteStore;
 import workspace.service.WorkspaceService;
 import workspace.service.WorkspaceProtocol;
+import workspace.service.WorkspaceDeviceRecord;
+import haxe.io.Bytes;
 
 private typedef Link = {var client:RpcConnection; var server:RpcConnection;}
 
@@ -85,8 +87,49 @@ class PersistenceTestMain {
 		require(done, "Rename did not complete");
 	}
 
+	static function devicePersistence(path:String):Void {
+		if (sys.FileSystem.exists(path)) sys.FileSystem.deleteFile(path);
+		if (sys.FileSystem.exists(path + ".sqlitekit-lock")) sys.FileSystem.deleteFile(path + ".sqlitekit-lock");
+		var deviceId = "0123456789abcdef0123456789abcdef";
+		var key = Bytes.alloc(32);
+		for (index in 0...key.length) key.set(index, (index * 7 + 3) & 0xff);
+		var seed = seed();
+		var store = new WorkspaceSqliteStore(path, "workspace", seed);
+		store.close();
+		// Simulate an existing v4 catalog and verify the additive device migration.
+		var admin = Database.open(path);
+		admin.exec("DROP TABLE workspace_devices; PRAGMA user_version=4");
+		admin.close();
+		store = new WorkspaceSqliteStore(path, "workspace", seed);
+		require(store.loadDevices().length == 0, "Device migration created unexpected rows");
+		var record:WorkspaceDeviceRecord = {
+			deviceId: deviceId,
+			staticPublicKey: key,
+			grants: [WorkspaceProtocol.READ, WorkspaceProtocol.TREE],
+			revoked: false
+		};
+		store.saveDevice(record);
+		store.close();
+		store = new WorkspaceSqliteStore(path, "workspace", seed);
+		var loaded = store.loadDevices();
+		require(loaded.length == 1 && loaded[0].deviceId == deviceId && !loaded[0].revoked,
+			"Pinned device did not persist");
+		require(loaded[0].staticPublicKey.length == key.length && loaded[0].grants.length == 2,
+			"Device key or explicit grants did not persist");
+		for (index in 0...key.length)
+			require(loaded[0].staticPublicKey.get(index) == key.get(index), "Device public key changed in storage");
+		store.revokeDevice(deviceId);
+		store.close();
+		store = new WorkspaceSqliteStore(path, "workspace", seed);
+		require(store.loadDevices()[0].revoked, "Device revocation did not persist");
+		store.close();
+		sys.FileSystem.deleteFile(path);
+		if (sys.FileSystem.exists(path + ".sqlitekit-lock")) sys.FileSystem.deleteFile(path + ".sqlitekit-lock");
+	}
+
 	static function main():Void {
 		var path = Sys.args()[0];
+		devicePersistence(path + ".devices");
 		var store = new WorkspaceSqliteStore(path, "workspace", seed());
 		var catalog = service(store), link = connect(catalog);
 		var events = 0;
@@ -237,7 +280,7 @@ class PersistenceTestMain {
 			corrupt.close();
 		}, "Oversized corrupt payload accepted");
 		admin = Database.open(path);
-		admin.exec("PRAGMA user_version=5");
+		admin.exec("PRAGMA user_version=6");
 		admin.close();
 		rejects(function() {
 			var unsupported = new WorkspaceSqliteStore(path, "workspace", seed());

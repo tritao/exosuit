@@ -32,6 +32,7 @@ mkdir -p "$root_dir/build"
 "$root_dir/native-packages/sqlite/tests/run.sh"
 "$root_dir/native-packages/terminal/tests/run.sh"
 "$root_dir/native-packages/terminal/session/tests/run.sh"
+"$root_dir/native-packages/noise/tests/run.sh"
 terminal_native_dir="$root_dir/native-packages/terminal/session/tests/build/nativekit"
 if [[ $(uname -s) == Darwin ]]; then
 	export DYLD_LIBRARY_PATH="$terminal_native_dir${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"

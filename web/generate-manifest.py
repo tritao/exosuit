@@ -22,6 +22,7 @@ manifest = {
         "haxeon-platform": {"path": "../haxeon/packages/platform"},
         "haxeon-ui": {"path": "../haxeon/packages/ui"},
         "haxeon-editor": {"path": "../haxeon/packages/editor"},
+        "noisekit": {"path": "../native-packages/noise"},
     },
     "target": "wasm32", "outputDir": "build"
 }

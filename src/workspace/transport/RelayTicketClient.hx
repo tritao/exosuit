@@ -45,7 +45,7 @@ class RelayTicketClient {
 	public function register(endpoint:RelayMachineEndpoint, machineToken:String, complete:Null<String>->Void):RelayTicketAttempt {
 		if (complete == null)
 			throw "Relay registration callback cannot be null";
-		return post(endpoint, machineToken, endpoint == null ? "" : endpoint.registrationUrl(), function(response, error) {
+		return send(endpoint, machineToken, endpoint == null ? "" : endpoint.registrationUrl(), HttpMethod.Post, "{}", function(response, error) {
 			if (error != null) {
 				complete(error);
 				return;
@@ -70,7 +70,7 @@ class RelayTicketClient {
 		complete:Null<RelaySocketTicket>->Null<String>->Void):RelayTicketAttempt {
 		if (complete == null)
 			throw "Relay ticket completion callback cannot be null";
-		return post(endpoint, machineToken, endpoint == null ? "" : endpoint.ticketUrl(), function(response, error) {
+		return send(endpoint, machineToken, endpoint == null ? "" : endpoint.ticketUrl(), HttpMethod.Post, "{}", function(response, error) {
 			if (error != null) {
 				complete(null, error);
 				return;
@@ -94,7 +94,68 @@ class RelayTicketClient {
 		});
 	}
 
-	function post(endpoint:RelayMachineEndpoint, machineToken:String, url:String,
+	public function createPairing(endpoint:RelayMachineEndpoint, machineToken:String, channelId:String,
+		secret:String, ttlSeconds:Int, complete:Null<String>->Void):RelayTicketAttempt {
+		if (complete == null)
+			throw "Pairing creation callback cannot be null";
+		if (endpoint == null || channelId == null || secret == null || !RelaySocketTicket.isToken(secret)
+			|| ttlSeconds < 1 || ttlSeconds > 300) {
+			complete("invalid_pairing_request");
+			return new RelayTicketAttempt(function() {});
+		}
+		try RelayFrameCodec.decodeChannelId(channelId) catch (_:Dynamic) {
+			complete("invalid_pairing_request");
+			return new RelayTicketAttempt(function() {});
+		}
+		var path = endpoint.pairingsUrl();
+		return send(endpoint, machineToken, path, HttpMethod.Post,
+			haxe.Json.stringify({channelId: channelId, secret: secret, ttlSeconds: ttlSeconds}), function(response, error) {
+			if (error != null) complete(error);
+			else if (response == null) complete("pairing_transport_failed");
+			else if (response.statusCode == 201) complete(null);
+			else complete(statusError(response.statusCode));
+		});
+	}
+
+	public function registerDevice(endpoint:RelayMachineEndpoint, machineToken:String, deviceId:String,
+		deviceToken:String, complete:Null<String>->Void):RelayTicketAttempt {
+		if (complete == null)
+			throw "Device registration callback cannot be null";
+		if (endpoint == null || deviceId == null || deviceToken == null || !RelaySocketTicket.isToken(deviceToken)) {
+			complete("invalid_device_registration");
+			return new RelayTicketAttempt(function() {});
+		}
+		var path:String;
+		try path = endpoint.deviceUrl(deviceId) catch (_:Dynamic) {
+			complete("invalid_device_registration");
+			return new RelayTicketAttempt(function() {});
+		}
+		return send(endpoint, machineToken, path, HttpMethod.Put, haxe.Json.stringify({token: deviceToken}), function(response, error) {
+			if (error != null) complete(error);
+			else if (response == null) complete("device_registration_transport_failed");
+			else if (response.statusCode == 201 || response.statusCode == 204) complete(null);
+			else complete(statusError(response.statusCode));
+		});
+	}
+
+	public function revokeDevice(endpoint:RelayMachineEndpoint, machineToken:String, deviceId:String,
+		complete:Null<String>->Void):RelayTicketAttempt {
+		if (complete == null)
+			throw "Device revocation callback cannot be null";
+		var path:String;
+		try path = endpoint == null ? "" : endpoint.deviceUrl(deviceId) catch (_:Dynamic) {
+			complete("invalid_device_id");
+			return new RelayTicketAttempt(function() {});
+		}
+		return send(endpoint, machineToken, path, HttpMethod.Delete, "", function(response, error) {
+			if (error != null) complete(error);
+			else if (response == null) complete("device_revocation_transport_failed");
+			else if (response.statusCode == 204 || response.statusCode == 404) complete(null);
+			else complete(statusError(response.statusCode));
+		});
+	}
+
+	function send(endpoint:RelayMachineEndpoint, machineToken:String, url:String, method:HttpMethod, body:String,
 		complete:Null<haxeon.platform.NativeKitHttpResponse>->Null<String>->Void):RelayTicketAttempt {
 		var requestId:Null<haxe.Int64> = null;
 		var key:Null<String> = null;
@@ -134,10 +195,10 @@ class RelayTicketClient {
 			contentType.set_name_bytes(Bytes.ofString("Content-Type"));
 			contentType.set_value_bytes(Bytes.ofString("application/json"));
 			var requestOptions = new HttpRequestOptions();
-			requestOptions.set_method(HttpMethod.Post);
+			requestOptions.set_method(method);
 			requestOptions.set_url(url);
 			requestOptions.set_headers([authorization, contentType]);
-			requestOptions.set_body_bytes(Bytes.ofString("{}"));
+			requestOptions.set_body_bytes(Bytes.ofString(body));
 			requestOptions.set_mode(HttpRequestMode.Buffered);
 			requestOptions.set_timeout_ms(10000);
 			requestOptions.set_max_response_size(4096);

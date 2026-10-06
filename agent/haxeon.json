@@ -22,6 +22,9 @@
     "sqlitekit": {
       "path": "../native-packages/sqlite"
     },
+    "noisekit": {
+      "path": "../native-packages/noise"
+    },
     "terminalsession": {
       "path": "../native-packages/terminal/session"
     }

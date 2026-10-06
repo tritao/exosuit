@@ -6,10 +6,74 @@
 const canvas = document.getElementById("canvas");
 const statusLine = document.getElementById("status");
 const report = window.exosuit = {state: "loading", frames: 0, error: null, unavailable: []};
+report.remoteDeviceStore = window.ExosuitRemoteDeviceStore;
 let hostMemory = null;
 let guest = null;
 let departing = false;
+const pendingRemoteStoreRequests = new Set();
+const cancelledRemoteStoreRequests = new Set();
 window.addEventListener("pagehide", () => { departing = true; });
+
+function completeRemoteStore(event, success) {
+  pendingRemoteStoreRequests.delete(event.request);
+  const callback = guest && guest["app.WebMain.remoteCredentialStored"];
+  if (callback) callback(event.request, success ? 1 : 0);
+}
+
+function persistRemoteDevice(text) {
+  let event;
+  try {
+    event = JSON.parse(text.slice("exosuit-remote-store:".length));
+    if (!Number.isSafeInteger(event.request) || event.request <= 0 || pendingRemoteStoreRequests.has(event.request))
+      throw new Error("invalid credential request");
+    pendingRemoteStoreRequests.add(event.request);
+  } catch (_error) {
+    console.error("The browser rejected an invalid remote-device storage request.");
+    return;
+  }
+  const store = report.remoteDeviceStore;
+  if (!store) {
+    completeRemoteStore(event, false);
+    return;
+  }
+  const credentials = {
+    staticPrivateKey: event.staticPrivateKey,
+    deviceToken: event.deviceToken,
+    machineStaticPublicKey: event.machineStaticPublicKey
+  };
+  event.staticPrivateKey = "";
+  event.deviceToken = "";
+  event.machineStaticPublicKey = "";
+  store.save(event.machineId, event.deviceId, credentials).then(async () => {
+    credentials.staticPrivateKey = "";
+    credentials.deviceToken = "";
+    credentials.machineStaticPublicKey = "";
+    if (cancelledRemoteStoreRequests.delete(event.request)) {
+      try { await store.remove(event.machineId, event.deviceId); }
+      catch (_error) { console.error("Could not clean up an abandoned remote-device record."); }
+      pendingRemoteStoreRequests.delete(event.request);
+      return;
+    }
+    completeRemoteStore(event, true);
+  }, error => {
+    credentials.staticPrivateKey = "";
+    credentials.deviceToken = "";
+    credentials.machineStaticPublicKey = "";
+    if (cancelledRemoteStoreRequests.delete(event.request)) {
+      pendingRemoteStoreRequests.delete(event.request);
+      return;
+    }
+    // Never include event data or credentials in diagnostics.
+    console.error("Could not protect remote-device credentials in browser storage:", error && error.message);
+    completeRemoteStore(event, false);
+  });
+}
+
+function cancelRemoteDeviceStore(text) {
+  const request = Number(text.slice("exosuit-remote-cancel:".length));
+  if (Number.isSafeInteger(request) && pendingRemoteStoreRequests.has(request))
+    cancelledRemoteStoreRequests.add(request);
+}
 
 function fail(message) {
   if (departing) return;
@@ -68,6 +132,8 @@ async function startGuest() {
   const started = await HaxeonWasmHost.instantiate(fetch("exosuit_guest.wasm"),
     {emscripten: Module, memory: hostMemory, contract: hostContract(), print: text => {
       if (text.startsWith("exosuit-state:")) report.document = JSON.parse(text.slice("exosuit-state:".length));
+      else if (text.startsWith("exosuit-remote-store:")) persistRemoteDevice(text);
+      else if (text.startsWith("exosuit-remote-cancel:")) cancelRemoteDeviceStore(text);
       else console.log(text);
     }});
   if (departing) return;

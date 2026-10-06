@@ -31,11 +31,28 @@ class RelayMachineEndpoint {
 	public function registrationUrl():String
 		return origin + "/v1/machines/" + machineId + "/register";
 
+	public function pairingsUrl():String
+		return origin + "/v1/machines/" + machineId + "/pairings";
+
+	public function deviceUrl(deviceId:String):String {
+		RelayFrameCodec.decodeChannelId(deviceId);
+		return origin + "/v1/machines/" + machineId + "/devices/" + deviceId;
+	}
+
 	public function websocketUrl(ticket:RelaySocketTicket):String {
 		if (ticket == null)
 			throw "Relay socket ticket is required";
 		var scheme = isLoopbackHttp ? "ws" : "wss";
 		var authority = origin.substr(origin.indexOf("://") + 3);
 		return scheme + "://" + authority + "/v1/machines/" + machineId + "/connect?ticket=" + ticket.value;
+	}
+
+	public function pairingSocketUrl(channelId:String, secret:String):String {
+		RelayFrameCodec.decodeChannelId(channelId);
+		if (!RelaySocketTicket.isToken(secret))
+			throw "Invalid relay pairing secret";
+		var scheme = isLoopbackHttp ? "ws" : "wss";
+		var authority = origin.substr(origin.indexOf("://") + 3);
+		return scheme + "://" + authority + "/v1/machines/" + machineId + "/pair/" + channelId + "?secret=" + secret;
 	}
 }

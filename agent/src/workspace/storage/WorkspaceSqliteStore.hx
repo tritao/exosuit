@@ -12,7 +12,8 @@ import workspace.service.WorkspaceTerminalProtocol;
 
 /** Agent-owned schema; small typed rows, not a copied full-catalog checkpoint.
  * The manager owns the exclusive process lock. SQL cursor/revision CAS fences stale writers. */
-class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceTerminalPersistence implements workspace.service.WorkspaceAgentPersistence {
+class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceTerminalPersistence implements workspace.service.WorkspaceAgentPersistence implements workspace.service.WorkspaceDevicePersistence {
+	static inline final MAX_DEVICES:Int = 64;
 	final db:Database;
 	final workspace:String;
 	final historyLimit:Int;
@@ -34,7 +35,7 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
 					throw "Missing SQLite schema version";
 				version = integer(row.columnInt64(0));
 			});
-			if (version != 0 && version != 1 && version != 2 && version != 3 && version != 4)
+			if (version != 0 && version != 1 && version != 2 && version != 3 && version != 4 && version != 5)
 				throw "Unsupported workspace schema version";
 			if (version == 0) {
 				var count = 0;
@@ -81,8 +82,12 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
 			});
    if(version<4) transaction(function() {
     db.exec("CREATE TABLE workspace_agents (id TEXT PRIMARY KEY, payload BLOB NOT NULL)");
-    db.exec("PRAGMA user_version=4");
+   db.exec("PRAGMA user_version=4");
    });
+			if (version < 5) transaction(function() {
+				db.exec("CREATE TABLE workspace_devices (device_id TEXT PRIMARY KEY, static_key BLOB NOT NULL CHECK(length(static_key)=32), grants BLOB NOT NULL, revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1)))");
+				db.exec("PRAGMA user_version=5");
+			});
 
 		} catch (error:Dynamic) {
 			db.close();
@@ -292,6 +297,84 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
    });
   });
  }
+
+	public function loadDevices():Array<workspace.service.WorkspaceDeviceRecord> {
+		var records:Array<workspace.service.WorkspaceDeviceRecord> = [];
+		statement("SELECT device_id,static_key,grants,revoked,length(static_key),length(grants) FROM workspace_devices ORDER BY device_id LIMIT 65", function(row) {
+			while (row.step()) {
+				var deviceId = row.columnText(0), keySize = integer(row.columnInt64(4)), grantsSize = integer(row.columnInt64(5));
+				workspace.transport.RelayFrameCodec.decodeChannelId(deviceId);
+				if (keySize != 32 || grantsSize < 1 || grantsSize > 4096)
+					throw "Invalid persisted workspace device";
+				var grants:Array<String> = MessagePack.decode(blob(row, 2, grantsSize, 4096));
+				validateDeviceGrants(grants);
+				var revokedValue = integer(row.columnInt64(3));
+				if (revokedValue > 1)
+					throw "Invalid persisted workspace device state";
+				records.push({deviceId: deviceId, staticPublicKey: row.columnBlob(1), grants: grants, revoked: revokedValue == 1});
+			}
+		});
+		if (records.length > 64)
+			throw "Workspace device catalog exceeds limit";
+		return records;
+	}
+
+	public function saveDevice(record:workspace.service.WorkspaceDeviceRecord):Void {
+		if (record == null || record.staticPublicKey == null || record.staticPublicKey.length != 32)
+			throw "Invalid workspace device identity";
+		workspace.transport.RelayFrameCodec.decodeChannelId(record.deviceId);
+		validateDeviceGrants(record.grants);
+		var grants = MessagePack.encode(record.grants);
+		transaction(function() {
+			var count = 0, exists = false;
+			statement("SELECT count(*),EXISTS(SELECT 1 FROM workspace_devices WHERE device_id=?1) FROM workspace_devices", function(row) {
+				row.bindText(1, record.deviceId);
+				if (!row.step()) throw "Workspace device count unavailable";
+				count = integer(row.columnInt64(0));
+				exists = integer(row.columnInt64(1)) == 1;
+			});
+			if (!exists && count >= MAX_DEVICES)
+				throw "Workspace device limit reached";
+			statement("INSERT INTO workspace_devices(device_id,static_key,grants,revoked) VALUES(?1,?2,?3,?4) ON CONFLICT(device_id) DO UPDATE SET static_key=excluded.static_key,grants=excluded.grants,revoked=excluded.revoked", function(row) {
+				row.bindText(1, record.deviceId);
+				row.bindBlob(2, record.staticPublicKey);
+				row.bindBlob(3, grants);
+				row.bindInt64(4, Int64.ofInt(record.revoked ? 1 : 0));
+				row.step();
+			});
+		});
+	}
+
+	public function revokeDevice(deviceId:String):Void {
+		workspace.transport.RelayFrameCodec.decodeChannelId(deviceId);
+		transaction(function() {
+			statement("UPDATE workspace_devices SET revoked=1 WHERE device_id=?1", function(row) {
+				row.bindText(1, deviceId);
+				row.step();
+			});
+		});
+	}
+
+	public function deleteDevice(deviceId:String):Void {
+		workspace.transport.RelayFrameCodec.decodeChannelId(deviceId);
+		transaction(function() {
+			statement("DELETE FROM workspace_devices WHERE device_id=?1", function(row) {
+				row.bindText(1, deviceId);
+				row.step();
+			});
+		});
+	}
+
+	static function validateDeviceGrants(grants:Array<String>):Void {
+		if (grants == null || grants.length > 32)
+			throw "Invalid workspace device grants";
+		var seen:Map<String, Bool> = [];
+		for (grant in grants) {
+			if (grant == null || grant.length == 0 || grant.length > 128 || seen.exists(grant))
+				throw "Invalid workspace device grant";
+			seen.set(grant, true);
+		}
+	}
 
 	public function close():Void
 		db.close();

@@ -95,6 +95,7 @@ class GraphicalMain {
 						workspace.client.LocalWorkspaceClient.findLauncher(), function() return NativeKit.nk_time_seconds() * 1000);
 					instance.attachWorkspace(workspaceClient);
 					instance.attachWorkbench(workspaceClient);
+					instance.attachRemoteAccess(workspaceClient);
 				}
 				catch (failure:Dynamic)
 					instance.application.reportError("workspace", Std.string(failure));

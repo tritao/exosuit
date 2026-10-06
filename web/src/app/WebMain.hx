@@ -4,6 +4,7 @@ import haxeon.ui.FontFamily;
 import haxeon.ui.core.Command;
 import nativekit.ffi.NativeKit;
 import nativekit.ffi.NativeKitTypes.Result;
+import haxeon.ui.icons.IconName;
 import haxeon.ui.host.BrowserUiHost;
 import haxeon.ui.host.BrowserUiHostOptions;
 import haxeon.ui.host.BrowserUiHostOptions.BrowserUiFontAsset;
@@ -11,6 +12,8 @@ import haxeon.ui.host.BrowserUiHostSession;
 import haxeon.ui.host.UiHostSession.UiHostLifecycle;
 import haxeon.ui.theme.Theme;
 import platform.HostCapabilities;
+import app.BrowserRemoteAccessPanel;
+import app.BrowserRemoteWorkspaceClient;
 import sys.FileSystem;
 import sys.io.File;
 import ui.ExosuitApp;
@@ -20,6 +23,7 @@ class WebMain {
 	static var height = 840;
 	static var session:Null<BrowserUiHostSession>;
 	static var editor:Null<ExosuitApp>;
+	static var remoteAccess:Null<BrowserRemoteWorkspaceClient>;
 
 	@:expose public static function configure(canvasWidth:Int, canvasHeight:Int):Int {
 		if (session != null || canvasWidth <= 0 || canvasHeight <= 0) return 1;
@@ -42,6 +46,14 @@ class WebMain {
 		];
 		var started = BrowserUiHost.start(options, function(context) {
 			var app = new ExosuitApp(context.fonts, Theme.light(), context, "/workspace", HostCapabilities.browser());
+			var remote = new BrowserRemoteWorkspaceClient(context.events,
+				function() return NativeKit.nk_time_seconds() * 1000,
+				function() context.requestFrame());
+			remoteAccess = remote;
+			context.onPoll = function() remote.poll();
+			var remotePanel = new BrowserRemoteAccessPanel(remote, function() context.requestFrame());
+			app.registerSidebarDestination("remote-access", IconName.Radar, function() return remotePanel,
+				new haxeon.ui.widgets.sidebar.SidebarModeOptions("Remote Access", 30, true));
 			app.application.openArgument("/workspace/Main.hx");
 			app.application.commands.add("help:documentation", function(_) {
 				if (openDocumentation() != 0) Sys.println("exosuit: could not open documentation");
@@ -85,5 +97,13 @@ class WebMain {
 
 	@:expose public static function openDocumentation():Int {
 		return NativeKit.nk_shell_open_url("https://github.com/tritao/exosuit") == Result.Ok ? 0 : 1;
+	}
+
+	/** Completion callback for IndexedDB credential persistence in the browser host. */
+	@:expose public static function remoteCredentialStored(request:Int, success:Int):Int {
+		var client = remoteAccess;
+		if (client == null) return 1;
+		client.credentialStored(request, success != 0);
+		return 0;
 	}
 }

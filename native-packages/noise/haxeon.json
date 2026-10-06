@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "package": { "name": "noisekit" },
+  "sourceRoots": ["haxe"],
+  "scopeSourceRoots": false,
+  "native": {
+    "cmake": {
+      "source": ".",
+      "target": "noisekit",
+      "library": "noisekit",
+      "inputs": ["CMakeLists.txt", "include/noisekit.h", "src/noisekit.c", "src/random_wasm.c", "vendor/noise-c/src"]
+    }
+  },
+  "ffi": {
+    "interfaces": ["bindings/noisekit.hxi"],
+    "projections": ["bindings/noisekit.hxmap"]
+  },
+  "target": "host"
+}

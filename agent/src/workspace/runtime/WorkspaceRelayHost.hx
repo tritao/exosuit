@@ -9,7 +9,7 @@ import workspace.transport.RelayMachineEndpoint;
 import workspace.transport.RelaySocketLink;
 
 /** Daemon-owned outbound relay connection. Inbound channels wait for Noise binding. */
-class WorkspaceRelayHost {
+class WorkspaceRelayHost implements WorkspacePairingRelay {
 	static inline final MAX_RETRY_MILLISECONDS:Float = 30000;
 
 	public var onChannel:Null<RelayChannel->Void>;
@@ -38,6 +38,31 @@ class WorkspaceRelayHost {
 	/** A configured remote endpoint deliberately keeps the workspace service available. */
 	public function activeCount():Int
 		return disposed || permanentFailure ? 0 : 1;
+
+	public function pairingEndpoint():RelayMachineEndpoint
+		return endpoint;
+
+	public function isConnected():Bool
+		return connected;
+
+	public function createPairing(channelId:String, secret:String, ttlSeconds:Int, complete:Null<String>->Void):Void {
+		if (disposed || permanentFailure || !connected) {
+			complete("relay_machine_offline");
+			return;
+		}
+		connector.createPairing(endpoint, machineToken, channelId, secret, ttlSeconds, complete);
+	}
+
+	public function registerDevice(channelId:String, token:String, complete:Null<String>->Void):Void {
+		if (disposed || permanentFailure || !connected) {
+			complete("relay_machine_offline");
+			return;
+		}
+		connector.registerDevice(endpoint, machineToken, channelId, token, complete);
+	}
+
+	public function revokeDevice(channelId:String, complete:Null<String>->Void):Void
+		connector.revokeDevice(endpoint, machineToken, channelId, complete);
 
 	function get_connected():Bool
 		return link != null && link.isOpen();

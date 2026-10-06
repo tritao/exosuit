@@ -6,7 +6,7 @@ import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceTerminals;
 import workspace.service.WorkspaceTerminalProtocol;
 
-private typedef Peer = {var transport:NativeRpcTransport; var preflight:Null<SessionPreflight>; var handshake:Null<RpcHandshake>; var connection:Null<RpcConnection>;}
+private typedef Peer = {var transport:MessageTransport; var options:RpcPeerOptions; var localAdmin:Bool; var preflight:Null<SessionPreflight>; var handshake:Null<RpcHandshake>; var connection:Null<RpcConnection>;}
 
 /** Bounded headless service loop, shared by daemon and transport tests. */
 class WorkspaceRpcServer {
@@ -15,9 +15,11 @@ class WorkspaceRpcServer {
 	final identity:Null<WorkspaceIdentity>;
 	final terminals:Null<WorkspaceTerminals>;
 	final agents:Null<workspace.service.WorkspaceAgents>;
+	final pairingAdmin:Null<workspace.service.WorkspacePairingAdmin>;
 	final peers:Array<Peer> = [];
 
 	public final options:RpcPeerOptions;
+	final localOptions:RpcPeerOptions;
 
 	/** Only authenticated, fully negotiated connections keep the daemon alive. */
 	public function clientCount():Int {
@@ -28,10 +30,11 @@ class WorkspaceRpcServer {
 		return count;
 	}
 
-	public function new(service:WorkspaceService, clock:Void->Float, ?capabilities:Array<String>, ?identity:WorkspaceIdentity, ?terminals:WorkspaceTerminals, ?agents:workspace.service.WorkspaceAgents) {
+	public function new(service:WorkspaceService, clock:Void->Float, ?capabilities:Array<String>, ?identity:WorkspaceIdentity, ?terminals:WorkspaceTerminals, ?agents:workspace.service.WorkspaceAgents, ?pairingAdmin:workspace.service.WorkspacePairingAdmin) {
 		this.service = service;
 		this.terminals = terminals;
 		this.agents = agents;
+		this.pairingAdmin = pairingAdmin;
 		this.clock = clock;
 		this.identity = identity == null ? null : {workspace: identity.workspace, root: identity.root, instance: identity.instance};
 		if (identity != null && (identity.workspace != service.id || identity.root.length == 0 || identity.instance.length == 0))
@@ -49,18 +52,45 @@ class WorkspaceRpcServer {
 			defaults.push(workspace.service.WorkspaceAgentProtocol.CONTROL);
 		}
 		options = new RpcPeerOptions("exosuit-agent/1", capabilities == null ? defaults : capabilities, [], 5000, 262144, 32, 1048576);
+		var localDefaults = options.offered();
+		if (pairingAdmin != null)
+			localDefaults.push(workspace.service.WorkspacePairingProtocol.ADMIN);
+		localOptions = new RpcPeerOptions(options.application, localDefaults, [], options.timeoutMs,
+			options.maxMessageBytes, options.maxCalls, options.maxQueuedBytes, options.protocol, options.codec);
 	}
 
 	/** NativeKit validates same-user peers and private paths on local sockets. */
 	public function acceptLocal(transport:NativeRpcTransport):Void {
-		accept(transport, null);
+		accept(transport, null, localOptions, true);
 	}
 
 	public function acceptWebSocket(transport:NativeRpcTransport, token:String):Void {
-		accept(transport, new SessionPreflight(transport, token, clock, true));
+		accept(transport, new SessionPreflight(transport, token, clock, true), options, false);
 	}
 
-	function accept(transport:NativeRpcTransport, preflight:Null<SessionPreflight>):Void {
+	/** A Noise-authenticated remote peer is restricted to its persisted device grants. */
+	public function acceptRemote(transport:MessageTransport, grants:Array<String>):Void {
+		if (grants == null) {
+			transport.close();
+			return;
+		}
+		var allowed:Array<String> = [];
+		for (grant in grants) {
+			if (grant == null || allowed.indexOf(grant) >= 0 || options.offered().indexOf(grant) < 0) {
+				transport.close();
+				return;
+			}
+			allowed.push(grant);
+		}
+		var maxMessageBytes = Std.int(Math.min(options.maxMessageBytes, NoiseMessageTransport.MAX_PLAINTEXT_BYTES));
+		var remoteOptions = new RpcPeerOptions(options.application, allowed, [], options.timeoutMs,
+			maxMessageBytes, options.maxCalls,
+			options.maxQueuedBytes < maxMessageBytes ? maxMessageBytes : options.maxQueuedBytes,
+			options.protocol, options.codec);
+		accept(transport, null, remoteOptions, false);
+	}
+
+	function accept(transport:MessageTransport, preflight:Null<SessionPreflight>, peerOptions:RpcPeerOptions, localAdmin:Bool):Void {
 		prune();
 		if (peers.length >= 16) {
 			transport.close();
@@ -68,8 +98,10 @@ class WorkspaceRpcServer {
 		}
 		peers.push({
 			transport: transport,
+			options: peerOptions,
+			localAdmin: localAdmin,
 			preflight: preflight,
-			handshake: preflight == null ? RpcHandshake.server(transport, clock, options) : null,
+			handshake: preflight == null ? RpcHandshake.server(transport, clock, peerOptions) : null,
 			connection: null
 		});
 	}
@@ -98,7 +130,7 @@ class WorkspaceRpcServer {
 					continue;
 				}
 				peer.preflight = null;
-				peer.handshake = RpcHandshake.server(peer.transport, clock, options);
+				peer.handshake = RpcHandshake.server(peer.transport, clock, peer.options);
 			}
 			var handshake = peer.handshake;
 			if (handshake != null) {
@@ -109,6 +141,35 @@ class WorkspaceRpcServer {
 				peer.connection = handshake.connection;
 				if (peer.connection != null) {
 					var grants = handshake.capabilities();
+					if (pairingAdmin != null && peer.localAdmin
+						&& grants.indexOf(workspace.service.WorkspacePairingProtocol.ADMIN) >= 0) {
+						var admin = pairingAdmin;
+						peer.connection.register(workspace.service.WorkspacePairingProtocol.CREATE, function(request, context) {
+							admin.createInvitation(request.ttlSeconds, function(invitation, error) {
+								if (error != null || invitation == null)
+									context.fail({code: "pairing_unavailable", message: error == null ? "Could not create pairing invitation" : error, ambiguous: false});
+								else
+									context.respond(invitation);
+							});
+						});
+						peer.connection.register(workspace.service.WorkspacePairingProtocol.LIST, function(_, context) {
+							context.respond({pending: admin.listPending(), devices: admin.listDevices()});
+						});
+						peer.connection.register(workspace.service.WorkspacePairingProtocol.APPROVE, function(request, context) {
+							admin.approve(request.deviceId, request.grants, function(error) {
+								context.respond({accepted: error == null, error: error});
+							});
+						});
+						peer.connection.register(workspace.service.WorkspacePairingProtocol.REJECT, function(request, context) {
+							var accepted = admin.reject(request.deviceId);
+							context.respond({accepted: accepted, error: accepted ? null : "pairing_not_found"});
+						});
+						peer.connection.register(workspace.service.WorkspacePairingProtocol.REVOKE, function(request, context) {
+							admin.revoke(request.deviceId, function(error) {
+								context.respond({accepted: error == null, error: error});
+							});
+						});
+					}
 					var currentIdentity = identity;
 					if (currentIdentity != null)
 						peer.connection.register(WorkspaceProtocol.IDENTITY, function(request, context) {

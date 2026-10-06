@@ -14,6 +14,9 @@ import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceTerminalProtocol;
 import workspace.service.WorkspaceReplica;
 import workspace.service.WorkspaceAgentProtocol;
+import workspace.service.WorkspacePairingProtocol;
+import workspace.service.WorkspacePairingProtocol.PairingInvitation;
+import workspace.service.WorkspacePairingProtocol.PairingList;
 
 @:wire typedef LocalWorkspaceEndpoint = {@: id(1) var version: Int;
 @:id(2) var protocol:Int;
@@ -28,7 +31,7 @@ import workspace.service.WorkspaceAgentProtocol;
 }
 
 /** Nonblocking native attachment. Closing a client never owns/stops the shared daemon. */
-class LocalWorkspaceClient implements WorkspaceAttachment implements workspace.client.WorkspaceWorkbenchClient implements workspace.client.WorkspaceAgentClient {
+class LocalWorkspaceClient implements WorkspaceAttachment implements workspace.client.WorkspaceWorkbenchClient implements workspace.client.WorkspaceAgentClient implements workspace.client.WorkspacePairingClient {
   public var root(default, null):Null<String>;
   public var error(default, null):Null<String>;
   public var instance(default, null):String = "";
@@ -62,6 +65,12 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements workspace.c
   var catalogMutation:Bool = false;
   var catalogNext:Float = 0;
   var catalogKey:String = "";
+  var pairings:Null<PairingList>;
+  var pairingsError:Null<String>;
+  var pairingsRevision:Int = 0;
+  var pairingsPending:Bool = false;
+  var pairingsMutation:Bool = false;
+  var pairingsNext:Float = 0;
 
   public function agentService():workspace.client.WorkspaceAgentClient return this;
   public function canReadAgents():Bool return ready && client!=null && client.capabilities().indexOf(WorkspaceAgentProtocol.READ)>=0;
@@ -207,6 +216,90 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements workspace.c
 
   public function hasGroupTree():Bool return client != null && client.capabilities().indexOf(WorkspaceProtocol.TREE) >= 0;
   public function canEditGroups():Bool return ready && client != null && hasGroupTree() && client.capabilities().indexOf(WorkspaceProtocol.WRITE) >= 0;
+  public function canManagePairings():Bool return ready && client != null && client.capabilities().indexOf(WorkspacePairingProtocol.ADMIN) >= 0;
+  public function pairingList():Null<PairingList> return pairings;
+  public function pairingRevision():Int return pairingsRevision;
+  public function pairingBusy():Bool return pairingsMutation;
+  public function pairingError():Null<String> return pairingsError;
+
+  public function refreshPairings(force:Bool):Void {
+    var connection = rpc();
+    if (connection == null || pairingsPending || (!force && clock() < pairingsNext)
+      || client == null || client.capabilities().indexOf(WorkspacePairingProtocol.ADMIN) < 0) return;
+    if (force) pairingsError = null;
+    pairingsPending = true;
+    pairingsNext = clock() + 1000;
+    connection.call(WorkspacePairingProtocol.LIST, {}, 3000, function(value) {
+      if (rpc() != connection) return;
+      pairingsPending = false;
+      if (value.pending == null || value.devices == null || value.pending.length > 8 || value.devices.length > 1024) {
+        pairingsError = "Invalid remote device list";
+      } else {
+        pairings = value;
+        pairingsError = null;
+      }
+      pairingsRevision++;
+    }, function(failure) {
+      if (rpc() == connection) {
+        pairingsPending = false;
+        pairingsError = failure.message;
+        pairingsRevision++;
+      }
+    });
+  }
+
+  public function createPairing(ttlSeconds:Int, complete:PairingInvitation->Null<String>->Void):Void {
+    if (complete == null) throw "Pairing completion cannot be null";
+    pairingMutation(WorkspacePairingProtocol.CREATE, {ttlSeconds: ttlSeconds}, function(result) {
+      var invitation:PairingInvitation = cast result;
+      complete(invitation, null);
+    }, function(error) complete(null, error));
+  }
+
+  public function approvePairing(deviceId:String, grants:Array<String>, complete:Null<String>->Void):Void
+    pairingAction(WorkspacePairingProtocol.APPROVE, {deviceId: deviceId, grants: grants}, complete);
+
+  public function rejectPairing(deviceId:String, complete:Null<String>->Void):Void
+    pairingAction(WorkspacePairingProtocol.REJECT, {deviceId: deviceId}, complete);
+
+  public function revokePairing(deviceId:String, complete:Null<String>->Void):Void
+    pairingAction(WorkspacePairingProtocol.REVOKE, {deviceId: deviceId}, complete);
+
+  function pairingAction<Request>(method:haxeon.rpc.RpcMethod<Request, workspace.service.WorkspacePairingProtocol.PairingActionResult>,
+    request:Request, complete:Null<String>->Void):Void {
+    if (complete == null) throw "Pairing action completion cannot be null";
+    pairingMutation(method, request, function(result:workspace.service.WorkspacePairingProtocol.PairingActionResult) {
+      if (!result.accepted) complete(result.error == null ? "pairing_action_failed" : result.error);
+      else {
+        pairingsNext = 0;
+        complete(null);
+      }
+    }, complete);
+  }
+
+  function pairingMutation<Request, Response>(method:haxeon.rpc.RpcMethod<Request, Response>, request:Request,
+    success:Response->Void, failure:Null<String>->Void):Void {
+    var connection = rpc();
+    if (connection == null || !canManagePairings() || pairingsMutation) {
+      failure("remote_access_unavailable");
+      return;
+    }
+    pairingsMutation = true;
+    pairingsError = null;
+    var selected = selection;
+    connection.call(method, request, 10000, function(value) {
+      if (rpc() != connection || selected != selection) return;
+      pairingsMutation = false;
+      pairingsRevision++;
+      success(value);
+    }, function(error) {
+      if (rpc() != connection || selected != selection) return;
+      pairingsMutation = false;
+      pairingsError = error.message;
+      pairingsRevision++;
+      failure(error.message);
+    });
+  }
   public function terminalCatalog():Null < workspace.service.WorkspaceTerminalProtocol.TerminalCatalog > return catalog;
   public function terminalCatalogError():Null < String > return catalogError;
   public function terminalCatalogRevision():Int return catalogRevision;
@@ -451,6 +544,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements workspace.c
   }
 
   function stopConnection():Void {
+    pairings = null; pairingsError = null; pairingsPending = false; pairingsMutation = false; pairingsNext = 0; pairingsRevision++;
     catalog = null;
     agentConnection=null;agentCatalog=null;discovery=null;pendingDiscovery=null;discoveryToken++;agentViews.clear();agentTokens.clear();agentsError=null;agentsPending=false;agentMutation=false;pendingAgentCreate=null;agentCreated=null;agentsNext=0;agentSelection++;agentsRevision++;
     catalogPending = false;
@@ -515,6 +609,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements workspace.c
     caps.push(WorkspaceAgentProtocol.CONTROL);
     caps.push(WorkspaceTerminalProtocol.READ);
     caps.push(WorkspaceTerminalProtocol.CONTROL);
+    caps.push(WorkspacePairingProtocol.ADMIN);
     deadline = clock() + 12000;
     client = new RpcClient(new NativeRpcConnector(hub,
       NativeRpcHub.local(endpoint.socket)), clock, function() return Math.random(), new RpcPeerOptions(

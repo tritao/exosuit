@@ -1,10 +1,14 @@
 # M16 — Connected web workspaces and away-from-home access
 
-Status: in progress. M16.1 has a local relay prototype and bidirectional
-NativeKit connector. A follow-up slice adds opt-in hosting in the
-workspace-daemon lifecycle and NativeKit OS credential storage for the reusable
-machine bearer. The browser client, Noise channel integration and cross-network
-qualification remain unimplemented. It depends on Haxeon RPC.1/RPC.2 and the
+Status: in progress. M16.1 now includes the local relay prototype, opt-in
+workspace-daemon hosting, NativeKit OS credential storage for the machine
+bearer, Noise-authenticated device grants, a desktop approval panel, and a
+first-pairing browser client. The browser consumes a pasted one-use relay URL,
+compares the Noise transcript code, stores device credentials encrypted under
+a non-extractable WebCrypto key, confirms receipt to the daemon, and verifies
+workspace identity over RPC. Saved-device selection/reconnection, remote
+workspace resources, and cross-network qualification remain open. It depends
+on Haxeon RPC.1/RPC.2 and the
 M14 workspace service; terminal and provider features depend on their M12/M14
 acceptance. Use the existing M15 web build as the first remote client. Android
 uses the same responsive web application; a native Android app is not required
@@ -112,10 +116,11 @@ the Emscripten web host. The initial candidate is
 prototype. It is MIT-licensed and its upstream core unit and Noise vector suites
 pass on Linux. Do not use the archived `noise-c.wasm` wrapper. Noise-C's default
 random source only handles Linux/macOS and Windows; the NativeKit integration
-must select the Emscripten `/dev/urandom` bridge explicitly and fail closed if
-entropy is unavailable. A prototype using that bridge passes in headless
-Chrome; the production module still needs its own browser test before the
-channel can be accepted. Noise-C describes
+overrides it with `crypto.getRandomValues` for Emscripten and fails closed if
+secure browser entropy is unavailable. The native package and Haxeon boundary
+are implemented; the production Wasm host builds and the web app launches in
+headless Chrome. A full browser-to-Worker Noise pairing run remains an
+acceptance test. Noise-C describes
 itself as a reference implementation, and this choice is not a claim of an
 independent security audit. Reassess the pinned implementation if portability,
 maintenance or review raises a material concern.
@@ -134,30 +139,37 @@ The QR/deep link carries only a short-lived, single-use pairing capability and
 opaque routing ID; it never carries a reusable device credential or workspace
 key. Consuming the invitation only admits a pending handshake. No workspace
 method is enabled until the user compares the authentication string and
-approves the device. The service then pins that device's static public key and
-its explicit workspace grants; later connections perform a fresh XX handshake
-against the pinned identities. The relay forwards bounded opaque handshake and
-ciphertext frames and stores no private keys, workspace keys or decrypted RPC.
+approves the device. The service delivers the relay bearer inside Noise and
+waits for an encrypted device receipt confirmation before admitting RPC; a
+missing confirmation rolls back the local grant and revokes the relay bearer.
+The service pins that device's static public key and its explicit workspace
+grants; later connections perform a fresh XX handshake against the pinned
+identities. The relay forwards bounded opaque handshake and ciphertext frames
+and stores no private keys, workspace keys or decrypted RPC.
 
 Investigation on 2026-10-06 verified Noise-C's core unit suite and all 1392
 upstream vectors at `cfe2541` on Linux. The same source compiled to Wasm with the
 pinned Emscripten 6.0.9 toolchain; its unit suite passed in Node and headless
-Chrome, and all 1392 vectors passed in Node. This proves the prototype's
-Emscripten `/dev/urandom` path uses a working browser entropy source. The
+Chrome, and all 1392 vectors passed in Node. That earlier prototype used an
+Emscripten `/dev/urandom` shim; the production package now uses the browser
+Crypto API directly. The headless browser validates WebCrypto credential
+storage; live browser-to-Worker pairing remains an acceptance gate. The
 complete upstream `make check` could not run because this environment lacks
-`yacc`. NativeKit/Haxeon channel integration, explicit Emscripten entropy
-selection, the browser key store and the full Web host handshake remain
-acceptance gates. See the
+`yacc`. See the
 [Noise specification](https://noiseprotocol.org/noise.html) and the
 [Web Crypto specification](https://www.w3.org/TR/WebCryptoAPI/) for the
 protocol and browser key-storage contracts.
 
-- [ ] Add Connect to machine and paired-machine selection to the existing web
-  entry point. Show connection state, machine availability and permissions.
+- [ ] Add saved-machine selection and reconnection to the existing web entry
+  point. First-pairing UI now shows connection state and approved permissions;
+  it consumes the pasted one-use URL and verifies the workspace identity.
 - [ ] Desktop/service Remote Access creates a short-lived single-use pairing
   invitation; scanning its QR code or opening its URL enters the same web UI.
-  Require explicit desktop pairing confirmation. Persist revocable device
-  identity and workspace-scoped grants, not reusable credentials in URLs.
+  The desktop panel now creates short-lived invitations, compares the
+  transcript code, selects grants, and lists or revokes devices. The copied
+  one-time relay URL is not yet a web-app deep link; QR sharing remains open.
+  The browser consumes the pasted URL and stores reusable credentials only in
+  its encrypted origin-scoped store, never in the URL.
 - [ ] Finish Worker/router and SQLite Durable Object qualification for
   hibernation recovery, forwarding limits, quota behavior and fault injection.
 - [x] Create an account-free local Worker/SQLite prototype with machine claim,
@@ -179,17 +191,54 @@ protocol and browser key-storage contracts.
   per-workspace machine identity and a private one-shot bootstrap, and the
   daemon stores the bearer with NativeKit credentials, enrolls and reconnects
   with backoff. Explicit relay hosting keeps the daemon alive. Inbound channels
-  close until authenticated Noise/device-grant dispatch is implemented.
-- [ ] Add the browser client and qualify across networks. The browser must
-  connect over secure WebSocket through the relay so remote use needs no inbound
-  public port, manual port forwarding or VPN. Keep direct/local transport
-  optional under the same client interface.
+  now require Noise XX, a pinned device key and saved workspace grants before
+  the RPC server accepts the peer. A same-user local RPC surface now creates
+  one-use invitations, lists pending transcript codes, and approves, rejects
+  or revokes devices. The graphical Remote Access panel exposes those
+  controls, shows matching codes and grants, and revokes saved devices.
+- [ ] Qualify browser access across networks. The first-pairing browser client
+  now connects over the relay's secure WebSocket and transfers its confirmed
+  Noise channel into RPC. Saved-device ticket exchange/reconnection and
+  real-network qualification remain open; keep direct/local transport optional
+  under the same client interface.
 - [x] Select and prototype-test the browser-compatible Noise XX suite and
   NativeKit/WebCrypto key-custody design documented above. Do not invent
   cryptography or treat relay TLS as end-to-end encryption.
-- [ ] Integrate the selected Noise channel into NativeKit/Haxeon and the web
-  host, validate pairing identity binding and browser key storage, and test the
-  complete handshake. Serve client assets over HTTPS. Relay handles
+- [x] Vendor the pinned Noise-C source as a submodule and add a fixed-suite
+  NativeKit/Haxeon package. Native and Wasm ABI generation, the native Haxe
+  binding, machine OS-key storage, workspace-scoped device records, Noise
+  framing and per-device RPC grant negotiation are implemented. Tests cover
+  XX, pinned machine/device identities, route binding, encrypted traffic,
+  nonce-safe backpressure, grant enforcement, schema migration and revocation.
+- [x] Add the daemon-side first-pairing gate. New Noise identities remain
+  pending until a local administrator compares the transcript code and approves
+  an explicit grant subset. Approval registers a relay bearer, persists the
+  device key/grants and delivers the bearer only inside Noise. RPC waits for an
+  encrypted device receipt confirmation; a missing confirmation rolls back
+  local state and revokes the relay registration. Tests cover unsupported
+  grants, relay registration failure, rejection, invitation/pending/receipt
+  expiry, one-use admission, revocation and local-only RPC access. The local
+  methods are exposed in the graphical Remote Access panel.
+- [x] Add the browser credential-storage primitive. It stores the Noise static
+  key and relay bearer as AES-GCM ciphertext in origin-scoped IndexedDB, with a
+  non-extractable WebCrypto wrapping key. A headless-Chrome test checks the
+  round trip, non-extractability, tamper rejection and record removal. The
+  first-pairing client now saves credentials through this store.
+- [x] Add first-pairing browser UI and key-custody integration. The web client
+  consumes an invitation, persists the Noise identity and bearer through the
+  browser store, displays the transcript code, and confirms it with the machine
+  owner before admitting workspace RPC. The current workspace call verifies
+  remote identity; file, terminal and agent views remain in M16.2.
+- [x] Keep the web build compiling the shared network and Noise interfaces.
+  The build generates the wasm32 NativeKit network ABI, compiles the Haxeon
+  guest and Emscripten host, and verifies all guest imports.
+- [x] Integrate the selected Noise channel into NativeKit/Haxeon and the web
+  host. The first-pair flow binds machine/device IDs in the Noise prologue,
+  checks the matching code, stores credentials, waits for the encrypted receipt,
+  and starts workspace RPC. Native/Worker transport tests, the Wasm build, a
+  headless browser launch, and browser-store checks pass. A real browser-to-
+  Worker pairing run and remote deployment remain qualification gates. Serve
+  client assets over HTTPS. Relay handles
   routing/discovery, not workspace history or provider credentials. Document
   relay trust/metadata and web-client delivery trust. Keep relay deployment
   self-hostable.

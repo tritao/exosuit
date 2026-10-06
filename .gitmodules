@@ -4,3 +4,6 @@
 [submodule "haxeon"]
 	path = haxeon
 	url = https://github.com/tritao/haxeon.git
+[submodule "native-packages/noise/vendor/noise-c"]
+	path = native-packages/noise/vendor/noise-c
+	url = https://github.com/rweather/noise-c.git

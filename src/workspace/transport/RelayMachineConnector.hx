@@ -75,6 +75,18 @@ class RelayMachineConnector {
 		return attempt;
 	}
 
+	public function createPairing(endpoint:RelayMachineEndpoint, machineToken:String, channelId:String,
+		secret:String, ttlSeconds:Int, complete:Null<String>->Void):RelayTicketAttempt
+		return tickets.createPairing(endpoint, machineToken, channelId, secret, ttlSeconds, complete);
+
+	public function registerDevice(endpoint:RelayMachineEndpoint, machineToken:String, deviceId:String,
+		deviceToken:String, complete:Null<String>->Void):RelayTicketAttempt
+		return tickets.registerDevice(endpoint, machineToken, deviceId, deviceToken, complete);
+
+	public function revokeDevice(endpoint:RelayMachineEndpoint, machineToken:String, deviceId:String,
+		complete:Null<String>->Void):RelayTicketAttempt
+		return tickets.revokeDevice(endpoint, machineToken, deviceId, complete);
+
 	public function dispose():Void {
 		if (disposed)
 			return;

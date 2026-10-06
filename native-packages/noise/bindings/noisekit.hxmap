@@ -1,0 +1,11 @@
+{
+  "interface": "NoiseKit",
+  "package": "noisekit.ffi",
+  "modules": {
+    "functions": "NoiseKit",
+    "types": "NoiseKitTypes"
+  },
+  "typeNames": {
+    "noisekit_handshake": "Handshake"
+  }
+}

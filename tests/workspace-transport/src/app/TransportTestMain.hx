@@ -18,14 +18,22 @@ class TransportTestMain {
 	}
 
 	static function main():Void {
-		RelayProtocolTests.run();
 		var args = Sys.args();
+		if (args.length == 1 && args[0] == "--noise-only") {
+			NoiseTransportTests.run();
+			WorkspacePairingTests.run();
+			return;
+		}
+		RelayProtocolTests.run();
+		NoiseTransportTests.run();
+		WorkspacePairingTests.run();
 		if (args.length != 4)
 			throw "Expected private socket, port, credential file and private relay config";
 		var token = sys.io.File.getContent(args[2]);
 		var relayConfig:Dynamic = haxe.Json.parse(sys.io.File.getContent(args[3]));
 		var runtime = NativeKitRuntime.start(),
 			hub = new NativeRpcHub(runtime.events);
+		testPairingRelayHttp(runtime, relayConfig);
 		var clock = function() return NativeKit.nk_time_seconds() * 1000;
 		var service = new WorkspaceService("workspace", "epoch-1", [
 			{
@@ -35,7 +43,7 @@ class TransportTestMain {
 				revision: 1
 			}
 		]);
-		var server = new WorkspaceRpcServer(service, clock);
+		var server = new WorkspaceRpcServer(service, clock, null, null, null, null, new TestPairingAdmin());
 		var local = hub.listen(NativeRpcHub.local(args[0]), server.acceptLocal);
 		var ws = hub.listen(NativeRpcHub.websocket(Std.parseInt(args[1]), "/workspace", true), function(stream) {
 			server.acceptWebSocket(stream, token);
@@ -65,7 +73,8 @@ class TransportTestMain {
 			var client:Null<RpcClient> = null;
 			var ready = 0;
 			client = new RpcClient(connector, clock, function() return 1.0,
-				new RpcPeerOptions("test/1", [WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS, WorkspaceProtocol.WRITE], [], 1000, 262144, 32, 1048576),
+				new RpcPeerOptions("test/1", [WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS, WorkspaceProtocol.WRITE,
+					WorkspacePairingProtocol.ADMIN], [], 1000, 262144, 32, 1048576),
 				function(connection, generation, _) {
 					ready++;
 					var current = client;
@@ -96,6 +105,32 @@ class TransportTestMain {
 			require(ready == 1 && replica.view()[0].cwd == "/workspace", "Workspace snapshot lost cwd");
 			var revision = service.snapshot().groups[0].revision,
 				sequence = service.snapshot().cursor;
+			if (!websocket) {
+				var invitation:Null<workspace.service.WorkspacePairingProtocol.PairingInvitation> = null;
+				var pairingFailure:Null<RpcError> = null;
+				connection.call(WorkspacePairingProtocol.CREATE, {ttlSeconds: 60}, 1000,
+					function(value) invitation = value, function(error) pairingFailure = error);
+				deadline = clock() + 5000;
+				while (invitation == null && pairingFailure == null) {
+					require(clock() < deadline, "Local pairing administration call timed out");
+					step();
+				}
+				require(invitation != null && pairingFailure == null
+					&& invitation.pairingSocketUrl.indexOf(invitation.secret) >= 0,
+					"same-user local RPC can create a one-use pairing invitation");
+			} else {
+				var pairingDenied:Null<RpcError> = null;
+				connection.call(WorkspacePairingProtocol.CREATE, {ttlSeconds: 60}, 1000,
+					function(_) throw "Remote WebSocket invoked local pairing administration",
+					function(error) pairingDenied = error);
+				deadline = clock() + 5000;
+				while (pairingDenied == null) {
+					require(clock() < deadline, "Remote pairing administration refusal timed out");
+					step();
+				}
+				require(pairingDenied.code == "unknown_method",
+					"remote WebSocket has no pairing administration method");
+			}
 			var failures = 0, ambiguous = false;
 			var operation = websocket ? "websocket-rename" : "local-rename";
 			connection.call(WorkspaceProtocol.RENAME, {
@@ -327,6 +362,52 @@ class TransportTestMain {
 		runtime.dispose();
 		Sys.println("PASS: authentication refusal is terminal before privileged dispatch");
 	}
+
+	static function testPairingRelayHttp(runtime:NativeKitRuntime, config:Dynamic):Void {
+		var origin:String = Reflect.field(config, "origin");
+		var machineId:String = Reflect.field(config, "machineId");
+		var machineToken:String = Reflect.field(config, "machineToken");
+		var endpoint = new RelayMachineEndpoint(origin, machineId);
+		var client = new RelayTicketClient(runtime.events, true);
+		var channelId = "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1";
+		var invitationSecret = StringTools.lpad("", "b", 64);
+		var deviceId = "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2";
+		var deviceToken = StringTools.lpad("", "d", 64);
+		var completed = false, failure:Null<String> = null;
+		client.createPairing(endpoint, machineToken, channelId, invitationSecret, 1, function(error) {
+			completed = true;
+			failure = error;
+		});
+		waitForRelayHttp(runtime, function() return completed);
+		require(failure == null, "Haxe relay client creates a one-use pairing invitation");
+		completed = false;
+		client.registerDevice(endpoint, machineToken, deviceId, deviceToken, function(error) {
+			completed = true;
+			failure = error;
+		});
+		waitForRelayHttp(runtime, function() return completed);
+		require(failure == null, "Haxe relay client registers an approved device bearer");
+		completed = false;
+		client.revokeDevice(endpoint, machineToken, deviceId, function(error) {
+			completed = true;
+			failure = error;
+		});
+		waitForRelayHttp(runtime, function() return completed);
+		require(failure == null, "Haxe relay client revokes a registered device bearer");
+		client.dispose();
+		Sys.println("PASS: Haxe relay pairing creation, device registration and revocation HTTP paths");
+	}
+
+	static function waitForRelayHttp(runtime:NativeKitRuntime, finished:Void->Bool):Void {
+		var deadline = NativeKit.nk_time_seconds() * 1000 + 5000;
+		while (!finished()) {
+			require(NativeKit.nk_time_seconds() * 1000 < deadline, "Haxe relay pairing HTTP request timed out");
+			runtime.events.wait(0.001);
+			for (_ in 0...128)
+				if (!runtime.events.poll())
+					break;
+		}
+	}
 }
 
 private class MemoryWorkspaceCredentialStore implements WorkspaceCredentialStore {
@@ -348,4 +429,33 @@ private class MemoryWorkspaceCredentialStore implements WorkspaceCredentialStore
 		copy.blit(0, secret, 0, secret.length);
 		values.set(account, copy);
 	}
+}
+
+private class TestPairingAdmin implements WorkspacePairingAdmin {
+	public function new() {}
+
+	public function createInvitation(ttlSeconds:Int,
+		complete:workspace.service.WorkspacePairingProtocol.PairingInvitation->Null<String>->Void):Void {
+		var machineId = "0123456789abcdef0123456789abcdef";
+		var deviceId = "abcdef0123456789abcdef0123456789";
+		var secret = StringTools.lpad("", "1", 64);
+		complete({relayOrigin: "https://relay.example", machineId: machineId, deviceId: deviceId, secret: secret,
+			pairingSocketUrl: 'wss://relay.example/v1/machines/${machineId}/pair/${deviceId}?secret=${secret}',
+			expiresInSeconds: ttlSeconds}, null);
+	}
+
+	public function listPending():Array<workspace.service.WorkspacePairingProtocol.PendingPairing>
+		return [];
+
+	public function listDevices():Array<workspace.service.WorkspacePairingProtocol.PairingDevice>
+		return [];
+
+	public function approve(deviceId:String, grants:Array<String>, complete:Null<String>->Void):Void
+		complete(null);
+
+	public function reject(deviceId:String):Bool
+		return true;
+
+	public function revoke(deviceId:String, complete:Null<String>->Void):Void
+		complete(null);
 }
