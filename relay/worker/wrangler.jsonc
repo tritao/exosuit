@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "exosuit-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-06",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MACHINE_RELAY",
+        "class_name": "MachineRelay"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["MachineRelay"]
+    }
+  ],
+  "observability": {
+    "enabled": false
+  }
+}

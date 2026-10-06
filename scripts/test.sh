@@ -51,6 +51,7 @@ run_test plugin-host
 run_test command-clipboard
 run_test haxeon-rpc
 bash "$root_dir/scripts/test-workspace-transport.sh"
+bash "$root_dir/scripts/test-relay.sh"
 bash "$root_dir/scripts/test-workspace-persistence.sh"
 bash "$root_dir/scripts/test-workspace-attachment.sh"
 python3 "$root_dir/scripts/test-agent-idle.py"
