@@ -137,6 +137,7 @@ class ExosuitApp implements DesktopUiApplication {
 	var viewRevision:Int = 0;
 	var submittedBuildKey:Null<String>;
 	var nextBackgroundPoll:Float = 0.0;
+	var nextExplorerPoll:Float = 0.0;
 	var visibleNotification:Null<feedback.Notification>;
 	var viewportWidth:Float = 1280.0;
 	var viewportHeight:Float = 840.0;
@@ -688,9 +689,7 @@ class ExosuitApp implements DesktopUiApplication {
 			if (mode != null) dock.setPanelWidth("explorer", sidebar.width, Math.max(0, viewportWidth - ActivityBar.WIDTH),
 				DockWorkspace.DividerExtent, DockWorkspace.MinimumHorizontalExtent);
 		}
-		pumpApplication();
 		dock.setPanelBadge("problems", host.getProblems().values().length);
-		if (explorerModel != null) explorerModel.refresh();
 		var key = viewRevision + ":" + dock.revision + ":" +
 			(explorerModel == null ? -1 : explorerModel.revision()) + ":" +
 			application.settings.current.minimapEnabled + ":problems=" + host.getProblems().revision + ":prefs=" + application.settings.store.revision;
@@ -890,6 +889,16 @@ class ExosuitApp implements DesktopUiApplication {
 		if (now < nextBackgroundPoll) return;
 		nextBackgroundPoll = now + 0.05;
 		pumpApplication();
+		// Rendering hover/selection changes must not perform filesystem polling.
+		// Watches make refresh a no-op until a change; unsupported backends poll
+		// on a bounded cadence instead of once for every pointer movement.
+		if (explorerModel != null && sidebar.visible && sidebar.activeId == "files" &&
+			(explorerModel.watchChanges || now >= nextExplorerPoll)) {
+			var previousRevision = explorerModel.revision();
+			explorerModel.refresh();
+			nextExplorerPoll = Sys.time() + 0.5;
+			if (explorerModel.revision() != previousRevision) requestFrame();
+		}
 	}
 
 	function pumpApplication():Void {
@@ -1220,7 +1229,6 @@ class ExosuitApp implements DesktopUiApplication {
 					function(root) host.markWorkspaceFilesChanged(remoteScope, root));
 			} else explorerModel = new DirectoryTreeModel(explorerRoot, theme);
 		}
-		explorerModel.refresh();
 		var remoteModel:Null<WorkspaceFileTreeModel> = Std.isOfType(explorerModel, WorkspaceFileTreeModel)
 			? cast explorerModel : null;
 		if (explorerTree != null) {
