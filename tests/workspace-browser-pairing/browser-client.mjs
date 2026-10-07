@@ -142,6 +142,18 @@ try {
     fs.writeFileSync(process.env.EXOSUIT_CAPTURE_BROWSER_PATH, Buffer.from(image.data, 'base64'));
   }
   console.log(`PASS: connected Explorer subscribed to ${remoteExplorer.explorerIdentity}`);
+  // Open the remote fixture through the rendered Explorer and verify the
+  // desktop's single-click preview behavior is wired to authenticated RPC.
+  await click(145, 114);
+  const remotePreview = await waitFor('remote file preview', async () => {
+    const shell = await shellState();
+    const file = shell?.workspaceFileTabs?.find(item => item.path === 'remote.md'
+      && item.scope === connected.state.workspaceRoot);
+    return file?.preview === true && file?.revision && file?.syntax ? file : null;
+  }, 20000);
+  if (remotePreview.syntax !== 'Markdown')
+    throw new Error(`Remote preview used unexpected syntax mode: ${remotePreview.syntax}`);
+  console.log('PASS: single-click opened the remote Markdown file as a revision-checked preview tab');
   const rawRecord = await expression(`(async()=>{const db=await new Promise((resolve,reject)=>{const r=indexedDB.open('exosuit-remote-devices-v1');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});const values=await new Promise((resolve,reject)=>{const r=db.transaction('devices','readonly').objectStore('devices').get(${JSON.stringify(`${invitation.machineId}:${invitation.deviceId}`)});r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});const key=await new Promise((resolve,reject)=>{const r=db.transaction('meta','readonly').objectStore('meta').get('noise-device-wrap-v1');r.onsuccess=()=>resolve(r.result?.key);r.onerror=()=>reject(r.error)});return {ciphertextBytes:values?.ciphertext?.byteLength||0,cleartextFields:!!values&&(Object.hasOwn(values,'staticPrivateKey')||Object.hasOwn(values,'deviceToken')),keyExtractable:key?.extractable}})()`);
   if (rawRecord.ciphertextBytes < 32 || rawRecord.cleartextFields || rawRecord.keyExtractable !== false)
     throw new Error(`Browser device storage did not preserve encrypted-at-rest custody: ${JSON.stringify(rawRecord)}`);

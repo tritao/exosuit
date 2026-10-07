@@ -370,11 +370,15 @@ Deployment/publication requires separate authorization under EXECUTION.md.
   supported input modes, then resumes byte-offset replay at the snapshot's
   terminal end. The payload is capped at 3 MiB, below the RPC message limit.
   The live viewport recovers; earlier scrollback is discarded after a gap.
-- [ ] Complete the browser host build and connected file clickthrough. The
-  pairing test now grants file access and checks that the browser Explorer
-  subscribes to the remote root; the web guest also compiles with remote
-  Workbench and terminal UI. Full Emscripten host/browser execution remains a
-  gate because the pinned SDK is unavailable in the current environment.
+- [x] Verify connected-browser file preview clickthrough. The pairing test
+  grants file access, confirms the Explorer subscribes to the remote root,
+  single-clicks `remote.md`, and checks that its revision-checked Markdown
+  preview opens in a preview tab. This uses the available host artifact with
+  the freshly compiled guest; it does not replace the full host build gate.
+- [ ] Complete the Emscripten host build and connected-browser terminal
+  clickthrough. The web guest compiles with remote Workbench and terminal UI,
+  but full Emscripten host/browser execution remains open because the pinned
+  SDK is unavailable in this environment.
 - [x] Wire the existing Codex session and approval UI to the shared browser
   Workbench client. It reads agent sessions/activity and sends prompt,
   interruption and approval actions under negotiated grants. Connected-browser

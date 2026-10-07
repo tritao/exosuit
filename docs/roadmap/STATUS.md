@@ -28,6 +28,24 @@ host build remains gated on the unavailable pinned Emscripten SDK.
 Next: complete the browser host build and connected file/terminal clickthrough.
 See [`16-remote-workspaces.md`](16-remote-workspaces.md).
 
+## M16.2 connected-browser file preview clickthrough, 2026-10-07
+
+The real-browser pairing acceptance now opens the fixture `remote.md` from the
+connected remote Explorer and verifies that its root-relative path, approved
+workspace scope, revision and Markdown syntax arrive in a preview tab. This
+exercises the rendered Explorer, authenticated file RPC and read-only editor
+path through local Wrangler and production AgentMain/SQLite.
+
+Validation: `python3 tests/workspace-browser-pairing/run.py --agent
+/tmp/exosuit-web-auto-reconnect/site` passes. The fixture is opened through a
+single click; the test then continues through encrypted credential checks and
+forced relay reconnect with Explorer watch recovery. The run uses the available
+Emscripten host artifact plus a newly compiled guest. A full host rebuild and
+browser terminal clickthrough remain open until the pinned SDK is available.
+
+Next: obtain Emscripten 6.0.9 and qualify the full files, agents and terminal
+browser flow. See [`16-remote-workspaces.md`](16-remote-workspaces.md).
+
 ## M16.2 shared browser Workbench and remote terminal UI, 2026-10-07
 
 Commit `ee891bd` extracts terminal-catalog and agent RPC behavior into
