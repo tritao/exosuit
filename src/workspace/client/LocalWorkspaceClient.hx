@@ -12,6 +12,7 @@ import workspace.transport.NativeRpcHub;
 import workspace.transport.NativeRpcConnector;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceTerminalProtocol;
+import workspace.service.WorkspaceFileProtocol;
 import workspace.service.WorkspaceReplica;
 import workspace.service.WorkspaceAgentProtocol;
 import workspace.service.WorkspacePairingProtocol;
@@ -43,6 +44,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements workspace.c
   final clock:Void -> Float;
   final environment:Null<Map < String, String>>;
   var client:Null<RpcClient>;
+  var fileApiConnection:Null<RpcConnection>;
+  var fileApiClient:Null<WorkspaceFileClient>;
   var replica:Null<WorkspaceReplica>;
   var helper:Null<OwnedProcess>;
   var helperMode:String = "";
@@ -213,6 +216,24 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements workspace.c
   public function view():Array < WorkspaceGroup > return ready && replica != null ? replica.view() :[];
 
   public function rpc():Null < RpcConnection > return ready && client != null ? client.current() : null;
+
+  /** A typed file API tied to the currently authenticated local workspace connection. */
+  public function fileClient():Null<WorkspaceFileClient> {
+    var connection = rpc();
+    if (connection == null || client == null || client.capabilities().indexOf(WorkspaceFileProtocol.READ) < 0) {
+      fileApiConnection = null;
+      fileApiClient = null;
+      return null;
+    }
+    if (connection != fileApiConnection) {
+      fileApiConnection = connection;
+      fileApiClient = new WorkspaceFileClient(connection);
+    }
+    return fileApiClient;
+  }
+
+  public function fileWorkspace():String return "workspace";
+  public function fileScope():Null<String> return root;
 
   public function hasGroupTree():Bool return client != null && client.capabilities().indexOf(WorkspaceProtocol.TREE) >= 0;
   public function canEditGroups():Bool return ready && client != null && hasGroupTree() && client.capabilities().indexOf(WorkspaceProtocol.WRITE) >= 0;
@@ -609,6 +630,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements workspace.c
     caps.push(WorkspaceAgentProtocol.CONTROL);
     caps.push(WorkspaceTerminalProtocol.READ);
     caps.push(WorkspaceTerminalProtocol.CONTROL);
+    caps.push(WorkspaceFileProtocol.READ);
     caps.push(WorkspacePairingProtocol.ADMIN);
     deadline = clock() + 12000;
     client = new RpcClient(new NativeRpcConnector(hub,

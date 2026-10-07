@@ -280,6 +280,78 @@ class UiWorkbenchHost implements WorkbenchHost {
 		}
 	}
 
+	public function activateWorkspaceFile(scope:String, root:String, path:String, makeSticky:Bool):Bool {
+		for (pane in panes) for (item in pane.items) {
+			var file = UiEditorTabs.workspaceFile(item);
+			if (file == null || file.scope != scope || file.root != root || file.path != path) continue;
+			if (makeSticky) file.preview = false;
+			activateEditorTab(file.id, pane.id);
+			return true;
+		}
+		return false;
+	}
+
+	public function canOpenWorkspaceFile(scope:String, root:String, path:String, sizeBytes:Int):Bool {
+		if (sizeBytes < 0 || sizeBytes > WorkspaceFileReader.MAX_PREVIEW_BYTES) return false;
+		var count = 0, totalBytes = 0;
+		for (pane in panes) for (item in pane.items) {
+			var file = UiEditorTabs.workspaceFile(item);
+			if (file == null || file.scope == scope && file.root == root && file.path == path) continue;
+			count++;
+			totalBytes += file.sizeBytes;
+		}
+		return count < MAX_WORKSPACE_FILE_TABS && totalBytes + sizeBytes <= MAX_WORKSPACE_FILE_BYTES;
+	}
+
+	static inline final MAX_WORKSPACE_FILE_TABS = 24;
+	static inline final MAX_WORKSPACE_FILE_BYTES = 33554432;
+
+	public function openWorkspaceFile(file:UiWorkspaceFileTab, preview:Bool):UiWorkspaceFileTab {
+		for (pane in panes) for (index in 0...pane.items.length) {
+			var existing = UiEditorTabs.workspaceFile(pane.items[index]);
+			if (existing == null || existing.id != file.id) continue;
+			file.preview = preview && existing.preview;
+			if (!preview) file.preview = false;
+			pane.items[index] = UiEditorTab.WorkspaceFile(file);
+			activateEditorTab(file.id, pane.id);
+			requestFrame();
+			return file;
+		}
+		var insertion = removePreviewTab(activePane);
+		file.preview = preview;
+		activePane.items.insert(insertion, UiEditorTab.WorkspaceFile(file));
+		setActiveIndex(insertion);
+		return file;
+	}
+
+	public function keepWorkspaceFile(file:UiWorkspaceFileTab):Void {
+		file.preview = false;
+		requestFrame();
+	}
+
+	function removePreviewTab(pane:UiEditorPane):Int {
+		for (index in 0...pane.items.length) {
+			var item = pane.items[index];
+			var documentView = UiEditorTabs.document(item);
+			if (documentView != null && documentView.preview) {
+				if (documentView.document.dirty) { documentView.preview = false; continue; }
+				pane.items.splice(index, 1);
+				documentView.dispose();
+				var shared = false;
+				for (other in allViews()) if (other.document == documentView.document) shared = true;
+				if (!shared) workspace.documents.close(documentView.document, true);
+				return index;
+			}
+			var workspaceFile = UiEditorTabs.workspaceFile(item);
+			if (workspaceFile != null && workspaceFile.preview) {
+				pane.items.splice(index, 1);
+				UiEditorTabs.dispose(item);
+				return index;
+			}
+		}
+		return pane.items.length;
+	}
+
 	public function switchActiveTab(delta:Int):Bool {
 		if (activePane.items.length == 0) return false;
 		var count = activePane.items.length;
@@ -415,6 +487,8 @@ class UiWorkbenchHost implements WorkbenchHost {
 		var source = activePane;
 		var movingDocument = UiEditorTabs.document(moving);
 		if (movingDocument != null) movingDocument.preview = false;
+		var movingWorkspaceFile = UiEditorTabs.workspaceFile(moving);
+		if (movingWorkspaceFile != null) movingWorkspaceFile.preview = false;
 		source.items.splice(source.activeIndex, 1);
 		source.activeIndex = source.items.length == 0 ? -1 : Std.int(Math.min(source.activeIndex, source.items.length - 1));
 		var duplicate = -1;
@@ -437,6 +511,8 @@ class UiWorkbenchHost implements WorkbenchHost {
 		var view = activePane.items.splice(activeIndex, 1)[0];
 		var documentView = UiEditorTabs.document(view);
 		if (documentView != null) documentView.preview = false;
+		var workspaceFile = UiEditorTabs.workspaceFile(view);
+		if (workspaceFile != null) workspaceFile.preview = false;
 		activePane.items.insert(target, view);
 		activeIndex = target;
 		requestFrame();
@@ -503,17 +579,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 				return existing;
 			}
 		}
-		var insertion = activePane.items.length;
-		if (preview) for (index in 0...activePane.items.length) {
-			var candidate = UiEditorTabs.document(activePane.items[index]);
-			if (candidate == null || !candidate.preview) continue;
-			if (candidate.document.dirty) { candidate.preview = false; continue; }
-			activePane.items.splice(index, 1); insertion = index; candidate.dispose();
-			var shared = false;
-			for (other in allViews()) if (other.document == candidate.document) shared = true;
-			if (!shared) workspace.documents.close(candidate.document, true);
-			break;
-		}
+		var insertion = preview ? removePreviewTab(activePane) : activePane.items.length;
 		var view = new UiDocumentView(document, new BufferSelection(), scrollSettings);
 		view.preview = preview && !document.dirty;
 		activePane.items.insert(insertion, UiEditorTab.Document(view));

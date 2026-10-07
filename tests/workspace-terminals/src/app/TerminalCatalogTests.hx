@@ -92,7 +92,7 @@ class TerminalCatalogTests {
     store.close();
     var admin = Database.open(path);
     admin.exec("DROP TABLE workspace_terminals");
-    admin.exec("DROP TABLE workspace_agents; ALTER TABLE workspace_meta DROP COLUMN root; PRAGMA user_version=1");
+    admin.exec("DROP TABLE workspace_agents; DROP TABLE workspace_devices; ALTER TABLE workspace_meta DROP COLUMN root; PRAGMA user_version=1");
     admin.close();
     store = new WorkspaceSqliteStore(path, "w", seed);
     var service = new WorkspaceService("w", "ignored", groups, 32, 256, 16, store);

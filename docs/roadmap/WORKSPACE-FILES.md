@@ -1,11 +1,54 @@
 # Workspace filesystem protocol
 
-Status: planned, not implemented. Required by [M16.2](16-remote-workspaces.md).
-Use shared typed Exosuit schemas over Haxeon RPC; filesystem semantics are not
-part of Haxeon's generic RPC package. Reuse the existing workspace index,
-search, filesystem and watcher implementations behind this service interface.
-Local adapters and RPC adapters implement the same operations. Local editor
-buffer edits remain in-process, without a request per keystroke.
+Status: Linux F1 and the first F2 read-handle slice are implemented; F1/F2
+acceptance is incomplete and F3–F5 remain planned. Required by
+[M16.2](16-remote-workspaces.md). The
+Exosuit service uses shared typed RPC schemas; filesystem semantics are not
+part of Haxeon's generic RPC package. Local adapters and RPC adapters will
+share operations, while editor buffer edits remain in-process.
+
+The current slice adds an optional NativeKit filesystem module with pinned
+root handles and race-resistant Linux path resolution, Haxeon wrappers, and
+an agent service with `roots`, `stat` and paginated `list`. The service accepts
+up to 16 configured authorized roots; AgentMain currently configures one. Each
+connection must hold `workspace.files.read`; cursors are connection-owned,
+capped and idle-expiring. A directory listing retains a bounded immutable copy
+of the entries it observed, so retries cannot mix pages. Its revision
+fingerprints that returned metadata set; it is not a file-content revision or
+a point-in-time filesystem transaction. Concurrent changes during enumeration
+may require a fresh listing. Later changes appear after a new listing until F3
+watch delivery is added.
+
+F2 adds root-scoped regular-file handles and typed `readOpen`, `readChunk` and
+`readClose` RPCs. A handle pins the opened identity; each chunk checks the
+identity, size, mtime and ctime-derived revision before and after reading.
+Chunks are capped at 256 KiB, with eight handles per connection and a 30-second
+idle expiry. A detected change retires the handle and returns
+`revision_changed`. This streams bytes without copying an entire file into a
+server snapshot. It is a revision-checked live read, not an atomic filesystem
+snapshot; timestamp precision and concurrent external writes remain platform
+limits. Revocation and connection cleanup close owned handles.
+The shared `WorkspaceFileClient` maps these typed calls over any RPC
+connection; local attachment exposes it only when the file-read grant exists.
+The Linux desktop explorer now uses this client for root discovery and paged
+directory browsing. Single-click opens a preview tab, double-click keeps it,
+and saved files display in a selectable, read-only text surface. The first UI
+slice caps each preview at 16 MiB, concurrent reads at two, and retained remote
+preview content at 32 MiB across 24 tabs. It rejects invalid UTF-8 and
+NUL-containing binary data instead of silently decoding it. If a listed file
+changes before open, the client retries once against the current revision;
+chunks must still match that revision. Syntax coloring, live change
+notifications and browser integration are still open. The Explorer resets
+remote listings after a connection replacement, retries expired page cursors
+from a fresh listing, and bounds its retained cache to 256 directories and
+32,768 entries. Remote editing remains out of scope.
+
+The secure NativeKit backend currently requires Linux `openat2`; it fails closed
+when unavailable, and other platforms return `unsupported`. Multiple roots are
+supported by the service and contract tests, but AgentMain currently publishes
+one configured root per workspace. Non-Linux secure backends and remaining F1
+acceptance cases are still open. File reads currently return raw saved bytes;
+text decoding, UI, watches and search remain open.
 
 ## Addressing and access
 
@@ -66,12 +109,14 @@ must not reveal another client's resources.
 ## Directory listing
 
 Use stable platform-independent ordering (directories first, then exact UTF-8
-name order with a stable tie-breaker). Cursors bind scope/filter/order, root
-identity and directory revision. Bound retained listing state; directory change
-or expired state invalidates the cursor explicitly. Do not silently mix pages
-from different directory versions. Re-list after invalidation; client expansion
-state is independent of service listing state. Include link and inaccessible
-entry metadata without reading targets eagerly.
+name order with a stable tie-breaker). Cursors bind scope/filter/order and root
+identity to a retained listing result. Bound retained listing state; expiry,
+revocation or root closure invalidates its cursors explicitly. Pages from one
+cursor stay on that immutable result even if the directory changes; a fresh
+listing observes later changes. The metadata fingerprint identifies the
+returned entry set, not an atomic filesystem view. Client expansion state is
+independent of service listing state. Include link and inaccessible entry
+metadata without reading targets eagerly.
 
 ## File reads and revisions
 
@@ -83,14 +128,13 @@ remains inspectable as bytes or an explicit unsupported text display.
 
 A read handle pins identity, not an automatically immutable file snapshot.
 Detect concurrent modification and return revision_changed; the client discards
-partial assembly/reopens rather than combining incompatible chunks. Establish
-identity at open and verify around reads; mtime/size alone is not a sufficient
-revision check. Define and test a bounded snapshot/content-verification strategy
-for stable file views. If a platform cannot prove a coherent read under concurrent
-external writes, return a consistency limitation/error instead of claiming a
-snapshot. Files too large for snapshot budgets need negotiated weaker live-read
-semantics or a clear size refusal. Choose the concrete strategy before accepting
-files.read; do not hide this behind an opaque revision token.
+partial assembly/reopens rather than combining incompatible chunks. The Linux
+slice pins identity at open and checks identity, size, mtime and ctime-derived
+revision around each chunk. This detects ordinary in-place writes, including
+same-size writes that preserve mtime, while acknowledging filesystem timestamp
+precision. It does not claim a point-in-time snapshot. Other platforms must
+provide equally clear consistency semantics or report the limitation instead
+of claiming a snapshot.
 
 Bound chunk length (initial maximum 256 KiB), active handles, cached snapshots
 and aggregate bytes per client. Close/cancel releases resources. No bulk whole
@@ -137,14 +181,17 @@ Revalidate match revision when opening; changed results require refresh.
 
 ## Acceptance and implementation slices
 
-- [ ] F1: schemas, root grants, path resolver and paginated roots/stat/list.
-  Tests cover multiple roots, Unicode/case, invalid paths, traversal, external
-  symlinks, symlink swaps, root replacement, loops, special files, revocation
-  and cursor invalidation. Unsupported native names have explicit outcomes.
+- [ ] F1: schemas, multiple root grants, path resolver and paginated roots/stat/list.
+  Tests cover multiple roots, exact UTF-8 ordering/case, invalid paths,
+  traversal, external symlinks, symlink swaps, root replacement, loops, special
+  files, revocation, stable cursor retries and expiry. Unsupported native names
+  have explicit outcomes.
 - [ ] F2: bounded coherent reads, handles, revisions and byte-to-text display.
   Tests cover multibyte chunk boundaries, empty/binary/large files, replacement,
   in-place writes, same-size preserved-mtime writes, truncation, cancellation,
-  disconnect and cross-client handle refusal. No mixed-revision display.
+  disconnect and cross-client handle refusal. No mixed-revision display. The
+  Linux desktop preview currently reads up to 16 MiB, validates UTF-8, rejects
+  binary content and does not yet provide syntax coloring or change refresh.
 - [ ] F3: watch subscriptions and reconnect. Tests cover initial fetch races,
   duplicates/coalescing, missing rename pairs, overflow, retention gaps, polling
   fallback, server restart and Wi-Fi/mobile-style reconnect. UI drops stale data

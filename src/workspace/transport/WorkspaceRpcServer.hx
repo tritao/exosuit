@@ -6,7 +6,7 @@ import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceTerminals;
 import workspace.service.WorkspaceTerminalProtocol;
 
-private typedef Peer = {var transport:MessageTransport; var options:RpcPeerOptions; var localAdmin:Bool; var preflight:Null<SessionPreflight>; var handshake:Null<RpcHandshake>; var connection:Null<RpcConnection>;}
+private typedef Peer = {var transport:MessageTransport; var options:RpcPeerOptions; var localAdmin:Bool; var preflight:Null<SessionPreflight>; var handshake:Null<RpcHandshake>; var connection:Null<RpcConnection>; var cleanup:Array<Void->Void>;}
 
 /** Bounded headless service loop, shared by daemon and transport tests. */
 class WorkspaceRpcServer {
@@ -16,6 +16,7 @@ class WorkspaceRpcServer {
 	final terminals:Null<WorkspaceTerminals>;
 	final agents:Null<workspace.service.WorkspaceAgents>;
 	final pairingAdmin:Null<workspace.service.WorkspacePairingAdmin>;
+	final files:Null<workspace.runtime.WorkspaceFileService>;
 	final peers:Array<Peer> = [];
 
 	public final options:RpcPeerOptions;
@@ -30,11 +31,12 @@ class WorkspaceRpcServer {
 		return count;
 	}
 
-	public function new(service:WorkspaceService, clock:Void->Float, ?capabilities:Array<String>, ?identity:WorkspaceIdentity, ?terminals:WorkspaceTerminals, ?agents:workspace.service.WorkspaceAgents, ?pairingAdmin:workspace.service.WorkspacePairingAdmin) {
+	public function new(service:WorkspaceService, clock:Void->Float, ?capabilities:Array<String>, ?identity:WorkspaceIdentity, ?terminals:WorkspaceTerminals, ?agents:workspace.service.WorkspaceAgents, ?pairingAdmin:workspace.service.WorkspacePairingAdmin, ?files:workspace.runtime.WorkspaceFileService) {
 		this.service = service;
 		this.terminals = terminals;
 		this.agents = agents;
 		this.pairingAdmin = pairingAdmin;
+		this.files = files;
 		this.clock = clock;
 		this.identity = identity == null ? null : {workspace: identity.workspace, root: identity.root, instance: identity.instance};
 		if (identity != null && (identity.workspace != service.id || identity.root.length == 0 || identity.instance.length == 0))
@@ -51,6 +53,8 @@ class WorkspaceRpcServer {
 			defaults.push(workspace.service.WorkspaceAgentProtocol.READ);
 			defaults.push(workspace.service.WorkspaceAgentProtocol.CONTROL);
 		}
+		if (files != null)
+			defaults.push(workspace.service.WorkspaceFileProtocol.READ);
 		options = new RpcPeerOptions("exosuit-agent/1", capabilities == null ? defaults : capabilities, [], 5000, 262144, 32, 1048576);
 		var localDefaults = options.offered();
 		if (pairingAdmin != null)
@@ -102,7 +106,8 @@ class WorkspaceRpcServer {
 			localAdmin: localAdmin,
 			preflight: preflight,
 			handshake: preflight == null ? RpcHandshake.server(transport, clock, peerOptions) : null,
-			connection: null
+			connection: null,
+			cleanup: []
 		});
 	}
 
@@ -113,6 +118,8 @@ class WorkspaceRpcServer {
 			if (!peers[index].transport.isOpen()) {
 				if (peers[index].connection != null)
 					peers[index].connection.close();
+				for (cleanup in peers[index].cleanup)
+					cleanup();
 				peers.splice(index, 1);
 			}
 		}
@@ -183,9 +190,10 @@ class WorkspaceRpcServer {
 							}
 							context.respond({workspace: currentIdentity.workspace, root: currentIdentity.root, instance: currentIdentity.instance});
 						});
-					service.bind(peer.connection, grants);
+					peer.cleanup.push(service.bind(peer.connection, grants));
 					if (terminals != null) terminals.bind(peer.connection, grants);
 					if (agents != null) agents.bind(peer.connection, grants);
+					if (files != null) peer.cleanup.push(files.bind(peer.connection, grants));
 				}
 			}
 			if (peer.connection != null)
@@ -200,6 +208,8 @@ class WorkspaceRpcServer {
 				peer.connection.close();
 			else
 				peer.transport.close();
+			for (cleanup in peer.cleanup)
+				cleanup();
 		}
 		peers.resize(0);
 	}

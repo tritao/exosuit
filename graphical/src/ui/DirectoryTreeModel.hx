@@ -13,11 +13,10 @@ import haxeon.ui.core.View;
 import haxeon.ui.core.TextStyleOverride;
 import haxeon.ui.theme.Theme;
 import haxeon.ui.widgets.collections.TreeRootMetadata;
-import haxeon.ui.widgets.collections.TreeViewModel;
 import haxeon.ui.widgets.text.MiddleEllipsisText;
 
 /** Synchronous, on-demand directory listing for the explorer's `TreeView`. */
-class DirectoryTreeModel implements TreeViewModel {
+class DirectoryTreeModel implements ExplorerTreeModel {
 	static final EmptyEntries:Array<String> = [];
 	final root:String;
 	final theme:Theme;
@@ -38,6 +37,8 @@ class DirectoryTreeModel implements TreeViewModel {
 	}
 
 	public function rootCount():Int return 1;
+	public function rootIdentity():String return root;
+	public function watchesChanges():Bool return watchChanges;
 
 	public function rootRange(start:Int, count:Int):Array<TreeRootMetadata>
 		return start > 0 || count <= 0 ? [] : [new TreeRootMetadata(root, true)];

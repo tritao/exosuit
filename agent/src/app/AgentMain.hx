@@ -43,6 +43,7 @@ class AgentMain {
 			? new WorkspaceRelayHost(runtime.events, hub, WorkspaceRelaySettings.loadBootstrap(args[8]), allowLoopbackHttp)
 			: null;
 		var directories = new workspace.runtime.WorkspaceDirectories(args.length >= 6 ? args[5] : Sys.getCwd());
+		var files = new workspace.runtime.WorkspaceFileService("workspace", [directories.root], clock);
 		// The seed epoch is used only when creating a new catalog. Reopening preserves it.
 		var seed = new WorkspaceService("workspace", args[3], [
 			{
@@ -78,7 +79,7 @@ class AgentMain {
 		}
 		var server = new WorkspaceRpcServer(service, clock, null,
 			args.length >= 7 ? {workspace: "workspace", root: directories.root, instance: args[6]} : null,
-			terminals, agents, pairingManager);
+			terminals, agents, pairingManager, files);
 		serverRef = server;
 		var local = hub.listen(NativeRpcHub.local(args[0]), server.acceptLocal);
 		var websocket = hub.listen(NativeRpcHub.websocket(port, "/workspace", true), function(transport) {
@@ -112,6 +113,7 @@ class AgentMain {
 		processes.shutdown();
 		terminals.dispose();
 		server.dispose();
+		files.dispose();
 		hub.dispose();
 		if (store != null)
 			store.close();

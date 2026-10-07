@@ -119,8 +119,9 @@ class ExosuitApp implements DesktopUiApplication {
 	final activityIcons:Map<String, IconName> = [];
 	public final sidebar = new haxeon.ui.widgets.sidebar.SidebarModel();
 	var explorerRoot:Null<String>;
-	var explorerModel:Null<DirectoryTreeModel>;
+	var explorerModel:Null<ExplorerTreeModel>;
 	var explorerTree:Null<TreeView>;
+	final workspaceFileOpenPending:Map<String, Bool> = new Map();
 	final tabClicks = new haxeon.ui.core.PointerClickSequence();
 	var statusMessage:String = "Ready";
 	var paletteVisible:Bool = false;
@@ -835,6 +836,8 @@ class ExosuitApp implements DesktopUiApplication {
 		if (workspaceAttachment != null)
 			workspaceAttachment.dispose();
 		workspaceAttachment = attachment;
+		explorerModel = null;
+		explorerTree = null;
 		requestFrame();
 	}
 
@@ -941,10 +944,11 @@ class ExosuitApp implements DesktopUiApplication {
 		var panel = terminal == null ? null : terminal.panel;
 		return {
 			documents: [for (view in host.allViews()) view.document.title],
+			workspaceFileTabs: workspaceFileDiagnostics(),
 			active: active == null ? -1 : active.id,
 			documentsSource: "core.Application (via UiWorkbenchHost)",
 			explorerRoot: explorerRoot,
-			explorerWatching: explorerModel != null && explorerModel.watchChanges,
+			explorerWatching: explorerModel != null && explorerModel.watchesChanges(),
 			sidebarMode: sidebar.activeId,
 			sidebarState: sidebar.encode(),
 			panels: dock.panelIds(),
@@ -963,6 +967,16 @@ class ExosuitApp implements DesktopUiApplication {
 			terminalColumns: panel == null ? 0 : panel.columns(),
 			terminalRows: panel == null ? 0 : panel.rows()
 		};
+	}
+
+	function workspaceFileDiagnostics():Array<Dynamic> {
+		var result:Array<Dynamic> = [];
+		for (pane in host.panes) for (item in pane.items) {
+			var file = UiEditorTabs.workspaceFile(item);
+			if (file != null) result.push({scope: file.scope, root: file.rootName, path: file.path,
+				revision: file.revision, preview: file.preview});
+		}
+		return result;
 	}
 
 	function topBar():View {
@@ -1048,23 +1062,59 @@ class ExosuitApp implements DesktopUiApplication {
 			compact.padding = new Insets(4.0, 8.0, 4.0, 8.0);
 			return new Column("explorer-empty", [new KeyedView("open", open)], compact);
 		}
-		if (explorerModel == null) explorerModel = new DirectoryTreeModel(explorerRoot, theme);
+		var attachment = workspaceAttachment;
+		var remoteFiles = attachment != null;
+		var remoteScope:String = explorerRoot;
+		var remoteWorkspace = attachment == null ? "" : attachment.fileWorkspace();
+		if (attachment != null && attachment.fileScope() != null) remoteScope = attachment.fileScope();
+		var remoteModelCurrent = explorerModel != null && Std.isOfType(explorerModel, WorkspaceFileTreeModel)
+			&& (cast(explorerModel, WorkspaceFileTreeModel)).scopeId() == remoteScope
+			&& (cast(explorerModel, WorkspaceFileTreeModel)).workspaceId() == remoteWorkspace;
+		var localModelCurrent = explorerModel != null && Std.isOfType(explorerModel, DirectoryTreeModel)
+			&& explorerModel.rootIdentity() == explorerRoot;
+		if (remoteFiles ? !remoteModelCurrent : !localModelCurrent) {
+			explorerModel = null;
+			explorerTree = null;
+			if (remoteFiles) {
+				var rootName = remoteScope;
+				var slash = rootName.lastIndexOf("/");
+				if (slash >= 0 && slash + 1 < rootName.length) rootName = rootName.substring(slash + 1);
+				explorerModel = new WorkspaceFileTreeModel(function()
+					return workspaceAttachment == null ? null : workspaceAttachment.fileClient(),
+					remoteWorkspace, remoteScope, rootName, theme, requestFrame);
+			} else explorerModel = new DirectoryTreeModel(explorerRoot, theme);
+		}
 		explorerModel.refresh();
 		if (explorerTree != null) return new ExplorerTreeView(explorerTree, explorerModel, darkPalette, hostContext == null ? null : hostContext.events);
 		var viewportStyle = new LayoutStyle();
 		viewportStyle.width = LayoutAxis.grow();
 		viewportStyle.height = LayoutAxis.grow();
 		viewportStyle.clipHorizontal = true;
+		var remoteModel:Null<WorkspaceFileTreeModel> = Std.isOfType(explorerModel, WorkspaceFileTreeModel)
+			? cast explorerModel : null;
 		var tree = new TreeView("exosuit-explorer-tree", explorerModel, viewportStyle, filesScroll, 640.0,
-			null, [explorerRoot], function(key) { host.setSelectedExplorerPath(key); }, function(key) {
-				if (!FileSystem.isDirectory(key)) application.open(key);
+			null, [explorerModel.rootKeyAt(0)], function(key) { host.setSelectedExplorerPath(key); }, function(key) {
+				if (remoteModel != null) {
+					if (remoteModel.isMoreKey(key) || remoteModel.isRetryKey(key)) remoteModel.activateSpecial(key);
+					else if (!remoteModel.isDirectoryKey(key)) openWorkspaceFile(remoteModel, key, true);
+				} else if (!FileSystem.isDirectory(key)) application.open(key);
 			}, null, null);
 		tree.expandOnSingleClick = true;
 		tree.onItemClicked = function(path, count) {
+			if (remoteModel != null) {
+				if (remoteModel.isMoreKey(path) || remoteModel.isRetryKey(path)) {
+					if (count == 1) remoteModel.activateSpecial(path);
+					return;
+				}
+				if (count == 1 && !remoteModel.isDirectoryKey(path)) openWorkspaceFile(remoteModel, path, false);
+				else if (count == 2 && !remoteModel.isDirectoryKey(path)) openWorkspaceFile(remoteModel, path, true);
+				return;
+			}
 			if (count != 1 || FileSystem.isDirectory(path)) return;
 			try host.openPreview(application.workspace.documents.open(path)) catch (error:Dynamic) application.reportError("files", "Could not open file: " + Std.string(error));
 		};
 		tree.onItemContextMenu = function(path, event) {
+			if (remoteModel != null) return;
 			var menuRoot = explorerRoot;
 			host.setSelectedExplorerPath(path);
 			showContextMenu([
@@ -1076,6 +1126,58 @@ class ExosuitApp implements DesktopUiApplication {
 		};
 		explorerTree = tree;
 		return new ExplorerTreeView(tree, explorerModel, darkPalette, hostContext == null ? null : hostContext.events);
+	}
+
+	function openWorkspaceFile(model:WorkspaceFileTreeModel, key:String, sticky:Bool):Void {
+		var path = model.relativePath(key), entry = model.entryForKey(key);
+		if (path == null || path.length == 0 || entry == null) return;
+		var root = model.rootId();
+		var scope = model.scopeId();
+		host.activateWorkspaceFile(scope, root, path, sticky);
+		var sizeBytes = WorkspaceFileReader.previewSize(entry.size);
+		if (sizeBytes == null) {
+			application.reportError("files", "File exceeds the 16 MiB preview limit");
+			return;
+		}
+		if (!host.canOpenWorkspaceFile(scope, root, path, sizeBytes)) {
+			application.reportError("files", "Workspace file preview memory limit reached; close another file first");
+			return;
+		}
+		var pendingKey = scope.length + ":" + scope + root.length + ":" + root + path;
+		if (workspaceFileOpenPending.exists(pendingKey)) {
+			if (sticky) workspaceFileOpenPending.set(pendingKey, true);
+			return;
+		}
+		var pendingCount = 0;
+		for (_ in workspaceFileOpenPending.keys()) pendingCount++;
+		if (pendingCount >= 2) {
+			application.reportError("files", "Two workspace file reads are already in progress");
+			return;
+		}
+		workspaceFileOpenPending.set(pendingKey, sticky);
+		var attachment = workspaceAttachment;
+		var client = attachment == null ? null : attachment.fileClient();
+		if (client == null) {
+			workspaceFileOpenPending.remove(pendingKey);
+			application.reportError("files", "Workspace file service is not connected");
+			return;
+		}
+		WorkspaceFileReader.read(client, model.workspaceId(), root, path, entry.revision,
+			function(result:WorkspaceFileReadResult) {
+				var makeSticky = workspaceFileOpenPending.get(pendingKey) == true;
+				workspaceFileOpenPending.remove(pendingKey);
+				if (result.error != null || result.contents == null || result.revision == null) {
+					application.reportError("files", result.error == null ? "Could not read workspace file" : result.error);
+					return;
+				}
+				if (!host.canOpenWorkspaceFile(scope, root, path, result.sizeBytes)) {
+					application.reportError("files", "Workspace file preview memory limit reached; close another file first");
+					return;
+				}
+				var file = new UiWorkspaceFileTab(root, scope, model.rootDisplayName(), path, result.revision,
+					result.contents, result.sizeBytes, !makeSticky);
+				host.openWorkspaceFile(file, !makeSticky);
+			});
 	}
 
 	/** Register a destination once; the Activity Bar follows the sidebar's order and visibility. */
@@ -1106,6 +1208,17 @@ class ExosuitApp implements DesktopUiApplication {
     tab.onClose=function() host.closeTab(item,paneId,true);
     items.push(tab);continue;
    }
+			var workspaceFile = UiEditorTabs.workspaceFile(item);
+			if (workspaceFile != null) {
+				var fileKey = UiEditorTabs.key(item);
+				var fileTab = new TabItem(fileKey,
+					workspaceFile.title + (workspaceFile.preview ? " (preview)" : ""),
+					new WorkspaceFilePreviewView(workspaceFile, theme), true);
+				fileTab.onClose = function() host.closeTab(item, paneId, true);
+				filenames.set(fileKey, workspaceFile.rootName + "/" + workspaceFile.path);
+				items.push(fileTab);
+				continue;
+			}
 
 			var terminal = UiEditorTabs.terminal(item);
 			if (terminal != null) {
@@ -1196,6 +1309,10 @@ class ExosuitApp implements DesktopUiApplication {
 			node.on(haxeon.ui.core.UiEventKind.Click, function(event) {
 				if (event.button != 0 || tabClicks.register(paneId + ":" + key, event) != 2) return;
 				for (view in tabs) if (key == "doc:" + view.document.id) host.keepDocument(view.document, paneId);
+				for (item in editorPane.items) {
+					var workspaceFile = UiEditorTabs.workspaceFile(item);
+					if (workspaceFile != null && UiEditorTabs.key(item) == key) host.keepWorkspaceFile(workspaceFile);
+				}
 			});
 		};
 		widget.onTabContextMenu = function(key, event) {

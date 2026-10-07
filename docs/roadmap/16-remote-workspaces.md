@@ -312,9 +312,27 @@ Deployment/publication requires separate authorization under EXECUTION.md.
 - [ ] Deliver [filesystem protocol F1–F5](WORKSPACE-FILES.md): typed root-relative
   addressing, coherent revision-checked reads, paginated directories, recoverable
   watches and cancellable file/content search through the shared service.
-- [ ] Browse allowed project roots and view saved files with bounded reads,
-  paginated listings, syntax display and change notifications. Handle path
-  traversal/symlinks under the service's workspace access policy.
+- [x] Build the first F1 Linux foundation: NativeKit root-scoped stat/list,
+  Haxeon bindings and a multi-root-capable agent RPC service. Contract tests
+  cover multiple roots, UTF-8 ordering, pagination, immutable cursor snapshots,
+  expiry and grant checks. AgentMain currently configures one root; non-Linux
+  secure backends and remaining F1 acceptance are still open.
+- [x] Build the first F2 Linux read foundation: root-bound regular-file handles,
+  256 KiB positional byte chunks, revision checks around each read and a shared
+  typed `WorkspaceFileClient` for negotiated RPC connections. Tests cover raw
+  bytes, expected revisions, same-size mutation detection, connection ownership,
+  range limits and idle expiry. This is a live read with best-effort metadata
+  checks, not an atomic snapshot.
+- [x] Add the first Linux desktop consumer: the Explorer browses through the
+  negotiated file RPC with paged listings; single-click opens a temporary
+  preview and double-click keeps it. Saved UTF-8 text opens in a selectable,
+  read-only tab using revision-checked reads capped at 16 MiB per file and
+  32 MiB retained content. Binary and invalid UTF-8 files report a clear error.
+  An Xvfb test covers stale listing recovery, preview replacement, sticky tabs
+  and blocked edits.
+- [ ] Add syntax display, live change notifications and refresh behavior, then
+  connect the same file client to the web build. Keep path traversal and symlink
+  handling enforced by the service's workspace access policy.
 - [ ] View Claude/Codex sessions, conversation/activity and pending requests.
   Add prompt, interruption and approval actions under explicit device grants.
   Resolve competing-client approvals exactly once at the service boundary.

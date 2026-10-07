@@ -36,6 +36,7 @@ class TerminalRpcTestMain {
       TerminalServiceTests.run(root);
       TerminalCatalogTests.run(root);
       WorkspaceGroupTests.run(root);
+      WorkspaceFileTests.run(root);
       processes.shutdown();
       runtime.dispose();
 

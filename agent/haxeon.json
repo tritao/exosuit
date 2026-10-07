@@ -16,6 +16,9 @@
     "haxeon-credentials": {
       "path": "../haxeon/packages/credentials"
     },
+    "haxeon-filesystem": {
+      "path": "../haxeon/packages/filesystem"
+    },
     "haxeon-gpu": {
       "path": "../haxeon/packages/gpu"
     },

@@ -2,6 +2,88 @@
 
 Last updated: 2026-10-07.
 
+## M16.2 Linux desktop workspace file previews, 2026-10-07
+
+Connected the graphical Explorer to the negotiated `WorkspaceFileClient` on
+the existing Linux workspace attachment. The tree obtains its root through RPC,
+loads directory pages on demand, and offers explicit retry/load-more rows. A
+single file click opens a replaceable preview tab; a double-click makes it
+sticky. File contents use the revision-checked chunk API, with a 16 MiB per-file
+limit, two concurrent reads and a 32 MiB retained-content limit across tabs.
+Stale listing revisions trigger one reopen at the current revision; chunks must
+still match it. The reader validates UTF-8 and rejects binary data. The separate
+workspace-file tab uses UIKit's read-only text field so it cannot accidentally
+write a remote file through local document save paths. The Explorer resets its
+page cache after RPC connection replacement, restarts expired cursors, and caps
+the retained tree model at 256 directories and 32,768 entries.
+
+Added `scripts/test-workspace-files-ui.py` for an Xvfb end-to-end check of the
+RPC-backed tree, preview replacement, sticky-tab behavior and read-only view.
+Validation: graphical Haxeon target build, agent target build, and the full
+workspace terminal/files RPC suite pass; the desktop UI acceptance script passes,
+including a file changed after listing and an attempted editor mutation.
+Remaining: syntax coloring, file-change/watch updates, browser integration,
+non-Linux secure filesystem backends and broader F1/F2 acceptance. See
+[`WORKSPACE-FILES.md`](WORKSPACE-FILES.md).
+
+## M16.2 filesystem F1 foundation, 2026-10-07
+
+Added an optional NativeKit filesystem module with generation-checked root and
+directory handles. Linux resolves relative paths with `openat2` containment and
+fails closed when the kernel lacks it; other platforms report unsupported.
+Haxeon now exposes root-relative stat and directory iteration. The Exosuit
+agent service binds configured authorized roots to the `workspace.files.read`
+grant and serves typed root discovery, stat and bounded paginated listings.
+The service supports multiple roots, while AgentMain currently configures one.
+Listings use connection-owned immutable snapshots with a 30-second idle expiry;
+the directory revision fingerprints the observed metadata set, and cursor pages
+remain stable if the directory changes afterward. No file contents, watchers,
+search or UI are included yet.
+
+The wire roots request reuses the existing `WorkspaceQuery` typedef after the
+compiler correctly rejected a duplicate structural wire type. The new RPC
+contract exercises multiple roots, stat, exact UTF-8 and case-sensitive listing
+order, stable cursor retries, directory changes between snapshots, expiry,
+canonical-path rejection, native missing-file errors and grant revocation.
+Updated old-catalog migration fixtures to remove the device table added by
+schema v5 before simulating v1/v2 databases.
+
+Validation: NativeKit `filesystem` CTest passes; the workspace terminal suite
+and filesystem RPC contracts pass; `agent/haxeon.json` builds. This is the
+initial Linux foundation, not completion of F1: AgentMain currently publishes
+one root, other platforms lack a secure backend, and the remaining F1 acceptance
+cases are open. See [`WORKSPACE-FILES.md`](WORKSPACE-FILES.md).
+
+## M16.2 filesystem F2 read foundation, 2026-10-07
+
+Extended NativeKit's Linux filesystem module with root-bound regular-file
+handles, identity metadata including ctime, and bounded positional reads. The
+Haxe wrapper exposes managed byte chunks. The agent now serves typed
+`readOpen`, `readChunk` and `readClose`: an open can require the revision seen
+in `stat`, each chunk checks the pinned file's identity and metadata before and
+after reading, and a detected change retires the handle with `revision_changed`.
+Chunks are at most 256 KiB; each connection may hold eight read handles, which
+expire after 30 seconds or close on revocation/disconnect. This avoids eager
+whole-file copies, but it does not claim an atomic snapshot under all external
+write races or filesystem timestamp resolutions.
+
+The RPC contracts cover raw binary and multibyte bytes, byte offsets and EOF,
+stale expected revisions, same-size in-place mutation, cross-connection handle
+refusal, invalid ranges, idle expiry and close behavior. NativeKit tests cover
+bounded native reads, FIFO/external-symlink refusal, root-close invalidation and
+change-time detection when mtime is preserved.
+
+Added a transport-neutral `WorkspaceFileClient` that exposes typed roots, stat,
+list and read operations over any `RpcConnection`. `LocalWorkspaceClient`
+provides it only when `workspace.files.read` was negotiated, keeping the same
+service boundary available to other connection hosts.
+
+Validation: NativeKit `filesystem` CTest passes; the full workspace terminal
+suite, including F1/F2 contracts, passes; `agent/haxeon.json` builds. Remaining
+F2 work includes broader large-file and concurrent-write qualification, client
+text decoding, UI integration, and non-Linux secure backends. See
+[`WORKSPACE-FILES.md`](WORKSPACE-FILES.md).
+
 ## M16.1 relay hibernation eviction, 2026-10-07
 
 Added a Worker Vitest that forces the actual `MachineRelay` Durable Object to
