@@ -16,10 +16,15 @@ import time
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 arguments = sys.argv[1:]
 AGENT_MODE = "--agent" in arguments
+NO_FILES = "--no-files" in arguments
 if AGENT_MODE:
     arguments.remove("--agent")
+if NO_FILES:
+    arguments.remove("--no-files")
+if AGENT_MODE and NO_FILES:
+    raise SystemExit("--agent uses the production AgentMain grant set and cannot be combined with --no-files")
 if len(arguments) > 1:
-    raise SystemExit("Usage: run.py [--agent] <built-site-directory>")
+    raise SystemExit("Usage: run.py [--agent | --no-files] <built-site-directory>")
 SITE = pathlib.Path(os.environ.get("EXOSUIT_WEB_SITE", ""))
 if arguments:
     SITE = pathlib.Path(arguments[0])
@@ -93,7 +98,11 @@ with tempfile.TemporaryDirectory(prefix="exosuit-browser-pairing-") as temporary
     debug_port = free_port()
     workspace_root = work / "workspace"
     workspace_root.mkdir(mode=0o700)
-    (workspace_root / "remote.md").write_text("# Browser remote file\n\nServed from the workspace daemon.\n")
+    (workspace_root / "remote.md").write_text("café 🙂 needle after the emoji\n\n# Browser remote file\n\nServed from the workspace daemon.\n")
+    (workspace_root / "needle-name-only.md").write_text("This file is found by its name only.\n")
+    nested = workspace_root / "needle-nested"
+    nested.mkdir()
+    (nested / "child.md").write_text("Nested child fixture.\n")
     invitation = work / "invitation.json"
     status = work / "status.json"
     decision = work / "approval.json"
@@ -109,7 +118,7 @@ with tempfile.TemporaryDirectory(prefix="exosuit-browser-pairing-") as temporary
     config.write_text(json.dumps({"origin": origin, "machineId": machine_id, "machineToken": machine_token,
         "workspaceRoot": str(workspace_root), "invitePath": str(invitation), "statusPath": str(status),
         "decisionPath": str(decision), "successPath": str(success), "fileChangePath": str(file_change),
-        "databasePath": str(database),
+        "databasePath": str(database), "fileRead": not NO_FILES,
         "localSocket": str(local_socket)}))
     os.chmod(config, 0o600)
     worker_log = work / "worker.log"
@@ -198,10 +207,11 @@ with tempfile.TemporaryDirectory(prefix="exosuit-browser-pairing-") as temporary
         env["EXOSUIT_CDP_PORT"] = str(debug_port)
         env["EXOSUIT_APP_PORT"] = str(web_port)
         env["EXOSUIT_TEST_AGENT"] = "1" if AGENT_MODE else "0"
+        env["EXOSUIT_TEST_NO_FILES"] = "1" if NO_FILES else "0"
         client = subprocess.run([
             NODE, str(ROOT / "tests/workspace-browser-pairing/browser-client.mjs"),
             str(invitation), str(status), str(decision), str(success), str(file_change),
-        ], cwd=ROOT, env=env, text=True, capture_output=True, timeout=100)
+        ], cwd=ROOT, env=env, text=True, capture_output=True, timeout=180)
         print(client.stdout, end="")
         if client.returncode != 0:
             raise RuntimeError("Browser pairing client failed:\n" + client.stderr + client.stdout)

@@ -27,20 +27,22 @@ with tempfile.TemporaryDirectory(prefix="exworkspacefilesui-") as temporary:
     refreshed = "# Remote preview fixture: café 🙂 refreshed from disk\n\n```haxe\nclass Example {}\n```\n"
     note = project / "notes.md"
     note.write_text(expected)
+    search_file = project / "search-result.md"
+    search_file.write_text("café 🙂 needle after the emoji\n")
     state = fixture / "state"
-    environment = dict(os.environ,
-        XDG_STATE_HOME=str(state),
-        PRAGTICAL_PORTABLE=str(fixture / "settings"),
-        EXOSUIT_AGENT_LAUNCHER=str(INSTALL / "tools/run-agent.py" if INSTALL else ROOT / "scripts/run-agent.py"))
-    if INSTALL:
-        environment.update(HAXEON_BIN="/no/source/compiler", HAXEON_ROOT="/no/source/tree", LD_LIBRARY_PATH="")
-    def run_capture(name, actions):
+    def run_capture(name, actions, capture_seconds=15):
         target = fixture / name
+        environment = dict(os.environ,
+            XDG_STATE_HOME=str(state),
+            PRAGTICAL_PORTABLE=str(fixture / "settings"),
+            EXOSUIT_AGENT_LAUNCHER=str(INSTALL / "tools/run-agent.py" if INSTALL else ROOT / "scripts/run-agent.py"))
+        if INSTALL:
+            environment.update(HAXEON_BIN="/no/source/compiler", HAXEON_ROOT="/no/source/tree", LD_LIBRARY_PATH="")
         app = None
         try:
             with (fixture / (name + ".log")).open("w") as log:
                 app = subprocess.Popen([
-                    *RUNNER, str(project), "--capture-dir=" + str(target), "--capture-seconds=15"
+                    *RUNNER, str(project), "--capture-dir=" + str(target), "--capture-seconds=" + str(capture_seconds)
                 ], cwd=ROOT, env=environment, stdout=log, stderr=subprocess.STDOUT)
                 window = subprocess.check_output([
                     "timeout", "60", "xdotool", "search", "--sync", "--onlyvisible", "--name", "^exosuit$"
@@ -50,11 +52,12 @@ with tempfile.TemporaryDirectory(prefix="exworkspacefilesui-") as temporary:
                 time.sleep(7)
 
                 def click(x, y):
-                    subprocess.run(["xdotool", "mousemove", "--window", window, str(x), str(y), "click", "1"], check=True)
+                    subprocess.run(["xdotool", "mousemove", "--window", window, str(x), str(y)], check=True)
+                    subprocess.run(["xdotool", "click", "1"], check=True)
 
                 def double_click(x, y):
-                    subprocess.run(["xdotool", "mousemove", "--window", window, str(x), str(y),
-                        "click", "--repeat", "2", "--delay", "180", "1"], check=True)
+                    subprocess.run(["xdotool", "mousemove", "--window", window, str(x), str(y)], check=True)
+                    subprocess.run(["xdotool", "click", "--repeat", "2", "--delay", "180", "1"], check=True)
 
                 actions(click, double_click)
                 assert app.wait(timeout=75) == 0, (fixture / (name + ".log")).read_text()[-5000:]
@@ -112,8 +115,41 @@ with tempfile.TemporaryDirectory(prefix="exworkspacefilesui-") as temporary:
         assert note.read_text() == refreshed
         assert diagnostic["errors"] == [], diagnostic["errors"]
         print("PASS: RPC explorer, syntax preview, live stale-file notice, stale-revision recovery, manual refresh, sticky tab and read-only view")
+
+        nested = project / "nested"
+        nested.mkdir()
+        (nested / "child.md").write_text("nested workspace file\n")
+
+        def verify_remote_search(click, double_click):
+            click(180, 56)  # Search sidebar tab.
+            click(180, 102)  # Search query field.
+            subprocess.run(["xdotool", "type", "--clearmodifiers", "needle"], check=True)
+            time.sleep(.7)
+            click(150, 210)  # First content match; opens its remote file preview.
+            time.sleep(.7)
+            click(180, 102)
+            subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+a"], check=True)
+            subprocess.run(["xdotool", "type", "--clearmodifiers", "search-result"], check=True)
+            click(100, 140)  # Switch from content search to file-name search.
+            time.sleep(1.0)
+            click(180, 102)
+            subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+a"], check=True)
+            subprocess.run(["xdotool", "type", "--clearmodifiers", "nested"], check=True)
+            time.sleep(.7)
+            click(150, 210)  # A directory name result reveals and expands it in Files.
+            time.sleep(1.0)
+
+        search_diagnostic, search_tree = run_capture("remote-search", verify_remote_search, 20)
+        search_tabs = search_diagnostic["workspaceFileTabs"]
+        assert search_diagnostic["workspaceConnection"] == "Workspace connected", search_diagnostic
+        assert len(search_tabs) == 1 and search_tabs[0]["path"] == "search-result.md", search_tabs
+        assert search_tabs[0]["searchSelection"] == {"start": 7, "end": 13}, search_tabs[0]
+        assert search_diagnostic["sidebarMode"] == "files", search_diagnostic["sidebarMode"]
+        assert 'label="child.md"' in search_tree, search_tree[-2500:]
+        assert search_diagnostic["errors"] == [], search_diagnostic["errors"]
+        print("PASS: remote content/name search, Unicode byte-to-codepoint selection and opening search results")
     finally:
-        for endpoint in state.glob("exosuit/workspaces/*/endpoint.json"):
+        for endpoint in (fixture / "state").rglob("endpoint.json"):
             try:
                 pid = json.loads(endpoint.read_text())["managerPid"]
                 os.kill(pid, signal.SIGTERM)

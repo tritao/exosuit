@@ -51,6 +51,27 @@ async function shellState() {
   await expression('window.exosuit.snapshot()');
   return expression('window.exosuit.document?.shell');
 }
+async function waitForTarget(name, description = name) {
+  return waitFor(description, async () => {
+    const shell = await shellState();
+    const target = shell?.testTargets?.[name];
+    return target?.width > 0 && target?.height > 0 ? target : null;
+  });
+}
+async function clickTarget(name, description = name) {
+  const target = await waitForTarget(name, description);
+  await click(target.x + target.width / 2, target.y + target.height / 2);
+}
+async function enterSearchQuery(value) {
+  await clickTarget('remoteSearchQuery', 'search query field');
+  await waitFor('focused SearchField', async () =>
+    (await shellState())?.testTargets?.remoteSearchQueryFocused === true);
+  await send('Input.insertText', {text: value});
+  const before = await shellState();
+  if (before?.testTargets?.remoteSearchState?.active)
+    await waitFor('remote SearchField query update', async () =>
+      (await shellState())?.testTargets?.remoteSearchState?.query === value);
+}
 function readStatus() {
   try { return JSON.parse(fs.readFileSync(statusPath, 'utf8')); }
   catch (_error) { return null; }
@@ -74,7 +95,8 @@ async function waitFor(description, predicate, timeout = 60000) {
     await pause(200);
   }
   const shell = await shellState().catch(() => null);
-  throw new Error(`Timed out waiting for ${description}: ${JSON.stringify({value, shell})}`);
+  const pairing = await remoteState().catch(() => null);
+  throw new Error(`Timed out waiting for ${description}: ${JSON.stringify({value, shell, pairing, host: readStatus()})}`);
 }
 try {
   await send('Runtime.enable');
@@ -93,7 +115,7 @@ try {
   await waitFor('editor startup', async () => (await expression('window.exosuit?.state')) === 'running');
 
   // Select Remote Access in the activity rail and submit the host-created one-use URL.
-  await click(28, 160);
+  await clickTarget('remoteAccessActivity', 'Remote Access activity tab');
   const invitation = JSON.parse(fs.readFileSync(invitePath, 'utf8'));
   await click(160, 289);
   await send('Input.insertText', {text: invitation.pairingSocketUrl});
@@ -135,9 +157,11 @@ try {
   });
   if (!connected.state.status.includes('Connected'))
     throw new Error(`RPC identity arrived with unexpected state: ${connected.state.status}`);
-  if (!connected.state.grants?.includes('workspace.identity') || !connected.state.grants?.includes('workspace.read')
-    || !connected.state.grants?.includes('workspace.files.read'))
+  const noFilesMode = process.env.EXOSUIT_TEST_NO_FILES === '1';
+  if (!connected.state.grants?.includes('workspace.identity') || !connected.state.grants?.includes('workspace.read'))
     throw new Error('The connected browser did not receive the approved workspace grants');
+  if (connected.state.grants.includes('workspace.files.read') === noFilesMode)
+    throw new Error(`Browser file grant did not match test mode (noFiles=${noFilesMode})`);
   const agentMode = process.env.EXOSUIT_TEST_AGENT === '1';
   if (agentMode && (!connected.state.grants?.includes('workspace.groups.tree')
     || !connected.state.grants?.includes('workspace.terminals.read')
@@ -146,52 +170,119 @@ try {
     || !connected.state.grants?.includes('workspace.agents.read')
     || !connected.state.grants?.includes('workspace.agents.control')))
     throw new Error('AgentMain browser did not receive the approved Workbench and Codex grants');
-  const remoteExplorer = await waitFor('connected remote file explorer', async () => {
-    const shell = await shellState();
-    return shell?.explorerWatching && shell?.explorerIdentity?.includes(connected.state.workspaceRoot) ? shell : null;
-  });
-  if (process.env.EXOSUIT_CAPTURE_BROWSER_PATH) {
-    const image = await send('Page.captureScreenshot', {format: 'png'});
-    fs.writeFileSync(process.env.EXOSUIT_CAPTURE_BROWSER_PATH, Buffer.from(image.data, 'base64'));
-  }
-  console.log(`PASS: connected Explorer subscribed to ${remoteExplorer.explorerIdentity}`);
-  // Open the remote fixture through the rendered Explorer and verify the
-  // desktop's single-click preview behavior is wired to authenticated RPC.
-  let remotePreview = null;
-  for (let attempt = 0; attempt < 8 && remotePreview == null; attempt++) {
-    await click(145, 114);
-    await pause(350);
-    const shell = await shellState();
-    remotePreview = shell?.workspaceFileTabs?.find(item => item.path === 'remote.md'
-      && item.scope === connected.state.workspaceRoot && item.preview === true && item.revision && item.syntax) || null;
-  }
-  if (remotePreview == null)
-    remotePreview = await waitFor('remote file preview', async () => {
+  if (noFilesMode) {
+    let shell = await shellState();
+    if (shell?.explorerWatching && shell?.explorerIdentity?.includes(connected.state.workspaceRoot))
+      throw new Error('Browser attached the remote file Explorer without the workspace.files.read grant');
+    await clickTarget('searchActivity', 'Search activity tab without file access');
+    await waitFor('standalone Search sidebar after pairing without file access', async () =>
+      (await shellState())?.sidebarMode === 'search');
+    await enterSearchQuery('class Main');
+    await waitForTarget('localSearchResult', 'local search result without file access');
+    await clickTarget('localSearchResult', 'local search result without file access');
+    shell = await waitFor('standalone project remains searchable without the file grant', async () => {
+      const current = await shellState();
+      return current?.documents?.includes('Main.hx') && !current.explorerWatching ? current : null;
+    });
+    console.log('PASS: omitting workspace.files.read keeps the browser in standalone filesystem and search mode');
+  } else {
+    const remoteExplorer = await waitFor('connected remote file explorer', async () => {
+      const shell = await shellState();
+      return shell?.explorerWatching && shell?.explorerIdentity?.includes(connected.state.workspaceRoot) ? shell : null;
+    });
+    console.log(`PASS: connected Explorer subscribed to ${remoteExplorer.explorerIdentity}`);
+    // Pairing already leaves the Explorer selected and visible. Clicking its
+    // active activity icon would collapse the sidebar before the row click.
+    await click(145, 166); // remote.md after the root row, nested folder and filename-only fixture.
+    const remotePreview = await waitFor('remote file preview', async () => {
       const shell = await shellState();
       const file = shell?.workspaceFileTabs?.find(item => item.path === 'remote.md'
         && item.scope === connected.state.workspaceRoot);
       return file?.preview === true && file?.revision && file?.syntax ? file : null;
     }, 12000);
-  if (remotePreview.syntax !== 'Markdown')
-    throw new Error(`Remote preview used unexpected syntax mode: ${remotePreview.syntax}`);
-  console.log('PASS: single-click opened the remote Markdown file as a revision-checked preview tab');
-  if (agentMode) {
-    const previewRevision = remotePreview.revision;
-    writePrivate(fileChangePath, {requestId: 'browser-file-change-v1', sequence: 1});
-    const stalePreview = await waitFor('AgentMain file-change notification in the browser preview', async () => {
+    if (remotePreview.syntax !== 'Markdown')
+      throw new Error(`Remote preview used unexpected syntax mode: ${remotePreview.syntax}`);
+    console.log('PASS: single-click opened the remote Markdown file as a revision-checked preview tab');
+    if (agentMode) {
+      const previewRevision = remotePreview.revision;
+      writePrivate(fileChangePath, {requestId: 'browser-file-change-v1', sequence: 1});
+      const stalePreview = await waitFor('AgentMain file-change notification in the browser preview', async () => {
+        const shell = await shellState();
+        return shell?.workspaceFileTabs?.find(item => item.path === 'remote.md'
+          && item.scope === connected.state.workspaceRoot && item.preview === true && item.diskChanged) || null;
+      }, 15000);
+      if (stalePreview.revision !== previewRevision)
+        throw new Error('Remote file notification replaced the browser preview snapshot before explicit refresh');
+      console.log('PASS: AgentMain file change reached the browser and marked the saved preview stale');
+    }
+
+    // Search results are exercised through their rendered controls and opened
+    // workbench files; diagnostics only supply stable screen-space targets.
+    await clickTarget('searchActivity', 'connected Search activity tab');
+    await waitFor('connected Search sidebar', async () => (await shellState())?.sidebarMode === 'search');
+    await enterSearchQuery('needle');
+    const contentSearchState = await waitFor('remote content search completion', async () => {
       const shell = await shellState();
-      return shell?.workspaceFileTabs?.find(item => item.path === 'remote.md'
-        && item.scope === connected.state.workspaceRoot && item.preview === true && item.diskChanged) || null;
-    }, 15000);
-    if (stalePreview.revision !== previewRevision)
-      throw new Error('Remote file notification replaced the browser preview snapshot before explicit refresh');
-    console.log('PASS: AgentMain file change reached the browser and marked the saved preview stale');
+      return shell?.testTargets?.remoteSearchState?.complete ? shell.testTargets.remoteSearchState : null;
+    }, 20000);
+    if (contentSearchState.error || contentSearchState.count === 0)
+      throw new Error(`Remote content search returned no results: ${JSON.stringify(contentSearchState)}`);
+    await waitForTarget('remoteSearchResult', 'remote content-search result');
+    await clickTarget('remoteSearchResult', 'remote content-search result');
+    const contentHit = await waitFor('opened Unicode content match', async () => {
+      const shell = await shellState();
+      const file = shell?.workspaceFileTabs?.find(item => item.path === 'remote.md'
+        && item.scope === connected.state.workspaceRoot);
+      return file?.searchSelection?.start === 7 && file.searchSelection.end === 13 ? file : null;
+    });
+    if (contentHit.searchSelection.start !== 7 || contentHit.searchSelection.end !== 13)
+      throw new Error(`Unicode search selection has unexpected editor coordinates: ${JSON.stringify(contentHit.searchSelection)}`);
+    console.log('PASS: connected content search opened the remote Unicode match at the correct editor range');
+
+    await clickTarget('remoteSearchMode', 'file-name search mode control');
+    const nameSearchState = await waitFor('remote file-name search completion', async () => {
+      const state = (await shellState())?.testTargets?.remoteSearchState;
+      return state?.mode === 'name' && state.complete ? state : null;
+    }, 20000);
+    if (nameSearchState.error || nameSearchState.count !== 2)
+      throw new Error(`Remote file-name search returned unexpected results: ${JSON.stringify(nameSearchState)}`);
+    if (!nameSearchState.results.some(item => item.kind === 'file' && item.path === 'needle-name-only.md')
+      || !nameSearchState.results.some(item => item.kind === 'directory' && item.path === 'needle-nested'))
+      throw new Error(`Remote file-name search returned unexpected paths: ${JSON.stringify(nameSearchState.results)}`);
+    await waitForTarget('remoteSearchFileResult', 'remote filename-search result');
+    await clickTarget('remoteSearchFileResult', 'remote filename-search result');
+    const filenameHit = await waitFor('opened file-name search result', async () => {
+      const shell = await shellState();
+      return shell?.workspaceFileTabs?.some(item => item.path === 'needle-name-only.md'
+        && item.scope === connected.state.workspaceRoot) ? shell : null;
+    });
+    if (!filenameHit.workspaceFileTabs.some(item => item.path === 'needle-name-only.md'))
+      throw new Error('File-name search did not open its matching remote file');
+    console.log('PASS: connected file-name search opened the matching remote file');
+
+    await waitForTarget('remoteSearchDirectoryResult', 'remote folder-name search result');
+    const beforeFolderReveal = await shellState();
+    await clickTarget('remoteSearchDirectoryResult', 'remote folder-name search result');
+    await waitFor('folder result revealed and loaded in the Files sidebar', async () => {
+      const shell = await shellState();
+      return shell?.sidebarMode === 'files' && shell.explorerRevision > beforeFolderReveal.explorerRevision
+        ? shell : null;
+    });
+    await click(145, 140); // Expanded child row directly below nested.
+    const revealedChild = await waitFor('opened child under the revealed search folder', async () => {
+      const shell = await shellState();
+      return shell?.workspaceFileTabs?.some(item => item.path === 'needle-nested/child.md'
+        && item.scope === connected.state.workspaceRoot) ? shell : null;
+    });
+    if (!revealedChild.workspaceFileTabs.some(item => item.path === 'needle-nested/child.md'))
+      throw new Error('Folder-name search did not reveal and expand the matching directory');
+    console.log('PASS: folder-name search revealed and expanded its remote child in Files');
   }
   let remoteTerminalId = null;
   let remoteAgentId = null;
   let remoteAgentThread = null;
   if (agentMode) {
-    await click(30, 160); // Workbench activity-rail icon.
+    await clickTarget('workbenchActivity', 'Workbench activity tab');
     await pause(120);
     const selectedWorkbench = (await shellState())?.sidebarMode === 'workbench';
     if (!selectedWorkbench) throw new Error('Could not select the connected Workbench from the activity rail');
@@ -313,7 +404,7 @@ try {
   if (automaticReconnect.workspaceRoot !== connected.state.workspaceRoot
     || !automaticReconnect.grants?.includes('workspace.identity')
     || !automaticReconnect.grants?.includes('workspace.read')
-    || !automaticReconnect.grants?.includes('workspace.files.read'))
+    || automaticReconnect.grants.includes('workspace.files.read') === noFilesMode)
     throw new Error('Automatic reconnect changed workspace identity or approved grants');
   if (agentMode && (!automaticReconnect.grants?.includes('workspace.terminals.read')
     || !automaticReconnect.grants?.includes('workspace.terminals.catalog')
@@ -325,13 +416,15 @@ try {
     socket.url.includes('/connect')).length`);
   if (freshConnectCount <= oldConnectCount)
     throw new Error(`Workspace recovered without opening a fresh ticketed relay socket (${oldConnectCount} before, ${freshConnectCount} after)`);
-  const recoveredExplorer = await waitFor('remote Explorer watch after reconnect', async () => {
-    const shell = await shellState();
-    return shell?.explorerWatching && shell?.explorerIdentity?.includes(automaticReconnect.workspaceRoot)
-      ? shell : null;
-  });
-  if (!recoveredExplorer.explorerWatching)
-    throw new Error('Remote Explorer did not restore its workspace watch after reconnect');
+  if (!noFilesMode) {
+    const recoveredExplorer = await waitFor('remote Explorer watch after reconnect', async () => {
+      const shell = await shellState();
+      return shell?.explorerWatching && shell?.explorerIdentity?.includes(automaticReconnect.workspaceRoot)
+        ? shell : null;
+    });
+    if (!recoveredExplorer.explorerWatching)
+      throw new Error('Remote Explorer did not restore its workspace watch after reconnect');
+  }
   if (agentMode) {
     await pause(500);
     const beforeChange = await shellState();
@@ -366,7 +459,9 @@ try {
   }
   writePrivate(successPath, {machineId: invitation.machineId, deviceId: invitation.deviceId,
     workspaceRoot: automaticReconnect.workspaceRoot});
-  console.log('PASS: relay disconnect recovered with a fresh ticket, pinned Noise handshake, workspace grants and Explorer watch');
+  console.log(noFilesMode
+    ? 'PASS: relay reconnect preserved workspace identity without granting file access'
+    : 'PASS: relay disconnect recovered with a fresh ticket, pinned Noise handshake, workspace grants and Explorer watch');
 } finally {
   socket.close();
 }

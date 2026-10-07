@@ -55,6 +55,7 @@ class BrowserPairingHostMain {
 			statusPath:String = config.statusPath, decisionPath:String = config.decisionPath,
 			successPath:String = config.successPath, databasePath:String = config.databasePath,
 			localSocket:String = config.localSocket;
+		var fileRead:Bool = Reflect.field(config, "fileRead") != false;
 		sys.FileSystem.createDirectory(workspaceRoot);
 		var directories = new WorkspaceDirectories(workspaceRoot);
 		var seed = new WorkspaceService("workspace", "browser-pairing-epoch", [
@@ -137,8 +138,10 @@ class BrowserPairingHostMain {
 				}
 				require(matched, "browser and desktop authentication codes did not match");
 				approvalRequestPending = true;
+				var grants = [WorkspaceProtocol.READ, WorkspaceProtocol.IDENTITY_CAPABILITY];
+				if (fileRead) grants.push(WorkspaceFileProtocol.READ);
 				adminConnection.call(WorkspacePairingProtocol.APPROVE, {deviceId: registeredDevice,
-					grants: [WorkspaceProtocol.READ, WorkspaceProtocol.IDENTITY_CAPABILITY, WorkspaceFileProtocol.READ]}, 10000, function(result) {
+					grants: grants}, 10000, function(result) {
 					if (!result.accepted) failure = "local pairing approval was refused: " + result.error;
 					else approved = true;
 				}, function(error) {
@@ -156,12 +159,12 @@ class BrowserPairingHostMain {
 				var result:Dynamic = Json.parse(sys.io.File.getContent(successPath));
 				require(result.machineId == machineId && result.deviceId == registeredDevice
 					&& result.workspaceRoot == workspaceRoot, "browser reported a different workspace identity");
-				verifyPersistedDevice(store, registeredDevice);
+				verifyPersistedDevice(store, registeredDevice, fileRead);
 				localAdmin.close();
 				hub.forget(localListener);
 				store.close();
 				store = new WorkspaceSqliteStore(databasePath, "workspace", seed.snapshot(), 32, directories.root);
-				verifyPersistedDevice(store, registeredDevice);
+				verifyPersistedDevice(store, registeredDevice, fileRead);
 				pairing.dispose();
 				relay.dispose();
 				server.dispose();
@@ -273,7 +276,7 @@ class BrowserPairingHostMain {
 						continue;
 					}
 					sys.io.File.saveContent(workspaceRoot + "/remote.md",
-						"# Browser remote file\n\nChanged by AgentMain after the preview was opened (change "
+						"café 🙂 needle after the emoji\n\n# Browser remote file\n\nChanged by AgentMain after the preview was opened (change "
 						+ request.sequence + ").\n");
 					fileChangeSequence = request.sequence;
 				}
@@ -312,21 +315,15 @@ class BrowserPairingHostMain {
 		throw failure == null ? "AgentMain browser pairing test timed out" : failure;
 	}
 
-	static function verifyPersistedDevice(store:WorkspaceSqliteStore, deviceId:String):Void {
+	static function verifyPersistedDevice(store:WorkspaceSqliteStore, deviceId:String, fileRead:Bool):Void {
 		var records = store.loadDevices();
 		require(records.length == 1, "SQLite did not retain exactly one approved device");
 		var record = records[0];
-		require(record.deviceId == deviceId && !record.revoked
-			&& record.grants.length == 9
-			&& record.grants.indexOf(WorkspaceProtocol.READ) >= 0
-			&& record.grants.indexOf(WorkspaceFileProtocol.READ) >= 0
-			&& record.grants.indexOf(WorkspaceProtocol.IDENTITY_CAPABILITY) >= 0
-			&& record.grants.indexOf(WorkspaceProtocol.TREE) >= 0
-			&& record.grants.indexOf(WorkspaceTerminalProtocol.READ) >= 0
-			&& record.grants.indexOf(WorkspaceTerminalProtocol.CATALOG) >= 0
-			&& record.grants.indexOf(WorkspaceTerminalProtocol.CONTROL) >= 0
-			&& record.grants.indexOf(WorkspaceAgentProtocol.READ) >= 0
-			&& record.grants.indexOf(WorkspaceAgentProtocol.CONTROL) >= 0,
+		var expected = [WorkspaceProtocol.READ, WorkspaceProtocol.IDENTITY_CAPABILITY];
+		if (fileRead) expected.push(WorkspaceFileProtocol.READ);
+		var grantsMatch = record.grants.length == expected.length;
+		for (grant in expected) if (record.grants.indexOf(grant) < 0) grantsMatch = false;
+		require(record.deviceId == deviceId && !record.revoked && grantsMatch,
 			"SQLite device trust or explicit workspace grants did not survive reload");
 	}
 

@@ -380,11 +380,16 @@ Deployment/publication requires separate authorization under EXECUTION.md.
   the watch notification and keep the displayed snapshot while marking it
   stale for explicit refresh. A second change after relay reconnect advances
   the restored Explorer revision.
-- [ ] Start F4 with bounded literal name/content RPC search. The first service
-  slice has per-connection handles, paged results, cancellation, UTF-8 byte
-  locations and resource limits, with host contract coverage. Ignore/glob
-  support, search UI and full F4 acceptance remain open in
-  [`WORKSPACE-FILES.md`](WORKSPACE-FILES.md).
+- [x] Wire bounded literal name/content RPC search into the shared Search
+  sidebar. Desktop and connected-browser results open read-only remote previews;
+  content matches select the correct UTF-8 byte range, file-name results open
+  their file, and folder-name results reveal the directory in Files. Local
+  project search stays active when the browser is standalone or lacks the
+  `workspace.files.read` grant. Xvfb desktop coverage and the full AgentMain
+  browser acceptance pass on wasm32 and wasm-gc.
+- [ ] Finish F4 qualification: project ignore/glob rules, stale search-result
+  behavior, scan/byte-limit fixtures and responsiveness under concurrent
+  search/watch/terminal traffic. See [`WORKSPACE-FILES.md`](WORKSPACE-FILES.md).
 - [x] Complete the Emscripten host builds and connected-browser terminal
   clickthrough for wasm32 and wasm-gc. The real browser test opens a remote
   terminal in the Workbench, verifies its dock panel and session identity,

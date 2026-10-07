@@ -19,6 +19,7 @@ import haxeon.ui.widgets.layout.Row;
 import haxeon.ui.widgets.text.MiddleEllipsisText;
 import haxeon.ui.widgets.text.Text;
 import haxeon.ui.widgets.text.TextArea;
+import haxeon.ui.widgets.text.TextSelection;
 import style.Theme as EditorTheme;
 
 /** Selectable, copyable text surface with all edits disabled by UIKit. */
@@ -62,6 +63,10 @@ class WorkspaceFilePreviewView implements View {
 		contents.readOnly = true;
 		contents.colorRangeProvider = file.textModel.foregroundProvider;
 		contents.presentationRevision = file.textModel.presentationRevision;
+		if (file.searchSelection != null) {
+			contents.selectionProvider = function():TextSelection return file.searchSelection;
+			contents.onSelectionChange = function(_) file.clearSearchSelection();
+		}
 		var refreshButton = new Button(file.refreshing ? "Refreshing…" : "Refresh", null, refresh,
 			"workspace-file-refresh:" + file.id);
 		refreshButton.enabled = !file.refreshing;

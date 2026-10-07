@@ -1,8 +1,9 @@
 # Workspace filesystem protocol
 
 Status: Linux F1 and the first F2 read-handle slice are implemented, with a
-basic Linux desktop F3 change-invalidation path and the first bounded F4 search
-service slice; F1–F5 acceptance is incomplete. Required by
+basic Linux desktop F3 change-invalidation path and bounded F4 search exposed
+through the shared desktop/browser Search sidebar; full F1–F5 acceptance is
+incomplete. Required by
 [M16.2](16-remote-workspaces.md). The
 Exosuit service uses shared typed RPC schemas; filesystem semantics are not
 part of Haxeon's generic RPC package. Local adapters and RPC adapters will
@@ -52,7 +53,14 @@ remain local. Connected-browser preview and live change invalidation now pass
 against AgentMain for both wasm32 and wasm-gc, including a second notification
 after relay reconnect; the existing preview stays intact and is marked stale
 until the user refreshes. This does not complete F1–F5 filesystem acceptance.
-Remote editing remains out of scope.
+The Search sidebar uses the same paged, cancellable literal name/content RPC on
+desktop and web. Search results open read-only remote previews; content matches
+map UTF-8 byte locations to editor positions, and directory-name matches reveal
+the folder in Files. Standalone browser search continues to use its seeded local
+project when remote access is absent or the file-read grant was not approved.
+Xvfb and full connected-browser search acceptance pass on wasm32 and wasm-gc.
+Ignore/glob behavior, stale-result UX, search-limit fixtures and load
+responsiveness remain open F4 work. Remote editing remains out of scope.
 
 The current Linux desktop watcher subscribes per root, coalesces native events
 over 100 ms and publishes only a root epoch/cursor, never host paths or file
@@ -72,10 +80,11 @@ supported by the service and contract tests, but AgentMain currently publishes
 one configured root per workspace. Non-Linux secure backends and remaining F1
 acceptance cases are still open. The Linux desktop and connected web client use
 valid UTF-8 syntax-colored read-only previews; Linux desktop has root-level
-change invalidation. The initial F4 service supports literal path/name and
-content search, with client-owned pages, cancellation and resource limits; it
-has no search UI or ignore/glob support yet. Full F1–F5 browser qualification
-and full F3–F4 acceptance remain open.
+change invalidation. F4 provides bounded literal name/content search with
+client-owned pages, cancellation and resource limits; its shared Search UI is
+described above. Project ignore/glob rules, stale-result UX, boundary fixtures
+and load responsiveness remain open. Full F1–F5 browser qualification and
+full F3–F4 acceptance remain open.
 
 ## Addressing and access
 
@@ -237,12 +246,14 @@ wired to this service slice yet.
   pairs, overflow, retention gaps, polling
   fallback, server restart and Wi-Fi/mobile-style reconnect. UI drops stale data
   and resyncs visibly when required.
-- [ ] F4: the first bounded literal name/content service slice is implemented
-  and contract-tested for root scope, connection ownership, cancellation,
-  paging, active/result limits, binary skipping, idle expiry, UTF-8 byte ranges
-  and large-line previews. Still needed: project ignore rules, glob filters,
-  stale-location UX, scan/byte-limit fixtures, search UI and proof that flooded
-  read/search/watch traffic leaves terminal and approval controls responsive.
+- [ ] F4: the bounded literal name/content service is contract-tested for root
+  scope, connection ownership, cancellation, paging, active/result limits,
+  binary skipping, idle expiry, UTF-8 byte ranges and large-line previews. The
+  shared Search UI now opens remote file/folder results on desktop and in the
+  connected browser; browser tests cover Unicode selection and standalone mode.
+  Still needed: project ignore rules, glob filters, stale-location UX,
+  scan/byte-limit fixtures and proof that flooded read/search/watch traffic
+  leaves terminal and approval controls responsive.
 - [ ] F5: desktop/local and connected-browser acceptance using the same service
   operations. Both Wasm targets preserve standalone gates; relay carries opaque
   encrypted payloads without filesystem-specific logic or storage.

@@ -247,6 +247,7 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 	public function workspaceId():String return workspace;
 	public function scopeId():String return scope;
 	public function rootDisplayName():String return rootName;
+	public function keyForPath(path:String):String return FILE_PREFIX + (path == null ? "" : path);
 
 	function requestRoots():Void {
 		var client = clientProvider();

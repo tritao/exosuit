@@ -2,6 +2,28 @@
 
 Last updated: 2026-10-07.
 
+## M16.2 shared desktop/browser workspace search, 2026-10-07
+
+The shared Search sidebar now uses the bounded remote name/content RPC when a
+workspace file grant is active, while preserving local project search in
+standalone browser mode and when the grant is absent. Remote content matches
+open read-only previews at the correct UTF-8 byte range; filename matches open
+their files, and directory-name matches reveal the folder in Files. Search
+requests are debounced, paged and cancelled as the query or attachment changes.
+
+Validation: `python3 scripts/test-workspace-terminals.py` passes the workspace
+file/search contract suite. `xvfb-run -a python3
+scripts/test-workspace-files-ui.py` passes the remote desktop search, Unicode
+selection and result-opening path. The full `tests/workspace-browser-pairing/run.py
+--agent` acceptance passes against AgentMain and the local Wrangler Worker for
+both wasm32 and wasm-gc; it covers remote content/name/folder search, preview
+invalidation, terminal/Codex use and relay reconnect. Both Emscripten web host
+builds complete using the available sibling SDK.
+
+Next: finish F4 qualification for project ignore/glob behavior, stale search
+results, scan/byte-limit fixtures and responsiveness under concurrent search,
+watch and terminal traffic. See [`WORKSPACE-FILES.md`](WORKSPACE-FILES.md).
+
 ## M16.2 connected-browser file-change notification, 2026-10-07
 
 The AgentMain browser acceptance changes the remote Markdown fixture after the

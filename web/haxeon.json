@@ -50,6 +50,7 @@
     "../src/controller/SearchController.hx",
     "../src/controller/SessionController.hx",
     "../src/controller/WorkbenchController.hx",
+    "../src/controller/WorkspaceFileSearchController.hx",
     "../src/core/Application.hx",
     "../src/core/DocumentManager.hx",
     "../src/core/FileActions.hx",

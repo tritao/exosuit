@@ -281,14 +281,22 @@ class UiWorkbenchHost implements WorkbenchHost {
 	}
 
 	public function activateWorkspaceFile(scope:String, root:String, path:String, makeSticky:Bool):Bool {
-		for (pane in panes) for (item in pane.items) {
-			var file = UiEditorTabs.workspaceFile(item);
-			if (file == null || file.scope != scope || file.root != root || file.path != path) continue;
-			if (makeSticky) file.preview = false;
+		var file = workspaceFile(scope, root, path);
+		if (file == null) return false;
+		if (makeSticky) file.preview = false;
+		for (pane in panes) for (item in pane.items) if (UiEditorTabs.workspaceFile(item) == file) {
 			activateEditorTab(file.id, pane.id);
 			return true;
 		}
 		return false;
+	}
+
+	public function workspaceFile(scope:String, root:String, path:String):Null<UiWorkspaceFileTab> {
+		for (pane in panes) for (item in pane.items) {
+			var file = UiEditorTabs.workspaceFile(item);
+			if (file != null && file.scope == scope && file.root == root && file.path == path) return file;
+		}
+		return null;
 	}
 
 	public function canOpenWorkspaceFile(scope:String, root:String, path:String, sizeBytes:Int):Bool {
