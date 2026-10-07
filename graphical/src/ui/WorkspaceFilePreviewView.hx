@@ -67,9 +67,9 @@ class WorkspaceFilePreviewView implements View {
 			contents.selectionProvider = function():TextSelection return file.searchSelection;
 			contents.onSelectionChange = function(_) file.clearSearchSelection();
 		}
-		var refreshButton = new Button(file.refreshing ? "Refreshing…" : "Refresh", null, refresh,
+		var refreshButton = new Button(file.loading ? "Loading…" : file.loadError != null ? "Retry" : file.refreshing ? "Refreshing…" : "Refresh", null, refresh,
 			"workspace-file-refresh:" + file.id);
-		refreshButton.enabled = !file.refreshing;
+		refreshButton.enabled = !file.refreshing && !file.loading;
 		refreshButton.accessibilityLabel = "Refresh saved workspace file";
 		var rows:Array<KeyedView> = [
 			new KeyedView("header", new Row("workspace-file-header:" + file.id, [
@@ -91,7 +91,11 @@ class WorkspaceFilePreviewView implements View {
 			rows.push(new KeyedView("file-changed", new Text("File changed on disk. Refresh to load the latest version.",
 				changedStyle, theme.tokens.warning, TextStyleOverride.text(12.0))));
 		}
-		rows.push(new KeyedView("contents", contents));
+		if (file.loading || file.loadError != null) {
+			bodyStyle.padding = new Insets(12, 12, 12, 12);
+			rows.push(new KeyedView("load-state", new Text(file.loading ? "Loading…" : file.loadError,
+				bodyStyle, file.loading ? theme.tokens.textSecondary : theme.tokens.danger)));
+		} else rows.push(new KeyedView("contents", contents));
 		return new Column("workspace-file-preview:" + file.id, rows, outer).build(context);
 	}
 }

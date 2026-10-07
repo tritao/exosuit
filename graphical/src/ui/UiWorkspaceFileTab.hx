@@ -18,6 +18,9 @@ class UiWorkspaceFileTab {
 	public final sizeBytes:Int;
 	public var preview:Bool;
 	public var searchSelection(default, null):Null<TextSelection>;
+	public var loading:Bool = false;
+	public var loadError:Null<String>;
+	public var contentReadyMs:Float = 0;
 	public var refreshing:Bool = false;
 	public var refreshError:Null<String>;
 	public var diskChanged:Bool = false;

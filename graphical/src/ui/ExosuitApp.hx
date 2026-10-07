@@ -128,7 +128,7 @@ class ExosuitApp implements DesktopUiApplication {
 	var explorerRoot:Null<String>;
 	var explorerModel:Null<ExplorerTreeModel>;
 	var explorerTree:Null<TreeView>;
-	final workspaceFileOpenPending:Map<String, Bool> = new Map();
+	final workspaceFileLoader = new WorkspaceFileLoader();
 	final workspaceFileRefreshPending:Map<String, Bool> = new Map();
 	final tabClicks = new haxeon.ui.core.PointerClickSequence();
 	var statusMessage:String = "Ready";
@@ -241,6 +241,11 @@ class ExosuitApp implements DesktopUiApplication {
 		if (hostContext != null) hostContext.onPoll = pollBackground;
 		sidebar.setVisible(dock.isOpen("explorer"));
 		sidebar.onChange = syncSidebar;
+		workspaceFileLoader.capacity = function() {
+			var refreshing = 0;
+			for (_ in workspaceFileRefreshPending.keys()) refreshing++;
+			return Std.int(Math.max(0, 2 - refreshing));
+		};
 		remoteFileSearch = new WorkspaceFileSearchController(function() return workspaceAttachment, requestFrame);
 		searchPanel = new WorkspaceSearchPanel(application, host, requestFrame,
 			remoteFileSearch, openWorkspaceSearchResult);
@@ -887,6 +892,7 @@ class ExosuitApp implements DesktopUiApplication {
 		if (workspaceAttachment != null)
 			workspaceAttachment.dispose();
 		workspaceAttachment = attachment;
+		workspaceFileLoader.clearCache();
 		searchFileClient = null;
 		pendingWorkspaceFolderReveal = null;
 		searchPanel.workspaceAttachmentChanged();
@@ -897,6 +903,7 @@ class ExosuitApp implements DesktopUiApplication {
 		if (workspaceAttachment != attachment) return;
 		clearExplorerModel();
 		workspaceAttachment = null;
+		workspaceFileLoader.clearCache();
 		searchFileClient = null;
 		pendingWorkspaceFolderReveal = null;
 		searchPanel.workspaceAttachmentChanged();
@@ -1083,6 +1090,8 @@ class ExosuitApp implements DesktopUiApplication {
 		return {
 			documents: [for (view in host.allViews()) view.document.title],
 			workspaceFileTabs: workspaceFileDiagnostics(),
+			workspaceFileReads: {active: workspaceFileLoader.active, completed: workspaceFileLoader.completedReads,
+				cacheHits: workspaceFileLoader.cacheHits, cachedBytes: workspaceFileLoader.cachedBytes, lastReadMs: workspaceFileLoader.lastReadMs},
 			active: active == null ? -1 : active.id,
 			documentsSource: "core.Application (via UiWorkbenchHost)",
 			explorerRoot: explorerRoot,
@@ -1158,6 +1167,7 @@ class ExosuitApp implements DesktopUiApplication {
 			var file = UiEditorTabs.workspaceFile(item);
 			if (file != null) result.push({scope: file.scope, root: file.rootName, path: file.path,
 				revision: file.revision, preview: file.preview, syntax: file.textModel.syntax.name,
+				loading: file.loading, loadError: file.loadError, contentReadyMs: file.contentReadyMs,
 				diskChanged: file.diskChanged, searchSelection: file.searchSelection == null ? null : {
 					start: file.searchSelection.anchor, end: file.searchSelection.focus
 				}});
@@ -1267,7 +1277,7 @@ class ExosuitApp implements DesktopUiApplication {
 				explorerModel = new WorkspaceFileTreeModel(function()
 					return workspaceAttachment == null ? null : workspaceAttachment.fileClient(),
 					remoteWorkspace, remoteScope, rootName, theme, requestFrame,
-					function(root) host.markWorkspaceFilesChanged(remoteScope, root));
+					function(root) { workspaceFileLoader.clearCache(); host.markWorkspaceFilesChanged(remoteScope, root); });
 			} else explorerModel = new DirectoryTreeModel(explorerRoot, theme);
 		}
 		var remoteModel:Null<WorkspaceFileTreeModel> = Std.isOfType(explorerModel, WorkspaceFileTreeModel)
@@ -1415,6 +1425,8 @@ class ExosuitApp implements DesktopUiApplication {
 			sticky:Bool, match:Null<FileSearchMatch>):Void {
 		if (host.activateWorkspaceFile(scope, root, path, sticky)) {
 			var existing = host.workspaceFile(scope, root, path);
+			if (existing != null && existing.loading)
+				workspaceFileLoader.prioritize(workspaceFileKey(workspace, scope, root, path));
 			if (existing != null && match != null && match.line >= 0)
 				existing.selectSearchMatch(match.line, match.column, match.length);
 			requestFrame();
@@ -1428,48 +1440,57 @@ class ExosuitApp implements DesktopUiApplication {
 			application.reportError("files", "Workspace file preview memory limit reached; close another file first");
 			return;
 		}
-		var pendingKey = workspaceFileKey(workspace, scope, root, path);
-		if (workspaceFileOpenPending.exists(pendingKey)) {
-			if (sticky) workspaceFileOpenPending.set(pendingKey, true);
-			return;
-		}
-		if (workspaceFileRefreshPending.exists(pendingKey)) return;
-		if (workspaceFileReadCount() >= 2) {
-			application.reportError("files", "Two workspace file reads are already in progress");
-			return;
-		}
-		workspaceFileOpenPending.set(pendingKey, sticky);
-		var client = attachment == null ? null : attachment.fileClient();
-		if (client == null || attachment.fileWorkspace() != workspace) {
-			workspaceFileOpenPending.remove(pendingKey);
-			application.reportError("files", "Workspace file service is not connected");
-			return;
-		}
-		WorkspaceFileReader.read(client, workspace, root, path, revision,
-			function(result:WorkspaceFileReadResult) {
-				var makeSticky = workspaceFileOpenPending.get(pendingKey) == true;
-				workspaceFileOpenPending.remove(pendingKey);
-				if (workspaceAttachment != attachment) return;
-				if (result.error != null || result.contents == null || result.revision == null) {
-					application.reportError("files", result.error == null ? "Could not read workspace file" : result.error);
-					return;
-				}
-				if (!host.canOpenWorkspaceFile(scope, root, path, result.sizeBytes)) {
-					application.reportError("files", "Workspace file preview memory limit reached; close another file first");
-					return;
-				}
-				var file = new UiWorkspaceFileTab(workspace, root, scope, rootName, path, result.revision,
-					result.contents, result.sizeBytes, !makeSticky, application.syntaxes, editorPalette);
-				if (match != null && match.line >= 0)
-					file.selectSearchMatch(match.line, match.column, match.length);
-				host.openWorkspaceFile(file, !makeSticky);
-			});
+		var file = new UiWorkspaceFileTab(workspace, root, scope, rootName, path, revision == null ? "" : revision,
+			"", sizeBytes, !sticky, application.syntaxes, editorPalette);
+		file.loading = true;
+		host.openWorkspaceFile(file, !sticky);
+		requestFrame();
+		loadWorkspaceFile(file, attachment, revision, match);
+	}
+
+	function loadWorkspaceFile(file:UiWorkspaceFileTab, attachment:Null<workspace.client.WorkspaceAttachment>,
+			revision:Null<String>, match:Null<FileSearchMatch>):Void {
+		file.loading = true;
+		file.loadError = null;
+		var started = Sys.time();
+		var key = workspaceFileKey(file.workspace, file.scope, file.root, file.path);
+		workspaceFileLoader.load(key, revision, function(complete, wanted) {
+			var client = attachment == null ? null : attachment.fileClient();
+			if (workspaceAttachment != attachment || client == null || attachment.fileWorkspace() != file.workspace ||
+				attachment.fileScope() != null && attachment.fileScope() != file.scope) {
+				complete({contents: null, revision: null, sizeBytes: 0, error: "Workspace file service is not connected"});
+				return;
+			}
+			WorkspaceFileReader.read(client, file.workspace, file.root, file.path, revision, complete, wanted);
+		}, function() return host.hasWorkspaceFile(file), function(result) {
+			file.loading = false;
+			if (workspaceAttachment != attachment) {
+				file.loadError = "Workspace is disconnected. Reconnect and retry.";
+			} else if (result.error != null || result.contents == null || result.revision == null) {
+				file.loadError = result.error == null ? "Could not read workspace file" : result.error;
+			} else if (!host.canOpenWorkspaceFile(file.scope, file.root, file.path, result.sizeBytes)) {
+				file.loadError = "Workspace file preview memory limit reached; close another file first";
+			} else {
+				var updated = new UiWorkspaceFileTab(file.workspace, file.root, file.scope, file.rootName,
+					file.path, result.revision, result.contents, result.sizeBytes, file.preview, application.syntaxes, editorPalette);
+				updated.contentReadyMs = (Sys.time() - started) * 1000;
+				if (match != null && match.line >= 0) updated.selectSearchMatch(match.line, match.column, match.length);
+				// Replace in place: an older response must never activate its tab again.
+				host.replaceWorkspaceFileSnapshot(file, updated);
+			}
+			requestFrame();
+		});
 	}
 
 	function refreshWorkspaceFile(file:UiWorkspaceFileTab):Void {
-		if (file == null || file.refreshing || !host.hasWorkspaceFile(file)) return;
+		if (file == null || file.loading || file.refreshing || !host.hasWorkspaceFile(file)) return;
+		if (file.loadError != null) {
+			loadWorkspaceFile(file, workspaceAttachment, null, null);
+			requestFrame();
+			return;
+		}
 		var key = workspaceFileKey(file.workspace, file.scope, file.root, file.path);
-		if (workspaceFileOpenPending.exists(key) || workspaceFileRefreshPending.exists(key)) return;
+		if (workspaceFileRefreshPending.exists(key)) return;
 		if (workspaceFileReadCount() >= 2) {
 			file.refreshError = "Two workspace file reads are already in progress";
 			requestFrame();
@@ -1489,6 +1510,7 @@ class ExosuitApp implements DesktopUiApplication {
 		requestFrame();
 		var fail = function(message:String):Void {
 			workspaceFileRefreshPending.remove(key);
+			workspaceFileLoader.pump();
 			file.refreshing = false;
 			if (host.hasWorkspaceFile(file)) file.refreshError = message;
 			requestFrame();
@@ -1522,6 +1544,8 @@ class ExosuitApp implements DesktopUiApplication {
 					var updated = new UiWorkspaceFileTab(file.workspace, file.root, file.scope, file.rootName, file.path,
 						result.revision, result.contents, result.sizeBytes, file.preview, application.syntaxes, editorPalette);
 					workspaceFileRefreshPending.remove(key);
+					workspaceFileLoader.clearCache();
+					workspaceFileLoader.pump();
 					file.refreshing = false;
 					if (host.replaceWorkspaceFileSnapshot(file, updated)) requestFrame();
 				});
@@ -1530,8 +1554,7 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function workspaceFileReadCount():Int {
-		var count = 0;
-		for (_ in workspaceFileOpenPending.keys()) count++;
+		var count = workspaceFileLoader.active;
 		for (_ in workspaceFileRefreshPending.keys()) count++;
 		return count;
 	}

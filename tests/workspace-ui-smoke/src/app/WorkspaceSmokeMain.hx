@@ -47,6 +47,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	var closeWidth:Float = 0;
 	var selectionDragOffset:Float = 0.0;
 	var selectionStoppedOffset:Float = 0.0;
+	var remoteOpenTests:Null<RemoteFileOpenTests>;
 
 	public function new(context:haxeon.ui.host.DesktopUiHostContext, path:String, phase:String) {
 		super(context.fonts, null, context, (phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-font" || phase == "editor-tabs" || phase == "zoom" || phase == "word-delete" || phase == "selection" || phase == "tab-close" || phase == "pointer-actions" || phase == "caret-follow" || phase == "exit-confirmation" || phase == "save-as" || phase == "tab-close-paint" || phase == "settings" || phase == "editor-minimap" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
@@ -67,6 +68,16 @@ class WorkspaceSmokeApp extends ExosuitApp {
 
 	override public function submit(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		frames++;
+		if (phase == "remote-open") {
+			if (frames == 1) { remoteOpenTests = new RemoteFileOpenTests(this); remoteOpenTests.start(); }
+			if (frames == 2) {
+				var loadingFile:ui.UiWorkspaceFileTab = cast UiEditorTabs.workspaceFile(host.activeTab());
+				var loading = find(ui.root, "workspace-file-preview:" + loadingFile.id);
+				require(loading != null, "loading preview was not rendered before the response");
+				remoteOpenTests.finish();
+			}
+			return super.submit(frame);
+		}
 		if (phase == "large-picker") return largePickerStep(frame);
 		if (phase == "editor-font") return editorFontStep(frame);
 		if (phase == "problems") return problemsStep(frame);
