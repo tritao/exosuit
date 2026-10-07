@@ -90,7 +90,15 @@ class WebMain {
 			dirty: active == null ? false : active.dirty,
 			errors: [for (entry in app.application.errors.entries) entry.message],
 			commands: [for (command in app.application.commands.all()) command.name],
-			shell: app.diagnosticState()
+			shell: app.diagnosticState(),
+			remoteAccess: remoteAccess == null ? null : {
+				status: remoteAccess.status,
+				error: remoteAccess.error,
+				authenticationCode: remoteAccess.authenticationCode,
+				codeConfirmed: remoteAccess.codeConfirmed,
+				workspaceRoot: remoteAccess.workspaceRoot,
+				grants: remoteAccess.grants
+			}
 		}));
 		return 0;
 	}

@@ -1,6 +1,45 @@
 # Execution ledger
 
-Last updated: 2026-10-06.
+Last updated: 2026-10-07.
+
+## M16.1 live browser first-pair qualification, 2026-10-07
+
+The fresh-browser first-pair path now passes end to end against the local
+Wrangler Worker. `tests/workspace-browser-pairing/run.py` starts an isolated
+Worker, a Haxe host composed from the production `WorkspaceRelayHost`,
+`WorkspacePairingManager` and `WorkspaceRpcServer`, and headless Chrome. It
+drives the visible browser Remote Access panel. The host and browser Noise
+authentication strings match; the test host then invokes the real pairing
+manager approval with only `workspace.read` and `workspace.identity`. The
+browser stores and reopens the credential record and receives workspace
+identity over encrypted RPC. The test uses in-memory device persistence and
+explicit loopback HTTP mode: it does not qualify the desktop approval UI,
+`AgentMain` startup, SQLite device persistence or the OS credential store. The
+raw IndexedDB record contains ciphertext, no clear key/token fields, and a
+non-extractable WebCrypto wrapping key. The test host waits for that identity
+assertion before closing, avoiding a false pass on handshake alone.
+
+The first run exposed a real browser transport defect: NativeKit's Emscripten
+backend passed an empty string as the optional WebSocket subprotocol, which
+Chromium rejects. `transport_web.cpp` now passes `nullptr` when no subprotocol is
+requested. The relay intentionally negotiates none, so this preserves the
+existing Worker wire protocol. NativeKit's platform-specific Wasm build and
+the complete browser-to-Worker run pass after the fix.
+
+Commands and outcomes:
+- `EMSDK_DIR=/home/joao/dev/nativekit/.tools/emsdk EXOSUIT_WEB_BUILD_DIR=/tmp/exosuit-web-browser-pairing web/build.sh` — pass; 110 guest imports match the host ABI.
+- `haxeon/scripts/haxeon build --project tests/workspace-browser-pairing/haxeon.json` — pass.
+- `python3 tests/workspace-browser-pairing/run.py /tmp/exosuit-web-browser-pairing/site` — pass: matching SAS, stored credentials, workspace identity, two grants and one admitted RPC client.
+- `python3 -m py_compile tests/workspace-browser-pairing/run.py` and `node --check tests/workspace-browser-pairing/browser-client.mjs` — pass.
+
+This qualifies local first pairing only. Saved-device reconnection, other-network
+access, Durable Object hibernation/wake, quotas and deployment remain open. No
+Worker was deployed. The unrelated Haxeon UI edits and
+`graphical/Untitled-1tra` were preserved. NativeKit commit `473c70d6` applies
+the browser fix on `exosuit-followon`; Haxeon commit `9355ef5e` pins that change
+without including its pre-existing UI edits. The Exosuit harness and this
+roadmap evidence are committed on the current `main` branch; these commits
+complete the local-pairing slice, not M16.1.
 
 ## M16.1 security groundwork, 2026-10-06
 

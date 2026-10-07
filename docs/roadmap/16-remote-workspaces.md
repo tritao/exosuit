@@ -6,9 +6,12 @@ bearer, Noise-authenticated device grants, a desktop approval panel, and a
 first-pairing browser client. The browser consumes a pasted one-use relay URL,
 compares the Noise transcript code, stores device credentials encrypted under
 a non-extractable WebCrypto key, confirms receipt to the daemon, and verifies
-workspace identity over RPC. Saved-device selection/reconnection, remote
-workspace resources, and cross-network qualification remain open. It depends
-on Haxeon RPC.1/RPC.2 and the
+workspace identity over RPC. The full first-pair path now passes in headless
+Chrome through a local Wrangler Worker, including code comparison, desktop
+pairing-manager approval and encrypted browser storage. Saved-device
+selection/reconnection,
+remote workspace resources, and cross-network qualification remain open. It
+depends on Haxeon RPC.1/RPC.2 and the
 M14 workspace service; terminal and provider features depend on their M12/M14
 acceptance. Use the existing M15 web build as the first remote client. Android
 uses the same responsive web application; a native Android app is not required
@@ -119,8 +122,8 @@ random source only handles Linux/macOS and Windows; the NativeKit integration
 overrides it with `crypto.getRandomValues` for Emscripten and fails closed if
 secure browser entropy is unavailable. The native package and Haxeon boundary
 are implemented; the production Wasm host builds and the web app launches in
-headless Chrome. A full browser-to-Worker Noise pairing run remains an
-acceptance test. Noise-C describes
+headless Chrome. The first-pair browser-to-Worker flow now passes locally;
+cross-network and deployment qualification remain open. Noise-C describes
 itself as a reference implementation, and this choice is not a claim of an
 independent security audit. Reassess the pinned implementation if portability,
 maintenance or review raises a material concern.
@@ -152,8 +155,8 @@ upstream vectors at `cfe2541` on Linux. The same source compiled to Wasm with th
 pinned Emscripten 6.0.9 toolchain; its unit suite passed in Node and headless
 Chrome, and all 1392 vectors passed in Node. That earlier prototype used an
 Emscripten `/dev/urandom` shim; the production package now uses the browser
-Crypto API directly. The headless browser validates WebCrypto credential
-storage; live browser-to-Worker pairing remains an acceptance gate. The
+Crypto API directly. Headless Chrome validates WebCrypto credential storage
+and the live browser-to-Worker first-pair path. The
 complete upstream `make check` could not run because this environment lacks
 `yacc`. See the
 [Noise specification](https://noiseprotocol.org/noise.html) and the
@@ -196,11 +199,11 @@ protocol and browser key-storage contracts.
   one-use invitations, lists pending transcript codes, and approves, rejects
   or revokes devices. The graphical Remote Access panel exposes those
   controls, shows matching codes and grants, and revokes saved devices.
-- [ ] Qualify browser access across networks. The first-pairing browser client
-  now connects over the relay's secure WebSocket and transfers its confirmed
-  Noise channel into RPC. Saved-device ticket exchange/reconnection and
-  real-network qualification remain open; keep direct/local transport optional
-  under the same client interface.
+- [ ] Qualify browser access across networks. The local first-pairing run passes
+  through a real headless browser, the local Wrangler Worker and the desktop
+  pairing state machine. Cross-network use, saved-device ticket exchange and
+  reconnection remain open; keep direct/local transport optional under the same
+  client interface.
 - [x] Select and prototype-test the browser-compatible Noise XX suite and
   NativeKit/WebCrypto key-custody design documented above. Do not invent
   cryptography or treat relay TLS as end-to-end encryption.
@@ -235,13 +238,23 @@ protocol and browser key-storage contracts.
 - [x] Integrate the selected Noise channel into NativeKit/Haxeon and the web
   host. The first-pair flow binds machine/device IDs in the Noise prologue,
   checks the matching code, stores credentials, waits for the encrypted receipt,
-  and starts workspace RPC. Native/Worker transport tests, the Wasm build, a
-  headless browser launch, and browser-store checks pass. A real browser-to-
-  Worker pairing run and remote deployment remain qualification gates. Serve
-  client assets over HTTPS. Relay handles
+  and starts workspace RPC. `tests/workspace-browser-pairing/run.py` now checks
+  the actual browser-to-Worker first-pair path, matching code, approved grants,
+  workspace identity and encrypted IndexedDB record. The Wasm build and local
+  Worker qualification pass. Cross-network access and remote deployment remain
+  gates. Serve client assets over HTTPS. Relay handles
   routing/discovery, not workspace history or provider credentials. Document
   relay trust/metadata and web-client delivery trust. Keep relay deployment
   self-hostable.
+- [x] Qualify fresh-browser first pairing against a local Wrangler Worker. The
+  test drives the browser Remote Access panel, matches the Noise code against
+  the real host pairing manager, and verifies its approval, workspace identity
+  over RPC, and AES-GCM-protected IndexedDB record. The host uses in-memory
+  device storage and loopback test mode, so production daemon startup and local
+  desktop approval UX still need qualification. It also caught the Emscripten
+  empty WebSocket subprotocol bug, fixed by passing `nullptr` when negotiation
+  is omitted. Run with a built site using
+  `python3 tests/workspace-browser-pairing/run.py <site-directory>`.
 - [ ] Use RPC reconnect with fresh authenticated handshakes and Exosuit-owned
   resource/cursor recovery. Machine sleep/offline and revoked devices produce
   clear states rather than stale connected indicators.
