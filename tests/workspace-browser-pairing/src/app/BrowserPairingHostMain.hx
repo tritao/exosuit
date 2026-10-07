@@ -15,6 +15,7 @@ import workspace.runtime.WorkspaceRelaySettings;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspacePairingProtocol;
 import workspace.service.WorkspacePairingProtocol.PendingPairing;
+import workspace.service.WorkspacePairingProtocol.PairingDevice;
 import workspace.service.WorkspaceService;
 import workspace.storage.WorkspaceSqliteStore;
 import workspace.runtime.WorkspaceDirectories;
@@ -31,6 +32,10 @@ class BrowserPairingHostMain {
 
 	static function main():Void {
 		var args = Sys.args();
+		if (args.length == 2 && args[0] == "--agent-admin") {
+			runAgentAdmin(args[1]);
+			return;
+		}
 		if (args.length == 3 && args[0] == "--cleanup-credentials") {
 			cleanupTestCredentials(args[1], args[2]);
 			return;
@@ -170,6 +175,114 @@ class BrowserPairingHostMain {
 		hub.dispose();
 		store.close();
 		throw failure == null ? "Browser pairing test timed out" : failure;
+	}
+
+	/** Drives the real daemon's same-user pairing RPC from the browser E2E harness. */
+	static function runAgentAdmin(configPath:String):Void {
+		var config:Dynamic = Json.parse(sys.io.File.getContent(configPath));
+		var machineId:String = config.machineId, origin:String = config.origin,
+			workspaceRoot:String = config.workspaceRoot, invitePath:String = config.invitePath,
+			statusPath:String = config.statusPath, decisionPath:String = config.decisionPath,
+			successPath:String = config.successPath, localSocket:String = config.localSocket;
+		var runtime = NativeKitRuntime.start(), hub = new NativeRpcHub(runtime.events),
+			clock = function() return NativeKit.nk_time_seconds() * 1000;
+		var localConnection:Null<RpcConnection> = null;
+		var client = new RpcClient(new NativeRpcConnector(hub, NativeRpcHub.local(localSocket)), clock,
+			function() return 0.5,
+			new RpcPeerOptions("exosuit-editor/1", [WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS,
+				WorkspaceProtocol.WRITE, WorkspaceProtocol.TREE, WorkspaceProtocol.IDENTITY_CAPABILITY,
+				WorkspacePairingProtocol.ADMIN], [WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS,
+				WorkspaceProtocol.IDENTITY_CAPABILITY], 2000, 262144, 32, 1048576),
+			function(connection, generation, _) localConnection = connection, 10, 100, 2000);
+		var invitationStarted = false, invitationReady = false, approved = false,
+			approvalPending = false, listPending = false;
+		var deviceId:String = "", visiblePending:Array<PendingPairing> = [],
+			visibleDevices:Array<PairingDevice> = [];
+		var deadline = clock() + 180000, nextStatusWrite = 0.0, nextListRequest = 0.0,
+			failure:Null<String> = null;
+		while (clock() < deadline && failure == null) {
+			runtime.events.wait(0.01);
+			for (_ in 0...128) if (!runtime.events.poll()) break;
+			client.poll();
+			var connection = localConnection;
+			if (connection != null && !invitationStarted) {
+				invitationStarted = true;
+				connection.call(WorkspacePairingProtocol.CREATE, {ttlSeconds: 120}, 10000, function(value) {
+					if (value.machineId != machineId || value.relayOrigin != origin) {
+						failure = "AgentMain returned an invitation for a different relay identity";
+						return;
+					}
+					deviceId = value.deviceId;
+					writePrivate(invitePath, Json.stringify({pairingSocketUrl: value.pairingSocketUrl,
+						machineId: value.machineId, deviceId: value.deviceId}));
+					invitationReady = true;
+				}, function(error) {
+					failure = "AgentMain invitation RPC failed: " + error.code;
+				});
+			}
+			if (connection != null && !listPending && clock() >= nextListRequest) {
+				listPending = true;
+				nextListRequest = clock() + 200;
+				connection.call(WorkspacePairingProtocol.LIST, {}, 2000, function(value) {
+					listPending = false;
+					visiblePending = value.pending;
+					visibleDevices = value.devices;
+				}, function(error) {
+					listPending = false;
+					failure = "AgentMain pairing-list RPC failed: " + error.code;
+				});
+			}
+			if (invitationReady && !approved && !approvalPending && sys.FileSystem.exists(decisionPath)) {
+				var decision:Dynamic = Json.parse(sys.io.File.getContent(decisionPath));
+				var matched = false;
+				for (candidate in visiblePending)
+					if (candidate.deviceId == decision.deviceId && candidate.authenticationCode == decision.authenticationCode)
+						matched = true;
+				if (!matched) {
+					failure = "Browser and AgentMain authentication codes did not match";
+				} else {
+					approvalPending = true;
+					connection.call(WorkspacePairingProtocol.APPROVE, {deviceId: deviceId,
+						grants: [WorkspaceProtocol.READ, WorkspaceProtocol.IDENTITY_CAPABILITY]}, 10000, function(result) {
+						if (!result.accepted) failure = "AgentMain refused pairing approval: " + result.error;
+						else approved = true;
+					}, function(error) {
+						failure = "AgentMain pairing-approval RPC failed: " + error.code;
+					});
+				}
+			}
+			if (clock() >= nextStatusWrite) {
+				var connected = false;
+				for (device in visibleDevices)
+					if (device.deviceId == deviceId && !device.revoked && device.connected) connected = true;
+				writePrivate(statusPath, Json.stringify({ready: invitationReady, pending: visiblePending,
+					approved: approved, activeClients: connected ? 1 : 0, failure: failure,
+					workspaceRoot: workspaceRoot}));
+				nextStatusWrite = clock() + 200;
+			}
+			if (approved && sys.FileSystem.exists(successPath)) {
+				var result:Dynamic = Json.parse(sys.io.File.getContent(successPath));
+				if (result.machineId != machineId || result.deviceId != deviceId || result.workspaceRoot != workspaceRoot)
+					failure = "Browser reported a different AgentMain workspace identity";
+				else {
+					var connected = false;
+					for (device in visibleDevices)
+						if (device.deviceId == deviceId && !device.revoked && device.connected) connected = true;
+					require(connected, "AgentMain did not retain the reconnected browser device");
+					writePrivate(statusPath, Json.stringify({ready: true, pending: visiblePending,
+						approved: true, activeClients: 1, failure: null, workspaceRoot: workspaceRoot}));
+					client.close();
+					hub.dispose();
+					runtime.dispose();
+					Sys.println("PASS: browser paired and reconnected through AgentMain's local admin RPC");
+					return;
+				}
+			}
+		}
+		client.close();
+		hub.dispose();
+		runtime.dispose();
+		throw failure == null ? "AgentMain browser pairing test timed out" : failure;
 	}
 
 	static function verifyPersistedDevice(store:WorkspaceSqliteStore, deviceId:String):Void {

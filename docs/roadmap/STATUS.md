@@ -2,6 +2,32 @@
 
 Last updated: 2026-10-07.
 
+## M16.1 browser pairing through AgentMain, 2026-10-07
+
+Extended the headless browser pairing run to launch the production `AgentMain`
+and drive invitation creation, pending-code review and approval through its
+same-user local RPC socket. The browser then completes first pairing, stores
+its encrypted credential, obtains a fresh ticket and reconnects with its pinned
+machine identity. The test confirms the connected device through AgentMain's
+pairing RPC, stops the daemon, and checks the production SQLite device row,
+public key and grants. This exercises the daemon's NativeKit credential store,
+SQLite store, relay host, Noise admission and local admin RPC together.
+
+The run exposed a real method-ID collision: pairing administration and Codex
+agent methods both used IDs 120–123. Pairing now has permanent IDs 130–134,
+leaving the agent range intact. A focused-host run had hidden this because it
+did not bind Codex methods.
+
+Validation: `haxeon/scripts/haxeon build --project
+tests/workspace-browser-pairing/haxeon.json`, `haxeon/scripts/haxeon build
+--project agent/haxeon.json`, Python/Node syntax checks, and
+`python3 tests/workspace-browser-pairing/run.py --agent
+/tmp/exosuit-web-saved-reconnect-debug/site` pass. The final run verifies
+matching transcript codes, browser credential custody, two approved grants,
+fresh-ticket reconnect, one authenticated AgentMain client, and the persisted
+SQLite trust record. Graphical desktop-panel clickthrough, cross-network use,
+and M16.2 workspace resources remain open.
+
 ## M16.1 saved-browser-device reconnect, 2026-10-07
 
 Added a saved-device list to the browser Remote Access panel and a reconnect
@@ -27,8 +53,8 @@ Validation: the web build passes with all 117 guest imports matched;
 credential storage, fresh ticket exchange, pinned-key reconnect and the final
 desktop client count. `npm run check` in `relay/worker` passes all 15 tests and
 type checking. The workspace transport relay-only and Noise/pairing tests pass.
-Graphical desktop approval, cross-network/browser-to-`AgentMain` use, and M16.2
-workspace resources remain open.
+Graphical desktop approval, cross-network use, and M16.2 workspace resources
+remain open. Browser-to-`AgentMain` use is covered by the later entry above.
 
 ## M16.1 production daemon credential restart, 2026-10-07
 
@@ -67,11 +93,10 @@ workspace identity, the harness closes and reopens SQLite. It verifies the
 pinned device ID, active revocation state, and exactly the `workspace.read` and
 `workspace.identity` grants survive reload.
 
-The test still does not start `AgentMain`, exercise the NativeKit OS credential
-service for the Noise machine identity, or click through the graphical desktop
-Remote Access panel. The existing Haxeon credential package smoke test passed
-on this user's OS credential service. Saved-browser-device reconnection and
-cross-network qualification also remain open.
+At this checkpoint the test did not start `AgentMain` or exercise the NativeKit
+OS credential service for the Noise machine identity. The later
+AgentMain-backed browser run above closes that gap. Graphical desktop-panel
+clickthrough and cross-network qualification remain open.
 
 Validation: `haxeon/scripts/haxeon build --project
 tests/workspace-browser-pairing/haxeon.json`, `python3 -m py_compile

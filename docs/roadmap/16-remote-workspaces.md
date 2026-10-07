@@ -246,13 +246,21 @@ protocol and browser key-storage contracts.
   remote identity; file, terminal and agent views remain in M16.2.
 - [x] Run browser first pairing against the production SQLite device store and
   reopen the database after approval. The test verifies the pinned device
-  remains active with exactly the approved capabilities. It still uses a
-  focused host harness instead of launching `AgentMain` or driving the desktop
-  Remote Access panel.
+  remains active with exactly the approved capabilities. The initial test used
+  a focused host harness; the real-daemon browser flow is qualified below.
 - [x] Create invitations, read pending transcript codes, and approve grants via
   the daemon's same-user local RPC methods in the browser pairing harness. This
-  covers the API used by `LocalWorkspaceClient`; actual `AgentMain` startup and
-  graphical desktop-panel clickthrough remain separate acceptance checks.
+  covers the API used by `LocalWorkspaceClient`. The browser flow now also runs
+  against real `AgentMain`; graphical desktop-panel clickthrough remains a
+  separate acceptance check.
+- [x] Run browser first pairing and saved-device reconnection through real
+  `AgentMain`, using its local admin RPC, NativeKit credential service, relay
+  host and production SQLite catalog. Verify the browser's transcript code,
+  approved grants, pinned machine identity, authenticated reconnect and saved
+  device row after daemon shutdown. The run caught and fixed an RPC method-ID
+  collision by assigning pairing administration IDs 130–134. This is local
+  qualification; graphical desktop approval and cross-network access remain
+  open.
 - [x] Keep the web build compiling the shared network and Noise interfaces.
   The build generates the wasm32 NativeKit network ABI, compiles the Haxeon
   guest and Emscripten host, and verifies all guest imports.
@@ -273,11 +281,12 @@ protocol and browser key-storage contracts.
   over RPC, and AES-GCM-protected IndexedDB record. Approved device trust is
   persisted and reloaded through production `WorkspaceSqliteStore`. Invitation,
   pending-code listing and approval now travel through a same-user local RPC
-  client. The focused host still uses loopback test mode, so `AgentMain` startup
-  and graphical local desktop approval UX remain open. It also caught the Emscripten
-  empty WebSocket subprotocol bug, fixed by passing `nullptr` when negotiation
-  is omitted. Run with a built site using
-  `python3 tests/workspace-browser-pairing/run.py <site-directory>`.
+  client. The focused-host test remains available for faster isolation, and
+  `--agent` exercises the same flow through the production daemon. The initial
+  test also caught the Emscripten empty WebSocket subprotocol bug, fixed by
+  passing `nullptr` when negotiation is omitted. Run with a built site using
+  `python3 tests/workspace-browser-pairing/run.py <site-directory>`; add
+  `--agent` to include AgentMain, SQLite and the OS credential service.
 - [x] Add saved-device selection and reconnect in the browser panel. The browser
   keeps the relay origin beside its encrypted credential, requests a fresh
   ticket with the saved device bearer, and pins the machine Noise key before

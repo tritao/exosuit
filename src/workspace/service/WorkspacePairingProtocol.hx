@@ -51,22 +51,22 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(2) var error:Null<String>;
 }
 
-/** Pairing administration is available only over the same-user local socket. */
+/** Permanent local-admin method IDs; pairing methods occupy the 130–134 range. */
 class WorkspacePairingProtocol {
 	public static inline final ADMIN = "workspace.pairing.admin";
-	public static final CREATE = new RpcMethod<CreatePairingRequest, PairingInvitation>(120,
+	public static final CREATE = new RpcMethod<CreatePairingRequest, PairingInvitation>(130,
 		function(value) return MessagePack.encode(value), function(bytes:Bytes):CreatePairingRequest return MessagePack.decode(bytes),
 		function(value) return MessagePack.encode(value), function(bytes:Bytes):PairingInvitation return MessagePack.decode(bytes));
-	public static final LIST = new RpcMethod<PairingListRequest, PairingList>(121,
+	public static final LIST = new RpcMethod<PairingListRequest, PairingList>(131,
 		function(value) return MessagePack.encode(value), function(bytes:Bytes):PairingListRequest return MessagePack.decode(bytes),
 		function(value) return MessagePack.encode(value), function(bytes:Bytes):PairingList return MessagePack.decode(bytes));
-	public static final APPROVE = new RpcMethod<ApprovePairingRequest, PairingActionResult>(122,
+	public static final APPROVE = new RpcMethod<ApprovePairingRequest, PairingActionResult>(132,
 		function(value) return MessagePack.encode(value), function(bytes:Bytes):ApprovePairingRequest return MessagePack.decode(bytes),
 		function(value) return MessagePack.encode(value), function(bytes:Bytes):PairingActionResult return MessagePack.decode(bytes));
-	public static final REJECT = new RpcMethod<PairingActionRequest, PairingActionResult>(123,
+	public static final REJECT = new RpcMethod<PairingActionRequest, PairingActionResult>(133,
 		function(value) return MessagePack.encode(value), function(bytes:Bytes):PairingActionRequest return MessagePack.decode(bytes),
 		function(value) return MessagePack.encode(value), function(bytes:Bytes):PairingActionResult return MessagePack.decode(bytes));
-	public static final REVOKE = new RpcMethod<PairingActionRequest, PairingActionResult>(124,
+	public static final REVOKE = new RpcMethod<PairingActionRequest, PairingActionResult>(134,
 		function(value) return MessagePack.encode(value), function(bytes:Bytes):PairingActionRequest return MessagePack.decode(bytes),
 		function(value) return MessagePack.encode(value), function(bytes:Bytes):PairingActionResult return MessagePack.decode(bytes));
 }
