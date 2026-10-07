@@ -8,5 +8,6 @@ interface ExplorerTreeModel extends TreeViewModel {
 	public function rootIdentity():String;
 	public function watchesChanges():Bool;
 	public function refresh():Void;
+	public function dispose():Void;
 	public function buildItemWithIcons(key:String, expanded:Bool, atlas:SetiIconAtlas, dark:Bool):View;
 }

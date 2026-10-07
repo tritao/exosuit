@@ -1,7 +1,8 @@
 # Workspace filesystem protocol
 
-Status: Linux F1 and the first F2 read-handle slice are implemented; F1/F2
-acceptance is incomplete and F3–F5 remain planned. Required by
+Status: Linux F1 and the first F2 read-handle slice are implemented, with a
+basic Linux desktop F3 change-invalidation path; F1–F3 acceptance is incomplete
+and F4–F5 remain planned. Required by
 [M16.2](16-remote-workspaces.md). The
 Exosuit service uses shared typed RPC schemas; filesystem semantics are not
 part of Haxeon's generic RPC package. Local adapters and RPC adapters will
@@ -16,8 +17,8 @@ capped and idle-expiring. A directory listing retains a bounded immutable copy
 of the entries it observed, so retries cannot mix pages. Its revision
 fingerprints that returned metadata set; it is not a file-content revision or
 a point-in-time filesystem transaction. Concurrent changes during enumeration
-may require a fresh listing. Later changes appear after a new listing until F3
-watch delivery is added.
+may require a fresh listing. Later changes invalidate the desktop Explorer's
+root listing through the basic Linux watch path described below.
 
 F2 adds root-scoped regular-file handles and typed `readOpen`, `readChunk` and
 `readClose` RPCs. A handle pins the opened identity; each chunk checks the
@@ -41,17 +42,29 @@ chunks must still match that revision. Desktop previews now use the shared
 syntax registry and apply token colors to visible text ranges. A Refresh action
 re-stats and rereads the saved file, replacing only the same still-open tab and
 retaining the last snapshot with an error if refresh fails. Live change
-notifications and browser integration remain open. The Explorer resets remote
+notifications now invalidate remote listings and mark open snapshots as
+changed on disk; the user still triggers Refresh. The Explorer resets remote
 listings after a connection replacement, retries expired page cursors from a
 fresh listing, and bounds its retained cache to 256 directories and 32,768
 entries. Remote editing remains out of scope.
+
+The current Linux desktop watcher subscribes per root, coalesces native events
+over 100 ms and publishes only a root epoch/cursor, never host paths or file
+contents. The Explorer drops cached pages for that root and shows a changed-on-
+disk notice on its open snapshots. A reconnect with a mismatched epoch/cursor
+requests a full root resync; the service does not retain/replay event history.
+This is invalidation, not automatic file reload. Watcher overflow invalidates
+all roots. Browser delivery, non-Linux backends, event replay, narrower
+subtree/path events, and full F3 race/overflow/reconnect qualification remain
+open.
 
 The secure NativeKit backend currently requires Linux `openat2`; it fails closed
 when unavailable, and other platforms return `unsupported`. Multiple roots are
 supported by the service and contract tests, but AgentMain currently publishes
 one configured root per workspace. Non-Linux secure backends and remaining F1
-acceptance cases are still open. File reads currently return raw saved bytes;
-text decoding, UI, watches and search remain open.
+acceptance cases are still open. The Linux desktop decodes valid UTF-8 for
+syntax-colored read-only previews and has root-level change invalidation;
+search, connected-browser UI and full F3 qualification remain open.
 
 ## Addressing and access
 
@@ -195,9 +208,12 @@ Revalidate match revision when opening; changed results require refresh.
   disconnect and cross-client handle refusal. No mixed-revision display. The
   Linux desktop preview currently reads up to 16 MiB, validates UTF-8, rejects
   binary content, uses the shared syntax registry for syntax coloring and has
-  explicit refresh; automatic change refresh remains open.
-- [ ] F3: watch subscriptions and reconnect. Tests cover initial fetch races,
-  duplicates/coalescing, missing rename pairs, overflow, retention gaps, polling
+  explicit refresh; automatic reload after a change remains open.
+- [ ] F3: watch subscriptions and reconnect. A basic Linux desktop path now
+  coalesces NativeKit events into root epoch/cursor notifications, invalidates
+  listings and marks open snapshots stale; it does not auto-reload file text.
+  Full tests cover initial fetch races, duplicates/coalescing, missing rename
+  pairs, overflow, retention gaps, polling
   fallback, server restart and Wi-Fi/mobile-style reconnect. UI drops stale data
   and resyncs visibly when required.
 - [ ] F4: bounded file/content search. Tests cover ignored directories, scoped

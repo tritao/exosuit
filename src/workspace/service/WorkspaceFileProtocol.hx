@@ -98,6 +98,37 @@ import workspace.service.WorkspaceProtocol.WorkspaceQuery;
 	@:id(1) var closed:Bool;
 }
 
+@:wire typedef FileWatchRequest = {
+	@:id(1) var workspace:String;
+	@:id(2) var root:String;
+	@:id(3) var epoch:Null<String>;
+	@:id(4) var cursor:Int;
+}
+
+@:wire typedef FileWatchResult = {
+	@:id(1) var workspace:String;
+	@:id(2) var root:String;
+	@:id(3) var epoch:String;
+	@:id(4) var cursor:Int;
+	@:id(5) var reset:Bool;
+}
+
+@:wire typedef FileUnwatchRequest = {
+	@:id(1) var workspace:String;
+	@:id(2) var root:String;
+}
+
+@:wire typedef FileUnwatchResult = {
+	@:id(1) var unwatched:Bool;
+}
+
+@:wire typedef FileChangeEvent = {
+	@:id(1) var workspace:String;
+	@:id(2) var root:String;
+	@:id(3) var epoch:String;
+	@:id(4) var cursor:Int;
+}
+
 /** Permanent ids for root-scoped workspace file metadata operations. */
 class WorkspaceFileProtocol {
 	public static inline final READ = "workspace.files.read";
@@ -119,4 +150,14 @@ class WorkspaceFileProtocol {
 	public static final READ_CLOSE = new RpcMethod<FileReadCloseRequest, FileReadCloseResult>(145,
 		function(value) return MessagePack.encode(value), function(bytes:Bytes):FileReadCloseRequest return MessagePack.decode(bytes),
 		function(value) return MessagePack.encode(value), function(bytes:Bytes):FileReadCloseResult return MessagePack.decode(bytes));
+	public static final WATCH = new RpcMethod<FileWatchRequest, FileWatchResult>(146,
+		function(value) return MessagePack.encode(value), function(bytes:Bytes):FileWatchRequest return MessagePack.decode(bytes),
+		function(value) return MessagePack.encode(value), function(bytes:Bytes):FileWatchResult return MessagePack.decode(bytes));
+	public static final UNWATCH = new RpcMethod<FileUnwatchRequest, FileUnwatchResult>(147,
+		function(value) return MessagePack.encode(value), function(bytes:Bytes):FileUnwatchRequest return MessagePack.decode(bytes),
+		function(value) return MessagePack.encode(value), function(bytes:Bytes):FileUnwatchResult return MessagePack.decode(bytes));
+	public static inline final CHANGED = 148;
+
+	public static function encodeChange(event:FileChangeEvent):Bytes return MessagePack.encode(event);
+	public static function decodeChange(bytes:Bytes):FileChangeEvent return MessagePack.decode(bytes);
 }

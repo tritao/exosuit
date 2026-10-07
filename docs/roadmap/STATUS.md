@@ -2,6 +2,23 @@
 
 Last updated: 2026-10-07.
 
+## M16.2 Linux desktop live file-change invalidation, 2026-10-07
+
+Added a NativeKit-backed watcher to the workspace daemon. It coalesces native
+events and sends per-root epoch/cursor notifications over the existing RPC
+connection. The Linux desktop Explorer subscribes when the root advertises watch
+support, clears cached pages after changes and marks open read-only snapshots
+with a changed-on-disk notice. Refresh remains explicit, so changes never
+silently replace the text a user is reading. Unsupported watcher backends omit
+the capability; overflow causes a full root invalidation. Connection/model
+replacement releases subscriptions.
+
+Validation: agent and graphical targets build; the two-phase Xvfb acceptance
+test verifies both the stale snapshot notice and an explicit refresh that loads
+the new contents, clears the notice, preserves the sticky tab and blocks edits.
+Browser file access and full F3 reconnect/overflow/platform qualification remain
+open. See [`WORKSPACE-FILES.md`](WORKSPACE-FILES.md).
+
 ## M16.2 explicit refresh for remote file previews, 2026-10-07
 
 Added a Refresh action to the read-only remote file preview. It stats the saved
@@ -12,10 +29,10 @@ pending cannot resurrect or overwrite it. Failure keeps the last loaded content
 visible and reports that refresh failed. Concurrent refresh and open reads share
 the existing two-read limit.
 
-Validation: the graphical target builds and the Xvfb acceptance test changes a
-Markdown file after opening it, invokes Refresh, confirms the updated contents,
-and verifies the refreshed tab remains sticky and read-only. Live file-change
-notifications remain the next step.
+Validation at this slice: the graphical target builds and the Xvfb acceptance
+test changes a Markdown file after opening it, invokes Refresh, confirms the
+updated contents, and verifies the refreshed tab remains sticky and read-only.
+Live change invalidation was added in the next slice above.
 
 ## M16.2 syntax-colored remote file previews, 2026-10-07
 

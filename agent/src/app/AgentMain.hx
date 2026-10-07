@@ -43,7 +43,7 @@ class AgentMain {
 			? new WorkspaceRelayHost(runtime.events, hub, WorkspaceRelaySettings.loadBootstrap(args[8]), allowLoopbackHttp)
 			: null;
 		var directories = new workspace.runtime.WorkspaceDirectories(args.length >= 6 ? args[5] : Sys.getCwd());
-		var files = new workspace.runtime.WorkspaceFileService("workspace", [directories.root], clock);
+		var files = new workspace.runtime.WorkspaceFileService("workspace", [directories.root], clock, runtime.events);
 		// The seed epoch is used only when creating a new catalog. Reopening preserves it.
 		var seed = new WorkspaceService("workspace", args[3], [
 			{
@@ -93,6 +93,7 @@ class AgentMain {
 				if (!runtime.events.poll())
 					break;
 			server.poll();
+			files.poll();
 			// Runtime ownership survives client disconnects.
 			terminals.poll();
 			agents.poll();

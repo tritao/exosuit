@@ -5,7 +5,12 @@ import haxe.crypto.Sha256;
 import haxe.io.Bytes;
 import haxeon.filesystem.FileSystemRoot;
 import haxeon.filesystem.FileSystemFile;
+import haxeon.platform.NativeKitEvents;
+import haxeon.platform.NativeKitEvents.NativeKitEventSubscription;
+import haxeon.platform.NativeKitEventValue;
+import nativekit.ffi.NativeKit;
 import nativekit.ffi.NativeKitFilesystemTypes.FileSystemEntry;
+import nativekit.ffi.NativeKitTypes;
 import nativekit.ffi.NativeKitTypes.Result;
 import haxeon.rpc.RpcConnection;
 import haxeon.rpc.RpcContext;
@@ -22,6 +27,11 @@ import workspace.service.WorkspaceFileProtocol.FileReadCloseRequest;
 import workspace.service.WorkspaceFileProtocol.FileReadCloseResult;
 import workspace.service.WorkspaceFileProtocol.FileStatRequest;
 import workspace.service.WorkspaceFileProtocol.FileStatResult;
+import workspace.service.WorkspaceFileProtocol.FileWatchRequest;
+import workspace.service.WorkspaceFileProtocol.FileWatchResult;
+import workspace.service.WorkspaceFileProtocol.FileUnwatchRequest;
+import workspace.service.WorkspaceFileProtocol.FileUnwatchResult;
+import workspace.service.WorkspaceFileProtocol.FileChangeEvent;
 import workspace.service.WorkspaceFileProtocol.WorkspaceFileEntry;
 import workspace.service.WorkspaceProtocol.WorkspaceQuery;
 
@@ -44,6 +54,7 @@ private class WorkspaceFileBinding {
 	final snapshots:Map<String, FileListSnapshot> = [];
 	final cursors:Map<String, FileListCursor> = [];
 	final readHandles:Map<String, FileReadHandle> = [];
+	final watchedRoots:Map<String, Bool> = [];
 
 	public function new(service:WorkspaceFileService, connection:RpcConnection, capabilities:Array<String>) {
 		this.service = service;
@@ -58,6 +69,8 @@ private class WorkspaceFileBinding {
 		connection.register(WorkspaceFileProtocol.READ_OPEN, function(request, context) onReadOpen(request, context));
 		connection.register(WorkspaceFileProtocol.READ_CHUNK, function(request, context) onReadChunk(request, context));
 		connection.register(WorkspaceFileProtocol.READ_CLOSE, function(request, context) onReadClose(request, context));
+		connection.register(WorkspaceFileProtocol.WATCH, function(request, context) onWatch(request, context));
+		connection.register(WorkspaceFileProtocol.UNWATCH, function(request, context) onUnwatch(request, context));
 		return revoke;
 	}
 
@@ -77,7 +90,7 @@ private class WorkspaceFileBinding {
 		context.respond({workspace: service.workspace, roots: [for (root in service.roots) {
 			id: root.id,
 			name: root.name,
-			capabilities: ["stat", "list", "read"]
+			capabilities: service.watchAvailable() ? ["stat", "list", "read", "watch"] : ["stat", "list", "read"]
 		}]});
 	}
 
@@ -231,6 +244,39 @@ private class WorkspaceFileBinding {
 		context.respond({closed: closeReadHandle(request.handle)});
 	}
 
+	function onWatch(request:FileWatchRequest, context:RpcContext<FileWatchResult>):Void {
+		if (!authorized(context)) return;
+		if (request == null || !service.validRef(request.workspace, request.root) || request.cursor < 0
+			|| request.epoch != null && request.epoch.length > 128) {
+			context.fail({code: "invalid_request", message: "Invalid workspace file watch", ambiguous: false});
+			return;
+		}
+		if (!service.watchAvailable()) {
+			context.fail({code: "unsupported", message: "Workspace file watching is unavailable", ambiguous: false});
+			return;
+		}
+		watchedRoots.set(request.root, true);
+		context.respond(service.subscribe(request.root, this, request.epoch, request.cursor));
+	}
+
+	function onUnwatch(request:FileUnwatchRequest, context:RpcContext<FileUnwatchResult>):Void {
+		if (!authorized(context)) return;
+		if (request == null || !service.validRef(request.workspace, request.root)) {
+			context.fail({code: "invalid_request", message: "Invalid workspace file watch", ambiguous: false});
+			return;
+		}
+		if (watchedRoots.exists(request.root)) {
+			watchedRoots.remove(request.root);
+			service.unsubscribe(request.root, this);
+		}
+		context.respond({unwatched: true});
+	}
+
+	public function notifyFileChanged(event:FileChangeEvent):Void {
+		if (active && watchedRoots.exists(event.root) && connection.isOpen())
+			connection.notify(WorkspaceFileProtocol.CHANGED, event, WorkspaceFileProtocol.encodeChange);
+	}
+
 	function makeReadToken(root:String, path:String):String {
 		counter++;
 		return Sha256.encode(service.workspace + ":" + root + ":" + path + ":" + counter + ":" + service.clock() + ":" + Math.random()).substr(0, 48);
@@ -345,6 +391,8 @@ private class WorkspaceFileBinding {
 
 	function revoke():Void {
 		active = false;
+		for (root in watchedRoots.keys()) service.unsubscribe(root, this);
+		watchedRoots.clear();
 		cursors.clear();
 		snapshots.clear();
 		var handles = [for (handle in readHandles.keys()) handle];
@@ -368,9 +416,16 @@ private typedef FileReadHandle = {
 	var lastUsed:Float;
 }
 
+private typedef FileWatchState = {
+	var epoch:String;
+	var cursor:Int;
+	var listeners:Array<WorkspaceFileBinding>;
+}
+
 private typedef WorkspaceFileRoot = {
 	var id:String;
 	var name:String;
+	var path:String;
 	var handle:FileSystemRoot;
 }
 
@@ -390,10 +445,15 @@ class WorkspaceFileService {
 	final workspace:String;
 	final roots:Array<WorkspaceFileRoot> = [];
 	final rootsById:Map<String, WorkspaceFileRoot> = [];
+	final watchStates:Map<String, FileWatchState> = [];
+	final dirtyRoots:Map<String, Bool> = [];
 	final clock:Void->Float;
+	var fileWatch:Null<OwnedFileWatch>;
+	var eventSubscription:Null<NativeKitEventSubscription>;
+	var nextWatchFlush:Float = 0.0;
 	var disposed:Bool = false;
 
-	public function new(workspace:String, rootPaths:Array<String>, clock:Void->Float) {
+	public function new(workspace:String, rootPaths:Array<String>, clock:Void->Float, ?events:NativeKitEvents) {
 		if (workspace == null || workspace.length == 0 || workspace.length > 128 || clock == null
 			|| rootPaths == null || rootPaths.length == 0 || rootPaths.length > MAX_ROOTS)
 			throw "Invalid workspace filesystem identity";
@@ -407,16 +467,123 @@ class WorkspaceFileService {
 				var root:WorkspaceFileRoot = {
 					id: index == 0 ? ROOT_ID : ROOT_ID + "-" + index,
 					name: displayName(path),
+					path: path,
 					handle: new FileSystemRoot(path)
 				};
 				roots.push(root);
 				rootsById.set(root.id, root);
+				watchStates.set(root.id, {
+					epoch: Sha256.encode(workspace + ":" + clock() + ":" + Math.random() + ":" + root.id),
+					cursor: 0,
+					listeners: []
+				});
 			}
 		} catch (error:Dynamic) {
 			for (root in roots)
 				try root.handle.close() catch (_:Dynamic) {}
 			throw error;
 		}
+		startWatcher(events);
+	}
+
+	public function watchAvailable():Bool return fileWatch != null;
+
+	public function subscribe(rootId:String, listener:WorkspaceFileBinding, epoch:Null<String>, cursor:Int):FileWatchResult {
+		var state = watchStates.get(rootId);
+		if (state == null || listener == null || !watchAvailable())
+			throw "Workspace file watcher is unavailable";
+		if (state.listeners.indexOf(listener) < 0) state.listeners.push(listener);
+		return {workspace: workspace, root: rootId, epoch: state.epoch, cursor: state.cursor,
+			reset: epoch != state.epoch || cursor != state.cursor};
+	}
+
+	public function unsubscribe(rootId:String, listener:WorkspaceFileBinding):Void {
+		var state = watchStates.get(rootId);
+		if (state != null) state.listeners.remove(listener);
+	}
+
+	/** Coalesces native events per root before notifying subscribed RPC peers. */
+	public function poll():Void {
+		var dirty = [for (root in dirtyRoots.keys()) root];
+		if (!watchAvailable() || dirty.length == 0) return;
+		var now = clock();
+		if (now < nextWatchFlush) return;
+		nextWatchFlush = now + 100.0;
+		dirtyRoots.clear();
+		for (root in dirty) {
+			var state = watchStates.get(root);
+			if (state == null) continue;
+			if (state.cursor == 0x7fffffff) {
+				state.epoch = newWatchEpoch(root);
+				state.cursor = 0;
+			}
+			state.cursor++;
+			var event:FileChangeEvent = {workspace: workspace, root: root, epoch: state.epoch, cursor: state.cursor};
+			for (listener in state.listeners.copy()) listener.notifyFileChanged(event);
+		}
+	}
+
+	function startWatcher(events:Null<NativeKitEvents>):Void {
+		if (events == null || events.isDisposed()) return;
+		try {
+			var options = new FileWatchOptions();
+			options.set_struct_size(24);
+			var created = NativeKit.nk_file_watch_create(options);
+			if (created.status != Result.Ok) return;
+			fileWatch = created.out_watch;
+			for (root in roots) if (NativeKit.nk_file_watch_add_directory(fileWatch.borrow(), root.path, true) != Result.Ok) {
+				stopWatcher();
+				return;
+			}
+			eventSubscription = events.listen(onNativeEvent);
+		} catch (_:Dynamic) {
+			stopWatcher();
+		}
+	}
+
+	function onNativeEvent(event:NativeKitEventValue):Void {
+		try switch event {
+			case Raw(kind, source, _, _, _, _, data) if (fileWatch != null
+				&& source.rawValue() == fileWatch.borrow().rawValue()):
+				if (kind == EventKind.FileWatchOverflow) markAllRootsChanged();
+				else if (kind == EventKind.FileChanged) {
+					if (data == null || data.length < 28) { markAllRootsChanged(); return; }
+					var flags = readU32(data, 8), offset = readU32(data, 12), length = readU32(data, 16);
+					if (flags != 0) { markAllRootsChanged(); return; }
+					var path = eventPath(data, offset, length);
+					if (path == null) markAllRootsChanged(); else markPathChanged(path);
+				}
+			case _:
+		} catch (_:Dynamic) markAllRootsChanged();
+	}
+
+	function markPathChanged(path:String):Void {
+		for (root in roots) {
+			var prefix = root.path == "/" ? "/" : root.path + "/";
+			if (path == root.path || StringTools.startsWith(path, prefix)) dirtyRoots.set(root.id, true);
+		}
+	}
+
+	function markAllRootsChanged():Void
+		for (root in roots) dirtyRoots.set(root.id, true);
+
+	function newWatchEpoch(rootId:String):String
+		return Sha256.encode(workspace + ":" + clock() + ":" + Math.random() + ":" + rootId);
+
+	static function readU32(bytes:Bytes, offset:Int):Int
+		return bytes.get(offset) | bytes.get(offset + 1) << 8 | bytes.get(offset + 2) << 16 | bytes.get(offset + 3) << 24;
+
+	static function eventPath(bytes:Bytes, offset:Int, length:Int):Null<String> {
+		if (offset < 28 || length < 0 || offset > bytes.length || length >= bytes.length - offset
+			|| bytes.get(offset + length) != 0) return null;
+		return bytes.getString(offset, length);
+	}
+
+	function stopWatcher():Void {
+		if (eventSubscription != null) eventSubscription.dispose();
+		eventSubscription = null;
+		if (fileWatch != null) fileWatch.close();
+		fileWatch = null;
 	}
 
 	public function bind(connection:RpcConnection, capabilities:Array<String>):Void->Void {
@@ -617,6 +784,7 @@ class WorkspaceFileService {
 		if (disposed)
 			return;
 		disposed = true;
+		stopWatcher();
 		for (root in roots)
 			root.handle.close();
 	}

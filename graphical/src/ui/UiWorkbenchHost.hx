@@ -343,6 +343,18 @@ class UiWorkbenchHost implements WorkbenchHost {
 		return false;
 	}
 
+	public function markWorkspaceFilesChanged(scope:String, root:String):Void {
+		var changed = false;
+		for (pane in panes) for (item in pane.items) {
+			var file = UiEditorTabs.workspaceFile(item);
+			if (file != null && file.scope == scope && file.root == root && !file.diskChanged) {
+				file.diskChanged = true;
+				changed = true;
+			}
+		}
+		if (changed) requestFrame();
+	}
+
 	public function keepWorkspaceFile(file:UiWorkspaceFileTab):Void {
 		file.preview = false;
 		requestFrame();

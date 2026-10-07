@@ -39,6 +39,7 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 	public function rootCount():Int return 1;
 	public function rootIdentity():String return root;
 	public function watchesChanges():Bool return watchChanges;
+	public function dispose():Void {}
 
 	public function rootRange(start:Int, count:Int):Array<TreeRootMetadata>
 		return start > 0 || count <= 0 ? [] : [new TreeRootMetadata(root, true)];

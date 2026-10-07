@@ -332,9 +332,13 @@ Deployment/publication requires separate authorization under EXECUTION.md.
   and blocked edits.
 - [x] Add syntax coloring and explicit refresh to Linux desktop read-only
   previews using the shared syntax registry and revision-checked file reads.
-- [ ] Add live change notifications, then connect the same file client to the
-  web build. Keep path traversal and symlink handling enforced by the service's
-  workspace access policy.
+- [x] Add basic Linux desktop live change invalidation. NativeKit watcher events
+  are coalesced into per-root epoch/cursor notifications; Explorer pages are
+  invalidated and open saved snapshots are marked stale for explicit refresh.
+  Full F3 replay, overflow, race and platform qualification remain in
+  [`WORKSPACE-FILES.md`](WORKSPACE-FILES.md).
+- [ ] Connect the same file client to the web build. Keep path traversal and
+  symlink handling enforced by the service's workspace access policy.
 - [ ] View Claude/Codex sessions, conversation/activity and pending requests.
   Add prompt, interruption and approval actions under explicit device grants.
   Resolve competing-client approvals exactly once at the service boundary.

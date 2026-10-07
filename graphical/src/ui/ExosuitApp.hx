@@ -834,11 +834,10 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	public function attachWorkspace(attachment:workspace.client.WorkspaceAttachment):Void {
+		clearExplorerModel();
 		if (workspaceAttachment != null)
 			workspaceAttachment.dispose();
 		workspaceAttachment = attachment;
-		explorerModel = null;
-		explorerTree = null;
 		requestFrame();
 	}
 
@@ -930,6 +929,7 @@ class ExosuitApp implements DesktopUiApplication {
 
 	public function dispose():Void {
 		if (hostContext != null) hostContext.onPoll = null;
+		clearExplorerModel();
 		if (workspaceAttachment != null) workspaceAttachment.dispose();
 		application.shutdown();
 		host.dispose();
@@ -975,7 +975,8 @@ class ExosuitApp implements DesktopUiApplication {
 		for (pane in host.panes) for (item in pane.items) {
 			var file = UiEditorTabs.workspaceFile(item);
 			if (file != null) result.push({scope: file.scope, root: file.rootName, path: file.path,
-				revision: file.revision, preview: file.preview, syntax: file.textModel.syntax.name});
+				revision: file.revision, preview: file.preview, syntax: file.textModel.syntax.name,
+				diskChanged: file.diskChanged});
 		}
 		return result;
 	}
@@ -1074,15 +1075,15 @@ class ExosuitApp implements DesktopUiApplication {
 		var localModelCurrent = explorerModel != null && Std.isOfType(explorerModel, DirectoryTreeModel)
 			&& explorerModel.rootIdentity() == explorerRoot;
 		if (remoteFiles ? !remoteModelCurrent : !localModelCurrent) {
-			explorerModel = null;
-			explorerTree = null;
+			clearExplorerModel();
 			if (remoteFiles) {
 				var rootName = remoteScope;
 				var slash = rootName.lastIndexOf("/");
 				if (slash >= 0 && slash + 1 < rootName.length) rootName = rootName.substring(slash + 1);
 				explorerModel = new WorkspaceFileTreeModel(function()
 					return workspaceAttachment == null ? null : workspaceAttachment.fileClient(),
-					remoteWorkspace, remoteScope, rootName, theme, requestFrame);
+					remoteWorkspace, remoteScope, rootName, theme, requestFrame,
+					function(root) host.markWorkspaceFilesChanged(remoteScope, root));
 			} else explorerModel = new DirectoryTreeModel(explorerRoot, theme);
 		}
 		explorerModel.refresh();
@@ -1537,8 +1538,7 @@ class ExosuitApp implements DesktopUiApplication {
 	function openArgument(path:String):Void {
 		if (FileSystem.exists(path) && FileSystem.isDirectory(path)) {
 			explorerRoot = application.workspace.fileSystem.normalize(path);
-			explorerModel = null;
-			explorerTree = null;
+			clearExplorerModel();
 			filesScroll.jumpTo(0, 0);
 			openExplorer();
 			application.openArgument(path);
@@ -1568,8 +1568,7 @@ class ExosuitApp implements DesktopUiApplication {
 		desktop.selectDirectory(function(accepted, paths) {
 			if (accepted && paths.length > 0) {
 				explorerRoot = application.workspace.fileSystem.normalize(paths[0]);
-				explorerModel = null;
-			explorerTree = null;
+				clearExplorerModel();
 				filesScroll.jumpTo(0, 0);
 				openExplorer();
 				application.openArgument(paths[0]);
@@ -1582,6 +1581,12 @@ class ExosuitApp implements DesktopUiApplication {
 		contextMenu = null;
 		paletteVisible = !paletteVisible;
 		requestFrame();
+	}
+
+	function clearExplorerModel():Void {
+		if (explorerModel != null) explorerModel.dispose();
+		explorerModel = null;
+		explorerTree = null;
 	}
 
 	function requestFrame():Void {

@@ -18,6 +18,7 @@ class UiWorkspaceFileTab {
 	public var preview:Bool;
 	public var refreshing:Bool = false;
 	public var refreshError:Null<String>;
+	public var diskChanged:Bool = false;
 
 	public function new(workspace:String, root:String, scope:String, rootName:String, path:String, revision:String,
 			contents:String, sizeBytes:Int, preview:Bool, syntaxes:SyntaxRegistry, editorTheme:Theme) {

@@ -16,6 +16,8 @@ import haxeon.ui.widgets.text.MiddleEllipsisText;
 import haxeon.ui.widgets.text.Text;
 import workspace.client.WorkspaceFileClient;
 import workspace.service.WorkspaceFileProtocol.FileListPage;
+import workspace.service.WorkspaceFileProtocol.FileWatchResult;
+import workspace.service.WorkspaceFileProtocol.FileChangeEvent;
 import workspace.service.WorkspaceFileProtocol.WorkspaceFileEntry;
 
 private class WorkspaceDirectoryListing {
@@ -40,6 +42,8 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 	final scope:String;
 	final theme:Theme;
 	final changed:Void->Void;
+	final fileChanged:Null<String->Void>;
+	final watchListener:FileChangeEvent->Void;
 	final listings:Map<String, WorkspaceDirectoryListing> = [];
 	final kinds:Map<String, String> = [];
 	final names:Map<String, String> = [];
@@ -54,11 +58,17 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 	var rootName:String;
 	var rootError:Null<String>;
 	var rootsRetryAt:Float = 0.0;
+	var rootSupportsWatch:Bool = false;
+	var watchRequested:Bool = false;
+	var watchingChanges:Bool = false;
+	var watchRetryAt:Float = 0.0;
+	var watchEpoch:Null<String>;
+	var watchCursor:Int = 0;
 
-	public function watchesChanges():Bool return false;
+	public function watchesChanges():Bool return watchingChanges;
 
 	public function new(clientProvider:Void->Null<WorkspaceFileClient>, workspace:String, scope:String,
-			fallbackRootName:String, theme:Theme, changed:Void->Void) {
+			fallbackRootName:String, theme:Theme, changed:Void->Void, ?fileChanged:String->Void) {
 		if (clientProvider == null || workspace == null || workspace.length == 0 || scope == null || theme == null || changed == null)
 			throw "Invalid workspace file tree configuration";
 		this.clientProvider = clientProvider;
@@ -68,6 +78,8 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 		this.rootName = initialRootName;
 		this.theme = theme;
 		this.changed = changed;
+		this.fileChanged = fileChanged;
+		this.watchListener = function(event) handleFileChange(event);
 		kinds.set(rootKey(), "directory");
 		names.set(rootKey(), rootName);
 	}
@@ -87,12 +99,16 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 		var client = clientProvider();
 		if (client == null) {
 			if (activeClient != null) {
+				activeClient.unwatch(workspace, rootId(), watchListener);
 				activeClient = null;
+				watchRequested = false;
+				watchingChanges = false;
 				connectionResetPending = true;
 			}
 			return;
 		}
 		if (client != activeClient) {
+			if (activeClient != null) activeClient.unwatch(workspace, rootId(), watchListener);
 			var hadState = rootsRequested || rootsLoaded;
 			if (!hadState) for (_ in listings.keys()) { hadState = true; break; }
 			activeClient = client;
@@ -103,6 +119,15 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 		}
 		if (!rootsRequested && rootError == null)
 			requestRoots();
+		if (rootsLoaded && rootSupportsWatch && !watchRequested && !watchingChanges && Sys.time() >= watchRetryAt)
+			requestWatch();
+	}
+
+	public function dispose():Void {
+		if (activeClient != null) activeClient.unwatch(workspace, rootId(), watchListener);
+		activeClient = null;
+		watchRequested = false;
+		watchingChanges = false;
 	}
 
 	public function childCount(parentKey:String):Int {
@@ -236,6 +261,7 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 					if (root.capabilities == null || root.capabilities.indexOf("list") < 0 || root.capabilities.indexOf("read") < 0)
 						rootError = "Workspace root does not allow browsing and reading files";
 					else {
+						rootSupportsWatch = root.capabilities.indexOf("watch") >= 0;
 						if (root.name != null && root.name.length > 0) rootName = root.name;
 						names.set(rootKey(), rootName);
 						found = true;
@@ -258,6 +284,59 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 			revisionValue++;
 			changed();
 		});
+	}
+
+	function requestWatch():Void {
+		var client = activeClient;
+		if (client == null || !rootSupportsWatch || watchRequested || watchingChanges || Sys.time() < watchRetryAt) return;
+		watchRequested = true;
+		client.watch(workspace, rootId(), watchEpoch, watchCursor, watchListener,
+			function(result:FileWatchResult) {
+				watchRequested = false;
+				if (activeClient != client) return;
+				if (result == null || result.workspace != workspace || result.root != rootId()
+					|| result.epoch == null || result.epoch.length == 0 || result.cursor < 0) {
+					client.unwatch(workspace, rootId(), watchListener);
+					watchRetryAt = Sys.time() + 1.0;
+					return;
+				}
+				var reset = result.reset || watchEpoch != result.epoch;
+				watchEpoch = result.epoch;
+				watchCursor = result.cursor;
+				watchingChanges = true;
+				if (reset) noteFilesChanged();
+			}, function(_) {
+				watchRequested = false;
+				client.unwatch(workspace, rootId(), watchListener);
+				watchRetryAt = Sys.time() + 1.0;
+			});
+	}
+
+	function handleFileChange(event:FileChangeEvent):Void {
+		if (event == null || event.workspace != workspace || event.root != rootId()
+			|| event.epoch == null || event.epoch.length == 0 || event.cursor < 1) return;
+		if (watchEpoch == event.epoch && event.cursor <= watchCursor) return;
+		watchEpoch = event.epoch;
+		watchCursor = event.cursor;
+		watchingChanges = true;
+		noteFilesChanged();
+	}
+
+	function noteFilesChanged():Void {
+		invalidateListings();
+		if (fileChanged != null) fileChanged(rootId());
+	}
+
+	function invalidateListings():Void {
+		listings.clear();
+		kinds.clear();
+		names.clear();
+		specialPaths.clear();
+		specialLabels.clear();
+		kinds.set(rootKey(), "directory");
+		names.set(rootKey(), rootName);
+		revisionValue++;
+		changed();
 	}
 
 	function requestPage(path:String, cursor:Null<String>):Void {
@@ -340,6 +419,10 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 	function resetForConnection():Void {
 		rootsRequested = false;
 		rootsLoaded = false;
+		rootSupportsWatch = false;
+		watchRequested = false;
+		watchingChanges = false;
+		watchRetryAt = 0.0;
 		rootError = null;
 		rootsRetryAt = 0.0;
 		rootName = initialRootName;

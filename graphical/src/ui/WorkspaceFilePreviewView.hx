@@ -79,6 +79,12 @@ class WorkspaceFilePreviewView implements View {
 			errorStyle.padding = new Insets(4.0, 8.0, 4.0, 8.0);
 			rows.push(new KeyedView("refresh-error", new Text(file.refreshError, errorStyle, theme.tokens.danger,
 				TextStyleOverride.text(12.0))));
+		} else if (file.diskChanged) {
+			var changedStyle = new LayoutStyle();
+			changedStyle.width = LayoutAxis.grow();
+			changedStyle.padding = new Insets(4.0, 8.0, 4.0, 8.0);
+			rows.push(new KeyedView("file-changed", new Text("File changed on disk. Refresh to load the latest version.",
+				changedStyle, theme.tokens.warning, TextStyleOverride.text(12.0))));
 		}
 		rows.push(new KeyedView("contents", contents));
 		return new Column("workspace-file-preview:" + file.id, rows, outer).build(context);
