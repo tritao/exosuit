@@ -2,6 +2,32 @@
 
 Last updated: 2026-10-07.
 
+## M16.1 durable device trust qualification, 2026-10-07
+
+Extended the headless browser-to-Worker first-pair test to use the production
+`WorkspaceSqliteStore` instead of its in-memory device-store fake. The harness
+now exposes the production `WorkspaceRpcServer` over a private same-user local
+socket and creates the invitation, lists the pending transcript code, and
+approves grants through the pairing RPC methods used by the desktop client.
+After the browser completes Noise, approval, encrypted receipt and authenticated
+workspace identity, the harness closes and reopens SQLite. It verifies the
+pinned device ID, active revocation state, and exactly the `workspace.read` and
+`workspace.identity` grants survive reload.
+
+The test still does not start `AgentMain`, exercise the NativeKit OS credential
+service for the Noise machine identity, or click through the graphical desktop
+Remote Access panel. The existing Haxeon credential package smoke test passed
+on this user's OS credential service. Saved-browser-device reconnection and
+cross-network qualification also remain open.
+
+Validation: `haxeon/scripts/haxeon build --project
+tests/workspace-browser-pairing/haxeon.json`, `python3 -m py_compile
+tests/workspace-browser-pairing/run.py`, and `python3
+tests/workspace-browser-pairing/run.py /tmp/exosuit-web-browser-pairing/site`
+pass. Headless Chrome confirms the browser-held credential and approved
+workspace grants, the local RPC path performs approval, and SQLite reload
+confirms the server-side device trust.
+
 ## M16.1 live browser first-pair qualification, 2026-10-07
 
 The fresh-browser first-pair path now passes end to end against the local

@@ -1,18 +1,23 @@
 package app;
 
 import haxe.Json;
-import haxe.io.Bytes;
 import haxeon.platform.NativeKitRuntime;
+import haxeon.rpc.RpcClient;
+import haxeon.rpc.RpcConnection;
+import haxeon.rpc.RpcPeerOptions;
 import nativekit.ffi.NativeKit;
 import noisekit.NoiseSession;
 import workspace.runtime.WorkspacePairingManager;
 import workspace.runtime.WorkspaceRelayHost;
 import workspace.runtime.WorkspaceRelaySettings;
-import workspace.service.WorkspaceDevicePersistence;
-import workspace.service.WorkspaceDeviceRecord;
 import workspace.service.WorkspaceProtocol;
+import workspace.service.WorkspacePairingProtocol;
+import workspace.service.WorkspacePairingProtocol.PendingPairing;
 import workspace.service.WorkspaceService;
+import workspace.storage.WorkspaceSqliteStore;
+import workspace.runtime.WorkspaceDirectories;
 import workspace.transport.NativeRpcHub;
+import workspace.transport.NativeRpcConnector;
 import workspace.transport.RelayMachineEndpoint;
 import workspace.transport.WorkspaceRpcServer;
 
@@ -33,13 +38,18 @@ class BrowserPairingHostMain {
 		var origin:String = config.origin, machineId:String = config.machineId, machineToken:String = config.machineToken,
 			workspaceRoot:String = config.workspaceRoot, invitePath:String = config.invitePath,
 			statusPath:String = config.statusPath, decisionPath:String = config.decisionPath,
-			successPath:String = config.successPath;
+			successPath:String = config.successPath, databasePath:String = config.databasePath,
+			localSocket:String = config.localSocket;
 		sys.FileSystem.createDirectory(workspaceRoot);
+		var directories = new WorkspaceDirectories(workspaceRoot);
+		var seed = new WorkspaceService("workspace", "browser-pairing-epoch", [
+			{id: "work", name: "Browser pairing test", cwd: directories.root, revision: 1}
+		]);
 		var runtime = NativeKitRuntime.start(), hub = new NativeRpcHub(runtime.events),
 			clock = function() return NativeKit.nk_time_seconds() * 1000,
 			endpoint = new RelayMachineEndpoint(origin, machineId),
 			relay = new WorkspaceRelayHost(runtime.events, hub, new WorkspaceRelaySettings(endpoint, machineToken), true),
-			store = new MemoryDeviceStore();
+		store = new WorkspaceSqliteStore(databasePath, "workspace", seed.snapshot(), 32, directories.root);
 		var machineKeys = NoiseSession.generateKeypair();
 		var server:Null<WorkspaceRpcServer> = null;
 		var pairing = new WorkspacePairingManager(store, relay, machineKeys.privateKey,
@@ -47,40 +57,63 @@ class BrowserPairingHostMain {
 			clock, function(secure, grants) {
 				if (server == null) secure.close(); else server.acceptRemote(secure, grants);
 			});
-		server = new WorkspaceRpcServer(new WorkspaceService("workspace", "browser-pairing-epoch", [
-			{id: "work", name: "Browser pairing test", cwd: workspaceRoot, revision: 1}
-		]), clock, null, {workspace: "workspace", root: workspaceRoot, instance: "browser-pairing-test"}, null, null, pairing);
+		server = new WorkspaceRpcServer(new WorkspaceService("workspace", "browser-pairing-epoch", seed.snapshot().groups,
+			32, 256, 16, store, directories.resolve), clock, null,
+			{workspace: "workspace", root: directories.root, instance: "browser-pairing-test"}, null, null, pairing);
 		relay.onChannel = function(channel) pairing.acceptChannel(channel.channelId, channel);
+		var localListener = hub.listen(NativeRpcHub.local(localSocket), server.acceptLocal);
+		var failure:Null<String> = null, localConnection:Null<RpcConnection> = null;
+		var localAdmin = new RpcClient(new NativeRpcConnector(hub, NativeRpcHub.local(localSocket)), clock,
+			function() return 0.5,
+			new RpcPeerOptions("exosuit-editor/1", [WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS,
+				WorkspaceProtocol.WRITE, WorkspaceProtocol.TREE, WorkspaceProtocol.IDENTITY_CAPABILITY,
+				WorkspacePairingProtocol.ADMIN], [WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS,
+				WorkspaceProtocol.IDENTITY_CAPABILITY], 2000, 262144, 32, 1048576),
+			function(connection, generation, _) {
+				localConnection = connection;
+			}, 10, 100, 2000);
 
 		var invitationStarted = false, invitationReady = false, approved = false,
-			approvalRequestPending = false, failure:Null<String> = null;
+			approvalRequestPending = false, listRequestPending = false;
 		var registeredDevice:String = "";
-		var deadline = clock() + 90000, nextStatusWrite = 0.0;
+		var visiblePending:Array<PendingPairing> = [], deadline = clock() + 90000,
+			nextStatusWrite = 0.0, nextListRequest = 0.0;
 		while (clock() < deadline && failure == null) {
 			runtime.events.wait(0.01);
 			for (_ in 0...128) if (!runtime.events.poll()) break;
 			relay.poll(clock());
 			server.poll();
 			pairing.poll();
+			localAdmin.poll();
 
-			if (relay.connected && !invitationStarted) {
+			var adminConnection = localConnection;
+			if (relay.connected && adminConnection != null && !invitationStarted) {
 				invitationStarted = true;
-				pairing.createInvitation(60, function(value, error) {
-					if (error != null || value == null) failure = error == null ? "invitation_failed" : error;
-					else {
-						registeredDevice = value.deviceId;
-						writePrivate(invitePath, Json.stringify({pairingSocketUrl: value.pairingSocketUrl,
-							machineId: value.machineId, deviceId: value.deviceId}));
-						invitationReady = true;
-					}
+				adminConnection.call(WorkspacePairingProtocol.CREATE, {ttlSeconds: 60}, 10000, function(value) {
+					registeredDevice = value.deviceId;
+					writePrivate(invitePath, Json.stringify({pairingSocketUrl: value.pairingSocketUrl,
+						machineId: value.machineId, deviceId: value.deviceId}));
+					invitationReady = true;
+				}, function(error) {
+					failure = "local pairing invitation RPC failed: " + error.code;
 				});
 			}
 
-			var candidates = pairing.listPending();
+			if (adminConnection != null && !listRequestPending && clock() >= nextListRequest) {
+				listRequestPending = true;
+				nextListRequest = clock() + 200;
+				adminConnection.call(WorkspacePairingProtocol.LIST, {}, 2000, function(value) {
+					listRequestPending = false;
+					visiblePending = value.pending;
+				}, function(error) {
+					listRequestPending = false;
+					failure = "local pairing list RPC failed: " + error.code;
+				});
+			}
 			if (invitationReady && !approved && !approvalRequestPending && sys.FileSystem.exists(decisionPath)) {
 				var decision:Dynamic = Json.parse(sys.io.File.getContent(decisionPath));
 				var matched = false;
-				for (candidate in candidates) {
+				for (candidate in visiblePending) {
 					if (candidate.deviceId == decision.deviceId && candidate.authenticationCode == decision.authenticationCode) {
 						matched = true;
 						break;
@@ -88,14 +121,18 @@ class BrowserPairingHostMain {
 				}
 				require(matched, "browser and desktop authentication codes did not match");
 				approvalRequestPending = true;
-				pairing.approve(registeredDevice, [WorkspaceProtocol.READ, WorkspaceProtocol.IDENTITY_CAPABILITY], function(error) {
-					if (error != null) failure = error; else approved = true;
+				adminConnection.call(WorkspacePairingProtocol.APPROVE, {deviceId: registeredDevice,
+					grants: [WorkspaceProtocol.READ, WorkspaceProtocol.IDENTITY_CAPABILITY]}, 10000, function(result) {
+					if (!result.accepted) failure = "local pairing approval was refused: " + result.error;
+					else approved = true;
+				}, function(error) {
+					failure = "local pairing approval RPC failed: " + error.code;
 				});
 			}
 
 			if (clock() >= nextStatusWrite) {
 				writePrivate(statusPath, Json.stringify({ready: relay.connected && invitationReady,
-					pending: candidates, approved: approved, activeClients: server.clientCount(),
+					pending: visiblePending, approved: approved, activeClients: server.clientCount() - (localAdmin.current() == null ? 0 : 1),
 					failure: failure, workspaceRoot: workspaceRoot}));
 				nextStatusWrite = clock() + 200;
 			}
@@ -103,15 +140,41 @@ class BrowserPairingHostMain {
 				var result:Dynamic = Json.parse(sys.io.File.getContent(successPath));
 				require(result.machineId == machineId && result.deviceId == registeredDevice
 					&& result.workspaceRoot == workspaceRoot, "browser reported a different workspace identity");
-				Sys.println("PASS: browser completed Noise pairing, desktop approval and authenticated workspace RPC");
+				verifyPersistedDevice(store, registeredDevice);
+				localAdmin.close();
+				hub.forget(localListener);
+				store.close();
+				store = new WorkspaceSqliteStore(databasePath, "workspace", seed.snapshot(), 32, directories.root);
+				verifyPersistedDevice(store, registeredDevice);
+				pairing.dispose();
+				relay.dispose();
+				server.dispose();
+				hub.dispose();
+				store.close();
+				runtime.dispose();
+				Sys.println("PASS: browser completed Noise pairing, desktop approval, authenticated RPC and SQLite trust reload");
 				return;
 			}
 		}
 		pairing.dispose();
 		relay.dispose();
+		localAdmin.close();
+		hub.forget(localListener);
 		server.dispose();
 		hub.dispose();
+		store.close();
 		throw failure == null ? "Browser pairing test timed out" : failure;
+	}
+
+	static function verifyPersistedDevice(store:WorkspaceSqliteStore, deviceId:String):Void {
+		var records = store.loadDevices();
+		require(records.length == 1, "SQLite did not retain exactly one approved device");
+		var record = records[0];
+		require(record.deviceId == deviceId && !record.revoked
+			&& record.grants.length == 2
+			&& record.grants.indexOf(WorkspaceProtocol.READ) >= 0
+			&& record.grants.indexOf(WorkspaceProtocol.IDENTITY_CAPABILITY) >= 0,
+			"SQLite device trust or explicit workspace grants did not survive reload");
 	}
 
 	static function writePrivate(path:String, contents:String):Void {
@@ -120,34 +183,5 @@ class BrowserPairingHostMain {
 		sys.io.File.saveContent(temporary, contents);
 		if (newlyCreated) try Sys.command("chmod", ["600", temporary]) catch (_:Dynamic) {}
 		sys.FileSystem.rename(temporary, path);
-	}
-}
-
-private class MemoryDeviceStore implements WorkspaceDevicePersistence {
-	final records:Map<String, WorkspaceDeviceRecord> = [];
-
-	public function new() {}
-
-	public function loadDevices():Array<WorkspaceDeviceRecord>
-		return [for (record in records) copy(record)];
-
-	public function saveDevice(record:WorkspaceDeviceRecord):Void
-		records.set(record.deviceId, copy(record));
-
-	public function revokeDevice(deviceId:String):Void {
-		var record = records.get(deviceId);
-		if (record != null) records.set(deviceId, {deviceId: record.deviceId, staticPublicKey: cloneBytes(record.staticPublicKey), grants: record.grants.copy(), revoked: true});
-	}
-
-	public function deleteDevice(deviceId:String):Void
-		records.remove(deviceId);
-
-	static function copy(record:WorkspaceDeviceRecord):WorkspaceDeviceRecord
-		return {deviceId: record.deviceId, staticPublicKey: cloneBytes(record.staticPublicKey), grants: record.grants.copy(), revoked: record.revoked};
-
-	static function cloneBytes(source:Bytes):Bytes {
-		var result = Bytes.alloc(source.length);
-		result.blit(0, source, 0, source.length);
-		return result;
 	}
 }

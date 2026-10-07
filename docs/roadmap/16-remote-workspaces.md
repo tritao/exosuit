@@ -8,9 +8,11 @@ compares the Noise transcript code, stores device credentials encrypted under
 a non-extractable WebCrypto key, confirms receipt to the daemon, and verifies
 workspace identity over RPC. The full first-pair path now passes in headless
 Chrome through a local Wrangler Worker, including code comparison, desktop
-pairing-manager approval and encrypted browser storage. Saved-device
-selection/reconnection,
-remote workspace resources, and cross-network qualification remain open. It
+same-user pairing administration RPC, encrypted browser storage, and reload of
+approved device trust from the production SQLite store. Saved-device
+selection/reconnection, actual `AgentMain` startup in the browser harness,
+graphical desktop-panel clickthrough, remote workspace resources, and
+cross-network qualification remain open. It
 depends on Haxeon RPC.1/RPC.2 and the
 M14 workspace service; terminal and provider features depend on their M12/M14
 acceptance. Use the existing M15 web build as the first remote client. Android
@@ -232,6 +234,15 @@ protocol and browser key-storage contracts.
   browser store, displays the transcript code, and confirms it with the machine
   owner before admitting workspace RPC. The current workspace call verifies
   remote identity; file, terminal and agent views remain in M16.2.
+- [x] Run browser first pairing against the production SQLite device store and
+  reopen the database after approval. The test verifies the pinned device
+  remains active with exactly the approved capabilities. It still uses a
+  focused host harness instead of launching `AgentMain` or driving the desktop
+  Remote Access panel.
+- [x] Create invitations, read pending transcript codes, and approve grants via
+  the daemon's same-user local RPC methods in the browser pairing harness. This
+  covers the API used by `LocalWorkspaceClient`; actual `AgentMain` startup and
+  graphical desktop-panel clickthrough remain separate acceptance checks.
 - [x] Keep the web build compiling the shared network and Noise interfaces.
   The build generates the wasm32 NativeKit network ABI, compiles the Haxeon
   guest and Emscripten host, and verifies all guest imports.
@@ -249,9 +260,11 @@ protocol and browser key-storage contracts.
 - [x] Qualify fresh-browser first pairing against a local Wrangler Worker. The
   test drives the browser Remote Access panel, matches the Noise code against
   the real host pairing manager, and verifies its approval, workspace identity
-  over RPC, and AES-GCM-protected IndexedDB record. The host uses in-memory
-  device storage and loopback test mode, so production daemon startup and local
-  desktop approval UX still need qualification. It also caught the Emscripten
+  over RPC, and AES-GCM-protected IndexedDB record. Approved device trust is
+  persisted and reloaded through production `WorkspaceSqliteStore`. Invitation,
+  pending-code listing and approval now travel through a same-user local RPC
+  client. The focused host still uses loopback test mode, so `AgentMain` startup
+  and graphical local desktop approval UX remain open. It also caught the Emscripten
   empty WebSocket subprotocol bug, fixed by passing `nullptr` when negotiation
   is omitted. Run with a built site using
   `python3 tests/workspace-browser-pairing/run.py <site-directory>`.

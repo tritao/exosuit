@@ -62,12 +62,15 @@ with tempfile.TemporaryDirectory(prefix="exosuit-browser-pairing-") as temporary
     decision = work / "approval.json"
     success = work / "success.json"
     config = work / "host-config.json"
+    database = work / "workspace.sqlite"
+    local_socket = work / "agent.sock"
     machine_id = secrets.token_hex(16)
     machine_token = secrets.token_hex(32)
     origin = f"http://127.0.0.1:{relay_port}"
     config.write_text(json.dumps({"origin": origin, "machineId": machine_id, "machineToken": machine_token,
         "workspaceRoot": str(workspace_root), "invitePath": str(invitation), "statusPath": str(status),
-        "decisionPath": str(decision), "successPath": str(success)}))
+        "decisionPath": str(decision), "successPath": str(success), "databasePath": str(database),
+        "localSocket": str(local_socket)}))
     os.chmod(config, 0o600)
     worker_log = work / "worker.log"
     agent_log = work / "agent.log"
