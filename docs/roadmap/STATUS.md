@@ -37,8 +37,8 @@ access, Durable Object hibernation/wake, quotas and deployment remain open. No
 Worker was deployed. The unrelated Haxeon UI edits and
 `graphical/Untitled-1tra` were preserved. NativeKit commit `473c70d6` applies
 the browser fix on `exosuit-followon`; Haxeon commit `9355ef5e` pins that change
-without including its pre-existing UI edits. The Exosuit harness and this
-roadmap evidence are committed on the current `main` branch; these commits
+without including its pre-existing UI edits. Exosuit commit `5f672c8` adds the
+harness and roadmap evidence on the current `main` branch. These commits
 complete the local-pairing slice, not M16.1.
 
 ## M16.1 security groundwork, 2026-10-06
