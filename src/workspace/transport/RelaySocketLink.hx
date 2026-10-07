@@ -95,7 +95,14 @@ class RelaySocketLink {
 		var frame = reader.take();
 		while (frame != null) {
 			var current = frame;
-			if (!rejected.exists(current.channelId)) {
+			if (current.reset) {
+				var channel = channels.get(current.channelId);
+				if (channel != null) {
+					channel.linkClosed("relay_device_reconnected");
+					channels.remove(current.channelId);
+				}
+				rejected.remove(current.channelId);
+			} else if (!rejected.exists(current.channelId)) {
 				var channel = channels.get(current.channelId);
 				var newChannel = false;
 				if (channel == null) {

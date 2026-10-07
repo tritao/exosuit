@@ -2,6 +2,34 @@
 
 Last updated: 2026-10-07.
 
+## M16.1 saved-browser-device reconnect, 2026-10-07
+
+Added a saved-device list to the browser Remote Access panel and a reconnect
+flow that reloads the encrypted IndexedDB credential, requests a fresh one-use
+relay ticket with the device bearer, and completes Noise with the previously
+pinned machine key before opening workspace RPC. The browser stores the relay
+origin with the ciphertext and its clear metadata, so reconnect does not need a
+new invitation.
+
+The first E2E attempt exposed two underlying transport issues. Haxeon treated
+NativeKit HTTP completions as raw events on WASM, so the ticket callback never
+ran; managed HTTP event decoding now works on all targets. After that, the
+Worker accepted the replacement device socket but the daemon retained the old
+logical channel because socket closure was invisible to the machine stream. A
+small version-2 route-reset envelope now invalidates that channel before the
+Worker admits a device socket. Tests cover the reset codec, Worker reconnect
+ordering, and a full browser disconnect/reconnect with the same workspace
+identity and grants.
+
+Validation: the web build passes with all 117 guest imports matched;
+`python3 tests/workspace-browser-pairing/run.py
+/tmp/exosuit-web-saved-reconnect-debug/site` passes first pairing, encrypted
+credential storage, fresh ticket exchange, pinned-key reconnect and the final
+desktop client count. `npm run check` in `relay/worker` passes all 15 tests and
+type checking. The workspace transport relay-only and Noise/pairing tests pass.
+Graphical desktop approval, cross-network/browser-to-`AgentMain` use, and M16.2
+workspace resources remain open.
+
 ## M16.1 production daemon credential restart, 2026-10-07
 
 Added a local Worker smoke test that launches the real `AgentMain` twice with

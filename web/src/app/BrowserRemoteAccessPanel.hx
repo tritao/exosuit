@@ -33,42 +33,60 @@ class BrowserRemoteAccessPanel implements View {
 			new KeyedView("description", new Text("Paste the one-time pairing URL copied from the desktop Remote Access panel. The browser connects directly to the relay; workspace traffic is encrypted end to end.",
 				null, context.theme.tokens.textSecondary))
 		];
-		if (client.authenticationCode == null) {
+		if (client.workspaceRoot != null) {
+			rows.push(new KeyedView("root", new Text("Workspace: " + client.workspaceRoot)));
+			rows.push(new KeyedView("grants-title", new Text("Granted permissions")));
+			for (index in 0...client.grants.length)
+				rows.push(new KeyedView("grant:" + index, new Text("• " + grantLabel(client.grants[index]))));
+		} else if (client.authenticationCode != null) {
+			rows.push(new KeyedView("code-instruction", new Text("Compare this code with the desktop before continuing.")));
+			rows.push(new KeyedView("code", new Text(client.authenticationCode, null,
+				context.theme.tokens.textPrimary, TextStyleOverride.text(28, TextWrap.None))));
+			if (!client.codeConfirmed) {
+				var confirm = new Button("I verified the code matches", null, client.confirmCode, "remote-pairing-confirm-code");
+				confirm.variant = ButtonVariant.Primary;
+				rows.push(new KeyedView("confirm", confirm));
+			} else {
+				rows.push(new KeyedView("confirmed", new Text("Code confirmed. Waiting for desktop approval and secure storage…")));
+			}
+		} else if (client.connecting) {
+			rows.push(new KeyedView("saved-connection", new Text(client.status)));
+		} else {
+			if (client.savedDevices.length > 0) {
+				rows.push(new KeyedView("saved-heading", new Text("Saved devices")));
+				for (index in 0...client.savedDevices.length) {
+					var device = client.savedDevices[index];
+					var machineId = device.machineId, deviceId = device.deviceId, relayOrigin = device.relayOrigin;
+					var shortMachine = machineId.substr(0, 8);
+					var shortDevice = deviceId.substr(0, 8);
+					rows.push(new KeyedView("saved-label:" + index,
+						new Text("Machine " + shortMachine + " · device " + shortDevice)));
+					var reconnect = new Button(relayOrigin == null ? "Pair again from desktop" : "Reconnect",
+						null, function() {
+							if (relayOrigin != null) client.beginSavedConnection(machineId, deviceId);
+							requestFrame();
+						}, "remote-saved-device:" + machineId + ":" + deviceId);
+					reconnect.enabled = relayOrigin != null;
+					rows.push(new KeyedView("saved-connect:" + index, reconnect));
+				}
+			}
 			var address = new TextField("remote-pairing-url", pairingUrl, function(value) {
 				pairingUrl = value;
 				requestFrame();
 			});
 			address.label = "One-time pairing URL";
 			rows.push(new KeyedView("url", address));
-			var connect = new Button("Connect", null, function() {
+			var connect = new Button("Pair new device", null, function() {
 				if (client.beginPairing(pairingUrl)) pairingUrl = "";
 				requestFrame();
 			}, "remote-pairing-connect");
 			connect.variant = ButtonVariant.Primary;
 			connect.enabled = pairingUrl.length > 0;
 			rows.push(new KeyedView("connect", connect));
-		} else {
-			rows.push(new KeyedView("code-instruction", new Text("Compare this code with the desktop before continuing.")));
-			rows.push(new KeyedView("code", new Text(client.authenticationCode, null,
-				context.theme.tokens.textPrimary, TextStyleOverride.text(28, TextWrap.None))));
-			if (client.workspaceRoot == null) {
-				if (!client.codeConfirmed) {
-					var confirm = new Button("I verified the code matches", null, client.confirmCode, "remote-pairing-confirm-code");
-					confirm.variant = ButtonVariant.Primary;
-					rows.push(new KeyedView("confirm", confirm));
-				} else {
-					rows.push(new KeyedView("confirmed", new Text("Code confirmed. Waiting for desktop approval and secure storage…")));
-				}
-			} else {
-				rows.push(new KeyedView("root", new Text("Workspace: " + client.workspaceRoot)));
-				rows.push(new KeyedView("grants-title", new Text("Granted permissions")));
-				for (index in 0...client.grants.length)
-					rows.push(new KeyedView("grant:" + index, new Text("• " + grantLabel(client.grants[index]))));
-			}
 		}
 		rows.push(new KeyedView("status", new Text(client.status)));
 		if (client.error != null) rows.push(new KeyedView("error", new Text(client.error, null, context.theme.tokens.danger)));
-		if (client.authenticationCode != null || client.error != null) {
+		if (client.authenticationCode != null || client.workspaceRoot != null || client.connecting || client.error != null) {
 			var disconnect = new Button("Disconnect", null, function() {
 				client.disconnect();
 				requestFrame();

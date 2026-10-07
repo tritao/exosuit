@@ -6,9 +6,11 @@ import haxe.io.Bytes;
 class RelayFrame {
 	public final channelId:String;
 	public final payload:Bytes;
+	public final reset:Bool;
 
-	public function new(channelId:String, payload:Bytes) {
+	public function new(channelId:String, payload:Bytes, reset:Bool = false) {
 		this.channelId = channelId;
 		this.payload = payload;
+		this.reset = reset;
 	}
 }

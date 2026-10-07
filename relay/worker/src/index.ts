@@ -465,6 +465,11 @@ export class MachineRelay extends DurableObject<Env> {
       return jsonResponse({ error: "connection_limit" }, 429);
     }
 
+    if (attachment.role === "device" && attachment.deviceId) {
+      const machine = sockets.find((socket) => readAttachment(socket)?.role === "machine");
+      if (machine) sendFrame(machine, resetFrame(attachment.deviceId));
+    }
+
     beforeAccept?.();
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
@@ -666,6 +671,14 @@ function sendFrame(socket: WebSocket, bytes: Uint8Array): void {
   } catch {
     closeSocket(socket, 1011, "relay delivery failed");
   }
+}
+
+function resetFrame(channelId: string): Uint8Array {
+  const frame = new Uint8Array(17);
+  frame[0] = 2;
+  for (let index = 0; index < 16; index += 1)
+    frame[index + 1] = Number.parseInt(channelId.slice(index * 2, index * 2 + 2), 16);
+  return frame;
 }
 
 export default worker;

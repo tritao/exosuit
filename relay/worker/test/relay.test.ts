@@ -241,6 +241,27 @@ describe("single-use pairing and device tickets", () => {
 });
 
 describe("bounded channel forwarding", () => {
+  it("resets the machine-side device route before accepting a reconnect", async () => {
+    const id = nextMachineId();
+    const machineToken = secret(36);
+    const deviceId = idFromNumber(1210);
+    const deviceToken = secret(37);
+    await registerMachine(id, machineToken);
+    const machine = await openMachine(id, machineToken);
+    await registerDevice(id, machineToken, deviceId, deviceToken);
+
+    const initialReset = waitForMessage(machine);
+    const firstDevice = socketOf(await connectDevice(id, await issueTicket(id, deviceToken)));
+    expect([...new Uint8Array(await initialReset)]).toEqual([...resetFrame(deviceId)]);
+
+    const reset = waitForMessage(machine);
+    const replaced = waitForClose(firstDevice);
+    const secondDevice = socketOf(await connectDevice(id, await issueTicket(id, deviceToken)));
+    expect(await replaced).toBe(1012);
+    expect([...new Uint8Array(await reset)]).toEqual([...resetFrame(deviceId)]);
+    secondDevice.close();
+  });
+
   it("caps the number of connected browser channels", async () => {
     const id = nextMachineId();
     const machineToken = secret(34);
@@ -446,6 +467,15 @@ function frame(channelId: string, payload: number[]): Uint8Array {
     bytes[index + 1] = Number.parseInt(channelId.slice(index * 2, index * 2 + 2), 16);
   }
   bytes.set(payload, 17);
+  return bytes;
+}
+
+function resetFrame(channelId: string): Uint8Array {
+  const bytes = new Uint8Array(17);
+  bytes[0] = 2;
+  for (let index = 0; index < 16; index += 1) {
+    bytes[index + 1] = Number.parseInt(channelId.slice(index * 2, index * 2 + 2), 16);
+  }
   return bytes;
 }
 

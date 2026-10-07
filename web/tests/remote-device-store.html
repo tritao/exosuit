@@ -10,7 +10,8 @@ window.testPromise = (async () => {
   const mark = phase => { document.getElementById("result").textContent = phase; };
   const machineId = "0123456789abcdef0123456789abcdef";
   const deviceId = "abcdef0123456789abcdef0123456789";
-  const credentials = {staticPrivateKey: "a".repeat(64), deviceToken: "f".repeat(64), machineStaticPublicKey: "b".repeat(64)};
+  const credentials = {staticPrivateKey: "a".repeat(64), deviceToken: "f".repeat(64),
+    machineStaticPublicKey: "b".repeat(64), relayOrigin: "https://workspace.example.test"};
 
   mark("Clearing prior test data…");
   await store.clear();
@@ -19,7 +20,8 @@ window.testPromise = (async () => {
   const loaded = await store.load(machineId, deviceId);
   if (JSON.stringify(loaded) !== JSON.stringify(credentials)) throw new Error("credential round trip failed");
   const records = await store.list();
-  if (records.length !== 1 || records[0].deviceId !== deviceId) throw new Error("metadata list failed");
+  if (records.length !== 1 || records[0].deviceId !== deviceId
+    || records[0].relayOrigin !== credentials.relayOrigin) throw new Error("metadata list failed");
 
   mark("Checking the non-extractable wrapping key…");
   const opening = indexedDB.open("exosuit-remote-devices-v1", 1);

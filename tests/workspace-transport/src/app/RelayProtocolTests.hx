@@ -35,6 +35,13 @@ class RelayProtocolTests {
 		var reader = new RelayFrameReader(128, 256, 4);
 		var firstPacket = RelayFrameCodec.encode(firstId, firstPayload, 128);
 		var secondPacket = RelayFrameCodec.encode(secondId, secondPayload, 128);
+		var resetReader = new RelayFrameReader(128, 256, 4);
+		var resetPacket = RelayFrameCodec.encodeReset(firstId);
+		require(resetReader.feed(resetPacket, 0, resetPacket.length) == resetPacket.length,
+			"relay reset envelope stalled");
+		var reset = resetReader.take();
+		require(reset != null && reset.reset && reset.channelId == firstId && reset.payload.length == 0,
+			"relay reset envelope changed route or was decoded as data");
 		for (index in 0...firstPacket.length) {
 			var consumed = reader.feed(firstPacket, index, 1);
 			require(consumed == 1, "split relay packet stalled");

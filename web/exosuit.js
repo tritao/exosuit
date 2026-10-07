@@ -20,6 +20,64 @@ function completeRemoteStore(event, success) {
   if (callback) callback(event.request, success ? 1 : 0);
 }
 
+function completeRemotePayload(request, kind, value, success) {
+  const chunk = guest && guest["app.WebMain.remoteStorePayloadChunk"];
+  const complete = guest && guest["app.WebMain.remoteStorePayloadComplete"];
+  if (!chunk || !complete) return;
+  if (success) {
+    if (typeof value !== "string" || value.length > 32768) {
+      complete(request, kind, 0, 0);
+      return;
+    }
+    for (let index = 0; index < value.length; index++)
+      chunk(request, kind, index, value.charCodeAt(index));
+    complete(request, kind, value.length, 1);
+  } else {
+    complete(request, kind, 0, 0);
+  }
+}
+
+function listRemoteDevices(text) {
+  const request = Number(text.slice("exosuit-remote-list:".length));
+  if (!Number.isSafeInteger(request) || request <= 0) return;
+  const store = report.remoteDeviceStore;
+  if (!store) {
+    completeRemotePayload(request, 1, "", false);
+    return;
+  }
+  store.list().then(devices => completeRemotePayload(request, 1, JSON.stringify(devices), true),
+    () => completeRemotePayload(request, 1, "", false));
+}
+
+function loadRemoteDevice(text) {
+  let event;
+  try {
+    event = JSON.parse(text.slice("exosuit-remote-load:".length));
+    if (!Number.isSafeInteger(event.request) || event.request <= 0
+      || !/^[0-9a-f]{32}$/.test(event.machineId) || !/^[0-9a-f]{32}$/.test(event.deviceId))
+      throw new Error("invalid saved-device request");
+  } catch (_error) {
+    return;
+  }
+  const store = report.remoteDeviceStore;
+  if (!store) {
+    completeRemotePayload(event.request, 2, "", false);
+    return;
+  }
+  store.load(event.machineId, event.deviceId).then(credentials => {
+    if (!credentials) {
+      completeRemotePayload(event.request, 2, "", false);
+      return;
+    }
+    const payload = JSON.stringify({machineId: event.machineId, deviceId: event.deviceId, credentials});
+    credentials.staticPrivateKey = "";
+    credentials.deviceToken = "";
+    credentials.machineStaticPublicKey = "";
+    credentials.relayOrigin = null;
+    completeRemotePayload(event.request, 2, payload, true);
+  }, () => completeRemotePayload(event.request, 2, "", false));
+}
+
 function persistRemoteDevice(text) {
   let event;
   try {
@@ -39,7 +97,8 @@ function persistRemoteDevice(text) {
   const credentials = {
     staticPrivateKey: event.staticPrivateKey,
     deviceToken: event.deviceToken,
-    machineStaticPublicKey: event.machineStaticPublicKey
+    machineStaticPublicKey: event.machineStaticPublicKey,
+    relayOrigin: event.relayOrigin
   };
   event.staticPrivateKey = "";
   event.deviceToken = "";
@@ -134,6 +193,8 @@ async function startGuest() {
       if (text.startsWith("exosuit-state:")) report.document = JSON.parse(text.slice("exosuit-state:".length));
       else if (text.startsWith("exosuit-remote-store:")) persistRemoteDevice(text);
       else if (text.startsWith("exosuit-remote-cancel:")) cancelRemoteDeviceStore(text);
+      else if (text.startsWith("exosuit-remote-list:")) listRemoteDevices(text);
+      else if (text.startsWith("exosuit-remote-load:")) loadRemoteDevice(text);
       else console.log(text);
     }});
   if (departing) return;

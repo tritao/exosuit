@@ -8,6 +8,7 @@ class RelayFrameCodec {
 	public static inline final ROUTE_BYTES:Int = 16;
 	public static inline final ENVELOPE_BYTES:Int = 1 + ROUTE_BYTES;
 	public static inline final VERSION:Int = 1;
+	public static inline final RESET_VERSION:Int = 2;
 
 	public static function encode(channelId:String, payload:Bytes, maxMessageBytes:Int = 262144):Bytes {
 		var route = decodeChannelId(channelId);
@@ -18,6 +19,15 @@ class RelayFrameCodec {
 		packet.set(0, VERSION);
 		packet.blit(1, route, 0, route.length);
 		packet.blit(ENVELOPE_BYTES, frame, 0, frame.length);
+		return packet;
+	}
+
+	/** Control envelope used by the Worker to invalidate a device's old socket route. */
+	public static function encodeReset(channelId:String):Bytes {
+		var route = decodeChannelId(channelId);
+		var packet = Bytes.alloc(ENVELOPE_BYTES);
+		packet.set(0, RESET_VERSION);
+		packet.blit(1, route, 0, route.length);
 		return packet;
 	}
 

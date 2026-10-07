@@ -19,6 +19,10 @@ class TransportTestMain {
 
 	static function main():Void {
 		var args = Sys.args();
+		if (args.length == 1 && args[0] == "--relay-only") {
+			RelayProtocolTests.run();
+			return;
+		}
 		if (args.length == 1 && args[0] == "--noise-only") {
 			NoiseTransportTests.run();
 			WorkspacePairingTests.run();

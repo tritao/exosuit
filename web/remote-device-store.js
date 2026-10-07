@@ -23,6 +23,19 @@
     return `${machineId}:${deviceId}`;
   }
 
+  function validRelayOrigin(value) {
+    if (typeof value !== "string") return false;
+    try {
+      const url = new URL(value);
+      if (url.origin !== value || url.username || url.password || url.pathname !== "/" || url.search || url.hash)
+        return false;
+      return url.protocol === "https:" || (url.protocol === "http:"
+        && (url.hostname === "localhost" || url.hostname === "127.0.0.1"));
+    } catch (_error) {
+      return false;
+    }
+  }
+
   function openDatabase() {
     if (databasePromise) return databasePromise;
     databasePromise = new Promise((resolve, reject) => {
@@ -102,7 +115,9 @@
     if (!credentials || typeof credentials !== "object"
       || typeof credentials.staticPrivateKey !== "string" || !/^[0-9a-f]{64}$/.test(credentials.staticPrivateKey)
       || typeof credentials.deviceToken !== "string" || !/^[0-9a-f]{64}$/.test(credentials.deviceToken)
-      || typeof credentials.machineStaticPublicKey !== "string" || !/^[0-9a-f]{64}$/.test(credentials.machineStaticPublicKey))
+      || typeof credentials.machineStaticPublicKey !== "string" || !/^[0-9a-f]{64}$/.test(credentials.machineStaticPublicKey)
+      || credentials.relayOrigin !== undefined && credentials.relayOrigin !== null
+        && !validRelayOrigin(credentials.relayOrigin))
       throw new TypeError("Invalid remote device credentials");
   }
 
@@ -113,7 +128,8 @@
     const key = await wrappingKey();
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const plaintext = encoder.encode(JSON.stringify({version: 1, staticPrivateKey: credentials.staticPrivateKey,
-      deviceToken: credentials.deviceToken, machineStaticPublicKey: credentials.machineStaticPublicKey}));
+      deviceToken: credentials.deviceToken, machineStaticPublicKey: credentials.machineStaticPublicKey,
+      relayOrigin: credentials.relayOrigin || null}));
     const additionalData = encoder.encode(`${id}:v1`);
     let ciphertext;
     try {
@@ -124,7 +140,7 @@
     const transaction = database.transaction(DEVICES, "readwrite");
     const done = transactionDone(transaction, "Could not save remote device credentials");
     transaction.objectStore(DEVICES).put({id, machineId, deviceId, version: 1,
-      iv: iv.buffer, ciphertext, updatedAt: Date.now()});
+      relayOrigin: credentials.relayOrigin || null, iv: iv.buffer, ciphertext, updatedAt: Date.now()});
     await done;
   }
 
@@ -144,8 +160,10 @@
       const credentials = JSON.parse(decoder.decode(plaintext));
       validateCredentials(credentials);
       if (credentials.version !== 1) throw new Error("Unsupported remote device credential version");
+      if (credentials.relayOrigin != null && !validRelayOrigin(credentials.relayOrigin))
+        throw new Error("Invalid saved relay origin");
       return {staticPrivateKey: credentials.staticPrivateKey, deviceToken: credentials.deviceToken,
-        machineStaticPublicKey: credentials.machineStaticPublicKey};
+        machineStaticPublicKey: credentials.machineStaticPublicKey, relayOrigin: credentials.relayOrigin || null};
     } catch (_error) {
       throw new Error("Remote device credentials could not be authenticated");
     } finally {
@@ -158,6 +176,7 @@
     const transaction = database.transaction(DEVICES, "readonly");
     const records = await requestResult(transaction.objectStore(DEVICES).getAll());
     return records.map(record => ({machineId: record.machineId, deviceId: record.deviceId,
+      relayOrigin: validRelayOrigin(record.relayOrigin) ? record.relayOrigin : null,
       updatedAt: record.updatedAt})).sort((left, right) => left.machineId.localeCompare(right.machineId)
         || left.deviceId.localeCompare(right.deviceId));
   }

@@ -9,9 +9,11 @@ a non-extractable WebCrypto key, confirms receipt to the daemon, and verifies
 workspace identity over RPC. The full first-pair path now passes in headless
 Chrome through a local Wrangler Worker, including code comparison, desktop
 same-user pairing administration RPC, encrypted browser storage, and reload of
-approved device trust from the production SQLite store. Saved-device
-selection/reconnection, graphical desktop-panel clickthrough, remote workspace
-resources, and cross-network qualification remain open. A separate local
+approved device trust from the production SQLite store. Saved-device selection
+and reconnect now obtain a fresh relay ticket and verify the pinned machine key;
+the Worker also resets the daemon's stale channel before admitting a replacement
+device socket. Graphical desktop-panel clickthrough, remote workspace resources,
+and cross-network qualification remain open. A separate local
 Worker smoke test starts the real `AgentMain` twice to qualify opt-in daemon
 startup, OS credential reload, and SQLite reopen; the full browser-pairing run
 still uses its focused host harness. It
@@ -210,11 +212,10 @@ protocol and browser key-storage contracts.
   enrolls with the original OS-stored bearer; the production SQLite catalog
   reopens after both launches. This is daemon startup qualification, not the
   browser pairing E2E or a cross-network test.
-- [ ] Qualify browser access across networks. The local first-pairing run passes
-  through a real headless browser, the local Wrangler Worker and the desktop
-  pairing state machine. Cross-network use, saved-device ticket exchange and
-  reconnection remain open; keep direct/local transport optional under the same
-  client interface.
+- [ ] Qualify browser access across networks. Local first pairing and saved-
+  device reconnection pass through headless Chrome and Wrangler. Cross-network
+  use remains open; keep direct/local transport optional under the same client
+  interface.
 - [x] Select and prototype-test the browser-compatible Noise XX suite and
   NativeKit/WebCrypto key-custody design documented above. Do not invent
   cryptography or treat relay TLS as end-to-end encryption.
@@ -277,6 +278,14 @@ protocol and browser key-storage contracts.
   empty WebSocket subprotocol bug, fixed by passing `nullptr` when negotiation
   is omitted. Run with a built site using
   `python3 tests/workspace-browser-pairing/run.py <site-directory>`.
+- [x] Add saved-device selection and reconnect in the browser panel. The browser
+  keeps the relay origin beside its encrypted credential, requests a fresh
+  ticket with the saved device bearer, and pins the machine Noise key before
+  starting workspace RPC. Haxeon now decodes NativeKit HTTP completion events
+  on WASM, and the Worker sends a bounded route-reset envelope before accepting
+  a device reconnect so the daemon discards the previous channel. The local
+  browser/Worker E2E pairs, disconnects, and reconnects with the same workspace
+  identity and grants.
 - [ ] Use RPC reconnect with fresh authenticated handshakes and Exosuit-owned
   resource/cursor recovery. Machine sleep/offline and revoked devices produce
   clear states rather than stale connected indicators.

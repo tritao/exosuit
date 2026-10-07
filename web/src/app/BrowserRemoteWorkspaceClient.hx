@@ -18,7 +18,18 @@ import workspace.transport.NoiseMessageTransport;
 import workspace.transport.NoisePairingCode;
 import workspace.transport.NoisePrologue;
 import workspace.transport.RelayDeviceTransport;
+import workspace.transport.RelayMachineEndpoint;
+import workspace.transport.RelaySocketTicket;
+import workspace.transport.RelayTicketAttempt;
+import workspace.transport.RelayTicketClient;
 import workspace.transport.TransferredMessageConnector;
+
+typedef BrowserRemoteDevice = {
+	var machineId:String;
+	var deviceId:String;
+	var relayOrigin:Null<String>;
+	var updatedAt:Float;
+}
 
 /** First-pairing client for the existing browser build; it owns no workspace files locally. */
 class BrowserRemoteWorkspaceClient {
@@ -28,33 +39,52 @@ class BrowserRemoteWorkspaceClient {
 	public var codeConfirmed(default, null):Bool = false;
 	public var workspaceRoot(default, null):Null<String>;
 	public var grants(default, null):Array<String> = [];
+	public var savedDevices(default, null):Array<BrowserRemoteDevice> = [];
+	public var connecting(default, null):Bool = false;
 	public var revision(default, null):Int = 0;
 
 	final hub:NativeRpcHub;
+	final events:NativeKitEvents;
 	final clock:Void->Float;
 	final changed:Void->Void;
 	var operationGeneration:Int = 0;
 	var selectedMachine:String;
 	var selectedDevice:String;
+	var selectedRelayOrigin:Null<String>;
+	var selectedDeviceToken:Null<String>;
+	var savedConnection:Bool = false;
 	var localPrivateKey:Null<Bytes>;
 	var machineStaticPublicKey:Null<Bytes>;
 	var channel:Null<RelayDeviceTransport>;
 	var handshake:Null<NoiseClientHandshake>;
 	var secure:Null<NoiseMessageTransport>;
 	var connectorAttempt:Null<haxeon.rpc.RpcConnectAttempt>;
+	var ticketClient:Null<RelayTicketClient>;
+	var ticketAttempt:Null<RelayTicketAttempt>;
 	var approved:Null<Dynamic>;
 	var approvedChallenge:Null<String>;
 	var storeRequest:Int = 0;
 	var nextStoreRequest:Int = 1;
+	var savedListRequest:Int = 0;
+	var savedListRefreshPending:Bool = false;
+	var savedLoadRequest:Int = 0;
+	var nextSavedRequest:Int = 1;
+	var pendingPayloadKind:Int = 0;
+	var pendingPayloadRequest:Int = 0;
+	var pendingPayloadIndex:Int = 0;
+	var pendingPayloadInvalid:Bool = false;
+	var pendingPayload = new StringBuf();
 	var confirmation:Null<Bytes>;
 	var rpc:Null<RpcClient>;
 	var disposed:Bool = false;
 
 	public function new(events:NativeKitEvents, clock:Void->Float, changed:Void->Void) {
 		if (events == null || clock == null || changed == null) throw "Browser remote access needs host services";
+		this.events = events;
 		this.clock = clock;
 		this.changed = changed;
 		hub = new NativeRpcHub(events);
+		refreshSavedDevices();
 	}
 
 	public function beginPairing(url:String):Bool {
@@ -71,6 +101,8 @@ class BrowserRemoteWorkspaceClient {
 		}
 		selectedMachine = parsed.machineId;
 		selectedDevice = parsed.deviceId;
+		selectedRelayOrigin = parsed.origin;
+		connecting = true;
 		try {
 			var keypair = NoiseSession.generateKeypair();
 			localPrivateKey = keypair.privateKey;
@@ -114,7 +146,209 @@ class BrowserRemoteWorkspaceClient {
 		return true;
 	}
 
-	static function parseInvitationUrl(url:String):Null<{url:String, machineId:String, deviceId:String}> {
+	public function refreshSavedDevices():Void {
+		if (disposed) return;
+		if (savedListRequest != 0) {
+			savedListRefreshPending = true;
+			return;
+		}
+		savedListRequest = nextSavedRequest++;
+		beginPayload(savedListRequest, 1);
+		Sys.println("exosuit-remote-list:" + savedListRequest);
+	}
+
+	public function receiveStorePayloadChunk(request:Int, kind:Int, index:Int, value:Int):Void {
+		if (request != pendingPayloadRequest || kind != pendingPayloadKind) return;
+		if (index != pendingPayloadIndex || value < 0 || value > 127 || pendingPayloadIndex >= 32768) {
+			pendingPayloadInvalid = true;
+			return;
+		}
+		pendingPayload.addChar(value);
+		pendingPayloadIndex++;
+	}
+
+	public function receiveStorePayloadComplete(request:Int, kind:Int, length:Int, success:Bool):Void {
+		if (request != pendingPayloadRequest || kind != pendingPayloadKind) return;
+		if (length != pendingPayloadIndex || pendingPayloadInvalid) success = false;
+		var payload = success ? pendingPayload.toString() : "";
+		pendingPayload = new StringBuf();
+		pendingPayloadRequest = 0;
+		pendingPayloadKind = 0;
+		pendingPayloadIndex = 0;
+		pendingPayloadInvalid = false;
+		if (kind == 1 && request == savedListRequest) {
+			savedListRequest = 0;
+			if (!success) {
+				savedDevices = [];
+				error = "Could not read saved browser devices.";
+				setStatus("Saved devices are unavailable.");
+				if (savedListRefreshPending) {
+					savedListRefreshPending = false;
+					refreshSavedDevices();
+				}
+				return;
+			}
+			try {
+				var values:Dynamic = Json.parse(payload);
+				if (!Std.isOfType(values, Array) || (cast values:Array<Dynamic>).length > 128)
+					throw "invalid_device_list";
+				var loaded:Array<BrowserRemoteDevice> = [];
+				for (value in (cast values:Array<Dynamic>)) {
+					var machineId:String = Reflect.field(value, "machineId");
+					var deviceId:String = Reflect.field(value, "deviceId");
+					var relayOrigin:Null<String> = Reflect.field(value, "relayOrigin");
+					if (!validHex(machineId, 32) || !validHex(deviceId, 32)) throw "invalid_device_identity";
+					if (relayOrigin != null) {
+						try {
+							var endpoint = new RelayMachineEndpoint(relayOrigin, machineId);
+						if (endpoint.origin != relayOrigin) relayOrigin = null;
+						} catch (_:Dynamic) relayOrigin = null;
+					}
+					var time:Dynamic = Reflect.field(value, "updatedAt");
+					var updatedAt:Float = Std.isOfType(time, Float) || Std.isOfType(time, Int) ? time : 0;
+					loaded.push({machineId: machineId, deviceId: deviceId, relayOrigin: relayOrigin, updatedAt: updatedAt});
+				}
+				savedDevices = loaded;
+				error = null;
+				revision++;
+				changed();
+			} catch (_:Dynamic) {
+				savedDevices = [];
+				error = "Saved browser device data is invalid.";
+				setStatus("Saved devices are unavailable.");
+			}
+			if (savedListRefreshPending) {
+				savedListRefreshPending = false;
+				refreshSavedDevices();
+			}
+			return;
+		}
+		if (kind == 2 && request == savedLoadRequest) {
+			savedLoadRequest = 0;
+			if (!success) {
+				fail("Could not open this saved device's encrypted credentials.");
+				return;
+			}
+			try {
+				var value:Dynamic = Json.parse(payload);
+				var credentials:Dynamic = Reflect.field(value, "credentials");
+				var machineId:String = Reflect.field(value, "machineId");
+				var deviceId:String = Reflect.field(value, "deviceId");
+				var privateHex:String = Reflect.field(credentials, "staticPrivateKey");
+				var token:String = Reflect.field(credentials, "deviceToken");
+				var machineHex:String = Reflect.field(credentials, "machineStaticPublicKey");
+				var relayOrigin:String = Reflect.field(credentials, "relayOrigin");
+				if (machineId != selectedMachine || deviceId != selectedDevice || relayOrigin != selectedRelayOrigin
+					|| !validHex(privateHex, 64) || !validHex(token, 64) || !validHex(machineHex, 64))
+					throw "invalid_saved_credentials";
+				localPrivateKey = bytesFromHex(privateHex);
+				selectedDeviceToken = token;
+				machineStaticPublicKey = bytesFromHex(machineHex);
+				requestSavedTicket();
+			} catch (_:Dynamic) {
+				fail("This saved device could not be authenticated. Pair it again from the desktop.");
+			}
+		}
+	}
+
+	public function beginSavedConnection(machineId:String, deviceId:String):Bool {
+		if (disposed) return false;
+		var record:Null<BrowserRemoteDevice> = null;
+		for (device in savedDevices)
+			if (device.machineId == machineId && device.deviceId == deviceId) {
+				record = device;
+				break;
+			}
+		if (record == null) {
+			fail("That saved browser device is no longer available.");
+			return false;
+		}
+		if (record.relayOrigin == null) {
+			fail("This older saved device has no relay address. Pair it again from the desktop.");
+			return false;
+		}
+		resetSession();
+		error = null;
+		authenticationCode = null;
+		workspaceRoot = null;
+		grants = [];
+		selectedMachine = machineId;
+		selectedDevice = deviceId;
+		selectedRelayOrigin = record.relayOrigin;
+		savedConnection = true;
+		connecting = true;
+		savedLoadRequest = nextSavedRequest++;
+		beginPayload(savedLoadRequest, 2);
+		setStatus("Opening encrypted saved-device credentials…");
+		Sys.println("exosuit-remote-load:" + Json.stringify({request: savedLoadRequest,
+			machineId: machineId, deviceId: deviceId}));
+		return true;
+	}
+
+	function requestSavedTicket():Void {
+		var origin = selectedRelayOrigin, machineId = selectedMachine, token = selectedDeviceToken;
+		if (origin == null || machineId == null || token == null) {
+			fail("Saved device credentials are incomplete.");
+			return;
+		}
+		var endpoint:RelayMachineEndpoint;
+		try endpoint = new RelayMachineEndpoint(origin, machineId) catch (_:Dynamic) {
+			fail("The saved relay address is invalid.");
+			return;
+		}
+		try {
+			ticketClient = new RelayTicketClient(events, endpoint.isLoopbackHttp);
+			var generation = operationGeneration;
+			ticketAttempt = ticketClient.request(endpoint, token, function(ticket, error) {
+				if (disposed || generation != operationGeneration) return;
+				ticketAttempt = null;
+				var current = ticketClient;
+				ticketClient = null;
+				if (current != null) current.dispose();
+				selectedDeviceToken = null;
+				if (error != null || ticket == null) {
+					fail("Could not get a fresh relay connection ticket: " + (error == null ? "ticket_missing" : error));
+					return;
+				}
+				openSavedDeviceSocket(endpoint, ticket, generation);
+			});
+			setStatus("Requesting a fresh relay connection ticket…");
+		} catch (_:Dynamic) {
+			fail("Could not start the saved-device relay connection.");
+		}
+	}
+
+	function openSavedDeviceSocket(endpoint:RelayMachineEndpoint, ticket:RelaySocketTicket, generation:Int):Void {
+		var deviceId = selectedDevice, privateKey = localPrivateKey, machineKey = machineStaticPublicKey;
+		if (deviceId == null || privateKey == null || machineKey == null) {
+			fail("Saved device keys are unavailable.");
+			return;
+		}
+		try connectorAttempt = hub.connectBytes(NativeRpcHub.websocketUrl(endpoint.websocketUrl(ticket)), function(stream, failure) {
+			if (disposed || generation != operationGeneration) {
+				if (stream != null) stream.close();
+				return;
+			}
+			connectorAttempt = null;
+			if (stream == null) {
+				fail(failure == null ? "Could not reconnect to the relay." : failure);
+				return;
+			}
+			try {
+				channel = new RelayDeviceTransport(stream, deviceId);
+				handshake = new NoiseClientHandshake(channel, privateKey, machineKey,
+					NoisePrologue.encode(selectedMachine, deviceId), clock, onNoiseReady);
+				setStatus("Verifying the saved machine identity…");
+			} catch (_:Dynamic) {
+				stream.close();
+				fail("Could not start the pinned machine handshake.");
+			}
+		}) catch (_:Dynamic) {
+			fail("Could not open a browser connection to the relay.");
+		}
+	}
+
+	static function parseInvitationUrl(url:String):Null<{url:String, origin:String, machineId:String, deviceId:String}> {
 		var pattern = ~/^(wss?):\/\/([A-Za-z0-9.-]+)(?::([0-9]{1,5}))?\/v1\/machines\/([0-9a-f]{32})\/pair\/([0-9a-f]{32})\?secret=([0-9a-f]{64})$/;
 		if (url == null || !pattern.match(url)) return null;
 		var scheme = pattern.matched(1).toLowerCase();
@@ -122,7 +356,8 @@ class BrowserRemoteWorkspaceClient {
 		var port = pattern.matched(3);
 		if (port != null && (Std.parseInt(port) == null || Std.parseInt(port) > 65535 || Std.parseInt(port) < 1)) return null;
 		if (scheme != "wss" && host != "localhost" && host != "127.0.0.1") return null;
-		return {url: url, machineId: pattern.matched(4), deviceId: pattern.matched(5)};
+		var origin = (scheme == "wss" ? "https" : "http") + "://" + host + (port == null ? "" : ":" + port);
+		return {url: url, origin: origin, machineId: pattern.matched(4), deviceId: pattern.matched(5)};
 	}
 
 	function onNoiseReady(transport:NoiseMessageTransport):Void {
@@ -133,6 +368,13 @@ class BrowserRemoteWorkspaceClient {
 			return;
 		}
 		machineStaticPublicKey = current.remoteStaticKey;
+		if (savedConnection) {
+			wipe(localPrivateKey);
+			localPrivateKey = null;
+			setStatus("Machine identity verified. Connecting to workspace…");
+			connectWorkspace(transport);
+			return;
+		}
 		authenticationCode = NoisePairingCode.fromHandshakeHash(current.transcriptHash);
 		setStatus("Compare this code with the one shown on the desktop.");
 	}
@@ -152,6 +394,7 @@ class BrowserRemoteWorkspaceClient {
 			fail("Could not protect this device credential in browser storage; the pairing was not completed.");
 			return;
 		}
+		refreshSavedDevices();
 		var challenge = approvedChallenge, deviceId = selectedDevice;
 		if (challenge == null || deviceId == null) {
 			fail("The pairing approval is missing its confirmation challenge.");
@@ -238,7 +481,7 @@ class BrowserRemoteWorkspaceClient {
 		setStatus("Protecting device credentials in browser storage…");
 		Sys.println("exosuit-remote-store:" + Json.stringify({request: storeRequest, machineId: machineId,
 			deviceId: deviceId, staticPrivateKey: hex(privateKey), deviceToken: value.deviceToken,
-			machineStaticPublicKey: hex(machineKey)}));
+			machineStaticPublicKey: hex(machineKey), relayOrigin: selectedRelayOrigin}));
 	}
 
 	function tryConfirmAndConnect():Void {
@@ -249,6 +492,11 @@ class BrowserRemoteWorkspaceClient {
 			return;
 		}
 		confirmation = null;
+		secure = null;
+		connectWorkspace(transport);
+	}
+
+	function connectWorkspace(transport:NoiseMessageTransport):Void {
 		secure = null;
 		var client:RpcClient = null;
 		client = new RpcClient(new TransferredMessageConnector(transport), clock,
@@ -266,6 +514,9 @@ class BrowserRemoteWorkspaceClient {
 		connection.call(WorkspaceProtocol.IDENTITY, {workspace: "workspace"}, 5000, function(identity) {
 			if (rpc != client || !client.isCurrent(token)) return;
 			workspaceRoot = identity.root;
+			grants = client.capabilities();
+			connecting = false;
+			savedConnection = false;
 			setStatus("Connected to workspace.");
 		}, function(failure) {
 			if (rpc == client && client.isCurrent(token)) fail("Workspace identity check failed: " + failure.code);
@@ -281,7 +532,8 @@ class BrowserRemoteWorkspaceClient {
 		setStatus("Disconnected. Paste another one-time pairing URL to connect.");
 	}
 
-	public function needsFrames():Bool return !disposed && (rpc != null || handshake != null || channel != null || storeRequest != 0 || confirmation != null);
+	public function needsFrames():Bool return !disposed && (rpc != null || handshake != null || channel != null
+		|| storeRequest != 0 || confirmation != null || ticketAttempt != null);
 
 	function resetSession():Void {
 		operationGeneration++;
@@ -289,6 +541,10 @@ class BrowserRemoteWorkspaceClient {
 			Sys.println("exosuit-remote-cancel:" + storeRequest);
 		if (connectorAttempt != null) connectorAttempt.cancel();
 		connectorAttempt = null;
+		if (ticketAttempt != null) ticketAttempt.cancel();
+		ticketAttempt = null;
+		if (ticketClient != null) ticketClient.dispose();
+		ticketClient = null;
 		if (handshake != null) handshake.close();
 		handshake = null;
 		if (rpc != null) rpc.close();
@@ -305,8 +561,14 @@ class BrowserRemoteWorkspaceClient {
 		confirmation = null;
 		codeConfirmed = false;
 		storeRequest = 0;
+		if (savedLoadRequest != 0 && pendingPayloadRequest == savedLoadRequest) clearPendingPayload();
 		selectedMachine = null;
 		selectedDevice = null;
+		selectedRelayOrigin = null;
+		selectedDeviceToken = null;
+		savedConnection = false;
+		connecting = false;
+		savedLoadRequest = 0;
 	}
 
 	public function dispose():Void {
@@ -341,6 +603,37 @@ class BrowserRemoteWorkspaceClient {
 			output.addChar("0123456789abcdef".charCodeAt(value & 0xf));
 		}
 		return output.toString();
+	}
+
+	static function validHex(value:Null<String>, length:Int):Bool
+		return value != null && value.length == length && ~/^[0-9a-f]+$/.match(value);
+
+	static function bytesFromHex(value:String):Bytes {
+		if (value == null || value.length % 2 != 0 || !~/^[0-9a-f]+$/.match(value))
+			throw "invalid_hex_bytes";
+		var result = Bytes.alloc(Std.int(value.length / 2));
+		for (index in 0...result.length) {
+			var high = "0123456789abcdef".indexOf(value.charAt(index * 2));
+			var low = "0123456789abcdef".indexOf(value.charAt(index * 2 + 1));
+			result.set(index, (high << 4) | low);
+		}
+		return result;
+	}
+
+	function beginPayload(request:Int, kind:Int):Void {
+		pendingPayloadRequest = request;
+		pendingPayloadKind = kind;
+		pendingPayloadIndex = 0;
+		pendingPayloadInvalid = false;
+		pendingPayload = new StringBuf();
+	}
+
+	function clearPendingPayload():Void {
+		pendingPayloadRequest = 0;
+		pendingPayloadKind = 0;
+		pendingPayloadIndex = 0;
+		pendingPayloadInvalid = false;
+		pendingPayload = new StringBuf();
 	}
 
 	static function wipe(bytes:Null<Bytes>):Void {

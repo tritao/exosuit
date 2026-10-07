@@ -44,7 +44,8 @@ class RelayFrameReader {
 				consumed += count;
 				if (routeUsed < routeHeader.length)
 					break;
-				if (routeHeader.get(0) != RelayFrameCodec.VERSION) {
+				var version = routeHeader.get(0);
+				if (version != RelayFrameCodec.VERSION && version != RelayFrameCodec.RESET_VERSION) {
 					failed = true;
 					throw "Unsupported relay envelope version";
 				}
@@ -52,6 +53,11 @@ class RelayFrameReader {
 				route.blit(0, routeHeader, 1, route.length);
 				channelId = RelayFrameCodec.encodeChannelId(route);
 				routeUsed = 0;
+				if (version == RelayFrameCodec.RESET_VERSION) {
+					queued.push(new RelayFrame(channelId, Bytes.alloc(0), true));
+					channelId = null;
+					continue;
+				}
 			}
 			if (headerUsed < frameHeader.length) {
 				var count = Std.int(Math.min(frameHeader.length - headerUsed, limit - consumed));

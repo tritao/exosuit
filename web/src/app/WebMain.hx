@@ -96,8 +96,10 @@ class WebMain {
 				error: remoteAccess.error,
 				authenticationCode: remoteAccess.authenticationCode,
 				codeConfirmed: remoteAccess.codeConfirmed,
+				connecting: remoteAccess.connecting,
 				workspaceRoot: remoteAccess.workspaceRoot,
-				grants: remoteAccess.grants
+				grants: remoteAccess.grants,
+				savedDevices: remoteAccess.savedDevices
 			}
 		}));
 		return 0;
@@ -112,6 +114,21 @@ class WebMain {
 		var client = remoteAccess;
 		if (client == null) return 1;
 		client.credentialStored(request, success != 0);
+		return 0;
+	}
+
+	/** IndexedDB metadata and credentials cross the browser boundary as bounded ASCII chunks. */
+	@:expose public static function remoteStorePayloadChunk(request:Int, kind:Int, index:Int, value:Int):Int {
+		var client = remoteAccess;
+		if (client == null) return 1;
+		client.receiveStorePayloadChunk(request, kind, index, value);
+		return 0;
+	}
+
+	@:expose public static function remoteStorePayloadComplete(request:Int, kind:Int, length:Int, success:Int):Int {
+		var client = remoteAccess;
+		if (client == null) return 1;
+		client.receiveStorePayloadComplete(request, kind, length, success != 0);
 		return 0;
 	}
 }

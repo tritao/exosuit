@@ -71,6 +71,10 @@ class RelayDeviceTransport implements MessageTransport {
 	}
 
 	function takeFrame(frame:RelayFrame):Null<Bytes> {
+		if (frame.reset) {
+			fail("unexpected_relay_control");
+			return null;
+		}
 		if (frame.channelId != channelId) {
 			fail("relay_channel_mismatch");
 			return null;
