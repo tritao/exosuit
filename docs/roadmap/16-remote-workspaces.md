@@ -373,17 +373,18 @@ Deployment/publication requires separate authorization under EXECUTION.md.
 - [x] Verify connected-browser file preview clickthrough. The pairing test
   grants file access, confirms the Explorer subscribes to the remote root,
   single-clicks `remote.md`, and checks that its revision-checked Markdown
-  preview opens in a preview tab. This uses the available host artifact with
-  the freshly compiled guest; it does not replace the full host build gate.
-- [ ] Complete the Emscripten host build and connected-browser terminal
-  clickthrough. The web guest compiles with remote Workbench and terminal UI,
-  but full Emscripten host/browser execution remains open because the pinned
-  SDK is unavailable in this environment.
+  preview opens in a preview tab. The full Emscripten host build and browser
+  flow now pass for wasm32 and wasm-gc.
+- [x] Complete the Emscripten host builds and connected-browser terminal
+  clickthrough for wasm32 and wasm-gc. The real browser test opens a remote
+  terminal in the Workbench, verifies its dock panel and session identity,
+  forces relay reconnect, then confirms that the same terminal reattaches.
+  Builds use the available sibling Emscripten 6.0.9 SDK.
 - [x] Wire the existing Codex session and approval UI to the shared browser
   Workbench client. It reads agent sessions/activity and sends prompt,
   interruption and approval actions under negotiated grants. Connected-browser
-  behavior and competing-client approval acceptance remain part of the pending
-  host/browser integration gate.
+  prompt/approval behavior and competing-client acceptance remain to be
+  qualified; the host build and terminal clickthrough are complete.
 - [x] Attach terminal output by byte offsets and replay, and gate input/resize
   through the explicit controller lease. Multiple viewers can read without
   resizing the shared PTY; taking or releasing control is visible in the pane.

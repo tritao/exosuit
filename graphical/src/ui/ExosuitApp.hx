@@ -272,12 +272,13 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function makeDock():DockWorkspaceModel {
 		var model = new DockWorkspaceModel();
+		var terminalUiAvailable = capabilities.supports(Processes) || createWorkspaceTerminal != null;
 		model.register(new DockPanelDescriptor("explorer", "Sidebar", true, true, IconName.FolderOpen, haxeon.ui.docking.DockPanelHeaderMode.Content, new haxeon.ui.docking.DockPanelGrouping("sidebar")));
 		model.register(new DockPanelDescriptor("editor", "Editor", false, true, IconName.NewFile, haxeon.ui.docking.DockPanelHeaderMode.Content, new haxeon.ui.docking.DockPanelGrouping("editors", false)));
 		model.register(new DockPanelDescriptor("problems", "Problems", true, true, IconName.AlertTriangle, haxeon.ui.docking.DockPanelHeaderMode.Dock, new haxeon.ui.docking.DockPanelGrouping("tools")));
 		if (capabilities.supports(Processes))
 			model.register(new DockPanelDescriptor("build", "Build Output", true, true, IconName.Terminal, haxeon.ui.docking.DockPanelHeaderMode.Dock, new haxeon.ui.docking.DockPanelGrouping("tools")));
-		if (capabilities.supports(Processes))
+		if (terminalUiAvailable)
 			model.register(new DockPanelDescriptor("terminal", "Terminal", true, true, IconName.Terminal, haxeon.ui.docking.DockPanelHeaderMode.Dock, new haxeon.ui.docking.DockPanelGrouping("tools")));
 		dockPanelContents = [
 			new DockPanelContent("explorer", function(_) return new haxeon.ui.widgets.sidebar.SidebarHost("sidebar-modes", sidebar, function(id) { showSidebarMode(id); }, function(id) return activityIcons.get(id))),
@@ -286,7 +287,7 @@ class ExosuitApp implements DesktopUiApplication {
 		];
 		if (capabilities.supports(Processes))
 			dockPanelContents.push(new DockPanelContent("build", function(_) return new BuildOutputPanel(host)));
-		if (capabilities.supports(Processes))
+		if (terminalUiAvailable)
 			dockPanelContents.push(new DockPanelContent("terminal", function(_) return terminalPanel()));
 		var bottom = capabilities.supports(Processes) ? DockNode.Tabs(["problems", "build"], "problems") : DockNode.Panel("problems");
 		var main = DockNode.Split(DockSplitAxis.Horizontal, 0.22,
@@ -347,7 +348,7 @@ class ExosuitApp implements DesktopUiApplication {
 		var number = nextTerminalId++;
 		var id = "terminal-" + number;
 		if (createWorkspaceTerminal != null && application.workspace.activeProject != null)
-			id = workspace.client.LocalTerminalIds.create(number);
+			id = workspace.client.WorkspaceIds.create("workspace-terminal");
 		return createTerminalTab(id, "Terminal " + number,
 			explorerRoot == null ? Sys.getCwd() : explorerRoot, false);
 	}
@@ -357,15 +358,21 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function createTerminalTab(id:String, title:String, cwd:String, restored:Bool, ?remoteOwner:Bool, ?resource:String, ?workspaceRoot:String, ?group:String, ?directory:String):Null<UiTerminalTab> {
 		var create = createTerminal;
-		if (create == null) return null;
+		var remote = createWorkspaceTerminal;
+		var isRemote = remoteOwner == null ? StringTools.startsWith(id, "workspace-terminal-") : remoteOwner;
+		if ((remote == null || !isRemote) && create == null) return null;
 		var number = StringTools.startsWith(id, "terminal-") ? Std.parseInt(id.substring(9)) : null;
 		if (number != null && number >= nextTerminalId) nextTerminalId = number + 1;
 		var localDirectory = FileSystem.exists(cwd) && FileSystem.isDirectory(cwd) ? cwd : Sys.getCwd();
 		try {
-			var remote = createWorkspaceTerminal;
-			var isRemote = remoteOwner == null ? StringTools.startsWith(id,"workspace-terminal-") : remoteOwner;
-			var panel = remote != null && isRemote ?
-				remote(resource==null ? id : resource,workspaceRoot == null ? cwd : workspaceRoot,restored,requestFrame,terminalPalette,group,directory) : create(localDirectory,requestFrame,terminalPalette);
+			var panel:TerminalPanel;
+			if (remote != null && isRemote)
+				panel = remote(resource == null ? id : resource, workspaceRoot == null ? cwd : workspaceRoot,
+					restored, requestFrame, terminalPalette, group, directory);
+			else if (create != null)
+				panel = create(localDirectory, requestFrame, terminalPalette);
+			else
+				return null;
 			return new UiTerminalTab(id, title, cwd, panel,isRemote,resource,workspaceRoot);
 		} catch (error:Dynamic) {
 			statusMessage = "Terminal: " + Std.string(error);
@@ -703,8 +710,9 @@ class ExosuitApp implements DesktopUiApplication {
 		terminalBrowserPanel = new WorkspaceTerminalsPanel(client, openCatalogTerminal, forgetCatalogTerminal, requestFrame);
 		workbenchPanel = new WorkbenchPanel(client, openCatalogTerminal, newGroupedTerminal, editWorkspaceGroup,
 			function(path) application.openArgument(path), openWorkspaceTerminals, requestFrame, openCodexAgent, showWorkbenchMenu, attachCodexThread);
-		registerSidebarDestination("workbench", IconName.Terminal, function() return workbenchPanel == null ? new Text("Workspace disconnected") : workbenchPanel,
-			new haxeon.ui.widgets.sidebar.SidebarModeOptions("Workbench", 20, true));
+		if (sidebar.find("workbench") == null)
+			registerSidebarDestination("workbench", IconName.Terminal, function() return workbenchPanel == null ? new Text("Workspace disconnected") : workbenchPanel,
+				new haxeon.ui.widgets.sidebar.SidebarModeOptions("Workbench", 20, true));
 	}
 
 	public function detachWorkbench(client:workspace.client.WorkspaceWorkbenchClient):Void {
@@ -753,7 +761,7 @@ class ExosuitApp implements DesktopUiApplication {
 		var root = catalog.workspaceRoot;
 		if (root == null) return;
 		var cwd = workbenchPanel.model.directory(selected);
-		var resource = workspace.client.LocalTerminalIds.create(nextTerminalId++);
+		var resource = workspace.client.WorkspaceIds.create("workspace-terminal");
 		var terminal = createTerminalTab(ResourceViewIdentity.view(root, resource), "Terminal", cwd == null ? root : cwd, false, true, resource, root, group);
 		if (terminal == null) return;
 		host.panelTerminals.push(terminal); host.activePanelTerminalIndex = host.panelTerminals.length - 1;

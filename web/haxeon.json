@@ -174,7 +174,6 @@
     "../src/workspace/TrashEntry.hx",
     "../src/workspace/TrashService.hx",
     "../src/workspace/Workspace.hx",
-    "../src/workspace/client/LocalTerminalIds.hx",
     "../src/workspace/client/LocalWorkspaceClient.hx",
     "../src/workspace/client/RpcTerminalBackend.hx",
     "../src/workspace/client/RpcWorkspaceWorkbenchClient.hx",

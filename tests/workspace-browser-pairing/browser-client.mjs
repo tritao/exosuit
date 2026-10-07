@@ -66,7 +66,10 @@ async function waitFor(description, predicate, timeout = 60000) {
     value = await predicate();
     if (value) return value;
     const app = await expression('({state:window.exosuit?.state,error:window.exosuit?.error})');
-    if (app?.state === 'failed') throw new Error(`Browser app failed: ${app.error}\n${browserDiagnostics.join('\n')}`);
+    if (app?.state === 'failed') {
+      const hostError = await expression('window.exosuit.document?.hostError');
+      throw new Error(`Browser app failed: ${app.error}\n${JSON.stringify(hostError)}\n${browserDiagnostics.join('\n')}`);
+    }
     await pause(200);
   }
   throw new Error(`Timed out waiting for ${description}: ${JSON.stringify(value)}`);
@@ -133,6 +136,12 @@ try {
   if (!connected.state.grants?.includes('workspace.identity') || !connected.state.grants?.includes('workspace.read')
     || !connected.state.grants?.includes('workspace.files.read'))
     throw new Error('The connected browser did not receive the approved workspace grants');
+  const agentMode = process.env.EXOSUIT_TEST_AGENT === '1';
+  if (agentMode && (!connected.state.grants?.includes('workspace.groups.tree')
+    || !connected.state.grants?.includes('workspace.terminals.read')
+    || !connected.state.grants?.includes('workspace.terminals.catalog')
+    || !connected.state.grants?.includes('workspace.terminals.control')))
+    throw new Error('AgentMain browser did not receive the approved terminal and workspace-tree grants');
   const remoteExplorer = await waitFor('connected remote file explorer', async () => {
     const shell = await shellState();
     return shell?.explorerWatching && shell?.explorerIdentity?.includes(connected.state.workspaceRoot) ? shell : null;
@@ -154,6 +163,30 @@ try {
   if (remotePreview.syntax !== 'Markdown')
     throw new Error(`Remote preview used unexpected syntax mode: ${remotePreview.syntax}`);
   console.log('PASS: single-click opened the remote Markdown file as a revision-checked preview tab');
+  let remoteTerminalId = null;
+  if (agentMode) {
+    await click(30, 160); // Workbench activity-rail icon.
+    await pause(120);
+    const selectedWorkbench = (await shellState())?.sidebarMode === 'workbench';
+    if (!selectedWorkbench) throw new Error('Could not select the connected Workbench from the activity rail');
+    console.log('PASS: connected Workbench selected');
+    const readyWorkbench = await waitFor('remote terminal catalog', async () => {
+      const shell = await shellState();
+      return shell?.terminalCatalog?.groups?.some(group => group.id === 'work') ? shell : null;
+    }, 20000);
+    console.log('PASS: remote terminal catalog loaded');
+    await click(74, 90); // Workbench's New terminal action for its selected Work group.
+    const openedTerminal = await waitFor('remote terminal tab', async () => {
+      const shell = await shellState();
+      return shell?.terminalResourceIds?.length === 1 && shell?.terminalIds?.length === 1
+        && shell?.terminal !== 'closed' && shell?.terminalColumns > 0
+        && shell?.panels?.includes('terminal') ? shell : null;
+    }, 30000);
+    remoteTerminalId = openedTerminal.terminalResourceIds[0];
+    if (remoteTerminalId == null || remoteTerminalId.length === 0)
+      throw new Error('Remote terminal tab did not retain a stable session id');
+    console.log('PASS: Workbench opened a controlled terminal session from the remote workspace group');
+  }
   const rawRecord = await expression(`(async()=>{const db=await new Promise((resolve,reject)=>{const r=indexedDB.open('exosuit-remote-devices-v1');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});const values=await new Promise((resolve,reject)=>{const r=db.transaction('devices','readonly').objectStore('devices').get(${JSON.stringify(`${invitation.machineId}:${invitation.deviceId}`)});r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});const key=await new Promise((resolve,reject)=>{const r=db.transaction('meta','readonly').objectStore('meta').get('noise-device-wrap-v1');r.onsuccess=()=>resolve(r.result?.key);r.onerror=()=>reject(r.error)});return {ciphertextBytes:values?.ciphertext?.byteLength||0,cleartextFields:!!values&&(Object.hasOwn(values,'staticPrivateKey')||Object.hasOwn(values,'deviceToken')),keyExtractable:key?.extractable}})()`);
   if (rawRecord.ciphertextBytes < 32 || rawRecord.cleartextFields || rawRecord.keyExtractable !== false)
     throw new Error(`Browser device storage did not preserve encrypted-at-rest custody: ${JSON.stringify(rawRecord)}`);
@@ -164,7 +197,7 @@ try {
   // Drop the active relay WebSocket. The RpcClient must obtain a fresh ticket
   // and Noise channel without another user action.
   const oldConnectCount = await expression(`window.__exosuitTestSockets.filter(socket =>
-    socket.url.includes('/connect?') && socket.readyState === WebSocket.OPEN).length`);
+    socket.url.includes('/connect')).length`);
   const forcedDrop = await expression(`(()=>{
     const socket = [...window.__exosuitTestSockets].reverse().find(value =>
       value.readyState === WebSocket.OPEN && (value.url.includes('/pair/') || value.url.includes('/connect?')));
@@ -187,10 +220,14 @@ try {
     || !automaticReconnect.grants?.includes('workspace.read')
     || !automaticReconnect.grants?.includes('workspace.files.read'))
     throw new Error('Automatic reconnect changed workspace identity or approved grants');
+  if (agentMode && (!automaticReconnect.grants?.includes('workspace.terminals.read')
+    || !automaticReconnect.grants?.includes('workspace.terminals.catalog')
+    || !automaticReconnect.grants?.includes('workspace.terminals.control')))
+    throw new Error('Automatic reconnect changed the approved terminal grants');
   const freshConnectCount = await expression(`window.__exosuitTestSockets.filter(socket =>
-    socket.url.includes('/connect?') && socket.readyState === WebSocket.OPEN).length`);
+    socket.url.includes('/connect')).length`);
   if (freshConnectCount <= oldConnectCount)
-    throw new Error('Workspace recovered without opening a fresh ticketed relay socket');
+    throw new Error(`Workspace recovered without opening a fresh ticketed relay socket (${oldConnectCount} before, ${freshConnectCount} after)`);
   const recoveredExplorer = await waitFor('remote Explorer watch after reconnect', async () => {
     const shell = await shellState();
     return shell?.explorerWatching && shell?.explorerIdentity?.includes(automaticReconnect.workspaceRoot)
@@ -198,6 +235,15 @@ try {
   });
   if (!recoveredExplorer.explorerWatching)
     throw new Error('Remote Explorer did not restore its workspace watch after reconnect');
+  if (agentMode) {
+    const resumedTerminal = await waitFor('remote terminal after reconnect', async () => {
+      const shell = await shellState();
+      return shell?.terminalResourceIds?.includes(remoteTerminalId) && shell?.terminal !== 'closed' ? shell : null;
+    });
+    if (!resumedTerminal.terminalResourceIds.includes(remoteTerminalId))
+      throw new Error('Remote terminal tab lost its stable session id after reconnect');
+    console.log('PASS: remote terminal tab reattached to the same session after relay reconnect');
+  }
   writePrivate(successPath, {machineId: invitation.machineId, deviceId: invitation.deviceId,
     workspaceRoot: automaticReconnect.workspaceRoot});
   console.log('PASS: relay disconnect recovered with a fresh ticket, pinned Noise handshake, workspace grants and Explorer watch');

@@ -17,6 +17,7 @@ import workspace.service.WorkspacePairingProtocol;
 import workspace.service.WorkspacePairingProtocol.PendingPairing;
 import workspace.service.WorkspacePairingProtocol.PairingDevice;
 import workspace.service.WorkspaceFileProtocol;
+import workspace.service.WorkspaceTerminalProtocol;
 import workspace.service.WorkspaceService;
 import workspace.storage.WorkspaceSqliteStore;
 import workspace.runtime.WorkspaceDirectories;
@@ -248,7 +249,9 @@ class BrowserPairingHostMain {
 				} else {
 					approvalPending = true;
 					connection.call(WorkspacePairingProtocol.APPROVE, {deviceId: deviceId,
-						grants: [WorkspaceProtocol.READ, WorkspaceProtocol.IDENTITY_CAPABILITY, WorkspaceFileProtocol.READ]}, 10000, function(result) {
+						grants: [WorkspaceProtocol.READ, WorkspaceProtocol.IDENTITY_CAPABILITY, WorkspaceFileProtocol.READ,
+							WorkspaceProtocol.TREE, WorkspaceTerminalProtocol.READ, WorkspaceTerminalProtocol.CATALOG,
+							WorkspaceTerminalProtocol.CONTROL]}, 10000, function(result) {
 						if (!result.accepted) failure = "AgentMain refused pairing approval: " + result.error;
 						else approved = true;
 					}, function(error) {
@@ -295,10 +298,14 @@ class BrowserPairingHostMain {
 		require(records.length == 1, "SQLite did not retain exactly one approved device");
 		var record = records[0];
 		require(record.deviceId == deviceId && !record.revoked
-			&& record.grants.length == 3
+			&& record.grants.length == 7
 			&& record.grants.indexOf(WorkspaceProtocol.READ) >= 0
 			&& record.grants.indexOf(WorkspaceFileProtocol.READ) >= 0
-			&& record.grants.indexOf(WorkspaceProtocol.IDENTITY_CAPABILITY) >= 0,
+			&& record.grants.indexOf(WorkspaceProtocol.IDENTITY_CAPABILITY) >= 0
+			&& record.grants.indexOf(WorkspaceProtocol.TREE) >= 0
+			&& record.grants.indexOf(WorkspaceTerminalProtocol.READ) >= 0
+			&& record.grants.indexOf(WorkspaceTerminalProtocol.CATALOG) >= 0
+			&& record.grants.indexOf(WorkspaceTerminalProtocol.CONTROL) >= 0,
 			"SQLite device trust or explicit workspace grants did not survive reload");
 	}
 

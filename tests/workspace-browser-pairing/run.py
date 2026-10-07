@@ -193,6 +193,7 @@ with tempfile.TemporaryDirectory(prefix="exosuit-browser-pairing-") as temporary
         env = os.environ.copy()
         env["EXOSUIT_CDP_PORT"] = str(debug_port)
         env["EXOSUIT_APP_PORT"] = str(web_port)
+        env["EXOSUIT_TEST_AGENT"] = "1" if AGENT_MODE else "0"
         client = subprocess.run([
             NODE, str(ROOT / "tests/workspace-browser-pairing/browser-client.mjs"),
             str(invitation), str(status), str(decision), str(success),

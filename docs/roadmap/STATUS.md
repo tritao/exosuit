@@ -2,6 +2,30 @@
 
 Last updated: 2026-10-07.
 
+## M16.2 full WebAssembly host and browser terminal validation, 2026-10-07
+
+The complete browser host now builds for both wasm32 and wasm-gc using the
+available sibling Emscripten 6.0.9 SDK. The wasm-gc build exposed that a native
+pointer is a managed wrapper in this target: converting it to `Dynamic` must
+retain the wrapper, and converting it back must check the wrapper type. Haxeon
+now lowers those conversions directly and reports the function name when
+WebAssembly GC lowering fails. A compiler runtime fixture covers non-null and
+null native-pointer round trips through `Dynamic`.
+
+Validation: `web/build.sh` completes for wasm-gc, including the Emscripten host
+link and import checks. `python3 tests/workspace-browser-pairing/run.py --agent
+/tmp/exosuit-web-terminal-gc/site` passes the real browser pairing flow through
+local Wrangler and production AgentMain/SQLite: remote file preview, Workbench
+terminal creation, terminal dock visibility, relay reconnect and session
+reattachment. The wasm32 build and corresponding browser acceptance also pass.
+`haxeon/scripts/test-wasm-backend.sh` and
+`python3 scripts/test-workspace-terminals.py` pass.
+
+Next: exercise connected browser Codex prompts and approvals, including
+competing clients; the current browser acceptance covers pairing, files,
+terminals and reconnect. Broader F1–F5 filesystem qualification and Android
+remain open. See [`16-remote-workspaces.md`](16-remote-workspaces.md).
+
 ## M16.1 automatic authenticated browser RPC reconnect, 2026-10-07
 
 The browser now keeps one Haxeon `RpcClient` across transient relay failures.

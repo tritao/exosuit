@@ -119,6 +119,11 @@ class WebMain {
 			errors: [for (entry in app.application.errors.entries) entry.message],
 			commands: [for (command in app.application.commands.all()) command.name],
 			shell: app.diagnosticState(),
+			hostError: session == null || session.error == null ? null : {
+				stage: session.error.stage,
+				message: session.error.message,
+				stack: session.error.stack
+			},
 			remoteAccess: remoteAccess == null ? null : {
 				status: remoteAccess.status,
 				error: remoteAccess.error,
