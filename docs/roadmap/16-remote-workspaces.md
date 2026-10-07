@@ -10,9 +10,11 @@ workspace identity over RPC. The full first-pair path now passes in headless
 Chrome through a local Wrangler Worker, including code comparison, desktop
 same-user pairing administration RPC, encrypted browser storage, and reload of
 approved device trust from the production SQLite store. Saved-device
-selection/reconnection, actual `AgentMain` startup in the browser harness,
-graphical desktop-panel clickthrough, remote workspace resources, and
-cross-network qualification remain open. It
+selection/reconnection, graphical desktop-panel clickthrough, remote workspace
+resources, and cross-network qualification remain open. A separate local
+Worker smoke test starts the real `AgentMain` twice to qualify opt-in daemon
+startup, OS credential reload, and SQLite reopen; the full browser-pairing run
+still uses its focused host harness. It
 depends on Haxeon RPC.1/RPC.2 and the
 M14 workspace service; terminal and provider features depend on their M12/M14
 acceptance. Use the existing M15 web build as the first remote client. Android
@@ -201,6 +203,13 @@ protocol and browser key-storage contracts.
   one-use invitations, lists pending transcript codes, and approves, rejects
   or revokes devices. The graphical Remote Access panel exposes those
   controls, shows matching codes and grants, and revokes saved devices.
+- [x] Smoke-test real `AgentMain` relay startup and restart against the local
+  Worker. The test sets `EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP=1`, which only
+  permits the loopback HTTP origin already enforced by `RelayMachineEndpoint`.
+  A second launch supplies a different one-shot bootstrap token and still
+  enrolls with the original OS-stored bearer; the production SQLite catalog
+  reopens after both launches. This is daemon startup qualification, not the
+  browser pairing E2E or a cross-network test.
 - [ ] Qualify browser access across networks. The local first-pairing run passes
   through a real headless browser, the local Wrangler Worker and the desktop
   pairing state machine. Cross-network use, saved-device ticket exchange and

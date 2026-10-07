@@ -1,6 +1,8 @@
 package app;
 
 import haxe.Json;
+import haxe.io.Bytes;
+import haxeon.credentials.Credentials;
 import haxeon.platform.NativeKitRuntime;
 import haxeon.rpc.RpcClient;
 import haxeon.rpc.RpcConnection;
@@ -29,6 +31,10 @@ class BrowserPairingHostMain {
 
 	static function main():Void {
 		var args = Sys.args();
+		if (args.length == 3 && args[0] == "--cleanup-credentials") {
+			cleanupTestCredentials(args[1], args[2]);
+			return;
+		}
 		if (args.length != 1)
 			throw "Expected a private browser-pairing test config file";
 		var configPath = args[0];
@@ -175,6 +181,18 @@ class BrowserPairingHostMain {
 			&& record.grants.indexOf(WorkspaceProtocol.READ) >= 0
 			&& record.grants.indexOf(WorkspaceProtocol.IDENTITY_CAPABILITY) >= 0,
 			"SQLite device trust or explicit workspace grants did not survive reload");
+	}
+
+	static function cleanupTestCredentials(machineId:String, origin:String):Void {
+		var runtime = NativeKitRuntime.start();
+		for (account in ["noise-static:" + machineId, "relay:" + origin + "/machine/" + machineId]) {
+			var secret = Credentials.get("com.exosuit.workspace-relay", account);
+			if (secret != null) {
+				for (index in 0...secret.length) secret.set(index, 0);
+				Credentials.delete("com.exosuit.workspace-relay", account);
+			}
+		}
+		runtime.dispose();
 	}
 
 	static function writePrivate(path:String, contents:String):Void {

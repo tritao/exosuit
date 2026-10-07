@@ -36,8 +36,11 @@ class AgentMain {
 		var runtime = NativeKitRuntime.start(),
 			hub = new NativeRpcHub(runtime.events);
 		var clock = function() return NativeKit.nk_time_seconds() * 1000;
+		// HTTP remains rejected by RelayMachineEndpoint except for loopback. This
+		// opt-in exists for local Worker development and test runs only.
+		var allowLoopbackHttp = Sys.getEnv("EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP") == "1";
 		var relayHost:Null<WorkspaceRelayHost> = args.length == 9
-			? new WorkspaceRelayHost(runtime.events, hub, WorkspaceRelaySettings.loadBootstrap(args[8]))
+			? new WorkspaceRelayHost(runtime.events, hub, WorkspaceRelaySettings.loadBootstrap(args[8]), allowLoopbackHttp)
 			: null;
 		var directories = new workspace.runtime.WorkspaceDirectories(args.length >= 6 ? args[5] : Sys.getCwd());
 		// The seed epoch is used only when creating a new catalog. Reopening preserves it.

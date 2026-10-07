@@ -2,6 +2,31 @@
 
 Last updated: 2026-10-07.
 
+## M16.1 production daemon credential restart, 2026-10-07
+
+Added a local Worker smoke test that launches the real `AgentMain` twice with
+the same machine identity and SQLite catalog. Each startup consumes a private
+one-shot relay bootstrap and successfully obtains a machine socket ticket. The
+second bootstrap deliberately carries a different bearer; enrollment still
+works with the previously saved OS credential, proving the daemon reloads the
+existing machine bearer rather than overwriting it. The second process also
+reopens the production SQLite catalog at schema version 5. The test removes
+only its uniquely generated machine Noise-key and relay-token entries from the
+current user's credential store when finished.
+
+`AgentMain` now accepts `EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP=1` as an explicit
+development/test opt-in. `RelayMachineEndpoint` still rejects plain HTTP except
+for `localhost` and `127.0.0.1`; production origins remain HTTPS-only. No
+default behavior or relay deployment changed.
+
+Validation: `python3 tests/workspace-browser-pairing/test-agent-startup.py`
+passes both daemon launches and the SQLite reopen check. `haxeon/scripts/haxeon
+build --project agent/haxeon.json` and the browser-pairing harness build pass.
+The existing NativeKit credentials package smoke test also passed against the
+current OS credential service. This startup test does not pair a browser to
+`AgentMain`; the browser pairing and local admin RPC E2E remains in the focused
+host harness. Graphical desktop approval and cross-network use remain open.
+
 ## M16.1 durable device trust qualification, 2026-10-07
 
 Extended the headless browser-to-Worker first-pair test to use the production
