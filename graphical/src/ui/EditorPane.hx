@@ -318,6 +318,7 @@ class EditorPane implements View {
 		area.historyManagedExternally = true;
 		area.onEditIntent = editIntentHandler;
 		area.onNavigationIntent = navigationIntentHandler;
+		area.pageHeightProvider = function() return scrollController.viewportHeight;
 		area.selectionTextProvider = selectedTextProvider;
 		var current = [document.buffer.stateId, decorations.revision, searchRevision(),
 			editorTheme.searchMatch, editorTheme.editorForeground];
