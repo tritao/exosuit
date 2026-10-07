@@ -19,10 +19,14 @@ class WorkspaceFileReader {
 	}
 
 	public static function read(client:WorkspaceFileClient, workspace:String, root:String, path:String,
-			expectedRevision:Null<String>, complete:WorkspaceFileReadResult->Void):Void {
+			expectedRevision:Null<String>, complete:WorkspaceFileReadResult->Void, ?wanted:Void->Bool):Void {
 		if (client == null || complete == null) {
 			if (complete != null) complete({contents: null, revision: null, sizeBytes: 0,
 				error: "Workspace file service is unavailable"});
+			return;
+		}
+		if (wanted != null && !wanted()) {
+			complete({contents: null, revision: null, sizeBytes: 0, error: "File preview was superseded"});
 			return;
 		}
 		client.openRead(workspace, root, path, expectedRevision, function(opened:FileReadOpenResult) {
@@ -59,28 +63,29 @@ class WorkspaceFileReader {
 			var fail = function(message:String):Void {
 				if (finished) return;
 				finished = true;
-				close(function(_) complete({contents: null, revision: null, sizeBytes: 0, error: message}));
+				close(function(_) {});
+				complete({contents: null, revision: null, sizeBytes: 0, error: message});
 			};
 			var readNext:Int64->Void = null;
 			readNext = function(offset:Int64):Void {
 				if (finished) return;
+				if (wanted != null && !wanted()) { fail("File preview was superseded"); return; }
 				var remaining = Int64.sub(size, offset);
 				if (Int64.compare(remaining, Int64.ofInt(0)) == 0) {
 					finished = true;
-					close(function(closeError) {
-						if (closeError != null) { complete({contents: null, revision: null, sizeBytes: 0, error: closeError}); return; }
-						var bytes = buffer.getBytes();
-						if (!validUtf8(bytes)) {
-							complete({contents: null, revision: null, sizeBytes: 0, error: "File is not valid UTF-8 text"});
-							return;
-						}
-						for (index in 0...bytes.length) if (bytes.get(index) == 0) {
-							complete({contents: null, revision: null, sizeBytes: 0,
-								error: "Binary files cannot be previewed as text"});
-							return;
-						}
-						complete({contents: bytes.toString(), revision: revision, sizeBytes: sizeBytes, error: null});
-					});
+					// Handle cleanup must not add a network round trip before showing valid bytes.
+					close(function(_) {});
+					var bytes = buffer.getBytes();
+					if (!validUtf8(bytes)) {
+						complete({contents: null, revision: null, sizeBytes: 0, error: "File is not valid UTF-8 text"});
+						return;
+					}
+					for (index in 0...bytes.length) if (bytes.get(index) == 0) {
+						complete({contents: null, revision: null, sizeBytes: 0,
+							error: "Binary files cannot be previewed as text"});
+						return;
+					}
+					complete({contents: bytes.toString(), revision: revision, sizeBytes: sizeBytes, error: null});
 					return;
 				}
 				var count = Int64.compare(remaining, Int64.ofInt(CHUNK_BYTES)) < 0
@@ -101,17 +106,24 @@ class WorkspaceFileReader {
 					} else readNext(next);
 				}, function(error) fail(error == null ? "Could not read workspace file" : error.message));
 			};
-			readNext(Int64.ofInt(0));
+			if (opened.initialBytes != null) {
+				if (opened.initialBytes.length != sizeBytes || sizeBytes > CHUNK_BYTES) {
+					fail("Workspace returned invalid initial file bytes");
+					return;
+				}
+				buffer.addBytes(opened.initialBytes, 0, opened.initialBytes.length);
+				readNext(size);
+			} else readNext(Int64.ofInt(0));
 		}, function(error) {
 			if (error != null && error.code == "revision_changed" && expectedRevision != null) {
 				// The listing became stale before open. Re-open against a fresh observed revision;
 				// subsequent chunks still have to match that exact revision.
-				read(client, workspace, root, path, null, complete);
+				read(client, workspace, root, path, null, complete, wanted);
 				return;
 			}
 			complete({contents: null, revision: null, sizeBytes: 0,
 				error: error == null ? "Could not open workspace file" : error.message});
-		});
+		}, 5000, CHUNK_BYTES);
 	}
 
 	static function validUtf8(bytes:Bytes):Bool {

@@ -63,6 +63,8 @@ import workspace.service.WorkspaceProtocol.WorkspaceQuery;
 	@:id(2) var root:String;
 	@:id(3) var path:String;
 	@:id(4) var expectedRevision:Null<String>;
+	/** Optional small-file read bundled with open; older agents ignore it. */
+	@:optional @:id(5) var initialBytesLimit:Null<Int>;
 }
 
 @:wire typedef FileReadOpenResult = {
@@ -72,6 +74,7 @@ import workspace.service.WorkspaceProtocol.WorkspaceQuery;
 	@:id(4) var handle:String;
 	@:id(5) var revision:String;
 	@:id(6) var size:Int64;
+	@:optional @:id(7) var initialBytes:Null<Bytes>;
 }
 
 @:wire typedef FileReadChunkRequest = {

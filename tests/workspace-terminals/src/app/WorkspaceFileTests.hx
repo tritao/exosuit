@@ -251,11 +251,19 @@ class WorkspaceFileTests {
 			throw "Binary file stat failed";
 		var opened:Null<FileReadOpenResult> = null;
 		files.openRead("workspace", WorkspaceFileService.ROOT_ID + "-1", "read.raw", rawStat.entry.revision,
-			function(value) opened = value, function(error) throw error.code, 1000);
+			function(value) opened = value, function(error) throw error.code, 1000, 32);
 		poll(client, server);
 		if (opened == null)
 			throw "Revision-checked file open failed";
 		var readHandle = opened;
+		require(readHandle.initialBytes != null && readHandle.initialBytes.compare(rawContent) == 0,
+			"Small-file open did not bundle the original bytes");
+		var invalidInitialLimit = "";
+		files.openRead("workspace", WorkspaceFileService.ROOT_ID, "a.txt", null,
+			function(_) throw "Oversized initial read limit was accepted",
+			function(error) invalidInitialLimit = error.code, 1000, WorkspaceFileService.READ_CHUNK_BYTES + 1);
+		poll(client, server);
+		require(invalidInitialLimit == "invalid_range", "Initial byte limit was not bounded");
 		require(readHandle.size == Int64.ofInt(rawContent.length) && readHandle.revision == rawStat.entry.revision,
 			"File open did not preserve the listed identity and byte size");
 		var rawFirst:Null<FileReadChunkResult> = null;

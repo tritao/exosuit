@@ -200,6 +200,10 @@ private class WorkspaceFileBinding {
 			context.fail({code: "invalid_request", message: "Invalid file revision", ambiguous: false});
 			return;
 		}
+		if (request.initialBytesLimit != null && (request.initialBytesLimit < 0 || request.initialBytesLimit > WorkspaceFileService.READ_CHUNK_BYTES)) {
+			context.fail({code: "invalid_range", message: "Invalid initial file byte limit", ambiguous: false});
+			return;
+		}
 		pruneReadHandles();
 		if (readHandleCount() >= WorkspaceFileService.MAX_READ_HANDLES_PER_CLIENT) {
 			context.fail({code: "resource_limit", message: "Too many open workspace file reads", ambiguous: false});
@@ -216,11 +220,25 @@ private class WorkspaceFileBinding {
 				context.fail({code: "revision_changed", message: "File changed since it was listed", ambiguous: false});
 				return;
 			}
+			var size = entry.get_size();
+			var initialBytes:Null<Bytes> = null;
+			if (request.initialBytesLimit != null && request.initialBytesLimit > 0 &&
+				Int64.compare(size, Int64.ofInt(request.initialBytesLimit)) <= 0) {
+				var length = Int64.toInt(size);
+				var bytes = length == 0 ? Bytes.alloc(0) : file.read(Int64.ofInt(0), length);
+				initialBytes = bytes;
+				if (bytes.length != length || WorkspaceFileService.fileRevision(service.workspace, request.root, file.info()) != revision) {
+					file.close();
+					file = null;
+					context.fail({code: "revision_changed", message: "File changed during the read", ambiguous: false});
+					return;
+				}
+			}
 			var handle = makeReadToken(request.root, request.path);
 			readHandles.set(handle, {root: request.root, path: request.path, file: file,
 				revision: revision, size: entry.get_size(), lastUsed: service.clock()});
 			context.respond({workspace: service.workspace, root: request.root, path: request.path,
-				handle: handle, revision: revision, size: entry.get_size()});
+				handle: handle, revision: revision, size: entry.get_size(), initialBytes: initialBytes});
 			file = null;
 		} catch (error:Dynamic) {
 			if (file != null)

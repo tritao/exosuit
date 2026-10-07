@@ -46,9 +46,9 @@ class WorkspaceFileClient {
 	}
 
 	public function openRead(workspace:String, root:String, path:String, expectedRevision:Null<String>,
-		onSuccess:FileReadOpenResult->Void, onError:RpcError->Void, ?timeoutMs:Int = 5000):Void {
+		onSuccess:FileReadOpenResult->Void, onError:RpcError->Void, ?timeoutMs:Int = 5000, ?initialBytesLimit:Int = 0):Void {
 		connection.call(WorkspaceFileProtocol.READ_OPEN,
-			{workspace: workspace, root: root, path: path, expectedRevision: expectedRevision}, timeoutMs, onSuccess, onError);
+			{workspace: workspace, root: root, path: path, expectedRevision: expectedRevision, initialBytesLimit: initialBytesLimit}, timeoutMs, onSuccess, onError);
 	}
 
 	public function readChunk(workspace:String, handle:String, offset:Int64, length:Int,
