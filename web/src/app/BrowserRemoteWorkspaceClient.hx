@@ -15,6 +15,7 @@ import workspace.service.WorkspaceTerminalProtocol;
 import workspace.service.WorkspaceFileProtocol;
 import workspace.client.WorkspaceAttachment;
 import workspace.client.WorkspaceFileClient;
+import workspace.client.WorkspaceRpcEndpoint;
 import workspace.transport.NativeRpcHub;
 import workspace.transport.NoiseClientHandshake;
 import workspace.transport.NoiseMessageTransport;
@@ -35,12 +36,13 @@ typedef BrowserRemoteDevice = {
 }
 
 /** First-pairing client for the existing browser build; it owns no workspace files locally. */
-class BrowserRemoteWorkspaceClient implements WorkspaceAttachment {
+class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements WorkspaceRpcEndpoint {
 	public var status(default, null):String = "Paste a one-time pairing URL from the desktop Remote Access panel.";
 	public var error(default, null):Null<String>;
 	public var authenticationCode(default, null):Null<String>;
 	public var codeConfirmed(default, null):Bool = false;
 	public var workspaceRoot(default, null):Null<String>;
+	var serviceInstance:String = "";
 	public var grants(default, null):Array<String> = [];
 	public var savedDevices(default, null):Array<BrowserRemoteDevice> = [];
 	public var connecting(default, null):Bool = false;
@@ -523,6 +525,7 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment {
 		connection.call(WorkspaceProtocol.IDENTITY, {workspace: "workspace"}, 5000, function(identity) {
 			if (rpc != client || !client.isCurrent(token)) return;
 			workspaceRoot = identity.root;
+			serviceInstance = identity.instance;
 			grants = client.capabilities();
 			connecting = false;
 			savedConnection = false;
@@ -542,6 +545,17 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment {
 	public function failure():Null<String> return error;
 
 	public function fileWorkspace():String return "workspace";
+
+	public function rootPath():Null<String> return workspaceRoot;
+
+	public function serviceGeneration():String return serviceInstance;
+
+	public function rpcConnection():Null<RpcConnection> return isWorkspaceConnected() ? workspaceConnection : null;
+
+	public function failureReason():Null<String>
+		return error != null ? error : workspaceRoot == null ? "Workspace disconnected" : null;
+
+	public function supportsWorkspaceGroups():Bool return grants.indexOf(WorkspaceProtocol.TREE) >= 0;
 
 	public function fileScope():Null<String> return workspaceRoot;
 
@@ -592,6 +606,7 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment {
 		if (rpc != null) rpc.close();
 		rpc = null;
 		workspaceConnection = null;
+		serviceInstance = "";
 		fileApiConnection = null;
 		fileApiClient = null;
 		if (secure != null) secure.close();

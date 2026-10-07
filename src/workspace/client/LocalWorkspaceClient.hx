@@ -32,7 +32,7 @@ import workspace.service.WorkspacePairingProtocol.PairingList;
 }
 
 /** Nonblocking native attachment. Closing a client never owns/stops the shared daemon. */
-class LocalWorkspaceClient implements WorkspaceAttachment implements workspace.client.WorkspaceWorkbenchClient implements workspace.client.WorkspaceAgentClient implements workspace.client.WorkspacePairingClient {
+class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRpcEndpoint implements workspace.client.WorkspaceWorkbenchClient implements workspace.client.WorkspaceAgentClient implements workspace.client.WorkspacePairingClient {
   public var root(default, null):Null<String>;
   public var error(default, null):Null<String>;
   public var instance(default, null):String = "";
@@ -216,6 +216,12 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements workspace.c
   public function view():Array < WorkspaceGroup > return ready && replica != null ? replica.view() :[];
 
   public function rpc():Null < RpcConnection > return ready && client != null ? client.current() : null;
+
+  public function rootPath():Null<String> return root;
+  public function serviceGeneration():String return instance;
+  public function rpcConnection():Null<RpcConnection> return rpc();
+  public function failureReason():Null<String> return error;
+  public function supportsWorkspaceGroups():Bool return hasGroupTree();
 
   /** A typed file API tied to the currently authenticated local workspace connection. */
   public function fileClient():Null<WorkspaceFileClient> {

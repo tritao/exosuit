@@ -2,6 +2,21 @@
 
 Last updated: 2026-10-07.
 
+## M16.2 transport-neutral terminal RPC boundary, 2026-10-07
+
+`RpcTerminalBackend` now depends on a small `WorkspaceRpcEndpoint` contract
+instead of `LocalWorkspaceClient`. The local daemon client and authenticated
+browser client both provide the service-owned root and generation, live RPC
+connection, failure state and group capability. Terminal roots stay opaque to
+the client filesystem, so the same terminal backend can attach across local and
+remote transports without a local-process dependency.
+
+Validation: graphical and terminal targets build; the terminal acceptance
+script passes catalog operations, shell detach/reconnect, output replay,
+resize and shutdown behavior. The web guest compiles with the new endpoint and
+all imports match the existing host. Browser terminal UI and connected
+terminal/agent acceptance remain open in M16.2.
+
 ## M16.2 connected-browser file Explorer wiring, 2026-10-07
 
 The browser's authenticated workspace RPC client now implements the shared
@@ -15,7 +30,7 @@ panel.
 
 The browser pairing acceptance fixture now serves a real root-scoped file API,
 approves the file-read grant and checks that the web Explorer subscribes to the
-remote root. Haxeon successfully compiled the updated 698-source WASM guest
+remote root. Haxeon successfully compiled the updated 699-source WASM guest
 against generated FFI interfaces, and the current NativeKit browser host accepts
 all guest imports. Full browser execution remains blocked here: the pinned
 Emscripten 6.0.9 SDK was absent, and installing it ran out of space during

@@ -6,7 +6,6 @@ import terminalsession.TerminalEvent;
 import haxe.io.Bytes;
 import haxe.Int64;
 import haxeon.rpc.RpcConnection;
-import workspace.client.LocalWorkspaceClient;
 import workspace.service.WorkspaceTerminalProtocol;
 
 /** Client attachment only: close/detach never kills a service-owned shell. */
@@ -15,7 +14,7 @@ class RpcTerminalBackend implements TerminalBackend {
   final root:String;
   final group:Null<String>;
   final directory:Null<String>;
-  final provider:Void -> Null<LocalWorkspaceClient>;
+  final provider:Void -> Null<WorkspaceRpcEndpoint>;
   var create:Bool;
   var connection:Null<RpcConnection>;
   var instance:String = "";
@@ -35,10 +34,10 @@ class RpcTerminalBackend implements TerminalBackend {
   var output:Array<TerminalEvent> = [];
   var nextRead:Float = 0;
 
-  public function new(provider:Void -> Null<LocalWorkspaceClient>, terminalId:String, root:String, create:Bool, ?group:String, ?directory:String) {
+  public function new(provider:Void -> Null<WorkspaceRpcEndpoint>, terminalId:String, root:String, create:Bool, ?group:String, ?directory:String) {
     this.provider = provider;
     this.terminalId = terminalId;
-    this.root = sys.FileSystem.fullPath(root);
+    this.root = root;
     this.create = create;
     this.group = group;
     this.directory = directory;
@@ -141,11 +140,12 @@ class RpcTerminalBackend implements TerminalBackend {
     }
     var client = provider();
     if (client == null) return;
-    if (client.error != null) {
-      fail(client.error);
+    var clientFailure = client.failureReason();
+    if (clientFailure != null) {
+      fail(clientFailure);
       return;
     }
-    var c = client.root == root ? client.rpc() : null;
+    var c = client.rootPath() == root ? client.rpcConnection() : null;
     if (c != connection) {
       if (writing) {
         fail("Terminal input delivery uncertain after disconnect");
@@ -158,13 +158,13 @@ class RpcTerminalBackend implements TerminalBackend {
     }
     if (c != null && attached) flushInput(c);
     if (c != null && !pending) {
-      if (instance.length > 0 && instance != client.instance) {
+      if (instance.length > 0 && instance != client.serviceGeneration()) {
         fail("Terminal service restarted; session was lost");
         return;
       }
-      instance = client.instance;
+      instance = client.serviceGeneration();
       if (!attached) {
-        if (create && (group != null || directory != null) && !client.hasGroupTree()) { fail("Workspace service does not support grouped terminals"); return; }
+        if (create && (group != null || directory != null) && !client.supportsWorkspaceGroups()) { fail("Workspace service does not support grouped terminals"); return; }
         pending = true;
         c.call(WorkspaceTerminalProtocol.OPEN, {
           workspace: "workspace",

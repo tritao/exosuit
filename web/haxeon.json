@@ -182,6 +182,7 @@
     "../src/workspace/client/WorkspaceAttachment.hx",
     "../src/workspace/client/WorkspaceIds.hx",
     "../src/workspace/client/WorkspacePairingClient.hx",
+    "../src/workspace/client/WorkspaceRpcEndpoint.hx",
     "../src/workspace/client/WorkspaceTerminalCatalogClient.hx",
     "../src/workspace/client/WorkspaceWorkbenchClient.hx",
     "../src/workspace/service/WorkspaceAgentPersistence.hx",
