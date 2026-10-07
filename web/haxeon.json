@@ -202,6 +202,7 @@
     "../src/workspace/service/WorkspaceTerminalPersistence.hx",
     "../src/workspace/service/WorkspaceTerminalProtocol.hx",
     "../src/workspace/service/WorkspaceTerminals.hx",
+    "../src/workspace/transport/DeviceRpcConnector.hx",
     "../src/workspace/transport/NativeKitByteStream.hx",
     "../src/workspace/transport/NativeRpcConnector.hx",
     "../src/workspace/transport/NativeRpcHub.hx",

@@ -23,12 +23,12 @@ import workspace.transport.NoiseClientHandshake;
 import workspace.transport.NoiseMessageTransport;
 import workspace.transport.NoisePairingCode;
 import workspace.transport.NoisePrologue;
+import workspace.transport.DeviceRpcConnector;
 import workspace.transport.RelayDeviceTransport;
 import workspace.transport.RelayMachineEndpoint;
 import workspace.transport.RelaySocketTicket;
 import workspace.transport.RelayTicketAttempt;
 import workspace.transport.RelayTicketClient;
-import workspace.transport.TransferredMessageConnector;
 
 typedef BrowserRemoteDevice = {
 	var machineId:String;
@@ -83,6 +83,7 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 	var pendingPayload = new StringBuf();
 	var confirmation:Null<Bytes>;
 	var rpc:Null<RpcClient>;
+	var reconnectConnector:Null<DeviceRpcConnector>;
 	var workspaceConnection:Null<RpcConnection>;
 	var fileApiConnection:Null<RpcConnection>;
 	var fileApiClient:Null<WorkspaceFileClient>;
@@ -317,7 +318,6 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 				var current = ticketClient;
 				ticketClient = null;
 				if (current != null) current.dispose();
-				selectedDeviceToken = null;
 				if (error != null || ticket == null) {
 					fail("Could not get a fresh relay connection ticket: " + (error == null ? "ticket_missing" : error));
 					return;
@@ -412,8 +412,13 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 			fail("The pairing approval is missing its confirmation challenge.");
 			return;
 		}
-		wipe(localPrivateKey);
-		localPrivateKey = null;
+		var credentials:Dynamic = approved;
+		var deviceToken:Null<String> = credentials == null ? null : Reflect.field(credentials, "deviceToken");
+		if (deviceToken == null || !RelaySocketTicket.isToken(deviceToken)) {
+			fail("The approved device credentials are unavailable for reconnect.");
+			return;
+		}
+		selectedDeviceToken = deviceToken;
 		var message = Bytes.ofString(Json.stringify({version: 1, type: "pairing-confirmed",
 			deviceId: deviceId, challenge: challenge}));
 		approved = null;
@@ -438,9 +443,26 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 		}
 		var activeRpc = rpc;
 		if (activeRpc != null) {
+			var connector = reconnectConnector;
+			if (connector != null) connector.poll();
 			activeRpc.poll();
-			if (activeRpc.state == RpcClientState.Closed && error == null)
-				fail("The workspace connection closed. Reconnect with a new pairing invitation or a saved device.");
+			if (activeRpc.state == RpcClientState.Closed && error == null) {
+				var rpcError = activeRpc.lastError;
+				var code = rpcError == null ? "" : rpcError.code;
+				fail(switch (code) {
+					case "unauthorized", "relay_unauthorized", "authentication_refused", "authorization_failed":
+						"This device is no longer authorized. Pair it again from the desktop.";
+					case "machine_identity_conflict", "noise_identity_mismatch":
+						"The saved machine identity changed. Verify it on the desktop and pair this device again.";
+					default:
+						"The workspace connection ended. Try a saved device again or pair from the desktop.";
+				});
+				return;
+			}
+			if (activeRpc.state != RpcClientState.Connected && !connecting) {
+				connecting = true;
+				setStatus("Workspace connection lost. Reconnecting securely…");
+			}
 			return;
 		}
 		var transport = secure;
@@ -512,8 +534,23 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 
 	function connectWorkspace(transport:NoiseMessageTransport):Void {
 		secure = null;
+		var origin = selectedRelayOrigin, machineId = selectedMachine, deviceId = selectedDevice;
+		var token = selectedDeviceToken, privateKey = localPrivateKey, machineKey = machineStaticPublicKey;
+		if (origin == null || machineId == null || deviceId == null || token == null
+			|| privateKey == null || machineKey == null) {
+			transport.close();
+			fail("Authenticated device credentials are unavailable for reconnect.");
+			return;
+		}
+		try reconnectConnector = new DeviceRpcConnector(events, hub, clock,
+			new RelayMachineEndpoint(origin, machineId), machineId, deviceId, token,
+			privateKey, machineKey, transport) catch (_:Dynamic) {
+			transport.close();
+			fail("Could not prepare secure workspace reconnect.");
+			return;
+		}
 		var client:RpcClient = null;
-		client = new RpcClient(new TransferredMessageConnector(transport), clock,
+		client = new RpcClient(reconnectConnector, clock,
 			function() return Math.random(), new RpcPeerOptions("exosuit-editor/1",
 				[WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS, WorkspaceProtocol.IDENTITY_CAPABILITY,
 					WorkspaceProtocol.TREE, WorkspaceFileProtocol.READ,
@@ -526,9 +563,14 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 	}
 
 	function onRpcReady(client:RpcClient, connection:RpcConnection, token:Int):Void {
-		workspaceConnection = connection;
 		connection.call(WorkspaceProtocol.IDENTITY, {workspace: "workspace"}, 5000, function(identity) {
 			if (rpc != client || !client.isCurrent(token)) return;
+			if (identity == null || identity.workspace != "workspace" || identity.root == null
+				|| identity.root.length == 0 || identity.instance == null || identity.instance.length == 0) {
+				fail("Workspace identity response was invalid.");
+				return;
+			}
+			workspaceConnection = connection;
 			workspaceRoot = identity.root;
 			serviceInstance = identity.instance;
 			grants = client.capabilities();
@@ -536,7 +578,11 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 			savedConnection = false;
 			setStatus("Connected to workspace.");
 		}, function(failure) {
-			if (rpc == client && client.isCurrent(token)) fail("Workspace identity check failed: " + failure.code);
+			if (rpc == client && client.isCurrent(token)) {
+				connecting = true;
+				setStatus("Workspace identity check failed. Reconnecting securely…");
+				connection.close("workspace_identity_check_failed");
+			}
 		});
 	}
 
@@ -544,7 +590,7 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 
 	public function statusLabel():String {
 		if (isWorkspaceConnected()) return "Workspace connected";
-		return connecting ? "Connecting workspace…" : "";
+		return connecting ? (workspaceRoot == null ? "Connecting workspace…" : "Reconnecting workspace…") : "";
 	}
 
 	public function failure():Null<String> return error;
@@ -571,7 +617,8 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 	public function fileScope():Null<String> return workspaceRoot;
 
 	public function isWorkspaceConnected():Bool
-		return workspaceRoot != null && workspaceConnection != null && workspaceConnection.isOpen();
+		return workspaceRoot != null && workspaceConnection != null && rpc != null
+			&& rpc.current() == workspaceConnection;
 
 	public function canReadFiles():Bool
 		return isWorkspaceConnected() && grants.indexOf(WorkspaceFileProtocol.READ) >= 0;
@@ -616,6 +663,8 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 		handshake = null;
 		if (rpc != null) rpc.close();
 		rpc = null;
+		if (reconnectConnector != null) reconnectConnector.dispose();
+		reconnectConnector = null;
 		workspaceConnection = null;
 		serviceInstance = "";
 		fileApiConnection = null;

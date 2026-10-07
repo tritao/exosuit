@@ -6,8 +6,9 @@ bearer, Noise-authenticated device grants, a desktop approval panel, and a
 first-pairing browser client. The browser consumes a pasted one-use relay URL,
 compares the Noise transcript code, stores device credentials encrypted under
 a non-extractable WebCrypto key, confirms receipt to the daemon, and verifies
-workspace identity over RPC. First pairing and saved-device reconnect pass in
-headless Chrome through the local Wrangler Worker, both through the focused
+workspace identity over RPC. First pairing, user-started saved-device reconnect
+and automatic RPC reconnect after relay loss pass in headless Chrome through
+the local Wrangler Worker, both through the focused
 host and through real `AgentMain` using its same-user pairing RPC, NativeKit
 credential service and production SQLite store. The Worker also resets the
 daemon's stale channel before admitting a replacement device socket. A local
@@ -168,7 +169,7 @@ complete upstream `make check` could not run because this environment lacks
 [Web Crypto specification](https://www.w3.org/TR/WebCryptoAPI/) for the
 protocol and browser key-storage contracts.
 
-- [ ] Add saved-machine selection and reconnection to the existing web entry
+- [x] Add saved-machine selection and reconnection to the existing web entry
   point. First-pairing UI now shows connection state and approved permissions;
   it consumes the pasted one-use URL and verifies the workspace identity.
 - [ ] Desktop/service Remote Access creates a short-lived single-use pairing
@@ -295,9 +296,17 @@ protocol and browser key-storage contracts.
   a device reconnect so the daemon discards the previous channel. The local
   browser/Worker E2E pairs, disconnects, and reconnects with the same workspace
   identity and grants.
-- [ ] Use RPC reconnect with fresh authenticated handshakes and Exosuit-owned
-  resource/cursor recovery. Machine sleep/offline and revoked devices produce
-  clear states rather than stale connected indicators.
+- [x] Use RPC reconnect with fresh authenticated handshakes and Exosuit-owned
+  resource/cursor recovery. Each retry obtains a new relay ticket and performs
+  Noise against the pinned machine identity before a new RPC handshake. The
+  browser revalidates workspace identity and grants; Explorer watches resume
+  from their Exosuit-owned epoch/cursor, Workbench catalogs reload, and terminal
+  sessions resume byte replay or request a bounded screen snapshot. Transient
+  relay loss retries with bounded backoff; revoked devices and changed machine
+  identities show explicit re-pair guidance. The local Worker/AgentMain browser
+  acceptance forcibly drops the active socket and checks the recovered identity,
+  grants, Explorer watch and persisted device trust. Cross-network relay restart,
+  machine-offline and Android qualification remain open.
 
 Acceptance: load the normal web build on a separate network, pair with a
 running development machine and reconnect without inbound port forwarding.

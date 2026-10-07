@@ -4,7 +4,7 @@ const [invitePath, statusPath, decisionPath, successPath] = process.argv.slice(2
 if (!invitePath || !statusPath || !decisionPath || !successPath) throw new Error('Expected invite, status, decision and success files');
 const chrome = `http://127.0.0.1:${process.env.EXOSUIT_CDP_PORT || 9224}`;
 const appOrigin = `http://localhost:${process.env.EXOSUIT_APP_PORT || 5173}`;
-const targetResponse = await fetch(`${chrome}/json/new?${appOrigin}/`, {method: 'PUT'});
+const targetResponse = await fetch(`${chrome}/json/new?about:blank`, {method: 'PUT'});
 if (!targetResponse.ok) throw new Error(`Could not open browser app: ${targetResponse.status}`);
 const target = await targetResponse.json();
 const socket = new WebSocket(target.webSocketDebuggerUrl);
@@ -75,6 +75,16 @@ try {
   await send('Runtime.enable');
   await send('Log.enable');
   await send('Page.enable');
+  await send('Page.addScriptToEvaluateOnNewDocument', {source: `(()=>{
+    const NativeWebSocket = window.WebSocket;
+    window.__exosuitTestSockets = [];
+    window.WebSocket = new Proxy(NativeWebSocket, {construct(target, args) {
+      const socket = Reflect.construct(target, args);
+      window.__exosuitTestSockets.push(socket);
+      return socket;
+    }});
+  })();`});
+  await send('Page.navigate', {url: `${appOrigin}/`});
   await waitFor('editor startup', async () => (await expression('window.exosuit?.state')) === 'running');
 
   // Select Remote Access in the activity rail and submit the host-created one-use URL.
@@ -139,30 +149,46 @@ try {
   console.log('PASS: IndexedDB re-opened the saved device credential; raw record is ciphertext with a non-extractable wrapping key');
   console.log(`PASS: browser received ${connected.state.grants.length} explicitly approved workspace grants`);
 
-  // Disconnect through the panel, select the saved device and establish a new ticketed Noise channel.
-  await pause(500);
-  await click(28, 160); // Return from the connected Files view to Remote Access.
-  await pause(300);
-  await click(120, 508); // Disconnect button after the optional file-read grant row.
-  const disconnected = await waitFor('saved device after disconnect', async () => {
+  // Drop the active relay WebSocket. The RpcClient must obtain a fresh ticket
+  // and Noise channel without another user action.
+  const oldConnectCount = await expression(`window.__exosuitTestSockets.filter(socket =>
+    socket.url.includes('/connect?') && socket.readyState === WebSocket.OPEN).length`);
+  const forcedDrop = await expression(`(()=>{
+    const socket = [...window.__exosuitTestSockets].reverse().find(value =>
+      value.readyState === WebSocket.OPEN && (value.url.includes('/pair/') || value.url.includes('/connect?')));
+    if (!socket) return false;
+    socket.close(4000, 'test connection interruption');
+    return true;
+  })()`);
+  if (!forcedDrop) throw new Error('Could not locate the active relay socket to interrupt');
+  await waitFor('workspace reconnect state after network loss', async () => {
     const state = await remoteState();
-    const device = state?.savedDevices?.find(item => item.machineId === invitation.machineId
-      && item.deviceId === invitation.deviceId && item.relayOrigin === connected.relayOrigin);
-    return state?.workspaceRoot == null && device ? {state, device} : null;
-  });
-  await click(120, 370);
-  const reconnected = await waitFor('saved-device authenticated reconnect', async () => {
+    return state?.connecting && state.status?.includes('Reconnecting') ? state : null;
+  }, 20000);
+  const automaticReconnect = await waitFor('automatic authenticated workspace reconnect', async () => {
     const state = await remoteState();
-    if (state?.error) throw new Error(`Saved-device reconnect failed: ${state.error}`);
-    return state?.workspaceRoot ? state : null;
+    if (state?.error) throw new Error(`Automatic reconnect failed: ${state.error}`);
+    return state?.workspaceRoot && !state.connecting ? state : null;
+  }, 60000);
+  if (automaticReconnect.workspaceRoot !== connected.state.workspaceRoot
+    || !automaticReconnect.grants?.includes('workspace.identity')
+    || !automaticReconnect.grants?.includes('workspace.read')
+    || !automaticReconnect.grants?.includes('workspace.files.read'))
+    throw new Error('Automatic reconnect changed workspace identity or approved grants');
+  const freshConnectCount = await expression(`window.__exosuitTestSockets.filter(socket =>
+    socket.url.includes('/connect?') && socket.readyState === WebSocket.OPEN).length`);
+  if (freshConnectCount <= oldConnectCount)
+    throw new Error('Workspace recovered without opening a fresh ticketed relay socket');
+  const recoveredExplorer = await waitFor('remote Explorer watch after reconnect', async () => {
+    const shell = await shellState();
+    return shell?.explorerWatching && shell?.explorerIdentity?.includes(automaticReconnect.workspaceRoot)
+      ? shell : null;
   });
-  if (reconnected.workspaceRoot !== connected.state.workspaceRoot
-    || !reconnected.grants?.includes('workspace.identity') || !reconnected.grants?.includes('workspace.read')
-    || !reconnected.grants?.includes('workspace.files.read'))
-    throw new Error('Saved-device reconnect changed workspace identity or approved grants');
+  if (!recoveredExplorer.explorerWatching)
+    throw new Error('Remote Explorer did not restore its workspace watch after reconnect');
   writePrivate(successPath, {machineId: invitation.machineId, deviceId: invitation.deviceId,
-    workspaceRoot: reconnected.workspaceRoot});
-  console.log('PASS: saved browser device obtained a fresh ticket and reconnected with its pinned machine identity');
+    workspaceRoot: automaticReconnect.workspaceRoot});
+  console.log('PASS: relay disconnect recovered with a fresh ticket, pinned Noise handshake, workspace grants and Explorer watch');
 } finally {
   socket.close();
 }

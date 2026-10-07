@@ -2,6 +2,32 @@
 
 Last updated: 2026-10-07.
 
+## M16.1 automatic authenticated browser RPC reconnect, 2026-10-07
+
+The browser now keeps one Haxeon `RpcClient` across transient relay failures.
+Its device connector requests a fresh one-use ticket, opens a new relay socket
+and verifies the pinned machine key with a fresh Noise handshake before handing
+the transport to RPC. Reconnect uses Haxeon's bounded backoff and generation
+fencing; workspace identity and negotiated grants are checked again on every
+connection. Revoked devices and changed machine identities end in explicit
+re-pair guidance instead of a stale connected state.
+
+On connection replacement, the existing file Explorer drops cached pages and
+restores its watch from the Exosuit-owned epoch/cursor. The Workbench refreshes
+catalogs, and terminal backends reattach by stable session ID and resume byte
+replay, falling back to the bounded screen snapshot on a replay gap.
+
+Validation: the 711-source wasm32 guest compiles and its imports match the
+available Emscripten host. `python3 tests/workspace-browser-pairing/run.py
+--agent /tmp/exosuit-web-auto-reconnect/site` passes through local Wrangler and
+production `AgentMain`/SQLite. The test pairs, forcibly drops the active relay
+socket, then verifies a fresh ticketed Noise channel, unchanged identity and
+grants, restored Explorer watch, and persisted device trust. The complete web
+host build remains gated on the unavailable pinned Emscripten SDK.
+
+Next: complete the browser host build and connected file/terminal clickthrough.
+See [`16-remote-workspaces.md`](16-remote-workspaces.md).
+
 ## M16.2 shared browser Workbench and remote terminal UI, 2026-10-07
 
 Commit `ee891bd` extracts terminal-catalog and agent RPC behavior into
@@ -17,7 +43,7 @@ and links the emulator into the Emscripten host.
 
 Validation: graphical build passes; `scripts/test-workspace-terminals.py`
 passes catalog, permissions, daemon lifecycle, shell reuse, output replay,
-resize and shutdown scenarios. The 710-source web guest compiles and its 146
+resize and shutdown scenarios. The 711-source web guest compiles and its 146
 imports include the expected 20 `terminalkit` functions. HXI generation,
 manifest JSON, shell syntax and diff checks pass. Full web-host build and
 connected-browser clickthrough remain unverified because the pinned Emscripten
@@ -43,7 +69,7 @@ Validation: `scripts/test-workspace-terminals.py` forces output past the replay
 window and confirms a fresh snapshot restores visible output. The terminal
 session suite checks styled Unicode cells and VT modes; the frozen RPC method
 vector and both wasm32/wasm-gc RPC tests pass. Graphical build and wasm32 ABI
-generation for terminalkit pass. The 710-source web guest also compiles after
+generation for terminalkit pass. The 711-source web guest also compiles after
 the generated manifest was fixed to include `TerminalPane` and its terminalkit
 packages. `web/build.sh` remains unavailable because the pinned Emscripten SDK
 is not installed.
