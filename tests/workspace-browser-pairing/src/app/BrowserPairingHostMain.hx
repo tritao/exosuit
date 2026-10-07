@@ -203,7 +203,8 @@ class BrowserPairingHostMain {
 				WorkspaceProtocol.IDENTITY_CAPABILITY], 2000, 262144, 32, 1048576),
 			function(connection, generation, _) localConnection = connection, 10, 100, 2000);
 		var invitationStarted = false, invitationReady = false, approved = false,
-			approvalPending = false, listPending = false, fileChangeApplied = false;
+			approvalPending = false, listPending = false;
+		var fileChangeSequence = 0;
 		var deviceId:String = "", visiblePending:Array<PendingPairing> = [],
 			visibleDevices:Array<PairingDevice> = [];
 		var deadline = clock() + 180000, nextStatusWrite = 0.0, nextListRequest = 0.0,
@@ -261,14 +262,20 @@ class BrowserPairingHostMain {
 					});
 				}
 			}
-			if (approved && !fileChangeApplied && fileChangePath != null && sys.FileSystem.exists(fileChangePath)) {
+			if (approved && fileChangePath != null && sys.FileSystem.exists(fileChangePath)) {
 				var request:Dynamic = Json.parse(sys.io.File.getContent(fileChangePath));
-				if (request == null || request.requestId != "browser-file-change-v1")
+				if (request == null || request.requestId != "browser-file-change-v1"
+					|| request.sequence == null || request.sequence < 1 || request.sequence > 2)
 					failure = "Browser requested an invalid remote file-change fixture";
-				else {
+				else if (request.sequence > fileChangeSequence) {
+					if (request.sequence != fileChangeSequence + 1) {
+						failure = "Browser skipped a remote file-change fixture sequence";
+						continue;
+					}
 					sys.io.File.saveContent(workspaceRoot + "/remote.md",
-						"# Browser remote file\n\nChanged by AgentMain after the preview was opened.\n");
-					fileChangeApplied = true;
+						"# Browser remote file\n\nChanged by AgentMain after the preview was opened (change "
+						+ request.sequence + ").\n");
+					fileChangeSequence = request.sequence;
 				}
 			}
 			if (clock() >= nextStatusWrite) {

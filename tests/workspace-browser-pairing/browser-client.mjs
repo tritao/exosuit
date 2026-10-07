@@ -177,7 +177,7 @@ try {
   console.log('PASS: single-click opened the remote Markdown file as a revision-checked preview tab');
   if (agentMode) {
     const previewRevision = remotePreview.revision;
-    writePrivate(fileChangePath, {requestId: 'browser-file-change-v1'});
+    writePrivate(fileChangePath, {requestId: 'browser-file-change-v1', sequence: 1});
     const stalePreview = await waitFor('AgentMain file-change notification in the browser preview', async () => {
       const shell = await shellState();
       return shell?.workspaceFileTabs?.find(item => item.path === 'remote.md'
@@ -332,6 +332,21 @@ try {
   });
   if (!recoveredExplorer.explorerWatching)
     throw new Error('Remote Explorer did not restore its workspace watch after reconnect');
+  if (agentMode) {
+    await pause(500);
+    const beforeChange = await shellState();
+    const revision = beforeChange?.explorerRevision;
+    if (!Number.isInteger(revision) || revision < 0)
+      throw new Error(`Remote Explorer did not expose a valid revision after reconnect: ${revision}`);
+    writePrivate(fileChangePath, {requestId: 'browser-file-change-v1', sequence: 2});
+    const reconnectedChange = await waitFor('AgentMain file-change delivery after relay reconnect', async () => {
+      const shell = await shellState();
+      return shell?.explorerWatching && shell.explorerRevision > revision ? shell : null;
+    }, 15000);
+    if (reconnectedChange.explorerRevision <= revision)
+      throw new Error('Remote Explorer did not invalidate its listing after reconnect');
+    console.log('PASS: reconnected browser received a fresh AgentMain file-change notification');
+  }
   if (agentMode) {
     const resumedTerminal = await waitFor('remote terminal after reconnect', async () => {
       const shell = await shellState();

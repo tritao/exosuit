@@ -4,12 +4,12 @@ Last updated: 2026-10-07.
 
 ## M16.2 connected-browser file-change notification, 2026-10-07
 
-The AgentMain browser acceptance now changes the remote Markdown fixture after
-the browser opens its read-only preview. The connected Explorer receives the
-watch event, marks the existing snapshot stale, and leaves refresh to the user.
-This passes in both wasm32 and wasm-gc builds. Full F3 remains open for initial
-fetch races, overflow, reconnect recovery details, event replay, platform
-backends and broader race qualification.
+The AgentMain browser acceptance changes the remote Markdown fixture after the
+browser opens its read-only preview, then changes it again after a forced relay
+reconnect. The first event marks the existing snapshot stale without replacing
+it; the second advances the Explorer revision after its watch is restored.
+Both wasm32 and wasm-gc pass. Full F3 remains open for initial fetch races,
+overflow, event replay, platform backends and broader race qualification.
 
 Next: continue filesystem F1–F5 acceptance. See
 [`WORKSPACE-FILES.md`](WORKSPACE-FILES.md).

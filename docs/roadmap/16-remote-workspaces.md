@@ -378,7 +378,8 @@ Deployment/publication requires separate authorization under EXECUTION.md.
 - [x] Verify connected-browser file-change delivery. After the preview opens,
   the AgentMain fixture changes `remote.md`; both Wasm browser targets receive
   the watch notification and keep the displayed snapshot while marking it
-  stale for explicit refresh.
+  stale for explicit refresh. A second change after relay reconnect advances
+  the restored Explorer revision.
 - [x] Complete the Emscripten host builds and connected-browser terminal
   clickthrough for wasm32 and wasm-gc. The real browser test opens a remote
   terminal in the Workbench, verifies its dock panel and session identity,

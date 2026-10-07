@@ -1010,6 +1010,7 @@ class ExosuitApp implements DesktopUiApplication {
 			explorerRoot: explorerRoot,
 			explorerIdentity: explorerModel == null ? null : explorerModel.rootIdentity(),
 			explorerWatching: explorerModel != null && explorerModel.watchesChanges(),
+			explorerRevision: explorerModel == null ? -1 : explorerModel.revision(),
 			sidebarMode: sidebar.activeId,
 			sidebarState: sidebar.encode(),
 			panels: dock.panelIds(),

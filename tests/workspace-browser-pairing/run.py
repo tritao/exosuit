@@ -217,9 +217,9 @@ with tempfile.TemporaryDirectory(prefix="exosuit-browser-pairing-") as temporary
         print("PASS: desktop persisted the pairing and admitted one remote RPC client")
         if AGENT_MODE:
             changed_file = (workspace_root / "remote.md").read_text()
-            if "Changed by AgentMain after the preview was opened." not in changed_file:
-                raise RuntimeError("AgentMain did not change the remote preview fixture")
-            print("PASS: AgentMain changed the remote preview fixture after the browser opened it")
+            if "Changed by AgentMain after the preview was opened (change 2)." not in changed_file:
+                raise RuntimeError("AgentMain did not apply both requested remote preview changes")
+            print("PASS: AgentMain changed the remote preview fixture before and after reconnect")
             codex_state = json.loads((workspace_root / "fake-codex.json").read_text())
             threads = list(codex_state.get("threads", {}).values())
             if codex_state.get("prompts") != 1 or len(threads) != 1 \
