@@ -49,8 +49,8 @@ class ExplorerDirectoryWatch {
 			return;
 		}
 		registered.set(path, true);
-		// Rescan after registration to close the gap between the initial read and the watch.
-		model.markChanged();
+		// Rescan this listing after registration to close the initial-read/watch gap.
+		model.refreshDirectory(path);
 	}
 
 	public function dispose():Void {

@@ -60,7 +60,9 @@ class Project {
 			tree = source.tree;
 			applyExpanded(tree);
 		}
-		indexedFiles = source.files.copy();
+		// The scan owns this append-only array; files() still returns a snapshot
+		// to callers. Copying the entire index after every step is quadratic.
+		indexedFiles = source.files;
 		if (finished) {
 			applyExpanded(tree);
 			changedSincePoll = source.snapshot != snapshot;
