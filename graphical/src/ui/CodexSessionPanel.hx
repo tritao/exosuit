@@ -57,6 +57,20 @@ class CodexSessionPanel implements View {
     field.label = "Codex prompt";
     field.placeholder = "Message Codex…";
     field.enabled = control;
+    var reconnect = new Button(
+      "Reconnect / History",
+      null,
+      function() client.agentAction(id, "connect", "", null),
+      "codex-connect"
+    );
+    reconnect.enabled = control;
+    var stop = new Button(
+      "Interrupt turn",
+      null,
+      function() client.agentAction(id, "stop", "", null),
+      "codex-stop"
+    );
+    stop.enabled = control;
     var rows:Array<KeyedView> = [
       new KeyedView("title", paragraph(view.record.name + " · " + view.record.state)),
       new KeyedView(
@@ -72,34 +86,8 @@ class CodexSessionPanel implements View {
         new Row(
           "codex-connection",
           [
-            new KeyedView(
-              "connect",
-              new Button(
-                "Reconnect / History",
-                null,
-                function() client.agentAction(
-                  id,
-                  "connect",
-                  "",
-                  null
-                ),
-                "codex-connect"
-              )
-            ),
-            new KeyedView(
-              "stop",
-              new Button(
-                "Interrupt turn",
-                null,
-                function() client.agentAction(
-                  id,
-                  "stop",
-                  "",
-                  null
-                ),
-                "codex-stop"
-              )
-            )
+            new KeyedView("connect", reconnect),
+            new KeyedView("stop", stop)
           ]
         )
       )
@@ -121,51 +109,39 @@ class CodexSessionPanel implements View {
         paragraph("Full request exceeds this view. Review it in another compatible Codex client.")
       ));
       if (r.method == "item/tool/requestUserInput") {
+        var answer = new Button(
+          "Answer using prompt (id=value per line)",
+          null,
+          function() client.agentAction(id, "answer", prompt, r.id),
+          "codex-answer-" + r.id
+        );
+        answer.enabled = control;
         activity.push(new KeyedView(
           "answer-" + r.id,
-          new Button(
-            "Answer using prompt (id=value per line)",
-            null,
-            function() client.agentAction(
-              id,
-              "answer",
-              prompt,
-              r.id
-            )
-          )
+          answer
         ));
       } else if (r.method == "item/commandExecution/requestApproval" || r.method == "item/fileChange/requestApproval") {
+        var approve = new Button(
+          "Approve once",
+          null,
+          function() client.agentAction(id, "approve", "", r.id),
+          "codex-approve-" + r.id
+        );
+        approve.enabled = control;
+        var decline = new Button(
+          "Decline",
+          null,
+          function() client.agentAction(id, "decline", "", r.id),
+          "codex-decline-" + r.id
+        );
+        decline.enabled = control;
         activity.push(new KeyedView(
           "approval-" + r.id,
           new Row(
             "codex-approval-" + r.id,
             [
-              new KeyedView(
-                "approve",
-                new Button(
-                  "Approve once",
-                  null,
-                  function() client.agentAction(
-                    id,
-                    "approve",
-                    "",
-                    r.id
-                  )
-                )
-              ),
-              new KeyedView(
-                "decline",
-                new Button(
-                  "Decline",
-                  null,
-                  function() client.agentAction(
-                    id,
-                    "decline",
-                    "",
-                    r.id
-                  )
-                )
-              )
+              new KeyedView("approve", approve),
+              new KeyedView("decline", decline)
             ]
           )
         ));
@@ -224,13 +200,15 @@ class CodexSessionPanel implements View {
     if (error != null) activity.push(new KeyedView("error", paragraph(error)));
     rows.push(new KeyedView("activity", new ScrollView("codex-activity", new Column("codex-items", activity), style)));
     rows.push(new KeyedView("prompt", field));
-    rows.push(new KeyedView("send", new Button("Send prompt", null, function() {
+    var send = new Button("Send prompt", null, function() {
       if (prompt != "") {
         client.agentAction(id, "prompt", prompt, null);
         prompt = "";
         frame();
       }
-    }, "codex-send")));
+    }, "codex-send");
+    send.enabled = control && prompt != "";
+    rows.push(new KeyedView("send", send));
     var viewport = new LayoutStyle();
     viewport.height = LayoutAxis.grow();
     viewport.width = LayoutAxis.grow();

@@ -72,7 +72,8 @@ async function waitFor(description, predicate, timeout = 60000) {
     }
     await pause(200);
   }
-  throw new Error(`Timed out waiting for ${description}: ${JSON.stringify(value)}`);
+  const shell = await shellState().catch(() => null);
+  throw new Error(`Timed out waiting for ${description}: ${JSON.stringify({value, shell})}`);
 }
 try {
   await send('Runtime.enable');
@@ -140,8 +141,10 @@ try {
   if (agentMode && (!connected.state.grants?.includes('workspace.groups.tree')
     || !connected.state.grants?.includes('workspace.terminals.read')
     || !connected.state.grants?.includes('workspace.terminals.catalog')
-    || !connected.state.grants?.includes('workspace.terminals.control')))
-    throw new Error('AgentMain browser did not receive the approved terminal and workspace-tree grants');
+    || !connected.state.grants?.includes('workspace.terminals.control')
+    || !connected.state.grants?.includes('workspace.agents.read')
+    || !connected.state.grants?.includes('workspace.agents.control')))
+    throw new Error('AgentMain browser did not receive the approved Workbench and Codex grants');
   const remoteExplorer = await waitFor('connected remote file explorer', async () => {
     const shell = await shellState();
     return shell?.explorerWatching && shell?.explorerIdentity?.includes(connected.state.workspaceRoot) ? shell : null;
@@ -153,17 +156,27 @@ try {
   console.log(`PASS: connected Explorer subscribed to ${remoteExplorer.explorerIdentity}`);
   // Open the remote fixture through the rendered Explorer and verify the
   // desktop's single-click preview behavior is wired to authenticated RPC.
-  await click(145, 114);
-  const remotePreview = await waitFor('remote file preview', async () => {
+  let remotePreview = null;
+  for (let attempt = 0; attempt < 8 && remotePreview == null; attempt++) {
+    await click(145, 114);
+    await pause(350);
     const shell = await shellState();
-    const file = shell?.workspaceFileTabs?.find(item => item.path === 'remote.md'
-      && item.scope === connected.state.workspaceRoot);
-    return file?.preview === true && file?.revision && file?.syntax ? file : null;
-  }, 20000);
+    remotePreview = shell?.workspaceFileTabs?.find(item => item.path === 'remote.md'
+      && item.scope === connected.state.workspaceRoot && item.preview === true && item.revision && item.syntax) || null;
+  }
+  if (remotePreview == null)
+    remotePreview = await waitFor('remote file preview', async () => {
+      const shell = await shellState();
+      const file = shell?.workspaceFileTabs?.find(item => item.path === 'remote.md'
+        && item.scope === connected.state.workspaceRoot);
+      return file?.preview === true && file?.revision && file?.syntax ? file : null;
+    }, 12000);
   if (remotePreview.syntax !== 'Markdown')
     throw new Error(`Remote preview used unexpected syntax mode: ${remotePreview.syntax}`);
   console.log('PASS: single-click opened the remote Markdown file as a revision-checked preview tab');
   let remoteTerminalId = null;
+  let remoteAgentId = null;
+  let remoteAgentThread = null;
   if (agentMode) {
     await click(30, 160); // Workbench activity-rail icon.
     await pause(120);
@@ -186,6 +199,75 @@ try {
     if (remoteTerminalId == null || remoteTerminalId.length === 0)
       throw new Error('Remote terminal tab did not retain a stable session id');
     console.log('PASS: Workbench opened a controlled terminal session from the remote workspace group');
+
+    const beforeCodex = await shellState();
+    const createCodex = beforeCodex?.testTargets?.newCodex;
+    if (!createCodex || createCodex.width <= 0 || createCodex.height <= 0)
+      throw new Error(`New Codex action is not available: ${JSON.stringify(beforeCodex?.testTargets)}`);
+    await click(createCodex.x + createCodex.width / 2, createCodex.y + createCodex.height / 2);
+    const openCodex = await waitFor('connected Codex session', async () => {
+      const shell = await shellState();
+      const record = shell?.agentCatalog?.records?.find(value => shell.agentTabs?.includes(value.id));
+      const summary = shell?.activeAgentSummary;
+      const prompt = shell?.testTargets?.prompt;
+      return record && summary?.id === record.id && summary.thread
+        && prompt?.width > 0 && prompt?.height > 0 ? {shell, record, summary} : null;
+    }, 60000);
+    remoteAgentId = openCodex.record.id;
+    remoteAgentThread = openCodex.record.thread;
+    if (openCodex.record.workspaceRoot !== connected.state.workspaceRoot)
+      throw new Error('Created Codex session is outside the approved workspace');
+
+    const initialPrompt = openCodex.shell.testTargets?.prompt;
+    if (!initialPrompt || initialPrompt.width <= 0 || initialPrompt.height <= 0)
+      throw new Error(`Codex prompt field is not visible: ${JSON.stringify(openCodex.shell.testTargets)}`);
+    await click(initialPrompt.x + initialPrompt.width / 2, initialPrompt.y + initialPrompt.height / 2);
+    await send('Input.insertText', {text: 'browser'});
+    const sendPrompt = (await shellState())?.testTargets?.send;
+    if (!sendPrompt || sendPrompt.width <= 0 || sendPrompt.height <= 0)
+      throw new Error('Codex Send prompt action is not visible');
+    await click(sendPrompt.x + sendPrompt.width / 2, sendPrompt.y + sendPrompt.height / 2);
+    await waitFor('Codex command approval in the browser session', async () => {
+      const shell = await shellState();
+      const summary = shell?.activeAgentSummary;
+      return ['working', 'needs-attention'].includes(summary?.state)
+        && summary.messageCount > 0
+        && summary.requestMethods?.includes('item/commandExecution/requestApproval')
+        ? {shell, summary} : null;
+    }, 30000);
+    const approvalWithTarget = await waitFor('visible Codex approval action', async () => {
+      const shell = await shellState();
+      const target = shell?.testTargets?.approve;
+      return target?.width > 0 && target?.height > 0 ? {shell, target} : null;
+    }, 10000);
+    const approve = approvalWithTarget.target;
+    if (!approve || approve.width <= 0 || approve.height <= 0)
+      throw new Error(`Codex approval action is not visible: ${JSON.stringify(approval.shell.testTargets)}`);
+    await click(approve.x + approve.width / 2, approve.y + approve.height / 2);
+    await waitFor('Codex input request after approval', async () => {
+      const shell = await shellState();
+      return shell?.activeAgentSummary?.requestMethods?.includes('item/tool/requestUserInput') ? shell : null;
+    }, 15000);
+    const answerControls = await waitFor('visible Codex answer controls', async () => {
+      const shell = await shellState();
+      const prompt = shell?.testTargets?.prompt;
+      const answer = shell?.testTargets?.answer;
+      return prompt?.width > 0 && answer?.width > 0 ? {shell, prompt, answer} : null;
+    }, 10000);
+    const answerField = answerControls.prompt;
+    const answerAction = answerControls.answer;
+    if (!answerField || !answerAction || answerField.width <= 0 || answerAction.width <= 0)
+      throw new Error(`Codex input controls are not visible: ${JSON.stringify(answerControls.shell.testTargets)}`);
+    await click(answerField.x + answerField.width / 2, answerField.y + answerField.height / 2);
+    await send('Input.insertText', {text: 'choice=yes'});
+    await click(answerAction.x + answerAction.width / 2, answerAction.y + answerAction.height / 2);
+    const answered = await waitFor('completed Codex session', async () => {
+      const shell = await shellState();
+      return shell?.activeAgentSummary?.state === 'completed' ? shell : null;
+    }, 15000);
+    if (answered.activeAgentSummary.messageCount < 2)
+      throw new Error('Browser Codex conversation did not retain the streamed assistant activity');
+    console.log('PASS: browser sent a Codex prompt, approved a command, answered an input request and received streamed activity');
   }
   const rawRecord = await expression(`(async()=>{const db=await new Promise((resolve,reject)=>{const r=indexedDB.open('exosuit-remote-devices-v1');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});const values=await new Promise((resolve,reject)=>{const r=db.transaction('devices','readonly').objectStore('devices').get(${JSON.stringify(`${invitation.machineId}:${invitation.deviceId}`)});r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});const key=await new Promise((resolve,reject)=>{const r=db.transaction('meta','readonly').objectStore('meta').get('noise-device-wrap-v1');r.onsuccess=()=>resolve(r.result?.key);r.onerror=()=>reject(r.error)});return {ciphertextBytes:values?.ciphertext?.byteLength||0,cleartextFields:!!values&&(Object.hasOwn(values,'staticPrivateKey')||Object.hasOwn(values,'deviceToken')),keyExtractable:key?.extractable}})()`);
   if (rawRecord.ciphertextBytes < 32 || rawRecord.cleartextFields || rawRecord.keyExtractable !== false)
@@ -222,8 +304,10 @@ try {
     throw new Error('Automatic reconnect changed workspace identity or approved grants');
   if (agentMode && (!automaticReconnect.grants?.includes('workspace.terminals.read')
     || !automaticReconnect.grants?.includes('workspace.terminals.catalog')
-    || !automaticReconnect.grants?.includes('workspace.terminals.control')))
-    throw new Error('Automatic reconnect changed the approved terminal grants');
+    || !automaticReconnect.grants?.includes('workspace.terminals.control')
+    || !automaticReconnect.grants?.includes('workspace.agents.read')
+    || !automaticReconnect.grants?.includes('workspace.agents.control')))
+    throw new Error('Automatic reconnect changed the approved Workbench or Codex grants');
   const freshConnectCount = await expression(`window.__exosuitTestSockets.filter(socket =>
     socket.url.includes('/connect')).length`);
   if (freshConnectCount <= oldConnectCount)
@@ -243,6 +327,14 @@ try {
     if (!resumedTerminal.terminalResourceIds.includes(remoteTerminalId))
       throw new Error('Remote terminal tab lost its stable session id after reconnect');
     console.log('PASS: remote terminal tab reattached to the same session after relay reconnect');
+    const resumedAgent = await waitFor('Codex session after relay reconnect', async () => {
+      const shell = await shellState();
+      return shell?.activeAgentSummary?.thread === remoteAgentThread
+        && shell.activeAgentSummary.workspaceRoot === connected.state.workspaceRoot ? shell : null;
+    });
+    if (!resumedAgent.agentTabs.includes(remoteAgentId))
+      throw new Error('Codex tab lost its stable workspace resource after relay reconnect');
+    console.log('PASS: Codex tab reattached to the same workspace session after relay reconnect');
   }
   writePrivate(successPath, {machineId: invitation.machineId, deviceId: invitation.deviceId,
     workspaceRoot: automaticReconnect.workspaceRoot});

@@ -2,6 +2,29 @@
 
 Last updated: 2026-10-07.
 
+## M16.2 connected-browser Codex prompt and approval acceptance, 2026-10-07
+
+The AgentMain browser acceptance now grants Codex read/control and uses the
+version-matched fake Codex app server. From the connected Workbench, the browser
+creates a workspace-scoped session, sends a prompt, receives streamed
+activity, approves a command request, answers Codex's input request and
+completes one turn. It then drops the relay connection and confirms that both
+the terminal and Codex tab reattach to their existing workspace sessions.
+`CodexSessionPanel` disables prompt, interrupt, reconnect, approval and answer
+actions unless the device has agent-control permission. The browser test
+snapshot reports session counts and request types, not conversation text.
+
+Validation: `python3 tests/workspace-browser-pairing/run.py --agent` passes for
+both current wasm32 and wasm-gc host builds through local Wrangler,
+AgentMain and production SQLite. `python3 scripts/test-workspace-agents.py`
+passes the provider's separate read-only observer, denied approval and
+one-time approval checks. The graphical Haxeon build passes.
+
+Next: continue F1–F5 filesystem qualification, which remains broader than the
+connected file-preview clickthrough, and qualify Android. See
+[`16-remote-workspaces.md`](16-remote-workspaces.md) and
+[`WORKSPACE-FILES.md`](WORKSPACE-FILES.md).
+
 ## M16.2 full WebAssembly host and browser terminal validation, 2026-10-07
 
 The complete browser host now builds for both wasm32 and wasm-gc using the

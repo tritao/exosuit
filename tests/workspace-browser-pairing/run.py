@@ -148,6 +148,8 @@ with tempfile.TemporaryDirectory(prefix="exosuit-browser-pairing-") as temporary
             handles.append(daemon_output)
             environment = os.environ.copy()
             environment["EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP"] = "1"
+            environment["EXOSUIT_CODEX_BIN"] = str(ROOT / "tests/workspace-agents/fake-codex.py")
+            environment["EXOSUIT_CODEX_PROXY_LAUNCHER"] = str(ROOT / "scripts/run-codex-proxy.py")
             daemon = subprocess.Popen([
                 str(HAXEON), "run", "--project", str(ROOT / "agent/haxeon.json"), "--",
                 str(local_socket), str(free_port()), str(token_path), epoch, str(database),
@@ -212,6 +214,12 @@ with tempfile.TemporaryDirectory(prefix="exosuit-browser-pairing-") as temporary
             raise RuntimeError("The desktop did not retain exactly one approved browser RPC client")
         print("PASS: desktop persisted the pairing and admitted one remote RPC client")
         if AGENT_MODE:
+            codex_state = json.loads((workspace_root / "fake-codex.json").read_text())
+            threads = list(codex_state.get("threads", {}).values())
+            if codex_state.get("prompts") != 1 or len(threads) != 1 \
+                    or threads[0].get("turn", {}).get("status") != "completed":
+                raise RuntimeError("The browser did not complete exactly one fake Codex turn")
+            print("PASS: browser Codex approval and input responses completed one shared turn")
             terminate_group(daemon)
             with sqlite3.connect(database) as db:
                 version = db.execute("PRAGMA user_version").fetchone()[0]
@@ -225,6 +233,13 @@ with tempfile.TemporaryDirectory(prefix="exosuit-browser-pairing-") as temporary
             print("PASS: AgentMain retained the approved device in production SQLite after reconnect")
     except Exception as error:
         daemon_details = f"\n\nAgentMain log:\n{tail(daemon_log)}" if AGENT_MODE else ""
+        if AGENT_MODE:
+            codex_state = workspace_root / "fake-codex.json"
+            codex_commands = workspace_root / "fake-codex-commands.log"
+            if codex_state.exists():
+                daemon_details += "\n\nFake Codex state:\n" + codex_state.read_text()
+            if codex_commands.exists():
+                daemon_details += "\n\nFake Codex commands:\n" + codex_commands.read_text()
         raise SystemExit(f"{error}{daemon_details}\n\nWorker log:\n{tail(worker_log)}\n\nHost log:\n{tail(agent_log)}\n\nChrome log:\n{tail(chrome_log)}") from error
     finally:
         for process in reversed(processes):

@@ -383,8 +383,11 @@ Deployment/publication requires separate authorization under EXECUTION.md.
 - [x] Wire the existing Codex session and approval UI to the shared browser
   Workbench client. It reads agent sessions/activity and sends prompt,
   interruption and approval actions under negotiated grants. Connected-browser
-  prompt/approval behavior and competing-client acceptance remain to be
-  qualified; the host build and terminal clickthrough are complete.
+  acceptance creates a Codex session in the selected workspace group, sends a
+  prompt, receives streamed activity, approves a command, answers a follow-up
+  input request, and reconnects to the same session. The provider acceptance
+  separately checks that a second read-only client cannot approve requests.
+  Codex controls are disabled without the agent-control grant.
 - [x] Attach terminal output by byte offsets and replay, and gate input/resize
   through the explicit controller lease. Multiple viewers can read without
   resizing the shared PTY; taking or releasing control is visible in the pane.

@@ -48,8 +48,9 @@ listings after a connection replacement, retries expired page cursors from a
 fresh listing, and bounds its retained cache to 256 directories and 32,768
 entries. The authenticated web build now exposes the same remote Explorer and
 preview path when `workspace.files.read` is granted; standalone browser files
-remain local. Full browser host acceptance is still open. Remote editing
-remains out of scope.
+remain local. Connected-browser file preview now passes against AgentMain for
+both wasm32 and wasm-gc. This does not complete F1–F5 filesystem acceptance.
+Remote editing remains out of scope.
 
 The current Linux desktop watcher subscribes per root, coalesces native events
 over 100 ms and publishes only a root epoch/cursor, never host paths or file
@@ -67,8 +68,8 @@ supported by the service and contract tests, but AgentMain currently publishes
 one configured root per workspace. Non-Linux secure backends and remaining F1
 acceptance cases are still open. The Linux desktop and connected web client use
 valid UTF-8 syntax-colored read-only previews; Linux desktop has root-level
-change invalidation. Search, full browser qualification and full F3 acceptance
-remain open.
+change invalidation. Search, full F1–F5 browser qualification and full F3
+acceptance remain open.
 
 ## Addressing and access
 

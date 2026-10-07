@@ -966,12 +966,42 @@ class ExosuitApp implements DesktopUiApplication {
 		ui.dispose();
 	}
 
+	function findStyleNode(node:Null<RenderNode>, key:String):Null<RenderNode> {
+		if (node == null) return null;
+		if (node.styleKey == key) return node;
+		for (child in node.children) {
+			var found = findStyleNode(child, key);
+			if (found != null) return found;
+		}
+		return null;
+	}
+
 	public function diagnosticState():Dynamic {
 		var active = host.activeDocument();
 		var tab = host.activeTab();
 		var terminal = tab == null ? null : UiEditorTabs.terminal(tab);
+		var agent = tab == null ? null : UiEditorTabs.agent(tab);
+		var agentClient = workbenchClient == null ? null : workbenchClient.agentService();
+		var agentView = agent == null || agentClient == null ? null : agentClient.agentView(agent.resource);
+		var agentRequest = agentView == null || agentView.requests.length == 0 ? null : agentView.requests[0];
+		var agentItems = agentView == null || agentView.items == null ? [] : agentView.items;
+		var agentSummary = agentView == null ? null : {
+			id: agentView.record.id,
+			workspaceRoot: agentView.record.workspaceRoot,
+			thread: agentView.record.thread,
+			state: agentView.record.state,
+			itemCount: agentItems.length,
+			messageCount: [for (item in agentItems) if (item.kind == "agentMessage") item].length,
+			requestMethods: [for (request in agentView.requests) request.method]
+		};
 		if (terminal == null) terminal = host.activePanelTerminal();
 		var panel = terminal == null ? null : terminal.panel;
+		var target = function(id:String):Dynamic {
+			var node = findStyleNode(ui.root, id);
+			if (node == null) return null;
+			var bounds = node.globalBounds();
+			return {x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height};
+		};
 		return {
 			documents: [for (view in host.allViews()) view.document.title],
 			workspaceFileTabs: workspaceFileDiagnostics(),
@@ -993,7 +1023,15 @@ class ExosuitApp implements DesktopUiApplication {
 			terminalBrowserVisible: terminalBrowserVisible,
 			agentCatalog:workbenchClient==null?null:workbenchClient.agentService().agents(),
    agentTabs:host.agentResourceIds(),
-   terminalCatalog: workbenchClient == null ? null : workbenchClient.terminalCatalog(),
+			activeAgentSummary: agentSummary,
+			testTargets: {
+				newCodex: target("workbench-new-codex"),
+				prompt: target("codex-prompt"),
+				send: target("codex-send"),
+				approve: agentRequest == null ? null : target("codex-approve-" + agentRequest.id),
+				answer: agentRequest == null ? null : target("codex-answer-" + agentRequest.id)
+			},
+			terminalCatalog: workbenchClient == null ? null : workbenchClient.terminalCatalog(),
 			terminal: panel == null ? "closed" : panel.status(),
 			terminalColumns: panel == null ? 0 : panel.columns(),
 			terminalRows: panel == null ? 0 : panel.rows()
