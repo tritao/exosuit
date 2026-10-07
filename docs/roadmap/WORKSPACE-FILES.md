@@ -1,8 +1,8 @@
 # Workspace filesystem protocol
 
 Status: Linux F1 and the first F2 read-handle slice are implemented, with a
-basic Linux desktop F3 change-invalidation path; F1–F3 acceptance is incomplete
-and F4–F5 remain planned. Required by
+basic Linux desktop F3 change-invalidation path and the first bounded F4 search
+service slice; F1–F5 acceptance is incomplete. Required by
 [M16.2](16-remote-workspaces.md). The
 Exosuit service uses shared typed RPC schemas; filesystem semantics are not
 part of Haxeon's generic RPC package. Local adapters and RPC adapters will
@@ -72,8 +72,10 @@ supported by the service and contract tests, but AgentMain currently publishes
 one configured root per workspace. Non-Linux secure backends and remaining F1
 acceptance cases are still open. The Linux desktop and connected web client use
 valid UTF-8 syntax-colored read-only previews; Linux desktop has root-level
-change invalidation. Search, full F1–F5 browser qualification and full F3
-acceptance remain open.
+change invalidation. The initial F4 service supports literal path/name and
+content search, with client-owned pages, cancellation and resource limits; it
+has no search UI or ignore/glob support yet. Full F1–F5 browser qualification
+and full F3–F4 acceptance remain open.
 
 ## Addressing and access
 
@@ -120,9 +122,9 @@ scoped to service/root epoch, never timestamps or bare mtime/size tuples.
 | `files.readClose` | Read handle | Released handle acknowledgement |
 | `files.subscribe` | Root/subtree scopes, optional resume cursor | Subscription id, epoch and acknowledged cursor |
 | `files.unsubscribe` | Subscription id | Closed subscription acknowledgement |
-| `files.searchStart` | Root scopes, file/content query and options | Connection-owned search id and generation |
-| `files.searchPage` | Search id, optional cursor, result limit | Bounded results, next cursor, completeness and skipped summary |
-| `files.searchCancel` | Search id | Cooperative cancellation acknowledgement |
+| `files.searchStart` | Root id, `name` or `content` mode, literal query and case flag | Connection-owned search handle |
+| `files.searchPage` | Search handle and page limit | Bounded matches, scan progress, completeness and truncation |
+| `files.searchCancel` | Search handle | Cooperative cancellation acknowledgement |
 
 All handles are opaque, bounded, owner-scoped, idle-expiring and invalidated on
 connection loss. Reconnect opens new read/search handles; it does not implicitly
@@ -189,20 +191,28 @@ Haxeon RPC reconnect merely restores explicitly resumable subscriptions.
 
 ## Search
 
-Share the existing workspace search engine. File search and content search
-have distinct typed queries; root/glob/ignore options stay within grants.
-Default to existing project ignore rules and expose explicit overrides. Do not
-accept arbitrary user regex syntax unless the engine can bound its work or
-interrupt it safely; advertise supported query capabilities.
+The first service slice supports literal relative-path/name queries and literal
+UTF-8 content queries through one editor-independent matcher. A search is
+bound to one authorized root and one connection. Multiline queries and regex
+are rejected; glob filters and project ignore rules remain future work.
 
-Page results and bound file sizes, concurrency, bytes scanned, result count,
-execution budget and retained search state. Cancellation retires pending work.
-Each content match carries FileRef, file revision and typed location with an
-explicit coordinate convention (zero-based line plus UTF-8 byte column/range).
-The client maps this to its text model; do not conflate UTF-16, bytes and graphemes.
-Search is best-effort across files, not an atomic workspace snapshot. Return
-truncation, incomplete coverage and permission/read failures as bounded summaries.
-Revalidate match revision when opening; changed results require refresh.
+Each search pages at most 100 matches and retains at most 1,000 total results.
+It scans at most 20,000 files, 4,096 directories, 100,000 entries and 64 MiB;
+content files are capped at 4 MiB and each query at 256 UTF-8 bytes. A page
+checks its 64-entry and 25 ms budgets between entries; one bounded file scan
+finishes before the page yields. Each client may hold two active searches,
+which expire after 30 seconds idle; completed searches release
+their state when the final page is returned. Cancellation closes the active
+directory and discards pending results between page calls.
+
+Content matches carry a root-relative path, the observed file revision and a
+zero-based line with UTF-8 byte column and length. Name matches use `-1` for
+line and range. Previews are capped at 512 UTF-16 code units. Binary, NUL
+containing, invalid UTF-8, oversized and changed-during-scan files are skipped
+and counted. Search is best-effort across files, not an atomic workspace
+snapshot; truncated and skipped-entry counts are returned. Clients must
+revalidate a match revision when opening it. No desktop or web search UI is
+wired to this service slice yet.
 
 ## Acceptance and implementation slices
 
@@ -227,9 +237,12 @@ Revalidate match revision when opening; changed results require refresh.
   pairs, overflow, retention gaps, polling
   fallback, server restart and Wi-Fi/mobile-style reconnect. UI drops stale data
   and resyncs visibly when required.
-- [ ] F4: bounded file/content search. Tests cover ignored directories, scoped
-  access, cancellation, result/scan limits, stale locations and Unicode offsets.
-  Flooded read/search/watch traffic leaves terminal/approval control responsive.
+- [ ] F4: the first bounded literal name/content service slice is implemented
+  and contract-tested for root scope, connection ownership, cancellation,
+  paging, active/result limits, binary skipping, idle expiry, UTF-8 byte ranges
+  and large-line previews. Still needed: project ignore rules, glob filters,
+  stale-location UX, scan/byte-limit fixtures, search UI and proof that flooded
+  read/search/watch traffic leaves terminal and approval controls responsive.
 - [ ] F5: desktop/local and connected-browser acceptance using the same service
   operations. Both Wasm targets preserve standalone gates; relay carries opaque
   encrypted payloads without filesystem-specific logic or storage.

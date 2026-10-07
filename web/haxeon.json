@@ -140,6 +140,8 @@
     "../src/recovery/RecoverySnapshot.hx",
     "../src/recovery/RecoveryStore.hx",
     "../src/search/DocumentSearch.hx",
+    "../src/search/LiteralMatch.hx",
+    "../src/search/LiteralSearch.hx",
     "../src/search/ReplacementBackup.hx",
     "../src/search/ReplacementBackupStore.hx",
     "../src/search/ReplacementFilePreview.hx",

@@ -16,6 +16,9 @@ import workspace.service.WorkspaceFileProtocol.FileStatResult;
 import workspace.service.WorkspaceFileProtocol.FileReadOpenResult;
 import workspace.service.WorkspaceFileProtocol.FileReadChunkResult;
 import workspace.service.WorkspaceFileProtocol.FileReadCloseResult;
+import workspace.service.WorkspaceFileProtocol.FileSearchPageResult;
+import workspace.service.WorkspaceFileProtocol.FileSearchHandle;
+import workspace.service.WorkspaceFileProtocol.FileSearchMatch;
 
 class WorkspaceFileTests {
 	static function require(value:Bool, message:String):Void {
@@ -38,6 +41,14 @@ class WorkspaceFileTests {
 		FileSystem.createDirectory(secondRootPath + "/unicode-order");
 		File.saveContent(rootPath + "/a.txt", "saved bytes");
 		File.saveContent(rootPath + "/β.txt", "unicode name");
+		var longLine = new StringBuf();
+		for (_ in 0...1600) longLine.add("x");
+		longLine.add("needle");
+		File.saveContent(secondRootPath + "/search-utf8.txt", "Olá needle\nneedle twice needle\n");
+		File.saveContent(secondRootPath + "/search-long-line.txt", longLine.toString());
+		var denseLine = new StringBuf();
+		for (_ in 0...1100) denseLine.add("z");
+		File.saveContent(secondRootPath + "/search-dense.txt", denseLine.toString());
 		var rawContent = Bytes.alloc(7);
 		rawContent.set(0, 0x41);
 		rawContent.set(1, 0x00);
@@ -81,6 +92,146 @@ class WorkspaceFileTests {
 			"Root descriptor did not expose its scoped metadata operations");
 		require(discovered.roots[1].id == WorkspaceFileService.ROOT_ID + "-1"
 			&& discovered.roots[1].name == "second-file-service-contract", "Additional root identity was not service-assigned");
+		require(discovered.roots[0].capabilities.indexOf("search") >= 0,
+			"Workspace root did not advertise its bounded search operation");
+
+		var emptySearch = "";
+		files.searchStart("workspace", WorkspaceFileService.ROOT_ID, "content", "", true,
+			function(_) throw "Empty workspace search query was accepted", function(error) emptySearch = error.code, 1000);
+		poll(client, server);
+		require(emptySearch == "unsupported_query", "Invalid workspace search query returned an unexpected error");
+		var multilineSearch = "";
+		files.searchStart("workspace", WorkspaceFileService.ROOT_ID, "content", "first\nsecond", true,
+			function(_) throw "Multiline workspace search query was accepted", function(error) multilineSearch = error.code, 1000);
+		poll(client, server);
+		require(multilineSearch == "unsupported_query", "Unsupported multiline query returned an unexpected error");
+
+		var searchHandle:Null<FileSearchHandle> = null;
+		files.searchStart("workspace", WorkspaceFileService.ROOT_ID + "-1", "content", "needle", true,
+			function(value) searchHandle = value, function(error) throw error.code, 1000);
+		poll(client, server);
+		if (searchHandle == null) throw "Workspace content search did not start";
+		var contentSearch = searchHandle;
+		var contentMatches:Array<FileSearchMatch> = [];
+		var searchComplete = false, searchScannedFiles = 0, searchScannedBytes = 0, searchSkipped = 0, searchScannedEntries = 0;
+		while (!searchComplete) {
+			var page:Null<FileSearchPageResult> = null;
+			files.searchPage("workspace", contentSearch.root, contentSearch.searchId, 1,
+				function(value) page = value, function(error) throw error.code, 1000);
+			poll(client, server);
+			if (page == null) throw "Workspace content search page was missing";
+			for (match in page.matches) contentMatches.push(match);
+			searchComplete = page.complete;
+			searchScannedFiles = page.scannedFiles;
+			searchScannedBytes = page.scannedBytes;
+			searchSkipped = page.skippedEntries;
+			searchScannedEntries = page.scannedEntries;
+		}
+		var longLineMatch = false;
+		var utf8Matches:Array<FileSearchMatch> = [];
+		for (match in contentMatches) if (match.path == "search-long-line.txt")
+			longLineMatch = match.column == 1600 && match.preview.length <= 514 && match.preview.indexOf("needle") >= 0;
+		for (match in contentMatches) if (match.path == "search-utf8.txt") utf8Matches.push(match);
+		require(contentMatches.length == 4 && longLineMatch && utf8Matches.length == 3
+			&& utf8Matches[0].line == 0 && utf8Matches[0].column == 5
+			&& utf8Matches[1].line == 1 && utf8Matches[1].column == 0
+			&& utf8Matches[2].line == 1 && utf8Matches[2].column == 13
+			&& utf8Matches[0].length == 6 && utf8Matches[0].revision.length > 0,
+			"Workspace content search lost ordered matches or UTF-8 byte ranges");
+		require(searchScannedFiles > 0 && searchScannedBytes > 0 && searchSkipped > 0 && searchScannedEntries > 0,
+			"Workspace content search did not report bounded scan and binary-file skip progress");
+
+		var insensitiveHandle:Null<FileSearchHandle> = null;
+		files.searchStart("workspace", WorkspaceFileService.ROOT_ID + "-1", "content", "NEEDLE", false,
+			function(value) insensitiveHandle = value, function(error) throw error.code, 1000);
+		poll(client, server);
+		if (insensitiveHandle == null) throw "Case-insensitive workspace search did not start";
+		var insensitiveSearch = insensitiveHandle, insensitivePage:Null<FileSearchPageResult> = null;
+		files.searchPage("workspace", insensitiveSearch.root, insensitiveSearch.searchId, 10,
+			function(value) insensitivePage = value, function(error) throw error.code, 1000);
+		poll(client, server);
+		require(insensitivePage != null && insensitivePage.complete && insensitivePage.matches.length == 4,
+			"Case-insensitive workspace content search returned the wrong matches");
+
+		var nameHandle:Null<FileSearchHandle> = null;
+		files.searchStart("workspace", WorkspaceFileService.ROOT_ID + "-1", "name", "search-utf8", true,
+			function(value) nameHandle = value, function(error) throw error.code, 1000);
+		poll(client, server);
+		if (nameHandle == null) throw "Workspace name search did not start";
+		var nameSearch = nameHandle, nameFound = false, nameSearchComplete = false;
+		while (!nameSearchComplete) {
+			var page:Null<FileSearchPageResult> = null;
+			files.searchPage("workspace", nameSearch.root, nameSearch.searchId, 8,
+				function(value) page = value, function(error) throw error.code, 1000);
+			poll(client, server);
+			if (page == null) throw "Workspace name search page was missing";
+			for (match in page.matches) if (match.path == "search-utf8.txt" && match.kind == "file") nameFound = true;
+			nameSearchComplete = page.complete;
+		}
+		require(nameFound, "Workspace name search did not return a root-relative matching path");
+
+		var denseHandle:Null<FileSearchHandle> = null;
+		files.searchStart("workspace", WorkspaceFileService.ROOT_ID + "-1", "content", "z", true,
+			function(value) denseHandle = value, function(error) throw error.code, 1000);
+		poll(client, server);
+		if (denseHandle == null) throw "Dense workspace search did not start";
+		var denseSearch = denseHandle, denseCount = 0, denseComplete = false, denseTruncated = false;
+		while (!denseComplete) {
+			var page:Null<FileSearchPageResult> = null;
+			files.searchPage("workspace", denseSearch.root, denseSearch.searchId, 100,
+				function(value) page = value, function(error) throw error.code, 1000);
+			poll(client, server);
+			if (page == null) throw "Dense workspace search page was missing";
+			denseCount += page.matches.length;
+			denseComplete = page.complete;
+			denseTruncated = page.truncated;
+		}
+		require(denseCount == 1000 && denseTruncated,
+			"Dense workspace search exceeded its result bound or did not report truncation");
+
+		var cancelledHandle:Null<FileSearchHandle> = null;
+		files.searchStart("workspace", WorkspaceFileService.ROOT_ID, "name", "never-match", true,
+			function(value) cancelledHandle = value, function(error) throw error.code, 1000);
+		poll(client, server);
+		if (cancelledHandle == null) throw "Cancellable workspace search did not start";
+		var cancelledResult:Null<workspace.service.WorkspaceFileProtocol.FileSearchCancelResult> = null;
+		files.searchCancel("workspace", cancelledHandle.root, cancelledHandle.searchId,
+			function(value) cancelledResult = value, function(error) throw error.code, 1000);
+		poll(client, server);
+		require(cancelledResult != null && cancelledResult.cancelled, "Workspace search cancellation did not release its cursor");
+		var cancelledPageError = "";
+		files.searchPage("workspace", cancelledHandle.root, cancelledHandle.searchId, 1,
+			function(_) throw "Cancelled workspace search remained available", function(error) cancelledPageError = error.code, 1000);
+		poll(client, server);
+		require(cancelledPageError == "invalid_handle", "Cancelled workspace search returned an unexpected handle result");
+
+		var firstActive:Null<FileSearchHandle> = null, secondActive:Null<FileSearchHandle> = null;
+		files.searchStart("workspace", WorkspaceFileService.ROOT_ID, "name", "first", true,
+			function(value) firstActive = value, function(error) throw error.code, 1000);
+		poll(client, server);
+		files.searchStart("workspace", WorkspaceFileService.ROOT_ID, "name", "second", true,
+			function(value) secondActive = value, function(error) throw error.code, 1000);
+		poll(client, server);
+		var thirdSearchError = "";
+		files.searchStart("workspace", WorkspaceFileService.ROOT_ID, "name", "third", true,
+			function(_) throw "Workspace service exceeded its active search bound", function(error) thirdSearchError = error.code, 1000);
+		poll(client, server);
+		require(firstActive != null && secondActive != null && thirdSearchError == "resource_limit",
+			"Workspace service did not enforce its per-connection active search limit");
+		if (firstActive == null || secondActive == null) throw "Bounded workspace searches were not created";
+		var activeOne = firstActive, activeTwo = secondActive;
+		files.searchCancel("workspace", activeOne.root, activeOne.searchId, function(_) {}, function(error) throw error.code, 1000);
+		poll(client, server);
+		var afterCancel:Null<FileSearchHandle> = null;
+		files.searchStart("workspace", WorkspaceFileService.ROOT_ID, "name", "after-cancel", true,
+			function(value) afterCancel = value, function(error) throw error.code, 1000);
+		poll(client, server);
+		if (afterCancel == null) throw "Cancelling a search did not free a bounded search slot";
+		var freedSlot = afterCancel;
+		files.searchCancel("workspace", activeTwo.root, activeTwo.searchId, function(_) {}, function(error) throw error.code, 1000);
+		poll(client, server);
+		files.searchCancel("workspace", freedSlot.root, freedSlot.searchId, function(_) {}, function(error) throw error.code, 1000);
+		poll(client, server);
 
 		var stat:Null<FileStatResult> = null;
 		var statError = "";
@@ -153,6 +304,19 @@ class WorkspaceFileTests {
 			function(_) throw "Another connection reused a file read handle", function(error) foreignHandle = error.code);
 		poll(foreignClient, foreignServer);
 		require(foreignHandle == "invalid_handle", "Read handle ownership was not bound to its connection");
+		var privateSearch:Null<FileSearchHandle> = null;
+		files.searchStart("workspace", WorkspaceFileService.ROOT_ID, "name", "private-search", true,
+			function(value) privateSearch = value, function(error) throw error.code, 1000);
+		poll(client, server);
+		if (privateSearch == null) throw "Connection-scoped workspace search did not start";
+		var ownedSearch = privateSearch, foreignSearchError = "";
+		foreignClient.call(WorkspaceFileProtocol.SEARCH_PAGE,
+			{workspace: "workspace", root: ownedSearch.root, searchId: ownedSearch.searchId, limit: 1}, 1000,
+			function(_) throw "Another connection reused a workspace search handle", function(error) foreignSearchError = error.code);
+		poll(foreignClient, foreignServer);
+		require(foreignSearchError == "invalid_handle", "Workspace search handle ownership was not bound to its connection");
+		files.searchCancel("workspace", ownedSearch.root, ownedSearch.searchId, function(_) {}, function(error) throw error.code, 1000);
+		poll(client, server);
 		revokeForeign();
 		foreignClient.close();
 		foreignServer.close();
@@ -307,6 +471,12 @@ class WorkspaceFileTests {
 		poll(client, server);
 		if (expiringRead == null)
 			throw "Expiring file read handle was missing";
+		var expiringSearch:Null<FileSearchHandle> = null;
+		files.searchStart("workspace", WorkspaceFileService.ROOT_ID, "name", "expiry-search", true,
+			function(value) expiringSearch = value, function(error) throw error.code, 1000);
+		poll(client, server);
+		if (expiringSearch == null) throw "Expiring workspace search was missing";
+		var idleSearch = expiringSearch;
 		now += 31000;
 		var expiredRead = "";
 		client.call(WorkspaceFileProtocol.READ_CHUNK,
@@ -320,6 +490,11 @@ class WorkspaceFileTests {
 			function(_) throw "Expired workspace cursor was accepted", function(error) expired = error.code);
 		poll(client, server);
 		require(expired == "cursor_expired", "Idle cursor expiry was not explicit");
+		var expiredSearch = "";
+		files.searchPage("workspace", idleSearch.root, idleSearch.searchId, 1,
+			function(_) throw "Expired workspace search was accepted", function(error) expiredSearch = error.code, 1000);
+		poll(client, server);
+		require(expiredSearch == "invalid_handle", "Idle workspace search expiry was not explicit");
 
 		var deniedPair = MemoryTransport.pair();
 		var deniedClient = new RpcConnection(deniedPair.client, clock);
@@ -343,6 +518,6 @@ class WorkspaceFileTests {
 		deniedClient.close();
 		deniedServer.close();
 		service.dispose();
-		Sys.println("PASS: workspace file root grants, stat, stable pagination, traversal refusal, cursor expiry and revocation");
+		Sys.println("PASS: workspace file/search grants, stable paging, UTF-8 locations, search limits/cancellation, expiry and revocation");
 	}
 }

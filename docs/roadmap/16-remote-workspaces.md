@@ -380,6 +380,11 @@ Deployment/publication requires separate authorization under EXECUTION.md.
   the watch notification and keep the displayed snapshot while marking it
   stale for explicit refresh. A second change after relay reconnect advances
   the restored Explorer revision.
+- [ ] Start F4 with bounded literal name/content RPC search. The first service
+  slice has per-connection handles, paged results, cancellation, UTF-8 byte
+  locations and resource limits, with host contract coverage. Ignore/glob
+  support, search UI and full F4 acceptance remain open in
+  [`WORKSPACE-FILES.md`](WORKSPACE-FILES.md).
 - [x] Complete the Emscripten host builds and connected-browser terminal
   clickthrough for wasm32 and wasm-gc. The real browser test opens a remote
   terminal in the Workbench, verifies its dock panel and session identity,

@@ -7,6 +7,9 @@ import haxeon.wire.MessagePackFrame;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceTerminalProtocol;
 import workspace.service.WorkspaceAgentProtocol;
+import workspace.service.WorkspaceFileProtocol;
+import workspace.service.WorkspaceFileProtocol.FileSearchMatch;
+import workspace.service.WorkspaceFileProtocol.FileSearchPageResult;
 
 /** Frozen independent MessagePack vectors: both bytes and semantic decode are checked. */
 class RpcCompatibilityTests {
@@ -102,6 +105,27 @@ class RpcCompatibilityTests {
 		require(WorkspaceTerminalProtocol.OUTPUT.decodeRequest(terminalReadBytes).offset==haxe.Int64.make(1,2),"64-bit terminal offset truncated");
 		var terminalInput:TerminalInput={workspace:"w",instance:"i",id:"t",sequence:1,data:bytes("0001")};
 		require(WorkspaceTerminalProtocol.INPUT.encodeRequest(terminalInput).compare(bytes("8501a17702a16903a174040105c4020001"))==0,"Terminal binary input vector changed");
+		require(WorkspaceFileProtocol.SEARCH_START.id == 149 && WorkspaceFileProtocol.SEARCH_PAGE.id == 150
+			&& WorkspaceFileProtocol.SEARCH_CANCEL.id == 151, "Workspace search method ids changed");
+		var searchRequest = {workspace: "w", root: "r", mode: "content", query: "q", caseSensitive: true};
+		var searchRequestBytes = bytes("8501a17702a17203a7636f6e74656e7404a17105c3");
+		require(WorkspaceFileProtocol.SEARCH_START.encodeRequest(searchRequest).compare(searchRequestBytes) == 0,
+			"Workspace search request field ids changed");
+		var searchHandle = {workspace: "w", root: "r", searchId: "s"};
+		var searchHandleBytes = bytes("8301a17702a17203a173");
+		require(WorkspaceFileProtocol.SEARCH_START.encodeResponse(searchHandle).compare(searchHandleBytes) == 0
+			&& WorkspaceFileProtocol.SEARCH_CANCEL.encodeRequest(searchHandle).compare(searchHandleBytes) == 0,
+			"Workspace search handle vector changed");
+		require(WorkspaceFileProtocol.SEARCH_PAGE.encodeRequest({workspace: "w", root: "r", searchId: "s", limit: 1})
+			.compare(bytes("8401a17702a17203a1730401")) == 0, "Workspace search page request vector changed");
+		var searchMatch:FileSearchMatch = {path: "a.txt", kind: "file", revision: "rev", line: 2,
+			column: 5, length: 6, preview: "needle"};
+		var searchPage:FileSearchPageResult = {workspace: "w", root: "r", searchId: "s", matches: [searchMatch],
+			complete: true, truncated: false, scannedFiles: 1, scannedBytes: 12, skippedEntries: 2, scannedEntries: 3};
+		var searchPageBytes = bytes("8a01a17702a17203a17304918701a5612e74787402a466696c6503a372657604020505060607a66e6565646c6505c306c20701080c09020a03");
+		require(WorkspaceFileProtocol.SEARCH_PAGE.encodeResponse(searchPage).compare(searchPageBytes) == 0
+			&& WorkspaceFileProtocol.SEARCH_PAGE.decodeResponse(searchPageBytes).matches[0].column == 5,
+			"Workspace search result field ids or byte-column vector changed");
         var catalogQuery:TerminalCatalogQuery={workspace:"w",instance:"i",after:null};
         require(WorkspaceTerminalProtocol.LIST.encodeRequest(catalogQuery).compare(bytes("8301a17702a16903c0"))==0,"Terminal catalog query vector changed");
         var renameTerminal:TerminalRename={workspace:"w",instance:"i",id:"t",name:"N",group:"w",expectedRevision:haxe.Int64.make(1,2)};

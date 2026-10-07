@@ -12,6 +12,9 @@ import workspace.service.WorkspaceFileProtocol.FileReadChunkResult;
 import workspace.service.WorkspaceFileProtocol.FileReadCloseResult;
 import workspace.service.WorkspaceFileProtocol.FileWatchResult;
 import workspace.service.WorkspaceFileProtocol.FileChangeEvent;
+import workspace.service.WorkspaceFileProtocol.FileSearchHandle;
+import workspace.service.WorkspaceFileProtocol.FileSearchPageResult;
+import workspace.service.WorkspaceFileProtocol.FileSearchCancelResult;
 
 /** Typed workspace file operations over any negotiated Exosuit RPC connection. */
 class WorkspaceFileClient {
@@ -58,6 +61,25 @@ class WorkspaceFileClient {
 		onError:RpcError->Void, ?timeoutMs:Int = 5000):Void {
 		connection.call(WorkspaceFileProtocol.READ_CLOSE,
 			{workspace: workspace, handle: handle}, timeoutMs, onSuccess, onError);
+	}
+
+	public function searchStart(workspace:String, root:String, mode:String, query:String, caseSensitive:Bool,
+		onSuccess:FileSearchHandle->Void, onError:RpcError->Void, ?timeoutMs:Int = 5000):Void {
+		connection.call(WorkspaceFileProtocol.SEARCH_START,
+			{workspace: workspace, root: root, mode: mode, query: query, caseSensitive: caseSensitive},
+			timeoutMs, onSuccess, onError);
+	}
+
+	public function searchPage(workspace:String, root:String, searchId:String, limit:Int,
+		onSuccess:FileSearchPageResult->Void, onError:RpcError->Void, ?timeoutMs:Int = 5000):Void {
+		connection.call(WorkspaceFileProtocol.SEARCH_PAGE,
+			{workspace: workspace, root: root, searchId: searchId, limit: limit}, timeoutMs, onSuccess, onError);
+	}
+
+	public function searchCancel(workspace:String, root:String, searchId:String,
+		onSuccess:FileSearchCancelResult->Void, onError:RpcError->Void, ?timeoutMs:Int = 5000):Void {
+		connection.call(WorkspaceFileProtocol.SEARCH_CANCEL,
+			{workspace: workspace, root: root, searchId: searchId}, timeoutMs, onSuccess, onError);
 	}
 
 	public function watch(workspace:String, root:String, epoch:Null<String>, cursor:Int,

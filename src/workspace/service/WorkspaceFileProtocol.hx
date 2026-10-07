@@ -129,6 +129,56 @@ import workspace.service.WorkspaceProtocol.WorkspaceQuery;
 	@:id(4) var cursor:Int;
 }
 
+@:wire typedef FileSearchStartRequest = {
+	@:id(1) var workspace:String;
+	@:id(2) var root:String;
+	/** "name" searches entry names; "content" searches UTF-8 text in regular files. */
+	@:id(3) var mode:String;
+	@:id(4) var query:String;
+	@:id(5) var caseSensitive:Bool;
+}
+
+@:wire typedef FileSearchHandle = {
+	@:id(1) var workspace:String;
+	@:id(2) var root:String;
+	@:id(3) var searchId:String;
+}
+
+@:wire typedef FileSearchPageRequest = {
+	@:id(1) var workspace:String;
+	@:id(2) var root:String;
+	@:id(3) var searchId:String;
+	@:id(4) var limit:Int;
+}
+
+@:wire typedef FileSearchMatch = {
+	@:id(1) var path:String;
+	@:id(2) var kind:String;
+	@:id(3) var revision:String;
+	/** Content matches use zero-based lines and UTF-8 byte columns; name matches use -1. */
+	@:id(4) var line:Int;
+	@:id(5) var column:Int;
+	@:id(6) var length:Int;
+	@:id(7) var preview:String;
+}
+
+@:wire typedef FileSearchPageResult = {
+	@:id(1) var workspace:String;
+	@:id(2) var root:String;
+	@:id(3) var searchId:String;
+	@:id(4) var matches:Array<FileSearchMatch>;
+	@:id(5) var complete:Bool;
+	@:id(6) var truncated:Bool;
+	@:id(7) var scannedFiles:Int;
+	@:id(8) var scannedBytes:Int;
+	@:id(9) var skippedEntries:Int;
+	@:id(10) var scannedEntries:Int;
+}
+
+@:wire typedef FileSearchCancelResult = {
+	@:id(1) var cancelled:Bool;
+}
+
 /** Permanent ids for root-scoped workspace file metadata operations. */
 class WorkspaceFileProtocol {
 	public static inline final READ = "workspace.files.read";
@@ -160,4 +210,13 @@ class WorkspaceFileProtocol {
 
 	public static function encodeChange(event:FileChangeEvent):Bytes return MessagePack.encode(event);
 	public static function decodeChange(bytes:Bytes):FileChangeEvent return MessagePack.decode(bytes);
+	public static final SEARCH_START = new RpcMethod<FileSearchStartRequest, FileSearchHandle>(149,
+		function(value) return MessagePack.encode(value), function(bytes:Bytes):FileSearchStartRequest return MessagePack.decode(bytes),
+		function(value) return MessagePack.encode(value), function(bytes:Bytes):FileSearchHandle return MessagePack.decode(bytes));
+	public static final SEARCH_PAGE = new RpcMethod<FileSearchPageRequest, FileSearchPageResult>(150,
+		function(value) return MessagePack.encode(value), function(bytes:Bytes):FileSearchPageRequest return MessagePack.decode(bytes),
+		function(value) return MessagePack.encode(value), function(bytes:Bytes):FileSearchPageResult return MessagePack.decode(bytes));
+	public static final SEARCH_CANCEL = new RpcMethod<FileSearchHandle, FileSearchCancelResult>(151,
+		function(value) return MessagePack.encode(value), function(bytes:Bytes):FileSearchHandle return MessagePack.decode(bytes),
+		function(value) return MessagePack.encode(value), function(bytes:Bytes):FileSearchCancelResult return MessagePack.decode(bytes));
 }

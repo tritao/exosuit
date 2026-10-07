@@ -3,7 +3,10 @@ package workspace.runtime;
 import haxe.Int64;
 import haxe.crypto.Sha256;
 import haxe.io.Bytes;
+import haxe.io.BytesBuffer;
 import haxeon.filesystem.FileSystemRoot;
+import haxeon.filesystem.FileSystemDirectory;
+import haxeon.filesystem.FileSystemDirectory.FileSystemDirectoryEntry;
 import haxeon.filesystem.FileSystemFile;
 import haxeon.platform.NativeKitEvents;
 import haxeon.platform.NativeKitEvents.NativeKitEventSubscription;
@@ -33,7 +36,14 @@ import workspace.service.WorkspaceFileProtocol.FileUnwatchRequest;
 import workspace.service.WorkspaceFileProtocol.FileUnwatchResult;
 import workspace.service.WorkspaceFileProtocol.FileChangeEvent;
 import workspace.service.WorkspaceFileProtocol.WorkspaceFileEntry;
+import workspace.service.WorkspaceFileProtocol.FileSearchStartRequest;
+import workspace.service.WorkspaceFileProtocol.FileSearchHandle;
+import workspace.service.WorkspaceFileProtocol.FileSearchPageRequest;
+import workspace.service.WorkspaceFileProtocol.FileSearchPageResult;
+import workspace.service.WorkspaceFileProtocol.FileSearchMatch;
+import workspace.service.WorkspaceFileProtocol.FileSearchCancelResult;
 import workspace.service.WorkspaceProtocol.WorkspaceQuery;
+import search.LiteralSearch;
 
 private typedef FileListSnapshot = {
 	var id:String;
@@ -44,8 +54,45 @@ private typedef FileListSnapshot = {
 	var lastUsed:Float;
 }
 
+private typedef FileSearchState = {
+	var id:String;
+	var root:String;
+	var mode:String;
+	var query:String;
+	var caseSensitive:Bool;
+	var pendingDirectories:Array<String>;
+	var currentPath:Null<String>;
+	var currentDirectory:Null<FileSystemDirectory>;
+	var pendingMatches:Array<FileSearchMatch>;
+	var pendingMatchIndex:Int;
+	var scannedFiles:Int;
+	var scannedBytes:Int;
+	var skippedEntries:Int;
+	var foundMatches:Int;
+	var directoriesVisited:Int;
+	var entriesVisited:Int;
+	var scanComplete:Bool;
+	var truncated:Bool;
+	var lastUsed:Float;
+}
+
 /** Per-connection cursor state; no listing handle is shared across clients. */
 private class WorkspaceFileBinding {
+	static inline final MAX_ACTIVE_SEARCHES = 2;
+	static inline final MAX_SEARCH_QUERY_BYTES = 256;
+	static inline final MAX_SEARCH_PAGE_SIZE = 100;
+	static inline final MAX_SEARCH_RESULTS = 1000;
+	static inline final MAX_SEARCH_FILE_BYTES = 4 * 1024 * 1024;
+	static inline final MAX_SEARCH_BYTES = 64 * 1024 * 1024;
+	static inline final MAX_SEARCH_FILES = 20000;
+	static inline final MAX_SEARCH_DIRECTORIES = 4096;
+	static inline final MAX_SEARCH_ENTRIES = 100000;
+	static inline final MAX_SEARCH_ENTRIES_PER_PAGE = 64;
+	static inline final SEARCH_IDLE_MS = 30000.0;
+	static inline final SEARCH_CHUNK_BYTES = 262144;
+	static inline final SEARCH_PREVIEW_MAX_CHARS = 512;
+	static inline final SEARCH_PREVIEW_CONTEXT_CHARS = 96;
+
 	final service:WorkspaceFileService;
 	final connection:RpcConnection;
 	final granted:Bool;
@@ -54,6 +101,7 @@ private class WorkspaceFileBinding {
 	final snapshots:Map<String, FileListSnapshot> = [];
 	final cursors:Map<String, FileListCursor> = [];
 	final readHandles:Map<String, FileReadHandle> = [];
+	final searches:Map<String, FileSearchState> = [];
 	final watchedRoots:Map<String, Bool> = [];
 
 	public function new(service:WorkspaceFileService, connection:RpcConnection, capabilities:Array<String>) {
@@ -71,6 +119,9 @@ private class WorkspaceFileBinding {
 		connection.register(WorkspaceFileProtocol.READ_CLOSE, function(request, context) onReadClose(request, context));
 		connection.register(WorkspaceFileProtocol.WATCH, function(request, context) onWatch(request, context));
 		connection.register(WorkspaceFileProtocol.UNWATCH, function(request, context) onUnwatch(request, context));
+		connection.register(WorkspaceFileProtocol.SEARCH_START, function(request, context) onSearchStart(request, context));
+		connection.register(WorkspaceFileProtocol.SEARCH_PAGE, function(request, context) onSearchPage(request, context));
+		connection.register(WorkspaceFileProtocol.SEARCH_CANCEL, function(request, context) onSearchCancel(request, context));
 		return revoke;
 	}
 
@@ -90,7 +141,7 @@ private class WorkspaceFileBinding {
 		context.respond({workspace: service.workspace, roots: [for (root in service.roots) {
 			id: root.id,
 			name: root.name,
-			capabilities: service.watchAvailable() ? ["stat", "list", "read", "watch"] : ["stat", "list", "read"]
+			capabilities: service.watchAvailable() ? ["stat", "list", "read", "watch", "search"] : ["stat", "list", "read", "search"]
 		}]});
 	}
 
@@ -272,6 +323,388 @@ private class WorkspaceFileBinding {
 		context.respond({unwatched: true});
 	}
 
+	function onSearchStart(request:FileSearchStartRequest, context:RpcContext<FileSearchHandle>):Void {
+		if (!authorized(context)) return;
+		if (request == null || !service.validRef(request.workspace, request.root)
+			|| request.mode != "name" && request.mode != "content" || request.query == null
+			|| request.query.length == 0 || Bytes.ofString(request.query).length > MAX_SEARCH_QUERY_BYTES
+			|| hasNul(request.query) || request.query.indexOf("\n") >= 0) {
+			context.fail({code: "unsupported_query", message: "Invalid workspace file search query", ambiguous: false});
+			return;
+		}
+		pruneSearches();
+		if (searchCount() >= MAX_ACTIVE_SEARCHES) {
+			context.fail({code: "resource_limit", message: "Too many active workspace searches", ambiguous: false});
+			return;
+		}
+		counter++;
+		var id = makeReadToken(request.root, "search:" + counter);
+		var state:FileSearchState = {
+			id: id,
+			root: request.root,
+			mode: request.mode,
+			query: request.query,
+			caseSensitive: request.caseSensitive,
+			pendingDirectories: [""],
+			currentPath: null,
+			currentDirectory: null,
+			pendingMatches: [],
+			pendingMatchIndex: 0,
+			scannedFiles: 0,
+			scannedBytes: 0,
+			skippedEntries: 0,
+			foundMatches: 0,
+			directoriesVisited: 0,
+			entriesVisited: 0,
+			scanComplete: false,
+			truncated: false,
+			lastUsed: service.clock()
+		};
+		searches.set(id, state);
+		context.respond({workspace: service.workspace, root: request.root, searchId: id});
+	}
+
+	function onSearchPage(request:FileSearchPageRequest, context:RpcContext<FileSearchPageResult>):Void {
+		if (!authorized(context)) return;
+		if (request == null || request.workspace != service.workspace || request.searchId == null
+			|| request.searchId.length == 0 || request.searchId.length > 128 || request.limit < 1
+			|| request.limit > MAX_SEARCH_PAGE_SIZE || !service.validRef(request.workspace, request.root)) {
+			context.fail({code: "invalid_request", message: "Invalid workspace search page", ambiguous: false});
+			return;
+		}
+		pruneSearches();
+		var state = searches.get(request.searchId);
+		if (state == null || state.root != request.root) {
+			context.fail({code: "invalid_handle", message: "Workspace search is unavailable", ambiguous: false});
+			return;
+		}
+		state.lastUsed = service.clock();
+		var matches = runSearchPage(state, request.limit);
+		var complete = searchComplete(state), result:FileSearchPageResult = {workspace: service.workspace, root: state.root,
+			searchId: state.id, matches: matches, complete: complete, truncated: state.truncated,
+			scannedFiles: state.scannedFiles, scannedBytes: state.scannedBytes,
+			skippedEntries: state.skippedEntries, scannedEntries: state.entriesVisited};
+		if (complete) {
+			searches.remove(state.id);
+			closeSearch(state);
+		}
+		context.respond(result);
+	}
+
+	function onSearchCancel(request:FileSearchHandle, context:RpcContext<FileSearchCancelResult>):Void {
+		if (!authorized(context)) return;
+		if (request == null || request.workspace != service.workspace || request.searchId == null
+			|| request.searchId.length == 0 || request.searchId.length > 128
+			|| !service.validRef(request.workspace, request.root)) {
+			context.fail({code: "invalid_request", message: "Invalid workspace search cancellation", ambiguous: false});
+			return;
+		}
+		var state = searches.get(request.searchId);
+		if (state == null || state.root != request.root) {
+			context.respond({cancelled: false});
+			return;
+		}
+		closeSearch(state);
+		searches.remove(state.id);
+		context.respond({cancelled: true});
+	}
+
+	function runSearchPage(state:FileSearchState, limit:Int):Array<FileSearchMatch> {
+		var matches:Array<FileSearchMatch> = [], processed = 0, startedAt = service.clock();
+		while (matches.length < limit && processed < MAX_SEARCH_ENTRIES_PER_PAGE
+			&& service.clock() - startedAt < 25.0 && !searchComplete(state)) {
+			if (state.pendingMatchIndex < state.pendingMatches.length) {
+				matches.push(state.pendingMatches[state.pendingMatchIndex++]);
+				continue;
+			}
+			state.pendingMatches = [];
+			state.pendingMatchIndex = 0;
+			if (state.scanComplete) break;
+			if (state.currentDirectory == null) {
+				if (state.pendingDirectories.length == 0) {
+					state.scanComplete = true;
+					break;
+				}
+				if (state.directoriesVisited >= MAX_SEARCH_DIRECTORIES) {
+					state.truncated = true;
+					state.scanComplete = true;
+					break;
+				}
+				state.currentPath = state.pendingDirectories.pop();
+				state.directoriesVisited++;
+				try {
+					state.currentDirectory = service.rootHandle(state.root).openDirectory(state.currentPath);
+				} catch (_:Dynamic) {
+					state.skippedEntries++;
+					state.currentPath = null;
+					continue;
+				}
+			}
+			var item:Null<FileSystemDirectoryEntry> = null;
+			try {
+				item = state.currentDirectory.next();
+			} catch (_:Dynamic) {
+				state.skippedEntries++;
+				closeCurrentDirectory(state);
+				continue;
+			}
+			if (item == null) {
+				closeCurrentDirectory(state);
+				continue;
+			}
+			if (state.entriesVisited >= MAX_SEARCH_ENTRIES) {
+				state.truncated = true;
+				state.scanComplete = true;
+				closeCurrentDirectory(state);
+				break;
+			}
+			processed++;
+			state.entriesVisited++;
+			if (item.name == null || item.name.length == 0) {
+				state.skippedEntries++;
+				continue;
+			}
+			var parent = state.currentPath == null ? "" : state.currentPath,
+				path = parent.length == 0 ? item.name : parent + "/" + item.name,
+				entry = WorkspaceFileService.metadata(service.workspace, state.root, item.name, item.metadata);
+			if (state.mode == "name") {
+				if (entry.kind == "file") {
+					if (state.scannedFiles >= MAX_SEARCH_FILES) {
+						state.truncated = true;
+						state.scanComplete = true;
+						closeCurrentDirectory(state);
+						break;
+					}
+					state.scannedFiles++;
+				}
+			} else if (entry.kind == "directory") {
+				state.pendingDirectories.push(path);
+			} else if (entry.kind == "file") {
+				scanSearchFile(state, path, entry.revision, entry.size);
+			}
+			if (state.mode == "name") {
+				var nameColumn = literalIndex(path, state.query, state.caseSensitive);
+				if (nameColumn >= 0)
+					queueSearchMatch(state, {path: path, kind: entry.kind, revision: entry.revision,
+						line: -1, column: -1, length: -1,
+						preview: boundedSearchPreview(path, nameColumn, state.query.length)});
+			}
+		}
+		return matches;
+	}
+
+	function scanSearchFile(state:FileSearchState, path:String, expectedRevision:String, listedSize:Int64):Void {
+		if (state.scannedFiles >= MAX_SEARCH_FILES) {
+			state.truncated = true;
+			state.scanComplete = true;
+			closeCurrentDirectory(state);
+			return;
+		}
+		state.scannedFiles++;
+		if (Int64.compare(listedSize, Int64.ofInt(MAX_SEARCH_FILE_BYTES)) > 0) {
+			state.skippedEntries++;
+			return;
+		}
+		if (state.scannedBytes + Int64.toInt(listedSize) > MAX_SEARCH_BYTES) {
+			state.truncated = true;
+			state.scanComplete = true;
+			closeCurrentDirectory(state);
+			return;
+		}
+		var file:Null<FileSystemFile> = null;
+		try {
+			file = service.rootHandle(state.root).openFile(path);
+		} catch (_:Dynamic) {
+			state.skippedEntries++;
+			return;
+		}
+		if (file == null) return;
+		try {
+			scanSearchFileContents(state, path, expectedRevision, file);
+		} catch (_:Dynamic) {
+			state.skippedEntries++;
+		}
+		try {
+			file.close();
+		} catch (_:Dynamic) {}
+	}
+
+	function scanSearchFileContents(state:FileSearchState, path:String, expectedRevision:String, file:FileSystemFile):Void {
+		var before = file.info(), beforeRevision = WorkspaceFileService.fileRevision(service.workspace, state.root, before);
+		if (beforeRevision != expectedRevision || Int64.compare(before.get_size(), Int64.ofInt(MAX_SEARCH_FILE_BYTES)) > 0) {
+			state.skippedEntries++;
+			return;
+		}
+		var size = Int64.toInt(before.get_size()), buffer = new BytesBuffer(), offset = 0;
+		if (state.scannedBytes + size > MAX_SEARCH_BYTES) {
+			state.truncated = true;
+			state.scanComplete = true;
+			closeCurrentDirectory(state);
+			return;
+		}
+		while (offset < size) {
+			var length = Std.int(Math.min(SEARCH_CHUNK_BYTES, size - offset));
+			var bytes = file.read(Int64.ofInt(offset), length);
+			if (bytes.length != length) {
+				state.skippedEntries++;
+				return;
+			}
+			buffer.add(bytes);
+			state.scannedBytes += bytes.length;
+			offset += bytes.length;
+		}
+		var after = file.info();
+		if (WorkspaceFileService.fileRevision(service.workspace, state.root, after) != beforeRevision) {
+			state.skippedEntries++;
+			return;
+		}
+		var content = buffer.getBytes();
+		if (!isSearchText(content)) {
+			state.skippedEntries++;
+			return;
+		}
+		var text = content.toString();
+		var found = LiteralSearch.findTextLimited(text, state.query, state.caseSensitive,
+			MAX_SEARCH_RESULTS - state.foundMatches + 1);
+		var previousLine = -1, byteColumn = 0, byteCursor = 0;
+		for (match in found) {
+			if (state.foundMatches >= MAX_SEARCH_RESULTS) {
+				state.truncated = true;
+				state.scanComplete = true;
+				closeCurrentDirectory(state);
+				break;
+			}
+			var line = match.lineText;
+			if (previousLine != match.line) {
+				previousLine = match.line;
+				byteColumn = 0;
+				byteCursor = 0;
+			}
+			byteColumn += Bytes.ofString(line.substring(byteCursor, match.column)).length;
+			var column = byteColumn, matchedText = line.substring(match.column, match.column + match.length),
+				length = Bytes.ofString(matchedText).length;
+			byteColumn += length;
+			byteCursor = match.column + match.length;
+			queueSearchMatch(state, {path: path, kind: "file", revision: beforeRevision,
+				line: match.line, column: column, length: length,
+				preview: boundedSearchPreview(line, match.column, match.length)});
+		}
+	}
+
+	static function boundedSearchPreview(line:String, column:Int, length:Int):String {
+		var start = Std.int(Math.max(0, Math.min(column - SEARCH_PREVIEW_CONTEXT_CHARS,
+			column + length - SEARCH_PREVIEW_MAX_CHARS)));
+		if (start > 0) {
+			var first = line.charCodeAt(start);
+			if (first >= 0xdc00 && first <= 0xdfff) start--;
+		}
+		var end = Std.int(Math.min(line.length, start + SEARCH_PREVIEW_MAX_CHARS));
+		if (end < line.length && end > 0) {
+			var previous = line.charCodeAt(end - 1), next = line.charCodeAt(end);
+			if (previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) end--;
+		}
+		var preview = line.substring(start, end);
+		if (start > 0) preview = "…" + preview;
+		if (end < line.length) preview += "…";
+		return preview;
+	}
+
+	function queueSearchMatch(state:FileSearchState, match:FileSearchMatch):Bool {
+		if (state.foundMatches >= MAX_SEARCH_RESULTS) {
+			state.truncated = true;
+			state.scanComplete = true;
+			closeCurrentDirectory(state);
+			return false;
+		}
+		state.pendingMatches.push(match);
+		state.foundMatches++;
+		return true;
+	}
+
+	function closeCurrentDirectory(state:FileSearchState):Void {
+		if (state.currentDirectory != null) {
+			try {
+				state.currentDirectory.close();
+			} catch (_:Dynamic) {}
+		}
+		state.currentDirectory = null;
+		state.currentPath = null;
+	}
+
+	function searchComplete(state:FileSearchState):Bool
+		return state.scanComplete && state.pendingMatchIndex >= state.pendingMatches.length;
+
+	function literalIndex(value:String, query:String, caseSensitive:Bool):Int
+		return (caseSensitive ? value : value.toLowerCase()).indexOf(caseSensitive ? query : query.toLowerCase());
+
+	function searchCount():Int {
+		var count = 0;
+		for (_ in searches.keys()) count++;
+		return count;
+	}
+
+	function pruneSearches():Void {
+		var now = service.clock(), expired:Array<String> = [];
+		for (id => state in searches)
+			if (now - state.lastUsed > SEARCH_IDLE_MS) expired.push(id);
+		for (id in expired) {
+			var state = searches.get(id);
+			if (state != null) closeSearch(state);
+			searches.remove(id);
+		}
+	}
+
+	function closeSearch(state:FileSearchState):Void {
+		closeCurrentDirectory(state);
+		state.pendingDirectories.resize(0);
+		state.pendingMatches.resize(0);
+		state.scanComplete = true;
+	}
+
+	static function isSearchText(bytes:Bytes):Bool {
+		var index = 0;
+		while (index < bytes.length) {
+			var first = bytes.get(index);
+			if (first == 0) return false;
+			if (first <= 0x7f) { index++; continue; }
+			if (first >= 0xc2 && first <= 0xdf) {
+				if (!continuation(bytes, index + 1)) return false;
+				index += 2;
+				continue;
+			}
+			if (first >= 0xe0 && first <= 0xef) {
+				if (index + 2 >= bytes.length) return false;
+				var second = bytes.get(index + 1), third = bytes.get(index + 2);
+				if (third < 0x80 || third > 0xbf || first == 0xe0 && (second < 0xa0 || second > 0xbf)
+					|| first == 0xed && (second < 0x80 || second > 0x9f)
+					|| first != 0xe0 && first != 0xed && (second < 0x80 || second > 0xbf)) return false;
+				index += 3;
+				continue;
+			}
+			if (first >= 0xf0 && first <= 0xf4) {
+				if (index + 3 >= bytes.length) return false;
+				var second = bytes.get(index + 1);
+				if (!continuation(bytes, index + 2) || !continuation(bytes, index + 3)
+					|| first == 0xf0 && (second < 0x90 || second > 0xbf)
+					|| first == 0xf4 && (second < 0x80 || second > 0x8f)
+					|| first != 0xf0 && first != 0xf4 && (second < 0x80 || second > 0xbf)) return false;
+				index += 4;
+				continue;
+			}
+			return false;
+		}
+		return true;
+	}
+
+	static function continuation(bytes:Bytes, index:Int):Bool
+		return index < bytes.length && bytes.get(index) >= 0x80 && bytes.get(index) <= 0xbf;
+
+	static function hasNul(value:String):Bool {
+		var bytes = Bytes.ofString(value);
+		for (index in 0...bytes.length) if (bytes.get(index) == 0) return true;
+		return false;
+	}
+
 	public function notifyFileChanged(event:FileChangeEvent):Void {
 		if (active && watchedRoots.exists(event.root) && connection.isOpen())
 			connection.notify(WorkspaceFileProtocol.CHANGED, event, WorkspaceFileProtocol.encodeChange);
@@ -364,6 +797,7 @@ private class WorkspaceFileBinding {
 		for (id in expired)
 			dropSnapshot(id);
 		pruneReadHandles();
+		pruneSearches();
 	}
 
 	function dropSnapshot(id:String):Void {
@@ -398,6 +832,9 @@ private class WorkspaceFileBinding {
 		var handles = [for (handle in readHandles.keys()) handle];
 		for (handle in handles)
 			closeReadHandle(handle);
+		var searchStates = [for (state in searches) state];
+		for (state in searchStates) closeSearch(state);
+		searches.clear();
 	}
 }
 
