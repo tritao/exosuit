@@ -190,7 +190,8 @@ class BrowserPairingHostMain {
 		var machineId:String = config.machineId, origin:String = config.origin,
 			workspaceRoot:String = config.workspaceRoot, invitePath:String = config.invitePath,
 			statusPath:String = config.statusPath, decisionPath:String = config.decisionPath,
-			successPath:String = config.successPath, localSocket:String = config.localSocket;
+			successPath:String = config.successPath, fileChangePath:String = config.fileChangePath,
+			localSocket:String = config.localSocket;
 		var runtime = NativeKitRuntime.start(), hub = new NativeRpcHub(runtime.events),
 			clock = function() return NativeKit.nk_time_seconds() * 1000;
 		var localConnection:Null<RpcConnection> = null;
@@ -202,7 +203,7 @@ class BrowserPairingHostMain {
 				WorkspaceProtocol.IDENTITY_CAPABILITY], 2000, 262144, 32, 1048576),
 			function(connection, generation, _) localConnection = connection, 10, 100, 2000);
 		var invitationStarted = false, invitationReady = false, approved = false,
-			approvalPending = false, listPending = false;
+			approvalPending = false, listPending = false, fileChangeApplied = false;
 		var deviceId:String = "", visiblePending:Array<PendingPairing> = [],
 			visibleDevices:Array<PairingDevice> = [];
 		var deadline = clock() + 180000, nextStatusWrite = 0.0, nextListRequest = 0.0,
@@ -258,6 +259,16 @@ class BrowserPairingHostMain {
 					}, function(error) {
 						failure = "AgentMain pairing-approval RPC failed: " + error.code;
 					});
+				}
+			}
+			if (approved && !fileChangeApplied && fileChangePath != null && sys.FileSystem.exists(fileChangePath)) {
+				var request:Dynamic = Json.parse(sys.io.File.getContent(fileChangePath));
+				if (request == null || request.requestId != "browser-file-change-v1")
+					failure = "Browser requested an invalid remote file-change fixture";
+				else {
+					sys.io.File.saveContent(workspaceRoot + "/remote.md",
+						"# Browser remote file\n\nChanged by AgentMain after the preview was opened.\n");
+					fileChangeApplied = true;
 				}
 			}
 			if (clock() >= nextStatusWrite) {

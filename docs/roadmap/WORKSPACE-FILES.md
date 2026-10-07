@@ -48,9 +48,10 @@ listings after a connection replacement, retries expired page cursors from a
 fresh listing, and bounds its retained cache to 256 directories and 32,768
 entries. The authenticated web build now exposes the same remote Explorer and
 preview path when `workspace.files.read` is granted; standalone browser files
-remain local. Connected-browser file preview now passes against AgentMain for
-both wasm32 and wasm-gc. This does not complete F1–F5 filesystem acceptance.
-Remote editing remains out of scope.
+remain local. Connected-browser preview and live change invalidation now pass
+against AgentMain for both wasm32 and wasm-gc; the existing preview stays intact
+and is marked stale until the user refreshes. This does not complete F1–F5
+filesystem acceptance. Remote editing remains out of scope.
 
 The current Linux desktop watcher subscribes per root, coalesces native events
 over 100 ms and publishes only a root epoch/cursor, never host paths or file
@@ -58,9 +59,10 @@ contents. The Explorer drops cached pages for that root and shows a changed-on-
 disk notice on its open snapshots. A reconnect with a mismatched epoch/cursor
 requests a full root resync; the service does not retain/replay event history.
 This is invalidation, not automatic file reload. Watcher overflow invalidates
-all roots. Browser delivery, non-Linux backends, event replay, narrower
-subtree/path events, connected-browser acceptance, and full F3
-race/overflow/reconnect qualification remain open.
+all roots. Connected-browser delivery now has a basic acceptance that changes a
+file on AgentMain and observes the stale-preview marker. Non-Linux backends,
+event replay, narrower subtree/path events and full F3 race/overflow/reconnect
+qualification remain open.
 
 The secure NativeKit backend currently requires Linux `openat2`; it fails closed
 when unavailable, and other platforms return `unsupported`. Multiple roots are
@@ -216,7 +218,9 @@ Revalidate match revision when opening; changed results require refresh.
   explicit refresh; automatic reload after a change remains open.
 - [ ] F3: watch subscriptions and reconnect. A basic Linux desktop path now
   coalesces NativeKit events into root epoch/cursor notifications, invalidates
-  listings and marks open snapshots stale; it does not auto-reload file text.
+  listings and marks open snapshots stale; connected-browser acceptance also
+  verifies one AgentMain change reaches the browser and marks its open preview
+  stale. Neither path auto-reloads file text.
   Full tests cover initial fetch races, duplicates/coalescing, missing rename
   pairs, overflow, retention gaps, polling
   fallback, server restart and Wi-Fi/mobile-style reconnect. UI drops stale data

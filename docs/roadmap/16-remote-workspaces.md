@@ -375,6 +375,10 @@ Deployment/publication requires separate authorization under EXECUTION.md.
   single-clicks `remote.md`, and checks that its revision-checked Markdown
   preview opens in a preview tab. The full Emscripten host build and browser
   flow now pass for wasm32 and wasm-gc.
+- [x] Verify connected-browser file-change delivery. After the preview opens,
+  the AgentMain fixture changes `remote.md`; both Wasm browser targets receive
+  the watch notification and keep the displayed snapshot while marking it
+  stale for explicit refresh.
 - [x] Complete the Emscripten host builds and connected-browser terminal
   clickthrough for wasm32 and wasm-gc. The real browser test opens a remote
   terminal in the Workbench, verifies its dock panel and session identity,

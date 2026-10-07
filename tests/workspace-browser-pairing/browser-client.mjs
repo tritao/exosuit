@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 
-const [invitePath, statusPath, decisionPath, successPath] = process.argv.slice(2);
-if (!invitePath || !statusPath || !decisionPath || !successPath) throw new Error('Expected invite, status, decision and success files');
+const [invitePath, statusPath, decisionPath, successPath, fileChangePath] = process.argv.slice(2);
+if (!invitePath || !statusPath || !decisionPath || !successPath || !fileChangePath)
+  throw new Error('Expected invite, status, decision, success and file-change files');
 const chrome = `http://127.0.0.1:${process.env.EXOSUIT_CDP_PORT || 9224}`;
 const appOrigin = `http://localhost:${process.env.EXOSUIT_APP_PORT || 5173}`;
 const targetResponse = await fetch(`${chrome}/json/new?about:blank`, {method: 'PUT'});
@@ -174,6 +175,18 @@ try {
   if (remotePreview.syntax !== 'Markdown')
     throw new Error(`Remote preview used unexpected syntax mode: ${remotePreview.syntax}`);
   console.log('PASS: single-click opened the remote Markdown file as a revision-checked preview tab');
+  if (agentMode) {
+    const previewRevision = remotePreview.revision;
+    writePrivate(fileChangePath, {requestId: 'browser-file-change-v1'});
+    const stalePreview = await waitFor('AgentMain file-change notification in the browser preview', async () => {
+      const shell = await shellState();
+      return shell?.workspaceFileTabs?.find(item => item.path === 'remote.md'
+        && item.scope === connected.state.workspaceRoot && item.preview === true && item.diskChanged) || null;
+    }, 15000);
+    if (stalePreview.revision !== previewRevision)
+      throw new Error('Remote file notification replaced the browser preview snapshot before explicit refresh');
+    console.log('PASS: AgentMain file change reached the browser and marked the saved preview stale');
+  }
   let remoteTerminalId = null;
   let remoteAgentId = null;
   let remoteAgentThread = null;
