@@ -52,7 +52,8 @@ HAXEON_DIR="$haxeon_dir" NATIVEKIT_DIR="$haxeon_dir/vendor/nativekit" "$app_dir/
  "$(realpath --relative-to="$materia_dir" "$haxeon_dir")/packages/ui/tools/check-hxi.sh:nativekit-ui.hxi" \
  "scenekit/scene/tools/check-hxi.sh:nativekit-scene.hxi" \
  "scenekit/scene_render/tools/check-hxi.sh:nativekit-scene-render.hxi" \
- "exosuit/native-packages/noise/tools/generate-wasm-hxi.sh:noisekit.hxi"
+ "exosuit/native-packages/noise/tools/generate-wasm-hxi.sh:noisekit.hxi" \
+ "exosuit/native-packages/terminal/tools/generate-wasm-hxi.sh:terminalkit.hxi"
 
 echo "== Haxeon $guest_target guest"
 contract="$build_dir/memory_contract.json"
@@ -89,7 +90,7 @@ exports="$build_dir/exports.json"
 node - "$guest" "$exports" <<'NODE'
 const fs = require("fs");
 const [guestPath, exportsPath] = process.argv.slice(2);
-const linked = new Set(["nativekit", "nativekit_gpu", "nativekit_ui", "nativekit_scene", "nativekit_scene_render", "noisekit"]);
+const linked = new Set(["nativekit", "nativekit_gpu", "nativekit_ui", "nativekit_scene", "nativekit_scene_render", "noisekit", "terminalkit"]);
 const module = new WebAssembly.Module(fs.readFileSync(guestPath));
 const names = new Set(["_main", "_nk_last_error", "_nkgpu_last_error", "_nkui_haxeon_memory_contract_status",
   "_nkui_haxeon_memory_contract_version", "_nkui_haxeon_memory_contract_page_size",

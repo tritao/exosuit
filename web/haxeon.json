@@ -176,6 +176,7 @@
     "../src/workspace/Workspace.hx",
     "../src/workspace/client/LocalTerminalIds.hx",
     "../src/workspace/client/LocalWorkspaceClient.hx",
+    "../src/workspace/client/RpcWorkspaceWorkbenchClient.hx",
     "../src/workspace/client/RpcTerminalBackend.hx",
     "../src/workspace/client/WorkspaceAgentClient.hx",
     "../src/workspace/client/WorkspaceFileClient.hx",
@@ -258,6 +259,7 @@
     "../graphical/src/ui/TerminalColors.hx",
     "../graphical/src/ui/TerminalPalette.hx",
     "../graphical/src/ui/TerminalPanel.hx",
+    "../graphical/src/ui/TerminalPane.hx",
     "../graphical/src/ui/TerminalTabView.hx",
     "../graphical/src/ui/UiAgentTab.hx",
     "../graphical/src/ui/UiDocumentView.hx",
@@ -290,6 +292,12 @@
     },
     "noisekit": {
       "path": "../native-packages/noise"
+    },
+    "terminalkit": {
+      "path": "../native-packages/terminal"
+    },
+    "terminalsession": {
+      "path": "../native-packages/terminal/session"
     }
   },
   "target": "wasm32",

@@ -16,6 +16,8 @@ import workspace.service.WorkspaceFileProtocol;
 import workspace.client.WorkspaceAttachment;
 import workspace.client.WorkspaceFileClient;
 import workspace.client.WorkspaceRpcEndpoint;
+import workspace.client.RpcWorkspaceWorkbenchClient;
+import workspace.client.WorkspaceWorkbenchClient;
 import workspace.transport.NativeRpcHub;
 import workspace.transport.NoiseClientHandshake;
 import workspace.transport.NoiseMessageTransport;
@@ -84,6 +86,7 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 	var workspaceConnection:Null<RpcConnection>;
 	var fileApiConnection:Null<RpcConnection>;
 	var fileApiClient:Null<WorkspaceFileClient>;
+	final workbench:RpcWorkspaceWorkbenchClient;
 	var disposed:Bool = false;
 
 	public function new(events:NativeKitEvents, clock:Void->Float, changed:Void->Void) {
@@ -92,6 +95,7 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 		this.clock = clock;
 		this.changed = changed;
 		hub = new NativeRpcHub(events);
+		workbench = new RpcWorkspaceWorkbenchClient(this, clock);
 		refreshSavedDevices();
 	}
 
@@ -420,6 +424,7 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 
 	public function poll():Void {
 		if (disposed) return;
+		workbench.poll();
 		var currentHandshake = handshake;
 		if (currentHandshake != null) {
 			currentHandshake.poll();
@@ -557,6 +562,12 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 
 	public function supportsWorkspaceGroups():Bool return grants.indexOf(WorkspaceProtocol.TREE) >= 0;
 
+	public function workspaceEpoch():Null<String> return null;
+
+	public function hasCapability(capability:String):Bool return grants.indexOf(capability) >= 0;
+
+	public function workbenchService():WorkspaceWorkbenchClient return workbench;
+
 	public function fileScope():Null<String> return workspaceRoot;
 
 	public function isWorkspaceConnected():Bool
@@ -629,12 +640,14 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 		savedConnection = false;
 		connecting = false;
 		savedLoadRequest = 0;
+		workbench.poll();
 	}
 
 	public function dispose():Void {
 		if (disposed) return;
 		disposed = true;
 		resetSession();
+		workbench.dispose();
 		hub.dispose();
 	}
 

@@ -39,6 +39,7 @@ class TerminalPane implements TerminalPanel {
 	final revisions:Array<Int> = [];
 	final backgrounds:Array<Array<TerminalBackground>> = [];
 	final palette:TerminalPalette;
+	final ownsFonts:Bool;
 	final foreground:Color;
 	final background:Color;
 	var cellWidth:Float;
@@ -82,10 +83,10 @@ class TerminalPane implements TerminalPanel {
 	}
 
 	public static function openRemote(provider:Void->Null<workspace.client.WorkspaceRpcEndpoint>, id:String, cwd:String, restored:Bool,
-		requestFrame:Void->Void, palette:TerminalPalette, ?group:String, ?directory:String):TerminalPanel {
+		requestFrame:Void->Void, palette:TerminalPalette, ?group:String, ?directory:String, ?providedFonts:FontCollection):TerminalPanel {
 		var backend = new workspace.client.RpcTerminalBackend(provider,id,cwd,!restored,group,directory);
 		var session = new TerminalSession(backend,terminalkit.Emulator.open(80,24,1000,"xterm-256color",false),false);
-		try return new TerminalPane(session,requestFrame,palette)
+		try return new TerminalPane(session,requestFrame,palette,providedFonts)
 		catch (failure:Dynamic) { session.close(); throw failure; }
 	}
 
@@ -100,18 +101,21 @@ class TerminalPane implements TerminalPanel {
 	public function rows():Int
 		return session.emulator.rows();
 
-	public function new(session:TerminalSession, requestFrame:Void->Void, palette:TerminalPalette) {
+	public function new(session:TerminalSession, requestFrame:Void->Void, palette:TerminalPalette, ?providedFonts:FontCollection) {
 		this.session = session;
 		this.requestFrame = requestFrame;
 		this.palette = palette;
+		ownsFonts = providedFonts == null;
 		foreground = palette.foreground;
 		background = palette.background;
-		fonts = FontCollection.create();
-		var mono = Sys.getEnv("EXOSUIT_TERMINAL_FONT");
-		if (mono == null || mono.length == 0)
-			mono = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf";
-		if (FileSystem.exists(mono)) fonts.add(mono);
-		fonts.addSystemFallbacks();
+		fonts = providedFonts == null ? FontCollection.create() : providedFonts;
+		if (ownsFonts) {
+			var mono = Sys.getEnv("EXOSUIT_TERMINAL_FONT");
+			if (mono == null || mono.length == 0)
+				mono = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf";
+			if (FileSystem.exists(mono)) fonts.add(mono);
+			fonts.addSystemFallbacks();
+		}
 		updateFontSize();
 		refreshRows(true);
 	}
@@ -499,7 +503,7 @@ class TerminalPane implements TerminalPanel {
 		closed = true;
 		for (layout in layouts) layout.dispose();
 		layouts.resize(0);
-		fonts.dispose();
+		if (ownsFonts) fonts.dispose();
 		session.close();
 	}
 }

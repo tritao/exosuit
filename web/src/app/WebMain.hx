@@ -14,6 +14,7 @@ import haxeon.ui.theme.Theme;
 import platform.HostCapabilities;
 import app.BrowserRemoteAccessPanel;
 import app.BrowserRemoteWorkspaceClient;
+import workspace.service.WorkspaceTerminalProtocol;
 import sys.FileSystem;
 import sys.io.File;
 import ui.ExosuitApp;
@@ -45,24 +46,38 @@ class WebMain {
 			new BrowserUiFontAsset("NotoEmoji-Regular", "assets/NotoEmoji-Regular.ttf", "/assets/NotoEmoji-Regular.ttf", FontFamily.Emoji)
 		];
 		var started = BrowserUiHost.start(options, function(context) {
-			var app = new ExosuitApp(context.fonts, Theme.light(), context, "/workspace", HostCapabilities.browser());
 			var remote = new BrowserRemoteWorkspaceClient(context.events,
 				function() return NativeKit.nk_time_seconds() * 1000,
 				function() context.requestFrame());
+			var app = new ExosuitApp(context.fonts, Theme.light(), context, "/workspace", HostCapabilities.browser(), null, null, null,
+				function(id, cwd, restored, requestFrame, palette, group, directory)
+					return ui.TerminalPane.openRemote(function() return remote, id, cwd, restored,
+						requestFrame, palette, group, directory, context.fonts));
 			remoteAccess = remote;
 			var remotePanel = new BrowserRemoteAccessPanel(remote, function() context.requestFrame());
-			var remoteAttached = false;
+			var filesAttached = false;
+			var workbenchAttached = false;
 			context.onPoll = function() {
-				if (!remoteAttached) remote.poll();
-				var connected = remote.isWorkspaceConnected() && remote.canReadFiles();
-				if (connected && !remoteAttached) {
-					remoteAttached = true;
+				if (!filesAttached) remote.poll();
+				var connected = remote.isWorkspaceConnected();
+				var filesAvailable = connected && remote.canReadFiles();
+				if (filesAvailable && !filesAttached) {
+					filesAttached = true;
 					app.attachWorkspace(remote);
 					app.activateSidebarDestination("files");
-				} else if (!connected && remoteAttached) {
-					remoteAttached = false;
+				} else if (!filesAvailable && filesAttached) {
+					filesAttached = false;
 					app.detachWorkspace(remote);
 					app.activateSidebarDestination("remote-access");
+				}
+				var workbenchAvailable = connected && remote.hasCapability(WorkspaceTerminalProtocol.READ)
+					&& remote.hasCapability(WorkspaceTerminalProtocol.CATALOG);
+				if (workbenchAvailable && !workbenchAttached) {
+					workbenchAttached = true;
+					app.attachWorkbench(remote.workbenchService());
+				} else if (!workbenchAvailable && workbenchAttached) {
+					workbenchAttached = false;
+					app.detachWorkbench(remote.workbenchService());
 				}
 			};
 			app.registerSidebarDestination("remote-access", IconName.Radar, function() return remotePanel,

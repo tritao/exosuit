@@ -43,6 +43,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   final launcher:String;
   final clock:Void -> Float;
   final environment:Null<Map < String, String>>;
+  final workbench:RpcWorkspaceWorkbenchClient;
   var client:Null<RpcClient>;
   var fileApiConnection:Null<RpcConnection>;
   var fileApiClient:Null<WorkspaceFileClient>;
@@ -61,13 +62,6 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   var wasReady:Bool = false;
   var spawned:Bool = false;
   var disposed:Bool = false;
-  var catalog:Null<workspace.service.WorkspaceTerminalProtocol.TerminalCatalog>;
-  var catalogError:Null<String>;
-  var catalogRevision:Int = 0;
-  var catalogPending:Bool = false;
-  var catalogMutation:Bool = false;
-  var catalogNext:Float = 0;
-  var catalogKey:String = "";
   var pairings:Null<PairingList>;
   var pairingsError:Null<String>;
   var pairingsRevision:Int = 0;
@@ -75,124 +69,6 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   var pairingsMutation:Bool = false;
   var pairingsNext:Float = 0;
 
-  public function agentService():workspace.client.WorkspaceAgentClient return this;
-  public function canReadAgents():Bool return ready && client!=null && client.capabilities().indexOf(WorkspaceAgentProtocol.READ)>=0;
-  public function canControlAgents():Bool return canReadAgents() && client!=null && client.capabilities().indexOf(WorkspaceAgentProtocol.CONTROL)>=0;
-  public function agentBusy():Bool return agentMutation;
-  var agentCatalog:Null<AgentCatalog>;
-  var agentConnection:Null<RpcConnection>;
-  var discovery:Null<AgentDiscovery>;
-  var discoveryToken=0;
-  var pendingDiscovery:Null<AgentDiscoveryQuery>;
-  var discoveryNext:Float=0;
-  var discoveryDeadline:Float=0;
-  public function discoveredAgents():Null<AgentDiscovery> return discovery;
-  public function discoverAgents(group:String,cursor:Null<String>):Void {
-    if(rpc()==null) return;
-    discoveryToken++;discovery=null;agentsError=null;agentsRevision++;
-    pendingDiscovery={workspace:"workspace",instance:instance,group:group,cursor:cursor};
-    discoveryDeadline=clock()+60000;discoveryNext=0;
-    continueDiscovery();
-  }
-  function continueDiscovery():Void {
-    var c=rpc(),q=pendingDiscovery;
-    if(c==null||q==null||clock()<discoveryNext) return;
-    if(clock()>=discoveryDeadline||q.instance!=instance) {
-      pendingDiscovery=null;agentsError="Codex thread discovery did not complete";agentsRevision++;return;
-    }
-    var token=discoveryToken;discoveryNext=discoveryDeadline;
-    c.call(WorkspaceAgentProtocol.DISCOVER,q,20000,function(v) {
-      if(rpc()!=c||token!=discoveryToken) return;
-      pendingDiscovery=null;discovery=v;agentsError=null;agentsRevision++;
-    },function(e) {
-      if(rpc()!=c||token!=discoveryToken) return;
-      // Discovery is read-only; a starting provider can be retried without duplicating a session or turn.
-      if(e.code=="provider_starting"&&!e.ambiguous) {discoveryNext=clock()+500;return;}
-      pendingDiscovery=null;agentsError=e.message;agentsRevision++;
-    });
-  }
-  var agentViews:Map<String,AgentView> = [];
-  var agentTokens:Map<String,Int> = [];
-  var agentsError:Null<String>;
-  var agentsPending=false;
-  var agentsNext:Float=0;
-  var agentMutation=false;
-  var agentSelection=0;
-  var agentsRevision=0;
-  public function agentRevision():Int return agentsRevision;
-  public function agents():Null<AgentCatalog> return agentCatalog;
-  public function agentError():Null<String> return agentsError;
-  public function agentView(id:String):Null<AgentView> return agentViews.get(id);
-  public function refreshAgents():Void {
-    var c=rpc();
-    if(c==null||agentsPending||clock()<agentsNext||client==null||client.capabilities().indexOf(WorkspaceAgentProtocol.READ)<0) return;
-    agentsPending=true;agentsNext=clock()+1000;
-    agentPage(c,null,[]);
-  }
-  function agentPage(c:RpcConnection,after:Null<String>,records:Array<AgentRecord>):Void {
-    c.call(WorkspaceAgentProtocol.LIST,{workspace:"workspace",instance:instance,after:after},3000,function(v) {
-      if(rpc()!=c) return;
-      if(v.root!=root||v.instance!=instance||v.records.length>6||records.length+v.records.length>32) {
-        agentsPending=false;agentsError="Invalid agent catalog";agentsRevision++;return;
-      }
-      var last=after;
-      for(r in v.records) {
-        if(r.workspaceRoot!=root||(last!=null&&Reflect.compare(r.id,last)<=0)) {agentsPending=false;agentsError="Invalid agent scope or page";agentsRevision++;return;}
-        records.push(r);last=r.id;
-      }
-      if(v.next!=null) {
-        if(v.records.length==0||v.next!=last) {agentsPending=false;agentsError="Invalid agent cursor";agentsRevision++;return;}
-        agentPage(c,v.next,records);return;
-      }
-      agentsPending=false;agentsRevision++;v.records=records;agentCatalog=v;
-    },function(e) {if(rpc()==c) {agentsPending=false;agentsError=e.message;agentsRevision++;}});
-  }
-
-  var pendingAgentCreate:Null<AgentCreate>;
-  var agentCreated:Null<String->Void>;
-  var createNext:Float=0;
-  var createDeadline:Float=0;
-  public function createAgent(group:String,thread:Null<String>,?created:String->Void):Void {
-    if(rpc()==null||agentMutation) return;
-    agentMutation=true;agentsError=null;agentCreated=created;
-    pendingAgentCreate={workspace:"workspace",instance:instance,id:WorkspaceIds.create("agent"),group:group,name:"Codex",thread:thread};
-    createDeadline=clock()+60000;createNext=0;
-    continueAgentCreate();
-  }
-  function continueAgentCreate():Void {
-    var c=rpc(), q=pendingAgentCreate;
-    if(c==null||q==null||clock()<createNext) return;
-    if(clock()>=createDeadline||q.instance!=instance) {pendingAgentCreate=null;agentMutation=false;agentsError="Codex startup did not complete";agentsRevision++;return;}
-    createNext=createDeadline;
-    c.call(WorkspaceAgentProtocol.CREATE,q,20000,function(r) {
-      if(rpc()!=c) return;
-      pendingAgentCreate=null;agentMutation=false;agentsNext=0;agentsRevision++;
-      if(r.workspaceRoot!=root) {agentsError="Invalid created agent scope";return;}
-      agentsError=null;
-      if(agentCatalog!=null) {
-       var found=false;for(index in 0...agentCatalog.records.length) if(agentCatalog.records[index].id==r.id) {agentCatalog.records[index]=r;found=true;break;}
-       if(!found) agentCatalog.records.push(r);
-      }
-      var created=agentCreated;agentCreated=null;if(created!=null) created(r.id);
-      agentAction(r.id,"read","",null);
-    },function(e) {
-      if(rpc()!=c) return;
-      if(e.code=="provider_starting"&&!e.ambiguous) {createNext=clock()+500;agentsError=e.message;agentsRevision++;return;}
-      pendingAgentCreate=null;agentMutation=false;agentsError=e.message;agentsNext=0;agentsRevision++;
-    });
-  }
-  public function agentAction(id:String,action:String,text:String,request:Null<String>):Void {
-    var c=rpc();if(c==null||agentMutation) return;
-    var mutate=action!="read";if(mutate) agentMutation=true;
-    var selected=++agentSelection;agentTokens.set(id,selected);
-    if(action!="read") agentsError=null;
-    c.call(WorkspaceAgentProtocol.ACTION,{workspace:"workspace",instance:instance,id:id,action:action,text:text,request:request},20000,function(v) {
-      if(rpc()!=c||agentTokens.get(id)!=selected) return;
-      if(mutate) agentMutation=false;
-      if(v.record.workspaceRoot!=root||v.record.id!=id) {agentsError="Invalid agent view";return;}
-      agentViews.set(id,v);agentsNext=0;agentsRevision++;
-    },function(e) {if(rpc()==c&&agentTokens.get(id)==selected) {if(mutate) agentMutation=false;agentsError=e.message;agentsRevision++;}});
-  }
   public function new(
     events:NativeKitEvents,
     processes:ProcessManager,
@@ -208,6 +84,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     this.launcher = launcher;
     this.clock = clock;
     this.environment = environment;
+    this.workbench = new RpcWorkspaceWorkbenchClient(this, clock);
   }
 
   function get_ready():Bool return verified
@@ -222,6 +99,9 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   public function rpcConnection():Null<RpcConnection> return rpc();
   public function failureReason():Null<String> return error;
   public function supportsWorkspaceGroups():Bool return hasGroupTree();
+  public function workspaceEpoch():Null<String> return replica == null ? null : replica.epoch;
+  public function hasCapability(capability:String):Bool
+    return client != null && client.capabilities().indexOf(capability) >= 0;
 
   /** A typed file API tied to the currently authenticated local workspace connection. */
   public function fileClient():Null<WorkspaceFileClient> {
@@ -242,7 +122,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   public function fileScope():Null<String> return root;
 
   public function hasGroupTree():Bool return client != null && client.capabilities().indexOf(WorkspaceProtocol.TREE) >= 0;
-  public function canEditGroups():Bool return ready && client != null && hasGroupTree() && client.capabilities().indexOf(WorkspaceProtocol.WRITE) >= 0;
+  public function canEditGroups():Bool return workbench.canEditGroups();
+
   public function canManagePairings():Bool return ready && client != null && client.capabilities().indexOf(WorkspacePairingProtocol.ADMIN) >= 0;
   public function pairingList():Null<PairingList> return pairings;
   public function pairingRevision():Int return pairingsRevision;
@@ -293,7 +174,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     pairingAction(WorkspacePairingProtocol.REVOKE, {deviceId: deviceId}, complete);
 
   function pairingAction<Request>(method:haxeon.rpc.RpcMethod<Request, workspace.service.WorkspacePairingProtocol.PairingActionResult>,
-    request:Request, complete:Null<String>->Void):Void {
+      request:Request, complete:Null<String>->Void):Void {
     if (complete == null) throw "Pairing action completion cannot be null";
     pairingMutation(method, request, function(result:workspace.service.WorkspacePairingProtocol.PairingActionResult) {
       if (!result.accepted) complete(result.error == null ? "pairing_action_failed" : result.error);
@@ -305,7 +186,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   }
 
   function pairingMutation<Request, Response>(method:haxeon.rpc.RpcMethod<Request, Response>, request:Request,
-    success:Response->Void, failure:Null<String>->Void):Void {
+      success:Response->Void, failure:Null<String>->Void):Void {
     var connection = rpc();
     if (connection == null || !canManagePairings() || pairingsMutation) {
       failure("remote_access_unavailable");
@@ -327,192 +208,37 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
       failure(error.message);
     });
   }
-  public function terminalCatalog():Null < workspace.service.WorkspaceTerminalProtocol.TerminalCatalog > return catalog;
-  public function terminalCatalogError():Null < String > return catalogError;
-  public function terminalCatalogRevision():Int return catalogRevision;
-  public function terminalCatalogBusy():Bool return catalogMutation;
-  public function refreshTerminals(force:Bool):Void {
-    if (root == null) {
-      if (force) {
-        catalogError = "Open a folder to view workspace terminals";
-        catalogRevision++;
-      }
-      return;
-    }
-    var c = rpc();
-    if (c == null || catalogPending ||(!force && clock() < catalogNext)) return;
-    if (client == null || client.capabilities().indexOf(WorkspaceTerminalProtocol.CATALOG) < 0) {
-      if (catalogError == null) {
-        catalogError = "This workspace service does not support terminal discovery";
-        catalogRevision++;
-      }
-      return;
-    }
-    if (force) catalogError = null;
-    catalogPending = true;
-    catalogNext = clock() + 1000;
-    catalogPage(c, null, []);
-  }
-  function catalogPage(
-    c:haxeon.rpc.RpcConnection,
-    after:Null<String>,
-    records:Array<workspace.service.WorkspaceTerminalProtocol.TerminalRecord>
-  ):Void {
-    c.call(WorkspaceTerminalProtocol.LIST,
-      {workspace: "workspace", instance: instance, after: after}, 2000, function(value) {
-      if (rpc() != c) return;
-      if (value.workspaceRoot == null && !hasGroupTree()) {
-        value.workspaceRoot = root;
-        for (record in value.terminals) if (record.workspaceRoot == null && record.cwd == root) record.workspaceRoot = root;
-      }
-      if (value.instance != instance || value.workspaceRoot != root || value.terminals.length > WorkspaceTerminalProtocol.CATALOG_PAGE_LIMIT || value.groups.length > 32 || records.length + value.terminals.length > 256) {
-        catalogPending = false;
-        catalogError = "Invalid terminal catalog";
-        catalogRevision++;
-        return;
-      }
-      var last = after;
-      for (record in value.terminals) {
-        if (record.workspaceRoot != root || record.id == null ||(last != null && Reflect.compare(record.id, last) <= 0)) {
-          catalogPending = false;
-          catalogError = "Invalid terminal catalog page";
-          catalogRevision++;
-          return;
-        }
-        records.push(record);
-        last = record.id;
-      }
-      if (value.next != null) {
-        if (value.terminals.length == 0 || value.next != last) {
-          catalogPending = false;
-          catalogError = "Invalid terminal catalog cursor";
-          catalogRevision++;
-          return;
-        }
-        catalogPage(c, value.next, records);
-        return;
-      }
-      catalogPending = false;
-      value.terminals = records;
-      var key = value.instance;
-      for (g in value.groups) key += "|g:" + g.id + ":" + g.revision;
-      for (r in records) key += "|t:" + r.id + ":" + r.revision + ":" + r.available;
-      catalog = value;
-      if (key != catalogKey) {
-        catalogKey = key;
-        catalogRevision++;
-      }
-    }, function(e) {
-      if (rpc() == c) {
-        catalogPending = false;
-        catalogError = e.message;
-        catalogRevision++;
-      }
-    }
-    );
-  }
 
-  function catalogReady():Bool {
-    if (catalogMutation) return false;
-    if (rpc() == null || client == null || client.capabilities().indexOf(WorkspaceTerminalProtocol.CATALOG) < 0) {
-      catalogError = "Workspace terminals are not connected";
-      catalogRevision++;
-      return false;
-    }
-    catalogError = null;
-    catalogMutation = true;
-    catalogRevision++;
-    return true;
-  }
-  function catalogCompleted(c:haxeon.rpc.RpcConnection):Void {
-    if (rpc() != c) return;
-    catalogMutation = false;
-    catalogNext = 0;
-    catalogRevision++;
-    refreshTerminals(false);
-  }
-  function catalogFailed(c:haxeon.rpc.RpcConnection, e:haxeon.rpc.RpcError):Void {
-    if (rpc() != c) return;
-    catalogMutation = false;
-    catalogError = e.ambiguous ? "Session change may have completed; refresh before retrying"
-      : e.code == "stale_revision" ? "This session changed. Reload its name/group before saving." : e.message;
-    catalogNext = 0;
-    catalogRevision++;
-    refreshTerminals(false);
-  }
-  public function renameTerminal(
-    record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord,
-    name:String,
-    group:String
-  ):Void {
-    var c = rpc();
-    if (record.workspaceRoot != root || c == null || !catalogReady()) return;
-    c.call(
-      WorkspaceTerminalProtocol.RENAME,
-      {
-      workspace: "workspace",
-      instance: instance,
-      id: record.id,
-      name: name,
-      group: group,
-      expectedRevision: record.revision
-    },
-      2000,
-      function(_) catalogCompleted(c),
-      function(e) catalogFailed(
-        c,
-        e
-      )
-    );
-  }
-  public function changeGroup(owner:String, group:WorkspaceGroup, name:String, parent:Null<String>, cwd:Null<String>, order:Int, create:Bool):Void {
-    var c = rpc();
-    var view = replica;
-    if (owner != instance) { catalogError = "Workspace changed; reopen the group editor"; catalogRevision++; return; }
-    if (c == null || view == null || !catalogReady()) return;
-    if (client == null || client.capabilities().indexOf(WorkspaceProtocol.TREE) < 0) {
-      catalogFailed(c, {code: "unsupported", message: "Group editing is not supported", ambiguous: false}); return;
-    }
-    c.call(WorkspaceProtocol.GROUP, {
-      workspace: "workspace", epoch: view.epoch, operation: WorkspaceIds.create("operation"),
-      group: group.id, expectedRevision: create ? 0 : group.revision, name: name,
-      action: create ? "create" : "update", parent: parent, cwd: cwd, order: order
-    }, 2000, function(_) catalogCompleted(c), function(e) catalogFailed(c, e));
-  }
-  public function stopTerminal(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Void {
-    var c = rpc();
-    if (record.workspaceRoot != root || c == null || !catalogReady()) return;
-    c.call(
-      WorkspaceTerminalProtocol.TERMINATE,
-      {workspace: "workspace", instance: instance, id: record.id},
-      2000,
-      function(_) catalogCompleted(c),
-      function(e) catalogFailed(
-        c,
-        e
-      )
-    );
-  }
-  public function forgetTerminal(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Void {
-    var c = rpc();
-    if (record.workspaceRoot != root || c == null || !catalogReady()) return;
-    c.call(
-      WorkspaceTerminalProtocol.FORGET,
-      {
-      workspace: "workspace",
-      instance: instance,
-      id: record.id,
-      resourceInstance: record.instance,
-      expectedRevision: record.revision
-    },
-      2000,
-      function(_) catalogCompleted(c),
-      function(e) catalogFailed(
-        c,
-        e
-      )
-    );
-  }
+  public function agentService():WorkspaceAgentClient return workbench.agentService();
+  public function canReadAgents():Bool return workbench.canReadAgents();
+  public function canControlAgents():Bool return workbench.canControlAgents();
+  public function agentBusy():Bool return workbench.agentBusy();
+  public function agentRevision():Int return workbench.agentRevision();
+  public function agents():Null<AgentCatalog> return workbench.agents();
+  public function agentError():Null<String> return workbench.agentError();
+  public function refreshAgents():Void workbench.refreshAgents();
+  public function createAgent(group:String, thread:Null<String>, ?created:String->Void):Void workbench.createAgent(group, thread, created);
+  public function agentAction(id:String, action:String, text:String, request:Null<String>):Void
+    workbench.agentAction(id, action, text, request);
+  public function discoverAgents(group:String, cursor:Null<String>):Void workbench.discoverAgents(group, cursor);
+  public function discoveredAgents():Null<AgentDiscovery> return workbench.discoveredAgents();
+  public function agentView(id:String):Null<AgentView> return workbench.agentView(id);
+
+  public function canReadTerminals():Bool return workbench.canReadTerminals();
+  public function canControlTerminals():Bool return workbench.canControlTerminals();
+  public function canCreateTerminals():Bool return workbench.canCreateTerminals();
+  public function terminalCatalog():Null<TerminalCatalog> return workbench.terminalCatalog();
+  public function terminalCatalogError():Null<String> return workbench.terminalCatalogError();
+  public function terminalCatalogRevision():Int return workbench.terminalCatalogRevision();
+  public function terminalCatalogBusy():Bool return workbench.terminalCatalogBusy();
+  public function refreshTerminals(force:Bool):Void workbench.refreshTerminals(force);
+  public function renameTerminal(record:TerminalRecord, name:String, group:String):Void
+    workbench.renameTerminal(record, name, group);
+  public function changeGroup(owner:String, group:WorkspaceGroup, name:String, parent:Null<String>,
+      cwd:Null<String>, order:Int, create:Bool):Void
+    workbench.changeGroup(owner, group, name, parent, cwd, order, create);
+  public function stopTerminal(record:TerminalRecord):Void workbench.stopTerminal(record);
+  public function forgetTerminal(record:TerminalRecord):Void workbench.forgetTerminal(record);
 
   public function failure():Null < String > return error;
 
@@ -572,17 +298,10 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
 
   function stopConnection():Void {
     pairings = null; pairingsError = null; pairingsPending = false; pairingsMutation = false; pairingsNext = 0; pairingsRevision++;
-    catalog = null;
-    agentConnection=null;agentCatalog=null;discovery=null;pendingDiscovery=null;discoveryToken++;agentViews.clear();agentTokens.clear();agentsError=null;agentsPending=false;agentMutation=false;pendingAgentCreate=null;agentCreated=null;agentsNext=0;agentSelection++;agentsRevision++;
-    catalogPending = false;
-    catalogMutation = false;
-    catalogKey = "";
-    catalogNext = 0;
-    catalogError = null;
-    catalogRevision++;
     if (client != null) client.close();
     client = null;
     verified = false;
+    workbench.poll();
   }
 
   function stopHelper():Void {
@@ -687,19 +406,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     }, 100, 1000, 2000);
   }
 
-  function fenceAgentConnection():Void {
-    var current=rpc();
-    if(current==agentConnection) return;
-    var lost=agentConnection!=null;
-    agentConnection=current;
-    agentsPending=false;agentMutation=false;pendingAgentCreate=null;agentCreated=null;
-    agentCatalog=null;discovery=null;pendingDiscovery=null;discoveryToken++;agentViews.clear();agentTokens.clear();agentsNext=0;agentsRevision++;
-    if(lost) agentsError="Workspace connection changed; reconcile the agent before retrying";
-  }
   public function poll():Void {
-    fenceAgentConnection();
-    continueDiscovery();
-    continueAgentCreate();
+    workbench.poll();
     if (disposed || root == null || error != null) return;
     var now = clock(), process = helper;
     if (!wasReady && now >= startupDeadline) {
@@ -746,7 +454,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
       return;
     }
     current.poll();
-    fenceAgentConnection();
+    workbench.poll();
     if (client != current || error != null) return;
     if (current.state == Closed) {
       fail(current.lastError == null ? "Workspace connection closed" : current.lastError.code);
@@ -781,6 +489,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     disposed = true;
     selection++;
     stopConnection();
+    workbench.dispose();
     stopHelper();
     hub.dispose();
     root = null;

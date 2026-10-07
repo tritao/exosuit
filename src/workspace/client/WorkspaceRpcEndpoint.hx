@@ -11,4 +11,6 @@ interface WorkspaceRpcEndpoint {
 	public function rpcConnection():Null<RpcConnection>;
 	public function failureReason():Null<String>;
 	public function supportsWorkspaceGroups():Bool;
+	public function workspaceEpoch():Null<String>;
+	public function hasCapability(capability:String):Bool;
 }

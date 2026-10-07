@@ -707,6 +707,18 @@ class ExosuitApp implements DesktopUiApplication {
 			new haxeon.ui.widgets.sidebar.SidebarModeOptions("Workbench", 20, true));
 	}
 
+	public function detachWorkbench(client:workspace.client.WorkspaceWorkbenchClient):Void {
+		if (workbenchClient != client) return;
+		workbenchClient = null;
+		workbenchPanel = null;
+		terminalBrowserPanel = null;
+		terminalBrowserVisible = false;
+		groupEditor = null;
+		agentAttach = null;
+		agentRevision = -1;
+		requestFrame();
+	}
+
 	public function attachRemoteAccess(client:workspace.client.WorkspacePairingClient):Void {
 		pairingClient = client;
 		remoteAccessPanel = new RemoteAccessPanel(client, requestFrame, function(value) {
@@ -733,14 +745,13 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function newGroupedTerminal(group:String):Void {
 		var client = workbenchClient;
+		if (client == null || !client.canCreateTerminals()) return;
 		var catalog = client == null ? null : client.terminalCatalog();
 		if (catalog == null || workbenchPanel == null) return;
 		var selected = workbenchPanel.model.groups.get(group);
 		if (selected == null) return;
-		var project = application.workspace.activeProject;
-		if (project == null) return;
-		var root = project.root;
-		if (catalog.workspaceRoot != root) return;
+		var root = catalog.workspaceRoot;
+		if (root == null) return;
 		var cwd = workbenchPanel.model.directory(selected);
 		var resource = workspace.client.LocalTerminalIds.create(nextTerminalId++);
 		var terminal = createTerminalTab(ResourceViewIdentity.view(root, resource), "Terminal", cwd == null ? root : cwd, false, true, resource, root, group);
@@ -791,7 +802,7 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	public function openCatalogTerminal(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Bool {
-		if (!record.available) return false;
+		if (workbenchClient == null || !workbenchClient.canReadTerminals() || !record.available) return false;
 		for (tab in host.allTerminalTabs()) if (tab.resourceId == record.id && tab.workspaceRoot == record.workspaceRoot && tab.remote && !tab.disposed) {
 			tab.title = record.name;
 			var pane = host.terminalPaneFor(tab);
@@ -819,7 +830,8 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function forgetCatalogTerminal(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Void {
-		if (workbenchClient == null || record.state == "running" || record.state == "starting") return;
+		if (workbenchClient == null || !workbenchClient.canControlTerminals()
+			|| record.state == "running" || record.state == "starting") return;
 		workbenchClient.forgetTerminal(record);
 		for (tab in host.allTerminalTabs()) if (tab.remote && tab.resourceId == record.id && tab.workspaceRoot == record.workspaceRoot) {
 			host.detachTerminal(tab);

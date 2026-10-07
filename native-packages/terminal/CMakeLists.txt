@@ -2,7 +2,12 @@ cmake_minimum_required(VERSION 3.21)
 project(terminalkit LANGUAGES C)
 
 set(LIBTSM vendor/libtsm)
-add_library(terminalkit SHARED
+if(EMSCRIPTEN)
+    set(TERMINALKIT_LIBRARY_TYPE STATIC)
+else()
+    set(TERMINALKIT_LIBRARY_TYPE SHARED)
+endif()
+add_library(terminalkit ${TERMINALKIT_LIBRARY_TYPE}
     src/terminalkit.c
     vendor/pragtical/terminal_emulator_libtsm.c
     ${LIBTSM}/src/tsm/tsm-render.c

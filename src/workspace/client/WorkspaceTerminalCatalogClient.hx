@@ -2,6 +2,9 @@ package workspace.client;
 import workspace.service.WorkspaceTerminalProtocol;
 /** UI-facing catalog operations, independent of native transports. */
 interface WorkspaceTerminalCatalogClient {
+  public function canReadTerminals():Bool;
+  public function canControlTerminals():Bool;
+  public function canCreateTerminals():Bool;
   public function canEditGroups():Bool;
   public function terminalCatalog():Null<TerminalCatalog>;
   public function terminalCatalogError():Null<String>;

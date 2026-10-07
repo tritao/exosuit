@@ -120,7 +120,8 @@ class WorkbenchPanel implements View {
 		var terminal = toolbarButton("New terminal", IconName.Terminal, function() {
 			if (selected != null) createTerminal(selected.id);
 		}, "workbench-new-terminal");
-		terminal.enabled = selected != null && !client.terminalCatalogBusy();
+		terminal.enabled = selected != null && client.canCreateTerminals()
+			&& !client.terminalCatalogBusy();
 		var agent = toolbarButton("New Codex", IconName.Plus, function() {
 			if (selected != null) client.agentService().createAgent(selected.id, null, openAgent);
 		}, "workbench-new-codex");

@@ -89,7 +89,7 @@ class WorkspaceTerminalsPanel implements View {
           draft.name = value;
           requestFrame();
         }, inputStyle);
-        field.enabled = !client.terminalCatalogBusy();
+        field.enabled = client.canControlTerminals() && !client.terminalCatalogBusy();
         field.label = "Session name";
         var options = [for (group in catalog.groups) new SelectOption<String>(group.id, group.name, group.id)];
         var select = new ComboBox<String>("terminal-group:" + record.id, options, draft.group, function(value) {
@@ -97,26 +97,27 @@ class WorkspaceTerminalsPanel implements View {
           requestFrame();
         }
         );
-        select.enabled = !client.terminalCatalogBusy();
+        select.enabled = client.canControlTerminals() && !client.terminalCatalogBusy();
         var save = new Button("Save name/group", null, function() {
           client.renameTerminal(draft.base, draft.name, draft.group);
           requestFrame();
         }, "terminal-rename:" + record.id);
-        save.enabled = draft.dirty() && !client.terminalCatalogBusy();
+        save.enabled = draft.dirty() && client.canControlTerminals() && !client.terminalCatalogBusy();
         var reload = new Button("Reload", null, function() {
           drafts.set(record.id, new TerminalDraft(record));
           requestFrame();
         }, "terminal-reload:" + record.id);
         reload.enabled = draft.dirty() && !client.terminalCatalogBusy();
         var reopen = new Button("Open", null, function() open(record), "terminal-open:" + record.id);
-        reopen.enabled = record.available && !client.terminalCatalogBusy();
+        reopen.enabled = record.available && client.canReadTerminals() && !client.terminalCatalogBusy();
         var stop = new Button("Stop", null, function() {
           client.stopTerminal(record);
           requestFrame();
         }, "terminal-stop:" + record.id);
-        stop.enabled = record.available && record.state == "running" && !client.terminalCatalogBusy();
+        stop.enabled = record.available && record.state == "running" && client.canControlTerminals() && !client.terminalCatalogBusy();
         var remove = new Button("Remove", null, function() forget(record), "terminal-forget:" + record.id);
-        remove.enabled = record.state != "running" && record.state != "starting" && !client.terminalCatalogBusy();
+        remove.enabled = record.state != "running" && record.state != "starting"
+          && client.canControlTerminals() && !client.terminalCatalogBusy();
         var rowStyle = new LayoutStyle();
         rowStyle.width = LayoutAxis.grow();
         rowStyle.height = LayoutAxis.fixed(132);
