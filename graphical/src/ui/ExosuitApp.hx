@@ -13,6 +13,7 @@ import haxeon.ui.LayoutFrame;
 import haxeon.ui.LayoutStyle;
 import haxeon.ui.FontCollection;
 import sys.FileSystem;
+import sys.io.File;
 import haxeon.ui.core.Command;
 import haxeon.ui.core.RenderNode;
 import haxeon.ui.core.RetainedView;
@@ -892,12 +893,31 @@ class ExosuitApp implements DesktopUiApplication {
 		// Rendering hover/selection changes must not perform filesystem polling.
 		// Watches make refresh a no-op until a change; unsupported backends poll
 		// on a bounded cadence instead of once for every pointer movement.
-		if (explorerModel != null && sidebar.visible && sidebar.activeId == "files" &&
-			(explorerModel.watchChanges || now >= nextExplorerPoll)) {
-			var previousRevision = explorerModel.revision();
-			explorerModel.refresh();
-			nextExplorerPoll = Sys.time() + 0.5;
-			if (explorerModel.revision() != previousRevision) requestFrame();
+		var model = explorerModel;
+		if (model != null) {
+			var localModel:Null<DirectoryTreeModel> = Std.isOfType(model, DirectoryTreeModel) ? cast model : null;
+			if (localModel != null) {
+				var applyStartedAt = Sys.time();
+				var changedPaths = localModel.pollLoads();
+				if (changedPaths.length > 0) {
+					var tree = explorerTree;
+					var treeStartedAt = Sys.time();
+					if (tree != null) tree.refreshBranches(changedPaths, model.revision());
+					var tracePath = Sys.getEnv("EXOSUIT_TREE_TRACE");
+					var treeMs = Std.int((Sys.time() - treeStartedAt) * 1000);
+					var applyMs = Std.int((Sys.time() - applyStartedAt) * 1000);
+					if (tracePath != null && tracePath.length > 0 && (treeMs >= 50 || applyMs >= 50)) {
+						try File.appendContent(tracePath,
+							'ui-apply=${applyMs}ms tree-refresh=${treeMs}ms paths=${changedPaths.join(",")}\n') catch (_:Dynamic) {}
+					}
+					requestFrame();
+				}
+			}
+			if (sidebar.visible && sidebar.activeId == "files" &&
+				(model.watchesChanges() || now >= nextExplorerPoll)) {
+				model.refresh();
+				nextExplorerPoll = now + 0.5;
+			}
 		}
 	}
 
@@ -1231,6 +1251,8 @@ class ExosuitApp implements DesktopUiApplication {
 		}
 		var remoteModel:Null<WorkspaceFileTreeModel> = Std.isOfType(explorerModel, WorkspaceFileTreeModel)
 			? cast explorerModel : null;
+		var localModel:Null<DirectoryTreeModel> = Std.isOfType(explorerModel, DirectoryTreeModel)
+			? cast explorerModel : null;
 		if (explorerTree != null) {
 			if (remoteModel != null) advanceWorkspaceFolderReveal(explorerTree, remoteModel);
 			return new ExplorerTreeView(explorerTree, explorerModel, darkPalette, hostContext == null ? null : hostContext.events);
@@ -1240,13 +1262,19 @@ class ExosuitApp implements DesktopUiApplication {
 		viewportStyle.height = LayoutAxis.grow();
 		viewportStyle.clipHorizontal = true;
 		var tree = new TreeView("exosuit-explorer-tree", explorerModel, viewportStyle, filesScroll, 640.0,
-			null, [explorerModel.rootKeyAt(0)], function(key) { host.setSelectedExplorerPath(key); }, function(key) {
+			null, [explorerModel.rootKeyAt(0)], function(key) {
+				if (localModel == null || !localModel.isSyntheticRow(key)) host.setSelectedExplorerPath(key);
+			}, function(key) {
 				if (remoteModel != null) {
 					if (remoteModel.isMoreKey(key) || remoteModel.isRetryKey(key)) remoteModel.activateSpecial(key);
 					else if (!remoteModel.isDirectoryKey(key)) openWorkspaceFile(remoteModel, key, true);
-				} else if (!FileSystem.isDirectory(key)) application.open(key);
+				} else if (localModel != null && !localModel.isSyntheticRow(key) && !localModel.isDirectoryPath(key)) application.open(key);
 			}, null, null);
 		tree.expandOnSingleClick = true;
+		if (localModel != null) {
+			tree.hasChildrenHint = function(key) return localModel.hasChildrenHint(key);
+			tree.onExpandedChanged = function(path, expanded) localModel.setDirectoryExpanded(path, expanded);
+		}
 		tree.onItemClicked = function(path, count) {
 			if (remoteModel != null) {
 				if (remoteModel.isMoreKey(path) || remoteModel.isRetryKey(path)) {
@@ -1257,11 +1285,15 @@ class ExosuitApp implements DesktopUiApplication {
 				else if (count == 2 && !remoteModel.isDirectoryKey(path)) openWorkspaceFile(remoteModel, path, true);
 				return;
 			}
-			if (count != 1 || FileSystem.isDirectory(path)) return;
+			if (localModel != null && localModel.isSyntheticRow(path)) {
+				if (count == 1 && localModel.activateSyntheticRow(path)) requestFrame();
+				return;
+			}
+			if (count != 1 || (localModel != null && localModel.isDirectoryPath(path))) return;
 			try host.openPreview(application.workspace.documents.open(path)) catch (error:Dynamic) application.reportError("files", "Could not open file: " + Std.string(error));
 		};
 		tree.onItemContextMenu = function(path, event) {
-			if (remoteModel != null) return;
+			if (remoteModel != null || (localModel != null && localModel.isSyntheticRow(path))) return;
 			var menuRoot = explorerRoot;
 			host.setSelectedExplorerPath(path);
 			showContextMenu([

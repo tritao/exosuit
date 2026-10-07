@@ -2,6 +2,7 @@ package workspace;
 
 import haxe.io.Bytes;
 import sys.FileSystem;
+import sys.FileSystem.FileSystemEntry;
 import sys.io.File;
 
 class FileSystemService implements EditorFileSystem {
@@ -29,6 +30,14 @@ class FileSystemService implements EditorFileSystem {
 		var values = FileSystem.readDirectory(path);
 		values.sort(Reflect.compare);
 		return values;
+	}
+
+	/** Resolves directory identity and child kinds in one enumeration. */
+	public function scanDirectory(path:String):{identity:String, entries:Array<FileSystemEntry>} {
+		var identity = normalize(path);
+		var entries = FileSystem.readDirectoryEntries(path);
+		entries.sort(function(left, right) return Reflect.compare(left.name, right.name));
+		return {identity: identity, entries: entries};
 	}
 
 	public function join(parent:String, name:String):String
