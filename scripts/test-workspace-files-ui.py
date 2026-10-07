@@ -21,9 +21,9 @@ with tempfile.TemporaryDirectory(prefix="exworkspacefilesui-") as temporary:
     project = fixture / "project"
     project.mkdir()
     (project / "README.md").write_text("First preview\n")
-    expected = "Remote preview fixture: café 🙂\nsecond line\n"
-    updated = "Remote preview fixture: café 🙂 updated after listing\nsecond line\n"
-    note = project / "notes.txt"
+    expected = "# Remote preview fixture: café 🙂\n\n```haxe\nclass Example {}\n```\n"
+    updated = "# Remote preview fixture: café 🙂 updated after listing\n\n```haxe\nclass Example {}\n```\n"
+    note = project / "notes.md"
     note.write_text(expected)
     state = fixture / "state"
     capture = fixture / "capture"
@@ -65,7 +65,8 @@ with tempfile.TemporaryDirectory(prefix="exworkspacefilesui-") as temporary:
         tabs = diagnostic["workspaceFileTabs"]
         tree = (capture / "ui-tree.txt").read_text()
         assert diagnostic["workspaceConnection"] == "Workspace connected", diagnostic
-        assert len(tabs) == 1 and tabs[0]["path"] == "notes.txt" and tabs[0]["preview"] is False, tabs
+        assert len(tabs) == 1 and tabs[0]["path"] == "notes.md" and tabs[0]["preview"] is False, tabs
+        assert tabs[0]["syntax"] == "Markdown", tabs
         assert "Remote preview fixture: café 🙂 updated after listing" in tree and "SHOULD_NOT_EDIT" not in tree, tree[-3000:]
         assert note.read_text() == updated
         assert diagnostic["errors"] == [], diagnostic["errors"]

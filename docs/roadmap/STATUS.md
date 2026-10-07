@@ -2,6 +2,20 @@
 
 Last updated: 2026-10-07.
 
+## M16.2 syntax-colored remote file previews, 2026-10-07
+
+Added syntax-aware rendering to the existing remote read-only preview tabs. The
+tab selects a syntax definition by remote path and applies the shared editor
+palette to visible token ranges, without registering the snapshot as a local
+saveable document. The Haxeon text document remains the read-only view's source
+of truth; line layout and selection stay in UIKit.
+
+Validation: the graphical Haxeon target builds; `tests/editor-view-test` passes;
+the Xvfb workspace-file UI test passes with a Markdown file containing a fenced
+code block, stale-listing recovery, preview replacement, sticky-tab behavior and
+blocked edits. Live file-change notifications, browser integration, and broader
+F1/F2 acceptance remain open.
+
 ## M16.2 Linux desktop workspace file previews, 2026-10-07
 
 Connected the graphical Explorer to the negotiated `WorkspaceFileClient` on
@@ -22,7 +36,7 @@ RPC-backed tree, preview replacement, sticky-tab behavior and read-only view.
 Validation: graphical Haxeon target build, agent target build, and the full
 workspace terminal/files RPC suite pass; the desktop UI acceptance script passes,
 including a file changed after listing and an attempted editor mutation.
-Remaining: syntax coloring, file-change/watch updates, browser integration,
+Remaining: file-change/watch updates, browser integration,
 non-Linux secure filesystem backends and broader F1/F2 acceptance. See
 [`WORKSPACE-FILES.md`](WORKSPACE-FILES.md).
 

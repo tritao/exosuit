@@ -330,9 +330,11 @@ Deployment/publication requires separate authorization under EXECUTION.md.
   32 MiB retained content. Binary and invalid UTF-8 files report a clear error.
   An Xvfb test covers stale listing recovery, preview replacement, sticky tabs
   and blocked edits.
-- [ ] Add syntax display, live change notifications and refresh behavior, then
-  connect the same file client to the web build. Keep path traversal and symlink
-  handling enforced by the service's workspace access policy.
+- [x] Add syntax coloring to Linux desktop read-only previews using the shared
+  syntax registry and visible text ranges.
+- [ ] Add live change notifications and refresh behavior, then connect the same
+  file client to the web build. Keep path traversal and symlink handling enforced
+  by the service's workspace access policy.
 - [ ] View Claude/Codex sessions, conversation/activity and pending requests.
   Add prompt, interruption and approval actions under explicit device grants.
   Resolve competing-client approvals exactly once at the service boundary.

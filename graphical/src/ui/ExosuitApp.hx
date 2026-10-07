@@ -974,7 +974,7 @@ class ExosuitApp implements DesktopUiApplication {
 		for (pane in host.panes) for (item in pane.items) {
 			var file = UiEditorTabs.workspaceFile(item);
 			if (file != null) result.push({scope: file.scope, root: file.rootName, path: file.path,
-				revision: file.revision, preview: file.preview});
+				revision: file.revision, preview: file.preview, syntax: file.textModel.syntax.name});
 		}
 		return result;
 	}
@@ -1175,7 +1175,7 @@ class ExosuitApp implements DesktopUiApplication {
 					return;
 				}
 				var file = new UiWorkspaceFileTab(root, scope, model.rootDisplayName(), path, result.revision,
-					result.contents, result.sizeBytes, !makeSticky);
+					result.contents, result.sizeBytes, !makeSticky, application.syntaxes, editorPalette);
 				host.openWorkspaceFile(file, !makeSticky);
 			});
 	}
@@ -1213,7 +1213,7 @@ class ExosuitApp implements DesktopUiApplication {
 				var fileKey = UiEditorTabs.key(item);
 				var fileTab = new TabItem(fileKey,
 					workspaceFile.title + (workspaceFile.preview ? " (preview)" : ""),
-					new WorkspaceFilePreviewView(workspaceFile, theme), true);
+					new WorkspaceFilePreviewView(workspaceFile, theme, editorPalette), true);
 				fileTab.onClose = function() host.closeTab(item, paneId, true);
 				filenames.set(fileKey, workspaceFile.rootName + "/" + workspaceFile.path);
 				items.push(fileTab);

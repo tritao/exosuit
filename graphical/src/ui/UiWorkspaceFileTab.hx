@@ -1,5 +1,8 @@
 package ui;
 
+import style.Theme;
+import syntax.SyntaxRegistry;
+
 /** Immutable remote file contents displayed in a workbench preview tab. */
 class UiWorkspaceFileTab {
 	public final id:String;
@@ -9,18 +12,18 @@ class UiWorkspaceFileTab {
 	public final path:String;
 	public final revision:String;
 	public final title:String;
-	public final contents:String;
+	public final textModel:WorkspaceFileTextModel;
 	public final sizeBytes:Int;
 	public var preview:Bool;
 
 	public function new(root:String, scope:String, rootName:String, path:String, revision:String,
-			contents:String, sizeBytes:Int, preview:Bool) {
+			contents:String, sizeBytes:Int, preview:Bool, syntaxes:SyntaxRegistry, editorTheme:Theme) {
 		this.root = root;
 		this.scope = scope;
 		this.rootName = rootName;
 		this.path = path;
 		this.revision = revision;
-		this.contents = contents;
+		this.textModel = new WorkspaceFileTextModel(path, contents, syntaxes, editorTheme);
 		this.sizeBytes = sizeBytes;
 		this.preview = preview;
 		var slash = path.lastIndexOf("/");

@@ -37,11 +37,12 @@ slice caps each preview at 16 MiB, concurrent reads at two, and retained remote
 preview content at 32 MiB across 24 tabs. It rejects invalid UTF-8 and
 NUL-containing binary data instead of silently decoding it. If a listed file
 changes before open, the client retries once against the current revision;
-chunks must still match that revision. Syntax coloring, live change
-notifications and browser integration are still open. The Explorer resets
-remote listings after a connection replacement, retries expired page cursors
-from a fresh listing, and bounds its retained cache to 256 directories and
-32,768 entries. Remote editing remains out of scope.
+chunks must still match that revision. Desktop previews now use the shared
+syntax registry and apply token colors to visible text ranges. Live change
+notifications and browser integration remain open. The Explorer resets remote
+listings after a connection replacement, retries expired page cursors from a
+fresh listing, and bounds its retained cache to 256 directories and 32,768
+entries. Remote editing remains out of scope.
 
 The secure NativeKit backend currently requires Linux `openat2`; it fails closed
 when unavailable, and other platforms return `unsupported`. Multiple roots are
@@ -191,7 +192,8 @@ Revalidate match revision when opening; changed results require refresh.
   in-place writes, same-size preserved-mtime writes, truncation, cancellation,
   disconnect and cross-client handle refusal. No mixed-revision display. The
   Linux desktop preview currently reads up to 16 MiB, validates UTF-8, rejects
-  binary content and does not yet provide syntax coloring or change refresh.
+  binary content and uses the shared syntax registry for syntax coloring; live
+  change refresh remains open.
 - [ ] F3: watch subscriptions and reconnect. Tests cover initial fetch races,
   duplicates/coalescing, missing rename pairs, overflow, retention gaps, polling
   fallback, server restart and Wi-Fi/mobile-style reconnect. UI drops stale data
