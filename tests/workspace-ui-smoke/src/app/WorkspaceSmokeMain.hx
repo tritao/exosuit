@@ -356,7 +356,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 
 	function tabsStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		if (frames == 1) sidebar.setVisible(false);
-		frame.setViewport(frames == 7 ? 640 : 900, 600);
+		frame.setViewport(frames >= 10 ? 4000 : frames == 7 ? 640 : 900, 600);
 		if (frames == 2) {
 			var folder = path.substring(0, path.lastIndexOf("/"));
 			for (name in ["NativeDesktopPlatform.hx", "Platform.hx", "README.md", "a-very-long-Unicode-🙂-filename-that-needs-an-ellipsis.hx", "Last.hx"])
@@ -390,7 +390,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 				previousRight = bounds.x + bounds.width;
 				header.walk(function(child) {
 					if (child.layout.visualKind == LayoutVisualKind.Text) {
-						require(child.globalBounds().width <= 181, "tab label exceeds width cap");
+						if (frames < 10) require(child.globalBounds().width <= 181, "crowded tab label exceeds width cap");
 						if (child.layout.text.indexOf("…") >= 0) truncated = true;
 					}
 				});
@@ -401,7 +401,8 @@ class WorkspaceSmokeApp extends ExosuitApp {
 				if (semantics == null) throw "tab lost its accessible filename";
 				require(tooltip.children[1].children[0].layout.text == semantics.label, "tooltip lost full filename");
 			}
-			require(truncated, "long filename was not ellipsized");
+			if (frames < 10) require(truncated, "long filename was not ellipsized");
+			else if (frames >= 11) require(!truncated, "tab title was truncated despite spare rail width");
 			if (frames == 5) require(content.children[0].globalBounds().x >= scroll.globalBounds().x - 1, "vertical wheel did not scroll tab rail back");
 			if (frames == 8) {
 				var last = content.children[content.children.length - 1].children[0].globalBounds();
@@ -1327,7 +1328,7 @@ class WorkspaceSmokeMain {
 			zoomWidth = options.width;
 		}
 		options.captureDirectory = args[1];
-		options.frameLimit = args[2] == "zoom" ? 75 : args[2] == "save-as" ? 10 : args[2] == "exit-confirmation" ? 11 : args[2] == "tab-close" ? 13 : args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 10 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
+		options.frameLimit = args[2] == "zoom" ? 75 : args[2] == "save-as" ? 10 : args[2] == "exit-confirmation" ? 11 : args[2] == "tab-close" ? 13 : args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 11 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
 		var status = DesktopUiHost.run(options, context -> new WorkspaceSmokeApp(context, args[0], args[2]));
 
 		return status;

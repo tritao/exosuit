@@ -38,10 +38,11 @@ class EditorTabsView implements View {
 		return context.withScope(new Key("editor-tab-icons"), function() {
 			var atlas = context.resourceState(context.id("seti-atlas"), function() return new SetiIconAtlas(),
 				function(value) value.dispose()).value;
-			var state = context.state(context.id("tab-scroll-state"), new TabScrollState()).value;
+			var scrollState = context.state(context.id("tab-scroll-state"), new TabScrollState());
+			var state = scrollState.value;
 			tabs.headerRevision = function() {
 				var revision = dark + ":" + tooltipDelay + ":" + context.animations.revision + ":" +
-					state.controller.offsetX + ":" + state.controller.viewportWidth;
+					state.controller.offsetX + ":" + state.controller.viewportWidth + ":" + state.labelViewportWidth;
 				for (item in tabs.items) {
 					var filename = filenames.get(item.key);
 					revision += ":" + item.key.length + ":" + item.key + ":" + item.label.length + ":" + item.label +
@@ -51,24 +52,55 @@ class EditorTabsView implements View {
 			};
 			var memo = context.state(context.id("tab-labels"), new Map<String, String>()).value;
 			var typography = context.resolveTextRole(TextRole.Button, TextStyleOverride.paragraph(TextWrap.None));
+			var widths = context.state(context.id("tab-natural-widths"), new Map<String, Float>()).value;
+			var naturalWidths:Array<Float> = [];
+			var chrome = Math.max(0, tabs.items.length - 1) * 4.0;
+			for (item in tabs.items) {
+				var textStyle = typography.textStyle;
+				var widthKey = item.label + ":" + textStyle.font + ":" + textStyle.fontSize + ":" + textStyle.letterSpacing;
+				var width = widths.get(widthKey);
+				if (width == null) {
+					width = item.label.length * 8.0;
+					if (context.fonts != null) {
+						var layout = TextLayout.createStyled(context.fonts, item.label, 100000.0, textStyle, typography.paragraphStyle);
+						width = layout.measure().width;
+						layout.dispose();
+					}
+					if ([for (_ in widths.keys()) 1].length > 128) widths.clear();
+					widths.set(widthKey, width);
+				}
+				naturalWidths.push(width);
+				chrome += 20.0 + (filenames.get(item.key) != null ? 28.0 : item.icon != null ? 22.0 : 0.0) +
+					(item.onClose != null ? 28.0 : 0.0);
+			}
+			var available = (state.labelViewportWidth > 0 ? state.labelViewportWidth : context.viewportWidth) - chrome;
+			var low = LABEL_WIDTH, high = Math.max(LABEL_WIDTH, available);
+			// Share spare width among long titles; short titles keep their natural width.
+			for (_ in 0...16) {
+				var candidate = (low + high) / 2;
+				var total = 0.0;
+				for (width in naturalWidths) total += Math.min(width, candidate);
+				if (total <= available) low = candidate; else high = candidate;
+			}
+			var labelWidth = Math.floor(low);
 			for (index in 0...tabs.items.length) {
 				var item = tabs.items[index];
 				var filename = filenames.get(item.key);
 				if (filename != null) item.iconView = new SetiFileIcon(atlas, filename, dark);
 				var textStyle = typography.textStyle;
-				var cacheKey = item.label + ":" + textStyle.font + ":" + textStyle.fontSize + ":" + textStyle.letterSpacing;
+				var cacheKey = labelWidth + ":" + item.label + ":" + textStyle.font + ":" + textStyle.fontSize + ":" + textStyle.letterSpacing;
 				var label = memo.get(cacheKey);
 				if (label == null && context.fonts != null) {
 					var layout = TextLayout.createStyled(context.fonts, item.label, 100000.0, textStyle, typography.paragraphStyle);
 					label = item.label;
-					if (layout.measure().width > LABEL_WIDTH) {
+					if (layout.measure().width > labelWidth) {
 						var document = new TextDocument(item.label);
 						var low = 0, high = document.codepointCount;
 						while (low < high) {
 							var count = (low + high + 1) >> 1;
 							var candidate = document.sliceCodepoints(0, count) + "…";
 							layout.setText(candidate);
-							if (layout.measure().width <= LABEL_WIDTH) low = count; else high = count - 1;
+							if (layout.measure().width <= labelWidth) low = count; else high = count - 1;
 						}
 						label = document.sliceCodepoints(0, low) + "…";
 					}
@@ -82,11 +114,11 @@ class EditorTabsView implements View {
 			displayed.badgeCount = item.badgeCount;
 				tabs.items[index] = displayed;
 			}
-			tabs.transformHeaderStrip = function(strip, buildContext) return buildRail(strip, buildContext, state);
+			tabs.transformHeaderStrip = function(strip, buildContext) return buildRail(strip, buildContext, state, function() { scrollState.update(state); });
 			return tabs.build(context);
 		});
 	}
-	function buildRail(strip:RenderNode, context:BuildContext, state:TabScrollState):RenderNode {
+	function buildRail(strip:RenderNode, context:BuildContext, state:TabScrollState, invalidate:Void->Void):RenderNode {
 		strip.layout.style.width = LayoutAxis.fit();
 		var headers = strip.children.copy();
 		var active:Null<RenderNode> = null;
@@ -115,6 +147,12 @@ class EditorTabsView implements View {
 		};
 		viewport = scroll.build(context);
 		viewport.setStyleIdentity("scroll-view", "editor-tab-scroll");
+		viewport.onResolved(function(_) {
+			var width = viewport.globalBounds().width;
+			if (Math.abs(state.labelViewportWidth - width) < 0.01) return;
+			state.labelViewportWidth = width;
+			invalidate();
+		});
 		if (active != null) active.onResolved(function(_) {
 			if (active == null || viewport.resolved == null || active.resolved == null) return;
 			var bounds = viewport.globalBounds();
@@ -142,5 +180,6 @@ private class TabScrollState {
 	public final controller = new ScrollController();
 	public var selected:String = "";
 	public var width:Float = -1;
+	public var labelViewportWidth:Float = -1;
 	public function new() {}
 }
