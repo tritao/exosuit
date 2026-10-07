@@ -50,8 +50,21 @@ class WebMain {
 				function() return NativeKit.nk_time_seconds() * 1000,
 				function() context.requestFrame());
 			remoteAccess = remote;
-			context.onPoll = function() remote.poll();
 			var remotePanel = new BrowserRemoteAccessPanel(remote, function() context.requestFrame());
+			var remoteAttached = false;
+			context.onPoll = function() {
+				if (!remoteAttached) remote.poll();
+				var connected = remote.isWorkspaceConnected() && remote.canReadFiles();
+				if (connected && !remoteAttached) {
+					remoteAttached = true;
+					app.attachWorkspace(remote);
+					app.activateSidebarDestination("files");
+				} else if (!connected && remoteAttached) {
+					remoteAttached = false;
+					app.detachWorkspace(remote);
+					app.activateSidebarDestination("remote-access");
+				}
+			};
 			app.registerSidebarDestination("remote-access", IconName.Radar, function() return remotePanel,
 				new haxeon.ui.widgets.sidebar.SidebarModeOptions("Remote Access", 30, true));
 			app.application.openArgument("/workspace/Main.hx");

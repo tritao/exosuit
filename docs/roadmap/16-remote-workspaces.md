@@ -13,10 +13,10 @@ credential service and production SQLite store. The Worker also resets the
 daemon's stale channel before admitting a replacement device socket. A local
 forced Durable Object eviction test confirms live sockets remain open and
 forward in both directions after wake. Graphical desktop-panel clickthrough,
-remote workspace resources, Cloudflare edge behavior and cross-network
-qualification remain open. A separate local Worker smoke test starts the real
-`AgentMain` twice to qualify opt-in daemon startup, OS credential reload and
-SQLite reopen. It depends on Haxeon RPC.1/RPC.2 and the
+remote terminal/agent resources, full browser file acceptance, Cloudflare edge
+behavior and cross-network qualification remain open. A separate local Worker
+smoke test starts the real `AgentMain` twice to qualify opt-in daemon startup,
+OS credential reload and SQLite reopen. It depends on Haxeon RPC.1/RPC.2 and the
 M14 workspace service; terminal and provider features depend on their M12/M14
 acceptance. Use the existing M15 web build as the first remote client. Android
 uses the same responsive web application; a native Android app is not required
@@ -337,8 +337,15 @@ Deployment/publication requires separate authorization under EXECUTION.md.
   invalidated and open saved snapshots are marked stale for explicit refresh.
   Full F3 replay, overflow, race and platform qualification remain in
   [`WORKSPACE-FILES.md`](WORKSPACE-FILES.md).
-- [ ] Connect the same file client to the web build. Keep path traversal and
-  symlink handling enforced by the service's workspace access policy.
+- [x] Connect the same file client to the authenticated web workspace. The
+  browser requests `workspace.files.read` as an optional grant and, when
+  approved, attaches the existing Files Explorer to the remote root. It keeps
+  the seeded browser filesystem in standalone mode and when that grant is
+  absent. Remote file listing, read-only preview, syntax coloring, stale-file
+  notice and explicit Refresh reuse the desktop implementation.
+- [ ] Complete the browser host build and connected file clickthrough. The
+  pairing test now grants file access and checks that the browser Explorer
+  subscribes to the remote root; full host/browser execution remains a gate.
 - [ ] View Claude/Codex sessions, conversation/activity and pending requests.
   Add prompt, interruption and approval actions under explicit device grants.
   Resolve competing-client approvals exactly once at the service boundary.

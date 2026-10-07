@@ -16,9 +16,11 @@ import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspacePairingProtocol;
 import workspace.service.WorkspacePairingProtocol.PendingPairing;
 import workspace.service.WorkspacePairingProtocol.PairingDevice;
+import workspace.service.WorkspaceFileProtocol;
 import workspace.service.WorkspaceService;
 import workspace.storage.WorkspaceSqliteStore;
 import workspace.runtime.WorkspaceDirectories;
+import workspace.runtime.WorkspaceFileService;
 import workspace.transport.NativeRpcHub;
 import workspace.transport.NativeRpcConnector;
 import workspace.transport.RelayMachineEndpoint;
@@ -62,6 +64,7 @@ class BrowserPairingHostMain {
 			relay = new WorkspaceRelayHost(runtime.events, hub, new WorkspaceRelaySettings(endpoint, machineToken), true),
 		store = new WorkspaceSqliteStore(databasePath, "workspace", seed.snapshot(), 32, directories.root);
 		var machineKeys = NoiseSession.generateKeypair();
+		var files = new WorkspaceFileService("workspace", [directories.root], clock, runtime.events);
 		var server:Null<WorkspaceRpcServer> = null;
 		var pairing = new WorkspacePairingManager(store, relay, machineKeys.privateKey,
 			function() return server == null ? [WorkspaceProtocol.READ, WorkspaceProtocol.IDENTITY_CAPABILITY] : server.options.offered(),
@@ -70,7 +73,7 @@ class BrowserPairingHostMain {
 			});
 		server = new WorkspaceRpcServer(new WorkspaceService("workspace", "browser-pairing-epoch", seed.snapshot().groups,
 			32, 256, 16, store, directories.resolve), clock, null,
-			{workspace: "workspace", root: directories.root, instance: "browser-pairing-test"}, null, null, pairing);
+			{workspace: "workspace", root: directories.root, instance: "browser-pairing-test"}, null, null, pairing, files);
 		relay.onChannel = function(channel) pairing.acceptChannel(channel.channelId, channel);
 		var localListener = hub.listen(NativeRpcHub.local(localSocket), server.acceptLocal);
 		var failure:Null<String> = null, localConnection:Null<RpcConnection> = null;
@@ -133,7 +136,7 @@ class BrowserPairingHostMain {
 				require(matched, "browser and desktop authentication codes did not match");
 				approvalRequestPending = true;
 				adminConnection.call(WorkspacePairingProtocol.APPROVE, {deviceId: registeredDevice,
-					grants: [WorkspaceProtocol.READ, WorkspaceProtocol.IDENTITY_CAPABILITY]}, 10000, function(result) {
+					grants: [WorkspaceProtocol.READ, WorkspaceProtocol.IDENTITY_CAPABILITY, WorkspaceFileProtocol.READ]}, 10000, function(result) {
 					if (!result.accepted) failure = "local pairing approval was refused: " + result.error;
 					else approved = true;
 				}, function(error) {
@@ -160,6 +163,7 @@ class BrowserPairingHostMain {
 				pairing.dispose();
 				relay.dispose();
 				server.dispose();
+				files.dispose();
 				hub.dispose();
 				store.close();
 				runtime.dispose();
@@ -172,6 +176,7 @@ class BrowserPairingHostMain {
 		localAdmin.close();
 		hub.forget(localListener);
 		server.dispose();
+		files.dispose();
 		hub.dispose();
 		store.close();
 		throw failure == null ? "Browser pairing test timed out" : failure;
@@ -243,7 +248,7 @@ class BrowserPairingHostMain {
 				} else {
 					approvalPending = true;
 					connection.call(WorkspacePairingProtocol.APPROVE, {deviceId: deviceId,
-						grants: [WorkspaceProtocol.READ, WorkspaceProtocol.IDENTITY_CAPABILITY]}, 10000, function(result) {
+						grants: [WorkspaceProtocol.READ, WorkspaceProtocol.IDENTITY_CAPABILITY, WorkspaceFileProtocol.READ]}, 10000, function(result) {
 						if (!result.accepted) failure = "AgentMain refused pairing approval: " + result.error;
 						else approved = true;
 					}, function(error) {
@@ -290,8 +295,9 @@ class BrowserPairingHostMain {
 		require(records.length == 1, "SQLite did not retain exactly one approved device");
 		var record = records[0];
 		require(record.deviceId == deviceId && !record.revoked
-			&& record.grants.length == 2
+			&& record.grants.length == 3
 			&& record.grants.indexOf(WorkspaceProtocol.READ) >= 0
+			&& record.grants.indexOf(WorkspaceFileProtocol.READ) >= 0
 			&& record.grants.indexOf(WorkspaceProtocol.IDENTITY_CAPABILITY) >= 0,
 			"SQLite device trust or explicit workspace grants did not survive reload");
 	}

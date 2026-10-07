@@ -11,8 +11,15 @@ const socket = new WebSocket(target.webSocketDebuggerUrl);
 await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject; });
 let next = 1;
 const pending = new Map();
+const browserDiagnostics = [];
 socket.onmessage = event => {
   const message = JSON.parse(event.data);
+  if (message.method === 'Runtime.exceptionThrown')
+    browserDiagnostics.push(message.params.exceptionDetails?.text || 'Browser JavaScript exception');
+  if (message.method === 'Log.entryAdded')
+    browserDiagnostics.push(message.params.entry?.text || 'Browser log entry');
+  if (message.method === 'Runtime.consoleAPICalled')
+    browserDiagnostics.push((message.params.args || []).map(item => item.value ?? item.description ?? '').join(' '));
   if (!message.id || !pending.has(message.id)) return;
   const request = pending.get(message.id);
   pending.delete(message.id);
@@ -39,6 +46,10 @@ async function remoteState() {
   await expression('window.exosuit.snapshot()');
   return expression('window.exosuit.document?.remoteAccess');
 }
+async function shellState() {
+  await expression('window.exosuit.snapshot()');
+  return expression('window.exosuit.document?.shell');
+}
 function readStatus() {
   try { return JSON.parse(fs.readFileSync(statusPath, 'utf8')); }
   catch (_error) { return null; }
@@ -55,13 +66,14 @@ async function waitFor(description, predicate, timeout = 60000) {
     value = await predicate();
     if (value) return value;
     const app = await expression('({state:window.exosuit?.state,error:window.exosuit?.error})');
-    if (app?.state === 'failed') throw new Error(`Browser app failed: ${app.error}`);
+    if (app?.state === 'failed') throw new Error(`Browser app failed: ${app.error}\n${browserDiagnostics.join('\n')}`);
     await pause(200);
   }
   throw new Error(`Timed out waiting for ${description}: ${JSON.stringify(value)}`);
 }
 try {
   await send('Runtime.enable');
+  await send('Log.enable');
   await send('Page.enable');
   await waitFor('editor startup', async () => (await expression('window.exosuit?.state')) === 'running');
 
@@ -108,8 +120,18 @@ try {
   });
   if (!connected.state.status.includes('Connected'))
     throw new Error(`RPC identity arrived with unexpected state: ${connected.state.status}`);
-  if (!connected.state.grants?.includes('workspace.identity') || !connected.state.grants?.includes('workspace.read'))
+  if (!connected.state.grants?.includes('workspace.identity') || !connected.state.grants?.includes('workspace.read')
+    || !connected.state.grants?.includes('workspace.files.read'))
     throw new Error('The connected browser did not receive the approved workspace grants');
+  const remoteExplorer = await waitFor('connected remote file explorer', async () => {
+    const shell = await shellState();
+    return shell?.explorerWatching && shell?.explorerIdentity?.includes(connected.state.workspaceRoot) ? shell : null;
+  });
+  if (process.env.EXOSUIT_CAPTURE_BROWSER_PATH) {
+    const image = await send('Page.captureScreenshot', {format: 'png'});
+    fs.writeFileSync(process.env.EXOSUIT_CAPTURE_BROWSER_PATH, Buffer.from(image.data, 'base64'));
+  }
+  console.log(`PASS: connected Explorer subscribed to ${remoteExplorer.explorerIdentity}`);
   const rawRecord = await expression(`(async()=>{const db=await new Promise((resolve,reject)=>{const r=indexedDB.open('exosuit-remote-devices-v1');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});const values=await new Promise((resolve,reject)=>{const r=db.transaction('devices','readonly').objectStore('devices').get(${JSON.stringify(`${invitation.machineId}:${invitation.deviceId}`)});r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});const key=await new Promise((resolve,reject)=>{const r=db.transaction('meta','readonly').objectStore('meta').get('noise-device-wrap-v1');r.onsuccess=()=>resolve(r.result?.key);r.onerror=()=>reject(r.error)});return {ciphertextBytes:values?.ciphertext?.byteLength||0,cleartextFields:!!values&&(Object.hasOwn(values,'staticPrivateKey')||Object.hasOwn(values,'deviceToken')),keyExtractable:key?.extractable}})()`);
   if (rawRecord.ciphertextBytes < 32 || rawRecord.cleartextFields || rawRecord.keyExtractable !== false)
     throw new Error(`Browser device storage did not preserve encrypted-at-rest custody: ${JSON.stringify(rawRecord)}`);
@@ -119,7 +141,9 @@ try {
 
   // Disconnect through the panel, select the saved device and establish a new ticketed Noise channel.
   await pause(500);
-  await click(120, 484);
+  await click(28, 160); // Return from the connected Files view to Remote Access.
+  await pause(300);
+  await click(120, 508); // Disconnect button after the optional file-read grant row.
   const disconnected = await waitFor('saved device after disconnect', async () => {
     const state = await remoteState();
     const device = state?.savedDevices?.find(item => item.machineId === invitation.machineId
@@ -133,7 +157,8 @@ try {
     return state?.workspaceRoot ? state : null;
   });
   if (reconnected.workspaceRoot !== connected.state.workspaceRoot
-    || !reconnected.grants?.includes('workspace.identity') || !reconnected.grants?.includes('workspace.read'))
+    || !reconnected.grants?.includes('workspace.identity') || !reconnected.grants?.includes('workspace.read')
+    || !reconnected.grants?.includes('workspace.files.read'))
     throw new Error('Saved-device reconnect changed workspace identity or approved grants');
   writePrivate(successPath, {machineId: invitation.machineId, deviceId: invitation.deviceId,
     workspaceRoot: reconnected.workspaceRoot});

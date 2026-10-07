@@ -46,7 +46,10 @@ notifications now invalidate remote listings and mark open snapshots as
 changed on disk; the user still triggers Refresh. The Explorer resets remote
 listings after a connection replacement, retries expired page cursors from a
 fresh listing, and bounds its retained cache to 256 directories and 32,768
-entries. Remote editing remains out of scope.
+entries. The authenticated web build now exposes the same remote Explorer and
+preview path when `workspace.files.read` is granted; standalone browser files
+remain local. Full browser host acceptance is still open. Remote editing
+remains out of scope.
 
 The current Linux desktop watcher subscribes per root, coalesces native events
 over 100 ms and publishes only a root epoch/cursor, never host paths or file
@@ -55,16 +58,17 @@ disk notice on its open snapshots. A reconnect with a mismatched epoch/cursor
 requests a full root resync; the service does not retain/replay event history.
 This is invalidation, not automatic file reload. Watcher overflow invalidates
 all roots. Browser delivery, non-Linux backends, event replay, narrower
-subtree/path events, and full F3 race/overflow/reconnect qualification remain
-open.
+subtree/path events, connected-browser acceptance, and full F3
+race/overflow/reconnect qualification remain open.
 
 The secure NativeKit backend currently requires Linux `openat2`; it fails closed
 when unavailable, and other platforms return `unsupported`. Multiple roots are
 supported by the service and contract tests, but AgentMain currently publishes
 one configured root per workspace. Non-Linux secure backends and remaining F1
-acceptance cases are still open. The Linux desktop decodes valid UTF-8 for
-syntax-colored read-only previews and has root-level change invalidation;
-search, connected-browser UI and full F3 qualification remain open.
+acceptance cases are still open. The Linux desktop and connected web client use
+valid UTF-8 syntax-colored read-only previews; Linux desktop has root-level
+change invalidation. Search, full browser qualification and full F3 acceptance
+remain open.
 
 ## Addressing and access
 

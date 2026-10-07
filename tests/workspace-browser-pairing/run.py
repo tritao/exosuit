@@ -93,6 +93,7 @@ with tempfile.TemporaryDirectory(prefix="exosuit-browser-pairing-") as temporary
     debug_port = free_port()
     workspace_root = work / "workspace"
     workspace_root.mkdir(mode=0o700)
+    (workspace_root / "remote.md").write_text("# Browser remote file\n\nServed from the workspace daemon.\n")
     invitation = work / "invitation.json"
     status = work / "status.json"
     decision = work / "approval.json"

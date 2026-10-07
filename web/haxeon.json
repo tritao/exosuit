@@ -178,6 +178,7 @@
     "../src/workspace/client/LocalWorkspaceClient.hx",
     "../src/workspace/client/RpcTerminalBackend.hx",
     "../src/workspace/client/WorkspaceAgentClient.hx",
+    "../src/workspace/client/WorkspaceFileClient.hx",
     "../src/workspace/client/WorkspaceAttachment.hx",
     "../src/workspace/client/WorkspaceIds.hx",
     "../src/workspace/client/WorkspacePairingClient.hx",
@@ -185,6 +186,7 @@
     "../src/workspace/client/WorkspaceWorkbenchClient.hx",
     "../src/workspace/service/WorkspaceAgentPersistence.hx",
     "../src/workspace/service/WorkspaceAgentProtocol.hx",
+    "../src/workspace/service/WorkspaceFileProtocol.hx",
     "../src/workspace/service/WorkspaceAgents.hx",
     "../src/workspace/service/WorkspaceDevicePersistence.hx",
     "../src/workspace/service/WorkspaceDeviceRecord.hx",
@@ -240,6 +242,7 @@
     "../graphical/src/ui/ExosuitPalette.hx",
     "../graphical/src/ui/ExplorerDirectoryWatch.hx",
     "../graphical/src/ui/ExplorerTreeView.hx",
+    "../graphical/src/ui/ExplorerTreeModel.hx",
     "../graphical/src/ui/GroupEditorPanel.hx",
     "../graphical/src/ui/KeyCaptureView.hx",
     "../graphical/src/ui/ProblemsPanel.hx",
@@ -266,7 +269,13 @@
     "../graphical/src/ui/WorkbenchPanel.hx",
     "../graphical/src/ui/WorkbenchTreeModel.hx",
     "../graphical/src/ui/WorkspaceSearchPanel.hx",
-    "../graphical/src/ui/WorkspaceTerminalsPanel.hx"
+    "../graphical/src/ui/WorkspaceTerminalsPanel.hx",
+    "../graphical/src/ui/WorkspaceFileReadResult.hx",
+    "../graphical/src/ui/WorkspaceFileReader.hx",
+    "../graphical/src/ui/WorkspaceFileTextModel.hx",
+    "../graphical/src/ui/UiWorkspaceFileTab.hx",
+    "../graphical/src/ui/WorkspaceFilePreviewView.hx",
+    "../graphical/src/ui/WorkspaceFileTreeModel.hx"
   ],
   "dependencies": {
     "haxeon-platform": {

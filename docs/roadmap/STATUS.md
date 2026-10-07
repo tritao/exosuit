@@ -2,6 +2,32 @@
 
 Last updated: 2026-10-07.
 
+## M16.2 connected-browser file Explorer wiring, 2026-10-07
+
+The browser's authenticated workspace RPC client now implements the shared
+`WorkspaceAttachment` boundary and offers `workspace.files.read` as an optional
+grant. With that grant, the existing Files Explorer attaches to the remote
+workspace and reuses the desktop's paged tree, read-only preview, syntax
+presentation, live stale-file notice and explicit Refresh. Without it, the
+browser keeps its seeded local workspace and explains which permission is
+missing. Disconnecting returns to the local browser workspace and Remote Access
+panel.
+
+The browser pairing acceptance fixture now serves a real root-scoped file API,
+approves the file-read grant and checks that the web Explorer subscribes to the
+remote root. Haxeon successfully compiled the updated 698-source WASM guest
+against generated FFI interfaces, and the current NativeKit browser host accepts
+all guest imports. Full browser execution remains blocked here: the pinned
+Emscripten 6.0.9 SDK was absent, and installing it ran out of space during
+unpack. The partial SDK download was removed. An attempt to run the new guest
+with the older checked-in build artifacts stopped during font initialization,
+so it does not qualify this feature's browser acceptance.
+
+Next: run `web/build.sh` and the updated Worker/browser pairing test on a machine
+with the pinned Emscripten SDK and enough free disk, then verify remote file
+open/refresh in the connected UI. See [`16-remote-workspaces.md`](16-remote-workspaces.md)
+and [`WORKSPACE-FILES.md`](WORKSPACE-FILES.md).
+
 ## M16.2 Linux desktop live file-change invalidation, 2026-10-07
 
 Added a NativeKit-backed watcher to the workspace daemon. It coalesces native

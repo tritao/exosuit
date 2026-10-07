@@ -38,6 +38,9 @@ class BrowserRemoteAccessPanel implements View {
 			rows.push(new KeyedView("grants-title", new Text("Granted permissions")));
 			for (index in 0...client.grants.length)
 				rows.push(new KeyedView("grant:" + index, new Text("• " + grantLabel(client.grants[index]))));
+			if (!client.canReadFiles()) rows.push(new KeyedView("files-unavailable", new Text(
+				"This device was not granted saved-file browsing. Ask the desktop owner to approve that permission and pair again.",
+				null, context.theme.tokens.textSecondary)));
 		} else if (client.authenticationCode != null) {
 			rows.push(new KeyedView("code-instruction", new Text("Compare this code with the desktop before continuing.")));
 			rows.push(new KeyedView("code", new Text(client.authenticationCode, null,
@@ -113,6 +116,7 @@ class BrowserRemoteAccessPanel implements View {
 		if (grant == workspace.service.WorkspaceTerminalProtocol.CONTROL) return "Control terminal sessions";
 		if (grant == workspace.service.WorkspaceAgentProtocol.READ) return "Read Codex sessions";
 		if (grant == workspace.service.WorkspaceAgentProtocol.CONTROL) return "Control Codex sessions";
+		if (grant == workspace.service.WorkspaceFileProtocol.READ) return "Browse and read saved workspace files";
 		if (grant == workspace.service.WorkspaceProtocol.IDENTITY_CAPABILITY) return "Workspace identity";
 		return grant;
 	}

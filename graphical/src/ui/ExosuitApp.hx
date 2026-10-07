@@ -841,6 +841,15 @@ class ExosuitApp implements DesktopUiApplication {
 		requestFrame();
 	}
 
+	public function detachWorkspace(attachment:workspace.client.WorkspaceAttachment):Void {
+		if (workspaceAttachment != attachment) return;
+		clearExplorerModel();
+		workspaceAttachment = null;
+		workspaceStatus = "";
+		workspaceError = null;
+		requestFrame();
+	}
+
 	/** Drain services without requesting a render merely because they are running. */
 	function pollBackground():Void {
 		var now = Sys.time();
@@ -949,6 +958,7 @@ class ExosuitApp implements DesktopUiApplication {
 			active: active == null ? -1 : active.id,
 			documentsSource: "core.Application (via UiWorkbenchHost)",
 			explorerRoot: explorerRoot,
+			explorerIdentity: explorerModel == null ? null : explorerModel.rootIdentity(),
 			explorerWatching: explorerModel != null && explorerModel.watchesChanges(),
 			sidebarMode: sidebar.activeId,
 			sidebarState: sidebar.encode(),

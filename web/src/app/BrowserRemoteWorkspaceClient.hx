@@ -12,6 +12,9 @@ import noisekit.NoiseSession;
 import workspace.service.WorkspaceAgentProtocol;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceTerminalProtocol;
+import workspace.service.WorkspaceFileProtocol;
+import workspace.client.WorkspaceAttachment;
+import workspace.client.WorkspaceFileClient;
 import workspace.transport.NativeRpcHub;
 import workspace.transport.NoiseClientHandshake;
 import workspace.transport.NoiseMessageTransport;
@@ -32,7 +35,7 @@ typedef BrowserRemoteDevice = {
 }
 
 /** First-pairing client for the existing browser build; it owns no workspace files locally. */
-class BrowserRemoteWorkspaceClient {
+class BrowserRemoteWorkspaceClient implements WorkspaceAttachment {
 	public var status(default, null):String = "Paste a one-time pairing URL from the desktop Remote Access panel.";
 	public var error(default, null):Null<String>;
 	public var authenticationCode(default, null):Null<String>;
@@ -76,6 +79,9 @@ class BrowserRemoteWorkspaceClient {
 	var pendingPayload = new StringBuf();
 	var confirmation:Null<Bytes>;
 	var rpc:Null<RpcClient>;
+	var workspaceConnection:Null<RpcConnection>;
+	var fileApiConnection:Null<RpcConnection>;
+	var fileApiClient:Null<WorkspaceFileClient>;
 	var disposed:Bool = false;
 
 	public function new(events:NativeKitEvents, clock:Void->Float, changed:Void->Void) {
@@ -453,7 +459,8 @@ class BrowserRemoteWorkspaceClient {
 				|| !~/^[0-9a-f]{64}$/.match(value.deviceToken) || value.grants == null
 				|| !Std.isOfType(value.grants, Array)) throw "invalid_approval";
 			var offered = [WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS, WorkspaceProtocol.WRITE,
-				WorkspaceProtocol.TREE, WorkspaceProtocol.IDENTITY_CAPABILITY, WorkspaceTerminalProtocol.READ,
+				WorkspaceProtocol.TREE, WorkspaceProtocol.IDENTITY_CAPABILITY, WorkspaceFileProtocol.READ,
+				WorkspaceTerminalProtocol.READ,
 				WorkspaceTerminalProtocol.CATALOG, WorkspaceTerminalProtocol.CONTROL,
 				WorkspaceAgentProtocol.READ, WorkspaceAgentProtocol.CONTROL];
 			var seen:Map<String, Bool> = [];
@@ -502,7 +509,8 @@ class BrowserRemoteWorkspaceClient {
 		client = new RpcClient(new TransferredMessageConnector(transport), clock,
 			function() return Math.random(), new RpcPeerOptions("exosuit-editor/1",
 				[WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS, WorkspaceProtocol.IDENTITY_CAPABILITY,
-					WorkspaceProtocol.TREE, WorkspaceTerminalProtocol.READ, WorkspaceTerminalProtocol.CATALOG,
+					WorkspaceProtocol.TREE, WorkspaceFileProtocol.READ,
+					WorkspaceTerminalProtocol.READ, WorkspaceTerminalProtocol.CATALOG,
 					WorkspaceTerminalProtocol.CONTROL, WorkspaceAgentProtocol.READ, WorkspaceAgentProtocol.CONTROL],
 				[WorkspaceProtocol.READ, WorkspaceProtocol.IDENTITY_CAPABILITY], 5000, 262144, 32, 1048576),
 			function(connection, token, _) onRpcReady(client, connection, token));
@@ -511,6 +519,7 @@ class BrowserRemoteWorkspaceClient {
 	}
 
 	function onRpcReady(client:RpcClient, connection:RpcConnection, token:Int):Void {
+		workspaceConnection = connection;
 		connection.call(WorkspaceProtocol.IDENTITY, {workspace: "workspace"}, 5000, function(identity) {
 			if (rpc != client || !client.isCurrent(token)) return;
 			workspaceRoot = identity.root;
@@ -521,6 +530,39 @@ class BrowserRemoteWorkspaceClient {
 		}, function(failure) {
 			if (rpc == client && client.isCurrent(token)) fail("Workspace identity check failed: " + failure.code);
 		});
+	}
+
+	public function select(root:Null<String>):Void {}
+
+	public function statusLabel():String {
+		if (isWorkspaceConnected()) return "Workspace connected";
+		return connecting ? "Connecting workspace…" : "";
+	}
+
+	public function failure():Null<String> return error;
+
+	public function fileWorkspace():String return "workspace";
+
+	public function fileScope():Null<String> return workspaceRoot;
+
+	public function isWorkspaceConnected():Bool
+		return workspaceRoot != null && workspaceConnection != null && workspaceConnection.isOpen();
+
+	public function canReadFiles():Bool
+		return isWorkspaceConnected() && grants.indexOf(WorkspaceFileProtocol.READ) >= 0;
+
+	public function fileClient():Null<WorkspaceFileClient> {
+		var connection = canReadFiles() ? workspaceConnection : null;
+		if (connection == null) {
+			fileApiConnection = null;
+			fileApiClient = null;
+			return null;
+		}
+		if (connection != fileApiConnection) {
+			fileApiConnection = connection;
+			fileApiClient = new WorkspaceFileClient(connection);
+		}
+		return fileApiClient;
 	}
 
 	public function disconnect():Void {
@@ -549,6 +591,9 @@ class BrowserRemoteWorkspaceClient {
 		handshake = null;
 		if (rpc != null) rpc.close();
 		rpc = null;
+		workspaceConnection = null;
+		fileApiConnection = null;
+		fileApiClient = null;
 		if (secure != null) secure.close();
 		secure = null;
 		if (channel != null) channel.close();
