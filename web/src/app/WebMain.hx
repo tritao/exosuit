@@ -10,7 +10,7 @@ import haxeon.ui.host.BrowserUiHostOptions;
 import haxeon.ui.host.BrowserUiHostOptions.BrowserUiFontAsset;
 import haxeon.ui.host.BrowserUiHostSession;
 import haxeon.ui.host.UiHostSession.UiHostLifecycle;
-import haxeon.ui.theme.Theme;
+import ui.ExosuitPalette;
 import platform.HostCapabilities;
 import app.BrowserRemoteAccessPanel;
 import app.BrowserRemoteWorkspaceClient;
@@ -49,7 +49,7 @@ class WebMain {
 			var remote = new BrowserRemoteWorkspaceClient(context.events,
 				function() return NativeKit.nk_time_seconds() * 1000,
 				function() context.requestFrame());
-			var app = new ExosuitApp(context.fonts, Theme.light(), context, "/workspace", HostCapabilities.browser(), null, null, null,
+			var app = new ExosuitApp(context.fonts, ExosuitPalette.theme(false), context, "/workspace", HostCapabilities.browser(), null, false, null,
 				function(id, cwd, restored, requestFrame, palette, group, directory)
 					return ui.TerminalPane.openRemote(function() return remote, id, cwd, restored,
 						requestFrame, palette, group, directory, context.fonts));
@@ -126,6 +126,8 @@ class WebMain {
 			},
 			remoteAccess: remoteAccess == null ? null : {
 				status: remoteAccess.status,
+				rpcFailure: remoteAccess.lastRpcFailure,
+				rpcFailures: remoteAccess.rpcFailures,
 				error: remoteAccess.error,
 				authenticationCode: remoteAccess.authenticationCode,
 				codeConfirmed: remoteAccess.codeConfirmed,

@@ -67,6 +67,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 
 	override public function submit(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		frames++;
+		if (phase == "large-picker") return largePickerStep(frame);
 		if (phase == "editor-font") return editorFontStep(frame);
 		if (phase == "problems") return problemsStep(frame);
 		if (phase == "activity-bar") return activityBarStep(frame);
@@ -409,6 +410,52 @@ class WorkspaceSmokeApp extends ExosuitApp {
 					"active tab was not revealed after selection/resize");
 				trace("PASS: crowded editor tabs do not overlap, long Unicode labels ellipsize, tooltips preserve filenames, wheel scrolling and active reveal work");
 			}
+		}
+		return result;
+	}
+
+	function largePickerStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
+		if (frames == 2) {
+			var store = new haxeon.ui.core.StateStore();
+			var prefix = "4:root|20:exosuit-overlay-host|12:host-overlay|12:command-view|7:content|10:cv-content|4:list|9:cv-scroll|7:content|7:cv-rows|";
+			var firstPath = prefix + "8:row24263|12:cv-row-24263|6:button";
+			var secondPath = prefix + "8:row29451|12:cv-row-29451|5:label|5:label";
+			require(haxeon.ui.core.KeyScope.widgetIdForPath(firstPath).value == haxeon.ui.core.KeyScope.widgetIdForPath(secondPath).value, "fixture no longer reproduces original collision");
+			var first = store.resolveWidgetId(firstPath), second = store.resolveWidgetId(secondPath);
+			require(first.value != second.value && store.resolveWidgetId(secondPath).value == second.value, "colliding paths alias widget identity");
+			var build = new haxeon.ui.core.BuildContext(store);
+			build.id("duplicate");
+			var rejected = false;
+			try { build.id("duplicate"); } catch (_:Dynamic) { rejected = true; }
+			require(rejected, "duplicate widget keys were silently accepted");
+			var entries:Array<commandview.CommandViewEntry> = [];
+			for (index in 0...50000) entries.push(new commandview.CommandViewEntry("file-" + index, "", Std.string(index)));
+			host.openCommandView(new commandview.CommandViewProvider("", entries, function(_) {}, function(entry, query, backwards) {
+				pointerCommand = entry == null ? "" : entry.value;
+				host.closeCommandView();
+			}));
+		}
+		if (frames == 3) ui.key(UiEventKind.KeyDown, UiKey.Up, 0);
+		if (frames == 4) {
+			var bounds = node("cv-row-49999").globalBounds();
+			require(bounds.y >= 40 && bounds.y + bounds.height <= 420, "keyboard selection was not revealed");
+			ui.text(UiEventKind.TextInput, "file-49999");
+		}
+		if (frames == 5) click("cv-row-0");
+		if (frames == 6) {
+			require(pointerCommand == "49999" && !host.isCommandViewActive(), "filtered pointer result was not accepted");
+			trace("PASS: 50000 picker results, keyboard reveal, filtering, pointer acceptance and widget hash collisions");
+		}
+		var result = super.submit(frame);
+		if (frames >= 2 && frames <= 4) {
+			var built = 0;
+			var pending = [result];
+			while (pending.length > 0) {
+				var current = pending.pop();
+				if (current.styleKey != null && StringTools.startsWith(current.styleKey, "cv-row-")) built++;
+				for (child in current.children) pending.push(child);
+			}
+			require(built > 0 && built < 40, "picker materialized an unbounded number of rows: " + built);
 		}
 		return result;
 	}
@@ -1214,14 +1261,14 @@ class WorkspaceSmokeApp extends ExosuitApp {
 			languageFeatureStage = 1;
 		} else if (languageFeatureStage == 1 && host.isCommandViewActive() && hasText(node("cv-content"), "Document Symbols")) {
 			ui.text(UiEventKind.TextInput, "value"); languageFeatureStage = 2;
-		} else if (languageFeatureStage == 2 && node("cv-rows").children.length == 1 && hasText(node("cv-row-0"), "value")) {
+		} else if (languageFeatureStage == 2 && find(ui.root, "cv-row-1") == null && hasText(node("cv-row-0"), "value")) {
 			ui.key(UiEventKind.KeyDown, UiKey.Enter, 0); languageFeatureStage = 3;
 		} else if (languageFeatureStage == 3 && !host.isCommandViewActive()) {
 			require(ui.commands.execute("exosuit.language:find-references"), "graphical references command unavailable"); languageFeatureStage = 4;
 		} else if (languageFeatureStage == 4 && host.isCommandViewActive() && hasText(node("cv-content"), "References")) {
-			require(node("cv-rows").children.length == 2, "graphical references omitted closed file");
+			require(find(ui.root, "cv-row-1") != null && find(ui.root, "cv-row-2") == null, "graphical references omitted closed file");
 			ui.text(UiEventKind.TextInput, "Other.hx"); languageFeatureStage = 5;
-		} else if (languageFeatureStage == 5 && node("cv-rows").children.length == 1 && hasText(node("cv-row-0"), "Other.hx")) {
+		} else if (languageFeatureStage == 5 && find(ui.root, "cv-row-1") == null && hasText(node("cv-row-0"), "Other.hx")) {
 			ui.key(UiEventKind.KeyDown, UiKey.Enter, 0); languageFeatureStage = 6;
 		} else if (languageFeatureStage == 6 && !host.isCommandViewActive()) {
 			var referenced = host.activeDocument();

@@ -27,6 +27,7 @@ class FileSystemService implements EditorFileSystem {
 
 	public function entries(path:String):Array<String> {
 		var values = FileSystem.readDirectory(path);
+		if (values == null) throw 'Could not read directory "$path"';
 		values.sort(Reflect.compare);
 		return values;
 	}

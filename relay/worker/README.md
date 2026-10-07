@@ -1,6 +1,7 @@
 # Exosuit relay Worker
 
-This is the local prototype of the M16 relay. One SQLite-backed Durable Object
+This is the M16 relay. The current deployment is
+`https://exosuit-relay.joao-9f7.workers.dev`. One SQLite-backed Durable Object
 is addressed by each random machine ID. A native workspace service opens the
 machine WebSocket; pairing browsers and approved devices open their own
 WebSockets to the same object. The object routes only binary frames and keeps
@@ -72,8 +73,8 @@ The first machine registration is a high-entropy, first-claim capability rather
 than an account-backed registration flow. Provision the machine ID and bearer
 locally, store the bearer in the OS credential store, and register before
 displaying any invitation. Account enrollment, global abuse controls and
-machine credential rotation are not implemented; this prototype is not ready
-for public deployment.
+machine credential rotation are not implemented. The current deployment is for
+controlled workspace use; it is not a generally available public relay service.
 
 ## Current limits
 
@@ -94,3 +95,36 @@ for public deployment.
   connector is not yet part of workspace-service lifecycle.
 - Noise integration, device-grant lifecycle, browser persistence and
   cross-network deployment are still open.
+
+## Deployment
+
+The project-local Wrangler deploys `exosuit-relay` to account
+`9f733f114bd1814ccd3a0a9483948b93`, using the `MachineRelay` SQLite Durable
+Object binding and migration `v1`. Browser origins currently allowed are
+`http://127.0.0.1:8081` and `http://localhost:8081`; add the exact hosted web
+app origin before using a hosted browser client. Preview URLs and observability
+logs are disabled. Deployment does not change the account's plan.
+
+```sh
+npm run check
+npx --no-install wrangler deploy --dry-run
+npx --no-install wrangler deploy
+```
+
+Version `d20a653e-470c-4659-9abd-37ff23624119` was deployed on 2026-10-07.
+Live HTTPS registration, idempotency, invalid-bearer rejection, browser-origin
+restrictions, ticket exchange, machine/device WebSockets, bidirectional binary
+forwarding, invitation creation, pairing WebSockets and device revocation passed. Desktop approval,
+Noise and full browser editor pairing still need live end-to-end qualification.
+
+Native hosted qualification is explicitly opt-in:
+
+```sh
+python3 scripts/test-hosted-relay.py https://exosuit-relay.joao-9f7.workers.dev
+```
+
+Run from the editor repository root. This creates an isolated workspace and
+relay machine, connects through the native HTTPS/WSS stack, creates a short-lived
+invitation, then stops the fixture and removes its local OS credentials.
+Native clients omit the browser `Origin` header; browser origin restrictions
+remain enforced. This check passed against the hosted deployment on 2026-10-07.

@@ -28,6 +28,7 @@ test -s "$fixture/state-restart/session.conf"
 test -s "$fixture/state-restart/recovery.conf"
 run_phase read restart
 run_phase keyboard keyboard
+run_phase large-picker large-picker
 mkdir -p "$fixture/state-legacy" "$fixture/state-corrupt" "$fixture/state-invalid-dock"
 printf 'version=3\nlayout=T\t\t0\t0\t0\t0\t0\tP\t%s\nlayout=T\t\t1\t0\t3\t0\t0\tP\t%s\n' \
     "$fixture/project/deleted.hx" "$fixture/project/Main.hx" > "$fixture/state-legacy/session.conf"

@@ -106,6 +106,14 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
       "failed",
       "lost"
     ].indexOf(r.state) >= 0;
+  function nextTerminalName():String {
+    var used:Map<String, Bool> = [];
+    for (record in catalog) used.set(record.name, true);
+    var number = 1;
+    while (used.exists("Terminal " + number)) number++;
+    return "Terminal " + number;
+  }
+
   function copy(r:TerminalRecord):TerminalRecord return {
     id: r.id,
     name: r.name,
@@ -329,7 +337,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         if (resolved == null) { c.fail(error("invalid_directory")); return; }
         var record:TerminalRecord = {
           id: r.id,
-          name: "Terminal " +(count + 1),
+          name: nextTerminalName(),
           group: selectedGroup,
           cwd : resolved,
           workspaceRoot: root,

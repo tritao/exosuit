@@ -49,6 +49,8 @@ import haxeon.ui.widgets.layout.Column;
 import haxeon.ui.widgets.layout.Row;
 import haxeon.ui.widgets.overlays.Popup;
 import haxeon.ui.widgets.scroll.ScrollView;
+import haxeon.ui.widgets.collections.VirtualList;
+import haxeon.ui.widgets.scroll.ScrollController;
 import haxeon.ui.widgets.text.Text;
 import haxeon.ui.core.TextStyleOverride;
 
@@ -115,6 +117,9 @@ class UiWorkbenchHost implements WorkbenchHost {
 	var selectedExplorerPath:Null<String>;
 
 	final commandView:CommandView = new CommandView();
+	final commandScroll = new ScrollController();
+	var commandScrollSelection = -1;
+	var commandScrollQuery = "";
 	var commandViewProvider:Null<CommandViewProvider>;
 	final commandViewCapture:KeyCaptureView;
 
@@ -449,6 +454,9 @@ class UiWorkbenchHost implements WorkbenchHost {
 	public function openCommandView(provider:CommandViewProvider):Void {
 		commandViewProvider = provider;
 		commandView.open(provider);
+		commandScroll.jumpTo(0, 0);
+		commandScrollSelection = -1;
+		commandScrollQuery = "";
 		commandViewCapture.resetFocus();
 		requestFrame();
 	}
@@ -1047,25 +1055,33 @@ class UiWorkbenchHost implements WorkbenchHost {
 
 	function buildCommandViewContent():NkView {
 		return new OverlayBuilderView(function(context) {
-			var rows:Array<KeyedView> = [];
-			for (index in 0...commandView.results.length) {
+			var rowHeight = 32.0, viewportHeight = 320.0;
+			if (commandScrollQuery != commandView.query) commandScroll.jumpTo(0, 0);
+			if (commandScrollSelection != commandView.selected || commandScrollQuery != commandView.query) {
+				var top = commandView.selected * rowHeight;
+				if (top < commandScroll.offsetY) commandScroll.jumpTo(0, top);
+				else if (top + rowHeight > commandScroll.offsetY + viewportHeight)
+					commandScroll.jumpTo(0, top + rowHeight - viewportHeight);
+			}
+			commandScrollSelection = commandView.selected;
+			commandScrollQuery = commandView.query;
+			var scrollStyle = new LayoutStyle();
+			scrollStyle.width = LayoutAxis.fixed(520.0);
+			scrollStyle.height = LayoutAxis.fixed(viewportHeight);
+			scrollStyle.background = Color.rgba(0.11, 0.11, 0.13, 0.98);
+			var scroll = new VirtualList("cv-scroll", commandView.results.length, rowHeight, function(index) {
 				var entry = commandView.results[index], provider = commandViewProvider;
 				var label = entry.label + (entry.detail.length > 0 ? "  " + entry.detail : "")
 					+ (entry.trailing.length > 0 ? "   [" + entry.trailing + "]" : "");
-				var button = new Button(label, null, function() {
+				var rowStyle = new LayoutStyle();
+				rowStyle.width = LayoutAxis.grow();
+				rowStyle.height = LayoutAxis.fixed(rowHeight);
+				var button = new Button(label, rowStyle, function() {
 					if (provider != null) provider.onAccept(entry, commandView.query, false);
 				}, "cv-row-" + index);
 				button.variant = index == commandView.selected ? ButtonVariant.Primary : ButtonVariant.Secondary;
-				rows.push(new KeyedView("row" + index, button));
-			}
-			var listStyle = new LayoutStyle();
-			listStyle.width = LayoutAxis.grow();
-			var list = new Column("cv-rows", rows, listStyle);
-			var scrollStyle = new LayoutStyle();
-			scrollStyle.width = LayoutAxis.fixed(520.0);
-			scrollStyle.height = LayoutAxis.fixed(320.0);
-			scrollStyle.background = Color.rgba(0.11, 0.11, 0.13, 0.98);
-			var scroll = new ScrollView("cv-scroll", list, scrollStyle);
+				return button;
+			}, scrollStyle, null, commandScroll, viewportHeight);
 			var promptStyle = new LayoutStyle();
 			promptStyle.width = LayoutAxis.fixed(520.0);
 			promptStyle.padding = new Insets(10.0, 8.0, 10.0, 8.0);

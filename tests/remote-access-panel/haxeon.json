@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "package": {"name": "exosuit-remote-access-panel-test"},
+  "entry": "app.RemoteAccessPanelTestMain",
+  "sourceRoots": ["src"],
+  "dependencies": {"exosuit-graphical": {"path": "../../graphical"}},
+  "target": "host",
+  "outputDir": "build"
+}

@@ -29,6 +29,7 @@ import workspace.service.WorkspacePairingProtocol.PairingList;
 @:id(8) var socket:String;
 @:id(9) var websocket:String;
 @:id(10) var credentialFile:String;
+@:optional @:id(11) var expectedBuild:Null<String>;
 }
 
 /** Nonblocking native attachment. Closing a client never owns/stops the shared daemon. */
@@ -68,6 +69,25 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   var pairingsPending:Bool = false;
   var pairingsMutation:Bool = false;
   var pairingsNext:Float = 0;
+  var relayStatus:Null<workspace.service.WorkspacePairingProtocol.RemoteAccessStatus>;
+  var relayStatusNext:Float = 0;
+  var relayStatusPending:Bool = false;
+  var relayOrigin:String = "";
+  var expectedBuild:String = "";
+  var lifecycle:Null<workspace.service.WorkspaceLifecycleProtocol.WorkspaceServiceStatus>;
+  var lifecyclePending = false;
+  var lifecycleNext:Float = 0;
+  var updateHelper:Null<OwnedProcess>;
+  var updateOutput = "";
+  var updateErrors = "";
+  var updateMode = "";
+  var updateSelection = 0;
+  var updateInstance = "";
+  var updateDeadline:Float = 0;
+  var updateFailure:Null<String>;
+  var updateRequestPending = false;
+  var autoUpdateAttempted = false;
+  var recoveringUntil:Float = 0;
 
   public function new(
     events:NativeKitEvents,
@@ -124,13 +144,132 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   public function hasGroupTree():Bool return client != null && client.capabilities().indexOf(WorkspaceProtocol.TREE) >= 0;
   public function canEditGroups():Bool return workbench.canEditGroups();
 
-  public function canManagePairings():Bool return ready && client != null && client.capabilities().indexOf(WorkspacePairingProtocol.ADMIN) >= 0;
+  public function workspaceConnected():Bool return ready;
+  public function serviceStatus():Null<workspace.service.WorkspaceLifecycleProtocol.WorkspaceServiceStatus> return lifecycle;
+  public function serviceUpdateAvailable():Bool return ready && (!hasCapability(workspace.service.WorkspaceLifecycleProtocol.CAPABILITY)
+    || lifecycle != null && (lifecycle.protocol != workspace.service.WorkspaceLifecycleProtocol.VERSION
+      || expectedBuild.length > 0 && lifecycle.build != expectedBuild));
+  public function serviceUpdateBusy():Bool return updateHelper != null || updateRequestPending;
+  public function serviceUpdateError():Null<String> return updateFailure;
+
+  public function requestServiceUpdate(mode:String):Void {
+    if (!ready || serviceUpdateBusy() || root == null || mode != "idle" && mode != "now" && mode != "cancel") return;
+    autoUpdateAttempted = true;
+    updateFailure = null;
+    if (mode == "cancel") { sendServiceUpdate(mode); return; }
+    var managed = hasCapability(workspace.service.WorkspaceLifecycleProtocol.CAPABILITY);
+    if (!managed && mode != "now") {
+      updateFailure = "This older service requires an explicit restart; its session activity cannot be checked safely.";
+      pairingsRevision++;
+      return;
+    }
+    updateMode = mode; updateSelection = selection; updateInstance = instance;
+    updateOutput = ""; updateErrors = "";
+    var arguments = [launcher, root, managed ? "--prepare-update" : "--restart", "--wire"];
+    if (!managed) { arguments.push("--expected-generation"); arguments.push(instance); }
+    try {
+      updateHelper = processes.start("python3", arguments, root, environment);
+      updateDeadline = clock() + 110000;
+    } catch (failure:Dynamic) updateFailure = Std.string(failure);
+    pairingsRevision++;
+  }
+
+  function sendServiceUpdate(mode:String):Void {
+    var connection = rpc();
+    if (connection == null || !hasCapability(workspace.service.WorkspaceLifecycleProtocol.CAPABILITY)) return;
+    updateRequestPending = true;
+    connection.call(workspace.service.WorkspaceLifecycleProtocol.UPDATE, {mode: mode}, 3000, function(value) {
+      updateRequestPending = false;
+      if (rpc() != connection) return;
+      if (!value.accepted) updateFailure = "The workspace service refused this update request.";
+      lifecycleNext = 0; pairingsRevision++;
+    }, function(failure) {
+      updateRequestPending = false;
+      if (rpc() == connection) { updateFailure = failure.message; pairingsRevision++; }
+    });
+  }
+
+  function pollUpdateHelper():Void {
+    var process = updateHelper;
+    if (process == null) return;
+    updateOutput += process.readStdout(); updateErrors += process.readStderr();
+    if (clock() >= updateDeadline || updateOutput.length > 16384 || updateErrors.length > 16384) {
+      processes.release(process); updateHelper = null;
+      updateFailure = "Workspace update preparation exceeded its limit."; pairingsRevision++; return;
+    }
+    if (process.running()) return;
+    updateOutput += process.readStdout(); updateErrors += process.readStderr();
+    var code = process.exitStatus();
+    processes.release(process); updateHelper = null;
+    if (updateSelection != selection) return;
+    if (code != 0) {
+      updateFailure = updateErrors.length == 0 ? "Could not prepare the workspace update." : StringTools.trim(updateErrors);
+    } else {
+      try {
+        var endpoint:LocalWorkspaceEndpoint = JsonWire.decode(updateOutput);
+        if (endpoint.root != root) throw "Update helper returned another workspace";
+        expectedBuild = endpoint.expectedBuild == null ? "" : endpoint.expectedBuild;
+        if (endpoint.generation != updateInstance) {
+          stopConnection(); retryAt = clock() + 100; recoveringUntil = clock() + 120000;
+        } else if (instance == updateInstance) sendServiceUpdate(updateMode);
+        else updateFailure = "Workspace service changed while preparing the update; refresh and try again.";
+      } catch (failure:Dynamic) updateFailure = Std.string(failure);
+    }
+    pairingsRevision++;
+  }
+
+  function refreshServiceStatus():Void {
+    var connection = rpc();
+    if (connection == null || lifecyclePending || clock() < lifecycleNext
+      || !hasCapability(workspace.service.WorkspaceLifecycleProtocol.CAPABILITY)) return;
+    lifecyclePending = true; lifecycleNext = clock() + 1000;
+    connection.call(workspace.service.WorkspaceLifecycleProtocol.STATUS, {}, 3000, function(value) {
+      if (rpc() != connection) return;
+      lifecyclePending = false;
+      if (value.protocol < 1 || value.build == null || value.build.length > 128 || value.terminals < 0 || value.agents < 0) {
+        updateFailure = "Workspace service returned an invalid update status.";
+        pairingsRevision++;
+        return;
+      }
+      var changed = lifecycle == null || lifecycle.build != value.build || lifecycle.protocol != value.protocol
+        || lifecycle.terminals != value.terminals || lifecycle.agents != value.agents || lifecycle.updatePending != value.updatePending;
+      lifecycle = value;
+      if (changed) pairingsRevision++;
+      if (serviceUpdateAvailable() && value.protocol == workspace.service.WorkspaceLifecycleProtocol.VERSION
+        && value.terminals == 0 && value.agents == 0 && !value.updatePending
+        && !serviceUpdateBusy() && !autoUpdateAttempted) {
+        autoUpdateAttempted = true;
+        requestServiceUpdate("idle");
+      }
+    }, function(failure) {
+      if (rpc() == connection) { lifecyclePending = false; updateFailure = failure.message; pairingsRevision++; }
+    });
+  }
+  public function remoteAccessStatus():Null<workspace.service.WorkspacePairingProtocol.RemoteAccessStatus> return relayStatus;
+  public function canConfigureRelay():Bool return ready && hasCapability(WorkspacePairingProtocol.STATUS_CAPABILITY);
+  public function configureRelay(origin:String):Void {
+    if (!canConfigureRelay() || helper != null || relayStatus != null && relayStatus.configured) return;
+    // Match the transport's origin validation before passing a structured process argument.
+    try {
+      var endpoint = new workspace.transport.RelayMachineEndpoint(StringTools.trim(origin), "00000000000000000000000000000000");
+      if (endpoint.isLoopbackHttp && Sys.getEnv("EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP") != "1") throw "Enter an HTTPS relay address";
+      relayOrigin = endpoint.origin;
+      startHelper("configure-relay");
+    } catch (failure:Dynamic) {
+      pairingsError = Std.string(failure);
+      pairingsRevision++;
+    }
+  }
+  public function canManagePairings():Bool return ready && client != null
+    && client.capabilities().indexOf(WorkspacePairingProtocol.ADMIN) >= 0
+    && (relayStatus == null || relayStatus.connected);
   public function pairingList():Null<PairingList> return pairings;
   public function pairingRevision():Int return pairingsRevision;
   public function pairingBusy():Bool return pairingsMutation;
   public function pairingError():Null<String> return pairingsError;
 
   public function refreshPairings(force:Bool):Void {
+    refreshRemoteAccessStatus(force);
     var connection = rpc();
     if (connection == null || pairingsPending || (!force && clock() < pairingsNext)
       || client == null || client.capabilities().indexOf(WorkspacePairingProtocol.ADMIN) < 0) return;
@@ -153,6 +292,31 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
         pairingsError = failure.message;
         pairingsRevision++;
       }
+    });
+  }
+
+  function refreshRemoteAccessStatus(force:Bool):Void {
+    var connection = rpc();
+    if (connection == null || relayStatusPending || !hasCapability(WorkspacePairingProtocol.STATUS_CAPABILITY)
+      || !force && clock() < relayStatusNext) return;
+    relayStatusPending = true;
+    relayStatusNext = clock() + 1000;
+    connection.call(WorkspacePairingProtocol.STATUS, {}, 3000, function(value) {
+      if (rpc() != connection) return;
+      relayStatusPending = false;
+      var changed = relayStatus == null || relayStatus.configured != value.configured
+        || relayStatus.connected != value.connected || relayStatus.origin != value.origin || relayStatus.error != value.error;
+      relayStatus = value;
+      if (changed) pairingsRevision++;
+      if (value.configured && !hasCapability(WorkspacePairingProtocol.ADMIN)) {
+        stopConnection();
+        retryAt = clock() + 100;
+      }
+    }, function(failure) {
+      if (rpc() != connection) return;
+      relayStatusPending = false;
+      pairingsError = failure.message;
+      pairingsRevision++;
     });
   }
 
@@ -249,7 +413,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   public function statusLabel():String {
     if (root == null) return "";
     if (error != null) return "Workspace unavailable";
-    if (ready) return "Workspace connected";
+    if (ready) return serviceUpdateAvailable() ? "Workspace update available" : "Workspace connected";
     return wasReady ? "Workspace reconnecting" : "Connecting workspace…";
   }
 
@@ -281,6 +445,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     }
     if (canonical == root) return;
     selection++;
+    if (updateHelper != null) processes.release(updateHelper);
+    updateHelper = null; updateFailure = null; autoUpdateAttempted = false; recoveringUntil = 0;
     stopConnection();
     stopHelper();
     root = canonical;
@@ -297,6 +463,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   }
 
   function stopConnection():Void {
+    lifecycle = null; lifecyclePending = false; lifecycleNext = 0; updateRequestPending = false;
+    relayStatus = null; relayStatusPending = false; relayStatusNext = 0;
     pairings = null; pairingsError = null; pairingsPending = false; pairingsMutation = false; pairingsNext = 0; pairingsRevision++;
     if (client != null) client.close();
     client = null;
@@ -312,6 +480,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
 
   function fail(message:String):Void {
     error = message;
+    if (updateHelper != null) processes.release(updateHelper);
+    updateHelper = null;
     stopConnection();
     stopHelper();
   }
@@ -327,7 +497,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     try {
       helper = processes.start(
         "python3",
-        [launcher, path, mode == "discover" ? "--discover" : "--detach", "--wire"],
+        mode == "configure-relay" ? [launcher, path, "--configure-relay", relayOrigin, "--wire"]
+          : [launcher, path, mode == "discover" ? "--discover" : "--detach", "--wire"],
         path,
         environment
       );
@@ -344,6 +515,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
       || endpoint.socket.length == 0) throw "Invalid workspace discovery descriptor";
     var expectedInstance = endpoint.generation, expectedRoot = path, selected = selection;
     instance = expectedInstance;
+    expectedBuild = endpoint.expectedBuild == null ? "" : endpoint.expectedBuild;
     verified = false;
     if (replica == null) replica = new WorkspaceReplica("workspace", 2000);
     var required = [WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS, WorkspaceProtocol.IDENTITY_CAPABILITY];
@@ -357,6 +529,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     caps.push(WorkspaceTerminalProtocol.CONTROL);
     caps.push(WorkspaceFileProtocol.READ);
     caps.push(WorkspacePairingProtocol.ADMIN);
+    caps.push(WorkspacePairingProtocol.STATUS_CAPABILITY);
+    caps.push(workspace.service.WorkspaceLifecycleProtocol.CAPABILITY);
     deadline = clock() + 12000;
     client = new RpcClient(new NativeRpcConnector(hub,
       NativeRpcHub.local(endpoint.socket)), clock, function() return Math.random(), new RpcPeerOptions(
@@ -407,9 +581,11 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   }
 
   public function poll():Void {
+    pollUpdateHelper();
     workbench.poll();
     if (disposed || root == null || error != null) return;
     var now = clock(), process = helper;
+    if (recoveringUntil > 0 && now >= recoveringUntil && !ready) { fail("Workspace service did not reconnect after updating"); return; }
     if (!wasReady && now >= startupDeadline) {
       fail("Workspace startup timed out");
       return;
@@ -438,6 +614,11 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
         } catch (failure:Dynamic) {
           fail(Std.string(failure));
         }
+      } else if (mode == "configure-relay") {
+        var message = errors.length > 0 ? StringTools.trim(errors) : "Could not configure remote access";
+        startHelper("discover");
+        pairingsError = message;
+        pairingsRevision++;
       } else if (mode == "discover" && code == 4) {
         spawned = true;
         startHelper("launch");
@@ -457,6 +638,12 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     workbench.poll();
     if (client != current || error != null) return;
     if (current.state == Closed) {
+      if (wasReady) {
+        stopConnection(); retryAt = now + 250;
+        if (recoveringUntil == 0) recoveringUntil = now + 120000;
+        pairingsRevision++;
+        return;
+      }
       fail(current.lastError == null ? "Workspace connection closed" : current.lastError.code);
       return;
     }
@@ -469,6 +656,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
       }
     }
     if (ready) {
+      recoveringUntil = 0;
+      refreshServiceStatus();
       wasReady = true;
       deadline = now + 3000;
       return;
@@ -487,6 +676,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   public function dispose():Void {
     if (disposed) return;
     disposed = true;
+    if (updateHelper != null) processes.release(updateHelper);
+    updateHelper = null;
     selection++;
     stopConnection();
     workbench.dispose();

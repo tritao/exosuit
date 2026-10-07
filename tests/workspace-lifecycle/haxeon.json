@@ -1,0 +1,1 @@
+{"version":1,"package":{"name":"exosuit-workspace-lifecycle-test"},"entry":"app.LifecycleTestMain","sourceRoots":["src"],"dependencies":{"pragtical_hx":{"path":"../.."}},"target":"host","outputDir":"build"}

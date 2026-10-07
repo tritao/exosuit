@@ -15,12 +15,32 @@ class WorkspaceRpcServer {
 	final identity:Null<WorkspaceIdentity>;
 	final terminals:Null<WorkspaceTerminals>;
 	final agents:Null<workspace.service.WorkspaceAgents>;
-	final pairingAdmin:Null<workspace.service.WorkspacePairingAdmin>;
+	var pairingAdmin:Null<workspace.service.WorkspacePairingAdmin>;
+	public var remoteAccessStatus:Null<Void->workspace.service.WorkspacePairingProtocol.RemoteAccessStatus>;
+	var serviceStatus:Null<Void->workspace.service.WorkspaceLifecycleProtocol.WorkspaceServiceStatus>;
+	var updateService:Null<String->Bool>;
 	final files:Null<workspace.runtime.WorkspaceFileService>;
 	final peers:Array<Peer> = [];
 
 	public final options:RpcPeerOptions;
-	final localOptions:RpcPeerOptions;
+	var localOptions:RpcPeerOptions;
+
+	public function enableLifecycle(status:Void->workspace.service.WorkspaceLifecycleProtocol.WorkspaceServiceStatus, update:String->Bool):Void {
+		serviceStatus = status; updateService = update;
+		var offered = localOptions.offered();
+		offered.push(workspace.service.WorkspaceLifecycleProtocol.CAPABILITY);
+		localOptions = new RpcPeerOptions(options.application, offered, [], options.timeoutMs,
+			options.maxMessageBytes, options.maxCalls, options.maxQueuedBytes, options.protocol, options.codec);
+	}
+
+	public function enablePairing(admin:workspace.service.WorkspacePairingAdmin):Void {
+		pairingAdmin = admin;
+		var offered = localOptions.offered();
+		if (offered.indexOf(workspace.service.WorkspacePairingProtocol.ADMIN) < 0)
+			offered.push(workspace.service.WorkspacePairingProtocol.ADMIN);
+		localOptions = new RpcPeerOptions(options.application, offered, [], options.timeoutMs,
+			options.maxMessageBytes, options.maxCalls, options.maxQueuedBytes, options.protocol, options.codec);
+	}
 
 	/** Only authenticated, fully negotiated connections keep the daemon alive. */
 	public function clientCount():Int {
@@ -57,6 +77,7 @@ class WorkspaceRpcServer {
 			defaults.push(workspace.service.WorkspaceFileProtocol.READ);
 		options = new RpcPeerOptions("exosuit-agent/1", capabilities == null ? defaults : capabilities, [], 5000, 262144, 32, 1048576);
 		var localDefaults = options.offered();
+		localDefaults.push(workspace.service.WorkspacePairingProtocol.STATUS_CAPABILITY);
 		if (pairingAdmin != null)
 			localDefaults.push(workspace.service.WorkspacePairingProtocol.ADMIN);
 		localOptions = new RpcPeerOptions(options.application, localDefaults, [], options.timeoutMs,
@@ -148,6 +169,20 @@ class WorkspaceRpcServer {
 				peer.connection = handshake.connection;
 				if (peer.connection != null) {
 					var grants = handshake.capabilities();
+					if (peer.localAdmin && serviceStatus != null && updateService != null
+						&& grants.indexOf(workspace.service.WorkspaceLifecycleProtocol.CAPABILITY) >= 0) {
+						var status = serviceStatus;
+						var update = updateService;
+						peer.connection.register(workspace.service.WorkspaceLifecycleProtocol.STATUS, function(_, context) context.respond(status()));
+						peer.connection.register(workspace.service.WorkspaceLifecycleProtocol.UPDATE, function(request, context)
+							context.respond({accepted: update(request.mode)}));
+					}
+					if (peer.localAdmin && grants.indexOf(workspace.service.WorkspacePairingProtocol.STATUS_CAPABILITY) >= 0)
+						peer.connection.register(workspace.service.WorkspacePairingProtocol.STATUS, function(_, context) {
+							context.respond(remoteAccessStatus == null
+								? {configured: pairingAdmin != null, connected: pairingAdmin != null, origin: null, error: null}
+								: remoteAccessStatus());
+						});
 					if (pairingAdmin != null && peer.localAdmin
 						&& grants.indexOf(workspace.service.WorkspacePairingProtocol.ADMIN) >= 0) {
 						var admin = pairingAdmin;

@@ -31,17 +31,27 @@ database and credential. Replaced/missing storage stops the daemon rather than
 silently opening a fresh catalog. Linux startup is tested; Windows management is
 not delivered by this POSIX launcher.
 
-Remote relay hosting is opt-in. Set `EXOSUIT_RELAY_ORIGIN` to an HTTPS relay
-origin before starting the manager. It creates one stable opaque relay identity
+Remote relay hosting is opt-in. In the desktop Remote Access panel, enter your
+HTTPS relay origin and choose **Enable remote access**. The address is saved in
+the private workspace state directory. The running daemon enables the relay
+without restarting terminals, Codex sessions, or sibling workspace clients.
+The panel distinguishes local workspace connection from relay connection and
+shows relay failures beside setup. Older daemons need to be restarted after
+their active sessions have finished before they can expose this setup flow.
+
+`EXOSUIT_RELAY_ORIGIN` still overrides the saved address when starting the manager.
+Configuration creates one stable opaque relay identity
 for that workspace service and a private, one-shot bearer bootstrap. The daemon
 moves the bearer into NativeKit's OS credential store, keyed by relay origin and
 machine identity, enrolls it with the Worker, and keeps the daemon alive while
 relay hosting is enabled. Linux builds
 need `libsecret-1-dev`; a user-session Secret Service must be available at runtime.
-The relay socket is outbound, so no inbound port needs to be exposed. Incoming
-device channels are currently closed until Noise authentication and device grants
-are connected to the workspace RPC service; this opt-in currently provides the
-host lifecycle and credential foundation, not a usable remote workspace client.
+The relay socket is outbound, so no inbound port needs to be exposed. Creating
+an invitation requires a connected relay. Incoming devices authenticate through
+Noise, and access starts only after code confirmation and desktop approval.
+Each request initially selects all permissions; the owner can select Read only,
+Edit files, or adjust individual permissions before approving. The choices for
+one request do not affect other requests or already paired devices.
 
 For direct fixtures, build with
 `haxeon/scripts/haxeon build --project agent/haxeon.json`.
@@ -81,6 +91,21 @@ Run `python3 scripts/test-agent-idle.py` for real idle shutdown, client retentio
 restart and detached availability. `bash scripts/test-runtime-bundle.sh` exercises
 already-built assets through the production staging routine after relocation,
 without publishing a release or modifying locked revisions.
+
+Managed services advertise a build identity and a same-user lifecycle capability.
+The editor compares that identity with the installed manager's source or bundled
+bytecode identity. An outdated idle service updates automatically. With active
+terminals or attached Codex conversations, the Remote access panel offers
+“Update when idle”, cancellation, and an explicitly confirmed “Restart now”.
+Preparation builds the replacement before asking the daemon to stop; build
+failure leaves current sessions running. The daemon rechecks activity itself,
+closes storage cleanly, and its manager starts a fresh generation. Connected
+editors rediscover and reconnect. Older services without lifecycle support need
+one explicitly confirmed restart because their activity cannot be checked safely.
+Lifecycle control is never offered to relay or loopback WebSocket clients.
+
+Run `python3 scripts/test-service-updates.py` for real idle, busy, forced and
+legacy upgrades with two editor clients, plus failed-build and generation guards.
 Run `bash scripts/test-workspace-attachment.sh` for discovery, identity, shared
 reuse and stale restart acceptance. `python3 scripts/test-workspace-attachment-ui.py`
 checks actual desktop attachment and reuse across windows under Xvfb.

@@ -19,6 +19,13 @@ import haxeon.wire.MessagePack;
 
 @:wire typedef PairingListRequest = {}
 
+@:wire typedef RemoteAccessStatus = {
+	@:id(1) var configured:Bool;
+	@:id(2) var connected:Bool;
+	@:optional @:id(3) var origin:Null<String>;
+	@:optional @:id(4) var error:Null<String>;
+}
+
 @:wire typedef PendingPairing = {
 	@:id(1) var deviceId:String;
 	@:id(2) var authenticationCode:String;
@@ -51,9 +58,13 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(2) var error:Null<String>;
 }
 
-/** Permanent local-admin method IDs; pairing methods occupy the 130–134 range. */
+/** Permanent local-admin method IDs; pairing and relay status occupy the 130–135 range. */
 class WorkspacePairingProtocol {
 	public static inline final ADMIN = "workspace.pairing.admin";
+	public static inline final STATUS_CAPABILITY = "workspace.remote-access.status";
+	public static final STATUS = new RpcMethod<PairingListRequest, RemoteAccessStatus>(135,
+		function(value) return MessagePack.encode(value), function(bytes:Bytes):PairingListRequest return MessagePack.decode(bytes),
+		function(value) return MessagePack.encode(value), function(bytes:Bytes):RemoteAccessStatus return MessagePack.decode(bytes));
 	public static final CREATE = new RpcMethod<CreatePairingRequest, PairingInvitation>(130,
 		function(value) return MessagePack.encode(value), function(bytes:Bytes):CreatePairingRequest return MessagePack.decode(bytes),
 		function(value) return MessagePack.encode(value), function(bytes:Bytes):PairingInvitation return MessagePack.decode(bytes));

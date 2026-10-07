@@ -48,6 +48,8 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 	public var grants(default, null):Array<String> = [];
 	public var savedDevices(default, null):Array<BrowserRemoteDevice> = [];
 	public var connecting(default, null):Bool = false;
+	public var lastRpcFailure(default, null):Null<String>;
+	public final rpcFailures:Array<String> = [];
 	public var revision(default, null):Int = 0;
 
 	final hub:NativeRpcHub;
@@ -107,7 +109,7 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 		authenticationCode = null;
 		workspaceRoot = null;
 		grants = [];
-		var parsed = parseInvitationUrl(StringTools.trim(url));
+		var parsed = BrowserPairingInvitation.parse(StringTools.trim(url));
 		if (parsed == null) {
 			fail("Enter the complete one-time WSS pairing URL from the desktop.");
 			return false;
@@ -138,7 +140,9 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 			}
 			connectorAttempt = null;
 			if (stream == null) {
-				fail(failure == null ? "Could not connect to the relay." : failure);
+				fail(failure == null || failure == "connect_failed"
+					? "Could not connect using this pairing link. Links expire and work only once; create a fresh invitation on the desktop and try again."
+					: failure);
 				return;
 			}
 			try {
@@ -360,17 +364,6 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 		}
 	}
 
-	static function parseInvitationUrl(url:String):Null<{url:String, origin:String, machineId:String, deviceId:String}> {
-		var pattern = ~/^(wss?):\/\/([A-Za-z0-9.-]+)(?::([0-9]{1,5}))?\/v1\/machines\/([0-9a-f]{32})\/pair\/([0-9a-f]{32})\?secret=([0-9a-f]{64})$/;
-		if (url == null || !pattern.match(url)) return null;
-		var scheme = pattern.matched(1).toLowerCase();
-		var host = pattern.matched(2).toLowerCase();
-		var port = pattern.matched(3);
-		if (port != null && (Std.parseInt(port) == null || Std.parseInt(port) > 65535 || Std.parseInt(port) < 1)) return null;
-		if (scheme != "wss" && host != "localhost" && host != "127.0.0.1") return null;
-		var origin = (scheme == "wss" ? "https" : "http") + "://" + host + (port == null ? "" : ":" + port);
-		return {url: url, origin: origin, machineId: pattern.matched(4), deviceId: pattern.matched(5)};
-	}
 
 	function onNoiseReady(transport:NoiseMessageTransport):Void {
 		secure = transport;
@@ -381,8 +374,6 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 		}
 		machineStaticPublicKey = current.remoteStaticKey;
 		if (savedConnection) {
-			wipe(localPrivateKey);
-			localPrivateKey = null;
 			setStatus("Machine identity verified. Connecting to workspace…");
 			connectWorkspace(transport);
 			return;
@@ -446,9 +437,14 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 			var connector = reconnectConnector;
 			if (connector != null) connector.poll();
 			activeRpc.poll();
+			if (activeRpc.lastError != null && (rpcFailures.length == 0 || rpcFailures[rpcFailures.length - 1] != activeRpc.lastError.code)) {
+				rpcFailures.push(activeRpc.lastError.code);
+				if (rpcFailures.length > 16) rpcFailures.shift();
+			}
 			if (activeRpc.state == RpcClientState.Closed && error == null) {
 				var rpcError = activeRpc.lastError;
 				var code = rpcError == null ? "" : rpcError.code;
+				lastRpcFailure = code;
 				fail(switch (code) {
 					case "unauthorized", "relay_unauthorized", "authentication_refused", "authorization_failed":
 						"This device is no longer authorized. Pair it again from the desktop.";

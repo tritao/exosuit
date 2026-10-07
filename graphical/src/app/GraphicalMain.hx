@@ -81,6 +81,7 @@ class GraphicalMain {
 			return true;
 		};
 		var app:Null<ExosuitApp> = null;
+		var terminalWorkspaces:Null<workspace.client.LocalTerminalWorkspacePool> = null;
 		var session = DesktopUiHost.open(host, function(context) {
 			var dark = prefersDark(themeChoice);
 			var workspaceClient:Null<workspace.client.LocalWorkspaceClient> = null;
@@ -88,10 +89,12 @@ class GraphicalMain {
 				openPaths.length == 0 ? null : openPaths[0], null,
 				new NativeDesktopServices(context), dark, ui.TerminalPane.open,
 				Sys.systemName() == "Linux" ? function(id,cwd,restored,requestFrame,palette,group,directory)
-					return ui.TerminalPane.openRemote(function() return workspaceClient,id,cwd,restored,requestFrame,palette,group,directory) : null);
+					return ui.TerminalPane.openRemote(function() return terminalWorkspaces == null ? null : terminalWorkspaces.endpoint(cwd),id,cwd,restored,requestFrame,palette,group,directory,null,true) : null);
 			if (Sys.systemName() == "Linux") {
 				try {
 					workspaceClient = new workspace.client.LocalWorkspaceClient(context.events, instance.application.processes,
+						workspace.client.LocalWorkspaceClient.findLauncher(), function() return NativeKit.nk_time_seconds() * 1000);
+					terminalWorkspaces = new workspace.client.LocalTerminalWorkspacePool(context.events, instance.application.processes,
 						workspace.client.LocalWorkspaceClient.findLauncher(), function() return NativeKit.nk_time_seconds() * 1000);
 					instance.attachWorkspace(workspaceClient);
 					instance.attachWorkbench(workspaceClient);
@@ -106,6 +109,13 @@ class GraphicalMain {
 			if (openWorkbench) instance.showSidebarMode("workbench");
 			if (pluginManifest != null && !instance.application.loadPluginManifest(pluginManifest))
 				Sys.println('exosuit: could not load plugin manifest "$pluginManifest"');
+			var applicationPoll = context.onPoll;
+			context.onPoll = function() {
+				if (terminalWorkspaces != null) terminalWorkspaces.poll();
+				if (applicationPoll != null) applicationPoll();
+				if (terminalWorkspaces != null) terminalWorkspaces.retainRoots(
+					[for (terminal in instance.host.allTerminalTabs()) if (terminal.remote && !terminal.disposed) terminal.workspaceRoot]);
+			};
 			app = instance;
 			if (startupMemory != null) StartupMemory.sample(startupMemory, "02-app-created");
 			return instance;
@@ -117,6 +127,7 @@ class GraphicalMain {
 		// Optional allocation census, excluding window/application construction.
 		if (allocationProfile != null) hl.Gc.censusStart(16384);
 		while (session.tick()) {}
+		if (terminalWorkspaces != null) terminalWorkspaces.dispose();
 		if (allocationProfile != null) {
 			hl.Gc.censusStop();
 			var encoded = haxe.io.Bytes.ofString(allocationProfile);

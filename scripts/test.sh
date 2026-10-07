@@ -55,6 +55,9 @@ bash "$root_dir/scripts/test-workspace-transport.sh"
 bash "$root_dir/scripts/test-relay.sh"
 bash "$root_dir/scripts/test-workspace-persistence.sh"
 bash "$root_dir/scripts/test-workspace-attachment.sh"
+python3 "$root_dir/scripts/test-relay-setup.py"
+run_test workspace-lifecycle
+python3 "$root_dir/scripts/test-service-updates.py"
 python3 "$root_dir/scripts/test-agent-idle.py"
 python3 "$root_dir/scripts/test-workspace-terminals.py"
 python3 "$root_dir/scripts/test-workspace-agents.py"
@@ -68,6 +71,18 @@ run_test command-test
 run_test editor-view-test
 run_test tab-tooltip
 run_test sidebar-layout
+run_test remote-access-panel
+run_test browser-pairing-url
+
+directory_scan_root=$(mktemp -d)
+mkdir "$directory_scan_root/blocked" "$directory_scan_root/vanishing"
+touch "$directory_scan_root/a.txt"
+chmod 000 "$directory_scan_root/blocked"
+directory_scan_status=0
+run_test directory-scan "$directory_scan_root" || directory_scan_status=$?
+chmod 700 "$directory_scan_root/blocked"
+rm -rf "$directory_scan_root"
+if [[ $directory_scan_status -ne 0 ]]; then exit "$directory_scan_status"; fi
 
 mkdir -p "$root_dir/build/process cwd"
 run_test process-test "$root_dir/build/process-fixture" "$root_dir/build/process cwd"

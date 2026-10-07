@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "package": {"name": "exosuit-directory-scan-test"},
+  "entry": "app.DirectoryScanTestMain",
+  "sourceRoots": ["src"],
+  "dependencies": {"pragtical_hx": {"path": "../.."}},
+  "target": "host",
+  "outputDir": "build"
+}

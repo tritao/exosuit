@@ -1,6 +1,12 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "exosuit-relay",
+  "account_id": "9f733f114bd1814ccd3a0a9483948b93",
+  "workers_dev": true,
+  "preview_urls": false,
+  "vars": {
+    "ALLOWED_ORIGINS": "http://127.0.0.1:8081,http://localhost:8081"
+  },
   "main": "src/index.ts",
   "compatibility_date": "2026-10-06",
   "durable_objects": {

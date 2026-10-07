@@ -6107,3 +6107,121 @@ Compiler issue ID, reduced case, root cause and regression evidence:
 Failures classified as introduced / baseline / environment:
 Remaining work and exact next action:
 ```
+
+
+## Hosted relay deployment — 2026-10-07
+
+User explicitly authorized deployment through existing Wrangler authentication.
+Deployed `exosuit-relay` with `MachineRelay` SQLite Durable Objects and migration
+`v1` to `https://exosuit-relay.joao-9f7.workers.dev`, version
+`d20a653e-470c-4659-9abd-37ff23624119`. No plan change was made. Browser allowlist
+contains the local web app origins `http://127.0.0.1:8081` and
+`http://localhost:8081`. Desktop setup defaults to the hosted address and still
+requires the owner to enable remote access.
+
+Typecheck, all 16 Worker-runtime tests and Wrangler dry run passed. Live machine
+registration/idempotency, invalid authentication, exact-origin browser CORS,
+machine/device and pairing WebSockets, binary forwarding in both directions,
+invitation creation and live device revocation passed. Live Noise/desktop approval/browser
+editor pairing and global abuse/quota qualification remain outstanding.
+
+
+## Hosted native relay recovery — 2026-10-07
+
+Investigated actual desktop `connect_failed` and `handler_failed` reports.
+Native TLS WebSockets sent a synthetic relay-host Origin, which the exact browser
+origin allowlist correctly rejected. NativeKit now omits Origin for native TLS
+WebSockets. Browser admission restrictions are unchanged; no relay redeploy was
+needed.
+
+The existing catalog used schema v5 for agent metadata, while the initial
+pairing implementation had reused v5 for device storage. Added additive v7
+migration accepting the older v5/v6 catalogs and existing pairing v5 catalogs,
+creating device storage without removing metadata. Migration preservation and
+persistence/manager tests passed. The affected running workspace now reports
+relay connected, pairing administration succeeds, and its schema is v7 with
+both device and existing agent-metadata tables present.
+
+Added opt-in `scripts/test-hosted-relay.py ORIGIN`, using isolated state and
+cleaning up fixture OS credentials. Native HTTPS/WSS connection, sibling editor
+continuity and hosted invitation creation passed. Native runtime rebuild and
+diff checks passed. End-to-end browser Noise/approval qualification remains open.
+
+
+### Browser pairing rebuild and hosted handshake check
+
+Rebuilt and served the current wasm32 web app. Extracted invitation validation
+into `BrowserPairingInvitation`, including normalization of the empty optional
+port capture; URL validation tests pass. The browser panel now identifies the
+one-time WSS invitation separately from the desktop HTTPS relay address, and
+connection failures explain how to retry with a fresh invitation.
+
+Verified a fresh invitation against the deployed relay using an isolated native
+workspace and Chrome: HTTP 101, bidirectional Noise handshake, and matching
+browser/native authentication codes passed on the final build. No device was
+approved and no workspace permissions were granted by this check. Full approval
+and attached-editor qualification remain outstanding.
+
+
+### Browser clipboard shortcut duplication
+
+Reproduced Ctrl+V inserting a complete 174-character invitation twice (348
+characters): the hidden browser input performed its default paste while the
+TextField also handled the forwarded shortcut. NativeKit now prevents default
+browser handling for these forwarded shortcuts, using the existing widget
+clipboard path once. Rebuilt the wasm32 host and guest; Chrome checks passed for
+exact single insertion, full selection copy, cut, and paste-back. Validation and
+relay admission restrictions are unchanged.
+
+
+### Post-approval workspace connection and saved-device reconnect
+
+Reproduced the browser closing after approval. Native TLS WebSocket sends queued
+work without waking the libwebsockets service thread; replies could stall until
+unrelated socket activity and exceed handshake timeouts. Queueing and stopping
+now wake the service, with context lifetime synchronized separately from the
+send queue. Removed temporary tracing and kept NativeKit comments generic.
+
+Fixed saved-device reconnect clearing the private key before constructing its
+workspace reconnect connector. Browser diagnostic snapshots retain bounded RPC
+failure codes. Service build identity now tracks NativeKit transport and RPC
+sources; the identity regression test and three manager unit tests pass.
+
+The final rebuilt browser passed hosted Noise pairing, matching codes, desktop
+approval, browser credential persistence, workspace identity/file attachment,
+and saved-device reconnect after page reload in an isolated workspace. The real
+workspace daemon updated while reporting zero active terminal/Codex sessions;
+its current-build status and relay/pairing administration check passed.
+
+All 13 workspace transport acceptance checks passed after the native wake-up fix.
+
+
+### Unique default terminal labels
+
+Terminal numbering now checks open panel/editor tabs and the workspace catalog,
+including restored sessions. Restoring duplicate default labels assigns an
+unused number locally; catalog refreshes preserve that disambiguation. Grouped
+terminal creation uses the same allocator. Custom titles remain unchanged.
+The daemon allocates default names from its persisted catalog rather than the
+active PTY count, preventing reuse after stop/restart or across client processes.
+
+Desktop and browser builds passed. Workspace terminal integration checks passed,
+including catalog operations, persisted groups, cross-client shell continuity,
+replay and idle shutdown. The current workspace daemon update was prepared and
+requested in idle mode, preserving active sessions.
+
+
+### Restored terminals from multiple workspace roots
+
+Confirmed the saved desktop layout contains terminals from both the main
+checkout and a separate worktree. Their backend previously shared the selected
+project's endpoint; the root check left other terminals indefinitely unattached.
+Desktop terminals now use a root-keyed connection pool independent of project
+selection. Closing the last terminal for a root releases its client, and desktop
+shutdown disposes the pool without terminating daemon-owned PTYs. Browser
+providers explicitly describe a different workspace rather than waiting forever.
+Unavailable saved sessions show their failure in the terminal control bar.
+
+Isolated real-daemon acceptance passed for two concurrent workspace roots,
+root switching, releasing one root without disconnecting another, an explicit
+workspace-mismatch message and an unavailable restored-session message.

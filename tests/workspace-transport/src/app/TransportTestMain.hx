@@ -48,7 +48,10 @@ class TransportTestMain {
 			}
 		]);
 		var server = new WorkspaceRpcServer(service, clock, null, null, null, null, new TestPairingAdmin());
-		var local = hub.listen(NativeRpcHub.local(args[0]), server.acceptLocal);
+		server.enableLifecycle(function():workspace.service.WorkspaceLifecycleProtocol.WorkspaceServiceStatus return {
+            protocol:1, build:"test", terminals:0, agents:0, updatePending:false
+        }, function(mode:String):Bool { throw "Transport fixture must not restart"; });
+        var local = hub.listen(NativeRpcHub.local(args[0]), server.acceptLocal);
 		var ws = hub.listen(NativeRpcHub.websocket(Std.parseInt(args[1]), "/workspace", true), function(stream) {
 			server.acceptWebSocket(stream, token);
 		});
@@ -78,7 +81,7 @@ class TransportTestMain {
 			var ready = 0;
 			client = new RpcClient(connector, clock, function() return 1.0,
 				new RpcPeerOptions("test/1", [WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS, WorkspaceProtocol.WRITE,
-					WorkspacePairingProtocol.ADMIN], [], 1000, 262144, 32, 1048576),
+					WorkspacePairingProtocol.ADMIN, workspace.service.WorkspaceLifecycleProtocol.CAPABILITY], [], 1000, 262144, 32, 1048576),
 				function(connection, generation, _) {
 					ready++;
 					var current = client;
@@ -107,6 +110,16 @@ class TransportTestMain {
 			if (connection == null)
 				throw "Missing connection";
 			require(ready == 1 && replica.view()[0].cwd == "/workspace", "Workspace snapshot lost cwd");
+            require((client.capabilities().indexOf(workspace.service.WorkspaceLifecycleProtocol.CAPABILITY) >= 0) == !websocket,
+                "Lifecycle control must only be offered on same-user local sockets");
+            if (websocket) {
+                var updateDenied:Null<RpcError> = null;
+                connection.call(workspace.service.WorkspaceLifecycleProtocol.UPDATE, {mode:"now"}, 1000,
+                    function(_) throw "WebSocket restarted local daemon", function(error) updateDenied = error);
+                while (updateDenied == null) { require(clock() < deadline, "Lifecycle refusal timed out"); step(); }
+                require(updateDenied.code == "unknown_method", "WebSocket can invoke lifecycle method");
+            }
+
 			var revision = service.snapshot().groups[0].revision,
 				sequence = service.snapshot().cursor;
 			if (!websocket) {

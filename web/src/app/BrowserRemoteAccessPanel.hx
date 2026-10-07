@@ -30,7 +30,7 @@ class BrowserRemoteAccessPanel implements View {
 	public function build(context:BuildContext):RenderNode {
 		var rows:Array<KeyedView> = [
 			new KeyedView("heading", new Text("Connect to a workspace")),
-			new KeyedView("description", new Text("Paste the one-time pairing URL copied from the desktop Remote Access panel. The browser connects directly to the relay; workspace traffic is encrypted end to end.",
+			new KeyedView("description", new Text("On the desktop, open Remote Access, click Create pairing invitation, then Copy pairing URL. Paste that one-time WSS link here. The relay HTTPS address is for desktop setup only.",
 				null, context.theme.tokens.textSecondary))
 		];
 		if (client.workspaceRoot != null) {
@@ -78,6 +78,10 @@ class BrowserRemoteAccessPanel implements View {
 				requestFrame();
 			});
 			address.label = "One-time pairing URL";
+			address.placeholder = "wss://…/v1/machines/…/pair/…?secret=…";
+			address.style.width = LayoutAxis.stretch();
+			address.ellipsizeWhenUnfocused = true;
+			rows.push(new KeyedView("url-label", new Text("One-time pairing URL")));
 			rows.push(new KeyedView("url", address));
 			var connect = new Button("Pair new device", null, function() {
 				if (client.beginPairing(pairingUrl)) pairingUrl = "";

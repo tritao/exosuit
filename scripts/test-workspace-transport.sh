@@ -56,13 +56,14 @@ with tempfile.TemporaryDirectory(prefix="exosuit-rpc-") as temporary:
      f'{origin}/v1/machines/{machine_id}/register',
      data=b'',headers={'Authorization':'Bearer '+machine_token},method='POST')
     with urllib.request.urlopen(request,timeout=1) as response:
-     if response.status != 201: raise RuntimeError(f'machine enrollment returned {response.status}')
+     # A timed-out response may already have committed enrollment; retries are idempotent.
+     if response.status not in (201, 204): raise RuntimeError(f'machine enrollment returned {response.status}')
     request=urllib.request.Request(
      f'{origin}/v1/machines/{machine_id}/devices/{device_id}',
      data=json.dumps({'token':device_token}).encode(),
      headers={'Authorization':'Bearer '+machine_token,'Content-Type':'application/json'},method='PUT')
     with urllib.request.urlopen(request,timeout=1) as response:
-     if response.status != 201: raise RuntimeError(f'device enrollment returned {response.status}')
+     if response.status not in (201, 204): raise RuntimeError(f'device enrollment returned {response.status}')
     break
    except (urllib.error.URLError, TimeoutError, ConnectionError):
     if time.monotonic() >= deadline:

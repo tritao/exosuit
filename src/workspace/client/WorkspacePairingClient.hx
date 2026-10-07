@@ -6,6 +6,15 @@ import workspace.service.WorkspacePairingProtocol.PairingList;
 
 /** Local-only controls for pairing and revoking remote devices. */
 interface WorkspacePairingClient {
+	public function serviceStatus():Null<workspace.service.WorkspaceLifecycleProtocol.WorkspaceServiceStatus>;
+	public function serviceUpdateAvailable():Bool;
+	public function serviceUpdateBusy():Bool;
+	public function serviceUpdateError():Null<String>;
+	public function requestServiceUpdate(mode:String):Void;
+	public function workspaceConnected():Bool;
+	public function remoteAccessStatus():Null<workspace.service.WorkspacePairingProtocol.RemoteAccessStatus>;
+	public function canConfigureRelay():Bool;
+	public function configureRelay(origin:String):Void;
 	public function canManagePairings():Bool;
 	public function pairingList():Null<PairingList>;
 	public function pairingRevision():Int;

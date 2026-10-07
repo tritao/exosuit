@@ -111,6 +111,7 @@ with tempfile.TemporaryDirectory(prefix='exa-') as temporary:
         assert restarted['generation'] != original['generation']
         descriptors[0] = restarted
         print('PASS: safe stale discovery restart and private descriptor rejection', flush=True)
+        run_client('remote-setup', root, environment)
     finally:
         # Read current owned descriptors, including managers created before a failed assertion.
         for endpoint in state.glob('exosuit/workspaces/*/endpoint.json'):
@@ -119,6 +120,10 @@ with tempfile.TemporaryDirectory(prefix='exa-') as temporary:
                 os.kill(descriptor['managerPid'], signal.SIGTERM)
             except (FileNotFoundError, ProcessLookupError):
                 pass
+        for identity in state.glob('exosuit/workspaces/*/relay-machine.json'):
+            machine_id = json.loads(identity.read_text())['machineId']
+            subprocess.run([HAXEON, 'run', '--project', str(ROOT / 'tests/workspace-attachment/haxeon.json'), *MODE, '--',
+                            'cleanup-relay', machine_id, 'https://127.0.0.1:1'], env=environment, check=True, timeout=120)
         deadline = time.monotonic() + 10
         while list(state.glob('exosuit/workspaces/*/endpoint.json')) and time.monotonic() < deadline:
             time.sleep(0.05)

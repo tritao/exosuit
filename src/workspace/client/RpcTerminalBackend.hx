@@ -22,6 +22,9 @@ class RpcTerminalBackend implements TerminalBackend {
   var controller:Bool = false;
   var controlled:Bool = false;
   var controlPending:Bool = false;
+  final autoClaimControl:Bool;
+  var controlReleased:Bool = false;
+  var controlUnavailable:Bool = false;
   var pending:Bool = false;
   var closed:Bool = false;
   var columns:Int = 80;
@@ -39,8 +42,9 @@ class RpcTerminalBackend implements TerminalBackend {
   var serverColumns:Int = 0;
   var serverRows:Int = 0;
 
-  public function new(provider:Void -> Null<WorkspaceRpcEndpoint>, terminalId:String, root:String, create:Bool, ?group:String, ?directory:String) {
+  public function new(provider:Void -> Null<WorkspaceRpcEndpoint>, terminalId:String, root:String, create:Bool, ?group:String, ?directory:String, autoClaimControl:Bool = false) {
     this.provider = provider;
+    this.autoClaimControl = autoClaimControl;
     this.terminalId = terminalId;
     this.root = root;
     this.create = create;
@@ -55,22 +59,32 @@ class RpcTerminalBackend implements TerminalBackend {
     return client != null && client.hasCapability(WorkspaceTerminalProtocol.CONTROL);
   }
   public function controlStatus():String {
-    if (!attached) return "Connecting to workspace terminal…";
+    if (failure != null) return "Terminal unavailable: " + failure;
+    if (!attached) {
+      var endpoint = provider();
+      if (endpoint != null && endpoint.rootPath() != null && endpoint.rootPath() != root)
+        return "Open this terminal's workspace to reconnect: " + root;
+      return "Connecting to workspace terminal…";
+    }
+    if (controlUnavailable) return "Read only · update the workspace daemon to control this terminal";
     if (!hasControlGrant()) return "Read only · control permission was not granted";
     if (controlPending) return "Updating terminal control…";
     if (controller) return "You are controlling this terminal";
     if (controlled) return "Read only · another client controls this terminal";
     return "Read only · no client is controlling this terminal";
   }
-  public function controlAction():String return !attached || !hasControlGrant() || controlPending ? "" : controller ? "Release" : "Take control";
-  public function activateControl():Void setControl(!controller);
-  function setControl(claim:Bool):Void {
+  public function controlAction():String return !attached || controlUnavailable || !hasControlGrant() || controlPending ? "" : controller ? "Release" : "Take control";
+  public function activateControl():Void {
+    controlReleased = controller;
+    setControl(!controller, true);
+  }
+  function setControl(claim:Bool, takeover:Bool = false):Void {
     var c = connection;
-    if (closed || !attached || c == null || !c.isOpen() || !hasControlGrant() || controlPending) return;
+    if (closed || !attached || controlUnavailable || c == null || !c.isOpen() || !hasControlGrant() || controlPending) return;
     controlPending = true;
     c.call(WorkspaceTerminalProtocol.SET_CONTROL, {
       workspace: "workspace", instance: instance, id: terminalId,
-      claim: claim, takeover: claim
+      claim: claim, takeover: claim && takeover
     }, 2000, function(info) {
       if (closed || connection != c) {
         if (info.controller == true && c.isOpen()) c.call(WorkspaceTerminalProtocol.SET_CONTROL, {
@@ -84,8 +98,10 @@ class RpcTerminalBackend implements TerminalBackend {
       if (controller) resizePending = true;
     }, function(error) {
       if (connection == c) controlPending = false;
-      if (!closed && connection == c && error.code != "disconnected" && error.code != "timeout")
-        fail(error.code);
+      if (!closed && connection == c) {
+        if (error.code == "unknown_method") controlUnavailable = true;
+        else if (error.code != "disconnected" && error.code != "timeout") fail(error.code);
+      }
     });
   }
   function observe(info:WorkspaceTerminalProtocol.TerminalInfo):Void {
@@ -101,6 +117,8 @@ class RpcTerminalBackend implements TerminalBackend {
       writes.resize(0);
       writeBytes = 0;
     }
+    if (autoClaimControl && !controlReleased && attached && !controlled && info.state == "running")
+      setControl(true);
     if (info.columns != serverColumns || info.rows != serverRows) {
       serverColumns = info.columns;
       serverRows = info.rows;
@@ -240,6 +258,7 @@ class RpcTerminalBackend implements TerminalBackend {
       controller = false;
       controlled = false;
       controlPending = false;
+      controlUnavailable = false;
     }
     if (c != null && attached) flushInput(c);
     if (c != null && !pending) {

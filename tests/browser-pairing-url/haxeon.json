@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "package": {"name": "exosuit-browser-pairing-url-test"},
+  "entry": "app.BrowserPairingUrlTestMain",
+  "sourceRoots": ["src", "../../web/src"],
+  "sources": ["src/app/BrowserPairingUrlTestMain.hx", "../../web/src/app/BrowserPairingInvitation.hx"],
+  "target": "host",
+  "outputDir": "build"
+}

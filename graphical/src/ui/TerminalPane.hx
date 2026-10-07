@@ -90,8 +90,8 @@ class TerminalPane implements TerminalPanel {
 	}
 
 	public static function openRemote(provider:Void->Null<workspace.client.WorkspaceRpcEndpoint>, id:String, cwd:String, restored:Bool,
-		requestFrame:Void->Void, palette:TerminalPalette, ?group:String, ?directory:String, ?providedFonts:FontCollection):TerminalPanel {
-		var backend = new workspace.client.RpcTerminalBackend(provider,id,cwd,!restored,group,directory);
+		requestFrame:Void->Void, palette:TerminalPalette, ?group:String, ?directory:String, ?providedFonts:FontCollection, autoClaimControl:Bool = false):TerminalPanel {
+		var backend = new workspace.client.RpcTerminalBackend(provider,id,cwd,!restored,group,directory,autoClaimControl);
 		var session = new TerminalSession(backend,terminalkit.Emulator.open(80,24,1000,"xterm-256color",false),false);
 		try return new TerminalPane(session,requestFrame,palette,providedFonts,backend)
 		catch (failure:Dynamic) { session.close(); throw failure; }
@@ -276,7 +276,12 @@ class TerminalPane implements TerminalPanel {
 			layers.push(new StackChild("control-strip", strip, 0.0, 0.0, 2,
 				LayoutAxis.grow(), LayoutAxis.fixed(CONTROL_BAR_HEIGHT)));
 		}
-		for (row in 0...layouts.length) {
+		var terminalTop = remoteBackend == null ? 4.0 : CONTROL_BAR_HEIGHT + 4.0;
+		// Remote observers retain the sender's grid; build only rows intersecting our viewport.
+		var visibleRows = resolvedHeight > 0
+			? Std.int(Math.min(layouts.length, Math.max(0, Math.ceil((resolvedHeight - terminalTop) / rowHeight))))
+			: 0;
+		for (row in 0...visibleRows) {
 			var index = row;
 			var rowStyle = new LayoutStyle();
 			rowStyle.width = LayoutAxis.grow();
@@ -291,7 +296,6 @@ class TerminalPane implements TerminalPanel {
 					canvas.fillRectIfPositive(new Rect(8.0 + cursorColumn * cellWidth, rowHeight - 2.0,
 						cellWidth, 2.0), palette.cursor);
 			}, rowStyle, null, false, CachePolicy.Raster, key);
-			var terminalTop = remoteBackend == null ? 4.0 : CONTROL_BAR_HEIGHT + 4.0;
 			layers.push(new StackChild('row-$index', view, 0.0, terminalTop + index * rowHeight,
 				1, LayoutAxis.grow(), LayoutAxis.fixed(rowHeight)));
 		}

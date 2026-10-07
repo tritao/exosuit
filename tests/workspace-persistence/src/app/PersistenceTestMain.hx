@@ -102,6 +102,18 @@ class PersistenceTestMain {
 		admin.close();
 		store = new WorkspaceSqliteStore(path, "workspace", seed);
 		require(store.loadDevices().length == 0, "Device migration created unexpected rows");
+		store.close();
+		admin = Database.open(path);
+		admin.exec("DROP TABLE workspace_devices; CREATE TABLE workspace_agent_metadata (operation TEXT PRIMARY KEY, payload BLOB NOT NULL); INSERT INTO workspace_agent_metadata VALUES('preserved',x'01'); PRAGMA user_version=5");
+		admin.close();
+		store = new WorkspaceSqliteStore(path, "workspace", seed);
+		require(store.loadDevices().length == 0, "Legacy v5 metadata catalog did not gain device storage");
+		store.close();
+		admin = Database.open(path);
+		var preserved = admin.prepare("SELECT count(*) FROM workspace_agent_metadata WHERE operation='preserved'");
+		require(preserved.step() && preserved.columnInt64(0) == 1, "Device migration lost existing agent metadata");
+		preserved.close(); admin.close();
+		store = new WorkspaceSqliteStore(path, "workspace", seed);
 		var record:WorkspaceDeviceRecord = {
 			deviceId: deviceId,
 			staticPublicKey: key,
@@ -280,7 +292,7 @@ class PersistenceTestMain {
 			corrupt.close();
 		}, "Oversized corrupt payload accepted");
 		admin = Database.open(path);
-		admin.exec("PRAGMA user_version=6");
+		admin.exec("PRAGMA user_version=999");
 		admin.close();
 		rejects(function() {
 			var unsupported = new WorkspaceSqliteStore(path, "workspace", seed());

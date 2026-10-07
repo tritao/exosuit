@@ -35,7 +35,7 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
 					throw "Missing SQLite schema version";
 				version = integer(row.columnInt64(0));
 			});
-			if (version != 0 && version != 1 && version != 2 && version != 3 && version != 4 && version != 5)
+			if (version < 0 || version > 7)
 				throw "Unsupported workspace schema version";
 			if (version == 0) {
 				var count = 0;
@@ -84,9 +84,12 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
     db.exec("CREATE TABLE workspace_agents (id TEXT PRIMARY KEY, payload BLOB NOT NULL)");
    db.exec("PRAGMA user_version=4");
    });
-			if (version < 5) transaction(function() {
-				db.exec("CREATE TABLE workspace_devices (device_id TEXT PRIMARY KEY, static_key BLOB NOT NULL CHECK(length(static_key)=32), grants BLOB NOT NULL, revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1)))");
-				db.exec("PRAGMA user_version=5");
+			// Older editor builds used v5/v6 for agent metadata and task tables,
+			// while the first pairing build also used v5. Preserve either catalog
+			// and converge on a distinct additive device schema revision.
+			if (version < 7) transaction(function() {
+				db.exec("CREATE TABLE IF NOT EXISTS workspace_devices (device_id TEXT PRIMARY KEY, static_key BLOB NOT NULL CHECK(length(static_key)=32), grants BLOB NOT NULL, revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1)))");
+				db.exec("PRAGMA user_version=7");
 			});
 
 		} catch (error:Dynamic) {

@@ -803,6 +803,15 @@ class CodexProvider implements WorkspaceAgents {
 		return n;
 	}
 
+	/** Updates also preserve idle attached conversations and pending provider startup. */
+	public function updateActivityCount():Int {
+		var count = starter == null ? 0 : 1;
+		for (session in sessions)
+			if (session.attached || session.busy || session.record.state == "creating"
+				|| session.record.state == "working" || session.record.state == "needs-attention") count++;
+		return count;
+	}
+
 	public function dispose():Void {
 		if (starter != null) {
 			processes.release(starter);

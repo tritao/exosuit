@@ -116,6 +116,7 @@ def main():
     parser.add_argument("--frames", type=int, default=30)
     parser.add_argument("--timeout", type=float, default=120.0)
     parser.add_argument("--screenshot")
+    parser.add_argument("--resize-only", action="store_true", help="Check viewport and framebuffer resizing without editor interactions")
     parser.add_argument("--trace-lifecycle", action="store_true", help="Record reload lifecycle and fetch timing for diagnosis")
     options = parser.parse_args()
 
@@ -194,6 +195,31 @@ def main():
     assert not initial["errors"], initial
     assert "build" not in initial["shell"]["panels"], initial
     assert not any(name.startswith(("build:", "lang:", "plugins:")) for name in initial["commands"]), initial
+
+    # Resize after NativeKit has assigned inline startup dimensions. Check both
+    # CSS bounds and the renderer's backing buffer, including a scale change.
+    for width, height, scale in ((1920, 1080, 1), (1000, 700, 2), (1400, 900, 1)):
+        page.command("Emulation.setDeviceMetricsOverride", {
+            "width": width, "height": height, "deviceScaleFactor": scale, "mobile": False})
+        deadline = time.monotonic() + 15
+        while True:
+            size = page.evaluate("""(() => {
+                const canvas = document.getElementById('canvas');
+                return [canvas.clientWidth, canvas.clientHeight, canvas.width, canvas.height];
+            })()""")
+            if size == [width, height, width * scale, height * scale]:
+                break
+            assert time.monotonic() < deadline, {"expected": [width, height, scale], "actual": size}
+            time.sleep(0.1)
+    page.command("Emulation.clearDeviceMetricsOverride")
+    print("PASS: canvas follows viewport growth, shrinkage and device scale changes")
+    if options.resize_only:
+        assert page.evaluate("window.exosuit.state") == "running"
+        if options.screenshot:
+            shot = page.command("Page.captureScreenshot", {"format": "png"})
+            with open(options.screenshot, "wb") as handle:
+                handle.write(base64.b64decode(shot["data"]))
+        return 0
 
     def key(letter):
         for kind in ("keyDown", "keyUp"):
