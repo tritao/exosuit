@@ -2,6 +2,21 @@
 
 Last updated: 2026-10-07.
 
+## M16.2 explicit refresh for remote file previews, 2026-10-07
+
+Added a Refresh action to the read-only remote file preview. It stats the saved
+file, enforces the existing size and retained-content limits, then reopens it
+with the observed revision. The updated snapshot replaces only the exact tab
+that initiated the request, so closing or replacing that tab while the read is
+pending cannot resurrect or overwrite it. Failure keeps the last loaded content
+visible and reports that refresh failed. Concurrent refresh and open reads share
+the existing two-read limit.
+
+Validation: the graphical target builds and the Xvfb acceptance test changes a
+Markdown file after opening it, invokes Refresh, confirms the updated contents,
+and verifies the refreshed tab remains sticky and read-only. Live file-change
+notifications remain the next step.
+
 ## M16.2 syntax-colored remote file previews, 2026-10-07
 
 Added syntax-aware rendering to the existing remote read-only preview tabs. The
@@ -36,7 +51,7 @@ RPC-backed tree, preview replacement, sticky-tab behavior and read-only view.
 Validation: graphical Haxeon target build, agent target build, and the full
 workspace terminal/files RPC suite pass; the desktop UI acceptance script passes,
 including a file changed after listing and an attempted editor mutation.
-Remaining: file-change/watch updates, browser integration,
+Remaining: automatic file-change/watch updates, browser integration,
 non-Linux secure filesystem backends and broader F1/F2 acceptance. See
 [`WORKSPACE-FILES.md`](WORKSPACE-FILES.md).
 

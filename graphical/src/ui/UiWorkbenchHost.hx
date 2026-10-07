@@ -324,6 +324,25 @@ class UiWorkbenchHost implements WorkbenchHost {
 		return file;
 	}
 
+	/** Replaces a refreshed snapshot only while the exact old tab is still open. */
+	public function replaceWorkspaceFileSnapshot(previous:UiWorkspaceFileTab, updated:UiWorkspaceFileTab):Bool {
+		for (pane in panes) for (index in 0...pane.items.length) {
+			var existing = UiEditorTabs.workspaceFile(pane.items[index]);
+			if (existing == null || existing != previous) continue;
+			updated.preview = existing.preview;
+			pane.items[index] = UiEditorTab.WorkspaceFile(updated);
+			requestFrame();
+			return true;
+		}
+		return false;
+	}
+
+	public function hasWorkspaceFile(file:UiWorkspaceFileTab):Bool {
+		for (pane in panes) for (item in pane.items)
+			if (UiEditorTabs.workspaceFile(item) == file) return true;
+		return false;
+	}
+
 	public function keepWorkspaceFile(file:UiWorkspaceFileTab):Void {
 		file.preview = false;
 		requestFrame();

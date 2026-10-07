@@ -122,6 +122,7 @@ class ExosuitApp implements DesktopUiApplication {
 	var explorerModel:Null<ExplorerTreeModel>;
 	var explorerTree:Null<TreeView>;
 	final workspaceFileOpenPending:Map<String, Bool> = new Map();
+	final workspaceFileRefreshPending:Map<String, Bool> = new Map();
 	final tabClicks = new haxeon.ui.core.PointerClickSequence();
 	var statusMessage:String = "Ready";
 	var paletteVisible:Bool = false;
@@ -1143,14 +1144,13 @@ class ExosuitApp implements DesktopUiApplication {
 			application.reportError("files", "Workspace file preview memory limit reached; close another file first");
 			return;
 		}
-		var pendingKey = scope.length + ":" + scope + root.length + ":" + root + path;
+		var pendingKey = workspaceFileKey(model.workspaceId(), scope, root, path);
 		if (workspaceFileOpenPending.exists(pendingKey)) {
 			if (sticky) workspaceFileOpenPending.set(pendingKey, true);
 			return;
 		}
-		var pendingCount = 0;
-		for (_ in workspaceFileOpenPending.keys()) pendingCount++;
-		if (pendingCount >= 2) {
+		if (workspaceFileRefreshPending.exists(pendingKey)) return;
+		if (workspaceFileReadCount() >= 2) {
 			application.reportError("files", "Two workspace file reads are already in progress");
 			return;
 		}
@@ -1174,11 +1174,84 @@ class ExosuitApp implements DesktopUiApplication {
 					application.reportError("files", "Workspace file preview memory limit reached; close another file first");
 					return;
 				}
-				var file = new UiWorkspaceFileTab(root, scope, model.rootDisplayName(), path, result.revision,
+				var file = new UiWorkspaceFileTab(model.workspaceId(), root, scope, model.rootDisplayName(), path, result.revision,
 					result.contents, result.sizeBytes, !makeSticky, application.syntaxes, editorPalette);
 				host.openWorkspaceFile(file, !makeSticky);
 			});
 	}
+
+	function refreshWorkspaceFile(file:UiWorkspaceFileTab):Void {
+		if (file == null || file.refreshing || !host.hasWorkspaceFile(file)) return;
+		var key = workspaceFileKey(file.workspace, file.scope, file.root, file.path);
+		if (workspaceFileOpenPending.exists(key) || workspaceFileRefreshPending.exists(key)) return;
+		if (workspaceFileReadCount() >= 2) {
+			file.refreshError = "Two workspace file reads are already in progress";
+			requestFrame();
+			return;
+		}
+		var attachment = workspaceAttachment;
+		var client = attachment == null ? null : attachment.fileClient();
+		if (client == null || attachment.fileWorkspace() != file.workspace
+			|| attachment.fileScope() != null && attachment.fileScope() != file.scope) {
+			file.refreshError = "Workspace is disconnected; showing the last loaded snapshot";
+			requestFrame();
+			return;
+		}
+		file.refreshing = true;
+		file.refreshError = null;
+		workspaceFileRefreshPending.set(key, true);
+		requestFrame();
+		var fail = function(message:String):Void {
+			workspaceFileRefreshPending.remove(key);
+			file.refreshing = false;
+			if (host.hasWorkspaceFile(file)) file.refreshError = message;
+			requestFrame();
+		};
+		client.stat(file.workspace, file.root, file.path, function(stat) {
+			if (!host.hasWorkspaceFile(file)) { fail(""); return; }
+			if (stat == null || stat.workspace != file.workspace || stat.root != file.root || stat.path != file.path
+				|| stat.entry == null || stat.entry.kind != "file" || stat.entry.revision == null) {
+				fail("Workspace returned invalid file metadata; showing the last loaded snapshot");
+				return;
+			}
+			var sizeBytes = WorkspaceFileReader.previewSize(stat.entry.size);
+			if (sizeBytes == null) {
+				fail("File is larger than the 16 MiB preview limit; showing the last loaded snapshot");
+				return;
+			}
+			if (!host.canOpenWorkspaceFile(file.scope, file.root, file.path, sizeBytes)) {
+				fail("Workspace file preview memory limit reached; showing the last loaded snapshot");
+				return;
+			}
+			WorkspaceFileReader.read(client, file.workspace, file.root, file.path, stat.entry.revision,
+				function(result:WorkspaceFileReadResult) {
+					if (result.error != null || result.contents == null || result.revision == null) {
+						fail((result.error == null ? "Could not refresh file" : result.error) + "; showing the last loaded snapshot");
+						return;
+					}
+					if (!host.canOpenWorkspaceFile(file.scope, file.root, file.path, result.sizeBytes)) {
+						fail("Workspace file preview memory limit reached; showing the last loaded snapshot");
+						return;
+					}
+					var updated = new UiWorkspaceFileTab(file.workspace, file.root, file.scope, file.rootName, file.path,
+						result.revision, result.contents, result.sizeBytes, file.preview, application.syntaxes, editorPalette);
+					workspaceFileRefreshPending.remove(key);
+					file.refreshing = false;
+					if (host.replaceWorkspaceFileSnapshot(file, updated)) requestFrame();
+				});
+		}, function(error) fail((error == null ? "Could not refresh file" : error.message) +
+			"; showing the last loaded snapshot"));
+	}
+
+	function workspaceFileReadCount():Int {
+		var count = 0;
+		for (_ in workspaceFileOpenPending.keys()) count++;
+		for (_ in workspaceFileRefreshPending.keys()) count++;
+		return count;
+	}
+
+	static function workspaceFileKey(workspace:String, scope:String, root:String, path:String):String
+		return workspace.length + ":" + workspace + scope.length + ":" + scope + root.length + ":" + root + path;
 
 	/** Register a destination once; the Activity Bar follows the sidebar's order and visibility. */
 	public function registerSidebarDestination(id:String, icon:IconName, provider:Void->View,
@@ -1213,7 +1286,8 @@ class ExosuitApp implements DesktopUiApplication {
 				var fileKey = UiEditorTabs.key(item);
 				var fileTab = new TabItem(fileKey,
 					workspaceFile.title + (workspaceFile.preview ? " (preview)" : ""),
-					new WorkspaceFilePreviewView(workspaceFile, theme, editorPalette), true);
+					new WorkspaceFilePreviewView(workspaceFile, theme, editorPalette,
+						function() refreshWorkspaceFile(workspaceFile)), true);
 				fileTab.onClose = function() host.closeTab(item, paneId, true);
 				filenames.set(fileKey, workspaceFile.rootName + "/" + workspaceFile.path);
 				items.push(fileTab);

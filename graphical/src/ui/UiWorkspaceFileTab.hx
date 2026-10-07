@@ -6,6 +6,7 @@ import syntax.SyntaxRegistry;
 /** Immutable remote file contents displayed in a workbench preview tab. */
 class UiWorkspaceFileTab {
 	public final id:String;
+	public final workspace:String;
 	public final root:String;
 	public final scope:String;
 	public final rootName:String;
@@ -15,9 +16,12 @@ class UiWorkspaceFileTab {
 	public final textModel:WorkspaceFileTextModel;
 	public final sizeBytes:Int;
 	public var preview:Bool;
+	public var refreshing:Bool = false;
+	public var refreshError:Null<String>;
 
-	public function new(root:String, scope:String, rootName:String, path:String, revision:String,
+	public function new(workspace:String, root:String, scope:String, rootName:String, path:String, revision:String,
 			contents:String, sizeBytes:Int, preview:Bool, syntaxes:SyntaxRegistry, editorTheme:Theme) {
+		this.workspace = workspace;
 		this.root = root;
 		this.scope = scope;
 		this.rootName = rootName;

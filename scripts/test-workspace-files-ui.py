@@ -23,6 +23,7 @@ with tempfile.TemporaryDirectory(prefix="exworkspacefilesui-") as temporary:
     (project / "README.md").write_text("First preview\n")
     expected = "# Remote preview fixture: café 🙂\n\n```haxe\nclass Example {}\n```\n"
     updated = "# Remote preview fixture: café 🙂 updated after listing\n\n```haxe\nclass Example {}\n```\n"
+    refreshed = "# Remote preview fixture: café 🙂 refreshed from disk\n\n```haxe\nclass Example {}\n```\n"
     note = project / "notes.md"
     note.write_text(expected)
     state = fixture / "state"
@@ -56,6 +57,9 @@ with tempfile.TemporaryDirectory(prefix="exworkspacefilesui-") as temporary:
             subprocess.run(["xdotool", "mousemove", "--window", window, "145", "140",
                 "click", "--repeat", "2", "--delay", "180", "1"], check=True)
             time.sleep(.4)
+            note.write_text(refreshed)
+            click(1200, 100)  # Refresh the open saved-file snapshot.
+            time.sleep(.5)
             click(500, 220)  # Focus the read-only file view and try to edit it.
             subprocess.run(["xdotool", "type", "--clearmodifiers", "SHOULD_NOT_EDIT"], check=True)
             assert app.wait(timeout=75) == 0, (fixture / "app.log").read_text()[-5000:]
@@ -67,10 +71,12 @@ with tempfile.TemporaryDirectory(prefix="exworkspacefilesui-") as temporary:
         assert diagnostic["workspaceConnection"] == "Workspace connected", diagnostic
         assert len(tabs) == 1 and tabs[0]["path"] == "notes.md" and tabs[0]["preview"] is False, tabs
         assert tabs[0]["syntax"] == "Markdown", tabs
-        assert "Remote preview fixture: café 🙂 updated after listing" in tree and "SHOULD_NOT_EDIT" not in tree, tree[-3000:]
-        assert note.read_text() == updated
+        assert "Remote preview fixture: café 🙂 refreshed from disk" in tree and "SHOULD_NOT_EDIT" not in tree, (
+            "\n".join(line for line in tree.splitlines() if "workspace-file" in line or "Refresh" in line)
+            + "\n" + tree[-1200:])
+        assert note.read_text() == refreshed
         assert diagnostic["errors"] == [], diagnostic["errors"]
-        print("PASS: RPC explorer, stale-revision recovery, preview replacement, sticky tab and read-only view")
+        print("PASS: RPC explorer, syntax preview, stale-revision recovery, manual refresh, sticky tab and read-only view")
     except Exception:
         if (fixture / "app.log").exists():
             print((fixture / "app.log").read_text()[-5000:])
