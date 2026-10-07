@@ -15,6 +15,7 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../haxeon/vendor/nativekit/tools"))
 from web_smoke import WebSocket, wait_for_page  # noqa: E402
+from canvas_sizing_smoke import check_canvas_sizing  # noqa: E402
 
 
 class ContextUnavailable(RuntimeError):
@@ -196,23 +197,7 @@ def main():
     assert "build" not in initial["shell"]["panels"], initial
     assert not any(name.startswith(("build:", "lang:", "plugins:")) for name in initial["commands"]), initial
 
-    # Resize after NativeKit has assigned inline startup dimensions. Check both
-    # CSS bounds and the renderer's backing buffer, including a scale change.
-    for width, height, scale in ((1920, 1080, 1), (1000, 700, 2), (1400, 900, 1)):
-        page.command("Emulation.setDeviceMetricsOverride", {
-            "width": width, "height": height, "deviceScaleFactor": scale, "mobile": False})
-        deadline = time.monotonic() + 15
-        while True:
-            size = page.evaluate("""(() => {
-                const canvas = document.getElementById('canvas');
-                return [canvas.clientWidth, canvas.clientHeight, canvas.width, canvas.height];
-            })()""")
-            if size == [width, height, width * scale, height * scale]:
-                break
-            assert time.monotonic() < deadline, {"expected": [width, height, scale], "actual": size}
-            time.sleep(0.1)
-    page.command("Emulation.clearDeviceMetricsOverride")
-    print("PASS: canvas follows viewport growth, shrinkage and device scale changes")
+    check_canvas_sizing(page)
     if options.resize_only:
         assert page.evaluate("window.exosuit.state") == "running"
         if options.screenshot:

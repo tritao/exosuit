@@ -40,3 +40,11 @@ passing smoke check from a successful artifact build.
 composed CI. `EXOSUIT_CI_WEB=1 ./scripts/test-web.sh` runs that browser stage
 alone. Its artifact trees are isolated by target. The stage reports `PENDING`
 when not selected or when Emscripten or Chrome is unavailable.
+
+### Canvas layout
+
+The page owns the editor canvas layout through CSS. NativeKit observes its size
+and updates the framebuffer and UI layout without replacing the viewport sizing
+with inline pixel dimensions. Container-based embeddings can use ordinary CSS
+width and height too. Set `data-nativekit-sizing="native"` on the canvas only
+when NativeKit's window/surface sizing APIs should control its displayed size.
