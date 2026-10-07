@@ -19,6 +19,9 @@ class RpcTerminalBackend implements TerminalBackend {
   var connection:Null<RpcConnection>;
   var instance:String = "";
   var attached:Bool = false;
+  var controller:Bool = false;
+  var controlled:Bool = false;
+  var controlPending:Bool = false;
   var pending:Bool = false;
   var closed:Bool = false;
   var columns:Int = 80;
@@ -33,6 +36,8 @@ class RpcTerminalBackend implements TerminalBackend {
   var failureReported:Bool = false;
   var output:Array<TerminalEvent> = [];
   var nextRead:Float = 0;
+  var serverColumns:Int = 0;
+  var serverRows:Int = 0;
 
   public function new(provider:Void -> Null<WorkspaceRpcEndpoint>, terminalId:String, root:String, create:Bool, ?group:String, ?directory:String) {
     this.provider = provider;
@@ -44,6 +49,64 @@ class RpcTerminalBackend implements TerminalBackend {
   }
   public function id():String return terminalId;
   public function isAttached():Bool return attached;
+  public function canControl():Bool return controller;
+  public function hasControlGrant():Bool {
+    var client = provider();
+    return client != null && client.hasCapability(WorkspaceTerminalProtocol.CONTROL);
+  }
+  public function controlStatus():String {
+    if (!attached) return "Connecting to workspace terminal…";
+    if (!hasControlGrant()) return "Read only · control permission was not granted";
+    if (controlPending) return "Updating terminal control…";
+    if (controller) return "You are controlling this terminal";
+    if (controlled) return "Read only · another client controls this terminal";
+    return "Read only · no client is controlling this terminal";
+  }
+  public function controlAction():String return !attached || !hasControlGrant() || controlPending ? "" : controller ? "Release" : "Take control";
+  public function activateControl():Void setControl(!controller);
+  function setControl(claim:Bool):Void {
+    var c = connection;
+    if (closed || !attached || c == null || !c.isOpen() || !hasControlGrant() || controlPending) return;
+    controlPending = true;
+    c.call(WorkspaceTerminalProtocol.SET_CONTROL, {
+      workspace: "workspace", instance: instance, id: terminalId,
+      claim: claim, takeover: claim
+    }, 2000, function(info) {
+      if (closed || connection != c) {
+        if (info.controller == true && c.isOpen()) c.call(WorkspaceTerminalProtocol.SET_CONTROL, {
+          workspace: "workspace", instance: instance, id: terminalId,
+          claim: false, takeover: false
+        }, 1000, function(_) {}, function(_) {});
+        return;
+      }
+      controlPending = false;
+      observe(info);
+      if (controller) resizePending = true;
+    }, function(error) {
+      if (connection == c) controlPending = false;
+      if (!closed && connection == c && error.code != "disconnected" && error.code != "timeout")
+        fail(error.code);
+    });
+  }
+  function observe(info:WorkspaceTerminalProtocol.TerminalInfo):Void {
+    if (info.columns < 1 || info.columns > 512 || info.rows < 1 || info.rows > 256) {
+      fail("Invalid terminal geometry");
+      return;
+    }
+    var wasController = controller;
+    controller = info.controller == true;
+    controlled = info.controlled == true;
+    if (controller && !wasController) resizePending = true;
+    if (attached && !controller) {
+      writes.resize(0);
+      writeBytes = 0;
+    }
+    if (info.columns != serverColumns || info.rows != serverRows) {
+      serverColumns = info.columns;
+      serverRows = info.rows;
+      output.push(TerminalEvent.geometry(serverColumns, serverRows));
+    }
+  }
   static function retryable(code:String):Bool return code == "timeout" || code == "disconnected";
   function fail(message:String):Void {
     message = switch (message) {
@@ -58,9 +121,12 @@ class RpcTerminalBackend implements TerminalBackend {
     };
     failure = message;
     attached = false;
+    writes.resize(0);
+    writeBytes = 0;
   }
   public function write(bytes:Bytes):Void {
     if (closed || failure != null) throw "Terminal is unavailable";
+    if (attached && !controller) return;
     if (bytes == null || bytes.length == 0) return;
     if (writeBytes + bytes.length > 65536) throw "Terminal input queue exceeds limit";
     writes.push(bytes.sub(0, bytes.length));
@@ -91,7 +157,8 @@ class RpcTerminalBackend implements TerminalBackend {
     }, function(e) {
       if (connection == c) {
         writing = false;
-        fail((e.ambiguous ? "Terminal input delivery uncertain: " : "Terminal input refused: ") + e.code);
+        if (e.code == "terminal_controlled") loseControl();
+        else fail((e.ambiguous ? "Terminal input delivery uncertain: " : "Terminal input refused: ") + e.code);
       }
     }
     );
@@ -100,7 +167,7 @@ class RpcTerminalBackend implements TerminalBackend {
     if (columns < 1 || columns > 512 || rows < 1 || rows > 256) throw "Terminal size exceeds service limits";
     this.columns = columns;
     this.rows = rows;
-    resizePending = true;
+    if (controller) resizePending = true;
   }
   public function requestReplay(offset:Int64):Void {
     position = offset;
@@ -116,13 +183,28 @@ class RpcTerminalBackend implements TerminalBackend {
     c.call(WorkspaceTerminalProtocol.TERMINATE,
       {workspace: "workspace", instance: instance, id: terminalId}, 2000, function(_) {
     }, function(e) {
-      if (!closed && connection == c) fail(e.code);
+      if (!closed && connection == c) {
+        if (e.code == "terminal_controlled") loseControl();
+        else fail(e.code);
+      }
     }
     );
   }
   public function detach():Void close();
+  function loseControl():Void {
+    controller = false;
+    controlled = true;
+    writes.resize(0);
+    writeBytes = 0;
+    resizePending = false;
+  }
   public function close():Void {
     closed = true;
+    var c = connection;
+    if (controller && c != null && c.isOpen()) c.call(WorkspaceTerminalProtocol.SET_CONTROL, {
+      workspace: "workspace", instance: instance, id: terminalId,
+      claim: false, takeover: false
+    }, 1000, function(_) {}, function(_) {});
     connection = null;
     output.resize(0);
     writes.resize(0);
@@ -155,6 +237,9 @@ class RpcTerminalBackend implements TerminalBackend {
       attached = false;
       pending = false;
       sequence = 0;
+      controller = false;
+      controlled = false;
+      controlPending = false;
     }
     if (c != null && attached) flushInput(c);
     if (c != null && !pending) {
@@ -179,6 +264,7 @@ class RpcTerminalBackend implements TerminalBackend {
           pending = false;
           attached = true;
           create = false;
+          observe(info);
           output.push(TerminalEvent.status(info.state, info.exitCode));
         }, function(e) {
           if (!closed && connection == c) {
@@ -196,19 +282,23 @@ class RpcTerminalBackend implements TerminalBackend {
           id: terminalId,
           columns: columns,
           rows: rows
-        }, 2000, function(_) {
-          if (connection == c) pending = false;
+        }, 2000, function(info) {
+          if (connection == c) {
+            pending = false;
+            observe(info);
+          }
         }, function(e) {
           if (connection == c) {
             pending = false;
-            if (retryable(e.code)) resizePending = true;
+            if (e.code == "terminal_controlled") loseControl();
+            else if (retryable(e.code)) resizePending = true;
             else fail(e.code);
           }
         }
         );
       } else if (Sys.time() >= nextRead) {
         pending = true;
-        c.call(WorkspaceTerminalProtocol.OUTPUT, {
+          c.call(WorkspaceTerminalProtocol.OUTPUT, {
           workspace: "workspace",
           instance: instance,
           id: terminalId,
@@ -220,6 +310,7 @@ class RpcTerminalBackend implements TerminalBackend {
             fail("Invalid terminal replay");
             return;
           }
+          observe(value.terminal);
           output.push(TerminalEvent.output(position, value.data));
           position += value.data.length;
           output.push(TerminalEvent.status(value.terminal.state, value.terminal.exitCode));

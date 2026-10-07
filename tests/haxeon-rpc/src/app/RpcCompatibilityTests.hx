@@ -86,6 +86,10 @@ class RpcCompatibilityTests {
 		require(identified.workspace == "w" && identified.root == "/w" && identified.instance == "i", "Identity decode changed");
 		var target:TerminalTarget = {workspace:"w",instance:"i",id:"t"};
 		require(WorkspaceTerminalProtocol.TERMINATE.encodeRequest(target).compare(bytes("8301a17702a16903a174"))==0,"Terminal target vector changed");
+		var control:TerminalControl={workspace:"w",instance:"i",id:"t",claim:true,takeover:true};
+		var controlBytes=bytes("8501a17702a16903a17404c305c3");
+		require(WorkspaceTerminalProtocol.SET_CONTROL.encodeRequest(control).compare(controlBytes)==0,"Terminal controller lease vector changed");
+		require(WorkspaceTerminalProtocol.SET_CONTROL.decodeRequest(controlBytes).takeover,"Terminal controller takeover decode changed");
 		var terminalRead:TerminalRead = {workspace:"w",instance:"i",id:"t",offset:haxe.Int64.make(1,2)};
 		var terminalReadBytes=bytes("8401a17702a16903a17404d30000000100000002");
 		require(WorkspaceTerminalProtocol.OUTPUT.encodeRequest(terminalRead).compare(terminalReadBytes)==0,"Terminal byte-offset vector changed");

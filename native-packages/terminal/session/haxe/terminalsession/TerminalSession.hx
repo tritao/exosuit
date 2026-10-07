@@ -81,6 +81,8 @@ class TerminalSession {
         if (event.kind == "status") {
             status = event.state;
             exitCode = event.exitCode;
+        } else if (event.kind == "geometry") {
+            emulator.resize(event.columns, event.rows);
         } else if (event.kind == "output") {
             applyOutput(event);
         }

@@ -47,6 +47,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
   final instance:String;
   final root:String;
   final terminals:Map<String, RuntimeTerminal> = [];
+  final controllers:Map<String, RpcConnection> = [];
   final historyLimit:Int;
   var count:Int = 0;
   final catalog:Map<String, TerminalRecord> = [];
@@ -133,7 +134,17 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
     records.sort(function(a, b) return Reflect.compare(a.id, b.id));
     return {instance: instance, groups: groups(), terminals: records, next: null, workspaceRoot: root};
   }
-  function info(t:RuntimeTerminal):TerminalInfo return {
+  function controller(id:String):Null<RpcConnection> {
+    var owner = controllers.get(id);
+    if (owner != null && !owner.isOpen()) {
+      controllers.remove(id);
+      return null;
+    }
+    return owner;
+  }
+  function info(t:RuntimeTerminal, viewer:RpcConnection):TerminalInfo {
+    var owner = controller(t.id);
+    return {
     id: t.id,
     cwd: t.cwd,
     state: t.state,
@@ -141,8 +152,11 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
     columns: t.columns,
     rows: t.rows,
     start: t.start,
-    end: t.end
-  };
+    end: t.end,
+    controller: owner == viewer,
+    controlled: owner != null
+    };
+  }
   function error(code:String):RpcError return {code: code, message: code, ambiguous: false};
   function valid(workspace:String, instance:String, id:String):Bool return workspace == this.workspace
     && instance == this.instance && id != null && id.length > 0 && id.length <= 128;
@@ -369,7 +383,8 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         terminals.set(r.id, created);
         count++;
       }
-      c.respond(info(t));
+      if (control && controller(r.id) == null) controllers.set(r.id, connection);
+      c.respond(info(t, connection));
     }
     );
     connection.register(WorkspaceTerminalProtocol.OUTPUT, function(r, c) {
@@ -405,8 +420,31 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         bytes.blit(copied, chunk.data, skip, take);
         copied += take;
       }
-      c.respond({terminal: info(t), offset: r.offset, data: bytes}
+      c.respond({terminal: info(t, connection), offset: r.offset, data: bytes}
       );
+    }
+    );
+    connection.register(WorkspaceTerminalProtocol.SET_CONTROL, function(r, c) {
+      if (!read || !control) {
+        c.fail(error("unauthorized"));
+        return;
+      }
+      if (!valid(r.workspace, r.instance, r.id)) {
+        c.fail(error("invalid_request"));
+        return;
+      }
+      var t = terminals.get(r.id);
+      if (t == null) {
+        c.fail(error("unknown_terminal"));
+        return;
+      }
+      var owner = controller(r.id);
+      if (r.claim) {
+        if (owner == null || owner == connection || r.takeover) controllers.set(r.id, connection);
+      } else if (owner == connection) {
+        controllers.remove(r.id);
+      }
+      c.respond(info(t, connection));
     }
     );
     connection.register(WorkspaceTerminalProtocol.INPUT, function(r, c) {
@@ -423,6 +461,10 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         c.fail(error("terminal_not_running"));
         return;
       }
+      if (controller(r.id) != connection) {
+        c.fail(error("terminal_controlled"));
+        return;
+      }
       var previous = inputSequence.get(r.id);
       if (r.sequence !=(previous == null ? 1 : previous + 1)) {
         c.fail(error("input_sequence"));
@@ -432,7 +474,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
       inputSequence.set(r.id, r.sequence);
       try {
         t.backend.write(r.data);
-        c.respond(info(t));
+        c.respond(info(t, connection));
       } catch (_:Dynamic) {
         c.fail({code: "input_failed", message: "Input delivery is uncertain", ambiguous: true}
         );
@@ -453,12 +495,16 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         c.fail(error("unknown_terminal"));
         return;
       }
+      if (controller(r.id) != connection) {
+        c.fail(error("terminal_controlled"));
+        return;
+      }
       try {
         if (t.state == "running") t.backend.resize(r.columns, r.rows);
         t.emulator.resize(r.columns, r.rows);
         t.columns = r.columns;
         t.rows = r.rows;
-        c.respond(info(t));
+        c.respond(info(t, connection));
       } catch (_:Dynamic) {
         c.fail(error("resize_failed"));
       }
@@ -479,11 +525,12 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         return;
       }
       if (t.state == "running") t.backend.terminate(true);
-      c.respond(info(t));
+      c.respond(info(t, connection));
     }
     );
   }
   public function poll():Void {
+    for (id in [for (id in controllers.keys()) id]) controller(id);
     for (t in terminals) {
       if (t.state != "running") continue;
       try t.backend.pollEvents(function(event) {
@@ -544,6 +591,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
       t.emulator.close();
     }
     terminals.clear();
+    controllers.clear();
     count = 0;
   }
 }

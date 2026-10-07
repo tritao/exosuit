@@ -10,15 +10,19 @@ class TerminalEvent {
     public final length:Int;
     public final state:String;
     public final exitCode:Int;
+    public final columns:Int;
+    public final rows:Int;
 
     private function new(kind:String, offset:haxe.Int64, data:Bytes, length:Int,
-            state:String, exitCode:Int) {
+            state:String, exitCode:Int, columns:Int = 0, rows:Int = 0) {
         this.kind = kind;
         this.offset = offset;
         this.data = data;
         this.length = length;
         this.state = state;
         this.exitCode = exitCode;
+        this.columns = columns;
+        this.rows = rows;
     }
 
     /** The byte buffer may be borrowed for the duration of pollEvents. */
@@ -30,4 +34,9 @@ class TerminalEvent {
 
     public static function status(state:String, exitCode:Int = 0):TerminalEvent
         return new TerminalEvent("status", 0, null, 0, state, exitCode);
+
+    public static function geometry(columns:Int, rows:Int):TerminalEvent {
+        if (columns < 1 || columns > 512 || rows < 1 || rows > 256) throw "Invalid terminal geometry";
+        return new TerminalEvent("geometry", 0, null, 0, "", 0, columns, rows);
+    }
 }

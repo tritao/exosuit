@@ -343,17 +343,38 @@ Deployment/publication requires separate authorization under EXECUTION.md.
   the seeded browser filesystem in standalone mode and when that grant is
   absent. Remote file listing, read-only preview, syntax coloring, stale-file
   notice and explicit Refresh reuse the desktop implementation.
+- [x] Share terminal-catalog and agent RPC behavior between the local daemon
+  and authenticated browser transport. The browser Workbench uses the remote
+  group/session catalog, existing Codex activity and approval views, and
+  permission-gated terminal actions. New terminal cwd and tab identity use the
+  remote workspace root. The browser build now generates wasm32 `terminalkit`
+  bindings, links its emulator into the host, and reuses browser-loaded fonts.
+- [x] Enforce single-controller ownership for shared terminal sessions. An
+  unowned PTY grants its lease to the first controller; viewers can explicitly
+  take or release it. The daemon refuses input and resize from other clients,
+  releases ownership on disconnect, and reports viewer-relative ownership.
+  Remote terminal panes show the transfer action and follow the active PTY size
+  while read-only. The multi-client service acceptance covers transfer and
+  lease recovery after disconnect.
+- [ ] Recover after output replay expires by loading a fresh VT snapshot or
+  checkpoint. The current client detects `replay_gap` and presents an error;
+  it cannot yet reconstruct the screen from a new snapshot.
 - [ ] Complete the browser host build and connected file clickthrough. The
   pairing test now grants file access and checks that the browser Explorer
-  subscribes to the remote root; full host/browser execution remains a gate.
-- [ ] View Claude/Codex sessions, conversation/activity and pending requests.
-  Add prompt, interruption and approval actions under explicit device grants.
-  Resolve competing-client approvals exactly once at the service boundary.
-- [ ] Attach terminal history/output using offsets and checkpoints, then
-  explicit input/resize control. Multiple viewers do not resize a shared PTY;
-  controller ownership transfers visibly and recovers after disconnect.
-- [ ] Resume event streams or fetch fresh snapshots after replay expiry.
-  Bound history, queues and polling; bulk output must not starve control events.
+  subscribes to the remote root; the web guest also compiles with remote
+  Workbench and terminal UI. Full Emscripten host/browser execution remains a
+  gate because the pinned SDK is unavailable in the current environment.
+- [x] Wire the existing Codex session and approval UI to the shared browser
+  Workbench client. It reads agent sessions/activity and sends prompt,
+  interruption and approval actions under negotiated grants. Connected-browser
+  behavior and competing-client approval acceptance remain part of the pending
+  host/browser integration gate.
+- [x] Attach terminal output by byte offsets and replay, and gate input/resize
+  through the explicit controller lease. Multiple viewers can read without
+  resizing the shared PTY; taking or releasing control is visible in the pane.
+- [ ] Recover terminal screen state after replay expiry using a fresh snapshot
+  or checkpoint. Keep replay and queues bounded so bulk output cannot starve
+  control events.
 
 Acceptance: same workspace resources appear on desktop and web. Closing the
 editor leaves the service and persistent sessions available. Browser reload

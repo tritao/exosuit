@@ -2,6 +2,54 @@
 
 Last updated: 2026-10-07.
 
+## M16.2 shared browser Workbench and remote terminal UI, 2026-10-07
+
+Commit `ee891bd` extracts terminal-catalog and agent RPC behavior into
+`RpcWorkspaceWorkbenchClient`, shared by the local daemon and authenticated
+browser transport. The web app attaches the Workbench when terminal read and
+catalog grants are present. It uses the same group/session tree, Codex activity
+and approval views, and remote terminal tabs as desktop. Terminal controls are
+gated by negotiated read, catalog, control and workspace-tree capabilities.
+New terminal cwd and tab identity come from the remote catalog root, not the
+browser's seeded `/workspace` project. `TerminalPane` now reuses the browser
+host's loaded fonts, and the web build generates wasm32 `terminalkit` bindings
+and links the emulator into the Emscripten host.
+
+Validation: graphical build passes; `scripts/test-workspace-terminals.py`
+passes catalog, permissions, daemon lifecycle, shell reuse, output replay,
+resize and shutdown scenarios. The 710-source web guest compiles and its 146
+imports include the expected 20 `terminalkit` functions. HXI generation,
+manifest JSON, shell syntax and diff checks pass. Full web-host build and
+connected-browser clickthrough remain unverified because the pinned Emscripten
+SDK is absent. Exclusive terminal controller ownership is implemented in the
+follow-up below; replay-expiry recovery remains open.
+
+Next: qualify the connected browser once Emscripten 6.0.9 is available, then
+implement recovery after output replay expires. See [`16-remote-workspaces.md`](16-remote-workspaces.md).
+
+## M16.2 exclusive terminal controller leases, 2026-10-07
+
+Shared PTYs now have one controller per authenticated RPC connection. Opening
+an unowned terminal acquires its lease; viewers can explicitly take or release
+control. The daemon rejects input and resize from non-owners and drops leases
+when their connection closes. Terminal status replies identify whether the
+current viewer controls the PTY. The remote terminal pane shows the state and
+transfer action, follows the controller's PTY dimensions while read-only, and
+buffers keystrokes during initial attachment until the daemon confirms access.
+
+Validation: `python3 scripts/test-workspace-terminals.py` passes, including two
+clients, denied viewer input/resize, explicit transfer, and recovery after the
+controller disconnects. `haxeon/scripts/haxeon run --project
+tests/haxeon-rpc/haxeon.json` and the graphical build pass. The desktop
+workspace-terminal UI smoke remains unqualified: its fixed 10-second capture
+can expire while the local daemon is still connecting. A longer traced run
+confirmed attachment and input acknowledgement, but ended before the full shell
+command completed.
+
+Next: recover a terminal view from a fresh VT snapshot when its bounded output
+replay has expired, then complete the browser host build and connected-browser
+clickthrough. See [`16-remote-workspaces.md`](16-remote-workspaces.md).
+
 ## M16.2 transport-neutral terminal RPC boundary, 2026-10-07
 
 `RpcTerminalBackend` now depends on a small `WorkspaceRpcEndpoint` contract
@@ -13,9 +61,9 @@ remote transports without a local-process dependency.
 
 Validation: graphical and terminal targets build; the terminal acceptance
 script passes catalog operations, shell detach/reconnect, output replay,
-resize and shutdown behavior. The web guest compiles with the new endpoint and
-all imports match the existing host. Browser terminal UI and connected
-terminal/agent acceptance remain open in M16.2.
+resize and shutdown behavior. The web guest compiles with the new endpoint.
+The browser Workbench and terminal UI are now wired, while connected-browser
+execution remains pending the full Emscripten host build and clickthrough.
 
 ## M16.2 connected-browser file Explorer wiring, 2026-10-07
 

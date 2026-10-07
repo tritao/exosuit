@@ -170,6 +170,68 @@ class TerminalServiceTests {
     step();
     step();
     require(error == "replay_gap", "Trimmed output did not report a gap");
+    var peer = MemoryTransport.pair();
+    var viewer = new RpcConnection(peer.client, clock), viewerServer = new RpcConnection(peer.server, clock);
+    manager.bind(viewerServer, [WorkspaceTerminalProtocol.READ, WorkspaceTerminalProtocol.CONTROL]);
+    var viewerStep = function() {
+      client.poll();
+      viewer.poll();
+      server.poll();
+      viewerServer.poll();
+      manager.poll();
+      client.poll();
+      viewer.poll();
+    };
+    var viewerInfo:Null<TerminalInfo> = null;
+    viewer.call(WorkspaceTerminalProtocol.OPEN, {workspace: "w", instance: "instance", id: "bounded",
+      create: false, columns: 80, rows: 24}, 1000, function(info) viewerInfo = info, function(e) throw e.code);
+    deadline = clock() + 2000;
+    while (viewerInfo == null) {
+      require(clock() < deadline, "Read-only viewer did not attach");
+      viewerStep();
+    }
+    require(viewerInfo.controlled == true && viewerInfo.controller == false,
+      "Second viewer did not observe exclusive terminal ownership");
+    error = "";
+    viewer.call(WorkspaceTerminalProtocol.INPUT, {workspace: "w", instance: "instance", id: "bounded",
+      sequence: 1, data: Bytes.ofString("should-not-run\n")}, 1000, function(_) throw "Viewer input bypassed controller lease",
+      function(e) error = e.code);
+    viewerStep(); viewerStep();
+    require(error == "terminal_controlled", "Input from the non-controller was not refused");
+    error = "";
+    viewer.call(WorkspaceTerminalProtocol.RESIZE, {workspace: "w", instance: "instance", id: "bounded",
+      columns: 100, rows: 30}, 1000, function(_) throw "Viewer resized a shared PTY",
+      function(e) error = e.code);
+    viewerStep(); viewerStep();
+    require(error == "terminal_controlled", "Resize from the non-controller was not refused");
+    viewerInfo = null;
+    viewer.call(WorkspaceTerminalProtocol.SET_CONTROL, {workspace: "w", instance: "instance", id: "bounded",
+      claim: true, takeover: true}, 1000, function(info) viewerInfo = info, function(e) throw e.code);
+    deadline = clock() + 2000;
+    while (viewerInfo == null) {
+      require(clock() < deadline, "Explicit controller transfer timed out");
+      viewerStep();
+    }
+    require(viewerInfo.controller == true, "Explicit controller transfer was not granted");
+    error = "";
+    client.call(WorkspaceTerminalProtocol.INPUT, {workspace: "w", instance: "instance", id: "bounded",
+      sequence: 2, data: Bytes.ofString("old-owner-must-not-run\n")}, 1000, function(_) throw "Former controller retained input access",
+      function(e) error = e.code);
+    viewerStep(); viewerStep();
+    require(error == "terminal_controlled", "Transferred controller retained input access");
+    viewer.close();
+    manager.poll();
+    viewerServer.poll();
+    var recovered:Null<TerminalInfo> = null;
+    client.call(WorkspaceTerminalProtocol.SET_CONTROL, {workspace: "w", instance: "instance", id: "bounded",
+      claim: true, takeover: false}, 1000, function(info) recovered = info, function(e) throw e.code);
+    deadline = clock() + 2000;
+    while (recovered == null) {
+      require(clock() < deadline, "Controller lease did not recover after disconnect");
+      viewerStep();
+    }
+    require(recovered.controller == true, "Disconnected controller did not release its lease");
+    viewerServer.close();
     done = false;
     client.call(WorkspaceTerminalProtocol.TERMINATE,
       {workspace: "w", instance: "instance", id: "bounded"}, 1000, function(_) done = true, function(e) {

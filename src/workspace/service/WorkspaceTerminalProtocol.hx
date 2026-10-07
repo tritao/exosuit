@@ -22,6 +22,8 @@ import haxeon.wire.MessagePack;
 @:id(6) var rows:Int;
 @:id(7) var start:Int64;
 @:id(8) var end:Int64;
+@:optional @:id(9) var controller:Null<Bool>;
+@:optional @:id(10) var controlled:Null<Bool>;
 }
 @:wire typedef TerminalRead = {@: id(1) var workspace: String;
 @:id(2) var instance:String;
@@ -47,6 +49,12 @@ import haxeon.wire.MessagePack;
 @:wire typedef TerminalTarget = {@: id(1) var workspace: String;
 @:id(2) var instance:String;
 @:id(3) var id:String;
+}
+@:wire typedef TerminalControl = {@: id(1) var workspace:String;
+@:id(2) var instance:String;
+@:id(3) var id:String;
+@:id(4) var claim:Bool;
+@:id(5) var takeover:Bool;
 }
 @:wire typedef TerminalCatalogQuery = {@: id(1) var workspace: String;
 @:id(2) var instance:String;
@@ -141,6 +149,13 @@ class WorkspaceTerminalProtocol {
     114,
     function(v:TerminalTarget) return MessagePack.encode(v),
     function(b:Bytes):TerminalTarget return MessagePack.decode(b),
+    function(v:TerminalInfo) return MessagePack.encode(v),
+    function(b:Bytes):TerminalInfo return MessagePack.decode(b)
+  );
+  public static final SET_CONTROL = new RpcMethod<TerminalControl, TerminalInfo>(
+    118,
+    function(v:TerminalControl) return MessagePack.encode(v),
+    function(b:Bytes):TerminalControl return MessagePack.decode(b),
     function(v:TerminalInfo) return MessagePack.encode(v),
     function(b:Bytes):TerminalInfo return MessagePack.decode(b)
   );

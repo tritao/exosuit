@@ -31,6 +31,7 @@ private typedef TerminalBackground = {start:Int, end:Int, color:Color};
 
 /** Retained terminal rows; each row has its own raster cache and text layout. */
 class TerminalPane implements TerminalPanel {
+	static inline final CONTROL_BAR_HEIGHT:Float = 26.0;
 	public final session:TerminalSession;
 	final requestFrame:Void->Void;
 	final fonts:FontCollection;
@@ -40,6 +41,11 @@ class TerminalPane implements TerminalPanel {
 	final backgrounds:Array<Array<TerminalBackground>> = [];
 	final palette:TerminalPalette;
 	final ownsFonts:Bool;
+	final remoteBackend:Null<workspace.client.RpcTerminalBackend>;
+	var controlLayout:Null<TextLayout>;
+	var controlActionLayout:Null<TextLayout>;
+	var controlStatusText:String = "";
+	var controlActionText:String = "";
 	final foreground:Color;
 	final background:Color;
 	var cellWidth:Float;
@@ -61,6 +67,7 @@ class TerminalPane implements TerminalPanel {
 	var hasSelection:Bool = false;
 	var mouseButton:Int = -1;
 	var mousePointer:Int = -1;
+	var controlPointer:Int = -1;
 	var cursorRow:Int = -1;
 	var cursorColumn:Int = -1;
 	var cursorMode:Int = 1;
@@ -86,7 +93,7 @@ class TerminalPane implements TerminalPanel {
 		requestFrame:Void->Void, palette:TerminalPalette, ?group:String, ?directory:String, ?providedFonts:FontCollection):TerminalPanel {
 		var backend = new workspace.client.RpcTerminalBackend(provider,id,cwd,!restored,group,directory);
 		var session = new TerminalSession(backend,terminalkit.Emulator.open(80,24,1000,"xterm-256color",false),false);
-		try return new TerminalPane(session,requestFrame,palette,providedFonts)
+		try return new TerminalPane(session,requestFrame,palette,providedFonts,backend)
 		catch (failure:Dynamic) { session.close(); throw failure; }
 	}
 
@@ -101,10 +108,12 @@ class TerminalPane implements TerminalPanel {
 	public function rows():Int
 		return session.emulator.rows();
 
-	public function new(session:TerminalSession, requestFrame:Void->Void, palette:TerminalPalette, ?providedFonts:FontCollection) {
+	public function new(session:TerminalSession, requestFrame:Void->Void, palette:TerminalPalette, ?providedFonts:FontCollection,
+		?remoteBackend:workspace.client.RpcTerminalBackend) {
 		this.session = session;
 		this.requestFrame = requestFrame;
 		this.palette = palette;
+		this.remoteBackend = remoteBackend;
 		ownsFonts = providedFonts == null;
 		foreground = palette.foreground;
 		background = palette.background;
@@ -117,6 +126,13 @@ class TerminalPane implements TerminalPanel {
 			fonts.addSystemFallbacks();
 		}
 		updateFontSize();
+		if (remoteBackend != null) {
+			controlLayout = TextLayout.create(fonts, "", 8192.0, new TextStyle(fontSize), new ParagraphStyle(TextWrap.None));
+			controlLayout.setColor(foreground);
+			controlActionLayout = TextLayout.create(fonts, "", 1024.0, new TextStyle(fontSize), new ParagraphStyle(TextWrap.None));
+			controlActionLayout.setColor(palette.cursor);
+			syncControlLayout();
+		}
 		refreshRows(true);
 	}
 
@@ -128,7 +144,23 @@ class TerminalPane implements TerminalPanel {
 			requestFrame();
 		}
 		session.pollEvents();
+		if (remoteBackend != null) syncControlLayout();
 		refreshRows(false);
+	}
+
+	function syncControlLayout():Void {
+		if (remoteBackend == null) return;
+		var status = remoteBackend.controlStatus(), action = remoteBackend.controlAction();
+		if (status != controlStatusText) {
+			controlStatusText = status;
+			controlLayout.setText(status);
+			requestFrame();
+		}
+		if (action != controlActionText) {
+			controlActionText = action;
+			controlActionLayout.setText(action);
+			requestFrame();
+		}
 	}
 
 	function updateFontSize():Void {
@@ -222,6 +254,28 @@ class TerminalPane implements TerminalPanel {
 		}, fill, "Terminal", true);
 		var layers:Array<StackChild> = [new StackChild("background", backdrop, 0.0, 0.0, 0,
 			LayoutAxis.grow(), LayoutAxis.grow())];
+		if (remoteBackend != null) {
+			var controlStyle = new LayoutStyle();
+			controlStyle.width = LayoutAxis.grow();
+			controlStyle.height = LayoutAxis.fixed(CONTROL_BAR_HEIGHT);
+			var action = controlActionLayout;
+			var status = controlLayout;
+			var tint = Color.rgba(palette.cursor.red, palette.cursor.green, palette.cursor.blue, 0.12);
+			var strip = new CanvasView("terminal-control-strip", function(canvas:Canvas, geometry) {
+				canvas.fillRectIfPositive(new Rect(0.0, 0.0, geometry.width, geometry.height), tint);
+				canvas.fillRectIfPositive(new Rect(0.0, 0.0, 3.0, geometry.height), palette.cursor);
+				if (status != null) canvas.drawText(status, 10.0, 4.0);
+				if (action != null && controlActionText.length > 0) {
+					var metrics = action.measure();
+					var width = metrics.width + 20.0;
+					var x = Math.max(8.0, geometry.width - width - 8.0);
+					canvas.fillRectIfPositive(new Rect(x, 2.0, width, geometry.height - 4.0), background);
+					canvas.drawText(action, x + 10.0, 4.0);
+				}
+			}, controlStyle, "Terminal control", true);
+			layers.push(new StackChild("control-strip", strip, 0.0, 0.0, 2,
+				LayoutAxis.grow(), LayoutAxis.fixed(CONTROL_BAR_HEIGHT)));
+		}
 		for (row in 0...layouts.length) {
 			var index = row;
 			var rowStyle = new LayoutStyle();
@@ -237,7 +291,8 @@ class TerminalPane implements TerminalPanel {
 					canvas.fillRectIfPositive(new Rect(8.0 + cursorColumn * cellWidth, rowHeight - 2.0,
 						cellWidth, 2.0), palette.cursor);
 			}, rowStyle, null, false, CachePolicy.Raster, key);
-			layers.push(new StackChild('row-$index', view, 0.0, 4.0 + index * rowHeight,
+			var terminalTop = remoteBackend == null ? 4.0 : CONTROL_BAR_HEIGHT + 4.0;
+			layers.push(new StackChild('row-$index', view, 0.0, terminalTop + index * rowHeight,
 				1, LayoutAxis.grow(), LayoutAxis.fixed(rowHeight)));
 		}
 		var node = new Stack("terminal-pane", layers, fill).build(context);
@@ -253,6 +308,15 @@ class TerminalPane implements TerminalPanel {
 		node.on(UiEventKind.PointerDown, function(event) {
 			context.requestFocus(node.id);
 			if (closed) return;
+			if (remoteBackend != null && event.localY >= 0 && event.localY < CONTROL_BAR_HEIGHT) {
+				if (event.button == 0) {
+					controlPointer = event.pointerId;
+					event.capturePointer();
+					event.preventDefault();
+					event.stopPropagation();
+				}
+				return;
+			}
 			if ((event.modifiers & UiModifier.Shift) != 0 || session.emulator.mouseMode() == 0) {
 				if (event.button != 0 || selectionPointer >= 0) return;
 				var cell = pointerCell(event);
@@ -283,6 +347,7 @@ class TerminalPane implements TerminalPanel {
 			}
 		});
 		node.on(UiEventKind.PointerMove, function(event) {
+			if (controlPointer >= 0) return;
 			if (selectionPointer >= 0) {
 				if (event.pointerId != selectionPointer || closed) return;
 				updateSelection(event);
@@ -294,6 +359,15 @@ class TerminalPane implements TerminalPanel {
 				reportMouse(event, mouseButton >= 0 ? mouseButton + 32 : 0, 4);
 		});
 		var releaseMouse = function(event:UiEvent) {
+			if (controlPointer == event.pointerId) {
+				if (event.kind != UiEventKind.PointerCancel && event.localY >= 0 && event.localY < CONTROL_BAR_HEIGHT)
+					remoteBackend.activateControl();
+				controlPointer = -1;
+				event.releasePointer();
+				event.preventDefault();
+				event.stopPropagation();
+				return;
+			}
 			if (selectionPointer == event.pointerId) {
 				if (!closed && event.kind != UiEventKind.PointerCancel) updateSelection(event);
 				selectionPointer = -1;
@@ -313,6 +387,7 @@ class TerminalPane implements TerminalPanel {
 		node.on(UiEventKind.PointerCancel, releaseMouse);
 		node.on(UiEventKind.TextInput, function(event:UiEvent) {
 			if (event.text != null && event.text.length > 0) {
+				if (!canSendInput()) { event.preventDefault(); return; }
 				prepareInput();
 				session.write(Bytes.ofString(event.text));
 				event.preventDefault();
@@ -331,6 +406,7 @@ class TerminalPane implements TerminalPanel {
 				(event.modifiers & (UiModifier.Control | UiModifier.Shift)) ==
 				(UiModifier.Control | UiModifier.Shift);
 			if (paste) {
+				if (!canSendInput()) { event.preventDefault(); return; }
 				var generation = focusGeneration;
 				context.clipboard.readText(function(text) {
 					if (closed || !focused || generation != focusGeneration || session.status != "running" || text.length == 0) return;
@@ -378,7 +454,8 @@ class TerminalPane implements TerminalPanel {
 
 	function pointerCell(event:UiEvent):{column:Int, row:Int} {
 		var column = Std.int(Math.floor((event.localX - 8.0) / cellWidth));
-		var row = Std.int(Math.floor((event.localY - 4.0) / rowHeight));
+		var top = remoteBackend == null ? 4.0 : CONTROL_BAR_HEIGHT + 4.0;
+		var row = Std.int(Math.floor((event.localY - top) / rowHeight));
 		column = Std.int(Math.max(0, Math.min(session.emulator.columns() - 1, column)));
 		row = Std.int(Math.max(0, Math.min(session.emulator.rows() - 1, row)));
 		return {column: column, row: row};
@@ -412,6 +489,7 @@ class TerminalPane implements TerminalPanel {
 
 	/** UIKit button/modifier values differ from the terminal wire protocol. */
 	function reportMouse(event:UiEvent, button:Int, kind:Int):Bool {
+		if (!canSendInput()) return false;
 		var cell = pointerCell(event);
 		var modifiers = 0;
 		if ((event.modifiers & UiModifier.Shift) != 0) modifiers |= 4;
@@ -427,6 +505,7 @@ class TerminalPane implements TerminalPanel {
 	}
 
 	function handleKey(event:UiEvent):Void {
+		if (!canSendInput()) { event.preventDefault(); return; }
 		if ((event.key == UiKey.V || event.key == UiKey.C) &&
 			(event.modifiers & (UiModifier.Control | UiModifier.Shift)) ==
 			(UiModifier.Control | UiModifier.Shift)) {
@@ -485,11 +564,13 @@ class TerminalPane implements TerminalPanel {
 
 	function resizeToViewport(width:Float, height:Float):Void {
 		if (closed || width <= 0.0 || height <= 0.0) return;
+		if (remoteBackend != null && !remoteBackend.canControl()) return;
 		if (width == viewportWidth && height == viewportHeight) return;
 		viewportWidth = width;
 		viewportHeight = height;
 		var columns = Std.int(Math.max(1.0, Math.min(512.0, Math.floor((width - 16.0) / cellWidth))));
-		var rows = Std.int(Math.max(1.0, Math.min(256.0, Math.floor((height - 8.0) / rowHeight))));
+		var topInset = remoteBackend == null ? 8.0 : CONTROL_BAR_HEIGHT + 8.0;
+		var rows = Std.int(Math.max(1.0, Math.min(256.0, Math.floor((height - topInset) / rowHeight))));
 		if (columns != session.emulator.columns() || rows != session.emulator.rows()) {
 			session.resize(columns, rows);
 			// Re-render all rows now; waiting for PTY output leaves stale/missing rows while dragging.
@@ -498,11 +579,15 @@ class TerminalPane implements TerminalPanel {
 		}
 	}
 
+	function canSendInput():Bool return remoteBackend == null || !remoteBackend.isAttached() || remoteBackend.canControl();
+
 	public function close():Void {
 		if (closed) return;
 		closed = true;
 		for (layout in layouts) layout.dispose();
 		layouts.resize(0);
+		if (controlLayout != null) controlLayout.dispose();
+		if (controlActionLayout != null) controlActionLayout.dispose();
 		if (ownsFonts) fonts.dispose();
 		session.close();
 	}
