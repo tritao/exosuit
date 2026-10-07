@@ -84,6 +84,13 @@ TERMINALKIT_API uint64_t terminalkit_checkpoint_size(terminalkit_handle *kit);
 TERMINALKIT_API int terminalkit_checkpoint(terminalkit_handle *kit, void *buffer,
     uint64_t capacity, uint64_t *written TK_OUT);
 TERMINALKIT_API int terminalkit_restore(terminalkit_handle *kit, const void *data, uint64_t size);
+/* Replaces the active viewport from a bounded, versioned screen snapshot and
+ * disables replay-log checkpoints on this emulator. */
+TERMINALKIT_API int terminalkit_restore_screen_snapshot(terminalkit_handle *kit,
+    const void *data, uint64_t size);
+TERMINALKIT_API void terminalkit_modes(terminalkit_handle *kit,
+    int *cursor_keys TK_OUT, int *keypad TK_OUT, int *mouse_tracking TK_OUT,
+    int *mouse_encoding TK_OUT, int *paste TK_OUT, int *focus TK_OUT);
 
 /* Refresh cached active-screen cells. A zero return means no row changed. */
 TERMINALKIT_API int terminalkit_snapshot(terminalkit_handle *kit);

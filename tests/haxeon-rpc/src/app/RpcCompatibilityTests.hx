@@ -85,6 +85,12 @@ class RpcCompatibilityTests {
 		var identified = WorkspaceProtocol.IDENTITY.decodeResponse(identityBytes);
 		require(identified.workspace == "w" && identified.root == "/w" && identified.instance == "i", "Identity decode changed");
 		var target:TerminalTarget = {workspace:"w",instance:"i",id:"t"};
+		require(WorkspaceTerminalProtocol.SNAPSHOT.id == 119,
+			"Terminal screen snapshot method id changed");
+		var snapshotRequest = WorkspaceTerminalProtocol.SNAPSHOT.encodeRequest(target);
+		require(RpcProtocol.encode(Request(1, 119, 1000, snapshotRequest), 4096)
+			.compare(bytes("8104940177cd03e8c40a8301a17702a16903a174")) == 0,
+			"Terminal screen snapshot RPC vector changed");
 		require(WorkspaceTerminalProtocol.TERMINATE.encodeRequest(target).compare(bytes("8301a17702a16903a174"))==0,"Terminal target vector changed");
 		var control:TerminalControl={workspace:"w",instance:"i",id:"t",claim:true,takeover:true};
 		var controlBytes=bytes("8501a17702a16903a17404c305c3");

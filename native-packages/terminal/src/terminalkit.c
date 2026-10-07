@@ -210,6 +210,23 @@ int terminalkit_restore(terminalkit_handle *kit, const void *data, uint64_t size
     terminal_emulator_dimensions(kit->emulator, &columns, &rows);
     return allocate_grid(kit, columns, rows);
 }
+int terminalkit_restore_screen_snapshot(terminalkit_handle *kit,
+    const void *data, uint64_t size) {
+    if (!kit || !data || size > SIZE_MAX ||
+        !terminal_emulator_restore_screen_snapshot(kit->emulator, data, (size_t)size))
+        return 0;
+    /* A viewport replacement cannot be represented by the historical VT
+     * replay log, so never expose a misleading checkpoint afterwards. */
+    terminal_emulator_disable_checkpoints(kit->emulator);
+    int columns = 0, rows = 0;
+    terminal_emulator_dimensions(kit->emulator, &columns, &rows);
+    return allocate_grid(kit, columns, rows);
+}
+void terminalkit_modes(terminalkit_handle *kit, int *cursor_keys, int *keypad,
+    int *mouse_tracking, int *mouse_encoding, int *paste, int *focus) {
+    if (kit) terminal_emulator_modes(kit->emulator, cursor_keys, keypad,
+        mouse_tracking, mouse_encoding, paste, focus);
+}
 
 static void collect_cell(int row, int column, int width, uint64_t style,
     const char *text, int length, void *user_data) {

@@ -21,11 +21,35 @@ resize and shutdown scenarios. The 710-source web guest compiles and its 146
 imports include the expected 20 `terminalkit` functions. HXI generation,
 manifest JSON, shell syntax and diff checks pass. Full web-host build and
 connected-browser clickthrough remain unverified because the pinned Emscripten
-SDK is absent. Exclusive terminal controller ownership is implemented in the
-follow-up below; replay-expiry recovery remains open.
+SDK is absent. Exclusive terminal controller ownership and replay-expiry
+recovery are implemented in the follow-ups below.
 
-Next: qualify the connected browser once Emscripten 6.0.9 is available, then
-implement recovery after output replay expires. See [`16-remote-workspaces.md`](16-remote-workspaces.md).
+Next: qualify the connected browser once Emscripten 6.0.9 is available. See
+[`16-remote-workspaces.md`](16-remote-workspaces.md).
+
+## M16.2 bounded terminal screen recovery, 2026-10-07
+
+The terminal service now answers a typed `SNAPSHOT` RPC with the active VT
+viewport and current terminal metadata. Its versioned payload is capped at
+3 MiB, below the RPC message limit. If byte-offset replay returns `replay_gap`,
+the client restores the snapshot's styled Unicode cells, cursor and supported
+input modes, sets its byte position to the reported terminal end, then resumes
+normal replay. This avoids enabling terminalkit's historical checkpoint log:
+that log grows with session output and stops accepting new emulator input at
+its hard cap. A gap recovery restores the live viewport; older scrollback is
+not included in the snapshot.
+
+Validation: `scripts/test-workspace-terminals.py` forces output past the replay
+window and confirms a fresh snapshot restores visible output. The terminal
+session suite checks styled Unicode cells and VT modes; the frozen RPC method
+vector and both wasm32/wasm-gc RPC tests pass. Graphical build and wasm32 ABI
+generation for terminalkit pass. The 710-source web guest also compiles after
+the generated manifest was fixed to include `TerminalPane` and its terminalkit
+packages. `web/build.sh` remains unavailable because the pinned Emscripten SDK
+is not installed.
+
+Next: complete the browser host build and connected file/terminal clickthrough.
+See [`16-remote-workspaces.md`](16-remote-workspaces.md).
 
 ## M16.2 exclusive terminal controller leases, 2026-10-07
 
@@ -46,8 +70,7 @@ can expire while the local daemon is still connecting. A longer traced run
 confirmed attachment and input acknowledgement, but ended before the full shell
 command completed.
 
-Next: recover a terminal view from a fresh VT snapshot when its bounded output
-replay has expired, then complete the browser host build and connected-browser
+Next: complete the browser host build and connected-browser file/terminal
 clickthrough. See [`16-remote-workspaces.md`](16-remote-workspaces.md).
 
 ## M16.2 transport-neutral terminal RPC boundary, 2026-10-07

@@ -34,6 +34,9 @@ import haxeon.wire.MessagePack;
 @:id(2) var offset:Int64;
 @:id(3) var data:Bytes;
 }
+@:wire typedef TerminalScreenSnapshot = {@: id(1) var terminal:TerminalInfo;
+@:id(2) var data:Bytes;
+}
 @:wire typedef TerminalInput = {@: id(1) var workspace: String;
 @:id(2) var instance:String;
 @:id(3) var id:String;
@@ -158,5 +161,12 @@ class WorkspaceTerminalProtocol {
     function(b:Bytes):TerminalControl return MessagePack.decode(b),
     function(v:TerminalInfo) return MessagePack.encode(v),
     function(b:Bytes):TerminalInfo return MessagePack.decode(b)
+  );
+  public static final SNAPSHOT = new RpcMethod<TerminalTarget, TerminalScreenSnapshot>(
+    119,
+    function(v:TerminalTarget) return MessagePack.encode(v),
+    function(b:Bytes):TerminalTarget return MessagePack.decode(b),
+    function(v:TerminalScreenSnapshot) return MessagePack.encode(v),
+    function(b:Bytes):TerminalScreenSnapshot return MessagePack.decode(b)
   );
 }

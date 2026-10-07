@@ -85,12 +85,35 @@ class Main {
                 backend.resizes != 1 || backend.detaches != 1 || backend.terminations != 1)
             throw "backend operations were not forwarded";
         var checkpoint = session.emulator.checkpoint();
+        var screenState = session.emulator.screenSnapshot();
         var replacement = new TerminalSession(new FakeBackend(), Emulator.open(5, 2, 2));
         replacement.applyCheckpoint(checkpoint, session.offset);
         replacement.emulator.snapshot();
         if (replacement.offset != session.offset || replacement.emulator.columns() != 30 ||
                 replacement.emulator.rowText(0).substr(0, 18) != "hello world! after")
             throw "checkpoint did not restore session state";
+        var screenReplacement = new TerminalSession(new FakeBackend(), Emulator.open(5, 2, 2, "xterm-256color", false));
+        screenReplacement.applyScreenSnapshot(screenState, session.offset);
+        screenReplacement.emulator.snapshot();
+        if (screenReplacement.offset != session.offset || screenReplacement.emulator.columns() != 30
+                || screenReplacement.emulator.rows() != 5
+                || screenReplacement.emulator.rowText(0).substr(0, 18) != "hello world! after")
+            throw "bounded screen snapshot did not restore the live viewport";
+        screenReplacement.close();
+        var modeSource = Emulator.open(20, 4, 8);
+        modeSource.feedString("\x1b[?1049h\x1b[?1h\x1b=\x1b[?1000h\x1b[?1006h\x1b[?2004h\x1b[?1004h\x1b[?2026h\x1b[31mR\x1b[0m界e\u0301");
+        modeSource.snapshot();
+        var modeCopy = Emulator.open(10, 3, 8, "xterm-256color", false);
+        modeCopy.restoreScreenSnapshot(modeSource.screenSnapshot());
+        modeCopy.snapshot();
+        if (!modeCopy.alternateScreen() || !modeCopy.synchronizedOutput()
+                || modeCopy.mouseMode() != modeSource.mouseMode()
+                || !modeCopy.focusReporting()
+                || modeCopy.rowText(0).indexOf("R界e\u0301") != 0
+                || modeCopy.rowCells(0)[0].style != modeSource.rowCells(0)[0].style)
+            throw "screen snapshot lost styled Unicode cells or VT modes";
+        modeCopy.close();
+        modeSource.close();
         replacement.close();
         session.close();
         session.close();

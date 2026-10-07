@@ -701,6 +701,224 @@ int terminal_emulator_restore_checkpoint(terminal_emulator_t* emulator,
   return 1;
 }
 
+static int snapshot_u32(const uint8_t* data, size_t size, size_t* offset,
+    uint32_t* value) {
+  if (!data || !offset || !value || *offset > size || size - *offset < 4)
+    return 0;
+  *value = read_u32(&data[*offset]);
+  *offset += 4;
+  return 1;
+}
+
+static int snapshot_codepoint(const uint8_t* data, size_t size, size_t* offset,
+    uint32_t* codepoint) {
+  if (*offset >= size) return 0;
+  uint8_t first = data[(*offset)++];
+  if (first < 0x80) { *codepoint = first; return 1; }
+  unsigned int count;
+  uint32_t value;
+  if (first >= 0xc2 && first <= 0xdf) { count = 1; value = first & 0x1f; }
+  else if (first >= 0xe0 && first <= 0xef) { count = 2; value = first & 0x0f; }
+  else if (first >= 0xf0 && first <= 0xf4) { count = 3; value = first & 0x07; }
+  else return 0;
+  if (count > size - *offset) return 0;
+  for (unsigned int i = 0; i < count; ++i) {
+    uint8_t next = data[(*offset)++];
+    if ((next & 0xc0) != 0x80) return 0;
+    if (i == 0 && ((first == 0xe0 && next < 0xa0)
+        || (first == 0xed && next >= 0xa0)
+        || (first == 0xf0 && next < 0x90)
+        || (first == 0xf4 && next >= 0x90))) return 0;
+    value = (value << 6) | (next & 0x3f);
+  }
+  *codepoint = value;
+  return 1;
+}
+
+static int snapshot_validate_text(const uint8_t* data, size_t size,
+    uint32_t width) {
+  if (width == 0) return size == 0;
+  if (width > 2 || size == 0) return 0;
+  size_t offset = 0;
+  uint32_t codepoint = 0;
+  if (!snapshot_codepoint(data, size, &offset, &codepoint)
+      || tsm_ucs4_get_width(codepoint) != width) return 0;
+  while (offset < size) {
+    if (!snapshot_codepoint(data, size, &offset, &codepoint)
+        || tsm_ucs4_get_width(codepoint) != 0) return 0;
+  }
+  return 1;
+}
+
+static void snapshot_color(uint32_t packed, int foreground,
+    struct tsm_screen_attr* attr) {
+  unsigned int mode = packed & 3u;
+  uint8_t* code = foreground ? (uint8_t*)&attr->fccode : (uint8_t*)&attr->bccode;
+  uint8_t* red = foreground ? &attr->fr : &attr->br;
+  uint8_t* green = foreground ? &attr->fg : &attr->bg;
+  uint8_t* blue = foreground ? &attr->fb : &attr->bb;
+  if (mode == TERMINAL_ATTRIBUTE_UNSET_COLOR) {
+    *code = foreground ? TSM_COLOR_FOREGROUND : TSM_COLOR_BACKGROUND;
+  } else if (mode == TERMINAL_ATTRIBUTE_INVERSE_COLOR) {
+    /* The packed renderer style swaps colors for inverse and marks defaults. */
+    *code = foreground ? TSM_COLOR_BACKGROUND : TSM_COLOR_FOREGROUND;
+  } else if (mode == TERMINAL_ATTRIBUTE_INDEX_COLOR) {
+    unsigned int index = (packed >> 8) & 0xffu;
+    if (index < TSM_COLOR_NUM) {
+      *code = (uint8_t)index;
+    } else {
+      /* libtsm stores the basic palette in the signed color code. Use the
+       * equivalent RGB value for extended colors in this lossless grid copy. */
+      static const uint8_t cube[] = {0, 95, 135, 175, 215, 255};
+      unsigned int r, g, b;
+      if (index < 232) {
+        unsigned int n = index - 16;
+        r = cube[n / 36]; g = cube[(n / 6) % 6]; b = cube[n % 6];
+      } else {
+        r = g = b = 8 + (index - 232) * 10;
+      }
+      *code = (uint8_t)-1;
+      *red = (uint8_t)r; *green = (uint8_t)g; *blue = (uint8_t)b;
+    }
+  } else {
+    *code = (uint8_t)-1;
+    *red = (uint8_t)(packed >> 8);
+    *green = (uint8_t)(packed >> 16);
+    *blue = (uint8_t)(packed >> 24);
+  }
+}
+
+static struct tsm_screen_attr snapshot_attr(uint64_t style) {
+  uint32_t foreground = (uint32_t)style;
+  uint32_t background = (uint32_t)(style >> 32);
+  struct tsm_screen_attr attr = {0};
+  int inverse = (foreground & 3u) == TERMINAL_ATTRIBUTE_INVERSE_COLOR
+    || (background & 3u) == TERMINAL_ATTRIBUTE_INVERSE_COLOR;
+  if (inverse) {
+    snapshot_color(background, 1, &attr);
+    snapshot_color(foreground, 0, &attr);
+    attr.inverse = 1;
+  } else {
+    snapshot_color(foreground, 1, &attr);
+    snapshot_color(background, 0, &attr);
+  }
+  attr.bold = (foreground & TERMINAL_ATTRIBUTE_BOLD) != 0;
+  attr.italic = (foreground & TERMINAL_ATTRIBUTE_ITALIC) != 0;
+  attr.underline = (foreground & TERMINAL_ATTRIBUTE_UNDERLINE) != 0;
+  return attr;
+}
+
+static void snapshot_feed_mode(terminal_t* terminal, const char* value,
+    size_t length) {
+  terminal_emulator_feed_internal(terminal, value, length, 0);
+}
+
+int terminal_emulator_restore_screen_snapshot(terminal_emulator_t* emulator,
+    const void* buffer, size_t size) {
+  static const uint8_t magic[8] = {'P', 'T', 'S', 'M', 'V', 'T', 'S', 0};
+  terminal_t* terminal = (terminal_t*)emulator;
+  if (!terminal || terminal->closed || !buffer || size < 64 || size > 3u * 1024u * 1024u)
+    return 0;
+  const uint8_t* data = buffer;
+  if (memcmp(data, magic, sizeof(magic))) return 0;
+  size_t offset = 8;
+  uint32_t version, columns, rows, cursor_column, cursor_row, cursor_mode;
+  uint32_t cursor_keys, keypad, mouse_tracking, mouse_encoding, paste, focus;
+  uint32_t alternate, synchronized;
+  if (!snapshot_u32(data, size, &offset, &version)
+      || !snapshot_u32(data, size, &offset, &columns)
+      || !snapshot_u32(data, size, &offset, &rows)
+      || !snapshot_u32(data, size, &offset, &cursor_column)
+      || !snapshot_u32(data, size, &offset, &cursor_row)
+      || !snapshot_u32(data, size, &offset, &cursor_mode)
+      || !snapshot_u32(data, size, &offset, &cursor_keys)
+      || !snapshot_u32(data, size, &offset, &keypad)
+      || !snapshot_u32(data, size, &offset, &mouse_tracking)
+      || !snapshot_u32(data, size, &offset, &mouse_encoding)
+      || !snapshot_u32(data, size, &offset, &paste)
+      || !snapshot_u32(data, size, &offset, &focus)
+      || !snapshot_u32(data, size, &offset, &alternate)
+      || !snapshot_u32(data, size, &offset, &synchronized)
+      || version != 1 || columns < 1 || columns > 512 || rows < 1 || rows > 256
+      || cursor_column > columns || cursor_row >= rows || cursor_mode > 2
+      || cursor_keys > 1 || keypad > 1 || mouse_tracking > 4
+      || mouse_encoding > 1 || paste > 1 || focus > 1 || alternate > 1
+      || synchronized > 1) return 0;
+  if ((size_t)columns * rows > (size - offset) / 16) return 0;
+  size_t records = (size_t)columns * rows;
+  size_t scan = offset;
+  for (size_t i = 0; i < records; ++i) {
+    uint32_t width, text_length;
+    if (!snapshot_u32(data, size, &scan, &width)
+        || !snapshot_u32(data, size, &scan, &text_length)
+        || scan > size || size - scan < 8 || text_length > size - scan - 8)
+      return 0;
+    scan += 8;
+    if (!snapshot_validate_text(&data[scan], text_length, width)) return 0;
+    scan += text_length;
+  }
+  if (scan != size) return 0;
+
+  terminal->replaying = 1;
+  terminal_emulator_reset_internal(terminal);
+  if (columns != (uint32_t)terminal->columns || rows != (uint32_t)terminal->rows) {
+    if (tsm_screen_resize(terminal->screen, columns, rows)) {
+      terminal->replaying = 0;
+      return 0;
+    }
+    terminal->columns = (int)columns;
+    terminal->rows = (int)rows;
+  }
+  tsm_screen_set_max_sb(terminal->screen, (unsigned int)terminal->scrollback_limit);
+  tsm_screen_clear_sb(terminal->screen);
+  if (alternate) snapshot_feed_mode(terminal, "\x1b[?1049h", 8);
+  if (cursor_keys) snapshot_feed_mode(terminal, "\x1b[?1h", 5);
+  if (keypad) snapshot_feed_mode(terminal, "\x1b=", 2);
+  if (mouse_tracking) {
+    static const char* tracking[] = {"", "\x1b[?9h", "\x1b[?1000h",
+      "\x1b[?1002h", "\x1b[?1003h"};
+    snapshot_feed_mode(terminal, tracking[mouse_tracking], strlen(tracking[mouse_tracking]));
+  }
+  if (mouse_encoding) snapshot_feed_mode(terminal, "\x1b[?1006h", 8);
+  if (paste) snapshot_feed_mode(terminal, "\x1b[?2004h", 8);
+  if (focus) snapshot_feed_mode(terminal, "\x1b[?1004h", 8);
+  if (synchronized) snapshot_feed_mode(terminal, "\x1b[?2026h", 8);
+
+  tsm_screen_erase_screen(terminal->screen, false);
+  offset = 64;
+  for (size_t i = 0; i < records; ++i) {
+    uint32_t width, text_length;
+    snapshot_u32(data, size, &offset, &width);
+    snapshot_u32(data, size, &offset, &text_length);
+    uint64_t style = (uint64_t)read_u32(&data[offset])
+      | ((uint64_t)read_u32(&data[offset + 4]) << 32);
+    offset += 8;
+    struct tsm_screen_attr attr = snapshot_attr(style);
+    size_t text_end = offset + text_length;
+    if (width > 0) {
+      unsigned int column = (unsigned int)(i % columns);
+      unsigned int row = (unsigned int)(i / columns);
+      tsm_screen_move_to(terminal->screen, column, row);
+      while (offset < text_end) {
+        uint32_t codepoint;
+        if (!snapshot_codepoint(data, text_end, &offset, &codepoint)) {
+          terminal->replaying = 0;
+          return 0;
+        }
+        tsm_screen_write(terminal->screen, codepoint, &attr);
+      }
+    }
+    offset = text_end;
+  }
+  if (cursor_mode == 1) tsm_screen_set_flags(terminal->screen, TSM_SCREEN_HIDE_CURSOR);
+  else if (cursor_mode == 2) tsm_screen_set_cursor_style(terminal->screen,
+      TSM_SCREEN_CURSOR_BLOCK_BLINK);
+  else tsm_screen_set_cursor_style(terminal->screen, TSM_SCREEN_CURSOR_BLOCK_STEADY);
+  tsm_screen_move_to(terminal->screen, cursor_column, cursor_row);
+  terminal->replaying = 0;
+  return 1;
+}
+
 void terminal_emulator_resize(terminal_emulator_t* emulator,
     int columns, int rows) {
   terminal_t* terminal = (terminal_t*)emulator;

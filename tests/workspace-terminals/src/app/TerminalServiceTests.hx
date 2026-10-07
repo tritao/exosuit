@@ -5,6 +5,7 @@ import haxeon.rpc.MemoryTransport;
 import haxeon.rpc.RpcConnection;
 import workspace.runtime.WorkspaceTerminalManager;
 import workspace.service.WorkspaceTerminalProtocol;
+import terminalkit.Emulator;
 
 class TerminalServiceTests {
   static function require(value:Bool, message:String):Void {
@@ -170,6 +171,26 @@ class TerminalServiceTests {
     step();
     step();
     require(error == "replay_gap", "Trimmed output did not report a gap");
+    var screen:Null<TerminalScreenSnapshot> = null;
+    client.call(WorkspaceTerminalProtocol.SNAPSHOT,
+      {workspace: "w", instance: "instance", id: "bounded"}, 3000,
+      function(value) screen = value, function(e) throw e.code);
+    deadline = clock() + 3000;
+    while (screen == null) {
+      require(clock() < deadline, "Terminal screen snapshot timed out");
+      step();
+    }
+    require(screen.terminal.end >= 100000 && screen.data.length >= 64
+      && screen.data.length <= 3 * 1024 * 1024,
+      "Terminal screen snapshot was not bounded at the current output offset");
+    var restored = Emulator.open(10, 3, 8, "xterm-256color", false);
+    restored.restoreScreenSnapshot(screen.data);
+    restored.snapshot();
+    var outputVisible = false;
+    for (row in 0...restored.rows()) if (restored.rowText(row).indexOf("x") >= 0
+      || restored.rowText(row).indexOf("DONE") >= 0) outputVisible = true;
+    restored.close();
+    require(outputVisible, "Terminal screen snapshot did not restore the live viewport");
     var peer = MemoryTransport.pair();
     var viewer = new RpcConnection(peer.client, clock), viewerServer = new RpcConnection(peer.server, clock);
     manager.bind(viewerServer, [WorkspaceTerminalProtocol.READ, WorkspaceTerminalProtocol.CONTROL]);

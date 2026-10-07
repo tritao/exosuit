@@ -424,6 +424,26 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
       );
     }
     );
+    connection.register(WorkspaceTerminalProtocol.SNAPSHOT, function(r, c) {
+      if (!read) {
+        c.fail(error("unauthorized"));
+        return;
+      }
+      if (!valid(r.workspace, r.instance, r.id)) {
+        c.fail(error("invalid_request"));
+        return;
+      }
+      var t = terminals.get(r.id);
+      if (t == null) {
+        c.fail(error("unknown_terminal"));
+        return;
+      }
+      try {
+        c.respond({terminal: info(t, connection), data: t.emulator.screenSnapshot()});
+      } catch (_:Dynamic) {
+        c.fail(error("snapshot_unavailable"));
+      }
+    });
     connection.register(WorkspaceTerminalProtocol.SET_CONTROL, function(r, c) {
       if (!read || !control) {
         c.fail(error("unauthorized"));

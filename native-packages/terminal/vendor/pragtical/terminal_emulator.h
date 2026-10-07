@@ -63,6 +63,11 @@ int terminal_emulator_restore_checkpoint(
   const void* data,
   size_t size
 );
+int terminal_emulator_restore_screen_snapshot(
+  terminal_emulator_t* emulator,
+  const void* data,
+  size_t size
+);
 void terminal_emulator_resize(terminal_emulator_t* emulator, int columns, int rows);
 int terminal_emulator_close(terminal_emulator_t* emulator);
 int terminal_emulator_is_closed(terminal_emulator_t* emulator);

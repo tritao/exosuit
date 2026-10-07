@@ -68,6 +68,15 @@ class TerminalSession {
         pendingBytes = 0;
         replayAt = -1;
     }
+    public function applyScreenSnapshot(snapshot:Bytes, at:haxe.Int64):Void {
+        ensureOpen();
+        if (at < 0 || snapshot == null) throw "Invalid terminal screen snapshot";
+        emulator.restoreScreenSnapshot(snapshot);
+        offset = at;
+        pending.resize(0);
+        pendingBytes = 0;
+        replayAt = -1;
+    }
     public function close():Void {
         if (closed) return;
         backend.close();
@@ -83,6 +92,8 @@ class TerminalSession {
             exitCode = event.exitCode;
         } else if (event.kind == "geometry") {
             emulator.resize(event.columns, event.rows);
+        } else if (event.kind == "snapshot") {
+            applyScreenSnapshot(event.data, event.offset);
         } else if (event.kind == "output") {
             applyOutput(event);
         }

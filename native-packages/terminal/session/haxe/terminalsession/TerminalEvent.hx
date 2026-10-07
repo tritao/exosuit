@@ -35,6 +35,13 @@ class TerminalEvent {
     public static function status(state:String, exitCode:Int = 0):TerminalEvent
         return new TerminalEvent("status", 0, null, 0, state, exitCode);
 
+    /** A bounded active-screen snapshot replaces the renderer before replay resumes. */
+    public static function screenSnapshot(offset:haxe.Int64, data:Bytes):TerminalEvent {
+        if (offset < 0 || data == null || data.length == 0)
+            throw "Invalid terminal screen snapshot event";
+        return new TerminalEvent("snapshot", offset, data, data.length, "", 0);
+    }
+
     public static function geometry(columns:Int, rows:Int):TerminalEvent {
         if (columns < 1 || columns > 512 || rows < 1 || rows > 256) throw "Invalid terminal geometry";
         return new TerminalEvent("geometry", 0, null, 0, "", 0, columns, rows);

@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-excluded = {"NativeDesktopServices.hx", "ui/TerminalPane.hx", "plugin/DynamicPlugin.hx",
+excluded = {"NativeDesktopServices.hx", "plugin/DynamicPlugin.hx",
             "plugin/DynamicHostRouter.hx", "plugin/DynamicHostRegistration.hx",
             "plugin/DynamicCompileCompletion.hx", "plugin/NativeSourcePluginLoader.hx"}
 sources = ["src/app/WebMain.hx"]
@@ -23,6 +23,8 @@ manifest = {
         "haxeon-ui": {"path": "../haxeon/packages/ui"},
         "haxeon-editor": {"path": "../haxeon/packages/editor"},
         "noisekit": {"path": "../native-packages/noise"},
+        "terminalkit": {"path": "../native-packages/terminal"},
+        "terminalsession": {"path": "../native-packages/terminal/session"},
     },
     "target": "wasm32", "outputDir": "build"
 }

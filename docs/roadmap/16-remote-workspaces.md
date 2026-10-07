@@ -356,9 +356,11 @@ Deployment/publication requires separate authorization under EXECUTION.md.
   Remote terminal panes show the transfer action and follow the active PTY size
   while read-only. The multi-client service acceptance covers transfer and
   lease recovery after disconnect.
-- [ ] Recover after output replay expires by loading a fresh VT snapshot or
-  checkpoint. The current client detects `replay_gap` and presents an error;
-  it cannot yet reconstruct the screen from a new snapshot.
+- [x] Recover after output replay expires with a bounded active-screen
+  snapshot. On `replay_gap`, the client restores styled cells, cursor and
+  supported input modes, then resumes byte-offset replay at the snapshot's
+  terminal end. The payload is capped at 3 MiB, below the RPC message limit.
+  The live viewport recovers; earlier scrollback is discarded after a gap.
 - [ ] Complete the browser host build and connected file clickthrough. The
   pairing test now grants file access and checks that the browser Explorer
   subscribes to the remote root; the web guest also compiles with remote
@@ -372,9 +374,9 @@ Deployment/publication requires separate authorization under EXECUTION.md.
 - [x] Attach terminal output by byte offsets and replay, and gate input/resize
   through the explicit controller lease. Multiple viewers can read without
   resizing the shared PTY; taking or releasing control is visible in the pane.
-- [ ] Recover terminal screen state after replay expiry using a fresh snapshot
-  or checkpoint. Keep replay and queues bounded so bulk output cannot starve
-  control events.
+- [x] Recover terminal screen state after replay expiry using a fresh bounded
+  screen snapshot. Keep replay and queues bounded so bulk output cannot starve
+  control events. Earlier scrollback is not part of the recovery snapshot.
 
 Acceptance: same workspace resources appear on desktop and web. Closing the
 editor leaves the service and persistent sessions available. Browser reload

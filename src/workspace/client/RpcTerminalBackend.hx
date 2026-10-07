@@ -298,7 +298,7 @@ class RpcTerminalBackend implements TerminalBackend {
         );
       } else if (Sys.time() >= nextRead) {
         pending = true;
-          c.call(WorkspaceTerminalProtocol.OUTPUT, {
+        c.call(WorkspaceTerminalProtocol.OUTPUT, {
           workspace: "workspace",
           instance: instance,
           id: terminalId,
@@ -318,7 +318,8 @@ class RpcTerminalBackend implements TerminalBackend {
         }, function(e) {
           if (!closed && connection == c) {
             pending = false;
-            if (!retryable(e.code)) fail(e.code);
+            if (e.code == "replay_gap") requestScreenSnapshot(c);
+            else if (!retryable(e.code)) fail(e.code);
           }
         }
         );
@@ -327,5 +328,33 @@ class RpcTerminalBackend implements TerminalBackend {
     var events = output;
     output = [];
     for (event in events) emit(event);
+  }
+  function requestScreenSnapshot(c:RpcConnection):Void {
+    if (closed || connection != c || pending) return;
+    pending = true;
+    c.call(WorkspaceTerminalProtocol.SNAPSHOT, {
+      workspace: "workspace", instance: instance, id: terminalId
+    }, 3000, function(value) {
+      if (closed || connection != c) return;
+      pending = false;
+      if (value.terminal == null || value.terminal.id != terminalId
+          || value.terminal.end < position || value.terminal.end < value.terminal.start
+          || value.data == null || value.data.length < 64 || value.data.length > 3 * 1024 * 1024
+          || value.terminal.columns < 1 || value.terminal.columns > 512
+          || value.terminal.rows < 1 || value.terminal.rows > 256) {
+        fail("Invalid terminal screen snapshot");
+        return;
+      }
+      observe(value.terminal);
+      position = value.terminal.end;
+      output.push(TerminalEvent.screenSnapshot(position, value.data));
+      output.push(TerminalEvent.status(value.terminal.state, value.terminal.exitCode));
+      nextRead = 0;
+    }, function(error) {
+      if (connection != c) return;
+      pending = false;
+      if (!closed && !retryable(error.code)) fail(error.code == "snapshot_unavailable"
+        ? "Terminal screen snapshot is unavailable" : error.code);
+    });
   }
 }

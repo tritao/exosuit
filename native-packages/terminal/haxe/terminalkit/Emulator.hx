@@ -2,6 +2,8 @@ package terminalkit;
 
 import terminalkit.ffi.TerminalKit;
 import terminalkit.ffi.TerminalKitTypes;
+import haxe.io.Bytes;
+import haxe.io.BytesOutput;
 
 /** Headless terminal emulator. Close it when the session ends. */
 class Emulator {
@@ -144,6 +146,62 @@ class Emulator {
     public function restore(checkpoint:haxe.io.Bytes):Void {
         if (TerminalKit.terminalkit_restore(live(), checkpoint, checkpoint.length) != 1)
             throw "Terminal checkpoint restore failed";
+    }
+
+    /** Compact active-screen state for bounded remote terminal recovery. */
+    public function screenSnapshot():Bytes {
+        snapshot();
+        var position = cursor();
+        var modes = TerminalKit.terminalkit_modes(live());
+        var output = new BytesOutput();
+        output.write(Bytes.ofString("PTSMVTS"));
+        output.writeByte(0);
+        writeU32(output, 1);
+        writeU32(output, columns());
+        writeU32(output, rows());
+        writeU32(output, position.column);
+        writeU32(output, position.row);
+        writeU32(output, position.mode);
+        writeU32(output, modes.cursor_keys);
+        writeU32(output, modes.keypad);
+        writeU32(output, modes.mouse_tracking);
+        writeU32(output, modes.mouse_encoding);
+        writeU32(output, modes.paste);
+        writeU32(output, modes.focus);
+        writeU32(output, alternateScreen() ? 1 : 0);
+        writeU32(output, synchronizedOutput() ? 1 : 0);
+        var size = 64;
+        for (row in 0...rows()) {
+            var cells = rowCells(row);
+            if (cells.length != columns()) throw "Terminal row width changed during snapshot";
+            for (cell in cells) {
+                var text = Bytes.ofString(cell.width > 0 && cell.text.length == 0 ? " " : cell.text);
+                if (text.length > 3 * 1024 * 1024 - size - 16)
+                    throw "Terminal screen snapshot exceeds limit";
+                size += 16 + text.length;
+                writeU32(output, cell.width);
+                writeU32(output, text.length);
+                writeU32(output, haxe.Int64.toInt(cell.style));
+                writeU32(output, haxe.Int64.toInt(cell.style >>> 32));
+                output.write(text);
+            }
+        }
+        return output.getBytes();
+    }
+
+    /** Restores a checked screen snapshot received from the workspace service. */
+    public function restoreScreenSnapshot(snapshot:Bytes):Void {
+        if (snapshot == null || snapshot.length < 64 || snapshot.length > 3 * 1024 * 1024)
+            throw "Invalid terminal screen snapshot size";
+        var restored = TerminalKit.terminalkit_restore_screen_snapshot(live(), snapshot, snapshot.length);
+        if (restored != 1) throw "Terminal screen snapshot restore failed";
+    }
+
+    private static function writeU32(output:BytesOutput, value:Int):Void {
+        output.writeByte(value & 255);
+        output.writeByte((value >>> 8) & 255);
+        output.writeByte((value >>> 16) & 255);
+        output.writeByte((value >>> 24) & 255);
     }
 
     private static function read32(bytes:haxe.io.Bytes, offset:Int):Int
