@@ -6,18 +6,17 @@ bearer, Noise-authenticated device grants, a desktop approval panel, and a
 first-pairing browser client. The browser consumes a pasted one-use relay URL,
 compares the Noise transcript code, stores device credentials encrypted under
 a non-extractable WebCrypto key, confirms receipt to the daemon, and verifies
-workspace identity over RPC. The full first-pair path now passes in headless
-Chrome through a local Wrangler Worker, including code comparison, desktop
-same-user pairing administration RPC, encrypted browser storage, and reload of
-approved device trust from the production SQLite store. Saved-device selection
-and reconnect now obtain a fresh relay ticket and verify the pinned machine key;
-the Worker also resets the daemon's stale channel before admitting a replacement
-device socket. Graphical desktop-panel clickthrough, remote workspace resources,
-and cross-network qualification remain open. A separate local
-Worker smoke test starts the real `AgentMain` twice to qualify opt-in daemon
-startup, OS credential reload, and SQLite reopen; the full browser-pairing run
-still uses its focused host harness. It
-depends on Haxeon RPC.1/RPC.2 and the
+workspace identity over RPC. First pairing and saved-device reconnect pass in
+headless Chrome through the local Wrangler Worker, both through the focused
+host and through real `AgentMain` using its same-user pairing RPC, NativeKit
+credential service and production SQLite store. The Worker also resets the
+daemon's stale channel before admitting a replacement device socket. A local
+forced Durable Object eviction test confirms live sockets remain open and
+forward in both directions after wake. Graphical desktop-panel clickthrough,
+remote workspace resources, Cloudflare edge behavior and cross-network
+qualification remain open. A separate local Worker smoke test starts the real
+`AgentMain` twice to qualify opt-in daemon startup, OS credential reload and
+SQLite reopen. It depends on Haxeon RPC.1/RPC.2 and the
 M14 workspace service; terminal and provider features depend on their M12/M14
 acceptance. Use the existing M15 web build as the first remote client. Android
 uses the same responsive web application; a native Android app is not required
@@ -185,9 +184,10 @@ protocol and browser key-storage contracts.
   device registration/revocation, expiring single-use pairing, one-use socket
   tickets, origin checks, bounded binary frames and channel-scoped unicast.
   Local tests cover replay, expiry, revocation, offline pairing, overload caps,
-  frame limits and bidirectional delivery. Forced Durable Object eviction with
-  live sockets still needs qualification; quota behavior and global admission
-  controls are not implemented.
+  frame limits, bidirectional delivery and forced Durable Object eviction with
+  live sockets. Hibernation survives eviction under the local workerd test
+  runtime; Cloudflare edge behavior, quota measurements and global admission
+  controls are not qualified or implemented.
 - [x] Add the NativeKit machine connector: exchange the reusable machine bearer
   over HTTP Authorization, then connect with the one-use socket ticket. The
   local Wrangler test verifies ticket exchange and machine WebSocket upgrade.

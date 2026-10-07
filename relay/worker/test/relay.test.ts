@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { evictDurableObject } from "cloudflare:test";
 import { afterEach, describe, expect, it } from "vitest";
 import worker from "../src/index";
 
@@ -241,6 +242,33 @@ describe("single-use pairing and device tickets", () => {
 });
 
 describe("bounded channel forwarding", () => {
+  it("routes both ways after hibernation eviction with live sockets", async () => {
+    const id = nextMachineId();
+    const machineToken = secret(38);
+    const deviceId = idFromNumber(1211);
+    const deviceToken = secret(39);
+    await registerMachine(id, machineToken);
+    const machine = await openMachine(id, machineToken);
+    await registerDevice(id, machineToken, deviceId, deviceToken);
+
+    const initialReset = waitForMessage(machine);
+    const device = socketOf(await connectDevice(id, await issueTicket(id, deviceToken)));
+    expect([...new Uint8Array(await initialReset)]).toEqual([...resetFrame(deviceId)]);
+
+    const stub = env.MACHINE_RELAY.get(env.MACHINE_RELAY.idFromName(id));
+    await evictDurableObject(stub);
+    expect(machine.readyState).toBe(WebSocket.OPEN);
+    expect(device.readyState).toBe(WebSocket.OPEN);
+
+    const toMachine = waitForMessage(machine);
+    device.send(frame(deviceId, [0xa1, 0xa2]).buffer);
+    expect([...new Uint8Array(await toMachine)]).toEqual([...frame(deviceId, [0xa1, 0xa2])]);
+
+    const toDevice = waitForMessage(device);
+    machine.send(frame(deviceId, [0xb1, 0xb2]).buffer);
+    expect([...new Uint8Array(await toDevice)]).toEqual([...frame(deviceId, [0xb1, 0xb2])]);
+  });
+
   it("resets the machine-side device route before accepting a reconnect", async () => {
     const id = nextMachineId();
     const machineToken = secret(36);
@@ -368,6 +396,8 @@ function call(id: string, endpoint: string, init: RequestInit = {}): Promise<Res
 async function registerMachine(id: string, machineToken: string): Promise<void> {
   const response = await call(id, "register", { method: "POST", headers: bearer(machineToken) });
   expect([201, 204]).toContain(response.status);
+  // Consume the DO-backed response before tests request instance eviction.
+  await response.arrayBuffer();
 }
 
 async function createPairing(
@@ -411,6 +441,7 @@ async function registerDevice(
     body: JSON.stringify({ token: deviceToken }),
   });
   expect([201, 204]).toContain(response.status);
+  await response.arrayBuffer();
 }
 
 async function issueTicket(id: string, deviceToken: string): Promise<string> {

@@ -2,6 +2,20 @@
 
 Last updated: 2026-10-07.
 
+## M16.1 relay hibernation eviction, 2026-10-07
+
+Added a Worker Vitest that forces the actual `MachineRelay` Durable Object to
+evict while its machine and browser sockets are live. The sockets remain open,
+and both directions still forward bounded binary frames after the object wakes,
+which exercises attachment-based routing reconstruction. The test initially
+held the DO alive because enrollment helpers left response bodies unread; those
+helpers now drain their responses so eviction sees no active request reference.
+
+Validation: `npm run check` in `relay/worker` passes type checking and all 16
+tests, including forced eviction and post-wake bidirectional routing. This
+qualifies local workerd hibernation behavior; Cloudflare edge, cross-network,
+quota and fault-injection qualification remain open.
+
 ## M16.1 browser pairing through AgentMain, 2026-10-07
 
 Extended the headless browser pairing run to launch the production `AgentMain`
