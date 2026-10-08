@@ -182,8 +182,112 @@ class DecorationSmokeApp extends ExosuitApp {
 		host.setDocumentSearchMatches(DocumentSearch.find(document, "return", new SearchOptions()));
 	}
 
+	function editingSettingsStep():Void {
+		var view = host.activeView();
+		if (view == null || ui.root == null) throw "editing settings lost the editor";
+		var node = findEditor(ui.root, "editor:" + view.document.id);
+		if (node == null) throw "editing settings lost the widget";
+		ui.focusWidget(node.id);
+		var buffer = view.document.buffer;
+		if (frames == 2) {
+			application.settings.store.set("editor/indentation/tab_width", haxeon.ui.properties.PropertyValue.Int(2));
+			buffer.replaceAllText(" a", view.selection); view.restoreCursor(0, 1);
+		} else if (frames == 3) {
+			ui.key(UiEventKind.KeyDown, UiKey.Tab);
+			if (buffer.text != "  a" || view.selection.cursor.column != 2) throw "Tab ignored live tab-width settings";
+			view.backspace();
+			if (buffer.text != "a" || view.selection.cursor.column != 0) throw "command Backspace ignored live tab width";
+			buffer.replaceAllText("  {}", view.selection); view.restoreCursor(0, 3);
+		} else if (frames == 4) {
+			ui.key(UiEventKind.KeyDown, UiKey.Enter);
+			if (buffer.text != "  {\n    \n  }" || view.selection.cursor.column != 4) throw "Enter ignored the configured indentation width";
+			application.settings.store.set("editor/indentation/insert_spaces", haxeon.ui.properties.PropertyValue.Bool(false));
+			buffer.replaceAllText("\t{}", view.selection); view.restoreCursor(0, 2);
+		} else if (frames == 5) {
+			view.insertNewline();
+			if (buffer.text != "\t{\n\t\t\n\t}" || view.selection.cursor.line != 1 || view.selection.cursor.column != 2) throw "command Enter ignored hard-tab settings";
+			view.undo(); view.restoreCursor(0, 0);
+			ui.key(UiEventKind.KeyDown, UiKey.Tab);
+			if (buffer.text != "\t\t{}") throw "keyboard Tab ignored hard-tab settings";
+			trace("PASS: live tab width and hard-tab settings shared by widget and command edits");
+		}
+	}
+
+	function editingPolicyStep():Void {
+		var view = host.activeView();
+		if (view == null || ui.root == null) throw "editing policy lost its view";
+		var node = findEditor(ui.root, "editor:" + view.document.id);
+		if (node == null) throw "editing policy lost its editor";
+		ui.focusWidget(node.id);
+		var buffer = view.document.buffer;
+		if (frames == 2) {
+			buffer.replaceAllText("  alpha", view.selection);
+			view.restoreCursor(0, 2);
+		} else if (frames == 3) {
+			ui.key(UiEventKind.KeyDown, UiKey.Tab);
+			if (buffer.text != "    alpha" || view.selection.cursor.column != 4) throw "Tab did not insert at its caret";
+			ui.key(UiEventKind.KeyRepeat, UiKey.Tab);
+			if (buffer.text != "        alpha" || view.selection.cursor.column != 8 || (ui.focus.focusedId == null || !ui.focus.focusedId.equals(node.id))) throw "held Tab moved focus or failed to repeat";
+			ui.key(UiEventKind.KeyDown, UiKey.Tab, UiModifier.Shift);
+			ui.key(UiEventKind.KeyRepeat, UiKey.Tab, UiModifier.Shift);
+			if (buffer.text != "alpha" || view.selection.cursor.column != 0) throw "held Shift+Tab did not unindent";
+			ui.key(UiEventKind.KeyDown, UiKey.Tab);
+			ui.key(UiEventKind.KeyDown, UiKey.Backspace);
+			if (buffer.text != "alpha" || view.selection.cursor.column != 0) throw "smart Backspace did not undo one indentation level";
+			var runs = 0;
+			ui.commands.register(new haxeon.ui.core.Command("test.repeat", "Repeat test", function() runs++, new haxeon.ui.core.Shortcut(UiKey.F5)));
+			ui.key(UiEventKind.KeyDown, UiKey.F5); ui.key(UiEventKind.KeyRepeat, UiKey.F5);
+			if (runs != 1) throw "command repeats ran an action without repeat opt-in";
+			buffer.replaceAllText("    {}", view.selection); view.restoreCursor(0, 5);
+		} else if (frames == 4) {
+			ui.key(UiEventKind.KeyDown, UiKey.Enter);
+			if (buffer.text != "    {\n        \n    }" || view.selection.cursor.line != 1 || view.selection.cursor.column != 8) throw "graphical Enter misplaced the indented caret";
+			view.undo();
+			if (buffer.text != "    {}" || view.selection.cursor.column != 5) throw "graphical Enter was not atomic";
+			buffer.replaceAllText("á👩‍💻\ná👩‍💻", view.selection);
+			var end = "á👩‍💻".length;
+			view.selection.setCursor(buffer, new BufferPosition(1, end));
+			view.selection.addRange(buffer, new BufferPosition(0, end), new BufferPosition(0, end));
+		} else if (frames == 5) {
+			ui.key(UiEventKind.KeyDown, UiKey.Backspace);
+			if (buffer.text != "á\ná" || view.selection.rangeCount() != 2) throw "multi-caret Backspace split an emoji grapheme";
+			ui.key(UiEventKind.KeyDown, UiKey.Backspace);
+			if (buffer.text != "\n") throw "multi-caret Backspace split a combining grapheme";
+			view.undo(); view.undo();
+			if (buffer.text != "á👩‍💻\ná👩‍💻" || view.selection.rangeCount() != 2) throw "multi-caret deletion undo lost text or carets";
+			view.selection.setCursor(buffer, new BufferPosition(0, "á👩‍💻".length));
+			view.backspace();
+			if (buffer.text != "á\ná👩‍💻") throw "command Backspace differed from widget grapheme deletion";
+			buffer.replaceAllText("  a\n      b", view.selection);
+			view.selection.setCursor(buffer, new BufferPosition(1, 6));
+			view.selection.addRange(buffer, new BufferPosition(0, 2), new BufferPosition(0, 2));
+		} else if (frames == 6) {
+			ui.key(UiEventKind.KeyDown, UiKey.Enter);
+			if (buffer.text != "  \n  a\n      \n      b" || view.selection.cursor.line != 3 || view.selection.cursor.column != 6) throw "graphical multi-caret Enter lost indentation";
+			var accepted = 0;
+			for (modifiers in [platform.Platform.MOD_SHIFT, platform.Platform.MOD_CTRL]) {
+				host.openLanguageCompletion(new platform.TextInputArea(0, 0, 1, 1), [new completion.CompletionItem("test")], function(_) accepted++);
+				if (host.handleLanguagePopupKey(platform.Platform.KEY_TAB, modifiers) || accepted != 0 || host.isLanguagePopupVisible()) throw "modified Tab accepted a completion";
+			}
+			host.openLanguageCompletion(new platform.TextInputArea(0, 0, 1, 1), [new completion.CompletionItem("test")], function(_) accepted++);
+			if (!host.handleLanguagePopupKey(platform.Platform.KEY_TAB, 0) || accepted != 1) throw "plain Tab failed to accept completion";
+			var beforeFocusMode = buffer.text;
+			ui.focusWidget(node.id);
+			ui.key(UiEventKind.KeyDown, 77 /* M */, UiModifier.Control);
+			ui.key(UiEventKind.KeyDown, UiKey.Tab);
+			if (buffer.text != beforeFocusMode || ui.focus.focusedId == null || ui.focus.focusedId.equals(node.id)) throw "Tab focus mode edited text or trapped focus";
+			ui.key(UiEventKind.KeyDown, 77 /* M */, UiModifier.Control);
+			ui.focusWidget(node.id);
+			ui.key(UiEventKind.KeyDown, UiKey.Tab);
+			if (buffer.text == beforeFocusMode || ui.focus.focusedId == null || !ui.focus.focusedId.equals(node.id)) throw "disabling Tab focus mode did not restore indentation";
+			trace("PASS: editor indentation stops, key repeats, grapheme deletion, Enter placement, undo and completion modifiers");
+		}
+	}
+
 	override public function submit(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		frames++;
+		if (phase == "editing-policy" && frames >= 2 && frames <= 6) editingPolicyStep();
+		if (phase == "editing-settings" && frames >= 2 && frames <= 5) editingSettingsStep();
 		if (phase == "ime-selection-affinity" && frames == 4) {
 			var view = host.activeView(), previous = ui.root;
 			if (view == null || previous == null) throw "IME regression lost editor";

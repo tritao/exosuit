@@ -37,9 +37,11 @@ class CommandBridge {
 		for (command in source.all()) {
 			if (layoutOnlyCommands.indexOf(command.name) >= 0 || duplicates.indexOf(command.name) >= 0) continue;
 			var name = command.name, shortcut = shortcutFor(keymap, name);
-			target.register(new Command(bridgedId(name), command.description, function() {
+			var bridged = new Command(bridgedId(name), command.description, function() {
 				source.perform(name, context);
-			}, shortcut, function() return source.isValid(name, context)));
+			}, shortcut, function() return source.isValid(name, context));
+			bridged.repeatable = ["doc:tab", "doc:indent", "doc:unindent", "doc:backspace", "doc:delete", "doc:newline"].indexOf(name) >= 0;
+			target.register(bridged);
 		}
 	}
 

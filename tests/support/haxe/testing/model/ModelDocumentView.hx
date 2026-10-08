@@ -50,10 +50,9 @@ class ModelDocumentView extends View {
 	override public function selectAll():Void editor.selection.selectAll(document.buffer);
 	override public function undo():Void document.buffer.undo(editor.selection);
 	override public function redo():Void document.buffer.redo(editor.selection);
-	override public function backspace():Void {
-		if (editor.selection.rangeCount() > 1) document.buffer.deleteSelections(editor.selection, true);
-		else document.buffer.deleteBackward(editor.selection);
-	}
+	override public function backspace(tabWidth:Int = 0):Void
+		EditorActions.backspace(document.buffer, editor.selection, tabWidth > 0 ? tabWidth : 4);
+
 	override public function deleteForward():Void {
 		if (editor.selection.rangeCount() > 1) document.buffer.deleteSelections(editor.selection, false);
 		else document.buffer.deleteForward(editor.selection);
@@ -85,11 +84,14 @@ class ModelDocumentView extends View {
 		return document.buffer.replaceSelections(editor.selection,
 			editor.selection.rangeCount() > 1 && lines.length == editor.selection.rangeCount() ? lines : [text]);
 	}
+	override public function tab(tabWidth:Int, insertSpaces:Bool):Bool
+		return EditorActions.tab(document.buffer, editor.selection, tabWidth, insertSpaces);
+
 	override public function indent(tabWidth:Int, insertSpaces:Bool):Bool
 		return EditorActions.indent(document.buffer, editor.selection, tabWidth, insertSpaces);
 	override public function unindent(tabWidth:Int):Bool
 		return EditorActions.unindent(document.buffer, editor.selection, tabWidth);
-	override public function insertNewline():Bool return EditorActions.insertNewline(document.buffer, editor.selection);
+	override public function insertNewline(tabWidth:Int = 0, insertSpaces:Bool = true):Bool return EditorActions.insertNewline(document.buffer, editor.selection, tabWidth > 0 ? tabWidth : 4, insertSpaces, document.highlighter);
 	override public function duplicateLines():Bool return EditorActions.duplicateLines(document.buffer, editor.selection);
 	override public function moveLines(direction:Int):Bool return EditorActions.moveLines(document.buffer, editor.selection, direction);
 	override public function deleteLines():Bool return EditorActions.deleteLines(document.buffer, editor.selection);

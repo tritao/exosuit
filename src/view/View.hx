@@ -35,7 +35,7 @@ class View {
 	public function selectAll():Void {}
 	public function undo():Void {}
 	public function redo():Void {}
-	public function backspace():Void {}
+	public function backspace(tabWidth:Int = 0):Void {}
 	public function deleteForward():Void {}
 	public function selectRange(from:BufferPosition, to:BufferPosition):Bool return false;
 	public function replaceRange(from:BufferPosition, to:BufferPosition, text:String):Bool return false;
@@ -43,9 +43,10 @@ class View {
 	public function copy():Bool return false;
 	public function cut():Bool return false;
 	public function paste():Bool return false;
+	public function tab(tabWidth:Int, insertSpaces:Bool):Bool return indent(tabWidth, insertSpaces);
 	public function indent(tabWidth:Int, insertSpaces:Bool):Bool return false;
 	public function unindent(tabWidth:Int):Bool return false;
-	public function insertNewline():Bool return false;
+	public function insertNewline(tabWidth:Int = 0, insertSpaces:Bool = true):Bool return false;
 	public function duplicateLines():Bool return false;
 	public function moveLines(direction:Int):Bool return false;
 	public function deleteLines():Bool return false;

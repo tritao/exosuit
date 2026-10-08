@@ -114,9 +114,10 @@ class TextBuffer {
 		return true;
 	}
 
-	public function replaceSelections(selection:BufferSelection, values:Array<String>):Bool {
+	/** Values and optional UTF-16 caret offsets are supplied in document order. */
+	public function replaceSelections(selection:BufferSelection, values:Array<String>, ?caretOffsets:Array<Int>):Bool {
 		var ranges = selection.allRanges();
-		return replaceSelectionRanges(selection, ranges, values);
+		return replaceSelectionRanges(selection, ranges, values, caretOffsets);
 	}
 
 	/** Deletes selected text or ranges from an optional navigation boundary, retaining one undo unit. */
@@ -127,7 +128,7 @@ class TextBuffer {
 			if (!range.isCollapsed()) ranges.push(range);
 			else {
 				var direction = backwards ? -1 : 1;
-				var other = boundary == null ? positionOffset(range.cursor, direction) : boundary(range.cursor, direction);
+				var other = boundary == null ? graphemeOffset(range.cursor, direction) : boundary(range.cursor, direction);
 				ranges.push(backwards ? new BufferRange(range.cursor, other) : new BufferRange(other, range.cursor));
 			}
 		}
@@ -140,8 +141,9 @@ class TextBuffer {
 		return replaceSelectionRanges(selection, ranges, [""]);
 	}
 
-	function replaceSelectionRanges(selection:BufferSelection, ranges:Array<BufferRange>, values:Array<String>):Bool {
+	function replaceSelectionRanges(selection:BufferSelection, ranges:Array<BufferRange>, values:Array<String>, ?caretOffsets:Array<Int>):Bool {
 		if (values.length != 1 && values.length != ranges.length) return false;
+		if (caretOffsets != null && caretOffsets.length != ranges.length) return false;
 		var pending:Array<PendingSelectionEdit> = [];
 		for (index in 0...ranges.length)
 			pending.push(new PendingSelectionEdit(ranges[index], values.length == 1 ? values[0] : "", index == 0));
@@ -153,7 +155,9 @@ class TextBuffer {
 		if (values.length > 1) for (index in 0...pending.length) pending[index].value = values[index];
 		var replacements:Array<BufferReplacement> = [], finalRanges:Array<BufferRange> = [], primary = 0;
 		for (index in 0...pending.length) {
-			var item = pending[index], position = advance(item.range.start(), item.value), lower = index;
+			var item = pending[index], caret = caretOffsets == null ? item.value.length : caretOffsets[index];
+			if (caret < 0 || caret > item.value.length) return false;
+			var position = advance(item.range.start(), item.value.substring(0, caret)), lower = index;
 			while (lower > 0) {
 				lower--;
 				var prior = pending[lower], change = new BufferChange(prior.range.start(), textRange(prior.range.start(), prior.range.end()),
@@ -169,13 +173,13 @@ class TextBuffer {
 
 	public function deleteBackward(selection:BufferSelection):Bool {
 		if (selection.hasSelection()) return replace(selection, selection.start(), selection.end(), "");
-		var start = positionOffset(selection.cursor, -1);
+		var start = graphemeOffset(selection.cursor, -1);
 		return start.equals(selection.cursor) ? false : replace(selection, start, selection.cursor, "");
 	}
 
 	public function deleteForward(selection:BufferSelection):Bool {
 		if (selection.hasSelection()) return replace(selection, selection.start(), selection.end(), "");
-		var end = positionOffset(selection.cursor, 1);
+		var end = graphemeOffset(selection.cursor, 1);
 		return end.equals(selection.cursor) ? false : replace(selection, selection.cursor, end, "");
 	}
 
@@ -214,6 +218,17 @@ class TextBuffer {
 
 	public function positionAt(line:Int, column:Int):BufferPosition
 		return sanitize(new BufferPosition(line, column));
+
+	/** Headless grapheme fallback; graphical editing supplies the shaped layout boundaries. */
+	public function graphemeOffset(position:BufferPosition, direction:Int):BufferPosition {
+		var at = sanitize(position), value = line(at.line);
+		if ((direction < 0 && at.column == 0) || (direction > 0 && at.column == value.length))
+			return positionOffset(at, direction);
+		var offsets = new haxeon.editor.TextOffsetMap(value);
+		var point = offsets.codepointOffsetForUtf16(at.column);
+		var next:Int = direction < 0 ? offsets.previousGraphemeBoundary(point - 1) : offsets.nextGraphemeBoundary(point);
+		return new BufferPosition(at.line, offsets.utf16OffsetForCodepoint(next));
+	}
 
 	public function positionOffset(position:BufferPosition, offset:Int):BufferPosition {
 		var result = sanitize(position), remaining = offset;

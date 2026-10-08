@@ -66,6 +66,9 @@ class EditorPane implements View {
 	final minimap:EditorMinimap;
 	public var minimapEnabled:Bool = true;
 	public var fontSize:Float = 15.0;
+	public var editSettings:config.Settings = new config.Settings();
+	var editingLayout:Null<TextEditorLayout> = null;
+
 	final onEdited:Void->Void;
 	public var caretRect(default, null):Null<Rect> = null;
 	public var onResolvedEditor:Null<Rect->haxeon.ui.core.WidgetId->Void> = null;
@@ -112,6 +115,13 @@ class EditorPane implements View {
 		editIntentHandler = handleEditIntent;
 		navigationIntentHandler = handleNavigationIntent;
 		selectedTextProvider = provideSelectedText;
+	}
+
+	public function deletionBoundary(position:editor.BufferPosition, direction:Int):editor.BufferPosition {
+		if (editingLayout == null || editingLayout.isDisposed()) return document.buffer.graphemeOffset(position, direction);
+		editingLayout.updateDocument(document.buffer.document, editingLayout.width, editingLayout.textStyle, editingLayout.paragraphStyle);
+		var point = EditorCoordinates.codepoint(document, position);
+		return EditorCoordinates.position(document, direction < 0 ? editingLayout.previousGrapheme(point) : editingLayout.nextGrapheme(point));
 	}
 
 	static function color(value:Int):Color {
@@ -168,16 +178,18 @@ class EditorPane implements View {
 	}
 
 	function handleEditIntent(intent:TextEditIntent, layout:TextEditorLayout):Bool {
-		if (selection.rangeCount() == 1) return false;
+		var policyEdit = switch intent { case DeleteBackward | DeleteForward | Insert("\n"): true; case _: false; };
+		if (selection.rangeCount() == 1 && !policyEdit) return false;
 		desiredVerticalXs = [];
 		switch intent {
+			case Insert("\n"): editor.EditorActions.insertNewline(document.buffer, selection, editSettings.tabWidth, editSettings.insertSpaces, document.highlighter);
 			case Insert(text): document.buffer.replaceSelections(selection, [text]);
 			case Paste(text):
 				var normalized = StringTools.replace(StringTools.replace(text, "\r\n", "\n"), "\r", "\n");
 				var lines = normalized.split("\n");
 				document.buffer.replaceSelections(selection, lines.length == selection.rangeCount() ? lines : [normalized]);
-			case DeleteBackward: document.buffer.deleteSelections(selection, true);
-			case DeleteForward: document.buffer.deleteSelections(selection, false);
+			case DeleteBackward: editor.EditorActions.backspace(document.buffer, selection, editSettings.tabWidth, deletionBoundary);
+			case DeleteForward: document.buffer.deleteSelections(selection, false, deletionBoundary);
 			case DeleteWordBackward(macStyle): deleteWords(layout, true, macStyle);
 			case DeleteWordForward(macStyle): deleteWords(layout, false, macStyle);
 		}
@@ -285,6 +297,7 @@ class EditorPane implements View {
 		area.decorationProvider = decorationProvider;
 		area.selectionProvider = selectionProvider;
 		area.onLayoutResolved = function(layout, geometry) {
+			editingLayout = layout;
 			gutter.resolveTextLayout(layout, geometry);
 			minimap.resolveTextLayout(layout);
 			if (viewportNode == null || viewportNode.resolved == null || scrollController.viewportHeight <= 0) return;

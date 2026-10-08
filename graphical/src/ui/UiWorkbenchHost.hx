@@ -1041,6 +1041,10 @@ class UiWorkbenchHost implements WorkbenchHost {
 			return true;
 		}
 		if (languageKind != LANG_COMPLETION || languageItems.length == 0) return false;
+		if (modifiers != 0 && (key == Platform.KEY_TAB || key == Platform.KEY_ENTER)) {
+			dismissLanguagePopup();
+			return false;
+		}
 		if (languageKey != null && languageKey(key, modifiers)) return true;
 		if (key == Platform.KEY_DOWN) {
 			languageSelected = (languageSelected + 1) % languageItems.length;
@@ -1054,7 +1058,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 			requestFrame();
 			return true;
 		}
-		if (key == Platform.KEY_ENTER || key == Platform.KEY_TAB) {
+		if ((key == Platform.KEY_ENTER || key == Platform.KEY_TAB) && modifiers == 0) {
 			var item = languageItems[languageSelected];
 			var accept = languageAccept;
 			dismissLanguagePopup();

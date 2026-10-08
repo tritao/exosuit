@@ -156,6 +156,17 @@ class ConfigurationController {
 		commands.add("settings:reload", context -> settings.reload(true));
 		commands.add("settings:open", context -> openSettingsCommandView());
 		commands.add("keybindings:open", context -> openKeybindingsCommandView());
+		commands.add("doc:tab", function(context) {
+			var value = settingsFor(context.requireDocument());
+			context.requireView().tab(value.tabWidth, value.insertSpaces);
+		}, hasDocument);
+		commands.add("doc:backspace", function(context) {
+			context.requireView().backspace(settingsFor(context.requireDocument()).tabWidth);
+		}, hasDocument);
+		commands.add("doc:newline", function(context) {
+			var value = settingsFor(context.requireDocument());
+			context.requireView().insertNewline(value.tabWidth, value.insertSpaces);
+		}, hasDocument);
 		commands.add("doc:indent", function(context) {
 			var value = settingsFor(context.requireDocument());
 			context.requireView().indent(value.tabWidth, value.insertSpaces);

@@ -42,9 +42,77 @@ class DocumentTestMain {
 			throw message;
 	}
 
+	static function editingPolicy(syntaxes:SyntaxRegistry):Void {
+		for (column in 0...9) {
+			var prefix = StringTools.rpad("", " ", column), buffer = new TextBuffer(prefix + "code"), selection = new BufferSelection(new BufferPosition(0, column));
+			var next = column + 4 - column % 4;
+			require(EditorActions.tab(buffer, selection, 4, true) && buffer.text == StringTools.rpad("", " ", next) + "code"
+				&& selection.cursor.column == next, "Tab did not advance to the next indentation stop");
+			require(EditorActions.backspace(buffer, selection, 4) && selection.cursor.column == next - 4,
+				"Backspace did not return to the preceding indentation stop");
+			require(buffer.undo(selection) && selection.cursor.column == next && buffer.undo(selection) && buffer.text == prefix + "code"
+				&& selection.cursor.column == column, "Tab/Backspace history lost the original caret");
+		}
+		var block = new TextBuffer("      a\n        b"), blockAt = new BufferSelection(new BufferPosition(1, 9), new BufferPosition(0, 0));
+		require(EditorActions.tab(block, blockAt, 4, true) && block.text == "          a\n            b"
+			&& EditorActions.unindent(block, blockAt, 4) && block.text == "      a\n        b",
+			"block Tab/Shift+Tab lost relative indentation on uneven stops");
+		var mid = new TextBuffer("abcDEF"), at = new BufferSelection(new BufferPosition(0, 3));
+		require(EditorActions.tab(mid, at, 4, true) && mid.text == "abc DEF" && at.cursor.column == 4, "Tab indented a line instead of inserting at its caret");
+		var mixed = new TextBuffer("\t  code"), mixedAt = new BufferSelection(new BufferPosition(0, 3));
+		require(EditorActions.backspace(mixed, mixedAt, 4) && mixed.text == "\tcode" && mixedAt.cursor.column == 1, "mixed-indent Backspace removed a whole level at an uneven stop");
+		mixed = new TextBuffer("\t  code"); mixedAt = new BufferSelection(new BufferPosition(0, 3));
+		require(EditorActions.unindent(mixed, mixedAt, 4) && mixed.text == "\tcode", "mixed-indent Shift+Tab did not preserve the preceding tab stop");
+		var tabs = new TextBuffer("ab"), tabsAt = new BufferSelection(new BufferPosition(0, 1));
+		require(EditorActions.tab(tabs, tabsAt, 4, false) && tabs.text == "a\tb" && tabsAt.cursor.column == 2, "hard Tab ignored the insertion caret");
+		for (cluster in ["á", "👩‍💻", "🇵🇹", "👍🏽"]) {
+			var unicode = new TextBuffer(cluster + "x"), unicodeAt = new BufferSelection(new BufferPosition(0, cluster.length));
+			require(EditorActions.backspace(unicode, unicodeAt, 4) && unicode.text == "x" && unicodeAt.cursor.column == 0, "Backspace split a Unicode grapheme");
+			require(unicode.undo(unicodeAt) && unicode.text == cluster + "x", "Unicode deletion undo lost text");
+			unicodeAt.setCursor(unicode, new BufferPosition(0, 0));
+			require(unicode.deleteForward(unicodeAt) && unicode.text == "x", "Delete split a Unicode grapheme");
+		}
+		var many = new TextBuffer("  a\n      b"), manyAt = new BufferSelection(new BufferPosition(1, 6));
+		manyAt.addRange(many, new BufferPosition(0, 2), new BufferPosition(0, 2));
+		require(EditorActions.tab(many, manyAt, 4, true) && many.text == "    a\n        b" && manyAt.cursor.line == 1
+			&& manyAt.cursor.column == 8 && manyAt.rangeCount() == 2, "multi-caret Tab lost document order or the primary caret");
+		require(many.undo(manyAt) && many.text == "  a\n      b" && manyAt.cursor.line == 1, "multi-caret Tab was not atomic");
+		require(EditorActions.insertNewline(many, manyAt) && many.text == "  \n  a\n      \n      b" && manyAt.cursor.line == 3
+			&& manyAt.cursor.column == 6, "multi-caret Enter used the wrong indentation or primary caret");
+		require(many.undo(manyAt) && many.text == "  a\n      b" && manyAt.rangeCount() == 2, "multi-caret Enter undo lost selections");
+		for (column in 0...5) {
+			var whitespace = new TextBuffer("    code"), caret = new BufferSelection(new BufferPosition(0, column));
+			require(EditorActions.insertNewline(whitespace, caret) && caret.cursor.line == 1 && caret.cursor.column == column
+				&& whitespace.text == StringTools.rpad("", " ", column) + "\n    code", "Enter inside indentation duplicated whitespace or misplaced the caret");
+		}
+		for (source in ["    {}", "    []", "    ()"]) {
+			var doc = new Document("Main.hx", source, syntaxes), caret = new BufferSelection(new BufferPosition(0, 5));
+			require(EditorActions.insertNewline(doc.buffer, caret, 4, true, doc.highlighter)
+				&& doc.buffer.text == source.substring(0, 5) + "\n        \n    " + source.substring(5)
+				&& caret.cursor.line == 1 && caret.cursor.column == 8, "Enter inside a bracket pair did not place the caret on an indented middle line");
+			require(doc.buffer.undo(caret) && doc.buffer.text == source && caret.cursor.column == 5, "bracket-pair Enter was not one undo unit");
+		}
+		var pairs = new Document("Main.hx", "{}\n  {}", syntaxes), pairCarets = new BufferSelection(new BufferPosition(1, 3));
+		pairCarets.addRange(pairs.buffer, new BufferPosition(0, 1), new BufferPosition(0, 1));
+		require(EditorActions.insertNewline(pairs.buffer, pairCarets, 4, true, pairs.highlighter)
+			&& pairs.buffer.text == "{\n    \n}\n  {\n      \n  }" && pairCarets.cursor.line == 4 && pairCarets.cursor.column == 6,
+			"multi-caret bracket Enter lost interior caret offsets or primary selection");
+		require(pairs.buffer.undo(pairCarets) && pairs.buffer.text == "{}\n  {}" && pairCarets.rangeCount() == 2, "multi-bracket Enter was not atomic");
+		for (source in ["    // {", "    var text = \"{"]) {
+			var doc = new Document("Main.hx", source, syntaxes), caret = new BufferSelection(doc.buffer.endPosition());
+			require(EditorActions.insertNewline(doc.buffer, caret, 4, true, doc.highlighter) && doc.buffer.text == source + "\n    "
+				&& caret.cursor.column == 4, "Enter treated a string or comment bracket as code");
+		}
+		var joined = new TextBuffer("a\nb"), joinedAt = new BufferSelection(new BufferPosition(1, 0));
+		require(EditorActions.backspace(joined, joinedAt, 4) && joined.text == "ab" && joinedAt.cursor.column == 1, "column-zero Backspace did not join lines");
+		joinedAt.setCursor(joined, new BufferPosition(0, 0));
+		require(!EditorActions.backspace(joined, joinedAt, 4), "Backspace at document start changed text");
+	}
+
 	static function main():Int {
 		var syntaxes = new SyntaxRegistry();
 		BuiltinSyntax.install(syntaxes);
+		editingPolicy(syntaxes);
 		require(syntaxes.find("script", "#!/usr/bin/env lua\n").name == "Lua" && syntaxes.find("data.json").name == "JSON"
 			&& syntaxes.find("README.md").name == "Markdown" && syntaxes.find("main.c").name == "C"
 			&& syntaxes.find("main.cpp").name == "C++" && syntaxes.find("build.sh").name == "Shell", "built-in syntax selection failed");

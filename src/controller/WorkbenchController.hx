@@ -176,7 +176,6 @@ class WorkbenchController {
 		commands.add("workbench:show-errors", context -> openErrorLog());
 		commands.add("workbench:show-problems", context -> openProblems());
 		commands.add("workbench:clear-notifications", context -> root.getNotifications().clear());
-		commands.add("doc:newline", context -> context.requireView().insertNewline(), hasDocument);
 		commands.add("doc:duplicate-line", context -> context.requireView().duplicateLines(), hasDocument);
 		commands.add("doc:move-line-up", context -> context.requireView().moveLines(-1), hasDocument);
 		commands.add("doc:move-line-down", context -> context.requireView().moveLines(1), hasDocument);

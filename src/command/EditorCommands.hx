@@ -11,8 +11,9 @@ class EditorCommands {
 		registry.add("doc:select-all", context -> context.requireView().selectAll(), hasDocument);
 		registry.add("doc:backspace", context -> context.requireView().backspace(), hasDocument);
 		registry.add("doc:delete", context -> context.requireView().deleteForward(), hasDocument);
-		registry.add("doc:newline", context -> context.requireView().textInput("\n"), hasDocument);
-		registry.add("doc:indent", context -> context.requireView().textInput("\t"), hasDocument);
+		registry.add("doc:newline", context -> context.requireView().insertNewline(), hasDocument);
+		registry.add("doc:tab", context -> context.requireView().tab(4, true), hasDocument);
+		registry.add("doc:indent", context -> context.requireView().indent(4, true), hasDocument);
 		if (clipboard) {
 			registry.add("doc:copy", context -> context.requireView().copy(), hasDocument);
 			registry.add("doc:cut", context -> context.requireView().cut(), hasDocument);
@@ -65,7 +66,7 @@ class EditorCommands {
 		keymap.addDirect(Platform.KEY_W, Platform.MOD_CTRL, ["root:close"]);
 		keymap.addDirect(Platform.KEY_TAB, Platform.MOD_CTRL, ["root:switch-to-next-tab"]);
 		keymap.addDirect(Platform.KEY_TAB, Platform.MOD_CTRL + Platform.MOD_SHIFT, ["root:switch-to-previous-tab"]);
-		keymap.addDirect(Platform.KEY_TAB, 0, ["doc:indent"]);
+		keymap.addDirect(Platform.KEY_TAB, 0, ["doc:tab"]);
 		keymap.addDirect(Platform.KEY_ENTER, 0, ["doc:newline"]);
 		keymap.addDirect(Platform.KEY_BACKSPACE, 0, ["doc:backspace"]);
 		keymap.addDirect(Platform.KEY_BACKSPACE, Platform.MOD_SHIFT, ["doc:backspace"]);

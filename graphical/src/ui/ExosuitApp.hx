@@ -551,6 +551,12 @@ class ExosuitApp implements DesktopUiApplication {
 		ui.commands.register(new Command("view.zoom-out", "Zoom Out", function() setApplicationZoom(application.settings.current.applicationZoom - 10), new Shortcut(45, modifier)).addShortcut(new Shortcut(333, modifier)));
 		ui.commands.register(new Command("view.zoom-reset", "Reset Zoom", function() setApplicationZoom(100), new Shortcut(48, modifier)).addShortcut(new Shortcut(320, modifier)));
 		ui.commands.register(new Command("view.notifications", "Show Notifications", function() showNotifications()));
+		ui.commands.register(new Command("editor.toggle-tab-focus", "Toggle Tab Moves Focus", function() {
+			ui.events.tabMovesFocus = !ui.events.tabMovesFocus;
+			host.dismissLanguagePopup();
+			host.getNotifications().publish(ui.events.tabMovesFocus ? "Tab moves focus" : "Tab inserts indentation");
+			requestFrame();
+		}, new Shortcut(77 /* M */, UiModifier.Control), null, function() return ui.events.tabMovesFocus));
 
 		// UiKey has no N/O/W/P constants, so these follow the raw-ASCII-code
 		// convention the canonical reference (app/src/Main.hx) uses for the same
@@ -1808,6 +1814,9 @@ class ExosuitApp implements DesktopUiApplication {
 					host.getPluginDecorations(), documentView.decorationSearchMatches, documentView.searchDecorationRevision, documentView.scrollController);
 				editorPanes.set(documentView.id, pane);
 			}
+			pane.editSettings = application.configuration.settingsFor(document);
+			documentView.editSettings = pane.editSettings;
+			documentView.deletionBoundary = pane.deletionBoundary;
 			pane.minimapEnabled = application.settings.current.minimapEnabled;
 			pane.consumeCursorReveal = documentView.consumeCursorReveal;
 			pane.fontSize = application.settings.current.fontSize;

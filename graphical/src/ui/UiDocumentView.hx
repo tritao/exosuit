@@ -34,6 +34,8 @@ class UiDocumentView extends View {
 	public final id:Int;
 	public final document:Document;
 	public final selection:BufferSelection;
+	public var editSettings:config.Settings = new config.Settings();
+	public var deletionBoundary:Null<(BufferPosition, Int)->BufferPosition> = null;
 	/** Preview is view-local and permanently clears on the first buffer edit. */
 	public var preview:Bool = false;
 	public final scrollController:ScrollController = new ScrollController();
@@ -91,15 +93,11 @@ class UiDocumentView extends View {
 	override public function redo():Void
 		document.buffer.redo(selection);
 
-	override public function backspace():Void {
-		if (selection.rangeCount() > 1) document.buffer.deleteSelections(selection, true);
-		else document.buffer.deleteBackward(selection);
-	}
+	override public function backspace(tabWidth:Int = 0):Void
+		EditorActions.backspace(document.buffer, selection, tabWidth > 0 ? tabWidth : editSettings.tabWidth, deletionBoundary);
 
-	override public function deleteForward():Void {
-		if (selection.rangeCount() > 1) document.buffer.deleteSelections(selection, false);
-		else document.buffer.deleteForward(selection);
-	}
+	override public function deleteForward():Void
+		document.buffer.deleteSelections(selection, false, deletionBoundary);
 
 	override public function selectRange(from:BufferPosition, to:BufferPosition):Bool {
 		selection.restore(document.buffer, to, from);
@@ -112,14 +110,18 @@ class UiDocumentView extends View {
 	override public function replaceAllText(text:String):Bool
 		return document.buffer.replaceAllText(text, selection);
 
+	override public function tab(tabWidth:Int, insertSpaces:Bool):Bool
+		return EditorActions.tab(document.buffer, selection, tabWidth, insertSpaces);
+
 	override public function indent(tabWidth:Int, insertSpaces:Bool):Bool
 		return EditorActions.indent(document.buffer, selection, tabWidth, insertSpaces);
 
 	override public function unindent(tabWidth:Int):Bool
 		return EditorActions.unindent(document.buffer, selection, tabWidth);
 
-	override public function insertNewline():Bool
-		return EditorActions.insertNewline(document.buffer, selection);
+	override public function insertNewline(tabWidth:Int = 0, insertSpaces:Bool = true):Bool
+		return EditorActions.insertNewline(document.buffer, selection, tabWidth > 0 ? tabWidth : editSettings.tabWidth,
+			tabWidth > 0 ? insertSpaces : editSettings.insertSpaces, document.highlighter);
 
 	override public function duplicateLines():Bool
 		return EditorActions.duplicateLines(document.buffer, selection);

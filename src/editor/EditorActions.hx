@@ -3,6 +3,46 @@ package editor;
 import syntax.SyntaxDefinition;
 
 class EditorActions {
+	/** Tab inserts at collapsed carets; a selection indents whole affected lines. */
+	public static function tab(buffer:TextBuffer, selection:BufferSelection, tabWidth:Int, insertSpaces:Bool):Bool {
+		for (range in selection.allRanges()) if (!range.isCollapsed()) return indent(buffer, selection, tabWidth, insertSpaces);
+		var values:Array<String> = [], width = tabWidth > 0 ? tabWidth : 1;
+		for (range in selection.documentRanges()) {
+			var column = visualColumn(buffer.line(range.cursor.line), range.cursor.column, width);
+			values.push(indentationUnit(insertSpaces ? width - column % width : width, insertSpaces));
+		}
+		return buffer.replaceSelections(selection, values);
+	}
+
+	/** Only leading whitespace uses indentation stops; text uses grapheme deletion. */
+	public static function backspace(buffer:TextBuffer, selection:BufferSelection, tabWidth:Int,
+			?boundary:(BufferPosition, Int)->BufferPosition):Bool {
+		var width = tabWidth > 0 ? tabWidth : 1;
+		return buffer.deleteSelections(selection, true, function(position, direction) {
+			var line = buffer.line(position.line);
+			if (position.column > 0 && position.column <= leadingWhitespace(line)) {
+				var column = visualColumn(line, position.column, width), target = column - (column % width == 0 ? width : column % width);
+				var offset = position.column;
+				while (offset > 0 && visualColumn(line, offset, width) > target) offset--;
+				return new BufferPosition(position.line, offset);
+			}
+			return boundary == null ? buffer.graphemeOffset(position, direction) : boundary(position, direction);
+		});
+	}
+
+	public static function visualColumn(line:String, end:Int, tabWidth:Int):Int {
+		var width = tabWidth > 0 ? tabWidth : 1, column = 0, index = 0;
+		while (index < end) {
+			var code = line.charCodeAt(index++);
+			if (code == 9) column += width - column % width;
+			else {
+				column++;
+				if (code >= 0xD800 && code <= 0xDBFF && index < end && line.charCodeAt(index) >= 0xDC00 && line.charCodeAt(index) <= 0xDFFF) index++;
+			}
+		}
+		return column;
+	}
+
 	public static function indent(buffer:TextBuffer, selection:BufferSelection, tabWidth:Int, insertSpaces:Bool):Bool {
 		var unit = indentationUnit(tabWidth, insertSpaces), replacements:Array<BufferReplacement> = [],
 			changes:Map<Int, LineColumnChange> = [];
@@ -15,25 +55,44 @@ class EditorActions {
 
 	public static function unindent(buffer:TextBuffer, selection:BufferSelection, tabWidth:Int):Bool {
 		var replacements:Array<BufferReplacement> = [], changes:Map<Int, LineColumnChange> = [];
+		var block = false;
+		for (range in selection.allRanges()) if (!range.isCollapsed()) block = true;
 		for (line in selectedLineNumbers(selection)) {
-			var text = buffer.line(line), count = 0;
-			if (text.length > 0 && text.charCodeAt(0) == 9) count = 1;
-			else while (count < tabWidth && count < text.length && text.charCodeAt(count) == 32) count++;
-			if (count > 0) {
-				replacements.push(new BufferReplacement(new BufferPosition(line, 0), new BufferPosition(line, count), ""));
-				changes.set(line, new LineColumnChange(0, -count));
+			var text = buffer.line(line), whitespace = leadingWhitespace(text), width = tabWidth > 0 ? tabWidth : 1;
+			var columns = visualColumn(text, whitespace, width), target = columns - (block || columns % width == 0 ? width : columns % width);
+			if (target < 0) target = 0;
+			var keep = 0, keptColumns = 0;
+			while (keep < whitespace) {
+				var next = text.charCodeAt(keep) == 9 ? keptColumns + width - keptColumns % width : keptColumns + 1;
+				if (next > target) break;
+				keep++; keptColumns = next;
+			}
+			var replacement = text.substring(0, keep) + indentationUnit(target - keptColumns, true);
+			if (whitespace > 0) {
+				replacements.push(new BufferReplacement(new BufferPosition(line, 0), new BufferPosition(line, whitespace), replacement));
+				changes.set(line, new LineColumnChange(keep, replacement.length - whitespace));
 			}
 		}
 		return apply(buffer, selection, replacements, changes);
 	}
 
-	public static function insertNewline(buffer:TextBuffer, selection:BufferSelection):Bool {
-		var values:Array<String> = [];
-		for (range in selection.allRanges()) {
-			var line = buffer.line(range.start().line);
-			values.push("\n" + line.substring(0, leadingWhitespace(line)));
+	public static function insertNewline(buffer:TextBuffer, selection:BufferSelection, tabWidth:Int = 4, insertSpaces:Bool = true,
+			?highlighter:syntax.Highlighter):Bool {
+		var values:Array<String> = [], carets:Array<Int> = [];
+		for (range in selection.documentRanges()) {
+			var start = range.start(), end = range.end(), line = buffer.line(start.line);
+			var indent = line.substring(0, Std.int(Math.min(start.column, leadingWhitespace(line))));
+			var left = StringTools.rtrim(line.substring(0, start.column)), opener = left.length == 0 ? "" : left.charAt(left.length - 1);
+			var codeBracket = highlighter != null && highlighter.syntax.highlighting && (opener == "{" || opener == "[" || opener == "(");
+			if (codeBracket) for (token in highlighter.line(start.line).tokens)
+				if (left.length - 1 >= token.start && left.length - 1 < token.start + token.length &&
+					(token.kind == syntax.HighlightToken.STRING || token.kind == syntax.HighlightToken.COMMENT)) codeBracket = false;
+			var value = "\n" + indent + (codeBracket ? indentationUnit(tabWidth, insertSpaces) : ""), caret = value.length;
+			var closer = opener == "{" ? "}" : opener == "[" ? "]" : ")";
+			if (codeBracket && buffer.line(end.line).charAt(end.column) == closer) value += "\n" + indent;
+			values.push(value); carets.push(caret);
 		}
-		return buffer.replaceSelections(selection, values);
+		return buffer.replaceSelections(selection, values, carets);
 	}
 
 	public static function duplicateLines(buffer:TextBuffer, selection:BufferSelection):Bool {

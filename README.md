@@ -46,6 +46,14 @@ The graphical workbench follows the system light/dark preference on launch.
 Use `python scripts/run.py --theme=dark` or `--theme=light` to override it.
 When no folder is open, the Explorer collapses to an Open Folder rail.
 
+In the source editor, Tab advances to the next indentation stop at the caret;
+with selected text it indents the affected lines. Shift+Tab unindents, and
+Backspace in leading whitespace returns to the preceding indentation stop.
+Enter preserves indentation and adds a level after a code opening bracket;
+between matching brackets it creates an indented middle line. These edits
+respect the configured tab width and spaces/tabs setting and support multiple
+carets. Ctrl+M toggles Tab between indentation and keyboard focus navigation.
+
 The graphical application builds from `graphical/haxeon.json` (entry
 `app.GraphicalMain`). Headless tests build from `haxeon.json` (entry
 `app.Main`); see `scripts/test.sh` for the test suite.
