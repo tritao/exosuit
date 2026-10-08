@@ -50,6 +50,7 @@ class GraphicalMain {
 		}
 		var host = new DesktopUiHostOptions();
 		host.title = "exosuit";
+		host.icons = ApplicationIcons.create();
 		host.customTitlebar = true;
 		host.width = 1280;
 		host.height = 840;
