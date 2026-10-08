@@ -151,7 +151,7 @@ class ExosuitApp implements DesktopUiApplication {
 	var viewportWidth:Float = 1280.0;
 	var viewportHeight:Float = 840.0;
 	static inline var TOOLBAR_HEIGHT:Float = 40.0;
-	static inline var STATUS_HEIGHT:Float = 26.0;
+	static inline var STATUS_HEIGHT:Float = StatusBarView.HEIGHT;
 
 	public function new(?fonts:FontCollection, ?theme:Theme, ?hostContext:UiHostContext,
 			?openPath:String, ?capabilities:HostCapabilities, ?fileDialogs:HostFileDialogs,
@@ -1406,50 +1406,19 @@ class ExosuitApp implements DesktopUiApplication {
 			+ (attachment.fileScope() == null ? "" : "\n" + attachment.fileScope())
 			+ (attachment.failure() == null ? "" : "\n" + attachment.failure()) : "";
 		var trailing = languageStatus.length > 0 ? languageStatus : '${host.activePane.items.length} open';
-		return new RetainedView("status-bar", function(_) {
-			var style = new LayoutStyle();
-			style.width = LayoutAxis.grow(); style.height = LayoutAxis.fixed(STATUS_HEIGHT);
-			style.childAlignY = LayoutAlignmentY.Center; style.childGap = 4;
-			style.padding = new Insets(remote ? 0 : 10, 0, 6, 0); style.background = theme.tokens.surfaceRaised;
-			var compact = new LayoutStyle(); compact.height = LayoutAxis.fixed(22); compact.padding = new Insets(4, 0, 4, 0);
-			var items:Array<KeyedView> = [];
-			if (remote) {
-				var connectionStyle = new LayoutStyle();
-				connectionStyle.height = LayoutAxis.fixed(STATUS_HEIGHT);
-				connectionStyle.padding = new Insets(10, 0, 10, 0);
-				connectionStyle.background = Color.fromBytes(0, 102, 184);
-				connectionStyle.radiusTopLeft = connectionStyle.radiusTopRight = 0;
-				connectionStyle.radiusBottomLeft = connectionStyle.radiusBottomRight = 0;
-				var connection = new Button("Remote", connectionStyle, function() { showSidebarMode("remote-access"); }, "status-remote");
-				connection.variant = ButtonVariant.Primary; connection.leadingIcon = IconName.Remote; connection.iconSize = 16;
-				connection.accessibilityLabel = remoteDetails + ". Open Remote Access";
-				items.push(new KeyedView("remote", new TabTooltip("remote-status-tooltip", connection,
-					new Text(remoteDetails, null, theme.tokens.textPrimary, TextStyleOverride.text(12)),
-					function() return new Rect(0, 0, viewportWidth, viewportHeight), 0.5, Above)));
-			}
-			items = items.concat([new KeyedView("document", new Text(label, null, theme.tokens.textSecondary, TextStyleOverride.text(12))),
-				new KeyedView("space", new Spacer("status-space", LayoutAxis.grow(), LayoutAxis.fixed(1)))]);
-			if (notification != null && !notificationsVisible) {
-				var entry = notification;
-				var message = new Button(feedback.NotificationText.summary(entry, 90), compact,
-					function() showNotifications(entry), "status-notification");
-				message.variant = ButtonVariant.Navigation;
-				message.leadingIcon = switch entry.kind { case Error: IconName.ErrorCircle; case Warning: IconName.AlertTriangle; case Information: IconName.InfoCircle; };
-				message.iconSize = 14; message.accessibilityLabel = "Show notification details: " + feedback.NotificationText.summary(entry);
-				items.push(new KeyedView("notification", message));
-				var dismiss = new Button("", compact, function() { center.dismissToast(); requestFrame(); }, "notification-toast-dismiss");
-				dismiss.variant = ButtonVariant.Navigation; dismiss.leadingIcon = IconName.Close; dismiss.iconSize = 12;
-				dismiss.accessibilityLabel = "Hide notification";
-				items.push(new KeyedView("dismiss", dismiss));
-			} else items.push(new KeyedView("status", new Text(trailing, null, theme.tokens.textSecondary, TextStyleOverride.text(12))));
-			var unread = center.unreadCount();
-			var bell = new Button("", compact, function() { if (notificationsVisible) hideNotifications(); else showNotifications(); }, "notifications-toggle");
-			bell.variant = ButtonVariant.Navigation; bell.leadingIcon = IconName.Bell; bell.iconSize = 16;
-			bell.accessibilityLabel = "Notifications, " + unread + " unread";
-			if (unread > 0) bell.trailingView = new haxeon.ui.widgets.controls.CountBadge(unread);
-			items.push(new KeyedView("notifications", bell));
-			return new Row("exosuit-status", items, style);
-		}, function() return remoteDetails + ":" + label + ":" + trailing + ":" + (notification == null ? 0 : notification.id) + ":" + center.revision + ":" + notificationsVisible + ":" + ui.animations.revision);
+		return new RetainedView("status-bar", function(_) return new StatusBarView({
+			document: label,
+			status: trailing,
+			remoteDetails: remoteDetails,
+			notification: notification,
+			notificationsVisible: notificationsVisible,
+			unread: center.unreadCount(),
+			viewport: function() return new Rect(0, 0, viewportWidth, viewportHeight),
+			openRemote: function() showSidebarMode("remote-access"),
+			showNotification: function(entry) showNotifications(entry),
+			dismissNotification: function() { center.dismissToast(); requestFrame(); },
+			toggleNotifications: function() { if (notificationsVisible) hideNotifications(); else showNotifications(); }
+		}), function() return remoteDetails + ":" + label + ":" + trailing + ":" + (notification == null ? 0 : notification.id) + ":" + center.revision + ":" + notificationsVisible + ":" + ui.animations.revision);
 	}
 
 	function explorerPanel():View {

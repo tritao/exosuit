@@ -71,6 +71,7 @@ run_test command-test
 run_test editor-view-test
 run_test tab-tooltip
 run_test narrow-tabs
+run_test status-bar
 run_test sidebar-layout
 run_test remote-access-panel
 run_test browser-pairing-url

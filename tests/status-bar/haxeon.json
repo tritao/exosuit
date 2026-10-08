@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "package": { "name": "exosuit-status-bar-test" },
+  "entry": "app.StatusBarTestMain",
+  "sourceRoots": ["src"],
+  "scopeSourceRoots": false,
+  "dependencies": { "exosuit-graphical": { "path": "../../graphical" } },
+  "target": "host",
+  "outputDir": "build"
+}

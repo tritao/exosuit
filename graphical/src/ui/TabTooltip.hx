@@ -17,6 +17,8 @@ import haxeon.ui.core.View;
 
 /** A delayed tooltip that appears after a deliberate hover. */
 class TabTooltip implements View {
+	/** Let a bounded row allocate the anchor width independently of tooltip content. */
+	public var fillAnchor:Bool = false;
 	final key:String;
 	final anchor:View;
 	final content:View;
@@ -63,9 +65,11 @@ class TabTooltip implements View {
 			delay.delaySeconds = delaySeconds;
 			var style = new LayoutStyle();
 			style.clipToParent = false;
+			if (fillAnchor) style.width = LayoutAxis.grow();
 			var root = new RenderNode(context.id("layers"), LayoutVisualKind.Box, style);
 			root.hitTestSelf = false;
 			var header = anchor.build(context);
+			if (fillAnchor) header.layout.style.width = LayoutAxis.stretch();
 			root.add(header);
 			var tipStyle = new LayoutStyle();
 			tipStyle.positioning = LayoutPositioning.Absolute;
