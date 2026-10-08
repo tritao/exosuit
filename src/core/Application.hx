@@ -290,7 +290,7 @@ class Application {
 
 	public function reportError(source:String, message:String):Void {
 		errors.record(source, message);
-		root.getNotifications().publish(message, NotificationKind.Error);
+		root.getNotifications().publish(message, NotificationKind.Error, source);
 	}
 
 	public function shutdown():Void {

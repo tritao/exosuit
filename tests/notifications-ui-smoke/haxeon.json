@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "package": {"name": "exosuit-notifications-ui-smoke"},
+  "entry": "app.NotificationsSmokeMain",
+  "sourceRoots": ["src"],
+  "scopeSourceRoots": false,
+  "dependencies": {"exosuit-graphical": {"path": "../../graphical"}},
+  "target": "host",
+  "outputDir": "build"
+}

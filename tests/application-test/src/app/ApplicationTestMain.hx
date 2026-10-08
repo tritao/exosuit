@@ -59,6 +59,23 @@ class ApplicationTestMain {
 		if (currentNotification == null) throw "missing current notification";
 		require(root.notifications.current(currentNotification.createdAt + feedback.NotificationCenter.DISPLAY_SECONDS + 0.1) == null,
 			"expired notification remained pinned over the editor");
+		require(root.notifications.unreadCount() == 100 && root.notifications.history()[0] == currentNotification,
+			"expiration lost unread history or history order");
+		root.notifications.dismissToast();
+		require(root.notifications.current() == null && root.notifications.unreadCount() == 100,
+			"hiding a toast deleted or read its history");
+		root.notifications.markRead(currentNotification.id);
+		require(root.notifications.unreadCount() == 99, "reading a notification did not update the badge");
+		root.notifications.markAllRead();
+		require(root.notifications.unreadCount() == 0 && root.notifications.entries.length == 100, "mark all read discarded history");
+		var crash = root.notifications.publish("HashLink fatal error\nInspect a retained core with: coredumpctl debug 1234", feedback.NotificationKind.Error, "workspace");
+		require(feedback.NotificationText.crashPid(crash) == 1234 && feedback.NotificationText.details(crash).indexOf("workspace") >= 0,
+			"crash details lost source or safe PID action");
+		var warning = root.notifications.publish("Warning", feedback.NotificationKind.Warning, "test");
+		root.notifications.dismiss(crash.id);
+		require(root.notifications.unreadCount() == 1 && root.notifications.history()[0] == warning, "dismiss removed the wrong notification");
+		root.notifications.clear();
+		require(root.notifications.unreadCount() == 0 && root.notifications.entries.length == 0, "clear left unread state behind");
 		for (index in 0...220) application.errors.record("test", "error " + index);
 		require(application.errors.entries.length == 200 && application.errors.entries[0].message == "error 20",
 			"error-log retention was not bounded");

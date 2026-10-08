@@ -4,6 +4,7 @@ import haxeon.ui.FontFamily;
 import haxeon.ui.Path;
 
 import haxeon.ui.Color;
+import haxeon.ui.Rect;
 
 import haxeon.ui.Insets;
 import haxeon.ui.LayoutAxis;
@@ -140,6 +141,10 @@ class ExosuitApp implements DesktopUiApplication {
 	var nextBackgroundPoll:Float = 0.0;
 	var nextExplorerPoll:Float = 0.0;
 	var visibleNotification:Null<feedback.Notification>;
+	var notificationPanel:Null<NotificationPanel>;
+	var notificationsVisible:Bool = false;
+	var notificationRevision:Int = -1;
+	final terminalErrors:Map<String, String> = [];
 	var viewportWidth:Float = 1280.0;
 	var viewportHeight:Float = 840.0;
 	static inline var TOOLBAR_HEIGHT:Float = 40.0;
@@ -157,6 +162,7 @@ class ExosuitApp implements DesktopUiApplication {
 		this.theme = theme == null ? ExosuitPalette.theme(darkPalette) : theme;
 		terminalPalette = new TerminalPalette(darkPalette);
 		var preferences = new config.Preferences(config.ConfigurationPaths.userSettings());
+		var fontErrors:Array<String> = [];
 		if (fonts != null) {
 			var loaded = false;
 			var candidates = [preferences.current.fontPath,
@@ -166,7 +172,7 @@ class ExosuitApp implements DesktopUiApplication {
 			for (path in candidates) {
 				if (loaded || !FileSystem.exists(path) || FileSystem.isDirectory(path)) continue;
 				try { fonts.add(path, FontFamily.Monospace); loaded = true; }
-				catch (error:Dynamic) { statusMessage = "Editor font: " + Std.string(error); }
+				catch (error:Dynamic) { fontErrors.push("Editor font: " + Std.string(error)); }
 			}
 			// DesktopUiHost resolves default script and emoji fallbacks on demand.
 			// Explicit lists retain their configured font order and family.
@@ -174,7 +180,7 @@ class ExosuitApp implements DesktopUiApplication {
 				? config.Settings.bundledFontFallbackPaths() : preferences.current.fontFallbackPaths;
 			for (path in fallbacks) {
 				if (FileSystem.exists(path) && !FileSystem.isDirectory(path))
-					try fonts.add(path, FontFamily.Monospace) catch (error:Dynamic) { statusMessage = "Editor fallback: " + Std.string(error); }
+					try fonts.add(path, FontFamily.Monospace) catch (error:Dynamic) { fontErrors.push("Editor fallback: " + Std.string(error)); }
 			}
 		}
 		ui = new UiContext(null, fonts, this.theme);
@@ -266,6 +272,7 @@ class ExosuitApp implements DesktopUiApplication {
 			return pane == null ? null : pane.caretRect;
 		};
 		editorPalette = darkPalette ? application.theme : ExosuitPalette.lightEditor();
+		for (error in fontErrors) application.reportError("fonts", error);
 		installCommands();
 		var previousSidebarWidth = application.settings.current.sidebarWidth;
 		sidebar.rememberWidth(previousSidebarWidth);
@@ -435,6 +442,7 @@ class ExosuitApp implements DesktopUiApplication {
 			return new UiTerminalTab(id, title, cwd, panel,isRemote,resource,workspaceRoot);
 		} catch (error:Dynamic) {
 			statusMessage = "Terminal: " + Std.string(error);
+			application.reportError("terminal", Std.string(error));
 			return null;
 		}
 	}
@@ -535,6 +543,7 @@ class ExosuitApp implements DesktopUiApplication {
 		ui.commands.register(zoomIn);
 		ui.commands.register(new Command("view.zoom-out", "Zoom Out", function() setApplicationZoom(application.settings.current.applicationZoom - 10), new Shortcut(45, modifier)).addShortcut(new Shortcut(333, modifier)));
 		ui.commands.register(new Command("view.zoom-reset", "Reset Zoom", function() setApplicationZoom(100), new Shortcut(48, modifier)).addShortcut(new Shortcut(320, modifier)));
+		ui.commands.register(new Command("view.notifications", "Show Notifications", function() showNotifications()));
 
 		// UiKey has no N/O/W/P constants, so these follow the raw-ASCII-code
 		// convention the canonical reference (app/src/Main.hx) uses for the same
@@ -618,7 +627,6 @@ class ExosuitApp implements DesktopUiApplication {
 			DockNode.Panel("explorer"), content));
 	}
 
-
 	public function view():View {
 		pruneStaleEditorPanes(host.allViews());
 		for (pane in host.panes) {
@@ -645,6 +653,17 @@ class ExosuitApp implements DesktopUiApplication {
 		shellStyle.background = theme.tokens.surface;
 		var layers:Array<StackChild> = [new StackChild("shell", new AppShell("exosuit-shell", body,
 			topBar(), null, null, shellStyle), 0.0, 0.0, 0, LayoutAxis.grow(), LayoutAxis.grow())];
+		if (notificationsVisible && notificationPanel != null) {
+			var width = Math.min(560.0, Math.max(240.0, viewportWidth - 24));
+			var height = Math.min(Math.max(64.0, notificationPanel.preferredHeight),
+				Math.min(520.0, Math.max(64.0, viewportHeight - TOOLBAR_HEIGHT - STATUS_HEIGHT - 16)));
+			var style = new LayoutStyle(); style.width = LayoutAxis.fixed(width); style.height = LayoutAxis.fixed(height);
+			var popup = new haxeon.ui.widgets.overlays.Popup("notifications-popup", notificationPanel,
+				Math.max(0, viewportWidth - width - 8), Math.max(TOOLBAR_HEIGHT, viewportHeight - STATUS_HEIGHT - height - 4),
+				style, hideNotifications);
+			popup.dimBackdrop = false; popup.menuSurface = true; popup.label = "Notifications";
+			layers.push(new StackChild("notifications", popup, 0, 0, 45, LayoutAxis.grow(), LayoutAxis.grow()));
+		}
 		if (paletteVisible) {
 			var palette = new CommandPalette("exosuit-command-palette", ui.commands,
 				ui.commandContext, 320.0, 120.0, "", function() { paletteVisible = false; },
@@ -741,7 +760,9 @@ class ExosuitApp implements DesktopUiApplication {
 			if (!menu.isCurrent()) contextMenu = null;
 			else layers.push(new StackChild("context-menu", menu, 0.0, 0.0, 40));
 		}
-		return new Stack("exosuit-overlay-host", layers);
+		var result:View = new Stack("exosuit-overlay-host", layers);
+		return hostContext != null && hostContext.windowControls != null
+			? new haxeon.ui.widgets.WindowFrame("exosuit-window", result, hostContext.windowControls) : result;
 	}
 
 	public function submit(frame:LayoutFrame):RenderNode {
@@ -761,7 +782,7 @@ class ExosuitApp implements DesktopUiApplication {
 				DockWorkspace.DividerExtent, DockWorkspace.MinimumHorizontalExtent);
 		}
 		dock.setPanelBadge("problems", host.getProblems().values().length);
-		var key = viewRevision + ":" + dock.revision + ":" +
+		var key = (hostContext == null || hostContext.windowControls == null ? 0 : hostContext.windowControls.revision) + ":" + viewRevision + ":" + dock.revision + ":" +
 			(explorerModel == null ? -1 : explorerModel.revision()) + ":" +
 			application.settings.current.minimapEnabled + ":problems=" + host.getProblems().revision + ":prefs=" + application.settings.store.revision;
 		var activeView = host.activeView();
@@ -1061,11 +1082,43 @@ class ExosuitApp implements DesktopUiApplication {
 			previousPluginPanels != host.getPluginPanels().revision)
 			requestFrame();
 		visibleNotification = host.getNotifications().current();
+		if (notificationRevision != host.getNotifications().revision) {
+			notificationRevision = host.getNotifications().revision;
+			requestFrame();
+		}
+		if (notificationsVisible && notificationPanel != null) notificationPanel.poll();
 		ui.buildContext.environment.scrollbarVisibility = host.scrollbarVisibility;
 		for (terminal in host.allTerminalTabs()) {
 			if (terminal.disposed) continue;
-			try { terminal.panel.poll(); } catch (error:Dynamic) {
+			try { terminal.panel.poll(); terminalErrors.remove(terminal.id); } catch (error:Dynamic) {
 				statusMessage = "Terminal: " + Std.string(error);
+				var message = Std.string(error);
+				if (terminalErrors.get(terminal.id) != message) {
+					terminalErrors.set(terminal.id, message);
+					application.errors.record("terminal", message);
+					var actions:Array<feedback.NotificationAction> = [];
+					var terminalId = terminal.id;
+					if (terminal.remote) actions.push(new feedback.NotificationAction("Open terminal", function() {
+						for (target in host.allTerminalTabs()) if (target.id == terminalId && !target.disposed) {
+							hideNotifications();
+							var index = host.panelTerminals.indexOf(target);
+							if (index >= 0) { host.activePanelTerminalIndex = index; openTerminalPanel(); }
+							else showTerminalInEditor(target);
+							return;
+						}
+					}));
+					if (createTerminal != null || createWorkspaceTerminal != null)
+						actions.push(new feedback.NotificationAction("Create terminal", function() {
+							hideNotifications();
+							var replacement = newTerminalTab();
+							if (replacement != null) showTerminalInEditor(replacement);
+						}));
+					var explanation = terminal.title + ": " + message;
+					if (terminal.remote) explanation += "\nWorkspace: " + terminal.workspaceRoot
+						+ "\nSession: " + terminal.resourceId
+						+ "\nThis view refers to the original session. Create a terminal to start a new shell in the current workspace.";
+					host.getNotifications().publish(explanation, feedback.NotificationKind.Error, "terminal", actions);
+				}
 				if (terminal.remote) { requestFrame(); continue; }
 				terminal.dispose();
                 host.hiddenTerminals.remove(terminal);
@@ -1086,6 +1139,7 @@ class ExosuitApp implements DesktopUiApplication {
 	public function context():UiContext return ui;
 
 	public function dispose():Void {
+		if (notificationPanel != null) notificationPanel.close();
 		if (hostContext != null) hostContext.onPoll = null;
 		clearExplorerModel();
 		remoteFileSearch.cancel();
@@ -1156,6 +1210,9 @@ class ExosuitApp implements DesktopUiApplication {
 			panels: dock.panelIds(),
 			status: statusMessage,
 			workspaceConnection: workspaceStatus,
+			notificationCount: host.getNotifications().entries.length,
+			unreadNotifications: host.getNotifications().unreadCount(),
+			notificationsVisible: notificationsVisible,
 			paletteCommandCount: ui.commands.ids().length,
 			errors: [for (entry in application.errors.entries) {source: entry.source, message: entry.message}],
 			plugins: application.plugins.enabledIds(),
@@ -1233,7 +1290,7 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function topBar():View {
 		return new RetainedView("toolbar", function(_) return buildTopBar(),
-			function() return statusMessage + ":" + workspaceStatus + ":" + ui.animations.revision);
+			function() return explorerRoot + ":" + workspaceStatus + ":" + (hostContext == null || hostContext.windowControls == null ? 0 : hostContext.windowControls.revision) + ":" + ui.animations.revision);
 	}
 
 	function buildTopBar():View {
@@ -1252,27 +1309,49 @@ class ExosuitApp implements DesktopUiApplication {
 				TextStyleOverride.text(13.0, 0.5))),
 			new KeyedView("new", toolbarButton("New", IconName.NewFile, function() application.newDocument())),
 			new KeyedView("open", toolbarButton("Open", IconName.FolderOpen, openFileDialog)),
-			new KeyedView("open-folder", toolbarButton("Open Folder", IconName.FolderOpen,
+			new KeyedView("open-folder", toolbarButton("Open Folder", IconName.FolderClosed,
 				openFolderDialog)),
 			new KeyedView("save", toolbarButton("Save", IconName.Save,
 				function() application.commands.perform("doc:save", application.context)))
 		];
 		if (capabilities.supports(Processes))
 			items.push(new KeyedView("terminal", toolbarButton("Terminal", IconName.Terminal, toggleTerminal)));
-		items.push(new KeyedView("space", new Spacer("toolbar-space", LayoutAxis.grow(), LayoutAxis.fixed(1.0))));
+		var workspaceTitleStyle = new LayoutStyle(); workspaceTitleStyle.width = LayoutAxis.grow();
+		var workspaceTitle = explorerRoot == null ? "" : haxe.io.Path.withoutDirectory(explorerRoot);
+		items.push(new KeyedView("workspace-title", new Text(workspaceTitle, workspaceTitleStyle, theme.tokens.textSecondary,
+			new TextStyleOverride(null, 12, null, haxeon.ui.TextWrap.None))));
 		if (workspaceStatus.length > 0)
 			items.push(new KeyedView("workspace-status", new Text(workspaceStatus, null, theme.tokens.textSecondary, TextStyleOverride.text(12.0))));
-		items.push(new KeyedView("status", new Text(statusMessage, null, theme.tokens.textSecondary,
-			TextStyleOverride.text(12.0))));
-		items.push(new KeyedView("palette", toolbarButton("Commands", IconName.Terminal, togglePalette)));
-		return new Row("exosuit-toolbar", items, style);
+		items.push(new KeyedView("palette", toolbarButton("Commands", IconName.Search, togglePalette)));
+		var toolbar:View = new Row("exosuit-toolbar", items, style);
+		return hostContext != null && hostContext.windowControls != null
+			? new haxeon.ui.widgets.WindowTitleBar("exosuit-titlebar", toolbar, hostContext.windowControls, TOOLBAR_HEIGHT) : toolbar;
 	}
 
-	function toolbarButton(label:String, icon:IconName, action:Void->Void):Button {
-		var button = new Button(label, null, action, "toolbar-" + label);
-		button.variant = ButtonVariant.Secondary;
+	function toolbarButton(label:String, icon:IconName, action:Void->Void):View {
+		var custom = hostContext != null && hostContext.windowControls != null;
+		var style = new LayoutStyle();
+		if (custom) { style.width = LayoutAxis.fixed(32); style.height = LayoutAxis.fixed(28); style.padding = new Insets(8, 0, 8, 0); }
+		var button = new Button(custom ? "" : label, style, action, "toolbar-" + label);
+		button.accessibilityLabel = label;
+		button.variant = custom ? ButtonVariant.Navigation : ButtonVariant.Secondary;
 		button.leadingIcon = icon;
-		return button;
+		return custom ? new TabTooltip("toolbar-tooltip:" + label, button,
+			new Text(label, null, theme.tokens.textPrimary, TextStyleOverride.text(12)),
+			function() return new Rect(0, 0, viewportWidth, viewportHeight), 0.5) : button;
+	}
+
+	function showNotifications(?entry:feedback.Notification):Void {
+		if (notificationPanel == null) notificationPanel = new NotificationPanel(host.getNotifications(),
+			function(text) ui.clipboard.writeText(text), requestFrame, hideNotifications, application.processes);
+		notificationsVisible = true;
+		notificationPanel.open(entry);
+	}
+
+	function hideNotifications():Void {
+		notificationsVisible = false;
+		if (notificationPanel != null) notificationPanel.close();
+		requestFrame();
 	}
 
 	function statusBar():View {
@@ -1281,27 +1360,59 @@ class ExosuitApp implements DesktopUiApplication {
 		var terminal = tab == null ? null : UiEditorTabs.terminal(tab);
 		var label = active == null ? (terminal == null ? "No document open" : terminal.title) :
 			(active.title + (active.dirty ? " *" : "") + " - " + active.encodingLabel());
-		var notification = application.root.getNotifications().current();
+		var center = host.getNotifications();
+		var notification = center.current();
 		var languageStatus = application.language.statusLabel();
-		var trailing = notification == null && languageStatus.length > 0 ? languageStatus : notification == null ? '${host.activePane.items.length} open' : notification.message;
-		var error = notification != null && notification.kind == NotificationKind.Error;
+		var attachment = workspaceAttachment;
+		var remote = attachment != null && !attachment.hasLocalFileAccess();
+		var remoteDetails = remote ? "Remote workspace · " + attachment.statusLabel()
+			+ (attachment.fileScope() == null ? "" : "\n" + attachment.fileScope())
+			+ (attachment.failure() == null ? "" : "\n" + attachment.failure()) : "";
+		var trailing = languageStatus.length > 0 ? languageStatus : '${host.activePane.items.length} open';
 		return new RetainedView("status-bar", function(_) {
 			var style = new LayoutStyle();
-			style.width = LayoutAxis.grow();
-			style.height = LayoutAxis.fixed(STATUS_HEIGHT);
-			style.direction = LayoutDirection.LeftToRight;
-			style.childAlignY = LayoutAlignmentY.Center;
-			style.padding = new Insets(10.0, 2.0, 10.0, 2.0);
-			style.background = theme.tokens.surfaceRaised;
-			return new Row("exosuit-status", [
-				new KeyedView("document", new Text(label, null, theme.tokens.textSecondary,
-					TextStyleOverride.text(12.0))),
-				new KeyedView("space", new Spacer("status-space", LayoutAxis.grow(), LayoutAxis.fixed(1.0))),
-				new KeyedView("notification", new Text(trailing, null,
-					error ? theme.tokens.text : theme.tokens.textSecondary,
-					TextStyleOverride.text(12.0)))
-			], style);
-		}, function() return label.length + ":" + label + trailing.length + ":" + trailing + ":" + error + ":" + ui.animations.revision);
+			style.width = LayoutAxis.grow(); style.height = LayoutAxis.fixed(STATUS_HEIGHT);
+			style.childAlignY = LayoutAlignmentY.Center; style.childGap = 4;
+			style.padding = new Insets(remote ? 0 : 10, 0, 6, 0); style.background = theme.tokens.surfaceRaised;
+			var compact = new LayoutStyle(); compact.height = LayoutAxis.fixed(22); compact.padding = new Insets(4, 0, 4, 0);
+			var items:Array<KeyedView> = [];
+			if (remote) {
+				var connectionStyle = new LayoutStyle();
+				connectionStyle.height = LayoutAxis.fixed(STATUS_HEIGHT);
+				connectionStyle.padding = new Insets(10, 0, 10, 0);
+				connectionStyle.background = Color.fromBytes(0, 102, 184);
+				connectionStyle.radiusTopLeft = connectionStyle.radiusTopRight = 0;
+				connectionStyle.radiusBottomLeft = connectionStyle.radiusBottomRight = 0;
+				var connection = new Button("Remote", connectionStyle, function() { showSidebarMode("remote-access"); }, "status-remote");
+				connection.variant = ButtonVariant.Primary; connection.leadingIcon = IconName.Remote; connection.iconSize = 16;
+				connection.accessibilityLabel = remoteDetails + ". Open Remote Access";
+				items.push(new KeyedView("remote", new TabTooltip("remote-status-tooltip", connection,
+					new Text(remoteDetails, null, theme.tokens.textPrimary, TextStyleOverride.text(12)),
+					function() return new Rect(0, 0, viewportWidth, viewportHeight), 0.5, false, true)));
+			}
+			items = items.concat([new KeyedView("document", new Text(label, null, theme.tokens.textSecondary, TextStyleOverride.text(12))),
+				new KeyedView("space", new Spacer("status-space", LayoutAxis.grow(), LayoutAxis.fixed(1)))]);
+			if (notification != null && !notificationsVisible) {
+				var entry = notification;
+				var message = new Button(feedback.NotificationText.summary(entry, 90), compact,
+					function() showNotifications(entry), "status-notification");
+				message.variant = ButtonVariant.Navigation;
+				message.leadingIcon = switch entry.kind { case Error: IconName.ErrorCircle; case Warning: IconName.AlertTriangle; case Information: IconName.InfoCircle; };
+				message.iconSize = 14; message.accessibilityLabel = "Show notification details: " + feedback.NotificationText.summary(entry);
+				items.push(new KeyedView("notification", message));
+				var dismiss = new Button("", compact, function() { center.dismissToast(); requestFrame(); }, "notification-toast-dismiss");
+				dismiss.variant = ButtonVariant.Navigation; dismiss.leadingIcon = IconName.Close; dismiss.iconSize = 12;
+				dismiss.accessibilityLabel = "Hide notification";
+				items.push(new KeyedView("dismiss", dismiss));
+			} else items.push(new KeyedView("status", new Text(trailing, null, theme.tokens.textSecondary, TextStyleOverride.text(12))));
+			var unread = center.unreadCount();
+			var bell = new Button("", compact, function() { if (notificationsVisible) hideNotifications(); else showNotifications(); }, "notifications-toggle");
+			bell.variant = ButtonVariant.Navigation; bell.leadingIcon = IconName.Bell; bell.iconSize = 16;
+			bell.accessibilityLabel = "Notifications, " + unread + " unread";
+			if (unread > 0) bell.trailingView = new haxeon.ui.widgets.controls.CountBadge(unread);
+			items.push(new KeyedView("notifications", bell));
+			return new Row("exosuit-status", items, style);
+		}, function() return remoteDetails + ":" + label + ":" + trailing + ":" + (notification == null ? 0 : notification.id) + ":" + center.revision + ":" + notificationsVisible + ":" + ui.animations.revision);
 	}
 
 	function explorerPanel():View {
