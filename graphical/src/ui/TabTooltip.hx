@@ -20,10 +20,17 @@ class TabTooltip implements View {
 	final content:View;
 	final delaySeconds:Float;
 	final beside:Bool;
+	final above:Bool;
+	final hoverGroup:Null<TooltipHoverGroup>;
+	final groupVisible:Bool;
 	final boundsProvider:Void->Rect;
 	static inline final PADDING = 10.0;
 	static inline final EDGE = 6.0;
-	public function new(key:String, anchor:View, content:View, boundsProvider:Void->Rect, delaySeconds:Float = 0.8, beside:Bool = false) {
+	public function new(key:String, anchor:View, content:View, boundsProvider:Void->Rect, delaySeconds:Float = 0.8, beside:Bool = false, above:Bool = false,
+			?hoverGroup:TooltipHoverGroup, groupVisible:Bool = false) {
+		this.hoverGroup = hoverGroup;
+		this.groupVisible = groupVisible;
+		this.above = above;
 		this.beside = beside;
 		this.boundsProvider = boundsProvider; this.delaySeconds = delaySeconds;
 		this.key = key; this.anchor = anchor; this.content = content;
@@ -52,7 +59,7 @@ class TabTooltip implements View {
 			tipStyle.positionY = 44;
 			tipStyle.zIndex = 10;
 			tipStyle.clipToParent = false;
-			tipStyle.visible = state.value;
+			tipStyle.visible = hoverGroup == null ? state.value : groupVisible;
 			tipStyle.background = context.theme.tokens.surfaceRaised;
 			tipStyle.padding = new Insets(PADDING, 7, PADDING, 7);
 			tipStyle.radiusTopLeft = tipStyle.radiusTopRight = 5;
@@ -65,10 +72,18 @@ class TabTooltip implements View {
 				var rail = boundsProvider();
 				var anchorBounds = root.globalBounds();
 				var placement = place(anchorBounds.x, header.globalBounds().height, rail.x, rail.width);
+				if (above && tip.resolved != null) placement.y = -tip.globalBounds().height - 4;
 				if (beside) {
 					placement.width = Math.max(1, Math.min(140, rail.width - anchorBounds.x - anchorBounds.width - 2 * PADDING - EDGE - 4));
 					placement.x = anchorBounds.width + 4;
 					placement.y = 0;
+					if (hoverGroup != null) {
+						placement.width = Math.max(1, Math.min(140, rail.width - 2 * (PADDING + EDGE)));
+						placement.x = -placement.width - 2 * PADDING - 4;
+						// Prefer the left, but keep the label inside the window when the bar is at its edge.
+						if (anchorBounds.x + placement.x < rail.x + EDGE)
+							placement.x = anchorBounds.width + 4;
+					}
 				}
 				if (tip.layout.style.positionX != placement.x || tip.layout.style.positionY != placement.y || label.layout.style.width.value != placement.width) {
 					tip.layout.style.positionX = placement.x;
@@ -80,9 +95,15 @@ class TabTooltip implements View {
 			// The overlay must never extend the tab's hover area into the editor.
 			tip.walk(function(node) { node.hitTestSelf = false; });
 			root.add(tip);
-			header.on(UiEventKind.HoverEnter, function(_) delay.start());
-			header.on(UiEventKind.HoverLeave, function(_) delay.cancel());
-			header.on(UiEventKind.PointerDown, function(_) delay.cancel(), "capture");
+			header.on(UiEventKind.HoverEnter, function(_) {
+				if (hoverGroup != null) hoverGroup.enter(key); else delay.start();
+			});
+			header.on(UiEventKind.HoverLeave, function(_) {
+				if (hoverGroup != null) hoverGroup.leave(key); else delay.cancel();
+			});
+			header.on(UiEventKind.PointerDown, function(_) {
+				if (hoverGroup != null) hoverGroup.cancel(); else delay.cancel();
+			}, "capture");
 			return root;
 		});
 	}

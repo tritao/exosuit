@@ -36,12 +36,18 @@ class EditorTabsView implements View {
 
 	public function build(context:BuildContext):RenderNode {
 		return context.withScope(new Key("editor-tab-icons"), function() {
+			var visibleTooltip = context.resourceState(context.id("tab-tooltip-visible"),
+				function():Null<String> return null, function(_) {});
+			var hover = context.resourceState(context.id("tab-tooltip-hover"),
+				function() return new TooltipHoverGroup(context.animations, function(key) visibleTooltip.update(key), tooltipDelay),
+				function(value) value.dispose()).value;
+			hover.delaySeconds = tooltipDelay;
 			var atlas = context.resourceState(context.id("seti-atlas"), function() return new SetiIconAtlas(),
 				function(value) value.dispose()).value;
 			var scrollState = context.state(context.id("tab-scroll-state"), new TabScrollState());
 			var state = scrollState.value;
 			tabs.headerRevision = function() {
-				var revision = dark + ":" + tooltipDelay + ":" + context.animations.revision + ":" +
+				var revision = dark + ":" + tooltipDelay + ":" + visibleTooltip.value + ":" + context.animations.revision + ":" +
 					state.controller.offsetX + ":" + state.controller.viewportWidth + ":" + state.labelViewportWidth;
 				for (item in tabs.items) {
 					var filename = filenames.get(item.key);
@@ -114,11 +120,13 @@ class EditorTabsView implements View {
 			displayed.badgeCount = item.badgeCount;
 				tabs.items[index] = displayed;
 			}
-			tabs.transformHeaderStrip = function(strip, buildContext) return buildRail(strip, buildContext, state, function() { scrollState.update(state); });
+			tabs.transformHeaderStrip = function(strip, buildContext) return buildRail(strip, buildContext, state,
+				function() { scrollState.update(state); }, hover, visibleTooltip.value);
 			return tabs.build(context);
 		});
 	}
-	function buildRail(strip:RenderNode, context:BuildContext, state:TabScrollState, invalidate:Void->Void):RenderNode {
+	function buildRail(strip:RenderNode, context:BuildContext, state:TabScrollState, invalidate:Void->Void,
+			hover:TooltipHoverGroup, visibleTooltip:Null<String>):RenderNode {
 		strip.layout.style.width = LayoutAxis.fit();
 		var headers = strip.children.copy();
 		var active:Null<RenderNode> = null;
@@ -130,7 +138,8 @@ class EditorTabsView implements View {
 			var tooltip = new TabTooltip("tab-tooltip:" + tabs.items[index].key,
 				new BuiltTabView(header), new Text(tabs.items[index].label, textStyle, context.theme.tokens.textPrimary,
 					new TextStyleOverride(null, 13, null, TextWrap.WordCharacter)),
-				function() return viewport == null ? new Rect(0, 0, context.viewportWidth, context.viewportHeight) : viewport.globalBounds(), tooltipDelay);
+				function() return viewport == null ? new Rect(0, 0, context.viewportWidth, context.viewportHeight) : viewport.globalBounds(),
+				tooltipDelay, false, false, hover, visibleTooltip == "tab-tooltip:" + tabs.items[index].key);
 			var built = tooltip.build(context);
 			strip.add(built);
 		}

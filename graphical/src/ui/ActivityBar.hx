@@ -29,6 +29,12 @@ class ActivityBar implements View {
 		this.model = model; this.icons = icons; this.activate = activate; this.tooltipDelay = tooltipDelay;
 	}
 	public function build(context:BuildContext):RenderNode {
+		var visibleTooltip = context.resourceState(context.id("activity-tooltip-visible"),
+			function():Null<String> return null, function(_) {});
+		var hover = context.resourceState(context.id("activity-tooltip-hover"),
+			function() return new TooltipHoverGroup(context.animations, function(key) visibleTooltip.update(key), tooltipDelay),
+			function(value) value.dispose()).value;
+		hover.delaySeconds = tooltipDelay;
 		var style = new LayoutStyle();
 		style.width = LayoutAxis.fixed(WIDTH);
 		style.height = LayoutAxis.grow();
@@ -50,7 +56,8 @@ class ActivityBar implements View {
 			button.selected = model.visible && model.activeId == id;
 			items.push(new KeyedView(id, new TabTooltip("activity-tooltip:" + id, button,
 				new Text(mode.label, null, context.theme.tokens.textPrimary, new TextStyleOverride(null, 13, null, TextWrap.None)),
-				function() return new Rect(0, 0, context.viewportWidth, context.viewportHeight), tooltipDelay, true)));
+				function() return new Rect(0, 0, context.viewportWidth, context.viewportHeight), tooltipDelay, true, false,
+				hover, visibleTooltip.value == "activity-tooltip:" + id)));
 		}
 		return new Column("activity-bar", items, style).build(context);
 	}
