@@ -189,3 +189,32 @@ Frame time improves consistently in these runs; input latency does not show a cl
 The complete native text-engine test passes, including new fresh-layout comparisons after an incremental ASCII edit, Unicode fallback, width and font-size changes, reversed and affinity-specific endpoints, mixed-direction text, mutation of a returned copy, and a large uncached selection. The complete native session-render regression also passes with this library. Tests were compiled/run directly against the graphical native build; no full framework suite or Windows/macOS run was performed for this change.
 
 A later verification rebuild included concurrent edits to `clay_layout_backend.cpp` and produced native UI hash `4fc44bed3326018f9c2d5b7097cbb4f7f32d536385862248af31a2a891940f99`. The full session-render test passes on that combined build too, but the timings above belong specifically to the recorded optimized hash `81416e…`; the combined build was not benchmarked in this comparison. Concurrent layout and application edits are outside this selection-query change.
+
+
+## GTK event waiting and input latency
+
+Input timing decomposition showed approximately 10.2 ms between the latest managed frame request and the render callback. NativeKit previously slept on its own condition variable between nonblocking GTK pumps, quantizing OS input and frame-clock handling to a fixed 10 ms polling interval.
+
+GTK waits now block in the GLib main context. A sequence-aware source checks queued events and explicit wakeups before and after polling, and core event publication/wake calls wake that context. A timeout source preserves the existing bounded poll interval for services such as joystick polling. Completing a GTK surface render wakes the host so it can process managed input and animation requests immediately. Other platform backends retain their existing wait implementation. This change does not shorten the polling interval or introduce busy polling.
+
+A rejected host-level experiment woke the event loop when a new frame became requested. It did not improve input latency and was removed. The controlled native comparison uses its frozen experimental bytecode with `NKUI_EXPERIMENT_FRAME_WAKE=0` for both baseline and candidate, so the host wake change is disabled throughout. No experimental switch remains in production source.
+
+| Metric | Previous native wait | GTK main-context wait |
+| --- | ---: | ---: |
+| Scheduled-input latency median | 31.9 ms | 23.0–24.7 ms |
+| Scheduled-input latency p95 | 42.6–43.4 ms | 31.9–32.8 ms |
+| Scheduled input to frame-start p95 | 31.3–31.6 ms | 19.9–21.1 ms |
+| Latest frame request to frame-start median | 10.2 ms | 3.2–4.1 ms |
+| Latest frame request to frame-start p95 | 10.2–10.3 ms | 7.2 ms |
+| Active-frame time p95 | 16.1–16.5 ms | 14.3–15.6 ms |
+| Scenario checks | Both pass | Both pass |
+
+Baseline reports are `/tmp/exosuit-frame-wake-before-2/result.json` and `/tmp/exosuit-native-wait-before-3/result.json`; candidate reports are `/tmp/exosuit-native-wait-after-{2,3}/result.json`. All share bytecode hash `30da4c62ee4ace3ebbaf565fb52f0b3c45bb0d3826721d6304ac3a8ced364cb5`, runtime `c665602d27c1061fcad2e7367acf8142b7ef3d5470e771689894723a53a30236`, and native UI `4fc44bed3326018f9c2d5b7097cbb4f7f32d536385862248af31a2a891940f99`. NativeKit core hashes are `20c3c74400f296e51bb876406dffdbd9716f1c5c1012d3b52433b8a40108d8d5` before and `5108609b1efc9b230c7900a64470ffcb8402f130c4029232becd3c6854cced93` after. Saved binaries/libraries are under `/tmp/exosuit-frame-wake-experiment` and `/tmp/exosuit-native-wait-candidate/native`.
+
+The first candidate run (`native-wait-after-1`) overlapped unrelated compiler activity and showed large frame stalls (77.9 ms frame p95 and 213.6 ms input p95). It is retained in the artifacts but excluded from the table; the subsequent two candidate runs agree. This remains a shared-machine software-rendered measurement, excluding OS input delivery and scanout.
+
+The benchmark now reports scheduled-input-to-frame-start and latest-frame-request-to-start separately, and records the NativeKit core library hash. The latest-request metric is not the age of the earliest coalesced request.
+
+Native time/wakeup tests and the full native session-render regression pass. A new CTest regression, `gtk_event_wait`, checks that unrelated GLib timers do not prematurely finish a wait, explicit wakeups are preserved, and a completed frame returns control before a watchdog fires. The regression passes against the candidate and fails against the saved old native library at the frame/watchdog assertion. These tests were compiled and run directly against the graphical native build. Windows/macOS execution remains unverified; this optimization is specific to the GTK backend.
+
+A final application rebuild with the host experiment removed passes every scenario check (`/tmp/exosuit-native-wait-final/result.json`). That verification uses current application sources, including concurrent edits, and is separate from the controlled frozen-bytecode comparison above.

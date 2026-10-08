@@ -73,7 +73,9 @@ def main():
     else:
         status=run_cli(ROOT, command, environment)
     native_ui=next((native_dir/name for name in ['libnativekit_ui.so','libnativekit_ui.dylib','nativekit_ui.dll','libnativekit_ui.dll'] if (native_dir/name).exists()),None)
+    native_kit=next((native_dir/name for name in ['libnativekit.so','libnativekit.dylib','nativekit.dll','libnativekit.dll'] if (native_dir/name).exists()),None)
     identity=dict(runtimeSha256=hashlib.sha256(runtime.read_bytes()).hexdigest() if runtime else None,
+                  nativeKitSha256=hashlib.sha256(native_kit.read_bytes()).hexdigest() if native_kit else None,
                   nativeUiSha256=hashlib.sha256(native_ui.read_bytes()).hexdigest() if native_ui else None,
                   gcThreads=os.environ.get('HL_GC_THREADS','default'), bytecodeSha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
                   platform=platform.platform(), frameGc=os.environ.get('MATERIA_FRAME_GC','default'))
@@ -125,6 +127,8 @@ def analyze(out):
         inputFrames=len(inputs), activeFrames=len(active),
         phasesMs={field:stats([1000*f[field] for f in active if f.get(field) is not None]) for field in ['prepareSeconds','applicationSubmitSeconds','contextRenderSeconds','viewSeconds','nativeLayoutSeconds','nativeRenderSeconds','frameGcSeconds']},
         inputLatencyMs=stats([1000*(f['scriptedInputRequestAgeSeconds']+f['frameSeconds']) for f in inputs]),
+        scheduledInputToFrameStartMs=stats([1000*f['scriptedInputRequestAgeSeconds'] for f in inputs]),
+        latestFrameRequestToStartMs=stats([1000*f['requestAgeSeconds'] for f in inputs if f.get('requestAgeSeconds') is not None]),
         frameMs=stats([1000*f['frameSeconds'] for f in active]),
         dispatchMs=stats([1000*f['scriptedInputDispatchSeconds'] for f in inputs]),
         frameGapMs=stats([1000*(b['startedAtSeconds']-a['startedAtSeconds']) for a,b in zip(active,active[1:])]),
