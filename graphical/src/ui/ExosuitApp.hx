@@ -1196,6 +1196,11 @@ class ExosuitApp implements DesktopUiApplication {
 		}
 		return {
 			documents: [for (view in host.allViews()) view.document.title],
+			editorSelections: [for (view in host.allViews()) {
+				title:view.document.title, anchorLine:view.selection.anchor.line,
+				anchorColumn:view.selection.anchor.column, cursorLine:view.selection.cursor.line,
+				cursorColumn:view.selection.cursor.column, scrollY:view.scrollController.offsetY
+			}],
 			workspaceFileTabs: workspaceFileDiagnostics(),
 			workspaceFileReads: {active: workspaceFileLoader.active, completed: workspaceFileLoader.completedReads,
 				cacheHits: workspaceFileLoader.cacheHits, cachedBytes: workspaceFileLoader.cachedBytes, lastReadMs: workspaceFileLoader.lastReadMs},

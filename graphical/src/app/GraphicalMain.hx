@@ -18,13 +18,16 @@ class GraphicalMain {
 		var frameLimit = 0;
 		var captureSeconds = 0.0;
 		var recordPath:Null<String> = null;
+		var inputScriptPath:Null<String> = null;
 		var openTerminal = false;
 		var openTerminalBrowser = false;
 		var openWorkbench = false;
 		var themeChoice = "system";
 		var openPaths:Array<String> = [];
 		for (argument in arguments) {
-			if (StringTools.startsWith(argument, "--plugin="))
+			if (StringTools.startsWith(argument, "--input-script="))
+				inputScriptPath = argument.substring(15);
+			else if (StringTools.startsWith(argument, "--plugin="))
 				pluginManifest = argument.substring(9);
 			else if (StringTools.startsWith(argument, "--capture-dir="))
 				captureDirectory = argument.substring(14);
@@ -54,6 +57,7 @@ class GraphicalMain {
 		host.frameLimit = frameLimit;
 		host.captureSeconds = captureSeconds;
 		host.recordPath = recordPath;
+		host.inputScriptPath = inputScriptPath;
 		var allocationProfile = Sys.getEnv("EXOSUIT_ALLOCATION_PROFILE");
 		var profileFrames = 0;
 		var reportedFirstFrame = false;
