@@ -19,7 +19,6 @@ import haxeon.ui.widgets.text.MiddleEllipsisText;
 /** Asynchronous, paged directory listings for the Explorer tree. */
 class DirectoryTreeModel implements ExplorerTreeModel {
 	static final PAGE_SIZE:Int = 256;
-	static final MAX_PREFETCH:Int = 4;
 	static final NoChangedPaths:Array<String> = [];
 	static final LOADING_SUFFIX:String = ".exosuit-tree-loading";
 	static final RETRY_SUFFIX:String = ".exosuit-tree-retry";
@@ -56,7 +55,6 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 	var listings:Map<String, DirectoryListing> = [];
 	var errors:Map<String, Bool> = [];
 	var pending:Map<String, Int> = [];
-	var prefetching:Map<String, Bool> = [];
 	var pageSizes:Map<String, Int> = [];
 	var refreshCursor:Int = 0;
 	public var watchChanges:Bool = false;
@@ -90,17 +88,9 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 
 	public function rootKeyAt(index:Int):String return root;
 
-	/** Fast hint used to draw expand arrows without starting background I/O. */
-	public function hasChildrenHint(key:String):Bool {
-		if (isSyntheticRow(key)) return false;
-		if (listings.exists(key)) return listings.get(key).names.length > 0;
-		if (!isKnownDirectory(key)) return false;
-		if (!pending.exists(key) && !errors.exists(key) && prefetchingCount() < MAX_PREFETCH) {
-			prefetching.set(key, true);
-			requestLoad(key, false);
-		}
-		return true;
-	}
+	/** Directory identity controls expandability, even when the listing is empty. */
+	public function hasChildrenHint(key:String):Bool
+		return isDirectoryPath(key);
 
 	public function childCount(parentKey:String):Int {
 		if (isSyntheticRow(parentKey)) return 0;
@@ -220,7 +210,6 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 			priorityClicks.remove(result.path);
 			boostedPrefetch.remove(result.path);
 			pending.remove(result.path);
-			prefetching.remove(result.path);
 
 			var affectsVisibleTree = isVisibleExpandedPath(result.path);
 			if (result.failed) {
@@ -285,7 +274,6 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 		expandedDirectories.set(root, true);
 		errors.clear();
 		pending.clear();
-		prefetching.clear();
 		priorityClicks.clear();
 		boostedPrefetch.clear();
 		pageSizes.clear();
@@ -306,7 +294,6 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 			if (priority) {
 				var now = Sys.time();
 				priorityClicks.set(path, now);
-				prefetching.remove(path);
 				var promoted = false;
 				for (index in 0...prefetchJobs.length) {
 					var queued = prefetchJobs[index];
@@ -390,12 +377,6 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 				names: [], kinds: [], unchanged: false, invalidated: [], failed: true,
 				queuedAt: job.queuedAt, startedAt: 0, finishedAt: Sys.time()});
 		}
-	}
-
-	function prefetchingCount():Int {
-		var count = 0;
-		for (_ in prefetching.keys()) count++;
-		return count;
 	}
 
 	function workerLoop():Void {
@@ -530,7 +511,6 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 		for (path in [for (path in expandedDirectories.keys()) if (underInvalidatedPath(path)) path]) expandedDirectories.remove(path);
 		for (path in [for (path in pageSizes.keys()) if (underInvalidatedPath(path)) path]) pageSizes.remove(path);
 		for (path in [for (path in pending.keys()) if (underInvalidatedPath(path)) path]) pending.remove(path);
-		for (path in [for (path in prefetching.keys()) if (underInvalidatedPath(path)) path]) prefetching.remove(path);
 		visitedPaths = [for (path in visitedPaths) if (listings.exists(path)) path];
 		if (refreshCursor >= visitedPaths.length) refreshCursor = 0;
 	}
