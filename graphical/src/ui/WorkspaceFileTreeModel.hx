@@ -6,9 +6,7 @@ import haxeon.ui.LayoutStyle;
 import haxeon.ui.TextWrap;
 import haxeon.ui.core.TextStyleOverride;
 import haxeon.ui.core.View;
-import haxeon.ui.icons.IconName;
 import haxeon.ui.theme.Theme;
-import haxeon.ui.widgets.Icon;
 import haxeon.ui.widgets.KeyedView;
 import haxeon.ui.widgets.collections.TreeRootMetadata;
 import haxeon.ui.widgets.layout.Row;
@@ -197,15 +195,13 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 		style.height = LayoutAxis.fixed(26.0);
 		style.clipHorizontal = true;
 		style.childAlignY = LayoutAlignmentY.Center;
-		style.childGap = 6.0;
-		var icon:View = directory
-			? new Icon("folder-icon", expanded ? IconName.FolderOpen : IconName.FolderClosed, 20.0, theme.tokens.textSecondary)
-			: new SetiFileIcon(atlas, label, dark);
-		return new Row("workspace-file-item", [
-			new KeyedView("icon", icon),
-			new KeyedView("name", new MiddleEllipsisText("filename", label, false,
-				new TextStyleOverride(null, 14.0, null, TextWrap.None, null, null, null, theme.tokens.text)))
-		], style);
+		style.childGap = 4.0;
+		var children:Array<KeyedView> = [];
+		if (!directory) children.push(new KeyedView("icon", new SetiFileIcon(atlas, label, dark)));
+		children.push(new KeyedView("name", new MiddleEllipsisText("filename", label, false,
+				new TextStyleOverride(null, 14.0, null, TextWrap.None, null, null, null, theme.tokens.text))
+		));
+		return new Row("workspace-file-item", children, style);
 	}
 
 	public function isDirectoryKey(key:String):Bool return isDirectory(key);

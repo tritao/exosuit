@@ -19,7 +19,8 @@ class ProcessManager {
 		var keys:Array<String> = [], values:Array<String> = [];
 		if (environment != null)
 			for (key => value in environment) { keys.push(key); values.push(value); }
-		var child = Process.spawn(executable, arguments, cwd, keys, values);
+		var child = Process.spawn(executable, arguments, cwd, keys, values, false,
+			Sys.getEnv("EXOSUIT_AGENT_LOCK_FD") == null);
 		var process = new OwnedProcess(child);
 		owned.push(process);
 		return process;

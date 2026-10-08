@@ -11,7 +11,10 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parent.parent
-MANAGER = ROOT / 'scripts/run-agent.py'
+from agent_test_runtime import manager_command, manager_environment
+
+MANAGER = manager_command(ROOT)
+ENVIRONMENT = manager_environment(ROOT)
 
 
 def wait_ready(process, state):
@@ -43,7 +46,7 @@ with tempfile.TemporaryDirectory(prefix='exosuit-manager-') as temporary:
     process = None
     with (state / 'test.log').open('w') as log:
         def start():
-            return subprocess.Popen([sys.executable, str(MANAGER), str(root), '--state-dir', str(state)], stdout=log, stderr=subprocess.STDOUT)
+            return subprocess.Popen([*MANAGER, str(root), '--state-dir', str(state)], env=ENVIRONMENT, stdout=log, stderr=subprocess.STDOUT)
 
         try:
             process = start()
@@ -54,7 +57,7 @@ with tempfile.TemporaryDirectory(prefix='exosuit-manager-') as temporary:
             assert len(credential) == 64 and int(credential, 16) >= 0
             for filename in ['credential', 'endpoint.json', 'catalog.sqlite', 'workspace.json', 'agent.lock']:
                 assert (state / filename).stat().st_mode & 0o077 == 0
-            duplicate = subprocess.run([sys.executable, str(MANAGER), str(root), '--state-dir', str(state)], capture_output=True, text=True, timeout=10)
+            duplicate = subprocess.run([*MANAGER, str(root), '--state-dir', str(state)], env=ENVIRONMENT, capture_output=True, text=True, timeout=10)
             assert duplicate.returncode == 3 and 'workspace_in_use' in duplicate.stderr
             stop(process)
             assert not (state / 'endpoint.json').exists()
@@ -68,7 +71,7 @@ with tempfile.TemporaryDirectory(prefix='exosuit-manager-') as temporary:
             daemon_group = int(children[0])
             process.kill(); process.wait(timeout=10)
             try:
-                duplicate = subprocess.run([sys.executable, str(MANAGER), str(root), '--state-dir', str(state)], capture_output=True, text=True, timeout=10)
+                duplicate = subprocess.run([*MANAGER, str(root), '--state-dir', str(state)], env=ENVIRONMENT, capture_output=True, text=True, timeout=10)
                 assert duplicate.returncode == 3, duplicate.stderr
             finally:
                 os.killpg(daemon_group, signal.SIGKILL)
@@ -96,14 +99,14 @@ with tempfile.TemporaryDirectory(prefix='exosuit-manager-') as temporary:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             # Refuse a mismatched root even when the lifetime lock is available.
             other = directory / 'other'; other.mkdir()
-            mismatch = subprocess.run([sys.executable, str(MANAGER), str(other), '--state-dir', str(state)], capture_output=True, text=True, timeout=10)
+            mismatch = subprocess.run([*MANAGER, str(other), '--state-dir', str(state)], env=ENVIRONMENT, capture_output=True, text=True, timeout=10)
             assert mismatch.returncode == 1 and 'identity mismatch' in mismatch.stderr
         finally:
             if process is not None:
                 stop(process)
     # An explicit detached start returns discovery only after its own manager is ready.
     detached = directory / 'detached'
-    result = subprocess.run([sys.executable, str(MANAGER), str(root), '--state-dir', str(detached), '--detach'], capture_output=True, text=True, timeout=100)
+    result = subprocess.run([*MANAGER, str(root), '--state-dir', str(detached), '--detach'], env=ENVIRONMENT, capture_output=True, text=True, timeout=100)
     if result.returncode != 0:
         raise RuntimeError(result.stderr + (detached / 'manager.log').read_text()[-3000:])
     descriptor = json.loads(result.stdout)

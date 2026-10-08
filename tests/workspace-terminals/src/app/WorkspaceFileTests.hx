@@ -60,6 +60,7 @@ class WorkspaceFileTests {
 		File.saveBytes(secondRootPath + "/read.raw", rawContent);
 		File.saveContent(rootPath + "/folder/Case.txt", "upper");
 		File.saveContent(rootPath + "/folder/case.txt", "lower");
+		var distinctCaseNames = File.getContent(rootPath + "/folder/Case.txt") != File.getContent(rootPath + "/folder/case.txt");
 		File.saveContent(secondRootPath + "/unicode-order/\uE000.txt", "bmp");
 		File.saveContent(secondRootPath + "/unicode-order/😀.txt", "supplementary");
 		File.saveContent(secondRootPath + "/other.txt", "another root");
@@ -342,9 +343,10 @@ class WorkspaceFileTests {
 			{workspace: "workspace", root: WorkspaceFileService.ROOT_ID, path: "folder", limit: 2, cursor: null}, 1000,
 			function(value) cases = value, function(error) throw error.code);
 		poll(client, server);
-		require(cases != null && cases.entries.length == 2 && cases.entries[0].name == "Case.txt"
-			&& cases.entries[1].name == "case.txt" && cases.next == null,
-			"Directory listing changed filename case or failed exact ordering");
+		require(cases != null && cases.entries.length == (distinctCaseNames ? 2 : 1)
+			&& cases.entries[0].name == "Case.txt" && cases.next == null
+			&& (!distinctCaseNames || cases.entries[1].name == "case.txt"),
+			"Directory listing changed filename case or failed the filesystem's exact ordering");
 
 		var unicodeOrder:Null<FileListPage> = null;
 		client.call(WorkspaceFileProtocol.LIST,

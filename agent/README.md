@@ -5,31 +5,38 @@ an authenticated **loopback-only** WebSocket. SQLite persists groups, revisions,
 cursor, operation outcomes and trimmed replay events atomically; restart preserves
 the catalog epoch and mutation idempotency. It has no UIKit or GPU dependency.
 
-Start it on Linux with:
+The manager implementation lives in Exosuit at `agent/src/app/AgentManager.hx`.
+Haxeon supplies generic host primitives for private files, locks, secure random
+tokens, process lifetime and loopback port allocation. Build and start the Haxe
+manager with:
 
 ```sh
-python3 scripts/run-agent.py /path/to/workspace --detach
+python3 scripts/build.py
+haxeon/.tools/hashlink/hl agent/build/host/main.hl --manager /path/to/workspace --detach
 ```
 
-Without `--detach`, the manager runs in the foreground. It creates private state
-under `$XDG_STATE_HOME/exosuit/workspaces/ROOT_HASH`, or `--state-dir DIRECTORY`.
-The directory must be owned by this user with mode 0700; files are mode 0600.
-`--port PORT` chooses the loopback WebSocket port; the default selects a free port
-and refuses startup if another listener wins the bind race.
+The graphical app and integration harnesses launch this bytecode directly;
+there is no Python workspace-manager launcher. Without `--detach`, the manager
+runs in the foreground. It creates private state
+under `$XDG_STATE_HOME/exosuit/workspaces/ROOT_HASH` on Linux or
+`%LOCALAPPDATA%\Exosuit\workspaces\ROOT_HASH` on Windows; `--state-dir DIRECTORY`
+overrides that location. State files are restricted to the current user. The
+default `--port 0` asks the OS for an available loopback port.
 
-The manager holds an exclusive lifetime lock inherited by the daemon and returns
-exit 3 `workspace_in_use` for a duplicate start. It writes `endpoint.json` after
-readiness, with the canonical workspace root, manager PID/generation, endpoints
-and credential file path. The credential itself is never included. Discovery
-is verified by the Linux editor through negotiated capabilities and a typed
-identity query before catalog subscription. Opening a folder through
-`scripts/run.sh` discovers or starts the detached daemon; switching folders
-selects the corresponding service. Closing a window closes only its client;
-the daemon stops after a minute without authenticated clients. To stop, send SIGTERM to the descriptor's `managerPid`. Normal stop
-removes owned discovery and stops the child process group while retaining the
-database and credential. Replaced/missing storage stops the daemon rather than
-silently opening a fresh catalog. Linux startup is tested; Windows management is
-not delivered by this POSIX launcher.
+The manager holds an exclusive lifetime lock and returns exit 3
+`workspace_in_use` for a duplicate start. On POSIX the daemon inherits the lock;
+on Windows it runs inside the manager's kill-on-close Job Object. It writes
+`endpoint.json` after readiness, with the canonical workspace root, manager
+PID/generation, endpoints and credential file path. The credential itself is
+never included. Windows local RPC uses a named pipe whose DACL grants access only
+to the current user; Linux and macOS continue to use private Unix sockets.
+Discovery is verified by the editor through negotiated capabilities and a typed
+identity query before catalog subscription. Opening a folder discovers or starts
+the detached daemon; switching folders selects the corresponding service.
+Closing a window closes only its client; the daemon stops after a minute without
+authenticated clients. Normal stop removes owned discovery and stops the owned
+child processes while retaining the database and credential. Replaced storage
+stops the daemon rather than silently opening a fresh catalog.
 
 Remote relay hosting is opt-in. In the desktop Remote Access panel, enter your
 HTTPS relay origin and choose **Enable remote access**. The address is saved in
@@ -53,7 +60,7 @@ Each request initially selects all permissions; the owner can select Read only,
 Edit files, or adjust individual permissions before approving. The choices for
 one request do not affect other requests or already paired devices.
 
-For direct fixtures, build with
+For direct daemon fixtures, build with
 `haxeon/scripts/haxeon build --project agent/haxeon.json`.
 Run arguments are:
 
@@ -75,9 +82,9 @@ authenticated secure relay and endpoint/session authorization described in
 
 `--discover` validates existing private discovery without starting a daemon;
 exit 4 means no discovery. `--wire` emits the typed JsonWire profile for the
-native client. The launcher is selected with `EXOSUIT_AGENT_LAUNCHER`, or found
-from a repository launch directory. Release bundles install the manager beside a matched `exosuit-agent` runner and
-bytecode, so managed startup does not compile sources or require Haxeon.
+native client. The bytecode is selected with `EXOSUIT_AGENT_LAUNCHER`, or found
+from a repository launch directory. Release bundles install the matched agent
+bytecode and HashLink runtime, so managed startup does not compile sources.
 
 The default idle grace is 60 seconds, including initial startup. `--idle-seconds N`
 changes it for new managed daemons; `--always-available` (or

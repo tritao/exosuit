@@ -12,16 +12,24 @@ from haxeon_cli import run_cli
 
 def main() -> int:
     root_dir = Path(__file__).resolve().parent.parent
-    arguments = [
+    self_hosted = os.environ.get("HAXEON_SELF_HOSTED", "0") == "1"
+    agent_arguments = [
         "build",
         "--project",
-        str(root_dir / "graphical" / "haxeon.json"),
+        str(root_dir / "agent" / "haxeon.json"),
     ]
-    if os.environ.get("HAXEON_SELF_HOSTED", "0") == "1":
-        arguments.append("--self-hosted")
-    arguments.extend(sys.argv[1:])
+    if self_hosted:
+        agent_arguments.append("--self-hosted")
+    agent_arguments.extend(sys.argv[1:])
 
     try:
+        status = run_cli(root_dir, agent_arguments)
+        if status != 0:
+            return status
+        arguments = ["build", "--project", str(root_dir / "graphical" / "haxeon.json")]
+        if self_hosted:
+            arguments.append("--self-hosted")
+        arguments.extend(sys.argv[1:])
         return run_cli(root_dir, arguments)
     except (OSError, RuntimeError) as error:
         print(f"Unable to prepare the Haxeon CLI: {error}", file=sys.stderr)

@@ -47,6 +47,26 @@ set(NOISE_C_SOURCES
     ${NOISE_C_ROOT}/src/crypto/sha2/sha512.c
     ${NOISE_C_ROOT}/src/crypto/ed25519/ed25519.c)
 
+# NoiseKit exposes only Noise_XX_25519_ChaChaPoly_SHA256. The vendored
+# Curve448 and NewHope implementations use GCC vector extensions that MSVC
+# cannot compile, and they are outside this package's fixed suite.
+if(MSVC)
+    list(REMOVE_ITEM NOISE_C_SOURCES
+        ${NOISE_C_ROOT}/src/backend/ref/dh-curve448.c
+        ${NOISE_C_ROOT}/src/backend/ref/dh-newhope.c
+        ${NOISE_C_ROOT}/src/crypto/curve448/curve448.c
+        ${NOISE_C_ROOT}/src/crypto/goldilocks/src/p448/arch_ref64/p448.c
+        ${NOISE_C_ROOT}/src/crypto/newhope/batcher.c
+        ${NOISE_C_ROOT}/src/crypto/newhope/crypto_stream_chacha20.c
+        ${NOISE_C_ROOT}/src/crypto/newhope/error_correction.c
+        ${NOISE_C_ROOT}/src/crypto/newhope/fips202.c
+        ${NOISE_C_ROOT}/src/crypto/newhope/newhope.c
+        ${NOISE_C_ROOT}/src/crypto/newhope/ntt.c
+        ${NOISE_C_ROOT}/src/crypto/newhope/poly.c
+        ${NOISE_C_ROOT}/src/crypto/newhope/precomp.c
+        ${NOISE_C_ROOT}/src/crypto/newhope/reduce.c)
+endif()
+
 if(EMSCRIPTEN)
     list(APPEND NOISE_C_SOURCES src/random_wasm.c)
 else()
@@ -63,6 +83,9 @@ target_compile_features(noisekit PRIVATE c_std_11)
 target_compile_definitions(noisekit PRIVATE
     NOISEKIT_BUILDING=1 USE_OPENSSL=0 USE_LIBSODIUM=0 HAVE_PTHREAD=0
     ED25519_CUSTOMHASH ED25519_CUSTOMRANDOM)
+if(MSVC)
+    target_compile_definitions(noisekit PRIVATE NOISEKIT_DH_CURVE25519_ONLY=1)
+endif()
 target_include_directories(noisekit PUBLIC include PRIVATE
     ${NOISE_C_ROOT}/include
     ${NOISE_C_ROOT}/src

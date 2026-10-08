@@ -25,18 +25,33 @@ def _enable_core_dumps() -> None:
 
 def main() -> int:
     root_dir = Path(__file__).resolve().parent.parent
+    self_hosted = os.environ.get("HAXEON_SELF_HOSTED", "0") == "1"
+    agent_arguments = ["build", "--project", str(root_dir / "agent" / "haxeon.json")]
+    if self_hosted:
+        agent_arguments.append("--self-hosted")
+    try:
+        status = run_cli(root_dir, agent_arguments)
+        if status != 0:
+            return status
+    except OSError as error:
+        print(f"Unable to build the workspace agent: {error}", file=sys.stderr)
+        return 127
+    except RuntimeError as error:
+        print(f"Unable to build the workspace agent: {error}", file=sys.stderr)
+        return 127
+
     arguments = [
         "run",
         "--project",
         str(root_dir / "graphical" / "haxeon.json"),
     ]
-    if os.environ.get("HAXEON_SELF_HOSTED", "0") == "1":
+    if self_hosted:
         arguments.append("--self-hosted")
     arguments.extend(["--", *sys.argv[1:]])
 
     try:
         environment = {
-            "EXOSUIT_AGENT_LAUNCHER": str(root_dir / "scripts" / "run-agent.py")
+            "EXOSUIT_AGENT_LAUNCHER": str(root_dir / "agent" / "build" / "host" / "main.hl")
         }
         _enable_core_dumps()
         return run_cli(root_dir, arguments, environment)

@@ -165,10 +165,22 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     }
     updateMode = mode; updateSelection = selection; updateInstance = instance;
     updateOutput = ""; updateErrors = "";
-    var arguments = [launcher, root, managed ? "--prepare-update" : "--restart", "--wire"];
-    if (!managed) { arguments.push("--expected-generation"); arguments.push(instance); }
     try {
-      updateHelper = processes.start("python3", arguments, root, environment);
+      var executable:String;
+      var arguments:Array<String>;
+      if (managed) {
+        executable = Sys.executablePath();
+        arguments = [launcher, "--manager", root, "--prepare-update", "--wire"];
+      } else {
+        if (Sys.systemName() == "Windows") {
+          updateFailure = "This older workspace service must be restarted from its host.";
+          pairingsRevision++;
+          return;
+        }
+        executable = "python3";
+        arguments = [findLegacyManager(), root, "--restart", "--wire", "--expected-generation", instance];
+      }
+      updateHelper = processes.start(executable, arguments, root, managed ? helperEnvironment() : environment);
       updateDeadline = clock() + 110000;
     } catch (failure:Dynamic) updateFailure = Std.string(failure);
     pairingsRevision++;
@@ -419,16 +431,30 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
 
   public static function findLauncher():String {
     var configured = Sys.getEnv("EXOSUIT_AGENT_LAUNCHER");
-    if (configured != null && configured.length > 0) return FileSystem.fullPath(configured);
+    if (configured != null && configured.length > 0)
+      return FileSystem.fullPath(configured);
     var directory = FileSystem.fullPath(Sys.getCwd());
     for (_ in 0...8) {
-      var candidate = directory + "/scripts/run-agent.py";
-      if (FileSystem.exists(candidate)) return candidate;
+      for (candidate in [directory + "/agent/build/host/main.hl", directory + "/tools/exosuit-agent.hl"])
+        if (FileSystem.exists(candidate)) return FileSystem.fullPath(candidate);
       var parent = haxe.io.Path.directory(directory);
       if (parent == directory || parent.length == 0) break;
       directory = parent;
     }
     throw "Workspace agent launcher is not installed";
+  }
+
+  function findLegacyManager():String {
+    var directory = FileSystem.fullPath(haxe.io.Path.directory(launcher));
+    for (_ in 0...10) {
+      for (candidate in [haxe.io.Path.join([directory, "scripts", "run-agent.py"]),
+          haxe.io.Path.join([directory, "run-agent.py"])])
+        if (FileSystem.exists(candidate)) return FileSystem.fullPath(candidate);
+      var parent = haxe.io.Path.directory(directory);
+      if (parent == directory || parent.length == 0) break;
+      directory = parent;
+    }
+    throw "Workspace update helper is not installed";
   }
 
   public function select(path:Null<String>):Void {
@@ -495,17 +521,64 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     errors = "";
     helperMode = mode;
     try {
+      var arguments = [launcher, "--manager", path];
+      if (mode == "configure-relay") {
+        arguments.push("--configure-relay");
+        arguments.push(relayOrigin);
+      } else {
+        arguments.push(mode == "discover" ? "--discover" : "--detach");
+      }
+      arguments.push("--wire");
       helper = processes.start(
-        "python3",
-        mode == "configure-relay" ? [launcher, path, "--configure-relay", relayOrigin, "--wire"]
-          : [launcher, path, mode == "discover" ? "--discover" : "--detach", "--wire"],
+        Sys.executablePath(),
+        arguments,
         path,
-        environment
+        helperEnvironment()
       );
       helperDeadline = clock() + 95000;
     } catch (failure:Dynamic) {
       fail(Std.string(failure));
     }
+  }
+
+  function helperEnvironment():Map<String, String> {
+    var result = new Map<String, String>();
+    if (environment != null)
+      for (key => value in environment)
+        result.set(key, value);
+    result.set("EXOSUIT_AGENT_LAUNCHER", launcher);
+
+    var launcherDirectory = haxe.io.Path.directory(FileSystem.fullPath(launcher));
+    var nativeRoot = haxe.io.Path.join([launcherDirectory, "native"]);
+    var directories:Array<String> = [];
+    addExistingDirectory(directories, nativeRoot);
+    if (FileSystem.exists(nativeRoot) && FileSystem.isDirectory(nativeRoot))
+      for (entry in FileSystem.readDirectory(nativeRoot))
+        addExistingDirectory(directories, haxe.io.Path.join([nativeRoot, entry]));
+
+    // Installed bundles place all agent libraries in ../lib; source builds
+    // keep them under agent/build/host/native/<package>.
+    var installRoot = haxe.io.Path.directory(launcherDirectory);
+    addExistingDirectory(directories, haxe.io.Path.join([installRoot, "lib"]));
+    addExistingDirectory(directories, haxe.io.Path.directory(Sys.executablePath()));
+    var haxeonHome = Sys.getEnv("HAXEON_HOME");
+    if (haxeonHome != null && haxeonHome.length > 0) {
+      addExistingDirectory(directories, haxe.io.Path.join([haxeonHome, "out"]));
+      addExistingDirectory(directories, haxe.io.Path.join([haxeonHome, ".tools", "hashlink"]));
+    }
+
+    var windows = Sys.systemName() == "Windows";
+    var variable = windows ? "PATH" : Sys.systemName() == "Mac" ? "DYLD_LIBRARY_PATH" : "LD_LIBRARY_PATH";
+    var inherited = environment == null ? null : environment.get(variable);
+    if (inherited == null || inherited.length == 0) inherited = Sys.getEnv(variable);
+    if (inherited != null && inherited.length > 0) directories.push(inherited);
+    if (directories.length > 0) result.set(variable, directories.join(windows ? ";" : ":"));
+    return result;
+  }
+
+  static function addExistingDirectory(directories:Array<String>, path:String):Void {
+    if (path.length > 0 && FileSystem.exists(path) && FileSystem.isDirectory(path) && directories.indexOf(path) < 0)
+      directories.push(path);
   }
 
   function install(endpoint:LocalWorkspaceEndpoint):Void {

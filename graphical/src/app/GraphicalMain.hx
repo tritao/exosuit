@@ -88,9 +88,9 @@ class GraphicalMain {
 			var instance = new ExosuitApp(context.fonts, ExosuitPalette.theme(dark), context,
 				openPaths.length == 0 ? null : openPaths[0], null,
 				new NativeDesktopServices(context), dark, ui.TerminalPane.open,
-				Sys.systemName() == "Linux" ? function(id,cwd,restored,requestFrame,palette,group,directory)
+				(Sys.systemName() == "Linux" || Sys.systemName() == "Windows") ? function(id,cwd,restored,requestFrame,palette,group,directory)
 					return ui.TerminalPane.openRemote(function() return terminalWorkspaces == null ? null : terminalWorkspaces.endpoint(cwd),id,cwd,restored,requestFrame,palette,group,directory,null,true) : null);
-			if (Sys.systemName() == "Linux") {
+			if (Sys.systemName() == "Linux" || Sys.systemName() == "Windows") {
 				try {
 					workspaceClient = new workspace.client.LocalWorkspaceClient(context.events, instance.application.processes,
 						workspace.client.LocalWorkspaceClient.findLauncher(), function() return NativeKit.nk_time_seconds() * 1000);

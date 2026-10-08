@@ -8,8 +8,6 @@ import haxeon.ui.LayoutStyle;
 import haxeon.ui.LayoutAxis;
 import haxeon.ui.LayoutAlignmentY;
 import haxeon.ui.TextWrap;
-import haxeon.ui.widgets.Icon;
-import haxeon.ui.icons.IconName;
 import haxeon.ui.widgets.KeyedView;
 import haxeon.ui.widgets.layout.Row;
 import haxeon.ui.core.View;
@@ -142,15 +140,13 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 		style.height = LayoutAxis.fixed(26.0);
 		style.clipHorizontal = true;
 		style.childAlignY = LayoutAlignmentY.Center;
-		style.childGap = 6.0;
-		var icon:View = directory
-			? new Icon("folder-icon", expanded ? IconName.FolderOpen : IconName.FolderClosed, 20.0, theme.tokens.textSecondary)
-			: new SetiFileIcon(atlas, name, dark);
-		return new Row("explorer-item", [
-			new KeyedView("icon", icon),
-			new KeyedView("name", new MiddleEllipsisText("filename", name, false,
-				new TextStyleOverride(null, 14.0, null, TextWrap.None, null, null, null, theme.tokens.text)))
-		], style);
+		style.childGap = 4.0;
+		var children:Array<KeyedView> = [];
+		if (!directory) children.push(new KeyedView("icon", new SetiFileIcon(atlas, name, dark)));
+		children.push(new KeyedView("name", new MiddleEllipsisText("filename", name, false,
+				new TextStyleOverride(null, 14.0, null, TextWrap.None, null, null, null, theme.tokens.text))
+		));
+		return new Row("explorer-item", children, style);
 	}
 
 	public function revision():Int return listRevision;

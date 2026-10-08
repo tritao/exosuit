@@ -164,11 +164,11 @@ integration and provider supervision remain pending.
 First bootstrap delivered in `agent/haxeon.json`: a headless NativeKit loop hosts
 a durable group catalog over same-user local sockets and authenticated loopback
 WebSockets. Real Chrome Wasm32/Wasm GC clients recover a saved rename across
-connection and agent process restarts. `scripts/run-agent.py` adds qualified Linux
-startup, an inherited exclusive lock (exit 3), private generation-tagged discovery,
-detached readiness and device/inode storage-replacement fencing. Linux repository
-desktop discovery, typed identity validation and detached auto-spawn/reuse are
-delivered, including release staging of the matched daemon/manager. An idle
+connection and agent process restarts. `agent/src/app/AgentManager.hx` owns
+managed startup, an exclusive lifetime lock (exit 3), private generation-tagged
+discovery, detached readiness and storage-replacement fencing. Repository desktop
+discovery, typed identity validation and detached auto-spawn/reuse work on Linux
+and Windows; Windows local RPC uses a current-user named pipe. An idle
 catalog-only service stops after one minute without authenticated clients; explicit
 always-available mode disables that timeout. Durable runtime recovery and provider supervision remain open. Catalog connection limits are the stricter existing RPC.2
 bounds documented below, not the future runtime-manager budget.

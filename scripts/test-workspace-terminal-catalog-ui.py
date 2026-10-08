@@ -18,7 +18,7 @@ OUTPUT = ROOT / 'tests/workspace-terminals/build/host'
 subprocess.run([HAXEON, 'build', '--project', str(ROOT / 'tests/workspace-terminals/haxeon.json'), *MODE], check=True)
 with tempfile.TemporaryDirectory(prefix='extcatui-') as temporary:
     fixture = Path(temporary); project = fixture / 'project'; project.mkdir(); state = fixture / 'state'
-    launcher = INSTALL / 'tools/run-agent.py' if INSTALL else ROOT / 'scripts/run-agent.py'
+    launcher = INSTALL / 'tools/exosuit-agent.hl' if INSTALL else ROOT / 'agent/build/host/main.hl'
     environment = dict(os.environ, XDG_STATE_HOME=str(state), PRAGTICAL_PORTABLE=str(fixture / 'settings'), SHELL='/bin/sh', EXOSUIT_AGENT_LAUNCHER=str(launcher))
     environment.pop('EXOSUIT_AGENT_ALWAYS_AVAILABLE', None)
     if INSTALL:

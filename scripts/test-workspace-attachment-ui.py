@@ -17,7 +17,7 @@ with tempfile.TemporaryDirectory(prefix='exui-') as temporary:
     project.mkdir()
     (project / 'sample.txt').write_text('Workspace attachment smoke\n')
     state = fixture / 'state'
-    environment = dict(os.environ, XDG_STATE_HOME=str(state), PRAGTICAL_PORTABLE=str(fixture / 'settings'), EXOSUIT_AGENT_LAUNCHER=str(ROOT / 'scripts/run-agent.py'))
+    environment = dict(os.environ, XDG_STATE_HOME=str(state), PRAGTICAL_PORTABLE=str(fixture / 'settings'), EXOSUIT_AGENT_LAUNCHER=str(ROOT / 'agent/build/host/main.hl'))
     try:
         previous = None
         for index in range(2):

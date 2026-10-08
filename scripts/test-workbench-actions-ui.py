@@ -21,7 +21,7 @@ with tempfile.TemporaryDirectory(prefix='exactions-') as temporary:
         'foreign': {'id': 'foreign', 'name': 'Other directory', 'cwd': str(fixture), 'status': {'type': 'idle'}, 'turn': None}}}))
     environment = dict(os.environ, XDG_STATE_HOME=str(state), PRAGTICAL_PORTABLE=str(fixture / 'settings'),
                        EXOSUIT_CODEX_BIN=str(ROOT / 'tests/workspace-agents/fake-codex.py'),
-                       EXOSUIT_AGENT_LAUNCHER=str(INSTALL / 'tools/run-agent.py' if INSTALL else ROOT / 'scripts/run-agent.py'))
+                       EXOSUIT_AGENT_LAUNCHER=str(INSTALL / 'tools/exosuit-agent.hl' if INSTALL else ROOT / 'agent/build/host/main.hl'))
     if INSTALL: environment.update(HAXEON_BIN='/no/source/compiler', HAXEON_ROOT='/no/source/tree', LD_LIBRARY_PATH='')
     app = None
     def layout(index): return json.loads((fixture / str(index) / 'layout.json').read_text())

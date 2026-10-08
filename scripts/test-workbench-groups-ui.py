@@ -18,7 +18,7 @@ with tempfile.TemporaryDirectory(prefix="exgroupsui-") as temporary:
     project = fixture / "project"; project.mkdir()
     child = project / "tools dir"; child.mkdir()
     state = fixture / "state"
-    environment = dict(os.environ, XDG_STATE_HOME=str(state), PRAGTICAL_PORTABLE=str(fixture / "settings"), SHELL="/bin/sh", EXOSUIT_AGENT_LAUNCHER=str(INSTALL / "tools/run-agent.py" if INSTALL else ROOT / "scripts/run-agent.py"))
+    environment = dict(os.environ, XDG_STATE_HOME=str(state), PRAGTICAL_PORTABLE=str(fixture / "settings"), SHELL="/bin/sh", EXOSUIT_AGENT_LAUNCHER=str(INSTALL / "tools/exosuit-agent.hl" if INSTALL else ROOT / "agent/build/host/main.hl"))
     environment.pop("EXOSUIT_AGENT_ALWAYS_AVAILABLE", None)
     if INSTALL:
         environment.update(HAXEON_BIN="/no/source/compiler", HAXEON_ROOT="/no/source/tree", LD_LIBRARY_PATH="")

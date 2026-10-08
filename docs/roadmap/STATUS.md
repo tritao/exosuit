@@ -1,6 +1,49 @@
 # Execution ledger
 
-Last updated: 2026-10-07.
+Last updated: 2026-10-08.
+
+## Windows workspace startup and filesystem backend, 2026-10-08
+
+The Windows NativeKit filesystem package now has a Win32 backend for pinned
+workspace roots, root-relative metadata and directory enumeration, and bounded
+file reads. It rejects alternate data stream paths and checks opened object
+paths against the authorized root. The Haxe manager now trims CRLF output lines
+so it recognizes the daemon's normal idle-stop marker on Windows. Its tagged
+`--wire` discovery encoder also preserves mixed string and integer field values,
+so Windows clients can decode the descriptor and authenticate.
+
+Validation: `python scripts/build.py` passes for the Windows/MSVC agent and
+graphical targets. The focused Windows attachment scenario passes with two
+clients and confirms the connected client keeps the daemon alive beyond its
+idle timeout. `python scripts/run.py` opens a responsive `exosuit` window; its
+workspace endpoint remained present beyond 60 seconds. The current computer-use
+surface still exposes no targetable Windows apps, so I could not capture the
+panel itself. Windows visual and watcher acceptance remain open; broader
+filesystem acceptance is not claimed complete.
+
+Next: inspect the workspace panel on Windows with a targetable UI session and
+qualify the Windows watcher and filesystem acceptance cases. See
+[`WORKSPACE-FILES.md`](WORKSPACE-FILES.md) and
+[`WORKSPACE-RPC.md`](WORKSPACE-RPC.md).
+
+## Standalone Haxe workspace manager, 2026-10-08
+
+Removed the Python workspace-manager launcher. The desktop app and integration
+harnesses now launch `agent/build/host/main.hl` directly through HashLink;
+release staging installs the agent bytecode and the separate Codex proxy only.
+Relay bootstrap creation now lives in the Haxe `AgentRelayBootstrap` component,
+with the transport harness checking identity persistence, token rotation and
+private file permissions through that implementation. The Windows filesystem
+fixture now adapts its case-name assertion to the underlying filesystem.
+
+Validation: `python scripts/build.py` compiles the Windows agent and graphical
+targets. Direct HashLink startup, discovery and idle cleanup pass on Windows.
+The Haxe transport fixture passes relay identity persistence, token rotation and
+private-file checks; the workspace file-service contract passes with the
+case-insensitive NTFS fixture. Release staging was inspected to confirm it copies
+the real Codex proxy and no manager wrapper. The Windows desktop panel still
+needs visual inspection with a targetable UI session, and watcher acceptance
+remains open.
 
 ## M16.2 shared desktop/browser workspace search, 2026-10-07
 
@@ -628,8 +671,8 @@ it does not yet allow remote RPC or make the web build a usable remote client.
 `scripts/test-workspace-transport.sh` verifies bootstrap identity/token handling,
 OS-store adapter compilation, Worker enrollment/connection and bidirectional
 routing. `scripts/test-relay.sh` passes all 14 Worker/SQLite tests.
-`python3 -m py_compile scripts/run-agent.py` passes. Linux builds need
-`libsecret-1-dev`; runtime requires an available user-session Secret Service.
+The Python compatibility launcher passed its syntax check at that stage. Linux
+builds need `libsecret-1-dev`; runtime requires an available user-session Secret Service.
 No relay was deployed.
 
 ## Workbench navigation cleanup, 2026-10-05
@@ -991,7 +1034,8 @@ new operations without discarding old outcomes. Corruption, unknown/unversioned
 schemas and stale cursor/revision writes are refused. An ambiguous storage failure
 fences subsequent RPC access until reopening.
 
-`scripts/run-agent.py` adds qualified Linux managed startup with canonical-root
+The earlier Python compatibility launcher added qualified Linux managed
+startup with canonical-root
 identity, private credential/state files, an inherited lifetime lock, exit 3
 `workspace_in_use`, generation-tagged discovery after readiness and optional
 detached startup. The descriptor publishes a credential path, never the secret.

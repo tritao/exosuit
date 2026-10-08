@@ -20,6 +20,11 @@ import workspace.runtime.WorkspacePairingManager;
 class AgentMain {
 	static function main():Void {
 		var args = Sys.args();
+		AgentManagerNative.guardChildLock();
+		if (args.length > 0 && args[0] == "--manager") {
+			Sys.exit(AgentManager.run(args.slice(1)));
+			return;
+		}
 		if (args.length < 4 || args.length > 9)
 			throw "Usage: exosuit-agent PRIVATE_SOCKET LOOPBACK_WS_PORT TOKEN_FILE SEED_EPOCH [DATABASE [WORKSPACE_ROOT [INSTANCE [IDLE_MILLISECONDS [RELAY_BOOTSTRAP]]]]]";
 		var idleMilliseconds = args.length >= 8 ? Std.parseInt(args[7]) : 60000;

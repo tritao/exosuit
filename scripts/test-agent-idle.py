@@ -10,7 +10,11 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parent.parent
-MANAGER = ROOT / 'scripts/run-agent.py'
+from agent_test_runtime import launcher_path, manager_command, manager_environment
+
+MANAGER = launcher_path(ROOT)
+MANAGER_COMMAND = manager_command(ROOT)
+MANAGER_ENVIRONMENT = manager_environment(ROOT, MANAGER)
 HAXEON = os.environ.get('HAXEON_BIN', str(Path(os.environ.get('HAXEON_ROOT', str(ROOT / 'haxeon'))) / 'scripts/haxeon'))
 MODE = ['--self-hosted'] if os.environ.get('HAXEON_SELF_HOSTED') == '1' else []
 PROJECT = ROOT / 'tests/workspace-attachment/haxeon.json'
@@ -19,7 +23,7 @@ with tempfile.TemporaryDirectory(prefix='exidle-') as temporary:
     fixture = Path(temporary)
     root = fixture / 'project'; root.mkdir()
     state = fixture / 'state'
-    environment = dict(os.environ, XDG_STATE_HOME=str(state))
+    environment = dict(MANAGER_ENVIRONMENT, XDG_STATE_HOME=str(state))
     environment.pop('EXOSUIT_AGENT_ALWAYS_AVAILABLE', None)
     def endpoint():
         entries = list(state.glob('exosuit/workspaces/*/endpoint.json'))
@@ -37,7 +41,7 @@ with tempfile.TemporaryDirectory(prefix='exidle-') as temporary:
         process = None
         try:
             # No handshake: a raw socket cannot keep a service alive indefinitely.
-            process = subprocess.Popen([sys.executable, str(MANAGER), str(root), '--idle-seconds', '2'], env=environment, stdout=log, stderr=subprocess.STDOUT)
+            process = subprocess.Popen([*MANAGER_COMMAND, str(root), '--idle-seconds', '2'], env=environment, stdout=log, stderr=subprocess.STDOUT)
             first = ready(process)
             with socket.socket(socket.AF_UNIX) as raw:
                 raw.connect(first['socket'])
@@ -46,14 +50,14 @@ with tempfile.TemporaryDirectory(prefix='exidle-') as temporary:
             database = Path(first['credentialFile']).parent / 'catalog.sqlite'
             assert database.exists(), 'Idle shutdown discarded persistent catalog'
             # A fresh instance reopens the same durable database. Clients reset grace.
-            process = subprocess.Popen([sys.executable, str(MANAGER), str(root), '--idle-seconds', '10'], env=environment, stdout=log, stderr=subprocess.STDOUT)
+            process = subprocess.Popen([*MANAGER_COMMAND, str(root), '--idle-seconds', '10'], env=environment, stdout=log, stderr=subprocess.STDOUT)
             second = ready(process)
             assert first['generation'] != second['generation']
             subprocess.run([HAXEON, 'run', '--project', str(PROJECT), *MODE, '--', 'hold', str(root), str(MANAGER)], env=environment, check=True, timeout=120)
             assert process.poll() is None and endpoint() is not None, 'Last disconnect had no grace'
             assert process.wait(timeout=15) == 0 and endpoint() is None
             # Explicit availability propagates through the detached manager boundary.
-            subprocess.run([sys.executable, str(MANAGER), str(root), '--detach', '--idle-seconds', '1', '--always-available'], env=environment, check=True, timeout=90)
+            subprocess.run([*MANAGER_COMMAND, str(root), '--detach', '--idle-seconds', '1', '--always-available'], env=environment, check=True, timeout=90)
             descriptor = json.loads(endpoint().read_text())
             time.sleep(2)
             assert endpoint() is not None and json.loads(endpoint().read_text())['generation'] == descriptor['generation'], 'Always-available service idled out'

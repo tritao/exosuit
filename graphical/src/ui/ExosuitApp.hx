@@ -1301,6 +1301,7 @@ class ExosuitApp implements DesktopUiApplication {
 					else if (!remoteModel.isDirectoryKey(key)) openWorkspaceFile(remoteModel, key, true);
 				} else if (localModel != null && !localModel.isSyntheticRow(key) && !localModel.isDirectoryPath(key)) application.open(key);
 			}, null, null);
+		tree.indentWidth = 12.0;
 		tree.expandOnSingleClick = true;
 		if (localModel != null) {
 			tree.hasChildrenHint = function(key) return localModel.hasChildrenHint(key);

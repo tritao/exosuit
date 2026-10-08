@@ -1,9 +1,10 @@
 # Workspace filesystem protocol
 
-Status: Linux F1 and the first F2 read-handle slice are implemented, with a
-basic Linux desktop F3 change-invalidation path and bounded F4 search exposed
-through the shared desktop/browser Search sidebar; full F1–F5 acceptance is
-incomplete. Required by
+Status: Linux F1/F2, a basic Linux desktop F3 change-invalidation path and
+bounded F4 search are implemented through the shared desktop/browser Search
+sidebar. The Windows NativeKit F1/F2 backend now builds and starts under
+AgentMain; Windows UI acceptance and F3/F4 qualification remain open. Full
+filesystem acceptance is incomplete. Required by
 [M16.2](16-remote-workspaces.md). The
 Exosuit service uses shared typed RPC schemas; filesystem semantics are not
 part of Haxeon's generic RPC package. Local adapters and RPC adapters will
@@ -71,20 +72,21 @@ This is invalidation, not automatic file reload. Watcher overflow invalidates
 all roots. Connected-browser delivery now has a basic acceptance that changes a
 file on AgentMain before and after relay reconnect, observes the stale-preview
 marker and confirms the Explorer revision advances after its watch is restored.
-Non-Linux backends, event replay, narrower subtree/path events and full F3
-race/overflow/reconnect qualification remain open.
+Windows watcher qualification, event replay, narrower subtree/path events and
+full F3 race/overflow/reconnect qualification remain open.
 
-The secure NativeKit backend currently requires Linux `openat2`; it fails closed
-when unavailable, and other platforms return `unsupported`. Multiple roots are
-supported by the service and contract tests, but AgentMain currently publishes
-one configured root per workspace. Non-Linux secure backends and remaining F1
-acceptance cases are still open. The Linux desktop and connected web client use
-valid UTF-8 syntax-colored read-only previews; Linux desktop has root-level
-change invalidation. F4 provides bounded literal name/content search with
-client-owned pages, cancellation and resource limits; its shared Search UI is
-described above. Project ignore/glob rules, stale-result UX, boundary fixtures
-and load responsiveness remain open. Full F1–F5 browser qualification and
-full F3–F4 acceptance remain open.
+The Linux secure NativeKit backend requires `openat2` and fails closed when it
+is unavailable. The Windows backend pins native handles, checks resolved paths
+against the granted root and rejects alternate data stream paths; other
+platforms still return `unsupported`. Multiple roots are supported by the
+service and contract code, but AgentMain currently publishes one configured
+root per workspace. Remaining F1 acceptance cases are open. The Linux desktop
+and connected web client use valid UTF-8 syntax-colored read-only previews;
+Linux desktop has root-level change invalidation. F4 provides bounded literal
+name/content search with client-owned pages, cancellation and resource limits;
+its shared Search UI is described above. Project ignore/glob rules, stale-result
+UX, boundary fixtures and load responsiveness remain open. Full filesystem
+browser qualification and full F3/F4 acceptance remain open.
 
 ## Addressing and access
 
@@ -166,11 +168,12 @@ A read handle pins identity, not an automatically immutable file snapshot.
 Detect concurrent modification and return revision_changed; the client discards
 partial assembly/reopens rather than combining incompatible chunks. The Linux
 slice pins identity at open and checks identity, size, mtime and ctime-derived
-revision around each chunk. This detects ordinary in-place writes, including
-same-size writes that preserve mtime, while acknowledging filesystem timestamp
-precision. It does not claim a point-in-time snapshot. Other platforms must
-provide equally clear consistency semantics or report the limitation instead
-of claiming a snapshot.
+revision around each chunk. The Windows backend uses the opened file's native
+identity and metadata for the same checks. These detect ordinary in-place
+writes, including same-size writes that preserve mtime, while acknowledging
+filesystem timestamp precision. Neither backend claims a point-in-time
+snapshot. Unsupported platforms must provide equally clear consistency
+semantics or report the limitation instead of claiming a snapshot.
 
 Bound chunk length (initial maximum 256 KiB), active handles, cached snapshots
 and aggregate bytes per client. Close/cancel releases resources. No bulk whole

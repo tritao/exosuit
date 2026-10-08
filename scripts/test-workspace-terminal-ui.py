@@ -15,7 +15,7 @@ INSTALL=Path(sys.argv[1]).resolve(strict=True) if len(sys.argv)>1 else None
 MODE=['--self-hosted'] if os.environ.get('HAXEON_SELF_HOSTED')=='1' else []
 with tempfile.TemporaryDirectory(prefix='exttyui-') as temporary:
     fixture=Path(temporary); project=fixture/'project'; project.mkdir(); state=fixture/'state'
-    environment=dict(os.environ,XDG_STATE_HOME=str(state),PRAGTICAL_PORTABLE=str(fixture/'settings'),SHELL='/bin/sh',EXOSUIT_AGENT_LAUNCHER=str(ROOT/'scripts/run-agent.py'))
+    environment=dict(os.environ,XDG_STATE_HOME=str(state),PRAGTICAL_PORTABLE=str(fixture/'settings'),SHELL='/bin/sh',EXOSUIT_AGENT_LAUNCHER=str(ROOT/'agent/build/host/main.hl'))
     environment.pop('EXOSUIT_AGENT_ALWAYS_AVAILABLE',None)
     if INSTALL:
         environment.pop('EXOSUIT_AGENT_LAUNCHER',None)

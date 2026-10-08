@@ -4,8 +4,8 @@ The transport-independent implementation lives in `src/workspace/service/`.
 It is a headless catalog of named group metadata with optional cwd association;
 renaming preserves cwd. It does not yet implement the full nested group model,
 project/file access or terminal/agent operations. The native daemon persists this
-catalog through an agent-owned SQLite store; a POSIX manager provides private
-discovery and exclusive startup. The Linux repository desktop discovers, validates
+catalog through an agent-owned SQLite store; Exosuit's Haxe manager provides
+private discovery and exclusive startup. The repository desktop discovers, validates
 and attaches to that service asynchronously, spawning it detached when absent.
 The native and Wasm tests consume the same service, client replica and wire types.
 
@@ -94,18 +94,30 @@ and fences further RPC access as `storage_unavailable` until reopening, since a
 failed commit acknowledgement cannot prove whether it reached durable storage.
 No state or event is published before a successful commit.
 
-`python3 scripts/run-agent.py WORKSPACE [--detach]` selects private state under
-`$XDG_STATE_HOME/exosuit/workspaces/ROOT_HASH` (or `--state-dir`). The POSIX manager
-holds an inherited lifetime lock, rejects duplicate starts with exit 3
-`workspace_in_use`, validates the canonical root, creates a private 256-bit
-credential file and publishes `endpoint.json` only after daemon readiness.
+`agent/src/app/AgentManager.hx` selects private state under
+`$XDG_STATE_HOME/exosuit/workspaces/ROOT_HASH` on POSIX or
+`%LOCALAPPDATA%\Exosuit\workspaces\ROOT_HASH` on Windows (or `--state-dir`).
+The manager holds an exclusive lifetime lock, rejects duplicate starts with exit
+3 `workspace_in_use`, validates the canonical root, creates a private 256-bit
+credential file and publishes `endpoint.json` only after daemon readiness. The
+Windows local endpoint uses a current-user ACL named pipe; POSIX uses a private
+Unix socket. The app launches the Haxe manager bytecode directly through its
+HashLink runtime; no Python manager launcher is required.
 Discovery includes the manager PID/generation, local socket, loopback WebSocket
 and credential **path**, never the secret. The lock stays held by the live daemon
 if the manager is killed abruptly. Normal stop removes owned discovery, stops the
 process group and retains catalog/credential files. Replaced/missing storage
 stops the daemon; there is no silent switch to an empty catalog.
 
-This launcher is qualified on Linux. Existing descriptors are discovery hints.
+The Windows agent and graphical targets now build under MSVC. A Win32 NativeKit
+filesystem backend supplies the pinned root, metadata, directory and bounded
+read operations used by the workspace daemon. The manager emits mixed-type
+tagged discovery fields correctly, so clients can validate the descriptor and
+authenticate. The focused Windows attachment scenario passes with concurrent
+clients, and the endpoint from `python scripts/run.py` remains active beyond the
+daemon's 60-second idle timeout. The current computer-use surface exposes no
+targetable Windows apps, so direct visual confirmation of the panel is still
+open. Existing descriptors are discovery hints.
 The native client validates private metadata through `--discover --wire`, negotiates
 `workspace.read`, `workspace.events` and `workspace.identity`, then calls permanent
 method 104 (`WorkspaceQuery` → `WorkspaceIdentity`) before accepting catalog data.
@@ -118,17 +130,18 @@ clients the catalog-only daemon closes listeners, SQLite and its native runtime,
 then the manager removes owned discovery and exits successfully. Handshake-only
 or unauthenticated sockets do not reset the idle grace. Explicit
 `--always-available` or `EXOSUIT_AGENT_ALWAYS_AVAILABLE=1` disables that timeout
-for newly started daemons. Future daemon-owned terminal/provider sessions must
-contribute to the lifetime policy before those resources are delivered. Stale discovery triggers safe
+for newly started daemons. Running daemon-owned terminal and agent sessions
+contribute to the lifetime policy. Stale discovery triggers safe
 exclusive startup, with exit 3 handled by rediscovery. Attachment uses the existing
 background poll and does not force continuous redraws.
 
-`scripts/run.py` supplies the repository launcher; `EXOSUIT_AGENT_LAUNCHER` can
-override its path. Release staging installs the Python manager, matched daemon bytecode/runner and
-SQLite library beside the desktop runtime. The installed launcher selects its own
-manager; discovery uses the same protocol. Relocation acceptance runs without
-source/compiler access and observes the default one-minute shutdown. Release
-revision checks remain enforced by `package-release.sh`.
+`scripts/run.py` builds the agent before launching the graphical app;
+`EXOSUIT_AGENT_LAUNCHER` can select its bytecode. Release staging installs the
+matched agent bytecode and SQLite library beside the desktop runtime. The
+installed launcher selects the same Haxe manager; discovery uses the same
+protocol. Relocation acceptance runs without source/compiler access and observes
+the default one-minute shutdown. Release revision checks remain enforced by
+`package-release.sh`.
 Runtime/provider supervision, history files/checkpoints and volatile terminal
 operation on storage loss remain M14.3 work. The manager currently stops on
 catalog storage loss rather than providing that future terminal fallback.

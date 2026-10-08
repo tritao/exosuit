@@ -9,6 +9,8 @@ import workspace.service.WorkspaceProtocol;
 import workspace.runtime.WorkspaceRelayHost;
 import workspace.runtime.WorkspaceRelaySettings;
 import workspace.runtime.WorkspaceCredentialStore;
+import app.AgentManagerNative;
+import app.AgentRelayBootstrap;
 import haxeon.rpc.*;
 
 class TransportTestMain {
@@ -26,6 +28,26 @@ class TransportTestMain {
 		if (args.length == 1 && args[0] == "--noise-only") {
 			NoiseTransportTests.run();
 			WorkspacePairingTests.run();
+			return;
+		}
+		if (args.length == 3 && args[0] == "--manager-bootstrap") {
+			AgentManagerNative.setPrivateUmask();
+			if (!AgentManagerNative.prepareDirectory(args[1])) throw "Could not prepare relay bootstrap fixture directory";
+			var firstPath = AgentRelayBootstrap.create(args[1], args[2]);
+			if (firstPath == null) throw "Relay bootstrap was not created";
+			var first:Dynamic = haxe.Json.parse(sys.io.File.getContent(firstPath));
+			if (!AgentManagerNative.privateFile(firstPath)) throw "Relay bootstrap was not private";
+			sys.FileSystem.deleteFile(firstPath);
+			var secondPath = AgentRelayBootstrap.create(args[1], args[2]);
+			if (secondPath == null) throw "Second relay bootstrap was not created";
+			var second:Dynamic = haxe.Json.parse(sys.io.File.getContent(secondPath));
+			if (!AgentManagerNative.privateFile(secondPath)) throw "Second relay bootstrap was not private";
+			if (Reflect.field(first, "origin") != args[2] || Reflect.field(second, "origin") != args[2]
+				|| Reflect.field(first, "machineId") != Reflect.field(second, "machineId")
+				|| Reflect.field(first, "bootstrapToken") == Reflect.field(second, "bootstrapToken"))
+				throw "Relay identity did not persist or bootstrap bearer did not rotate";
+			sys.FileSystem.deleteFile(secondPath);
+			Sys.println("PASS: Haxe manager persists relay identity and rotates private one-shot bootstrap tokens");
 			return;
 		}
 		RelayProtocolTests.run();

@@ -31,6 +31,14 @@ class TerminalRpcTestMain {
   static function main():Void {
     var args = Sys.args(), mode = args[0], root = args[1], launcher = args[2];
 
+    if (mode == "files-only") {
+      var fileRuntime = NativeKitRuntime.start();
+      WorkspaceFileTests.run(root);
+      fileRuntime.dispose();
+      Sys.println("PASS: workspace file-service contract on the current filesystem");
+      return;
+    }
+
     var runtime = NativeKitRuntime.start(), processes = new ProcessManager();
     if (mode == "contracts") {
       TerminalServiceTests.run(root);

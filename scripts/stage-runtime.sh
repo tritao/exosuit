@@ -19,7 +19,7 @@ cp -a "$root_dir/graphical/build/host/native/exosuit-ui-native/"*.so* "$stage/li
 cp "$root_dir/agent/build/host/main.hl" "$stage/tools/exosuit-agent.hl"
 cp -a "$root_dir/agent/build/host/native/terminalkit/"*.so* "$stage/lib/"
 cp "$root_dir/agent/build/host/native/sqlitekit/libsqlitekit.so" "$stage/lib/"
-cp "$root_dir/scripts/run-agent.py" "$root_dir/scripts/run-codex-proxy.py" "$stage/tools/"
+cp "$root_dir/scripts/run-codex-proxy.py" "$stage/tools/"
 cp "$root_dir/packaging/exosuit-agent" "$stage/tools/"
 # Relocate only staged binaries; source build output retains its build paths.
 patchelf --set-rpath '$ORIGIN/../lib' "$stage/tools/hl"

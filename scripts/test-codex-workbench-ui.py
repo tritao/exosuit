@@ -7,7 +7,7 @@ INSTALL=Path(sys.argv[1]).resolve() if len(sys.argv)>1 else None
 RUNNER=[str(INSTALL/'exosuit')] if INSTALL else [str(ROOT/'haxeon/scripts/haxeon'),'run','--project',str(ROOT/'graphical/haxeon.json'),'--']
 with tempfile.TemporaryDirectory(prefix='excodexui-') as temporary:
  fixture=Path(temporary);project=fixture/'project';project.mkdir();state=fixture/'state'
- env=dict(os.environ,XDG_STATE_HOME=str(state),PRAGTICAL_PORTABLE=str(fixture/'settings'),EXOSUIT_CODEX_BIN=str(ROOT/'tests/workspace-agents/fake-codex.py'),EXOSUIT_AGENT_LAUNCHER=str(INSTALL/'tools/run-agent.py' if INSTALL else ROOT/'scripts/run-agent.py'))
+ env=dict(os.environ,XDG_STATE_HOME=str(state),PRAGTICAL_PORTABLE=str(fixture/'settings'),EXOSUIT_CODEX_BIN=str(ROOT/'tests/workspace-agents/fake-codex.py'),EXOSUIT_AGENT_LAUNCHER=str(INSTALL/'tools/exosuit-agent.hl' if INSTALL else ROOT/'agent/build/host/main.hl'))
  if INSTALL: env.update(HAXEON_BIN='/no/source/compiler',HAXEON_ROOT='/no/source/tree',LD_LIBRARY_PATH='')
  app=None
  def nodes(index): return json.loads((fixture/str(index)/'layout.json').read_text())
