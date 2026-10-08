@@ -57,11 +57,35 @@ private class FeedbackFixture implements haxeon.ui.core.View {
 	}
 }
 
+@:access(haxeon.ui.widgets.WindowFrame)
 @:access(haxeon.ui.LayoutMeasureConstraints)
 
 class TabTooltipTestMain {
 	static function require(value:Bool, message:String):Void { if (!value) throw message; }
 	static function main():Int {
+		// Every rim point has one resize direction, including the wider corner
+		// arms; inset controls remain client space even close to a corner.
+		for (size in [[900, 600], [32, 24], [8, 8]]) {
+			var regions = haxeon.ui.widgets.WindowFrame.resizeRegions(size[0], size[1]);
+			for (y in 0...size[1]) for (x in 0...size[0]) {
+				var count = 0;
+				for (region in regions) {
+					require(region.x >= 0 && region.y >= 0 && region.x + region.width <= size[0] && region.y + region.height <= size[1],
+						"resize region escaped a small window");
+					if (x >= region.x && y >= region.y && x < region.x + region.width && y < region.y + region.height) count++;
+				}
+				var rim = x < Math.min(6, size[0] / 2) || x >= size[0] - Math.min(6, size[0] / 2)
+					|| y < Math.min(6, size[1] / 2) || y >= size[1] - Math.min(6, size[1] / 2);
+				require(count == (rim ? 1 : 0), "resize rim has gaps, overlaps, or covers interior controls");
+			}
+		}
+		var corners = haxeon.ui.widgets.WindowFrame.resizeRegions(900, 600);
+		for (point in [[18, 2], [2, 18]]) {
+			var diagonal = false;
+			for (region in corners) if (point[0] >= region.x && point[1] >= region.y && point[0] < region.x + region.width && point[1] < region.y + region.height)
+				diagonal = region.kind == nativekit.ffi.NativeKitTypes.WindowDecorationRegionKind.ResizeNorthwest;
+			require(diagonal, "expanded corner arm did not select diagonal resize");
+		}
 		var scheduler = new AnimationScheduler();
 		var visible = false;
 		var reveals = 0;
