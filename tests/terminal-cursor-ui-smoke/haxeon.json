@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "package": {
+    "name": "exosuit-terminal-cursor-smoke"
+  },
+  "entry": "TerminalCursorSmoke",
+  "sourceRoots": [
+    "src"
+  ],
+  "scopeSourceRoots": false,
+  "dependencies": {
+    "exosuit-graphical": {
+      "path": "../../graphical"
+    }
+  },
+  "target": "host",
+  "outputDir": "build"
+}

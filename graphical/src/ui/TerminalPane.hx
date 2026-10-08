@@ -71,6 +71,8 @@ class TerminalPane implements TerminalPanel {
 	var cursorRow:Int = -1;
 	var cursorColumn:Int = -1;
 	var cursorMode:Int = 1;
+	var cursorOutlineColor:Color;
+	var cursorOutlineWidth:Int = 1;
 
 	public static function open(cwd:String, requestFrame:Void->Void, palette:TerminalPalette):TerminalPanel {
 		var profile = terminalsession.TerminalProfile.shell(cwd);
@@ -117,6 +119,7 @@ class TerminalPane implements TerminalPanel {
 		ownsFonts = providedFonts == null;
 		foreground = palette.foreground;
 		background = palette.background;
+		cursorOutlineColor = foreground;
 		fonts = providedFonts == null ? FontCollection.create() : providedFonts;
 		if (ownsFonts) {
 			var mono = Sys.getEnv("EXOSUIT_TERMINAL_FONT");
@@ -176,9 +179,12 @@ class TerminalPane implements TerminalPanel {
 		layouts.resize(0); texts.resize(0); revisions.resize(0); backgrounds.resize(0);
 	}
 
-	function refreshRows(force:Bool):Void {
+	function refreshRows(force:Bool, focusChanged:Bool = false):Void {
 		var emulator = session.emulator;
 		emulator.snapshot();
+		var cursor = emulator.cursor();
+		cursor.column = Std.int(Math.min(cursor.column, emulator.columns() - 1));
+		cursor.row += emulator.scrollback(-1).current;
 		var count = emulator.rows();
 		while (layouts.length > count) {
 			layouts.pop().dispose();
@@ -196,7 +202,8 @@ class TerminalPane implements TerminalPanel {
 			force = true;
 		}
 		for (row in 0...count) {
-			if (!force && !emulator.rowChanged(row)) continue;
+			var repaintCursor = focusChanged && (row == cursor.row || row == cursorRow);
+			if (!force && !repaintCursor && !emulator.rowChanged(row)) continue;
 			var cells = emulator.rowCells(row);
 			var buffer = new StringBuf();
 			var ranges:Array<TextColorRange> = [];
@@ -210,14 +217,26 @@ class TerminalPane implements TerminalPanel {
 				var count = codepoints(content);
 				var fg = haxe.Int64.toInt(cell.style);
 				var bg = haxe.Int64.toInt(cell.style >>> 32);
-				if ((fg & 3) != 0) ranges.push(new TextColorRange(offset, offset + count,
-					TerminalColors.decode(fg, foreground, palette, false)));
-				if ((bg & 3) != 0) fills.push({start: column, end: column + cell.width,
-					color: TerminalColors.decode(bg, background, palette, true)});
+				if (!focused && cursor.mode != 1 && row == cursor.row && column == cursor.column) {
+					// libtsm paints its block cursor by swapping cell colors. Decode
+					// each packed color in its emitted role before undoing that swap;
+					// this also preserves default colors and inverse-video content.
+					var ink = TerminalColors.decode(bg, background, palette, true);
+					var paper = TerminalColors.decode(fg, foreground, palette, false);
+					ranges.push(new TextColorRange(offset, offset + count, ink));
+					fills.push({start: column, end: column + cell.width, color: paper});
+					cursorOutlineColor = ink;
+					cursorOutlineWidth = cell.width;
+				} else {
+					if ((fg & 3) != 0) ranges.push(new TextColorRange(offset, offset + count,
+						TerminalColors.decode(fg, foreground, palette, false)));
+					if ((bg & 3) != 0) fills.push({start: column, end: column + cell.width,
+						color: TerminalColors.decode(bg, background, palette, true)});
+				}
 				offset += count;
 			}
 			var next = buffer.toString();
-			if (force || next != texts[row] || emulator.rowChanged(row)) {
+			if (force || repaintCursor || next != texts[row] || emulator.rowChanged(row)) {
 				layouts[row].setText(next);
 				layouts[row].setColorRanges(ranges);
 				texts[row] = next;
@@ -225,7 +244,6 @@ class TerminalPane implements TerminalPanel {
 				revisions[row]++;
 			}
 		}
-		var cursor = emulator.cursor();
 		if (cursorRow != cursor.row || cursorColumn != cursor.column || cursorMode != cursor.mode) {
 			if (cursorRow >= 0 && cursorRow < revisions.length) revisions[cursorRow]++;
 			cursorRow = cursor.row;
@@ -233,6 +251,16 @@ class TerminalPane implements TerminalPanel {
 			cursorMode = cursor.mode;
 			if (cursorRow >= 0 && cursorRow < revisions.length) revisions[cursorRow]++;
 		}
+	}
+
+	function setFocused(value:Bool):Void {
+		if (closed || focused == value) return;
+		focused = value;
+		focusGeneration++;
+		session.emulator.focus(value);
+		session.flushInput();
+		refreshRows(false, true);
+		requestFrame();
 	}
 
 	static function codepoints(value:String):Int {
@@ -292,9 +320,18 @@ class TerminalPane implements TerminalPanel {
 				for (fill in backgrounds[index]) canvas.fillRectIfPositive(new Rect(8.0 + fill.start * cellWidth,
 					0.0, (fill.end - fill.start) * cellWidth, rowHeight), fill.color);
 				canvas.drawText(layouts[index], 8.0, 0.0);
-				if (index == cursorRow && cursorMode != 1)
-					canvas.fillRectIfPositive(new Rect(8.0 + cursorColumn * cellWidth, rowHeight - 2.0,
-						cellWidth, 2.0), palette.cursor);
+				if (index == cursorRow && cursorMode != 1) {
+					var x = 8.0 + cursorColumn * cellWidth;
+					if (focused)
+						canvas.fillRectIfPositive(new Rect(x, rowHeight - 2.0, cellWidth, 2.0), palette.cursor);
+					else {
+						var width = cursorOutlineWidth * cellWidth;
+						canvas.fillRectIfPositive(new Rect(x, 0.0, width, 1.0), cursorOutlineColor);
+						canvas.fillRectIfPositive(new Rect(x, rowHeight - 1.0, width, 1.0), cursorOutlineColor);
+						canvas.fillRectIfPositive(new Rect(x, 1.0, 1.0, rowHeight - 2.0), cursorOutlineColor);
+						canvas.fillRectIfPositive(new Rect(x + width - 1.0, 1.0, 1.0, rowHeight - 2.0), cursorOutlineColor);
+					}
+				}
 			}, rowStyle, null, false, CachePolicy.Raster, key);
 			layers.push(new StackChild('row-$index', view, 0.0, terminalTop + index * rowHeight,
 				1, LayoutAxis.grow(), LayoutAxis.fixed(rowHeight)));
@@ -424,20 +461,10 @@ class TerminalPane implements TerminalPanel {
 			} else handleKey(event);
 		});
 		node.on(UiEventKind.KeyRepeat, handleKey);
-		node.on(UiEventKind.Focus, function(_) {
-			focused = true;
-			focusGeneration++;
-			session.emulator.focus(true);
-			session.flushInput();
-			requestFrame();
-		});
-		node.on(UiEventKind.FocusLost, function(_) {
-			focused = false;
-			focusGeneration++;
-			session.emulator.focus(false);
-			session.flushInput();
-			requestFrame();
-		});
+		node.on(UiEventKind.Focus, function(_) setFocused(true));
+		var blur = function(_:UiEvent):Void setFocused(false);
+		node.on(UiEventKind.Blur, blur);
+		node.on(UiEventKind.FocusLost, blur);
 		node.on(UiEventKind.Scroll, function(event:UiEvent) {
 			if (event.deltaY == 0 || closed) return;
 			if ((event.modifiers & UiModifier.Shift) == 0) {
