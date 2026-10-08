@@ -13,6 +13,10 @@ import haxeon.wire.MessagePack;
 	@:id(6) var state:String;
 	@:id(7) var turn:Null<String>;
 	@:id(8) var workspaceRoot:String;
+	/** Latest Exosuit permission choice, applied to this and subsequent turns. */
+	@:optional @:id(9) var sandboxPolicy:Null<String>;
+	@:optional @:id(10) var approvalPolicy:Null<String>;
+	@:optional @:id(11) var permissionProfile:Null<String>;
 }
 
 @:wire typedef AgentQuery = {
@@ -42,6 +46,8 @@ import haxeon.wire.MessagePack;
 @:wire typedef AgentModel = {
 	@:id(1) var model:String;
 	@:id(2) var name:String;
+	@:optional @:id(3) var defaultEffort:Null<String>;
+	@:optional @:id(4) var supportedEfforts:Null<Array<String>>;
 }
 
 @:wire typedef AgentAction = {
@@ -52,6 +58,7 @@ import haxeon.wire.MessagePack;
 	@:id(5) var text:String;
 	@:id(6) var request:Null<String>;
 	@:optional @:id(7) var model:Null<String>;
+	@:optional @:id(8) var effort:Null<String>;
 }
 
 @:wire typedef AgentRequest = {
@@ -70,6 +77,12 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(6) var itemsOmitted:Null<Bool>;
 	@:optional @:id(7) var models:Null<Array<AgentModel>>;
 	@:optional @:id(8) var modelsNext:Null<String>;
+	@:optional @:id(9) var currentModel:Null<String>;
+	@:optional @:id(10) var currentEffort:Null<String>;
+	/** Transport/session readiness, separate from the Codex turn state. */
+	@:optional @:id(11) var connectionState:Null<String>;
+	/** Stable recovery category for actionable UI; raw diagnostics remain in error. */
+	@:optional @:id(12) var recoveryReason:Null<String>;
 }
 
 /** Bounded presentation data; provider protocol and policy stay on the host. */

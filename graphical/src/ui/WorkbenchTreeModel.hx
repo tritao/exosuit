@@ -100,6 +100,15 @@ class WorkbenchTreeModel implements TreeViewModel {
 	public function revision():Int
 		return version;
 
+	static function agentStateLabel(state:String):String {
+		return switch (state) {
+			case "reconnecting": "Reconnecting…";
+			case "reconnect-failed": "Session unavailable";
+			case "disconnected": "Disconnected";
+			default: state;
+		};
+	}
+
 	public function buildItem(key:String):View {
 		if (StringTools.startsWith(key, "g:")) {
             var editing = groupEditor == null ? null : groupEditor(key.substring(2));
@@ -124,7 +133,7 @@ class WorkbenchTreeModel implements TreeViewModel {
 		}
 		if (StringTools.startsWith(key, "a:")) {
 			var a = agents.get(key.substring(2));
-			return new Text(a == null ? "" : a.name + " · " + a.state);
+			return new Text(a == null ? "" : a.name + " · " + agentStateLabel(a.state));
 		}
 		var terminal = terminals.get(key.substring(2));
 		return new Text(terminal == null ? "" : terminal.name + " · " + terminal.state);

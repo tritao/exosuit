@@ -9,6 +9,7 @@ import workspace.service.WorkspaceAgentPersistence;
 import workspace.service.WorkspaceAgents;
 import workspace.service.WorkspaceProtocol;
 import workspace.runtime.WorkspaceDirectories;
+import workspace.client.CodexPermissions;
 import haxeon.rpc.RpcConnection;
 import haxeon.rpc.RpcContext;
 
@@ -20,6 +21,12 @@ private typedef Session = {
 	var attached:Bool;
 	var busy:Bool;
 	var requests:Map<String, PendingApproval>;
+	var currentModel:Null<String>;
+	var currentEffort:Null<String>;
+	var reconnectAttempts:Int;
+	var reconnectAt:Float;
+	var reconnectBlocked:Bool;
+	var eventRevision:Int;
 }
 
 private typedef PendingApproval = {var wireId:Dynamic; var method:String; var detail:String; var reviewable:Bool; var questions:Array<String>;}
@@ -47,6 +54,12 @@ class CodexProvider implements WorkspaceAgents {
 	var deadline:Float = 0;
 	var serial = 0;
 	var storageFailed = false;
+	var connectionGeneration = 0;
+	var retryAt:Float = 0;
+	var retryDelay:Float = 1;
+	var connectedAt:Float = 0;
+	var startupBlocked = false;
+	var recoveringSession:Null<Session>;
 
 	public var status(default, null) = "Codex is not connected";
 
@@ -81,7 +94,13 @@ class CodexProvider implements WorkspaceAgents {
 					error: null,
 					attached: false,
 					busy: false,
-					requests: []
+					requests: [],
+					currentModel: null,
+					currentEffort: null,
+					reconnectAttempts: 0,
+					reconnectAt: 0,
+					reconnectBlocked: false,
+					eventRevision: 0
 				});
 			}
 	}
@@ -110,7 +129,10 @@ class CodexProvider implements WorkspaceAgents {
 			thread: r.thread,
 			state: r.state,
 			turn: r.turn,
-			workspaceRoot: r.workspaceRoot
+			workspaceRoot: r.workspaceRoot,
+			sandboxPolicy: r.sandboxPolicy,
+			approvalPolicy: r.approvalPolicy,
+			permissionProfile: r.permissionProfile
 		};
 
 	function view(s:Session):AgentView
@@ -121,6 +143,10 @@ class CodexProvider implements WorkspaceAgents {
 			itemsOmitted: s.conversation.omitted,
 			models: models,
 			modelsNext: modelsNext,
+			currentModel: s.currentModel,
+			currentEffort: s.currentEffort,
+			connectionState: s.attached ? "connected" : s.record.state == "reconnecting" ? "reconnecting" : "disconnected",
+			recoveryReason: recoveryReason(s),
 			requests: [
 				for (id => r in s.requests)
 					{
@@ -133,16 +159,91 @@ class CodexProvider implements WorkspaceAgents {
 			error: s.error
 		};
 
+	function recoveryReason(s:Session):Null<String> {
+		if (s.record.thread == "" || s.attached
+			|| (s.record.state != "disconnected" && s.record.state != "reconnect-failed")) return null;
+		var lower = s.error == null ? "" : s.error.toLowerCase();
+		if (lower.indexOf("thread not found") >= 0 || lower.indexOf("unknown thread") >= 0)
+			return "thread-unavailable";
+		if (lower.indexOf("active writer") >= 0) return "active-writer";
+		if (lower.indexOf("thread directory does not match") >= 0) return "workspace-mismatch";
+		if (isPermanentProviderError(lower) || lower.indexOf("unsupported codex") >= 0) return "setup-required";
+		return "temporary";
+	}
+
 	function append(s:Session, text:String):Void {
 		s.activity += text;
 		if (s.activity.length > 16384)
 			s.activity = s.activity.substring(s.activity.length - 16384);
 	}
 
+	function retrySeconds(attempt:Int):Float {
+		var base = Math.min(30, Math.pow(2, Math.min(5, Math.max(0, attempt - 1))));
+		return base * (0.8 + Math.random() * 0.4);
+	}
+
+	function hasRecoverableSessions():Bool {
+		for (s in sessions)
+			if (s.record.thread != "" && !s.attached && !s.reconnectBlocked) return true;
+		return false;
+	}
+
+	function isPermanentProviderError(reason:String):Bool {
+		var lower = reason == null ? "" : reason.toLowerCase();
+		return lower.indexOf("unsupported codex") >= 0 || lower.indexOf("authentication") >= 0
+			|| lower.indexOf("unauthorized") >= 0 || lower.indexOf("invalid api key") >= 0
+			|| lower.indexOf("not logged in") >= 0 || lower.indexOf("login required") >= 0
+			|| lower.indexOf("forbidden") >= 0 || lower.indexOf("permission denied") >= 0;
+	}
+
+	function isPermanentSessionError(reason:String):Bool {
+		var lower = reason == null ? "" : reason.toLowerCase();
+		return lower.indexOf("thread directory does not match") >= 0 || lower.indexOf("thread not found") >= 0
+			|| lower.indexOf("unknown thread") >= 0 || lower.indexOf("not found") >= 0
+			|| lower.indexOf("unauthorized") >= 0 || lower.indexOf("authentication") >= 0
+			|| lower.indexOf("invalid api key") >= 0 || lower.indexOf("forbidden") >= 0
+			|| lower.indexOf("unsupported codex") >= 0 || lower.indexOf("active writer") >= 0;
+	}
+
+	function updateRecoveryStatus():Void {
+		if (phase != "ready") return;
+		var retrying = false, blocked = false;
+		for (s in sessions) if (s.record.thread != "" && !s.attached) {
+			if (s.reconnectBlocked) blocked = true; else retrying = true;
+		}
+		status = retrying ? "Reconnecting Codex sessions" : blocked ? "Codex connected; some sessions need attention" : "Codex connected";
+	}
+
+	function scheduleConnectionRetry():Void {
+		if (startupBlocked) return;
+		retryAt = clock() + retryDelay * 1000 * (0.8 + Math.random() * 0.4);
+		retryDelay = Math.min(30, retryDelay * 2);
+	}
+
+	function failStartup(reason:String, permanent:Bool = false):Void {
+		phase = "failed";
+		status = reason;
+		if (permanent || isPermanentProviderError(reason)) {
+			startupBlocked = true;
+			for (s in sessions) if (s.record.thread != "") {
+				s.attached = false;
+				s.busy = false;
+				s.reconnectBlocked = true;
+				s.record.state = "reconnect-failed";
+				s.error = reason;
+			}
+		} else scheduleConnectionRetry();
+	}
+
 	function start():Void {
-		if (phase != "stopped" && phase != "failed")
+		if ((phase != "stopped" && phase != "failed") || startupBlocked)
 			return;
-		disconnect("Reconnecting Codex");
+		connectionGeneration++;
+		retryAt = 0;
+		for (s in sessions) if (s.record.thread != "" && !s.attached && !s.reconnectBlocked) {
+			s.record.state = "reconnecting";
+			s.error = null;
+		}
 		try {
 			starter = processes.start(executable, commandPrefix.concat(["--version"]), directories.root);
 			output = "";
@@ -150,21 +251,18 @@ class CodexProvider implements WorkspaceAgents {
 			deadline = clock() + 15000;
 			status = "Checking Codex version";
 		} catch (e:Dynamic) {
-			phase = "failed";
-			status = Std.string(e);
+			failStartup(Std.string(e));
 		}
 	}
 
 	public function poll():Void {
 		if (starter != null) {
 			var process = starter;
-			output += process.readStdout();
-			process.readStderr();
+			output += process.readStdout() + process.readStderr();
 			if (output.length > 4096 || clock() >= deadline) {
 				processes.release(process);
 				starter = null;
-				phase = "failed";
-				status = "Codex startup timed out";
+				failStartup("Codex startup timed out");
 				return;
 			}
 			if (process.exited()) {
@@ -172,14 +270,12 @@ class CodexProvider implements WorkspaceAgents {
 				processes.release(process);
 				starter = null;
 				if (exit != 0) {
-					phase = "failed";
-					status = "Codex startup failed";
+					failStartup("Codex startup failed" + (StringTools.trim(output) == "" ? "" : ": " + StringTools.trim(output)));
 					return;
 				}
 				if (phase == "version") {
 					if (StringTools.trim(output) != "codex-cli 0.160.0") {
-						phase = "failed";
-						status = "Unsupported Codex version; this adapter requires 0.160.0";
+						failStartup("Unsupported Codex version; this adapter requires 0.160.0", true);
 						return;
 					}
 					try {
@@ -189,8 +285,7 @@ class CodexProvider implements WorkspaceAgents {
 						deadline = clock() + 15000;
 						status = "Starting shared Codex daemon";
 					} catch (e:Dynamic) {
-						phase = "failed";
-						status = Std.string(e);
+						failStartup(Std.string(e));
 					}
 				} else {
 					try {
@@ -221,6 +316,8 @@ class CodexProvider implements WorkspaceAgents {
 									return;
 								}
 								phase = "ready";
+								connectedAt = clock();
+								retryAt = 0;
 								status = "Codex connected";
 						});
 					} catch (e:Dynamic) {
@@ -235,9 +332,19 @@ class CodexProvider implements WorkspaceAgents {
 			if (current.failure != null)
 				disconnect(current.failure);
 		}
+		if ((phase == "stopped" || phase == "failed") && !startupBlocked && hasRecoverableSessions() && clock() >= retryAt)
+			start();
+		if (phase == "ready") {
+			reconcileNextSession();
+			updateRecoveryStatus();
+		}
 	}
 
 	function disconnect(reason:String):Void {
+		connectionGeneration++;
+		recoveringSession = null;
+		if (connectedAt > 0 && clock() - connectedAt >= 60000) retryDelay = 1;
+		connectedAt = 0;
 		var current = transport;
 		transport = null;
 		if (current != null)
@@ -248,14 +355,63 @@ class CodexProvider implements WorkspaceAgents {
 		}
 		phase = "failed";
 		status = reason;
+		var permanent = isPermanentProviderError(reason);
+		if (permanent) startupBlocked = true;
+		else scheduleConnectionRetry();
 		for (s in sessions) {
 			s.attached = false;
 			s.busy = false;
 			s.requests.clear();
 			s.error = reason;
-			if (s.record.thread != "")
-				s.record.state = "disconnected";
+			if (s.record.thread != "") {
+				if (permanent) {
+					s.reconnectBlocked = true;
+					s.record.state = "reconnect-failed";
+				} else if (!s.reconnectBlocked) s.record.state = "disconnected";
+			}
 		}
+	}
+
+	function scheduleSessionRetry(s:Session):Void {
+		s.reconnectAttempts++;
+		s.reconnectAt = clock() + retrySeconds(s.reconnectAttempts) * 1000;
+	}
+
+	function reconcileNextSession():Void {
+		if (phase != "ready" || recoveringSession != null) return;
+		var candidates:Array<Session> = [];
+		for (s in sessions)
+			if (s.record.thread != "" && !s.attached && !s.busy && !s.reconnectBlocked && clock() >= s.reconnectAt)
+				candidates.push(s);
+		if (candidates.length == 0) return;
+		candidates.sort(function(a, b) return Reflect.compare(a.record.id, b.record.id));
+		var s = candidates[0];
+		var generation = connectionGeneration;
+		recoveringSession = s;
+		s.busy = true;
+		s.record.state = "reconnecting";
+		s.error = null;
+		loadThread(s, function(r) {
+			if (generation != connectionGeneration) return;
+			recoveringSession = null;
+			s.busy = false;
+			if (r.error != null) {
+				s.attached = false;
+				s.error = r.error;
+				if (isPermanentSessionError(r.error)) {
+					s.reconnectBlocked = true;
+					s.record.state = "reconnect-failed";
+				} else {
+					s.record.state = "disconnected";
+					scheduleSessionRetry(s);
+				}
+			} else {
+				s.reconnectAttempts = 0;
+				s.reconnectAt = 0;
+				s.reconnectBlocked = false;
+			}
+			updateRecoveryStatus();
+		});
 	}
 
 	function call(method:String, params:Dynamic, done:JsonRpcResponse->Void):Void {
@@ -285,6 +441,7 @@ class CodexProvider implements WorkspaceAgents {
 		var s = threadSession(string(params, "threadId"));
   // The shared server may route requests for other clients. Never answer those.
   if(s==null) return;
+  s.eventRevision++;
 		if (s.requests.keys().hasNext() && requestCount(s) >= 16) {
 			if (transport != null)
 				transport.close("Too many Codex approval requests");
@@ -368,6 +525,7 @@ class CodexProvider implements WorkspaceAgents {
 		if (s == null)
 			return;
 		if (method == "turn/started") {
+			s.eventRevision++;
 			var t = Reflect.field(params, "turn");
 			s.record.turn = string(t, "id");
 			s.record.state = "working";
@@ -375,6 +533,7 @@ class CodexProvider implements WorkspaceAgents {
 			var t = Reflect.field(params, "turn");
 			if (s.record.turn != null && string(t, "id") != s.record.turn)
 				return;
+			s.eventRevision++;
 			s.record.turn = null;
 			var state = string(t, "status");
 			if (state != "completed" && state != "failed" && state != "interrupted")
@@ -385,6 +544,7 @@ class CodexProvider implements WorkspaceAgents {
 			s.busy = false;
 			save(s);
 		} else if (method == "thread/status/changed") {
+			s.eventRevision++;
 			var state = Reflect.field(params, "status");
 			var type = string(state, "type");
 			if (type == "active")
@@ -420,9 +580,42 @@ class CodexProvider implements WorkspaceAgents {
 		return directories.root;
 	}
 
-	function loadThread(s:Session, done:JsonRpcResponse->Void):Void {
-		// Read metadata first: no thread from another project is resumed or policy-mutated.
+	/** Metadata reads require loaded threads on some supported servers. The
+	 * directory-filtered catalog also exposes persisted threads without loading history. */
+	function readThreadMetadata(s:Session, done:JsonRpcResponse->Void):Void {
+		var generation = connectionGeneration;
+		function page(cursor:Null<String>, count:Int):Void {
+			call("thread/list", {cwd: s.record.cwd, limit: 32, cursor: cursor, archived: false}, function(r) {
+				if (generation != connectionGeneration) { done(new JsonRpcResponse(null, "Codex connection changed")); return; }
+				if (r.error != null) { done(r); return; }
+				var data:Array<Dynamic> = Reflect.field(r.result, "data");
+				if (data == null || data.length > 32) { done(new JsonRpcResponse(null, "Invalid thread metadata catalog")); return; }
+				for (thread in data) if (string(thread, "id") == s.record.thread) {
+					done(new JsonRpcResponse({thread: thread}, null)); return;
+				}
+				var next = string(r.result, "nextCursor");
+				if (next == "" || count >= 8) { done(new JsonRpcResponse(null, "Thread not found in this workspace's bounded metadata catalog")); return; }
+				if (next == cursor || next.length > 2048) { done(new JsonRpcResponse(null, "Invalid thread metadata cursor")); return; }
+				page(next, count + 1);
+			});
+		}
 		call("thread/read", {threadId: s.record.thread, includeTurns: false}, function(r) {
+			if (generation != connectionGeneration) { done(new JsonRpcResponse(null, "Codex connection changed")); return; }
+			if (r.error != null && r.error.toLowerCase().indexOf("thread not loaded") >= 0) page(null, 1);
+			else done(r);
+		});
+	}
+
+	function loadThread(s:Session, done:JsonRpcResponse->Void):Void {
+		var generation = connectionGeneration;
+		var eventRevision = s.eventRevision;
+		var restoredActive = false;
+		var restoredTurn:Null<String> = null;
+		function stale():Bool return generation != connectionGeneration;
+		function connectionChanged():Void done(new JsonRpcResponse(null, "Codex connection changed during session recovery"));
+		// Read metadata first: no thread from another project is resumed or policy-mutated.
+		readThreadMetadata(s, function(r) {
+			if (stale()) { connectionChanged(); return; }
 			if (r.error != null) {
 				done(r);
 				return;
@@ -433,14 +626,22 @@ class CodexProvider implements WorkspaceAgents {
 				return;
 			}
 			call("thread/resume", {threadId: s.record.thread, excludeTurns: true}, function(resumed) {
+				if (stale()) { connectionChanged(); return; }
 				if (resumed.error == null) {
-					s.attached = true;
-					s.error = null;
+					if (s.record.sandboxPolicy == null)
+						s.record.sandboxPolicy = CodexPermissions.sandboxType(Reflect.field(resumed.result, "sandbox"));
+					if (s.record.approvalPolicy == null)
+						s.record.approvalPolicy = CodexPermissions.approvalType(Reflect.field(resumed.result, "approvalPolicy"));
+					if (s.record.permissionProfile == null)
+						s.record.permissionProfile = CodexPermissions.profileFor(s.record.sandboxPolicy, s.record.approvalPolicy);
+					save(s);
 					// Active turns are discovered from status; no prompt is replayed.
 					var thread = Reflect.field(resumed.result, "thread"),
 						state = Reflect.field(thread, "status");
-					s.record.state = string(state, "type") == "active" ? "working" : "idle";
-					s.record.turn = null;
+					if (valid(string(thread, "model"), 256)) s.currentModel = string(thread, "model");
+					var reasoningEffort = string(thread, "reasoningEffort");
+					s.currentEffort = reasoningEffort == "" ? null : reasoningEffort;
+					restoredActive = string(state, "type") == "active";
 					append(s, "\nReattached to Codex thread " + s.record.thread + "\n");
 					call("thread/turns/list", {
 						threadId: s.record.thread,
@@ -448,27 +649,35 @@ class CodexProvider implements WorkspaceAgents {
 						sortDirection: "desc",
 						itemsView: "summary"
 					}, function(turns) {
+						if (stale()) { connectionChanged(); return; }
 						if (turns.error != null) {
 							done(turns);
 							return;
 						}
 						var data:Array<Dynamic> = Reflect.field(turns.result, "data");
 						if (data != null && data.length > 0 && string(data[0], "status") == "inProgress") {
-							s.record.turn = string(data[0], "id");
-							s.record.state = "working";
+							restoredTurn = string(data[0], "id");
 						}
-						save(s);
 						var historyBaseline = s.conversation.historyBaseline();
 						call("thread/items/list", {threadId: s.record.thread, limit: 8, sortDirection: "desc"}, function(items) {
+							if (stale()) { connectionChanged(); return; }
 							if (items.error != null) {
 								done(items);
 								return;
 							}
 							var recent:Array<Dynamic> = Reflect.field(items.result, "data");
-							s.conversation.history(recent == null ? [] : recent, s.record.turn, historyBaseline);
+							var historyTurn = s.eventRevision == eventRevision ? restoredTurn : s.record.turn;
+							s.conversation.history(recent == null ? [] : recent, historyTurn, historyBaseline);
 							if (Reflect.field(items.result, "nextCursor") != null) s.conversation.noteOmitted();
 							var text = Json.stringify(Reflect.field(items.result, "data"));
 							append(s, "\nRecent history (latest 8 items):\n" + (text.length > 8192 ? text.substring(0, 8192) + "…" : text) + "\n");
+							s.attached = true;
+							s.error = null;
+							if (s.eventRevision == eventRevision) {
+								s.record.turn = restoredTurn;
+								s.record.state = restoredTurn != null || restoredActive ? "working" : "idle";
+							}
+							save(s);
 							done(resumed);
 						});
 					});
@@ -605,14 +814,23 @@ class CodexProvider implements WorkspaceAgents {
 					thread: q.thread == null ? "" : q.thread,
 					state: "creating",
 					turn: null,
-					workspaceRoot: directories.root
+					workspaceRoot: directories.root,
+					sandboxPolicy: q.thread == null ? "workspaceWrite" : null,
+					approvalPolicy: q.thread == null ? "on-request" : null,
+					permissionProfile: q.thread == null ? "workspace-write" : null
 				},
 				activity: "",
 				conversation: new CodexConversation(),
 				error: null,
 				attached: false,
 				busy: true,
-				requests: []
+				requests: [],
+				currentModel: null,
+				currentEffort: null,
+				reconnectAttempts: 0,
+				reconnectAt: 0,
+				reconnectBlocked: false,
+				eventRevision: 0
 			};
 			// Reserve before the side effect. Ambiguous create is retained, never retried as new.
 			try
@@ -626,7 +844,14 @@ class CodexProvider implements WorkspaceAgents {
 				s.busy = false;
 				if (r.error != null) {
 					s.error = r.error;
-					s.record.state = s.record.thread == "" ? "uncertain" : "disconnected";
+					if (s.record.thread == "") s.record.state = "uncertain";
+					else if (isPermanentSessionError(r.error)) {
+						s.reconnectBlocked = true;
+						s.record.state = "reconnect-failed";
+					} else {
+						s.record.state = "disconnected";
+						scheduleSessionRetry(s);
+					}
 					try
 						save(s)
 					catch (_:Dynamic) {}
@@ -642,6 +867,9 @@ class CodexProvider implements WorkspaceAgents {
 					return;
 				}
 				s.record.thread = id;
+				if (valid(string(thread, "model"), 256)) s.currentModel = string(thread, "model");
+				var reasoningEffort = string(thread, "reasoningEffort");
+				s.currentEffort = reasoningEffort == "" ? null : reasoningEffort;
 				s.attached = true;
 				if (q.thread == null)
 					s.record.state = "idle";
@@ -697,7 +925,26 @@ class CodexProvider implements WorkspaceAgents {
                         }
                         var duplicate = false;
                         for (existing in found) if (existing.model == model) duplicate = true;
-                        if (!duplicate && Reflect.field(entry, "hidden") != true) found.push({model: model, name: name});
+						if (!duplicate && Reflect.field(entry, "hidden") != true) {
+							var efforts:Array<String> = [];
+							var rawEfforts:Dynamic = Reflect.field(entry, "supportedReasoningEfforts");
+							if (rawEfforts != null) {
+								if (!Std.isOfType(rawEfforts, Array) || (cast rawEfforts:Array<Dynamic>).length > 16) {
+									ctx.fail({code: "provider_error", message: "Invalid model effort catalog", ambiguous: false});
+									return;
+								}
+								for (option in (cast rawEfforts:Array<Dynamic>)) {
+									var effort = string(option, "reasoningEffort");
+									if (valid(effort, 64) && !efforts.contains(effort)) efforts.push(effort);
+								}
+							}
+						found.push({
+							model: model,
+							name: name,
+							defaultEffort: valid(string(entry, "defaultReasoningEffort"), 64) ? string(entry, "defaultReasoningEffort") : null,
+							supportedEfforts: efforts
+						});
+						}
                     }
                     models = found;
                     var next = string(r.result, "nextCursor");
@@ -706,25 +953,69 @@ class CodexProvider implements WorkspaceAgents {
                 });
                 return;
             }
+			if (q.action == "permissions") {
+				var profile = CodexPermissions.find(q.text);
+				if (profile == null) {
+					ctx.fail({code: "invalid_permissions", message: "Choose a supported Codex permission preset", ambiguous: false});
+					return;
+				}
+				if (s.busy || s.record.state == "working" || s.record.state == "needs-attention") {
+					ctx.fail({code: "busy", message: "Wait for the Codex turn to finish before changing permissions", ambiguous: false});
+					return;
+				}
+				s.record.sandboxPolicy = profile.sandboxPolicy;
+				s.record.approvalPolicy = profile.approvalPolicy;
+				s.record.permissionProfile = profile.id;
+				try save(s) catch (_:Dynamic) {
+					ctx.fail({code: "storage_unavailable", message: "Codex permission choice could not be saved", ambiguous: false});
+					return;
+				}
+				ctx.respond(view(s));
+				return;
+			}
 			if (q.action == "connect") {
 				if (s.record.thread == "") {
 					ctx.fail({code: "uncertain_create", message: "Creation outcome is uncertain; discover and attach the thread explicitly", ambiguous: false});
-					return;
-				}
-				if (phase != "ready") {
-					start();
-					ctx.fail({code: "provider_starting", message: status, ambiguous: false});
 					return;
 				}
 				if (s.busy) {
 					ctx.fail({code: "busy", message: "Agent request in progress", ambiguous: false});
 					return;
 				}
+				if (startupBlocked) for (other in sessions) {
+					other.reconnectBlocked = false;
+					other.reconnectAttempts = 0;
+					other.reconnectAt = 0;
+				}
+				s.reconnectBlocked = false;
+				s.reconnectAttempts = 0;
+				s.reconnectAt = 0;
+				startupBlocked = false;
+				s.record.state = "reconnecting";
+				s.error = null;
+				if (phase != "ready") {
+					start();
+					ctx.fail({code: "provider_starting", message: status, ambiguous: false});
+					return;
+				}
 				s.busy = true;
 				loadThread(s, function(r) {
 					s.busy = false;
-					if (r.error != null)
+					if (r.error != null) {
+						s.attached = false;
 						s.error = r.error;
+						if (isPermanentSessionError(r.error)) {
+							s.reconnectBlocked = true;
+							s.record.state = "reconnect-failed";
+						} else {
+							s.record.state = "disconnected";
+							scheduleSessionRetry(s);
+						}
+					} else {
+						s.reconnectAttempts = 0;
+						s.reconnectAt = 0;
+						s.reconnectBlocked = false;
+					}
 					ctx.respond(view(s));
 				});
 				return;
@@ -740,20 +1031,35 @@ class CodexProvider implements WorkspaceAgents {
 					ctx.fail({code: "busy", message: "Agent is busy or prompt is invalid", ambiguous: false});
 					return;
 				}
-                if (q.model != null) {
+				if (q.model != null) {
                     var known = false;
                     if (models != null) for (entry in models) if (entry.model == q.model) known = true;
                     if (!known) {
                         ctx.fail({code: "invalid_model", message: "Choose a model from the current catalog", ambiguous: false});
                         return;
-                    }
-                }
+					}
+				}
+				if (q.effort != null) {
+					if (!valid(q.effort, 64)) {
+						ctx.fail({code: "invalid_effort", message: "Choose a reasoning effort from the model catalog", ambiguous: false});
+						return;
+					}
+					var effortModel = q.model == null ? s.currentModel : q.model;
+					if (models != null && effortModel != null) for (entry in models) if (entry.model == effortModel
+						&& (entry.supportedEfforts == null || !entry.supportedEfforts.contains(q.effort))) {
+						ctx.fail({code: "invalid_effort", message: "Choose a reasoning effort supported by the selected model", ambiguous: false});
+						return;
+					}
+				}
 				s.busy = true;
 				s.record.state = "working";
 				s.error = null;
 				append(s, "\nYou: " + q.text + "\n");
-				var params:Dynamic = {threadId: s.record.thread, input: [{type: "text", text: q.text, text_elements: new Array<String>()}]};
+                var params:Dynamic = {threadId: s.record.thread, input: [{type: "text", text: q.text, text_elements: new Array<String>()}]};
                 if (q.model != null) Reflect.setField(params, "model", q.model);
+                if (q.effort != null) Reflect.setField(params, "effort", q.effort);
+                if (s.record.approvalPolicy != null) Reflect.setField(params, "approvalPolicy", s.record.approvalPolicy);
+                if (s.record.sandboxPolicy != null) Reflect.setField(params, "sandboxPolicy", {type: s.record.sandboxPolicy});
                 call("turn/start", params, function(r) {
 					s.busy = false;
 					if (r.error != null) {
@@ -764,6 +1070,10 @@ class CodexProvider implements WorkspaceAgents {
 					}
 					var t = Reflect.field(r.result, "turn");
 					s.record.turn = string(t, "id");
+					if (q.model != null) {
+						s.currentModel = q.model;
+						s.currentEffort = q.effort;
+					} else if (q.effort != null) s.currentEffort = q.effort;
 					save(s);
 					ctx.respond(view(s));
 				});

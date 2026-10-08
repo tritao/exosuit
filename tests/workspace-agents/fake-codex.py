@@ -58,6 +58,7 @@ def messages():
 def event(method,params): send({'method':method,'params':params})
 def reply(i,result): send({'id':i,'result':result})
 pending={}
+loaded=set()
 for line in messages():
  message=json.loads(line); method=message.get('method');params=message.get('params',{});i=message.get('id')
  if method=='initialize':
@@ -68,14 +69,23 @@ for line in messages():
   assert params['sandbox']=='workspace-write' and params['approvalPolicy']=='on-request'
   v=load();v['starts']+=1;t={'id':'thread-'+str(v['starts']),'cwd':params['cwd'],'status':{'type':'idle'},'turn':None}
   v['threads'][t['id']]=t;save(v);reply(i,{'thread':t})
+  loaded.add(t['id'])
  elif method=='thread/list':
-  reply(i,{'data':[t for t in load()['threads'].values() if t['cwd']==params['cwd']][:6],'nextCursor':None})
+  data=[t for t in load()['threads'].values() if t['cwd']==params['cwd']]
+  if params['cwd']==str(root): data.append({'id':'owned','cwd':str(root),'status':{'type':'idle'},'turn':None})
+  reply(i,{'data':data[:6],'nextCursor':None})
  elif method=='thread/read':
   v=load();t=v['threads'].get(params['threadId'])
   if params['threadId']=='foreign': t={'id':'foreign','cwd':str(root.parent),'status':{'type':'idle'},'turn':None}
+  if params['threadId']=='owned': t={'id':'owned','cwd':str(root),'status':{'type':'idle'},'turn':None}
   if t is None: send({'id':i,'error':{'code':-32000,'message':'Unknown thread'}})
+  elif params['threadId']!='foreign' and params['threadId'] not in loaded:
+   send({'id':i,'error':{'code':-32000,'message':'thread not loaded: '+params['threadId']}})
   else: reply(i,{'thread':t})
  elif method=='thread/resume':
+  if params['threadId']=='owned':
+   send({'id':i,'error':{'code':-32000,'message':'Thread already has an active writer in another Codex client'}});continue
+  loaded.add(params['threadId'])
   reply(i,{'thread':load()['threads'][params['threadId']]})
  elif method=='thread/turns/list':
   t=load()['threads'][params['threadId']]

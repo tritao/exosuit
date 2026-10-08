@@ -75,6 +75,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 	final notifications:NotificationCenter = new NotificationCenter();
 	public final panes:Array<UiEditorPane> = [];
 	public var activePane(default, null):UiEditorPane;
+	var notifiedActiveIdentity:Null<String>;
 	var nextPaneId:Int = 1;
 	var pendingEditorFocus:Bool = false;
 	var tabList(get, never):Array<UiDocumentView>;
@@ -82,10 +83,15 @@ class UiWorkbenchHost implements WorkbenchHost {
 	public var tabs(get, never):Array<UiDocumentView>;
 	public var activeIndex(get, set):Int;
 	function get_activeIndex():Int return activePane.activeIndex;
-	function set_activeIndex(value:Int):Int return activePane.activeIndex = value;
+	function set_activeIndex(value:Int):Int {
+		activePane.activeIndex = value;
+		notifyActiveTabChanged();
+		return value;
+	}
 	public var fileActions(default, null):Null<FileActions>;
 	public var welcomeActions(default, null):Null<WelcomeActions>;
 	public var restoreTerminal:Null<(String, String, String, Bool, String, String)->Null<UiTerminalTab>>;
+	public var onActiveTabChanged:Null<UiEditorTab->Void>;
 	public final panelTerminals:Array<UiTerminalTab> = [];
 	public final hiddenTerminals:Array<UiTerminalTab> = [];
 	public var activePanelTerminalIndex:Int = -1;
@@ -187,6 +193,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		defaultDockLayout = DockNodeTools.clone(dockActions.model.defaultRoot);
 		activePane = new UiEditorPane("editor");
 		panes.push(activePane);
+		notifiedActiveIdentity = activeTabIdentity();
 		commandViewCapture = new KeyCaptureView(buildCommandViewContent(), commandViewKeyPressed, commandViewTextInput);
 		// Completion owns its revision-checked input callback; informational popups
 		// dismiss and forward committed text to the active editor.
@@ -240,10 +247,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 			created.activeIndex = 0;
 		}
 		panes.push(created);
-		activePane = created;
-		pendingEditorFocus = true;
-		focus.activate(activeView());
-		requestFrame();
+		activatePane(created);
 		return true;
 	}
 
@@ -251,6 +255,18 @@ class UiWorkbenchHost implements WorkbenchHost {
 		return activePane.activeView();
 
 	public function activeTab():Null<UiEditorTab> return activePane.activeTab();
+
+	function activeTabIdentity():Null<String> {
+		var tab = activeTab();
+		return tab == null ? null : activePane.id + "|" + UiEditorTabs.key(tab);
+	}
+
+	function notifyActiveTabChanged():Void {
+		var identity = activeTabIdentity();
+		if (identity == notifiedActiveIdentity) return;
+		notifiedActiveIdentity = identity;
+		if (onActiveTabChanged != null) onActiveTabChanged(activeTab());
+	}
 	public function canCloseActiveTab():Bool return activeTab() != null;
 
 	public function terminalPaneFor(terminal:UiTerminalTab):Null<UiEditorPane> {
@@ -282,10 +298,14 @@ class UiWorkbenchHost implements WorkbenchHost {
 		var pane = terminalPaneFor(terminal);
 		if (pane == null) return false;
 		for (index in 0...pane.items.length) if (UiEditorTabs.terminal(pane.items[index]) == terminal) {
+			var wasActive = pane == activePane && pane.activeIndex == index;
 			pane.items.splice(index, 1);
 			if (pane.activeIndex > index) pane.activeIndex--;
 			else if (pane.activeIndex == index) pane.activeIndex = Std.int(Math.min(index, pane.items.length - 1));
-			if (pane == activePane) focus.activate(activeView());
+			if (pane == activePane) {
+				focus.activate(activeView());
+				if (wasActive) activeIndex = pane.activeIndex;
+			}
 			requestFrame();
 			return true;
 		}
@@ -516,6 +536,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		activePane = pane;
 		dockActions.model.activate(pane.id);
 		focus.activate(activeView());
+		notifyActiveTabChanged();
 		pendingEditorFocus = true;
 		if (pane.focusTarget != null) dockActions.focusEditor(pane.focusTarget);
 		requestFrame();
@@ -710,6 +731,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		if (pane == null) return false;
 		var index = pane.items.indexOf(item);
 		if (index < 0) return false;
+		var wasActive = pane == activePane && pane.activeIndex == index;
 		var lost = documentsLostByClosingTab(item);
 		if (!force) for (document in lost) if (document.dirty) return false;
 		pane.items.splice(index, 1);
@@ -720,7 +742,10 @@ class UiWorkbenchHost implements WorkbenchHost {
 		if (index < pane.activeIndex) pane.activeIndex--;
 		else if (index == pane.activeIndex)
 			pane.activeIndex = pane.items.length == 0 ? -1 : Std.int(Math.min(index, pane.items.length - 1));
-		if (pane == activePane) focus.activate(activeView());
+		if (pane == activePane) {
+			focus.activate(activeView());
+			if (wasActive) activeIndex = pane.activeIndex;
+		}
 		requestFrame();
 		return true;
 	}
@@ -902,6 +927,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		dockActions.model.activate(activePane.id);
 		pendingEditorFocus = true;
 		focus.activate(activeView());
+		notifyActiveTabChanged();
 		requestFrame();
 	}
 

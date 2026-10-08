@@ -3,6 +3,7 @@ package ui;
 import haxeon.ui.LayoutAxis;
 import haxeon.ui.Insets;
 import haxeon.ui.core.UiEventKind;
+import haxeon.ui.core.UiEvent;
 import haxeon.ui.core.UiKey;
 import haxeon.ui.core.UiModifier;
 import haxeon.ui.LayoutStyle;
@@ -15,10 +16,19 @@ import haxeon.ui.widgets.controls.ComboBox;
 import haxeon.ui.widgets.controls.SelectOption;
 import haxeon.ui.widgets.layout.Column;
 import haxeon.ui.widgets.layout.Row;
+import haxeon.ui.widgets.overlays.MenuItem;
 import haxeon.ui.widgets.scroll.ScrollView;
 import haxeon.ui.widgets.text.Text;
 import haxeon.ui.widgets.text.TextField;
 import workspace.client.WorkspaceAgentClient;
+import workspace.client.CodexPermissions;
+import workspace.service.WorkspaceAgentProtocol.AgentModel;
+
+private typedef CodexRecoveryPresentation = {
+  var label:String;
+  var message:String;
+  var retryLabel:Null<String>;
+}
 
 /** Conversation controls are a client projection; shared provider owns requests and turns. */
 class CodexSessionPanel implements View {
@@ -27,8 +37,11 @@ class CodexSessionPanel implements View {
   final root:String;
   final frame:Void -> Void;
   final editorPalette:style.Theme;
+  final showMenu:(Array<MenuItem>, UiEvent, Void->Bool)->Void;
+  final createReplacement:String->Void;
   var prompt = "";
   var selectedModel = "";
+  var selectedEffort = "";
   var diagnostics = false;
   var details = false;
   var expanded:Map<String, Bool> = [];
@@ -41,12 +54,68 @@ class CodexSessionPanel implements View {
     return new Text(value, style);
   }
 
-  public function new(getClient:Void -> Null<WorkspaceAgentClient>, resource:String, root:String, frame:Void -> Void, editorPalette:style.Theme) {
+  public function new(getClient:Void -> Null<WorkspaceAgentClient>, resource:String, root:String, frame:Void -> Void,
+      editorPalette:style.Theme, showMenu:(Array<MenuItem>, UiEvent, Void->Bool)->Void, createReplacement:String->Void) {
     this.getClient = getClient;
     this.resource = resource;
     this.root = root;
     this.frame = frame;
     this.editorPalette = editorPalette;
+    this.showMenu = showMenu;
+    this.createReplacement = createReplacement;
+  }
+
+  static function findModel(models:Null<Array<AgentModel>>, slug:String):Null<AgentModel> {
+    if (models != null && slug != null && slug != "") for (model in models) if (model.model == slug) return model;
+    return null;
+  }
+
+  static function effortLabel(value:String):String {
+    return switch (value) {
+      case "xhigh": "Extra high effort";
+      case "max": "Maximum effort";
+      case "none": "No reasoning effort";
+      case "minimal": "Minimal effort";
+      default: (value.length == 0 ? value : value.substr(0, 1).toUpperCase() + value.substr(1) + " effort");
+    };
+  }
+
+  static function recoveryPresentation(reason:Null<String>):CodexRecoveryPresentation {
+    return switch (reason) {
+      case "thread-unavailable": {label: "Thread unavailable", message: "Codex could not locate this thread in the current workspace’s history. Retrying will not create a replacement. Create a new session below, or attach the thread if it is still available. This saved session record will remain in Workbench.", retryLabel: null};
+      case "active-writer": {label: "Open in another client", message: "Another Codex client currently owns this thread. Finish or close the session there, then check its availability here.", retryLabel: "Check availability"};
+      case "workspace-mismatch": {label: "Different workspace", message: "This thread belongs to a different workspace. Switch to that workspace or attach a thread from the current one.", retryLabel: null};
+      case "setup-required": {label: "Codex setup needed", message: "Codex needs setup before this session can reconnect. Check the installation and sign-in, then retry.", retryLabel: "Retry connection"};
+      default: {label: "Connection interrupted", message: "Exosuit could not reach this Codex session. It will keep trying to reconnect; you can also retry now.", retryLabel: "Reconnect now"};
+    }
+  }
+
+  function openPermissionsMenu(client:WorkspaceAgentClient, id:String, thread:String, event:UiEvent):Void {
+    var initial = client.agentView(id);
+    if (initial == null) return;
+    var selectedLabel = CodexPermissions.labelForRecord(initial.record.permissionProfile,
+      initial.record.sandboxPolicy, initial.record.approvalPolicy);
+    var items:Array<MenuItem> = [];
+    for (profile in CodexPermissions.profiles()) {
+      var choice = profile;
+      var selected = selectedLabel == profile.label;
+      items.push(new MenuItem(profile.id, profile.label + (selected ? "  ✓" : ""), function() {
+        var currentClient = getClient();
+        if (currentClient != null && currentClient.canControlAgents() && !currentClient.agentBusy())
+          currentClient.agentAction(id, "permissions", choice.id, null);
+      }));
+    }
+    showMenu(items, event, function() {
+      var currentClient = getClient();
+      if (currentClient == null || currentClient != client || !currentClient.canControlAgents()
+          || currentClient.agentBusy())
+        return false;
+      var currentCatalog = currentClient.agents();
+      if (currentCatalog == null || currentCatalog.root != root) return false;
+      var current = currentClient.agentView(id);
+      return current != null && current.record.thread == thread && current.record.state != "working"
+        && current.record.state != "needs-attention" && current.requests.length == 0;
+    });
   }
 
   public function build(context:BuildContext):RenderNode {
@@ -61,10 +130,23 @@ class CodexSessionPanel implements View {
     var control = client.canControlAgents() && !client.agentBusy();
     var tokens = context.theme.tokens;
     var working = view.record.state == "working";
-    var canSend = control && !working && view.requests.length == 0;
+    var connectionState = view.connectionState == null
+      ? (view.record.state == "reconnecting" ? "reconnecting"
+        : view.record.state == "disconnected" || view.record.state == "reconnect-failed" || view.record.state == "creating" || view.record.state == "uncertain"
+          ? "disconnected" : "connected")
+      : view.connectionState;
+    var connectionReady = connectionState == "connected";
+    var canSend = control && connectionReady && !working && view.requests.length == 0;
+    var recovery = recoveryPresentation(view.recoveryReason);
+    var stateLabel = view.record.state == "reconnecting" ? "Reconnecting…"
+      : view.record.state == "reconnect-failed" ? recovery.label : view.record.state;
+    var effortModel = findModel(view.models, selectedModel == "" ? view.currentModel : selectedModel);
     var submit = function() {
       if (canSend && StringTools.trim(prompt) != "") {
-        client.agentAction(id, "prompt", prompt, null, selectedModel == "" ? null : selectedModel);
+        var effort = selectedEffort;
+        if (effort == "" && selectedModel != "" && effortModel != null) effort = effortModel.defaultEffort;
+        client.agentAction(id, "prompt", prompt, null, selectedModel == "" ? null : selectedModel,
+          effort == "" ? null : effort);
         prompt = "";
         frame();
       }
@@ -79,19 +161,23 @@ class CodexSessionPanel implements View {
     }, inputStyle, null, null, null, true);
     field.label = "Codex prompt";
     field.placeholder = "Message Codex…";
-    field.enabled = client.canControlAgents();
-    var reconnect = new Button("Reconnect / History", null,
-      function() client.agentAction(id, "connect", "", null), "codex-connect");
-    reconnect.enabled = control;
+    field.enabled = client.canControlAgents() && connectionReady;
     var stop = new Button("Stop", null,
       function() client.agentAction(id, "stop", "", null), "codex-stop");
-    stop.enabled = control;
+    stop.enabled = control && connectionReady;
     var headerStyle = new LayoutStyle();
     headerStyle.width = LayoutAxis.grow();
     headerStyle.childGap = 12;
-    var heading = paragraph(view.record.name + " · " + (working ? "Working…" : view.record.state));
+    var heading = paragraph(view.record.name + " · " + (working ? "Working…" : stateLabel));
     var header:Array<KeyedView> = [new KeyedView("title", heading)];
     if (working) header.push(new KeyedView("stop", stop));
+    var permissions = new Button("Permissions · " + CodexPermissions.labelForRecord(view.record.permissionProfile,
+      view.record.sandboxPolicy, view.record.approvalPolicy) + "  ▾", null, null, "codex-permissions");
+    permissions.enabled = control && !working && view.requests.length == 0;
+    permissions.onClickEvent = function(event) {
+      if (permissions.enabled) openPermissionsMenu(client, id, view.record.thread, event);
+    };
+    header.push(new KeyedView("permissions", permissions));
     header.push(new KeyedView("details", new Button(details ? "Hide session details" : "Session details", null, function() {
       details = !details;
       frame();
@@ -100,11 +186,29 @@ class CodexSessionPanel implements View {
     if (details) {
       rows.push(new KeyedView("directory", paragraph(view.record.cwd)));
       rows.push(new KeyedView("thread", paragraph("Thread: " + view.record.thread)));
-      rows.push(new KeyedView("connection", reconnect));
+      rows.push(new KeyedView("connection", paragraph("Connection: " + connectionState)));
       rows.push(new KeyedView("diagnostics-toggle", new Button(diagnostics ? "Hide diagnostics" : "Show diagnostics", null, function() {
         diagnostics = !diagnostics;
         frame();
       })));
+    }
+    if (view.record.thread != "" && (view.record.state == "reconnect-failed" || connectionState == "disconnected")) {
+      var recoveryStyle = new LayoutStyle();
+      recoveryStyle.width = LayoutAxis.grow();
+      recoveryStyle.childGap = 10;
+      var recoveryControls = [new KeyedView("message", paragraph(recovery.message))];
+      if (view.recoveryReason == "thread-unavailable") {
+        var create = new Button("Create new session", null,
+          function() createReplacement(view.record.group), "codex-create-replacement");
+        create.enabled = control;
+        recoveryControls.push(new KeyedView("create-replacement", create));
+      } else if (recovery.retryLabel != null) {
+        var retry = new Button(recovery.retryLabel, null,
+          function() client.agentAction(id, "connect", "", null), "codex-retry-connection");
+        retry.enabled = control;
+        recoveryControls.push(new KeyedView("retry", retry));
+      }
+      rows.push(new KeyedView("recovery-error", new Row("codex-recovery-error", recoveryControls, recoveryStyle)));
     }
     var style = new LayoutStyle();
     style.height = LayoutAxis.grow();
@@ -232,6 +336,8 @@ class CodexSessionPanel implements View {
     if (working) activity.push(new KeyedView("working", new Text("Codex is working…", null, tokens.mutedText)));
 
     var error = client.agentError() == null ? view.error : client.agentError();
+    if ((view.record.state == "reconnect-failed" || connectionState == "disconnected")
+      && error == view.error && !(details && diagnostics)) error = null;
     if (error != null) activity.push(new KeyedView("error", paragraph(error)));
     var activityStyle = new LayoutStyle();
     activityStyle.width = LayoutAxis.grow();
@@ -245,6 +351,7 @@ class CodexSessionPanel implements View {
     footerStyle.childGap = 12;
     var hint = new Text("Enter to send · Shift+Enter for newline", paragraph("").style, tokens.mutedText);
     var modelControls:Array<KeyedView> = [];
+    var moreModels:Button = null;
     if (view.models == null) {
       var load = new Button("Choose model…", null, function() client.agentAction(id, "models", "", null), "codex-models");
       load.enabled = control && !working;
@@ -254,16 +361,29 @@ class CodexSessionPanel implements View {
       for (model in view.models) options.push(new SelectOption<String>(model.model, model.name, model.model));
       var chooser = new ComboBox<String>("codex-model", options, selectedModel, function(value) {
         selectedModel = value;
+        selectedEffort = "";
         frame();
       });
       chooser.enabled = control && !working;
       modelControls.push(new KeyedView("chooser", chooser));
       if (view.modelsNext != null) {
-        var more = new Button("More models", null, function() client.agentAction(id, "models", "", view.modelsNext));
-        more.enabled = control && !working;
-        modelControls.push(new KeyedView("more", more));
+        moreModels = new Button("More models", null, function() client.agentAction(id, "models", "", view.modelsNext));
+        moreModels.enabled = control && !working;
       }
     }
+    var defaultEffortLabel = selectedModel == "" && view.currentEffort != null
+      ? "Effort: Keep current (" + view.currentEffort + ")" : "Effort: Model default";
+    var effortOptions = [new SelectOption<String>("model-default", defaultEffortLabel, "")];
+    var availableEfforts:Array<String> = effortModel == null || effortModel.supportedEfforts == null
+      ? [] : effortModel.supportedEfforts;
+    for (effort in availableEfforts) effortOptions.push(new SelectOption<String>("effort-" + effort, effortLabel(effort), effort));
+    var effortChooser = new ComboBox<String>("codex-effort", effortOptions, selectedEffort, function(value) {
+      selectedEffort = value;
+      frame();
+    });
+    effortChooser.enabled = control && !working && effortModel != null && availableEfforts.length > 0;
+    modelControls.push(new KeyedView("effort", effortChooser));
+    if (moreModels != null) modelControls.push(new KeyedView("more", moreModels));
     var composerStyle = new LayoutStyle();
     composerStyle.width = LayoutAxis.grow();
     composerStyle.childGap = 8;

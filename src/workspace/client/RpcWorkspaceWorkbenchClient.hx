@@ -23,10 +23,14 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   var agentCatalog:Null<WorkspaceAgentProtocol.AgentCatalog>;
   var agentViews:Map<String, WorkspaceAgentProtocol.AgentView> = [];
   var agentTokens:Map<String, Int> = [];
+  var agentReadPending:Map<String, Bool> = [];
+  var agentReadCount:Int = 0;
   var agentsError:Null<String>;
+  var agentActionError:Null<String>;
   var agentsPending:Bool = false;
   var agentsNext:Float = 0;
   var agentMutation:Bool = false;
+  var agentMutationId:Null<String>;
   var agentSelection:Int = 0;
   var agentsRevision:Int = 0;
   var pendingDiscovery:Null<WorkspaceAgentProtocol.AgentDiscoveryQuery>;
@@ -69,7 +73,11 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       discoveryToken++;
       agentViews.clear();
       agentTokens.clear();
+      agentReadPending.clear();
+      agentReadCount = 0;
+      agentMutationId = null;
       agentCatalog = null;
+      agentActionError = null;
       agentsNext = 0;
       agentsRevision++;
       if (lost) {
@@ -90,6 +98,9 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     agentCreated = null;
     agentViews.clear();
     agentTokens.clear();
+    agentReadPending.clear();
+    agentReadCount = 0;
+    agentMutationId = null;
     agentCatalog = null;
     catalog = null;
   }
@@ -100,7 +111,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   public function agentBusy():Bool return agentMutation;
   public function agentRevision():Int return agentsRevision;
   public function agents():Null < WorkspaceAgentProtocol.AgentCatalog > return agentCatalog;
-  public function agentError():Null < String > return agentsError;
+  public function agentError():Null < String > return agentActionError == null ? agentsError : agentActionError;
   public function agentView(id:String):Null < WorkspaceAgentProtocol.AgentView > return agentViews.get(id);
   public function discoveredAgents():Null < WorkspaceAgentProtocol.AgentDiscovery > return discovery;
 
@@ -276,14 +287,32 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     );
   }
 
-  public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String):Void {
+  public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String):Void {
     var connection = rpc();
-    if (connection == null ||(action == "read" ? !canReadAgents() : !canControlAgents()) || agentMutation) return;
+    if (connection == null ||(action == "read" ? !canReadAgents() : !canControlAgents())) return;
     var mutate = action != "read";
-    if (mutate) agentMutation = true;
+    if (mutate ? agentMutation
+      : agentReadCount >= 4 || agentReadPending.exists(id) || (agentMutation && agentMutationId == id)) return;
+    if (mutate) {
+      // User actions take priority over a background read for this session. The
+      // token below makes the read response stale, and removing it here keeps
+      // the bounded read count accurate when that response eventually arrives.
+      if (agentReadPending.exists(id)) {
+        agentReadPending.remove(id);
+        agentReadCount = Std.int(Math.max(0, agentReadCount - 1));
+      }
+      agentMutation = true;
+      agentMutationId = id;
+    } else {
+      agentReadPending.set(id, true);
+      agentReadCount++;
+    }
     var selected =++ agentSelection;
     agentTokens.set(id, selected);
-    if (mutate) agentsError = null;
+    if (mutate) {
+      agentsError = null;
+      agentActionError = null;
+    }
     connection.call(WorkspaceAgentProtocol.ACTION, {
       workspace: "workspace",
       instance: instance(),
@@ -291,21 +320,43 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       action: action,
       text: text,
       request: request,
-      model: model
+      model: model,
+      effort: effort
     }, 20000, function(value) {
       if (rpc() != connection || agentTokens.get(id) != selected) return;
-      if (mutate) agentMutation = false;
+      if (mutate) {
+        agentMutation = false;
+        agentMutationId = null;
+      } else {
+        agentReadPending.remove(id);
+        agentReadCount--;
+      }
       if (value.record.workspaceRoot != root() || value.record.id != id) {
         agentsError = "Invalid agent view";
         return;
       }
+      if (mutate) agentActionError = null;
+      else agentsError = null;
       agentViews.set(id, value);
       agentsNext = 0;
       agentsRevision++;
     }, function(error) {
       if (rpc() == connection && agentTokens.get(id) == selected) {
-        if (mutate) agentMutation = false;
-        agentsError = error.message;
+        if (mutate) {
+          agentMutation = false;
+          agentMutationId = null;
+        } else {
+          agentReadPending.remove(id);
+          agentReadCount--;
+        }
+        if (mutate) {
+          if (error.code == "provider_starting") {
+            agentActionError = null;
+            agentsError = error.message;
+          } else agentActionError = action == "permissions" && error.code == "resolved"
+            ? "This workspace service does not support permission changes yet. Update it from Remote Access, then try again."
+            : error.message;
+        } else agentsError = error.message;
         agentsRevision++;
       }
     }

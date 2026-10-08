@@ -102,6 +102,8 @@ class ExosuitApp implements DesktopUiApplication {
 	var workbenchPanel:Null<WorkbenchPanel>;
 
  var codexPoll:Float=0;
+ var nextActiveCodexRead:Float=0;
+ var codexReadIndex:Int=0;
  var agentRevision=-1;
 	var groupEditor:Null<GroupEditorPanel>;
 	var agentAttach:Null<AgentAttachPanel>;
@@ -812,6 +814,8 @@ class ExosuitApp implements DesktopUiApplication {
 		terminalBrowserPanel = new WorkspaceTerminalsPanel(client, openCatalogTerminal, forgetCatalogTerminal, requestFrame);
 		workbenchPanel = new WorkbenchPanel(client, openCatalogTerminal, newGroupedTerminal, editWorkspaceGroup,
 			function(path) application.openArgument(path), openWorkspaceTerminals, requestFrame, openCodexAgent, showWorkbenchMenu, attachCodexThread);
+		host.onActiveTabChanged = syncWorkbenchAgentSelection;
+		syncWorkbenchAgentSelection(host.activeTab());
 		if (sidebar.find("workbench") == null)
 			registerSidebarDestination("workbench", IconName.Terminal, function() return workbenchPanel == null ? new Text("Workspace disconnected") : workbenchPanel,
 				new haxeon.ui.widgets.sidebar.SidebarModeOptions("Workbench", 20, true));
@@ -820,6 +824,7 @@ class ExosuitApp implements DesktopUiApplication {
 	public function detachWorkbench(client:workspace.client.WorkspaceWorkbenchClient):Void {
 		if (workbenchClient != client) return;
 		workbenchClient = null;
+		host.onActiveTabChanged = null;
 		workbenchPanel = null;
 		terminalBrowserPanel = null;
 		terminalBrowserVisible = false;
@@ -842,15 +847,26 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
  function makeAgentTab(id:String,resource:String,root:String,title:String):UiAgentTab {
-  return new UiAgentTab(id,resource,root,title,new CodexSessionPanel(function() return workbenchClient==null?null:workbenchClient.agentService(),resource,root,requestFrame,editorPalette));
+  return new UiAgentTab(id,resource,root,title,new CodexSessionPanel(function() return workbenchClient==null?null:workbenchClient.agentService(),resource,root,requestFrame,editorPalette,showWorkbenchMenu,
+   function(group:String) {
+    var client=workbenchClient;
+    if(client!=null) client.agentService().createAgent(group,null,openCodexAgent);
+   }));
  }
+
+ function syncWorkbenchAgentSelection(tab:Null<UiEditorTab>):Void {
+  var agent = tab == null ? null : UiEditorTabs.agent(tab);
+  if (workbenchPanel == null) return;
+  workbenchPanel.syncActiveAgent(agent == null ? null : agent.resource,
+    agent == null ? null : agent.workspaceRoot);
+ }
+
  function openCodexAgent(resource:String):Void {
   var client=workbenchClient, catalog=client==null?null:client.agentService().agents();
   if(catalog==null) return;
   for(record in catalog.records) if(record.id==resource) {
    var id=ResourceViewIdentity.view(catalog.root,resource,"agent");
    host.attachAgent(makeAgentTab(id,resource,catalog.root,record.name));
-   if (workbenchPanel != null) workbenchPanel.revealNode("a:" + resource);
    requestFrame();return;
   }
  }
@@ -964,6 +980,7 @@ class ExosuitApp implements DesktopUiApplication {
 
 	public function attachWorkspace(attachment:workspace.client.WorkspaceAttachment):Void {
 		clearExplorerModel();
+		if (workbenchPanel != null) workbenchPanel.workspaceAttachmentChanged();
 		if (workspaceAttachment != null)
 			workspaceAttachment.dispose();
 		workspaceAttachment = attachment;
@@ -977,6 +994,7 @@ class ExosuitApp implements DesktopUiApplication {
 	public function detachWorkspace(attachment:workspace.client.WorkspaceAttachment):Void {
 		if (workspaceAttachment != attachment) return;
 		clearExplorerModel();
+		if (workbenchPanel != null) workbenchPanel.workspaceAttachmentChanged();
 		workspaceAttachment = null;
 		workspaceFileLoader.clearCache();
 		searchFileClient = null;
@@ -1026,11 +1044,24 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function pumpApplication():Void {
 		nextBackgroundPoll = Sys.time() + 0.05;
-        if(workbenchClient!=null && ((sidebar.visible && sidebar.activeId=="workbench")|| (host.activeTab()!=null&&UiEditorTabs.agent(host.activeTab())!=null))) {
-   workbenchClient.agentService().refreshAgents();
-   if(agentRevision!=workbenchClient.agentService().agentRevision()) {agentRevision=workbenchClient.agentService().agentRevision();requestFrame();}
-   var active=host.activeTab(), agent=active==null?null:UiEditorTabs.agent(active), catalog=workbenchClient.agentService().agents();
-   if(agent!=null && catalog!=null && agent.workspaceRoot==catalog.root && Sys.time()>=codexPoll) {codexPoll=Sys.time()+1;workbenchClient.agentService().agentAction(agent.resource,"read","",null);}
+		if(workbenchClient!=null) {
+   var agentService=workbenchClient.agentService();
+   agentService.refreshAgents();
+   if(agentRevision!=agentService.agentRevision()) {agentRevision=agentService.agentRevision();requestFrame();}
+   var now=Sys.time(), catalog=agentService.agents();
+   if(catalog!=null && catalog.records.length>0 && now>=codexPoll) {
+    codexPoll=now+0.2;
+    var active=host.activeTab(), activeAgent=active==null?null:UiEditorTabs.agent(active);
+    var selected=activeAgent!=null && activeAgent.workspaceRoot==catalog.root && now>=nextActiveCodexRead
+      ? activeAgent.resource : null;
+    if(selected!=null) nextActiveCodexRead=now+1;
+    else {
+     var count=catalog.records.length;
+     if(codexReadIndex>=count) codexReadIndex=0;
+     selected=catalog.records[codexReadIndex++].id;
+    }
+    agentService.agentAction(selected,"read","",null);
+   }
   }
         if((terminalBrowserVisible || groupEditor != null || (sidebar.visible && sidebar.activeId == "workbench")) && workbenchClient!=null) workbenchClient.refreshTerminals(false);
         if(workbenchClient!=null && workbenchClient.terminalCatalogRevision()!=terminalBrowserRevision) {

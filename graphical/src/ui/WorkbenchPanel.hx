@@ -49,6 +49,8 @@ class WorkbenchPanel implements View {
     var revealRoot:Null<String>;
     var scrollTarget:Null<String>;
     var scrollPasses = 0;
+    var pendingAgentSelection:Null<{var key:String; var workspaceRoot:String;}>;
+    var observedWorkspaceRoot:Null<String>;
 
 	public function new(client:WorkspaceWorkbenchClient, open:TerminalRecord->Bool, createTerminal:String->Void,
 		edit:(WorkspaceGroup, Bool)->Void, openFolder:String->Void, manage:Void->Void, requestFrame:Void->Void,
@@ -149,6 +151,59 @@ class WorkbenchPanel implements View {
         requestFrame();
     }
 
+    /** Keep the tree projection aligned with the active Codex editor tab. */
+    public function syncActiveAgent(resource:Null<String>, workspaceRoot:Null<String>):Void {
+        if (resource == null || workspaceRoot == null) {
+            pendingAgentSelection = null;
+            return;
+        }
+        var key = "a:" + resource;
+        if (tree.selectedKey == key) {
+            pendingAgentSelection = null;
+            return;
+        }
+        if (pendingAgentSelection != null && pendingAgentSelection.key == key
+            && pendingAgentSelection.workspaceRoot == workspaceRoot) return;
+        pendingAgentSelection = {key: key, workspaceRoot: workspaceRoot};
+        requestFrame();
+    }
+
+    /** Discard a delayed tab-to-tree sync when the workspace attachment changes. */
+    public function workspaceAttachmentChanged():Void {
+        pendingAgentSelection = null;
+        if (scrollTarget != null && StringTools.startsWith(scrollTarget, "a:")) scrollTarget = null;
+    }
+
+    function applyPendingAgentSelection():Void {
+        var target = pendingAgentSelection;
+        if (target == null) return;
+        var terminalCatalog = client.terminalCatalog();
+        var agentCatalog = client.agentService().agents();
+        if (terminalCatalog == null || terminalCatalog.workspaceRoot != target.workspaceRoot
+            || agentCatalog == null || agentCatalog.root != target.workspaceRoot
+            || !model.agents.exists(target.key.substring(2))) return;
+        var agent = model.agents.get(target.key.substring(2));
+        var group = agent == null ? null : model.groups.get(agent.group);
+        if (group == null) return;
+        var ancestors:Array<String> = [];
+        var visited:Map<String, Bool> = [];
+        var parent:Null<String> = group.id;
+        while (parent != null && !visited.exists(parent)) {
+            visited.set(parent, true);
+            ancestors.unshift("g:" + parent);
+            var ancestor = model.groups.get(parent);
+            if (ancestor == null) return;
+            parent = ancestor.parent;
+        }
+        for (ancestor in ancestors) tree.setExpanded(ancestor, true);
+        if (tree.selectedKey != target.key) {
+            tree.select(target.key);
+            scrollTarget = target.key;
+            scrollPasses = 2;
+        }
+        pendingAgentSelection = null;
+    }
+
     function applyPendingReveal():Void {
         var key = pendingReveal;
         if (key == null) return;
@@ -210,8 +265,13 @@ class WorkbenchPanel implements View {
 		return button;
 	}
 
-	public function build(context:BuildContext):RenderNode {
+    public function build(context:BuildContext):RenderNode {
         var catalog = client.terminalCatalog();
+        var currentRoot = catalog == null ? null : catalog.workspaceRoot;
+        if (currentRoot != null) {
+            if (observedWorkspaceRoot != null && observedWorkspaceRoot != currentRoot) workspaceAttachmentChanged();
+            observedWorkspaceRoot = currentRoot;
+        }
         if (pending && !client.terminalCatalogBusy()) {
             var saved = false;
             var base = draft;
@@ -225,13 +285,16 @@ class WorkbenchPanel implements View {
         }
         if (inlineEditor != null) inlineEditor.enabled = !pending;
 		var agents = client.agentService().agents();
+		var terminalCatalog = client.terminalCatalog();
+		if (agents != null && (terminalCatalog == null || agents.root != terminalCatalog.workspaceRoot)) agents = null;
 		var nextAgentKey = client.agentService().agentRevision();
 		if (refreshModel || catalogRevision != client.terminalCatalogRevision() || nextAgentKey != agentKey) {
             refreshModel = false;
 			catalogRevision = client.terminalCatalogRevision(); agentKey = nextAgentKey;
-			model.update(client.terminalCatalog(), agents, creating ? draft : null);
-		}
+			model.update(terminalCatalog, agents, creating ? draft : null);
+        }
         applyPendingReveal();
+		applyPendingAgentSelection();
 		var selected = groupFor(tree.selectedKey);
 		var terminal = toolbarButton("New terminal", IconName.Terminal, function() {
 			if (selected != null) createTerminal(selected.id);

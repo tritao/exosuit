@@ -12,6 +12,61 @@ import process.ProcessManager;
 import platform.Platform;
 
 class AgentProviderTestMain {
+	static function clientActionPriorityTest():Void {
+		var clock = function() return Sys.time() * 1000;
+		var pair = MemoryTransport.pair();
+		var clientConnection = new RpcConnection(pair.client, clock);
+		var serverConnection = new RpcConnection(pair.server, clock);
+		var pendingRead:Null<haxeon.rpc.RpcContext<WorkspaceAgentProtocol.AgentView>> = null;
+		serverConnection.register(WorkspaceAgentProtocol.ACTION, function(q, ctx) {
+			if (q.action == "read") pendingRead = ctx;
+			else ctx.respond({
+				record: {id: "a", name: "Codex", group: "work", cwd: "C:/work", thread: "thread-a", state: "idle", turn: null,
+					workspaceRoot: "C:/work", sandboxPolicy: null, approvalPolicy: null, permissionProfile: null},
+				activity: "mutation", requests: [], error: null, connectionState: "connected", recoveryReason: null
+			});
+		});
+		var client = new workspace.client.RpcWorkspaceWorkbenchClient(new AgentTestEndpoint(clientConnection), clock);
+		client.poll();
+		client.agentAction("a", "read", "", null);
+		serverConnection.poll();
+		require(pendingRead != null, "Background read was not started");
+		client.agentAction("a", "prompt", "hello", null);
+		require(client.agentBusy(), "Prompt was blocked by an in-flight background read");
+		serverConnection.poll();
+		clientConnection.poll();
+		var mutationView = client.agentView("a");
+		require(!client.agentBusy() && mutationView != null
+			&& mutationView.activity == "mutation", "Prompt response did not replace the pending read");
+		var stale = pendingRead;
+		pendingRead = null;
+		stale.respond({
+			record: {id: "a", name: "Codex", group: "work", cwd: "C:/work", thread: "thread-a", state: "idle", turn: null,
+				workspaceRoot: "C:/work", sandboxPolicy: null, approvalPolicy: null, permissionProfile: null},
+			activity: "stale read", requests: [], error: null, connectionState: "connected", recoveryReason: null
+		});
+		serverConnection.poll();
+		clientConnection.poll();
+		var afterStale = client.agentView("a");
+		require(afterStale != null && afterStale.activity == "mutation", "A stale background read overwrote the user action result");
+		client.agentAction("a", "read", "", null);
+		serverConnection.poll();
+		require(pendingRead != null, "Preempted read still consumed a read slot");
+		pendingRead.respond({
+			record: {id: "a", name: "Codex", group: "work", cwd: "C:/work", thread: "thread-a", state: "idle", turn: null,
+				workspaceRoot: "C:/work", sandboxPolicy: null, approvalPolicy: null, permissionProfile: null},
+			activity: "fresh read", requests: [], error: null, connectionState: "connected", recoveryReason: null
+		});
+		serverConnection.poll();
+		clientConnection.poll();
+		var freshView = client.agentView("a");
+		require(freshView != null && freshView.activity == "fresh read", "Read capacity was not restored after preemption");
+		client.dispose();
+		clientConnection.close();
+		serverConnection.close();
+		Sys.println("PASS: user action preempts a pending background read without stale overwrite or leaked read capacity");
+	}
+
 	static function conversationTests():Void {
         var blocks = workspace.client.CodexMarkdown.parse("Before\n\n```python\ndef primes():\n    return 2\n```\nAfter");
         require(blocks.length == 3 && blocks[1].kind == "code" && blocks[1].language == "python", "Markdown fences not parsed");
@@ -62,9 +117,11 @@ class AgentProviderTestMain {
 
 	static function main():Void {
 		conversationTests();
+		clientActionPriorityTest();
 
 		var root = Sys.args()[0],
 			executable = Sys.args()[1], bridge=Sys.args()[2],
+			codexScript:Null<String> = Sys.args().length >= 4 ? Sys.args()[3] : null,
 			clock = function() return Sys.time() * 1000;
 		var processes = new ProcessManager();
 		var sources = new BuildFileCollector();
@@ -90,7 +147,7 @@ class AgentProviderTestMain {
 		]);
 		var store = new WorkspaceSqliteStore(root + "/agents.sqlite", "w", seed.snapshot(), 32, root);
 		var provider = new CodexProvider("w", "owner", new WorkspaceDirectories(root), function() return seed.snapshot().groups, processes, clock, store,
-			executable,bridge);
+			executable,bridge,codexScript);
 		var pair = MemoryTransport.pair(),
 			client = new RpcConnection(pair.client, clock),
 			server = new RpcConnection(pair.server, clock);
@@ -142,6 +199,10 @@ class AgentProviderTestMain {
 		wait(function() return provider.status == "Codex connected");
 		create("foreign-resource", "foreign");
 		require(code == "provider_error", "Foreign thread attached");
+		create("missing-resource", "missing");
+		require(code == "provider_error", "Missing Codex thread attached");
+		create("owned-resource", "owned");
+		require(code == "provider_error", "Thread owned by another client attached");
 		create("a", null);
 		require(record != null && record.thread == "thread-1", "Thread creation failed");
 		var created = record;
@@ -182,6 +243,7 @@ class AgentProviderTestMain {
 		for (_ in 0...2500)
 			longPrompt += "界";
 		action("models");
+		require(snapshot().connectionState == "connected", "Connected agent view did not expose connection readiness");
 		var catalogModels = snapshot().models;
 		require(catalogModels != null && catalogModels.length == 1, "Model catalog missing");
 		action("prompt", "invalid model", null, "unlisted-model");
@@ -223,11 +285,12 @@ class AgentProviderTestMain {
 		// A lost acknowledgement must not replay a turn.
 		action("prompt", "disconnect");
 		require(code == "provider_error", "Disconnected prompt not marked ambiguous");
-		action("connect");
-		require(code == "provider_starting", "Reconnect not explicit");
-		wait(function() return provider.status == "Codex connected");
-		action("connect");
-		require(view != null && snapshot().record.state == "working" && snapshot().record.turn != null, "Active turn not reconciled");
+		wait(function() {
+			action("read");
+			return snapshot().record.state == "working" && snapshot().record.turn != null;
+		});
+		require(view != null && snapshot().record.state == "working" && snapshot().record.turn != null,
+			"Dropped Codex transport did not automatically restore its active turn");
 		require(snapshot().activity.indexOf("Persisted history") >= 0, "Bounded persisted history not read");
 		action("stop");
 		wait(function() {
@@ -251,16 +314,71 @@ class AgentProviderTestMain {
 		store = new WorkspaceSqliteStore(root + "/agents.sqlite", "w", seed.snapshot(), 32, root);
 		processes = new ProcessManager();
 		provider = new CodexProvider("w", "next-owner", new WorkspaceDirectories(root), function() return seed.snapshot().groups, processes, clock, store,
-			executable,bridge);
+			executable,bridge,codexScript);
 		var saved = store.loadAgents();
-		require(saved.length == 2
+		require(saved.length == 4
 			&& [for (r in saved) if (r.thread == thread) r].length == 1, "Thread identity did not survive workspace restart");
+		var recoveryPair = MemoryTransport.pair(),
+			recoveryClient = new RpcConnection(recoveryPair.client, clock),
+			recoveryServer = new RpcConnection(recoveryPair.server, clock);
+		provider.bind(recoveryServer, [WorkspaceAgentProtocol.READ, WorkspaceAgentProtocol.CONTROL]);
+		function recoveryPump():Void {
+			recoveryClient.poll();
+			recoveryServer.poll();
+			provider.poll();
+			recoveryClient.poll();
+			Sys.sleep(0.005);
+		}
+		function recoveryWait(done:Void->Bool):Void {
+			var end = clock() + 20000;
+			while (!done()) {
+				require(clock() < end, "Timed out during automatic recovery: " + provider.status);
+				recoveryPump();
+			}
+		}
+		recoveryWait(function() return provider.status == "Codex connected; some sessions need attention");
+		var recoveredView:Null<AgentView> = null, recoveredFinished = false;
+		recoveryClient.call(WorkspaceAgentProtocol.ACTION, {
+			workspace: "w", instance: "next-owner", id: "a", action: "read", text: "", request: null
+		}, 5000, function(value) { recoveredView = value; recoveredFinished = true; }, function(error) throw error.message);
+		recoveryWait(function() return recoveredFinished);
+		require(recoveredView != null && recoveredView.record.state == "working" && recoveredView.record.turn != null
+			&& recoveredView.error == null
+			&& recoveredView.items != null && Lambda.exists(recoveredView.items, function(item) return item.text.indexOf("Persisted history") >= 0),
+			"Persisted Codex sessions did not automatically resume and restore history");
+		var blockedView:Null<AgentView> = null, blockedFinished = false;
+		recoveryClient.call(WorkspaceAgentProtocol.ACTION, {
+			workspace: "w", instance: "next-owner", id: "foreign-resource", action: "read", text: "", request: null
+		}, 5000, function(value) { blockedView = value; blockedFinished = true; }, function(error) throw error.message);
+		recoveryWait(function() return blockedFinished);
+		require(blockedView != null && blockedView.record.state == "reconnect-failed"
+			&& blockedView.error != null && blockedView.error.indexOf("directory") >= 0
+			&& blockedView.connectionState == "disconnected" && blockedView.recoveryReason == "workspace-mismatch",
+			"A thread with a workspace mismatch was not surfaced as a retryable recovery failure");
+		var missingView:Null<AgentView> = null, missingFinished = false;
+		recoveryClient.call(WorkspaceAgentProtocol.ACTION, {
+			workspace: "w", instance: "next-owner", id: "missing-resource", action: "read", text: "", request: null
+		}, 5000, function(value) { missingView = value; missingFinished = true; }, function(error) throw error.message);
+		recoveryWait(function() return missingFinished);
+		require(missingView != null && missingView.record.state == "reconnect-failed"
+			&& missingView.connectionState == "disconnected" && missingView.recoveryReason == "thread-unavailable",
+			"An unavailable Codex thread did not retain its record and recovery reason");
+		var ownedView:Null<AgentView> = null, ownedFinished = false;
+		recoveryClient.call(WorkspaceAgentProtocol.ACTION, {
+			workspace: "w", instance: "next-owner", id: "owned-resource", action: "read", text: "", request: null
+		}, 5000, function(value) { ownedView = value; ownedFinished = true; }, function(error) throw error.message);
+		recoveryWait(function() return ownedFinished);
+		require(ownedView != null && ownedView.record.state == "reconnect-failed"
+			&& ownedView.recoveryReason == "active-writer",
+			"An active-writer conflict did not expose its recovery reason");
 		provider.dispose();
+		recoveryClient.close();
+		recoveryServer.close();
 		store.close();
 		processes.shutdown();
 		sys.io.File.saveContent(root + "/unsupported-version", "1");
 		provider = new CodexProvider("w", "bad-version", new WorkspaceDirectories(root), function() return seed.snapshot().groups, processes, clock, null,
-			executable,bridge);
+			executable,bridge,codexScript);
 		var badPair = MemoryTransport.pair(),
 			badClient = new RpcConnection(badPair.client, clock),
 			badServer = new RpcConnection(badPair.server, clock);
@@ -282,6 +400,19 @@ class AgentProviderTestMain {
 		badServer.close();
 		processes.shutdown();
 
-		Sys.println("PASS: Codex shared proxy, lazy/version handshake, create idempotence, streamed items, permission fencing, approval races, input, ambiguous prompt reconciliation, history, interruption and persisted thread identity");
+		Sys.println("PASS: Codex shared proxy, lazy/version handshake, create idempotence, streamed items, permission fencing, approval races, input, automatic active-turn and persisted-session recovery, history, interruption and workspace mismatch handling");
 	}
+}
+
+private class AgentTestEndpoint implements workspace.client.WorkspaceRpcEndpoint {
+	final connection:haxeon.rpc.RpcConnection;
+	public function new(connection:haxeon.rpc.RpcConnection) this.connection = connection;
+	public function rootPath():Null<String> return "C:/work";
+	public function serviceGeneration():String return "test-generation";
+	public function rpcConnection():Null<haxeon.rpc.RpcConnection> return connection;
+	public function failureReason():Null<String> return null;
+	public function supportsWorkspaceGroups():Bool return false;
+	public function workspaceEpoch():Null<String> return null;
+	public function hasCapability(capability:String):Bool
+		return capability == WorkspaceAgentProtocol.READ || capability == WorkspaceAgentProtocol.CONTROL;
 }
