@@ -152,6 +152,20 @@ class DocumentTestMain {
 			new BufferReplacement(new BufferPosition(0, 3), new BufferPosition(0, 5), "overlap")
 		]) && transactional.text == "aXcdYf" && transactional.stateId == transactionState,
 			"overlapping transaction was partially applied");
+		for (text in ["value", ""]) for (spaces in [true, false]) {
+			var atStart = new TextBuffer(text), atStartSelection = new BufferSelection(), unit = spaces ? "  " : "\t";
+			require(EditorActions.indent(atStart, atStartSelection, 2, spaces) && atStart.text == unit + text
+				&& atStartSelection.cursor.column == unit.length && !atStartSelection.hasSelection(),
+				"indent at column zero left the caret before the indentation");
+			require(EditorActions.indent(atStart, atStartSelection, 2, spaces) && atStart.text == unit + unit + text
+				&& atStartSelection.cursor.column == unit.length * 2, "repeated indent did not advance the caret");
+			require(atStart.undo(atStartSelection) && atStartSelection.cursor.column == unit.length,
+				"indent undo did not restore the caret");
+			require(atStart.undo(atStartSelection) && atStart.text == text && atStartSelection.cursor.column == 0,
+				"column-zero indent undo did not restore the original text and caret");
+			require(atStart.redo(atStartSelection) && atStartSelection.cursor.column == unit.length,
+				"column-zero indent redo did not restore the advanced caret");
+		}
 		var coding = new TextBuffer("one\n  two\nthree"), codingSelection = new BufferSelection();
 		codingSelection.restore(coding, new BufferPosition(2, 5), new BufferPosition(0, 0));
 		require(EditorActions.indent(coding, codingSelection, 2, true) && coding.text == "  one\n    two\n  three"

@@ -10,7 +10,7 @@ class EditorActions {
 			replacements.push(new BufferReplacement(new BufferPosition(line, 0), new BufferPosition(line, 0), unit));
 			changes.set(line, new LineColumnChange(0, unit.length));
 		}
-		return apply(buffer, selection, replacements, changes);
+		return apply(buffer, selection, replacements, changes, true);
 	}
 
 	public static function unindent(buffer:TextBuffer, selection:BufferSelection, tabWidth:Int):Bool {
@@ -159,16 +159,19 @@ class EditorActions {
 		return apply(buffer, selection, replacements, changes);
 	}
 
-	static function apply(buffer:TextBuffer, selection:BufferSelection, replacements:Array<BufferReplacement>, changes:Map<Int, LineColumnChange>):Bool {
+	static function apply(buffer:TextBuffer, selection:BufferSelection, replacements:Array<BufferReplacement>, changes:Map<Int, LineColumnChange>, moveCollapsedAtInsertion:Bool = false):Bool {
 		if (replacements.length == 0) return false;
 		var ranges:Array<BufferRange> = [];
-		for (range in selection.allRanges()) ranges.push(new BufferRange(adjust(range.cursor, changes), adjust(range.anchor, changes)));
+		for (range in selection.allRanges()) {
+			var moveAtInsertion = moveCollapsedAtInsertion && range.isCollapsed();
+			ranges.push(new BufferRange(adjust(range.cursor, changes, moveAtInsertion), adjust(range.anchor, changes, moveAtInsertion)));
+		}
 		return buffer.applyReplacements(selection, replacements, null, null, new SelectionSnapshot(ranges, 0));
 	}
 
-	static function adjust(position:BufferPosition, changes:Map<Int, LineColumnChange>):BufferPosition {
+	static function adjust(position:BufferPosition, changes:Map<Int, LineColumnChange>, moveAtInsertion:Bool = false):BufferPosition {
 		var change = changes.get(position.line);
-		if (change == null || position.column <= change.column) return position;
+		if (change == null || position.column < change.column || (position.column == change.column && !moveAtInsertion)) return position;
 		var column = position.column + change.delta;
 		if (column < change.column) column = change.column;
 		return new BufferPosition(position.line, column);
