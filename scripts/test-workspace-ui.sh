@@ -64,6 +64,7 @@ run_phase editor-minimap editor-minimap "$fixture/sidebar-project/Main.hx"
 printf 'exit fixture\n' > "$fixture/project/Exit.hx"
 run_phase save-as save-as "$fixture/project/Exit.hx"
 run_phase exit-confirmation exit-confirmation "$fixture/project/Exit.hx"
+run_phase blank-editor-click blank-editor-click
 run_phase caret-follow caret-follow "$fixture/project/Main.hx"
 run_phase pointer-actions pointer-actions "$fixture/sidebar-project/Main.hx"
 run_phase tab-close tab-close "$fixture/sidebar-project/Main.hx"

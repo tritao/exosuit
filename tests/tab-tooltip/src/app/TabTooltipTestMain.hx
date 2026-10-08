@@ -37,6 +37,26 @@ private class EllipsisFixture implements haxeon.ui.core.View {
 	}
 }
 
+private class FeedbackFixture implements haxeon.ui.core.View {
+	public var passes:Int = 0;
+	final changes:Int;
+	public function new(changes:Int) this.changes = changes;
+	public function build(context:haxeon.ui.core.BuildContext):haxeon.ui.core.RenderNode {
+		var style = new haxeon.ui.LayoutStyle();
+		style.width = haxeon.ui.LayoutAxis.fixed(20);
+		style.height = haxeon.ui.LayoutAxis.fixed(20);
+		var node = new haxeon.ui.core.RenderNode(context.id("feedback-fixture"), haxeon.ui.LayoutVisualKind.Box, style);
+		node.onResolved(function(_) {
+			passes++;
+			if (changes < 0 || passes <= changes) {
+				node.layout.style.width = haxeon.ui.LayoutAxis.fixed(20 + passes % 2);
+				context.requestLayoutFeedback();
+			}
+		});
+		return node;
+	}
+}
+
 @:access(haxeon.ui.LayoutMeasureConstraints)
 
 class TabTooltipTestMain {
@@ -101,6 +121,10 @@ class TabTooltipTestMain {
 			layout.dispose();
 			var editor = new haxeon.ui.widgets.text.TextEditorLayout(fonts, "Open", 200.5, style, paragraph);
 			var metrics = editor.measure();
+			require(editor.hitTest(0, metrics.height + 40).offset == 4 && editor.hitTest(100, metrics.height + 40).offset == 4,
+				"blank space below document must hit its end independently of x");
+			require(editor.hitTest(0, metrics.height / 2).offset == 0,
+				"document-end clamping changed hit testing inside the last line");
 			var measured = editor.measureForConstraints(new haxeon.ui.LayoutMeasureConstraints(0, 200.5, 0, 100));
 			require(measured.width == metrics.width && measured.height == metrics.height,
 				"editor measurement changed fractional shaping geometry");
@@ -108,6 +132,13 @@ class TabTooltipTestMain {
 			require(bounded.width <= 10.5 && bounded.height <= 8.5, "editor measurement exceeded hard constraints");
 			editor.dispose();
 		}
+		var feedback = new FeedbackFixture(3);
+		context.submit(feedback, new haxeon.ui.LayoutFrame(800, 600));
+		require(feedback.passes == 4, "layout published a frame before dependent geometry settled");
+		var rejected = false;
+		try context.submit(new FeedbackFixture(-1), new haxeon.ui.LayoutFrame(800, 600))
+		catch (error:Dynamic) rejected = Std.string(error).indexOf("did not converge") >= 0;
+		require(rejected, "oscillating layout feedback was silently discarded");
 		context.dispose(); session.dispose(); fonts.dispose();
 		var settings = new Settings(); settings.tabTooltipDelay = 1.2;
 		require(settings.copy().tabTooltipDelay == 1.2, "settings copy lost tooltip delay");

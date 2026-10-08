@@ -269,12 +269,15 @@ class EditorPane implements View {
 
 	public function build(context:haxeon.ui.core.BuildContext):haxeon.ui.core.RenderNode {
 		var viewportNode:Null<haxeon.ui.core.RenderNode> = null;
-		var contentNode:Null<haxeon.ui.core.RenderNode> = null;
+		var editorNode:Null<haxeon.ui.core.RenderNode> = null;
 		var gutter = new EditorGutter("gutter:" + document.id, document.buffer,
 			color(editorTheme.foregroundMuted), color(editorTheme.surface), fontSize);
 		var editorStyle = new LayoutStyle();
 		editorStyle.width = LayoutAxis.grow();
-		editorStyle.height = LayoutAxis.fit();
+		// Blank viewport space and the trailing scroll margin belong to the
+		// text field, so pointer focus/selection uses its normal hit-test path.
+		editorStyle.height = LayoutAxis.grow();
+		editorStyle.padding = new Insets(0, 0, 0, caretScrollMargin);
 		editorStyle.background = color(editorTheme.editorBackground);
 		var area = TextArea.withDocument("editor:" + document.id, document.buffer.document,
 			handleEdit, editorStyle, null, new TextStyle(fontSize, FontFamily.Monospace), color(editorTheme.editorForeground));
@@ -291,9 +294,9 @@ class EditorPane implements View {
 			var trailingSpace = 5 * Math.max(1, lineHeight);
 			var margin = Math.min(trailingSpace, Math.max(0, (bounds.height - Math.abs(caret.descender - caret.ascender)) / 2));
 			// Trailing space lets the last line keep the same margin as other lines.
-			if (Math.abs(caretScrollMargin - trailingSpace) > 0.01 && contentNode != null) {
+			if (Math.abs(caretScrollMargin - trailingSpace) > 0.01 && editorNode != null) {
 				caretScrollMargin = trailingSpace;
-				contentNode.layout.style.padding = new Insets(0, 0, 0, trailingSpace);
+				editorNode.layout.style.padding = new Insets(0, 0, 0, trailingSpace);
 				context.requestLayoutFeedback();
 				return; // Reveal after the scroll range includes the new trailing space.
 			}
@@ -335,9 +338,8 @@ class EditorPane implements View {
 		area.presentationRevision = presentationRevision;
 		var rowStyle = new LayoutStyle();
 		rowStyle.width = LayoutAxis.grow();
-		rowStyle.height = LayoutAxis.fit();
+		rowStyle.height = LayoutAxis.grow();
 		rowStyle.direction = LayoutDirection.LeftToRight;
-		rowStyle.padding = new Insets(0, 0, 0, caretScrollMargin);
 		var row = new Row("editor-row:" + document.id, [
 			new KeyedView("gutter", gutter),
 			new KeyedView("text", area)
@@ -353,10 +355,13 @@ class EditorPane implements View {
 		var container = new haxeon.ui.core.RenderNode(context.id("editor-container:" + document.id), LayoutVisualKind.Box, containerStyle);
 		container.setStyleIdentity("editor-container", "editor-container:" + document.id);
 		var viewport = new ScrollView("editor-scroll:" + document.id, row, scrollStyle, ScrollAxis.Vertical, scrollController);
+		viewport.fillViewport = true;
 		viewport.scrollbarOverlayHost = container;
 		var node = viewport.build(context);
 		viewportNode = node;
-		contentNode = node.children[0].children[0];
+		node.walk(function(child) {
+			if (child.focusable && child.styleKey == "editor:" + document.id) editorNode = child;
+		});
 
 		node.onResolved(function(_) {
 			var handler = onResolvedEditor;

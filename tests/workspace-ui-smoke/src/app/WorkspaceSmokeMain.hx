@@ -1,5 +1,7 @@
 package app;
 
+import editor.EditorCoordinates;
+
 import haxeon.ui.FontCollection;
 import haxeon.ui.FontFamily;
 import haxeon.ui.LayoutFrame;
@@ -50,7 +52,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	var remoteOpenTests:Null<RemoteFileOpenTests>;
 
 	public function new(context:haxeon.ui.host.DesktopUiHostContext, path:String, phase:String) {
-		super(context.fonts, null, context, (phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-font" || phase == "editor-tabs" || phase == "zoom" || phase == "word-delete" || phase == "selection" || phase == "tab-close" || phase == "pointer-actions" || phase == "caret-follow" || phase == "exit-confirmation" || phase == "save-as" || phase == "tab-close-paint" || phase == "settings" || phase == "editor-minimap" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
+		super(context.fonts, null, context, (phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-font" || phase == "editor-tabs" || phase == "zoom" || phase == "word-delete" || phase == "selection" || phase == "tab-close" || phase == "pointer-actions" || phase == "blank-editor-click" || phase == "caret-follow" || phase == "exit-confirmation" || phase == "save-as" || phase == "tab-close-paint" || phase == "settings" || phase == "editor-minimap" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
 			null, null, null, WorkspaceSmokeMain.createTerminal);
 		this.phase = phase;
 		closeContext = context;
@@ -92,6 +94,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		if (phase == "selection") return selectionStep(frame);
 		if (phase == "tab-close") return tabCloseStep(frame);
 		if (phase == "pointer-actions") return pointerActionsStep(frame);
+		if (phase == "blank-editor-click") return blankEditorClickStep(frame);
 		if (phase == "caret-follow") return caretFollowStep(frame);
 		if (phase == "exit-confirmation") return exitConfirmationStep(frame);
 		if (phase == "save-as") return saveAsStep(frame);
@@ -355,7 +358,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		require(Math.abs(track.height - Math.max(0, controller.viewportHeight - 4)) < 0.01, "resize left stale scrollbar track");
 		require(controller.offsetY <= controller.maxScrollY, "resize left scroll beyond content");
 		var expectedThumbY = track.y + (controller.maxScrollY == 0 ? 0 : controller.offsetY / controller.maxScrollY * (track.height - thumb.height));
-		require(Math.abs(thumb.y - expectedThumbY) < 0.01, "resize left stale scrollbar thumb");
+		require(Math.abs(thumb.y - expectedThumbY) < 0.01, "resize left stale scrollbar thumb: frame=" + frames + ", actual=" + thumb.y + ", expected=" + expectedThumbY + ", offset=" + controller.offsetY + ", content=" + controller.contentHeight);
 		var height = controller.contentHeight;
 		var offset = controller.offsetY;
 		result = super.submit(frame);
@@ -572,6 +575,41 @@ class WorkspaceSmokeApp extends ExosuitApp {
 			trace("PASS: window exit confirms dirty documents, Cancel and Save As cancellation preserve edits, Save/Discard closes once without restoring discarded recovery");
 		}
 		return super.submit(frame);
+	}
+
+	function blankEditorClickStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
+		var view = host.activeView();
+		if (view == null) throw "blank click missing editor";
+		if (frames == 7) {
+			ui.key(UiEventKind.KeyDown, UiKey.A, UiModifier.Control);
+			ui.key(UiEventKind.KeyDown, UiKey.Backspace);
+		}
+		if (frames == 3 || frames == 5 || frames == 9) {
+			var editor = node("editor:" + view.document.id);
+			var viewport = node("editor-scroll:" + view.document.id).globalBounds();
+			ui.focusWidget(editor.id);
+			var x = editor.globalBounds().x + 12;
+			var y = viewport.y + viewport.height - 12;
+			ui.pointerDown(x, y, 0); ui.pointerUp(x, y, 0);
+		}
+		var result = super.submit(frame);
+		if (frames == 4 || frames == 6 || frames == 10) {
+			var editor = node("editor:" + view.document.id);
+			require(ui.focus.focusedId != null && ui.focus.focusedId.equals(editor.id), "click below last line lost editor focus");
+			require(host.textInputArea() != null, "click below last line lost caret");
+			require(EditorCoordinates.codepoint(view.document, view.selection.cursor) == view.document.buffer.document.codepointCount,
+				"click below last line did not place caret at document end");
+			if (frames == 4) {
+				ui.key(UiEventKind.KeyDown, UiKey.End, UiModifier.Control);
+				for (_ in 0...60) ui.key(UiEventKind.KeyDown, UiKey.Enter);
+			}
+			if (frames == 6) {
+				ui.text(UiEventKind.TextInput, "typed");
+				require(StringTools.endsWith(view.document.buffer.document.text, "typed"), "blank click did not retain text input");
+			}
+			if (frames == 10) trace("PASS: short, long and empty editor blank space retains focus, document-end caret and text input");
+		}
+		return result;
 	}
 
 	function caretFollowStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
@@ -1134,9 +1172,9 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		if (phase == "sidebar-write") {
 			if (frames >= 2) { node("activity:files"); node("activity:search"); }
 			if (frames == 3) ui.key(UiEventKind.KeyDown, UiKey.F, UiModifier.Control | UiModifier.Shift);
-			if (frames == 4) { require(sidebar.activeId == "search", "search shortcut did not select mode"); click("files"); }
+			if (frames == 4) { require(sidebar.activeId == "search", "search shortcut did not select mode"); click("activity:files"); }
 			if (frames == 5) {
-				require(sidebar.activeId == "files", "Files tab click did not select mode");
+				require(sidebar.activeId == "files", "Files activity click did not select mode");
 				sidebarWidth = node("sidebar-modes").globalBounds().width;
 				var tree = findTree(ui.root);
 				require(tree != null, "Files tree missing");
@@ -1151,10 +1189,10 @@ class WorkspaceSmokeApp extends ExosuitApp {
 				var files = sidebar.find("files");
 				require(files != null && sidebar.width > sidebarWidth + 20, "Files divider width was not retained");
 				sidebarWidth = sidebar.width;
-				click("search");
+				click("activity:search");
 			}
 			if (frames == 8) {
-				require(sidebar.activeId == "search", "Search tab click failed");
+				require(sidebar.activeId == "search", "Search activity click failed");
 				require(Math.abs(node("sidebar-modes").globalBounds().width - sidebarWidth) < 1, "destination switch changed shared width: " + node("sidebar-modes").globalBounds().width);
 				resizeSidebar(40);
 			}
@@ -1162,7 +1200,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 				var search = sidebar.find("search");
 				require(search != null && sidebar.width > sidebarWidth + 30, "Search divider width lost");
 				sys.io.File.saveContent(config.ConfigurationPaths.stateRoot() + "/expected-sidebar.txt", sidebar.encode());
-				trace("PASS: sidebar commands, pointer tabs and shared dragged width");
+				trace("PASS: sidebar commands, activity buttons and shared dragged width");
 			}
 		} else if ((phase == "sidebar-read" || phase == "sidebar-hidden-read") && frames == 5) {
 			require(sidebar.activeId == "search", "restart lost sidebar mode");
@@ -1339,7 +1377,7 @@ class WorkspaceSmokeMain {
 			zoomWidth = options.width;
 		}
 		options.captureDirectory = args[1];
-		options.frameLimit = args[2] == "zoom" ? 75 : args[2] == "save-as" ? 10 : args[2] == "exit-confirmation" ? 11 : args[2] == "tab-close" ? 13 : args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 11 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
+		options.frameLimit = args[2] == "blank-editor-click" ? 11 : args[2] == "zoom" ? 75 : args[2] == "save-as" ? 10 : args[2] == "exit-confirmation" ? 11 : args[2] == "tab-close" ? 13 : args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 11 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
 		var status = DesktopUiHost.run(options, context -> new WorkspaceSmokeApp(context, args[0], args[2]));
 
 		return status;
