@@ -605,6 +605,20 @@ class ExosuitApp implements DesktopUiApplication {
 		requestFrame();
 	}
 
+	function keepSidebarFullHeight():Void {
+		if (!dock.isOpen("explorer")) return;
+		switch dock.root {
+			case Split(Horizontal, _, Panel("explorer"), _): return;
+			case Panel("explorer"): return;
+			default:
+		}
+		var content = haxeon.ui.docking.DockNodeTools.remove(dock.root, "explorer");
+		var width = Math.max(1.0, viewportWidth - ActivityBar.WIDTH - DockWorkspace.DividerExtent);
+		dock.setRoot(DockNode.Split(DockSplitAxis.Horizontal, sidebar.width / width,
+			DockNode.Panel("explorer"), content));
+	}
+
+
 	public function view():View {
 		pruneStaleEditorPanes(host.allViews());
 		for (pane in host.panes) {
@@ -740,6 +754,7 @@ class ExosuitApp implements DesktopUiApplication {
 		var widthChanged = viewportWidth != frame.width;
 		viewportWidth = frame.width;
 		viewportHeight = frame.height;
+		keepSidebarFullHeight();
 		if (widthChanged && dock.isOpen("explorer")) {
 			var mode = sidebar.selected();
 			if (mode != null) dock.setPanelWidth("explorer", sidebar.width, Math.max(0, viewportWidth - ActivityBar.WIDTH),
