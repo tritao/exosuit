@@ -1346,6 +1346,8 @@ class ExosuitApp implements DesktopUiApplication {
 		tree.verticalGuidesOnly = true;
 		tree.compactLeafIndent = true;
 		tree.expandOnSingleClick = true;
+		if (remoteModel != null)
+			tree.hasChildrenHint = function(key) return remoteModel.isDirectoryKey(key);
 		if (localModel != null) {
 			tree.hasChildrenHint = function(key) return localModel.hasChildrenHint(key);
 			tree.onExpandedChanged = function(path, expanded) localModel.setDirectoryExpanded(path, expanded);
