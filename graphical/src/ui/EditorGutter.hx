@@ -98,14 +98,16 @@ private class GutterLabels {
 			var end = Std.int(Math.min(editor.paragraphCount,
 				editor.paragraphIndexAtY(visible.y + visible.height - originY) + 2));
 			if (end <= first) return;
+			// Stable line-to-slot mapping retains overlapping labels during scrolling.
+			// Grow before choosing slots so every visible line has a distinct slot.
+			while (visibleLabels.length < end - first) {
+				var number = TextLayout.create(fonts, "", 1.0,
+					new TextStyle(fontSize, FontFamily.Monospace), new ParagraphStyle(TextWrap.None));
+				if (color != null) number.setColor(color);
+				visibleLabels.push(new GutterLabel(number));
+			}
 			for (index in first...end) {
-				var slot = index - first;
-				if (slot == visibleLabels.length) {
-					var number = TextLayout.create(fonts, "", 1.0,
-						new TextStyle(fontSize, FontFamily.Monospace), new ParagraphStyle(TextWrap.None));
-					if (color != null) number.setColor(color);
-					visibleLabels.push(new GutterLabel(number));
-				}
+				var slot = index % visibleLabels.length;
 				var label = visibleLabels[slot];
 				if (label.index != index || label.digits != digits) {
 					var text = Std.string(index + 1);

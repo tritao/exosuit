@@ -258,7 +258,8 @@ class DecorationSmokeApp extends ExosuitApp {
 		if (phase == "gutter-aligned" && frames == 5) {
 			var view = host.activeView();
 			if (view == null) throw "gutter fixture lost its view";
-			view.restoreScroll(0, 80);
+			// Keep the wrapped paragraph and its preceding line visible together.
+			view.restoreScroll(0, 20);
 		}
 		if (phase == "gutter-aligned" && frames == 6) {
 			var view = host.activeView();
