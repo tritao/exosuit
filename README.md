@@ -50,6 +50,20 @@ The graphical application builds from `graphical/haxeon.json` (entry
 `app.GraphicalMain`). Headless tests build from `haxeon.json` (entry
 `app.Main`); see `scripts/test.sh` for the test suite.
 
+The desktop window icon is embedded in the app and packaged runtime. To update it,
+edit `graphical/assets/icons/exosuit-mark.svg` or the background in
+`scripts/generate-icon.py`, then run:
+
+```sh
+python -m pip install cairosvg pillow
+python scripts/generate-icon.py
+python scripts/build.py
+```
+
+The generator refreshes `icon.png`, the SVG and PNG assets, and
+`graphical/src/app/ApplicationIcons.hx`. Normal builds use the checked-in embedded
+pixels and do not require the image-generation dependencies.
+
 Haxeon and its nested dependencies are pinned by Git submodule commits.
 Use `git submodule update --init --recursive` after pulling dependency updates.
 

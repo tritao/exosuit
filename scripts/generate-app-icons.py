@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Generate embedded RGBA icons and the Windows icon resource from icon2.png."""
+"""Generate embedded RGBA icons and Windows resources from vector-generated icon.png.
+
+Run generate-icon.py first after changing vector artwork. Requires Pillow.
+"""
 from pathlib import Path
 import base64
 from PIL import Image
 
 root = Path(__file__).resolve().parent.parent
 sizes = (16, 24, 32, 48, 64, 128, 256)
-with Image.open(root / "icon2.png") as source:
+with Image.open(root / "icon.png") as source:
     image = source.convert("RGBA")
     data = b"".join(image.resize((size, size), Image.Resampling.LANCZOS).tobytes() for size in sizes)
     image.save(root / "graphical/assets/exosuit.ico", sizes=[(size, size) for size in sizes])
@@ -16,7 +19,7 @@ lines = [
     "import haxe.crypto.Base64;",
     "import haxeon.ui.host.ApplicationIconSet;",
     "import haxeon.ui.host.WindowIcon;", "",
-    "// Generated from icon2.png by scripts/generate-app-icons.py.",
+    "// Generated from icon.png by scripts/generate-app-icons.py.",
     "// Embedded so packaged apps and launches from other directories use the same icon.",
     "class ApplicationIcons {",
     "\tpublic static function create():ApplicationIconSet {",
