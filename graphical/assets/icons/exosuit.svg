@@ -1,44 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <title>Exosuit application icon</title>
   <defs>
-    <path id="tile" d="M 300,0 H 954 C 1164,0 1254,90 1254,300
-      V 954 C 1254,1164 1164,1254 954,1254 H 300
-      C 90,1254 0,1164 0,954 V 300 C 0,90 90,0 300,0 Z"/>
-    <clipPath id="tile-clip"><use href="#tile"/></clipPath>
-    <linearGradient id="blue" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0" stop-color="#4778ff"/>
-      <stop offset="0.46" stop-color="#3048f4"/>
-      <stop offset="1" stop-color="#17118e"/>
+    <linearGradient id="blue" x1="0%" y1="0%" x2="60%" y2="100%">
+      <stop offset="0" stop-color="#437bfa"/>
+      <stop offset="1" stop-color="#2942cc"/>
     </linearGradient>
-    <radialGradient id="light" cx="22%" cy="8%" r="85%">
-      <stop offset="0" stop-color="#a7c8ff" stop-opacity="0.25"/>
-      <stop offset="1" stop-color="#a7c8ff" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="edge" x1="0%" y1="0%" x2="25%" y2="100%">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.38"/>
-      <stop offset="0.45" stop-color="#ffffff" stop-opacity="0.08"/>
-      <stop offset="1" stop-color="#08084b" stop-opacity="0.22"/>
-    </linearGradient>
-    <g id="emblem"><ns0:path xmlns:ns0="http://www.w3.org/2000/svg" fill="#fff" fill-rule="evenodd" d="     M 533,261 Q 533,228 500,240     L 337,338 Q 310,358 337,382     L 416,432 Q 423,436 423,445 L 423,501 Q 423,508 417,512     L 397,525 Q 389,530 389,520 L 389,461 Q 389,449 379,442     L 367,434 Q 353,424 339,434 L 242,502 Q 230,510 230,524     L 230,731 Q 230,747 243,756 L 319,807 Q 325,811 325,819     L 325,903 Q 325,918 337,927 L 365,946 Q 379,956 392,948     Q 404,941 404,926 L 404,817 Q 404,809 411,814     L 429,826 Q 435,830 435,838 L 435,900 Q 435,914 447,923     L 612,1028 Q 627,1039 642,1028 L 807,923 Q 819,914 819,900     L 819,838 Q 819,830 825,826 L 843,814 Q 850,809 850,817     L 850,926 Q 850,941 862,948 Q 875,956 889,946     L 917,927 Q 929,918 929,903 L 929,819 Q 929,811 935,807     L 1011,756 Q 1024,747 1024,731 L 1024,524 Q 1024,510 1012,502     L 915,434 Q 901,424 887,434 L 875,442 Q 865,449 865,461     L 865,520 Q 865,530 857,525 L 837,512 Q 831,508 831,501     L 831,445 Q 831,436 838,432 L 917,382 Q 944,358 917,338     L 754,240 Q 721,228 721,261 L 721,415 Q 721,422 716,427     L 690,453 Q 685,458 677,458 L 577,458 Q 569,458 564,453     L 538,427 Q 533,422 533,415 Z      M 481,590 Q 502,575 518,596 Q 533,617 512,632     L 450,677 L 512,722 Q 533,737 518,759 Q 502,780 481,765     L 397,704 Q 371,677 397,650 Z      M 773,590 Q 752,575 736,596 Q 721,617 742,632     L 804,677 L 742,722 Q 721,737 736,759 Q 752,780 773,765     L 857,704 Q 883,677 857,650 Z      M 640,579 C 654,546 704,565 690,599     L 606,785 C 592,818 540,798 555,765 Z" />
-<ns0:rect xmlns:ns0="http://www.w3.org/2000/svg" x="571" y="194" width="112" height="220" rx="24" fill="#fff" /></g>
-    <!-- Layered offsets keep the soft shadow portable across SVG renderers. -->
-    <mask id="emblem-mask" maskUnits="userSpaceOnUse"
-          x="0" y="0" width="1254" height="1254">
-      <use href="#emblem"/>
-    </mask>
   </defs>
-  <use href="#tile" fill="url(#blue)"/>
-  <use href="#tile" fill="url(#light)"/>
-  <g clip-path="url(#tile-clip)">
-    <use href="#tile" fill="none" stroke="url(#edge)" stroke-width="5"/>
-    <g fill="#080d61">
-      <rect width="1254" height="1254" mask="url(#emblem-mask)"
-            transform="translate(0 10)" opacity="0.045"/>
-      <rect width="1254" height="1254" mask="url(#emblem-mask)"
-            transform="translate(0 7)" opacity="0.055"/>
-      <rect width="1254" height="1254" mask="url(#emblem-mask)"
-            transform="translate(0 4)" opacity="0.07"/>
-    </g>
-    <use href="#emblem"/>
+  <!-- 29px tile in a 32px canvas, matching the visual weight of taskbar peers. -->
+  <g transform="translate(3 3) scale(0.90625)">
+    <path fill="url(#blue)" d="M15 0 H49 Q64 0 64 15 V49 Q64 64 49 64
+      H15 Q0 64 0 49 V15 Q0 0 15 0 Z"/>
+    <ns0:path xmlns:ns0="http://www.w3.org/2000/svg" fill="white" fill-rule="evenodd" d="       M25 15 L17 20 Q15 21 15 23 L15 27 L12 29 Q11 30 11 32       L11 43 Q11 45 13 46 L29 55 Q32 57 35 55 L51 46       Q53 45 53 43 L53 32 Q53 30 52 29 L49 27 L49 23       Q49 21 47 20 L39 15 L39 23 Q39 25 37 25 H27       Q25 25 25 23 Z  M24 30 Q25 29 26 30 Q27 31 26 32 L22 36 L26 40  Q27 41 26 42 Q25 43 24 42 L18.5 37.5 Q17 36 18.5 34.5 Z  M40 30 Q39 29 38 30 Q37 31 38 32 L42 36 L38 40  Q37 41 38 42 Q39 43 40 42 L45.5 37.5 Q47 36 45.5 34.5 Z  M33.5 28.5 Q34.2 27 35.7 27.7 Q37.2 28.4 36.5 29.9  L30.5 43.5 Q29.8 45 28.3 44.3 Q26.8 43.6 27.5 42.1 Z " />
+<ns0:rect xmlns:ns0="http://www.w3.org/2000/svg" x="29" y="11" width="6" height="11" rx="1.8" fill="white" />
   </g>
 </svg>

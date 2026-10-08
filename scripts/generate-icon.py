@@ -30,47 +30,19 @@ def main():
     mark = ET.parse(ASSETS / "exosuit-mark.svg").getroot()
     geometry = "\n".join(ET.tostring(child, encoding="unicode").strip() for child in mark
                          if child.tag.rsplit("}", 1)[-1] != "title")
-    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254">
+    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <title>Exosuit application icon</title>
   <defs>
-    <path id="tile" d="M 300,0 H 954 C 1164,0 1254,90 1254,300
-      V 954 C 1254,1164 1164,1254 954,1254 H 300
-      C 90,1254 0,1164 0,954 V 300 C 0,90 90,0 300,0 Z"/>
-    <clipPath id="tile-clip"><use href="#tile"/></clipPath>
-    <linearGradient id="blue" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0" stop-color="#4778ff"/>
-      <stop offset="0.46" stop-color="#3048f4"/>
-      <stop offset="1" stop-color="#17118e"/>
+    <linearGradient id="blue" x1="0%" y1="0%" x2="60%" y2="100%">
+      <stop offset="0" stop-color="#437bfa"/>
+      <stop offset="1" stop-color="#2942cc"/>
     </linearGradient>
-    <radialGradient id="light" cx="22%" cy="8%" r="85%">
-      <stop offset="0" stop-color="#a7c8ff" stop-opacity="0.25"/>
-      <stop offset="1" stop-color="#a7c8ff" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="edge" x1="0%" y1="0%" x2="25%" y2="100%">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.38"/>
-      <stop offset="0.45" stop-color="#ffffff" stop-opacity="0.08"/>
-      <stop offset="1" stop-color="#08084b" stop-opacity="0.22"/>
-    </linearGradient>
-    <g id="emblem">{geometry}</g>
-    <!-- Layered offsets keep the soft shadow portable across SVG renderers. -->
-    <mask id="emblem-mask" maskUnits="userSpaceOnUse"
-          x="0" y="0" width="1254" height="1254">
-      <use href="#emblem"/>
-    </mask>
   </defs>
-  <use href="#tile" fill="url(#blue)"/>
-  <use href="#tile" fill="url(#light)"/>
-  <g clip-path="url(#tile-clip)">
-    <use href="#tile" fill="none" stroke="url(#edge)" stroke-width="5"/>
-    <g fill="#080d61">
-      <rect width="1254" height="1254" mask="url(#emblem-mask)"
-            transform="translate(0 10)" opacity="0.045"/>
-      <rect width="1254" height="1254" mask="url(#emblem-mask)"
-            transform="translate(0 7)" opacity="0.055"/>
-      <rect width="1254" height="1254" mask="url(#emblem-mask)"
-            transform="translate(0 4)" opacity="0.07"/>
-    </g>
-    <use href="#emblem"/>
+  <!-- 29px tile in a 32px canvas, matching the visual weight of taskbar peers. -->
+  <g transform="translate(3 3) scale(0.90625)">
+    <path fill="url(#blue)" d="M15 0 H49 Q64 0 64 15 V49 Q64 64 49 64
+      H15 Q0 64 0 49 V15 Q0 0 15 0 Z"/>
+    {geometry}
   </g>
 </svg>
 '''
