@@ -3,6 +3,7 @@ package app;
 import haxeon.ui.TextLayout.TextPosition;
 
 import ui.ExosuitApp;
+import ui.ExosuitPalette;
 import ui.UiEditorTabs;
 import haxeon.ui.LayoutFrame;
 import haxeon.ui.Color;
@@ -36,7 +37,7 @@ class DecorationSmokeApp extends ExosuitApp {
 	var popupScrollController:Null<haxeon.ui.widgets.scroll.ScrollController> = null;
 
 	public function new(context:haxeon.ui.host.DesktopUiHostContext, path:String, phase:String) {
-		super(context.fonts, null, context, path, null, null, null, DecorationSmokeMain.createTerminal);
+		super(context.fonts, phase == "popup-completion-light" ? ExosuitPalette.theme(false) : null, context, path, null, null, phase == "popup-completion-light" ? false : null, DecorationSmokeMain.createTerminal);
 		this.phase = phase;
 		installMarks(0);
 		if (phase == "ime-selection-affinity") {
@@ -475,19 +476,19 @@ class DecorationSmokeApp extends ExosuitApp {
 		if (frames == 4 && StringTools.startsWith(phase, "popup-")) {
 			var area = host.textInputArea();
 			if (area == null) throw "popup fixture lacks resolved caret geometry";
-			if (phase == "popup-live-completion" || phase == "popup-ime") {
+			if (phase == "popup-live-completion" || phase == "popup-ime" || phase == "popup-completion-mouse" || phase == "popup-completion-dismiss") {
 				var view = host.activeView();
 				if (view == null) throw "live completion lacks editor";
 				view.document.buffer.replaceAllText("", view.selection);
 				view.restoreCursor(0, 0);
 				new completion.ActiveCompletion(host, view, view.document, new BufferPosition(0, 0), new BufferPosition(0, 0),
-					[new completion.CompletionItem("alpha"), new completion.CompletionItem("beta")], () -> host.activeView() == view).show();
-			} else if ((phase == "popup-completion-long" || phase == "popup-completion-wrap")) {
+					[new completion.CompletionItem("alpha", "alpha", null, null, 6), new completion.CompletionItem("beta", "():Int", null, null, 3, "Returns the answer.")], () -> host.activeView() == view).show();
+			} else if ((phase == "popup-completion-long" || phase == "popup-completion-wrap" || phase == "popup-completion-page")) {
 				var items:Array<completion.CompletionItem> = [];
 				for (index in 0...40) items.push(new completion.CompletionItem("suggestion" + index));
 				host.openLanguageCompletion(area, items, function(_) {});
-			} else if (phase == "popup-completion")
-				host.openLanguageCompletion(area, [new completion.CompletionItem("example")], function(_) {});
+			} else if (phase == "popup-completion" || phase == "popup-completion-light")
+				host.openLanguageCompletion(area, [new completion.CompletionItem("example", "(value:Int):String", null, null, 3, "Example documentation")], function(_) {});
 			else if (phase == "popup-signature")
 				host.openLanguageSignature(area, new language.SignatureHelp("example(value:Int)", "signature documentation", "value"));
 			else {
@@ -498,8 +499,9 @@ class DecorationSmokeApp extends ExosuitApp {
 			}
 		}
 		if (frames == 5 && StringTools.startsWith(phase, "popup-")) {
-			if ((phase == "popup-completion-long" || phase == "popup-completion-wrap"))
+			if ((phase == "popup-completion-long" || phase == "popup-completion-wrap" || phase == "popup-completion-page"))
 				for (_ in 0...(phase == "popup-completion-wrap" ? 1 : 39)) ui.key(UiEventKind.KeyDown, phase == "popup-completion-wrap" ? UiKey.Up : UiKey.Down);
+			if (phase == "popup-completion-page") ui.key(UiEventKind.KeyDown, UiKey.PageUp);
 			var view = host.activeView();
 			if (view == null) throw "popup fixture lost active document";
 			if (phase == "popup-ime") {
@@ -513,10 +515,23 @@ class DecorationSmokeApp extends ExosuitApp {
 			} else if (phase == "popup-switch")
 				host.openDocument(new editor.Document(null, "other", application.syntaxes));
 			else if (phase == "popup-scroll" || phase == "popup-clipped") {
-				if (popupScrollController == null || !popupScrollController.scrollBy(0.0, phase == "popup-clipped" ? 350.0 : 24.0))
+				if (popupScrollController == null || !popupScrollController.jumpTo(0.0, phase == "popup-clipped" ? 350.0 : 24.0))
 					throw "popup fixture could not scroll retained editor";
 			} else if (phase != "popup-edge" && phase != "popup-large")
 				view.selection.restore(view.document.buffer, new BufferPosition(0, 7), new BufferPosition(0, 7));
+		}
+		if (frames == 6 && (phase == "popup-completion-mouse" || phase == "popup-completion-dismiss")) {
+			var view = host.activeView();
+			if (phase == "popup-completion-mouse") {
+				var row = findEditor(ui.root, "lang-row-1");
+				if (row == null) throw "completion mouse target missing";
+				var bounds = row.globalBounds();
+				ui.pointerMove(bounds.x + 10, bounds.y + 10);
+				ui.pointerDown(bounds.x + 10, bounds.y + 10, 0);
+				ui.pointerUp(bounds.x + 10, bounds.y + 10, 0);
+			} else ui.key(UiEventKind.KeyDown, UiKey.Escape);
+			if (view == null || host.isLanguagePopupVisible() || view.document.buffer.text != (phase == "popup-completion-mouse" ? "beta" : ""))
+				throw "completion pointer acceptance or Escape dismissal failed";
 		}
 		if (frames == 6 && phase == "popup-live-completion") {
 			var view = host.activeView();
@@ -835,16 +850,23 @@ class DecorationSmokeApp extends ExosuitApp {
 				popupScrollController = activeView.scrollController;
 			}
 			if (frames == 6) {
-				if (phase == "popup-switch" || phase == "popup-clipped" || phase == "popup-live-completion" || phase == "popup-ime") {
+				if (phase == "popup-switch" || phase == "popup-clipped" || phase == "popup-live-completion" || phase == "popup-ime" || phase == "popup-completion-mouse" || phase == "popup-completion-dismiss") {
 					if (host.isLanguagePopupVisible() || panel != null) throw "popup survived document switch";
 				} else {
 					var area = host.textInputArea();
 					if (panel == null || panel.resolved == null || area == null) throw "missing resolved popup or caret";
 					var bounds = panel.resolved;
-					if ((phase == "popup-completion-long" || phase == "popup-completion-wrap")) {
-						var selected = findEditor(root, "lang-row-39");
+					if (phase == "popup-completion" || phase == "popup-completion-light") {
+						var row = findEditor(root, "lang-row-0");
+						if (row == null || row.semantics == null || (row.semantics.states & haxeon.ui.semantics.AccessibilityState.Selected) == 0)
+							throw "completion selection lacks accessibility state";
+						if (!containsText(panel, "(value:Int):String\nExample documentation") || !containsText(panel, "Up/Down select · Tab / Enter accept · Esc dismiss"))
+							throw "completion documentation or keyboard hint missing";
+					}
+					if ((phase == "popup-completion-long" || phase == "popup-completion-wrap" || phase == "popup-completion-page")) {
+						var selected = findEditor(root, phase == "popup-completion-page" ? "lang-row-31" : "lang-row-39");
 						var viewport = findEditor(root, "language-scroll");
-						if (selected == null || viewport == null) throw "completion lost selected row or scroll viewport";
+						if (selected == null || viewport == null || selected.semantics == null || (selected.semantics.states & haxeon.ui.semantics.AccessibilityState.Selected) == 0) throw "completion lost selected row or scroll viewport";
 						var row = selected.globalBounds();
 						var visible = viewport.globalBounds();
 						if (row.y < visible.y - 0.1 || row.y + row.height > visible.y + visible.height + 0.1)
@@ -922,6 +944,12 @@ class DecorationSmokeApp extends ExosuitApp {
 	static function hasFileLabel(node:RenderNode):Bool {
 		if (node.semantics != null && node.semantics.label != null && StringTools.endsWith(node.semantics.label, "Main.hx")) return true;
 		for (child in node.children) if (hasFileLabel(child)) return true;
+		return false;
+	}
+
+	static function containsText(node:RenderNode, text:String):Bool {
+		if (node.layout.text == text) return true;
+		for (child in node.children) if (containsText(child, text)) return true;
 		return false;
 	}
 

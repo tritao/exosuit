@@ -137,10 +137,9 @@ class UiWorkbenchHost implements WorkbenchHost {
 	static inline var LANG_INFO = 1;
 	static inline var LANG_COMPLETION = 2;
 	static inline var LANG_SIGNATURE = 3;
-	static inline var COMPLETION_ROW_HEIGHT = 24.0;
-	static inline var COMPLETION_ROW_GAP = 4.0;
-	static inline var COMPLETION_PADDING = 8.0;
-	static inline var COMPLETION_MAX_HEIGHT = 236.0;
+	static inline var COMPLETION_ROW_HEIGHT = CompletionPopupContent.RowHeight;
+	static inline var COMPLETION_ROW_GAP = CompletionPopupContent.RowGap;
+	static inline var COMPLETION_PADDING = CompletionPopupContent.Padding;
 	public var caretRectProvider:Null<Void->Null<Rect>>;
 	var languageArea:Null<TextInputArea>;
 	var languageDocumentId:Int = -1;
@@ -1045,6 +1044,12 @@ class UiWorkbenchHost implements WorkbenchHost {
 			dismissLanguagePopup();
 			return false;
 		}
+		if (modifiers == 0 && (key == Platform.KEY_PAGE_UP || key == Platform.KEY_PAGE_DOWN)) {
+			var page = Std.int(Math.max(1.0, languageScroll.viewportHeight / (COMPLETION_ROW_HEIGHT + COMPLETION_ROW_GAP)));
+			languageSelected = Std.int(Math.max(0, Math.min(languageItems.length - 1,
+				languageSelected + (key == Platform.KEY_PAGE_UP ? -page : page))));
+			revealLanguageSelection(); requestFrame(); return true;
+		}
 		if (languageKey != null && languageKey(key, modifiers)) return true;
 		if (key == Platform.KEY_DOWN) {
 			languageSelected = (languageSelected + 1) % languageItems.length;
@@ -1059,10 +1064,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 			return true;
 		}
 		if ((key == Platform.KEY_ENTER || key == Platform.KEY_TAB) && modifiers == 0) {
-			var item = languageItems[languageSelected];
-			var accept = languageAccept;
-			dismissLanguagePopup();
-			accept(item);
+			acceptLanguageItem(languageSelected);
 			return true;
 		}
 		return false;
@@ -1121,6 +1123,23 @@ class UiWorkbenchHost implements WorkbenchHost {
 	}
 
 
+	function acceptLanguageItem(index:Int):Void {
+		if (languageKind != LANG_COMPLETION || index < 0 || index >= languageItems.length) return;
+		var item = languageItems[index], accept = languageAccept;
+		dismissLanguagePopup();
+		accept(item);
+	}
+
+	function languagePopup(content:NkView):NkView {
+		var area = textInputArea();
+		if (area == null) area = languageArea;
+		var popup = new Popup("language-popup", content, area == null ? 0.0 : area.x,
+			area == null ? 0.0 : area.y + area.height, null, dismissLanguagePopup);
+		popup.modal = false;
+		popup.anchorRectProvider = caretRectProvider;
+		return popup;
+	}
+
 	function buildLanguagePopupContent():NkView {
 		return new OverlayBuilderView(function(context) {
 			var rows:Array<NkView> = [];
@@ -1132,19 +1151,10 @@ class UiWorkbenchHost implements WorkbenchHost {
 			panelStyle.childGap = COMPLETION_ROW_GAP;
 			switch languageKind {
 				case LANG_COMPLETION:
-					for (index in 0...languageItems.length) {
-						var item = languageItems[index];
-						var rowStyle = new LayoutStyle();
-						rowStyle.width = LayoutAxis.grow();
-						rowStyle.height = LayoutAxis.fixed(COMPLETION_ROW_HEIGHT);
-						rowStyle.direction = LayoutDirection.LeftToRight;
-						var color = index == languageSelected ? Color.rgba(1.0, 1.0, 1.0, 1.0) : Color.rgba(0.75, 0.75, 0.78, 1.0);
-						rows.push(new Row("lang-row-" + index,
-							[
-								new KeyedView("label", new Text(item.label, null, color, TextStyleOverride.text(13.0))),
-								new KeyedView("detail", new Text("  " + item.detail, null, Color.rgba(0.6, 0.6, 0.65, 1.0), TextStyleOverride.text(12.0)))
-							], rowStyle));
-					}
+					var content = new CompletionPopupContent(languageItems, languageSelected, languageScroll, function(index) {
+						if (languageSelected != index) { languageSelected = index; requestFrame(); }
+					}, acceptLanguageItem);
+					return languagePopup(content);
 				case LANG_SIGNATURE:
 					var help = languageSignature;
 					if (help != null) {
@@ -1162,14 +1172,9 @@ class UiWorkbenchHost implements WorkbenchHost {
 			var scrollStyle = new LayoutStyle();
 			scrollStyle.width = panelStyle.width;
 			var maxHeight = Math.max(1.0, context.viewportHeight - 16.0);
-			if (languageKind == LANG_COMPLETION) maxHeight = Math.min(COMPLETION_MAX_HEIGHT, maxHeight);
 			scrollStyle.height = LayoutAxis.fit(0.0, maxHeight);
 			var scroll = new ScrollView("language-scroll", content, scrollStyle, haxeon.ui.widgets.scroll.ScrollAxis.Vertical, languageScroll);
-			var popup = new Popup("language-popup", scroll, area == null ? 0.0 : area.x,
-				area == null ? 0.0 : area.y + area.height, null, dismissLanguagePopup);
-			popup.modal = false;
-			popup.anchorRectProvider = caretRectProvider;
-			return popup;
+			return languagePopup(scroll);
 		});
 	}
 }

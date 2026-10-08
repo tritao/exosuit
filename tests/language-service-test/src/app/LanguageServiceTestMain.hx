@@ -76,6 +76,14 @@ class LanguageServiceTestMain {
 		var completed = completionResult(completions), located = definitionResult(definitions);
 		require(completed.length == 1 && completed[0].insertText == "completion", "completion response was not decoded");
 		require(completed[0].filterText == "completion", "completion filterText was not decoded");
+		require(completed[0].kind == 3 && completed[0].documentation == "Completion documentation",
+			"completion kind or markup documentation was lost");
+		var duplicate = new CompletionItem("same", "same");
+		require(duplicate.displayDetail() == "" && duplicate.kindLabel() == "", "unspecified completion metadata should be unobtrusive");
+		var ranked = [new CompletionItem("alphaSecond", "", "second", "alpha"), new CompletionItem("alphaFirst")];
+		var narrowed = CompletionItem.matching(ranked, "AL");
+		require(narrowed.length == 2 && narrowed[0] == ranked[0] && narrowed[1] == ranked[1],
+			"completion filtering changed provider ranking or item identity");
 		require(located.length == 1 && located[0].path == sourcePath && located[0].from.column == 2,
 			"definition response did not retain its UTF-16 location");
 		require(signature != null && signature.activeParameter == "right:Int" && signature.documentation == "Adds values",

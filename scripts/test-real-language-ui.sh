@@ -5,7 +5,26 @@ haxeon_root=${HAXEON_ROOT:-"$root_dir/haxeon"}
 haxeon=${HAXEON_BIN:-"$haxeon_root/scripts/haxeon"}
 server=${HAXEON_LSP:-"$haxeon_root/scripts/haxeon-lsp"}
 fixture=$(mktemp -d)
-trap 'rm -rf -- "$fixture"' EXIT
+cleanup() {
+    result=$?
+    if [[ -n ${REAL_LANGUAGE_UI_ARTIFACTS:-} ]]; then
+        mkdir -p "$REAL_LANGUAGE_UI_ARTIFACTS"
+        cp -R "$fixture/." "$REAL_LANGUAGE_UI_ARTIFACTS/"
+    elif [[ $result -ne 0 ]]; then
+        echo "Real language UI failure artifacts: $fixture" >&2
+        return
+    fi
+    rm -rf -- "$fixture"
+}
+trap cleanup EXIT
+run_ui() {
+    local phase=$1 state=$2 project=$3
+    shift 3
+    PRAGTICAL_PORTABLE="$state" HAXEON_LSP="$server" \
+        timeout 150 xvfb-run -a "$haxeon" run \
+        --project "$root_dir/tests/real-language-ui-smoke/haxeon.json" \
+        "${compiler_mode[@]}" -- "$project" "$@" 2>&1 | tee "$fixture/$phase.log"
+}
 mkdir -p "$fixture/project" "$fixture/state"
 cat > "$fixture/project/haxeon.json" <<'JSON'
 {"version":1,"package":{"name":"real-language-ui-fixture"},"entry":"Main","sourceRoots":["."],"scopeSourceRoots":false,"target":"host","outputDir":"build"}
@@ -18,7 +37,7 @@ with open(sys.argv[1], "w") as output:
 PY
 compiler_mode=()
 if [[ ${HAXEON_SELF_HOSTED:-0} == 1 ]]; then compiler_mode+=(--self-hosted); fi
-PRAGTICAL_PORTABLE="$fixture/state" xvfb-run -a "$haxeon" run --project "$root_dir/tests/real-language-ui-smoke/haxeon.json" "${compiler_mode[@]}" -- "$fixture/project"
+run_ui fixture "$fixture/state" "$fixture/project"
 "$haxeon" build --project "$fixture/project/haxeon.json" "${compiler_mode[@]}"
 set +e
 "$haxeon" run --project "$fixture/project/haxeon.json" "${compiler_mode[@]}"
@@ -29,4 +48,4 @@ if [[ $result -ne 42 ]]; then
     exit 1
 fi
 echo "PASS: graphical real-server fixture builds and executes after language edits"
-PRAGTICAL_PORTABLE="$fixture/state-repository" HAXEON_LSP="$server" xvfb-run -a "$haxeon" run --project "$root_dir/tests/real-language-ui-smoke/haxeon.json" "${compiler_mode[@]}" -- "$root_dir" repository
+run_ui repository "$fixture/state-repository" "$root_dir" repository

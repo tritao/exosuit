@@ -42,6 +42,26 @@ python scripts/build.py
 python scripts/run.py
 ```
 
+Run the editor against the real Haxeon language server without a visible desktop:
+
+```sh
+bash scripts/test-real-language-ui.sh
+```
+
+This Xvfb scenario checks diagnostics and Problems clearing, keyboard completion
+and acceptance, go-to-definition, hover and dismissal, rename, undo/redo, and
+saving. It also exercises unsaved overlays against repository sources without
+saving those edits. The runner retains its temporary fixture and logs on failure;
+set `REAL_LANGUAGE_UI_ARTIFACTS=/tmp/lsp-ui-results` to collect artifacts on success
+as well. The scenario is included in `scripts/ci.sh`. Completion popups use theme colors,
+show symbol kinds and provider details/documentation, and support arrow navigation,
+Tab/Enter acceptance, Escape dismissal, and mouse selection. Filtering preserves
+provider order and insertion text. To run focused popup checks headlessly:
+
+```sh
+DECORATION_UI_PHASES='popup-completion popup-completion-long popup-completion-wrap popup-live-completion popup-completion-mouse popup-completion-dismiss' bash scripts/test-decoration-ui.sh
+```
+
 The graphical workbench follows the system light/dark preference on launch.
 Use `python scripts/run.py --theme=dark` or `--theme=light` to override it.
 When no folder is open, the Explorer collapses to an Open Folder rail.

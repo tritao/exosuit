@@ -5,6 +5,7 @@ import haxeon.ui.LayoutFrame;
 import haxeon.ui.core.RenderNode;
 import haxeon.ui.core.UiEventKind;
 import haxeon.ui.core.UiKey;
+import haxeon.ui.core.UiModifier;
 import haxeon.ui.host.DesktopUiHost;
 import haxeon.ui.host.DesktopUiHostContext;
 import haxeon.ui.host.DesktopUiHostOptions;
@@ -20,6 +21,7 @@ class RealLanguageUiApp extends ExosuitApp {
 	var stage:Int = 0;
 	var stageFrame:Int = 0;
 	var frames:Int = 0;
+	var popupFrame:Int = -1;
 	var declaration = new editor.BufferPosition(0, 0);
 	var accepted:String = "";
 
@@ -37,14 +39,23 @@ class RealLanguageUiApp extends ExosuitApp {
 		application.openArgument(project);
 	}
 
-	function advance():Void { stage++; stageFrame = frames; Sys.println("real language UI stage " + stage); Sys.stdout().flush(); }
+	function advance():Void { stage++; stageFrame = frames; popupFrame = -1; Sys.println("real language UI stage " + stage); Sys.stdout().flush(); }
+	// Server callbacks can open an overlay immediately before submit. Let UIKit
+	// build it and apply deferred focus before sending the next key.
+	function popupReady(visible:Bool):Bool {
+		if (!visible) { popupFrame = -1; return false; }
+		if (popupFrame < 0) popupFrame = frames;
+		return frames > popupFrame + 1;
+	}
 	function command(name:String):Void {
 		if (!ui.commands.execute("exosuit.language:" + name)) throw "real graphical language command unavailable: " + name;
 	}
 
 	override public function submit(frame:LayoutFrame):RenderNode {
+		if (completed) return super.submit(frame);
 		frames++;
-		if (Sys.time() > deadline) throw "real graphical language timeout at stage " + stage + ": " + application.language.statusLabel();
+		if (Sys.time() > deadline) throw "real graphical language timeout at stage " + stage + ": " + application.language.statusLabel()
+			+ "; Problems: " + [for (problem in host.getProblems().values()) problem.message].join("; ");
 		var view = host.activeView(), service = application.language.client;
 		if (view == null) throw "real graphical language test lost editor";
 		if (application.language.statusLabel().indexOf("disabled after repeated failures") >= 0)
@@ -59,20 +70,25 @@ class RealLanguageUiApp extends ExosuitApp {
 				view.cursorChanged();
 				advance();
 			} else if (stage == 1 && frames > stageFrame) {
-				command("complete"); advance();
-			} else if (stage == 2 && host.isLanguagePopupVisible() && frames > stageFrame + 1) {
+				ui.key(UiEventKind.KeyDown, UiKey.Space, UiModifier.Control); advance();
+			} else if (stage == 2 && popupReady(host.isLanguagePopupVisible())) {
 				ui.key(UiEventKind.KeyDown, UiKey.Tab);
 				accepted = view.document.buffer.text;
-				if ((repository ? accepted != original : accepted.indexOf("return answer;") < 0) || host.isLanguagePopupVisible()) throw "real graphical completion did not replace prefix";
+				if ((repository ? accepted != original : accepted.indexOf("return answer;") < 0) || host.isLanguagePopupVisible()) throw "real graphical completion did not replace prefix: popup=" + host.isLanguagePopupVisible() + ", text=" + accepted;
 				var cursor = view.document.buffer.positionFromOffset(repository ? accepted.indexOf("slash >") + 1 : accepted.lastIndexOf("answer") + 1);
 				view.restoreCursor(cursor.line, cursor.column);
-				command("go-to-definition"); advance();
+				ui.key(UiEventKind.KeyDown, UiKey.G, UiModifier.Control | UiModifier.Alt); advance();
 			} else if (stage == 3 && view.cursorLine() == declaration.line && view.cursorColumn() == declaration.column) {
+				ui.key(UiEventKind.KeyDown, UiKey.Space, UiModifier.Control | UiModifier.Alt); advance();
+			} else if (stage == 4 && popupReady(host.isLanguagePopupVisible())) {
+				ui.key(UiEventKind.KeyDown, UiKey.Escape);
+				if (host.isLanguagePopupVisible() || view.document.buffer.text != accepted)
+					throw "real graphical hover did not dismiss without editing";
 				command("rename-symbol"); advance();
-			} else if (stage == 4 && host.isCommandViewActive() && frames > stageFrame + 1) {
+			} else if (stage == 5 && popupReady(host.isCommandViewActive())) {
 				ui.text(UiEventKind.TextInput, renamed);
 				ui.key(UiEventKind.KeyDown, UiKey.Enter); advance();
-			} else if (stage == 5 && view.document.buffer.text.indexOf(repository ? "folderSeparator >" : "return result;") >= 0 && service.diagnosticsFor(view.document).length == 0) {
+			} else if (stage == 6 && view.document.buffer.text.indexOf(repository ? "folderSeparator >" : "return result;") >= 0 && service.diagnosticsFor(view.document).length == 0 && [for (problem in host.getProblems().values()) if (problem.path == view.document.requirePath()) problem].length == 0) {
 				if (view.document.buffer.text.indexOf("var " + renamed + " =") < 0 || host.isCommandViewActive()) throw "real graphical rename was incomplete";
 				view.undo();
 				if (view.document.buffer.text != accepted) throw "real graphical rename did not undo transactionally";
@@ -83,7 +99,10 @@ class RealLanguageUiApp extends ExosuitApp {
 						throw "real graphical repository test changed checkout content";
 				} else if (!view.document.save()) throw "real graphical language fixture did not save";
 				completed = true;
-				Sys.println("PASS: real graphical diagnose, complete, definition, rename, undo/redo " + (repository ? "through repository unsaved overlays" : "and save"));
+				Sys.println("PASS: real graphical diagnose, keyboard completion, definition, hover/dismiss, rename, clear Problems, undo/redo " + (repository ? "through repository unsaved overlays" : "and save"));
+				// Repository overlays are deliberately unsaved; assertions above verify
+				// their restoration. Do not open the interactive dirty-close dialog.
+				desktopContext.onCloseRequested = function(close) close();
 				desktopContext.requestClose();
 			}
 		}

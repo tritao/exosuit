@@ -145,8 +145,8 @@ class LanguageServiceClient {
 				if (Std.isOfType(raw, Array))
 					for (item in cast(raw, Array<Dynamic>)) {
 						var label:Dynamic = Reflect.field(item, "label"), detail:Dynamic = Reflect.field(item, "detail"), insert:Dynamic = Reflect.field(item, "insertText");
-						var filter:Dynamic = Reflect.field(item, "filterText");
-						if (label != null) result.push(new CompletionItem(Std.string(label), detail == null ? "" : Std.string(detail), insert == null ? null : Std.string(insert), filter == null ? null : Std.string(filter)));
+						var filter:Dynamic = Reflect.field(item, "filterText"), kind:Dynamic = Reflect.field(item, "kind");
+						if (label != null) result.push(new CompletionItem(Std.string(label), detail == null ? "" : Std.string(detail), insert == null ? null : Std.string(insert), filter == null ? null : Std.string(filter), kind == null ? 0 : Std.int(kind), text(Reflect.field(item, "documentation"))));
 					}
 			}
 			complete(result);
