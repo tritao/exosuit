@@ -917,7 +917,7 @@ class ExosuitApp implements DesktopUiApplication {
 			}, item.enabled));
 		}
 		contextMenu = new CommandMenu(application.commands, application.context, [], x, y, valid,
-			function() { contextMenu = null; requestFrame(); }, actions);
+			function() { contextMenu = null; requestFrame(); }, actions, menuOpenedWithKeyboard(event));
 		requestFrame();
 	}
 
@@ -1948,7 +1948,8 @@ class ExosuitApp implements DesktopUiApplication {
 				var view = pane.activeView();
 				return view != null && view.document == document;
 			},
-			function() { if (contextMenu == breadcrumbMenu) contextMenu = null; requestFrame(); }, items);
+			function() { if (contextMenu == breadcrumbMenu) contextMenu = null; requestFrame(); }, items,
+			menuOpenedWithKeyboard(event));
 		contextMenu = breadcrumbMenu;
 		requestFrame();
 	}
@@ -1991,7 +1992,7 @@ class ExosuitApp implements DesktopUiApplication {
 		if (host.isCommandViewActive()) host.closeCommandView();
 		host.dismissLanguagePopup();
 		manageMenu = new CommandMenu(application.commands, application.context, [], x, y, function() return true,
-			function() { contextMenu = null; requestFrame(); }, actions);
+			function() { contextMenu = null; requestFrame(); }, actions, menuOpenedWithKeyboard(event));
 		contextMenu = manageMenu;
 		requestFrame();
 	}
@@ -2013,8 +2014,13 @@ class ExosuitApp implements DesktopUiApplication {
 		if (host.isCommandViewActive()) host.closeCommandView();
 		host.dismissLanguagePopup();
 		contextMenu = new CommandMenu(application.commands, application.context, entries, x, y, valid,
-			function() { contextMenu = null; requestFrame(); });
+			function() { contextMenu = null; requestFrame(); }, null, menuOpenedWithKeyboard(event));
 		requestFrame();
+	}
+
+	static function menuOpenedWithKeyboard(event:UiEvent):Bool {
+		return event.kind == UiEventKind.KeyDown || event.kind == UiEventKind.KeyRepeat ||
+			event.kind == UiEventKind.Activate;
 	}
 
 	function pruneStaleEditorPanes(tabs:Array<UiDocumentView>):Void {

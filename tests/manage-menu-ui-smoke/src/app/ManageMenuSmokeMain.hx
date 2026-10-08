@@ -45,7 +45,14 @@ class ManageMenuSmokeApp extends ExosuitApp {
 				}
 				var paletteItem:RenderNode = cast find(root, 'manage-palette');
 				var settingsItem:RenderNode = cast find(root, 'manage-settings');
-				ui.focusWidget(paletteItem.id);
+				var focused = ui.focus.focusedNode();
+				if (focused == null || focused.semantics == null ||
+					focused.semantics.role != haxeon.ui.semantics.AccessibilityRole.Menu)
+					throw 'Mouse-opened menu selected an action by default';
+				ui.key(UiEventKind.KeyDown, UiKey.Enter);
+				if (contextMenu == null || host.isCommandViewActive()) throw 'Enter activated an unselected menu';
+				ui.key(UiEventKind.KeyDown, UiKey.Down);
+				if (!paletteItem.id.equals(ui.focus.focusedId)) throw 'Down did not select first action';
 				ui.key(UiEventKind.KeyDown, UiKey.Down);
 				if (!settingsItem.id.equals(ui.focus.focusedId)) throw 'Down did not move menu focus';
 				ui.key(UiEventKind.KeyDown, UiKey.Up);
@@ -53,6 +60,31 @@ class ManageMenuSmokeApp extends ExosuitApp {
 				ui.key(UiEventKind.KeyDown, UiKey.Escape); stage++;
 			case 2:
 				if (find(root, 'manage-settings') != null) throw 'Escape did not dismiss menu';
+				var gear:RenderNode = cast find(root, 'activity-manage');
+				if (!gear.id.equals(ui.focus.focusedId)) throw 'Dismissal did not restore gear focus';
+				ui.key(UiEventKind.KeyDown, UiKey.Enter); stage = 22;
+			case 22:
+				var first = find(root, 'manage-palette');
+				if (first == null || !first.id.equals(ui.focus.focusedId))
+					throw 'Keyboard-opened menu did not select first action';
+				ui.key(UiEventKind.KeyDown, UiKey.Up);
+				var gear:RenderNode = cast find(root, 'activity-manage');
+				var event = new haxeon.ui.core.UiEvent(UiEventKind.PointerDown, gear.id);
+				// Close and reopen before a render can unmount the old focus trap.
+				showManageMenu(event);
+				showManageMenu(event);
+				stage = 24;
+			case 24:
+				var focus = ui.focus.focusedNode();
+				if (focus == null || focus.semantics == null || focus.semantics.label != 'Menu')
+					throw 'Replacing a menu retained the old item focus';
+				ui.key(UiEventKind.KeyDown, UiKey.Down);
+				var first:RenderNode = cast find(root, 'manage-palette');
+				if (!first.id.equals(ui.focus.focusedId)) throw 'Down failed after same-frame reopening';
+				ui.key(UiEventKind.KeyDown, UiKey.Escape); stage = 23;
+			case 23:
+				var gear:RenderNode = cast find(root, 'activity-manage');
+				if (!gear.id.equals(ui.focus.focusedId)) throw 'Replacement lost the original return focus';
 				click(root, 'activity-manage'); stage = 20;
 			case 20:
 				ui.pointerDown(frame.width - 20, 100, 0);
@@ -80,7 +112,7 @@ class ManageMenuSmokeApp extends ExosuitApp {
 			case 11: click(root, 'activity-manage'); stage++;
 			case 12: click(root, 'manage-palette'); stage++;
 			case 13:
-				if (!paletteVisible || contextMenu != null) throw 'Command palette action failed';
+				if (!host.isCommandViewActive() || contextMenu != null) throw 'Command palette action failed';
 				passed = true; stage++;
 				Sys.println('PASS: bottom Manage gear, anchored menu, Escape, settings, shortcuts, colors and command palette');
 			default:

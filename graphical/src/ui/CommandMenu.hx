@@ -10,6 +10,8 @@ import haxeon.ui.widgets.overlays.MenuItem;
 
 /** A contextual command surface whose target and predicates stay live. */
 class CommandMenu implements View {
+	static var nextOpeningId:Int = 0;
+	final surfaceKey:String;
 	final registry:CommandRegistry;
 	final commandContext:CommandContext;
 	final entries:Array<CommandMenuEntry>;
@@ -18,10 +20,14 @@ class CommandMenu implements View {
 	final x:Float;
 	final y:Float;
 	final customItems:Null<Array<MenuItem>>;
+	final selectFirstOnOpen:Bool;
 
 	public function new(registry:CommandRegistry, commandContext:CommandContext,
 			entries:Array<CommandMenuEntry>, x:Float, y:Float,
-			targetIsCurrent:Void->Bool, dismiss:Void->Void, ?customItems:Array<MenuItem>) {
+			targetIsCurrent:Void->Bool, dismiss:Void->Void, ?customItems:Array<MenuItem>, selectFirstOnOpen:Bool = false) {
+		this.selectFirstOnOpen = selectFirstOnOpen;
+		// Each opening has its own focus, hover and scroll lifetime.
+		surfaceKey = "command-context-menu:" + nextOpeningId++;
 		this.customItems = customItems;
 		this.registry = registry;
 		this.commandContext = commandContext;
@@ -44,6 +50,8 @@ class CommandMenu implements View {
 				if (isCurrent()) registry.perform(entry.command, commandContext);
 			}, targetValid && registry.isValid(entry.command, commandContext)));
 		}
-		return new Menu("command-context-menu", items, x, y, dismiss).build(context);
+		var menu = new Menu(surfaceKey, items, x, y, dismiss);
+		menu.selectFirstOnOpen = selectFirstOnOpen;
+		return menu.build(context);
 	}
 }
