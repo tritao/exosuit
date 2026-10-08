@@ -1102,7 +1102,8 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		frame.deltaSeconds = 1.0;
 		var file = new feedback.Problem("test", "file", path, 2, 1, 3, "File warning", 2, null, "Test");
 		var project = feedback.Problem.scoped("test", "project", feedback.ProblemScope.Project(haxe.io.Path.directory(path)), "Project issue", 1, "Test");
-		var workspace = feedback.Problem.scoped("test", "workspace", feedback.ProblemScope.Workspace, "Workspace issue", 1, "Test",
+		var longMessage = "Workspace issue\n" + StringTools.rpad("Unicode diagnostic: Olá 世界 😀 ", "long diagnostic text ", 2000);
+		var workspace = feedback.Problem.scoped("test", "workspace", feedback.ProblemScope.Workspace, longMessage, 1, "Test",
 			[new feedback.ProblemAction("Show status", "test:problem-action")]);
 		if (frames == 2) {
 			application.commands.add("test:problem-action", function(_) diagnosticActions++);
@@ -1127,8 +1128,21 @@ class WorkspaceSmokeApp extends ExosuitApp {
 			require(foundBadge, "Problems count did not render/update as a badge");
 		}
 		if (frames >= 2) { node("problem-group:" + project.scopeKey()); node("problem-group:workspace"); }
+		if (frames == 3) {
+			var problemRow = node("problem:" + workspace.key()), summaryFound = false;
+			problemRow.walk(function(child) {
+				var text = child.layout.text;
+				if (text != null && StringTools.startsWith(text, "Workspace issue")) {
+					summaryFound = true;
+					require(text.indexOf("\n") < 0 && text.length < longMessage.length && StringTools.endsWith(text, "…"),
+						"long multiline diagnostic did not fit into a single-line summary");
+				}
+			});
+			require(summaryFound && problemRow.globalBounds().height <= 28.1, "long diagnostic overflowed its Problems row");
+		}
 		if (frames == 4) {
 			require(diagnosticActions == 1 && host.activeView() == null, "workspace action/navigation failed: " + diagnosticActions);
+			require(hasText(node("problems-scroll"), longMessage), "selected diagnostic lost its full multiline message");
 			node("problem-action:0");
 		}
 		if (frames == 7) {

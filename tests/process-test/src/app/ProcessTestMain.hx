@@ -64,7 +64,12 @@ class ProcessTestMain {
 		require(writeFailed, "broken stdin pipe did not throw safely");
 		broken.close();
 		var spawnFailed = false;
-		try { Process.spawn("/definitely/missing/exosuit-process", []); } catch (_:Dynamic) { spawnFailed = true; }
+		try { Process.spawn("/definitely/missing/exosuit-process", []); } catch (error:Dynamic) {
+			spawnFailed = true;
+			var message = Std.string(error);
+			require(StringTools.startsWith(message, "Could not start process") && message.indexOf(": ") >= 0 && message.length < 256,
+				"spawn failure corrupted the OS error message");
+		}
 		require(spawnFailed, "missing executable did not fail during spawn");
 	}
 

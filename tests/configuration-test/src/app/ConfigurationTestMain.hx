@@ -23,6 +23,23 @@ class ConfigurationTestMain {
 
 	static function main():Int {
 		var arguments = Sys.args(), userPath = arguments[0], projectPath = arguments[1];
+		require(config.LanguageServerCommand.resolve(["configured", "argument"], "environment", "bundled", true, "compiler").join("|") == "configured|argument"
+			&& config.LanguageServerCommand.resolve([], "environment", "bundled", true, "compiler")[0] == "environment"
+			&& config.LanguageServerCommand.resolve([], "", "bundled", true, "compiler")[0] == "bundled"
+			&& config.LanguageServerCommand.resolve([], null, "bundled", false, "compiler")[0] == "compiler/scripts/haxeon-lsp",
+			"language server command overrides lost their precedence or argument boundaries");
+		var discovery = arguments[2] + "/discovery", launcher = discovery + "/haxeon/scripts/haxeon-lsp";
+		for (suffix in ["", "/haxeon", "/haxeon/scripts", "/graphical", "/graphical/build", "/graphical/build/host"])
+			FileSystem.createDirectory(discovery + suffix);
+		File.saveContent(launcher, "fixture");
+		require(config.LanguageServerCommand.findCompilerRoot(discovery + "/graphical/build/host") == FileSystem.absolutePath(discovery + "/haxeon"),
+			"language server discovery failed from a nested application directory");
+		FileSystem.deleteFile(launcher);
+		FileSystem.createDirectory(launcher);
+		require(config.LanguageServerCommand.findCompilerRoot(discovery) != FileSystem.absolutePath(discovery + "/haxeon"),
+			"language server discovery accepted a directory as an executable");
+		FileSystem.deleteDirectory(launcher);
+
 		var oldPortable = Sys.getEnv("PRAGTICAL_PORTABLE"), oldConfig = Sys.getEnv("XDG_CONFIG_HOME"), oldState = Sys.getEnv("XDG_STATE_HOME");
 		Sys.putEnv("PRAGTICAL_PORTABLE", arguments[2] + "/portable/");
 		require(ConfigurationPaths.userSettings() == arguments[2] + "/portable/settings.json"

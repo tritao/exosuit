@@ -20,6 +20,7 @@ import haxeon.ui.widgets.layout.Column;
 import haxeon.ui.widgets.layout.Row;
 import haxeon.ui.widgets.scroll.ScrollView;
 import haxeon.ui.widgets.text.Text;
+import haxeon.ui.widgets.text.MiddleEllipsisText;
 
 /** Scope grouping is independent of the producer; state follows stable diagnostic IDs. */
 class ProblemsPanel implements View {
@@ -66,6 +67,8 @@ class ProblemsPanel implements View {
 			var headerStyle = new LayoutStyle();
 			headerStyle.width = LayoutAxis.grow();
 			headerStyle.height = LayoutAxis.fixed(28);
+			headerStyle.clipHorizontal = true;
+			headerStyle.clipVertical = true;
 			headerStyle.padding = new Insets(12, 0, 12, 0);
 			var label = switch problems[0].scope {
 				case feedback.ProblemScope.File(path): haxe.io.Path.withoutDirectory(path);
@@ -107,10 +110,14 @@ class ProblemsPanel implements View {
 				var buttonStyle = new LayoutStyle();
 				buttonStyle.width = LayoutAxis.grow();
 				buttonStyle.height = LayoutAxis.fixed(28);
+				buttonStyle.clipHorizontal = true;
+				buttonStyle.clipVertical = true;
 				var button = new Button(problem.message, buttonStyle, function() {
 					selected.update(problem.key()); host.activateProblem(problem);
 				}, "problem:" + problem.key());
 				button.variant = ButtonVariant.Navigation;
+				var summary = StringTools.replace(StringTools.replace(StringTools.replace(problem.message, "\r", " "), "\n", " "), "\t", " ");
+				button.labelView = new MiddleEllipsisText("message-summary", summary, false);
 				button.selected = selected.value == problem.key();
 				var severity = problem.severity <= 1 ? "Error" : problem.severity == 2 ? "Warning" : "Information";
 				button.accessibilityLabel = severity + ": " + problem.message;
@@ -122,6 +129,12 @@ class ProblemsPanel implements View {
 					new KeyedView("message", new FlatProblemControl(button)), new KeyedView("metadata", new Text(metadata, null, context.theme.tokens.textSecondary, TextStyleOverride.text(12)))
 				], rowStyle)));
 				if (selected.value == problem.key()) {
+					var messageStyle = new LayoutStyle();
+					messageStyle.width = LayoutAxis.grow();
+					messageStyle.padding = new Insets(64, 6, 12, 6);
+					rows.push(new KeyedView("message-detail:" + problem.key(), new Text(problem.message, messageStyle,
+						context.theme.tokens.textPrimary, TextStyleOverride.combine(TextStyleOverride.text(12),
+							TextStyleOverride.paragraph(haxeon.ui.TextWrap.WordCharacter)))));
 					for (index in 0...problem.actions.length) {
 						var action = problem.actions[index];
 						var actionButton = new Button(action.label, null, function() host.activateProblem(problem.forAction(action)), "problem-action:" + index);
