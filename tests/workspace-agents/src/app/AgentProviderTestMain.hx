@@ -67,6 +67,19 @@ class AgentProviderTestMain {
 			executable = Sys.args()[1], bridge=Sys.args()[2],
 			clock = function() return Sys.time() * 1000;
 		var processes = new ProcessManager();
+		var sources = new BuildFileCollector();
+		sources.collect(root + "/build-inputs/source");
+		sources.collect(root + "/build-inputs/source/nested");
+		require(sources.files.length == 2, "Fingerprint source traversal followed a cycle, alias, broken link or excluded build directory");
+		sources.collect(root + "/build-inputs/source", true);
+		require(sources.files.length == 3, "Runtime traversal reused a source-only directory cache");
+		var runtime = new BuildFileCollector();
+		runtime.collect(root + "/build-inputs/runtime", true);
+		require(runtime.files.length == 1, "Fingerprint runtime traversal duplicated a symlink or followed a cycle");
+		var fresh = new BuildFileCollector();
+		sys.io.File.saveContent(root + "/build-inputs/source/new.hx", "changed");
+		fresh.collect(root + "/build-inputs/source");
+		require(fresh.files.length == 3, "Fingerprint traversal retained a stale directory cache");
 		var seed = new WorkspaceService("w", "e", [
 			{
 				id: "work",

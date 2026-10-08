@@ -12,6 +12,17 @@ env=dict(os.environ)
 env['LD_LIBRARY_PATH']=':'.join(str(p) for p in [HAXEON/'out',HAXEON/'.tools/hashlink',*sorted(p for p in (output/'native').iterdir() if p.is_dir())])
 with tempfile.TemporaryDirectory(prefix='exosuit-codex-') as temporary:
  root=Path(temporary)
+ # Canonical traversal must terminate cycles and deduplicate directory/file aliases.
+ inputs=root/'build-inputs'; source=inputs/'source'; runtime=inputs/'runtime'
+ (source/'nested').mkdir(parents=True); (source/'build').mkdir(); runtime.mkdir()
+ (source/'one.c').write_text('one'); (source/'nested/two.hx').write_text('two')
+ (source/'libmixed.so').write_text('mixed')
+ (source/'build/ignored.c').write_text('ignored'); (runtime/'libsample.so.1').write_text('runtime')
+ (source/'cycle').symlink_to('.',target_is_directory=True)
+ (source/'alias').symlink_to('nested',target_is_directory=True)
+ (source/'broken').symlink_to('missing',target_is_directory=True)
+ (runtime/'cycle').symlink_to('.',target_is_directory=True)
+ (runtime/'libsample.so').symlink_to('libsample.so.1')
  subprocess.run([str(HAXEON/'.tools/hashlink/hl'),str(output/'main.hl'),temporary,str(project.parent/'fake-codex.py'),str(ROOT/'scripts/run-codex-proxy.py')],env=env,check=True,timeout=90)
  state=json.loads((root/'fake-codex.json').read_text())
  assert state['starts']==1 and state['prompts']==3,state

@@ -479,32 +479,33 @@ class AgentManager {
 			return value;
 		}
 		var repository = repositoryRoot();
-		var files:Array<String> = [];
+		var collector = new BuildFileCollector();
+		var files = collector.files;
 		if (repository != null) {
 			for (relative in ["agent/haxeon.json", "haxeon.json", "release.lock", "scripts/run-codex-proxy.py",
 				"scripts/run-agent.py",
 				"haxeon/vendor/nativekit/CMakeLists.txt"])
-				addBuildFile(files, Path.join([repository, relative]));
+				collector.add(Path.join([repository, relative]));
 			for (relative in ["agent/src", "agent/native", "src", "native-packages", "haxeon/src", "haxeon/stdlib",
 				"haxeon/native", "haxeon/packages/platform", "haxeon/packages/credentials", "haxeon/packages/filesystem",
 				"haxeon/packages/gpu", "haxeon/vendor/nativekit"])
-				collectBuildFiles(Path.join([repository, relative]), files, true);
+				collector.collect(Path.join([repository, relative]));
 		}
 		var launcher = managerBytecode();
 		var proxy = findProxy(launcher);
-		if (proxy != null) addBuildFile(files, proxy);
+		if (proxy != null) collector.add(proxy);
 		var installRoot = Path.directory(Path.directory(launcher));
 		if (repository == null) {
 			// Bundles do not include sources, so fingerprint the installed runtime itself.
-			addBuildFile(files, launcher);
+			collector.add(launcher);
 			var runtime = FileSystem.fullPath(Sys.executablePath());
-			addBuildFile(files, runtime);
-			collectRuntimeArtifacts(Path.join([Path.directory(launcher), "native"]), files);
+			collector.add(runtime);
+			collector.collect(Path.join([Path.directory(launcher), "native"]), true);
 			if (Path.directory(runtime) != Path.directory(launcher))
-				collectRuntimeArtifacts(Path.directory(runtime), files);
+				collector.collect(Path.directory(runtime), true);
 			for (name in ["exosuit-agent.hl", "exosuit-agent", "exosuit-agent.exe", "hl", "hl.exe"])
-				addBuildFile(files, Path.join([Path.directory(launcher), name]));
-			collectRuntimeArtifacts(Path.join([installRoot, "lib"]), files);
+				collector.add(Path.join([Path.directory(launcher), name]));
+			collector.collect(Path.join([installRoot, "lib"]), true);
 		}
 		files.sort(Reflect.compare);
 		var identityRoot = repository == null ? installRoot : repository;
@@ -528,51 +529,6 @@ class AgentManager {
 		var result = "";
 		for (index in 0...digest.length) result += StringTools.hex(digest.get(index), 2);
 		return result.toLowerCase();
-	}
-
-	static function addBuildFile(files:Array<String>, path:String):Void {
-		if (FileSystem.exists(path) && !FileSystem.isDirectory(path) && files.indexOf(path) < 0) files.push(path);
-	}
-
-	static function collectBuildFiles(directory:String, files:Array<String>, includeVendor:Bool = false):Void {
-		if (!FileSystem.exists(directory) || !FileSystem.isDirectory(directory)) return;
-		var names = FileSystem.readDirectory(directory);
-		names.sort(Reflect.compare);
-		for (name in names) {
-			if (name == "build" || name == "out" || name == ".git" || name == "__pycache__"
-				|| name == "test" || name == "tests" || name == "bench" || name == "benchmarks"
-				|| name == "examples" || name == "docs" || name == "doc" || (name == "vendor" && !includeVendor)) continue;
-			var path = Path.join([directory, name]);
-			if (FileSystem.isDirectory(path)) {
-				collectBuildFiles(path, files, includeVendor);
-			} else {
-				var dot = name.lastIndexOf(".");
-				var extension = dot < 0 ? "" : name.substr(dot + 1).toLowerCase();
-				if (extension == "hx" || extension == "c" || extension == "h" || extension == "cpp" || extension == "json"
-					|| extension == "hxi" || extension == "hxmap" || extension == "inc" || extension == "in"
-					|| extension == "cmake" || extension == "hxml" || extension == "def" || extension == "rc"
-					|| Path.withoutDirectory(path) == "CMakeLists.txt") addBuildFile(files, path);
-			}
-		}
-	}
-
-	static function collectRuntimeArtifacts(directory:String, files:Array<String>):Void {
-		if (!FileSystem.exists(directory) || !FileSystem.isDirectory(directory)) return;
-		var names = FileSystem.readDirectory(directory);
-		names.sort(Reflect.compare);
-		for (name in names) {
-			var path = Path.join([directory, name]);
-			if (FileSystem.isDirectory(path)) {
-				collectRuntimeArtifacts(path, files);
-				continue;
-			}
-			var dot = name.lastIndexOf(".");
-			var extension = dot < 0 ? "" : name.substr(dot + 1).toLowerCase();
-			var lowerName = name.toLowerCase();
-			if (extension == "hl" || extension == "hdll" || extension == "so" || extension == "dylib" || extension == "dll"
-				|| extension == "a" || extension == "lib" || lowerName.indexOf(".so.") >= 0 || lowerName.indexOf(".dylib.") >= 0)
-				addBuildFile(files, path);
-		}
 	}
 
 	static function readDiscovery(directory:String, root:String):Null<Dynamic> {
