@@ -165,3 +165,27 @@ The full native session-render test now passes. Investigation of its pre-existin
 Applying only these test corrections to the original session-render source also passes against the saved previous native library (`/tmp/exosuit-session-corrected-baseline`). This confirms the corrections independently of adaptive caching. The current complete executable (`/tmp/exosuit-row-cache-smoke`) passes all existing assertions and the adaptive-cache regression.
 
 The adaptive regression additionally checks that a two-layout-pixel translation (whole device pixels at 1×, 1.5× and 2×) increases cache hits without new misses. Fractional movement, stationary population, exact direct/cached pixel equality, and whole-pixel reuse are now covered together. These changes affect tests and documentation only; the native renderer and measured benchmark binaries are unchanged. Windows/macOS execution and the full framework suite remain unverified.
+
+
+## Reuse native selection-query geometry
+
+The next CPU profile (`/tmp/exosuit-selection-next-perf.data`) highlighted `skb_layout_iterate_text_range_bounds_with_offset`. The public selection-buffer API computes the same geometry once for buffer sizing and again for filling. Repeated painting also asks for unchanged selections in fully selected paragraph chunks.
+
+`TextEngine::selection_rects` now retains its last normalized query, keyed by active layout ID, native layout generation, both endpoint offsets, and both affinities. A native generation change invalidates reuse after incremental ASCII edits; new layouts invalidate it after Unicode edits, wrapping or style changes. Returned vectors remain independent values. Retention is limited to 256 rectangles (4 KiB of rectangle data per text engine); larger results bypass retention and clear the cached query. This is separate from the existing grapheme cache used for IME geometry.
+
+Two alternating baseline/optimized Linux/Xvfb comparisons used identical frozen application bytecode and runtime. No application rebuild or test compilation overlapped these timed runs:
+
+| Metric | Previous renderer | Selection-query cache |
+| --- | ---: | ---: |
+| Median active-frame time | 10.6–10.7 ms | 8.8–9.0 ms |
+| Active-frame time p95 | 17.6–17.8 ms | 14.8–15.3 ms |
+| Median application submission | 6.3 ms | 3.8–4.2 ms |
+| Median native layout/submission phase | 4.4 ms | 2.3–2.5 ms |
+| Scheduled-input latency p95 | 43.0–45.1 ms | 43.8–43.9 ms |
+| Scenario checks | Both pass | Both pass |
+
+Frame time improves consistently in these runs; input latency does not show a clear improvement. The input metric also includes the scheduling delay before a frame begins. Results are `/tmp/exosuit-selection-query-{before,after}-{1,2}/result.json`. Baseline native libraries are saved under `/tmp/exosuit-selection-query-baseline/native`. Application bytecode remains `a6e7563f53fe397f9f08aba0e07176de19210626b79c0d4be1b460487caff6b2`; baseline and optimized native UI hashes are `4a816266b148c6152b600b9377763802768e823afd7292299fc8a96fbca480b9` and `81416e63f02240b49c5f646316232ef9459af5211526cbb266124cff836d181f`.
+
+The complete native text-engine test passes, including new fresh-layout comparisons after an incremental ASCII edit, Unicode fallback, width and font-size changes, reversed and affinity-specific endpoints, mixed-direction text, mutation of a returned copy, and a large uncached selection. The complete native session-render regression also passes with this library. Tests were compiled/run directly against the graphical native build; no full framework suite or Windows/macOS run was performed for this change.
+
+A later verification rebuild included concurrent edits to `clay_layout_backend.cpp` and produced native UI hash `4fc44bed3326018f9c2d5b7097cbb4f7f32d536385862248af31a2a891940f99`. The full session-render test passes on that combined build too, but the timings above belong specifically to the recorded optimized hash `81416e…`; the combined build was not benchmarked in this comparison. Concurrent layout and application edits are outside this selection-query change.
