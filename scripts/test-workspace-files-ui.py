@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Xvfb desktop acceptance for RPC-backed file previews and preview-tab behavior."""
+"""Xvfb desktop acceptance for editable files in an attached local workspace."""
 import json
 import os
 from pathlib import Path
@@ -20,135 +20,62 @@ with tempfile.TemporaryDirectory(prefix="exworkspacefilesui-") as temporary:
     fixture = Path(temporary)
     project = fixture / "project"
     project.mkdir()
-    (project / "README.md").write_text("First preview\n")
-    expected = "# Remote preview fixture: café 🙂\n\n```haxe\nclass Example {}\n```\n"
-    updated = "# Remote preview fixture: café 🙂 updated after listing\n\n```haxe\nclass Example {}\n```\n"
-    changed = "# Remote preview fixture: café 🙂 changed live on disk\n\n```haxe\nclass Example {}\n```\n"
-    refreshed = "# Remote preview fixture: café 🙂 refreshed from disk\n\n```haxe\nclass Example {}\n```\n"
-    note = project / "notes.md"
-    note.write_text(expected)
-    search_file = project / "search-result.md"
-    search_file.write_text("café 🙂 needle after the emoji\n")
+    (project / "README.md").write_text("Local project readme\n", encoding="utf-8")
+    (project / "notes.md").write_text("Initial local note\n", encoding="utf-8")
     state = fixture / "state"
-    def run_capture(name, actions, capture_seconds=15):
-        target = fixture / name
-        environment = dict(os.environ,
-            XDG_STATE_HOME=str(state),
-            PRAGTICAL_PORTABLE=str(fixture / "settings"),
-            EXOSUIT_AGENT_LAUNCHER=str(INSTALL / "tools/exosuit-agent.hl" if INSTALL else ROOT / "agent/build/host/main.hl"))
-        if INSTALL:
-            environment.update(HAXEON_BIN="/no/source/compiler", HAXEON_ROOT="/no/source/tree", LD_LIBRARY_PATH="")
-        app = None
-        try:
-            with (fixture / (name + ".log")).open("w") as log:
-                app = subprocess.Popen([
-                    *RUNNER, str(project), "--capture-dir=" + str(target), "--capture-seconds=" + str(capture_seconds)
-                ], cwd=ROOT, env=environment, stdout=log, stderr=subprocess.STDOUT)
-                window = subprocess.check_output([
-                    "timeout", "60", "xdotool", "search", "--sync", "--onlyvisible", "--name", "^exosuit$"
-                ], text=True).splitlines()[0]
-                subprocess.run(["xdotool", "windowfocus", "--sync", window], check=True)
-                # Let the authenticated local workspace connection populate the tree.
-                time.sleep(7)
-
-                def click(x, y):
-                    subprocess.run(["xdotool", "mousemove", "--window", window, str(x), str(y)], check=True)
-                    subprocess.run(["xdotool", "click", "1"], check=True)
-
-                def double_click(x, y):
-                    subprocess.run(["xdotool", "mousemove", "--window", window, str(x), str(y)], check=True)
-                    subprocess.run(["xdotool", "click", "--repeat", "2", "--delay", "180", "1"], check=True)
-
-                actions(click, double_click)
-                assert app.wait(timeout=75) == 0, (fixture / (name + ".log")).read_text()[-5000:]
-                app = None
-            return (json.loads((target / "app-state.json").read_text()),
-                (target / "ui-tree.txt").read_text())
-        except Exception:
-            if (fixture / (name + ".log")).exists():
-                print((fixture / (name + ".log")).read_text()[-5000:])
-            raise
-        finally:
-            if app is not None and app.poll() is None:
-                app.terminate()
-                app.wait(timeout=10)
-
+    capture = fixture / "capture"
+    environment = dict(os.environ,
+        XDG_STATE_HOME=str(state),
+        PRAGTICAL_PORTABLE=str(fixture / "settings"),
+        EXOSUIT_AGENT_LAUNCHER=str(INSTALL / "tools/exosuit-agent.hl" if INSTALL else ROOT / "agent/build/host/main.hl"))
+    if INSTALL:
+        environment.update(HAXEON_BIN="/no/source/compiler", HAXEON_ROOT="/no/source/tree", LD_LIBRARY_PATH="")
+    app = None
     try:
-        def verify_live_stale(click, double_click):
-            double_click(145, 140)  # Open notes.md as a sticky read-only tab.
-            time.sleep(.4)
-            note.write_text(changed)
-            time.sleep(1.0)  # Native watcher coalesces and delivers the root cursor.
+        with (fixture / "app.log").open("w") as log:
+            app = subprocess.Popen([
+                *RUNNER, str(project), "--capture-dir=" + str(capture), "--capture-seconds=15"
+            ], cwd=ROOT, env=environment, stdout=log, stderr=subprocess.STDOUT)
+            window = subprocess.check_output([
+                "timeout", "60", "xdotool", "search", "--sync", "--onlyvisible", "--name", "^exosuit$"
+            ], text=True).splitlines()[0]
+            subprocess.run(["xdotool", "windowfocus", "--sync", window], check=True)
+            # Allow the local workspace connection and Files tree to initialize.
+            time.sleep(5)
 
-        stale_diagnostic, stale_tree = run_capture("stale", verify_live_stale)
-        stale_tabs = stale_diagnostic["workspaceFileTabs"]
-        assert stale_diagnostic["workspaceConnection"] == "Workspace connected", stale_diagnostic
-        assert stale_diagnostic["explorerWatching"] is True, stale_diagnostic
-        assert len(stale_tabs) == 1 and stale_tabs[0]["path"] == "notes.md", stale_tabs
-        assert stale_tabs[0]["diskChanged"] is True, stale_tabs
-        assert "File changed on disk. Refresh to load the latest version." in stale_tree, stale_tree[-1600:]
+            def click(x, y):
+                subprocess.run(["xdotool", "mousemove", "--window", window, str(x), str(y)], check=True)
+                subprocess.run(["xdotool", "click", "1"], check=True)
 
-        def verify_refresh(click, double_click):
-            click(145, 114)  # README.md: open as the temporary preview tab.
-            time.sleep(.3)
-            note.write_text(updated)  # Force readOpen to reject the now-stale listing revision.
-            click(145, 140)  # notes.md: replace the existing preview.
-            time.sleep(.4)
-            double_click(145, 140)  # Keep the file in a sticky tab.
-            time.sleep(.4)
-            note.write_text(refreshed)
-            time.sleep(.7)
-            click(1200, 100)  # Refresh the open saved-file snapshot.
+            # Open notes.md from Files, replace its contents, then save the normal document.
+            subprocess.run(["xdotool", "mousemove", "--window", window, "145", "140"], check=True)
+            subprocess.run(["xdotool", "click", "--repeat", "2", "--delay", "180", "1"], check=True)
             time.sleep(.5)
-            click(500, 220)  # Focus the read-only file view and try to edit it.
-            subprocess.run(["xdotool", "type", "--clearmodifiers", "SHOULD_NOT_EDIT"], check=True)
+            click(500, 220)
+            subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+a"], check=True)
+            subprocess.run(["xdotool", "type", "--clearmodifiers", "Editable local file: LOCAL_EDIT"], check=True)
+            subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+s"], check=True)
+            time.sleep(.5)
+            assert app.wait(timeout=75) == 0, (fixture / "app.log").read_text()[-5000:]
+            app = None
 
-        diagnostic, tree = run_capture("refreshed", verify_refresh)
-        tabs = diagnostic["workspaceFileTabs"]
+        diagnostic = json.loads((capture / "app-state.json").read_text())
+        tree = (capture / "ui-tree.txt").read_text()
         assert diagnostic["workspaceConnection"] == "Workspace connected", diagnostic
-        assert diagnostic["explorerWatching"] is True, diagnostic
-        assert len(tabs) == 1 and tabs[0]["path"] == "notes.md" and tabs[0]["preview"] is False, tabs
-        assert tabs[0]["syntax"] == "Markdown" and tabs[0]["diskChanged"] is False, tabs
-        assert "Remote preview fixture: café 🙂 refreshed from disk" in tree and "SHOULD_NOT_EDIT" not in tree, (
-            "\n".join(line for line in tree.splitlines() if "workspace-file" in line or "Refresh" in line)
-            + "\n" + tree[-1200:])
-        assert note.read_text() == refreshed
+        assert "notes.md" in diagnostic["documents"], diagnostic["documents"]
+        assert diagnostic["workspaceFileTabs"] == [], diagnostic["workspaceFileTabs"]
+        assert "Read-only" not in tree, tree[-1500:]
+        assert (project / "notes.md").read_text(encoding="utf-8") == "Editable local file: LOCAL_EDIT"
         assert diagnostic["errors"] == [], diagnostic["errors"]
-        print("PASS: RPC explorer, syntax preview, live stale-file notice, stale-revision recovery, manual refresh, sticky tab and read-only view")
-
-        nested = project / "nested"
-        nested.mkdir()
-        (nested / "child.md").write_text("nested workspace file\n")
-
-        def verify_remote_search(click, double_click):
-            click(180, 56)  # Search sidebar tab.
-            click(180, 102)  # Search query field.
-            subprocess.run(["xdotool", "type", "--clearmodifiers", "needle"], check=True)
-            time.sleep(.7)
-            click(150, 210)  # First content match; opens its remote file preview.
-            time.sleep(.7)
-            click(180, 102)
-            subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+a"], check=True)
-            subprocess.run(["xdotool", "type", "--clearmodifiers", "search-result"], check=True)
-            click(100, 140)  # Switch from content search to file-name search.
-            time.sleep(1.0)
-            click(180, 102)
-            subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+a"], check=True)
-            subprocess.run(["xdotool", "type", "--clearmodifiers", "nested"], check=True)
-            time.sleep(.7)
-            click(150, 210)  # A directory name result reveals and expands it in Files.
-            time.sleep(1.0)
-
-        search_diagnostic, search_tree = run_capture("remote-search", verify_remote_search, 20)
-        search_tabs = search_diagnostic["workspaceFileTabs"]
-        assert search_diagnostic["workspaceConnection"] == "Workspace connected", search_diagnostic
-        assert len(search_tabs) == 1 and search_tabs[0]["path"] == "search-result.md", search_tabs
-        assert search_tabs[0]["searchSelection"] == {"start": 7, "end": 13}, search_tabs[0]
-        assert search_diagnostic["sidebarMode"] == "files", search_diagnostic["sidebarMode"]
-        assert 'label="child.md"' in search_tree, search_tree[-2500:]
-        assert search_diagnostic["errors"] == [], search_diagnostic["errors"]
-        print("PASS: remote content/name search, Unicode byte-to-codepoint selection and opening search results")
+        print("PASS: desktop Files opens an attached local file as an editable document and saves changes")
+    except Exception:
+        if (fixture / "app.log").exists():
+            print((fixture / "app.log").read_text()[-5000:])
+        raise
     finally:
+        if app is not None and app.poll() is None:
+            app.terminate()
+            app.wait(timeout=10)
         for endpoint in (fixture / "state").rglob("endpoint.json"):
             try:
                 pid = json.loads(endpoint.read_text())["managerPid"]

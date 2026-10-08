@@ -48,16 +48,20 @@ remains open.
 ## M16.2 shared desktop/browser workspace search, 2026-10-07
 
 The shared Search sidebar now uses the bounded remote name/content RPC when a
-workspace file grant is active, while preserving local project search in
-standalone browser mode and when the grant is absent. Remote content matches
-open read-only previews at the correct UTF-8 byte range; filename matches open
-their files, and directory-name matches reveal the folder in Files. Search
-requests are debounced, paged and cancelled as the query or attachment changes.
+remote workspace file grant is active, while preserving local project search
+when the grant is absent or the attached workspace is on this machine. Remote
+content matches open read-only previews at the correct UTF-8 byte range;
+filename matches open their files, and directory-name matches reveal the folder
+in Files. Desktop local attachments use the native directory tree and regular
+editable documents, even while the local workspace service is connected.
+Search requests are debounced, paged and cancelled as the query or attachment
+changes.
 
 Validation: `python3 scripts/test-workspace-terminals.py` passes the workspace
-file/search contract suite. `xvfb-run -a python3
-scripts/test-workspace-files-ui.py` passes the remote desktop search, Unicode
-selection and result-opening path. The full `tests/workspace-browser-pairing/run.py
+file/search contract suite. Desktop UI coverage in `xvfb-run -a python3
+scripts/test-workspace-files-ui.py` now checks that Files opens attached local
+files as editable documents and saves changes. The full
+`tests/workspace-browser-pairing/run.py
 --agent` acceptance passes against AgentMain and the local Wrangler Worker for
 both wasm32 and wasm-gc; it covers remote content/name/folder search, preview
 invalidation, terminal/Codex use and relay reconnect. Both Emscripten web host
@@ -328,10 +332,10 @@ code block, stale-listing recovery, preview replacement, sticky-tab behavior and
 blocked edits. Live file-change notifications, browser integration, and broader
 F1/F2 acceptance remain open.
 
-## M16.2 Linux desktop workspace file previews, 2026-10-07
+## M16.2 Remote workspace file previews, 2026-10-07
 
-Connected the graphical Explorer to the negotiated `WorkspaceFileClient` on
-the existing Linux workspace attachment. The tree obtains its root through RPC,
+Remote `WorkspaceAttachment` implementations use the negotiated
+`WorkspaceFileClient`. Their tree obtains its root through RPC,
 loads directory pages on demand, and offers explicit retry/load-more rows. A
 single file click opens a replaceable preview tab; a double-click makes it
 sticky. File contents use the revision-checked chunk API, with a 16 MiB per-file
@@ -339,15 +343,16 @@ limit, two concurrent reads and a 32 MiB retained-content limit across tabs.
 Stale listing revisions trigger one reopen at the current revision; chunks must
 still match it. The reader validates UTF-8 and rejects binary data. The separate
 workspace-file tab uses UIKit's read-only text field so it cannot accidentally
-write a remote file through local document save paths. The Explorer resets its
+write a remote file through local document save paths. Local attachments instead
+use the native directory tree and regular editable documents. The Explorer resets its
 page cache after RPC connection replacement, restarts expired cursors, and caps
 the retained tree model at 256 directories and 32,768 entries.
 
-Added `scripts/test-workspace-files-ui.py` for an Xvfb end-to-end check of the
-RPC-backed tree, preview replacement, sticky-tab behavior and read-only view.
+Added `scripts/test-workspace-files-ui.py` for an Xvfb end-to-end check that
+desktop Files edits and saves files from a local workspace attachment.
 Validation: graphical Haxeon target build, agent target build, and the full
-workspace terminal/files RPC suite pass; the desktop UI acceptance script passes,
-including a file changed after listing and an attempted editor mutation.
+workspace terminal/files RPC suite pass; the desktop UI acceptance script checks
+that the open file is a normal editable document and its saved text reaches disk.
 Remaining: automatic file-change/watch updates, browser integration,
 non-Linux secure filesystem backends and broader F1/F2 acceptance. See
 [`WORKSPACE-FILES.md`](WORKSPACE-FILES.md).

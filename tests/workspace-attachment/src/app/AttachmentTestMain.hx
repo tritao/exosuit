@@ -118,6 +118,20 @@ class AttachmentTestMain {
     a.select(root);
     b.select(root);
     var deadline = clock() + 115000;
+    if (mode == "relay-persist-inspect") {
+      while ((!a.ready || !b.ready) && clock() < deadline) {
+        require(a.error == null && b.error == null, "Attachment failed after relay restart: " + a.error + " / " + b.error);
+        step();
+      }
+      deadline = clock() + 10000;
+      while (a.remoteAccessStatus() == null && clock() < deadline) { a.refreshPairings(false); step(); }
+      var status = a.remoteAccessStatus();
+      require(a.ready && status != null && status.configured && status.origin == args[3],
+        "Persisted relay configuration was not restored after manager restart: " + (status == null ? "no status" : status.origin));
+      a.dispose(); b.dispose(); processes.shutdown(); runtime.dispose();
+      Sys.println("PASS: workspace relay settings persist across manager restart");
+      return;
+    }
     if (mode == "reject") {
       while (a.error == null && clock() < deadline) {
         require(!a.ready, "Unverified workspace accepted");

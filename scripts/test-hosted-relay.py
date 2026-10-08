@@ -10,6 +10,7 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parent.parent
+from agent_test_runtime import launcher_path
 
 
 def main():
@@ -19,6 +20,7 @@ def main():
     if not args.origin.startswith('https://'):
         parser.error('Expected an HTTPS relay origin')
     cli = os.environ.get('HAXEON_BIN', str(Path(os.environ.get('HAXEON_ROOT', str(ROOT / 'haxeon'))) / 'scripts/haxeon'))
+    launcher = launcher_path(ROOT)
     compiler_mode = ['--self-hosted'] if os.environ.get('HAXEON_SELF_HOSTED') == '1' else []
     command = [cli, 'run', '--project', str(ROOT / 'tests/workspace-attachment/haxeon.json'), *compiler_mode, '--']
     with tempfile.TemporaryDirectory(prefix='exa-live-') as temporary:
@@ -27,7 +29,7 @@ def main():
         project.mkdir()
         environment = dict(os.environ, XDG_STATE_HOME=str(state))
         try:
-            subprocess.run([*command, 'relay-live', str(project), str(ROOT / 'scripts/run-agent.py'), args.origin],
+            subprocess.run([*command, 'relay-live', str(project), str(launcher), args.origin],
                            env=environment, check=True, timeout=150)
         finally:
             for endpoint in state.glob('exosuit/workspaces/*/endpoint.json'):

@@ -612,6 +612,8 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 
 	public function fileScope():Null<String> return workspaceRoot;
 
+	public function hasLocalFileAccess():Bool return false;
+
 	public function isWorkspaceConnected():Bool
 		return workspaceRoot != null && workspaceConnection != null && rpc != null
 			&& rpc.current() == workspaceConnection;

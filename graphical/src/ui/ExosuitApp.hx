@@ -1259,7 +1259,7 @@ class ExosuitApp implements DesktopUiApplication {
 			return new Column("explorer-empty", [new KeyedView("open", open)], compact);
 		}
 		var attachment = workspaceAttachment;
-		var remoteFiles = attachment != null;
+		var remoteFiles = attachment != null && !attachment.hasLocalFileAccess();
 		var remoteScope:String = explorerRoot;
 		var remoteWorkspace = attachment == null ? "" : attachment.fileWorkspace();
 		if (attachment != null && attachment.fileScope() != null) remoteScope = attachment.fileScope();

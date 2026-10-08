@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
+import sys
 
 
 def run_cli(
@@ -94,3 +95,14 @@ def run_cli(
     return subprocess.run(
         [str(hashlink), str(cli), *arguments], env=environment, check=False
     ).returncode
+
+
+def main() -> int:
+    project_root = Path(
+        os.environ.get("EXOSUIT_PROJECT_ROOT") or Path(__file__).resolve().parent.parent
+    ).expanduser().resolve()
+    return run_cli(project_root, sys.argv[1:])
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

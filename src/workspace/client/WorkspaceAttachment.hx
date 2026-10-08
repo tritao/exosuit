@@ -10,5 +10,7 @@ interface WorkspaceAttachment {
   public function fileClient():Null<WorkspaceFileClient>;
   public function fileWorkspace():String;
   public function fileScope():Null<String>;
+  /** True when fileScope is on this machine and can use the regular editable file documents. */
+  public function hasLocalFileAccess():Bool;
   public function dispose():Void;
 }

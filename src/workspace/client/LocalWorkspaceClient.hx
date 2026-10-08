@@ -140,6 +140,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
 
   public function fileWorkspace():String return "workspace";
   public function fileScope():Null<String> return root;
+  public function hasLocalFileAccess():Bool return true;
 
   public function hasGroupTree():Bool return client != null && client.capabilities().indexOf(WorkspaceProtocol.TREE) >= 0;
   public function canEditGroups():Bool return workbench.canEditGroups();
@@ -168,19 +169,17 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     try {
       var executable:String;
       var arguments:Array<String>;
+      executable = Sys.executablePath();
+      arguments = [launcher, "--manager", root];
       if (managed) {
-        executable = Sys.executablePath();
-        arguments = [launcher, "--manager", root, "--prepare-update", "--wire"];
+        arguments.push("--prepare-update");
       } else {
-        if (Sys.systemName() == "Windows") {
-          updateFailure = "This older workspace service must be restarted from its host.";
-          pairingsRevision++;
-          return;
-        }
-        executable = "python3";
-        arguments = [findLegacyManager(), root, "--restart", "--wire", "--expected-generation", instance];
+        arguments.push("--restart");
+        arguments.push("--expected-generation");
+        arguments.push(instance);
       }
-      updateHelper = processes.start(executable, arguments, root, managed ? helperEnvironment() : environment);
+      arguments.push("--wire");
+      updateHelper = processes.start(executable, arguments, root, helperEnvironment());
       updateDeadline = clock() + 110000;
     } catch (failure:Dynamic) updateFailure = Std.string(failure);
     pairingsRevision++;
@@ -442,19 +441,6 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
       directory = parent;
     }
     throw "Workspace agent launcher is not installed";
-  }
-
-  function findLegacyManager():String {
-    var directory = FileSystem.fullPath(haxe.io.Path.directory(launcher));
-    for (_ in 0...10) {
-      for (candidate in [haxe.io.Path.join([directory, "scripts", "run-agent.py"]),
-          haxe.io.Path.join([directory, "run-agent.py"])])
-        if (FileSystem.exists(candidate)) return FileSystem.fullPath(candidate);
-      var parent = haxe.io.Path.directory(directory);
-      if (parent == directory || parent.length == 0) break;
-      directory = parent;
-    }
-    throw "Workspace update helper is not installed";
   }
 
   public function select(path:Null<String>):Void {

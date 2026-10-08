@@ -51,7 +51,9 @@ def main() -> int:
 
     try:
         environment = {
-            "EXOSUIT_AGENT_LAUNCHER": str(root_dir / "agent" / "build" / "host" / "main.hl")
+            "EXOSUIT_AGENT_LAUNCHER": str(root_dir / "agent" / "build" / "host" / "main.hl"),
+            "EXOSUIT_HAXEON_CLI_PYTHON": sys.executable,
+            "EXOSUIT_PROJECT_ROOT": str(root_dir),
         }
         _enable_core_dumps()
         return run_cli(root_dir, arguments, environment)

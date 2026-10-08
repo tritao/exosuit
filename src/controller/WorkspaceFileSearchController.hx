@@ -56,7 +56,7 @@ class WorkspaceFileSearchController {
 		scannedEntries = 0;
 		skippedEntries = 0;
 		error = null;
-		if (attachment == null || client == null || attachment.fileWorkspace() == null
+		if (attachment == null || attachment.hasLocalFileAccess() || client == null || attachment.fileWorkspace() == null
 			|| attachment.fileWorkspace().length == 0) {
 			active = false;
 			complete = true;

@@ -1,6 +1,7 @@
 package app;
 
 typedef AgentLockHandle = hl.Abstract<"realtime_file_lock">;
+typedef AgentProcessIdentityHandle = hl.Abstract<"realtime_process_identity">;
 
 @:hlNative("haxeon_runtime", "__host_prepare_private_directory")
 extern function nativePrepareDirectory(path:String):Bool;
@@ -40,6 +41,15 @@ extern function nativeStopRequested():Bool;
 
 @:hlNative("haxeon_runtime", "__host_regular_file_identity")
 extern function nativeFileIdentity(path:String):Null<String>;
+
+@:hlNative("haxeon_runtime", "__host_process_identity_open")
+extern function nativeProcessOpen(pid:Int, expectedExecutable:String):Null<AgentProcessIdentityHandle>;
+
+@:hlNative("haxeon_runtime", "__host_process_identity_terminate")
+extern function nativeProcessTerminate(handle:AgentProcessIdentityHandle):Bool;
+
+@:hlNative("haxeon_runtime", "__host_process_identity_close")
+extern function nativeProcessClose(handle:AgentProcessIdentityHandle):Void;
 
 /** Narrow host primitives used by the Haxe workspace manager. */
 class AgentManagerNative {
@@ -81,4 +91,13 @@ class AgentManagerNative {
 
 	public static inline function fileIdentity(path:String):Null<String>
 		return nativeFileIdentity(path);
+
+	public static inline function openProcessIdentity(pid:Int, expectedExecutable:String):Null<AgentProcessIdentityHandle>
+		return nativeProcessOpen(pid, expectedExecutable);
+
+	public static inline function terminateProcess(handle:AgentProcessIdentityHandle):Bool
+		return nativeProcessTerminate(handle);
+
+	public static inline function closeProcessIdentity(handle:AgentProcessIdentityHandle):Void
+		nativeProcessClose(handle);
 }
