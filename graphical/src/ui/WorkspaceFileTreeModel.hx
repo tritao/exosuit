@@ -153,6 +153,13 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 		}
 	}
 
+	public function refreshAll():Void {
+		if (disposed) return;
+		rootError = null;
+		invalidateListings();
+		refresh();
+	}
+
 	public function dispose():Void {
 		disposed = true;
 		generation++;

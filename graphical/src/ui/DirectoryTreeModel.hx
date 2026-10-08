@@ -261,6 +261,10 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 		}
 	}
 
+	public function refreshAll():Void {
+		for (directory in visitedDirectories()) requestLoad(directory, false);
+	}
+
 	public function refreshDirectory(path:String):Void {
 		if (listings.exists(path) || path == root) requestLoad(path, false);
 	}

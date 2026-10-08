@@ -116,21 +116,25 @@ class FileController {
 		}, onCancel));
 	}
 
-	public function openCreateFile():Void {
+	public function openCreateFile(?baseDirectory:String, ?onCreated:Void->Void):Void {
 		root.openCommandView(new CommandViewProvider("New File: ", [], function(query) {}, function(entry, path, backwards) {
+			if (baseDirectory != null && path.length > 0 && !haxe.io.Path.isAbsolute(path)) path = haxe.io.Path.join([baseDirectory, path]);
 			var result = operations.createFile(path);
 			if (result.success) {
 				workspace.refreshProjects();
 				if (result.destination != null) openDocument(result.destination);
+				if (onCreated != null) onCreated();
 			} else reportError("file", 'Could not create file "$path": ' + result.detail);
 			root.closeCommandView();
 		}));
 	}
 
-	public function openCreateFolder():Void {
+	public function openCreateFolder(?baseDirectory:String, ?onCreated:Void->Void):Void {
 		root.openCommandView(new CommandViewProvider("New Folder: ", [], function(query) {}, function(entry, path, backwards) {
+			if (baseDirectory != null && path.length > 0 && !haxe.io.Path.isAbsolute(path)) path = haxe.io.Path.join([baseDirectory, path]);
 			var result = operations.createFolder(path);
 			if (!result.success) reportError("file", 'Could not create folder "$path": ' + result.detail);
+			else if (onCreated != null) onCreated();
 			workspace.refreshProjects();
 			root.closeCommandView();
 		}));

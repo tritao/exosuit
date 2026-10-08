@@ -8,6 +8,8 @@ interface ExplorerTreeModel extends TreeViewModel {
 	public function rootIdentity():String;
 	public function watchesChanges():Bool;
 	public function refresh():Void;
+	/** Explicit user refresh; retain cached rows while replacing loaded listings. */
+	public function refreshAll():Void;
 	public function dispose():Void;
 	public function buildItemWithIcons(key:String, expanded:Bool, atlas:SetiIconAtlas, dark:Bool):View;
 }

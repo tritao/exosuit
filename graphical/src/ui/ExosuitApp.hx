@@ -311,7 +311,17 @@ class ExosuitApp implements DesktopUiApplication {
 		if (terminalUiAvailable)
 			model.register(new DockPanelDescriptor("terminal", "Terminal", true, true, IconName.Terminal, haxeon.ui.docking.DockPanelHeaderMode.Dock, new haxeon.ui.docking.DockPanelGrouping("tools")));
 		dockPanelContents = [
-			new DockPanelContent("explorer", function(_) return new haxeon.ui.widgets.sidebar.SidebarHost("sidebar-modes", sidebar, function(id) { showSidebarMode(id); }, function(id) return activityIcons.get(id), true)),
+			new DockPanelContent("explorer", function(_) {
+				var view = new haxeon.ui.widgets.sidebar.SidebarHost("sidebar-modes", sidebar,
+					function(id) { showSidebarMode(id); }, function(id) return activityIcons.get(id), true);
+				view.headerActions = function(id) return id == "files" ? explorerHeaderActions() : null;
+				view.headerActionsVisible = function(node) {
+					var focused = ui.focus.focusedId;
+					return haxeon.ui.style.StyleStateUtil.contains(node.states, haxeon.ui.style.StyleState.Hovered)
+						|| (focused != null && node.find(focused) != null);
+				};
+				return view;
+			}),
 			new DockPanelContent("editor", function(_) return editorPanel("editor")),
 			new DockPanelContent("problems", function(_) return new ProblemsPanel(host, [for (project in application.workspace.projects) project.root]))
 		];
@@ -1503,6 +1513,62 @@ class ExosuitApp implements DesktopUiApplication {
 			dismissNotification: function() { center.dismissToast(); requestFrame(); },
 			toggleNotifications: function() { if (notificationsVisible) hideNotifications(); else showNotifications(); }
 		}), function() return indentationDetails + ":" + remoteDetails + ":" + label + ":" + trailing + ":" + (notification == null ? 0 : notification.id) + ":" + center.revision + ":" + notificationsVisible + ":" + ui.animations.revision);
+	}
+
+	function explorerHeaderActions():View {
+		var remote = workspaceAttachment != null && !workspaceAttachment.hasLocalFileAccess();
+		var available = explorerRoot != null;
+		var style = new LayoutStyle();
+		style.childAlignY = LayoutAlignmentY.Center;
+		style.childGap = 2;
+		style.padding = new Insets(2, 0, 6, 0);
+		return new Row("explorer-header-actions", [
+			new KeyedView("new-file", explorerHeaderButton("New File", IconName.NewFile,
+				function() createExplorerEntry(false), available && !remote, remote)),
+			new KeyedView("new-folder", explorerHeaderButton("New Folder", IconName.NewFolder,
+				function() createExplorerEntry(true), available && !remote, remote)),
+			new KeyedView("refresh", explorerHeaderButton("Refresh", IconName.Reset, function() {
+				if (explorerModel != null) explorerModel.refreshAll();
+				requestFrame();
+			}, available)),
+			new KeyedView("collapse", explorerHeaderButton("Collapse All", IconName.CollapseAll, function() {
+				if (explorerTree != null) explorerTree.collapseAll(true);
+				requestFrame();
+			}, available))
+		], style);
+	}
+
+	function explorerHeaderButton(label:String, icon:IconName, action:Void->Void, enabled:Bool, readOnly:Bool = false):View {
+		var style = new LayoutStyle();
+		style.width = LayoutAxis.fixed(24);
+		style.height = LayoutAxis.fixed(24);
+		style.padding = new Insets(4, 4, 4, 4);
+		style.childDistribution = haxeon.ui.LayoutDistribution.Center;
+		style.childAlignY = LayoutAlignmentY.Center;
+		var button = new Button("", style, action, "explorer-action:" + label);
+		button.enabled = enabled;
+		button.variant = ButtonVariant.Navigation;
+		button.leadingIcon = icon;
+		button.iconSize = 16;
+		button.accessibilityLabel = label;
+		return new TabTooltip("explorer-action-tooltip:" + label, button,
+			new Text(readOnly ? label + " (remote files are read-only)" : label, null, theme.tokens.textPrimary, TextStyleOverride.text(12)),
+			function() return new Rect(0, 0, viewportWidth, viewportHeight), 0.5);
+	}
+
+	function createExplorerEntry(folder:Bool):Void {
+		if (explorerRoot == null || (workspaceAttachment != null && !workspaceAttachment.hasLocalFileAccess())) return;
+		var base = explorerRoot;
+		var selected = explorerTree == null ? null : explorerTree.selectedKey;
+		var model:Null<DirectoryTreeModel> = Std.isOfType(explorerModel, DirectoryTreeModel) ? cast explorerModel : null;
+		if (selected != null && model != null && !model.isSyntheticRow(selected))
+			base = model.isDirectoryPath(selected) ? selected : haxe.io.Path.directory(selected);
+		var refresh = function() {
+			if (model != null) model.refreshDirectory(base);
+			requestFrame();
+		};
+		if (folder) application.files.openCreateFolder(base, refresh);
+		else application.files.openCreateFile(base, refresh);
 	}
 
 	function explorerPanel():View {
