@@ -49,6 +49,7 @@ for index in range(24):
 PYFIXTURE
 run_phase editor-font editor-font "$fixture/sidebar-project/Main.hx"
 run_phase problems problems "$fixture/sidebar-project/Main.hx"
+run_phase file-deletion file-deletion
 run_phase activity-bar activity-bar "$fixture/sidebar-project/Main.hx"
 run_phase sidebar-write sidebar "$fixture/sidebar-project/Main.hx"
 run_phase sidebar-read sidebar "$fixture/sidebar-project/Main.hx"

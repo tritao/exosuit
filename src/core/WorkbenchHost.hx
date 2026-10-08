@@ -55,6 +55,8 @@ interface WorkbenchHost {
 	// -- Open/activate document & active-editor input dispatch --
 	function openDocument(document:Document):View;
 	function documentRenamed(document:Document):Void;
+	/** Closes all views of a clean document, without changing the active pane. Refuses dirty documents. */
+	function closeDocument(document:Document):Bool;
 	function cursorChanged():Void;
 	function textInput(text:String):Void;
 	function setComposition(text:String, start:Int, length:Int):Void;

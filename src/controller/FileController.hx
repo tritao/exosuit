@@ -154,7 +154,13 @@ class FileController {
 		confirmations.choose('Type delete to remove "' + path + '": ', ["delete"], function(answer) {
 			var result = operations.remove(path);
 			if (result.success) {
-				for (document in result.documents) root.documentRenamed(document);
+				for (document in result.documents) {
+					if (document.dirty) root.documentRenamed(document);
+					else if (root.closeDocument(document)) {
+						documents.close(document);
+						recovery.forget(document);
+					}
+				}
 				saveRecovery();
 				reportInformation('Moved "$path" to ' + result.destination);
 				workspace.refreshProjects();

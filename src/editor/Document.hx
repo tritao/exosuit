@@ -43,8 +43,10 @@ class Document {
 	public static function untitled(registry:SyntaxRegistry, ?fileSystem:EditorFileSystem, ?recoveryId:String, ?title:String):Document
 		return new Document(null, "", registry, fileSystem, recoveryId, title);
 
-	function get_title():String
-		return path == null ? (detachedTitle == null ? "Untitled-" + id : detachedTitle) : fileName(path);
+	function get_title():String {
+		if (path == null) return detachedTitle == null ? "Untitled-" + id : detachedTitle;
+		return fileName(path) + (externalState == Deleted ? " (Deleted)" : "");
+	}
 
 	public function hasBackingPath():Bool
 		return path != null;
@@ -69,14 +71,13 @@ class Document {
 		selectSyntax();
 	}
 
-	/** Keeps removed backing content recoverable as a dirty, pathless document. */
+	/** Detaches an intentionally removed file without changing the buffer save point. */
 	public function detachBacking():Void {
 		if (path == null) return;
 		detachedTitle = fileName(path) + " (Deleted)";
 		path = null;
-		savedStateId = -1;
 		externalState = Current;
-		selectSyntax();
+		// Keep the original syntax: the display suffix is not a file extension.
 	}
 
 	function selectSyntax():Void {
@@ -181,6 +182,8 @@ class Document {
 
 	public function acceptRecoveredText(text:String):Void {
 		if (buffer.text != text) buffer.replaceAllText(text);
+		// A pathless recovery snapshot represents unsaved work even when empty.
+		if (path == null) savedStateId = -1;
 	}
 
 	function encode(text:String):String {

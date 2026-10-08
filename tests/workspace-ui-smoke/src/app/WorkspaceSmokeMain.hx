@@ -70,6 +70,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 
 	override public function submit(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		frames++;
+		if (phase == "file-deletion") return fileDeletionStep(frame);
 		if (phase == "remote-open") {
 			if (frames == 1) { remoteOpenTests = new RemoteFileOpenTests(this); remoteOpenTests.start(); }
 			if (frames == 2) {
@@ -1142,6 +1143,57 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		return result;
 	}
 
+	var deletedDocument:editor.Document;
+	var deletedPane:String;
+	function fileDeletionStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
+		var cleanPath = path + ".delete-clean.hx", dirtyPath = path + ".delete-dirty.hx";
+		if (frames == 2) {
+			sys.io.File.saveContent(cleanPath, "");
+			application.open(cleanPath);
+			var active = host.activeView();
+			if (active == null) throw "deletion fixture did not open an editor";
+			deletedDocument = active.document;
+			host.splitActive(view.LayoutKind.Horizontal);
+			deletedPane = host.activePane.id;
+		}
+		if (frames == 3 || frames == 5) {
+			application.files.openDeleteFile();
+			application.textInput("delete");
+			application.keyPressed(platform.Platform.KEY_ENTER, 0);
+		}
+		if (frames == 4) {
+			require(!sys.FileSystem.exists(cleanPath) && !deletedDocument.dirty
+				&& host.allViews().length == 0 && !application.documents.documents.contains(deletedDocument)
+				&& host.activePane.id == deletedPane && !host.isCommandViewActive(),
+				"clean Explorer deletion retained tabs, changed pane, or opened a save prompt");
+			sys.io.File.saveContent(dirtyPath, "class Dirty {}\n");
+			application.open(dirtyPath);
+			var active = host.activeView();
+			if (active == null) throw "deletion fixture did not open an editor";
+			deletedDocument = active.document;
+			deletedDocument.insert(new editor.BufferSelection(), "// unsaved\n");
+		}
+		if (frames == 6) {
+			require(!sys.FileSystem.exists(dirtyPath) && deletedDocument.dirty && deletedDocument.path == null
+				&& host.allViews().length == 1 && host.activeView() != null,
+				"dirty Explorer deletion lost its editor");
+			application.files.requestCloseActiveTab();
+		}
+		if (frames == 7) click("save-confirmation-cancel");
+		if (frames == 8) {
+			require(host.allViews().length == 1, "Cancel lost deleted edits");
+			application.files.requestCloseActiveTab();
+		}
+		if (frames == 9) click("save-confirmation-discard");
+		var result = super.submit(frame);
+		if (frames == 10) {
+			require(host.allViews().length == 0 && !application.documents.documents.contains(deletedDocument),
+				"Discard retained deleted editor");
+			trace("PASS: clean deletion closes split editors, dirty deletion retains edits and confirms Cancel/Discard");
+		}
+		return result;
+	}
+
 	function activityBarStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		if (frames == 3) click("activity:files");
 		if (frames == 4) click("activity:search");
@@ -1377,7 +1429,7 @@ class WorkspaceSmokeMain {
 			zoomWidth = options.width;
 		}
 		options.captureDirectory = args[1];
-		options.frameLimit = args[2] == "blank-editor-click" ? 11 : args[2] == "zoom" ? 75 : args[2] == "save-as" ? 10 : args[2] == "exit-confirmation" ? 11 : args[2] == "tab-close" ? 13 : args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 11 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
+		options.frameLimit = args[2] == "file-deletion" ? 10 : args[2] == "blank-editor-click" ? 11 : args[2] == "zoom" ? 75 : args[2] == "save-as" ? 10 : args[2] == "exit-confirmation" ? 11 : args[2] == "tab-close" ? 13 : args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 11 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
 		var status = DesktopUiHost.run(options, context -> new WorkspaceSmokeApp(context, args[0], args[2]));
 
 		return status;

@@ -174,6 +174,22 @@ class ModelWorkbenchHost implements WorkbenchHost {
 		return true;
 	}
 
+	public function closeDocument(document:Document):Bool {
+		if (document.dirty) return false;
+		function closeViews(current:testing.model.ModelLayoutNode):Void {
+			if (current.isLeaf()) {
+				for (view in current.tabs.views.copy())
+					if (view.getDocument() == document) current.tabs.close(view);
+			} else {
+				closeViews(current.requireFirst());
+				closeViews(current.requireSecond());
+			}
+		}
+		closeViews(node);
+		focus.activate(activeLeaf.tabs.activeView);
+		return true;
+	}
+
 	public function closeActiveTab(force:Bool = false):Bool {
 		var view = tabs.activeView;
 		if (view == null || !tabs.close(view, force)) return false;

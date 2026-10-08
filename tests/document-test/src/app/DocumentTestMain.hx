@@ -354,6 +354,22 @@ class DocumentTestMain {
 		require(outer != null && outer.first.column == 4 && outer.second.column == 35,
 			"bracket matching counted a string or comment delimiter");
 		require(inner != null && inner.first.column == 27 && inner.second.column == 32, "nested bracket matching failed");
+		var detached = new Document("detached.hx", "class Detached {}", syntaxes);
+		var detachedSelection = new BufferSelection(), detachedSyntax = detached.syntax;
+		detached.insert(detachedSelection, "// unsaved\n");
+		detached.detachBacking();
+		require(detached.dirty && detached.path == null && detached.syntax == detachedSyntax,
+			"detachment lost edits or syntax");
+		require(detached.buffer.undo(detachedSelection) && !detached.dirty,
+			"detachment replaced the saved undo point with synthetic edits");
+		require(detached.buffer.redo(detachedSelection) && detached.dirty,
+			"detachment lost redo history");
+		var detachedClean = new Document("clean.hx", "", syntaxes);
+		detachedClean.detachBacking();
+		require(!detachedClean.dirty, "detaching a clean document fabricated edits");
+		var recoveredEmpty = new DocumentManager(syntaxes).restoreRecovered("empty-deleted", "empty.hx (Deleted)", null, "");
+		require(recoveredEmpty.dirty && recoveredEmpty.buffer.text == "",
+			"empty pathless recovery lost its unsaved state");
 		var arguments = Sys.args();
 		if (arguments.length > 0) {
 			var saveAsPath = arguments[0] + ".save-as";

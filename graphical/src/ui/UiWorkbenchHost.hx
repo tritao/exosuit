@@ -756,6 +756,15 @@ class UiWorkbenchHost implements WorkbenchHost {
 		return true;
 	}
 
+	public function closeDocument(document:Document):Bool {
+		if (document.dirty) return false;
+		for (pane in panes) for (item in pane.items.copy()) {
+			var view = UiEditorTabs.document(item);
+			if (view != null && view.document == document) closeTab(item, pane.id);
+		}
+		return true;
+	}
+
 	public function closeActiveTab(force:Bool = false):Bool {
 		var item = activeTab();
 		return item != null && closeTab(item, activePane.id, force);
