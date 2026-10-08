@@ -68,8 +68,10 @@ class WebMain {
 			context.onPoll = function() {
 				if (pollEditor != null) pollEditor();
 				if (!filesAttached) remote.poll();
-				var connected = remote.isWorkspaceConnected();
-				var filesAvailable = connected && remote.canReadFiles();
+				// Keep projections attached while a known workspace reconnects. Their
+				// clients disable mutations until the new authenticated connection is ready.
+				var identified = remote.fileScope() != null;
+				var filesAvailable = identified && remote.hasCapability(workspace.service.WorkspaceFileProtocol.READ);
 				if (filesAvailable && !filesAttached) {
 					filesAttached = true;
 					app.attachWorkspace(remote);
@@ -79,7 +81,7 @@ class WebMain {
 					app.detachWorkspace(remote);
 					app.activateSidebarDestination("remote-access");
 				}
-				var workbenchAvailable = connected && remote.hasCapability(WorkspaceTerminalProtocol.READ)
+				var workbenchAvailable = identified && remote.hasCapability(WorkspaceTerminalProtocol.READ)
 					&& remote.hasCapability(WorkspaceTerminalProtocol.CATALOG);
 				if (workbenchAvailable && !workbenchAttached) {
 					workbenchAttached = true;

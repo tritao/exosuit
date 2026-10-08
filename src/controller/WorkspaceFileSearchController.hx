@@ -56,6 +56,15 @@ class WorkspaceFileSearchController {
 		scannedEntries = 0;
 		skippedEntries = 0;
 		error = null;
+		// A disconnected remote workspace still owns this query. Falling back to
+		// local search would search a different filesystem and steal sidebar focus.
+		if (attachment != null && !attachment.hasLocalFileAccess() && client == null) {
+			active = true;
+			complete = true;
+			error = "Workspace disconnected. Search resumes after reconnect.";
+			changed();
+			return true;
+		}
 		if (attachment == null || attachment.hasLocalFileAccess() || client == null || attachment.fileWorkspace() == null
 			|| attachment.fileWorkspace().length == 0) {
 			active = false;

@@ -38,6 +38,7 @@ class WorkbenchPanel implements View {
 	public final tree:TreeView;
 	var catalogRevision = -1;
 	var agentKey = -1;
+	var retainedAgents:Null<workspace.service.WorkspaceAgentProtocol.AgentCatalog>;
     var draft:Null<WorkspaceGroup>;
     var draftName = "";
     var draftOwner = "";
@@ -316,14 +317,18 @@ class WorkbenchPanel implements View {
         }
         if (inlineEditor != null) inlineEditor.enabled = !pending;
 		var agents = client.agentService().agents();
-		var terminalCatalog = client.terminalCatalog();
-		if (agents != null && (terminalCatalog == null || agents.root != terminalCatalog.workspaceRoot)) agents = null;
+		if (agents != null && (catalog == null || agents.root != catalog.workspaceRoot)) agents = null;
 		var nextAgentKey = client.agentService().agentRevision();
-		if (refreshModel || catalogRevision != client.terminalCatalogRevision() || nextAgentKey != agentKey) {
+		// Keep the last projection during transport recovery so TreeView does not
+		// discard its selection, expansion and scroll state for an empty catalog.
+		if (catalog != null && (refreshModel || catalogRevision != client.terminalCatalogRevision() || nextAgentKey != agentKey)) {
             refreshModel = false;
 			catalogRevision = client.terminalCatalogRevision(); agentKey = nextAgentKey;
-			model.update(terminalCatalog, agents, creating ? draft : null);
-        }
+			if (retainedAgents != null && (retainedAgents.root != catalog.workspaceRoot
+				|| (client.canReadTerminals() && !client.agentService().canReadAgents()))) retainedAgents = null;
+			if (agents != null) retainedAgents = agents;
+			model.update(catalog, retainedAgents, creating ? draft : null);
+		}
         applyPendingReveal();
 		applyPendingAgentSelection();
 		var selected = groupFor(tree.selectedKey);

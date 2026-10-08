@@ -33,6 +33,9 @@ private typedef CodexRecoveryPresentation = {
 
 /** Conversation controls are a client projection; shared provider owns requests and turns. */
 class CodexSessionPanel implements View {
+  static inline final MIN_ACTIVITY_HEIGHT:Float = 180;
+  // Reserve header, spacing, a one-line composer and a usable activity area.
+  static inline final MIN_SESSION_HEIGHT:Float = 480;
   final getClient:Void -> Null<WorkspaceAgentClient>;
   final resource:String;
   final root:String;
@@ -219,7 +222,7 @@ class CodexSessionPanel implements View {
       rows.push(new KeyedView("recovery-error", new Row("codex-recovery-error", recoveryControls, recoveryStyle)));
     }
     var style = new LayoutStyle();
-    style.height = LayoutAxis.grow();
+    style.height = LayoutAxis.grow(MIN_ACTIVITY_HEIGHT);
     style.width = LayoutAxis.grow();
     var activity:Array<KeyedView> = [];
     for (request in view.requests) {
@@ -447,11 +450,18 @@ class CodexSessionPanel implements View {
       new KeyedView("footer", new Row("codex-composer-footer", [new KeyedView("hint", hint), new KeyedView("send", send)], footerStyle))
     ], composerStyle)));
     var viewport = new LayoutStyle();
-    viewport.height = LayoutAxis.grow();
+    viewport.height = LayoutAxis.grow(MIN_SESSION_HEIGHT + inputStyle.height.value - 56);
     viewport.width = LayoutAxis.grow();
     viewport.padding = new Insets(20, 16, 20, 16);
     viewport.childGap = 12;
-    return new Column("codex-session", rows, viewport).build(context);
+    // Preserve a usable activity viewport. When the header and composer cannot
+    // fit, scroll the whole session rather than clipping its action controls.
+    var scrollStyle = new LayoutStyle();
+    scrollStyle.height = LayoutAxis.grow();
+    scrollStyle.width = LayoutAxis.grow();
+    var session = new ScrollView("codex-session-viewport", new Column("codex-session", rows, viewport), scrollStyle);
+    session.fillViewport = true;
+    return session.build(context);
   }
 }
 

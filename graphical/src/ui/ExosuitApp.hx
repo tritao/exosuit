@@ -1089,7 +1089,7 @@ class ExosuitApp implements DesktopUiApplication {
 					requestFrame();
 				}
 			}
-			if (sidebar.visible && sidebar.activeId == "files" &&
+			if ((Std.isOfType(model, WorkspaceFileTreeModel) || (sidebar.visible && sidebar.activeId == "files")) &&
 				(model.watchesChanges() || now >= nextExplorerPoll)) {
 				model.refresh();
 				nextExplorerPoll = now + 0.5;
@@ -1332,6 +1332,8 @@ class ExosuitApp implements DesktopUiApplication {
 			activeAgentSummary: agentSummary,
 			testTargets: {
 				newCodex: target("workbench-new-codex"),
+				codexViewport: target("codex-session-viewport"),
+				filesActivity: targetByLabel("Files"),
 				newTerminal: target("workbench-new-terminal"),
 				terminalToolbar: target("toolbar-Terminal"),
 				terminalPane: target("terminal-pane"),

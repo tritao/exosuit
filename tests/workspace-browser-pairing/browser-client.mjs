@@ -62,6 +62,23 @@ async function clickTarget(name, description = name) {
   const target = await waitForTarget(name, description);
   await click(target.x + target.width / 2, target.y + target.height / 2);
 }
+async function revealCodexTarget(name) {
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const shell = await shellState();
+    const bounds = shell?.testTargets?.[name], viewport = shell?.testTargets?.codexViewport;
+    if (!bounds || !viewport) throw new Error(`Missing Codex target ${name}`);
+    const center = bounds.y + bounds.height / 2;
+    if (center >= viewport.y + 8 && center < viewport.y + viewport.height - 8) return bounds;
+    // Native scroll events use the last pointer position, as a real mouse does.
+    await send('Input.dispatchMouseEvent', {type: 'mouseMoved',
+      x: viewport.x + viewport.width - 20, y: viewport.y + viewport.height - 10});
+    await send('Input.dispatchMouseEvent', {type: 'mouseWheel',
+      x: viewport.x + viewport.width - 20, y: viewport.y + viewport.height - 10,
+      deltaX: 0, deltaY: center < viewport.y ? -180 : 180});
+    await pause(200);
+  }
+  throw new Error(`Codex ${name} cannot be reached in the small viewport: ${JSON.stringify((await shellState())?.testTargets)}`);
+}
 async function clickTreeItem(key) {
   const item = await waitFor(`visible tree item ${key}`, async () =>
     (await shellState())?.treeItems?.find(item => item.key === key && item.bounds?.height > 0));
@@ -107,9 +124,9 @@ try {
   await send('Runtime.enable');
   await send('Log.enable');
   await send('Page.enable');
-  // Keep the full workspace/Codex workflow visible on headless hosts whose
-  // screen size otherwise clamps Chrome's requested window height.
-  await send('Emulation.setDeviceMetricsOverride', {width: 1050, height: 900, deviceScaleFactor: 1, mobile: false});
+  // Exercise approvals and the composer in a short window, including scroll
+  // access to controls that cannot all fit at once.
+  await send('Emulation.setDeviceMetricsOverride', {width: 1050, height: 600, deviceScaleFactor: 1, mobile: false});
   await send('Page.addScriptToEvaluateOnNewDocument', {source: `(()=>{
     const NativeWebSocket = window.WebSocket;
     window.__exosuitTestSockets = [];
@@ -364,12 +381,12 @@ try {
     if (openCodex.record.workspaceRoot !== connected.state.workspaceRoot)
       throw new Error('Created Codex session is outside the approved workspace');
 
-    const initialPrompt = openCodex.shell.testTargets?.prompt;
+    const initialPrompt = await revealCodexTarget('prompt');
     if (!initialPrompt || initialPrompt.width <= 0 || initialPrompt.height <= 0)
       throw new Error(`Codex prompt field is not visible: ${JSON.stringify(openCodex.shell.testTargets)}`);
     await click(initialPrompt.x + initialPrompt.width / 2, initialPrompt.y + initialPrompt.height / 2);
     await send('Input.insertText', {text: 'browser'});
-    const sendPrompt = (await shellState())?.testTargets?.send;
+    const sendPrompt = await revealCodexTarget('send');
     if (!sendPrompt || sendPrompt.width <= 0 || sendPrompt.height <= 0)
       throw new Error('Codex Send prompt action is not visible');
     await click(sendPrompt.x + sendPrompt.width / 2, sendPrompt.y + sendPrompt.height / 2);
@@ -386,7 +403,7 @@ try {
       const target = shell?.testTargets?.approve;
       return target?.width > 0 && target?.height > 0 ? {shell, target} : null;
     }, 10000);
-    const approve = approvalWithTarget.target;
+    const approve = await revealCodexTarget('approve');
     if (!approve || approve.width <= 0 || approve.height <= 0)
       throw new Error(`Codex approval action is not visible: ${JSON.stringify(approval.shell.testTargets)}`);
     await click(approve.x + approve.width / 2, approve.y + approve.height / 2);
@@ -400,12 +417,12 @@ try {
       const answer = shell?.testTargets?.answer;
       return prompt?.width > 0 && answer?.width > 0 ? {shell, prompt, answer} : null;
     }, 10000);
-    const answerField = answerControls.prompt;
-    const answerAction = answerControls.answer;
-    if (!answerField || !answerAction || answerField.width <= 0 || answerAction.width <= 0)
+    const answerField = await revealCodexTarget('prompt');
+    if (!answerField || answerField.width <= 0)
       throw new Error(`Codex input controls are not visible: ${JSON.stringify(answerControls.shell.testTargets)}`);
     await click(answerField.x + answerField.width / 2, answerField.y + answerField.height / 2);
     await send('Input.insertText', {text: 'choice=yes'});
+    const answerAction = await revealCodexTarget('answer');
     await click(answerAction.x + answerAction.width / 2, answerAction.y + answerAction.height / 2);
     const answered = await waitFor('completed Codex session', async () => {
       const shell = await shellState();
@@ -424,6 +441,11 @@ try {
 
   // Drop the active relay WebSocket. The RpcClient must obtain a fresh ticket
   // and Noise channel without another user action.
+  if (agentMode) {
+    await clickTreeItem('g:work');
+    await waitFor('selected Workbench group before disconnect', async () => (await shellState())?.workbenchSelectedNode === 'g:work');
+  }
+  const sidebarBeforeDrop = agentMode ? await shellState() : null;
   const terminalIdsBeforeDrop = agentMode ? (await shellState()).terminalResourceIds.slice().sort() : [];
   const oldConnectCount = await expression(`window.__exosuitTestSockets.filter(socket =>
     socket.url.includes('/connect')).length`);
@@ -439,6 +461,11 @@ try {
     const state = await remoteState();
     return state?.connecting && state.status?.includes('Reconnecting') ? state : null;
   }, 20000);
+  if (agentMode) {
+    const interrupted = await shellState();
+    if (interrupted.sidebarMode !== sidebarBeforeDrop.sidebarMode || interrupted.workbenchSelectedNode !== sidebarBeforeDrop.workbenchSelectedNode)
+      throw new Error(`Temporary disconnect discarded sidebar selection: ${JSON.stringify({before: {sidebar: sidebarBeforeDrop.sidebarMode, group: sidebarBeforeDrop.workbenchSelectedNode}, after: {sidebar: interrupted.sidebarMode, group: interrupted.workbenchSelectedNode, nodes: interrupted.treeItems?.map(item => item.key)}})}`);
+  }
   const automaticReconnect = await waitFor('automatic authenticated workspace reconnect', async () => {
     const state = await remoteState();
     if (state?.error) throw new Error(`Automatic reconnect failed: ${state.error}`);
@@ -470,6 +497,13 @@ try {
   }
   if (agentMode) {
     await pause(500);
+    const restored = await shellState();
+    if (restored.sidebarMode !== sidebarBeforeDrop.sidebarMode || restored.workbenchSelectedNode !== sidebarBeforeDrop.workbenchSelectedNode)
+      throw new Error('Reconnect changed the selected sidebar or group');
+    console.log('PASS: sidebar and selected Workbench group survived disconnect and reconnect');
+    // Reveal Files to verify the new file in the visible tree.
+    await clickTarget('filesActivity');
+    await waitFor('Files selected for watch verification', async () => (await shellState())?.sidebarMode === 'files');
     const beforeChange = await shellState();
     const revision = beforeChange?.explorerRevision;
     if (!Number.isInteger(revision) || revision < 0)
