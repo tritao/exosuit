@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "package": {"name": "exosuit-manage-menu-ui-smoke"},
+  "entry": "app.ManageMenuSmokeMain",
+  "sourceRoots": ["src"],
+  "scopeSourceRoots": false,
+  "dependencies": {"exosuit-graphical": {"path": "../../graphical"}},
+  "target": "host",
+  "outputDir": "build"
+}

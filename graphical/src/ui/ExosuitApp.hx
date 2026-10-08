@@ -136,6 +136,7 @@ class ExosuitApp implements DesktopUiApplication {
 	var paletteVisible:Bool = false;
 	var settingsPanel:Null<haxeon.ui.widgets.settings.SettingsPanel>;
 	var contextMenu:Null<CommandMenu> = null;
+	var manageMenu:Null<CommandMenu> = null;
 	var viewRevision:Int = 0;
 	var submittedBuildKey:Null<String>;
 	var nextBackgroundPoll:Float = 0.0;
@@ -642,7 +643,7 @@ class ExosuitApp implements DesktopUiApplication {
 		workspaceView.availableHeight = Math.max(0.0, viewportHeight - TOOLBAR_HEIGHT - STATUS_HEIGHT);
 		var workspace:View = new Row("workspace-with-activity-bar", [
 			new KeyedView("activity-bar", new ActivityBar(sidebar, activityIcons, activateSidebarDestination,
-				application.settings.current.tabTooltipDelay)),
+				application.settings.current.tabTooltipDelay, showManageMenu, manageMenu != null && contextMenu == manageMenu)),
 			new KeyedView("workspace", workspaceView)
 		], fillStyle());
 		var body = new Column("exosuit-body", [
@@ -1933,6 +1934,49 @@ class ExosuitApp implements DesktopUiApplication {
 			},
 			function() { if (contextMenu == breadcrumbMenu) contextMenu = null; requestFrame(); }, items);
 		contextMenu = breadcrumbMenu;
+		requestFrame();
+	}
+
+	function showManageMenu(event:UiEvent):Void {
+		if (manageMenu != null && contextMenu == manageMenu) {
+			contextMenu = null;
+			requestFrame();
+			return;
+		}
+		var x = ActivityBar.WIDTH, y = viewportHeight - STATUS_HEIGHT - 8;
+		if (ui.root != null) {
+			ui.root.walk(function(node) {
+				if (node.styleKey == "activity-manage" && node.resolved != null) {
+					var bounds = node.globalBounds();
+					x = bounds.x + bounds.width + 4;
+					y = bounds.y + bounds.height;
+				}
+			});
+		}
+		var shortcut = function(id:String):Null<String> {
+			var bindings = ui.commands.shortcutsFor(id);
+			return bindings.length == 0 ? null : bindings[0].label();
+		};
+		var openPreferences = function(category:Null<String>, advanced:Bool):Void {
+			openSettings();
+			settingsPanel.setShowAdvanced(advanced);
+			if (category != null) settingsPanel.select(category);
+		};
+		var actions = [
+			new haxeon.ui.widgets.overlays.MenuItem("manage-palette", "Command Palette…", togglePalette,
+				true, shortcut("view.toggle-palette")),
+			new haxeon.ui.widgets.overlays.MenuItem("manage-settings", "Settings", openSettings,
+				true, shortcut("preferences.open"), true),
+			new haxeon.ui.widgets.overlays.MenuItem("manage-keyboard", "Keyboard Shortcuts",
+				function() openPreferences("editor/keyboard", true)),
+			new haxeon.ui.widgets.overlays.MenuItem("manage-themes", "Themes…",
+				function() openPreferences("appearance/colors", true))
+		];
+		paletteVisible = false;
+		host.dismissLanguagePopup();
+		manageMenu = new CommandMenu(application.commands, application.context, [], x, y, function() return true,
+			function() { contextMenu = null; requestFrame(); }, actions);
+		contextMenu = manageMenu;
 		requestFrame();
 	}
 

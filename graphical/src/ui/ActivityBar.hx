@@ -10,6 +10,7 @@ import haxeon.ui.core.BuildContext;
 import haxeon.ui.core.RenderNode;
 import haxeon.ui.core.TextStyleOverride;
 import haxeon.ui.core.View;
+import haxeon.ui.core.UiEvent;
 import haxeon.ui.icons.IconName;
 import haxeon.ui.widgets.KeyedView;
 import haxeon.ui.widgets.controls.Button;
@@ -25,7 +26,12 @@ class ActivityBar implements View {
 	final icons:Map<String, IconName>;
 	final activate:String->Void;
 	final tooltipDelay:Float;
-	public function new(model:SidebarModel, icons:Map<String, IconName>, activate:String->Void, tooltipDelay:Float) {
+	final manage:UiEvent->Void;
+	final manageOpen:Bool;
+	public function new(model:SidebarModel, icons:Map<String, IconName>, activate:String->Void, tooltipDelay:Float,
+			manage:UiEvent->Void, manageOpen:Bool = false) {
+		this.manage = manage;
+		this.manageOpen = manageOpen;
 		this.model = model; this.icons = icons; this.activate = activate; this.tooltipDelay = tooltipDelay;
 	}
 	public function build(context:BuildContext):RenderNode {
@@ -59,6 +65,21 @@ class ActivityBar implements View {
 				function() return new Rect(0, 0, context.viewportWidth, context.viewportHeight), tooltipDelay, true, false,
 				hover, visibleTooltip.value == "activity-tooltip:" + id)));
 		}
+		items.push(new KeyedView("space", new haxeon.ui.widgets.layout.Spacer("activity-space")));
+		var manageStyle = new LayoutStyle();
+		manageStyle.width = LayoutAxis.fixed(40);
+		manageStyle.height = LayoutAxis.fixed(40);
+		var gear = new Button("", manageStyle, null, "activity-manage");
+		gear.onClickEvent = function(event) { hover.cancel(); manage(event); };
+		gear.variant = ButtonVariant.Navigation;
+		gear.leadingIcon = IconName.Settings;
+		gear.iconSize = 22;
+		gear.accessibilityLabel = "Manage";
+		gear.selected = manageOpen;
+		items.push(new KeyedView("manage", new TabTooltip("activity-tooltip:manage", gear,
+			new Text("Manage", null, context.theme.tokens.textPrimary, TextStyleOverride.text(13)),
+			function() return new Rect(0, 0, context.viewportWidth, context.viewportHeight), tooltipDelay, true, false,
+			hover, visibleTooltip.value == "activity-tooltip:manage")));
 		return new Column("activity-bar", items, style).build(context);
 	}
 }
