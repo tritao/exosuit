@@ -39,6 +39,8 @@ class QuickPickView implements View {
 	var focusPending:Bool = true;
 	var previousQuery:String = "";
 	var previousSelection:Int = -1;
+	var previousRowHeight:Float = 0.0;
+	var previousListHeight:Float = 0.0;
 	var hovered:Int = -1;
 
 	public function new(model:CommandView, provider:CommandViewProvider, dismiss:Void->Void, changed:Void->Void, ?configureKeybinding:String->Void) {
@@ -59,14 +61,18 @@ class QuickPickView implements View {
 			var rowHeight = narrow ? 52.0 : 32.0;
 			var listHeight = Math.min(Math.max(rowHeight, model.results.length * rowHeight),
 				Math.max(rowHeight, Math.min(360.0, context.viewportHeight - 80.0)));
+			var geometryChanged = previousRowHeight != rowHeight || previousListHeight != listHeight;
 			if (previousQuery != model.query) { scroll.jumpTo(0, 0); hovered = -1; }
-			if (previousSelection != model.selected || previousQuery != model.query) {
+			if (previousSelection != model.selected || previousQuery != model.query
+				|| geometryChanged) {
 				var top = model.selected * rowHeight;
 				if (top < scroll.offsetY) scroll.jumpTo(0, top);
 				else if (top + rowHeight > scroll.offsetY + listHeight) scroll.jumpTo(0, top + rowHeight - listHeight);
 			}
 			previousQuery = model.query;
 			previousSelection = model.selected;
+			previousRowHeight = rowHeight;
+			previousListHeight = listHeight;
 			var inputStyle = new LayoutStyle();
 			inputStyle.width = LayoutAxis.grow();
 			inputStyle.height = LayoutAxis.fixed(34.0);
@@ -159,6 +165,15 @@ class QuickPickView implements View {
 			popup.menuSurface = true;
 			popup.label = provider.prompt.length == 0 ? "Quick Open" : "Command Palette";
 			var root = popup.build(context);
+			// A resize can change the content extent before ScrollView resolves its
+			// new metrics. Recheck once on the next frame, after those metrics settle.
+			var recheckAfterLayout = geometryChanged;
+			root.onResolved(function(_) {
+				if (!recheckAfterLayout) return;
+				recheckAfterLayout = false;
+				previousSelection = -1;
+				changed();
+			});
 			var navigate = function(event:UiEvent) {
 				var key = switch event.key {
 					case UiKey.Up: Platform.KEY_UP;
