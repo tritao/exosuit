@@ -99,7 +99,7 @@ class AgentManager {
 			switch value {
 				case "--state-dir":
 					if (index >= arguments.length) throw "--state-dir requires a directory";
-					options.stateDir = FileSystem.fullPath(arguments[index++]);
+					options.stateDir = absoluteStatePath(arguments[index++]);
 				case "--port":
 					if (index >= arguments.length) throw "--port requires a value";
 					var port = Std.parseInt(arguments[index++]);
@@ -159,7 +159,13 @@ class AgentManager {
 			if (home == null) home = Sys.getCwd();
 			base = Path.join([state == null ? Path.join([home, ".local", "state"]) : state, "exosuit", "workspaces"]);
 		}
-		return FileSystem.fullPath(Path.join([base, Sha256.encode(options.root).substr(0, 20)]));
+		return absoluteStatePath(Path.join([base, Sha256.encode(options.root).substr(0, 20)]));
+	}
+
+	static function absoluteStatePath(path:String):String {
+		// fullPath uses realpath on POSIX, which fails before a new state directory exists.
+		return FileSystem.exists(path) ? FileSystem.fullPath(path)
+			: Path.normalize(Path.isAbsolute(path) ? path : Path.join([Sys.getCwd(), path]));
 	}
 
 	static function ensureStateDirectory(directory:String):Void {
@@ -896,7 +902,12 @@ class AgentManager {
 	static function prepareLog(path:String):Void {
 		if (FileSystem.exists(path)) {
 			if (!AgentManagerNative.privateFile(path)) throw "Manager log file is not private";
-		} else AtomicFile.create(path, "");
+		} else {
+			try AtomicFile.create(path, "") catch (error:Dynamic) {
+				// Concurrent clients may both prepare the log before taking the manager lock.
+				if (!FileSystem.exists(path) || !AgentManagerNative.privateFile(path)) throw error;
+			}
+		}
 	}
 
 	static function cleanupEndpoint(path:String, generation:String):Void {

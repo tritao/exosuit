@@ -48,7 +48,7 @@ with tempfile.TemporaryDirectory(prefix="exworkspacefilesui-") as temporary:
                 subprocess.run(["xdotool", "click", "1"], check=True)
 
             # Open notes.md from Files, replace its contents, then save the normal document.
-            subprocess.run(["xdotool", "mousemove", "--window", window, "145", "140"], check=True)
+            subprocess.run(["xdotool", "mousemove", "--window", window, "145", "125"], check=True)
             subprocess.run(["xdotool", "click", "--repeat", "2", "--delay", "180", "1"], check=True)
             time.sleep(.5)
             click(500, 220)
