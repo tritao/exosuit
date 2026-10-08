@@ -28,12 +28,14 @@ class WorkspaceFilePreviewView implements View {
 	final theme:Theme;
 	final editorTheme:EditorTheme;
 	final refresh:Void->Void;
+	final fontSize:Float;
 
-	public function new(file:UiWorkspaceFileTab, theme:Theme, editorTheme:EditorTheme, refresh:Void->Void) {
+	public function new(file:UiWorkspaceFileTab, theme:Theme, editorTheme:EditorTheme, refresh:Void->Void, fontSize:Float = 15.0) {
 		this.file = file;
 		this.theme = theme;
 		this.editorTheme = editorTheme;
 		this.refresh = refresh;
+		this.fontSize = fontSize;
 	}
 
 	public function build(context:haxeon.ui.core.BuildContext):haxeon.ui.core.RenderNode {
@@ -57,7 +59,7 @@ class WorkspaceFilePreviewView implements View {
 		file.textModel.updateTheme(editorTheme);
 		var contents = TextArea.withDocument("workspace-preview:" + file.id + ":" + file.revision,
 			file.textModel.document(), null, bodyStyle, "Read-only workspace file",
-			new TextStyle(15.0, FontFamily.Monospace), Color.fromBytes((editorTheme.editorForeground >>> 24) & 255,
+			new TextStyle(fontSize, FontFamily.Monospace), Color.fromBytes((editorTheme.editorForeground >>> 24) & 255,
 				(editorTheme.editorForeground >>> 16) & 255, (editorTheme.editorForeground >>> 8) & 255,
 				editorTheme.editorForeground & 255));
 		contents.readOnly = true;

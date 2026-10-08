@@ -1459,6 +1459,8 @@ class ExosuitApp implements DesktopUiApplication {
 			? cast explorerModel : null;
 		var localModel:Null<DirectoryTreeModel> = Std.isOfType(explorerModel, DirectoryTreeModel)
 			? cast explorerModel : null;
+		if (remoteModel != null) remoteModel.fontSize = application.settings.current.explorerFontSize;
+		if (localModel != null) localModel.fontSize = application.settings.current.explorerFontSize;
 		if (explorerTree != null) {
 			if (remoteModel != null) advanceWorkspaceFolderReveal(explorerTree, remoteModel);
 			return new ExplorerTreeView(explorerTree, explorerModel, darkPalette, hostContext == null ? null : hostContext.events);
@@ -1776,7 +1778,7 @@ class ExosuitApp implements DesktopUiApplication {
 				var fileTab = new TabItem(fileKey,
 					workspaceFile.title + (workspaceFile.preview ? " (preview)" : ""),
 					new WorkspaceFilePreviewView(workspaceFile, theme, editorPalette,
-						function() refreshWorkspaceFile(workspaceFile)), true);
+						function() refreshWorkspaceFile(workspaceFile), application.settings.current.fontSize), true);
 				fileTab.onClose = function() host.closeTab(item, paneId, true);
 				filenames.set(fileKey, workspaceFile.rootName + "/" + workspaceFile.path);
 				items.push(fileTab);

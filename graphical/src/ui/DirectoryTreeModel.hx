@@ -26,6 +26,19 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 	static final MORE_SUFFIX:String = ".exosuit-tree-more";
 	final root:String;
 	final theme:Theme;
+	public var fontSize(default, set):Float = 15.0;
+
+	function set_fontSize(value:Float):Float {
+		value = Math.max(6.0, Math.min(96.0, value));
+		if (fontSize != value) {
+			fontSize = value;
+			listRevision++;
+		}
+		return fontSize;
+	}
+
+	function rowHeight():Float return Math.max(26.0, Math.ceil(fontSize * 1.4 + 4.0));
+
 	final queueLock:Mutex = new Mutex();
 	final jobs:Array<DirectoryLoadJob> = [];
 	final prefetchJobs:Array<DirectoryLoadJob> = [];
@@ -120,31 +133,31 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 
 	public function initiallyExpanded(key:String):Bool return key == root;
 
-	public function estimatedExtent():Float return 20.0;
+	public function estimatedExtent():Float return rowHeight();
 
 	public function extentIsUniform():Bool return true;
 
-	public function extentAt(key:String):Float return 20.0;
+	public function extentAt(key:String):Float return rowHeight();
 
 	public function buildItem(key:String):View
 		return new MiddleEllipsisText("filename", rowLabel(key), false,
-			new TextStyleOverride(null, 14.0, null, TextWrap.None, null, null, null, theme.tokens.text));
+			new TextStyleOverride(null, fontSize, null, TextWrap.None, null, null, null, theme.tokens.text));
 
 	public function buildItemWithIcons(key:String, expanded:Bool, atlas:SetiIconAtlas, dark:Bool):View {
 		if (isSyntheticRow(key))
 			return new MiddleEllipsisText("filename", rowLabel(key), false,
-				new TextStyleOverride(null, 14.0, null, TextWrap.None, null, null, null, theme.tokens.textSecondary));
+				new TextStyleOverride(null, fontSize, null, TextWrap.None, null, null, null, theme.tokens.textSecondary));
 		var name = baseName(key), directory = isKnownDirectory(key);
 		var style = new LayoutStyle();
 		style.width = LayoutAxis.grow();
-		style.height = LayoutAxis.fixed(20.0);
+		style.height = LayoutAxis.fixed(rowHeight());
 		style.clipHorizontal = true;
 		style.childAlignY = LayoutAlignmentY.Center;
 		style.childGap = 2.0;
 		var children:Array<KeyedView> = [];
 		if (!directory) children.push(new KeyedView("icon", new SetiFileIcon(atlas, name, dark, true)));
 		children.push(new KeyedView("name", new MiddleEllipsisText("filename", name, false,
-				new TextStyleOverride(null, 14.0, null, TextWrap.None, null, null, null, theme.tokens.text))
+				new TextStyleOverride(null, fontSize, null, TextWrap.None, null, null, null, theme.tokens.text))
 		));
 		return new Row("explorer-item", children, style);
 	}

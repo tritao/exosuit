@@ -42,6 +42,19 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 	final workspace:String;
 	final scope:String;
 	final theme:Theme;
+	public var fontSize(default, set):Float = 15.0;
+
+	function set_fontSize(value:Float):Float {
+		value = Math.max(6.0, Math.min(96.0, value));
+		if (fontSize != value) {
+			fontSize = value;
+			revisionValue++;
+		}
+		return fontSize;
+	}
+
+	function rowHeight():Float return Math.max(26.0, Math.ceil(fontSize * 1.4 + 4.0));
+
 	final changed:Void->Void;
 	final fileChanged:Null<String->Void>;
 	final watchListener:FileChangeEvent->Void;
@@ -206,12 +219,12 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 	}
 
 	public function buildItem(key:String):View
-		return new Text(displayName(key), null, theme.tokens.text, TextStyleOverride.text(14.0));
+		return new Text(displayName(key), null, theme.tokens.text, TextStyleOverride.text(fontSize));
 
 	public function buildItemWithIcons(key:String, expanded:Bool, atlas:SetiIconAtlas, dark:Bool):View {
 		var special = specialLabels.get(key);
 		if (special != null)
-			return new Text(special, null, theme.tokens.textSecondary, TextStyleOverride.text(13.0));
+			return new Text(special, null, theme.tokens.textSecondary, TextStyleOverride.text(fontSize));
 		var label = displayName(key), directory = isDirectory(key);
 		var style = new LayoutStyle();
 		style.width = LayoutAxis.grow();
@@ -222,7 +235,7 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 		var children:Array<KeyedView> = [];
 		if (!directory) children.push(new KeyedView("icon", new SetiFileIcon(atlas, label, dark, true)));
 		children.push(new KeyedView("name", new MiddleEllipsisText("filename", label, false,
-				new TextStyleOverride(null, 14.0, null, TextWrap.None, null, null, null, theme.tokens.text))
+				new TextStyleOverride(null, fontSize, null, TextWrap.None, null, null, null, theme.tokens.text))
 		));
 		return new Row("workspace-file-item", children, style);
 	}

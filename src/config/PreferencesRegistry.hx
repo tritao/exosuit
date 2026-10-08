@@ -31,6 +31,12 @@ class PreferencesRegistry {
 		}
 		{
 			var options = new SettingOptions();
+			options.minimum = 6; options.maximum = 96;
+			options.tooltip = "File tree text size, independent of editor font size.";
+			if (!projectOnly) registry.define("files/explorer/font_size", PropertyType.Int, PropertyValue.Int(defaults.explorerFontSize), options);
+		}
+		{
+			var options = new SettingOptions();
 			options.minimum = 70; options.maximum = 200; options.step = 10;
 			options.tooltip = "Scale the whole application independently of editor font size.";
 			if (!projectOnly) registry.define("appearance/workbench/zoom_percent", PropertyType.Int, PropertyValue.Int(defaults.applicationZoom), options);
@@ -229,6 +235,7 @@ class PreferencesRegistry {
 		if (store.registry.exists("editor/fonts/font_path") && (base == null || !store.isDefault("editor/fonts/font_path"))) value.fontPath = store.getString("editor/fonts/font_path");
 		if (store.registry.exists("editor/fonts/font_fallback_paths") && (base == null || !store.isDefault("editor/fonts/font_fallback_paths"))) value.fontFallbackPaths = strings(store.getString("editor/fonts/font_fallback_paths"));
 		if (store.registry.exists("editor/fonts/font_size") && (base == null || !store.isDefault("editor/fonts/font_size"))) value.fontSize = store.getInt("editor/fonts/font_size");
+		if (store.registry.exists("files/explorer/font_size") && (base == null || !store.isDefault("files/explorer/font_size"))) value.explorerFontSize = store.getInt("files/explorer/font_size");
 		if (store.registry.exists("appearance/workbench/sidebar_width") && (base == null || !store.isDefault("appearance/workbench/sidebar_width"))) value.sidebarWidth = store.getInt("appearance/workbench/sidebar_width");
 		if (store.registry.exists("editor/display/scrollbar_visibility") && (base == null || !store.isDefault("editor/display/scrollbar_visibility"))) value.scrollbarVisibility = store.getString("editor/display/scrollbar_visibility");
 		if (store.registry.exists("editor/display/minimap_enabled") && (base == null || !store.isDefault("editor/display/minimap_enabled"))) value.minimapEnabled = store.getBool("editor/display/minimap_enabled");
