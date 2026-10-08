@@ -88,9 +88,9 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 		return start > 0 || count <= 0 ? [] : [new TreeRootMetadata(rootKey(), true)];
 	public function rootKeyAt(index:Int):String return index == 0 ? rootKey() : "";
 	public function initiallyExpanded(key:String):Bool return key == rootKey();
-	public function estimatedExtent():Float return 26.0;
+	public function estimatedExtent():Float return 20.0;
 	public function extentIsUniform():Bool return true;
-	public function extentAt(key:String):Float return 26.0;
+	public function extentAt(key:String):Float return 20.0;
 	public function revision():Int return revisionValue;
 
 	public function refresh():Void {
@@ -192,12 +192,12 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 		var label = displayName(key), directory = isDirectory(key);
 		var style = new LayoutStyle();
 		style.width = LayoutAxis.grow();
-		style.height = LayoutAxis.fixed(26.0);
+		style.height = LayoutAxis.fixed(20.0);
 		style.clipHorizontal = true;
 		style.childAlignY = LayoutAlignmentY.Center;
-		style.childGap = 4.0;
+		style.childGap = 2.0;
 		var children:Array<KeyedView> = [];
-		if (!directory) children.push(new KeyedView("icon", new SetiFileIcon(atlas, label, dark)));
+		if (!directory) children.push(new KeyedView("icon", new SetiFileIcon(atlas, label, dark, true)));
 		children.push(new KeyedView("name", new MiddleEllipsisText("filename", label, false,
 				new TextStyleOverride(null, 14.0, null, TextWrap.None, null, null, null, theme.tokens.text))
 		));

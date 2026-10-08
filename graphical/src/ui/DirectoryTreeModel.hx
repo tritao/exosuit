@@ -120,11 +120,11 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 
 	public function initiallyExpanded(key:String):Bool return key == root;
 
-	public function estimatedExtent():Float return 26.0;
+	public function estimatedExtent():Float return 20.0;
 
 	public function extentIsUniform():Bool return true;
 
-	public function extentAt(key:String):Float return 26.0;
+	public function extentAt(key:String):Float return 20.0;
 
 	public function buildItem(key:String):View
 		return new MiddleEllipsisText("filename", rowLabel(key), false,
@@ -137,12 +137,12 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 		var name = baseName(key), directory = isKnownDirectory(key);
 		var style = new LayoutStyle();
 		style.width = LayoutAxis.grow();
-		style.height = LayoutAxis.fixed(26.0);
+		style.height = LayoutAxis.fixed(20.0);
 		style.clipHorizontal = true;
 		style.childAlignY = LayoutAlignmentY.Center;
-		style.childGap = 4.0;
+		style.childGap = 2.0;
 		var children:Array<KeyedView> = [];
-		if (!directory) children.push(new KeyedView("icon", new SetiFileIcon(atlas, name, dark)));
+		if (!directory) children.push(new KeyedView("icon", new SetiFileIcon(atlas, name, dark, true)));
 		children.push(new KeyedView("name", new MiddleEllipsisText("filename", name, false,
 				new TextStyleOverride(null, 14.0, null, TextWrap.None, null, null, null, theme.tokens.text))
 		));
