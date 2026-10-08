@@ -39,8 +39,10 @@ class RpcTerminalBackend implements TerminalBackend {
   var failureReported:Bool = false;
   var output:Array<TerminalEvent> = [];
   var nextRead:Float = 0;
-  var serverColumns:Int = 0;
-  var serverRows:Int = 0;
+  var replayCursor:Int64 = 0;
+  var snapshotOnly:Bool = false;
+  var snapshotPending:Bool = false;
+  var replayAfterResize:Bool = false;
 
   public function new(provider:Void -> Null<WorkspaceRpcEndpoint>, terminalId:String, root:String, create:Bool, ?group:String, ?directory:String, autoClaimControl:Bool = false) {
     this.provider = provider;
@@ -94,7 +96,7 @@ class RpcTerminalBackend implements TerminalBackend {
         return;
       }
       controlPending = false;
-      observe(info);
+      if (!observe(info)) return;
       if (controller) resizePending = true;
     }, function(error) {
       if (connection == c) controlPending = false;
@@ -104,10 +106,10 @@ class RpcTerminalBackend implements TerminalBackend {
       }
     });
   }
-  function observe(info:WorkspaceTerminalProtocol.TerminalInfo):Void {
+  function observe(info:WorkspaceTerminalProtocol.TerminalInfo):Bool {
     if (info.columns < 1 || info.columns > 512 || info.rows < 1 || info.rows > 256) {
       fail("Invalid terminal geometry");
-      return;
+      return false;
     }
     var wasController = controller;
     controller = info.controller == true;
@@ -119,11 +121,7 @@ class RpcTerminalBackend implements TerminalBackend {
     }
     if (autoClaimControl && !controlReleased && attached && !controlled && info.state == "running")
       setControl(true);
-    if (info.columns != serverColumns || info.rows != serverRows) {
-      serverColumns = info.columns;
-      serverRows = info.rows;
-      output.push(TerminalEvent.geometry(serverColumns, serverRows));
-    }
+    return true;
   }
   static function retryable(code:String):Bool return code == "timeout" || code == "disconnected";
   function fail(message:String):Void {
@@ -188,7 +186,8 @@ class RpcTerminalBackend implements TerminalBackend {
     if (controller) resizePending = true;
   }
   public function requestReplay(offset:Int64):Void {
-    position = offset;
+    // Byte offsets cannot identify geometry-only records. Recover atomically.
+    snapshotPending = true;
     nextRead = 0;
   }
   public function terminate(force:Bool):Void {
@@ -283,8 +282,8 @@ class RpcTerminalBackend implements TerminalBackend {
           pending = false;
           attached = true;
           create = false;
-          observe(info);
-          output.push(TerminalEvent.status(info.state, info.exitCode));
+          if (!observe(info)) return;
+          // Lifecycle follows drained replay, including when attaching after exit.
         }, function(e) {
           if (!closed && connection == c) {
             pending = false;
@@ -292,7 +291,9 @@ class RpcTerminalBackend implements TerminalBackend {
           }
         }
         );
-      } else if (resizePending) {
+      } else if (snapshotPending) {
+        requestScreenSnapshot(c);
+      } else if (resizePending && !replayAfterResize) {
         resizePending = false;
         pending = true;
         c.call(WorkspaceTerminalProtocol.RESIZE, {
@@ -304,7 +305,9 @@ class RpcTerminalBackend implements TerminalBackend {
         }, 2000, function(info) {
           if (connection == c) {
             pending = false;
-            observe(info);
+            if (!observe(info)) return;
+            replayAfterResize = true;
+            nextRead = 0;
           }
         }, function(e) {
           if (connection == c) {
@@ -316,37 +319,62 @@ class RpcTerminalBackend implements TerminalBackend {
         }
         );
       } else if (Sys.time() >= nextRead) {
-        pending = true;
-        c.call(WorkspaceTerminalProtocol.OUTPUT, {
-          workspace: "workspace",
-          instance: instance,
-          id: terminalId,
-          offset: position
-        }, 2000, function(value) {
-          if (closed || connection != c) return;
-          pending = false;
-          if (value.offset != position || value.terminal.id != terminalId) {
-            fail("Invalid terminal replay");
-            return;
-          }
-          observe(value.terminal);
-          output.push(TerminalEvent.output(position, value.data));
-          position += value.data.length;
-          output.push(TerminalEvent.status(value.terminal.state, value.terminal.exitCode));
-          nextRead = Sys.time() +(value.data.length == 0 ? 0.05 : 0);
-        }, function(e) {
-          if (!closed && connection == c) {
-            pending = false;
-            if (e.code == "replay_gap") requestScreenSnapshot(c);
-            else if (!retryable(e.code)) fail(e.code);
-          }
-        }
-        );
+        if (snapshotOnly) requestScreenSnapshot(c);
+        else requestReplayBatch(c);
       }
     }
     var events = output;
     output = [];
     for (event in events) emit(event);
+  }
+  function requestReplayBatch(c:RpcConnection):Void {
+    pending = true;
+    var requested = replayCursor;
+    c.call(WorkspaceTerminalProtocol.REPLAY, {
+      workspace:"workspace", instance:instance, id:terminalId, cursor:requested
+    }, 2000, function(value) {
+      if (closed || connection != c) return;
+      pending = false;
+      if (value.terminal == null || value.terminal.id != terminalId || value.events == null
+          || value.events.length > 128 || value.next != requested + value.events.length || value.next > value.end) {
+        fail("Invalid terminal replay"); return;
+      }
+      var nextOffset = position, nextCursor = requested, bytes = 0;
+      // Validate the whole batch before exposing any of it to the emulator.
+      for (event in value.events) {
+        if (event.sequence != nextCursor || event.offset != nextOffset || event.data == null
+            || event.data.length > 65536) { fail("Invalid terminal replay order"); return; }
+        if (event.data.length == 0) {
+          if (event.columns < 1 || event.columns > 512 || event.rows < 1 || event.rows > 256) {
+            fail("Invalid terminal replay geometry"); return;
+          }
+        } else if (event.columns != 0 || event.rows != 0) {
+          fail("Invalid terminal replay output"); return;
+        }
+        bytes += event.data.length;
+        nextOffset += event.data.length;
+        nextCursor += 1;
+      }
+      if (bytes > 65536 || nextOffset > value.terminal.end) { fail("Invalid terminal replay bounds"); return; }
+      if (!observe(value.terminal)) return;
+      for (event in value.events) output.push(event.data.length == 0
+        ? TerminalEvent.geometry(event.columns, event.rows) : TerminalEvent.output(event.offset, event.data));
+      position = nextOffset;
+      replayCursor = value.next;
+      if (value.next == value.end) output.push(TerminalEvent.status(value.terminal.state, value.terminal.exitCode));
+      replayAfterResize = false;
+      nextRead = Sys.time() + (value.events.length == 0 ? 0.05 : 0);
+    }, function(error) {
+      if (closed || connection != c) return;
+      pending = false;
+      if (error.code == "unknown_method") {
+        // Older daemons have no ordered geometry history. Their atomic snapshots
+        // are safe; combining current dimensions with historical bytes is not.
+        snapshotOnly = true;
+        snapshotPending = true;
+      } else if (error.code == "replay_gap") snapshotPending = true;
+      else if (!retryable(error.code)) fail(error.code);
+    });
   }
   function requestScreenSnapshot(c:RpcConnection):Void {
     if (closed || connection != c || pending) return;
@@ -364,11 +392,17 @@ class RpcTerminalBackend implements TerminalBackend {
         fail("Invalid terminal screen snapshot");
         return;
       }
-      observe(value.terminal);
+      if (!snapshotOnly && (value.cursor == null || value.cursor < replayCursor)) {
+        fail("Invalid terminal snapshot cursor"); return;
+      }
+      if (!observe(value.terminal)) return;
+      if (value.cursor != null) replayCursor = value.cursor;
+      snapshotPending = false;
+      replayAfterResize = false;
       position = value.terminal.end;
       output.push(TerminalEvent.screenSnapshot(position, value.data));
       output.push(TerminalEvent.status(value.terminal.state, value.terminal.exitCode));
-      nextRead = 0;
+      nextRead = Sys.time() + (snapshotOnly ? 0.05 : 0);
     }, function(error) {
       if (connection != c) return;
       pending = false;

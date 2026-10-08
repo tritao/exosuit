@@ -86,6 +86,25 @@ Terminal catalog vectors (methods 115–117 use permanent identities):
 
 These run in the same native, Wasm32 and Wasm GC compatibility fixtures.
 
+Ordered terminal replay uses method 138 with a record cursor, separate from the
+output byte offset. Records contain a sequence, byte offset, binary data and
+columns/rows. Empty data denotes an accepted resize; output records have zero
+columns/rows. The initial record establishes geometry. Each response is bounded
+to 128 records and 64 KiB of output. Repeated resizes at the same byte offset
+remain distinct, and lifecycle state follows the final replay batch.
+
+Snapshot method 119 adds optional field 3 for the next record cursor, captured
+atomically with the screen and byte offset. A trimmed journal produces
+`replay_gap`; the client restores that snapshot before resuming replay. Clients
+apply geometry from replay records, never from current-state metadata or
+unacknowledged resize requests. Daemons without method 138 use atomic screen
+snapshots rather than replaying historical bytes at current dimensions. Existing
+byte-only method 111 and its vectors retain their identities.
+
+`TerminalReplayTests.hx` and `TerminalServiceTests.hx` cover replay ordering,
+geometry-only events, coalescing, reconnect, read-only viewers, malformed batches,
+exit ordering, bounded retention, snapshot recovery and legacy daemons.
+
 
 ## Group tree extension
 

@@ -21,7 +21,10 @@ class FakeBackend implements TerminalBackend {
 
     public function new() {}
     public function write(bytes:Bytes):Void writes.push(bytes.toString());
-    public function resize(columns:Int, rows:Int):Void resizes++;
+    public function resize(columns:Int, rows:Int):Void {
+        resizes++;
+        events.push(TerminalEvent.geometry(columns, rows));
+    }
     public function pollEvents(emit:TerminalEvent->Void):Void {
         var batch = events.copy();
         events.resize(0);
@@ -79,6 +82,10 @@ class Main {
             throw "output after exit was lost";
         session.write(Bytes.ofString("input"));
         session.resize(30, 5);
+        if (session.emulator.columns() != 20) throw "Resize speculatively changed the grid";
+        session.pollEvents();
+        if (session.emulator.columns() != 30 || session.emulator.rows() != 5)
+            throw "Accepted geometry was not applied";
         session.detach();
         session.terminate(true);
         if (backend.writes.length != 3 || backend.writes[2] != "input" ||
@@ -114,6 +121,19 @@ class Main {
             throw "screen snapshot lost styled Unicode cells or VT modes";
         modeCopy.close();
         modeSource.close();
+        // Screen snapshots contain rendered cursor inversion. Restoring twice
+        // must preserve content defaults and keep exactly one cursor inversion.
+        var cursorSource = Emulator.open(20, 4, 8, "xterm-256color", false);
+        cursorSource.feedString("prompt$ ");
+        var cursorCopy = Emulator.open(10, 3, 8, "xterm-256color", false);
+        for (_ in 0...2) {
+            cursorCopy.restoreScreenSnapshot(cursorSource.screenSnapshot());
+            cursorSource.snapshot(); cursorCopy.snapshot();
+            for (row in 0...4) for (column in 0...20)
+                if (cursorSource.rowCells(row)[column].style != cursorCopy.rowCells(row)[column].style)
+                    throw "Screen snapshot baked cursor inversion into content";
+        }
+        cursorSource.close(); cursorCopy.close();
         replacement.close();
         session.close();
         session.close();

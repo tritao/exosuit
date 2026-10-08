@@ -1,9 +1,9 @@
 package workspace.runtime;
 
-import haxe.io.Bytes;
 import haxe.Int64;
 import haxeon.rpc.*;
 import workspace.service.WorkspaceTerminalProtocol;
+import workspace.service.TerminalReplayLog;
 import workspace.service.WorkspaceTerminals;
 import workspace.service.WorkspaceTerminalPersistence;
 import workspace.service.WorkspaceProtocol;
@@ -11,10 +11,6 @@ import terminalsession.LocalPtyBackend;
 import terminalsession.TerminalProfile;
 import terminalkit.Emulator;
 
-private typedef OutputChunk = {var offset: Int64;
-var data:Bytes;
-var length:Int;
-}
 private class RuntimeTerminal {
   public final id:String;
   public final cwd:String;
@@ -24,14 +20,16 @@ private class RuntimeTerminal {
   public var rows:Int;
   public var state:String = "running";
   public var exitCode:Int = 0;
-  public var start:Int64 = 0;
-  public var end:Int64 = 0;
-  public var retained:Int = 0;
-  public final output:Array<OutputChunk> = [];
-  public function new(id:String, cwd:String, backend:LocalPtyBackend, columns:Int, rows:Int) {
+  public final replay:TerminalReplayLog;
+  public var start(get, never):Int64;
+  public var end(get, never):Int64;
+  function get_start():Int64 return replay.startOffset;
+  function get_end():Int64 return replay.endOffset;
+  public function new(id:String, cwd:String, backend:LocalPtyBackend, columns:Int, rows:Int, historyLimit:Int) {
     this.id = id;
     this.cwd = cwd;
     this.backend = backend;
+    replay = new TerminalReplayLog(columns, rows, historyLimit);
     try emulator = Emulator.open(columns, rows, 1000, "xterm-256color", false) catch (failure:Dynamic) {
       backend.close();
       throw failure;
@@ -361,7 +359,8 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
             resolved,
             LocalPtyBackend.spawn(TerminalProfile.shell(resolved), r.columns, r.rows),
             r.columns,
-            r.rows
+            r.rows,
+            historyLimit
           );
         } catch (_:Dynamic) {
           var failed = copy(record);
@@ -417,21 +416,21 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         c.fail(error("invalid_offset"));
         return;
       }
-      var length = Int64.toInt(t.end - r.offset > 65536 ? Int64.ofInt(65536) : t.end - r.offset);
-      var bytes = Bytes.alloc(length), copied = 0;
-      for (chunk in t.output) {
-        if (copied == length) break;
-        if (chunk.offset + chunk.length <= r.offset) continue;
-        var skip = r.offset > chunk.offset ? Int64.toInt(r.offset - chunk.offset) : 0;
-        var take = chunk.length - skip;
-        if (take > length - copied) take = length - copied;
-        bytes.blit(copied, chunk.data, skip, take);
-        copied += take;
-      }
+      var bytes = t.replay.readBytes(r.offset);
       c.respond({terminal: info(t, connection), offset: r.offset, data: bytes}
       );
     }
     );
+    connection.register(WorkspaceTerminalProtocol.REPLAY, function(r, c) {
+      if (!read) { c.fail(error("unauthorized")); return; }
+      if (!valid(r.workspace, r.instance, r.id)) { c.fail(error("invalid_request")); return; }
+      var t = terminals.get(r.id);
+      if (t == null) { c.fail(error("unknown_terminal")); return; }
+      if (r.cursor < t.replay.startCursor) { c.fail(error("replay_gap")); return; }
+      if (r.cursor < 0 || r.cursor > t.replay.endCursor) { c.fail(error("invalid_offset")); return; }
+      var batch = t.replay.read(r.cursor);
+      c.respond({terminal:info(t, connection), events:batch.events, next:batch.next, end:t.replay.endCursor});
+    });
     connection.register(WorkspaceTerminalProtocol.SNAPSHOT, function(r, c) {
       if (!read) {
         c.fail(error("unauthorized"));
@@ -447,7 +446,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         return;
       }
       try {
-        c.respond({terminal: info(t, connection), data: t.emulator.screenSnapshot()});
+        c.respond({terminal: info(t, connection), data: t.emulator.screenSnapshot(), cursor: t.replay.endCursor});
       } catch (_:Dynamic) {
         c.fail(error("snapshot_unavailable"));
       }
@@ -528,10 +527,13 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         return;
       }
       try {
-        if (t.state == "running") t.backend.resize(r.columns, r.rows);
-        t.emulator.resize(r.columns, r.rows);
-        t.columns = r.columns;
-        t.rows = r.rows;
+        if (t.columns != r.columns || t.rows != r.rows) {
+          if (t.state == "running") t.backend.resize(r.columns, r.rows);
+          t.emulator.resize(r.columns, r.rows);
+          t.replay.geometry(r.columns, r.rows);
+          t.columns = r.columns;
+          t.rows = r.rows;
+        }
         c.respond(info(t, connection));
       } catch (_:Dynamic) {
         c.fail(error("resize_failed"));
@@ -566,27 +568,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
           t.emulator.feedRange(event.data, 0, event.length);
           var replies = t.emulator.takeReplies();
           if (replies.length > 0) t.backend.write(replies);
-          // Native PTY memory is borrowed; retained replay must own exactly these bytes.
-          var consumed = 0;
-          while (consumed < event.length) {
-            var chunk = t.output.length == 0 ? null : t.output[t.output.length - 1];
-            if (chunk == null || chunk.length == 65536) {
-              chunk = {offset: t.end + consumed, data: Bytes.alloc(65536), length: 0};
-              t.output.push(chunk);
-            }
-            var take = event.length - consumed;
-            if (take > 65536 - chunk.length) take = 65536 - chunk.length;
-            chunk.data.blit(chunk.length, event.data, consumed, take);
-            chunk.length += take;
-            consumed += take;
-          }
-          t.end += event.length;
-          t.retained += event.length;
-          while (t.retained > historyLimit) {
-            var old = t.output.shift();
-            t.retained -= old.length;
-            t.start = old.offset + old.length;
-          }
+          t.replay.output(event.data, event.length);
         } else if (event.kind == "status") {
           t.state = event.state;
           t.exitCode = event.exitCode;

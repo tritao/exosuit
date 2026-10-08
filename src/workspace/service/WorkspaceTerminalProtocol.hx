@@ -36,6 +36,28 @@ import haxeon.wire.MessagePack;
 }
 @:wire typedef TerminalScreenSnapshot = {@: id(1) var terminal:TerminalInfo;
 @:id(2) var data:Bytes;
+@:optional @:id(3) var cursor:Null<Int64>;
+}
+/** Cursor counts immutable records, including resizes with no output between them. */
+@:wire typedef TerminalReplayQuery = {
+@:id(1) var workspace:String;
+@:id(2) var instance:String;
+@:id(3) var id:String;
+@:id(4) var cursor:Int64;
+}
+@:wire typedef TerminalReplayEvent = {
+@:id(1) var sequence:Int64;
+@:id(2) var offset:Int64;
+/** Empty data denotes geometry; output records have columns/rows zero. */
+@:id(3) var data:Bytes;
+@:id(4) var columns:Int;
+@:id(5) var rows:Int;
+}
+@:wire typedef TerminalReplay = {
+@:id(1) var terminal:TerminalInfo;
+@:id(2) var events:Array<TerminalReplayEvent>;
+@:id(3) var next:Int64;
+@:id(4) var end:Int64;
 }
 @:wire typedef TerminalInput = {@: id(1) var workspace: String;
 @:id(2) var instance:String;
@@ -161,6 +183,13 @@ class WorkspaceTerminalProtocol {
     function(b:Bytes):TerminalControl return MessagePack.decode(b),
     function(v:TerminalInfo) return MessagePack.encode(v),
     function(b:Bytes):TerminalInfo return MessagePack.decode(b)
+  );
+  public static final REPLAY = new RpcMethod<TerminalReplayQuery, TerminalReplay>(
+    138,
+    function(v:TerminalReplayQuery) return MessagePack.encode(v),
+    function(b:Bytes):TerminalReplayQuery return MessagePack.decode(b),
+    function(v:TerminalReplay) return MessagePack.encode(v),
+    function(b:Bytes):TerminalReplay return MessagePack.decode(b)
   );
   public static final SNAPSHOT = new RpcMethod<TerminalTarget, TerminalScreenSnapshot>(
     119,

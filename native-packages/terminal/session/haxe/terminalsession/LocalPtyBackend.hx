@@ -15,6 +15,7 @@ class LocalPtyBackend implements TerminalBackend {
     var streamOffset:haxe.Int64 = 0;
     var exited:Bool = false;
     var closed:Bool = false;
+    final geometry:Array<TerminalEvent> = [];
 
     private function new(pty:OwnedPtyHandle) {
         this.pty = pty;
@@ -54,9 +55,12 @@ class LocalPtyBackend implements TerminalBackend {
         if (columns < 1 || columns > 65535 || rows < 1 || rows > 65535)
             throw "Terminal size is outside PTY limits";
         check(NativeKit.nk_pty_resize(pty.borrow(), columns, rows), "resize");
+        geometry.push(TerminalEvent.geometry(columns, rows));
     }
     public function pollEvents(emit:TerminalEvent->Void):Void {
         ensureOpen();
+        for (event in geometry) emit(event);
+        geometry.resize(0);
         flushWrites();
         var drained = false;
         for (_ in 0...4) {

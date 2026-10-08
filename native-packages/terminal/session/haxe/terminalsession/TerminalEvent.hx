@@ -43,7 +43,7 @@ class TerminalEvent {
     }
 
     public static function geometry(columns:Int, rows:Int):TerminalEvent {
-        if (columns < 1 || columns > 512 || rows < 1 || rows > 256) throw "Invalid terminal geometry";
+        if (columns < 1 || columns > 65535 || rows < 1 || rows > 65535) throw "Invalid terminal geometry";
         return new TerminalEvent("geometry", 0, null, 0, "", 0, columns, rows);
     }
 }

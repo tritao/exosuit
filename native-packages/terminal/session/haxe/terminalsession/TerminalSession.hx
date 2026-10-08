@@ -32,8 +32,8 @@ class TerminalSession {
     }
     public function resize(columns:Int, rows:Int):Void {
         ensureOpen();
+        // Geometry is applied only when the backend emits it in output order.
         backend.resize(columns, rows);
-        emulator.resize(columns, rows);
     }
     public function pollEvents():Void {
         ensureOpen();

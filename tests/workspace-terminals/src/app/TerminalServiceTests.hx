@@ -109,6 +109,27 @@ class TerminalServiceTests {
       step();
     }
     require(manager.activeCount() == 1, "Open retry duplicated PTY");
+    // Service records accepted geometry even when no PTY output intervenes.
+    // Drain RPC only here so both resizes have the same byte offset.
+    for (width in [20, 80]) {
+      done = false;
+      client.call(WorkspaceTerminalProtocol.RESIZE, {workspace:"w", instance:"instance", id:"bounded",
+        columns:width, rows:24}, 1000, function(_) done = true, function(e) throw e.code);
+      client.poll(); server.poll(); client.poll();
+      require(done, "Ordered resize was not acknowledged");
+    }
+    var replay:Null<TerminalReplay> = null;
+    client.call(WorkspaceTerminalProtocol.REPLAY, {workspace:"w", instance:"instance", id:"bounded", cursor:0},
+      1000, function(value) replay = value, function(e) throw e.code);
+    client.poll(); server.poll(); client.poll();
+    require(replay != null && replay.next == replay.end, "Service replay cursor did not cover the current journal");
+    var batch:TerminalReplay = cast replay;
+    var geometry = [for (event in batch.events) if (event.data.length == 0) event];
+    require(geometry.length == 3 && geometry[0].columns == 80 && geometry[1].columns == 20
+      && geometry[2].columns == 80 && geometry[1].offset == geometry[2].offset
+      && geometry[1].sequence + 1 == geometry[2].sequence,
+      "Service lost geometry-only replay order");
+
     error = "";
     client.call(WorkspaceTerminalProtocol.OPEN, {
       workspace: "w",
@@ -180,7 +201,7 @@ class TerminalServiceTests {
       require(clock() < deadline, "Terminal screen snapshot timed out");
       step();
     }
-    require(screen.terminal.end >= 100000 && screen.data.length >= 64
+    require(screen.cursor != null && screen.cursor > batch.next && screen.terminal.end >= 100000 && screen.data.length >= 64
       && screen.data.length <= 3 * 1024 * 1024,
       "Terminal screen snapshot was not bounded at the current output offset");
     var restored = Emulator.open(10, 3, 8, "xterm-256color", false);

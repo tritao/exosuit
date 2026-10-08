@@ -13,11 +13,15 @@ import terminalsession.TerminalSession;
 /** Deterministic terminal output without a shell, process or workspace daemon. */
 class QuietBackend implements TerminalBackend {
 	public var replies:String = "";
+	final geometry:Array<TerminalEvent> = [];
 	public function new() {}
 	public function id():String return "cursor-fixture";
 	public function write(bytes:Bytes):Void { replies += bytes.toString(); }
-	public function resize(columns:Int, rows:Int):Void {}
-	public function pollEvents(emit:TerminalEvent->Void):Void {}
+	public function resize(columns:Int, rows:Int):Void geometry.push(TerminalEvent.geometry(columns, rows));
+	public function pollEvents(emit:TerminalEvent->Void):Void {
+		for (event in geometry) emit(event);
+		geometry.resize(0);
+	}
 	public function requestReplay(offset:haxe.Int64):Void {}
 	public function terminate(force:Bool):Void {}
 	public function detach():Void {}

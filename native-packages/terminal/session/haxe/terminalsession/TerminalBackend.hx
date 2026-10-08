@@ -6,6 +6,7 @@ import haxe.io.Bytes;
 interface TerminalBackend {
     public function id():String;
     public function write(bytes:Bytes):Void;
+    /** Request a resize; emit accepted geometry in the same order as output. */
     public function resize(columns:Int, rows:Int):Void;
     /** Emit borrowed output synchronously; callers copy only gapped events. */
     public function pollEvents(emit:TerminalEvent->Void):Void;

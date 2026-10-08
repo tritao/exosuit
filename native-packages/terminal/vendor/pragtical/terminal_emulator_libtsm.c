@@ -795,8 +795,12 @@ static struct tsm_screen_attr snapshot_attr(uint64_t style) {
   int inverse = (foreground & 3u) == TERMINAL_ATTRIBUTE_INVERSE_COLOR
     || (background & 3u) == TERMINAL_ATTRIBUTE_INVERSE_COLOR;
   if (inverse) {
-    snapshot_color(background, 1, &attr);
-    snapshot_color(foreground, 0, &attr);
+    /* After swapping back, opposite-role default markers are ordinary
+     * defaults again. Keeping the marker would invert the defaults twice. */
+    snapshot_color((background & 3u) == TERMINAL_ATTRIBUTE_INVERSE_COLOR
+      ? (background & ~3u) : background, 1, &attr);
+    snapshot_color((foreground & 3u) == TERMINAL_ATTRIBUTE_INVERSE_COLOR
+      ? (foreground & ~3u) : foreground, 0, &attr);
     attr.inverse = 1;
   } else {
     snapshot_color(foreground, 1, &attr);
@@ -894,6 +898,11 @@ int terminal_emulator_restore_screen_snapshot(terminal_emulator_t* emulator,
       | ((uint64_t)read_u32(&data[offset + 4]) << 32);
     offset += 8;
     struct tsm_screen_attr attr = snapshot_attr(style);
+    /* Version 1 stores rendered cells, including the cursor's temporary
+     * inversion. Restore content attributes; libtsm will paint the cursor. */
+    unsigned int painted_cursor = cursor_column < columns ? cursor_column : columns - 1;
+    if (cursor_mode != 1 && i / columns == cursor_row && i % columns == painted_cursor)
+      attr.inverse = !attr.inverse;
     size_t text_end = offset + text_length;
     if (width > 0) {
       unsigned int column = (unsigned int)(i % columns);
