@@ -58,7 +58,7 @@ class QuickPickView implements View {
 			var narrow = width < 520.0;
 			var files = provider.prompt.length == 0;
 			var commands = provider.prompt == "> ";
-			var rowHeight = narrow ? 52.0 : 32.0;
+			var rowHeight = files && narrow ? 52.0 : 32.0;
 			var listHeight = Math.min(Math.max(rowHeight, model.results.length * rowHeight),
 				Math.max(rowHeight, Math.min(360.0, context.viewportHeight - 80.0)));
 			var geometryChanged = previousRowHeight != rowHeight || previousListHeight != listHeight;
@@ -134,20 +134,15 @@ class QuickPickView implements View {
 						cells.push(new KeyedView("name", new Row("cv-name-column", [new KeyedView("name", labelView)], nameStyle)));
 						cells.push(new KeyedView("path", detailView));
 					} else {
-						var shortcuts:View = new ShortcutKeycaps(entry.trailing, selected);
-						if (narrow && entry.trailing.length > 0) {
-							textStyle.childGap = 2.0;
-							cells.push(new KeyedView("text", new Column("cv-command-text", [new KeyedView("name", labelView), new KeyedView("shortcut", shortcuts)], textStyle)));
-						} else {
-							cells.push(new KeyedView("name", labelView));
-							if (!commands && detail.length > 0) cells.push(new KeyedView("detail", detailView));
-							if (entry.trailing.length > 0) cells.push(new KeyedView("shortcut", shortcuts));
-						}
-						if (commands && configureKeybinding != null) cells.push(new KeyedView("configure",
-							new haxeon.ui.widgets.overlays.Tooltip("configure-keybinding-tooltip",
-								new QuickPickGear(selected || index == hovered, foreground, function() {
-									var configure:String->Void = cast configureKeybinding; configure(entry.value);
-								}), new Text("Configure Keybinding"), -150.0, -32.0)));
+						cells.push(new KeyedView("name", labelView));
+						if (!commands && detail.length > 0) cells.push(new KeyedView("detail", detailView));
+						if (entry.trailing.length > 0) cells.push(new KeyedView("shortcut", new ShortcutKeycaps(entry.trailing, selected)));
+						if (commands && configureKeybinding != null && (selected || index == hovered))
+							cells.push(new KeyedView("configure",
+								new haxeon.ui.widgets.overlays.Tooltip("configure-keybinding-tooltip",
+									new QuickPickGear(foreground, function() {
+										var configure:String->Void = cast configureKeybinding; configure(entry.value);
+									}), new Text("Configure Keybinding"), -150.0, -32.0)));
 					}
 					return new QuickPickRow(new Row("cv-result", cells, rowStyle), label, selected,
 						function() { model.activate(index); changed(); },
@@ -226,18 +221,18 @@ private class QuickPickRow implements View {
 	}
 }
 
-/** Reserves a consistent action column without turning the result into a button. */
+/** Centered action shown only on the selected or hovered command. */
 private class QuickPickGear implements View {
-	final visible:Bool;
 	final color:haxeon.ui.Color;
 	final configure:Void->Void;
-	public function new(visible:Bool, color:haxeon.ui.Color, configure:Void->Void) {
-		this.visible = visible; this.color = color; this.configure = configure;
+	public function new(color:haxeon.ui.Color, configure:Void->Void) {
+		this.color = color; this.configure = configure;
 	}
 	public function build(context:BuildContext):RenderNode {
 		var style = new LayoutStyle(); style.width = LayoutAxis.fixed(24); style.height = LayoutAxis.fixed(24);
-		var icon:View = visible ? new haxeon.ui.widgets.Icon("configure-keybinding", haxeon.ui.icons.IconName.Settings, 16, color)
-			: new Text("", style);
+		style.childAlignX = haxeon.ui.LayoutAlignmentX.Center;
+		style.childAlignY = LayoutAlignmentY.Center;
+		var icon:View = new haxeon.ui.widgets.Icon("configure-keybinding", haxeon.ui.icons.IconName.Settings, 16, color);
 		var node = new Row("cv-configure", [new KeyedView("icon", icon)], style).build(context);
 		node.semantics = new haxeon.ui.semantics.Semantics(haxeon.ui.semantics.AccessibilityRole.Button, "Configure Keybinding");
 		node.semantics.actions = haxeon.ui.semantics.AccessibilityAction.Activate;

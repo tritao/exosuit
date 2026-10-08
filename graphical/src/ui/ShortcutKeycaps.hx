@@ -5,7 +5,6 @@ import haxeon.ui.Insets;
 import haxeon.ui.LayoutAlignmentY;
 import haxeon.ui.LayoutAxis;
 import haxeon.ui.LayoutStyle;
-import haxeon.ui.Rect;
 import haxeon.ui.core.BuildContext;
 import haxeon.ui.core.RenderNode;
 import haxeon.ui.core.TextStyleOverride;
@@ -51,7 +50,7 @@ class ShortcutKeycaps implements View {
 					caps.push(new KeyedView("key-" + caps.length, new ShortcutKeycap(label, selected)));
 				}
 				var chordStyle = new LayoutStyle();
-				chordStyle.childGap = 3.0;
+				chordStyle.childGap = 4.0;
 				chordStyle.childAlignY = LayoutAlignmentY.Center;
 				children.push(new KeyedView("chord-" + children.length, new Row("shortcut-chord", caps, chordStyle)));
 			}
@@ -74,25 +73,39 @@ private class ShortcutKeycap implements View {
 	public function build(context:BuildContext):RenderNode {
 		var tokens = context.theme.tokens;
 		var style = new LayoutStyle();
-		style.height = LayoutAxis.fixed(22.0);
-		style.padding = new Insets(5.0, 1.0, 5.0, 2.0);
-		style.background = selected ? Color.rgba(1.0, 1.0, 1.0, 0.14) : tokens.surfaceRaised;
-		style.radiusTopLeft = style.radiusTopRight = style.radiusBottomLeft = style.radiusBottomRight = 3.0;
+		style.width = LayoutAxis.fit(24.0);
+		style.height = LayoutAxis.fixed(24.0);
+		style.padding = new Insets(6.0, 1.0, 6.0, 2.0);
+		style.childAlignX = haxeon.ui.LayoutAlignmentX.Center;
+		style.childAlignY = LayoutAlignmentY.Center;
+		var base = selected ? tokens.accent : tokens.surface;
+		var ink = selected ? tokens.textOnAccent : tokens.textPrimary;
+		style.background = blend(base, ink, selected ? 0.12 : 0.04);
+		style.radiusTopLeft = style.radiusTopRight = style.radiusBottomLeft = style.radiusBottomRight = 4.0;
 		var node = new Row("keycap", [new KeyedView("label", new Text(label, null,
-			selected ? tokens.textOnAccent : tokens.textPrimary, TextStyleOverride.text(12.0)))], style).build(context);
-		var borderStyle = new LayoutStyle(); borderStyle.width = LayoutAxis.grow(); borderStyle.height = LayoutAxis.grow();
-		borderStyle.positioning = haxeon.ui.LayoutPositioning.Absolute;
-		var borderNode = new RenderNode(context.id("keycap-border"), haxeon.ui.LayoutVisualKind.Custom, borderStyle);
-		borderNode.hitTestSelf = false;
-		var border = selected ? Color.rgba(1.0, 1.0, 1.0, 0.4) : tokens.border;
-		borderNode.onPaint(function(canvas, geometry) {
-			canvas.fillRectIfPositive(new Rect(2, 0, geometry.width - 4, 1), border);
-			canvas.fillRectIfPositive(new Rect(2, geometry.height - 2, geometry.width - 4, 2), border);
-			canvas.fillRectIfPositive(new Rect(0, 2, 1, geometry.height - 4), border);
-			canvas.fillRectIfPositive(new Rect(geometry.width - 1, 2, 1, geometry.height - 4), border);
+			selected ? tokens.textOnAccent : tokens.textSecondary, TextStyleOverride.text(12.0)))], style).build(context);
+		var surfaceStyle = new LayoutStyle();
+		surfaceStyle.width = LayoutAxis.grow();
+		surfaceStyle.height = LayoutAxis.grow();
+		surfaceStyle.positioning = haxeon.ui.LayoutPositioning.Absolute;
+		var surface = new RenderNode(context.id("keycap-surface"), haxeon.ui.LayoutVisualKind.Custom, surfaceStyle);
+		surface.hitTestSelf = false;
+		var border = blend(base, ink, selected ? 0.35 : 0.20);
+		surface.onPaint(function(canvas, geometry) {
+			if (geometry.width <= 2 || geometry.height <= 3) return;
+			canvas.strokeTransient(new haxeon.ui.PathBuilder().roundRect(0.5, 0.5,
+				geometry.width - 1, geometry.height - 1, 3.5).build(), border, 1.0);
+			canvas.strokeTransient(new haxeon.ui.PathBuilder().moveTo(4, geometry.height - 1.5)
+				.lineTo(geometry.width - 4, geometry.height - 1.5).build(), border, 1.0);
 		});
-		node.add(borderNode);
+		node.add(surface);
 		node.hitTestSelf = false;
 		return node;
+	}
+
+	static function blend(base:Color, ink:Color, amount:Float):Color {
+		return Color.rgba(base.red + (ink.red - base.red) * amount,
+			base.green + (ink.green - base.green) * amount,
+			base.blue + (ink.blue - base.blue) * amount);
 	}
 }
