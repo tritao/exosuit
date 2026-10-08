@@ -7,7 +7,8 @@ import haxeon.ui.animation.AnimationScheduler;
 import config.Settings;
 
 private class NarrowTooltipFixture implements haxeon.ui.core.View {
-	public function new() {}
+	final placement:haxeon.ui.widgets.overlays.TooltipPlacement;
+	public function new(placement:haxeon.ui.widgets.overlays.TooltipPlacement = Below) this.placement = placement;
 	public function build(context:haxeon.ui.core.BuildContext):haxeon.ui.core.RenderNode {
 		var anchorStyle = new haxeon.ui.LayoutStyle();
 		anchorStyle.width = haxeon.ui.LayoutAxis.fixed(24);
@@ -16,7 +17,7 @@ private class NarrowTooltipFixture implements haxeon.ui.core.View {
 		return new TabTooltip("narrow-tooltip", new haxeon.ui.widgets.text.Text("+", anchorStyle),
 			new haxeon.ui.widgets.text.Text("Open", null, null,
 				new haxeon.ui.core.TextStyleOverride(null, 13, null, haxeon.ui.TextWrap.WordCharacter)),
-			function() return new Rect(0, 0, 800, 600), 0, haxeon.ui.widgets.overlays.TooltipPlacement.Below, group, true).build(context);
+			function() return new Rect(0, 0, 800, 600), 0, placement, group, true).build(context);
 	}
 }
 
@@ -123,8 +124,29 @@ class TabTooltipTestMain {
 		for (_ in 0...4) root = context.submit(fixture, new haxeon.ui.LayoutFrame(800, 600));
 		var open:haxeon.ui.core.RenderNode = null;
 		root.walk(function(node) { if (node.layout.text == "Open") open = node; });
+		var paintedTooltip = false;
+		root.walk(function(node) {
+			if (node.styleType != "tooltip") return;
+			require(node.layout.visualKind == haxeon.ui.LayoutVisualKind.Custom,
+				"tooltip surface cannot host its themed paint decorations");
+			var decorations = node.computedStyle.get(haxeon.ui.style.StyleProperty.Decorations);
+			require(decorations != null && decorations.decorations.length == 2
+				&& decorations.decorations[1].kind == haxeon.ui.style.DecorationKind.Border,
+				"tooltip theme did not attach a painted border");
+			var effects = node.computedStyle.get(haxeon.ui.style.StyleProperty.Effects);
+			require(effects != null && effects.effects.length == 1
+				&& effects.effects[0].kind == haxeon.ui.style.EffectKind.DropShadow,
+				"tooltip theme did not attach a painted drop shadow");
+			paintedTooltip = true;
+		});
+		require(paintedTooltip, "tooltip fixture did not build a styled tooltip");
 		require(open != null && open.globalBounds().width > 25 && open.globalBounds().height < 25,
 			"short tooltip wrapped to its narrow anchor: " + (open == null ? "missing" : open.globalBounds().width + " x " + open.globalBounds().height));
+		var sideRoot = context.submit(new NarrowTooltipFixture(Right), new haxeon.ui.LayoutFrame(800, 600));
+		var sideTip:haxeon.ui.core.RenderNode = null;
+		sideRoot.walk(function(node) { if (node.styleType == "tooltip") sideTip = node; });
+		require(sideTip != null && sideTip.globalBounds().x >= 32,
+			"right tooltip resolved below its anchor: " + (sideTip == null ? "missing" : Std.string(sideTip.globalBounds().x)));
 		for (fontSize in [11.0, 13.0, 13.5, 17.25]) {
 			var style = new haxeon.ui.TextStyle(fontSize);
 			var paragraph = new haxeon.ui.ParagraphStyle(haxeon.ui.TextWrap.None);

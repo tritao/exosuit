@@ -77,13 +77,15 @@ class TabTooltip implements View {
 			var tipId = context.id("tooltip");
 			var computed = context.resolveStyle(new StyleTarget("tooltip", key, key, null, ["tooltip"],
 				context.interactionStates.get(tipId)), tipStyle);
-			var tip = new RenderNode(tipId, LayoutVisualKind.Box, computed.toLayoutStyle());
+			var tip = new RenderNode(tipId, LayoutVisualKind.Custom, computed.toLayoutStyle());
 			tip.computedStyle = computed;
 			tip.setStyleIdentity("tooltip", key, key, null, ["tooltip"]);
 			var label = context.withStyleParent(computed, function() return
 				context.withScope(new Key("content"), function() return content.build(context)));
 			tip.add(label);
-			root.onResolved(function(_) {
+			// The tooltip resolves after its anchor sibling; the parent callback
+			// runs before either child has geometry on a freshly built tree.
+			tip.onResolved(function(_) {
 				if (root.resolved == null || header.resolved == null) return;
 				var rail = boundsProvider();
 				var anchorBounds = root.globalBounds();
