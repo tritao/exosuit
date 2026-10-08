@@ -1,5 +1,7 @@
 package ui;
 
+import haxeon.ui.widgets.overlays.TooltipPlacement;
+
 import haxeon.ui.Rect;
 
 import haxeon.ui.Insets;
@@ -62,7 +64,7 @@ class ActivityBar implements View {
 			button.selected = model.visible && model.activeId == id;
 			items.push(new KeyedView(id, new TabTooltip("activity-tooltip:" + id, button,
 				new Text(mode.label, null, context.theme.tokens.textPrimary, new TextStyleOverride(null, 13, null, TextWrap.None)),
-				function() return new Rect(0, 0, context.viewportWidth, context.viewportHeight), tooltipDelay, true, false,
+				function() return new Rect(0, 0, context.viewportWidth, context.viewportHeight), tooltipDelay, Right,
 				hover, visibleTooltip.value == "activity-tooltip:" + id)));
 		}
 		items.push(new KeyedView("space", new haxeon.ui.widgets.layout.Spacer("activity-space")));
@@ -78,7 +80,7 @@ class ActivityBar implements View {
 		gear.selected = manageOpen;
 		items.push(new KeyedView("manage", new TabTooltip("activity-tooltip:manage", gear,
 			new Text("Manage", null, context.theme.tokens.textPrimary, TextStyleOverride.text(13)),
-			function() return new Rect(0, 0, context.viewportWidth, context.viewportHeight), tooltipDelay, true, false,
+			function() return new Rect(0, 0, context.viewportWidth, context.viewportHeight), tooltipDelay, Right,
 			hover, visibleTooltip.value == "activity-tooltip:manage")));
 		return new Column("activity-bar", items, style).build(context);
 	}

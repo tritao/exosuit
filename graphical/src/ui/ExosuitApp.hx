@@ -1,5 +1,7 @@
 package ui;
 
+import haxeon.ui.widgets.overlays.TooltipPlacement;
+
 import haxeon.ui.FontFamily;
 import haxeon.ui.Path;
 
@@ -1394,7 +1396,7 @@ class ExosuitApp implements DesktopUiApplication {
 				connection.accessibilityLabel = remoteDetails + ". Open Remote Access";
 				items.push(new KeyedView("remote", new TabTooltip("remote-status-tooltip", connection,
 					new Text(remoteDetails, null, theme.tokens.textPrimary, TextStyleOverride.text(12)),
-					function() return new Rect(0, 0, viewportWidth, viewportHeight), 0.5, false, true)));
+					function() return new Rect(0, 0, viewportWidth, viewportHeight), 0.5, Above)));
 			}
 			items = items.concat([new KeyedView("document", new Text(label, null, theme.tokens.textSecondary, TextStyleOverride.text(12))),
 				new KeyedView("space", new Spacer("status-space", LayoutAxis.grow(), LayoutAxis.fixed(1)))]);

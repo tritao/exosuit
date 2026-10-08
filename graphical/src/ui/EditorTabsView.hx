@@ -1,5 +1,7 @@
 package ui;
 
+import haxeon.ui.widgets.overlays.TooltipPlacement;
+
 import haxeon.ui.Rect;
 
 import haxeon.ui.LayoutAxis;
@@ -139,7 +141,7 @@ class EditorTabsView implements View {
 				new BuiltTabView(header), new Text(tabs.items[index].label, textStyle, context.theme.tokens.textPrimary,
 					new TextStyleOverride(null, 13, null, TextWrap.WordCharacter)),
 				function() return viewport == null ? new Rect(0, 0, context.viewportWidth, context.viewportHeight) : viewport.globalBounds(),
-				tooltipDelay, false, false, hover, visibleTooltip == "tab-tooltip:" + tabs.items[index].key);
+				tooltipDelay, Below, hover, visibleTooltip == "tab-tooltip:" + tabs.items[index].key);
 			var built = tooltip.build(context);
 			strip.add(built);
 		}

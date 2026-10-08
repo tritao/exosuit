@@ -2,8 +2,42 @@ package app;
 
 import ui.TabHoverDelay;
 import ui.TabTooltip;
+import haxeon.ui.Rect;
 import haxeon.ui.animation.AnimationScheduler;
 import config.Settings;
+
+private class NarrowTooltipFixture implements haxeon.ui.core.View {
+	public function new() {}
+	public function build(context:haxeon.ui.core.BuildContext):haxeon.ui.core.RenderNode {
+		var anchorStyle = new haxeon.ui.LayoutStyle();
+		anchorStyle.width = haxeon.ui.LayoutAxis.fixed(24);
+		anchorStyle.height = haxeon.ui.LayoutAxis.fixed(24);
+		var group = new ui.TooltipHoverGroup(context.animations, function(_) {}, 0);
+		return new TabTooltip("narrow-tooltip", new haxeon.ui.widgets.text.Text("+", anchorStyle),
+			new haxeon.ui.widgets.text.Text("Open", null, null,
+				new haxeon.ui.core.TextStyleOverride(null, 13, null, haxeon.ui.TextWrap.WordCharacter)),
+			function() return new Rect(0, 0, 800, 600), 0, haxeon.ui.widgets.overlays.TooltipPlacement.Below, group, true).build(context);
+	}
+}
+
+private class EllipsisFixture implements haxeon.ui.core.View {
+	public var width:Float;
+	public var value:String;
+	public var middle:Bool;
+	public final label:haxeon.ui.widgets.text.MiddleEllipsisText;
+	public function new(width:Float, value:String, middle:Bool, fontSize:Float) {
+		this.width = width; this.value = value; this.middle = middle;
+		label = new haxeon.ui.widgets.text.MiddleEllipsisText("boundary-label", value, middle,
+			new haxeon.ui.core.TextStyleOverride(null, fontSize, null, haxeon.ui.TextWrap.None));
+	}
+	public function build(context:haxeon.ui.core.BuildContext):haxeon.ui.core.RenderNode {
+		var style = new haxeon.ui.LayoutStyle();
+		style.width = haxeon.ui.LayoutAxis.fixed(width);
+		return new haxeon.ui.widgets.layout.Row("ellipsis-boundary", [new haxeon.ui.widgets.KeyedView("label", label)], style).build(context);
+	}
+}
+
+@:access(haxeon.ui.LayoutMeasureConstraints)
 
 class TabTooltipTestMain {
 	static function require(value:Bool, message:String):Void { if (!value) throw message; }
@@ -31,9 +65,53 @@ class TabTooltipTestMain {
 		require(right.x + 390 + right.width + 20 <= 394 && right.y == 56, "tooltip ignored rail edge or tab height");
 		var narrow = TabTooltip.place(20, 40, 20, 100);
 		require(narrow.width == 68 && narrow.x == 6, "tooltip padding was not included in width clamping");
+		var viewport = new Rect(0, 0, 800, 600);
+		var activity = TabTooltip.placeRight(new Rect(0, 80, 40, 40), 100, 30, viewport);
+		require(activity.x == 48 && activity.y == 5, "activity tooltip must prefer right and center vertically");
+		var edge = TabTooltip.placeRight(new Rect(760, 580, 40, 40), 100, 30, viewport);
+		require(edge.x == -108 && 580 + edge.y + 30 <= 594, "right tooltip did not flip or clamp at viewport edges");
+		var fonts = haxeon.ui.FontCollection.create();
+		fonts.add(Sys.getCwd() + "/../../haxeon/packages/ui/vendor/skribidi/example/data/IBMPlexSans-Regular.ttf");
+		var session = haxeon.ui.LayoutSession.create();
+		var context = new haxeon.ui.core.UiContext(session, fonts, ui.ExosuitPalette.theme(false));
+		var fixture = new NarrowTooltipFixture();
+		var root:haxeon.ui.core.RenderNode = null;
+		for (_ in 0...4) root = context.submit(fixture, new haxeon.ui.LayoutFrame(800, 600));
+		var open:haxeon.ui.core.RenderNode = null;
+		root.walk(function(node) { if (node.layout.text == "Open") open = node; });
+		require(open != null && open.globalBounds().width > 25 && open.globalBounds().height < 25,
+			"short tooltip wrapped to its narrow anchor: " + (open == null ? "missing" : open.globalBounds().width + " x " + open.globalBounds().height));
+		for (fontSize in [11.0, 13.0, 13.5, 17.25]) {
+			var style = new haxeon.ui.TextStyle(fontSize);
+			var paragraph = new haxeon.ui.ParagraphStyle(haxeon.ui.TextWrap.None);
+			var layout = haxeon.ui.TextLayout.createStyled(fonts, "Open", 10000, style, paragraph);
+			var fullWidth = layout.measure().width;
+			for (middle in [false, true]) {
+				for (available in [fullWidth + 0.5, fullWidth, fullWidth - 0.5, 1.0, 0.0]) {
+					var ellipsis = new EllipsisFixture(available, "Open", middle, fontSize);
+					for (_ in 0...4) root = context.submit(ellipsis, new haxeon.ui.LayoutFrame(800, 600));
+					var shown = "";
+					root.walk(function(node) { if (node.layout.text != null) shown = node.layout.text; });
+					require(ellipsis.label.truncated == (available < fullWidth), "ellipsis ignored subpixel overflow");
+					layout.setText(shown);
+					require(layout.measure().width <= available + 0.0001, "ellipsis itself exceeded available width");
+					if (available <= 1) require(shown == "", "unfittable ellipsis must not paint a clipped marker");
+				}
+			}
+			layout.dispose();
+			var editor = new haxeon.ui.widgets.text.TextEditorLayout(fonts, "Open", 200.5, style, paragraph);
+			var metrics = editor.measure();
+			var measured = editor.measureForConstraints(new haxeon.ui.LayoutMeasureConstraints(0, 200.5, 0, 100));
+			require(measured.width == metrics.width && measured.height == metrics.height,
+				"editor measurement changed fractional shaping geometry");
+			var bounded = editor.measureForConstraints(new haxeon.ui.LayoutMeasureConstraints(0, 10.5, 0, 8.5));
+			require(bounded.width <= 10.5 && bounded.height <= 8.5, "editor measurement exceeded hard constraints");
+			editor.dispose();
+		}
+		context.dispose(); session.dispose(); fonts.dispose();
 		var settings = new Settings(); settings.tabTooltipDelay = 1.2;
 		require(settings.copy().tabTooltipDelay == 1.2, "settings copy lost tooltip delay");
-		trace("PASS: tooltip delay, cancellation, reentry, disposal, and rail clamping");
+		trace("PASS: tooltip timing and placement, text fit, ellipsis boundaries, and fractional editor measurement");
 		return 0;
 	}
 }
