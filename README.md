@@ -191,3 +191,13 @@ document, selection, active view, or server session changes while waiting. The
 bundled Haxeon server supports explicit formatting, but does not advertise
 on-type formatting; Enter therefore uses the local indentation policy. Reindent
 remains a separate, whitespace-only operation.
+
+Paired browser workspaces expose New Terminal in Commands and through
+Ctrl+Shift+` when terminal read and control permissions are granted. The terminal
+runs on the connected workspace, using the selected Workbench group's inherited
+directory or the workspace root. The Terminal toolbar action and Ctrl+` open or
+hide the terminal panel outside Workbench; inside Workbench, new terminals open
+as editor tabs. New sessions claim available input control without taking it
+from another client. Closing a view never terminates the workspace shell;
+Terminate Active Terminal is the explicit stop action. Reconnects reuse the
+same session IDs, and retries cannot create a second shell for the same ID.

@@ -278,6 +278,9 @@ class BrowserPairingHostMain {
 					sys.io.File.saveContent(workspaceRoot + "/remote.md",
 						"café 🙂 needle after the emoji\n\n# Browser remote file\n\nChanged by AgentMain after the preview was opened (change "
 						+ request.sequence + ").\n");
+					// Exercise a visible listing change after reconnect. Content-only edits
+					// deliberately preserve the Explorer tree revision.
+					if (request.sequence == 2) sys.io.File.saveContent(workspaceRoot + "/relay-reconnected.md", "Created after relay reconnect.\n");
 					fileChangeSequence = request.sequence;
 				}
 			}

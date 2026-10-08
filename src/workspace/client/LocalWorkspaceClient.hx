@@ -403,6 +403,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   public function canReadTerminals():Bool return workbench.canReadTerminals();
   public function canControlTerminals():Bool return workbench.canControlTerminals();
   public function canCreateTerminals():Bool return workbench.canCreateTerminals();
+  public function canCreateGroupedTerminals():Bool return workbench.canCreateGroupedTerminals();
   public function terminalCatalog():Null<TerminalCatalog> return workbench.terminalCatalog();
   public function terminalCatalogError():Null<String> return workbench.terminalCatalogError();
   public function terminalCatalogRevision():Int return workbench.terminalCatalogRevision();

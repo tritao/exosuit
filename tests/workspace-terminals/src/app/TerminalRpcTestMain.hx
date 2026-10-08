@@ -41,6 +41,7 @@ class TerminalRpcTestMain {
 
     var runtime = NativeKitRuntime.start(), processes = new ProcessManager();
     if (mode == "contracts") {
+      TerminalCapabilitiesTests.run();
       TerminalReplayTests.run();
       TerminalServiceTests.run(root);
       TerminalCatalogTests.run(root);

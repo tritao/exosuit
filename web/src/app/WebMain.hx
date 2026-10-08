@@ -46,18 +46,27 @@ class WebMain {
 			new BrowserUiFontAsset("NotoEmoji-Regular", "assets/NotoEmoji-Regular.ttf", "/assets/NotoEmoji-Regular.ttf", FontFamily.Emoji)
 		];
 		var started = BrowserUiHost.start(options, function(context) {
+			var browserApp:Null<ExosuitApp> = null;
+			var redraw = function() {
+				if (browserApp == null) context.requestFrame(); else browserApp.requestFrame();
+			};
 			var remote = new BrowserRemoteWorkspaceClient(context.events,
 				function() return NativeKit.nk_time_seconds() * 1000,
-				function() context.requestFrame());
+				redraw);
 			var app = new ExosuitApp(context.fonts, ExosuitPalette.theme(false), context, "/workspace", HostCapabilities.browser(), null, false, null,
 				function(id, cwd, restored, requestFrame, palette, group, directory)
 					return ui.TerminalPane.openRemote(function() return remote, id, cwd, restored,
-						requestFrame, palette, group, directory, context.fonts));
+						requestFrame, palette, group, directory, context.fonts, !restored));
+			browserApp = app;
 			remoteAccess = remote;
-			var remotePanel = new BrowserRemoteAccessPanel(remote, function() context.requestFrame());
+			var remotePanel = new BrowserRemoteAccessPanel(remote, redraw);
 			var filesAttached = false;
 			var workbenchAttached = false;
+			// ExosuitApp owns service/explorer polling once the workspace is attached.
+			// Preserve it when adding the browser connection lifecycle callback.
+			var pollEditor = context.onPoll;
 			context.onPoll = function() {
+				if (pollEditor != null) pollEditor();
 				if (!filesAttached) remote.poll();
 				var connected = remote.isWorkspaceConnected();
 				var filesAvailable = connected && remote.canReadFiles();

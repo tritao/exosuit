@@ -240,7 +240,7 @@ with tempfile.TemporaryDirectory(prefix="exosuit-browser-pairing-") as temporary
             with sqlite3.connect(database) as db:
                 version = db.execute("PRAGMA user_version").fetchone()[0]
                 tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-                if version != 5 or "workspace_devices" not in tables:
+                if version != 7 or not {"workspace_devices", "workspace_terminals", "workspace_agents"}.issubset(tables):
                     raise RuntimeError("AgentMain did not persist the production workspace/device schema")
                 rows = db.execute("SELECT device_id,revoked,length(static_key),length(grants) FROM workspace_devices").fetchall()
                 success_result = json.loads(success.read_text())

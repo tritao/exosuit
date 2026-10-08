@@ -13,6 +13,9 @@ import haxeon.ui.TextStyle;
 import haxeon.ui.TextWrap;
 import haxe.io.Bytes;
 import haxeon.ui.core.BuildContext;
+import haxeon.platform.NativeKitEventValue.NativeKitTextEdit;
+import nativekit.ffi.NativeKitTypes.TextEditAction;
+import haxeon.ui.widgets.text.TextInputWindow;
 import haxeon.ui.core.CachePolicy;
 import haxeon.ui.core.RenderNode;
 import haxeon.ui.core.UiEvent;
@@ -100,6 +103,8 @@ class TerminalPane implements TerminalPanel {
 	}
 
 	public function terminate(force:Bool):Void session.terminate(force);
+
+	public function controlStatus():Null<String> return remoteBackend == null ? null : remoteBackend.controlStatus();
 
 	public function status():String
 		return session.status;
@@ -337,7 +342,18 @@ class TerminalPane implements TerminalPanel {
 				1, LayoutAxis.grow(), LayoutAxis.fixed(rowHeight)));
 		}
 		var node = new Stack("terminal-pane", layers, fill).build(context);
+		// A terminal is an input stream, not an editable copy of its screen. Publish
+		// an empty surrounding document so IME edits cannot target the last editor.
+		var syncTextInput = function() {
+			if (!focused || !context.textInput.isOwner(node.id)) return;
+			var bounds = node.globalBounds();
+			context.textInput.update(new TextInputWindow("", 0, 0), 0, 0, 0, -1, -1, 0, 0,
+				new Rect(bounds.x + 8 + Math.max(0, cursorColumn) * cellWidth,
+					bounds.y + terminalTop + Math.max(0, cursorRow) * rowHeight,
+					cellWidth, rowHeight), [], []);
+		};
 		node.onResolved(function(_) {
+			syncTextInput();
 			var bounds = node.globalBounds();
 			if (bounds.width != resolvedWidth || bounds.height != resolvedHeight) {
 				resolvedWidth = bounds.width;
@@ -434,6 +450,17 @@ class TerminalPane implements TerminalPanel {
 				event.preventDefault();
 			}
 		});
+		node.on(UiEventKind.TextEdit, function(event:UiEvent) {
+			var edit:NativeKitTextEdit = cast event.data;
+			// Composition previews stay with the platform IME. Only committed text
+			// enters the PTY; sending previews would execute unfinished input.
+			if (edit != null && edit.action == TextEditAction.Commit &&
+				edit.text != null && edit.text.length > 0 && canSendInput()) {
+				prepareInput();
+				session.write(Bytes.ofString(edit.text));
+			}
+			event.preventDefault();
+		});
 		node.on(UiEventKind.KeyDown, function(event) {
 			if (event.key == UiKey.C &&
 				(event.modifiers & (UiModifier.Control | UiModifier.Shift)) ==
@@ -461,8 +488,15 @@ class TerminalPane implements TerminalPanel {
 			} else handleKey(event);
 		});
 		node.on(UiEventKind.KeyRepeat, handleKey);
-		node.on(UiEventKind.Focus, function(_) setFocused(true));
-		var blur = function(_:UiEvent):Void setFocused(false);
+		node.on(UiEventKind.Focus, function(_) {
+			setFocused(true);
+			context.textInput.activate(node.id);
+			syncTextInput();
+		});
+		var blur = function(_:UiEvent):Void {
+			setFocused(false);
+			context.textInput.deactivate(node.id);
+		};
 		node.on(UiEventKind.Blur, blur);
 		node.on(UiEventKind.FocusLost, blur);
 		node.on(UiEventKind.Scroll, function(event:UiEvent) {

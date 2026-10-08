@@ -5,6 +5,7 @@ interface WorkspaceTerminalCatalogClient {
   public function canReadTerminals():Bool;
   public function canControlTerminals():Bool;
   public function canCreateTerminals():Bool;
+  public function canCreateGroupedTerminals():Bool;
   public function canEditGroups():Bool;
   public function terminalCatalog():Null<TerminalCatalog>;
   public function terminalCatalogError():Null<String>;

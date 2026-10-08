@@ -62,6 +62,11 @@ async function clickTarget(name, description = name) {
   const target = await waitForTarget(name, description);
   await click(target.x + target.width / 2, target.y + target.height / 2);
 }
+async function clickTreeItem(key) {
+  const item = await waitFor(`visible tree item ${key}`, async () =>
+    (await shellState())?.treeItems?.find(item => item.key === key && item.bounds?.height > 0));
+  await click(item.bounds.x + item.bounds.width / 2, item.bounds.y + item.bounds.height / 2);
+}
 async function enterSearchQuery(value) {
   await clickTarget('remoteSearchQuery', 'search query field');
   await waitFor('focused SearchField', async () =>
@@ -102,6 +107,9 @@ try {
   await send('Runtime.enable');
   await send('Log.enable');
   await send('Page.enable');
+  // Keep the full workspace/Codex workflow visible on headless hosts whose
+  // screen size otherwise clamps Chrome's requested window height.
+  await send('Emulation.setDeviceMetricsOverride', {width: 1050, height: 900, deviceScaleFactor: 1, mobile: false});
   await send('Page.addScriptToEvaluateOnNewDocument', {source: `(()=>{
     const NativeWebSocket = window.WebSocket;
     window.__exosuitTestSockets = [];
@@ -117,9 +125,9 @@ try {
   // Select Remote Access in the activity rail and submit the host-created one-use URL.
   await clickTarget('remoteAccessActivity', 'Remote Access activity tab');
   const invitation = JSON.parse(fs.readFileSync(invitePath, 'utf8'));
-  await click(160, 289);
+  await clickTarget('pairingUrl', 'one-time pairing URL field');
   await send('Input.insertText', {text: invitation.pairingSocketUrl});
-  await click(110, 337);
+  await clickTarget('pairingConnect', 'Pair new device button');
 
   const browser = await waitFor('browser Noise authentication code', async () => {
     const state = await remoteState();
@@ -137,7 +145,7 @@ try {
   console.log('PASS: browser and desktop display the same Noise authentication code');
 
   // Confirm the code in the same panel; approval is gated on the exact matching code above.
-  await click(160, 405);
+  await clickTarget('pairingConfirm', 'verify pairing code button');
   const connected = await waitFor('authenticated workspace identity and credential storage', async () => {
     const state = await remoteState();
     if (state?.error) throw new Error(`Browser pairing failed: ${state.error}`);
@@ -193,7 +201,7 @@ try {
     console.log(`PASS: connected Explorer subscribed to ${remoteExplorer.explorerIdentity}`);
     // Pairing already leaves the Explorer selected and visible. Clicking its
     // active activity icon would collapse the sidebar before the row click.
-    await click(145, 166); // remote.md after the root row, nested folder and filename-only fixture.
+    await clickTreeItem('workspace-file:remote.md');
     const remotePreview = await waitFor('remote file preview', async () => {
       const shell = await shellState();
       const file = shell?.workspaceFileTabs?.find(item => item.path === 'remote.md'
@@ -268,7 +276,7 @@ try {
       return shell?.sidebarMode === 'files' && shell.explorerRevision > beforeFolderReveal.explorerRevision
         ? shell : null;
     });
-    await click(145, 140); // Expanded child row directly below nested.
+    await clickTreeItem('workspace-file:needle-nested/child.md');
     const revealedChild = await waitFor('opened child under the revealed search folder', async () => {
       const shell = await shellState();
       return shell?.workspaceFileTabs?.some(item => item.path === 'needle-nested/child.md'
@@ -283,26 +291,60 @@ try {
   let remoteAgentThread = null;
   if (agentMode) {
     await clickTarget('workbenchActivity', 'Workbench activity tab');
-    await pause(120);
-    const selectedWorkbench = (await shellState())?.sidebarMode === 'workbench';
-    if (!selectedWorkbench) throw new Error('Could not select the connected Workbench from the activity rail');
+    await waitFor('connected Workbench selection', async () => (await shellState())?.sidebarMode === 'workbench');
     console.log('PASS: connected Workbench selected');
     const readyWorkbench = await waitFor('remote terminal catalog', async () => {
       const shell = await shellState();
       return shell?.terminalCatalog?.groups?.some(group => group.id === 'work') ? shell : null;
     }, 20000);
     console.log('PASS: remote terminal catalog loaded');
-    await click(74, 90); // Workbench's New terminal action for its selected Work group.
+    await clickTarget('newTerminal', 'Workbench New terminal action');
     const openedTerminal = await waitFor('remote terminal tab', async () => {
       const shell = await shellState();
       return shell?.terminalResourceIds?.length === 1 && shell?.terminalIds?.length === 1
         && shell?.terminal !== 'closed' && shell?.terminalColumns > 0
-        && shell?.panels?.includes('terminal') ? shell : null;
+        && shell?.terminalControl === 'You are controlling this terminal' ? shell : null;
     }, 30000);
     remoteTerminalId = openedTerminal.terminalResourceIds[0];
     if (remoteTerminalId == null || remoteTerminalId.length === 0)
       throw new Error('Remote terminal tab did not retain a stable session id');
     console.log('PASS: Workbench opened a controlled terminal session from the remote workspace group');
+    // Ctrl+Shift+` uses the same creation path, without relying on local Processes.
+    await send('Input.dispatchKeyEvent', {type: 'keyDown', key: '~', code: 'Backquote', windowsVirtualKeyCode: 192, modifiers: 10});
+    await send('Input.dispatchKeyEvent', {type: 'keyUp', key: '~', code: 'Backquote', windowsVirtualKeyCode: 192, modifiers: 10});
+    const shortcutTerminal = await waitFor('terminal created by browser shortcut', async () => {
+      const shell = await shellState();
+      return shell?.terminalResourceIds?.length === 2 && shell?.terminalColumns > 0
+        && shell?.terminalControl === 'You are controlling this terminal' ? shell : null;
+    });
+    if (new Set(shortcutTerminal.terminalResourceIds).size !== 2)
+      throw new Error('Terminal shortcut reused a session id');
+    await clickTarget('terminalPane', 'new terminal input');
+    await send('Input.insertText', {text: "printf 'browser-input-ok' > browser-terminal-input.txt"});
+    await send('Input.dispatchKeyEvent', {type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13});
+    await send('Input.dispatchKeyEvent', {type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13});
+    await waitFor('remote shell input in workspace root', async () => {
+      try { return fs.readFileSync(`${connected.state.workspaceRoot}/browser-terminal-input.txt`, 'utf8') === 'browser-input-ok'; }
+      catch (_) { return false; }
+    });
+    console.log('PASS: browser terminal shortcut creates a distinct session and immediately accepts shell input');
+    await clickTarget('searchActivity', 'Search activity outside Workbench');
+    await waitFor('Search selected outside Workbench', async () => (await shellState())?.sidebarMode === 'search');
+    await clickTarget('terminalToolbar', 'remote terminal toolbar');
+    const panelTerminal = await waitFor('remote terminal panel outside Workbench', async () => {
+      const shell = await shellState();
+      return shell?.terminalPanelTabs?.length === 1 && shell?.terminalResourceIds?.length === 3 ? shell : null;
+    });
+    await clickTarget('terminalToolbar', 'hide terminal panel');
+    await clickTarget('terminalToolbar', 'reopen terminal panel');
+    const reopenedPanel = await shellState();
+    if (reopenedPanel.terminalResourceIds.length !== 3 || reopenedPanel.terminalPanelTabs[0] !== panelTerminal.terminalPanelTabs[0])
+      throw new Error('Reopening the terminal panel created a duplicate session');
+    await clickTarget('terminalToolbar', 'hide terminal panel before Workbench');
+    await clickTarget('workbenchActivity', 'return to Workbench');
+    await waitFor('Workbench restored', async () => (await shellState())?.sidebarMode === 'workbench');
+    console.log('PASS: remote terminal panel opens outside Workbench and reopening preserves the existing session');
+
 
     const beforeCodex = await shellState();
     const createCodex = beforeCodex?.testTargets?.newCodex;
@@ -382,6 +424,7 @@ try {
 
   // Drop the active relay WebSocket. The RpcClient must obtain a fresh ticket
   // and Noise channel without another user action.
+  const terminalIdsBeforeDrop = agentMode ? (await shellState()).terminalResourceIds.slice().sort() : [];
   const oldConnectCount = await expression(`window.__exosuitTestSockets.filter(socket =>
     socket.url.includes('/connect')).length`);
   const forcedDrop = await expression(`(()=>{
@@ -434,7 +477,8 @@ try {
     writePrivate(fileChangePath, {requestId: 'browser-file-change-v1', sequence: 2});
     const reconnectedChange = await waitFor('AgentMain file-change delivery after relay reconnect', async () => {
       const shell = await shellState();
-      return shell?.explorerWatching && shell.explorerRevision > revision ? shell : null;
+      return shell?.explorerWatching && shell.explorerRevision > revision
+        && shell.treeItems?.some(item => item.key === 'workspace-file:relay-reconnected.md') ? shell : null;
     }, 15000);
     if (reconnectedChange.explorerRevision <= revision)
       throw new Error('Remote Explorer did not invalidate its listing after reconnect');
@@ -445,8 +489,8 @@ try {
       const shell = await shellState();
       return shell?.terminalResourceIds?.includes(remoteTerminalId) && shell?.terminal !== 'closed' ? shell : null;
     });
-    if (!resumedTerminal.terminalResourceIds.includes(remoteTerminalId))
-      throw new Error('Remote terminal tab lost its stable session id after reconnect');
+    if (JSON.stringify(resumedTerminal.terminalResourceIds.slice().sort()) !== JSON.stringify(terminalIdsBeforeDrop))
+      throw new Error('Remote terminal reconnect lost or duplicated a session');
     console.log('PASS: remote terminal tab reattached to the same session after relay reconnect');
     const resumedAgent = await waitFor('Codex session after relay reconnect', async () => {
       const shell = await shellState();

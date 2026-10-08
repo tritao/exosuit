@@ -442,7 +442,10 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     && has(WorkspaceTerminalProtocol.CONTROL) && has(WorkspaceTerminalProtocol.CATALOG);
 
   public function canCreateTerminals():Bool return canReadTerminals()
-    && canControlTerminals() && endpoint.supportsWorkspaceGroups() && has(WorkspaceProtocol.TREE);
+    && canControlTerminals();
+
+  public function canCreateGroupedTerminals():Bool return canCreateTerminals()
+    && endpoint.supportsWorkspaceGroups() && has(WorkspaceProtocol.TREE);
 
   public function terminalCatalog():Null < WorkspaceTerminalProtocol.TerminalCatalog > return catalog;
   public function terminalCatalogError():Null < String > return catalogError;

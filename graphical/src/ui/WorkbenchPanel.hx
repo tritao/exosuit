@@ -82,6 +82,11 @@ class WorkbenchPanel implements View {
 		};
 	}
 
+	public function selectedGroupId():Null<String> {
+		var group = groupFor(tree.selectedKey);
+		return group == null ? null : group.id;
+	}
+
 	function groupFor(key:Null<String>):Null<WorkspaceGroup> {
 		if (key != null) {
 			if (StringTools.startsWith(key, "g:")) return model.groups.get(key.substring(2));
@@ -131,7 +136,7 @@ class WorkbenchPanel implements View {
 		}
         items.push(new MenuItem("new-codex", "New Codex session", function() client.agentService().createAgent(groupId, null, openAgent),
             group != null && client.agentService().canControlAgents() && !client.agentService().agentBusy()));
-        items.push(new MenuItem("new-terminal", "New terminal", function() createTerminal(groupId), group != null && client.canCreateTerminals() && !client.terminalCatalogBusy()));
+        items.push(new MenuItem("new-terminal", "New terminal", function() createTerminal(groupId), group != null && client.canCreateGroupedTerminals() && !client.terminalCatalogBusy()));
         items.push(new MenuItem("new-group", "New group", function() beginGroup({id: workspace.client.WorkspaceIds.create("group"),
             name: "", cwd: null, revision: 0, parent: group == null ? null : group.id,
             order: model.nextOrder(group == null ? null : group.id)}, true), editable && !pending));
@@ -325,7 +330,7 @@ class WorkbenchPanel implements View {
 		var terminal = toolbarButton("New terminal", IconName.Terminal, function() {
 			if (selected != null) createTerminal(selected.id);
 		}, "workbench-new-terminal");
-		terminal.enabled = selected != null && client.canCreateTerminals()
+		terminal.enabled = selected != null && client.canCreateGroupedTerminals()
 			&& !client.terminalCatalogBusy();
 		var agent = toolbarButton("New Codex", IconName.Plus, function() {
 			if (selected != null) client.agentService().createAgent(selected.id, null, openAgent);
@@ -342,7 +347,9 @@ class WorkbenchPanel implements View {
 		var toolbarStyle = new LayoutStyle(); toolbarStyle.width = LayoutAxis.stretch(); toolbarStyle.childGap = 2;
 		toolbarStyle.padding = new Insets(4, 2, 4, 2);
 		var rows:Array<KeyedView> = [new KeyedView("toolbar", new Row("workbench-toolbar", [
-			new KeyedView("terminal", new haxeon.ui.widgets.overlays.Tooltip("new-terminal-tip", terminal, new Text("New terminal"), 0, 36)),
+			new KeyedView("terminal", new haxeon.ui.widgets.overlays.Tooltip("new-terminal-tip", terminal, new Text(!client.canReadTerminals() ? "Connect to a workspace with terminal read permission"
+				: !client.canControlTerminals() ? "Terminal creation requires terminal control permission"
+				: !client.canCreateGroupedTerminals() ? "This workspace does not support grouped terminals" : "New terminal"), 0, 36)),
 			new KeyedView("agent", new haxeon.ui.widgets.overlays.Tooltip("new-agent-tip", agent, new Text("New Codex"), -32, 36)),
 			new KeyedView("delete-agent", new haxeon.ui.widgets.overlays.Tooltip("delete-agent-tip", deleteAgent, new Text("Remove from Workbench"), -64, 36)),
 			new KeyedView("more", new haxeon.ui.widgets.overlays.Tooltip("workbench-actions-tip", more, new Text("Actions"), -96, 36))
