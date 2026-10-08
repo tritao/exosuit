@@ -16,6 +16,7 @@ class Document {
 	public final buffer:TextBuffer;
 	public var highlighter(default, null):Highlighter;
 	public var syntax(default, null):SyntaxDefinition;
+	public var indentation(default, null):DocumentIndentation;
 	final syntaxes:SyntaxRegistry;
 	final fileSystem:EditorFileSystem;
 	public var dirty(get, never):Bool;
@@ -37,6 +38,7 @@ class Document {
 		buffer = new TextBuffer(text);
 		diskContent = text;
 		selectSyntax();
+		indentation = new DocumentIndentation(buffer, highlighter);
 		savedStateId = buffer.stateId;
 	}
 
@@ -50,6 +52,8 @@ class Document {
 
 	public function hasBackingPath():Bool
 		return path != null;
+
+	public function indentationFileSystem():EditorFileSystem return fileSystem;
 
 	public function requirePath():String {
 		if (path == null) throw "document has no backing path";
@@ -85,6 +89,7 @@ class Document {
 		syntax = syntaxes.find(path == null ? title : path, buffer.text.substr(0, 128));
 		highlighter = new Highlighter(buffer, syntax);
 		highlighterSubscription = buffer.subscribe(highlighter.bufferChanged);
+		if (indentation != null) indentation.updateSyntax(buffer, highlighter);
 	}
 
 	public static function open(path:String, registry:SyntaxRegistry, ?fileSystem:EditorFileSystem):Document {
@@ -174,6 +179,11 @@ class Document {
 		newline = body.indexOf("\r\n") >= 0 ? "\r\n" : "\n";
 		body = StringTools.replace(StringTools.replace(body, "\r\n", "\n"), "\r", "\n");
 		buffer.replaceAllText(body);
+		var previousIndentation = indentation;
+		previousIndentation.cache.dispose();
+		indentation = new DocumentIndentation(buffer, highlighter);
+		indentation.overrideWidth = previousIndentation.overrideWidth;
+		indentation.overrideSpaces = previousIndentation.overrideSpaces;
 		savedStateId = buffer.stateId;
 		diskContent = content;
 		externalState = Current;
@@ -181,7 +191,11 @@ class Document {
 	}
 
 	public function acceptRecoveredText(text:String):Void {
-		if (buffer.text != text) buffer.replaceAllText(text);
+		if (buffer.text != text) {
+			buffer.replaceAllText(text);
+			indentation.cache.dispose();
+			indentation = new DocumentIndentation(buffer, highlighter);
+		}
 		// A pathless recovery snapshot represents unsaved work even when empty.
 		if (path == null) savedStateId = -1;
 	}

@@ -143,6 +143,21 @@ class LanguageControllerTestMain {
 		require(protocol.length > 0 && protocol[0].indexOf("Haxeon LSP") == 0, "verbose protocol was not logged");
 		var selection = view.getSelection();
 		require(selection != null, "document view has no selection");
+		var formattingSettings = new config.Settings(); formattingSettings.indentSize = 3; formattingSettings.insertSpaces = true;
+		controller.documentSettings = target -> formattingSettings;
+		var unformatted = document.buffer.text;
+		require(commands.perform("language:format-document", context), "format document command unavailable");
+		pump(controller, () -> document.buffer.text != unformatted, 5);
+		require(document.buffer.text == "   " + unformatted, "format command ignored resolved document settings");
+		document.undo(selection);
+		require(!commands.perform("language:format-selection", context), "format selection enabled without selection");
+		selection.restore(document.buffer, new BufferPosition(0, 2), new BufferPosition(0, 0));
+		require(commands.perform("language:format-selection", context), "format selection command unavailable");
+		pump(controller, () -> document.buffer.text != unformatted, 5);
+		require(document.buffer.text == "   " + unformatted.substring(2), "format selection did not use selected UTF-16 range");
+		document.undo(selection);
+		Sys.println("PASS: formatting commands use resolved settings and selection ranges");
+
 		selection.setCursor(document.buffer, new BufferPosition(0, 2));
 		document.insert(selection, "x");
 		pump(controller, () -> root.pluginDecorations.forDocument(document).length == 1 && root.problems.values().length == 1, 5.0);

@@ -54,7 +54,7 @@ while True:
         capabilities = {"positionEncoding": "utf-8" if "bad-encoding" in sys.argv else "utf-16", "textDocumentSync": {"openClose": True, "change": 2}}
         if not minimal:
             capabilities.update({"hoverProvider": True, "completionProvider": {}, "definitionProvider": True,
-                                 "signatureHelpProvider": {"triggerCharacters": ["(", ","]}, "documentSymbolProvider": True, "referencesProvider": True, "renameProvider": {}})
+                                 "signatureHelpProvider": {"triggerCharacters": ["(", ","]}, "documentSymbolProvider": True, "referencesProvider": True, "renameProvider": {}, "documentFormattingProvider": True, "documentRangeFormattingProvider": True})
         send({"jsonrpc": "2.0", "id": message["id"], "result": {"capabilities": capabilities}})
     elif method == "initialized":
         pass
@@ -87,6 +87,13 @@ while True:
             sys.exit(7)
     elif method == "textDocument/didClose":
         documents.pop(message["params"]["textDocument"]["uri"], None)
+    elif method in ("textDocument/formatting", "textDocument/rangeFormatting"):
+        options = message["params"]["options"]
+        if options != {"tabSize": 3, "insertSpaces": True}:
+            send({"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32602, "message": "wrong formatting settings"}})
+            continue
+        edit_range = message["params"].get("range", {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}})
+        send({"jsonrpc": "2.0", "id": message["id"], "result": [{"range": edit_range, "newText": "   "}]})
     elif method == "textDocument/hover":
         item = documents[message["params"]["textDocument"]["uri"]]
         send({"jsonrpc": "2.0", "id": 9001, "method": "workspace/applyEdit", "params": {"edit": {"documentChanges": [{

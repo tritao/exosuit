@@ -34,7 +34,7 @@ class ModelProblemsView extends View {
 		selected += delta; if (selected < 0) selected = 0; if (selected >= values.length) selected = values.length - 1;
 		ensureVisible();
 	}
-	override public function insertNewline(tabWidth:Int = 0, insertSpaces:Bool = true):Bool { activateSelected(); return true; }
+	override public function insertNewline(tabWidth:Int = 0, insertSpaces:Bool = true, indentSize:Int = 0):Bool { activateSelected(); return true; }
 	override public function mouseDown(button:Int, pointerX:Int, pointerY:Int, clicks:Int = 1):Void {
 		if (button != 1 || pointerY < y + testing.model.EditorViewportModel.HEADER_HEIGHT) return;
 		selected = scrollRow + Std.int((pointerY - y - testing.model.EditorViewportModel.HEADER_HEIGHT) / metrics.lineHeight);

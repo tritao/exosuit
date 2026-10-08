@@ -183,6 +183,45 @@ class DecorationSmokeApp extends ExosuitApp {
 		host.setDocumentSearchMatches(DocumentSearch.find(document, "return", new SearchOptions()));
 	}
 
+	function smartIndentationStep():Void {
+		var view = host.activeView();
+		if (view == null || ui.root == null) throw "smart indentation lost editor";
+		var node = findEditor(ui.root, "editor:" + view.document.id);
+		if (node == null) throw "smart indentation lost widget";
+		ui.focusWidget(node.id);
+		var source = "class A {\n  function f() {\n    if (ready)";
+		if (frames == 2) {
+			application.settings.store.set("editor/indentation/tab_width", haxeon.ui.properties.PropertyValue.Int(2));
+			view.document.buffer.replaceAllText(source, view.selection);
+			view.restoreCursor(2, view.document.buffer.line(2).length);
+		} else if (frames == 3) {
+			ui.key(UiEventKind.KeyDown, UiKey.Enter);
+			if (view.selection.cursor.line != 3 || view.selection.cursor.column != 6) throw "widget Enter lost Haxe control context";
+			view.undo();
+			if (view.document.buffer.text != source) throw "smart Enter undo failed";
+			view.document.buffer.replaceAllText("class A {\nvar a;\nvar b;\n}", view.selection);
+			view.restoreCursor(1, 3);
+		} else if (frames == 4) {
+			application.commands.perform("doc:reindent-document", application.context);
+			if (view.document.buffer.text != "class A {\n  var a;\n  var b;\n}" || view.selection.cursor.column != 5) throw "reindent command ignored settings or caret";
+			view.undo();
+			if (view.document.buffer.text != "class A {\nvar a;\nvar b;\n}") throw "reindent command was not atomic";
+			if (findEditor(ui.root, "status-indentation") == null) throw "status bar omitted document indentation control";
+			application.commands.perform("doc:indentation", application.context);
+			if (!host.isCommandViewActive()) throw "indentation chooser did not open";
+		} else if (frames == 5) {
+			host.commandViewTextInput("Tabs: 8");
+			host.commandViewKeyPressed(platform.Platform.KEY_ENTER, 0);
+			if (host.isCommandViewActive()) throw "indentation chooser did not accept override";
+		} else if (frames == 6) {
+			var value = application.configuration.settingsFor(view.document);
+			if (value.tabWidth != 8 || value.insertSpaces || view.editSettings.tabWidth != 8) throw "document override did not reach editor";
+			view.restoreCursor(1, 0); ui.key(UiEventKind.KeyDown, UiKey.Tab);
+			if (view.document.buffer.line(1) != "\tvar a;") throw "document override did not affect keyboard editing";
+			trace("PASS: Haxe Enter, reindent command/undo, status control and document override share effective indentation");
+		}
+	}
+
 	function tabRenderingStep():Void {
 		var view = host.activeView();
 		if (view == null || ui.root == null) throw "tab rendering lost editor";
@@ -315,6 +354,7 @@ class DecorationSmokeApp extends ExosuitApp {
 	override public function submit(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		frames++;
 		if (phase == "editing-policy" && frames >= 2 && frames <= 6) editingPolicyStep();
+		if (phase == "smart-indentation" && frames >= 2 && frames <= 6) smartIndentationStep();
 		if (phase == "tab-rendering" && frames >= 2 && frames <= 5) tabRenderingStep();
 		if (phase == "editing-settings" && frames >= 2 && frames <= 5) editingSettingsStep();
 		if (phase == "ime-selection-affinity" && frames == 4) {

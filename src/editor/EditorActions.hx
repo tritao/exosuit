@@ -4,24 +4,28 @@ import syntax.SyntaxDefinition;
 
 class EditorActions {
 	/** Tab inserts at collapsed carets; a selection indents whole affected lines. */
-	public static function tab(buffer:TextBuffer, selection:BufferSelection, tabWidth:Int, insertSpaces:Bool):Bool {
-		for (range in selection.allRanges()) if (!range.isCollapsed()) return indent(buffer, selection, tabWidth, insertSpaces);
+	public static function tab(buffer:TextBuffer, selection:BufferSelection, tabWidth:Int, insertSpaces:Bool, indentSize:Int = 0):Bool {
+		for (range in selection.allRanges()) if (!range.isCollapsed()) return indent(buffer, selection, tabWidth, insertSpaces, indentSize);
 		var values:Array<String> = [], width = tabWidth > 0 ? tabWidth : 1;
 		for (range in selection.documentRanges()) {
 			var column = visualColumn(buffer.line(range.cursor.line), range.cursor.column, width);
-			values.push(indentationUnit(insertSpaces ? width - column % width : width, insertSpaces));
+			var step = indentSize > 0 ? indentSize : width, target = column + step - column % step;
+			var value = "", at = column;
+			while (at < target) { var next = at + width - at % width; if (!insertSpaces && next <= target) { value += "\t"; at = next; } else { value += " "; at++; } }
+			values.push(value);
 		}
 		return buffer.replaceSelections(selection, values);
 	}
 
 	/** Only leading whitespace uses indentation stops; text uses grapheme deletion. */
 	public static function backspace(buffer:TextBuffer, selection:BufferSelection, tabWidth:Int,
-			?boundary:(BufferPosition, Int)->BufferPosition):Bool {
+			?boundary:(BufferPosition, Int)->BufferPosition, indentSize:Int = 0):Bool {
 		var width = tabWidth > 0 ? tabWidth : 1;
 		return buffer.deleteSelections(selection, true, function(position, direction) {
 			var line = buffer.line(position.line);
 			if (position.column > 0 && position.column <= leadingWhitespace(line)) {
-				var column = visualColumn(line, position.column, width), target = column - (column % width == 0 ? width : column % width);
+				var step = indentSize > 0 ? indentSize : width;
+				var column = visualColumn(line, position.column, width), target = column - (column % step == 0 ? step : column % step);
 				var offset = position.column;
 				while (offset > 0 && visualColumn(line, offset, width) > target) offset--;
 				return new BufferPosition(position.line, offset);
@@ -43,23 +47,26 @@ class EditorActions {
 		return column;
 	}
 
-	public static function indent(buffer:TextBuffer, selection:BufferSelection, tabWidth:Int, insertSpaces:Bool):Bool {
-		var unit = indentationUnit(tabWidth, insertSpaces), replacements:Array<BufferReplacement> = [],
-			changes:Map<Int, LineColumnChange> = [];
+	public static function indent(buffer:TextBuffer, selection:BufferSelection, tabWidth:Int, insertSpaces:Bool, indentSize:Int = 0):Bool {
+		var replacements:Array<BufferReplacement> = [], changes:Map<Int, LineColumnChange> = [];
 		for (line in selectedLineNumbers(selection)) {
-			replacements.push(new BufferReplacement(new BufferPosition(line, 0), new BufferPosition(line, 0), unit));
-			changes.set(line, new LineColumnChange(0, unit.length));
+			var text = buffer.line(line), count = leadingWhitespace(text);
+			var columns = visualColumn(text, count, tabWidth), step = indentSize > 0 ? indentSize : tabWidth;
+			var prefix = Indentation.prefix(columns + step, tabWidth, insertSpaces);
+			replacements.push(new BufferReplacement(new BufferPosition(line, 0), new BufferPosition(line, count), prefix));
+			changes.set(line, new LineColumnChange(0, prefix.length - count));
 		}
 		return apply(buffer, selection, replacements, changes, true);
 	}
 
-	public static function unindent(buffer:TextBuffer, selection:BufferSelection, tabWidth:Int):Bool {
+	public static function unindent(buffer:TextBuffer, selection:BufferSelection, tabWidth:Int, indentSize:Int = 0):Bool {
 		var replacements:Array<BufferReplacement> = [], changes:Map<Int, LineColumnChange> = [];
 		var block = false;
 		for (range in selection.allRanges()) if (!range.isCollapsed()) block = true;
 		for (line in selectedLineNumbers(selection)) {
 			var text = buffer.line(line), whitespace = leadingWhitespace(text), width = tabWidth > 0 ? tabWidth : 1;
-			var columns = visualColumn(text, whitespace, width), target = columns - (block || columns % width == 0 ? width : columns % width);
+			var step = indentSize > 0 ? indentSize : width;
+			var columns = visualColumn(text, whitespace, width), target = columns - (block || columns % step == 0 ? step : columns % step);
 			if (target < 0) target = 0;
 			var keep = 0, keptColumns = 0;
 			while (keep < whitespace) {
@@ -77,22 +84,31 @@ class EditorActions {
 	}
 
 	public static function insertNewline(buffer:TextBuffer, selection:BufferSelection, tabWidth:Int = 4, insertSpaces:Bool = true,
-			?highlighter:syntax.Highlighter):Bool {
+			?highlighter:syntax.Highlighter, indentSize:Int = 0, ?cache:Indentation.IndentationCache):Bool {
 		var values:Array<String> = [], carets:Array<Int> = [];
 		for (range in selection.documentRanges()) {
-			var start = range.start(), end = range.end(), line = buffer.line(start.line);
-			var indent = line.substring(0, Std.int(Math.min(start.column, leadingWhitespace(line))));
-			var left = StringTools.rtrim(line.substring(0, start.column)), opener = left.length == 0 ? "" : left.charAt(left.length - 1);
-			var codeBracket = highlighter != null && highlighter.syntax.highlighting && (opener == "{" || opener == "[" || opener == "(");
-			if (codeBracket) for (token in highlighter.line(start.line).tokens)
-				if (left.length - 1 >= token.start && left.length - 1 < token.start + token.length &&
-					(token.kind == syntax.HighlightToken.STRING || token.kind == syntax.HighlightToken.COMMENT)) codeBracket = false;
-			var value = "\n" + indent + (codeBracket ? indentationUnit(tabWidth, insertSpaces) : ""), caret = value.length;
-			var closer = opener == "{" ? "}" : opener == "[" ? "]" : ")";
-			if (codeBracket && buffer.line(end.line).charAt(end.column) == closer) value += "\n" + indent;
-			values.push(value); carets.push(caret);
+			var result = Indentation.newline(buffer, range.start(), range.end(), tabWidth, insertSpaces, highlighter, indentSize, cache);
+			values.push(result.text); carets.push(result.caret);
 		}
 		return buffer.replaceSelections(selection, values, carets);
+	}
+
+	public static function reindent(buffer:TextBuffer, selection:BufferSelection, highlighter:syntax.Highlighter,
+			tabWidth:Int, insertSpaces:Bool, indentSize:Int, wholeDocument:Bool):Bool {
+		if (highlighter.syntax.name != "Haxe") return false;
+		var desired = Indentation.lineIndents(buffer, highlighter, tabWidth, indentSize);
+		var lines = wholeDocument ? [for (i in 0...buffer.lineCount()) i] : selectedLineNumbers(selection);
+		var replacements:Array<BufferReplacement> = [], changes:Map<Int, LineColumnChange> = [];
+		for (line in lines) {
+			var columns = desired[line];
+			if (columns == null) continue;
+			var text = buffer.line(line), count = leadingWhitespace(text);
+			var replacement = Indentation.prefix(columns, tabWidth, insertSpaces);
+			if (replacement == text.substring(0, count)) continue;
+			replacements.push(new BufferReplacement(new BufferPosition(line, 0), new BufferPosition(line, count), replacement));
+			changes.set(line, new LineColumnChange(0, replacement.length - count));
+		}
+		return apply(buffer, selection, replacements, changes, true);
 	}
 
 	public static function duplicateLines(buffer:TextBuffer, selection:BufferSelection):Bool {

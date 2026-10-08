@@ -99,6 +99,33 @@ class LanguageServiceTestMain {
 		document.undo(selection);
 		require(document.buffer.line(0) == "😀serverx value", "workspace edit was not one undo transaction");
 
+		var formatted:Null<LanguageEditResult> = null;
+		require(client.formattingSupported && client.rangeFormattingSupported, "formatting capabilities missing");
+		var beforeFormat = document.buffer.text;
+		require(client.requestFormatting(document, selection, 3, true, false, Sys.time(), value -> formatted = value), "formatting request rejected");
+		pump(client, () -> formatted != null, 5);
+		require(formatted != null && formatted.applied && document.buffer.text == "   " + beforeFormat, "document formatting or options failed");
+		document.undo(selection);
+		require(document.buffer.text == beforeFormat, "formatting was not one undo transaction");
+		selection.restore(document.buffer, new BufferPosition(0, 2), new BufferPosition(0, 0));
+		formatted = null;
+		require(client.requestFormatting(document, selection, 3, true, true, Sys.time(), value -> formatted = value), "range formatting request rejected");
+		pump(client, () -> formatted != null, 5);
+		require(formatted != null && formatted.applied && document.buffer.text == "   " + beforeFormat.substring(2), "UTF-16 formatting range incorrect");
+		document.undo(selection);
+		for (moveOnly in [false, true]) {
+			selection.setCursor(document.buffer, new BufferPosition(0, 0));
+			formatted = null;
+			require(client.requestFormatting(document, selection, 3, true, false, Sys.time(), value -> formatted = value), "stale formatting request rejected early");
+			selection.setCursor(document.buffer, document.buffer.endPosition());
+			if (!moveOnly) document.insert(selection, "pending");
+			pump(client, () -> formatted != null, 5);
+			require(formatted != null && !formatted.applied && !StringTools.startsWith(document.buffer.text, "   "), "stale formatting overwrote typing or cursor movement");
+			if (!moveOnly) document.undo(selection);
+			else selection.setCursor(document.buffer, new BufferPosition(0, 0));
+		}
+		Sys.println("PASS: document/range formatting, settings, UTF-16, undo and stale replies");
+
 		var symbols:Null<Array<LanguageSymbol>> = null, references:Null<Array<LanguageLocation>> = null;
 		require(client.requestSymbols(document, Sys.time(), value -> symbols = value), "symbols request was rejected");
 		require(client.requestReferences(document, new BufferPosition(0, 2), Sys.time(), value -> references = value), "references request was rejected");
@@ -148,8 +175,9 @@ class LanguageServiceTestMain {
 		var minimal = new LanguageServiceClient(manager, documents, "python3", [arguments[0], "minimal"], arguments[1]);
 		minimal.start(Sys.time());
 		pump(minimal, () -> minimal.ready, 5.0);
-		require(!minimal.hoverSupported && !minimal.completionSupported && !minimal.definitionSupported && !minimal.signatureHelpSupported && !minimal.symbolsSupported && !minimal.referencesSupported && !minimal.renameSupported,
+		require(!minimal.formattingSupported && !minimal.rangeFormattingSupported && !minimal.hoverSupported && !minimal.completionSupported && !minimal.definitionSupported && !minimal.signatureHelpSupported && !minimal.symbolsSupported && !minimal.referencesSupported && !minimal.renameSupported,
 			"unsupported server capabilities were advertised by the client");
+		require(!minimal.requestFormatting(document, selection, 3, true, false, Sys.time(), value -> {}), "unsupported formatting request was sent");
 		require(!minimal.requestHover(document, new BufferPosition(0, 0), Sys.time(), value -> {}),
 			"unsupported hover request was sent");
 		require(!minimal.requestSymbols(document, Sys.time(), value -> {}) &&

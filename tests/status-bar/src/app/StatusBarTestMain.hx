@@ -41,9 +41,10 @@ class StatusBarTestMain {
 			for (remote in [false, true]) for (toast in [false, true]) for (unread in [0, 100]) {
 				var center = new feedback.NotificationCenter();
 				var notice = center.publish("A long notification with 日本語 and multiple lines\nFull details remain available", Error);
-				var toggles = 0, details = 0, dismissals = 0, connections = 0;
+				var toggles = 0, details = 0, dismissals = 0, connections = 0, indentations = 0;
 				var view = new StatusBarView({
 					document: document, status: status,
+					indentation: "Spaces: 4", indentationDetails: "Spaces: 4 · Detected from document", openIndentation: function() indentations++,
 					remoteDetails: remote ? "Remote workspace · Connected\n/home/example/project" : "",
 					notification: toast ? notice : null, notificationsVisible: false, unread: unread,
 					viewport: function() return new Rect(0, 0, 1000, 600),
@@ -63,11 +64,12 @@ class StatusBarTestMain {
 							"status slots overlap or escape at " + width + " remote=" + remote + " toast=" + toast + " unread=" + unread + ": " + bounds.x + "," + bounds.width + " slots=" + [for (slot in root.children) slot.globalBounds().x + "," + slot.globalBounds().width]);
 						previousRight = bounds.x + bounds.width;
 					}
-					var bell:RenderNode = null, message:RenderNode = null, dismiss:RenderNode = null, connection:RenderNode = null;
+					var bell:RenderNode = null, message:RenderNode = null, dismiss:RenderNode = null, connection:RenderNode = null, indentation:RenderNode = null;
 					function visit(node:RenderNode):Void {
 						if (node.styleType == "tooltip" || !node.layout.style.visible) return;
 						var semantics = node.semantics;
 						if (semantics != null && semantics.role == AccessibilityRole.Button && semantics.label == "Notifications, " + unread + " unread") bell = node;
+						if (semantics != null && semantics.label == "Spaces: 4. Choose document indentation") indentation = node;
 						if (semantics != null && semantics.label == "Hide notification") dismiss = node;
 						if (semantics != null && semantics.role == AccessibilityRole.Button && semantics.label.indexOf("Open Remote Access") >= 0) connection = node;
 						if (semantics != null && semantics.label == (toast ? "Show notification details: " + notice.message : status)) message = node;
@@ -82,13 +84,14 @@ class StatusBarTestMain {
 						for (child in node.children) visit(child);
 					}
 					visit(root);
+					require((indentation != null) == (width >= 480), "indentation control did not follow available width");
 					require(bell != null && (message != null || width < 48), "status actions or full accessible message missing");
 					var bellBounds = bell.globalBounds();
 					require(bellBounds.width >= 28 && bellBounds.x + bellBounds.width <= width + 0.1, "notification action was clipped");
 					context.pointerDown(bellBounds.x + bellBounds.width / 2, bellBounds.y + bellBounds.height / 2, 0);
 					context.pointerUp(bellBounds.x + bellBounds.width / 2, bellBounds.y + bellBounds.height / 2, 0);
 					if (width == 520) {
-						for (action in [toast ? message : null, dismiss, connection]) if (action != null) {
+						for (action in [toast ? message : null, dismiss, connection, indentation]) if (action != null) {
 							var bounds = action.globalBounds();
 							context.pointerDown(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
 							context.pointerUp(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
@@ -108,6 +111,7 @@ class StatusBarTestMain {
 						require(fullTip, "full status text was not available on hover");
 					}
 				}
+				require(indentations == 1, "indentation action became unreachable after resizing");
 				require(toggles == 8, "notification button became unreachable after resizing");
 				require(details == (toast ? 1 : 0) && dismissals == (toast ? 1 : 0) && connections == (remote ? 1 : 0),
 					"message, dismiss, or remote action became unreachable");

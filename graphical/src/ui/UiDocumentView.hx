@@ -93,8 +93,8 @@ class UiDocumentView extends View {
 	override public function redo():Void
 		document.buffer.redo(selection);
 
-	override public function backspace(tabWidth:Int = 0):Void
-		EditorActions.backspace(document.buffer, selection, tabWidth > 0 ? tabWidth : editSettings.tabWidth, deletionBoundary);
+	override public function backspace(tabWidth:Int = 0, indentSize:Int = 0):Void
+		EditorActions.backspace(document.buffer, selection, tabWidth > 0 ? tabWidth : editSettings.tabWidth, deletionBoundary, indentSize > 0 ? indentSize : editSettings.indentSize);
 
 	override public function deleteForward():Void
 		document.buffer.deleteSelections(selection, false, deletionBoundary);
@@ -110,18 +110,18 @@ class UiDocumentView extends View {
 	override public function replaceAllText(text:String):Bool
 		return document.buffer.replaceAllText(text, selection);
 
-	override public function tab(tabWidth:Int, insertSpaces:Bool):Bool
-		return EditorActions.tab(document.buffer, selection, tabWidth, insertSpaces);
+	override public function tab(tabWidth:Int, insertSpaces:Bool, indentSize:Int = 0):Bool
+		return EditorActions.tab(document.buffer, selection, tabWidth, insertSpaces, indentSize);
 
-	override public function indent(tabWidth:Int, insertSpaces:Bool):Bool
-		return EditorActions.indent(document.buffer, selection, tabWidth, insertSpaces);
+	override public function indent(tabWidth:Int, insertSpaces:Bool, indentSize:Int = 0):Bool
+		return EditorActions.indent(document.buffer, selection, tabWidth, insertSpaces, indentSize);
 
-	override public function unindent(tabWidth:Int):Bool
-		return EditorActions.unindent(document.buffer, selection, tabWidth);
+	override public function unindent(tabWidth:Int, indentSize:Int = 0):Bool
+		return EditorActions.unindent(document.buffer, selection, tabWidth, indentSize);
 
-	override public function insertNewline(tabWidth:Int = 0, insertSpaces:Bool = true):Bool
+	override public function insertNewline(tabWidth:Int = 0, insertSpaces:Bool = true, indentSize:Int = 0):Bool
 		return EditorActions.insertNewline(document.buffer, selection, tabWidth > 0 ? tabWidth : editSettings.tabWidth,
-			tabWidth > 0 ? insertSpaces : editSettings.insertSpaces, document.highlighter);
+			tabWidth > 0 ? insertSpaces : editSettings.insertSpaces, document.highlighter, indentSize > 0 ? indentSize : editSettings.indentSize, document.indentation.cache);
 
 	override public function duplicateLines():Bool
 		return EditorActions.duplicateLines(document.buffer, selection);

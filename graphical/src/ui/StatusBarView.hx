@@ -34,7 +34,8 @@ class StatusBarView implements View {
 			var toast = data.notification;
 			var showToast = toast != null && !data.notificationsVisible;
 			var remote = data.remoteDetails.length > 0;
-			var sizes = allocate(context.viewportWidth, remote, showToast, data.unread);
+			var hasIndentation = data.indentation != null && data.openIndentation != null;
+			var sizes = allocate(context.viewportWidth, remote, showToast, data.unread, hasIndentation);
 			var remoteNode:RenderNode = null, remoteLabel:RenderNode = null;
 			var dismissNode:RenderNode = null;
 
@@ -65,6 +66,14 @@ class StatusBarView implements View {
 			var documentNode = documentTip.build(context);
 			documentNode.layout.style.width = LayoutAxis.fixed(sizes.document);
 			root.add(documentNode);
+			var indentationNode:Null<RenderNode> = null;
+			if (hasIndentation) {
+				var button = new Button(data.indentation, controlStyle(sizes.indentation, 22), data.openIndentation, "status-indentation");
+				button.variant = ButtonVariant.Navigation;
+				button.accessibilityLabel = data.indentation + ". Choose document indentation";
+				indentationNode = tooltip("indentation", button, data.indentationDetails == null ? data.indentation : data.indentationDetails).build(context);
+				root.add(indentationNode);
+			}
 			var message:View;
 			if (showToast) {
 				var entry:Notification = cast toast;
@@ -99,6 +108,7 @@ class StatusBarView implements View {
 				root.layout.style.padding = new Insets(next.left, 0, next.right, 0);
 				sizeSlot(documentNode, next.document);
 				sizeSlot(messageNode, next.message);
+				if (indentationNode != null) { sizeSlot(indentationNode, next.indentation); indentationNode.layout.style.visible = next.indentation > 0; }
 				bellNode.layout.style.width = LayoutAxis.fixed(next.bell);
 				bellNode.layout.style.childGap = next.compact ? 0 : 8;
 				if (data.unread > 0) {
@@ -121,7 +131,7 @@ class StatusBarView implements View {
 			root.onResolved(function(geometry) {
 				if (lastWidth == geometry.width) return;
 				lastWidth = geometry.width;
-				apply(allocate(geometry.width, remote, showToast, data.unread));
+				apply(allocate(geometry.width, remote, showToast, data.unread, hasIndentation));
 				context.requestLayoutFeedback();
 			});
 			return root;
@@ -129,7 +139,7 @@ class StatusBarView implements View {
 	}
 
 	/** Allocate the resolved bar width, keeping actions intact before reducing text. */
-	static function allocate(width:Float, remote:Bool, toast:Bool, unread:Int):StatusBarSizes {
+	static function allocate(width:Float, remote:Bool, toast:Bool, unread:Int, hasIndentation:Bool = false):StatusBarSizes {
 		var compact = width < 320;
 		var gap = width < 48 ? 0.0 : 4.0;
 		var left = remote ? 0.0 : Math.min(10, Math.max(0, width - 28));
@@ -140,10 +150,12 @@ class StatusBarView implements View {
 		// Slots remain mounted across resizes, retaining hover/focus identities.
 		var remaining = Math.max(0, width - left - right - bell - dismiss - connection
 			- gap * (1 + (connection > 0 ? 1 : 0) + (dismiss > 0 ? 1 : 0)));
+		var indentation = hasIndentation && width >= 480 ? 92.0 : 0.0;
+		if (indentation > 0) remaining -= indentation + gap;
 		var document = remaining >= 240 ? Math.min(320, (remaining - gap) * 0.4) : 0.0;
 		if (document > 0) remaining -= gap;
 		return {compact: compact, gap: gap, left: left, right: right, bell: bell,
-			dismiss: dismiss, remote: connection, document: document, message: remaining - document};
+			dismiss: dismiss, remote: connection, document: document, message: remaining - document, indentation: indentation};
 	}
 
 	static function sizeSlot(node:RenderNode, width:Float):Void {
@@ -178,6 +190,9 @@ typedef StatusBarData = {
 	var document:String;
 	var status:String;
 	var remoteDetails:String;
+	@:optional var indentation:String;
+	@:optional var indentationDetails:String;
+	@:optional var openIndentation:Void->Void;
 	var notification:Null<Notification>;
 	var notificationsVisible:Bool;
 	var unread:Int;
@@ -198,4 +213,5 @@ private typedef StatusBarSizes = {
 	var remote:Float;
 	var document:Float;
 	var message:Float;
+	var indentation:Float;
 };

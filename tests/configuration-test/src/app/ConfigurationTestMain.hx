@@ -201,6 +201,7 @@ class ConfigurationTestMain {
 		emptyApplication.shutdown();
 		application.shutdown();
 
+		IndentationConfigurationTests.run(arguments[2] + "/indentation");
 		Sys.println("PASS: UIKit preference persistence, validation, live updates, resets and project configuration");
 		return 0;
 	}

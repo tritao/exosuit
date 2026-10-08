@@ -103,6 +103,16 @@ class RealLanguageServiceSmokeMain {
 			document.buffer.text.indexOf("return result") >= 0, "real rename did not update declaration and reference");
 		pump(client, () -> client.diagnosticsFor(document).length == 0, 30);
 
+		var beforeFormatting = document.buffer.text, formatted:Null<LanguageEditResult> = null;
+		require(client.formattingSupported && client.rangeFormattingSupported, "real server formatting capabilities missing");
+		require(client.requestFormatting(document, selection, 2, true, false, Sys.time(), value -> formatted = value), "real formatting request unavailable");
+		pump(client, () -> formatted != null, 30);
+		require(formatted != null && formatted.applied && document.buffer.text != beforeFormatting
+			&& document.buffer.text.indexOf("\n  var result") >= 0, "real formatter did not use two-space indentation");
+		document.undo(selection);
+		require(document.buffer.text == beforeFormatting, "real formatting was not undoable");
+		Sys.println("PASS: real Haxeon document formatting with resolved style and undo");
+
 		require(document.save() && File.getContent(source) == document.buffer.text, "fixed language-service document did not save");
 		client.stop(Sys.time());
 		pump(client, () -> client.status == "stopped", 5.0);

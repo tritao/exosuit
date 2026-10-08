@@ -1411,9 +1411,15 @@ class ExosuitApp implements DesktopUiApplication {
 		var remoteDetails = remote ? "Remote workspace · " + attachment.statusLabel()
 			+ (attachment.fileScope() == null ? "" : "\n" + attachment.fileScope())
 			+ (attachment.failure() == null ? "" : "\n" + attachment.failure()) : "";
+		var indentSettings = active == null ? null : application.configuration.settingsFor(active);
+		var indentation = indentSettings == null ? "" : (indentSettings.insertSpaces ? "Spaces: " : "Tabs: ") + indentSettings.indentSize;
+		var indentationDetails = active == null || indentSettings == null ? "" : indentation + " · Tab width: " + indentSettings.tabWidth + " · " + active.indentation.source;
 		var trailing = languageStatus.length > 0 ? languageStatus : '${host.activePane.items.length} open';
 		return new RetainedView("status-bar", function(_) return new StatusBarView({
 			document: label,
+			indentation: active == null ? null : indentation,
+			indentationDetails: indentationDetails,
+			openIndentation: function() application.configuration.openIndentationCommandView(),
 			status: trailing,
 			remoteDetails: remoteDetails,
 			notification: notification,
@@ -1424,7 +1430,7 @@ class ExosuitApp implements DesktopUiApplication {
 			showNotification: function(entry) showNotifications(entry),
 			dismissNotification: function() { center.dismissToast(); requestFrame(); },
 			toggleNotifications: function() { if (notificationsVisible) hideNotifications(); else showNotifications(); }
-		}), function() return remoteDetails + ":" + label + ":" + trailing + ":" + (notification == null ? 0 : notification.id) + ":" + center.revision + ":" + notificationsVisible + ":" + ui.animations.revision);
+		}), function() return indentationDetails + ":" + remoteDetails + ":" + label + ":" + trailing + ":" + (notification == null ? 0 : notification.id) + ":" + center.revision + ":" + notificationsVisible + ":" + ui.animations.revision);
 	}
 
 	function explorerPanel():View {

@@ -28,6 +28,8 @@ class LanguageServiceClient {
 	public var symbolsSupported(default, null):Bool = false;
 	public var referencesSupported(default, null):Bool = false;
 	public var renameSupported(default, null):Bool = false;
+	public var formattingSupported(default, null):Bool = false;
+	public var rangeFormattingSupported(default, null):Bool = false;
 	public var verbose:Bool = false;
 	public var log:String->Void = function(message) Sys.println(message);
 	public var report:String->Void = function(message) {};
@@ -215,6 +217,38 @@ class LanguageServiceClient {
 		return true;
 	}
 
+	/** Explicit formatting only: edits are validated against the requesting buffer/session. */
+	public function requestFormatting(document:Document, selection:BufferSelection, tabSize:Int, insertSpaces:Bool,
+			ranged:Bool, now:Float, complete:LanguageEditResult->Void, ?stillActive:Void->Bool):Bool {
+		var state = states.get(document.id), session = transport;
+		if (!(ranged ? rangeFormattingSupported : formattingSupported) || !ready || !accepts(document)
+				|| state == null || session == null || state.revision != document.buffer.stateId || tabSize <= 0) return false;
+		var revision = document.buffer.stateId, path = document.path, ranges = selection.allRanges();
+		var params:Dynamic = {textDocument: {uri: state.uri}, options: {tabSize: tabSize, insertSpaces: insertSpaces}};
+		if (ranged) {
+			if (ranges.length != 1 || !selection.hasSelection()) return false;
+			Reflect.setField(params, "range", {start: LspPositionCodec.encode(selection.start()), end: LspPositionCodec.encode(selection.end())});
+		}
+		session.request(ranged ? "textDocument/rangeFormatting" : "textDocument/formatting", params, now, FEATURE_REQUEST_TIMEOUT, response -> {
+			if (response.error != null) { complete(new LanguageEditResult(false, response.error)); return; }
+			var current = selection.allRanges(), sameSelection = current.length == ranges.length;
+			if (sameSelection) for (index in 0...ranges.length)
+				if (!current[index].cursor.equals(ranges[index].cursor) || !current[index].anchor.equals(ranges[index].anchor)) sameSelection = false;
+			if (transport != session || !ready || !accepts(document) || documents.documents.indexOf(document) < 0
+					|| document.path != path || document.buffer.stateId != revision || !sameSelection || (stillActive != null && !stillActive())) {
+				complete(new LanguageEditResult(false, "Formatting cancelled: document, selection or language session changed")); return;
+			}
+			if (response.result == null) { complete(new LanguageEditResult(true)); return; }
+			if (!Std.isOfType(response.result, Array)) { complete(new LanguageEditResult(false, "Invalid formatting response")); return; }
+			var replacements = parseWorkspaceEdits(document, cast response.result);
+			if (replacements == null) { complete(new LanguageEditResult(false, "Formatting edit validation failed")); return; }
+			if (replacements.length == 0) { complete(new LanguageEditResult(true)); return; }
+			var applied = document.buffer.applyReplacements(selection, replacements);
+			complete(new LanguageEditResult(applied, applied ? "" : "Could not apply formatting", applied ? [document] : []));
+		});
+		return true;
+	}
+
 	function decodeSymbols(document:Document, value:Dynamic, container:String, result:Array<LanguageSymbol>):Void {
 		if (!Std.isOfType(value, Array)) return;
 		for (item in cast(value, Array<Dynamic>)) {
@@ -343,6 +377,8 @@ class LanguageServiceClient {
 		symbolsSupported = capability(capabilities, "documentSymbolProvider");
 		referencesSupported = capability(capabilities, "referencesProvider");
 		renameSupported = capability(capabilities, "renameProvider");
+		formattingSupported = capability(capabilities, "documentFormattingProvider");
+		rangeFormattingSupported = capability(capabilities, "documentRangeFormattingProvider");
 		status = "ready";
 		readySince = clock;
 		transport.notify("initialized", {});
@@ -464,6 +500,7 @@ class LanguageServiceClient {
 	function retireSession():Void {
 		ready = false;
 		hoverSupported = false;
+		formattingSupported = false; rangeFormattingSupported = false;
 		completionSupported = false;
 		definitionSupported = false;
 		signatureHelpSupported = false; symbolsSupported = false; referencesSupported = false; renameSupported = false;

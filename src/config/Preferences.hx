@@ -29,6 +29,10 @@ class Preferences {
 		signature = diskSignature();
 	}
 
+	/** Whether this scope (or its parent) explicitly sets a value, including a default. */
+	public function explicitlySets(path:String):Bool
+		return (registry.exists(path) && !store.isDefault(path)) || (parent != null && parent.explicitlySets(path));
+
 	public function forProject(path:String):Preferences
 		return new Preferences(null, path, this);
 

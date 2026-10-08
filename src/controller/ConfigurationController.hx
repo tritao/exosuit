@@ -27,6 +27,7 @@ class ConfigurationController {
 	final releaseSettings:Void->Void;
 	var appliedSettings:Null<Settings>;
 	var lastDiagnostics:String = "";
+	final editorConfig = new config.EditorConfig();
 
 	public function new(settings:Preferences, workspace:Workspace, root:WorkbenchHost, context:CommandContext, commands:CommandRegistry,
 		keymap:Keymap, theme:Theme, search:SearchController, reportError:(String, String)->Void) {
@@ -52,16 +53,55 @@ class ConfigurationController {
 	}
 
 	public function settingsFor(document:Document):Settings {
-		var value = settings.current, matchedLength = -1;
+		var preference = settings, value = settings.current, matchedLength = -1;
 		for (project in workspace.projects) {
 			var projectSettings = project.settings;
 			if (projectSettings != null && document.path != null && StringTools.startsWith(document.path, project.root + "/")
 				&& project.root.length > matchedLength) {
-				value = projectSettings.current;
+				value = projectSettings.current; preference = projectSettings;
 				matchedLength = project.root.length;
 			}
 		}
-		return value;
+		var policy = document.indentation;
+		var ec:Map<String, String> = document.path == null ? [] : editorConfig.resolve(document.path, document.indentationFileSystem());
+		var ecSize = config.EditorConfig.positive(ec.get("indent_size")), ecTab = config.EditorConfig.positive(ec.get("tab_width"));
+		var width = policy.detectedWidth == null ? value.tabWidth : policy.detectedWidth;
+		var spaces = policy.detectedSpaces == null ? value.insertSpaces : policy.detectedSpaces;
+		var widthSource = policy.detectedWidth != null ? "Detected from document" : "Defaults";
+		var styleSource = policy.detectedSpaces != null ? "Detected from document" : "Defaults";
+		if (ecSize != null || ecTab != null) widthSource = ".editorconfig";
+		if (ec.get("indent_style") == "tab" || ec.get("indent_style") == "space") styleSource = ".editorconfig";
+		if (ecSize != null) width = ecSize;
+		if (ecTab != null) width = ecTab;
+		if (ec.get("indent_style") == "tab") spaces = false;
+		if (ec.get("indent_style") == "space") spaces = true;
+		var step = ecSize == null ? width : ecSize;
+		if (preference.explicitlySets("editor/indentation/tab_width")) { width = value.tabWidth; step = width; widthSource = "Configured settings"; }
+		if (preference.explicitlySets("editor/indentation/insert_spaces")) { spaces = value.insertSpaces; styleSource = "Configured settings"; }
+		if (policy.overrideWidth != null) { width = policy.overrideWidth; step = width; widthSource = "Document override"; }
+		if (policy.overrideSpaces != null) { spaces = policy.overrideSpaces; styleSource = "Document override"; }
+		var source = widthSource == styleSource ? widthSource : "Width: " + widthSource + "; style: " + styleSource;
+		var previous = policy.effective;
+		if (policy.base == value && previous != null && previous.tabWidth == width && previous.insertSpaces == spaces && previous.indentSize == step && policy.source == source) return previous;
+		var result = value.copy(); result.tabWidth = width; result.insertSpaces = spaces; result.indentSize = step;
+		policy.base = value; policy.effective = result; policy.source = source;
+		return result;
+	}
+
+	public function openIndentationCommandView():Void {
+		var document = activeDocument();
+		if (document == null) return;
+		settingsFor(document);
+		var entries:Array<CommandViewEntry> = [];
+		entries.push(new CommandViewEntry("Automatic", "Use settings, .editorconfig, then detection", "auto"));
+		for (spaces in [true, false]) for (width in 1...17)
+			entries.push(new CommandViewEntry((spaces ? "Spaces: " : "Tabs: ") + width, "Use for this document", (spaces ? "spaces:" : "tabs:") + width));
+		root.openCommandView(new CommandViewProvider("Indentation (" + document.indentation.source + "): ", entries, function(_) {}, function(entry, query, backwards) {
+			if (entry == null) return;
+			if (entry.value == "auto") { document.indentation.overrideWidth = null; document.indentation.overrideSpaces = null; }
+			else { var parts = entry.value.split(":"); document.indentation.overrideWidth = Std.parseInt(parts[1]); document.indentation.overrideSpaces = parts[0] == "spaces"; }
+			settingsFor(document); root.closeCommandView();
+		}));
 	}
 
 	public function apply(value:Settings):Void {
@@ -153,27 +193,35 @@ class ConfigurationController {
 		releaseSettings();
 
 	function installCommands(commands:CommandRegistry):Void {
-		commands.add("settings:reload", context -> settings.reload(true));
+		commands.add("settings:reload", function(context) { settings.reload(true); editorConfig.invalidate(); });
+		commands.add("doc:indentation", context -> openIndentationCommandView(), hasDocument, "Choose Document Indentation");
+		for (whole in [false, true]) {
+			var entire = whole;
+			commands.add(entire ? "doc:reindent-document" : "doc:reindent-selection", function(context) {
+				var document = context.requireDocument(), selection = context.requireView().getSelection(), value = settingsFor(document);
+				if (selection != null) editor.EditorActions.reindent(document.buffer, selection, document.highlighter, value.tabWidth, value.insertSpaces, value.indentSize, entire);
+			}, function(context) return hasDocument(context) && context.requireDocument().syntax.name == "Haxe", entire ? "Reindent Document" : "Reindent Selection");
+		}
 		commands.add("settings:open", context -> openSettingsCommandView());
 		commands.add("keybindings:open", context -> openKeybindingsCommandView());
 		commands.add("doc:tab", function(context) {
 			var value = settingsFor(context.requireDocument());
-			context.requireView().tab(value.tabWidth, value.insertSpaces);
+			context.requireView().tab(value.tabWidth, value.insertSpaces, value.indentSize);
 		}, hasDocument);
 		commands.add("doc:backspace", function(context) {
-			context.requireView().backspace(settingsFor(context.requireDocument()).tabWidth);
+			context.requireView().backspace(settingsFor(context.requireDocument()).tabWidth, settingsFor(context.requireDocument()).indentSize);
 		}, hasDocument);
 		commands.add("doc:newline", function(context) {
 			var value = settingsFor(context.requireDocument());
-			context.requireView().insertNewline(value.tabWidth, value.insertSpaces);
+			context.requireView().insertNewline(value.tabWidth, value.insertSpaces, value.indentSize);
 		}, hasDocument);
 		commands.add("doc:indent", function(context) {
 			var value = settingsFor(context.requireDocument());
-			context.requireView().indent(value.tabWidth, value.insertSpaces);
+			context.requireView().indent(value.tabWidth, value.insertSpaces, value.indentSize);
 		}, hasDocument);
 		commands.add("doc:unindent", function(context) {
 			var value = settingsFor(context.requireDocument());
-			context.requireView().unindent(value.tabWidth);
+			context.requireView().unindent(value.tabWidth, value.indentSize);
 		}, hasDocument);
 	}
 

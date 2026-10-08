@@ -32,6 +32,7 @@ class LanguageController {
 	final settings:Null<Void->config.Settings>;
 	final reportError:(String, String)->Void;
 	final retiring:Array<FolderLanguageSession> = [];
+	public var documentSettings:Null<Document->config.Settings>;
 
 	public function new(workspace:Workspace, root:WorkbenchHost, context:CommandContext, commands:CommandRegistry, processes:ProcessManager,
 			executable:String, reportError:(String, String)->Void, ?arguments:Array<String>, available:Bool = true, ?settings:Void->config.Settings) {
@@ -197,6 +198,11 @@ class LanguageController {
 	}
 
 	function installCommands():Void {
+		commands.add("language:format-document", commandContext -> format(false), commandContext -> supports("format"), "Format Document");
+		commands.add("language:format-selection", commandContext -> format(true), commandContext -> {
+			var view = context.activeView(), selection = view == null ? null : view.getSelection();
+			return supports("range-format") && selection != null && selection.rangeCount() == 1 && selection.hasSelection();
+		}, "Format Selection");
 		commands.add("language:haxeon-start", commandContext -> start());
 		commands.add("language:haxeon-stop", commandContext -> stop(), commandContext -> client != null);
 		commands.add("language:hover", commandContext -> hover(), commandContext -> supports("hover"));
@@ -206,6 +212,19 @@ class LanguageController {
 		commands.add("language:document-symbols", commandContext -> symbols(), commandContext -> supports("symbols"));
 		commands.add("language:find-references", commandContext -> references(), commandContext -> supports("references"));
 		commands.add("language:rename-symbol", commandContext -> rename(), commandContext -> supports("rename"));
+	}
+
+	function format(ranged:Bool):Void {
+		var service = client, document = activeDocument(), view = context.activeView();
+		if (service == null || document == null || view == null) return;
+		var selection = view.getSelection();
+		if (selection == null) return;
+		var project = projectFor(document), value = documentSettings != null ? documentSettings(document)
+			: project != null ? configuration(project) : new config.Settings();
+		if (!service.requestFormatting(document, selection, value.indentSize, value.insertSpaces, ranged, Sys.time(), result -> {
+			if (!result.applied) reportError("language", result.error);
+			else view.cursorChanged();
+		}, () -> client == service && context.activeView() == view)) reportError("language", "Formatting is unavailable for this document");
 	}
 
 	function hover():Void {
@@ -355,7 +374,7 @@ class LanguageController {
 	function supports(feature:String):Bool {
 		var service = client, document = activeDocument();
 		if (service == null || !service.ready || document == null || !service.accepts(document)) return false;
-		return feature == "hover" ? service.hoverSupported : feature == "completion" ? service.completionSupported
+		return feature == "format" ? service.formattingSupported : feature == "range-format" ? service.rangeFormattingSupported : feature == "hover" ? service.hoverSupported : feature == "completion" ? service.completionSupported
 			: feature == "signature" ? service.signatureHelpSupported : feature == "symbols" ? service.symbolsSupported
 			: feature == "references" ? service.referencesSupported : feature == "rename" ? service.renameSupported : service.definitionSupported;
 	}

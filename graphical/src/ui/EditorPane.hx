@@ -182,13 +182,13 @@ class EditorPane implements View {
 		if (selection.rangeCount() == 1 && !policyEdit) return false;
 		desiredVerticalXs = [];
 		switch intent {
-			case Insert("\n"): editor.EditorActions.insertNewline(document.buffer, selection, editSettings.tabWidth, editSettings.insertSpaces, document.highlighter);
+			case Insert("\n"): editor.EditorActions.insertNewline(document.buffer, selection, editSettings.tabWidth, editSettings.insertSpaces, document.highlighter, editSettings.indentSize, document.indentation.cache);
 			case Insert(text): document.buffer.replaceSelections(selection, [text]);
 			case Paste(text):
 				var normalized = StringTools.replace(StringTools.replace(text, "\r\n", "\n"), "\r", "\n");
 				var lines = normalized.split("\n");
 				document.buffer.replaceSelections(selection, lines.length == selection.rangeCount() ? lines : [normalized]);
-			case DeleteBackward: editor.EditorActions.backspace(document.buffer, selection, editSettings.tabWidth, deletionBoundary);
+			case DeleteBackward: editor.EditorActions.backspace(document.buffer, selection, editSettings.tabWidth, deletionBoundary, editSettings.indentSize);
 			case DeleteForward: document.buffer.deleteSelections(selection, false, deletionBoundary);
 			case DeleteWordBackward(macStyle): deleteWords(layout, true, macStyle);
 			case DeleteWordForward(macStyle): deleteWords(layout, false, macStyle);

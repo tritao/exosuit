@@ -24,6 +24,8 @@ class Settings {
 	public var minimapEnabled:Bool = true;
 	public var terminalFontSize:Int = 14;
 	public var tabWidth:Int = 4;
+	/** Effective indentation step; may differ from hard-tab display width. */
+	public var indentSize:Int = 4;
 	public var insertSpaces:Bool = true;
 	public var scrollAnimationType:String = "smooth";
 	public var scrollAnimationDuration:Float = 0.12;
@@ -72,6 +74,7 @@ class Settings {
 		result.minimapEnabled = minimapEnabled;
 		result.terminalFontSize = terminalFontSize;
 		result.tabWidth = tabWidth;
+		result.indentSize = indentSize;
 		result.insertSpaces = insertSpaces;
 		result.scrollAnimationType = scrollAnimationType;
 		result.scrollAnimationDuration = scrollAnimationDuration;

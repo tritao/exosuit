@@ -113,6 +113,7 @@ class DocumentTestMain {
 		var syntaxes = new SyntaxRegistry();
 		BuiltinSyntax.install(syntaxes);
 		editingPolicy(syntaxes);
+		IndentationTests.run(syntaxes);
 		require(syntaxes.find("script", "#!/usr/bin/env lua\n").name == "Lua" && syntaxes.find("data.json").name == "JSON"
 			&& syntaxes.find("README.md").name == "Markdown" && syntaxes.find("main.c").name == "C"
 			&& syntaxes.find("main.cpp").name == "C++" && syntaxes.find("build.sh").name == "Shell", "built-in syntax selection failed");

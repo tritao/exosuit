@@ -76,6 +76,26 @@ carets. Existing tab characters render at the same configured stops, with matchi
 caret, selection, and mouse geometry; their width scales with the editor font.
 Ctrl+M toggles Tab between indentation and keyboard focus navigation.
 
+Indentation resolves each setting from a document override, explicit project/user
+settings, `.editorconfig`, detected file style, then defaults. Detection samples
+meaningful lines on opening and stays stable while typing; ambiguous files keep
+their defaults. Explicit settings take precedence even when they equal a default.
+The status-bar indentation control shows the effective style and its source and
+opens a document-only override picker; Automatic restores normal resolution.
+
+The indentation adapter reads `indent_style`, `indent_size`, and `tab_width` from
+ancestor `.editorconfig` files, including section globs, `root`, and `unset`.
+Widths from 1 to 16 are supported; indentation size and hard-tab display width
+may differ. Other EditorConfig properties are not applied. See the
+[EditorConfig specification](https://spec.editorconfig.org/) for those rules.
+
+Haxe Enter uses shared structural context for brackets, switch cases, continued
+expressions, and unbraced control bodies. Comments and strings do not contribute
+brackets, and incomplete code uses conservative fallback behavior. Reindent
+Selection and Reindent Document are available in Commands for Haxe files; each
+changes leading indentation as one undoable operation, preserving selections
+and multiline literal/comment contents. Opening a file never rewrites whitespace.
+
 The graphical application builds from `graphical/haxeon.json` (entry
 `app.GraphicalMain`). Headless tests build from `haxeon.json` (entry
 `app.Main`); see `scripts/test.sh` for the test suite.
@@ -163,3 +183,11 @@ See the [implementation roadmap](docs/roadmap/README.md) for ordered milestones,
 acceptance checks and the core compiler typing policy. The
 [overnight handoff](docs/roadmap/OVERNIGHT.md) provides a launch prompt, and the
 [execution ledger](docs/roadmap/STATUS.md) tracks resumable progress.
+
+The command palette exposes **Format Document** and **Format Selection** when the
+Haxe language server advertises those capabilities. Formatting uses the resolved
+document indentation settings and is undoable. Replies are discarded if the
+document, selection, active view, or server session changes while waiting. The
+bundled Haxeon server supports explicit formatting, but does not advertise
+on-type formatting; Enter therefore uses the local indentation policy. Reindent
+remains a separate, whitespace-only operation.

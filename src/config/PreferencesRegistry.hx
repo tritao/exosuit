@@ -64,11 +64,13 @@ class PreferencesRegistry {
 		{
 			var options = new SettingOptions();
 			options.minimum = 1; options.maximum = 16;
-			if (!projectOnly) registry.define("editor/indentation/tab_width", PropertyType.Int, PropertyValue.Int(defaults.tabWidth), options);
+			options.preserveExplicitDefault = true;
+			registry.define("editor/indentation/tab_width", PropertyType.Int, PropertyValue.Int(defaults.tabWidth), options);
 		}
 		{
 			var options = new SettingOptions();
-			if (!projectOnly) registry.define("editor/indentation/insert_spaces", PropertyType.Bool, PropertyValue.Bool(defaults.insertSpaces), options);
+			options.preserveExplicitDefault = true;
+			registry.define("editor/indentation/insert_spaces", PropertyType.Bool, PropertyValue.Bool(defaults.insertSpaces), options);
 		}
 		{
 			var options = new SettingOptions();
