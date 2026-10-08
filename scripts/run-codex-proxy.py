@@ -3,7 +3,7 @@
 
 Owns only the proxy child. No daemon lifetime or inference policy is changed.
 """
-import base64,hashlib,json,os,selectors,struct,subprocess,sys,time,signal
+import base64,hashlib,json,os,queue,selectors,struct,subprocess,sys,threading,time,signal
 
 LIMIT=262144
 QUEUE=1048576
@@ -15,9 +15,125 @@ def frame(payload,opcode=1):
     head=bytes([0x80|opcode,0x80|n]) if n<126 else bytes([0x80|opcode,0xfe if n<=65535 else 0xff])+struct.pack('!H' if n<=65535 else '!Q',n)
     return head+mask+bytes(byte^mask[i%4] for i,byte in enumerate(payload))
 
+def main_windows():
+    """Bridge Windows pipes with bounded reader threads; select() cannot poll pipes there."""
+    if len(sys.argv)<2: raise ValueError('Expected Codex executable')
+    child=subprocess.Popen([sys.argv[1],*sys.argv[2:],'app-server','proxy'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,bufsize=0)
+    events=queue.Queue(maxsize=16)
+    stop=threading.Event()
+    def append(queue,data):
+        if len(data)>QUEUE-len(queue): raise ValueError('Codex bridge queue exceeds bound')
+        queue.extend(data)
+    def queue_event(event):
+        while not stop.is_set():
+            try: events.put(event,timeout=0.1);return True
+            except queue.Full: pass
+        return False
+    def pump(name,stream,send=True):
+        try:
+            while True:
+                data=os.read(stream.fileno(),65536)
+                if send and not queue_event((name,data)): return
+                if not data: return
+        except (OSError,ValueError) as error:
+            if send: queue_event((name,error))
+    for name,stream in [('input',sys.stdin.buffer),('proxy',child.stdout)]:
+        threading.Thread(target=pump,args=(name,stream),daemon=True).start()
+    threading.Thread(target=pump,args=('errors',child.stderr,False),daemon=True).start()
+
+    key=base64.b64encode(os.urandom(16))
+    expected=base64.b64encode(hashlib.sha1(key+GUID).digest())
+    network=bytearray(b'GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: '+key+b'\r\n\r\n')
+    output=bytearray();incoming=bytearray();lines=bytearray();fragment=bytearray()
+    handshake=False;fragmenting=False;closing=False
+    deadline=time.monotonic()+10
+    try:
+        while True:
+            if closing and not output: return
+            if not handshake and time.monotonic()>deadline: raise TimeoutError('Codex WebSocket handshake timed out')
+            try:
+                name,data=events.get(timeout=0.01)
+                if isinstance(data,BaseException): closing=True
+                elif not data:
+                    if name in ('input','proxy'): closing=True
+                elif name=='input': append(lines,data)
+                elif name=='proxy': append(incoming,data)
+            except queue.Empty:
+                pass
+
+            if not handshake:
+                at=incoming.find(b'\r\n\r\n')
+                if at<0:
+                    if len(incoming)>8192: raise ValueError('Codex upgrade header exceeds bound')
+                else:
+                    if at>8192: raise ValueError('Codex upgrade header exceeds bound')
+                    header=bytes(incoming[:at]);del incoming[:at+4]
+                    fields=header.split(b'\r\n')
+                    if not fields[0].startswith(b'HTTP/1.1 101 '): raise ValueError('Codex WebSocket upgrade refused')
+                    headers={k.strip().lower():v.strip().lower() for line in fields[1:] for k,v in [line.split(b':',1)]}
+                    accept=next((line.split(b':',1)[1].strip() for line in fields[1:] if line.lower().startswith(b'sec-websocket-accept:')),None)
+                    if accept!=expected or headers.get(b'upgrade')!=b'websocket' or b'upgrade' not in headers.get(b'connection',b''):
+                        raise ValueError('Invalid Codex WebSocket upgrade')
+                    handshake=True
+
+            if handshake:
+                for _ in range(32):
+                    at=lines.find(b'\n')
+                    if at<0: break
+                    if at>LIMIT: raise ValueError('Codex JSONL frame exceeds bound')
+                    line=bytes(lines[:at]);del lines[:at+1]
+                    if not line: continue
+                    line.decode('utf-8')
+                    append(network,frame(line))
+                if len(lines)>LIMIT and b'\n' not in lines: raise ValueError('Codex JSONL frame exceeds bound')
+                for _ in range(32):
+                    if len(incoming)<2: break
+                    a,b=incoming[:2];fin=bool(a&0x80);opcode=a&15;n=b&127;offset=2
+                    if a&0x70 or b&0x80: raise ValueError('Unsupported Codex WebSocket frame')
+                    if n==126:
+                        if len(incoming)<4: break
+                        n=struct.unpack('!H',incoming[2:4])[0];offset=4
+                    elif n==127:
+                        if len(incoming)<10: break
+                        n=struct.unpack('!Q',incoming[2:10])[0];offset=10
+                    if n>LIMIT or (opcode>=8 and (not fin or n>125)): raise ValueError('Codex WebSocket frame exceeds bound')
+                    if len(incoming)<offset+n: break
+                    payload=bytes(incoming[offset:offset+n]);del incoming[:offset+n]
+                    if opcode==8: closing=True;break
+                    if opcode==9: append(network,frame(payload,10));continue
+                    if opcode==10: continue
+                    if opcode==1:
+                        if fragmenting: raise ValueError('Nested Codex WebSocket message')
+                        fragment.clear();fragmenting=not fin
+                    elif opcode!=0 or not fragmenting: raise ValueError('Expected Codex WebSocket text')
+                    if len(payload)>LIMIT-len(fragment): raise ValueError('Codex WebSocket message exceeds bound')
+                    fragment.extend(payload)
+                    if fin:
+                        fragmenting=False
+                        fragment.decode('utf-8')
+                        payload=bytes(fragment)
+                        if b'\n' in payload: payload=json.dumps(json.loads(payload),separators=(',',':')).encode()
+                        append(output,payload+b'\n');fragment.clear()
+
+            if network:
+                written=os.write(child.stdin.fileno(),memoryview(network)[:65536])
+                del network[:written]
+            if output:
+                written=os.write(sys.stdout.fileno(),memoryview(output)[:65536])
+                del output[:written]
+    finally:
+        stop.set()
+        if child.poll() is None: child.terminate()
+        try: child.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            child.kill();child.wait(timeout=5)
+        for stream in (child.stdin,child.stdout,child.stderr):
+            if stream is not None: stream.close()
+
 def main():
-    if len(sys.argv)!=2: raise ValueError('Expected Codex executable')
-    child=subprocess.Popen([sys.argv[1],'app-server','proxy'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,bufsize=0)
+    if len(sys.argv)<2: raise ValueError('Expected Codex executable')
+    if os.name=='nt': return main_windows()
+    child=subprocess.Popen([sys.argv[1],*sys.argv[2:],'app-server','proxy'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,bufsize=0)
     selector=selectors.DefaultSelector()
     key=base64.b64encode(os.urandom(16))
     expected=base64.b64encode(hashlib.sha1(key+GUID).digest())

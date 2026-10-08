@@ -4,10 +4,29 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 from pathlib import Path
 
 from haxeon_cli import run_cli
+
+
+def _windows_npm_codex_environment() -> dict[str, str]:
+    """Use the npm Codex CLI directly instead of another codex.exe earlier on PATH."""
+    if os.name != "nt" or os.environ.get("EXOSUIT_CODEX_BIN"):
+        return {}
+    shim = shutil.which("codex.cmd")
+    if shim is None:
+        return {}
+    directory = Path(shim).resolve().parent
+    node = directory / "node.exe"
+    cli = directory / "node_modules" / "@openai" / "codex" / "bin" / "codex.js"
+    if not node.is_file() or not cli.is_file():
+        return {}
+    return {
+        "EXOSUIT_CODEX_BIN": str(node),
+        "EXOSUIT_CODEX_SCRIPT": str(cli),
+    }
 
 
 def _enable_core_dumps() -> None:
@@ -55,6 +74,7 @@ def main() -> int:
             "EXOSUIT_HAXEON_CLI_PYTHON": sys.executable,
             "EXOSUIT_PROJECT_ROOT": str(root_dir),
         }
+        environment.update(_windows_npm_codex_environment())
         _enable_core_dumps()
         return run_cli(root_dir, arguments, environment)
     except OSError as error:

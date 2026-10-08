@@ -34,7 +34,8 @@ class CodexProvider implements WorkspaceAgents {
 	final processes:ProcessManager;
 	final clock:Void->Float;
 	final executable:String;
- final bridge:Null<String>;
+	final commandPrefix:Array<String>;
+	final bridge:Null<String>;
 	final sessions:Map<String, Session> = [];
 	var models:Null<Array<AgentModel>>;
 	var modelsNext:Null<String>;
@@ -50,7 +51,7 @@ class CodexProvider implements WorkspaceAgents {
 	public var status(default, null) = "Codex is not connected";
 
 	public function new(workspace:String, instance:String, directories:WorkspaceDirectories, groups:Void->Array<WorkspaceGroup>, processes:ProcessManager,
-			clock:Void->Float, ?persistence:WorkspaceAgentPersistence, executable:String = "codex", ?bridge:String) {
+			clock:Void->Float, ?persistence:WorkspaceAgentPersistence, executable:String = "codex", ?bridge:String, ?script:String) {
 		this.workspace = workspace;
 		this.instance = instance;
 		this.directories = directories;
@@ -58,7 +59,9 @@ class CodexProvider implements WorkspaceAgents {
 		this.processes = processes;
 		this.clock = clock;
 		this.persistence = persistence;
-		this.executable = executable;this.bridge=bridge;
+		this.executable = executable;
+		this.commandPrefix = script == null || script.length == 0 ? [] : [script];
+		this.bridge = bridge;
 		if (persistence != null)
 			for (r in persistence.loadAgents()) {
 				if (!valid(r.id, 128)
@@ -141,7 +144,7 @@ class CodexProvider implements WorkspaceAgents {
 			return;
 		disconnect("Reconnecting Codex");
 		try {
-			starter = processes.start(executable, ["--version"], directories.root);
+			starter = processes.start(executable, commandPrefix.concat(["--version"]), directories.root);
 			output = "";
 			phase = "version";
 			deadline = clock() + 15000;
@@ -180,7 +183,7 @@ class CodexProvider implements WorkspaceAgents {
 						return;
 					}
 					try {
-						starter = processes.start(executable, ["app-server", "daemon", "start"], directories.root);
+						starter = processes.start(executable, commandPrefix.concat(["app-server", "daemon", "start"]), directories.root);
 						phase = "daemon";
 						output = "";
 						deadline = clock() + 15000;
@@ -191,8 +194,9 @@ class CodexProvider implements WorkspaceAgents {
 					}
 				} else {
 					try {
-						if(bridge==null) throw "Codex WebSocket proxy bridge is not configured";
-      proxy = processes.start("python3", [bridge,executable], directories.root);
+						if (bridge == null) throw "Codex WebSocket proxy bridge is not configured";
+						var python = Sys.systemName() == "Windows" ? "python" : "python3";
+						proxy = processes.start(python, [bridge, executable].concat(commandPrefix), directories.root);
 						var connection = new CodexTransport(proxy);
 						transport = connection;
 						phase = "initializing";

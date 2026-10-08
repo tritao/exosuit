@@ -65,7 +65,8 @@ class AgentMain {
 		var service = new WorkspaceService("workspace", args[3], seed.snapshot().groups, 32, 256, 16, store, directories.resolve);
 		var terminals = new WorkspaceTerminalManager("workspace", args.length >= 7 ? args[6] : args[3], directories.root,16777216,store,function() return service.snapshot().groups);
 		var executable = Sys.getEnv("EXOSUIT_CODEX_BIN");
-		var agents = new workspace.provider.CodexProvider("workspace", args.length >= 7 ? args[6] : args[3], directories, function() return service.snapshot().groups, processes, clock, store, executable == null ? "codex" : executable, Sys.getEnv("EXOSUIT_CODEX_PROXY_LAUNCHER"));
+		var codexScript = Sys.getEnv("EXOSUIT_CODEX_SCRIPT");
+		var agents = new workspace.provider.CodexProvider("workspace", args.length >= 7 ? args[6] : args[3], directories, function() return service.snapshot().groups, processes, clock, store, executable == null ? "codex" : executable, Sys.getEnv("EXOSUIT_CODEX_PROXY_LAUNCHER"), codexScript);
 		var noiseIdentity:Null<WorkspaceNoiseIdentity> = null;
 		if (relayHost != null && store == null)
 			throw "Remote workspace access requires persistent device storage";
