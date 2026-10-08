@@ -48,7 +48,6 @@ import haxeon.ui.widgets.controls.Tabs;
 import haxeon.ui.widgets.controls.TabsOptions;
 import haxeon.ui.widgets.controls.TabsSelectionMode;
 import haxeon.ui.widgets.collections.TreeView;
-import haxeon.ui.widgets.commands.CommandPalette;
 import haxeon.ui.widgets.docking.DockPanelContent;
 import haxeon.ui.widgets.docking.DockWorkspace;
 import haxeon.ui.widgets.layout.AppShell;
@@ -80,7 +79,7 @@ import controller.WorkspaceFileSearchController;
  * comment for what it owns on `Application`'s behalf (the open document
  * tabs, and the command-view/language-popup overlays this class renders
  * via `overlayView()`), and `CommandBridge` for how `application.commands`
- * reaches this shell's own `ui.commands`-backed `CommandPalette`.
+ * reaches this shell's command picker through `ui.commands`.
  */
 class ExosuitApp implements DesktopUiApplication {
 	public final ui:UiContext;
@@ -137,7 +136,6 @@ class ExosuitApp implements DesktopUiApplication {
 	final workspaceFileRefreshPending:Map<String, Bool> = new Map();
 	final tabClicks = new haxeon.ui.core.PointerClickSequence();
 	var statusMessage:String = "Ready";
-	var paletteVisible:Bool = false;
 	var settingsPanel:Null<haxeon.ui.widgets.settings.SettingsPanel>;
 	var contextMenu:Null<CommandMenu> = null;
 	var manageMenu:Null<CommandMenu> = null;
@@ -218,6 +216,11 @@ class ExosuitApp implements DesktopUiApplication {
 			return capturedHost;
 		}, preferences, null, this.capabilities);
 		host = capturedHost;
+		host.configureKeybinding = function(command) {
+			openSettings();
+			settingsPanel.setShowAdvanced(true);
+			settingsPanel.select("editor/keyboard");
+		};
 		if (hostContext != null) hostContext.onCloseRequested = function(close) {
 			application.files.requestQuit(close);
 			requestFrame();
@@ -528,7 +531,6 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	public function openSettings():Void {
-		paletteVisible = false;
 		host.closeCommandView();
 		settingsPanel = new haxeon.ui.widgets.settings.SettingsPanel("exosuit-settings", application.settings.store, requestFrame);
 		requestFrame();
@@ -669,12 +671,7 @@ class ExosuitApp implements DesktopUiApplication {
 			popup.dimBackdrop = false; popup.menuSurface = true; popup.label = "Notifications";
 			layers.push(new StackChild("notifications", popup, 0, 0, 45, LayoutAxis.grow(), LayoutAxis.grow()));
 		}
-		if (paletteVisible) {
-			var palette = new CommandPalette("exosuit-command-palette", ui.commands,
-				ui.commandContext, 320.0, 120.0, "", function() { paletteVisible = false; },
-				function(_) { paletteVisible = false; });
-			layers.push(new StackChild("palette", palette, 0.0, 0.0, 20));
-		}
+
         if(terminalBrowserVisible) {
             var dismiss=function() {terminalBrowserVisible=false;requestFrame();};
             var browserStyle=new LayoutStyle();browserStyle.width=LayoutAxis.grow();
@@ -1963,7 +1960,7 @@ class ExosuitApp implements DesktopUiApplication {
 			var anchor = ui.root.find(event.target);
 			if (anchor != null && anchor.resolved != null) { var bounds = anchor.globalBounds(); x = bounds.x; y = bounds.y + bounds.height + 4; }
 		}
-		paletteVisible = false;
+		if (host.isCommandViewActive()) host.closeCommandView();
 		host.dismissLanguagePopup();
 		var breadcrumbMenu:CommandMenu = null;
 		breadcrumbMenu = new CommandMenu(application.commands, application.context, [], x, y,
@@ -2013,7 +2010,7 @@ class ExosuitApp implements DesktopUiApplication {
 			new haxeon.ui.widgets.overlays.MenuItem("manage-themes", "Themes…",
 				function() openPreferences("appearance/colors", true))
 		];
-		paletteVisible = false;
+		if (host.isCommandViewActive()) host.closeCommandView();
 		host.dismissLanguagePopup();
 		manageMenu = new CommandMenu(application.commands, application.context, [], x, y, function() return true,
 			function() { contextMenu = null; requestFrame(); }, actions);
@@ -2035,7 +2032,7 @@ class ExosuitApp implements DesktopUiApplication {
 				}
 			}
 		}
-		paletteVisible = false;
+		if (host.isCommandViewActive()) host.closeCommandView();
 		host.dismissLanguagePopup();
 		contextMenu = new CommandMenu(application.commands, application.context, entries, x, y, valid,
 			function() { contextMenu = null; requestFrame(); });
@@ -2144,7 +2141,19 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function togglePalette():Void {
 		contextMenu = null;
-		paletteVisible = !paletteVisible;
+		var entries:Array<commandview.CommandViewEntry> = [];
+		for (id in ui.commands.ids()) {
+			var command = ui.commands.get(id);
+			if (command == null || !command.isEnabled(ui.commandContext)) continue;
+			var shortcuts = ui.commands.shortcutsFor(id);
+			entries.push(new commandview.CommandViewEntry(command.label, "", id,
+				[for (shortcut in shortcuts) shortcut.label()].join(", "), command.label + " " + id));
+		}
+		entries.sort(function(a, b) return Reflect.compare(a.label.toLowerCase(), b.label.toLowerCase()));
+		host.openCommandView(new commandview.CommandViewProvider("> ", entries, function(_) {}, function(entry, _, _) {
+			host.closeCommandView();
+			if (entry != null) ui.commands.executeContext(entry.value, ui.commandContext);
+		}));
 		requestFrame();
 	}
 

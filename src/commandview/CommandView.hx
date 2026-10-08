@@ -143,10 +143,14 @@ class CommandView {
 		if (provider != null) provider.onMove(delta);
 	}
 
-	function accept(backwards:Bool):Void {
+	function accept(backwards:Bool):Void activate(selected, backwards);
+
+	/** Shared mouse/keyboard acceptance, including input history. */
+	public function activate(index:Int, backwards:Bool = false):Void {
 		var current = provider;
-		if (current == null) return;
-		var entry = selected >= 0 && selected < results.length ? results[selected] : null;
+		if (!active || current == null) return;
+		if (index >= 0 && index < results.length) select(index);
+		var entry = index >= 0 && index < results.length ? results[index] : null;
 		input.remember();
 		current.onAccept(entry, query, backwards);
 	}

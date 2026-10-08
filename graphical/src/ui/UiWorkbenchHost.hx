@@ -44,13 +44,10 @@ import haxeon.ui.LayoutStyle;
 import haxeon.ui.core.View as NkView;
 import haxeon.ui.widgets.KeyedView;
 import haxeon.ui.widgets.controls.Button;
-import haxeon.ui.widgets.controls.ButtonVariant;
 import haxeon.ui.widgets.layout.Column;
 import haxeon.ui.widgets.layout.Row;
 import haxeon.ui.widgets.overlays.Popup;
 import haxeon.ui.widgets.scroll.ScrollView;
-import haxeon.ui.widgets.collections.VirtualList;
-import haxeon.ui.widgets.scroll.ScrollController;
 import haxeon.ui.widgets.text.Text;
 import haxeon.ui.core.TextStyleOverride;
 
@@ -133,11 +130,8 @@ class UiWorkbenchHost implements WorkbenchHost {
 	var selectedExplorerPath:Null<String>;
 
 	final commandView:CommandView = new CommandView();
-	final commandScroll = new ScrollController();
-	var commandScrollSelection = -1;
-	var commandScrollQuery = "";
-	var commandViewProvider:Null<CommandViewProvider>;
-	final commandViewCapture:KeyCaptureView;
+	var commandPicker:Null<QuickPickView>;
+	public var configureKeybinding:Null<String->Void>;
 
 	static inline var LANG_NONE = 0;
 	static inline var LANG_INFO = 1;
@@ -194,7 +188,6 @@ class UiWorkbenchHost implements WorkbenchHost {
 		activePane = new UiEditorPane("editor");
 		panes.push(activePane);
 		notifiedActiveIdentity = activeTabIdentity();
-		commandViewCapture = new KeyCaptureView(buildCommandViewContent(), commandViewKeyPressed, commandViewTextInput);
 		// Completion owns its revision-checked input callback; informational popups
 		// dismiss and forward committed text to the active editor.
 		languageCapture = new KeyCaptureView(buildLanguagePopupContent(), handleLanguagePopupKey, function(text) {
@@ -501,18 +494,18 @@ class UiWorkbenchHost implements WorkbenchHost {
 	// -- core.WorkbenchHost: command-view / confirmations --
 
 	public function openCommandView(provider:CommandViewProvider):Void {
-		commandViewProvider = provider;
 		commandView.open(provider);
-		commandScroll.jumpTo(0, 0);
-		commandScrollSelection = -1;
-		commandScrollQuery = "";
-		commandViewCapture.resetFocus();
+		commandPicker = new QuickPickView(commandView, provider, function() {
+			commandView.close(true);
+			closeCommandView();
+		}, requestFrame, configureKeybinding);
 		requestFrame();
 	}
 
 	public function closeCommandView():Void {
 		commandView.close();
-		commandViewProvider = null;
+		commandPicker = null;
+		pendingEditorFocus = true;
 		requestFrame();
 	}
 
@@ -520,7 +513,10 @@ class UiWorkbenchHost implements WorkbenchHost {
 
 	public function commandViewKeyPressed(key:Int, modifiers:Int):Bool {
 		var handled = commandView.keyPressed(key, modifiers);
-		if (handled) requestFrame();
+		if (handled) {
+			if (!commandView.active) closeCommandView();
+			else requestFrame();
+		}
 		return handled;
 	}
 
@@ -1102,7 +1098,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 
 	/** The command-view or language-popup overlay to render this frame, or null for neither. */
 	public function overlayView():Null<NkView> {
-		if (commandView.active) return commandViewCapture;
+		if (commandView.active) return commandPicker;
 		if (languageKind != LANG_NONE) {
 			var active = activeDocument();
 			if (active == null || active.id != languageDocumentId) dismissLanguagePopup();
@@ -1111,50 +1107,6 @@ class UiWorkbenchHost implements WorkbenchHost {
 		return null;
 	}
 
-	function buildCommandViewContent():NkView {
-		return new OverlayBuilderView(function(context) {
-			var rowHeight = 32.0, viewportHeight = 320.0;
-			if (commandScrollQuery != commandView.query) commandScroll.jumpTo(0, 0);
-			if (commandScrollSelection != commandView.selected || commandScrollQuery != commandView.query) {
-				var top = commandView.selected * rowHeight;
-				if (top < commandScroll.offsetY) commandScroll.jumpTo(0, top);
-				else if (top + rowHeight > commandScroll.offsetY + viewportHeight)
-					commandScroll.jumpTo(0, top + rowHeight - viewportHeight);
-			}
-			commandScrollSelection = commandView.selected;
-			commandScrollQuery = commandView.query;
-			var scrollStyle = new LayoutStyle();
-			scrollStyle.width = LayoutAxis.fixed(520.0);
-			scrollStyle.height = LayoutAxis.fixed(viewportHeight);
-			scrollStyle.background = Color.rgba(0.11, 0.11, 0.13, 0.98);
-			var scroll = new VirtualList("cv-scroll", commandView.results.length, rowHeight, function(index) {
-				var entry = commandView.results[index], provider = commandViewProvider;
-				var label = entry.label + (entry.detail.length > 0 ? "  " + entry.detail : "")
-					+ (entry.trailing.length > 0 ? "   [" + entry.trailing + "]" : "");
-				var rowStyle = new LayoutStyle();
-				rowStyle.width = LayoutAxis.grow();
-				rowStyle.height = LayoutAxis.fixed(rowHeight);
-				var button = new Button(label, rowStyle, function() {
-					if (provider != null) provider.onAccept(entry, commandView.query, false);
-				}, "cv-row-" + index);
-				button.variant = index == commandView.selected ? ButtonVariant.Primary : ButtonVariant.Secondary;
-				return button;
-			}, scrollStyle, null, commandScroll, viewportHeight);
-			var promptStyle = new LayoutStyle();
-			promptStyle.width = LayoutAxis.fixed(520.0);
-			promptStyle.padding = new Insets(10.0, 8.0, 10.0, 8.0);
-			promptStyle.background = Color.rgba(0.16, 0.16, 0.19, 1.0);
-			var prompt = commandViewProvider == null ? "" : commandViewProvider.prompt;
-			var input = new Text(prompt + commandView.query + "█", promptStyle, Color.rgba(1.0, 1.0, 1.0, 1.0),
-				TextStyleOverride.text(14.0));
-			var contentStyle = new LayoutStyle();
-			contentStyle.width = LayoutAxis.fixed(520.0);
-			var content = new Column("cv-content", [new KeyedView("input", input), new KeyedView("list", scroll)], contentStyle);
-			return new Popup("command-view", content, 40.0, 40.0, null, function() {
-				if (commandView.active) commandView.close(true);
-			});
-		});
-	}
 
 	function buildLanguagePopupContent():NkView {
 		return new OverlayBuilderView(function(context) {
