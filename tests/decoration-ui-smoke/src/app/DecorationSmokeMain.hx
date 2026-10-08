@@ -183,6 +183,33 @@ class DecorationSmokeApp extends ExosuitApp {
 		host.setDocumentSearchMatches(DocumentSearch.find(document, "return", new SearchOptions()));
 	}
 
+	function tabRenderingStep():Void {
+		var view = host.activeView();
+		if (view == null || ui.root == null) throw "tab rendering lost editor";
+		var node = findEditor(ui.root, "editor:" + view.document.id);
+		if (node == null) throw "tab rendering lost widget";
+		if (frames == 2) {
+			application.settings.store.set("editor/indentation/tab_width", haxeon.ui.properties.PropertyValue.Int(4));
+			view.document.buffer.replaceAllText("\tX\n    X", view.selection);
+			view.restoreCursor(0, 0);
+		} else {
+			var state:State<TextEditorState> = ui.buildContext.existingState(node.id);
+			var layout = state.value.layout;
+			var columns = frames == 3 ? 4 : frames == 4 ? 8 : 2;
+			if (layout.paragraphStyle.tabWidth != columns) throw "tab width did not reach retained layout";
+			var space = layout.caret(new TextPosition(4, 0)).x - layout.caret(new TextPosition(3, 0)).x;
+			var after = layout.caret(new TextPosition(1, 0));
+			if (space <= 0 || Math.abs(after.x - columns * space) > 0.05) throw "tab was not rendered at its configured stop";
+			var rects = layout.selectionRects(new TextPosition(0, 0), new TextPosition(1, 0));
+			if (rects.length != 1 || Math.abs(rects[0].width - after.x) > 0.05) throw "tab selection geometry disagrees with rendering";
+			if (layout.hitTest(after.x + 0.1, after.y).offset != 1) throw "tab hit testing disagrees with caret geometry";
+			if (view.document.buffer.text != "\tX\n    X") throw "rendering expanded the source tab";
+			if (frames == 3) application.settings.store.set("editor/indentation/tab_width", haxeon.ui.properties.PropertyValue.Int(8));
+			else if (frames == 4) application.settings.store.set("editor/indentation/tab_width", haxeon.ui.properties.PropertyValue.Int(2));
+			else trace("PASS: native tabs, caret, selection and hit testing follow live tab width without changing source");
+		}
+	}
+
 	function editingSettingsStep():Void {
 		var view = host.activeView();
 		if (view == null || ui.root == null) throw "editing settings lost the editor";
@@ -288,6 +315,7 @@ class DecorationSmokeApp extends ExosuitApp {
 	override public function submit(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		frames++;
 		if (phase == "editing-policy" && frames >= 2 && frames <= 6) editingPolicyStep();
+		if (phase == "tab-rendering" && frames >= 2 && frames <= 5) tabRenderingStep();
 		if (phase == "editing-settings" && frames >= 2 && frames <= 5) editingSettingsStep();
 		if (phase == "ime-selection-affinity" && frames == 4) {
 			var view = host.activeView(), previous = ui.root;

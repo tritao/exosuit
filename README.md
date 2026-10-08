@@ -72,7 +72,9 @@ Backspace in leading whitespace returns to the preceding indentation stop.
 Enter preserves indentation and adds a level after a code opening bracket;
 between matching brackets it creates an indented middle line. These edits
 respect the configured tab width and spaces/tabs setting and support multiple
-carets. Ctrl+M toggles Tab between indentation and keyboard focus navigation.
+carets. Existing tab characters render at the same configured stops, with matching
+caret, selection, and mouse geometry; their width scales with the editor font.
+Ctrl+M toggles Tab between indentation and keyboard focus navigation.
 
 The graphical application builds from `graphical/haxeon.json` (entry
 `app.GraphicalMain`). Headless tests build from `haxeon.json` (entry

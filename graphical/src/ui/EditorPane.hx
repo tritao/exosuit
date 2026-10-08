@@ -293,6 +293,7 @@ class EditorPane implements View {
 		editorStyle.background = color(editorTheme.editorBackground);
 		var area = TextArea.withDocument("editor:" + document.id, document.buffer.document,
 			handleEdit, editorStyle, null, new TextStyle(fontSize, FontFamily.Monospace), color(editorTheme.editorForeground));
+		area.tabWidth = Std.int(Math.max(1, editSettings.tabWidth));
 		area.colorRangeProvider = foregroundProvider;
 		area.decorationProvider = decorationProvider;
 		area.selectionProvider = selectionProvider;
