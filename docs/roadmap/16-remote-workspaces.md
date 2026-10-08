@@ -121,7 +121,8 @@ initiator/responder roles. It contains no secret material.
 
 Use the same pinned C Noise implementation in the NativeKit native module and
 the Emscripten web host. The initial candidate is
-[Noise-C](https://github.com/rweather/noise-c), pinned at `cfe2541` for the
+[Noise-C](https://github.com/tritao/noise-c), our fork of
+[rweather/noise-c](https://github.com/rweather/noise-c), pinned at `cfe2541` for the
 prototype. It is MIT-licensed and its upstream core unit and Noise vector suites
 pass on Linux. Do not use the archived `noise-c.wasm` wrapper. Noise-C's default
 random source only handles Linux/macOS and Windows; the NativeKit integration
