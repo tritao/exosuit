@@ -36,6 +36,8 @@ class CodexProvider implements WorkspaceAgents {
 	final executable:String;
  final bridge:Null<String>;
 	final sessions:Map<String, Session> = [];
+	var models:Null<Array<AgentModel>>;
+	var modelsNext:Null<String>;
 	var transport:Null<CodexTransport>;
 	var proxy:Null<OwnedProcess>;
 	var starter:Null<OwnedProcess>;
@@ -114,6 +116,8 @@ class CodexProvider implements WorkspaceAgents {
 			activity: s.activity,
 			items: s.conversation.items(),
 			itemsOmitted: s.conversation.omitted,
+			models: models,
+			modelsNext: modelsNext,
 			requests: [
 				for (id => r in s.requests)
 					{
@@ -204,8 +208,8 @@ class CodexProvider implements WorkspaceAgents {
 									return;
 								}
 								var agent = string(r.result, "userAgent");
-								if (!~/(^|[^0-9])0[.]160[.](0|1)([^0-9]|$)/.match(agent)) {
-									connection.close("Unsupported Codex server version");
+								if (!~/(^|[^0-9])0[.](160[.](0|1)|161[.]0)([^0-9]|$)/.match(agent)) {
+									connection.close("Unsupported Codex server version: " + agent + "; supported: 0.160.0, 0.160.1, 0.161.0");
 									return;
 								}
 								if (!connection.send({method: "initialized"})) {
@@ -665,6 +669,39 @@ class CodexProvider implements WorkspaceAgents {
 				ctx.respond(view(s));
 				return;
 			}
+			if (q.action == "models") {
+                if (q.request != null && (q.request != modelsNext || models == null || models.length >= 128)) {
+                    ctx.fail({code: "invalid_cursor", message: "Refresh the model catalog", ambiguous: false});
+                    return;
+                }
+                call("model/list", {limit: 32, includeHidden: false, cursor: q.request}, function(r) {
+                    if (r.error != null) {
+                        ctx.fail({code: "provider_error", message: r.error, ambiguous: false});
+                        return;
+                    }
+                    var data:Dynamic = Reflect.field(r.result, "data");
+                    if (!Std.isOfType(data, Array) || (cast data:Array<Dynamic>).length > 32) {
+                        ctx.fail({code: "provider_error", message: "Invalid model catalog", ambiguous: false});
+                        return;
+                    }
+                    var found:Array<AgentModel> = q.request == null ? [] : models.copy();
+                    for (entry in (cast data:Array<Dynamic>)) {
+                        var model = string(entry, "model"), name = string(entry, "displayName");
+                        if (!valid(model, 256) || !valid(name, 256)) {
+                            ctx.fail({code: "provider_error", message: "Invalid model catalog entry", ambiguous: false});
+                            return;
+                        }
+                        var duplicate = false;
+                        for (existing in found) if (existing.model == model) duplicate = true;
+                        if (!duplicate && Reflect.field(entry, "hidden") != true) found.push({model: model, name: name});
+                    }
+                    models = found;
+                    var next = string(r.result, "nextCursor");
+                    modelsNext = next == "" || found.length >= 128 ? null : next;
+                    ctx.respond(view(s));
+                });
+                return;
+            }
 			if (q.action == "connect") {
 				if (s.record.thread == "") {
 					ctx.fail({code: "uncertain_create", message: "Creation outcome is uncertain; discover and attach the thread explicitly", ambiguous: false});
@@ -699,11 +736,21 @@ class CodexProvider implements WorkspaceAgents {
 					ctx.fail({code: "busy", message: "Agent is busy or prompt is invalid", ambiguous: false});
 					return;
 				}
+                if (q.model != null) {
+                    var known = false;
+                    if (models != null) for (entry in models) if (entry.model == q.model) known = true;
+                    if (!known) {
+                        ctx.fail({code: "invalid_model", message: "Choose a model from the current catalog", ambiguous: false});
+                        return;
+                    }
+                }
 				s.busy = true;
 				s.record.state = "working";
 				s.error = null;
 				append(s, "\nYou: " + q.text + "\n");
-				call("turn/start", {threadId: s.record.thread, input: [{type: "text", text: q.text, text_elements: new Array<String>()}]}, function(r) {
+				var params:Dynamic = {threadId: s.record.thread, input: [{type: "text", text: q.text, text_elements: new Array<String>()}]};
+                if (q.model != null) Reflect.setField(params, "model", q.model);
+                call("turn/start", params, function(r) {
 					s.busy = false;
 					if (r.error != null) {
 						s.error = r.error;

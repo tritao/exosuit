@@ -28,7 +28,7 @@ try:
   a,b=connect(),connect()
   for p in [a,b]:
    r=request(p,1,'initialize',{'clientInfo':{'name':'exosuit','title':'Exosuit','version':'1'},'capabilities':{'experimentalApi':False}})
-   assert any(v in r.get('userAgent','') for v in ['0.160.0','0.160.1'])
+   assert any(v in r.get('userAgent','') for v in ['0.160.0','0.160.1','0.161.0'])
    p.stdin.write(json.dumps({'method':'initialized'})+'\n');p.stdin.flush()
    page=request(p,2,'thread/list',{'cwd':root,'limit':6,'archived':False})
    assert page['data']==[], 'Unexpected thread in fresh read-only fixture directory'

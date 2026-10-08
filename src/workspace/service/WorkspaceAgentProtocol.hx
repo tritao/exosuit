@@ -39,6 +39,11 @@ import haxeon.wire.MessagePack;
 	@:id(6) var thread:Null<String>;
 }
 
+@:wire typedef AgentModel = {
+	@:id(1) var model:String;
+	@:id(2) var name:String;
+}
+
 @:wire typedef AgentAction = {
 	@:id(1) var workspace:String;
 	@:id(2) var instance:String;
@@ -46,6 +51,7 @@ import haxeon.wire.MessagePack;
 	@:id(4) var action:String;
 	@:id(5) var text:String;
 	@:id(6) var request:Null<String>;
+	@:optional @:id(7) var model:Null<String>;
 }
 
 @:wire typedef AgentRequest = {
@@ -62,6 +68,8 @@ import haxeon.wire.MessagePack;
 	@:id(4) var error:Null<String>;
 	@:optional @:id(5) var items:Null<Array<AgentActivityItem>>;
 	@:optional @:id(6) var itemsOmitted:Null<Bool>;
+	@:optional @:id(7) var models:Null<Array<AgentModel>>;
+	@:optional @:id(8) var modelsNext:Null<String>;
 }
 
 /** Bounded presentation data; provider protocol and policy stay on the host. */

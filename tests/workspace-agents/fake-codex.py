@@ -62,7 +62,7 @@ for line in messages():
  message=json.loads(line); method=message.get('method');params=message.get('params',{});i=message.get('id')
  if method=='initialize':
   assert message.get('jsonrpc') is None
-  reply(i,{'userAgent':'codex-cli/0.160.1','codexHome':'fixture','platformFamily':'unix','platformOs':'linux'})
+  reply(i,{'userAgent':'codex-cli/0.161.0','codexHome':'fixture','platformFamily':'unix','platformOs':'linux'})
  elif method=='initialized': pass
  elif method=='thread/start':
   assert params['sandbox']=='workspace-write' and params['approvalPolicy']=='on-request'
@@ -82,11 +82,15 @@ for line in messages():
   reply(i,{'data':[] if not t['turn'] else [t['turn']]})
  elif method=='thread/items/list':
   reply(i,{'data':[{'turnId':'history','item':{'id':'historical-message','type':'agentMessage','text':'Persisted history'}}]})
+ elif method=='model/list':
+  reply(i,{'data':[{'id':'fixture-model','model':'fixture-model','displayName':'Fixture model','hidden':False}], 'nextCursor':None})
  elif method=='turn/start':
   v=load();t=v['threads'][params['threadId']];v['prompts']+=1
   turn={'id':'turn-'+str(v['prompts']),'status':'inProgress'}
   t['turn']=turn;t['status']={'type':'active'};save(v)
   text=params['input'][0]['text']
+  v['lastPrompt']=text;v['lastModel']=params.get('model');save(v)
+  if text.startswith('界'): assert params.get('model')=='fixture-model'
   if text=='disconnect': sys.exit()
   if text=='oversize':
    send_payload(b'x'*300000);continue
@@ -98,6 +102,7 @@ for line in messages():
   event('item/completed',{'threadId':t['id'],'turnId':turn['id'],'item':{'id':'command-output','type':'commandExecution','command':'echo test','cwd':t['cwd'],'aggregatedOutput':'test','exitCode':0,'status':'completed'}})
   event('item/completed',{'threadId':t['id'],'turnId':turn['id'],'item':{'id':'file-change','type':'fileChange','changes':[{'path':'README.md','kind':{'type':'update'},'diff':'+fixture line'}],'status':'completed'}})
   event('item/completed',{'threadId':t['id'],'turnId':turn['id'],'item':{'id':'wrapped-message','type':'agentMessage','text':'Wrapped conversation text exercises paragraph measurement. '*12}})
+  event('item/completed',{'threadId':t['id'],'turnId':turn['id'],'item':{'id':'code-message','type':'agentMessage','text':'Example `primes`:\n\n```python\ndef primes():\n    return 2 # 界\n```'}})
   send({'id':799,'method':'item/commandExecution/requestApproval','params':{'threadId':'another-clients-thread','turnId':'foreign-turn','itemId':'foreign-command','command':'unrelated'}})
   pending[700]={'threadId':t['id'],'turnId':turn['id'],'itemId':'command','command':'echo test','cwd':t['cwd'],'reason':'Fixture approval'}
   send({'id':700,'method':'item/commandExecution/requestApproval','params':pending[700]})

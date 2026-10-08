@@ -33,8 +33,20 @@ with tempfile.TemporaryDirectory(prefix='excodexui-') as temporary:
      click(window,locate(nodes(1),'Codex · idle'));time.sleep(1)
      # Opening changes the layout; capture here via the next restart before prompting.
     elif index==3:
+     model_button=locate(nodes(2),'Choose model…')
+     click(window,model_button);time.sleep(1)
+     click(window,model_button)
+     subprocess.run(['xdotool','key','--clearmodifiers','ctrl+a'],check=True)
+     subprocess.run(['xdotool','type','--clearmodifiers','Fixture model'],check=True)
+     subprocess.run(['xdotool','key','--clearmodifiers','Return'],check=True)
+     time.sleep(.3)
      field(window,nodes(2),'hello')
-     click(window,locate(nodes(2),'Send prompt'))
+     subprocess.run(['xdotool','key','--clearmodifiers','shift+KP_Enter'],check=True)
+     time.sleep(.2)
+     result=json.loads((project/'fake-codex.json').read_text())
+     assert result['prompts']==0, 'Shift+keypad Enter submitted the draft'
+     subprocess.run(['xdotool','type','--clearmodifiers','--delay','1','second line'],check=True)
+     subprocess.run(['xdotool','key','--clearmodifiers','KP_Enter'],check=True)
     elif index==4: click(window,locate(nodes(3),'Approve once'))
     elif index==5:
      field(window,nodes(4),'choice=yes')
@@ -58,7 +70,15 @@ with tempfile.TemporaryDirectory(prefix='excodexui-') as temporary:
     labels=[(n.get('label') or '') for n in nodes(index) if n['visible']]
     assert labels.count('Hello streamed world')==1,labels
     assert 'echo test' in labels and 'update README.md' in labels,labels
-    assert 'Show diagnostics' in labels and not any('item/completed' in label for label in labels),labels
+    assert 'Copy code' in labels and 'python' in labels,labels
+    assert any(n.get('label')=='Code block: python' and n.get('focusable') for n in nodes(index)),nodes(index)
+    assert not any('```python' in label for label in labels),labels
+    assert 'Session details' in labels and 'Stop' not in labels,labels
+    assert 'Enter to send · Shift+Enter for newline' in labels,labels
+    sent=json.loads((project/'fake-codex.json').read_text())
+    assert sent['lastPrompt']=='hello\nsecond line',sent
+    assert sent['lastModel']=='fixture-model',sent
+    assert not any('item/completed' in label for label in labels),labels
     wrapped=[n for n in nodes(index) if (n.get('label') or '').startswith('Wrapped conversation text')]
     assert len(wrapped)==1 and wrapped[0]['bounds']['height']>30,wrapped
    if index==6:

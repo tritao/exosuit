@@ -13,6 +13,14 @@ import platform.Platform;
 
 class AgentProviderTestMain {
 	static function conversationTests():Void {
+        var blocks = workspace.client.CodexMarkdown.parse("Before\n\n```python\ndef primes():\n    return 2\n```\nAfter");
+        require(blocks.length == 3 && blocks[1].kind == "code" && blocks[1].language == "python", "Markdown fences not parsed");
+        require(blocks[1].text == "def primes():\n    return 2", "Code indentation changed");
+        var streaming = workspace.client.CodexMarkdown.parse("~~~~python\n# 界\n```\n");
+        require(streaming.length == 1 && streaming[0].text == "# 界\n```\n", "Streaming fence was closed by a different marker");
+        var nested = workspace.client.CodexMarkdown.parse("````text\n```\n````");
+        require(nested[0].text == "```", "Short fence closed a longer fence");
+
 		var conversation = new workspace.provider.CodexConversation();
 		conversation.delta("t", "m", "agentMessage", "Hello ");
 		conversation.history([{turnId: "t", completedAtMs: null, item: {id: "m", type: "agentMessage", text: "stale"}}], "t");
@@ -136,7 +144,7 @@ class AgentProviderTestMain {
 				throw "Missing view";
 			return v;
 		}
-		function action(kind:String, text:String = "", request:Null<String> = null):Void {
+		function action(kind:String, text:String = "", request:Null<String> = null, model:Null<String> = null):Void {
 			code = "";
 			view = null;
 			var finished = false;
@@ -146,7 +154,8 @@ class AgentProviderTestMain {
 				id: "a",
 				action: kind,
 				text: text,
-				request: request
+				request: request,
+				model: model
 			}, 20000, function(v) {
 				view = v;
 				finished = true;
@@ -159,7 +168,12 @@ class AgentProviderTestMain {
 		var longPrompt = "";
 		for (_ in 0...2500)
 			longPrompt += "界";
-		action("prompt", longPrompt);
+		action("models");
+		var catalogModels = snapshot().models;
+		require(catalogModels != null && catalogModels.length == 1, "Model catalog missing");
+		action("prompt", "invalid model", null, "unlisted-model");
+		require(code == "invalid_model", "Unlisted model accepted");
+		action("prompt", longPrompt, null, "fixture-model");
 		wait(function() {
 			action("read");
 			return view != null && snapshot().requests.length == 1;

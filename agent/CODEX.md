@@ -8,9 +8,12 @@ text, ping/pong, UTF-8, masking and graceful output drain without owning the dae
 Closing an editor/conversation view releases its client; provider shutdown closes
 only its proxy. It never stops/restarts the shared server or deletes Codex history.
 
-This first adapter supports **codex-cli 0.160.0** with server **0.160.0/0.160.1**. The initialized server must be 0.160.0 or 0.160.1. All 31
-used generated schemas are identical for these two server versions; hashes are
-recorded in [codex-protocol-lock.json](codex-protocol-lock.json). A different version fails visibly; update the
+This first adapter supports **codex-cli 0.160.0** with server **0.160.0/0.160.1/0.161.0**. The initialized server must be one of these versions. All 33
+used generated schemas are identical for 0.160.0 and 0.160.1. In 0.161.0,
+`CodexErrorInfo` accepts additional string/object values and `CyberAccessProgram`
+has a description change; the adapter does not interpret either field. Approval
+schemas are unchanged. Baseline and 0.161.0 hashes are recorded in
+[codex-protocol-lock.json](codex-protocol-lock.json). A different version fails visibly; update the
 adapter against that version's generated schema rather than guessing field names.
 
 Protocol reference: <https://learn.chatgpt.com/docs/app-server>.
@@ -23,6 +26,9 @@ The installed schema was generated with:
   New threads request `workspace-write` sandbox and `on-request` approvals.
 - Find existing threads in the selected directory and explicitly attach them.
   Read metadata before resume, validate cwd, and preserve existing thread policy.
+- Load the server model catalog in the composer and choose a model for the next
+  prompt. Leaving “Conversation model” selected preserves the thread’s model.
+  Model choices come from `model/list`; the server remains responsible for access.
 - Send a text prompt, watch streamed messages/tool activity, interrupt the active
   turn, or reconnect and read the latest turn plus eight recent history items.
 - Command/file approvals support approve once or decline. Truncated requests
@@ -68,7 +74,7 @@ question/options presented as readable text. Transport IDs stay in the adapter;
 other decision fields remain visible, and the complete raw request size still
 fences approval reviewability. Unknown item kinds retain bounded diagnostic details.
 
-This is a first Codex slice: full paged history browsing, Markdown/diff rendering,
+This is a first Codex slice: full paged history browsing, diff rendering,
 the remaining request kinds, agent rename/move/remove, supervision CLI/wait and
 Claude are still planned. Two real shared-daemon clients initialize and query
 metadata through the WebSocket bridge; one continues querying after the other
@@ -97,6 +103,12 @@ history. It sends no approval replies, never replays the prompt and never
 stops/restarts the shared daemon. Failure cleanup interrupts only its test turn.
 The persistent test thread is printed and retained for inspection.
 
-The structured desktop fixture includes a long wrapped message. Native layout
+Assistant messages render a bounded Markdown subset: paragraphs, headings, bullet
+markers, inline code and fenced code blocks. Fenced snippets use the editor syntax
+engine and palette, stay selectable/read-only, and offer Copy code and horizontal
+scrolling. Unclosed fences remain code during streaming; unknown languages fall
+back to plain monospace. HTML and executable embeds are not interpreted.
+
+The structured desktop fixture includes a long wrapped message and Python code. Native layout
 regressions also check that external paragraph line coordinates agree with
 rendered primitives, including explicit newlines and empty lines.

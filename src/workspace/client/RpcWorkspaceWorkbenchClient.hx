@@ -276,7 +276,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     );
   }
 
-  public function agentAction(id:String, action:String, text:String, request:Null<String>):Void {
+  public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String):Void {
     var connection = rpc();
     if (connection == null ||(action == "read" ? !canReadAgents() : !canControlAgents()) || agentMutation) return;
     var mutate = action != "read";
@@ -290,7 +290,8 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       id: id,
       action: action,
       text: text,
-      request: request
+      request: request,
+      model: model
     }, 20000, function(value) {
       if (rpc() != connection || agentTokens.get(id) != selected) return;
       if (mutate) agentMutation = false;
