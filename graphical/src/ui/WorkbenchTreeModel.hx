@@ -16,11 +16,12 @@ class WorkbenchTreeModel implements TreeViewModel {
 	final children:Map<String, Array<String>> = [];
 	final roots:Array<String> = [];
 	var version:Int = 0;
+	public var groupEditor:Null<String->Null<View>>;
 	var workspaceRoot:Null<String>;
 
 	public function new() {}
 
-	public function update(catalog:Null<TerminalCatalog>, ?agentCatalog:workspace.service.WorkspaceAgentProtocol.AgentCatalog):Void {
+	public function update(catalog:Null<TerminalCatalog>, ?agentCatalog:workspace.service.WorkspaceAgentProtocol.AgentCatalog, ?draft:WorkspaceGroup):Void {
 		agents.clear();
 		groups.clear();
 		terminals.clear();
@@ -31,6 +32,7 @@ class WorkbenchTreeModel implements TreeViewModel {
 		if (catalog == null)
 			return;
 		var ordered = catalog.groups.copy();
+        if (draft != null && !Lambda.exists(ordered, function(g) return g.id == draft.id)) ordered.push(draft);
 		ordered.sort(function(a, b) {
 			var order = WorkspaceProtocol.order(a.order) - WorkspaceProtocol.order(b.order);
 			return order == 0 ? Reflect.compare(a.id, b.id) : order;
@@ -100,6 +102,8 @@ class WorkbenchTreeModel implements TreeViewModel {
 
 	public function buildItem(key:String):View {
 		if (StringTools.startsWith(key, "g:")) {
+            var editing = groupEditor == null ? null : groupEditor(key.substring(2));
+            if (editing != null) return editing;
 			var group = groups.get(key.substring(2));
 			if (group == null)
 				return new Text("");

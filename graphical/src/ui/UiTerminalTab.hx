@@ -10,6 +10,7 @@ class UiTerminalTab {
 	public final workspaceRoot:String;
 	public final panel:TerminalPanel;
 	public var disposed(default, null):Bool = false;
+	public var retainOnClose:Bool = false;
 
 	public function new(id:String, title:String, cwd:String, panel:TerminalPanel, remote:Bool = false, ?resourceId:String, ?workspaceRoot:String) {
 		this.id = id;

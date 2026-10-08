@@ -33,22 +33,28 @@ with tempfile.TemporaryDirectory(prefix='exactions-') as temporary:
         subprocess.run(['xdotool', 'mousemove', '--window', window,
                         str(round(bounds['x'] + bounds['width'] / 2)), str(round(bounds['y'] + bounds['height'] / 2)), 'click', '1'], check=True)
     try:
-        for index in range(5):
+        for index in range(7):
             with (fixture / ('app-' + str(index) + '.log')).open('w') as log:
                 app = subprocess.Popen([*RUNNER, str(project), '--open-workbench',
-                                        '--capture-dir=' + str(fixture / str(index)), '--capture-seconds=6'],
+                                        '--capture-dir=' + str(fixture / str(index)), '--capture-seconds=9'],
                                        cwd=ROOT, env=environment, stdout=log, stderr=subprocess.STDOUT)
                 window = subprocess.check_output(['timeout', '60', 'xdotool', 'search', '--sync', '--onlyvisible', '--name', '^exosuit$'], text=True).splitlines()[0]
-                subprocess.run(['xdotool', 'windowfocus', '--sync', window], check=True); time.sleep(1.5)
-                if index >= 1:
+                subprocess.run(['xdotool', 'windowfocus', '--sync', window], check=True); time.sleep(2)
+                if 1 <= index <= 4:
                     click(window, locate(layout(0), 'Workbench actions')); time.sleep(.3)
-                if index >= 2:
+                if 2 <= index <= 4:
                     click(window, locate(layout(1), 'Attach existing Codex thread…')); time.sleep(1)
                 if index == 3:
                     click(window, locate(layout(2), 'Search Codex threads'))
                     subprocess.run(['xdotool', 'type', '--clearmodifiers', 'unmatched-title'], check=True)
                 if index == 4:
                     click(window, locate(layout(2), 'Existing work'))
+                if index in (5, 6):
+                    nodes = layout(0)
+                    group = next(n for n in nodes if n.get('label') == 'g:work' and n['visible'])['bounds']
+                    subprocess.run(['xdotool', 'mousemove', '--window', window, str(round(group['x'] + group['width']/2)), str(round(group['y'] + group['height']/2)), 'click', '3'], check=True)
+                    time.sleep(.4)
+                    if index == 6: click(window, locate(layout(5), 'New Codex session'))
                 assert app.wait(timeout=90) == 0, (fixture / ('app-' + str(index) + '.log')).read_text()[-4000:]
                 app = None
             nodes = layout(index)
@@ -58,8 +64,8 @@ with tempfile.TemporaryDirectory(prefix='exactions-') as temporary:
                 assert 'New group' not in labels and 'Manage terminals…' not in labels and 'Existing Codex thread id' not in labels
                 # The group row is near the toolbar, with no permanent attachment form above it.
                 groups = [node for node in nodes if node.get('label') == 'g:work' and node['visible']]
-                assert groups and groups[0]['bounds']['y'] < 150, groups
-            if index == 1: assert all(label in labels for label in ['New group', 'Edit group', 'Open folder', 'Manage terminals…'])
+                assert groups and groups[0]['bounds']['y'] < 150, (groups, json.loads((fixture / str(index) / 'app-state.json').read_text()))
+            if index == 1: assert all(label in labels for label in ['New Codex session', 'New terminal', 'New group', 'Rename group', 'Group settings…', 'Open folder', 'Manage terminals…'])
             if index == 2:
                 assert 'Existing work' in labels and 'Other directory' not in labels and 'Existing Codex thread id' in labels, labels
                 assert (project / 'fake-codex.json').exists()
@@ -69,6 +75,16 @@ with tempfile.TemporaryDirectory(prefix='exactions-') as temporary:
                 records = diagnostic['agentCatalog']['records']
                 assert len(records) == 1 and records[0]['thread'] == 'existing' and records[0]['group'] == 'work', diagnostic
                 assert len(diagnostic['agentTabs']) == 1, diagnostic
+            if index == 5:
+                assert all(label in labels for label in ['New Codex session', 'New terminal', 'New group', 'Rename group', 'Group settings…']), labels
+            if index == 6:
+                diagnostic = json.loads((fixture / str(index) / 'app-state.json').read_text())
+                assert len(diagnostic['agentCatalog']['records']) == 2, diagnostic
+                assert all(record['group'] == 'work' for record in diagnostic['agentCatalog']['records']), diagnostic
+                created = next(record for record in diagnostic['agentCatalog']['records'] if record['thread'] != 'existing')
+                assert diagnostic['workbenchSelectedNode'] == 'a:' + created['id'], diagnostic
+                assert any(node.get('label') == 'Codex prompt' and node.get('focused') for node in nodes), nodes
+                assert any((node.get('label') or '').startswith(created['name'] + ' · ') and node['visible'] for node in nodes), nodes
         print('PASS: compact Workbench, contextual group actions, scoped discovery, search and explicit existing-thread attachment')
     except Exception:
         for path in fixture.glob('app-*.log'): print(path.name + '\n' + path.read_text()[-3000:])

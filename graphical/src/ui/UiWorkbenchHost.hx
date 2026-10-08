@@ -87,6 +87,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 	public var welcomeActions(default, null):Null<WelcomeActions>;
 	public var restoreTerminal:Null<(String, String, String, Bool, String, String)->Null<UiTerminalTab>>;
 	public final panelTerminals:Array<UiTerminalTab> = [];
+	public final hiddenTerminals:Array<UiTerminalTab> = [];
 	public var activePanelTerminalIndex:Int = -1;
 
 	public function activePanelTerminal():Null<UiTerminalTab>
@@ -99,8 +100,17 @@ class UiWorkbenchHost implements WorkbenchHost {
   return result;
  }
 
+    public function terminalEditorResourceIds():Array<String> {
+        var result:Array<String> = [];
+        for (pane in panes) for (item in pane.items) {
+            var terminal = UiEditorTabs.terminal(item);
+            if (terminal != null) result.push(terminal.resourceId);
+        }
+        return result;
+    }
+
 	public function allTerminalTabs():Array<UiTerminalTab> {
-		var result = panelTerminals.copy();
+		var result = panelTerminals.concat(hiddenTerminals);
 		for (pane in panes) for (item in pane.items) {
 			var terminal = UiEditorTabs.terminal(item);
 			if (terminal != null) result.push(terminal);
@@ -203,6 +213,8 @@ class UiWorkbenchHost implements WorkbenchHost {
 	}
 
 	public function dispose():Void {
+		for (terminal in hiddenTerminals) terminal.dispose();
+		hiddenTerminals.resize(0);
 		for (terminal in panelTerminals) terminal.dispose();
 		panelTerminals.resize(0);
 		for (pane in panes) {
@@ -254,6 +266,13 @@ class UiWorkbenchHost implements WorkbenchHost {
  public var restoreAgent:Null<(String,String,String,String)->UiAgentTab>;
 
 	public function attachTerminal(terminal:UiTerminalTab):Void {
+        hiddenTerminals.remove(terminal);
+        var panelIndex = panelTerminals.indexOf(terminal);
+        if (panelIndex >= 0) {
+            panelTerminals.splice(panelIndex, 1);
+            if (panelIndex < activePanelTerminalIndex) activePanelTerminalIndex--;
+            else activePanelTerminalIndex = Std.int(Math.min(activePanelTerminalIndex, panelTerminals.length - 1));
+        }
 		var pane = terminalPaneFor(terminal);
 		if (pane == null) { pane = activePane; pane.items.push(UiEditorTab.Terminal(terminal)); }
 		activateEditorTab("terminal:" + terminal.id, pane.id);
@@ -694,7 +713,9 @@ class UiWorkbenchHost implements WorkbenchHost {
 		var lost = documentsLostByClosingTab(item);
 		if (!force) for (document in lost) if (document.dirty) return false;
 		pane.items.splice(index, 1);
-		UiEditorTabs.dispose(item);
+        var terminal = UiEditorTabs.terminal(item);
+        if (terminal != null && terminal.retainOnClose) hiddenTerminals.push(terminal);
+        else UiEditorTabs.dispose(item);
 		for (document in lost) workspace.documents.close(document, true);
 		if (index < pane.activeIndex) pane.activeIndex--;
 		else if (index == pane.activeIndex)
@@ -796,6 +817,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 	public function restoreSessionLines(lines:Array<String>, ?resolver:(String, String) -> Null<Document>):Void {
 		var retainedTerminals:Map<String, UiTerminalTab> = [];
 		for (terminal in allTerminalTabs()) retainedTerminals.set(terminal.id, terminal);
+		hiddenTerminals.resize(0);
 		panelTerminals.resize(0);
 		activePanelTerminalIndex = -1;
 		focus.activate(null);
