@@ -218,3 +218,30 @@ The benchmark now reports scheduled-input-to-frame-start and latest-frame-reques
 Native time/wakeup tests and the full native session-render regression pass. A new CTest regression, `gtk_event_wait`, checks that unrelated GLib timers do not prematurely finish a wait, explicit wakeups are preserved, and a completed frame returns control before a watchdog fires. The regression passes against the candidate and fails against the saved old native library at the frame/watchdog assertion. These tests were compiled and run directly against the graphical native build. Windows/macOS execution remains unverified; this optimization is specific to the GTK backend.
 
 A final application rebuild with the host experiment removed passes every scenario check (`/tmp/exosuit-native-wait-final/result.json`). That verification uses current application sources, including concurrent edits, and is separate from the controlled frozen-bytecode comparison above.
+
+
+## Script deadlines and actual delivery timing
+
+Further investigation found that the managed input driver ran only after native polling, which can execute rendering callbacks. Its idle wait also ignored the next scripted deadline. Already-due scripted events are now drained before native polling, and events that become due during native work are drained afterwards. Idle waits are capped by the next script deadline. Events retain their original deadlines; delayed input is still delivered and measured rather than dropped or retimed. The callbacks used for draining are allocated once at startup.
+
+Frame traces now record the actual delivery-start time of the earliest scripted event included in each frame. Reports distinguish:
+
+- `inputLatencyMs`: scheduled deadline to completed frame, preserving the existing definition.
+- `scheduledInputToDeliveryMs`: lateness before managed input dispatch begins, including time when the UI thread is occupied.
+- `deliveredInputToFrameCompleteMs`: managed delivery start to completed frame, including event processing, frame waiting, layout and rendering.
+
+Reports with actual delivery timing use `inputTimingVersion: 2`; older traces remain analyzable as version 1, with delivery-based statistics unavailable. These are per input-bearing frame, using its earliest included event. Percentiles of the separate components cannot be added to obtain the combined percentile.
+
+Two runs with frozen bytecode `6646b172ab7206bba6c44cd220cb447bf0401b44520447035e254abed2770233` passed all scenario checks:
+
+| Metric | Run 1 | Run 2 |
+| --- | ---: | ---: |
+| Scheduled deadline to completed frame p95 | 38.2 ms | 35.8 ms |
+| Scheduled deadline to delivery p95 | 20.3 ms | 19.5 ms |
+| Delivered input to completed frame median | 13.5 ms | 13.9 ms |
+| Delivered input to completed frame p95 | 21.5 ms | 21.8 ms |
+| Active-frame time p95 | 19.6 ms | 19.0 ms |
+
+Reports are `/tmp/exosuit-script-deadline-{1,2}/result.json`. The native libraries and runtime match the previous GTK comparison. Application bytecode includes concurrent application/framework edits, so this is not a controlled before/after performance comparison with the preceding runs. The driver changes improve measurement fidelity and do not establish an additional production responsiveness gain. Waiting for the single UI thread to become available still contributes to deadline-to-delivery lateness.
+
+The full application compiles and both complete drag scenarios pass. Re-analysis of an older GTK trace passes and correctly leaves delivery-based statistics unavailable. A separate one-second application capture without any input script also exits successfully (`/tmp/exosuit-host-idle-check`), checking the normal host path. Windows/macOS execution remains unverified.
