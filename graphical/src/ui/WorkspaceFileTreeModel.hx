@@ -23,6 +23,9 @@ private class WorkspaceDirectoryListing {
 	public var unsupportedCount:Int = 0;
 	public var cursor:Null<String>;
 	public var loading:Bool = false;
+	public var loaded:Bool = false;
+	public var stale:Bool = false;
+	public var refreshing:Bool = false;
 	public var error:Null<String>;
 	public var limited:Bool = false;
 }
@@ -50,6 +53,8 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 	final initialRootName:String;
 	var activeClient:Null<WorkspaceFileClient>;
 	var connectionResetPending:Bool = false;
+	var generation:Int = 0;
+	var disposed:Bool = false;
 	var revisionValue:Int = 0;
 	var rootsRequested:Bool = false;
 	var rootsLoaded:Bool = false;
@@ -82,7 +87,7 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 		names.set(rootKey(), rootName);
 	}
 
-	public function rootIdentity():String return workspace + ":" + scope + ":" + rootName;
+	public function rootIdentity():String return workspace + ":" + scope;
 	public function rootCount():Int return 1;
 	public function rootRange(start:Int, count:Int):Array<TreeRootMetadata>
 		return start > 0 || count <= 0 ? [] : [new TreeRootMetadata(rootKey(), true)];
@@ -94,11 +99,13 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 	public function revision():Int return revisionValue;
 
 	public function refresh():Void {
+		if (disposed) return;
 		var client = clientProvider();
 		if (client == null) {
 			if (activeClient != null) {
 				activeClient.unwatch(workspace, rootId(), watchListener);
 				activeClient = null;
+				generation++;
 				watchRequested = false;
 				watchingChanges = false;
 				connectionResetPending = true;
@@ -119,9 +126,23 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 			requestRoots();
 		if (rootsLoaded && rootSupportsWatch && !watchRequested && !watchingChanges && Sys.time() >= watchRetryAt)
 			requestWatch();
+		// Bound background work, including changes accumulated while Files was hidden.
+		if (rootsLoaded) {
+			var pending = 0;
+			for (listing in listings) if (listing.loading || listing.refreshing) pending++;
+			for (path => listing in listings) {
+				if (pending >= 4) break;
+				if (listing.stale && listing.error == null && !listing.limited && !listing.loading && !listing.refreshing) {
+					requestPage(path, null);
+					pending++;
+				}
+			}
+		}
 	}
 
 	public function dispose():Void {
+		disposed = true;
+		generation++;
 		if (activeClient != null) activeClient.unwatch(workspace, rootId(), watchListener);
 		activeClient = null;
 		watchRequested = false;
@@ -132,21 +153,21 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 		var special = specialLabels.get(parentKey);
 		if (special != null) return 0;
 		if (!isDirectory(parentKey)) return 0;
-		if (!rootsLoaded) return 1;
 		var path = pathForKey(parentKey);
 		var listing = listings.get(path);
 		if (listing == null) return 1;
 		var count = listing.entries.length;
 		if (listing.unsupportedCount > 0) count++;
+		if (parentKey == rootKey() && !rootsLoaded && rootError != null) return count + 1;
 		if (listing.error != null) return count + 1;
 		if (listing.cursor != null) return count + 1;
-		if (listing.loading) return count + 1;
+		if (listing.loading && !listing.loaded) return count + 1;
 		return count;
 	}
 
 	public function childKeyAt(parentKey:String, index:Int):String {
 		if (index < 0 || !isDirectory(parentKey)) return "";
-		if (!rootsLoaded) {
+		if (!rootsLoaded && listings.get(pathForKey(parentKey)) == null) {
 			if (rootError != null)
 				return index == 0 ? specialKey("retry-roots", "", "Could not connect — retry") : "";
 			requestRoots();
@@ -172,12 +193,14 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 			return specialKey("unsupported", path,
 				listing.unsupportedCount + (listing.unsupportedCount == 1 ? " file name cannot" : " file names cannot") + " be represented here");
 		var syntheticIndex = listing.entries.length + (listing.unsupportedCount > 0 ? 1 : 0);
+		if (parentKey == rootKey() && !rootsLoaded && rootError != null && index == syntheticIndex)
+			return specialKey("retry-roots", "", "Could not connect — retry");
 		if (listing.error != null && index == syntheticIndex)
 			return specialKey(listing.limited ? "limit" : "retry", path,
 				listing.limited ? listing.error : "Could not load folder — retry");
 		if (listing.cursor != null && index == syntheticIndex)
 			return specialKey("more", path, "Load more…");
-		if (listing.loading && index == syntheticIndex)
+		if (listing.loading && !listing.loaded && index == syntheticIndex)
 			return specialKey("loading", path, "Loading folder…");
 		return "";
 	}
@@ -212,10 +235,11 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 		if (path == null) path = "";
 		if (kind == "more") {
 			var listing = listings.get(path);
-			if (listing != null && listing.cursor != null && !listing.loading) requestPage(path, listing.cursor);
+			if (listing != null && listing.cursor != null && !listing.loading && !listing.refreshing && !listing.stale) requestPage(path, listing.cursor);
 		} else if (kind == "retry") {
 			var listing = listings.get(path);
-			if (listing != null && !listing.loading) requestPage(path, listing.cursor);
+			if (listing != null && !listing.loading && !listing.refreshing)
+				requestPage(path, listing.stale ? null : listing.cursor);
 		} else if (kind == "loading-roots") {
 			requestRoots();
 		} else if (kind == "retry-roots" && Sys.time() >= rootsRetryAt) {
@@ -246,10 +270,12 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 	public function keyForPath(path:String):String return FILE_PREFIX + (path == null ? "" : path);
 
 	function requestRoots():Void {
-		var client = clientProvider();
-		if (client == null || rootsRequested || Sys.time() < rootsRetryAt) return;
+		var client = activeClient;
+		if (disposed || client == null || rootsRequested || Sys.time() < rootsRetryAt) return;
 		rootsRequested = true;
+		var requestGeneration = generation;
 		client.roots(workspace, function(result) {
+			if (!requestCurrent(client, requestGeneration)) return;
 			if (result == null || result.workspace != workspace || result.roots == null) {
 				rootError = "Invalid workspace roots response";
 			} else {
@@ -266,7 +292,10 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 					break;
 				}
 				if (!found) rootError = "Workspace has no readable root";
-				else rootsLoaded = true;
+				else {
+					rootsLoaded = true;
+					if (rootSupportsWatch) requestWatch();
+				}
 			}
 			if (rootError != null) {
 				rootsRequested = false;
@@ -275,6 +304,7 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 			revisionValue++;
 			changed();
 		}, function(error) {
+			if (!requestCurrent(client, requestGeneration)) return;
 			rootsRequested = false;
 			rootError = error == null ? "Could not read workspace roots" : error.message;
 			rootsRetryAt = Sys.time() + 1.0;
@@ -287,30 +317,38 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 		var client = activeClient;
 		if (client == null || !rootSupportsWatch || watchRequested || watchingChanges || Sys.time() < watchRetryAt) return;
 		watchRequested = true;
+		var requestGeneration = generation;
 		client.watch(workspace, rootId(), watchEpoch, watchCursor, watchListener,
 			function(result:FileWatchResult) {
+				if (!requestCurrent(client, requestGeneration)) return;
 				watchRequested = false;
-				if (activeClient != client) return;
 				if (result == null || result.workspace != workspace || result.root != rootId()
 					|| result.epoch == null || result.epoch.length == 0 || result.cursor < 0) {
 					client.unwatch(workspace, rootId(), watchListener);
 					watchRetryAt = Sys.time() + 1.0;
+					revisionValue++;
+					changed();
 					return;
 				}
 				var reset = result.reset || watchEpoch != result.epoch;
+				watchCursor = watchEpoch == result.epoch ? Std.int(Math.max(watchCursor, result.cursor)) : result.cursor;
 				watchEpoch = result.epoch;
-				watchCursor = result.cursor;
 				watchingChanges = true;
 				if (reset) noteFilesChanged();
+				revisionValue++;
+				changed();
 			}, function(_) {
+				if (!requestCurrent(client, requestGeneration)) return;
 				watchRequested = false;
 				client.unwatch(workspace, rootId(), watchListener);
 				watchRetryAt = Sys.time() + 1.0;
+				revisionValue++;
+				changed();
 			});
 	}
 
 	function handleFileChange(event:FileChangeEvent):Void {
-		if (event == null || event.workspace != workspace || event.root != rootId()
+		if (disposed || activeClient == null || event == null || event.workspace != workspace || event.root != rootId()
 			|| event.epoch == null || event.epoch.length == 0 || event.cursor < 1) return;
 		if (watchEpoch == event.epoch && event.cursor <= watchCursor) return;
 		watchEpoch = event.epoch;
@@ -325,85 +363,152 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 	}
 
 	function invalidateListings():Void {
-		listings.clear();
-		kinds.clear();
-		names.clear();
-		specialPaths.clear();
-		specialLabels.clear();
-		kinds.set(rootKey(), "directory");
-		names.set(rootKey(), rootName);
-		revisionValue++;
-		changed();
+		// Preserve the visible snapshot until all previously loaded pages are replaced.
+		var clearedError = false;
+		for (listing in listings) {
+			if (listing.error != null) clearedError = true;
+			listing.stale = true;
+			listing.error = null;
+			listing.limited = false;
+		}
+		if (clearedError) { revisionValue++; changed(); }
 	}
 
+	function requestCurrent(client:WorkspaceFileClient, requestGeneration:Int):Bool
+		return !disposed && generation == requestGeneration && activeClient == client && clientProvider() == client;
+
 	function requestPage(path:String, cursor:Null<String>):Void {
-		if (!rootsLoaded || clientProvider() == null) {
-			if (!rootsRequested) requestRoots();
-			return;
-		}
+		var client = activeClient;
+		if (!rootsLoaded || client == null || disposed) return;
+		// Subscribe before the first snapshot so the initial watch reset cannot
+		// invalidate a listing that was just fetched. Fall back after watch failure.
+		if (watchRequested && watchEpoch == null) return;
 		var listing = listings.get(path);
 		if (listing == null) {
-			listing = new WorkspaceDirectoryListing();
-			listings.set(path, listing);
 			var directoryCount = 0;
 			for (_ in listings.keys()) directoryCount++;
-			if (directoryCount > MAX_LISTED_DIRECTORIES) {
+			listing = new WorkspaceDirectoryListing();
+			listings.set(path, listing);
+			if (directoryCount >= MAX_LISTED_DIRECTORIES) {
 				listing.error = "Explorer folder limit reached";
 				listing.limited = true;
 				return;
 			}
 		}
-		if (listing.loading) return;
-		listing.loading = true;
+		if (listing.loading || listing.refreshing || listing.limited) return;
+		var replacing = cursor == null;
+		var snapshot = new WorkspaceDirectoryListing();
+		if (!replacing) {
+			snapshot.entries = listing.entries.copy();
+			snapshot.unsupportedCount = listing.unsupportedCount;
+		}
+		var targetCount = listing.entries.length + listing.unsupportedCount;
+		var hadError = listing.error != null;
+		listing.refreshing = replacing && listing.loaded;
+		listing.loading = !listing.refreshing;
+		listing.stale = false;
 		listing.error = null;
-		var client = clientProvider();
-		if (client == null) { listing.loading = false; return; }
-		client.list(workspace, rootId(), path, PAGE_SIZE, cursor, function(page:FileListPage) {
-			if (page == null || page.workspace != workspace || page.root != rootId() || page.path != path
-				|| page.entries == null || page.entries.length > PAGE_SIZE) {
-				listing.loading = false;
-				listing.error = "Invalid directory listing response";
-			} else {
-				if (cursor == null) { listing.entries.resize(0); listing.unsupportedCount = 0; }
-				var cached = cachedEntryCount(cursor == null ? listing : null);
+		var requestGeneration = generation;
+		var seenCursors:Map<String, Bool> = [];
+		function current():Bool
+			return requestCurrent(client, requestGeneration) && listings.get(path) == listing;
+		function superseded():Bool {
+			if (!listing.stale) return false;
+			// A watch event arrived during this read. Coalesce it into a new read
+			// rather than publishing a snapshot taken before the latest change.
+			listing.loading = false;
+			listing.refreshing = false;
+			return true;
+		}
+		function fail(message:String):Void {
+			listing.loading = false;
+			listing.refreshing = false;
+			// Keep the snapshot and make retry restart an interrupted replacement.
+			listing.stale = replacing || listing.stale;
+			listing.error = message;
+			revisionValue++;
+			changed();
+		}
+		function fetch(pageCursor:Null<String>):Void {
+			if (pageCursor != null) seenCursors.set(pageCursor, true);
+			client.list(workspace, rootId(), path, PAGE_SIZE, pageCursor, function(page:FileListPage) {
+				if (!current() || superseded()) return;
+				if (page == null || page.workspace != workspace || page.root != rootId() || page.path != path
+					|| page.entries == null || page.entries.length > PAGE_SIZE) {
+					fail("Invalid directory listing response");
+					return;
+				}
+				if (page.next != null && (page.entries.length == 0 || seenCursors.exists(page.next))) {
+					fail("Invalid directory cursor");
+					return;
+				}
+				var cached = cachedEntryCount(listing) + snapshot.entries.length + snapshot.unsupportedCount;
 				for (entry in page.entries) {
 					var supported = entry != null && entry.name != null && !entry.nameUnsupported && entry.name.length > 0;
 					var unsupported = entry != null && (entry.name == null || entry.nameUnsupported);
 					if (!supported && !unsupported) continue;
 					if (cached >= MAX_CACHED_ENTRIES) {
-						listing.limited = true;
-						listing.error = "Explorer entry limit reached; collapse folders to browse another area";
-						listing.cursor = null;
+						snapshot.limited = true;
+						snapshot.error = "Explorer entry limit reached; collapse folders to browse another area";
 						break;
 					}
-					if (supported) listing.entries.push(entry);
-					else listing.unsupportedCount++;
+					if (supported) snapshot.entries.push(entry);
+					else snapshot.unsupportedCount++;
 					cached++;
 				}
-				if (listing.error == null && page.next != null && (page.entries.length == 0 || page.next == cursor)) {
-					listing.error = "Invalid directory cursor";
-					listing.cursor = null;
-				} else if (listing.error == null) {
-					listing.cursor = page.next;
+				snapshot.cursor = snapshot.limited ? null : page.next;
+				if (replacing && snapshot.cursor != null && snapshot.entries.length + snapshot.unsupportedCount < targetCount) {
+					fetch(snapshot.cursor);
+					return;
 				}
+				var visibleChanged = hadError || !listing.loaded || listing.error != snapshot.error || listing.limited != snapshot.limited
+					|| listing.unsupportedCount != snapshot.unsupportedCount || (listing.cursor == null) != (snapshot.cursor == null)
+					|| listing.entries.length != snapshot.entries.length;
+				if (!visibleChanged) for (index in 0...listing.entries.length) {
+					var before = listing.entries[index], after = snapshot.entries[index];
+					if (before.name != after.name || before.kind != after.kind) { visibleChanged = true; break; }
+				}
+				if (replacing) {
+					var retained:Map<String, String> = [];
+					for (entry in snapshot.entries) retained.set(entry.name, entry.kind);
+					for (entry in listing.entries) if (retained.get(entry.name) != entry.kind) {
+						var removed = path.length == 0 ? entry.name : path + "/" + entry.name;
+						kinds.remove(fileKey(removed));
+						names.remove(fileKey(removed));
+						if (entry.kind == "directory") {
+							var discarded = [for (cachedPath in listings.keys())
+								if (cachedPath == removed || StringTools.startsWith(cachedPath, removed + "/")) cachedPath];
+							for (cachedPath in discarded) listings.remove(cachedPath);
+							var discardedKeys = [for (key in kinds.keys())
+								if (StringTools.startsWith(key, fileKey(removed + "/"))) key];
+							for (key in discardedKeys) { kinds.remove(key); names.remove(key); }
+						}
+					}
+				}
+				listing.entries = snapshot.entries;
+				listing.unsupportedCount = snapshot.unsupportedCount;
+				listing.cursor = snapshot.cursor;
+				listing.error = snapshot.error;
+				listing.limited = snapshot.limited;
+				listing.loaded = true;
 				listing.loading = false;
-			}
-			revisionValue++;
-			changed();
-		}, function(error) {
-			listing.loading = false;
-			if (cursor != null && error != null && error.code == "cursor_expired") {
-				listing.error = null;
-				listing.cursor = null;
-				requestPage(path, null);
-				revisionValue++;
-				changed();
-				return;
-			}
-			listing.error = error == null ? "Could not list folder" : error.message;
-			revisionValue++;
-			changed();
-		});
+				listing.refreshing = false;
+				if (visibleChanged) {
+					revisionValue++;
+					changed();
+				}
+			}, function(error) {
+				if (!current() || superseded()) return;
+				if (!replacing && error != null && error.code == "cursor_expired") {
+					listing.loading = false;
+					listing.stale = true;
+					requestPage(path, null);
+					return;
+				}
+				fail(error == null ? "Could not list folder" : error.message);
+			});
+		}
+		fetch(cursor);
 	}
 
 	function cachedEntryCount(except:Null<WorkspaceDirectoryListing>):Int {
@@ -414,6 +519,7 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 	}
 
 	function resetForConnection():Void {
+		generation++;
 		rootsRequested = false;
 		rootsLoaded = false;
 		rootSupportsWatch = false;
@@ -422,14 +528,13 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 		watchRetryAt = 0.0;
 		rootError = null;
 		rootsRetryAt = 0.0;
-		rootName = initialRootName;
-		listings.clear();
-		kinds.clear();
-		names.clear();
-		specialPaths.clear();
-		specialLabels.clear();
-		kinds.set(rootKey(), "directory");
-		names.set(rootKey(), rootName);
+		for (listing in listings) {
+			listing.loading = false;
+			listing.refreshing = false;
+			listing.stale = true;
+			listing.error = null;
+			listing.limited = false;
+		}
 	}
 
 	function rootKey():String return FILE_PREFIX;
