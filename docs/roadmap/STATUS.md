@@ -66,6 +66,8 @@ configuration/commondir changes and falls back to polling when watch creation
 fails. Restricted status reads inspect Git filter names and override external
 filter commands; status fails closed if that config inspection fails.
 
+Implementation slice committed on `main` as `eecf72c`.
+
 Validation: the Windows `tests/scm-git` run passes real repository discovery
 for plain, nested, linked-worktree, submodule, unborn and non-repository cases;
 trust persistence; untracked truncation; restricted filter conversion; stable
