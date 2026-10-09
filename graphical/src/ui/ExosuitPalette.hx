@@ -2,6 +2,10 @@ package ui;
 
 import haxeon.ui.Color;
 import haxeon.ui.theme.Theme;
+import haxeon.ui.style.StyleSelector;
+import haxeon.ui.style.StyleValue;
+import haxeon.ui.style.StyleProperty;
+import haxeon.ui.style.StyleState;
 
 /** Shared workbench colors. Keep terminal defaults and chrome in one scheme. */
 class ExosuitPalette {
@@ -28,6 +32,18 @@ class ExosuitPalette {
 			dark ? 0.47 : 0.63, dark ? 0.76 : 0.89, dark ? 0.65 : 0.50);
 		result.textCaret = tokens.textPrimary;
 		result.refreshStyles();
+		// Status actions meet the window edge: explicit zero radii override button defaults.
+		result.styles.rule(StyleSelector.widget("button").className("status-remote"), [
+			StyleValue.background(tokens.surfaceRaised),
+			StyleValue.radius(StyleProperty.RadiusTopLeft, 0),
+			StyleValue.radius(StyleProperty.RadiusTopRight, 0),
+			StyleValue.radius(StyleProperty.RadiusBottomLeft, 0),
+			StyleValue.radius(StyleProperty.RadiusBottomRight, 0)
+		]);
+		result.styles.rule(StyleSelector.widget("button").className("status-remote").state(StyleState.Hovered),
+			[StyleValue.background(tokens.surfaceHover)]);
+		result.styles.rule(StyleSelector.widget("button").className("status-remote").state(StyleState.Pressed),
+			[StyleValue.background(tokens.surfaceSunken)]);
 		return result;
 	}
 

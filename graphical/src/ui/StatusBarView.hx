@@ -1,7 +1,6 @@
 package ui;
 
 import feedback.Notification;
-import haxeon.ui.Color;
 import haxeon.ui.Insets;
 import haxeon.ui.LayoutAlignmentY;
 import haxeon.ui.LayoutAxis;
@@ -17,6 +16,7 @@ import haxeon.ui.core.RenderNode;
 import haxeon.ui.core.TextStyleOverride;
 import haxeon.ui.core.View;
 import haxeon.ui.icons.IconName;
+import haxeon.ui.widgets.Icon;
 import haxeon.ui.widgets.controls.Button;
 import haxeon.ui.widgets.controls.ButtonVariant;
 import haxeon.ui.widgets.controls.CountBadge;
@@ -50,11 +50,13 @@ class StatusBarView implements View {
 
 			if (remote) {
 				var connectionStyle = controlStyle(sizes.remote, HEIGHT);
-				connectionStyle.background = Color.fromBytes(0, 102, 184);
-				connectionStyle.radiusTopLeft = connectionStyle.radiusTopRight = 0;
-				connectionStyle.radiusBottomLeft = connectionStyle.radiusBottomRight = 0;
+				connectionStyle.padding = new Insets(8, 0, 8, 0);
 				var connection = new Button("Remote", connectionStyle, data.openRemote, "status-remote");
-				connection.variant = ButtonVariant.Primary; connection.leadingIcon = IconName.Remote; connection.iconSize = 16;
+				connection.variant = ButtonVariant.Navigation;
+				connection.classes.push("status-remote");
+				connection.leadingView = new Icon("remote-icon", IconName.Remote, 16, context.theme.tokens.accent);
+				connection.labelView = new Text("Remote", null, null,
+					new TextStyleOverride(null, 12, null, TextWrap.None, null, null, null, context.theme.tokens.textSecondary));
 				connection.accessibilityLabel = data.remoteDetails + ". Open Remote Access";
 				remoteNode = tooltip("remote", connection, data.remoteDetails).build(context);
 				remoteNode.layout.style.width = LayoutAxis.fixed(sizes.remote);
@@ -118,7 +120,7 @@ class StatusBarView implements View {
 				}
 				if (remoteNode != null && remoteLabel != null) {
 					sizeSlot(remoteNode, next.remote);
-					remoteNode.children[0].layout.style.childGap = next.compact ? 0 : 8;
+					remoteNode.children[0].layout.style.childGap = next.compact ? 0 : 6;
 					remoteLabel.layout.style.visible = !next.compact;
 					remoteLabel.layout.style.width = next.compact ? LayoutAxis.fixed(0) : LayoutAxis.fit();
 				}
@@ -146,7 +148,7 @@ class StatusBarView implements View {
 		var right = Math.min(6, Math.max(0, width - left - 28));
 		var bell = Math.min(Math.max(0, width - left - right), unread > 0 && !compact ? 68.0 : 28.0);
 		var dismiss = toast && width >= 160 ? 24.0 : 0.0;
-		var connection = remote && width >= 96 ? (compact ? 32.0 : 100.0) : 0.0;
+		var connection = remote && width >= 96 ? (compact ? 32.0 : 84.0) : 0.0;
 		// Slots remain mounted across resizes, retaining hover/focus identities.
 		var remaining = Math.max(0, width - left - right - bell - dismiss - connection
 			- gap * (1 + (connection > 0 ? 1 : 0) + (dismiss > 0 ? 1 : 0)));
