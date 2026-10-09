@@ -42,6 +42,7 @@ class QuickPickView implements View {
 	var previousRowHeight:Float = 0.0;
 	var previousListHeight:Float = 0.0;
 	var hovered:Int = -1;
+	var tooltipDismissRevision:Int = 0;
 
 	public function new(model:CommandView, provider:CommandViewProvider, dismiss:Void->Void, changed:Void->Void, ?configureKeybinding:String->Void) {
 		this.model = model;
@@ -61,6 +62,7 @@ class QuickPickView implements View {
 			var rowHeight = files && narrow ? 52.0 : 32.0;
 			var listHeight = Math.min(Math.max(rowHeight, model.results.length * rowHeight),
 				Math.max(rowHeight, Math.min(360.0, context.viewportHeight - 80.0)));
+			if (previousSelection != model.selected || previousQuery != model.query) tooltipDismissRevision++;
 			var geometryChanged = previousRowHeight != rowHeight || previousListHeight != listHeight;
 			if (previousQuery != model.query) { scroll.jumpTo(0, 0); hovered = -1; }
 			if (previousSelection != model.selected || previousQuery != model.query
@@ -137,12 +139,15 @@ class QuickPickView implements View {
 						cells.push(new KeyedView("name", labelView));
 						if (!commands && detail.length > 0) cells.push(new KeyedView("detail", detailView));
 						if (entry.trailing.length > 0) cells.push(new KeyedView("shortcut", new ShortcutKeycaps(entry.trailing, selected)));
-						if (commands && configureKeybinding != null && (selected || index == hovered))
-							cells.push(new KeyedView("configure",
-								new haxeon.ui.widgets.overlays.Tooltip("configure-keybinding-tooltip",
-									new QuickPickGear(foreground, function() {
-										var configure:String->Void = cast configureKeybinding; configure(entry.value);
-									}), new Text("Configure Keybinding"), -150.0, -32.0)));
+						if (commands && configureKeybinding != null && (selected || index == hovered)) {
+							var tooltip = new haxeon.ui.widgets.overlays.Tooltip("configure-keybinding-tooltip",
+								new QuickPickGear(foreground, function() {
+									var configure:String->Void = cast configureKeybinding; configure(entry.value);
+								}), new Text("Configure Keybinding"), -150.0, -32.0);
+							tooltip.requirePointerMovement = true;
+							tooltip.dismissRevision = tooltipDismissRevision;
+							cells.push(new KeyedView("configure", tooltip));
+						}
 					}
 					return new QuickPickRow(new Row("cv-result", cells, rowStyle), label, selected,
 						function() { model.activate(index); changed(); },
@@ -160,6 +165,10 @@ class QuickPickView implements View {
 			popup.menuSurface = true;
 			popup.label = provider.prompt.length == 0 ? "Quick Open" : "Command Palette";
 			var root = popup.build(context);
+			root.on(UiEventKind.Scroll, function(_) {
+				tooltipDismissRevision++;
+				changed();
+			}, "capture");
 			// A resize can change the content extent before ScrollView resolves its
 			// new metrics. Recheck once on the next frame, after those metrics settle.
 			var recheckAfterLayout = geometryChanged;
@@ -230,7 +239,7 @@ private class QuickPickGear implements View {
 	}
 	public function build(context:BuildContext):RenderNode {
 		var style = new LayoutStyle(); style.width = LayoutAxis.fixed(24); style.height = LayoutAxis.fixed(24);
-		style.childAlignX = haxeon.ui.LayoutAlignmentX.Center;
+		style.childDistribution = haxeon.ui.LayoutDistribution.Center;
 		style.childAlignY = LayoutAlignmentY.Center;
 		var icon:View = new haxeon.ui.widgets.Icon("configure-keybinding", haxeon.ui.icons.IconName.Settings, 16, color);
 		var node = new Row("cv-configure", [new KeyedView("icon", icon)], style).build(context);

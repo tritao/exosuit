@@ -40,14 +40,7 @@ class ShortcutKeycaps implements View {
 					if (key.length == 0) continue;
 					if (caps.length > 0) caps.push(new KeyedView("plus-" + caps.length,
 						new Text("+", null, color, TextStyleOverride.text(11.0))));
-					var label = switch key.toLowerCase() {
-						case "up": "UpArrow";
-						case "down": "DownArrow";
-						case "left": "LeftArrow";
-						case "right": "RightArrow";
-						default: key;
-					};
-					caps.push(new KeyedView("key-" + caps.length, new ShortcutKeycap(label, selected)));
+					caps.push(new KeyedView("key-" + caps.length, new ShortcutKeycap(key, selected)));
 				}
 				var chordStyle = new LayoutStyle();
 				chordStyle.childGap = 4.0;
@@ -75,15 +68,27 @@ private class ShortcutKeycap implements View {
 		var style = new LayoutStyle();
 		style.width = LayoutAxis.fit(24.0);
 		style.height = LayoutAxis.fixed(24.0);
-		style.padding = new Insets(6.0, 1.0, 6.0, 2.0);
-		style.childAlignX = haxeon.ui.LayoutAlignmentX.Center;
+		style.padding = new Insets(5.0, 0.0, 5.0, 0.0);
+		// A Row distributes spare horizontal space through childDistribution.
+		style.childDistribution = haxeon.ui.LayoutDistribution.Center;
 		style.childAlignY = LayoutAlignmentY.Center;
 		var base = selected ? tokens.accent : tokens.surface;
 		var ink = selected ? tokens.textOnAccent : tokens.textPrimary;
 		style.background = blend(base, ink, selected ? 0.12 : 0.04);
 		style.radiusTopLeft = style.radiusTopRight = style.radiusBottomLeft = style.radiusBottomRight = 4.0;
-		var node = new Row("keycap", [new KeyedView("label", new Text(label, null,
-			selected ? tokens.textOnAccent : tokens.textSecondary, TextStyleOverride.text(12.0)))], style).build(context);
+		var arrow:Null<haxeon.ui.icons.IconName> = switch label.toLowerCase() {
+			case "up", "uparrow": haxeon.ui.icons.IconName.ArrowUp;
+			case "down", "downarrow": haxeon.ui.icons.IconName.ArrowDown;
+			case "left", "leftarrow": haxeon.ui.icons.IconName.ArrowLeft;
+			case "right", "rightarrow": haxeon.ui.icons.IconName.ArrowRight;
+			default: null;
+		};
+		var foreground = selected ? tokens.textOnAccent : tokens.textSecondary;
+		var content:View = arrow == null
+			? new Text(label, null, foreground, new TextStyleOverride(null, 12.0, null,
+				haxeon.ui.TextWrap.None, haxeon.ui.TextAlignment.Center, 16.0))
+			: new haxeon.ui.widgets.Icon("arrow", arrow, 14.0, foreground);
+		var node = new Row("keycap", [new KeyedView("label", content)], style).build(context);
 		var surfaceStyle = new LayoutStyle();
 		surfaceStyle.width = LayoutAxis.grow();
 		surfaceStyle.height = LayoutAxis.grow();
