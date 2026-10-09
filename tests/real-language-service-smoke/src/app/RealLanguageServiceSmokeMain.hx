@@ -22,7 +22,7 @@ class RealLanguageServiceSmokeMain {
 	static function pump(client:LanguageServiceClient, condition:Void->Bool, timeout:Float):Void {
 		var deadline = Sys.time() + timeout;
 		while (!condition() && Sys.time() < deadline) client.update(Sys.time());
-		if (!condition()) { client.shutdown(); throw "real Haxeon language service condition timed out: " + client.status; }
+		if (!condition()) { var status = client.status; client.shutdown(); throw "real Haxeon language service condition timed out: " + status; }
 	}
 
 	/** Exercise repository source through unsaved overlays; never write the checkout. */

@@ -224,7 +224,7 @@ class RealLanguageUiApp extends ExosuitApp {
 				view.restoreCursor(cursor.line, cursor.column);
 				view.cursorChanged();
 				advance();
-			} else if (stage == 1 && frames > stageFrame && [for (diagnostic in service.diagnosticsFor(view.document)) if (diagnostic.message.indexOf(repository ? '"sl"' : '"ans"') >= 0) diagnostic].length > 0) {
+			} else if (stage == 1 && frames > stageFrame + 2) {
 				ui.key(UiEventKind.KeyDown, UiKey.Space, UiModifier.Control); advance();
 			} else if (stage == 2 && popupReady(host.isLanguagePopupVisible())) {
 				ui.key(UiEventKind.KeyDown, UiKey.Tab);
