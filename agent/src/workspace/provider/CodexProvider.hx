@@ -139,12 +139,13 @@ class CodexProvider implements WorkspaceAgents {
 			preferredEffort: r.preferredEffort
 		};
 
-	function view(s:Session):AgentView
+	function view(s:Session, ?before:Int):AgentView
 		return {
 			record: copy(s.record),
 			activity: s.activity,
-			items: s.conversation.items(),
-			itemsOmitted: s.conversation.omitted,
+			items: s.conversation.page(before),
+			itemsOmitted: false,
+			itemsNext: s.conversation.next(before),
 			models: models,
 			modelsNext: modelsNext,
 			currentModel: s.currentModel,
@@ -668,27 +669,49 @@ class CodexProvider implements WorkspaceAgents {
 							restoredTurn = string(data[0], "id");
 						}
 						var historyBaseline = s.conversation.historyBaseline();
-						call("thread/items/list", {threadId: s.record.thread, limit: 8, sortDirection: "desc"}, function(items) {
-							if (stale()) { connectionChanged(); return; }
-							if (items.error != null) {
-								done(items);
-								return;
-							}
-							var recent:Array<Dynamic> = Reflect.field(items.result, "data");
-							var historyTurn = s.eventRevision == eventRevision ? restoredTurn : s.record.turn;
-							s.conversation.history(recent == null ? [] : recent, historyTurn, historyBaseline);
-							if (Reflect.field(items.result, "nextCursor") != null) s.conversation.noteOmitted();
-							var text = Json.stringify(Reflect.field(items.result, "data"));
-							append(s, "\nRecent history (latest 8 items):\n" + (text.length > 8192 ? text.substring(0, 8192) + "…" : text) + "\n");
-							s.attached = true;
-							s.error = null;
-							if (s.eventRevision == eventRevision) {
-								s.record.turn = restoredTurn;
-								s.record.state = restoredTurn != null || restoredActive ? "working" : "idle";
-							}
-							save(s);
-							done(resumed);
-						});
+						var history:Array<Dynamic> = [];
+						var cursors:Map<String, Bool> = [];
+						var ready = false;
+						function historyPage(cursor:Null<String>):Void {
+							var query:Dynamic = {threadId: s.record.thread, limit: 8, sortDirection: "desc"};
+							if (cursor != null) Reflect.setField(query, "cursor", cursor);
+							call("thread/items/list", query, function(items) {
+								if (stale() || sessions.get(s.record.id) != s) {
+									if (!ready) connectionChanged();
+									return;
+								}
+								var next = items.error == null ? string(items.result, "nextCursor") : "";
+								if (next != "" && cursors.exists(next)) items = new JsonRpcResponse(null, "Repeated conversation history cursor");
+								if (items.error != null) {
+									if (!ready) done(items);
+									else s.error = "Could not load earlier activity: " + items.error;
+									return;
+								}
+								var data:Array<Dynamic> = Reflect.field(items.result, "data");
+								if (data != null) for (item in data) history.push(item);
+								// Attach promptly; continue fetching older pages in the background.
+								if (!ready || next == "") {
+									var historyTurn = s.eventRevision == eventRevision ? restoredTurn : s.record.turn;
+									s.conversation.history(history, historyTurn, historyBaseline);
+								}
+								if (!ready) {
+									s.attached = true;
+									s.error = null;
+									if (s.eventRevision == eventRevision) {
+										s.record.turn = restoredTurn;
+										s.record.state = restoredTurn != null || restoredActive ? "working" : "idle";
+									}
+									save(s);
+									ready = true;
+									done(resumed);
+								}
+								if (next != "") {
+									cursors.set(next, true);
+									historyPage(next);
+								} else append(s, "\nLoaded conversation history (" + history.length + " items)\n");
+							});
+						}
+						historyPage(null);
 					});
 					return;
 				}
@@ -903,7 +926,15 @@ class CodexProvider implements WorkspaceAgents {
 				return;
 			}
 			if (q.action == "read") {
-				ctx.respond(view(s));
+				var before:Null<Int> = null;
+				if (q.after != null) {
+					before = s.conversation.cursorOffset(q.after);
+					if (before == null) {
+						ctx.fail({code: "invalid_cursor", message: "Activity history changed while loading. Refreshing activity.", ambiguous: false});
+						return;
+					}
+				}
+				ctx.respond(view(s, before));
 				return;
 			}
 			if (q.action == "delete") {

@@ -62,6 +62,8 @@ import haxeon.wire.MessagePack;
 	@:id(6) var request:Null<String>;
 	@:optional @:id(7) var model:Null<String>;
 	@:optional @:id(8) var effort:Null<String>;
+	/** Older activity page; absent starts with the newest items. */
+	@:optional @:id(9) var after:Null<String>;
 }
 
 @:wire typedef AgentRequest = {
@@ -86,6 +88,7 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(11) var connectionState:Null<String>;
 	/** Stable recovery category for actionable UI; raw diagnostics remain in error. */
 	@:optional @:id(12) var recoveryReason:Null<String>;
+	@:optional @:id(13) var itemsNext:Null<String>;
 }
 
 /** Bounded presentation data; provider protocol and policy stay on the host. */

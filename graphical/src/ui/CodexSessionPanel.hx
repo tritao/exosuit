@@ -280,10 +280,6 @@ class CodexSessionPanel implements View {
       ));
     }
     var items = view.items;
-    if (view.itemsOmitted == true) activity.push(new KeyedView(
-      "omitted",
-      paragraph("Showing recent activity. Earlier items are not included in this view.")
-    ));
     if (items == null) activity.push(new KeyedView(
       "legacy",
       paragraph(view.activity == "" ? "No activity yet" : view.activity)

@@ -98,7 +98,7 @@ class AgentProviderTestMain {
 		for (i in 0...40) conversation.put("t", {id: "next" + i, type: "agentMessage", text: longText}, true);
 		var total = 0;
 		for (item in conversation.items()) total += item.id.length + item.turn.length + item.kind.length + item.title.length + item.text.length + item.detail.length + item.state.length;
-		require(total <= 8192 && conversation.items().length <= 32 && conversation.omitted, "Conversation exceeded its retention bounds");
+		require(total > 8192 && conversation.items().length == 45, "Conversation discarded earlier activity");
 		var ordering = new workspace.provider.CodexConversation();
 		ordering.put("older", {id: "m", type: "agentMessage", text: "old window"}, true);
 		var baseline = ordering.historyBaseline();
@@ -108,7 +108,7 @@ class AgentProviderTestMain {
 		ordering.finish("live", "interrupted");
 		ordering.delta("live", "m", "agentMessage", "late");
 		require(ordering.items()[1].state == "interrupted" && ordering.items()[1].text == "arrived during history read", "Interrupted item accepted a late delta");
-		Sys.println("PASS: structured conversation identity, streamed/history races, duplicate completion, commands, file changes and bounded retention");
+		Sys.println("PASS: structured conversation identity, streamed/history races, duplicate completion, commands, file changes and complete retention");
 	}
 	static function require(v:Bool, s:String):Void {
 		if (!v)

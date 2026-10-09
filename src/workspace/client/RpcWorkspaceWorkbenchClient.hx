@@ -397,19 +397,23 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       if (mutate) {
         agentMutation = false;
         agentMutationId = null;
-      } else {
-        agentReadPending.remove(id);
-        agentReadCount--;
       }
       if (value.record.workspaceRoot != root() || value.record.id != id) {
+        finishAgentRead(id);
         agentsError = "Invalid agent view";
         return;
       }
       if (mutate) agentActionError = null;
       else agentsError = null;
-      agentViews.set(id, value);
-      agentsNext = 0;
-      agentsRevision++;
+      if (mutate && value.itemsNext != null) {
+        agentReadPending.set(id, true);
+        agentReadCount++;
+      }
+      if (!agentViews.exists(id)) {
+        agentViews.set(id, value);
+        agentsRevision++;
+      }
+      loadAgentPages(connection, id, selected, value);
     }, function(error) {
       if (rpc() == connection && agentTokens.get(id) == selected) {
         if (mutate) {
@@ -431,6 +435,51 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       }
     }
     );
+  }
+
+  function finishAgentRead(id:String):Void {
+    if (agentReadPending.exists(id)) {
+      agentReadPending.remove(id);
+      agentReadCount = Std.int(Math.max(0, agentReadCount - 1));
+    }
+  }
+
+  function loadAgentPages(connection:RpcConnection, id:String, selected:Int, value:AgentView):Void {
+    var next = value.itemsNext;
+    if (next == null) {
+      finishAgentRead(id);
+      agentViews.set(id, value);
+      agentsNext = 0;
+      agentsRevision++;
+      return;
+    }
+    connection.call(WorkspaceAgentProtocol.ACTION, {
+      workspace: "workspace", instance: instance(), id: id, action: "read", text: "", request: null, after: next
+    }, 20000, function(page) {
+      if (rpc() != connection || agentTokens.get(id) != selected) return;
+      if (page.record.workspaceRoot != root() || page.record.id != id || page.items == null
+        || (page.itemsNext != null && !earlierAgentCursor(page.itemsNext, next))) {
+        finishAgentRead(id);
+        agentsError = "Invalid agent activity page";
+        agentsRevision++;
+        return;
+      }
+      value.items = page.items.concat(value.items == null ? [] : value.items);
+      value.itemsNext = page.itemsNext;
+      loadAgentPages(connection, id, selected, value);
+    }, function(error) {
+      if (rpc() != connection || agentTokens.get(id) != selected) return;
+      finishAgentRead(id);
+      agentsError = error.message;
+      agentsRevision++;
+    });
+  }
+
+  static function earlierAgentCursor(cursor:String, previous:String):Bool {
+    var parts = cursor.split(":"), old = previous.split(":");
+    if (parts.length != 2 || old.length != 2 || parts[0] != old[0]) return false;
+    var offset = Std.parseInt(parts[1]), before = Std.parseInt(old[1]);
+    return offset != null && before != null && offset >= 0 && offset < before && Std.string(offset) == parts[1];
   }
 
   public function canEditGroups():Bool return rpc() != null

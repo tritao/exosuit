@@ -3,18 +3,30 @@ package workspace.provider;
 import haxe.Json;
 import workspace.service.WorkspaceAgentProtocol;
 
-/** Stable turn/item identity across live events and bounded persisted history. */
+/** Stable turn/item identity across live events and persisted history. */
 class CodexConversation {
-  public static inline final MAX_ITEMS = 32;
-  public static inline final MAX_CHARACTERS = 8192;
+  public static inline final PAGE_ITEMS = 8;
   var entries:Array<AgentActivityItem> = [];
-  public var omitted(default, null) = false;
+  var historyRevision:Int = 0;
 
   public function new() {
   }
 
   public function items():Array<AgentActivityItem> return entries.copy();
-  public function noteOmitted():Void omitted = true;
+  public function cursorOffset(cursor:String):Null<Int> {
+    var parts = cursor.split(":");
+    if (parts.length != 2 || parts[0] != Std.string(historyRevision)) return null;
+    var offset = Std.parseInt(parts[1]);
+    return offset != null && offset >= 0 && offset <= entries.length && Std.string(offset) == parts[1] ? offset : null;
+  }
+  public function page(?before:Int):Array<AgentActivityItem> {
+    var end = before == null ? entries.length : before;
+    return entries.slice(Std.int(Math.max(0, end - PAGE_ITEMS)), end);
+  }
+  public function next(?before:Int):Null<String> {
+    var end = before == null ? entries.length : before;
+    return end > PAGE_ITEMS ? historyRevision + ":" + (end - PAGE_ITEMS) : null;
+  }
   public function finish(turn:String, state:String):Void {
     for (entry in entries)
       if (entry.turn == turn && entry.state == "inProgress") entry.state = state;
@@ -46,22 +58,6 @@ class CodexConversation {
     entry.title = title;
     entry.text = text;
     entry.detail = detail;
-  }
-
-  function trim():Void {
-    while (entries.length > MAX_ITEMS) {
-      entries.shift();
-      omitted = true;
-    }
-    var total = 0;
-    for (entry in entries) total += entry.id.length + entry.turn.length
-      + entry.kind.length + entry.title.length + entry.text.length + entry.detail.length + entry.state.length;
-    while (total > MAX_CHARACTERS && entries.length > 1) {
-      omitted = true;
-      var old = entries.shift();
-      total -= old.id.length
-        + old.turn.length + old.kind.length + old.title.length + old.text.length + old.detail.length + old.state.length;
-    }
   }
 
   public function put(turn:String, item:Dynamic, completed:Bool):Void {
@@ -140,7 +136,6 @@ class CodexConversation {
     bounded(entry);
     if (existing == null) entries.push(entry);
     else entries[entries.indexOf(existing)] = entry;
-    trim();
   }
 
   public function delta(turn:String, id:String, kind:String, text:String):Void {
@@ -153,16 +148,15 @@ class CodexConversation {
     if (kind == "commandExecution") entry.detail += text;
     else entry.text += text;
     bounded(entry);
-    trim();
   }
 
   public function history(data:Array<Dynamic>, ?activeTurn:String, ?baseline:Array<String>):Void {
+    historyRevision++;
     var previous = entries;
     if (baseline == null) baseline = historyBaseline();
     entries = [];
     // The page is authoritative for ordering; preserve newer live updates.
-    var count = data.length > 8 ? 8 : data.length;
-    if (data.length > count) omitted = true;
+    var count = data.length;
     for (index in 0...count) {
       var entry = data[count - 1 - index];
       var turn = string(entry, "turnId");
@@ -170,11 +164,10 @@ class CodexConversation {
       var completed = turn != activeTurn || Reflect.field(entry, "completedAtMs") != null;
       var retained:Null<AgentActivityItem> = null;
       for (old in previous) if (old.turn == turn && old.id == id) retained = old;
-      if (retained != null && !completed) entries.push(retained);
+      if (retained != null && (!completed || baseline.indexOf(turn + ":" + id) < 0)) entries.push(retained);
       else put(turn, item, completed);
     }
     for (old in previous) if (find(old.turn,
       old.id) == null && (baseline.indexOf(old.turn + ":" + old.id) < 0 || old.state == "inProgress")) entries.push(old);
-    trim();
   }
 }
