@@ -34,6 +34,14 @@ python scripts/build.py
 python scripts/run.py [file or directory]
 ```
 
+Development runs through `scripts/run.py` (or `scripts/run.sh`) enable core dumps
+up to the shell's hard limit. Native text-layout creation failures print their
+failure stage, resource slot, and layout parameters, then abort before exception
+cleanup so the native state is preserved in a dump. Set
+`EXOSUIT_DEV_CORE_DUMPS=0` to retain normal error-return behavior. Packaged launches
+do not enable this diagnostic mode. On Linux with systemd-coredump, inspect a
+failure with `coredumpctl info <pid>` and `coredumpctl debug <pid>`.
+
 On Windows, point `HAXEON_BIN` to the native Haxeon executable:
 
 ```powershell

@@ -38,8 +38,12 @@ def _enable_core_dumps() -> None:
     except ImportError:
         return
 
+    if os.environ.get("EXOSUIT_DEV_CORE_DUMPS", "1") == "0":
+        return
     _, hard_limit = resource.getrlimit(resource.RLIMIT_CORE)
     resource.setrlimit(resource.RLIMIT_CORE, (hard_limit, hard_limit))
+    if hard_limit == 0:
+        print("Core dumps are disabled by the shell hard limit; start from a shell with a nonzero core limit.", file=sys.stderr)
 
 
 def main() -> int:
@@ -73,6 +77,9 @@ def main() -> int:
             "EXOSUIT_AGENT_LAUNCHER": str(root_dir / "agent" / "build" / "host" / "main.hl"),
             "EXOSUIT_HAXEON_CLI_PYTHON": sys.executable,
             "EXOSUIT_PROJECT_ROOT": str(root_dir),
+            # The source-tree launcher is a development entry point. Abort at
+            # native text-layout failures before caught exceptions dispose state.
+            "NKUI_DUMP_ON_TEXT_LAYOUT_FAILURE": os.environ.get("EXOSUIT_DEV_CORE_DUMPS", "1"),
         }
         environment.update(_windows_npm_codex_environment())
         _enable_core_dumps()
