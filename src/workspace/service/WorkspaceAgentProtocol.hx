@@ -17,6 +17,9 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(9) var sandboxPolicy:Null<String>;
 	@:optional @:id(10) var approvalPolicy:Null<String>;
 	@:optional @:id(11) var permissionProfile:Null<String>;
+	/** Composer overrides retained with the resource across daemon restarts. */
+	@:optional @:id(12) var preferredModel:Null<String>;
+	@:optional @:id(13) var preferredEffort:Null<String>;
 }
 
 @:wire typedef AgentQuery = {

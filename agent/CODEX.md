@@ -33,7 +33,9 @@ The installed schema was generated with:
   Read metadata before resume, validate cwd, and preserve existing thread policy.
 - Load the server model catalog in the composer and choose a model for the next
   prompt. Leaving “Conversation model” selected preserves the thread’s model.
-  Model choices come from `model/list`; the server remains responsible for access.
+  Model and effort choices are saved with the session and restored after Exosuit
+  restarts. Model choices come from `model/list`; the server remains responsible
+  for access.
 - Send a text prompt, watch streamed messages/tool activity, interrupt the active
   turn, or reconnect and read the latest turn plus eight recent history items.
 - Command/file approvals support approve once or decline. Truncated requests
