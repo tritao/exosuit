@@ -9,6 +9,8 @@
 			"target": "exosuit_ui_native",
 			"inputs": [
 				"CMakeLists.txt",
+				"windows/app-icon.rc.in",
+				"../graphical/assets/exosuit.ico",
 				"../haxeon/vendor/nativekit/CMakeLists.txt",
 				"../haxeon/vendor/nativekit/modules/gpu/CMakeLists.txt",
 				"../haxeon/packages/ui/CMakeLists.txt"

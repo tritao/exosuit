@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Embed icon2.png as NativeKit RGBA icons. Requires Pillow; rerun after artwork changes."""
+"""Generate embedded RGBA icons and the Windows icon resource from icon2.png."""
 from pathlib import Path
 import base64
 from PIL import Image
@@ -9,6 +9,7 @@ sizes = (16, 24, 32, 48, 64, 128, 256)
 with Image.open(root / "icon2.png") as source:
     image = source.convert("RGBA")
     data = b"".join(image.resize((size, size), Image.Resampling.LANCZOS).tobytes() for size in sizes)
+    image.save(root / "graphical/assets/exosuit.ico", sizes=[(size, size) for size in sizes])
 encoded = base64.b64encode(data).decode("ascii")
 lines = [
     "package app;", "",

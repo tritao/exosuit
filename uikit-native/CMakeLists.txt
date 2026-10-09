@@ -18,6 +18,12 @@ set(NKUI_ENABLE_SECTION_GC ON CACHE BOOL "Keep UIKit section garbage collection 
 get_filename_component(EXOSUIT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 set(EXOSUIT_HAXEON_ROOT "${EXOSUIT_ROOT}/haxeon" CACHE PATH "Haxeon source directory")
 add_subdirectory("${EXOSUIT_HAXEON_ROOT}/vendor/nativekit" nativekit)
+if(WIN32)
+    enable_language(RC)
+    configure_file(windows/app-icon.rc.in "${CMAKE_CURRENT_BINARY_DIR}/app-icon.rc" @ONLY)
+    target_sources(nativekit PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/app-icon.rc")
+    target_compile_definitions(nativekit PRIVATE NK_APPLICATION_ICON_RESOURCE_ID=101)
+endif()
 set(NKUI_NATIVEKIT_DIR "${EXOSUIT_HAXEON_ROOT}/vendor/nativekit" CACHE PATH "NativeKit source for the UI package" FORCE)
 add_subdirectory("${EXOSUIT_HAXEON_ROOT}/packages/ui" uikit)
 

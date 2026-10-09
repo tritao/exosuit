@@ -49,6 +49,7 @@ class GraphicalMain {
 				openPaths.push(argument);
 		}
 		var host = new DesktopUiHostOptions();
+		host.applicationId = "Exosuit.Desktop";
 		host.title = "exosuit";
 		host.icons = ApplicationIcons.create();
 		host.customTitlebar = true;
