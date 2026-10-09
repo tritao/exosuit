@@ -46,7 +46,7 @@ class ActivityBar implements View {
 		var style = new LayoutStyle();
 		style.width = LayoutAxis.fixed(WIDTH);
 		style.height = LayoutAxis.grow();
-		style.padding = new Insets(8, 8, 8, 8);
+		style.padding = new Insets(0, 8, 0, 8);
 		style.childGap = 6;
 		style.background = context.theme.tokens.surfaceRaised;
 		var items:Array<KeyedView> = [];
@@ -62,10 +62,10 @@ class ActivityBar implements View {
 			button.iconSize = 20;
 			button.accessibilityLabel = mode.label;
 			button.selected = model.visible && model.activeId == id;
-			items.push(new KeyedView(id, new TabTooltip("activity-tooltip:" + id, button,
+			items.push(new KeyedView(id, new ActivityBarItem(new TabTooltip("activity-tooltip:" + id, button,
 				new Text(mode.label, null, context.theme.tokens.textPrimary, new TextStyleOverride(null, 13, null, TextWrap.None)),
 				function() return new Rect(0, 0, context.viewportWidth, context.viewportHeight), tooltipDelay, Right,
-				hover, visibleTooltip.value == "activity-tooltip:" + id)));
+				hover, visibleTooltip.value == "activity-tooltip:" + id), button.selected)));
 		}
 		items.push(new KeyedView("space", new haxeon.ui.widgets.layout.Spacer("activity-space")));
 		var manageStyle = new LayoutStyle();
@@ -78,10 +78,37 @@ class ActivityBar implements View {
 		gear.iconSize = 22;
 		gear.accessibilityLabel = "Manage";
 		gear.selected = manageOpen;
-		items.push(new KeyedView("manage", new TabTooltip("activity-tooltip:manage", gear,
+		items.push(new KeyedView("manage", new ActivityBarItem(new TabTooltip("activity-tooltip:manage", gear,
 			new Text("Manage", null, context.theme.tokens.textPrimary, TextStyleOverride.text(13)),
 			function() return new Rect(0, 0, context.viewportWidth, context.viewportHeight), tooltipDelay, Right,
-			hover, visibleTooltip.value == "activity-tooltip:manage")));
+			hover, visibleTooltip.value == "activity-tooltip:manage"), manageOpen)));
 		return new Column("activity-bar", items, style).build(context);
+	}
+}
+
+/** Full-width slot keeps the selection rail at the bar edge, outside the button. */
+private class ActivityBarItem implements View {
+	final child:View;
+	final selected:Bool;
+	public function new(child:View, selected:Bool) { this.child = child; this.selected = selected; }
+	public function build(context:BuildContext):RenderNode {
+		var style = new LayoutStyle();
+		style.width = LayoutAxis.fixed(ActivityBar.WIDTH);
+		style.height = LayoutAxis.fixed(40);
+		style.padding = new Insets(8, 0, 8, 0);
+		style.clipToParent = false;
+		var node = new haxeon.ui.widgets.layout.Row("activity-item", [new KeyedView("content", child)], style).build(context);
+		node.hitTestSelf = false;
+		if (selected) {
+			var railStyle = new LayoutStyle();
+			railStyle.positioning = haxeon.ui.LayoutPositioning.Absolute;
+			railStyle.width = LayoutAxis.fixed(2);
+			railStyle.height = LayoutAxis.grow();
+			railStyle.background = context.theme.tokens.accent;
+			var rail = new RenderNode(context.id("activity-selection-rail"), haxeon.ui.LayoutVisualKind.Box, railStyle);
+			rail.hitTestSelf = false;
+			node.add(rail);
+		}
+		return node;
 	}
 }
