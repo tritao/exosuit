@@ -393,6 +393,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   public function agentError():Null<String> return workbench.agentError();
   public function refreshAgents():Void workbench.refreshAgents();
   public function createAgent(group:String, thread:Null<String>, ?created:String->Void):Void workbench.createAgent(group, thread, created);
+  public function deleteAgent(id:String, ?deleted:Void->Void):Void workbench.deleteAgent(id, deleted);
   public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String):Void
     workbench.agentAction(id, action, text, request, model, effort);
   public function discoverAgents(group:String, cursor:Null<String>):Void workbench.discoverAgents(group, cursor);

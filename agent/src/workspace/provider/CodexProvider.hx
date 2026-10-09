@@ -60,6 +60,8 @@ class CodexProvider implements WorkspaceAgents {
 	var connectedAt:Float = 0;
 	var startupBlocked = false;
 	var recoveringSession:Null<Session>;
+	var cliVersion = "unknown";
+	var serverVersion = "unknown";
 
 	public var status(default, null) = "Codex is not connected";
 
@@ -193,7 +195,9 @@ class CodexProvider implements WorkspaceAgents {
 		return lower.indexOf("unsupported codex") >= 0 || lower.indexOf("authentication") >= 0
 			|| lower.indexOf("unauthorized") >= 0 || lower.indexOf("invalid api key") >= 0
 			|| lower.indexOf("not logged in") >= 0 || lower.indexOf("login required") >= 0
-			|| lower.indexOf("forbidden") >= 0 || lower.indexOf("permission denied") >= 0;
+			|| lower.indexOf("forbidden") >= 0 || lower.indexOf("permission denied") >= 0
+			|| lower.indexOf("method not found") >= 0 || lower.indexOf("unknown method") >= 0
+			|| lower.indexOf("method not supported") >= 0 || lower.indexOf("unsupported protocol version") >= 0;
 	}
 
 	function isPermanentSessionError(reason:String):Bool {
@@ -202,7 +206,9 @@ class CodexProvider implements WorkspaceAgents {
 			|| lower.indexOf("unknown thread") >= 0 || lower.indexOf("not found") >= 0
 			|| lower.indexOf("unauthorized") >= 0 || lower.indexOf("authentication") >= 0
 			|| lower.indexOf("invalid api key") >= 0 || lower.indexOf("forbidden") >= 0
-			|| lower.indexOf("unsupported codex") >= 0 || lower.indexOf("active writer") >= 0;
+			|| lower.indexOf("unsupported codex") >= 0 || lower.indexOf("active writer") >= 0
+			|| lower.indexOf("method not found") >= 0 || lower.indexOf("unknown method") >= 0
+			|| lower.indexOf("method not supported") >= 0 || lower.indexOf("unsupported protocol version") >= 0;
 	}
 
 	function updateRecoveryStatus():Void {
@@ -212,7 +218,11 @@ class CodexProvider implements WorkspaceAgents {
 			if (s.reconnectBlocked) blocked = true; else retrying = true;
 		}
 		status = retrying ? "Reconnecting Codex sessions" : blocked ? "Codex connected; some sessions need attention" : "Codex connected";
+		status += " (" + cliVersion + "; " + serverVersion + ")";
 	}
+
+	function withVersions(reason:String):String
+		return reason + " (" + cliVersion + "; " + serverVersion + ")";
 
 	function scheduleConnectionRetry():Void {
 		if (startupBlocked) return;
@@ -222,7 +232,7 @@ class CodexProvider implements WorkspaceAgents {
 
 	function failStartup(reason:String, permanent:Bool = false):Void {
 		phase = "failed";
-		status = reason;
+		status = withVersions(reason);
 		if (permanent || isPermanentProviderError(reason)) {
 			startupBlocked = true;
 			for (s in sessions) if (s.record.thread != "") {
@@ -235,7 +245,8 @@ class CodexProvider implements WorkspaceAgents {
 		} else scheduleConnectionRetry();
 	}
 
-	function start():Void {
+	function start(manual:Bool = false):Void {
+		if (manual) startupBlocked = false;
 		if ((phase != "stopped" && phase != "failed") || startupBlocked)
 			return;
 		connectionGeneration++;
@@ -274,10 +285,8 @@ class CodexProvider implements WorkspaceAgents {
 					return;
 				}
 				if (phase == "version") {
-					if (StringTools.trim(output) != "codex-cli 0.160.0") {
-						failStartup("Unsupported Codex version; this adapter requires 0.160.0", true);
-						return;
-					}
+					var versionParts = StringTools.trim(output).split(" ");
+					cliVersion = versionParts.length > 1 ? versionParts[1] : StringTools.trim(output);
 					try {
 						starter = processes.start(executable, commandPrefix.concat(["app-server", "daemon", "start"]), directories.root);
 						phase = "daemon";
@@ -307,10 +316,8 @@ class CodexProvider implements WorkspaceAgents {
 									return;
 								}
 								var agent = string(r.result, "userAgent");
-								if (!~/(^|[^0-9])0[.](160[.](0|1)|161[.]0)([^0-9]|$)/.match(agent)) {
-									connection.close("Unsupported Codex server version: " + agent + "; supported: 0.160.0, 0.160.1, 0.161.0");
-									return;
-								}
+								var agentParts = StringTools.trim(agent).split(" ");
+								serverVersion = agentParts.length == 0 || agentParts[0] == "" ? "unknown server" : agentParts[0];
 								if (!connection.send({method: "initialized"})) {
 									connection.close("Codex initialization queue failed");
 									return;
@@ -318,7 +325,7 @@ class CodexProvider implements WorkspaceAgents {
 								phase = "ready";
 								connectedAt = clock();
 								retryAt = 0;
-								status = "Codex connected";
+								status = "Codex connected (" + cliVersion + "; " + serverVersion + ")";
 						});
 					} catch (e:Dynamic) {
 						disconnect(Std.string(e));
@@ -354,7 +361,7 @@ class CodexProvider implements WorkspaceAgents {
 			proxy = null;
 		}
 		phase = "failed";
-		status = reason;
+		status = withVersions(reason);
 		var permanent = isPermanentProviderError(reason);
 		if (permanent) startupBlocked = true;
 		else scheduleConnectionRetry();
@@ -725,7 +732,7 @@ class CodexProvider implements WorkspaceAgents {
 				return;
 			}
 			if (phase != "ready") {
-				start();
+				start(true);
 				ctx.fail({code: "provider_starting", message: status, ambiguous: false});
 				return;
 			}
@@ -797,11 +804,7 @@ class CodexProvider implements WorkspaceAgents {
 				return;
 			}
 			if (phase != "ready") {
-				if (phase == "failed") {
-					ctx.fail({code: "provider_unavailable", message: status, ambiguous: false});
-					return;
-				}
-				start();
+				start(true);
 				ctx.fail({code: "provider_starting", message: status + "; retry when connected", ambiguous: false});
 				return;
 			}
@@ -899,6 +902,23 @@ class CodexProvider implements WorkspaceAgents {
 			}
 			if (q.action == "read") {
 				ctx.respond(view(s));
+				return;
+			}
+			if (q.action == "delete") {
+				if (s.busy || s.record.state == "working" || s.record.state == "needs-attention") {
+					ctx.fail({code: "busy", message: "Wait for this Codex turn to finish before removing its Workbench leaf", ambiguous: false});
+					return;
+				}
+				var result = view(s);
+				try {
+					if (persistence != null) persistence.removeAgent(q.id);
+				} catch (e:Dynamic) {
+					storageFailed = true;
+					ctx.fail({code: "storage_unavailable", message: "Agent leaf could not be removed from storage", ambiguous: false});
+					return;
+				}
+				sessions.remove(q.id);
+				ctx.respond(result);
 				return;
 			}
 			if (q.action == "models") {

@@ -8,7 +8,7 @@ def load(): return json.loads(state.read_text()) if state.exists() else {'thread
 def save(v): state.write_text(json.dumps(v))
 with (root/'fake-codex-commands.log').open('a') as log: log.write(json.dumps(sys.argv[1:])+'\n')
 if sys.argv[1:]==['--version']:
- print('codex-cli 0.999.0' if (root/'unsupported-version').exists() else 'codex-cli 0.160.0');sys.exit()
+ print('codex-cli 0.999.0' if (root/'newer-version').exists() else 'codex-cli 0.160.0');sys.exit()
 if sys.argv[1:]==['app-server','daemon','start']: sys.exit()
 assert sys.argv[1:]==['app-server','proxy'],sys.argv
 # The real proxy is a raw WebSocket byte tunnel, not JSONL.
@@ -63,7 +63,7 @@ for line in messages():
  message=json.loads(line); method=message.get('method');params=message.get('params',{});i=message.get('id')
  if method=='initialize':
   assert message.get('jsonrpc') is None
-  reply(i,{'userAgent':'codex-cli/0.161.0','codexHome':'fixture','platformFamily':'unix','platformOs':'linux'})
+  reply(i,{'userAgent':'codex-cli/0.162.0','codexHome':'fixture','platformFamily':'unix','platformOs':'linux'})
  elif method=='initialized': pass
  elif method=='thread/start':
   assert params['sandbox']=='workspace-write' and params['approvalPolicy']=='on-request'

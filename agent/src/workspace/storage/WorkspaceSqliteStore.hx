@@ -300,6 +300,11 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
    });
   });
  }
+ public function removeAgent(id:String):Void {
+  transaction(function() {
+   statement("DELETE FROM workspace_agents WHERE id=?1",function(row) {row.bindText(1,id);row.step();});
+  });
+ }
 
 	public function loadDevices():Array<workspace.service.WorkspaceDeviceRecord> {
 		var records:Array<workspace.service.WorkspaceDeviceRecord> = [];

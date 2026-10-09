@@ -17,6 +17,7 @@ import haxeon.ui.widgets.layout.Row;
 import haxeon.ui.widgets.overlays.MenuItem;
 import haxeon.ui.widgets.text.Text;
 import workspace.client.WorkspaceWorkbenchClient;
+import workspace.service.WorkspaceAgentProtocol;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceTerminalProtocol;
 
@@ -32,6 +33,7 @@ class WorkbenchPanel implements View {
 	final requestFrame:Void->Void;
 	final showMenu:(Array<MenuItem>, UiEvent, Void->Bool)->Void;
 	final attach:WorkspaceGroup->Void;
+	final closeAgentTab:(String, String)->Void;
 	public final model = new WorkbenchTreeModel();
 	public final tree:TreeView;
 	var catalogRevision = -1;
@@ -54,10 +56,11 @@ class WorkbenchPanel implements View {
 
 	public function new(client:WorkspaceWorkbenchClient, open:TerminalRecord->Bool, createTerminal:String->Void,
 		edit:(WorkspaceGroup, Bool)->Void, openFolder:String->Void, manage:Void->Void, requestFrame:Void->Void,
-		openAgent:String->Void, showMenu:(Array<MenuItem>, UiEvent, Void->Bool)->Void, attach:WorkspaceGroup->Void) {
+		openAgent:String->Void, showMenu:(Array<MenuItem>, UiEvent, Void->Bool)->Void, attach:WorkspaceGroup->Void,
+		closeAgentTab:(String, String)->Void) {
 		this.client = client; this.open = open; this.createTerminal = createTerminal; this.edit = edit;
 		this.openFolder = openFolder; this.manage = manage; this.requestFrame = requestFrame;
-		this.openAgent = openAgent; this.showMenu = showMenu; this.attach = attach;
+		this.openAgent = openAgent; this.showMenu = showMenu; this.attach = attach; this.closeAgentTab = closeAgentTab;
 		var style = new LayoutStyle(); style.width = LayoutAxis.stretch(); style.height = LayoutAxis.grow();
 		tree = new TreeView("workbench-tree", model, style);
 		tree.expandOnSingleClick = true;
@@ -94,6 +97,12 @@ class WorkbenchPanel implements View {
 		return model.groups.get("work");
 	}
 
+	function agentCanBeRemoved(agent:Null<WorkspaceAgentProtocol.AgentRecord>):Bool {
+		if (agent == null) return false;
+		return agent.state != "creating" && agent.state != "reconnecting"
+			&& agent.state != "working" && agent.state != "needs-attention";
+	}
+
 	function menu(group:Null<WorkspaceGroup>, event:UiEvent, ?key:String):Void {
 		var catalog = client.terminalCatalog();
 		var owner = catalog == null ? "" : catalog.instance;
@@ -112,10 +121,14 @@ class WorkbenchPanel implements View {
             var terminal = model.terminals.get(key.substring(2));
             if (terminal != null) items.push(new MenuItem("open-terminal", "Open terminal", function() open(terminal), terminal.available));
         }
-        if (key != null && StringTools.startsWith(key, "a:")) {
-            var agent = model.agents.get(key.substring(2));
-            if (agent != null) items.push(new MenuItem("open-codex", "Open Codex session", function() openAgent(agent.id)));
-        }
+		if (key != null && StringTools.startsWith(key, "a:")) {
+			var agent = model.agents.get(key.substring(2));
+			if (agent != null) {
+				items.push(new MenuItem("open-codex", "Open Codex session", function() openAgent(agent.id)));
+				items.push(new MenuItem("delete-codex-leaf", "Remove from Workbench", function() removeAgent(agent.id),
+					client.agentService().canControlAgents() && !client.agentService().agentBusy() && agentCanBeRemoved(agent)));
+			}
+		}
         items.push(new MenuItem("new-codex", "New Codex session", function() client.agentService().createAgent(groupId, null, openAgent),
             group != null && client.agentService().canControlAgents() && !client.agentService().agentBusy()));
         items.push(new MenuItem("new-terminal", "New terminal", function() createTerminal(groupId), group != null && client.canCreateTerminals() && !client.terminalCatalogBusy()));
@@ -128,7 +141,20 @@ class WorkbenchPanel implements View {
         items.push(new MenuItem("attach-codex", "Attach existing Codex thread…", function() attach(group), group != null && client.agentService().canControlAgents()));
         items.push(new MenuItem("manage-terminals", "Manage terminals…", manage));
         items.push(new MenuItem("refresh-agents", "Refresh agent status", function() client.agentService().refreshAgents(), client.agentService().canReadAgents()));
-        showMenu(items, event, valid);
+		showMenu(items, event, valid);
+	}
+
+	function removeAgent(id:String):Void {
+		var agent = model.agents.get(id);
+		if (agent == null || !agentCanBeRemoved(agent) || !client.agentService().canControlAgents() || client.agentService().agentBusy()) return;
+		tree.select("a:" + id);
+		var group = agent.group;
+		client.agentService().deleteAgent(id, function() {
+			closeAgentTab(id, agent.workspaceRoot);
+			if (model.groups.exists(group)) tree.select("g:" + group);
+			requestFrame();
+		});
+		requestFrame();
 	}
 
     function beginGroup(group:WorkspaceGroup, create:Bool):Void {
@@ -305,6 +331,12 @@ class WorkbenchPanel implements View {
 			if (selected != null) client.agentService().createAgent(selected.id, null, openAgent);
 		}, "workbench-new-codex");
 		agent.enabled = selected != null && client.agentService().canControlAgents() && !client.agentService().agentBusy();
+		var selectedAgent = tree.selectedKey != null && StringTools.startsWith(tree.selectedKey, "a:")
+			? model.agents.get(tree.selectedKey.substring(2)) : null;
+		var deleteAgent = toolbarButton("Remove selected leaf from Workbench", IconName.Trash, function() {
+			if (selectedAgent != null) removeAgent(selectedAgent.id);
+		}, "workbench-delete-codex");
+		deleteAgent.enabled = agentCanBeRemoved(selectedAgent) && client.agentService().canControlAgents() && !client.agentService().agentBusy();
 		var more = toolbarButton("Workbench actions", IconName.ChevronDown, null, "workbench-actions");
 		more.onClickEvent = function(event) menu(selected, event);
 		var toolbarStyle = new LayoutStyle(); toolbarStyle.width = LayoutAxis.stretch(); toolbarStyle.childGap = 2;
@@ -312,7 +344,8 @@ class WorkbenchPanel implements View {
 		var rows:Array<KeyedView> = [new KeyedView("toolbar", new Row("workbench-toolbar", [
 			new KeyedView("terminal", new haxeon.ui.widgets.overlays.Tooltip("new-terminal-tip", terminal, new Text("New terminal"), 0, 36)),
 			new KeyedView("agent", new haxeon.ui.widgets.overlays.Tooltip("new-agent-tip", agent, new Text("New Codex"), -32, 36)),
-			new KeyedView("more", new haxeon.ui.widgets.overlays.Tooltip("workbench-actions-tip", more, new Text("Actions"), -64, 36))
+			new KeyedView("delete-agent", new haxeon.ui.widgets.overlays.Tooltip("delete-agent-tip", deleteAgent, new Text("Remove from Workbench"), -64, 36)),
+			new KeyedView("more", new haxeon.ui.widgets.overlays.Tooltip("workbench-actions-tip", more, new Text("Actions"), -96, 36))
 		], toolbarStyle)), new KeyedView("tree", tree)];
 		var error = draftError == null ? client.terminalCatalogError() : draftError;
 		if (error == null) error = client.agentService().agentError();

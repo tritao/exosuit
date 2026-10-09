@@ -196,7 +196,7 @@ class AgentProviderTestMain {
 		}
 		create("a", null);
 		require(code == "provider_starting", "Lazy provider startup did not report state");
-		wait(function() return provider.status == "Codex connected");
+		wait(function() return StringTools.startsWith(provider.status, "Codex connected"));
 		create("foreign-resource", "foreign");
 		require(code == "provider_error", "Foreign thread attached");
 		create("missing-resource", "missing");
@@ -336,7 +336,7 @@ class AgentProviderTestMain {
 				recoveryPump();
 			}
 		}
-		recoveryWait(function() return provider.status == "Codex connected; some sessions need attention");
+		recoveryWait(function() return StringTools.startsWith(provider.status, "Codex connected; some sessions need attention"));
 		var recoveredView:Null<AgentView> = null, recoveredFinished = false;
 		recoveryClient.call(WorkspaceAgentProtocol.ACTION, {
 			workspace: "w", instance: "next-owner", id: "a", action: "read", text: "", request: null
@@ -376,13 +376,14 @@ class AgentProviderTestMain {
 		recoveryServer.close();
 		store.close();
 		processes.shutdown();
-		sys.io.File.saveContent(root + "/unsupported-version", "1");
+		sys.io.File.saveContent(root + "/newer-version", "1");
 		provider = new CodexProvider("w", "bad-version", new WorkspaceDirectories(root), function() return seed.snapshot().groups, processes, clock, null,
 			executable,bridge,codexScript);
 		var badPair = MemoryTransport.pair(),
 			badClient = new RpcConnection(badPair.client, clock),
 			badServer = new RpcConnection(badPair.server, clock);
 		provider.bind(badServer, [WorkspaceAgentProtocol.READ, WorkspaceAgentProtocol.CONTROL]);
+		var newerVersionCode = "", newerVersionDone = false;
 		badClient.call(WorkspaceAgentProtocol.CREATE, {
 			workspace: "w",
 			instance: "bad-version",
@@ -390,17 +391,46 @@ class AgentProviderTestMain {
 			name: "Codex",
 			group: "work",
 			thread: null
-		}, 1000, function(_) throw "Unsupported version created thread", function(_) {});
-		badClient.poll();
-		badServer.poll();
-		badClient.poll();
-		wait(function() return provider.status.indexOf("Unsupported Codex version") >= 0);
+		}, 1000, function(_) throw "Create completed before Codex startup", function(error) {
+			newerVersionCode = error.code;
+			newerVersionDone = true;
+		});
+		function badWait(done:Void->Bool):Void {
+			var end = clock() + 20000;
+			while (!done()) {
+				require(clock() < end, "Timed out: " + provider.status);
+				badClient.poll();
+				badServer.poll();
+				provider.poll();
+				badClient.poll();
+				Sys.sleep(0.005);
+			}
+		}
+		badWait(function() return newerVersionDone);
+		require(newerVersionCode == "provider_starting", "Newer Codex CLI version did not begin startup");
+		badWait(function() return StringTools.startsWith(provider.status, "Codex connected"));
+		require(provider.status.indexOf("0.999.0") >= 0 && provider.status.indexOf("codex-cli/0.162.0") >= 0,
+			"Detected Codex versions were not reported after successful initialization");
+		var newerRecord:Null<AgentRecord> = null, newerCreateDone = false;
+		badClient.call(WorkspaceAgentProtocol.CREATE, {
+			workspace: "w",
+			instance: "bad-version",
+			id: "newer-version-resource",
+			name: "Codex",
+			group: "work",
+			thread: null
+		}, 5000, function(value) {
+			newerRecord = value;
+			newerCreateDone = true;
+		}, function(error) throw "Compatible newer Codex version could not create a thread: " + error.message);
+		badWait(function() return newerCreateDone);
+		require(newerRecord != null && newerRecord.thread != "", "Compatible newer Codex version did not create a thread");
 		provider.dispose();
 		badClient.close();
 		badServer.close();
 		processes.shutdown();
 
-		Sys.println("PASS: Codex shared proxy, lazy/version handshake, create idempotence, streamed items, permission fencing, approval races, input, automatic active-turn and persisted-session recovery, history, interruption and workspace mismatch handling");
+		Sys.println("PASS: Codex shared proxy, automatic newer-version acceptance and diagnostics, create idempotence, streamed items, permission fencing, approval races, input, automatic active-turn and persisted-session recovery, history, interruption and workspace mismatch handling");
 	}
 }
 

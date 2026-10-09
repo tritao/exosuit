@@ -8,7 +8,6 @@ import argparse
 import json
 import os
 from pathlib import Path
-import re
 import selectors
 import subprocess
 import tempfile
@@ -75,8 +74,8 @@ class Peer:
         result = self.request('initialize', {
             'clientInfo': {'name': 'exosuit', 'title': 'Exosuit lifecycle acceptance', 'version': '1'},
             'capabilities': {'experimentalApi': False}})
-        if not re.search(r'(^|[^0-9])0\.(160\.(0|1)|161\.0)([^0-9]|$)', result.get('userAgent', '')):
-            raise RuntimeError('Unsupported shared-server version')
+        if not isinstance(result.get('userAgent'), str) or not result['userAgent']:
+            raise RuntimeError('Shared server omitted its user agent')
         self.send({'method': 'initialized'})
 
     def close(self):

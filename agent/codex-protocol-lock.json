@@ -1,10 +1,12 @@
 {
-  "cli": "0.160.0",
-  "servers": [
-    "0.160.0",
-    "0.160.1",
-    "0.161.0"
-  ],
+  "schemaBaseline": {
+    "cli": "0.160.0",
+    "servers": [
+      "0.160.0",
+      "0.160.1",
+      "0.161.0"
+    ]
+  },
   "schemas": {
     "CommandExecutionRequestApprovalParams": "16a71816c2d66e319c2c4aa83dd636dfdc43c61e72b6d5475e421ce08d8e6558",
     "CommandExecutionRequestApprovalResponse": "6d0767113e22f311381809b6b236b0dde2b99b01992879c26bf7b1ea0e003cb7",

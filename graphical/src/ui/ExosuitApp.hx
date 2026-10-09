@@ -813,7 +813,8 @@ class ExosuitApp implements DesktopUiApplication {
 		workbenchClient = client;
 		terminalBrowserPanel = new WorkspaceTerminalsPanel(client, openCatalogTerminal, forgetCatalogTerminal, requestFrame);
 		workbenchPanel = new WorkbenchPanel(client, openCatalogTerminal, newGroupedTerminal, editWorkspaceGroup,
-			function(path) application.openArgument(path), openWorkspaceTerminals, requestFrame, openCodexAgent, showWorkbenchMenu, attachCodexThread);
+			function(path) application.openArgument(path), openWorkspaceTerminals, requestFrame, openCodexAgent, showWorkbenchMenu,
+			attachCodexThread, function(resource, workspaceRoot) host.closeAgentTabs(resource, workspaceRoot));
 		host.onActiveTabChanged = syncWorkbenchAgentSelection;
 		syncWorkbenchAgentSelection(host.activeTab());
 		if (sidebar.find("workbench") == null)

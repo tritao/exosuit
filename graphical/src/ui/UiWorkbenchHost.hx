@@ -279,6 +279,16 @@ class UiWorkbenchHost implements WorkbenchHost {
   for(pane in panes) for(item in pane.items) {var a=UiEditorTabs.agent(item);if(a!=null&&a.id==agent.id) {activateEditorTab("agent:"+a.id,pane.id);return;}}
   activePane.items.push(UiEditorTab.Agent(agent));activateEditorTab("agent:"+agent.id,activePane.id);
  }
+
+ public function closeAgentTabs(resource:String, workspaceRoot:String):Void {
+  var targets:Array<{var item:UiEditorTab; var paneId:String;}> = [];
+  for(pane in panes) for(item in pane.items) {
+   var agent=UiEditorTabs.agent(item);
+   if(agent!=null&&agent.resource==resource&&agent.workspaceRoot==workspaceRoot) targets.push({item:item,paneId:pane.id});
+  }
+  for(target in targets) closeTab(target.item,target.paneId,true);
+ }
+
  public var restoreAgent:Null<(String,String,String,String)->UiAgentTab>;
 
 	public function attachTerminal(terminal:UiTerminalTab):Void {

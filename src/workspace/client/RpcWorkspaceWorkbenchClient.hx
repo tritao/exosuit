@@ -28,6 +28,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   var agentsError:Null<String>;
   var agentActionError:Null<String>;
   var agentsPending:Bool = false;
+  var agentsRequestToken:Int = 0;
   var agentsNext:Float = 0;
   var agentMutation:Bool = false;
   var agentMutationId:Null<String>;
@@ -65,6 +66,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       catalogKey = "";
       catalogRevision++;
       agentsPending = false;
+      agentsRequestToken++;
       agentMutation = false;
       pendingAgentCreate = null;
       agentCreated = null;
@@ -119,18 +121,20 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     var connection = rpc();
     if (connection == null || !has(WorkspaceAgentProtocol.READ) || agentsPending || clock() < agentsNext) return;
     agentsPending = true;
+    var requestToken = ++agentsRequestToken;
     agentsNext = clock() + 1000;
-    loadAgentPage(connection, null, []);
+    loadAgentPage(connection, requestToken, null, []);
   }
 
   function loadAgentPage(
     connection:RpcConnection,
+    requestToken:Int,
     after:Null<String>,
     records:Array<WorkspaceAgentProtocol.AgentRecord>
   ):Void {
     connection.call(WorkspaceAgentProtocol.LIST,
       {workspace: "workspace", instance: instance(), after: after}, 3000, function(value) {
-      if (rpc() != connection) return;
+      if (rpc() != connection || requestToken != agentsRequestToken) return;
       var workspaceRoot = root();
       if (workspaceRoot == null || value.root != workspaceRoot
         || value.instance != instance() || value.records.length > 6 || records.length + value.records.length > 32) {
@@ -157,7 +161,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
           agentsRevision++;
           return;
         }
-        loadAgentPage(connection, value.next, records);
+        loadAgentPage(connection, requestToken, value.next, records);
         return;
       }
       agentsPending = false;
@@ -166,7 +170,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       value.records = records;
       agentCatalog = value;
     }, function(error) {
-      if (rpc() == connection) {
+      if (rpc() == connection && requestToken == agentsRequestToken) {
         agentsPending = false;
         agentsError = error.message;
         agentsRevision++;
@@ -285,6 +289,72 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       agentsRevision++;
     }
     );
+  }
+
+  public function deleteAgent(id:String, ?deleted:Void->Void):Void {
+    var connection = rpc();
+    if (connection == null || !canControlAgents() || agentMutation || id == null || id.length == 0 || id.length > 128) return;
+    if (agentReadPending.exists(id)) {
+      agentReadPending.remove(id);
+      agentReadCount = Std.int(Math.max(0, agentReadCount - 1));
+    }
+    agentMutation = true;
+    agentMutationId = id;
+    var selected = ++agentSelection;
+    agentTokens.set(id, selected);
+    agentsError = null;
+    agentActionError = null;
+    connection.call(WorkspaceAgentProtocol.ACTION, {
+      workspace: "workspace",
+      instance: instance(),
+      id: id,
+      action: "delete",
+      text: "",
+      request: null,
+      model: null,
+      effort: null
+    }, 20000, function(value) {
+      if (rpc() != connection || agentTokens.get(id) != selected) return;
+      agentMutation = false;
+      agentMutationId = null;
+      if (value.record.id != id || value.record.workspaceRoot != root()) {
+        agentActionError = "Invalid removed agent scope";
+        agentsRevision++;
+        return;
+      }
+      if (agentCatalog != null)
+        agentCatalog.records = [for (record in agentCatalog.records) if (record.id != id) record];
+      agentsRequestToken++;
+      agentsPending = false;
+      agentViews.remove(id);
+      agentTokens.remove(id);
+      agentsNext = 0;
+      agentsRevision++;
+      refreshAgents();
+      if (deleted != null) deleted();
+    }, function(error) {
+      if (rpc() != connection || agentTokens.get(id) != selected) return;
+      if (error.code == "unknown_agent") {
+        agentMutation = false;
+        agentMutationId = null;
+        if (agentCatalog != null)
+          agentCatalog.records = [for (record in agentCatalog.records) if (record.id != id) record];
+        agentsRequestToken++;
+        agentsPending = false;
+        agentViews.remove(id);
+        agentTokens.remove(id);
+        agentsNext = 0;
+        agentsRevision++;
+        refreshAgents();
+        if (deleted != null) deleted();
+        return;
+      }
+      agentMutation = false;
+      agentMutationId = null;
+      agentActionError = error.message;
+      agentsNext = 0;
+      agentsRevision++;
+    });
   }
 
   public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String):Void {

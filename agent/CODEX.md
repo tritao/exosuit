@@ -8,13 +8,18 @@ text, ping/pong, UTF-8, masking and graceful output drain without owning the dae
 Closing an editor/conversation view releases its client; provider shutdown closes
 only its proxy. It never stops/restarts the shared server or deletes Codex history.
 
-This first adapter supports **codex-cli 0.160.0** with server **0.160.0/0.160.1/0.161.0**. The initialized server must be one of these versions. All 33
-used generated schemas are identical for 0.160.0 and 0.160.1. In 0.161.0,
+The adapter does not gate startup on Codex version numbers. It records the CLI
+and initialized server versions in Workbench status, then relies on successful
+initialization and validates the operations it uses. A clear missing-method or
+unsupported-protocol error blocks reconnect attempts for the affected provider
+or session until the user retries. All 33 used generated schemas are identical
+for 0.160.0 and 0.160.1. In 0.161.0,
 `CodexErrorInfo` accepts additional string/object values and `CyberAccessProgram`
 has a description change; the adapter does not interpret either field. Approval
-schemas are unchanged. Baseline and 0.161.0 hashes are recorded in
-[codex-protocol-lock.json](codex-protocol-lock.json). A different version fails visibly; update the
-adapter against that version's generated schema rather than guessing field names.
+schemas are unchanged. These schema snapshots are historical baselines, recorded
+in [codex-protocol-lock.json](codex-protocol-lock.json); their version numbers
+are not an acceptance list. Unknown approval requests remain visible and cannot
+be approved through Exosuit.
 
 Protocol reference: <https://learn.chatgpt.com/docs/app-server>.
 The installed schema was generated with:
