@@ -49,3 +49,6 @@ if [[ $result -ne 42 ]]; then
 fi
 echo "PASS: graphical real-server fixture builds and executes after language edits"
 run_ui repository "$fixture/state-repository" "$root_dir" repository
+
+run_ui overlapping "$fixture/state-overlapping" "$root_dir" overlapping
+run_ui nested "$fixture/state-nested" "$root_dir" nested

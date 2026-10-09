@@ -59,10 +59,15 @@ class CommandTestMain {
 			{key: Platform.KEY_G, modifiers: Platform.MOD_CTRL | Platform.MOD_ALT, command: "language:go-to-definition"}
 		];
 		for (shortcut in languageShortcuts) {
-			require(!keymap.onKeyPressed(shortcut.key, shortcut.modifiers, context), "unsupported language shortcut consumed input");
+			if (shortcut.command == "language:go-to-definition") {
+				var count = root.getNotifications().entries.length;
+				require(keymap.onKeyPressed(shortcut.key, shortcut.modifiers, context) && root.getNotifications().entries.length > count,
+					"unavailable definition shortcut did not explain server status");
+			} else require(!keymap.onKeyPressed(shortcut.key, shortcut.modifiers, context), "unsupported language shortcut consumed input");
 			var invoked = false;
 			registry.add(shortcut.command, function(context) { invoked = true; });
 			require(keymap.onKeyPressed(shortcut.key, shortcut.modifiers, context) && invoked, "language shortcut did not dispatch " + shortcut.command);
+			if (shortcut.command == "language:go-to-definition") require(keymap.onKeyPressed(Platform.KEY_F12, 0, context), "F12 definition shortcut missing");
 			registry.add(shortcut.command, function(context) {}, context -> false);
 		}
 		registry.add("test:disabled", function(context) { performed = 1; }, context -> false);

@@ -134,6 +134,9 @@ class Application {
 		keymap.add(Platform.KEY_SPACE, Platform.MOD_CTRL | Platform.MOD_ALT, ["language:hover"]);
 		keymap.add(Platform.KEY_SPACE, Platform.MOD_CTRL | Platform.MOD_SHIFT, ["language:signature-help"]);
 		keymap.add(Platform.KEY_G, Platform.MOD_CTRL | Platform.MOD_ALT, ["language:go-to-definition"]);
+		keymap.add(Platform.KEY_F12, 0, ["language:go-to-definition"]);
+		keymap.add(Platform.KEY_LEFT, Platform.MOD_ALT, ["navigation:go-back"]);
+		keymap.add(Platform.KEY_RIGHT, Platform.MOD_ALT, ["navigation:go-forward"]);
 
 		root.configureWelcomeActions({
 			recentProjects: this.recentProjects.paths,

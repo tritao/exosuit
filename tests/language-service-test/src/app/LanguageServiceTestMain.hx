@@ -186,6 +186,13 @@ class LanguageServiceTestMain {
 
 		minimal.stop(Sys.time());
 		pump(minimal, () -> minimal.status == "stopped", 5.0);
+		var cold = new LanguageServiceClient(manager, documents, "python3", [arguments[0], "--slow-initialize"], arguments[1]);
+		cold.start(Sys.time());
+		pump(cold, () -> cold.ready, 8.0);
+		require(cold.ready, "cold initialization used the short shutdown timeout");
+		cold.stop(Sys.time());
+		pump(cold, () -> cold.status == "stopped", 5.0);
+		Sys.println("PASS: cold initialization has its own timeout and still shuts down promptly");
 		var slow = new LanguageServiceClient(manager, documents, "python3", [arguments[0], "--slow-completion"], arguments[1]);
 		slow.start(Sys.time());
 		pump(slow, () -> slow.ready, 5.0);

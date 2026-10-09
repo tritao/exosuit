@@ -178,6 +178,33 @@ class LanguageControllerTestMain {
 			"signature help was not surfaced through an anchored popup");
 		require(commands.perform("language:go-to-definition", context), "definition command was not available");
 		for (_ in 0...32) controller.update(Sys.time());
+		selection.setCursor(document.buffer, new BufferPosition(0, 5));
+		require(commands.perform("language:go-to-definition", context), "multiple definition command unavailable");
+		pump(controller, () -> root.commandView.active, 5);
+		require(root.commandView.results.length == 2, "definitions did not open a picker");
+		root.commandView.setQuery("Other.hx"); root.commandView.keyPressed(Platform.KEY_ENTER, 0);
+		require(context.requireDocument().path == arguments[1] + "/Other.hx", "definition picker did not open selected file");
+		require(context.activeView().cursorColumn() == 1, "definition picker missed target cursor");
+		require(commands.perform("navigation:go-back", context), "Go Back unavailable after definition");
+		require(context.requireDocument() == document && view.cursorColumn() == 5, "Go Back lost source cursor");
+		require(commands.perform("navigation:go-forward", context), "Go Forward unavailable after Go Back");
+		require(context.requireDocument().path == arguments[1] + "/Other.hx", "Go Forward lost destination");
+		commands.perform("navigation:go-back", context);
+		for (column in [6, 7]) {
+			selection.setCursor(document.buffer, new BufferPosition(0, column));
+			var notifications = root.notifications.entries.length;
+			commands.perform("language:go-to-definition", context);
+			pump(controller, () -> root.notifications.entries.length > notifications, 5);
+			var message = root.notifications.entries[root.notifications.entries.length - 1].message;
+			require(message.indexOf(column == 6 ? "No definition found" : "still being analysed") >= 0, "definition failure was silent");
+		}
+		selection.setCursor(document.buffer, new BufferPosition(0, 5));
+		commands.perform("language:go-to-definition", context);
+		pump(controller, () -> root.commandView.active, 5);
+		selection.setCursor(document.buffer, new BufferPosition(0, 0));
+		root.commandView.setQuery("Other.hx"); root.commandView.keyPressed(Platform.KEY_ENTER, 0);
+		require(context.requireDocument() == document, "stale definition picker navigated after caret changed");
+		Sys.println("PASS: definition picker, back/forward history, missing/error feedback and stale result guard");
 		require(commands.perform("language:document-symbols", context), "symbols command unavailable");
 		pump(controller, () -> root.commandView.active, 5);
 		root.commandView.setQuery("value");

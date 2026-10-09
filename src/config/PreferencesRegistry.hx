@@ -337,6 +337,7 @@ class PreferencesRegistry {
 			case "w": Platform.KEY_W; case "p": Platform.KEY_P; case "f": Platform.KEY_F; case "h": Platform.KEY_H;
 			case "c": Platform.KEY_C; case "v": Platform.KEY_V; case "x": Platform.KEY_X; case "k": Platform.KEY_K; case "j": Platform.KEY_J;
 			case "d": Platform.KEY_D;
+			case "f12": Platform.KEY_F12;
 			case "g": Platform.KEY_G;
 			case "b": Platform.KEY_B;
 			case "tab": Platform.KEY_TAB; case "enter": Platform.KEY_ENTER; case "escape": Platform.KEY_ESCAPE;

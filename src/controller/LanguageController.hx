@@ -21,6 +21,9 @@ class LanguageController {
 	final suppressed:Map<String, Bool> = [];
 	final failedRoots:Map<String, Bool> = [];
 	var shuttingDown:Bool = false;
+	final navigationBack:Array<LanguageLocation> = [];
+	final navigationForward:Array<LanguageLocation> = [];
+	var definitionRequest:Int = 0;
 
 	final workspace:Workspace;
 	final root:WorkbenchHost;
@@ -207,7 +210,9 @@ class LanguageController {
 		commands.add("language:haxeon-stop", commandContext -> stop(), commandContext -> client != null);
 		commands.add("language:hover", commandContext -> hover(), commandContext -> supports("hover"));
 		commands.add("language:complete", commandContext -> complete(), commandContext -> supports("completion"));
-		commands.add("language:go-to-definition", commandContext -> definition(), commandContext -> supports("definition"));
+		commands.add("language:go-to-definition", commandContext -> definition(), commandContext -> activeDocument() != null);
+		commands.add("navigation:go-back", _ -> navigateHistory(navigationBack, navigationForward), _ -> navigationBack.length > 0);
+		commands.add("navigation:go-forward", _ -> navigateHistory(navigationForward, navigationBack), _ -> navigationForward.length > 0);
 		commands.add("language:signature-help", commandContext -> signatureHelp(), commandContext -> supports("signature"));
 		commands.add("language:document-symbols", commandContext -> symbols(), commandContext -> supports("symbols"));
 		commands.add("language:find-references", commandContext -> references(), commandContext -> supports("references"));
@@ -248,15 +253,65 @@ class LanguageController {
 		});
 	}
 
-	function definition():Void {
-		var service = client, view = context.activeView(), document = activeDocument();
-		if (service == null || view == null || document == null) return;
-		service.requestDefinition(document, new BufferPosition(view.cursorLine(), view.cursorColumn()), Sys.time(), locations -> {
-			if (locations.length == 0 || client != service || context.activeView() != view) return;
-			var location = locations[0], target = root.openDocument(workspace.documents.open(location.path));
+	function currentLocation():Null<LanguageLocation> {
+		var view = context.activeView(), document = activeDocument();
+		if (view == null || document == null || document.path == null) return null;
+		var position = new BufferPosition(view.cursorLine(), view.cursorColumn());
+		return new LanguageLocation(document.path, position, position);
+	}
+
+	function openLocation(location:LanguageLocation):Bool {
+		try {
+			var target = root.openDocument(workspace.documents.open(location.path));
 			target.restoreCursor(location.from.line, location.from.column);
 			target.cursorChanged();
-		});
+			return true;
+		} catch (error:Dynamic) {
+			reportError("language", "Could not open definition: " + Std.string(error));
+			return false;
+		}
+	}
+
+	function navigateHistory(from:Array<LanguageLocation>, to:Array<LanguageLocation>):Void {
+		if (from.length == 0) return;
+		var origin = currentLocation(), destination = from[from.length - 1];
+		if (!openLocation(destination)) return;
+		from.pop();
+		if (origin != null) to.push(origin);
+		definitionRequest++;
+	}
+
+	function definition():Void {
+		var service = client, view = context.activeView(), document = activeDocument();
+		if (view == null || document == null) return;
+		if (service == null || !service.ready || !service.definitionSupported) {
+			root.getNotifications().publish("Go to Definition is unavailable: " + (service == null ? "start the language server" : service.ready ? "server does not support definitions" : service.status));
+			return;
+		}
+		var revision = document.buffer.stateId, origin = currentLocation(), request = ++definitionRequest;
+		var position = new BufferPosition(view.cursorLine(), view.cursorColumn());
+		var valid = function() return request == definitionRequest && client == service && context.activeView() == view &&
+			document.buffer.stateId == revision && view.cursorLine() == position.line && view.cursorColumn() == position.column;
+		var navigate = function(location:LanguageLocation) {
+			if (!valid()) { root.getNotifications().publish("Definition result changed; run Go to Definition again"); return; }
+			if (openLocation(location)) {
+				if (origin != null) { navigationBack.push(origin); if (navigationBack.length > 100) navigationBack.shift(); }
+				navigationForward.resize(0);
+			}
+		};
+		if (!service.requestDefinition(document, position, Sys.time(), locations -> {
+			if (!valid()) return;
+			if (locations.length == 0) { root.getNotifications().publish("No definition found"); return; }
+			if (locations.length == 1) { navigate(locations[0]); return; }
+			var entries:Array<CommandViewEntry> = [];
+			for (index in 0...locations.length) entries.push(new CommandViewEntry(locations[index].path, locationLabel(locations[index]), Std.string(index)));
+			root.openCommandView(new CommandViewProvider("Go to Definition: ", entries, _ -> {}, (entry, query, backwards) -> {
+				if (entry == null) return;
+				root.closeCommandView();
+				var index = Std.parseInt(entry.value);
+				if (index != null && index >= 0 && index < locations.length) navigate(locations[index]);
+			}));
+		}, error -> { if (valid()) root.getNotifications().publish("Go to Definition failed: " + error); })) root.getNotifications().publish("Language server is synchronizing this document; try Go to Definition again");
 	}
 
 	function signatureHelp():Void {

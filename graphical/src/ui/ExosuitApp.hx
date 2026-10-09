@@ -2056,6 +2056,8 @@ class ExosuitApp implements DesktopUiApplication {
 			documentView.onStateChanged = requestFrame;
 			documentView.isActive = function() return host.activeView() == documentView;
 			pane.onEditorAction = documentView.performEditorAction;
+			pane.onNavigationKey = event -> CommandBridge.navigationKey(application.keymap, application.context, event.key, event.modifiers);
+			pane.onDefinition = function() { host.activateTab(document, paneId); application.commands.perform("language:go-to-definition", application.context); };
 			pane.requestCursorReveal = documentView.cursorChanged;
 			pane.consumeCursorReveal = documentView.consumeCursorReveal;
 			pane.fontSize = application.settings.current.fontSize;
@@ -2072,7 +2074,10 @@ class ExosuitApp implements DesktopUiApplication {
 					new CommandMenuEntry("doc:paste", "Paste"),
 					new CommandMenuEntry("doc:select-all", "Select All"),
 					new CommandMenuEntry("find:open", "Find…"),
-					new CommandMenuEntry("find:replace", "Replace…")
+					new CommandMenuEntry("find:replace", "Replace…"),
+					new CommandMenuEntry("language:go-to-definition", "Go to Definition"),
+					new CommandMenuEntry("navigation:go-back", "Go Back"),
+					new CommandMenuEntry("navigation:go-forward", "Go Forward")
 				], event, function() return host.activeView() == documentView);
 			};
 			pane.onCaretRectChanged = function() {

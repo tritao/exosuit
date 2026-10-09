@@ -76,6 +76,8 @@ class EditorPane implements View {
 	public var caretRect(default, null):Null<Rect> = null;
 	public var onResolvedEditor:Null<Rect->haxeon.ui.core.WidgetId->Void> = null;
 	public var onActivated:Null<Void->Void> = null;
+	public var onNavigationKey:Null<haxeon.ui.core.UiEvent->Bool> = null;
+	public var onDefinition:Null<Void->Void> = null;
 	public var onContextMenu:Null<haxeon.ui.core.UiEvent->Void> = null;
 	public var onCaretRectChanged:Null<Void->Void> = null;
 	public var onEditorAction:Null<haxeon.ui.widgets.text.TextEditorAction->Bool>;
@@ -361,6 +363,21 @@ class EditorPane implements View {
 			if (changed && onCaretRectChanged != null)
 				onCaretRectChanged();
 		};
+		area.onTextPointerDown = function(offset, event) {
+			var definition = event.button == 0 && event.modifiers == haxeon.ui.core.UiModifier.Control;
+			if (event.button != 1 && !definition) return false;
+			if (onActivated != null) onActivated();
+			var position = EditorCoordinates.position(document, offset);
+			var insideSelection = false;
+			if (!definition) for (range in selection.allRanges())
+				if (!range.isCollapsed() && !position.before(range.start()) && !range.end().before(position)) insideSelection = true;
+			if (!insideSelection) selection.setCursor(document.buffer, position);
+			onEdited();
+			requestCursorReveal();
+			if (definition) { if (onDefinition != null) onDefinition(); }
+			else if (onContextMenu != null) onContextMenu(event);
+			return true;
+		};
 		area.onSelectionChange = selectionHandler;
 		area.onEditorAction = onEditorAction;
 		area.onCaretRevealRequest = requestCursorReveal;
@@ -433,6 +450,10 @@ class EditorPane implements View {
 		node.on(haxeon.ui.core.UiEventKind.KeyDown, function(event) {
 			if (haxeon.ui.core.UiKey.isContextMenuRequest(event.key, event.modifiers)) requestMenu(event);
 		});
+		container.on(haxeon.ui.core.UiEventKind.KeyDown, function(event) {
+			var handler = onNavigationKey;
+			if (handler != null && handler(event)) { event.preventDefault(); event.stopPropagation(); }
+		}, "capture");
 		container.add(gutter.build(context));
 		container.add(node);
 		if (!minimapEnabled) return container;

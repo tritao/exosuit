@@ -76,8 +76,18 @@ class CommandBridge {
 		return result;
 	}
 
+	/** Navigation history takes precedence over TextArea's Alt+arrow word motion. */
+	public static function navigationKey(keymap:Keymap, context:CommandContext, key:Int, modifiers:Int):Bool {
+		for (binding in keymap.effectiveBindings())
+			if ((binding.commands.indexOf("navigation:go-back") >= 0 || binding.commands.indexOf("navigation:go-forward") >= 0) &&
+				uiKeyFor(binding.key) == key && uiModifiersFor(binding.modifiers) == modifiers)
+				return keymap.onKeyPressed(binding.key, binding.modifiers, context);
+		return false;
+	}
+
 	static function uiKeyFor(key:Int):Int
 		return switch key {
+			case Platform.KEY_F12: UiKey.F12;
 			case Platform.KEY_ESCAPE: UiKey.Escape;
 			case Platform.KEY_ENTER: UiKey.Enter;
 			case Platform.KEY_TAB: UiKey.Tab;

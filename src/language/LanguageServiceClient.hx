@@ -13,6 +13,7 @@ import process.ProcessManager;
 /** One restartable LSP session, owning synchronization for backed Haxe documents. */
 class LanguageServiceClient {
 	public static inline final REQUEST_TIMEOUT = 5.0;
+	public static inline final INITIALIZE_REQUEST_TIMEOUT = 30.0;
 	/** Editing a large project may queue analysis before an interactive reply. */
 	public static inline final FEATURE_REQUEST_TIMEOUT = 30.0;
 	public static inline final RESTART_DELAY = 0.25;
@@ -83,7 +84,7 @@ class LanguageServiceClient {
 			rootUri: uri(rootPath),
 			capabilities: {general: {positionEncodings: ["utf-16"]}},
 			workspaceFolders: [{uri: uri(rootPath), name: fileName(rootPath)}]
-		}, now, REQUEST_TIMEOUT, initialized);
+		}, now, INITIALIZE_REQUEST_TIMEOUT, initialized);
 		return true;
 	}
 
@@ -155,9 +156,12 @@ class LanguageServiceClient {
 		});
 	}
 
-	public function requestDefinition(document:Document, position:BufferPosition, now:Float, complete:Array<LanguageLocation>->Void):Bool {
+	public function requestDefinition(document:Document, position:BufferPosition, now:Float, complete:Array<LanguageLocation>->Void, ?failed:String->Void):Bool {
 		if (!definitionSupported) return false;
-		return requestAt("textDocument/definition", document, position, now, response -> complete(response.error == null ? locations(response.result) : []));
+		return requestAt("textDocument/definition", document, position, now, response -> {
+			if (response.error != null && failed != null) failed(response.error);
+			else complete(response.error == null ? locations(response.result) : []);
+		});
 	}
 
 	public function requestSignatureHelp(document:Document, position:BufferPosition, now:Float, complete:Null<SignatureHelp>->Void):Bool {
@@ -349,6 +353,12 @@ class LanguageServiceClient {
 		if (method != "workspace/applyEdit") return new JsonRpcResponse(null, "Method not found");
 		var result = applyWorkspaceEdit(params == null ? null : Reflect.field(params, "edit"), captureDocuments());
 		return new JsonRpcResponse({applied: result.applied, failureReason: result.error});
+	}
+
+	/** Distinguish a published empty result from diagnostics that have not arrived yet. */
+	public function hasReceivedDiagnostics(document:Document):Bool {
+		var state = states.get(document.id);
+		return state != null && diagnostics.exists(state.uri);
 	}
 
 	public function diagnosticsFor(document:Document):Array<LanguageDiagnostic> {

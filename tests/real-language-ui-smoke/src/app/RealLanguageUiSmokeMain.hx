@@ -15,6 +15,9 @@ class RealLanguageUiApp extends ExosuitApp {
 	final desktopContext:DesktopUiHostContext;
 	final deadline:Float;
 	final repository:Bool;
+	final projectOwnership:Bool;
+	final projectPath:String;
+	var definitionChecked:Bool = false;
 	final original:String;
 	final symbol:String;
 	final renamed:String;
@@ -25,10 +28,12 @@ class RealLanguageUiApp extends ExosuitApp {
 	var declaration = new editor.BufferPosition(0, 0);
 	var accepted:String = "";
 
-	public function new(context:DesktopUiHostContext, project:String, repository:Bool) {
-		super(context.fonts, null, context, project + (repository ? "/src/config/ApplicationPaths.hx" : "/Main.hx"));
+	public function new(context:DesktopUiHostContext, project:String, mode:String) {
+		super(context.fonts, null, context, project + (mode == "overlapping" || mode == "nested" ? "/graphical/src/ui/EditorMinimap.hx" : mode == "repository" ? "/src/config/ApplicationPaths.hx" : "/Main.hx"));
 		this.desktopContext = context;
-		this.repository = repository;
+		this.repository = mode == "repository";
+		this.projectOwnership = mode == "overlapping" || mode == "nested";
+		this.projectPath = project;
 		symbol = repository ? "slash" : "answer";
 		renamed = repository ? "folderSeparator" : "result";
 		var view = host.activeView();
@@ -37,6 +42,11 @@ class RealLanguageUiApp extends ExosuitApp {
 		if (repository) view.replaceAllText(StringTools.replace(original, 'var slash = path.lastIndexOf("/")', 'var slash:Int = "wrong"'));
 		deadline = Sys.time() + 90;
 		application.openArgument(project);
+		if (mode == "overlapping") {
+			application.openArgument(project + "/src");
+			application.openArgument(project + "/graphical");
+			application.openArgument(project + "/graphical/src");
+		}
 	}
 
 	function advance():Void { stage++; stageFrame = frames; popupFrame = -1; Sys.println("real language UI stage " + stage); Sys.stdout().flush(); }
@@ -53,14 +63,82 @@ class RealLanguageUiApp extends ExosuitApp {
 
 	override public function submit(frame:LayoutFrame):RenderNode {
 		if (completed) return super.submit(frame);
+		requestFrame();
 		frames++;
-		if (Sys.time() > deadline) throw "real graphical language timeout at stage " + stage + ": " + application.language.statusLabel()
-			+ "; Problems: " + [for (problem in host.getProblems().values()) problem.message].join("; ");
 		var view = host.activeView(), service = application.language.client;
+		if (Sys.time() > deadline) throw "real graphical language timeout at stage " + stage + ": " + application.language.statusLabel()
+			+ "; document: " + (view == null ? "none" : view.document.path)
+			+ "; notifications: " + [for (notification in host.getNotifications().entries) notification.message].join("; ")
+			+ "; Problems: " + [for (problem in host.getProblems().values()) problem.message].join("; ");
 		if (view == null) throw "real graphical language test lost editor";
 		if (application.language.statusLabel().indexOf("disabled after repeated failures") >= 0)
 			throw "real graphical language startup failed: " + [for (problem in host.getProblems().values()) problem.message].join("; ");
-		if (service != null && service.ready) {
+		if (projectOwnership && service != null && service.ready) {
+			if (stage == 0 && service.hasReceivedDiagnostics(view.document)) {
+				var position = view.document.buffer.positionFromOffset(original.indexOf("document:Document") + "document:".length + 2);
+				if (!service.requestDefinition(view.document, position, Sys.time(), locations -> {
+					if (locations.length == 0 || locations[0].path != projectPath + "/src/editor/Document.hx")
+						throw "EditorMinimap dependency definition was not resolved: " + [for (location in locations) location.path].join(", ")
+						+ "; diagnostics: " + [for (diagnostic in service.diagnosticsFor(view.document)) diagnostic.message].join("; ");
+					definitionChecked = true;
+				})) throw "project ownership definition request rejected";
+				advance();
+			} else if (stage == 1 && definitionChecked) {
+				var position = view.document.buffer.positionFromOffset(original.indexOf("document:Document") + "document:".length + 2);
+				view.restoreCursor(position.line, position.column); view.cursorChanged();
+				ui.key(UiEventKind.KeyDown, UiKey.F12); advance();
+			} else if (stage == 2 && frames > stageFrame + 2 && view.document.path == projectPath + "/src/editor/Document.hx") {
+				if (view.document.buffer.line(view.cursorLine()).indexOf("class Document") < 0) throw "definition cursor missed declaration";
+				ui.key(UiEventKind.KeyDown, UiKey.Left, UiModifier.Alt); advance();
+			} else if (stage == 3 && view.document.path == projectPath + "/graphical/src/ui/EditorMinimap.hx") {
+				var position = view.document.buffer.positionFromOffset(original.indexOf("document:Document") + "document:".length + 2);
+				if (view.cursorLine() != position.line || view.cursorColumn() != position.column) throw "Go Back lost origin cursor";
+				ui.key(UiEventKind.KeyDown, UiKey.Right, UiModifier.Alt); advance();
+			} else if (stage == 4 && frames > stageFrame + 2 && view.document.path == projectPath + "/src/editor/Document.hx") {
+				ui.key(UiEventKind.KeyDown, UiKey.Left, UiModifier.Alt); advance();
+			} else if (stage == 5 && view.document.path == projectPath + "/graphical/src/ui/EditorMinimap.hx") {
+				advance();
+			} else if (stage == 6 && frames > stageFrame + 2) {
+				var area = host.textInputArea(); if (area == null) throw "definition pointer lacks caret geometry";
+				ui.pointerDown(area.x + 2, area.y + area.height / 2, 0, UiModifier.Control);
+				ui.pointerUp(area.x + 2, area.y + area.height / 2, 0, UiModifier.Control); advance();
+			} else if (stage == 7 && frames > stageFrame + 2 && view.document.path == projectPath + "/src/editor/Document.hx") {
+				ui.key(UiEventKind.KeyDown, UiKey.Left, UiModifier.Alt); advance();
+			} else if (stage == 8 && view.document.path == projectPath + "/graphical/src/ui/EditorMinimap.hx" && frames > stageFrame + 2) {
+				var area = host.textInputArea(); if (area == null) throw "context menu lacks caret geometry";
+				ui.pointerDown(area.x + 2, area.y + area.height / 2, 1);
+				ui.pointerUp(area.x + 2, area.y + area.height / 2, 1); advance();
+			} else if (stage == 9 && frames > stageFrame + 2) {
+				var entry:Null<RenderNode> = null;
+				ui.root.walk(node -> { if (node.semantics != null && node.semantics.label == "Go to Definition" && node.semantics.role == haxeon.ui.semantics.AccessibilityRole.MenuItem) entry = node; });
+				if (entry == null) throw "editor context menu lacks Go to Definition";
+				var bounds = entry.resolved.viewportBounds();
+				ui.pointerDown(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+				ui.pointerUp(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0); advance();
+			} else if (stage == 10 && frames > stageFrame + 2 && view.document.path == projectPath + "/src/editor/Document.hx") {
+				ui.key(UiEventKind.KeyDown, UiKey.Left, UiModifier.Alt); advance();
+			} else if (stage == 11 && view.document.path == projectPath + "/graphical/src/ui/EditorMinimap.hx") {
+				view.replaceAllText(original + "\nclass NativeDefinitionProbe { static function take(image:haxeon.platform.GraphicsImageRef):Void {} }\n");
+				var position = view.document.buffer.positionFromOffset(view.document.buffer.text.lastIndexOf("GraphicsImageRef") + 2);
+				view.restoreCursor(position.line, position.column); view.cursorChanged(); advance();
+			} else if (stage == 12 && frames > stageFrame + 2) {
+				ui.key(UiEventKind.KeyDown, UiKey.F12); advance();
+			} else if (stage == 13 && frames > stageFrame + 2 && view.document.path == projectPath + "/haxeon/packages/platform/src/haxeon/platform/GraphicsImageRef.hx") {
+				if (view.document.buffer.line(view.cursorLine()).indexOf("GraphicsImageRef") < 0) throw "native wrapper definition missed declaration";
+				ui.key(UiEventKind.KeyDown, UiKey.Left, UiModifier.Alt); advance();
+			} else if (stage == 14 && view.document.path == projectPath + "/graphical/src/ui/EditorMinimap.hx") {
+				view.undo(); advance();
+			} else if (stage == 15 && service.diagnosticsFor(view.document).length == 0) {
+				for (diagnostic in service.diagnosticsFor(view.document))
+					if (diagnostic.message.indexOf("Missing module") >= 0) throw "false import diagnostic: " + diagnostic.message;
+				if (view.document.buffer.text != original || sys.io.File.getContent(view.document.requirePath()) != original)
+					throw "project ownership test changed repository source";
+				completed = true;
+				Sys.println("PASS: EditorMinimap imports, F12/Ctrl+click/context-menu definitions, native wrapper and back/forward history with " + (application.workspace.projects.length > 1 ? "overlapping source folders" : "a nested project under the repository root"));
+				desktopContext.onCloseRequested = function(close) close();
+				desktopContext.requestClose();
+			}
+		} else if (service != null && service.ready) {
 			if (stage == 0 && service.diagnosticsFor(view.document).length > 0 && host.getProblems().values().length > 0) {
 				view.replaceAllText(repository ? StringTools.replace(original, "slash >", "sl >") : "function main():Int { var answer = 42; return ans; }\n");
 				var text = view.document.buffer.text;
@@ -69,7 +147,7 @@ class RealLanguageUiApp extends ExosuitApp {
 				view.restoreCursor(cursor.line, cursor.column);
 				view.cursorChanged();
 				advance();
-			} else if (stage == 1 && frames > stageFrame) {
+			} else if (stage == 1 && frames > stageFrame && [for (diagnostic in service.diagnosticsFor(view.document)) if (diagnostic.message.indexOf(repository ? '"sl"' : '"ans"') >= 0) diagnostic].length > 0) {
 				ui.key(UiEventKind.KeyDown, UiKey.Space, UiModifier.Control); advance();
 			} else if (stage == 2 && popupReady(host.isLanguagePopupVisible())) {
 				ui.key(UiEventKind.KeyDown, UiKey.Tab);
@@ -121,7 +199,7 @@ class RealLanguageUiSmokeMain {
 		options.width = 900; options.height = 600;
 		var app:Null<RealLanguageUiApp> = null;
 		var status = DesktopUiHost.run(options, function(context) {
-			app = new RealLanguageUiApp(context, args[0], args.length == 2 && args[1] == "repository");
+			app = new RealLanguageUiApp(context, args[0], args.length == 2 ? args[1] : "fixture");
 			return app;
 		});
 
