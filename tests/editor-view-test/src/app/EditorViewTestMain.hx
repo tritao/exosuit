@@ -87,10 +87,10 @@ class EditorViewTestMain {
 		require(bitmap.width == 80 && bitmap.height == 1024 && bitmap.pixels.length == 80 * 1024 * 4,
 			"dense minimap exceeds its bitmap memory bound");
 		require(bitmap.pixels.get(0) == 0x12 && bitmap.pixels.get(1) == 0x34 && bitmap.pixels.get(2) == 0x56
-			&& bitmap.pixels.get(3) == 178 && bitmap.pixels.get(7) == 0,
+			&& bitmap.pixels.get(3) == 102 && bitmap.pixels.get(7) == 0,
 			"minimap bitmap lost color, opacity or whitespace");
 		bitmap = preview.rasterize([for (_ in 0...8) 0x123456ff], [for (index in 0...512) index * 20.0], 10240, 512);
-		require(bitmap.pixels.get((511 * 80) * 4 + 3) == 178,
+		require(bitmap.pixels.get((511 * 80) * 4 + 3) == 102,
 			"minimap bitmap did not use wrapped row positions");
 		preview.update(new Document(null, "", syntaxes));
 		bitmap = preview.rasterize([for (_ in 0...8) 0x123456ff], [], 1, 1);

@@ -63,7 +63,7 @@ class EditorMinimap implements View {
 
 	function mapScale():Float {
 		var layout = resolvedLayout;
-		return 2.0 / Math.max(1, layout == null ? 20 : layout.textStyle.fontSize * 1.4);
+		return 3.0 / Math.max(1, layout == null ? 20 : layout.textStyle.fontSize * 1.4);
 	}
 
 	function mapGeometry(height:Float):MinimapGeometry {

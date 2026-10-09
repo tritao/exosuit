@@ -73,7 +73,7 @@ class MinimapModel {
 					pixels.set(offset, (color >>> 24) & 255);
 					pixels.set(offset + 1, (color >>> 16) & 255);
 					pixels.set(offset + 2, (color >>> 8) & 255);
-					pixels.set(offset + 3, Std.int((color & 255) * 0.7));
+					pixels.set(offset + 3, Std.int((color & 255) * 0.4));
 				}
 			}
 		}
