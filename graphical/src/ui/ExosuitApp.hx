@@ -1087,6 +1087,7 @@ class ExosuitApp implements DesktopUiApplication {
 			var localModel:Null<DirectoryTreeModel> = Std.isOfType(model, DirectoryTreeModel) ? cast model : null;
 			if (localModel != null) {
 				var applyStartedAt = Sys.time();
+				var previousRevision = model.revision();
 				var changedPaths = localModel.pollLoads();
 				if (changedPaths.length > 0) {
 					var tree = explorerTree;
@@ -1101,6 +1102,9 @@ class ExosuitApp implements DesktopUiApplication {
 					}
 					requestFrame();
 				}
+				var ready = localModel.readyExpansions(now);
+				if (explorerTree != null) for (path in ready) explorerTree.setExpanded(path, true);
+				if (ready.length > 0 || previousRevision != model.revision()) requestFrame();
 			}
 			if ((Std.isOfType(model, WorkspaceFileTreeModel) || (sidebar.visible && sidebar.activeId == "files")) &&
 				(model.watchesChanges() || now >= nextExplorerPoll)) {
@@ -1662,6 +1666,12 @@ class ExosuitApp implements DesktopUiApplication {
 			tree.hasChildrenHint = function(key) return remoteModel.isDirectoryKey(key);
 		if (localModel != null) {
 			tree.hasChildrenHint = function(key) return localModel.hasChildrenHint(key);
+			tree.onExpansionRequested = function(path, expanded, toggle) {
+				var allowed = localModel.requestExpansion(path, expanded, toggle);
+				requestFrame();
+				return allowed;
+			};
+			tree.onCollapseAll = localModel.cancelRequestedExpansions;
 			tree.onExpandedChanged = function(path, expanded) localModel.setDirectoryExpanded(path, expanded);
 		}
 		tree.onItemClicked = function(path, count) {

@@ -19,6 +19,7 @@ import haxeon.ui.widgets.text.MiddleEllipsisText;
 /** Asynchronous, paged directory listings for the Explorer tree. */
 class DirectoryTreeModel implements ExplorerTreeModel {
 	static final PAGE_SIZE:Int = 256;
+	static final EXPANSION_GRACE_SECONDS:Float = 0.1;
 	static final NoChangedPaths:Array<String> = [];
 	static final LOADING_SUFFIX:String = ".exosuit-tree-loading";
 	static final RETRY_SUFFIX:String = ".exosuit-tree-retry";
@@ -49,6 +50,8 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 	var priorityClicks:Map<String, Float> = [];
 	var visitedPaths:Array<String> = [];
 	var expandedDirectories:Map<String, Bool> = [];
+	final requestedExpansions:Map<String, Float> = [];
+	final busyExpansions:Map<String, Bool> = [];
 	var generation:Int = 0;
 	var requestSequence:Int = 0;
 	var listRevision:Int = 0;
@@ -73,9 +76,53 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 		expandedDirectories.set(root, true);
 	}
 
+	/** Keep unloaded branches visually closed until a complete listing (or error) is ready. */
+	public function requestExpansion(path:String, expanded:Bool, toggle:Bool):Bool {
+		if (!expanded) {
+			for (requested in [for (key in requestedExpansions.keys()) if (key == path || StringTools.startsWith(key, path + "/")) key]) cancelExpansion(requested);
+			return true;
+		}
+		if (requestedExpansions.exists(path)) {
+			if (toggle) cancelExpansion(path);
+			return false;
+		}
+		if (listings.exists(path) || errors.exists(path)) return true;
+		requestedExpansions.set(path, Sys.time());
+		requestLoad(path);
+		return false;
+	}
+
+	function cancelExpansion(path:String):Void {
+		requestedExpansions.remove(path);
+		if (busyExpansions.remove(path)) listRevision++;
+	}
+
+	public function cancelRequestedExpansions():Void {
+		for (path in [for (path in requestedExpansions.keys()) path]) cancelExpansion(path);
+	}
+
+	/** Called on the UI thread after pollLoads; publishes busy state only after the grace period. */
+	public function readyExpansions(now:Float):Array<String> {
+		var ready:Array<String> = [];
+		for (path in [for (path in requestedExpansions.keys()) path]) {
+			if (listings.exists(path) || errors.exists(path)) {
+				cancelExpansion(path);
+				ready.push(path);
+			} else if (!busyExpansions.exists(path) && now - requestedExpansions.get(path) >= EXPANSION_GRACE_SECONDS) {
+				busyExpansions.set(path, true);
+				listRevision++;
+			}
+		}
+		return ready;
+	}
+
 	public function setDirectoryExpanded(path:String, expanded:Bool):Void {
 		if (expanded) expandedDirectories.set(path, true);
-		else expandedDirectories.remove(path);
+		else {
+			expandedDirectories.remove(path);
+			for (requested in [for (key in requestedExpansions.keys()) if (key == path || StringTools.startsWith(key, path + "/")) key])
+				cancelExpansion(requested);
+		}
 	}
 
 	public function rootCount():Int return 1;
@@ -149,6 +196,14 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 		children.push(new KeyedView("name", new MiddleEllipsisText("filename", name, false,
 				new TextStyleOverride(null, fontSize, null, TextWrap.None, null, null, null, theme.tokens.text))
 		));
+		if (busyExpansions.exists(key)) {
+			var indicatorStyle = new LayoutStyle();
+			indicatorStyle.width = LayoutAxis.fixed(16.0);
+			indicatorStyle.height = LayoutAxis.fixed(3.0);
+			var indicator = new haxeon.ui.widgets.controls.ProgressBar("folder-loading", 0.0, 0.0, 1.0, "Loading folder", indicatorStyle);
+			indicator.mode = haxeon.ui.widgets.controls.ProgressMode.Indeterminate;
+			children.push(new KeyedView("loading", indicator));
+		}
 		return new Row("explorer-item", children, style);
 	}
 
@@ -272,6 +327,7 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 	/** Invalidates cached listings after the root/workspace changes. */
 	public function invalidate():Void {
 		generation++;
+		cancelRequestedExpansions();
 		listings.clear();
 		visitedPaths = [];
 		expandedDirectories.clear();
@@ -510,6 +566,7 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 				if (candidate == path || StringTools.startsWith(candidate, path + "/")) return true;
 			return false;
 		}
+		for (path in [for (path in requestedExpansions.keys()) if (underInvalidatedPath(path)) path]) cancelExpansion(path);
 		for (path in [for (path in listings.keys()) if (underInvalidatedPath(path)) path]) listings.remove(path);
 		for (path in [for (path in errors.keys()) if (underInvalidatedPath(path)) path]) errors.remove(path);
 		for (path in [for (path in expandedDirectories.keys()) if (underInvalidatedPath(path)) path]) expandedDirectories.remove(path);
