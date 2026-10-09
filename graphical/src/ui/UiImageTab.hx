@@ -7,6 +7,7 @@ class UiImageTab extends view.View {
 	public final id:String;
 	public final path:String;
 	public final image:Image;
+	public final sizeBytes:Int;
 	public var preview:Bool;
 
 	public static function supports(path:String):Bool {
@@ -23,6 +24,9 @@ class UiImageTab extends view.View {
 		this.path = path;
 		this.id = "image:" + path;
 		this.preview = preview;
+		var metadata = sys.FileSystem.metadata(path);
+		if (metadata == null) throw "Could not read image file metadata";
+		this.sizeBytes = metadata.size;
 		// Decode bytes directly through UIKit, never through the text filesystem API.
 		this.image = Image.loadFile(path);
 	}

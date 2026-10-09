@@ -4,9 +4,57 @@ import ui.UiImageTab;
 import ui.UiEditorTabs;
 import ui.UiWorkbenchHost;
 import ui.ImagePreviewView;
+import workspace.TextFileContent;
+import workspace.UnsupportedTextFile;
 
 class ImagePreviewTestMain {
 	static function require(value:Bool, message:String):Void { if (!value) throw message; }
+
+	static function checkUnsupportedFiles(host:UiWorkbenchHost, workspace:workspace.Workspace):Void {
+		var previous = host.activeTab();
+		var fixture = "build/binary-preview.bin";
+		var bytes = haxe.io.Bytes.alloc(5000);
+		bytes.set(0, 0x7f); bytes.set(1, 0x45); bytes.set(2, 0); bytes.set(3, 0x80);
+		sys.io.File.saveBytes(fixture, bytes);
+		var opened = host.openFile(fixture, true);
+		var tab = UiEditorTabs.unsupportedFile(host.activeTab());
+		if (tab == null) throw "binary file did not open a warning tab";
+		require(tab.file.binary && tab.file.sizeBytes == 5000 && tab.file.previewBytes == 4096, "binary classification or bounded preview");
+		require(tab.file.bytePreview.indexOf("7F 45 00 80") >= 0, "byte preview lost NUL or invalid bytes");
+		require(workspace.documents.documents.length == 0 && host.openFile(fixture, false) == opened && !tab.preview,
+			"binary file became editable or reopened as a duplicate");
+		var invalid = haxe.io.Bytes.alloc(2); invalid.set(0, 0xc0); invalid.set(1, 0x80);
+		var invalidEncoding = false;
+		try TextFileContent.decode(invalid, "invalid") catch (error:Dynamic) {
+			if (Std.isOfType(error, UnsupportedTextFile)) {
+				var file:UnsupportedTextFile = cast error; invalidEncoding = !file.binary;
+			}
+		}
+		require(invalidEncoding, "invalid UTF-8 reached the text decoder");
+		require(TextFileContent.decode(haxe.io.Bytes.ofString("Hello 🙂\n"), "valid") == "Hello 🙂\n", "valid UTF-8 changed");
+		require(ui.FileSizeLabel.format(1024) == "1.00 KB" && ui.FileSizeLabel.format(12) == "12 B", "file size status labels");
+		var fonts = haxeon.ui.FontCollection.create();
+		fonts.add("../../haxeon/packages/ui/vendor/skribidi/example/data/IBMPlexSans-Regular.ttf");
+		fonts.add("../../haxeon/packages/ui/vendor/skribidi/example/data/IBMPlexSans-Regular.ttf", haxeon.ui.FontFamily.Monospace);
+		var session = haxeon.ui.LayoutSession.create(), context = new haxeon.ui.core.UiContext(session, fonts);
+		var view = new ui.UnsupportedFileView(tab, function() {});
+		var root = context.submit(view, new haxeon.ui.LayoutFrame(640, 480));
+		var button:Null<haxeon.ui.Rect> = null;
+		root.walk(function(node) {
+			if (node.semantics != null && node.semantics.label == "View Bytes") button = node.globalBounds();
+		});
+		if (button == null) throw "byte preview action missing";
+		context.pointerDown(button.x + button.width / 2, button.y + button.height / 2, 0);
+		context.pointerUp(button.x + button.width / 2, button.y + button.height / 2, 0);
+		require(tab.showBytes, "byte preview action did not activate");
+		context.submit(view, new haxeon.ui.LayoutFrame(640, 480));
+		context.dispose(); session.dispose(); fonts.dispose();
+		var binaryItem = host.activeTab();
+		require(host.sessionLines().join("\n").indexOf("B\teditor\t") >= 0, "binary tab not persisted");
+		host.closeTab(binaryItem, "editor");
+		if (previous != null) host.activateEditorTab(UiEditorTabs.key(previous), "editor");
+		sys.FileSystem.deleteFile(fixture);
+	}
 
 	static function main():Int {
 		var syntax = new syntax.SyntaxRegistry();
@@ -78,6 +126,7 @@ class ImagePreviewTestMain {
 		var restored = UiEditorTabs.image(host.activeTab());
 		if (restored == null) throw "missing restored image";
 		require(host.closeTab(host.activeTab(), "editor") && restored.image.isDisposed(), "close leaked image resource");
+		checkUnsupportedFiles(host, workspace);
 		var remaining = UiEditorTabs.image(host.activeTab());
 		if (remaining == null) throw "missing remaining image";
 		host.dispose();

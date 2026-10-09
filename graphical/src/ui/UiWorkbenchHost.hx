@@ -35,6 +35,7 @@ import haxeon.ui.docking.DockNode;
 import haxeon.ui.docking.DockNodeTools;
 import haxeon.ui.core.WidgetId;
 import workspace.Workspace;
+import workspace.UnsupportedTextFile;
 
 import haxeon.ui.Color;
 import haxeon.ui.Insets;
@@ -427,6 +428,10 @@ class UiWorkbenchHost implements WorkbenchHost {
 				if (!shared) workspace.documents.close(documentView.document, true);
 				return index;
 			}
+			var unsupported = UiEditorTabs.unsupportedFile(item);
+			if (unsupported != null && unsupported.preview) {
+				pane.items.splice(index, 1); return index;
+			}
 			var image = UiEditorTabs.image(item);
 			if (image != null && image.preview) {
 				pane.items.splice(index, 1);
@@ -583,6 +588,8 @@ class UiWorkbenchHost implements WorkbenchHost {
 		var target = neighboringPane(horizontal, vertical), moving = activeTab();
 		if (target == null || moving == null) return false;
 		var source = activePane;
+		var movingUnsupported = UiEditorTabs.unsupportedFile(moving);
+		if (movingUnsupported != null) movingUnsupported.preview = false;
 		var movingImage = UiEditorTabs.image(moving);
 		if (movingImage != null) movingImage.preview = false;
 		var movingDocument = UiEditorTabs.document(moving);
@@ -605,6 +612,12 @@ class UiWorkbenchHost implements WorkbenchHost {
 				break;
 			}
 		}
+		if (movingUnsupported != null) for (index in 0...target.items.length) {
+			var candidate = UiEditorTabs.unsupportedFile(target.items[index]);
+			if (candidate != null && candidate.file.path == movingUnsupported.file.path) {
+				candidate.preview = false; duplicate = index; break;
+			}
+		}
 		if (duplicate >= 0) { UiEditorTabs.dispose(moving); target.activeIndex = duplicate; }
 		else { target.items.push(moving); target.activeIndex = target.items.length - 1; }
 		target.focusTarget = null;
@@ -617,6 +630,8 @@ class UiWorkbenchHost implements WorkbenchHost {
 		var target = activeIndex + delta;
 		if (target < 0 || target >= activePane.items.length) return false;
 		var view = activePane.items.splice(activeIndex, 1)[0];
+		var unsupported = UiEditorTabs.unsupportedFile(view);
+		if (unsupported != null) unsupported.preview = false;
 		var image = UiEditorTabs.image(view);
 		if (image != null) image.preview = false;
 		var documentView = UiEditorTabs.document(view);
@@ -692,6 +707,30 @@ class UiWorkbenchHost implements WorkbenchHost {
 	public function captureCloseActivePane(force:Bool):Void->Bool {
 		var pane = activePane.id;
 		return function() return closePane(pane, force);
+	}
+
+	public function openFile(path:String, preview:Bool = false):View {
+		if (UiImageTab.supports(path)) return openImage(path, preview);
+		var normalized = workspace.fileSystem.normalize(path);
+		try return openDocumentTab(workspace.documents.open(normalized), preview)
+		catch (error:Dynamic) {
+			if (!Std.isOfType(error, UnsupportedTextFile)) throw error;
+			return openUnsupportedFile(cast error, preview);
+		}
+	}
+
+	public function openUnsupportedFile(file:UnsupportedTextFile, preview:Bool):UiUnsupportedFileTab {
+		for (index in 0...activePane.items.length) {
+			var existing = UiEditorTabs.unsupportedFile(activePane.items[index]);
+			if (existing != null && existing.file.path == file.path) {
+				if (!preview) existing.preview = false;
+				setActiveIndex(index); return existing;
+			}
+		}
+		var insertion = preview ? removePreviewTab(activePane) : activePane.items.length;
+		var tab = new UiUnsupportedFileTab(file, preview);
+		activePane.items.insert(insertion, UiEditorTab.UnsupportedFile(tab));
+		setActiveIndex(insertion); return tab;
 	}
 
 	public function openImage(path:String, preview:Bool = false):UiImageTab {
@@ -882,6 +921,13 @@ class UiWorkbenchHost implements WorkbenchHost {
 			result.push("P\t" + pane.id);
 			for (index in 0...pane.items.length) {
 				var item = pane.items[index];
+				var unsupported = UiEditorTabs.unsupportedFile(item);
+				if (unsupported != null) {
+					var path = unsupported.file.path;
+					if (path.indexOf("\t") < 0 && path.indexOf("\n") < 0)
+						result.push("B\t" + pane.id + "\t" + (index == pane.activeIndex ? "1" : "0") + "\t" + path);
+					continue;
+				}
 				var image = UiEditorTabs.image(item);
 				if (image != null) {
 					if (image.path.indexOf("\t") < 0 && image.path.indexOf("\n") < 0)
@@ -996,6 +1042,18 @@ class UiWorkbenchHost implements WorkbenchHost {
 				if (pane != null && terminal != null) {
 					pane.items.push(UiEditorTab.Terminal(terminal));
 					if (fields[2] == "1" || pane.activeIndex < 0) pane.activeIndex = pane.items.length - 1;
+				}
+				continue;
+			}
+			if (modern && fields.length == 4 && fields[0] == "B") {
+				var pane = paneById(fields[1]);
+				if (pane != null) try {
+					workspace.fileSystem.read(fields[3]);
+				} catch (error:Dynamic) {
+					if (Std.isOfType(error, UnsupportedTextFile)) {
+						pane.items.push(UiEditorTab.UnsupportedFile(new UiUnsupportedFileTab(cast error, false)));
+						if (fields[2] == "1" || pane.activeIndex < 0) pane.activeIndex = pane.items.length - 1;
+					}
 				}
 				continue;
 			}

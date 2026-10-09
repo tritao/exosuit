@@ -219,7 +219,7 @@ class ExosuitApp implements DesktopUiApplication {
 			return capturedHost;
 		}, preferences, null, this.capabilities);
 		host = capturedHost;
-		application.openResourceView = function(path) return UiImageTab.supports(path) ? host.openImage(path) : null;
+		application.openFileView = function(path, preview) return host.openFile(path, preview);
 		host.configureKeybinding = function(command) {
 			openSettings();
 			settingsPanel.setShowAdvanced(true);
@@ -1518,6 +1518,10 @@ class ExosuitApp implements DesktopUiApplication {
 		var terminal = tab == null ? null : UiEditorTabs.terminal(tab);
 		var label = active == null ? (terminal == null ? "No document open" : terminal.title) :
 			(active.title + (active.dirty ? " *" : "") + " - " + active.encodingLabel());
+		var image = tab == null ? null : UiEditorTabs.image(tab);
+		var unsupported = tab == null ? null : UiEditorTabs.unsupportedFile(tab);
+		if (image != null) label = image.title;
+		else if (unsupported != null) label = unsupported.title;
 		var center = host.getNotifications();
 		var notification = center.current();
 		var languageStatus = application.language.statusLabel();
@@ -1530,6 +1534,8 @@ class ExosuitApp implements DesktopUiApplication {
 		var indentation = indentSettings == null ? "" : (indentSettings.insertSpaces ? "Spaces: " : "Tabs: ") + indentSettings.indentSize;
 		var indentationDetails = active == null || indentSettings == null ? "" : indentation + " · Tab width: " + indentSettings.tabWidth + " · " + active.indentation.source;
 		var trailing = languageStatus.length > 0 ? languageStatus : '${host.activePane.items.length} open';
+		if (image != null) trailing = "Whole Image · " + image.image.width + " × " + image.image.height + " px · " + FileSizeLabel.format(image.sizeBytes);
+		else if (unsupported != null) trailing = (unsupported.file.binary ? "Binary file" : "Unsupported encoding") + " · " + FileSizeLabel.format(unsupported.file.sizeBytes);
 		return new RetainedView("status-bar", function(_) return new StatusBarView({
 			document: label,
 			indentation: active == null ? null : indentation,
@@ -1692,8 +1698,7 @@ class ExosuitApp implements DesktopUiApplication {
 			}
 			if ((count != 1 && count != 2) || (localModel != null && localModel.isDirectoryPath(path))) return;
 			try {
-				if (UiImageTab.supports(path)) host.openImage(path, count == 1);
-				else if (count == 1) host.openPreview(application.workspace.documents.open(path));
+				application.open(path, count == 1);
 			} catch (error:Dynamic) application.reportError("files", "Could not open file: " + Std.string(error));
 		};
 		tree.onItemContextMenu = function(path, event) {
@@ -1957,6 +1962,14 @@ class ExosuitApp implements DesktopUiApplication {
 		var items:Array<TabItem> = [];
 		var filenames:Map<String, String> = new Map();
 		for (item in editorPane.items) {
+			var unsupported = UiEditorTabs.unsupportedFile(item);
+			if (unsupported != null) {
+				var key = UiEditorTabs.key(item);
+				var fileTab = new TabItem(key, unsupported.title + (unsupported.preview ? " (preview)" : ""),
+					new UnsupportedFileView(unsupported, function() requestFrame()), true);
+				fileTab.onClose = function() host.closeTab(item, paneId, true);
+				filenames.set(key, unsupported.file.path); items.push(fileTab); continue;
+			}
 			var image = UiEditorTabs.image(item);
 			if (image != null) {
 				var imageKey = UiEditorTabs.key(item);
@@ -2085,6 +2098,8 @@ class ExosuitApp implements DesktopUiApplication {
 				if (event.button != 0 || tabClicks.register(paneId + ":" + key, event) != 2) return;
 				for (view in tabs) if (key == "doc:" + view.document.id) host.keepDocument(view.document, paneId);
 				for (item in editorPane.items) {
+					var unsupported = UiEditorTabs.unsupportedFile(item);
+					if (unsupported != null && UiEditorTabs.key(item) == key) { unsupported.preview = false; requestFrame(); }
 					var image = UiEditorTabs.image(item);
 					if (image != null && UiEditorTabs.key(item) == key) host.keepImage(image);
 					var workspaceFile = UiEditorTabs.workspaceFile(item);

@@ -1,7 +1,6 @@
 package ui;
 
 import haxeon.ui.Color;
-import haxeon.ui.Insets;
 import haxeon.ui.LayoutAxis;
 import haxeon.ui.LayoutStyle;
 import haxeon.ui.LayoutVisualKind;
@@ -9,9 +8,6 @@ import haxeon.ui.Rect;
 import haxeon.ui.core.BuildContext;
 import haxeon.ui.core.RenderNode;
 import haxeon.ui.core.View;
-import haxeon.ui.widgets.layout.Column;
-import haxeon.ui.widgets.KeyedView;
-import haxeon.ui.widgets.text.Text;
 
 /** Fits an image without upscaling, with a checkerboard for transparent pixels. */
 class ImagePreviewView implements View {
@@ -32,12 +28,8 @@ class ImagePreviewView implements View {
 	}
 
 	public function build(context:BuildContext):RenderNode {
-		var outer = new LayoutStyle();
-		outer.width = LayoutAxis.grow(); outer.height = LayoutAxis.grow();
-		var header = new LayoutStyle();
-		header.padding = new Insets(12, 8, 12, 8);
 		var surface = new LayoutStyle();
-		surface.width = LayoutAxis.stretch(); surface.height = LayoutAxis.grow();
+		surface.width = LayoutAxis.stretch(); surface.height = LayoutAxis.stretch();
 		surface.clipHorizontal = true; surface.clipVertical = true;
 		surface.background = context.theme.tokens.surface;
 		var node = new RenderNode(context.id(tab.id + ":preview"), LayoutVisualKind.Custom, surface);
@@ -61,15 +53,6 @@ class ImagePreviewView implements View {
 					(x + y) % 2 == 0 ? light : dark);
 			canvas.drawImage(tab.image, bounds);
 		}, tab.id + ":" + tab.image.identity);
-		return new Column(tab.id + ":content", [
-			new KeyedView("dimensions", new Text(tab.image.width + " × " + tab.image.height + " px", header)),
-			new KeyedView("image", new ImageSurface(node))
-		], outer).build(context);
+		return node;
 	}
-}
-
-private class ImageSurface implements View {
-	final node:RenderNode;
-	public function new(node:RenderNode) this.node = node;
-	public function build(context:BuildContext):RenderNode return node;
 }

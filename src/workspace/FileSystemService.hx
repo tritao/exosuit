@@ -45,7 +45,7 @@ class FileSystemService implements EditorFileSystem {
 		return parent + "/" + name;
 
 	public function read(path:String):String
-		return File.getContent(path);
+		return TextFileContent.decode(File.getBytes(path), path);
 
 	public function readBytes(path:String):Bytes
 		return File.getBytes(path);

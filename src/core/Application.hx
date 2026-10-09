@@ -155,12 +155,12 @@ class Application {
 		});
 	}
 
-	/** Optional host handler for non-text resources; null falls back to a document. */
-	public var openResourceView:Null<String->Null<View>>;
+	/** Optional host file opener; null falls back to a text document. */
+	public var openFileView:Null<(String, Bool)->Null<View>>;
 
-	public function open(path:String):View {
-		if (openResourceView != null) {
-			var resource = openResourceView(path);
+	public function open(path:String, preview:Bool = false):View {
+		if (openFileView != null) {
+			var resource = openFileView(path, preview);
 			if (resource != null) return resource;
 		}
 		return root.openDocument(documents.open(path));

@@ -4,6 +4,7 @@ package ui;
 enum UiEditorTab {
 	Document(view:UiDocumentView);
 	Image(image:UiImageTab);
+	UnsupportedFile(file:UiUnsupportedFileTab);
 	Terminal(terminal:UiTerminalTab);
  Agent(agent:UiAgentTab);
 	WorkspaceFile(file:UiWorkspaceFileTab);
