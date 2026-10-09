@@ -49,6 +49,8 @@ class UiEditorTabs {
 				value.dispose();
 			case Image(value):
 				value.dispose();
-			case Agent(_), WorkspaceFile(_), UnsupportedFile(_):
+			case WorkspaceFile(value):
+				value.dispose();
+			case Agent(_), UnsupportedFile(_):
 		}
 }

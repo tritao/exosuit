@@ -1,5 +1,6 @@
 package style;
 
+import haxe.Json;
 import syntax.HighlightToken;
 
 class Theme {
@@ -29,10 +30,23 @@ class Theme {
 	public var diagnosticError:Int = 0xe06c75ff;
 	public var diagnosticWarning:Int = 0xe5c07bff;
 	public var scrollbar:Int = 0x606060ff;
+	public var styleRevision(default, null):Int = 0;
+	final textMateStyles:Array<TextMateScopeStyle> = [];
 
 	public function new() {}
 
-	public function tokenColor(kind:Int):Int
+	public function tokenColor(kind:Int, ?scopes:Array<String>):Int {
+		if (scopes != null && scopes.length > 0) {
+			var selected:Null<TextMateScopeStyle> = null, bestSpecificity = -1;
+			for (style in textMateStyles) {
+				var specificity = selectorSpecificity(style.selector, scopes);
+				if (specificity >= 0 && specificity >= bestSpecificity) {
+					selected = style;
+					bestSpecificity = specificity;
+				}
+			}
+			if (selected != null) return selected.color;
+		}
 		if (lightSyntax) return switch kind {
 			case HighlightToken.KEYWORD: 0x7b3fb3ff;
 			case HighlightToken.TYPE: 0x146b8aff;
@@ -40,9 +54,9 @@ class Theme {
 			case HighlightToken.STRING: 0x247a37ff;
 			case HighlightToken.COMMENT: 0x66758aff;
 			case HighlightToken.OPERATOR: 0x425064ff;
-			case HighlightToken.LITERAL: 0xb33e4bff;
-			default: editorForeground;
-		};
+				case HighlightToken.LITERAL: 0xb33e4bff;
+				default: editorForeground;
+			};
 		else return switch kind {
 			case HighlightToken.KEYWORD: 0xc678ddff;
 			case HighlightToken.TYPE: 0x56b6c2ff;
@@ -53,6 +67,78 @@ class Theme {
 			case HighlightToken.LITERAL: 0xe06c75ff;
 			default: editorForeground;
 		};
+	}
+
+	/** Appends TextMate theme foreground selectors in source order. */
+	public function addTextMateTheme(source:String):Void {
+		var raw:Dynamic = Json.parse(source), settings:Dynamic = Reflect.field(raw, "settings");
+		if (settings == null || !Std.isOfType(settings, Array)) throw "TextMate theme requires a settings array";
+		for (entry in (cast settings:Array<Dynamic>)) {
+			var values:Dynamic = Reflect.field(entry, "settings"), foreground = values == null ? null : Reflect.field(values, "foreground");
+			if (!Std.isOfType(foreground, String)) continue;
+			var color = parseColor(cast foreground), scope:Dynamic = Reflect.field(entry, "scope");
+			if (scope == null) {
+				textMateStyles.push(new TextMateScopeStyle("", color));
+			} else if (Std.isOfType(scope, String)) {
+				textMateStyles.push(new TextMateScopeStyle(cast scope, color));
+			} else if (Std.isOfType(scope, Array)) {
+				for (selector in (cast scope:Array<Dynamic>))
+					if (Std.isOfType(selector, String)) textMateStyles.push(new TextMateScopeStyle(cast selector, color));
+			}
+		}
+		styleRevision++;
+	}
+
+	static function parseColor(value:String):Int {
+		if (value.length != 7 && value.length != 9 || value.charAt(0) != "#")
+			throw 'Invalid TextMate theme color "$value"';
+		var red = Std.parseInt("0x" + value.substr(1, 2));
+		var green = Std.parseInt("0x" + value.substr(3, 2));
+		var blue = Std.parseInt("0x" + value.substr(5, 2));
+		var alpha = value.length == 9 ? Std.parseInt("0x" + value.substr(7, 2)) : 255;
+		if (red == null || green == null || blue == null || alpha == null) throw 'Invalid TextMate theme color "$value"';
+		return (red << 24) | (green << 16) | (blue << 8) | alpha;
+	}
+
+	static function selectorSpecificity(selector:String, scopes:Array<String>):Int {
+		if (selector.length == 0) return 0;
+		var best = -1;
+		for (alternative in selector.split(",")) {
+			var parts = StringTools.trim(alternative).split(" "), excluded = false, required:Array<String> = [];
+			for (part in parts) {
+				part = StringTools.trim(part);
+				if (part.length == 0) continue;
+				if (StringTools.startsWith(part, "-")) {
+					var exclusionSelector = part.substr(1);
+					for (scope in scopes) if (scopeMatches(scope, exclusionSelector)) excluded = true;
+				} else required.push(part);
+			}
+			if (excluded) continue;
+			var cursor = scopes.length - 1, matched = true, specificity = 0;
+			var index = required.length;
+			while (index > 0) {
+				var part = required[--index], found = false;
+				while (cursor >= 0) {
+					if (scopeMatches(scopes[cursor], part)) {
+						found = true;
+						cursor--;
+						break;
+					}
+					cursor--;
+				}
+				if (!found) {
+					matched = false;
+					break;
+				}
+				specificity += part.split(".").length * 4 + 1;
+			}
+			if (matched && specificity > best) best = specificity;
+		}
+		return best;
+	}
+
+	static function scopeMatches(scope:String, selector:String):Bool
+		return selector.length > 0 && (scope == selector || StringTools.startsWith(scope, selector + "."));
 
 	/** Standard LSP entity names; unfamiliar categories retain syntax colors. */
 	public function semanticColor(type:String, modifiers:Array<String>):Null<Int> {

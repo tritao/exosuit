@@ -124,7 +124,7 @@ class EditorMinimap implements View {
 			var map = lineMap;
 			if (map != null && map.rows.length > 0) {
 				model.update(document, Std.int(Math.floor(tileTop / scale)),
-					Std.int(Math.ceil((tileTop + tileHeight) / scale)), map.rows, positionRevision);
+					Std.int(Math.ceil((tileTop + tileHeight) / scale)), map.rows, positionRevision, theme);
 			}
 
 			var colors = [for (kind in 0...8) theme.tokenColor(kind)];

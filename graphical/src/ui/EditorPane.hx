@@ -439,7 +439,7 @@ class EditorPane implements View {
 		area.onNavigationIntent = navigationIntentHandler;
 		area.pageHeightProvider = function() return scrollController.viewportHeight;
 		area.selectionTextProvider = selectedTextProvider;
-		var current = [document.buffer.stateId, decorations.revision, searchRevision(),
+		var current = [document.buffer.stateId, decorations.revision, searchRevision(), editorTheme.styleRevision,
 			editorTheme.searchMatch, editorTheme.editorForeground, definitionStart, definitionEnd, definitionState, semanticRevision];
 		for (kind in 0...8) current.push(editorTheme.tokenColor(kind));
 		var changed = caretPresentation.update(document, selection, editorTheme);

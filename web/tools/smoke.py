@@ -212,7 +212,7 @@ def main():
                                                    "code": "Key" + letter, "windowsVirtualKeyCode": ord(letter)})
 
     for kind in ("mousePressed", "mouseReleased"):
-        page.command("Input.dispatchMouseEvent", {"type": kind, "x": 550, "y": 95,
+        page.command("Input.dispatchMouseEvent", {"type": kind, "x": 550, "y": 120,
                                                  "button": "left", "clickCount": 1})
     if options.screenshot:
         shot = page.command("Page.captureScreenshot", {"format": "png"})

@@ -165,6 +165,7 @@
     "../src/session/RecentProjects.hx",
     "../src/session/SessionPersistence.hx",
     "../src/session/WorkspaceSession.hx",
+    "../src/style/TextMateScopeStyle.hx",
     "../src/style/Theme.hx",
     "../src/syntax/BuiltinSyntax.hx",
     "../src/syntax/HighlightToken.hx",
@@ -172,6 +173,10 @@
     "../src/syntax/Highlighter.hx",
     "../src/syntax/SyntaxDefinition.hx",
     "../src/syntax/SyntaxRegistry.hx",
+    "../src/syntax/TextMateFrame.hx",
+    "../src/syntax/TextMateGrammar.hx",
+    "../src/syntax/TextMateRule.hx",
+    "../src/syntax/TextMateTokenizer.hx",
     "../src/view/LayoutKind.hx",
     "../src/view/View.hx",
     "../src/workspace/EditorFileSystem.hx",
@@ -324,6 +329,9 @@
     },
     "terminalsession": {
       "path": "../native-packages/terminal/session"
+    },
+    "textmateregex": {
+      "path": "../native-packages/oniguruma"
     }
   },
   "target": "wasm32",

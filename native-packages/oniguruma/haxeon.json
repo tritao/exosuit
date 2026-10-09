@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "package": { "name": "textmateregex" },
+  "sourceRoots": ["haxe"],
+  "scopeSourceRoots": false,
+  "native": {
+    "cmake": {
+      "source": ".",
+      "target": "textmate_regex",
+      "library": "textmate_regex",
+      "inputs": [
+        "CMakeLists.txt",
+        "include/textmate_regex.h",
+        "src/textmate_regex.c",
+        "vendor/oniguruma/CMakeLists.txt",
+        "vendor/oniguruma/src"
+      ]
+    }
+  },
+  "ffi": {
+    "interfaces": ["bindings/textmate_regex.hxi"],
+    "projections": ["bindings/textmate_regex.hxmap"]
+  },
+  "target": "host"
+}

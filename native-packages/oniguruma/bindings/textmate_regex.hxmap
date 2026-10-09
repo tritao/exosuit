@@ -1,0 +1,11 @@
+{
+  "interface": "TextMateRegex",
+  "package": "textmateregex.ffi",
+  "modules": {
+    "functions": "TextMateRegex",
+    "types": "TextMateRegexTypes"
+  },
+  "typeNames": {
+    "textmate_regex_scanner": "Scanner"
+  }
+}

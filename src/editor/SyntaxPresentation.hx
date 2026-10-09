@@ -26,10 +26,16 @@ class SyntaxPresentation {
 			var paragraph = text.paragraphRangeAtIndex(line);
 			var utf16Start = text.utf16OffsetForCodepoint(paragraph.start);
 			for (token in highlighter.line(line).tokens) {
-				if (token.kind == HighlightToken.NORMAL) continue;
+				var color = theme.tokenColor(token.kind, token.scopes);
+				if (token.kind == HighlightToken.NORMAL && color == theme.editorForeground) continue;
 				var from = Std.int(Math.max(start, text.codepointOffsetForUtf16(utf16Start + token.start)));
 				var to = Std.int(Math.min(end, text.codepointOffsetForUtf16(utf16Start + token.start + token.length)));
-				if (from < to) result.push(new SyntaxColorRange(from, to, theme.tokenColor(token.kind)));
+				if (from < to) {
+					var previous = result.length == 0 ? null : result[result.length - 1];
+					if (previous != null && previous.end == from && previous.color == color)
+						result[result.length - 1] = new SyntaxColorRange(previous.start, to, color);
+					else result.push(new SyntaxColorRange(from, to, color));
+				}
 			}
 		}
 		return result;

@@ -22,6 +22,7 @@ import completion.CompletionRegistry;
 import completion.DocumentWordCompletionProvider;
 import search.DocumentSearch;
 import search.SearchOptions;
+import textmateregex.RegexScanner;
 
 class FakeEditorClock implements EditorClock {
 	public var value:Float = 0.0;
@@ -36,12 +37,24 @@ class EditorViewTestMain {
 			throw message;
 	}
 
+	static function hasScope(tokens:Array<syntax.HighlightToken>, expected:String):Bool {
+		for (token in tokens) for (scope in token.scopes) if (scope == expected) return true;
+		return false;
+	}
+
 	static function main():Int {
 
 		var syntaxes = new SyntaxRegistry();
 		BuiltinSyntax.install(syntaxes);
+		var regexScanner = new RegexScanner();
+		regexScanner.add("(?<=\\b)([A-Z]\\w*)(?=\\s*\\()");
+		var regexMatch = regexScanner.find("λ🙂 Widget(\"text\")");
+		require(regexMatch != null && regexMatch.start == 4 && regexMatch.end == 10 &&
+			regexMatch.captures.length == 2 && regexMatch.captures[1].start == 4 && regexMatch.captures[1].end == 10,
+			"Oniguruma captures did not preserve TextMate lookaround or UTF-16 offsets");
+		regexScanner.close();
 		var preview = new editor.MinimapModel();
-		var previewDocument = new Document("preview.hx", "class Main {\n\t🙂x\n}", syntaxes);
+		var previewDocument = new Document("preview.hx", "class Main {\n\t🙂Main\n}", syntaxes);
 		preview.update(previewDocument);
 		require(preview.rows.length == 3 && preview.rows[1].spans[0].start == 4 && preview.rows[1].spans[0].length == 1 && preview.rows[1].spans[1].start == 5,
 			"minimap tabs or Unicode columns are incorrect");
@@ -111,7 +124,7 @@ class EditorViewTestMain {
 		for (range in syntaxColors) {
 			if (range.color == syntaxTheme.tokenColor(syntax.HighlightToken.STRING)) {
 				stringFound = true;
-				require(range.start == 8 && range.end == 12, "syntax string range confused UTF-16 with codepoints");
+				require(range.start == 8 && range.end == 12, 'syntax string range confused UTF-16 with codepoints: ${range.start}-${range.end}');
 			}
 		}
 		require(stringFound, "syntax presentation omitted the Unicode string");
@@ -130,8 +143,59 @@ class EditorViewTestMain {
 		var symbolDocument = new Document("symbols.hx", "🙂 + 42", syntaxes);
 		var symbolColors = SyntaxPresentation.foreground(symbolDocument, syntaxTheme, 0,
 			symbolDocument.buffer.document.codepointCount);
-		require(symbolColors.length == 3 && symbolColors[0].start == 0 && symbolColors[0].end == 1,
-			"syntax token boundaries split an astral character outside a string");
+		var symbolTokens = symbolDocument.highlighter.line(0).tokens;
+		for (token in symbolTokens)
+			require(token.start != 1 && token.start + token.length != 1, "syntax token boundary split an astral character");
+		require(symbolColors.length == 2 && symbolColors[0].start == 2 && symbolColors[0].end == 3
+			&& symbolColors[1].start == 4 && symbolColors[1].end == 6,
+			"TextMate presentation returned incorrect Unicode ranges");
+		var themed = new Theme();
+		themed.addTextMateTheme('{"settings":[{"scope":"source.haxe keyword.control.haxe","settings":{"foreground":"#123456"}}]}');
+		var keywordDocument = new Document("keyword.hx", "class Widget {}", syntaxes);
+		var keywordColors = SyntaxPresentation.foreground(keywordDocument, themed, 0,
+			keywordDocument.buffer.document.codepointCount);
+		require(keywordColors.length > 0 && keywordColors[0].start == 0 && keywordColors[0].end == 5
+			&& keywordColors[0].color == 0x123456ff, "TextMate theme selector did not color a scoped keyword");
+		var jsonDocument = new Document("settings.json", '{"enabled": true, "count": 42}', syntaxes);
+		require(hasScope(jsonDocument.highlighter.line(0).tokens, "support.type.property-name.json")
+			&& hasScope(jsonDocument.highlighter.line(0).tokens, "constant.language.json")
+			&& hasScope(jsonDocument.highlighter.line(0).tokens, "constant.numeric.json"),
+			"JSON TextMate grammar omitted keys, literals, or numbers");
+		var javascriptDocument = new Document("app.js", "const message = `Hi ${name}`; // note", syntaxes);
+		var javascriptTokens = javascriptDocument.highlighter.line(0).tokens;
+		require(hasScope(javascriptTokens, "keyword.control.js") && hasScope(javascriptTokens, "string.template.js")
+			&& hasScope(javascriptTokens, "meta.interpolation.js") && hasScope(javascriptTokens, "comment.line.double-slash.js"),
+			"JavaScript TextMate grammar omitted keywords, template interpolation, or comments");
+		var typescriptDocument = new Document("types.ts", "interface Widget { value: number }", syntaxes);
+		var typescriptTokens = typescriptDocument.highlighter.line(0).tokens;
+		require(hasScope(typescriptTokens, "storage.type.ts") && hasScope(typescriptTokens, "entity.name.type.js"),
+			"TypeScript grammar did not compose with JavaScript rules");
+		var pythonDocument = new Document("module.py", "def render():\n    return \"\"\"hello\nworld\"\"\"", syntaxes);
+		require(hasScope(pythonDocument.highlighter.line(0).tokens, "keyword.control.python")
+			&& hasScope(pythonDocument.highlighter.line(2).tokens, "string.quoted.triple.double.python"),
+			"Python TextMate grammar omitted keywords or multiline string state");
+		var shellDocument = new Document("build.sh", "if [ \"$HOME\" = true ]; then echo ok; fi", syntaxes);
+		var shellTokens = shellDocument.highlighter.line(0).tokens;
+		require(hasScope(shellTokens, "keyword.control.shell") && hasScope(shellTokens, "variable.other.shell"),
+			"Shell TextMate grammar omitted control keywords or variables");
+		var dynamicGrammar = syntaxes.addGrammar('{"scopeName":"source.dynamic-test","patterns":[{"begin":"<(\\\\w+)>","end":"</\\\\1>","name":"meta.tag.dynamic-test","contentName":"string.quoted.dynamic-test"}]}');
+		syntaxes.add(new syntax.SyntaxDefinition("Dynamic Test", [".dyn"], true, [], [], "", "", "", "", "", false, dynamicGrammar));
+		var dynamicDocument = new Document("example.dyn", "<tag>body</tag>", syntaxes);
+		require(hasScope(dynamicDocument.highlighter.line(0).tokens, "string.quoted.dynamic-test"),
+			"TextMate begin/end backreference did not preserve its captured delimiter");
+		var documentManager = new core.DocumentManager(syntaxes), managedDocument = documentManager.createUntitled();
+		managedDocument.setPath("managed.hx");
+		managedDocument.buffer.replaceAllText("class Managed {}", new BufferSelection());
+		managedDocument.highlighter.line(0);
+		require(documentManager.close(managedDocument, true), "document manager did not close the TextMate document");
+		var paletteDocument = new Document("palette.hx", "class Main {}", syntaxes), paletteTheme = new Theme();
+		var paletteMinimap = new editor.MinimapModel();
+		paletteMinimap.update(paletteDocument, -1, -1, null, -1, paletteTheme);
+		var darkKeywordColor = paletteMinimap.rows[0].spans[0].color;
+		paletteTheme.lightSyntax = true;
+		paletteMinimap.update(paletteDocument, -1, -1, null, -1, paletteTheme);
+		require(paletteMinimap.rows[0].spans[0].color != darkKeywordColor,
+			"minimap did not refresh after the syntax palette changed");
 		var decorationDocument = new Document("marks.hx", "é🙂value\nsecond", syntaxes);
 		var decorationRegistry = new PluginDecorationRegistry();
 		var diagnosticDecoration = decorationRegistry.add("language", "error", decorationDocument, 0, 3, 8,

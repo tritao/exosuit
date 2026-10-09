@@ -25,6 +25,7 @@ manifest = {
         "noisekit": {"path": "../native-packages/noise"},
         "terminalkit": {"path": "../native-packages/terminal"},
         "terminalsession": {"path": "../native-packages/terminal/session"},
+        "textmateregex": {"path": "../native-packages/oniguruma"},
     },
     "target": "wasm32", "outputDir": "build"
 }

@@ -13,10 +13,13 @@ class HighlightToken {
 	public final kind:Int;
 	public final start:Int;
 	public final length:Int;
+	/** Innermost TextMate scopes; empty for the built-in lexer. */
+	public final scopes:Array<String>;
 
-	public function new(kind:Int, start:Int, length:Int) {
+	public function new(kind:Int, start:Int, length:Int, ?scopes:Array<String>) {
 		this.kind = kind;
 		this.start = start;
 		this.length = length;
+		this.scopes = scopes == null ? [] : scopes;
 	}
 }

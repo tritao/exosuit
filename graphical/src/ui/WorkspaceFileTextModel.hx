@@ -19,27 +19,31 @@ class WorkspaceFileTextModel {
 	public var presentationRevision(default, null):Int = 0;
 	var editorTheme:Theme;
 	var previousColors:Array<Int> = [];
+	var previousThemeRevision:Int = -1;
 
 	public function new(path:String, contents:String, syntaxes:SyntaxRegistry, editorTheme:Theme) {
 		if (path == null || contents == null || syntaxes == null || editorTheme == null)
 			throw "Invalid workspace file text model";
 		buffer = new TextBuffer(contents);
 		syntax = syntaxes.find(path, contents.substr(0, 128));
-		highlighter = new Highlighter(buffer, syntax);
+		highlighter = new Highlighter(buffer, syntax, syntaxes);
 		foregroundProvider = function(start, end) return provideForeground(start, end);
 		updateTheme(editorTheme);
 	}
 
 	public function document():TextDocument return buffer.document;
 
+	public function dispose():Void highlighter.dispose();
+
 	public function updateTheme(theme:Theme):Void {
 		var colors = [theme.editorForeground];
 		for (kind in 0...8) colors.push(theme.tokenColor(kind));
-		var changed = colors.length != previousColors.length;
+		var changed = colors.length != previousColors.length || theme.styleRevision != previousThemeRevision;
 		if (!changed) for (index in 0...colors.length)
 			if (colors[index] != previousColors[index]) changed = true;
 		if (changed) {
 			previousColors = colors;
+			previousThemeRevision = theme.styleRevision;
 			presentationRevision++;
 		}
 		editorTheme = theme;

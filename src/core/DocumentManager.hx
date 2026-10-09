@@ -102,6 +102,8 @@ class DocumentManager {
 	public function close(document:Document, force:Bool = false):Bool {
 		if (document.dirty && !force)
 			return false;
-		return documents.remove(document);
+		if (!documents.remove(document)) return false;
+		document.dispose();
+		return true;
 	}
 }

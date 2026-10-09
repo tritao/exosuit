@@ -86,10 +86,19 @@ class Document {
 
 	function selectSyntax():Void {
 		if (highlighterSubscription != null) highlighterSubscription.release();
+		if (highlighter != null) highlighter.dispose();
 		syntax = syntaxes.find(path == null ? title : path, buffer.text.substr(0, 128));
-		highlighter = new Highlighter(buffer, syntax);
+		highlighter = new Highlighter(buffer, syntax, syntaxes);
 		highlighterSubscription = buffer.subscribe(highlighter.bufferChanged);
 		if (indentation != null) indentation.updateSyntax(buffer, highlighter);
+	}
+
+	public function dispose():Void {
+		if (highlighterSubscription != null) {
+			highlighterSubscription.release();
+			highlighterSubscription = null;
+		}
+		if (highlighter != null) highlighter.dispose();
 	}
 
 	public static function open(path:String, registry:SyntaxRegistry, ?fileSystem:EditorFileSystem):Document {

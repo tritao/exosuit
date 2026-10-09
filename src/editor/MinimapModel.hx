@@ -14,15 +14,29 @@ class MinimapModel {
 	var rangeStart:Int = -1;
 	var rangeEnd:Int = -1;
 	var visualRevision:Int = -1;
+	var themeRevision:Int = -1;
+	var themeColors:Array<Int> = [];
 
 	public function new() {}
 
-	public function update(document:Document, firstLine:Int = -1, lastLine:Int = -1, ?visualRows:Array<{start:Int, end:Int, top:Float, bottom:Float}>, geometryRevision:Int = -1):Void {
-		if (documentId == document.id && revision == document.buffer.stateId && syntax == document.syntax && rangeStart == firstLine && rangeEnd == lastLine && visualRevision == geometryRevision) return;
+	public function update(document:Document, firstLine:Int = -1, lastLine:Int = -1,
+			?visualRows:Array<{start:Int, end:Int, top:Float, bottom:Float}>, geometryRevision:Int = -1,
+			?theme:style.Theme):Void {
+		var requestedThemeRevision = theme == null ? -1 : theme.styleRevision;
+		var requestedThemeColors:Array<Int> = theme == null ? [] : [theme.editorForeground];
+		if (theme != null) for (kind in 0...8) requestedThemeColors.push(theme.tokenColor(kind));
+		var sameTheme = requestedThemeColors.length == themeColors.length;
+		if (sameTheme) for (index in 0...themeColors.length)
+			if (themeColors[index] != requestedThemeColors[index]) sameTheme = false;
+		if (documentId == document.id && revision == document.buffer.stateId && syntax == document.syntax &&
+			rangeStart == firstLine && rangeEnd == lastLine && visualRevision == geometryRevision &&
+			themeRevision == requestedThemeRevision && sameTheme) return;
 		generation++;
 		visualRevision = geometryRevision;
 		rangeStart = firstLine;
 		rangeEnd = lastLine;
+		themeRevision = requestedThemeRevision;
+		themeColors = requestedThemeColors;
 		documentId = document.id;
 		revision = document.buffer.stateId;
 		syntax = document.syntax;
@@ -46,11 +60,13 @@ class MinimapModel {
 				var code = text.charCodeAt(offset);
 				while (token + 1 < tokens.length && offset >= tokens[token].start + tokens[token].length) token++;
 				var kind = tokens.length == 0 ? 0 : tokens[token].kind;
+				var scopes = tokens.length == 0 ? [] : tokens[token].scopes;
+				var color:Null<Int> = theme == null ? null : theme.tokenColor(kind, scopes);
 				var width = code == 9 ? 4 - column % 4 : 1;
 				if (code != 9 && code != 32 && code != 13) {
 					var previous = spans.length == 0 ? null : spans[spans.length - 1];
-					if (previous != null && previous.kind == kind && previous.start + previous.length == column) previous.length++;
-					else spans.push({start: column, length: 1, kind: kind});
+					if (previous != null && previous.kind == kind && previous.color == color && previous.start + previous.length == column) previous.length++;
+					else spans.push({start: column, length: 1, kind: kind, color: color});
 				}
 				column += width;
 				offset++;
@@ -76,7 +92,7 @@ class MinimapModel {
 			if (index < positions.length && (y < 0 || y >= 1)) continue;
 			var row = Std.int(Math.max(0, Math.min(pixelHeight - 1, Math.floor(y * pixelHeight))));
 			for (span in rows[index].spans) {
-				var color = colors[span.kind];
+				var color = span.color == null ? colors[span.kind] : span.color;
 				for (pixelRow in row...Std.int(Math.min(pixelHeight, row + markHeight)))
 					for (column in span.start...Std.int(Math.min(MAX_COLUMNS, span.start + span.length))) {
 						var offset = (pixelRow * MAX_COLUMNS + column) * 4;
@@ -92,7 +108,7 @@ class MinimapModel {
 }
 
 typedef MinimapRow = {var line:Int; var spans:Array<MinimapSpan>;}
-typedef MinimapSpan = {var start:Int; var length:Int; var kind:Int;}
+typedef MinimapSpan = {var start:Int; var length:Int; var kind:Int; var color:Null<Int>;}
 
 typedef MinimapBitmap = {
 	var width:Int;

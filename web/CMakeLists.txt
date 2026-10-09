@@ -37,6 +37,7 @@ add_subdirectory("${MATERIA_SOURCE_ROOT}/scenekit/scene" scene)
 add_subdirectory("${MATERIA_SOURCE_ROOT}/scenekit/scene_render" scene_render)
 add_subdirectory("${MATERIA_SOURCE_ROOT}/exosuit/native-packages/noise" noisekit)
 add_subdirectory("${MATERIA_SOURCE_ROOT}/exosuit/native-packages/terminal" terminalkit)
+add_subdirectory("${MATERIA_SOURCE_ROOT}/exosuit/native-packages/oniguruma" textmate_regex)
 
 # The host heap ends where the guest's managed heap begins; the guest owns the
 # rest of the fixed-size memory. Values are byte offsets, multiples of 64 KiB.
@@ -57,7 +58,7 @@ add_executable(exosuit_web
 target_include_directories(exosuit_web PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 target_link_libraries(exosuit_web PRIVATE
     NativeKit::nativekit NativeKit::gpu NativeKit::ui NativeKit::scene NativeKit::scene_render
-    NativeKit::wasm_host_allocator noisekit terminalkit)
+    NativeKit::wasm_host_allocator noisekit terminalkit textmate_regex)
 target_link_options(exosuit_web PRIVATE
     "-sINITIAL_MEMORY=${EXOSUIT_WEB_GUEST_MEMORY_LIMIT}"
     "-sALLOW_MEMORY_GROWTH=0"

@@ -61,4 +61,6 @@ class UiWorkspaceFileTab {
 	}
 
 	public function clearSearchSelection():Void searchSelection = null;
+
+	public function dispose():Void textModel.dispose();
 }

@@ -7,3 +7,6 @@
 [submodule "native-packages/noise/vendor/noise-c"]
 	path = native-packages/noise/vendor/noise-c
 	url = https://github.com/tritao/noise-c.git
+[submodule "native-packages/oniguruma/vendor/oniguruma"]
+	path = native-packages/oniguruma/vendor/oniguruma
+	url = https://github.com/kkos/oniguruma.git

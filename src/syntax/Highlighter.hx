@@ -12,11 +12,14 @@ class Highlighter {
 	public final buffer:TextBuffer;
 	public final syntax:SyntaxDefinition;
 	final cache:Map<Int, HighlightedLine> = [];
+	final textMate:Null<TextMateTokenizer>;
 	var validatedThrough:Int = -1;
 
-	public function new(buffer:TextBuffer, syntax:SyntaxDefinition) {
+	public function new(buffer:TextBuffer, syntax:SyntaxDefinition, ?syntaxes:SyntaxRegistry) {
 		this.buffer = buffer;
 		this.syntax = syntax;
+		textMate = syntax.grammar == null ? null : new TextMateTokenizer(syntax.grammar,
+			syntaxes == null ? new SyntaxRegistry() : syntaxes);
 	}
 
 	public function invalidate(line:Int, removedLines:Int, insertedLines:Int):Void {
@@ -35,30 +38,31 @@ class Highlighter {
 
 	public function line(index:Int):HighlightedLine {
 		if (index <= validatedThrough) return cache.get(index);
-		var start = validatedThrough + 1, state = NORMAL_STATE;
+		var start = validatedThrough + 1, state:Dynamic = textMate == null ? NORMAL_STATE : null;
 		if (start > 0) {
 			var previous = cache.get(start - 1);
 			if (previous == null) {
 				start = 0;
 				validatedThrough = -1;
-			} else state = previous.stateAfter;
+			} else state = previous.tokenizerStateAfter;
 		}
 		for (lineIndex in start...index + 1) {
 			var text = buffer.line(lineIndex), cached = cache.get(lineIndex);
-			if (cached == null || cached.text != text || cached.stateBefore != state) {
+			if (cached == null || cached.text != text || cached.tokenizerStateBefore != state) {
 				cached = tokenize(text, state);
 				cache.set(lineIndex, cached);
 			}
-			state = cached.stateAfter;
+			state = cached.tokenizerStateAfter;
 		}
 		validatedThrough = index;
 		return cache.get(index);
 	}
 
-	function tokenize(text:String, initialState:Int):HighlightedLine {
+	function tokenize(text:String, initialState:Dynamic):HighlightedLine {
+		if (textMate != null) return textMate.tokenize(text, initialState);
 		if (!syntax.highlighting)
 			return new HighlightedLine(text, [new HighlightToken(HighlightToken.NORMAL, 0, text.length)], NORMAL_STATE, NORMAL_STATE);
-		var tokens:Array<HighlightToken> = [], index = 0, state = initialState;
+		var tokens:Array<HighlightToken> = [], index = 0, state:Int = cast initialState;
 		while (index < text.length) {
 			var start = index, kind = HighlightToken.NORMAL;
 			if (state == COMMENT_STATE) {
@@ -135,6 +139,12 @@ class Highlighter {
 			push(tokens, kind, start, index - start);
 		}
 		return new HighlightedLine(text, tokens, initialState, state);
+	}
+
+	public function dispose():Void {
+		if (textMate != null) textMate.dispose();
+		cache.clear();
+		validatedThrough = -1;
 	}
 
 	static function stringEnd(text:String, index:Int, quote:Int):Int {
