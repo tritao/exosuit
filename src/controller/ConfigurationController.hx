@@ -197,29 +197,29 @@ class ConfigurationController {
 		commands.add("doc:indentation", context -> openIndentationCommandView(), hasDocument, "Choose Document Indentation");
 		for (whole in [false, true]) {
 			var entire = whole;
-			commands.add(entire ? "doc:reindent-document" : "doc:reindent-selection", function(context) {
+			commands.addEditorAction(entire ? "doc:reindent-document" : "doc:reindent-selection", function(context) {
 				var document = context.requireDocument(), selection = context.requireView().getSelection(), value = settingsFor(document);
 				if (selection != null) editor.EditorActions.reindent(document.buffer, selection, document.highlighter, value.tabWidth, value.insertSpaces, value.indentSize, entire);
 			}, function(context) return hasDocument(context) && context.requireDocument().syntax.name == "Haxe", entire ? "Reindent Document" : "Reindent Selection");
 		}
 		commands.add("settings:open", context -> openSettingsCommandView());
 		commands.add("keybindings:open", context -> openKeybindingsCommandView());
-		commands.add("doc:tab", function(context) {
+		commands.addEditorAction("doc:tab", function(context) {
 			var value = settingsFor(context.requireDocument());
 			context.requireView().tab(value.tabWidth, value.insertSpaces, value.indentSize);
 		}, hasDocument);
-		commands.add("doc:backspace", function(context) {
+		commands.addEditorAction("doc:backspace", function(context) {
 			context.requireView().backspace(settingsFor(context.requireDocument()).tabWidth, settingsFor(context.requireDocument()).indentSize);
 		}, hasDocument);
-		commands.add("doc:newline", function(context) {
+		commands.addEditorAction("doc:newline", function(context) {
 			var value = settingsFor(context.requireDocument());
 			context.requireView().insertNewline(value.tabWidth, value.insertSpaces, value.indentSize);
 		}, hasDocument);
-		commands.add("doc:indent", function(context) {
+		commands.addEditorAction("doc:indent", function(context) {
 			var value = settingsFor(context.requireDocument());
 			context.requireView().indent(value.tabWidth, value.insertSpaces, value.indentSize);
 		}, hasDocument);
-		commands.add("doc:unindent", function(context) {
+		commands.addEditorAction("doc:unindent", function(context) {
 			var value = settingsFor(context.requireDocument());
 			context.requireView().unindent(value.tabWidth, value.indentSize);
 		}, hasDocument);

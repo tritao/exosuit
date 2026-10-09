@@ -1980,7 +1980,6 @@ class ExosuitApp implements DesktopUiApplication {
 			var pane = editorPanes.get(documentView.id);
 			if (pane == null) {
 				pane = new EditorPane(document, theme, function() {
-					documentView.cursorChanged();
 					requestFrame();
 				}, documentView.selection, editorPalette,
 					host.getPluginDecorations(), documentView.decorationSearchMatches, documentView.searchDecorationRevision, documentView.scrollController);
@@ -1990,6 +1989,7 @@ class ExosuitApp implements DesktopUiApplication {
 			documentView.editSettings = pane.editSettings;
 			documentView.deletionBoundary = pane.deletionBoundary;
 			pane.minimapEnabled = application.settings.current.minimapEnabled;
+			pane.requestCursorReveal = documentView.cursorChanged;
 			pane.consumeCursorReveal = documentView.consumeCursorReveal;
 			pane.fontSize = application.settings.current.fontSize;
 			pane.onResolvedEditor = function(bounds, id) host.editorResolved(paneId, bounds, id);

@@ -62,6 +62,9 @@ interface WorkbenchHost {
 	function documentRenamed(document:Document):Void;
 	/** Closes all views of a clean document, without changing the active pane. Refuses dirty documents. */
 	function closeDocument(document:Document):Bool;
+	/** Refresh selection presentation without requesting a caret reveal. */
+	function selectionChanged():Void;
+	/** Refresh editor state and explicitly request caret visibility. */
 	function cursorChanged():Void;
 	function textInput(text:String):Void;
 	function setComposition(text:String, start:Int, length:Int):Void;

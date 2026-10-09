@@ -84,8 +84,11 @@ class UiDocumentView extends View {
 	override public function getSelection():Null<BufferSelection>
 		return selection;
 
-	override public function selectAll():Void
+	override public function selectAll():Void {
 		selection.selectAll(document.buffer);
+		// Bulk selection preserves the current viewport, including queued reveals.
+		cursorRevealPending = false;
+	}
 
 	override public function undo():Void
 		document.buffer.undo(selection);

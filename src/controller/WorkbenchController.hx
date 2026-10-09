@@ -47,7 +47,7 @@ class WorkbenchController {
 		if (root.handleLanguagePopupKey(key, modifiers)) return true;
 		var handled = keymap.onKeyPressed(key, modifiers, context);
 		if (handled) {
-			root.cursorChanged();
+			root.selectionChanged();
 			search.editorStateChanged();
 		}
 		return handled;
@@ -211,13 +211,13 @@ class WorkbenchController {
 		commands.add("workbench:show-errors", context -> openErrorLog());
 		commands.add("workbench:show-problems", context -> openProblems());
 		commands.add("workbench:clear-notifications", context -> root.getNotifications().clear());
-		commands.add("doc:duplicate-line", context -> context.requireView().duplicateLines(), hasDocument);
-		commands.add("doc:move-line-up", context -> context.requireView().moveLines(-1), hasDocument);
-		commands.add("doc:move-line-down", context -> context.requireView().moveLines(1), hasDocument);
-		commands.add("doc:delete-line", context -> context.requireView().deleteLines(), hasDocument);
-		commands.add("doc:join-lines", context -> context.requireView().joinLines(), hasDocument);
-		commands.add("doc:toggle-line-comment", context -> context.requireView().toggleLineComment(), hasDocument);
-		commands.add("doc:select-next-occurrence", context -> context.requireView().selectNextOccurrence(), hasDocument);
+		commands.addEditorAction("doc:duplicate-line", context -> context.requireView().duplicateLines(), hasDocument);
+		commands.addEditorAction("doc:move-line-up", context -> context.requireView().moveLines(-1), hasDocument);
+		commands.addEditorAction("doc:move-line-down", context -> context.requireView().moveLines(1), hasDocument);
+		commands.addEditorAction("doc:delete-line", context -> context.requireView().deleteLines(), hasDocument);
+		commands.addEditorAction("doc:join-lines", context -> context.requireView().joinLines(), hasDocument);
+		commands.addEditorAction("doc:toggle-line-comment", context -> context.requireView().toggleLineComment(), hasDocument);
+		commands.addEditorAction("doc:select-next-occurrence", context -> context.requireView().selectNextOccurrence(), hasDocument);
 		keymap.addDirect(Platform.KEY_TAB, Platform.MOD_SHIFT, ["doc:unindent"]);
 		keymap.addDirect(Platform.KEY_DOWN, Platform.MOD_ALT + Platform.MOD_SHIFT, ["doc:duplicate-line"]);
 		keymap.addDirect(Platform.KEY_UP, Platform.MOD_ALT, ["doc:move-line-up"]);

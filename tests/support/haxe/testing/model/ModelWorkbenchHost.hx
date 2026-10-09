@@ -340,6 +340,8 @@ class ModelWorkbenchHost implements WorkbenchHost {
 		return tabs.activeView == null ? null : tabs.activeView.textInputArea();
 	}
 
+	public function selectionChanged():Void {}
+
 	public function cursorChanged():Void {
 		if (tabs.activeView != null) tabs.activeView.cursorChanged();
 	}

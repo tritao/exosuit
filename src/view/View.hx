@@ -63,6 +63,9 @@ class View {
 	public function setComposition(text:String, start:Int, length:Int):Void {}
 	public function clearComposition():Void {}
 	public function textInputArea():Null<TextInputArea> return null;
+	/** Explicit request to reveal the caret after editing or navigation.
+	 * Selection updates alone do not call this hook.
+	 */
 	public function cursorChanged():Void {}
 	public function scrollX():Int return 0;
 	public function scrollY():Int return 0;

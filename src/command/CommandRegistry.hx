@@ -17,6 +17,17 @@ class CommandRegistry {
 		commands.push(new Command(name, perform, predicate, description));
 	}
 
+	/** Editor edits and navigation explicitly reveal the affected view after execution.
+	 * Bulk selection and non-editor commands use add() and preserve the viewport.
+	 */
+	public function addEditorAction(name:String, perform:CommandContext->Void, ?predicate:CommandContext->Bool, ?description:String):Void {
+		add(name, function(context) {
+			var view = context.requireView();
+			perform(context);
+			view.cursorChanged();
+		}, predicate, description);
+	}
+
 	public function contains(name:String):Bool
 		return find(name) != null;
 

@@ -75,6 +75,7 @@ class EditorPane implements View {
 	public var onActivated:Null<Void->Void> = null;
 	public var onContextMenu:Null<haxeon.ui.core.UiEvent->Void> = null;
 	public var onCaretRectChanged:Null<Void->Void> = null;
+	public var requestCursorReveal:Void->Void = function() {};
 	public var consumeCursorReveal:Void->Bool = function() return false;
 	final editorTheme:style.Theme;
 	final decorations:PluginDecorationRegistry;
@@ -193,6 +194,7 @@ class EditorPane implements View {
 			case DeleteWordBackward(macStyle): deleteWords(layout, true, macStyle);
 			case DeleteWordForward(macStyle): deleteWords(layout, false, macStyle);
 		}
+		requestCursorReveal();
 		onEdited();
 		return true;
 	}
@@ -268,6 +270,7 @@ class EditorPane implements View {
 		}
 		if (changed) {
 			selection.setRanges(document.buffer, moved);
+			requestCursorReveal();
 			onEdited();
 		}
 		return true;
@@ -276,6 +279,7 @@ class EditorPane implements View {
 	function handleEdit(transaction:EditTransaction):Void {
 		desiredVerticalXs = [];
 		document.buffer.applyEditTransaction(selection, transaction);
+		requestCursorReveal();
 		onEdited();
 	}
 
@@ -330,6 +334,7 @@ class EditorPane implements View {
 				onCaretRectChanged();
 		};
 		area.onSelectionChange = selectionHandler;
+		area.onCaretRevealRequest = requestCursorReveal;
 		area.additionalSelectionProvider = additionalProvider;
 		area.onSelectionDragScroll = function(delta) return scrollController.jumpTo(scrollController.offsetX, scrollController.offsetY + delta);
 		area.historyManagedExternally = true;
