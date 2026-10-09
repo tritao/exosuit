@@ -1660,6 +1660,7 @@ class ExosuitApp implements DesktopUiApplication {
 			}, null, null);
 		tree.indentWidth = 10.0;
 		tree.verticalGuidesOnly = true;
+		tree.guidesOnInteraction = true;
 		tree.compactLeafIndent = true;
 		tree.expandOnSingleClick = true;
 		if (remoteModel != null)
