@@ -23,6 +23,7 @@ import editor.Document;
 import editor.MinimapModel;
 import editor.MinimapGeometry;
 import editor.MinimapDensity;
+import editor.MinimapLineMap;
 
 /** Fixed right-hand preview sharing the editor's resolved paragraph positions. */
 class EditorMinimap implements View {
@@ -33,11 +34,10 @@ class EditorMinimap implements View {
 	final viewportGeometry:Null<editor.EditorViewportGeometry>;
 	/** Workbench zoom factor, separate from the editor font size and layout coordinates. */
 	public var applicationZoom:Float = 1.0;
-	var rowPositions:Array<Float> = [];
+	var lineMap:Null<MinimapLineMap>;
 	var positionRevision:Int = 0;
 	var resolvedLayout:Null<TextEditorLayout>;
 	var resolvedRevision:Int = -1;
-	var resolvedGeneration:Int = -1;
 	var dragging:Bool = false;
 	var dragOffset:Float = 0;
 	public var node(default, null):Null<RenderNode>;
@@ -51,19 +51,11 @@ class EditorMinimap implements View {
 	}
 
 	public function resolveTextLayout(layout:TextEditorLayout):Void {
-		if (resolvedLayout == layout && resolvedRevision == layout.geometryRevision && resolvedGeneration == model.generation) return;
+		if (resolvedLayout == layout && resolvedRevision == layout.geometryRevision) return;
 		resolvedLayout = layout;
 		resolvedRevision = layout.geometryRevision;
-		resolvedGeneration = model.generation;
-		var previous = rowPositions;
-		rowPositions = [];
-		if (layout.paragraphCount == 0) { positionRevision++; return; }
-		var origin = layout.paragraphCaret(0).y;
-		for (row in model.rows)
-			rowPositions.push(row.line < layout.paragraphCount ? Math.max(0, layout.paragraphCaret(row.line).y - origin) : 0);
-		var changed = previous.length != rowPositions.length;
-		if (!changed) for (index in 0...previous.length) if (previous[index] != rowPositions[index]) changed = true;
-		if (changed) positionRevision++;
+		lineMap = new MinimapLineMap(layout.visualRows());
+		positionRevision++;
 	}
 
 	static function color(value:Int, alpha:Float = 1):Color
@@ -75,20 +67,10 @@ class EditorMinimap implements View {
 		return MinimapDensity.resolve(applicationZoom);
 	}
 
-	function mapScale():Float {
-		if (viewportGeometry != null) return viewportGeometry.minimapScale(applicationZoom);
-		var layout = resolvedLayout;
-		var lineHeight = 21.0;
-		if (layout != null && layout.paragraphCount > 0) {
-			var caret = layout.paragraphCaret(0);
-			lineHeight = layout.paragraphStyle.lineHeight == null ?
-				Math.abs(caret.descender - caret.ascender) : layout.paragraphStyle.lineHeight;
-		}
-		return density().rowPitch / Math.max(1, lineHeight);
-	}
-
 	function mapGeometry(height:Float):MinimapGeometry {
-		return viewportGeometry == null ? new MinimapGeometry(height, scroll.contentHeight, scroll.viewportHeight, mapScale()) : viewportGeometry.minimapGeometry(height, applicationZoom);
+		return viewportGeometry == null ?
+			new MinimapGeometry(height, scroll.contentHeight, scroll.viewportHeight, density().rowPitch, lineMap) :
+			viewportGeometry.minimapGeometry(height, applicationZoom, lineMap);
 	}
 
 	public function build(context:BuildContext):RenderNode {
@@ -131,7 +113,7 @@ class EditorMinimap implements View {
 		built.onPaint(function(canvas, geometry) {
 			if (geometry.width <= 0 || geometry.height <= 0) return;
 			var height = geometry.height;
-			var scale = mapScale();
+			var scale = density().rowPitch;
 			var mapping = mapGeometry(height);
 			var offset = mapping.previewOffset(scroll.offsetY);
 			// Cache a page with a scroll margin, rather than compressing the whole file.
@@ -139,19 +121,18 @@ class EditorMinimap implements View {
 			var tileStep = 256.0 / previewDensity.rasterScale;
 			var tileTop = Math.floor(offset / tileStep) * tileStep;
 			var tileHeight = Math.ceil((height + tileStep) * previewDensity.rasterScale) / previewDensity.rasterScale;
-			var layout = resolvedLayout;
-			if (layout != null && layout.paragraphCount > 0) {
-				var origin = layout.paragraphCaret(0).y;
-				model.update(document, layout.paragraphIndexAtY(tileTop / scale + origin),
-					layout.paragraphIndexAtY((tileTop + tileHeight) / scale + origin));
-				resolveTextLayout(layout);
+			var map = lineMap;
+			if (map != null && map.rows.length > 0) {
+				model.update(document, Std.int(Math.floor(tileTop / scale)),
+					Std.int(Math.ceil((tileTop + tileHeight) / scale)), map.rows, positionRevision);
 			}
+
 			var colors = [for (kind in 0...8) theme.tokenColor(kind)];
 			var markHeight = previewDensity.markHeight;
 			var key = model.generation + ":" + positionRevision + ":" + tileTop + ":" + tileHeight + ":" + scale + ":" + markHeight + ":" + previewDensity.rasterScale + ":" + colors.join(",");
 			if (painting.key != key) {
 				painting.dispose();
-				var positions = [for (position in rowPositions) position * scale - tileTop];
+				var positions = [for (row in model.rows) row.line * scale - tileTop];
 				var bitmap = model.rasterize(colors, positions, tileHeight, tileHeight, markHeight, previewDensity.rasterScale);
 				painting.image = Image.create(bitmap.width, bitmap.height, ImageFormat.RGBA8,
 					bitmap.pixels, ImageFilter.Nearest);
@@ -160,7 +141,7 @@ class EditorMinimap implements View {
 			var previewImage = painting.image;
 			if (previewImage != null) canvas.drawImage(previewImage, new Rect(4, tileTop - offset, geometry.width - 8, tileHeight));
 			var top = mapping.thumbTop(scroll.offsetY);
-			var visible = mapping.thumbHeight;
+			var visible = mapping.thumbHeightAt(scroll.offsetY);
 			canvas.fillRectIfPositive(new Rect(0, top, geometry.width, Math.max(2, visible)), color(theme.scrollbar, 0.25 * visibility.opacity));
 			canvas.fillRectIfPositive(new Rect(0, top, 2, Math.max(2, visible)), color(theme.scrollbar, 0.8 * visibility.opacity));
 		});
@@ -177,10 +158,10 @@ class EditorMinimap implements View {
 			if (event.button != 0 || built.resolved == null) return;
 			var mapping = mapGeometry(built.resolved.height);
 			var top = mapping.thumbTop(scroll.offsetY);
-			if (event.localY >= top && event.localY <= top + mapping.thumbHeight)
+			if (event.localY >= top && event.localY <= top + mapping.thumbHeightAt(scroll.offsetY))
 				dragOffset = event.localY - top;
 			else {
-				dragOffset = mapping.thumbHeight / 2;
+				dragOffset = mapping.thumbHeightAt(scroll.offsetY) / 2;
 				navigate(event);
 			}
 			dragging = true;

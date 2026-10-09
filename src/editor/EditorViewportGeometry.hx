@@ -41,8 +41,9 @@ class EditorViewportGeometry {
 	public function maxScrollY():Float return Math.max(0, contentHeight - viewportHeight);
 	public function overlapsMinimap(offsetX:Float):Bool return minimapWidth > 0 && !wordWrap && maxScrollX() - offsetX > 0.5;
 	public function minimapScale(zoom:Float):Float return MinimapDensity.resolve(zoom).rowPitch / lineHeight;
-	public function minimapGeometry(height:Float, zoom:Float):MinimapGeometry
-		return new MinimapGeometry(height, contentHeight, viewportHeight, minimapScale(zoom));
+	public function minimapGeometry(height:Float, zoom:Float, ?lineMap:MinimapLineMap):MinimapGeometry
+		return new MinimapGeometry(height, contentHeight, viewportHeight,
+			lineMap == null ? minimapScale(zoom) : MinimapDensity.resolve(zoom).rowPitch, lineMap);
 
 	/** Reveal a source-space caret against the unobscured viewport, using the same scroll bounds. */
 	public function reveal(x:Float, top:Float, bottom:Float, offsetX:Float, offsetY:Float):{x:Float, y:Float} {

@@ -13,31 +13,36 @@ class MinimapModel {
 	var syntax:Null<syntax.SyntaxDefinition>;
 	var rangeStart:Int = -1;
 	var rangeEnd:Int = -1;
+	var visualRevision:Int = -1;
 
 	public function new() {}
 
-	public function update(document:Document, firstLine:Int = -1, lastLine:Int = -1):Void {
-		if (documentId == document.id && revision == document.buffer.stateId && syntax == document.syntax && rangeStart == firstLine && rangeEnd == lastLine) return;
+	public function update(document:Document, firstLine:Int = -1, lastLine:Int = -1, ?visualRows:Array<{start:Int, end:Int, top:Float, bottom:Float}>, geometryRevision:Int = -1):Void {
+		if (documentId == document.id && revision == document.buffer.stateId && syntax == document.syntax && rangeStart == firstLine && rangeEnd == lastLine && visualRevision == geometryRevision) return;
 		generation++;
+		visualRevision = geometryRevision;
 		rangeStart = firstLine;
 		rangeEnd = lastLine;
 		documentId = document.id;
 		revision = document.buffer.stateId;
 		syntax = document.syntax;
 		rows.resize(0);
-		var count = document.buffer.lineCount();
+		var count = visualRows == null ? document.buffer.lineCount() : visualRows.length;
 		var start = firstLine < 0 ? 0 : Std.int(Math.max(0, Math.min(count - 1, firstLine)));
 		var end = lastLine < 0 ? count : Std.int(Math.max(start + 1, Math.min(count, lastLine + 1)));
 		var samples = Std.int(Math.min(end - start, MAX_ROWS));
 		// Avoid advancing the stateful highlighter through a huge file just for its preview.
-		var colored = count <= MAX_COLORED_ROWS && document.buffer.document.codepointCount <= 32768;
+		var colored = document.buffer.lineCount() <= MAX_COLORED_ROWS && document.buffer.document.codepointCount <= 32768;
 		for (sample in 0...samples) {
 			var line = samples <= 1 ? start : start + Std.int(sample * (end - start - 1) / (samples - 1));
-			var text = document.buffer.line(line);
-			var tokens = colored ? document.highlighter.line(line).tokens : [];
+			var sourceLine = visualRows == null ? line : document.buffer.document.paragraphIndexAtOffset(visualRows[line].start);
+			var text = document.buffer.line(sourceLine);
+			var startOffset = visualRows == null ? 0 : EditorCoordinates.position(document, visualRows[line].start).column;
+			var endOffset = visualRows == null ? text.length : document.buffer.document.utf16OffsetForCodepoint(visualRows[line].end) - document.buffer.document.utf16OffsetForCodepoint(document.buffer.document.paragraphRangeAtIndex(sourceLine).start);
+			var tokens = colored ? document.highlighter.line(sourceLine).tokens : [];
 			var spans:Array<MinimapSpan> = [];
-			var offset = 0, column = 0, token = 0;
-			while (offset < text.length && column < MAX_COLUMNS) {
+			var offset = startOffset, column = 0, token = 0;
+			while (offset < Math.min(text.length, endOffset) && column < MAX_COLUMNS) {
 				var code = text.charCodeAt(offset);
 				while (token + 1 < tokens.length && offset >= tokens[token].start + tokens[token].length) token++;
 				var kind = tokens.length == 0 ? 0 : tokens[token].kind;
@@ -68,6 +73,7 @@ class MinimapModel {
 			var y = index < positions.length
 				? positions[index] / Math.max(1, contentHeight)
 				: rows.length <= 1 ? 0.0 : index / (rows.length - 1);
+			if (index < positions.length && (y < 0 || y >= 1)) continue;
 			var row = Std.int(Math.max(0, Math.min(pixelHeight - 1, Math.floor(y * pixelHeight))));
 			for (span in rows[index].spans) {
 				var color = colors[span.kind];

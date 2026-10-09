@@ -21,6 +21,20 @@ private class NarrowTooltipFixture implements haxeon.ui.core.View {
 	}
 }
 
+private class ClippedToolbarFixture implements haxeon.ui.core.View {
+	public function new() {}
+	public function build(context:haxeon.ui.core.BuildContext):haxeon.ui.core.RenderNode {
+		var style = new haxeon.ui.LayoutStyle();
+		style.width = haxeon.ui.LayoutAxis.fixed(40);
+		style.height = haxeon.ui.LayoutAxis.fixed(40);
+		style.clipHorizontal = true;
+		style.clipVertical = true;
+		var root = new haxeon.ui.core.RenderNode(context.id("clipped-toolbar"), haxeon.ui.LayoutVisualKind.Box, style);
+		root.add(new NarrowTooltipFixture().build(context));
+		return root;
+	}
+}
+
 private class EllipsisFixture implements haxeon.ui.core.View {
 	public var width:Float;
 	public var value:String;
@@ -142,6 +156,15 @@ class TabTooltipTestMain {
 		require(paintedTooltip, "tooltip fixture did not build a styled tooltip");
 		require(open != null && open.globalBounds().width > 25 && open.globalBounds().height < 25,
 			"short tooltip wrapped to its narrow anchor: " + (open == null ? "missing" : open.globalBounds().width + " x " + open.globalBounds().height));
+		var clippedRoot = context.submit(new ClippedToolbarFixture(), new haxeon.ui.LayoutFrame(800, 600));
+		var escapedTip:haxeon.ui.core.RenderNode = null;
+		clippedRoot.walk(function(node) { if (node.styleType == "tooltip") escapedTip = node; });
+		require(escapedTip != null && escapedTip.globalBounds().width > 40,
+			"toolbar tooltip did not cross its clipped ancestor");
+		var escapedGeometry:haxeon.ui.ResolvedLayoutItem = cast escapedTip.resolved;
+		require(escapedGeometry.clipBounds.width == 800 && escapedGeometry.clipBounds.height == 600,
+			"unclipped tooltip inherited sidebar clipping instead of viewport clipping");
+
 		var sideRoot = context.submit(new NarrowTooltipFixture(Right), new haxeon.ui.LayoutFrame(800, 600));
 		var sideTip:haxeon.ui.core.RenderNode = null;
 		sideRoot.walk(function(node) { if (node.styleType == "tooltip") sideTip = node; });

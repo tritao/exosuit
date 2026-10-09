@@ -62,6 +62,22 @@ run_phase sidebar-stale-preview sidebar-stale-preview "$fixture/sidebar-project/
 run_phase editor-scroll editor-scroll "$fixture/sidebar-project/Main.hx"
 run_phase scrollbar-visibility scrollbar-visibility "$fixture/sidebar-project/Main.hx"
 run_phase editor-resize editor-resize "$fixture/sidebar-project/Main.hx"
+run_phase toolbar-tooltip toolbar-tooltip "$fixture/sidebar-project/Main.hx"
+python3 - "$fixture/toolbar-tooltip" <<'PYTOOLTIP'
+import json, sys
+from pathlib import Path
+from PIL import Image
+capture = Path(sys.argv[1])
+nodes = json.loads((capture / "layout.json").read_text())
+by_id = {node["id"]: node for node in nodes}
+label = next(node for node in nodes if node.get("label") == "Collapse All" and node.get("role") == 4)
+bounds = by_id[label["parentId"]]["bounds"]
+image = Image.open(capture / "frame.png").convert("RGB")
+y = round(bounds["y"] + bounds["height"] / 2)
+left, right = round(bounds["x"] + 4), round(bounds["x"] + bounds["width"] - 4)
+assert image.getpixel((left, y)) == image.getpixel((right, y)), "Tooltip surface is cut off over editor"
+print("PASS: Files tooltip background remains continuous across sidebar/editor boundary")
+PYTOOLTIP
 run_phase editor-minimap editor-minimap "$fixture/sidebar-project/Main.hx"
 printf 'exit fixture\n' > "$fixture/project/Exit.hx"
 run_phase save-as save-as "$fixture/project/Exit.hx"

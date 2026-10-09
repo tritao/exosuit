@@ -185,6 +185,7 @@
     "../src/workspace/TrashService.hx",
     "../src/workspace/Workspace.hx",
     "../src/workspace/client/CodexMarkdown.hx",
+    "../src/workspace/client/CodexPermissions.hx",
     "../src/workspace/client/LocalTerminalWorkspacePool.hx",
     "../src/workspace/client/LocalWorkspaceClient.hx",
     "../src/workspace/client/RpcTerminalBackend.hx",

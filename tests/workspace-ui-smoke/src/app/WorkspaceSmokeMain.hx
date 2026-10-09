@@ -53,7 +53,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	var remoteOpenTests:Null<RemoteFileOpenTests>;
 
 	public function new(context:haxeon.ui.host.DesktopUiHostContext, path:String, phase:String) {
-		super(context.fonts, null, context, (phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-geometry" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-font" || phase == "editor-tabs" || phase == "zoom" || phase == "word-delete" || phase == "selection" || phase == "tab-close" || phase == "pointer-actions" || phase == "blank-editor-click" || phase == "caret-follow" || phase == "exit-confirmation" || phase == "save-as" || phase == "tab-close-paint" || phase == "settings" || phase == "editor-minimap" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
+		super(context.fonts, null, context, (phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-geometry" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-font" || phase == "editor-tabs" || phase == "zoom" || phase == "word-delete" || phase == "selection" || phase == "tab-close" || phase == "pointer-actions" || phase == "blank-editor-click" || phase == "caret-follow" || phase == "exit-confirmation" || phase == "save-as" || phase == "tab-close-paint" || phase == "settings" || phase == "editor-minimap" || phase == "toolbar-tooltip" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
 			null, null, null, WorkspaceSmokeMain.createTerminal);
 		this.phase = phase;
 		closeContext = context;
@@ -132,6 +132,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		if (phase == "editor-resize") return resizeStep(frame);
 		if (phase == "editor-minimap") return minimapStep(frame);
 		if (phase == "editor-geometry") return geometryStep(frame);
+		if (phase == "toolbar-tooltip") return toolbarTooltipStep(frame);
 		if (phase == "editor-tabs") return tabsStep(frame);
 		if (phase == "settings") return settingsStep(frame);
 		if (phase == "zoom") return zoomStep(frame);
@@ -923,7 +924,29 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		return result;
 	}
 
+	function toolbarTooltipStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
+		if (frames == 2) ui.pointerMove(240, 60);
+		if (frames == 3) {
+			var bounds = node("explorer-action:Collapse All").globalBounds();
+			ui.pointerMove(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+		}
+		if (frames == 4) ui.animations.advance(0.6);
+		var result = super.submit(frame);
+		if (frames >= 4) {
+			var tip = node("explorer-action-tooltip:Collapse All");
+			var geometry:haxeon.ui.ResolvedLayoutItem = cast tip.resolved;
+			var sidebarBounds = node("sidebar-modes").globalBounds();
+			require(tip.layout.style.visible && geometry.x + geometry.width > sidebarBounds.x + sidebarBounds.width,
+				"Collapse All tooltip did not overlap the editor in acceptance fixture");
+			require(geometry.clipBounds.x + geometry.clipBounds.width >= geometry.x + geometry.width,
+				"Collapse All tooltip surface is clipped at sidebar boundary");
+			if (frames == 7) trace("PASS: Files toolbar tooltip surface escapes sidebar clipping over editor");
+		}
+		return result;
+	}
+
 	function geometryStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
+		if (frames == 1) GutterGeometryTests.run();
 		frame.deltaSeconds = 1.0 / 60.0;
 		var view = host.activeView();
 		if (view == null) throw "geometry acceptance missing editor";

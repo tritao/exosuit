@@ -37,7 +37,9 @@ class EditorGutter implements View {
 
 	public function resolveTextLayout(layout:TextEditorLayout, geometry:ResolvedLayoutItem):Void {
 		if (labels == null || node == null || node.resolved == null || context == null) return;
-		if (labels.resolve(layout, geometry.y - node.resolved.y)) context.requestLayoutFeedback();
+		// ScrollView translates its content through the resolved transform;
+		// layout y alone stays unchanged while the document scrolls.
+		if (labels.resolve(layout, editor.GutterGeometry.sourceOriginY(geometry, node.resolved))) context.requestLayoutFeedback();
 	}
 
 	public function new(key:String, buffer:TextBuffer, foreground:Color, ?background:Color, fontSize:Float = 15.0, activeLine:Int = -1, ?activeForeground:Color) {
