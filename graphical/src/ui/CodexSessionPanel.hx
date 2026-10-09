@@ -43,6 +43,8 @@ class CodexSessionPanel implements View {
   var prompt = "";
   var selectedModel = "";
   var selectedEffort = "";
+  var selectionLoaded = false;
+  var modelCatalogRequested = false;
   var diagnostics = false;
   var details = false;
   var expanded:Map<String, Bool> = [];
@@ -128,6 +130,11 @@ class CodexSessionPanel implements View {
     if (view == null) return paragraph(client.agentError()
       == null ? "Loading Codex session…" : client.agentError()).build(context);
     var id = view.record.id;
+    if (!selectionLoaded) {
+      selectedModel = view.record.preferredModel == null ? "" : view.record.preferredModel;
+      selectedEffort = view.record.preferredEffort == null ? "" : view.record.preferredEffort;
+      selectionLoaded = true;
+    }
     var control = client.canControlAgents() && !client.agentBusy();
     var tokens = context.theme.tokens;
     var working = view.record.state == "working";
@@ -369,7 +376,14 @@ class CodexSessionPanel implements View {
     var modelControls:Array<KeyedView> = [];
     var moreModels:Button = null;
     if (view.models == null) {
-      var load = new Button("Choose model…", null, function() client.agentAction(id, "models", "", null), "codex-models");
+      if ((selectedModel != "" || selectedEffort != "") && !modelCatalogRequested && !client.agentBusy()) {
+        modelCatalogRequested = true;
+        client.agentAction(id, "models", "", null);
+      }
+      var load = new Button("Choose model…", null, function() {
+        modelCatalogRequested = true;
+        client.agentAction(id, "models", "", null);
+      }, "codex-models");
       load.enabled = control && !working;
       modelControls.push(new KeyedView("load", load));
     } else {
@@ -378,6 +392,7 @@ class CodexSessionPanel implements View {
       var chooser = new ComboBox<String>("codex-model", options, selectedModel, function(value) {
         selectedModel = value;
         selectedEffort = "";
+        client.agentAction(id, "model-settings", "", null, selectedModel == "" ? null : selectedModel, null);
         frame();
       });
       chooser.enabled = control && !working;
@@ -395,6 +410,8 @@ class CodexSessionPanel implements View {
     for (effort in availableEfforts) effortOptions.push(new SelectOption<String>("effort-" + effort, effortLabel(effort), effort));
     var effortChooser = new ComboBox<String>("codex-effort", effortOptions, selectedEffort, function(value) {
       selectedEffort = value;
+      client.agentAction(id, "model-settings", "", null, selectedModel == "" ? null : selectedModel,
+        selectedEffort == "" ? null : selectedEffort);
       frame();
     });
     effortChooser.enabled = control && !working && effortModel != null && availableEfforts.length > 0;

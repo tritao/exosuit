@@ -134,7 +134,9 @@ class CodexProvider implements WorkspaceAgents {
 			workspaceRoot: r.workspaceRoot,
 			sandboxPolicy: r.sandboxPolicy,
 			approvalPolicy: r.approvalPolicy,
-			permissionProfile: r.permissionProfile
+			permissionProfile: r.permissionProfile,
+			preferredModel: r.preferredModel,
+			preferredEffort: r.preferredEffort
 		};
 
 	function view(s:Session):AgentView
@@ -1038,6 +1040,39 @@ class CodexProvider implements WorkspaceAgents {
 					}
 					ctx.respond(view(s));
 				});
+				return;
+			}
+			if (q.action == "model-settings") {
+				if (q.model != null) {
+					var known = false;
+					if (models != null) for (entry in models) if (entry.model == q.model) known = true;
+					if (!valid(q.model, 256) || !known) {
+						ctx.fail({code: "invalid_model", message: "Choose a model from the current catalog", ambiguous: false});
+						return;
+					}
+				}
+				if (q.effort != null) {
+					if (!valid(q.effort, 64)) {
+						ctx.fail({code: "invalid_effort", message: "Choose a reasoning effort from the model catalog", ambiguous: false});
+						return;
+					}
+					var effortModel = q.model == null ? s.currentModel : q.model;
+					if (models != null && effortModel != null) for (entry in models) if (entry.model == effortModel
+						&& (entry.supportedEfforts == null || !entry.supportedEfforts.contains(q.effort))) {
+						ctx.fail({code: "invalid_effort", message: "Choose a reasoning effort supported by the selected model", ambiguous: false});
+						return;
+					}
+				}
+				var previousModel = s.record.preferredModel, previousEffort = s.record.preferredEffort;
+				s.record.preferredModel = q.model;
+				s.record.preferredEffort = q.effort;
+				try save(s) catch (_:Dynamic) {
+					s.record.preferredModel = previousModel;
+					s.record.preferredEffort = previousEffort;
+					ctx.fail({code: "storage_unavailable", message: "Codex model and effort choice could not be saved", ambiguous: false});
+					return;
+				}
+				ctx.respond(view(s));
 				return;
 			}
 			if (!s.attached || phase != "ready") {
