@@ -318,6 +318,7 @@ class EditorPane implements View {
 		editorStyle.background = color(editorTheme.editorBackground);
 		var area = TextArea.withDocument("editor:" + document.id, document.buffer.document,
 			handleEdit, editorStyle, null, new TextStyle(fontSize, FontFamily.Monospace), color(editorTheme.editorForeground));
+		area.codeWordBoundaries = true;
 		area.wrap = editSettings.wordWrap ? haxeon.ui.TextWrap.WordCharacter : haxeon.ui.TextWrap.None;
 		if (previousWrap != null && previousWrap != editSettings.wordWrap) {
 			if (editingLayout != null && editingLayout.paragraphCount > 0)
