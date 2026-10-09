@@ -1989,6 +1989,10 @@ class ExosuitApp implements DesktopUiApplication {
 			documentView.editSettings = pane.editSettings;
 			documentView.deletionBoundary = pane.deletionBoundary;
 			pane.minimapEnabled = application.settings.current.minimapEnabled;
+			documentView.clipboard = ui.clipboard;
+			documentView.onStateChanged = requestFrame;
+			documentView.isActive = function() return host.activeView() == documentView;
+			pane.onEditorAction = documentView.performEditorAction;
 			pane.requestCursorReveal = documentView.cursorChanged;
 			pane.consumeCursorReveal = documentView.consumeCursorReveal;
 			pane.fontSize = application.settings.current.fontSize;

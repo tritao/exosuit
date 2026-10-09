@@ -3,6 +3,65 @@ package editor;
 import syntax.SyntaxDefinition;
 
 class EditorActions {
+	/** Copy selected ranges, or unique current lines when every caret is collapsed. */
+	public static function clipboardPayload(buffer:TextBuffer, selection:BufferSelection):{text:String, linewise:Bool} {
+		var ranges = selection.documentRanges(), linewise = true, values:Array<String> = [];
+		for (range in ranges) if (!range.isCollapsed()) linewise = false;
+		var previousLine = -1;
+		for (range in ranges) {
+			if (linewise) {
+				if (range.cursor.line != previousLine) values.push(buffer.line(range.cursor.line) + "\n");
+				previousLine = range.cursor.line;
+			} else if (!range.isCollapsed()) values.push(buffer.textRange(range.start(), range.end()));
+		}
+		return {text: values.join(linewise ? "" : "\n"), linewise: linewise};
+	}
+
+	public static function cutClipboard(buffer:TextBuffer, selection:BufferSelection, linewise:Bool):Bool
+		return linewise ? deleteLines(buffer, selection) : buffer.replaceSelections(selection, [""]);
+
+	/** Adds an indented line at each distinct caret line in one undo transaction. */
+	public static function insertAdjacentLine(buffer:TextBuffer, selection:BufferSelection, below:Bool):Bool {
+		var ranges = selection.documentRanges(), replacements:Array<BufferReplacement> = [], positions:Array<BufferPosition> = [];
+		var previousLine = -1, primary = 0;
+		for (range in ranges) {
+			var line = range.cursor.line;
+			if (line == previousLine) continue;
+			previousLine = line;
+			var source = buffer.line(line), prefix = source.substring(0, leadingWhitespace(source));
+			var at = new BufferPosition(line, below ? source.length : 0);
+			replacements.push(new BufferReplacement(at, at, below ? "\n" + prefix : prefix + "\n"));
+			var result = new BufferPosition(line + (below ? 1 : 0) + positions.length, prefix.length);
+			if (line == selection.cursor.line) primary = positions.length;
+			positions.push(result);
+		}
+		var next = [for (position in positions) new BufferRange(position, position)];
+		return buffer.applyReplacements(selection, replacements, null, null, new SelectionSnapshot(next, primary));
+	}
+
+	public static function selectNextOccurrence(buffer:TextBuffer, selection:BufferSelection):Bool {
+		if (!selection.hasSelection()) {
+			var from = buffer.wordStartAt(selection.cursor), to = buffer.wordEndAt(selection.cursor);
+			if (from.equals(to)) return false;
+			selection.restore(buffer, to, from); return true;
+		}
+		var needle = buffer.textRange(selection.start(), selection.end());
+		if (needle.length == 0) return false;
+		var start = buffer.offsetOf(selection.end());
+		for (range in selection.allRanges()) start = Std.int(Math.max(start, buffer.offsetOf(range.end())));
+		var text = buffer.text, offset = text.indexOf(needle, start), wrapped = false;
+		if (offset < 0) { offset = text.indexOf(needle); wrapped = true; }
+		while (offset >= 0) {
+			if (wrapped && offset >= start) return false;
+			var from = buffer.positionFromOffset(offset), to = buffer.positionFromOffset(offset + needle.length), existing = false;
+			for (range in selection.allRanges()) if (range.start().equals(from) && range.end().equals(to)) existing = true;
+			if (!existing) { selection.addRange(buffer, to, from); return true; }
+			offset = text.indexOf(needle, offset + needle.length);
+			if (offset < 0 && !wrapped) { offset = text.indexOf(needle); wrapped = true; }
+		}
+		return false;
+	}
+
 	/** Tab inserts at collapsed carets; a selection indents whole affected lines. */
 	public static function tab(buffer:TextBuffer, selection:BufferSelection, tabWidth:Int, insertSpaces:Bool, indentSize:Int = 0):Bool {
 		for (range in selection.allRanges()) if (!range.isCollapsed()) return indent(buffer, selection, tabWidth, insertSpaces, indentSize);

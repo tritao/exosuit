@@ -36,11 +36,12 @@ class CommandBridge {
 	public static function install(target:UiCommandRegistry, source:CommandRegistry, keymap:Keymap, context:CommandContext):Void {
 		for (command in source.all()) {
 			if (layoutOnlyCommands.indexOf(command.name) >= 0 || duplicates.indexOf(command.name) >= 0) continue;
-			var name = command.name, shortcut = shortcutFor(keymap, name);
+			var name = command.name, shortcuts = shortcutsFor(keymap, name);
 			var bridged = new Command(bridgedId(name), command.description, function() {
 				source.perform(name, context);
-			}, shortcut, function() return source.isValid(name, context));
+			}, shortcuts.length == 0 ? null : shortcuts[0], function() return source.isValid(name, context));
 			bridged.repeatable = ["doc:tab", "doc:indent", "doc:unindent", "doc:backspace", "doc:delete", "doc:newline"].indexOf(name) >= 0;
+			for (shortcut in shortcuts) bridged.addShortcut(shortcut);
 			target.register(bridged);
 		}
 	}
@@ -53,19 +54,19 @@ class CommandBridge {
 		for (command in source.all()) {
 			var id = "exosuit." + command.name;
 			if (target.get(id) == null) continue;
-			var shortcut = shortcutFor(keymap, command.name);
-			target.setShortcuts(id, shortcut == null ? [] : [shortcut]);
+			target.setShortcuts(id, shortcutsFor(keymap, command.name));
 		}
 	}
 
-	static function shortcutFor(keymap:Keymap, name:String):Null<Shortcut> {
-		for (binding in keymap.allBindings())
+	static function shortcutsFor(keymap:Keymap, name:String):Array<Shortcut> {
+		var result:Array<Shortcut> = [];
+		for (binding in keymap.effectiveBindings())
 			if (binding.commands.indexOf(name) >= 0) {
 				var key = uiKeyFor(binding.key);
 				if (key < 0) continue;
-				return new Shortcut(key, uiModifiersFor(binding.modifiers));
+				result.push(new Shortcut(key, uiModifiersFor(binding.modifiers)));
 			}
-		return null;
+		return result;
 	}
 
 	static function uiKeyFor(key:Int):Int
@@ -75,6 +76,7 @@ class CommandBridge {
 			case Platform.KEY_TAB: UiKey.Tab;
 			case Platform.KEY_BACKSPACE: UiKey.Backspace;
 			case Platform.KEY_DELETE: UiKey.Delete;
+			case Platform.KEY_INSERT: UiKey.Insert;
 			case Platform.KEY_DOWN: UiKey.Down;
 			case Platform.KEY_UP: UiKey.Up;
 			case Platform.KEY_PAGE_UP: UiKey.PageUp;

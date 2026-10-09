@@ -74,6 +74,14 @@ class Keymap {
 	public function allBindings():Array<KeyBinding>
 		return bindings.copy();
 
+	/** Configured chords replace defaults for the same key and modifiers. */
+	public function effectiveBindings():Array<KeyBinding> {
+		var result = configured.copy();
+		for (binding in bindings)
+			if (findIn(configured, binding.key, binding.modifiers) == null) result.push(binding);
+		return result;
+	}
+
 	public function setConfigured(values:Array<KeyBinding>):Void {
 		configured.resize(0);
 		for (value in values) configured.push(new KeyBinding(value.key, value.modifiers, copy(value.commands)));

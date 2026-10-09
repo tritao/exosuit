@@ -46,6 +46,9 @@ class View {
 	public function tab(tabWidth:Int, insertSpaces:Bool, indentSize:Int = 0):Bool return indent(tabWidth, insertSpaces, indentSize);
 	public function indent(tabWidth:Int, insertSpaces:Bool, indentSize:Int = 0):Bool return false;
 	public function unindent(tabWidth:Int, indentSize:Int = 0):Bool return false;
+	public function insertAdjacentLine(below:Bool):Bool return false;
+	public function supportsFolding():Bool return false;
+	public function supportsWordWrap():Bool return false;
 	public function insertNewline(tabWidth:Int = 0, insertSpaces:Bool = true, indentSize:Int = 0):Bool return false;
 	public function duplicateLines():Bool return false;
 	public function moveLines(direction:Int):Bool return false;

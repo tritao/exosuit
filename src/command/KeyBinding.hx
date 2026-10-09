@@ -24,7 +24,7 @@ class KeyBinding {
 	static function keyName(key:Int):String
 		return switch key {
 			case Platform.KEY_BACKSPACE: "Backspace"; case Platform.KEY_TAB: "Tab"; case Platform.KEY_ENTER: "Enter";
-			case Platform.KEY_ESCAPE: "Escape"; case Platform.KEY_DELETE: "Delete"; case Platform.KEY_LEFT: "Left";
+			case Platform.KEY_INSERT: "Insert"; case Platform.KEY_ESCAPE: "Escape"; case Platform.KEY_DELETE: "Delete"; case Platform.KEY_LEFT: "Left";
 			case Platform.KEY_RIGHT: "Right"; case Platform.KEY_UP: "Up"; case Platform.KEY_DOWN: "Down";
 			case Platform.KEY_HOME: "Home"; case Platform.KEY_END: "End"; case Platform.KEY_A: "A"; case Platform.KEY_S: "S";
 			case Platform.KEY_Y: "Y"; case Platform.KEY_Z: "Z"; case Platform.KEY_W: "W"; case Platform.KEY_P: "P";

@@ -11,6 +11,8 @@ class EditorCommands {
 		registry.add("doc:select-all", context -> context.requireView().selectAll(), hasDocument);
 		registry.addEditorAction("doc:backspace", context -> context.requireView().backspace(), hasDocument);
 		registry.addEditorAction("doc:delete", context -> context.requireView().deleteForward(), hasDocument);
+		registry.addEditorAction("doc:insert-line-above", context -> context.requireView().insertAdjacentLine(false), hasDocument);
+		registry.addEditorAction("doc:insert-line-below", context -> context.requireView().insertAdjacentLine(true), hasDocument);
 		registry.addEditorAction("doc:newline", context -> context.requireView().insertNewline(), hasDocument);
 		registry.addEditorAction("doc:tab", context -> context.requireView().tab(4, true), hasDocument);
 		registry.addEditorAction("doc:indent", context -> context.requireView().indent(4, true), hasDocument);
@@ -43,8 +45,8 @@ class EditorCommands {
 		registry.addEditorAction("doc:move-page-down", context -> context.requireView().movePage(1, false), hasDocument);
 		registry.addEditorAction("doc:select-page-up", context -> context.requireView().movePage(-1, true), hasDocument);
 		registry.addEditorAction("doc:select-page-down", context -> context.requireView().movePage(1, true), hasDocument);
-		registry.add("doc:toggle-word-wrap", context -> context.requireView().toggleWordWrap(), hasDocument);
-		registry.add("doc:toggle-fold", context -> context.requireView().toggleFold(), hasDocument);
+		registry.add("doc:toggle-word-wrap", context -> context.requireView().toggleWordWrap(), context -> hasDocument(context) && context.requireView().supportsWordWrap());
+		registry.add("doc:toggle-fold", context -> context.requireView().toggleFold(), context -> hasDocument(context) && context.requireView().supportsFolding());
 		// Shared host operations support both document and terminal editor tabs.
 		registry.add("root:switch-to-next-tab", context -> context.host.switchActiveTab(1), context -> context.host.canCloseActiveTab());
 		registry.add("root:switch-to-previous-tab", context -> context.host.switchActiveTab(-1), context -> context.host.canCloseActiveTab());
@@ -62,16 +64,23 @@ class EditorCommands {
 		keymap.addDirect(Platform.KEY_S, Platform.MOD_CTRL, ["doc:save"]);
 		keymap.addDirect(Platform.KEY_Z, Platform.MOD_CTRL, ["doc:undo"]);
 		keymap.addDirect(Platform.KEY_Y, Platform.MOD_CTRL, ["doc:redo"]);
+		keymap.addDirect(Platform.KEY_Z, Platform.MOD_CTRL | Platform.MOD_SHIFT, ["doc:redo"]);
 		keymap.addDirect(Platform.KEY_A, Platform.MOD_CTRL, ["doc:select-all"]);
 		keymap.addDirect(Platform.KEY_W, Platform.MOD_CTRL, ["root:close"]);
 		keymap.addDirect(Platform.KEY_TAB, Platform.MOD_CTRL, ["root:switch-to-next-tab"]);
 		keymap.addDirect(Platform.KEY_TAB, Platform.MOD_CTRL + Platform.MOD_SHIFT, ["root:switch-to-previous-tab"]);
 		keymap.addDirect(Platform.KEY_TAB, 0, ["doc:tab"]);
 		keymap.addDirect(Platform.KEY_ENTER, 0, ["doc:newline"]);
+		keymap.addDirect(Platform.KEY_ENTER, Platform.MOD_CTRL, ["doc:insert-line-below"]);
+		keymap.addDirect(Platform.KEY_ENTER, Platform.MOD_CTRL | Platform.MOD_SHIFT, ["doc:insert-line-above"]);
 		keymap.addDirect(Platform.KEY_BACKSPACE, 0, ["doc:backspace"]);
 		keymap.addDirect(Platform.KEY_BACKSPACE, Platform.MOD_SHIFT, ["doc:backspace"]);
+		if (clipboard) {
+			keymap.addDirect(Platform.KEY_INSERT, Platform.MOD_CTRL, ["doc:copy"]);
+			keymap.addDirect(Platform.KEY_INSERT, Platform.MOD_SHIFT, ["doc:paste"]);
+		}
 		keymap.addDirect(Platform.KEY_DELETE, 0, ["doc:delete"]);
-		keymap.addDirect(Platform.KEY_DELETE, Platform.MOD_SHIFT, ["doc:delete"]);
+		keymap.addDirect(Platform.KEY_DELETE, Platform.MOD_SHIFT, [clipboard ? "doc:cut" : "doc:delete"]);
 		if (clipboard) {
 			keymap.addDirect(Platform.KEY_C, Platform.MOD_CTRL, ["doc:copy"]);
 			keymap.addDirect(Platform.KEY_X, Platform.MOD_CTRL, ["doc:cut"]);

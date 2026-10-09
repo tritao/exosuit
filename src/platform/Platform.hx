@@ -34,6 +34,7 @@ class Platform {
 	public static inline final KEY_G = 29;
 	public static inline final KEY_B = 30;
 	public static inline final KEY_SPACE = 31;
+	public static inline final KEY_INSERT = 32;
 	public static inline final MOD_SHIFT = 1;
 	public static inline final MOD_CTRL = 2;
 	public static inline final MOD_ALT = 4;

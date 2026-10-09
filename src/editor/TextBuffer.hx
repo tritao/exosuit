@@ -141,7 +141,8 @@ class TextBuffer {
 		return replaceSelectionRanges(selection, ranges, [""]);
 	}
 
-	function replaceSelectionRanges(selection:BufferSelection, ranges:Array<BufferRange>, values:Array<String>, ?caretOffsets:Array<Int>):Bool {
+	/** Replaces explicit ranges while preserving the original selection for undo. */
+	public function replaceSelectionRanges(selection:BufferSelection, ranges:Array<BufferRange>, values:Array<String>, ?caretOffsets:Array<Int>):Bool {
 		if (values.length != 1 && values.length != ranges.length) return false;
 		if (caretOffsets != null && caretOffsets.length != ranges.length) return false;
 		var pending:Array<PendingSelectionEdit> = [];

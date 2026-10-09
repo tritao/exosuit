@@ -118,6 +118,9 @@ class ModelDocumentView extends View {
 		selection.addRange(buffer, to, from);
 		return true;
 	}
+	override public function supportsWordWrap():Bool return true;
+	override public function supportsFolding():Bool return true;
+	override public function insertAdjacentLine(below:Bool):Bool return EditorActions.insertAdjacentLine(document.buffer, editor.selection, below);
 	override public function toggleWordWrap():Bool return editor.toggleWordWrap();
 	override public function toggleFold():Bool return editor.toggleCurrentFold();
 

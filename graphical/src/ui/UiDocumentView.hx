@@ -23,12 +23,15 @@ import view.View;
  * Additional normalized selections render through the widget; text insertion,
  * clipboard operations and deletion are delegated to the buffer as one undo unit.
  *
- * Mouse/wheel/draw and clipboard (`copy`/`cut`/`paste`) are left as the
- * `View` base class's no-ops: `TextArea` handles pointer input and the
- * system clipboard itself once focused, and this adapter is never drawn or
- * pointer-dispatched to directly (uikit renders `EditorPane`, not this).
+ * Clipboard actions share the application clipboard bridge across keyboard, menu,
+ * and palette dispatch. Pointer input remains owned by TextArea.
  */
 class UiDocumentView extends View {
+	static var lineClipboardText:Null<String>;
+	public var clipboard:Null<haxeon.ui.core.ClipboardService>;
+	public var onStateChanged:Void->Void = function() {};
+	public var isActive:Void->Bool = function() return true;
+	var disposed:Bool = false;
 	static var nextId:Int = 1;
 	/** Stable identity for this view, independent of the shared document. */
 	public final id:Int;
@@ -72,7 +75,7 @@ class UiDocumentView extends View {
 		scrollController.configureAnimation(settings.scrollAnimationType == "smooth", settings.scrollAnimationDuration);
 
 	override public function dispose():Void {
-		bufferSubscription.release(); scrollController.cancelAnimation();
+		disposed = true; bufferSubscription.release(); scrollController.cancelAnimation();
 	}
 
 	override public function isDirty():Bool
@@ -140,6 +143,78 @@ class UiDocumentView extends View {
 
 	override public function toggleLineComment():Bool
 		return EditorActions.toggleLineComment(document.buffer, selection, document.syntax);
+
+	public function performEditorAction(action:haxeon.ui.widgets.text.TextEditorAction):Bool {
+		return switch action {
+			case Copy: copy();
+			case Cut: cut();
+			case Paste: paste();
+			case ClearSelection:
+				if (selection.rangeCount() == 1 && !selection.hasSelection()) false;
+				else { selection.collapse(document.buffer, selection.cursor); cursorRevealPending = false; onStateChanged(); true; }
+			case InsertLineAbove: insertAdjacentLine(false);
+			case InsertLineBelow: insertAdjacentLine(true);
+		};
+	}
+
+	override public function copy():Bool {
+		if (clipboard == null) return false;
+		var payload = EditorActions.clipboardPayload(document.buffer, selection);
+		clipboard.writeText(payload.text);
+		lineClipboardText = payload.linewise ? payload.text : null;
+		return true;
+	}
+
+	override public function cut():Bool {
+		if (clipboard == null) return false;
+		var payload = EditorActions.clipboardPayload(document.buffer, selection);
+		clipboard.writeText(payload.text);
+		lineClipboardText = payload.linewise ? payload.text : null;
+		if (EditorActions.cutClipboard(document.buffer, selection, payload.linewise)) { cursorChanged(); onStateChanged(); }
+		return true;
+	}
+
+	override public function paste():Bool {
+		if (clipboard == null) return false;
+		var revision = document.buffer.stateId, ranges = selection.snapshot().ranges;
+		clipboard.readText(function(text) {
+			if (disposed || !isActive() || document.buffer.stateId != revision) return;
+			var current = selection.allRanges();
+			if (current.length != ranges.length) return;
+			for (index in 0...ranges.length)
+				if (!current[index].cursor.equals(ranges[index].cursor) || !current[index].anchor.equals(ranges[index].anchor)) return;
+			if (text.length == 0) return;
+			var linewise = text == lineClipboardText;
+			for (range in current) if (!range.isCollapsed()) linewise = false;
+			var value = StringTools.replace(StringTools.replace(text, "\r\n", "\n"), "\r", "\n"), lines = value.split("\n");
+			var targetRanges = linewise ? [for (range in current) {
+				var position = new BufferPosition(range.cursor.line, 0);
+				new editor.BufferRange(position, position);
+			}] : current;
+			if (linewise) {
+				var normalized = new BufferSelection();
+				normalized.setRanges(document.buffer, targetRanges, 0, false);
+				targetRanges = normalized.allRanges();
+			}
+			if (document.buffer.replaceSelectionRanges(selection, targetRanges,
+				!linewise && selection.rangeCount() > 1 && lines.length == selection.rangeCount() ? lines : [value])) {
+				cursorChanged(); onStateChanged();
+			}
+		});
+		return true;
+	}
+
+	override public function insertAdjacentLine(below:Bool):Bool {
+		var changed = EditorActions.insertAdjacentLine(document.buffer, selection, below);
+		if (changed) { cursorChanged(); onStateChanged(); }
+		return changed;
+	}
+
+	override public function selectNextOccurrence():Bool {
+		var changed = EditorActions.selectNextOccurrence(document.buffer, selection);
+		if (changed) { cursorChanged(); onStateChanged(); }
+		return changed;
+	}
 
 	override public function textInput(text:String):Void {
 		if (selection.rangeCount() > 1) document.buffer.replaceSelections(selection, [text]);

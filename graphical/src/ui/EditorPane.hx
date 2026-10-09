@@ -75,6 +75,7 @@ class EditorPane implements View {
 	public var onActivated:Null<Void->Void> = null;
 	public var onContextMenu:Null<haxeon.ui.core.UiEvent->Void> = null;
 	public var onCaretRectChanged:Null<Void->Void> = null;
+	public var onEditorAction:Null<haxeon.ui.widgets.text.TextEditorAction->Bool>;
 	public var requestCursorReveal:Void->Void = function() {};
 	public var consumeCursorReveal:Void->Bool = function() return false;
 	final editorTheme:style.Theme;
@@ -336,6 +337,7 @@ class EditorPane implements View {
 				onCaretRectChanged();
 		};
 		area.onSelectionChange = selectionHandler;
+		area.onEditorAction = onEditorAction;
 		area.onCaretRevealRequest = requestCursorReveal;
 		area.additionalSelectionProvider = additionalProvider;
 		area.onSelectionDragScroll = function(delta) return scrollController.jumpTo(scrollController.offsetX, scrollController.offsetY + delta);
