@@ -1,8 +1,9 @@
 /build/
 /out/
 /dist/
-/.local/stable/
+/.local/
 /graphical/build/
+/graphical/.local/
 /uikit-native/build/
 
 /web/build/
