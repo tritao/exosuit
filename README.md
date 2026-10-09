@@ -70,7 +70,14 @@ Tab/Enter acceptance, Escape dismissal, and mouse selection. Filtering preserves
 provider order and insertion text. Go to Definition supports F12 and Ctrl+Alt+G,
 Ctrl+click, and the editor context menu. Multiple results open a searchable picker;
 Alt+Left and Alt+Right return through definition navigation history. Missing results
-and server failures appear as notifications. To run focused popup checks headlessly:
+and server failures appear as notifications. An early F12 waits for server startup
+and document synchronization while the file and cursor remain unchanged. After
+200 ms, the status bar shows initialization, synchronization, or definition lookup
+progress; editing, moving the cursor, or changing tabs cancels the request. Navigation
+outranks background semantic coloring and interrupts diagnostics, which resume afterward.
+With verbose Haxeon logging enabled, navigation logs include readiness and total time,
+and server timing notifications separate queue wait, analysis, and execution time.
+To run focused popup checks headlessly:
 
 ```sh
 DECORATION_UI_PHASES='popup-completion popup-completion-long popup-completion-wrap popup-live-completion popup-completion-mouse popup-completion-dismiss' bash scripts/test-decoration-ui.sh

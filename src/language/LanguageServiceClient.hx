@@ -54,6 +54,10 @@ class LanguageServiceClient {
 	var restartCount:Int = 0;
 	var stopping:Bool = false;
 	var clock:Float = 0;
+	var definitionRequestId:Int = -1;
+	public var lastServerRequestTiming(default, null):Dynamic;
+	public var initializationMs(default, null):Float = 0;
+	var initializeStarted:Float = 0;
 	var readySince:Float = -1;
 	var failureScheduled:Bool = false;
 	public var includesDocument:Document->Bool;
@@ -86,6 +90,7 @@ class LanguageServiceClient {
 		session.serverRequest = receiveServerRequest;
 		session.failed = message -> scheduleRestart(clock, session.stderr.length == 0 ? message : message + ": " + session.stderr);
 		status = "initializing";
+		initializeStarted = now;
 		session.request("initialize", {
 			processId: null,
 			rootUri: uri(rootPath),
@@ -168,6 +173,11 @@ class LanguageServiceClient {
 			}
 			complete(result);
 		});
+	}
+
+	public function cancelDefinition():Void {
+		var id = definitionRequestId; definitionRequestId = -1;
+		if (id >= 0 && transport != null) transport.cancel(id);
 	}
 
 	public function requestDefinition(document:Document, position:BufferPosition, now:Float, complete:Array<LanguageLocation>->Void, ?failed:String->Void):Bool {
@@ -397,6 +407,7 @@ class LanguageServiceClient {
 			scheduleRestart(clock, "language server does not support UTF-16 positions");
 			return;
 		}
+		initializationMs = (clock - initializeStarted) * 1000;
 		ready = true;
 		hoverSupported = capability(capabilities, "hoverProvider");
 		completionSupported = capability(capabilities, "completionProvider");
@@ -526,12 +537,24 @@ class LanguageServiceClient {
 	function requestAt(method:String, document:Document, position:BufferPosition, now:Float, complete:JsonRpcResponse->Void):Bool {
 		var state = states.get(document.id), session = transport;
 		if (!ready || !accepts(document) || state == null || session == null || state.revision != document.buffer.stateId) return false;
-		session.request(method, {textDocument: {uri: state.uri}, position: LspPositionCodec.encode(position)}, now, FEATURE_REQUEST_TIMEOUT, complete);
+		if (method == "textDocument/definition") for (state in states) if (state.semanticRequest >= 0) invalidateSemanticTokens(state);
+		var id = -1;
+		id = session.request(method, {textDocument: {uri: state.uri}, position: LspPositionCodec.encode(position)}, now, FEATURE_REQUEST_TIMEOUT, response -> {
+			if (method == "textDocument/definition" && definitionRequestId == id) definitionRequestId = -1;
+			complete(response);
+		});
+		if (method == "textDocument/definition") {
+			definitionRequestId = id;
+		}
 		return true;
 	}
 
 	function receiveNotification(method:String, params:Dynamic):Void {
-		if (method == "textDocument/publishDiagnostics") publishDiagnostics(params);
+		if (method == "$/haxeon/requestTiming") {
+			lastServerRequestTiming = params;
+			if (verbose) log("Haxeon request timing: " + haxe.Json.stringify(params));
+		}
+		else if (method == "textDocument/publishDiagnostics") publishDiagnostics(params);
 		else if (method == "window/showMessage") {
 			var message:Dynamic = params == null ? null : Reflect.field(params, "message");
 			if (message != null) report("Language server: " + Std.string(message));

@@ -94,6 +94,10 @@ class RealLanguageServiceSmokeMain {
 		if (completions != null) for (item in completions) if (item.label == "answer") foundCompletion = true;
 		require(foundCompletion, "real completion omitted local symbol");
 		require(definitions != null && definitions.length > 0 && definitions[0].from.column == definitionOffset, "real definition did not resolve local declaration");
+		pump(client, () -> client.lastServerRequestTiming != null, 5);
+		require(client.initializationMs >= 0 && client.lastServerRequestTiming.queueMs >= 0 && client.lastServerRequestTiming.analysisMs >= 0,
+			"real navigation omitted startup/queue/analysis timing");
+		Sys.println("Definition timing: " + haxe.Json.stringify(client.lastServerRequestTiming));
 		require(references != null && references.length >= 2, "real references omitted local usage/declaration");
 		require(symbols != null && symbols.length > 0 && symbols[0].name == "main", "real symbols omitted entry function");
 		var renamed:Null<LanguageEditResult> = null;

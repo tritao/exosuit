@@ -60,6 +60,8 @@ while True:
         response = {"jsonrpc": "2.0", "id": message["id"], "result": {"capabilities": capabilities}}
         if "--slow-initialize" in sys.argv:
             threading.Timer(5.2, send, args=(response,)).start()
+        elif "--initialize-delay" in sys.argv:
+            threading.Timer(0.4, send, args=(response,)).start()
         else:
             send(response)
     elif method == "initialized":
@@ -113,17 +115,22 @@ while True:
         else:
             send(response)
     elif method == "textDocument/definition":
+        def reply(response):
+            if "--definition-delay" in sys.argv:
+                threading.Timer(0.4, send, args=(response,)).start()
+            else:
+                send(response)
         position = message["params"]["position"]
         location = {"uri": message["params"]["textDocument"]["uri"], "range": {"start": position, "end": position}}
         if position["character"] == 5:
             other = {"uri": root_uri + "/Other.hx", "range": {"start": {"line": 0, "character": 1}, "end": {"line": 0, "character": 2}}}
-            send({"jsonrpc": "2.0", "id": message["id"], "result": [location, other]})
+            reply({"jsonrpc": "2.0", "id": message["id"], "result": [location, other]})
         elif position["character"] == 6:
-            send({"jsonrpc": "2.0", "id": message["id"], "result": None})
+            reply({"jsonrpc": "2.0", "id": message["id"], "result": None})
         elif position["character"] == 7:
-            send({"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32801, "message": "Document is still being analysed"}})
+            reply({"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32801, "message": "Document is still being analysed"}})
         else:
-            send({"jsonrpc": "2.0", "id": message["id"], "result": location})
+            reply({"jsonrpc": "2.0", "id": message["id"], "result": location})
     elif method == "textDocument/signatureHelp":
         send({"jsonrpc": "2.0", "id": message["id"], "result": {"activeSignature": 0, "activeParameter": 1,
             "signatures": [{"label": "sum(left:Int, right:Int):Int", "documentation": {"kind": "markdown", "value": "Adds values"},

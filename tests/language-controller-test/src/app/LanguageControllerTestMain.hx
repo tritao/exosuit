@@ -124,7 +124,7 @@ class LanguageControllerTestMain {
 		var workspace = new Workspace(syntaxes);
 		workspace.addProject(arguments[1]);
 		var serverSettings = new config.Settings();
-		serverSettings.haxeonCommand = ["python3", arguments[0]];
+		serverSettings.haxeonCommand = ["python3", arguments[0], "--initialize-delay", "--definition-delay"];
 		serverSettings.haxeonVerbose = true;
 		var document = workspace.documents.open(sourcePath), focus = new FocusManager(),
 			metrics = new ModelTextMetrics( "ignored-headlessly.ttf", 15), root = new ModelWorkbenchHost(metrics, new Theme(), focus, workspace, 640, 320),
@@ -139,10 +139,40 @@ class LanguageControllerTestMain {
 		var started = controller.client;
 		if (started == null) throw "controller failed to create configured client";
 		started.log = message -> protocol.push(message);
-		pump(controller, () -> started.ready, 5.0);
+		require(commands.perform("language:go-to-definition", context), "early definition unavailable");
+		pump(controller, () -> controller.statusLabel().indexOf("Initializing") >= 0, 5);
+		pump(controller, () -> controller.lastDefinitionTiming != null && controller.lastDefinitionTiming.outcome == "completed", 5);
+		require(controller.lastDefinitionTiming.readinessMs >= 200 && controller.lastDefinitionTiming.totalMs >= 400, "cold navigation timing missing");
+		require(controller.statusLabel().indexOf("definition") < 0, "completed definition left progress active");
 		require(protocol.length > 0 && protocol[0].indexOf("Haxeon LSP") == 0, "verbose protocol was not logged");
 		var selection = view.getSelection();
 		require(selection != null, "document view has no selection");
+		selection.setCursor(document.buffer, new BufferPosition(0, 5));
+		commands.perform("language:go-to-definition", context);
+		pump(controller, () -> controller.statusLabel().indexOf("Finding definition") >= 0, 5);
+		selection.setCursor(document.buffer, new BufferPosition(0, 0));
+		controller.update(Sys.time());
+		require(controller.lastDefinitionTiming.outcome == "cancelled" && !root.commandView.active, "cursor movement did not cancel navigation");
+		commands.perform("language:go-to-definition", context);
+		pump(controller, () -> controller.lastDefinitionTiming.outcome == "completed", 5);
+		require(!root.commandView.active, "cancelled response opened a stale definition picker");
+		// Repeating F12 supersedes the previous request; changing tabs cancels the newest one.
+		selection.setCursor(document.buffer, new BufferPosition(0, 5));
+		commands.perform("language:go-to-definition", context);
+		commands.perform("language:go-to-definition", context);
+		root.openDocument(workspace.documents.open(arguments[1] + "/Other.hx"));
+		controller.update(Sys.time());
+		require(controller.lastDefinitionTiming.outcome == "cancelled", "tab change did not cancel navigation");
+		root.openDocument(document);
+		selection.setCursor(document.buffer, new BufferPosition(0, 0));
+		var freshPath = arguments[1] + "/Fresh.hx";
+		File.saveContent(freshPath, "class Fresh {}\n");
+		root.openDocument(workspace.documents.open(freshPath));
+		var beforeFresh = controller.lastDefinitionTiming;
+		commands.perform("language:go-to-definition", context);
+		pump(controller, () -> controller.lastDefinitionTiming != beforeFresh && controller.lastDefinitionTiming.outcome == "completed", 5);
+		root.openDocument(document);
+		Sys.println("PASS: cold and unsynchronized F12 retention, progress, timings, repeated requests and cursor/tab cancellation");
 		var formattingSettings = new config.Settings(); formattingSettings.indentSize = 3; formattingSettings.insertSpaces = true;
 		controller.documentSettings = target -> formattingSettings;
 		var unformatted = document.buffer.text;

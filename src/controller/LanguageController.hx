@@ -25,6 +25,9 @@ class LanguageController {
 	final navigationBack:Array<LanguageLocation> = [];
 	final navigationForward:Array<LanguageLocation> = [];
 	var definitionRequest:Int = 0;
+	var pendingDefinition:Null<Float->Void>;
+	var definitionProgress:String = "";
+	public var lastDefinitionTiming(default, null):Dynamic;
 
 	final workspace:Workspace;
 	final root:WorkbenchHost;
@@ -90,7 +93,7 @@ class LanguageController {
 
 	public function statusLabel():String {
 		var service = client;
-		return service == null ? "" : "Haxeon: " + service.status;
+		return definitionProgress != "" ? definitionProgress : service == null ? "" : "Haxeon: " + service.status;
 	}
 
 	function configuration(project:workspace.Project):config.Settings {
@@ -155,6 +158,7 @@ class LanguageController {
 	}
 
 	public function update(now:Float):Void {
+		if (pendingDefinition != null) pendingDefinition(now);
 		var index = retiring.length;
 		while (index > 0) {
 			index--; var previous = retiring[index]; previous.service.update(now);
@@ -199,10 +203,12 @@ class LanguageController {
 		suppressed.set(project.root, true);
 		var entry = sessions.get(project.root);
 		if (entry != null) retire(entry, Sys.time());
+		if (pendingDefinition != null) pendingDefinition(Sys.time());
 	}
 
 	public function shutdown():Void {
 		shuttingDown = true;
+		if (pendingDefinition != null) pendingDefinition(Sys.time());
 		var entries:Array<FolderLanguageSession> = [for (entry in sessions) entry];
 		for (entry in entries) retire(entry, Sys.time());
 		for (entry in retiring) entry.service.shutdown();
@@ -291,13 +297,18 @@ class LanguageController {
 	}
 
 	function definition():Void {
+		definitionRequest++;
+		var previous = client;
+		if (previous != null) previous.cancelDefinition();
+		pendingDefinition = null; definitionProgress = "";
+		if (client == null) start();
 		var service = client, view = context.activeView(), document = activeDocument();
 		if (view == null || document == null) return;
-		if (service == null || !service.ready || !service.definitionSupported) {
+		if (service == null || (service.ready && !service.definitionSupported)) {
 			root.getNotifications().publish("Go to Definition is unavailable: " + (service == null ? "start the language server" : service.ready ? "server does not support definitions" : service.status));
 			return;
 		}
-		var revision = document.buffer.stateId, origin = currentLocation(), request = ++definitionRequest;
+		var revision = document.buffer.stateId, origin = currentLocation(), request = definitionRequest;
 		var position = new BufferPosition(view.cursorLine(), view.cursorColumn());
 		var valid = function() return request == definitionRequest && client == service && context.activeView() == view &&
 			document.buffer.stateId == revision && view.cursorLine() == position.line && view.cursorColumn() == position.column;
@@ -308,19 +319,42 @@ class LanguageController {
 				navigationForward.resize(0);
 			}
 		};
-		if (!service.requestDefinition(document, position, Sys.time(), locations -> {
-			if (!valid()) return;
-			if (locations.length == 0) { root.getNotifications().publish("No definition found"); return; }
-			if (locations.length == 1) { navigate(locations[0]); return; }
-			var entries:Array<CommandViewEntry> = [];
-			for (index in 0...locations.length) entries.push(new CommandViewEntry(locations[index].path, locationLabel(locations[index]), Std.string(index)));
-			root.openCommandView(new CommandViewProvider("Go to Definition: ", entries, _ -> {}, (entry, query, backwards) -> {
-				if (entry == null) return;
-				root.closeCommandView();
-				var index = Std.parseInt(entry.value);
-				if (index != null && index >= 0 && index < locations.length) navigate(locations[index]);
-			}));
-		}, error -> { if (valid()) root.getNotifications().publish("Go to Definition failed: " + error); })) root.getNotifications().publish("Language server is synchronizing this document; try Go to Definition again");
+		var started = Sys.time(), sent = false, settled = false, sentAt = started;
+		var finish = function(outcome:String) {
+			settled = true;
+			lastDefinitionTiming = {outcome: outcome, readinessMs: (sentAt - started) * 1000, totalMs: (Sys.time() - started) * 1000};
+			if (service.verbose) service.log("Go to Definition timing: " + haxe.Json.stringify(lastDefinitionTiming));
+			if (request == definitionRequest) { pendingDefinition = null; definitionProgress = ""; }
+		};
+		pendingDefinition = function(now) {
+			if (!valid() || shuttingDown || service.status == "stopping" || service.status == "stopped" || service.status == "disabled after repeated failures") {
+				finish("cancelled"); service.cancelDefinition(); return;
+			}
+			if (now - started >= 30) {
+				finish("timeout"); service.cancelDefinition();
+				root.getNotifications().publish("Go to Definition timed out"); return;
+			}
+			if (now - started >= 0.2) definitionProgress = !service.ready ? "Initializing language server…" : sent ? "Finding definition…" : "Synchronizing document…";
+			if (sent || !service.ready) return;
+			if (!service.definitionSupported) { finish("unsupported"); root.getNotifications().publish("Server does not support definitions"); return; }
+			sentAt = now;
+			sent = service.requestDefinition(document, position, now, locations -> {
+				if (settled) return;
+				finish("completed");
+				if (!valid()) return;
+				if (locations.length == 0) { root.getNotifications().publish("No definition found"); return; }
+				if (locations.length == 1) { navigate(locations[0]); return; }
+				var entries:Array<CommandViewEntry> = [];
+				for (index in 0...locations.length) entries.push(new CommandViewEntry(locations[index].path, locationLabel(locations[index]), Std.string(index)));
+				root.openCommandView(new CommandViewProvider("Go to Definition: ", entries, _ -> {}, (entry, query, backwards) -> {
+					if (entry == null) return;
+					root.closeCommandView();
+					var index = Std.parseInt(entry.value);
+					if (index != null && index >= 0 && index < locations.length) navigate(locations[index]);
+				}));
+			}, error -> { if (settled) return; finish("failed"); if (valid()) root.getNotifications().publish("Go to Definition failed: " + error); });
+		};
+		pendingDefinition(started);
 	}
 
 	function signatureHelp():Void {
