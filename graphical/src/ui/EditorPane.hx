@@ -288,7 +288,7 @@ class EditorPane implements View {
 		var viewportNode:Null<haxeon.ui.core.RenderNode> = null;
 		var editorNode:Null<haxeon.ui.core.RenderNode> = null;
 		var gutter = new EditorGutter("gutter:" + document.id, document.buffer,
-			color(editorTheme.foregroundMuted), color(editorTheme.surface), fontSize);
+			color(editorTheme.foregroundMuted), color(editorTheme.surface), fontSize, selection.cursor.line, context.theme.tokens.accent);
 		var editorStyle = new LayoutStyle();
 		editorStyle.width = LayoutAxis.grow();
 		// Blank viewport space and the trailing scroll margin belong to the
