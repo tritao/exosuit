@@ -1,6 +1,34 @@
 # Execution ledger
 
-Last updated: 2026-10-08.
+Last updated: 2026-10-09.
+
+## M17 source control — in progress
+
+Starting point: Exosuit `ab7a21ae0986083cee2a61e5e99bae9d70da674d` on
+`main`; the worktree was clean before this milestone began. No SCM subsystem
+existed in `src/`.
+
+The delivered M17.1 foundation adds the VCS-neutral repository, head, group,
+resource, feature, operation, result and cancellable-job records; canonical
+group ordering; a scripted fake provider; a byte-oriented porcelain v2 parser;
+and a scheduled Myers line diff. The parser consumes NUL-delimited `Bytes`,
+keeps original path bytes on each resource, and separately escapes control and
+invalid UTF-8 bytes for one-line display. Upstream-gone state and the
+in-progress operation are explicit parser inputs because porcelain v2 does not
+provide reliable markers for those host facts.
+
+The focused Windows Haxeon run of `tests/scm-git` passes branch headers,
+unborn/detached/no-upstream/gone-upstream states, ordinary/rename/copy/unmerged/
+untracked/ignored entries, all seven conflict codes, submodule state, path edge
+cases, model and feature behavior, fake-provider latency/cancellation, and
+100 deterministic line-edit reconstruction cases. A 10,000-line fixture with
+50 scattered edits converged in 3 ms total. The project is registered in
+`scripts/test.sh`. The per-slice 4 ms ceiling and full M17.1 acceptance suite
+are not yet qualified.
+
+Next: implement the asynchronous Git process runner and batched blob reader,
+including their failure, cancellation and reuse behavior; then finish M17.1's
+Git fixtures before beginning service discovery and trust.
 
 ## Windows workspace startup and filesystem backend, 2026-10-08
 

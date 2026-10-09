@@ -51,6 +51,7 @@ echo "PASS: Haxeon headless application exercised the core document model"
 run_test plugin-host
 run_test command-clipboard
 run_test haxeon-rpc
+run_test scm-git
 bash "$root_dir/scripts/test-workspace-transport.sh"
 bash "$root_dir/scripts/test-relay.sh"
 bash "$root_dir/scripts/test-workspace-persistence.sh"

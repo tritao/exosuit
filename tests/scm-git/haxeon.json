@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "package": { "name": "exosuit-scm-git-test" },
+  "entry": "app.ScmGitTestMain",
+  "sourceRoots": ["src"],
+  "dependencies": {
+    "pragtical_hx": { "path": "../.." }
+  },
+  "target": "host",
+  "outputDir": "build"
+}
