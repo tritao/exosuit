@@ -346,8 +346,8 @@ class WorkspaceSmokeApp extends ExosuitApp {
 
 		if (phase == "explorer-icons" && (frames == 3 || frames == 4)) {
 			var root = path.substring(0, path.lastIndexOf("/"));
-			var names = ["Main.hx", "data.json", "notes.md", "README.md", "tool.py", "Dockerfile", "mystery.wibble", "language-controller-test-with-an-extra-long-filename.hl"];
-			var ids = ["_haxe", "_json", "_markdown", "_info", "_python", "_docker", "_default", "_default"];
+			var names = ["Main.hx", "Main.hxi", "data.json", "notes.md", "README.md", "tool.py", "Dockerfile", "mystery.wibble", "language-controller-test-with-an-extra-long-filename.hl"];
+			var ids = ["_haxe", "_haxe", "_json", "_markdown", "_info", "_python", "_docker", "_default", "_default"];
 			for (index in 0...names.length) {
 				var row = treeRow(ui.root, root + "/" + names[index]);
 				require(row != null, "icon row missing: " + names[index]);

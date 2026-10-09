@@ -145,7 +145,7 @@ class SetiIconData {
 				case "haml": return "_haml";
 				case "happenings": return "_happenings";
 				case "hs", "lhs": return "_haskell";
-				case "hx": return "_haxe";
+				case "hx", "hxi": return "_haxe";
 				case "hxs": return "_haxe_1";
 				case "hxp": return "_haxe_2";
 				case "hxml": return "_haxe_3";

@@ -127,6 +127,7 @@ printf 'c\n' > "$fixture/explorer-project/folder/C.txt"
 run_phase explorer-preview explorer-preview "$fixture/explorer-project/Main.hx"
 
 printf 'class Main {}\n' > "$fixture/explorer-project/Main.hx"
+printf 'class Main {}\n' > "$fixture/explorer-project/Main.hxi"
 printf '{}\n' > "$fixture/explorer-project/data.json"
 printf '# Readme\n' > "$fixture/explorer-project/README.md"
 printf 'print(1)\n' > "$fixture/explorer-project/tool.py"
