@@ -44,7 +44,7 @@ import haxeon.ui.widgets.text.TextNavigationIntent;
 /**
  * One editor tab: a line-number gutter next to a `TextArea` sharing the
  * active document's `TextBuffer.document` EditorKit document. Gutter and
- * text share a single scroll container, so they always scroll together.
+ * text share resolved source coordinates; the gutter stays fixed horizontally.
  *
  * Syntax providers adapt the document's cached UTF-16 tokens to the retained
  * layout's codepoint ranges. Multiple selections paint through UIKit and
@@ -62,10 +62,13 @@ class EditorPane implements View {
 	 */
 	public final selection:BufferSelection;
 	final scrollController:ScrollController;
-	var caretScrollMargin:Float = 0.0;
+	final viewportGeometry = new editor.EditorViewportGeometry();
+	var previousWrap:Null<Bool> = null;
+	var wrapAnchorLine:Int = -1;
 	final minimap:EditorMinimap;
 	public var minimapEnabled:Bool = true;
 	public var fontSize:Float = 15.0;
+	public var applicationZoom:Float = 1.0;
 	public var editSettings:config.Settings = new config.Settings();
 	var editingLayout:Null<TextEditorLayout> = null;
 
@@ -107,7 +110,7 @@ class EditorPane implements View {
 		decorationProvider = provideDecorations;
 		this.onEdited = onEdited;
 		this.editorTheme = editorTheme == null ? new style.Theme() : editorTheme;
-		minimap = new EditorMinimap(document, this.scrollController, this.editorTheme, new editor.MinimapModel());
+		minimap = new EditorMinimap(document, this.scrollController, this.editorTheme, new editor.MinimapModel(), viewportGeometry);
 		this.selection = selection == null ? new BufferSelection() : selection;
 		widgetSelection = new TextSelection(EditorCoordinates.codepoint(document, this.selection.anchor),
 			EditorCoordinates.codepoint(document, this.selection.cursor));
@@ -284,20 +287,42 @@ class EditorPane implements View {
 		onEdited();
 	}
 
+	/** One layout bridge applies the retained dimensions atomically after shaping. */
+	function applySourceGeometry(node:Null<haxeon.ui.core.RenderNode>):Bool {
+		if (node == null) return false;
+		var latest = haxeon.ui.core.RenderNode.latest(node), style = latest.layout.style;
+		var changed = style.width.sizing != haxeon.ui.LayoutSizing.Fixed || style.height.sizing != haxeon.ui.LayoutSizing.Fixed ||
+			Math.abs(style.width.value - viewportGeometry.contentWidth) > 0.01 || Math.abs(style.height.value - viewportGeometry.contentHeight) > 0.01 ||
+			Math.abs(style.padding.right - viewportGeometry.rightPadding()) > 0.01 || Math.abs(style.padding.bottom - viewportGeometry.trailingSpace()) > 0.01;
+		if (changed) {
+			style.width = LayoutAxis.fixed(viewportGeometry.contentWidth); style.height = LayoutAxis.fixed(viewportGeometry.contentHeight);
+			style.padding = new Insets(0, 0, viewportGeometry.rightPadding(), viewportGeometry.trailingSpace());
+		}
+		return changed;
+	}
+
 	public function build(context:haxeon.ui.core.BuildContext):haxeon.ui.core.RenderNode {
 		var viewportNode:Null<haxeon.ui.core.RenderNode> = null;
 		var editorNode:Null<haxeon.ui.core.RenderNode> = null;
 		var gutter = new EditorGutter("gutter:" + document.id, document.buffer,
 			color(editorTheme.foregroundMuted), color(editorTheme.surface), fontSize, selection.cursor.line, context.theme.tokens.accent);
+		viewportGeometry.configure(editSettings.wordWrap, minimapEnabled);
 		var editorStyle = new LayoutStyle();
-		editorStyle.width = LayoutAxis.grow();
+		editorStyle.width = viewportGeometry.viewportWidth > 0 ? LayoutAxis.fixed(viewportGeometry.contentWidth) : LayoutAxis.grow();
 		// Blank viewport space and the trailing scroll margin belong to the
 		// text field, so pointer focus/selection uses its normal hit-test path.
-		editorStyle.height = LayoutAxis.grow();
-		editorStyle.padding = new Insets(0, 0, 0, caretScrollMargin);
+		editorStyle.height = viewportGeometry.viewportHeight > 0 ? LayoutAxis.fixed(viewportGeometry.contentHeight) : LayoutAxis.grow();
+		editorStyle.padding = new Insets(0, 0, viewportGeometry.rightPadding(), viewportGeometry.trailingSpace());
 		editorStyle.background = color(editorTheme.editorBackground);
 		var area = TextArea.withDocument("editor:" + document.id, document.buffer.document,
 			handleEdit, editorStyle, null, new TextStyle(fontSize, FontFamily.Monospace), color(editorTheme.editorForeground));
+		area.wrap = editSettings.wordWrap ? haxeon.ui.TextWrap.WordCharacter : haxeon.ui.TextWrap.None;
+		if (previousWrap != null && previousWrap != editSettings.wordWrap) {
+			if (editingLayout != null && editingLayout.paragraphCount > 0)
+				wrapAnchorLine = editingLayout.paragraphIndexAtY(scrollController.offsetY + editingLayout.paragraphCaret(0).y);
+			scrollController.jumpTo(0.0, scrollController.offsetY);
+		}
+		previousWrap = editSettings.wordWrap;
 		area.renderWhitespace = editSettings.renderWhitespace;
 		area.whitespaceColor = color(editorTheme.foregroundSubtle);
 		area.tabWidth = Std.int(Math.max(1, editSettings.tabWidth));
@@ -311,22 +336,22 @@ class EditorPane implements View {
 			if (viewportNode == null || viewportNode.resolved == null || scrollController.viewportHeight <= 0) return;
 			var caret = layout.caret(new TextPosition(EditorCoordinates.codepoint(document, selection.cursor), 0));
 			var bounds = viewportNode.globalBounds();
-			var lineHeight = layout.paragraphStyle.lineHeight == null ? Math.abs(caret.descender - caret.ascender) : layout.paragraphStyle.lineHeight;
-			var trailingSpace = 5 * Math.max(1, lineHeight);
-			var margin = Math.min(trailingSpace, Math.max(0, (bounds.height - Math.abs(caret.descender - caret.ascender)) / 2));
-			// Trailing space lets the last line keep the same margin as other lines.
-			if (Math.abs(caretScrollMargin - trailingSpace) > 0.01 && editorNode != null) {
-				caretScrollMargin = trailingSpace;
-				editorNode.layout.style.padding = new Insets(0, 0, 0, trailingSpace);
-				context.requestLayoutFeedback();
-				return; // Reveal after the scroll range includes the new trailing space.
+			viewportGeometry.setViewport(bounds.width, bounds.height);
+			var metrics = layout.measure();
+			viewportGeometry.resolveSource(metrics.width, metrics.height,
+				layout.paragraphStyle.lineHeight == null ? Math.abs(caret.descender - caret.ascender) : layout.paragraphStyle.lineHeight);
+			if (applySourceGeometry(editorNode)) { context.requestLayoutFeedback(); return; }
+			if (Math.abs(scrollController.contentHeight - viewportGeometry.contentHeight) > 0.01 ||
+				Math.abs(scrollController.contentWidth - viewportGeometry.contentWidth) > 0.01) { context.requestLayoutFeedback(); return; }
+			if (wrapAnchorLine >= 0) {
+				var line = Std.int(Math.min(wrapAnchorLine, layout.paragraphCount - 1));
+				wrapAnchorLine = -1;
+				if (scrollController.jumpTo(0.0, Math.max(0, layout.paragraphCaret(line).y - layout.paragraphCaret(0).y))) context.requestLayoutFeedback();
 			}
 			if (!consumeCursorReveal()) return;
-			var top = geometry.localToViewport(new Point(0.0, caret.y + Math.min(caret.ascender, caret.descender))).y;
-			var bottom = geometry.localToViewport(new Point(0.0, caret.y + Math.max(caret.ascender, caret.descender))).y;
-			var delta = top < bounds.y + margin ? top - bounds.y - margin :
-				bottom > bounds.y + bounds.height - margin ? bottom - bounds.y - bounds.height + margin : 0.0;
-			if (delta != 0 && scrollController.jumpTo(scrollController.offsetX, scrollController.offsetY + delta)) context.requestLayoutFeedback();
+			var target = viewportGeometry.reveal(caret.x, caret.y + Math.min(caret.ascender, caret.descender),
+				caret.y + Math.max(caret.ascender, caret.descender), scrollController.offsetX, scrollController.offsetY);
+			if (scrollController.jumpTo(target.x, target.y)) context.requestLayoutFeedback();
 		};
 		area.onCaretRect = function(rect) {
 			var previous = caretRect;
@@ -359,14 +384,6 @@ class EditorPane implements View {
 			previousPresentation = current;
 		}
 		area.presentationRevision = presentationRevision;
-		var rowStyle = new LayoutStyle();
-		rowStyle.width = LayoutAxis.grow();
-		rowStyle.height = LayoutAxis.grow();
-		rowStyle.direction = LayoutDirection.LeftToRight;
-		var row = new Row("editor-row:" + document.id, [
-			new KeyedView("gutter", gutter),
-			new KeyedView("text", area)
-		], rowStyle);
 		var scrollStyle = new LayoutStyle();
 		scrollStyle.width = LayoutAxis.grow();
 		scrollStyle.height = LayoutAxis.grow();
@@ -375,10 +392,16 @@ class EditorPane implements View {
 		containerStyle.width = LayoutAxis.grow();
 		containerStyle.height = LayoutAxis.grow();
 		containerStyle.direction = LayoutDirection.LeftToRight;
+		containerStyle.clipHorizontal = true;
+		containerStyle.clipVertical = true;
 		var container = new haxeon.ui.core.RenderNode(context.id("editor-container:" + document.id), LayoutVisualKind.Box, containerStyle);
 		container.setStyleIdentity("editor-container", "editor-container:" + document.id);
-		var viewport = new ScrollView("editor-scroll:" + document.id, row, scrollStyle, ScrollAxis.Vertical, scrollController);
+		var viewport = new ScrollView("editor-scroll:" + document.id, area, scrollStyle, editSettings.wordWrap ? ScrollAxis.Vertical : ScrollAxis.Both, scrollController);
 		viewport.fillViewport = true;
+		viewport.contentExtentProvider = function(width, height) {
+			viewportGeometry.setViewport(width, height);
+			return {width: viewportGeometry.contentWidth, height: viewportGeometry.contentHeight};
+		};
 		viewport.scrollbarOverlayHost = container;
 		var node = viewport.build(context);
 		viewportNode = node;
@@ -410,12 +433,34 @@ class EditorPane implements View {
 		node.on(haxeon.ui.core.UiEventKind.KeyDown, function(event) {
 			if (haxeon.ui.core.UiKey.isContextMenuRequest(event.key, event.modifiers)) requestMenu(event);
 		});
+		container.add(gutter.build(context));
 		container.add(node);
 		if (!minimapEnabled) return container;
+		minimap.applicationZoom = applicationZoom;
 		var preview = minimap.build(context);
+		preview.layout.style.positioning = haxeon.ui.LayoutPositioning.Absolute;
+		preview.layout.style.zIndex = 10;
 		container.add(preview);
+		var shadowStyle = new LayoutStyle();
+		shadowStyle.positioning = haxeon.ui.LayoutPositioning.Absolute;
+		shadowStyle.width = LayoutAxis.fixed(8.0);
+		shadowStyle.height = LayoutAxis.grow();
+		shadowStyle.zIndex = 9;
+		var shadow = new haxeon.ui.core.RenderNode(context.id("minimap-shadow:" + document.id), LayoutVisualKind.Custom, shadowStyle);
+		shadow.hitTestSelf = false;
+		shadow.onPaint(function(canvas, geometry) {
+			if (!viewportGeometry.overlapsMinimap(scrollController.offsetX) || geometry.height <= 0) return;
+			canvas.fillLinearGradientRect(new Rect(0, 0, geometry.width, geometry.height), 0, 0, geometry.width, 0, [
+				new haxeon.ui.GradientStop(0.0, Color.rgba(0, 0, 0, 0)),
+				new haxeon.ui.GradientStop(1.0, Color.rgba(0, 0, 0, editorTheme.lightSyntax ? 0.15 : 0.35))
+			]);
+		});
+		container.add(shadow);
 		container.onResolved(function(geometry) {
-			var width = geometry.width >= 480 ? 88.0 : 0.0;
+			var width = viewportGeometry.minimapWidth;
+			var x = Math.max(0.0, geometry.width - width);
+			if (shadowStyle.positionX != x - 8.0) { shadowStyle.positionX = x - 8.0; context.requestLayoutFeedback(); }
+			if (preview.layout.style.positionX != x) { preview.layout.style.positionX = x; context.requestLayoutFeedback(); }
 			if (preview.layout.style.width.value != width) {
 				preview.layout.style.width = LayoutAxis.fixed(width);
 				context.requestLayoutFeedback();

@@ -2,8 +2,10 @@ package editor;
 
 /** Bounded, theme-independent preview data. Scrolling never rebuilds these spans. */
 class MinimapModel {
-	public static inline final MAX_ROWS = 512;
+	public static inline final MAX_ROWS = 2048;
+	static inline final MAX_COLORED_ROWS = 512;
 	public static inline final MAX_COLUMNS = 80;
+	public static inline final MAX_BITMAP_HEIGHT = 2048;
 	public final rows:Array<MinimapRow> = [];
 	public var generation(default, null):Int = 0;
 	var revision:Int = -1;
@@ -28,7 +30,7 @@ class MinimapModel {
 		var end = lastLine < 0 ? count : Std.int(Math.max(start + 1, Math.min(count, lastLine + 1)));
 		var samples = Std.int(Math.min(end - start, MAX_ROWS));
 		// Avoid advancing the stateful highlighter through a huge file just for its preview.
-		var colored = count <= MAX_ROWS && document.buffer.document.codepointCount <= 32768;
+		var colored = count <= MAX_COLORED_ROWS && document.buffer.document.codepointCount <= 32768;
 		for (sample in 0...samples) {
 			var line = samples <= 1 ? start : start + Std.int(sample * (end - start - 1) / (samples - 1));
 			var text = document.buffer.line(line);
@@ -58,9 +60,10 @@ class MinimapModel {
 
 	/** A dense preview never expands into thousands of GPU path meshes. */
 	public function rasterize(colors:Array<Int>, positions:Array<Float>, contentHeight:Float,
-			height:Float):MinimapBitmap {
-		var pixelHeight = Std.int(Math.max(1, Math.min(1024, Math.ceil(height))));
+			height:Float, markHeight:Int = 1, rasterScale:Float = 1.0):MinimapBitmap {
+		var pixelHeight = Std.int(Math.max(1, Math.min(MAX_BITMAP_HEIGHT, Math.ceil(height * rasterScale))));
 		var pixels = haxe.io.Bytes.alloc(MAX_COLUMNS * pixelHeight * 4);
+		markHeight = Std.int(Math.max(1, Math.min(2, markHeight)));
 		for (index in 0...rows.length) {
 			var y = index < positions.length
 				? positions[index] / Math.max(1, contentHeight)
@@ -68,13 +71,14 @@ class MinimapModel {
 			var row = Std.int(Math.max(0, Math.min(pixelHeight - 1, Math.floor(y * pixelHeight))));
 			for (span in rows[index].spans) {
 				var color = colors[span.kind];
-				for (column in span.start...Std.int(Math.min(MAX_COLUMNS, span.start + span.length))) {
-					var offset = (row * MAX_COLUMNS + column) * 4;
-					pixels.set(offset, (color >>> 24) & 255);
-					pixels.set(offset + 1, (color >>> 16) & 255);
-					pixels.set(offset + 2, (color >>> 8) & 255);
-					pixels.set(offset + 3, Std.int((color & 255) * 0.4));
-				}
+				for (pixelRow in row...Std.int(Math.min(pixelHeight, row + markHeight)))
+					for (column in span.start...Std.int(Math.min(MAX_COLUMNS, span.start + span.length))) {
+						var offset = (pixelRow * MAX_COLUMNS + column) * 4;
+						pixels.set(offset, (color >>> 24) & 255);
+						pixels.set(offset + 1, (color >>> 16) & 255);
+						pixels.set(offset + 2, (color >>> 8) & 255);
+						pixels.set(offset + 3, Std.int((color & 255) * 0.4));
+					}
 			}
 		}
 		return {width: MAX_COLUMNS, height: pixelHeight, pixels: pixels};

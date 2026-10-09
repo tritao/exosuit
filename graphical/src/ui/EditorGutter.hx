@@ -61,7 +61,8 @@ class EditorGutter implements View {
 		retained.update(buffer.lineCount(), foreground, fontSize, activeLine, activeForeground);
 		var style = new LayoutStyle();
 		style.width = LayoutAxis.fit();
-		style.height = LayoutAxis.fit();
+		style.height = LayoutAxis.grow();
+		style.clipVertical = true;
 		if (background != null) style.background = background;
 		var built = new RenderNode(id, LayoutVisualKind.Custom, style);
 		built.styleKey = key;
@@ -81,7 +82,7 @@ private class GutterLabels {
 	final visibleLabels:Array<GutterLabel> = [];
 	var editorLayout:Null<TextEditorLayout>;
 	var originY:Float = 0.0;
-	var height:Float = 4.0;
+
 	var count:Int = -1;
 	var digits:Int = 1;
 	var width:Float = 0.0;
@@ -94,7 +95,7 @@ private class GutterLabels {
 		this.fonts = fonts;
 		layout = TextLayout.create(fonts, "", 1.0, new TextStyle(fontSize, FontFamily.Monospace), new ParagraphStyle(TextWrap.None));
 		measurement = new LayoutMeasuredContent(function(_) {
-			return new LayoutMeasureResult(width + 12.0, height);
+			return new LayoutMeasureResult(width + 12.0, 1.0);
 		});
 		content = new LayoutRenderableContent(measurement, function(canvas, geometry) {
 			var editor = editorLayout;
@@ -142,14 +143,8 @@ private class GutterLabels {
 	public function resolve(editor:TextEditorLayout, nextOriginY:Float):Bool {
 		editorLayout = editor;
 		originY = nextOriginY;
-		var nextHeight = Math.max(0.0, originY + editor.measure().height);
-		var changed = height != nextHeight;
-		if (changed) {
-			height = nextHeight;
-			measurement.invalidate();
-		}
 		content.invalidatePaint();
-		return changed;
+		return false;
 	}
 
 	public function update(nextCount:Int, nextColor:Color, nextFontSize:Float, nextActiveLine:Int, nextActiveColor:Color):Void {

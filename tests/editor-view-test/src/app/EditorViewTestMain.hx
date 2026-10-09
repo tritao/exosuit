@@ -57,7 +57,7 @@ class EditorViewTestMain {
 		require(preview.rows.length == 3, "minimap undo did not restore rows");
 		var largePreview = new Document("large.hx", [for (_ in 0...10000) "class Main {}"].join("\n"), syntaxes);
 		preview.update(largePreview);
-		require(preview.rows.length == editor.MinimapModel.MAX_ROWS && preview.rows[511].line == 9999,
+		require(preview.rows.length == editor.MinimapModel.MAX_ROWS && preview.rows[editor.MinimapModel.MAX_ROWS - 1].line == 9999,
 			"large minimap is unbounded or misses the end of the file");
 		require(preview.rows[0].spans[0].kind == 0, "large minimap unnecessarily requests syntax highlighting");
 		preview.update(largePreview, 9000, 9255);
@@ -84,7 +84,7 @@ class EditorViewTestMain {
 			[for (_ in 0...40) "x "].join("")].join("\n"), syntaxes);
 		preview.update(densePreview);
 		var bitmap = preview.rasterize([for (_ in 0...8) 0x123456ff], [], 10000, 10000);
-		require(bitmap.width == 80 && bitmap.height == 1024 && bitmap.pixels.length == 80 * 1024 * 4,
+		require(bitmap.width == 80 && bitmap.height == editor.MinimapModel.MAX_BITMAP_HEIGHT && bitmap.pixels.length == 80 * editor.MinimapModel.MAX_BITMAP_HEIGHT * 4,
 			"dense minimap exceeds its bitmap memory bound");
 		require(bitmap.pixels.get(0) == 0x12 && bitmap.pixels.get(1) == 0x34 && bitmap.pixels.get(2) == 0x56
 			&& bitmap.pixels.get(3) == 102 && bitmap.pixels.get(7) == 0,

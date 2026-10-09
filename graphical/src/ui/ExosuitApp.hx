@@ -2007,6 +2007,7 @@ class ExosuitApp implements DesktopUiApplication {
 			pane.requestCursorReveal = documentView.cursorChanged;
 			pane.consumeCursorReveal = documentView.consumeCursorReveal;
 			pane.fontSize = application.settings.current.fontSize;
+			pane.applicationZoom = application.settings.current.applicationZoom / 100.0;
 			pane.onResolvedEditor = function(bounds, id) host.editorResolved(paneId, bounds, id);
 			pane.onActivated = function() host.activateTab(document, paneId);
 			pane.onContextMenu = function(event) {

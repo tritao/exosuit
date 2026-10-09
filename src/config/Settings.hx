@@ -22,6 +22,7 @@ class Settings {
 	public var scrollbarVisibility:String = "auto";
 	public var tabTooltipDelay:Float = 0.8;
 	public var minimapEnabled:Bool = true;
+	public var wordWrap:Bool = false;
 	public var renderWhitespace:String = "selection";
 	public var terminalFontSize:Int = 14;
 	public var tabWidth:Int = 4;
@@ -73,6 +74,7 @@ class Settings {
 		result.scrollbarVisibility = scrollbarVisibility;
 		result.tabTooltipDelay = tabTooltipDelay;
 		result.minimapEnabled = minimapEnabled;
+		result.wordWrap = wordWrap;
 		result.renderWhitespace = renderWhitespace;
 		result.terminalFontSize = terminalFontSize;
 		result.tabWidth = tabWidth;

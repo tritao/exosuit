@@ -15,10 +15,14 @@ import haxeon.ui.core.UiEvent;
 import haxeon.ui.core.UiEventKind;
 import haxeon.ui.core.View;
 import haxeon.ui.widgets.scroll.ScrollController;
+import haxeon.ui.widgets.scroll.ScrollbarVisibilityController;
+import haxeon.ui.widgets.scroll.ScrollbarVisibility;
+import haxeon.ui.core.UiKey;
 import haxeon.ui.widgets.text.TextEditorLayout;
 import editor.Document;
 import editor.MinimapModel;
 import editor.MinimapGeometry;
+import editor.MinimapDensity;
 
 /** Fixed right-hand preview sharing the editor's resolved paragraph positions. */
 class EditorMinimap implements View {
@@ -26,6 +30,9 @@ class EditorMinimap implements View {
 	final scroll:ScrollController;
 	final theme:style.Theme;
 	final model:MinimapModel;
+	final viewportGeometry:Null<editor.EditorViewportGeometry>;
+	/** Workbench zoom factor, separate from the editor font size and layout coordinates. */
+	public var applicationZoom:Float = 1.0;
 	var rowPositions:Array<Float> = [];
 	var positionRevision:Int = 0;
 	var resolvedLayout:Null<TextEditorLayout>;
@@ -35,11 +42,12 @@ class EditorMinimap implements View {
 	var dragOffset:Float = 0;
 	public var node(default, null):Null<RenderNode>;
 
-	public function new(document:Document, scroll:ScrollController, theme:style.Theme, model:MinimapModel) {
+	public function new(document:Document, scroll:ScrollController, theme:style.Theme, model:MinimapModel, ?viewportGeometry:editor.EditorViewportGeometry) {
 		this.document = document;
 		this.scroll = scroll;
 		this.theme = theme;
 		this.model = model;
+		this.viewportGeometry = viewportGeometry;
 	}
 
 	public function resolveTextLayout(layout:TextEditorLayout):Void {
@@ -61,13 +69,26 @@ class EditorMinimap implements View {
 	static function color(value:Int, alpha:Float = 1):Color
 		return Color.fromBytes((value >>> 24) & 255, (value >>> 16) & 255, (value >>> 8) & 255, Std.int((value & 255) * alpha));
 
+	function viewportGeometryLineHeight():Float return viewportGeometry == null ? 21 : viewportGeometry.lineHeight;
+
+	function density():MinimapDensity {
+		return MinimapDensity.resolve(applicationZoom);
+	}
+
 	function mapScale():Float {
+		if (viewportGeometry != null) return viewportGeometry.minimapScale(applicationZoom);
 		var layout = resolvedLayout;
-		return 3.0 / Math.max(1, layout == null ? 20 : layout.textStyle.fontSize * 1.4);
+		var lineHeight = 21.0;
+		if (layout != null && layout.paragraphCount > 0) {
+			var caret = layout.paragraphCaret(0);
+			lineHeight = layout.paragraphStyle.lineHeight == null ?
+				Math.abs(caret.descender - caret.ascender) : layout.paragraphStyle.lineHeight;
+		}
+		return density().rowPitch / Math.max(1, lineHeight);
 	}
 
 	function mapGeometry(height:Float):MinimapGeometry {
-		return new MinimapGeometry(height, scroll.contentHeight, scroll.viewportHeight, mapScale());
+		return viewportGeometry == null ? new MinimapGeometry(height, scroll.contentHeight, scroll.viewportHeight, mapScale()) : viewportGeometry.minimapGeometry(height, applicationZoom);
 	}
 
 	public function build(context:BuildContext):RenderNode {
@@ -81,6 +102,31 @@ class EditorMinimap implements View {
 		var built = new RenderNode(context.id("editor-minimap:" + document.id), LayoutVisualKind.Custom, layoutStyle);
 		built.setStyleIdentity("editor-minimap", "editor-minimap:" + document.id);
 		node = built;
+		built.focusable = true;
+		var visibility = context.resourceState(context.id("minimap-viewport-visibility:" + document.id),
+			function() return new ScrollbarVisibilityController(), function(value) value.dispose()).value;
+		visibility.attach(context.animations, function() context.commands.refresh());
+		visibility.configure(ScrollbarVisibility.Auto, context.environment.reducedMotion);
+		visibility.setAvailable(true);
+		built.on(UiEventKind.HoverEnter, function(_) visibility.setHovered(true));
+		built.on(UiEventKind.HoverLeave, function(_) visibility.setHovered(false));
+		built.on(UiEventKind.Focus, function(_) visibility.setFocused(true));
+		built.on(UiEventKind.Blur, function(_) visibility.setFocused(false));
+		built.on(UiEventKind.FocusLost, function(_) visibility.setFocused(false));
+		built.on(UiEventKind.KeyDown, function(event) {
+			var target = switch (event.key) {
+				case UiKey.Up: scroll.offsetY - viewportGeometryLineHeight();
+				case UiKey.Down: scroll.offsetY + viewportGeometryLineHeight();
+				case UiKey.PageUp: scroll.offsetY - scroll.viewportHeight;
+				case UiKey.PageDown: scroll.offsetY + scroll.viewportHeight;
+				case UiKey.Home: 0.0;
+				case UiKey.End: scroll.maxScrollY;
+				default: return;
+			};
+			scroll.jumpTo(scroll.offsetX, target);
+			context.commands.refresh();
+			event.preventDefault(); event.stopPropagation();
+		});
 		var painting = context.resourceState(built.id, function() return new MinimapPainting(), function(value) value.dispose()).value;
 		built.onPaint(function(canvas, geometry) {
 			if (geometry.width <= 0 || geometry.height <= 0) return;
@@ -89,8 +135,10 @@ class EditorMinimap implements View {
 			var mapping = mapGeometry(height);
 			var offset = mapping.previewOffset(scroll.offsetY);
 			// Cache a page with a scroll margin, rather than compressing the whole file.
-			var tileTop = Math.floor(offset / 256) * 256;
-			var tileHeight = Math.ceil(height + 256);
+			var previewDensity = density();
+			var tileStep = 256.0 / previewDensity.rasterScale;
+			var tileTop = Math.floor(offset / tileStep) * tileStep;
+			var tileHeight = Math.ceil((height + tileStep) * previewDensity.rasterScale) / previewDensity.rasterScale;
 			var layout = resolvedLayout;
 			if (layout != null && layout.paragraphCount > 0) {
 				var origin = layout.paragraphCaret(0).y;
@@ -99,11 +147,12 @@ class EditorMinimap implements View {
 				resolveTextLayout(layout);
 			}
 			var colors = [for (kind in 0...8) theme.tokenColor(kind)];
-			var key = model.generation + ":" + positionRevision + ":" + tileTop + ":" + tileHeight + ":" + scale + ":" + colors.join(",");
+			var markHeight = previewDensity.markHeight;
+			var key = model.generation + ":" + positionRevision + ":" + tileTop + ":" + tileHeight + ":" + scale + ":" + markHeight + ":" + previewDensity.rasterScale + ":" + colors.join(",");
 			if (painting.key != key) {
 				painting.dispose();
 				var positions = [for (position in rowPositions) position * scale - tileTop];
-				var bitmap = model.rasterize(colors, positions, tileHeight, tileHeight);
+				var bitmap = model.rasterize(colors, positions, tileHeight, tileHeight, markHeight, previewDensity.rasterScale);
 				painting.image = Image.create(bitmap.width, bitmap.height, ImageFormat.RGBA8,
 					bitmap.pixels, ImageFilter.Nearest);
 				painting.key = key;
@@ -112,8 +161,8 @@ class EditorMinimap implements View {
 			if (previewImage != null) canvas.drawImage(previewImage, new Rect(4, tileTop - offset, geometry.width - 8, tileHeight));
 			var top = mapping.thumbTop(scroll.offsetY);
 			var visible = mapping.thumbHeight;
-			canvas.fillRectIfPositive(new Rect(0, top, geometry.width, Math.max(2, visible)), color(theme.scrollbar, 0.25));
-			canvas.fillRectIfPositive(new Rect(0, top, 2, Math.max(2, visible)), color(theme.scrollbar, 0.8));
+			canvas.fillRectIfPositive(new Rect(0, top, geometry.width, Math.max(2, visible)), color(theme.scrollbar, 0.25 * visibility.opacity));
+			canvas.fillRectIfPositive(new Rect(0, top, 2, Math.max(2, visible)), color(theme.scrollbar, 0.8 * visibility.opacity));
 		});
 		var navigate = function(event:UiEvent) {
 			if (built.resolved == null) return;
@@ -135,13 +184,14 @@ class EditorMinimap implements View {
 				navigate(event);
 			}
 			dragging = true;
+			visibility.setDragging(true);
 			event.capturePointer();
 			event.preventDefault();
 			event.stopPropagation();
 		});
 		built.on(UiEventKind.PointerMove, function(event) { if (dragging) navigate(event); });
-		built.on(UiEventKind.PointerUp, function(event) { dragging = false; event.releasePointer(); });
-		built.on(UiEventKind.PointerCancel, function(_) dragging = false);
+		built.on(UiEventKind.PointerUp, function(event) { dragging = false; visibility.setDragging(false); event.releasePointer(); });
+		built.on(UiEventKind.PointerCancel, function(_) { dragging = false; visibility.setDragging(false); });
 		built.on(UiEventKind.Scroll, function(event) {
 			scroll.scrollBy(0, event.deltaY);
 			context.commands.refresh();

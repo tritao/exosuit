@@ -52,7 +52,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	var remoteOpenTests:Null<RemoteFileOpenTests>;
 
 	public function new(context:haxeon.ui.host.DesktopUiHostContext, path:String, phase:String) {
-		super(context.fonts, null, context, (phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-font" || phase == "editor-tabs" || phase == "zoom" || phase == "word-delete" || phase == "selection" || phase == "tab-close" || phase == "pointer-actions" || phase == "blank-editor-click" || phase == "caret-follow" || phase == "exit-confirmation" || phase == "save-as" || phase == "tab-close-paint" || phase == "settings" || phase == "editor-minimap" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
+		super(context.fonts, null, context, (phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-geometry" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-font" || phase == "editor-tabs" || phase == "zoom" || phase == "word-delete" || phase == "selection" || phase == "tab-close" || phase == "pointer-actions" || phase == "blank-editor-click" || phase == "caret-follow" || phase == "exit-confirmation" || phase == "save-as" || phase == "tab-close-paint" || phase == "settings" || phase == "editor-minimap" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
 			null, null, null, WorkspaceSmokeMain.createTerminal);
 		this.phase = phase;
 		closeContext = context;
@@ -88,6 +88,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		if (phase == "scrollbar-visibility") return scrollbarStep(frame);
 		if (phase == "editor-resize") return resizeStep(frame);
 		if (phase == "editor-minimap") return minimapStep(frame);
+		if (phase == "editor-geometry") return geometryStep(frame);
 		if (phase == "editor-tabs") return tabsStep(frame);
 		if (phase == "settings") return settingsStep(frame);
 		if (phase == "zoom") return zoomStep(frame);
@@ -875,6 +876,85 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		return result;
 	}
 
+	function geometryStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
+		frame.deltaSeconds = 1.0 / 60.0;
+		var view = host.activeView();
+		if (view == null) throw "geometry acceptance missing editor";
+		var controller = view.scrollController;
+		controller.configureAnimation(false, 0);
+		if (frames == 2) {
+			view.document.buffer.replaceAllText([for (index in 0...200) "line" + index + " " + [for (_ in 0...150) "x"].join("")].join("\n"), view.selection);
+		}
+		if (frames == 3) {
+			require(controller.maxScrollY > 1000 && controller.maxScrollX > 0, "long source lost intrinsic scroll ranges: " + controller.contentWidth + ":" + controller.contentHeight + " viewport=" + controller.viewportWidth + ":" + controller.viewportHeight);
+			ui.focusWidget(node("editor:" + view.document.id).id);
+			ui.key(UiEventKind.KeyDown, UiKey.Home, UiModifier.Control);
+			for (_ in 0...100) ui.key(UiEventKind.KeyDown, UiKey.Down);
+		}
+		if (frames == 4) {
+			require(controller.offsetY > 0, "keyboard Down did not scroll source: cursor=" + view.selection.cursor.line + ":" + view.selection.cursor.column + " content=" + controller.contentHeight + " viewport=" + controller.viewportHeight + " offset=" + controller.offsetY);
+			selectionStoppedOffset = controller.offsetY;
+			ui.key(UiEventKind.KeyDown, UiKey.A, UiModifier.Control);
+		}
+		if (frames == 5) {
+			require(Math.abs(controller.offsetY - selectionStoppedOffset) < 0.01, "select all moved viewport");
+			ui.key(UiEventKind.KeyDown, UiKey.Escape);
+			controller.jumpTo(0, 0);
+			var bounds = editorViewport(view.document.id).globalBounds();
+			ui.pointerDown(bounds.x + 20, bounds.y + 20, 0);
+			ui.pointerMove(bounds.x + 20, bounds.y + bounds.height + 40);
+		}
+		if (frames == 9) {
+			var bounds = editorViewport(view.document.id).globalBounds();
+			ui.pointerUp(bounds.x + 20, bounds.y + bounds.height + 40, 0);
+			require(controller.offsetY > 0 && view.selection.hasSelection(), "selection drag did not autoscroll");
+			controller.jumpTo(0, 0);
+			var map = node("editor-minimap:" + view.document.id).globalBounds();
+			ui.pointerDown(map.x + 20, map.y + map.height * 0.7, 0);
+			ui.pointerUp(map.x + 20, map.y + map.height * 0.7, 0);
+			require(controller.offsetY > 0, "minimap did not scroll source");
+			selectionStoppedOffset = controller.offsetY;
+		}
+		if (frames == 10) require(Math.abs(controller.offsetY - selectionStoppedOffset) < 0.01, "rebuild reset minimap scroll");
+		if (frames == 11) {
+			ui.focusWidget(node("editor:" + view.document.id).id);
+			ui.key(UiEventKind.KeyDown, UiKey.Home, UiModifier.Control);
+			ui.key(UiEventKind.KeyDown, UiKey.End);
+		}
+		if (frames == 12) {
+			require(controller.offsetX > 0, "long-line caret did not reveal horizontally");
+			pointerX = node("gutter:" + view.document.id).globalBounds().x;
+			ui.key(UiEventKind.KeyDown, UiKey.Z, UiModifier.Alt);
+		}
+		if (frames == 14) {
+			require(application.settings.current.wordWrap && controller.offsetX == 0 && controller.maxScrollX == 0, "Alt+Z did not enable wrap and clear horizontal range");
+			require(node("gutter:" + view.document.id).globalBounds().x == pointerX, "gutter moved with horizontal scroll");
+			ui.key(UiEventKind.KeyDown, UiKey.End, UiModifier.Control);
+		}
+		if (frames == 16) {
+			require(controller.offsetY > 0, "wrapped caret did not scroll vertically");
+			ui.key(UiEventKind.KeyDown, UiKey.Z, UiModifier.Alt);
+		}
+		if (frames == 18) {
+			require(!application.settings.current.wordWrap && controller.maxScrollY > 0 && controller.maxScrollX > 0, "unwrap lost scroll ranges");
+			var before = view.selection.snapshot();
+			application.settings.reload(true);
+			require(!application.settings.current.wordWrap, "wrap preference was not persisted");
+			require(view.selection.cursor.equals(before.ranges[0].cursor), "wrap changed cursor");
+			controller.jumpTo(0, 0);
+			var bounds = editorViewport(view.document.id).globalBounds();
+			ui.scroll(bounds.x + 20, bounds.y + 100, 0, 100);
+		}
+		var result = super.submit(frame);
+		if (frames == 20) {
+			require(controller.offsetY > 0, "mouse wheel did not scroll source");
+			var caret = host.textInputArea(), bounds = editorViewport(view.document.id).globalBounds();
+			require(bounds.height < controller.contentHeight, "viewport grew to full source height");
+			trace("PASS: keyboard, selection drag, minimap, horizontal caret, fixed gutter, wrap persistence and mouse wheel");
+		}
+		return result;
+	}
+
 	function minimapStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		var view = host.activeView();
 		if (view == null) throw "minimap acceptance missing editor";
@@ -1452,7 +1532,7 @@ class WorkspaceSmokeMain {
 			zoomWidth = options.width;
 		}
 		options.captureDirectory = args[1];
-		options.frameLimit = args[2] == "file-deletion" ? 10 : args[2] == "blank-editor-click" ? 11 : args[2] == "zoom" ? 75 : args[2] == "save-as" ? 10 : args[2] == "exit-confirmation" ? 11 : args[2] == "tab-close" ? 13 : args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 11 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
+		options.frameLimit = args[2] == "editor-geometry" ? 25 : args[2] == "file-deletion" ? 10 : args[2] == "blank-editor-click" ? 11 : args[2] == "zoom" ? 75 : args[2] == "save-as" ? 10 : args[2] == "exit-confirmation" ? 11 : args[2] == "tab-close" ? 13 : args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 11 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
 		var status = DesktopUiHost.run(options, context -> new WorkspaceSmokeApp(context, args[0], args[2]));
 
 		return status;

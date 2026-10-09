@@ -62,6 +62,7 @@ class EditorCommands {
 		registry.add("project:sidebar-open", context -> context.host.sidebarActivate(), hasRoot);
 
 		keymap.addDirect(Platform.KEY_S, Platform.MOD_CTRL, ["doc:save"]);
+		keymap.addDirect(Platform.KEY_Z, Platform.MOD_ALT, ["doc:toggle-word-wrap"]);
 		keymap.addDirect(Platform.KEY_Z, Platform.MOD_CTRL, ["doc:undo"]);
 		keymap.addDirect(Platform.KEY_Y, Platform.MOD_CTRL, ["doc:redo"]);
 		keymap.addDirect(Platform.KEY_Z, Platform.MOD_CTRL | Platform.MOD_SHIFT, ["doc:redo"]);

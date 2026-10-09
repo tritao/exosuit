@@ -210,6 +210,12 @@ class ConfigurationController {
 
 	function installCommands(commands:CommandRegistry):Void {
 		commands.add("settings:reload", function(context) { settings.reload(true); editorConfig.invalidate(); });
+		commands.add("doc:toggle-word-wrap", _ -> {
+			var error = settings.store.set("editor/display/word_wrap", haxeon.ui.properties.PropertyValue.Bool(!settings.current.wordWrap));
+			if (error != null) reportError("configuration", error);
+			else if (!settings.store.save()) reportError("configuration", settings.store.lastError);
+			root.selectionChanged();
+		}, hasDocument, "Editor: Toggle Word Wrap");
 		commands.add("doc:render-whitespace", _ -> openWhitespaceCommandView(), hasDocument, "Editor: Render Whitespace");
 		commands.add("doc:toggle-render-whitespace", _ -> {
 			var mode = settings.current.renderWhitespace == "all" ? "selection" : "all";
