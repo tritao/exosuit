@@ -57,6 +57,11 @@ class PreferencesRegistry {
 		}
 		{
 			var options = new SettingOptions();
+			options.options = [new PropertyOption("selection", "Selection"), new PropertyOption("all", "All")];
+			if (!projectOnly) registry.define("editor/display/render_whitespace", PropertyType.Enum, PropertyValue.Enum(defaults.renderWhitespace), options);
+		}
+		{
+			var options = new SettingOptions();
 			options.minimum = 0; options.maximum = 5;
 			if (!projectOnly) registry.define("editor/display/tab_tooltip_delay", PropertyType.Float, PropertyValue.Float(defaults.tabTooltipDelay), options);
 		}
@@ -241,6 +246,7 @@ class PreferencesRegistry {
 		if (store.registry.exists("appearance/workbench/sidebar_width") && (base == null || !store.isDefault("appearance/workbench/sidebar_width"))) value.sidebarWidth = store.getInt("appearance/workbench/sidebar_width");
 		if (store.registry.exists("editor/display/scrollbar_visibility") && (base == null || !store.isDefault("editor/display/scrollbar_visibility"))) value.scrollbarVisibility = store.getString("editor/display/scrollbar_visibility");
 		if (store.registry.exists("editor/display/minimap_enabled") && (base == null || !store.isDefault("editor/display/minimap_enabled"))) value.minimapEnabled = store.getBool("editor/display/minimap_enabled");
+		if (store.registry.exists("editor/display/render_whitespace") && (base == null || !store.isDefault("editor/display/render_whitespace"))) value.renderWhitespace = store.getString("editor/display/render_whitespace");
 		if (store.registry.exists("editor/display/tab_tooltip_delay") && (base == null || !store.isDefault("editor/display/tab_tooltip_delay"))) value.tabTooltipDelay = store.getFloat("editor/display/tab_tooltip_delay");
 		if (store.registry.exists("editor/indentation/tab_width") && (base == null || !store.isDefault("editor/indentation/tab_width"))) value.tabWidth = store.getInt("editor/indentation/tab_width");
 		if (store.registry.exists("editor/indentation/insert_spaces") && (base == null || !store.isDefault("editor/indentation/insert_spaces"))) value.insertSpaces = store.getBool("editor/indentation/insert_spaces");

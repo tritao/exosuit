@@ -88,6 +88,21 @@ class ConfigurationController {
 		return result;
 	}
 
+	public function openWhitespaceCommandView():Void {
+		var current = settings.current.renderWhitespace;
+		var entries = [
+			new CommandViewEntry("Selection", "Show spaces and tabs in selected text", "selection", current == "selection" ? "Current" : ""),
+			new CommandViewEntry("All", "Show spaces, tabs, and line endings throughout the document", "all", current == "all" ? "Current" : "")
+		];
+		root.openCommandView(new CommandViewProvider("Render Whitespace (" + current + "): ", entries, function(_) {}, function(entry, _, _) {
+			if (entry == null) return;
+			var error = settings.store.set("editor/display/render_whitespace", haxeon.ui.properties.PropertyValue.Enum(entry.value));
+			if (error != null) { reportError("configuration", error); return; }
+			if (!settings.store.save()) { reportError("configuration", settings.store.lastError); return; }
+			root.closeCommandView();
+		}));
+	}
+
 	public function openIndentationCommandView():Void {
 		var document = activeDocument();
 		if (document == null) return;
@@ -147,6 +162,7 @@ class ConfigurationController {
 	public function openSettingsCommandView():Void {
 		var value = effectiveSettings(), entries = [
 			new CommandViewEntry("editor.fontPath", value.fontPath, "editor.fontPath"),
+			new CommandViewEntry("editor.renderWhitespace", value.renderWhitespace, "editor.renderWhitespace"),
 			new CommandViewEntry("editor.fontSize", Std.string(value.fontSize), "editor.fontSize"),
 			new CommandViewEntry("editor.tabWidth", Std.string(value.tabWidth), "editor.tabWidth"),
 			new CommandViewEntry("editor.insertSpaces", Std.string(value.insertSpaces), "editor.insertSpaces"),
@@ -194,6 +210,14 @@ class ConfigurationController {
 
 	function installCommands(commands:CommandRegistry):Void {
 		commands.add("settings:reload", function(context) { settings.reload(true); editorConfig.invalidate(); });
+		commands.add("doc:render-whitespace", _ -> openWhitespaceCommandView(), hasDocument, "Editor: Render Whitespace");
+		commands.add("doc:toggle-render-whitespace", _ -> {
+			var mode = settings.current.renderWhitespace == "all" ? "selection" : "all";
+			var error = settings.store.set("editor/display/render_whitespace", haxeon.ui.properties.PropertyValue.Enum(mode));
+			if (error != null) reportError("configuration", error);
+			else if (!settings.store.save()) reportError("configuration", settings.store.lastError);
+			root.selectionChanged();
+		}, hasDocument, "Editor: Toggle Render Whitespace");
 		commands.add("doc:indentation", context -> openIndentationCommandView(), hasDocument, "Choose Document Indentation");
 		for (whole in [false, true]) {
 			var entire = whole;

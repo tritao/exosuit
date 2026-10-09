@@ -22,6 +22,7 @@ class Settings {
 	public var scrollbarVisibility:String = "auto";
 	public var tabTooltipDelay:Float = 0.8;
 	public var minimapEnabled:Bool = true;
+	public var renderWhitespace:String = "selection";
 	public var terminalFontSize:Int = 14;
 	public var tabWidth:Int = 4;
 	/** Effective indentation step; may differ from hard-tab display width. */
@@ -72,6 +73,7 @@ class Settings {
 		result.scrollbarVisibility = scrollbarVisibility;
 		result.tabTooltipDelay = tabTooltipDelay;
 		result.minimapEnabled = minimapEnabled;
+		result.renderWhitespace = renderWhitespace;
 		result.terminalFontSize = terminalFontSize;
 		result.tabWidth = tabWidth;
 		result.indentSize = indentSize;
