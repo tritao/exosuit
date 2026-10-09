@@ -74,7 +74,23 @@ class RealLanguageUiApp extends ExosuitApp {
 		if (application.language.statusLabel().indexOf("disabled after repeated failures") >= 0)
 			throw "real graphical language startup failed: " + [for (problem in host.getProblems().values()) problem.message].join("; ");
 		if (projectOwnership && service != null && service.ready) {
-			if (stage == 0 && service.hasReceivedDiagnostics(view.document)) {
+			if (stage == 0 && service.hasReceivedDiagnostics(view.document) && service.semanticTokensFor(view.document) != null) {
+				var snapshot = service.semanticTokensFor(view.document);
+				var entity = view.document.buffer.positionFromOffset(original.indexOf("document:Document") + "document:".length);
+				var offset = editor.EditorCoordinates.codepoint(view.document, entity);
+				if (snapshot == null || [for (token in snapshot.tokens) if (token.start == offset && token.type == "class") token].length == 0)
+					throw "real server did not classify Document as a class: " + (snapshot == null ? "no snapshot" : [for (token in snapshot.tokens) if (token.start >= offset - 12 && token.start <= offset + 12) token.type + "@" + token.start].join(", "));
+				var pane:ui.EditorPane = @:privateAccess editorPanes.get(view.id);
+				var painted:Null<language.LanguageSemanticSnapshot> = @:privateAccess pane.semanticSnapshot;
+				if (painted != snapshot) return super.submit(frame);
+				var ranges = @:privateAccess pane.provideForeground(offset, offset + "Document".length);
+				var palette:style.Theme = @:privateAccess pane.editorTheme;
+				var expected = palette.semanticColor("class", []);
+				var actual = ranges.length == 0 ? null : ranges[0].color;
+				var expectedColor = expected == null ? null : new haxeon.ui.Color(((expected >>> 24) & 255) / 255.0, ((expected >>> 16) & 255) / 255.0, ((expected >>> 8) & 255) / 255.0, (expected & 255) / 255.0);
+				if (actual == null || expectedColor == null || actual.red != expectedColor.red || actual.green != expectedColor.green || actual.blue != expectedColor.blue) throw "semantic class color did not reach renderer";
+				if (ranges.length != 1 || ranges[0].start != offset || ranges[0].end != offset + "Document".length)
+					throw "semantic class range did not reach editor renderer";
 				var position = view.document.buffer.positionFromOffset(original.indexOf("document:Document") + "document:".length + 2);
 				if (!service.requestDefinition(view.document, position, Sys.time(), locations -> {
 					if (locations.length == 0 || locations[0].path != projectPath + "/src/editor/Document.hx")
@@ -100,6 +116,29 @@ class RealLanguageUiApp extends ExosuitApp {
 				advance();
 			} else if (stage == 6 && frames > stageFrame + 2) {
 				var area = host.textInputArea(); if (area == null) throw "definition pointer lacks caret geometry";
+				var pane:ui.EditorPane = @:privateAccess editorPanes.get(view.id);
+				var before = view.cursorColumn();
+				ui.pointerMove(area.x + 2, area.y + area.height / 2, UiModifier.Control);
+				var underlined = @:privateAccess pane.provideDecorations(0, view.document.buffer.document.codepointCount);
+				var found = false;
+				for (decoration in underlined) if (decoration.kind == haxeon.ui.widgets.text.TextDecorationKind.Underline) found = true;
+				if (!found || view.cursorColumn() != before) throw "Ctrl-hover failed to underline without moving caret";
+				var position = view.document.buffer.positionFromOffset(original.indexOf("document:Document") + "document:".length);
+				var expected = editor.EditorCoordinates.codepoint(view.document, position);
+				for (decoration in underlined) if (decoration.kind == haxeon.ui.widgets.text.TextDecorationKind.Underline &&
+					(decoration.start != expected || decoration.end != expected + "Document".length)) throw "Ctrl-hover underlined wrong symbol range";
+				ui.key(UiEventKind.KeyUp, 341, 0);
+				var cleared = @:privateAccess pane.provideDecorations(0, view.document.buffer.document.codepointCount);
+				for (decoration in cleared) if (decoration.kind == haxeon.ui.widgets.text.TextDecorationKind.Underline) throw "Ctrl release retained underline";
+				ui.key(UiEventKind.KeyDown, 341, UiModifier.Control);
+				var stationary = @:privateAccess pane.provideDecorations(0, view.document.buffer.document.codepointCount);
+				var restored = false;
+				for (decoration in stationary) if (decoration.kind == haxeon.ui.widgets.text.TextDecorationKind.Underline) restored = true;
+				if (!restored) throw "Stationary Ctrl press did not restore underline";
+				ui.pointerMove(0, 0, UiModifier.Control);
+				var left = @:privateAccess pane.provideDecorations(0, view.document.buffer.document.codepointCount);
+				for (decoration in left) if (decoration.kind == haxeon.ui.widgets.text.TextDecorationKind.Underline) throw "Pointer leave retained underline";
+				ui.pointerMove(area.x + 2, area.y + area.height / 2, UiModifier.Control);
 				ui.pointerDown(area.x + 2, area.y + area.height / 2, 0, UiModifier.Control);
 				ui.pointerUp(area.x + 2, area.y + area.height / 2, 0, UiModifier.Control); advance();
 			} else if (stage == 7 && frames > stageFrame + 2 && view.document.path == projectPath + "/src/editor/Document.hx") {
@@ -118,7 +157,8 @@ class RealLanguageUiApp extends ExosuitApp {
 			} else if (stage == 10 && frames > stageFrame + 2 && view.document.path == projectPath + "/src/editor/Document.hx") {
 				ui.key(UiEventKind.KeyDown, UiKey.Left, UiModifier.Alt); advance();
 			} else if (stage == 11 && view.document.path == projectPath + "/graphical/src/ui/EditorMinimap.hx") {
-				view.replaceAllText(original + "\nclass NativeDefinitionProbe { static function take(image:haxeon.platform.GraphicsImageRef):Void {} }\n");
+				view.replaceAllText(original + "\nclass NativeDefinitionProbe { static function take(image:haxeon.platform.GraphicsImageRef, surface:nativekit.ffi.NativeKitTypes.SurfaceHandle):Void {} }\n");
+				if (service.semanticTokensFor(view.document) != null) throw "editing retained stale semantic colors";
 				var position = view.document.buffer.positionFromOffset(view.document.buffer.text.lastIndexOf("GraphicsImageRef") + 2);
 				view.restoreCursor(position.line, position.column); view.cursorChanged(); advance();
 			} else if (stage == 12 && frames > stageFrame + 2) {
@@ -127,14 +167,22 @@ class RealLanguageUiApp extends ExosuitApp {
 				if (view.document.buffer.line(view.cursorLine()).indexOf("GraphicsImageRef") < 0) throw "native wrapper definition missed declaration";
 				ui.key(UiEventKind.KeyDown, UiKey.Left, UiModifier.Alt); advance();
 			} else if (stage == 14 && view.document.path == projectPath + "/graphical/src/ui/EditorMinimap.hx") {
+				var position = view.document.buffer.positionFromOffset(view.document.buffer.text.lastIndexOf("SurfaceHandle") + 2);
+				view.restoreCursor(position.line, position.column); view.cursorChanged(); advance();
+			} else if (stage == 15 && frames > stageFrame + 2) {
+				ui.key(UiEventKind.KeyDown, UiKey.F12); advance();
+			} else if (stage == 16 && view.document.path == projectPath + "/haxeon/packages/platform/bindings/nativekit.hxi") {
+				if (view.document.buffer.line(view.cursorLine()).indexOf("handle nk_surface") < 0) throw "FFI handle definition missed ABI declaration";
+				ui.key(UiEventKind.KeyDown, UiKey.Left, UiModifier.Alt); advance();
+			} else if (stage == 17 && view.document.path == projectPath + "/graphical/src/ui/EditorMinimap.hx") {
 				view.undo(); advance();
-			} else if (stage == 15 && service.diagnosticsFor(view.document).length == 0) {
+			} else if (stage == 18 && service.diagnosticsFor(view.document).length == 0 && service.semanticTokensFor(view.document) != null) {
 				for (diagnostic in service.diagnosticsFor(view.document))
 					if (diagnostic.message.indexOf("Missing module") >= 0) throw "false import diagnostic: " + diagnostic.message;
 				if (view.document.buffer.text != original || sys.io.File.getContent(view.document.requirePath()) != original)
 					throw "project ownership test changed repository source";
 				completed = true;
-				Sys.println("PASS: EditorMinimap imports, F12/Ctrl+click/context-menu definitions, native wrapper and back/forward history with " + (application.workspace.projects.length > 1 ? "overlapping source folders" : "a nested project under the repository root"));
+				Sys.println("PASS: EditorMinimap imports, F12/Ctrl+click/context-menu definitions, native wrapper, projected FFI handle and back/forward history with " + (application.workspace.projects.length > 1 ? "overlapping source folders" : "a nested project under the repository root"));
 				desktopContext.onCloseRequested = function(close) close();
 				desktopContext.requestClose();
 			}

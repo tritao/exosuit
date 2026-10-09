@@ -54,6 +54,26 @@ class Theme {
 			default: editorForeground;
 		};
 
+	/** Standard LSP entity names; unfamiliar categories retain syntax colors. */
+	public function semanticColor(type:String, modifiers:Array<String>):Null<Int> {
+		return switch type {
+			case "namespace": lightSyntax ? 0x795e26ff : 0xd7ba7dff;
+			case "type", "class", "enum", "interface", "struct", "typeParameter": tokenColor(HighlightToken.TYPE);
+			case "function", "method", "macro": lightSyntax ? 0x795e26ff : 0xdcdcaaff;
+			case "parameter": lightSyntax ? 0x8a4b08ff : 0xd19a66ff;
+			case "variable", "property", "event": modifiers.indexOf("readonly") >= 0
+				? (lightSyntax ? 0x005f9eff : 0x4fc1ffff) : (lightSyntax ? 0x174a8bff : 0x9cdcfeff);
+			case "enumMember": lightSyntax ? 0x005f9eff : 0x4fc1ffff;
+			case "keyword", "modifier": tokenColor(HighlightToken.KEYWORD);
+			case "comment": tokenColor(HighlightToken.COMMENT);
+			case "string", "regexp": tokenColor(HighlightToken.STRING);
+			case "number": tokenColor(HighlightToken.NUMBER);
+			case "operator": tokenColor(HighlightToken.OPERATOR);
+			case "decorator": lightSyntax ? 0x795e26ff : 0xdcdcaaff;
+			default: null;
+		};
+	}
+
 	public static function contrastRatio(first:Int, second:Int):Float {
 		var left = luminance(first), right = luminance(second), lighter = left > right ? left : right, darker = left > right ? right : left;
 		return (lighter + 0.05) / (darker + 0.05);

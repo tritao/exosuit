@@ -91,6 +91,49 @@ class EditorPane implements View {
 	final decorationProvider:(Int, Int)->Array<TextDecoration>;
 	final caretPresentation = new CaretPresentation();
 	var presentationRevision:Int = 0;
+	var semanticSnapshot:Null<language.LanguageSemanticSnapshot>;
+	var semanticRevision:Int = 0;
+
+	public function setSemanticTokens(value:Null<language.LanguageSemanticSnapshot>):Void {
+		if (semanticSnapshot == value) return;
+		semanticSnapshot = value;
+		semanticRevision++;
+	}
+	var pointerOffset:Int = -1;
+	var definitionStart:Int = -1;
+	var definitionEnd:Int = -1;
+	var definitionState:Int = -1;
+
+	public function pointerModifiersChanged(modifiers:Int):Void {
+		if (updateDefinitionUnderline(modifiers == haxeon.ui.core.UiModifier.Control)) onEdited();
+	}
+
+	function updateDefinitionUnderline(control:Bool):Bool {
+		var start = -1, end = -1;
+		if (control && pointerOffset >= 0 && pointerOffset < document.buffer.document.codepointCount) {
+			var position = EditorCoordinates.position(document, pointerOffset);
+			var line = document.buffer.line(position.line);
+			for (token in document.highlighter.line(position.line).tokens)
+				if (position.column >= token.start && position.column < token.start + token.length &&
+					token.kind != syntax.HighlightToken.NORMAL && token.kind != syntax.HighlightToken.TYPE)
+					return updateDefinitionUnderline(false);
+			var identifier = ~/[A-Za-z_][A-Za-z0-9_]*/g;
+			var at = 0;
+			while (identifier.matchSub(line, at)) {
+				var match = identifier.matchedPos();
+				if (position.column >= match.pos && position.column < match.pos + match.len) {
+					start = EditorCoordinates.codepoint(document, new editor.BufferPosition(position.line, match.pos));
+					end = EditorCoordinates.codepoint(document, new editor.BufferPosition(position.line, match.pos + match.len));
+					break;
+				}
+				at = match.pos + match.len;
+			}
+		}
+		if (start == definitionStart && end == definitionEnd && definitionState == document.buffer.stateId) return false;
+		definitionStart = start; definitionEnd = end;
+		definitionState = document.buffer.stateId;
+		return true;
+	}
 	var previousPresentation:Array<Int> = [];
 	final selectionProvider:Void->TextSelection;
 	final selectionHandler:TextSelection->Void;
@@ -137,7 +180,7 @@ class EditorPane implements View {
 	}
 
 	function provideForeground(start:Int, end:Int):Array<TextColorRange> {
-		return [for (range in SyntaxPresentation.foreground(document, editorTheme, start, end))
+		return [for (range in editor.SemanticPresentation.foreground(document, editorTheme, semanticSnapshot, start, end))
 			new TextColorRange(range.start, range.end, color(range.color))];
 	}
 
@@ -145,12 +188,15 @@ class EditorPane implements View {
 		var ranges = caretPresentation.ranges(start, end);
 		for (range in DecorationPresentation.ranges(document, editorTheme,
 			decorations.forDocument(document), searchMatches(), start, end)) ranges.push(range);
-		return [for (range in ranges)
+		var result = [for (range in ranges)
 			new TextDecoration(range.start, range.end, color(range.color), switch range.kind {
 				case Background: TextDecorationKind.Background;
 				case WholeLineBackground: TextDecorationKind.WholeLineBackground;
 				case WavyUnderline: TextDecorationKind.WavyUnderline;
 			})];
+		if (definitionState == document.buffer.stateId && definitionStart >= 0 && definitionStart < end && definitionEnd > start)
+			result.push(new TextDecoration(definitionStart, definitionEnd, color(editorTheme.editorForeground), TextDecorationKind.Underline));
+		return result;
 	}
 
 	function provideSelection():TextSelection {
@@ -364,6 +410,10 @@ class EditorPane implements View {
 			if (changed && onCaretRectChanged != null)
 				onCaretRectChanged();
 		};
+		area.onTextPointerMove = function(offset, event) {
+			pointerOffset = offset;
+			if (updateDefinitionUnderline(event.modifiers == haxeon.ui.core.UiModifier.Control)) onEdited();
+		};
 		area.onTextPointerDown = function(offset, event) {
 			var definition = event.button == 0 && event.modifiers == haxeon.ui.core.UiModifier.Control;
 			if (event.button != 1 && !definition) return false;
@@ -390,7 +440,7 @@ class EditorPane implements View {
 		area.pageHeightProvider = function() return scrollController.viewportHeight;
 		area.selectionTextProvider = selectedTextProvider;
 		var current = [document.buffer.stateId, decorations.revision, searchRevision(),
-			editorTheme.searchMatch, editorTheme.editorForeground];
+			editorTheme.searchMatch, editorTheme.editorForeground, definitionStart, definitionEnd, definitionState, semanticRevision];
 		for (kind in 0...8) current.push(editorTheme.tokenColor(kind));
 		var changed = caretPresentation.update(document, selection, editorTheme);
 		if (current.length != previousPresentation.length) changed = true;
@@ -455,6 +505,13 @@ class EditorPane implements View {
 			var handler = onNavigationKey;
 			if (handler != null && handler(event)) { event.preventDefault(); event.stopPropagation(); }
 		}, "capture");
+		container.on(haxeon.ui.core.UiEventKind.FocusLost, function(_) {
+			if (updateDefinitionUnderline(false)) onEdited();
+		}, "capture");
+		node.on(haxeon.ui.core.UiEventKind.HoverLeave, function(_) {
+			pointerOffset = -1;
+			if (updateDefinitionUnderline(false)) onEdited();
+		});
 		container.add(gutter.build(context));
 		container.add(node);
 		if (!minimapEnabled) return container;

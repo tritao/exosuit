@@ -21,6 +21,13 @@ class LanguageServiceClient {
 
 	public final diagnostics:Map<String, Array<LanguageDiagnostic>> = [];
 	public var ready(default, null):Bool = false;
+	public var semanticTokensSupported(default, null):Bool = false;
+	public var semanticTokensChanged:Void->Void = function() {};
+	public var preferredDocument:Null<Document>;
+	var semanticTypes:Array<String> = [];
+	var semanticModifiers:Array<String> = [];
+	static final TOKEN_TYPES = ["namespace", "type", "class", "enum", "interface", "struct", "typeParameter", "parameter", "variable", "property", "enumMember", "event", "function", "method", "macro", "keyword", "modifier", "comment", "string", "number", "regexp", "operator", "decorator"];
+	static final TOKEN_MODIFIERS = ["declaration", "definition", "readonly", "static", "deprecated", "abstract", "async", "modification", "documentation", "defaultLibrary"];
 	public var status(default, null):String = "stopped";
 	public var hoverSupported(default, null):Bool = false;
 	public var completionSupported(default, null):Bool = false;
@@ -82,7 +89,14 @@ class LanguageServiceClient {
 		session.request("initialize", {
 			processId: null,
 			rootUri: uri(rootPath),
-			capabilities: {general: {positionEncodings: ["utf-16"]}},
+			capabilities: {
+				general: {positionEncodings: ["utf-16"]},
+				workspace: {semanticTokens: {refreshSupport: true}},
+				textDocument: {semanticTokens: {
+					requests: {full: true}, tokenTypes: TOKEN_TYPES, tokenModifiers: TOKEN_MODIFIERS,
+					formats: ["relative"], overlappingTokenSupport: false, multilineTokenSupport: false
+				}}
+			},
 			workspaceFolders: [{uri: uri(rootPath), name: fileName(rootPath)}]
 		}, now, INITIALIZE_REQUEST_TIMEOUT, initialized);
 		return true;
@@ -97,7 +111,7 @@ class LanguageServiceClient {
 			if (session.failure != null || status == "failed" || status == "disabled after repeated failures") retireSession();
 		}
 		if (transport == null && !stopping && restartAt >= 0 && now >= restartAt) start(now);
-		if (ready) synchronizeDocuments();
+		if (ready) { synchronizeDocuments(); updateSemanticTokens(now); }
 	}
 
 	public function stop(now:Float):Void {
@@ -350,6 +364,10 @@ class LanguageServiceClient {
 	}
 
 	function receiveServerRequest(method:String, params:Dynamic):JsonRpcResponse {
+		if (method == "workspace/semanticTokens/refresh") {
+			for (state in states) invalidateSemanticTokens(state);
+			return new JsonRpcResponse(null);
+		}
 		if (method != "workspace/applyEdit") return new JsonRpcResponse(null, "Method not found");
 		var result = applyWorkspaceEdit(params == null ? null : Reflect.field(params, "edit"), captureDocuments());
 		return new JsonRpcResponse({applied: result.applied, failureReason: result.error});
@@ -389,6 +407,11 @@ class LanguageServiceClient {
 		renameSupported = capability(capabilities, "renameProvider");
 		formattingSupported = capability(capabilities, "documentFormattingProvider");
 		rangeFormattingSupported = capability(capabilities, "documentRangeFormattingProvider");
+		var semantic:Dynamic = capabilities == null ? null : Reflect.field(capabilities, "semanticTokensProvider");
+		var legend:Dynamic = semantic == null ? null : Reflect.field(semantic, "legend");
+		semanticTypes = stringArray(legend == null ? null : Reflect.field(legend, "tokenTypes"));
+		semanticModifiers = stringArray(legend == null ? null : Reflect.field(legend, "tokenModifiers"));
+		semanticTokensSupported = semanticTypes.length > 0 && capability(semantic, "full");
 		status = "ready";
 		readySince = clock;
 		transport.notify("initialized", {});
@@ -418,6 +441,7 @@ class LanguageServiceClient {
 	function openDocument(document:Document, documentUri:String):Void {
 		var state = new LanguageDocumentState(document, documentUri);
 		states.set(document.id, state);
+		state.semanticDue = clock + 0.15;
 		state.subscription = document.buffer.subscribe(change -> changed(state, change));
 		transport.notify("textDocument/didOpen", {textDocument: {uri: documentUri, languageId: "haxe", version: state.version, text: document.buffer.text}});
 	}
@@ -426,6 +450,7 @@ class LanguageServiceClient {
 		if (!ready || states.get(state.document.id) != state) return;
 		state.version++;
 		state.revision = change.stateAfter;
+		invalidateSemanticTokens(state);
 		var previous = diagnostics.get(state.uri);
 		if (previous != null) {
 			var moved:Array<LanguageDiagnostic> = [];
@@ -442,9 +467,60 @@ class LanguageServiceClient {
 	}
 
 	function closeState(state:LanguageDocumentState):Void {
+		invalidateSemanticTokens(state);
 		state.release();
 		if (ready && transport != null) transport.notify("textDocument/didClose", {textDocument: {uri: state.uri}});
 		diagnostics.remove(state.uri);
+	}
+
+	public function semanticTokensFor(document:Document):Null<LanguageSemanticSnapshot> {
+		var state = states.get(document.id);
+		return !ready || !accepts(document) || state == null || state.uri != uri(document.requirePath()) ||
+			state.semanticSnapshot == null || state.semanticSnapshot.revision != document.buffer.stateId ? null : state.semanticSnapshot;
+	}
+
+	function invalidateSemanticTokens(state:LanguageDocumentState):Void {
+		state.semanticEpoch++;
+		var request = state.semanticRequest;
+		state.semanticRequest = -1;
+		state.semanticWanted = true;
+		state.semanticDue = clock + 0.15;
+		if (state.semanticSnapshot != null) { state.semanticSnapshot = null; semanticTokensChanged(); }
+		if (request >= 0 && transport != null) transport.cancel(request);
+	}
+
+	function updateSemanticTokens(now:Float):Void {
+		var session = transport;
+		// Background coloring yields to interactive requests, with one request in flight.
+		if (!semanticTokensSupported || session == null || session.pendingCount() > 0) return;
+		var ordered:Array<LanguageDocumentState> = [];
+		var preferred = preferredDocument == null ? null : states.get(preferredDocument.id);
+		if (preferred != null) ordered.push(preferred);
+		for (state in states) if (state != preferred) ordered.push(state);
+		for (state in ordered) {
+			if (!state.semanticWanted || state.semanticDue > now || state.revision != state.document.buffer.stateId) continue;
+			state.semanticWanted = false;
+			var revision = state.revision, epoch = state.semanticEpoch;
+			state.semanticRequest = session.request("textDocument/semanticTokens/full", {textDocument: {uri: state.uri}}, now, FEATURE_REQUEST_TIMEOUT, response -> {
+				if (transport != session || states.get(state.document.id) != state || state.semanticEpoch != epoch) return;
+				state.semanticRequest = -1;
+				if (!ready || !accepts(state.document) || uri(state.document.requirePath()) != state.uri || state.document.buffer.stateId != revision) return;
+				if (response.error != null) return;
+				var data:Dynamic = response.result == null ? new Array<Int>() : Reflect.field(response.result, "data");
+				var tokens = SemanticTokenCodec.decode(state.document, data, semanticTypes, semanticModifiers);
+				if (tokens == null) { if (verbose) log("Ignored malformed semantic tokens for " + state.uri); return; }
+				state.semanticSnapshot = new LanguageSemanticSnapshot(state.document.id, revision, tokens);
+				semanticTokensChanged();
+			});
+			return;
+		}
+	}
+
+	static function stringArray(raw:Dynamic):Array<String> {
+		if (!Std.isOfType(raw, Array)) return [];
+		var result:Array<String> = [];
+		for (value in cast(raw, Array<Dynamic>)) { if (!Std.isOfType(value, String)) return []; result.push(cast value); }
+		return result;
 	}
 
 	function requestAt(method:String, document:Document, position:BufferPosition, now:Float, complete:JsonRpcResponse->Void):Bool {
@@ -509,6 +585,8 @@ class LanguageServiceClient {
 
 	function retireSession():Void {
 		ready = false;
+		semanticTokensSupported = false; semanticTypes = []; semanticModifiers = [];
+		semanticTokensChanged();
 		hoverSupported = false;
 		formattingSupported = false; rangeFormattingSupported = false;
 		completionSupported = false;

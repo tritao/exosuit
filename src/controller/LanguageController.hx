@@ -16,6 +16,7 @@ import workspace.Workspace;
 class LanguageController {
 
 	public final available:Bool;
+	public var onPresentationChanged:Void->Void = function() {};
 	public var client(get, never):Null<LanguageServiceClient>;
 	final sessions:Map<String, FolderLanguageSession> = [];
 	final suppressed:Map<String, Bool> = [];
@@ -72,6 +73,11 @@ class LanguageController {
 		return entry == null ? null : entry.service;
 	}
 
+	public function semanticTokensFor(document:Document):Null<language.LanguageSemanticSnapshot> {
+		var project = projectFor(document), entry = project == null ? null : sessions.get(project.root);
+		return entry == null ? null : entry.service.semanticTokensFor(document);
+	}
+
 	public function sessionFor(path:String):Null<LanguageServiceClient> {
 		var entry = sessions.get(path); return entry == null ? null : entry.service;
 	}
@@ -112,6 +118,7 @@ class LanguageController {
 		service.includesDocument = document -> { var owner = projectFor(document); return owner != null && owner.root == project.root; };
 		service.verbose = value.haxeonVerbose;
 		var entry = new FolderLanguageSession(project.root, service, configurationSignature(value));
+		service.semanticTokensChanged = function() { if (sessions.get(project.root) == entry) onPresentationChanged(); };
 		service.report = message -> {
 			if (sessions.get(project.root) != entry) return;
 			entry.failure = message;
@@ -140,6 +147,7 @@ class LanguageController {
 	function retire(entry:FolderLanguageSession, now:Float):Void {
 		sessions.remove(entry.path);
 		entry.service.stop(now);
+		onPresentationChanged();
 		if (entry.service.status != "stopped") retiring.push(entry);
 		root.getPluginDecorations().removeOwner(entry.owner);
 		root.getProblems().removeOwner(entry.owner);
@@ -176,6 +184,7 @@ class LanguageController {
 				if (needed) { launch(project, value, commandFor(value), now); entry = sessions.get(project.root); }
 			}
 			if (entry != null) {
+				entry.service.preferredDocument = activeDocument();
 				entry.service.update(now);
 				if (entry.service.ready && failedRoots.remove(project.root)) root.getNotifications().publish("Haxeon ready: " + project.name);
 				if (entry.service.ready && entry.failure.length > 0) { entry.failure = ""; root.getProblems().removeOwner(entry.owner + ":status"); }

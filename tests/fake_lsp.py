@@ -55,6 +55,8 @@ while True:
         if not minimal:
             capabilities.update({"hoverProvider": True, "completionProvider": {}, "definitionProvider": True,
                                  "signatureHelpProvider": {"triggerCharacters": ["(", ","]}, "documentSymbolProvider": True, "referencesProvider": True, "renameProvider": {}, "documentFormattingProvider": True, "documentRangeFormattingProvider": True})
+        if "--semantic" in sys.argv:
+            capabilities["semanticTokensProvider"] = {"legend": {"tokenTypes": ["function", "class"], "tokenModifiers": ["readonly"]}, "full": True}
         response = {"jsonrpc": "2.0", "id": message["id"], "result": {"capabilities": capabilities}}
         if "--slow-initialize" in sys.argv:
             threading.Timer(5.2, send, args=(response,)).start()
@@ -150,6 +152,13 @@ while True:
         response = {"jsonrpc": "2.0", "id": message["id"], "result": {"documentChanges": changes}}
         if name == "stale": held_rename = response
         else: send(response)
+    elif method == "textDocument/semanticTokens/full":
+        item = documents[message["params"]["textDocument"]["uri"]]
+        version = item["version"]
+        response = {"jsonrpc": "2.0", "id": message["id"], "result": {"data": [0, 3 + version - 1, 5, 0, 1]}}
+        timer = threading.Timer(0.3, send, args=[response])
+        timer.daemon = True
+        timer.start()
     elif method == "shutdown":
         send({"jsonrpc": "2.0", "id": message["id"], "result": None})
     elif method == "exit":

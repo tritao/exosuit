@@ -190,6 +190,9 @@ class ExosuitApp implements DesktopUiApplication {
 			}
 		}
 		ui = new UiContext(null, fonts, this.theme);
+		ui.onModifiersChanged = function(modifiers) {
+			for (pane in editorPanes) pane.pointerModifiersChanged(modifiers);
+		};
 		ui.buildContext.environment.colorScheme = darkPalette ? EnvironmentColorScheme.Dark : EnvironmentColorScheme.Light;
 		desktop = fileDialogs;
 		registerSidebarDestination("files", IconName.FolderOpen, explorerPanel, new haxeon.ui.widgets.sidebar.SidebarModeOptions("Files", 0, true));
@@ -229,6 +232,7 @@ class ExosuitApp implements DesktopUiApplication {
 			application.files.requestQuit(close);
 			requestFrame();
 		};
+		application.language.onPresentationChanged = requestFrame;
 		application.confirmations.saveChangesPrompt = function(filename, handler) {
 			if (desktop != null) {
 				try { desktop.confirmSaveChanges(filename, handler); return; }
@@ -2048,6 +2052,7 @@ class ExosuitApp implements DesktopUiApplication {
 					host.getPluginDecorations(), documentView.decorationSearchMatches, documentView.searchDecorationRevision, documentView.scrollController);
 				editorPanes.set(documentView.id, pane);
 			}
+			pane.setSemanticTokens(application.language.semanticTokensFor(document));
 			pane.editSettings = application.configuration.settingsFor(document);
 			documentView.editSettings = pane.editSettings;
 			documentView.deletionBoundary = pane.deletionBoundary;

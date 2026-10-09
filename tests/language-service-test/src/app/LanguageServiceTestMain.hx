@@ -38,10 +38,70 @@ class LanguageServiceTestMain {
 		return value;
 	}
 
+	static function semanticColors(server:String, project:String):Void {
+		var registry = new SyntaxRegistry(); BuiltinSyntax.install(registry);
+		var documents = new DocumentManager(registry), path = project + "/Semantic.hx";
+		File.saveContent(path, "😀 value\n");
+		var document = documents.open(path), manager = new ProcessManager();
+		var client = new LanguageServiceClient(manager, documents, "python3", [server, "--semantic"], project);
+		client.start(Sys.time());
+		pump(client, () -> client.semanticTokensFor(document) != null, 5.0);
+		var snapshot = client.semanticTokensFor(document);
+		require(snapshot != null && snapshot.tokens.length == 1 && snapshot.tokens[0].start == 2 && snapshot.tokens[0].end == 7 &&
+			snapshot.tokens[0].type == "function" && snapshot.tokens[0].modifiers[0] == "readonly", "semantic legend or UTF-16 conversion failed");
+		var theme = new style.Theme();
+		var foreground = editor.SemanticPresentation.foreground(document, theme, snapshot, 0, document.buffer.document.codepointCount);
+		require([for (range in foreground) if (range.start == 2 && range.end == 7 && range.color == theme.semanticColor("function", [])) range].length == 1,
+			"semantic function color did not override syntax");
+		for (index in 1...foreground.length) require(foreground[index].start >= foreground[index - 1].end, "foreground ranges overlap");
+		var other = new editor.Document(null, "😀 value\n", registry);
+		var otherColors = editor.SemanticPresentation.foreground(other, theme, snapshot, 0, other.buffer.document.codepointCount);
+		require([for (range in otherColors) if (range.color == theme.semanticColor("function", [])) range].length == 0, "another document inherited semantic colors");
+		var original = snapshot;
+		document.insert(new BufferSelection(new BufferPosition(0, 2)), "x");
+		require(client.semanticTokensFor(document) == null, "edit retained semantic snapshot");
+		var fallback = editor.SemanticPresentation.foreground(document, theme, original, 0, document.buffer.document.codepointCount);
+		require([for (range in fallback) if (range.color == theme.semanticColor("function", [])) range].length == 0, "stale semantic colors survived edit");
+		pump(client, () -> { var state:Null<language.LanguageDocumentState> = @:privateAccess client.states.get(document.id); return state != null && state.semanticRequest >= 0; }, 5.0);
+		document.insert(new BufferSelection(new BufferPosition(0, 2)), "y");
+		require(client.semanticTokensFor(document) == null, "pending edit retained colors");
+		pump(client, () -> client.semanticTokensFor(document) != null, 5.0);
+		snapshot = client.semanticTokensFor(document);
+		require(snapshot != null && snapshot.revision == document.buffer.stateId && snapshot.tokens[0].start == 4,
+			"cancelled semantic reply replaced newer tokens");
+		var types = ["function"], modifiers = ["readonly"];
+		for (data in [[0, 0, 1, 0, 0], [0, 1, 1, 0, 0], [0, 99, 1, 0, 0], [0, 5, 99, 0, 0], [0, 5, 1, 9, 0],
+			[0, 5, 2, 0, 0, 0, 1, 2, 0, 0], [0, 5, 1, 0], [0, 5, 1, 0, 2]])
+			require(language.SemanticTokenCodec.decode(document, data, types, modifiers) == null, "malformed semantic tokens were accepted");
+		var collision = new editor.Document(project + "/Color.hx", "String", registry);
+		var semanticOverride = new language.LanguageSemanticSnapshot(collision.id, collision.buffer.stateId,
+			[new language.LanguageSemanticToken(1, 4, "function", [])]);
+		var merged = editor.SemanticPresentation.foreground(collision, theme, semanticOverride, 0, 6);
+		require(merged.length == 3 && merged[0].start == 0 && merged[0].end == 1 && merged[1].start == 1 && merged[1].end == 4 &&
+			merged[1].color == theme.semanticColor("function", []) && merged[2].start == 4 && merged[2].end == 6, "semantic override lost surrounding syntax");
+		var clipped = editor.SemanticPresentation.foreground(collision, theme, semanticOverride, 2, 3);
+		require(clipped.length == 1 && clipped[0].start == 2 && clipped[0].end == 3, "semantic ranges escaped requested viewport");
+		var future = new language.LanguageSemanticSnapshot(collision.id, collision.buffer.stateId,
+			[new language.LanguageSemanticToken(0, 6, "futureEntity", [])]);
+		var preserved = editor.SemanticPresentation.foreground(collision, theme, future, 0, 6);
+		require(preserved.length == 1 && preserved[0].color == theme.tokenColor(syntax.HighlightToken.TYPE), "unknown semantic category removed syntax fallback");
+		var before = snapshot;
+		@:privateAccess client.receiveServerRequest("workspace/semanticTokens/refresh", null);
+		require(client.semanticTokensFor(document) == null, "refresh retained old snapshot");
+		pump(client, () -> client.semanticTokensFor(document) != null, 5.0);
+		require(client.semanticTokensFor(document) != before, "refresh did not request new tokens");
+		client.stop(Sys.time());
+		require(client.semanticTokensFor(document) == null, "stopped server retained colors");
+		pump(client, () -> client.status == "stopped", 5.0);
+		manager.shutdown();
+		Sys.println("PASS: semantic colors, Unicode, stale/cancelled replies, refresh, malformed tokens and syntax fallback");
+	}
+
 	static function main():Int {
 
 		var arguments = Sys.args();
 		require(arguments.length == 2, "language service test requires fake server and project paths");
+		semanticColors(arguments[0], arguments[1]);
 		var sourcePath = arguments[1] + "/Main.hx";
 		File.saveContent(sourcePath, "😀 value\n");
 		File.saveContent(arguments[1] + "/Other.hx", "old\n");
@@ -175,7 +235,7 @@ class LanguageServiceTestMain {
 		var minimal = new LanguageServiceClient(manager, documents, "python3", [arguments[0], "minimal"], arguments[1]);
 		minimal.start(Sys.time());
 		pump(minimal, () -> minimal.ready, 5.0);
-		require(!minimal.formattingSupported && !minimal.rangeFormattingSupported && !minimal.hoverSupported && !minimal.completionSupported && !minimal.definitionSupported && !minimal.signatureHelpSupported && !minimal.symbolsSupported && !minimal.referencesSupported && !minimal.renameSupported,
+		require(!minimal.semanticTokensSupported && !minimal.formattingSupported && !minimal.rangeFormattingSupported && !minimal.hoverSupported && !minimal.completionSupported && !minimal.definitionSupported && !minimal.signatureHelpSupported && !minimal.symbolsSupported && !minimal.referencesSupported && !minimal.renameSupported,
 			"unsupported server capabilities were advertised by the client");
 		require(!minimal.requestFormatting(document, selection, 3, true, false, Sys.time(), value -> {}), "unsupported formatting request was sent");
 		require(!minimal.requestHover(document, new BufferPosition(0, 0), Sys.time(), value -> {}),
