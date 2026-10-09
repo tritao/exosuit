@@ -5,6 +5,7 @@ Run from any directory: python scripts/generate-icon.py
 The standalone mark SVG is the source of truth; icon3.png is only a reference.
 """
 import argparse
+import re
 import subprocess
 import sys
 from io import BytesIO
@@ -19,6 +20,64 @@ ASSETS = ROOT / "graphical/assets/icons"
 SIZES = (16, 24, 32, 48, 64, 128, 256)
 
 
+def generate_brand(mark):
+    """Compile the blue titlebar mark to native vector geometry."""
+    svg = ET.fromstring(ET.tostring(mark))
+    svg.set("viewBox", "8 9 48 48")
+    for child in svg:
+        if child.get("fill") is not None:
+            child.set("fill", "#4b7ff2")
+    artwork = ET.tostring(svg, encoding="unicode") + "\n"
+    (ASSETS / "exosuit-brand.svg").write_text(artwork)
+    shell, cutouts = [], []
+    for child in mark:
+        tag = child.tag.rsplit("}", 1)[-1]
+        if tag == "path":
+            contours = re.findall(r"M[^M]+", child.attrib["d"])
+            shell.extend(path_commands(contours[0]))
+            for contour in contours[1:]:
+                cutouts.extend(path_commands(contour))
+        elif tag == "rect":
+            values = [child.attrib[name] for name in ("x", "y", "width", "height", "rx")]
+            shell.append(".roundRect(" + ", ".join(values) + ")")
+        elif tag != "title":
+            raise ValueError(f"Unsupported branding element: {tag}")
+    lines = ["package ui;", "", "import haxeon.ui.Path;", "import haxeon.ui.PathBuilder;", "",
+             "// Generated from exosuit-mark.svg by scripts/generate-icon.py.",
+             "class BrandingIconData {"]
+    for name, commands in [("createShell", shell), ("createCutouts", cutouts)]:
+        lines += [f"\tpublic static function {name}():Path {{", "\t\treturn new PathBuilder()",
+                  *["\t\t\t" + command for command in commands], "\t\t\t.build();", "\t}"]
+    lines += ["}", ""]
+    (ROOT / "graphical/src/ui/BrandingIconData.hx").write_text("\n".join(lines))
+
+
+def path_commands(contour):
+    """Compile the mark's absolute SVG commands to native quadratic/cubic paths."""
+    tokens = re.findall(r"[A-Za-z]|[-+]?(?:\d*\.\d+|\d+\.?\d*)(?:[eE][-+]?\d+)?", contour)
+    counts = {"M": 2, "L": 2, "H": 1, "V": 1, "Q": 4, "C": 6, "Z": 0}
+    methods = {"M": "moveTo", "L": "lineTo", "Q": "quadraticTo", "C": "cubicTo", "Z": "close"}
+    result, x, y, start = [], "0", "0", ("0", "0")
+    while tokens:
+        command = tokens.pop(0)
+        if command not in counts:
+            raise ValueError(f"Unsupported branding SVG command: {command}")
+        count = counts[command]
+        values, tokens = tokens[:count], tokens[count:]
+        if command == "H":
+            values, command = [values[0], y], "L"
+        elif command == "V":
+            values, command = [x, values[0]], "L"
+        if command == "Z":
+            x, y = start
+        else:
+            x, y = values[-2:]
+            if command == "M":
+                start = (x, y)
+        result.append("." + methods[command] + "(" + ", ".join(values) + ")")
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=ROOT / "icon.png")
@@ -28,6 +87,7 @@ def main():
         parser.error("--size must be between 1 and 4096")
 
     mark = ET.parse(ASSETS / "exosuit-mark.svg").getroot()
+    generate_brand(mark)
     geometry = "\n".join(ET.tostring(child, encoding="unicode").strip() for child in mark
                          if child.tag.rsplit("}", 1)[-1] != "title")
     svg = f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">

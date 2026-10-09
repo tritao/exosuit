@@ -151,6 +151,9 @@ class ExosuitApp implements DesktopUiApplication {
 	var viewportWidth:Float = 1280.0;
 	var viewportHeight:Float = 840.0;
 	static inline var TOOLBAR_HEIGHT:Float = 40.0;
+	static inline var BRAND_WIDTH:Float = 108.0;
+	static inline var TOOLBAR_BUTTON_WIDTH:Float = 32.0;
+	static inline var TOOLBAR_GAP:Float = 6.0;
 	static inline var STATUS_HEIGHT:Float = StatusBarView.HEIGHT;
 
 	public function new(?fonts:FontCollection, ?theme:Theme, ?hostContext:UiHostContext,
@@ -1418,33 +1421,49 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function buildTopBar():View {
+		var custom = hostContext != null && hostContext.windowControls != null;
+		var actions = toolbarActionCapacity();
 		var style = new LayoutStyle();
 		style.width = LayoutAxis.grow();
 		style.height = LayoutAxis.fixed(TOOLBAR_HEIGHT);
 		style.direction = LayoutDirection.LeftToRight;
 		style.childAlignY = LayoutAlignmentY.Center;
-		style.childGap = 6.0;
+		style.childGap = TOOLBAR_GAP;
 		style.padding = new Insets(10.0, 4.0, 10.0, 4.0);
 		style.background = theme.tokens.surfaceRaised;
 		var titleStyle = new LayoutStyle();
 		titleStyle.width = LayoutAxis.fixed(80.0);
+		var brandStyle = new LayoutStyle();
+		brandStyle.width = LayoutAxis.fixed(BRAND_WIDTH);
+		brandStyle.childGap = 6;
+		brandStyle.childAlignY = LayoutAlignmentY.Center;
 		var items:Array<KeyedView> = [
-			new KeyedView("brand", new Text("EXOSUIT", titleStyle, theme.tokens.text,
-				TextStyleOverride.text(13.0, 0.5))),
-			new KeyedView("new", toolbarButton("New", IconName.NewFile, function() application.newDocument())),
-			new KeyedView("open", toolbarButton("Open", IconName.FolderOpen, openFileDialog)),
-			new KeyedView("open-folder", toolbarButton("Open Folder", IconName.FolderClosed,
-				openFolderDialog)),
-			new KeyedView("save", toolbarButton("Save", IconName.Save,
-				function() application.commands.perform("doc:save", application.context)))
+			new KeyedView("brand", new Row("exosuit-brand", [
+				new KeyedView("icon", new BrandingIcon(theme.tokens.surfaceRaised)),
+				new KeyedView("name", new Text("EXOSUIT", titleStyle, theme.tokens.text,
+					TextStyleOverride.text(13.0, 0.5)))
+			], brandStyle))
 		];
-		if (terminalUiAvailable())
-			items.push(new KeyedView("terminal", toolbarButton("Terminal", IconName.Terminal, toggleTerminal)));
+		// Commands stays available at every width. Drop optional shortcuts in
+		// priority order while retaining their usual order when there is room.
+		if (actions >= 4) items.push(new KeyedView("new", toolbarButton("New", IconName.NewFile, function() application.newDocument())));
+		if (actions >= 1) items.push(new KeyedView("open", toolbarButton("Open", IconName.FolderOpen, openFileDialog)));
+		if (actions >= 3) items.push(new KeyedView("open-folder", toolbarButton("Open Folder", IconName.FolderClosed, openFolderDialog)));
+		if (actions >= 2) items.push(new KeyedView("save", toolbarButton("Save", IconName.Save,
+			function() application.commands.perform("doc:save", application.context))));
+		if (actions >= 5 && terminalUiAvailable()) {
+			var button = toolbarButton("Terminal", IconName.Terminal, toggleTerminal);
+			items.push(new KeyedView("terminal", button));
+		}
 		var workspaceTitleStyle = new LayoutStyle(); workspaceTitleStyle.width = LayoutAxis.grow();
 		var workspaceTitle = explorerRoot == null ? "" : haxe.io.Path.withoutDirectory(explorerRoot);
-		items.push(new KeyedView("workspace-title", new Text(workspaceTitle, workspaceTitleStyle, theme.tokens.textSecondary,
+		if (custom) {
+			var caption = workspaceTitle + (workspaceStatus.length == 0 ? "" : (workspaceTitle.length == 0 ? "" : " · ") + workspaceStatus);
+			items.push(new KeyedView("workspace-title", new haxeon.ui.widgets.text.MiddleEllipsisText("toolbar-workspace-title", caption, true,
+				new TextStyleOverride(null, 12, null, haxeon.ui.TextWrap.None, null, null, null, theme.tokens.textSecondary))));
+		} else items.push(new KeyedView("workspace-title", new Text(workspaceTitle, workspaceTitleStyle, theme.tokens.textSecondary,
 			new TextStyleOverride(null, 12, null, haxeon.ui.TextWrap.None))));
-		if (workspaceStatus.length > 0)
+		if (!custom && workspaceStatus.length > 0)
 			items.push(new KeyedView("workspace-status", new Text(workspaceStatus, null, theme.tokens.textSecondary, TextStyleOverride.text(12.0))));
 		items.push(new KeyedView("palette", toolbarButton("Commands", IconName.Search, togglePalette)));
 		var toolbar:View = new Row("exosuit-toolbar", items, style);
@@ -1452,10 +1471,18 @@ class ExosuitApp implements DesktopUiApplication {
 			? new haxeon.ui.widgets.WindowTitleBar("exosuit-titlebar", toolbar, hostContext.windowControls, TOOLBAR_HEIGHT) : toolbar;
 	}
 
+	function toolbarActionCapacity():Int {
+		if (hostContext == null || hostContext.windowControls == null) return 5;
+		var available = viewportWidth - haxeon.ui.widgets.WindowTitleBar.CONTROLS_WIDTH;
+		// Brand, horizontal padding, Commands, two gaps and a small title area.
+		var reserved = BRAND_WIDTH + 20.0 + TOOLBAR_BUTTON_WIDTH + 2 * TOOLBAR_GAP + 32.0;
+		return Std.int(Math.max(0, Math.min(5, Math.floor((available - reserved) / (TOOLBAR_BUTTON_WIDTH + TOOLBAR_GAP)))));
+	}
+
 	function toolbarButton(label:String, icon:IconName, action:Void->Void):View {
 		var custom = hostContext != null && hostContext.windowControls != null;
 		var style = new LayoutStyle();
-		if (custom) { style.width = LayoutAxis.fixed(32); style.height = LayoutAxis.fixed(28); style.padding = new Insets(8, 0, 8, 0); }
+		if (custom) { style.width = LayoutAxis.fixed(TOOLBAR_BUTTON_WIDTH); style.height = LayoutAxis.fixed(28); style.padding = new Insets(8, 0, 8, 0); }
 		var button = new Button(custom ? "" : label, style, action, "toolbar-" + label);
 		button.accessibilityLabel = label;
 		if (label == "Terminal") button.enabled = canShowTerminal();

@@ -55,6 +55,8 @@ class GraphicalMain {
 		host.customTitlebar = true;
 		host.width = 1280;
 		host.height = 840;
+		host.minimumWidth = 320;
+		host.minimumHeight = 200;
 		host.captureDirectory = captureDirectory;
 		host.frameLimit = frameLimit;
 		host.captureSeconds = captureSeconds;

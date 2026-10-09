@@ -243,6 +243,8 @@
     "../src/workspace/transport/WorkspaceRpcServer.hx",
     "../graphical/src/ui/ActivityBar.hx",
     "../graphical/src/ui/AgentAttachPanel.hx",
+    "../graphical/src/ui/BrandingIcon.hx",
+    "../graphical/src/ui/BrandingIconData.hx",
     "../graphical/src/ui/BuildOutputPanel.hx",
     "../graphical/src/ui/CodexMarkdownView.hx",
     "../graphical/src/ui/CodexSessionPanel.hx",
