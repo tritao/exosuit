@@ -178,6 +178,22 @@ class EditorViewTestMain {
 		var shellTokens = shellDocument.highlighter.line(0).tokens;
 		require(hasScope(shellTokens, "keyword.control.shell") && hasScope(shellTokens, "variable.other.shell"),
 			"Shell TextMate grammar omitted control keywords or variables");
+		var hxiDocument = new Document("nativekit.hxi", "/**\n * Generated interface.\n */\ninterface Example @target(\"portable-abi64\") @library(\"example\") {\n"
+			+ "\tconst API_VERSION = 2;\n\textern fn scan(input: ptr<const<u8>> @in_array(\"length\"), length: u32) -> c_int @symbol(\"scan\");\n}", syntaxes);
+		var hxiInterfaceTokens = hxiDocument.highlighter.line(3).tokens,
+			hxiConstantTokens = hxiDocument.highlighter.line(4).tokens,
+			hxiFunctionTokens = hxiDocument.highlighter.line(5).tokens;
+		require(hxiDocument.syntax.name == "HXI" && hxiDocument.syntax.lineComment == "//"
+			&& hxiDocument.highlighter.line(0).stateAfter != 0 && hxiDocument.highlighter.line(1).stateBefore != 0
+			&& hasScope(hxiDocument.highlighter.line(1).tokens, "comment.block.documentation.hxi")
+			&& hxiDocument.highlighter.line(2).stateAfter == 0,
+			"HXI TextMate grammar lost language selection, comment metadata, or multiline documentation state");
+		require(hasScope(hxiInterfaceTokens, "keyword.declaration.hxi") && hasScope(hxiInterfaceTokens, "entity.name.type.hxi")
+			&& hasScope(hxiInterfaceTokens, "keyword.other.attribute.hxi") && hasScope(hxiConstantTokens, "constant.other.hxi")
+			&& hasScope(hxiConstantTokens, "constant.numeric.hxi") && hasScope(hxiFunctionTokens, "entity.name.function.hxi")
+			&& hasScope(hxiFunctionTokens, "storage.type.hxi") && hasScope(hxiFunctionTokens, "keyword.other.attribute.hxi")
+			&& hasScope(hxiFunctionTokens, "string.quoted.double.hxi"),
+			"HXI TextMate grammar omitted declaration, type, attribute, literal, or function scopes");
 		var dynamicGrammar = syntaxes.addGrammar('{"scopeName":"source.dynamic-test","patterns":[{"begin":"<(\\\\w+)>","end":"</\\\\1>","name":"meta.tag.dynamic-test","contentName":"string.quoted.dynamic-test"}]}');
 		syntaxes.add(new syntax.SyntaxDefinition("Dynamic Test", [".dyn"], true, [], [], "", "", "", "", "", false, dynamicGrammar));
 		var dynamicDocument = new Document("example.dyn", "<tag>body</tag>", syntaxes);
