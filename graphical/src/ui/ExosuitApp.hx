@@ -1006,7 +1006,7 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
  function makeAgentTab(id:String,resource:String,root:String,title:String):UiAgentTab {
-  return new UiAgentTab(id,resource,root,title,new CodexSessionPanel(function() return workbenchClient==null?null:workbenchClient.agentService(),resource,root,requestFrame,editorPalette,showWorkbenchMenu,
+  return new UiAgentTab(id,resource,root,title,new CodexSessionPanel(function() return workbenchClient==null?null:workbenchClient.agentService(),resource,root,requestFrame,editorPalette,application.syntaxes,showWorkbenchMenu,
    function(group:String) {
     createCodexAgent(group, openCodexAgent);
    }));

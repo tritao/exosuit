@@ -24,6 +24,7 @@ import haxeon.ui.widgets.text.TextField;
 import workspace.client.WorkspaceAgentClient;
 import workspace.client.CodexPermissions;
 import workspace.service.WorkspaceAgentProtocol.AgentModel;
+import syntax.SyntaxRegistry;
 
 private typedef CodexRecoveryPresentation = {
   var label:String;
@@ -41,6 +42,7 @@ class CodexSessionPanel implements View {
   final root:String;
   final frame:Void -> Void;
   final editorPalette:style.Theme;
+  final syntaxes:SyntaxRegistry;
   final showMenu:(Array<MenuItem>, UiEvent, Void->Bool)->Void;
   final createReplacement:String->Void;
   var prompt = "";
@@ -61,12 +63,13 @@ class CodexSessionPanel implements View {
   }
 
   public function new(getClient:Void -> Null<WorkspaceAgentClient>, resource:String, root:String, frame:Void -> Void,
-      editorPalette:style.Theme, showMenu:(Array<MenuItem>, UiEvent, Void->Bool)->Void, createReplacement:String->Void) {
+      editorPalette:style.Theme, syntaxes:SyntaxRegistry, showMenu:(Array<MenuItem>, UiEvent, Void->Bool)->Void, createReplacement:String->Void) {
     this.getClient = getClient;
     this.resource = resource;
     this.root = root;
     this.frame = frame;
     this.editorPalette = editorPalette;
+    this.syntaxes = syntaxes;
     this.showMenu = showMenu;
     this.createReplacement = createReplacement;
   }
@@ -324,7 +327,7 @@ class CodexSessionPanel implements View {
         if (item.text != "" && ((!reasoning && !command) || expanded.get(key) == true)) {
           if (item.kind == "agentMessage") {
             var rendered = markdown.get(key);
-            if (rendered == null) { rendered = new CodexMarkdownView(item.text, editorPalette); markdown.set(key, rendered); }
+            if (rendered == null) { rendered = new CodexMarkdownView(item.text, editorPalette, syntaxes); markdown.set(key, rendered); }
             rendered.update(item.text);
             message.push(new KeyedView("text-" + key, rendered));
           } else message.push(new KeyedView("text-" + key, paragraph(item.text)));

@@ -30,21 +30,19 @@ import haxeon.ui.widgets.text.TextArea;
 import haxeon.ui.widgets.scroll.ScrollView;
 import haxeon.ui.widgets.scroll.ScrollAxis;
 import syntax.SyntaxRegistry;
-import syntax.BuiltinSyntax;
-import syntax.SyntaxDefinition;
-import syntax.HighlightToken;
 
 /** Read-only Markdown projection using the editor's syntax engine and palette. */
 class CodexMarkdownView implements View {
   var value:String;
   final models:Map<String, WorkspaceFileTextModel> = [];
   final palette:style.Theme;
+  final syntaxes:SyntaxRegistry;
   final openLink:String->Void;
-  static var syntaxes:Null<SyntaxRegistry>;
 
-  public function new(value:String, palette:style.Theme, ?openLink:String->Void) {
+  public function new(value:String, palette:style.Theme, syntaxes:SyntaxRegistry, ?openLink:String->Void) {
     this.value = value;
     this.palette = palette;
+    this.syntaxes = syntaxes;
     this.openLink = openLink == null ? function(destination) {
       if (NativeKit.nk_shell_open_url(destination) != Result.Ok)
         throw "Unable to open link: " + NativeKit.nk_last_error();
@@ -52,22 +50,6 @@ class CodexMarkdownView implements View {
   }
 
   public function update(value:String):Void this.value = value;
-
-  static function registry():SyntaxRegistry {
-    if (syntaxes != null) return syntaxes;
-    var result = new SyntaxRegistry();
-    BuiltinSyntax.install(result);
-    var python:Map<String, Int> = [];
-    for (word in "and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield".split(" ")) python.set(word, HighlightToken.KEYWORD);
-    for (word in ["True", "False", "None"]) python.set(word, HighlightToken.LITERAL);
-    result.add(new SyntaxDefinition("Python", [".py"], true, python, [], "#", "", "", '"""', '"""'));
-    var js:Map<String, Int> = [];
-    for (word in "async await break case catch class const continue debugger default delete do else export extends finally for function if import in instanceof let new return static super switch throw try typeof var void while with yield".split(" ")) js.set(word, HighlightToken.KEYWORD);
-    for (word in ["true", "false", "null", "undefined"]) js.set(word, HighlightToken.LITERAL);
-    result.add(new SyntaxDefinition("JavaScript", [".js", ".ts", ".jsx", ".tsx"], true, js));
-    syntaxes = result;
-    return result;
-  }
 
   static function extension(language:String):String return switch language {
     case "python", "py": "py";
@@ -88,8 +70,8 @@ class CodexMarkdownView implements View {
       var key = "block-" + index++;
       if (block.kind == "code") {
         var model = models.get(key);
-        if (model == null || model.buffer.text != block.text || model.syntax != registry().find("snippet." + extension(block.language))) {
-          model = new WorkspaceFileTextModel("snippet." + extension(block.language), block.text, registry(), palette);
+        if (model == null || model.buffer.text != block.text || model.syntax != syntaxes.find("snippet." + extension(block.language))) {
+          model = new WorkspaceFileTextModel("snippet." + extension(block.language), block.text, syntaxes, palette);
           models.set(key, model);
         }
         model.updateTheme(palette);
