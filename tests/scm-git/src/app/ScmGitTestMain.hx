@@ -18,6 +18,7 @@ import scm.LineDiffKind;
 import scm.ScmOperation;
 import scm.ScmRef;
 import scm.ScmRepository;
+import scm.ScmRepositoryHandle;
 import scm.ScmRepositoryKind;
 import scm.ScmSnapshot;
 import jobs.JobScheduler;
@@ -26,7 +27,10 @@ import scm.fake.FakeScmRepositoryScript;
 import scm.git.GitStatusParser;
 import scm.git.GitProcess;
 import scm.git.GitBlobReader;
+import scm.git.GitScmProvider;
 import scm.git.GitVersion;
+import scm.ScmTrustStore;
+import scm.ScmService;
 import process.ProcessManager;
 import sys.FileSystem;
 import sys.io.File;
@@ -42,6 +46,24 @@ class ScmGitTestMain {
 		var deadline = Sys.time() + timeout;
 		while (!complete() && Sys.time() < deadline) { scheduler.update(32); Sys.sleep(0.001); }
 		require(complete(), message);
+	}
+
+	static function runGit(git:GitProcess, scheduler:JobScheduler, arguments:Array<String>, cwd:String, generation:Int,
+			readOnly:Bool = false):scm.git.GitCommandResult {
+		var result:Null<ScmJobResult<scm.git.GitCommandResult>> = null;
+		git.run(arguments, cwd, generation, value -> result = value, readOnly);
+		pump(scheduler, () -> result != null, "Git fixture command timed out: " + arguments.join(" "));
+		if (result == null || result.error != null || result.value == null)
+			throw "Git fixture command failed: " + (result == null || result.error == null ? arguments.join(" ") : result.error.message);
+		return result.value;
+	}
+
+	static function deleteTree(path:String):Void {
+		if (!FileSystem.exists(path)) return;
+		if (FileSystem.isDirectory(path)) {
+			for (name in FileSystem.readDirectory(path)) deleteTree(path + "/" + name);
+			FileSystem.deleteDirectory(path);
+		} else FileSystem.deleteFile(path);
 	}
 
 	static function normalizeNewlines(value:String):String return StringTools.replace(value, "\r\n", "\n");
@@ -72,6 +94,11 @@ class ScmGitTestMain {
 	static function group(result:scm.git.GitStatusParseResult, id:ScmGroupId):Array<scm.ScmResource> {
 		for (value in result.groups) if (value.id == id) return value.resources;
 		return [];
+	}
+
+	static function snapshotGroup(snapshot:ScmSnapshot, id:ScmGroupId):Null<scm.ScmGroup> {
+		for (value in snapshot.groups) if (value.id == id) return value;
+		return null;
 	}
 
 	static function runDiff(oldText:String, newText:String, maxCost:Int = LineDiff.DEFAULT_MAX_COST, sliceCost:Int = LineDiff.DEFAULT_SLICE_COST):Array<LineDiffHunk> {
@@ -257,7 +284,163 @@ class ScmGitTestMain {
 		var temporaryDirectory = Sys.getEnv("TEMP");
 		if (temporaryDirectory == null || temporaryDirectory.length == 0) temporaryDirectory = Sys.getEnv("TMP");
 		if (temporaryDirectory == null || temporaryDirectory.length == 0) temporaryDirectory = Sys.getCwd();
-		var nonRepository = FileSystem.fullPath(temporaryDirectory + "/exosuit-scm-nonrepo-" + Std.string(Std.int(Sys.time() * 1000000)));
+		var fixtureId = Std.string(Std.int((Sys.time() * 1000) % 1000000000)) + "-" + Std.string(Std.random(1000000));
+		var fixtureBase = FileSystem.fullPath(temporaryDirectory + "/exosuit-scm-discovery-" + fixtureId),
+			discoveryRoot = fixtureBase + "/project", nestedRoot = discoveryRoot + "/nested", emptyHooks = fixtureBase + "/empty-hooks";
+		FileSystem.createDirectory(fixtureBase);
+		FileSystem.createDirectory(discoveryRoot);
+		FileSystem.createDirectory(nestedRoot);
+		FileSystem.createDirectory(emptyHooks);
+		runGit(git, gitScheduler, ["init"], discoveryRoot, 70);
+		runGit(git, gitScheduler, ["init"], nestedRoot, 71);
+		File.saveContent(discoveryRoot + "/one.txt", "one");
+		File.saveContent(discoveryRoot + "/two.txt", "two");
+		File.saveContent(discoveryRoot + "/filtered.txt", "before filter\n");
+		runGit(git, gitScheduler, ["add", "filtered.txt"], discoveryRoot, 711);
+		File.saveContent(discoveryRoot + "/.gitattributes", "filtered.txt filter=unsafe\n");
+		runGit(git, gitScheduler, ["add", ".gitattributes"], discoveryRoot, 712);
+		runGit(git, gitScheduler, ["config", "filter.unsafe.clean", "exosuite-missing-filter-command"], discoveryRoot, 713);
+		runGit(git, gitScheduler, ["config", "filter.unsafe.smudge", "cat"], discoveryRoot, 714);
+		runGit(git, gitScheduler, ["config", "filter.unsafe.required", "true"], discoveryRoot, 715);
+		File.saveContent(discoveryRoot + "/filtered.txt", "after filter\n");
+		var trustStore = new ScmTrustStore(fixtureBase + "/trust.json"),
+			provider = new GitScmProvider(processManager, gitScheduler, git.executable, emptyHooks, trustStore, 1, 2),
+			discovered:Null<ScmJobResult<Array<ScmRepositoryHandle>>> = null;
+		var discoveryJob = provider.detect(discoveryRoot, 72, value -> discovered = value);
+		pump(gitScheduler, () -> discovered != null, "Git repository discovery timed out");
+		if (discovered == null || discovered.value == null) throw "Git repository discovery returned no handle list";
+		require(discoveryJob.complete && discovered.error == null && discovered.value.length == 2,
+			"Git discovery did not find the root and nested repositories");
+		var rootHandle:Null<ScmRepositoryHandle> = null, nestedHandle:Null<ScmRepositoryHandle> = null;
+		for (handle in discovered.value) {
+			if (handle.repository().root == StringTools.replace(FileSystem.fullPath(discoveryRoot), "\\", "/")) rootHandle = handle;
+			if (handle.repository().root == StringTools.replace(FileSystem.fullPath(nestedRoot), "\\", "/")) nestedHandle = handle;
+		}
+		if (rootHandle == null || nestedHandle == null) throw "Git discovery lost a repository root";
+		require(rootHandle.repository().kind == scm.ScmRepositoryKind.Worktree && !rootHandle.repository().trusted
+			&& nestedHandle.repository().kind == scm.ScmRepositoryKind.Nested && nestedHandle.repository().parentId == rootHandle.repository().id,
+			"Git discovery lost root kind, nested kind, trust default or parent relation: root=" + rootHandle.repository().kind
+				+ ", trusted=" + rootHandle.repository().trusted + ", nested=" + nestedHandle.repository().kind
+				+ ", parent=" + Std.string(nestedHandle.repository().parentId) + ", expected=" + rootHandle.repository().id);
+		var normalFilterConversion:Null<ScmJobResult<scm.git.GitCommandResult>> = null;
+		git.run(["hash-object", "--path=filtered.txt", "filtered.txt"], discoveryRoot, 721,
+			value -> normalFilterConversion = value, true, false);
+		pump(gitScheduler, () -> normalFilterConversion != null, "Unrestricted Git filter fixture timed out");
+		require(normalFilterConversion != null && normalFilterConversion.error != null,
+			"Git filter fixture did not invoke the configured clean filter");
+		var restrictedFilterGit = new GitProcess(processManager, gitScheduler, git.executable, emptyHooks),
+			disabledFilterConversion:Null<ScmJobResult<scm.git.GitCommandResult>> = null;
+		restrictedFilterGit.run(["hash-object", "--path=filtered.txt", "filtered.txt"], discoveryRoot, 722,
+			value -> disabledFilterConversion = value, true, true, GitProcess.DEFAULT_MAX_STDOUT, ["unsafe"]);
+		pump(gitScheduler, () -> disabledFilterConversion != null, "Restricted Git filter fixture timed out");
+		require(disabledFilterConversion != null && disabledFilterConversion.error == null && disabledFilterConversion.value != null,
+			"restricted Git did not disable the configured external clean filter");
+		var firstSnapshot:Null<ScmJobResult<ScmSnapshot>> = null;
+		rootHandle.refresh(73, value -> firstSnapshot = value);
+		pump(gitScheduler, () -> firstSnapshot != null, "Git status refresh timed out");
+		if (firstSnapshot == null || firstSnapshot.value == null) throw "Git status refresh returned no snapshot";
+		var firstSnapshotValue:ScmSnapshot = cast firstSnapshot.value;
+		var untrackedGroup = snapshotGroup(firstSnapshotValue, ScmGroupId.Untracked);
+		require(firstSnapshot.error == null && firstSnapshotValue.truncated
+			&& untrackedGroup != null && untrackedGroup.resources.length == 1
+			&& snapshotGroup(firstSnapshotValue, ScmGroupId.WorkingTree) != null,
+			"Git untracked limit did not mark a truncated status snapshot");
+		require(firstSnapshotValue.head.unborn, "Git status lost the unborn repository state");
+		var unchangedSnapshot:Null<ScmJobResult<ScmSnapshot>> = null;
+		rootHandle.refresh(74, value -> unchangedSnapshot = value);
+		pump(gitScheduler, () -> unchangedSnapshot != null, "Git unchanged refresh timed out");
+		if (unchangedSnapshot == null || unchangedSnapshot.value == null) throw "Git unchanged refresh returned no snapshot";
+		var unchangedSnapshotValue:ScmSnapshot = cast unchangedSnapshot.value;
+		require(unchangedSnapshotValue.revision == firstSnapshotValue.revision,
+			"Git status refresh advanced the revision without content changes");
+		runGit(git, gitScheduler, ["config", "--unset-all", "filter.unsafe.clean"], discoveryRoot, 723);
+		runGit(git, gitScheduler, ["config", "--unset-all", "filter.unsafe.smudge"], discoveryRoot, 724);
+		runGit(git, gitScheduler, ["config", "--unset-all", "filter.unsafe.required"], discoveryRoot, 725);
+		provider.trust(discoveryRoot);
+		var reloadedTrust = new ScmTrustStore(fixtureBase + "/trust.json");
+		require(rootHandle.repository().trusted && trustStore.isTrusted(discoveryRoot) && reloadedTrust.isTrusted(discoveryRoot),
+			"Local trust decision was not persisted");
+		runGit(git, gitScheduler, ["-c", "user.name=SCM Test", "-c", "user.email=scm@example.invalid", "commit", "--allow-empty", "-m", "initial"], discoveryRoot, 76);
+		var linkedRoot = discoveryRoot + "/linked";
+		runGit(git, gitScheduler, ["worktree", "add", "-b", "scm-linked-fixture", linkedRoot, "HEAD"], discoveryRoot, 77);
+		var submoduleSource = fixtureBase + "/submodule-source";
+		FileSystem.createDirectory(submoduleSource);
+		runGit(git, gitScheduler, ["init"], submoduleSource, 78);
+		runGit(git, gitScheduler, ["-c", "user.name=SCM Test", "-c", "user.email=scm@example.invalid", "commit", "--allow-empty", "-m", "source"], submoduleSource, 79);
+		runGit(git, gitScheduler, ["-c", "protocol.file.allow=always", "submodule", "add", submoduleSource, "submodule"], discoveryRoot, 80);
+		var completeDetection:Null<ScmJobResult<Array<ScmRepositoryHandle>>> = null;
+		provider.detect(discoveryRoot, 81, value -> completeDetection = value);
+		pump(gitScheduler, () -> completeDetection != null, "Git worktree and submodule discovery timed out");
+		if (completeDetection == null || completeDetection.value == null) throw "Git worktree discovery returned no handles";
+		require(completeDetection.error == null && completeDetection.value.length == 4,
+			"Git discovery did not find all nested repositories, linked worktrees and submodules");
+		var linkedHandle:Null<ScmRepositoryHandle> = null, submoduleHandle:Null<ScmRepositoryHandle> = null;
+		for (handle in completeDetection.value) {
+			if (handle.repository().root == StringTools.replace(FileSystem.fullPath(linkedRoot), "\\", "/")) linkedHandle = handle;
+			if (handle.repository().root == StringTools.replace(FileSystem.fullPath(discoveryRoot + "/submodule"), "\\", "/")) submoduleHandle = handle;
+		}
+		if (linkedHandle == null || submoduleHandle == null) throw "Git discovery lost the linked worktree or submodule";
+		require(linkedHandle.repository().kind == scm.ScmRepositoryKind.LinkedWorktree
+			&& linkedHandle.repository().parentId == rootHandle.repository().id
+			&& submoduleHandle.repository().kind == scm.ScmRepositoryKind.Submodule
+			&& submoduleHandle.repository().parentId == rootHandle.repository().id,
+			"Git discovery did not classify linked worktree and submodule relationships");
+		for (handle in discovered.value) handle.dispose();
+		for (handle in completeDetection.value) handle.dispose();
+		var service = new ScmService(processManager, gitScheduler, git.executable, 1, 2, true,
+			fixtureBase + "/trust.json", emptyHooks), serviceResult:Null<ScmJobResult<Array<scm.ScmRepository>>> = null,
+			serviceEvents = 0;
+		service.subscribe(function(_, _) serviceEvents++);
+		service.discover(discoveryRoot, value -> serviceResult = value);
+		pump(gitScheduler, () -> serviceResult != null, "SCM service discovery timed out");
+		if (serviceResult == null || serviceResult.value == null || serviceResult.value.length != 4)
+			throw "SCM service did not publish discovered repositories";
+		var serviceWatchPaths = service.watchDirectories(discoveryRoot);
+		require(serviceWatchPaths.length > 1
+			&& serviceWatchPaths[0] == StringTools.replace(FileSystem.fullPath(discoveryRoot), "\\", "/"),
+			"SCM service did not expose the project and Git metadata directories for host watches");
+		var serviceRepositories:Array<ScmRepository> = cast serviceResult.value;
+		var serviceRepository = serviceRepositories[0];
+		service.update(Sys.time());
+		pump(gitScheduler, function() {
+			for (repository in serviceRepositories) if (service.snapshot(repository.id) == null) return false;
+			return true;
+		}, "SCM service initial refresh timed out");
+		var initialServiceSnapshot:Null<ScmSnapshot> = service.snapshot(serviceRepository.id);
+		if (initialServiceSnapshot == null) throw "SCM service lost its initial snapshot";
+		var serviceSnapshot:ScmSnapshot = cast initialServiceSnapshot;
+		require(serviceEvents == serviceRepositories.length, "SCM service did not publish every initial snapshot");
+		runGit(git, gitScheduler, ["add", "one.txt"], discoveryRoot, 811);
+		var externalRevision = serviceSnapshot.revision, pollStarted = Sys.time();
+		while (Sys.time() - pollStarted < 2.0) {
+			var latest = service.snapshot(serviceRepository.id);
+			if (latest != null && latest.revision != externalRevision) break;
+			service.update(Sys.time());
+			gitScheduler.update(32);
+			Sys.sleep(0.005);
+		}
+		var externalSnapshot = service.snapshot(serviceRepository.id);
+			require(externalSnapshot != null && externalSnapshot.revision != externalRevision && Sys.time() - pollStarted < 2.0,
+			"SCM polling did not observe an external Git add within two seconds");
+		serviceSnapshot = cast externalSnapshot;
+		var stableServiceEvents = serviceEvents;
+		service.notifyChanged(discoveryRoot, true);
+		service.update(Sys.time());
+		pump(gitScheduler, () -> gitScheduler.activeCount() == 0, "SCM service overflow refresh timed out");
+		var refreshedServiceSnapshot:ScmSnapshot = cast service.snapshot(serviceRepository.id);
+		require(serviceEvents == stableServiceEvents && refreshedServiceSnapshot.revision == serviceSnapshot.revision,
+			"An unchanged refresh caused snapshot revision or listener churn");
+		service.dispose();
+		var emptyDirectory = fixtureBase + "/not-a-repository";
+		FileSystem.createDirectory(emptyDirectory);
+		var emptyDetection:Null<ScmJobResult<Array<scm.ScmRepositoryHandle>>> = null;
+		provider.detect(emptyDirectory, 75, value -> emptyDetection = value);
+		pump(gitScheduler, () -> emptyDetection != null, "Non-repository detection timed out");
+		require(emptyDetection != null && emptyDetection.error == null && emptyDetection.value != null && emptyDetection.value.length == 0,
+			"A non-repository directory did not produce an empty discovery result");
+		deleteTree(emptyDirectory);
+		deleteTree(fixtureBase);
+		var nonRepository = FileSystem.fullPath(temporaryDirectory + "/exosuit-scm-nonrepo-" + fixtureId);
 		FileSystem.createDirectory(nonRepository);
 		var repositoryError:Null<ScmJobResult<scm.git.GitCommandResult>> = null;
 		git.run(["rev-parse", "--show-toplevel"], nonRepository, 53, value -> repositoryError = value);
@@ -447,7 +630,7 @@ class ScmGitTestMain {
 			"10,000-line scattered diff did not converge to its edits");
 		require(lastMaxDiffSliceMillis < 4.0, 'LineDiff slice exceeded 4 ms: ${lastMaxDiffSliceMillis} ms');
 		Sys.println('LINE_DIFF lines=10000 edits=50 elapsed_ms=${Std.int(largeMillis)} max_slice_ms=${lastMaxDiffSliceMillis}');
-		Sys.println("PASS: SCM model, porcelain v2 parser, fake provider, Git process runner, blob reader and line diff");
+		Sys.println("PASS: SCM model, porcelain parser, trust store, nested Git discovery, restricted filter status, service, blob reader and line diff");
 		return 0;
 	}
 }

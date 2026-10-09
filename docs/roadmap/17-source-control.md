@@ -134,7 +134,7 @@ Acceptance:
 
 ## M17.2 — Service core: discovery, refresh and trust
 
-- [ ] `ScmService` discovers repositories for each project root:
+- [x] `ScmService` discovers repositories for each project root:
   - the containing repository via `git rev-parse --show-toplevel --git-dir
     --git-common-dir`;
   - linked worktrees, where `.git` is a file;
@@ -142,7 +142,7 @@ Acceptance:
   - nested repositories found by a bounded scan for `.git` markers under the
     root (default depth 3, configurable);
   - a parent/child relation for the UI.
-- [ ] Refresh scheduling:
+- [x] Refresh scheduling:
   - **Watches.** Worktree changes arrive through the existing watcher. Separate
     watches cover the gitdir and common dir: `HEAD`, `index`, `refs/` (heads,
     remotes, tags), `packed-refs` and operation markers (`MERGE_HEAD`,
@@ -155,22 +155,22 @@ Acceptance:
   - **Overflow.** Watcher overflow triggers a full refresh.
   - **Other triggers.** Refresh after the service's own operations, after a
     document save, and when the window regains focus.
-- [ ] Snapshot revision advances only when content changes (compare encoded
+- [x] Snapshot revision advances only when content changes (compare encoded
   snapshots), so idle repositories cause no UI churn.
-- [ ] Untracked limit (default 10 000 resources). Beyond it the snapshot is
+- [x] Untracked limit (default 10 000 resources). Beyond it the snapshot is
   marked truncated and the UI says so; it is never silently partial.
 - [ ] Per-repository FIFO operation queue. Mutations are serialized, and
   `lock_contention` retries three times with backoff, then reports.
 - [ ] Repository trust:
-  - A per-root record is persisted by the host that runs Git.
-  - Restricted mode passes `-c core.fsmonitor=`, `-c core.hooksPath=<empty
+  - [x] A per-root record is persisted by the host that runs Git.
+  - [x] Restricted mode passes `-c core.fsmonitor=`, `-c core.hooksPath=<empty
     dir>`, uses unfiltered reads and disables mutations.
-  - Git's `safe.directory` refusal is surfaced as its own state.
-  - Trusting is a local-only action: the in-process host or a local desktop
+  - [x] Git's `safe.directory` refusal is surfaced as its own state.
+  - [ ] Trusting is a local-only action: the in-process host or a local desktop
     connection. Over RPC, trust state is readable, but the service rejects
     trust requests from paired devices regardless of their grants. Their UI
     says to trust the repository on the machine itself.
-- [ ] Settings in `Settings.hx`/`PreferencesRegistry`:
+- [x] Settings in `Settings.hx`/`PreferencesRegistry`:
   - `scm.enabled`, `scm.gitPath`, `scm.untrackedLimit`, `scm.diffSizeLimit`;
   - `scm.nestedScanDepth`, `scm.autoRefresh`;
   - `scm.gutter`, `scm.explorerDecorations`.
@@ -188,6 +188,10 @@ and records "pending" when Git is absent. It covers:
 The trust test uses a repository whose `core.fsmonitor` and
 `filter.x.smudge` write a marker file. In restricted mode, status and
 original-content reads never create the marker. After trusting, they may.
+The current focused fixture proves clean-filter conversion is disabled and
+restricted status remains readable. Marker-based fsmonitor/smudge checks,
+original-content trust checks, the 500-write debounce bound, lock retry and
+real merge-conflict service refresh remain pending.
 
 ## M17.3 — Workspace protocol and agent host
 

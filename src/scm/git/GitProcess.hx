@@ -32,12 +32,13 @@ class GitProcess {
 	}
 
 	public function run(arguments:Array<String>, cwd:String, generation:Int, complete:ScmJobResult<GitCommandResult>->Void,
-			readOnly:Bool = true, restricted:Bool = false, maxStdout:Int = DEFAULT_MAX_STDOUT):ScmJob<GitCommandResult> {
+			readOnly:Bool = true, restricted:Bool = false, maxStdout:Int = DEFAULT_MAX_STDOUT,
+			?disabledFilters:Array<String>):ScmJob<GitCommandResult> {
 		var task:Null<GitCommandTask> = null, handle:Null<JobHandle> = null;
 		var job = new ScmJob<GitCommandResult>(generation, function() {
 			if (handle != null) scheduler.cancel(handle); else if (task != null) task.cancel();
 		});
-		task = new GitCommandTask(processes, configuredPath, emptyHooksPath, arguments, cwd, readOnly, restricted, maxStdout,
+		task = new GitCommandTask(processes, configuredPath, emptyHooksPath, arguments, cwd, readOnly, restricted, maxStdout, disabledFilters,
 			function(result, error) {
 				if (result != null) executable = result.executable;
 				if (job.finish()) complete(new ScmJobResult<GitCommandResult>(generation, result, error));
@@ -145,6 +146,7 @@ private class GitCommandTask implements JobTask {
 	final readOnly:Bool;
 	final restricted:Bool;
 	final maxStdout:Int;
+	final disabledFilters:Array<String>;
 	final complete:(Null<GitCommandResult>, Null<ScmError>)->Void;
 	final output:BytesBuffer = new BytesBuffer();
 	var outputLength:Int = 0;
@@ -159,7 +161,8 @@ private class GitCommandTask implements JobTask {
 	var finished:Bool = false;
 
 	public function new(processes:ProcessManager, configuredPath:Null<String>, emptyHooksPath:Null<String>, arguments:Array<String>, cwd:String,
-			readOnly:Bool, restricted:Bool, maxStdout:Int, complete:(Null<GitCommandResult>, Null<ScmError>)->Void) {
+			readOnly:Bool, restricted:Bool, maxStdout:Int, ?disabledFilters:Array<String>,
+			complete:(Null<GitCommandResult>, Null<ScmError>)->Void) {
 		this.processes = processes;
 		this.configuredPath = configuredPath;
 		this.emptyHooksPath = emptyHooksPath;
@@ -168,6 +171,7 @@ private class GitCommandTask implements JobTask {
 		this.readOnly = readOnly;
 		this.restricted = restricted;
 		this.maxStdout = maxStdout < 1 ? 1 : maxStdout;
+		this.disabledFilters = disabledFilters == null ? [] : disabledFilters.copy();
 		this.complete = complete;
 	}
 
@@ -233,6 +237,13 @@ private class GitCommandTask implements JobTask {
 		if (restricted) {
 			launchArguments.push("-c"); launchArguments.push("core.fsmonitor=");
 			launchArguments.push("-c"); launchArguments.push("core.hooksPath=" + emptyHooksPath);
+			for (filter in disabledFilters) {
+				if (filter.length == 0 || filter.indexOf("\n") >= 0 || filter.indexOf("\r") >= 0) continue;
+				for (suffix in ["process", "clean", "smudge", "required"]) {
+					launchArguments.push("-c");
+					launchArguments.push("filter." + filter + "." + suffix + "=" + (suffix == "required" ? "false" : ""));
+				}
+			}
 		}
 		launchArguments.push("--no-pager");
 		launchArguments.push("-c"); launchArguments.push("color.ui=false");

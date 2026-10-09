@@ -45,6 +45,7 @@ import controller.BuildController;
 import controller.LanguageController;
 import platform.Platform;
 import session.RecentProjects;
+import scm.ScmService;
 
 class Application {
 	public final capabilities:HostCapabilities;
@@ -67,6 +68,7 @@ class Application {
 	public final session:SessionController;
 	public final workbench:WorkbenchController;
 	public final processes:ProcessManager;
+	public final scm:ScmService;
 	public final build:BuildController;
 	public final language:LanguageController;
 	public final searchOptions:SearchOptions;
@@ -79,6 +81,9 @@ class Application {
 	public final errors:ErrorLog;
 	public final confirmations:ConfirmationService;
 	public final recentProjects:RecentProjects;
+	final releaseScmSettings:Void->Void;
+	final releaseScmWatchPaths:Void->Void;
+	public var onScmWatchPathsChanged:Null<(String, Array<String>)->Void>;
 	public final documentMatches:Array<SearchMatch>;
 	public var documentSearchQuery(get, never):String;
 	public var quitReady(get, never):Bool;
@@ -94,6 +99,13 @@ class Application {
 		theme = new Theme();
 		workspace = new Workspace(syntaxes);
 		processes = new ProcessManager(this.capabilities.supports(Processes));
+		scm = new ScmService(processes, workspace.jobs, this.settings.current.scmGitPath,
+			this.settings.current.scmUntrackedLimit, this.settings.current.scmNestedScanDepth, this.settings.current.scmAutoRefresh);
+		scm.configure(this.settings.current);
+		releaseScmSettings = this.settings.subscribe(value -> scm.configure(value));
+		releaseScmWatchPaths = scm.subscribeWatchPaths(function(root, paths) {
+			if (onScmWatchPathsChanged != null) onScmWatchPathsChanged(root, paths);
+		});
 		fileOperations = new FileOperations(workspace, new TrashService(ConfigurationPaths.trash(), workspace.fileSystem));
 		documents = workspace.documents;
 		focus = new FocusManager();
@@ -115,7 +127,8 @@ class Application {
 		session = new SessionController(this, workspace, root, commands, reportError);
 		recovery = session.recovery;
 		files = new FileController(documents, workspace, fileOperations, root, context, commands, confirmations, recovery,
-			path -> { open(path); }, function() { newDocument(); }, function() { recovery.save(this); }, reportError, reportInformation);
+			path -> { open(path); }, function() { newDocument(); }, function() { recovery.save(this); }, reportError, reportInformation,
+			path -> scm.documentSaved(path));
 		pluginController = new PluginController(commands, keymap, context, syntaxes, completions, root.getPluginPanels(), workspace.jobs,
 			effectiveSettings, root, processes, reportError, reportInformation, this.capabilities.supports(SourcePlugins));
 		plugins = pluginController.manager;
@@ -175,6 +188,7 @@ class Application {
 			var projectSettings = settings.forProject(ConfigurationPaths.projectSettings(normalized));
 			var project = workspace.addProject(normalized, projectSettings.current.excludedNames);
 			project.setSettings(projectSettings);
+			scm.discover(normalized, _ -> {});
 			configuration.apply(projectSettings.current);
 			recentProjects.add(normalized);
 			return null;
@@ -287,6 +301,7 @@ class Application {
 		var now = Sys.time();
 		configuration.update();
 		search.update(now);
+		scm.update(now);
 		workspace.jobs.update(32);
 		session.update(now);
 		pluginController.update(now);
@@ -306,6 +321,10 @@ class Application {
 	}
 
 	public function shutdown():Void {
+		releaseScmSettings();
+		releaseScmWatchPaths();
+		onScmWatchPathsChanged = null;
+		scm.dispose();
 		configuration.shutdown();
 		pluginController.shutdown();
 		build.shutdown();

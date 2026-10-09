@@ -35,6 +35,9 @@ import haxeon.ui.docking.DockDropZone;
 import haxeon.ui.docking.DockWorkspaceModel;
 import haxeon.ui.host.DesktopUiApplication;
 import haxeon.ui.host.UiHostContext;
+import haxeon.platform.NativeKitEventValue;
+import haxeon.platform.NativeKitEvents.NativeKitEventSubscription;
+import nativekit.ffi.NativeKitTypes;
 import platform.HostFileDialogs;
 import haxeon.ui.icons.IconName;
 import haxeon.ui.semantics.AccessibilityState;
@@ -118,6 +121,8 @@ class ExosuitApp implements DesktopUiApplication {
 	var saveAsReplace:Bool = false;
 	var saveAsHandler:Null<(Null<String>, Bool)->Void>;
 	final hostContext:Null<UiHostContext>;
+	var scmDirectoryWatch:Null<ScmDirectoryWatch>;
+	var scmFocusSubscription:Null<NativeKitEventSubscription>;
 	final dock:DockWorkspaceModel;
 	var dockPanelContents:Array<DockPanelContent>;
 	final editorPanes:Map<Int, EditorPane> = new Map();
@@ -227,6 +232,19 @@ class ExosuitApp implements DesktopUiApplication {
 			return capturedHost;
 		}, preferences, null, this.capabilities);
 		host = capturedHost;
+		if (hostContext != null) {
+			scmDirectoryWatch = new ScmDirectoryWatch(application.scm, hostContext.events);
+			application.onScmWatchPathsChanged = function(root, paths) {
+				if (scmDirectoryWatch != null) scmDirectoryWatch.update(root, paths);
+			};
+			scmFocusSubscription = hostContext.events.listen(function(event) {
+				switch event {
+					case WindowStateChanged(_, flags) if ((flags & WindowStateFlags.Active) != 0):
+						application.scm.windowFocused();
+					case _:
+				}
+			});
+		}
 		application.openFileView = function(path, preview) return host.openFile(path, preview);
 		host.configureKeybinding = function(command) {
 			openSettings();
@@ -1338,6 +1356,11 @@ class ExosuitApp implements DesktopUiApplication {
 	public function dispose():Void {
 		if (notificationPanel != null) notificationPanel.close();
 		if (hostContext != null) hostContext.onPoll = null;
+		application.onScmWatchPathsChanged = null;
+		if (scmFocusSubscription != null) scmFocusSubscription.dispose();
+		scmFocusSubscription = null;
+		if (scmDirectoryWatch != null) scmDirectoryWatch.dispose();
+		scmDirectoryWatch = null;
 		clearExplorerModel();
 		remoteFileSearch.cancel();
 		if (workspaceAttachment != null) workspaceAttachment.dispose();

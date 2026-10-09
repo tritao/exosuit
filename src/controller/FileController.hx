@@ -29,6 +29,7 @@ class FileController {
 	final saveRecovery:Void->Void;
 	final reportError:(String, String)->Void;
 	final reportInformation:String->Void;
+	final onDocumentSaved:Null<String->Void>;
 	var closeDocuments:Array<Document> = [];
 	var closeIndex:Int = 0;
 	var closeAction:Null<Void->Bool>;
@@ -36,7 +37,8 @@ class FileController {
 
 	public function new(documents:DocumentManager, workspace:Workspace, operations:FileOperations, root:WorkbenchHost, context:CommandContext,
 		commands:CommandRegistry, confirmations:ConfirmationService, recovery:RecoveryStore, openDocument:String->Void,
-		newDocument:Void->Void, saveRecovery:Void->Void, reportError:(String, String)->Void, reportInformation:String->Void) {
+		newDocument:Void->Void, saveRecovery:Void->Void, reportError:(String, String)->Void, reportInformation:String->Void,
+		?onDocumentSaved:String->Void) {
 		this.documents = documents;
 		this.workspace = workspace;
 		this.operations = operations;
@@ -49,6 +51,7 @@ class FileController {
 		this.saveRecovery = saveRecovery;
 		this.reportError = reportError;
 		this.reportInformation = reportInformation;
+		this.onDocumentSaved = onDocumentSaved;
 		installCommands(commands);
 	}
 
@@ -180,7 +183,7 @@ class FileController {
 				openSaveAs(document);
 				return;
 			}
-			if (!document.save()) {
+			if (!saveDocument(document)) {
 				reportError("file", 'Save blocked for "' + document.path + '": disk changed or write failed');
 				if (document.externalState != editor.ExternalState.Current) confirmOverwrite(document);
 			} else recovery.forget(document);
@@ -231,7 +234,7 @@ class FileController {
 				else if (answer == "discard") advanceClose(document);
 				else if (answer == "save") {
 					if (document.hasBackingPath()) {
-						if (!document.save()) {
+						if (!saveDocument(document)) {
 							reportError("file", 'Could not save "' + document.title + '"; close cancelled');
 							cancelClose();
 						} else advanceClose(document);
@@ -259,18 +262,25 @@ class FileController {
 	function completeSaveAs(document:Document, onSuccess:Null<Void->Void>):Void {
 		root.documentRenamed(document);
 		recovery.forget(document);
+		if (onDocumentSaved != null && document.path != null) onDocumentSaved(document.path);
 		root.closeCommandView();
 		if (onSuccess != null) onSuccess();
 	}
 
 	function confirmOverwrite(document:Document):Void {
 		confirmations.choose("Disk changed. Type overwrite to save, or Escape to cancel: ", ["overwrite"], function(answer) {
-			if (document.save(true)) {
+			if (saveDocument(document, true)) {
 				recovery.forget(document);
 				reportInformation("Saved " + document.path);
 			} else reportError("file", "Could not save " + document.path);
 			root.closeCommandView();
 		});
+	}
+
+	function saveDocument(document:Document, force:Bool = false):Bool {
+		if (!document.save(force)) return false;
+		if (onDocumentSaved != null && document.path != null) onDocumentSaved(document.path);
+		return true;
 	}
 
 	function selectedFileOperationPath():Null<String> {

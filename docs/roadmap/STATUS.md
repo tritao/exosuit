@@ -1,6 +1,6 @@
 # Execution ledger
 
-Last updated: 2026-10-09.
+Last updated: 2026-10-10.
 
 ## M17 source control — in progress
 
@@ -53,8 +53,33 @@ raw, length-framed blobs instead, and line comparisons normalize CRLF. External
 smudge filters and LFS output remain unsupported until Git offers a framed
 filtered response.
 
-Next: begin M17.2 repository discovery, refresh watches and local trust
-integration.
+### M17.2 service progress, 2026-10-10
+
+The service slice now has a persistent local trust store, Git repository
+discovery for containing/nested repositories, linked worktrees and submodules,
+and an off-frame directory scan. `ScmService` owns cached snapshots, debounced
+and single-flight refreshes, polling fallback, trust changes, settings updates,
+document-save refreshes, focus refreshes and serialized operation requests.
+The graphical host now watches project and Git metadata directories through
+NativeKit, re-registers after filesystem events, restarts blob readers on
+configuration/commondir changes and falls back to polling when watch creation
+fails. Restricted status reads inspect Git filter names and override external
+filter commands; status fails closed if that config inspection fails.
+
+Validation: the Windows `tests/scm-git` run passes real repository discovery
+for plain, nested, linked-worktree, submodule, unborn and non-repository cases;
+trust persistence; untracked truncation; restricted filter conversion; stable
+snapshot revisions; and external `git add` refresh within two seconds. The
+10,000-line diff fixture passes. `graphical/haxeon.json` compiles on Windows,
+and the already-running Exosuite window remains responsive.
+
+M17.2 remains in progress. The acceptance suite still needs the 500-write
+debounce bound, a held `index.lock` retry, a real merge conflict snapshot, and
+runtime coverage of native watcher delivery/recovery. Git mutation commands
+remain intentionally unavailable until their later source-control workflow
+slice. No remote protocol or Source Control UI is included here.
+
+Next: add the remaining M17.2 acceptance fixtures, then continue to M17.3.
 
 ## Windows workspace startup and filesystem backend, 2026-10-08
 

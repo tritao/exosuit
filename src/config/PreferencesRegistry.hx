@@ -140,6 +140,48 @@ class PreferencesRegistry {
 		}
 		{
 			var options = new SettingOptions();
+			options.tooltip = "Enable Git source control for open workspace roots.";
+			if (!projectOnly) registry.define("scm/enabled", PropertyType.Bool, PropertyValue.Bool(defaults.scmEnabled), options);
+		}
+		{
+			var options = new SettingOptions();
+			options.advanced = true; options.tooltip = "Optional path to Git; empty uses PATH.";
+			if (!projectOnly) registry.define("scm/git_path", PropertyType.Text, PropertyValue.Text(defaults.scmGitPath), options);
+		}
+		{
+			var options = new SettingOptions();
+			options.minimum = 0; options.maximum = 1000000;
+			options.tooltip = "Maximum untracked resources shown per repository.";
+			if (!projectOnly) registry.define("scm/untracked_limit", PropertyType.Int, PropertyValue.Int(defaults.scmUntrackedLimit), options);
+		}
+		{
+			var options = new SettingOptions();
+			options.minimum = 1024; options.maximum = 67108864;
+			options.tooltip = "Maximum bytes loaded for a source control diff.";
+			if (!projectOnly) registry.define("scm/diff_size_limit", PropertyType.Int, PropertyValue.Int(defaults.scmDiffSizeLimit), options);
+		}
+		{
+			var options = new SettingOptions();
+			options.minimum = 0; options.maximum = 8;
+			options.tooltip = "Maximum nested repository scan depth.";
+			if (!projectOnly) registry.define("scm/nested_scan_depth", PropertyType.Int, PropertyValue.Int(defaults.scmNestedScanDepth), options);
+		}
+		{
+			var options = new SettingOptions();
+			if (!projectOnly) registry.define("scm/auto_refresh", PropertyType.Bool, PropertyValue.Bool(defaults.scmAutoRefresh), options);
+		}
+		{
+			var options = new SettingOptions();
+			options.tooltip = "Show source control change markers beside editor line numbers.";
+			if (!projectOnly) registry.define("scm/gutter", PropertyType.Bool, PropertyValue.Bool(defaults.scmGutter), options);
+		}
+		{
+			var options = new SettingOptions();
+			options.tooltip = "Show source control badges in the file tree.";
+			if (!projectOnly) registry.define("scm/explorer_decorations", PropertyType.Bool, PropertyValue.Bool(defaults.scmExplorerDecorations), options);
+		}
+		{
+			var options = new SettingOptions();
 			if (!projectOnly) registry.define("search/results/case_sensitive", PropertyType.Bool, PropertyValue.Bool(defaults.searchCaseSensitive), options);
 		}
 		{
@@ -296,6 +338,14 @@ class PreferencesRegistry {
 		if (store.registry.exists("search/results/case_sensitive") && (base == null || !store.isDefault("search/results/case_sensitive"))) value.searchCaseSensitive = store.getBool("search/results/case_sensitive");
 		if (store.registry.exists("search/results/whole_word") && (base == null || !store.isDefault("search/results/whole_word"))) value.searchWholeWord = store.getBool("search/results/whole_word");
 		if (store.registry.exists("search/results/max_results") && (base == null || !store.isDefault("search/results/max_results"))) value.searchMaxResults = store.getInt("search/results/max_results");
+		if (store.registry.exists("scm/enabled") && (base == null || !store.isDefault("scm/enabled"))) value.scmEnabled = store.getBool("scm/enabled");
+		if (store.registry.exists("scm/git_path") && (base == null || !store.isDefault("scm/git_path"))) value.scmGitPath = store.getString("scm/git_path");
+		if (store.registry.exists("scm/untracked_limit") && (base == null || !store.isDefault("scm/untracked_limit"))) value.scmUntrackedLimit = store.getInt("scm/untracked_limit");
+		if (store.registry.exists("scm/diff_size_limit") && (base == null || !store.isDefault("scm/diff_size_limit"))) value.scmDiffSizeLimit = store.getInt("scm/diff_size_limit");
+		if (store.registry.exists("scm/nested_scan_depth") && (base == null || !store.isDefault("scm/nested_scan_depth"))) value.scmNestedScanDepth = store.getInt("scm/nested_scan_depth");
+		if (store.registry.exists("scm/auto_refresh") && (base == null || !store.isDefault("scm/auto_refresh"))) value.scmAutoRefresh = store.getBool("scm/auto_refresh");
+		if (store.registry.exists("scm/gutter") && (base == null || !store.isDefault("scm/gutter"))) value.scmGutter = store.getBool("scm/gutter");
+		if (store.registry.exists("scm/explorer_decorations") && (base == null || !store.isDefault("scm/explorer_decorations"))) value.scmExplorerDecorations = store.getBool("scm/explorer_decorations");
 		if (store.registry.exists("appearance/colors/editor_background") && (base == null || !store.isDefault("appearance/colors/editor_background"))) value.editorBackground = store.getInt("appearance/colors/editor_background");
 		if (store.registry.exists("appearance/colors/editor_foreground") && (base == null || !store.isDefault("appearance/colors/editor_foreground"))) value.editorForeground = store.getInt("appearance/colors/editor_foreground");
 		if (store.registry.exists("appearance/colors/accent") && (base == null || !store.isDefault("appearance/colors/accent"))) value.accent = store.getInt("appearance/colors/accent");
