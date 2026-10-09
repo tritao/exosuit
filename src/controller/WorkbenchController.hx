@@ -26,6 +26,8 @@ class WorkbenchController {
 	final openDocument:String->Void;
 	public var openPath:String->Void = function(path) {};
 	final recentCommands:Array<String> = [];
+	/** Hosts can supply their full command catalog while sharing palette history and behavior. */
+	public var commandPaletteSource:Null<commandview.CommandPaletteSource>;
 
 	public function new(workspace:Workspace, root:WorkbenchHost, commands:CommandRegistry, keymap:Keymap, context:CommandContext,
 		completions:CompletionRegistry, errors:ErrorLog, search:SearchController, openDocument:String->Void) {
@@ -127,21 +129,30 @@ class WorkbenchController {
 	}
 
 	public function openCommandView():Void {
-		var available = commands.availableCommands(context), entries:Array<CommandViewEntry> = [];
+		var source = commandPaletteSource;
+		var available = source == null
+			? [for (command in commands.availableCommands(context)) commandEntry(command, "Other Commands")]
+			: source.entries();
+		var entries:Array<CommandViewEntry> = [];
 		for (name in recentCommands)
 			for (command in available)
-				if (command.name == name) entries.push(commandEntry(command, "Recently Used"));
+				if (command.value == name) entries.push(paletteEntry(command, "Recently Used"));
 		for (command in available)
-			if (recentCommands.indexOf(command.name) < 0) entries.push(commandEntry(command, "Other Commands"));
+			if (recentCommands.indexOf(command.value) < 0) entries.push(paletteEntry(command, "Other Commands"));
 		root.openCommandView(new CommandViewProvider("> ",
 			entries,
 			function(query) {}, function(entry, query, backwards) {
 				root.closeCommandView();
 				if (entry != null) {
 					rememberCommand(entry.value);
-					commands.perform(entry.value, context);
+					if (source == null) commands.perform(entry.value, context);
+					else source.perform(entry.value);
 				}
 			}));
+	}
+
+	function paletteEntry(entry:CommandViewEntry, section:String):CommandViewEntry {
+		return new CommandViewEntry(entry.label, entry.detail, entry.value, entry.trailing, entry.searchText, section);
 	}
 
 	function commandEntry(command:Command, section:String):CommandViewEntry {

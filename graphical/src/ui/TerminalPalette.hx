@@ -1,20 +1,25 @@
 package ui;
 
 import haxeon.ui.Color;
+import style.WorkbenchColors;
 
 /** Terminal defaults and the first 16 ANSI colors for each workbench scheme. */
 class TerminalPalette {
 	public var fontSize:Float = 14.0;
-	public final foreground:Color;
-	public final background:Color;
-	public final cursor:Color;
-	public final ansi:Array<Color>;
-	public final ansiBackground:Array<Color>;
+	public var foreground:Color;
+	public var background:Color;
+	public var cursor:Color;
+	public var ansi:Array<Color>;
+	public var ansiBackground:Array<Color>;
 
 	public function new(dark:Bool) {
-		foreground = ExosuitPalette.hex(dark ? 0xdce3ec : 0x202a36);
-		background = ExosuitPalette.hex(dark ? 0x171c23 : 0xffffff);
-		cursor = ExosuitPalette.hex(dark ? 0x91bfff : 0x2866b2);
+		setDark(dark);
+	}
+
+	public function setDark(dark:Bool):Void {
+		foreground = ExosuitPalette.hex(dark ? WorkbenchColors.darkForeground : WorkbenchColors.lightForeground);
+		background = ExosuitPalette.hex(dark ? WorkbenchColors.darkSurfaceSunken : WorkbenchColors.lightSurfaceSunken);
+		cursor = ExosuitPalette.hex(dark ? WorkbenchColors.darkAccentHover : WorkbenchColors.lightAccent);
 		var values = dark ? [
 			0x788596, 0xe8858c, 0x77d49a, 0xe9c46a,
 			0x80b4ff, 0xc9a3ef, 0x72cbd4, 0xdce3ec,
@@ -28,7 +33,7 @@ class TerminalPalette {
 		];
 		ansi = [for (value in values) ExosuitPalette.hex(value)];
 		ansiBackground = ansi.copy();
-		if (dark) ansiBackground[0] = ExosuitPalette.hex(0x202630);
+		if (dark) ansiBackground[0] = ExosuitPalette.hex(WorkbenchColors.darkSurface);
 		else {
 			ansiBackground[7] = ExosuitPalette.hex(0xe9eef5);
 			ansiBackground[15] = ExosuitPalette.hex(0xffffff);

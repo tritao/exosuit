@@ -38,8 +38,8 @@ class Settings {
 	public var searchCaseSensitive:Bool = false;
 	public var searchWholeWord:Bool = false;
 	public var searchMaxResults:Int = 10000;
-	public var editorBackground:Int = 404232447;
-	public var editorForeground:Int = -421075201;
+	public var editorBackground:Int = style.WorkbenchColors.opaque(style.WorkbenchColors.darkEditorBackground);
+	public var editorForeground:Int = style.WorkbenchColors.opaque(style.WorkbenchColors.darkForeground);
 	public var accent:Int = 1334824191;
 	public var surface:Int = 0x202020ff;
 	public var surfaceElevated:Int = 0x252932ff;

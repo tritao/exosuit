@@ -15,6 +15,31 @@ import haxeon.ui.widgets.controls.ButtonVariant;
 class ButtonThemeTestMain {
 	static function require(value:Bool, message:String):Void { if (!value) throw message; }
 	static function main():Int {
+		var editor = new style.Theme(), settings = new config.Settings();
+		require(editor.editorBackground == settings.editorBackground && editor.editorForeground == settings.editorForeground,
+			"Settings and editor theme have different default colors");
+		require(style.Theme.contrastRatio(editor.editorBackground, editor.editorForeground) >= 7,
+			"Default dark editor text lacks contrast");
+		var live = ExosuitPalette.theme(false);
+		var tokens = live.tokens;
+		var styles = live.styles;
+		for (dark in [true, false, true]) {
+			var expected = ExosuitPalette.theme(dark);
+			require(ExosuitPalette.theme(dark, live) == live && live.tokens == tokens && live.styles == styles,
+				"Theme switching replaced shared objects");
+			require(live.tokens.surface.red == expected.tokens.surface.red
+				&& live.tokens.textPrimary.red == expected.tokens.textPrimary.red
+				&& live.textCaret.red == expected.textCaret.red, "Theme switching retained old colors");
+		}
+		var terminal = new ui.TerminalPalette(false);
+		terminal.fontSize = 18;
+		for (dark in [true, false]) {
+			terminal.setDark(dark);
+			var expected = new ui.TerminalPalette(dark);
+			require(terminal.background.red == expected.background.red && terminal.foreground.red == expected.foreground.red
+				&& terminal.ansi[0].red == expected.ansi[0].red && terminal.fontSize == 18,
+				"Terminal theme switching retained old colors or changed font size");
+		}
 		var states = [0, StyleState.Hovered, StyleState.Pressed, StyleState.Focused,
 			StyleState.Selected, StyleState.Focused | StyleState.Hovered,
 			StyleState.Selected | StyleState.Focused, StyleState.Disabled];

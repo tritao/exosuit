@@ -1,6 +1,7 @@
 package ui;
 
 import haxeon.ui.Color;
+import style.WorkbenchColors;
 import haxeon.ui.theme.Theme;
 import haxeon.ui.style.StyleSelector;
 import haxeon.ui.style.StyleValue;
@@ -9,24 +10,35 @@ import haxeon.ui.style.StyleState;
 
 /** Shared workbench colors. Keep terminal defaults and chrome in one scheme. */
 class ExosuitPalette {
-	public static function theme(dark:Bool):Theme {
+	public static function theme(dark:Bool, ?target:Theme):Theme {
 		var result = dark ? Theme.dark() : Theme.light();
+		if (target != null) {
+			for (field in Reflect.fields(result.tokens))
+				Reflect.setField(target.tokens, field, Reflect.field(result.tokens, field));
+			target.textSelectionInactive = result.textSelectionInactive;
+			target.body = result.body;
+			target.heading = result.heading;
+			target.label = result.label;
+			target.caption = result.caption;
+			target.button = result.button;
+			result = target;
+		}
 		var tokens = result.tokens;
-		tokens.accent = hex(dark ? 0x78aef8 : 0x2866b2);
-		tokens.accentHover = hex(dark ? 0x91bfff : 0x1d579d);
-		tokens.accentPressed = hex(dark ? 0x5e96df : 0x18477f);
-		tokens.textPrimary = hex(dark ? 0xdce3ec : 0x202a36);
-		tokens.textSecondary = hex(dark ? 0xa6b2c1 : 0x536174);
-		tokens.textDisabled = hex(dark ? 0x8793a3 : 0x687589);
-		tokens.textOnAccent = hex(dark ? 0x14202e : 0xffffff);
-		tokens.surface = hex(dark ? 0x202630 : 0xf4f6fa);
-		tokens.surfaceRaised = hex(dark ? 0x262e39 : 0xe8edf4);
-		tokens.surfaceSunken = hex(dark ? 0x171c23 : 0xffffff);
-		tokens.surfaceHover = hex(dark ? 0x303b49 : 0xdce5f1);
-		tokens.border = hex(dark ? 0x526071 : 0x8b9aad);
-		tokens.borderStrong = hex(dark ? 0x657489 : 0x718299);
-		tokens.focusRing = hex(dark ? 0x91bfff : 0x2866b2);
-		tokens.selection = hex(dark ? 0x294765 : 0xc6dcf6);
+		tokens.accent = hex(dark ? WorkbenchColors.darkAccent : WorkbenchColors.lightAccent);
+		tokens.accentHover = hex(dark ? WorkbenchColors.darkAccentHover : WorkbenchColors.lightAccentHover);
+		tokens.accentPressed = hex(dark ? WorkbenchColors.darkAccentPressed : WorkbenchColors.lightAccentPressed);
+		tokens.textPrimary = hex(dark ? WorkbenchColors.darkForeground : WorkbenchColors.lightForeground);
+		tokens.textSecondary = hex(dark ? WorkbenchColors.darkForegroundMuted : WorkbenchColors.lightForegroundMuted);
+		tokens.textDisabled = hex(dark ? WorkbenchColors.darkForegroundDisabled : WorkbenchColors.lightForegroundDisabled);
+		tokens.textOnAccent = hex(dark ? WorkbenchColors.darkForegroundOnAccent : WorkbenchColors.lightForegroundOnAccent);
+		tokens.surface = hex(dark ? WorkbenchColors.darkSurface : WorkbenchColors.lightSurface);
+		tokens.surfaceRaised = hex(dark ? WorkbenchColors.darkSurfaceRaised : WorkbenchColors.lightSurfaceRaised);
+		tokens.surfaceSunken = hex(dark ? WorkbenchColors.darkSurfaceSunken : WorkbenchColors.lightSurfaceSunken);
+		tokens.surfaceHover = hex(dark ? WorkbenchColors.darkSurfaceHover : WorkbenchColors.lightSurfaceHover);
+		tokens.border = hex(dark ? WorkbenchColors.darkBorder : WorkbenchColors.lightBorder);
+		tokens.borderStrong = hex(dark ? WorkbenchColors.darkBorderStrong : WorkbenchColors.lightBorderStrong);
+		tokens.focusRing = hex(dark ? WorkbenchColors.darkAccentHover : WorkbenchColors.lightAccent);
+		tokens.selection = hex(dark ? WorkbenchColors.darkSelection : WorkbenchColors.lightSelection);
 		tokens.deriveComponents();
 		result.textSelection = Color.rgba(dark ? 0.23 : 0.38,
 			dark ? 0.47 : 0.63, dark ? 0.76 : 0.89, dark ? 0.65 : 0.50);
@@ -49,23 +61,23 @@ class ExosuitPalette {
 
 	public static function lightEditor():style.Theme {
 		var result = new style.Theme();
-		result.editorBackground = 0xffffffff;
-		result.editorForeground = 0x202a36ff;
-		result.surface = 0xf0f4f9ff;
-		result.surfaceElevated = 0xe8edf4ff;
-		result.surfaceActive = 0xdce5f1ff;
-		result.surfaceInactive = 0xf4f6faff;
-		result.surfaceHover = 0xe5ecf5ff;
-		result.border = 0x8b9aadff;
-		result.divider = 0x8b9aadff;
-		result.foregroundMuted = 0x536174ff;
-		result.foregroundSubtle = 0x687589ff;
-		result.caret = 0x202a36ff;
-		result.currentLine = 0xf1f5faff;
-		result.selection = 0xc6dcf6ff;
-		result.searchMatch = 0xffe7a0ff;
-		result.bracketMatch = 0xd7e5f6ff;
-		result.accent = 0x2866b2ff;
+		result.editorBackground = WorkbenchColors.opaque(WorkbenchColors.lightEditorBackground);
+		result.editorForeground = WorkbenchColors.opaque(WorkbenchColors.lightForeground);
+		result.surface = WorkbenchColors.opaque(WorkbenchColors.lightEditorSurface);
+		result.surfaceElevated = WorkbenchColors.opaque(WorkbenchColors.lightSurfaceRaised);
+		result.surfaceActive = WorkbenchColors.opaque(WorkbenchColors.lightSurfaceHover);
+		result.surfaceInactive = WorkbenchColors.opaque(WorkbenchColors.lightEditorInactive);
+		result.surfaceHover = WorkbenchColors.opaque(WorkbenchColors.lightEditorHover);
+		result.border = WorkbenchColors.opaque(WorkbenchColors.lightBorder);
+		result.divider = WorkbenchColors.opaque(WorkbenchColors.lightBorder);
+		result.foregroundMuted = WorkbenchColors.opaque(WorkbenchColors.lightForegroundMuted);
+		result.foregroundSubtle = WorkbenchColors.opaque(WorkbenchColors.lightForegroundDisabled);
+		result.caret = WorkbenchColors.opaque(WorkbenchColors.lightForeground);
+		result.currentLine = WorkbenchColors.opaque(WorkbenchColors.lightCurrentLine);
+		result.selection = WorkbenchColors.opaque(WorkbenchColors.lightSelection);
+		result.searchMatch = WorkbenchColors.opaque(WorkbenchColors.lightSearchMatch);
+		result.bracketMatch = WorkbenchColors.opaque(WorkbenchColors.lightBracketMatch);
+		result.accent = WorkbenchColors.opaque(WorkbenchColors.lightAccent);
 		result.lightSyntax = true;
 		return result;
 	}

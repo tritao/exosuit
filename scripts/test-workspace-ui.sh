@@ -28,6 +28,7 @@ test -s "$fixture/state-restart/session.conf"
 test -s "$fixture/state-restart/recovery.conf"
 run_phase read restart
 run_phase keyboard keyboard
+run_phase theme-palette theme-palette
 run_phase large-picker large-picker
 run_phase remote-open remote-open
 mkdir -p "$fixture/state-legacy" "$fixture/state-corrupt" "$fixture/state-invalid-dock"

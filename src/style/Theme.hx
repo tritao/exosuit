@@ -4,8 +4,8 @@ import syntax.HighlightToken;
 
 class Theme {
 	public var lightSyntax:Bool = false;
-	public var editorBackground:Int = 0x181818ff;
-	public var editorForeground:Int = 0xe6e6e6ff;
+	public var editorBackground:Int = WorkbenchColors.opaque(WorkbenchColors.darkEditorBackground);
+	public var editorForeground:Int = WorkbenchColors.opaque(WorkbenchColors.darkForeground);
 	public var accent:Int = 0x4f8fccff;
 	public var surface:Int = 0x202020ff;
 	public var surfaceElevated:Int = 0x252932ff;

@@ -86,6 +86,26 @@ class CommandTestMain {
 		var recentEntry = [for (entry in root.commandView.results) if (entry.value == "test:fallback") entry][0];
 		require(recentEntry.section == "Recently Used", "executed palette command was not promoted to the recent section");
 		root.commandView.close();
+		var catalog = [new CommandViewEntry("Use Dark Theme", "Appearance", "host:dark", "", "dark theme")];
+		var hostCommand = "";
+		application.workbench.commandPaletteSource = new commandview.CommandPaletteSource(
+			function() return catalog.copy(), function(id) hostCommand = id);
+		require(keymap.onKeyPressed(Platform.KEY_P, Platform.MOD_CTRL | Platform.MOD_SHIFT, context), "palette shortcut was not handled");
+		require(root.commandView.results.length == 1 && root.commandView.results[0].value == "host:dark",
+			"keyboard palette did not use the host catalog");
+		root.commandView.keyPressed(Platform.KEY_ENTER, 0);
+		require(hostCommand == "host:dark" && !root.isCommandViewActive(), "host palette command did not execute and close");
+		catalog.push(new CommandViewEntry("Late Plugin Command", "", "host:late"));
+		application.workbench.openCommandView();
+		require(root.commandView.results.length == 2 && root.commandView.results[0].section == "Recently Used"
+			&& root.commandView.results[0].value == "host:dark", "shared palette lost recent commands or live catalog updates");
+		root.commandView.close();
+		catalog.shift();
+		application.workbench.openCommandView();
+		require(root.commandView.results.length == 1 && root.commandView.results[0].value == "host:late",
+			"palette retained a removed host command");
+		root.commandView.close();
+		application.workbench.commandPaletteSource = null;
 		keymap.addDirect(100, 1, ["test:disabled", "test:fallback"]);
 		require(keymap.onKeyPressed(100, 1, context) && performed == 2, "predicate fallback dispatch failed");
 		registry.add("test:override", function(context) { performed = 3; });

@@ -84,7 +84,7 @@ import controller.WorkspaceFileSearchController;
 class ExosuitApp implements DesktopUiApplication {
 	public final ui:UiContext;
 	public final theme:Theme;
-	final darkPalette:Bool;
+	var darkPalette:Bool;
 	final editorPalette:style.Theme;
 	final terminalPalette:TerminalPalette;
 	public final application:Application;
@@ -283,12 +283,14 @@ class ExosuitApp implements DesktopUiApplication {
 			var pane = editorPanes.get(active.id);
 			return pane == null ? null : pane.caretRect;
 		};
-		editorPalette = darkPalette ? application.theme : ExosuitPalette.lightEditor();
+		editorPalette = new style.Theme();
+		updateEditorPalette();
 		for (error in fontErrors) application.reportError("fonts", error);
 		installCommands();
 		var previousSidebarWidth = application.settings.current.sidebarWidth;
 		sidebar.rememberWidth(previousSidebarWidth);
 		application.settings.subscribe(function(value) {
+			updateEditorPalette();
 			if (hostContext != null) hostContext.zoom = value.applicationZoom / 100.0;
 			terminalPalette.fontSize = value.terminalFontSize;
 			if (value.sidebarWidth != previousSidebarWidth) {
@@ -615,7 +617,27 @@ class ExosuitApp implements DesktopUiApplication {
 			haxeon.ui.properties.PropertyValue.Int(Std.int(Math.max(70, Math.min(200, percent)))));
 	}
 
+	function updateEditorPalette():Void {
+		var source = darkPalette ? application.theme : ExosuitPalette.lightEditor();
+		// Retained editors and previews share this palette instance.
+		for (field in Reflect.fields(source))
+			Reflect.setField(editorPalette, field, Reflect.field(source, field));
+	}
+
+	public function setDarkTheme(dark:Bool):Void {
+		if (darkPalette == dark) return;
+		darkPalette = dark;
+		ExosuitPalette.theme(dark, theme);
+		ui.setTheme(theme);
+		ui.buildContext.environment.colorScheme = dark ? EnvironmentColorScheme.Dark : EnvironmentColorScheme.Light;
+		updateEditorPalette();
+		terminalPalette.setDark(dark);
+		requestFrame();
+	}
+
 	function installCommands():Void {
+		application.commands.add("preferences:theme-dark", function(_) setDarkTheme(true), null, "Use Dark Theme");
+		application.commands.add("preferences:theme-light", function(_) setDarkTheme(false), null, "Use Light Theme");
 		var modifier = Sys.systemName() == "Mac" ? UiModifier.Super : UiModifier.Control;
 		var zoomIn = new Command("view.zoom-in", "Zoom In", function() setApplicationZoom(application.settings.current.applicationZoom + 10), new Shortcut(61, modifier));
 		zoomIn.addShortcut(new Shortcut(61, modifier | UiModifier.Shift));
@@ -676,6 +698,8 @@ class ExosuitApp implements DesktopUiApplication {
 		ui.commands.register(new Command("preferences.open", "Settings…", openSettings,
 			new Shortcut(UiKey.Comma, UiModifier.Control)));
 		CommandBridge.install(ui.commands, application.commands, application.keymap, application.context);
+		application.workbench.commandPaletteSource = new commandview.CommandPaletteSource(paletteEntries,
+			function(id) { ui.commands.executeContext(id, ui.commandContext); });
 	}
 
 	function resolveSaveConfirmation(answer:String):Void {
@@ -2345,6 +2369,13 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function togglePalette():Void {
 		contextMenu = null;
+		application.workbench.openCommandView();
+		requestFrame();
+	}
+
+	function paletteEntries():Array<commandview.CommandViewEntry> {
+		// Include domain commands registered after startup (for example by plugins).
+		CommandBridge.install(ui.commands, application.commands, application.keymap, application.context);
 		var entries:Array<commandview.CommandViewEntry> = [];
 		for (id in ui.commands.ids()) {
 			var command = ui.commands.get(id);
@@ -2354,11 +2385,7 @@ class ExosuitApp implements DesktopUiApplication {
 				[for (shortcut in shortcuts) shortcut.label()].join(", "), command.label + " " + id));
 		}
 		entries.sort(function(a, b) return Reflect.compare(a.label.toLowerCase(), b.label.toLowerCase()));
-		host.openCommandView(new commandview.CommandViewProvider("> ", entries, function(_) {}, function(entry, _, _) {
-			host.closeCommandView();
-			if (entry != null) ui.commands.executeContext(entry.value, ui.commandContext);
-		}));
-		requestFrame();
+		return entries;
 	}
 
 	function clearExplorerModel():Void {

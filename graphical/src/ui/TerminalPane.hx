@@ -50,8 +50,8 @@ class TerminalPane implements TerminalPanel {
 	var controlActionLayout:Null<TextLayout>;
 	var controlStatusText:String = "";
 	var controlActionText:String = "";
-	final foreground:Color;
-	final background:Color;
+	var foreground:Color;
+	var background:Color;
 	var cellWidth:Float;
 	var rowHeight:Float;
 	var fontSize:Float;
@@ -156,6 +156,16 @@ class TerminalPane implements TerminalPanel {
 
 	public function poll():Void {
 		if (closed) return;
+		if (foreground != palette.foreground || background != palette.background) {
+			foreground = palette.foreground;
+			background = palette.background;
+			cursorOutlineColor = foreground;
+			for (layout in layouts) layout.setColor(foreground);
+			if (controlLayout != null) controlLayout.setColor(foreground);
+			if (controlActionLayout != null) controlActionLayout.setColor(palette.cursor);
+			refreshRows(true);
+			requestFrame();
+		}
 		if (fontSize != palette.fontSize) {
 			updateFontSize();
 			resizeToViewport(resolvedWidth, resolvedHeight);

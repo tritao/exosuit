@@ -34,9 +34,15 @@ class CommandBridge {
 	static final duplicates:Array<String> = ["file:new", "doc:save", "root:close", "settings:open"];
 
 	public static function install(target:UiCommandRegistry, source:CommandRegistry, keymap:Keymap, context:CommandContext):Void {
+		for (id in target.ids())
+			if (StringTools.startsWith(id, "exosuit.") && !source.contains(id.substring(8))) target.unregister(id);
 		for (command in source.all()) {
 			if (layoutOnlyCommands.indexOf(command.name) >= 0 || duplicates.indexOf(command.name) >= 0) continue;
-			var name = command.name, shortcuts = shortcutsFor(keymap, name);
+			var name = command.name;
+			var existing = target.get(bridgedId(name));
+			if (existing != null && existing.label == command.description) continue;
+			if (existing != null) target.unregister(existing.id);
+			var shortcuts = shortcutsFor(keymap, name);
 			var bridged = new Command(bridgedId(name), command.description, function() {
 				source.perform(name, context);
 			}, shortcuts.length == 0 ? null : shortcuts[0], function() return source.isValid(name, context));
@@ -44,6 +50,7 @@ class CommandBridge {
 			for (shortcut in shortcuts) bridged.addShortcut(shortcut);
 			target.register(bridged);
 		}
+		refreshShortcuts(target, source, keymap);
 	}
 
 	/** `haxeon.ui.core.CommandRegistry` ids are namespaced separately from `ExosuitApp`'s own dotted ids; the colon survives untouched since nothing else uses it. */

@@ -14,6 +14,7 @@ import haxeon.ui.TextStyle;
 import haxeon.ui.TextWrap;
 
 import ui.ExosuitApp;
+import ui.ExosuitPalette;
 import ui.UiEditorTabs;
 import ui.UiDocumentView;
 import ui.SetiIconData;
@@ -63,6 +64,47 @@ class WorkspaceSmokeApp extends ExosuitApp {
 
 	function require(value:Bool, message:String):Void { if (!value) throw message; }
 
+	function themePaletteStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
+		if (frames == 1) {
+			application.commands.add("test:late-palette", function(_) {}, null, "Late Palette Command");
+			ui.key(UiEventKind.KeyDown, UiKey.P, UiModifier.Control | UiModifier.Shift);
+		}
+		if (frames == 2) {
+			for (id in ["exosuit.preferences:theme-dark", "exosuit.preferences:theme-light", "view.zoom-in", "exosuit.test:late-palette"])
+				require([for (entry in host.commandView.results) if (entry.value == id) entry].length == 1,
+					"keyboard palette missing " + id);
+			host.commandView.setQuery("Use Light Theme");
+			ui.key(UiEventKind.KeyDown, UiKey.Enter, 0);
+		}
+		if (frames == 3) {
+			require(!host.isCommandViewActive() && theme.tokens.surface.red == ExosuitPalette.theme(false).tokens.surface.red,
+				"keyboard palette did not apply light theme");
+			require(ui.commands.execute("view.toggle-palette"), "toolbar palette command unavailable");
+		}
+		if (frames == 4) {
+			var recent = [for (entry in host.commandView.results) if (entry.value == "exosuit.preferences:theme-light") entry];
+			require(recent.length == 1 && recent[0].section == "Recently Used", "toolbar palette did not share keyboard palette history");
+			host.commandView.setQuery("Use Dark Theme");
+			ui.key(UiEventKind.KeyDown, UiKey.Enter, 0);
+		}
+		if (frames == 5) {
+			require(!host.isCommandViewActive() && theme.tokens.surface.red == ExosuitPalette.theme(true).tokens.surface.red,
+				"toolbar palette did not apply dark theme");
+			application.commands.add("test:late-palette", function(_) {}, null, "Renamed Palette Command");
+			application.commands.perform("commands:open", application.context);
+			var renamed = [for (entry in host.commandView.results) if (entry.value == "exosuit.test:late-palette") entry];
+			require(renamed.length == 1 && renamed[0].label == "Renamed Palette Command", "palette retained an old command label");
+			host.closeCommandView();
+			application.commands.remove("test:late-palette");
+			application.commands.perform("commands:open", application.context);
+			require([for (entry in host.commandView.results) if (entry.value == "exosuit.test:late-palette") entry].length == 0,
+				"removed command remained in the shared palette");
+			host.closeCommandView();
+			trace("PASS: keyboard and toolbar palettes share theme commands, recent history and live plugin commands");
+		}
+		return super.submit(frame);
+	}
+
 	function palette(command:String):Void {
 		paletteCommand = command;
 		ui.key(UiEventKind.KeyDown, UiKey.P, UiModifier.Control | UiModifier.Shift);
@@ -70,6 +112,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 
 	override public function submit(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		frames++;
+		if (phase == "theme-palette") return themePaletteStep(frame);
 		if (phase == "file-deletion") return fileDeletionStep(frame);
 		if (phase == "remote-open") {
 			if (frames == 1) { remoteOpenTests = new RemoteFileOpenTests(this); remoteOpenTests.start(); }
@@ -485,7 +528,11 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		}
 		if (frames == 3) ui.text(UiEventKind.TextInput, "Pointer palette");
 		if (frames == 4) {
-			var bounds = node("cv-row-1").globalBounds();
+			require(host.isCommandViewActive() && host.commandView.results.length == 2,
+				"pointer palette query did not match two commands: " + host.commandView.query + " / " + host.commandView.results.length);
+			var row = findLabel(ui.root, "Pointer palette second");
+			if (row == null) throw "second palette command was not rendered";
+			var bounds = row.globalBounds();
 			pointerX = bounds.x + 20; pointerY = bounds.y + bounds.height / 2;
 			ui.pointerDown(pointerX, pointerY, 0, 0, 42);
 		}
@@ -1077,6 +1124,12 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		if (found == null) throw "sidebar widget missing: " + key;
 		return found;
 	}
+	static function findLabel(root:haxeon.ui.core.RenderNode, label:String):Null<haxeon.ui.core.RenderNode> {
+		if (root.semantics != null && root.semantics.label == label) return root;
+		for (child in root.children) { var found = findLabel(child, label); if (found != null) return found; }
+		return null;
+	}
+
 	static function find(root:haxeon.ui.core.RenderNode, key:String):Null<haxeon.ui.core.RenderNode> {
 		if (root.styleKey == key) return root;
 		for (child in root.children) { var found = find(child, key); if (found != null) return found; }
