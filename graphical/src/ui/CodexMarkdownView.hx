@@ -7,6 +7,9 @@ import haxeon.ui.LayoutStyle;
 import haxeon.ui.Insets;
 import haxeon.ui.FontFamily;
 import haxeon.ui.TextStyle;
+import haxeon.ui.TextLayout;
+import haxeon.ui.TextLayout.TextPosition;
+import haxeon.ui.theme.TextRole;
 import haxeon.ui.core.BuildContext;
 import haxeon.ui.core.RenderNode;
 import haxeon.ui.core.View;
@@ -67,6 +70,7 @@ class CodexMarkdownView implements View {
 
   public function build(context:BuildContext):RenderNode {
     var rows:Array<KeyedView> = [];
+    var spaceWidths:Map<String, Float> = [];
     var index = 0;
     for (block in CodexMarkdown.parse(value)) {
       var key = "block-" + index++;
@@ -113,22 +117,59 @@ class CodexMarkdownView implements View {
         text = ~/^[-*+] /gm.replace(text, "• ");
         if (text.indexOf("`") < 0) rows.push(new KeyedView(key, new Text(text, prose, null, TextStyleOverride.text(size))));
         else {
-          var pieces:Array<KeyedView> = [], cursor = 0, part = 0;
-          while (cursor < text.length) {
-            var open = text.indexOf("`", cursor);
-            var close = open < 0 ? -1 : text.indexOf("`", open + 1);
-            var end = close < 0 ? text.length : open;
-            for (word in text.substring(cursor, end).split(" ")) if (word != "")
-              pieces.push(new KeyedView("word-" + part++, new Text(word + " ", null, null, TextStyleOverride.text(size))));
-            if (close < 0) break;
-            var chip = new LayoutStyle(); chip.padding = new Insets(4, 1, 4, 1); chip.background = context.theme.tokens.surfaceSunken;
-            pieces.push(new KeyedView("inline-" + part++, new Text(text.substring(open + 1, close), chip, null,
-              TextStyleOverride.text(size - 1, null, null, FontFamily.Monospace))));
-            cursor = close + 1;
+          var lines:Array<KeyedView> = [], lineIndex = 0;
+          for (line in text.split("\n")) {
+            var lineKey = key + "-line-" + lineIndex++;
+            var pieces:Array<KeyedView> = [], word:Array<KeyedView> = [], cursor = 0, part = 0;
+            // Whitespace separates layout groups; adjacent punctuation and code
+            // stay together. Trailing spaces on Text widgets are not measurable.
+            function flushWord():Void {
+              if (word.length == 0) return;
+              var wordStyle = new LayoutStyle(); wordStyle.width = LayoutAxis.fit();
+              pieces.push(new KeyedView("word-" + part++, new Row(lineKey + "-word-" + part, word, wordStyle)));
+              word = [];
+            }
+            function appendText(value:String):Void {
+              var tokens = ~/\s+|\S+/g, offset = 0;
+              while (tokens.matchSub(value, offset)) {
+                var token = tokens.matched(0), position = tokens.matchedPos();
+                offset = position.pos + position.len;
+                if (~/^\s/.match(token)) flushWord();
+                else word.push(new KeyedView("text-" + part++, new Text(token, null, null, TextStyleOverride.text(size))));
+              }
+            }
+            while (cursor < line.length) {
+              var open = line.indexOf("`", cursor);
+              var close = open < 0 ? -1 : line.indexOf("`", open + 1);
+              var end = close < 0 ? line.length : open;
+              appendText(line.substring(cursor, end));
+              if (close < 0) break;
+              var chip = new LayoutStyle(); chip.padding = new Insets(4, 1, 4, 1); chip.background = context.theme.tokens.surfaceSunken;
+              word.push(new KeyedView("inline-" + part++, new Text(line.substring(open + 1, close), chip, null,
+                TextStyleOverride.text(size - 1, null, null, FontFamily.Monospace))));
+              cursor = close + 1;
+            }
+            flushWord();
+            var spaceKey = Std.string(size);
+            var spaceWidth = spaceWidths.get(spaceKey);
+            if (spaceWidth == null) {
+              spaceWidth = size / 3;
+              if (context.fonts != null) {
+                var typography = context.resolveTextRole(TextRole.Body, TextStyleOverride.text(size));
+                var probe = TextLayout.createStyled(context.fonts, "x x", 1000, typography.textStyle, typography.paragraphStyle);
+                spaceWidth = probe.caret(new TextPosition(2, 0)).x - probe.caret(new TextPosition(1, 0)).x;
+                probe.dispose();
+              }
+              spaceWidths.set(spaceKey, spaceWidth);
+            }
+            var lineStyle = new LayoutStyle(); lineStyle.width = LayoutAxis.grow();
+            lineStyle.childGap = spaceWidth;
+            lineStyle.wrapMode = LayoutWrapMode.Wrap;
+            lineStyle.rowGap = 3;
+            lines.push(new KeyedView(lineKey, new Row(lineKey + "-inline", pieces, lineStyle)));
           }
-          prose.wrapMode = LayoutWrapMode.Wrap;
-          prose.rowGap = 3;
-          rows.push(new KeyedView(key, new Row(key + "-inline", pieces, prose)));
+          prose.childGap = 3;
+          rows.push(new KeyedView(key, new Column(key + "-lines", lines, prose)));
         }
       }
     }

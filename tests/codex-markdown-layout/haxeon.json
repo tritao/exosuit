@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "package": {"name": "exosuit-codex-markdown-layout"},
+  "entry": "app.CodexMarkdownLayoutMain",
+  "sourceRoots": ["src"],
+  "scopeSourceRoots": false,
+  "dependencies": {"exosuit-graphical": {"path": "../../graphical"}},
+  "target": "host",
+  "outputDir": "build"
+}
