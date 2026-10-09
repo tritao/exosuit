@@ -42,11 +42,12 @@ class LineDiff implements JobTask {
 		frontier[offset + 1] = 0;
 	}
 
-	/** A line includes its terminating LF; the final line may omit it. */
+	/** Lines retain LF termination; CRLF is normalized so repository EOL policy does not mark every line changed. */
 	public static function splitLines(text:String):Array<String> {
 		var result:Array<String> = [], start = 0;
 		for (index in 0...text.length) if (text.charCodeAt(index) == 10) {
-			result.push(text.substring(start, index + 1));
+			var end = index > start && text.charCodeAt(index - 1) == 13 ? index - 1 : index;
+			result.push(text.substring(start, end) + "\n");
 			start = index + 1;
 		}
 		if (start < text.length) result.push(text.substring(start));

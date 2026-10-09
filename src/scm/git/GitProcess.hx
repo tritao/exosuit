@@ -22,6 +22,7 @@ class GitProcess {
 	final configuredPath:Null<String>;
 	final emptyHooksPath:Null<String>;
 	public var executable(default, null):Null<String>;
+	public var version(default, null):Null<GitVersion>;
 
 	public function new(processes:ProcessManager, scheduler:JobScheduler, ?configuredPath:String, ?emptyHooksPath:String) {
 		this.processes = processes;
@@ -46,6 +47,7 @@ class GitProcess {
 	}
 
 	public function probeVersion(generation:Int, complete:ScmJobResult<GitVersion>->Void):ScmJob<GitVersion> {
+		version = null;
 		var command:Null<ScmJob<GitCommandResult>> = null;
 		var job = new ScmJob<GitVersion>(generation, function() {
 			if (command != null) command.cancel();
@@ -69,10 +71,35 @@ class GitProcess {
 				complete(new ScmJobResult<GitVersion>(generation, null,
 					new ScmError("git_too_old", 'Git 2.25 or newer is required; found ${version}')));
 			} else {
+				this.version = version;
 				complete(new ScmJobResult<GitVersion>(generation, version));
 			}
 		}, false);
 		return job;
+	}
+
+	/** Starts the reusable, length-framed raw-object protocol after version validation. */
+	public function startBlobBatch(cwd:String, restricted:Bool):OwnedProcess {
+		if (executable == null || version == null || !version.supportsScm())
+			throw "Git must pass its version probe before reading blobs";
+		if (restricted && (emptyHooksPath == null || emptyHooksPath.length == 0))
+			throw "Restricted Git reads require an empty hooks directory";
+		var arguments:Array<String> = [];
+		if (restricted) {
+			arguments.push("-c"); arguments.push("core.fsmonitor=");
+			arguments.push("-c"); arguments.push("core.hooksPath=" + emptyHooksPath);
+		}
+		arguments.push("--no-pager");
+		arguments.push("-c"); arguments.push("color.ui=false");
+		arguments.push("--no-optional-locks");
+		arguments.push("cat-file"); arguments.push("--batch");
+		var environment:Map<String, String> = [];
+		environment.set("GIT_TERMINAL_PROMPT", "0");
+		environment.set("GIT_EDITOR", ":");
+		environment.set("GIT_LITERAL_PATHSPECS", "1");
+		environment.set("GIT_PAGER", "cat");
+		environment.set("LC_ALL", "C");
+		return processes.start(executable, arguments, cwd, environment);
 	}
 
 	static function locate(configuredPath:Null<String>, developerDirectory:Null<String>):Null<String> {

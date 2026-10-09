@@ -60,7 +60,7 @@ Adapt class names to the existing abstractions when implementing
 
 ## M17.1 — Model, provider interface and Git core
 
-- [ ] VCS-neutral model:
+- [x] VCS-neutral model:
   - `ScmRepository`, `ScmSnapshot` (Int64 revision), `ScmHead` (branch or
     detached commit, upstream, ahead/behind, upstream gone, and an operation:
     none, merge, rebase, cherry-pick, revert or bisect);
@@ -69,19 +69,19 @@ Adapt class names to the existing abstractions when implementing
   - `ScmFeatures` flags;
   - an `ScmOperation` enum: stage, unstage, discard, commit (message, amend),
     stage patch, checkout, create branch, fetch, pull, push.
-- [ ] `ScmProvider` / `ScmRepositoryHandle`: detect, refresh, original
+- [x] `ScmProvider` / `ScmRepositoryHandle`: detect, refresh, original
   content at an `ScmRef` (HEAD, index, commit, conflict stage 1–3), apply and
   dispose. Every call returns a cancellable job; results carry the generation
   they were started under.
-- [ ] `FakeScmProvider` for tests: scripted snapshots, latency and failures.
-- [ ] Porcelain v2 parser (`GitStatusParser`) over `-z` output. It must handle:
+- [x] `FakeScmProvider` for tests: scripted snapshots, latency and failures.
+- [x] Porcelain v2 parser (`GitStatusParser`) over `-z` output. It must handle:
   - branch headers, including an unborn branch, a detached HEAD, no upstream
     and a gone upstream;
   - ordinary `1`, renamed or copied `2` with score, unmerged `u` (all seven XY
     codes), untracked `?` and ignored `!` entries;
   - submodule state fields;
   - paths containing spaces, newlines, non-UTF-8 bytes and leading dashes.
-- [ ] `GitProcess` runner over `ProcessManager`:
+- [x] `GitProcess` runner over `ProcessManager`:
   - standard environment: `GIT_TERMINAL_PROMPT=0`, `GIT_EDITOR=:`,
     `GIT_LITERAL_PATHSPECS=1`, `--no-optional-locks` on reads, no color;
   - bounded stdout and stderr capture;
@@ -93,8 +93,14 @@ Adapt class names to the existing abstractions when implementing
   - a stable error mapping: `git_unavailable`, `git_too_old`,
     `not_a_repository`, `lock_contention` (retryable), `operation_failed`
     (with a bounded stderr excerpt) and `untrusted`.
-- [ ] `GitBlobReader`: one long-lived `git cat-file --batch --filters`
-  process per repository, fed `<rev>:<path>` lines over stdin.
+- [x] `GitBlobReader`: one long-lived `git cat-file --batch` process per
+  repository, fed `<rev>:<path>` lines over stdin. It returns raw object bytes
+  so the header size remains a reliable response boundary.
+  `--filters` is deferred: Git documents the batch body as `objectsize` bytes,
+  but size-changing smudge filters (including Windows CRLF conversion) emit a
+  different byte count without a second length field. Using that output would
+  make the next response boundary ambiguous. Text consumers must normalize
+  line endings where needed; filter-aware reads need a future framed protocol.
   - Responses are parsed incrementally from the `<oid> <type> <size>` header,
     and `missing` / `ambiguous` replies map to errors.
   - Requests are queued in FIFO order; a cancelled request's bytes are
@@ -102,11 +108,12 @@ Adapt class names to the existing abstractions when implementing
   - Restart after a process exit or protocol error, after the repository
     config changes (`config` / `commondir` watch), and after an idle timeout
     (default 60 s).
-  - Restricted mode uses `--batch` without `--filters`.
+  - Restricted mode disables fsmonitor and hooks; neither mode runs content
+    filters in the length-framed batch reader.
   - Binary detection (NUL in the first 8000 bytes, as Git does) and a
     configurable size cap. Oversized blobs are skipped by their header size
     before reading.
-- [ ] `LineDiff`: Myers O(ND) line diff with a cost budget. Past the budget
+- [x] `LineDiff`: Myers O(ND) line diff with a cost budget. Past the budget
   it degrades to one whole-range hunk. It is step-sliced for `JobScheduler`
   and outputs added, modified and deleted hunks with old and new ranges.
 

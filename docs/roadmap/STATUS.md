@@ -35,9 +35,26 @@ stdout-limit and non-repository error mapping, raw porcelain NUL preservation,
 and cancellation with no leaked process. Exosuite's graphical target compiled
 and launched on Windows with a responsive `exosuit` window.
 
-Next: implement the long-lived batched blob reader, including partial writes,
-incremental responses, cancellation, restart and size limits. Then finish M17.1's
-Git fixtures before beginning service discovery and trust.
+`GitBlobReader` now uses one long-lived `git cat-file --batch` process per
+repository, with partial-write support, incremental response parsing, FIFO
+requests, cancellation draining, raw-byte size caps, binary detection, config
+restart, process-exit recovery, and a 60-second idle-expiry hook. The focused
+Windows run passed 1,000 sequential reads on one process, missing and ambiguous
+objects, oversized blobs, binary detection, interleaved cancellation, config
+restart, idle expiry, process exit mid-response, and restricted-mode reads.
+`LineDiff` now normalizes CRLF to LF for comparisons; its 10,000-line/50-edit
+run completed in 3 ms with a 0.144 ms maximum observed slice.
+
+Implementation deviation: a real Git-for-Windows run showed that
+`cat-file --batch --filters` reports the raw object size but can emit a larger
+filtered body (CRLF conversion). Since the batch protocol has no transformed
+length field, the next response boundary would be ambiguous. The reader uses
+raw, length-framed blobs instead, and line comparisons normalize CRLF. External
+smudge filters and LFS output remain unsupported until Git offers a framed
+filtered response.
+
+Next: begin M17.2 repository discovery, refresh watches and local trust
+integration.
 
 ## Windows workspace startup and filesystem backend, 2026-10-08
 

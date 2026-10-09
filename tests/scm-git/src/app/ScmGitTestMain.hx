@@ -25,13 +25,43 @@ import scm.fake.FakeScmProvider;
 import scm.fake.FakeScmRepositoryScript;
 import scm.git.GitStatusParser;
 import scm.git.GitProcess;
+import scm.git.GitBlobReader;
 import scm.git.GitVersion;
 import process.ProcessManager;
 import sys.FileSystem;
+import sys.io.File;
 
 class ScmGitTestMain {
+	static var lastMaxDiffSliceMillis:Float = 0;
+
 	static function require(condition:Bool, message:String):Void {
 		if (!condition) throw message;
+	}
+
+	static function pump(scheduler:JobScheduler, complete:Void->Bool, message:String, timeout:Float = 10.0):Void {
+		var deadline = Sys.time() + timeout;
+		while (!complete() && Sys.time() < deadline) { scheduler.update(32); Sys.sleep(0.001); }
+		require(complete(), message);
+	}
+
+	static function normalizeNewlines(value:String):String return StringTools.replace(value, "\r\n", "\n");
+
+	static function readBlob(reader:GitBlobReader, scheduler:JobScheduler, reference:String, path:Bytes, generation:Int):ScmJobResult<ScmBlob> {
+		var result:Null<ScmJobResult<ScmBlob>> = null;
+		var job = reader.read(reference, path, generation, value -> result = value);
+		pump(scheduler, () -> result != null, "Git blob request timed out");
+		if (result == null) throw "Git blob result disappeared";
+		require(job.complete, "Git blob job did not finish before its result callback");
+		return result;
+	}
+
+	static function readBlobObject(reader:GitBlobReader, scheduler:JobScheduler, object:String, generation:Int):ScmJobResult<ScmBlob> {
+		var result:Null<ScmJobResult<ScmBlob>> = null;
+		var job = reader.readObject(object, generation, value -> result = value);
+		pump(scheduler, () -> result != null, "Git object blob request timed out");
+		if (result == null) throw "Git object blob result disappeared";
+		require(job.complete, "Git object blob job did not finish before its result callback");
+		return result;
 	}
 
 	static function record(bytes:BytesBuffer, value:String):Void {
@@ -46,10 +76,17 @@ class ScmGitTestMain {
 
 	static function runDiff(oldText:String, newText:String, maxCost:Int = LineDiff.DEFAULT_MAX_COST, sliceCost:Int = LineDiff.DEFAULT_SLICE_COST):Array<LineDiffHunk> {
 		var result:Null<Array<LineDiffHunk>> = null, task = new LineDiff(oldText, newText, value -> result = value, maxCost, sliceCost),
-			scheduler = new JobScheduler();
+			scheduler = new JobScheduler(), maxSliceMillis = 0.0;
 		scheduler.schedule(task);
 		var steps = 0;
-		while (scheduler.activeCount() > 0 && steps < 100000) { scheduler.update(1); steps++; }
+		while (scheduler.activeCount() > 0 && steps < 100000) {
+			var sliceStarted = Sys.time();
+			scheduler.update(1);
+			var elapsed = (Sys.time() - sliceStarted) * 1000.0;
+			if (elapsed > maxSliceMillis) maxSliceMillis = elapsed;
+			steps++;
+		}
+		lastMaxDiffSliceMillis = maxSliceMillis;
 		require(task.finished && result != null && steps < 100000, "line diff did not finish as a scheduled job");
 		return result;
 	}
@@ -252,6 +289,121 @@ class ScmGitTestMain {
 		require(processManager.activeCount() == 1 && waitingJob.cancel(), "Git process cancellation did not own the started process");
 		require(processManager.activeCount() == 0 && !processCallback && waitingJob.cancelled,
 			"cancelling Git work leaked a process or published a stale result");
+
+		var blobReader = new GitBlobReader(processManager, gitScheduler, git, repositoryRoot, false, 4096),
+			smallPath = Bytes.ofString("src/scm/ScmBlob.hx"), smallBytes = File.getBytes(repositoryRoot + "/src/scm/ScmBlob.hx"),
+			firstBlob = readBlob(blobReader, gitScheduler, "HEAD", smallPath, 60);
+		require(firstBlob.error == null && firstBlob.value != null
+			&& normalizeNewlines(firstBlob.value.bytes.toString()) == normalizeNewlines(smallBytes.toString()) && !firstBlob.value.binary,
+			"cat-file batch did not return the raw text blob");
+		var sharedProcessId = blobReader.activeProcessId();
+		require(sharedProcessId > 0 && processManager.activeCount() == 1, "blob reader did not retain its batch process");
+		for (index in 0...1000) {
+			var repeated = readBlob(blobReader, gitScheduler, "HEAD", smallPath, 61 + index);
+			require(repeated.value != null && repeated.error == null
+				&& normalizeNewlines(repeated.value.bytes.toString()) == normalizeNewlines(smallBytes.toString())
+				&& blobReader.activeProcessId() == sharedProcessId && processManager.activeCount() == 1,
+				'blob read $index did not reuse one process or preserve its bytes');
+		}
+		var objectNamesResult:Null<ScmJobResult<scm.git.GitCommandResult>> = null;
+		git.run(["cat-file", "--batch-all-objects", "--batch-check=%(objectname) %(objecttype)"], repositoryRoot, 57,
+			value -> objectNamesResult = value);
+		pump(gitScheduler, () -> objectNamesResult != null, "Git object-prefix fixture did not finish");
+		var objectNames = objectNamesResult;
+		if (objectNames == null || objectNames.value == null) throw "Git object-prefix fixture returned no ids";
+		var seenPrefixes:Map<String, Bool> = [], ambiguousPrefix:Null<String> = null;
+		for (objectLine in objectNames.value.stdout.toString().split("\n")) {
+			var fields = StringTools.trim(objectLine).split(" ");
+			if (fields.length != 2 || fields[1] != "commit") continue;
+			var candidate = fields[0];
+			if (candidate.length < 4) continue;
+			var prefix = candidate.substr(0, 4);
+			if (seenPrefixes.exists(prefix)) { ambiguousPrefix = prefix; break; }
+			seenPrefixes.set(prefix, true);
+		}
+		if (ambiguousPrefix != null) {
+			var ambiguousBlob = readBlobObject(blobReader, gitScheduler, ambiguousPrefix, 58);
+			require(ambiguousBlob.error != null && ambiguousBlob.error.code == "ambiguous_object",
+				"ambiguous Git object prefix did not map to its stable error");
+			var ambiguousPath = readBlob(blobReader, gitScheduler, ambiguousPrefix, Bytes.ofString("src/scm/ScmBlob.hx"), 59);
+			require(ambiguousPath.error != null && ambiguousPath.error.code == "ambiguous_object",
+				"ambiguous revision in a path request was mistaken for a missing file");
+		}
+		var binaryBlob = readBlob(blobReader, gitScheduler, "HEAD", Bytes.ofString("graphical/assets/icons/exosuit-16.png"), 1061);
+		require(binaryBlob.value != null && binaryBlob.value.binary && binaryBlob.value.bytes.compare(File.getBytes(repositoryRoot + "/graphical/assets/icons/exosuit-16.png")) == 0,
+			"NUL in the first 8000 bytes did not mark a blob as binary");
+		var missingBlob = readBlob(blobReader, gitScheduler, "HEAD", Bytes.ofString("scm/no-such-file"), 1062);
+		require(missingBlob.error != null && missingBlob.error.code == "missing_object"
+			&& blobReader.activeProcessId() == sharedProcessId, "missing blob was not mapped without restarting the reader");
+		var largeBlob = readBlob(blobReader, gitScheduler, "HEAD", Bytes.ofString("docs/roadmap/STATUS.md"), 1063);
+		require(largeBlob.error != null && largeBlob.error.code == "blob_too_large"
+			&& blobReader.activeProcessId() == sharedProcessId, "oversized blob was not drained by its header size");
+		var afterOversized = readBlob(blobReader, gitScheduler, "HEAD", smallPath, 1064);
+		require(afterOversized.value != null && afterOversized.value.bytes.compare(smallBytes) == 0,
+			"a read after an oversized blob was misaligned");
+
+		var blobCancelledCallback = false, cancelledBlob = blobReader.read("HEAD", Bytes.ofString("docs/roadmap/STATUS.md"), 1065,
+			_ -> blobCancelledCallback = true);
+		gitScheduler.update(1);
+		var followingBlob:Null<ScmJobResult<ScmBlob>> = null;
+		blobReader.read("HEAD", smallPath, 1066, value -> followingBlob = value);
+		require(cancelledBlob.cancel(), "in-flight blob read refused cancellation");
+		pump(gitScheduler, () -> followingBlob != null, "reader did not drain a cancelled blob before serving the next request");
+			require(!blobCancelledCallback && followingBlob != null && followingBlob.error == null && followingBlob.value != null
+			&& normalizeNewlines(followingBlob.value.bytes.toString()) == normalizeNewlines(smallBytes.toString())
+			&& blobReader.activeProcessId() == sharedProcessId,
+			"cancelled response bytes were misattributed or the reader process was not reused");
+
+		var interrupted:Null<ScmJobResult<ScmBlob>> = null;
+		blobReader.read("HEAD", Bytes.ofString("docs/roadmap/STATUS.md"), 1067, value -> interrupted = value);
+		gitScheduler.update(1);
+		blobReader.configurationChanged();
+		pump(gitScheduler, () -> interrupted != null, "config change did not retire the active blob request");
+		var interruptedResult = interrupted;
+		if (interruptedResult == null) throw "config change result disappeared";
+		require(interruptedResult.error != null && interruptedResult.error.retryable && processManager.activeCount() == 0,
+			"repository config change did not return a retryable error and close the old process");
+		var restarted = readBlob(blobReader, gitScheduler, "HEAD", smallPath, 1068);
+		var restartedProcessId = blobReader.activeProcessId();
+		require(restarted.value != null && normalizeNewlines(restarted.value.bytes.toString()) == normalizeNewlines(smallBytes.toString()) && restartedProcessId > 0
+			&& restartedProcessId != sharedProcessId, "reader did not start a fresh process after a config change");
+		require(blobReader.expireIdle(Sys.time() + GitBlobReader.DEFAULT_IDLE_TIMEOUT_SECONDS + 1)
+			&& processManager.activeCount() == 0, "idle timeout did not close the batch process");
+		var afterIdle = readBlob(blobReader, gitScheduler, "HEAD", smallPath, 1069);
+		require(afterIdle.value != null && normalizeNewlines(afterIdle.value.bytes.toString()) == normalizeNewlines(smallBytes.toString())
+			&& blobReader.activeProcessId() != restartedProcessId,
+			"blob reader did not restart after its idle timeout");
+		var interruptedByExit:Null<ScmJobResult<ScmBlob>> = null;
+		blobReader.read("HEAD", Bytes.ofString("docs/roadmap/STATUS.md"), 1070, value -> interruptedByExit = value);
+		gitScheduler.update(1);
+		processManager.shutdown();
+		gitScheduler.update(1);
+		pump(gitScheduler, () -> interruptedByExit != null, "reader did not report a process exit mid-response");
+		var exitResult = interruptedByExit;
+		if (exitResult == null) throw "process exit result disappeared";
+		require(exitResult.error != null && exitResult.error.retryable && processManager.activeCount() == 0,
+			"process exit mid-response did not yield a retryable error");
+		var afterExit = readBlob(blobReader, gitScheduler, "HEAD", smallPath, 1071);
+		require(afterExit.value != null && normalizeNewlines(afterExit.value.bytes.toString()) == normalizeNewlines(smallBytes.toString()),
+			"reader did not recover after its process exited");
+
+		blobReader.dispose();
+		require(processManager.activeCount() == 0, "disposing the blob reader leaked its owned process");
+
+		var hooksTempDirectory = Sys.getEnv("TEMP");
+		if (hooksTempDirectory == null || hooksTempDirectory.length == 0) hooksTempDirectory = Sys.getEnv("TMP");
+		if (hooksTempDirectory == null || hooksTempDirectory.length == 0) hooksTempDirectory = Sys.getCwd();
+		var hooksPath = FileSystem.fullPath(hooksTempDirectory + "/exosuit-scm-empty-hooks-" + Std.string(Std.int(Sys.time() * 1000000)));
+		FileSystem.createDirectory(hooksPath);
+		var restrictedGit = new GitProcess(processManager, gitScheduler, "", hooksPath), restrictedVersion:Null<ScmJobResult<GitVersion>> = null;
+		restrictedGit.probeVersion(1072, value -> restrictedVersion = value);
+		pump(gitScheduler, () -> restrictedVersion != null, "restricted Git version probe did not finish");
+		var restrictedReader = new GitBlobReader(processManager, gitScheduler, restrictedGit, repositoryRoot, true, 4096),
+			restrictedBlob = readBlob(restrictedReader, gitScheduler, "HEAD", smallPath, 1073);
+		require(restrictedBlob.value != null && restrictedBlob.error == null && processManager.activeCount() == 1,
+			"restricted raw batch reader did not return its blob");
+		restrictedReader.dispose();
+		FileSystem.deleteDirectory(hooksPath);
 		processManager.shutdown();
 
 		var diff = runDiff("a\nb\nc\nd\n", "a\nB\nc\ne\n", LineDiff.DEFAULT_MAX_COST, 1);
@@ -265,6 +417,8 @@ class ScmGitTestMain {
 			&& deleted[0].newStart == 1 && deleted[0].newCount == 0, "deleted hunk ranges were incorrect");
 		require(runDiff("a\n", "a").length == 1 && runDiff("same", "same").length == 0,
 			"line diff ignored a final-newline change or reported an identical document");
+		require(runDiff("a\r\nb\r\n", "a\nb\n").length == 0,
+			"line diff treated CRLF and LF as different content");
 		var fallback = runDiff("one\ntwo", "other\nlines", 1);
 		require(fallback.length == 1 && fallback[0].kind == LineDiffKind.Modified && fallback[0].oldStart == 0
 			&& fallback[0].oldCount == 2 && fallback[0].newStart == 0 && fallback[0].newCount == 2,
@@ -291,8 +445,9 @@ class ScmGitTestMain {
 		var largeMillis = (Sys.time() - started) * 1000.0;
 		require(largeHunks.length == 50 && reconstruct(largeOldText, largeNewText, largeHunks) == largeNewText,
 			"10,000-line scattered diff did not converge to its edits");
-		Sys.println('LINE_DIFF lines=10000 edits=50 elapsed_ms=${Std.int(largeMillis)}');
-		Sys.println("PASS: SCM model, porcelain v2 parser, fake provider, Git process runner and line diff");
+		require(lastMaxDiffSliceMillis < 4.0, 'LineDiff slice exceeded 4 ms: ${lastMaxDiffSliceMillis} ms');
+		Sys.println('LINE_DIFF lines=10000 edits=50 elapsed_ms=${Std.int(largeMillis)} max_slice_ms=${lastMaxDiffSliceMillis}');
+		Sys.println("PASS: SCM model, porcelain v2 parser, fake provider, Git process runner, blob reader and line diff");
 		return 0;
 	}
 }

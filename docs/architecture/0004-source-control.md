@@ -69,15 +69,20 @@ It runs `git` through `ProcessManager`, not libgit2 or a reimplementation.
 
 - Status comes from `git status --porcelain=v2 -z --branch`. The format is
   stable, NUL-delimited and locale-independent.
-- Original content comes from one long-lived `git cat-file --batch --filters`
-  process per repository, fed `<rev>:<path>` lines over stdin. The base text
-  then has the same line endings and smudge filters as the working tree. It
-  also avoids starting a process per file, which costs tens of milliseconds
-  on Windows. The reader is restarted after errors, when the repository
-  config changes, and after an idle timeout. Untrusted repositories use
-  `--batch` without filters; see section 6.
-- The user's config, credential helpers, hooks, worktrees, sparse checkout,
-  fsmonitor and LFS all keep working, and no native dependency is added.
+- Original content comes from one long-lived `git cat-file --batch` process
+  per repository, fed `<rev>:<path>` lines over stdin. It returns raw object
+  bytes, whose declared size frames each response, and avoids starting a
+  process per file, which costs tens of milliseconds on Windows. The reader
+  is restarted after errors, when the repository config changes, and after an
+  idle timeout. Text consumers normalize line endings where appropriate.
+  `--filters` cannot be safely framed: Git's batch header declares the object
+  size, while size-changing smudge filters (including Windows CRLF conversion)
+  can emit a different number of bytes without another length field. A future
+  filter-aware reader needs a framed protocol. Untrusted repositories still
+  disable fsmonitor and hooks; see section 6.
+- The user's config, credential helpers, hooks, worktrees, sparse checkout
+  and fsmonitor keep working, and no native dependency is added. Custom content
+  filters and LFS smudge output are not applied by the raw batch reader.
 - Pathspecs are passed literally (`GIT_LITERAL_PATHSPECS=1`, after `--`).
   Read operations use `--no-optional-locks` so they do not fight the user's
   own commands for `index.lock`. Prompts are disabled
