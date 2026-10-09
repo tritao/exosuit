@@ -68,11 +68,18 @@ class EditorViewTestMain {
 		require(preview.rows[0] == retainedPage, "unchanged minimap page rebuilt");
 		preview.update(largePreview, 9744, 9999);
 		require(preview.rows[255].line == 9999, "minimap page cannot reach the file end");
-		require(editor.MinimapModel.scrollTarget(0, 100, 1000, 200) == 0 &&
-			editor.MinimapModel.scrollTarget(100, 100, 1000, 200) == 800 &&
-			editor.MinimapModel.scrollTarget(50, 100, 1000, 200) == 400 &&
-			editor.MinimapModel.scrollTarget(50, 100, 50, 200) == 0,
-			"minimap navigation is not centered or clamped");
+		for (height in [0.0, 300.0, 700.0]) for (content in [0.0, 100.0, 1000.0, 10000.0, 1000000.0]) {
+			var mapping = new editor.MinimapGeometry(height, content, 200, 0.1);
+			require(mapping.scrollAt(-100) == 0, "minimap does not clamp above track");
+			if (mapping.thumbTravel > 0) {
+				require(mapping.scrollAt(height + 100) == mapping.scrollRange, "minimap cannot reach bottom");
+				for (fraction in [0.0, 0.2, 0.5, 0.9, 1.0]) {
+					var offset = mapping.scrollRange * fraction;
+					require(Math.abs(mapping.scrollAt(mapping.thumbTop(offset)) - offset) < 0.000001,
+						"minimap drawing and navigation disagree");
+				}
+			} else require(mapping.scrollAt(100) == 0, "non-scrollable minimap navigates");
+		}
 		var densePreview = new Document("dense.hx", [for (_ in 0...512)
 			[for (_ in 0...40) "x "].join("")].join("\n"), syntaxes);
 		preview.update(densePreview);

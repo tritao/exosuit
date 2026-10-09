@@ -888,8 +888,9 @@ class WorkspaceSmokeApp extends ExosuitApp {
 			ui.pointerDown(bounds.x + 30, bounds.y + y, 0);
 			ui.pointerUp(bounds.x + 30, bounds.y + y, 0);
 			var scale = 2.0 / (application.settings.current.fontSize * 1.4);
-			var expected = Math.max(0, Math.min(view.scrollController.contentHeight - view.scrollController.viewportHeight,
-				y / scale - view.scrollController.viewportHeight / 2));
+			var mapping = new editor.MinimapGeometry(bounds.height, view.scrollController.contentHeight,
+				view.scrollController.viewportHeight, scale);
+			var expected = mapping.scrollAt(y - mapping.thumbHeight / 2);
 			require(Math.abs(view.scrollController.offsetY - expected) < 0.01, "minimap click did not use wrapped content metrics");
 		}
 		if (frames == 4) {
@@ -898,7 +899,15 @@ class WorkspaceSmokeApp extends ExosuitApp {
 			ui.pointerDown(bounds.x + 30, bounds.y + 2, 0);
 			ui.pointerMove(bounds.x + 30, bounds.y + 150);
 			ui.pointerUp(bounds.x + 30, bounds.y + 150, 0);
-			require(view.scrollController.offsetY > 0, "minimap viewport drag did not scroll");
+			var mapping = new editor.MinimapGeometry(bounds.height, view.scrollController.contentHeight,
+				view.scrollController.viewportHeight, 2.0 / (application.settings.current.fontSize * 1.4));
+			require(Math.abs(mapping.thumbTop(view.scrollController.offsetY) - 148) < 0.01,
+				"minimap thumb drifted away from grabbed pointer position");
+			ui.pointerDown(bounds.x + 30, bounds.y + 150, 0);
+			ui.pointerMove(bounds.x + 30, bounds.y + 60);
+			ui.pointerUp(bounds.x + 30, bounds.y + 60, 0);
+			require(Math.abs(mapping.thumbTop(view.scrollController.offsetY) - 58) < 0.01,
+				"minimap reverse drag or re-grab lost pointer position");
 		}
 		frame.setViewport(frames == 5 ? 420 : 900, 600);
 		if (frames == 6) application.settings.current.minimapEnabled = false;

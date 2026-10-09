@@ -79,6 +79,7 @@
     "../src/editor/ExternalState.hx",
     "../src/editor/FoldRegion.hx",
     "../src/editor/Indentation.hx",
+    "../src/editor/MinimapGeometry.hx",
     "../src/editor/MinimapModel.hx",
     "../src/editor/SelectionSnapshot.hx",
     "../src/editor/SyntaxColorRange.hx",

@@ -18,6 +18,7 @@ import haxeon.ui.widgets.scroll.ScrollController;
 import haxeon.ui.widgets.text.TextEditorLayout;
 import editor.Document;
 import editor.MinimapModel;
+import editor.MinimapGeometry;
 
 /** Fixed right-hand preview sharing the editor's resolved paragraph positions. */
 class EditorMinimap implements View {
@@ -60,18 +61,13 @@ class EditorMinimap implements View {
 	static function color(value:Int, alpha:Float = 1):Color
 		return Color.fromBytes((value >>> 24) & 255, (value >>> 16) & 255, (value >>> 8) & 255, Std.int((value & 255) * alpha));
 
-	var dragMapOffset:Float = 0;
-
 	function mapScale():Float {
 		var layout = resolvedLayout;
 		return 2.0 / Math.max(1, layout == null ? 20 : layout.textStyle.fontSize * 1.4);
 	}
 
-	function mapOffset(height:Float):Float {
-		var scale = mapScale();
-		var travel = Math.max(0, scroll.contentHeight * scale - height);
-		var scrollTravel = Math.max(1, scroll.contentHeight - scroll.viewportHeight);
-		return travel * scroll.offsetY / scrollTravel;
+	function mapGeometry(height:Float):MinimapGeometry {
+		return new MinimapGeometry(height, scroll.contentHeight, scroll.viewportHeight, mapScale());
 	}
 
 	public function build(context:BuildContext):RenderNode {
@@ -90,7 +86,8 @@ class EditorMinimap implements View {
 			if (geometry.width <= 0 || geometry.height <= 0) return;
 			var height = geometry.height;
 			var scale = mapScale();
-			var offset = mapOffset(height);
+			var mapping = mapGeometry(height);
+			var offset = mapping.previewOffset(scroll.offsetY);
 			// Cache a page with a scroll margin, rather than compressing the whole file.
 			var tileTop = Math.floor(offset / 256) * 256;
 			var tileHeight = Math.ceil(height + 256);
@@ -113,15 +110,15 @@ class EditorMinimap implements View {
 			}
 			var previewImage = painting.image;
 			if (previewImage != null) canvas.drawImage(previewImage, new Rect(4, tileTop - offset, geometry.width - 8, tileHeight));
-			var top = scroll.offsetY * scale - offset;
-			var visible = Math.min(height, scroll.viewportHeight * scale);
+			var top = mapping.thumbTop(scroll.offsetY);
+			var visible = mapping.thumbHeight;
 			canvas.fillRectIfPositive(new Rect(0, top, geometry.width, Math.max(2, visible)), color(theme.scrollbar, 0.25));
 			canvas.fillRectIfPositive(new Rect(0, top, 2, Math.max(2, visible)), color(theme.scrollbar, 0.8));
 		});
 		var navigate = function(event:UiEvent) {
 			if (built.resolved == null) return;
-			var offset = dragging ? dragMapOffset : mapOffset(built.resolved.height);
-			var target = (event.localY + offset - (dragging ? dragOffset : scroll.viewportHeight * mapScale() / 2)) / mapScale();
+			var mapping = mapGeometry(built.resolved.height);
+			var target = mapping.scrollAt(event.localY - dragOffset);
 			scroll.jumpTo(scroll.offsetX, target);
 			context.commands.refresh();
 			event.preventDefault();
@@ -129,15 +126,14 @@ class EditorMinimap implements View {
 		};
 		built.on(UiEventKind.PointerDown, function(event) {
 			if (event.button != 0 || built.resolved == null) return;
-			var offset = mapOffset(built.resolved.height);
-			var top = scroll.offsetY * mapScale() - offset;
-			var visible = scroll.viewportHeight * mapScale();
-			if (event.localY >= top && event.localY <= top + visible) dragOffset = event.localY - top;
+			var mapping = mapGeometry(built.resolved.height);
+			var top = mapping.thumbTop(scroll.offsetY);
+			if (event.localY >= top && event.localY <= top + mapping.thumbHeight)
+				dragOffset = event.localY - top;
 			else {
+				dragOffset = mapping.thumbHeight / 2;
 				navigate(event);
-				dragOffset = event.localY + offset - scroll.offsetY * mapScale();
 			}
-			dragMapOffset = offset;
 			dragging = true;
 			event.capturePointer();
 			event.preventDefault();

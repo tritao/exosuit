@@ -79,13 +79,6 @@ class MinimapModel {
 		}
 		return {width: MAX_COLUMNS, height: pixelHeight, pixels: pixels};
 	}
-
-	/** Center a viewport on a map coordinate; safe for empty/short documents. */
-	public static function scrollTarget(y:Float, mapHeight:Float, contentHeight:Float, viewportHeight:Float):Float {
-		if (mapHeight <= 0 || contentHeight <= viewportHeight) return 0;
-		return Math.max(0, Math.min(contentHeight - viewportHeight,
-			y / mapHeight * contentHeight - viewportHeight / 2));
-	}
 }
 
 typedef MinimapRow = {var line:Int; var spans:Array<MinimapSpan>;}
