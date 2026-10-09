@@ -12,4 +12,5 @@ endif()
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../haxeon/vendor/nativekit" nativekit)
 set_target_properties(nativekit PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${HAXEON_NATIVE_OUTPUT_DIR}" RUNTIME_OUTPUT_DIRECTORY "${HAXEON_NATIVE_OUTPUT_DIR}")
 add_custom_target(exosuit_agent_native DEPENDS nativekit
- COMMAND "${CMAKE_COMMAND}" -E touch "${HAXEON_NATIVE_OUTPUT_DIR}/exosuit-agent-native.hdll")
+ COMMAND "${CMAKE_COMMAND}" -E touch "${HAXEON_NATIVE_OUTPUT_DIR}/exosuit-agent.hdll"
+ BYPRODUCTS "${HAXEON_NATIVE_OUTPUT_DIR}/exosuit-agent.hdll")
