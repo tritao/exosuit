@@ -2,6 +2,9 @@ package app;
 
 import haxeon.platform.NativeKitRuntime;
 import nativekit.ffi.NativeKit;
+import haxe.io.Path;
+import sys.FileSystem;
+import sys.io.AtomicFile;
 import workspace.transport.NativeRpcHub;
 import workspace.transport.WorkspaceRpcServer;
 import workspace.transport.SessionPreflight;
@@ -24,6 +27,14 @@ class AgentMain {
 		if (args.length > 0 && args[0] == "--manager") {
 			Sys.exit(AgentManager.run(args.slice(1)));
 			return;
+		}
+		var stableLease:Null<String> = null;
+		var stableBundle = Sys.getEnv("EXOSUIT_STABLE_BUNDLE");
+		if (stableBundle != null && stableBundle.length > 0) {
+			stableBundle = FileSystem.fullPath(stableBundle);
+			if (!FileSystem.isDirectory(stableBundle)) throw "Stable workspace-agent snapshot is missing";
+			stableLease = Path.join([stableBundle, ".running-daemon-" + Sys.getPid()]);
+			AtomicFile.create(stableLease, Std.string(Sys.getPid()) + "\n");
 		}
 		if (args.length < 4 || args.length > 9)
 			throw "Usage: exosuit-agent PRIVATE_SOCKET LOOPBACK_WS_PORT TOKEN_FILE SEED_EPOCH [DATABASE [WORKSPACE_ROOT [INSTANCE [IDLE_MILLISECONDS [RELAY_BOOTSTRAP]]]]]";
@@ -183,5 +194,7 @@ class AgentMain {
 		runtime.dispose();
 		Sys.println(restarting ? "STOPPED: exosuit-agent update" : "STOPPED: exosuit-agent idle");
 		Sys.stdout().flush();
+		if (stableLease != null && FileSystem.exists(stableLease))
+			try FileSystem.deleteFile(stableLease) catch (_:Dynamic) {}
 	}
 }

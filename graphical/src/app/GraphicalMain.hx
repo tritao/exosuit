@@ -49,8 +49,9 @@ class GraphicalMain {
 				openPaths.push(argument);
 		}
 		var host = new DesktopUiHostOptions();
-		host.applicationId = "Exosuit.Desktop";
-		host.title = "exosuit";
+		var stableChannel = Sys.getEnv("EXOSUIT_CHANNEL") == "stable";
+		host.applicationId = stableChannel ? "Exosuit.Stable" : "Exosuit.Desktop";
+		host.title = stableChannel ? "Exosuit Stable" : "exosuit";
 		host.icons = ApplicationIcons.create();
 		host.customTitlebar = true;
 		host.width = 1280;

@@ -121,6 +121,27 @@ Selection and Reindent Document are available in Commands for Haxe files; each
 changes leading indentation as one undoable operation, preserving selections
 and multiline literal/comment contents. Opening a file never rewrites whitespace.
 
+## Local stable build
+
+Save the current host build outside the disposable build directories, then launch
+it without rebuilding from the checkout:
+
+```sh
+python scripts/stable.py save
+python scripts/stable.py launch
+python scripts/stable.py rollback
+python scripts/stable.py status
+```
+
+Snapshots are stored under the Git-ignored `.local/stable/<platform>/` directory.
+Stable opens with a separate title, settings and workspace-agent state. Run `save`
+after building the app and agent; each snapshot includes its own language-server
+launcher. The tool retains the current and previous snapshots and removes older
+ones only after their app, language server and workspace agent have stopped.
+On Windows, taskbar pins use the promoted launcher and icon under the stable
+directory, so reopening restores the stable environment and follows the current
+snapshot after saves or rollbacks.
+
 The graphical application builds from `graphical/haxeon.json` (entry
 `app.GraphicalMain`). Headless tests build from `haxeon.json` (entry
 `app.Main`); see `scripts/test.sh` for the test suite.

@@ -147,8 +147,10 @@ class AgentManager {
 
 	static function stateDirectory(options:ManagerOptions):String {
 		if (options.stateDir != null) return options.stateDir;
-		var base:String;
-		if (Sys.systemName() == "Windows") {
+		var stateHome = nonempty(Sys.getEnv("EXOSUIT_AGENT_STATE_HOME")), base:String;
+		if (stateHome != null) {
+			base = Path.join([stateHome, "workspaces"]);
+		} else if (Sys.systemName() == "Windows") {
 			var local = nonempty(Sys.getEnv("LOCALAPPDATA"));
 			if (local == null) local = nonempty(Sys.getEnv("APPDATA"));
 			if (local == null) local = Path.join([Sys.getEnv("USERPROFILE") == null ? Sys.getCwd() : Sys.getEnv("USERPROFILE"), "AppData", "Local"]);
@@ -164,8 +166,9 @@ class AgentManager {
 
 	static function absoluteStatePath(path:String):String {
 		// fullPath uses realpath on POSIX, which fails before a new state directory exists.
-		return FileSystem.exists(path) ? FileSystem.fullPath(path)
-			: Path.normalize(Path.isAbsolute(path) ? path : Path.join([Sys.getCwd(), path]));
+		// Keep separators identical before and after creation: this path also identifies the socket.
+		return Path.normalize(FileSystem.exists(path) ? FileSystem.fullPath(path)
+			: Path.isAbsolute(path) ? path : Path.join([Sys.getCwd(), path]));
 	}
 
 	static function ensureStateDirectory(directory:String):Void {
@@ -622,6 +625,7 @@ class AgentManager {
 			Sys.stderr().flush();
 			return 3;
 		}
+		var stableLease:Null<String> = null;
 		AgentManagerNative.installStopSignals();
 		var generation = options.generation == null ? "" : options.generation;
 		var endpointPath = Path.join([directory, "endpoint.json"]);
@@ -639,6 +643,13 @@ class AgentManager {
 		var pending = "";
 		var exitCode = 0;
 		try {
+			var stableBundle = nonempty(Sys.getEnv("EXOSUIT_STABLE_BUNDLE"));
+			if (stableBundle != null) {
+				stableBundle = FileSystem.fullPath(stableBundle);
+				if (!FileSystem.isDirectory(stableBundle)) throw "Stable workspace-agent snapshot is missing";
+				stableLease = Path.join([stableBundle, ".running-agent-" + Sys.getPid()]);
+				AtomicFile.create(stableLease, Std.string(Sys.getPid()) + "\n");
+			}
 			if (generation.length == 0) generation = AgentManagerNative.randomToken().substr(0, 32);
 			prepareLog(logPath);
 			ensureIdentity(identityPath, options.root);
@@ -734,7 +745,9 @@ class AgentManager {
 			try FileSystem.deleteFile(relayBootstrap) catch (_:Dynamic) {}
 		try AgentManagerNative.releaseLock(lock) catch (_:Dynamic) { exitCode = 1; }
 		if (restartRequested && exitCode == 0)
-			return startDetached(options, directory);
+			exitCode = startDetached(options, directory);
+		if (stableLease != null && FileSystem.exists(stableLease))
+			try FileSystem.deleteFile(stableLease) catch (_:Dynamic) { exitCode = 1; }
 		return exitCode;
 	}
 
@@ -785,6 +798,8 @@ class AgentManager {
 		var environment = new Map<String, String>();
 		environment.set("EXOSUIT_AGENT_BUILD_ID", agentBuildId());
 		environment.set("EXOSUIT_AGENT_MANAGED_UPDATES", Sys.getEnv("EXOSUIT_AGENT_MANAGED_UPDATES") == "0" ? "0" : "1");
+		var stableBundle = nonempty(Sys.getEnv("EXOSUIT_STABLE_BUNDLE"));
+		if (stableBundle != null) environment.set("EXOSUIT_STABLE_BUNDLE", stableBundle);
 		var descriptor = AgentManagerNative.lockDescriptor(lock);
 		if (descriptor >= 0) environment.set("EXOSUIT_AGENT_LOCK_FD", Std.string(descriptor));
 		if (nonempty(Sys.getEnv("EXOSUIT_CODEX_PROXY_LAUNCHER")) == null) {

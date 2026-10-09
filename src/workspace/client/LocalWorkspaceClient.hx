@@ -535,6 +535,11 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
       for (key => value in environment)
         result.set(key, value);
     result.set("EXOSUIT_AGENT_LAUNCHER", launcher);
+    for (key in ["EXOSUIT_AGENT_STATE_HOME", "EXOSUIT_AGENT_MANAGED_UPDATES", "EXOSUIT_STABLE_BUNDLE"])
+      if (!result.exists(key)) {
+        var inheritedValue = Sys.getEnv(key);
+        if (inheritedValue != null && inheritedValue.length > 0) result.set(key, inheritedValue);
+      }
 
     var launcherDirectory = haxe.io.Path.directory(FileSystem.fullPath(launcher));
     var nativeRoot = haxe.io.Path.join([launcherDirectory, "native"]);

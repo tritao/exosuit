@@ -22,6 +22,8 @@ under `$XDG_STATE_HOME/exosuit/workspaces/ROOT_HASH` on Linux or
 `%LOCALAPPDATA%\Exosuit\workspaces\ROOT_HASH` on Windows; `--state-dir DIRECTORY`
 overrides that location. State files are restricted to the current user. The
 default `--port 0` asks the OS for an available loopback port.
+`EXOSUIT_AGENT_STATE_HOME` overrides the parent of the per-workspace directories,
+allowing local stable builds to keep their catalogs separate from development.
 
 The manager holds an exclusive lifetime lock and returns exit 3
 `workspace_in_use` for a duplicate start. On POSIX the daemon inherits the lock;

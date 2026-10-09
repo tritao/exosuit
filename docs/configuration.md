@@ -17,6 +17,10 @@ The user file is `settings.json` in the existing application configuration direc
 
 `PRAGTICAL_PORTABLE` overrides both configuration and state directories. Session,
 recovery and other workspace state retain their existing storage formats and locations.
+The workspace agent also accepts `EXOSUIT_AGENT_STATE_HOME` as the parent directory
+for per-workspace state, which local stable builds use to keep catalogs separate.
+When `languages/haxeon/command` is unset, `EXOSUIT_HAXEON_LSP_COMMAND` can supply
+the language-server argv as a JSON string array; an explicit setting takes precedence.
 
 ```json
 {
