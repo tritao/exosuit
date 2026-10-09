@@ -19,6 +19,7 @@ import haxeon.ui.widgets.layout.Row;
 import haxeon.ui.widgets.overlays.MenuItem;
 import haxeon.ui.widgets.scroll.ScrollView;
 import haxeon.ui.widgets.text.Text;
+import haxeon.ui.widgets.text.MiddleEllipsisText;
 import haxeon.ui.widgets.text.TextField;
 import workspace.client.WorkspaceAgentClient;
 import workspace.client.CodexPermissions;
@@ -291,17 +292,31 @@ class CodexSessionPanel implements View {
       for (item in items) {
         var key = item.turn + ":" + item.id;
         var reasoning = item.kind == "reasoning";
+        var command = item.kind == "commandExecution";
         if (reasoning && item.state == "completed" && StringTools.trim(item.text + item.detail) == "" && !item.truncated) continue;
         var tool = item.kind != "agentMessage" && item.kind != "userMessage";
         var detail = item.detail;
         var message:Array<KeyedView> = [];
-        if (reasoning) message.push(new KeyedView("reasoning-" + key,
+        if (command) {
+          var summary = ~/\s+/g.replace(StringTools.trim(item.text), " ");
+          var commandStyle = new LayoutStyle();
+          commandStyle.width = LayoutAxis.grow();
+          commandStyle.childGap = 8;
+          message.push(new KeyedView("command-" + key, new Row("codex-command-" + key, [
+            new KeyedView("summary", new MiddleEllipsisText("summary",
+              item.title + " · " + item.state + (summary == "" ? "" : " · " + summary), false)),
+            new KeyedView("toggle", new Button(expanded.get(key) == true ? "Hide details" : "Show details", null, function() {
+              expanded.set(key, expanded.get(key) != true);
+              frame();
+            }))
+          ], commandStyle)));
+        } else if (reasoning) message.push(new KeyedView("reasoning-" + key,
           new Button((expanded.get(key) == true ? "Hide reasoning" : "Show reasoning") + (item.state == "completed" ? "" : " · " + item.state), null, function() {
             expanded.set(key, expanded.get(key) != true);
             frame();
           })));
         else message.push(new KeyedView("title-" + key, new Text(item.title + (tool ? " · " + item.state : ""), null, tokens.mutedText)));
-        if (item.text != "" && (!reasoning || expanded.get(key) == true)) {
+        if (item.text != "" && ((!reasoning && !command) || expanded.get(key) == true)) {
           if (item.kind == "agentMessage") {
             var rendered = markdown.get(key);
             if (rendered == null) { rendered = new CodexMarkdownView(item.text, editorPalette); markdown.set(key, rendered); }
@@ -310,7 +325,8 @@ class CodexSessionPanel implements View {
           } else message.push(new KeyedView("text-" + key, paragraph(item.text)));
         }
         if (detail != "" && reasoning && expanded.get(key) == true) message.push(new KeyedView("detail-" + key, paragraph(detail)));
-        if (detail != "" && !reasoning) {
+        if (detail != "" && command && expanded.get(key) == true) message.push(new KeyedView("detail-" + key, paragraph(detail)));
+        if (detail != "" && !reasoning && !command) {
           message.push(new KeyedView("toggle-" + key,
             new Button(expanded.get(key) == true ? "Hide details" : "Show details", null, function() {
             expanded.set(key, expanded.get(key) != true);
@@ -319,7 +335,7 @@ class CodexSessionPanel implements View {
           )));
           if (expanded.get(key) == true) message.push(new KeyedView("detail-" + key, paragraph(detail)));
         }
-        if (item.truncated) message.push(new KeyedView(
+        if (item.truncated && (!command || expanded.get(key) == true)) message.push(new KeyedView(
           "truncated-" + key,
           paragraph("This item is truncated in the current view.")
         ));
