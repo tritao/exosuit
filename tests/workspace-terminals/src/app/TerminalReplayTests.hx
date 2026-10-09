@@ -32,18 +32,20 @@ private class ReplayFixture {
   public final session:TerminalSession;
   var server:RpcConnection;
   public var snapshots = 0;
+  public var openedColumns = 0;
+  public var openedRows = 0;
   public var replayRequests = 0;
   public var controller = true;
   public var state = "running";
   public var corrupt = false;
   final legacy:Bool;
-  public function new(legacy:Bool = false, limit:Int = 65536) {
+  public function new(legacy:Bool = false, limit:Int = 65536, requireGeometry:Bool = false) {
     this.legacy = legacy;
     emulator = Emulator.open(80, 24, 1000, "xterm-256color", false);
     log = new TerminalReplayLog(80, 24, limit);
     endpoint = new ReplayEndpoint(null);
     connect();
-    backend = new RpcTerminalBackend(function() return endpoint, "fixture", "/fixture", false);
+    backend = new RpcTerminalBackend(function() return endpoint, "fixture", "/fixture", false, null, null, false, requireGeometry);
     session = new TerminalSession(backend, Emulator.open(80, 24, 1000, "xterm-256color", false), false);
   }
   function info():TerminalInfo return {id:"fixture", cwd:"/fixture", state:state, exitCode:0,
@@ -54,7 +56,7 @@ private class ReplayFixture {
     var pair = MemoryTransport.pair(), clock = function() return Sys.time() * 1000;
     endpoint.connection = new RpcConnection(pair.client, clock);
     server = new RpcConnection(pair.server, clock);
-    server.register(WorkspaceTerminalProtocol.OPEN, function(_, c) c.respond(info()));
+    server.register(WorkspaceTerminalProtocol.OPEN, function(r, c) { openedColumns = r.columns; openedRows = r.rows; c.respond(info()); });
     server.register(WorkspaceTerminalProtocol.RESIZE, function(r, c) { resize(r.columns, r.rows); c.respond(info()); });
     server.register(WorkspaceTerminalProtocol.SET_CONTROL, function(_, c) c.respond(info()));
     if (!legacy) server.register(WorkspaceTerminalProtocol.REPLAY, function(r, c) {
@@ -83,8 +85,9 @@ private class ReplayFixture {
     emulator.resize(columns, rows);
     log.geometry(columns, rows);
   }
-  public function step():Void {
-    session.pollEvents(); endpoint.connection.poll(); server.poll(); endpoint.connection.poll(); session.pollEvents();
+  public function step(apply:Bool = true):Void {
+    session.pollEvents(); endpoint.connection.poll(); server.poll(); endpoint.connection.poll();
+    if (apply) session.pollEvents();
   }
   public function pump():Void {
     for (_ in 0...24) { step(); Sys.sleep(0.005); }
@@ -108,6 +111,31 @@ class TerminalReplayTests {
     return ac.column == bc.column && ac.row == bc.row && ac.mode == bc.mode;
   }
   public static function run():Void {
+    var atomic = new ReplayFixture();
+    atomic.output("prompt$ ");
+    for (_ in 0...8) {
+      atomic.step(false);
+      if (atomic.replayRequests > 0) break;
+    }
+    require(atomic.replayRequests > 0 && atomic.session.offset == 0 && !atomic.backend.isSynchronized(),
+      "RPC receipt exposed readiness before emulator application");
+    atomic.session.pollEvents();
+    require(atomic.backend.isSynchronized() && equal(atomic.emulator, atomic.session.emulator),
+      "Applied replay did not publish readiness");
+    atomic.close();
+
+    var measured = new ReplayFixture(false, 65536, true);
+    measured.pump();
+    require(measured.openedColumns == 0 && !measured.backend.isSynchronized(), "Terminal opened before measured geometry");
+    measured.session.resize(89, 14);
+    measured.output("prompt$ ");
+    measured.pump();
+    require(measured.openedColumns == 89 && measured.openedRows == 14,
+      "OPEN did not use measured terminal dimensions");
+    require(measured.backend.isSynchronized() && equal(measured.emulator, measured.session.emulator),
+      "Measured terminal did not become ready after replay");
+    measured.close();
+
     var fixture = new ReplayFixture();
     var prompt = "joao@tritao-desktop:~/dev/materia/exosuit/src$ ";
     // Historical output was produced at 80 columns, but metadata now says 20.
@@ -156,11 +184,25 @@ class TerminalReplayTests {
     var exited = new ReplayFixture(false, 262144);
     exited.output([for (_ in 0...100000) "z"].join("")); exited.state = "exited";
     for (_ in 0...8) { if (exited.replayRequests > 0) break; exited.step(); }
-    require(exited.session.status == "running" && exited.session.offset < exited.log.endOffset,
+    require(!exited.backend.isSynchronized() && exited.session.status == "running" && exited.session.offset < exited.log.endOffset,
       "Exit was delivered before the last replay batch");
     exited.pump();
-    require(exited.session.status == "exited" && equal(exited.emulator, exited.session.emulator), "Exit lost trailing replay output");
+    require(exited.backend.isSynchronized() && exited.session.status == "exited" && equal(exited.emulator, exited.session.emulator), "Exit lost trailing replay output");
     exited.close();
+
+    // A long history can contain many intermediate screens. None is ready to paint.
+    var loading = new ReplayFixture(false, 262144);
+    loading.output([for (_ in 0...30000) "p\r\n"].join("") + "\x1b[2J\x1b[Hprompt$ ");
+    for (_ in 0...12) {
+      loading.step();
+      if (loading.session.offset > 0) break;
+    }
+    require(loading.session.offset > 0 && loading.session.offset < loading.log.endOffset
+      && !loading.backend.isSynchronized(), "Partial history was exposed as a ready terminal");
+    loading.pump();
+    require(loading.backend.isSynchronized() && equal(loading.emulator, loading.session.emulator),
+      "Final terminal screen did not replace intermediate history");
+    loading.close();
 
     var invalid = new ReplayFixture(); invalid.output("must not be applied"); invalid.corrupt = true;
     var refused = false;

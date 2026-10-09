@@ -326,6 +326,12 @@ try {
     if (remoteTerminalId == null || remoteTerminalId.length === 0)
       throw new Error('Remote terminal tab did not retain a stable session id');
     console.log('PASS: Workbench opened a controlled terminal session from the remote workspace group');
+    const screen = openedTerminal.terminalScreen;
+    const expectedColumns = Math.min(512, Math.floor((screen.width - 16) / screen.cellWidth));
+    const expectedRows = Math.min(256, Math.floor((screen.height - 34) / screen.rowHeight));
+    if (screen.loading || openedTerminal.terminalColumns !== expectedColumns || openedTerminal.terminalRows !== expectedRows)
+      throw new Error(`Terminal became visible before measured geometry/replay settled: ${JSON.stringify(openedTerminal)}`);
+    console.log('PASS: first ready terminal frame uses measured geometry with completed replay');
     // Ctrl+Shift+` uses the same creation path, without relying on local Processes.
     await send('Input.dispatchKeyEvent', {type: 'keyDown', key: '~', code: 'Backquote', windowsVirtualKeyCode: 192, modifiers: 10});
     await send('Input.dispatchKeyEvent', {type: 'keyUp', key: '~', code: 'Backquote', windowsVirtualKeyCode: 192, modifiers: 10});

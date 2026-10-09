@@ -19,6 +19,11 @@ class RpcTerminalBackend implements TerminalBackend {
   var connection:Null<RpcConnection>;
   var instance:String = "";
   var attached:Bool = false;
+  var synchronized:Bool = false;
+  var synchronizationPending:Bool = false;
+  var geometryReady:Bool;
+  var observedColumns:Int = 0;
+  var observedRows:Int = 0;
   var controller:Bool = false;
   var controlled:Bool = false;
   var controlPending:Bool = false;
@@ -44,8 +49,9 @@ class RpcTerminalBackend implements TerminalBackend {
   var snapshotPending:Bool = false;
   var replayAfterResize:Bool = false;
 
-  public function new(provider:Void -> Null<WorkspaceRpcEndpoint>, terminalId:String, root:String, create:Bool, ?group:String, ?directory:String, autoClaimControl:Bool = false) {
+  public function new(provider:Void -> Null<WorkspaceRpcEndpoint>, terminalId:String, root:String, create:Bool, ?group:String, ?directory:String, autoClaimControl:Bool = false, requireGeometry:Bool = false) {
     this.provider = provider;
+    geometryReady = !requireGeometry;
     this.autoClaimControl = autoClaimControl;
     this.terminalId = terminalId;
     this.root = root;
@@ -55,6 +61,7 @@ class RpcTerminalBackend implements TerminalBackend {
   }
   public function id():String return terminalId;
   public function isAttached():Bool return attached;
+  public function isSynchronized():Bool return synchronized;
   public function canControl():Bool return controller;
   public function hasControlGrant():Bool {
     var client = provider();
@@ -68,6 +75,7 @@ class RpcTerminalBackend implements TerminalBackend {
         return "Open this terminal's workspace to reconnect: " + root;
       return "Connecting to workspace terminal…";
     }
+    if (!synchronized) return "Loading terminal history…";
     if (controlUnavailable) return "Read only · update the workspace daemon to control this terminal";
     if (!hasControlGrant()) return "Read only · control permission was not granted";
     if (controlPending) return "Updating terminal control…";
@@ -75,7 +83,7 @@ class RpcTerminalBackend implements TerminalBackend {
     if (controlled) return "Read only · another client controls this terminal";
     return "Read only · no client is controlling this terminal";
   }
-  public function controlAction():String return !attached || controlUnavailable || !hasControlGrant() || controlPending ? "" : controller ? "Release" : "Take control";
+  public function controlAction():String return !attached || !synchronized || controlUnavailable || !hasControlGrant() || controlPending ? "" : controller ? "Release" : "Take control";
   public function activateControl():Void {
     controlReleased = controller;
     setControl(!controller, true);
@@ -97,7 +105,6 @@ class RpcTerminalBackend implements TerminalBackend {
       }
       controlPending = false;
       if (!observe(info)) return;
-      if (controller) resizePending = true;
     }, function(error) {
       if (connection == c) controlPending = false;
       if (!closed && connection == c) {
@@ -111,10 +118,11 @@ class RpcTerminalBackend implements TerminalBackend {
       fail("Invalid terminal geometry");
       return false;
     }
-    var wasController = controller;
+    observedColumns = info.columns;
+    observedRows = info.rows;
     controller = info.controller == true;
     controlled = info.controlled == true;
-    if (controller && !wasController) resizePending = true;
+    resizePending = controller && (columns != observedColumns || rows != observedRows);
     if (attached && !controller) {
       writes.resize(0);
       writeBytes = 0;
@@ -149,7 +157,7 @@ class RpcTerminalBackend implements TerminalBackend {
     writeBytes += bytes.length;
   }
   function flushInput(c:RpcConnection):Void {
-    if (writing || writeBytes == 0 || resizePending) return;
+    if (writing || writeBytes == 0 || resizePending || !synchronized) return;
     var bytes = writes.length == 1 ? writes[0] : Bytes.alloc(writeBytes);
     if (writes.length > 1) {
       var offset = 0;
@@ -181,9 +189,10 @@ class RpcTerminalBackend implements TerminalBackend {
   }
   public function resize(columns:Int, rows:Int):Void {
     if (columns < 1 || columns > 512 || rows < 1 || rows > 256) throw "Terminal size exceeds service limits";
+    geometryReady = true;
     this.columns = columns;
     this.rows = rows;
-    if (controller) resizePending = true;
+    resizePending = controller && (columns != observedColumns || rows != observedRows);
   }
   public function requestReplay(offset:Int64):Void {
     // Byte offsets cannot identify geometry-only records. Recover atomically.
@@ -228,7 +237,7 @@ class RpcTerminalBackend implements TerminalBackend {
     writeBytes = 0;
   }
   public function pollEvents(emit:TerminalEvent -> Void):Void {
-    if (closed) return;
+    if (closed || !geometryReady) return;
     if (failure != null) {
       if (!failureReported) {
         failureReported = true;
@@ -252,6 +261,8 @@ class RpcTerminalBackend implements TerminalBackend {
       }
       connection = c;
       attached = false;
+      synchronized = false;
+      synchronizationPending = false;
       pending = false;
       sequence = 0;
       controller = false;
@@ -326,6 +337,11 @@ class RpcTerminalBackend implements TerminalBackend {
     var events = output;
     output = [];
     for (event in events) emit(event);
+    // Readiness follows application to the emulator, never just receipt of an RPC reply.
+    if (synchronizationPending) {
+      synchronizationPending = false;
+      synchronized = true;
+    }
   }
   function requestReplayBatch(c:RpcConnection):Void {
     pending = true;
@@ -361,7 +377,10 @@ class RpcTerminalBackend implements TerminalBackend {
         ? TerminalEvent.geometry(event.columns, event.rows) : TerminalEvent.output(event.offset, event.data));
       position = nextOffset;
       replayCursor = value.next;
-      if (value.next == value.end) output.push(TerminalEvent.status(value.terminal.state, value.terminal.exitCode));
+      if (value.next == value.end) {
+        synchronizationPending = true;
+        output.push(TerminalEvent.status(value.terminal.state, value.terminal.exitCode));
+      }
       replayAfterResize = false;
       nextRead = Sys.time() + (value.events.length == 0 ? 0.05 : 0);
     }, function(error) {
@@ -398,6 +417,7 @@ class RpcTerminalBackend implements TerminalBackend {
       if (!observe(value.terminal)) return;
       if (value.cursor != null) replayCursor = value.cursor;
       snapshotPending = false;
+      synchronizationPending = true;
       replayAfterResize = false;
       position = value.terminal.end;
       output.push(TerminalEvent.screenSnapshot(position, value.data));

@@ -1381,7 +1381,8 @@ class ExosuitApp implements DesktopUiApplication {
 			terminal: panel == null ? "closed" : panel.status(),
 			terminalColumns: panel == null ? 0 : panel.columns(),
 			terminalControl: Std.isOfType(panel, TerminalPane) ? cast(panel, TerminalPane).controlStatus() : null,
-			terminalRows: panel == null ? 0 : panel.rows()
+			terminalRows: panel == null ? 0 : panel.rows(),
+			terminalScreen: Std.isOfType(panel, TerminalPane) ? cast(panel, TerminalPane).diagnosticState() : null
 		};
 	}
 

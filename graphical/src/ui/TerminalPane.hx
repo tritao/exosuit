@@ -3,6 +3,7 @@ package ui;
 import haxeon.ui.Canvas;
 import haxeon.ui.Color;
 import haxeon.ui.FontCollection;
+import haxeon.ui.FontFamily;
 import haxeon.ui.LayoutAxis;
 import haxeon.ui.LayoutStyle;
 import haxeon.ui.ParagraphStyle;
@@ -96,7 +97,7 @@ class TerminalPane implements TerminalPanel {
 
 	public static function openRemote(provider:Void->Null<workspace.client.WorkspaceRpcEndpoint>, id:String, cwd:String, restored:Bool,
 		requestFrame:Void->Void, palette:TerminalPalette, ?group:String, ?directory:String, ?providedFonts:FontCollection, autoClaimControl:Bool = false):TerminalPanel {
-		var backend = new workspace.client.RpcTerminalBackend(provider,id,cwd,!restored,group,directory,autoClaimControl);
+		var backend = new workspace.client.RpcTerminalBackend(provider,id,cwd,!restored,group,directory,autoClaimControl,true);
 		var session = new TerminalSession(backend,terminalkit.Emulator.open(80,24,1000,"xterm-256color",false),false);
 		try return new TerminalPane(session,requestFrame,palette,providedFonts,backend)
 		catch (failure:Dynamic) { session.close(); throw failure; }
@@ -108,6 +109,15 @@ class TerminalPane implements TerminalPanel {
 
 	public function status():String
 		return session.status;
+
+	/** Bounded renderer state for lifecycle and browser acceptance diagnostics. */
+	public function diagnosticState():Dynamic return {
+		width: resolvedWidth, height: resolvedHeight,
+		cellWidth: cellWidth, rowHeight: rowHeight,
+		cursorColumn: cursorColumn, cursorRow: cursorRow,
+		loading: remoteBackend != null && !remoteBackend.isSynchronized(),
+		lines: [for (index in 0...Std.int(Math.min(texts.length, 32))) StringTools.rtrim(texts[index])]
+	};
 
 	public function columns():Int
 		return session.emulator.columns();
@@ -130,7 +140,7 @@ class TerminalPane implements TerminalPanel {
 			var mono = Sys.getEnv("EXOSUIT_TERMINAL_FONT");
 			if (mono == null || mono.length == 0)
 				mono = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf";
-			if (FileSystem.exists(mono)) fonts.add(mono);
+			if (FileSystem.exists(mono)) fonts.add(mono, FontFamily.Monospace);
 			fonts.addSystemFallbacks();
 		}
 		updateFontSize();
@@ -171,9 +181,12 @@ class TerminalPane implements TerminalPanel {
 		}
 	}
 
+	/** Grid measurement and shaped rows must select the same fixed-pitch face. */
+	function gridTextStyle():TextStyle return new TextStyle(fontSize, FontFamily.Monospace);
+
 	function updateFontSize():Void {
 		fontSize = palette.fontSize;
-		var probe = TextLayout.create(fonts, "M", 64.0, new TextStyle(fontSize), new ParagraphStyle(TextWrap.None));
+		var probe = TextLayout.create(fonts, "M", 64.0, gridTextStyle(), new ParagraphStyle(TextWrap.None));
 		var metrics = probe.measure();
 		cellWidth = Math.max(1.0, metrics.width);
 		rowHeight = Math.max(1.0, Math.ceil(metrics.height + 2.0));
@@ -198,7 +211,7 @@ class TerminalPane implements TerminalPanel {
 			backgrounds.pop();
 		}
 		while (layouts.length < count) {
-			var layout = TextLayout.create(fonts, "", 8192.0, new TextStyle(fontSize), new ParagraphStyle(TextWrap.None));
+			var layout = TextLayout.create(fonts, "", 8192.0, gridTextStyle(), new ParagraphStyle(TextWrap.None));
 			layout.setColor(foreground);
 			layouts.push(layout);
 			texts.push("");
@@ -311,7 +324,7 @@ class TerminalPane implements TerminalPanel {
 		}
 		var terminalTop = remoteBackend == null ? 4.0 : CONTROL_BAR_HEIGHT + 4.0;
 		// Remote observers retain the sender's grid; build only rows intersecting our viewport.
-		var visibleRows = resolvedHeight > 0
+		var visibleRows = resolvedHeight > 0 && (remoteBackend == null || remoteBackend.isSynchronized())
 			? Std.int(Math.min(layouts.length, Math.max(0, Math.ceil((resolvedHeight - terminalTop) / rowHeight))))
 			: 0;
 		for (row in 0...visibleRows) {
@@ -628,16 +641,17 @@ class TerminalPane implements TerminalPanel {
 	}
 
 	function resizeToViewport(width:Float, height:Float):Void {
-		if (closed || width <= 0.0 || height <= 0.0) return;
-		if (remoteBackend != null && !remoteBackend.canControl()) return;
+		var topInset = remoteBackend == null ? 8.0 : CONTROL_BAR_HEIGHT + 8.0;
+		if (closed || width < 16.0 + cellWidth || height < topInset + rowHeight) return;
 		if (width == viewportWidth && height == viewportHeight) return;
 		viewportWidth = width;
 		viewportHeight = height;
 		var columns = Std.int(Math.max(1.0, Math.min(512.0, Math.floor((width - 16.0) / cellWidth))));
-		var topInset = remoteBackend == null ? 8.0 : CONTROL_BAR_HEIGHT + 8.0;
 		var rows = Std.int(Math.max(1.0, Math.min(256.0, Math.floor((height - topInset) / rowHeight))));
-		if (columns != session.emulator.columns() || rows != session.emulator.rows()) {
-			session.resize(columns, rows);
+		// Desired geometry also seeds OPEN and is retained while observing another controller.
+		if (remoteBackend == null && columns == session.emulator.columns() && rows == session.emulator.rows()) return;
+		session.resize(columns, rows);
+		if (remoteBackend == null) {
 			// Re-render all rows now; waiting for PTY output leaves stale/missing rows while dragging.
 			refreshRows(true);
 			requestFrame();

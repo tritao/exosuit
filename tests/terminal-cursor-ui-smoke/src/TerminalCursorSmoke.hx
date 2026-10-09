@@ -34,6 +34,7 @@ class CursorApp implements DesktopUiApplication {
 	final pane:ui.TerminalPane;
 	final host:DesktopUiHostContext;
 	final backend:QuietBackend;
+	final fonts:haxeon.ui.FontCollection;
 	final mode:String;
 	var unchangedRowRevision = -1;
 	var frames = 0;
@@ -44,10 +45,15 @@ class CursorApp implements DesktopUiApplication {
 		ui = new UiContext(null, host.fonts);
 		backend = new QuietBackend();
 		var emulator = terminalkit.Emulator.open(80, 24);
-		emulator.feedString("\x1b[?1004hprompt$ ");
+		emulator.feedString("\x1b[?1004hWi.i prompt$ ");
 		if (mode == "hidden") emulator.feedString("\x1b[?25l");
+		// Match the browser: proportional UI default plus a separate monospace face.
+		fonts = haxeon.ui.FontCollection.create();
+		var fontDirectory = "haxeon/packages/ui/vendor/skribidi/example/data/";
+		fonts.add(fontDirectory + "IBMPlexSans-Regular.ttf");
+		fonts.add(fontDirectory + "IBMPlexMono-Regular.ttf", haxeon.ui.FontFamily.Monospace);
 		pane = new ui.TerminalPane(new TerminalSession(backend, emulator), host.requestFrame,
-			new ui.TerminalPalette(dark), host.fonts);
+			new ui.TerminalPalette(dark), fonts);
 	}
 
 	public function context():UiContext return ui;
@@ -66,7 +72,14 @@ class CursorApp implements DesktopUiApplication {
 		var root = ui.submit(pane, frame);
 		frames++;
 		if (frames == 3) ui.focusWidget(root.id);
-		if (frames == 4) unchangedRowRevision = pane.revisions[1];
+		if (frames == 4) {
+			unchangedRowRevision = pane.revisions[1];
+			for (column in 0...14) {
+				var caret = pane.layouts[0].caret(new haxeon.ui.TextLayout.TextPosition(column, 0));
+				if (Math.abs(caret.x - column * pane.cellWidth) > 0.1)
+					throw "Terminal text and cursor grid disagree at column " + column;
+			}
+		}
 		if (frames == 5 && (mode == "unfocused" || mode == "refocused" || mode == "hidden")) ui.clearFocus();
 		if (frames == 5 && mode == "window-blur") ui.windowFocusLost();
 		if (frames == 7 && mode == "refocused") ui.focusWidget(root.id);
@@ -79,6 +92,7 @@ class CursorApp implements DesktopUiApplication {
 	public function dispose():Void {
 		pane.close();
 		ui.dispose();
+		fonts.dispose();
 	}
 }
 
