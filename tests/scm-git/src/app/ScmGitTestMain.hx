@@ -24,6 +24,10 @@ import jobs.JobScheduler;
 import scm.fake.FakeScmProvider;
 import scm.fake.FakeScmRepositoryScript;
 import scm.git.GitStatusParser;
+import scm.git.GitProcess;
+import scm.git.GitVersion;
+import process.ProcessManager;
+import sys.FileSystem;
 
 class ScmGitTestMain {
 	static function require(condition:Bool, message:String):Void {
@@ -197,6 +201,58 @@ class ScmGitTestMain {
 			&& !scm.ScmOperationAvailability.supports(script.features, ScmOperation.Push),
 			"operation availability did not follow provider feature flags");
 		fakeHandle.dispose();
+		var gitScheduler = new JobScheduler(), processManager = new ProcessManager(), git = new GitProcess(processManager, gitScheduler, ""),
+			versionResult:Null<ScmJobResult<GitVersion>> = null;
+		var versionJob = git.probeVersion(51, value -> versionResult = value), deadline = Sys.time() + 10.0;
+		while (gitScheduler.activeCount() > 0 && Sys.time() < deadline) { gitScheduler.update(32); Sys.sleep(0.001); }
+		var checkedVersion = versionResult;
+		if (checkedVersion == null || checkedVersion.value == null) throw "Git version probe did not complete";
+		require(versionJob.complete && checkedVersion.generation == 51 && checkedVersion.error == null
+			&& checkedVersion.value.supportsScm() && git.executable != null, "Git discovery or minimum-version probe failed");
+		require(!GitVersion.parse("git version 2.24.9").supportsScm() && GitVersion.parse("git version 2.25").supportsScm(),
+			"Git minimum-version boundary was incorrect");
+		var boundedResult:Null<ScmJobResult<scm.git.GitCommandResult>> = null;
+		git.run(["--version"], "", 52, value -> boundedResult = value, false, false, 1);
+		deadline = Sys.time() + 10.0;
+		while (gitScheduler.activeCount() > 0 && Sys.time() < deadline) { gitScheduler.update(32); Sys.sleep(0.001); }
+		if (boundedResult == null || boundedResult.error == null) throw "Git stdout limit did not produce an error";
+		require(boundedResult.error.code == "output_too_large", "Git stdout limit returned the wrong error code");
+		var temporaryDirectory = Sys.getEnv("TEMP");
+		if (temporaryDirectory == null || temporaryDirectory.length == 0) temporaryDirectory = Sys.getEnv("TMP");
+		if (temporaryDirectory == null || temporaryDirectory.length == 0) temporaryDirectory = Sys.getCwd();
+		var nonRepository = FileSystem.fullPath(temporaryDirectory + "/exosuit-scm-nonrepo-" + Std.string(Std.int(Sys.time() * 1000000)));
+		FileSystem.createDirectory(nonRepository);
+		var repositoryError:Null<ScmJobResult<scm.git.GitCommandResult>> = null;
+		git.run(["rev-parse", "--show-toplevel"], nonRepository, 53, value -> repositoryError = value);
+		deadline = Sys.time() + 10.0;
+		while (gitScheduler.activeCount() > 0 && Sys.time() < deadline) { gitScheduler.update(32); Sys.sleep(0.001); }
+		FileSystem.deleteDirectory(nonRepository);
+		if (repositoryError == null || repositoryError.error == null) throw "non-repository Git command unexpectedly succeeded";
+		require(repositoryError.error.code == "not_a_repository" && processManager.activeCount() == 0,
+			"Git error mapping or process cleanup was incorrect: " + repositoryError.error.code + ", active=" + processManager.activeCount()
+				+ ", message=" + repositoryError.error.message);
+		var repositoryRootResult:Null<ScmJobResult<scm.git.GitCommandResult>> = null;
+		git.run(["rev-parse", "--show-toplevel"], Sys.getCwd(), 54, value -> repositoryRootResult = value);
+		deadline = Sys.time() + 10.0;
+		while (gitScheduler.activeCount() > 0 && Sys.time() < deadline) { gitScheduler.update(32); Sys.sleep(0.001); }
+		if (repositoryRootResult == null || repositoryRootResult.value == null) throw "could not locate the fixture repository for process cancellation";
+		var repositoryRoot = StringTools.trim(repositoryRootResult.value.stdout.toString()), statusResult:Null<ScmJobResult<scm.git.GitCommandResult>> = null;
+		git.run(["status", "--porcelain=v2", "-z", "--branch"], repositoryRoot, 55, value -> statusResult = value);
+		deadline = Sys.time() + 10.0;
+		while (gitScheduler.activeCount() > 0 && Sys.time() < deadline) { gitScheduler.update(32); Sys.sleep(0.001); }
+		if (statusResult == null || statusResult.value == null) throw "Git porcelain v2 status did not return its NUL-delimited bytes";
+		var statusCommandResult = statusResult.value;
+		if (statusCommandResult == null) throw "Git status result disappeared";
+		var hasNul = false;
+		for (index in 0...statusCommandResult.stdout.length) if (statusCommandResult.stdout.get(index) == 0) { hasNul = true; break; }
+		require(hasNul, "Git process runner decoded or removed porcelain NUL delimiters");
+		var processCallback = false, waitingJob = git.run(["cat-file", "--batch"], repositoryRoot, 56,
+			_ -> processCallback = true);
+		gitScheduler.update(1);
+		require(processManager.activeCount() == 1 && waitingJob.cancel(), "Git process cancellation did not own the started process");
+		require(processManager.activeCount() == 0 && !processCallback && waitingJob.cancelled,
+			"cancelling Git work leaked a process or published a stale result");
+		processManager.shutdown();
 
 		var diff = runDiff("a\nb\nc\nd\n", "a\nB\nc\ne\n", LineDiff.DEFAULT_MAX_COST, 1);
 		require(diff.length == 2 && diff[0].kind == LineDiffKind.Modified && diff[0].oldStart == 1 && diff[0].newStart == 1
@@ -236,7 +292,7 @@ class ScmGitTestMain {
 		require(largeHunks.length == 50 && reconstruct(largeOldText, largeNewText, largeHunks) == largeNewText,
 			"10,000-line scattered diff did not converge to its edits");
 		Sys.println('LINE_DIFF lines=10000 edits=50 elapsed_ms=${Std.int(largeMillis)}');
-		Sys.println("PASS: SCM model, porcelain v2 parser, fake provider and line diff");
+		Sys.println("PASS: SCM model, porcelain v2 parser, fake provider, Git process runner and line diff");
 		return 0;
 	}
 }

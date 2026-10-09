@@ -17,6 +17,8 @@ class OwnedProcess {
 	public function exitStatus():Int return -1;
 	public function readStdout():String return "";
 	public function readStderr():String return "";
+	public function readStdoutBytes():Bytes return Bytes.alloc(0);
+	public function readStderrBytes():Bytes return Bytes.alloc(0);
 	public function writeStdin(data:String):Int { throw "Processes are unavailable on this host"; }
 	public function writeBytes(bytes:Bytes, offset:Int, length:Int):Int { throw "Processes are unavailable on this host"; }
 	public function closeStdin():Bool return false;
@@ -30,6 +32,8 @@ class OwnedProcess {
 	final child:ChildProcess;
 	final stdout = new ProcessTextStream();
 	final stderr = new ProcessTextStream();
+	final stdoutBytes = new ProcessByteStream();
+	final stderrBytes = new ProcessByteStream();
 	var disposed:Bool = false;
 
 	@:allow(process.ProcessManager)
@@ -55,6 +59,13 @@ class OwnedProcess {
 
 	public function readStderr():String
 		return disposed ? "" : stderr.read(child, true);
+
+	/** Use instead of the text API when output is a binary or NUL-delimited protocol. */
+	public function readStdoutBytes():Bytes
+		return disposed ? Bytes.alloc(0) : stdoutBytes.read(child);
+
+	public function readStderrBytes():Bytes
+		return disposed ? Bytes.alloc(0) : stderrBytes.read(child, true);
 
 	/** Returns UTF-8 bytes accepted, possibly partial, or zero for backpressure. */
 	public function writeStdin(data:String):Int {

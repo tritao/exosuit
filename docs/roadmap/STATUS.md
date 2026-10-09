@@ -26,8 +26,17 @@ cases, model and feature behavior, fake-provider latency/cancellation, and
 `scripts/test.sh`. The per-slice 4 ms ceiling and full M17.1 acceptance suite
 are not yet qualified.
 
-Next: implement the asynchronous Git process runner and batched blob reader,
-including their failure, cancellation and reuse behavior; then finish M17.1's
+The asynchronous Git runner now discovers a configured executable or PATH,
+checks the minimum version, uses bounded stdout/stderr capture and stable error
+codes, and cancels its owned child process. A separate byte stream preserves
+NUL-delimited output. Restricted reads disable fsmonitor and use an empty hooks
+directory. The focused Windows fixture also passes real Git version discovery,
+stdout-limit and non-repository error mapping, raw porcelain NUL preservation,
+and cancellation with no leaked process. Exosuite's graphical target compiled
+and launched on Windows with a responsive `exosuit` window.
+
+Next: implement the long-lived batched blob reader, including partial writes,
+incremental responses, cancellation, restart and size limits. Then finish M17.1's
 Git fixtures before beginning service discovery and trust.
 
 ## Windows workspace startup and filesystem backend, 2026-10-08
