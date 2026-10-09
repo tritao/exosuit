@@ -219,6 +219,7 @@ class ExosuitApp implements DesktopUiApplication {
 			return capturedHost;
 		}, preferences, null, this.capabilities);
 		host = capturedHost;
+		application.openResourceView = function(path) return UiImageTab.supports(path) ? host.openImage(path) : null;
 		host.configureKeybinding = function(command) {
 			openSettings();
 			settingsPanel.setShowAdvanced(true);
@@ -1689,8 +1690,11 @@ class ExosuitApp implements DesktopUiApplication {
 				if (count == 1 && localModel.activateSyntheticRow(path)) requestFrame();
 				return;
 			}
-			if (count != 1 || (localModel != null && localModel.isDirectoryPath(path))) return;
-			try host.openPreview(application.workspace.documents.open(path)) catch (error:Dynamic) application.reportError("files", "Could not open file: " + Std.string(error));
+			if ((count != 1 && count != 2) || (localModel != null && localModel.isDirectoryPath(path))) return;
+			try {
+				if (UiImageTab.supports(path)) host.openImage(path, count == 1);
+				else if (count == 1) host.openPreview(application.workspace.documents.open(path));
+			} catch (error:Dynamic) application.reportError("files", "Could not open file: " + Std.string(error));
 		};
 		tree.onItemContextMenu = function(path, event) {
 			if (remoteModel != null || (localModel != null && localModel.isSyntheticRow(path))) return;
@@ -1953,6 +1957,17 @@ class ExosuitApp implements DesktopUiApplication {
 		var items:Array<TabItem> = [];
 		var filenames:Map<String, String> = new Map();
 		for (item in editorPane.items) {
+			var image = UiEditorTabs.image(item);
+			if (image != null) {
+				var imageKey = UiEditorTabs.key(item);
+				var imageTab = new TabItem(imageKey, image.title + (image.preview ? " (preview)" : ""),
+					new ImagePreviewView(image, function() host.activateEditorTab(imageKey, paneId),
+						function(bounds, id) host.editorResolved(paneId, bounds, id)), true);
+				imageTab.onClose = function() host.closeTab(item, paneId, true);
+				filenames.set(imageKey, image.path);
+				items.push(imageTab);
+				continue;
+			}
    var agent=UiEditorTabs.agent(item);
    if(agent!=null) {
     var key=UiEditorTabs.key(item), tab=new TabItem(key,agent.title,agent.panel,true,IconName.Terminal);
@@ -2070,6 +2085,8 @@ class ExosuitApp implements DesktopUiApplication {
 				if (event.button != 0 || tabClicks.register(paneId + ":" + key, event) != 2) return;
 				for (view in tabs) if (key == "doc:" + view.document.id) host.keepDocument(view.document, paneId);
 				for (item in editorPane.items) {
+					var image = UiEditorTabs.image(item);
+					if (image != null && UiEditorTabs.key(item) == key) host.keepImage(image);
 					var workspaceFile = UiEditorTabs.workspaceFile(item);
 					if (workspaceFile != null && UiEditorTabs.key(item) == key) host.keepWorkspaceFile(workspaceFile);
 				}

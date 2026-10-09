@@ -427,6 +427,12 @@ class UiWorkbenchHost implements WorkbenchHost {
 				if (!shared) workspace.documents.close(documentView.document, true);
 				return index;
 			}
+			var image = UiEditorTabs.image(item);
+			if (image != null && image.preview) {
+				pane.items.splice(index, 1);
+				image.dispose();
+				return index;
+			}
 			var workspaceFile = UiEditorTabs.workspaceFile(item);
 			if (workspaceFile != null && workspaceFile.preview) {
 				pane.items.splice(index, 1);
@@ -577,6 +583,8 @@ class UiWorkbenchHost implements WorkbenchHost {
 		var target = neighboringPane(horizontal, vertical), moving = activeTab();
 		if (target == null || moving == null) return false;
 		var source = activePane;
+		var movingImage = UiEditorTabs.image(moving);
+		if (movingImage != null) movingImage.preview = false;
 		var movingDocument = UiEditorTabs.document(moving);
 		if (movingDocument != null) movingDocument.preview = false;
 		var movingWorkspaceFile = UiEditorTabs.workspaceFile(moving);
@@ -588,6 +596,14 @@ class UiWorkbenchHost implements WorkbenchHost {
 		if (documentView != null) for (index in 0...target.items.length) {
 			var candidate = UiEditorTabs.document(target.items[index]);
 			if (candidate != null && candidate.document == documentView.document) { candidate.preview = false; duplicate = index; break; }
+		}
+		if (movingImage != null) for (index in 0...target.items.length) {
+			var candidate = UiEditorTabs.image(target.items[index]);
+			if (candidate != null && candidate.path == movingImage.path) {
+				candidate.preview = false;
+				duplicate = index;
+				break;
+			}
 		}
 		if (duplicate >= 0) { UiEditorTabs.dispose(moving); target.activeIndex = duplicate; }
 		else { target.items.push(moving); target.activeIndex = target.items.length - 1; }
@@ -601,6 +617,8 @@ class UiWorkbenchHost implements WorkbenchHost {
 		var target = activeIndex + delta;
 		if (target < 0 || target >= activePane.items.length) return false;
 		var view = activePane.items.splice(activeIndex, 1)[0];
+		var image = UiEditorTabs.image(view);
+		if (image != null) image.preview = false;
 		var documentView = UiEditorTabs.document(view);
 		if (documentView != null) documentView.preview = false;
 		var workspaceFile = UiEditorTabs.workspaceFile(view);
@@ -674,6 +692,29 @@ class UiWorkbenchHost implements WorkbenchHost {
 	public function captureCloseActivePane(force:Bool):Void->Bool {
 		var pane = activePane.id;
 		return function() return closePane(pane, force);
+	}
+
+	public function openImage(path:String, preview:Bool = false):UiImageTab {
+		var normalized = workspace.fileSystem.normalize(path);
+		for (index in 0...activePane.items.length) {
+			var existing = UiEditorTabs.image(activePane.items[index]);
+			if (existing != null && existing.path == normalized) {
+				if (!preview) existing.preview = false;
+				setActiveIndex(index);
+				return existing;
+			}
+		}
+		// Decode before replacing a preview: failed opens leave the current tab intact.
+		var image = new UiImageTab(normalized, preview);
+		var insertion = preview ? removePreviewTab(activePane) : activePane.items.length;
+		activePane.items.insert(insertion, UiEditorTab.Image(image));
+		setActiveIndex(insertion);
+		return image;
+	}
+
+	public function keepImage(image:UiImageTab):Void {
+		image.preview = false;
+		requestFrame();
 	}
 
 	public function openPreview(document:Document):View return openDocumentTab(document, true);
@@ -841,6 +882,12 @@ class UiWorkbenchHost implements WorkbenchHost {
 			result.push("P\t" + pane.id);
 			for (index in 0...pane.items.length) {
 				var item = pane.items[index];
+				var image = UiEditorTabs.image(item);
+				if (image != null) {
+					if (image.path.indexOf("\t") < 0 && image.path.indexOf("\n") < 0)
+						result.push("I\t" + pane.id + "\t" + (index == pane.activeIndex ? "1" : "0") + "\t" + image.path);
+					continue;
+				}
 				var agent=UiEditorTabs.agent(item);
     if(agent!=null) {result.push("C\t"+pane.id+"\t"+(index==pane.activeIndex?"1":"0")+"\t"+ResourceViewIdentity.encode(agent.resource,agent.workspaceRoot)+"\t"+agent.id+"\t"+agent.title);continue;}
     var terminal = UiEditorTabs.terminal(item);
@@ -891,6 +938,10 @@ class UiWorkbenchHost implements WorkbenchHost {
 		panelTerminals.resize(0);
 		activePanelTerminalIndex = -1;
 		focus.activate(null);
+		for (pane in panes) for (item in pane.items) {
+			var image = UiEditorTabs.image(item);
+			if (image != null) image.dispose();
+		}
 		for (view in allViews()) view.dispose();
 		for (pane in panes) dockActions.model.unregister(pane.id);
 		panes.resize(0);
@@ -946,6 +997,14 @@ class UiWorkbenchHost implements WorkbenchHost {
 					pane.items.push(UiEditorTab.Terminal(terminal));
 					if (fields[2] == "1" || pane.activeIndex < 0) pane.activeIndex = pane.items.length - 1;
 				}
+				continue;
+			}
+			if (modern && fields.length == 4 && fields[0] == "I") {
+				var pane = paneById(fields[1]);
+				if (pane != null && UiImageTab.supports(fields[3])) try {
+					pane.items.push(UiEditorTab.Image(new UiImageTab(fields[3], false)));
+					if (fields[2] == "1" || pane.activeIndex < 0) pane.activeIndex = pane.items.length - 1;
+				} catch (_:Dynamic) {} // Missing or unreadable images do not block session restore.
 				continue;
 			}
 			if (fields.length != 9 || fields[0] != (modern ? "V" : "T")) continue;

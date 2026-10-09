@@ -155,8 +155,16 @@ class Application {
 		});
 	}
 
-	public function open(path:String):View
+	/** Optional host handler for non-text resources; null falls back to a document. */
+	public var openResourceView:Null<String->Null<View>>;
+
+	public function open(path:String):View {
+		if (openResourceView != null) {
+			var resource = openResourceView(path);
+			if (resource != null) return resource;
+		}
 		return root.openDocument(documents.open(path));
+	}
 
 	public function openArgument(path:String):Null<View> {
 		if (FileSystem.isDirectory(path)) {
