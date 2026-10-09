@@ -112,6 +112,7 @@ class LanguageServiceTestMain {
 		client.start(Sys.time());
 		pump(client, () -> client.ready, 5.0);
 
+		require(client.typeDefinitionSupported, "type definition capability was not negotiated");
 		var selection = new BufferSelection(new BufferPosition(0, 2));
 		document.insert(selection, "x");
 		pump(client, () -> client.diagnosticsFor(document).length == 1, 5.0);
@@ -235,8 +236,9 @@ class LanguageServiceTestMain {
 		var minimal = new LanguageServiceClient(manager, documents, "python3", [arguments[0], "minimal"], arguments[1]);
 		minimal.start(Sys.time());
 		pump(minimal, () -> minimal.ready, 5.0);
-		require(!minimal.semanticTokensSupported && !minimal.formattingSupported && !minimal.rangeFormattingSupported && !minimal.hoverSupported && !minimal.completionSupported && !minimal.definitionSupported && !minimal.signatureHelpSupported && !minimal.symbolsSupported && !minimal.referencesSupported && !minimal.renameSupported,
+		require(!minimal.semanticTokensSupported && !minimal.formattingSupported && !minimal.rangeFormattingSupported && !minimal.hoverSupported && !minimal.completionSupported && !minimal.definitionSupported && !minimal.typeDefinitionSupported && !minimal.signatureHelpSupported && !minimal.symbolsSupported && !minimal.referencesSupported && !minimal.renameSupported,
 			"unsupported server capabilities were advertised by the client");
+		require(!minimal.requestTypeDefinition(document, new BufferPosition(0, 0), Sys.time(), value -> {}), "unsupported type navigation was sent");
 		require(!minimal.requestFormatting(document, selection, 3, true, false, Sys.time(), value -> {}), "unsupported formatting request was sent");
 		require(!minimal.requestHover(document, new BufferPosition(0, 0), Sys.time(), value -> {}),
 			"unsupported hover request was sent");

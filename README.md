@@ -68,7 +68,11 @@ as well. The scenario is included in `scripts/ci.sh`. Completion popups use them
 show symbol kinds and provider details/documentation, and support arrow navigation,
 Tab/Enter acceptance, Escape dismissal, and mouse selection. Filtering preserves
 provider order and insertion text. Go to Definition supports F12 and Ctrl+Alt+G,
-Ctrl+click, and the editor context menu. Multiple results open a searchable picker;
+Ctrl+click, and the editor context menu. Go to Type Definition is available in the
+command palette and editor context menu. Both navigation commands can use current
+syntax facts when dependency analysis fails. Recovery follows declared types and
+imports and refuses ambiguous names. Blocked requests report the compiler error and source location.
+Multiple results open a searchable picker;
 Alt+Left and Alt+Right return through definition navigation history. Missing results
 and server failures appear as notifications. An early F12 waits for server startup
 and document synchronization while the file and cursor remain unchanged. After

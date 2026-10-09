@@ -172,6 +172,12 @@ class LanguageControllerTestMain {
 		commands.perform("language:go-to-definition", context);
 		pump(controller, () -> controller.lastDefinitionTiming != beforeFresh && controller.lastDefinitionTiming.outcome == "completed", 5);
 		root.openDocument(document);
+		var beforeType = controller.lastDefinitionTiming;
+		require(commands.perform("language:go-to-type-definition", context), "type definition command unavailable");
+		pump(controller, () -> controller.statusLabel().indexOf("Finding type definition") >= 0, 5);
+		pump(controller, () -> controller.lastDefinitionTiming != beforeType && controller.lastDefinitionTiming.outcome == "completed", 5);
+		require([for (message in protocol) if (message.indexOf("textDocument/typeDefinition") >= 0) message].length > 0, "type navigation did not send its LSP request");
+		Sys.println("PASS: type definition command uses progress, synchronization and request lifecycle");
 		Sys.println("PASS: cold and unsynchronized F12 retention, progress, timings, repeated requests and cursor/tab cancellation");
 		var formattingSettings = new config.Settings(); formattingSettings.indentSize = 3; formattingSettings.insertSpaces = true;
 		controller.documentSettings = target -> formattingSettings;

@@ -15,6 +15,7 @@ class RealLanguageUiApp extends ExosuitApp {
 	final desktopContext:DesktopUiHostContext;
 	final deadline:Float;
 	final repository:Bool;
+	final activeCompletion:Bool;
 	final projectOwnership:Bool;
 	final projectPath:String;
 	var definitionChecked:Bool = false;
@@ -29,9 +30,10 @@ class RealLanguageUiApp extends ExosuitApp {
 	var accepted:String = "";
 
 	public function new(context:DesktopUiHostContext, project:String, mode:String) {
-		super(context.fonts, null, context, project + (mode == "overlapping" || mode == "nested" ? "/graphical/src/ui/EditorMinimap.hx" : mode == "repository" ? "/src/config/ApplicationPaths.hx" : "/Main.hx"));
+		super(context.fonts, null, context, project + (mode == "active-completion" ? "/src/completion/ActiveCompletion.hx" : mode == "overlapping" || mode == "nested" ? "/graphical/src/ui/EditorMinimap.hx" : mode == "repository" ? "/src/config/ApplicationPaths.hx" : "/Main.hx"));
 		this.desktopContext = context;
 		this.repository = mode == "repository";
+		this.activeCompletion = mode == "active-completion";
 		this.projectOwnership = mode == "overlapping" || mode == "nested";
 		this.projectPath = project;
 		symbol = repository ? "slash" : "answer";
@@ -42,6 +44,7 @@ class RealLanguageUiApp extends ExosuitApp {
 		if (repository) view.replaceAllText(StringTools.replace(original, 'var slash = path.lastIndexOf("/")', 'var slash:Int = "wrong"'));
 		deadline = Sys.time() + 90;
 		application.openArgument(project);
+		if (activeCompletion) application.openArgument(project + "/src");
 		if (mode == "overlapping") {
 			application.openArgument(project + "/src");
 			application.openArgument(project + "/graphical");
@@ -73,7 +76,33 @@ class RealLanguageUiApp extends ExosuitApp {
 		if (view == null) throw "real graphical language test lost editor";
 		if (application.language.statusLabel().indexOf("disabled after repeated failures") >= 0)
 			throw "real graphical language startup failed: " + [for (problem in host.getProblems().values()) problem.message].join("; ");
-		if (projectOwnership && service != null && service.ready) {
+		if (activeCompletion) {
+			if (stage == 0) {
+				var position = view.document.buffer.positionFromOffset(original.indexOf("this.view") + 6);
+				view.restoreCursor(position.line, position.column); view.cursorChanged(); advance();
+			} else if (stage == 1 && frames > stageFrame + 2) {
+				var area = host.textInputArea(); if (area == null) throw "ActiveCompletion pointer lacks caret geometry";
+				ui.pointerMove(area.x + 1, area.y + area.height / 2, UiModifier.Control);
+				ui.pointerDown(area.x + 1, area.y + area.height / 2, 0, UiModifier.Control);
+				ui.pointerUp(area.x + 1, area.y + area.height / 2, 0, UiModifier.Control); advance();
+			} else if (stage == 2) {
+				for (notification in host.getNotifications().entries)
+					if (notification.message.indexOf("Go to Definition failed") >= 0) throw notification.message;
+				if (view.cursorLine() == 11 && view.document.buffer.line(view.cursorLine()).indexOf("final view:View") >= 0) {
+					if (view.document.buffer.text != original || sys.io.File.getContent(view.document.requirePath()) != original)
+						throw "ActiveCompletion navigation changed source";
+					command("go-to-type-definition"); advance();
+				}
+			} else if (stage == 3 && view.document.path == projectPath + "/src/view/View.hx") {
+				if (view.document.buffer.line(view.cursorLine()).indexOf("class View") < 0) throw "type navigation missed View declaration";
+				ui.key(UiEventKind.KeyDown, UiKey.Left, UiModifier.Alt); advance();
+			} else if (stage == 4 && view.document.path == projectPath + "/src/completion/ActiveCompletion.hx") {
+				if (view.cursorLine() != 11) throw "type navigation history lost field cursor";
+				completed = true;
+				Sys.println("PASS: cold Ctrl+click on ActiveCompletion this.view, Go to Type Definition and history with overlapping src ownership and no edits");
+				desktopContext.onCloseRequested = function(close) close(); desktopContext.requestClose();
+			}
+		} else if (projectOwnership && service != null && service.ready) {
 			if (stage == 0 && service.hasReceivedDiagnostics(view.document) && service.semanticTokensFor(view.document) != null) {
 				var snapshot = service.semanticTokensFor(view.document);
 				var entity = view.document.buffer.positionFromOffset(original.indexOf("document:Document") + "document:".length);

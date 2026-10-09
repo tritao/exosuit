@@ -48,6 +48,7 @@ if [[ $result -ne 42 ]]; then
     exit 1
 fi
 echo "PASS: graphical real-server fixture builds and executes after language edits"
+run_ui active-completion "$fixture/state-active-completion" "$root_dir" active-completion
 run_ui repository "$fixture/state-repository" "$root_dir" repository
 
 run_ui overlapping "$fixture/state-overlapping" "$root_dir" overlapping

@@ -2081,6 +2081,7 @@ class ExosuitApp implements DesktopUiApplication {
 					new CommandMenuEntry("find:open", "Find…"),
 					new CommandMenuEntry("find:replace", "Replace…"),
 					new CommandMenuEntry("language:go-to-definition", "Go to Definition"),
+					new CommandMenuEntry("language:go-to-type-definition", "Go to Type Definition"),
 					new CommandMenuEntry("navigation:go-back", "Go Back"),
 					new CommandMenuEntry("navigation:go-forward", "Go Forward")
 				], event, function() return host.activeView() == documentView);

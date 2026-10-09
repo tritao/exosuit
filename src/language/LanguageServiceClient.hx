@@ -32,6 +32,7 @@ class LanguageServiceClient {
 	public var hoverSupported(default, null):Bool = false;
 	public var completionSupported(default, null):Bool = false;
 	public var definitionSupported(default, null):Bool = false;
+	public var typeDefinitionSupported(default, null):Bool = false;
 	public var signatureHelpSupported(default, null):Bool = false;
 	public var symbolsSupported(default, null):Bool = false;
 	public var referencesSupported(default, null):Bool = false;
@@ -183,6 +184,14 @@ class LanguageServiceClient {
 	public function requestDefinition(document:Document, position:BufferPosition, now:Float, complete:Array<LanguageLocation>->Void, ?failed:String->Void):Bool {
 		if (!definitionSupported) return false;
 		return requestAt("textDocument/definition", document, position, now, response -> {
+			if (response.error != null && failed != null) failed(response.error);
+			else complete(response.error == null ? locations(response.result) : []);
+		});
+	}
+
+	public function requestTypeDefinition(document:Document, position:BufferPosition, now:Float, complete:Array<LanguageLocation>->Void, ?failed:String->Void):Bool {
+		if (!typeDefinitionSupported) return false;
+		return requestAt("textDocument/typeDefinition", document, position, now, response -> {
 			if (response.error != null && failed != null) failed(response.error);
 			else complete(response.error == null ? locations(response.result) : []);
 		});
@@ -412,6 +421,7 @@ class LanguageServiceClient {
 		hoverSupported = capability(capabilities, "hoverProvider");
 		completionSupported = capability(capabilities, "completionProvider");
 		definitionSupported = capability(capabilities, "definitionProvider");
+		typeDefinitionSupported = capability(capabilities, "typeDefinitionProvider");
 		signatureHelpSupported = capability(capabilities, "signatureHelpProvider");
 		symbolsSupported = capability(capabilities, "documentSymbolProvider");
 		referencesSupported = capability(capabilities, "referencesProvider");
@@ -537,13 +547,14 @@ class LanguageServiceClient {
 	function requestAt(method:String, document:Document, position:BufferPosition, now:Float, complete:JsonRpcResponse->Void):Bool {
 		var state = states.get(document.id), session = transport;
 		if (!ready || !accepts(document) || state == null || session == null || state.revision != document.buffer.stateId) return false;
-		if (method == "textDocument/definition") for (state in states) if (state.semanticRequest >= 0) invalidateSemanticTokens(state);
+		var navigation = method == "textDocument/definition" || method == "textDocument/typeDefinition";
+		if (navigation) for (state in states) if (state.semanticRequest >= 0) invalidateSemanticTokens(state);
 		var id = -1;
 		id = session.request(method, {textDocument: {uri: state.uri}, position: LspPositionCodec.encode(position)}, now, FEATURE_REQUEST_TIMEOUT, response -> {
-			if (method == "textDocument/definition" && definitionRequestId == id) definitionRequestId = -1;
+			if (navigation && definitionRequestId == id) definitionRequestId = -1;
 			complete(response);
 		});
-		if (method == "textDocument/definition") {
+		if (navigation) {
 			definitionRequestId = id;
 		}
 		return true;
@@ -614,6 +625,7 @@ class LanguageServiceClient {
 		formattingSupported = false; rangeFormattingSupported = false;
 		completionSupported = false;
 		definitionSupported = false;
+		typeDefinitionSupported = false;
 		signatureHelpSupported = false; symbolsSupported = false; referencesSupported = false; renameSupported = false;
 		for (state in states) state.release();
 		states.clear();

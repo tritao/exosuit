@@ -53,7 +53,7 @@ while True:
     if method == "initialize":
         capabilities = {"positionEncoding": "utf-8" if "bad-encoding" in sys.argv else "utf-16", "textDocumentSync": {"openClose": True, "change": 2}}
         if not minimal:
-            capabilities.update({"hoverProvider": True, "completionProvider": {}, "definitionProvider": True,
+            capabilities.update({"hoverProvider": True, "completionProvider": {}, "definitionProvider": True, "typeDefinitionProvider": True,
                                  "signatureHelpProvider": {"triggerCharacters": ["(", ","]}, "documentSymbolProvider": True, "referencesProvider": True, "renameProvider": {}, "documentFormattingProvider": True, "documentRangeFormattingProvider": True})
         if "--semantic" in sys.argv:
             capabilities["semanticTokensProvider"] = {"legend": {"tokenTypes": ["function", "class"], "tokenModifiers": ["readonly"]}, "full": True}
@@ -114,7 +114,7 @@ while True:
             threading.Timer(6.0, send, args=(response,)).start()
         else:
             send(response)
-    elif method == "textDocument/definition":
+    elif method in ("textDocument/definition", "textDocument/typeDefinition"):
         def reply(response):
             if "--definition-delay" in sys.argv:
                 threading.Timer(0.4, send, args=(response,)).start()

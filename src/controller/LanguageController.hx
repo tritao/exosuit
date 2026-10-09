@@ -226,6 +226,7 @@ class LanguageController {
 		commands.add("language:hover", commandContext -> hover(), commandContext -> supports("hover"));
 		commands.add("language:complete", commandContext -> complete(), commandContext -> supports("completion"));
 		commands.add("language:go-to-definition", commandContext -> definition(), commandContext -> activeDocument() != null);
+		commands.add("language:go-to-type-definition", commandContext -> definition(true), commandContext -> activeDocument() != null, "Go to Type Definition");
 		commands.add("navigation:go-back", _ -> navigateHistory(navigationBack, navigationForward), _ -> navigationBack.length > 0);
 		commands.add("navigation:go-forward", _ -> navigateHistory(navigationForward, navigationBack), _ -> navigationForward.length > 0);
 		commands.add("language:signature-help", commandContext -> signatureHelp(), commandContext -> supports("signature"));
@@ -296,7 +297,8 @@ class LanguageController {
 		definitionRequest++;
 	}
 
-	function definition():Void {
+	function definition(type:Bool = false):Void {
+		var label = type ? "Go to Type Definition" : "Go to Definition";
 		definitionRequest++;
 		var previous = client;
 		if (previous != null) previous.cancelDefinition();
@@ -304,8 +306,8 @@ class LanguageController {
 		if (client == null) start();
 		var service = client, view = context.activeView(), document = activeDocument();
 		if (view == null || document == null) return;
-		if (service == null || (service.ready && !service.definitionSupported)) {
-			root.getNotifications().publish("Go to Definition is unavailable: " + (service == null ? "start the language server" : service.ready ? "server does not support definitions" : service.status));
+		if (service == null || (service.ready && !(type ? service.typeDefinitionSupported : service.definitionSupported))) {
+			root.getNotifications().publish(label + " is unavailable: " + (service == null ? "start the language server" : service.ready ? "server does not support this navigation" : service.status));
 			return;
 		}
 		var revision = document.buffer.stateId, origin = currentLocation(), request = definitionRequest;
@@ -313,7 +315,7 @@ class LanguageController {
 		var valid = function() return request == definitionRequest && client == service && context.activeView() == view &&
 			document.buffer.stateId == revision && view.cursorLine() == position.line && view.cursorColumn() == position.column;
 		var navigate = function(location:LanguageLocation) {
-			if (!valid()) { root.getNotifications().publish("Definition result changed; run Go to Definition again"); return; }
+			if (!valid()) { root.getNotifications().publish(label + " result changed; run it again"); return; }
 			if (openLocation(location)) {
 				if (origin != null) { navigationBack.push(origin); if (navigationBack.length > 100) navigationBack.shift(); }
 				navigationForward.resize(0);
@@ -323,7 +325,7 @@ class LanguageController {
 		var finish = function(outcome:String) {
 			settled = true;
 			lastDefinitionTiming = {outcome: outcome, readinessMs: (sentAt - started) * 1000, totalMs: (Sys.time() - started) * 1000};
-			if (service.verbose) service.log("Go to Definition timing: " + haxe.Json.stringify(lastDefinitionTiming));
+			if (service.verbose) service.log(label + " timing: " + haxe.Json.stringify(lastDefinitionTiming));
 			if (request == definitionRequest) { pendingDefinition = null; definitionProgress = ""; }
 		};
 		pendingDefinition = function(now) {
@@ -332,27 +334,28 @@ class LanguageController {
 			}
 			if (now - started >= 30) {
 				finish("timeout"); service.cancelDefinition();
-				root.getNotifications().publish("Go to Definition timed out"); return;
+				root.getNotifications().publish(label + " timed out"); return;
 			}
-			if (now - started >= 0.2) definitionProgress = !service.ready ? "Initializing language server…" : sent ? "Finding definition…" : "Synchronizing document…";
+			if (now - started >= 0.2) definitionProgress = !service.ready ? "Initializing language server…" : sent ? (type ? "Finding type definition…" : "Finding definition…") : "Synchronizing document…";
 			if (sent || !service.ready) return;
-			if (!service.definitionSupported) { finish("unsupported"); root.getNotifications().publish("Server does not support definitions"); return; }
+			if (!(type ? service.typeDefinitionSupported : service.definitionSupported)) { finish("unsupported"); root.getNotifications().publish("Server does not support this navigation"); return; }
 			sentAt = now;
-			sent = service.requestDefinition(document, position, now, locations -> {
+			var sendRequest = type ? service.requestTypeDefinition : service.requestDefinition;
+			sent = sendRequest(document, position, now, locations -> {
 				if (settled) return;
 				finish("completed");
 				if (!valid()) return;
-				if (locations.length == 0) { root.getNotifications().publish("No definition found"); return; }
+				if (locations.length == 0) { root.getNotifications().publish(type ? "No type definition found" : "No definition found"); return; }
 				if (locations.length == 1) { navigate(locations[0]); return; }
 				var entries:Array<CommandViewEntry> = [];
 				for (index in 0...locations.length) entries.push(new CommandViewEntry(locations[index].path, locationLabel(locations[index]), Std.string(index)));
-				root.openCommandView(new CommandViewProvider("Go to Definition: ", entries, _ -> {}, (entry, query, backwards) -> {
+				root.openCommandView(new CommandViewProvider(label + ": ", entries, _ -> {}, (entry, query, backwards) -> {
 					if (entry == null) return;
 					root.closeCommandView();
 					var index = Std.parseInt(entry.value);
 					if (index != null && index >= 0 && index < locations.length) navigate(locations[index]);
 				}));
-			}, error -> { if (settled) return; finish("failed"); if (valid()) root.getNotifications().publish("Go to Definition failed: " + error); });
+			}, error -> { if (settled) return; finish("failed"); if (valid()) root.getNotifications().publish(label + " failed: " + error); });
 		};
 		pendingDefinition(started);
 	}
