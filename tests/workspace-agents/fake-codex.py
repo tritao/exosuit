@@ -93,13 +93,18 @@ for line in messages():
  elif method=='thread/items/list':
   reply(i,{'data':[{'turnId':'history','item':{'id':'historical-message','type':'agentMessage','text':'Persisted history'}}]})
  elif method=='model/list':
-  reply(i,{'data':[{'id':'fixture-model','model':'fixture-model','displayName':'Fixture model','hidden':False}], 'nextCursor':None})
+  reply(i,{'data':[
+   {'id':'fixture-model','model':'fixture-model','displayName':'Fixture model','hidden':False,
+    'defaultReasoningEffort':'low','supportedReasoningEfforts':[{'reasoningEffort':'low'},{'reasoningEffort':'high'}]},
+   {'id':'override-model','model':'override-model','displayName':'Override model','hidden':False,
+    'defaultReasoningEffort':'low','supportedReasoningEfforts':[{'reasoningEffort':'low'},{'reasoningEffort':'high'}]}
+  ], 'nextCursor':None})
  elif method=='turn/start':
   v=load();t=v['threads'][params['threadId']];v['prompts']+=1
   turn={'id':'turn-'+str(v['prompts']),'status':'inProgress'}
   t['turn']=turn;t['status']={'type':'active'};save(v)
   text=params['input'][0]['text']
-  v['lastPrompt']=text;v['lastModel']=params.get('model');save(v)
+  v['lastPrompt']=text;v['lastModel']=params.get('model');v['lastEffort']=params.get('effort');save(v)
   if text.startswith('界'): assert params.get('model')=='fixture-model'
   if text=='disconnect': sys.exit()
   if text=='oversize':

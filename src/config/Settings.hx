@@ -16,6 +16,10 @@ class Settings {
 		return paths;
 	}
 	public var applicationZoom:Int = 100;
+	/** Codex defaults used when Workbench creates a new thread. */
+	public var codexDefaultModel:String = "";
+	public var codexDefaultEffort:String = "model-default";
+	public var codexDefaultPermissions:String = "workspace-write";
 	public var fontSize:Int = 15;
 	public var explorerFontSize:Int = 15;
 	public var sidebarWidth:Int = 220;
@@ -68,6 +72,9 @@ class Settings {
 		result.fontPath = fontPath;
 		result.fontFallbackPaths = copyStrings(fontFallbackPaths);
 		result.applicationZoom = applicationZoom;
+		result.codexDefaultModel = codexDefaultModel;
+		result.codexDefaultEffort = codexDefaultEffort;
+		result.codexDefaultPermissions = codexDefaultPermissions;
 		result.fontSize = fontSize;
 		result.explorerFontSize = explorerFontSize;
 		result.sidebarWidth = sidebarWidth;

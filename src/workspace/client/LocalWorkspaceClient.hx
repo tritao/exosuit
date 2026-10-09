@@ -392,13 +392,17 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   public function agents():Null<AgentCatalog> return workbench.agents();
   public function agentError():Null<String> return workbench.agentError();
   public function refreshAgents():Void workbench.refreshAgents();
-  public function createAgent(group:String, thread:Null<String>, ?created:String->Void):Void workbench.createAgent(group, thread, created);
+  public function createAgent(group:String, thread:Null<String>, ?created:String->Void,
+      ?defaults:CodexSessionDefaults):Void
+    workbench.createAgent(group, thread, created, defaults);
   public function deleteAgent(id:String, ?deleted:Void->Void):Void workbench.deleteAgent(id, deleted);
   public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String):Void
     workbench.agentAction(id, action, text, request, model, effort);
   public function discoverAgents(group:String, cursor:Null<String>):Void workbench.discoverAgents(group, cursor);
   public function discoveredAgents():Null<AgentDiscovery> return workbench.discoveredAgents();
   public function agentView(id:String):Null<AgentView> return workbench.agentView(id);
+  public function listModels(cursor:Null<String>, done:Null<AgentModelsPage>->Null<String>->Void):Void
+    workbench.listModels(cursor, done);
 
   public function canReadTerminals():Bool return workbench.canReadTerminals();
   public function canControlTerminals():Bool return workbench.canControlTerminals();

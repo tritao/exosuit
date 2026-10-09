@@ -154,10 +154,7 @@ class CodexSessionPanel implements View {
     var effortModel = findModel(view.models, selectedModel == "" ? view.currentModel : selectedModel);
     var submit = function() {
       if (canSend && StringTools.trim(prompt) != "") {
-        var effort = selectedEffort;
-        if (effort == "" && selectedModel != "" && effortModel != null) effort = effortModel.defaultEffort;
-        client.agentAction(id, "prompt", prompt, null, selectedModel == "" ? null : selectedModel,
-          effort == "" ? null : effort);
+        client.agentAction(id, "prompt", prompt, null);
         prompt = "";
         frame();
       }
@@ -179,17 +176,19 @@ class CodexSessionPanel implements View {
     var headerStyle = new LayoutStyle();
     headerStyle.width = LayoutAxis.grow();
     headerStyle.childGap = 12;
+    var headerButtonStyle = new LayoutStyle();
+    headerButtonStyle.height = LayoutAxis.fixed(40);
     var heading = paragraph(view.record.name + " · " + (working ? "Working…" : stateLabel));
     var header:Array<KeyedView> = [new KeyedView("title", heading)];
     if (working) header.push(new KeyedView("stop", stop));
     var permissions = new Button("Permissions · " + CodexPermissions.labelForRecord(view.record.permissionProfile,
-      view.record.sandboxPolicy, view.record.approvalPolicy) + "  ▾", null, null, "codex-permissions");
+      view.record.sandboxPolicy, view.record.approvalPolicy) + "  ▾", headerButtonStyle, null, "codex-permissions");
     permissions.enabled = control && !working && view.requests.length == 0;
     permissions.onClickEvent = function(event) {
       if (permissions.enabled) openPermissionsMenu(client, id, view.record.thread, event);
     };
     header.push(new KeyedView("permissions", permissions));
-    header.push(new KeyedView("details", new Button(details ? "Hide session details" : "Session details", null, function() {
+    header.push(new KeyedView("details", new Button(details ? "Hide session details" : "Session details", headerButtonStyle, function() {
       details = !details;
       frame();
     }, "codex-details")));

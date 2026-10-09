@@ -28,7 +28,9 @@ The installed schema was generated with:
 ## Operations
 
 - Create a conversation in the selected group's inherited canonical directory.
-  New threads request `workspace-write` sandbox and `on-request` approvals.
+  New threads use the Workbench `workbench/codex` defaults for model, effort,
+  sandbox and approvals. The defaults are workspace-write/on-request, model
+  default effort and Codex's configured model unless changed in Settings.
 - Find existing threads in the selected directory and explicitly attach them.
   Read metadata before resume, validate cwd, and preserve existing thread policy.
 - Load the server model catalog in the composer and choose a model for the next
@@ -36,6 +38,9 @@ The installed schema was generated with:
   Model and effort choices are saved with the session and restored after Exosuit
   restarts. Model choices come from `model/list`; the server remains responsible
   for access.
+- When a prompt omits model or effort, the provider applies the saved session
+  choice. An explicit prompt value takes precedence. An absent saved choice
+  leaves that field to Codex.
 - Send a text prompt, watch streamed messages/tool activity, interrupt the active
   turn, or reconnect and read the latest turn plus eight recent history items.
 - Command/file approvals support approve once or decline. Truncated requests

@@ -34,6 +34,7 @@ class WorkbenchPanel implements View {
 	final showMenu:(Array<MenuItem>, UiEvent, Void->Bool)->Void;
 	final attach:WorkspaceGroup->Void;
 	final closeAgentTab:(String, String)->Void;
+	final createCodex:(String, String->Void)->Void;
 	public final model = new WorkbenchTreeModel();
 	public final tree:TreeView;
 	var catalogRevision = -1;
@@ -58,10 +59,11 @@ class WorkbenchPanel implements View {
 	public function new(client:WorkspaceWorkbenchClient, open:TerminalRecord->Bool, createTerminal:String->Void,
 		edit:(WorkspaceGroup, Bool)->Void, openFolder:String->Void, manage:Void->Void, requestFrame:Void->Void,
 		openAgent:String->Void, showMenu:(Array<MenuItem>, UiEvent, Void->Bool)->Void, attach:WorkspaceGroup->Void,
-		closeAgentTab:(String, String)->Void) {
+		closeAgentTab:(String, String)->Void, createCodex:(String, String->Void)->Void) {
 		this.client = client; this.open = open; this.createTerminal = createTerminal; this.edit = edit;
 		this.openFolder = openFolder; this.manage = manage; this.requestFrame = requestFrame;
 		this.openAgent = openAgent; this.showMenu = showMenu; this.attach = attach; this.closeAgentTab = closeAgentTab;
+		this.createCodex = createCodex;
 		var style = new LayoutStyle(); style.width = LayoutAxis.stretch(); style.height = LayoutAxis.grow();
 		tree = new TreeView("workbench-tree", model, style);
 		tree.expandOnSingleClick = true;
@@ -135,7 +137,7 @@ class WorkbenchPanel implements View {
 					client.agentService().canControlAgents() && !client.agentService().agentBusy() && agentCanBeRemoved(agent)));
 			}
 		}
-        items.push(new MenuItem("new-codex", "New Codex session", function() client.agentService().createAgent(groupId, null, openAgent),
+		items.push(new MenuItem("new-codex", "New Codex session", function() createCodex(groupId, openAgent),
             group != null && client.agentService().canControlAgents() && !client.agentService().agentBusy()));
         items.push(new MenuItem("new-terminal", "New terminal", function() createTerminal(groupId), group != null && client.canCreateGroupedTerminals() && !client.terminalCatalogBusy()));
         items.push(new MenuItem("new-group", "New group", function() beginGroup({id: workspace.client.WorkspaceIds.create("group"),
@@ -338,7 +340,7 @@ class WorkbenchPanel implements View {
 		terminal.enabled = selected != null && client.canCreateGroupedTerminals()
 			&& !client.terminalCatalogBusy();
 		var agent = toolbarButton("New Codex", IconName.Plus, function() {
-			if (selected != null) client.agentService().createAgent(selected.id, null, openAgent);
+			if (selected != null) createCodex(selected.id, openAgent);
 		}, "workbench-new-codex");
 		agent.enabled = selected != null && client.agentService().canControlAgents() && !client.agentService().agentBusy();
 		var selectedAgent = tree.selectedKey != null && StringTools.startsWith(tree.selectedKey, "a:")

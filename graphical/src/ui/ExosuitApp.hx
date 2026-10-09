@@ -137,6 +137,11 @@ class ExosuitApp implements DesktopUiApplication {
 	final tabClicks = new haxeon.ui.core.PointerClickSequence();
 	var statusMessage:String = "Ready";
 	var settingsPanel:Null<haxeon.ui.widgets.settings.SettingsPanel>;
+	var settingsModels:Array<workspace.service.WorkspaceAgentProtocol.AgentModel> = [];
+	var settingsModelsNext:Null<String>;
+	var settingsModelsPending:Bool = false;
+	var settingsModelsError:Null<String>;
+	var settingsModelsToken:Int = 0;
 	var contextMenu:Null<CommandMenu> = null;
 	var manageMenu:Null<CommandMenu> = null;
 	var viewRevision:Int = 0;
@@ -612,8 +617,41 @@ class ExosuitApp implements DesktopUiApplication {
 
 	public function openSettings():Void {
 		host.closeCommandView();
-		settingsPanel = new haxeon.ui.widgets.settings.SettingsPanel("exosuit-settings", application.settings.store, requestFrame);
+		settingsPanel = new ExosuitSettingsPanel(application.settings.store, function() return settingsModels, requestFrame);
+		settingsModels = [];
+		settingsModelsNext = null;
+		settingsModelsPending = false;
+		settingsModelsError = null;
+		loadSettingsModels(null);
 		requestFrame();
+	}
+
+	function loadSettingsModels(cursor:Null<String>):Void {
+		if (settingsModelsPending) return;
+		var client = workbenchClient == null ? null : workbenchClient.agentService();
+		if (client == null) {
+			settingsModelsError = "Connect a workspace to load Codex models";
+			requestFrame();
+			return;
+		}
+		settingsModelsPending = true;
+		settingsModelsError = null;
+		var token = ++settingsModelsToken;
+		client.listModels(cursor, function(page, error) {
+			if (token != settingsModelsToken || settingsPanel == null) return;
+			settingsModelsPending = false;
+			if (error != null || page == null) settingsModelsError = error == null ? "Could not load Codex models" : error;
+			else {
+				if (cursor == null) settingsModels = [];
+				for (model in page.models) {
+					var found = false;
+					for (existing in settingsModels) if (existing.model == model.model) found = true;
+					if (!found) settingsModels.push(model);
+				}
+				settingsModelsNext = page.next;
+			}
+			requestFrame();
+		});
 	}
 
 	public function setApplicationZoom(percent:Int):Void {
@@ -814,17 +852,28 @@ class ExosuitApp implements DesktopUiApplication {
 		if (settingsPanel != null) {
 			if (settingsPanel.catalog.store != application.settings.store) {
 				var filter = settingsPanel.filter, advanced = settingsPanel.showAdvanced, category = settingsPanel.selectedCategory;
-				settingsPanel = new haxeon.ui.widgets.settings.SettingsPanel("exosuit-settings", application.settings.store, requestFrame);
+				settingsPanel = new ExosuitSettingsPanel(application.settings.store, function() return settingsModels, requestFrame);
 				settingsPanel.setShowAdvanced(advanced);
 				settingsPanel.setFilter(filter);
 				if (category != null) settingsPanel.select(category);
 			}
+			var panel:haxeon.ui.widgets.settings.SettingsPanel = cast settingsPanel;
 			var settingsStyle = new LayoutStyle();
 			settingsStyle.width = LayoutAxis.grow();
 			settingsStyle.height = LayoutAxis.fixed(Math.max(180.0, Math.min(560.0, viewportHeight - 160.0)));
-			var dismiss = function() { settingsPanel = null; requestFrame(); };
-			var content = new Column("settings-content", [new KeyedView("panel", settingsPanel),
-				new KeyedView("close", new Button("Close", null, dismiss, "settings-close"))], settingsStyle);
+			var dismiss = function() { settingsPanel = null; settingsModelsToken++; settingsModelsPending = false; requestFrame(); };
+			var footer:Array<KeyedView> = [];
+			if (panel.selectedCategory == "workbench/codex") {
+				var modelButton = new Button(settingsModelsNext != null ? "More models" : "Refresh models", null,
+					function() loadSettingsModels(settingsModelsNext), "settings-codex-models-load");
+				modelButton.enabled = !settingsModelsPending;
+				footer.push(new KeyedView("models", modelButton));
+				if (settingsModelsPending) footer.push(new KeyedView("status", new Text("Loading Codex models…")));
+				else if (settingsModelsError != null) footer.push(new KeyedView("status", new Text(settingsModelsError)));
+			}
+			footer.push(new KeyedView("close", new Button("Close", null, dismiss, "settings-close")));
+			var content = new Column("settings-content", [new KeyedView("panel", panel),
+				new KeyedView("footer", new Row("settings-footer", footer))], settingsStyle);
 			var dialog = new haxeon.ui.widgets.overlays.Dialog("settings-dialog", "Settings", content, dismiss,
 				Math.max(240.0, Math.min(860.0, viewportWidth - 48.0)));
 			layers.push(new StackChild("settings", dialog, 0.0, 0.0, 50, LayoutAxis.grow(), LayoutAxis.grow()));
@@ -922,7 +971,8 @@ class ExosuitApp implements DesktopUiApplication {
 		terminalBrowserPanel = new WorkspaceTerminalsPanel(client, openCatalogTerminal, forgetCatalogTerminal, requestFrame);
 		workbenchPanel = new WorkbenchPanel(client, openCatalogTerminal, newGroupedTerminal, editWorkspaceGroup,
 			function(path) application.openArgument(path), openWorkspaceTerminals, requestFrame, openCodexAgent, showWorkbenchMenu,
-			attachCodexThread, function(resource, workspaceRoot) host.closeAgentTabs(resource, workspaceRoot));
+			attachCodexThread, function(resource, workspaceRoot) host.closeAgentTabs(resource, workspaceRoot),
+			createCodexAgent);
 		host.onActiveTabChanged = syncWorkbenchAgentSelection;
 		syncWorkbenchAgentSelection(host.activeTab());
 		if (sidebar.find("workbench") == null)
@@ -958,9 +1008,21 @@ class ExosuitApp implements DesktopUiApplication {
  function makeAgentTab(id:String,resource:String,root:String,title:String):UiAgentTab {
   return new UiAgentTab(id,resource,root,title,new CodexSessionPanel(function() return workbenchClient==null?null:workbenchClient.agentService(),resource,root,requestFrame,editorPalette,showWorkbenchMenu,
    function(group:String) {
-    var client=workbenchClient;
-    if(client!=null) client.agentService().createAgent(group,null,openCodexAgent);
+    createCodexAgent(group, openCodexAgent);
    }));
+ }
+
+ function createCodexAgent(group:String, created:String->Void):Void {
+  var client = workbenchClient;
+  if (client == null) return;
+  var settings = application.settings.current;
+  var model = StringTools.trim(settings.codexDefaultModel);
+  var defaults:workspace.client.CodexSessionDefaults = {
+   model: model == "" ? null : model,
+   effort: settings.codexDefaultEffort == "model-default" ? null : settings.codexDefaultEffort,
+   permissionProfile: settings.codexDefaultPermissions
+  };
+  client.agentService().createAgent(group, null, created, defaults);
  }
 
  function syncWorkbenchAgentSelection(tab:Null<UiEditorTab>):Void {

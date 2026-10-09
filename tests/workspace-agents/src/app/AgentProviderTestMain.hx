@@ -174,7 +174,7 @@ class AgentProviderTestMain {
 			}
 		}
 		var code = "", record:Null<AgentRecord> = null;
-		function create(id:String, thread:Null<String>):Void {
+		function create(id:String, thread:Null<String>, ?defaults:workspace.client.CodexSessionDefaults):Void {
 			code = "";
 			record = null;
 			var finished = false;
@@ -184,7 +184,10 @@ class AgentProviderTestMain {
 				id: id,
 				name: "Codex",
 				group: "work",
-				thread: thread
+				thread: thread,
+				defaultModel: defaults == null ? null : defaults.model,
+				defaultEffort: defaults == null ? null : defaults.effort,
+				permissionProfile: defaults == null ? null : defaults.permissionProfile
 			}, 20000, function(r) {
 				record = r;
 				finished = true;
@@ -194,7 +197,8 @@ class AgentProviderTestMain {
 			});
 			wait(function() return finished);
 		}
-		create("a", null);
+		var defaults:workspace.client.CodexSessionDefaults = {model: "fixture-model", effort: "high", permissionProfile: "workspace-write"};
+		create("a", null, defaults);
 		require(code == "provider_starting", "Lazy provider startup did not report state");
 		wait(function() return StringTools.startsWith(provider.status, "Codex connected"));
 		create("foreign-resource", "foreign");
@@ -203,11 +207,13 @@ class AgentProviderTestMain {
 		require(code == "provider_error", "Missing Codex thread attached");
 		create("owned-resource", "owned");
 		require(code == "provider_error", "Thread owned by another client attached");
-		create("a", null);
+		create("a", null, defaults);
 		require(record != null && record.thread == "thread-1", "Thread creation failed");
 		var created = record;
 		if (created == null)
 			throw "Missing created resource";
+		require(created.preferredModel == "fixture-model" && created.preferredEffort == "high",
+			"Creation defaults were not saved with the Codex session");
 		var thread = created.thread;
 		create("a", null);
 		require(record != null && record.thread == thread, "Repeated create duplicated thread");
@@ -218,7 +224,8 @@ class AgentProviderTestMain {
 				throw "Missing view";
 			return v;
 		}
-		function action(kind:String, text:String = "", request:Null<String> = null, model:Null<String> = null):Void {
+		function action(kind:String, text:String = "", request:Null<String> = null, model:Null<String> = null,
+				effort:Null<String> = null):Void {
 			code = "";
 			view = null;
 			var finished = false;
@@ -229,7 +236,8 @@ class AgentProviderTestMain {
 				action: kind,
 				text: text,
 				request: request,
-				model: model
+				model: model,
+				effort: effort
 			}, 20000, function(v) {
 				view = v;
 				finished = true;
@@ -245,10 +253,13 @@ class AgentProviderTestMain {
 		action("models");
 		require(snapshot().connectionState == "connected", "Connected agent view did not expose connection readiness");
 		var catalogModels = snapshot().models;
-		require(catalogModels != null && catalogModels.length == 1, "Model catalog missing");
+		require(catalogModels != null && catalogModels.length == 2, "Model catalog missing");
 		action("prompt", "invalid model", null, "unlisted-model");
 		require(code == "invalid_model", "Unlisted model accepted");
-		action("prompt", longPrompt, null, "fixture-model");
+		action("prompt", longPrompt);
+		var firstTurn:Dynamic = haxe.Json.parse(sys.io.File.getContent(root + "/fake-codex.json"));
+		require(Reflect.field(firstTurn, "lastModel") == "fixture-model" && Reflect.field(firstTurn, "lastEffort") == "high",
+			"A prompt without overrides did not use the saved model and effort");
 		wait(function() {
 			action("read");
 			return view != null && snapshot().requests.length == 1;
@@ -283,8 +294,11 @@ class AgentProviderTestMain {
 			return snapshot().record.state == "completed";
 		});
 		// A lost acknowledgement must not replay a turn.
-		action("prompt", "disconnect");
+		action("prompt", "disconnect", null, "override-model", "low");
 		require(code == "provider_error", "Disconnected prompt not marked ambiguous");
+		var overriddenTurn:Dynamic = haxe.Json.parse(sys.io.File.getContent(root + "/fake-codex.json"));
+		require(Reflect.field(overriddenTurn, "lastModel") == "override-model" && Reflect.field(overriddenTurn, "lastEffort") == "low",
+			"An explicit prompt model and effort did not override the saved defaults");
 		wait(function() {
 			action("read");
 			return snapshot().record.state == "working" && snapshot().record.turn != null;

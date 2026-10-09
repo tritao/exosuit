@@ -10,6 +10,7 @@ import workspace.service.WorkspaceAgents;
 import workspace.service.WorkspaceProtocol;
 import workspace.runtime.WorkspaceDirectories;
 import workspace.client.CodexPermissions;
+import workspace.client.CodexPermissions.CodexPermissionProfile;
 import haxeon.rpc.RpcConnection;
 import haxeon.rpc.RpcContext;
 
@@ -109,6 +110,18 @@ class CodexProvider implements WorkspaceAgents {
 
 	static function valid(s:String, n:Int):Bool
 		return s != null && s.length > 0 && s.length <= n;
+
+	function catalogModel(id:Null<String>):Null<AgentModel> {
+		if (id != null && models != null) for (entry in models) if (entry.model == id) return entry;
+		return null;
+	}
+
+	function effortSupported(effort:Null<String>, model:Null<String>):Bool {
+		if (effort == null) return true;
+		if (!valid(effort, 64)) return false;
+		var entry = catalogModel(model);
+		return entry == null || entry.supportedEfforts == null || entry.supportedEfforts.contains(effort);
+	}
 
 	function save(s:Session):Void {
 		if (storageFailed)
@@ -746,6 +759,48 @@ class CodexProvider implements WorkspaceAgents {
 				next: more ? records[records.length - 1].id : null
 			});
 		});
+		connection.register(WorkspaceAgentProtocol.MODELS, function(q, ctx) {
+			if (!allowed(q.workspace, q.instance, false)) {
+				ctx.fail({code: "unauthorized", message: "Codex model catalog denied", ambiguous: false});
+				return;
+			}
+			if (q.cursor != null && !valid(q.cursor, 2048)) {
+				ctx.fail({code: "invalid_cursor", message: "Invalid model catalog cursor", ambiguous: false});
+				return;
+			}
+			if (phase != "ready") {
+				start(true);
+				ctx.fail({code: "provider_starting", message: status, ambiguous: false});
+				return;
+			}
+			call("model/list", {limit: 32, includeHidden: false, cursor: q.cursor}, function(r) {
+				if (r.error != null) {
+					ctx.fail({code: "provider_error", message: r.error, ambiguous: false});
+					return;
+				}
+				var data:Dynamic = Reflect.field(r.result, "data");
+				if (!Std.isOfType(data, Array) || (cast data:Array<Dynamic>).length > 32) {
+					ctx.fail({code: "provider_error", message: "Invalid model catalog", ambiguous: false});
+					return;
+				}
+				var page:Array<AgentModel> = [];
+				for (entry in (cast data:Array<Dynamic>)) {
+					if (Reflect.field(entry, "hidden") == true) continue;
+					var model = string(entry, "model"), name = string(entry, "displayName");
+					if (!valid(model, 256) || !valid(name, 256)) {
+						ctx.fail({code: "provider_error", message: "Invalid model catalog entry", ambiguous: false});
+						return;
+					}
+					page.push({model: model, name: name, defaultEffort: null, supportedEfforts: null});
+				}
+				var next = string(r.result, "nextCursor");
+				if (next.length > 2048) {
+					ctx.fail({code: "provider_error", message: "Invalid model catalog cursor", ambiguous: false});
+					return;
+				}
+				ctx.respond({models: page, next: next == "" ? null : next});
+			});
+		});
 		connection.register(WorkspaceAgentProtocol.DISCOVER, function(q, ctx) {
 			if (!allowed(q.workspace, q.instance, false)) {
 				ctx.fail({code: "unauthorized", message: "Thread discovery denied", ambiguous: false});
@@ -828,6 +883,31 @@ class CodexProvider implements WorkspaceAgents {
 				ctx.fail({code: "conflict", message: "Thread already attached", ambiguous: false});
 				return;
 			}
+			var defaultModel:Null<String> = null;
+			var defaultEffort:Null<String> = null;
+			var permissionProfile:Null<CodexPermissionProfile> = null;
+			if (q.thread == null) {
+				if (q.defaultModel != null && StringTools.trim(q.defaultModel).length > 0) {
+					defaultModel = StringTools.trim(q.defaultModel);
+					if (!valid(defaultModel, 256)) {
+						ctx.fail({code: "invalid_model", message: "Default Codex model must be a model ID of at most 256 characters", ambiguous: false});
+						return;
+					}
+				}
+				if (q.defaultEffort != null) {
+					defaultEffort = q.defaultEffort;
+					if (!effortSupported(defaultEffort, defaultModel)) {
+						ctx.fail({code: "invalid_effort", message: "Choose an effort supported by the selected Codex model", ambiguous: false});
+						return;
+					}
+				}
+				var profileId = q.permissionProfile == null ? "workspace-write" : q.permissionProfile;
+				permissionProfile = CodexPermissions.find(profileId);
+				if (permissionProfile == null) {
+					ctx.fail({code: "invalid_permissions", message: "Choose a supported default Codex permission preset", ambiguous: false});
+					return;
+				}
+			}
 			if (phase != "ready") {
 				start(true);
 				ctx.fail({code: "provider_starting", message: status + "; retry when connected", ambiguous: false});
@@ -843,9 +923,11 @@ class CodexProvider implements WorkspaceAgents {
 					state: "creating",
 					turn: null,
 					workspaceRoot: directories.root,
-					sandboxPolicy: q.thread == null ? "workspaceWrite" : null,
-					approvalPolicy: q.thread == null ? "on-request" : null,
-					permissionProfile: q.thread == null ? "workspace-write" : null
+					sandboxPolicy: permissionProfile == null ? null : permissionProfile.sandboxPolicy,
+					approvalPolicy: permissionProfile == null ? null : permissionProfile.approvalPolicy,
+					permissionProfile: permissionProfile == null ? null : permissionProfile.id,
+					preferredModel: defaultModel,
+					preferredEffort: defaultEffort
 				},
 				activity: "",
 				conversation: new CodexConversation(),
@@ -909,9 +991,18 @@ class CodexProvider implements WorkspaceAgents {
 				}
 				ctx.respond(copy(s.record));
 			}
-			if (q.thread == null)
-				call("thread/start", {cwd: cwd, sandbox: "workspace-write", approvalPolicy: "on-request"}, complete);
-			else
+			if (q.thread == null) {
+				var startProfile = permissionProfile;
+				if (startProfile == null) {
+					ctx.fail({code: "invalid_permissions", message: "Missing Codex permission preset", ambiguous: false});
+					return;
+				}
+				call("thread/start", {
+					cwd: cwd,
+					sandbox: startProfile.threadSandbox,
+					approvalPolicy: startProfile.approvalPolicy
+				}, complete);
+			} else
 				loadThread(s, complete);
 		});
 		connection.register(WorkspaceAgentProtocol.ACTION, function(q, ctx) {
@@ -1075,21 +1166,15 @@ class CodexProvider implements WorkspaceAgents {
 			}
 			if (q.action == "model-settings") {
 				if (q.model != null) {
-					var known = false;
-					if (models != null) for (entry in models) if (entry.model == q.model) known = true;
-					if (!valid(q.model, 256) || !known) {
+					if (!valid(q.model, 256) || catalogModel(q.model) == null) {
 						ctx.fail({code: "invalid_model", message: "Choose a model from the current catalog", ambiguous: false});
 						return;
 					}
 				}
 				if (q.effort != null) {
-					if (!valid(q.effort, 64)) {
-						ctx.fail({code: "invalid_effort", message: "Choose a reasoning effort from the model catalog", ambiguous: false});
-						return;
-					}
-					var effortModel = q.model == null ? s.currentModel : q.model;
-					if (models != null && effortModel != null) for (entry in models) if (entry.model == effortModel
-						&& (entry.supportedEfforts == null || !entry.supportedEfforts.contains(q.effort))) {
+					var effortModel = q.model == null
+						? (s.record.preferredModel == null ? s.currentModel : s.record.preferredModel) : q.model;
+					if (!effortSupported(q.effort, effortModel)) {
 						ctx.fail({code: "invalid_effort", message: "Choose a reasoning effort supported by the selected model", ambiguous: false});
 						return;
 					}
@@ -1117,33 +1202,28 @@ class CodexProvider implements WorkspaceAgents {
 					ctx.fail({code: "busy", message: "Agent is busy or prompt is invalid", ambiguous: false});
 					return;
 				}
-				if (q.model != null) {
-                    var known = false;
-                    if (models != null) for (entry in models) if (entry.model == q.model) known = true;
-                    if (!known) {
-                        ctx.fail({code: "invalid_model", message: "Choose a model from the current catalog", ambiguous: false});
-                        return;
-					}
+				var effectiveModel = q.model == null ? s.record.preferredModel : q.model;
+				var effectiveEffort = q.effort == null ? s.record.preferredEffort : q.effort;
+				if (effectiveModel != null && !valid(effectiveModel, 256)) {
+					ctx.fail({code: "invalid_model", message: "Choose a valid Codex model ID", ambiguous: false});
+					return;
 				}
-				if (q.effort != null) {
-					if (!valid(q.effort, 64)) {
-						ctx.fail({code: "invalid_effort", message: "Choose a reasoning effort from the model catalog", ambiguous: false});
-						return;
-					}
-					var effortModel = q.model == null ? s.currentModel : q.model;
-					if (models != null && effortModel != null) for (entry in models) if (entry.model == effortModel
-						&& (entry.supportedEfforts == null || !entry.supportedEfforts.contains(q.effort))) {
-						ctx.fail({code: "invalid_effort", message: "Choose a reasoning effort supported by the selected model", ambiguous: false});
-						return;
-					}
+				if (effectiveModel != null && models != null && modelsNext == null && catalogModel(effectiveModel) == null) {
+					ctx.fail({code: "invalid_model", message: "Choose a model from the current catalog", ambiguous: false});
+					return;
+				}
+				var effortModel = effectiveModel == null ? s.currentModel : effectiveModel;
+				if (!effortSupported(effectiveEffort, effortModel)) {
+					ctx.fail({code: "invalid_effort", message: "Choose a reasoning effort supported by the selected model", ambiguous: false});
+					return;
 				}
 				s.busy = true;
 				s.record.state = "working";
 				s.error = null;
 				append(s, "\nYou: " + q.text + "\n");
                 var params:Dynamic = {threadId: s.record.thread, input: [{type: "text", text: q.text, text_elements: new Array<String>()}]};
-                if (q.model != null) Reflect.setField(params, "model", q.model);
-                if (q.effort != null) Reflect.setField(params, "effort", q.effort);
+                if (effectiveModel != null) Reflect.setField(params, "model", effectiveModel);
+                if (effectiveEffort != null) Reflect.setField(params, "effort", effectiveEffort);
                 if (s.record.approvalPolicy != null) Reflect.setField(params, "approvalPolicy", s.record.approvalPolicy);
                 if (s.record.sandboxPolicy != null) Reflect.setField(params, "sandboxPolicy", {type: s.record.sandboxPolicy});
                 call("turn/start", params, function(r) {
@@ -1156,10 +1236,10 @@ class CodexProvider implements WorkspaceAgents {
 					}
 					var t = Reflect.field(r.result, "turn");
 					s.record.turn = string(t, "id");
-					if (q.model != null) {
-						s.currentModel = q.model;
-						s.currentEffort = q.effort;
-					} else if (q.effort != null) s.currentEffort = q.effort;
+					if (effectiveModel != null) {
+						s.currentModel = effectiveModel;
+						s.currentEffort = effectiveEffort;
+					} else if (effectiveEffort != null) s.currentEffort = effectiveEffort;
 					save(s);
 					ctx.respond(view(s));
 				});

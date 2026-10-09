@@ -48,6 +48,38 @@ class PreferencesRegistry {
 		}
 		{
 			var options = new SettingOptions();
+			// The settings dialog renders this persisted value with the live Codex model picker.
+			options.internal = true;
+			if (!projectOnly) registry.define("workbench/codex/default_model", PropertyType.Text, PropertyValue.Text(defaults.codexDefaultModel), options);
+		}
+		{
+			var options = new SettingOptions();
+			options.tooltip = "Reasoning effort for new Workbench Codex sessions.";
+			options.options = [
+				new PropertyOption("model-default", "Model default"),
+				new PropertyOption("none", "None"),
+				new PropertyOption("minimal", "Minimal"),
+				new PropertyOption("low", "Low"),
+				new PropertyOption("medium", "Medium"),
+				new PropertyOption("high", "High"),
+				new PropertyOption("xhigh", "Extra high"),
+				new PropertyOption("max", "Maximum")
+			];
+			if (!projectOnly) registry.define("workbench/codex/default_effort", PropertyType.Enum, PropertyValue.Enum(defaults.codexDefaultEffort), options);
+		}
+		{
+			var options = new SettingOptions();
+			options.tooltip = "Permission preset for new Workbench Codex sessions. Full access skips approval prompts; existing sessions keep their selected preset.";
+			options.advanced = true;
+			options.options = [
+				new PropertyOption("read-only", "Read-only"),
+				new PropertyOption("workspace-write", "Workspace access"),
+				new PropertyOption("full-access", "Full access")
+			];
+			if (!projectOnly) registry.define("workbench/codex/default_permissions", PropertyType.Enum, PropertyValue.Enum(defaults.codexDefaultPermissions), options);
+		}
+		{
+			var options = new SettingOptions();
 			options.options = [new PropertyOption("auto", "Auto"), new PropertyOption("always", "Always"), new PropertyOption("hidden", "Hidden")];
 			if (!projectOnly) registry.define("editor/display/scrollbar_visibility", PropertyType.Enum, PropertyValue.Enum(defaults.scrollbarVisibility), options);
 		}
@@ -240,6 +272,9 @@ class PreferencesRegistry {
 	public static function snapshot(store:SettingsStore, ?base:Settings):Settings {
 		var value = base == null ? new Settings() : base.copy();
 		if (store.registry.exists("appearance/workbench/zoom_percent") && (base == null || !store.isDefault("appearance/workbench/zoom_percent"))) value.applicationZoom = store.getInt("appearance/workbench/zoom_percent");
+		if (store.registry.exists("workbench/codex/default_model") && (base == null || !store.isDefault("workbench/codex/default_model"))) value.codexDefaultModel = store.getString("workbench/codex/default_model");
+		if (store.registry.exists("workbench/codex/default_effort") && (base == null || !store.isDefault("workbench/codex/default_effort"))) value.codexDefaultEffort = store.getString("workbench/codex/default_effort");
+		if (store.registry.exists("workbench/codex/default_permissions") && (base == null || !store.isDefault("workbench/codex/default_permissions"))) value.codexDefaultPermissions = store.getString("workbench/codex/default_permissions");
 		if (store.registry.exists("editor/fonts/font_path") && (base == null || !store.isDefault("editor/fonts/font_path"))) value.fontPath = store.getString("editor/fonts/font_path");
 		if (store.registry.exists("editor/fonts/font_fallback_paths") && (base == null || !store.isDefault("editor/fonts/font_fallback_paths"))) value.fontFallbackPaths = strings(store.getString("editor/fonts/font_fallback_paths"));
 		if (store.registry.exists("editor/fonts/font_size") && (base == null || !store.isDefault("editor/fonts/font_size"))) value.fontSize = store.getInt("editor/fonts/font_size");

@@ -119,6 +119,17 @@ resets to 100%; macOS uses Cmd. Each step changes zoom by 10 percentage points.
 Zoom scales the whole interface and is independent of editor/terminal font size
 and monitor pixel density. It applies immediately and persists across launches.
 
+Workbench Codex defaults are available under `workbench/codex`. The Settings
+dialog offers a searchable model dropdown loaded from Codex; “Codex default”
+uses Codex's configured model. The saved `default_model` value is the model ID,
+`default_effort` accepts Model default, None, Minimal, Low, Medium, High, Extra
+high or Maximum, and `default_permissions` accepts Read-only, Workspace access
+or Full access (which skips approval prompts). Turn on Advanced Settings to edit
+the permission default. These apply when Workbench creates a new Codex thread.
+Attaching an existing thread keeps its current policy, and changing these
+defaults does not change existing Workbench sessions. Effort support depends on
+the selected model.
+
 Text fields and the editor support Ctrl+Backspace/Delete to delete the previous/next
 word (Option on macOS). Selected text is deleted as-is. Editor word deletion works
 with multiple carets and restores the original carets on undo.

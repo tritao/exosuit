@@ -6,6 +6,14 @@ import workspace.service.WorkspaceAgentProtocol;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceTerminalProtocol;
 
+private typedef PendingModelList = {
+  var cursor:Null<String>;
+  var done:Null<WorkspaceAgentProtocol.AgentModelsPage>->Null<String>->Void;
+  var connection:RpcConnection;
+  var deadline:Float;
+  var next:Float;
+}
+
 /** Typed terminal and agent RPC resources shared by local and remote transports. */
 class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements WorkspaceAgentClient {
   final endpoint:WorkspaceRpcEndpoint;
@@ -43,6 +51,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   var agentCreated:Null < String -> Void >;
   var createNext:Float = 0;
   var createDeadline:Float = 0;
+  var pendingModels:Null<PendingModelList>;
 
   public function new(endpoint:WorkspaceRpcEndpoint, clock:Void -> Float) {
     this.endpoint = endpoint;
@@ -57,6 +66,11 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   public function poll():Void {
     var current = rpc();
     if (current != observedConnection) {
+      if (pendingModels != null) {
+        var cancelled = pendingModels;
+        pendingModels = null;
+        cancelled.done(null, "Workspace connection changed");
+      }
       var lost = observedConnection != null;
       observedConnection = current;
       catalog = null;
@@ -89,9 +103,15 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     }
     continueDiscovery();
     continueAgentCreate();
+    continueModels();
   }
 
   public function dispose():Void {
+    if (pendingModels != null) {
+      var cancelled = pendingModels;
+      pendingModels = null;
+      cancelled.done(null, "Workspace connection closed");
+    }
     observedConnection = null;
     pendingDiscovery = null;
     discovery = null;
@@ -115,6 +135,41 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   public function agents():Null < WorkspaceAgentProtocol.AgentCatalog > return agentCatalog;
   public function agentError():Null < String > return agentActionError == null ? agentsError : agentActionError;
   public function agentView(id:String):Null < WorkspaceAgentProtocol.AgentView > return agentViews.get(id);
+  public function listModels(cursor:Null<String>, done:Null<WorkspaceAgentProtocol.AgentModelsPage>->Null<String>->Void):Void {
+    var connection = rpc();
+    if (connection == null || !canReadAgents()) {
+      done(null, "Connect a workspace to load Codex models");
+      return;
+    }
+    pendingModels = {cursor: cursor, done: done, connection: connection, deadline: clock() + 60000, next: 0};
+    continueModels();
+  }
+
+  function continueModels():Void {
+    var pending = pendingModels;
+    if (pending == null || clock() < pending.next) return;
+    if (clock() >= pending.deadline || rpc() != pending.connection) {
+      pendingModels = null;
+      pending.done(null, "Codex model catalog did not load");
+      return;
+    }
+    pending.next = pending.deadline;
+    pending.connection.call(WorkspaceAgentProtocol.MODELS,
+      {workspace: "workspace", instance: instance(), cursor: pending.cursor}, 20000,
+      function(page) {
+        if (pendingModels != pending) return;
+        pendingModels = null;
+        pending.done(page, null);
+      }, function(error) {
+        if (pendingModels != pending) return;
+        if (error.code == "provider_starting" && !error.ambiguous) {
+          pending.next = clock() + 500;
+          return;
+        }
+        pendingModels = null;
+        pending.done(null, error.message);
+      });
+  }
   public function discoveredAgents():Null < WorkspaceAgentProtocol.AgentDiscovery > return discovery;
 
   public function refreshAgents():Void {
@@ -221,7 +276,8 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     );
   }
 
-  public function createAgent(group:String, thread:Null<String>, ? created:String -> Void):Void {
+  public function createAgent(group:String, thread:Null<String>, ? created:String -> Void,
+      ?defaults:CodexSessionDefaults):Void {
     if (rpc() == null || !canControlAgents() || agentMutation) return;
     agentMutation = true;
     agentsError = null;
@@ -232,7 +288,10 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       id: WorkspaceIds.create("agent"),
       group: group,
       name: "Codex",
-      thread: thread
+      thread: thread,
+      defaultModel: thread == null && defaults != null ? defaults.model : null,
+      defaultEffort: thread == null && defaults != null ? defaults.effort : null,
+      permissionProfile: thread == null && defaults != null ? defaults.permissionProfile : null
     };
     createDeadline = clock() + 60000;
     createNext = 0;

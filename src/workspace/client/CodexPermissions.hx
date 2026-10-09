@@ -5,14 +5,15 @@ typedef CodexPermissionProfile = {
 	var id:String;
 	var label:String;
 	var sandboxPolicy:String;
+	var threadSandbox:String;
 	var approvalPolicy:String;
 }
 
 class CodexPermissions {
 	public static function profiles():Array<CodexPermissionProfile> return [
-		{id: "read-only", label: "Read-only", sandboxPolicy: "readOnly", approvalPolicy: "on-request"},
-		{id: "workspace-write", label: "Workspace access", sandboxPolicy: "workspaceWrite", approvalPolicy: "on-request"},
-		{id: "full-access", label: "Full access", sandboxPolicy: "dangerFullAccess", approvalPolicy: "never"}
+		{id: "read-only", label: "Read-only", sandboxPolicy: "readOnly", threadSandbox: "read-only", approvalPolicy: "on-request"},
+		{id: "workspace-write", label: "Workspace access", sandboxPolicy: "workspaceWrite", threadSandbox: "workspace-write", approvalPolicy: "on-request"},
+		{id: "full-access", label: "Full access", sandboxPolicy: "dangerFullAccess", threadSandbox: "danger-full-access", approvalPolicy: "never"}
 	];
 
 	public static function find(id:String):Null<CodexPermissionProfile> {

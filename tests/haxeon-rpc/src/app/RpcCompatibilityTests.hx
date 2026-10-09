@@ -18,7 +18,7 @@ class RpcCompatibilityTests {
 			throw message;
 	}
 
-	public static function bytes(hex:String):Bytes {
+  public static function bytes(hex:String):Bytes {
 		var result = Bytes.alloc(Std.int(hex.length / 2));
 		for (index in 0...result.length) {
 			var value = Std.parseInt("0x" + hex.substr(index * 2, 2));
@@ -45,9 +45,20 @@ class RpcCompatibilityTests {
 	public static function run():Void {
 
   var agentCreate:AgentCreate={workspace:"w",instance:"i",id:"a",group:"g",name:"Codex",thread:null};
-  require(WorkspaceAgentProtocol.CREATE.encodeRequest(agentCreate).compare(bytes("8601a17702a16903a16104a16705a5436f64657806c0"))==0,"Agent create vector changed");
+  var legacyCreateBytes = bytes("8601a17702a16903a16104a16705a5436f64657806c0");
+  require(WorkspaceAgentProtocol.CREATE.decodeRequest(legacyCreateBytes).id == "a",
+    "Legacy Agent create vector no longer decodes");
+  require(WorkspaceAgentProtocol.CREATE.encodeRequest(agentCreate).compare(bytes("8901a17702a16903a16104a16705a5436f64657806c007c008c009c0")) == 0,
+    "Agent create vector changed");
+  var configuredCreate:AgentCreate={workspace:"w",instance:"i",id:"b",group:"g",name:"Codex",thread:null,
+    defaultModel:"fixture-model",defaultEffort:"high",permissionProfile:"read-only"};
+  var restoredCreate=WorkspaceAgentProtocol.CREATE.decodeRequest(WorkspaceAgentProtocol.CREATE.encodeRequest(configuredCreate));
+  require(restoredCreate.defaultModel=="fixture-model" && restoredCreate.defaultEffort=="high"
+    && restoredCreate.permissionProfile=="read-only", "Agent creation defaults did not survive RPC encoding");
   var agentAction:AgentAction={workspace:"w",instance:"i",id:"a",action:"prompt",text:"hi",request:null};
-  require(WorkspaceAgentProtocol.ACTION.encodeRequest(agentAction).compare(bytes("8601a17702a16903a16104a670726f6d707405a2686906c0"))==0,"Agent prompt vector changed");
+  require(WorkspaceAgentProtocol.ACTION.decodeRequest(bytes("8601a17702a16903a16104a670726f6d707405a2686906c0")).action == "prompt",
+    "Legacy Agent prompt vector no longer decodes");
+  require(WorkspaceAgentProtocol.ACTION.encodeRequest(agentAction).compare(bytes("8901a17702a16903a16104a670726f6d707405a2686906c007c008c009c0"))==0,"Agent prompt vector changed");
   var agentWideRoot="";for(_ in 0...1024) agentWideRoot+="😀";
   var agentWideName="";for(_ in 0...256) agentWideName+="😀";
   var agents:Array<AgentRecord> = [];

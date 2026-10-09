@@ -44,6 +44,10 @@ import haxeon.wire.MessagePack;
 	@:id(5) var name:String;
 	// Null creates a new thread; non-null explicitly attaches an existing thread.
 	@:id(6) var thread:Null<String>;
+	/** Defaults for new threads only; ignored when attaching an existing thread. */
+	@:optional @:id(7) var defaultModel:Null<String>;
+	@:optional @:id(8) var defaultEffort:Null<String>;
+	@:optional @:id(9) var permissionProfile:Null<String>;
 }
 
 @:wire typedef AgentModel = {
@@ -121,9 +125,23 @@ import haxeon.wire.MessagePack;
 	@:id(2) var next:Null<String>;
 }
 
+@:wire typedef AgentModelsQuery = {
+	@:id(1) var workspace:String;
+	@:id(2) var instance:String;
+	@:id(3) var cursor:Null<String>;
+}
+
+@:wire typedef AgentModelsPage = {
+	@:id(1) var models:Array<AgentModel>;
+	@:id(2) var next:Null<String>;
+}
+
 class WorkspaceAgentProtocol {
 	public static inline final READ = "workspace.agents.read";
 	public static inline final CONTROL = "workspace.agents.control";
+	public static final MODELS = new RpcMethod<AgentModelsQuery, AgentModelsPage>(124, function(v:AgentModelsQuery) return MessagePack.encode(v),
+		function(b:Bytes):AgentModelsQuery return MessagePack.decode(b), function(v:AgentModelsPage) return MessagePack.encode(v),
+		function(b:Bytes):AgentModelsPage return MessagePack.decode(b));
 	public static final DISCOVER = new RpcMethod<AgentDiscoveryQuery, AgentDiscovery>(123, function(v:AgentDiscoveryQuery) return MessagePack.encode(v),
 		function(b:Bytes):AgentDiscoveryQuery return MessagePack.decode(b), function(v:AgentDiscovery) return MessagePack.encode(v),
 		function(b:Bytes):AgentDiscovery return MessagePack.decode(b));
