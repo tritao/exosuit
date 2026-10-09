@@ -70,17 +70,52 @@ class WorkbenchController {
 
 	public function openFileCommandView():Void {
 		var entries:Array<CommandViewEntry> = [];
-		for (project in workspace.projects)
+		var seen:Map<String, Bool> = [];
+		// Merge overlapping indexes before ranking. The deepest project owns the
+		// display path, independent of the order projects were opened.
+		var projects = workspace.projects.copy();
+		projects.sort(function(left, right) {
+			var depth = right.root.length - left.root.length;
+			return depth != 0 ? depth : Reflect.compare(left.root, right.root);
+		});
+		for (project in projects) {
+			var projectLabel = fileProjectLabel(project, projects);
 			for (node in project.files()) {
-				var relative = node.path.substring(project.root.length + 1);
-				entries.push(new CommandViewEntry(relative, project.name, node.path));
+				// Project roots are already resolved by FileSystemService. Normalize
+				// separators/dot segments lexically here; do not stat every indexed file.
+				var path = haxe.io.Path.normalize(StringTools.replace(node.path, "\\", "/"));
+				if (seen.exists(path)) continue;
+				seen.set(path, true);
+				var prefix = StringTools.endsWith(project.root, "/") ? project.root : project.root + "/";
+				var relative = StringTools.startsWith(path, prefix) ? path.substring(prefix.length) : node.name;
+				entries.push(new CommandViewEntry(relative, projectLabel, path, null, path + " " + projectLabel));
 			}
+		}
 		root.openCommandView(new CommandViewProvider("", entries, function(query) {}, function(entry, query, backwards) {
 			if (entry != null) openDocument(entry.value);
 			root.closeCommandView();
 		}, null, null, function(query, entry) {
 			return entry == null ? query : entry.label;
 		}));
+	}
+
+	/** Shortest root suffix that distinguishes projects with matching names. */
+	static function fileProjectLabel(project:workspace.Project, projects:Array<workspace.Project>):String {
+		var parts = project.root.split("/"), start = parts.length - 1;
+		while (start >= 0) {
+			var label = parts.slice(start).join("/");
+			var ambiguous = false;
+			for (other in projects) {
+				if (other.root == project.root) continue;
+				if (other.root == label || StringTools.endsWith(other.root, "/" + label)) {
+					ambiguous = true;
+					break;
+				}
+			}
+			if (!ambiguous) return label.length == 0 ? project.root : label;
+			start--;
+		}
+		return project.root;
 	}
 
 	public function openPathCommandView(directory:Bool):Void {
