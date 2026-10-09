@@ -653,6 +653,29 @@ class UiWorkbenchHost implements WorkbenchHost {
 
 	public function openDocument(document:Document):View return openDocumentTab(document, false);
 
+	public function revealDocument(document:Document):Bool {
+		var candidates = [activePane];
+		for (pane in panes) if (pane != activePane) candidates.push(pane);
+		for (pane in candidates) for (item in pane.items) {
+			var view = UiEditorTabs.document(item);
+			if (view != null && view.document == document) {
+				activateTab(document, pane.id);
+				return true;
+			}
+		}
+		return false;
+	}
+
+	public function captureCloseActiveTab(force:Bool):Void->Bool {
+		var item = activeTab(), pane = activePane.id;
+		return function() return item != null && closeTab(item, pane, force);
+	}
+
+	public function captureCloseActivePane(force:Bool):Void->Bool {
+		var pane = activePane.id;
+		return function() return closePane(pane, force);
+	}
+
 	public function openPreview(document:Document):View return openDocumentTab(document, true);
 
 	public function keepDocument(document:Document, ?paneId:String):Void {
@@ -769,29 +792,33 @@ class UiWorkbenchHost implements WorkbenchHost {
 		return item != null && closeTab(item, activePane.id, force);
 	}
 
-	public function documentsLostByClosingActivePane():Array<Document> {
+	public function documentsLostByClosingActivePane():Array<Document> return documentsLostByClosingPane(activePane);
+
+	function documentsLostByClosingPane(target:UiEditorPane):Array<Document> {
 		var result:Array<Document> = [];
 		if (!canCloseActivePane()) return result;
-		for (view in activePane.tabs) {
+		for (view in target.tabs) {
 			var shared = false;
-			for (pane in panes) if (pane != activePane)
+			for (pane in panes) if (pane != target)
 				for (other in pane.tabs) if (other.document == view.document) shared = true;
 			if (!shared && !result.contains(view.document)) result.push(view.document);
 		}
 		return result;
 	}
 
-	public function closeActivePane(force:Bool = false):Bool {
-		if (!canCloseActivePane()) return false;
-		var lost = documentsLostByClosingActivePane();
+	public function closeActivePane(force:Bool = false):Bool return closePane(activePane.id, force);
+
+	function closePane(id:String, force:Bool):Bool {
+		var removed = paneById(id);
+		if (removed == null || !canCloseActivePane()) return false;
+		var lost = documentsLostByClosingPane(removed);
 		if (!force) for (document in lost) if (document.dirty) return false;
-		var removed = activePane;
 		panes.remove(removed);
 		dockActions.model.unregister(removed.id);
 		for (item in removed.items) UiEditorTabs.dispose(item);
 		removed.items.resize(0);
 		for (document in lost) workspace.documents.close(document, true);
-		activatePane(panes[0]);
+		if (activePane == removed) activatePane(panes[0]); else requestFrame();
 		return true;
 	}
 

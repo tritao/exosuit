@@ -234,6 +234,7 @@ class ApplicationTestMain {
 		require(application.requestCloseActivePane() && !root.commandView.active && !root.node.isLeaf(),
 			"shared-document pane close prompted or failed to collapse");
 		require(root.closeActivePane(true) && root.node.isLeaf(), "closing final pane did not collapse layout root");
+		while (root.canCloseActiveTab()) require(root.closeActiveTab(true), "could not clear earlier close fixtures");
 		var failing = new Document("/missing-parent/failure.txt", "clean", application.syntaxes);
 		failing.insert(new BufferSelection(), "dirty");
 		application.add(failing);
@@ -242,15 +243,40 @@ class ApplicationTestMain {
 		application.keyPressed(Platform.KEY_ENTER, 0);
 		require(application.documents.documents.indexOf(failing) >= 0 && failing.dirty && !root.commandView.active,
 			"failed save closed or cleaned the document");
+		var failingPane = root.activeLeaf;
+		require(root.splitActive(LayoutKind.Horizontal), "quit fixture split failed");
+		failingPane = root.node.firstLeaf();
+		require(root.closeActiveTab(true), "quit fixture shared view could not close");
 		var quitOther = application.documents.createUntitled();
 		quitOther.insert(new BufferSelection(), "quit dirty");
+		application.add(quitOther);
+		var secondPane = root.activeLeaf;
+		application.newDocument();
+		var cleanQuitDocument = root.tabs.activeView.getDocument();
+		var closeCleanTarget = root.captureCloseActiveTab(true);
+		root.activateLeaf(failingPane);
+		require(closeCleanTarget() && root.node.findDocument(cleanQuitDocument) == null
+			&& root.node.findDocument(failing) != null, "captured close followed a different active pane");
+		root.activateLeaf(secondPane);
 		require(application.requestQuit(), "quit coordination did not start");
+		require(root.activeLeaf == failingPane && root.tabs.activeView.getDocument() == failing,
+			"first quit prompt did not reveal its existing pane and tab");
 		application.textInput("discard");
 		application.keyPressed(Platform.KEY_ENTER, 0);
+		require(root.activeLeaf == secondPane && root.tabs.activeView.getDocument() == quitOther,
+			"next quit prompt did not reveal its existing pane and tab");
 		application.textInput("cancel");
 		application.keyPressed(Platform.KEY_ENTER, 0);
 		require(!application.quitReady && application.documents.documents.indexOf(failing) >= 0
 			&& application.documents.documents.indexOf(quitOther) >= 0, "cancel during multi-document quit released state");
+
+		require(application.requestQuit(), "second quit coordination did not start");
+		quitOther.undo(new BufferSelection());
+		require(!quitOther.dirty, "quit skip fixture did not become clean");
+		application.textInput("discard");
+		application.keyPressed(Platform.KEY_ENTER, 0);
+		require(application.quitReady && !root.commandView.active,
+			"quit prompted a document that became clean while confirming another document");
 
 		root.update();
 

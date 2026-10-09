@@ -143,6 +143,40 @@ class ModelWorkbenchHost implements WorkbenchHost {
 
 	public function reorderActiveTab(delta:Int):Bool return tabs.reorderActive(delta);
 
+	public function revealDocument(document:Document):Bool {
+		for (view in tabs.views) if (view.getDocument() == document) { tabs.setActive(view); return true; }
+		var view = node.findDocument(document);
+		if (view == null) return false;
+		var leaf = leafForView(node, view);
+		if (leaf == null) return false;
+		activateLeaf(leaf);
+		tabs.setActive(view);
+		return true;
+	}
+
+	public function captureCloseActiveTab(force:Bool):Void->Bool {
+		var view = tabs.activeView;
+		return function() {
+			if (view == null) return false;
+			var leaf = leafForView(node, view);
+			if (leaf == null) return false;
+			activateLeaf(leaf);
+			tabs.setActive(view);
+			return closeActiveTab(force);
+		};
+	}
+
+	public function captureCloseActivePane(force:Bool):Void->Bool {
+		var leaf = activeLeaf;
+		return function() {
+			var leaves:Array<ModelLayoutNode> = [];
+			collectLeaves(node, leaves);
+			if (leaves.indexOf(leaf) < 0) return false;
+			activateLeaf(leaf);
+			return closeActivePane(force);
+		};
+	}
+
 	public function openDocument(document:Document):View {
 		if (document.hasBackingPath()) sidebar.selectPath(document.requirePath());
 		var existing = node.findDocument(document);

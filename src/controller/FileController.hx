@@ -53,7 +53,7 @@ class FileController {
 	}
 
 	public function requestCloseActiveTab():Bool
-		return requestCloseTab(root.documentsLostByClosingActiveTab(), function() return root.closeActiveTab(true));
+		return requestCloseTab(root.documentsLostByClosingActiveTab(), root.captureCloseActiveTab(true));
 
 	/** Confirm losses before closing a stable tab target supplied by a UI host. */
 	public function requestCloseTab(documentsLost:Array<Document>, close:Void->Bool):Bool
@@ -61,7 +61,7 @@ class FileController {
 
 	public function requestCloseActivePane():Bool {
 		if (!root.canCloseActivePane()) return false;
-		return beginClose(root.documentsLostByClosingActivePane(), function() return root.closeActivePane(true));
+		return beginClose(root.documentsLostByClosingActivePane(), root.captureCloseActivePane(true));
 	}
 
 	public function requestQuit(?onReady:Void->Void):Bool {
@@ -211,6 +211,10 @@ class FileController {
 
 	function continueClose():Void {
 		if (!closePending) return;
+		while (closeIndex < closeDocuments.length && !closeDocuments[closeIndex].dirty) {
+			recovery.forget(closeDocuments[closeIndex]);
+			closeIndex++;
+		}
 		if (closeIndex >= closeDocuments.length) {
 			var action = closeAction;
 			closePending = false;
@@ -220,6 +224,7 @@ class FileController {
 			return;
 		}
 		var document = closeDocuments[closeIndex];
+		root.revealDocument(document);
 		confirmations.saveChanges(document.title,
 			function(answer) {
 				if (answer == "cancel") cancelClose();

@@ -54,6 +54,11 @@ interface WorkbenchHost {
 
 	// -- Open/activate document & active-editor input dispatch --
 	function openDocument(document:Document):View;
+	/** Reveal an existing document view, preferring the active pane; never create a tab. */
+	function revealDocument(document:Document):Bool;
+	/** Capture close targets before asynchronous prompts can change the active view. */
+	function captureCloseActiveTab(force:Bool):Void->Bool;
+	function captureCloseActivePane(force:Bool):Void->Bool;
 	function documentRenamed(document:Document):Void;
 	/** Closes all views of a clean document, without changing the active pane. Refuses dirty documents. */
 	function closeDocument(document:Document):Bool;

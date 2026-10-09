@@ -33,6 +33,9 @@ class DecorationSmokeApp extends ExosuitApp {
 	var menuAllowed:Bool = true;
 	var menuDocument:Null<editor.Document> = null;
 	var firstPopupY:Float = -1.0;
+	var quitSecondDocument:Null<editor.Document>;
+	var quitFirstPane:String = "";
+	var quitViewCount:Int = 0;
 	var savedPaneLines:Array<String> = [];
 	var popupScrollController:Null<haxeon.ui.widgets.scroll.ScrollController> = null;
 
@@ -612,6 +615,41 @@ class DecorationSmokeApp extends ExosuitApp {
 			var view = host.activeView();
 			if (view == null || view.document.buffer.line(0) != "日本") throw "IME handoff lost or duplicated committed text";
 		}
+		if (phase == "quit-reveal" && frames == 4) {
+			menuDocument = host.activeDocument();
+			quitFirstPane = host.activePane.id;
+			host.activeView().textInput("first dirty");
+			if (!host.splitActive(view.LayoutKind.Horizontal) || !host.closeActiveTab(true)) throw "quit split fixture failed";
+			application.newDocument();
+			host.activeView().textInput("second dirty");
+			quitSecondDocument = host.activeDocument();
+			application.newDocument(); // Clean file must not prompt.
+			quitViewCount = host.allViews().length;
+			if (!application.requestQuit() || host.activeDocument() != menuDocument || host.activePane.id != quitFirstPane)
+				throw "quit did not reveal first document in its original pane";
+		}
+		if (phase == "quit-reveal" && (frames == 5 || frames == 6)) {
+			var expected = frames == 5 ? menuDocument : quitSecondDocument;
+			if (expected == null || host.activeDocument() != expected || saveConfirmation != expected.title || host.allViews().length != quitViewCount)
+				throw "save prompt did not reveal existing document without duplicating tabs";
+			var dialog = ui.root == null ? null : findEditor(ui.root, "save-confirmation");
+			if (dialog == null || ui.focus.focusedId == null || dialog.find(ui.focus.focusedId) == null)
+				throw "revealing document stole keyboard focus from save dialog";
+			if (frames == 5) {
+				var discard = findEditor(ui.root, "save-confirmation-discard");
+				if (discard == null) throw "missing discard action";
+				var bounds = discard.globalBounds();
+				ui.pointerDown(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+				ui.pointerUp(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+			} else ui.key(UiEventKind.KeyDown, UiKey.Escape);
+		}
+		if (phase == "quit-reveal" && frames == 7) {
+			var first = menuDocument, second = quitSecondDocument;
+			if (first == null || second == null) throw "missing quit documents";
+			if (application.quitReady || saveConfirmation != null || host.allViews().length != quitViewCount
+				|| !first.dirty || !second.dirty) throw "cancelled quit lost documents or proceeded";
+			trace("PASS: quit reveals each existing pane/tab, skips clean documents and retains modal focus and cancelled edits");
+		}
 		if (StringTools.startsWith(phase, "pane-close-") && frames == 5) {
 			if (phase != "pane-close-shared") application.newDocument();
 			var active = host.activeView();
@@ -622,11 +660,17 @@ class DecorationSmokeApp extends ExosuitApp {
 			if (phase == "pane-close-shared") {
 				if (host.panes.length != 1 || host.commandView.active || host.activeDocument() != menuDocument ||
 					!application.documents.documents.contains(active.document)) throw "shared dirty document was lost or prompted";
-			} else if (host.panes.length != 2 || !host.commandView.active) throw "unique dirty pane bypassed confirmation";
+			} else if (host.panes.length != 2 || saveConfirmation == null) throw "unique dirty pane bypassed confirmation";
 		}
 		if (StringTools.startsWith(phase, "pane-close-") && phase != "pane-close-shared" && frames == 6) {
 			if (phase == "pane-close-cancel") ui.key(UiEventKind.KeyDown, UiKey.Escape);
-			else { ui.text(UiEventKind.TextInput, "discard"); ui.key(UiEventKind.KeyDown, UiKey.Enter); }
+			else {
+				var discard = ui.root == null ? null : findEditor(ui.root, "save-confirmation-discard");
+				if (discard == null) throw "missing pane discard action";
+				var bounds = discard.globalBounds();
+				ui.pointerDown(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+				ui.pointerUp(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+			}
 		}
 		if (StringTools.startsWith(phase, "pane-move-") && frames == 5) {
 			if (phase == "pane-move-unique") application.newDocument();
@@ -772,7 +816,7 @@ class DecorationSmokeApp extends ExosuitApp {
 		}
 
 		if (StringTools.startsWith(phase, "pane-close-") && frames == 7) {
-			if (host.commandView.active) throw "pane confirmation did not finish";
+			if (saveConfirmation != null) throw "pane confirmation did not finish";
 			if (phase == "pane-close-cancel") {
 				if (host.panes.length != 2 || host.activeDocument() != menuDocument) throw "cancel lost pane or document";
 			} else if (host.panes.length != 1) throw "confirmed pane did not collapse";
