@@ -14,6 +14,13 @@ import haxeon.ui.core.BuildContext;
 import haxeon.ui.core.RenderNode;
 import haxeon.ui.core.View;
 import haxeon.ui.core.TextStyleOverride;
+import haxeon.ui.core.CursorShape;
+import haxeon.ui.core.UiEventKind;
+import haxeon.ui.semantics.Semantics;
+import haxeon.ui.semantics.AccessibilityRole;
+import haxeon.ui.semantics.AccessibilityAction;
+import nativekit.ffi.NativeKit;
+import nativekit.ffi.NativeKitTypes;
 import haxeon.ui.widgets.KeyedView;
 import haxeon.ui.widgets.layout.Column;
 import haxeon.ui.widgets.layout.Row;
@@ -32,11 +39,16 @@ class CodexMarkdownView implements View {
   var value:String;
   final models:Map<String, WorkspaceFileTextModel> = [];
   final palette:style.Theme;
+  final openLink:String->Void;
   static var syntaxes:Null<SyntaxRegistry>;
 
-  public function new(value:String, palette:style.Theme) {
+  public function new(value:String, palette:style.Theme, ?openLink:String->Void) {
     this.value = value;
     this.palette = palette;
+    this.openLink = openLink == null ? function(destination) {
+      if (NativeKit.nk_shell_open_url(destination) != Result.Ok)
+        throw "Unable to open link: " + NativeKit.nk_last_error();
+    } : openLink;
   }
 
   public function update(value:String):Void this.value = value;
@@ -115,12 +127,12 @@ class CodexMarkdownView implements View {
         if (heading.match(text)) { size = 24 - heading.matched(1).length; text = heading.replace(text, ""); }
         var prose = new LayoutStyle(); prose.width = LayoutAxis.grow();
         text = ~/^[-*+] /gm.replace(text, "• ");
-        if (text.indexOf("`") < 0) rows.push(new KeyedView(key, new Text(text, prose, null, TextStyleOverride.text(size))));
+        if (text.indexOf("`") < 0 && text.indexOf("](") < 0) rows.push(new KeyedView(key, new Text(text, prose, null, TextStyleOverride.text(size))));
         else {
           var lines:Array<KeyedView> = [], lineIndex = 0;
           for (line in text.split("\n")) {
             var lineKey = key + "-line-" + lineIndex++;
-            var pieces:Array<KeyedView> = [], word:Array<KeyedView> = [], cursor = 0, part = 0;
+            var pieces:Array<KeyedView> = [], word:Array<KeyedView> = [], part = 0;
             // Whitespace separates layout groups; adjacent punctuation and code
             // stay together. Trailing spaces on Text widgets are not measurable.
             function flushWord():Void {
@@ -138,16 +150,15 @@ class CodexMarkdownView implements View {
                 else word.push(new KeyedView("text-" + part++, new Text(token, null, null, TextStyleOverride.text(size))));
               }
             }
-            while (cursor < line.length) {
-              var open = line.indexOf("`", cursor);
-              var close = open < 0 ? -1 : line.indexOf("`", open + 1);
-              var end = close < 0 ? line.length : open;
-              appendText(line.substring(cursor, end));
-              if (close < 0) break;
-              var chip = new LayoutStyle(); chip.padding = new Insets(4, 1, 4, 1); chip.background = context.theme.tokens.surfaceSunken;
-              word.push(new KeyedView("inline-" + part++, new Text(line.substring(open + 1, close), chip, null,
-                TextStyleOverride.text(size - 1, null, null, FontFamily.Monospace))));
-              cursor = close + 1;
+            for (span in CodexMarkdown.inlineSpans(line)) {
+              if (span.kind == "text") appendText(span.text);
+              else if (span.kind == "link") word.push(new KeyedView("link-" + part++,
+                new CodexMarkdownLink(span.text, span.destination, size, openLink)));
+              else {
+                var chip = new LayoutStyle(); chip.padding = new Insets(4, 1, 4, 1); chip.background = context.theme.tokens.surfaceSunken;
+                word.push(new KeyedView("inline-" + part++, new Text(span.text, chip, null,
+                  TextStyleOverride.text(size - 1, null, null, FontFamily.Monospace))));
+              }
             }
             flushWord();
             var spaceKey = Std.string(size);
@@ -175,5 +186,29 @@ class CodexMarkdownView implements View {
     }
     var layout = new LayoutStyle(); layout.width = LayoutAxis.grow(); layout.childGap = 12;
     return new Column("codex-markdown", rows, layout).build(context);
+  }
+}
+
+private class CodexMarkdownLink implements View {
+  final label:String;
+  final destination:String;
+  final size:Float;
+  final openLink:String->Void;
+
+  public function new(label:String, destination:String, size:Float, openLink:String->Void) {
+    this.label = label; this.destination = destination; this.size = size; this.openLink = openLink;
+  }
+
+  public function build(context:BuildContext):RenderNode {
+    var layout = new LayoutStyle(); layout.width = LayoutAxis.fit();
+    var node = new Text(label, layout, context.theme.tokens.accent, TextStyleOverride.text(size)).build(context);
+    node.focusable = true;
+    node.cursor = CursorShape.Hand;
+    var semantics = new Semantics(AccessibilityRole.Link, label, destination);
+    semantics.actions = AccessibilityAction.Activate;
+    node.semantics = semantics;
+    node.on(UiEventKind.Click, function(_) openLink(destination));
+    node.on(UiEventKind.Activate, function(_) openLink(destination));
+    return node;
   }
 }
