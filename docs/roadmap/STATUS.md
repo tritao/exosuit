@@ -83,8 +83,8 @@ pass (2/2). The source-tree launcher opens a responsive Exosuite window.
 
 The Windows NativeKit file-watch backend is committed on `exosuit-followon` as
 `d18f949a`; Haxeon records that submodule update on `exosuit-followon` as
-`64d35384`. The root M17.2 follow-up slice is recorded in its implementation
-commit below.
+`64d35384`. The root M17.2 follow-up slice is committed on `main` as
+`92f0b05`.
 
 M17.2's local service behavior and acceptance fixtures are complete. The
 remaining paired-device trust restriction is implemented with the M17.3 RPC

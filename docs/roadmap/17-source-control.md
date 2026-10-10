@@ -1,6 +1,6 @@
 # M17 — Source control
 
-Status: planned. The design is [ADR 0004](../architecture/0004-source-control.md).
+Status: in progress. The design is [ADR 0004](../architecture/0004-source-control.md).
 
 Depends on:
 - M9 (sidebar modes, panes);
