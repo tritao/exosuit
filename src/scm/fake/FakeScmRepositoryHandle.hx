@@ -30,6 +30,7 @@ class FakeScmRepositoryHandle implements ScmRepositoryHandle {
 	public function features():ScmFeatures return featuresValue;
 
 	public function refresh(generation:Int, complete:ScmJobResult<ScmSnapshot>->Void):ScmJob<ScmSnapshot> {
+		script.refreshCalls++;
 		var error = availableError("refresh"), value = error == null ? script.nextSnapshot() : null;
 		if (error == null && value == null) error = new ScmError("operation_failed", "The fake repository has no snapshots");
 		return schedule(generation, value, error, complete);

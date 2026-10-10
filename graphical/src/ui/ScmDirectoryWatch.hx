@@ -14,6 +14,7 @@ class ScmDirectoryWatch {
 	final byHandle:Map<Int, ScmWatchState> = [];
 	final subscription:NativeKitEventSubscription;
 	var disposed:Bool = false;
+	public var lastError(default, null):Null<String>;
 
 	public function new(scm:ScmService, events:NativeKitEvents) {
 		this.scm = scm;
@@ -23,6 +24,7 @@ class ScmDirectoryWatch {
 	/** Replaces watches for one project root; unsupported watches use SCM polling. */
 	public function update(root:String, paths:Array<String>):Void {
 		if (disposed) return;
+		lastError = null;
 		var key = pathKey(root), previous = states.get(key);
 		if (previous != null) disposeState(previous);
 		scm.setWatchAvailable(root, false);
@@ -31,7 +33,10 @@ class ScmDirectoryWatch {
 		var options = new FileWatchOptions();
 		options.set_struct_size(24);
 		var created = NativeKit.nk_file_watch_create(options);
-		if (created.status != Result.Ok) return;
+		if (created.status != Result.Ok) {
+			lastError = nativeError("Creating the SCM file watcher failed");
+			return;
+		}
 		var watch = created.out_watch;
 		var state = new ScmWatchState(key, root, watch);
 		states.set(key, state);
@@ -43,6 +48,7 @@ class ScmDirectoryWatch {
 			for (parent in selected) if (within(parent, path)) { covered = true; break; }
 			if (covered) continue;
 			if (NativeKit.nk_file_watch_add_directory(watch.borrow(), path, true) != Result.Ok) {
+				lastError = nativeError("Watching " + path + " failed");
 				disposeState(state);
 				return;
 			}
@@ -50,6 +56,11 @@ class ScmDirectoryWatch {
 		}
 		state.paths = selected;
 		scm.setWatchAvailable(root, true);
+	}
+
+	public function isWatching(root:String):Bool {
+		var state = states.get(pathKey(root));
+		return state != null && state.watch != null;
 	}
 
 	public function dispose():Void {
@@ -71,6 +82,7 @@ class ScmDirectoryWatch {
 				for (path in state.paths) {
 					if (state.watch == null) break;
 					if (NativeKit.nk_file_watch_add_directory(state.watch.borrow(), path, true) != Result.Ok) {
+						lastError = nativeError("Re-arming the SCM watch for " + path + " failed");
 						disposeState(state);
 						break;
 					}
@@ -98,6 +110,11 @@ class ScmDirectoryWatch {
 			watch.close();
 		}
 		state.paths.resize(0);
+	}
+
+	static function nativeError(message:String):String {
+		var detail = NativeKit.nk_last_error();
+		return detail == null || detail.length == 0 ? message : message + ": " + detail;
 	}
 
 	static function within(parent:String, child:String):Bool {

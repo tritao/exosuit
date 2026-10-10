@@ -48,14 +48,32 @@ class ScmGitTestMain {
 		require(complete(), message);
 	}
 
+	static function pumpService(service:ScmService, scheduler:JobScheduler, complete:Void->Bool, message:String,
+			timeout:Float = 10.0):Void {
+		var deadline = Sys.time() + timeout;
+		while (!complete() && Sys.time() < deadline) {
+			service.update(Sys.time());
+			scheduler.update(32);
+			Sys.sleep(0.001);
+		}
+		require(complete(), message);
+	}
+
 	static function runGit(git:GitProcess, scheduler:JobScheduler, arguments:Array<String>, cwd:String, generation:Int,
 			readOnly:Bool = false):scm.git.GitCommandResult {
+		var result = runGitResult(git, scheduler, arguments, cwd, generation, readOnly);
+		if (result.error != null || result.value == null)
+			throw "Git fixture command failed: " + (result.error == null ? arguments.join(" ") : result.error.message);
+		return result.value;
+	}
+
+	static function runGitResult(git:GitProcess, scheduler:JobScheduler, arguments:Array<String>, cwd:String, generation:Int,
+			readOnly:Bool = false):ScmJobResult<scm.git.GitCommandResult> {
 		var result:Null<ScmJobResult<scm.git.GitCommandResult>> = null;
 		git.run(arguments, cwd, generation, value -> result = value, readOnly);
 		pump(scheduler, () -> result != null, "Git fixture command timed out: " + arguments.join(" "));
-		if (result == null || result.error != null || result.value == null)
-			throw "Git fixture command failed: " + (result == null || result.error == null ? arguments.join(" ") : result.error.message);
-		return result.value;
+		if (result == null) throw "Git fixture command returned no result: " + arguments.join(" ");
+		return result;
 	}
 
 	static function deleteTree(path:String):Void {
@@ -67,6 +85,20 @@ class ScmGitTestMain {
 	}
 
 	static function normalizeNewlines(value:String):String return StringTools.replace(value, "\r\n", "\n");
+
+	static function shellQuote(value:String):String
+		return "'" + StringTools.replace(value, "'", "'\\''") + "'";
+
+	static function markerCommand(directory:String, name:String, marker:String, consumeInput:Bool):String {
+		var markerPath = marker, scriptPath = directory + "/" + name;
+		scriptPath += ".sh";
+		var content = "#!/bin/sh\nprintf 'ran\\n' >> " + shellQuote(markerPath) + "\n";
+		if (consumeInput) content += "cat >/dev/null\n";
+		if (name == "fsmonitor-hook") content += "printf 'token\\0marked.txt\\0'\n";
+		else content += "printf 'token\\n'\n";
+		File.saveContent(scriptPath, content);
+		return "sh " + shellQuote(scriptPath);
+	}
 
 	static function readBlob(reader:GitBlobReader, scheduler:JobScheduler, reference:String, path:Bytes, generation:Int):ScmJobResult<ScmBlob> {
 		var result:Null<ScmJobResult<ScmBlob>> = null;
@@ -296,12 +328,25 @@ class ScmGitTestMain {
 		File.saveContent(discoveryRoot + "/one.txt", "one");
 		File.saveContent(discoveryRoot + "/two.txt", "two");
 		File.saveContent(discoveryRoot + "/filtered.txt", "before filter\n");
+		File.saveContent(discoveryRoot + "/marked.txt", "before marker\n");
 		runGit(git, gitScheduler, ["add", "filtered.txt"], discoveryRoot, 711);
-		File.saveContent(discoveryRoot + "/.gitattributes", "filtered.txt filter=unsafe\n");
+		runGit(git, gitScheduler, ["add", "marked.txt"], discoveryRoot, 710);
+		File.saveContent(discoveryRoot + "/.gitattributes", "filtered.txt filter=unsafe\nmarked.txt filter=marker\n");
 		runGit(git, gitScheduler, ["add", ".gitattributes"], discoveryRoot, 712);
 		runGit(git, gitScheduler, ["config", "filter.unsafe.clean", "exosuite-missing-filter-command"], discoveryRoot, 713);
 		runGit(git, gitScheduler, ["config", "filter.unsafe.smudge", "cat"], discoveryRoot, 714);
 		runGit(git, gitScheduler, ["config", "filter.unsafe.required", "true"], discoveryRoot, 715);
+		var fsmonitorMarker = fixtureBase + "/fsmonitor-ran", cleanMarker = fixtureBase + "/clean-ran",
+			smudgeMarker = fixtureBase + "/smudge-ran";
+		var fsmonitorCommand = markerCommand(fixtureBase, "fsmonitor-hook", fsmonitorMarker, false),
+			cleanCommand = markerCommand(fixtureBase, "clean-filter", cleanMarker, true),
+			smudgeCommand = markerCommand(fixtureBase, "smudge-filter", smudgeMarker, true);
+		runGit(git, gitScheduler, ["config", "core.fsmonitor", fsmonitorCommand], discoveryRoot, 716);
+		runGit(git, gitScheduler, ["config", "core.fsmonitorHookVersion", "2"], discoveryRoot, 726);
+		runGit(git, gitScheduler, ["config", "filter.marker.clean", cleanCommand], discoveryRoot, 717);
+		runGit(git, gitScheduler, ["config", "filter.marker.smudge", smudgeCommand], discoveryRoot, 718);
+		runGit(git, gitScheduler, ["config", "filter.marker.required", "true"], discoveryRoot, 719);
+		File.saveContent(discoveryRoot + "/marked.txt", "after marker\n");
 		File.saveContent(discoveryRoot + "/filtered.txt", "after filter\n");
 		var trustStore = new ScmTrustStore(fixtureBase + "/trust.json"),
 			provider = new GitScmProvider(processManager, gitScheduler, git.executable, emptyHooks, trustStore, 1, 2),
@@ -346,6 +391,14 @@ class ScmGitTestMain {
 			&& snapshotGroup(firstSnapshotValue, ScmGroupId.WorkingTree) != null,
 			"Git untracked limit did not mark a truncated status snapshot");
 		require(firstSnapshotValue.head.unborn, "Git status lost the unborn repository state");
+		require(!FileSystem.exists(fsmonitorMarker) && !FileSystem.exists(cleanMarker) && !FileSystem.exists(smudgeMarker),
+			"restricted Git status or original-content setup ran an fsmonitor or filter command");
+		var restrictedOriginal:Null<ScmJobResult<ScmBlob>> = null;
+		rootHandle.original(ScmRef.Index, "marked.txt", 731, value -> restrictedOriginal = value);
+		pump(gitScheduler, () -> restrictedOriginal != null, "Restricted original-content read timed out");
+		require(restrictedOriginal != null && restrictedOriginal.error == null && restrictedOriginal.value != null
+			&& restrictedOriginal.value.bytes.toString() == "before marker\n" && !FileSystem.exists(smudgeMarker),
+			"restricted original-content read ran the smudge filter or returned filtered content");
 		var unchangedSnapshot:Null<ScmJobResult<ScmSnapshot>> = null;
 		rootHandle.refresh(74, value -> unchangedSnapshot = value);
 		pump(gitScheduler, () -> unchangedSnapshot != null, "Git unchanged refresh timed out");
@@ -360,6 +413,23 @@ class ScmGitTestMain {
 		var reloadedTrust = new ScmTrustStore(fixtureBase + "/trust.json");
 		require(rootHandle.repository().trusted && trustStore.isTrusted(discoveryRoot) && reloadedTrust.isTrusted(discoveryRoot),
 			"Local trust decision was not persisted");
+		var trustedSnapshot:Null<ScmJobResult<ScmSnapshot>> = null;
+		rootHandle.refresh(732, value -> trustedSnapshot = value);
+		pump(gitScheduler, () -> trustedSnapshot != null, "Trusted status refresh timed out");
+		require(trustedSnapshot != null && trustedSnapshot.error == null && FileSystem.exists(fsmonitorMarker),
+			"trusted status did not allow the configured fsmonitor command");
+		var trustedFilterConversion:Null<ScmJobResult<scm.git.GitCommandResult>> = null;
+		git.run(["hash-object", "--path=marked.txt", "marked.txt"], discoveryRoot, 734,
+			value -> trustedFilterConversion = value, true, false);
+		pump(gitScheduler, () -> trustedFilterConversion != null, "Trusted Git filter fixture timed out");
+		require(trustedFilterConversion != null && trustedFilterConversion.error == null && FileSystem.exists(cleanMarker),
+			"trusted Git content conversion did not allow the configured clean filter");
+		var trustedOriginal:Null<ScmJobResult<ScmBlob>> = null;
+		rootHandle.original(ScmRef.Index, "marked.txt", 733, value -> trustedOriginal = value);
+		pump(gitScheduler, () -> trustedOriginal != null, "Trusted original-content read timed out");
+		require(trustedOriginal != null && trustedOriginal.error == null && trustedOriginal.value != null
+			&& trustedOriginal.value.bytes.toString() == "before marker\n" && !FileSystem.exists(smudgeMarker),
+			"original-content reads stopped returning raw Git objects after trust");
 		runGit(git, gitScheduler, ["-c", "user.name=SCM Test", "-c", "user.email=scm@example.invalid", "commit", "--allow-empty", "-m", "initial"], discoveryRoot, 76);
 		var linkedRoot = discoveryRoot + "/linked";
 		runGit(git, gitScheduler, ["worktree", "add", "-b", "scm-linked-fixture", linkedRoot, "HEAD"], discoveryRoot, 77);
@@ -410,6 +480,16 @@ class ScmGitTestMain {
 		if (initialServiceSnapshot == null) throw "SCM service lost its initial snapshot";
 		var serviceSnapshot:ScmSnapshot = cast initialServiceSnapshot;
 		require(serviceEvents == serviceRepositories.length, "SCM service did not publish every initial snapshot");
+		var lockedPath = discoveryRoot + "/lock-contention.txt", indexLock = discoveryRoot + "/.git/index.lock";
+		File.saveContent(lockedPath, "lock fixture\n");
+		File.saveContent(indexLock, "held by fixture\n");
+		var lockedAdd = runGitResult(git, gitScheduler, ["add", "--", "lock-contention.txt"], discoveryRoot, 810);
+		require(lockedAdd.error != null && lockedAdd.error.code == "lock_contention" && lockedAdd.error.retryable,
+			"a held index.lock did not produce a retryable lock-contention error");
+		FileSystem.deleteFile(indexLock);
+		var releasedAdd = runGitResult(git, gitScheduler, ["add", "--", "lock-contention.txt"], discoveryRoot, 8101);
+		require(releasedAdd.error == null && releasedAdd.value != null,
+			"Git staging did not succeed after the held index.lock was released");
 		runGit(git, gitScheduler, ["add", "one.txt"], discoveryRoot, 811);
 		var externalRevision = serviceSnapshot.revision, pollStarted = Sys.time();
 		while (Sys.time() - pollStarted < 2.0) {
@@ -431,6 +511,166 @@ class ScmGitTestMain {
 		require(serviceEvents == stableServiceEvents && refreshedServiceSnapshot.revision == serviceSnapshot.revision,
 			"An unchanged refresh caused snapshot revision or listener churn");
 		service.dispose();
+
+		var operationRoot = StringTools.replace(FileSystem.fullPath(fixtureBase + "/operation-service"), "\\", "/");
+		FileSystem.createDirectory(operationRoot);
+		var operationsProvider = new FakeScmProvider(gitScheduler), operationsScript = new FakeScmRepositoryScript(
+			new ScmRepository("operations", "fake", operationRoot), new ScmFeatures(true), [orderedSnapshot], 0);
+		operationsProvider.add(operationsScript);
+		var operationService = new ScmService(processManager, gitScheduler, git.executable, 10000, 0, true,
+			fixtureBase + "/operation-trust.json", emptyHooks, operationsProvider),
+			operationDiscovery:Null<ScmJobResult<Array<ScmRepository>>> = null;
+		operationService.discover(operationRoot, value -> operationDiscovery = value);
+		pumpService(operationService, gitScheduler, () -> operationDiscovery != null, "Fake SCM operation service discovery timed out");
+		if (operationDiscovery == null || operationDiscovery.value == null || operationDiscovery.value.length != 1)
+			throw "Fake SCM operation service returned no repository";
+		var operationRepository = operationDiscovery.value[0];
+		operationService.setWatchAvailable(operationRoot, true);
+		pumpService(operationService, gitScheduler, () -> operationService.snapshot(operationRepository.id) != null,
+			"Fake SCM operation service initial refresh timed out");
+		for (_ in 0...3) operationsScript.failNext("apply", new scm.ScmError("lock_contention", "index.lock is held", true));
+		var operationCompletions = 0, firstOperationError:Null<scm.ScmError> = null, secondOperationError:Null<scm.ScmError> = null;
+		var firstOperation = operationService.apply(operationRepository.id, ScmOperation.Stage("first.txt"), 901, function(result) {
+			operationCompletions++;
+			firstOperationError = result.error;
+		});
+		var secondOperation = operationService.apply(operationRepository.id, ScmOperation.Unstage("second.txt"), 902, function(result) {
+			operationCompletions++;
+			secondOperationError = result.error;
+		});
+		pumpService(operationService, gitScheduler, () -> operationCompletions == 2,
+			"SCM operation FIFO queue did not complete after three lock retries", 5.0);
+		var operationOrder = [for (operation in operationsScript.operations) switch operation {
+			case Stage(path): "stage:" + path;
+			case Unstage(path): "unstage:" + path;
+			case _: "other";
+		}];
+		require(firstOperation.complete && secondOperation.complete && firstOperationError == null && secondOperationError == null
+			&& operationOrder.join(",") == "stage:first.txt,stage:first.txt,stage:first.txt,stage:first.txt,unstage:second.txt",
+			"SCM operation queue did not retry the head three times before running the next operation");
+		for (_ in 0...4) operationsScript.failNext("apply", new scm.ScmError("lock_contention", "index.lock remains held", true));
+		var thirdOperationError:Null<scm.ScmError> = null, fourthOperationCompleted = false, retryCompletionCount = 0,
+			retryOperationStart = operationsScript.operations.length;
+		var thirdOperation = operationService.apply(operationRepository.id, ScmOperation.Stage("third.txt"), 903, function(result) {
+			retryCompletionCount++;
+			thirdOperationError = result.error;
+		});
+		var fourthOperation = operationService.apply(operationRepository.id, ScmOperation.Unstage("fourth.txt"), 904, function(_) {
+			retryCompletionCount++;
+			fourthOperationCompleted = true;
+		});
+		pumpService(operationService, gitScheduler, () -> retryCompletionCount == 2,
+			"SCM operation queue did not report exhausted retries and advance", 5.0);
+		var retryOrder = [for (operation in operationsScript.operations.slice(retryOperationStart)) switch operation {
+			case Stage(path): "stage:" + path;
+			case Unstage(path): "unstage:" + path;
+			case _: "other";
+		}];
+		require(thirdOperation.complete && thirdOperationError != null && thirdOperationError.code == "lock_contention"
+			&& thirdOperationError.retryable && fourthOperation.complete && fourthOperationCompleted
+			&& retryOrder.join(",") == "stage:third.txt,stage:third.txt,stage:third.txt,stage:third.txt,unstage:fourth.txt",
+			"SCM operation queue did not report lock contention after three retries before advancing");
+		operationsScript.latencySteps = 8;
+		var cancelledOperationCallback = false, afterCancelCompleted = false;
+		var cancelledOperation = operationService.apply(operationRepository.id, ScmOperation.Stage("cancelled.txt"), 905,
+			_ -> cancelledOperationCallback = true);
+		var afterCancelOperation = operationService.apply(operationRepository.id, ScmOperation.Unstage("after-cancel.txt"), 906,
+			_ -> afterCancelCompleted = true);
+		operationService.update(Sys.time());
+		gitScheduler.update(1);
+		require(cancelledOperation.cancel(), "an active SCM queue head refused cancellation");
+		pumpService(operationService, gitScheduler, () -> afterCancelCompleted,
+			"Cancelling an active SCM queue head left the repository busy");
+		require(!cancelledOperationCallback && afterCancelOperation.complete,
+			"A cancelled SCM operation published a stale callback or blocked the next request");
+		operationsScript.latencySteps = 0;
+
+		var burstRoot = StringTools.replace(FileSystem.fullPath(fixtureBase + "/burst-service"), "\\", "/");
+		FileSystem.createDirectory(burstRoot);
+		var burstScript = new FakeScmRepositoryScript(new ScmRepository("burst", "fake", burstRoot), new ScmFeatures(), [orderedSnapshot], 0);
+		operationsProvider.add(burstScript);
+		var burstDiscovery:Null<ScmJobResult<Array<ScmRepository>>> = null;
+		operationService.discover(burstRoot, value -> burstDiscovery = value);
+		pumpService(operationService, gitScheduler, () -> burstDiscovery != null, "Fake SCM burst service discovery timed out");
+		if (burstDiscovery == null || burstDiscovery.value == null || burstDiscovery.value.length != 1)
+			throw "Fake SCM burst service returned no repository";
+		var burstRepository = burstDiscovery.value[0];
+		operationService.setWatchAvailable(burstRoot, true);
+		pumpService(operationService, gitScheduler, () -> operationService.snapshot(burstRepository.id) != null,
+			"Fake SCM burst service initial refresh timed out");
+		var burstRefreshBaseline = burstScript.refreshCalls, lastBurstEvent = Sys.time();
+		for (index in 0...500) {
+			File.saveContent(burstRoot + "/burst-" + index + ".txt", Std.string(index));
+			lastBurstEvent = Sys.time();
+			operationService.notifyChanged(burstRoot, false, lastBurstEvent);
+		}
+		operationService.update(lastBurstEvent + 0.301);
+		pumpService(operationService, gitScheduler,
+			() -> burstScript.refreshCalls > burstRefreshBaseline && gitScheduler.activeCount() == 0,
+			"A 500-write SCM burst did not settle into a refresh");
+		require(FileSystem.readDirectory(burstRoot).length == 500
+			&& burstScript.refreshCalls - burstRefreshBaseline <= 3,
+			"A burst of 500 file writes produced more than three SCM refreshes");
+		var continuousStart = Sys.time() + 1.0, continuousBaseline = burstScript.refreshCalls,
+			firstContinuousRefresh:Null<Float> = null;
+		for (index in 0...500) {
+			var eventAt = continuousStart + index * 0.005;
+			operationService.notifyChanged(burstRoot, false, eventAt);
+			operationService.update(eventAt);
+			gitScheduler.update(32);
+			if (firstContinuousRefresh == null && burstScript.refreshCalls > continuousBaseline) firstContinuousRefresh = eventAt;
+		}
+		var continuousLastEvent = continuousStart + 499 * 0.005;
+		var finalContinuousBaseline = burstScript.refreshCalls;
+		operationService.update(continuousLastEvent + 0.301);
+		gitScheduler.update(32);
+		pumpService(operationService, gitScheduler,
+			() -> burstScript.refreshCalls > finalContinuousBaseline && gitScheduler.activeCount() == 0,
+			"SCM continuous-change debounce did not issue its trailing refresh");
+		require(firstContinuousRefresh != null && firstContinuousRefresh <= continuousStart + 2.0,
+			"A continuous change stream postponed SCM refresh for more than two seconds");
+		operationService.dispose();
+
+		var mergeRoot = fixtureBase + "/merge-conflict";
+		FileSystem.createDirectory(mergeRoot);
+		runGit(git, gitScheduler, ["init"], mergeRoot, 920);
+		runGit(git, gitScheduler, ["config", "user.name", "SCM Test"], mergeRoot, 921);
+		runGit(git, gitScheduler, ["config", "user.email", "scm@example.invalid"], mergeRoot, 922);
+		runGit(git, gitScheduler, ["config", "core.hooksPath", emptyHooks], mergeRoot, 923);
+		File.saveContent(mergeRoot + "/conflict.txt", "base\n");
+		runGit(git, gitScheduler, ["add", "conflict.txt"], mergeRoot, 924);
+		runGit(git, gitScheduler, ["commit", "-m", "base"], mergeRoot, 925);
+		var baseBranch = StringTools.trim(runGit(git, gitScheduler, ["symbolic-ref", "--short", "HEAD"], mergeRoot, 926).stdout.toString());
+		runGit(git, gitScheduler, ["branch", "conflict-side"], mergeRoot, 927);
+		File.saveContent(mergeRoot + "/conflict.txt", "ours\n");
+		runGit(git, gitScheduler, ["add", "conflict.txt"], mergeRoot, 928);
+		runGit(git, gitScheduler, ["commit", "-m", "ours"], mergeRoot, 929);
+		runGit(git, gitScheduler, ["checkout", "conflict-side"], mergeRoot, 930);
+		File.saveContent(mergeRoot + "/conflict.txt", "theirs\n");
+		runGit(git, gitScheduler, ["add", "conflict.txt"], mergeRoot, 931);
+		runGit(git, gitScheduler, ["commit", "-m", "theirs"], mergeRoot, 932);
+		runGit(git, gitScheduler, ["checkout", baseBranch], mergeRoot, 933);
+		var mergeAttempt = runGitResult(git, gitScheduler, ["merge", "conflict-side"], mergeRoot, 934);
+		require(mergeAttempt.error != null && File.getContent(mergeRoot + "/conflict.txt").indexOf("<<<<<<<") >= 0,
+			"The real Git merge fixture did not leave a content conflict");
+		var mergeService = new ScmService(processManager, gitScheduler, git.executable, 100, 0, false,
+			fixtureBase + "/merge-trust.json", emptyHooks), mergeDiscovery:Null<ScmJobResult<Array<ScmRepository>>> = null;
+		mergeService.discover(mergeRoot, value -> mergeDiscovery = value);
+		pumpService(mergeService, gitScheduler, () -> mergeDiscovery != null, "Merge-conflict service discovery timed out");
+		if (mergeDiscovery == null || mergeDiscovery.value == null || mergeDiscovery.value.length != 1)
+			throw "Merge-conflict service returned no repository";
+		var mergeRepository = mergeDiscovery.value[0];
+		mergeService.setWatchAvailable(mergeRoot, true);
+		pumpService(mergeService, gitScheduler, () -> mergeService.snapshot(mergeRepository.id) != null,
+			"Merge-conflict service refresh timed out");
+		var mergeSnapshot:ScmSnapshot = cast mergeService.snapshot(mergeRepository.id), mergeGroup = snapshotGroup(mergeSnapshot, ScmGroupId.Merge),
+			mergeConflict:Null<scm.ScmResource> = null;
+		if (mergeGroup != null) for (resource in mergeGroup.resources) if (resource.path == "conflict.txt") mergeConflict = resource;
+		require(mergeSnapshot.head.operation == ScmHeadOperation.Merge && mergeConflict != null
+			&& mergeConflict.conflictKind == ScmConflictKind.BothModified,
+			"A real Git merge conflict was not refreshed into the merge group with its conflict kind");
+		mergeService.dispose();
+
 		var emptyDirectory = fixtureBase + "/not-a-repository";
 		FileSystem.createDirectory(emptyDirectory);
 		var emptyDetection:Null<ScmJobResult<Array<scm.ScmRepositoryHandle>>> = null;

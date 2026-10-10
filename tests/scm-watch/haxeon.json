@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "package": { "name": "exosuit-scm-watch-test" },
+  "entry": "app.ScmWatchTestMain",
+  "sourceRoots": ["src", "../../graphical/src"],
+  "scopeSourceRoots": false,
+  "dependencies": {
+    "pragtical_hx": { "path": "../.." }
+  },
+  "native": {
+    "cmake": {
+      "source": "native",
+      "target": "scm_watch_native",
+      "inputs": [
+        "native/CMakeLists.txt",
+        "../../haxeon/vendor/nativekit/CMakeLists.txt"
+      ]
+    }
+  },
+  "target": "host",
+  "outputDir": "build"
+}

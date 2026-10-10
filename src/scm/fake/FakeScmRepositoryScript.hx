@@ -12,9 +12,10 @@ class FakeScmRepositoryScript {
 	public final features:scm.ScmFeatures;
 	public final snapshots:Array<ScmSnapshot>;
 	public final blobs:Map<String, ScmBlob> = [];
-	public final failures:Map<String, ScmError> = [];
+	public final failures:Map<String, Array<ScmError>> = [];
 	public final operations:Array<ScmOperation> = [];
 	public var latencySteps:Int;
+	public var refreshCalls:Int = 0;
 	var snapshotCursor:Int = 0;
 
 	public function new(repository:scm.ScmRepository, features:scm.ScmFeatures, snapshots:Array<ScmSnapshot>, latencySteps:Int = 0) {
@@ -25,11 +26,17 @@ class FakeScmRepositoryScript {
 	}
 
 	public function setBlob(reference:ScmRef, path:String, blob:ScmBlob):Void blobs.set(blobKey(reference, path), blob);
-	public function failNext(action:String, error:ScmError):Void failures.set(action, error);
+	public function failNext(action:String, error:ScmError):Void {
+		var queue = failures.get(action);
+		if (queue == null) { queue = []; failures.set(action, queue); }
+		queue.push(error);
+	}
 
 	public function takeFailure(action:String):Null<ScmError> {
-		var failure = failures.get(action);
-		if (failure != null) failures.remove(action);
+		var queue = failures.get(action);
+		if (queue == null || queue.length == 0) return null;
+		var failure = queue.shift();
+		if (queue.length == 0) failures.remove(action);
 		return failure;
 	}
 

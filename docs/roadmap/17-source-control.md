@@ -159,7 +159,7 @@ Acceptance:
   snapshots), so idle repositories cause no UI churn.
 - [x] Untracked limit (default 10 000 resources). Beyond it the snapshot is
   marked truncated and the UI says so; it is never silently partial.
-- [ ] Per-repository FIFO operation queue. Mutations are serialized, and
+- [x] Per-repository FIFO operation queue. Mutations are serialized, and
   `lock_contention` retries three times with backoff, then reports.
 - [ ] Repository trust:
   - [x] A per-root record is persisted by the host that runs Git.
@@ -185,13 +185,15 @@ and records "pending" when Git is absent. It covers:
   released;
 - a merge conflict appearing in the `merge` group with the right conflict kind.
 
-The trust test uses a repository whose `core.fsmonitor` and
-`filter.x.smudge` write a marker file. In restricted mode, status and
-original-content reads never create the marker. After trusting, they may.
-The current focused fixture proves clean-filter conversion is disabled and
-restricted status remains readable. Marker-based fsmonitor/smudge checks,
-original-content trust checks, the 500-write debounce bound, lock retry and
-real merge-conflict service refresh remain pending.
+The trust fixture uses a repository whose `core.fsmonitor` and
+`filter.x.clean`/`smudge` commands write marker files. Restricted status and
+raw original-content reads do not invoke them; restricted clean conversion is
+disabled. After trust, status invokes fsmonitor and a content conversion can
+invoke the clean filter, while original-content reads still return raw Git
+objects without running smudge. The 500-write debounce bound, held-lock retry,
+real merge-conflict refresh and Windows NativeKit watcher delivery/re-arm plus
+polling fallback are covered by the focused `tests/scm-git` and
+`tests/scm-watch` runs. The RPC-only local trust enforcement remains in M17.3.
 
 ## M17.3 — Workspace protocol and agent host
 

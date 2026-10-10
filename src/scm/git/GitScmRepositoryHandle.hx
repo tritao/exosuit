@@ -147,7 +147,7 @@ class GitScmRepositoryHandle implements ScmRepositoryHandle {
 		ensureBlobReaderTrustMode();
 		var spec = switch reference {
 			case Head: "HEAD";
-			case Index: ":";
+			case Index: ":0";
 			case Commit(oid): oid;
 			case ConflictStage(stage): ":" + Std.string(stage);
 		};

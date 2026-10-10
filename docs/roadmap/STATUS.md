@@ -70,18 +70,29 @@ Implementation slice committed on `main` as `eecf72c`.
 
 Validation: the Windows `tests/scm-git` run passes real repository discovery
 for plain, nested, linked-worktree, submodule, unborn and non-repository cases;
-trust persistence; untracked truncation; restricted filter conversion; stable
-snapshot revisions; and external `git add` refresh within two seconds. The
-10,000-line diff fixture passes. `graphical/haxeon.json` compiles on Windows,
-and the already-running Exosuite window remains responsive.
+trust persistence; untracked truncation; restricted filters; stable snapshot
+revisions; external `git add` refresh within two seconds; the 500-write
+debounce bound; held `index.lock` retry and recovery; and a real merge conflict
+refresh. The trust fixture confirms restricted status and raw original-content
+reads do not invoke configured hooks or filters, trusted status permits the
+fsmonitor hook, trusted content conversion permits the clean filter, and raw
+original reads never invoke smudge. The 10,000-line diff fixture passes.
+`tests/scm-watch` passes Windows NativeKit watch delivery, re-arm and polling
+fallback recovery. NativeKit's `platform_parity` and `file_watch` CTest cases
+pass (2/2). The source-tree launcher opens a responsive Exosuite window.
 
-M17.2 remains in progress. The acceptance suite still needs the 500-write
-debounce bound, a held `index.lock` retry, a real merge conflict snapshot, and
-runtime coverage of native watcher delivery/recovery. Git mutation commands
-remain intentionally unavailable until their later source-control workflow
-slice. No remote protocol or Source Control UI is included here.
+The Windows NativeKit file-watch backend is committed on `exosuit-followon` as
+`d18f949a`; Haxeon records that submodule update on `exosuit-followon` as
+`64d35384`. The root M17.2 follow-up slice is recorded in its implementation
+commit below.
 
-Next: add the remaining M17.2 acceptance fixtures, then continue to M17.3.
+M17.2's local service behavior and acceptance fixtures are complete. The
+remaining paired-device trust restriction is implemented with the M17.3 RPC
+origin checks. Real Git mutation commands remain intentionally unavailable
+until M17.6. No Source Control UI is included yet.
+
+Next: audit existing workspace method IDs, authenticated connection origins,
+device grants and watch lifetimes, then implement the M17.3 protocol slice.
 
 ## Windows workspace startup and filesystem backend, 2026-10-08
 

@@ -4,6 +4,7 @@ import haxe.io.Bytes;
 import jobs.JobScheduler;
 import process.ProcessManager;
 import scm.ScmRepositoryHandle;
+import scm.ScmProvider;
 import scm.git.GitScmProvider;
 import sys.FileSystem;
 
@@ -16,7 +17,6 @@ private class ScmRootState {
 	public final rerun:Map<String, Bool> = [];
 	public final operations:Map<String, Array<ScmOperationRequest>> = [];
 	public final operationBusy:Map<String, Bool> = [];
-	public final operationJob:Map<String, ScmJob<ScmApplyResult>> = [];
 	public var detectJob:Null<ScmJob<Array<ScmRepositoryHandle>>>;
 	public var detectGeneration:Int = 0;
 	public var changedAt:Null<Float>;
@@ -51,7 +51,8 @@ class ScmService {
 	final processes:ProcessManager;
 	final scheduler:JobScheduler;
 	final trustStore:ScmTrustStore;
-	var provider:GitScmProvider;
+	final providerOverride:Null<ScmProvider>;
+	var provider:ScmProvider;
 	final roots:Map<String, ScmRootState> = [];
 	final listeners:Array<(ScmRepository, ScmSnapshot)->Void> = [];
 	final watchPathListeners:Array<(String, Array<String>)->Void> = [];
@@ -67,16 +68,19 @@ class ScmService {
 
 	public function new(processes:ProcessManager, scheduler:JobScheduler, ?gitPath:String,
 			untrackedLimit:Int = 10000, nestedScanDepth:Int = 3, autoRefresh:Bool = true,
-			?trustStorePath:String, ?emptyHooksPath:String) {
+			?trustStorePath:String, ?emptyHooksPath:String, ?provider:ScmProvider) {
 		this.processes = processes;
 		this.scheduler = scheduler;
+		providerOverride = provider;
 		this.autoRefresh = autoRefresh;
 		this.gitPath = gitPath;
 		this.untrackedLimit = untrackedLimit;
 		this.diffSizeLimit = 16 * 1024 * 1024;
 		this.nestedScanDepth = nestedScanDepth;
 		trustStore = new ScmTrustStore(trustStorePath == null ? config.ConfigurationPaths.stateRoot() + "/scm/trust.json" : trustStorePath);
-		provider = new GitScmProvider(processes, scheduler, gitPath, emptyHooksPath, trustStore, untrackedLimit, nestedScanDepth);
+		this.provider = provider == null
+			? new GitScmProvider(processes, scheduler, gitPath, emptyHooksPath, trustStore, untrackedLimit, nestedScanDepth)
+			: provider;
 	}
 
 	public function configure(settings:config.Settings):Void {
@@ -91,7 +95,8 @@ class ScmService {
 		autoRefresh = settings.scmAutoRefresh;
 		if (providerChanged) {
 			for (state in roots) cancelState(state);
-			provider = new GitScmProvider(processes, scheduler, gitPath, null, trustStore, untrackedLimit, nestedScanDepth);
+			if (providerOverride == null)
+				provider = new GitScmProvider(processes, scheduler, gitPath, null, trustStore, untrackedLimit, nestedScanDepth);
 		}
 		enabled = settings.scmEnabled;
 		if (!enabled) {
@@ -260,7 +265,7 @@ class ScmService {
 	public function trust(repositoryId:String):Bool {
 		var state = stateForRepository(repositoryId), handle = state == null ? null : findHandle(state, repositoryId);
 		if (handle == null) return false;
-		try provider.trust(handle.repository().root) catch (_:Dynamic) return false;
+		try trustStore.trust(handle.repository().root) catch (_:Dynamic) return false;
 		cancelRefresh(cast state, repositoryId);
 		scheduleRoot(state, Sys.time(), true);
 		return true;
@@ -269,7 +274,7 @@ class ScmService {
 	public function revokeTrust(repositoryId:String):Bool {
 		var state = stateForRepository(repositoryId), handle = state == null ? null : findHandle(state, repositoryId);
 		if (handle == null) return false;
-		try provider.revokeTrust(handle.repository().root) catch (_:Dynamic) return false;
+		try trustStore.revoke(handle.repository().root) catch (_:Dynamic) return false;
 		cancelRefresh(cast state, repositoryId);
 		scheduleRoot(state, Sys.time(), true);
 		return true;
@@ -285,7 +290,12 @@ class ScmService {
 		if (queue == null) { queue = []; activeState.operations.set(repositoryId, queue); }
 		var request = new ScmOperationRequest(repositoryId, operation, generation, complete);
 		var job = new ScmJob<ScmApplyResult>(generation, function() {
-			if (request.child != null) request.child.cancel();
+			var child = request.child;
+			request.child = null;
+			if (child != null) {
+				child.cancel();
+				activeState.operationBusy.set(repositoryId, false);
+			}
 			if (!request.finished) queue.remove(request);
 		});
 		request.job = job;
@@ -397,7 +407,8 @@ class ScmService {
 				finishOperation(state, queue, request, result.value, result.error);
 				if (result.error == null) notifyRepository(repositoryId, Sys.time(), true);
 			});
-			if (!request.finished && request.job != null && !request.job.cancelled) request.child = child;
+			if (!request.finished && request.job != null && !request.job.cancelled && !child.complete && !child.cancelled)
+				request.child = child;
 		}
 	}
 
@@ -457,7 +468,7 @@ class ScmService {
 		if (state.detectJob != null) state.detectJob.cancel();
 		state.detectJob = null;
 		for (job in state.refreshJobs) job.cancel();
-		for (queue in state.operations) for (request in queue) if (request.job != null) request.job.cancel();
+		for (queue in state.operations) for (request in queue.copy()) if (request.job != null) request.job.cancel();
 		state.refreshJobs.clear();
 		state.operations.clear();
 		state.operationBusy.clear();
