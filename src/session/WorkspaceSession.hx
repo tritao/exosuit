@@ -14,6 +14,7 @@ class WorkspaceSession {
 	public var activeDocument:String = "";
 	public final layout:Array<String> = [];
 	public final expanded:Array<String> = [];
+	public final scmCommitDrafts:Map<String, String> = [];
 
 	public function new() {}
 
@@ -32,10 +33,21 @@ class WorkspaceSession {
 			if (active != null && active.hasBackingPath()) result.activeDocument = active.requirePath();
 		}
 		for (line in application.root.sessionLines()) result.layout.push(line);
+		for (repositoryId in application.scmCommitDrafts.keys()) {
+			var message = application.scmCommitDrafts.get(repositoryId);
+			if (repositoryId != null && repositoryId.length > 0 && message != null)
+				result.scmCommitDrafts.set(repositoryId, message);
+		}
 		return result;
 	}
 
 	public function restore(application:Application, ?recovery:RecoveryStore):Void {
+		for (repositoryId in [for (repositoryId in application.scmCommitDrafts.keys()) repositoryId])
+			application.scmCommitDrafts.remove(repositoryId);
+		for (repositoryId in scmCommitDrafts.keys()) {
+			var message = scmCommitDrafts.get(repositoryId);
+			if (message != null) application.scmCommitDrafts.set(repositoryId, message);
+		}
 		for (root in projects)
 			if (FileSystem.exists(root) && FileSystem.isDirectory(root)) application.openArgument(root);
 		for (project in application.workspace.projects) project.restoreExpanded(expanded);
@@ -74,6 +86,14 @@ class WorkspaceSession {
 		output += "active=" + clean(activeDocument) + "\n";
 		for (line in layout) output += "layout=" + clean(line) + "\n";
 		for (path in expanded) output += "expanded=" + clean(path) + "\n";
+		var repositoryIds = [for (repositoryId in scmCommitDrafts.keys()) repositoryId];
+		repositoryIds.sort(Reflect.compare);
+		for (repositoryId in repositoryIds) {
+			var message = scmCommitDrafts.get(repositoryId);
+			if (repositoryId.length > 0 && message != null)
+				output += "scmCommitDraft=" + haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(repositoryId)) + ":"
+					+ haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(message)) + "\n";
+		}
 		return output;
 	}
 
@@ -89,6 +109,14 @@ class WorkspaceSession {
 			else if (key == "active") result.activeDocument = value;
 			else if (key == "layout" && validLayout(value)) result.layout.push(value);
 			else if (key == "expanded" && value.length > 0) result.expanded.push(value);
+			else if (key == "scmCommitDraft") {
+				var separator = value.indexOf(":");
+				if (separator > 0) try {
+					var repositoryId = haxe.crypto.Base64.decode(value.substring(0, separator)).toString();
+					if (repositoryId.length > 0)
+						result.scmCommitDrafts.set(repositoryId, haxe.crypto.Base64.decode(value.substring(separator + 1)).toString());
+				} catch (_:Dynamic) {}
+			}
 		}
 		if (version != VERSION) throw "unsupported workspace session version";
 		return result;

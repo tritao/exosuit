@@ -17,12 +17,15 @@ import workspace.service.WorkspacePairingProtocol;
 import workspace.service.WorkspacePairingProtocol.PendingPairing;
 import workspace.service.WorkspacePairingProtocol.PairingDevice;
 import workspace.service.WorkspaceFileProtocol;
+import workspace.service.WorkspaceScmProtocol;
 import workspace.service.WorkspaceTerminalProtocol;
 import workspace.service.WorkspaceAgentProtocol;
 import workspace.service.WorkspaceService;
 import workspace.storage.WorkspaceSqliteStore;
 import workspace.runtime.WorkspaceDirectories;
 import workspace.runtime.WorkspaceFileService;
+import workspace.runtime.WorkspaceScmService;
+import process.ProcessManager;
 import workspace.transport.NativeRpcHub;
 import workspace.transport.NativeRpcConnector;
 import workspace.transport.RelayMachineEndpoint;
@@ -56,6 +59,7 @@ class BrowserPairingHostMain {
 			successPath:String = config.successPath, databasePath:String = config.databasePath,
 			localSocket:String = config.localSocket;
 		var fileRead:Bool = Reflect.field(config, "fileRead") != false;
+		var scmRead:Bool = Reflect.field(config, "scmRead") == true;
 		sys.FileSystem.createDirectory(workspaceRoot);
 		var directories = new WorkspaceDirectories(workspaceRoot);
 		var seed = new WorkspaceService("workspace", "browser-pairing-epoch", [
@@ -68,6 +72,11 @@ class BrowserPairingHostMain {
 		store = new WorkspaceSqliteStore(databasePath, "workspace", seed.snapshot(), 32, directories.root);
 		var machineKeys = NoiseSession.generateKeypair();
 		var files = new WorkspaceFileService("workspace", [directories.root], clock, runtime.events);
+		var scmProcesses = new ProcessManager();
+		var scm:Null<WorkspaceScmService> = scmRead
+			? new WorkspaceScmService("workspace", [directories.root], scmProcesses,
+				Sys.getEnv("EXOSUITE_GIT_BIN"), null, databasePath + ".scm-trust")
+			: null;
 		var server:Null<WorkspaceRpcServer> = null;
 		var pairing = new WorkspacePairingManager(store, relay, machineKeys.privateKey,
 			function() return server == null ? [WorkspaceProtocol.READ, WorkspaceProtocol.IDENTITY_CAPABILITY] : server.options.offered(),
@@ -76,7 +85,7 @@ class BrowserPairingHostMain {
 			});
 		server = new WorkspaceRpcServer(new WorkspaceService("workspace", "browser-pairing-epoch", seed.snapshot().groups,
 			32, 256, 16, store, directories.resolve), clock, null,
-			{workspace: "workspace", root: directories.root, instance: "browser-pairing-test"}, null, null, pairing, files);
+			{workspace: "workspace", root: directories.root, instance: "browser-pairing-test"}, null, null, pairing, files, scm);
 		relay.onChannel = function(channel) pairing.acceptChannel(channel.channelId, channel);
 		var localListener = hub.listen(NativeRpcHub.local(localSocket), server.acceptLocal);
 		var failure:Null<String> = null, localConnection:Null<RpcConnection> = null;
@@ -101,6 +110,7 @@ class BrowserPairingHostMain {
 			relay.poll(clock());
 			server.poll();
 			pairing.poll();
+			if (scm != null) scm.poll();
 			localAdmin.poll();
 
 			var adminConnection = localConnection;
@@ -140,6 +150,7 @@ class BrowserPairingHostMain {
 				approvalRequestPending = true;
 				var grants = [WorkspaceProtocol.READ, WorkspaceProtocol.IDENTITY_CAPABILITY];
 				if (fileRead) grants.push(WorkspaceFileProtocol.READ);
+				if (scmRead) grants.push(WorkspaceScmProtocol.READ);
 				adminConnection.call(WorkspacePairingProtocol.APPROVE, {deviceId: registeredDevice,
 					grants: grants}, 10000, function(result) {
 					if (!result.accepted) failure = "local pairing approval was refused: " + result.error;
@@ -159,16 +170,18 @@ class BrowserPairingHostMain {
 				var result:Dynamic = Json.parse(sys.io.File.getContent(successPath));
 				require(result.machineId == machineId && result.deviceId == registeredDevice
 					&& result.workspaceRoot == workspaceRoot, "browser reported a different workspace identity");
-				verifyPersistedDevice(store, registeredDevice, fileRead);
+				verifyPersistedDevice(store, registeredDevice, fileRead, scmRead);
 				localAdmin.close();
 				hub.forget(localListener);
 				store.close();
 				store = new WorkspaceSqliteStore(databasePath, "workspace", seed.snapshot(), 32, directories.root);
-				verifyPersistedDevice(store, registeredDevice, fileRead);
+				verifyPersistedDevice(store, registeredDevice, fileRead, scmRead);
 				pairing.dispose();
 				relay.dispose();
 				server.dispose();
 				files.dispose();
+				if (scm != null) scm.dispose();
+				scmProcesses.shutdown();
 				hub.dispose();
 				store.close();
 				runtime.dispose();
@@ -182,6 +195,8 @@ class BrowserPairingHostMain {
 		hub.forget(localListener);
 		server.dispose();
 		files.dispose();
+		if (scm != null) scm.dispose();
+		scmProcesses.shutdown();
 		hub.dispose();
 		store.close();
 		throw failure == null ? "Browser pairing test timed out" : failure;
@@ -256,6 +271,7 @@ class BrowserPairingHostMain {
 					approvalPending = true;
 					connection.call(WorkspacePairingProtocol.APPROVE, {deviceId: deviceId,
 						grants: [WorkspaceProtocol.READ, WorkspaceProtocol.IDENTITY_CAPABILITY, WorkspaceFileProtocol.READ,
+							WorkspaceScmProtocol.READ,
 							WorkspaceProtocol.TREE, WorkspaceTerminalProtocol.READ, WorkspaceTerminalProtocol.CATALOG,
 							WorkspaceTerminalProtocol.CONTROL, WorkspaceAgentProtocol.READ, WorkspaceAgentProtocol.CONTROL]}, 10000, function(result) {
 						if (!result.accepted) failure = "AgentMain refused pairing approval: " + result.error;
@@ -318,12 +334,13 @@ class BrowserPairingHostMain {
 		throw failure == null ? "AgentMain browser pairing test timed out" : failure;
 	}
 
-	static function verifyPersistedDevice(store:WorkspaceSqliteStore, deviceId:String, fileRead:Bool):Void {
+	static function verifyPersistedDevice(store:WorkspaceSqliteStore, deviceId:String, fileRead:Bool, scmRead:Bool = false):Void {
 		var records = store.loadDevices();
 		require(records.length == 1, "SQLite did not retain exactly one approved device");
 		var record = records[0];
 		var expected = [WorkspaceProtocol.READ, WorkspaceProtocol.IDENTITY_CAPABILITY];
 		if (fileRead) expected.push(WorkspaceFileProtocol.READ);
+		if (scmRead) expected.push(WorkspaceScmProtocol.READ);
 		var grantsMatch = record.grants.length == expected.length;
 		for (grant in expected) if (record.grants.indexOf(grant) < 0) grantsMatch = false;
 		require(record.deviceId == deviceId && !record.revoked && grantsMatch,

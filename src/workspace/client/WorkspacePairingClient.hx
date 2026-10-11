@@ -23,6 +23,7 @@ interface WorkspacePairingClient {
 	public function refreshPairings(force:Bool):Void;
 	public function createPairing(ttlSeconds:Int, complete:PairingInvitation->Null<String>->Void):Void;
 	public function approvePairing(deviceId:String, grants:Array<String>, complete:Null<String>->Void):Void;
+	public function setPairingGrants(deviceId:String, grants:Array<String>, complete:Null<String>->Void):Void;
 	public function rejectPairing(deviceId:String, complete:Null<String>->Void):Void;
 	public function revokePairing(deviceId:String, complete:Null<String>->Void):Void;
 }

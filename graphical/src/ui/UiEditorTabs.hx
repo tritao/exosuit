@@ -33,7 +33,8 @@ class UiEditorTabs {
 
 	public static function key(tab:UiEditorTab):String
 		return switch tab {
-			case Document(view): "doc:" + view.document.id;
+			case Document(view): view.diffDocument == null ? "doc:" + view.document.id :
+				view.sideBySideDiff ? view.diffDocument.id + ":" + (view.sideBySideLabel == null ? Std.string(view.id) : view.sideBySideLabel) : view.diffDocument.id;
 			case Image(value): value.id;
 			case UnsupportedFile(value): value.id;
 			case Terminal(value): "terminal:" + value.id;

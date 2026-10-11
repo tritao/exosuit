@@ -153,7 +153,7 @@ class GitBlobReader implements JobTask {
 				for (_ in 0...READ_CHUNKS_PER_STEP) {
 					var remaining = current.spec.length - current.writeOffset;
 					if (remaining <= 0) { current.sent = true; break; }
-					var written = child.writeBytes(current.spec, current.writeOffset, remaining);
+					var written:Int = child.writeBytes(current.spec, current.writeOffset, remaining);
 					if (written < 0 || written > remaining) {
 						protocolFailure("Git accepted an invalid number of request bytes");
 						return queued.length == 0 ? finishStep() : false;

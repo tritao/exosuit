@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "package": { "name": "exosuit-workspace-scm-test" },
+  "entry": "app.WorkspaceScmTestMain",
+  "sourceRoots": ["src"],
+  "dependencies": {
+    "exosuit-agent": { "path": "../../agent" }
+  },
+  "target": "host",
+  "outputDir": "build"
+}

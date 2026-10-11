@@ -10,6 +10,7 @@ interface WorkspacePairingAdmin {
 	function listPending():Array<PendingPairing>;
 	function listDevices():Array<PairingDevice>;
 	function approve(deviceId:String, grants:Array<String>, complete:Null<String>->Void):Void;
+	function setGrants(deviceId:String, grants:Array<String>, complete:Null<String>->Void):Void;
 	function reject(deviceId:String):Bool;
 	function revoke(deviceId:String, complete:Null<String>->Void):Void;
 }

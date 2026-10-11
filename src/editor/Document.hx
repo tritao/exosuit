@@ -199,6 +199,26 @@ class Document {
 		return externalState;
 	}
 
+	/** Reloads the backing file after the user explicitly accepts losing buffer edits. */
+	public function reloadFromDisk():Bool {
+		if (path == null) return false;
+		var target = requirePath(), content = "", missing = !fileSystem.exists(target);
+		if (!missing) {
+			try content = fileSystem.read(target) catch (_:Dynamic) return false;
+		}
+		var bom = StringTools.startsWith(content, "﻿"), body = bom ? content.substring(1) : content;
+		hasBom = bom;
+		newline = body.indexOf("\r\n") >= 0 ? "\r\n" : "\n";
+		body = StringTools.replace(StringTools.replace(body, "\r\n", "\n"), "\r", "\n");
+		buffer.replaceAllText(body);
+		indentation.cache.dispose();
+		indentation = new DocumentIndentation(buffer, highlighter);
+		savedStateId = buffer.stateId;
+		diskContent = content;
+		externalState = missing ? Deleted : Current;
+		return true;
+	}
+
 	public function acceptRecoveredText(text:String):Void {
 		if (buffer.text != text) {
 			buffer.replaceAllText(text);

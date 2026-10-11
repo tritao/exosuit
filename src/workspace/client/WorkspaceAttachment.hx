@@ -8,6 +8,8 @@ interface WorkspaceAttachment {
   public function failure():Null<String>;
   /** Stable per-connection API wrapper for root-scoped reads, or null without the negotiated grant. */
   public function fileClient():Null<WorkspaceFileClient>;
+  /** Source control authority for this workspace root, or null without its read service. */
+  public function sourceControlSource():Null<scm.ScmSource>;
   public function fileWorkspace():String;
   public function fileScope():Null<String>;
   /** True when fileScope is on this machine and can use the regular editable file documents. */

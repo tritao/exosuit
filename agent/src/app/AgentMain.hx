@@ -63,6 +63,7 @@ class AgentMain {
 		}
 		var directories = new workspace.runtime.WorkspaceDirectories(args.length >= 6 ? args[5] : Sys.getCwd());
 		var files = new workspace.runtime.WorkspaceFileService("workspace", [directories.root], clock, runtime.events);
+		var scm = new workspace.runtime.WorkspaceScmService("workspace", [directories.root], processes, Sys.getEnv("EXOSUITE_GIT_BIN"));
 		// The seed epoch is used only when creating a new catalog. Reopening preserves it.
 		var seed = new WorkspaceService("workspace", args[3], [
 			{
@@ -107,7 +108,7 @@ class AgentMain {
 		}
 		var server = new WorkspaceRpcServer(service, clock, null,
 			args.length >= 7 ? {workspace: "workspace", root: directories.root, instance: args[6]} : null,
-			terminals, agents, pairingManager, files);
+			terminals, agents, pairingManager, files, scm);
 		serverRef = server;
 		var updates = new workspace.service.WorkspaceUpdatePolicy();
 		var build = Sys.getEnv("EXOSUIT_AGENT_BUILD_ID");
@@ -160,6 +161,7 @@ class AgentMain {
 			}
 			server.poll();
 			files.poll();
+			scm.poll();
 			// Runtime ownership survives client disconnects.
 			terminals.poll();
 			agents.poll();

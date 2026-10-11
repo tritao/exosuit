@@ -66,6 +66,96 @@ The full headless suite and SDL artifact compile passed after these changes. Pea
 RSS is a whole-run high-water mark; the chronological first/last soak comparisons
 show no progressive latency in the exercised cycles.
 
+## M17 connected Source Control browser
+
+Verified 2026-10-10 with the isolated wasm32 site, WSL2 Ubuntu 24.04, Chrome 154
+on Windows, and Wrangler 4.147.0. The browser-pairing runner was invoked in
+`--scm` mode against the built site. It completed the Noise pairing and desktop
+approval, attached the remote workspace, opened a changed file from the real Git
+fixture, and opened its Source Control diff. The paired device had
+`workspace.scm.read` and did not have `workspace.scm.write` or
+`workspace.scm.remote`; the panel exposed no commit or row-mutation controls.
+The same diff opened full-width at 320 × 740. Remote file preview, Unicode
+content search, filename search, reconnect, and persisted device grants also
+passed in the same run.
+
+The test host binds the production `WorkspaceScmService` and
+`WorkspaceRpcServer` behind the real local Wrangler relay and Noise pairing.
+`tests/workspace-scm` separately exercises the production agent-side service and
+its permission boundary. This is automated browser evidence, not a manual
+qualification of every Explorer and status-bar interaction.
+
+Linux agent builds require libcurl development files for the relay ticket HTTP
+client. `agent/native/CMakeLists.txt` now fails during configuration with the
+package name when those files are missing instead of producing a relay that
+cannot connect.
+
+## M17 local Git Explorer and performance
+
+Verified 2026-10-10. The requested benchmark checkout is Exosuite. The initial
+Windows run used the Exosuite worktree with 94 SCM resources; a repeat used the
+current worktree with 95. Linux used a clean ext4-backed snapshot at `b185a73`
+with zero changes. Each run also used a synthetic 50,000-file repository
+containing 49,999 untracked files, without status truncation. Unchanged
+refreshes emitted zero notifications in every run.
+
+The shared `scripts/test-scm-ui.py` runner passed on Windows through the native
+Haxeon CLI. Its eight UI phases verify staged, changed, untracked and conflicted
+groups; refresh after an external commit; a full-width phone diff; conflict
+resolution; read-only remote controls; file stage/unstage/discard with actual
+Git state checks; commit message entry and commit-button behavior; and Explorer
+folder badges with `main ↑1 ↓1`. A real submodule fixture also verifies its
+nested repository row and confirms that staging a child file changes only the
+child index. The runner uses the native window on Windows
+and wraps the same fixtures with Xvfb on Linux; `scripts/test-scm-ui.sh` remains a shell
+entry point for existing callers. The UI assertions pass on Windows, but its
+PNG capture step invokes ImageMagick's X11-only `import` command, which is not
+available there, so Windows screenshot capture is not claimed. The focused
+Windows `tests/scm-git` run also passed; the latest 10,000-line, 50-edit run
+completed in 10 ms total with a 0.387 ms maximum diff slice, below both the
+4 ms slice and 100 ms convergence limits.
+Separate Windows phases pass gutter marker rendering, click and owner removal,
+unified diff refresh, and synchronized side-by-side scrolling. The
+`tests/status-bar` fixture also verifies Explorer badge/name tint, priority
+roll-up, owner removal, status item ordering/action, and the resource tint on an
+editor tab title. The `tests/remote-access-panel` and
+`tests/workspace-transport --noise-only` runs pass the permission editor and
+pairing grant persistence checks.
+
+| Host and fixture | Resources | Status / unchanged total (ms) | Max frame: status / unchanged (ms) | Max service / scheduler update (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| Windows 11, Exosuite worktree | 94 | 1472.7 / 1652.4 | 15.523 / 8.439 | 0.815 / 14.708 |
+| Windows 11, 50,000-file fixture | 49,999 | 1130.1 / 1130.6 | 12.634 / 10.312 | 1.240 / 11.529 |
+| Windows 11, Exosuite worktree (repeat) | 95 | 1200.8 / 1202.4 | 12.134 / 8.300 | 0.816 / 11.616 |
+| Windows 11, 50,000-file fixture (repeat) | 49,999 | 517.2 / 429.0 | 14.590 / 11.137 | 2.364 / 13.631 |
+| WSL2 Ubuntu 24.04, clean Exosuite snapshot | 0 | 91.995 / 84.808 | 0.437 / 0.522 | 0.038 / 0.427 |
+| WSL2 Ubuntu 24.04, 50,000-file fixture | 49,999 | 156.202 / 164.276 | 6.597 / 6.486 | 0.053 / 6.588 |
+
+| Host and fixture | Wire bytes | Conversion median (ms) | MessagePack encode / decode median (ms) | Model rebuild median (ms) | Batch spawn / cold blob / warm median (warm max), ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Windows 11, Exosuite worktree | 9,874 | 0.0057 | 0.102 / 0.108 | 0.163 | 12.54 / 78.0 / 46.12 (47.61) |
+| Windows 11, 50,000-file fixture | 3,450,077 | 3.699 | 45.891 / 55.936 | 67.037 | 8.887 / 61.93 / 46.40 (47.56) |
+| Windows 11, Exosuite worktree (repeat) | 9,949 | 0.0093 | 0.185 / 0.158 | 0.199 | 10.939 / 57.627 / 13.604 (18.387) |
+| Windows 11, 50,000-file fixture (repeat) | 3,450,084 | 3.793 | 45.102 / 57.404 | 55.788 | 7.551 / 53.689 / 14.224 (16.572) |
+| WSL2 Ubuntu 24.04, clean Exosuite snapshot | 101 | 0 | 0.00095 / 0.00405 | 0 | 0.271 / 63.38 / 7.199 (8.479) |
+| WSL2 Ubuntu 24.04, 50,000-file fixture | 3,450,059 | 6.491 | 37.413 / 51.707 | 38.156 | 0.564 / 3.895 / 2.363 (2.553) |
+
+Initial and unchanged refresh frame assertions are strictly below 16.67 ms on
+both hosts. The initial Windows Exosuite worktree's 15.523 ms maximum was close
+to that budget. The repeat run measured 12.134 ms on the current worktree and
+14.590 ms on the 50,000-file fixture. The clean Linux snapshot is a different
+baseline from the dirty Windows worktree, so those repository rows are not a
+direct comparison. Linux used the
+system libffi 3.4.6 shared library because the WSL image lacked the pinned
+toolchain's autoreconf dependency; SCM performance results are from the same
+Exosuite source snapshot.
+
+The Linux Xvfb runner was attempted, but this WSL image lacks GTK3 development
+files. NativeKit therefore built its no-window stub and the UI process reported
+that no platform window backend was available. This is an environment
+limitation; the Windows native UI runner passed, while Linux UI automation is
+not claimed as a pass.
+
 ## Platform matrix
 
 Only Linux x86-64 is claimed. Windows and macOS remain unclaimed until native

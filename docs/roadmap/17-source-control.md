@@ -33,6 +33,9 @@ Record any override in STATUS.
   relies on credential helpers and SSH agents with prompts disabled.
   Interactive credential prompts through `exosuit-ctl` as `GIT_ASKPASS` are a
   follow-on.
+- **Linux relay dependency.** The agent's HTTP ticket client requires the
+  system libcurl development package. Linux CMake configuration fails clearly
+  when it is unavailable rather than producing a daemon without relay support.
 - **Restricted mode.** New repository roots stay restricted until the user
   trusts them. Restricted mode means no fsmonitor, no hooks, no filters and no
   mutations.
@@ -53,7 +56,7 @@ Record any override in STATUS.
 | RPC client source | `src/workspace/client/WorkspaceScmClient.hx` (`RpcScmSource`) |
 | Agent host | `agent/src/workspace/runtime/WorkspaceScmService.hx` |
 | Graphical UI | `graphical/src/ui/Scm*.hx`, plus hook changes in `EditorGutter`, `ExplorerTreeModel`/`DirectoryTreeModel`, `StatusBarView`, `ExosuitApp` |
-| Tests | `tests/scm-model`, `tests/scm-git`, `tests/workspace-scm`, `tests/scm-ui-smoke` (`scripts/test-scm-ui.sh`) |
+| Tests | `tests/scm-git`, `tests/workspace-scm`, `tests/decoration-ui-smoke` (`scripts/test-scm-ui.py`, with `scripts/test-scm-ui.sh` compatibility entry point) |
 
 Adapt class names to the existing abstractions when implementing
 (EXECUTION.md work loop, step 2).
@@ -161,12 +164,12 @@ Acceptance:
   marked truncated and the UI says so; it is never silently partial.
 - [x] Per-repository FIFO operation queue. Mutations are serialized, and
   `lock_contention` retries three times with backoff, then reports.
-- [ ] Repository trust:
+- [x] Repository trust:
   - [x] A per-root record is persisted by the host that runs Git.
   - [x] Restricted mode passes `-c core.fsmonitor=`, `-c core.hooksPath=<empty
     dir>`, uses unfiltered reads and disables mutations.
   - [x] Git's `safe.directory` refusal is surfaced as its own state.
-  - [ ] Trusting is a local-only action: the in-process host or a local desktop
+  - [x] Trusting is a local-only action: the in-process host or a local desktop
     connection. Over RPC, trust state is readable, but the service rejects
     trust requests from paired devices regardless of their grants. Their UI
     says to trust the repository on the machine itself.
@@ -197,7 +200,7 @@ polling fallback are covered by the focused `tests/scm-git` and
 
 ## M17.3 — Workspace protocol and agent host
 
-- [ ] `WorkspaceScmProtocol`, shared `@:wire` records with permanent `@:id`s.
+- [x] `WorkspaceScmProtocol`, shared `@:wire` records with permanent `@:id`s.
   Allocate an unused method-id range after auditing the existing protocols,
   and never reuse ids. Methods:
   - `scm.repositories`;
@@ -210,11 +213,11 @@ polling fallback are covered by the focused `tests/scm-git` and
   - `scm.trust`, accepted only on local desktop connections (the
     connection's authenticated origin, not a capability). It is rejected for
     relay devices with `local_only`.
-- [ ] Capabilities `workspace.scm.read`, `workspace.scm.write` and
+- [x] Capabilities `workspace.scm.read`, `workspace.scm.write` and
   `workspace.scm.remote`, enforced per method in the service, independently of
   the relay. The Remote Access approval panel lists them; new devices default
   to read only.
-- [ ] Grant editing for approved devices, in the Remote Access panel and the
+- [x] Grant editing for approved devices, in the Remote Access panel and the
   pairing admin protocol. It applies to every grant (terminals, agents,
   SCM), not only SCM.
   - Widening a grant is an owner action on the desktop only.
@@ -222,12 +225,12 @@ polling fallback are covered by the focused `tests/scm-git` and
     grant is cancelled and its watches are closed.
   - The updated grant set is persisted in the device record and survives a
     daemon restart.
-- [ ] Revoking a grant cancels outstanding SCM work for that device and closes
+- [x] Revoking a grant cancels outstanding SCM work for that device and closes
   its watches.
-- [ ] `WorkspaceScmService` in the agent hosts the same `ScmService` core.
+- [x] `WorkspaceScmService` in the agent hosts the same `ScmService` core.
   `RpcScmSource` in the client implements `ScmSource` over the protocol, with
   reconnect and resubscribe.
-- [ ] Source selection: a root browsed through `WorkspaceFileTreeModel` uses
+- [x] Source selection: a root browsed through `WorkspaceFileTreeModel` uses
   `RpcScmSource`, and a local root uses `LocalScmSource`. One root never has
   both.
 
@@ -250,13 +253,13 @@ repository, covers:
 Each hook is generic and owner-scoped. Source control is its first
 contributor.
 
-- [ ] **Gutter marker lane.**
+- [x] **Gutter marker lane.**
   - A marker registry keyed by document, owner and line range, with kinds
     added, modified, deleted-above and deleted-below.
   - `EditorGutter` draws a narrow strip next to the line numbers, using theme
     tokens. Markers are part of the gutter's retained key.
   - Clicking a marker selects its hunk, which M17.6 uses.
-- [ ] **Resource decorations.**
+- [x] **Resource decorations.**
   - A `ResourceDecorationProvider` returns, per path, a badge (1–2 characters),
     a color token, a tooltip and whether the decoration propagates to parent
     folders.
@@ -264,13 +267,13 @@ contributor.
     badge and a tinted name.
   - The provider revision joins the `ExplorerTreeView` cache key.
   - Editor tab titles take the same tint.
-- [ ] **Status bar items.**
+- [x] **Status bar items.**
   - `StatusBarData` gains a contributed item list: side, priority, text, icon,
     tooltip and command.
   - `PluginStatusRegistry` items render through the same path, closing the
     existing gap.
   - Item revisions join the status bar's retained key.
-- [ ] **Diff document.**
+- [x] **Diff document.**
   - A read-only document view showing a unified diff, with the file's syntax
     highlighting, `WholeLineBackground` decorations for added and removed
     lines, and old and new line-number columns.
@@ -285,18 +288,24 @@ Acceptance: `decoration-ui-smoke` / `status-bar` style headless checks cover:
 - contributed status items order by priority and dispatch their command;
 - diff documents render a 3-hunk fixture with correct line numbers.
 
+Focused Windows runs pass the gutter marker render, click and owner-removal
+phases, the unified and side-by-side diff phases, and the status-bar fixture.
+The status-bar fixture checks highest-priority folder roll-up, badge and name
+tint, owner cleanup, contributed item ordering/action, and resource tint on an
+editor tab title.
+
 No SCM code is needed for these tests.
 
 ## M17.5 — Source Control view and read-only workflows
 
-- [ ] Register the sidebar destination:
+- [x] Register the sidebar destination:
   `registerSidebarDestination("scm", …, new SidebarModeOptions("Source
   Control", 15, true))`. Add the `sidebar:scm` command with Ctrl+Shift+G.
   It is absent without the `SourceControl` capability (local) or
   `workspace.scm.read` (connected).
-- [ ] Add `HostCapability.SourceControl`, derived from `Processes`, to
+- [x] Add `HostCapability.SourceControl`, derived from `Processes`, to
   `HostCapabilities.desktop()`.
-- [ ] The view:
+- [x] The view:
   - **Repositories.** Each repository is a collapsible section, with nested
     repositories under their parent. The header shows branch, ahead/behind and
     any in-progress operation.
@@ -308,25 +317,26 @@ No SCM code is needed for these tests.
     action locally; on remote clients, a message to trust on the machine), `safe.directory` refusal, truncated untracked list, and
     refresh error with retry.
   - **Width.** It works at phone width in the web build.
-- [ ] Row activation opens the diff document against the group's base:
+- [x] Row activation opens the diff document against the group's base:
   - index group: HEAD → index;
   - working tree: index → working tree;
   - untracked: the whole file as added;
   - conflicts: the file itself with conflict markers.
 
   Alt+activation opens the file instead.
-- [ ] Explorer decorations and the status bar branch item, through the
+- [x] Explorer decorations and the status bar branch item, through the
   M17.4 hooks. Clicking the branch item focuses the view; branch switching
   comes in M17.7.
-- [ ] Gutter markers for open documents. The original is fetched once per
+- [x] Gutter markers for open documents. The original is fetched once per
   base revision and diffed against the live buffer through `LineDiff` jobs,
   debounced about 100 ms after edits. Files over the size cap or binary files
   get no markers.
-- [ ] Commands: `scm:refresh`, `scm:open-changes`, `scm:open-file`,
+- [x] Commands: `scm:refresh`, `scm:open-changes`, `scm:open-file`,
   `scm:next-change` and `scm:previous-change` (editor hunks), and
   `scm:trust-repository`.
 
-Acceptance: `scripts/test-scm-ui.sh` (Xvfb) on a fixture repository covers:
+Acceptance: `scripts/test-scm-ui.py` on a fixture repository covers the UI
+flows on a native Windows window and under Xvfb on Linux:
 - the view lists staged, changed, untracked and conflicted files in the right
   groups;
 - typing in an unsaved buffer adds a modified gutter marker within 250 ms,
@@ -335,21 +345,47 @@ Acceptance: `scripts/test-scm-ui.sh` (Xvfb) on a fixture repository covers:
 - explorer badges and folder roll-up match;
 - the status bar shows the branch with ahead/behind against a local bare
   remote;
+- a nested submodule appears under its parent, and staging one of its files
+  changes only the submodule index;
 - the diff tab opens with the correct hunks.
 
 The capability-restricted browser host shows no `scm:*` command. The
 connected web client with a read grant shows the view and no mutating
 actions.
 
+The shared `scripts/test-scm-ui.py` runner passes all eight phases on Windows:
+the real Git fixture renders staged, changed, untracked and conflicted groups;
+an external commit clears the live view; the key groups and a full-width diff
+remain available at 320 px; conflict resolution refreshes Git state; the
+read-only remote panel hides mutation controls; UI stage, unstage and discard
+match real Git state; the commit editor creates a commit through the UI; a
+nested submodule is rendered under its parent and a file is staged only in that
+submodule; and Explorer badges roll up through nested folders while the status
+item shows ahead/behind. Its shell
+compatibility entry point is `scripts/test-scm-ui.sh`. On Windows the native
+assertions pass, but the optional PNG capture still relies on ImageMagick's
+X11-only `import` command. The Linux Xvfb runner is not qualified in the current
+WSL image because GTK3 development files are absent and NativeKit builds its
+no-window stub. The connected-browser
+acceptance in `tests/workspace-browser-pairing/run.py --scm <built-site>` now
+passes: it pairs through the local Worker, binds the production
+`WorkspaceScmService` behind the real RPC server, grants only
+`workspace.scm.read`, opens a fixture Git diff, checks that write and remote
+controls are absent, and opens the diff full-width at 320 × 740. A dedicated
+panel smoke also opens a conflict row's context menu, accepts Ours, and verifies
+the resolved file in the refreshed Git state.
+`tests/workspace-scm` covers the corresponding RPC permission boundary against
+the agent service.
+
 ## M17.6 — Mutations: stage, unstage, discard, commit
 
-- [ ] Stage and unstage per file, per group and for everything, from row
+- [x] Stage and unstage per file, per group and for everything, from row
   hover actions, the context menu and commands (`scm:stage`, `scm:stage-all`,
   `scm:unstage`, `scm:unstage-all`).
   - Unstage uses `git restore --staged`; on an unborn HEAD it uses
     `git rm --cached`.
   - Feedback is optimistic, with rollback when the operation fails.
-- [ ] Discard (`scm:discard`):
+- [x] Discard (`scm:discard`):
   - `ConfirmationService` asks first, naming the file count.
   - Tracked files: capture the current blob with `git hash-object -w`, then
     run `git restore --worktree`.
@@ -357,12 +393,12 @@ actions.
   - Notifications offer undo while the capture exists.
   - Open dirty buffers on discarded files go through the existing
     reload-or-keep prompt.
-- [ ] Hunk actions from gutter markers and the diff document: stage hunk,
+- [x] Hunk actions from gutter markers and the diff document: stage hunk,
   unstage hunk, revert hunk. A minimal patch with context is built from
   `LineDiff` and applied with `git apply --cached --recount` (or
   `-R` / worktree for revert) through stdin, after a `--check` dry run.
   This needs the `partialStaging` feature flag.
-- [ ] Commit box:
+- [x] Commit box:
   - multiline message input with a subject length hint; Ctrl+Enter commits;
   - the commit button has a menu: Commit, Amend, Commit Staged vs Commit All
     when nothing is staged (opt-in setting);
@@ -370,12 +406,14 @@ actions.
   - hook output appears in the build output dock on failure;
   - an unsaved-documents check offers Save All first;
   - the draft message persists in session state per repository.
-- [ ] Sign-off and GPG/SSH signing follow the user's Git config. A signing
+- [x] Sign-off and GPG/SSH signing follow the user's Git config. A signing
   failure caused by a missing TTY prompt reports a specific, actionable error.
 
 Acceptance: `tests/scm-git` plus the UI smoke cover:
-- stage, unstage and discard round-trip, with real `git` state asserted after
-  each;
+- UI stage, unstage and tracked discard round-trip, with real `git` state
+  checked after each operation and exact bytes checked after discard;
+- UI commit message entry and Commit Staged button, with the fixture's Git
+  index and working tree clean after commit;
 - discard undo restores the exact bytes;
 - stage hunk on a 3-hunk file leaves exactly one hunk staged
   (`git diff --cached` matches);
@@ -385,20 +423,27 @@ Acceptance: `tests/scm-git` plus the UI smoke cover:
 - a restricted-mode repository rejects every mutation with `untrusted`;
 - a remote device without `workspace.scm.write` cannot trigger any of them.
 
+The focused Git suite covers stage/unstage, tracked and untracked discard with
+exact-byte undo, one-hunk staging, hook failure output, amend, and restricted
+mutation rejection. The Windows Source Control UI runner covers the rendered
+stage, unstage, discard, and commit controls against temporary Git fixtures; it
+is portable to Linux through the same runner with Xvfb. The connected-device
+denial is covered by `tests/workspace-scm`.
+
 ## M17.7 — Branches, remotes and side-by-side diff
 
-- [ ] Branch quick pick (`scm:checkout`) from the status item: local and
+- [x] Branch quick pick (`scm:checkout`) from the status item: local and
   remote branches, create from HEAD (`scm:create-branch`). Checkout is blocked
   with a clear message when it would overwrite local changes, as Git reports.
-- [ ] `scm:fetch`, `scm:pull` (fast-forward only by default, configurable) and
+- [x] `scm:fetch`, `scm:pull` (fast-forward only by default, configurable) and
   `scm:push` (sets upstream on first push after confirmation). They require
   `workspace.scm.remote` when remote, and show progress in a notification.
   With prompts disabled, an authentication failure explains how to configure
   a credential helper or SSH agent.
-- [ ] Optional periodic fetch (`scm.autoFetch`, off by default).
-- [ ] Side-by-side diff: two synchronized read-only/editable panes with
+- [x] Optional periodic fetch (`scm.autoFetch`, off by default).
+- [x] Side-by-side diff: two synchronized read-only/editable panes with
   aligned hunks.
-- [ ] Merge-conflict assistance: the conflict group plus accept
+- [x] Merge-conflict assistance: the conflict group plus accept
   ours/theirs/both actions on conflict blocks, and "mark resolved" (stage).
 
 Acceptance:
@@ -406,6 +451,14 @@ Acceptance:
 - an auth failure with a fake `ssh` command yields the documented message;
 - checkout with conflicting local changes is refused without data loss;
 - a two-way conflict resolves in the UI and stages.
+
+The focused Git suite now exercises first push/upstream setup, fetch, fast-
+forward pull, push and checkout refusal with preserved dirty bytes against a
+local bare remote. The UI smoke verifies aligned side-by-side panes, accepts
+Ours from the conflict menu, and confirms a stage-0 index entry remains after
+resolution. Accept Theirs and Accept Both remain covered by the Git service
+tests. Its fake-SSH fixture confirms an authentication failure returns the
+documented credential-helper/SSH-agent guidance.
 
 ## M17.8 — Extensibility follow-ons (separately scheduled)
 
@@ -429,13 +482,26 @@ These are not part of M17 exit. Listed so the boundaries stay open.
 ## Performance
 
 - Status refresh never blocks a frame.
-- Record status time and snapshot encode/decode time on the materia monorepo
+- Record status time and snapshot encode/decode time on the Exosuite checkout
   and on a synthetic repository with 50 000 files.
 - A gutter `LineDiff` step stays under 4 ms per slice. A 10 000-line file with
   50 scattered edits converges within 100 ms.
 - Explorer decoration lookup is O(1) per row.
 - Measure process startup and batch blob-read latency on Linux and Windows.
   This decides whether the libgit2 reader follow-on is needed.
+
+Qualification recorded 2026-10-10: the Exosuite worktree and the 50,000-file
+fixture stayed below a strict 16.67 ms maximum refresh-frame budget on both
+Windows and Linux. Unchanged refreshes emitted no notifications. The Windows
+Exosuite worktree's first run reached 15.523 ms at its maximum frame. A repeat
+Windows run on the current 95-resource worktree measured 12.134 ms; the
+49,999-untracked-file fixture measured 14.590 ms. Both repeat runs emitted zero
+notifications on unchanged refreshes. Full host and serialization measurements are in
+[`docs/release-qualification.md`](../release-qualification.md). The dedicated
+Explorer/status UI phase passed on Windows. Additional native Windows runs of
+the gutter marker, unified diff and synchronized side-by-side phases also pass.
+The Linux Xvfb runner remains unqualified because the current WSL image lacks
+GTK3 development files.
 
 Record results in `docs/release-qualification.md`.
 

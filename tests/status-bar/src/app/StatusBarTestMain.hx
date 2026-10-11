@@ -8,6 +8,11 @@ import haxeon.ui.core.RenderNode;
 import haxeon.ui.core.UiContext;
 import haxeon.ui.semantics.AccessibilityRole;
 import ui.StatusBarView;
+import haxeon.ui.icons.IconName;
+import plugin.PluginResourceDecorationColor;
+import plugin.PluginResourceDecorationRegistry;
+import plugin.PluginStatusRegistry;
+import plugin.PluginStatusSide;
 
 private class StatusFixture implements haxeon.ui.core.View {
 	public var width:Float = 1000;
@@ -29,6 +34,10 @@ class StatusBarTestMain {
 	static function main():Int {
 		var fonts = haxeon.ui.FontCollection.create();
 		fonts.add("../../haxeon/packages/ui/vendor/skribidi/example/data/IBMPlexSans-Regular.ttf");
+		resourceDecorationRollup();
+		resourceDecorationRendering(fonts);
+		editorTabResourceDecoration(fonts);
+		statusContributions(fonts);
 		var status = "Haxeon: disabled after repeated failures";
 		var document = "a-very-long-document-name-with-Unicode-日本語.hx * - UTF-8";
 		for (dark in [false, true]) {
@@ -121,5 +130,113 @@ class StatusBarTestMain {
 		fonts.dispose();
 		trace("PASS: fixed-height status bar, bounded single-line labels, responsive priorities, and reachable actions in both themes");
 		return 0;
+	}
+
+	static function resourceDecorationRollup():Void {
+		var registry = new PluginResourceDecorationRegistry();
+		registry.add("test-low", "modified", "C:/repo/src/old.hx", "M", Accent, "Modified", true, 10);
+		registry.add("test-high", "added", "C:\\repo\\src\\new.hx", "A", Success, "Added", true, 20);
+		var folder = registry.forPath("C:\\repo\\src");
+		require(folder != null && folder.badge == "A" && folder.sourcePath == "C:/repo/src/new.hx" && folder.inherited,
+			"folder roll-up did not choose the highest-priority descendant decoration");
+		var revision = registry.revision;
+		registry.removeOwner("test-high");
+		folder = registry.forPath("C:/repo/src");
+		require(registry.revision > revision && folder != null && folder.badge == "M",
+			"owner cleanup did not recompute inherited folder decorations");
+	}
+
+	static function resourceDecorationRendering(fonts:haxeon.ui.FontCollection):Void {
+		var theme = ui.ExosuitPalette.theme(true);
+		var registry = new PluginResourceDecorationRegistry();
+		registry.add("smoke", "modified", "C:/repo/src/old.hx", "M", Accent, "Modified", true, 10);
+		registry.add("smoke", "added", "C:/repo/src/new.hx", "A", Success, "Added", true, 20);
+		var model = new ui.DirectoryTreeModel("C:/repo", theme);
+		model.setResourceDecorations(registry);
+		var atlas = new ui.SetiIconAtlas();
+		var context = new UiContext(null, fonts, theme);
+		function row():RenderNode
+			return context.submit(model.buildItemWithIcons("C:/repo/src", false, atlas, true), new LayoutFrame(500, 28));
+		var root = row(), highestBadge = false, tintedName = false;
+		root.walk(function(node) {
+			if (node.layout.text == "A") highestBadge = true;
+			if (node.layout.text == "src" && sameColor(node.layout.textColor, theme.tokens.success)) tintedName = true;
+		});
+		require(highestBadge && tintedName, "explorer row did not render the highest-priority child badge and tint");
+		var before = model.revision();
+		registry.removeOwner("smoke");
+		root = row();
+		var badgeRemains = false, restoredName = false;
+		root.walk(function(node) {
+			if (node.layout.text == "A" || node.layout.text == "M") badgeRemains = true;
+			if (node.layout.text == "src" && sameColor(node.layout.textColor, theme.tokens.text)) restoredName = true;
+		});
+		require(model.revision() > before && !badgeRemains && restoredName,
+			"explorer decoration did not clear its badge and tint after owner removal");
+		model.dispose(); atlas.dispose(); context.dispose();
+	}
+
+	static function sameColor(a:Null<haxeon.ui.Color>, b:haxeon.ui.Color):Bool
+		return a != null && a.red == b.red && a.green == b.green && a.blue == b.blue && a.alpha == b.alpha;
+
+	static function editorTabResourceDecoration(fonts:haxeon.ui.FontCollection):Void {
+		var theme = ui.ExosuitPalette.theme(true);
+		var registry = new PluginResourceDecorationRegistry();
+		registry.add("smoke", "new-file", "C:/repo/src/new.hx", "A", PluginResourceDecorationColor.Success,
+			"Added", false, 10);
+		var decoration = registry.forPath("C:/repo/src/new.hx");
+		require(decoration != null, "resource decoration registry lost the editor-tab fixture");
+		var colors = new Map<String, haxeon.ui.Color>();
+		colors.set("new-file", ui.ResourceDecorationBadge.colorFor(decoration, theme));
+		var item = new haxeon.ui.widgets.controls.TabItem("new-file", "new.hx",
+			new haxeon.ui.widgets.text.Text("fixture"));
+		var view = new ui.EditorTabsView(new haxeon.ui.widgets.controls.Tabs("resource-tabs", [item], item.key),
+			new Map<String, String>(), true, 0.0, colors, registry.revision);
+		var context = new UiContext(null, fonts, theme);
+		var root = context.submit(view, new LayoutFrame(500, 120));
+		var tintedTitle = false;
+		root.walk(function(node) {
+			if (node.layout.text == item.label && sameColor(node.layout.textColor, theme.tokens.success)) tintedTitle = true;
+		});
+		require(tintedTitle, "resource decoration color did not tint the editor tab title");
+		context.dispose();
+	}
+
+	static function statusContributions(fonts:haxeon.ui.FontCollection):Void {
+		var registry = new PluginStatusRegistry();
+		var low = registry.add("scm", "low", "low", 5, Left, null, "Low priority", "scm:low");
+		var high = registry.add("scm", "high", "main", 50, Left, IconName.Activity, "Current branch", "sidebar:scm");
+		registry.add("other", "right", "build", 20, Right, null, "Build status", "build:open");
+		var ordered = registry.items();
+		require(ordered[0] == high && ordered[1].owner == "other" && ordered[2] == low,
+			"status contributions were not ordered by descending priority");
+		var context = new UiContext(null, fonts, ui.ExosuitPalette.theme(true));
+		var commands:Array<String> = [];
+		var view = new StatusBarView({
+			document: "file.hx", status: "Haxe", remoteDetails: "", notification: null,
+			notificationsVisible: false, unread: 0, viewport: function() return new Rect(0, 0, 1000, 600),
+			openRemote: function() {}, showNotification: function(_) {}, dismissNotification: function() {},
+			toggleNotifications: function() {}, items: ordered, runCommand: function(command) commands.push(command)
+		});
+		var root = context.submit(new StatusFixture(view), new LayoutFrame(1000, 200)).children[1];
+		var highNode:RenderNode = null, lowNode:RenderNode = null;
+		root.walk(function(node) {
+			if (node.styleType != "button") return;
+			if (node.styleKey == "status-item:scm:high") highNode = node;
+			if (node.styleKey == "status-item:scm:low") lowNode = node;
+		});
+		require(highNode != null && lowNode != null && highNode.globalBounds().x < lowNode.globalBounds().x,
+			"status bar did not render same-side items in priority order");
+		var bounds = highNode.globalBounds();
+		context.pointerDown(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+		context.pointerUp(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+		require(commands.length == 1 && commands[0] == "sidebar:scm",
+			"status contribution command did not dispatch: " + commands.join(",") +
+			" bounds=" + bounds.x + "," + bounds.y + "," + bounds.width + "," + bounds.height);
+		var revision = registry.revision;
+		registry.removeOwner("scm");
+		require(registry.revision > revision && registry.items().length == 1,
+			"status owner cleanup did not remove its items or advance the revision");
+		context.dispose();
 	}
 }

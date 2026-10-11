@@ -277,6 +277,32 @@ class FileController {
 		});
 	}
 
+	/** Saves every dirty open document in order; completes false if any save is cancelled or fails. */
+	public function saveAll(complete:Bool->Void):Void {
+		if (complete == null) return;
+		var pending = [for (document in documents.documents) if (document.dirty) document];
+		function saveAt(index:Int):Void {
+			if (index >= pending.length) { complete(true); return; }
+			var document = pending[index];
+			if (!document.dirty) { saveAt(index + 1); return; }
+			if (!document.hasBackingPath()) {
+				openSaveAs(document, function() {
+					recovery.forget(document);
+					saveAt(index + 1);
+				}, function() complete(false));
+				return;
+			}
+			if (!saveDocument(document)) {
+				reportError("file", 'Could not save "' + document.title + '"; Save All cancelled');
+				complete(false);
+				return;
+			}
+			recovery.forget(document);
+			saveAt(index + 1);
+		}
+		saveAt(0);
+	}
+
 	function saveDocument(document:Document, force:Bool = false):Bool {
 		if (!document.save(force)) return false;
 		if (onDocumentSaved != null && document.path != null) onDocumentSaved(document.path);

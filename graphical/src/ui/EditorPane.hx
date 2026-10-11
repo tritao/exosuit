@@ -22,6 +22,8 @@ import editor.CaretPresentation;
 import haxeon.ui.widgets.text.TextSelection;
 import haxeon.ui.widgets.text.TextEditIntent;
 import plugin.PluginDecorationRegistry;
+import plugin.PluginGutterMarker;
+import plugin.PluginGutterMarkerRegistry;
 import search.SearchMatch;
 import haxeon.ui.widgets.text.TextDecoration;
 import haxeon.ui.widgets.text.TextDecorationKind;
@@ -67,6 +69,7 @@ class EditorPane implements View {
 	var wrapAnchorLine:Int = -1;
 	final minimap:EditorMinimap;
 	public var minimapEnabled:Bool = true;
+	public var readOnly:Bool = false;
 	public var fontSize:Float = 15.0;
 	public var applicationZoom:Float = 1.0;
 	public var editSettings:config.Settings = new config.Settings();
@@ -85,6 +88,8 @@ class EditorPane implements View {
 	public var consumeCursorReveal:Void->Bool = function() return false;
 	final editorTheme:style.Theme;
 	final decorations:PluginDecorationRegistry;
+	final gutterMarkers:PluginGutterMarkerRegistry;
+	public var onGutterMarkerClick:Null<PluginGutterMarker->Void>;
 	final searchMatches:Void->Array<SearchMatch>;
 	final searchRevision:Void->Int;
 	final foregroundProvider:(Int, Int)->Array<TextColorRange>;
@@ -145,10 +150,12 @@ class EditorPane implements View {
 	var desiredVerticalXs:Array<Float> = [];
 
 	public function new(document:Document, theme:Theme, onEdited:Void->Void, ?selection:BufferSelection, ?editorTheme:style.Theme,
-			?decorations:PluginDecorationRegistry, ?searchMatches:Void->Array<SearchMatch>, ?searchRevision:Void->Int, ?scrollController:ScrollController) {
+			?decorations:PluginDecorationRegistry, ?searchMatches:Void->Array<SearchMatch>, ?searchRevision:Void->Int,
+			?scrollController:ScrollController, ?gutterMarkers:PluginGutterMarkerRegistry) {
 		this.document = document;
 		this.scrollController = scrollController == null ? new ScrollController() : scrollController;
 		this.decorations = decorations == null ? new PluginDecorationRegistry() : decorations;
+		this.gutterMarkers = gutterMarkers == null ? new PluginGutterMarkerRegistry() : gutterMarkers;
 		this.searchMatches = searchMatches == null ? function() return [] : searchMatches;
 		this.searchRevision = searchRevision == null ? function() return 0 : searchRevision;
 		foregroundProvider = provideForeground;
@@ -231,6 +238,7 @@ class EditorPane implements View {
 	}
 
 	function handleEditIntent(intent:TextEditIntent, layout:TextEditorLayout):Bool {
+		if (readOnly) return false;
 		var policyEdit = switch intent { case DeleteBackward | DeleteForward | Insert("\n"): true; case _: false; };
 		if (selection.rangeCount() == 1 && !policyEdit) return false;
 		desiredVerticalXs = [];
@@ -353,7 +361,8 @@ class EditorPane implements View {
 		var viewportNode:Null<haxeon.ui.core.RenderNode> = null;
 		var editorNode:Null<haxeon.ui.core.RenderNode> = null;
 		var gutter = new EditorGutter("gutter:" + document.id, document.buffer,
-			color(editorTheme.foregroundMuted), color(editorTheme.surface), fontSize, selection.cursor.line, context.theme.tokens.accent);
+			color(editorTheme.foregroundMuted), color(editorTheme.surface), fontSize, selection.cursor.line,
+			context.theme.tokens.accent, gutterMarkers.forDocument(document), gutterMarkers.revision, onGutterMarkerClick);
 		viewportGeometry.configure(editSettings.wordWrap, minimapEnabled);
 		var editorStyle = new LayoutStyle();
 		editorStyle.width = viewportGeometry.viewportWidth > 0 ? LayoutAxis.fixed(viewportGeometry.contentWidth) : LayoutAxis.grow();
@@ -364,6 +373,7 @@ class EditorPane implements View {
 		editorStyle.background = color(editorTheme.editorBackground);
 		var area = TextArea.withDocument("editor:" + document.id, document.buffer.document,
 			handleEdit, editorStyle, null, new TextStyle(fontSize, FontFamily.Monospace), color(editorTheme.editorForeground));
+		area.readOnly = readOnly;
 		area.codeWordBoundaries = true;
 		area.wrap = editSettings.wordWrap ? haxeon.ui.TextWrap.WordCharacter : haxeon.ui.TextWrap.None;
 		if (previousWrap != null && previousWrap != editSettings.wordWrap) {

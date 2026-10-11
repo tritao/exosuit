@@ -70,6 +70,9 @@ import ui.UiDocumentView;
 import ui.UiWorkbenchHost;
 import workspace.service.WorkspaceFileProtocol.FileSearchMatch;
 import controller.WorkspaceFileSearchController;
+import scm.LocalScmSource;
+import scm.ScmGroupId;
+import scm.ScmSource;
 
 /**
  * exosuit's graphical shell: `DesktopUiHost` owns the window, GPU, and frame
@@ -137,6 +140,23 @@ class ExosuitApp implements DesktopUiApplication {
 	var explorerRoot:Null<String>;
 	var explorerModel:Null<ExplorerTreeModel>;
 	var explorerTree:Null<TreeView>;
+	var localScmSource:Null<LocalScmSource>;
+	var sourceControlPanelValue:Null<SourceControlPanel>;
+	var sourceControlPanelIdentity:Null<String>;
+	final scmDecorationOwners:Map<String, Bool> = [];
+	final scmDecorationRevisions:Map<String, String> = [];
+	final scmDocumentMarkers:Map<Int, scm.ScmOpenDocumentMarkers> = [];
+	final scmDocumentMarkerKeys:Map<Int, String> = [];
+	var scmBranchStatus:Null<plugin.PluginStatusItem>;
+	var scmPresentationSourceIdentity:Null<String>;
+	var scmBranchJob:Null<scm.ScmJob<Array<scm.ScmBranch>>>;
+	var scmBranchRequestToken:Int = 0;
+	var pendingScmSource:Null<ScmSource>;
+	var pendingScmRepository:Null<scm.ScmRepository>;
+	var pendingScmGroup:Null<scm.ScmGroup>;
+	var pendingScmResource:Null<scm.ScmResource>;
+	var nextScmOperationId:Int = 1;
+	public var gutterMarkerClickHandler:Null<plugin.PluginGutterMarker->Void>;
 	final workspaceFileLoader = new WorkspaceFileLoader();
 	final workspaceFileRefreshPending:Map<String, Bool> = new Map();
 	final tabClicks = new haxeon.ui.core.PointerClickSequence();
@@ -153,6 +173,9 @@ class ExosuitApp implements DesktopUiApplication {
 	var submittedBuildKey:Null<String>;
 	var nextBackgroundPoll:Float = 0.0;
 	var nextExplorerPoll:Float = 0.0;
+	var nextScmPoll:Float = 0.0;
+	final scmAutoFetchPending:Map<String, Bool> = [];
+	final scmAutoFetchLast:Map<String, Float> = [];
 	var visibleNotification:Null<feedback.Notification>;
 	var notificationPanel:Null<NotificationPanel>;
 	var notificationsVisible:Bool = false;
@@ -160,6 +183,11 @@ class ExosuitApp implements DesktopUiApplication {
 	final terminalErrors:Map<String, String> = [];
 	var viewportWidth:Float = 1280.0;
 	var viewportHeight:Float = 840.0;
+	static inline var PHONE_LAYOUT_MAX_WIDTH:Float = 640.0;
+	var phoneLayoutActive:Bool = false;
+	var desktopDockRoot:Null<DockNode>;
+	var desktopDockActivePanel:Null<String>;
+	var phoneContentRoot:Null<DockNode>;
 	static inline var TOOLBAR_HEIGHT:Float = 40.0;
 	static inline var BRAND_WIDTH:Float = 108.0;
 	static inline var TOOLBAR_BUTTON_WIDTH:Float = 32.0;
@@ -208,6 +236,8 @@ class ExosuitApp implements DesktopUiApplication {
 		registerSidebarDestination("files", IconName.FolderOpen, explorerPanel, new haxeon.ui.widgets.sidebar.SidebarModeOptions("Files", 0, true));
 		registerSidebarDestination("search", IconName.Search, function() return searchPanel,
 			new haxeon.ui.widgets.sidebar.SidebarModeOptions("Search", 10, true));
+		if (this.capabilities.supports(HostCapability.SourceControl))
+			registerSidebarDestination("scm", IconName.Hierarchy, sourceControlPanel, new haxeon.ui.widgets.sidebar.SidebarModeOptions("Source Control", 15, true));
 		dock = makeDock();
 		if (openPath == null) dock.close("explorer");
 		var capturedHost:UiWorkbenchHost = null;
@@ -298,6 +328,7 @@ class ExosuitApp implements DesktopUiApplication {
 			sidebar.setVisible(dock.isOpen("explorer"));
 			return "B\tsidebar\t1\t" + sidebar.encode();
 		};
+		host.captureDockLayout = captureDockLayout;
 		host.restoreSidebar = function(lines) {
 			for (line in lines) if (StringTools.startsWith(line, "B\tsidebar\t1\t")) sidebar.restore(line.substring(12));
 		};
@@ -314,6 +345,7 @@ class ExosuitApp implements DesktopUiApplication {
 		updateEditorPalette();
 		for (error in fontErrors) application.reportError("fonts", error);
 		installCommands();
+		syncScmSidebar();
 		var previousSidebarWidth = application.settings.current.sidebarWidth;
 		sidebar.rememberWidth(previousSidebarWidth);
 		application.settings.subscribe(function(value) {
@@ -388,7 +420,9 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function syncSidebar():Void {
 		viewRevision++;
-		if (!sidebar.visible) {
+		if (phoneLayoutActive) {
+			syncPhoneDockRoot();
+		} else if (!sidebar.visible) {
 			if (dock.isOpen("explorer")) dock.close("explorer");
 		} else {
 			if (!dock.isOpen("explorer")) dock.dock("explorer", host.activePane.id, DockDropZone.Left);
@@ -397,6 +431,80 @@ class ExosuitApp implements DesktopUiApplication {
 				DockWorkspace.DividerExtent, DockWorkspace.MinimumHorizontalExtent);
 		}
 		requestFrame();
+	}
+
+	/** At phone width, show the sidebar or editor as one full-width workspace. */
+	function syncResponsiveDockLayout():Void {
+		var phone = viewportWidth > 0 && viewportWidth <= PHONE_LAYOUT_MAX_WIDTH;
+		if (phone) {
+			if (!phoneLayoutActive) {
+				desktopDockRoot = haxeon.ui.docking.DockNodeTools.clone(dock.root);
+				desktopDockActivePanel = dock.activePanelId;
+				phoneContentRoot = haxeon.ui.docking.DockNodeTools.remove(desktopDockRoot, "explorer");
+				phoneLayoutActive = true;
+			} else if (!sidebar.visible) {
+				phoneContentRoot = haxeon.ui.docking.DockNodeTools.clone(dock.root);
+			}
+			syncPhoneDockRoot();
+			return;
+		}
+		if (!phoneLayoutActive) return;
+
+		if (!sidebar.visible) phoneContentRoot = haxeon.ui.docking.DockNodeTools.clone(dock.root);
+		phoneLayoutActive = false;
+		var restored = sidebar.visible ?
+			(desktopDockRoot == null ? haxeon.ui.docking.DockNodeTools.clone(dock.root) :
+				haxeon.ui.docking.DockNodeTools.clone(desktopDockRoot)) :
+			(phoneContentRoot == null ? haxeon.ui.docking.DockNodeTools.remove(dock.root, "explorer") :
+				haxeon.ui.docking.DockNodeTools.clone(phoneContentRoot));
+		if (!sidebar.visible) restored = haxeon.ui.docking.DockNodeTools.remove(restored, "explorer");
+		if (!haxeon.ui.docking.DockNodeTools.same(dock.root, restored)) dock.setRoot(restored);
+		if (sidebar.visible && !dock.isOpen("explorer")) {
+			var target = dock.isOpen(host.activePane.id) ? host.activePane.id :
+				haxeon.ui.docking.DockNodeTools.firstPanel(dock.root);
+			if (target == null) dock.open("explorer");
+			else dock.dock("explorer", target, DockDropZone.Left);
+		} else if (!sidebar.visible && desktopDockActivePanel != null && dock.isOpen(desktopDockActivePanel)) {
+			dock.activate(desktopDockActivePanel);
+		}
+		desktopDockRoot = null;
+		desktopDockActivePanel = null;
+		phoneContentRoot = null;
+	}
+
+	function syncPhoneDockRoot():Void {
+		if (!phoneLayoutActive) return;
+		var target = sidebar.visible ? DockNode.Panel("explorer") :
+			(phoneContentRoot == null ? haxeon.ui.docking.DockNodeTools.remove(dock.root, "explorer") :
+				haxeon.ui.docking.DockNodeTools.clone(phoneContentRoot));
+		if (!haxeon.ui.docking.DockNodeTools.same(dock.root, target)) dock.setRoot(target);
+	}
+
+	function captureDockLayout():String {
+		if (!phoneLayoutActive || desktopDockRoot == null) return dock.snapshotJson();
+		var layout:DockNode;
+		var active:Null<String>;
+		if (sidebar.visible) {
+			layout = haxeon.ui.docking.DockNodeTools.clone(desktopDockRoot);
+			if (!haxeon.ui.docking.DockNodeTools.contains(layout, "explorer")) {
+				var content = phoneContentRoot == null ?
+					haxeon.ui.docking.DockNodeTools.remove(layout, "explorer") :
+					haxeon.ui.docking.DockNodeTools.clone(phoneContentRoot);
+				var width = Math.max(1.0, 1280.0 - ActivityBar.WIDTH - DockWorkspace.DividerExtent);
+				layout = DockNode.Split(DockSplitAxis.Horizontal, Math.min(0.9, sidebar.width / width),
+					DockNode.Panel("explorer"), content);
+			}
+			active = "explorer";
+		} else {
+			layout = phoneContentRoot == null ?
+				haxeon.ui.docking.DockNodeTools.remove(desktopDockRoot, "explorer") :
+				haxeon.ui.docking.DockNodeTools.clone(phoneContentRoot);
+			active = desktopDockActivePanel;
+		}
+		if (active != null && !haxeon.ui.docking.DockNodeTools.contains(layout, active))
+			active = haxeon.ui.docking.DockNodeTools.firstPanel(layout);
+		return haxeon.ui.docking.DockWorkspaceSnapshotCodec.encode(
+			new haxeon.ui.docking.DockWorkspaceSnapshot(layout, active));
 	}
 
 	function terminalUiAvailable():Bool return createTerminal != null || createWorkspaceTerminal != null;
@@ -754,6 +862,56 @@ class ExosuitApp implements DesktopUiApplication {
 		application.commands.add("workspace:search", function(_) showSidebarMode("search"));
 		application.commands.add("sidebar:files", function(_) showSidebarMode("files"));
 		application.commands.add("sidebar:search", function(_) showSidebarMode("search"));
+		application.commands.add("scm:next-hunk", function(_) host.moveActiveDiffHunk(1), function(_) return activeDiffView() != null);
+		application.commands.add("scm:previous-hunk", function(_) host.moveActiveDiffHunk(-1), function(_) return activeDiffView() != null);
+		application.commands.add("scm:stage-hunk", function(_) applyActiveScmHunk("stage"), function(_) return canApplyActiveScmHunk("stage"));
+		application.commands.add("scm:unstage-hunk", function(_) applyActiveScmHunk("unstage"), function(_) return canApplyActiveScmHunk("unstage"));
+		application.commands.add("scm:revert-hunk", function(_) applyActiveScmHunk("revert"), function(_) return canApplyActiveScmHunk("revert"));
+		application.commands.add("scm:next-change", function(_) host.moveActiveGutterMarker(1), function(_) return host.canMoveActiveGutterMarker());
+		application.commands.add("scm:previous-change", function(_) host.moveActiveGutterMarker(-1), function(_) return host.canMoveActiveGutterMarker());
+		application.commands.add("scm:open-file-at-line", function(_) openActiveDiffSourceAtLine(), function(_) return activeDiffView() != null);
+		application.commands.add("scm:refresh", function(_) refreshSourceControl(), function(_) return sourceControlSource() != null);
+		application.commands.add("scm:fetch", function(_) applyPendingScmRemote(scm.ScmOperation.Fetch(null)), function(_) return canUsePendingScmRemotes());
+		application.commands.add("scm:pull", function(_) applyPendingScmRemote(scm.ScmOperation.Pull), function(_) return canUsePendingScmRemotes());
+		application.commands.add("scm:push", function(_) applyPendingScmRemote(scm.ScmOperation.Push), function(_) return canUsePendingScmRemotes());
+		application.commands.add("scm:checkout", function(_) openScmBranchPicker(null), function(_) return canCheckoutScmRepository(null));
+		application.commands.add("scm:checkout-selected", function(_) openScmBranchPicker(pendingScmRepository), function(_) return canCheckoutScmRepository(pendingScmRepository));
+		application.commands.add("scm:create-branch", function(_) openScmCreateBranchPrompt(null), function(_) return canCheckoutScmRepository(null));
+		application.commands.add("scm:create-branch-selected", function(_) openScmCreateBranchPrompt(pendingScmRepository), function(_) return canCheckoutScmRepository(pendingScmRepository));
+		application.commands.add("scm:trust-repository", function(_) {
+			var source = pendingScmSource, repository = pendingScmRepository;
+			if (source != null && repository != null && !source.isRemote()) trustScmRepository(repository);
+		}, function(_) return canTrustPendingScmRepository());
+		application.commands.add("scm:open-changes", function(_) {
+			if (pendingScmSource != null && pendingScmRepository != null && pendingScmGroup != null && pendingScmResource != null)
+				openScmResource(pendingScmSource, pendingScmRepository, pendingScmGroup, pendingScmResource);
+		}, function(_) return pendingScmResource != null);
+		application.commands.add("scm:open-side-by-side", function(_) {
+			if (pendingScmSource != null && pendingScmRepository != null && pendingScmGroup != null && pendingScmResource != null)
+				openScmResource(pendingScmSource, pendingScmRepository, pendingScmGroup, pendingScmResource, true);
+		}, function(_) return pendingScmResource != null && pendingScmGroup != null && pendingScmGroup.id != ScmGroupId.Merge);
+		application.commands.add("scm:open-file", function(_) openPendingScmFile(), function(_) return pendingScmResource != null);
+		application.commands.add("scm:stage", function(_) applyPendingScmFile(true), function(_) return canStagePendingScmFile());
+		application.commands.add("scm:unstage", function(_) applyPendingScmFile(false), function(_) return canUnstagePendingScmFile());
+		application.commands.add("scm:resolve-ours", function(_) applyPendingScmConflict("ours"), function(_) return canResolvePendingScmConflict());
+		application.commands.add("scm:resolve-theirs", function(_) applyPendingScmConflict("theirs"), function(_) return canResolvePendingScmConflict());
+		application.commands.add("scm:resolve-both", function(_) applyPendingScmConflict("both"), function(_) return canResolvePendingScmConflict());
+		application.commands.add("scm:stage-all", function(_) applyPendingScmGroup(true), function(_) return canStagePendingScmGroup());
+		application.commands.add("scm:unstage-all", function(_) applyPendingScmGroup(false), function(_) return canUnstagePendingScmGroup());
+		application.commands.add("scm:discard", function(_) discardPendingScmFile(), function(_) return canDiscardPendingScmFile());
+		application.commands.add("scm:commit", function(_) {
+			var source = sourceControlSource(), repository = source == null ? null : scmCommitRepository(source);
+			if (source != null && repository != null) commitScmMessage(source, repository, application.scmCommitDrafts.get(repository.id), false, false);
+		}, function(_) return canCommitStagedCurrentScmRepository());
+		application.commands.add("scm:commit-amend", function(_) {
+			var source = sourceControlSource(), repository = source == null ? null : scmCommitRepository(source);
+			if (source != null && repository != null) commitScmMessage(source, repository, application.scmCommitDrafts.get(repository.id), true, false);
+		}, function(_) return canAmendCurrentScmRepository());
+		application.commands.add("scm:commit-all", function(_) {
+			var source = sourceControlSource(), repository = source == null ? null : scmCommitRepository(source);
+			if (source != null && repository != null) commitScmMessage(source, repository, application.scmCommitDrafts.get(repository.id), false, true);
+		}, function(_) return canCommitAllCurrentScmRepository());
+		application.keymap.add(UiKey.Enter, UiModifier.Control, ["scm:commit"]);
 		application.commands.add("settings:open", function(_) openSettings());
 		ui.commands.register(new Command("preferences.open", "Settings…", openSettings,
 			new Shortcut(UiKey.Comma, UiModifier.Control)));
@@ -955,8 +1113,9 @@ class ExosuitApp implements DesktopUiApplication {
 		var widthChanged = viewportWidth != frame.width;
 		viewportWidth = frame.width;
 		viewportHeight = frame.height;
+		syncResponsiveDockLayout();
 		keepSidebarFullHeight();
-		if (widthChanged && dock.isOpen("explorer")) {
+		if (widthChanged && !phoneLayoutActive && dock.isOpen("explorer")) {
 			var mode = sidebar.selected();
 			if (mode != null) dock.setPanelWidth("explorer", sidebar.width, Math.max(0, viewportWidth - ActivityBar.WIDTH),
 				DockWorkspace.DividerExtent, DockWorkspace.MinimumHorizontalExtent);
@@ -964,7 +1123,10 @@ class ExosuitApp implements DesktopUiApplication {
 		dock.setPanelBadge("problems", host.getProblems().values().length);
 		var key = (hostContext == null || hostContext.windowControls == null ? 0 : hostContext.windowControls.revision) + ":" + viewRevision + ":" + dock.revision + ":" +
 			(explorerModel == null ? -1 : explorerModel.revision()) + ":" +
-			application.settings.current.minimapEnabled + ":problems=" + host.getProblems().revision + ":prefs=" + application.settings.store.revision;
+			application.settings.current.minimapEnabled + ":problems=" + host.getProblems().revision + ":prefs=" + application.settings.store.revision +
+			":decorations=" + host.getPluginDecorations().revision + ":gutter-markers=" + host.getPluginGutterMarkers().revision +
+			":resource-decorations=" + host.getResourceDecorations().revision + ":status-items=" + host.getPluginStatusItems().revision +
+			":panels=" + host.getPluginPanels().revision;
 		var activeView = host.activeView();
 		key += ":active=" + (activeView == null ? -1 : activeView.id);
 		for (view in host.allViews()) {
@@ -1156,11 +1318,15 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	public function attachWorkspace(attachment:workspace.client.WorkspaceAttachment):Void {
+		clearSourceControlPanel();
+		clearScmPresentation();
 		clearExplorerModel();
+		clearLocalScmSource();
 		if (workbenchPanel != null) workbenchPanel.workspaceAttachmentChanged();
 		if (workspaceAttachment != null)
 			workspaceAttachment.dispose();
 		workspaceAttachment = attachment;
+		syncScmSidebar();
 		workspaceFileLoader.clearCache();
 		searchFileClient = null;
 		pendingWorkspaceFolderReveal = null;
@@ -1170,9 +1336,13 @@ class ExosuitApp implements DesktopUiApplication {
 
 	public function detachWorkspace(attachment:workspace.client.WorkspaceAttachment):Void {
 		if (workspaceAttachment != attachment) return;
+		clearSourceControlPanel();
+		clearScmPresentation();
 		clearExplorerModel();
+		clearLocalScmSource();
 		if (workbenchPanel != null) workbenchPanel.workspaceAttachmentChanged();
 		workspaceAttachment = null;
+		syncScmSidebar();
 		workspaceFileLoader.clearCache();
 		searchFileClient = null;
 		pendingWorkspaceFolderReveal = null;
@@ -1187,7 +1357,14 @@ class ExosuitApp implements DesktopUiApplication {
 		var now = Sys.time();
 		if (now < nextBackgroundPoll) return;
 		nextBackgroundPoll = now + 0.05;
+		if (host.syncSideBySidePanes()) requestFrame();
 		pumpApplication();
+		syncScmDocumentMarkers(now);
+		if (now >= nextScmPoll) {
+			nextScmPoll = now + 0.5;
+			var source = sourceControlSource();
+			if (source != null) { source.poll(); syncScmPresentation(source); maybeAutoFetchScm(source, now); }
+		}
 		// Rendering hover/selection changes must not perform filesystem polling.
 		// Watches make refresh a no-op until a change; unsupported backends poll
 		// on a bounded cadence instead of once for every pointer movement.
@@ -1355,12 +1532,14 @@ class ExosuitApp implements DesktopUiApplication {
 
 	public function dispose():Void {
 		if (notificationPanel != null) notificationPanel.close();
+		cancelScmBranchRequest();
 		if (hostContext != null) hostContext.onPoll = null;
 		application.onScmWatchPathsChanged = null;
 		if (scmFocusSubscription != null) scmFocusSubscription.dispose();
 		scmFocusSubscription = null;
 		if (scmDirectoryWatch != null) scmDirectoryWatch.dispose();
 		scmDirectoryWatch = null;
+		clearLocalScmSource();
 		clearExplorerModel();
 		remoteFileSearch.cancel();
 		if (workspaceAttachment != null) workspaceAttachment.dispose();
@@ -1391,7 +1570,11 @@ class ExosuitApp implements DesktopUiApplication {
 		var treeItems:Array<Dynamic> = [];
 		diagnosticTreeItems(ui.root, treeItems);
 		var active = host.activeDocument();
+		var activeView = host.activeView();
 		var tab = host.activeTab();
+		var source = sourceControlSource();
+		var repositories = source == null ? [] : source.repositories();
+		var firstRepository = repositories.length == 0 ? null : repositories[0];
 		var terminal = tab == null ? null : UiEditorTabs.terminal(tab);
 		var agent = tab == null ? null : UiEditorTabs.agent(tab);
 		var agentClient = workbenchClient == null ? null : workbenchClient.agentService();
@@ -1432,8 +1615,18 @@ class ExosuitApp implements DesktopUiApplication {
 			workspaceFileTabs: workspaceFileDiagnostics(),
 			workspaceFileReads: {active: workspaceFileLoader.active, completed: workspaceFileLoader.completedReads,
 				cacheHits: workspaceFileLoader.cacheHits, cachedBytes: workspaceFileLoader.cachedBytes, lastReadMs: workspaceFileLoader.lastReadMs},
+			viewport: {width: viewportWidth, height: viewportHeight, phoneLayout: phoneLayoutActive,
+				sidebarVisible: sidebar.visible, explorerOpen: dock.isOpen("explorer"), activePanel: dock.activePanelId},
+			sourceControl: source == null ? null : {
+				remote: source.isRemote(), connected: source.connected(), repositoryCount: repositories.length,
+				canWrite: firstRepository != null && source.canWrite(firstRepository.id),
+				canUseRemotes: firstRepository != null && source.canUseRemotes(firstRepository.id),
+				commitMessage: target("scm-commit-message:" + (firstRepository == null ? "" : firstRepository.id)),
+				commitButton: target("scm-commit-staged"), rowMutation: target("scm-row-action:file-mutation")
+			},
+			activeDiff: activeView != null && activeView.diffDocument != null,
 			active: active == null ? -1 : active.id,
-			documentsSource: "core.Application (via UiWorkbenchHost)",
+				documentsSource: "core.Application (via UiWorkbenchHost)",
 			treeItems: treeItems,
 			explorerRoot: explorerRoot,
 			explorerIdentity: explorerModel == null ? null : explorerModel.rootIdentity(),
@@ -1465,6 +1658,8 @@ class ExosuitApp implements DesktopUiApplication {
 				newCodex: target("workbench-new-codex"),
 				codexViewport: target("codex-session-viewport"),
 				filesActivity: targetByLabel("Files"),
+				sourceControlActivity: targetByLabel("Source Control"),
+				sourceControlPanel: target("source-control-panel"),
 				newTerminal: target("workbench-new-terminal"),
 				terminalToolbar: target("toolbar-Terminal"),
 				terminalPane: target("terminal-pane"),
@@ -1654,6 +1849,8 @@ class ExosuitApp implements DesktopUiApplication {
 			indentation: active == null ? null : indentation,
 			indentationDetails: indentationDetails,
 			openIndentation: function() application.configuration.openIndentationCommandView(),
+			items: host.getPluginStatusItems().items(),
+			runCommand: function(command) { application.commands.perform(command, application.context); requestFrame(); },
 			status: trailing,
 			remoteDetails: remoteDetails,
 			notification: notification,
@@ -1664,7 +1861,8 @@ class ExosuitApp implements DesktopUiApplication {
 			showNotification: function(entry) showNotifications(entry),
 			dismissNotification: function() { center.dismissToast(); requestFrame(); },
 			toggleNotifications: function() { if (notificationsVisible) hideNotifications(); else showNotifications(); }
-		}), function() return indentationDetails + ":" + remoteDetails + ":" + label + ":" + trailing + ":" + (notification == null ? 0 : notification.id) + ":" + center.revision + ":" + notificationsVisible + ":" + ui.animations.revision);
+		}), function() return indentationDetails + ":" + remoteDetails + ":" + label + ":" + trailing + ":" +
+			host.getPluginStatusItems().revision + ":" + (notification == null ? 0 : notification.id) + ":" + center.revision + ":" + notificationsVisible + ":" + ui.animations.revision);
 	}
 
 	function explorerHeaderActions():View {
@@ -1752,9 +1950,11 @@ class ExosuitApp implements DesktopUiApplication {
 				explorerModel = new WorkspaceFileTreeModel(function()
 					return workspaceAttachment == null ? null : workspaceAttachment.fileClient(),
 					remoteWorkspace, remoteScope, rootName, theme, requestFrame,
-					function(root) { workspaceFileLoader.clearCache(); host.markWorkspaceFilesChanged(remoteScope, root); });
+					function(root) { workspaceFileLoader.clearCache(); host.markWorkspaceFilesChanged(remoteScope, root); },
+					attachment == null || attachment.hasLocalFileAccess() ? null : attachment.sourceControlSource());
 			} else explorerModel = new DirectoryTreeModel(explorerRoot, theme);
 		}
+		if (explorerModel != null) explorerModel.setResourceDecorations(host.getResourceDecorations());
 		var remoteModel:Null<WorkspaceFileTreeModel> = Std.isOfType(explorerModel, WorkspaceFileTreeModel)
 			? cast explorerModel : null;
 		var localModel:Null<DirectoryTreeModel> = Std.isOfType(explorerModel, DirectoryTreeModel)
@@ -2074,6 +2274,7 @@ class ExosuitApp implements DesktopUiApplication {
 		if (editorPane.items.length == 0) return welcomePanel();
 		var items:Array<TabItem> = [];
 		var filenames:Map<String, String> = new Map();
+		var tabColors:Map<String, haxeon.ui.Color> = new Map();
 		for (item in editorPane.items) {
 			var unsupported = UiEditorTabs.unsupportedFile(item);
 			if (unsupported != null) {
@@ -2126,6 +2327,12 @@ class ExosuitApp implements DesktopUiApplication {
 			var documentView = UiEditorTabs.document(item);
 			if (documentView == null) continue;
 			var document = documentView.document;
+			var diffDocument = documentView.diffDocument;
+			if (document.path != null) {
+				var decoration = host.getResourceDecorations().forPath(document.path);
+				if (decoration != null) tabColors.set(UiEditorTabs.key(item),
+					ResourceDecorationBadge.colorFor(decoration, theme));
+			}
 			// Reused across frames (not rebuilt each `view()` call) so its
 			// `BufferSelection` (shared with `documentView`, see `UiDocumentView`'s
 			// doc comment) persists between edits instead of resetting.
@@ -2134,11 +2341,17 @@ class ExosuitApp implements DesktopUiApplication {
 				pane = new EditorPane(document, theme, function() {
 					requestFrame();
 				}, documentView.selection, editorPalette,
-					host.getPluginDecorations(), documentView.decorationSearchMatches, documentView.searchDecorationRevision, documentView.scrollController);
+					host.getPluginDecorations(), documentView.decorationSearchMatches, documentView.searchDecorationRevision,
+					documentView.scrollController, host.getPluginGutterMarkers());
 				editorPanes.set(documentView.id, pane);
 			}
+			pane.readOnly = documentView.readOnly;
+			pane.onGutterMarkerClick = gutterMarkerClickHandler == null
+				? function(marker) host.selectGutterMarker(marker) : gutterMarkerClickHandler;
 			pane.setSemanticTokens(application.language.semanticTokensFor(document));
-			pane.editSettings = application.configuration.settingsFor(document);
+			var editSettings = application.configuration.settingsFor(document);
+			if (documentView.sideBySideDiff) { editSettings = editSettings.copy(); editSettings.wordWrap = false; }
+			pane.editSettings = editSettings;
 			documentView.editSettings = pane.editSettings;
 			documentView.deletionBoundary = pane.deletionBoundary;
 			pane.minimapEnabled = application.settings.current.minimapEnabled;
@@ -2147,7 +2360,10 @@ class ExosuitApp implements DesktopUiApplication {
 			documentView.isActive = function() return host.activeView() == documentView;
 			pane.onEditorAction = documentView.performEditorAction;
 			pane.onNavigationKey = event -> CommandBridge.navigationKey(application.keymap, application.context, event.key, event.modifiers);
-			pane.onDefinition = function() { host.activateTab(document, paneId); application.commands.perform("language:go-to-definition", application.context); };
+			pane.onDefinition = diffDocument == null ? function() {
+				host.activateTab(document, paneId);
+				application.commands.perform("language:go-to-definition", application.context);
+			} : null;
 			pane.requestCursorReveal = documentView.cursorChanged;
 			pane.consumeCursorReveal = documentView.consumeCursorReveal;
 			pane.fontSize = application.settings.current.fontSize;
@@ -2156,6 +2372,16 @@ class ExosuitApp implements DesktopUiApplication {
 			pane.onActivated = function() host.activateTab(document, paneId);
 			pane.onContextMenu = function(event) {
 				host.activateTab(document, paneId);
+				if (diffDocument != null) {
+					var entries = [new CommandMenuEntry("doc:copy", "Copy")];
+					if (!documentView.sideBySideDiff) {
+						entries.push(new CommandMenuEntry("scm:previous-hunk", "Previous Hunk"));
+						entries.push(new CommandMenuEntry("scm:next-hunk", "Next Hunk"));
+						entries.push(new CommandMenuEntry("scm:open-file-at-line", "Open File at Line"));
+					}
+					showContextMenu(entries, event, function() return host.activeView() == documentView);
+					return;
+				}
 				showContextMenu([
 					new CommandMenuEntry("doc:undo", "Undo"),
 					new CommandMenuEntry("doc:redo", "Redo"),
@@ -2177,7 +2403,8 @@ class ExosuitApp implements DesktopUiApplication {
 					else requestFrame();
 				}
 			};
-			filenames.set("doc:" + document.id, document.title);
+			var documentKey = UiEditorTabs.key(item);
+			filenames.set(documentKey, diffDocument == null ? document.title : diffDocument.path);
 			var breadcrumbRoot:Null<String> = null;
 			if (document.path != null) for (project in application.workspace.projects) {
 				var root = StringTools.replace(project.root, "\\", "/");
@@ -2189,17 +2416,20 @@ class ExosuitApp implements DesktopUiApplication {
 			var contentStyle = new LayoutStyle();
 			contentStyle.width = LayoutAxis.grow();
 			contentStyle.height = LayoutAxis.grow();
-			var content = new Column("document-content:" + documentView.id, [
-				new KeyedView("breadcrumbs", new EditorBreadcrumbs(document, breadcrumbRoot,
-					theme.tokens.textSecondary, Color.fromBytes((editorPalette.editorBackground >>> 24) & 255,
-						(editorPalette.editorBackground >>> 16) & 255, (editorPalette.editorBackground >>> 8) & 255,
-						editorPalette.editorBackground & 255), darkPalette,
-					function(path, event) showBreadcrumbMenu(document, paneId, path, event))),
-				new KeyedView("editor", pane)
-			], contentStyle);
-			var fileTab = new TabItem("doc:" + document.id, (document.dirty ? "* " : "") + document.title + (documentView.preview ? " (preview)" : ""), content);
-			fileTab.onClose = function() application.files.requestCloseTab(host.documentsLostByClosingTab(item),
-				function() return host.closeTab(item, paneId, true));
+			var contentItems:Array<KeyedView> = [];
+			if (diffDocument == null) contentItems.push(new KeyedView("breadcrumbs", new EditorBreadcrumbs(document, breadcrumbRoot,
+				theme.tokens.textSecondary, Color.fromBytes((editorPalette.editorBackground >>> 24) & 255,
+					(editorPalette.editorBackground >>> 16) & 255, (editorPalette.editorBackground >>> 8) & 255,
+					editorPalette.editorBackground & 255), darkPalette,
+				function(path, event) showBreadcrumbMenu(document, paneId, path, event))));
+			contentItems.push(new KeyedView("editor", pane));
+			var content = new Column("document-content:" + documentView.id, contentItems, contentStyle);
+			var title = diffDocument == null ? (document.dirty ? "* " : "") + document.title :
+				documentView.sideBySideDiff ? document.title : diffDocument.path + " (diff)";
+			var fileTab = new TabItem(documentKey, title + (documentView.preview ? " (preview)" : ""), content);
+			fileTab.onClose = diffDocument != null ? function() host.closeTab(item, paneId, true) : function()
+				application.files.requestCloseTab(host.documentsLostByClosingTab(item),
+					function() return host.closeTab(item, paneId, true));
 			items.push(fileTab);
 		}
 		var tabsStyle = new LayoutStyle();
@@ -2250,7 +2480,8 @@ class ExosuitApp implements DesktopUiApplication {
 				return;
 			}
 		};
-		return new EditorTabsView(widget, filenames, darkPalette, application.settings.current.tabTooltipDelay);
+		return new EditorTabsView(widget, filenames, darkPalette, application.settings.current.tabTooltipDelay,
+			tabColors, host.getResourceDecorations().revision);
 	}
 
 	function showBreadcrumbMenu(document:editor.Document, paneId:String, path:String, event:UiEvent):Void {
@@ -2431,9 +2662,9 @@ class ExosuitApp implements DesktopUiApplication {
 			return;
 		}
 		if (explorerRoot == null) {
-			var slash = path.lastIndexOf("/");
+			var normalized = StringTools.replace(path, "\\", "/"), slash = normalized.lastIndexOf("/");
 			if (slash > 0) {
-				explorerRoot = path.substring(0, slash);
+				explorerRoot = normalized.substring(0, slash);
 				openExplorer();
 			}
 		}
@@ -2488,6 +2719,1055 @@ class ExosuitApp implements DesktopUiApplication {
 		if (explorerModel != null) explorerModel.dispose();
 		explorerModel = null;
 		explorerTree = null;
+	}
+
+	/** Select exactly the source owned by the active explorer root. */
+	public function sourceControlSource():Null<ScmSource> {
+		if (workspaceAttachment != null && !workspaceAttachment.hasLocalFileAccess()) {
+			clearLocalScmSource();
+			return workspaceAttachment.sourceControlSource();
+		}
+		if (!capabilities.supports(HostCapability.SourceControl) || explorerRoot == null) {
+			clearLocalScmSource();
+			return null;
+		}
+		if (localScmSource == null || localScmSource.identity() != "local:" + normalizedLocalRoot(explorerRoot)) {
+			clearLocalScmSource();
+			localScmSource = new LocalScmSource(application.scm, explorerRoot);
+		}
+		return localScmSource;
+	}
+
+	function syncScmSidebar():Void {
+		var remoteRead = workspaceAttachment != null && !workspaceAttachment.hasLocalFileAccess()
+			&& workspaceAttachment.sourceControlSource() != null;
+		var enabled = capabilities.supports(HostCapability.SourceControl) || remoteRead;
+		if (enabled && sidebar.find("scm") == null)
+			registerSidebarDestination("scm", IconName.Hierarchy, sourceControlPanel,
+				new haxeon.ui.widgets.sidebar.SidebarModeOptions("Source Control", 15, true));
+		else if (!enabled && sidebar.find("scm") != null) {
+			sidebar.unregister("scm");
+			application.commands.remove("sidebar:scm");
+			application.keymap.removeCommand("sidebar:scm");
+		}
+		if (enabled && application != null && !application.commands.contains("sidebar:scm")) {
+			application.commands.add("sidebar:scm", function(_) { activateSidebarDestination("scm"); requestFrame(); });
+			application.keymap.add(UiKey.G, UiModifier.Control | UiModifier.Shift, ["sidebar:scm"]);
+		}
+	}
+
+	function sourceControlPanel():View {
+		var source = sourceControlSource();
+		if (source == null) {
+			clearSourceControlPanel();
+			return new Text(explorerRoot == null ? "Open a folder to view source control" : "Source control access is unavailable",
+				null, theme.tokens.textSecondary, new TextStyleOverride(null, 13.0, null, haxeon.ui.TextWrap.WordCharacter));
+		}
+		if (sourceControlPanelValue == null || sourceControlPanelIdentity != source.identity()) {
+			clearSourceControlPanel();
+			sourceControlPanelIdentity = source.identity();
+			sourceControlPanelValue = new SourceControlPanel(source, theme, function() {
+				syncScmPresentation(source);
+				requestFrame();
+			}, function(repository, group, resource) {
+				rememberScmResource(source, repository, group, resource);
+				openScmResource(source, repository, group, resource);
+				requestFrame();
+			}, showScmResourceMenu,
+				function() { source.discover(_ -> requestFrame()); }, trustScmRepository,
+			function(repository, group, resource) {
+				rememberScmResource(source, repository, group, resource);
+				openScmSourceFile(source, repository, resource);
+			}, function(repository, group, event) { showScmRepositoryMenu(source, repository, group, event); },
+			function() return scmCommitRepository(source), function(repository) {
+				var value = application.scmCommitDrafts.get(repository.id);
+				return value == null ? "" : value;
+			}, function(repository, value) {
+				application.scmCommitDrafts.set(repository.id, value);
+				requestFrame();
+			}, function(repository, amend, all) {
+				var value = application.scmCommitDrafts.get(repository.id);
+				commitScmMessage(source, repository, value, amend, all);
+			}, function(repository) return source.canWrite(repository.id) && hasStagedScmChanges(source, repository), function(repository, group, resource) {
+				rememberScmResource(source, repository, group, resource);
+			if (resource != null && group != null) applyPendingScmFile(group.id != ScmGroupId.Index);
+			else applyPendingScmGroup(group == null || group.id != ScmGroupId.Index);
+			}, function(repository, event) showScmCommitMenu(source, repository, event));
+			syncScmPresentation(source);
+		}
+		return sourceControlPanelValue;
+	}
+
+	function clearSourceControlPanel():Void {
+		if (sourceControlPanelValue != null) sourceControlPanelValue.dispose();
+		sourceControlPanelValue = null;
+		sourceControlPanelIdentity = null;
+	}
+
+	function clearScmPresentation():Void {
+		cancelScmBranchRequest();
+		for (owner in [for (value in scmDecorationOwners.keys()) value]) host.getResourceDecorations().removeOwner(owner);
+		scmDecorationOwners.clear(); scmDecorationRevisions.clear();
+		scmPresentationSourceIdentity = null;
+		host.getPluginStatusItems().removeOwner("scm");
+		scmBranchStatus = null;
+	}
+
+	function syncScmPresentation(source:ScmSource):Void {
+		if (source == null) return;
+		var decorationRegistry = host.getResourceDecorations();
+		var statusRegistry = host.getPluginStatusItems();
+		var decorationRevisionBefore = decorationRegistry.revision;
+		var statusRevisionBefore = statusRegistry.revision;
+		if (scmPresentationSourceIdentity != null && scmPresentationSourceIdentity != source.identity()) clearScmPresentation();
+		scmPresentationSourceIdentity = source.identity();
+		var desired:Map<String, Bool> = [];
+		var repositories = source.repositories();
+		for (repository in repositories) {
+			var snapshot = source.snapshot(repository.id);
+			if (snapshot == null) continue;
+			var owner = "scm:" + source.identity() + ":" + repository.id;
+			desired.set(owner, true);
+			var revision = haxe.Int64.toStr(snapshot.revision);
+			if (scmDecorationRevisions.get(owner) == revision) continue;
+			host.getResourceDecorations().removeOwner(owner);
+			for (group in snapshot.groups) {
+			for (resource in group.resources) {
+				var relative = resource.pathBytes.getString(0, resource.pathBytes.length);
+				var path:String;
+				if (source.isRemote()) {
+					var scope = workspaceAttachment == null ? null : workspaceAttachment.fileScope();
+					var repoRelative = scope == null ? null : pathUnderScope(scope, repository.root);
+					if (repoRelative == null) continue;
+					path = repoRelative.length == 0 ? relative : repoRelative + "/" + relative;
+				} else path = repository.root + "/" + relative;
+				path = StringTools.replace(path, "\\", "/");
+				var badge = scmStatusBadge(resource);
+				var color = resource.conflictKind != null || resource.changeKind == scm.ScmChangeKind.Unmerged
+					? plugin.PluginResourceDecorationColor.Danger
+					: resource.changeKind == scm.ScmChangeKind.Added || resource.changeKind == scm.ScmChangeKind.Untracked
+						? plugin.PluginResourceDecorationColor.Success
+						: resource.changeKind == scm.ScmChangeKind.Deleted ? plugin.PluginResourceDecorationColor.Danger
+						: resource.changeKind == scm.ScmChangeKind.Ignored ? plugin.PluginResourceDecorationColor.Secondary
+						: plugin.PluginResourceDecorationColor.Warning;
+				var priority = group.id == ScmGroupId.Merge ? 400 : group.id == ScmGroupId.Index ? 300 :
+					group.id == ScmGroupId.WorkingTree ? 200 : group.id == ScmGroupId.Untracked ? 100 : 0;
+				host.getResourceDecorations().add(owner, "resource:" + group.id + ":" + resource.pathBytes.length + ":" + resource.path,
+					path, badge, color, "Source control · " + scmGroupLabel(group.id) + " · " + resource.path, true, priority);
+			}
+			}
+			scmDecorationOwners.set(owner, true);
+			scmDecorationRevisions.set(owner, revision);
+		}
+		for (owner in [for (owner in scmDecorationOwners.keys()) if (!desired.exists(owner)) owner]) {
+			host.getResourceDecorations().removeOwner(owner);
+			scmDecorationOwners.remove(owner); scmDecorationRevisions.remove(owner);
+		}
+		if (repositories.length == 0) {
+			statusRegistry.removeOwner("scm"); scmBranchStatus = null;
+			if (decorationRegistry.revision != decorationRevisionBefore || statusRegistry.revision != statusRevisionBefore) requestFrame();
+			return;
+		}
+		var activeRepository = repositories[0], snapshot = source.snapshot(activeRepository.id);
+		if (snapshot == null) return;
+		var head = snapshot.head;
+		var branch = head.branch != null ? head.branch : head.detachedCommit == null ? "No branch" : "detached " + head.detachedCommit.substr(0, 8);
+		var text = branch + (head.ahead > 0 ? " ↑" + head.ahead : "") + (head.behind > 0 ? " ↓" + head.behind : "");
+		var tooltip = activeRepository.root + "\n" + branch + (head.upstream == null ? "" : "\nUpstream: " + head.upstream)
+			+ (head.operation == null ? "" : "\n" + Std.string(head.operation));
+		var branchCommand = canCheckoutScmRepository(activeRepository) ? "scm:checkout" : "sidebar:scm";
+		var registry = statusRegistry;
+		if (scmBranchStatus == null || registry.find("scm", "branch") == null)
+			scmBranchStatus = registry.add("scm", "branch", text, 100, plugin.PluginStatusSide.Left,
+				null, tooltip, branchCommand);
+		else registry.update(scmBranchStatus, text, 100, plugin.PluginStatusSide.Left, null, tooltip, branchCommand);
+		if (decorationRegistry.revision != decorationRevisionBefore || statusRegistry.revision != statusRevisionBefore) requestFrame();
+	}
+
+	function syncScmDocumentMarkers(now:Float):Void {
+		var source = sourceControlSource();
+		var desired:Map<Int, Bool> = [];
+		if (source != null && !source.isRemote()) {
+			var repositories = source.repositories();
+			for (view in host.allViews()) {
+				var document = view.document;
+				if (view.diffDocument != null || document.path == null) continue;
+				var repository:Null<scm.ScmRepository> = null, relative:Null<String> = null;
+				for (candidate in repositories) {
+					var candidatePath = scmRelativePath(candidate.root, document.path);
+					if (candidatePath != null && (repository == null || candidate.root.length > repository.root.length)) {
+						repository = candidate;
+						relative = candidatePath;
+					}
+				}
+				if (repository == null || relative == null || relative.length == 0) continue;
+				var snapshot = source.snapshot(repository.id);
+				if (snapshot == null) continue;
+				var untracked = false, worktree = false;
+				for (group in snapshot.groups) for (resource in group.resources) if (resource.path == relative) {
+					if (group.id == ScmGroupId.Untracked) untracked = true;
+					if (group.id == ScmGroupId.WorkingTree) worktree = true;
+				}
+				var identity = source.identity() + "|" + repository.id + "|" + relative;
+				var previousIdentity = scmDocumentMarkerKeys.get(document.id);
+				var tracker = scmDocumentMarkers.get(document.id);
+				if (tracker != null && previousIdentity != identity) {
+					tracker.dispose();
+					scmDocumentMarkers.remove(document.id);
+					scmDocumentMarkerKeys.remove(document.id);
+					tracker = null;
+				}
+				if (tracker == null) {
+					var documentId = document.id;
+					tracker = new scm.ScmOpenDocumentMarkers(source, repository.id, haxe.io.Bytes.ofString(relative), document,
+						"scm-open:" + documentId, host.getPluginGutterMarkers(), application.workspace.jobs,
+						application.settings.current.scmDiffSizeLimit, requestFrame);
+					scmDocumentMarkers.set(document.id, tracker);
+					scmDocumentMarkerKeys.set(document.id, identity);
+				}
+				tracker.update(snapshot, document.dirty || worktree || untracked, untracked, now);
+				desired.set(document.id, true);
+			}
+		}
+		for (id in [for (id in scmDocumentMarkers.keys()) if (!desired.exists(id)) id]) {
+			var tracker = scmDocumentMarkers.get(id);
+			if (tracker != null) tracker.dispose();
+			scmDocumentMarkers.remove(id);
+			scmDocumentMarkerKeys.remove(id);
+		}
+	}
+
+	function scmRelativePath(root:String, path:String):Null<String> {
+		var base = StringTools.replace(application.workspace.fileSystem.normalize(root), "\\", "/");
+		var full = StringTools.replace(application.workspace.fileSystem.normalize(path), "\\", "/");
+		while (base.length > 1 && StringTools.endsWith(base, "/")) base = base.substr(0, base.length - 1);
+		var compareBase = Sys.systemName() == "Windows" ? base.toLowerCase() : base;
+		var compareFull = Sys.systemName() == "Windows" ? full.toLowerCase() : full;
+		if (compareFull == compareBase) return "";
+		var prefix = compareBase + "/";
+		return StringTools.startsWith(compareFull, prefix) ? full.substring(prefix.length) : null;
+	}
+
+	static function scmStatusBadge(resource:scm.ScmResource):String {
+		if (resource.conflictKind != null) return "!";
+		return resource.changeKind == scm.ScmChangeKind.Added || resource.changeKind == scm.ScmChangeKind.Untracked ? "A" :
+			resource.changeKind == scm.ScmChangeKind.Modified ? "M" : resource.changeKind == scm.ScmChangeKind.Deleted ? "D" :
+			resource.changeKind == scm.ScmChangeKind.Renamed ? "R" : resource.changeKind == scm.ScmChangeKind.Copied ? "C" :
+			resource.changeKind == scm.ScmChangeKind.TypeChanged ? "T" : resource.changeKind == scm.ScmChangeKind.Unmerged ? "!" :
+			resource.changeKind == scm.ScmChangeKind.Ignored ? "I" : "?";
+	}
+
+	static function scmGroupLabel(group:ScmGroupId):String
+		return group == ScmGroupId.Merge ? "Merge Changes" : group == ScmGroupId.Index ? "Staged Changes" :
+			group == ScmGroupId.WorkingTree ? "Changes" : group == ScmGroupId.Untracked ? "Untracked" : Std.string(group);
+
+	function trustScmRepository(repository:scm.ScmRepository):Void {
+		var source = sourceControlSource();
+		if (source == null || source.isRemote()) {
+			application.reportError("source-control", "Trust this repository on the machine that runs Git");
+			return;
+		}
+		source.trust(repository.id, function(result) {
+			if (result.error != null || result.value != true)
+				application.reportError("source-control", result.error == null ? "Could not trust repository" : result.error.message);
+			else {
+				source.refreshNow(repository.id);
+				requestFrame();
+			}
+		});
+	}
+
+	function openScmResource(source:ScmSource, repository:scm.ScmRepository, group:scm.ScmGroup, resource:scm.ScmResource,
+		sideBySide:Bool = false):Void {
+		if (source == null || repository == null || group == null || resource == null) return;
+		var relative = resource.pathBytes.getString(0, resource.pathBytes.length);
+		if (group.id == ScmGroupId.Merge) {
+			openScmWorktreeFile(source, repository, relative, function(path, contents, live) {
+				if (source.isRemote()) openRemoteScmFile(repository, relative, -1);
+				else if (path != null) application.open(path);
+				closePhoneSidebarAfterOpen();
+			});
+			return;
+		}
+		var absolute = source.isRemote() ? null : repository.root + "/" + relative;
+		var live = absolute == null ? null : findDocument(absolute);
+		var snapshot = source.snapshot(repository.id);
+		var revision = snapshot == null ? "" : haxe.Int64.toStr(snapshot.revision);
+		var baseRef:scm.ScmRef = group.id == ScmGroupId.Index ? scm.ScmRef.Head : scm.ScmRef.Index;
+		var refLabel = group.id == ScmGroupId.Index ? "HEAD→INDEX" : group.id == ScmGroupId.Untracked ? "EMPTY→WORKTREE" : "INDEX→WORKTREE";
+		var open = function(oldText:String, newText:String):Void {
+			var diffPath = absolute == null ? relative : absolute;
+			if (sideBySide && !phoneLayoutActive) host.openScmSideBySide(repository.id, diffPath, refLabel, revision, oldText, newText, live);
+			else host.openScmDiff(repository.id, diffPath, refLabel, revision, oldText, newText, live);
+			closePhoneSidebarAfterOpen();
+		};
+		var loadCurrent = function(complete:String->Void):Void {
+			if (group.id == ScmGroupId.Untracked) {
+				openScmWorktreeFile(source, repository, relative, function(path, contents, _) {
+					if (contents == null) reportScmReadError("Could not read untracked file " + resource.path);
+					else open("", contents);
+				});
+				return;
+			}
+			if (group.id == ScmGroupId.Index) {
+				readScmOriginal(source, repository.id, scm.ScmRef.Index, resource.pathBytes, function(contents, error) {
+					if (error != null && error.code != "not_found" && error.code != "missing") reportScmReadError(error.message);
+					else if (contents == null) open("", "");
+					else open("", contents);
+				});
+				return;
+			}
+			openScmWorktreeFile(source, repository, relative, function(path, contents, live) {
+				if (contents == null) reportScmReadError("Could not read changed file " + resource.path);
+				else complete(contents);
+			});
+		};
+		if (group.id == ScmGroupId.Index) {
+			readScmOriginal(source, repository.id, baseRef, resource.pathBytes, function(base, error) {
+				if (error != null && error.code != "not_found" && error.code != "missing") { reportScmReadError(error.message); return; }
+				readScmOriginal(source, repository.id, scm.ScmRef.Index, resource.pathBytes, function(indexText, indexError) {
+					if (indexError != null && indexError.code != "not_found" && indexError.code != "missing") { reportScmReadError(indexError.message); return; }
+					open(base == null ? "" : base, indexText == null ? "" : indexText);
+				});
+			});
+			return;
+		}
+		if (group.id == ScmGroupId.Untracked) { loadCurrent(function(_) {}); return; }
+		readScmOriginal(source, repository.id, baseRef, resource.pathBytes, function(base, error) {
+			if (error != null && error.code != "not_found" && error.code != "missing") { reportScmReadError(error.message); return; }
+			loadCurrent(function(current) open(base == null ? "" : base, live != null ? live.buffer.text : current));
+		});
+	}
+
+	function closePhoneSidebarAfterOpen():Void {
+		if (phoneLayoutActive && sidebar.visible) sidebar.setVisible(false);
+	}
+
+	function readScmOriginal(source:ScmSource, repositoryId:String, reference:scm.ScmRef, path:haxe.io.Bytes,
+		complete:Null<String>->Null<scm.ScmError>->Void):Void {
+		source.originalBytes(repositoryId, reference, path, function(result) {
+			if (result.error != null || result.value == null) { complete(null, result.error); return; }
+			if (result.value.binary) { complete(null, new scm.ScmError("binary", "Binary files cannot be shown as text diffs")); return; }
+			complete(result.value.bytes.toString(), null);
+		});
+	}
+
+	function openScmWorktreeFile(source:ScmSource, repository:scm.ScmRepository, relative:String,
+		complete:Null<String>->Null<String>->Null<editor.Document>->Void):Void {
+		if (source.isRemote()) {
+			var attachment = workspaceAttachment, client = attachment == null ? null : attachment.fileClient();
+			var scope = attachment == null ? null : attachment.fileScope();
+			if (attachment == null || client == null || scope == null) { complete(null, null, null); return; }
+			var repoRelative = pathUnderScope(scope, repository.root);
+			if (repoRelative == null) { complete(null, null, null); return; }
+			var path = repoRelative.length == 0 ? relative : repoRelative + "/" + relative;
+			WorkspaceFileReader.read(client, attachment.fileWorkspace(), "root", path, null, function(result) {
+				complete(null, result.error == null ? result.contents : null, null);
+			});
+			return;
+		}
+		var path = repository.root + "/" + relative;
+		var live = findDocument(path);
+		if (live != null && live.dirty) { complete(path, live.buffer.text, live); return; }
+		if (!application.workspace.fileSystem.exists(path)) { complete(path, "", live); return; }
+		try complete(path, application.workspace.fileSystem.read(path), live)
+		catch (_:Dynamic) complete(path, null, live);
+	}
+
+	function findDocument(path:String):Null<editor.Document> {
+		var normalized = StringTools.replace(application.workspace.fileSystem.normalize(path), "\\", "/");
+		for (document in application.documents.documents) if (document.path != null &&
+			StringTools.replace(application.workspace.fileSystem.normalize(document.path), "\\", "/") == normalized) return document;
+		return null;
+	}
+
+	function openRemoteScmFile(repository:scm.ScmRepository, relative:String, line:Int):Void {
+		var attachment = workspaceAttachment, client = attachment == null ? null : attachment.fileClient();
+		var scope = attachment == null ? null : attachment.fileScope();
+		if (attachment == null || client == null || scope == null) { reportScmReadError("Workspace file service is unavailable"); return; }
+		var repoRelative = pathUnderScope(scope, repository.root);
+		if (repoRelative == null) { reportScmReadError("Repository is outside the workspace file root"); return; }
+		var path = repoRelative.length == 0 ? relative : repoRelative + "/" + relative;
+		var workspaceId = attachment.fileWorkspace();
+		client.stat(workspaceId, "root", path, function(stat) {
+			if (workspaceAttachment != attachment || stat == null || stat.entry == null || stat.entry.kind != "file") {
+				reportScmReadError("The changed file is no longer available"); return;
+			}
+			var rootName = scope;
+			var slash = rootName.lastIndexOf("/");
+			if (slash >= 0) rootName = rootName.substring(slash + 1);
+			openWorkspaceFileSnapshot(attachment, workspaceId, scope, "root", rootName, path, stat.entry.revision,
+				WorkspaceFileReader.previewSize(stat.entry.size), false, null);
+			if (line >= 0) {
+				var existing = host.workspaceFile(scope, "root", path);
+				if (existing != null) existing.selectSearchMatch(line, 0, 0);
+			}
+		}, function(error) reportScmReadError(error == null ? "Could not open changed workspace file" : error.message));
+	}
+
+	static function pathUnderScope(scope:String, root:String):Null<String> {
+		var base = StringTools.replace(scope, "\\", "/"), full = StringTools.replace(root, "\\", "/");
+		while (StringTools.endsWith(base, "/")) base = base.substr(0, base.length - 1);
+		if (full == base) return "";
+		var prefix = base + "/";
+		if (!StringTools.startsWith(full, prefix)) return null;
+		return full.substr(prefix.length);
+	}
+
+	function reportScmReadError(message:String):Void application.reportError("source-control", message);
+
+	function rememberScmResource(source:Null<ScmSource>, repository:scm.ScmRepository, group:Null<scm.ScmGroup>,
+		resource:Null<scm.ScmResource>):Void {
+		pendingScmSource = source;
+		pendingScmRepository = repository;
+		pendingScmGroup = group;
+		pendingScmResource = resource;
+	}
+
+	function showScmResourceMenu(repository:scm.ScmRepository, group:scm.ScmGroup, resource:scm.ScmResource, event:UiEvent):Void {
+		rememberScmResource(sourceControlSource(), repository, group, resource);
+		var entries = [
+			new CommandMenuEntry("scm:open-changes", "Open Changes"),
+			new CommandMenuEntry("scm:open-file", "Open File")
+		];
+		if (group.id != ScmGroupId.Merge)
+			entries.push(new CommandMenuEntry("scm:open-side-by-side", "Compare Side by Side"));
+		if (group.id == ScmGroupId.Merge && canResolvePendingScmConflict()) {
+			entries.push(new CommandMenuEntry("scm:resolve-ours", "Accept Ours"));
+			entries.push(new CommandMenuEntry("scm:resolve-theirs", "Accept Theirs"));
+			entries.push(new CommandMenuEntry("scm:resolve-both", "Accept Both"));
+		}
+		if (canStagePendingScmFile()) entries.push(new CommandMenuEntry("scm:stage", group.id == ScmGroupId.Merge ? "Mark Resolved (Stage)" : "Stage File"));
+		if (canUnstagePendingScmFile()) entries.push(new CommandMenuEntry("scm:unstage", "Unstage File"));
+		if (canDiscardPendingScmFile()) entries.push(new CommandMenuEntry("scm:discard", "Discard Changes"));
+		showContextMenu(entries, event, function() return true);
+	}
+
+	function showScmRepositoryMenu(source:ScmSource, repository:scm.ScmRepository, group:Null<scm.ScmGroup>, event:UiEvent):Void {
+		rememberScmResource(source, repository, group, null);
+		var entries:Array<CommandMenuEntry> = [];
+		if (group == null && canCheckoutScmRepository(repository)) {
+			entries.push(new CommandMenuEntry("scm:checkout-selected", "Switch Branch…"));
+			entries.push(new CommandMenuEntry("scm:create-branch-selected", "Create Branch…"));
+		}
+		if (canStagePendingScmGroup()) entries.push(new CommandMenuEntry("scm:stage-all", group == null ? "Stage All Changes" : "Stage Group"));
+		if (canUnstagePendingScmGroup()) entries.push(new CommandMenuEntry("scm:unstage-all", group == null ? "Unstage All Changes" : "Unstage Group"));
+		if (group == null && source.canUseRemotes(repository.id)) {
+			entries.push(new CommandMenuEntry("scm:fetch", "Fetch Remotes"));
+			entries.push(new CommandMenuEntry("scm:pull", "Pull (Fast Forward Only)"));
+			entries.push(new CommandMenuEntry("scm:push", "Push"));
+		}
+		if (entries.length == 0) return;
+		showContextMenu(entries, event, function() return true);
+	}
+
+	function canCheckoutScmRepository(repository:Null<scm.ScmRepository>):Bool {
+		var source = sourceControlSource();
+		if (source == null) return false;
+		var target = repository;
+		if (target == null) {
+			var repositories = source.repositories();
+			target = repositories.length == 0 ? null : repositories[0];
+		}
+		if (target == null || !source.canWrite(target.id)) return false;
+		var features = source.features(target.id);
+		return features != null && features.branches;
+	}
+
+	function isScmSourceActive(identity:String):Bool {
+		var source = sourceControlSource();
+		return source != null && source.identity() == identity;
+	}
+
+	function cancelScmBranchRequest():Void {
+		scmBranchRequestToken++;
+		if (scmBranchJob != null) scmBranchJob.cancel();
+		scmBranchJob = null;
+	}
+
+	function openScmBranchPicker(repository:Null<scm.ScmRepository>):Void {
+		var source = sourceControlSource();
+		if (source == null) return;
+		var target = repository;
+		if (target == null) {
+			var repositories = source.repositories();
+			target = repositories.length == 0 ? null : repositories[0];
+		}
+		if (target == null || !canCheckoutScmRepository(target)) return;
+		var selectedRepository:scm.ScmRepository = cast target;
+		cancelScmBranchRequest();
+		var token = scmBranchRequestToken;
+		var identity = source.identity();
+		host.getNotifications().publish("Loading branches…", feedback.NotificationKind.Information, "source-control");
+		requestFrame();
+		var job = source.branches(selectedRepository.id, function(result) {
+			if (token != scmBranchRequestToken || !isScmSourceActive(identity)) return;
+			scmBranchJob = null;
+			if (result.error != null) {
+				application.reportError("source-control", result.error.message);
+				requestFrame();
+				return;
+			}
+			showScmBranchPicker(source, selectedRepository, result.value == null ? [] : result.value);
+		});
+		if (!job.complete && !job.cancelled) scmBranchJob = job;
+	}
+
+	function showScmBranchPicker(source:ScmSource, repository:scm.ScmRepository, branches:Array<scm.ScmBranch>):Void {
+		var entries:Array<commandview.CommandViewEntry> = [
+			new commandview.CommandViewEntry("Create Branch…", "Create a branch from the current HEAD", "@create", null,
+				"create branch new", "Actions"),
+			new commandview.CommandViewEntry("Open Source Control", "Show repository changes", "@source-control", null,
+				"open changes repository source control", "Actions")
+		];
+		for (branch in branches) {
+			var section = branch.remote ? "Remote Branches" : "Local Branches";
+			var detail = branch.current ? "Current branch" : branch.remote ? "Remote branch" : "Local branch";
+			entries.push(new commandview.CommandViewEntry(branch.name, detail, branch.reference, null,
+				branch.name + " " + branch.reference + " " + detail, section));
+		}
+		var valid = function() return isScmSourceActive(source.identity())
+			&& canCheckoutScmRepository(repository);
+		host.openCommandView(new commandview.CommandViewProvider("Switch Branch: ", entries, function(_) {}, function(entry, _, _) {
+			if (!valid()) { host.closeCommandView(); return; }
+			host.closeCommandView();
+			if (entry == null) return;
+			if (entry.value == "@create") openScmCreateBranchPrompt(repository);
+			else if (entry.value == "@source-control") activateSidebarDestination("scm");
+			else checkoutScmBranch(source, repository, entry.value);
+		}, function() cancelScmBranchRequest()));
+	}
+
+	function openScmCreateBranchPrompt(repository:Null<scm.ScmRepository>):Void {
+		var source = sourceControlSource();
+		if (source == null) return;
+		var target = repository;
+		if (target == null) {
+			var repositories = source.repositories();
+			target = repositories.length == 0 ? null : repositories[0];
+		}
+		if (target == null || !canCheckoutScmRepository(target)) return;
+		var selectedRepository:scm.ScmRepository = cast target;
+		var identity = source.identity();
+		var selected = selectedRepository;
+		host.openCommandView(new commandview.CommandViewProvider("New Branch: ", [], function(_) {}, function(_, name, _) {
+			host.closeCommandView();
+			if (!isScmSourceActive(identity)) return;
+			createScmBranch(source, selected, name);
+		}, function() {}));
+	}
+
+	function checkoutScmBranch(source:ScmSource, repository:scm.ScmRepository, reference:String):Void {
+		applyScmBranchOperation(source, repository, scm.ScmOperation.Checkout(reference), "Switched branch");
+	}
+
+	function createScmBranch(source:ScmSource, repository:scm.ScmRepository, name:String):Void {
+		var branch = StringTools.trim(name);
+		if (branch.length == 0) {
+			application.reportError("source-control", "Enter a branch name");
+			return;
+		}
+		applyScmBranchOperation(source, repository, scm.ScmOperation.CreateBranch(branch), "Created branch " + branch);
+	}
+
+	function applyScmBranchOperation(source:ScmSource, repository:scm.ScmRepository, operation:scm.ScmOperation, label:String):Void {
+		if (!isScmSourceActive(source.identity()) || !canCheckoutScmRepository(repository)) return;
+		var snapshot = source.snapshot(repository.id);
+		if (snapshot == null) {
+			application.reportError("source-control", "Refresh the repository before changing branches");
+			return;
+		}
+		host.getNotifications().publish(label + " in progress…", feedback.NotificationKind.Information, "source-control");
+		var operationId = "ui-" + Std.string(nextScmOperationId++);
+		source.apply(repository.id, operationId, snapshot.revision, operation, function(result) {
+			if (result.error != null) {
+				host.getNotifications().publish("Branch operation failed: " + result.error.message,
+					feedback.NotificationKind.Error, "source-control");
+				application.reportError("source-control", result.error.message);
+			} else {
+				host.getNotifications().publish(label, feedback.NotificationKind.Information, "source-control");
+				source.refreshNow(repository.id);
+			}
+			requestFrame();
+		});
+	}
+
+	function canUsePendingScmRemotes():Bool {
+		var source = pendingScmSource, repository = pendingScmRepository;
+		if (source == null || repository == null || !source.canUseRemotes(repository.id)) return false;
+		var features = source.features(repository.id);
+		return features != null && features.remotes;
+	}
+
+	function applyPendingScmRemote(operation:scm.ScmOperation):Void {
+		if (!canUsePendingScmRemotes()) return;
+		var source = pendingScmSource, repository = pendingScmRepository;
+		if (source == null || repository == null) return;
+		var snapshot = source.snapshot(repository.id);
+		if (snapshot == null) {
+			application.reportError("source-control", "Refresh the repository before running a Git remote operation");
+			return;
+		}
+		function start():Void {
+			var label = switch operation {
+				case Fetch(_): "Fetch";
+				case Pull: "Pull";
+				case Push: "Push";
+				case _: "Git remote operation";
+			};
+			host.getNotifications().publish(label + " in progress…", feedback.NotificationKind.Information, "source-control");
+			var operationId = "ui-" + Std.string(nextScmOperationId++);
+			switch operation {
+				case Fetch(_): scmAutoFetchLast.set(source.identity() + "\n" + repository.id, Sys.time());
+				case _:
+			}
+			source.apply(repository.id, operationId, snapshot.revision, operation, function(result) {
+				if (result.error != null) {
+					host.getNotifications().publish(label + " failed: " + result.error.message,
+						feedback.NotificationKind.Error, "source-control");
+					application.reportError("source-control", result.error.message);
+				} else {
+					host.getNotifications().publish(label + " completed", feedback.NotificationKind.Information, "source-control");
+					source.refreshNow(repository.id);
+				}
+				requestFrame();
+			});
+		}
+		var isInitialPush = switch operation {
+			case Push: snapshot.head.upstream == null;
+			case _: false;
+		};
+		if (isInitialPush) {
+			application.confirmations.choose('Push the current branch to origin and set its upstream?', ["push", "cancel"], function(answer) {
+				if (answer == "push") start();
+			});
+		} else start();
+	}
+
+	function maybeAutoFetchScm(source:ScmSource, now:Float):Void {
+		if (!application.settings.current.scmAutoFetch || !source.connected()) return;
+		for (repository in source.repositories()) {
+			if (!source.canUseRemotes(repository.id)) continue;
+			var features = source.features(repository.id);
+			if (features == null || !features.remotes) continue;
+			var key = source.identity() + "\n" + repository.id;
+			if (scmAutoFetchPending.exists(key)) continue;
+			var last = scmAutoFetchLast.get(key);
+			if (last == null) { scmAutoFetchLast.set(key, now); continue; }
+			if (now - last < 300.0) continue;
+			var snapshot = source.snapshot(repository.id);
+			if (snapshot == null) continue;
+			scmAutoFetchLast.set(key, now);
+			scmAutoFetchPending.set(key, true);
+			var operationId = "auto-fetch-" + Std.string(nextScmOperationId++);
+			source.apply(repository.id, operationId, snapshot.revision, scm.ScmOperation.Fetch(null), function(result) {
+				scmAutoFetchPending.remove(key);
+				if (result.error != null) {
+					host.getNotifications().publish("Automatic fetch failed: " + result.error.message,
+						feedback.NotificationKind.Warning, "source-control");
+					application.reportError("source-control", result.error.message);
+				} else source.refreshNow(repository.id);
+				requestFrame();
+			});
+		}
+	}
+
+	function canStagePendingScmFile():Bool {
+		var source = pendingScmSource, repository = pendingScmRepository, group = pendingScmGroup, resource = pendingScmResource;
+		return source != null && repository != null && group != null && resource != null && source.canWrite(repository.id)
+			&& (group.id == ScmGroupId.WorkingTree || group.id == ScmGroupId.Untracked || group.id == ScmGroupId.Merge);
+	}
+
+	function canResolvePendingScmConflict():Bool {
+		var source = pendingScmSource, repository = pendingScmRepository, group = pendingScmGroup, resource = pendingScmResource;
+		if (source == null || repository == null || group == null || resource == null || group.id != ScmGroupId.Merge
+			|| !source.canWrite(repository.id)) return false;
+		var features = source.features(repository.id);
+		return features != null && features.staging;
+	}
+
+	function applyPendingScmConflict(choice:String):Void {
+		if (!canResolvePendingScmConflict()) return;
+		var source = pendingScmSource, repository = pendingScmRepository, resource = pendingScmResource;
+		if (source == null || repository == null || resource == null) return;
+		var snapshot = source.snapshot(repository.id);
+		if (snapshot == null) { application.reportError("source-control", "Refresh the repository before resolving conflicts"); return; }
+		host.getNotifications().publish("Resolving conflict in " + resource.path + "…", feedback.NotificationKind.Information, "source-control");
+		var operationId = "ui-" + Std.string(nextScmOperationId++);
+		source.apply(repository.id, operationId, snapshot.revision, scm.ScmOperation.ResolveConflict(resource.path, choice), function(result) {
+			if (result.error != null) {
+				host.getNotifications().publish("Conflict resolution failed: " + result.error.message,
+					feedback.NotificationKind.Error, "source-control");
+				application.reportError("source-control", result.error.message);
+			} else {
+				host.getNotifications().publish("Resolved " + resource.path + " using " + choice,
+					feedback.NotificationKind.Information, "source-control");
+				source.refreshNow(repository.id);
+			}
+			requestFrame();
+		});
+	}
+
+	function canTrustPendingScmRepository():Bool {
+		var source = pendingScmSource, repository = pendingScmRepository;
+		return source != null && repository != null && !source.isRemote() && !repository.trusted;
+	}
+
+	function refreshSourceControl():Void {
+		var source = sourceControlSource();
+		if (source == null) return;
+		source.poll();
+		for (repository in source.repositories()) source.refreshNow(repository.id);
+		source.discover(function(result) {
+			if (result.error != null) application.reportError("source-control", result.error.message);
+			else for (repository in result.value) source.refreshNow(repository.id);
+			source.poll();
+			syncScmPresentation(source);
+			requestFrame();
+		});
+	}
+
+	function canUnstagePendingScmFile():Bool {
+		var source = pendingScmSource, repository = pendingScmRepository, group = pendingScmGroup, resource = pendingScmResource;
+		return source != null && repository != null && group != null && resource != null && source.canWrite(repository.id)
+			&& group.id == ScmGroupId.Index;
+	}
+
+	function canDiscardPendingScmFile():Bool {
+		var source = pendingScmSource, repository = pendingScmRepository, group = pendingScmGroup, resource = pendingScmResource;
+		return source != null && repository != null && group != null && resource != null && source.canWrite(repository.id)
+			&& (group.id == ScmGroupId.WorkingTree || group.id == ScmGroupId.Untracked);
+	}
+
+	function discardPendingScmFile():Void {
+		if (!canDiscardPendingScmFile()) return;
+		var source = pendingScmSource, repository = pendingScmRepository, group = pendingScmGroup, resource = pendingScmResource;
+		if (source == null || repository == null || group == null || resource == null) return;
+		var snapshot = source.snapshot(repository.id);
+		if (snapshot == null) { application.reportError("source-control", "Refresh the repository before discarding changes"); return; }
+		var relative = resource.pathBytes.getString(0, resource.pathBytes.length);
+		var path = repository.root + "/" + StringTools.replace(relative, "\\", "/");
+		var dirty = [for (document in application.documents.documents)
+			if (document.dirty && document.hasBackingPath() && sameScmPath(document.requirePath(), path)) document];
+		function confirmDiscard(reloadBuffers:Bool):Void {
+			application.confirmations.choose("Discard changes to 1 file?",
+				["discard", "cancel"], function(answer) {
+					if (answer != "discard") return;
+					if (group.id == ScmGroupId.Untracked && !source.isRemote()) {
+						var removed = application.fileOperations.remove(path);
+						if (!removed.success) { application.reportError("source-control", removed.detail); return; }
+						application.workspace.refreshProjects();
+						source.refreshNow(repository.id);
+						var trashPath = removed.destination;
+						host.getNotifications().publish("Moved " + relative + " to recoverable trash", feedback.NotificationKind.Information,
+							"source-control", [new feedback.NotificationAction("Undo", function() {
+								if (trashPath == null || application.workspace.fileSystem.exists(path)
+									|| !application.workspace.fileSystem.rename(trashPath, path)) {
+								application.reportError("source-control", "Could not restore " + relative + " from trash");
+								return;
+							}
+							application.workspace.refreshProjects();
+							source.refreshNow(repository.id);
+							requestFrame();
+							})]);
+						if (reloadBuffers) for (document in dirty) document.reloadFromDisk();
+						requestFrame();
+						return;
+					}
+					var operationId = "ui-" + Std.string(nextScmOperationId++);
+					source.apply(repository.id, operationId, snapshot.revision, scm.ScmOperation.Discard(relative), function(result) {
+						if (result.error != null) { application.reportError("source-control", result.error.message); return; }
+						source.refreshNow(repository.id);
+						if (reloadBuffers) for (document in dirty) document.reloadFromDisk();
+						var token = result.value == null ? null : result.value.recoveryToken;
+						if (token != null) host.getNotifications().publish("Discarded changes to " + relative,
+							feedback.NotificationKind.Information, "source-control", [new feedback.NotificationAction("Undo", function() {
+								var latest = source.snapshot(repository.id);
+								if (latest == null) { application.reportError("source-control", "Refresh before undoing the discard"); return; }
+								var undoId = "ui-" + Std.string(nextScmOperationId++);
+								source.apply(repository.id, undoId, latest.revision, scm.ScmOperation.RestoreDiscard(relative, token), function(undo) {
+									if (undo.error != null) application.reportError("source-control", undo.error.message);
+									else source.refreshNow(repository.id);
+									requestFrame();
+								});
+							})]);
+						requestFrame();
+					});
+				});
+		}
+		if (dirty.length > 0) {
+			application.confirmations.choose('An open buffer has unsaved edits. Choose reload after discard or keep the buffer: ',
+				["reload", "keep", "cancel"], function(choice) {
+					if (choice == "reload") confirmDiscard(true);
+					else if (choice == "keep") confirmDiscard(false);
+				});
+		} else confirmDiscard(false);
+	}
+
+	static function sameScmPath(left:String, right:String):Bool {
+		var a = StringTools.replace(left, "\\", "/"), b = StringTools.replace(right, "\\", "/");
+		return Sys.systemName() == "Windows" ? a.toLowerCase() == b.toLowerCase() : a == b;
+	}
+
+	function canStagePendingScmGroup():Bool {
+		var source = pendingScmSource, repository = pendingScmRepository, group = pendingScmGroup;
+		if (source == null || repository == null || !source.canWrite(repository.id)) return false;
+		var snapshot = source.snapshot(repository.id);
+		if (snapshot == null) return false;
+		if (group == null) return hasScmResources(snapshot, [ScmGroupId.WorkingTree, ScmGroupId.Untracked]);
+		return (group.id == ScmGroupId.WorkingTree || group.id == ScmGroupId.Untracked) && group.resources.length > 0;
+	}
+
+	function canUnstagePendingScmGroup():Bool {
+		var source = pendingScmSource, repository = pendingScmRepository, group = pendingScmGroup;
+		if (source == null || repository == null || !source.canWrite(repository.id)) return false;
+		var snapshot = source.snapshot(repository.id);
+		if (snapshot == null) return false;
+		if (group == null) return hasScmResources(snapshot, [ScmGroupId.Index]);
+		return group.id == ScmGroupId.Index && group.resources.length > 0;
+	}
+
+	static function hasScmResources(snapshot:scm.ScmSnapshot, ids:Array<ScmGroupId>):Bool {
+		for (group in snapshot.groups) if (ids.indexOf(group.id) >= 0 && group.resources.length > 0) return true;
+		return false;
+	}
+
+	function applyPendingScmGroup(stage:Bool):Void {
+		var source = pendingScmSource, repository = pendingScmRepository, group = pendingScmGroup;
+		if (source == null || repository == null || (stage ? !canStagePendingScmGroup() : !canUnstagePendingScmGroup())) return;
+		var snapshot = source.snapshot(repository.id);
+		if (snapshot == null) return;
+		if (group == null) {
+			var operation = stage ? scm.ScmOperation.StageAll : scm.ScmOperation.UnstageAll;
+			applyScmOperation(source, repository, snapshot, operation);
+			return;
+		}
+		var paths = [for (resource in group.resources) resource.pathBytes.getString(0, resource.pathBytes.length)];
+		var operation = stage ? scm.ScmOperation.StagePaths(paths) : scm.ScmOperation.UnstagePaths(paths);
+		applyScmOperation(source, repository, snapshot, operation);
+	}
+
+	function applyScmOperation(source:ScmSource, repository:scm.ScmRepository, snapshot:scm.ScmSnapshot,
+		operation:scm.ScmOperation):Void {
+		var operationId = "ui-" + Std.string(nextScmOperationId++);
+		source.apply(repository.id, operationId, snapshot.revision, operation, function(result) {
+			if (result.error != null) application.reportError("source-control", result.error.message);
+			source.refreshNow(repository.id);
+			requestFrame();
+		});
+	}
+
+	function scmCommitRepository(source:ScmSource):Null<scm.ScmRepository> {
+		if (source == null) return null;
+		if (pendingScmSource != null && pendingScmSource.identity() == source.identity() && pendingScmRepository != null)
+			return pendingScmRepository;
+		var repositories = source.repositories();
+		return repositories.length == 0 ? null : repositories[0];
+	}
+
+	function hasStagedScmChanges(source:ScmSource, repository:scm.ScmRepository):Bool {
+		var snapshot = source.snapshot(repository.id);
+		if (snapshot == null) return false;
+		for (group in snapshot.groups)
+			if (group.id == ScmGroupId.Index && group.resources.length > 0) return true;
+		return false;
+	}
+
+	function canCommitStagedCurrentScmRepository():Bool {
+		var source = sourceControlSource(), repository = source == null ? null : scmCommitRepository(source);
+		return source != null && repository != null && source.canWrite(repository.id) && hasStagedScmChanges(source, repository)
+			&& canCommitCurrentScmRepository();
+	}
+
+	function canAmendCurrentScmRepository():Bool {
+		var source = sourceControlSource(), repository = source == null ? null : scmCommitRepository(source);
+		if (source == null || repository == null || !source.canWrite(repository.id) || !canCommitCurrentScmRepository()) return false;
+		var features = source.features(repository.id);
+		return features != null && features.amend;
+	}
+
+	function canCommitAllCurrentScmRepository():Bool {
+		var source = sourceControlSource(), repository = source == null ? null : scmCommitRepository(source);
+		return application.settings.current.scmCommitAllWhenNothingStaged && source != null && repository != null
+			&& source.canWrite(repository.id) && !hasStagedScmChanges(source, repository) && canCommitCurrentScmRepository();
+	}
+
+	function showScmCommitMenu(source:ScmSource, repository:scm.ScmRepository, event:UiEvent):Void {
+		rememberScmResource(source, repository, null, null);
+		var entries:Array<CommandMenuEntry> = [];
+		if (hasStagedScmChanges(source, repository)) entries.push(new CommandMenuEntry("scm:commit", "Commit Staged"));
+		var features = source.features(repository.id);
+		if (features != null && features.amend) entries.push(new CommandMenuEntry("scm:commit-amend", "Amend Last Commit"));
+		if (application.settings.current.scmCommitAllWhenNothingStaged && !hasStagedScmChanges(source, repository))
+			entries.push(new CommandMenuEntry("scm:commit-all", "Commit All Changes"));
+		if (entries.length == 0) return;
+		showContextMenu(entries, event, function() return isScmSourceActive(source.identity()) && source.canWrite(repository.id));
+	}
+
+	function canCommitCurrentScmRepository():Bool {
+		var source = sourceControlSource(), repository = source == null ? null : scmCommitRepository(source);
+		if (source == null || repository == null || !source.canWrite(repository.id)) return false;
+		var message = application.scmCommitDrafts.get(repository.id);
+		return message != null && StringTools.trim(message).length > 0;
+	}
+
+	function commitScmMessage(source:ScmSource, repository:scm.ScmRepository, message:Null<String>, amend:Bool, all:Bool):Void {
+		if (source == null || repository == null || !source.canWrite(repository.id)) return;
+		var commitMessage = message == null ? "" : message;
+		if (StringTools.trim(commitMessage).length == 0) return;
+		if (amend) {
+			var features = source.features(repository.id);
+			if (features == null || !features.amend) return;
+		}
+		function beginCommit():Void {
+			var snapshot = source.snapshot(repository.id);
+			if (snapshot == null) { application.reportError("source-control", "Refresh the repository before committing"); return; }
+			function commitWithSnapshot(expected:scm.ScmSnapshot):Void {
+				var operationId = "ui-" + Std.string(nextScmOperationId++);
+				source.apply(repository.id, operationId, expected.revision, scm.ScmOperation.Commit(commitMessage, amend), function(result) {
+					if (result.error != null) {
+						application.build.output.reset(repository.root);
+						application.build.output.append("Git commit failed\n" + result.error.message + "\n");
+						application.build.output.finish();
+						host.showBuildOutput("Source Control Commit", application.build.output);
+						application.reportError("source-control", result.error.message);
+						return;
+					}
+					application.scmCommitDrafts.set(repository.id, "");
+					source.refreshNow(repository.id);
+					host.getNotifications().publish(amend ? "Commit amended" : "Commit created",
+						feedback.NotificationKind.Information, "source-control");
+					requestFrame();
+				});
+			}
+			if (!all) { commitWithSnapshot(snapshot); return; }
+			var stageId = "ui-" + Std.string(nextScmOperationId++);
+			source.apply(repository.id, stageId, snapshot.revision, scm.ScmOperation.StageAll, function(staged) {
+				if (staged.error != null) { application.reportError("source-control", staged.error.message); return; }
+				var refreshed = source.snapshot(repository.id);
+				commitWithSnapshot(refreshed == null ? snapshot : refreshed);
+			});
+		}
+		var dirtyDocuments = [for (document in application.documents.documents) if (document.dirty) document];
+		if (dirtyDocuments.length == 0) { beginCommit(); return; }
+		application.confirmations.choose('There are ' + dirtyDocuments.length + ' unsaved document(s). Save All before committing? ',
+			["save-all", "commit-without-saving", "cancel"], function(answer) {
+				if (answer == "save-all") application.files.saveAll(function(saved) {
+					if (saved) beginCommit();
+					else application.reportError("source-control", "Save All did not complete; commit cancelled");
+				});
+				else if (answer == "commit-without-saving") beginCommit();
+			});
+	}
+
+	function applyPendingScmFile(stage:Bool):Void {
+		var source = pendingScmSource, repository = pendingScmRepository, group = pendingScmGroup, resource = pendingScmResource;
+		if (source == null || repository == null || group == null || resource == null
+			|| (stage ? !canStagePendingScmFile() : !canUnstagePendingScmFile())) return;
+		var snapshot = source.snapshot(repository.id);
+		if (snapshot == null) { application.reportError("source-control", "Refresh the repository before changing its index"); return; }
+		var path = resource.pathBytes.getString(0, resource.pathBytes.length);
+		var operation = stage ? scm.ScmOperation.Stage(path) : scm.ScmOperation.Unstage(path);
+		applyScmOperation(source, repository, snapshot, operation);
+	}
+
+	function openPendingScmFile():Void {
+		var source = pendingScmSource;
+		if (source == null) return;
+		var repository = pendingScmRepository;
+		if (repository == null) return;
+		var resource = pendingScmResource;
+		if (resource == null) return;
+		openScmSourceFile(source, repository, resource);
+	}
+
+	function openScmSourceFile(source:ScmSource, repository:scm.ScmRepository, resource:scm.ScmResource):Void {
+		if (source == null || repository == null || resource == null) return;
+		var relative = resource.pathBytes.getString(0, resource.pathBytes.length);
+		if (source.isRemote()) openRemoteScmFile(repository, relative, -1);
+		else application.open(repository.root + "/" + relative);
+		closePhoneSidebarAfterOpen();
+	}
+
+	function activeDiffView():Null<UiDocumentView> {
+		var view = host.activeView();
+		return view != null && view.diffDocument != null && !view.sideBySideDiff ? view : null;
+	}
+
+	function canApplyActiveScmHunk(action:String):Bool {
+		var source = sourceControlSource(), view = host.activeView();
+		if (source == null || view == null) return false;
+		if (view.diffDocument != null) {
+			if (view.sideBySideDiff) return false;
+			var diff = view.diffDocument, repository = source.repository(diff.repositoryId);
+			if (repository == null || !source.canWrite(repository.id)) return false;
+			var features = source.features(repository.id), snapshot = source.snapshot(repository.id);
+			if (features == null || !features.partialStaging || snapshot == null) return false;
+			var staged = diff.reference == "HEAD→INDEX";
+			if (action == "unstage" ? !staged : staged ||
+				(diff.reference != "INDEX→WORKTREE" && diff.reference != "EMPTY→WORKTREE")) return false;
+			var relative = source.isRemote() ? diff.path : pathUnderScope(repository.root, diff.path);
+			var hunk = diff.hunkIndexAtLine(view.selection.cursor.line);
+			return relative != null && hunk >= 0 && diff.patchForHunk(hunk, haxe.io.Bytes.ofString(relative)) != null;
+		}
+		if (action == "unstage") return false;
+		var tracker = scmDocumentMarkers.get(view.document.id);
+		if (tracker == null) return false;
+		var repository = source.repository(tracker.getRepositoryId()), features = repository == null ? null : source.features(tracker.getRepositoryId());
+		return repository != null && source.canWrite(repository.id) && features != null && features.partialStaging
+			&& source.snapshot(repository.id) != null && tracker.patchForLine(view.selection.cursor.line) != null;
+	}
+
+	function applyActiveScmHunk(action:String):Void {
+		if (!canApplyActiveScmHunk(action)) return;
+		var source = sourceControlSource(), view = host.activeView();
+		if (source == null || view == null) return;
+		var repository:Null<scm.ScmRepository> = null, pathBytes:haxe.io.Bytes = null, patch:haxe.io.Bytes = null;
+		if (view.diffDocument != null) {
+			var diff = view.diffDocument;
+			repository = source.repository(diff.repositoryId);
+			if (repository == null) return;
+			var relative = source.isRemote() ? diff.path : pathUnderScope(repository.root, diff.path);
+			if (relative == null) return;
+			pathBytes = haxe.io.Bytes.ofString(relative);
+			patch = diff.patchForHunk(diff.hunkIndexAtLine(view.selection.cursor.line), pathBytes);
+		} else {
+			var tracker = scmDocumentMarkers.get(view.document.id);
+			if (tracker == null) return;
+			repository = source.repository(tracker.getRepositoryId());
+			pathBytes = tracker.getPathBytes();
+			patch = tracker.patchForLine(view.selection.cursor.line);
+		}
+		if (repository == null || pathBytes == null || patch == null) return;
+		var snapshot = source.snapshot(repository.id);
+		if (snapshot == null) return;
+		var relativePath = pathBytes.toString();
+		var operation:scm.ScmOperation = action == "stage" ? scm.ScmOperation.StagePatch(relativePath, patch) :
+			action == "unstage" ? scm.ScmOperation.UnstagePatch(relativePath, patch) : scm.ScmOperation.RevertPatch(relativePath, patch);
+		applyScmOperation(source, repository, snapshot, operation);
+	}
+
+	function openActiveDiffSourceAtLine():Void {
+		var view = activeDiffView(), diff = view == null ? null : view.diffDocument;
+		if (view == null || diff == null) return;
+		var source = sourceControlSource();
+		if (source != null && source.isRemote()) {
+			var repository = source.repository(diff.repositoryId);
+			if (repository != null) openRemoteScmFile(repository, diff.path, diff.sourceLine(view.selection.cursor.line));
+		} else host.openDiffSourceAtLine();
+	}
+
+	function clearLocalScmSource():Void {
+		if (localScmSource == null) return;
+		cancelScmBranchRequest();
+		localScmSource.dispose();
+		localScmSource = null;
+	}
+
+	static function normalizedLocalRoot(path:String):String {
+		var value = StringTools.replace(FileSystem.fullPath(path), "\\", "/");
+		while (value.length > 1 && StringTools.endsWith(value, "/")) value = value.substring(0, value.length - 1);
+		return Sys.systemName() == "Windows" ? value.toLowerCase() : value;
 	}
 
 	/** Invalidate application views as well as scheduling a host render. */

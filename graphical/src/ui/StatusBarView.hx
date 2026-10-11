@@ -22,6 +22,10 @@ import haxeon.ui.widgets.controls.ButtonVariant;
 import haxeon.ui.widgets.controls.CountBadge;
 import haxeon.ui.widgets.text.MiddleEllipsisText;
 import haxeon.ui.widgets.text.Text;
+import haxeon.ui.widgets.KeyedView;
+import haxeon.ui.widgets.layout.Row;
+import plugin.PluginStatusItem;
+import plugin.PluginStatusSide;
 
 /** A fixed-height status line: actions first, then messages, then document context. */
 class StatusBarView implements View {
@@ -35,7 +39,13 @@ class StatusBarView implements View {
 			var showToast = toast != null && !data.notificationsVisible;
 			var remote = data.remoteDetails.length > 0;
 			var hasIndentation = data.indentation != null && data.openIndentation != null;
-			var sizes = allocate(context.viewportWidth, remote, showToast, data.unread, hasIndentation);
+			var statusItems = data.items == null ? [] : data.items;
+			var leftItems = itemGroup(statusItems, Left, context);
+			var rightItems = itemGroup(statusItems, Right, context);
+			var leftItemsWidth = contributionWidth(statusItems, Left);
+			var rightItemsWidth = contributionWidth(statusItems, Right);
+			var sizes = allocate(context.viewportWidth, remote, showToast, data.unread, hasIndentation,
+				leftItemsWidth, rightItemsWidth);
 			var remoteNode:RenderNode = null, remoteLabel:RenderNode = null;
 			var dismissNode:RenderNode = null;
 
@@ -62,6 +72,11 @@ class StatusBarView implements View {
 				remoteNode.layout.style.width = LayoutAxis.fixed(sizes.remote);
 				remoteLabel = remoteNode.children[0].children[1];
 				root.add(remoteNode);
+			}
+			var leftItemsNode:Null<RenderNode> = null;
+			if (leftItems != null) {
+				leftItemsNode = leftItems.build(context);
+				root.add(leftItemsNode);
 			}
 			var document = label("document", data.document, true, context);
 			var documentTip = tooltip("document", document, data.document);
@@ -105,6 +120,11 @@ class StatusBarView implements View {
 			if (data.unread > 0) bell.trailingView = new CountBadge(data.unread);
 			var bellNode = bell.build(context);
 			root.add(bellNode);
+			var rightItemsNode:Null<RenderNode> = null;
+			if (rightItems != null) {
+				rightItemsNode = rightItems.build(context);
+				root.add(rightItemsNode);
+			}
 			var apply = function(next:StatusBarSizes) {
 				root.layout.style.childGap = next.gap;
 				root.layout.style.padding = new Insets(next.left, 0, next.right, 0);
@@ -127,13 +147,16 @@ class StatusBarView implements View {
 				if (dismissNode != null) {
 					sizeSlot(dismissNode, next.dismiss);
 				}
+				if (leftItemsNode != null) sizeSlot(leftItemsNode, next.leftItems);
+				if (rightItemsNode != null) sizeSlot(rightItemsNode, next.rightItems);
 			};
 			apply(sizes);
 			var lastWidth = context.viewportWidth;
 			root.onResolved(function(geometry) {
 				if (lastWidth == geometry.width) return;
 				lastWidth = geometry.width;
-				apply(allocate(geometry.width, remote, showToast, data.unread, hasIndentation));
+				apply(allocate(geometry.width, remote, showToast, data.unread, hasIndentation,
+					leftItemsWidth, rightItemsWidth));
 				context.requestLayoutFeedback();
 			});
 			return root;
@@ -141,8 +164,11 @@ class StatusBarView implements View {
 	}
 
 	/** Allocate the resolved bar width, keeping actions intact before reducing text. */
-	static function allocate(width:Float, remote:Bool, toast:Bool, unread:Int, hasIndentation:Bool = false):StatusBarSizes {
+	static function allocate(width:Float, remote:Bool, toast:Bool, unread:Int, hasIndentation:Bool = false,
+			leftItemsWidth:Float = 0, rightItemsWidth:Float = 0):StatusBarSizes {
 		var compact = width < 320;
+		var visibleLeftItems = width >= 300 ? leftItemsWidth : 0.0;
+		var visibleRightItems = width >= 380 ? rightItemsWidth : 0.0;
 		var gap = width < 48 ? 0.0 : 4.0;
 		var left = remote ? 0.0 : Math.min(10, Math.max(0, width - 28));
 		var right = Math.min(6, Math.max(0, width - left - 28));
@@ -150,15 +176,59 @@ class StatusBarView implements View {
 		var dismiss = toast && width >= 160 ? 24.0 : 0.0;
 		var connection = remote && width >= 96 ? (compact ? 32.0 : 84.0) : 0.0;
 		// Slots remain mounted across resizes, retaining hover/focus identities.
-		var remaining = Math.max(0, width - left - right - bell - dismiss - connection
-			- gap * (1 + (connection > 0 ? 1 : 0) + (dismiss > 0 ? 1 : 0)));
+		var remaining = Math.max(0, width - left - right - bell - dismiss - connection - visibleLeftItems - visibleRightItems
+			- gap * (1 + (connection > 0 ? 1 : 0) + (dismiss > 0 ? 1 : 0)
+				+ (visibleLeftItems > 0 ? 1 : 0) + (visibleRightItems > 0 ? 1 : 0)));
 		var indentation = hasIndentation && width >= 480 ? 92.0 : 0.0;
 		if (indentation > 0) remaining -= indentation + gap;
 		var document = remaining >= 240 ? Math.min(320, (remaining - gap) * 0.4) : 0.0;
 		if (document > 0) remaining -= gap;
 		return {compact: compact, gap: gap, left: left, right: right, bell: bell,
-			dismiss: dismiss, remote: connection, document: document, message: remaining - document, indentation: indentation};
+			dismiss: dismiss, remote: connection, document: document, message: remaining - document,
+			indentation: indentation, leftItems: visibleLeftItems, rightItems: visibleRightItems};
 	}
+
+	function itemGroup(items:Array<PluginStatusItem>, side:PluginStatusSide, context:BuildContext):Null<View> {
+		var children:Array<KeyedView> = [];
+		for (item in items) if (item.side == side) {
+			var style = controlStyle(statusItemWidth(item), 22);
+			style.padding = new Insets(5, 0, 5, 0);
+			var callback = data.runCommand;
+			var command = item.command;
+			var action = function() {
+				if (callback != null && command != null && command.length > 0) callback(command);
+			};
+			var button = new Button(item.text, style, action, "status-item:" + item.owner + ":" + item.id);
+			button.variant = ButtonVariant.Navigation;
+			button.accessibilityLabel = item.tooltip.length == 0 ? item.text : item.tooltip;
+			button.leadingIcon = item.icon;
+			button.iconSize = 14;
+			button.labelView = new MiddleEllipsisText("status-item-label", item.text, false,
+				new TextStyleOverride(null, 12, null, TextWrap.None, null, null, null, context.theme.tokens.textSecondary));
+			var description = item.tooltip.length == 0 ? item.text : item.tooltip;
+			children.push(new KeyedView(item.owner + ":" + item.id,
+				tooltip("status-item:" + item.owner + ":" + item.id, button, description)));
+		}
+		if (children.length == 0) return null;
+		var style = new LayoutStyle();
+		style.width = LayoutAxis.fit(); style.height = LayoutAxis.fixed(HEIGHT);
+		style.direction = LayoutDirection.LeftToRight;
+		style.childAlignY = LayoutAlignmentY.Center; style.childGap = 4;
+		style.clipHorizontal = true;
+		return new Row("status-items-" + (side == Left ? "left" : "right"), children, style);
+	}
+
+	static function contributionWidth(items:Array<PluginStatusItem>, side:PluginStatusSide):Float {
+		var width = 0.0, count = 0;
+		for (item in items) if (item.side == side) {
+			width += statusItemWidth(item);
+			count++;
+		}
+		return count == 0 ? 0 : width + (count - 1) * 4;
+	}
+
+	static function statusItemWidth(item:PluginStatusItem):Float
+		return Math.min(132, Math.max(item.icon == null ? 34 : 30, item.text.length * 7.0 + (item.icon == null ? 18 : 36)));
 
 	static function sizeSlot(node:RenderNode, width:Float):Void {
 		node.layout.style.width = LayoutAxis.fixed(width);
@@ -195,6 +265,8 @@ typedef StatusBarData = {
 	@:optional var indentation:String;
 	@:optional var indentationDetails:String;
 	@:optional var openIndentation:Void->Void;
+	@:optional var items:Array<PluginStatusItem>;
+	@:optional var runCommand:String->Void;
 	var notification:Null<Notification>;
 	var notificationsVisible:Bool;
 	var unread:Int;
@@ -216,4 +288,6 @@ private typedef StatusBarSizes = {
 	var document:Float;
 	var message:Float;
 	var indentation:Float;
+	var leftItems:Float;
+	var rightItems:Float;
 };

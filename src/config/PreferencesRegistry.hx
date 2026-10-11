@@ -172,6 +172,17 @@ class PreferencesRegistry {
 		}
 		{
 			var options = new SettingOptions();
+			options.tooltip = "Fetch remote updates periodically while source control is open. Disabled by default.";
+			if (!projectOnly) registry.define("scm/auto_fetch", PropertyType.Bool, PropertyValue.Bool(defaults.scmAutoFetch), options);
+		}
+		{
+			var options = new SettingOptions();
+			options.tooltip = "Offer Commit All when there are no staged changes.";
+			if (!projectOnly) registry.define("scm/commit_all_when_nothing_staged", PropertyType.Bool,
+				PropertyValue.Bool(defaults.scmCommitAllWhenNothingStaged), options);
+		}
+		{
+			var options = new SettingOptions();
 			options.tooltip = "Show source control change markers beside editor line numbers.";
 			if (!projectOnly) registry.define("scm/gutter", PropertyType.Bool, PropertyValue.Bool(defaults.scmGutter), options);
 		}
@@ -344,6 +355,9 @@ class PreferencesRegistry {
 		if (store.registry.exists("scm/diff_size_limit") && (base == null || !store.isDefault("scm/diff_size_limit"))) value.scmDiffSizeLimit = store.getInt("scm/diff_size_limit");
 		if (store.registry.exists("scm/nested_scan_depth") && (base == null || !store.isDefault("scm/nested_scan_depth"))) value.scmNestedScanDepth = store.getInt("scm/nested_scan_depth");
 		if (store.registry.exists("scm/auto_refresh") && (base == null || !store.isDefault("scm/auto_refresh"))) value.scmAutoRefresh = store.getBool("scm/auto_refresh");
+		if (store.registry.exists("scm/auto_fetch") && (base == null || !store.isDefault("scm/auto_fetch"))) value.scmAutoFetch = store.getBool("scm/auto_fetch");
+		if (store.registry.exists("scm/commit_all_when_nothing_staged") && (base == null || !store.isDefault("scm/commit_all_when_nothing_staged")))
+			value.scmCommitAllWhenNothingStaged = store.getBool("scm/commit_all_when_nothing_staged");
 		if (store.registry.exists("scm/gutter") && (base == null || !store.isDefault("scm/gutter"))) value.scmGutter = store.getBool("scm/gutter");
 		if (store.registry.exists("scm/explorer_decorations") && (base == null || !store.isDefault("scm/explorer_decorations"))) value.scmExplorerDecorations = store.getBool("scm/explorer_decorations");
 		if (store.registry.exists("appearance/colors/editor_background") && (base == null || !store.isDefault("appearance/colors/editor_background"))) value.editorBackground = store.getInt("appearance/colors/editor_background");

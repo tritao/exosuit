@@ -5,9 +5,14 @@ set(NK_BUILD_GPU OFF CACHE BOOL "" FORCE)
 set(NK_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(NK_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    # The workspace relay connector obtains one-use socket tickets over HTTPS.
-    # NativeKit's Linux HTTP backend is opt-in because it depends on system curl.
-    set(NK_USE_SYSTEM_CURL ON CACHE BOOL "" FORCE)
+	# The workspace relay connector obtains one-use socket tickets over HTTPS.
+	# Require curl development files instead of silently building a relay that
+	# cannot create an HTTP client at runtime.
+	set(NK_USE_SYSTEM_CURL ON CACHE BOOL "" FORCE)
+	find_package(CURL QUIET)
+	if(NOT CURL_FOUND)
+		message(FATAL_ERROR "Linux workspace relay requires libcurl development files (for example, libcurl4-openssl-dev).")
+	endif()
 endif()
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../haxeon/vendor/nativekit" nativekit)
 set_target_properties(nativekit PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${HAXEON_NATIVE_OUTPUT_DIR}" RUNTIME_OUTPUT_DIRECTORY "${HAXEON_NATIVE_OUTPUT_DIR}")

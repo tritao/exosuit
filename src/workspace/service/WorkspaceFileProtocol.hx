@@ -5,6 +5,9 @@ import haxe.io.Bytes;
 import haxeon.rpc.RpcMethod;
 import haxeon.wire.MessagePack;
 import workspace.service.WorkspaceProtocol.WorkspaceQuery;
+import workspace.service.WorkspaceProtocol.WorkspaceRootRequest;
+import workspace.service.WorkspaceProtocol.WorkspaceRootWatchRequest;
+import workspace.service.WorkspaceProtocol.WorkspaceUnwatchResult;
 
 @:wire typedef FileRootDescriptor = {
 	@:id(1) var id:String;
@@ -101,12 +104,7 @@ import workspace.service.WorkspaceProtocol.WorkspaceQuery;
 	@:id(1) var closed:Bool;
 }
 
-@:wire typedef FileWatchRequest = {
-	@:id(1) var workspace:String;
-	@:id(2) var root:String;
-	@:id(3) var epoch:Null<String>;
-	@:id(4) var cursor:Int;
-}
+typedef FileWatchRequest = WorkspaceRootWatchRequest;
 
 @:wire typedef FileWatchResult = {
 	@:id(1) var workspace:String;
@@ -116,14 +114,9 @@ import workspace.service.WorkspaceProtocol.WorkspaceQuery;
 	@:id(5) var reset:Bool;
 }
 
-@:wire typedef FileUnwatchRequest = {
-	@:id(1) var workspace:String;
-	@:id(2) var root:String;
-}
+typedef FileUnwatchRequest = WorkspaceRootRequest;
 
-@:wire typedef FileUnwatchResult = {
-	@:id(1) var unwatched:Bool;
-}
+typedef FileUnwatchResult = WorkspaceUnwatchResult;
 
 @:wire typedef FileChangeEvent = {
 	@:id(1) var workspace:String;

@@ -33,12 +33,13 @@ class GitProcess {
 
 	public function run(arguments:Array<String>, cwd:String, generation:Int, complete:ScmJobResult<GitCommandResult>->Void,
 			readOnly:Bool = true, restricted:Bool = false, maxStdout:Int = DEFAULT_MAX_STDOUT,
-			?disabledFilters:Array<String>):ScmJob<GitCommandResult> {
+			?disabledFilters:Array<String>, ?stdin:Bytes):ScmJob<GitCommandResult> {
 		var task:Null<GitCommandTask> = null, handle:Null<JobHandle> = null;
 		var job = new ScmJob<GitCommandResult>(generation, function() {
 			if (handle != null) scheduler.cancel(handle); else if (task != null) task.cancel();
 		});
 		task = new GitCommandTask(processes, configuredPath, emptyHooksPath, arguments, cwd, readOnly, restricted, maxStdout, disabledFilters,
+			stdin,
 			function(result, error) {
 				if (result != null) executable = result.executable;
 				if (job.finish()) complete(new ScmJobResult<GitCommandResult>(generation, result, error));
@@ -147,6 +148,7 @@ private class GitCommandTask implements JobTask {
 	final restricted:Bool;
 	final maxStdout:Int;
 	final disabledFilters:Array<String>;
+	final stdin:Null<Bytes>;
 	final complete:(Null<GitCommandResult>, Null<ScmError>)->Void;
 	final output:BytesBuffer = new BytesBuffer();
 	var outputLength:Int = 0;
@@ -159,9 +161,12 @@ private class GitCommandTask implements JobTask {
 	var emptyPolls:Int = 0;
 	var cancelled:Bool = false;
 	var finished:Bool = false;
+	var stdinOffset:Int = 0;
+	var stdinClosed:Bool = false;
 
 	public function new(processes:ProcessManager, configuredPath:Null<String>, emptyHooksPath:Null<String>, arguments:Array<String>, cwd:String,
 			readOnly:Bool, restricted:Bool, maxStdout:Int, ?disabledFilters:Array<String>,
+			?stdin:Bytes,
 			complete:(Null<GitCommandResult>, Null<ScmError>)->Void) {
 		this.processes = processes;
 		this.configuredPath = configuredPath;
@@ -172,6 +177,7 @@ private class GitCommandTask implements JobTask {
 		this.restricted = restricted;
 		this.maxStdout = maxStdout < 1 ? 1 : maxStdout;
 		this.disabledFilters = disabledFilters == null ? [] : disabledFilters.copy();
+		this.stdin = stdin == null ? null : stdin.sub(0, stdin.length);
 		this.complete = complete;
 	}
 
@@ -257,6 +263,10 @@ private class GitCommandTask implements JobTask {
 		environment.set("LC_ALL", "C");
 		try {
 			child = processes.start(path, launchArguments, cwd, environment);
+			if (stdin == null || stdin.length == 0) {
+				child.closeStdin();
+				stdinClosed = true;
+			}
 			phase = "git";
 		} catch (error:Dynamic) {
 			finish(null, new ScmError("git_unavailable", "Could not start Git: " + bounded(Std.string(error), GitProcess.MAX_STDERR)));
@@ -267,6 +277,30 @@ private class GitCommandTask implements JobTask {
 		var process = child;
 		if (process == null) { finish(null, new ScmError("git_unavailable", "Git process was lost")); return true; }
 		var received = false;
+		if (!stdinClosed) {
+			var input = stdin;
+			if (input == null || stdinOffset >= input.length) {
+				process.closeStdin();
+				stdinClosed = true;
+			} else {
+				var count = Std.int(Math.min(16 * 1024, input.length - stdinOffset));
+				try {
+					var written:Int = process.writeBytes(input, stdinOffset, count);
+					if (written > 0) { stdinOffset += written; received = true; }
+				} catch (failure:Dynamic) {
+					if (process.exited()) {
+						// Keep draining stderr below so signing and hook failures retain their useful message.
+						stdinClosed = true;
+					} else {
+						process.cancel();
+						processes.release(process);
+						child = null;
+						finish(null, new ScmError("stdin_failed", "Could not send input to Git: " + bounded(Std.string(failure), GitProcess.MAX_STDERR)));
+						return true;
+					}
+				}
+			}
+		}
 		for (_ in 0...4) {
 			var bytes = process.readStdoutBytes();
 			if (bytes.length == 0) break;
@@ -299,10 +333,18 @@ private class GitCommandTask implements JobTask {
 
 	function mapError(stderr:String, exitCode:Int):ScmError {
 		var message = StringTools.trim(stderr), lower = message.toLowerCase();
+		if (lower.indexOf("is not a valid branch name") >= 0 || lower.indexOf("not a valid ref") >= 0)
+			return new ScmError("invalid_reference", bounded(message, GitProcess.MAX_STDERR));
 		if (lower.indexOf("not a git repository") >= 0)
 			return new ScmError("not_a_repository", "The selected directory is not a Git repository");
 		if (lower.indexOf("safe.directory") >= 0 || lower.indexOf("dubious ownership") >= 0)
 			return new ScmError("safe_directory", "Git refused this repository because of its ownership; review safe.directory");
+		if (lower.indexOf("gpg failed to sign") >= 0 || lower.indexOf("failed to sign the data") >= 0 ||
+			lower.indexOf("pinentry") >= 0 || lower.indexOf("signing failed") >= 0)
+			return new ScmError("signing_prompt_required", "Git signing failed. Configure a non-interactive GPG or SSH signing agent and retry: " + bounded(message, GitProcess.MAX_STDERR));
+		if (lower.indexOf("terminal prompts disabled") >= 0 || lower.indexOf("could not read username") >= 0 ||
+			lower.indexOf("authentication failed") >= 0 || lower.indexOf("permission denied (publickey)") >= 0)
+			return new ScmError("authentication_required", "Git could not authenticate without an interactive prompt. Configure a credential helper or SSH agent and retry: " + bounded(message, GitProcess.MAX_STDERR));
 		if (lower.indexOf("index.lock") >= 0 || (lower.indexOf("unable to create") >= 0 && lower.indexOf(".lock") >= 0))
 			return new ScmError("lock_contention", bounded(message, GitProcess.MAX_STDERR), true);
 		return new ScmError("operation_failed", message.length == 0 ? "Git command failed with status " + exitCode

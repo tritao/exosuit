@@ -38,6 +38,12 @@ class UiDocumentView extends View {
 	public final document:Document;
 	public final selection:BufferSelection;
 	public var editSettings:config.Settings = new config.Settings();
+	/** A comparison tab shares editor navigation while refusing every text mutation. */
+	public var readOnly:Bool = false;
+	public var diffDocument:Null<scm.ScmDiffDocument>;
+	public var sideBySideDiff:Bool = false;
+	public var sideBySideLabel:Null<String>;
+	public var onDispose:Void->Void = function() {};
 	public var deletionBoundary:Null<(BufferPosition, Int)->BufferPosition> = null;
 	/** Preview is view-local and permanently clears on the first buffer edit. */
 	public var preview:Bool = false;
@@ -75,11 +81,12 @@ class UiDocumentView extends View {
 		scrollController.configureAnimation(settings.scrollAnimationType == "smooth", settings.scrollAnimationDuration);
 
 	override public function dispose():Void {
-		disposed = true; bufferSubscription.release(); scrollController.cancelAnimation();
+		if (disposed) return;
+		disposed = true; bufferSubscription.release(); scrollController.cancelAnimation(); onDispose();
 	}
 
 	override public function isDirty():Bool
-		return document.dirty;
+		return !readOnly && document.dirty;
 
 	override public function getDocument():Null<Document>
 		return document;
@@ -94,16 +101,16 @@ class UiDocumentView extends View {
 	}
 
 	override public function undo():Void
-		document.buffer.undo(selection);
+		if (!readOnly) document.buffer.undo(selection);
 
 	override public function redo():Void
-		document.buffer.redo(selection);
+		if (!readOnly) document.buffer.redo(selection);
 
 	override public function backspace(tabWidth:Int = 0, indentSize:Int = 0):Void
-		EditorActions.backspace(document.buffer, selection, tabWidth > 0 ? tabWidth : editSettings.tabWidth, deletionBoundary, indentSize > 0 ? indentSize : editSettings.indentSize);
+		if (!readOnly) EditorActions.backspace(document.buffer, selection, tabWidth > 0 ? tabWidth : editSettings.tabWidth, deletionBoundary, indentSize > 0 ? indentSize : editSettings.indentSize);
 
 	override public function deleteForward():Void
-		document.buffer.deleteSelections(selection, false, deletionBoundary);
+		if (!readOnly) document.buffer.deleteSelections(selection, false, deletionBoundary);
 
 	override public function selectRange(from:BufferPosition, to:BufferPosition):Bool {
 		selection.restore(document.buffer, to, from);
@@ -111,40 +118,41 @@ class UiDocumentView extends View {
 	}
 
 	override public function replaceRange(from:BufferPosition, to:BufferPosition, text:String):Bool
-		return document.buffer.replaceRange(selection, from, to, text);
+		return !readOnly && document.buffer.replaceRange(selection, from, to, text);
 
 	override public function replaceAllText(text:String):Bool
-		return document.buffer.replaceAllText(text, selection);
+		return !readOnly && document.buffer.replaceAllText(text, selection);
 
 	override public function tab(tabWidth:Int, insertSpaces:Bool, indentSize:Int = 0):Bool
-		return EditorActions.tab(document.buffer, selection, tabWidth, insertSpaces, indentSize);
+		return !readOnly && EditorActions.tab(document.buffer, selection, tabWidth, insertSpaces, indentSize);
 
 	override public function indent(tabWidth:Int, insertSpaces:Bool, indentSize:Int = 0):Bool
-		return EditorActions.indent(document.buffer, selection, tabWidth, insertSpaces, indentSize);
+		return !readOnly && EditorActions.indent(document.buffer, selection, tabWidth, insertSpaces, indentSize);
 
 	override public function unindent(tabWidth:Int, indentSize:Int = 0):Bool
-		return EditorActions.unindent(document.buffer, selection, tabWidth, indentSize);
+		return !readOnly && EditorActions.unindent(document.buffer, selection, tabWidth, indentSize);
 
 	override public function insertNewline(tabWidth:Int = 0, insertSpaces:Bool = true, indentSize:Int = 0):Bool
-		return EditorActions.insertNewline(document.buffer, selection, tabWidth > 0 ? tabWidth : editSettings.tabWidth,
+		return !readOnly && EditorActions.insertNewline(document.buffer, selection, tabWidth > 0 ? tabWidth : editSettings.tabWidth,
 			tabWidth > 0 ? insertSpaces : editSettings.insertSpaces, document.highlighter, indentSize > 0 ? indentSize : editSettings.indentSize, document.indentation.cache);
 
 	override public function duplicateLines():Bool
-		return EditorActions.duplicateLines(document.buffer, selection);
+		return !readOnly && EditorActions.duplicateLines(document.buffer, selection);
 
 	override public function moveLines(direction:Int):Bool
-		return EditorActions.moveLines(document.buffer, selection, direction);
+		return !readOnly && EditorActions.moveLines(document.buffer, selection, direction);
 
 	override public function deleteLines():Bool
-		return EditorActions.deleteLines(document.buffer, selection);
+		return !readOnly && EditorActions.deleteLines(document.buffer, selection);
 
 	override public function joinLines():Bool
-		return EditorActions.joinLines(document.buffer, selection);
+		return !readOnly && EditorActions.joinLines(document.buffer, selection);
 
 	override public function toggleLineComment():Bool
-		return EditorActions.toggleLineComment(document.buffer, selection, document.syntax);
+		return !readOnly && EditorActions.toggleLineComment(document.buffer, selection, document.syntax);
 
 	public function performEditorAction(action:haxeon.ui.widgets.text.TextEditorAction):Bool {
+		if (readOnly) return switch action { case Copy: copy(); case _: false; };
 		return switch action {
 			case Copy: copy();
 			case Cut: cut();
@@ -166,7 +174,7 @@ class UiDocumentView extends View {
 	}
 
 	override public function cut():Bool {
-		if (clipboard == null) return false;
+		if (readOnly || clipboard == null) return false;
 		var payload = EditorActions.clipboardPayload(document.buffer, selection);
 		clipboard.writeText(payload.text);
 		lineClipboardText = payload.linewise ? payload.text : null;
@@ -175,7 +183,7 @@ class UiDocumentView extends View {
 	}
 
 	override public function paste():Bool {
-		if (clipboard == null) return false;
+		if (readOnly || clipboard == null) return false;
 		var revision = document.buffer.stateId, ranges = selection.snapshot().ranges;
 		clipboard.readText(function(text) {
 			if (disposed || !isActive() || document.buffer.stateId != revision) return;
@@ -205,6 +213,7 @@ class UiDocumentView extends View {
 	}
 
 	override public function insertAdjacentLine(below:Bool):Bool {
+		if (readOnly) return false;
 		var changed = EditorActions.insertAdjacentLine(document.buffer, selection, below);
 		if (changed) { cursorChanged(); onStateChanged(); }
 		return changed;
@@ -217,6 +226,7 @@ class UiDocumentView extends View {
 	}
 
 	override public function textInput(text:String):Void {
+		if (readOnly) return;
 		if (selection.rangeCount() > 1) document.buffer.replaceSelections(selection, [text]);
 		else document.buffer.insert(selection, text, text.indexOf("\n") < 0);
 	}

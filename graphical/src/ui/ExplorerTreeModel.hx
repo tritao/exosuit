@@ -2,6 +2,7 @@ package ui;
 
 import haxeon.ui.core.View;
 import haxeon.ui.widgets.collections.TreeViewModel;
+import plugin.PluginResourceDecorationRegistry;
 
 /** Shared presentation contract for local and RPC-backed workspace trees. */
 interface ExplorerTreeModel extends TreeViewModel {
@@ -11,5 +12,6 @@ interface ExplorerTreeModel extends TreeViewModel {
 	/** Explicit user refresh; retain cached rows while replacing loaded listings. */
 	public function refreshAll():Void;
 	public function dispose():Void;
+	public function setResourceDecorations(provider:Null<PluginResourceDecorationRegistry>):Void;
 	public function buildItemWithIcons(key:String, expanded:Bool, atlas:SetiIconAtlas, dark:Bool):View;
 }

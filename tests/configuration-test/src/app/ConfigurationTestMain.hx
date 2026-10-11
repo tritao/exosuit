@@ -58,6 +58,15 @@ class ConfigurationTestMain {
 		if (FileSystem.exists(userPath)) FileSystem.deleteFile(userPath);
 		var service = new Preferences(userPath);
 		var store = service.store;
+		require(!service.current.scmAutoFetch && !service.current.scmCommitAllWhenNothingStaged,
+			"SCM auto-fetch or Commit All became enabled without the user opting in");
+		require(store.set("scm/auto_fetch", haxeon.ui.properties.PropertyValue.Bool(true)) == null
+			&& store.set("scm/commit_all_when_nothing_staged", haxeon.ui.properties.PropertyValue.Bool(true)) == null
+			&& service.current.scmAutoFetch && service.current.scmCommitAllWhenNothingStaged
+			&& service.current.copy().scmAutoFetch && service.current.copy().scmCommitAllWhenNothingStaged,
+			"SCM opt-in settings did not update and copy with the settings snapshot");
+		store.reset("scm/auto_fetch");
+		store.reset("scm/commit_all_when_nothing_staged");
 		var notifications = 0, release = service.subscribe(function(_) notifications++);
 		require(notifications == 1, "initial preference notification missing");
 		require(store.set("editor/fonts/font_size", haxeon.ui.properties.PropertyValue.Int(18)) == null,
@@ -127,11 +136,23 @@ class ConfigurationTestMain {
 		application.update();
 		require(metrics.fontSize == 23, "project configuration blocked live user preferences");
 		application.open(arguments[3]); application.update();
+		var scmDraft = "feat: keep commit draft\n\nA multiline message — saved per repository.";
+		application.scmCommitDrafts.set("repo:windows:main", scmDraft);
 		var sessionPath = arguments[2] + "/state/nested/session.conf", session = WorkspaceSession.capture(application);
 		require(session.save(sessionPath), "session did not create its state directory");
 		var loaded = WorkspaceSession.load(sessionPath);
 		require(loaded != null && loaded.projects.length == 1 && loaded.documents.length == 1 && loaded.activeDocument == arguments[3],
 			"session round trip lost workspace state");
+		if (loaded == null) throw "session round trip returned no workspace session";
+		var loadedSession:WorkspaceSession = cast loaded;
+		require(loadedSession.scmCommitDrafts.get("repo:windows:main") == scmDraft,
+			"session round trip lost a multiline per-repository source-control draft");
+		var draftRestoreApplication = new Application((theme, focus, workspace, settings) -> new ModelWorkbenchHost(metrics, theme, focus, workspace, 640, 320, settings),
+			service, new session.RecentProjects(""));
+		loadedSession.restore(draftRestoreApplication);
+		require(draftRestoreApplication.scmCommitDrafts.get("repo:windows:main") == scmDraft,
+			"session restore did not reinstate the source-control commit draft");
+		draftRestoreApplication.shutdown();
 		var recoveryPath = arguments[2] + "/state/recovery.conf", recovery = new RecoveryStore(recoveryPath);
 		require(recovery.saveSnapshots([new RecoverySnapshot("recovered-1", "recovered", arguments[3], "dirty\nrecovered")]), "recovery snapshot save failed");
 		var snapshots = recovery.load();

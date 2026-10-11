@@ -393,6 +393,34 @@ class WorkspacePairingManager implements WorkspacePairingAdmin {
 		revokeRelayDevice(deviceId, complete);
 	}
 
+	/** Persist owner-edited grants and close the current session so they take effect immediately. */
+	public function setGrants(deviceId:String, grants:Array<String>, complete:Null<String>->Void):Void {
+		if (complete == null)
+			throw "Grant update callback cannot be null";
+		var current = findDevice(deviceId);
+		if (current == null || current.revoked) {
+			complete("device_not_found");
+			return;
+		}
+		if (!validGrants(grants)) {
+			complete("invalid_pairing_grants");
+			return;
+		}
+		var updated:WorkspaceDeviceRecord = {deviceId: current.deviceId, staticPublicKey: current.staticPublicKey,
+			grants: grants.copy(), revoked: false};
+		try
+			store.saveDevice(updated)
+		catch (_:Dynamic) {
+			complete("device_grant_update_failed");
+			return;
+		}
+		var transport = active.get(deviceId);
+		if (transport != null) transport.close();
+		active.remove(deviceId);
+		activeRecords.remove(deviceId);
+		complete(null);
+	}
+
 	function revokeRelayDevice(deviceId:String, complete:Null<String>->Void):Void {
 		relayRevocations.set(deviceId, true);
 		relay.revokeDevice(deviceId, function(error) {

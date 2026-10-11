@@ -15,6 +15,26 @@ import haxeon.wire.MessagePack;
 
 @:wire typedef WorkspaceQuery = {@:id(1) var workspace:String;}
 
+/** Shared scoped request shapes keep wire schemas unique across workspace services. */
+@:wire typedef WorkspaceRootRequest = {
+	@:id(1) var workspace:String;
+	@:id(2) var root:String;
+}
+
+@:wire typedef WorkspaceRootWatchRequest = {
+	@:id(1) var workspace:String;
+	@:id(2) var root:String;
+	@:id(3) var epoch:Null<String>;
+	@:id(4) var cursor:Int;
+}
+
+@:wire typedef WorkspaceRepositoryRequest = {
+	@:id(1) var workspace:String;
+	@:id(2) var repository:String;
+}
+
+@:wire typedef WorkspaceUnwatchResult = {@:id(1) var unwatched:Bool;}
+
 @:wire typedef WorkspaceSnapshot = {
 	@:id(1) var epoch:String;
 	@:id(2) var cursor:Int;

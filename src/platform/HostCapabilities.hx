@@ -11,13 +11,14 @@ class HostCapabilities {
 		if (enabled.indexOf(capability) < 0) return false;
 		return switch capability {
 			case LanguageServices: enabled.indexOf(Processes) >= 0;
+			case SourceControl: enabled.indexOf(Processes) >= 0;
 			case SourcePlugins: enabled.indexOf(Threads) >= 0;
 			default: true;
 		};
 	}
 
 	public static function desktop():HostCapabilities
-		return new HostCapabilities([Clipboard, Filesystem, Processes, Threads, LanguageServices, SourcePlugins]);
+		return new HostCapabilities([Clipboard, Filesystem, Processes, Threads, LanguageServices, SourceControl, SourcePlugins]);
 
 	/** Browser files are session-local; native process/thread services are absent. */
 	public static function browser(clipboard:Bool = false, url:Bool = true):HostCapabilities {

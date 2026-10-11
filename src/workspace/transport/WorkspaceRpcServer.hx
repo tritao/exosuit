@@ -20,6 +20,7 @@ class WorkspaceRpcServer {
 	var serviceStatus:Null<Void->workspace.service.WorkspaceLifecycleProtocol.WorkspaceServiceStatus>;
 	var updateService:Null<String->Bool>;
 	final files:Null<workspace.runtime.WorkspaceFileService>;
+	final scm:Null<workspace.runtime.WorkspaceScmService>;
 	final peers:Array<Peer> = [];
 
 	public final options:RpcPeerOptions;
@@ -51,17 +52,26 @@ class WorkspaceRpcServer {
 		return count;
 	}
 
-	public function new(service:WorkspaceService, clock:Void->Float, ?capabilities:Array<String>, ?identity:WorkspaceIdentity, ?terminals:WorkspaceTerminals, ?agents:workspace.service.WorkspaceAgents, ?pairingAdmin:workspace.service.WorkspacePairingAdmin, ?files:workspace.runtime.WorkspaceFileService) {
+	public function new(service:WorkspaceService, clock:Void->Float, ?capabilities:Array<String>, ?identity:WorkspaceIdentity,
+			?terminals:WorkspaceTerminals, ?agents:workspace.service.WorkspaceAgents,
+			?pairingAdmin:workspace.service.WorkspacePairingAdmin, ?files:workspace.runtime.WorkspaceFileService,
+			?scm:workspace.runtime.WorkspaceScmService) {
 		this.service = service;
 		this.terminals = terminals;
 		this.agents = agents;
 		this.pairingAdmin = pairingAdmin;
 		this.files = files;
+		this.scm = scm;
 		this.clock = clock;
 		this.identity = identity == null ? null : {workspace: identity.workspace, root: identity.root, instance: identity.instance};
 		if (identity != null && (identity.workspace != service.id || identity.root.length == 0 || identity.instance.length == 0))
 			throw "Invalid daemon identity";
 		var defaults = [WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS, WorkspaceProtocol.WRITE, WorkspaceProtocol.TREE];
+		if (scm != null) {
+			defaults.push(workspace.service.WorkspaceScmProtocol.READ);
+			defaults.push(workspace.service.WorkspaceScmProtocol.WRITE);
+			defaults.push(workspace.service.WorkspaceScmProtocol.REMOTE);
+		}
 		if (identity != null)
 			defaults.push(WorkspaceProtocol.IDENTITY_CAPABILITY);
 		if (terminals != null) {
@@ -86,6 +96,12 @@ class WorkspaceRpcServer {
 
 	/** NativeKit validates same-user peers and private paths on local sockets. */
 	public function acceptLocal(transport:NativeRpcTransport):Void {
+		accept(transport, null, localOptions, true);
+	}
+
+	/** In-memory transport seam for the authenticated-local-origin RPC fixture. */
+	@:allow(app.WorkspaceScmTestMain)
+	private function acceptTestLocal(transport:MessageTransport):Void {
 		accept(transport, null, localOptions, true);
 	}
 
@@ -202,6 +218,11 @@ class WorkspaceRpcServer {
 								context.respond({accepted: error == null, error: error});
 							});
 						});
+						peer.connection.register(workspace.service.WorkspacePairingProtocol.SET_GRANTS, function(request, context) {
+							admin.setGrants(request.deviceId, request.grants, function(error) {
+								context.respond({accepted: error == null, error: error});
+							});
+						});
 						peer.connection.register(workspace.service.WorkspacePairingProtocol.REJECT, function(request, context) {
 							var accepted = admin.reject(request.deviceId);
 							context.respond({accepted: accepted, error: accepted ? null : "pairing_not_found"});
@@ -229,6 +250,7 @@ class WorkspaceRpcServer {
 					if (terminals != null) terminals.bind(peer.connection, grants);
 					if (agents != null) agents.bind(peer.connection, grants);
 					if (files != null) peer.cleanup.push(files.bind(peer.connection, grants));
+					if (scm != null) peer.cleanup.push(scm.bind(peer.connection, grants, peer.localAdmin));
 				}
 			}
 			if (peer.connection != null)

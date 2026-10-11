@@ -3,6 +3,7 @@ package ui;
 import haxeon.ui.LayoutAlignmentY;
 import haxeon.ui.LayoutAxis;
 import haxeon.ui.LayoutStyle;
+import haxeon.ui.Insets;
 import haxeon.ui.TextWrap;
 import haxeon.ui.core.TextStyleOverride;
 import haxeon.ui.core.View;
@@ -10,9 +11,13 @@ import haxeon.ui.theme.Theme;
 import haxeon.ui.widgets.KeyedView;
 import haxeon.ui.widgets.collections.TreeRootMetadata;
 import haxeon.ui.widgets.layout.Row;
+import haxeon.ui.widgets.layout.SizedBox;
 import haxeon.ui.widgets.text.MiddleEllipsisText;
 import haxeon.ui.widgets.text.Text;
 import workspace.client.WorkspaceFileClient;
+import scm.ScmSource;
+import plugin.PluginResourceDecoration;
+import plugin.PluginResourceDecorationRegistry;
 import workspace.service.WorkspaceFileProtocol.FileListPage;
 import workspace.service.WorkspaceFileProtocol.FileWatchResult;
 import workspace.service.WorkspaceFileProtocol.FileChangeEvent;
@@ -57,6 +62,7 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 
 	final changed:Void->Void;
 	final fileChanged:Null<String->Void>;
+	final sourceControl:Null<ScmSource>;
 	final watchListener:FileChangeEvent->Void;
 	final listings:Map<String, WorkspaceDirectoryListing> = [];
 	final kinds:Map<String, String> = [];
@@ -69,6 +75,8 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 	var generation:Int = 0;
 	var disposed:Bool = false;
 	var revisionValue:Int = 0;
+	var decorationProvider:Null<PluginResourceDecorationRegistry>;
+	var observedDecorationRevision:Int = -1;
 	var rootsRequested:Bool = false;
 	var rootsLoaded:Bool = false;
 	var rootName:String;
@@ -84,7 +92,8 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 	public function watchesChanges():Bool return watchingChanges;
 
 	public function new(clientProvider:Void->Null<WorkspaceFileClient>, workspace:String, scope:String,
-			fallbackRootName:String, theme:Theme, changed:Void->Void, ?fileChanged:String->Void) {
+			fallbackRootName:String, theme:Theme, changed:Void->Void, ?fileChanged:String->Void,
+			?sourceControl:ScmSource) {
 		if (clientProvider == null || workspace == null || workspace.length == 0 || scope == null || theme == null || changed == null)
 			throw "Invalid workspace file tree configuration";
 		this.clientProvider = clientProvider;
@@ -95,12 +104,15 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 		this.theme = theme;
 		this.changed = changed;
 		this.fileChanged = fileChanged;
+		this.sourceControl = sourceControl;
 		this.watchListener = function(event) handleFileChange(event);
 		kinds.set(rootKey(), "directory");
 		names.set(rootKey(), rootName);
 	}
 
 	public function rootIdentity():String return workspace + ":" + scope;
+	/** The workspace authority paired with this remote file tree. */
+	public function sourceControlSource():Null<ScmSource> return sourceControl;
 	public function rootCount():Int return 1;
 	public function rootRange(start:Int, count:Int):Array<TreeRootMetadata>
 		return start > 0 || count <= 0 ? [] : [new TreeRootMetadata(rootKey(), true)];
@@ -109,7 +121,21 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 	public function estimatedExtent():Float return 20.0;
 	public function extentIsUniform():Bool return true;
 	public function extentAt(key:String):Float return 20.0;
-	public function revision():Int return revisionValue;
+	public function revision():Int {
+		var current = decorationProvider == null ? -1 : decorationProvider.revision;
+		if (current != observedDecorationRevision) {
+			observedDecorationRevision = current;
+			revisionValue++;
+		}
+		return revisionValue;
+	}
+
+	public function setResourceDecorations(provider:Null<PluginResourceDecorationRegistry>):Void {
+		if (decorationProvider == provider) return;
+		decorationProvider = provider;
+		observedDecorationRevision = provider == null ? -1 : provider.revision;
+		revisionValue++;
+	}
 
 	public function refresh():Void {
 		if (disposed) return;
@@ -236,15 +262,30 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 		var style = new LayoutStyle();
 		style.width = LayoutAxis.grow();
 		style.height = LayoutAxis.fixed(20.0);
-		style.clipHorizontal = true;
+		style.padding = new Insets(0.0, 0.0, 16.0, 0.0);
 		style.childAlignY = LayoutAlignmentY.Center;
 		style.childGap = 2.0;
 		var children:Array<KeyedView> = [];
 		if (!directory) children.push(new KeyedView("icon", new SetiFileIcon(atlas, label, dark, true)));
-		children.push(new KeyedView("name", new MiddleEllipsisText("filename", label, false,
-				new TextStyleOverride(null, fontSize, null, TextWrap.None, null, null, null, theme.tokens.text))
-		));
+		var relative = relativePath(key);
+		var decorationPath = relative == null ? null : relative.length == 0 ? "." : relative;
+		var decoration = decorationProvider == null || decorationPath == null ? null : decorationProvider.forPath(decorationPath);
+		var foreground = decoration == null ? theme.tokens.text : decorationColor(decoration);
+		var filename = new SizedBox("filename-box", new MiddleEllipsisText("filename", label, false,
+			new TextStyleOverride(null, fontSize, null, TextWrap.None, null, null, null, foreground)));
+		filename.style.clipHorizontal = true;
+		children.push(new KeyedView("name", filename));
+		if (decoration != null) children.push(new KeyedView("decoration", new ResourceDecorationBadge(decoration, fontSize)));
 		return new Row("workspace-file-item", children, style);
+	}
+
+	function decorationColor(value:PluginResourceDecoration):haxeon.ui.Color return switch value.color {
+		case Text: theme.tokens.text;
+		case Secondary: theme.tokens.textSecondary;
+		case Accent: theme.tokens.accent;
+		case Success: theme.tokens.success;
+		case Warning: theme.tokens.warning;
+		case Danger: theme.tokens.danger;
 	}
 
 	public function isDirectoryKey(key:String):Bool return isDirectory(key);

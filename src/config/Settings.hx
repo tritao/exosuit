@@ -48,6 +48,10 @@ class Settings {
 	public var scmDiffSizeLimit:Int = 16 * 1024 * 1024;
 	public var scmNestedScanDepth:Int = 3;
 	public var scmAutoRefresh:Bool = true;
+	/** Fetch remotes periodically; disabled until the user opts in. */
+	public var scmAutoFetch:Bool = false;
+	/** Offer Commit All when no changes are staged. */
+	public var scmCommitAllWhenNothingStaged:Bool = false;
 	public var scmGutter:Bool = true;
 	public var scmExplorerDecorations:Bool = true;
 	public var editorBackground:Int = style.WorkbenchColors.opaque(style.WorkbenchColors.darkEditorBackground);
@@ -110,6 +114,8 @@ class Settings {
 		result.scmDiffSizeLimit = scmDiffSizeLimit;
 		result.scmNestedScanDepth = scmNestedScanDepth;
 		result.scmAutoRefresh = scmAutoRefresh;
+		result.scmAutoFetch = scmAutoFetch;
+		result.scmCommitAllWhenNothingStaged = scmCommitAllWhenNothingStaged;
 		result.scmGutter = scmGutter;
 		result.scmExplorerDecorations = scmExplorerDecorations;
 		result.editorBackground = editorBackground;

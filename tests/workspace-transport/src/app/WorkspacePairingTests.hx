@@ -183,6 +183,22 @@ class WorkspacePairingTests {
 			&& devices[0].grants[0] == WorkspaceProtocol.READ,
 			'local administration can list the approved device without exposing its key or bearer');
 
+		var grantsError:Null<String> = 'callback_missing';
+		pairing.setGrants(invite.deviceId, [], function(error) grantsError = error);
+		record = store.loadDevices()[0];
+		require(grantsError == null && record.grants.length == 0 && !pair.server.isOpen()
+			&& !pairing.listDevices()[0].connected,
+			'narrowing a device grant persists immediately and closes its active authenticated transport');
+		pairing.setGrants(invite.deviceId, [WorkspaceProtocol.READ], function(error) grantsError = error);
+		require(grantsError == null && store.loadDevices()[0].grants.length == 1,
+			'grant widening is persisted for the next authenticated connection');
+		var restartedPairing = manager(store, relay, machine.privateKey, now, function(_, _) {});
+		var afterRestart = restartedPairing.listDevices();
+		require(afterRestart.length == 1 && afterRestart[0].grants.length == 1
+			&& afterRestart[0].grants[0] == WorkspaceProtocol.READ,
+			'owner-edited device grants survive a pairing-manager restart');
+		restartedPairing.dispose();
+
 		var revokedError:Null<String> = 'callback_missing';
 		pairing.revoke(invite.deviceId, function(error) revokedError = error);
 		require(revokedError == null && store.loadDevices()[0].revoked && !pair.server.isOpen()

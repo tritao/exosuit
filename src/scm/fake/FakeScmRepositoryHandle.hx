@@ -11,6 +11,7 @@ import scm.ScmRef;
 import scm.ScmRepository;
 import scm.ScmRepositoryHandle;
 import scm.ScmSnapshot;
+import haxe.io.Bytes;
 
 class FakeScmRepositoryHandle implements ScmRepositoryHandle {
 	final repositoryValue:ScmRepository;
@@ -28,6 +29,10 @@ class FakeScmRepositoryHandle implements ScmRepositoryHandle {
 
 	public function repository():ScmRepository return repositoryValue;
 	public function features():ScmFeatures return featuresValue;
+	public function branches(generation:Int, complete:ScmJobResult<Array<ScmBranch>>->Void):ScmJob<Array<ScmBranch>> {
+		var error = availableError("branches");
+		return schedule(generation, error == null ? script.branches.copy() : null, error, complete);
+	}
 
 	public function refresh(generation:Int, complete:ScmJobResult<ScmSnapshot>->Void):ScmJob<ScmSnapshot> {
 		script.refreshCalls++;
@@ -37,7 +42,11 @@ class FakeScmRepositoryHandle implements ScmRepositoryHandle {
 	}
 
 	public function original(reference:ScmRef, path:String, generation:Int, complete:ScmJobResult<ScmBlob>->Void):ScmJob<ScmBlob> {
-		var error = availableError("original"), value = error == null ? script.blobs.get(FakeScmRepositoryScript.blobKey(reference, path)) : null;
+		return originalBytes(reference, Bytes.ofString(path), generation, complete);
+	}
+
+	public function originalBytes(reference:ScmRef, path:Bytes, generation:Int, complete:ScmJobResult<ScmBlob>->Void):ScmJob<ScmBlob> {
+		var error = availableError("original"), value = error == null ? script.blobs.get(FakeScmRepositoryScript.blobKey(reference, path.toString())) : null;
 		if (error == null && value == null) error = new ScmError("operation_failed", "No scripted blob for this reference and path");
 		return schedule(generation, value, error, complete);
 	}
@@ -46,16 +55,18 @@ class FakeScmRepositoryHandle implements ScmRepositoryHandle {
 		script.operations.push(operation);
 		var error = availableError("apply"), snapshot = script.latestSnapshot();
 		var value = error == null ? new ScmApplyResult(snapshot, "fake operation completed") : null;
-		return schedule(generation, value, error, complete);
+		return schedule(generation, value, error, complete, function() script.cancelledOperations++);
 	}
 
 	function availableError(action:String):Null<ScmError>
 		return disposed ? new ScmError("operation_failed", "The fake repository handle was disposed") : script.takeFailure(action);
 
-	function schedule<T>(generation:Int, value:Null<T>, error:Null<ScmError>, complete:ScmJobResult<T>->Void):ScmJob<T> {
+	function schedule<T>(generation:Int, value:Null<T>, error:Null<ScmError>, complete:ScmJobResult<T>->Void,
+			?onCancelled:Void->Void):ScmJob<T> {
 		var scheduled:Null<jobs.JobHandle> = null;
 		var job = new ScmJob<T>(generation, function() {
 			if (scheduled != null) scheduler.cancel(scheduled);
+			if (onCancelled != null) onCancelled();
 		});
 		var task = new FakeScmTask(script.latencySteps, function() {
 			if (job.finish()) complete(new ScmJobResult<T>(generation, value, error));

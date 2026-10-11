@@ -13,8 +13,10 @@ import workspace.service.WorkspaceAgentProtocol;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceTerminalProtocol;
 import workspace.service.WorkspaceFileProtocol;
+import workspace.service.WorkspaceScmProtocol;
 import workspace.client.WorkspaceAttachment;
 import workspace.client.WorkspaceFileClient;
+import workspace.client.WorkspaceScmClient;
 import workspace.client.WorkspaceRpcEndpoint;
 import workspace.client.RpcWorkspaceWorkbenchClient;
 import workspace.client.WorkspaceWorkbenchClient;
@@ -29,6 +31,8 @@ import workspace.transport.RelayMachineEndpoint;
 import workspace.transport.RelaySocketTicket;
 import workspace.transport.RelayTicketAttempt;
 import workspace.transport.RelayTicketClient;
+import scm.RpcScmSource;
+import scm.ScmSource;
 
 typedef BrowserRemoteDevice = {
 	var machineId:String;
@@ -89,6 +93,9 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 	var workspaceConnection:Null<RpcConnection>;
 	var fileApiConnection:Null<RpcConnection>;
 	var fileApiClient:Null<WorkspaceFileClient>;
+	var scmApiConnection:Null<RpcConnection>;
+	var scmApiClient:Null<WorkspaceScmClient>;
+	var scmSource:Null<RpcScmSource>;
 	final workbench:RpcWorkspaceWorkbenchClient;
 	var disposed:Bool = false;
 
@@ -421,6 +428,7 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 	public function poll():Void {
 		if (disposed) return;
 		workbench.poll();
+		if (scmSource != null) scmSource.poll();
 		var currentHandshake = handshake;
 		if (currentHandshake != null) {
 			currentHandshake.poll();
@@ -485,6 +493,7 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 				|| !Std.isOfType(value.grants, Array)) throw "invalid_approval";
 			var offered = [WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS, WorkspaceProtocol.WRITE,
 				WorkspaceProtocol.TREE, WorkspaceProtocol.IDENTITY_CAPABILITY, WorkspaceFileProtocol.READ,
+				WorkspaceScmProtocol.READ, WorkspaceScmProtocol.WRITE, WorkspaceScmProtocol.REMOTE,
 				WorkspaceTerminalProtocol.READ,
 				WorkspaceTerminalProtocol.CATALOG, WorkspaceTerminalProtocol.CONTROL,
 				WorkspaceAgentProtocol.READ, WorkspaceAgentProtocol.CONTROL];
@@ -550,6 +559,7 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 			function() return Math.random(), new RpcPeerOptions("exosuit-editor/1",
 				[WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS, WorkspaceProtocol.IDENTITY_CAPABILITY,
 					WorkspaceProtocol.TREE, WorkspaceFileProtocol.READ,
+					WorkspaceScmProtocol.READ, WorkspaceScmProtocol.WRITE, WorkspaceScmProtocol.REMOTE,
 					WorkspaceTerminalProtocol.READ, WorkspaceTerminalProtocol.CATALOG,
 					WorkspaceTerminalProtocol.CONTROL, WorkspaceAgentProtocol.READ, WorkspaceAgentProtocol.CONTROL],
 				[WorkspaceProtocol.READ, WorkspaceProtocol.IDENTITY_CAPABILITY], 5000, 262144, 32, 1048576),
@@ -635,6 +645,32 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 		return fileApiClient;
 	}
 
+	public function sourceControlSource():Null<ScmSource> {
+		if (!isWorkspaceConnected() || !hasCapability(WorkspaceScmProtocol.READ) || workspaceRoot == null) return null;
+		var identity = "workspace:" + workspaceRoot;
+		if (scmSource == null || scmSource.identity() != identity) {
+			if (scmSource != null) scmSource.dispose();
+			scmSource = new RpcScmSource(function() return workspaceScmClient(), "workspace", "root", identity,
+				function() return hasCapability(WorkspaceScmProtocol.WRITE),
+				function() return hasCapability(WorkspaceScmProtocol.REMOTE));
+		}
+		return scmSource;
+	}
+
+	function workspaceScmClient():Null<WorkspaceScmClient> {
+		var connection = isWorkspaceConnected() && hasCapability(WorkspaceScmProtocol.READ) ? workspaceConnection : null;
+		if (connection == null) {
+			scmApiConnection = null;
+			scmApiClient = null;
+			return null;
+		}
+		if (connection != scmApiConnection) {
+			scmApiConnection = connection;
+			scmApiClient = new WorkspaceScmClient(connection);
+		}
+		return scmApiClient;
+	}
+
 	public function disconnect():Void {
 		resetSession();
 		error = null;
@@ -648,6 +684,10 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 		|| storeRequest != 0 || confirmation != null || ticketAttempt != null);
 
 	function resetSession():Void {
+		if (scmSource != null) scmSource.dispose();
+		scmSource = null;
+		scmApiConnection = null;
+		scmApiClient = null;
 		operationGeneration++;
 		if (storeRequest != 0)
 			Sys.println("exosuit-remote-cancel:" + storeRequest);

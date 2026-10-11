@@ -36,19 +36,23 @@ class RemoteAccessPanel implements View {
 	var actionError:Null<String>;
 	var selections:Map<String, Map<String, Bool>> = [];
 	var confirmed:Map<String, Bool> = [];
+	var editing:Map<String, Bool> = [];
 	var relayOrigin:String = "https://exosuit-relay.joao-9f7.workers.dev";
 	var confirmRestart:Bool = false;
 
 	static final grantOptions:Array<{id:String, label:String, grant:String, defaultValue:Bool}> = [
 		{id: "files", label: "Read project files", grant: WorkspaceProtocol.READ, defaultValue: true},
 		{id: "events", label: "Receive updates", grant: WorkspaceProtocol.EVENTS, defaultValue: true},
-		{id: "edit", label: "Edit and save files", grant: WorkspaceProtocol.WRITE, defaultValue: true},
+		{id: "edit", label: "Edit and save files", grant: WorkspaceProtocol.WRITE, defaultValue: false},
 		{id: "tree", label: "Browse project folders", grant: WorkspaceProtocol.TREE, defaultValue: true},
 		{id: "terminal-read", label: "Read terminals", grant: WorkspaceTerminalProtocol.READ, defaultValue: true},
 		{id: "terminal-catalog", label: "List terminals", grant: WorkspaceTerminalProtocol.CATALOG, defaultValue: true},
-		{id: "terminal-control", label: "Control terminals", grant: WorkspaceTerminalProtocol.CONTROL, defaultValue: true},
+		{id: "terminal-control", label: "Control terminals", grant: WorkspaceTerminalProtocol.CONTROL, defaultValue: false},
 		{id: "agent-read", label: "Read Codex sessions", grant: WorkspaceAgentProtocol.READ, defaultValue: true},
-		{id: "agent-control", label: "Control Codex sessions", grant: WorkspaceAgentProtocol.CONTROL, defaultValue: true}
+		{id: "agent-control", label: "Control Codex sessions", grant: WorkspaceAgentProtocol.CONTROL, defaultValue: false},
+		{id: "scm-read", label: "Review source control", grant: workspace.service.WorkspaceScmProtocol.READ, defaultValue: true},
+		{id: "scm-write", label: "Change source control", grant: workspace.service.WorkspaceScmProtocol.WRITE, defaultValue: false},
+		{id: "scm-remote", label: "Fetch and push Git remotes", grant: workspace.service.WorkspaceScmProtocol.REMOTE, defaultValue: false}
 	];
 
 	public function new(client:WorkspacePairingClient, requestFrame:Void->Void, copyText:String->Bool) {
@@ -57,13 +61,15 @@ class RemoteAccessPanel implements View {
 		this.copyText = copyText;
 	}
 
-	function selection(id:String):Map<String, Bool> {
+	function selection(id:String, ?initialGrants:Array<String>):Map<String, Bool> {
 		var selected = selections.get(id);
 		if (selected == null) {
 			selected = [];
 			for (option in grantOptions) selected.set(option.id, option.defaultValue);
 			selections.set(id, selected);
 		}
+		if (initialGrants != null && editing.get(id) != true)
+			for (option in grantOptions) selected.set(option.id, initialGrants.indexOf(option.grant) >= 0);
 		return selected;
 	}
 
@@ -107,6 +113,9 @@ class RemoteAccessPanel implements View {
 		if (grant == WorkspaceTerminalProtocol.CONTROL) return "terminal control";
 		if (grant == WorkspaceAgentProtocol.READ) return "Codex sessions";
 		if (grant == WorkspaceAgentProtocol.CONTROL) return "Codex control";
+		if (grant == workspace.service.WorkspaceScmProtocol.READ) return "source control review";
+		if (grant == workspace.service.WorkspaceScmProtocol.WRITE) return "source control changes";
+		if (grant == workspace.service.WorkspaceScmProtocol.REMOTE) return "Git remotes";
 		if (grant == WorkspaceProtocol.IDENTITY_CAPABILITY) return "workspace identity";
 		return grant;
 	}
@@ -129,7 +138,7 @@ class RemoteAccessPanel implements View {
 		var selected = selection(id), all = true, read = true, edit = true;
 		for (option in grantOptions) {
 			var checked = selected.get(option.id) == true;
-			var reading = option.id == "files" || option.id == "events" || option.id == "tree";
+			var reading = option.defaultValue;
 			if (!checked) all = false;
 			if (checked != reading) read = false;
 			if (checked != (reading || option.id == "edit")) edit = false;
@@ -140,7 +149,7 @@ class RemoteAccessPanel implements View {
 	function setPreset(id:String, preset:String):Void {
 		var selected = selection(id);
 		for (option in grantOptions) selected.set(option.id, preset == "all"
-			|| option.id == "files" || option.id == "events" || option.id == "tree" || preset == "edit" && option.id == "edit");
+			|| option.defaultValue || preset == "edit" && option.id == "edit");
 	}
 
 	function paragraph(value:String, context:BuildContext, secondary:Bool = false):Text {
@@ -268,7 +277,7 @@ class RemoteAccessPanel implements View {
 					new KeyedView("confirmed", new Checkbox("pairing-confirm-" + id, "I checked both codes", confirmed.get(id) == true,
 						function(value) { confirmed.set(id, value); requestFrame(); })),
 					new KeyedView("permissions-title", paragraph("Permissions to approve", context)),
-					new KeyedView("permissions-hint", paragraph("All permissions are selected by default. Adjust access before approving.", context, true))
+					new KeyedView("permissions-hint", paragraph("Read-only access is selected by default. Review write and control access before approving.", context, true))
 				];
 				var presets = new Select<String>("pairing-presets-" + id, [
 					new SelectOption("all", "All permissions", "all"),
@@ -289,11 +298,44 @@ class RemoteAccessPanel implements View {
 		if (list != null) for (device in list.devices) {
 			var children:Array<KeyedView> = [new KeyedView("details", paragraph(deviceLabel(device), context))];
 			if (!device.revoked) {
+				var deviceId = device.deviceId;
+				selection(deviceId, device.grants);
+				if (editing.get(deviceId) != true) {
+					children.push(new KeyedView("edit-permissions", new Button("Edit permissions", null, function() {
+						selection(deviceId, device.grants);
+						editing.set(deviceId, true);
+						requestFrame();
+					}, "pairing-edit-grants-" + deviceId)));
+				} else {
+					children.push(new KeyedView("permissions-title", paragraph("Device permissions", context)));
+					var presets = new Select<String>("pairing-device-presets-" + deviceId, [
+						new SelectOption("all", "All permissions", "all"),
+						new SelectOption("read", "Read only", "read"),
+						new SelectOption("edit", "Edit files", "edit"),
+						new SelectOption("custom", "Custom", "custom")
+					], preset(deviceId), function(value) { if (value != "custom") setPreset(deviceId, value); requestFrame(); }, sectionStyle());
+					presets.accessibilityLabel = "Device permission preset";
+					children.push(new KeyedView("presets", presets));
+					for (entry in grantCheckboxes(deviceId)) children.push(entry);
+					children.push(new KeyedView("save-permissions", new Button(client.pairingBusy() ? "Saving permissions…" : "Save permissions", null, function() {
+						client.setPairingGrants(deviceId, grants(deviceId), function(error) {
+							if (error == null) editing.set(deviceId, false);
+							actionError = error == null ? "Permissions updated. The device must reconnect." : error;
+							requestFrame();
+						});
+						requestFrame();
+					}, "pairing-save-grants-" + deviceId)));
+					children.push(new KeyedView("cancel-permissions", new Button("Cancel", null, function() {
+						editing.set(deviceId, false);
+						selection(deviceId, device.grants);
+						requestFrame();
+					}, "pairing-cancel-grants-" + deviceId)));
+				}
 				var revoke = new Button("Revoke", null, function() {
-					var id = device.deviceId;
+					var id = deviceId;
 					client.revokePairing(id, function(error) { actionError = error == null ? "Device revoked" : error; requestFrame(); });
 					requestFrame();
-				}, "pairing-revoke-" + device.deviceId);
+				}, "pairing-revoke-" + deviceId);
 				revoke.enabled = !client.pairingBusy();
 				children.push(new KeyedView("revoke", revoke));
 			}

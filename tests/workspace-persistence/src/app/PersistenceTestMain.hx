@@ -130,6 +130,16 @@ class PersistenceTestMain {
 			"Device key or explicit grants did not persist");
 		for (index in 0...key.length)
 			require(loaded[0].staticPublicKey.get(index) == key.get(index), "Device public key changed in storage");
+		store.saveDevice({deviceId: deviceId, staticPublicKey: key,
+			grants: [WorkspaceProtocol.READ, workspace.service.WorkspaceScmProtocol.READ], revoked: false});
+		store.close();
+		store = new WorkspaceSqliteStore(path, "workspace", seed);
+		loaded = store.loadDevices();
+		require(loaded.length == 1 && loaded[0].grants.length == 2
+			&& loaded[0].grants.indexOf(WorkspaceProtocol.READ) >= 0
+			&& loaded[0].grants.indexOf(workspace.service.WorkspaceScmProtocol.READ) >= 0
+			&& loaded[0].grants.indexOf(WorkspaceProtocol.TREE) < 0,
+			"Owner-edited grants did not survive reopening the device store");
 		store.revokeDevice(deviceId);
 		store.close();
 		store = new WorkspaceSqliteStore(path, "workspace", seed);

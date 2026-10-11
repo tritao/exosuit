@@ -1,5 +1,7 @@
 package plugin;
 
+import haxeon.ui.icons.IconName;
+
 class PluginStatusRegistry {
 	final values:Array<PluginStatusItem> = [];
 
@@ -8,13 +10,34 @@ class PluginStatusRegistry {
 
 	public function new() {}
 
-	public function add(owner:String, id:String, text:String, priority:Int = 0):PluginStatusItem {
-		if (id.length == 0) throw "status item id cannot be empty";
+	public function add(owner:String, id:String, text:String, priority:Int = 0,
+			side:PluginStatusSide = Right, ?icon:IconName, tooltip:String = "", command:String = ""):PluginStatusItem {
+		if (owner == null || owner.length == 0 || id == null || id.length == 0) throw "status item owner and id cannot be empty";
+		if (side == null) throw "status item side is required";
 		if (find(owner, id) != null) throw 'status item "$owner:$id" is already registered';
-		var value = new PluginStatusItem(owner, id, text, priority);
+		var value = new PluginStatusItem(owner, id, text, priority, side, icon, tooltip, command);
 		values.push(value);
 		revision++;
 		return value;
+	}
+
+	public function update(value:PluginStatusItem, text:String, priority:Int,
+			side:PluginStatusSide, ?icon:IconName, tooltip:String = "", ?command:String):Bool {
+		if (value == null || !values.contains(value)) return false;
+		if (side == null) return false;
+		var nextText = text == null ? "" : text;
+		var nextTooltip = tooltip == null ? "" : tooltip;
+		var nextCommand = command == null ? value.command : command;
+		if (value.text == nextText && value.priority == priority && value.side == side && value.icon == icon &&
+			value.tooltip == nextTooltip && value.command == nextCommand) return true;
+		value.text = nextText;
+		value.priority = priority;
+		value.side = side;
+		value.icon = icon;
+		value.tooltip = nextTooltip;
+		value.command = nextCommand;
+		revision++;
+		return true;
 	}
 
 	public function find(owner:String, id:String):Null<PluginStatusItem> {

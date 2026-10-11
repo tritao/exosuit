@@ -5,6 +5,7 @@ import haxeon.ui.FontFamily;
 import haxeon.ui.Color;
 import haxeon.ui.FontCollection;
 import haxeon.ui.LayoutAxis;
+import haxeon.ui.LayoutDirection;
 import haxeon.ui.LayoutStyle;
 import haxeon.ui.LayoutVisualKind;
 import haxeon.ui.LayoutMeasuredContent;
@@ -17,7 +18,10 @@ import haxeon.ui.TextWrap;
 import haxeon.ui.core.BuildContext;
 import haxeon.ui.core.RenderNode;
 import haxeon.ui.core.View;
+import haxeon.ui.core.UiEventKind;
 import editor.TextBuffer;
+import plugin.PluginGutterMarker;
+import plugin.PluginGutterMarkerKind;
 import haxeon.ui.widgets.text.TextEditorLayout;
 import haxeon.ui.ResolvedLayoutItem;
 import haxeon.ui.TextLayout.TextPosition;
@@ -31,18 +35,27 @@ class EditorGutter implements View {
 	final fontSize:Float;
 	final activeLine:Int;
 	final activeForeground:Color;
+	final markers:Array<PluginGutterMarker>;
+	final markerRevision:Int;
+	final onMarkerClick:Null<PluginGutterMarker->Void>;
 	var labels:Null<GutterLabels>;
+	var markerLane:Null<GutterMarkerLane>;
 	var node:Null<RenderNode>;
 	var context:Null<BuildContext>;
 
 	public function resolveTextLayout(layout:TextEditorLayout, geometry:ResolvedLayoutItem):Void {
-		if (labels == null || node == null || node.resolved == null || context == null) return;
+		if (labels == null || markerLane == null || node == null || node.resolved == null || context == null) return;
 		// ScrollView translates its content through the resolved transform;
 		// layout y alone stays unchanged while the document scrolls.
-		if (labels.resolve(layout, editor.GutterGeometry.sourceOriginY(geometry, node.resolved))) context.requestLayoutFeedback();
+		var originY = editor.GutterGeometry.sourceOriginY(geometry, node.resolved);
+		var labelsChanged = labels.resolve(layout, originY);
+		var markersChanged = markerLane.resolve(layout, originY);
+		if (labelsChanged || markersChanged) context.requestLayoutFeedback();
 	}
 
-	public function new(key:String, buffer:TextBuffer, foreground:Color, ?background:Color, fontSize:Float = 15.0, activeLine:Int = -1, ?activeForeground:Color) {
+	public function new(key:String, buffer:TextBuffer, foreground:Color, ?background:Color, fontSize:Float = 15.0,
+			activeLine:Int = -1, ?activeForeground:Color, ?markers:Array<PluginGutterMarker>, markerRevision:Int = 0,
+			?onMarkerClick:PluginGutterMarker->Void) {
 		this.key = key;
 		this.buffer = buffer;
 		this.foreground = foreground;
@@ -50,6 +63,9 @@ class EditorGutter implements View {
 		this.fontSize = fontSize;
 		this.activeLine = activeLine;
 		this.activeForeground = activeForeground == null ? foreground : activeForeground;
+		this.markers = markers == null ? [] : markers.copy();
+		this.markerRevision = markerRevision;
+		this.onMarkerClick = onMarkerClick;
 	}
 
 	public function build(context:BuildContext):RenderNode {
@@ -61,16 +77,45 @@ class EditorGutter implements View {
 			function(value) { value.dispose(); }).value;
 		labels = retained;
 		retained.update(buffer.lineCount(), foreground, fontSize, activeLine, activeForeground);
+		var markerState = context.resourceState(context.id("gutter-marker-lane:" + key),
+			function() return new GutterMarkerLane(), function(value) { value.dispose(); }).value;
+		markerLane = markerState;
+		markerState.update(markers, markerRevision, context.theme.tokens.success,
+			context.theme.tokens.accent, context.theme.tokens.danger);
 		var style = new LayoutStyle();
 		style.width = LayoutAxis.fit();
 		style.height = LayoutAxis.grow();
+		style.direction = LayoutDirection.LeftToRight;
 		style.clipVertical = true;
 		if (background != null) style.background = background;
-		var built = new RenderNode(id, LayoutVisualKind.Custom, style);
-		built.styleKey = key;
+		var built = new RenderNode(id, LayoutVisualKind.Box, style);
+		built.styleKey = key + ":markers:" + markerRevision;
 		node = built;
 		built.hitTestSelf = false;
-		built.layout.intrinsicContent = retained.content;
+		var laneStyle = new LayoutStyle();
+		laneStyle.width = LayoutAxis.fixed(5.0);
+		laneStyle.height = LayoutAxis.grow();
+		laneStyle.clipVertical = true;
+		var laneNode = new RenderNode(context.id("gutter-marker-strip:" + key), LayoutVisualKind.Custom, laneStyle);
+		laneNode.styleKey = key + ":marker-strip:" + markerRevision;
+		laneNode.hitTestSelf = markers.length > 0;
+		laneNode.layout.intrinsicContent = markerState.content;
+		laneNode.on(UiEventKind.PointerDown, function(event) {
+			if (event.button != 0 || onMarkerClick == null) return;
+			var marker = markerState.markerAt(event.localY);
+			if (marker == null) return;
+			onMarkerClick(marker);
+			event.preventDefault();
+			event.stopPropagation();
+		});
+		var labelsNode = new RenderNode(context.id("gutter-line-numbers:" + key), LayoutVisualKind.Custom, new LayoutStyle());
+		labelsNode.styleKey = key + ":line-numbers";
+		labelsNode.hitTestSelf = false;
+		labelsNode.layout.style.width = LayoutAxis.fit();
+		labelsNode.layout.style.height = LayoutAxis.grow();
+		labelsNode.layout.intrinsicContent = retained.content;
+		built.add(laneNode);
+		built.add(labelsNode);
 		return built;
 	}
 }
@@ -97,7 +142,7 @@ private class GutterLabels {
 		this.fonts = fonts;
 		layout = TextLayout.create(fonts, "", 1.0, new TextStyle(fontSize, FontFamily.Monospace), new ParagraphStyle(TextWrap.None));
 		measurement = new LayoutMeasuredContent(function(_) {
-			return new LayoutMeasureResult(width + 12.0, 1.0);
+			return new LayoutMeasureResult(width + 7.0, 1.0);
 		});
 		content = new LayoutRenderableContent(measurement, function(canvas, geometry) {
 			var editor = editorLayout;
@@ -137,7 +182,7 @@ private class GutterLabels {
 					label.layout.setColor(highlighted ? activeColor : color);
 					label.highlighted = highlighted;
 				}
-				canvas.drawText(label.layout, 6.0, originY + label.y - label.baseline);
+				canvas.drawText(label.layout, 1.0, originY + label.y - label.baseline);
 			}
 		});
 	}
@@ -187,6 +232,89 @@ private class GutterLabels {
 		layout.dispose();
 		for (label in visibleLabels) label.layout.dispose();
 	}
+}
+
+/** Narrow, separately hit-tested marker lane retained with the line-number rail. */
+private class GutterMarkerLane {
+	public final content:LayoutRenderableContent;
+	final measurement:LayoutMeasuredContent;
+	var editorLayout:Null<TextEditorLayout>;
+	var originY:Float = 0.0;
+	var markers:Array<PluginGutterMarker> = [];
+	var revision:Int = -1;
+	var addedColor:Null<Color>;
+	var modifiedColor:Null<Color>;
+	var deletedColor:Null<Color>;
+
+	public function new() {
+		measurement = new LayoutMeasuredContent(function(_) return new LayoutMeasureResult(5.0, 1.0));
+		content = new LayoutRenderableContent(measurement, function(canvas, geometry) {
+			var editor = editorLayout;
+			if (editor == null || markers.length == 0) return;
+			var visible = geometry.visibleLocalBounds();
+			var first = Std.int(Math.max(0, editor.paragraphIndexAtY(visible.y - originY) - 1));
+			var end = Std.int(Math.min(editor.paragraphCount,
+				editor.paragraphIndexAtY(visible.y + visible.height - originY) + 2));
+			if (end <= first) return;
+			for (marker in markers) {
+				if (marker.endLine < first || marker.startLine >= end) continue;
+				var color = switch marker.kind {
+					case Added: addedColor;
+					case Modified: modifiedColor;
+					case DeletedAbove | DeletedBelow: deletedColor;
+				};
+				if (color == null) continue;
+				for (line in marker.startLine...(marker.endLine + 1)) {
+					if (line < first || line >= end || line >= editor.paragraphCount) continue;
+					var caret = editor.paragraphCaret(line);
+					var top = originY + caret.y + Math.min(caret.ascender, caret.descender);
+					var height = Math.max(1.0, Math.abs(caret.descender - caret.ascender));
+					switch marker.kind {
+						case Added | Modified:
+							canvas.fillRectIfPositive(new haxeon.ui.Rect(1.0, top, 3.0, height), color);
+						case DeletedAbove:
+							canvas.fillRectIfPositive(new haxeon.ui.Rect(0.0, top - 2.0, 5.0, 2.0), color);
+						case DeletedBelow:
+							canvas.fillRectIfPositive(new haxeon.ui.Rect(0.0, top + height, 5.0, 2.0), color);
+					}
+				}
+			}
+		});
+	}
+
+	public function update(next:Array<PluginGutterMarker>, nextRevision:Int, nextAdded:Color,
+			nextModified:Color, nextDeleted:Color):Void {
+		var colorChanged = addedColor == null || modifiedColor == null || deletedColor == null ||
+			!sameColor(addedColor, nextAdded) || !sameColor(modifiedColor, nextModified) || !sameColor(deletedColor, nextDeleted);
+		if (revision == nextRevision && !colorChanged) return;
+		markers = next == null ? [] : next.copy();
+		revision = nextRevision;
+		addedColor = nextAdded;
+		modifiedColor = nextModified;
+		deletedColor = nextDeleted;
+		content.invalidatePaint();
+	}
+
+	public function resolve(editor:TextEditorLayout, nextOriginY:Float):Bool {
+		var changed = editorLayout != editor || originY != nextOriginY;
+		editorLayout = editor;
+		originY = nextOriginY;
+		if (changed) content.invalidatePaint();
+		return false;
+	}
+
+	public function markerAt(localY:Float):Null<PluginGutterMarker> {
+		var editor = editorLayout;
+		if (editor == null || markers.length == 0) return null;
+		var line = editor.paragraphIndexAtY(localY - originY);
+		for (marker in markers) if (line >= marker.startLine && line <= marker.endLine) return marker;
+		return null;
+	}
+
+	public function dispose():Void content.dispose();
+
+	static function sameColor(a:Color, b:Color):Bool
+		return a.red == b.red && a.green == b.green && a.blue == b.blue && a.alpha == b.alpha;
 }
 
 /** Geometry belongs to a particular editor layout and its current revision. */

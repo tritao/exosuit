@@ -17,14 +17,17 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 arguments = sys.argv[1:]
 AGENT_MODE = "--agent" in arguments
 NO_FILES = "--no-files" in arguments
+SCM_MODE = "--scm" in arguments
 if AGENT_MODE:
     arguments.remove("--agent")
 if NO_FILES:
     arguments.remove("--no-files")
-if AGENT_MODE and NO_FILES:
-    raise SystemExit("--agent uses the production AgentMain grant set and cannot be combined with --no-files")
+if SCM_MODE:
+    arguments.remove("--scm")
+if (AGENT_MODE and NO_FILES) or (SCM_MODE and (AGENT_MODE or NO_FILES)):
+    raise SystemExit("--scm requires file access and cannot be combined with --agent or --no-files")
 if len(arguments) > 1:
-    raise SystemExit("Usage: run.py [--agent | --no-files] <built-site-directory>")
+    raise SystemExit("Usage: run.py [--agent | --no-files | --scm] <built-site-directory>")
 SITE = pathlib.Path(os.environ.get("EXOSUIT_WEB_SITE", ""))
 if arguments:
     SITE = pathlib.Path(arguments[0])
@@ -34,7 +37,7 @@ if not SITE.is_dir() or not (SITE / "index.html").is_file():
 HAXEON = pathlib.Path(os.environ.get("HAXEON_BIN", ROOT / "haxeon/scripts/haxeon"))
 WRANGLER = ROOT / "relay/worker/node_modules/.bin/wrangler"
 CHROME = os.environ.get("CHROME_BIN") or shutil.which("google-chrome") or "/opt/google/chrome/chrome"
-NODE = shutil.which("node")
+NODE = os.environ.get("NODE_BIN") or shutil.which("node")
 if not WRANGLER.exists() or not pathlib.Path(CHROME).is_file() or not NODE:
     raise SystemExit("Wrangler, Chrome and Node.js are required for the browser pairing test")
 
@@ -103,6 +106,20 @@ with tempfile.TemporaryDirectory(prefix="exosuit-browser-pairing-") as temporary
     nested = workspace_root / "needle-nested"
     nested.mkdir()
     (nested / "child.md").write_text("Nested child fixture.\n")
+    if AGENT_MODE or SCM_MODE:
+        (workspace_root / "changed.txt").write_text("baseline source-control content\n")
+        git = subprocess.run(["git", "-C", str(workspace_root), "init"], text=True, capture_output=True)
+        if git.returncode != 0:
+            raise RuntimeError("Could not initialize the browser SCM fixture:\n" + git.stderr)
+        for args in (["config", "user.name", "Exosuit Browser Test"],
+                     ["config", "user.email", "exosuit-browser-test@example.invalid"],
+                     ["add", "remote.md", "changed.txt"],
+                     ["commit", "-m", "browser SCM baseline"]):
+            result = subprocess.run(["git", "-C", str(workspace_root), *args], text=True, capture_output=True)
+            if result.returncode != 0:
+                raise RuntimeError("Could not prepare the browser SCM fixture:\n" + result.stderr)
+        (workspace_root / "changed.txt").write_text("updated source-control content\n")
+        (workspace_root / "untracked.txt").write_text("untracked source-control content\n")
     invitation = work / "invitation.json"
     status = work / "status.json"
     decision = work / "approval.json"
@@ -119,6 +136,7 @@ with tempfile.TemporaryDirectory(prefix="exosuit-browser-pairing-") as temporary
         "workspaceRoot": str(workspace_root), "invitePath": str(invitation), "statusPath": str(status),
         "decisionPath": str(decision), "successPath": str(success), "fileChangePath": str(file_change),
         "databasePath": str(database), "fileRead": not NO_FILES,
+        "scmRead": SCM_MODE,
         "localSocket": str(local_socket)}))
     os.chmod(config, 0o600)
     worker_log = work / "worker.log"
@@ -208,9 +226,12 @@ with tempfile.TemporaryDirectory(prefix="exosuit-browser-pairing-") as temporary
         env["EXOSUIT_APP_PORT"] = str(web_port)
         env["EXOSUIT_TEST_AGENT"] = "1" if AGENT_MODE else "0"
         env["EXOSUIT_TEST_NO_FILES"] = "1" if NO_FILES else "0"
+        env["EXOSUIT_TEST_SCM"] = "1" if SCM_MODE else "0"
+        test_mode = "agent" if AGENT_MODE else "no-files" if NO_FILES else "scm" if SCM_MODE else "normal"
         client = subprocess.run([
             NODE, str(ROOT / "tests/workspace-browser-pairing/browser-client.mjs"),
             str(invitation), str(status), str(decision), str(success), str(file_change),
+            str(debug_port), str(web_port), test_mode,
         ], cwd=ROOT, env=env, text=True, capture_output=True, timeout=180)
         print(client.stdout, end="")
         if client.returncode != 0:
@@ -263,6 +284,22 @@ with tempfile.TemporaryDirectory(prefix="exosuit-browser-pairing-") as temporary
                 terminate_group(process)
             else:
                 terminate(process)
+        if "wsl-chrome-wrapper" in str(CHROME):
+            powershell = shutil.which("powershell.exe")
+            if powershell:
+                profile = work.name + "-chrome-profile"
+                script = (
+                    "$profile = '" + profile + "'; "
+                    "$roots = @(Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" "
+                    "| Where-Object { $_.CommandLine -and $_.CommandLine.Contains($profile) "
+                    "-and $_.CommandLine -notmatch '--type=' }); "
+                    "foreach ($root in $roots) { & taskkill.exe /PID $root.ProcessId /T /F | Out-Null }"
+                )
+                try:
+                    subprocess.run([powershell, "-NoProfile", "-NonInteractive", "-Command", script],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30, check=False)
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
         for handle in handles:
             handle.close()
         if AGENT_MODE:

@@ -5,6 +5,7 @@ import haxeon.ui.TextLayout.TextPosition;
 import ui.ExosuitApp;
 import ui.ExosuitPalette;
 import ui.UiEditorTabs;
+import ui.UiDocumentView;
 import haxeon.ui.LayoutFrame;
 import haxeon.ui.Color;
 import haxeon.ui.host.DesktopUiHost;
@@ -38,11 +39,56 @@ class DecorationSmokeApp extends ExosuitApp {
 	var quitViewCount:Int = 0;
 	var savedPaneLines:Array<String> = [];
 	var popupScrollController:Null<haxeon.ui.widgets.scroll.ScrollController> = null;
+	var gutterMarkerClicks:Int = 0;
+	var scmLiveDocument:Null<editor.Document>;
+	var scmDiffOriginalLines:Array<String> = [];
+	var scmDiffWorkingLines:Array<String> = [];
+	var scmDiffRefreshCompleted:Bool = false;
+	var scmDiffRefreshVerified:Bool = false;
+	var scmPanelVerified:Bool = false;
+	var scmPanelInitialVerified:Bool = false;
+	var scmPanelExternalCommitStarted:Bool = false;
+	var scmPanelConflictStep:Int = 0;
+	var scmPanelMutationStep:Int = 0;
+	var scmPanelCommitStep:Int = 0;
+	var scmPanelPhoneStep:Int = 0;
+	var scmPanelRemoteStep:Int = 0;
+	var scmPanelSubmoduleStep:Int = 0;
+	var scmPanelSubmoduleGroupsTried:Int = 0;
+	var scmPanelSubmoduleTrustPendingId:String = "";
+	var scmPanelSubmoduleVerified:Bool = false;
+	var scmPanelRemoteSource:Null<ReadOnlyRemoteScmPanelSource>;
+	var scmPanelError:Null<String>;
+	var scmExplorerStatusStep:Int = 0;
+	var scmExplorerStatusVerified:Bool = false;
 
 	public function new(context:haxeon.ui.host.DesktopUiHostContext, path:String, phase:String) {
 		super(context.fonts, phase == "popup-completion-light" ? ExosuitPalette.theme(false) : null, context, path, null, null, phase == "popup-completion-light" ? false : null, DecorationSmokeMain.createTerminal);
 		this.phase = phase;
 		installMarks(0);
+		if (phase == "scm-panel-remote-read") {
+			scmPanelRemoteSource = new ReadOnlyRemoteScmPanelSource();
+			attachWorkspace(new ReadOnlyRemoteScmPanelAttachment(scmPanelRemoteSource));
+		}
+		if (StringTools.startsWith(phase, "scm-panel")) {
+			var source = sourceControlSource();
+			if (source == null) throw "SCM panel fixture has no local source-control source";
+			source.discover(function(result) {
+				if (result.error != null) scmPanelError = result.error.message;
+				requestFrame();
+			});
+			if (phase == "scm-panel-remote-read") showSidebarMode("scm");
+			else activateSidebarDestination("scm");
+		}
+		if (phase == "scm-explorer-status") {
+			var source = sourceControlSource();
+			if (source == null) throw "SCM Explorer fixture has no local source-control source";
+			source.discover(function(result) {
+				if (result.error != null) scmPanelError = result.error.message;
+				requestFrame();
+			});
+			showSidebarMode("files");
+		}
 		if (phase == "ime-selection-affinity") {
 			var view = host.activeView();
 			if (view == null) throw "IME regression has no document";
@@ -64,6 +110,44 @@ class DecorationSmokeApp extends ExosuitApp {
 			application.theme.foregroundMuted = 0xff0000ff;
 			host.getPluginDecorations().removeOwner("smoke");
 			host.setDocumentSearchMatches([]);
+		}
+		if (phase == "gutter-markers" || phase == "gutter-marker-click" || phase == "gutter-markers-cleared") {
+			var view = host.activeView();
+			if (view == null) throw "gutter marker fixture has no view";
+			view.document.buffer.replaceAllText("alpha\nbeta\ngamma\ndelta", view.selection);
+			host.getPluginDecorations().removeOwner("smoke");
+			host.setDocumentSearchMatches([]);
+			host.getPluginGutterMarkers().add("smoke-markers", "added", view.document, 1, 1, plugin.PluginGutterMarkerKind.Added);
+			host.getPluginGutterMarkers().add("smoke-markers", "deleted", view.document, 2, 2, plugin.PluginGutterMarkerKind.DeletedBelow);
+			gutterMarkerClickHandler = function(_) gutterMarkerClicks++;
+		}
+		if (phase == "scm-diff-document") {
+			for (line in 1...31) scmDiffOriginalLines.push("line-" + line);
+			scmDiffWorkingLines = scmDiffOriginalLines.copy();
+			scmDiffWorkingLines[1] = "working-2";
+			scmDiffWorkingLines[14] = "working-15";
+			scmDiffWorkingLines[27] = "working-28";
+			var oldText = scmDiffOriginalLines.join("\n") + "\n";
+			var currentText = scmDiffWorkingLines.join("\n") + "\n";
+			scmLiveDocument = new editor.Document("C:/repo/src/Fixture.hx", currentText,
+				application.workspace.syntaxes, application.workspace.fileSystem);
+			var diffView = host.openScmDiff("fixture-repository", "src/Fixture.hx", "HEAD", "base-v1",
+				oldText, currentText, scmLiveDocument);
+			if (diffView.document.syntax.name != "Haxe")
+				throw "SCM diff tab did not select syntax from the source file extension";
+			var previousDispose = diffView.onDispose;
+			diffView.onDispose = function() {
+				previousDispose();
+				if (scmLiveDocument != null) scmLiveDocument.dispose();
+			};
+		}
+		if (phase == "scm-side-by-side") {
+			var oldLines:Array<String> = [], newLines:Array<String> = [];
+			for (line in 1...81) { oldLines.push("line-" + line); newLines.push("line-" + line); }
+			newLines[29] = "after-30";
+			newLines.insert(30, "added-line");
+			host.openScmSideBySide("fixture-repository", "C:/repo/src/Fixture.hx", "INDEX→WORKTREE", "base-v1",
+				oldLines.join("\n") + "\n", newLines.join("\n") + "\n");
 		}
 		if (phase == "selection-clipped") {
 			var view = host.activeView();
@@ -356,6 +440,142 @@ class DecorationSmokeApp extends ExosuitApp {
 
 	override public function submit(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		frames++;
+		if (phase == "scm-panel-mutations" && ui.root != null) {
+			var previous = ui.root;
+			if (scmPanelMutationStep == 0) {
+				var source = sourceControlSource(), repositories = source == null ? [] : source.repositories();
+				if (source != null && repositories.length > 0) {
+					if (source.canWrite(repositories[0].id)) scmPanelMutationStep = 1;
+					else {
+						var trust = findEditor(previous, "scm-trust:" + repositories[0].id);
+					if (smokeClick(trust)) scmPanelMutationStep = -1;
+					}
+				}
+			} else if (scmPanelMutationStep == 1) {
+				if (smokeClick(findTreeItemWithText(previous, "Changes"))) scmPanelMutationStep = 2;
+			} else if (scmPanelMutationStep == 2) {
+				if (smokeContextClick(previous, "tracked.txt")) scmPanelMutationStep = 3;
+			} else if (scmPanelMutationStep == 3) {
+				if (smokeClick(findEditor(previous, "scm:stage"))) scmPanelMutationStep = 4;
+			} else if (scmPanelMutationStep == 5) {
+				if (smokeClick(findTreeItemWithText(previous, "Staged Changes"))) scmPanelMutationStep = 6;
+			} else if (scmPanelMutationStep == 6) {
+				if (smokeContextClick(previous, "tracked.txt")) scmPanelMutationStep = 7;
+			} else if (scmPanelMutationStep == 7) {
+				if (smokeClick(findEditor(previous, "scm:unstage"))) scmPanelMutationStep = 8;
+			} else if (scmPanelMutationStep == 9) {
+				if (smokeContextClick(previous, "tracked.txt")) scmPanelMutationStep = 10;
+			} else if (scmPanelMutationStep == 10) {
+				if (smokeClick(findEditor(previous, "scm:discard"))) scmPanelMutationStep = 11;
+			} else if (scmPanelMutationStep == 11 && host.isCommandViewActive()) {
+				host.commandViewTextInput("discard");
+				host.commandViewKeyPressed(platform.Platform.KEY_ENTER, 0);
+				scmPanelMutationStep = 12;
+			}
+		}
+		if (phase == "scm-panel-commit" && ui.root != null) {
+			var previous = ui.root;
+			if (scmPanelCommitStep == 0) {
+				var source = sourceControlSource(), repositories = source == null ? [] : source.repositories();
+				if (source != null && repositories.length > 0) {
+					if (source.canWrite(repositories[0].id)) scmPanelCommitStep = 2;
+					else if (smokeClick(findEditor(previous, "scm-trust:" + repositories[0].id))) scmPanelCommitStep = -1;
+				}
+			} else if (scmPanelCommitStep == 2) {
+				var source = sourceControlSource(), repositories = source == null ? [] : source.repositories();
+				if (repositories.length > 0) {
+					var message = findEditor(previous, "scm-commit-message:" + repositories[0].id);
+					if (message != null) {
+						if (!ui.focusWidget(message.id)) throw "SCM commit message field did not accept focus";
+						ui.text(UiEventKind.TextInput, "M17 mutation UI commit");
+						scmPanelCommitStep = 3;
+					}
+				}
+			} else if (scmPanelCommitStep == 3) {
+				var source = sourceControlSource(), repositories = source == null ? [] : source.repositories();
+				var button = findEditor(previous, "scm-commit-staged");
+				if (repositories.length > 0 && application.scmCommitDrafts.get(repositories[0].id) == "M17 mutation UI commit" &&
+					button != null && button.enabled && button.resolved != null && button.resolved.visible && smokeClick(button))
+					scmPanelCommitStep = 4;
+			}
+		}
+		if (phase == "scm-panel-submodule" && ui.root != null && !scmPanelSubmoduleVerified) {
+			var source = sourceControlSource(), repositories = source == null ? [] : source.repositories();
+			if (source != null && repositories.length >= 2 && scmPanelSubmoduleStep == 0) {
+				var allTrusted = true;
+				if (scmPanelSubmoduleTrustPendingId.length > 0 && source.canWrite(scmPanelSubmoduleTrustPendingId))
+					scmPanelSubmoduleTrustPendingId = "";
+				for (repository in repositories) {
+					if (source.canWrite(repository.id)) continue;
+					allTrusted = false;
+					if (scmPanelSubmoduleTrustPendingId.length == 0) {
+						var trust = findEditor(ui.root, "scm-trust:" + repository.id);
+						if (smokeClick(trust)) scmPanelSubmoduleTrustPendingId = repository.id;
+					}
+					break;
+				}
+				if (allTrusted) {
+					var parent:Null<scm.ScmRepository> = null, child:Null<scm.ScmRepository> = null;
+					for (repository in repositories) {
+						if (smokeNormalizePath(repository.root) == smokeNormalizePath(explorerRoot)) parent = repository;
+						if (smokeNormalizePath(repository.root) == smokeNormalizePath(explorerRoot + "/nested")) child = repository;
+					}
+					if (parent == null || child == null || child.kind != scm.ScmRepositoryKind.Submodule || child.parentId != parent.id)
+						throw "SCM UI did not discover the nested submodule under its parent repository";
+					var childSnapshot = source.snapshot(child.id);
+					if (childSnapshot != null && scmSnapshotContains(childSnapshot, scm.ScmGroupId.WorkingTree, "nested-change.txt")) {
+						if (findTreeItemWithText(ui.root, "nested") == null)
+							throw "SCM UI did not render the nested submodule repository row";
+						scmPanelSubmoduleStep = 1;
+					}
+				}
+			}
+			if (scmPanelSubmoduleStep == 1) {
+				scmPanelSubmoduleStep = 2;
+			} else if (scmPanelSubmoduleStep == 2) {
+				if (findTreeItemWithText(ui.root, "nested-change.txt") != null) {
+					if (smokeContextClick(ui.root, "nested-change.txt")) scmPanelSubmoduleStep = 3;
+				} else {
+					var changeGroups = findTreeItemsWithText(ui.root, "Changes");
+					if (scmPanelSubmoduleGroupsTried < changeGroups.length &&
+						smokeClick(changeGroups[scmPanelSubmoduleGroupsTried])) scmPanelSubmoduleGroupsTried++;
+				}
+			} else if (scmPanelSubmoduleStep == 3) {
+				if (smokeClick(findEditor(ui.root, "scm:stage"))) scmPanelSubmoduleStep = 4;
+			}
+		}
+		if (phase == "scm-panel-remote-read" && scmPanelRemoteStep == 1 && ui.root != null) {
+			var changesGroup = findTreeItemWithText(ui.root, "Changes");
+			if (changesGroup == null) throw "Remote SCM smoke could not find the Changes group to expand";
+			var bounds = changesGroup.globalBounds();
+			ui.pointerDown(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+			ui.pointerUp(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+			scmPanelRemoteStep = 2;
+		}
+		if (phase == "scm-panel-conflict" && scmPanelInitialVerified && ui.root != null) {
+			if (scmPanelConflictStep == 1) {
+				var mergeGroup = findTreeItemWithText(ui.root, "Merge Changes");
+				if (mergeGroup == null) throw "SCM conflict smoke could not find the Merge Changes group";
+				var bounds = mergeGroup.globalBounds();
+				ui.pointerDown(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+				ui.pointerUp(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+				scmPanelConflictStep = 2;
+			} else if (scmPanelConflictStep == 2) {
+				var conflictFile = findTreeItemWithText(ui.root, "conflict.txt");
+				if (conflictFile == null) throw "SCM conflict smoke could not find the expanded conflict file";
+				var bounds = conflictFile.globalBounds();
+				ui.pointerDown(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 1);
+				ui.pointerUp(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 1);
+				scmPanelConflictStep = 3;
+			} else if (scmPanelConflictStep == 3) {
+				var acceptOurs = findEditor(ui.root, "scm:resolve-ours");
+				if (acceptOurs == null) throw "SCM conflict context menu omitted Accept Ours";
+				var bounds = acceptOurs.globalBounds();
+				ui.pointerDown(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+				ui.pointerUp(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+				scmPanelConflictStep = 4;
+			}
+		}
 		if (phase == "editing-policy" && frames >= 2 && frames <= 6) editingPolicyStep();
 		if (phase == "smart-indentation" && frames >= 2 && frames <= 6) smartIndentationStep();
 		if (phase == "tab-rendering" && frames >= 2 && frames <= 5) tabRenderingStep();
@@ -725,8 +945,395 @@ class DecorationSmokeApp extends ExosuitApp {
             var bounds = terminal.globalBounds();
             ui.pointerDown(bounds.x + 20, bounds.y + 20, 1);
             ui.pointerUp(bounds.x + 20, bounds.y + 20, 1);
-        }
+		}
 		var root = super.submit(frame);
+		if (phase == "scm-panel-mutations" && !scmPanelVerified) {
+			var source = sourceControlSource(), repositories = source == null ? [] : source.repositories();
+			if (source != null && repositories.length > 0) {
+				var repository = repositories[0], snapshot = source.snapshot(repository.id);
+				if (scmPanelMutationStep == -1 && source.canWrite(repository.id)) scmPanelMutationStep = 1;
+				if (scmPanelMutationStep == 4 && snapshot != null && scmSnapshotContains(snapshot, scm.ScmGroupId.Index, "tracked.txt") &&
+					!scmSnapshotContains(snapshot, scm.ScmGroupId.WorkingTree, "tracked.txt")) {
+					if (gitDiffStatus("tracked.txt", true) != 1 || gitDiffStatus("tracked.txt", false) != 0)
+						throw "UI stage action did not move tracked.txt into the Git index";
+					scmPanelMutationStep = 5;
+				}
+				if (scmPanelMutationStep == 8 && snapshot != null && !scmSnapshotContains(snapshot, scm.ScmGroupId.Index, "tracked.txt") &&
+					scmSnapshotContains(snapshot, scm.ScmGroupId.WorkingTree, "tracked.txt")) {
+					if (gitDiffStatus("tracked.txt", true) != 0 || gitDiffStatus("tracked.txt", false) != 1)
+						throw "UI unstage action did not return tracked.txt to the Git working tree";
+					scmPanelMutationStep = 9;
+				}
+				if (scmPanelMutationStep == 12 && snapshot != null &&
+					!scmSnapshotContains(snapshot, scm.ScmGroupId.Index, "tracked.txt") &&
+					!scmSnapshotContains(snapshot, scm.ScmGroupId.WorkingTree, "tracked.txt")) {
+					var restored = StringTools.replace(sys.io.File.getContent(explorerRoot + "/tracked.txt"), "\r\n", "\n");
+					if (restored != "base\n" || gitDiffStatus("tracked.txt", true) != 0 || gitDiffStatus("tracked.txt", false) != 0)
+						throw "UI discard action did not restore tracked.txt to its committed bytes";
+					scmPanelVerified = true;
+					trace("PASS: Source Control UI stages, unstages, and discards tracked edits with actual Git state");
+				}
+			}
+			if (frames >= 180 && !scmPanelVerified) {
+				var latestSource = sourceControlSource(), latestRepositories = latestSource == null ? [] : latestSource.repositories();
+				var latestRepository = latestRepositories.length == 0 ? null : latestRepositories[0];
+				var latestSnapshot = latestSource == null || latestRepository == null ? null : latestSource.snapshot(latestRepository.id);
+				var latestFile = explorerRoot == null ? "<no-root>" :
+					(application.workspace.fileSystem.exists(explorerRoot + "/tracked.txt") ?
+						StringTools.replace(sys.io.File.getContent(explorerRoot + "/tracked.txt"), "\r\n", "\n") : "<missing>");
+				throw "SCM mutation UI timed out at step " + scmPanelMutationStep + " (error=" +
+					(scmPanelError == null ? "none" : scmPanelError) + ", index=" +
+					(latestSnapshot != null && scmSnapshotContains(latestSnapshot, scm.ScmGroupId.Index, "tracked.txt")) +
+					", worktree=" + (latestSnapshot != null && scmSnapshotContains(latestSnapshot, scm.ScmGroupId.WorkingTree, "tracked.txt")) +
+					", index-diff=" + gitDiffStatus("tracked.txt", true) + ", worktree-diff=" + gitDiffStatus("tracked.txt", false) +
+					", bytes=" + latestFile + ")";
+			}
+		}
+		if (phase == "scm-panel-commit" && !scmPanelVerified) {
+			var source = sourceControlSource(), repositories = source == null ? [] : source.repositories();
+			if (source != null && repositories.length > 0) {
+				var repository = repositories[0], snapshot = source.snapshot(repository.id);
+				if (scmPanelCommitStep == -1 && source.canWrite(repository.id)) scmPanelCommitStep = 2;
+				if (scmPanelCommitStep == 4 && snapshot != null) {
+					var remaining = 0;
+					for (group in snapshot.groups) remaining += group.resources.length;
+					if (remaining == 0) {
+						if (gitDiffStatus("commit.txt", true) != 0 || gitDiffStatus("commit.txt", false) != 0)
+							throw "UI commit left fixture changes in the Git index or working tree";
+						scmPanelVerified = true;
+						trace("PASS: Source Control commit editor accepts a message and commits staged changes through the UI");
+					}
+				}
+			}
+			if (frames >= 180 && !scmPanelVerified) {
+				var source = sourceControlSource(), repositories = source == null ? [] : source.repositories();
+				var repositoryId = repositories.length == 0 ? "" : repositories[0].id;
+				var draft = repositoryId.length == 0 ? null : application.scmCommitDrafts.get(repositoryId);
+				var button = ui.root == null ? null : findEditor(ui.root, "scm-commit-staged");
+				var visible = button != null && button.resolved != null && button.resolved.visible;
+				var enabled = button != null && button.enabled;
+				var error = source == null || repositoryId.length == 0 ? null : source.error(repositoryId);
+				throw "SCM commit UI timed out at step " + scmPanelCommitStep + " (draft=" + Std.string(draft) +
+					", button-enabled=" + enabled + ", button-visible=" + visible + ", index-diff=" + gitDiffStatus("commit.txt", true) +
+					", source-error=" + (error == null ? "none" : error.message) + ", error=" +
+					(scmPanelError == null ? "none" : scmPanelError) + ")";
+			}
+		}
+		if (phase == "scm-panel-submodule" && !scmPanelSubmoduleVerified) {
+			var source = sourceControlSource(), repositories = source == null ? [] : source.repositories();
+			var child:Null<scm.ScmRepository> = null;
+			if (source != null) for (repository in repositories)
+				if (smokeNormalizePath(repository.root) == smokeNormalizePath(explorerRoot + "/nested")) child = repository;
+			if (source != null && child != null && scmPanelSubmoduleStep == 4) {
+				var snapshot = source.snapshot(child.id);
+				if (snapshot != null && scmSnapshotContains(snapshot, scm.ScmGroupId.Index, "nested-change.txt") &&
+					!scmSnapshotContains(snapshot, scm.ScmGroupId.WorkingTree, "nested-change.txt")) {
+					if (gitDiffStatusAt(explorerRoot + "/nested", "nested-change.txt", true) != 1 ||
+						gitDiffStatusAt(explorerRoot + "/nested", "nested-change.txt", false) != 0 ||
+						gitDiffStatusAt(explorerRoot, "nested", true) != 0)
+						throw "SCM UI staged the submodule file in the wrong Git repository";
+					scmPanelSubmoduleVerified = true;
+					trace("PASS: Source Control nests submodule repositories and stages a selected file in the child repository only");
+				}
+			}
+			if (frames >= 180 && !scmPanelSubmoduleVerified)
+				throw "SCM submodule UI timed out at step " + scmPanelSubmoduleStep + " (repositories=" + repositories.length +
+					", child-index=" + (child != null && source != null && source.snapshot(child.id) != null &&
+						scmSnapshotContains(source.snapshot(child.id), scm.ScmGroupId.Index, "nested-change.txt")) +
+					", child-index-diff=" + gitDiffStatusAt(explorerRoot + "/nested", "nested-change.txt", true) +
+					", child-worktree-diff=" + gitDiffStatusAt(explorerRoot + "/nested", "nested-change.txt", false) +
+					", parent-index-diff=" + gitDiffStatusAt(explorerRoot, "nested", true) + ")";
+		}
+		if (phase == "scm-explorer-status" && !scmExplorerStatusVerified && root != null) {
+			var source = sourceControlSource(), repositories = source == null ? [] : source.repositories();
+			if (source != null && repositories.length == 1) {
+				var repository = repositories[0], snapshot = source.snapshot(repository.id);
+				if (snapshot != null) {
+					if (snapshot.head.branch != "main" || snapshot.head.ahead != 1 || snapshot.head.behind != 1)
+						throw "SCM Explorer fixture did not retain its one-ahead/one-behind upstream state";
+					var branchLabel = "main ↑1 ↓1";
+					var statusItem = host.getPluginStatusItems().find("scm", "branch");
+					if (statusItem != null && statusItem.text != branchLabel)
+						throw "Status bar branch item has incorrect ahead/behind counts: " + statusItem.text;
+					var statusRendered = statusItem != null && containsText(root, branchLabel);
+					if (statusRendered) {
+
+						var decorations = host.getResourceDecorations();
+						var changedFile = smokeNormalizePath(explorerRoot + "/src/rollup/new.txt");
+						var rollupPath = smokeNormalizePath(explorerRoot + "/src/rollup");
+						var rollupDecoration = decorations.forPath(rollupPath);
+						var fileDecoration = decorations.forPath(changedFile);
+						if (rollupDecoration == null || !rollupDecoration.inherited || rollupDecoration.badge != "A" ||
+							rollupDecoration.sourcePath != changedFile || fileDecoration == null || fileDecoration.badge != "A")
+							throw "SCM Explorer decoration registry did not roll the untracked file up to its folder";
+
+						var srcPath = smokeNormalizePath(explorerRoot + "/src");
+						var srcRow = findTreeItemByLabel(root, srcPath);
+						var rollupRow = findTreeItemByLabel(root, rollupPath);
+						var fileRow = findTreeItemByLabel(root, changedFile);
+						if (scmExplorerStatusStep == 0 && srcRow != null) {
+							if (!containsText(srcRow, "A")) throw "Explorer did not render the rolled-up badge on src";
+							var bounds = srcRow.globalBounds();
+							ui.pointerDown(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+							ui.pointerUp(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+							scmExplorerStatusStep = 1;
+						} else if (scmExplorerStatusStep == 1 && rollupRow != null) {
+							if (!containsText(rollupRow, "A")) throw "Explorer did not render the rolled-up badge on src/rollup";
+							var bounds = rollupRow.globalBounds();
+							ui.pointerDown(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+							ui.pointerUp(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+							scmExplorerStatusStep = 2;
+						} else if (scmExplorerStatusStep == 2 && rollupRow != null && fileRow != null) {
+							if (!containsText(rollupRow, "A") || !containsText(fileRow, "A"))
+								throw "Explorer did not render matching folder and file badges";
+							scmExplorerStatusVerified = true;
+							trace("PASS: Explorer folder badges roll up from Git changes and status bar shows ahead/behind");
+						}
+					}
+				}
+			}
+			if (frames >= 180 && !scmExplorerStatusVerified) {
+				var finalStatus = host.getPluginStatusItems().find("scm", "branch");
+				var finalLabel = finalStatus == null ? "<missing>" : finalStatus.text;
+				throw "SCM Explorer/status-bar interaction timed out (step=" + scmExplorerStatusStep +
+					", repositories=" + repositories.length + ", status=" + finalLabel + ", error=" +
+					(scmPanelError == null ? "none" : scmPanelError) + ")";
+			}
+		}
+		if (phase == "scm-panel-remote-read" && !scmPanelVerified) {
+			var source = scmPanelRemoteSource, repositories = source == null ? [] : source.repositories();
+			if (source != null && repositories.length == 1) {
+				var repository = repositories[0], snapshot = source.snapshot(repository.id);
+				if (snapshot != null) {
+					if (!source.isRemote() || source.canWrite(repository.id) || source.canUseRemotes(repository.id))
+						throw "Remote read-only SCM source exposed a mutation capability";
+					var hasSidebarCommand = application.commands.contains("sidebar:scm");
+					var hasHeader = containsText(root, "Source Control"), hasChanges = containsText(root, "Changes");
+					if (!hasSidebarCommand || !hasHeader || !hasChanges)
+						throw "Remote read-grant Source Control panel did not render its repository and changes (command=" + hasSidebarCommand +
+							", header=" + hasHeader + ", changes=" + hasChanges +
+							", active=" + sidebar.activeId + ", visible=" + sidebar.visible + ")";
+					if (findEditor(root, "scm-commit-message:" + repository.id) != null ||
+						findEditor(root, "scm-commit-staged") != null ||
+						findEditor(root, "scm-row-action:file-mutation") != null || source.applyCalls != 0)
+						throw "Remote read-only Source Control panel exposed or invoked a mutation action";
+					if (scmPanelRemoteStep == 0) scmPanelRemoteStep = 1;
+					else if (scmPanelRemoteStep == 2 && findTreeFile(root) != null) {
+						scmPanelVerified = true;
+						trace("PASS: remote read-only workspace shows Source Control changes while hiding mutation controls");
+					}
+				}
+			}
+		}
+		if (StringTools.startsWith(phase, "scm-panel") && phase != "scm-panel-remote-read" &&
+			phase != "scm-panel-mutations" && phase != "scm-panel-commit" && phase != "scm-panel-submodule" && !scmPanelVerified) {
+			var source = sourceControlSource(), repositories = source == null ? [] : source.repositories();
+			if (source != null && repositories.length > 0) {
+				var repository = repositories[0], snapshot = source.snapshot(repository.id);
+				if (snapshot != null && !scmPanelInitialVerified) {
+					function includes(groupId:scm.ScmGroupId, path:String):Bool {
+						for (group in snapshot.groups) if (group.id == groupId)
+							for (resource in group.resources) if (resource.path == path) return true;
+						return false;
+					}
+					if (!includes(scm.ScmGroupId.Index, "staged.txt") || !includes(scm.ScmGroupId.WorkingTree, "changed.txt") ||
+						!includes(scm.ScmGroupId.Untracked, "untracked.txt") || !includes(scm.ScmGroupId.Merge, "conflict.txt"))
+						throw "SCM panel did not place staged, changed, untracked and conflicted files in their groups";
+					if (!containsText(root, "Source Control") || !containsText(root, "Staged Changes") ||
+						!containsText(root, "Changes") || !containsText(root, "Untracked") || !containsText(root, "Merge Changes"))
+						throw "SCM panel did not render the repository and its change groups";
+					if (!application.commands.contains("sidebar:scm"))
+						throw "SCM sidebar command was not registered for the local repository";
+					if (phase == "scm-panel-phone") {
+						if (!containsText(root, "Source Control") || !containsText(root, "Merge Changes"))
+							throw "SCM panel lost its main controls at phone width";
+						scmPanelInitialVerified = true;
+						scmPanelPhoneStep = 1;
+						trace("PASS: Source Control panel renders its repository groups at phone width");
+					} else if (phase == "scm-panel-conflict") {
+						if (!source.canWrite(repository.id)) {
+							var trusted:Null<scm.ScmJobResult<Bool>> = null;
+						source.trust(repository.id, value -> trusted = value);
+						if (trusted == null || trusted.error != null || trusted.value != true)
+							throw "SCM conflict smoke could not trust its local fixture";
+							source.refreshNow(repository.id);
+						}
+						scmPanelInitialVerified = true;
+						scmPanelConflictStep = 1;
+						trace("PASS: Source Control panel renders all change groups before conflict resolution");
+					} else {
+						scmPanelInitialVerified = true;
+						var addStatus = Sys.command("git", ["-C", explorerRoot, "add", "-A"]);
+						var commitStatus = addStatus == 0 ? Sys.command("git", ["-C", explorerRoot, "commit", "-m", "external UI refresh"]) : addStatus;
+						if (commitStatus != 0) throw "External Git commit failed in SCM panel smoke (exit=" + commitStatus + ")";
+						scmPanelExternalCommitStarted = true;
+						trace("PASS: Source Control panel initially renders staged, changed, untracked and conflicted files in their groups");
+					}
+				}
+				if (phase == "scm-panel" && scmPanelExternalCommitStarted && snapshot != null) {
+					var remaining = 0;
+					for (group in snapshot.groups) remaining += group.resources.length;
+					if (remaining == 0 && snapshot.head.operation == scm.ScmHeadOperation.None) {
+						scmPanelVerified = true;
+						trace("PASS: Source Control panel refreshes after an external Git commit");
+					}
+				}
+				if (phase == "scm-panel-conflict" && scmPanelConflictStep >= 4 && snapshot != null) {
+					var conflictVisible = false;
+					for (group in snapshot.groups) if (group.id == scm.ScmGroupId.Merge)
+						for (resource in group.resources) if (resource.path == "conflict.txt") conflictVisible = true;
+					var resolvedText = StringTools.replace(sys.io.File.getContent(explorerRoot + "/conflict.txt"), "\r\n", "\n");
+					if (!conflictVisible && resolvedText == "ours\n" && snapshot.head.operation == scm.ScmHeadOperation.Merge) {
+						var stageZero = Sys.command("git", ["-C", explorerRoot, "rev-parse", "--quiet", "--verify", ":0:conflict.txt"]);
+						if (stageZero != 0) throw "Accept Ours removed the conflict without writing conflict.txt to index stage 0";
+						scmPanelVerified = true;
+						trace("PASS: Source Control conflict menu accepts Ours, stages the resolution, and refreshes Git state");
+					}
+				}
+			}
+			if (frames >= 180 && !scmPanelVerified) {
+				var timedOutView = host.activeView();
+				throw "SCM panel did not load its Git snapshot (root=" + explorerRoot + ", repositories=" + repositories.length +
+					", external-commit=" + scmPanelExternalCommitStarted + ", phone-step=" + scmPanelPhoneStep +
+					", sidebar-visible=" + sidebar.visible + ", changed-row=" + (findTreeItemWithText(root, "changed.txt") != null) +
+					", active-diff=" + (timedOutView != null && timedOutView.diffDocument != null) +
+					", error=" + (scmPanelError == null ? "none" : scmPanelError) + ")";
+			}
+		}
+		if (phase == "scm-panel-phone" && scmPanelInitialVerified && !scmPanelVerified && ui.root != null) {
+			var active = host.activeView();
+			if (scmPanelPhoneStep == 1) {
+				var group = findTreeItemWithText(root, "Changes");
+				if (group == null) throw "Phone Source Control layout lost the Changes group";
+				if (group.globalBounds().width < 220) throw "Phone Source Control panel did not receive the usable viewport width";
+				if (active != null && findEditor(root, "editor:" + active.document.id) != null)
+					throw "Phone Source Control panel competed with the editor instead of taking the full workspace";
+				var layoutJson:Null<String> = null;
+				for (line in host.sessionLines()) if (StringTools.startsWith(line, "D\tdock\t1\t")) layoutJson = line.substring(9);
+				var saved = layoutJson == null ? null : haxeon.ui.docking.DockWorkspaceSnapshotCodec.decode(layoutJson);
+				if (saved == null || !haxeon.ui.docking.DockNodeTools.contains(saved.root, "explorer") ||
+					!haxeon.ui.docking.DockNodeTools.contains(saved.root, "editor"))
+					throw "Phone Source Control session snapshot lost the desktop editor layout";
+				var bounds = group.globalBounds();
+				ui.pointerDown(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+				ui.pointerUp(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+				scmPanelPhoneStep = 2;
+			} else if (scmPanelPhoneStep == 2) {
+				var file = findTreeItemWithText(root, "changed.txt");
+				if (file != null) {
+					var bounds = file.globalBounds();
+					ui.pointerDown(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+					ui.pointerUp(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+					scmPanelPhoneStep = 3;
+				}
+			} else if (scmPanelPhoneStep == 3) {
+				var file = findTreeItemWithText(root, "changed.txt");
+				if (file != null) {
+					var bounds = file.globalBounds();
+					ui.pointerDown(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+					ui.pointerUp(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+					scmPanelPhoneStep = 4;
+				}
+			} else if (scmPanelPhoneStep == 4) {
+				active = host.activeView();
+				var editor = active == null ? null : findEditor(root, "editor:" + active.document.id);
+				if (active != null && active.diffDocument != null && !sidebar.visible && editor != null && editor.globalBounds().width >= 220) {
+					scmPanelVerified = true;
+					trace("PASS: phone Source Control opens a full-width diff and preserves the desktop layout");
+				}
+			}
+		}
+		if (phase == "scm-diff-document") {
+			var view = host.activeView(), diff = view == null ? null : view.diffDocument;
+			if (view == null || diff == null) throw "SCM diff smoke fixture did not open a diff view";
+			if (frames == 5) {
+				if (diff.id != "scm-diff:fixture-repository:src/Fixture.hx:HEAD" || !view.readOnly ||
+					view.replaceAllText("must remain read-only"))
+					throw "SCM diff identity or read-only behavior was incorrect";
+				if (diff.hunks.length != 3 || diff.addedLines.length != 3 || diff.removedLines.length != 3)
+					throw "three-change SCM diff did not render three hunks and line decorations";
+				if (!StringTools.contains(diff.text, " 2  - line-2") || !StringTools.contains(diff.text, "  2 + working-2") ||
+					!StringTools.contains(diff.text, "@@ -"))
+					throw "SCM diff omitted its unified hunk or old/new line-number columns";
+				var decorations = host.getPluginDecorations().forDocument(view.document);
+				if (decorations.length != 6) throw "SCM diff did not decorate added and removed rows";
+				for (decoration in decorations) if (decoration.kind != plugin.PluginDecorationKind.WholeLineBackground)
+					throw "SCM diff row decoration was not a whole-line background";
+
+				var liveDocument = scmLiveDocument;
+				if (liveDocument == null) throw "SCM diff smoke fixture lost its live source document";
+				var previousChanged = diff.onChanged;
+				diff.onChanged = function() {
+					previousChanged();
+					if (diff.baseRevision == "base-v2") scmDiffRefreshCompleted = true;
+				};
+				var nextWorking = scmDiffWorkingLines.copy();
+				nextWorking[14] = "live-update-15";
+				liveDocument.buffer.replaceAllText(nextWorking.join("\n") + "\n");
+				var nextBase = scmDiffOriginalLines.copy();
+				nextBase[1] = scmDiffWorkingLines[1];
+				host.openScmDiff("fixture-repository", "src/Fixture.hx", "HEAD", "base-v2",
+					nextBase.join("\n") + "\n", nextWorking.join("\n") + "\n", liveDocument);
+				trace("PASS: SCM diff tab renders syntax-aware, read-only three-hunk comparisons with line numbers and row backgrounds");
+			}
+			if (frames >= 7 && scmDiffRefreshCompleted && !scmDiffRefreshVerified) {
+				var hasLiveText = StringTools.contains(diff.text, "live-update-15");
+				var hasStaleFirstChange = StringTools.contains(diff.text, " 2  - line-2");
+				if (diff.baseRevision != "base-v2" || diff.hunks.length != 2 || diff.addedLines.length != 2 ||
+					diff.removedLines.length != 2 || !hasLiveText || hasStaleFirstChange)
+					throw "SCM diff did not recompute after the source buffer and base revision changed (base=" +
+						diff.baseRevision + ", hunks=" + diff.hunks.length + ", added=" + diff.addedLines.length +
+						", removed=" + diff.removedLines.length + ", live-text=" + hasLiveText +
+						", stale-first-change=" + hasStaleFirstChange + ", text=" + diff.text.substr(0, 1200) + ")";
+				if (host.getPluginDecorations().forDocument(view.document).length != 4)
+					throw "SCM diff row backgrounds were not replaced after recomputation";
+				scmDiffRefreshVerified = true;
+				trace("PASS: SCM diff refreshes line mapping and decorations after buffer and base changes");
+			}
+			if (frames >= 11 && !scmDiffRefreshVerified)
+				throw "SCM diff update callback did not complete after the buffer and base revision changed";
+		}
+		if (phase == "scm-side-by-side") {
+			var before:Null<UiDocumentView> = null, after:Null<UiDocumentView> = null;
+			for (view in host.allViews()) if (view.sideBySideDiff) {
+				if (view.sideBySideLabel != null && StringTools.startsWith(view.sideBySideLabel, "before-")) before = view;
+				if (view.sideBySideLabel != null && StringTools.startsWith(view.sideBySideLabel, "after-")) after = view;
+			}
+			if (before == null || after == null || !before.readOnly || !after.readOnly || host.panes.length < 2)
+				throw "SCM side-by-side fixture did not create two read-only editor panes";
+			if (frames == 5) {
+				if (!StringTools.contains(before.document.buffer.text, "line-30\n\nline-31") ||
+					!StringTools.contains(after.document.buffer.text, "after-30\nadded-line\nline-31") ||
+					(cast before.diffDocument:scm.ScmDiffDocument).alignedOldChangedLines.length == 0 ||
+					(cast after.diffDocument:scm.ScmDiffDocument).alignedCurrentChangedLines.length == 0)
+					throw "SCM side-by-side panes did not align and mark changed rows";
+				if (!before.scrollController.jumpTo(0, 100) || !host.syncSideBySidePanes() ||
+					Math.abs(after.scrollController.offsetY - before.scrollController.offsetY) > 0.5)
+					throw "SCM side-by-side panes did not synchronize vertical scrolling";
+				trace("PASS: SCM side-by-side diff opens aligned read-only panes and mirrors scrolling");
+			}
+		}
+		if (phase == "gutter-markers" || phase == "gutter-marker-click" || phase == "gutter-markers-cleared") {
+			var lane = findMarkerLane(root);
+			if (lane == null || lane.layout.intrinsicContent == null)
+				throw "gutter marker lane was not included in the editor scene";
+			if (phase == "gutter-marker-click" && frames == 5) {
+				var bounds = lane.globalBounds();
+				ui.pointerDown(bounds.x + bounds.width / 2, bounds.y + 24, 0);
+				ui.pointerUp(bounds.x + bounds.width / 2, bounds.y + 24, 0);
+				if (gutterMarkerClicks != 1) throw "gutter marker click did not dispatch to its owner";
+				trace("PASS: gutter marker lane hit testing dispatched the selected marker");
+			}
+			if (phase == "gutter-markers-cleared" && frames == 5) {
+				host.getPluginGutterMarkers().removeOwner("smoke-markers");
+				if (host.getPluginGutterMarkers().forDocument(host.activeDocument()).length != 0)
+					throw "gutter owner removal retained markers";
+				root = super.submit(frame);
+				lane = findMarkerLane(root);
+				if (lane == null || lane.hitTestSelf) throw "gutter marker lane stayed active after owner removal";
+				trace("PASS: gutter markers clear from the retained editor after owner removal");
+			}
+		}
 		if (phase == "ime-selection-affinity" && frames == 5)
 			trace("PASS: real GTK pointer selection publishes logical IME range tags with visual affinity");
 
@@ -1065,6 +1672,38 @@ class DecorationSmokeApp extends ExosuitApp {
 		return false;
 	}
 
+	function smokeClick(node:Null<RenderNode>, button:Int = 0):Bool {
+		if (node == null) return false;
+		var bounds = node.globalBounds();
+		ui.pointerDown(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, button);
+		ui.pointerUp(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, button);
+		return true;
+	}
+
+	function smokeContextClick(root:RenderNode, path:String):Bool {
+		var item = findTreeItemWithText(root, path);
+		return smokeClick(item, 1);
+	}
+
+	function gitDiffStatus(path:String, cached:Bool):Int {
+		return gitDiffStatusAt(explorerRoot, path, cached);
+	}
+
+	function gitDiffStatusAt(repositoryRoot:String, path:String, cached:Bool):Int {
+		var arguments = ["-C", repositoryRoot, "diff"];
+		if (cached) arguments.push("--cached");
+		arguments.push("--quiet");
+		arguments.push("--");
+		arguments.push(path);
+		return Sys.command("git", arguments);
+	}
+
+	static function scmSnapshotContains(snapshot:scm.ScmSnapshot, groupId:scm.ScmGroupId, path:String):Bool {
+		for (group in snapshot.groups) if (group.id == groupId)
+			for (resource in group.resources) if (resource.path == path) return true;
+		return false;
+	}
+
 	static function findPopup(node:RenderNode):Null<RenderNode> {
 		if (node.styleType == "popup-content" && node.styleKey == "language-popup") return node;
 		for (child in node.children) {
@@ -1081,6 +1720,48 @@ class DecorationSmokeApp extends ExosuitApp {
 		}
 		return null;
 	}
+	static function findMarkerLane(node:RenderNode):Null<RenderNode> {
+		if (node.styleKey != null && node.styleKey.indexOf("marker-strip:") >= 0) return node;
+		for (child in node.children) {
+			var found = findMarkerLane(child);
+			if (found != null) return found;
+		}
+		return null;
+	}
+
+	static function findTreeItemWithText(node:RenderNode, text:String):Null<RenderNode> {
+		if (node.semantics != null && node.semantics.role == haxeon.ui.semantics.AccessibilityRole.TreeItem && containsText(node, text)) return node;
+		for (child in node.children) {
+			var found = findTreeItemWithText(child, text);
+			if (found != null) return found;
+		}
+		return null;
+	}
+
+	static function findTreeItemsWithText(node:RenderNode, text:String):Array<RenderNode> {
+		var result:Array<RenderNode> = [];
+		collectTreeItemsWithText(node, text, result);
+		return result;
+	}
+
+	static function collectTreeItemsWithText(node:RenderNode, text:String, result:Array<RenderNode>):Void {
+		if (node.semantics != null && node.semantics.role == haxeon.ui.semantics.AccessibilityRole.TreeItem && containsText(node, text))
+			result.push(node);
+		for (child in node.children) collectTreeItemsWithText(child, text, result);
+	}
+
+	static function findTreeItemByLabel(node:RenderNode, path:String):Null<RenderNode> {
+		if (node.semantics != null && node.semantics.role == haxeon.ui.semantics.AccessibilityRole.TreeItem &&
+			node.semantics.label != null && smokeNormalizePath(node.semantics.label) == path) return node;
+		for (child in node.children) {
+			var found = findTreeItemByLabel(child, path);
+			if (found != null) return found;
+		}
+		return null;
+	}
+
+	static function smokeNormalizePath(path:String):String return StringTools.replace(path, "\\", "/");
+
 }
 
 /** Real renderer coverage for the EditorPane's public presentation providers. */
@@ -1099,14 +1780,92 @@ class DecorationSmokeMain {
 		if (args.length != 3) throw "expected source path, capture directory and phase";
 		var options = new DesktopUiHostOptions();
 		options.title = "exosuit decoration smoke";
-		options.width = 900;
+		options.width = args[2] == "scm-panel-phone" ? 320 : 900;
 		options.height = 600;
 		options.captureDirectory = args[1];
-		options.frameLimit = args[2] == "terminal-editor-transfer" ? 9 : 7;
+		options.frameLimit = args[2] == "terminal-editor-transfer" ? 9 :
+			StringTools.startsWith(args[2], "scm-panel") ? 180 : (args[2] == "scm-diff-document" || args[2] == "scm-side-by-side") ? 12 : 7;
+		if (args[2] == "scm-explorer-status") options.frameLimit = 180;
 		var status = DesktopUiHost.run(options, function(context) {
 			return new DecorationSmokeApp(context, args[0], args[2]);
 		});
 
 		return status;
 	}
+}
+
+private class ReadOnlyRemoteScmPanelSource implements scm.ScmSource {
+	final repositoryValue:scm.ScmRepository;
+	final snapshotValue:scm.ScmSnapshot;
+	var nextGeneration:Int = 1;
+	public var applyCalls(default, null):Int = 0;
+
+	public function new() {
+		repositoryValue = new scm.ScmRepository("remote-fixture", "git", "remote/project",
+			scm.ScmRepositoryKind.Worktree, null, true);
+		var resource = new scm.ScmResource(haxe.io.Bytes.ofString("src/Main.hx"), scm.ScmChangeKind.Modified);
+		var head = new scm.ScmHead("main", null, false, null, 0, 0, false, scm.ScmHeadOperation.None);
+		snapshotValue = new scm.ScmSnapshot(haxe.Int64.ofInt(1), head,
+			[new scm.ScmGroup(scm.ScmGroupId.WorkingTree, [resource])]);
+	}
+
+	public function identity():String return "workspace:read-only-fixture";
+	public function isRemote():Bool return true;
+	public function connected():Bool return true;
+	public function repositories():Array<scm.ScmRepository> return [repositoryValue];
+	public function repository(repositoryId:String):Null<scm.ScmRepository> return repositoryId == repositoryValue.id ? repositoryValue : null;
+	public function features(repositoryId:String):Null<scm.ScmFeatures> return repository(repositoryId) == null ? null : new scm.ScmFeatures();
+	public function canWrite(repositoryId:String):Bool return false;
+	public function canUseRemotes(repositoryId:String):Bool return false;
+	public function snapshot(repositoryId:String):Null<scm.ScmSnapshot> return repository(repositoryId) == null ? null : snapshotValue;
+	public function error(repositoryId:String):Null<scm.ScmError> return null;
+
+	public function branches(repositoryId:String, complete:scm.ScmJobResult<Array<scm.ScmBranch>>->Void):scm.ScmJob<Array<scm.ScmBranch>> {
+		return completeValue([], complete);
+	}
+	public function discover(complete:scm.ScmJobResult<Array<scm.ScmRepository>>->Void):scm.ScmJob<Array<scm.ScmRepository>> {
+		return completeValue([repositoryValue], complete);
+	}
+	public function refreshNow(repositoryId:String):Bool return repository(repositoryId) != null;
+	public function originalBytes(repositoryId:String, reference:scm.ScmRef, path:haxe.io.Bytes,
+		complete:scm.ScmJobResult<scm.ScmBlob>->Void):scm.ScmJob<scm.ScmBlob> {
+		return failValue(null, complete, "read_only", "Remote fixture does not provide original bytes");
+	}
+	public function apply(repositoryId:String, operationId:String, expectedRevision:haxe.Int64, operation:scm.ScmOperation,
+		complete:scm.ScmApplyCompletion):scm.ScmJob<scm.ScmApplyResult> {
+		applyCalls++;
+		return failValue(null, complete, "read_only", "Remote fixture rejects mutations");
+	}
+	public function trust(repositoryId:String, complete:scm.ScmJobResult<Bool>->Void):scm.ScmJob<Bool> {
+		return completeValue(false, complete);
+	}
+	public function subscribe(listener:(scm.ScmRepository, Null<scm.ScmSnapshot>)->Void):Void->Void return function() {};
+	public function poll():Void {}
+	public function dispose():Void {}
+
+	function completeValue<T>(value:T, complete:scm.ScmJobResult<T>->Void):scm.ScmJob<T> {
+		var job = new scm.ScmJob<T>(nextGeneration++);
+		if (job.finish()) complete(new scm.ScmJobResult<T>(job.generation, value));
+		return job;
+	}
+	function failValue<T>(value:Null<T>, complete:scm.ScmJobResult<T>->Void, code:String, message:String):scm.ScmJob<T> {
+		var job = new scm.ScmJob<T>(nextGeneration++);
+		if (job.finish()) complete(new scm.ScmJobResult<T>(job.generation, value, new scm.ScmError(code, message)));
+		return job;
+	}
+}
+
+private class ReadOnlyRemoteScmPanelAttachment implements workspace.client.WorkspaceAttachment {
+	final source:ReadOnlyRemoteScmPanelSource;
+	public function new(source:ReadOnlyRemoteScmPanelSource) this.source = source;
+	public function select(root:Null<String>):Void {}
+	public function poll():Void source.poll();
+	public function statusLabel():String return "Connected";
+	public function failure():Null<String> return null;
+	public function fileClient():Null<workspace.client.WorkspaceFileClient> return null;
+	public function sourceControlSource():Null<scm.ScmSource> return source;
+	public function fileWorkspace():String return "remote-fixture";
+	public function fileScope():Null<String> return "remote-fixture-root";
+	public function hasLocalFileAccess():Bool return false;
+	public function dispose():Void source.dispose();
 }

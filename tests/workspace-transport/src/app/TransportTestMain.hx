@@ -492,6 +492,9 @@ private class TestPairingAdmin implements WorkspacePairingAdmin {
 	public function approve(deviceId:String, grants:Array<String>, complete:Null<String>->Void):Void
 		complete(null);
 
+	public function setGrants(deviceId:String, grants:Array<String>, complete:Null<String>->Void):Void
+		complete(null);
+
 	public function reject(deviceId:String):Bool
 		return true;
 

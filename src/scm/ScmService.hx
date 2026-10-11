@@ -1,5 +1,6 @@
 package scm;
 
+import haxe.Int64;
 import haxe.io.Bytes;
 import jobs.JobScheduler;
 import process.ProcessManager;
@@ -166,7 +167,10 @@ class ScmService {
 			cancelJobs(state);
 			for (handle in state.handles) handle.dispose();
 			state.handles = result.value;
-			state.snapshots.clear();
+			var discovered:Map<String, Bool> = [];
+			for (handle in state.handles) discovered.set(handle.repository().id, true);
+			for (id in [for (id in state.snapshots.keys()) id])
+				if (!discovered.exists(id)) state.snapshots.remove(id);
 			state.errors.clear();
 			state.lastPoll = Sys.time();
 			publishWatchPaths(state);
@@ -180,6 +184,24 @@ class ScmService {
 	public function repositories(root:String):Array<ScmRepository> {
 		var state = stateForPath(root);
 		return state == null ? [] : [for (handle in state.handles) handle.repository()];
+	}
+
+	public function repository(repositoryId:String):Null<ScmRepository> {
+		var state = stateForRepository(repositoryId), handle = state == null ? null : findHandle(state, repositoryId);
+		return handle == null ? null : handle.repository();
+	}
+
+	public function features(repositoryId:String):Null<ScmFeatures> {
+		var state = stateForRepository(repositoryId), handle = state == null ? null : findHandle(state, repositoryId);
+		return handle == null ? null : handle.features();
+	}
+
+	public function branches(repositoryId:String, generation:Int, complete:ScmJobResult<Array<ScmBranch>>->Void):ScmJob<Array<ScmBranch>> {
+		var state = stateForRepository(repositoryId), handle = state == null ? null : findHandle(state, repositoryId);
+		if (!enabled || disposed || handle == null)
+			return failedAt(generation, null, complete, !enabled ? "disabled" : "not_found",
+				!enabled ? "Source control is disabled" : "Repository is unavailable");
+		return handle.branches(generation, complete);
 	}
 
 	/** Returns worktree plus Git metadata directories for host file watches. */
@@ -205,6 +227,23 @@ class ScmService {
 	public function snapshot(repositoryId:String):Null<ScmSnapshot> {
 		var state = stateForRepository(repositoryId);
 		return state == null ? null : state.snapshots.get(repositoryId);
+	}
+
+	/** Starts an immediate refresh for a repository already discovered under a root. */
+	public function refreshNow(repositoryId:String):Bool {
+		var state = stateForRepository(repositoryId);
+		if (state == null || disposed || !enabled) return false;
+		scheduleRoot(state, Sys.time(), true);
+		return true;
+	}
+
+	public function originalBytes(repositoryId:String, reference:ScmRef, path:Bytes, generation:Int,
+			complete:ScmJobResult<ScmBlob>->Void):ScmJob<ScmBlob> {
+		var state = stateForRepository(repositoryId), handle = state == null ? null : findHandle(state, repositoryId);
+		if (disposed || handle == null)
+			return failed(null, complete, disposed ? "service_closed" : "not_found",
+				disposed ? "Source control service is closed" : "Repository is unavailable");
+		return handle.originalBytes(reference, path, generation, complete);
 	}
 
 	public function error(repositoryId:String):Null<ScmError> {
@@ -284,7 +323,9 @@ class ScmService {
 			complete:ScmJobResult<ScmApplyResult>->Void):ScmJob<ScmApplyResult> {
 		var state = stateForRepository(repositoryId), handle = state == null ? null : findHandle(state, repositoryId);
 		if (!enabled || disposed || handle == null)
-			return failed(null, complete, !enabled ? "disabled" : "not_found", !enabled ? "Source control is disabled" : "Repository is unavailable");
+			return failedAt(generation, null, complete, !enabled ? "disabled" : "not_found", !enabled ? "Source control is disabled" : "Repository is unavailable");
+		if (!ScmOperationAvailability.supports(handle.features(), operation))
+			return failedAt(generation, null, complete, "unsupported_operation", "This operation is not available for this repository");
 		var activeState:ScmRootState = cast state;
 		var queue = activeState.operations.get(repositoryId);
 		if (queue == null) { queue = []; activeState.operations.set(repositoryId, queue); }
@@ -369,9 +410,14 @@ class ScmService {
 				state.errors.set(id, result.error == null ? new ScmError("operation_failed", "Git refresh returned no snapshot") : result.error);
 			} else {
 				state.errors.remove(id);
-				var previous = state.snapshots.get(id), snapshot = result.value;
+				var previous = state.snapshots.get(id), received = result.value;
+				var changed = previous == null || !sameSnapshotContent(previous, received);
+				var revision = previous == null ? received.revision
+					: changed ? Int64.add(previous.revision, Int64.ofInt(1)) : previous.revision;
+				var snapshot = revision == received.revision ? received
+					: new ScmSnapshot(revision, received.head, received.groups, received.truncated);
 				state.snapshots.set(id, snapshot);
-				if (previous == null || previous.revision != snapshot.revision)
+				if (changed)
 					for (listener in listeners.copy()) listener(repository, snapshot);
 			}
 			if (state.rerun.exists(id)) {
@@ -503,4 +549,41 @@ class ScmService {
 		if (job.finish()) complete(new ScmJobResult<T>(job.generation, value, new ScmError(code, message)));
 		return job;
 	}
+
+	function failedAt<T>(generation:Int, value:Null<T>, complete:ScmJobResult<T>->Void, code:String, message:String):ScmJob<T> {
+		var job = new ScmJob<T>(generation);
+		if (job.finish()) complete(new ScmJobResult<T>(generation, value, new ScmError(code, message)));
+		return job;
+	}
+
+	static function sameSnapshotContent(left:ScmSnapshot, right:ScmSnapshot):Bool {
+		if (left.truncated != right.truncated || !sameHead(left.head, right.head) || left.groups.length != right.groups.length)
+			return false;
+		for (index in 0...left.groups.length) {
+			var a = left.groups[index], b = right.groups[index];
+			if (a.id != b.id || a.resources.length != b.resources.length) return false;
+			for (resourceIndex in 0...a.resources.length) {
+				var x = a.resources[resourceIndex], y = b.resources[resourceIndex];
+				if (!sameBytes(x.pathBytes, y.pathBytes) || !sameOptionalBytes(x.originalPathBytes, y.originalPathBytes)
+					|| x.changeKind != y.changeKind || x.conflictKind != y.conflictKind
+					|| x.submoduleStatus != y.submoduleStatus || x.renameScore != y.renameScore)
+					return false;
+			}
+		}
+		return true;
+	}
+
+	static function sameHead(left:ScmHead, right:ScmHead):Bool {
+		return left == right || (left != null && right != null && left.branch == right.branch
+			&& left.detachedCommit == right.detachedCommit && left.unborn == right.unborn && left.upstream == right.upstream
+			&& left.ahead == right.ahead && left.behind == right.behind && left.upstreamGone == right.upstreamGone
+			&& left.operation == right.operation);
+	}
+
+	static function sameOptionalBytes(left:Null<Bytes>, right:Null<Bytes>):Bool {
+		if (left == null || right == null) return left == right;
+		return sameBytes(left, right);
+	}
+
+	static function sameBytes(left:Bytes, right:Bytes):Bool return left.compare(right) == 0;
 }

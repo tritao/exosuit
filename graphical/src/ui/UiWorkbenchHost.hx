@@ -21,7 +21,9 @@ import platform.Platform;
 import platform.TextInputArea;
 import haxeon.ui.Rect;
 import plugin.PluginDecorationRegistry;
+import plugin.PluginGutterMarkerRegistry;
 import plugin.PluginPanelRegistry;
+import plugin.PluginResourceDecorationRegistry;
 import plugin.PluginStatusRegistry;
 import search.DocumentSearch;
 import search.SearchMatch;
@@ -68,13 +70,17 @@ class UiWorkbenchHost implements WorkbenchHost {
 
 	final problems:ProblemRegistry = new ProblemRegistry();
 	final pluginDecorations:PluginDecorationRegistry = new PluginDecorationRegistry();
+	final pluginGutterMarkers:PluginGutterMarkerRegistry = new PluginGutterMarkerRegistry();
+	final pluginResourceDecorations:PluginResourceDecorationRegistry = new PluginResourceDecorationRegistry();
 	final pluginStatusItems:PluginStatusRegistry = new PluginStatusRegistry();
 	final pluginPanels:PluginPanelRegistry = new PluginPanelRegistry();
 	final notifications:NotificationCenter = new NotificationCenter();
 	public final panes:Array<UiEditorPane> = [];
+	final sideBySidePairs:Array<ScmSideBySidePair> = [];
 	public var activePane(default, null):UiEditorPane;
 	var notifiedActiveIdentity:Null<String>;
 	var nextPaneId:Int = 1;
+	var nextScmDiffPairId:Int = 1;
 	var pendingEditorFocus:Bool = false;
 	var tabList(get, never):Array<UiDocumentView>;
 	function get_tabList():Array<UiDocumentView> return activePane.tabs;
@@ -157,6 +163,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 
 	public var activateSearch:Void->Void = function() {};
 	public var captureSidebar:Null<Void->String>;
+	public var captureDockLayout:Null<Void->String>;
 	public var restoreSidebar:Null<Array<String>->Void>;
 	public var workspaceSearchQuery(default, null):String = "";
 	public var workspaceSearchResults(default, null):Array<SearchMatch> = [];
@@ -493,6 +500,8 @@ class UiWorkbenchHost implements WorkbenchHost {
 	public function getTheme():Theme return theme;
 	public function getProblems():ProblemRegistry return problems;
 	public function getPluginDecorations():PluginDecorationRegistry return pluginDecorations;
+	public function getPluginGutterMarkers():PluginGutterMarkerRegistry return pluginGutterMarkers;
+	public function getResourceDecorations():PluginResourceDecorationRegistry return pluginResourceDecorations;
 	public function getPluginStatusItems():PluginStatusRegistry return pluginStatusItems;
 	public function getPluginPanels():PluginPanelRegistry return pluginPanels;
 	public function getNotifications():NotificationCenter return notifications;
@@ -686,6 +695,210 @@ class UiWorkbenchHost implements WorkbenchHost {
 
 	public function openDocument(document:Document):View return openDocumentTab(document, false);
 
+	/** Opens or refreshes the stable, read-only editor tab for a comparison. */
+	public function openScmDiff(repositoryId:String, path:String, reference:String, baseRevision:String,
+		oldText:String, currentText:String, ?liveDocument:Document):UiDocumentView {
+		var identity = "scm-diff:" + repositoryId + ":" + path + ":" + reference;
+		for (pane in panes) for (index in 0...pane.items.length) {
+			var existing = UiEditorTabs.document(pane.items[index]);
+			if (existing == null || existing.sideBySideDiff || existing.diffDocument == null || existing.diffDocument.id != identity) continue;
+			existing.diffDocument.update(baseRevision, oldText, currentText);
+			activateTab(existing.document, pane.id);
+			return existing;
+		}
+		var title = haxe.io.Path.withoutDirectory(path);
+		var document = new Document(null, "", workspace.syntaxes, workspace.fileSystem, null, title);
+		var view = new UiDocumentView(document, new BufferSelection(), scrollSettings);
+		var diff = new scm.ScmDiffDocument(workspace.jobs, repositoryId, path, reference,
+			baseRevision, oldText, currentText, liveDocument);
+		view.readOnly = true;
+		view.diffDocument = diff;
+		var owner = "scm-diff-lines:" + document.id;
+		diff.onChanged = function() {
+			if (view.diffDocument != diff) return;
+			document.buffer.replaceAllText(diff.text);
+			pluginDecorations.removeOwner(owner);
+			for (line in diff.addedLines)
+				pluginDecorations.add(owner, "added:" + line, document, line, 0, 0, 0x3B8C5A40, plugin.PluginDecorationKind.WholeLineBackground);
+			for (line in diff.removedLines)
+				pluginDecorations.add(owner, "removed:" + line, document, line, 0, 0, 0xD73A4940, plugin.PluginDecorationKind.WholeLineBackground);
+			requestFrame();
+		};
+		view.onDispose = function() {
+			diff.dispose();
+			pluginDecorations.removeOwner(owner);
+			document.dispose();
+		};
+		activePane.items.push(UiEditorTab.Document(view));
+		setActiveIndex(activePane.items.length - 1);
+		return view;
+	}
+
+	/** Opens a line-aligned, synchronized two-pane comparison. */
+	public function openScmSideBySide(repositoryId:String, path:String, reference:String, baseRevision:String,
+		oldText:String, currentText:String, ?liveDocument:Document):Void {
+		var identity = "scm-diff:" + repositoryId + ":" + path + ":" + reference;
+		for (pair in sideBySidePairs) if (pair.identity == identity) {
+			pair.diff.update(baseRevision, oldText, currentText);
+			activateTab(pair.after.document, pair.rightPaneId);
+			return;
+		}
+		var title = haxe.io.Path.withoutDirectory(path), diff = new scm.ScmDiffDocument(workspace.jobs,
+			repositoryId, path, reference, baseRevision, oldText, currentText, liveDocument);
+		var beforeDocument = new Document(null, oldText == null ? "" : oldText, workspace.syntaxes,
+			workspace.fileSystem, null, title + " (base)");
+		var afterDocument = new Document(null, currentText == null ? "" : currentText, workspace.syntaxes,
+			workspace.fileSystem, null, title + " (working)");
+		var beforeView = new UiDocumentView(beforeDocument, new BufferSelection(), scrollSettings);
+		var pairToken = Std.string(nextScmDiffPairId++);
+		beforeView.readOnly = true;
+		beforeView.diffDocument = diff;
+		beforeView.sideBySideDiff = true;
+		beforeView.sideBySideLabel = "before-" + pairToken;
+		var beforeTab = UiEditorTab.Document(beforeView);
+		activePane.items.push(beforeTab);
+		setActiveIndex(activePane.items.length - 1);
+		if (!splitActive(LayoutKind.Horizontal)) {
+			var beforeIndex = activePane.items.indexOf(beforeTab);
+			if (beforeIndex >= 0) activePane.items.splice(beforeIndex, 1);
+			beforeView.dispose();
+			afterDocument.dispose();
+			diff.dispose();
+			return;
+		}
+		var rightPane = activePane, duplicate = activeTab();
+		var afterView = new UiDocumentView(afterDocument, new BufferSelection(), scrollSettings);
+		afterView.readOnly = true;
+		afterView.diffDocument = diff;
+		afterView.sideBySideDiff = true;
+		afterView.sideBySideLabel = "after-" + pairToken;
+		rightPane.items.push(UiEditorTab.Document(afterView));
+		// Keep the new group populated while removing the split's duplicated tab.
+		if (duplicate != null) closeTab(duplicate, rightPane.id, true);
+		setActiveIndex(rightPane.items.length - 1);
+		var pair = new ScmSideBySidePair(identity, beforeView, afterView, rightPane.id, diff);
+		sideBySidePairs.push(pair);
+		var beforeOwner = "scm-side-diff-before:" + beforeDocument.id;
+		var afterOwner = "scm-side-diff-after:" + afterDocument.id;
+		var disposedViews = 0;
+		function updatePair():Void {
+			beforeDocument.buffer.replaceAllText(diff.alignedOldText);
+			afterDocument.buffer.replaceAllText(diff.alignedCurrentText);
+			pluginDecorations.removeOwner(beforeOwner);
+			pluginDecorations.removeOwner(afterOwner);
+			for (line in diff.alignedOldChangedLines)
+				pluginDecorations.add(beforeOwner, "removed:" + line, beforeDocument, line, 0, 0, 0xD73A4940,
+					plugin.PluginDecorationKind.WholeLineBackground);
+			for (line in diff.alignedCurrentChangedLines)
+				pluginDecorations.add(afterOwner, "added:" + line, afterDocument, line, 0, 0, 0x3B8C5A40,
+					plugin.PluginDecorationKind.WholeLineBackground);
+			requestFrame();
+		}
+		diff.onChanged = updatePair;
+		beforeView.onDispose = function() {
+			pluginDecorations.removeOwner(beforeOwner);
+			beforeDocument.dispose();
+			disposedViews++;
+			if (disposedViews == 2) { diff.dispose(); sideBySidePairs.remove(pair); }
+		};
+		afterView.onDispose = function() {
+			pluginDecorations.removeOwner(afterOwner);
+			afterDocument.dispose();
+			disposedViews++;
+			if (disposedViews == 2) { diff.dispose(); sideBySidePairs.remove(pair); }
+		};
+		updatePair();
+		requestFrame();
+	}
+
+	/** Mirrors vertical scrolling so equal line positions stay aligned in paired diff panes. */
+	public function syncSideBySidePanes():Bool {
+		var changed = false;
+		for (pair in sideBySidePairs.copy()) {
+			var beforeOpen = false, afterOpen = false;
+			for (pane in panes) for (item in pane.items) {
+				var view = UiEditorTabs.document(item);
+				if (view == pair.before) beforeOpen = true;
+				if (view == pair.after) afterOpen = true;
+			}
+			if (!beforeOpen || !afterOpen) { sideBySidePairs.remove(pair); continue; }
+			var beforeY = pair.before.scrollController.offsetY, afterY = pair.after.scrollController.offsetY;
+			var beforeMoved = Math.abs(beforeY - pair.lastBeforeY) > 0.5;
+			var afterMoved = Math.abs(afterY - pair.lastAfterY) > 0.5;
+			var activeBefore = false;
+			for (item in activePane.items) if (UiEditorTabs.document(item) == pair.before) activeBefore = true;
+			if (beforeMoved && (!afterMoved || activeBefore))
+				changed = pair.after.scrollController.jumpTo(pair.after.scrollController.offsetX, beforeY) || changed;
+			else if (afterMoved)
+				changed = pair.before.scrollController.jumpTo(pair.before.scrollController.offsetX, afterY) || changed;
+			pair.lastBeforeY = pair.before.scrollController.offsetY;
+			pair.lastAfterY = pair.after.scrollController.offsetY;
+		}
+		return changed;
+	}
+
+	public function moveActiveDiffHunk(direction:Int):Bool {
+		var view = activeView(), diff = view == null ? null : view.diffDocument;
+		if (view == null || diff == null) return false;
+		var line = diff.hunkLine(view.selection.cursor.line, direction);
+		if (line < 0) return false;
+		view.selection.setCursor(view.document.buffer, new BufferPosition(line, 0));
+		view.cursorChanged();
+		requestFrame();
+		return true;
+	}
+
+	public function canMoveActiveGutterMarker():Bool {
+		var view = activeView();
+		return view != null && view.diffDocument == null && pluginGutterMarkers.forDocument(view.document).length > 0;
+	}
+
+	public function selectGutterMarker(marker:plugin.PluginGutterMarker):Bool {
+		if (marker == null || !revealDocument(marker.document)) return false;
+		var view = activeView();
+		if (view == null || view.document != marker.document) return false;
+		view.selection.setCursor(view.document.buffer, new BufferPosition(marker.startLine, 0));
+		view.cursorChanged();
+		requestFrame();
+		return true;
+	}
+
+	public function moveActiveGutterMarker(direction:Int):Bool {
+		var view = activeView();
+		if (view == null || view.diffDocument != null) return false;
+		var markers = pluginGutterMarkers.forDocument(view.document);
+		if (markers.length == 0) return false;
+		var current = view.selection.cursor.line, target = -1;
+		if (direction >= 0) {
+			for (marker in markers) if (marker.startLine > current) { target = marker.startLine; break; }
+			if (target < 0) target = markers[0].startLine;
+		} else {
+			var index = markers.length - 1;
+			while (index >= 0 && target < 0) {
+				if (markers[index].startLine < current) target = markers[index].startLine;
+				index--;
+			}
+			if (target < 0) target = markers[markers.length - 1].startLine;
+		}
+		view.selection.setCursor(view.document.buffer, new BufferPosition(target, 0));
+		view.cursorChanged();
+		requestFrame();
+		return true;
+	}
+
+	public function openDiffSourceAtLine():Bool {
+		var view = activeView(), diff = view == null ? null : view.diffDocument;
+		if (view == null || diff == null || diff.path.length == 0 || !workspace.fileSystem.exists(diff.path)) return false;
+		var line = diff.sourceLine(view.selection.cursor.line);
+		if (line < 0) return false;
+		var source = workspace.documents.open(diff.path);
+		var target = cast(openDocument(source), UiDocumentView);
+		target.restoreCursor(line, 0);
+		target.cursorChanged();
+		requestFrame();
+		return true;
+	}
+
 	public function revealDocument(document:Document):Bool {
 		var candidates = [activePane];
 		for (pane in panes) if (pane != activePane) candidates.push(pane);
@@ -827,7 +1040,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 
 	public function documentsLostByClosingTab(item:UiEditorTab):Array<Document> {
 		var view = UiEditorTabs.document(item);
-		if (view == null) return [];
+		if (view == null || view.diffDocument != null) return [];
 		for (other in allViews()) if (other != view && other.document == view.document) return [];
 		return [view.document];
 	}
@@ -854,6 +1067,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		if (index < pane.activeIndex) pane.activeIndex--;
 		else if (index == pane.activeIndex)
 			pane.activeIndex = pane.items.length == 0 ? -1 : Std.int(Math.min(index, pane.items.length - 1));
+		if (pane.items.length == 0 && panes.length > 1) return closePane(pane.id, true);
 		if (pane == activePane) {
 			focus.activate(activeView());
 			if (wasActive) activeIndex = pane.activeIndex;
@@ -864,7 +1078,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 
 	public function closeDocument(document:Document):Bool {
 		if (document.dirty) return false;
-		for (pane in panes) for (item in pane.items.copy()) {
+		for (pane in panes.copy()) for (item in pane.items.copy()) {
 			var view = UiEditorTabs.document(item);
 			if (view != null && view.document == document) closeTab(item, pane.id);
 		}
@@ -908,7 +1122,8 @@ class UiWorkbenchHost implements WorkbenchHost {
 
 	public function sessionLines():Array<String> {
 		var result:Array<String> = [];
-		result.push("D\tdock\t1\t" + dockActions.model.snapshotJson());
+		var dockSnapshot = captureDockLayout == null ? dockActions.model.snapshotJson() : captureDockLayout();
+		result.push("D\tdock\t1\t" + dockSnapshot);
 		result.push("Q\t" + activePane.id);
 		if (captureSidebar != null) result.push(captureSidebar());
 		for (index in 0...panelTerminals.length) {
@@ -944,7 +1159,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 					continue;
 				}
 				var view = UiEditorTabs.document(item);
-				if (view == null) continue;
+				if (view == null || view.diffDocument != null) continue;
 				var document = view.document;
 				var reference = document.dirty || !document.hasBackingPath() ? document.recoveryId : document.requirePath();
 				var kind = document.dirty || !document.hasBackingPath() ? "R" : "P";
@@ -1086,6 +1301,8 @@ class UiWorkbenchHost implements WorkbenchHost {
 		for (pane in panes) if (!dockActions.model.isOpen(pane.id)) dockActions.model.open(pane.id);
 		var requested = selectedPane == null ? null : paneById(selectedPane);
 		if (requested != null) activePane = requested;
+		// Transient comparisons are not restored; their empty groups must not reserve editor space.
+		for (pane in panes.copy()) if (pane.items.length == 0 && panes.length > 1) closePane(pane.id, true);
 		dockActions.model.activate(activePane.id);
 		pendingEditorFocus = true;
 		focus.activate(activeView());
@@ -1324,6 +1541,24 @@ class UiWorkbenchHost implements WorkbenchHost {
 			var scroll = new ScrollView("language-scroll", content, scrollStyle, haxeon.ui.widgets.scroll.ScrollAxis.Vertical, languageScroll);
 			return languagePopup(scroll);
 		});
+	}
+}
+
+private class ScmSideBySidePair {
+	public final identity:String;
+	public final before:UiDocumentView;
+	public final after:UiDocumentView;
+	public final rightPaneId:String;
+	public final diff:scm.ScmDiffDocument;
+	public var lastBeforeY:Float = 0.0;
+	public var lastAfterY:Float = 0.0;
+	public function new(identity:String, before:UiDocumentView, after:UiDocumentView, rightPaneId:String,
+			diff:scm.ScmDiffDocument) {
+		this.identity = identity;
+		this.before = before;
+		this.after = after;
+		this.rightPaneId = rightPaneId;
+		this.diff = diff;
 	}
 }
 

@@ -1,10 +1,10 @@
 import fs from 'node:fs';
 
-const [invitePath, statusPath, decisionPath, successPath, fileChangePath] = process.argv.slice(2);
+const [invitePath, statusPath, decisionPath, successPath, fileChangePath, cdpPortArg, appPortArg, testModeArg] = process.argv.slice(2);
 if (!invitePath || !statusPath || !decisionPath || !successPath || !fileChangePath)
-  throw new Error('Expected invite, status, decision, success and file-change files');
-const chrome = `http://127.0.0.1:${process.env.EXOSUIT_CDP_PORT || 9224}`;
-const appOrigin = `http://localhost:${process.env.EXOSUIT_APP_PORT || 5173}`;
+  throw new Error('Expected invite, status, decision and success fixture paths');
+const chrome = `http://127.0.0.1:${cdpPortArg || process.env.EXOSUIT_CDP_PORT || 9224}`;
+const appOrigin = `http://localhost:${appPortArg || process.env.EXOSUIT_APP_PORT || 5173}`;
 const targetResponse = await fetch(`${chrome}/json/new?about:blank`, {method: 'PUT'});
 if (!targetResponse.ok) throw new Error(`Could not open browser app: ${targetResponse.status}`);
 const target = await targetResponse.json();
@@ -33,10 +33,10 @@ function send(method, params = {}) {
   return result;
 }
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
-async function click(x, y) {
+async function click(x, y, clickCount = 1) {
   await send('Input.dispatchMouseEvent', {type: 'mouseMoved', x, y});
-  await send('Input.dispatchMouseEvent', {type: 'mousePressed', x, y, button: 'left', clickCount: 1});
-  await send('Input.dispatchMouseEvent', {type: 'mouseReleased', x, y, button: 'left', clickCount: 1});
+  await send('Input.dispatchMouseEvent', {type: 'mousePressed', x, y, button: 'left', clickCount});
+  await send('Input.dispatchMouseEvent', {type: 'mouseReleased', x, y, button: 'left', clickCount});
 }
 async function expression(source) {
   const response = await send('Runtime.evaluate', {expression: source, awaitPromise: true, returnByValue: true});
@@ -83,6 +83,17 @@ async function clickTreeItem(key) {
   const item = await waitFor(`visible tree item ${key}`, async () =>
     (await shellState())?.treeItems?.find(item => item.key === key && item.bounds?.height > 0));
   await click(item.bounds.x + item.bounds.width / 2, item.bounds.y + item.bounds.height / 2);
+}
+async function findTreeItem(predicate, description) {
+  return waitFor(`visible tree item ${description}`, async () =>
+    (await shellState())?.treeItems?.find(item => item.bounds?.height > 0 && predicate(item)));
+}
+async function activateTreeItem(key) {
+  const item = await findTreeItem(candidate => candidate.key === key, key);
+  const x = item.bounds.x + item.bounds.width / 2, y = item.bounds.y + item.bounds.height / 2;
+  await click(x, y);
+  await pause(120);
+  await click(x, y);
 }
 async function enterSearchQuery(value) {
   await clickTarget('remoteSearchQuery', 'search query field');
@@ -182,12 +193,13 @@ try {
   });
   if (!connected.state.status.includes('Connected'))
     throw new Error(`RPC identity arrived with unexpected state: ${connected.state.status}`);
-  const noFilesMode = process.env.EXOSUIT_TEST_NO_FILES === '1';
+  const noFilesMode = testModeArg === 'no-files' || process.env.EXOSUIT_TEST_NO_FILES === '1';
   if (!connected.state.grants?.includes('workspace.identity') || !connected.state.grants?.includes('workspace.read'))
     throw new Error('The connected browser did not receive the approved workspace grants');
   if (connected.state.grants.includes('workspace.files.read') === noFilesMode)
     throw new Error(`Browser file grant did not match test mode (noFiles=${noFilesMode})`);
-  const agentMode = process.env.EXOSUIT_TEST_AGENT === '1';
+  const agentMode = testModeArg === 'agent' || process.env.EXOSUIT_TEST_AGENT === '1';
+  const scmMode = testModeArg === 'scm' || process.env.EXOSUIT_TEST_SCM === '1';
   if (agentMode && (!connected.state.grants?.includes('workspace.groups.tree')
     || !connected.state.grants?.includes('workspace.terminals.read')
     || !connected.state.grants?.includes('workspace.terminals.catalog')
@@ -195,6 +207,14 @@ try {
     || !connected.state.grants?.includes('workspace.agents.read')
     || !connected.state.grants?.includes('workspace.agents.control')))
     throw new Error('AgentMain browser did not receive the approved Workbench and Codex grants');
+  if (agentMode && (!connected.state.grants?.includes('workspace.scm.read')
+    || connected.state.grants.includes('workspace.scm.write')
+    || connected.state.grants.includes('workspace.scm.remote')))
+    throw new Error('New browser pairing did not receive read-only Source Control access');
+  if (scmMode && (!connected.state.grants?.includes('workspace.scm.read')
+    || connected.state.grants.includes('workspace.scm.write')
+    || connected.state.grants.includes('workspace.scm.remote')))
+    throw new Error('New browser pairing did not receive read-only Source Control access');
   if (noFilesMode) {
     let shell = await shellState();
     if (shell?.explorerWatching && shell?.explorerIdentity?.includes(connected.state.workspaceRoot))
@@ -228,17 +248,64 @@ try {
     if (remotePreview.syntax !== 'Markdown')
       throw new Error(`Remote preview used unexpected syntax mode: ${remotePreview.syntax}`);
     console.log('PASS: single-click opened the remote Markdown file as a revision-checked preview tab');
-    if (agentMode) {
-      const previewRevision = remotePreview.revision;
-      writePrivate(fileChangePath, {requestId: 'browser-file-change-v1', sequence: 1});
-      const stalePreview = await waitFor('AgentMain file-change notification in the browser preview', async () => {
+    if (agentMode || scmMode) {
+      await clickTarget('sourceControlActivity', 'Source Control activity tab');
+      const scmPanel = await waitFor('connected read-only Source Control panel', async () => {
+        const shell = await shellState(), source = shell?.sourceControl;
+        return shell?.sidebarMode === 'scm' && source?.remote && source.connected
+          && source.repositoryCount === 1 ? shell : null;
+      });
+      const scm = scmPanel.sourceControl;
+      if (scm.canWrite || scm.canUseRemotes || scm.commitMessage || scm.commitButton || scm.rowMutation)
+        throw new Error(`Read-only browser Source Control exposed a mutation surface: ${JSON.stringify(scm)}`);
+      const changes = await findTreeItem(item => item.key.endsWith(':workingTree'), 'working-tree group');
+      await clickTreeItem(changes.key);
+      const changedFile = await findTreeItem(item => item.key.startsWith('file:')
+        && item.key.includes(':workingTree:') && item.key.endsWith('changed.txt'), 'changed source file');
+      await activateTreeItem(changedFile.key);
+      await waitFor('remote Source Control diff', async () => {
         const shell = await shellState();
-        return shell?.workspaceFileTabs?.find(item => item.path === 'remote.md'
-          && item.scope === connected.state.workspaceRoot && item.preview === true && item.diskChanged) || null;
-      }, 15000);
-      if (stalePreview.revision !== previewRevision)
-        throw new Error('Remote file notification replaced the browser preview snapshot before explicit refresh');
-      console.log('PASS: AgentMain file change reached the browser and marked the saved preview stale');
+        return shell?.activeDiff && shell?.sourceControl?.remote && !shell.sourceControl.canWrite
+          && !shell.sourceControl.canUseRemotes ? shell : null;
+      });
+      console.log('PASS: connected browser reviewed a real Git change while write and remote grants stayed disabled');
+
+      await send('Emulation.setDeviceMetricsOverride', {width: 320, height: 740, deviceScaleFactor: 1, mobile: true});
+      await waitFor('phone Source Control panel', async () => {
+        const shell = await shellState();
+        return shell?.viewport?.phoneLayout && shell.viewport.width === 320
+          && shell.viewport.sidebarVisible && shell.sidebarMode === 'scm' ? shell : null;
+      });
+      const phoneChanges = await findTreeItem(item => item.key.endsWith(':workingTree'), 'phone-width working-tree group');
+      await clickTreeItem(phoneChanges.key);
+      const phoneFile = await findTreeItem(item => item.key.startsWith('file:')
+        && item.key.includes(':workingTree:') && item.key.endsWith('changed.txt'), 'phone-width changed source file');
+      await activateTreeItem(phoneFile.key);
+      const phoneDiff = await waitFor('full-width phone Source Control diff', async () => {
+        const shell = await shellState();
+        return shell?.activeDiff && shell.viewport?.phoneLayout && !shell.viewport.sidebarVisible
+          && shell.panels?.includes('editor') && shell.viewport.activePanel === 'editor' ? shell : null;
+      });
+      if (phoneDiff.viewport.width !== 320 || phoneDiff.viewport.height !== 740)
+        throw new Error(`Phone Source Control diff did not use the responsive editor layout: ${JSON.stringify(phoneDiff.viewport)}`);
+      console.log('PASS: read-only Source Control opened a full-width diff at 320 × 740 in the web build');
+      await send('Emulation.setDeviceMetricsOverride', {width: 1050, height: 600, deviceScaleFactor: 1, mobile: false});
+      await waitFor('desktop viewport restored after phone SCM check', async () => {
+        const shell = await shellState();
+        return shell?.viewport && !shell.viewport.phoneLayout ? shell : null;
+      });
+      if (agentMode) {
+        const previewRevision = remotePreview.revision;
+        writePrivate(fileChangePath, {requestId: 'browser-file-change-v1', sequence: 1});
+        const stalePreview = await waitFor('AgentMain file-change notification in the browser preview', async () => {
+          const shell = await shellState();
+          return shell?.workspaceFileTabs?.find(item => item.path === 'remote.md'
+            && item.scope === connected.state.workspaceRoot && item.preview === true && item.diskChanged) || null;
+        }, 15000);
+        if (stalePreview.revision !== previewRevision)
+          throw new Error('Remote file notification replaced the browser preview snapshot before explicit refresh');
+        console.log('PASS: AgentMain file change reached the browser and marked the saved preview stale');
+      }
     }
 
     // Search results are exercised through their rendered controls and opened

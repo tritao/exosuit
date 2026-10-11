@@ -49,6 +49,8 @@ import haxeon.wire.MessagePack;
 	@:id(2) var grants:Array<String>;
 }
 
+typedef SetPairingGrantsRequest = ApprovePairingRequest;
+
 @:wire typedef PairingActionRequest = {
 	@:id(1) var deviceId:String;
 }
@@ -65,6 +67,9 @@ class WorkspacePairingProtocol {
 	public static final STATUS = new RpcMethod<PairingListRequest, RemoteAccessStatus>(135,
 		function(value) return MessagePack.encode(value), function(bytes:Bytes):PairingListRequest return MessagePack.decode(bytes),
 		function(value) return MessagePack.encode(value), function(bytes:Bytes):RemoteAccessStatus return MessagePack.decode(bytes));
+	public static final SET_GRANTS = new RpcMethod<SetPairingGrantsRequest, PairingActionResult>(152,
+		function(value) return MessagePack.encode(value), function(bytes:Bytes):SetPairingGrantsRequest return MessagePack.decode(bytes),
+		function(value) return MessagePack.encode(value), function(bytes:Bytes):PairingActionResult return MessagePack.decode(bytes));
 	public static final CREATE = new RpcMethod<CreatePairingRequest, PairingInvitation>(130,
 		function(value) return MessagePack.encode(value), function(bytes:Bytes):CreatePairingRequest return MessagePack.decode(bytes),
 		function(value) return MessagePack.encode(value), function(bytes:Bytes):PairingInvitation return MessagePack.decode(bytes));

@@ -29,6 +29,7 @@ private class PairingFixture implements WorkspacePairingClient {
  public function refreshPairings(force:Bool):Void {}
  public function createPairing(ttl:Int, complete:PairingInvitation->Null<String>->Void):Void {}
  public function approvePairing(id:String, grants:Array<String>, complete:Null<String>->Void):Void {}
+ public function setPairingGrants(id:String, grants:Array<String>, complete:Null<String>->Void):Void {}
  public function rejectPairing(id:String, complete:Null<String>->Void):Void {}
  public function revokePairing(id:String, complete:Null<String>->Void):Void {}
 }
@@ -109,11 +110,19 @@ class RemoteAccessPanelTestMain {
   require(enabledApprovals == 0, "Approval was enabled before code confirmation");
   panel.confirmed.set("one", true); labels();
   require(enabledApprovals == 1, "Code confirmation must enable only its own request");
-  require(panel.grants("one").length == 11 && panel.grants("two").length == 11, "All permissions must default on per request");
-  panel.setPreset("one", "read");
-  require(panel.grants("one").length == 5 && panel.grants("two").length == 11, "Presets must not change another request");
-  panel.setPreset("one", "edit"); require(panel.grants("one").length == 6, "Edit files preset grants excess access");
-  panel.setPreset("one", "all"); require(panel.grants("one").length == 11, "All permissions preset incomplete");
+		require(panel.grants("one").length == 9 && panel.grants("two").length == 9,
+			"New devices must default to read-only grants, including source control review");
+		panel.setPreset("one", "read");
+		require(panel.grants("one").length == 9 && panel.grants("two").length == 9, "Presets must not change another request");
+		panel.setPreset("one", "edit"); require(panel.grants("one").length == 10, "Edit files preset grants excess access");
+		panel.setPreset("one", "all"); require(panel.grants("one").length == 14, "All permissions preset incomplete");
+		fixture.list.devices = [{deviceId:"paired", grants:[workspace.service.WorkspaceScmProtocol.READ], revoked:false, connected:true}];
+		var pairedLabels = labels().join("\n");
+		require(pairedLabels.indexOf("Edit permissions") >= 0, "Approved devices must expose grant editing");
+		panel.editing.set("paired", true);
+		pairedLabels = labels().join("\n");
+		require(pairedLabels.indexOf("Save permissions") >= 0 && pairedLabels.indexOf("Fetch and push Git remotes") >= 0,
+			"Approved device editing must show and save the full grant set");
   fixture.updateAvailable = true;
   var legacyUpdate = labels().join("\n");
   require(legacyUpdate.indexOf("Restart now…") >= 0 && legacyUpdate.indexOf("Update when idle") < 0,

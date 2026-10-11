@@ -141,6 +141,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   public function fileWorkspace():String return "workspace";
   public function fileScope():Null<String> return root;
   public function hasLocalFileAccess():Bool return true;
+  /** Local desktop roots use Application.scm; this attachment owns no second SCM source. */
+  public function sourceControlSource():Null<scm.ScmSource> return null;
 
   public function hasGroupTree():Bool return client != null && client.capabilities().indexOf(WorkspaceProtocol.TREE) >= 0;
   public function canEditGroups():Bool return workbench.canEditGroups();
@@ -341,6 +343,9 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
 
   public function approvePairing(deviceId:String, grants:Array<String>, complete:Null<String>->Void):Void
     pairingAction(WorkspacePairingProtocol.APPROVE, {deviceId: deviceId, grants: grants}, complete);
+
+  public function setPairingGrants(deviceId:String, grants:Array<String>, complete:Null<String>->Void):Void
+    pairingAction(WorkspacePairingProtocol.SET_GRANTS, {deviceId: deviceId, grants: grants}, complete);
 
   public function rejectPairing(deviceId:String, complete:Null<String>->Void):Void
     pairingAction(WorkspacePairingProtocol.REJECT, {deviceId: deviceId}, complete);

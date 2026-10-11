@@ -5,16 +5,20 @@ import sys.io.File;
 import sys.thread.Mutex;
 import sys.thread.Thread;
 import haxeon.ui.LayoutStyle;
+import haxeon.ui.Insets;
 import haxeon.ui.LayoutAxis;
 import haxeon.ui.LayoutAlignmentY;
 import haxeon.ui.TextWrap;
 import haxeon.ui.widgets.KeyedView;
 import haxeon.ui.widgets.layout.Row;
+import haxeon.ui.widgets.layout.SizedBox;
 import haxeon.ui.core.View;
 import haxeon.ui.core.TextStyleOverride;
 import haxeon.ui.theme.Theme;
 import haxeon.ui.widgets.collections.TreeRootMetadata;
 import haxeon.ui.widgets.text.MiddleEllipsisText;
+import plugin.PluginResourceDecoration;
+import plugin.PluginResourceDecorationRegistry;
 
 /** Asynchronous, paged directory listings for the Explorer tree. */
 class DirectoryTreeModel implements ExplorerTreeModel {
@@ -55,6 +59,8 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 	var generation:Int = 0;
 	var requestSequence:Int = 0;
 	var listRevision:Int = 0;
+	var decorationProvider:Null<PluginResourceDecorationRegistry>;
+	var observedDecorationRevision:Int = -1;
 	var listings:Map<String, DirectoryListing> = [];
 	var errors:Map<String, Bool> = [];
 	var pending:Map<String, Int> = [];
@@ -129,6 +135,12 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 	public function rootIdentity():String return root;
 	public function watchesChanges():Bool return watchChanges;
 	public function dispose():Void invalidate();
+	public function setResourceDecorations(provider:Null<PluginResourceDecorationRegistry>):Void {
+		if (decorationProvider == provider) return;
+		decorationProvider = provider;
+		observedDecorationRevision = provider == null ? -1 : provider.revision;
+		listRevision++;
+	}
 
 	public function rootRange(start:Int, count:Int):Array<TreeRootMetadata>
 		return start > 0 || count <= 0 ? [] : [new TreeRootMetadata(root, true)];
@@ -188,14 +200,18 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 		var style = new LayoutStyle();
 		style.width = LayoutAxis.grow();
 		style.height = LayoutAxis.fixed(rowHeight());
-		style.clipHorizontal = true;
+		// Keep the overlay scrollbar clear while allowing the filename to shrink.
+		style.padding = new Insets(0.0, 0.0, 16.0, 0.0);
 		style.childAlignY = LayoutAlignmentY.Center;
 		style.childGap = 2.0;
 		var children:Array<KeyedView> = [];
 		if (!directory) children.push(new KeyedView("icon", new SetiFileIcon(atlas, name, dark, true)));
-		children.push(new KeyedView("name", new MiddleEllipsisText("filename", name, false,
-				new TextStyleOverride(null, fontSize, null, TextWrap.None, null, null, null, theme.tokens.text))
-		));
+		var decoration = decorationProvider == null ? null : decorationProvider.forPath(key);
+		var foreground = decoration == null ? theme.tokens.text : decorationColor(decoration);
+		var filename = new SizedBox("filename-box", new MiddleEllipsisText("filename", name, false,
+			new TextStyleOverride(null, fontSize, null, TextWrap.None, null, null, null, foreground)));
+		filename.style.clipHorizontal = true;
+		children.push(new KeyedView("name", filename));
 		if (busyExpansions.exists(key)) {
 			var indicatorStyle = new LayoutStyle();
 			indicatorStyle.width = LayoutAxis.fixed(16.0);
@@ -204,10 +220,27 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 			indicator.mode = haxeon.ui.widgets.controls.ProgressMode.Indeterminate;
 			children.push(new KeyedView("loading", indicator));
 		}
+		if (decoration != null) children.push(new KeyedView("decoration", new ResourceDecorationBadge(decoration, fontSize)));
 		return new Row("explorer-item", children, style);
 	}
 
-	public function revision():Int return listRevision;
+	public function revision():Int {
+		var current = decorationProvider == null ? -1 : decorationProvider.revision;
+		if (current != observedDecorationRevision) {
+			observedDecorationRevision = current;
+			listRevision++;
+		}
+		return listRevision;
+	}
+
+	function decorationColor(value:PluginResourceDecoration):haxeon.ui.Color return switch value.color {
+		case Text: theme.tokens.text;
+		case Secondary: theme.tokens.textSecondary;
+		case Accent: theme.tokens.accent;
+		case Success: theme.tokens.success;
+		case Warning: theme.tokens.warning;
+		case Danger: theme.tokens.danger;
+	}
 
 	public function isDirectoryPath(path:String):Bool
 		return !isSyntheticRow(path) && isKnownDirectory(path);

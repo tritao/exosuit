@@ -2,6 +2,7 @@ package scm.git;
 
 import haxe.Int64;
 import haxe.io.Bytes;
+import jobs.JobHandle;
 import jobs.JobScheduler;
 import process.ProcessManager;
 import scm.ScmApplyResult;
@@ -16,6 +17,7 @@ import scm.ScmRepository;
 import scm.ScmSnapshot;
 import scm.ScmRepositoryHandle;
 import sys.FileSystem;
+import sys.io.File;
 
 /** Git status and original-content access for one worktree. */
 class GitScmRepositoryHandle implements ScmRepositoryHandle {
@@ -81,40 +83,75 @@ class GitScmRepositoryHandle implements ScmRepositoryHandle {
 	}
 
 	public function features():ScmFeatures {
-		// Mutations are added in the operation slice; restricted roots never advertise them.
-		return new ScmFeatures();
+		var allowed = trusted();
+		return new ScmFeatures(allowed, allowed, allowed, allowed, allowed, false);
 	}
 
 	public function trusted():Bool return trustStore != null && trustStore.isTrusted(root);
 
-	public function refresh(generation:Int, complete:ScmJobResult<ScmSnapshot>->Void):ScmJob<ScmSnapshot> {
+	public function branches(generation:Int, complete:ScmJobResult<Array<ScmBranch>>->Void):ScmJob<Array<ScmBranch>> {
 		if (disposed) return failed(generation, complete, "repository_closed", "The Git repository handle is closed");
 		var command:Null<ScmJob<GitCommandResult>> = null;
-		var job = new ScmJob<ScmSnapshot>(generation, function() {
+		var job = new ScmJob<Array<ScmBranch>>(generation, function() {
 			if (command != null) command.cancel();
 		});
-		function finishStatus(result:ScmJobResult<GitCommandResult>):Void {
+		command = process.run(["for-each-ref", "--format=%(refname)%09%(HEAD)%09%(symref)", "refs/heads", "refs/remotes"],
+			root, generation, function(result) {
 				if (job.cancelled || job.complete) return;
 				if (result.error != null) {
-					if (job.finish()) complete(new ScmJobResult<ScmSnapshot>(generation, null, result.error));
+					if (job.finish()) complete(new ScmJobResult<Array<ScmBranch>>(generation, null, result.error));
 					return;
 				}
-				var output = result.value == null ? Bytes.alloc(0) : result.value.stdout;
 				try {
-					var operationState = operation();
-					var parsed = GitStatusParser.parse(output, false, operationState), groups = limitUntracked(parsed.groups);
-					if (!sameBytes(signature, output) || signatureOperation != operationState) {
+					var branches = GitBranchParser.parse(result.value == null ? Bytes.alloc(0) : result.value.stdout);
+					if (job.finish()) complete(new ScmJobResult<Array<ScmBranch>>(generation, branches));
+				} catch (failure:Dynamic) {
+					if (job.finish()) complete(new ScmJobResult<Array<ScmBranch>>(generation, null,
+						new ScmError("invalid_refs", "Git returned invalid branch data: " + Std.string(failure))));
+				}
+			}, true, !trusted(), 1024 * 1024);
+		return job;
+	}
+
+	public function refresh(generation:Int, complete:ScmJobResult<ScmSnapshot>->Void):ScmJob<ScmSnapshot> {
+		if (disposed) return failed(generation, complete, "repository_closed", "The Git repository handle is closed");
+		var command:Null<ScmJob<GitCommandResult>> = null, parserHandle:Null<JobHandle> = null;
+		var job = new ScmJob<ScmSnapshot>(generation, function() {
+			if (command != null) command.cancel();
+			if (parserHandle != null) scheduler.cancel(parserHandle);
+		});
+		function finishStatus(result:ScmJobResult<GitCommandResult>):Void {
+			if (job.cancelled || job.complete) return;
+			if (result.error != null) {
+				if (job.finish()) complete(new ScmJobResult<ScmSnapshot>(generation, null, result.error));
+				return;
+			}
+			var output = result.value == null ? Bytes.alloc(0) : result.value.stdout;
+			var operationState = operation();
+			var parser:GitStatusParser = null;
+			parser = new GitStatusParser(output, false, operationState, untrackedLimit, signature, function(parsed, failure) {
+				if (job.cancelled || job.complete) return;
+				if (failure != null || parsed == null) {
+					var detail = failure == null ? "parser returned no result" : Std.string(failure);
+					if (job.finish()) complete(new ScmJobResult<ScmSnapshot>(generation, null,
+						new ScmError("invalid_status", "Git returned invalid status data: " + detail)));
+					return;
+				}
+				try {
+					if (signature == null || !parser.signatureMatches || signatureOperation != operationState) {
 						revision = Int64.add(revision, Int64.ofInt(1));
-						signature = output.sub(0, output.length);
+						signature = output;
 						signatureOperation = operationState;
 					}
-					var snapshot = new ScmSnapshot(revision, parsed.head, groups.groups, groups.truncated);
+					var snapshot = new ScmSnapshot(revision, parsed.head, parsed.groups, parsed.truncated);
 					current = snapshot;
 					if (job.finish()) complete(new ScmJobResult<ScmSnapshot>(generation, snapshot));
 				} catch (failure:Dynamic) {
 					if (job.finish()) complete(new ScmJobResult<ScmSnapshot>(generation, null,
 						new ScmError("invalid_status", "Git returned invalid status data: " + Std.string(failure))));
 				}
+			});
+			parserHandle = scheduler.schedule(parser);
 		}
 		function runStatus(disabledFilters:Array<String>):Void {
 			command = process.run(["status", "--porcelain=v2", "-z", "--branch", "--untracked-files=all"], root, generation,
@@ -143,6 +180,10 @@ class GitScmRepositoryHandle implements ScmRepositoryHandle {
 	}
 
 	public function original(reference:ScmRef, path:String, generation:Int, complete:ScmJobResult<ScmBlob>->Void):ScmJob<ScmBlob> {
+		return originalBytes(reference, Bytes.ofString(path), generation, complete);
+	}
+
+	public function originalBytes(reference:ScmRef, path:Bytes, generation:Int, complete:ScmJobResult<ScmBlob>->Void):ScmJob<ScmBlob> {
 		if (disposed) return failed(generation, complete, "repository_closed", "The Git repository handle is closed");
 		ensureBlobReaderTrustMode();
 		var spec = switch reference {
@@ -151,13 +192,286 @@ class GitScmRepositoryHandle implements ScmRepositoryHandle {
 			case Commit(oid): oid;
 			case ConflictStage(stage): ":" + Std.string(stage);
 		};
-		return blobReader.read(spec, Bytes.ofString(path), generation, complete);
+		return blobReader.read(spec, path, generation, complete);
 	}
 
 	public function apply(operation:ScmOperation, generation:Int, complete:ScmJobResult<ScmApplyResult>->Void):ScmJob<ScmApplyResult> {
-		var code = trusted() ? "unsupported" : "untrusted";
-		var message = trusted() ? "Git mutations are not available yet" : "Trust this repository on this machine before changing it";
-		return failed(generation, complete, code, message);
+		if (disposed) return failed(generation, complete, "repository_closed", "The Git repository handle is closed");
+		if (!trusted()) return failed(generation, complete, "untrusted", "Trust this repository on this machine before changing it");
+		var child:Null<ScmJob<GitCommandResult>> = null;
+		var recoveryToken:Null<String> = null;
+		var job = new ScmJob<ScmApplyResult>(generation, function() {
+			if (child != null) child.cancel();
+		});
+		function finish(result:ScmJobResult<GitCommandResult>, message:String):Void {
+			if (job.cancelled || job.complete) return;
+			if (result.error != null) {
+				if (job.finish()) complete(new ScmJobResult<ScmApplyResult>(generation, null, result.error));
+				return;
+			}
+			if (job.finish()) complete(new ScmJobResult<ScmApplyResult>(generation, new ScmApplyResult(current, message, recoveryToken)));
+		}
+		function run(arguments:Array<String>, input:Null<Bytes>, message:String):Void {
+			child = process.run(arguments, root, generation, result -> finish(result, message), false, false,
+				GitProcess.DEFAULT_MAX_STDOUT, [], input);
+		}
+		function validBranchName(name:String):Bool {
+			return name != null && name.length > 0 && name.length <= 255 && name.charAt(0) != "-"
+				&& name.indexOf("\n") < 0 && name.indexOf("\r") < 0;
+		}
+		function invalidBranch():Void {
+				if (job.finish()) complete(new ScmJobResult<ScmApplyResult>(generation, null,
+					new ScmError("invalid_reference", "Enter a valid branch name")));
+		}
+		function validatePath(path:String):Bool {
+			if (path == null || path.length == 0) return false;
+			var normalized = StringTools.replace(path, "\\", "/");
+			if (StringTools.startsWith(normalized, "/") ||
+				(normalized.length >= 2 && normalized.charAt(1) == ":")) return false;
+			for (part in normalized.split("/")) if (part == ".." || part == ".") return false;
+			return true;
+		}
+		function allValid(paths:Array<String>):Bool {
+			if (paths == null || paths.length == 0) return false;
+			for (path in paths) if (!validatePath(path)) return false;
+			return true;
+		}
+		function invalidPath():Void {
+			if (job.finish()) complete(new ScmJobResult<ScmApplyResult>(generation, null,
+				new ScmError("invalid_path", "Git operation requires repository-relative paths")));
+		}
+		function relativePath(path:String):String return StringTools.replace(path, "\\", "/");
+		function isUntracked(path:String):Bool {
+			if (this.current == null) return false;
+			var snapshot:ScmSnapshot = cast this.current;
+			var normalized = relativePath(path);
+			for (group in snapshot.groups) if (group.id == scm.ScmGroupId.Untracked)
+				for (resource in group.resources) if (relativePath(resource.path) == normalized) return true;
+			return false;
+		}
+		function validObjectId(value:String):Bool {
+			if (value == null || (value.length != 40 && value.length != 64)) return false;
+			for (index in 0...value.length) {
+				var char = value.charCodeAt(index);
+				if (!((char >= 48 && char <= 57) || (char >= 97 && char <= 102))) return false;
+			}
+			return true;
+		}
+		function completeDirect(message:String):Void {
+			if (job.finish()) complete(new ScmJobResult<ScmApplyResult>(generation, new ScmApplyResult(current, message)));
+		}
+		function runForPath(path:String, arguments:Array<String>, message:String):Void {
+			if (!validatePath(path)) {
+				if (job.finish()) complete(new ScmJobResult<ScmApplyResult>(generation, null,
+					new ScmError("invalid_path", "Git operation requires a repository-relative path")));
+				return;
+			}
+			run(arguments.concat(["--", StringTools.replace(path, "\\", "/")]), null, message);
+		}
+		function runCheckedPatch(path:String, arguments:Array<String>, patch:Bytes, message:String):Void {
+			if (!validatePath(path)) {
+				if (job.finish()) complete(new ScmJobResult<ScmApplyResult>(generation, null,
+					new ScmError("invalid_path", "Git operation requires a repository-relative path")));
+				return;
+			}
+			// Patch bytes may come from an RPC client. Restrict Git to the declared
+			// repository-relative file even if a malformed patch names other paths.
+			var scopedArguments = arguments.copy();
+			scopedArguments.push("--include=" + StringTools.replace(path, "\\", "/"));
+			var checkArguments = scopedArguments.copy();
+			checkArguments.push("--check");
+			child = process.run(checkArguments, root, generation, function(check) {
+				if (job.cancelled || job.complete) return;
+				if (check.error != null) {
+					if (job.finish()) complete(new ScmJobResult<ScmApplyResult>(generation, null, check.error));
+				} else run(scopedArguments, patch, message);
+			}, false, false, 8192, [], patch);
+		}
+		switch operation {
+			case Stage(path): runForPath(path, ["add"], "Staged " + path);
+			case StageAll: run(["add", "-A", "--", "."], null, "Staged all changes");
+			case StagePaths(paths):
+				var arguments = ["add", "-A", "--"];
+				if (paths.length == 0 || !allValid(paths)) invalidPath();
+				else { for (path in paths) arguments.push(StringTools.replace(path, "\\", "/")); run(arguments, null, "Staged " + paths.length + " files"); }
+			case Unstage(path):
+				if (!validatePath(path)) {
+					if (job.finish()) complete(new ScmJobResult<ScmApplyResult>(generation, null, new ScmError("invalid_path", "Git operation requires a repository-relative path")));
+				} else {
+					var command = current != null && current.head.unborn ? ["rm", "--cached", "--ignore-unmatch"] : ["restore", "--staged"];
+					runForPath(path, command, "Unstaged " + path);
+				}
+			case UnstageAll:
+				var command = current != null && current.head.unborn
+					? ["rm", "--cached", "-r", "--ignore-unmatch", "--", "."]
+					: ["restore", "--staged", "--", "."];
+				run(command, null, "Unstaged all changes");
+			case UnstagePaths(paths):
+				if (paths.length == 0 || !allValid(paths)) invalidPath();
+				else {
+					var arguments = current != null && current.head.unborn
+						? ["rm", "--cached", "-r", "--ignore-unmatch", "--"]
+						: ["restore", "--staged", "--"];
+					for (path in paths) arguments.push(StringTools.replace(path, "\\", "/"));
+					run(arguments, null, "Unstaged " + paths.length + " files");
+				}
+			case Discard(path):
+				if (!validatePath(path)) invalidPath(); else {
+				var relative = relativePath(path), target = root + "/" + relative;
+				var exists = FileSystem.exists(target) && !FileSystem.isDirectory(target), untracked = isUntracked(path);
+				function restoreDiscard():Void {
+					if (!exists) recoveryToken = "";
+					var args = untracked ? ["clean", "-f", "-d", "--", relative] : ["restore", "--worktree", "--", relative];
+					run(args, null, "Discarded changes to " + path);
+				}
+				if (!exists) restoreDiscard();
+				else child = process.run(["hash-object", "-w", "--", relative], root, generation, function(result) {
+					if (job.cancelled || job.complete) return;
+					if (result.error != null) {
+						if (job.finish()) complete(new ScmJobResult<ScmApplyResult>(generation, null, result.error));
+						return;
+					}
+					var token = result.value == null ? "" : StringTools.trim(result.value.stdout.toString());
+					if (!validObjectId(token)) {
+						if (job.finish()) complete(new ScmJobResult<ScmApplyResult>(generation, null,
+							new ScmError("operation_failed", "Git did not return a valid discard recovery object")));
+						return;
+					}
+						recoveryToken = token;
+					restoreDiscard();
+				}, false, false, 256);
+				}
+			case RestoreDiscard(path, token):
+				if (!validatePath(path) || (token != "" && !validObjectId(token))) invalidPath(); else {
+				var target = root + "/" + relativePath(path);
+				if (token == "") {
+					var deleteFailed = false;
+					if (FileSystem.exists(target) && !FileSystem.isDirectory(target)) {
+						try FileSystem.deleteFile(target) catch (_:Dynamic) deleteFailed = true;
+						if (FileSystem.exists(target)) deleteFailed = true;
+					}
+					if (deleteFailed) {
+						if (job.finish()) complete(new ScmJobResult<ScmApplyResult>(generation, null,
+							new ScmError("restore_failed", "Could not restore the deleted-file state")));
+					} else completeDirect("Restored the discarded state of " + path);
+				} else child = process.run(["cat-file", "blob", token], root, generation, function(result) {
+					if (job.cancelled || job.complete) return;
+					if (result.error != null || result.value == null) {
+						if (job.finish()) complete(new ScmJobResult<ScmApplyResult>(generation, null,
+							result.error == null ? new ScmError("restore_failed", "Git returned no discard recovery data") : result.error));
+						return;
+					}
+					try {
+						var slash = target.lastIndexOf("/");
+						if (slash > 0 && !ensureDirectory(target.substring(0, slash))) throw "Could not create the discarded file's parent directory";
+						File.saveBytes(target, result.value.stdout);
+						completeDirect("Restored discarded changes to " + path);
+					} catch (failure:Dynamic) {
+						if (job.finish()) complete(new ScmJobResult<ScmApplyResult>(generation, null,
+							new ScmError("restore_failed", Std.string(failure))));
+					}
+				}, false, false, 64 * 1024 * 1024);
+				}
+			case ResolveConflict(path, choice):
+				if (!validatePath(path)) invalidPath();
+				else if (choice != "ours" && choice != "theirs" && choice != "both") {
+					if (job.finish()) complete(new ScmJobResult<ScmApplyResult>(generation, null,
+						new ScmError("invalid_conflict_choice", "Choose the current branch, incoming branch, or both")));
+				} else if (choice == "both") {
+					var target = root + "/" + relativePath(path);
+					if (!FileSystem.exists(target) || FileSystem.isDirectory(target)) {
+						if (job.finish()) complete(new ScmJobResult<ScmApplyResult>(generation, null,
+							new ScmError("conflict_resolution_failed", "The conflicted file is unavailable")));
+					} else {
+						try {
+							var original = File.getBytes(target), content = original.toString(), roundTrip = Bytes.ofString(content);
+							var exact = roundTrip.length == original.length;
+							if (exact) for (index in 0...original.length) if (roundTrip.get(index) != original.get(index)) { exact = false; break; }
+							var combined = exact ? combineConflictBoth(content) : null;
+							if (combined == null) {
+							if (job.finish()) complete(new ScmJobResult<ScmApplyResult>(generation, null,
+								new ScmError("conflict_resolution_failed", exact
+									? "Accept Both requires standard text conflict markers"
+									: "Accept Both is unavailable for this binary or non-UTF-8 file")));
+							} else {
+								File.saveContent(target, combined);
+								child = process.run(["add", "--", relativePath(path)], root, generation, function(result) {
+									if (job.cancelled || job.complete) return;
+								if (result.error != null) try File.saveBytes(target, original) catch (_:Dynamic) {}
+								finish(result, "Resolved " + path + " using both sides");
+								}, false, false, GitProcess.DEFAULT_MAX_STDOUT);
+							}
+						} catch (failure:Dynamic) {
+							if (job.finish()) complete(new ScmJobResult<ScmApplyResult>(generation, null,
+								new ScmError("conflict_resolution_failed", Std.string(failure))));
+						}
+					}
+				} else {
+					var option = choice == "ours" ? "--ours" : "--theirs", relative = relativePath(path);
+					child = process.run(["checkout", option, "--", relative], root, generation, function(check) {
+						if (job.cancelled || job.complete) return;
+						if (check.error != null) {
+						if (job.finish()) complete(new ScmJobResult<ScmApplyResult>(generation, null, check.error));
+					} else runForPath(path, ["add"], "Resolved " + path + " using " + choice);
+					}, false, false, 8192);
+				}
+			case Commit(message, amend):
+				if (StringTools.trim(message).length == 0) {
+					if (job.finish()) complete(new ScmJobResult<ScmApplyResult>(generation, null,
+						new ScmError("empty_commit_message", "Commit message cannot be empty")));
+				} else {
+					var args = ["commit", "--file=-"];
+					if (amend) args.insert(1, "--amend");
+					run(args, Bytes.ofString(message), amend ? "Amended commit" : "Created commit");
+				}
+			case StagePatch(path, patch): runCheckedPatch(path, ["apply", "--cached", "--recount"], patch, "Staged hunk in " + path);
+			case UnstagePatch(path, patch): runCheckedPatch(path, ["apply", "--cached", "--recount", "--reverse"], patch, "Unstaged hunk in " + path);
+			case RevertPatch(path, patch): runCheckedPatch(path, ["apply", "--recount", "--reverse"], patch, "Reverted hunk in " + path);
+			case Checkout(reference):
+				var localPrefix = "refs/heads/", remotePrefix = "refs/remotes/";
+				if (!validBranchName(reference) || (!StringTools.startsWith(reference, localPrefix)
+					&& !StringTools.startsWith(reference, remotePrefix))) invalidBranch();
+				else if (StringTools.startsWith(reference, remotePrefix))
+					run(["checkout", "--quiet", "--track", reference], null, "Checked out " + reference);
+				else run(["switch", "--quiet", reference.substr(localPrefix.length)], null, "Checked out " + reference);
+			case CreateBranch(name):
+				if (!validBranchName(name)) invalidBranch(); else run(["checkout", "--quiet", "-b", name], null, "Created branch " + name);
+			case Fetch(remote):
+				if (remote != null && (remote.length == 0 || remote.charAt(0) == "-" || remote.indexOf("\n") >= 0 || remote.indexOf("\r") >= 0)) {
+					if (job.finish()) complete(new ScmJobResult<ScmApplyResult>(generation, null, new ScmError("invalid_remote", "Enter a valid Git remote name")));
+				} else run(remote == null ? ["fetch", "--all", "--prune"] : ["fetch", "--prune", remote], null, "Fetched remote updates");
+			case Pull: run(["pull", "--ff-only"], null, "Pulled fast-forward updates");
+			case Push:
+				var upstream = current == null ? null : current.head.upstream;
+				run(upstream == null ? ["push", "--set-upstream", "origin", "HEAD"] : ["push"], null, "Pushed commits");
+		}
+		return job;
+	}
+
+	static function combineConflictBoth(text:String):Null<String> {
+		var lines = text.split("\n"), output:Array<String> = [], ours:Array<String> = [], theirs:Array<String> = [];
+		var side = 0, inBase = false, conflicts = 0;
+		for (line in lines) {
+			var marker = StringTools.endsWith(line, "\r") ? line.substring(0, line.length - 1) : line;
+			if (side == 0) {
+				if (StringTools.startsWith(marker, "<<<<<<<")) {
+					side = 1;
+					inBase = false;
+					ours = [];
+					theirs = [];
+					conflicts++;
+				} else output.push(line);
+			} else if (side == 1) {
+				if (StringTools.startsWith(marker, "|||||||")) inBase = true;
+				else if (StringTools.startsWith(marker, "=======")) { side = 2; inBase = false; }
+				else if (!inBase) ours.push(line);
+			} else if (StringTools.startsWith(marker, ">>>>>>>")) {
+				for (part in ours) output.push(part);
+				for (part in theirs) output.push(part);
+				side = 0;
+			} else theirs.push(line);
+		}
+		return side == 0 && conflicts > 0 ? output.join("\n") : null;
 	}
 
 	public function expireBlobReader(now:Float):Void {
@@ -189,25 +503,12 @@ class GitScmRepositoryHandle implements ScmRepositoryHandle {
 		blobReader = new GitBlobReader(processes, scheduler, process, root, restricted, 64 * 1024 * 1024);
 	}
 
-	function limitUntracked(groups:Array<scm.ScmGroup>):{groups:Array<scm.ScmGroup>, truncated:Bool} {
-		var remaining = untrackedLimit, truncated = false, result:Array<scm.ScmGroup> = [];
-		for (group in groups) {
-			if (group.id != scm.ScmGroupId.Untracked) {
-				result.push(group);
-				continue;
-			}
-			if (group.resources.length > remaining) truncated = true;
-			var count = Std.int(Math.min(group.resources.length, remaining));
-			result.push(new scm.ScmGroup(group.id, group.resources.slice(0, count)));
-			remaining -= count;
-		}
-		return {groups: result, truncated: truncated};
-	}
-
-	static function sameBytes(left:Null<Bytes>, right:Bytes):Bool {
-		if (left == null || left.length != right.length) return false;
-		for (index in 0...right.length) if (left.get(index) != right.get(index)) return false;
-		return true;
+	static function ensureDirectory(path:String):Bool {
+		if (FileSystem.exists(path)) return FileSystem.isDirectory(path);
+		var separator = path.lastIndexOf("/");
+		if (separator > 0 && !ensureDirectory(path.substring(0, separator))) return false;
+		try FileSystem.createDirectory(path) catch (_:Dynamic) return false;
+		return FileSystem.exists(path) && FileSystem.isDirectory(path);
 	}
 
 	static function pathKey(path:String):String {

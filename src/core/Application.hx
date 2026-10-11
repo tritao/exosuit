@@ -69,6 +69,8 @@ class Application {
 	public final workbench:WorkbenchController;
 	public final processes:ProcessManager;
 	public final scm:ScmService;
+	/** Commit message drafts keyed by stable source-control repository id. */
+	public final scmCommitDrafts:Map<String, String> = [];
 	public final build:BuildController;
 	public final language:LanguageController;
 	public final searchOptions:SearchOptions;

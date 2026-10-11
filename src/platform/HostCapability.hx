@@ -9,6 +9,7 @@ enum HostCapability {
 	LocalIpc;
 	Terminal;
 	LanguageServices;
+	SourceControl;
 	Url;
 	SourcePlugins;
 }

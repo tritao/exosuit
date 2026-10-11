@@ -3,6 +3,7 @@ package app;
 import haxe.io.Bytes;
 import haxe.io.BytesBuffer;
 import haxe.Int64;
+import haxeon.wire.MessagePack;
 import scm.ScmApplyResult;
 import scm.ScmBlob;
 import scm.ScmChangeKind;
@@ -21,16 +22,20 @@ import scm.ScmRepository;
 import scm.ScmRepositoryHandle;
 import scm.ScmRepositoryKind;
 import scm.ScmSnapshot;
+import scm.ScmHead;
 import jobs.JobScheduler;
 import scm.fake.FakeScmProvider;
 import scm.fake.FakeScmRepositoryScript;
 import scm.git.GitStatusParser;
+import scm.git.GitBranchParser;
 import scm.git.GitProcess;
 import scm.git.GitBlobReader;
 import scm.git.GitScmProvider;
 import scm.git.GitVersion;
 import scm.ScmTrustStore;
 import scm.ScmService;
+import workspace.service.WorkspaceScmSnapshotCodec;
+import workspace.service.WorkspaceScmProtocol.ScmSnapshotResult;
 import process.ProcessManager;
 import sys.FileSystem;
 import sys.io.File;
@@ -41,6 +46,9 @@ class ScmGitTestMain {
 	static function require(condition:Bool, message:String):Void {
 		if (!condition) throw message;
 	}
+
+	static function normalizeLineEndings(value:String):String
+		return StringTools.replace(StringTools.replace(value, "\r\n", "\n"), "\r", "\n");
 
 	static function pump(scheduler:JobScheduler, complete:Void->Bool, message:String, timeout:Float = 10.0):Void {
 		var deadline = Sys.time() + timeout;
@@ -73,6 +81,15 @@ class ScmGitTestMain {
 		git.run(arguments, cwd, generation, value -> result = value, readOnly);
 		pump(scheduler, () -> result != null, "Git fixture command timed out: " + arguments.join(" "));
 		if (result == null) throw "Git fixture command returned no result: " + arguments.join(" ");
+		return result;
+	}
+
+	static function applyOperation(handle:ScmRepositoryHandle, scheduler:JobScheduler, operation:ScmOperation,
+			generation:Int):ScmJobResult<ScmApplyResult> {
+		var result:Null<ScmJobResult<ScmApplyResult>> = null;
+		handle.apply(operation, generation, value -> result = value);
+		pump(scheduler, () -> result != null, "Git SCM operation timed out: " + Std.string(operation));
+		if (result == null) throw "Git SCM operation returned no result: " + Std.string(operation);
 		return result;
 	}
 
@@ -150,6 +167,46 @@ class ScmGitTestMain {
 		return result;
 	}
 
+	static function validateOpenDocumentMarkers():Void {
+		var base = "one\ntwo\nthree\n";
+		var resource = new scm.ScmResource(Bytes.ofString("Fixture.hx"), ScmChangeKind.Modified);
+		var head = new ScmHead("main", null, false, null, 0, 0, false, ScmHeadOperation.None);
+		var snapshot = new ScmSnapshot(Int64.ofInt(1), head,
+			[new scm.ScmGroup(ScmGroupId.WorkingTree, [resource])]);
+		var repository = new ScmRepository("open-document", "fake", "/fixture");
+		var source = new ScmOpenDocumentMarkerTestSource(repository, snapshot, new ScmBlob(Bytes.ofString(base), false));
+		var document = new editor.Document(null, base, new syntax.SyntaxRegistry(), null, null, "Fixture.hx");
+		var registry = new plugin.PluginGutterMarkerRegistry(), scheduler = new JobScheduler();
+		var tracker = new scm.ScmOpenDocumentMarkers(source, repository.id, Bytes.ofString("Fixture.hx"), document,
+			"scm-open-test", registry, scheduler, 1024, function() {});
+		tracker.update(snapshot, true, false, Sys.time());
+		scheduler.update(64);
+		tracker.update(snapshot, true, false, Sys.time());
+		scheduler.update(64);
+		require(registry.forDocument(document).length == 0, "unchanged open document produced SCM gutter markers");
+
+		var selection = new editor.BufferSelection();
+		document.buffer.replaceAllText("one\nedited\nthree\n", selection);
+		tracker.update(snapshot, true, false, Sys.time());
+		scheduler.update(64);
+		require(registry.forDocument(document).length == 0, "SCM gutter diff ignored its 100 ms edit debounce");
+		Sys.sleep(0.12);
+		tracker.update(snapshot, true, false, Sys.time());
+		while (scheduler.activeCount() > 0) scheduler.update(64);
+		var markers = registry.forDocument(document);
+		require(markers.length == 1 && markers[0].kind == plugin.PluginGutterMarkerKind.Modified &&
+			markers[0].startLine == 1 && markers[0].endLine == 1,
+			"SCM gutter diff did not mark the edited line after its debounce");
+		require(source.originalCalls == 1, "SCM document marker tracker refetched the same index baseline");
+
+		document.buffer.undo(selection);
+		var cleanSnapshot = new ScmSnapshot(Int64.ofInt(2), head, []);
+		tracker.update(cleanSnapshot, false, false, Sys.time());
+		require(registry.forDocument(document).length == 0, "undo did not remove SCM gutter markers");
+		tracker.dispose();
+		document.dispose();
+	}
+
 	static function encodeLines(lines:Array<String>, trailingNewline:Bool):String {
 		var result = new StringBuf();
 		for (index in 0...lines.length) {
@@ -178,7 +235,170 @@ class ScmGitTestMain {
 		return (randomState & 0x7fffffff) % limit;
 	}
 
+	static function median(values:Array<Float>):Float {
+		var sorted = values.copy();
+		sorted.sort(function(a, b) return a < b ? -1 : a > b ? 1 : 0);
+		return sorted[Std.int(sorted.length / 2)];
+	}
+
+	static function resourceCount(snapshot:ScmSnapshot):Int {
+		var count = 0;
+		for (group in snapshot.groups) count += group.resources.length;
+		return count;
+	}
+
+	static function benchmarkRoot(label:String, root:String, blobPath:String):Void {
+		var temporaryDirectory = Sys.getEnv("TEMP");
+		if (temporaryDirectory == null || temporaryDirectory.length == 0) temporaryDirectory = Sys.getEnv("TMP");
+		if (temporaryDirectory == null || temporaryDirectory.length == 0) temporaryDirectory = Sys.getCwd();
+		var identity = Std.string(Std.int(Sys.time() * 1000000)) + "-" + Std.string(Std.random(1000000));
+		var privateDirectory = FileSystem.fullPath(temporaryDirectory + "/exosuit-scm-benchmark-" + identity),
+			emptyHooks = privateDirectory + "/empty-hooks", trustPath = privateDirectory + "/trust.json";
+		FileSystem.createDirectory(privateDirectory);
+		FileSystem.createDirectory(emptyHooks);
+		var scheduler = new JobScheduler(), processes = new ProcessManager(), git = new GitProcess(processes, scheduler, "", emptyHooks),
+			versionResult:Null<ScmJobResult<GitVersion>> = null, versionStarted = Sys.time();
+		git.probeVersion(1, value -> versionResult = value);
+		pump(scheduler, () -> versionResult != null, "SCM benchmark Git version probe timed out", 30.0);
+		if (versionResult == null || versionResult.value == null) throw "SCM benchmark requires Git 2.25 or newer";
+		var gitVersion = versionResult.value;
+		var versionProbeMillis = (Sys.time() - versionStarted) * 1000.0;
+		var service = new ScmService(processes, scheduler, git.executable, 50000, 0, false, trustPath, emptyHooks),
+			discovery:Null<ScmJobResult<Array<ScmRepository>>> = null;
+		service.discover(root, value -> discovery = value);
+		pumpService(service, scheduler, () -> discovery != null, 'SCM benchmark discovery timed out for "$label"', 60.0);
+		if (discovery == null || discovery.error != null || discovery.value == null || discovery.value.length == 0)
+			throw 'SCM benchmark root "$label" is not a Git repository: ' + (discovery == null || discovery.error == null ? "no repository" : discovery.error.message);
+		var repository:Null<ScmRepository> = null;
+		var fullRoot = StringTools.replace(FileSystem.fullPath(root), "\\", "/");
+		while (StringTools.endsWith(fullRoot, "/") && fullRoot.length > 1) fullRoot = fullRoot.substr(0, fullRoot.length - 1);
+		for (candidate in discovery.value) if (candidate.root == fullRoot) { repository = candidate; break; }
+		if (repository == null) repository = discovery.value[0];
+		var repositoryId = repository.id;
+		service.refreshNow(repositoryId);
+		var statusStarted = Sys.time(), maxFrameMillis = 0.0, maxServiceMillis = 0.0, maxSchedulerMillis = 0.0,
+			deadline = statusStarted + 600.0;
+		while (service.snapshot(repositoryId) == null && Sys.time() < deadline) {
+			var frameStarted = Sys.time(), serviceStarted = frameStarted;
+			service.update(Sys.time());
+			var serviceMillis = (Sys.time() - serviceStarted) * 1000.0;
+			if (serviceMillis > maxServiceMillis) maxServiceMillis = serviceMillis;
+			var schedulerStarted = Sys.time();
+			scheduler.update(32);
+			var schedulerMillis = (Sys.time() - schedulerStarted) * 1000.0;
+			if (schedulerMillis > maxSchedulerMillis) maxSchedulerMillis = schedulerMillis;
+			var frameMillis = (Sys.time() - frameStarted) * 1000.0;
+			if (frameMillis > maxFrameMillis) maxFrameMillis = frameMillis;
+			Sys.sleep(0.001);
+		}
+		var snapshot = service.snapshot(repositoryId);
+		if (snapshot == null) throw 'SCM benchmark status refresh timed out for "$label"';
+		require(maxFrameMillis < 16.67,
+			'SCM status refresh exceeded a 60 Hz frame slice for "$label": ${Std.string(maxFrameMillis)} ms');
+		var statusMillis = (Sys.time() - statusStarted) * 1000.0, resourceTotal = resourceCount(snapshot);
+		var changeNotifications = 0;
+		var unlisten = service.subscribe(function(_, _) changeNotifications++);
+		service.refreshNow(repositoryId);
+		var unchangedStarted = Sys.time(), observedRefreshWork = false, maxUnchangedFrameMillis = 0.0,
+			unchangedDeadline = unchangedStarted + 600.0;
+		while (Sys.time() < unchangedDeadline) {
+			var frameStarted = Sys.time();
+			service.update(Sys.time());
+			scheduler.update(32);
+			var frameMillis = (Sys.time() - frameStarted) * 1000.0;
+			if (frameMillis > maxUnchangedFrameMillis) maxUnchangedFrameMillis = frameMillis;
+			if (processes.activeCount() > 0 || scheduler.activeCount() > 0) observedRefreshWork = true;
+			if (observedRefreshWork && processes.activeCount() == 0 && scheduler.activeCount() == 0) break;
+			Sys.sleep(0.001);
+		}
+		var unchangedStatusMillis = (Sys.time() - unchangedStarted) * 1000.0,
+			unchangedSnapshot = service.snapshot(repositoryId);
+		require(observedRefreshWork && unchangedSnapshot != null && unchangedSnapshot.revision == snapshot.revision
+			&& changeNotifications == 0, "unchanged SCM refresh changed its revision or notified listeners");
+		require(maxUnchangedFrameMillis < 16.67,
+			'Unchanged SCM refresh exceeded a 60 Hz frame slice for "$label": ${Std.string(maxUnchangedFrameMillis)} ms');
+		unlisten();
+
+		// Include the same model-to-record conversion, MessagePack encoding and
+		// decoding used by the agent RPC response and browser/desktop client.
+		var wireBuildSamples:Array<Float> = [], encodeSamples:Array<Float> = [], decodeSamples:Array<Float> = [],
+			modelBuildSamples:Array<Float> = [], wireBytes = 0;
+		for (sample in 0...6) {
+			var started = Sys.time(), wireSnapshot = WorkspaceScmSnapshotCodec.encode(snapshot);
+			var wireBuildMillis = (Sys.time() - started) * 1000.0;
+			started = Sys.time();
+			var response:ScmSnapshotResult = {workspace: "benchmark", repository: repositoryId,
+				snapshot: wireSnapshot, error: null};
+			var encoded = MessagePack.encode(response), encodeMillis = (Sys.time() - started) * 1000.0;
+			started = Sys.time();
+			var decoded:ScmSnapshotResult = MessagePack.decode(encoded), decodeMillis = (Sys.time() - started) * 1000.0;
+			started = Sys.time();
+			var decodedModel = WorkspaceScmSnapshotCodec.decode(decoded.snapshot);
+			var modelBuildMillis = (Sys.time() - started) * 1000.0;
+			require(resourceCount(decodedModel) == resourceTotal && decodedModel.revision == snapshot.revision,
+				"SCM benchmark wire round-trip changed the snapshot");
+			if (sample > 0) {
+				wireBuildSamples.push(wireBuildMillis);
+				encodeSamples.push(encodeMillis);
+				decodeSamples.push(decodeMillis);
+				modelBuildSamples.push(modelBuildMillis);
+			}
+			wireBytes = encoded.length;
+		}
+
+		var processStarted = Sys.time(), batchProcess = git.startBlobBatch(root, false),
+			batchSpawnMillis = (Sys.time() - processStarted) * 1000.0;
+		batchProcess.cancel();
+		processes.release(batchProcess);
+		var blobReader = new GitBlobReader(processes, scheduler, git, root, false, 1024 * 1024),
+			blobStarted = Sys.time(), firstBlob = readBlob(blobReader, scheduler, "HEAD", Bytes.ofString(blobPath), 2),
+			coldBlobMillis = (Sys.time() - blobStarted) * 1000.0;
+		if (firstBlob.error != null || firstBlob.value == null) throw 'SCM benchmark could not read HEAD:$blobPath in "$label"';
+		var warmBlobSamples:Array<Float> = [];
+		for (index in 0...30) {
+			blobStarted = Sys.time();
+			var repeated = readBlob(blobReader, scheduler, "HEAD", Bytes.ofString(blobPath), 3 + index);
+			warmBlobSamples.push((Sys.time() - blobStarted) * 1000.0);
+			if (repeated.error != null || repeated.value == null) throw 'SCM benchmark warm blob read failed for "$label"';
+		}
+		var activeBatch = blobReader.activeProcessId();
+		blobReader.dispose();
+		service.dispose();
+		processes.shutdown();
+		deleteTree(privateDirectory);
+		Sys.println('SCM_BENCH label=$label git_version=$gitVersion resources=$resourceTotal truncated=${snapshot.truncated}'
+			+ ' status_ms=${Std.string(statusMillis)} max_frame_ms=${Std.string(maxFrameMillis)}'
+			+ ' unchanged_status_ms=${Std.string(unchangedStatusMillis)} max_unchanged_frame_ms=${Std.string(maxUnchangedFrameMillis)}'
+			+ ' unchanged_notifications=$changeNotifications'
+			+ ' max_service_update_ms=${Std.string(maxServiceMillis)} max_scheduler_update_ms=${Std.string(maxSchedulerMillis)}'
+			+ ' wire_build_median_ms=${Std.string(median(wireBuildSamples))} messagepack_encode_median_ms=${Std.string(median(encodeSamples))}'
+			+ ' messagepack_decode_median_ms=${Std.string(median(decodeSamples))} model_build_median_ms=${Std.string(median(modelBuildSamples))}'
+			+ ' wire_bytes=$wireBytes git_batch_spawn_ms=${Std.string(batchSpawnMillis)} cold_blob_ms=${Std.string(coldBlobMillis)}'
+			+ ' warm_blob_median_ms=${Std.string(median(warmBlobSamples))} warm_blob_max_ms=${Std.string(maximum(warmBlobSamples))}'
+			+ ' active_batch_id=$activeBatch');
+	}
+
+	static function maximum(values:Array<Float>):Float {
+		var result = 0.0;
+		for (value in values) if (value > result) result = value;
+		return result;
+	}
+
+	static function benchmark(args:Array<String>):Int {
+		if (args.length < 4 || (args.length - 1) % 3 != 0)
+			throw "Usage: --scm-benchmark <label> <repository-root> <committed-blob-path> [<label> <root> <blob-path> ...]";
+		var index = 1;
+		while (index < args.length) {
+			benchmarkRoot(args[index], args[index + 1], args[index + 2]);
+			index += 3;
+		}
+		return 0;
+	}
+
 	static function main():Int {
+		var arguments = Sys.args();
+		if (arguments.length > 0 && arguments[0] == "--scm-benchmark") return benchmark(arguments);
+		validateOpenDocumentMarkers();
 		var bytes = new BytesBuffer();
 		record(bytes, "# branch.oid abc123");
 		record(bytes, "# branch.head feature/test");
@@ -266,6 +486,11 @@ class ScmGitTestMain {
 		require(orderedSnapshot.groups[0].id == ScmGroupId.Merge && orderedSnapshot.groups[1].id == ScmGroupId.Index
 			&& orderedSnapshot.groups[2].id == ScmGroupId.WorkingTree && orderedSnapshot.groups[3].id == ScmGroupId.Untracked,
 			"snapshot did not canonicalize source control group ordering");
+		var parsedBranches = GitBranchParser.parse(Bytes.ofString(
+			"refs/heads/main\t*\t\nrefs/remotes/origin/main\t\t\nrefs/remotes/origin/HEAD\t\trefs/remotes/origin/main\n"));
+		require(parsedBranches.length == 2 && parsedBranches[0].current && !parsedBranches[0].remote
+			&& parsedBranches[1].remote && parsedBranches[1].name == "origin/main",
+			"Git branch parser lost local/remote branch details or kept a symbolic remote HEAD");
 		var fakeScheduler = new JobScheduler(), fake = new FakeScmProvider(fakeScheduler), script = new FakeScmRepositoryScript(
 			new ScmRepository("fixture", "fake", "/fixture"), new ScmFeatures(true, false, true, false, false), [orderedSnapshot], 2);
 		fake.add(script);
@@ -393,6 +618,9 @@ class ScmGitTestMain {
 		require(firstSnapshotValue.head.unborn, "Git status lost the unborn repository state");
 		require(!FileSystem.exists(fsmonitorMarker) && !FileSystem.exists(cleanMarker) && !FileSystem.exists(smudgeMarker),
 			"restricted Git status or original-content setup ran an fsmonitor or filter command");
+		var restrictedMutation = applyOperation(rootHandle, gitScheduler, ScmOperation.Stage("one.txt"), 730);
+		require(restrictedMutation.error != null && restrictedMutation.error.code == "untrusted",
+			"a restricted repository accepted a Git mutation");
 		var restrictedOriginal:Null<ScmJobResult<ScmBlob>> = null;
 		rootHandle.original(ScmRef.Index, "marked.txt", 731, value -> restrictedOriginal = value);
 		pump(gitScheduler, () -> restrictedOriginal != null, "Restricted original-content read timed out");
@@ -431,6 +659,272 @@ class ScmGitTestMain {
 			&& trustedOriginal.value.bytes.toString() == "before marker\n" && !FileSystem.exists(smudgeMarker),
 			"original-content reads stopped returning raw Git objects after trust");
 		runGit(git, gitScheduler, ["-c", "user.name=SCM Test", "-c", "user.email=scm@example.invalid", "commit", "--allow-empty", "-m", "initial"], discoveryRoot, 76);
+		var mutationRoot = StringTools.replace(FileSystem.fullPath(fixtureBase + "/real-operations"), "\\", "/");
+		FileSystem.createDirectory(mutationRoot);
+		runGit(git, gitScheduler, ["init"], mutationRoot, 760);
+		runGit(git, gitScheduler, ["config", "user.name", "SCM Test"], mutationRoot, 761);
+		runGit(git, gitScheduler, ["config", "user.email", "scm@example.invalid"], mutationRoot, 762);
+		File.saveContent(mutationRoot + "/tracked.txt", "base\n");
+		File.saveContent(mutationRoot + "/other.txt", "other base\n");
+		runGit(git, gitScheduler, ["add", "--", "tracked.txt", "other.txt"], mutationRoot, 763);
+		runGit(git, gitScheduler, ["commit", "-m", "baseline"], mutationRoot, 764);
+		var mutationTrust = new ScmTrustStore(fixtureBase + "/real-operation-trust.json");
+		var mutationProvider = new GitScmProvider(processManager, gitScheduler, git.executable, emptyHooks, mutationTrust, 100, 0);
+		mutationProvider.trust(mutationRoot);
+		var mutationDiscovery:Null<ScmJobResult<Array<ScmRepositoryHandle>>> = null;
+		mutationProvider.detect(mutationRoot, 765, value -> mutationDiscovery = value);
+		pump(gitScheduler, () -> mutationDiscovery != null, "Git mutation repository discovery timed out");
+		if (mutationDiscovery == null || mutationDiscovery.value == null || mutationDiscovery.value.length != 1)
+			throw "Git mutation fixture returned no repository handle";
+		var mutationHandle = mutationDiscovery.value[0];
+		var initialBranches:Null<ScmJobResult<Array<scm.ScmBranch>>> = null;
+		mutationHandle.branches(7651, value -> initialBranches = value);
+		pump(gitScheduler, () -> initialBranches != null, "Git branch listing timed out");
+		if (initialBranches == null || initialBranches.error != null || initialBranches.value == null)
+			throw "Git branch listing failed: " + (initialBranches == null || initialBranches.error == null ? "unknown" : initialBranches.error.message);
+		var currentReference:Null<String> = null;
+		for (branch in initialBranches.value) if (branch.current && !branch.remote) currentReference = branch.reference;
+		require(currentReference != null, "Git branch listing did not identify the current local branch");
+		var originalBranchReference:String = cast currentReference;
+		var createBranchResult = applyOperation(mutationHandle, gitScheduler, ScmOperation.CreateBranch("scm-branch-test"), 7652);
+		require(createBranchResult.error == null && runGit(git, gitScheduler, ["symbolic-ref", "--short", "HEAD"], mutationRoot, 7653).stdout.toString() == "scm-branch-test\n",
+			"Git branch creation did not create and check out the requested branch");
+		var checkoutMainResult = applyOperation(mutationHandle, gitScheduler, ScmOperation.Checkout(originalBranchReference), 7654);
+		require(checkoutMainResult.error == null
+			&& runGit(git, gitScheduler, ["symbolic-ref", "--short", "HEAD"], mutationRoot, 7655).stdout.toString()
+				== originalBranchReference.substring("refs/heads/".length) + "\n",
+			"Git branch checkout did not return to the previous local branch");
+		File.saveContent(mutationRoot + "/tracked.txt", "base\nchanged\n");
+		var stagedMutation = applyOperation(mutationHandle, gitScheduler, ScmOperation.Stage("tracked.txt"), 766);
+		require(stagedMutation.error == null && runGit(git, gitScheduler, ["show", ":tracked.txt"], mutationRoot, 767).stdout.toString() == "base\nchanged\n",
+			"the SCM stage operation did not update the Git index");
+		var unstagedMutation = applyOperation(mutationHandle, gitScheduler, ScmOperation.Unstage("tracked.txt"), 768);
+		require(unstagedMutation.error == null && runGit(git, gitScheduler, ["show", ":tracked.txt"], mutationRoot, 769).stdout.toString() == "base\n",
+			"the SCM unstage operation did not restore the index version");
+		File.saveContent(mutationRoot + "/other.txt", "other staged in bulk\n");
+		File.saveContent(mutationRoot + "/new.txt", "new staged in bulk\n");
+		var stageAllMutation = applyOperation(mutationHandle, gitScheduler, ScmOperation.StageAll, 7681);
+		require(stageAllMutation.error == null
+			&& runGit(git, gitScheduler, ["diff", "--cached", "--name-only"], mutationRoot, 7682).stdout.toString().split("\n").filter(value -> value.length > 0).join(",") == "new.txt,other.txt,tracked.txt",
+			"the SCM stage-all operation did not stage tracked and untracked changes");
+		var unstageAllMutation = applyOperation(mutationHandle, gitScheduler, ScmOperation.UnstageAll, 7683);
+		require(unstageAllMutation.error == null && runGit(git, gitScheduler, ["diff", "--cached", "--name-only"], mutationRoot, 7684).stdout.length == 0,
+			"the SCM unstage-all operation did not clear the index");
+		var stagePathsMutation = applyOperation(mutationHandle, gitScheduler, ScmOperation.StagePaths(["other.txt", "new.txt"]), 7685);
+		require(stagePathsMutation.error == null
+			&& runGit(git, gitScheduler, ["diff", "--cached", "--name-only"], mutationRoot, 7686).stdout.toString().split("\n").filter(value -> value.length > 0).join(",") == "new.txt,other.txt",
+			"the SCM grouped stage operation did not stage its exact paths");
+		var unstagePathsMutation = applyOperation(mutationHandle, gitScheduler, ScmOperation.UnstagePaths(["other.txt", "new.txt"]), 7687);
+		require(unstagePathsMutation.error == null && runGit(git, gitScheduler, ["diff", "--cached", "--name-only"], mutationRoot, 7688).stdout.length == 0,
+			"the SCM grouped unstage operation did not clear its exact paths");
+		var stagedForCommit = applyOperation(mutationHandle, gitScheduler, ScmOperation.Stage("tracked.txt"), 770);
+		require(stagedForCommit.error == null, "the SCM stage operation failed before commit");
+		var indexedBeforeDiscard = runGit(git, gitScheduler, ["show", ":tracked.txt"], mutationRoot, 7690).stdout.toString();
+		var trackedDiscardBytes = Bytes.ofString("discard me byte for byte\nwith a second line\n");
+		File.saveBytes(mutationRoot + "/tracked.txt", trackedDiscardBytes);
+		var discarded = applyOperation(mutationHandle, gitScheduler, ScmOperation.Discard("tracked.txt"), 7691);
+		var discardToken = discarded.value == null ? null : discarded.value.recoveryToken;
+		require(discarded.error == null && discardToken != null
+			&& runGit(git, gitScheduler, ["show", ":tracked.txt"], mutationRoot, 7692).stdout.toString()
+				== normalizeLineEndings(File.getContent(mutationRoot + "/tracked.txt"))
+			&& normalizeLineEndings(File.getContent(mutationRoot + "/tracked.txt")) == indexedBeforeDiscard,
+			"tracked discard did not restore the index version or return a recovery object (error="
+				+ (discarded.error == null ? "none" : discarded.error.message) + ", token=" + (discardToken == null ? "null" : discardToken)
+				+ ", index=" + runGit(git, gitScheduler, ["show", ":tracked.txt"], mutationRoot, 7698).stdout.toString()
+				+ ", worktree=" + File.getContent(mutationRoot + "/tracked.txt") + ")");
+		if (discardToken == null) throw "Tracked discard did not retain its recovery token";
+		var restoredDiscard = applyOperation(mutationHandle, gitScheduler,
+			ScmOperation.RestoreDiscard("tracked.txt", cast discardToken), 7693);
+		require(restoredDiscard.error == null && File.getBytes(mutationRoot + "/tracked.txt").compare(trackedDiscardBytes) == 0,
+			"tracked discard undo did not restore the exact worktree bytes");
+		var stageAgainAfterUndo = applyOperation(mutationHandle, gitScheduler, ScmOperation.Stage("tracked.txt"), 7694);
+		require(stageAgainAfterUndo.error == null, "could not restage tracked file after discard undo");
+		var untrackedDiscardBytes = Bytes.ofString("recoverable untracked bytes\n");
+		File.saveBytes(mutationRoot + "/untracked-discard.txt", untrackedDiscardBytes);
+		var untrackedSnapshot:Null<ScmJobResult<ScmSnapshot>> = null;
+		mutationHandle.refresh(7695, value -> untrackedSnapshot = value);
+		pump(gitScheduler, () -> untrackedSnapshot != null, "Git status refresh before untracked discard timed out");
+		var untrackedDiscard = applyOperation(mutationHandle, gitScheduler, ScmOperation.Discard("untracked-discard.txt"), 7696);
+		var untrackedToken = untrackedDiscard.value == null ? null : untrackedDiscard.value.recoveryToken;
+		require(untrackedDiscard.error == null && untrackedToken != null && !FileSystem.exists(mutationRoot + "/untracked-discard.txt"),
+			"untracked Git discard did not remove the file and retain its recovery object");
+		if (untrackedToken == null) throw "Untracked discard did not retain its recovery token";
+		var restoredUntracked = applyOperation(mutationHandle, gitScheduler,
+			ScmOperation.RestoreDiscard("untracked-discard.txt", cast untrackedToken), 7697);
+		require(restoredUntracked.error == null && File.getBytes(mutationRoot + "/untracked-discard.txt").compare(untrackedDiscardBytes) == 0,
+			"untracked Git discard undo did not restore the exact bytes");
+		var hunkOldLines:Array<String> = [], hunkNewLines:Array<String> = [];
+		for (line in 0...40) {
+			hunkOldLines.push("line-" + line + "\n");
+			hunkNewLines.push(line == 2 || line == 18 || line == 34 ? "changed-" + line + "\n" : "line-" + line + "\n");
+		}
+		var hunkOldText = hunkOldLines.join(""), hunkNewText = hunkNewLines.join("");
+		File.saveBytes(mutationRoot + "/hunk.txt", Bytes.ofString(hunkOldText));
+		runGit(git, gitScheduler, ["add", "--", "hunk.txt"], mutationRoot, 76981);
+		runGit(git, gitScheduler, ["-c", "user.name=SCM Test", "-c", "user.email=scm@example.invalid", "commit", "-m", "hunk baseline"], mutationRoot, 76982);
+		File.saveBytes(mutationRoot + "/hunk.txt", Bytes.ofString(hunkNewText));
+		var lineDiff = new LineDiff(hunkOldText, hunkNewText);
+		while (!lineDiff.step()) {}
+		if (lineDiff.result == null) throw "the partial-stage fixture diff did not complete";
+		var hunkChanges:Array<scm.LineDiffHunk> = cast lineDiff.result;
+		require(hunkChanges.length == 3, "the partial-stage fixture did not produce three separated hunks");
+		var hunkPatch = scm.ScmPatchBuilder.build(Bytes.ofString("hunk.txt"), hunkOldText, hunkNewText, hunkChanges, 1);
+		require(hunkPatch != null, "the partial-stage patch builder returned no patch for the middle hunk");
+		var stagedMiddleHunk = applyOperation(mutationHandle, gitScheduler,
+			ScmOperation.StagePatch("hunk.txt", cast hunkPatch), 76983);
+		var stagedHunkText = runGit(git, gitScheduler, ["show", ":hunk.txt"], mutationRoot, 76984).stdout.toString();
+		require(stagedMiddleHunk.error == null && stagedHunkText == hunkOldLines.slice(0, 18).join("")
+			+ hunkNewLines[18] + hunkOldLines.slice(19).join(""),
+			"staging one generated hunk did not leave the other two changes unstaged");
+		var failingHooks = fixtureBase + "/failing-hooks";
+		FileSystem.createDirectory(failingHooks);
+		File.saveBytes(failingHooks + "/pre-commit", Bytes.ofString("#!/bin/sh\necho EXOSUIT_TEST_HOOK_FAILURE >&2\nexit 1\n"));
+		runGit(git, gitScheduler, ["config", "core.hooksPath", failingHooks], mutationRoot, 76985);
+		var failedHookCommit = applyOperation(mutationHandle, gitScheduler,
+			ScmOperation.Commit("Retain this message after hook failure", false), 76986);
+		require(failedHookCommit.error != null && failedHookCommit.error.message.indexOf("EXOSUIT_TEST_HOOK_FAILURE") >= 0,
+			"a failing pre-commit hook did not report its output");
+		runGit(git, gitScheduler, ["config", "core.hooksPath", emptyHooks], mutationRoot, 76987);
+		var committed = applyOperation(mutationHandle, gitScheduler, ScmOperation.Commit("SCM commit message", false), 771);
+		require(committed.error == null && runGit(git, gitScheduler, ["log", "-1", "--format=%s"], mutationRoot, 772).stdout.toString() == "SCM commit message\n",
+			"the SCM commit operation did not pass its message through stdin");
+		File.saveContent(mutationRoot + "/tracked.txt", "base\namended\n");
+		var stagedForAmend = applyOperation(mutationHandle, gitScheduler, ScmOperation.Stage("tracked.txt"), 773);
+		var amended = stagedForAmend.error == null
+			? applyOperation(mutationHandle, gitScheduler, ScmOperation.Commit("Amended SCM message", true), 774)
+			: stagedForAmend;
+		require(amended.error == null && runGit(git, gitScheduler, ["log", "-1", "--format=%s"], mutationRoot, 775).stdout.toString() == "Amended SCM message\n",
+			"the SCM amend operation did not replace HEAD with the supplied message");
+		File.saveContent(mutationRoot + "/other.txt", "other changed\n");
+		var foreignPatch = runGit(git, gitScheduler, ["diff", "--", "other.txt"], mutationRoot, 776).stdout;
+		applyOperation(mutationHandle, gitScheduler, ScmOperation.StagePatch("tracked.txt", foreignPatch), 777);
+		require(runGit(git, gitScheduler, ["show", ":other.txt"], mutationRoot, 778).stdout.toString() == "other base\n",
+			"a hunk patch scoped to tracked.txt changed another file in the index");
+		File.saveContent(mutationRoot + "/tracked.txt", "base\namended with patch\n");
+		var trackedPatch = runGit(git, gitScheduler, ["diff", "--", "tracked.txt"], mutationRoot, 779).stdout;
+		var patched = applyOperation(mutationHandle, gitScheduler, ScmOperation.StagePatch("tracked.txt", trackedPatch), 780);
+		require(patched.error == null && runGit(git, gitScheduler, ["show", ":tracked.txt"], mutationRoot, 781).stdout.toString() == "base\namended with patch\n",
+			"the SCM hunk-stage operation did not apply its patch to the index");
+		var createdBranch = applyOperation(mutationHandle, gitScheduler, ScmOperation.CreateBranch("scm-operation-test"), 782);
+		require(createdBranch.error == null && runGit(git, gitScheduler, ["branch", "--show-current"], mutationRoot, 783).stdout.toString() == "scm-operation-test\n",
+			"the SCM create-branch operation did not check out the new branch");
+		mutationHandle.dispose();
+		for (handle in mutationDiscovery.value) handle.dispose();
+		var mutationService = new ScmService(processManager, gitScheduler, git.executable, 100, 0, true,
+			fixtureBase + "/real-operation-trust.json", emptyHooks), mutationServiceDiscovery:Null<ScmJobResult<Array<ScmRepository>>> = null;
+		mutationService.discover(mutationRoot, value -> mutationServiceDiscovery = value);
+		pumpService(mutationService, gitScheduler, () -> mutationServiceDiscovery != null && mutationServiceDiscovery.value != null
+			&& mutationService.snapshot(mutationServiceDiscovery.value[0].id) != null, "Git mutation service discovery timed out");
+		if (mutationServiceDiscovery == null || mutationServiceDiscovery.value == null || mutationServiceDiscovery.value.length != 1)
+			throw "Git mutation service did not discover its repository";
+		var serviceBranchResult:Null<ScmJobResult<ScmApplyResult>> = null;
+		mutationService.apply(mutationServiceDiscovery.value[0].id, ScmOperation.CreateBranch("scm-service-operation"), 784,
+			value -> serviceBranchResult = value);
+		pumpService(mutationService, gitScheduler, () -> serviceBranchResult != null, "Git service branch operation timed out");
+		require(serviceBranchResult != null && serviceBranchResult.error == null
+			&& runGit(git, gitScheduler, ["branch", "--show-current"], mutationRoot, 785).stdout.toString() == "scm-service-operation\n",
+			"the SCM service queue did not complete its Git branch operation");
+		mutationService.dispose();
+		var remoteRoot = fixtureBase + "/remote-operations", bareRemote = fixtureBase + "/scm-origin.git",
+			remoteWriter = fixtureBase + "/remote-writer";
+		FileSystem.createDirectory(remoteRoot);
+		runGit(git, gitScheduler, ["init"], remoteRoot, 786);
+		runGit(git, gitScheduler, ["config", "user.name", "SCM Test"], remoteRoot, 787);
+		runGit(git, gitScheduler, ["config", "user.email", "scm@example.invalid"], remoteRoot, 788);
+		runGit(git, gitScheduler, ["config", "core.hooksPath", emptyHooks], remoteRoot, 789);
+		File.saveContent(remoteRoot + "/README.txt", "remote base\n");
+		runGit(git, gitScheduler, ["add", "README.txt"], remoteRoot, 790);
+		runGit(git, gitScheduler, ["commit", "-m", "remote baseline"], remoteRoot, 791);
+		var remoteBranch = StringTools.trim(runGit(git, gitScheduler, ["branch", "--show-current"], remoteRoot, 792).stdout.toString());
+		runGit(git, gitScheduler, ["init", "--bare", bareRemote], fixtureBase, 793);
+		runGit(git, gitScheduler, ["--git-dir", bareRemote, "symbolic-ref", "HEAD", "refs/heads/" + remoteBranch], fixtureBase, 794);
+		runGit(git, gitScheduler, ["remote", "add", "origin", bareRemote], remoteRoot, 795);
+		var remoteTrust = new ScmTrustStore(fixtureBase + "/remote-trust.json"),
+			remoteProvider = new GitScmProvider(processManager, gitScheduler, git.executable, emptyHooks, remoteTrust, 100, 0);
+		remoteProvider.trust(remoteRoot);
+		require(remoteTrust.isTrusted(remoteRoot), "Could not trust the local bare-remote fixture");
+		var remoteDiscovery:Null<ScmJobResult<Array<ScmRepositoryHandle>>> = null;
+		remoteProvider.detect(remoteRoot, 796, value -> remoteDiscovery = value);
+		pump(gitScheduler, () -> remoteDiscovery != null, "Bare-remote fixture discovery timed out");
+		if (remoteDiscovery == null || remoteDiscovery.value == null || remoteDiscovery.value.length != 1)
+			throw "Bare-remote fixture returned no repository handle";
+		var remoteHandle = remoteDiscovery.value[0], remoteInitial:Null<ScmJobResult<ScmSnapshot>> = null;
+		remoteHandle.refresh(797, value -> remoteInitial = value);
+		pump(gitScheduler, () -> remoteInitial != null, "Bare-remote initial refresh timed out");
+		var firstPush = applyOperation(remoteHandle, gitScheduler, ScmOperation.Push, 798);
+		require(remoteInitial != null && remoteInitial.error == null && firstPush.error == null
+			&& StringTools.trim(runGit(git, gitScheduler, ["rev-parse", "refs/heads/" + remoteBranch], bareRemote, 799).stdout.toString())
+				== StringTools.trim(runGit(git, gitScheduler, ["rev-parse", "HEAD"], remoteRoot, 800).stdout.toString())
+			&& StringTools.trim(runGit(git, gitScheduler, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], remoteRoot, 801).stdout.toString())
+				== "origin/" + remoteBranch,
+			"the first SCM push did not publish HEAD and set its origin upstream");
+		runGit(git, gitScheduler, ["clone", bareRemote, remoteWriter], fixtureBase, 802);
+		runGit(git, gitScheduler, ["config", "user.name", "SCM Remote Writer"], remoteWriter, 803);
+		runGit(git, gitScheduler, ["config", "user.email", "remote@example.invalid"], remoteWriter, 804);
+		File.saveContent(remoteWriter + "/README.txt", "remote base\nremote change\n");
+		runGit(git, gitScheduler, ["add", "README.txt"], remoteWriter, 805);
+		runGit(git, gitScheduler, ["commit", "-m", "remote change"], remoteWriter, 806);
+		runGit(git, gitScheduler, ["push"], remoteWriter, 807);
+		var fetched = applyOperation(remoteHandle, gitScheduler, ScmOperation.Fetch(null), 808),
+			remoteBranches:Null<ScmJobResult<Array<scm.ScmBranch>>> = null;
+		remoteHandle.branches(809, value -> remoteBranches = value);
+		pump(gitScheduler, () -> remoteBranches != null, "Fetched branch listing timed out");
+		var foundRemoteBranch = false;
+		if (remoteBranches != null && remoteBranches.value != null)
+			for (branch in remoteBranches.value) if (branch.remote && branch.reference == "refs/remotes/origin/" + remoteBranch) foundRemoteBranch = true;
+		var pulled = applyOperation(remoteHandle, gitScheduler, ScmOperation.Pull, 810);
+		require(fetched.error == null && foundRemoteBranch && pulled.error == null
+			&& normalizeLineEndings(File.getContent(remoteRoot + "/README.txt")) == "remote base\nremote change\n",
+			"SCM fetch/pull did not fast-forward from the local bare remote");
+		File.saveContent(remoteRoot + "/README.txt", "remote base\nremote change\nlocal change\n");
+		runGit(git, gitScheduler, ["add", "README.txt"], remoteRoot, 811);
+		runGit(git, gitScheduler, ["commit", "-m", "local change"], remoteRoot, 812);
+		var refreshedRemote:Null<ScmJobResult<ScmSnapshot>> = null;
+		remoteHandle.refresh(813, value -> refreshedRemote = value);
+		pump(gitScheduler, () -> refreshedRemote != null, "Remote fixture refresh before push timed out");
+		var pushed = applyOperation(remoteHandle, gitScheduler, ScmOperation.Push, 814);
+		require(refreshedRemote != null && refreshedRemote.error == null && pushed.error == null
+			&& StringTools.trim(runGit(git, gitScheduler, ["rev-parse", "refs/heads/" + remoteBranch], bareRemote, 815).stdout.toString())
+				== StringTools.trim(runGit(git, gitScheduler, ["rev-parse", "HEAD"], remoteRoot, 816).stdout.toString()),
+			"SCM push did not publish a local commit to the bare remote");
+		runGit(git, gitScheduler, ["checkout", "-b", "scm-checkout-target"], remoteRoot, 817);
+		File.saveContent(remoteRoot + "/README.txt", "target branch content\n");
+		runGit(git, gitScheduler, ["add", "README.txt"], remoteRoot, 818);
+		runGit(git, gitScheduler, ["commit", "-m", "checkout target"], remoteRoot, 819);
+		runGit(git, gitScheduler, ["switch", remoteBranch], remoteRoot, 820);
+		var dirtyCheckoutBytes = Bytes.ofString("uncommitted local content\n");
+		File.saveBytes(remoteRoot + "/README.txt", dirtyCheckoutBytes);
+		var refreshedBeforeCheckout:Null<ScmJobResult<ScmSnapshot>> = null;
+		remoteHandle.refresh(821, value -> refreshedBeforeCheckout = value);
+		pump(gitScheduler, () -> refreshedBeforeCheckout != null, "Refresh before conflicting checkout timed out");
+		var blockedCheckout = applyOperation(remoteHandle, gitScheduler, ScmOperation.Checkout("refs/heads/scm-checkout-target"), 822);
+		require(refreshedBeforeCheckout != null && refreshedBeforeCheckout.error == null && blockedCheckout.error != null
+			&& StringTools.trim(runGit(git, gitScheduler, ["branch", "--show-current"], remoteRoot, 823).stdout.toString()) == remoteBranch
+			&& File.getBytes(remoteRoot + "/README.txt").compare(dirtyCheckoutBytes) == 0,
+			"SCM checkout overwrote conflicting local changes instead of refusing safely");
+		var fakeSsh = fixtureBase + "/fake-ssh.sh", shell = "/bin/sh";
+		if (Sys.systemName() == "Windows") {
+			var gitExecutable = StringTools.replace(git.executable == null ? "" : git.executable, "\\", "/");
+			var gitBin = gitExecutable.substr(0, gitExecutable.lastIndexOf("/"));
+			var gitRoot = gitBin.substr(0, gitBin.lastIndexOf("/"));
+			shell = gitRoot + "/bin/sh.exe";
+		}
+		require(FileSystem.exists(shell), "Could not locate the shell bundled with Git for the fake SSH fixture");
+		File.saveContent(fakeSsh, "#!/bin/sh\necho 'Permission denied (publickey)' >&2\nexit 255\n");
+		runGit(git, gitScheduler, ["config", "core.sshCommand", shellQuote(shell) + " " + shellQuote(fakeSsh)], remoteRoot, 824);
+		runGit(git, gitScheduler, ["config", "ssh.variant", "simple"], remoteRoot, 825);
+		runGit(git, gitScheduler, ["remote", "set-url", "origin", "ssh://git@example.invalid/scm.git"], remoteRoot, 826);
+		var refreshedBeforeAuth:Null<ScmJobResult<ScmSnapshot>> = null;
+		remoteHandle.refresh(827, value -> refreshedBeforeAuth = value);
+		pump(gitScheduler, () -> refreshedBeforeAuth != null, "Refresh before fake SSH auth failure timed out");
+		var rejectedAuth = applyOperation(remoteHandle, gitScheduler, ScmOperation.Push, 828);
+		require(refreshedBeforeAuth != null && refreshedBeforeAuth.error == null && rejectedAuth.error != null
+			&& rejectedAuth.error.code == "authentication_required"
+			&& rejectedAuth.error.message.indexOf("credential helper or SSH agent") >= 0,
+			"SCM fake-SSH failure did not explain non-interactive authentication (code="
+				+ (rejectedAuth.error == null ? "none" : rejectedAuth.error.code) + ", message="
+				+ (rejectedAuth.error == null ? "none" : rejectedAuth.error.message) + ")");
+		for (handle in remoteDiscovery.value) handle.dispose();
 		var linkedRoot = discoveryRoot + "/linked";
 		runGit(git, gitScheduler, ["worktree", "add", "-b", "scm-linked-fixture", linkedRoot, "HEAD"], discoveryRoot, 77);
 		var submoduleSource = fixtureBase + "/submodule-source";
@@ -528,6 +1022,18 @@ class ScmGitTestMain {
 		operationService.setWatchAvailable(operationRoot, true);
 		pumpService(operationService, gitScheduler, () -> operationService.snapshot(operationRepository.id) != null,
 			"Fake SCM operation service initial refresh timed out");
+		var unsupportedError:Null<scm.ScmError> = null;
+		var unsupportedOperation = operationService.apply(operationRepository.id, ScmOperation.StagePatch("blocked.txt", Bytes.alloc(0)), 900,
+			result -> unsupportedError = result.error);
+		require(unsupportedOperation.complete && unsupportedOperation.generation == 900 && unsupportedError != null
+			&& unsupportedError.code == "unsupported_operation" && operationsScript.operations.length == 0,
+			"SCM service did not enforce repository feature availability before queuing a mutation");
+		unsupportedError = null;
+		var unsupportedAmend = operationService.apply(operationRepository.id, ScmOperation.Commit("message", true), 901,
+			result -> unsupportedError = result.error);
+		require(unsupportedAmend.complete && unsupportedAmend.generation == 901 && unsupportedError != null
+			&& unsupportedError.code == "unsupported_operation" && operationsScript.operations.length == 0,
+			"SCM service allowed amend when the repository feature flag was disabled");
 		for (_ in 0...3) operationsScript.failNext("apply", new scm.ScmError("lock_contention", "index.lock is held", true));
 		var operationCompletions = 0, firstOperationError:Null<scm.ScmError> = null, secondOperationError:Null<scm.ScmError> = null;
 		var firstOperation = operationService.apply(operationRepository.id, ScmOperation.Stage("first.txt"), 901, function(result) {
@@ -638,16 +1144,22 @@ class ScmGitTestMain {
 		runGit(git, gitScheduler, ["config", "user.email", "scm@example.invalid"], mergeRoot, 922);
 		runGit(git, gitScheduler, ["config", "core.hooksPath", emptyHooks], mergeRoot, 923);
 		File.saveContent(mergeRoot + "/conflict.txt", "base\n");
+		File.saveContent(mergeRoot + "/conflict-both.txt", "base both\n");
 		runGit(git, gitScheduler, ["add", "conflict.txt"], mergeRoot, 924);
+		runGit(git, gitScheduler, ["add", "conflict-both.txt"], mergeRoot, 924);
 		runGit(git, gitScheduler, ["commit", "-m", "base"], mergeRoot, 925);
 		var baseBranch = StringTools.trim(runGit(git, gitScheduler, ["symbolic-ref", "--short", "HEAD"], mergeRoot, 926).stdout.toString());
 		runGit(git, gitScheduler, ["branch", "conflict-side"], mergeRoot, 927);
 		File.saveContent(mergeRoot + "/conflict.txt", "ours\n");
+		File.saveContent(mergeRoot + "/conflict-both.txt", "ours both\n");
 		runGit(git, gitScheduler, ["add", "conflict.txt"], mergeRoot, 928);
+		runGit(git, gitScheduler, ["add", "conflict-both.txt"], mergeRoot, 928);
 		runGit(git, gitScheduler, ["commit", "-m", "ours"], mergeRoot, 929);
 		runGit(git, gitScheduler, ["checkout", "conflict-side"], mergeRoot, 930);
 		File.saveContent(mergeRoot + "/conflict.txt", "theirs\n");
+		File.saveContent(mergeRoot + "/conflict-both.txt", "theirs both\n");
 		runGit(git, gitScheduler, ["add", "conflict.txt"], mergeRoot, 931);
+		runGit(git, gitScheduler, ["add", "conflict-both.txt"], mergeRoot, 931);
 		runGit(git, gitScheduler, ["commit", "-m", "theirs"], mergeRoot, 932);
 		runGit(git, gitScheduler, ["checkout", baseBranch], mergeRoot, 933);
 		var mergeAttempt = runGitResult(git, gitScheduler, ["merge", "conflict-side"], mergeRoot, 934);
@@ -669,6 +1181,31 @@ class ScmGitTestMain {
 		require(mergeSnapshot.head.operation == ScmHeadOperation.Merge && mergeConflict != null
 			&& mergeConflict.conflictKind == ScmConflictKind.BothModified,
 			"A real Git merge conflict was not refreshed into the merge group with its conflict kind");
+		require(mergeService.trust(mergeRepository.id), "Could not trust the merge-resolution fixture");
+		pumpService(mergeService, gitScheduler, () -> {
+			var repositories = mergeService.repositories(mergeRoot), current = mergeService.snapshot(mergeRepository.id);
+			return repositories.length == 1 && repositories[0].trusted && current != null;
+		}, "Trusted merge-resolution fixture did not refresh");
+		var conflictResolution:Null<ScmJobResult<ScmApplyResult>> = null;
+		mergeService.apply(mergeRepository.id, ScmOperation.ResolveConflict("conflict.txt", "ours"), 935,
+			value -> conflictResolution = value);
+		pumpService(mergeService, gitScheduler, () -> conflictResolution != null, "Git conflict resolution timed out");
+		var resolvedConflictContent = File.getContent(mergeRoot + "/conflict.txt");
+		var unresolvedConflictStages = runGit(git, gitScheduler, ["ls-files", "-u", "--", "conflict.txt"], mergeRoot, 936).stdout.toString();
+		require(conflictResolution != null && conflictResolution.error == null
+			&& normalizeLineEndings(resolvedConflictContent) == "ours\n" && unresolvedConflictStages.length == 0,
+			"Accept Ours failed (error=" + (conflictResolution == null || conflictResolution.error == null ? "none" : conflictResolution.error.message)
+				+ ", content=" + StringTools.replace(resolvedConflictContent, "\n", "\\n")
+				+ ", unmerged=" + StringTools.replace(unresolvedConflictStages, "\n", "\\n") + ")");
+		var bothResolution:Null<ScmJobResult<ScmApplyResult>> = null;
+		mergeService.apply(mergeRepository.id, ScmOperation.ResolveConflict("conflict-both.txt", "both"), 937,
+			value -> bothResolution = value);
+		pumpService(mergeService, gitScheduler, () -> bothResolution != null, "Git Accept Both resolution timed out");
+		var remainingConflictStages = runGit(git, gitScheduler, ["ls-files", "-u"], mergeRoot, 938).stdout.toString();
+		require(bothResolution != null && bothResolution.error == null
+			&& normalizeLineEndings(File.getContent(mergeRoot + "/conflict-both.txt")) == "ours both\ntheirs both\n"
+			&& remainingConflictStages.length == 0,
+			"Accept Both did not retain both sides in order and stage the resolved file");
 		mergeService.dispose();
 
 		var emptyDirectory = fixtureBase + "/not-a-repository";
@@ -846,6 +1383,14 @@ class ScmGitTestMain {
 		require(fallback.length == 1 && fallback[0].kind == LineDiffKind.Modified && fallback[0].oldStart == 0
 			&& fallback[0].oldCount == 2 && fallback[0].newStart == 0 && fallback[0].newCount == 2,
 			"cost budget did not degrade to one whole-range hunk");
+		var alignedDiff = new scm.ScmDiffDocument(gitScheduler, "fixture", "file.txt", "INDEX→WORKTREE", "1",
+			"a\nremove\nc\nend\n", "a\nadd one\nadd two\nc\nend\n");
+		pump(gitScheduler, () -> alignedDiff.hunks.length > 0, "side-by-side diff did not finish");
+		require(alignedDiff.alignedOldText == "a\nremove\n\nc\nend\n"
+			&& alignedDiff.alignedCurrentText == "a\nadd one\nadd two\nc\nend\n"
+			&& alignedDiff.alignedOldChangedLines.length == 2 && alignedDiff.alignedCurrentChangedLines.length == 2,
+			"side-by-side diff did not insert aligned padding rows around the changed hunk");
+		alignedDiff.dispose();
 		for (caseIndex in 0...100) {
 			var original:Array<String> = [];
 			for (index in 0...nextRandom(18)) original.push("line-" + nextRandom(9));
@@ -868,6 +1413,7 @@ class ScmGitTestMain {
 		var largeMillis = (Sys.time() - started) * 1000.0;
 		require(largeHunks.length == 50 && reconstruct(largeOldText, largeNewText, largeHunks) == largeNewText,
 			"10,000-line scattered diff did not converge to its edits");
+		require(largeMillis < 100.0, '10,000-line scattered diff exceeded 100 ms: ${largeMillis} ms');
 		require(lastMaxDiffSliceMillis < 4.0, 'LineDiff slice exceeded 4 ms: ${lastMaxDiffSliceMillis} ms');
 		Sys.println('LINE_DIFF lines=10000 edits=50 elapsed_ms=${Std.int(largeMillis)} max_slice_ms=${lastMaxDiffSliceMillis}');
 		Sys.println("PASS: SCM model, porcelain parser, trust store, nested Git discovery, restricted filter status, service, blob reader and line diff");

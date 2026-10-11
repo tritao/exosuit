@@ -21,10 +21,11 @@ The focused Windows Haxeon run of `tests/scm-git` passes branch headers,
 unborn/detached/no-upstream/gone-upstream states, ordinary/rename/copy/unmerged/
 untracked/ignored entries, all seven conflict codes, submodule state, path edge
 cases, model and feature behavior, fake-provider latency/cancellation, and
-100 deterministic line-edit reconstruction cases. A 10,000-line fixture with
-50 scattered edits converged in 3 ms total. The project is registered in
-`scripts/test.sh`. The per-slice 4 ms ceiling and full M17.1 acceptance suite
-are not yet qualified.
+100 deterministic line-edit reconstruction cases. The full focused Windows
+`tests/scm-git` acceptance suite now passes. Its 10,000-line fixture with 50
+scattered edits converged in 8 ms total with a 0.357 ms maximum diff slice,
+within the 4 ms per-slice and 100 ms convergence limits. The project is
+registered in `scripts/test.sh`.
 
 The asynchronous Git runner now discovers a configured executable or PATH,
 checks the minimum version, uses bounded stdout/stderr capture and stable error
@@ -42,8 +43,8 @@ restart, process-exit recovery, and a 60-second idle-expiry hook. The focused
 Windows run passed 1,000 sequential reads on one process, missing and ambiguous
 objects, oversized blobs, binary detection, interleaved cancellation, config
 restart, idle expiry, process exit mid-response, and restricted-mode reads.
-`LineDiff` now normalizes CRLF to LF for comparisons; its 10,000-line/50-edit
-run completed in 3 ms with a 0.144 ms maximum observed slice.
+`LineDiff` normalizes CRLF to LF for comparisons, keeping Windows checkout
+line endings consistent across diff boundaries.
 
 Implementation deviation: a real Git-for-Windows run showed that
 `cat-file --batch --filters` reports the raw object size but can emit a larger
@@ -86,13 +87,125 @@ The Windows NativeKit file-watch backend is committed on `exosuit-followon` as
 `64d35384`. The root M17.2 follow-up slice is committed on `main` as
 `92f0b05`.
 
-M17.2's local service behavior and acceptance fixtures are complete. The
-remaining paired-device trust restriction is implemented with the M17.3 RPC
-origin checks. Real Git mutation commands remain intentionally unavailable
-until M17.6. No Source Control UI is included yet.
+At the M17.2 delivery point, mutations were deferred to M17.6 and no Source
+Control UI was included. Later M17.4–M17.7 implementation and validation are
+recorded below.
 
-Next: audit existing workspace method IDs, authenticated connection origins,
-device grants and watch lifetimes, then implement the M17.3 protocol slice.
+### M17.3 protocol and agent integration, 2026-10-10
+
+The protocol uses permanent method IDs 160–166 after auditing the existing
+workspace ranges. The agent binds the shared `ScmService` behind authenticated
+origin and per-method read/write/remote grant checks. SCM watches have epoch and
+sequence cursors with replay/reset, original blob replies are capped, apply
+requests use expected revisions and operation-ID deduplication, and trust is
+accepted only for local desktop origins. Repository IDs are checked against
+registered workspace roots. Local explorer roots select `LocalScmSource`; the
+remote `WorkspaceFileTreeModel` carries the attachment's `RpcScmSource`, so one
+active explorer root cannot select both.
+
+Approved-device grant editing now persists the full grant set and closes the
+active authenticated transport so a narrowed grant immediately retires its
+RPC bindings, SCM work and watches. The Remote Access panel shows the three SCM
+permissions; new devices receive read access by default, while write and remote
+operations require explicit approval. Grant persistence across a pairing
+manager restart and immediate transport closure are covered by the pairing
+suite; SCM cancellation and watch cleanup on transport closure are covered by
+the workspace SCM RPC fixture.
+
+Validation on Windows: `python scripts/test-workspace-scm.py` passes against a
+temporary real Git repository, including capability denials, local-only trust,
+stale revisions, duplicate operations, bounded raw-original reads, watcher
+cleanup, cancellation and reconnect recovery. An oversized blob receives the
+protocol's explicit `too_large` response. The focused pairing command
+`python scripts/haxeon_cli.py run --project tests/workspace-transport/haxeon.json
+-- --noise-only` passes; `python scripts/haxeon_cli.py run --project
+tests/remote-access-panel/haxeon.json` passes. The source-tree `python
+scripts/run.py` rebuilt the agent and graphical targets and launched a
+responsive `exosuit` window. The native screen is not exposed by this session's
+UI inspection surface, so visual dialog absence was not confirmed.
+
+M17.3 is complete. M17.4–M17.7 implementation is now present: shared editor
+decorations and status items, a local/RPC Source Control panel, staged and
+working-tree diffs, mutations and commits, branch/remote actions, synchronized
+side-by-side panes, and conflict assistance.
+
+### M17.4–M17.7 implementation and focused validation, 2026-10-10
+
+The editor hooks now clear owner-scoped gutter markers from the retained scene,
+render resource badges and contributed status items, and refresh unified and
+aligned side-by-side diffs when their base or source buffer changes. The Source
+Control panel lists repositories and change groups, opens the appropriate diff
+or file, and provides staging, discard, commit, branch, remote and conflict
+actions. Local file arguments with Windows backslashes now derive the correct
+Explorer root, so SCM follows the folder the user opened.
+
+Validation on Windows: the `scm-git` suite passes the existing real-Git model,
+service, mutation, discard/undo, hunk, hook-failure, amend, conflict and blob
+reader coverage, plus a new local bare-remote fixture for initial push/upstream,
+fetch, fast-forward pull, later push and safe checkout refusal. The focused UI
+smoke passes gutter owner-removal, unified diff, side-by-side alignment and
+Source Control panel phases. The panel uses a real merge-conflict repository,
+checks staged, changed, untracked and conflicted grouping, verifies refresh
+after an external commit, and keeps its key groups visible at 320 px desktop
+width. The status-bar layout and workspace SCM RPC suites pass. The fake-SSH
+Git fixture confirms actionable credential-helper/SSH-agent guidance. The
+Source Control panel smoke also opens the conflict menu, selects Accept Ours,
+and verifies the resolved file and refreshed Git state. A read-only remote
+attachment smoke expands a group, shows its file row and confirms commit and
+row-mutation controls are absent. The corrected `python scripts/run.py` build
+launched a responsive source `exosuit` window; the SHA-256 runtime dialog did
+not recur.
+
+The shared Python runner `scripts/test-scm-ui.py` now builds the same isolated
+fixtures on Windows and Linux; Linux runs the UI under Xvfb, while Windows uses
+its native window. The compatibility shell wrapper delegates to that runner.
+All eight Windows phases pass: panel grouping and refresh, phone-width diff,
+conflict resolution, remote read-only controls, UI stage/unstage/discard with
+real Git state checks, UI commit message and button behavior, nested submodule
+rendering and child-only staging, and Explorer/status badges. The optional PNG
+capture still calls ImageMagick's X11-only `import` command, so Windows
+screenshots are not claimed. The isolated
+wasm32 build was exercised in a real connected-browser pairing flow on WSL2
+Ubuntu 24.04 with Chrome 154 on Windows and Wrangler 4.147.0. The
+browser received exactly `workspace.scm.read`, opened a real Git change, showed
+no write or remote actions, and opened a full-width diff at 320 × 740. The host
+fixture binds the production `WorkspaceScmService` and `WorkspaceRpcServer`;
+`tests/workspace-scm` separately covers the real agent RPC service. The runner
+now terminates its isolated Windows Chrome process tree, and its ports and mode
+are passed as arguments so WSL environment forwarding is not required.
+
+The complete Windows Source Control UI runner now passes, including the
+rendered `main ↑1 ↓1` status item and untracked-file badges rolling up through
+two folder levels. Windows and Linux performance measurements are recorded in
+`docs/release-qualification.md`; all initial and unchanged refresh frame
+assertions stayed below 16.67 ms, with zero notifications for unchanged
+refreshes. The Linux Xvfb runner remains unqualified because this WSL image
+lacks GTK3 development files, so NativeKit selects its no-window stub.
+
+Additional native Windows runs pass the gutter marker, marker owner-removal,
+unified diff document refresh and synchronized side-by-side diff phases. The
+`tests/remote-access-panel` UI suite and `tests/workspace-transport --noise-only`
+also pass, covering default read grants, owner editing, immediate transport
+closure on narrowing, and grant persistence across a pairing-manager restart.
+
+Windows revalidation on 2026-10-10 passes `tests/scm-git`,
+`tests/workspace-scm`, `tests/scm-watch`, `tests/remote-access-panel`,
+`tests/workspace-transport --noise-only`, the status-bar fixture, the five
+gutter/diff UI phases and all eight Source Control UI phases. The status-bar
+fixture now also checks resource-decorated editor-tab titles. A fresh
+`scripts/benchmark-scm.py` run measured the current 95-resource worktree and
+49,999 untracked files without truncation; maximum refresh frames were 12.134
+and 14.590 ms, with zero notifications on unchanged refreshes. The detailed
+results are recorded in `docs/release-qualification.md`.
+
+One full UI invocation timed out once during the discard phase. Its isolated
+rerun and the subsequent full eight-phase rerun passed. The timeout now reports
+the fixture's index/worktree state and restored file bytes to make a repeat
+failure diagnosable.
+
+M17 remains in progress: the one-week editor-only-commit exit criterion still
+requires a week of real use. The Linux Xvfb runner still awaits a GTK3-capable
+environment. The paired browser's read-only review path has already passed.
 
 ## Windows workspace startup and filesystem backend, 2026-10-08
 

@@ -14,8 +14,10 @@ class FakeScmRepositoryScript {
 	public final blobs:Map<String, ScmBlob> = [];
 	public final failures:Map<String, Array<ScmError>> = [];
 	public final operations:Array<ScmOperation> = [];
+	public final branches:Array<scm.ScmBranch> = [];
 	public var latencySteps:Int;
 	public var refreshCalls:Int = 0;
+	public var cancelledOperations:Int = 0;
 	var snapshotCursor:Int = 0;
 
 	public function new(repository:scm.ScmRepository, features:scm.ScmFeatures, snapshots:Array<ScmSnapshot>, latencySteps:Int = 0) {

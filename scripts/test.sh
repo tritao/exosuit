@@ -54,6 +54,7 @@ run_test haxeon-rpc
 run_test scm-git
 run_test scm-watch
 bash "$root_dir/scripts/test-workspace-transport.sh"
+python3 "$root_dir/scripts/test-workspace-scm.py"
 bash "$root_dir/scripts/test-relay.sh"
 bash "$root_dir/scripts/test-workspace-persistence.sh"
 bash "$root_dir/scripts/test-workspace-attachment.sh"

@@ -3,6 +3,7 @@ package ui;
 import haxeon.ui.widgets.overlays.TooltipPlacement;
 
 import haxeon.ui.Rect;
+import haxeon.ui.Color;
 
 import haxeon.ui.LayoutAxis;
 import haxeon.ui.LayoutStyle;
@@ -28,12 +29,17 @@ class EditorTabsView implements View {
 	final filenames:Map<String, String>;
 	final dark:Bool;
 	final tooltipDelay:Float;
+	final tabColors:Map<String, Color>;
+	final decorationRevision:Int;
 
-	public function new(tabs:Tabs, filenames:Map<String, String>, dark:Bool, tooltipDelay:Float = 0.8) {
+	public function new(tabs:Tabs, filenames:Map<String, String>, dark:Bool, tooltipDelay:Float = 0.8,
+			?tabColors:Map<String, Color>, decorationRevision:Int = 0) {
 		this.tabs = tabs;
 		this.filenames = filenames;
 		this.dark = dark;
 		this.tooltipDelay = tooltipDelay;
+		this.tabColors = tabColors == null ? new Map() : tabColors;
+		this.decorationRevision = decorationRevision;
 	}
 
 	public function build(context:BuildContext):RenderNode {
@@ -49,14 +55,26 @@ class EditorTabsView implements View {
 			var scrollState = context.state(context.id("tab-scroll-state"), new TabScrollState());
 			var state = scrollState.value;
 			tabs.headerRevision = function() {
-				var revision = dark + ":" + tooltipDelay + ":" + visibleTooltip.value + ":" + context.animations.revision + ":" +
+				var revision = dark + ":" + tooltipDelay + ":" + decorationRevision + ":" + visibleTooltip.value + ":" + context.animations.revision + ":" +
 					state.controller.offsetX + ":" + state.controller.viewportWidth + ":" + state.labelViewportWidth;
 				for (item in tabs.items) {
 					var filename = filenames.get(item.key);
+					var tint = tabColors.get(item.key);
 					revision += ":" + item.key.length + ":" + item.key + ":" + item.label.length + ":" + item.label +
-						":" + item.enabled + ":" + item.icon + ":" + filename + ":" + (item.onClose != null);
+						":" + item.enabled + ":" + item.icon + ":" + filename + ":" + (item.onClose != null) +
+						":" + (tint == null ? "" : tint.red + "," + tint.green + "," + tint.blue + "," + tint.alpha);
 				}
 				return revision;
+			};
+			var previousHeaderBuilt = tabs.onTabHeaderBuilt;
+			tabs.onTabHeaderBuilt = function(key, node) {
+				if (previousHeaderBuilt != null) previousHeaderBuilt(key, node);
+				var tint = tabColors.get(key);
+				if (tint == null) return;
+				node.walk(function(part) {
+					if (part.layout.text != null && part.layout.text.length > 0)
+						part.layout.textColor = tint;
+				});
 			};
 			var memo = context.state(context.id("tab-labels"), new Map<String, String>()).value;
 			var typography = context.resolveTextRole(TextRole.Button, TextStyleOverride.paragraph(TextWrap.None));
