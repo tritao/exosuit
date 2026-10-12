@@ -51,9 +51,9 @@ class EditorMinimap implements View {
 	}
 
 	public function resolveTextLayout(layout:TextEditorLayout):Void {
-		if (resolvedLayout == layout && resolvedRevision == layout.geometryRevision) return;
+		if (resolvedLayout == layout && resolvedRevision == layout.visualRowsRevision) return;
 		resolvedLayout = layout;
-		resolvedRevision = layout.geometryRevision;
+		resolvedRevision = layout.visualRowsRevision;
 		lineMap = new MinimapLineMap(layout.visualRows());
 		positionRevision++;
 	}
