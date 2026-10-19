@@ -110,7 +110,13 @@ class EditorPane implements View {
 	var definitionState:Int = -1;
 
 	public function pointerModifiersChanged(modifiers:Int):Void {
-		if (updateDefinitionUnderline(modifiers == haxeon.ui.core.UiModifier.Control)) onEdited();
+		if (updateDefinitionUnderline(definitionModifier(modifiers))) onEdited();
+	}
+
+	/** Control alone selects definitions; Caps Lock and Num Lock states are not held modifiers. */
+	static function definitionModifier(modifiers:Int):Bool {
+		var held = haxeon.ui.core.UiModifier.Shift | haxeon.ui.core.UiModifier.Control | haxeon.ui.core.UiModifier.Alt | haxeon.ui.core.UiModifier.Super;
+		return (modifiers & held) == haxeon.ui.core.UiModifier.Control;
 	}
 
 	function updateDefinitionUnderline(control:Bool):Bool {
@@ -422,10 +428,10 @@ class EditorPane implements View {
 		};
 		area.onTextPointerMove = function(offset, event) {
 			pointerOffset = offset;
-			if (updateDefinitionUnderline(event.modifiers == haxeon.ui.core.UiModifier.Control)) onEdited();
+			if (updateDefinitionUnderline(definitionModifier(event.modifiers))) onEdited();
 		};
 		area.onTextPointerDown = function(offset, event) {
-			var definition = event.button == 0 && event.modifiers == haxeon.ui.core.UiModifier.Control;
+			var definition = event.button == 0 && definitionModifier(event.modifiers);
 			if (event.button != 1 && !definition) return false;
 			if (onActivated != null) onActivated();
 			var position = EditorCoordinates.position(document, offset);
