@@ -66,6 +66,8 @@ def main() -> int:
         print(f"Unable to build the workspace agent: {error}", file=sys.stderr)
         return 127
 
+    # --watch rebuilds and relaunches the app after source edits; the rest is forwarded to the app.
+    app_arguments = [argument for argument in sys.argv[1:] if argument != "--watch"]
     arguments = [
         "run",
         "--project",
@@ -73,7 +75,9 @@ def main() -> int:
     ]
     if self_hosted:
         arguments.append("--self-hosted")
-    arguments.extend(["--", *sys.argv[1:]])
+    if len(app_arguments) != len(sys.argv) - 1:
+        arguments.append("--watch")
+    arguments.extend(["--", *app_arguments])
 
     try:
         environment = {
