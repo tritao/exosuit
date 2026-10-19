@@ -26,7 +26,8 @@ class ConfigurationTestMain {
 		require(config.LanguageServerCommand.resolve(["configured", "argument"], "environment", "bundled", true, "compiler").join("|") == "configured|argument"
 			&& config.LanguageServerCommand.resolve([], "environment", "bundled", true, "compiler")[0] == "environment"
 			&& config.LanguageServerCommand.resolve([], "", "bundled", true, "compiler")[0] == "bundled"
-			&& config.LanguageServerCommand.resolve([], null, "bundled", false, "compiler")[0] == "compiler/scripts/haxeon-lsp",
+			&& config.LanguageServerCommand.resolve([], null, "bundled", false, "compiler")[0] == "compiler/scripts/haxeon-lsp"
+			&& config.LanguageServerCommand.resolve([], null, "bundled", false, "compiler", true).join("|") == "compiler/.tools/hashlink/hl.exe|compiler/out/haxeon-lsp.hl",
 			"language server command overrides lost their precedence or argument boundaries");
 		var discovery = arguments[2] + "/discovery", launcher = discovery + "/haxeon/scripts/haxeon-lsp";
 		for (suffix in ["", "/haxeon", "/haxeon/scripts", "/graphical", "/graphical/build", "/graphical/build/host"])

@@ -15,7 +15,7 @@ class LanguageServerCommand {
 		if (root == null) root = findCompilerRoot(Sys.getCwd());
 		if (root == null) root = "haxeon";
 		return resolve(settings.haxeonCommand, Sys.getEnv("HAXEON_LSP"), bundled,
-			FileSystem.exists(bundled) && !FileSystem.isDirectory(bundled), FileSystem.absolutePath(root));
+			FileSystem.exists(bundled) && !FileSystem.isDirectory(bundled), FileSystem.absolutePath(root), Sys.systemName() == "Windows");
 	}
 
 	/** CLI launches run from the manifest folder, which may be below the checkout root. */
@@ -49,10 +49,12 @@ class LanguageServerCommand {
 	}
 
 	public static function resolve(configured:Array<String>, environment:Null<String>, bundled:String,
-			bundledAvailable:Bool, compilerRoot:String):Array<String> {
+			bundledAvailable:Bool, compilerRoot:String, windows:Bool = false):Array<String> {
 		if (configured.length > 0) return configured.copy();
 		if (environment != null && environment.length > 0) return [environment];
 		if (bundledAvailable) return [bundled];
+		// Windows cannot execute the Bash launcher; run the server built by scripts/build.py directly.
+		if (windows) return [compilerRoot + "/.tools/hashlink/hl.exe", compilerRoot + "/out/haxeon-lsp.hl"];
 		return [compilerRoot + "/scripts/haxeon-lsp"];
 	}
 }
