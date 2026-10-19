@@ -650,11 +650,19 @@ class LanguageServiceClient {
 	static function eligible(document:Document):Bool
 		return document.path != null && StringTools.endsWith(document.path.toLowerCase(), ".hx");
 
-	static function uri(path:String):String
-		return StringTools.startsWith(path, "file://") ? path : "file://" + path;
+	static final windows:Bool = Sys.systemName() == "Windows";
 
-	static function pathFromUri(value:String):String
-		return StringTools.startsWith(value, "file://") ? value.substring(7) : value;
+	// Windows drive paths take a slash before the drive letter: file:///C:/x.
+	static function uri(path:String):String {
+		if (StringTools.startsWith(path, "file://")) return path;
+		return windows && ~/^[A-Za-z]:/.match(path) ? "file:///" + path : "file://" + path;
+	}
+
+	static function pathFromUri(value:String):String {
+		if (!StringTools.startsWith(value, "file://")) return value;
+		var path = value.substring(7);
+		return windows && ~/^\/[A-Za-z]:/.match(path) ? path.substring(1) : path;
+	}
 
 	static function fileName(path:String):String {
 		var slash = path.lastIndexOf("/");
