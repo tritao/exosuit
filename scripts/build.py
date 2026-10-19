@@ -7,7 +7,7 @@ import os
 import sys
 from pathlib import Path
 
-from haxeon_cli import run_cli
+from haxeon_cli import ensure_language_server, run_cli
 
 
 def main() -> int:
@@ -23,6 +23,9 @@ def main() -> int:
     agent_arguments.extend(sys.argv[1:])
 
     try:
+        status = ensure_language_server(root_dir)
+        if status != 0:
+            return status
         status = run_cli(root_dir, agent_arguments)
         if status != 0:
             return status

@@ -8,7 +8,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from haxeon_cli import run_cli
+from haxeon_cli import ensure_language_server, run_cli
 
 
 def _windows_npm_codex_environment() -> dict[str, str]:
@@ -53,6 +53,9 @@ def main() -> int:
     if self_hosted:
         agent_arguments.append("--self-hosted")
     try:
+        status = ensure_language_server(root_dir)
+        if status != 0:
+            return status
         status = run_cli(root_dir, agent_arguments)
         if status != 0:
             return status

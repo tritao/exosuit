@@ -97,6 +97,32 @@ def run_cli(
     ).returncode
 
 
+def ensure_language_server(project_root: Path) -> int:
+    """Build out/haxeon-lsp.hl on Windows, where the Bash launcher cannot rebuild it on demand."""
+    if os.name != "nt":
+        return 0
+    haxeon_root = Path(
+        os.environ.get("HAXEON_ROOT") or str(project_root / "haxeon")
+    ).expanduser().resolve(strict=True)
+    haxe = haxeon_root / ".tools" / "haxe" / "haxe.exe"
+    project = haxeon_root / "haxeon-lsp.hxml"
+    server = haxeon_root / "out" / "haxeon-lsp.hl"
+    if server.is_file():
+        built = server.stat().st_mtime_ns
+        sources = [project, *(haxeon_root / "src").rglob("*.hx")]
+        if not any(source.stat().st_mtime_ns > built for source in sources):
+            return 0
+    if not haxe.is_file():
+        raise RuntimeError(
+            "Pinned Haxe compiler is not bootstrapped; run the Haxeon Windows "
+            "toolchain bootstrap first"
+        )
+    server.parent.mkdir(parents=True, exist_ok=True)
+    return subprocess.run(
+        [str(haxe), "--cwd", str(haxeon_root), str(project)], check=False
+    ).returncode
+
+
 def main() -> int:
     project_root = Path(
         os.environ.get("EXOSUIT_PROJECT_ROOT") or Path(__file__).resolve().parent.parent
