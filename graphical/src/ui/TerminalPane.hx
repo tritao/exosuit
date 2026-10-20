@@ -137,10 +137,13 @@ class TerminalPane implements TerminalPanel {
 		cursorOutlineColor = foreground;
 		fonts = providedFonts == null ? FontCollection.create() : providedFonts;
 		if (ownsFonts) {
-			var mono = Sys.getEnv("EXOSUIT_TERMINAL_FONT");
-			if (mono == null || mono.length == 0)
-				mono = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf";
-			if (FileSystem.exists(mono)) fonts.add(mono, FontFamily.Monospace);
+			// The first monospace face present on this host; system fallbacks are proportional.
+			for (mono in [Sys.getEnv("EXOSUIT_TERMINAL_FONT"), "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+					"/System/Library/Fonts/Menlo.ttc", "C:/Windows/Fonts/consola.ttf"])
+				if (mono != null && mono.length > 0 && FileSystem.exists(mono)) {
+					fonts.add(mono, FontFamily.Monospace);
+					break;
+				}
 			fonts.addSystemFallbacks();
 		}
 		updateFontSize();
