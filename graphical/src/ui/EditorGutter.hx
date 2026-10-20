@@ -28,6 +28,8 @@ import haxeon.ui.TextLayout.TextPosition;
 
 /** Retained visible line-number labels, sharing the editor scroll transform. */
 class EditorGutter implements View {
+	static inline final MARKER_LANE_WIDTH = 5.0;
+
 	final key:String;
 	final buffer:TextBuffer;
 	final foreground:Color;
@@ -83,7 +85,8 @@ class EditorGutter implements View {
 		markerState.update(markers, markerRevision, context.theme.tokens.success,
 			context.theme.tokens.accent, context.theme.tokens.danger);
 		var style = new LayoutStyle();
-		style.width = LayoutAxis.fit();
+		// Fixed, not fit: Clay compresses fit children (even with a minimum) when the source view fills the row.
+		style.width = LayoutAxis.fixed(MARKER_LANE_WIDTH + retained.railWidth());
 		style.height = LayoutAxis.grow();
 		style.direction = LayoutDirection.LeftToRight;
 		style.clipVertical = true;
@@ -93,7 +96,7 @@ class EditorGutter implements View {
 		node = built;
 		built.hitTestSelf = false;
 		var laneStyle = new LayoutStyle();
-		laneStyle.width = LayoutAxis.fixed(5.0);
+		laneStyle.width = LayoutAxis.fixed(MARKER_LANE_WIDTH);
 		laneStyle.height = LayoutAxis.grow();
 		laneStyle.clipVertical = true;
 		var laneNode = new RenderNode(context.id("gutter-marker-strip:" + key), LayoutVisualKind.Custom, laneStyle);
@@ -111,7 +114,7 @@ class EditorGutter implements View {
 		var labelsNode = new RenderNode(context.id("gutter-line-numbers:" + key), LayoutVisualKind.Custom, new LayoutStyle());
 		labelsNode.styleKey = key + ":line-numbers";
 		labelsNode.hitTestSelf = false;
-		labelsNode.layout.style.width = LayoutAxis.fit();
+		labelsNode.layout.style.width = LayoutAxis.fixed(retained.railWidth());
 		labelsNode.layout.style.height = LayoutAxis.grow();
 		labelsNode.layout.intrinsicContent = retained.content;
 		built.add(laneNode);
@@ -142,7 +145,7 @@ private class GutterLabels {
 		this.fonts = fonts;
 		layout = TextLayout.create(fonts, "", 1.0, new TextStyle(fontSize, FontFamily.Monospace), new ParagraphStyle(TextWrap.None));
 		measurement = new LayoutMeasuredContent(function(_) {
-			return new LayoutMeasureResult(width + 7.0, 1.0);
+			return new LayoutMeasureResult(railWidth(), 1.0);
 		});
 		content = new LayoutRenderableContent(measurement, function(canvas, geometry) {
 			var editor = editorLayout;
@@ -193,6 +196,8 @@ private class GutterLabels {
 		content.invalidatePaint();
 		return false;
 	}
+
+	public function railWidth():Float return width + 7.0;
 
 	public function update(nextCount:Int, nextColor:Color, nextFontSize:Float, nextActiveLine:Int, nextActiveColor:Color):Void {
 		if (fontSize != nextFontSize) {
