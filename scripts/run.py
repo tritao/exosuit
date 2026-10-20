@@ -67,10 +67,12 @@ def main() -> int:
         return 127
 
     # --watch rebuilds and relaunches the app after source edits. --live also watches, but patches Haxe
-    # edits into the running app instead of relaunching it. The rest is forwarded to the app.
+    # edits into the running app instead of relaunching it. --profile records each launch with the
+    # sampling profiler and writes a Perfetto trace when it ends. The rest is forwarded to the app.
     watch = "--watch" in sys.argv[1:]
     live = "--live" in sys.argv[1:]
-    app_arguments = [argument for argument in sys.argv[1:] if argument not in ("--watch", "--live")]
+    profile = "--profile" in sys.argv[1:]
+    app_arguments = [argument for argument in sys.argv[1:] if argument not in ("--watch", "--live", "--profile")]
     arguments = [
         "run",
         "--project",
@@ -83,6 +85,8 @@ def main() -> int:
     if live:
         # Live builds carry patch history and must not overwrite the ordinary app build.
         arguments.extend(["--live", "--output", str(root_dir / "graphical" / "build" / "host" / "live.hl")])
+    if profile:
+        arguments.append("--profile")
     arguments.extend(["--", *app_arguments])
 
     try:
