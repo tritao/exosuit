@@ -1,18 +1,65 @@
 package app;
 
 import haxeon.ui.host.DesktopUiHost;
+import haxeon.ui.host.DesktopUiHostSession;
 import haxeon.ui.host.DesktopUiHostOptions;
 import nativekit.ffi.NativeKit;
 import nativekit.ffi.NativeKitTypes;
 import ui.ExosuitApp;
 import ui.ExosuitPalette;
 
-/** Hosted desktop entry. UIKit owns the window, GPU, and frame loop. */
+/**
+	Hosted desktop entry. UIKit owns the window, GPU, and frame loop.
+
+	`main` runs the loop itself. `haxeon run --watch --live` instead calls `start`, then `tick` until it
+	returns 0, then `close`, and patches changed functions between ticks without restarting the editor.
+**/
 class GraphicalMain {
+	static var session:Null<DesktopUiHostSession> = null;
+	static var terminalWorkspaces:Null<workspace.client.LocalTerminalWorkspacePool> = null;
+	static var allocationProfile:Null<String> = null;
+
 	static function main():Int {
+		open(Sys.args());
+		while (tick() != 0) {}
+		return close();
+	}
+
+	@:keep public static function start(arguments:String):Void
+		open(haxe.Json.parse(arguments));
+
+	@:keep public static function tick():Int {
+		var current = session;
+		return current != null && current.tick() ? 1 : 0;
+	}
+
+	@:keep public static function close():Int {
+		var current = session;
+		if (current == null) return 0;
+		session = null;
+		var workspaces = terminalWorkspaces;
+		terminalWorkspaces = null;
+		if (workspaces != null) workspaces.dispose();
+		var profile = allocationProfile;
+		if (profile != null) {
+			hl.Gc.censusStop();
+			var encoded = haxe.io.Bytes.ofString(profile);
+			var terminated = haxe.io.Bytes.alloc(encoded.length + 1);
+			terminated.blit(0, encoded, 0, encoded.length);
+			hl.Gc.censusDump(AllocationProfileBytes.data(terminated));
+		}
+		return current.close();
+	}
+
+	/** A structural live reload reopens the window; tabs and layout come back from the editor's session file. */
+	@:keep public static function saveState():String
+		return "";
+
+	@:keep public static function restoreState(state:String):Void {}
+
+	static function open(arguments:Array<String>):Void {
 		var startupMemory = Sys.getEnv("EXOSUIT_STARTUP_MEMORY_DIR");
 		if (startupMemory != null) StartupMemory.sample(startupMemory, "01-runtime");
-		var arguments = Sys.args();
 		var pluginManifest:Null<String> = null;
 		var captureDirectory:Null<String> = null;
 		var frameLimit = 0;
@@ -63,7 +110,7 @@ class GraphicalMain {
 		host.captureSeconds = captureSeconds;
 		host.recordPath = recordPath;
 		host.inputScriptPath = inputScriptPath;
-		var allocationProfile = Sys.getEnv("EXOSUIT_ALLOCATION_PROFILE");
+		allocationProfile = Sys.getEnv("EXOSUIT_ALLOCATION_PROFILE");
 		var profileFrames = 0;
 		var reportedFirstFrame = false;
 		var memoryFrames = 0;
@@ -91,8 +138,7 @@ class GraphicalMain {
 			return true;
 		};
 		var app:Null<ExosuitApp> = null;
-		var terminalWorkspaces:Null<workspace.client.LocalTerminalWorkspacePool> = null;
-		var session = DesktopUiHost.open(host, function(context) {
+		session = DesktopUiHost.open(host, function(context) {
 			var dark = prefersDark(themeChoice);
 			var workspaceClient:Null<workspace.client.LocalWorkspaceClient> = null;
 			var instance = new ExosuitApp(context.fonts, ExosuitPalette.theme(dark), context,
@@ -136,17 +182,6 @@ class GraphicalMain {
 		}
 		// Optional allocation census, excluding window/application construction.
 		if (allocationProfile != null) hl.Gc.censusStart(16384);
-		while (session.tick()) {}
-		if (terminalWorkspaces != null) terminalWorkspaces.dispose();
-		if (allocationProfile != null) {
-			hl.Gc.censusStop();
-			var encoded = haxe.io.Bytes.ofString(allocationProfile);
-			var terminated = haxe.io.Bytes.alloc(encoded.length + 1);
-			terminated.blit(0, encoded, 0, encoded.length);
-			hl.Gc.censusDump(AllocationProfileBytes.data(terminated));
-		}
-		var status = session.close();
-		return status;
 	}
 
 	static function prefersDark(choice:String):Bool {
