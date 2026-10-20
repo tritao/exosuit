@@ -66,8 +66,11 @@ def main() -> int:
         print(f"Unable to build the workspace agent: {error}", file=sys.stderr)
         return 127
 
-    # --watch rebuilds and relaunches the app after source edits; the rest is forwarded to the app.
-    app_arguments = [argument for argument in sys.argv[1:] if argument != "--watch"]
+    # --watch rebuilds and relaunches the app after source edits. --live also watches, but patches Haxe
+    # edits into the running app instead of relaunching it. The rest is forwarded to the app.
+    watch = "--watch" in sys.argv[1:]
+    live = "--live" in sys.argv[1:]
+    app_arguments = [argument for argument in sys.argv[1:] if argument not in ("--watch", "--live")]
     arguments = [
         "run",
         "--project",
@@ -75,8 +78,11 @@ def main() -> int:
     ]
     if self_hosted:
         arguments.append("--self-hosted")
-    if len(app_arguments) != len(sys.argv) - 1:
+    if watch or live:
         arguments.append("--watch")
+    if live:
+        # Live builds carry patch history and must not overwrite the ordinary app build.
+        arguments.extend(["--live", "--output", str(root_dir / "graphical" / "build" / "host" / "live.hl")])
     arguments.extend(["--", *app_arguments])
 
     try:
