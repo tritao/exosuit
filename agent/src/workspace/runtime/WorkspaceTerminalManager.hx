@@ -362,7 +362,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
             r.rows,
             historyLimit
           );
-        } catch (_:Dynamic) {
+        } catch (cause:Dynamic) {
           var failed = copy(record);
           failed.state = "failed";
           failed.revision += 1;
@@ -370,7 +370,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
           }
           c.fail({
             code: storageFailed ? "storage_failed" : "terminal_spawn_failed",
-            message : "Terminal creation failed",
+            message : "Terminal creation failed: " + Std.string(cause),
             ambiguous : storageFailed
           }
           );
