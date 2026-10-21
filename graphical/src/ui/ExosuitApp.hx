@@ -1827,8 +1827,10 @@ class ExosuitApp implements DesktopUiApplication {
 		var active = host.activeDocument();
 		var tab = host.activeTab();
 		var terminal = tab == null ? null : UiEditorTabs.terminal(tab);
+		// A diff view's document is generated, never saved, so it has no unsaved changes to flag.
+		var activeView = host.activeView(), diff = activeView != null && activeView.diffDocument != null;
 		var label = active == null ? (terminal == null ? "No document open" : terminal.title) :
-			(active.title + (active.dirty ? " *" : "") + " - " + active.encodingLabel());
+			(active.title + (active.dirty && !diff ? " *" : "") + " - " + active.encodingLabel());
 		var image = tab == null ? null : UiEditorTabs.image(tab);
 		var unsupported = tab == null ? null : UiEditorTabs.unsupportedFile(tab);
 		if (image != null) label = image.title;
