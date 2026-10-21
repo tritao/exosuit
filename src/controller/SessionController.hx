@@ -49,7 +49,7 @@ class SessionController {
 		if (now - lastFileSystemCheck >= 1.0) {
 			lastFileSystemCheck = now;
 			application.documents.checkExternalChanges();
-			workspace.refreshProjects();
+			workspace.refreshProjects(32, false);
 		}
 		if (!started) return;
 		var activePersistence = persistence;

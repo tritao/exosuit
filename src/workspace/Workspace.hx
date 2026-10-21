@@ -39,10 +39,11 @@ class Workspace {
 		return true;
 	}
 
-	public function refreshProjects(directoryBudget:Int = 32):Bool {
+	/** `immediate` (the default) rescans right away; the periodic poll passes false to let rescans be paced. */
+	public function refreshProjects(directoryBudget:Int = 32, immediate:Bool = true):Bool {
 		jobs.update(directoryBudget);
 		var changed = false;
-		for (project in projects) if (project.pollChanges(directoryBudget)) changed = true;
+		for (project in projects) if (project.pollChanges(directoryBudget, immediate)) changed = true;
 		return changed;
 	}
 }

@@ -43,6 +43,18 @@ class ProjectScanYieldTest {
 		require(!project.indexing() && project.tree.loaded, "chunked scan did not finish");
 		require(project.files().length == 116 && fs.listings == 2, "scan lost entries or reread a directory");
 		require(snapshot.length == initialLength, "published file snapshot changed as the scan grew");
+		var generation = project.indexGeneration();
+		project.pollChanges(32, false);
+		require(project.indexGeneration() == generation, "a periodic poll rescanned right after a scan finished");
+		project.pollChanges(32, true);
+		require(project.indexGeneration() == generation + 1 && !project.indexing(), "an immediate poll did not start a rescan");
+		deadline = Sys.time() + 5;
+		while (scheduler.activeCount() > 0 && Sys.time() < deadline) {
+			scheduler.update(1);
+			require(project.files().length == 116 && project.tree.loaded, "a rescan published a partial index");
+			Sys.sleep(0.001);
+		}
+		require(scheduler.activeCount() == 0 && fs.listings == 4, "rescan did not finish or reread a directory");
 		project.cancelIndex();
 		require(scheduler.activeCount() == 0, "completed scan was not released");
 		Sys.println("project scan yielding and snapshot checks passed");

@@ -6,12 +6,18 @@ import sys.thread.Lock;
 import sys.thread.Mutex;
 import sys.thread.Thread;
 
+private typedef DirectoryRead = {result:Null<{identity:String, entries:Array<FileSystemEntry>}>, error:Null<String>};
+
 class ProjectScan implements JobTask {
+	/** Directories the reader thread may list ahead of the one being merged. */
+	static inline final READ_AHEAD = 64;
+
 	public final generation:Int;
 	public final tree:ProjectNode;
 	public final files:Array<ProjectNode> = [];
 	public var complete(default, null):Bool = false;
 	public var snapshot(default, null):String = "";
+	public final startedAt:Float = Sys.time();
 	final owner:Project;
 	final fileSystem:FileSystemService;
 	final ignored:Map<String, Bool>;
@@ -23,16 +29,19 @@ class ProjectScan implements JobTask {
 	var pendingDirectory:Null<ProjectNode>;
 	var pendingEntries:Array<FileSystemEntry> = [];
 	var entryCursor:Int = 0;
+	var directoryReadPending:Bool = false;
+	// Directories are queued for the reader thread in scan order; the reader lists each once and leaves the result for
+	// the scan step that merges that directory.
+	var queued:Int = 0;
 	final readRequest:Lock = new Lock();
 	final readComplete:Lock = new Lock();
 	final readState:Mutex = new Mutex();
+	final readQueue:Array<String> = [];
+	final readResults:Map<String, DirectoryRead> = [];
 	var readerStarted:Bool = false;
 	var readerStopped:Bool = false;
 	var readerUnavailable:Bool = false;
-	var readerPath:String;
-	var readerResult:Null<{identity:String, entries:Array<FileSystemEntry>}>;
-	var readerError:Null<String>;
-	var directoryReadPending:Bool = false;
+	var readerFailure:Null<String>;
 
 	public function new(owner:Project, generation:Int, fileSystem:FileSystemService, ignored:Map<String, Bool>) {
 		this.owner = owner;
@@ -55,27 +64,23 @@ class ProjectScan implements JobTask {
 			pendingDirectory = nextDirectory;
 			entryCursor = 0;
 			pendingEntries = [];
-			requestDirectoryRead(nextDirectory.path);
-			return false;
+			directoryReadPending = true;
+			queueReads();
 		}
 		var node:ProjectNode = cast pendingDirectory;
 		if (directoryReadPending) {
-			if (!readComplete.wait(0)) return false;
-			readState.acquire();
-			var result = readerResult;
-			var error = readerError;
-			readerResult = null;
-			readerError = null;
-			readState.release();
-			directoryReadPending = false;
-			if (error != null) owner.scanFailed(generation, node.path, error);
-			if (result != null && !seen.exists(result.identity)) {
-				seen.set(result.identity, true);
-				pendingEntries = result.entries;
-			}
 			if (readerUnavailable) {
+				owner.scanFailed(generation, node.path, readerFailure);
 				finish();
 				return true;
+			}
+			var read = takeRead(node.path, deadline);
+			if (read == null) return false;
+			directoryReadPending = false;
+			if (read.error != null) owner.scanFailed(generation, node.path, read.error);
+			if (read.result != null && !seen.exists(read.result.identity)) {
+				seen.set(read.result.identity, true);
+				pendingEntries = read.result.entries;
 			}
 		}
 		var processed = 0;
@@ -112,50 +117,65 @@ class ProjectScan implements JobTask {
 		owner.publishScan(this, true);
 	}
 
-	function requestDirectoryRead(path:String):Void {
-		readState.acquire();
-		readerPath = path;
-		readState.release();
-		directoryReadPending = true;
-		if (!readerStarted && !readerUnavailable) {
+	/** Hands the reader the directories found so far, up to READ_AHEAD past the one being merged. */
+	function queueReads():Void {
+		if (readerUnavailable) return;
+		if (!readerStarted) {
 			try {
 				Thread.create(directoryReaderLoop);
 				readerStarted = true;
 			} catch (error:Dynamic) {
 				readerUnavailable = true;
-				readState.acquire();
-				readerError = "Could not start project scan worker: " + Std.string(error);
-				readState.release();
-				readComplete.release();
+				readerFailure = "Could not start project scan worker: " + Std.string(error);
 				return;
 			}
 		}
+		var limit = cursor - 1 + READ_AHEAD;
+		if (queued >= directories.length || queued >= limit) return;
+		readState.acquire();
+		while (queued < directories.length && queued < limit) readQueue.push(directories[queued++].path);
+		readState.release();
 		readRequest.release();
+	}
+
+	/** The reader's listing of `path`, waiting for it no later than `deadline`; null if it is not ready yet. */
+	function takeRead(path:String, deadline:Float):Null<DirectoryRead> {
+		while (true) {
+			readState.acquire();
+			var read = readResults.get(path);
+			if (read != null) readResults.remove(path);
+			readState.release();
+			if (read != null) return read;
+			var remaining = deadline - Sys.time();
+			if (remaining <= 0 || !readComplete.wait(remaining)) return null;
+		}
 	}
 
 	function directoryReaderLoop():Void {
 		while (true) {
 			readRequest.wait();
-			readState.acquire();
-			var stop = readerStopped;
-			var path = readerPath;
-			readState.release();
-			if (stop) return;
-
-			var result:Null<{identity:String, entries:Array<FileSystemEntry>}> = null;
-			var error:Null<String> = null;
-			try result = fileSystem.scanDirectory(path) catch (failure:Dynamic) error = Std.string(failure);
-			readState.acquire();
-			readerResult = result;
-			readerError = error;
-			readState.release();
-			readComplete.release();
+			while (true) {
+				readState.acquire();
+				var stop = readerStopped;
+				var path = stop || readQueue.length == 0 ? null : readQueue.shift();
+				readState.release();
+				if (stop) return;
+				if (path == null) break;
+				var read:DirectoryRead = {result: null, error: null};
+				try read.result = fileSystem.scanDirectory(path) catch (failure:Dynamic) read.error = Std.string(failure);
+				readState.acquire();
+				readResults.set(path, read);
+				readState.release();
+				readComplete.release();
+			}
 		}
 	}
 
 	function stopReader():Void {
 		readState.acquire();
 		readerStopped = true;
+		readQueue.resize(0);
+		readResults.clear();
 		readState.release();
 		if (readerStarted) readRequest.release();
 	}

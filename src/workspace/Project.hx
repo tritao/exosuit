@@ -17,6 +17,8 @@ class Project {
 	var scan:Null<ProjectScan>;
 	var scanHandle:Null<JobHandle>;
 	var scanGeneration:Int = 0;
+	var indexComplete:Bool = false;
+	var nextRescanAt:Float = 0.0;
 	var changedSincePoll:Bool = false;
 	var requestedExpanded:Map<String, Bool> = [];
 	var releaseSettings:Null<Void->Void>;
@@ -56,6 +58,9 @@ class Project {
 
 	public function publishScan(source:ProjectScan, finished:Bool):Void {
 		if (source.generation != scanGeneration) return;
+		// Only the first scan shows its progress. A rescan replaces the complete index and tree when it finishes, so
+		// file lists and the explorer never shrink back to a partial scan.
+		if (!finished && indexComplete) return;
 		if (tree != source.tree) {
 			tree = source.tree;
 			applyExpanded(tree);
@@ -67,6 +72,10 @@ class Project {
 			applyExpanded(tree);
 			changedSincePoll = source.snapshot != snapshot;
 			snapshot = source.snapshot;
+			indexComplete = true;
+			// Polling rescans keep background scanning to about a fifth of one core, however large the project.
+			var now = Sys.time();
+			nextRescanAt = now + Math.max(2.0, 4.0 * (now - source.startedAt));
 		}
 	}
 
@@ -74,11 +83,12 @@ class Project {
 		if (generation == scanGeneration) diagnostics.push('Could not scan "$path": $detail');
 	}
 
-	public function pollChanges(directoryBudget:Int):Bool {
+	/** `immediate` rescans as soon as the previous scan is done, for callers that just changed files themselves. */
+	public function pollChanges(directoryBudget:Int, immediate:Bool = true):Bool {
 		if (settings != null) settings.reload();
 		var changed = changedSincePoll;
 		changedSincePoll = false;
-		if (scan != null && scan.complete) startScan();
+		if (scan != null && scan.complete && (immediate || Sys.time() >= nextRescanAt)) startScan();
 		return changed;
 	}
 
@@ -104,7 +114,8 @@ class Project {
 
 	public function files():Array<ProjectNode> return indexedFiles.copy();
 	public function indexGeneration():Int return scanGeneration;
-	public function indexing():Bool return scan != null && !scan.complete;
+	/** True until the first scan completes; later rescans keep serving the last complete index. */
+	public function indexing():Bool return !indexComplete;
 
 	public function expandedPaths():Array<String> {
 		var result:Array<String> = [];
