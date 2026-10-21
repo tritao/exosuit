@@ -28,6 +28,8 @@ class WorkbenchController {
 	final recentCommands:Array<String> = [];
 	/** Hosts can supply their full command catalog while sharing palette history and behavior. */
 	public var commandPaletteSource:Null<commandview.CommandPaletteSource>;
+	/** The open file picker while the project index it lists is still growing. */
+	var growingFileView:Null<{provider:CommandViewProvider, indexed:Int}>;
 
 	public function new(workspace:Workspace, root:WorkbenchHost, commands:CommandRegistry, keymap:Keymap, context:CommandContext,
 		completions:CompletionRegistry, errors:ErrorLog, search:SearchController, openDocument:String->Void) {
@@ -71,6 +73,44 @@ class WorkbenchController {
 		root.clearComposition();
 
 	public function openFileCommandView():Void {
+		var provider = new CommandViewProvider("", fileEntries(), function(query) {}, function(entry, query, backwards) {
+			growingFileView = null;
+			if (entry != null) openDocument(entry.value);
+			root.closeCommandView();
+		}, function() { growingFileView = null; }, null, function(query, entry) {
+			return entry == null ? query : entry.label;
+		});
+		growingFileView = indexing() ? {provider: provider, indexed: indexedFileCount()} : null;
+		root.openCommandView(provider);
+	}
+
+	/** Lists files the index found since the file picker opened, so it never silently misses files still being indexed. */
+	public function update():Void {
+		var view = growingFileView;
+		if (view == null) return;
+		var indexed = indexedFileCount();
+		if (indexed != view.indexed) {
+			view.indexed = indexed;
+			var entries = fileEntries();
+			view.provider.entries.resize(0);
+			for (entry in entries) view.provider.entries.push(entry);
+			view.provider.refresh();
+		}
+		if (!indexing()) growingFileView = null;
+	}
+
+	function indexing():Bool {
+		for (project in workspace.projects) if (project.indexing()) return true;
+		return false;
+	}
+
+	function indexedFileCount():Int {
+		var count = 0;
+		for (project in workspace.projects) count += project.fileCount();
+		return count;
+	}
+
+	function fileEntries():Array<CommandViewEntry> {
 		var entries:Array<CommandViewEntry> = [];
 		var seen:Map<String, Bool> = [];
 		// Merge overlapping indexes before ranking. The deepest project owns the
@@ -93,12 +133,7 @@ class WorkbenchController {
 				entries.push(new CommandViewEntry(relative, projectLabel, path, null, path + " " + projectLabel));
 			}
 		}
-		root.openCommandView(new CommandViewProvider("", entries, function(query) {}, function(entry, query, backwards) {
-			if (entry != null) openDocument(entry.value);
-			root.closeCommandView();
-		}, null, null, function(query, entry) {
-			return entry == null ? query : entry.label;
-		}));
+		return entries;
 	}
 
 	/** Shortest root suffix that distinguishes projects with matching names. */

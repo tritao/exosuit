@@ -305,6 +305,7 @@ class Application {
 		search.update(now);
 		scm.update(now);
 		workspace.jobs.update(32);
+		workbench.update();
 		session.update(now);
 		pluginController.update(now);
 		build.update();

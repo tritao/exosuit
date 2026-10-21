@@ -113,6 +113,7 @@ class Project {
 	}
 
 	public function files():Array<ProjectNode> return indexedFiles.copy();
+	public function fileCount():Int return indexedFiles.length;
 	public function indexGeneration():Int return scanGeneration;
 	/** True until the first scan completes; later rescans keep serving the last complete index. */
 	public function indexing():Bool return !indexComplete;

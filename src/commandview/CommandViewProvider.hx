@@ -8,6 +8,8 @@ class CommandViewProvider {
 	public final onCancel:Void->Void;
 	public final onMove:Int->Void;
 	public final onComplete:(query:String, entry:Null<CommandViewEntry>)->String;
+	/** Set by the view showing this provider: filters `entries` again after the provider changed them. */
+	public var refresh:Void->Void = function() {};
 
 	public function new(prompt:String, entries:Array<CommandViewEntry>, onQuery:String->Void,
 			onAccept:(entry:Null<CommandViewEntry>, query:String, backwards:Bool)->Void, ?onCancel:Void->Void, ?onMove:Int->Void,
