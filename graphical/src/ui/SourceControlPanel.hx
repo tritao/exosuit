@@ -206,7 +206,6 @@ class SourceControlPanel implements View {
 		var style = new LayoutStyle();
 		style.width = LayoutAxis.grow();
 		style.padding = new Insets(6.0, 10.0, 6.0, 10.0);
-		style.clipHorizontal = true;
 		return new KeyedView(key, new Text(value, style, color, new TextStyleOverride(null, 13.0, null, TextWrap.WordCharacter)));
 	}
 }
