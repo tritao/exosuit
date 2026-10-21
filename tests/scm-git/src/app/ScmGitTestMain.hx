@@ -1186,7 +1186,14 @@ class ScmGitTestMain {
 		require(mergeSnapshot.head.operation == ScmHeadOperation.Merge && mergeConflict != null
 			&& mergeConflict.conflictKind == ScmConflictKind.BothModified,
 			"A real Git merge conflict was not refreshed into the merge group with its conflict kind");
+		var trustNotices:Array<Bool> = [];
+		var stopTrustNotices = mergeService.subscribe(function(repository, _) {
+			if (repository.id == mergeRepository.id) trustNotices.push(repository.trusted);
+		});
 		require(mergeService.trust(mergeRepository.id), "Could not trust the merge-resolution fixture");
+		require(trustNotices.length == 1 && trustNotices[0],
+			"Trusting a repository did not notify subscribers, so views kept showing it as restricted");
+		stopTrustNotices();
 		pumpService(mergeService, gitScheduler, () -> {
 			var repositories = mergeService.repositories(mergeRoot), current = mergeService.snapshot(mergeRepository.id);
 			return repositories.length == 1 && repositories[0].trusted && current != null;

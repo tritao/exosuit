@@ -307,6 +307,7 @@ class ScmService {
 		try trustStore.trust(handle.repository().root) catch (_:Dynamic) return false;
 		cancelRefresh(cast state, repositoryId);
 		scheduleRoot(state, Sys.time(), true);
+		publishTrust(cast state, handle);
 		return true;
 	}
 
@@ -316,7 +317,14 @@ class ScmService {
 		try trustStore.revoke(handle.repository().root) catch (_:Dynamic) return false;
 		cancelRefresh(cast state, repositoryId);
 		scheduleRoot(state, Sys.time(), true);
+		publishTrust(cast state, handle);
 		return true;
+	}
+
+	/** Trust changes no Git status, so the refresh that follows reports nothing new; tell subscribers now. */
+	function publishTrust(state:ScmRootState, handle:ScmRepositoryHandle):Void {
+		var repository = handle.repository(), snapshot = state.snapshots.get(repository.id);
+		if (snapshot != null) for (listener in listeners.copy()) listener(repository, snapshot);
 	}
 
 	public function apply(repositoryId:String, operation:ScmOperation, generation:Int,
