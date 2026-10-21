@@ -828,7 +828,7 @@ int terminal_emulator_restore_screen_snapshot(terminal_emulator_t* emulator,
   size_t offset = 8;
   uint32_t version, columns, rows, cursor_column, cursor_row, cursor_mode;
   uint32_t cursor_keys, keypad, mouse_tracking, mouse_encoding, paste, focus;
-  uint32_t alternate, synchronized;
+  uint32_t alternate, synchronized, win32_input = 0;
   if (!snapshot_u32(data, size, &offset, &version)
       || !snapshot_u32(data, size, &offset, &columns)
       || !snapshot_u32(data, size, &offset, &rows)
@@ -843,14 +843,16 @@ int terminal_emulator_restore_screen_snapshot(terminal_emulator_t* emulator,
       || !snapshot_u32(data, size, &offset, &focus)
       || !snapshot_u32(data, size, &offset, &alternate)
       || !snapshot_u32(data, size, &offset, &synchronized)
-      || version != 1 || columns < 1 || columns > 512 || rows < 1 || rows > 256
+      || (version == 2 && !snapshot_u32(data, size, &offset, &win32_input))
+      || (version != 1 && version != 2) || win32_input > 1 || columns < 1 || columns > 512 || rows < 1 || rows > 256
       || cursor_column > columns || cursor_row >= rows || cursor_mode > 2
       || cursor_keys > 1 || keypad > 1 || mouse_tracking > 4
       || mouse_encoding > 1 || paste > 1 || focus > 1 || alternate > 1
       || synchronized > 1) return 0;
-  if ((size_t)columns * rows > (size - offset) / 16) return 0;
+  const size_t header = offset;
+  if ((size_t)columns * rows > (size - header) / 16) return 0;
   size_t records = (size_t)columns * rows;
-  size_t scan = offset;
+  size_t scan = header;
   for (size_t i = 0; i < records; ++i) {
     uint32_t width, text_length;
     if (!snapshot_u32(data, size, &scan, &width)
@@ -887,9 +889,10 @@ int terminal_emulator_restore_screen_snapshot(terminal_emulator_t* emulator,
   if (paste) snapshot_feed_mode(terminal, "\x1b[?2004h", 8);
   if (focus) snapshot_feed_mode(terminal, "\x1b[?1004h", 8);
   if (synchronized) snapshot_feed_mode(terminal, "\x1b[?2026h", 8);
+  if (win32_input) snapshot_feed_mode(terminal, "\x1b[?9001h", 9);
 
   tsm_screen_erase_screen(terminal->screen, false);
-  offset = 64;
+  offset = header;
   for (size_t i = 0; i < records; ++i) {
     uint32_t width, text_length;
     snapshot_u32(data, size, &offset, &width);
@@ -1165,6 +1168,12 @@ int terminal_emulator_synchronized_output(terminal_emulator_t* emulator) {
   terminal_t* terminal = (terminal_t*)emulator;
   return terminal && !terminal->closed
     && tsm_vte_get_synchronized_output(terminal->vte);
+}
+
+int terminal_emulator_win32_input_mode(terminal_emulator_t* emulator) {
+  terminal_t* terminal = (terminal_t*)emulator;
+  return terminal && !terminal->closed
+    && tsm_vte_get_win32_input_mode(terminal->vte);
 }
 
 int terminal_emulator_alternate_screen(terminal_emulator_t* emulator) {

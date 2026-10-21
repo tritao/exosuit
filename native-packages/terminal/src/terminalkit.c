@@ -2,6 +2,7 @@
 #include "terminal_emulator.h"
 #include <limits.h>
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -125,6 +126,9 @@ int terminalkit_synchronized_output(terminalkit_handle *kit) {
 int terminalkit_alternate_screen(terminalkit_handle *kit) {
     return kit && terminal_emulator_alternate_screen(kit->emulator);
 }
+int terminalkit_win32_input_mode(terminalkit_handle *kit) {
+    return kit && terminal_emulator_win32_input_mode(kit->emulator);
+}
 const char *terminalkit_title(terminalkit_handle *kit) {
     return kit ? terminal_emulator_name(kit->emulator) : NULL;
 }
@@ -137,27 +141,94 @@ void terminalkit_set_output_callback(terminalkit_handle *kit,
     kit->output_callback = callback;
     kit->output_user_data = user_data;
 }
-int terminalkit_paste(terminalkit_handle *kit, const uint8_t *bytes, uint64_t size) {
+/* Length of the well-formed UTF-8 sequence at bytes[0], or 0. */
+static size_t utf8_sequence(const uint8_t *bytes, size_t size, uint32_t *codepoint) {
+    uint8_t lead = bytes[0];
+    size_t length = lead >= 0xf0 ? 4 : lead >= 0xe0 ? 3 : lead >= 0xc0 ? 2 : 0;
+    if (!length || lead > 0xf4 || length > size) return 0;
+    uint32_t value = lead & (0x7fu >> length);
+    for (size_t i = 1; i < length; ++i) {
+        if ((bytes[i] & 0xc0) != 0x80) return 0;
+        value = value << 6 | (bytes[i] & 0x3fu);
+    }
+    static const uint32_t minimum[] = {0, 0, 0x80, 0x800, 0x10000};
+    if (value < minimum[length] || value > 0x10ffff || (value >= 0xd800 && value < 0xe000))
+        return 0;
+    *codepoint = value;
+    return length;
+}
+
+/* A key press and release carrying one UTF-16 unit: CSI Vk;Sc;Uc;Kd;Cs;Rc _ */
+static int win32_key(char *out, uint32_t unit) {
+    char down[24], up[24];
+    int a = snprintf(down, sizeof(down), "\033[0;0;%u;1;0;1_", (unsigned)unit);
+    int b = snprintf(up, sizeof(up), "\033[0;0;%u;0;0;1_", (unsigned)unit);
+    if (out) { memcpy(out, down, (size_t)a); memcpy(out + a, up, (size_t)b); }
+    return a + b;
+}
+
+/* Encodes text for the PTY into out (or only measures it when out is NULL). In
+ * win32-input-mode non-ASCII characters become key events; ASCII, control bytes
+ * and malformed UTF-8 pass through unchanged, as they do outside the mode. */
+static uint64_t encode_text(const uint8_t *bytes, uint64_t size, int win32, char *out) {
+    if (!win32) {
+        if (out) memcpy(out, bytes, (size_t)size);
+        return size;
+    }
+    uint64_t written = 0;
+    for (uint64_t i = 0; i < size;) {
+        uint32_t codepoint = 0;
+        size_t length = bytes[i] < 0x80 ? 0 : utf8_sequence(bytes + i, (size_t)(size - i), &codepoint);
+        if (!length) {
+            if (out) out[written] = (char)bytes[i];
+            written++;
+            i++;
+            continue;
+        }
+        if (codepoint >= 0x10000) {
+            written += win32_key(out ? out + written : NULL, 0xd800 + ((codepoint - 0x10000) >> 10));
+            written += win32_key(out ? out + written : NULL, 0xdc00 + ((codepoint - 0x10000) & 0x3ff));
+        } else written += win32_key(out ? out + written : NULL, codepoint);
+        i += length;
+    }
+    return written;
+}
+
+static int emit_text(terminalkit_handle *kit, const uint8_t *bytes, uint64_t size, int bracketed) {
     if (!kit || (!bytes && size) || size > TERMINALKIT_REPLY_LIMIT) return -1;
     if (!size) return 0;
-    int mode = 0;
-    terminal_emulator_modes(kit->emulator, NULL, NULL, NULL, NULL, &mode, NULL);
-    uint32_t needed = (uint32_t)size + (mode ? 12u : 0u);
+    int win32 = terminal_emulator_win32_input_mode(kit->emulator);
+    uint64_t encoded = encode_text(bytes, size, win32, NULL);
+    uint64_t needed = encoded + (bracketed ? 12u : 0u);
+    if (needed > TERMINALKIT_REPLY_LIMIT) return -1;
     if (!kit->output_callback) {
         if (kit->reply_overflow || needed > TERMINALKIT_REPLY_LIMIT - kit->reply_size)
             return -1;
         needed += kit->reply_size;
         if (needed > kit->reply_capacity) {
-            uint8_t *grown = realloc(kit->replies, needed);
+            uint8_t *grown = realloc(kit->replies, (size_t)needed);
             if (!grown) return -1;
             kit->replies = grown;
-            kit->reply_capacity = needed;
+            kit->reply_capacity = (uint32_t)needed;
         }
     }
-    if (mode) emit_reply("\033[200~", 6, kit);
-    emit_reply((const char *)bytes, (int)size, kit);
-    if (mode) emit_reply("\033[201~", 6, kit);
+    char *text = (char *)bytes;
+    if (win32 && !(text = malloc((size_t)encoded))) return -1;
+    if (win32) encode_text(bytes, size, 1, text);
+    if (bracketed) emit_reply("\033[200~", 6, kit);
+    emit_reply(text, (int)encoded, kit);
+    if (bracketed) emit_reply("\033[201~", 6, kit);
+    if (win32) free(text);
     return 0;
+}
+
+int terminalkit_paste(terminalkit_handle *kit, const uint8_t *bytes, uint64_t size) {
+    int mode = 0;
+    if (kit) terminal_emulator_modes(kit->emulator, NULL, NULL, NULL, NULL, &mode, NULL);
+    return emit_text(kit, bytes, size, mode);
+}
+int terminalkit_input_text(terminalkit_handle *kit, const uint8_t *bytes, uint64_t size) {
+    return emit_text(kit, bytes, size, 0);
 }
 int terminalkit_keyboard(terminalkit_handle *kit, const char *key_name,
     uint32_t modifiers, uint32_t unicode) {

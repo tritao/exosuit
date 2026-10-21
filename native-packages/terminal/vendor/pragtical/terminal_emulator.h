@@ -110,6 +110,8 @@ int terminal_emulator_for_each_cell(terminal_emulator_t* emulator,
   terminal_emulator_cell_callback callback, void* user_data);
 int terminal_emulator_synchronized_output(terminal_emulator_t* emulator);
 int terminal_emulator_alternate_screen(terminal_emulator_t* emulator);
+/* Whether the application asked for win32-input-mode (DECSET 9001). */
+int terminal_emulator_win32_input_mode(terminal_emulator_t* emulator);
 /* Modifier bits: shift=1, lock=2, control=4, alt=8, logo=16. */
 /* Selection operation: 0 reset, 1 start, 2 target, 3 word. */
 int terminal_emulator_selection(terminal_emulator_t* emulator, unsigned int column,

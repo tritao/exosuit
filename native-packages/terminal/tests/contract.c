@@ -8,7 +8,7 @@
     return 1; \
 } } while (0)
 
-static char replies[128];
+static char replies[512];
 static size_t reply_size;
 static void collect_reply(const char *bytes, int length, void *user_data) {
     (void)user_data;
@@ -129,6 +129,34 @@ int main(void) {
     terminalkit_focus(protocol, 1);
     terminalkit_focus(protocol, 0);
     REQUIRE(!strcmp(replies, "\x1b[I\x1b[O"));
+    clear_replies();
+    /* Typed text is UTF-8 until the application (the Windows pseudoconsole)
+     * requests win32-input-mode; then non-ASCII characters travel as key events,
+     * astral ones as two UTF-16 units, and ASCII and malformed bytes stay raw. */
+    const char typed[] = "a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80\xff\r";
+    REQUIRE(!terminalkit_win32_input_mode(protocol));
+    REQUIRE(terminalkit_input_text(protocol, (const uint8_t *)typed, strlen(typed)) == 0);
+    REQUIRE(!strcmp(replies, typed));
+    clear_replies();
+    REQUIRE(feed(protocol, "\x1b[?9001h") >= 0);
+    REQUIRE(terminalkit_win32_input_mode(protocol));
+    REQUIRE(terminalkit_input_text(protocol, (const uint8_t *)typed, strlen(typed)) == 0);
+    REQUIRE(!strcmp(replies, "a"
+        "\x1b[0;0;233;1;0;1_\x1b[0;0;233;0;0;1_"
+        "\x1b[0;0;8364;1;0;1_\x1b[0;0;8364;0;0;1_"
+        "\x1b[0;0;55357;1;0;1_\x1b[0;0;55357;0;0;1_"
+        "\x1b[0;0;56832;1;0;1_\x1b[0;0;56832;0;0;1_"
+        "\xff\r"));
+    clear_replies();
+    REQUIRE(feed(protocol, "\x1b[?2004h") >= 0);
+    REQUIRE(terminalkit_paste(protocol, (const uint8_t *)"x\xc3\xa9", 3) == 0);
+    REQUIRE(!strcmp(replies, "\x1b[200~x\x1b[0;0;233;1;0;1_\x1b[0;0;233;0;0;1_\x1b[201~"));
+    clear_replies();
+    REQUIRE(feed(protocol, "\x1b[?2004l\x1b[?9001l") >= 0);
+    REQUIRE(!terminalkit_win32_input_mode(protocol));
+    REQUIRE(terminalkit_input_text(protocol, (const uint8_t *)"\xc3\xa9", 2) == 0);
+    REQUIRE(!strcmp(replies, "\xc3\xa9"));
+    REQUIRE(terminalkit_input_text(protocol, NULL, 1) == -1);
     clear_replies();
     REQUIRE(feed(protocol, "\x1b[?1049h\x1b[?1007h") >= 0);
     REQUIRE(terminalkit_alternate_screen(protocol));

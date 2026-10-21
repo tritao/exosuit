@@ -116,6 +116,7 @@ class TerminalPane implements TerminalPanel {
 		cellWidth: cellWidth, rowHeight: rowHeight,
 		cursorColumn: cursorColumn, cursorRow: cursorRow,
 		loading: remoteBackend != null && !remoteBackend.isSynchronized(),
+		win32Input: !closed && session.emulator.win32InputMode(),
 		lines: [for (index in 0...Std.int(Math.min(texts.length, 32))) StringTools.rtrim(texts[index])]
 	};
 
@@ -292,6 +293,12 @@ class TerminalPane implements TerminalPanel {
 		session.flushInput();
 		refreshRows(false, true);
 		requestFrame();
+	}
+
+	/** Typed text follows the shell's input mode; ConPTY asks for Win32 key events. */
+	function sendText(text:String):Void {
+		session.emulator.text(Bytes.ofString(text));
+		session.flushInput();
 	}
 
 	static function codepoints(value:String):Int {
@@ -472,7 +479,7 @@ class TerminalPane implements TerminalPanel {
 			if (event.text != null && event.text.length > 0) {
 				if (!canSendInput()) { event.preventDefault(); return; }
 				prepareInput();
-				session.write(Bytes.ofString(event.text));
+				sendText(event.text);
 				event.preventDefault();
 			}
 		});
@@ -483,7 +490,7 @@ class TerminalPane implements TerminalPanel {
 			if (edit != null && edit.action == TextEditAction.Commit &&
 				edit.text != null && edit.text.length > 0 && canSendInput()) {
 				prepareInput();
-				session.write(Bytes.ofString(edit.text));
+				sendText(edit.text);
 			}
 			event.preventDefault();
 		});

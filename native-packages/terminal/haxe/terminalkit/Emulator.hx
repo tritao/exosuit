@@ -47,6 +47,9 @@ class Emulator {
     public function focusReporting():Bool
         return TerminalKit.terminalkit_focus_reporting(live()) != 0;
     public function mouseMode():Int return TerminalKit.terminalkit_mouse_mode(live());
+    /** Whether the application asked for keys as Win32 key events (the Windows pseudoconsole does). */
+    public function win32InputMode():Bool
+        return TerminalKit.terminalkit_win32_input_mode(live()) != 0;
 
     /** Scrollback position counts lines above the live viewport. */
     public function scrollback(position:Int):{current:Int, total:Int} {
@@ -106,6 +109,12 @@ class Emulator {
             throw "Terminal paste exceeds the pending input limit";
     }
 
+    /** Encodes typed or committed text for the application's current input mode. */
+    public function text(bytes:haxe.io.Bytes):Void {
+        if (TerminalKit.terminalkit_input_text(live(), bytes, bytes.length) != 0)
+            throw "Terminal text exceeds the pending input limit";
+    }
+
     public function key(name:String, modifiers:Int = 0, unicode:Int = -1):Bool
         return TerminalKit.terminalkit_keyboard(live(), name, modifiers, unicode) != 0;
 
@@ -156,7 +165,7 @@ class Emulator {
         var output = new BytesOutput();
         output.write(Bytes.ofString("PTSMVTS"));
         output.writeByte(0);
-        writeU32(output, 1);
+        writeU32(output, 2);
         writeU32(output, columns());
         writeU32(output, rows());
         writeU32(output, position.column);
@@ -170,7 +179,8 @@ class Emulator {
         writeU32(output, modes.focus);
         writeU32(output, alternateScreen() ? 1 : 0);
         writeU32(output, synchronizedOutput() ? 1 : 0);
-        var size = 64;
+        writeU32(output, win32InputMode() ? 1 : 0);
+        var size = 68;
         for (row in 0...rows()) {
             var cells = rowCells(row);
             if (cells.length != columns()) throw "Terminal row width changed during snapshot";

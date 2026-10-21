@@ -55,6 +55,12 @@ TERMINALKIT_API int terminalkit_mouse_mode(terminalkit_handle *kit);
 TERMINALKIT_API int terminalkit_focus_reporting(terminalkit_handle *kit);
 TERMINALKIT_API int terminalkit_synchronized_output(terminalkit_handle *kit);
 TERMINALKIT_API int terminalkit_alternate_screen(terminalkit_handle *kit);
+/* Nonzero while the application wants keys as Win32 key events (DECSET 9001).
+ * The Windows pseudoconsole asks for it; terminalkit_input_text and terminalkit_paste
+ * then send non-ASCII characters that way, since ConPTY otherwise turns
+ * characters missing from the keyboard layout into OEM code page Alt+Numpad
+ * input and shells such as PowerShell lose them. */
+TERMINALKIT_API int terminalkit_win32_input_mode(terminalkit_handle *kit);
 TERMINALKIT_API const char *terminalkit_title(terminalkit_handle *kit) TK_RETURNS_BORROWED_UTF8;
 TERMINALKIT_API void terminalkit_focus(terminalkit_handle *kit, int focused);
 TERMINALKIT_API void terminalkit_set_output_callback(terminalkit_handle *kit,
@@ -63,6 +69,8 @@ TERMINALKIT_API void terminalkit_set_output_callback(terminalkit_handle *kit,
  * Returns 0 on success, -1 for invalid input, allocation failure or queue limit.
  * Callback bytes are borrowed only for the duration of each invocation. */
 TERMINALKIT_API int terminalkit_paste(terminalkit_handle *kit, const uint8_t *bytes, uint64_t size);
+/** Emits typed or committed UTF-8 text like terminalkit_paste, without paste brackets. */
+TERMINALKIT_API int terminalkit_input_text(terminalkit_handle *kit, const uint8_t *bytes, uint64_t size);
 TERMINALKIT_API int terminalkit_keyboard(terminalkit_handle *kit,
     const char *key_name TK_UTF8, uint32_t modifiers, uint32_t unicode);
 TERMINALKIT_API int terminalkit_mouse(terminalkit_handle *kit, uint32_t x, uint32_t y,

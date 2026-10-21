@@ -53,6 +53,12 @@ class Main {
         session.pollEvents();
         if (backend.writes.length != 2 || backend.writes[1] != "plain")
             throw "plain paste was not delivered to the backend";
+        session.emulator.feedString("\x1b[?9001h");
+        session.emulator.text(Bytes.ofString("o€"));
+        session.flushInput();
+        if (backend.writes.length != 3 || backend.writes[2] != "o\x1b[0;0;8364;1;0;1_\x1b[0;0;8364;0;0;1_")
+            throw "win32-input-mode text was not encoded as key events";
+        session.emulator.feedString("\x1b[?9001l");
         backend.events.push(output(6, "world"));
         session.pollEvents();
         if (session.offset != 0 || backend.replays.length != 1 || backend.replays[0] != 0)
@@ -88,7 +94,7 @@ class Main {
             throw "Accepted geometry was not applied";
         session.detach();
         session.terminate(true);
-        if (backend.writes.length != 3 || backend.writes[2] != "input" ||
+        if (backend.writes.length != 4 || backend.writes[3] != "input" ||
                 backend.resizes != 1 || backend.detaches != 1 || backend.terminations != 1)
             throw "backend operations were not forwarded";
         var checkpoint = session.emulator.checkpoint();
@@ -108,14 +114,14 @@ class Main {
             throw "bounded screen snapshot did not restore the live viewport";
         screenReplacement.close();
         var modeSource = Emulator.open(20, 4, 8);
-        modeSource.feedString("\x1b[?1049h\x1b[?1h\x1b=\x1b[?1000h\x1b[?1006h\x1b[?2004h\x1b[?1004h\x1b[?2026h\x1b[31mR\x1b[0m界e\u0301");
+        modeSource.feedString("\x1b[?1049h\x1b[?1h\x1b=\x1b[?1000h\x1b[?1006h\x1b[?2004h\x1b[?1004h\x1b[?2026h\x1b[?9001h\x1b[31mR\x1b[0m界e\u0301");
         modeSource.snapshot();
         var modeCopy = Emulator.open(10, 3, 8, "xterm-256color", false);
         modeCopy.restoreScreenSnapshot(modeSource.screenSnapshot());
         modeCopy.snapshot();
         if (!modeCopy.alternateScreen() || !modeCopy.synchronizedOutput()
                 || modeCopy.mouseMode() != modeSource.mouseMode()
-                || !modeCopy.focusReporting()
+                || !modeCopy.focusReporting() || !modeCopy.win32InputMode()
                 || modeCopy.rowText(0).indexOf("R界e\u0301") != 0
                 || modeCopy.rowCells(0)[0].style != modeSource.rowCells(0)[0].style)
             throw "screen snapshot lost styled Unicode cells or VT modes";

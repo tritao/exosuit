@@ -12,6 +12,10 @@ interface TerminalKit @target("portable-abi64") @library("terminalkit") {
 	extern fn terminalkit_feed_range(kit: ptr<terminalkit_handle>, bytes: ptr<const<u8>>, buffer_size: u64, offset: u64, size: u64) -> c_int;
 	extern fn terminalkit_focus(kit: ptr<terminalkit_handle>, focused: c_int) -> void;
 	extern fn terminalkit_focus_reporting(kit: ptr<terminalkit_handle>) -> c_int;
+	/**
+	 * Emits typed or committed UTF-8 text like terminalkit_paste, without paste brackets.
+	 */
+	extern fn terminalkit_input_text(kit: ptr<terminalkit_handle>, bytes: ptr<const<u8>>, size: u64) -> c_int;
 	extern fn terminalkit_keyboard(kit: ptr<terminalkit_handle>, key_name: utf8, modifiers: u32, unicode: u32) -> c_int;
 	extern fn terminalkit_modes(kit: ptr<terminalkit_handle>, cursor_keys: ptr<c_int> @out, keypad: ptr<c_int> @out, mouse_tracking: ptr<c_int> @out, mouse_encoding: ptr<c_int> @out, paste: ptr<c_int> @out, focus: ptr<c_int> @out) -> void;
 	extern fn terminalkit_mouse(kit: ptr<terminalkit_handle>, x: u32, y: u32, button: u32, event: u32, modifiers: u8) -> c_int;
@@ -41,6 +45,7 @@ interface TerminalKit @target("portable-abi64") @library("terminalkit") {
 	extern fn terminalkit_text(kit: ptr<terminalkit_handle>) -> ptr<const<u8>> @borrowed;
 	extern fn terminalkit_text_size(kit: ptr<terminalkit_handle>) -> u64;
 	extern fn terminalkit_title(kit: ptr<terminalkit_handle>) -> utf8 @borrowed;
+	extern fn terminalkit_win32_input_mode(kit: ptr<terminalkit_handle>) -> c_int;
 	opaque terminalkit_cell;
 	opaque terminalkit_handle;
 	callback terminalkit_output_callback = fn(arg0: ptr<const<c_char>>, arg1: c_int, arg2: ptr<void>) -> void;
