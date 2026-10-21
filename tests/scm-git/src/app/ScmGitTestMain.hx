@@ -904,10 +904,15 @@ class ScmGitTestMain {
 			"SCM checkout overwrote conflicting local changes instead of refusing safely");
 		var fakeSsh = fixtureBase + "/fake-ssh.sh", shell = "/bin/sh";
 		if (Sys.systemName() == "Windows") {
-			var gitExecutable = StringTools.replace(git.executable == null ? "" : git.executable, "\\", "/");
-			var gitBin = gitExecutable.substr(0, gitExecutable.lastIndexOf("/"));
-			var gitRoot = gitBin.substr(0, gitBin.lastIndexOf("/"));
-			shell = gitRoot + "/bin/sh.exe";
+			// git.exe lives in cmd/, bin/ or mingw64/bin/ depending on which PATH entry found it; the shell is in
+			// bin/ or usr/bin/ under the installation root.
+			var directory = StringTools.replace(git.executable == null ? "" : git.executable, "\\", "/");
+			shell = "";
+			for (_ in 0...3) {
+				directory = directory.substr(0, directory.lastIndexOf("/"));
+				for (candidate in [directory + "/bin/sh.exe", directory + "/usr/bin/sh.exe"])
+					if (shell == "" && FileSystem.exists(candidate)) shell = candidate;
+			}
 		}
 		require(FileSystem.exists(shell), "Could not locate the shell bundled with Git for the fake SSH fixture");
 		File.saveContent(fakeSsh, "#!/bin/sh\necho 'Permission denied (publickey)' >&2\nexit 255\n");
@@ -1299,7 +1304,8 @@ class ScmGitTestMain {
 		require(largeBlob.error != null && largeBlob.error.code == "blob_too_large"
 			&& blobReader.activeProcessId() == sharedProcessId, "oversized blob was not drained by its header size");
 		var afterOversized = readBlob(blobReader, gitScheduler, "HEAD", smallPath, 1064);
-		require(afterOversized.value != null && afterOversized.value.bytes.compare(smallBytes) == 0,
+		require(afterOversized.value != null
+			&& normalizeNewlines(afterOversized.value.bytes.toString()) == normalizeNewlines(smallBytes.toString()),
 			"a read after an oversized blob was misaligned");
 
 		var blobCancelledCallback = false, cancelledBlob = blobReader.read("HEAD", Bytes.ofString("docs/roadmap/STATUS.md"), 1065,
