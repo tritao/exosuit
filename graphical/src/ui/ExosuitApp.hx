@@ -1632,6 +1632,9 @@ class ExosuitApp implements DesktopUiApplication {
 			explorerIdentity: explorerModel == null ? null : explorerModel.rootIdentity(),
 			explorerWatching: explorerModel != null && explorerModel.watchesChanges(),
 			explorerRevision: explorerModel == null ? -1 : explorerModel.revision(),
+			workspaceIndex: [for (project in application.workspace.projects) {
+				root: project.root, files: project.files().length, indexing: project.indexing(), generation: project.indexGeneration()
+			}],
 			sidebarMode: sidebar.activeId,
             workbenchSelectedNode: workbenchPanel == null ? null : workbenchPanel.tree.selectedKey,
 			sidebarState: sidebar.encode(),
