@@ -71,8 +71,12 @@ def main() -> int:
     # sampling profiler and writes a Perfetto trace when it ends. The rest is forwarded to the app.
     watch = "--watch" in sys.argv[1:]
     live = "--live" in sys.argv[1:]
-    profile = "--profile" in sys.argv[1:]
-    app_arguments = [argument for argument in sys.argv[1:] if argument not in ("--watch", "--live", "--profile")]
+    profile_arguments = [argument for argument in sys.argv[1:] if argument == "--profile" or argument.startswith("--profile=")]
+    app_arguments = [
+        argument
+        for argument in sys.argv[1:]
+        if argument not in ("--watch", "--live") and argument not in profile_arguments
+    ]
     arguments = [
         "run",
         "--project",
@@ -85,8 +89,7 @@ def main() -> int:
     if live:
         # Live builds carry patch history and must not overwrite the ordinary app build.
         arguments.extend(["--live", "--output", str(root_dir / "graphical" / "build" / "host" / "live.hl")])
-    if profile:
-        arguments.append("--profile")
+    arguments.extend(profile_arguments)
     arguments.extend(["--", *app_arguments])
 
     try:
