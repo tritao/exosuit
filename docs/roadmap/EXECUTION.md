@@ -33,12 +33,22 @@ reference input, including its uncommitted work. Read its sources and tests to
 port behavior. You may build it and run its binaries for interoperability
 tests, using a separate build directory. Do not modify it.
 
-No publishing, pushes, PR mutations or destructive cleanup are part of this
-plan. Commit each verified slice on the current branch of the repository it
-belongs to. In a sibling repository, first create a branch named
-`exosuit-followon`, and never commit to `main`. Stage only owned hunks. Use
-the commit attribution the session requires, and record every repository's
-commit IDs in STATUS.
+Features are developed on feature branches and merged back to mainline:
+`main` in exosuit, Haxeon, NativeKit and libtsm, and `haxeon/main` in
+HashLink. In every repository a feature touches, branch from current mainline
+under a name that describes the feature, such as `scm-watch-windows`. Commit
+each verified slice to that branch. Stage only owned hunks. Use the commit
+attribution the session requires, and record every repository's commit IDs in
+STATUS.
+
+An incomplete feature's branches may be pushed so the work is not stranded on
+one machine. When the feature is complete and verified, merge each branch into
+mainline from the bottom up: HashLink and NativeKit, then Haxeon, then
+exosuit. Each superproject then pins a commit on its submodule's mainline.
+Merge by fast-forward or merge commit. Never squash, or rebase pushed commits,
+because that orphans commits pinned by earlier superproject history. After the
+merge, delete the feature branch locally and on the remote. Pushes, merges
+into mainline and remote branch deletions each need the user's approval.
 
 ## Work loop
 

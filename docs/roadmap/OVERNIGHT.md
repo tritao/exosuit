@@ -34,10 +34,12 @@ red has not met the goal, however many boxes are checked.
 > evade it with weakened types, casts, special cases, disabled diagnostics or
 > `--self-hosted` toggles.
 >
-> Commit each verified slice following EXECUTION.md: the current branch in
-> exosuit, and an `exosuit-followon` branch in sibling repositories. Stage
-> only owned hunks and preserve all pre-existing dirty work. Do not push,
-> publish or mutate PRs. Serialize builds that share output directories.
+> Commit each verified slice to the feature's branch in every repository it
+> touches, following EXECUTION.md. Merge completed features into mainline as
+> EXECUTION.md describes. Stage only owned hunks and preserve all pre-existing
+> dirty work. Do not push, merge into mainline or delete branches without the
+> user's approval; list branches awaiting a merge in the final report.
+> Serialize builds that share output directories.
 > Update STATUS after each slice with the commands run, their outcomes,
 > commit IDs, compiler fixes and an exact resume instruction. If blocked,
 > record the evidence and continue with independent ready work (M11 and M13
