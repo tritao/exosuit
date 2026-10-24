@@ -68,10 +68,11 @@ def main() -> int:
 
     # --watch rebuilds and relaunches the app after source edits. --live also watches, but patches Haxe
     # edits into the running app instead of relaunching it. --profile records each launch with the
-    # sampling profiler and writes a Perfetto trace when it ends. The rest is forwarded to the app.
+    # profiler and writes a Perfetto trace when it ends; the other --profile-* options (start, duration,
+    # max size, window) go to haxeon with it. The rest is forwarded to the app.
     watch = "--watch" in sys.argv[1:]
     live = "--live" in sys.argv[1:]
-    profile_arguments = [argument for argument in sys.argv[1:] if argument == "--profile" or argument.startswith("--profile=")]
+    profile_arguments = [argument for argument in sys.argv[1:] if argument == "--profile" or argument.startswith("--profile=") or argument.startswith("--profile-")]
     app_arguments = [
         argument
         for argument in sys.argv[1:]

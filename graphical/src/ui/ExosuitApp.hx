@@ -815,6 +815,8 @@ class ExosuitApp implements DesktopUiApplication {
 		ui.commands.register(new Command("view.zoom-out", "Zoom Out", function() setApplicationZoom(application.settings.current.applicationZoom - 10), new Shortcut(45, modifier)).addShortcut(new Shortcut(333, modifier)));
 		ui.commands.register(new Command("view.zoom-reset", "Reset Zoom", function() setApplicationZoom(100), new Shortcut(48, modifier)).addShortcut(new Shortcut(320, modifier)));
 		ui.commands.register(new Command("view.notifications", "Show Notifications", function() showNotifications()));
+		// Starts or pauses recording in a `haxeon run --profile` session; does nothing without one.
+		ui.commands.register(new Command("profiler.toggle-recording", "Profiler: Toggle Recording", function() haxeon.ProfileRecording.toggle()));
 		ui.commands.register(new Command("editor.toggle-tab-focus", "Toggle Tab Moves Focus", function() {
 			ui.events.tabMovesFocus = !ui.events.tabMovesFocus;
 			host.dismissLanguagePopup();

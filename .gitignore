@@ -3,6 +3,7 @@
 /dist/
 /.local/
 /graphical/build/
+/graphical/build-instrument/
 /graphical/graphical/build/
 /graphical/.local/
 /uikit-native/build/
