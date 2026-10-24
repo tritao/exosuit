@@ -510,7 +510,7 @@ class TerminalPane implements TerminalPanel {
 				if (!canSendInput()) { event.preventDefault(); return; }
 				var generation = focusGeneration;
 				context.clipboard.readText(function(text) {
-					if (closed || !focused || generation != focusGeneration || session.status != "running" || text.length == 0) return;
+					if (!focused || generation != focusGeneration || session.status != "running" || text.length == 0 || !canSendInput()) return;
 					prepareInput();
 					session.emulator.paste(Bytes.ofString(text));
 					session.flushInput();
@@ -678,7 +678,9 @@ class TerminalPane implements TerminalPanel {
 		}
 	}
 
-	function canSendInput():Bool return remoteBackend == null || !remoteBackend.isAttached() || remoteBackend.canControl();
+	/** Input before a remote terminal attaches is queued; a failed one (detached too) takes none. */
+	function canSendInput():Bool
+		return !closed && (remoteBackend == null || remoteBackend.isAvailable() && (!remoteBackend.isAttached() || remoteBackend.canControl()));
 
 	public function close():Void {
 		if (closed) return;

@@ -61,6 +61,8 @@ class RpcTerminalBackend implements TerminalBackend {
   }
   public function id():String return terminalId;
   public function isAttached():Bool return attached;
+  /** False once the terminal failed or closed: write throws, so input must not reach it. */
+  public function isAvailable():Bool return !closed && failure == null;
   public function isSynchronized():Bool return synchronized;
   public function canControl():Bool return controller;
   public function hasControlGrant():Bool {
