@@ -18,7 +18,7 @@ Status: ✅ done · 🔨 in progress · ⬜ todo · ⏸ deferred
 | 3 | Lower only the regenerated functions | compile 8.1 → 5.6 s | small | ✅ | haxeon 5c14a23d; editor compile 9.8 → 6.5 s |
 | 4 | Stop ~150 functions counting as "changed" each compile: encode unreachable open IR blocks (4a) | 0.3–0.6 s | small | ✅ | haxeon 41facedf; lowering 430–760 → 210–340 ms |
 | 5 | CLI: reuse file digests across watch rebuilds, cache the worker identity and resolved project (4b) | ~1 s | small | ⬜ | |
-| 6 | Cache directory listings when resolving imports (4c) | 0.4–0.6 s per edit; several s cold | small | ⬜ | |
+| 6 | Cache directory listings when resolving imports (4c) | 0.4–0.6 s per edit; several s cold | small | ⬜ next | The cold parse still takes 6.3 s after #12–#13; directory listings are a likely part of it |
 | 7 | Watch loop: file-change notifications instead of polling plus a 0.5 s settle (4d) | 0.6–0.8 s | small–medium | ⬜ | |
 | 8 | Live edits write only the patch and stamp; defer the 40 MB `.hl`, its build-id hash and the side files | 0.7–1.1 s | small–medium | ⬜ | |
 | 9 | Incremental inliner: stop re-encoding ~2k function pairs per compile (4e) | 1–1.5 s | medium | ⬜ | |
@@ -29,8 +29,10 @@ Status: ✅ done · 🔨 in progress · ⬜ todo · ⏸ deferred
 
 | # | Optimization | Expected gain | Effort | Status | Commits / measured |
 |---|---|---|---|---|---|
-| 12 | The frontend restarts partway through a cold compile and discards about 17 s of work, including the only full parse | up to ~17 s | small–medium (cause not yet known) | 🔨 | |
-| 13 | `decodeString` and interpolated-string parsing build literals in O(n²) time | several s (about 8 GB of allocation) | small | 🔨 | |
+| 12 | The frontend restarts when typing finds it needs `runtime.DynamicObject` / `haxeon.DynamicOps` (19 triggers in the editor) | measured 3.6 s (the "17 s" estimate counted the parse, which runs once anyway) | small | 🔨 | A first version seeded both modules always: a `return 42` program grew from 2 KB to 53 KB. Reworking it to seed them only when the reachable sources mention `Dynamic` |
+| 13 | `decodeString` and interpolated-string parsing build literals in O(n²) time | several s (about 8 GB of allocation) | small | ✅ | haxeon 39218b1d; parse 11.4 → 6.3 s |
+
+Cold compile, measured with one batch and then bisected: baseline 35.7 s → #12 only 32.1 s → #12 + #13 24.8 s. Allocation 19.3 → 8.3 GB, GC 5.0 → 2.6 s.
 
 ## Run time: live mode as fast as normal mode
 
