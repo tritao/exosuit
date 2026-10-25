@@ -54,8 +54,8 @@ UI-thread time outside the app's tick during the 24 s scroll window:
 - That is where the fewer frames per second and the 9–15 ms input lag come from.
 - The host's own Haxe code is not instrumented, so the parse shows in the trace only as gaps between `tick` slices,
   plus the `fread` and `_wfopen` boundary calls.
-- Fix (not done): poll a small revision stamp, or the file's size and modification time, at most every ~100 ms. Parse
-  the description only when it changes.
+- *Fixed* in haxeon d08c1d35: the compiler publishes a small `.live.stamp` (the publication key) after the
+  description, and the host parses the description only when the stamp changes.
 
 ### 2. The per-call cost of a patchable module (smaller)
 
@@ -139,10 +139,14 @@ Scroll, normal run, self ms per frame:
 8. **Trace size.** About 265k kept calls per second gives 4.8 MB/s of HLPC and 16 MB/s of `.pftrace`, roughly 60 bytes
    per call or 3.3× the capture. The export closes and reopens every open call-stack slice at each frame boundary
    (`pf_stack_frame`), which multiplies slice events for deep stacks. Worth measuring.
-9. **Host code is a blind spot.** In live mode the profiler sees the app module but not `LiveHost`, so the host's
-   9–13 ms per tick appear only as gaps.
+9. **Host code was a blind spot.** `LiveHost` was built with stock Haxe, so its 9–13 ms per tick appeared only as gaps.
+   *Fixed* in haxeon b63db7c0: `run --live` builds the host with Haxeon, instrumented under `--profile`. The host runs
+   the app's tick on the same thread, so host and app calls share one track.
 
 ### Haxeon compiler (found building the live host with Haxeon)
+
+19. **An edit to three functions takes 8–16 s to compile** with a warm compile server ("compile=14028 ms, 3 functions
+    retyped"). That is most of the edit-to-patch delay a user feels. Not investigated.
 
 17. **A `try … catch` used as an expression needs a `;` after the catch block.** Haxeon's parser rejects
     `var x = try f() catch (e:Dynamic) { … }` followed by a new statement ("E0002: Expected Semicolon, got
