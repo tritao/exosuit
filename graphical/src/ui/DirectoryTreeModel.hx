@@ -445,7 +445,7 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 
 	function startPriorityWorkers(count:Int):Void {
 		for (_ in 0...count) {
-			try Thread.create(workerLoop) catch (_:Dynamic) {
+			try haxeon.Threads.create("exo.tree.worker", workerLoop) catch (_:Dynamic) {
 				queueLock.acquire();
 				workerCount--;
 				if (workerCount == 0) failQueued(jobs);
@@ -455,7 +455,7 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 	}
 
 	function startPrefetchWorkerThread():Void {
-		try Thread.create(prefetchWorkerLoop) catch (_:Dynamic) {
+		try haxeon.Threads.create("exo.tree.prefetch", prefetchWorkerLoop) catch (_:Dynamic) {
 			queueLock.acquire();
 			prefetchWorkerRunning = false;
 			failQueued(prefetchJobs);

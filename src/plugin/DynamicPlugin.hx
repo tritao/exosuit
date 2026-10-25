@@ -118,7 +118,7 @@ class DynamicPlugin implements Plugin {
 		if (compiling || disposed) return false;
 		var generation = observationGeneration;
 		compiling = true;
-		Thread.create(function() {
+		haxeon.Threads.create("exo.plugin.build", function() {
 			var build:Null<compiler.CompileResult> = null, error:Null<String> = null;
 			compilerMutex.acquire();
 			try {

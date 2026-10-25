@@ -122,7 +122,7 @@ class ProjectScan implements JobTask {
 		if (readerUnavailable) return;
 		if (!readerStarted) {
 			try {
-				Thread.create(directoryReaderLoop);
+				haxeon.Threads.create("exo.scan.reader", directoryReaderLoop);
 				readerStarted = true;
 			} catch (error:Dynamic) {
 				readerUnavailable = true;

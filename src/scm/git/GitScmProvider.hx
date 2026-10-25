@@ -356,7 +356,7 @@ private class GitDetectTask implements JobTask {
 		directoryReadPending = true;
 		if (!readerStarted && !readerUnavailable) {
 			try {
-				Thread.create(directoryReaderLoop);
+				haxeon.Threads.create("exo.git.reader", directoryReaderLoop);
 				readerStarted = true;
 			} catch (failure:Dynamic) {
 				readerUnavailable = true;
