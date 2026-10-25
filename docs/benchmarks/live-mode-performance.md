@@ -171,6 +171,9 @@ Scroll, normal run, self ms per frame:
 14. Watch-mode output contains `'import' is not recognized as an internal or external command` (some step passes a
     POSIX or Python line to cmd). Not investigated.
 15. Every capture directory gets `screenshot-error.txt`: the frame capture's screenshot fails. Not investigated.
+17. **Two Haxeon tooling tests fail on Windows, with or without this work** (checked against haxeon e4661b98):
+    `LspProtocolMain` ("projected FFI constant definition did not reach its ABI declaration") and
+    `CompilerSessionMain` ("runtime library path must be restored exactly"). Not investigated.
 16. The Chrome profile used for browser automation blocked all page scripts (Perfetto stopped at its boot spinner;
     a `data:` script failed on example.com too). It's a browser setting, not a profiler bug.
 
