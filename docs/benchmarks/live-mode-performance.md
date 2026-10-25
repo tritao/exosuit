@@ -142,6 +142,15 @@ Scroll, normal run, self ms per frame:
 9. **Host code is a blind spot.** In live mode the profiler sees the app module but not `LiveHost`, so the host's
    9–13 ms per tick appear only as gaps.
 
+### Haxeon compiler (found building the live host with Haxeon)
+
+17. **A `try … catch` used as an expression needs a `;` after the catch block.** Haxeon's parser rejects
+    `var x = try f() catch (e:Dynamic) { … }` followed by a new statement ("E0002: Expected Semicolon, got
+    Identifier"), where Haxe accepts it.
+18. **A parsed `Dynamic` cannot be cast to a structure type.** `var d:LiveDescription = Json.parse(text)` fails at
+    run time with "Can't cast dynobj to $anon:{…}"; Haxe converts the object. `LiveHost` now builds the structure
+    field by field.
+
 ### Tooling and environment
 
 10. **The main checkout's HashLink tools and runtime were stale** (from before the profiler work). The editor failed
