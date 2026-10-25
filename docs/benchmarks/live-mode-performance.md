@@ -174,7 +174,11 @@ Scroll, normal run, self ms per frame:
     a `data:` script failed on example.com too). It's a browser setting, not a profiler bug.
 21. **Two Haxeon tooling tests fail on Windows, with or without this work** (checked against haxeon e4661b98):
     `LspProtocolMain` ("projected FFI constant definition did not reach its ABI declaration") and
-    `CompilerSessionMain` ("runtime library path must be restored exactly"). Not investigated.
+    `CompilerSessionMain` ("runtime library path must be restored exactly"). Not investigated. In the runtime suite, 9
+    of 68 fail on Windows for portability reasons: four integration scripts call `cc` (`GcAllocationPaths`,
+    `GcEmptyPages`, `JitInlineAllocation`, `JitBoxedAllocation`), four tests start `.tools/hashlink/hl` without `.exe`
+    (`nullable-enum-pattern`, `static-init-order`, `loaded-array-cast`, `dynamic-string`), and `BytesAsciiMain` runs
+    a command cmd does not recognize.
 
 ## Reproducing
 
