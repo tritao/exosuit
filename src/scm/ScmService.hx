@@ -24,6 +24,10 @@ private class ScmRootState {
 	public var refreshAt:Null<Float>;
 	public var lastPoll:Float = 0;
 	public var watchAvailable:Bool = false;
+	/** Directories host watches leave out (see GitScmRepositoryHandle.watchExclusions); null until known. */
+	public var excluded:Null<Array<String>>;
+	public var exclusionsJobs:Array<ScmJob<Array<String>>> = [];
+	public var exclusionsGeneration:Int = 0;
 
 	public function new(root:String) this.root = root;
 }
@@ -56,7 +60,7 @@ class ScmService {
 	var provider:ScmProvider;
 	final roots:Map<String, ScmRootState> = [];
 	final listeners:Array<(ScmRepository, ScmSnapshot)->Void> = [];
-	final watchPathListeners:Array<(String, Array<String>)->Void> = [];
+	final watchPathListeners:Array<(String, Array<String>, Array<String>)->Void> = [];
 	var enabled:Bool = true;
 	var autoRefresh:Bool = true;
 	var pollingInterval:Float = 1.5;
@@ -167,6 +171,7 @@ class ScmService {
 			cancelJobs(state);
 			for (handle in state.handles) handle.dispose();
 			state.handles = result.value;
+			state.excluded = null;
 			var discovered:Map<String, Bool> = [];
 			for (handle in state.handles) discovered.set(handle.repository().id, true);
 			for (id in [for (id in state.snapshots.keys()) id])
@@ -224,6 +229,22 @@ class ScmService {
 		return result;
 	}
 
+	/** Whether a root relies on its host watch rather than polling. */
+	public function isWatchAvailable(root:String):Bool {
+		var normalized:String;
+		try normalized = normalize(root) catch (_:Dynamic) return false;
+		var state = roots.get(normalized);
+		return state != null && state.watchAvailable;
+	}
+
+	/** Directories host watches of a root leave out; empty until they are known. */
+	public function watchExclusions(root:String):Array<String> {
+		var normalized:String;
+		try normalized = normalize(root) catch (_:Dynamic) return [];
+		var state = roots.get(normalized);
+		return state == null || state.excluded == null ? [] : state.excluded.copy();
+	}
+
 	public function snapshot(repositoryId:String):Null<ScmSnapshot> {
 		var state = stateForRepository(repositoryId);
 		return state == null ? null : state.snapshots.get(repositoryId);
@@ -274,6 +295,14 @@ class ScmService {
 			if (isGitMarker || metadataChanged) {
 				discover(state.root, _ -> {});
 				return;
+			}
+			for (handle in state.handles) {
+				var gitHandle:scm.git.GitScmRepositoryHandle = Std.isOfType(handle, scm.git.GitScmRepositoryHandle) ? cast handle : null;
+				if (gitHandle != null && gitHandle.ignoreRulesChanged(key)) {
+					state.excluded = null;
+					publishWatchPaths(state);
+					break;
+				}
 			}
 		}
 		scheduleRoot(state, now == null ? Sys.time() : now, overflow);
@@ -358,7 +387,8 @@ class ScmService {
 	}
 
 	/** Subscribes a desktop host to watch path changes after discovery/settings updates. */
-	public function subscribeWatchPaths(listener:(String, Array<String>)->Void):Void->Void {
+	/** Calls `listener(root, paths, excluded)` whenever the directories a host should watch for a root change. */
+	public function subscribeWatchPaths(listener:(String, Array<String>, Array<String>)->Void):Void->Void {
 		if (listener != null && watchPathListeners.indexOf(listener) < 0) watchPathListeners.push(listener);
 		return function() watchPathListeners.remove(listener);
 	}
@@ -513,14 +543,47 @@ class ScmService {
 		publishWatchPaths(state);
 	}
 
+	/** Publishes a root's watch directories once its exclusions are known, so a host never walks the trees they leave
+		out. Until then the root has no watch and is polled. */
 	function publishWatchPaths(state:ScmRootState):Void {
 		var paths = watchDirectories(state.root);
-		for (listener in watchPathListeners.copy()) listener(state.root, paths.copy());
+		if (paths.length > 0 && state.excluded == null) {
+			queryExclusions(state);
+			return;
+		}
+		var excluded = paths.length == 0 || state.excluded == null ? [] : state.excluded;
+		for (listener in watchPathListeners.copy()) listener(state.root, paths.copy(), excluded.copy());
+	}
+
+	function queryExclusions(state:ScmRootState):Void {
+		for (job in state.exclusionsJobs) job.cancel();
+		state.exclusionsJobs.resize(0);
+		var generation = ++state.exclusionsGeneration;
+		var gitHandles = [for (handle in state.handles) if (Std.isOfType(handle, scm.git.GitScmRepositoryHandle)) (cast handle : scm.git.GitScmRepositoryHandle)];
+		var pending = gitHandles.length, excluded:Array<String> = [];
+		function finish():Void {
+			state.exclusionsJobs.resize(0);
+			state.excluded = excluded;
+			publishWatchPaths(state);
+		}
+		if (pending == 0) {
+			finish();
+			return;
+		}
+		for (handle in gitHandles)
+			state.exclusionsJobs.push(handle.watchExclusions(generation, function(result) {
+				if (disposed || state.exclusionsGeneration != generation) return;
+				if (result.value != null) for (path in result.value) if (excluded.indexOf(path) < 0) excluded.push(path);
+				if (--pending == 0) finish();
+			}));
 	}
 
 	function cancelJobs(state:ScmRootState):Void {
 		if (state.detectJob != null) state.detectJob.cancel();
 		state.detectJob = null;
+		for (job in state.exclusionsJobs) job.cancel();
+		state.exclusionsJobs.resize(0);
+		state.exclusionsGeneration++;
 		for (job in state.refreshJobs) job.cancel();
 		for (queue in state.operations) for (request in queue.copy()) if (request.job != null) request.job.cancel();
 		state.refreshJobs.clear();

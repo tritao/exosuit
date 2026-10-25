@@ -85,7 +85,7 @@ class Application {
 	public final recentProjects:RecentProjects;
 	final releaseScmSettings:Void->Void;
 	final releaseScmWatchPaths:Void->Void;
-	public var onScmWatchPathsChanged:Null<(String, Array<String>)->Void>;
+	public var onScmWatchPathsChanged:Null<(String, Array<String>, Array<String>)->Void>;
 	public final documentMatches:Array<SearchMatch>;
 	public var documentSearchQuery(get, never):String;
 	public var quitReady(get, never):Bool;
@@ -105,8 +105,8 @@ class Application {
 			this.settings.current.scmUntrackedLimit, this.settings.current.scmNestedScanDepth, this.settings.current.scmAutoRefresh);
 		scm.configure(this.settings.current);
 		releaseScmSettings = this.settings.subscribe(value -> scm.configure(value));
-		releaseScmWatchPaths = scm.subscribeWatchPaths(function(root, paths) {
-			if (onScmWatchPathsChanged != null) onScmWatchPathsChanged(root, paths);
+		releaseScmWatchPaths = scm.subscribeWatchPaths(function(root, paths, excluded) {
+			if (onScmWatchPathsChanged != null) onScmWatchPathsChanged(root, paths, excluded);
 		});
 		fileOperations = new FileOperations(workspace, new TrashService(ConfigurationPaths.trash(), workspace.fileSystem));
 		documents = workspace.documents;
