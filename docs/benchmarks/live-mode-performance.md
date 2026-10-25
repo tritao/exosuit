@@ -155,6 +155,10 @@ Scroll, normal run, self ms per frame:
     retyped"). That is most of the edit-to-patch delay a user feels. Not investigated.
 20. **Applying a patch freezes the editor for about 2 s.** In a capture with the stamp fix (one edit, three functions),
     `live.patch` / `runtime.Runtime.patchSet` ran 1,896 ms on the UI thread. Not investigated.
+22. **The module files and the description can pair across builds.** `.hl`, `.hli` and `.hlp` are published before
+    `.live.json` but the host reads them after it; if a newer build lands in between, the host can apply build N+1's
+    `.hlp` with build N's description (or, at startup, load N+1 with N's function ids). Existed before the stamp,
+    found in review, not fixed.
 
 ### Tooling and environment
 
