@@ -78,6 +78,10 @@ class ScmWatchTestMain {
 		var service:Null<ScmService> = null, watcher:Null<ScmDirectoryWatch> = null;
 		try {
 			runGit(git, runtime, scheduler, ["init"], root, 2);
+			// Ignored build output is left out of the watch.
+			File.saveContent(root + "/.gitignore", "build/\n");
+			FileSystem.createDirectory(root + "/build");
+			FileSystem.createDirectory(root + "/build/out");
 			var trustPath = root + "/trust.json";
 			service = new ScmService(processes, scheduler, git.executable, 1000, 0, true, trustPath, hooks);
 			var discovery:Null<ScmJobResult<Array<ScmRepository>>> = null;
@@ -86,9 +90,16 @@ class ScmWatchTestMain {
 			if (discovery == null || discovery.error != null || discovery.value == null || discovery.value.length != 1)
 				throw "SCM watch fixture did not produce one repository";
 			var repository = discovery.value[0];
+			pumpNative(runtime, service, scheduler, () -> service.watchExclusions(root).length > 0,
+				"SCM watch exclusions were not computed");
+			var exclusions = service.watchExclusions(root);
+			require(exclusions.indexOf(root + "/build") >= 0 && exclusions.indexOf(root + "/.git/objects") >= 0,
+				"SCM watch exclusions miss the ignored build directory or the object store: " + exclusions);
 			watcher = new ScmDirectoryWatch(service, runtime.events);
-			watcher.update(root, service.watchDirectories(root));
+			watcher.update(root, service.watchDirectories(root), exclusions);
 			require(watcher.isWatching(root), "NativeKit did not arm the SCM worktree watcher: " + watcher.lastError);
+			pumpNative(runtime, service, scheduler, () -> service.isWatchAvailable(root),
+				"The SCM watch did not become available once its directories were registered");
 			pumpNative(runtime, service, scheduler, () -> service.snapshot(repository.id) != null,
 				"SCM watch fixture initial status timed out");
 

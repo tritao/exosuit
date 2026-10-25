@@ -264,8 +264,8 @@ class ExosuitApp implements DesktopUiApplication {
 		host = capturedHost;
 		if (hostContext != null) {
 			scmDirectoryWatch = new ScmDirectoryWatch(application.scm, hostContext.events);
-			application.onScmWatchPathsChanged = function(root, paths) {
-				if (scmDirectoryWatch != null) scmDirectoryWatch.update(root, paths);
+			application.onScmWatchPathsChanged = function(root, paths, excluded) {
+				if (scmDirectoryWatch != null) scmDirectoryWatch.update(root, paths, excluded);
 			};
 			scmFocusSubscription = hostContext.events.listen(function(event) {
 				switch event {
