@@ -45,6 +45,17 @@ Cold compile, measured with one batch and then bisected: baseline 35.7 s → #12
 | 18 | App code: `SetiIconData` (852 literals) and `Theme.semanticColor` lookups | helps both modes | small | ⬜ | |
 | 19 | Flag captures that recorded human input (measurement hygiene, not a speedup) | — | small | ⬜ | |
 
+## Upstream work by tritao (checked 2026-10-25, merged into `live-mode-speed`)
+
+Read patch by patch against this list. None of it implements a tracked item; nothing here is duplicated.
+
+| Upstream commit(s) | What it does | Relation to this list |
+|---|---|---|
+| haxeon a6736d27, ee7c2357; exosuit ff6e4af, f783468, 813227e | `NativeKitFileWatch`: typed file watch with `Ready`/`Lost`/`Overflow` events and directory exclusions. Exosuit's watchers use it; SCM watches change in place, leave out ignored directories (12k of 17k), and share one watch per repository | **#7 should be built on `NativeKitFileWatch`.** The haxeon CLI watch loop (`src/build`) is untouched and still polls. The SCM changes also cut UI-thread directory walks at startup (outside this list) |
+| haxeon 6252b583, a9dcd71e, ab7cf25d, d7fd872c | Editor run time: cached visual rows per paragraph group; incremental layout for edits the owner makes; layouts kept across width changes that cannot affect them; semantic values compared by revision instead of rebuilding the whole text every frame | Not on this list. They are per-frame and per-keystroke app costs in both modes, like #18 but different code. **Run-time baselines for #14–#16 must be taken after this merge**, or their gains would be mixed up with these |
+| haxeon 590a0a7d, 84db03da, f0ec7295; hashlink 4891279, e1517a4, 99c48e3, 9e0da2c | Profiler: native frames on Linux/macOS, unbroken FFI stacks (libffi fork, frame pointers), running vs waiting samples, a sampler that cannot hang | Helps attribution (#19-style tooling). Touches the stack capture in hashlink `module.c`, not `gc.c`/`jit*.c`/`hlpatch.c`, so it doesn't conflict with #14/#16 |
+| haxeon 8978c52d | Formats LiveHost and two of our live tests | Our new commits should be run through the formatter before the stack is merged |
+
 ## Multicore compiler (deferred)
 
 ⏸ Parallel lowering, a second parallel split, parallel typing, and removing HashLink's global allocator lock
