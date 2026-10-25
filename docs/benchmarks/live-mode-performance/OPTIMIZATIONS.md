@@ -17,7 +17,7 @@ Status: ✅ done · 🔨 in progress · ⬜ todo · ⏸ deferred
 | 2 | Patch freeze: indexed type-name lookup when hashing types for a patch (and reject struct/method types) | 1.9 s freeze → ~10 ms | small | ✅ | hashlink fba14f4; measured 1,927 ms → no visible gap |
 | 3 | Lower only the regenerated functions | compile 8.1 → 5.6 s | small | ✅ | haxeon 5c14a23d; editor compile 9.8 → 6.5 s |
 | 4 | Stop ~150 functions counting as "changed" each compile: encode unreachable open IR blocks (4a) | 0.3–0.6 s | small | ✅ | haxeon 41facedf; lowering 430–760 → 210–340 ms |
-| 5 | CLI: reuse file digests across watch rebuilds, cache the worker identity and resolved project (4b) | ~1 s | small | ⬜ | |
+| 5 | CLI: reuse file digests across watch rebuilds, cache the worker identity and resolved project (4b) | ~1 s | small | ✅ | haxeon 4d9ee155 + review fix aa024d78 (a re-resolved project is kept when its build fails). Measured by the implementer: CLI time before the compile request ~1.14–1.21 s → ~0.13 s on the editor project; end to end on a small project 750–850 → 122–130 ms. Follow-ups: fewer syscalls in `ActionFingerprint.appendPath` (~50–80 ms), and `PackageResolver`'s per-file `fullPath` |
 | 6 | Cache directory listings when resolving imports (4c) | 0.4–0.6 s per edit; several s cold | small | ⬜ next | The cold parse still takes 6.3 s after #12–#13; directory listings are a likely part of it |
 | 7 | Watch loop: file-change notifications instead of polling plus a 0.5 s settle (4d) | 0.6–0.8 s | small–medium | ⬜ | |
 | 8 | Live edits write only the patch and stamp; defer the 40 MB `.hl`, its build-id hash and the side files | 0.7–1.1 s | small–medium | ⬜ | |
