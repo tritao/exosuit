@@ -40,7 +40,7 @@ Cold compile, measured with one batch and then bisected: baseline 35.7 s → #12
 |---|---|---|---|---|---|
 | 14 | GC ownership ledger makes GC pauses 5–6× longer in live mode | the largest run-time gap | medium (HashLink C) | ⬜ | |
 | 15 | String literals allocate on every evaluation in live builds (+0.37 MB per frame) | less GC pressure | medium | ⬜ | |
-| 16 | Direct calls instead of indirect calls in live modules | small | medium (JIT) | ⬜ | |
+| 16 | Direct calls instead of indirect calls in live modules | small | medium (JIT) | ✅ | hashlink 0bd7f9a, haxeon test 1334f4ae. Base code of a patchable module calls directly (x86-64); every function starts with an 8-byte nop that the first patch turns into a jump with one atomic store. Micro-benchmark: patchable 1.95–2.2 → 1.10–1.21 ns/call (normal ~1.0–1.1); a call into patched code is unchanged (~1.9 ns). Linux build syntax-checked under WSL; the Linux profiler path is untested at run time |
 | 17 | LiveHost per-frame work: look up the tick function's ID once | tiny | small | ⬜ | |
 | 18 | App code: `SetiIconData` (852 literals) and `Theme.semanticColor` lookups | helps both modes | small | ⬜ | |
 | 19 | Flag captures that recorded human input (measurement hygiene, not a speedup) | — | small | ⬜ | |
