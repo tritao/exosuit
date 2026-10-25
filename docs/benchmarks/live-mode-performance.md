@@ -176,15 +176,32 @@ Scroll, normal run, self ms per frame:
 
 ## Reproducing
 
-The driver and analysis scripts are in [`live-mode-performance/`](live-mode-performance/):
-- `run.ps1` and `drive.ps1` run one capture;
-- `make_script.py` writes the input script;
-- `frames.py`, `windows.py`, `compare.py` and `split.py` do the analysis;
+The driver and analysis scripts are in [`live-mode-performance/`](live-mode-performance/) and run in place; their
+output (`runs/`, `traces/`, generated `script*.json`) is ignored by git. The checkout path is fixed at
+`C:/Users/corbi/projects/exosuit`.
+
+- `run.ps1` and `drive.ps1` run one capture. The driver enforces a hard deadline, kills the process tree, reads any
+  error dialog's text, makes the scripted source edits and restores the file, and stops leftover compile servers and
+  workspace agents. Progress goes to `runs/<name>/driver.log`.
+- `make_script.py OFFSET OUT` writes the input script: the interaction starts OFFSET seconds after the first frame.
+- `windows.py RUN_DIR CAPTURE.hlpc` maps the run's checkpoints to capture milliseconds; `frames.py`, `compare.py`
+  and `split.py` do the rest of the analysis.
+- `serve_dir.py DIR [SECONDS]` serves the `.pftrace` files in DIR to ui.perfetto.dev. Perfetto fetches only from
+  `127.0.0.1:9001`, and the server lists its files at start, so restart it after adding a trace. Open
+  `https://ui.perfetto.dev/#!/?url=http://127.0.0.1:9001/<name>.pftrace`.
 - `call-stats-aggregator.patch` is the temporary `hlprof-live` aggregator, applied to the HashLink submodule.
 
-Their paths point at this session's scratchpad and checkout. The essentials are:
-- an empty `PRAGTICAL_PORTABLE` state folder;
-- `--input-script`, `--capture-dir`, `--capture-seconds` and `--record-path` passed through `run.py`;
-- for the live comparison, edits made after the first frame, with the interaction starting once they patch;
-- a hard time limit per run that kills the process tree, checks for error dialogs, and stops leftover compile
-  servers and workspace agents.
+A capture's trace (the editor process, launch to exit) stays at or under 120 s. The build before launch doesn't count.
+
+```powershell
+cd docs/benchmarks/live-mode-performance
+python make_script.py 1 script.json            # ordinary runs: interaction 1 s after the first frame
+python make_script.py 25 script-one-edit.json  # live with one edit: starts once the edit has patched
+./run.ps1 -Name normal -Seconds 44
+./run.ps1 -Name watch -Mode '--watch' -Seconds 44
+./run.ps1 -Name live -Mode '--live' -Seconds 44
+./run.ps1 -Name live-edit -Mode '--live' -Script 'script-one-edit.json' -Seconds 68 -Deadline 360 -Patch -OneEdit
+```
+
+`-Patch` alone makes three edits (`"Spaces: "` in `ExosuitApp.hx`); `-OneEdit` keeps only the first. Each run's
+`run.log` names its `profile.pftrace`; link it into `traces/` under a descriptive name before serving.
