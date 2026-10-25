@@ -152,7 +152,12 @@ Scroll, normal run, self ms per frame:
     run time with "Can't cast dynobj to $anon:{…}"; Haxe converts the object. `LiveHost` now builds the structure
     field by field.
 19. **An edit to three functions takes 8–16 s to compile** with a warm compile server ("compile=14028 ms, 3 functions
-    retyped"). That is most of the edit-to-patch delay a user feels. Not investigated.
+    retyped"). That is most of the edit-to-patch delay a user feels. Investigated in
+    [`investigations/compile-slow.md`](live-mode-performance/investigations/compile-slow.md). *Partly fixed* in haxeon
+    5c14a23d: an edit lowers again only the functions it regenerated (629 instead of 8,315); a warm edit compiles in
+    5.6 s instead of 8.1 s with a byte-identical module, and in the editor save-to-patch went from 13.4 to 10.0 s.
+    Still open: 150 functions compare as changed on every compile, whole-file source hashes and absolute offsets in
+    the IR comparison, the inliner's re-encoding, and the CLI and watch-loop overheads.
 20. **Applying a patch freezes the editor for about 2 s.** In a capture with the stamp fix (one edit, three functions),
     `live.patch` / `runtime.Runtime.patchSet` ran 1,896 ms on the UI thread. *Fixed* in hashlink fba14f4: the VM
     scanned the whole string table for each of 23,287 type names when hashing the type prefix; a content index makes it
