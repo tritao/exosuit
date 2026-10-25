@@ -145,6 +145,8 @@ Scroll, normal run, self ms per frame:
 
 ### Haxeon compiler (found building the live host with Haxeon)
 
+20. **Applying a patch freezes the editor for about 2 s.** In a capture with the stamp fix (one edit, three functions),
+    `live.patch` / `runtime.Runtime.patchSet` ran 1,896 ms on the UI thread. Not investigated.
 19. **An edit to three functions takes 8–16 s to compile** with a warm compile server ("compile=14028 ms, 3 functions
     retyped"). That is most of the edit-to-patch delay a user feels. Not investigated.
 
