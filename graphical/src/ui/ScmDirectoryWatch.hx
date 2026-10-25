@@ -2,7 +2,6 @@ package ui;
 
 import nativekit.ffi.NativeKit;
 import nativekit.ffi.NativeKitTypes;
-import haxe.io.Bytes;
 import haxeon.platform.NativeKitEvents;
 import haxeon.platform.NativeKitEvents.NativeKitEventSubscription;
 import scm.ScmService;
@@ -25,7 +24,7 @@ class ScmDirectoryWatch {
 	public function update(root:String, paths:Array<String>):Void {
 		if (disposed) return;
 		lastError = null;
-		var key = pathKey(root), previous = states.get(key);
+		var key = FileWatchEvents.pathKey(root), previous = states.get(key);
 		if (previous != null) disposeState(previous);
 		scm.setWatchAvailable(root, false);
 		if (paths == null || paths.length == 0) return;
@@ -45,7 +44,7 @@ class ScmDirectoryWatch {
 		var selected:Array<String> = [];
 		for (path in paths) {
 			var covered = false;
-			for (parent in selected) if (within(parent, path)) { covered = true; break; }
+			for (parent in selected) if (FileWatchEvents.within(parent, path)) { covered = true; break; }
 			if (covered) continue;
 			if (NativeKit.nk_file_watch_add_directory(watch.borrow(), path, true) != Result.Ok) {
 				lastError = nativeError("Watching " + path + " failed");
@@ -59,7 +58,7 @@ class ScmDirectoryWatch {
 	}
 
 	public function isWatching(root:String):Bool {
-		var state = states.get(pathKey(root));
+		var state = states.get(FileWatchEvents.pathKey(root));
 		return state != null && state.watch != null;
 	}
 
@@ -78,9 +77,12 @@ class ScmDirectoryWatch {
 				var state = byHandle.get(source.rawValue());
 				if (state == null || state.watch == null) return;
 				var overflow = kind == EventKind.FileWatchOverflow;
-				scm.notifyChanged(state.root, overflow, null, overflow ? null : changedPath(data));
+				scm.notifyChanged(state.root, overflow, null, overflow ? null : FileWatchEvents.changedPath(data));
+				// Recursive registrations follow their subtrees; only a change at or above one can invalidate it.
+				var scope = FileWatchEvents.rearmScope(kind, data);
 				for (path in state.paths) {
 					if (state.watch == null) break;
+					if (!FileWatchEvents.covers(scope, path)) continue;
 					if (NativeKit.nk_file_watch_add_directory(state.watch.borrow(), path, true) != Result.Ok) {
 						lastError = nativeError("Re-arming the SCM watch for " + path + " failed");
 						disposeState(state);
@@ -89,14 +91,6 @@ class ScmDirectoryWatch {
 				}
 			case _:
 		}
-	}
-
-	static function changedPath(data:Bytes):Null<String> {
-		if (data == null || data.length < 28) return null;
-		var header:FileChangedEvent = data;
-		var offset = header.get_path_offset(), length = header.get_path_length();
-		if (offset < 28 || length < 0 || offset + length > data.length) return null;
-		return data.getString(offset, length);
 	}
 
 	function disposeState(state:ScmWatchState):Void {
@@ -115,17 +109,6 @@ class ScmDirectoryWatch {
 	static function nativeError(message:String):String {
 		var detail = NativeKit.nk_last_error();
 		return detail == null || detail.length == 0 ? message : message + ": " + detail;
-	}
-
-	static function within(parent:String, child:String):Bool {
-		var left = pathKey(parent), right = pathKey(child);
-		return left == right || StringTools.startsWith(right, StringTools.endsWith(left, "/") ? left : left + "/");
-	}
-
-	static function pathKey(path:String):String {
-		var normalized = StringTools.replace(path, "\\", "/");
-		while (normalized.length > 1 && StringTools.endsWith(normalized, "/")) normalized = normalized.substring(0, normalized.length - 1);
-		return Sys.systemName() == "Windows" ? normalized.toLowerCase() : normalized;
 	}
 }
 

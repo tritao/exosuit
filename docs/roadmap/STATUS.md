@@ -82,10 +82,33 @@ original reads never invoke smudge. The 10,000-line diff fixture passes.
 fallback recovery. NativeKit's `platform_parity` and `file_watch` CTest cases
 pass (2/2). The source-tree launcher opens a responsive Exosuite window.
 
-The Windows NativeKit file-watch backend is committed on `exosuit-followon` as
-`d18f949a`; Haxeon records that submodule update on `exosuit-followon` as
-`64d35384`. The root M17.2 follow-up slice is committed on `main` as
-`92f0b05`.
+The Windows file-watch backend recorded here as NativeKit `d18f949a` (Haxeon
+`64d35384`) was never pushed and is lost. A replacement was written on
+2026-10-23 on the `file-watch-windows` branches:
+- NativeKit `1620dfad` shares event encoding between backends.
+- NativeKit `ec61e8e4` adds the backend.
+- NativeKit `6ec620d8` advertises it, with its docs and tests.
+- NativeKit `615541ef` makes the Linux backend raise a rescan when the event
+  queue rejects a change. It is compile-checked only: no test fills the queue
+  on Linux yet.
+- Haxeon `ec719fef` updates the pointer.
+- Exosuit `ad77c39` re-arms watches only after changes that can invalidate
+  them.
+- Exosuit `49bbace` matches workspace file events to roots by normalized path.
+
+On Windows:
+- NativeKit's `file_watch` and `win_file_watch` pass. Changes arrive within
+  1 ms, 10,000 re-adds take about 4 ms, and a 5,000-file burst loses nothing.
+- `platform_parity` and `capability_conformance` pass.
+- The pre-existing `transport_contract`, `wasm_host_allocator`,
+  `win_create_destroy` and `win_surface_d3d11` failures are unchanged.
+- Haxeon matches its baseline: 550 passed, 14 failed.
+- All 18 headless Exosuit test projects pass, including `tests/scm-watch`.
+
+On Linux, the portable `file_watch` case passes against the inotify backend in
+WSL. GTK is absent there, so it was run with the capability gate removed.
+
+The root M17.2 follow-up slice is committed on `main` as `92f0b05`.
 
 At the M17.2 delivery point, mutations were deferred to M17.6 and no Source
 Control UI was included. Later M17.4–M17.7 implementation and validation are

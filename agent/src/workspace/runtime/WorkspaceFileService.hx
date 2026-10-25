@@ -1012,11 +1012,20 @@ class WorkspaceFileService {
 		} catch (_:Dynamic) markAllRootsChanged();
 	}
 
+	/** Event paths are absolute but not canonical, so both sides are compared normalized. */
 	function markPathChanged(path:String):Void {
+		var changed = watchPathKey(path);
 		for (root in roots) {
-			var prefix = root.path == "/" ? "/" : root.path + "/";
-			if (path == root.path || StringTools.startsWith(path, prefix)) dirtyRoots.set(root.id, true);
+			var key = watchPathKey(root.path);
+			if (changed == key || StringTools.startsWith(changed, StringTools.endsWith(key, "/") ? key : key + "/"))
+				dirtyRoots.set(root.id, true);
 		}
+	}
+
+	static function watchPathKey(path:String):String {
+		var normalized = StringTools.replace(path, "\\", "/");
+		while (normalized.length > 1 && StringTools.endsWith(normalized, "/")) normalized = normalized.substring(0, normalized.length - 1);
+		return Sys.systemName() == "Windows" ? normalized.toLowerCase() : normalized;
 	}
 
 	function markAllRootsChanged():Void

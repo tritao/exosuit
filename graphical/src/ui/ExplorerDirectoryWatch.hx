@@ -22,14 +22,10 @@ class ExplorerDirectoryWatch {
 			watch = result.out_watch;
 			subscription = events.listen(function(event) {
 				switch event {
-					case Raw(kind, source, _, _, _, _, _) if (watch != null && source.rawValue() == watch.borrow().rawValue() &&
+					case Raw(kind, source, _, _, _, _, data) if (watch != null && source.rawValue() == watch.borrow().rawValue() &&
 						(kind == EventKind.FileChanged || kind == EventKind.FileWatchOverflow)):
 						model.markChanged();
-						// Re-arm watches after moves/removals; inaccessible directories fall back to polling.
-						for (path in registered.keys()) {
-							if (watch == null) break;
-							if (NativeKit.nk_file_watch_add_directory(watch.borrow(), path, false) != Result.Ok) dispose();
-						}
+						rearm(FileWatchEvents.rearmScope(kind, data));
 					case _:
 				}
 			});
@@ -51,6 +47,24 @@ class ExplorerDirectoryWatch {
 		registered.set(path, true);
 		// Rescan this listing after registration to close the initial-read/watch gap.
 		model.refreshDirectory(path);
+	}
+
+	/**
+	 * Re-arms the registrations an event may have invalidated. Directories that are gone are forgotten; other
+	 * failures fall back to polling.
+	 */
+	function rearm(scope:RearmScope):Void {
+		switch scope {
+			case Nothing: return;
+			case _:
+		}
+		for (path in [for (path in registered.keys()) path]) {
+			if (watch == null) return;
+			if (!FileWatchEvents.covers(scope, path)) continue;
+			var result = NativeKit.nk_file_watch_add_directory(watch.borrow(), path, false);
+			if (result == Result.ErrorInvalidArgument) registered.remove(path);
+			else if (result != Result.Ok) dispose();
+		}
 	}
 
 	public function dispose():Void {
