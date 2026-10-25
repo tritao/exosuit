@@ -113,8 +113,17 @@ class ScmWatchTestMain {
 				"SCM watcher did not deliver a second change after re-arming", 1.2);
 			require(watcher.isWatching(root), "SCM watcher was lost after a second filesystem event");
 
+			// A second root inside the repository watches the same directories, so it shares the native watch.
+			var nested = root + "/nested-root";
+			FileSystem.createDirectory(nested);
+			watcher.update(nested, service.watchDirectories(root), exclusions);
+			require(watcher.watchCount() == 1 && watcher.isWatching(nested),
+				"Two roots of one repository did not share one native watch: " + watcher.watchCount());
+
 			watcher.update(root, [root + "/missing-watch-directory"]);
 			require(!watcher.isWatching(root), "An invalid watch target unexpectedly remained active");
+			require(watcher.isWatching(nested) && watcher.watchCount() == 1,
+				"A root leaving a shared watch stopped it for the other root");
 			File.saveContent(root + "/poll-fallback.txt", "fallback\n");
 			var fallbackStarted = Sys.time();
 			pumpNative(runtime, service, scheduler, () -> contains(service.snapshot(repository.id), "poll-fallback.txt"),

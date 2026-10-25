@@ -5,11 +5,20 @@ import haxeon.platform.NativeKitEvents;
 import haxeon.platform.NativeKitFileWatch;
 import scm.ScmService;
 
-/** Bridges native worktree/Git metadata watches into the shared SCM service. */
+/**
+	Bridges native worktree/Git metadata watches into the shared SCM service.
+
+	Roots that watch the same directories with the same exclusions share one native watch: several workspace folders
+	inside one repository all watch that repository, and one watch of it serves them all. A root's set differs from
+	another's only when their repositories differ, so exclusions never cross from one repository to another.
+**/
 class ScmDirectoryWatch {
 	final scm:ScmService;
 	final events:NativeKitEvents;
-	final states:Map<String, ScmWatchState> = [];
+	/** Shared watches by the directories and exclusions they cover (see signature). */
+	final watches:Map<String, SharedScmWatch> = [];
+	/** Each watched root's shared watch, by root key. */
+	final rootWatches:Map<String, SharedScmWatch> = [];
 	var disposed:Bool = false;
 	public var lastError(default, null):Null<String>;
 
@@ -19,81 +28,108 @@ class ScmDirectoryWatch {
 	}
 
 	/**
-		Watches `paths` for one project root, leaving out `excluded`, by changing the root's watch rather than replacing
-		it. SCM relies on the watch only while every directory in it is registered; until then, and when a watch cannot
-		be armed, it polls.
+		Watches `paths` for one project root, leaving out `excluded`. SCM relies on the watch only while every directory
+		in it is registered; until then, and when a watch cannot be armed, it polls.
 	**/
 	public function update(root:String, paths:Array<String>, ?excluded:Array<String>):Void {
 		if (disposed) return;
 		lastError = null;
-		var key = NativeKitFileWatch.pathKey(root), state = states.get(key);
-		var exclusions = excluded == null ? [] : excluded;
+		var rootKey = NativeKitFileWatch.pathKey(root), current = rootWatches.get(rootKey);
 		if (paths == null || paths.length == 0) {
-			if (state != null) disposeState(state);
+			if (current != null) detach(rootKey, root, current);
 			return;
 		}
-		var selected = outermost(paths);
-		// A lifted exclusion means a subtree to watch again: start over rather than track which ones.
-		if (state != null)
-			for (path in state.watch.exclusions())
-				if (!containsPath(exclusions, path)) {
-					disposeState(state);
-					state = null;
-					break;
-				}
-		try {
-			if (state == null) state = createState(key, root);
-			var watch = state.watch;
-			for (path in exclusions) watch.exclude(path);
-			for (path in watch.directories()) if (!containsPath(selected, path)) watch.remove(path);
-			for (path in selected) watch.add(path, true);
-		} catch (error:NativeKitError) {
-			lastError = error.message;
-			if (state != null) disposeState(state);
+		var selected = outermost(paths), exclusions = excluded == null ? [] : excluded;
+		var key = signature(selected, exclusions);
+		if (current != null && current.key == key) {
+			syncAvailability(current);
 			return;
 		}
-		syncAvailability(state);
+		if (current != null) detach(rootKey, root, current);
+		var shared = watches.get(key);
+		if (shared == null) {
+			shared = new SharedScmWatch(key);
+			try {
+				var created = shared;
+				shared.watch = NativeKitFileWatch.create(events, event -> onEvent(created, event));
+				for (path in exclusions) shared.watch.exclude(path);
+				for (path in selected) shared.watch.add(path, true);
+			} catch (error:NativeKitError) {
+				lastError = error.message;
+				if (shared.watch != null) shared.watch.dispose();
+				scm.setWatchAvailable(root, false);
+				return;
+			}
+			watches.set(key, shared);
+		}
+		shared.roots.set(rootKey, root);
+		rootWatches.set(rootKey, shared);
+		syncAvailability(shared);
 	}
 
 	public function isWatching(root:String):Bool {
-		var state = states.get(NativeKitFileWatch.pathKey(root));
-		return state != null && !state.watch.isDisposed() && state.watch.directories().length > 0;
+		var shared = rootWatches.get(NativeKitFileWatch.pathKey(root));
+		return shared != null && !shared.watch.isDisposed() && shared.watch.directories().length > 0;
 	}
+
+	/** Native watches in use, for diagnostics: roots sharing one count once. */
+	public function watchCount():Int
+		return [for (_ in watches) 1].length;
 
 	public function dispose():Void {
 		if (disposed) return;
 		disposed = true;
-		for (state in [for (value in states) value]) disposeState(state);
-		states.clear();
+		for (shared in [for (value in watches) value]) close(shared);
+		watches.clear();
+		rootWatches.clear();
 	}
 
-	function createState(key:String, root:String):ScmWatchState {
-		var state = new ScmWatchState(key, root);
-		state.watch = NativeKitFileWatch.create(events, event -> onEvent(state, event));
-		states.set(key, state);
-		return state;
-	}
-
-	function onEvent(state:ScmWatchState, event:FileWatchEvent):Void {
+	function onEvent(shared:SharedScmWatch, event:FileWatchEvent):Void {
+		var roots = [for (root in shared.roots) root];
 		switch event {
-			case Changed(change): scm.notifyChanged(state.root, false, null, change.path);
-			case Overflow | Lost(_): scm.notifyChanged(state.root, true);
+			case Changed(change): for (root in roots) scm.notifyChanged(root, false, null, change.path);
+			case Overflow | Lost(_): for (root in roots) scm.notifyChanged(root, true);
 			case Failed(error):
-				lastError = "The SCM watch for " + state.root + " stopped: " + error.message;
-				disposeState(state);
+				lastError = "The SCM watch for " + roots.join(", ") + " stopped: " + error.message;
+				close(shared);
 				return;
 			case Ready:
 		}
-		syncAvailability(state);
+		syncAvailability(shared);
 	}
 
-	function syncAvailability(state:ScmWatchState):Void
-		scm.setWatchAvailable(state.root, isWatching(state.root) && state.watch.ready);
+	function syncAvailability(shared:SharedScmWatch):Void {
+		var available = !shared.watch.isDisposed() && shared.watch.directories().length > 0 && shared.watch.ready;
+		for (root in shared.roots) scm.setWatchAvailable(root, available);
+	}
 
-	function disposeState(state:ScmWatchState):Void {
-		if (states.get(state.key) == state) states.remove(state.key);
-		state.watch.dispose();
-		scm.setWatchAvailable(state.root, false);
+	/** Stops `root` using its shared watch, closing the watch once no root uses it. */
+	function detach(rootKey:String, root:String, shared:SharedScmWatch):Void {
+		rootWatches.remove(rootKey);
+		shared.roots.remove(rootKey);
+		scm.setWatchAvailable(root, false);
+		if (!shared.roots.keys().hasNext()) {
+			watches.remove(shared.key);
+			shared.watch.dispose();
+		}
+	}
+
+	function close(shared:SharedScmWatch):Void {
+		watches.remove(shared.key);
+		shared.watch.dispose();
+		for (rootKey => root in shared.roots) {
+			rootWatches.remove(rootKey);
+			scm.setWatchAvailable(root, false);
+		}
+		shared.roots.clear();
+	}
+
+	static function signature(paths:Array<String>, excluded:Array<String>):String {
+		var pathKeys = [for (path in paths) NativeKitFileWatch.pathKey(path)], excludedKeys = [for (path in excluded) NativeKitFileWatch.pathKey(path)];
+		var byText = (a:String, b:String) -> a < b ? -1 : a > b ? 1 : 0;
+		pathKeys.sort(byText);
+		excludedKeys.sort(byText);
+		return pathKeys.join("\n") + "\n--\n" + excludedKeys.join("\n");
 	}
 
 	/** The paths not under another one, so a directory already watched recursively is not walked again. */
@@ -107,21 +143,14 @@ class ScmDirectoryWatch {
 		}
 		return selected;
 	}
-
-	static function containsPath(paths:Array<String>, path:String):Bool {
-		var key = NativeKitFileWatch.pathKey(path);
-		for (candidate in paths) if (NativeKitFileWatch.pathKey(candidate) == key) return true;
-		return false;
-	}
 }
 
-private class ScmWatchState {
+private class SharedScmWatch {
 	public final key:String;
-	public final root:String;
 	public var watch:NativeKitFileWatch;
+	/** The roots using this watch, by root key. */
+	public final roots:Map<String, String> = [];
 
-	public function new(key:String, root:String) {
+	public function new(key:String)
 		this.key = key;
-		this.root = root;
-	}
 }
