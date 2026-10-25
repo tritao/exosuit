@@ -1,0 +1,60 @@
+diff --git a/tools/hlprof-live.c b/tools/hlprof-live.c
+index 538ef5b..0eb5d6b 100644
+--- a/tools/hlprof-live.c
++++ b/tools/hlprof-live.c
+@@ -277,9 +277,47 @@ static int pf_stack_sample( pf_export *pf,symbols *s,double time,uint32_t tid,co
+ 	st->last=time;
+ 	return 1;
+ }
++/* DIAG-LIVE-PERF: per-function call statistics of an export window, written to $HLPROF_CALL_STATS as
++   "tid count self_ms total_ms name" lines. Not for commit. */
++typedef struct { char *name; uint32_t tid; uint64_t count; double self,total; } cs_entry;
++typedef struct { uint32_t entry; double begin,child; } cs_frame;
++typedef struct { uint32_t tid,depth,cap; cs_frame *frames; } cs_thread;
++static cs_entry *cs_entries;static uint32_t cs_count,cs_cap,*cs_table,cs_table_size;
++static cs_thread *cs_threads;static uint32_t cs_thread_count,cs_thread_cap;
++static const char *cs_path;static int cs_init;
++static uint64_t cs_hash( uint32_t tid,const unsigned char *s,size_t n ){uint64_t h=1469598103934665603ULL^tid;for(size_t i=0;i<n;i++){h^=s[i];h*=1099511628211ULL;}return h;}
++static uint32_t cs_lookup( uint32_t tid,const unsigned char *name,uint32_t n ) {
++	uint32_t j;
++	if((cs_count+1)*2>=cs_table_size){uint32_t size=cs_table_size?cs_table_size*2:65536;uint32_t *t=(uint32_t*)calloc(size,4);
++		for(uint32_t i=0;i<cs_count;i++){uint32_t k=(uint32_t)(cs_hash(cs_entries[i].tid,(unsigned char*)cs_entries[i].name,strlen(cs_entries[i].name))&(size-1));while(t[k])k=(k+1)&(size-1);t[k]=i+1;}
++		free(cs_table);cs_table=t;cs_table_size=size;}
++	j=(uint32_t)(cs_hash(tid,name,n)&(cs_table_size-1));
++	while(cs_table[j]){cs_entry *e=cs_entries+cs_table[j]-1;if(e->tid==tid&&strlen(e->name)==n&&!memcmp(e->name,name,n))return cs_table[j]-1;j=(j+1)&(cs_table_size-1);}
++	if(cs_count==cs_cap){cs_cap=cs_cap?cs_cap*2:4096;cs_entries=(cs_entry*)realloc(cs_entries,sizeof(cs_entry)*cs_cap);}
++	{cs_entry *e=cs_entries+cs_count;e->name=(char*)malloc((size_t)n+1);memcpy(e->name,name,n);e->name[n]=0;e->tid=tid;e->count=0;e->self=e->total=0;}
++	cs_table[j]=++cs_count;return cs_count-1;
++}
++static void cs_event( uint32_t tid,double time,const unsigned char *name,uint32_t size,int begin ) {
++	cs_thread *t=NULL;
++	for(uint32_t i=0;i<cs_thread_count;i++)if(cs_threads[i].tid==tid){t=cs_threads+i;break;}
++	if(!t){if(cs_thread_count==cs_thread_cap){cs_thread_cap=cs_thread_cap?cs_thread_cap*2:64;cs_threads=(cs_thread*)realloc(cs_threads,sizeof(cs_thread)*cs_thread_cap);}
++		t=cs_threads+cs_thread_count++;memset(t,0,sizeof(*t));t->tid=tid;}
++	if(begin){if(t->depth==t->cap){t->cap=t->cap?t->cap*2:256;t->frames=(cs_frame*)realloc(t->frames,sizeof(cs_frame)*t->cap);}
++		t->frames[t->depth].entry=cs_lookup(tid,name,size);t->frames[t->depth].begin=time;t->frames[t->depth].child=0;t->depth++;return;}
++	if(!t->depth)return;
++	{cs_frame f=t->frames[--t->depth];double d=time-f.begin;cs_entry *e=cs_entries+f.entry;static double lo=-1,hi=1e30;static int window_read;if(!window_read){const char *a=getenv("HLPROF_CALL_STATS_START"),*b=getenv("HLPROF_CALL_STATS_END");window_read=1;if(a)lo=atof(a);if(b)hi=atof(b);}if(f.begin<lo||time>hi){if(t->depth)t->frames[t->depth-1].child+=d;return;}if(d>0.5){static int warned;if(warned++<200)fprintf(stderr,"call-stats: dropping %.3f s call to %s on %u from %.6f to %.6f depth %u\n",d,e->name,tid,f.begin,time,t->depth);if(t->depth)t->frames[t->depth-1].child+=d;return;}e->count++;e->total+=d;e->self+=d-f.child;
++		if(t->depth)t->frames[t->depth-1].child+=d;}
++}
++static void cs_write( void ) {
++	FILE *o;
++	if(!cs_path||!(o=fopen(cs_path,"wb")))return;
++	for(uint32_t i=0;i<cs_count;i++)if(cs_entries[i].count)fprintf(o,"%u\t%llu\t%.4f\t%.4f\t%s\n",cs_entries[i].tid,(unsigned long long)cs_entries[i].count,cs_entries[i].self*1e3,cs_entries[i].total*1e3,cs_entries[i].name);
++	fclose(o);
++}
+ /* An instrumented call begins or ends on the thread. The first one replaces the stack the thread's samples built. A startup
+    phase (instrumented 0) is laid out the same way but leaves the thread's samples shown. */
+ static int pf_stack_call( pf_export *pf,double time,uint32_t tid,const unsigned char *name,uint32_t size,int begin,int instrumented ) {
++	if(!cs_init){cs_init=1;cs_path=getenv("HLPROF_CALL_STATS");}if(cs_path&&instrumented)cs_event(tid,time,name,size,begin); /* DIAG-LIVE-PERF */
+ 	pf_stack *st=pf_stack_of(pf,tid);uint32_t base;
+ 	if(!st)return 0;
+ 	base=st->root?1:0;
+@@ -302,6 +340,7 @@ static int pf_stack_frame( pf_export *pf,double time,uint32_t tid,const char *ro
+ 	return 1;
+ }
+ static void pf_stacks_finish( pf_export *pf ) {
++	cs_write(); /* DIAG-LIVE-PERF */
+ 	for(uint32_t i=0;i<pf->stack_count;i++){pf_stack *st=pf->stacks+i;pf_stack_cut(pf,st,0,st->last+pf->weight_ns/1e9);pf_stack_truncate(st,0);free(st->names);free(st->root);}
+ 	free(pf->stacks);pf->stacks=NULL;pf->stack_count=pf->stack_capacity=0;
+ }
