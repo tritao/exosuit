@@ -47,6 +47,25 @@ class ScmGitTestMain {
 		if (!condition) throw message;
 	}
 
+	/** Where fixtures go: outside the working directory, which may itself be a Git work tree. */
+	static function systemTemporaryDirectory():String {
+		for (name in ["TEMP", "TMP", "TMPDIR"]) {
+			var value = Sys.getEnv(name);
+			if (value != null && value.length > 0) return value;
+		}
+		return Sys.systemName() == "Windows" ? Sys.getCwd() : "/tmp";
+	}
+
+	/** The full path of a file or directory not made yet: fullPath resolves only existing paths on POSIX, so the parent is resolved. */
+	static function newPath(path:String):String {
+		var full = FileSystem.fullPath(path);
+		if (full != null) return full;
+		var slash = Std.int(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")));
+		var parent = slash > 0 ? FileSystem.fullPath(path.substr(0, slash)) : null;
+		if (parent == null) throw "Cannot resolve the parent of " + path;
+		return parent + path.substr(slash);
+	}
+
 	static function normalizeLineEndings(value:String):String
 		return StringTools.replace(StringTools.replace(value, "\r\n", "\n"), "\r", "\n");
 
@@ -248,11 +267,9 @@ class ScmGitTestMain {
 	}
 
 	static function benchmarkRoot(label:String, root:String, blobPath:String):Void {
-		var temporaryDirectory = Sys.getEnv("TEMP");
-		if (temporaryDirectory == null || temporaryDirectory.length == 0) temporaryDirectory = Sys.getEnv("TMP");
-		if (temporaryDirectory == null || temporaryDirectory.length == 0) temporaryDirectory = Sys.getCwd();
+		var temporaryDirectory = systemTemporaryDirectory();
 		var identity = Std.string(Std.int(Sys.time() * 1000000)) + "-" + Std.string(Std.random(1000000));
-		var privateDirectory = FileSystem.fullPath(temporaryDirectory + "/exosuit-scm-benchmark-" + identity),
+		var privateDirectory = newPath(temporaryDirectory + "/exosuit-scm-benchmark-" + identity),
 			emptyHooks = privateDirectory + "/empty-hooks", trustPath = privateDirectory + "/trust.json";
 		FileSystem.createDirectory(privateDirectory);
 		FileSystem.createDirectory(emptyHooks);
@@ -538,11 +555,9 @@ class ScmGitTestMain {
 		while (gitScheduler.activeCount() > 0 && Sys.time() < deadline) { gitScheduler.update(32); Sys.sleep(0.001); }
 		if (boundedResult == null || boundedResult.error == null) throw "Git stdout limit did not produce an error";
 		require(boundedResult.error.code == "output_too_large", "Git stdout limit returned the wrong error code");
-		var temporaryDirectory = Sys.getEnv("TEMP");
-		if (temporaryDirectory == null || temporaryDirectory.length == 0) temporaryDirectory = Sys.getEnv("TMP");
-		if (temporaryDirectory == null || temporaryDirectory.length == 0) temporaryDirectory = Sys.getCwd();
+		var temporaryDirectory = systemTemporaryDirectory();
 		var fixtureId = Std.string(Std.int((Sys.time() * 1000) % 1000000000)) + "-" + Std.string(Std.random(1000000));
-		var fixtureBase = FileSystem.fullPath(temporaryDirectory + "/exosuit-scm-discovery-" + fixtureId),
+		var fixtureBase = newPath(temporaryDirectory + "/exosuit-scm-discovery-" + fixtureId),
 			discoveryRoot = fixtureBase + "/project", nestedRoot = discoveryRoot + "/nested", emptyHooks = fixtureBase + "/empty-hooks";
 		FileSystem.createDirectory(fixtureBase);
 		FileSystem.createDirectory(discoveryRoot);
@@ -659,7 +674,7 @@ class ScmGitTestMain {
 			&& trustedOriginal.value.bytes.toString() == "before marker\n" && !FileSystem.exists(smudgeMarker),
 			"original-content reads stopped returning raw Git objects after trust");
 		runGit(git, gitScheduler, ["-c", "user.name=SCM Test", "-c", "user.email=scm@example.invalid", "commit", "--allow-empty", "-m", "initial"], discoveryRoot, 76);
-		var mutationRoot = StringTools.replace(FileSystem.fullPath(fixtureBase + "/real-operations"), "\\", "/");
+		var mutationRoot = StringTools.replace(newPath(fixtureBase + "/real-operations"), "\\", "/");
 		FileSystem.createDirectory(mutationRoot);
 		runGit(git, gitScheduler, ["init"], mutationRoot, 760);
 		runGit(git, gitScheduler, ["config", "user.name", "SCM Test"], mutationRoot, 761);
@@ -779,6 +794,8 @@ class ScmGitTestMain {
 		var failingHooks = fixtureBase + "/failing-hooks";
 		FileSystem.createDirectory(failingHooks);
 		File.saveBytes(failingHooks + "/pre-commit", Bytes.ofString("#!/bin/sh\necho EXOSUIT_TEST_HOOK_FAILURE >&2\nexit 1\n"));
+		// Git skips a hook that is not executable, which only POSIX checks.
+		if (Sys.systemName() != "Windows") require(Sys.command("chmod", ["+x", failingHooks + "/pre-commit"]) == 0, "the failing pre-commit hook could not be made executable");
 		runGit(git, gitScheduler, ["config", "core.hooksPath", failingHooks], mutationRoot, 76985);
 		var failedHookCommit = applyOperation(mutationHandle, gitScheduler,
 			ScmOperation.Commit("Retain this message after hook failure", false), 76986);
@@ -1011,7 +1028,7 @@ class ScmGitTestMain {
 			"An unchanged refresh caused snapshot revision or listener churn");
 		service.dispose();
 
-		var operationRoot = StringTools.replace(FileSystem.fullPath(fixtureBase + "/operation-service"), "\\", "/");
+		var operationRoot = StringTools.replace(newPath(fixtureBase + "/operation-service"), "\\", "/");
 		FileSystem.createDirectory(operationRoot);
 		var operationsProvider = new FakeScmProvider(gitScheduler), operationsScript = new FakeScmRepositoryScript(
 			new ScmRepository("operations", "fake", operationRoot), new ScmFeatures(true), [orderedSnapshot], 0);
@@ -1096,7 +1113,7 @@ class ScmGitTestMain {
 			"A cancelled SCM operation published a stale callback or blocked the next request");
 		operationsScript.latencySteps = 0;
 
-		var burstRoot = StringTools.replace(FileSystem.fullPath(fixtureBase + "/burst-service"), "\\", "/");
+		var burstRoot = StringTools.replace(newPath(fixtureBase + "/burst-service"), "\\", "/");
 		FileSystem.createDirectory(burstRoot);
 		var burstScript = new FakeScmRepositoryScript(new ScmRepository("burst", "fake", burstRoot), new ScmFeatures(), [orderedSnapshot], 0);
 		operationsProvider.add(burstScript);
@@ -1229,7 +1246,7 @@ class ScmGitTestMain {
 			"A non-repository directory did not produce an empty discovery result");
 		deleteTree(emptyDirectory);
 		deleteTree(fixtureBase);
-		var nonRepository = FileSystem.fullPath(temporaryDirectory + "/exosuit-scm-nonrepo-" + fixtureId);
+		var nonRepository = newPath(temporaryDirectory + "/exosuit-scm-nonrepo-" + fixtureId);
 		FileSystem.createDirectory(nonRepository);
 		var repositoryError:Null<ScmJobResult<scm.git.GitCommandResult>> = null;
 		git.run(["rev-parse", "--show-toplevel"], nonRepository, 53, value -> repositoryError = value);
@@ -1363,10 +1380,8 @@ class ScmGitTestMain {
 		blobReader.dispose();
 		require(processManager.activeCount() == 0, "disposing the blob reader leaked its owned process");
 
-		var hooksTempDirectory = Sys.getEnv("TEMP");
-		if (hooksTempDirectory == null || hooksTempDirectory.length == 0) hooksTempDirectory = Sys.getEnv("TMP");
-		if (hooksTempDirectory == null || hooksTempDirectory.length == 0) hooksTempDirectory = Sys.getCwd();
-		var hooksPath = FileSystem.fullPath(hooksTempDirectory + "/exosuit-scm-empty-hooks-" + Std.string(Std.int(Sys.time() * 1000000)));
+		var hooksTempDirectory = systemTemporaryDirectory();
+		var hooksPath = newPath(hooksTempDirectory + "/exosuit-scm-empty-hooks-" + Std.string(Std.int(Sys.time() * 1000000)));
 		FileSystem.createDirectory(hooksPath);
 		var restrictedGit = new GitProcess(processManager, gitScheduler, "", hooksPath), restrictedVersion:Null<ScmJobResult<GitVersion>> = null;
 		restrictedGit.probeVersion(1072, value -> restrictedVersion = value);

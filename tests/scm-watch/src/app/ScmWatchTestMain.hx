@@ -49,13 +49,18 @@ class ScmWatchTestMain {
 	}
 
 	static function main():Int {
+		// Outside the working directory, which may itself be a Git work tree.
 		var temporaryDirectory = Sys.getEnv("TEMP");
 		if (temporaryDirectory == null || temporaryDirectory.length == 0) temporaryDirectory = Sys.getEnv("TMP");
-		if (temporaryDirectory == null || temporaryDirectory.length == 0) temporaryDirectory = Sys.getCwd();
+		if (temporaryDirectory == null || temporaryDirectory.length == 0) temporaryDirectory = Sys.getEnv("TMPDIR");
+		if (temporaryDirectory == null || temporaryDirectory.length == 0)
+			temporaryDirectory = Sys.systemName() == "Windows" ? Sys.getCwd() : "/tmp";
 		var fixtureId = Std.string(Std.int(Sys.time() * 1000000)) + "-" + Std.string(Std.random(1000000)),
-			root = FileSystem.fullPath(temporaryDirectory + "/exosuit-scm-watch-" + fixtureId),
-			hooks = root + "/empty-hooks";
+			root = temporaryDirectory + "/exosuit-scm-watch-" + fixtureId;
+		// fullPath resolves only an existing path on POSIX, so the directory is made first.
 		FileSystem.createDirectory(root);
+		root = FileSystem.fullPath(root);
+		var hooks = root + "/empty-hooks";
 		FileSystem.createDirectory(hooks);
 		var scheduler = new JobScheduler(), processes = new ProcessManager(), git = new GitProcess(processes, scheduler),
 			versionResult:Null<ScmJobResult<GitVersion>> = null;
