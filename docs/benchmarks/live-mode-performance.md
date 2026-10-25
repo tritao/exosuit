@@ -108,10 +108,13 @@ Scroll, normal run, self ms per frame:
 1. **A static closure of a native was rejected** ("Invalid static closure"). Any edited function that uses a native
    as a value could not patch, so every edit to the status-bar code reloaded the module. The JIT's patch-staging path
    for `OStaticClosure` also took the type from `code->functions` for a native index, which reads past the table.
-   *Fixed locally*, hashlink branch `live-patch-native-closure` (uncommitted, no regression test yet).
+   *Fixed* in hashlink 1c0478d (branch `live-patch-native-closure`). Test: haxeon `NativeClosurePatchMain`.
 2. **About 30 opcodes were rejected by the patch validator** ("Unsupported patch opcode"), though the JIT compiles
-   them. *Fixed locally* for the register-only ones: `OIncr ODecr ONeg ONot OGetType OGetTID ORef OUnref OSetref
-   ORefData OUDiv OUMod OGetI8 OGetI16 OGetMem OSetI8 OSetI16 OSetMem ORefOffset`. **Still rejected:** `OBytes`,
+   them. *Fixed* in hashlink 4a90f4f for the register-only ones: `OIncr ODecr ONeg ONot OGetType OGetTID ORef
+   OUnref OSetref ORefData OUDiv OUMod OGetI8 OGetI16 OGetMem OSetI8 OSetI16 OSetMem ORefOffset`. Of these, Haxeon
+   emits only `ORefData` and the memory gets and sets (an array write is `ORefData` then `OSetMem`). Test: haxeon
+   `ArrayWritePatchMain`. The validator still checks only register indexes, not types; the load path doesn't check
+   types either. **Still rejected:** `OBytes`,
    `OVirtualClosure`, `ODynGet`, `ODynSet`, `OSwitch` (its jump table must also be followed by the trap-flow walker),
    `OSetEnumField`, `OAssert`, `ONop`, `OPrefetch`, `OAsm`, `OCatch`. Any edit to a function containing one still
    reloads; `OSwitch` is the one real code hits most.
