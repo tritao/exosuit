@@ -12,7 +12,6 @@ import runtime.RuntimeError;
 import sys.FileSystem;
 import sys.io.File;
 import sys.thread.Mutex;
-import sys.thread.Thread;
 
 class DynamicPlugin implements Plugin {
 	public final manifest:PluginManifest;

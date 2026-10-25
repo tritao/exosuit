@@ -4,7 +4,6 @@ import jobs.JobTask;
 import sys.FileSystem.FileSystemEntry;
 import sys.thread.Lock;
 import sys.thread.Mutex;
-import sys.thread.Thread;
 
 private typedef DirectoryRead = {result:Null<{identity:String, entries:Array<FileSystemEntry>}>, error:Null<String>};
 

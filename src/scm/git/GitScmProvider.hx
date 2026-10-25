@@ -17,7 +17,6 @@ import sys.FileSystem;
 import sys.FileSystem.FileSystemEntry;
 import sys.thread.Lock;
 import sys.thread.Mutex;
-import sys.thread.Thread;
 import config.ConfigurationPaths;
 
 /** Discovers Git worktrees without invoking Git from the application frame. */

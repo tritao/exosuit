@@ -3,7 +3,6 @@ package ui;
 import sys.FileSystem;
 import sys.io.File;
 import sys.thread.Mutex;
-import sys.thread.Thread;
 import haxeon.ui.LayoutStyle;
 import haxeon.ui.Insets;
 import haxeon.ui.LayoutAxis;
