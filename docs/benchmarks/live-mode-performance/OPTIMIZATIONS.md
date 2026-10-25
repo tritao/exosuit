@@ -29,7 +29,7 @@ Status: ✅ done · 🔨 in progress · ⬜ todo · ⏸ deferred
 
 | # | Optimization | Expected gain | Effort | Status | Commits / measured |
 |---|---|---|---|---|---|
-| 12 | The frontend restarts when typing finds it needs `runtime.DynamicObject` / `haxeon.DynamicOps` (19 triggers in the editor) | measured 3.6 s (the "17 s" estimate counted the parse, which runs once anyway) | small | 🔨 | A first version seeded both modules always: a `return 42` program grew from 2 KB to 53 KB. Reworking it to seed them only when the reachable sources mention `Dynamic` |
+| 12 | The frontend restarts when typing finds a runtime module the graph lacks | measured 3.6 s (the "17 s" estimate counted the parse, which runs once anyway) | small | ✅ | haxeon 3befffc9 (drop the unused `runtime.DynamicObject` dependency on HL, report restarts in the compile phases), c1e71a38 + exosuit `SemanticTokenCodec` (type the 2 Dynamic arithmetic sites). No restart; cold 25.5 s with #13. Seeding the modules instead grew small programs 2 KB → 53 KB, so it was dropped |
 | 13 | `decodeString` and interpolated-string parsing build literals in O(n²) time | several s (about 8 GB of allocation) | small | ✅ | haxeon 39218b1d; parse 11.4 → 6.3 s |
 
 Cold compile, measured with one batch and then bisected: baseline 35.7 s → #12 only 32.1 s → #12 + #13 24.8 s. Allocation 19.3 → 8.3 GB, GC 5.0 → 2.6 s.
