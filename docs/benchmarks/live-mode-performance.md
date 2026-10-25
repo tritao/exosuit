@@ -143,19 +143,18 @@ Scroll, normal run, self ms per frame:
    *Fixed* in haxeon b63db7c0: `run --live` builds the host with Haxeon, instrumented under `--profile`. The host runs
    the app's tick on the same thread, so host and app calls share one track.
 
-### Haxeon compiler (found building the live host with Haxeon)
+### Haxeon compiler and live runtime
 
-19. **An edit to three functions takes 8–16 s to compile** with a warm compile server ("compile=14028 ms, 3 functions
-    retyped"). That is most of the edit-to-patch delay a user feels. Not investigated.
-
-20. **Applying a patch freezes the editor for about 2 s.** In a capture with the stamp fix (one edit, three functions),
-    `live.patch` / `runtime.Runtime.patchSet` ran 1,896 ms on the UI thread. Not investigated.
 17. **A `try … catch` used as an expression needs a `;` after the catch block.** Haxeon's parser rejects
     `var x = try f() catch (e:Dynamic) { … }` followed by a new statement ("E0002: Expected Semicolon, got
     Identifier"), where Haxe accepts it.
 18. **A parsed `Dynamic` cannot be cast to a structure type.** `var d:LiveDescription = Json.parse(text)` fails at
     run time with "Can't cast dynobj to $anon:{…}"; Haxe converts the object. `LiveHost` now builds the structure
     field by field.
+19. **An edit to three functions takes 8–16 s to compile** with a warm compile server ("compile=14028 ms, 3 functions
+    retyped"). That is most of the edit-to-patch delay a user feels. Not investigated.
+20. **Applying a patch freezes the editor for about 2 s.** In a capture with the stamp fix (one edit, three functions),
+    `live.patch` / `runtime.Runtime.patchSet` ran 1,896 ms on the UI thread. Not investigated.
 
 ### Tooling and environment
 
@@ -173,10 +172,10 @@ Scroll, normal run, self ms per frame:
 15. Every capture directory gets `screenshot-error.txt`: the frame capture's screenshot fails. Not investigated.
 16. The Chrome profile used for browser automation blocked all page scripts (Perfetto stopped at its boot spinner;
     a `data:` script failed on example.com too). It's a browser setting, not a profiler bug.
-
 21. **Two Haxeon tooling tests fail on Windows, with or without this work** (checked against haxeon e4661b98):
     `LspProtocolMain` ("projected FFI constant definition did not reach its ABI declaration") and
     `CompilerSessionMain` ("runtime library path must be restored exactly"). Not investigated.
+
 ## Reproducing
 
 The driver and analysis scripts are in [`live-mode-performance/`](live-mode-performance/) and run in place; their
