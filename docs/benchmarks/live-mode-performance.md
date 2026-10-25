@@ -147,10 +147,14 @@ Scroll, normal run, self ms per frame:
 
 17. **A `try … catch` used as an expression needs a `;` after the catch block.** Haxeon's parser rejects
     `var x = try f() catch (e:Dynamic) { … }` followed by a new statement ("E0002: Expected Semicolon, got
-    Identifier"), where Haxe accepts it.
+    Identifier"), where Haxe accepts it. **Fixed** in Haxeon: an expression whose last token is `}` needs no
+    semicolon. The same change lets a try body that calls a never-returning function take its type from the catch,
+    instead of failing with "Type mismatch for return".
 18. **A parsed `Dynamic` cannot be cast to a structure type.** `var d:LiveDescription = Json.parse(text)` fails at
     run time with "Can't cast dynobj to $anon:{…}"; Haxe converts the object. `LiveHost` now builds the structure
-    field by field.
+    field by field. This is deliberate in Haxeon, not an oversight: structures are concrete records rather than
+    HashLink virtuals, and `tests/programs/json-typed-object-array.hx` asserts that JSON objects are rejected.
+    Accepting them means either copying on the cast, which breaks aliasing, or backing structures with virtuals.
 19. **An edit to three functions takes 8–16 s to compile** with a warm compile server ("compile=14028 ms, 3 functions
     retyped"). That is most of the edit-to-patch delay a user feels. Investigated in
     [`investigations/compile-slow.md`](live-mode-performance/investigations/compile-slow.md). *Partly fixed* in haxeon
