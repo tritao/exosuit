@@ -154,7 +154,10 @@ Scroll, normal run, self ms per frame:
 19. **An edit to three functions takes 8–16 s to compile** with a warm compile server ("compile=14028 ms, 3 functions
     retyped"). That is most of the edit-to-patch delay a user feels. Not investigated.
 20. **Applying a patch freezes the editor for about 2 s.** In a capture with the stamp fix (one edit, three functions),
-    `live.patch` / `runtime.Runtime.patchSet` ran 1,896 ms on the UI thread. Not investigated.
+    `live.patch` / `runtime.Runtime.patchSet` ran 1,896 ms on the UI thread. *Fixed* in hashlink fba14f4: the VM
+    scanned the whole string table for each of 23,287 type names when hashing the type prefix; a content index makes it
+    milliseconds, and an unprofiled live edit no longer leaves a frame gap (1,927 ms before). See
+    [`investigations/patch-freeze.md`](live-mode-performance/investigations/patch-freeze.md).
 22. **The module files and the description can pair across builds.** `.hl`, `.hli` and `.hlp` are published before
     `.live.json` but the host reads them after it; if a newer build lands in between, the host can apply build N+1's
     `.hlp` with build N's description (or, at startup, load N+1 with N's function ids). Existed before the stamp,
@@ -183,6 +186,21 @@ Scroll, normal run, self ms per frame:
     `GcEmptyPages`, `JitInlineAllocation`, `JitBoxedAllocation`), four tests start `.tools/hashlink/hl` without `.exe`
     (`nullable-enum-pattern`, `static-init-order`, `loaded-array-cast`, `dynamic-string`), and `BytesAsciiMain` runs
     a command cmd does not recognize.
+
+## Investigations (2026-10-25)
+
+Four questions were investigated in parallel, each report then checked by an adversarial reviewer; both are in
+[`live-mode-performance/investigations/`](live-mode-performance/investigations/):
+
+- `patch-freeze`: the 1.9 s patch freeze (fixed, item 20). The review also found that patches could append struct
+  and method types the VM could not stage; they are now rejected.
+- `compile-slow`: why a 3-function edit takes 8-16 s. Mostly fixed costs: the backend re-lowers every function that
+  touches a changed file (8,315 of 13,496; lowering only regenerated functions measured 8.1 -> 6.1 s with identical
+  output), 150 functions count as changed on every compile, and source locations hash the whole file.
+- `live-scroll-slowdown`: run 6's slower frames came from a person using the window; the real live-mode cost is GC
+  ownership tracking (5-6x longer pauses), per-evaluation string literals (+0.37 MB per frame) and call indirection.
+- `compiler-multicore`: fix the frontend restart and the O(n^2) string decoding first; threading is capped by the
+  allocator's global lock.
 
 ## Reproducing
 
