@@ -1,5 +1,36 @@
 # Execution ledger
 
+## M18 — workspace, context and layout implementation
+
+Work starts on `m18-workspace-context-layout`, preserving existing local
+changes. Implement M18.1, then record its evidence before M18.2 and M18.3.
+Saved workspace definitions contain stable identity, display name and ordered
+root paths, and are written explicitly and atomically. Per-window session
+snapshots reference that definition; autosave never rewrites its roots.
+Missing roots remain in the definition and are presented as unavailable.
+Context is window-owned and independent of tree selection. The right panel
+will use the existing dock model and session codec rather than an overlay.
+
+### M18.1 — saved workspace evidence
+
+Implemented versioned `.exosuit-workspace` definitions with stable id, name
+and ordered absolute roots; explicit atomic saves reject stale records from
+another window. Session snapshots retain the definition and missing roots
+without implicitly publishing changes. Added filesystem-gated Open, Save,
+Save As, Add/Remove Folder, Close and recent-workspace commands, native
+choosers, the saved name in the toolbar, and welcome-screen recents. Files
+renders every root, including an unavailable-root row. Nested roots have one
+top-level row each to preserve the tree's path identity.
+
+`tests/saved-workspace` passes 1/3-root round trips, explicit-save isolation,
+two-window stale-save rejection, missing-root/session preservation and bounded
+MRU ordering. The `saved-workspace` Xvfb phase passes title, three-root Files,
+unavailable-root presentation, welcome actions and recent reopen. Both checks
+are wired into their existing test runners. Desktop compilation passed.
+Full browser build passed using the installed sibling Emscripten toolchain
+(`EMSDK_DIR=/home/joao/dev/materia/haxeon/vendor/nativekit/.tools/emsdk`).
+Next: M18.2's window-owned ActiveContext, preserving the default workspace view.
+
 Last updated: 2026-10-10.
 
 ## M17 source control — in progress

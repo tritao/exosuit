@@ -12,6 +12,8 @@ class WorkspaceSession {
 	public final projects:Array<String> = [];
 	public final documents:Array<String> = [];
 	public var activeDocument:String = "";
+	public var savedWorkspace:Null<workspace.SavedWorkspace>;
+	public var workspaceFile:String = "";
 	public final layout:Array<String> = [];
 	public final expanded:Array<String> = [];
 	public final scmCommitDrafts:Map<String, String> = [];
@@ -20,6 +22,8 @@ class WorkspaceSession {
 
 	public static function capture(application:Application):WorkspaceSession {
 		var result = new WorkspaceSession();
+		if (application.savedWorkspaces.current != null) result.savedWorkspace = application.savedWorkspaces.current.copy();
+		result.workspaceFile = application.savedWorkspaces.path;
 		for (project in application.workspace.projects) {
 			if (safeValue(project.root)) result.projects.push(project.root);
 			for (path in project.expandedPaths()) if (safeValue(path)) result.expanded.push(path);
@@ -48,7 +52,8 @@ class WorkspaceSession {
 			var message = scmCommitDrafts.get(repositoryId);
 			if (message != null) application.scmCommitDrafts.set(repositoryId, message);
 		}
-		for (root in projects)
+		if (savedWorkspace != null) application.savedWorkspaces.restore(savedWorkspace, workspaceFile);
+		else for (root in projects)
 			if (FileSystem.exists(root) && FileSystem.isDirectory(root)) application.openArgument(root);
 		for (project in application.workspace.projects) project.restoreExpanded(expanded);
 		// Populate the sidebar before restoring the saved dock selection and focus.
@@ -81,6 +86,10 @@ class WorkspaceSession {
 
 	public function encode():String {
 		var output = "version=" + VERSION + "\n";
+		if (savedWorkspace != null) {
+			output += "workspace=" + haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(savedWorkspace.encode())) + "\n";
+			output += "workspaceFile=" + haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(workspaceFile)) + "\n";
+		}
 		for (project in projects) output += "project=" + clean(project) + "\n";
 		for (document in documents) output += "document=" + clean(document) + "\n";
 		output += "active=" + clean(activeDocument) + "\n";
@@ -104,6 +113,8 @@ class WorkspaceSession {
 			if (line.length == 0 || separator < 0) continue;
 			var key = line.substring(0, separator), value = line.substring(separator + 1);
 			if (key == "version") version = Std.parseInt(value);
+			else if (key == "workspace") result.savedWorkspace = workspace.SavedWorkspace.decode(haxe.crypto.Base64.decode(value).toString());
+			else if (key == "workspaceFile") result.workspaceFile = haxe.crypto.Base64.decode(value).toString();
 			else if (key == "project" && value.length > 0) result.projects.push(value);
 			else if (key == "document" && value.length > 0) result.documents.push(value);
 			else if (key == "active") result.activeDocument = value;

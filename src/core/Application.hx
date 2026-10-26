@@ -83,6 +83,7 @@ class Application {
 	public final errors:ErrorLog;
 	public final confirmations:ConfirmationService;
 	public final recentProjects:RecentProjects;
+	public final savedWorkspaces:controller.SavedWorkspaceController;
 	final releaseScmSettings:Void->Void;
 	final releaseScmWatchPaths:Void->Void;
 	public var onScmWatchPathsChanged:Null<(String, Array<String>, Array<String>)->Void>;
@@ -153,6 +154,7 @@ class Application {
 		keymap.add(Platform.KEY_LEFT, Platform.MOD_ALT, ["navigation:go-back"]);
 		keymap.add(Platform.KEY_RIGHT, Platform.MOD_ALT, ["navigation:go-forward"]);
 
+		savedWorkspaces = new controller.SavedWorkspaceController(this);
 		root.configureWelcomeActions({
 			recentProjects: this.recentProjects.paths,
 			newFile: function() { newDocument(); },
@@ -210,6 +212,7 @@ class Application {
 	}
 
 	public function openArgument(path:String):Null<View> {
+		if (StringTools.endsWith(path, ".exosuit-workspace")) { savedWorkspaces.open(path); return null; }
 		if (FileSystem.isDirectory(path)) {
 			var normalized = workspace.fileSystem.normalize(path);
 			var projectSettings = settings.forProject(ConfigurationPaths.projectSettings(normalized));
@@ -218,6 +221,7 @@ class Application {
 			scm.discover(normalized, _ -> {});
 			configuration.apply(projectSettings.current);
 			recentProjects.add(normalized);
+			savedWorkspaces.folderOpened(normalized);
 			return null;
 		}
 		return open(path);

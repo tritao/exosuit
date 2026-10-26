@@ -147,6 +147,8 @@ printf 'ignored\n' >"$workspace_root/.cache/ignored"
 printf 'needle in second project\n' >"$workspace_other/second.txt"
 run_test workspace-test "$workspace_root" "$workspace_other"
 run_test file-deletion "$root_dir/build/file-deletion-test"
+saved_workspace_fixture=$(mktemp -d)
+PRAGTICAL_PORTABLE="$saved_workspace_fixture/state" run_test saved-workspace "$saved_workspace_fixture/roots"
 run_test project-scan-yield
 chmod 600 "$workspace_root/unreadable.txt"
 

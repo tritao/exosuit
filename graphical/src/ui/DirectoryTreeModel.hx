@@ -28,6 +28,7 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 	static final RETRY_SUFFIX:String = ".exosuit-tree-retry";
 	static final MORE_SUFFIX:String = ".exosuit-tree-more";
 	final root:String;
+	final roots:Array<String>;
 	final theme:Theme;
 	public var fontSize(default, set):Float = 15.0;
 
@@ -75,10 +76,11 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 		return [for (path in visitedPaths) if (listings.exists(path)) path];
 	}
 
-	public function new(root:String, theme:Theme) {
+	public function new(root:String, theme:Theme, ?roots:Array<String>) {
 		this.root = root;
+		this.roots = roots == null ? [root] : roots.copy();
 		this.theme = theme;
-		expandedDirectories.set(root, true);
+		for (path in this.roots) expandedDirectories.set(path, true);
 	}
 
 	/** Keep unloaded branches visually closed until a complete listing (or error) is ready. */
@@ -130,8 +132,8 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 		}
 	}
 
-	public function rootCount():Int return 1;
-	public function rootIdentity():String return root;
+	public function rootCount():Int return roots.length;
+	public function rootIdentity():String return roots.join("\n");
 	public function watchesChanges():Bool return watchChanges;
 	public function dispose():Void invalidate();
 	public function setResourceDecorations(provider:Null<PluginResourceDecorationRegistry>):Void {
@@ -142,15 +144,16 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 	}
 
 	public function rootRange(start:Int, count:Int):Array<TreeRootMetadata>
-		return start > 0 || count <= 0 ? [] : [new TreeRootMetadata(root, true)];
+		return [for (index in start...Std.int(Math.min(roots.length, start + count))) new TreeRootMetadata(roots[index], true)];
 
-	public function rootKeyAt(index:Int):String return root;
+	public function rootKeyAt(index:Int):String return roots[index];
 
 	/** Directory identity controls expandability, even when the listing is empty. */
 	public function hasChildrenHint(key:String):Bool
 		return isDirectoryPath(key);
 
 	public function childCount(parentKey:String):Int {
+		if (roots.indexOf(parentKey) >= 0 && !sys.FileSystem.exists(parentKey)) return 0;
 		if (isSyntheticRow(parentKey)) return 0;
 		if (!isKnownDirectory(parentKey)) return 0;
 		if (!listings.exists(parentKey)) {
@@ -179,7 +182,7 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 		return "";
 	}
 
-	public function initiallyExpanded(key:String):Bool return key == root;
+	public function initiallyExpanded(key:String):Bool return roots.indexOf(key) >= 0;
 
 	public function estimatedExtent():Float return rowHeight();
 
@@ -192,6 +195,7 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 			new TextStyleOverride(null, fontSize, null, TextWrap.None, null, null, null, theme.tokens.text));
 
 	public function buildItemWithIcons(key:String, expanded:Bool, atlas:SetiIconAtlas, dark:Bool):View {
+		if (roots.indexOf(key) >= 0 && !sys.FileSystem.exists(key)) return new haxeon.ui.widgets.text.Text(baseName(key) + " (unavailable)", null, theme.tokens.textSecondary);
 		if (isSyntheticRow(key))
 			return new MiddleEllipsisText("filename", rowLabel(key), false,
 				new TextStyleOverride(null, fontSize, null, TextWrap.None, null, null, null, theme.tokens.textSecondary));
@@ -245,7 +249,7 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 		return !isSyntheticRow(path) && isKnownDirectory(path);
 
 	public function isSyntheticRow(path:String):Bool
-		return path != root && (StringTools.endsWith(path, "/" + LOADING_SUFFIX) ||
+		return roots.indexOf(path) < 0 && (StringTools.endsWith(path, "/" + LOADING_SUFFIX) ||
 			StringTools.endsWith(path, "/" + RETRY_SUFFIX) || StringTools.endsWith(path, "/" + MORE_SUFFIX));
 
 	/** Handles retry and paging rows. Returns true when the visible tree changed. */
@@ -316,7 +320,9 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 			if (!result.unchanged || !hadListing) {
 				if (result.invalidated.length > 0) prunePaths(result.invalidated);
 				if (!hadListing) visitedPaths.push(result.path);
-				listings.set(result.path, {names: result.names, kinds: result.kinds});
+				// An explicitly added nested root has its own top-level row. Keep
+				// each path's tree identity unique when its parent is also a root.
+				listings.set(result.path, {names: [for (name in result.names) if (roots.indexOf(result.path + "/" + name) < 0) name], kinds: result.kinds});
 				if (affectsVisibleTree) markVisibleChanged(result.path);
 			}
 			if (observeDirectory != null) observeDirectory(result.path);
@@ -353,7 +359,7 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 	}
 
 	public function refreshDirectory(path:String):Void {
-		if (listings.exists(path) || path == root) requestLoad(path, false);
+		if (listings.exists(path) || roots.indexOf(path) >= 0) requestLoad(path, false);
 	}
 
 	/** Invalidates cached listings after the root/workspace changes. */
@@ -363,7 +369,7 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 		listings.clear();
 		visitedPaths = [];
 		expandedDirectories.clear();
-		expandedDirectories.set(root, true);
+		for (path in this.roots) expandedDirectories.set(path, true);
 		errors.clear();
 		pending.clear();
 		priorityClicks.clear();
@@ -571,7 +577,7 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 	}
 
 	function isKnownDirectory(path:String):Bool {
-		if (path == root) return true;
+		if (roots.indexOf(path) >= 0) return true;
 		var slash = path.lastIndexOf("/");
 		if (slash < 0) return false;
 		var parent = path.substring(0, slash);
@@ -580,12 +586,12 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 	}
 
 	function isVisibleExpandedPath(path:String):Bool {
-		if (path == root) return true;
+		if (roots.indexOf(path) >= 0) return true;
 		var current = path;
-		while (current != root) {
+		while (roots.indexOf(current) < 0) {
 			if (!expandedDirectories.exists(current)) return false;
 			var slash = current.lastIndexOf("/");
-			if (slash < root.length) return false;
+			if (slash <= 0) return false;
 			current = current.substring(0, slash);
 		}
 		return true;

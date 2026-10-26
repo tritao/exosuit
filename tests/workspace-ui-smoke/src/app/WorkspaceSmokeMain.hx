@@ -53,7 +53,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	var remoteOpenTests:Null<RemoteFileOpenTests>;
 
 	public function new(context:haxeon.ui.host.DesktopUiHostContext, path:String, phase:String) {
-		super(context.fonts, null, context, (phase == "explorer-rename" || phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-geometry" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-font" || phase == "editor-tabs" || phase == "zoom" || phase == "word-delete" || phase == "selection" || phase == "tab-close" || phase == "pointer-actions" || phase == "blank-editor-click" || phase == "caret-follow" || phase == "exit-confirmation" || phase == "save-as" || phase == "tab-close-paint" || phase == "settings" || phase == "editor-minimap" || phase == "toolbar-tooltip" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
+		super(context.fonts, null, context, (phase == "saved-workspace" || phase == "explorer-rename" || phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-geometry" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-font" || phase == "editor-tabs" || phase == "zoom" || phase == "word-delete" || phase == "selection" || phase == "tab-close" || phase == "pointer-actions" || phase == "blank-editor-click" || phase == "caret-follow" || phase == "exit-confirmation" || phase == "save-as" || phase == "tab-close-paint" || phase == "settings" || phase == "editor-minimap" || phase == "toolbar-tooltip" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
 			null, null, null, WorkspaceSmokeMain.createTerminal);
 		this.phase = phase;
 		closeContext = context;
@@ -120,6 +120,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		if (phase == "theme-palette") return themePaletteStep(frame);
 		if (phase == "file-deletion") return fileDeletionStep(frame);
 		if (phase == "explorer-rename") return explorerRenameStep(frame);
+		if (phase == "saved-workspace") return savedWorkspaceStep(frame);
 		if (phase == "remote-open") {
 			if (frames == 1) { remoteOpenTests = new RemoteFileOpenTests(this); remoteOpenTests.start(); }
 			if (frames == 2) {
@@ -1330,6 +1331,36 @@ class WorkspaceSmokeApp extends ExosuitApp {
 
 	var deletedDocument:editor.Document;
 	var deletedPane:String;
+	function savedWorkspaceStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
+		var directory = haxe.io.Path.directory(path), file = directory + "/Named.exosuit-workspace";
+		if (frames == 2) {
+			for (name in ["second", "third"]) {
+				var root = directory + "/" + name;
+				sys.FileSystem.createDirectory(root); application.savedWorkspaces.addFolder(root);
+			}
+			require(application.savedWorkspaces.saveAs(file), "UI workspace save failed");
+			application.savedWorkspaces.restore(new workspace.SavedWorkspace("fixture", "Named", [directory, directory + "/second", directory + "/unavailable"]), file);
+		}
+		var result = super.submit(frame);
+		if (frames == 4) {
+			require(treeRow(ui.root, directory) != null && treeRow(ui.root, directory + "/second") != null &&
+				treeRow(ui.root, directory + "/unavailable") != null, "Files did not show all workspace roots");
+			require(hasText(ui.root, "unavailable"), "missing root was not identified");
+			require(hasText(ui.root, "Named"), "saved workspace name was absent from title bar");
+			application.savedWorkspaces.close();
+		}
+		if (frames == 6) {
+			require(find(ui.root, "welcome-open-workspace") != null && find(ui.root, "welcome-workspace-recent-0") != null,
+				"welcome did not expose Open Workspace and workspace recents");
+			click("welcome-workspace-recent-0");
+		}
+		if (frames == 8) {
+			require(application.workspace.projects.length == 3, "recent workspace did not restore its three roots");
+			trace("PASS: named workspace title, multi-root Files, unavailable root, welcome actions and recent reopen");
+		}
+		return result;
+	}
+
 	var renameStage:Int = 0;
 	function explorerRenameStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		var destination = haxe.io.Path.directory(path) + "/Renamed.hx";
@@ -1676,7 +1707,7 @@ class WorkspaceSmokeMain {
 			zoomWidth = options.width;
 		}
 		options.captureDirectory = args[1];
-		options.frameLimit = args[2] == "explorer-rename" ? 40 : args[2] == "editor-geometry" ? 25 : args[2] == "file-deletion" ? 10 : args[2] == "blank-editor-click" ? 11 : args[2] == "zoom" ? 75 : args[2] == "save-as" ? 10 : args[2] == "exit-confirmation" ? 11 : args[2] == "tab-close" ? 13 : args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 11 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
+		options.frameLimit = args[2] == "saved-workspace" ? 10 : args[2] == "explorer-rename" ? 40 : args[2] == "editor-geometry" ? 25 : args[2] == "file-deletion" ? 10 : args[2] == "blank-editor-click" ? 11 : args[2] == "zoom" ? 75 : args[2] == "save-as" ? 10 : args[2] == "exit-confirmation" ? 11 : args[2] == "tab-close" ? 13 : args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 11 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
 		var status = DesktopUiHost.run(options, context -> new WorkspaceSmokeApp(context, args[0], args[2]));
 
 		return status;

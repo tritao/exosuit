@@ -391,6 +391,31 @@ class ExosuitApp implements DesktopUiApplication {
 			CommandBridge.refreshShortcuts(ui.commands, application.commands, application.keymap);
 			requestFrame();
 		});
+		application.savedWorkspaces.onChanged = function() {
+			var roots = application.savedWorkspaces.roots();
+			explorerRoot = roots.length == 0 ? null : roots[0];
+			clearExplorerModel(); filesScroll.jumpTo(0, 0);
+			if (roots.length > 0) openExplorer(); else sidebar.setVisible(false);
+			requestFrame();
+		};
+		if (desktop != null) {
+			application.savedWorkspaces.chooseOpen = function() desktop.openFile(function(accepted, paths) {
+				if (accepted && paths.length > 0) application.savedWorkspaces.open(paths[0]);
+				requestFrame();
+			}, "Open Workspace");
+			application.savedWorkspaces.chooseSaveAs = function() desktop.saveFile(function(accepted, paths) {
+				if (accepted && paths.length > 0) {
+					var file = paths[0];
+					if (!StringTools.endsWith(file, ".exosuit-workspace")) file += ".exosuit-workspace";
+					application.savedWorkspaces.saveAs(file);
+				}
+				requestFrame();
+			}, "Save Workspace As", null, "Workspace.exosuit-workspace");
+			application.savedWorkspaces.chooseFolder = function() desktop.selectDirectory(function(accepted, paths) {
+				if (accepted && paths.length > 0) application.savedWorkspaces.addFolder(paths[0]);
+				requestFrame();
+			}, "Add Folder to Workspace");
+		}
 		application.session.start();
 		if (openPath != null) openArgument(openPath);
 		if (dock.isOpen("terminal") && host.panelTerminals.length == 0) openTerminal();
@@ -1869,7 +1894,9 @@ class ExosuitApp implements DesktopUiApplication {
 			items.push(new KeyedView("terminal", button));
 		}
 		var workspaceTitleStyle = new LayoutStyle(); workspaceTitleStyle.width = LayoutAxis.grow();
-		var workspaceTitle = explorerRoot == null ? "" : haxe.io.Path.withoutDirectory(explorerRoot);
+		var savedWorkspace = application.savedWorkspaces.current;
+		var workspaceTitle = savedWorkspace == null ? (explorerRoot == null ? "" : haxe.io.Path.withoutDirectory(explorerRoot)) :
+			savedWorkspace.name + (application.savedWorkspaces.dirty ? " *" : "");
 		if (custom) {
 			var caption = workspaceTitle + (workspaceStatus.length == 0 ? "" : (workspaceTitle.length == 0 ? "" : " · ") + workspaceStatus);
 			items.push(new KeyedView("workspace-title", new haxeon.ui.widgets.text.MiddleEllipsisText("toolbar-workspace-title", caption, true,
@@ -2027,7 +2054,7 @@ class ExosuitApp implements DesktopUiApplication {
 		var tree = explorerTree;
 		var model:Null<DirectoryTreeModel> = Std.isOfType(explorerModel, DirectoryTreeModel) ? cast explorerModel : null;
 		if (tree == null || model == null || tree.selectedKey != path || model.isSyntheticRow(path)) return false;
-		if (path == explorerRoot) { application.reportError("files", "Project roots cannot be renamed while open."); return true; }
+		if (application.savedWorkspaces.roots().indexOf(path) >= 0) { application.reportError("files", "Project roots cannot be renamed while open."); return true; }
 		host.closeCommandView();
 		tree.scrollIntoView(path);
 		host.focusExplorer();
@@ -2043,6 +2070,11 @@ class ExosuitApp implements DesktopUiApplication {
 		}, requestFrame, function(message) application.reportError("files", message), application.settings.current.explorerFontSize);
 		requestFrame();
 		return true;
+	}
+
+	function localExplorerRoots():Array<String> {
+		var roots = application.savedWorkspaces.roots();
+		return roots.length == 0 && explorerRoot != null ? [explorerRoot] : roots;
 	}
 
 	function explorerPanel():View {
@@ -2064,7 +2096,7 @@ class ExosuitApp implements DesktopUiApplication {
 			&& (cast(explorerModel, WorkspaceFileTreeModel)).scopeId() == remoteScope
 			&& (cast(explorerModel, WorkspaceFileTreeModel)).workspaceId() == remoteWorkspace;
 		var localModelCurrent = explorerModel != null && Std.isOfType(explorerModel, DirectoryTreeModel)
-			&& explorerModel.rootIdentity() == explorerRoot;
+			&& explorerModel.rootIdentity() == localExplorerRoots().join("\n");
 		if (remoteFiles ? !remoteModelCurrent : !localModelCurrent) {
 			clearExplorerModel();
 			if (remoteFiles) {
@@ -2076,7 +2108,7 @@ class ExosuitApp implements DesktopUiApplication {
 					remoteWorkspace, remoteScope, rootName, theme, requestFrame,
 					function(root) { workspaceFileLoader.clearCache(); host.markWorkspaceFilesChanged(remoteScope, root); },
 					attachment == null || attachment.hasLocalFileAccess() ? null : attachment.sourceControlSource());
-			} else explorerModel = new DirectoryTreeModel(explorerRoot, theme);
+			} else explorerModel = new DirectoryTreeModel(explorerRoot, theme, localExplorerRoots());
 		}
 		if (explorerModel != null) explorerModel.setResourceDecorations(host.getResourceDecorations());
 		var remoteModel:Null<WorkspaceFileTreeModel> = Std.isOfType(explorerModel, WorkspaceFileTreeModel)
@@ -2095,7 +2127,7 @@ class ExosuitApp implements DesktopUiApplication {
 		viewportStyle.height = LayoutAxis.grow();
 		viewportStyle.clipHorizontal = true;
 		var tree = new TreeView("exosuit-explorer-tree", explorerModel, viewportStyle, filesScroll, 640.0,
-			null, [explorerModel.rootKeyAt(0)], function(key) {
+			null, [for (index in 0...explorerModel.rootCount()) explorerModel.rootKeyAt(index)], function(key) {
 				if (localModel == null || !localModel.isSyntheticRow(key)) host.setSelectedExplorerPath(key);
 			}, function(key) {
 				if (remoteModel != null) {
@@ -2163,7 +2195,8 @@ class ExosuitApp implements DesktopUiApplication {
 				new CommandMenuEntry("file:new", "New File…"),
 				new CommandMenuEntry("folder:new", "New Folder…"),
 				new CommandMenuEntry("file:rename", "Rename…"),
-				new CommandMenuEntry("file:delete", "Delete…")
+				new CommandMenuEntry("file:delete", "Delete…"),
+				new CommandMenuEntry("workspace:remove-folder", "Remove Folder from Workspace…")
 			], event, function() return explorerRoot == menuRoot && host.focusedFilePath() == path && FileSystem.exists(path));
 		};
 		explorerTree = tree;
@@ -2791,6 +2824,18 @@ class ExosuitApp implements DesktopUiApplication {
 			new KeyedView("new", newButton),
 			new KeyedView("open", openButton)
 		];
+		if (capabilities.supports(HostCapability.Filesystem)) {
+			items.push(new KeyedView("open-workspace", new Button("Open Workspace…", null, application.savedWorkspaces.openPicker, "welcome-open-workspace")));
+			items.push(new KeyedView("add-folder", new Button("Add Folder to Workspace…", null, application.savedWorkspaces.addPicker, "welcome-add-folder")));
+			if (application.savedWorkspaces.roots().length > 0)
+				items.push(new KeyedView("save-workspace", new Button("Save Workspace As…", null, application.savedWorkspaces.savePicker, "welcome-save-workspace")));
+			for (index in 0...application.savedWorkspaces.recents.paths.length) {
+				var file = application.savedWorkspaces.recents.paths[index];
+				var available = FileSystem.exists(file);
+				items.push(new KeyedView("workspace-recent-" + index, new Button(workspace.SavedWorkspace.nameFromPath(file) +
+					(available ? "" : " (unavailable)"), null, function() application.savedWorkspaces.open(file), "welcome-workspace-recent-" + index)));
+			}
+		}
 		if (actions != null && actions.recentProjects.length > 0) {
 			var recentStyle = new LayoutStyle();
 			recentStyle.direction = LayoutDirection.TopToBottom;
