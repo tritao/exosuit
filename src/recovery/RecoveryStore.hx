@@ -12,6 +12,8 @@ class RecoveryStore {
 	public final path:String;
 	public final diagnostics:Array<String> = [];
 	final fileSystem:EditorFileSystem;
+	/** The dirty documents and their text states as of the last save, which a save with nothing new skips. */
+	var savedSignature:Null<String> = null;
 
 	public function new(path:String, ?fileSystem:EditorFileSystem) {
 		this.path = path;
@@ -19,6 +21,10 @@ class RecoveryStore {
 	}
 
 	public function save(application:Application):Bool {
+		var signature = "";
+		for (document in application.documents.documents)
+			if (document.dirty) signature += document.recoveryId + "\n" + document.path + "\n" + document.buffer.stateId + "\n";
+		if (signature == savedSignature) return true;
 		var snapshots = load();
 		if (diagnostics.length > 0) return false;
 		for (document in application.documents.documents) {
@@ -30,10 +36,13 @@ class RecoveryStore {
 			}
 			snapshots.push(new RecoverySnapshot(document.recoveryId, document.title, document.path, document.buffer.text));
 		}
-		return saveSnapshots(snapshots);
+		if (!saveSnapshots(snapshots)) return false;
+		savedSignature = signature;
+		return true;
 	}
 
 	public function saveSnapshots(snapshots:Array<RecoverySnapshot>):Bool {
+		savedSignature = null;
 		if (!ensureParent(path)) return false;
 		var output = "pragtical-recovery=" + VERSION + "\n";
 		var start = snapshots.length > MAX_SNAPSHOTS ? snapshots.length - MAX_SNAPSHOTS : 0;
@@ -64,6 +73,7 @@ class RecoveryStore {
 		try {
 			return decode(fileSystem.read(path));
 		} catch (error:Dynamic) {
+			savedSignature = null;
 			var quarantined = quarantine();
 			diagnostics.push(quarantined == null
 				? "Could not read recovery data: " + Std.string(error)

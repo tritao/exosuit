@@ -183,6 +183,15 @@ class ConfigurationTestMain {
 		var beforeRestore = application.documents.documents.length;
 		require(recovery.restore(application, untitledSnapshot) && application.documents.documents.length == beforeRestore,
 			"accepting an already restored recovery identity duplicated its pathless document");
+		// The periodic save writes only when a dirty buffer changed since the last one.
+		var countedPath = arguments[2] + "/state/counted-recovery.conf";
+		if (FileSystem.exists(countedPath)) FileSystem.deleteFile(countedPath);
+		var countedFiles = new testing.CountingFileSystem(), counted = new RecoveryStore(countedPath, countedFiles);
+		require(counted.save(application) && counted.save(application) && countedFiles.writes == 1,
+			"an unchanged recovery state was saved again");
+		untitledView.textInput("!");
+		require(counted.save(application) && countedFiles.writes == 2 && counted.load()[counted.load().length - 1].text == "unsaved untitled!",
+			"a changed buffer was not saved for recovery");
 		var many:Array<RecoverySnapshot> = [];
 		for (index in 0...RecoveryStore.MAX_SNAPSHOTS + 5)
 			many.push(new RecoverySnapshot("bounded-" + (index + 1), "bounded-" + index, null, "value-" + index));
