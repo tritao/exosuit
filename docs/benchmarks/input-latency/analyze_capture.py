@@ -14,7 +14,12 @@ the app reacts):
 then SCREEN, the time from the OS stamp to the end of the first frame that starts after the application polled the input,
 which is the frame that can show its effect (the end of nk.frame is when the frame was submitted: what the display does
 with it is not measured), and, for polled inputs slower than --slow-ms, where their time went on the UI thread: inside nk.frame zones, waiting for
-events (nk.wait), or other work."""
+events (nk.wait), or other work.
+
+Resizes the application polled (`resize polled window` and `resize polled surface`) are grouped into drags: resizes less
+than 300 ms apart. For each drag it reports how many resizes the application saw, and the frames drawn while it lasted: their
+cost, the gaps between them (a frame budget is 16.7 ms) and the time from a polled resize to the end of the next frame. A drag's
+resizes are merged in NativeKit's queue, so the application sees fewer than were sent."""
 import argparse, collections, json, statistics, sys
 
 
@@ -68,6 +73,54 @@ def overlap(spans, start, end):
     return sum(max(0.0, min(end, b) - max(start, a)) for a, b, _ in spans)
 
 
+def report_resizes(events, resize_events):
+    if not resize_events:
+        return
+    import bisect
+    thread = resize_events[0]["tid"]
+    frames = intervals(events, thread, {"nk.frame"})
+    starts = [a for a, _, _ in frames]
+    windows = [e for e in resize_events if e["name"] == "resize polled window"] or resize_events
+    drags, current = [], [windows[0]]
+    for e in windows[1:]:
+        if e["ts"] - current[-1]["ts"] > 300_000:
+            drags.append(current)
+            current = []
+        current.append(e)
+    drags.append(current)
+    print("\nRESIZE  %d drags, %d resizes polled by the application" % (len(drags), len(windows)))
+    all_after, all_cost, all_gaps = [], [], []
+    for n, drag in enumerate(drags, 1):
+        first, last = drag[0]["ts"], drag[-1]["ts"]
+        lo, hi = bisect.bisect_left(starts, first), bisect.bisect_right(starts, last + 100_000)
+        inside = frames[lo:hi]
+        cost = [(b - a) / 1000 for a, b, _ in inside]
+        gaps = [(inside[i + 1][0] - inside[i][0]) / 1000 for i in range(len(inside) - 1)]
+        after = []
+        for e in drag:
+            i = bisect.bisect_left(starts, e["ts"])
+            if i < len(frames):
+                after.append((frames[i][1] - e["ts"]) / 1000)
+        all_after += after
+        all_cost += cost
+        all_gaps += gaps
+        seconds = max((last - first) / 1e6, 1e-3)
+        a, b = drag[0]["args"], drag[-1]["args"]
+        print("  drag %-2d %3d resizes in %.2f s (%dx%d -> %dx%d): %3d frames (%.0f/s), cost median %.1f max %.1f ms, "
+              "gap p90 %.1f max %.1f ms" % (
+                  n, len(drag), seconds, a["a"], a["b"], b["a"], b["b"], len(inside), len(inside) / seconds,
+                  statistics.median(cost) if cost else 0, max(cost) if cost else 0,
+                  percentile(gaps, 0.90) if gaps else 0, max(gaps) if gaps else 0))
+    if all_cost:
+        print("  frames during drags: n=%d, cost median %.1f  p90 %.1f  p99 %.1f  max %.1f ms; %d over 16.7 ms, %d over 50 ms" % (
+            len(all_cost), statistics.median(all_cost), percentile(all_cost, 0.90), percentile(all_cost, 0.99), max(all_cost),
+            sum(c > 16.7 for c in all_cost), sum(c > 50 for c in all_cost)))
+    if all_gaps:
+        print("  time between frame starts: median %.1f  p90 %.1f  p99 %.1f  max %.1f ms" % (
+            statistics.median(all_gaps), percentile(all_gaps, 0.90), percentile(all_gaps, 0.99), max(all_gaps)))
+    summary("  RESIZE→FRAME", all_after)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("trace")
@@ -75,11 +128,17 @@ def main():
     args = parser.parse_args()
     events = load(args.trace)
 
-    inputs = sorted((e for e in events if e.get("cat") == "hl.input" and e.get("ph") == "i"), key=lambda e: e["ts"])
+    resize_events = sorted((e for e in events if e.get("cat") == "hl.input" and e.get("ph") == "i"
+                            and e.get("name") in ("resize polled window", "resize polled surface")), key=lambda e: e["ts"])
+    inputs = sorted((e for e in events if e.get("cat") == "hl.input" and e.get("ph") == "i"
+                     and not e["name"].startswith("resize")), key=lambda e: e["ts"])
     ages = sorted((e for e in events if e.get("cat") == "hl.input" and e.get("ph") == "C"), key=lambda e: e["ts"])
-    if not inputs:
-        print("no input events: was the run recorded with NativeKit's trace sink?", file=sys.stderr)
+    if not inputs and not resize_events:
+        print("no input or resize events: was the run recorded with NativeKit's trace sink?", file=sys.stderr)
         return 1
+    if not inputs:
+        report_resizes(events, resize_events)
+        return 0
     # An age counter is written right after its instant, with the same timestamp.
     age_at = {}
     for e in ages:
@@ -143,6 +202,8 @@ def main():
     summary("SCREEN", screen["input polled move"] + screen["input polled key"])
     summary(" moves", screen["input polled move"])
     summary(" keys", screen["input polled key"])
+
+    report_resizes(events, resize_events)
 
     slow = [r for r in polled if r[2] >= args.slow_ms]
     print("\n%d of %d polled inputs took %.0f ms or more" % (len(slow), len(polled), args.slow_ms))

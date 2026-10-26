@@ -85,6 +85,11 @@ it off NativeKit's queue (`Input polled age`). A move that the queue merged into
 stands for. ONSET, MOVING and KEYS are the polled ages, as the Windows analyzer defines them, and slow inputs are split by
 what the UI thread was doing (`nk.frame`, `nk.wait`, other).
 
+`session_linux.sh NAME --resize --seconds 40` resizes the window instead (`driver_x11.py --mode resize`, configure requests
+every 8 ms, shrinking and growing between pauses, no window manager) and the tables gain a RESIZE section: for each drag the
+resizes the application polled, the frames drawn while it lasted (their cost, the gaps between them against a 16.7 ms
+budget) and the time from a polled resize to the end of the next frame. It works with `--human` too: drag the window edge.
+
 To measure on your own display, with your GPU and devices, run `session_linux.sh NAME --human --seconds 60`: the editor opens
 on `$DISPLAY`, nothing is injected, and you move the mouse over it with pauses, click in the text and use the arrow keys.
 The capture is analyzed when it ends. The recorder is given 30 s to finalize after the editor is stopped.
@@ -135,3 +140,21 @@ The capture is analyzed when it ends. The recorder is given 30 s to finalize aft
     separate walks of the node tree in `submitInternal` could be fused.
 - In the probe app under Xvfb every mouse move reaches GTK's handler twice (80 handler events for 40 moves). The editor
   shows about two handler events per polled move too, with merging. Whether real hardware does it is unchecked.
+
+### Resizing (2026-10-26, Xvfb, software GL, busy machine; 33 drags, 2208 configure requests at 125 per second)
+
+| | |
+|---|---|
+| resizes the application polled | 2209, one per request: they are not merged here |
+| frames during drags | 664, about 30 a second against a 60 Hz budget; time between frame starts median 34 ms, p90 51 ms |
+| frame cost during drags | median 18.0, p90 26.3, p99 35.7 ms (ordinary frames: median 13.1); 58% over 16.7 ms, none over 50 ms |
+| polled resize to a submitted frame | median 29, p90 40, p99 51 ms |
+
+- The editor keeps up with the stream in the sense that every resize is taken and drawn within about two frames, but it
+  draws at about half the budget. A resize needs a full native layout (nothing can be reused when the size changes), and
+  the CPU profile of the drags is that of ordinary frames (building the tree 12%, native layout 5%, style comparison 4%)
+  plus buffer churn: `memset`, `memmove` and `malloc` are 20% of samples, almost all inside llvmpipe resizing its render
+  targets and GDK copying the result. A GPU would not pay that, so a real display is needed to say how much is left.
+- Two long frames occur in every run and are not resizes: one of 260 to 300 ms before the first input (the first frame of
+  the editor), and one of about 150 ms that came 16 s into the input phase in both normal runs. The second was not
+  diagnosed.

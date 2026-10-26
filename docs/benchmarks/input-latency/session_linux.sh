@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# session_linux.sh NAME [--seconds S] [--live] [--human]: runs the editor in a private Xvfb display on its own sources, drives
+# session_linux.sh NAME [--seconds S] [--live] [--human] [--resize]: runs the editor in a private Xvfb display on its own sources, drives
 # it with X11 input (driver_x11.py), records a profiler capture and prints the latency tables (analyze_capture.py). Output
 # goes to runs/NAME/. Linux. The editor must be built (python3 scripts/build.py).
+#
+# With --resize the driver resizes the window as a drag would (instead of moving the mouse and typing), and the tables
+# include the frames drawn while it was resized.
 #
 # With --human the editor opens on the display in $DISPLAY (your GPU, compositor and devices) and a person drives it for S
 # seconds: move the mouse over it with pauses between, click in the text, use the arrow keys. Nothing is injected.
@@ -17,11 +20,13 @@ name=$1; shift
 seconds=60
 live=0
 human=0
+mode=input
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 		--seconds) seconds=$2; shift 2 ;;
 		--live) live=1; shift ;;
 		--human) human=1; shift ;;
+		--resize) mode=resize; shift ;;
 		*) echo "unknown option $1" >&2; exit 2 ;;
 	esac
 done
@@ -66,7 +71,7 @@ if [[ $human == 1 ]]; then
 	until xdotool search --name "$title" > /dev/null 2>&1; do sleep 0.5; done
 	sleep $seconds
 else
-	python3 $here/driver_x11.py "$title" --seconds $seconds --wait-window 150 > $out/driver.log 2>&1
+	python3 $here/driver_x11.py "$title" --seconds $seconds --wait-window 150 --mode $mode > $out/driver.log 2>&1
 fi
 sleep 2
 # A live run is a process group (the watcher, the build and the app): stop all of it, or it would relaunch the app.
