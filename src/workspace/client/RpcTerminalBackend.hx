@@ -41,6 +41,7 @@ class RpcTerminalBackend implements TerminalBackend {
   var writeBytes:Int = 0;
   var writing:Bool = false;
   var failure:Null<String>;
+  public var name(default, null):Null<String>;
   var failureReported:Bool = false;
   var output:Array<TerminalEvent> = [];
   var nextRead:Float = 0;
@@ -121,6 +122,7 @@ class RpcTerminalBackend implements TerminalBackend {
       return false;
     }
     observedColumns = info.columns;
+    if (info.name != null && StringTools.trim(info.name) != "") name = info.name;
     observedRows = info.rows;
     controller = info.controller == true;
     controlled = info.controlled == true;

@@ -73,6 +73,7 @@ class TerminalRpcTestMain {
       require(clock() < deadline, "Terminal attach timed out");
       step();
     }
+    require(backend.name != null && backend.name != "", "Attachment did not expose the service terminal name");
     if (mode == "create") {
       session.write(Bytes.ofString("KEEP=alive; printf 'DAEMON_%s:%s\\n' PID $$\n"));
       while (marker(session.emulator, "DAEMON_PID:") == "") {

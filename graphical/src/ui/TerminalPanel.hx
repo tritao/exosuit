@@ -9,6 +9,8 @@ interface TerminalPanel extends View {
 	public function terminate(force:Bool):Void;
 	public function close():Void;
 	public function status():String;
+	/** Workspace metadata received on attachment, or null for local/older hosts. */
+	public function workspaceName():Null<String>;
 	public function columns():Int;
 	public function rows():Int;
 }

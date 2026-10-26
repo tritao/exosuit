@@ -150,8 +150,10 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
   }
   function info(t:RuntimeTerminal, viewer:RpcConnection):TerminalInfo {
     var owner = controller(t.id);
+    var record = catalog.get(t.id);
     return {
     id: t.id,
+    name: record == null ? null : record.name,
     cwd: t.cwd,
     state: t.state,
     exitCode: t.exitCode,

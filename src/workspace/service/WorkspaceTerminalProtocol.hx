@@ -24,6 +24,8 @@ import haxeon.wire.MessagePack;
 @:id(8) var end:Int64;
 @:optional @:id(9) var controller:Null<Bool>;
 @:optional @:id(10) var controlled:Null<Bool>;
+/** Service-owned display name; optional for older daemons. */
+@:optional @:id(11) var name:Null<String>;
 }
 @:wire typedef TerminalRead = {@: id(1) var workspace: String;
 @:id(2) var instance:String;

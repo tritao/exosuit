@@ -11,6 +11,21 @@ class UiTerminalTab {
 	public final panel:TerminalPanel;
 	public var disposed(default, null):Bool = false;
 	public var retainOnClose:Bool = false;
+	public var workspaceNameKnown(default, null):Bool = false;
+
+	public function poll():Bool {
+		panel.poll();
+		return !workspaceNameKnown && updateWorkspaceName(panel.workspaceName());
+	}
+
+	public function updateWorkspaceName(name:Null<String>):Bool {
+		// Titles are metadata, not identity: different workspaces may share a name.
+		if (!remote || name == null || StringTools.trim(name) == "") return false;
+		workspaceNameKnown = true;
+		var changed = title != name;
+		title = name;
+		return changed;
+	}
 
 	public function new(id:String, title:String, cwd:String, panel:TerminalPanel, remote:Bool = false, ?resourceId:String, ?workspaceRoot:String) {
 		this.id = id;

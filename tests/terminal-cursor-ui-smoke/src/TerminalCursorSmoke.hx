@@ -54,6 +54,7 @@ class CursorApp implements DesktopUiApplication {
 		fonts.add(fontDirectory + "IBMPlexMono-Regular.ttf", haxeon.ui.FontFamily.Monospace);
 		pane = new ui.TerminalPane(new TerminalSession(backend, emulator), host.requestFrame,
 			new ui.TerminalPalette(dark), fonts);
+		TerminalNameTests.run();
 		if (mode == "colors") {
 			emulator.feedString("\x1b[2J\x1b[H\x1b[31mRED RED\x1b[0m gap \x1b[31mRED\x1b[32mGREEN\x1b[0m"
 				+ "\r\n\x1b[38;5;196mINDEXED\x1b[38;2;255;0;0m TRUECOLOR\x1b[0m"

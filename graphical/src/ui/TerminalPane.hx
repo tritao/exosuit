@@ -114,6 +114,8 @@ class TerminalPane implements TerminalPanel {
 	public function status():String
 		return session.status;
 
+	public function workspaceName():Null<String> return remoteBackend == null ? null : remoteBackend.name;
+
 	/** Bounded renderer state for lifecycle and browser acceptance diagnostics. */
 	public function diagnosticState():Dynamic return {
 		width: resolvedWidth, height: resolvedHeight,

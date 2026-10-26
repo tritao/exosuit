@@ -100,7 +100,10 @@ class TerminalServiceTests {
     }
     require(manager.activeCount() == 1, "Runtime was not created before reply loss");
     done = false;
-    client.call(WorkspaceTerminalProtocol.OPEN, open, 1000, function(_) done = true, function(e) {
+    client.call(WorkspaceTerminalProtocol.OPEN, open, 1000, function(info) {
+      require(info.name == "Terminal 1", "Open response omitted the service-owned terminal name");
+      done = true;
+    }, function(e) {
       throw e.code;
     }
     );

@@ -586,7 +586,6 @@ class ExosuitApp implements DesktopUiApplication {
 	function newTerminalTab(?group:String):Null<UiTerminalTab> {
 		var failure = terminalCreationFailure();
 		if (failure != null) { application.reportError("terminal", failure); return null; }
-		var number = allocateTerminalNumber(), title = "Terminal " + number;
 		var client = workbenchClient;
 		if (client != null) {
 			var catalog = client.terminalCatalog();
@@ -606,8 +605,9 @@ class ExosuitApp implements DesktopUiApplication {
 				}
 			}
 			var resource = workspace.client.WorkspaceIds.create("workspace-terminal");
-			return createTerminalTab(ResourceViewIdentity.view(root, resource), title, cwd, false, true, resource, root, group);
+			return createTerminalTab(ResourceViewIdentity.view(root, resource), "Terminal", cwd, false, true, resource, root, group);
 		}
+		var number = allocateTerminalNumber(), title = "Terminal " + number;
 		var id = createWorkspaceTerminal != null && application.workspace.activeProject != null
 			? workspace.client.WorkspaceIds.create("workspace-terminal") : "terminal-" + number;
 		return createTerminalTab(id, title, explorerRoot == null ? Sys.getCwd() : explorerRoot, false);
@@ -622,12 +622,6 @@ class ExosuitApp implements DesktopUiApplication {
 		return nextTerminalId++;
 	}
 
-	function updateTerminalTitle(tab:UiTerminalTab, title:String):Void {
-		if (~/^Terminal [1-9][0-9]*$/.match(title) && Lambda.exists(host.allTerminalTabs(),
-			function(other) return other != tab && !other.disposed && other.title == title)) return;
-		tab.title = title;
-	}
-
 	function restoreTerminalTab(id:String, title:String, cwd:String, remote:Bool,resource:String, workspaceRoot:String):Null<UiTerminalTab>
 		{
             var terminal = createTerminalTab(id,title,cwd,true,remote,resource,workspaceRoot);
@@ -636,7 +630,8 @@ class ExosuitApp implements DesktopUiApplication {
         }
 
 	function createTerminalTab(id:String, title:String, cwd:String, restored:Bool, ?remoteOwner:Bool, ?resource:String, ?workspaceRoot:String, ?group:String, ?directory:String):Null<UiTerminalTab> {
-		if (restored && ~/^Terminal [1-9][0-9]*$/.match(title)) {
+		var isRemote = remoteOwner == null ? StringTools.startsWith(id, "workspace-terminal-") : remoteOwner;
+		if (restored && !isRemote && ~/^Terminal [1-9][0-9]*$/.match(title)) {
 			for (existing in host.allTerminalTabs()) if (!existing.disposed && existing.title == title) {
 				title = "Terminal " + allocateTerminalNumber();
 				break;
@@ -644,7 +639,6 @@ class ExosuitApp implements DesktopUiApplication {
 		}
 		var create = createTerminal;
 		var remote = createWorkspaceTerminal;
-		var isRemote = remoteOwner == null ? StringTools.startsWith(id, "workspace-terminal-") : remoteOwner;
 		if (isRemote ? remote == null : create == null) return null;
 		var number = StringTools.startsWith(id, "terminal-") ? Std.parseInt(id.substring(9)) : null;
 		if (number != null && number >= nextTerminalId) nextTerminalId = number + 1;
@@ -1273,7 +1267,7 @@ class ExosuitApp implements DesktopUiApplication {
 	public function openCatalogTerminal(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Bool {
 		if (workbenchClient == null || !workbenchClient.canReadTerminals() || !record.available) return false;
 		for (tab in host.allTerminalTabs()) if (tab.resourceId == record.id && tab.workspaceRoot == record.workspaceRoot && tab.remote && !tab.disposed) {
-			updateTerminalTitle(tab, record.name);
+			tab.updateWorkspaceName(record.name);
 			var pane = host.terminalPaneFor(tab);
 			if (sidebar.activeId == "workbench") showTerminalInEditor(tab);
             else if (pane != null) host.attachTerminal(tab);
@@ -1428,7 +1422,7 @@ class ExosuitApp implements DesktopUiApplication {
             terminalBrowserRevision=workbenchClient.terminalCatalogRevision();
             var catalog=workbenchClient.terminalCatalog();
             if(catalog!=null) for(record in catalog.terminals) for(tab in host.allTerminalTabs())
-                if(tab.remote && tab.resourceId==record.id && tab.workspaceRoot==record.workspaceRoot) { updateTerminalTitle(tab, record.name); tab.cwd=record.cwd; }
+                if(tab.remote && tab.resourceId==record.id && tab.workspaceRoot==record.workspaceRoot) { tab.updateWorkspaceName(record.name); tab.cwd=record.cwd; }
             requestFrame();
         }
 		var previousLanguageStatus = application.language.statusLabel();
@@ -1484,7 +1478,10 @@ class ExosuitApp implements DesktopUiApplication {
 		ui.buildContext.environment.scrollbarVisibility = host.scrollbarVisibility;
 		for (terminal in host.allTerminalTabs()) {
 			if (terminal.disposed) continue;
-			try { terminal.panel.poll(); terminalErrors.remove(terminal.id); } catch (error:Dynamic) {
+			try {
+				if (terminal.poll()) requestFrame();
+				terminalErrors.remove(terminal.id);
+			} catch (error:Dynamic) {
 				statusMessage = "Terminal: " + Std.string(error);
 				var message = Std.string(error);
 				if (terminalErrors.get(terminal.id) != message) {

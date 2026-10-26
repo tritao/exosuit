@@ -159,6 +159,14 @@ class TerminalCatalogTests {
     step();
     step();
     require(done && record.name == "Build shell" && record.group == "other", "Session rename/group did not commit");
+    done = false;
+    client.call(WorkspaceTerminalProtocol.OPEN, open, 1000, function(info) {
+      require(info.name == record.name, "Reattachment returned a stale terminal name");
+      done = true;
+    }, function(e) throw e.code);
+    step();
+    step();
+    require(done, "Renamed terminal did not reattach");
     var error = "";
     client.call(WorkspaceTerminalProtocol.RENAME, rename, 1000, function(_) {
       throw "Stale rename accepted";
