@@ -13,6 +13,7 @@ import haxeon.ui.core.View;
 import haxeon.ui.widgets.KeyedView;
 import haxeon.ui.widgets.controls.Button;
 import haxeon.ui.widgets.controls.ComboBox;
+import haxeon.ui.widgets.controls.Select;
 import haxeon.ui.widgets.controls.SelectOption;
 import haxeon.ui.widgets.layout.Column;
 import haxeon.ui.widgets.layout.Row;
@@ -404,20 +405,23 @@ class CodexSessionPanel implements View {
       }
     }
     var defaultEffortLabel = selectedModel == "" && view.currentEffort != null
-      ? "Effort: Keep current (" + view.currentEffort + ")" : "Effort: Model default";
+      ? "Keep current (" + view.currentEffort + ")" : "Model default";
     var effortOptions = [new SelectOption<String>("model-default", defaultEffortLabel, "")];
     var availableEfforts:Array<String> = effortModel == null || effortModel.supportedEfforts == null
       ? [] : effortModel.supportedEfforts;
     for (effort in availableEfforts) effortOptions.push(new SelectOption<String>("effort-" + effort, effortLabel(effort), effort));
-    var effortChooser = new ComboBox<String>("codex-effort", effortOptions, selectedEffort, function(value) {
+    var effortChooser = new Select<String>("codex-effort", effortOptions, selectedEffort, function(value) {
       selectedEffort = value;
       client.agentAction(id, "model-settings", "", null, selectedModel == "" ? null : selectedModel,
         selectedEffort == "" ? null : selectedEffort);
       frame();
     });
+    effortChooser.accessibilityLabel = "Reasoning effort";
     effortChooser.enabled = control && !working && effortModel != null && availableEfforts.length > 0;
     modelControls.push(new KeyedView("effort", effortChooser));
     if (moreModels != null) modelControls.push(new KeyedView("more", moreModels));
+    var modelControlsStyle = footerStyle.copy();
+    modelControlsStyle.wrapMode = haxeon.ui.LayoutWrapMode.Wrap;
     var composerStyle = new LayoutStyle();
     composerStyle.width = LayoutAxis.grow();
     composerStyle.childGap = 8;
@@ -443,7 +447,7 @@ class CodexSessionPanel implements View {
       }
     }, "capture");
     rows.push(new KeyedView("composer", new Column("codex-composer", [
-      new KeyedView("models", new Row("codex-model-controls", modelControls, footerStyle)),
+      new KeyedView("models", new Row("codex-model-controls", modelControls, modelControlsStyle)),
       new KeyedView("prompt", new CodexPromptNode(promptNode)),
       new KeyedView("footer", new Row("codex-composer-footer", [new KeyedView("hint", hint), new KeyedView("send", send)], footerStyle))
     ], composerStyle)));

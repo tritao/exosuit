@@ -27,6 +27,8 @@ with tempfile.TemporaryDirectory(prefix='excodexui-') as temporary:
    with (fixture/('app-'+str(index)+'.log')).open('w') as log:
     app=subprocess.Popen([*RUNNER,str(project),'--open-workbench','--capture-dir='+str(capture),'--capture-seconds=10'],env=env,cwd=ROOT,stdout=log,stderr=subprocess.STDOUT)
     window=subprocess.check_output(['timeout','60','xdotool','search','--sync','--onlyvisible','--name','^exosuit$'],text=True).splitlines()[0]
+    # Keep wrapped model controls from shifting saved click coordinates between launches.
+    subprocess.run(['xdotool','windowsize','--sync',window,'1280','1000'],check=True)
     subprocess.run(['xdotool','windowfocus','--sync',window],check=True);time.sleep(2)
     if index==1: click(window,locate(nodes(0),'New Codex'))
     elif index==2:
@@ -69,7 +71,8 @@ with tempfile.TemporaryDirectory(prefix='excodexui-') as temporary:
    if index==3:
     labels=[(n.get('label') or '') for n in nodes(index) if n['visible']]
     assert labels.count('Hello streamed world')==1,labels
-    assert 'echo test' in labels and 'update README.md' in labels,labels
+    assert 'Command · completed · echo test' in labels and 'update README.md' in labels,labels
+    assert 'Reasoning effort' in labels,labels
     assert 'Copy code' in labels and 'python' in labels,labels
     assert any(n.get('label')=='Code block: python' and n.get('focusable') for n in nodes(index)),nodes(index)
     assert not any('```python' in label for label in labels),labels
