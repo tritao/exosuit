@@ -3043,8 +3043,8 @@ class ExosuitApp implements DesktopUiApplication {
 		if (snapshot == null) return;
 		var head = snapshot.head;
 		var branch = head.branch != null ? head.branch : head.detachedCommit == null ? "No branch" : "detached " + head.detachedCommit.substr(0, 8);
-		var text = branch + (head.ahead > 0 ? " ↑" + head.ahead : "") + (head.behind > 0 ? " ↓" + head.behind : "");
-		var tooltip = activeRepository.root + "\n" + branch + (head.upstream == null ? "" : "\nUpstream: " + head.upstream)
+		var text = branch;
+		var tooltip = activeRepository.root + "\n" + text + (head.upstream == null ? "" : "\nUpstream: " + head.upstream)
 			+ (head.operation == null ? "" : "\n" + Std.string(head.operation));
 		var branchCommand = canCheckoutScmRepository(activeRepository) ? "scm:checkout" : "sidebar:scm";
 		var registry = statusRegistry;
@@ -3052,6 +3052,23 @@ class ExosuitApp implements DesktopUiApplication {
 			scmBranchStatus = registry.add("scm", "branch", text, 100, plugin.PluginStatusSide.Left,
 				null, tooltip, branchCommand);
 		else registry.update(scmBranchStatus, text, 100, plugin.PluginStatusSide.Left, null, tooltip, branchCommand);
+		for (direction in ["ahead", "behind"]) {
+			var count = direction == "ahead" ? head.ahead : head.behind;
+			var id = "branch-" + direction;
+			var item = registry.find("scm", id);
+			if (count <= 0) {
+				if (item != null) registry.remove(item);
+				continue;
+			}
+			var icon = direction == "ahead" ? IconName.ArrowUp : IconName.ArrowDown;
+			var priority = direction == "ahead" ? 99 : 98;
+			var description = count + (count == 1 ? " commit " : " commits ") + direction
+				+ (head.upstream == null ? "" : (direction == "ahead" ? " of " : " ") + head.upstream);
+			if (item == null) registry.add("scm", id, Std.string(count), priority, plugin.PluginStatusSide.Left,
+				icon, description, branchCommand);
+			else registry.update(item, Std.string(count), priority, plugin.PluginStatusSide.Left,
+				icon, description, branchCommand);
+		}
 		if (decorationRegistry.revision != decorationRevisionBefore || statusRegistry.revision != statusRevisionBefore) requestFrame();
 	}
 
