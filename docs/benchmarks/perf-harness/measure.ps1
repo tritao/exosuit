@@ -23,8 +23,9 @@ param(
 	[string]$Root = ''
 )
 $ErrorActionPreference = 'Stop'
-# Instrumented runs build and export more slowly.
-if (-not $DeadlineSeconds) { $DeadlineSeconds = if ($Profile -eq 'instrument') { 600 } else { 300 } }
+# Instrumented runs build and export more slowly; after a clean build their first launch also builds build-instrument.
+if (-not $DeadlineSeconds) { $DeadlineSeconds = if ($Profile -eq 'instrument') { 900 } else { 300 } }
+$editorLimit = if ($Profile -eq 'instrument') { 600 } else { 240 }
 Import-Module (Join-Path $PSScriptRoot 'guard.psm1') -Force
 $root = if ($Root) { (Resolve-Path $Root).Path } else { (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path }
 $out = Join-Path $PSScriptRoot "runs\$Name"
@@ -67,7 +68,7 @@ try {
 					-RedirectStandardOutput (Join-Path $out 'scenario.log') -RedirectStandardError (Join-Path $out 'scenario.err') -PassThru -WindowStyle Hidden
 			}
 		}
-		if (-not $state.editor -and $elapsed -gt 240) { return 'no editor process recognized after 240 s (build failed, or the editor runs from an unexpected path)' }
+		if (-not $state.editor -and $elapsed -gt $editorLimit) { return "no editor process recognized after $editorLimit s (build failed, or the editor runs from an unexpected path)" }
 		if ($state.scenario -and -not $state.stopped -and $state.scenario.HasExited) {
 			Note "scenario finished (exit $($state.scenario.ExitCode)); stopping the editor so the profiler exports"
 			Stop-Process -Id $state.editor.ProcessId -Force -ErrorAction SilentlyContinue
