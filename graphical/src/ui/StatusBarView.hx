@@ -88,6 +88,8 @@ class StatusBarView implements View {
 				var button = new Button(data.indentation, controlStyle(sizes.indentation, 22), data.openIndentation, "status-indentation");
 				button.variant = ButtonVariant.Navigation;
 				button.accessibilityLabel = data.indentation + ". Choose document indentation";
+				button.labelView = new MiddleEllipsisText("status-indentation-label", data.indentation, false,
+					new TextStyleOverride(null, 12, null, TextWrap.None, null, null, null, context.theme.tokens.textSecondary));
 				indentationNode = tooltip("indentation", button, data.indentationDetails == null ? data.indentation : data.indentationDetails).build(context);
 				root.add(indentationNode);
 			}

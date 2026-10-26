@@ -1949,7 +1949,7 @@ class ExosuitApp implements DesktopUiApplication {
 			document: label,
 			indentation: active == null ? null : indentation,
 			indentationDetails: indentationDetails,
-			openIndentation: function() application.configuration.openIndentationCommandView(),
+			openIndentation: function() application.configuration.openIndentationCommandView(active),
 			items: host.getPluginStatusItems().items(),
 			runCommand: function(command) { application.commands.perform(command, application.context); requestFrame(); },
 			status: trailing,

@@ -297,7 +297,9 @@ class DecorationSmokeApp extends ExosuitApp {
 			application.commands.perform("doc:indentation", application.context);
 			if (!host.isCommandViewActive()) throw "indentation chooser did not open";
 		} else if (frames == 5) {
-			host.commandViewTextInput("Tabs: 8");
+			host.commandViewTextInput("Indent Using Tabs");
+			host.commandViewKeyPressed(platform.Platform.KEY_ENTER, 0);
+			host.commandViewTextInput("8");
 			host.commandViewKeyPressed(platform.Platform.KEY_ENTER, 0);
 			if (host.isCommandViewActive()) throw "indentation chooser did not accept override";
 		} else if (frames == 6) {

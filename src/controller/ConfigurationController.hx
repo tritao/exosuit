@@ -103,19 +103,36 @@ class ConfigurationController {
 		}));
 	}
 
-	public function openIndentationCommandView():Void {
-		var document = activeDocument();
+	public function openIndentationCommandView(?document:Document):Void {
+		if (document == null) document = activeDocument();
 		if (document == null) return;
-		settingsFor(document);
-		var entries:Array<CommandViewEntry> = [];
-		entries.push(new CommandViewEntry("Automatic", "Use settings, .editorconfig, then detection", "auto"));
-		for (spaces in [true, false]) for (width in 1...17)
-			entries.push(new CommandViewEntry((spaces ? "Spaces: " : "Tabs: ") + width, "Use for this document", (spaces ? "spaces:" : "tabs:") + width));
-		root.openCommandView(new CommandViewProvider("Indentation (" + document.indentation.source + "): ", entries, function(_) {}, function(entry, query, backwards) {
+		var target:Document = document;
+		settingsFor(target);
+		var entries = [
+			new CommandViewEntry("Indent Using Spaces", "Choose the number of spaces per indentation level", "spaces"),
+			new CommandViewEntry("Indent Using Tabs", "Choose the displayed tab width", "tabs"),
+			new CommandViewEntry("Automatic", "Use settings, .editorconfig, then detection", "auto")
+		];
+		root.openCommandView(new CommandViewProvider("Indentation: ", entries, function(_) {}, function(entry, _, _) {
 			if (entry == null) return;
-			if (entry.value == "auto") { document.indentation.overrideWidth = null; document.indentation.overrideSpaces = null; }
-			else { var parts = entry.value.split(":"); document.indentation.overrideWidth = Std.parseInt(parts[1]); document.indentation.overrideSpaces = parts[0] == "spaces"; }
-			settingsFor(document); root.closeCommandView();
+			if (entry.value == "auto") {
+				target.indentation.overrideWidth = null;
+				target.indentation.overrideSpaces = null;
+				settingsFor(target);
+				root.closeCommandView();
+				return;
+			}
+			var spaces = entry.value == "spaces";
+			var widths:Array<CommandViewEntry> = [];
+			for (width in 1...17) widths.push(new CommandViewEntry(Std.string(width), "Use for this document", Std.string(width)));
+			root.openCommandView(new CommandViewProvider(spaces ? "Indent Using Spaces: " : "Indent Using Tabs: ", widths,
+				function(_) {}, function(width, _, _) {
+					if (width == null) return;
+					target.indentation.overrideWidth = Std.parseInt(width.value);
+					target.indentation.overrideSpaces = spaces;
+					settingsFor(target);
+					root.closeCommandView();
+				}));
 		}));
 	}
 

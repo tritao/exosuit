@@ -35,6 +35,18 @@ class ApplicationTestMain {
 			first = new Document("first", "one", application.syntaxes),
 			second = new Document("second", "two", application.syntaxes);
 		var firstView = application.add(first), secondView = application.add(second);
+		application.focus.activate(null);
+		application.configuration.openIndentationCommandView(first);
+		require(root.commandView.active && root.commandView.results.length == 3, "indentation picker depended on editor focus");
+		root.commandView.activate(1);
+		require(root.commandView.active && root.commandView.results.length == 16, "indentation style did not open width picker");
+		root.commandView.activate(7);
+		require(!root.commandView.active && first.indentation.overrideWidth == 8 && first.indentation.overrideSpaces == false
+			&& second.indentation.overrideWidth == null, "indentation picker changed the wrong document or lost its choice");
+		first.indentation.overrideWidth = null;
+		first.indentation.overrideSpaces = null;
+		application.configuration.settingsFor(first);
+		application.focus.activate(secondView);
 		var focusPolicies:Array<Bool> = [];
 		application.openFileView = function(_, preview, focusEditor) {
 			require(preview, "preview intent was lost during file loading");
