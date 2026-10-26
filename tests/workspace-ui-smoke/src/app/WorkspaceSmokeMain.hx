@@ -53,7 +53,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	var remoteOpenTests:Null<RemoteFileOpenTests>;
 
 	public function new(context:haxeon.ui.host.DesktopUiHostContext, path:String, phase:String) {
-		super(context.fonts, null, context, (phase == "mode-write" || phase == "mode-phone-default" || phase == "context-layout-write" || StringTools.startsWith(phase, "layout-") || phase == "active-context" || phase == "saved-workspace" || phase == "explorer-rename" || phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-geometry" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-font" || phase == "editor-tabs" || phase == "zoom" || phase == "word-delete" || phase == "selection" || phase == "tab-close" || phase == "pointer-actions" || phase == "blank-editor-click" || phase == "caret-follow" || phase == "exit-confirmation" || phase == "save-as" || phase == "tab-close-paint" || phase == "settings" || phase == "editor-minimap" || phase == "toolbar-tooltip" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
+		super(context.fonts, null, context, (phase == "mode-write" || phase == "mode-phone-default" || phase == "context-layout-write" || StringTools.startsWith(phase, "layout-") || phase == "active-context" || phase == "saved-workspace" || phase == "divider-chrome" || phase == "explorer-rename" || phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-geometry" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-font" || phase == "editor-tabs" || phase == "zoom" || phase == "word-delete" || phase == "selection" || phase == "tab-close" || phase == "pointer-actions" || phase == "blank-editor-click" || phase == "caret-follow" || phase == "exit-confirmation" || phase == "save-as" || phase == "tab-close-paint" || phase == "settings" || phase == "editor-minimap" || phase == "toolbar-tooltip" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
 			null, null, null, WorkspaceSmokeMain.createTerminal);
 		this.phase = phase;
 		closeContext = context;
@@ -61,6 +61,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		this.path = path;
 		if (phase == "context-layout-write" || StringTools.startsWith(phase, "layout-") || phase == "mode-write" || phase == "mode-phone-default") application.open(path);
 		if (phase == "layout-write" && !layoutControls.bottomOpen()) layoutControls.toggleBottom();
+		if (phase == "divider-chrome") application.open(path);
 		if (phase == "explorer-rename") {
 			var folder = haxe.io.Path.directory(path) + "/folder.old";
 			sys.FileSystem.createDirectory(folder);
@@ -122,6 +123,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		if (phase == "theme-palette") return themePaletteStep(frame);
 		if (phase == "file-deletion") return fileDeletionStep(frame);
 		if (phase == "explorer-rename") return explorerRenameStep(frame);
+		if (phase == "divider-chrome") return dividerChromeStep(frame);
 		if (phase == "saved-workspace") return savedWorkspaceStep(frame);
 		if (phase == "active-context") return activeContextStep(frame);
 		if (StringTools.startsWith(phase, "mode-")) return modeStep(frame);
@@ -1658,6 +1660,82 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		return result;
 	}
 
+	static function dockDivider(root:haxeon.ui.core.RenderNode):Null<haxeon.ui.core.RenderNode> {
+		if (root.semantics != null && root.semantics.role == haxeon.ui.semantics.AccessibilityRole.Separator
+			&& root.children.length == 1 && root.children[0].layout.visualKind == LayoutVisualKind.Custom) return root;
+		for (child in root.children) { var found = dockDivider(child); if (found != null) return found; }
+		return null;
+	}
+	function dividerChromeStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
+		if (frames == 2) {
+			var zoom = Sys.getEnv("EXOSUIT_DIVIDER_ZOOM");
+			setApplicationZoom(zoom == null ? 100 : Std.parseInt(zoom));
+			setDarkTheme(Sys.getEnv("EXOSUIT_DIVIDER_DARK") == "1");
+			layoutControls.toggleBottom(); layoutControls.toggleRight();
+		}
+		if (frames == 4) {
+			var checked = 0;
+			ui.root.walk(function(node) {
+				if (node.semantics == null || node.semantics.role != haxeon.ui.semantics.AccessibilityRole.Separator
+					|| node.children.length != 1 || node.children[0].layout.visualKind != LayoutVisualKind.Custom) return;
+				var anchor = node.parent;
+				if (anchor == null || anchor.parent == null) throw "missing dock boundary anchor";
+				var split = anchor.parent;
+				var first = split.children[0].globalBounds(), second = split.children[2].globalBounds();
+				var bounds = node.globalBounds();
+				var horizontal = bounds.width == 8;
+				var end = horizontal ? first.x + first.width : first.y + first.height;
+				var start = horizontal ? second.x : second.y;
+				var center = horizontal ? bounds.x + bounds.width / 2 : bounds.y + bounds.height / 2;
+				require(Math.abs(end - start) < 0.01 && Math.abs(center - start) < 0.01,
+					"dock panes have a gap or displaced resize target");
+				checked++;
+			});
+			require(checked >= 3, "missing left, bottom or right dock boundary coverage");
+			var divider = dockDivider(ui.root);
+			if (divider == null) throw "missing dock divider";
+			require(divider != null, "missing dock hairline");
+			var bounds = divider.globalBounds();
+			require(Math.abs(bounds.width - 8) < 0.01, "divider resize target changed");
+			var anchor = divider.parent;
+			if (anchor == null || anchor.parent == null) throw "divider lacks boundary anchor";
+			var split = anchor.parent;
+			var before = split.children[0].globalBounds(), after = split.children[2].globalBounds();
+			require(Math.abs(before.x + before.width - after.x) < 0.01, "divider left a layout gutter");
+			require(Math.abs(bounds.x + bounds.width / 2 - after.x) < 0.01, "resize target is not centered on pane edge");
+			var visual = divider.children[0].globalBounds();
+			require(visual.width == bounds.width && visual.height == bounds.height,
+				"divider drawing child collapsed with an editor open");
+			ui.pointerMove(bounds.x + 1, bounds.y + bounds.height / 2);
+		}
+		if (frames == 5 || frames == 6) {
+			var divider = dockDivider(ui.root);
+			if (divider == null) throw "missing dock divider";
+			var color:haxeon.ui.Color = divider.computedStyle.get(haxeon.ui.style.StyleProperty.Background);
+			var expected = frames == 5 ? theme.tokens.accentHover : theme.tokens.accentPressed;
+			require(color.red == expected.red && color.green == expected.green && color.blue == expected.blue,
+				"divider highlight missing at frame " + frames + ": color=" + color.red + "," + color.green + "," + color.blue + " expected=" + expected.red + "," + expected.green + "," + expected.blue + " states=" + divider.states);
+			var bounds = divider.globalBounds();
+			if (frames == 5) ui.pointerDown(bounds.x + 1, bounds.y + bounds.height / 2, 0);
+			else {
+				ui.pointerMove(bounds.x + 24, bounds.y + bounds.height / 2);
+				ui.pointerUp(bounds.x + 24, bounds.y + bounds.height / 2, 0);
+				ui.pointerDown(frame.width - 40, 100, 0); ui.pointerUp(frame.width - 40, 100, 0);
+				ui.pointerMove(frame.width - 40, 100);
+			}
+		}
+		var result = super.submit(frame);
+		if (frames == 8) {
+			var divider = dockDivider(ui.root);
+			if (divider == null) throw "missing dock divider";
+			var color:haxeon.ui.Color = divider.computedStyle.get(haxeon.ui.style.StyleProperty.Background);
+			require(color.red == theme.tokens.textPrimary.red && color.green == theme.tokens.textPrimary.green && color.blue == theme.tokens.textPrimary.blue && color.alpha == 0.14,
+				"divider did not return to neutral border");
+			trace("PASS: hairline dock separator keeps resize target, hover, drag, and neutral resting color");
+		}
+		return result;
+	}
+
 	var renameStage:Int = 0;
 	function explorerRenameStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		var destination = haxe.io.Path.directory(path) + "/Renamed.hx";
@@ -1996,6 +2074,7 @@ class WorkspaceSmokeMain {
 		var options = new DesktopUiHostOptions();
 		options.title = "exosuit workspace acceptance";
 		options.width = 900; options.height = 600;
+		if (args[2] == "divider-chrome") { options.width = 1600; options.height = 900; }
 		if (args[2] == "zoom") {
 			var width = Sys.getEnv("EXOSUIT_ZOOM_TEST_WIDTH");
 			var height = Sys.getEnv("EXOSUIT_ZOOM_TEST_HEIGHT");
@@ -2004,7 +2083,7 @@ class WorkspaceSmokeMain {
 			zoomWidth = options.width;
 		}
 		options.captureDirectory = args[1];
-		options.frameLimit = args[2] == "mode-write" ? 16 : args[2] == "mode-read" ? 12 : args[2] == "mode-phone-default" ? 10 : args[2] == "context-layout-write" ? 14 : args[2] == "context-layout-read" ? 9 : StringTools.startsWith(args[2], "context-layout-") ? 7 : args[2] == "layout-read" ? 15 : args[2] == "layout-write" ? 13 : args[2] == "layout-phone" ? 6 : args[2] == "active-context" ? 10 : args[2] == "saved-workspace" ? 10 : args[2] == "explorer-rename" ? 40 : args[2] == "editor-geometry" ? 25 : args[2] == "file-deletion" ? 10 : args[2] == "blank-editor-click" ? 11 : args[2] == "zoom" ? 75 : args[2] == "save-as" ? 10 : args[2] == "exit-confirmation" ? 11 : args[2] == "tab-close" ? 13 : args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 11 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
+		options.frameLimit = args[2] == "mode-write" ? 16 : args[2] == "mode-read" ? 12 : args[2] == "mode-phone-default" ? 10 : args[2] == "context-layout-write" ? 14 : args[2] == "context-layout-read" ? 9 : StringTools.startsWith(args[2], "context-layout-") ? 7 : args[2] == "layout-read" ? 15 : args[2] == "layout-write" ? 13 : args[2] == "layout-phone" ? 6 : args[2] == "active-context" ? 10 : args[2] == "saved-workspace" ? 10 : args[2] == "divider-chrome" ? 10 : args[2] == "explorer-rename" ? 40 : args[2] == "editor-geometry" ? 25 : args[2] == "file-deletion" ? 10 : args[2] == "blank-editor-click" ? 11 : args[2] == "zoom" ? 75 : args[2] == "save-as" ? 10 : args[2] == "exit-confirmation" ? 11 : args[2] == "tab-close" ? 13 : args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 11 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
 		var status = DesktopUiHost.run(options, context -> new WorkspaceSmokeApp(context, args[0], args[2]));
 
 		return status;

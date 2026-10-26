@@ -6701,3 +6701,22 @@ Evidence: /tmp/exosuit-session-context-ui/run.log and
 /tmp/exosuit-session-context-build.log. Real live-provider session clicking has
 not been exercised. Remaining M18.6: attention badges, quick switching and group
 landing cards; explicit Focus Group is superseded by automatic session entry.
+
+### Dock separator overlay — remove the resize gutter
+
+Hairline SplitViews now place the existing eight-pixel pointer/keyboard resize
+target in an absolute overlay centered on a zero-width/height flow anchor.
+Dock geometry no longer subtracts the hit-target extent from available pane
+space. The existing device-aligned one-pixel paint and hover/pressed styles
+remain; panes meet directly at the line instead of exposing the parent surface
+through an eight-pixel transparent gutter. Non-hairline SplitViews retain their
+existing layout policy. Toolkit commit 3a1a28f6 on dock-divider-overlay includes the related
+divider styling/painting and pixel-density propagation.
+
+Xvfb divider-chrome passed at 100% light, 110% light and 200% dark. The expanded
+110% phase verifies all three left/bottom/right pane boundaries meet with no gap,
+centers their eight-pixel hit areas on the shared edge, and starts hover/drag
+three pixels away from the visible line. Evidence: /tmp/exosuit-divider-overlay*.log
+and /tmp/exosuit-divider-overlay*-capture/.
+Desktop and browser builds also passed; logs:
+/tmp/exosuit-divider-overlay-desktop.log and /tmp/exosuit-divider-overlay-web.log.
