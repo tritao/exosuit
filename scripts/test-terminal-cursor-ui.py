@@ -27,7 +27,7 @@ def main():
             foreground = (32, 42, 54) if scheme == "light" else (220, 227, 236)
             background = (255, 255, 255) if scheme == "light" else (23, 28, 35)
             images = {}
-            for mode in ("focused", "unfocused", "refocused", "window-blur", "hidden", "colors", "row-reuse"):
+            for mode in ("focused", "unfocused", "refocused", "window-blur", "hidden", "selection", "colors", "row-reuse"):
                 capture = fixture / f"{scheme}-{mode}"
                 command = [str(ROOT / "haxeon/.tools/hashlink/hl"),
                            str(PROJECT.parent / "build/host/main.hl"), str(capture), mode, scheme]
@@ -51,6 +51,17 @@ def main():
                     assert "RED RED" in state["lines"][0], state
                     assert "INDEXED TRUECOLOR" in state["lines"][1], state
                     continue
+                if mode == "selection":
+                    assert state['selectionText'] == 'GREEN plain selected text\nsecond selected row', state
+                    # Sample below the glyphs across fractional-width cell boundaries.
+                    # Adjacent selected cells must paint a continuous solid background.
+                    for row, start, end in ((1, 6, 24), (2, 0, 18)):
+                        y = math.floor(4 + (row + 1) * state['rowHeight'] - 2)
+                        colors = [image.getpixel((x, y)) for x in range(
+                            math.ceil(8 + (start + .2) * state['cellWidth']),
+                            math.floor(8 + (end + .8) * state['cellWidth']))]
+                        assert len(set(colors)) == 1, (scheme, 'selection has cell seams', set(colors))
+                    continue
                 x = math.floor(state["cursorX"] + state["cursorWidth"] / 2)
                 y = math.floor(state["cursorY"] + state["cursorHeight"] / 2)
                 active = mode in ("focused", "refocused")
@@ -68,7 +79,7 @@ def main():
         artifacts = os.environ.get("TERMINAL_CURSOR_ARTIFACTS")
         if artifacts:
             shutil.copytree(fixture, artifacts, dirs_exist_ok=True)
-        print("PASS: terminal cursor focus, colors and retained-row comparisons in both themes")
+        print("PASS: terminal names, cursor focus, retained rows and seamless selection in both themes")
 
 
 if __name__ == "__main__":

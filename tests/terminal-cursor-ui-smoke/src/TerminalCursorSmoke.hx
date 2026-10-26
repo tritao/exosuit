@@ -61,6 +61,11 @@ class CursorApp implements DesktopUiApplication {
 				+ "\r\n\x1b[7mINVERSE\x1b[0m plain \x1b[31;7mINVERSE RED\x1b[0m"
 				+ "\r\n\x1b[32m日本語 e\u0301 café λ\x1b[0m gap \x1b[34mBLUE\x1b[0m");
 		}
+		if (mode == "selection") {
+			emulator.feedString("\r\n\x1b[32mGREEN\x1b[0m plain selected text\r\nsecond selected row");
+			emulator.selectionStart(0, 1);
+			emulator.selectionTarget(18, 2);
+		}
 	}
 
 	public function context():UiContext return ui;
@@ -72,7 +77,10 @@ class CursorApp implements DesktopUiApplication {
 		cursorHeight: pane.rowHeight,
 		focused: pane.focused,
 		lines: [for (row in pane.renderedRows) row.text],
-		focusReports: backend.replies
+		focusReports: backend.replies,
+		cellWidth: pane.cellWidth,
+		rowHeight: pane.rowHeight,
+		selectionText: mode == "selection" ? pane.session.emulator.selectionText() : null
 	};
 
 	public function submit(frame:LayoutFrame):RenderNode {

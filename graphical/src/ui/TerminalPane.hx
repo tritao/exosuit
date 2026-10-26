@@ -320,13 +320,13 @@ class TerminalPane implements TerminalPanel {
 					var ink = TerminalColors.decode(bg, background, palette, true);
 					var paper = TerminalColors.decode(fg, foreground, palette, false);
 					appendForeground(inkRuns, offset, offset + count, bg, true);
-					fills.push({start: column, end: column + cell.width, color: paper});
+					appendBackground(fills, column, column + cell.width, paper);
 					cursorOutlineColor = ink;
 					cursorOutlineWidth = cell.width;
 				} else {
 					if ((fg & 3) != 0) appendForeground(inkRuns, offset, offset + count, fg, false);
-					if ((bg & 3) != 0) fills.push({start: column, end: column + cell.width,
-						color: TerminalColors.decode(bg, background, palette, true)});
+					if ((bg & 3) != 0) appendBackground(fills, column, column + cell.width,
+						TerminalColors.decode(bg, background, palette, true));
 				}
 				offset += count;
 			}
@@ -355,6 +355,15 @@ class TerminalPane implements TerminalPanel {
 		if (previous != null && previous.end == start && previous.packed == packed && previous.background == background)
 			previous.end = end;
 		else runs.push({start: start, end: end, packed: packed, background: background});
+	}
+
+	/** One fill per color run avoids antialiased seams at fractional cell edges. */
+	static function appendBackground(fills:Array<TerminalBackground>, start:Int, end:Int, color:Color):Void {
+		var previous = fills.length == 0 ? null : fills[fills.length - 1];
+		if (previous != null && previous.end == start && previous.color.red == color.red
+			&& previous.color.green == color.green && previous.color.blue == color.blue && previous.color.alpha == color.alpha)
+			previous.end = end;
+		else fills.push({start: start, end: end, color: color});
 	}
 
 	function setFocused(value:Bool):Void {
