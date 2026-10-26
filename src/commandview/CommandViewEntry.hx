@@ -7,6 +7,7 @@ class CommandViewEntry {
 	public final trailing:String;
 	public final searchText:String;
 	public final section:String;
+	public var enabled:Bool = true;
 	public var score:Int = 0;
 	public var order:Int = 0;
 

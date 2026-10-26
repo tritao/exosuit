@@ -152,6 +152,7 @@ class CommandView {
 		if (!active || current == null) return;
 		if (index >= 0 && index < results.length) select(index);
 		var entry = index >= 0 && index < results.length ? results[index] : null;
+		if (entry != null && !entry.enabled) return;
 		input.remember();
 		current.onAccept(entry, query, backwards);
 	}

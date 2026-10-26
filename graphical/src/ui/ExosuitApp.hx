@@ -1022,6 +1022,7 @@ class ExosuitApp implements DesktopUiApplication {
 		application.commands.add("scm:fetch", function(_) applyPendingScmRemote(scm.ScmOperation.Fetch(null)), function(_) return canUsePendingScmRemotes());
 		application.commands.add("scm:pull", function(_) applyPendingScmRemote(scm.ScmOperation.Pull), function(_) return canUsePendingScmRemotes());
 		application.commands.add("scm:push", function(_) applyPendingScmRemote(scm.ScmOperation.Push), function(_) return canUsePendingScmRemotes());
+		application.commands.add("scm:branches", function(_) openScmBranchPicker(null), function(_) return true, "Switch Git Branch…");
 		application.commands.add("scm:checkout", function(_) openScmBranchPicker(null), function(_) return canCheckoutScmRepository(null));
 		application.commands.add("scm:checkout-selected", function(_) openScmBranchPicker(pendingScmRepository), function(_) return canCheckoutScmRepository(pendingScmRepository));
 		application.commands.add("scm:create-branch", function(_) openScmCreateBranchPrompt(null), function(_) return canCheckoutScmRepository(null));
@@ -3297,7 +3298,7 @@ class ExosuitApp implements DesktopUiApplication {
 		var text = branch;
 		var tooltip = activeRepository.root + "\n" + text + (head.upstream == null ? "" : "\nUpstream: " + head.upstream)
 			+ (head.operation == null ? "" : "\n" + Std.string(head.operation));
-		var branchCommand = canCheckoutScmRepository(activeRepository) ? "scm:checkout" : "sidebar:scm";
+		var branchCommand = "scm:branches";
 		var registry = statusRegistry;
 		if (scmBranchStatus == null || registry.find("scm", "branch") == null)
 			scmBranchStatus = registry.add("scm", "branch", text, 100, plugin.PluginStatusSide.Left,
@@ -3624,26 +3625,42 @@ class ExosuitApp implements DesktopUiApplication {
 		scmBranchJob = null;
 	}
 
+	function showScmBranchUnavailable(reason:String, label:String = "Branch switching unavailable"):Void {
+		cancelScmBranchRequest();
+		var entry = new commandview.CommandViewEntry(label, reason, "@unavailable");
+		entry.enabled = false;
+		host.openCommandView(new commandview.CommandViewProvider("Switch Branch: ", [entry], function(_) {}, function(_, _, _) {}, function() cancelScmBranchRequest()));
+		requestFrame();
+	}
+
 	function openScmBranchPicker(repository:Null<scm.ScmRepository>):Void {
 		var source = sourceControlSource();
-		if (source == null) return;
+		if (source == null) { showScmBranchUnavailable("No source control repository is available."); return; }
 		var target = repository;
 		if (target == null) {
 			var repositories = source.repositories();
 			target = repositories.length == 0 ? null : repositories[0];
 		}
-		if (target == null || !canCheckoutScmRepository(target)) return;
+		if (target == null) { showScmBranchUnavailable("Repository discovery is still in progress."); return; }
+		if (!source.connected()) { showScmBranchUnavailable("Reconnect the workspace to switch branches."); return; }
+		var error = source.error(target.id);
+		if (!canCheckoutScmRepository(target)) {
+			var features = source.features(target.id);
+			showScmBranchUnavailable(error != null ? error.message : !target.trusted ? "Trust this repository before switching branches." :
+				features == null ? "Repository capabilities are still loading." : !features.branches ? "This source control provider does not support branch switching." :
+				"Branch switching is unavailable with the current repository permissions.");
+			return;
+		}
 		var selectedRepository:scm.ScmRepository = cast target;
-		cancelScmBranchRequest();
+		showScmBranchUnavailable("Reading repository branches.", "Loading branches…");
 		var token = scmBranchRequestToken;
 		var identity = source.identity();
-		host.getNotifications().publish("Loading branches…", feedback.NotificationKind.Information, "source-control");
 		requestFrame();
 		var job = source.branches(selectedRepository.id, function(result) {
 			if (token != scmBranchRequestToken || !isScmSourceActive(identity)) return;
 			scmBranchJob = null;
 			if (result.error != null) {
-				application.reportError("source-control", result.error.message);
+				showScmBranchUnavailable(result.error.message);
 				requestFrame();
 				return;
 			}

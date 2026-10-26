@@ -35,6 +35,16 @@ class ApplicationTestMain {
 			first = new Document("first", "one", application.syntaxes),
 			second = new Document("second", "two", application.syntaxes);
 		var firstView = application.add(first), secondView = application.add(second);
+		var unavailable = new commandview.CommandViewEntry("Branch switching unavailable", "Reconnect the workspace", "disabled");
+		unavailable.enabled = false;
+		var unavailableActivations = 0;
+		root.openCommandView(new commandview.CommandViewProvider("Switch Branch: ", [unavailable], function(_) {},
+			function(_, _, _) unavailableActivations++));
+		root.commandView.activate(0);
+		root.commandView.keyPressed(Platform.KEY_ENTER, 0);
+		require(unavailableActivations == 0 && root.commandView.active, "disabled picker entry accepted a click or Enter");
+		root.closeCommandView();
+
 		application.focus.activate(null);
 		application.configuration.openIndentationCommandView(first);
 		require(root.commandView.active && root.commandView.results.length == 3, "indentation picker depended on editor focus");

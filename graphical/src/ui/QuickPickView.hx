@@ -106,8 +106,8 @@ class QuickPickView implements View {
 			} else {
 				var list = new VirtualList("cv-scroll", model.results.length, rowHeight, function(index) {
 					var entry = model.results[index];
-					var selected = index == model.selected;
-					var foreground = selected ? tokens.textOnAccent : tokens.textPrimary;
+					var selected = entry.enabled && index == model.selected;
+					var foreground = !entry.enabled ? tokens.textSecondary : selected ? tokens.textOnAccent : tokens.textPrimary;
 					var secondary = selected ? tokens.textOnAccent : tokens.textSecondary;
 					var rowStyle = new LayoutStyle();
 					rowStyle.width = LayoutAxis.grow();
@@ -149,9 +149,9 @@ class QuickPickView implements View {
 							cells.push(new KeyedView("configure", tooltip));
 						}
 					}
-					return new QuickPickRow(new Row("cv-result", cells, rowStyle), label, selected,
+					return new QuickPickRow(new Row("cv-result", cells, rowStyle), entry.enabled ? label : label + ". " + detail, selected,
 						function() { model.activate(index); changed(); },
-						function(value) { hovered = value ? index : -1; changed(); });
+						function(value) { hovered = value ? index : -1; changed(); }, entry.enabled);
 				}, listStyle, null, scroll, listHeight);
 				rows.push(new KeyedView("list", list));
 			}
@@ -214,14 +214,18 @@ private class QuickPickRow implements View {
 	final selected:Bool;
 	final activate:Void->Void;
 	final hover:Bool->Void;
-	public function new(child:View, label:String, selected:Bool, activate:Void->Void, hover:Bool->Void) {
+	final enabled:Bool;
+	public function new(child:View, label:String, selected:Bool, activate:Void->Void, hover:Bool->Void, enabled:Bool = true) {
+		this.enabled = enabled;
 		this.child = child; this.label = label; this.selected = selected; this.activate = activate; this.hover = hover;
 	}
 	public function build(context:BuildContext):RenderNode {
 		var node = child.build(context);
 		node.semantics = new haxeon.ui.semantics.Semantics(haxeon.ui.semantics.AccessibilityRole.Button, label);
 		node.semantics.states = selected ? haxeon.ui.semantics.AccessibilityState.Selected : 0;
-		node.semantics.actions = haxeon.ui.semantics.AccessibilityAction.Activate;
+		node.enabled = enabled;
+		if (!enabled) node.semantics.states |= haxeon.ui.semantics.AccessibilityState.Disabled;
+		node.semantics.actions = enabled ? haxeon.ui.semantics.AccessibilityAction.Activate : 0;
 		node.on(UiEventKind.Click, function(event) { activate(); event.stopPropagation(); });
 		node.on(UiEventKind.Activate, function(event) { activate(); event.stopPropagation(); });
 		node.on(UiEventKind.HoverEnter, function(_) hover(true));
