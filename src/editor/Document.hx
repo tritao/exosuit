@@ -32,14 +32,15 @@ class Document {
 	var detachedTitle:Null<String>;
 	var highlighterSubscription:Null<BufferSubscription>;
 
-	public function new(path:Null<String>, text:String, registry:SyntaxRegistry, ?fileSystem:EditorFileSystem, ?recoveryId:String, ?pathlessTitle:String) {
+	public function new(path:Null<String>, text:String, registry:SyntaxRegistry, ?fileSystem:EditorFileSystem, ?recoveryId:String, ?pathlessTitle:String,
+			?prepared:TextBuffer) {
 		id = nextId++;
 		this.recoveryId = recoveryId == null ? "document-" + Std.string(Sys.time()) + "-" + id : recoveryId;
 		detachedTitle = pathlessTitle;
 		this.path = path;
 		this.syntaxes = registry;
 		this.fileSystem = fileSystem == null ? new FileSystemService() : fileSystem;
-		buffer = new TextBuffer(text);
+		buffer = prepared == null ? new TextBuffer(text) : prepared;
 		diskContent = text;
 		selectSyntax();
 		indentation = new DocumentIndentation(buffer, highlighter);
@@ -106,17 +107,26 @@ class Document {
 		if (highlighter != null) highlighter.dispose();
 	}
 
-	public static function open(path:String, registry:SyntaxRegistry, ?fileSystem:EditorFileSystem):Document {
+	public static function open(path:String, registry:SyntaxRegistry, ?fileSystem:EditorFileSystem):Document
+		return fromLoaded(load(path, fileSystem), registry);
+
+	/** Reads and prepares a file for a document. It touches nothing shared, so it can run on another thread; turn the
+		result into a document on the UI thread with fromLoaded. */
+	public static function load(path:String, ?fileSystem:EditorFileSystem):LoadedFile {
 		var service = fileSystem == null ? new FileSystemService() : fileSystem;
 		var stamp = service.stamp(path), readAt = Sys.time();
 		var raw = service.read(path), bom = StringTools.startsWith(raw, "﻿");
 		var body = bom ? raw.substring(1) : raw, newline = body.indexOf("\r\n") >= 0 ? "\r\n" : "\n";
 		body = StringTools.replace(StringTools.replace(body, "\r\n", "\n"), "\r", "\n");
-		var document = new Document(path, body, registry, service);
-		document.hasBom = bom;
-		document.newline = newline;
-		document.diskContent = raw;
-		document.diskStamp = trusted(stamp, readAt);
+		return new LoadedFile(path, service, raw, bom, newline, new TextBuffer(body), trusted(stamp, readAt));
+	}
+
+	public static function fromLoaded(file:LoadedFile, registry:SyntaxRegistry):Document {
+		var document = new Document(file.path, "", registry, file.fileSystem, null, null, file.buffer);
+		document.hasBom = file.hasBom;
+		document.newline = file.newline;
+		document.diskContent = file.raw;
+		document.diskStamp = file.stamp;
 		return document;
 	}
 
