@@ -765,6 +765,9 @@ class TerminalPane implements TerminalPanel {
 		if (remoteBackend == null && columns == session.emulator.columns() && rows == session.emulator.rows()) return;
 		session.resize(columns, rows);
 		if (remoteBackend == null) {
+			// Consume the local backend's ordered geometry event before rebuilding row painters.
+			// A geometry-only change must not wait for the background output poll.
+			session.pollEvents();
 			// Re-render all rows now; waiting for PTY output leaves stale/missing rows while dragging.
 			refreshRows(true);
 			requestFrame();

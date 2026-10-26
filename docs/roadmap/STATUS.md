@@ -79,6 +79,19 @@ this predates M18.3. Logs: `/tmp/exosuit-m18-final-ui-suite.log` and
 `/tmp/exosuit-m18-baseline.log`. Focused M18 captures and restart artifacts:
 `/tmp/exosuit-m18-layout-final`. M18.4 and later remain outside this request.
 
+### M18.4 — session foundation in progress
+
+Fixed the baseline terminal-transfer failure: local PTY resize now emits an
+ordered geometry event, but TerminalPane rebuilt row painters before consuming
+it. The renderer now polls that local event before refreshing rows; remote
+geometry still follows server ordering. The existing Xvfb `write` phase passes
+both directions and proves the same shell survives. Restart then exposes a
+separate saved-scroll loss, being addressed with per-context restoration.
+
+Context snapshots will retain live views in memory while documents remain
+application-owned, and persist inactive layouts with explicit context identity.
+Switching must not invoke file-close operations or terminate inactive terminals.
+
 Last updated: 2026-10-10.
 
 ## M17 source control — in progress
