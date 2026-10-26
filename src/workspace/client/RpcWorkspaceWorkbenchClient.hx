@@ -417,9 +417,14 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     });
   }
 
-  public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String):Void {
+  public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String, ?accepted:Void->Void):Void {
     var connection = rpc();
     if (connection == null ||(action == "read" ? !canReadAgents() : !canControlAgents())) return;
+    if (request == null && (action == "queue" || action == "steer" || action == "clear-native-queue")) {
+      var current = agentViews.get(id);
+      request = current == null ? null : current.inputToken;
+      if (request == null) {agentActionError = "Refresh this session before submitting a message";agentsRevision++;return;}
+    }
     var mutate = action != "read";
     if (mutate ? agentMutation
       : agentReadCount >= 4 || agentReadPending.exists(id) || (agentMutation && agentMutationId == id)) return;
@@ -463,6 +468,10 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
         agentsError = "Invalid agent view";
         return;
       }
+      // Admission metadata is authoritative immediately; older history can finish loading later.
+      var currentView = agentViews.get(id);
+      if (currentView != null && value.inputToken != null) currentView.inputToken = value.inputToken;
+      if (accepted != null) accepted();
       if (mutate) agentActionError = null;
       else agentsError = null;
       if (mutate && value.itemsNext != null) {

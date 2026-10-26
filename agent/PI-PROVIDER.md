@@ -30,6 +30,33 @@ Changing permission mode restarts Pi with an immutable policy and resumes its
 native conversation. Stop terminates the owned Pi process, clears live dialogs,
 and requires explicit resume before another message.
 
+While Pi is working, **Queue message** stores a follow-up for after the current
+turn settles. Enter queues when no question or approval is waiting; use the
+explicit button while responding to a request. Follow-ups run one at a time in
+submission order, using the model and permissions active when they start. Pending
+cards offer **Remove queued message**, **Pause queued messages**, and **Use as
+draft**. Pausing leaves the active turn running.
+
+**Steer now** sends instructions to Pi's current run at its next input boundary.
+Skills and prompt templates keep Pi's native expansion. Extension commands can
+be queued for a later turn or sent while idle. The native pending list shows
+what Pi is waiting to consume; **Clear Pi pending messages** clears that native
+list, including messages queued by Pi extensions. Daemon-owned follow-ups keep
+their individual Remove controls.
+
+Stop, transport failure, and daemon restart pause follow-ups. Resume Pi first,
+then choose **Resume queued messages** to release unsent follow-ups. Messages
+with uncertain delivery stay visible and are never resent automatically. Inspect
+the native conversation before explicitly sending a new copy; **Use as draft**
+only copies text, and **Dismiss input** removes the local notice. Rejected
+submissions preserve the composer draft.
+
+Pending user input is bounded to eight messages and 4096 total UTF-8 bytes. The
+durable outbox keeps sixteen delivery receipts; a monotonic token serial rejects
+expired receipts instead of admitting them as new work. State is saved before
+native delivery. Only queued, unsent follow-ups can be removed individually;
+steering already handed to Pi uses its native clear-all operation.
+
 Protocol frames are bounded to 256 KiB, queues to 1 MiB, pending RPC requests to
 32, and dialogs to 16. Control requests time out after 60 seconds. Prompt requests
 can remain pending while extension dialogs are open. Malformed frames, process
@@ -51,7 +78,7 @@ installed resources may require a fresh session. Discovery failures leave the
 conversation usable and show an error beside the composer. TUI-only commands
 that Pi does not advertise are not suggested.
 
-Active steering, queued messages, usage meters, app-tool/MCP bridging, subagent
+Usage meters, app-tool/MCP bridging, subagent
 presentation, native forks and rollback are follow-up work. Terminal decorations
 from Pi extensions have no UI mapping yet.
 
@@ -59,12 +86,14 @@ Run deterministic adapter/failure tests:
 
 ```sh
 python3 scripts/test-pi-agents.py
+python3 scripts/test-pi-agents.py --inputs
 ```
 
 Run the actual installed Pi against a temporary loopback mock model endpoint:
 
 ```sh
 EXOSUIT_PI_BIN=/path/to/pi python3 scripts/test-pi-agents.py --real
+EXOSUIT_PI_BIN=/path/to/pi python3 scripts/test-pi-agents.py --real --inputs
 ```
 
 The real fixture uses an isolated Pi directory and no account or paid API. It
@@ -83,3 +112,6 @@ EXOSUIT_PI_BIN=/path/to/pi xvfb-run -a -s "-screen 0 1280x1024x24 -noreset" \
 ```
 
 Set `PI_UI_ARTIFACTS` to retain screenshots and layout/state captures.
+
+Pass `--inputs` to the desktop test to exercise Queue/Steer, rejected drafts,
+removal, pause and explicit recovery.

@@ -26,6 +26,9 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(16) var replay:Null<Array<AgentActivityItem>>;
 	/** A native conversation must exist after delivery was attempted, independently of bounded replay. */
 	@:optional @:id(17) var nativeSessionRequired:Null<Bool>;
+	@:optional @:id(18) var inputSerial:Null<Int>;
+	@:optional @:id(19) var inputMessages:Null<Array<AgentInputMessage>>;
+	@:optional @:id(20) var queuePaused:Null<Bool>;
 }
 
 @:wire typedef AgentQuery = {
@@ -73,6 +76,23 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(5) var scope:Null<String>;
 }
 
+/** Durable user submission and its bounded idempotency receipt. */
+@:wire typedef AgentInputMessage = {
+	@:id(1) var id:String;
+	@:id(2) var kind:String;
+	@:id(3) var text:String;
+	@:id(4) var fingerprint:String;
+	@:id(5) var state:String;
+	@:optional @:id(6) var error:Null<String>;
+}
+
+/** Native queue contents can be expanded or transformed by Pi extensions. */
+@:wire typedef AgentNativeInput = {
+	@:id(1) var kind:String;
+	@:id(2) var text:String;
+	@:id(3) var truncated:Bool;
+}
+
 @:wire typedef AgentAction = {
 	@:id(1) var workspace:String;
 	@:id(2) var instance:String;
@@ -115,6 +135,13 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(14) var commands:Null<Array<AgentCommand>>;
 	@:optional @:id(15) var commandsError:Null<String>;
 	@:optional @:id(16) var commandsLoading:Null<Bool>;
+	@:optional @:id(17) var inputToken:Null<String>;
+	@:optional @:id(18) var pendingInputs:Null<Array<AgentInputMessage>>;
+	@:optional @:id(19) var queuePaused:Null<Bool>;
+	@:optional @:id(20) var nativePending:Null<Array<AgentNativeInput>>;
+	@:optional @:id(21) var inputBusy:Null<Bool>;
+	@:optional @:id(22) var supportsSteering:Null<Bool>;
+	@:optional @:id(23) var supportsQueue:Null<Bool>;
 }
 
 /** Bounded presentation data; provider protocol and policy stay on the host. */

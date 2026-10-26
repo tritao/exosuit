@@ -1,0 +1,5 @@
+{
+ "version":1,"package":{"name":"exosuit-pi-agents-test"},
+ "entry":"app.PiInputTestMain","sourceRoots":["src"],"scopeSourceRoots":false,
+ "dependencies":{"exosuit-agent":{"path":"../../agent"}},"target":"host","outputDir":"build"
+}

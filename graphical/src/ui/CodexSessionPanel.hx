@@ -26,6 +26,8 @@ import workspace.client.WorkspaceAgentClient;
 import workspace.client.AgentCommandCompletion;
 import workspace.client.CodexPermissions;
 import workspace.service.WorkspaceAgentProtocol.AgentModel;
+import workspace.service.WorkspaceAgentProtocol.AgentInputMessage;
+import workspace.service.WorkspaceAgentProtocol.AgentNativeInput;
 import syntax.SyntaxRegistry;
 
 private typedef CodexRecoveryPresentation = {
@@ -176,17 +178,24 @@ class CodexSessionPanel implements View {
       : view.connectionState;
     var connectionReady = connectionState == "connected";
     var canSend = control && connectionReady && !working && view.requests.length == 0;
+    var piActive = view.supportsQueue == true && (working || view.record.state == "needs-attention");
+    var canQueue = control && connectionReady && view.supportsQueue == true && view.inputToken != null;
+    var canSteer = control && connectionReady && view.supportsSteering == true && view.inputToken != null && view.inputBusy != true;
     var recovery = recoveryPresentation(view.recoveryReason);
     var stateLabel = view.record.state == "reconnecting" ? "Reconnecting…"
       : view.record.state == "reconnect-failed" ? recovery.label : view.record.state;
     var effortModel = findModel(view.models, selectedModel == "" ? view.currentModel : selectedModel);
-    var submit = function() {
-      if (canSend && StringTools.trim(prompt) != "") {
-        client.agentAction(id, "prompt", prompt, null);
-        prompt = "";
-        frame();
+    var submitAction = function(action:String) {
+      var allowed = action == "queue" ? canQueue : action == "steer" ? canSteer : canSend;
+      if (allowed && StringTools.trim(prompt) != "") {
+        var sent = prompt;
+        client.agentAction(id,action,sent,null,null,null,function() {
+          if (prompt == sent) prompt = "";
+          frame();
+        });
       }
     };
+    var submit = function() {if (view.requests.length == 0) submitAction(piActive ? "queue" : "prompt");};
     var inputStyle = new LayoutStyle();
     inputStyle.height = LayoutAxis.fixed(Math.min(160, 56 + (prompt.split("\n").length - 1) * 22));
     inputStyle.width = LayoutAxis.grow();
@@ -253,6 +262,52 @@ class CodexSessionPanel implements View {
     style.height = LayoutAxis.grow(MIN_ACTIVITY_HEIGHT);
     style.width = LayoutAxis.grow();
     var activity:Array<KeyedView> = [];
+    var pending = view.pendingInputs == null ? [] : view.pendingInputs;
+    var queuedCount = 0;
+    for (input in pending) {
+      if (input.kind == "queue" && input.state == "queued") queuedCount++;
+      if (input.state == "steering") continue;
+      var entry = input;
+      var title = (entry.kind == "queue" ? "Follow-up" : entry.kind == "steer" ? "Steering" : "Clear Pi queue") + " · " + entry.state;
+      var message = title + "\n" + entry.text.substr(0,512);
+      if (entry.text.length > 512) message += "\nPreview shortened. Use as draft to review the full message.";
+      if (entry.error != null) message += "\n" + entry.error;
+      if (entry.state == "uncertain") message += "\nDelivery is uncertain. Check Pi’s history before sending a new copy.";
+      var controls:Array<KeyedView> = [];
+      if (entry.state == "queued" || entry.state == "uncertain" || entry.state == "rejected") {
+        var remove = new Button(entry.state == "queued" ? "Remove queued message" : "Dismiss input",null,
+          function() client.agentAction(id,"remove-input","",entry.id),"agent-remove-input-"+entry.id);
+        remove.enabled = control;
+        controls.push(new KeyedView("remove",remove));
+        if (entry.text != "") {
+          var draft = new Button("Use as draft",null,function() {prompt=entry.text;promptFocusRequested=false;frame();});
+          draft.enabled = control;
+          controls.push(new KeyedView("draft",draft));
+        }
+      }
+      activity.push(new KeyedView("pending-input-"+entry.id,new Column("pending-input-"+entry.id,[
+        new KeyedView("text",paragraph(message)),new KeyedView("controls",new Row("controls",controls))
+      ])));
+    }
+    if (view.supportsQueue == true && queuedCount > 0) {
+      var queueControl = new Button(view.queuePaused == true ? "Resume queued messages" : "Pause queued messages",null,
+        function() client.agentAction(id,view.queuePaused == true ? "resume-queue" : "pause-queue","",null),"agent-queue-policy");
+      queueControl.enabled = control && (view.queuePaused != true || connectionReady);
+      activity.unshift(new KeyedView("queue-state",new Column("agent-queue-state",[
+        new KeyedView("label",paragraph(Std.string(queuedCount)+" queued follow-up(s)"+(view.queuePaused == true ? " · Paused" : ""))),
+        new KeyedView("control",queueControl)
+      ])));
+    }
+    var nativePending = view.nativePending == null ? [] : view.nativePending;
+    if (nativePending.length > 0) {
+      var clear = new Button("Clear Pi pending messages",null,function() client.agentAction(id,"clear-native-queue","",null),"agent-clear-native-inputs");
+      clear.enabled = control && connectionReady && view.inputBusy != true;
+      activity.push(new KeyedView("native-clear",clear));
+      for (index in 0...nativePending.length) {
+        var nativeInput = nativePending[index];
+        activity.push(new KeyedView("native-input-"+index,paragraph("Pi pending · "+(nativeInput.kind == "steer" ? "Steering" : "Follow-up")+"\n"+nativeInput.text+(nativeInput.truncated ? "\nPreview shortened" : ""))));
+      }
+    }
     for (request in view.requests) {
       var r = request;
       activity.push(new KeyedView(
@@ -396,7 +451,7 @@ class CodexSessionPanel implements View {
     activityStyle.childGap = 16;
     activityStyle.padding = new Insets(0, 12, 0, 12);
     rows.push(new KeyedView("activity", new AgentTranscript(new Column("codex-items", activity, activityStyle), style)));
-    var suggestions = canSend && !dismissSuggestions ? AgentCommandCompletion.matches(view.commands,prompt) : [];
+    var suggestions = (canSend || (canQueue && view.requests.length == 0)) && !dismissSuggestions ? AgentCommandCompletion.matches(view.commands,prompt) : [];
     if (suggestionIndex >= suggestions.length) suggestionIndex = 0;
     var completionRows:Array<KeyedView> = [];
     function complete(index:Int):Void {
@@ -411,12 +466,19 @@ class CodexSessionPanel implements View {
       completionRows.push(new KeyedView("suggestion-"+index,new Button((index == suggestionIndex ? "› " : "")+label,null,
         function() complete(choice),"agent-command-suggestion-"+index)));
     }
-    var send = new Button("Send", null, submit, "codex-send");
-    send.enabled = canSend && StringTools.trim(prompt) != "";
+    var send = new Button(piActive ? "Queue message" : "Send", null, function() submitAction(piActive ? "queue" : "prompt"), "codex-send");
+    send.enabled = (piActive ? canQueue : canSend) && StringTools.trim(prompt) != "";
     var footerStyle = new LayoutStyle();
     footerStyle.width = LayoutAxis.grow();
     footerStyle.childGap = 12;
-    var hint = new Text("Enter to send · Shift+Enter for newline" + (view.commands == null ? "" : " · / commands · $ skills"), paragraph("").style, tokens.mutedText);
+    var hint = new Text((piActive ? (view.requests.length > 0 ? "Answer the request, or use Queue / Steer" : "Enter to queue · Shift+Enter for newline") : "Enter to send · Shift+Enter for newline") + (view.commands == null ? "" : " · / commands · $ skills"), paragraph("").style, tokens.mutedText);
+    var footerControls:Array<KeyedView> = [new KeyedView("hint",hint)];
+    if (piActive) {
+      var steer = new Button("Steer now",null,function() submitAction("steer"),"agent-steer");
+      steer.enabled = canSteer && StringTools.trim(prompt) != "";
+      footerControls.push(new KeyedView("steer",steer));
+    }
+    footerControls.push(new KeyedView("send",send));
     var modelControls:Array<KeyedView> = [];
     var moreModels:Button = null;
     if (view.models == null) {
@@ -513,7 +575,7 @@ class CodexSessionPanel implements View {
       new KeyedView("prompt", new CodexPromptNode(promptNode)),
       new KeyedView("suggestions", new Column("agent-command-suggestions",completionRows)),
       new KeyedView("commands-error", new Text(view.commandsError == null ? "" : view.commandsError)),
-      new KeyedView("footer", new Row("codex-composer-footer", [new KeyedView("hint", hint), new KeyedView("send", send)], footerStyle))
+      new KeyedView("footer", new Row("codex-composer-footer", footerControls, footerStyle))
     ], composerStyle)));
     var viewport = new LayoutStyle();
     viewport.height = LayoutAxis.grow(MIN_SESSION_HEIGHT + inputStyle.height.value - 56);

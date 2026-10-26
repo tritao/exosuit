@@ -2,6 +2,7 @@ package workspace.provider;
 
 import haxe.Json;
 import haxe.io.Path;
+import haxeon.wire.MessagePack;
 import sys.FileSystem;
 import sys.io.File;
 import haxeon.rpc.RpcContext;
@@ -37,7 +38,12 @@ private typedef PiSession = {
  var serial:Int;
  var message:Int;
  var interrupted:Bool;
- var promptDone:Bool;
+ var pendingPrompts:Int;
+ var revision:Int;
+ var probe:Int;
+ var inputs:PiInputQueue;
+ var nativePending:Array<AgentNativeInput>;
+ var nativeKnown:Bool;
  var settled:Bool;
  var settling:Bool;
  var currentModel:Null<String>;
@@ -78,14 +84,18 @@ class PiProvider implements LocalAgentProvider {
  static function sessionPath(v:String):Bool return valid(v,4096) && Path.isAbsolute(v) && v.indexOf("\n") < 0;
  function inside(v:String):Bool return v != null && (v == directories.root || StringTools.startsWith(v,directories.root == "/" ? "/" : directories.root + "/"));
  function session(r:AgentRecord):PiSession return {record:r,process:null,transport:null,ready:false,policyReady:false,busy:false,error:null,
-  conversation:new PiConversation(r.replay),dialogs:[],models:[],commands:null,commandsError:null,commandsLoading:false,serial:0,message:0,interrupted:false,promptDone:false,settled:false,
+  conversation:new PiConversation(r.replay),dialogs:[],models:[],commands:null,commandsError:null,commandsLoading:false,serial:0,message:0,interrupted:false,pendingPrompts:0,revision:0,probe:0,inputs:new PiInputQueue(r),nativePending:[],nativeKnown:false,settled:false,
   settling:false,currentModel:null,currentEffort:null};
- static function copy(r:AgentRecord):AgentRecord {var result:AgentRecord=cast Reflect.copy(r);result.replay=null;return result;}
+ static function copy(r:AgentRecord):AgentRecord {var result:AgentRecord=cast Reflect.copy(r);result.replay=null;result.inputMessages=null;return result;}
  public function owns(id:String):Bool return sessions.exists(id);
  public function records():Array<AgentRecord> return [for(s in sessions) copy(s.record)];
  function save(s:PiSession):Void {
   if(storageFailed) throw "Agent storage requires recovery";
   s.record.replay=s.conversation.snapshot();
+  // Outbox state has priority over the optional recent-history snapshot.
+  while(MessagePack.encode(s.record).length>16384 && (cast s.record.replay:Array<AgentActivityItem>).length>0)
+   (cast s.record.replay:Array<AgentActivityItem>).shift();
+  if(MessagePack.encode(s.record).length>16384) throw "Pi input state exceeds storage bound";
   if(persistence != null) try persistence.saveAgent(s.record) catch(e:Dynamic) {storageFailed=true;throw e;}
  }
  function view(s:PiSession,?before:Int):AgentView return {
@@ -94,11 +104,14 @@ class PiProvider implements LocalAgentProvider {
    detail:d.detail,reviewable:d.reviewable,inputKind:d.method,options:d.options}],
   models:s.models,modelsNext:null,commands:s.commands,commandsError:s.commandsError,commandsLoading:s.commandsLoading,currentModel:s.currentModel,currentEffort:s.currentEffort,
   connectionState:s.ready && s.record.state != "reconnecting" ? "connected" : s.transport == null ? "disconnected" : "reconnecting",
-  recoveryReason:s.ready ? null : "explicit-resume",error:s.error
+  recoveryReason:s.ready ? null : "explicit-resume",error:s.error,
+  inputToken:s.inputs.token(),pendingInputs:[for(m in s.inputs.pending()) cast Reflect.copy(m)],queuePaused:s.record.queuePaused==true,
+  nativePending:s.nativePending,inputBusy:s.inputs.hasNativeOperation(),supportsSteering:true,supportsQueue:true
  };
  function fail(s:PiSession,reason:String,terminalState:String="failed"):Void {
   var t=s.transport;s.transport=null;s.ready=false;
   var uncertain=s.busy || s.record.state == "uncertain";
+  s.inputs.pause();s.nativePending=[];s.nativeKnown=false;s.pendingPrompts=0;s.revision++;s.probe++;
   s.busy=false;s.settling=false;s.dialogs.clear();s.commands=null;s.commandsLoading=false;s.commandsError=null;s.error=reason.substring(0,2048);
   if(s.record.turn != null) s.conversation.finish(s.record.turn,terminalState);
   s.record.state=uncertain ? "uncertain" : "disconnected";s.record.turn=null;
@@ -240,23 +253,139 @@ class PiProvider implements LocalAgentProvider {
   s.record.state="needs-attention";
  }
  function settle(s:PiSession):Void {
-  if(!s.busy || !s.promptDone || !s.settled || s.settling || s.dialogs.keys().hasNext()) return;
-  s.settling=true;
+  if(!s.busy || s.pendingPrompts!=0 || !s.settled || s.settling || s.dialogs.keys().hasNext() || s.inputs.hasNativeOperation()) return;
+  s.settling=true;var revision=s.revision,probe=++s.probe,turn=s.record.turn;
   request(s,"get_state",{},function(state) {
+   if(s.probe!=probe) return;
    s.settling=false;
-   if(Reflect.field(state,"isStreaming") != false || Reflect.field(state,"isCompacting") == true) return;
+   if(s.revision!=revision || s.record.turn!=turn) {settle(s);return;}
+   if(Reflect.field(state,"isStreaming") != false || Reflect.field(state,"isCompacting") == true
+    || (Reflect.field(state,"pendingMessageCount") != null && Reflect.field(state,"pendingMessageCount") != 0)) return;
    if(s.record.turn == null) return;
+   s.nativePending=[];s.nativeKnown=true;s.inputs.nativeEmpty();
    var status=s.interrupted ? "interrupted" : s.error == null ? "completed" : "failed";
    s.conversation.finish(s.record.turn,status);s.record.state=status;s.record.turn=null;s.busy=false;s.dialogs.clear();
-   try save(s) catch(_:Dynamic) fail(s,"Pi result could not be saved");
+   if(status!="completed") s.record.queuePaused=true;
+   try save(s) catch(_:Dynamic) {fail(s,"Pi result could not be saved");return;}
+   drain(s);
   });
  }
+ function startRun(s:PiSession,text:String,?message:AgentInputMessage):Void {
+  var turn=message == null ? "pi-turn-"+(++s.serial)+"-"+Std.string(clock()) : "pi-turn-"+message.id;
+  s.record.nativeSessionRequired=true;s.record.state="working";s.record.turn=turn;s.busy=true;s.error=null;
+  s.message=0;s.interrupted=false;s.settled=false;s.settling=false;s.probe++;s.revision++;
+  if(message != null) message.state="sending";
+  s.conversation.put(message == null ? turn : message.id,turn,"userMessage","You",text,"","completed");
+  try save(s) catch(_:Dynamic) {fail(s,"Pi prompt could not be saved before delivery");return;}
+  sendPrompt(s,text,message,false);
+ }
+ function sendPrompt(s:PiSession,text:String,message:Null<AgentInputMessage>,activeSteer:Bool):Void {
+  var t=s.transport;if(t == null) return;
+  s.pendingPrompts++;
+  var params:Dynamic={message:text};
+  if(message != null && message.kind=="steer") Reflect.setField(params,"streamingBehavior","steer");
+  t.request("prompt",params,clock(),function(r) {
+   if(s.transport!=t) return;
+   if(r.error != null) {fail(s,r.error);return;}
+   s.pendingPrompts--;
+   var disposition=str(r.result,"disposition");
+   if(disposition!="started" && disposition!="queued" && disposition!="handled") {fail(s,"Pi did not report prompt acceptance");return;}
+   if(message != null) s.inputs.finish(message,disposition=="handled" ? "handled" : disposition=="queued" && (!s.nativeKnown || s.nativePending.length>0) ? "steering" : "sent");
+   if(disposition=="handled") s.settled=true;
+   try save(s) catch(_:Dynamic) {fail(s,"Pi input acceptance could not be saved");return;}
+   settle(s);
+  },function(reason) {
+   if(s.transport!=t) return;
+   s.pendingPrompts--;
+   if(message == null) {fail(s,reason);return;}
+   s.inputs.finish(message,"rejected",reason);
+   if(!activeSteer) {
+    if(s.record.turn != null) s.conversation.finish(s.record.turn,"failed");
+    s.busy=false;s.record.turn=null;s.record.state="failed";s.record.queuePaused=true;
+   }
+   try save(s) catch(_:Dynamic) {fail(s,"Pi rejection could not be saved");return;}
+   settle(s);
+  });
+ }
+ function drain(s:PiSession):Void {
+  if(!s.ready || s.busy || s.record.queuePaused==true || s.dialogs.keys().hasNext() || s.inputs.hasNativeOperation() || s.nativePending.length>0) return;
+  var next=s.inputs.next();if(next != null) startRun(s,next.text,next);
+ }
+ function nativeQueue(s:PiSession,v:Dynamic):Void {
+  var result:Array<AgentNativeInput>=[];
+  for(kind in ["steering","followUp"]) {
+   var raw:Dynamic=Reflect.field(v,kind);
+   if(!Std.isOfType(raw,Array) || (cast raw:Array<Dynamic>).length>64) {fail(s,"Invalid Pi pending-message snapshot");return;}
+   for(text in (cast raw:Array<Dynamic>)) {
+    if(!Std.isOfType(text,String)) {fail(s,"Invalid Pi pending message");return;}
+    result.push({kind:kind=="steering" ? "steer" : "queue",text:(cast text:String).substr(0,2048),truncated:(cast text:String).length>2048});
+   }
+  }
+  s.nativePending=result;s.nativeKnown=true;
+  if(result.length==0) {
+   s.inputs.nativeEmpty();
+   try save(s) catch(_:Dynamic) fail(s,"Pi queue state could not be saved");
+  }
+ }
+ function canSteerText(s:PiSession,text:String):Bool {
+  if(!StringTools.startsWith(text,"/")) return true;
+  var token=~/\s+/g.split(text)[0];
+  if(s.commands != null) for(command in (cast s.commands:Array<AgentCommand>))
+   if(command.invocation==token) return command.kind=="skill" || command.kind=="prompt";
+  return false;
+ }
+ function submitInput(s:PiSession,q:AgentAction,ctx:RpcContext<AgentView>):Void {
+  var kind=q.action=="queue" ? "queue" : q.action=="steer" ? "steer" : "clear",text=kind=="clear" ? "" : q.text;
+  if(text == null || (kind!="clear" && (!valid(text,4096) || StringTools.trim(text)=="")) || q.request==null || !valid(q.request,128)) {
+   ctx.fail({code:"invalid_request",message:"A current input token and a message of at most 4096 bytes are required",ambiguous:false});return;
+  }
+  var existing=s.inputs.find(q.request);
+  if(existing != null) {
+   if(existing.kind!=kind || existing.fingerprint!=PiInputQueue.fingerprint(kind,text)) ctx.fail({code:"conflict",message:"Input token already belongs to another message",ambiguous:false});
+   else ctx.respond(view(s));return;
+  }
+  if(q.request!=s.inputs.token()) {ctx.fail({code:"stale_input",message:"The input token has expired; refresh the session before submitting again",ambiguous:false});return;}
+  if(!s.ready || s.transport==null) {ctx.fail({code:"disconnected",message:"Resume Pi before submitting messages",ambiguous:false});return;}
+  if((kind!="queue" && s.inputs.hasNativeOperation()) || (s.busy && s.record.turn==null)) {ctx.fail({code:"busy",message:"Wait for the pending Pi operation",ambiguous:false});return;}
+  if(kind=="steer" && !canSteerText(s,text)) {ctx.fail({code:"invalid_request",message:"Send extension commands when Pi is idle; steering supports text, skills and prompt templates",ambiguous:false});return;}
+  if(!s.inputs.canAdd(text,kind)) {ctx.fail({code:"limit",message:"Pending inputs are limited to eight messages and 4096 total bytes",ambiguous:false});return;}
+  var input=s.inputs.add(q.request,kind,text);
+  try save(s) catch(_:Dynamic) {fail(s,"Pi input could not be saved before delivery");ctx.fail({code:"storage_unavailable",message:"Pi input could not be saved",ambiguous:false});return;}
+  if(kind=="steer") {
+   if(s.busy) {
+    s.revision++;s.settled=false;
+    s.conversation.put(input.id,s.record.turn,"userMessage","You · Steering",text,"","completed");
+    try save(s) catch(_:Dynamic) {fail(s,"Steering could not be saved");ctx.respond(view(s));return;}
+    sendPrompt(s,text,input,true);
+   } else startRun(s,text,input);
+  } else if(kind=="clear") {
+   var t=s.transport;s.revision++;
+   t.request("clear_queue",{},clock(),function(r) {
+    if(s.transport!=t) return;
+    if(r.error != null) {fail(s,r.error);return;}
+    s.inputs.finish(input,"sent");
+    if(s.nativeKnown && s.nativePending.length==0) s.inputs.nativeEmpty();
+    try save(s) catch(_:Dynamic) {fail(s,"Pi clear-queue result could not be saved");return;}
+    settle(s);
+   },function(reason) {
+    if(s.transport!=t) return;
+    s.inputs.finish(input,"rejected",reason);
+    try save(s) catch(_:Dynamic) {fail(s,"Pi clear-queue rejection could not be saved");return;}
+    settle(s);
+   });
+  }
+  ctx.respond(view(s));
+ }
  function event(s:PiSession,type:String,v:Dynamic):Void {
+  if(type == "queue_update") {nativeQueue(s,v);return;}
   if(type == "extension_ui_request") {dialog(s,v);return;}
   if(type == "extension_error") {s.error="Pi extension failed: "+str(v,"error");return;}
   var turn=s.record.turn;if(turn == null) return;
   switch(type) {
-   case "message_start": if(str(Reflect.field(v,"message"),"role") == "assistant") s.message++;
+   case "agent_start": s.revision++;s.settled=false;
+   case "message_start":
+    s.revision++;s.settled=false;
+    if(str(Reflect.field(v,"message"),"role") == "assistant") s.message++;
    case "message_update":
     var d=Reflect.field(v,"assistantMessageEvent"),kind=str(d,"type"),index:Dynamic=Reflect.field(d,"contentIndex");
     if(kind == "text_delta" || kind == "thinking_delta") {
@@ -279,6 +408,7 @@ class PiProvider implements LocalAgentProvider {
     s.conversation.put(turn+":tool:"+id,turn,"tool",str(v,"toolName"),text,type == "tool_execution_start" ? Json.stringify(Reflect.field(v,"args")) : "",
      type == "tool_execution_end" ? Reflect.field(v,"isError") == true ? "failed" : "completed" : "inProgress");
    case "agent_settled": s.settled=true;settle(s);
+   case "compaction_end": settle(s);
    default:
   }
  }
@@ -289,6 +419,7 @@ class PiProvider implements LocalAgentProvider {
     t.poll(clock());if(t.failure != null && s.transport == t) fail(s,t.failure);
     for(id in [for(id=>d in s.dialogs) if(clock() >= d.expires) id]) s.dialogs.remove(id);
     if(s.ready && s.record.state == "needs-attention" && !s.dialogs.keys().hasNext()) s.record.state=s.busy ? "working" : "idle";
+    drain(s);
    }
   }
  }
@@ -322,9 +453,25 @@ class PiProvider implements LocalAgentProvider {
    ctx.respond(view(s,before));return;
   }
   if(storageFailed) {error("storage_unavailable","Agent storage requires recovery");return;}
+  if(q.action=="queue" || q.action=="steer" || q.action=="clear-native-queue") {submitInput(s,q,ctx);return;}
+  if(q.action=="remove-input") {
+   var input=s.inputs.find(q.request);
+   if(input==null) {error("resolved","This input is no longer retained");return;}
+   if(input.state=="cancelled") {ctx.respond(view(s));return;}
+   if(input.state!="queued" && input.state!="uncertain" && input.state!="rejected") {error("resolved","Pi already accepted this message; use Clear Pi pending messages for its native queue");return;}
+   s.inputs.finish(input,"cancelled");
+   try save(s) catch(_:Dynamic) {error("storage_unavailable","Input removal could not be saved");return;}
+   ctx.respond(view(s));return;
+  }
+  if(q.action=="resume-queue" || q.action=="pause-queue") {
+   if(q.action=="resume-queue" && !s.ready) {error("disconnected","Resume Pi before resuming queued messages");return;}
+   s.record.queuePaused=q.action=="pause-queue";
+   try save(s) catch(_:Dynamic) {error("storage_unavailable","Queue policy could not be saved");return;}
+   ctx.respond(view(s));return;
+  }
   if(q.action == "connect") {if(s.transport == null) launch(s);ctx.respond(view(s));return;}
   if(q.action == "delete") {
-   if(s.busy || s.dialogs.keys().hasNext()) {error("busy","Stop Pi before removing this session");return;}
+   if(s.busy || s.dialogs.keys().hasNext() || s.inputs.pending().length>0) {error("busy","Stop Pi and remove its pending inputs before removing this session");return;}
    var result=view(s);
    try {if(persistence != null) persistence.removeAgent(q.id);} catch(_:Dynamic) {storageFailed=true;error("storage_unavailable","Pi removal failed");return;}
    if(s.process != null) processes.release(s.process);sessions.remove(q.id);ctx.respond(result);return;
@@ -387,15 +534,11 @@ class PiProvider implements LocalAgentProvider {
   if(q.action != "prompt") {error("unsupported_request","Unsupported Pi action");return;}
   if(!valid(q.text,8192) || s.busy || s.dialogs.keys().hasNext()) {error("busy","Pi is busy or the prompt is empty/too large");return;}
   if((q.effort != null && q.effort != s.currentEffort) || (q.model != null && q.model != s.currentModel)) {error("invalid_request","Apply Pi model/thinking settings before sending");return;}
-  var turn="pi-turn-"+(++s.serial)+"-"+Std.string(clock());
-  s.record.nativeSessionRequired=true;
-  s.record.state="working";s.record.turn=turn;s.busy=true;s.error=null;s.message=0;s.interrupted=false;s.promptDone=false;s.settled=false;
-  s.conversation.put(turn,turn,"userMessage","You",q.text,"","completed");
-  try save(s) catch(_:Dynamic) {s.busy=false;s.record.state="uncertain";error("storage_unavailable","Pi prompt was not queued");return;}
-  request(s,"prompt",{message:q.text},function(data) {s.promptDone=true;if(str(data,"disposition") == "handled") s.settled=true;settle(s);});
+  if(s.inputs.next()!=null && s.record.queuePaused!=true) {error("busy","Queued messages will run first");return;}
+  startRun(s,q.text);
   ctx.respond(view(s));
  }
- public function activeCount():Int return [for(s in sessions) if(s.busy || s.dialogs.keys().hasNext()) true].length;
+ public function activeCount():Int return [for(s in sessions) if(s.busy || s.dialogs.keys().hasNext() || (s.inputs.next()!=null && s.record.queuePaused!=true)) true].length;
  public function updateActivityCount():Int return [for(s in sessions) if(s.transport != null) true].length;
  public function dispose():Void {for(s in sessions) if(s.transport != null) fail(s,"Workspace daemon closed; explicitly resume Pi");}
 }

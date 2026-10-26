@@ -19,6 +19,9 @@ current=model.copy()
 pending=None
 active=None
 thinking="medium"
+steering=[]
+held_state=None
+race=False
 
 def emit(v):
  # Preserve Unicode and unusual separators; LF is the only frame delimiter.
@@ -26,8 +29,14 @@ def emit(v):
  for i in range(0,len(data),37):
   os.write(sys.stdout.fileno(),data[i:i+37])
 def reply(v,data=None):emit({'id':v['id'],'type':'response','command':v['type'],'success':True,'data':data or {}})
+def queue_update():emit({'type':'queue_update','steering':steering,'followUp':[]})
 def complete():
  global streaming,pending
+ for text in list(steering):
+  steering.remove(text);queue_update()
+  emit({'type':'message_start','message':{'role':'user','content':[{'type':'text','text':text}]}})
+  emit({'type':'message_start','message':{'role':'assistant'}})
+  emit({'type':'message_update','assistantMessageEvent':{'type':'text_delta','contentIndex':0,'delta':'Steered reply'}})
  streaming=False;pending=None
  emit({'type':'agent_settled','aborted':False})
 def message():
@@ -41,7 +50,12 @@ if not Path('no-hook').exists():
  emit({'type':'extension_ui_request','method':'notify','message':'exosuit-permissions/v1:'+mode})
 for line in sys.stdin:
  v=json.loads(line);log.write(json.dumps(v)+'\n');kind=v['type']
- if kind=='get_state':reply(v,{'sessionFile':session,'model':current,'thinkingLevel':thinking,'isStreaming':streaming})
+ if kind=='get_state':
+  if race:
+   held_state=v;emit({'type':'extension_ui_request','method':'notify','message':'RACE_PROBE_HELD'});continue
+  reply(v,{'sessionFile':session,'model':current,'thinkingLevel':thinking,'isStreaming':streaming,'pendingMessageCount':len(steering)})
+ elif kind=='clear_queue':
+  cleared=list(steering);steering.clear();queue_update();reply(v,{'steering':cleared,'followUp':[]})
  elif kind=='get_commands':
   if Path('commands-broken').exists():
    emit({'id':v['id'],'type':'response','command':kind,'success':False,'error':'Discovery unavailable'})
@@ -57,8 +71,19 @@ for line in sys.stdin:
  elif kind=='set_model':
   current={**model,'id':v['modelId']};reply(v,current)
  elif kind=='prompt':
-  active=v;streaming=True
+  active=v
   text=v['message']
+  if v.get('streamingBehavior')=='steer' and streaming:
+   if text=='reject-steer':
+    emit({'id':v['id'],'type':'response','command':'prompt','success':False,'error':'Steer rejected before acceptance'});continue
+   steering.append(text);queue_update()
+   if text=='lost-steer':os._exit(7)
+   reply(v,{'disposition':'queued'});continue
+  if text=='race-steer':
+   race=False
+   if held_state:
+    reply(held_state,{'sessionFile':session,'model':current,'thinkingLevel':thinking,'isStreaming':False,'pendingMessageCount':0});held_state=None
+  streaming=True
   if text=='crash':os._exit(7)
   if text=='malformed':os.write(sys.stdout.fileno(),b'{broken\n');continue
   if text=='oversized':os.write(sys.stdout.fileno(),b'x'*270000+b'\n');continue
@@ -68,7 +93,9 @@ for line in sys.stdin:
    reply(v,{'disposition':'handled'});continue
   reply(v,{'disposition':'started'})
   emit({'type':'agent_start'})
-  if text in ('approval','large-approval','wait','select','input','editor'):
+  if text=='settle-race':
+   streaming=False;race=True;emit({'type':'agent_settled','aborted':False});continue
+  if text in ('approval','large-approval','wait','select','input','editor','race-steer'):
    method=text if text in ('select','input','editor') else 'confirm'
    pending=method
    emit({'type':'extension_ui_request','id':'reused-native-id','method':method,'title':'Allow bash?' if method=='confirm' else 'Pick a value','message':'x'*3000 if text=='large-approval' else 'echo ok','options':['Blue','Red'] if method=='select' else None})

@@ -13,6 +13,7 @@ class PiTransport {
 
 	final process:OwnedProcess;
 	final pending:Map<Int, JsonRpcPending> = [];
+	final rejections:Map<Int, String->Void> = [];
 	final queue:Array<Bytes> = [];
 	final sizes:Array<Int> = [];
 	var offset = 0;
@@ -24,7 +25,7 @@ class PiTransport {
 	public function new(process:OwnedProcess)
 		this.process = process;
 
-	public function request(method:String, params:Dynamic, now:Float, done:JsonRpcResponse->Void):Void {
+	public function request(method:String, params:Dynamic, now:Float, done:JsonRpcResponse->Void, ?onReject:String->Void):Void {
 		if (failure != null) {
 			done(new JsonRpcResponse(null, failure));
 			return;
@@ -34,11 +35,13 @@ class PiTransport {
 			return;
 		}
 		var id = next++;
+		if (onReject != null) rejections.set(id,onReject);
 		pending.set(id, new JsonRpcPending(id, method == "prompt" ? Math.POSITIVE_INFINITY : now + 60000, done));
 		Reflect.setField(params, "type", method);
 		Reflect.setField(params, "id", Std.string(id));
 		if (!send(params)) {
 			pending.remove(id);
+			rejections.remove(id);
 			done(new JsonRpcResponse(null, "Pi output queue is full"));
 		}
 	}
@@ -113,6 +116,7 @@ class PiTransport {
 				var p = pending.get(id);
 				if (p != null && now >= p.deadline) {
 					pending.remove(id);
+					rejections.remove(id);
 					p.complete(new JsonRpcResponse(null, "Pi response timed out; reconcile before retrying"));
 				}
 			}
@@ -136,8 +140,10 @@ class PiTransport {
 		var p = pending.get(id);
 		if (p == null) return;
 		pending.remove(id);
-		p.complete(new JsonRpcResponse(Reflect.field(v, "data"), Reflect.field(v, "success") == true ? null
-			: Std.string(Reflect.field(v, "error")).substring(0, 2048)));
+		var rejected = rejections.get(id);rejections.remove(id);
+		var error = Reflect.field(v,"success") == true ? null : Std.string(Reflect.field(v,"error")).substring(0,2048);
+		if (error != null && rejected != null) rejected(error);
+		else p.complete(new JsonRpcResponse(Reflect.field(v,"data"),error));
 	}
 
 	function count():Int {
@@ -157,6 +163,7 @@ class PiTransport {
 		queued = 0;
 		var callbacks = [for (p in pending) p];
 		pending.clear();
+		rejections.clear();
 		for (p in callbacks)
 			p.complete(new JsonRpcResponse(null, reason));
 	}

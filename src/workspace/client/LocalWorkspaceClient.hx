@@ -409,8 +409,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
       ?defaults:CodexSessionDefaults):Void
     workbench.createAgent(group, thread, created, defaults);
   public function deleteAgent(id:String, ?deleted:Void->Void):Void workbench.deleteAgent(id, deleted);
-  public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String):Void
-    workbench.agentAction(id, action, text, request, model, effort);
+  public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String, ?accepted:Void->Void):Void
+    workbench.agentAction(id, action, text, request, model, effort, accepted);
   public function discoverAgents(group:String, cursor:Null<String>):Void workbench.discoverAgents(group, cursor);
   public function discoveredAgents():Null<AgentDiscovery> return workbench.discoveredAgents();
   public function agentView(id:String):Null<AgentView> return workbench.agentView(id);

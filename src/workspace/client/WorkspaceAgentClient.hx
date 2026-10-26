@@ -13,7 +13,7 @@ interface WorkspaceAgentClient {
 	public function createAgent(group:String, thread:Null<String>, ?created:String->Void,
 		?defaults:CodexSessionDefaults):Void;
 	public function deleteAgent(id:String, ?deleted:Void->Void):Void;
-	public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String):Void;
+	public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String, ?accepted:Void->Void):Void;
 	public function discoverAgents(group:String, cursor:Null<String>):Void;
 	public function discoveredAgents():Null<AgentDiscovery>;
 	public function agentView(id:String):Null<AgentView>;
