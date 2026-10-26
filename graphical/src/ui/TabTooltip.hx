@@ -78,6 +78,12 @@ class TabTooltip implements View {
 			tipStyle.clipToParent = false;
 			tipStyle.visible = hoverGroup == null ? state.value : groupVisible;
 			tipStyle.padding = new Insets(PADDING, 7, PADDING, 7);
+			// A rebuilt tooltip starts where the last layout placed it, so an unchanged placement needs no extra layout pass.
+			var placed = context.resourceState(context.id("placement"), function() return {known: false, x: 0.0, y: 0.0, width: 0.0}, function(_) {}).value;
+			if (placed.known) {
+				tipStyle.positionX = placed.x;
+				tipStyle.positionY = placed.y;
+			}
 			var tipId = context.id("tooltip");
 			var computed = context.resolveStyle(new StyleTarget("tooltip", key, key, null, ["tooltip"],
 				context.interactionStates.get(tipId)), tipStyle);
@@ -87,6 +93,7 @@ class TabTooltip implements View {
 			var label = context.withStyleParent(computed, function() return
 				context.withScope(new Key("content"), function() return content.build(context)));
 			tip.add(label);
+			if (placed.known) label.layout.style.width = LayoutAxis.fit(0, placed.width);
 			// The tooltip resolves after its anchor sibling; the parent callback
 			// runs before either child has geometry on a freshly built tree.
 			tip.onResolved(function(_) {
@@ -106,11 +113,16 @@ class TabTooltip implements View {
 					placement.width = side.width;
 				}
 
+				placed.known = true;
+				placed.x = placement.x;
+				placed.y = placement.y;
+				placed.width = placement.width;
 				if (tip.layout.style.positionX != placement.x || tip.layout.style.positionY != placement.y || label.layout.style.width.max != placement.width) {
 					tip.layout.style.positionX = placement.x;
 					tip.layout.style.positionY = placement.y;
 					label.layout.style.width = LayoutAxis.fit(0, placement.width);
-					context.requestLayoutFeedback();
+					// A hidden tooltip draws nothing; its next build applies the stored placement before it is shown.
+					if (tip.layout.style.visible) context.requestLayoutFeedback();
 				}
 			});
 			// The overlay must never extend the tab's hover area into the editor.
