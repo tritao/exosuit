@@ -436,9 +436,10 @@ class AgentManager {
 		var status = -1;
 		try {
 			while (status < 0) {
+				// Polled before copying, so a build's last output reaches the log before its exit ends the loop.
+				status = child.pollExit();
 				copyOutput(child, buffer, false, logPath);
 				copyOutput(child, buffer, true, logPath);
-				status = child.pollExit();
 				if (status >= 0) break;
 				if (Sys.time() >= deadline) {
 					child.cancel();
@@ -590,9 +591,9 @@ class AgentManager {
 		var complete = false, result = 1;
 		try {
 			while (Sys.time() < deadline) {
+				var status = child.pollExit();
 				copyOutput(child, buffer, false, logPath);
 				copyOutput(child, buffer, true, logPath);
-				var status = child.pollExit();
 				if (status >= 0) { result = status; complete = true; break; }
 				try {
 					var endpoint = readDiscovery(directory, options.root);
@@ -675,6 +676,9 @@ class AgentManager {
 			child = daemon;
 			var outputBytes = Bytes.alloc(16384), deadline = Sys.time() + 90.0;
 			while (true) {
+				// Polled before reading: once the daemon has exited, all it wrote is readable now, so its last lines (an
+				// idle or update stop) are seen before its exit is judged.
+				var status = daemon.pollExit();
 				var output = readAvailable(daemon, outputBytes, false, logPath);
 				copyOutput(daemon, outputBytes, true, logPath);
 				pending += output;
@@ -705,7 +709,6 @@ class AgentManager {
 					}
 					newline = pending.indexOf("\n");
 				}
-				var status = daemon.pollExit();
 				if (status >= 0) {
 					if (status == 0 && idleShutdown) { exitCode = 0; break; }
 					if (status == 0 && updateShutdown) { restartRequested = true; exitCode = 0; break; }
