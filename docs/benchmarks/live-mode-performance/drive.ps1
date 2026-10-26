@@ -6,7 +6,9 @@ param(
 	[string]$EditFile = "",                       # live edits: file to edit
 	[string]$EditFind = "",                       # text to replace
 	[string[]]$EditReplacements = @(),            # one edit per entry, applied in order
-	[int]$FirstEditAfterSeconds = 0               # wait this long after first frame before editing
+	[int]$FirstEditAfterSeconds = 0,              # wait this long after first frame before editing
+	[int]$AppSeconds = 0,                         # stop only the editor this long after it starts, so the profiler still exports
+	[int]$EditAtAppSeconds = 0                    # write the first edit this long after the editor starts (instead of after first frame)
 )
 $ErrorActionPreference = 'Stop'
 $root = 'C:\Users\corbi\projects\exosuit'
@@ -40,6 +42,9 @@ $original = $null
 if ($EditFile) { $original = [IO.File]::ReadAllText($EditFile) }
 $editIndex = 0; $firstFrameAt = $null; $waitingPatch = $false; $editSentAt = $null
 $reason = 'exited'; $lastProgress = 0; $lastLength = -1; $quietSince = 0
+# The editor is the hl.exe running a graphical host build; compile servers and workspace agents are other hl.exe processes.
+$appPattern = 'graphical[\\/]build[\\/]host[\\/][^\\/"]+\.hl'
+$app = $null; $appStartedAt = $null; $appStopped = $false
 try {
 	while (-not $p.HasExited) {
 		Start-Sleep -Milliseconds 500
@@ -62,6 +67,20 @@ try {
 			Note ("dialog text: " + ($texts -join ' | '))
 			$reason = "dialog: $($dialog.MainWindowTitle -join ', ')"; break
 		}
+		if (($AppSeconds -or $EditAtAppSeconds) -and -not $app) {
+			$hl = @(Get-CimInstance Win32_Process -Filter "Name='hl.exe'" | Where-Object { $tree -contains [int]$_.ProcessId })
+			$app = $hl | Where-Object { $_.CommandLine -match $appPattern -and $_.CommandLine -notmatch 'haxeon[\\/]compiler|--output' } | Select-Object -First 1
+			if ($app) {
+				$appStartedAt = $elapsed
+				Note "editor started: pid $($app.ProcessId)"
+				foreach ($h in $hl) { Note "  hl $($h.ProcessId): $($h.CommandLine)" }
+			}
+		}
+		if ($AppSeconds -and $app -and -not $appStopped -and $elapsed -ge $appStartedAt + $AppSeconds) {
+			Note "stopping editor after $AppSeconds s; the profiler finalizes and exports"
+			Stop-Process -Id $app.ProcessId -Force -ErrorAction SilentlyContinue
+			$appStopped = $true
+		}
 		$rec = $procs | Where-Object Name -eq 'hlprof-live'
 		if ($rec -and ($rec | Measure-Object WorkingSet64 -Sum).Sum / 1MB -gt $RecorderMaxMB) { $reason = 'recorder memory cap'; break }
 		$text = (Get-Content $log -Raw -ErrorAction SilentlyContinue) + (Get-Content $errlog -Raw -ErrorAction SilentlyContinue)
@@ -77,13 +96,14 @@ try {
 			$mem = ($procs | Where-Object Name -in 'hl','hlprof-live' | ForEach-Object { "$($_.Name)=$([int]($_.WorkingSet64/1MB))MB" }) -join ' '
 			Note ("progress: $mem | " + ("$last".Substring(0, [Math]::Min(120, "$last".Length))))
 		}
-		if ($EditFile -and $firstFrameAt) {
+		$editReady = if ($EditAtAppSeconds) { $app -and $elapsed -ge $appStartedAt + $EditAtAppSeconds } else { $firstFrameAt -and $elapsed -ge $firstFrameAt + $FirstEditAfterSeconds }
+		if ($EditFile -and ($firstFrameAt -or $EditAtAppSeconds)) {
 			$patches = ([regex]::Matches($text, 'patched live module to revision (\d+)')).Count
 			$reloads = ([regex]::Matches($text, 'reloaded live module to revision (\d+)')).Count
 			if ($waitingPatch -and ($patches + $reloads) -ge $editIndex) {
 				$waitingPatch = $false; Note ("edit {0} applied after {1:N1}s (patches {2}, reload lines {3})" -f $editIndex, ($elapsed - $editSentAt), $patches, $reloads)
 			}
-			if (-not $waitingPatch -and $editIndex -lt $EditReplacements.Count -and $elapsed -ge $firstFrameAt + $FirstEditAfterSeconds) {
+			if (-not $waitingPatch -and $editIndex -lt $EditReplacements.Count -and $editReady) {
 				$edited = $original.Replace($EditFind, $EditReplacements[$editIndex])
 				if ($edited -eq $original) { throw "edit text not found: $EditFind" }
 				[IO.File]::WriteAllText($EditFile, $edited)
