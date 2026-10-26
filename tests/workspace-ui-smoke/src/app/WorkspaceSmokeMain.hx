@@ -53,13 +53,14 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	var remoteOpenTests:Null<RemoteFileOpenTests>;
 
 	public function new(context:haxeon.ui.host.DesktopUiHostContext, path:String, phase:String) {
-		super(context.fonts, null, context, (phase == "context-layout-write" || StringTools.startsWith(phase, "layout-") || phase == "active-context" || phase == "saved-workspace" || phase == "explorer-rename" || phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-geometry" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-font" || phase == "editor-tabs" || phase == "zoom" || phase == "word-delete" || phase == "selection" || phase == "tab-close" || phase == "pointer-actions" || phase == "blank-editor-click" || phase == "caret-follow" || phase == "exit-confirmation" || phase == "save-as" || phase == "tab-close-paint" || phase == "settings" || phase == "editor-minimap" || phase == "toolbar-tooltip" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
+		super(context.fonts, null, context, (phase == "mode-write" || phase == "mode-phone-default" || phase == "context-layout-write" || StringTools.startsWith(phase, "layout-") || phase == "active-context" || phase == "saved-workspace" || phase == "explorer-rename" || phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-geometry" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-font" || phase == "editor-tabs" || phase == "zoom" || phase == "word-delete" || phase == "selection" || phase == "tab-close" || phase == "pointer-actions" || phase == "blank-editor-click" || phase == "caret-follow" || phase == "exit-confirmation" || phase == "save-as" || phase == "tab-close-paint" || phase == "settings" || phase == "editor-minimap" || phase == "toolbar-tooltip" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
 			null, null, null, WorkspaceSmokeMain.createTerminal);
 		this.phase = phase;
 		closeContext = context;
 		this.testFonts = context.fonts;
 		this.path = path;
-		if (phase == "context-layout-write" || StringTools.startsWith(phase, "layout-")) application.open(path);
+		if (phase == "context-layout-write" || StringTools.startsWith(phase, "layout-") || phase == "mode-write" || phase == "mode-phone-default") application.open(path);
+		if (phase == "layout-write" && !layoutControls.bottomOpen()) layoutControls.toggleBottom();
 		if (phase == "explorer-rename") {
 			var folder = haxe.io.Path.directory(path) + "/folder.old";
 			sys.FileSystem.createDirectory(folder);
@@ -123,6 +124,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		if (phase == "explorer-rename") return explorerRenameStep(frame);
 		if (phase == "saved-workspace") return savedWorkspaceStep(frame);
 		if (phase == "active-context") return activeContextStep(frame);
+		if (StringTools.startsWith(phase, "mode-")) return modeStep(frame);
 		if (StringTools.startsWith(phase, "context-layout-")) return contextLayoutStep(frame);
 		if (StringTools.startsWith(phase, "layout-")) return layoutControlsStep(frame);
 		if (phase == "remote-open") {
@@ -1335,6 +1337,98 @@ class WorkspaceSmokeApp extends ExosuitApp {
 
 	var deletedDocument:editor.Document;
 	var deletedPane:String;
+	var modeDocument:editor.Document;
+	var modeEditorDock:String;
+	function modeStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
+		var widthFile = config.ConfigurationPaths.stateRoot() + "/mode-right-width.txt";
+		if (frames == 2) {
+			layoutModes.suspend();
+			registerSidebarDestination("workbench", haxeon.ui.icons.IconName.Terminal, function() return new haxeon.ui.widgets.text.Text("Workbench fixture"),
+				new haxeon.ui.widgets.sidebar.SidebarModeOptions("Workbench", 20, true));
+			layoutModes.resume(); layoutModes.refreshContext();
+		}
+		if (phase == "mode-write") {
+			if (frames == 2) {
+				var active = host.activeView(); if (active == null) throw "mode test missing document";
+				modeDocument = active.document; modeDocument.insert(new editor.BufferSelection(), "// dirty\n");
+				require(layoutModes.current.id == "editor" && !layoutControls.bottomOpen() && !layoutControls.rightOpen(), "fresh Editor defaults incorrect");
+				modeEditorDock = dock.snapshotJson();
+			}
+			if (frames == 3 || frames == 7) ui.commands.execute("view.mode-agents");
+			if (frames == 4) {
+				require(layoutModes.current.id == "agents" && layoutControls.rightOpen() && !layoutControls.bottomOpen() && sidebar.activeId == "workbench" && sidebar.modes[0].id == "workbench", "Agents preset not rendered");
+				click("layout-menu");
+			}
+			if (frames == 5) {
+				require(hasText(ui.root, "Editor Layout") && hasText(ui.root, "✓ Agents Layout"), "Layout menu omitted mode choices/current marker");
+				ui.key(UiEventKind.KeyDown, UiKey.Escape); ui.commands.execute("view.mode-editor");
+			}
+			if (frames == 6) require(dock.snapshotJson() == modeEditorDock && sidebar.activeId == "files" && sidebar.modes[0].id == "files", "mode round trip changed untouched layout");
+			if (frames == 8) {
+				var bounds = node("context-panel-content").globalBounds();
+				closeWidth = bounds.width;
+				ui.pointerDown(bounds.x - 4, bounds.y + 80, 0); ui.pointerMove(bounds.x - 44, bounds.y + 80); ui.pointerUp(bounds.x - 44, bounds.y + 80, 0);
+			}
+			if (frames == 9) {
+				require(layoutModes.rightChanged && node("context-panel-content").globalBounds().width > closeWidth + 20, "real right resize did not set manual flag");
+				closeWidth = node("context-panel-content").globalBounds().width;
+				ui.commands.execute("view.mode-editor");
+			}
+			if (frames == 10) {
+				require(layoutControls.rightOpen() && Math.abs(node("context-panel-content").globalBounds().width - closeWidth) < 2, "Editor changed custom right region");
+				ui.commands.execute("view.layout-bottom"); ui.commands.execute("view.mode-agents");
+			}
+			if (frames == 11) {
+				require(layoutModes.bottomChanged && layoutControls.bottomOpen(), "Agents hid custom bottom region");
+				sys.io.File.saveContent(widthFile, Std.string(closeWidth));
+				application.activeContext.focusGroup("mode-b", "Mode B", haxe.io.Path.directory(path));
+				require(!layoutModes.rightChanged && !layoutModes.bottomChanged && !layoutControls.bottomOpen() && layoutControls.rightOpen(), "new context inherited A's custom flags");
+			}
+			if (frames == 12) ui.commands.execute("view.mode-editor");
+			if (frames == 13) application.activeContext.useWorkspace();
+			if (frames == 14) {
+				require(layoutModes.current.id == "editor" && layoutModes.rightChanged && layoutModes.bottomChanged && layoutControls.rightOpen() && layoutControls.bottomOpen(), "return to A lost manual flags or followed old mode");
+				var active = host.activeView(); require(active != null && active.document == modeDocument && modeDocument.dirty, "mode/context switch changed dirty document ownership");
+				ui.commands.execute("view.mode-agents");
+				trace("PASS: mode commands/menu, reversible presets, actual divider resize, custom panel visibility and context isolation");
+			}
+		} else if (phase == "mode-read") {
+			if (frames == 3) {
+				require(layoutModes.choice == "agents" && layoutModes.current.id == "agents" && layoutModes.rightChanged && layoutModes.bottomChanged && layoutControls.rightOpen() && layoutControls.bottomOpen(), "restart lost window mode or context flags");
+				var expected = Std.parseFloat(sys.io.File.getContent(widthFile));
+				require(Math.abs(node("context-panel-content").globalBounds().width - expected) < 2, "restart lost custom right width");
+				application.settings.store.set("appearance/workbench/layout_mode", haxeon.ui.properties.PropertyValue.Enum("editor"));
+			}
+			if (frames == 4) {
+				require(layoutModes.current.id == "editor" && layoutControls.rightOpen() && layoutControls.bottomOpen(), "setting changed manual regions or did not apply");
+				application.settings.store.set("appearance/workbench/layout_mode", haxeon.ui.properties.PropertyValue.Enum("agents"));
+			}
+			if (frames == 5) require(layoutModes.current.id == "agents" && sidebar.find("files") != null && sidebar.find("workbench") != null, "mode setting hid a sidebar destination");
+			if (frames >= 6 && frames <= 8) frame.setViewport(480, 720);
+			if (frames == 7) application.settings.store.set("appearance/workbench/layout_mode", haxeon.ui.properties.PropertyValue.Enum("editor"));
+			if (frames == 10) {
+				require(dock.isOpen("context-panel") && layoutModes.rightChanged && layoutModes.bottomChanged, "phone round trip lost custom regions");
+				trace("PASS: window mode/region restart, live preference, destination reachability and phone transition");
+			}
+		}
+		if (phase == "mode-phone-default") {
+			if (frames >= 3 && frames <= 5) frame.setViewport(480, 720);
+			if (frames == 4) application.settings.store.set("appearance/workbench/layout_mode", haxeon.ui.properties.PropertyValue.Enum("agents"));
+			if (frames == 7) {
+				require(layoutModes.current.id == "agents" && layoutControls.rightOpen() && !layoutControls.bottomOpen() && !layoutModes.rightChanged && !layoutModes.bottomChanged,
+					"phone preference did not update untouched desktop preset");
+				application.settings.store.set("appearance/workbench/layout_mode", haxeon.ui.properties.PropertyValue.Enum("editor"));
+			}
+			if (frames == 8) {
+				require(!layoutControls.rightOpen() && !layoutModes.rightChanged, "phone transition marked an untouched region as manual");
+				trace("PASS: mode change on phone updates desktop preset without leaking regions or customization flags");
+			}
+		}
+		var result = super.submit(frame);
+		if ((phase == "mode-read" && frames >= 6 && frames <= 8) || (phase == "mode-phone-default" && frames >= 3 && frames <= 5)) require(!dock.isOpen("context-panel") && find(ui.root, "layout-menu") == null, "mode preference leaked desktop regions/controls onto phone");
+		return result;
+	}
+
 	var contextAView:UiDocumentView;
 	var contextBView:UiDocumentView;
 	var contextADock:String;
@@ -1364,7 +1458,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 				sys.io.File.saveContent(groupRoot + "/B.txt", "group line\n");
 				application.activeContext.focusGroup("context-layout-b", "Group B", groupRoot);
 				require(host.panes.length == 1 && host.activePane.items.length == 0, "new context inherited A's tabs");
-				require(!dock.isOpen("context-panel") && layoutControls.bottomOpen(), "new context inherited A's panels");
+				require(!dock.isOpen("context-panel") && !layoutControls.bottomOpen(), "new context inherited A's panels");
 				application.open(groupRoot + "/B.txt"); contextBView = host.activeView();
 				var text = ""; for (i in 0...150) text += "group B dirty line " + i + "\n";
 				contextBView.document.buffer.replaceAllText(text, contextBView.selection);
@@ -1506,14 +1600,15 @@ class WorkspaceSmokeApp extends ExosuitApp {
 			var output = new build.BuildOutput(); output.reset(root); output.append("outside build\n"); output.finish();
 			host.showBuildOutput("Build Output", output);
 			application.activeContext.focusGroup("test-group", "Test Group", group);
-			dock.activate("problems"); requestFrame();
+			host.showProblems(); requestFrame();
 		}
 		if (frames == 4) {
 			require(treeRow(ui.root, group) != null && treeRow(ui.root, root) == null, "Files did not follow ActiveContext");
 			require(hasText(ui.root, "inside context") && !hasText(ui.root, "outside context"), "Problems escaped ActiveContext");
 			var source = sourceControlSource();
 			require(source != null && source.identity() == scm.LocalScmSource.identityFor([group]), "SCM did not use context roots");
-			dock.activate("build"); requestFrame();
+			var current = host.currentBuildOutput; if (current == null) throw "missing build output";
+			host.showBuildOutput("Build Output", current); requestFrame();
 		}
 		if (frames == 5) {
 			require(!hasText(ui.root, "outside build"), "Build output escaped ActiveContext");
@@ -1908,7 +2003,7 @@ class WorkspaceSmokeMain {
 			zoomWidth = options.width;
 		}
 		options.captureDirectory = args[1];
-		options.frameLimit = args[2] == "context-layout-write" ? 14 : args[2] == "context-layout-read" ? 9 : StringTools.startsWith(args[2], "context-layout-") ? 7 : args[2] == "layout-read" ? 15 : args[2] == "layout-write" ? 13 : args[2] == "layout-phone" ? 6 : args[2] == "active-context" ? 10 : args[2] == "saved-workspace" ? 10 : args[2] == "explorer-rename" ? 40 : args[2] == "editor-geometry" ? 25 : args[2] == "file-deletion" ? 10 : args[2] == "blank-editor-click" ? 11 : args[2] == "zoom" ? 75 : args[2] == "save-as" ? 10 : args[2] == "exit-confirmation" ? 11 : args[2] == "tab-close" ? 13 : args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 11 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
+		options.frameLimit = args[2] == "mode-write" ? 16 : args[2] == "mode-read" ? 12 : args[2] == "mode-phone-default" ? 10 : args[2] == "context-layout-write" ? 14 : args[2] == "context-layout-read" ? 9 : StringTools.startsWith(args[2], "context-layout-") ? 7 : args[2] == "layout-read" ? 15 : args[2] == "layout-write" ? 13 : args[2] == "layout-phone" ? 6 : args[2] == "active-context" ? 10 : args[2] == "saved-workspace" ? 10 : args[2] == "explorer-rename" ? 40 : args[2] == "editor-geometry" ? 25 : args[2] == "file-deletion" ? 10 : args[2] == "blank-editor-click" ? 11 : args[2] == "zoom" ? 75 : args[2] == "save-as" ? 10 : args[2] == "exit-confirmation" ? 11 : args[2] == "tab-close" ? 13 : args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 11 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
 		var status = DesktopUiHost.run(options, context -> new WorkspaceSmokeApp(context, args[0], args[2]));
 
 		return status;

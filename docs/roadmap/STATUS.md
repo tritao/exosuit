@@ -131,6 +131,53 @@ Evidence is under `/tmp/exosuit-m184/` (`full-ui3.log`,
 `context-final-*.log`, `core-*.log`, `web.log`, and `final-*.log`).
 Next milestone: M18.5's layout-mode presets; not started in this request.
 
+### M18.5 — Editor/Agents layout-mode evidence
+
+M18.4 landed as `32be74c`. Added data-defined Editor and Agents presets with
+sidebar ordering, default destination and left/bottom/right visibility. Editor
+selects Files, closes right and leaves bottom tools on demand. Agents selects
+Workbench (Files until available), opens right and closes bottom. Every sidebar
+provider remains reachable, including providers registered after mode selection.
+Layout contains Editor/Agents/Automatic commands and the current-mode marker;
+there is no additional title-bar button. Problems, Build and terminals explicitly
+open the bottom region when requested.
+
+A window-owned choice is persisted separately from context-owned manual region
+flags. Commands choose an explicit mode for that window. Automatic follows the
+`appearance/workbench/layout_mode` preference (Automatic/Editor/Agents), then
+uses Agents only with a connected Workbench catalog containing groups. A live
+preference change returns the window to its configured default. Disconnect does
+not replace an explicit window choice.
+
+Manual visibility, divider ratios and sidebar selection are tracked per context.
+Presets, context restore, provider registration and responsive sizing are guarded
+from that tracking. Switching applies defaults only to untouched regions; editor
+tabs, dirty documents, context roots and running shells remain independent of
+mode. Older sessions infer customization from deviations from pre-mode defaults,
+including closed-region sizes. Phone changes apply to the saved desktop layout
+and retain the existing single-pane presentation.
+
+`tests/layout-modes` passes automatic/explicit/preference precedence, reversible
+presets, actual model resize/visibility retention, per-context flags, window
+metadata, late Workbench availability, offline Files fallback, legacy-size
+migration, setting validation and destination reachability. Registered in the
+core runner. Separate-process Xvfb mode phases pass real title-bar commands and
+menu, actual right-divider dragging, context isolation, window/region restart,
+live settings and both custom and untouched phone/desktop transitions. Registered
+in the UI runner. Existing terminal-transfer/restart, ActiveContext, layout
+controls/phone and per-context dirty-buffer restart phases pass with the new
+defaults. Core application, configuration and layout-controls regressions pass.
+The graphical target and full browser build pass. The desktop packaging script
+now stops in concurrent agent-provider work with `CodexProvider.hx:766` /
+`Unknown variable "claude"`; those edits are unrelated and were left untouched.
+Artifacts/logs are in `/tmp/exosuit-m185/`, including `graphical-reviewed.log`,
+`web-reviewed.log` and `desktop-reviewed.log`.
+
+The full UI runner's pre-existing picker/Explorer-rename failures remain recorded
+under M18.4; those checks were not removed or bypassed in the committed runner.
+Next: M18.6's explicit group focus, quick switching and agent-first home; not
+started in this request.
+
 Last updated: 2026-10-10.
 
 ## M17 source control — in progress

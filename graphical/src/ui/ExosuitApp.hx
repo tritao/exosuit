@@ -131,6 +131,7 @@ class ExosuitApp implements DesktopUiApplication {
 	var scmFocusSubscription:Null<NativeKitEventSubscription>;
 	final dock:DockWorkspaceModel;
 	final layoutControls:WorkbenchLayoutControls;
+	final layoutModes:WorkbenchLayoutModes;
 	var contextFiles:Null<ContextFilesView>;
 	var contextLayoutsReady:Bool = false;
 	var dockPanelContents:Array<DockPanelContent>;
@@ -196,6 +197,7 @@ class ExosuitApp implements DesktopUiApplication {
 	var viewportHeight:Float = 840.0;
 	static inline var PHONE_LAYOUT_MAX_WIDTH:Float = 640.0;
 	var phoneLayoutActive:Bool = false;
+	var phoneModeApplying:Bool = false;
 	var desktopDockRoot:Null<DockNode>;
 	var desktopSidebarWidth:Float = 260;
 	var desktopDockActivePanel:Null<String>;
@@ -252,6 +254,7 @@ class ExosuitApp implements DesktopUiApplication {
 			registerSidebarDestination("scm", IconName.Hierarchy, sourceControlPanel, new haxeon.ui.widgets.sidebar.SidebarModeOptions("Source Control", 15, true));
 		dock = makeDock();
 		layoutControls = new WorkbenchLayoutControls(dock);
+		layoutModes = new WorkbenchLayoutModes(dock, sidebar, layoutControls, requestFrame);
 		if (openPath == null) dock.close("explorer");
 		var capturedHost:UiWorkbenchHost = null;
 		application = new Application(function(exosuitTheme, focus, workspace, settings) {
@@ -269,8 +272,8 @@ class ExosuitApp implements DesktopUiApplication {
 						explorerRoot = application.workspace.projects[0].root;
 					openExplorer();
 				},
-				activateProblems: function() dock.activate("problems"),
-				activateBuild: function() dock.activate("build")
+				activateProblems: function() { if (!layoutControls.bottomOpen()) layoutControls.toggleBottom(); dock.open("problems"); dock.activate("problems"); },
+				activateBuild: function() { if (!layoutControls.bottomOpen()) layoutControls.toggleBottom(); dock.open("build"); dock.activate("build"); }
 			});
 			return capturedHost;
 		}, preferences, null, this.capabilities);
@@ -382,8 +385,27 @@ class ExosuitApp implements DesktopUiApplication {
 			return "B\tsidebar\t1\t" + sidebar.encode();
 		};
 		host.captureDockLayout = captureDockLayout;
-		host.captureExtraLayout = function() return [layoutControls.capture()];
-		host.restoreExtraLayout = layoutControls.restore;
+		host.captureExtraLayout = function() return [layoutControls.capture(), layoutModes.captureContext()];
+		host.restoreExtraLayout = function(lines) { layoutControls.restore(lines); layoutModes.restoreContext(lines); };
+		host.captureWindowLayout = function() return [layoutModes.captureWindow()];
+		host.restoreWindowLayout = layoutModes.restoreWindow;
+		host.beforeContextDetach = layoutModes.suspend;
+		layoutModes.beforeApply = function() {
+			if (!phoneLayoutActive) return;
+			var saved = haxeon.ui.docking.DockWorkspaceSnapshotCodec.decode(captureDockLayout());
+			if (saved == null) return;
+			phoneModeApplying = true; phoneLayoutActive = false;
+			sidebar.rememberWidth(desktopSidebarWidth);
+			dock.setRoot(saved.root);
+		};
+		layoutModes.afterApply = function() {
+			if (!phoneModeApplying) return;
+			desktopDockRoot = haxeon.ui.docking.DockNodeTools.clone(dock.root);
+			desktopDockActivePanel = dock.activePanelId;
+			phoneContentRoot = haxeon.ui.docking.DockNodeTools.remove(haxeon.ui.docking.DockNodeTools.remove(dock.root, "explorer"), "context-panel");
+			phoneLayoutActive = true; phoneModeApplying = false; syncPhoneDockRoot();
+		};
+		host.afterContextRestore = function() { layoutModes.resume(); layoutModes.refreshContext(); };
 		var defaultSidebar = sidebar.encode();
 		host.restoreSidebar = function(lines) {
 			var saved = defaultSidebar;
@@ -408,6 +430,7 @@ class ExosuitApp implements DesktopUiApplication {
 		sidebar.rememberWidth(previousSidebarWidth);
 		application.settings.subscribe(function(value) {
 			updateEditorPalette();
+			layoutModes.setPreference(value.layoutMode);
 			if (hostContext != null) hostContext.zoom = value.applicationZoom / 100.0;
 			terminalPalette.fontSize = value.terminalFontSize;
 			if (value.sidebarWidth != previousSidebarWidth) {
@@ -464,6 +487,7 @@ class ExosuitApp implements DesktopUiApplication {
 		contextLayoutsReady = true;
 		if (openPath != null) openArgument(openPath);
 		if (dock.isOpen("terminal") && host.panelTerminals.length == 0) openTerminal();
+		layoutModes.start(application.settings.current.layoutMode);
 	}
 
 	function makeDock():DockWorkspaceModel {
@@ -509,6 +533,7 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function toggleExplorerVisible():Bool {
+		layoutModes.markLeft();
 		if (dock.isOpen("explorer")) { sidebar.setVisible(false); return !dock.isOpen("explorer"); }
 		var selected = sidebar.selected();
 		return showSidebarMode(selected == null ? "files" : selected.id);
@@ -518,6 +543,7 @@ class ExosuitApp implements DesktopUiApplication {
 
 	public function showSidebarMode(id:String):Bool {
 		if (!sidebar.select(id)) return false;
+		layoutModes.markLeft();
 		if (!dock.isOpen("explorer")) return false;
 		if (id == "search") searchPanel.focusQuery = true;
 		dock.activate("explorer"); requestFrame(); return true;
@@ -525,6 +551,7 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function syncSidebar():Void {
 		viewRevision++;
+		if (phoneModeApplying) { requestFrame(); return; }
 		if (phoneLayoutActive) {
 			syncPhoneDockRoot();
 		} else if (!sidebar.visible) {
@@ -674,6 +701,7 @@ class ExosuitApp implements DesktopUiApplication {
 			host.panelTerminals.push(terminal);
 			host.activePanelTerminalIndex = 0;
 		}
+		if (!layoutControls.bottomOpen()) layoutControls.toggleBottom();
 		if (!dock.isOpen("terminal")) {
 			if (dock.isOpen("build")) dock.open("terminal", "build");
 			else if (dock.isOpen("problems")) dock.open("terminal", "problems");
@@ -947,6 +975,11 @@ class ExosuitApp implements DesktopUiApplication {
 			new Shortcut(UiKey.S, UiModifier.Control)));
 		ui.commands.register(new Command("file.close-tab", "Close Tab", function() application.requestCloseActiveTab(),
 			new Shortcut(87 /* W */, UiModifier.Control)));
+		for (mode in [LayoutMode.Editor, LayoutMode.Agents]) {
+			var selected = mode;
+			ui.commands.register(new Command("view.mode-" + mode.id, "Use " + mode.label + " Layout", function() layoutModes.select(selected.id), null, function() return !phoneLayoutActive));
+		}
+		ui.commands.register(new Command("view.mode-auto", "Use Automatic Layout", layoutModes.automatic, null, function() return !phoneLayoutActive));
 		ui.commands.register(new Command("view.layout-bottom", "Toggle Bottom Panel", function() { layoutControls.toggleBottom(); requestFrame(); },
 			new Shortcut(UiKey.J, UiModifier.Control | UiModifier.Alt), function() return !phoneLayoutActive));
 		if (capabilities.supports(HostCapability.Filesystem)) ui.commands.register(new Command("view.layout-right", "Toggle Right Panel",
@@ -1275,6 +1308,7 @@ class ExosuitApp implements DesktopUiApplication {
 		var widthChanged = viewportWidth != frame.width;
 		viewportWidth = frame.width;
 		viewportHeight = frame.height;
+		layoutModes.suspend();
 		syncResponsiveDockLayout();
 		keepSidebarFullHeight();
 		if (widthChanged && !phoneLayoutActive && dock.isOpen("explorer")) {
@@ -1282,6 +1316,7 @@ class ExosuitApp implements DesktopUiApplication {
 			if (mode != null) dock.setPanelWidth("explorer", sidebar.width, Math.max(0, viewportWidth - ActivityBar.WIDTH),
 				DockWorkspace.DividerExtent, DockWorkspace.MinimumHorizontalExtent);
 		}
+		layoutModes.resume();
 		dock.setPanelBadge("problems", host.getProblems().values().length);
 		var key = (hostContext == null || hostContext.windowControls == null ? 0 : hostContext.windowControls.revision) + ":" + viewRevision + ":" + dock.revision + ":" +
 			(explorerModel == null ? -1 : explorerModel.revision()) + ":" +
@@ -1322,6 +1357,7 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	public function attachWorkbench(client:workspace.client.WorkspaceWorkbenchClient):Void {
+		layoutModes.suspend();
 		workbenchClient = client;
 		terminalBrowserPanel = new WorkspaceTerminalsPanel(client, openCatalogTerminal, forgetCatalogTerminal, requestFrame);
 		workbenchPanel = new WorkbenchPanel(client, openCatalogTerminal, newGroupedTerminal, editWorkspaceGroup,
@@ -1333,11 +1369,13 @@ class ExosuitApp implements DesktopUiApplication {
 		if (sidebar.find("workbench") == null)
 			registerSidebarDestination("workbench", IconName.Terminal, function() return workbenchPanel == null ? new Text("Workspace disconnected") : workbenchPanel,
 				new haxeon.ui.widgets.sidebar.SidebarModeOptions("Workbench", 20, true));
+		layoutModes.resume(); layoutModes.refreshSidebar(); syncLayoutService();
 	}
 
 	public function detachWorkbench(client:workspace.client.WorkspaceWorkbenchClient):Void {
 		if (workbenchClient != client) return;
 		workbenchClient = null;
+		layoutModes.setServiceAvailable(false);
 		host.onActiveTabChanged = null;
 		workbenchPanel = null;
 		terminalBrowserPanel = null;
@@ -1527,11 +1565,18 @@ class ExosuitApp implements DesktopUiApplication {
 		requestFrame();
 	}
 
+	function syncLayoutService():Void {
+		var client = workbenchClient;
+		var catalog = client == null ? null : client.terminalCatalog();
+		layoutModes.setServiceAvailable(client != null && client.canReadTerminals() && catalog != null && catalog.groups.length > 0);
+	}
+
 	/** Drain services without requesting a render merely because they are running. */
 	function pollBackground():Void {
 		var now = Sys.time();
 		if (now < nextBackgroundPoll) return;
 		nextBackgroundPoll = now + 0.05;
+		syncLayoutService();
 		if (zoomOverlayUntil > 0 && now >= zoomOverlayUntil) {
 			zoomOverlayUntil = 0;
 			requestFrame();
@@ -1714,6 +1759,7 @@ class ExosuitApp implements DesktopUiApplication {
 	public function context():UiContext return ui;
 
 	public function dispose():Void {
+		layoutModes.dispose();
 		layoutControls.dispose();
 		if (contextFiles != null) contextFiles.dispose();
 		if (notificationPanel != null) notificationPanel.close();
@@ -1977,6 +2023,11 @@ class ExosuitApp implements DesktopUiApplication {
 				contextMenu = null; ui.commands.executeContext(command, ui.commandContext); requestFrame();
 			}, true, layoutShortcut(command)));
 		}
+		for (mode in [LayoutMode.Editor, LayoutMode.Agents]) {
+			var selected = mode;
+			items.push(new haxeon.ui.widgets.overlays.MenuItem("view.mode-" + mode.id, (layoutModes.current.id == mode.id ? "✓ " : "") + mode.label + " Layout", function() { contextMenu = null; layoutModes.select(selected.id); requestFrame(); }));
+		}
+		items.push(new haxeon.ui.widgets.overlays.MenuItem("view.mode-auto", "Automatic Layout", function() { contextMenu = null; layoutModes.automatic(); requestFrame(); }));
 		var anchor = findStyleNode(ui.root, "layout-menu");
 		var x = Math.max(0, viewportWidth - 290), y = TOOLBAR_HEIGHT + 4;
 		if (anchor != null) { var bounds = anchor.globalBounds(); x = Math.min(x, bounds.x); y = bounds.y + bounds.height + 4; }
@@ -2582,8 +2633,10 @@ class ExosuitApp implements DesktopUiApplication {
 	/** Register a destination once; the Activity Bar follows the sidebar's order and visibility. */
 	public function registerSidebarDestination(id:String, icon:IconName, provider:Void->View,
 			options:haxeon.ui.widgets.sidebar.SidebarModeOptions):Void {
+		if (contextLayoutsReady) layoutModes.suspend();
 		sidebar.register(id, provider, options);
 		activityIcons.set(id, icon);
+		if (contextLayoutsReady) { layoutModes.resume(); layoutModes.refreshSidebar(); }
 	}
 
 	public function activateSidebarDestination(id:String):Void {

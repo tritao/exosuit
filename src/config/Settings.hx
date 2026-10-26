@@ -16,6 +16,7 @@ class Settings {
 		return paths;
 	}
 	public var applicationZoom:Int = 100;
+	public var layoutMode:String = "auto";
 	/** Codex defaults used when Workbench creates a new thread. */
 	public var codexDefaultModel:String = "";
 	public var codexDefaultEffort:String = "model-default";
@@ -85,6 +86,7 @@ class Settings {
 		result.fontPath = fontPath;
 		result.fontFallbackPaths = copyStrings(fontFallbackPaths);
 		result.applicationZoom = applicationZoom;
+		result.layoutMode = layoutMode;
 		result.codexDefaultModel = codexDefaultModel;
 		result.codexDefaultEffort = codexDefaultEffort;
 		result.codexDefaultPermissions = codexDefaultPermissions;

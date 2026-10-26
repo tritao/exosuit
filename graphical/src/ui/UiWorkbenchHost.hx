@@ -76,6 +76,10 @@ class UiWorkbenchHost implements WorkbenchHost {
 	var contextResolver:Null<(String, String)->Null<Document>>;
 	var defaultContextLines:Array<String> = [];
 	public var beforeContextRestore:Void->Void = function() {};
+	public var beforeContextDetach:Void->Void = function() {};
+	public var afterContextRestore:Void->Void = function() {};
+	public var captureWindowLayout:Void->Array<String> = function() return [];
+	public var restoreWindowLayout:Array<String>->Void = function(_) {};
 
 	final problems:ProblemRegistry = new ProblemRegistry();
 	final pluginDecorations:PluginDecorationRegistry = new PluginDecorationRegistry();
@@ -1263,10 +1267,11 @@ class UiWorkbenchHost implements WorkbenchHost {
 
 	static function chromeLines(lines:Array<String>):Array<String> return [for (line in lines)
 		if (StringTools.startsWith(line, "D\t") || StringTools.startsWith(line, "Q\t") ||
-			StringTools.startsWith(line, "B\tsidebar\t") || StringTools.startsWith(line, "L\t")) line];
+			StringTools.startsWith(line, "B\tsidebar\t") || StringTools.startsWith(line, "L\t") || StringTools.startsWith(line, "N\t")) line];
 
 	public function sessionLines():Array<String> {
 		var result = layoutLines();
+		for (line in captureWindowLayout()) result.push(line);
 		result.push(session.ContextLayoutStore.activeLine(contextKey));
 		var keys = [for (key in contextLayouts.keys()) key];
 		for (key in pendingContextLayouts.keys()) if (keys.indexOf(key) < 0) keys.push(key);
@@ -1318,6 +1323,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		if (key == contextKey) return;
 		contextLayouts.set(contextKey, new UiContextLayout(panes, activePane, panelTerminals, hiddenTerminals,
 			activePanelTerminalIndex, chromeLines(layoutLines())));
+		beforeContextDetach();
 		focus.activate(null);
 		dismissLanguagePopup();
 		closeCommandView();
@@ -1345,7 +1351,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 			restoreLayoutLines(lines == null ? defaultContextLines : lines, resolveContextDocument);
 		}
 		var editorFocused = dockActions.model.activePanelId == activePane.id;
-		pendingEditorFocus = editorFocused; focus.activate(editorFocused ? activeView() : null); notifyActiveTabChanged(); requestFrame();
+		pendingEditorFocus = editorFocused; focus.activate(editorFocused ? activeView() : null); notifyActiveTabChanged(); afterContextRestore(); requestFrame();
 	}
 
 	function resolveContextDocument(kind:String, reference:String):Null<Document> {
@@ -1357,6 +1363,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 	}
 
 	public function restoreSessionLines(lines:Array<String>, ?resolver:(String, String)->Null<Document>):Void {
+		restoreWindowLayout(lines);
 		var stored = session.ContextLayoutStore.read(lines);
 		contextResolver = resolver;
 		for (key in stored.layouts.keys()) {
@@ -1375,6 +1382,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		pendingContextLayouts.remove(contextKey);
 		if (selected == null) selected = stored.activeKey == null || stored.activeKey == contextKey ? lines : defaultContextLines;
 		restoreLayoutLines(selected, resolveContextDocument);
+		afterContextRestore();
 	}
 
 	function retainedViews():Array<UiDocumentView> {

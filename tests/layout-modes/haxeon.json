@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "package": {"name": "exosuit-layout-modes-test"},
+  "entry": "app.LayoutModesTestMain",
+  "sourceRoots": ["src"],
+  "scopeSourceRoots": false,
+  "dependencies": {"exosuit-graphical": {"path": "../../graphical"}},
+  "target": "host",
+  "outputDir": "build"
+}

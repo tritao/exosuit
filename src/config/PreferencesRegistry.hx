@@ -44,6 +44,12 @@ class PreferencesRegistry {
 		}
 		{
 			var options = new SettingOptions();
+			options.options = [new PropertyOption("auto", "Automatic"), new PropertyOption("editor", "Editor"), new PropertyOption("agents", "Agents")];
+			options.tooltip = "Default layout mode. Automatic uses Agents when a Workbench service with groups is connected. A window can choose a different mode from Layout.";
+			if (!projectOnly) registry.define("appearance/workbench/layout_mode", PropertyType.Enum, PropertyValue.Enum(defaults.layoutMode), options);
+		}
+		{
+			var options = new SettingOptions();
 			options.minimum = 100; options.maximum = 1200;
 			if (!projectOnly) registry.define("appearance/workbench/sidebar_width", PropertyType.Int, PropertyValue.Int(defaults.sidebarWidth), options);
 		}
@@ -326,6 +332,7 @@ class PreferencesRegistry {
 	public static function snapshot(store:SettingsStore, ?base:Settings):Settings {
 		var value = base == null ? new Settings() : base.copy();
 		if (store.registry.exists("appearance/workbench/zoom_percent") && (base == null || !store.isDefault("appearance/workbench/zoom_percent"))) value.applicationZoom = store.getInt("appearance/workbench/zoom_percent");
+		if (store.registry.exists("appearance/workbench/layout_mode") && (base == null || !store.isDefault("appearance/workbench/layout_mode"))) value.layoutMode = store.getString("appearance/workbench/layout_mode");
 		if (store.registry.exists("workbench/codex/default_model") && (base == null || !store.isDefault("workbench/codex/default_model"))) value.codexDefaultModel = store.getString("workbench/codex/default_model");
 		if (store.registry.exists("workbench/codex/default_effort") && (base == null || !store.isDefault("workbench/codex/default_effort"))) value.codexDefaultEffort = store.getString("workbench/codex/default_effort");
 		if (store.registry.exists("workbench/codex/default_permissions") && (base == null || !store.isDefault("workbench/codex/default_permissions"))) value.codexDefaultPermissions = store.getString("workbench/codex/default_permissions");

@@ -188,6 +188,12 @@ class WorkspaceSession {
 	public static function validLayout(value:String):Bool {
 		if (StringTools.startsWith(value, "Z\t")) return value.length <= ContextLayoutStore.MAX_RECORD;
 		var fields = value.split("\t");
+		if (fields.length == 4 && fields[0] == "M") return fields[1] == "layout-mode" && fields[2] == "1" && ["auto", "editor", "agents"].indexOf(fields[3]) >= 0;
+		if (fields.length == 7 && fields[0] == "N") {
+			if (fields[1] != "layout-mode" || fields[2] != "1" || ["", "editor", "agents"].indexOf(fields[3]) < 0) return false;
+			for (i in 4...7) if (fields[i] != "0" && fields[i] != "1") return false;
+			return true;
+		}
 		if (fields.length == 6 && fields[0] == "L") {
 			var bottom = Std.parseFloat(fields[3]), right = Std.parseFloat(fields[4]);
 			return fields[1] == "regions" && fields[2] == "1" && fields[5].length <= 1048576 &&

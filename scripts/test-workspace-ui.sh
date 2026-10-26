@@ -58,6 +58,9 @@ mkdir -p "$fixture/saved-workspace-project"
 printf 'class Main {}\n' > "$fixture/saved-workspace-project/Main.hx"
 run_phase saved-workspace saved-workspace "$fixture/saved-workspace-project/Main.hx"
 run_phase active-context active-context "$fixture/project/Main.hx"
+run_phase mode-write layout-modes
+run_phase mode-read layout-modes
+run_phase mode-phone-default layout-modes-phone
 run_phase context-layout-write context-layout
 run_phase context-layout-read context-layout
 mkdir -p "$fixture/state-context-layout-corrupt"
