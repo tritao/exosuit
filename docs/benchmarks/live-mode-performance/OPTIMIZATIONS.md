@@ -45,6 +45,14 @@ Unprofiled live capture with one edit (`runs/d-live-edit`), merged stack on `rev
 | Incremental backend | 0.8 s | 0.40 s |
 | Patch size | 2.19 MB | 0.92 MB |
 
+- **Round 2 (haxeon 36dd604a): the real save-to-live latency is ~3.4 s.** File times in `runs/e-live-edit`: the
+  compile request starts 0.41 s after the save, the stamp is written at 3.33 s, and LiveHost's new timing line shows the
+  host takes 17 ms to apply the patch (`description=0 read=1 apply=16`; it now patches from a small `.live.patch.json`).
+  The driver's "applied after 4.0–4.3 s" includes up to 1 s of its own once-a-second log polling, and so did batch 1's
+  9.5 s. What is left: compile ~2.65 s (IR assembly 0.95, typing 0.54, frontend 0.50, backend 0.40), prepare 0.2 s,
+  save detection ~0.2 s. Next candidates: #9's content memo (needs a decision on stale debug offsets in reused inlined
+  bodies), #10's debug-position refresh, whole-program `assemble` (~370 ms), and moving the deferred 40 MB write and
+  hash out of the request.
 - What is left of the 4.0 s: compile 2.6 s (IR assembly 0.95, typing 0.54, frontend 0.50, backend 0.40), ~0.4 s of
   writes and prepare, and ~1 s from publish to applied (LiveHost picking up and applying a 0.9 MB patch; the capture
   driver also polls its log once a second, so part of that is measurement).
