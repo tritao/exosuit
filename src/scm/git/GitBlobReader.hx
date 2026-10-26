@@ -211,7 +211,12 @@ class GitBlobReader implements JobTask {
 		queued.resize(0);
 		if (active != null) requests.push(active);
 		active = null;
-		for (request in requests) if (!request.job.complete && !request.job.cancelled) request.job.cancel();
+		// Callers still waiting are told the reader went away, rather than left without an answer: a reader is disposed
+		// when its repository's handle is, which a caller cannot see.
+		for (request in requests)
+			if (!request.cancelled && request.job.finish())
+				request.complete(new ScmJobResult<ScmBlob>(request.generation, null,
+					new ScmError("repository_closed", "The Git repository was closed while reading a blob", true)));
 		dropProcess();
 		resetResponse();
 	}

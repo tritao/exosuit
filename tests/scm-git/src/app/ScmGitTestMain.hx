@@ -1343,6 +1343,15 @@ class ScmGitTestMain {
 			&& normalizeNewlines(followingBlob.value.bytes.toString()) == normalizeNewlines(smallBytes.toString())
 			&& blobReader.activeProcessId() == sharedProcessId,
 			"cancelled response bytes were misattributed or the reader process was not reused");
+		// A reader disposed under a read in progress (its repository handle closed) answers it rather than leaving it
+		// waiting: callers cannot see the handle go.
+		var closingReader = new GitBlobReader(processManager, gitScheduler, git, repositoryRoot, false, 1024 * 1024),
+			closedBlob:Null<ScmJobResult<ScmBlob>> = null;
+		closingReader.read("HEAD", Bytes.ofString("docs/roadmap/STATUS.md"), 1067, value -> closedBlob = value);
+		gitScheduler.update(1);
+		closingReader.dispose();
+		require(closedBlob != null && closedBlob.error != null && closedBlob.error.code == "repository_closed" && closedBlob.error.retryable,
+			"a blob read in progress when its reader was disposed was left without an answer");
 
 		var interrupted:Null<ScmJobResult<ScmBlob>> = null;
 		blobReader.read("HEAD", Bytes.ofString("docs/roadmap/STATUS.md"), 1067, value -> interrupted = value);
