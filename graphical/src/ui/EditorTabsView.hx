@@ -31,9 +31,11 @@ class EditorTabsView implements View {
 	final tooltipDelay:Float;
 	final tabColors:Map<String, Color>;
 	final decorationRevision:Int;
+	final tooltips:Map<String, String>;
 
 	public function new(tabs:Tabs, filenames:Map<String, String>, dark:Bool, tooltipDelay:Float = 0.8,
-			?tabColors:Map<String, Color>, decorationRevision:Int = 0) {
+			?tabColors:Map<String, Color>, decorationRevision:Int = 0, ?tooltips:Map<String, String>) {
+		this.tooltips = tooltips == null ? new Map() : tooltips;
 		this.tabs = tabs;
 		this.filenames = filenames;
 		this.dark = dark;
@@ -61,7 +63,7 @@ class EditorTabsView implements View {
 					var filename = filenames.get(item.key);
 					var tint = tabColors.get(item.key);
 					revision += ":" + item.key.length + ":" + item.key + ":" + item.label.length + ":" + item.label +
-						":" + item.enabled + ":" + item.icon + ":" + filename + ":" + (item.onClose != null) +
+						":" + item.enabled + ":" + item.icon + ":" + filename + ":" + tooltips.get(item.key) + ":" + (item.onClose != null) +
 						":" + (tint == null ? "" : tint.red + "," + tint.green + "," + tint.blue + "," + tint.alpha);
 				}
 				return revision;
@@ -156,7 +158,7 @@ class EditorTabsView implements View {
 			if (tabs.items[index].key == tabs.selectedKey) active = header;
 			var textStyle = new LayoutStyle();
 			var tooltip = new TabTooltip("tab-tooltip:" + tabs.items[index].key,
-				new BuiltTabView(header), new Text(tabs.items[index].label, textStyle, context.theme.tokens.textPrimary,
+				new BuiltTabView(header), new Text(tooltips.exists(tabs.items[index].key) ? tooltips.get(tabs.items[index].key) : tabs.items[index].label, textStyle, context.theme.tokens.textPrimary,
 					new TextStyleOverride(null, 13, null, TextWrap.WordCharacter)),
 				function() return viewport == null ? new Rect(0, 0, context.viewportWidth, context.viewportHeight) : viewport.globalBounds(),
 				tooltipDelay, Below, hover, visibleTooltip == "tab-tooltip:" + tabs.items[index].key);

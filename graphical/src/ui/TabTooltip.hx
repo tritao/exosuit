@@ -106,6 +106,12 @@ class TabTooltip implements View {
 					placement.width = side.width;
 				}
 
+				// A window overlay host may have lifted the surface out of the tab.
+				if (tip.parent != root && tip.parent != null && tip.parent.resolved != null) {
+					var parentBounds = tip.parent.globalBounds();
+					placement.x += anchorBounds.x - parentBounds.x;
+					placement.y += anchorBounds.y - parentBounds.y;
+				}
 				if (tip.layout.style.positionX != placement.x || tip.layout.style.positionY != placement.y || label.layout.style.width.max != placement.width) {
 					tip.layout.style.positionX = placement.x;
 					tip.layout.style.positionY = placement.y;

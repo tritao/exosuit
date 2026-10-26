@@ -161,6 +161,7 @@ class ExosuitApp implements DesktopUiApplication {
 	final workspaceFileRefreshPending:Map<String, Bool> = new Map();
 	final tabClicks = new haxeon.ui.core.PointerClickSequence();
 	var statusMessage:String = "Ready";
+	var zoomOverlayUntil:Float = 0.0;
 	var settingsPanel:Null<haxeon.ui.widgets.settings.SettingsPanel>;
 	var settingsModels:Array<workspace.service.WorkspaceAgentProtocol.AgentModel> = [];
 	var settingsModelsNext:Null<String>;
@@ -779,6 +780,8 @@ class ExosuitApp implements DesktopUiApplication {
 	public function setApplicationZoom(percent:Int):Void {
 		application.settings.store.set("appearance/workbench/zoom_percent",
 			haxeon.ui.properties.PropertyValue.Int(Std.int(Math.max(70, Math.min(200, percent)))));
+		zoomOverlayUntil = Sys.time() + 2.0;
+		requestFrame();
 	}
 
 	function updateEditorPalette():Void {
@@ -1091,6 +1094,16 @@ class ExosuitApp implements DesktopUiApplication {
 		}
 		var overlay = host.overlayView();
 		if (overlay != null) layers.push(new StackChild("host-overlay", overlay, 0.0, 0.0, 30));
+		if (zoomOverlayUntil > Sys.time()) {
+			var style = new LayoutStyle();
+			style.padding = new Insets(16, 10, 16, 10);
+			style.background = theme.tokens.surfaceRaised;
+			style.radiusTopLeft = style.radiusTopRight = style.radiusBottomLeft = style.radiusBottomRight = 8;
+			var label = new Text("Zoom " + application.settings.current.applicationZoom + "%", null,
+				theme.tokens.textPrimary);
+			layers.push(new StackChild("zoom-overlay", new Row("zoom-indicator", [new KeyedView("label", label)], style),
+				Math.max(8, viewportWidth - 156), TOOLBAR_HEIGHT + 12, 80));
+		}
 		var menu = contextMenu;
 		if (menu != null) {
 			if (!menu.isCurrent()) contextMenu = null;
@@ -1355,6 +1368,10 @@ class ExosuitApp implements DesktopUiApplication {
 		var now = Sys.time();
 		if (now < nextBackgroundPoll) return;
 		nextBackgroundPoll = now + 0.05;
+		if (zoomOverlayUntil > 0 && now >= zoomOverlayUntil) {
+			zoomOverlayUntil = 0;
+			requestFrame();
+		}
 		if (host.syncSideBySidePanes()) requestFrame();
 		pumpApplication();
 		syncScmDocumentMarkers(now);

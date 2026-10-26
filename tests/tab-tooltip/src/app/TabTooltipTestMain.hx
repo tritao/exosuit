@@ -165,6 +165,17 @@ class TabTooltipTestMain {
 		require(escapedGeometry.clipBounds.width == 800 && escapedGeometry.clipBounds.height == 600,
 			"unclipped tooltip inherited sidebar clipping instead of viewport clipping");
 
+		var overlayFixture = new ui.TooltipOverlayHost(new ClippedToolbarFixture());
+		for (_ in 0...3) {
+			var overlayRoot = context.submit(overlayFixture, new haxeon.ui.LayoutFrame(800, 600));
+			var liftedTip:haxeon.ui.core.RenderNode = null;
+			overlayRoot.walk(function(node) { if (node.styleType == "tooltip") liftedTip = node; });
+			require(liftedTip != null && liftedTip.parent == overlayRoot,
+				"tooltip remained inside the clipped toolbar stacking context");
+			require(liftedTip.globalBounds().y >= 28 && liftedTip.globalBounds().x >= 6,
+				"lifted tooltip lost its anchor placement");
+		}
+
 		var sideRoot = context.submit(new NarrowTooltipFixture(Right), new haxeon.ui.LayoutFrame(800, 600));
 		var sideTip:haxeon.ui.core.RenderNode = null;
 		sideRoot.walk(function(node) { if (node.styleType == "tooltip") sideTip = node; });
