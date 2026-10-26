@@ -30,7 +30,29 @@ editor changes included in both modes. Runs `b-normal`, `b-live`, `b-live-edit` 
 - The batch also turned up: the editor build broke under Haxeon (#15, fixed in d091baaf; the suites build the compiler
   with stock Haxe, so the self-hosting check is now part of every merge), and #20 below.
 
-## Edit latency: save to applied patch (about 10 s now)
+## Batch 2: edit latency (2026-10-25, #7–#11 plus a NativeKit timer fix)
+
+Unprofiled live capture with one edit (`runs/d-live-edit`), merged stack on `review-followups` (haxeon 3d02069f):
+
+| One-string edit | Batch 1 | Batch 2 |
+|---|---|---|
+| Save → applied | 9.5 s | **4.0 s** |
+| Save → patch published | ~7.6 s | ~3.0 s |
+| Compile phase | 6.8 s | 2.6 s |
+| IR assembly | 3.9 s | 0.95 s |
+| Typing/lowering | 0.9 s | 0.54 s |
+| Frontend | 0.65 s | 0.50 s |
+| Incremental backend | 0.8 s | 0.40 s |
+| Patch size | 2.19 MB | 0.92 MB |
+
+- What is left of the 4.0 s: compile 2.6 s (IR assembly 0.95, typing 0.54, frontend 0.50, backend 0.40), ~0.4 s of
+  writes and prepare, and ~1 s from publish to applied (LiveHost picking up and applying a 0.9 MB patch; the capture
+  driver also polls its log once a second, so part of that is measurement).
+- Hover input lag: holding 1 ms timer resolution while NativeKit waits for events (nativekit 1f1b3e62) cut normal-mode
+  hover lag p95 from 7.7 to 3.7 ms, but live hover p95 stays at ~18.6 ms (`runs/c-normal`, `runs/c-live`). The live stall
+  is something else: a frame starts ~18 ms after input arrives, right after an animation's last frame. Open (#21).
+
+## Edit latency: save to applied patch (about 4 s now)
 
 | # | Optimization | Expected gain | Effort | Status | Commits / measured |
 |---|---|---|---|---|---|
@@ -40,11 +62,12 @@ editor changes included in both modes. Runs `b-normal`, `b-live`, `b-live-edit` 
 | 4 | Stop ~150 functions counting as "changed" each compile: encode unreachable open IR blocks (4a) | 0.3–0.6 s | small | ✅ | haxeon 41facedf; lowering 430–760 → 210–340 ms |
 | 5 | CLI: reuse file digests across watch rebuilds, cache the worker identity and resolved project (4b) | ~1 s | small | ✅ | haxeon 4d9ee155 + review fix aa024d78 (a re-resolved project is kept when its build fails). Measured by the implementer: CLI time before the compile request ~1.14–1.21 s → ~0.13 s on the editor project; end to end on a small project 750–850 → 122–130 ms. Follow-ups: fewer syscalls in `ActionFingerprint.appendPath` (~50–80 ms), and `PackageResolver`'s per-file `fullPath` |
 | 6 | Cache directory listings when resolving imports (4c) | 0.4–0.6 s per edit; several s cold | small | ✅ | haxeon 7b15e72b. A cold compile listed 120 directories 82,513 times. Implementer's paired runs: cold graph 7.6–8.2 → 2.0–2.2 s (cold request 24.8–29.1 → 19.3–19.8 s), no-op frontend 0.91–1.22 → 0.49 s, edit graph 0.50–0.62 → 0.04 s. Output byte-identical |
-| 7 | Watch loop: file-change notifications instead of polling plus a 0.5 s settle (4d) | 0.6–0.8 s | small–medium | ⬜ | |
-| 8 | Live edits write only the patch and stamp; defer the 40 MB `.hl`, its build-id hash and the side files | 0.7–1.1 s | small–medium | ⬜ | |
-| 9 | Incremental inliner: stop re-encoding ~2k function pairs per compile (4e) | 1–1.5 s | medium | ⬜ | |
-| 10 | Edit-local "changed" comparison plus a separate debug-position refresh in patches (4f) | 0.5–1 s, and a much smaller patch | medium | ⬜ | |
-| 11 | Remaining whole-program floor: semantic canonicalization and invalidation, IR assembly, re-reading sources | 1–2 s; IR assembly alone measured 3.9 s for a 3-function edit, so likely more | large | ⬜ | |
+| 7 | Watch loop: file-change notifications instead of polling plus a 0.5 s settle (4d) | 0.6–0.8 s | small–medium | ✅ | haxeon 15c08d19..dc7a5340. Windows `ReadDirectoryChangesW` watch in the runtime HDLL wakes the loop; 30 ms coalescing, polling stays as backstop. Save to compile start ~0.5 s in the capture. Linux/macOS still poll; a second watcher beside NativeKit's (NativeKit is only callable from Haxeon-compiled code) |
+| 8 | Live edits write only the patch and stamp; defer the 40 MB `.hl`, its build-id hash and the side files | 0.7–1.1 s | small–medium | ✅ | haxeon 3ca31ff7+. Patch, `.live.json` and stamp are published before the module and side files; a `.live.full` marker guards reloads (finding 22). Measured 0.2–0.35 s, not 0.7–1.1 s: most of that estimate was full-module hashing, now after the stamp but still inside the request |
+| 9 | Incremental inliner: stop re-encoding ~2k function pairs per compile (4e) | 1–1.5 s | medium | 🔨 | haxeon 2a9f9cde: the published side's encoding is cached, halving the comparison encodes. Not done: memo by content, so unchanged initializers stop forcing ~2.9k re-inlines |
+| 10 | Edit-local "changed" comparison plus a separate debug-position refresh in patches (4f) | 0.5–1 s, and a much smaller patch | medium | 🔨 | haxeon b5851e42..c1b11371: the changed comparison ignores the file hash, byte and scope offsets, and functions whose final IR is unchanged are not re-lowered. One-string edit: 478 → 96 changed, patch 2.19 → 0.92 MB, patch phase 242 → 62 ms. Not done: a separate debug-position refresh, so adding lines still marks every later function changed |
+| 11 | Remaining whole-program floor: semantic canonicalization and invalidation, IR assembly, re-reading sources | 1–2 s; IR assembly alone measured 3.9 s for a 3-function edit, so likely more | large | 🔨 | haxeon 86ff2792..457085f3: static null-check copies keep their identity between compiles, so the inliner memo hits (13458/13528 on a no-op). IR assembly on a one-string edit 3.9 s → 0.95 s. Left: whole-program `assemble` (~370 ms) and comparing ~500 regenerated lambdas |
+| 21 | Live hover input lag: after an animation ends, the next frame starts ~18 ms after input arrives in live mode (p95 18.6 ms vs 3.7 ms in normal). Not the stamp read and not timer resolution | p95 lag 18.6 → ~4 ms | unknown | ⬜ | investigated in batch 2 |
 | 20 | A restarted live session reloads on its first edit: the app starts from a `live.hl` an earlier compile server built, the new worker has no patch history, so the first edit compiles cold (~24 s) and reloads | first edit ~24 s → normal edit | medium | ⬜ | seen in the batch run |
 
 ## Cold build (about 33 s compile)
