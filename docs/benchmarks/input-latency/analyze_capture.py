@@ -11,7 +11,9 @@ the app reacts):
   ONSET   the first move after at least 100 ms without one
   MOVING  every other polled move
   KEYS    polled key transitions
-and, for polled inputs slower than --slow-ms, where their time went on the UI thread: inside nk.frame zones, waiting for
+then SCREEN, the time from the OS stamp to the end of the first frame that starts after the application polled the input,
+which is the frame that can show its effect (the end of nk.frame is when the frame was submitted: what the display does
+with it is not measured), and, for polled inputs slower than --slow-ms, where their time went on the UI thread: inside nk.frame zones, waiting for
 events (nk.wait), or other work."""
 import argparse, collections, json, statistics, sys
 
@@ -126,6 +128,21 @@ def main():
         print("\nFRAMES  n=%d  median %.1f  p90 %.1f  p99 %.1f  max %.1f ms; the UI thread spent %.0f%% of the capture in them" % (
             len(durations), statistics.median(durations), percentile(durations, 0.90), percentile(durations, 0.99), max(durations),
             100 * busy / window))
+
+    # The first frame that starts after each poll. An input that no frame follows within 50 ms did not change the screen.
+    import bisect
+    starts = [a for a, _, _ in frame_spans]
+    screen = {"input polled move": [], "input polled key": []}
+    for ts, name, age, _ in polled:
+        if name not in screen:
+            continue
+        i = bisect.bisect_left(starts, ts)
+        if i < len(frame_spans) and frame_spans[i][0] - ts < 50_000:
+            screen[name].append((frame_spans[i][1] - (ts - age * 1000)) / 1000)
+    print()
+    summary("SCREEN", screen["input polled move"] + screen["input polled key"])
+    summary(" moves", screen["input polled move"])
+    summary(" keys", screen["input polled key"])
 
     slow = [r for r in polled if r[2] >= args.slow_ms]
     print("\n%d of %d polled inputs took %.0f ms or more" % (len(slow), len(polled), args.slow_ms))

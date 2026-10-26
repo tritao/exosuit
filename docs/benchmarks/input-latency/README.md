@@ -85,10 +85,14 @@ it off NativeKit's queue (`Input polled age`). A move that the queue merged into
 stands for. ONSET, MOVING and KEYS are the polled ages, as the Windows analyzer defines them, and slow inputs are split by
 what the UI thread was doing (`nk.frame`, `nk.wait`, other).
 
+To measure on your own display, with your GPU and devices, run `session_linux.sh NAME --human --seconds 60`: the editor opens
+on `$DISPLAY`, nothing is injected, and you move the mouse over it with pauses, click in the text and use the arrow keys.
+The capture is analyzed when it ends. The recorder is given 30 s to finalize after the editor is stopped.
+
 ### Limits
 
 - **Software rendering.** Xvfb draws with llvmpipe, even on a machine with a GPU (Xephyr with glamor does too). Frames are
-  slower than on a real display, and frame cost dominates the numbers.
+  slower than on a real display, and frame cost dominates the numbers. `--human` measures a real display.
 - **XTEST skips the kernel.** The X server stamps input when the driver script sends it, so the leg from a device through
   evdev to the server is not measured. The X time stamp has 1 ms resolution.
 - **The machine's load shows.** The runs below were made at load average 5 to 9 with other jobs running.
@@ -107,9 +111,20 @@ what the UI thread was doing (`nk.frame`, `nk.wait`, other).
   spent, the UI thread was inside `nk.frame` (almost none in GC, and 5% waiting). With input at 1 kHz and frames about
   14 ms long, the oldest unpolled move is about a frame old when the application polls. `nk_poll_event` pumps the platform
   first, and a pump can draw a frame, so a move already queued can also wait behind a frame it does not need.
-- **Candidate, not adopted:** handing over a queued event before pumping again (at most 16 polls in a row) left the median
-  unchanged (18.1 and 17.9 ms) and cut MOVING p90 from about 34 ms to 23 ms in both runs, by removing moves that waited
-  through two frames. It was not kept: it changes when frames draw relative to input, and no measurement here shows
-  whether the screen reacts sooner. That needs an input-to-screen measure first.
+- **SCREEN, input to a submitted frame** (the OS stamp to the end of the first `nk.frame` that starts after the poll; what
+  the display does with the frame is not measured): moves median 31 to 33 ms and p90 46 to 50 ms, keys median 15.6 to
+  16.2 ms. A move waits about a frame to be polled and then a frame to be drawn.
+- **Candidate, not adopted:** handing over a queued event before pumping again (at most 16 polls in a row) left MOVING and
+  SCREEN medians unchanged (18 and 33 ms), cut the move p90 from about 34 to 23 ms (polled) and from 50 to 40 ms (SCREEN)
+  in two runs each, and made keys about 2 ms slower (SCREEN median 15.6 to 17.4 ms). It removes moves that waited through
+  two frames but does not shorten the typical one, and it changes when frames draw relative to input, so it stays out.
+- **What a frame costs** (1 kHz on-CPU profile of the same runs): about a third of the time is llvmpipe (`libgallium`), the
+  software rasterizer, which a GPU would not spend. The rest is layout (`nkui` layout, 7%), the render tree walk (6%),
+  encoding the layout transaction (3%) and allocation. Two fixes came out of it:
+  - GTK resolved `glGetIntegerv` with `dlsym(RTLD_DEFAULT)` on every frame-target query, several times a frame: 4.7% of
+    on-CPU time, now none (NativeKit, "Resolve glGetIntegerv once per surface"). The latency effect is below this
+    machine's run-to-run noise of about a millisecond.
+  - Still open: `BuildContext.pruneKeyCaches` walks every cached key path, hashing strings, on each UI submit, about 2%
+    of on-CPU time. Pruning only when something was unmounted would remove it; the key caches' lifetime rules need care.
 - In the probe app under Xvfb every mouse move reaches GTK's handler twice (80 handler events for 40 moves). The editor
   shows about two handler events per polled move too, with merging. Whether real hardware does it is unchecked.
