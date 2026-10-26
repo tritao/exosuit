@@ -266,6 +266,13 @@ class EditorViewTestMain {
 			decorationRegistry.forDocument(decorationDocument), [], 0, decorationDocument.buffer.document.codepointCount);
 		require(wholeLines.length == 1 && wholeLines[0].start == wholeLines[0].end,
 			"whole-line presentation lost empty range or accepted reversed columns");
+		// Unchanged decorations come back as the same ordered list; a change orders them afresh.
+		var orderedDecorations = decorationRegistry.forDocument(decorationDocument);
+		require(decorationRegistry.forDocument(decorationDocument) == orderedDecorations, "unchanged decorations were sorted again");
+		decorationRegistry.add("plugin", "first", decorationDocument, 0, 0, 1, syntaxTheme.currentLine, Background);
+		var reordered = decorationRegistry.forDocument(decorationDocument);
+		require(reordered != orderedDecorations && reordered.length == 2 && reordered[0].id == "first" && reordered[1].id == "empty-line",
+			"a new decoration was not ordered in");
 		var caretDocument = new Document("caret.hx", "é🙂(x)\n\n// (ignored)", syntaxes);
 		var caretSelection = new BufferSelection(new BufferPosition(0, 3));
 		var caretPresentation = new CaretPresentation();
