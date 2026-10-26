@@ -17,12 +17,14 @@ param(
 	[ValidateSet('sampling', 'instrument')][string]$Profile = 'sampling',
 	[string]$File = 'src/editor/TextBuffer.hx',
 	[switch]$Live,
-	[int]$DeadlineSeconds = 300,
+	[int]$DeadlineSeconds = 0,
 	[int]$LockWaitMinutes = 60,
 	# The checkout to measure; this script's own by default. Output still goes under this script's runs folder.
 	[string]$Root = ''
 )
 $ErrorActionPreference = 'Stop'
+# Instrumented runs build and export more slowly.
+if (-not $DeadlineSeconds) { $DeadlineSeconds = if ($Profile -eq 'instrument') { 600 } else { 300 } }
 Import-Module (Join-Path $PSScriptRoot 'guard.psm1') -Force
 $root = if ($Root) { (Resolve-Path $Root).Path } else { (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path }
 $out = Join-Path $PSScriptRoot "runs\$Name"
@@ -51,7 +53,8 @@ try {
 	$log = Join-Path $out 'run.log'
 	$state = @{ editor = $null; scenario = $null; stopped = $false; quietSince = 0; lastLength = -1 }
 	# hl.exe gets paths with forward slashes; compare with both kinds of separator made alike.
-	$appPattern = [regex]::Escape(($root -replace '\\', '/')) + '/graphical/build/host/'
+	# Instrumented runs use graphical/build-instrument.
+	$appPattern = [regex]::Escape(($root -replace '\\', '/')) + '/graphical/build[^/]*/host/'
 	$tick = {
 		param($process, $elapsed, $tree)
 		if (-not $state.editor) {
@@ -64,6 +67,7 @@ try {
 					-RedirectStandardOutput (Join-Path $out 'scenario.log') -RedirectStandardError (Join-Path $out 'scenario.err') -PassThru -WindowStyle Hidden
 			}
 		}
+		if (-not $state.editor -and $elapsed -gt 240) { return 'no editor process recognized after 240 s (build failed, or the editor runs from an unexpected path)' }
 		if ($state.scenario -and -not $state.stopped -and $state.scenario.HasExited) {
 			Note "scenario finished (exit $($state.scenario.ExitCode)); stopping the editor so the profiler exports"
 			Stop-Process -Id $state.editor.ProcessId -Force -ErrorAction SilentlyContinue
