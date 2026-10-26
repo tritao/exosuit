@@ -1160,7 +1160,7 @@ class ExosuitApp implements DesktopUiApplication {
 			if (!menu.isCurrent()) contextMenu = null;
 			else layers.push(new StackChild("context-menu", menu, 0.0, 0.0, 40));
 		}
-		var result:View = new Stack("exosuit-overlay-host", layers);
+		var result:View = new TooltipOverlayHost(new Stack("exosuit-overlay-host", layers));
 		return hostContext != null && hostContext.windowControls != null
 			? new haxeon.ui.widgets.WindowFrame("exosuit-window", result, hostContext.windowControls) : result;
 	}
@@ -2390,6 +2390,7 @@ class ExosuitApp implements DesktopUiApplication {
 		if (editorPane.items.length == 0) return welcomePanel();
 		var items:Array<TabItem> = [];
 		var filenames:Map<String, String> = new Map();
+		var tooltips:Map<String, String> = new Map();
 		var tabColors:Map<String, haxeon.ui.Color> = new Map();
 		for (item in editorPane.items) {
 			var unsupported = UiEditorTabs.unsupportedFile(item);
@@ -2541,7 +2542,32 @@ class ExosuitApp implements DesktopUiApplication {
 			contentItems.push(new KeyedView("editor", pane));
 			var content = new Column("document-content:" + documentView.id, contentItems, contentStyle);
 			var title = diffDocument == null ? (document.dirty ? "* " : "") + document.title :
-				documentView.sideBySideDiff ? document.title : diffDocument.path + " (diff)";
+				documentView.sideBySideDiff ? document.title : haxe.io.Path.withoutDirectory(diffDocument.path) + " (diff)";
+			if (diffDocument != null) {
+				var path = diffDocument.path;
+				var source = sourceControlSource();
+				if (source != null) for (repository in source.repositories())
+					if (repository.id == diffDocument.repositoryId) {
+						var relative = pathUnderScope(repository.root, path);
+						if (relative != null) path = relative;
+					}
+				tooltips.set(documentKey, path + "\n" + (diffDocument.reference == "HEAD→INDEX" ? "HEAD → Staged Changes" :
+					diffDocument.reference == "INDEX→WORKTREE" ? "Staged Changes → Working Tree" :
+					diffDocument.reference == "EMPTY→WORKTREE" ? "Empty → Working Tree" : diffDocument.reference));
+			}
+			if (diffDocument != null && !documentView.sideBySideDiff) {
+				var parts = StringTools.replace(diffDocument.path, "\\", "/").split("/");
+				var depth = 1;
+				for (other in tabs) {
+					if (other.diffDocument == null || other.diffDocument.path == diffDocument.path) continue;
+					var otherParts = StringTools.replace(other.diffDocument.path, "\\", "/").split("/");
+					var shared = 0;
+					while (shared < parts.length && shared < otherParts.length &&
+						parts[parts.length - 1 - shared] == otherParts[otherParts.length - 1 - shared]) shared++;
+					if (shared > 0) depth = Std.int(Math.max(depth, shared + 1));
+				}
+				if (depth > 1) title = parts[parts.length - 1] + " — " + parts.slice(Std.int(Math.max(0, parts.length - depth)), parts.length - 1).join("/") + " (diff)";
+			}
 			var fileTab = new TabItem(documentKey, title + (documentView.preview ? " (preview)" : ""), content);
 			fileTab.onClose = diffDocument != null ? function() host.closeTab(item, paneId, true) : function()
 				application.files.requestCloseTab(host.documentsLostByClosingTab(item),
@@ -2597,7 +2623,7 @@ class ExosuitApp implements DesktopUiApplication {
 			}
 		};
 		return new EditorTabsView(widget, filenames, darkPalette, application.settings.current.tabTooltipDelay,
-			tabColors, host.getResourceDecorations().revision);
+			tabColors, host.getResourceDecorations().revision, tooltips);
 	}
 
 	function showBreadcrumbMenu(document:editor.Document, paneId:String, path:String, event:UiEvent):Void {
