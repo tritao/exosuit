@@ -58,6 +58,25 @@ mkdir -p "$fixture/saved-workspace-project"
 printf 'class Main {}\n' > "$fixture/saved-workspace-project/Main.hx"
 run_phase saved-workspace saved-workspace "$fixture/saved-workspace-project/Main.hx"
 run_phase active-context active-context "$fixture/project/Main.hx"
+run_phase context-layout-write context-layout
+run_phase context-layout-read context-layout
+mkdir -p "$fixture/state-context-layout-corrupt"
+cp "$fixture/state-context-layout/session.conf" "$fixture/state-context-layout/recovery.conf" "$fixture/state-context-layout-corrupt/"
+python3 - "$fixture/state-context-layout-corrupt/session.conf" <<'PYCONTEXT'
+import base64, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+lines = path.read_text().splitlines()
+for index, line in enumerate(lines):
+    fields = line.split("\t")
+    if len(fields) == 5 and fields[0] == "layout=Z" and fields[1] == "context" and base64.b64decode(fields[3]).decode().startswith("workspace:"):
+        fields[4] = "invalid-context-payload"
+        lines[index] = "\t".join(fields)
+path.write_text("\n".join(lines) + "\n")
+PYCONTEXT
+run_phase context-layout-corrupt context-layout-corrupt
+run_phase context-layout-save-inactive context-layout
+run_phase context-layout-read-inactive-save context-layout
 run_phase layout-write layout-controls
 run_phase layout-read layout-controls
 run_phase layout-phone layout-controls

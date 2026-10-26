@@ -86,6 +86,7 @@ class EditorPane implements View {
 	public var onEditorAction:Null<haxeon.ui.widgets.text.TextEditorAction->Bool>;
 	public var requestCursorReveal:Void->Void = function() {};
 	public var consumeCursorReveal:Void->Bool = function() return false;
+	public var applyRestoredScroll:Void->Bool = function() return false;
 	final editorTheme:style.Theme;
 	final decorations:PluginDecorationRegistry;
 	final gutterMarkers:PluginGutterMarkerRegistry;
@@ -408,6 +409,7 @@ class EditorPane implements View {
 			if (applySourceGeometry(editorNode)) { context.requestLayoutFeedback(); return; }
 			if (Math.abs(scrollController.contentHeight - viewportGeometry.contentHeight) > 0.01 ||
 				Math.abs(scrollController.contentWidth - viewportGeometry.contentWidth) > 0.01) { context.requestLayoutFeedback(); return; }
+			if (applyRestoredScroll()) { context.requestLayoutFeedback(); return; }
 			if (wrapAnchorLine >= 0) {
 				var line = Std.int(Math.min(wrapAnchorLine, layout.paragraphCount - 1));
 				wrapAnchorLine = -1;

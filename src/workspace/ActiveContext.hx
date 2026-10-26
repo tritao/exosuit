@@ -11,6 +11,7 @@ class ActiveContext {
 	final workspace:Workspace;
 	final listeners:Array<Void->Void> = [];
 	final groupProjects:Map<String, Project> = [];
+	var workspaceUpdateDepth:Int = 0;
 	var workspaceId:String = "workspace";
 	var workspaceLabel:String = "Workspace";
 	var workspaceRoots:Array<String> = [];
@@ -19,7 +20,7 @@ class ActiveContext {
 		workspace.activeContext = this;
 		workspace.subscribe(function() {
 			workspaceRoots = [for (project in workspace.projects) project.root];
-			if (kind == ContextKind.Workspace) publish(ContextKind.Workspace, workspaceId, workspaceLabel, workspaceRoots);
+			if (kind == ContextKind.Workspace && workspaceUpdateDepth == 0) publish(ContextKind.Workspace, workspaceId, workspaceLabel, workspaceRoots);
 		});
 	}
 	public function subscribe(listener:Void->Void):Void->Void {
@@ -28,7 +29,14 @@ class ActiveContext {
 	}
 	public function updateWorkspace(id:String, label:String, roots:Array<String>):Void {
 		workspaceId = id; workspaceLabel = label; workspaceRoots = roots.copy();
-		if (kind == ContextKind.Workspace) useWorkspace();
+		if (kind == ContextKind.Workspace && workspaceUpdateDepth == 0) useWorkspace();
+	}
+	/** Replacing a saved definition publishes one final context, never temporary roots/identity. */
+	public function beginWorkspaceUpdate():Void workspaceUpdateDepth++;
+	public function endWorkspaceUpdate():Void {
+		if (workspaceUpdateDepth == 0) throw "Unbalanced workspace context update";
+		workspaceUpdateDepth--;
+		if (workspaceUpdateDepth == 0 && kind == ContextKind.Workspace) useWorkspace();
 	}
 	public function useWorkspace():Void publish(ContextKind.Workspace, workspaceId, workspaceLabel, workspaceRoots);
 	public function focusGroup(id:String, label:String, directory:String):Void {

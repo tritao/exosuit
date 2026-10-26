@@ -132,6 +132,7 @@ class ExosuitApp implements DesktopUiApplication {
 	final dock:DockWorkspaceModel;
 	final layoutControls:WorkbenchLayoutControls;
 	var contextFiles:Null<ContextFilesView>;
+	var contextLayoutsReady:Bool = false;
 	var dockPanelContents:Array<DockPanelContent>;
 	final editorPanes:Map<Int, EditorPane> = new Map();
 	var nextTerminalId:Int = 1;
@@ -383,8 +384,11 @@ class ExosuitApp implements DesktopUiApplication {
 		host.captureDockLayout = captureDockLayout;
 		host.captureExtraLayout = function() return [layoutControls.capture()];
 		host.restoreExtraLayout = layoutControls.restore;
+		var defaultSidebar = sidebar.encode();
 		host.restoreSidebar = function(lines) {
-			for (line in lines) if (StringTools.startsWith(line, "B\tsidebar\t1\t")) sidebar.restore(line.substring(12));
+			var saved = defaultSidebar;
+			for (line in lines) if (StringTools.startsWith(line, "B\tsidebar\t1\t")) saved = line.substring(12);
+			sidebar.restore(saved);
 		};
 		host.activateSearch = function() showSidebarMode("search");
 		host.restoreAgent=makeAgentTab;
@@ -414,18 +418,28 @@ class ExosuitApp implements DesktopUiApplication {
 			CommandBridge.refreshShortcuts(ui.commands, application.commands, application.keymap);
 			requestFrame();
 		});
+		host.initializeContext(session.ContextLayoutStore.key(application.activeContext.kind, application.activeContext.id));
+		host.beforeContextRestore = function() {
+			phoneLayoutActive = false; desktopDockRoot = null; desktopDockActivePanel = null; phoneContentRoot = null;
+			contextMenu = null;
+		};
 		application.activeContext.subscribe(function() {
+			var key = session.ContextLayoutStore.key(application.activeContext.kind, application.activeContext.id);
+			if (contextLayoutsReady) { host.switchContext(key); pendingTerminalFocus = dock.activePanelId == "terminal"; }
+			else host.initializeContext(key);
 			var roots = filesUseWorkspaceRoots ? application.savedWorkspaces.roots() : application.activeContext.roots;
 			explorerRoot = roots.length == 0 ? null : roots[0];
 			clearExplorerModel(); clearLocalScmSource();
 			for (root in roots) if (controller.SavedWorkspaceController.available(root)) application.scm.discover(root, _ -> requestFrame());
 			requestFrame();
 		});
+		application.savedWorkspaces.onIdentityAssigned = function(previous, next) host.renameContext(session.ContextLayoutStore.key(workspace.ContextKind.Workspace, previous), session.ContextLayoutStore.key(workspace.ContextKind.Workspace, next));
 		application.savedWorkspaces.onChanged = function() {
 			var roots = filesUseWorkspaceRoots ? application.savedWorkspaces.roots() : application.activeContext.roots;
 			explorerRoot = roots.length == 0 ? null : roots[0];
 			clearExplorerModel(); filesScroll.jumpTo(0, 0);
-			if (roots.length > 0) openExplorer(); else sidebar.setVisible(false);
+			if (roots.length > 0 && !contextLayoutsReady) openExplorer();
+			else if (roots.length == 0) { sidebar.setVisible(false); dock.close("explorer"); }
 			requestFrame();
 		};
 		if (desktop != null) {
@@ -447,6 +461,7 @@ class ExosuitApp implements DesktopUiApplication {
 			}, "Add Folder to Workspace");
 		}
 		application.session.start();
+		contextLayoutsReady = true;
 		if (openPath != null) openArgument(openPath);
 		if (dock.isOpen("terminal") && host.panelTerminals.length == 0) openTerminal();
 	}
@@ -714,7 +729,7 @@ class ExosuitApp implements DesktopUiApplication {
 		for (terminal in host.allTerminalTabs()) if (!terminal.disposed) used.set(terminal.title, true);
 		var catalog = workbenchClient == null ? null : workbenchClient.terminalCatalog();
 		if (catalog != null) for (record in catalog.terminals) used.set(record.name, true);
-		while (used.exists("Terminal " + nextTerminalId)) nextTerminalId++;
+		while (used.exists("Terminal " + nextTerminalId) || host.terminalNumberInUse(nextTerminalId)) nextTerminalId++;
 		return nextTerminalId++;
 	}
 
@@ -1085,7 +1100,7 @@ class ExosuitApp implements DesktopUiApplication {
 		var workspace:View = new Row("workspace-with-activity-bar", [
 			new KeyedView("activity-bar", new ActivityBar(sidebar, activityIcons, activateSidebarDestination,
 				application.settings.current.tabTooltipDelay, showManageMenu, manageMenu != null && contextMenu == manageMenu)),
-			new KeyedView("workspace", workspaceView)
+			new KeyedView("workspace:" + host.layoutContextKey, workspaceView)
 		], fillStyle());
 		var body = new Column("exosuit-body", [
 			new KeyedView("workspace", workspace),
@@ -2678,6 +2693,7 @@ class ExosuitApp implements DesktopUiApplication {
 			} : null;
 			pane.requestCursorReveal = documentView.cursorChanged;
 			pane.consumeCursorReveal = documentView.consumeCursorReveal;
+			pane.applyRestoredScroll = documentView.applyRestoredScroll;
 			pane.fontSize = application.settings.current.fontSize;
 			pane.applicationZoom = application.settings.current.applicationZoom / 100.0;
 			pane.onResolvedEditor = function(bounds, id) host.editorResolved(paneId, bounds, id);

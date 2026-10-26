@@ -53,6 +53,14 @@ class UiDocumentView extends View {
 	var searchRevision:Int = 0;
 	public var cursorRevealRevision(default, null):Int = 0;
 	var cursorRevealPending:Bool = false;
+	var restoredScroll:Null<{x:Int, y:Int}>;
+	/** Apply only after text and viewport metrics agree; initial layout may report empty content. */
+	public function applyRestoredScroll():Bool {
+		var target = restoredScroll;
+		if (target == null) return false;
+		restoredScroll = null;
+		return scrollController.jumpTo(target.x, target.y);
+	}
 
 	override public function cursorChanged():Void {
 		cursorRevealPending = true;
@@ -243,9 +251,13 @@ class UiDocumentView extends View {
 	override public function restoreCursor(line:Int, column:Int):Void
 		selection.setCursor(document.buffer, new BufferPosition(line, column));
 
-	override public function scrollX():Int return Std.int(scrollController.offsetX);
-	override public function scrollY():Int return Std.int(scrollController.offsetY);
-	override public function restoreScroll(x:Int, y:Int):Void scrollController.jumpTo(x, y);
+	override public function scrollX():Int return restoredScroll == null ? Std.int(scrollController.offsetX) : restoredScroll.x;
+	override public function scrollY():Int return restoredScroll == null ? Std.int(scrollController.offsetY) : restoredScroll.y;
+	override public function restoreScroll(x:Int, y:Int):Void {
+		restoredScroll = {x: x, y: y};
+		cursorRevealPending = false;
+		scrollController.jumpTo(x, y);
+	}
 
 	override public function setSearchMatches(matches:Array<SearchMatch>):Void {
 		searchRevision++;

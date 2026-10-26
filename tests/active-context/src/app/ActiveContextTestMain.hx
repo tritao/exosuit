@@ -36,6 +36,11 @@ class ActiveContextTestMain {
 		require(changes == 2 && app.activeContext.roots[0] == first && app.workspaceSearch.results.length == 0, "context switch retained stale search results");
 		unsubscribe(); app.activeContext.focusGroup("group-1", "Group", group);
 		require(changes == 2, "context listener survived unsubscribe");
+		app.activeContext.useWorkspace();
+		var replacements = 0, release = app.activeContext.subscribe(function() replacements++);
+		app.savedWorkspaces.restore(workspace.SavedWorkspace.create("Two roots", [first, group]), "");
+		require(replacements == 1 && app.activeContext.roots.length == 2, "workspace replacement published intermediate layout identities");
+		release();
 		app.shutdown();
 		trace("PASS: workspace default, coherent context event, independent group indexes, scoped search/build tasks and stale-result cancellation");
 		return 0;

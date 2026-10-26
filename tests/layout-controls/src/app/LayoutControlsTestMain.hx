@@ -32,6 +32,19 @@ class LayoutControlsTestMain {
 		require(restored.capture() == before, "corrupt optional region metadata changed layout");
 		var windowSession = new session.WorkspaceSession(); windowSession.layout.push(metadata);
 		require(session.WorkspaceSession.decode(windowSession.encode()).layout[0] == metadata, "session codec discarded region metadata");
+		var key = session.ContextLayoutStore.key(workspace.ContextKind.Group, "same-id");
+		var workspaceKey = session.ContextLayoutStore.key(workspace.ContextKind.Workspace, "same-id");
+		require(key != workspaceKey, "workspace/group context keys collided");
+		var payload = ["D\tdock\t1\t" + snapshot, "P\teditor", "V\teditor\t1\t4\t2\t0\t120\tR\tdirty-doc"];
+		var record = session.ContextLayoutStore.layoutLine(key, payload);
+		var store = session.ContextLayoutStore.read([session.ContextLayoutStore.activeLine(workspaceKey), record,
+			"Z\tcontext\t1\tbad\tbroken", session.ContextLayoutStore.layoutLine("recursive", [record])]);
+		var roundTrip = store.layouts.get(key);
+		require(store.activeKey == workspaceKey && roundTrip != null && roundTrip.join("\n") == payload.join("\n") && !store.layouts.exists("recursive"), "context codec did not isolate valid and corrupt records");
+		windowSession.groupId = "group-id"; windowSession.groupLabel = "Group label"; windowSession.groupDirectory = "/tmp/group";
+		windowSession.layout.push(record);
+		var decoded = session.WorkspaceSession.decode(windowSession.encode());
+		require(decoded.groupId == "group-id" && decoded.groupDirectory == "/tmp/group" && decoded.layout[1] == record, "window session lost active scope or inactive context");
 		controls.dispose(); restored.dispose();
 		trace("PASS: dock-region toggles, closed-region size persistence, bottom tab restoration and defensive session metadata");
 		return 0;

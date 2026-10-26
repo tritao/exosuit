@@ -14,6 +14,8 @@ class SavedWorkspaceController {
 	public var dirty(default, null):Bool = false;
 	public final recents:session.RecentWorkspaces;
 	public var onChanged:Void->Void = function() {};
+	public var onIdentityAssigned:(String, String)->Void = function(_, _) {};
+	var restoring:Bool = false;
 	public var chooseOpen:Null<Void->Void>;
 	public var chooseSaveAs:Null<Void->Void>;
 	public var chooseFolder:Null<Void->Void>;
@@ -33,6 +35,7 @@ class SavedWorkspaceController {
 		app.commands.add("workspace:close", _ -> close(), null, "Close Workspace");
 	}
 	function changed():Void {
+		if (restoring) return;
 		app.activeContext.updateWorkspace(current == null ? "workspace" : current.id, current == null ? "Workspace" : current.name, roots());
 		onChanged();
 	}
@@ -43,13 +46,20 @@ class SavedWorkspaceController {
 		changed();
 	}
 	public function restore(record:SavedWorkspace, file:String):Void {
-		for (project in app.workspace.projects.copy()) app.workspace.removeProject(project);
-		current = null;
-		for (root in record.roots) if (available(root)) app.openArgument(root);
-		current = record.copy(); path = file; dirty = false;
-		savedContent = file.length > 0 && FileSystem.exists(file) ? File.getContent(file) : "";
-		changed();
+		var content = file.length > 0 && FileSystem.exists(file) ? File.getContent(file) : "";
+		app.activeContext.beginWorkspaceUpdate(); restoring = true;
+		try {
+			for (project in app.workspace.projects.copy()) app.workspace.removeProject(project);
+			current = null;
+			for (root in record.roots) if (available(root)) app.openArgument(root);
+			current = record.copy(); path = file; dirty = false; savedContent = content;
+			app.activeContext.updateWorkspace(record.id, record.name, record.roots);
+		} catch (error:Dynamic) {
+			restoring = false; app.activeContext.endWorkspaceUpdate(); throw error;
+		}
+		restoring = false; app.activeContext.endWorkspaceUpdate(); onChanged();
 	}
+
 	public function open(file:String):Bool {
 		try {
 			var record = SavedWorkspace.decode(File.getContent(file));
@@ -68,7 +78,9 @@ class SavedWorkspaceController {
 			if (target != path) record.name = name;
 			var content = record.encode();
 			if (FileSystem.exists(target)) sys.io.AtomicFile.write(target, content); else sys.io.AtomicFile.create(target, content);
+			var previousId = current == null ? "workspace" : current.id;
 			current = record; path = target; savedContent = content; dirty = false;
+			if (previousId != record.id) onIdentityAssigned(previousId, record.id);
 			recents.add(target); changed(); return true;
 		} catch (error:Dynamic) { app.reportError("workspace", "Could not save workspace: " + Std.string(error)); return false; }
 	}

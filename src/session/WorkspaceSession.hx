@@ -14,6 +14,9 @@ class WorkspaceSession {
 	public var activeDocument:String = "";
 	public var savedWorkspace:Null<workspace.SavedWorkspace>;
 	public var workspaceFile:String = "";
+	public var groupId:String = "";
+	public var groupLabel:String = "";
+	public var groupDirectory:String = "";
 	public final layout:Array<String> = [];
 	public final expanded:Array<String> = [];
 	public final scmCommitDrafts:Map<String, String> = [];
@@ -24,6 +27,10 @@ class WorkspaceSession {
 		var result = new WorkspaceSession();
 		if (application.savedWorkspaces.current != null) result.savedWorkspace = application.savedWorkspaces.current.copy();
 		result.workspaceFile = application.savedWorkspaces.path;
+		if (application.activeContext.kind == workspace.ContextKind.Group) {
+			result.groupId = application.activeContext.id; result.groupLabel = application.activeContext.label;
+			result.groupDirectory = application.activeContext.cwd;
+		}
 		for (project in application.workspace.projects) {
 			if (safeValue(project.root)) result.projects.push(project.root);
 			for (path in project.expandedPaths()) if (safeValue(path)) result.expanded.push(path);
@@ -56,6 +63,7 @@ class WorkspaceSession {
 		else for (root in projects)
 			if (FileSystem.exists(root) && FileSystem.isDirectory(root)) application.openArgument(root);
 		for (project in application.workspace.projects) project.restoreExpanded(expanded);
+		if (groupId.length > 0 && groupDirectory.length > 0) application.activeContext.focusGroup(groupId, groupLabel, groupDirectory);
 		// Populate the sidebar before restoring the saved dock selection and focus.
 		application.root.showProjectSidebar();
 		if (layout.length > 0) {
@@ -90,6 +98,7 @@ class WorkspaceSession {
 			output += "workspace=" + haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(savedWorkspace.encode())) + "\n";
 			output += "workspaceFile=" + haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(workspaceFile)) + "\n";
 		}
+		if (groupId.length > 0) output += "contextGroup=" + [for (value in [groupId, groupLabel, groupDirectory]) haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(value))].join(":") + "\n";
 		for (project in projects) output += "project=" + clean(project) + "\n";
 		for (document in documents) output += "document=" + clean(document) + "\n";
 		output += "active=" + clean(activeDocument) + "\n";
@@ -115,6 +124,15 @@ class WorkspaceSession {
 			if (key == "version") version = Std.parseInt(value);
 			else if (key == "workspace") result.savedWorkspace = workspace.SavedWorkspace.decode(haxe.crypto.Base64.decode(value).toString());
 			else if (key == "workspaceFile") result.workspaceFile = haxe.crypto.Base64.decode(value).toString();
+			else if (key == "contextGroup" && value.length <= 32768) {
+				var fields = value.split(":");
+				if (fields.length == 3) try {
+					var id = haxe.crypto.Base64.decode(fields[0]).toString(), label = haxe.crypto.Base64.decode(fields[1]).toString(), directory = haxe.crypto.Base64.decode(fields[2]).toString();
+					if (id.length > 0 && id.length <= 4096 && directory.length > 0 && directory.length <= 4096 && safeValue(id) && safeValue(directory)) {
+						result.groupId = id; result.groupLabel = label; result.groupDirectory = directory;
+					}
+				} catch (_:Dynamic) {}
+			}
 			else if (key == "project" && value.length > 0) result.projects.push(value);
 			else if (key == "document" && value.length > 0) result.documents.push(value);
 			else if (key == "active") result.activeDocument = value;
@@ -167,15 +185,18 @@ class WorkspaceSession {
 	static function safeValue(value:String):Bool
 		return value.indexOf("\n") < 0 && value.indexOf("\r") < 0;
 
-	static function validLayout(value:String):Bool {
+	public static function validLayout(value:String):Bool {
+		if (StringTools.startsWith(value, "Z\t")) return value.length <= ContextLayoutStore.MAX_RECORD;
 		var fields = value.split("\t");
 		if (fields.length == 6 && fields[0] == "L") {
 			var bottom = Std.parseFloat(fields[3]), right = Std.parseFloat(fields[4]);
 			return fields[1] == "regions" && fields[2] == "1" && fields[5].length <= 1048576 &&
 				Math.isFinite(bottom) && Math.isFinite(right) && bottom >= 0.05 && bottom <= 0.95 && right >= 0.05 && right <= 0.95;
 		}
-		if (fields.length == 4 && fields[0] == "B")
-			return fields[1] == "sidebar" && fields[2] == "1" && fields[3].length <= 65536;
+		if (fields.length == 4 && fields[0] == "B" && fields[1] == "sidebar")
+			return fields[2] == "1" && fields[3].length <= 65536;
+		if (fields.length == 4 && (fields[0] == "I" || fields[0] == "B"))
+			return validPaneId(fields[1]) && (fields[2] == "0" || fields[2] == "1") && fields[3].length > 0 && fields[3].length <= 4096;
 		if (fields.length == 6 && fields[0] == "C")
 			return validPaneId(fields[1]) && (fields[2] == "0" || fields[2] == "1") && fields[3].length > 0 && fields[3].length <= 4096 &&
 				validPaneId(fields[4]) && fields[5].length > 0 && fields[5].length <= 256;

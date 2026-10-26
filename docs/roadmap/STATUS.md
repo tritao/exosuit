@@ -79,18 +79,57 @@ this predates M18.3. Logs: `/tmp/exosuit-m18-final-ui-suite.log` and
 `/tmp/exosuit-m18-baseline.log`. Focused M18 captures and restart artifacts:
 `/tmp/exosuit-m18-layout-final`. M18.4 and later remain outside this request.
 
-### M18.4 — session foundation in progress
+### M18.4 — per-context layouts and tabs evidence
 
-Fixed the baseline terminal-transfer failure: local PTY resize now emits an
-ordered geometry event, but TerminalPane rebuilt row painters before consuming
-it. The renderer now polls that local event before refreshing rows; remote
-geometry still follows server ordering. The existing Xvfb `write` phase passes
-both directions and proves the same shell survives. Restart then exposes a
-separate saved-scroll loss, being addressed with per-context restoration.
+The terminal geometry prerequisite landed as `d73a10e`: local PTY resize emits
+an ordered geometry event, which the renderer now consumes before rebuilding
+rows. The existing terminal-transfer check passes in both directions with one
+shell. Saved editor scroll also needed to survive initial empty layout metrics;
+view restoration now applies its saved offset after text/viewport metrics agree,
+including tabs that have not rendered yet. The existing separate-process
+split/caret/dirty-recovery/scroll/terminal restart checks now pass.
 
-Context snapshots will retain live views in memory while documents remain
-application-owned, and persist inactive layouts with explicit context identity.
-Switching must not invoke file-close operations or terminate inactive terminals.
+Added context-keyed window snapshots: the active layout retains the legacy flat
+records, with an explicit context key and bounded, versioned inactive records.
+Workspace/group keys cannot collide. Live context switches retain view objects,
+selections, tab order, active editor, splits, terminal sessions and dock/sidebar
+state. Documents stay application-owned; closing a shared dirty tab in B does
+not close A's document. Inactive documents are hydrated on restart for Save All,
+recovery and path reconciliation, while their terminal attachments restore only
+when visited. Snapshot references follow inactive Save As/rename operations.
+Missing or damaged optional context records use default layouts independently.
+The active group identity/directory survives process restart.
+
+Saved-workspace replacement now publishes one coherent context update; the
+first Save assigns identity without replacing the current tabs. Phone state is
+captured through the existing desktop-layout adapter and rebuilt on context
+switch. Widget state is scoped by context. Terminal numbering reserves inactive
+snapshot identities. Clean file deletion reconciles inactive layouts as well.
+The deletion UI regression now clicks the shipped Move to Trash confirmation
+instead of sending the obsolete typed-delete response.
+
+Passed: `tests/active-context` (including atomic workspace replacement),
+`tests/saved-workspace`, `tests/application-test`, `tests/configuration-test`,
+and `tests/layout-controls` (context codec round trips, collision prevention,
+corrupt/recursive record isolation and active-group persistence). Xvfb context
+checks pass A/B switching, independent dirty buffers/carets/scroll/splits/panel
+visibility, shared-document close ownership, two live shells without restart,
+fresh-process restoration, first workspace Save, missing/corrupt defaults, and
+Save As of an inactive document followed by another process restart. Existing
+workspace-scope and title-bar layout/phone checks are also exercised. The full
+browser build passes with the sibling Emscripten toolchain.
+
+The full UI runner now gets past its former terminal/restart failures, then
+fails the existing large-picker row-count check (`0` rows). Running the rest
+separately passes remote-open, legacy/corrupt/missing/invalid-dock startup,
+font, Problems and updated deletion checks, then stops at Explorer rename
+("TreeView selection key is not visible"). Both picker and rename failures
+reproduce on the isolated pre-layout `b91f87a` archive with the same toolkit;
+they are not M18.4 regressions. No checks were removed from the committed runner.
+Evidence is under `/tmp/exosuit-m184/` (`full-ui3.log`,
+`ui-except-picker2.log`, `picker-baseline.log`, `rename-baseline.log`,
+`context-final-*.log`, `core-*.log`, `web.log`, and `final-*.log`).
+Next milestone: M18.5's layout-mode presets; not started in this request.
 
 Last updated: 2026-10-10.
 

@@ -67,6 +67,15 @@ class UiWorkbenchHost implements WorkbenchHost {
 	final requestFrame:Void->Void;
 	final dockActions:DockActions;
 	final defaultDockLayout:DockNode;
+	var contextKey:String = "workspace:workspace";
+	public var layoutContextKey(get, never):String;
+	function get_layoutContextKey():String return contextKey;
+	final contextLayouts:Map<String, UiContextLayout> = [];
+	final pendingContextLayouts:Map<String, Array<String>> = [];
+	final contextDocumentRefs:Map<String, Document> = [];
+	var contextResolver:Null<(String, String)->Null<Document>>;
+	var defaultContextLines:Array<String> = [];
+	public var beforeContextRestore:Void->Void = function() {};
 
 	final problems:ProblemRegistry = new ProblemRegistry();
 	final pluginDecorations:PluginDecorationRegistry = new PluginDecorationRegistry();
@@ -125,7 +134,25 @@ class UiWorkbenchHost implements WorkbenchHost {
 			var terminal = UiEditorTabs.terminal(item);
 			if (terminal != null) result.push(terminal);
 		}
+		for (state in contextLayouts) {
+			for (terminal in state.panelTerminals.concat(state.hiddenTerminals)) if (result.indexOf(terminal) < 0) result.push(terminal);
+			for (pane in state.panes) for (item in pane.items) {
+				var terminal = UiEditorTabs.terminal(item);
+				if (terminal != null && result.indexOf(terminal) < 0) result.push(terminal);
+			}
+		}
 		return result;
+	}
+
+	public function terminalNumberInUse(number:Int):Bool {
+		var id = "terminal-" + number, title = "Terminal " + number;
+		for (terminal in allTerminalTabs()) if (!terminal.disposed && (terminal.id == id || terminal.title == title)) return true;
+		for (lines in pendingContextLayouts) for (line in lines) {
+			var fields = line.split("\t");
+			if (fields.length >= 6 && fields[0] == "X" && (fields[3] == id || fields[4] == title)) return true;
+			if (fields.length >= 5 && fields[0] == "Y" && (fields[2] == id || fields[3] == title)) return true;
+		}
+		return false;
 	}
 
 	public function deactivateDocumentFocus():Void focus.activate(null);
@@ -227,6 +254,11 @@ class UiWorkbenchHost implements WorkbenchHost {
 	}
 
 	public function dispose():Void {
+		for (state in contextLayouts) {
+			for (terminal in state.panelTerminals.concat(state.hiddenTerminals)) terminal.dispose();
+			for (pane in state.panes) for (item in pane.items) UiEditorTabs.dispose(item);
+		}
+		contextLayouts.clear(); pendingContextLayouts.clear(); contextDocumentRefs.clear(); contextResolver = null;
 		for (terminal in hiddenTerminals) terminal.dispose();
 		hiddenTerminals.resize(0);
 		for (terminal in panelTerminals) terminal.dispose();
@@ -265,7 +297,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 
 	function activeTabIdentity():Null<String> {
 		var tab = activeTab();
-		return tab == null ? null : activePane.id + "|" + UiEditorTabs.key(tab);
+		return tab == null ? null : contextKey + "|" + activePane.id + "|" + UiEditorTabs.key(tab);
 	}
 
 	function notifyActiveTabChanged():Void {
@@ -438,7 +470,8 @@ class UiWorkbenchHost implements WorkbenchHost {
 				pane.items.splice(index, 1);
 				documentView.dispose();
 				var shared = false;
-				for (other in allViews()) if (other.document == documentView.document) shared = true;
+				for (other in retainedViews()) if (other.document == documentView.document) shared = true;
+				if (pendingDocument(documentView.document)) shared = true;
 				if (!shared) workspace.documents.close(documentView.document, true);
 				return index;
 			}
@@ -744,7 +777,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 	/** Opens a line-aligned, synchronized two-pane comparison. */
 	public function openScmSideBySide(repositoryId:String, path:String, reference:String, baseRevision:String,
 		oldText:String, currentText:String, ?liveDocument:Document):Void {
-		var identity = "scm-diff:" + repositoryId + ":" + path + ":" + reference;
+		var identity = contextKey + ":scm-diff:" + repositoryId + ":" + path + ":" + reference;
 		for (pair in sideBySidePairs) if (pair.identity == identity) {
 			pair.diff.update(baseRevision, oldText, currentText);
 			activateTab(pair.after.document, pair.rightPaneId);
@@ -828,7 +861,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 				if (view == pair.before) beforeOpen = true;
 				if (view == pair.after) afterOpen = true;
 			}
-			if (!beforeOpen || !afterOpen) { sideBySidePairs.remove(pair); continue; }
+			if (!beforeOpen || !afterOpen) continue;
 			var beforeY = pair.before.scrollController.offsetY, afterY = pair.after.scrollController.offsetY;
 			var beforeMoved = Math.abs(beforeY - pair.lastBeforeY) > 0.5;
 			var afterMoved = Math.abs(afterY - pair.lastAfterY) > 0.5;
@@ -1054,7 +1087,8 @@ class UiWorkbenchHost implements WorkbenchHost {
 	public function documentsLostByClosingTab(item:UiEditorTab):Array<Document> {
 		var view = UiEditorTabs.document(item);
 		if (view == null || view.diffDocument != null) return [];
-		for (other in allViews()) if (other != view && other.document == view.document) return [];
+		for (other in retainedViews()) if (other != view && other.document == view.document) return [];
+		if (pendingDocument(view.document)) return [];
 		return [view.document];
 	}
 
@@ -1075,7 +1109,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		pane.items.splice(index, 1);
         var terminal = UiEditorTabs.terminal(item);
         if (terminal != null && terminal.retainOnClose) hiddenTerminals.push(terminal);
-        else UiEditorTabs.dispose(item);
+        else if (terminal == null || allTerminalTabs().indexOf(terminal) < 0) UiEditorTabs.dispose(item);
 		for (document in lost) workspace.documents.close(document, true);
 		if (index < pane.activeIndex) pane.activeIndex--;
 		else if (index == pane.activeIndex)
@@ -1091,6 +1125,20 @@ class UiWorkbenchHost implements WorkbenchHost {
 
 	public function closeDocument(document:Document):Bool {
 		if (document.dirty) return false;
+		for (state in contextLayouts) for (pane in state.panes) for (item in pane.items.copy()) {
+			var view = UiEditorTabs.document(item);
+			if (view == null || view.document != document) continue;
+			var index = pane.items.indexOf(item); pane.items.remove(item); view.dispose();
+			if (pane.activeIndex > index) pane.activeIndex--;
+			else if (pane.activeIndex == index) pane.activeIndex = Std.int(Math.min(index, pane.items.length - 1));
+		}
+		for (key in pendingContextLayouts.keys()) {
+			var lines = pendingContextLayouts.get(key);
+			if (lines != null) pendingContextLayouts.set(key, [for (line in lines) {
+				var fields = line.split("\t");
+				if (fields.length != 9 || (fields[0] != "V" && fields[0] != "T") || contextDocumentRefs.get(fields[7] + ":" + fields[8]) != document) line;
+			}]);
+		}
 		for (pane in panes.copy()) for (item in pane.items.copy()) {
 			var view = UiEditorTabs.document(item);
 			if (view != null && view.document == document) closeTab(item, pane.id);
@@ -1110,8 +1158,8 @@ class UiWorkbenchHost implements WorkbenchHost {
 		if (!canCloseActivePane()) return result;
 		for (view in target.tabs) {
 			var shared = false;
-			for (pane in panes) if (pane != target)
-				for (other in pane.tabs) if (other.document == view.document) shared = true;
+			for (other in retainedViews()) if (target.tabs.indexOf(other) < 0 && other.document == view.document) shared = true;
+			if (pendingDocument(view.document)) shared = true;
 			if (!shared && !result.contains(view.document)) result.push(view.document);
 		}
 		return result;
@@ -1126,20 +1174,29 @@ class UiWorkbenchHost implements WorkbenchHost {
 		if (!force) for (document in lost) if (document.dirty) return false;
 		panes.remove(removed);
 		dockActions.model.unregister(removed.id);
-		for (item in removed.items) UiEditorTabs.dispose(item);
+		for (item in removed.items) {
+			var terminal = UiEditorTabs.terminal(item);
+			if (terminal == null || allTerminalTabs().indexOf(terminal) < 0) UiEditorTabs.dispose(item);
+		}
 		removed.items.resize(0);
 		for (document in lost) workspace.documents.close(document, true);
 		if (activePane == removed) activatePane(panes[0]); else requestFrame();
 		return true;
 	}
 
-	public function sessionLines():Array<String> {
-		var result:Array<String> = [];
-		var dockSnapshot = captureDockLayout == null ? dockActions.model.snapshotJson() : captureDockLayout();
-		result.push("D\tdock\t1\t" + dockSnapshot);
-		result.push("Q\t" + activePane.id);
-		if (captureSidebar != null) result.push(captureSidebar());
-		if (captureExtraLayout != null) for (line in captureExtraLayout()) result.push(line);
+	function layoutLines(?state:UiContextLayout):Array<String> {
+		var panes = state == null ? this.panes : state.panes;
+		var activePane = state == null ? this.activePane : state.activePane;
+		var panelTerminals = state == null ? this.panelTerminals : state.panelTerminals;
+		var activePanelTerminalIndex = state == null ? this.activePanelTerminalIndex : state.activePanelTerminalIndex;
+		var result:Array<String> = state == null ? [] : state.chrome.copy();
+		if (state == null) {
+			var dockSnapshot = captureDockLayout == null ? dockActions.model.snapshotJson() : captureDockLayout();
+			result.push("D\tdock\t1\t" + dockSnapshot);
+			result.push("Q\t" + activePane.id);
+			if (captureSidebar != null) result.push(captureSidebar());
+			if (captureExtraLayout != null) for (line in captureExtraLayout()) result.push(line);
+		}
 		for (index in 0...panelTerminals.length) {
 			var terminal = panelTerminals[index];
 			if (!terminal.disposed && terminal.cwd.indexOf("\t") < 0 && terminal.cwd.indexOf("\n") < 0)
@@ -1181,11 +1238,157 @@ class UiWorkbenchHost implements WorkbenchHost {
 				var location = "\t" + view.cursorLine() + "\t" + view.cursorColumn() + "\t" + view.scrollX() + "\t" + view.scrollY() + "\t" + kind + "\t" + reference;
 				result.push("V\t" + pane.id + "\t" + (index == pane.activeIndex ? "1" : "0") + location);
 				// Older session readers retain every document through their flat tab format.
-				result.push("T\t\t" + (view == activeView() ? "1" : "0") + location);
+				result.push("T\t\t" + (view == activePane.activeView() ? "1" : "0") + location);
 			}
 		}
 		result.push("A\t");
 		return result;
+	}
+
+	public function renameContext(previous:String, next:String):Void {
+		if (contextKey == previous) {
+			for (view in allViews()) view.restoreScroll(view.scrollX(), view.scrollY());
+			contextKey = next;
+		}
+		var live = contextLayouts.get(previous);
+		if (live != null) { contextLayouts.remove(previous); contextLayouts.set(next, live); }
+		var pending = pendingContextLayouts.get(previous);
+		if (pending != null) { pendingContextLayouts.remove(previous); pendingContextLayouts.set(next, pending); }
+	}
+
+	public function initializeContext(key:String):Void {
+		contextKey = key;
+		if (defaultContextLines.length == 0) defaultContextLines = [for (line in chromeLines(layoutLines())) if (StringTools.startsWith(line, "L\t")) line];
+	}
+
+	static function chromeLines(lines:Array<String>):Array<String> return [for (line in lines)
+		if (StringTools.startsWith(line, "D\t") || StringTools.startsWith(line, "Q\t") ||
+			StringTools.startsWith(line, "B\tsidebar\t") || StringTools.startsWith(line, "L\t")) line];
+
+	public function sessionLines():Array<String> {
+		var result = layoutLines();
+		result.push(session.ContextLayoutStore.activeLine(contextKey));
+		var keys = [for (key in contextLayouts.keys()) key];
+		for (key in pendingContextLayouts.keys()) if (keys.indexOf(key) < 0) keys.push(key);
+		keys.sort(Reflect.compare);
+		for (key in keys) if (key != contextKey) {
+			var state = contextLayouts.get(key);
+			var lines = state == null ? serializePending(pendingContextLayouts.get(key)) : layoutLines(state);
+			if (lines != null) result.push(session.ContextLayoutStore.layoutLine(key, lines));
+		}
+		return result;
+	}
+
+	function serializePending(lines:Null<Array<String>>):Null<Array<String>> {
+		if (lines == null) return null;
+		var result:Array<String> = [];
+		for (line in lines) {
+			var fields = line.split("\t");
+			if (fields.length == 9 && (fields[0] == "V" || fields[0] == "T")) {
+				var document = contextDocumentRefs.get(fields[7] + ":" + fields[8]);
+				if (document != null) {
+					fields[7] = document.dirty || !document.hasBackingPath() ? "R" : "P";
+					fields[8] = fields[7] == "R" ? document.recoveryId : document.requirePath();
+					line = fields.join("\t");
+				}
+			}
+			result.push(line);
+		}
+		return result;
+	}
+
+	function registerContextPanes():Void {
+		for (pane in panes) dockActions.model.register(new DockPanelDescriptor(pane.id, "Editor", false, true, null,
+			haxeon.ui.docking.DockPanelHeaderMode.Content, new haxeon.ui.docking.DockPanelGrouping("editors", false)));
+	}
+
+	function restoreChrome(lines:Array<String>):Void {
+		dockActions.model.setDefaultLayout(fallbackDockLayout(defaultDockLayout, panes[0].id));
+		for (line in lines) {
+			var fields = line.split("\t");
+			if (fields.length == 4 && fields[0] == "D" && fields[1] == "dock" && fields[2] == "1") dockActions.model.restoreJson(fields[3]);
+		}
+		if (restoreSidebar != null) restoreSidebar(lines);
+		if (restoreExtraLayout != null) restoreExtraLayout(lines);
+		for (pane in panes) if (!dockActions.model.isOpen(pane.id)) dockActions.model.open(pane.id);
+	}
+
+	/** A context switch detaches views, never closes their documents or shells. */
+	public function switchContext(key:String):Void {
+		if (key == contextKey) return;
+		contextLayouts.set(contextKey, new UiContextLayout(panes, activePane, panelTerminals, hiddenTerminals,
+			activePanelTerminalIndex, chromeLines(layoutLines())));
+		focus.activate(null);
+		dismissLanguagePopup();
+		closeCommandView();
+		for (pane in panes) dockActions.model.unregister(pane.id);
+		panes.resize(0); panelTerminals.resize(0); hiddenTerminals.resize(0); activePanelTerminalIndex = -1;
+		contextKey = key;
+		beforeContextRestore();
+		var saved = contextLayouts.get(key);
+		contextLayouts.remove(key);
+		if (saved != null) {
+			for (pane in saved.panes) {
+				for (item in pane.items.copy()) { var terminal = UiEditorTabs.terminal(item); if (terminal != null && terminal.disposed) pane.items.remove(item); }
+				pane.activeIndex = Std.int(Math.min(pane.activeIndex, pane.items.length - 1));
+				for (view in pane.tabs) view.restoreScroll(view.scrollX(), view.scrollY());
+				panes.push(pane);
+			}
+			activePane = saved.activePane;
+			for (terminal in saved.panelTerminals) if (!terminal.disposed) panelTerminals.push(terminal);
+			for (terminal in saved.hiddenTerminals) if (!terminal.disposed) hiddenTerminals.push(terminal);
+			activePanelTerminalIndex = saved.activePanelTerminalIndex;
+			registerContextPanes(); restoreChrome(saved.chrome);
+		} else {
+			var lines = pendingContextLayouts.get(key);
+			pendingContextLayouts.remove(key);
+			restoreLayoutLines(lines == null ? defaultContextLines : lines, resolveContextDocument);
+		}
+		var editorFocused = dockActions.model.activePanelId == activePane.id;
+		pendingEditorFocus = editorFocused; focus.activate(editorFocused ? activeView() : null); notifyActiveTabChanged(); requestFrame();
+	}
+
+	function resolveContextDocument(kind:String, reference:String):Null<Document> {
+		var cached = contextDocumentRefs.get(kind + ":" + reference);
+		if (cached != null && workspace.documents.documents.indexOf(cached) >= 0) return cached;
+		for (document in workspace.documents.documents) if (kind == "R" && document.recoveryId == reference ||
+			kind == "P" && document.hasBackingPath() && document.requirePath() == reference) return document;
+		return contextResolver == null ? null : contextResolver(kind, reference);
+	}
+
+	public function restoreSessionLines(lines:Array<String>, ?resolver:(String, String)->Null<Document>):Void {
+		var stored = session.ContextLayoutStore.read(lines);
+		contextResolver = resolver;
+		for (key in stored.layouts.keys()) {
+			var layout = stored.layouts.get(key);
+			if (layout == null) continue;
+			pendingContextLayouts.set(key, layout);
+			// Hydrate documents now so Save All, recovery and rename also see inactive tabs.
+			for (line in layout) {
+				var fields = line.split("\t");
+				if (fields.length != 9 || fields[0] != "V") continue;
+				var document = resolveContextDocument(fields[7], fields[8]);
+				if (document != null) contextDocumentRefs.set(fields[7] + ":" + fields[8], document);
+			}
+		}
+		var selected = pendingContextLayouts.get(contextKey);
+		pendingContextLayouts.remove(contextKey);
+		if (selected == null) selected = stored.activeKey == null || stored.activeKey == contextKey ? lines : defaultContextLines;
+		restoreLayoutLines(selected, resolveContextDocument);
+	}
+
+	function retainedViews():Array<UiDocumentView> {
+		var result = allViews();
+		for (state in contextLayouts) for (pane in state.panes) for (view in pane.tabs) result.push(view);
+		return result;
+	}
+
+	function pendingDocument(document:Document):Bool {
+		for (layout in pendingContextLayouts) for (line in layout) {
+			var fields = line.split("\t");
+			if (fields.length == 9 && fields[0] == "V" && contextDocumentRefs.get(fields[7] + ":" + fields[8]) == document) return true;
+		}
+		return false;
 	}
 
 	function validEditorPaneId(id:String):Bool {
@@ -1206,9 +1409,12 @@ class UiWorkbenchHost implements WorkbenchHost {
 		};
 	}
 
-	public function restoreSessionLines(lines:Array<String>, ?resolver:(String, String) -> Null<Document>):Void {
+	function restoreLayoutLines(lines:Array<String>, ?resolver:(String, String) -> Null<Document>):Void {
 		var retainedTerminals:Map<String, UiTerminalTab> = [];
-		for (terminal in allTerminalTabs()) retainedTerminals.set(terminal.id, terminal);
+		for (terminal in panelTerminals.concat(hiddenTerminals)) retainedTerminals.set(terminal.id, terminal);
+		for (pane in panes) for (item in pane.items) {
+			var terminal = UiEditorTabs.terminal(item); if (terminal != null) retainedTerminals.set(terminal.id, terminal);
+		}
 		hiddenTerminals.resize(0);
 		panelTerminals.resize(0);
 		activePanelTerminalIndex = -1;
@@ -1309,7 +1515,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		}
 		for (terminal in retainedTerminals) terminal.dispose();
 		dockActions.model.setDefaultLayout(fallbackDockLayout(defaultDockLayout, panes[0].id));
-		if (snapshot != null) dockActions.model.restoreJson(snapshot);
+		var snapshotRestored = snapshot != null && dockActions.model.restoreJson(snapshot);
 		if (restoreSidebar != null) restoreSidebar(lines);
 		if (restoreExtraLayout != null) restoreExtraLayout(lines);
 		// Invalid/older layouts still reopen every resolved pane and document.
@@ -1318,15 +1524,16 @@ class UiWorkbenchHost implements WorkbenchHost {
 		if (requested != null) activePane = requested;
 		// Transient comparisons are not restored; their empty groups must not reserve editor space.
 		for (pane in panes.copy()) if (pane.items.length == 0 && panes.length > 1) closePane(pane.id, true);
-		dockActions.model.activate(activePane.id);
-		pendingEditorFocus = true;
-		focus.activate(activeView());
+		if (!snapshotRestored) dockActions.model.activate(activePane.id);
+		pendingEditorFocus = dockActions.model.activePanelId == activePane.id;
+		focus.activate(pendingEditorFocus ? activeView() : null);
 		notifyActiveTabChanged();
 		requestFrame();
 	}
 
 	function resolveTerminal(id:String, title:String, cwd:String, remote:Bool, resource:String, workspaceRoot:String, retained:Map<String, UiTerminalTab>):Null<UiTerminalTab> {
-		for (terminal in allTerminalTabs()) if (terminal.id == id) return null;
+		for (terminal in panelTerminals) if (terminal.id == id) return null;
+		for (pane in panes) for (item in pane.items) { var terminal = UiEditorTabs.terminal(item); if (terminal != null && terminal.id == id) return null; }
 		var existing = retained.get(id);
 		if (existing != null) {
 			retained.remove(id);
@@ -1482,7 +1689,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 	/** Updates motion settings for existing and future document panes. */
 	public function applySettings(settings:Settings):Bool {
 		scrollSettings = settings.copy();
-		for (view in allViews()) view.applyScrollSettings(scrollSettings);
+		for (view in retainedViews()) view.applyScrollSettings(scrollSettings);
 		return true;
 	}
 

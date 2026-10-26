@@ -53,13 +53,13 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	var remoteOpenTests:Null<RemoteFileOpenTests>;
 
 	public function new(context:haxeon.ui.host.DesktopUiHostContext, path:String, phase:String) {
-		super(context.fonts, null, context, (StringTools.startsWith(phase, "layout-") || phase == "active-context" || phase == "saved-workspace" || phase == "explorer-rename" || phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-geometry" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-font" || phase == "editor-tabs" || phase == "zoom" || phase == "word-delete" || phase == "selection" || phase == "tab-close" || phase == "pointer-actions" || phase == "blank-editor-click" || phase == "caret-follow" || phase == "exit-confirmation" || phase == "save-as" || phase == "tab-close-paint" || phase == "settings" || phase == "editor-minimap" || phase == "toolbar-tooltip" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
+		super(context.fonts, null, context, (phase == "context-layout-write" || StringTools.startsWith(phase, "layout-") || phase == "active-context" || phase == "saved-workspace" || phase == "explorer-rename" || phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-geometry" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-font" || phase == "editor-tabs" || phase == "zoom" || phase == "word-delete" || phase == "selection" || phase == "tab-close" || phase == "pointer-actions" || phase == "blank-editor-click" || phase == "caret-follow" || phase == "exit-confirmation" || phase == "save-as" || phase == "tab-close-paint" || phase == "settings" || phase == "editor-minimap" || phase == "toolbar-tooltip" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
 			null, null, null, WorkspaceSmokeMain.createTerminal);
 		this.phase = phase;
 		closeContext = context;
 		this.testFonts = context.fonts;
 		this.path = path;
-		if (StringTools.startsWith(phase, "layout-")) application.open(path);
+		if (phase == "context-layout-write" || StringTools.startsWith(phase, "layout-")) application.open(path);
 		if (phase == "explorer-rename") {
 			var folder = haxe.io.Path.directory(path) + "/folder.old";
 			sys.FileSystem.createDirectory(folder);
@@ -123,6 +123,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		if (phase == "explorer-rename") return explorerRenameStep(frame);
 		if (phase == "saved-workspace") return savedWorkspaceStep(frame);
 		if (phase == "active-context") return activeContextStep(frame);
+		if (StringTools.startsWith(phase, "context-layout-")) return contextLayoutStep(frame);
 		if (StringTools.startsWith(phase, "layout-")) return layoutControlsStep(frame);
 		if (phase == "remote-open") {
 			if (frames == 1) { remoteOpenTests = new RemoteFileOpenTests(this); remoteOpenTests.start(); }
@@ -1334,6 +1335,111 @@ class WorkspaceSmokeApp extends ExosuitApp {
 
 	var deletedDocument:editor.Document;
 	var deletedPane:String;
+	var contextAView:UiDocumentView;
+	var contextBView:UiDocumentView;
+	var contextADock:String;
+	var contextBDock:String;
+	function contextLayoutStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
+		var groupRoot = haxe.io.Path.directory(path) + "-context-b";
+		var expected = config.ConfigurationPaths.stateRoot() + "/context-layout-a.txt";
+		if (phase == "context-layout-write") {
+			if (frames == 2) {
+				var text = ""; for (i in 0...150) text += "workspace line " + i + "\n";
+				contextAView = host.activeView(); require(contextAView != null, "context A has no document");
+				contextAView.document.buffer.replaceAllText(text, contextAView.selection);
+				require(host.splitActive(view.LayoutKind.Horizontal), "context A split failed");
+				contextAView = host.activeView();
+				newTerminal();
+				layoutControls.toggleRight(); layoutControls.toggleBottom();
+			}
+			if (frames == 4) {
+				contextAView.restoreCursor(30, 4); contextAView.restoreScroll(0, 320);
+				host.activateTab(contextAView.document, host.activePane.id);
+				require(application.savedWorkspaces.saveAs(config.ConfigurationPaths.stateRoot() + "/A.exosuit-workspace") && host.activeView() == contextAView, "first workspace save replaced visible tabs");
+				contextADock = dock.snapshotJson();
+				sys.io.File.saveContent(expected, contextADock);
+			}
+			if (frames == 5) {
+				sys.FileSystem.createDirectory(groupRoot);
+				sys.io.File.saveContent(groupRoot + "/B.txt", "group line\n");
+				application.activeContext.focusGroup("context-layout-b", "Group B", groupRoot);
+				require(host.panes.length == 1 && host.activePane.items.length == 0, "new context inherited A's tabs");
+				require(!dock.isOpen("context-panel") && layoutControls.bottomOpen(), "new context inherited A's panels");
+				application.open(groupRoot + "/B.txt"); contextBView = host.activeView();
+				var text = ""; for (i in 0...150) text += "group B dirty line " + i + "\n";
+				contextBView.document.buffer.replaceAllText(text, contextBView.selection);
+				// Closing a shared dirty tab in B must retain A's document and view.
+				application.open(path);
+				var shared = host.activeView();
+				require(shared != null && shared.document == contextAView.document && host.closeActiveTab(), "shared dirty tab could not close independently");
+				require(application.documents.documents.indexOf(contextAView.document) >= 0, "B closed A's document");
+				newTerminal(); host.activateTab(contextBView.document, host.activePane.id);
+				require(WorkspaceSmokeMain.terminalStarts == 2 && host.allTerminalTabs().length == 2, "context switch terminated or duplicated a shell");
+			}
+			if (frames == 7) { contextBView.restoreCursor(42, 6); contextBView.restoreScroll(0, 480); contextBDock = dock.snapshotJson(); }
+			if (frames == 8) application.activeContext.useWorkspace();
+			if (frames == 10) {
+				require(host.activeView() == contextAView && host.panes.length == 2, "switch lost A's live views or split");
+				require(contextAView.document.dirty && contextAView.cursorLine() == 30 && contextAView.cursorColumn() == 4 && contextAView.scrollY() == 320, "switch lost A's dirty text, caret or scroll: " + contextAView.document.dirty + ":" + contextAView.cursorLine() + ":" + contextAView.cursorColumn() + ":" + contextAView.scrollY());
+				require(dock.snapshotJson() == contextADock, "switch lost A's panel visibility or layout");
+				application.activeContext.focusGroup("context-layout-b", "Group B", groupRoot);
+			}
+			if (frames == 12) {
+				require(host.activeView() == contextBView && contextBView.document.dirty && contextBView.cursorLine() == 42 && contextBView.scrollY() == 480, "switch lost B's independent view");
+				require(dock.snapshotJson() == contextBDock, "switch lost B's dock");
+				require(WorkspaceSmokeMain.terminalStarts == 2 && host.panelTerminals.length == 1, "returning to B recreated its shell");
+				trace("PASS: context A/B independent tabs, splits, panel layouts, dirty shared ownership, carets and scroll");
+			}
+		} else if (phase == "context-layout-read") {
+			if (frames == 3) {
+				require(application.activeContext.id == "context-layout-b" && application.activeContext.cwd == groupRoot, "restart lost focused group context");
+				contextBView = host.activeView();
+				require(contextBView != null && contextBView.document.dirty && contextBView.document.buffer.text.indexOf("group B dirty") == 0 && contextBView.cursorLine() == 42 && contextBView.scrollY() == 480, "restart lost B's dirty tab/caret/scroll");
+				require(application.documents.documents.length == 2, "inactive dirty documents were not hydrated");
+				require(WorkspaceSmokeMain.terminalStarts == 1 && host.terminalNumberInUse(1) && host.terminalNumberInUse(2), "inactive terminal identity was not reserved");
+				application.activeContext.useWorkspace();
+			}
+			if (frames == 5) {
+				contextAView = host.activeView();
+				require(host.panes.length == 2 && contextAView != null && contextAView.document.dirty && contextAView.document.buffer.text.indexOf("workspace line") == 0,
+					"restart lost inactive A's split or dirty document");
+				require(contextAView.cursorLine() == 30 && contextAView.cursorColumn() == 4 && contextAView.scrollY() == 320, "restart lost A's caret/scroll");
+				require(dock.snapshotJson() == sys.io.File.getContent(expected), "restart lost A's dock sizes/visibility");
+				require(WorkspaceSmokeMain.terminalStarts == 2 && host.panelTerminals.length == 1, "inactive A terminal was not restored exactly once");
+				application.activeContext.focusGroup("context-layout-b", "Group B", groupRoot);
+			}
+			if (frames == 7) {
+				require(host.activeView() == contextBView, "restored B view did not survive return");
+				application.activeContext.focusGroup("missing-layout", "Fresh context", groupRoot);
+				require(host.activePane.items.length == 0 && host.panes.length == 1, "missing snapshot did not use defaults");
+				application.activeContext.focusGroup("context-layout-b", "Group B", groupRoot);
+				trace("PASS: process restart restores active group plus inactive dirty context, caret/scroll, dock, and missing-context defaults");
+			}
+		} else if (phase == "context-layout-save-inactive" && frames == 3) {
+			var inactive:Null<editor.Document> = null;
+			for (document in application.documents.documents) if (document.path == path) inactive = document;
+			require(inactive != null && inactive.dirty, "inactive dirty document was not available to Save All");
+			if (inactive == null) throw "missing inactive document";
+			require(application.documents.saveAs(inactive, config.ConfigurationPaths.stateRoot() + "/saved-inactive.txt"), "inactive Save As failed");
+			trace("PASS: inactive document can be saved/renamed before its context is visited");
+		} else if (phase == "context-layout-read-inactive-save" && frames == 3) {
+			application.activeContext.useWorkspace();
+		} else if (phase == "context-layout-read-inactive-save" && frames == 5) {
+			var active = host.activeView();
+			require(active != null && active.document.path == config.ConfigurationPaths.stateRoot() + "/saved-inactive.txt" && !active.document.dirty
+				&& active.document.buffer.text.indexOf("workspace line") == 0 && active.cursorLine() == 30 && active.scrollY() == 320,
+				"inactive snapshot kept a stale recovery/path reference after Save As");
+			trace("PASS: saved inactive tab survives another process with current path and view state");
+		} else if (phase == "context-layout-corrupt" && frames == 3) {
+			var active = host.activeView();
+			require(active != null && active.document.dirty, "corrupt inactive snapshot damaged the active context");
+			application.activeContext.useWorkspace();
+			require(host.panes.length == 1 && host.activePane.items.length == 0, "corrupt inactive snapshot did not use defaults");
+			trace("PASS: corrupt context snapshot falls back independently without losing the active dirty tab");
+		}
+		return super.submit(frame);
+	}
+
 	function layoutControlsStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		var expectedFile = config.ConfigurationPaths.stateRoot() + "/layout-controls-width.txt";
 		if (phase == "layout-phone") frame.setViewport(480, 720);
@@ -1531,10 +1637,9 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		}
 		if (frames == 3 || frames == 5) {
 			application.files.openDeleteFile();
-			application.textInput("delete");
-			application.keyPressed(platform.Platform.KEY_ENTER, 0);
 		}
 		if (frames == 4) {
+			click("trash-confirmation-move");
 			require(!sys.FileSystem.exists(cleanPath) && !deletedDocument.dirty
 				&& host.allViews().length == 0 && !application.documents.documents.contains(deletedDocument)
 				&& host.activePane.id == deletedPane && !host.isCommandViewActive(),
@@ -1547,6 +1652,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 			deletedDocument.insert(new editor.BufferSelection(), "// unsaved\n");
 		}
 		if (frames == 6) {
+			click("trash-confirmation-move");
 			require(!sys.FileSystem.exists(dirtyPath) && deletedDocument.dirty && deletedDocument.path == null
 				&& host.allViews().length == 1 && host.activeView() != null,
 				"dirty Explorer deletion lost its editor");
@@ -1802,7 +1908,7 @@ class WorkspaceSmokeMain {
 			zoomWidth = options.width;
 		}
 		options.captureDirectory = args[1];
-		options.frameLimit = args[2] == "layout-read" ? 15 : args[2] == "layout-write" ? 13 : args[2] == "layout-phone" ? 6 : args[2] == "active-context" ? 10 : args[2] == "saved-workspace" ? 10 : args[2] == "explorer-rename" ? 40 : args[2] == "editor-geometry" ? 25 : args[2] == "file-deletion" ? 10 : args[2] == "blank-editor-click" ? 11 : args[2] == "zoom" ? 75 : args[2] == "save-as" ? 10 : args[2] == "exit-confirmation" ? 11 : args[2] == "tab-close" ? 13 : args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 11 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
+		options.frameLimit = args[2] == "context-layout-write" ? 14 : args[2] == "context-layout-read" ? 9 : StringTools.startsWith(args[2], "context-layout-") ? 7 : args[2] == "layout-read" ? 15 : args[2] == "layout-write" ? 13 : args[2] == "layout-phone" ? 6 : args[2] == "active-context" ? 10 : args[2] == "saved-workspace" ? 10 : args[2] == "explorer-rename" ? 40 : args[2] == "editor-geometry" ? 25 : args[2] == "file-deletion" ? 10 : args[2] == "blank-editor-click" ? 11 : args[2] == "zoom" ? 75 : args[2] == "save-as" ? 10 : args[2] == "exit-confirmation" ? 11 : args[2] == "tab-close" ? 13 : args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 11 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
 		var status = DesktopUiHost.run(options, context -> new WorkspaceSmokeApp(context, args[0], args[2]));
 
 		return status;
