@@ -76,8 +76,9 @@ class ScmOpenDocumentMarkers {
 			return;
 		}
 
-		// The revision string is only needed when the snapshot object changed.
-		var revision = snapshot == baseSnapshot ? baseRevision : haxe.Int64.toStr(snapshot.revision);
+		// The revision string is only needed when the revision changed.
+		var known = baseSnapshot;
+		var revision = known != null && (known == snapshot || haxe.Int64.eq(known.revision, snapshot.revision)) ? baseRevision : haxe.Int64.toStr(snapshot.revision);
 		baseSnapshot = snapshot;
 		if (!wasNeeded || revision != baseRevision || untracked != wasUntracked) {
 			baseRevision = revision;

@@ -2894,12 +2894,14 @@ class ExosuitApp implements DesktopUiApplication {
 	function syncScmDocumentMarkers(now:Float):Void {
 		var source = sourceControlSource();
 		var desired:Map<Int, Bool> = [];
+		var visited:Map<Int, Bool> = [];
 		if (source != null && !source.isRemote()) {
 			var repositories = source.repositories();
 			var sourceIdentity = source.identity();
 			for (view in host.allViews()) {
 				var document = view.document;
 				if (view.diffDocument != null || document.path == null) continue;
+				visited.set(document.id, true);
 				var target = scmMarkerTarget(sourceIdentity, repositories, document);
 				if (target == null) continue;
 				var repository = target.repository;
@@ -2908,7 +2910,8 @@ class ExosuitApp implements DesktopUiApplication {
 				var snapshot = source.snapshot(repository.id);
 				if (snapshot == null) continue;
 				// The group scan costs as much as the change list is long, so redo it only for a new snapshot.
-				if (target.snapshot != snapshot) {
+				var scanned = target.snapshot;
+				if (scanned == null || (scanned != snapshot && !haxe.Int64.eq(scanned.revision, snapshot.revision))) {
 					var untracked = false, worktree = false;
 					for (group in snapshot.groups) for (resource in group.resources) if (resource.path == relative) {
 						if (group.id == ScmGroupId.Untracked) untracked = true;
@@ -2946,7 +2949,7 @@ class ExosuitApp implements DesktopUiApplication {
 			scmDocumentMarkers.remove(id);
 			scmDocumentMarkerKeys.remove(id);
 		}
-		for (id in [for (id in scmMarkerTargets.keys()) if (!desired.exists(id)) id]) scmMarkerTargets.remove(id);
+		for (id in [for (id in scmMarkerTargets.keys()) if (!visited.exists(id)) id]) scmMarkerTargets.remove(id);
 	}
 
 	/** Resolves a document to its repository, recomputing only when its path or the repository list changed. */
