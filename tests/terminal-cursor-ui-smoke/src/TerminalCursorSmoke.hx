@@ -52,6 +52,7 @@ class CursorApp implements DesktopUiApplication {
 		var fontDirectory = "haxeon/packages/ui/vendor/skribidi/example/data/";
 		fonts.add(fontDirectory + "IBMPlexSans-Regular.ttf");
 		fonts.add(fontDirectory + "IBMPlexMono-Regular.ttf", haxeon.ui.FontFamily.Monospace);
+		TerminalPollTests.run(fonts);
 		pane = new ui.TerminalPane(new TerminalSession(backend, emulator), host.requestFrame,
 			new ui.TerminalPalette(dark), fonts);
 		TerminalNameTests.run();
@@ -122,6 +123,7 @@ class TerminalCursorSmoke {
 		var args = Sys.args();
 		if (args.length != 3) throw "Expected capture directory, focus mode and theme";
 		if (args[1] == "row-reuse") return TerminalRowReuseSmoke.run(args[0], args[2] == "dark");
+		if (args[1] == "async-echo") return TerminalAsyncEchoSmoke.run(args[0], args[2] == "dark");
 		var options = new DesktopUiHostOptions();
 		options.width = 360;
 		options.height = 140;

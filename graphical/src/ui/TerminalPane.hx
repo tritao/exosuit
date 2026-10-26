@@ -183,7 +183,9 @@ class TerminalPane implements TerminalPanel {
 		}
 		session.pollEvents();
 		if (remoteBackend != null) syncControlLayout();
-		refreshRows(false);
+		// Shell echo and cursor motion arrive asynchronously, often after the
+		// frame requested by the key itself. Schedule their presentation too.
+		if (refreshRows(false)) requestFrame();
 	}
 
 	/** Keep the normal writable terminal quiet; show states that need attention. */
@@ -272,7 +274,7 @@ class TerminalPane implements TerminalPanel {
 		return sources;
 	}
 
-	function refreshRows(force:Bool, focusChanged:Bool = false):Void {
+	function refreshRows(force:Bool, focusChanged:Bool = false):Bool {
 		var emulator = session.emulator;
 		var changed = emulator.snapshot();
 		var cursor = emulator.cursor();
@@ -280,7 +282,7 @@ class TerminalPane implements TerminalPanel {
 		cursor.row += emulator.scrollback(-1).current;
 		var count = emulator.rows();
 		if (!force && !focusChanged && changed == 0 && count == renderedRows.length
-			&& cursorRow == cursor.row && cursorColumn == cursor.column && cursorMode == cursor.mode) return;
+			&& cursorRow == cursor.row && cursorColumn == cursor.column && cursorMode == cursor.mode) return false;
 		while (renderedRows.length > count) {
 			renderedRows.pop().layout.dispose();
 			revisions.pop();
@@ -352,6 +354,7 @@ class TerminalPane implements TerminalPanel {
 			cursorMode = cursor.mode;
 			if (cursorRow >= 0 && cursorRow < revisions.length) revisions[cursorRow]++;
 		}
+		return true;
 	}
 
 	/** Keep codepoint offsets and cursor color roles while decoding only once per run. */

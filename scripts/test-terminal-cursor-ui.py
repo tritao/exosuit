@@ -27,7 +27,7 @@ def main():
             foreground = (32, 42, 54) if scheme == "light" else (220, 227, 236)
             background = (255, 255, 255) if scheme == "light" else (23, 28, 35)
             images = {}
-            for mode in ("focused", "unfocused", "refocused", "window-blur", "hidden", "selection", "colors", "row-reuse"):
+            for mode in ("focused", "unfocused", "refocused", "window-blur", "hidden", "selection", "colors", "row-reuse", "async-echo"):
                 capture = fixture / f"{scheme}-{mode}"
                 command = [str(ROOT / "haxeon/.tools/hashlink/hl"),
                            str(PROJECT.parent / "build/host/main.hl"), str(capture), mode, scheme]
@@ -37,6 +37,14 @@ def main():
                 state = json.loads((capture / "app-state.json").read_text())
                 image = Image.open(capture / "frame.png").convert("RGB")
                 images[mode] = image
+                if mode == "async-echo":
+                    assert state["batches"] == state["renderedBatches"] == 10, state
+                    assert state["renderedColumn"] == 30 and state["echoToSubmitMs"], state
+                    x = math.floor(state["cursorX"] + state["cursorWidth"] / 2)
+                    y = math.floor(state["cursorY"] + state["cursorHeight"] - 1)
+                    cursor = (40, 102, 178) if scheme == "light" else (145, 191, 255)
+                    assert image.getpixel((x, y)) == cursor, (scheme, "asynchronous cursor", image.getpixel((x, y)))
+                    continue
                 if mode == "row-reuse":
                     assert state["rowReuseChecks"] == 25 and state["stableRowWidgets"] == 6, state
                     comparisons = sorted(capture.glob("comparison-*.png"))
@@ -79,7 +87,7 @@ def main():
         artifacts = os.environ.get("TERMINAL_CURSOR_ARTIFACTS")
         if artifacts:
             shutil.copytree(fixture, artifacts, dirs_exist_ok=True)
-        print("PASS: terminal names, cursor focus, retained rows and seamless selection in both themes")
+        print("PASS: terminal names, cursor focus, asynchronous echo, retained rows and seamless selection in both themes")
 
 
 if __name__ == "__main__":
