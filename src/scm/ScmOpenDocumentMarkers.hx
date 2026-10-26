@@ -20,6 +20,7 @@ class ScmOpenDocumentMarkers {
 	final onChanged:Void->Void;
 	final subscription:BufferSubscription;
 	var baseRevision:String = "";
+	var baseSnapshot:Null<ScmSnapshot>;
 	var baseText:Null<String>;
 	var baseLoaded:Bool = false;
 	var baseRequestGeneration:Int = 0;
@@ -75,8 +76,12 @@ class ScmOpenDocumentMarkers {
 			return;
 		}
 
-		var revision = haxe.Int64.toStr(snapshot.revision);
-		if (!wasNeeded || revision != baseRevision || untracked != wasUntracked) {
+		// Snapshots are compared by identity: the service keeps one object while content is unchanged, and a
+		// repository that was dropped and found again restarts its revisions, so a revision alone can repeat.
+		var revision = snapshot == baseSnapshot ? baseRevision : haxe.Int64.toStr(snapshot.revision);
+		var replaced = snapshot != baseSnapshot;
+		baseSnapshot = snapshot;
+		if (!wasNeeded || replaced || untracked != wasUntracked) {
 			baseRevision = revision;
 			wasNeeded = true;
 			wasUntracked = untracked;

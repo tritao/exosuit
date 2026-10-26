@@ -38,6 +38,22 @@ class LanguageServiceTestMain {
 		return value;
 	}
 
+	static function ask(client:LanguageServiceClient, method:String):Dynamic {
+		var result:Dynamic = null, done = false;
+		@:privateAccess client.transport.request(method, {}, Sys.time(), 5.0, response -> { result = response.result; done = true; });
+		pump(client, () -> done, 5.0);
+		return result;
+	}
+
+	static function serverSemanticRequests(client:LanguageServiceClient):Int return Reflect.field(ask(client, "semanticStats"), "requests");
+
+	/** Waits until the next semantic request was sent and its reply handled. */
+	static function awaitSemanticReply(client:LanguageServiceClient, document:editor.Document):Void {
+		function state():Null<language.LanguageDocumentState> return @:privateAccess client.states.get(document.id);
+		pump(client, () -> { var value = state(); return value != null && value.semanticRequest >= 0; }, 5.0);
+		pump(client, () -> { var value = state(); return value != null && value.semanticRequest < 0; }, 5.0);
+	}
+
 	static function semanticColors(server:String, project:String):Void {
 		var registry = new SyntaxRegistry(); BuiltinSyntax.install(registry);
 		var documents = new DocumentManager(registry), path = project + "/Semantic.hx";
@@ -85,11 +101,21 @@ class LanguageServiceTestMain {
 			[new language.LanguageSemanticToken(0, 6, "futureEntity", [])]);
 		var preserved = editor.SemanticPresentation.foreground(collision, theme, future, 0, 6);
 		require(preserved.length == 1 && preserved[0].color == theme.tokenColor(syntax.HighlightToken.TYPE), "unknown semantic category removed syntax fallback");
-		var before = snapshot;
+		var before = snapshot, changes = 0;
+		client.semanticTokensChanged = () -> changes++;
+		var requestsBefore = serverSemanticRequests(client);
 		@:privateAccess client.receiveServerRequest("workspace/semanticTokens/refresh", null);
-		require(client.semanticTokensFor(document) == null, "refresh retained old snapshot");
-		pump(client, () -> client.semanticTokensFor(document) != null, 5.0);
-		require(client.semanticTokensFor(document) != before, "refresh did not request new tokens");
+		require(client.semanticTokensFor(document) == before && changes == 0, "refresh dropped tokens that are still valid");
+		awaitSemanticReply(client, document);
+		// The reply arrived and was decoded (the server counted a request, the callback cleared it), but equal tokens change nothing.
+		require(serverSemanticRequests(client) == requestsBefore + 1, "refresh did not request tokens again");
+		require(client.semanticTokensFor(document) == before && changes == 0, "refresh with unchanged tokens replaced them or requested a redraw");
+		ask(client, "semanticShift");
+		@:privateAccess client.receiveServerRequest("workspace/semanticTokens/refresh", null);
+		awaitSemanticReply(client, document);
+		var shifted = client.semanticTokensFor(document);
+		require(shifted != null && before != null && shifted != before && changes == 1 && shifted.tokens[0].end == before.tokens[0].end - 1,
+			"refresh with different tokens did not replace them and request a redraw");
 		client.stop(Sys.time());
 		require(client.semanticTokensFor(document) == null, "stopped server retained colors");
 		pump(client, () -> client.status == "stopped", 5.0);

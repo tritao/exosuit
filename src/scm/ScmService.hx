@@ -56,6 +56,9 @@ class ScmService {
 	final processes:ProcessManager;
 	final scheduler:JobScheduler;
 	final trustStore:ScmTrustStore;
+	/** Advances whenever discovery replaces a root's repositories, so callers can drop cached path resolutions. */
+	public var discoveryEpoch(default, null):Int = 0;
+	final normalizedPaths:Map<String, String> = [];
 	final providerOverride:Null<ScmProvider>;
 	var provider:ScmProvider;
 	final roots:Map<String, ScmRootState> = [];
@@ -189,6 +192,10 @@ class ScmService {
 					handle.dispose();
 				}
 			state.handles = next;
+			// A symlink may now lead elsewhere; forget the remembered path resolutions.
+			discoveryEpoch++;
+			normalizedPaths.clear();
+			trustStore.forgetKeys();
 			state.excluded = null;
 			var discovered:Map<String, Bool> = [];
 			for (handle in state.handles) discovered.set(handle.repository().id, true);
@@ -470,7 +477,8 @@ class ScmService {
 				var changed = previous == null || !sameSnapshotContent(previous, received);
 				var revision = previous == null ? received.revision
 					: changed ? Int64.add(previous.revision, Int64.ofInt(1)) : previous.revision;
-				var snapshot = revision == received.revision ? received
+				// Unchanged content keeps the same object, so holders can tell a new snapshot by identity.
+				var snapshot = previous != null && !changed ? previous : revision == received.revision ? received
 					: new ScmSnapshot(revision, received.head, received.groups, received.truncated);
 				state.snapshots.set(id, snapshot);
 				if (changed)
@@ -537,9 +545,17 @@ class ScmService {
 		return null;
 	}
 
+	function normalizedPath(path:String):String {
+		var known = normalizedPaths.get(path);
+		if (known != null) return known;
+		var value = normalize(path);
+		normalizedPaths.set(path, value);
+		return value;
+	}
+
 	function stateForPath(path:String):Null<ScmRootState> {
 		var normalized:String;
-		try normalized = normalize(path) catch (_:Dynamic) return null;
+		try normalized = normalizedPath(path) catch (_:Dynamic) return null;
 		var best:Null<ScmRootState> = null;
 		for (state in roots) {
 			if (within(state.root, normalized) && (best == null || state.root.length > best.root.length)) best = state;

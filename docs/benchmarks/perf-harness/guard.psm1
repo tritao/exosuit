@@ -27,6 +27,7 @@ namespace PerfHarness {
 		[DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int count);
 		[DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint msg, IntPtr wparam, StringBuilder lparam, uint flags, uint timeout, out IntPtr result);
 		[DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr wparam, IntPtr lparam);
+		[DllImport("kernel32.dll")] public static extern uint SetErrorMode(uint mode);
 
 		static string ClassOf(IntPtr hwnd) { var b = new StringBuilder(256); GetClassName(hwnd, b, b.Capacity); return b.ToString(); }
 		static string TitleOf(IntPtr hwnd) { var b = new StringBuilder(1024); GetWindowText(hwnd, b, b.Capacity); return b.ToString(); }
@@ -134,6 +135,10 @@ function Invoke-Guarded {
 		[scriptblock]$OnTick = $null
 	)
 	$baseline = Get-DialogSnapshot
+	# Children inherit the error mode: a missing DLL then fails with an exit code instead of a loader dialog, and a crash
+	# exits without a Windows Error Reporting box. Dialogs a program shows itself (HashLink, CRT asserts) still appear
+	# and are caught below.
+	[void][PerfHarness.Windows]::SetErrorMode(0x8003) # SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX
 	$start = @{ FilePath = $FilePath; WorkingDirectory = $WorkingDirectory; PassThru = $true; NoNewWindow = $true }
 	if ($ArgumentList.Count) { $start.ArgumentList = $ArgumentList }
 	if ($LogPath) { $start.RedirectStandardOutput = $LogPath; $start.RedirectStandardError = "$LogPath.err" }
