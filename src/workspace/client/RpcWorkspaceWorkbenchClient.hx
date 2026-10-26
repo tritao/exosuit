@@ -220,10 +220,13 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
         return;
       }
       agentsPending = false;
-      agentsError = null;
-      agentsRevision++;
       value.records = records;
+      // The catalog is listed every second; an identical listing must not redraw the window.
+      var changed = agentsError != null || agentCatalog == null
+        || haxe.Json.stringify(agentCatalog) != haxe.Json.stringify(value);
+      agentsError = null;
       agentCatalog = value;
+      if (changed) agentsRevision++;
     }, function(error) {
       if (rpc() == connection && requestToken == agentsRequestToken) {
         agentsPending = false;
@@ -453,6 +456,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       effort: effort
     }, 20000, function(value) {
       if (rpc() != connection || agentTokens.get(id) != selected) return;
+      var errorsBefore = agentsError + "\n" + agentActionError;
       if (mutate) {
         agentMutation = false;
         agentMutationId = null;
@@ -464,6 +468,8 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       }
       if (mutate) agentActionError = null;
       else agentsError = null;
+      // A finished action, or a cleared error, shows on screen even when the view itself is unchanged.
+      if (mutate || errorsBefore != agentsError + "\n" + agentActionError) agentsRevision++;
       if (mutate && value.itemsNext != null) {
         agentReadPending.set(id, true);
         agentReadCount++;
@@ -475,6 +481,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       loadAgentPages(connection, id, selected, value);
     }, function(error) {
       if (rpc() == connection && agentTokens.get(id) == selected) {
+        var errorsBefore = agentsError + "\n" + agentActionError;
         if (mutate) {
           agentMutation = false;
           agentMutationId = null;
@@ -490,7 +497,8 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
             ? "This workspace service does not support permission changes yet. Update it from Remote Access, then try again."
             : error.message;
         } else agentsError = error.message;
-        agentsRevision++;
+        // A background read that keeps failing the same way must not redraw on every attempt.
+        if (mutate || errorsBefore != agentsError + "\n" + agentActionError) agentsRevision++;
       }
     }
     );
@@ -507,9 +515,14 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     var next = value.itemsNext;
     if (next == null) {
       finishAgentRead(id);
+      // Background reads repeat every fraction of a second; only a changed view is news to the catalog and the screen.
+      // The first page of a new view is stored before its later pages arrive, so the same object counts as changed.
+      var previous = agentViews.get(id);
       agentViews.set(id, value);
-      agentsNext = 0;
-      agentsRevision++;
+      if (previous == null || previous == value || haxe.Json.stringify(previous) != haxe.Json.stringify(value)) {
+        agentsNext = 0;
+        agentsRevision++;
+      }
       return;
     }
     connection.call(WorkspaceAgentProtocol.ACTION, {
