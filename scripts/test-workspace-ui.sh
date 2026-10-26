@@ -86,6 +86,8 @@ run_phase layout-phone layout-controls
 run_phase layout-read layout-controls
 EXOSUIT_DIVIDER_ZOOM=110 run_phase divider-chrome divider-light
 EXOSUIT_DIVIDER_ZOOM=200 EXOSUIT_DIVIDER_DARK=1 run_phase divider-chrome divider-dark
+EXOSUIT_DIVIDER_TERMINAL=1 EXOSUIT_DIVIDER_ZOOM=110 run_phase divider-chrome divider-terminal
+EXOSUIT_DIVIDER_TERMINAL=1 EXOSUIT_DIVIDER_ZOOM=200 EXOSUIT_DIVIDER_DARK=1 run_phase divider-chrome divider-terminal-dark
 run_phase activity-bar activity-bar "$fixture/sidebar-project/Main.hx"
 run_phase sidebar-write sidebar "$fixture/sidebar-project/Main.hx"
 run_phase sidebar-read sidebar "$fixture/sidebar-project/Main.hx"

@@ -1672,6 +1672,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 			setApplicationZoom(zoom == null ? 100 : Std.parseInt(zoom));
 			setDarkTheme(Sys.getEnv("EXOSUIT_DIVIDER_DARK") == "1");
 			layoutControls.toggleBottom(); layoutControls.toggleRight();
+			if (Sys.getEnv("EXOSUIT_DIVIDER_TERMINAL") == "1") { openTerminal(); moveTerminalToEditor(); }
 		}
 		if (frames == 4) {
 			var checked = 0;
@@ -1706,7 +1707,14 @@ class WorkspaceSmokeApp extends ExosuitApp {
 			var visual = divider.children[0].globalBounds();
 			require(visual.width == bounds.width && visual.height == bounds.height,
 				"divider drawing child collapsed with an editor open");
-			ui.pointerMove(bounds.x + 1, bounds.y + bounds.height / 2);
+			// Both halves of the target must beat floating terminal rows.
+			for (offset in [1.0, 5.0, 7.0]) {
+				var path = haxeon.ui.core.HitTest.path(ui.root, bounds.x + offset, bounds.y + bounds.height / 2);
+				require(path.length > 0 && path[path.length - 1] == divider, "pane content covered divider hit target");
+			}
+			if (Sys.getEnv("EXOSUIT_DIVIDER_TERMINAL") == "1")
+				require(host.allTerminalTabs().length == 1, "terminal coverage missing");
+			ui.pointerMove(bounds.x + 5, bounds.y + bounds.height / 2);
 		}
 		if (frames == 5 || frames == 6) {
 			var divider = dockDivider(ui.root);
@@ -1716,7 +1724,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 			require(color.red == expected.red && color.green == expected.green && color.blue == expected.blue,
 				"divider highlight missing at frame " + frames + ": color=" + color.red + "," + color.green + "," + color.blue + " expected=" + expected.red + "," + expected.green + "," + expected.blue + " states=" + divider.states);
 			var bounds = divider.globalBounds();
-			if (frames == 5) ui.pointerDown(bounds.x + 1, bounds.y + bounds.height / 2, 0);
+			if (frames == 5) ui.pointerDown(bounds.x + 5, bounds.y + bounds.height / 2, 0);
 			else {
 				ui.pointerMove(bounds.x + 24, bounds.y + bounds.height / 2);
 				ui.pointerUp(bounds.x + 24, bounds.y + bounds.height / 2, 0);
