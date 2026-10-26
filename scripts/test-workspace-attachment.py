@@ -13,7 +13,7 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parent.parent
-from agent_test_runtime import launcher_path, manager_command
+from agent_test_runtime import launcher_path, manager_command, manager_environment
 
 HAXEON = os.environ.get('HAXEON_BIN', str(Path(os.environ.get('HAXEON_ROOT', str(ROOT / 'haxeon'))) / 'scripts/haxeon'))
 MANAGER = launcher_path(ROOT)
@@ -99,8 +99,10 @@ with tempfile.TemporaryDirectory(prefix='exa-') as temporary:
         # Validate helper rejection independently of RPC with an injected remote path.
         value = dict(original, socket=str(directory / 'untrusted.sock'))
         endpoint.write_text(json.dumps(value))
-        rejected = subprocess.run([*MANAGER_COMMAND, str(root), '--discover'], env=environment, capture_output=True, text=True, timeout=10)
-        assert rejected.returncode == 1 and 'path mismatch' in rejected.stderr
+        # The manager runs with its native libraries, so it fails for the descriptor rather than for loading.
+        manager = dict(manager_environment(ROOT), XDG_STATE_HOME=str(state))
+        rejected = subprocess.run([*MANAGER_COMMAND, str(root), '--discover'], env=manager, capture_output=True, text=True, timeout=10)
+        assert rejected.returncode == 1 and 'identity mismatch' in rejected.stderr, (rejected.returncode, rejected.stdout, rejected.stderr)
         endpoint.write_text(json.dumps(original))
         # A stale descriptor for a dead manager/socket must cause safe restart.
         os.kill(original['managerPid'], signal.SIGTERM)
