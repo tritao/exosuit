@@ -122,6 +122,7 @@ class LanguageController {
 		service.verbose = value.haxeonVerbose;
 		var entry = new FolderLanguageSession(project.root, service, configurationSignature(value));
 		service.semanticTokensChanged = function() { if (sessions.get(project.root) == entry) onPresentationChanged(); };
+		service.editsApplied = function() { if (sessions.get(project.root) == entry) onPresentationChanged(); };
 		service.report = message -> {
 			if (sessions.get(project.root) != entry) return;
 			entry.failure = message;
@@ -244,7 +245,11 @@ class LanguageController {
 			: project != null ? configuration(project) : new config.Settings();
 		if (!service.requestFormatting(document, selection, value.indentSize, value.insertSpaces, ranged, Sys.time(), result -> {
 			if (!result.applied) reportError("language", result.error);
-			else view.cursorChanged();
+			else {
+				view.cursorChanged();
+				// Buffer edits do not request a frame; the formatted text arrives while the window may be idle.
+				onPresentationChanged();
+			}
 		}, () -> client == service && context.activeView() == view)) reportError("language", "Formatting is unavailable for this document");
 	}
 

@@ -1439,6 +1439,7 @@ class ExosuitApp implements DesktopUiApplication {
 		var previousDecorations = host.getPluginDecorations().revision;
 		var previousPluginStatus = host.getPluginStatusItems().revision;
 		var previousPluginPanels = host.getPluginPanels().revision;
+		var previousExternal = application.documents.externalRevision;
 		application.update();
 		var attachment = workspaceAttachment;
 		if (attachment != null) {
@@ -1473,7 +1474,8 @@ class ExosuitApp implements DesktopUiApplication {
 			previousBuildBytes != application.build.output.byteCount || previousBuild != application.build.active ||
 			previousDecorations != host.getPluginDecorations().revision ||
 			previousPluginStatus != host.getPluginStatusItems().revision ||
-			previousPluginPanels != host.getPluginPanels().revision)
+			previousPluginPanels != host.getPluginPanels().revision ||
+			previousExternal != application.documents.externalRevision)
 			requestFrame();
 		visibleNotification = host.getNotifications().current();
 		if (notificationRevision != host.getNotifications().revision) {

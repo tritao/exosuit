@@ -23,6 +23,8 @@ class LanguageServiceClient {
 	public var ready(default, null):Bool = false;
 	public var semanticTokensSupported(default, null):Bool = false;
 	public var semanticTokensChanged:Void->Void = function() {};
+	/** Called after a server-initiated workspace edit changed open documents. */
+	public var editsApplied:Void->Void = function() {};
 	public var preferredDocument:Null<Document>;
 	var semanticTypes:Array<String> = [];
 	var semanticModifiers:Array<String> = [];
@@ -391,6 +393,7 @@ class LanguageServiceClient {
 		}
 		if (method != "workspace/applyEdit") return new JsonRpcResponse(null, "Method not found");
 		var result = applyWorkspaceEdit(params == null ? null : Reflect.field(params, "edit"), captureDocuments());
+		if (result.applied) editsApplied();
 		return new JsonRpcResponse({applied: result.applied, failureReason: result.error});
 	}
 

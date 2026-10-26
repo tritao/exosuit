@@ -9,6 +9,7 @@ import workspace.EditorFileSystem;
 
 class DocumentManager {
 	public final documents:Array<Document> = [];
+	public var externalRevision(default, null):Int = 0;
 	public final syntaxes:SyntaxRegistry;
 	public final fileSystem:EditorFileSystem;
 	/** Files being read on worker threads, by normalized path, with everyone waiting for each. */
@@ -155,8 +156,14 @@ class DocumentManager {
 		return changed;
 	}
 
-	public function checkExternalChanges():Void
-		for (document in documents) document.checkExternal();
+	/** Rereads changed backing files. `externalRevision` changes when a document was reloaded or its external state
+		changed, so the presentation can redraw for it. */
+	public function checkExternalChanges():Void {
+		for (document in documents) {
+			var previousState = document.externalState, previousBuffer = document.buffer.stateId;
+			if (document.checkExternal() != previousState || document.buffer.stateId != previousBuffer) externalRevision++;
+		}
+	}
 
 	public function add(document:Document):Document {
 		for (existing in documents)

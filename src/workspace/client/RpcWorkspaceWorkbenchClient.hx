@@ -464,6 +464,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       if (value.record.workspaceRoot != root() || value.record.id != id) {
         finishAgentRead(id);
         agentsError = "Invalid agent view";
+        agentsRevision++;
         return;
       }
       if (mutate) agentActionError = null;
@@ -654,8 +655,10 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       for (group in value.groups) key += "|g:" + group.id + ":" + group.revision;
       for (record in records) key += "|t:" + record.id + ":" + record.revision + ":" + record.available;
       catalog = value;
+      // A refresh that clears an error must redraw even when the catalog itself is unchanged.
+      var errorCleared = catalogError != null;
       catalogError = null;
-      if (key != catalogKey) {
+      if (key != catalogKey || errorCleared) {
         catalogKey = key;
         catalogRevision++;
       }
