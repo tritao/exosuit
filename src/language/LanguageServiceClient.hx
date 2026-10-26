@@ -68,8 +68,9 @@ class LanguageServiceClient {
 		this.documents = documents;
 		this.executable = executable;
 		this.arguments = arguments.copy();
-		this.rootPath = rootPath;
-		includesDocument = document -> document.path != null && StringTools.startsWith(document.path, StringTools.endsWith(rootPath, "/") ? rootPath : rootPath + "/");
+		// Documents carry the file system's canonical path (on-disk casing, drive letter), so the root must too.
+		this.rootPath = canonicalRoot(documents, rootPath);
+		includesDocument = document -> document.path != null && StringTools.startsWith(document.path, StringTools.endsWith(this.rootPath, "/") ? this.rootPath : this.rootPath + "/");
 	}
 
 	public function start(now:Float):Bool {
@@ -660,6 +661,9 @@ class LanguageServiceClient {
 		return null;
 	}
 
+	static function canonicalRoot(documents:DocumentManager, rootPath:String):String {
+		try return documents.fileSystem.normalize(rootPath) catch (_:Dynamic) return rootPath;
+	}
 	static function eligible(document:Document):Bool
 		return document.path != null && StringTools.endsWith(document.path.toLowerCase(), ".hx");
 
