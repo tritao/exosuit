@@ -158,7 +158,7 @@ class FileController {
 	public function openDeleteFile():Void {
 		var path = selectedFileOperationPath();
 		if (path == null) return;
-		confirmations.choose('Type delete to remove "' + path + '": ', ["delete"], function(answer) {
+		confirmations.moveToTrash(path, function() {
 			var result = operations.remove(path);
 			if (result.success) {
 				for (document in result.documents) {

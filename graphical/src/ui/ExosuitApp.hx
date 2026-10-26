@@ -120,6 +120,9 @@ class ExosuitApp implements DesktopUiApplication {
 	var workspaceError:Null<String>;
 	public var saveConfirmation(default, null):Null<String>;
 	var saveConfirmationHandler:Null<String->Void>;
+	var trashConfirmation:Null<String>;
+	var trashConfirmationHandler:Null<Bool->Void>;
+	var skipTrashConfirmation:Bool = false;
 	public var saveAsDestination(default, null):Null<String>;
 	var saveAsReplace:Bool = false;
 	var saveAsHandler:Null<(Null<String>, Bool)->Void>;
@@ -296,6 +299,14 @@ class ExosuitApp implements DesktopUiApplication {
 			}
 			saveConfirmation = filename;
 			saveConfirmationHandler = handler;
+			requestFrame();
+		};
+		application.confirmations.trashPrompt = function(path, handler) {
+			if (!application.settings.current.confirmTrash) { handler(true); return; }
+			host.closeCommandView();
+			trashConfirmation = path;
+			trashConfirmationHandler = handler;
+			skipTrashConfirmation = false;
 			requestFrame();
 		};
 		application.files.chooseSaveDestination = function(document, handler) {
@@ -921,6 +932,16 @@ class ExosuitApp implements DesktopUiApplication {
 			function(id) { ui.commands.executeContext(id, ui.commandContext); });
 	}
 
+	function resolveTrashConfirmation(confirmed:Bool):Void {
+		var handler = trashConfirmationHandler;
+		trashConfirmationHandler = null;
+		trashConfirmation = null;
+		if (confirmed && skipTrashConfirmation)
+			application.settings.store.set("files/explorer/confirm_trash", haxeon.ui.properties.PropertyValue.Bool(false));
+		if (handler != null) handler(confirmed);
+		requestFrame();
+	}
+
 	function resolveSaveConfirmation(answer:String):Void {
 		var handler = saveConfirmationHandler;
 		saveConfirmationHandler = null;
@@ -1054,6 +1075,33 @@ class ExosuitApp implements DesktopUiApplication {
 			var dialog = new haxeon.ui.widgets.overlays.Dialog("settings-dialog", "Settings", content, dismiss,
 				Math.max(240.0, Math.min(860.0, viewportWidth - 48.0)));
 			layers.push(new StackChild("settings", dialog, 0.0, 0.0, 50, LayoutAxis.grow(), LayoutAxis.grow()));
+		}
+		if (trashConfirmation != null) {
+			var path = trashConfirmation;
+			var displayPath = path;
+			for (project in application.workspace.projects) {
+				var relative = pathUnderScope(project.root, path);
+				if (relative != null && relative.length > 0) { displayPath = relative; break; }
+			}
+			var contentStyle = new LayoutStyle();
+			contentStyle.childGap = 12;
+			var actionsStyle = new LayoutStyle();
+			actionsStyle.childGap = 8;
+			var content = new Column("trash-confirmation-content", [
+				new KeyedView("path", new Text(displayPath)),
+				new KeyedView("detail", new Text("This item and its contents will be moved to Exosuit’s recoverable trash.")),
+				new KeyedView("remember", new haxeon.ui.widgets.controls.Checkbox("trash-confirmation-remember",
+					"Do not ask me again", skipTrashConfirmation, function(value) { skipTrashConfirmation = value; requestFrame(); })),
+				new KeyedView("actions", new Row("trash-confirmation-actions", [
+					new KeyedView("cancel", new Button("Cancel", null, function() resolveTrashConfirmation(false), "trash-confirmation-cancel")),
+					new KeyedView("move", new Button("Move to Trash", null, function() resolveTrashConfirmation(true), "trash-confirmation-move"))
+				], actionsStyle))
+			], contentStyle);
+			var dialog = new haxeon.ui.widgets.overlays.Dialog("trash-confirmation",
+				'Move "' + haxe.io.Path.withoutDirectory(path) + '" to Trash?', content,
+				function() resolveTrashConfirmation(false), Math.max(240, Math.min(540, viewportWidth - 48)));
+			dialog.dismissOnOutside = false;
+			layers.push(new StackChild("trash-confirmation", dialog, 0, 0, 60, LayoutAxis.grow(), LayoutAxis.grow()));
 		}
 		if (saveConfirmation != null) {
 			var content = new Column("save-confirmation-content", [

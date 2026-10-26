@@ -39,6 +39,25 @@ class FileDeletionTestMain {
 		File.saveContent(cleanPath, "class Clean {}\n");
 		application.open(cleanPath);
 		var clean = application.documents.documents[0];
+		var trashPrompted = false;
+		var trashReply:Bool->Void = function(_) { throw "missing trash reply"; };
+		application.confirmations.trashPrompt = function(path, reply) {
+			require(path == cleanPath, "trash prompt did not capture selected path");
+			trashPrompted = true;
+			trashReply = reply;
+		};
+		application.files.openDeleteFile();
+		require(trashPrompted && FileSystem.exists(cleanPath) && !root.isCommandViewActive(),
+			"graphical trash prompt deleted before confirmation or opened command picker");
+		trashReply(false);
+		require(FileSystem.exists(cleanPath) && root.node.containsDocument(clean), "cancel changed file or tabs");
+		application.files.openDeleteFile();
+		trashReply(true);
+		require(!FileSystem.exists(cleanPath), "confirmed trash prompt did not remove file");
+		application.confirmations.trashPrompt = null;
+		File.saveContent(cleanPath, "class Clean {}\n");
+		application.open(cleanPath);
+		clean = application.documents.documents[0];
 		root.splitActive(LayoutKind.Horizontal);
 		confirmDelete(application);
 		require(!FileSystem.exists(cleanPath) && !clean.dirty && !root.node.containsDocument(clean)

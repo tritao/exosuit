@@ -7,6 +7,7 @@ class ConfirmationService {
 	final host:WorkbenchHost;
 	/** Installed by graphical hosts; core-only hosts retain their command input. */
 	public var saveChangesPrompt:Null<(String, String->Void)->Void>;
+	public var trashPrompt:Null<(String, Bool->Void)->Void>;
 
 	public function new(host:WorkbenchHost) {
 		this.host = host;
@@ -19,6 +20,13 @@ class ConfirmationService {
 			});
 		} else choose('Save changes to "' + filename + '"? Type save, discard, or cancel: ',
 			["save", "discard", "cancel"], onChoose, onCancel);
+	}
+
+	public function moveToTrash(path:String, onConfirm:Void->Void):Void {
+		if (trashPrompt != null) trashPrompt(path, function(confirmed) {
+			if (confirmed) onConfirm();
+		});
+		else choose('Type delete to remove "' + path + '": ', ["delete"], function(_) onConfirm());
 	}
 
 	public function choose(prompt:String, choices:Array<String>, onChoose:String->Void, ?onCancel:Void->Void):Void {

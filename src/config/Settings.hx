@@ -22,6 +22,7 @@ class Settings {
 	public var codexDefaultPermissions:String = "workspace-write";
 	public var fontSize:Int = 15;
 	public var explorerFontSize:Int = 15;
+	public var confirmTrash:Bool = true;
 	public var sidebarWidth:Int = 220;
 	public var scrollbarVisibility:String = "auto";
 	public var tabTooltipDelay:Float = 0.8;
@@ -89,6 +90,7 @@ class Settings {
 		result.codexDefaultPermissions = codexDefaultPermissions;
 		result.fontSize = fontSize;
 		result.explorerFontSize = explorerFontSize;
+		result.confirmTrash = confirmTrash;
 		result.sidebarWidth = sidebarWidth;
 		result.scrollbarVisibility = scrollbarVisibility;
 		result.tabTooltipDelay = tabTooltipDelay;
