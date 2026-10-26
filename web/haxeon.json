@@ -279,6 +279,7 @@
     "../src/workspace/client/WorkspaceRpcEndpoint.hx",
     "../src/workspace/client/WorkspaceScmClient.hx",
     "../src/workspace/client/WorkspaceTerminalCatalogClient.hx",
+    "../src/workspace/client/WorkspaceTerminalEvents.hx",
     "../src/workspace/client/WorkspaceWorkbenchClient.hx",
     "../src/workspace/service/TerminalReplayLog.hx",
     "../src/workspace/service/WorkspaceAgentPersistence.hx",

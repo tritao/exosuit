@@ -13,6 +13,13 @@ private class CapabilityEndpoint implements WorkspaceRpcEndpoint {
   public function new(connection:RpcConnection) this.connection = connection;
   public function rootPath():Null<String> return "/fixture";
   public function serviceGeneration():String return "fixture";
+  var eventRouter:Null<workspace.client.WorkspaceTerminalEvents>;
+  public function terminalEvents():Null<workspace.client.WorkspaceTerminalEvents> {
+    if (connection == null) return null;
+    if (eventRouter == null || eventRouter.connection != connection)
+      eventRouter = new workspace.client.WorkspaceTerminalEvents(connection);
+    return eventRouter;
+  }
   public function rpcConnection():Null<RpcConnection> return connection;
   public function failureReason():Null<String> return null;
   public function supportsWorkspaceGroups():Bool return hasCapability(WorkspaceProtocol.TREE);

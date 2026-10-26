@@ -16,6 +16,13 @@ private class ReplayEndpoint implements WorkspaceRpcEndpoint {
   public function new(connection:RpcConnection) this.connection = connection;
   public function rootPath():Null<String> return "/fixture";
   public function serviceGeneration():String return "replay-fixture";
+  var eventRouter:Null<workspace.client.WorkspaceTerminalEvents>;
+  public function terminalEvents():Null<workspace.client.WorkspaceTerminalEvents> {
+    if (connection == null) return null;
+    if (eventRouter == null || eventRouter.connection != connection)
+      eventRouter = new workspace.client.WorkspaceTerminalEvents(connection);
+    return eventRouter;
+  }
   public function rpcConnection():Null<RpcConnection> return connection;
   public function failureReason():Null<String> return null;
   public function supportsWorkspaceGroups():Bool return true;
@@ -35,11 +42,17 @@ private class ReplayFixture {
   public var openedColumns = 0;
   public var openedRows = 0;
   public var replayRequests = 0;
+  public final inputs:Array<String> = [];
   public var controller = true;
   public var state = "running";
   public var corrupt = false;
   final legacy:Bool;
-  public function new(legacy:Bool = false, limit:Int = 65536, requireGeometry:Bool = false) {
+  final notifications:Bool;
+  var watched = false;
+  var stamp = "";
+  public var unwatches = 0;
+  public function new(legacy:Bool = false, limit:Int = 65536, requireGeometry:Bool = false, notifications:Bool = true) {
+    this.notifications = notifications;
     this.legacy = legacy;
     emulator = Emulator.open(80, 24, 1000, "xterm-256color", false);
     log = new TerminalReplayLog(80, 24, limit);
@@ -50,15 +63,21 @@ private class ReplayFixture {
   }
   function info():TerminalInfo return {id:"fixture", cwd:"/fixture", state:state, exitCode:0,
     columns:emulator.columns(), rows:emulator.rows(), start:log.startOffset, end:log.endOffset,
-    controller:controller, controlled:controller};
+    controller:controller, controlled:controller, notifications:notifications && !legacy};
   public function connect():Void {
     if (endpoint.connection != null) { endpoint.connection.close(); server.close(); }
+    watched = false; stamp = "";
     var pair = MemoryTransport.pair(), clock = function() return Sys.time() * 1000;
     endpoint.connection = new RpcConnection(pair.client, clock);
     server = new RpcConnection(pair.server, clock);
-    server.register(WorkspaceTerminalProtocol.OPEN, function(r, c) { openedColumns = r.columns; openedRows = r.rows; c.respond(info()); });
+    server.register(WorkspaceTerminalProtocol.OPEN, function(r, c) { openedColumns = r.columns; openedRows = r.rows; watched = r.watch == true && notifications && !legacy; c.respond(info()); });
     server.register(WorkspaceTerminalProtocol.RESIZE, function(r, c) { resize(r.columns, r.rows); c.respond(info()); });
-    server.register(WorkspaceTerminalProtocol.SET_CONTROL, function(_, c) c.respond(info()));
+    server.register(WorkspaceTerminalProtocol.UNWATCH, function(r, c) { watched = false; unwatches++; c.respond(r); });
+    server.register(WorkspaceTerminalProtocol.INPUT, function(r, c) {
+      inputs.push(r.data.toString());
+      c.respond(info());
+    });
+    server.register(WorkspaceTerminalProtocol.SET_CONTROL, function(r, c) { controller = r.claim; c.respond(info()); });
     if (!legacy) server.register(WorkspaceTerminalProtocol.REPLAY, function(r, c) {
       replayRequests++;
       if (r.cursor < log.startCursor) { c.fail({code:"replay_gap", message:"trimmed", ambiguous:false}); return; }
@@ -85,7 +104,16 @@ private class ReplayFixture {
     emulator.resize(columns, rows);
     log.geometry(columns, rows);
   }
+  public function dispatchInput():Void {
+    server.poll(); endpoint.connection.poll();
+  }
+  public function notifyChange(?instance:String):Void {
+    server.notify(WorkspaceTerminalProtocol.CHANGED,
+      {workspace:"workspace", instance:instance == null ? "replay-fixture" : instance, id:"fixture"}, WorkspaceTerminalProtocol.encodeChange);
+  }
   public function step(apply:Bool = true):Void {
+    var next = Std.string(log.endCursor) + state + controller;
+    if (watched && stamp != next) { stamp = next; notifyChange(); }
     session.pollEvents(); endpoint.connection.poll(); server.poll(); endpoint.connection.poll();
     if (apply) session.pollEvents();
   }
@@ -93,7 +121,7 @@ private class ReplayFixture {
     for (_ in 0...24) { step(); Sys.sleep(0.005); }
   }
   public function close():Void {
-    session.close(); endpoint.connection.close(); server.close(); emulator.close();
+    session.close(); server.poll(); endpoint.connection.poll(); endpoint.connection.close(); server.close(); emulator.close();
   }
 }
 
@@ -123,6 +151,72 @@ class TerminalReplayTests {
     require(atomic.backend.isSynchronized() && equal(atomic.emulator, atomic.session.emulator),
       "Applied replay did not publish readiness");
     atomic.close();
+
+    var typing = new ReplayFixture(false, 65536, false, false);
+    typing.output("prompt$ ");
+    typing.pump();
+    typing.session.write(Bytes.ofString("a"));
+    // Dispatch transport only: input must not wait for another terminal poll.
+    typing.dispatchInput();
+    require(typing.inputs.length == 1 && typing.inputs[0] == "a", "Input waited for a terminal poll");
+    typing.session.write(Bytes.ofString("b"));
+    typing.session.write(Bytes.ofString("c"));
+    for (_ in 0...4) typing.step();
+    require(typing.inputs.join("") == "abc", "Queued input changed order or was duplicated");
+    // The shell can echo after an empty replay reply. It must still be read promptly.
+    var reads = typing.replayRequests;
+    for (_ in 0...4) typing.step();
+    require(typing.replayRequests > reads, "Typing retained the idle replay delay");
+    typing.output("abc");
+    for (_ in 0...4) typing.step();
+    require(equal(typing.emulator, typing.session.emulator), "Shell echo waited for idle backoff");
+    typing.close();
+
+    var pushed = new ReplayFixture();
+    pushed.output("prompt$ "); pushed.pump();
+    var idleReads = pushed.replayRequests;
+    pushed.pump();
+    require(pushed.replayRequests == idleReads, "Subscribed terminal still polls while idle");
+    pushed.notifyChange("stale-generation");
+    for (_ in 0...4) pushed.step();
+    require(pushed.replayRequests == idleReads, "Stale notification triggered replay");
+    pushed.session.write(Bytes.ofString("x"));
+    for (_ in 0...4) pushed.step();
+    require(pushed.replayRequests == idleReads, "Input polled instead of waiting for shell output");
+    pushed.controller = false;
+    for (_ in 0...4) pushed.step();
+    require(!pushed.backend.canControl() && pushed.backend.needsControlNotice(), "Control loss without output was not notified");
+    pushed.controller = true;
+    for (_ in 0...4) pushed.step();
+    require(pushed.backend.canControl(), "Control gain without output was not notified");
+    pushed.output("x");
+    for (_ in 0...4) pushed.step();
+    require(equal(pushed.emulator, pushed.session.emulator), "Notified shell echo was not applied");
+    // A change arriving after a replay reply but before application must survive.
+    pushed.output("a"); pushed.notifyChange(); pushed.endpoint.connection.poll();
+    pushed.step(false);
+    pushed.output("b"); pushed.notifyChange(); pushed.endpoint.connection.poll();
+    for (_ in 0...4) pushed.step();
+    require(equal(pushed.emulator, pushed.session.emulator), "Change during replay was lost");
+    var peerBackend = new RpcTerminalBackend(function() return pushed.endpoint, "fixture", "/fixture", false);
+    var peerSession = new TerminalSession(peerBackend, Emulator.open(80,24,1000,"xterm-256color",false),false);
+    for (_ in 0...8) { peerSession.pollEvents(); pushed.step(); }
+    require(peerBackend.isSynchronized(), "Second pane did not share notification router");
+    peerSession.close(); pushed.dispatchInput();
+    require(pushed.controller, "Closing one pane released another pane's control");
+    require(pushed.unwatches == 0, "Closing one pane removed another pane's watch");
+    pushed.output("still attached");
+    for (_ in 0...4) pushed.step();
+    require(equal(pushed.emulator, pushed.session.emulator), "Remaining pane lost notifications");
+    pushed.close();
+    require(pushed.unwatches == 1, "Closing terminal left a daemon watch active");
+
+    var abandoned = new ReplayFixture();
+    abandoned.session.pollEvents(); // OPEN is in flight when the pane closes.
+    abandoned.session.close();
+    abandoned.dispatchInput(); abandoned.dispatchInput();
+    require(abandoned.unwatches == 1, "Late OPEN response leaked a closed pane's watch");
+    abandoned.close();
 
     var measured = new ReplayFixture(false, 65536, true);
     measured.pump();
@@ -220,6 +314,6 @@ class TerminalReplayTests {
     legacy.resize(80, 24); legacy.output("\r\nresized"); legacy.pump();
     require(equal(legacy.emulator, legacy.session.emulator), "Legacy snapshot refresh diverged");
     legacy.close();
-    Sys.println("PASS: ordered terminal output/resize replay, coalescing, geometry-only events, reconnect, viewers, alternate screen, Unicode, exit ordering, invalid batches, bounded history, snapshot recovery and legacy daemon");
+    Sys.println("PASS: notification-driven echo, idle silence, stale generations, in-flight changes, shared panes and unwatch; ordered terminal output/resize replay, coalescing, geometry-only events, reconnect, viewers, alternate screen, Unicode, exit ordering, invalid batches, bounded history, snapshot recovery and legacy daemon");
   }
 }

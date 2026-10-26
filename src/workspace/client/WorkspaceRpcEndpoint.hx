@@ -8,6 +8,7 @@ import haxeon.rpc.RpcConnection;
 interface WorkspaceRpcEndpoint {
 	public function rootPath():Null<String>;
 	public function serviceGeneration():String;
+	public function terminalEvents():Null<WorkspaceTerminalEvents>;
 	public function rpcConnection():Null<RpcConnection>;
 	public function failureReason():Null<String>;
 	public function supportsWorkspaceGroups():Bool;

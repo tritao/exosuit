@@ -101,6 +101,19 @@ unacknowledged resize requests. Daemons without method 138 use atomic screen
 snapshots rather than replaying historical bytes at current dimensions. Existing
 byte-only method 111 and its vectors retain their identities.
 
+Terminal OPEN (110) adds optional field 9, `watch`. A daemon supporting change
+notifications returns optional TerminalInfo field 12, `notifications: true`.
+Opted-in read-authorized connections receive notification 139 with a TerminalTarget
+(workspace, service instance, terminal id) when output, geometry, lifecycle,
+control ownership, or terminal metadata changes. Changes coalesce per terminal
+per daemon tick; replay remains the authoritative ordered stream. Notifications
+received during replay keep the terminal dirty until another replay drains it.
+Idle subscribed clients issue no output reads. Reconnect registers a new watch
+and resumes replay from the retained cursor. Method 155, UNWATCH, removes a
+connection's terminal watch; disconnect also removes it. Panes share one router
+per connection and only the final pane unwatches a shared terminal. Older daemons
+ignore the new OPEN field and retain the polling/snapshot fallback.
+
 `TerminalReplayTests.hx` and `TerminalServiceTests.hx` cover replay ordering,
 geometry-only events, coalescing, reconnect, read-only viewers, malformed batches,
 exit ordering, bounded retention, snapshot recovery and legacy daemons.

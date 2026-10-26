@@ -186,10 +186,15 @@ class TerminalPane implements TerminalPanel {
 		refreshRows(false);
 	}
 
+	/** Keep the normal writable terminal quiet; show states that need attention. */
+	function showControlNotice():Bool
+		return remoteBackend != null && remoteBackend.needsControlNotice();
+
 	function syncControlLayout():Void {
 		if (remoteBackend == null) return;
 		var status = remoteBackend.controlStatus(), action = remoteBackend.controlAction();
 		if (status != controlStatusText) {
+			viewportHeight = -1; // The notice can appear or disappear without a viewport resize.
 			controlStatusText = status;
 			controlLayout.setText(status);
 			requestFrame();
@@ -401,7 +406,7 @@ class TerminalPane implements TerminalPanel {
 		}, fill, "Terminal", true);
 		var layers:Array<StackChild> = [new StackChild("background", backdrop, 0.0, 0.0, 0,
 			LayoutAxis.grow(), LayoutAxis.grow())];
-		if (remoteBackend != null) {
+		if (showControlNotice()) {
 			var controlStyle = new LayoutStyle();
 			controlStyle.width = LayoutAxis.grow();
 			controlStyle.height = LayoutAxis.fixed(CONTROL_BAR_HEIGHT);
@@ -423,7 +428,7 @@ class TerminalPane implements TerminalPanel {
 			layers.push(new StackChild("control-strip", strip, 0.0, 0.0, 2,
 				LayoutAxis.grow(), LayoutAxis.fixed(CONTROL_BAR_HEIGHT)));
 		}
-		var terminalTop = remoteBackend == null ? 4.0 : CONTROL_BAR_HEIGHT + 4.0;
+		var terminalTop = showControlNotice() ? CONTROL_BAR_HEIGHT + 4.0 : 4.0;
 		// Remote observers retain the sender's grid; build only rows intersecting our viewport.
 		var visibleRows = resolvedHeight > 0 && (remoteBackend == null || remoteBackend.isSynchronized())
 			? Std.int(Math.min(renderedRows.length, Math.max(0, Math.ceil((resolvedHeight - terminalTop) / rowHeight))))
@@ -486,7 +491,7 @@ class TerminalPane implements TerminalPanel {
 		node.on(UiEventKind.PointerDown, function(event) {
 			context.requestFocus(node.id);
 			if (closed) return;
-			if (remoteBackend != null && event.localY >= 0 && event.localY < CONTROL_BAR_HEIGHT) {
+			if (showControlNotice() && event.localY >= 0 && event.localY < CONTROL_BAR_HEIGHT) {
 				if (event.button == 0) {
 					controlPointer = event.pointerId;
 					event.capturePointer();
@@ -538,7 +543,7 @@ class TerminalPane implements TerminalPanel {
 		});
 		var releaseMouse = function(event:UiEvent) {
 			if (controlPointer == event.pointerId) {
-				if (event.kind != UiEventKind.PointerCancel && event.localY >= 0 && event.localY < CONTROL_BAR_HEIGHT)
+				if (showControlNotice() && event.kind != UiEventKind.PointerCancel && event.localY >= 0 && event.localY < CONTROL_BAR_HEIGHT)
 					remoteBackend.activateControl();
 				controlPointer = -1;
 				event.releasePointer();
@@ -640,7 +645,7 @@ class TerminalPane implements TerminalPanel {
 
 	function pointerCell(event:UiEvent):{column:Int, row:Int} {
 		var column = Std.int(Math.floor((event.localX - 8.0) / cellWidth));
-		var top = remoteBackend == null ? 4.0 : CONTROL_BAR_HEIGHT + 4.0;
+		var top = showControlNotice() ? CONTROL_BAR_HEIGHT + 4.0 : 4.0;
 		var row = Std.int(Math.floor((event.localY - top) / rowHeight));
 		column = Std.int(Math.max(0, Math.min(session.emulator.columns() - 1, column)));
 		row = Std.int(Math.max(0, Math.min(session.emulator.rows() - 1, row)));
@@ -749,7 +754,7 @@ class TerminalPane implements TerminalPanel {
 	}
 
 	function resizeToViewport(width:Float, height:Float):Void {
-		var topInset = remoteBackend == null ? 8.0 : CONTROL_BAR_HEIGHT + 8.0;
+		var topInset = showControlNotice() ? CONTROL_BAR_HEIGHT + 8.0 : 8.0;
 		if (closed || width < 16.0 + cellWidth || height < topInset + rowHeight) return;
 		if (width == viewportWidth && height == viewportHeight) return;
 		viewportWidth = width;

@@ -45,6 +45,10 @@ class RpcTerminalBackend implements TerminalBackend {
   var failureReported:Bool = false;
   var output:Array<TerminalEvent> = [];
   var nextRead:Float = 0;
+  var interactiveUntil:Float = 0; // Legacy daemons only.
+  var eventDriven:Bool = false;
+  var replayDirty:Bool = true;
+  var releaseEvents:Null<Void->Bool>;
   var replayCursor:Int64 = 0;
   var snapshotOnly:Bool = false;
   var snapshotPending:Bool = false;
@@ -62,6 +66,7 @@ class RpcTerminalBackend implements TerminalBackend {
   }
   public function id():String return terminalId;
   public function isAttached():Bool return attached;
+  public function usesNotifications():Bool return eventDriven;
   /** False once the terminal failed or closed: write throws, so input must not reach it. */
   public function isAvailable():Bool return !closed && failure == null;
   public function isSynchronized():Bool return synchronized;
@@ -70,6 +75,9 @@ class RpcTerminalBackend implements TerminalBackend {
     var client = provider();
     return client != null && client.hasCapability(WorkspaceTerminalProtocol.CONTROL);
   }
+  /** Normal writable sessions need no persistent control notice. */
+  public function needsControlNotice():Bool
+    return failure != null || !attached || !synchronized || controlUnavailable || !hasControlGrant() || controlPending || !controller;
   public function controlStatus():String {
     if (failure != null) return "Terminal unavailable: " + failure;
     if (!attached) {
@@ -159,9 +167,13 @@ class RpcTerminalBackend implements TerminalBackend {
     if (writeBytes + bytes.length > 65536) throw "Terminal input queue exceeds limit";
     writes.push(bytes.sub(0, bytes.length));
     writeBytes += bytes.length;
+    interactiveUntil = Sys.time() + 0.25;
+    nextRead = 0;
+    var c = connection;
+    if (c != null && c.isOpen()) flushInput(c);
   }
   function flushInput(c:RpcConnection):Void {
-    if (writing || writeBytes == 0 || resizePending || !synchronized) return;
+    if (writing || writeBytes == 0 || resizePending || !synchronized || !attached || !controller) return;
     var bytes = writes.length == 1 ? writes[0] : Bytes.alloc(writeBytes);
     if (writes.length > 1) {
       var offset = 0;
@@ -181,7 +193,11 @@ class RpcTerminalBackend implements TerminalBackend {
       sequence: sequence,
       data: bytes
     }, 2000, function(_) {
-      if (connection == c) writing = false;
+      if (connection == c) {
+        writing = false;
+        nextRead = 0;
+        flushInput(c);
+      }
     }, function(e) {
       if (connection == c) {
         writing = false;
@@ -201,6 +217,7 @@ class RpcTerminalBackend implements TerminalBackend {
   public function requestReplay(offset:Int64):Void {
     // Byte offsets cannot identify geometry-only records. Recover atomically.
     snapshotPending = true;
+    replayDirty = true;
     nextRead = 0;
   }
   public function terminate(force:Bool):Void {
@@ -229,9 +246,14 @@ class RpcTerminalBackend implements TerminalBackend {
     resizePending = false;
   }
   public function close():Void {
+    if (closed) return;
     closed = true;
+    var lastListener = releaseEvents == null || releaseEvents();
+    releaseEvents = null;
     var c = connection;
-    if (controller && c != null && c.isOpen()) c.call(WorkspaceTerminalProtocol.SET_CONTROL, {
+    if (lastListener && eventDriven && c != null && c.isOpen()) c.call(WorkspaceTerminalProtocol.UNWATCH,
+      {workspace:"workspace", instance:instance, id:terminalId}, 1000, function(_) {}, function(_) {});
+    if (lastListener && controller && c != null && c.isOpen()) c.call(WorkspaceTerminalProtocol.SET_CONTROL, {
       workspace: "workspace", instance: instance, id: terminalId,
       claim: false, takeover: false
     }, 1000, function(_) {}, function(_) {});
@@ -263,7 +285,16 @@ class RpcTerminalBackend implements TerminalBackend {
         fail("Terminal input delivery uncertain after disconnect");
         return;
       }
+      if (releaseEvents != null) { releaseEvents(); releaseEvents = null; }
       connection = c;
+      eventDriven = false;
+      replayDirty = true;
+      var events = c == null ? null : client.terminalEvents();
+      if (events != null) releaseEvents = events.listen(terminalId, function(event) {
+        if (closed || connection != c || event.workspace != "workspace" || event.instance != instance) return;
+        replayDirty = true;
+        nextRead = 0;
+      });
       attached = false;
       synchronized = false;
       synchronizationPending = false;
@@ -284,6 +315,7 @@ class RpcTerminalBackend implements TerminalBackend {
       if (!attached) {
         if (create && (group != null || directory != null) && !client.supportsWorkspaceGroups()) { fail("Workspace service does not support grouped terminals"); return; }
         pending = true;
+        var router = client.terminalEvents();
         c.call(WorkspaceTerminalProtocol.OPEN, {
           workspace: "workspace",
           instance: instance,
@@ -291,11 +323,21 @@ class RpcTerminalBackend implements TerminalBackend {
           create: create,
           columns: columns,
           rows: rows,
-          group: group, directory: directory
+          group: group, directory: directory, watch: true
         }, 2000, function(info) {
-          if (closed || connection != c) return;
+          if (closed || connection != c) {
+            if (info.notifications == true && c.isOpen() && router != null && !router.hasListeners(terminalId)) {
+              c.call(WorkspaceTerminalProtocol.UNWATCH, {workspace:"workspace", instance:instance, id:terminalId},
+                1000, function(_) {}, function(_) {});
+              if (info.controller == true) c.call(WorkspaceTerminalProtocol.SET_CONTROL,
+                {workspace:"workspace", instance:instance, id:terminalId, claim:false, takeover:false},
+                1000, function(_) {}, function(_) {});
+            }
+            return;
+          }
           pending = false;
           attached = true;
+          eventDriven = info.notifications == true && releaseEvents != null;
           create = false;
           if (!observe(info)) return;
           // Lifecycle follows drained replay, including when attaching after exit.
@@ -322,6 +364,7 @@ class RpcTerminalBackend implements TerminalBackend {
             pending = false;
             if (!observe(info)) return;
             replayAfterResize = true;
+            replayDirty = true;
             nextRead = 0;
           }
         }, function(e) {
@@ -333,7 +376,7 @@ class RpcTerminalBackend implements TerminalBackend {
           }
         }
         );
-      } else if (Sys.time() >= nextRead) {
+      } else if ((!eventDriven || replayDirty) && Sys.time() >= nextRead) {
         if (snapshotOnly) requestScreenSnapshot(c);
         else requestReplayBatch(c);
       }
@@ -347,8 +390,12 @@ class RpcTerminalBackend implements TerminalBackend {
       synchronized = true;
     }
   }
+  // Keep polling for asynchronous shell echo after input, then resume idle backoff.
+  function idleReadDelay():Float return eventDriven || Sys.time() < interactiveUntil ? 0 : 0.05;
+
   function requestReplayBatch(c:RpcConnection):Void {
     pending = true;
+    replayDirty = false;
     var requested = replayCursor;
     c.call(WorkspaceTerminalProtocol.REPLAY, {
       workspace:"workspace", instance:instance, id:terminalId, cursor:requested
@@ -381,15 +428,17 @@ class RpcTerminalBackend implements TerminalBackend {
         ? TerminalEvent.geometry(event.columns, event.rows) : TerminalEvent.output(event.offset, event.data));
       position = nextOffset;
       replayCursor = value.next;
+      if (value.next < value.end) replayDirty = true;
       if (value.next == value.end) {
         synchronizationPending = true;
         output.push(TerminalEvent.status(value.terminal.state, value.terminal.exitCode));
       }
       replayAfterResize = false;
-      nextRead = Sys.time() + (value.events.length == 0 ? 0.05 : 0);
+      nextRead = Sys.time() + (value.events.length == 0 ? idleReadDelay() : 0);
     }, function(error) {
       if (closed || connection != c) return;
       pending = false;
+      replayDirty = true;
       if (error.code == "unknown_method") {
         // Older daemons have no ordered geometry history. Their atomic snapshots
         // are safe; combining current dimensions with historical bytes is not.
@@ -402,6 +451,7 @@ class RpcTerminalBackend implements TerminalBackend {
   function requestScreenSnapshot(c:RpcConnection):Void {
     if (closed || connection != c || pending) return;
     pending = true;
+    replayDirty = false;
     c.call(WorkspaceTerminalProtocol.SNAPSHOT, {
       workspace: "workspace", instance: instance, id: terminalId
     }, 3000, function(value) {
@@ -426,10 +476,11 @@ class RpcTerminalBackend implements TerminalBackend {
       position = value.terminal.end;
       output.push(TerminalEvent.screenSnapshot(position, value.data));
       output.push(TerminalEvent.status(value.terminal.state, value.terminal.exitCode));
-      nextRead = Sys.time() + (snapshotOnly ? 0.05 : 0);
+      nextRead = Sys.time() + (snapshotOnly ? idleReadDelay() : 0);
     }, function(error) {
       if (connection != c) return;
       pending = false;
+      replayDirty = true;
       if (!closed && !retryable(error.code)) fail(error.code == "snapshot_unavailable"
         ? "Terminal screen snapshot is unavailable" : error.code);
     });

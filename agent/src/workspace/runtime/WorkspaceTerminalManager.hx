@@ -46,6 +46,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
   final root:String;
   final terminals:Map<String, RuntimeTerminal> = [];
   final controllers:Map<String, RpcConnection> = [];
+  final watchers:Array<{connection:RpcConnection, id:String, stamp:String}> = [];
   final historyLimit:Int;
   var count:Int = 0;
   final catalog:Map<String, TerminalRecord> = [];
@@ -162,6 +163,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
     start: t.start,
     end: t.end,
     controller: owner == viewer,
+    notifications: true,
     controlled: owner != null
     };
   }
@@ -283,6 +285,13 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
     );
     // Input sequence is per authenticated connection, never a persisted global client counter.
     var inputSequence:Map<String, Int> = [];
+    connection.register(WorkspaceTerminalProtocol.UNWATCH, function(r, c) {
+      if (!read) { c.fail(error("unauthorized")); return; }
+      if (!valid(r.workspace, r.instance, r.id)) { c.fail(error("invalid_request")); return; }
+      for (watch in watchers.copy())
+        if (watch.connection == connection && watch.id == r.id) watchers.remove(watch);
+      c.respond(r);
+    });
     connection.register(WorkspaceTerminalProtocol.OPEN, function(r, c) {
       if (!read ||(r.create && !control)) {
         c.fail(error("unauthorized"));
@@ -393,6 +402,11 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         count++;
       }
       if (control && controller(r.id) == null) controllers.set(r.id, connection);
+      if (r.watch == true) {
+        var watch = Lambda.find(watchers, function(w) return w.connection == connection && w.id == r.id);
+        if (watch == null) watchers.push({connection:connection, id:r.id, stamp:changeStamp(t, connection)});
+        else watch.stamp = changeStamp(t, connection);
+      }
       c.respond(info(t, connection));
     }
     );
@@ -561,6 +575,26 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
     }
     );
   }
+  // Replay remains authoritative. Invalidation is coalesced once per terminal per daemon tick.
+  function changeStamp(t:RuntimeTerminal, connection:RpcConnection):String {
+    var record = catalog.get(t.id);
+    return Std.string(t.replay.endCursor) + ":" + t.state + ":" + t.exitCode + ":"
+      + (controller(t.id) == connection) + ":" + (controller(t.id) != null) + ":"
+      + (record == null ? "" : Std.string(record.revision));
+  }
+  function notifyChanges():Void {
+    for (watch in watchers.copy()) {
+      var connection = watch.connection;
+      if (!connection.isOpen()) { watchers.remove(watch); continue; }
+      var t = terminals.get(watch.id);
+      var stamp = t == null ? "missing" : changeStamp(t, connection);
+      if (stamp == watch.stamp) continue;
+      watch.stamp = stamp;
+      connection.notify(WorkspaceTerminalProtocol.CHANGED,
+        {workspace:workspace, instance:instance, id:watch.id}, WorkspaceTerminalProtocol.encodeChange);
+      if (t == null) watchers.remove(watch);
+    }
+  }
   public function poll():Void {
     for (id in [for (id in controllers.keys()) id]) controller(id);
     for (t in terminals) {
@@ -591,6 +625,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         }
       }
     }
+    notifyChanges();
   }
   public function activeCount():Int {
     var active = 0;
@@ -604,6 +639,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
     }
     terminals.clear();
     controllers.clear();
+    watchers.resize(0);
     count = 0;
   }
 }

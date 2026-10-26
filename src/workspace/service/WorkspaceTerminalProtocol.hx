@@ -13,6 +13,8 @@ import haxeon.wire.MessagePack;
 @:id(6) var rows:Int;
 @:optional @:id(7) var group:Null<String>;
 @:optional @:id(8) var directory:Null<String>;
+/** Opt in to connection-scoped change notifications. */
+@:optional @:id(9) var watch:Null<Bool>;
 }
 @:wire typedef TerminalInfo = {@: id(1) var id: String;
 @:id(2) var cwd:String;
@@ -26,6 +28,7 @@ import haxeon.wire.MessagePack;
 @:optional @:id(10) var controlled:Null<Bool>;
 /** Service-owned display name; optional for older daemons. */
 @:optional @:id(11) var name:Null<String>;
+@:optional @:id(12) var notifications:Null<Bool>;
 }
 @:wire typedef TerminalRead = {@: id(1) var workspace: String;
 @:id(2) var instance:String;
@@ -119,6 +122,11 @@ import haxeon.wire.MessagePack;
 }
 /** Permanent method ids; output offsets count bytes. Input is never retried across connections. */
 class WorkspaceTerminalProtocol {
+  public static inline final CHANGED = 139;
+  public static function encodeChange(value:TerminalTarget):Bytes return MessagePack.encode(value);
+  public static function decodeChange(bytes:Bytes):TerminalTarget return MessagePack.decode(bytes);
+  public static final UNWATCH = new RpcMethod<TerminalTarget, TerminalTarget>(155,
+    encodeChange, decodeChange, encodeChange, decodeChange);
   public static inline final CATALOG_PAGE_LIMIT = 6;
   public static inline final CATALOG = "workspace.terminals.catalog";
   public static inline final READ = "workspace.terminals.read";

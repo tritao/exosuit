@@ -85,7 +85,12 @@ class TerminalServiceTests {
       manager.poll();
       client.poll();
     };
-    var open:TerminalOpen = {workspace: "w", instance: "instance", id: "bounded", create: true, columns: 80, rows: 24};
+    var changes = 0;
+    client.onNotification(WorkspaceTerminalProtocol.CHANGED, WorkspaceTerminalProtocol.decodeChange, function(event) {
+      require(event.workspace == "w" && event.instance == "instance" && event.id == "bounded", "Notification scope mismatch");
+      changes++;
+    });
+    var open:TerminalOpen = {watch:true, workspace: "w", instance: "instance", id: "bounded", create: true, columns: 80, rows: 24};
     var done = false;
     // A committed open with a lost reply must not create a second shell when retried.
     pair.server.loseNext();
@@ -101,6 +106,7 @@ class TerminalServiceTests {
     require(manager.activeCount() == 1, "Runtime was not created before reply loss");
     done = false;
     client.call(WorkspaceTerminalProtocol.OPEN, open, 1000, function(info) {
+      require(info.notifications == true, "Daemon omitted notification support");
       require(info.name == "Terminal 1", "Open response omitted the service-owned terminal name");
       done = true;
     }, function(e) {
@@ -121,6 +127,22 @@ class TerminalServiceTests {
       client.poll(); server.poll(); client.poll();
       require(done, "Ordered resize was not acknowledged");
     }
+    var beforeChanges = changes;
+    manager.poll(); client.poll();
+    require(changes == beforeChanges + 1, "Geometry changes were not coalesced into one notification");
+    client.call(WorkspaceTerminalProtocol.UNWATCH, {workspace:"w", instance:"instance", id:"bounded"},
+      1000, function(_) {}, function(e) throw e.code);
+    client.poll(); server.poll(); client.poll();
+    beforeChanges = changes;
+    for (width in [79, 80]) {
+      client.call(WorkspaceTerminalProtocol.RESIZE, {workspace:"w", instance:"instance", id:"bounded", columns:width, rows:24},
+        1000, function(_) {}, function(e) throw e.code);
+      client.poll(); server.poll(); manager.poll(); client.poll();
+    }
+    require(changes == beforeChanges, "Unwatched connection still receives notifications");
+    // Reattaching opts back in; old clients omit watch and keep polling.
+    client.call(WorkspaceTerminalProtocol.OPEN, open, 1000, function(_) {}, function(e) throw e.code);
+    client.poll(); server.poll(); client.poll();
     var replay:Null<TerminalReplay> = null;
     client.call(WorkspaceTerminalProtocol.REPLAY, {workspace:"w", instance:"instance", id:"bounded", cursor:0},
       1000, function(value) replay = value, function(e) throw e.code);
@@ -128,7 +150,7 @@ class TerminalServiceTests {
     require(replay != null && replay.next == replay.end, "Service replay cursor did not cover the current journal");
     var batch:TerminalReplay = cast replay;
     var geometry = [for (event in batch.events) if (event.data.length == 0) event];
-    require(geometry.length == 3 && geometry[0].columns == 80 && geometry[1].columns == 20
+    require(geometry.length == 5 && geometry[0].columns == 80 && geometry[1].columns == 20
       && geometry[2].columns == 80 && geometry[1].offset == geometry[2].offset
       && geometry[1].sequence + 1 == geometry[2].sequence,
       "Service lost geometry-only replay order");

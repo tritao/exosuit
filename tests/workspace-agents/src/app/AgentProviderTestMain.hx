@@ -457,6 +457,13 @@ private class AgentTestEndpoint implements workspace.client.WorkspaceRpcEndpoint
 	public function new(connection:haxeon.rpc.RpcConnection) this.connection = connection;
 	public function rootPath():Null<String> return "C:/work";
 	public function serviceGeneration():String return "test-generation";
+	var eventRouter:Null<workspace.client.WorkspaceTerminalEvents>;
+	public function terminalEvents():Null<workspace.client.WorkspaceTerminalEvents> {
+		if (connection == null) return null;
+		if (eventRouter == null || eventRouter.connection != connection)
+			eventRouter = new workspace.client.WorkspaceTerminalEvents(connection);
+		return eventRouter;
+	}
 	public function rpcConnection():Null<haxeon.rpc.RpcConnection> return connection;
 	public function failureReason():Null<String> return null;
 	public function supportsWorkspaceGroups():Bool return false;

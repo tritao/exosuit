@@ -116,6 +116,14 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
 
   public function rootPath():Null<String> return root;
   public function serviceGeneration():String return instance;
+  var terminalEventRouter:Null<WorkspaceTerminalEvents>;
+  public function terminalEvents():Null<WorkspaceTerminalEvents> {
+    var c = rpc();
+    if (c == null) { terminalEventRouter = null; return null; }
+    if (terminalEventRouter == null || terminalEventRouter.connection != c)
+      terminalEventRouter = new WorkspaceTerminalEvents(c);
+    return terminalEventRouter;
+  }
   public function rpcConnection():Null<RpcConnection> return rpc();
   public function failureReason():Null<String> return error;
   public function supportsWorkspaceGroups():Bool return hasGroupTree();
@@ -486,6 +494,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   }
 
   function stopConnection():Void {
+    terminalEventRouter = null;
     lifecycle = null; lifecyclePending = false; lifecycleNext = 0; updateRequestPending = false;
     relayStatus = null; relayStatusPending = false; relayStatusNext = 0;
     pairings = null; pairingsError = null; pairingsPending = false; pairingsMutation = false; pairingsNext = 0; pairingsRevision++;

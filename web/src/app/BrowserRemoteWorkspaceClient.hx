@@ -607,6 +607,15 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 
 	public function serviceGeneration():String return serviceInstance;
 
+	var terminalEventRouter:Null<workspace.client.WorkspaceTerminalEvents>;
+	public function terminalEvents():Null<workspace.client.WorkspaceTerminalEvents> {
+		var c = rpcConnection();
+		if (c == null) { terminalEventRouter = null; return null; }
+		if (terminalEventRouter == null || terminalEventRouter.connection != c)
+			terminalEventRouter = new workspace.client.WorkspaceTerminalEvents(c);
+		return terminalEventRouter;
+	}
+
 	public function rpcConnection():Null<RpcConnection> return isWorkspaceConnected() ? workspaceConnection : null;
 
 	public function failureReason():Null<String>
@@ -704,6 +713,7 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 		if (reconnectConnector != null) reconnectConnector.dispose();
 		reconnectConnector = null;
 		workspaceConnection = null;
+		terminalEventRouter = null;
 		serviceInstance = "";
 		fileApiConnection = null;
 		fileApiClient = null;
