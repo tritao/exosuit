@@ -162,6 +162,7 @@ class EditorTabsView implements View {
 					new TextStyleOverride(null, 13, null, TextWrap.WordCharacter)),
 				function() return viewport == null ? new Rect(0, 0, context.viewportWidth, context.viewportHeight) : viewport.globalBounds(),
 				tooltipDelay, Below, hover, visibleTooltip == "tab-tooltip:" + tabs.items[index].key);
+			tooltip.startAtAnchorMiddle = true;
 			var built = tooltip.build(context);
 			strip.add(built);
 		}

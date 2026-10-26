@@ -24,16 +24,21 @@ private class ExplorerInputModel implements haxeon.ui.widgets.collections.TreeVi
 
 private class NarrowTooltipFixture implements haxeon.ui.core.View {
 	final placement:haxeon.ui.widgets.overlays.TooltipPlacement;
-	public function new(placement:haxeon.ui.widgets.overlays.TooltipPlacement = Below) this.placement = placement;
+	final midpoint:Bool;
+	public function new(placement:haxeon.ui.widgets.overlays.TooltipPlacement = Below, midpoint:Bool = false) {
+		this.placement = placement; this.midpoint = midpoint;
+	}
 	public function build(context:haxeon.ui.core.BuildContext):haxeon.ui.core.RenderNode {
 		var anchorStyle = new haxeon.ui.LayoutStyle();
 		anchorStyle.width = haxeon.ui.LayoutAxis.fixed(24);
 		anchorStyle.height = haxeon.ui.LayoutAxis.fixed(24);
 		var group = new ui.TooltipHoverGroup(context.animations, function(_) {}, 0);
-		return new TabTooltip("narrow-tooltip", new haxeon.ui.widgets.text.Text("+", anchorStyle),
+		var tooltip = new TabTooltip("narrow-tooltip", new haxeon.ui.widgets.text.Text("+", anchorStyle),
 			new haxeon.ui.widgets.text.Text("Open", null, null,
 				new haxeon.ui.core.TextStyleOverride(null, 13, null, haxeon.ui.TextWrap.WordCharacter)),
-			function() return new Rect(0, 0, 800, 600), 0, placement, group, true).build(context);
+			function() return new Rect(0, 0, 800, 600), 0, placement, group, true);
+		tooltip.startAtAnchorMiddle = midpoint;
+		return tooltip.build(context);
 	}
 }
 
@@ -140,6 +145,10 @@ class TabTooltipTestMain {
 		require(right.x + 390 + right.width + 20 <= 394 && right.y == 56, "tooltip ignored rail edge or tab height");
 		var narrow = TabTooltip.place(20, 40, 20, 100);
 		require(narrow.width == 68 && narrow.x == 6, "tooltip padding was not included in width clamping");
+		var middle = TabTooltip.place(100, 40, 0, 800, 80, 100);
+		require(middle.x == 80, "tooltip did not start at tab midpoint when space was available");
+		var middleEdge = TabTooltip.place(700, 40, 0, 800, 60, 180);
+		require(middleEdge.x == -86, "midpoint tooltip did not shift left to stay inside the rail");
 		var viewport = new Rect(0, 0, 800, 600);
 		var activity = TabTooltip.placeRight(new Rect(0, 80, 40, 40), 100, 30, viewport);
 		require(activity.x == 48 && activity.y == 5, "activity tooltip must prefer right and center vertically");
@@ -172,6 +181,12 @@ class TabTooltipTestMain {
 		require(paintedTooltip, "tooltip fixture did not build a styled tooltip");
 		require(open != null && open.globalBounds().width > 25 && open.globalBounds().height < 25,
 			"short tooltip wrapped to its narrow anchor: " + (open == null ? "missing" : open.globalBounds().width + " x " + open.globalBounds().height));
+		var midpointRoot = context.submit(new ui.TooltipOverlayHost(new NarrowTooltipFixture(Below, true)),
+			new haxeon.ui.LayoutFrame(800, 600));
+		var midpointTip:haxeon.ui.core.RenderNode = null;
+		midpointRoot.walk(function(node) { if (node.styleType == "tooltip") midpointTip = node; });
+		require(midpointTip != null && midpointTip.globalBounds().x == 12,
+			"lifted tooltip did not resolve at the 24px anchor midpoint");
 		var clippedRoot = context.submit(new ClippedToolbarFixture(), new haxeon.ui.LayoutFrame(800, 600));
 		var escapedTip:haxeon.ui.core.RenderNode = null;
 		clippedRoot.walk(function(node) { if (node.styleType == "tooltip") escapedTip = node; });

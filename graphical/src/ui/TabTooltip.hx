@@ -19,6 +19,8 @@ import haxeon.ui.core.View;
 class TabTooltip implements View {
 	/** Let a bounded row allocate the anchor width independently of tooltip content. */
 	public var fillAnchor:Bool = false;
+	/** Prefer the tooltip's left edge at the anchor midpoint, subject to viewport bounds. */
+	public var startAtAnchorMiddle:Bool = false;
 	final key:String;
 	final anchor:View;
 	final content:View;
@@ -38,9 +40,11 @@ class TabTooltip implements View {
 		this.key = key; this.anchor = anchor; this.content = content;
 	}
 	/** Content width excludes the tooltip's own padding. */
-	public static function place(anchorX:Float, anchorHeight:Float, railX:Float, railWidth:Float):{x:Float, y:Float, width:Float} {
+	public static function place(anchorX:Float, anchorHeight:Float, railX:Float, railWidth:Float,
+			preferredOffset:Float = 0, ?boxWidth:Float):{x:Float, y:Float, width:Float} {
 		var width = Math.max(1, Math.min(300, railWidth - 2 * (EDGE + PADDING)));
-		var x = Math.max(railX + EDGE - anchorX, Math.min(0, railX + railWidth - EDGE - anchorX - width - 2 * PADDING));
+		var actualWidth = boxWidth == null ? width + 2 * PADDING : boxWidth;
+		var x = Math.max(railX + EDGE - anchorX, Math.min(preferredOffset, railX + railWidth - EDGE - anchorX - actualWidth));
 		return {x: x, y: anchorHeight + 4, width: width};
 	}
 	/** Returns anchor-relative coordinates, preferring right and keeping the box in the viewport. */
@@ -93,10 +97,9 @@ class TabTooltip implements View {
 				if (root.resolved == null || header.resolved == null) return;
 				var rail = boundsProvider();
 				var anchorBounds = root.globalBounds();
-				var placement = place(anchorBounds.x, header.globalBounds().height, rail.x, rail.width);
 				var tipBounds = tip.resolved == null ? null : tip.globalBounds();
-				if (tipBounds != null) placement.x = Math.max(rail.x + EDGE - anchorBounds.x,
-					Math.min(0, rail.x + rail.width - EDGE - anchorBounds.x - tipBounds.width));
+				var placement = place(anchorBounds.x, header.globalBounds().height, rail.x, rail.width,
+					startAtAnchorMiddle ? anchorBounds.width / 2 : 0, tipBounds == null ? null : tipBounds.width);
 				if (this.placement == Above && tipBounds != null) placement.y = -tipBounds.height - 4;
 				if (this.placement == Right) {
 					var side = placeRight(anchorBounds, tipBounds == null ? 0 : tipBounds.width,
