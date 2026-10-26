@@ -119,6 +119,12 @@ def main():
     dropped = q("select coalesce(sum(c.value), 0) s from counter c join counter_track t on c.track_id=t.id "
                 "where t.name='Short calls dropped per frame'")[0].s
     report["short_calls_dropped"] = dropped
+    # Render plan reuse: cumulative counters, so the run's total is the last value minus the first.
+    plan = {}
+    for row in q("select t.name n, max(c.value) hi, min(c.value) lo from counter c join counter_track t on c.track_id=t.id "
+                 "where t.name like 'ui.plan.%' group by t.name"):
+        plan[row.n[len("ui.plan."):]] = int(row.hi - row.lo)
+    report["render_plan"] = plan
 
     if out_json:
         json.dump(report, open(out_json, "w"), indent=1)
@@ -142,6 +148,8 @@ def main():
     for label, v in watch.items():
         print(f"  watch {label:20s} {v['ms']:9.1f} ms  {v['ms_per_frame']:7.2f} ms/frame  calls {v['calls']}")
     print(f"short calls dropped {dropped:.3g}")
+    if plan:
+        print("  render plan " + ", ".join(f"{k} {v}" for k, v in sorted(plan.items())))
 
 
 if __name__ == "__main__":
