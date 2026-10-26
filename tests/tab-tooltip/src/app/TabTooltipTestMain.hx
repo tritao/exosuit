@@ -22,6 +22,25 @@ private class ExplorerInputModel implements haxeon.ui.widgets.collections.TreeVi
 	public function revision():Int return 0;
 }
 
+private class ToolbarTooltipFixture implements haxeon.ui.core.View {
+	final offset:Float;
+	public function new(offset:Float) this.offset = offset;
+	public function build(context:haxeon.ui.core.BuildContext):haxeon.ui.core.RenderNode {
+		var style = new haxeon.ui.LayoutStyle();
+		style.width = haxeon.ui.LayoutAxis.fixed(24);
+		style.height = haxeon.ui.LayoutAxis.fixed(24);
+		var anchor = new haxeon.ui.widgets.controls.Button("+", style, function() {}, "fixture-toolbar-button");
+		var tooltip = new haxeon.ui.widgets.overlays.Tooltip("fixture-standard-tooltip", anchor,
+			new haxeon.ui.widgets.text.Text("New Codex"), offset, 36);
+		var container = new haxeon.ui.LayoutStyle();
+		container.width = haxeon.ui.LayoutAxis.grow();
+		container.height = haxeon.ui.LayoutAxis.grow();
+		container.padding = new haxeon.ui.Insets(80, 40, 0, 0);
+		return new haxeon.ui.widgets.layout.Column("toolbar-fixture",
+			[new haxeon.ui.widgets.KeyedView("tooltip", tooltip)], container).build(context);
+	}
+}
+
 private class NarrowTooltipFixture implements haxeon.ui.core.View {
 	final placement:haxeon.ui.widgets.overlays.TooltipPlacement;
 	final midpoint:Bool;
@@ -205,6 +224,21 @@ class TabTooltipTestMain {
 				"tooltip remained inside the clipped toolbar stacking context");
 			require(liftedTip.globalBounds().y >= 28 && liftedTip.globalBounds().x >= 6,
 				"lifted tooltip lost its anchor placement");
+		}
+
+		for (offset in [-32.0, -200.0, 900.0]) {
+			var toolbarFixture = new ui.TooltipOverlayHost(new ToolbarTooltipFixture(offset));
+			context.submit(toolbarFixture, new haxeon.ui.LayoutFrame(800, 600));
+			context.pointerMove(90, 50);
+			var toolbarRoot = context.submit(toolbarFixture, new haxeon.ui.LayoutFrame(800, 600));
+			var toolbarTip:haxeon.ui.core.RenderNode = null;
+			toolbarRoot.walk(function(node) { if (node.styleType == "tooltip") toolbarTip = node; });
+			require(toolbarTip != null && toolbarTip.layout.style.visible, "toolbar tooltip did not open on hover");
+			var tipBounds = toolbarTip.globalBounds();
+			require(tipBounds.x >= 6 && tipBounds.x + tipBounds.width <= 794 && tipBounds.y == 76,
+				"lifted toolbar tooltip lost its anchor or escaped the window");
+			if (offset == -32) require(tipBounds.x == 48, "toolbar tooltip used window coordinates for an anchor offset");
+			context.pointerMove(790, 590);
 		}
 
 		var sideRoot = context.submit(new NarrowTooltipFixture(Right), new haxeon.ui.LayoutFrame(800, 600));
