@@ -15,6 +15,8 @@ class FileController {
 	public var quitReady(default, null):Bool = false;
 	/** A graphical host supplies an asynchronous destination chooser. */
 	public var chooseSaveDestination:Null<(Document, (Null<String>, Bool)->Void)->Void>;
+	/** Return true when the host can edit this path in its tree. */
+	public var renameInPlace:Null<(String, String->Bool)->Bool>;
 	var saveAsPending:Bool = false;
 
 	final documents:DocumentManager;
@@ -146,11 +148,20 @@ class FileController {
 	public function openRenameFile():Void {
 		var source = selectedFileOperationPath();
 		if (source == null) return;
-		root.openCommandView(new CommandViewProvider("Rename/Move: ", [], function(query) {}, function(entry, destination, backwards) {
+		var rename = function(destination:String):Bool {
 			var result = operations.move(source, destination);
-			if (!result.success) reportError("file", 'Could not rename "$source": ' + result.detail); else
-				for (document in result.documents) root.documentRenamed(document);
+			if (!result.success) {
+				reportError("file", 'Could not rename "' + source + '": ' + result.detail);
+				return false;
+			}
+			for (document in result.documents) root.documentRenamed(document);
 			workspace.refreshProjects();
+			saveRecovery();
+			return true;
+		};
+		if (renameInPlace != null && renameInPlace(source, rename)) return;
+		root.openCommandView(new CommandViewProvider("Rename/Move: ", [], function(query) {}, function(entry, destination, backwards) {
+			rename(destination);
 			root.closeCommandView();
 		}));
 	}

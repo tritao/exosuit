@@ -143,6 +143,8 @@ class ExosuitApp implements DesktopUiApplication {
 	var explorerRoot:Null<String>;
 	var explorerModel:Null<ExplorerTreeModel>;
 	var explorerTree:Null<TreeView>;
+	var explorerRename:Null<ExplorerRename>;
+	var renamedExplorerPath:Null<String>;
 	var localScmSource:Null<LocalScmSource>;
 	var sourceControlPanelValue:Null<SourceControlPanel>;
 	var sourceControlPanelIdentity:Null<String>;
@@ -309,6 +311,7 @@ class ExosuitApp implements DesktopUiApplication {
 			skipTrashConfirmation = false;
 			requestFrame();
 		};
+		application.files.renameInPlace = beginExplorerRename;
 		application.files.chooseSaveDestination = function(document, handler) {
 			var initial = document.hasBackingPath() ? haxe.io.Path.directory(document.requirePath()) :
 				application.workspace.projects.length == 0 ? "" : application.workspace.projects[0].root;
@@ -1992,6 +1995,29 @@ class ExosuitApp implements DesktopUiApplication {
 		else application.files.openCreateFile(base, refresh);
 	}
 
+	function beginExplorerRename(path:String, rename:String->Bool):Bool {
+		if (!sidebar.visible || sidebar.activeId != "files") return false;
+		var tree = explorerTree;
+		var model:Null<DirectoryTreeModel> = Std.isOfType(explorerModel, DirectoryTreeModel) ? cast explorerModel : null;
+		if (tree == null || model == null || tree.selectedKey != path || model.isSyntheticRow(path)) return false;
+		if (path == explorerRoot) { application.reportError("files", "Project roots cannot be renamed while open."); return true; }
+		host.closeCommandView();
+		tree.scrollIntoView(path);
+		host.focusExplorer();
+		explorerRename = new ExplorerRename(path, model.isDirectoryPath(path), rename, function(destination) {
+			if (explorerRename == null || explorerRename.path != path) return;
+			explorerRename = null;
+			if (destination != null) {
+				renamedExplorerPath = destination;
+				host.setSelectedExplorerPath(destination);
+				model.refreshDirectory(haxe.io.Path.directory(path));
+			}
+			requestFrame();
+		}, requestFrame, function(message) application.reportError("files", message), application.settings.current.explorerFontSize);
+		requestFrame();
+		return true;
+	}
+
 	function explorerPanel():View {
 		if (explorerRoot == null) {
 			var open = new Button("Open", null, openFolderDialog, "explorer-open-folder");
@@ -2034,7 +2060,8 @@ class ExosuitApp implements DesktopUiApplication {
 		if (localModel != null) localModel.fontSize = application.settings.current.explorerFontSize;
 		if (explorerTree != null) {
 			if (remoteModel != null) advanceWorkspaceFolderReveal(explorerTree, remoteModel);
-			return new ExplorerTreeView(explorerTree, explorerModel, darkPalette, hostContext == null ? null : hostContext.events);
+			return new ExplorerTreeView(explorerTree, explorerModel, darkPalette, hostContext == null ? null : hostContext.events, explorerRename,
+			host.focusExplorer, function(command) application.commands.perform(command, application.context));
 		}
 		var viewportStyle = new LayoutStyle();
 		viewportStyle.width = LayoutAxis.grow();
@@ -2057,6 +2084,17 @@ class ExosuitApp implements DesktopUiApplication {
 		if (remoteModel != null)
 			tree.hasChildrenHint = function(key) return remoteModel.isDirectoryKey(key);
 		if (localModel != null) {
+			tree.onStateReady = function(current) {
+				var path = renamedExplorerPath;
+				if (path == null) return;
+				var parent = haxe.io.Path.directory(path);
+				for (index in 0...localModel.childCount(parent)) if (localModel.childKeyAt(parent, index) == path) {
+					current.select(path);
+					current.scrollIntoView(path);
+					renamedExplorerPath = null;
+					break;
+				}
+			};
 			tree.hasChildrenHint = function(key) return localModel.hasChildrenHint(key);
 			tree.onExpansionRequested = function(path, expanded, toggle) {
 				var allowed = localModel.requestExpansion(path, expanded, toggle);
@@ -2085,6 +2123,12 @@ class ExosuitApp implements DesktopUiApplication {
 				application.openInBackground(path, count == 1);
 			} catch (error:Dynamic) application.reportError("files", "Could not open file: " + Std.string(error));
 		};
+		if (localModel != null) tree.onItemRename = function(path) {
+			if (explorerRename != null || localModel.isSyntheticRow(path)) return;
+			tree.select(path);
+			host.setSelectedExplorerPath(path);
+			application.files.openRenameFile();
+		};
 		tree.onItemContextMenu = function(path, event) {
 			if (remoteModel != null || (localModel != null && localModel.isSyntheticRow(path))) return;
 			var menuRoot = explorerRoot;
@@ -2098,7 +2142,8 @@ class ExosuitApp implements DesktopUiApplication {
 		};
 		explorerTree = tree;
 		if (remoteModel != null) advanceWorkspaceFolderReveal(tree, remoteModel);
-		return new ExplorerTreeView(tree, explorerModel, darkPalette, hostContext == null ? null : hostContext.events);
+		return new ExplorerTreeView(tree, explorerModel, darkPalette, hostContext == null ? null : hostContext.events, explorerRename,
+			host.focusExplorer, function(command) application.commands.perform(command, application.context));
 	}
 
 	function advanceWorkspaceFolderReveal(tree:TreeView, model:WorkspaceFileTreeModel):Void {
@@ -2787,6 +2832,8 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function clearExplorerModel():Void {
+		explorerRename = null;
+		renamedExplorerPath = null;
 		if (explorerModel != null) explorerModel.dispose();
 		explorerModel = null;
 		explorerTree = null;

@@ -130,6 +130,11 @@ class UiWorkbenchHost implements WorkbenchHost {
 
 	public function deactivateDocumentFocus():Void focus.activate(null);
 
+	public function focusExplorer():Void {
+		pendingEditorFocus = false;
+		focus.activate(null);
+	}
+
 	var problemActivationHandler:Problem->Void = function(problem) {};
 	var buildDiagnosticHandler:BuildDiagnostic->Void = function(diagnostic) {};
 	public var currentBuildTitle(default, null):String = "";

@@ -51,6 +51,9 @@ PYFIXTURE
 run_phase editor-font editor-font "$fixture/sidebar-project/Main.hx"
 run_phase problems problems "$fixture/sidebar-project/Main.hx"
 run_phase file-deletion file-deletion
+mkdir -p "$fixture/rename-project"
+printf 'class Main {}\n' > "$fixture/rename-project/Main.hx"
+run_phase explorer-rename explorer-rename "$fixture/rename-project/Main.hx"
 run_phase activity-bar activity-bar "$fixture/sidebar-project/Main.hx"
 run_phase sidebar-write sidebar "$fixture/sidebar-project/Main.hx"
 run_phase sidebar-read sidebar "$fixture/sidebar-project/Main.hx"

@@ -53,12 +53,17 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	var remoteOpenTests:Null<RemoteFileOpenTests>;
 
 	public function new(context:haxeon.ui.host.DesktopUiHostContext, path:String, phase:String) {
-		super(context.fonts, null, context, (phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-geometry" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-font" || phase == "editor-tabs" || phase == "zoom" || phase == "word-delete" || phase == "selection" || phase == "tab-close" || phase == "pointer-actions" || phase == "blank-editor-click" || phase == "caret-follow" || phase == "exit-confirmation" || phase == "save-as" || phase == "tab-close-paint" || phase == "settings" || phase == "editor-minimap" || phase == "toolbar-tooltip" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
+		super(context.fonts, null, context, (phase == "explorer-rename" || phase == "explorer-preview" || phase == "explorer-icons") ? path.substring(0, path.lastIndexOf("/")) : phase == "language-folder" || phase == "editor-geometry" || phase == "editor-scroll" || phase == "editor-resize" || phase == "editor-font" || phase == "editor-tabs" || phase == "zoom" || phase == "word-delete" || phase == "selection" || phase == "tab-close" || phase == "pointer-actions" || phase == "blank-editor-click" || phase == "caret-follow" || phase == "exit-confirmation" || phase == "save-as" || phase == "tab-close-paint" || phase == "settings" || phase == "editor-minimap" || phase == "toolbar-tooltip" || phase == "scrollbar-visibility" || phase == "write" || phase == "keyboard" || phase == "sidebar-write" || (phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) ? path : null,
 			null, null, null, WorkspaceSmokeMain.createTerminal);
 		this.phase = phase;
 		closeContext = context;
 		this.testFonts = context.fonts;
 		this.path = path;
+		if (phase == "explorer-rename") {
+			var folder = haxe.io.Path.directory(path) + "/folder.old";
+			sys.FileSystem.createDirectory(folder);
+			sys.io.File.saveContent(folder + "/Child.hx", "class Child {}\n");
+		}
 		if (phase == "zoom" || phase == "language-folder" || phase == "sidebar-write" || phase == "sidebar-search" || (phase == "sidebar-preview" || phase == "sidebar-stale-preview")) application.openArgument(path.substring(0, path.lastIndexOf("/")));
 	}
 
@@ -114,6 +119,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		frames++;
 		if (phase == "theme-palette") return themePaletteStep(frame);
 		if (phase == "file-deletion") return fileDeletionStep(frame);
+		if (phase == "explorer-rename") return explorerRenameStep(frame);
 		if (phase == "remote-open") {
 			if (frames == 1) { remoteOpenTests = new RemoteFileOpenTests(this); remoteOpenTests.start(); }
 			if (frames == 2) {
@@ -1324,6 +1330,68 @@ class WorkspaceSmokeApp extends ExosuitApp {
 
 	var deletedDocument:editor.Document;
 	var deletedPane:String;
+	var renameStage:Int = 0;
+	function explorerRenameStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
+		var destination = haxe.io.Path.directory(path) + "/Renamed.hx";
+		if (renameStage == 0 && ui.root != null && treeRow(ui.root, path) != null) {
+			clickTree(path); renameStage++;
+		} else if (renameStage == 1) {
+			ui.key(UiEventKind.KeyDown, UiKey.F2); renameStage++;
+		} else if (renameStage == 2) {
+			require(!host.isCommandViewActive(), "inline rename opened command picker");
+			ui.text(UiEventKind.TextInput, "Renamed");
+			ui.key(UiEventKind.KeyDown, UiKey.Enter); renameStage++;
+		} else if (renameStage == 3) {
+			require(!sys.FileSystem.exists(path) && sys.FileSystem.exists(destination), "inline rename did not preserve extension and rename file");
+			var active = host.activeView();
+			require(active != null && active.document.path == destination, "rename lost open document path");
+			renameStage++;
+		} else if (renameStage == 4 && treeRow(ui.root, destination) != null) {
+			clickTree(destination); application.files.openRenameFile(); renameStage++;
+		} else if (renameStage == 5) {
+			ui.key(UiEventKind.KeyDown, UiKey.A, UiModifier.Control);
+			ui.text(UiEventKind.TextInput, "cancelled.hx");
+			ui.key(UiEventKind.KeyDown, UiKey.Escape); renameStage++;
+		} else if (renameStage == 6) {
+			require(sys.FileSystem.exists(destination) && !sys.FileSystem.exists(haxe.io.Path.directory(path) + "/cancelled.hx"), "Escape renamed the file");
+			sys.io.File.saveContent(haxe.io.Path.directory(path) + "/Taken.hx", "keep me");
+			clickTree(destination); application.files.openRenameFile(); renameStage++;
+		} else if (renameStage == 7) {
+			ui.key(UiEventKind.KeyDown, UiKey.A, UiModifier.Control);
+			ui.text(UiEventKind.TextInput, "../invalid.hx");
+			ui.key(UiEventKind.KeyDown, UiKey.Enter); renameStage++;
+		} else if (renameStage == 8) {
+			require(sys.FileSystem.exists(destination), "invalid name moved the source");
+			ui.key(UiEventKind.KeyDown, UiKey.A, UiModifier.Control);
+			ui.text(UiEventKind.TextInput, "Taken.hx");
+			ui.key(UiEventKind.KeyDown, UiKey.Enter); renameStage++;
+		} else if (renameStage == 9) {
+			require(sys.FileSystem.exists(destination) && sys.io.File.getContent(haxe.io.Path.directory(path) + "/Taken.hx") == "keep me", "name collision overwrote an existing file");
+			ui.key(UiEventKind.KeyDown, UiKey.A, UiModifier.Control);
+			ui.text(UiEventKind.TextInput, "Final.hx");
+			ui.key(UiEventKind.KeyDown, UiKey.Enter); renameStage++;
+		} else if (renameStage == 10) {
+			require(!sys.FileSystem.exists(destination) && sys.FileSystem.exists(haxe.io.Path.directory(path) + "/Final.hx"), "rename field did not allow correction after validation failures");
+			renameStage++;
+		} else if (renameStage == 11) {
+			var folder = haxe.io.Path.directory(path) + "/folder.old";
+			application.open(folder + "/Child.hx");
+			clickTree(folder); application.files.openRenameFile(); renameStage++;
+		} else if (renameStage == 12) {
+			ui.text(UiEventKind.TextInput, "RenamedFolder");
+			ui.key(UiEventKind.KeyDown, UiKey.Enter); renameStage++;
+		} else if (renameStage == 13) {
+			var child = haxe.io.Path.directory(path) + "/RenamedFolder/Child.hx";
+			require(sys.FileSystem.exists(child), "folder rename did not select the whole dotted name or preserve contents");
+			var active = host.activeView();
+			require(active != null && active.document.path == child, "folder rename lost child document path");
+			renameStage++;
+			trace("PASS: inline file and folder rename, extension selection, open-document paths, Escape, invalid names and collision correction");
+		}
+		if (frames == 39) require(renameStage == 14, "inline rename scenario did not complete: " + renameStage);
+		return super.submit(frame);
+	}
+
 	function fileDeletionStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		var cleanPath = path + ".delete-clean.hx", dirtyPath = path + ".delete-dirty.hx";
 		if (frames == 2) {
@@ -1608,7 +1676,7 @@ class WorkspaceSmokeMain {
 			zoomWidth = options.width;
 		}
 		options.captureDirectory = args[1];
-		options.frameLimit = args[2] == "editor-geometry" ? 25 : args[2] == "file-deletion" ? 10 : args[2] == "blank-editor-click" ? 11 : args[2] == "zoom" ? 75 : args[2] == "save-as" ? 10 : args[2] == "exit-confirmation" ? 11 : args[2] == "tab-close" ? 13 : args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 11 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
+		options.frameLimit = args[2] == "explorer-rename" ? 40 : args[2] == "editor-geometry" ? 25 : args[2] == "file-deletion" ? 10 : args[2] == "blank-editor-click" ? 11 : args[2] == "zoom" ? 75 : args[2] == "save-as" ? 10 : args[2] == "exit-confirmation" ? 11 : args[2] == "tab-close" ? 13 : args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 11 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
 		var status = DesktopUiHost.run(options, context -> new WorkspaceSmokeApp(context, args[0], args[2]));
 
 		return status;
