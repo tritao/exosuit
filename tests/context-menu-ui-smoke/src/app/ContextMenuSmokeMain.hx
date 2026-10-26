@@ -9,6 +9,7 @@ import ui.ExosuitApp;
 
 /** Report native input results without injecting events through UiContext. */
 @:access(ui.ExosuitApp)
+@:access(ui.CommandMenu)
 class ContextMenuSmokeApp extends ExosuitApp {
 	final report:String;
 	public function new(context:haxeon.ui.host.UiHostContext, directory:String) {
@@ -17,6 +18,14 @@ class ContextMenuSmokeApp extends ExosuitApp {
 	}
 	override public function submit(frame:LayoutFrame):RenderNode {
 		var root = super.submit(frame);
+		// Exercise the workbench custom-action entry point with the same native
+		// editor input target, without depending on a running workspace agent.
+		if (sys.FileSystem.exists(haxe.io.Path.directory(report) + "/workbench-menu")) {
+			for (pane in editorPanes) pane.onContextMenu = function(event) {
+				showWorkbenchMenu([new haxeon.ui.widgets.overlays.MenuItem("smoke-action", "Smoke action", function() {})],
+					event, function() return true);
+			};
+		}
 		var nodes:Array<Dynamic> = [];
 		root.walk(function(node) {
 			if (node.resolved == null) return;
@@ -31,6 +40,7 @@ class ContextMenuSmokeApp extends ExosuitApp {
 		});
 		var focused = ui.focus.focusedNode();
 		sys.io.File.saveContent(report, haxe.Json.stringify({menuOpen: contextMenu != null,
+			anchor: contextMenu == null ? null : {x: contextMenu.x, y: contextMenu.y},
 			focus: focused == null ? -1 : focused.id.value,
 			focusLabel: focused == null || focused.semantics == null ? "" : focused.semantics.label,
 			nodes: nodes}));

@@ -1454,11 +1454,7 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function showWorkbenchMenu(items:Array<haxeon.ui.widgets.overlays.MenuItem>, event:UiEvent, valid:Void->Bool):Void {
-		var x = event.x, y = event.y;
-		var node = ui.root == null ? null : ui.root.find(event.target);
-		if (node != null && node.resolved != null) {
-			var bounds = node.globalBounds(); x = bounds.x; y = bounds.y + bounds.height;
-		}
+		var anchor = contextMenuAnchor(event);
 		var actions:Array<haxeon.ui.widgets.overlays.MenuItem> = [];
 		for (item in items) {
 			var action = item;
@@ -1468,7 +1464,7 @@ class ExosuitApp implements DesktopUiApplication {
 				requestFrame();
 			}, item.enabled));
 		}
-		contextMenu = new CommandMenu(application.commands, application.context, [], x, y, valid,
+		contextMenu = new CommandMenu(application.commands, application.context, [], anchor.x, anchor.y, valid,
 			function() { contextMenu = null; requestFrame(); }, actions, menuOpenedWithKeyboard(event));
 		requestFrame();
 	}
@@ -2986,23 +2982,29 @@ class ExosuitApp implements DesktopUiApplication {
 		requestFrame();
 	}
 
-	function showContextMenu(entries:Array<CommandMenuEntry>, event:UiEvent, valid:Void->Bool):Void {
-		var x = event.x, y = event.y;
-		if (event.kind == UiEventKind.KeyDown && ui.root != null) {
+	/** Context menus use viewport pointer coordinates; non-pointer requests anchor to the focused target. */
+	function contextMenuAnchor(event:UiEvent):{x:Float, y:Float} {
+		var anchor = {x: event.x, y: event.y};
+		if (menuOpenedWithKeyboard(event) && ui.root != null) {
 			var node = ui.root.find(event.target);
 			if (node != null && node.resolved != null) {
 				var bounds = node.globalBounds();
-				x = bounds.x;
-				y = bounds.y + bounds.height;
+				anchor.x = bounds.x;
+				anchor.y = bounds.y + bounds.height;
 				if (node.semantics != null && node.semantics.role == haxeon.ui.semantics.AccessibilityRole.TextField) {
 					var caret = host.textInputArea();
-					if (caret != null) { x = caret.x; y = caret.y + caret.height; }
+					if (caret != null) { anchor.x = caret.x; anchor.y = caret.y + caret.height; }
 				}
 			}
 		}
+		return anchor;
+	}
+
+	function showContextMenu(entries:Array<CommandMenuEntry>, event:UiEvent, valid:Void->Bool):Void {
+		var anchor = contextMenuAnchor(event);
 		if (host.isCommandViewActive()) host.closeCommandView();
 		host.dismissLanguagePopup();
-		contextMenu = new CommandMenu(application.commands, application.context, entries, x, y, valid,
+		contextMenu = new CommandMenu(application.commands, application.context, entries, anchor.x, anchor.y, valid,
 			function() { contextMenu = null; requestFrame(); }, null, menuOpenedWithKeyboard(event));
 		requestFrame();
 	}

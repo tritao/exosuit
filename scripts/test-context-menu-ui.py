@@ -85,7 +85,34 @@ def main():
                 xdo("key", "shift+F10")
                 wait(lambda s: s["menuOpen"] and s["focus"] in [n["id"] for n in s["nodes"] if n["menuItem"]],
                      "Keyboard context menu did not select an action")
-                print("PASS: native editor right-click, Down without hover, repeated reopenings, and Shift+F10")
+                xdo("key", "Escape")
+                wait(lambda s: not s["menuOpen"], "Keyboard menu did not close")
+                for workbench in (False, True):
+                    if workbench:
+                        (fixture / "workbench-menu").touch()
+                        # Request a frame so the fixture installs the workbench handler.
+                        click(gear)
+                        wait(lambda s: s["menuOpen"], "Manage menu did not open")
+                        xdo("key", "Escape")
+                        wait(lambda s: not s["menuOpen"], "Manage menu did not close")
+                    for offset in (80, 220):
+                        px = int(editor["x"] + offset)
+                        py = int(editor["y"] + 90)
+                        xdo("mousemove", "--window", window, px, py, "click", 3)
+                        wait(lambda s: s["menuOpen"], "Positioned context menu did not open")
+                        assert state["anchor"] == {"x": px, "y": py}, (workbench, state)
+                        if workbench:
+                            assert any(n["key"] == "smoke-action" for n in state["nodes"]), state
+                        xdo("key", "Escape")
+                        wait(lambda s: not s["menuOpen"], "Positioned menu did not close")
+                    click(editor)
+                    xdo("key", "shift+F10")
+                    wait(lambda s: s["menuOpen"] and s["focus"] in [n["id"] for n in s["nodes"] if n["menuItem"]],
+                         "Keyboard context menu did not select an action")
+                    assert state["anchor"] != {"x": 0, "y": 0}, state
+                    xdo("key", "Escape")
+                    wait(lambda s: not s["menuOpen"], "Keyboard context menu did not close")
+                print("PASS: native menu navigation, pointer anchors for command and workbench menus, and Shift+F10")
             finally:
                 app.terminate()
                 app.wait(timeout=5)
