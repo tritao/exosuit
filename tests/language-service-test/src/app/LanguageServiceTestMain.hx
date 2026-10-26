@@ -60,6 +60,9 @@ class LanguageServiceTestMain {
 		File.saveContent(path, "😀 value\n");
 		var document = documents.open(path), manager = new ProcessManager();
 		var client = new LanguageServiceClient(manager, documents, "python3", [server, "--semantic"], project);
+		// A root spelled with another drive-letter case still owns the document.
+		var recased = ~/^[A-Za-z]:/.match(project) ? (project.charAt(0) == project.charAt(0).toLowerCase() ? project.charAt(0).toUpperCase() : project.charAt(0).toLowerCase()) + project.substr(1) : project;
+		require(new LanguageServiceClient(manager, documents, "python3", [server], recased).accepts(document), "root with other drive-letter case excludes its document");
 		client.start(Sys.time());
 		pump(client, () -> client.semanticTokensFor(document) != null, 5.0);
 		var snapshot = client.semanticTokensFor(document);
@@ -171,7 +174,7 @@ class LanguageServiceTestMain {
 		var narrowed = CompletionItem.matching(ranked, "AL");
 		require(narrowed.length == 2 && narrowed[0] == ranked[0] && narrowed[1] == ranked[1],
 			"completion filtering changed provider ranking or item identity");
-		require(located.length == 1 && located[0].path == sourcePath && located[0].from.column == 2,
+		require(located.length == 1 && located[0].path == document.path && located[0].from.column == 2,
 			"definition response did not retain its UTF-16 location");
 		require(signature != null && signature.activeParameter == "right:Int" && signature.documentation == "Adds values",
 			"signature help did not decode its active parameter or documentation");
@@ -218,7 +221,7 @@ class LanguageServiceTestMain {
 		require(client.requestReferences(document, new BufferPosition(0, 2), Sys.time(), value -> references = value), "references request was rejected");
 		pump(client, () -> symbols != null && references != null, 5);
 		require(symbols != null && symbols.length == 2 && symbols[1].name == "value" && symbols[1].detail == "Main / Int", "nested document symbols were not decoded");
-		require(references != null && references.length == 2 && references[1].path == arguments[1] + "/Other.hx", "references omitted unopened document");
+		require(references != null && references.length == 2 && references[1].path == documents.fileSystem.normalize(arguments[1]) + "/Other.hx", "references omitted unopened document");
 		var renamed:Null<LanguageEditResult> = null;
 		require(client.requestRename(document, new BufferPosition(0, 2), "multi", Sys.time(), value -> renamed = value), "rename request rejected");
 		pump(client, () -> renamed != null, 5);
