@@ -64,6 +64,10 @@ class Emulator {
     public function rowId(row:Int):haxe.Int64
         return TerminalKit.terminalkit_row_id(live(), row);
 
+    /** Rendered text, widths and colors from the last snapshot, independent of viewport position. */
+    public function rowHash(row:Int):haxe.Int64
+        return TerminalKit.terminalkit_row_hash(live(), row);
+
     /** Copies one rendered row into Haxe-owned UTF-8 storage. */
     public function rowText(row:Int):String {
         var copied = TerminalKit.terminalkit_row_text_copy(live(), row);

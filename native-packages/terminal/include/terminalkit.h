@@ -104,6 +104,8 @@ TERMINALKIT_API void terminalkit_modes(terminalkit_handle *kit,
 TERMINALKIT_API int terminalkit_snapshot(terminalkit_handle *kit);
 TERMINALKIT_API int terminalkit_row_changed(terminalkit_handle *kit, int row);
 TERMINALKIT_API uint64_t terminalkit_row_id(terminalkit_handle *kit, int row);
+/* Rendered text/width/color fingerprint from the last snapshot, independent of row position. */
+TERMINALKIT_API uint64_t terminalkit_row_hash(terminalkit_handle *kit, int row);
 /* Borrowed until the next feed, resize, restore, snapshot or close. */
 TERMINALKIT_API const terminalkit_cell *terminalkit_cells(terminalkit_handle *kit)
     TK_BORROWED;

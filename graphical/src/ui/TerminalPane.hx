@@ -32,17 +32,20 @@ import terminalsession.TerminalSession;
 import terminalkit.Cell;
 
 private typedef TerminalBackground = {start:Int, end:Int, color:Color};
+private typedef TerminalForeground = {start:Int, end:Int, packed:Int, background:Bool};
+private typedef TerminalRow = {
+	layout:TextLayout, text:String, fills:Array<TerminalBackground>,
+	id:haxe.Int64, hash:haxe.Int64, reusable:Bool, serial:Int, paintRevision:Int, paintKey:String
+};
 
-/** Retained terminal rows; each row has its own raster cache and text layout. */
+/** Retained terminal rows; each row reuses a display list and shaped text. */
 class TerminalPane implements TerminalPanel {
 	static inline final CONTROL_BAR_HEIGHT:Float = 26.0;
 	public final session:TerminalSession;
 	final requestFrame:Void->Void;
 	final fonts:FontCollection;
-	final layouts:Array<TextLayout> = [];
-	final texts:Array<String> = [];
+	final renderedRows:Array<TerminalRow> = [];
 	final revisions:Array<Int> = [];
-	final backgrounds:Array<Array<TerminalBackground>> = [];
 	final palette:TerminalPalette;
 	final ownsFonts:Bool;
 	final remoteBackend:Null<workspace.client.RpcTerminalBackend>;
@@ -56,6 +59,7 @@ class TerminalPane implements TerminalPanel {
 	var rowHeight:Float;
 	var fontSize:Float;
 	var fontRevision:Int = 0;
+	var rowSerial:Int = 0;
 	var viewportWidth:Float = 0.0;
 	var viewportHeight:Float = 0.0;
 	var resolvedWidth:Float = 0.0;
@@ -117,7 +121,7 @@ class TerminalPane implements TerminalPanel {
 		cursorColumn: cursorColumn, cursorRow: cursorRow,
 		loading: remoteBackend != null && !remoteBackend.isSynchronized(),
 		win32Input: !closed && session.emulator.win32InputMode(),
-		lines: [for (index in 0...Std.int(Math.min(texts.length, 32))) StringTools.rtrim(texts[index])]
+		lines: [for (index in 0...Std.int(Math.min(renderedRows.length, 32))) StringTools.rtrim(renderedRows[index].text)]
 	};
 
 	public function columns():Int
@@ -164,7 +168,7 @@ class TerminalPane implements TerminalPanel {
 			foreground = palette.foreground;
 			background = palette.background;
 			cursorOutlineColor = foreground;
-			for (layout in layouts) layout.setColor(foreground);
+			for (row in renderedRows) row.layout.setColor(foreground);
 			if (controlLayout != null) controlLayout.setColor(foreground);
 			if (controlActionLayout != null) controlActionLayout.setColor(palette.cursor);
 			refreshRows(true);
@@ -206,39 +210,97 @@ class TerminalPane implements TerminalPanel {
 		rowHeight = Math.max(1.0, Math.ceil(metrics.height + 2.0));
 		probe.dispose();
 		for (revision in revisions) if (revision >= fontRevision) fontRevision = revision + 1;
-		for (layout in layouts) layout.dispose();
+		for (row in renderedRows) row.layout.dispose();
 		viewportWidth = -1; viewportHeight = -1;
-		layouts.resize(0); texts.resize(0); revisions.resize(0); backgrounds.resize(0);
+		renderedRows.resize(0); revisions.resize(0);
+	}
+
+	/** Move unchanged rows before recycling storage for newly visible content. */
+	function relocateRows(nextCursorRow:Int, nextCursorMode:Int, focusChanged:Bool):Array<Int> {
+		var emulator = session.emulator;
+		var count = renderedRows.length;
+		// Match all destinations before recycling layouts, so a new line cannot
+		// overwrite a layout that a later viewport row still needs.
+		var previous = renderedRows.copy();
+		var byId:Map<String, Int> = new Map();
+		for (index in 0...count) {
+			var entry = previous[index];
+			if (entry.reusable && entry.id != 0) byId.set(haxe.Int64.toStr(entry.id), index);
+		}
+		var sources:Array<Int> = [];
+		var ids:Array<haxe.Int64> = [];
+		var hashes:Array<haxe.Int64> = [];
+		var used = [for (_ in 0...count) false];
+		for (row in 0...count) {
+			var id = emulator.rowId(row), hash = emulator.rowHash(row);
+			ids.push(id); hashes.push(hash);
+			var source = -1;
+			var repaintCursor = focusChanged && (row == nextCursorRow || row == cursorRow);
+			if (!repaintCursor && previous[row].id == id && previous[row].hash == hash
+				&& !emulator.rowChanged(row)) source = row;
+			else if (!repaintCursor && (nextCursorMode == 1 || row != nextCursorRow)) {
+				var candidate = byId.get(haxe.Int64.toStr(id));
+				if (candidate != null && !used[candidate] && previous[candidate].hash == hash) source = candidate;
+			}
+			if (source >= 0) used[source] = true;
+			sources.push(source);
+		}
+		var recycle = 0;
+		for (row in 0...count) {
+			var source = sources[row];
+			if (source < 0) {
+				while (used[recycle]) recycle++;
+				source = recycle++;
+			}
+			var entry = previous[source];
+			renderedRows[row] = entry;
+			entry.id = ids[row]; entry.hash = hashes[row];
+			// An unfocused cursor repairs libtsm's swapped cell colors. Keep
+			// cursor-bearing rows out of cross-position reuse in either focus mode.
+			entry.reusable = nextCursorMode == 1 || row != nextCursorRow;
+			if (sources[row] >= 0) {
+				if (source != row) revisions[row]++;
+			}
+		}
+		return sources;
 	}
 
 	function refreshRows(force:Bool, focusChanged:Bool = false):Void {
 		var emulator = session.emulator;
-		emulator.snapshot();
+		var changed = emulator.snapshot();
 		var cursor = emulator.cursor();
 		cursor.column = Std.int(Math.min(cursor.column, emulator.columns() - 1));
 		cursor.row += emulator.scrollback(-1).current;
 		var count = emulator.rows();
-		while (layouts.length > count) {
-			layouts.pop().dispose();
-			texts.pop();
+		if (!force && !focusChanged && changed == 0 && count == renderedRows.length
+			&& cursorRow == cursor.row && cursorColumn == cursor.column && cursorMode == cursor.mode) return;
+		while (renderedRows.length > count) {
+			renderedRows.pop().layout.dispose();
 			revisions.pop();
-			backgrounds.pop();
 		}
-		while (layouts.length < count) {
+		while (renderedRows.length < count) {
 			var layout = TextLayout.create(fonts, "", 8192.0, gridTextStyle(), new ParagraphStyle(TextWrap.None));
 			layout.setColor(foreground);
-			layouts.push(layout);
-			texts.push("");
+			renderedRows.push({layout: layout, text: "", fills: [], id: 0, hash: 0, reusable: false, serial: ++rowSerial, paintRevision: 0, paintKey: ""});
 			revisions.push(fontRevision);
-			backgrounds.push([]);
 			force = true;
 		}
+		var moved = false;
+		if (!force) for (row in 0...count) {
+			if (renderedRows[row].id != emulator.rowId(row)) { moved = true; break; }
+		}
+		var sources = moved ? relocateRows(cursor.row, cursor.mode, focusChanged) : null;
 		for (row in 0...count) {
 			var repaintCursor = focusChanged && (row == cursor.row || row == cursorRow);
-			if (!force && !repaintCursor && !emulator.rowChanged(row)) continue;
+			if (sources != null) {
+				if (sources[row] >= 0) continue;
+			} else if (!force && !repaintCursor && !emulator.rowChanged(row)) continue;
+			var entry = renderedRows[row];
+			entry.id = emulator.rowId(row); entry.hash = emulator.rowHash(row);
+			entry.reusable = cursor.mode == 1 || row != cursor.row;
 			var cells = emulator.rowCells(row);
 			var buffer = new StringBuf();
-			var ranges:Array<TextColorRange> = [];
+			var inkRuns:Array<TerminalForeground> = [];
 			var fills:Array<TerminalBackground> = [];
 			var offset = 0;
 			for (column in 0...cells.length) {
@@ -255,26 +317,26 @@ class TerminalPane implements TerminalPanel {
 					// this also preserves default colors and inverse-video content.
 					var ink = TerminalColors.decode(bg, background, palette, true);
 					var paper = TerminalColors.decode(fg, foreground, palette, false);
-					ranges.push(new TextColorRange(offset, offset + count, ink));
+					appendForeground(inkRuns, offset, offset + count, bg, true);
 					fills.push({start: column, end: column + cell.width, color: paper});
 					cursorOutlineColor = ink;
 					cursorOutlineWidth = cell.width;
 				} else {
-					if ((fg & 3) != 0) ranges.push(new TextColorRange(offset, offset + count,
-						TerminalColors.decode(fg, foreground, palette, false)));
+					if ((fg & 3) != 0) appendForeground(inkRuns, offset, offset + count, fg, false);
 					if ((bg & 3) != 0) fills.push({start: column, end: column + cell.width,
 						color: TerminalColors.decode(bg, background, palette, true)});
 				}
 				offset += count;
 			}
 			var next = buffer.toString();
-			if (force || repaintCursor || next != texts[row] || emulator.rowChanged(row)) {
-				layouts[row].setText(next);
-				layouts[row].setColorRanges(ranges);
-				texts[row] = next;
-				backgrounds[row] = fills;
-				revisions[row]++;
-			}
+			if (next != entry.text) entry.layout.setText(next);
+			entry.layout.setColorRanges([for (run in inkRuns) new TextColorRange(run.start, run.end,
+				TerminalColors.decode(run.packed, run.background ? background : foreground, palette, run.background))]);
+			entry.text = next;
+			entry.fills = fills;
+			entry.paintRevision++;
+			entry.paintKey = 'terminal-row-${entry.serial}-${entry.paintRevision}';
+			revisions[row]++;
 		}
 		if (cursorRow != cursor.row || cursorColumn != cursor.column || cursorMode != cursor.mode) {
 			if (cursorRow >= 0 && cursorRow < revisions.length) revisions[cursorRow]++;
@@ -283,6 +345,14 @@ class TerminalPane implements TerminalPanel {
 			cursorMode = cursor.mode;
 			if (cursorRow >= 0 && cursorRow < revisions.length) revisions[cursorRow]++;
 		}
+	}
+
+	/** Keep codepoint offsets and cursor color roles while decoding only once per run. */
+	static function appendForeground(runs:Array<TerminalForeground>, start:Int, end:Int, packed:Int, background:Bool):Void {
+		var previous = runs.length == 0 ? null : runs[runs.length - 1];
+		if (previous != null && previous.end == start && previous.packed == packed && previous.background == background)
+			previous.end = end;
+		else runs.push({start: start, end: end, packed: packed, background: background});
 	}
 
 	function setFocused(value:Bool):Void {
@@ -345,19 +415,26 @@ class TerminalPane implements TerminalPanel {
 		var terminalTop = remoteBackend == null ? 4.0 : CONTROL_BAR_HEIGHT + 4.0;
 		// Remote observers retain the sender's grid; build only rows intersecting our viewport.
 		var visibleRows = resolvedHeight > 0 && (remoteBackend == null || remoteBackend.isSynchronized())
-			? Std.int(Math.min(layouts.length, Math.max(0, Math.ceil((resolvedHeight - terminalTop) / rowHeight))))
+			? Std.int(Math.min(renderedRows.length, Math.max(0, Math.ceil((resolvedHeight - terminalTop) / rowHeight))))
 			: 0;
+		// Row display lists and glyphs are already retained. An extra raster target
+		// per row adds offscreen rendering and compositing work during updates.
 		for (row in 0...visibleRows) {
 			var index = row;
 			var rowStyle = new LayoutStyle();
 			rowStyle.width = LayoutAxis.grow();
 			rowStyle.height = LayoutAxis.fixed(rowHeight);
-			var key = 'terminal-row-$index-${revisions[index]}-${Std.int(viewportWidth)}';
-			var view = new CanvasView('terminal-row-$index', function(canvas:Canvas, geometry) {
+			var entry = renderedRows[index];
+			var serial = entry.serial;
+			// Follow row storage through scrolling so its encoded paint survives moves.
+			// Storage IDs keep UI/style identities bounded as new lines arrive.
+			var key = entry.paintKey;
+			if (index == cursorRow && cursorMode != 1) key += '-cursor-$cursorColumn-$cursorMode-$focusGeneration';
+			var view = new CanvasView('terminal-row-$serial', function(canvas:Canvas, geometry) {
 				canvas.fillRectIfPositive(new Rect(0.0, 0.0, geometry.width, geometry.height), background);
-				for (fill in backgrounds[index]) canvas.fillRectIfPositive(new Rect(8.0 + fill.start * cellWidth,
+				for (fill in renderedRows[index].fills) canvas.fillRectIfPositive(new Rect(8.0 + fill.start * cellWidth,
 					0.0, (fill.end - fill.start) * cellWidth, rowHeight), fill.color);
-				canvas.drawText(layouts[index], 8.0, 0.0);
+				canvas.drawText(renderedRows[index].layout, 8.0, 0.0);
 				if (index == cursorRow && cursorMode != 1) {
 					var x = 8.0 + cursorColumn * cellWidth;
 					if (focused)
@@ -370,8 +447,8 @@ class TerminalPane implements TerminalPanel {
 						canvas.fillRectIfPositive(new Rect(x + width - 1.0, 1.0, 1.0, rowHeight - 2.0), cursorOutlineColor);
 					}
 				}
-			}, rowStyle, null, false, CachePolicy.Raster, key);
-			layers.push(new StackChild('row-$index', view, 0.0, terminalTop + index * rowHeight,
+			}, rowStyle, null, false, CachePolicy.None, key);
+			layers.push(new StackChild('row-$serial', view, 0.0, terminalTop + index * rowHeight,
 				1, LayoutAxis.grow(), LayoutAxis.fixed(rowHeight)));
 		}
 		var node = new Stack("terminal-pane", layers, fill).build(context);
@@ -542,7 +619,7 @@ class TerminalPane implements TerminalPanel {
 			var step = Std.int(Math.round(event.deltaY / rowHeight * 3.0));
 			if (step == 0) step = event.deltaY > 0 ? 1 : -1;
 			session.emulator.scrollback(current + step);
-			refreshRows(true);
+			refreshRows(false);
 			requestFrame();
 			event.preventDefault();
 		});
@@ -563,7 +640,7 @@ class TerminalPane implements TerminalPanel {
 		clearSelection();
 		if (session.emulator.scrollback(-1).current == 0) return;
 		session.emulator.scrollback(0);
-		refreshRows(true);
+		refreshRows(false);
 		requestFrame();
 	}
 
@@ -685,8 +762,8 @@ class TerminalPane implements TerminalPanel {
 	public function close():Void {
 		if (closed) return;
 		closed = true;
-		for (layout in layouts) layout.dispose();
-		layouts.resize(0);
+		for (row in renderedRows) row.layout.dispose();
+		renderedRows.resize(0);
 		if (controlLayout != null) controlLayout.dispose();
 		if (controlActionLayout != null) controlActionLayout.dispose();
 		if (ownsFonts) fonts.dispose();

@@ -370,6 +370,9 @@ int terminalkit_row_changed(terminalkit_handle *kit, int row) {
 uint64_t terminalkit_row_id(terminalkit_handle *kit, int row) {
     return kit && row >= 0 && row < kit->rows ? kit->row_ids[row] : 0;
 }
+uint64_t terminalkit_row_hash(terminalkit_handle *kit, int row) {
+    return kit && kit->snapshot_valid && row >= 0 && row < kit->rows ? kit->row_hashes[row] : 0;
+}
 const terminalkit_cell *terminalkit_cells(terminalkit_handle *kit) { return kit ? kit->cells : NULL; }
 const uint8_t *terminalkit_text(terminalkit_handle *kit) { return kit ? kit->text : NULL; }
 uint64_t terminalkit_text_size(terminalkit_handle *kit) { return kit ? kit->text_size : 0; }

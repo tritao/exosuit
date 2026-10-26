@@ -54,6 +54,12 @@ class CursorApp implements DesktopUiApplication {
 		fonts.add(fontDirectory + "IBMPlexMono-Regular.ttf", haxeon.ui.FontFamily.Monospace);
 		pane = new ui.TerminalPane(new TerminalSession(backend, emulator), host.requestFrame,
 			new ui.TerminalPalette(dark), fonts);
+		if (mode == "colors") {
+			emulator.feedString("\x1b[2J\x1b[H\x1b[31mRED RED\x1b[0m gap \x1b[31mRED\x1b[32mGREEN\x1b[0m"
+				+ "\r\n\x1b[38;5;196mINDEXED\x1b[38;2;255;0;0m TRUECOLOR\x1b[0m"
+				+ "\r\n\x1b[7mINVERSE\x1b[0m plain \x1b[31;7mINVERSE RED\x1b[0m"
+				+ "\r\n\x1b[32m日本語 e\u0301 café λ\x1b[0m gap \x1b[34mBLUE\x1b[0m");
+		}
 	}
 
 	public function context():UiContext return ui;
@@ -64,18 +70,24 @@ class CursorApp implements DesktopUiApplication {
 		cursorWidth: pane.cellWidth,
 		cursorHeight: pane.rowHeight,
 		focused: pane.focused,
+		lines: [for (row in pane.renderedRows) row.text],
 		focusReports: backend.replies
 	};
 
 	public function submit(frame:LayoutFrame):RenderNode {
 		pane.poll();
 		var root = ui.submit(pane, frame);
+		var rowCache = Sys.getEnv("EXOSUIT_TERMINAL_ROW_CACHE");
+		if (rowCache == "none" || rowCache == "raster") root.walk(function(node) {
+			if (node.styleKey != null && StringTools.startsWith(node.styleKey, "terminal-row-"))
+				node.cachePolicy = rowCache == "none" ? haxeon.ui.core.CachePolicy.None : haxeon.ui.core.CachePolicy.Raster;
+		});
 		frames++;
 		if (frames == 3) ui.focusWidget(root.id);
 		if (frames == 4) {
 			unchangedRowRevision = pane.revisions[1];
 			for (column in 0...14) {
-				var caret = pane.layouts[0].caret(new haxeon.ui.TextLayout.TextPosition(column, 0));
+				var caret = pane.renderedRows[0].layout.caret(new haxeon.ui.TextLayout.TextPosition(column, 0));
 				if (Math.abs(caret.x - column * pane.cellWidth) > 0.1)
 					throw "Terminal text and cursor grid disagree at column " + column;
 			}
@@ -100,6 +112,7 @@ class TerminalCursorSmoke {
 	static function main():Int {
 		var args = Sys.args();
 		if (args.length != 3) throw "Expected capture directory, focus mode and theme";
+		if (args[1] == "row-reuse") return TerminalRowReuseSmoke.run(args[0], args[2] == "dark");
 		var options = new DesktopUiHostOptions();
 		options.width = 360;
 		options.height = 140;

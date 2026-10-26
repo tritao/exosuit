@@ -42,7 +42,37 @@ static int same_screen(terminalkit_handle *a, terminalkit_handle *b) {
     }
     return 1;
 }
+static int row_fingerprints(void) {
+    terminalkit_handle *kit = NULL;
+    REQUIRE(terminalkit_open(20, 4, 16, "xterm-256color", &kit));
+    REQUIRE(terminalkit_row_hash(kit, 0) == 0);
+    REQUIRE(feed(kit, "\x1b[?25lfirst\r\nsecond\r\nthird\r\nfourth") >= 0);
+    REQUIRE(terminalkit_snapshot(kit) >= 0);
+    uint64_t id = terminalkit_row_id(kit, 1), hash = terminalkit_row_hash(kit, 1);
+    REQUIRE(id != 0 && hash != 0);
+    REQUIRE(feed(kit, "\r\nfifth") >= 0);
+    REQUIRE(terminalkit_snapshot(kit) > 0);
+    REQUIRE(terminalkit_row_id(kit, 0) == id && terminalkit_row_hash(kit, 0) == hash);
+    REQUIRE(feed(kit, "\x1b[H\x1b[31msecond") >= 0);
+    REQUIRE(terminalkit_snapshot(kit) > 0);
+    REQUIRE(terminalkit_row_id(kit, 0) == id && terminalkit_row_hash(kit, 0) != hash);
+    REQUIRE(feed(kit, "\x1b[H\x1b[0msecond") >= 0);
+    REQUIRE(terminalkit_snapshot(kit) > 0 && terminalkit_row_hash(kit, 0) == hash);
+    REQUIRE(terminalkit_selection(kit, 0, 0, 1) == 0);
+    REQUIRE(terminalkit_selection(kit, 4, 0, 2) == 0);
+    REQUIRE(terminalkit_snapshot(kit) > 0 && terminalkit_row_hash(kit, 0) != hash);
+    REQUIRE(terminalkit_selection(kit, 0, 0, 0) == 0);
+    REQUIRE(terminalkit_snapshot(kit) > 0 && terminalkit_row_hash(kit, 0) == hash);
+    REQUIRE(terminalkit_snapshot(kit) == 0 && terminalkit_row_hash(kit, 0) == hash);
+    terminalkit_resize(kit, 24, 4);
+    REQUIRE(terminalkit_snapshot(kit) > 0 && terminalkit_row_hash(kit, 0) != hash);
+    REQUIRE(terminalkit_row_hash(kit, -1) == 0 && terminalkit_row_hash(kit, 4) == 0);
+    terminalkit_close(kit);
+    return 0;
+}
+
 int main(void) {
+    REQUIRE(row_fingerprints() == 0);
     terminalkit_handle *kit = NULL, *restored = NULL;
     REQUIRE(terminalkit_open(20, 4, 8, "xterm-256color", &kit));
     REQUIRE(terminalkit_snapshot(kit) == 4);

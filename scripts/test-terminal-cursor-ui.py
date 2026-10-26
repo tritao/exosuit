@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import tempfile
 
-from PIL import Image
+from PIL import Image, ImageChops
 
 ROOT = Path(__file__).resolve().parent.parent
 PROJECT = ROOT / "tests/terminal-cursor-ui-smoke/haxeon.json"
@@ -27,7 +27,7 @@ def main():
             foreground = (32, 42, 54) if scheme == "light" else (220, 227, 236)
             background = (255, 255, 255) if scheme == "light" else (23, 28, 35)
             images = {}
-            for mode in ("focused", "unfocused", "refocused", "window-blur", "hidden"):
+            for mode in ("focused", "unfocused", "refocused", "window-blur", "hidden", "colors", "row-reuse"):
                 capture = fixture / f"{scheme}-{mode}"
                 command = [str(ROOT / "haxeon/.tools/hashlink/hl"),
                            str(PROJECT.parent / "build/host/main.hl"), str(capture), mode, scheme]
@@ -37,6 +37,20 @@ def main():
                 state = json.loads((capture / "app-state.json").read_text())
                 image = Image.open(capture / "frame.png").convert("RGB")
                 images[mode] = image
+                if mode == "row-reuse":
+                    assert state["rowReuseChecks"] == 25 and state["stableRowWidgets"] == 6, state
+                    comparisons = sorted(capture.glob("comparison-*.png"))
+                    assert len(comparisons) == 25, len(comparisons)
+                    for comparison in comparisons:
+                        pixels = Image.open(comparison).convert("RGB")
+                        difference = ImageChops.difference(pixels.crop((0, 0, 360, 140)),
+                                                          pixels.crop((360, 0, 720, 140)))
+                        assert difference.getbbox() is None, (scheme, comparison, difference.getbbox())
+                    continue
+                if mode == "colors":
+                    assert "RED RED" in state["lines"][0], state
+                    assert "INDEXED TRUECOLOR" in state["lines"][1], state
+                    continue
                 x = math.floor(state["cursorX"] + state["cursorWidth"] / 2)
                 y = math.floor(state["cursorY"] + state["cursorHeight"] / 2)
                 active = mode in ("focused", "refocused")
@@ -51,7 +65,10 @@ def main():
                     assert image.getpixel((x, math.floor(state["cursorY"]))) == background, "Hidden cursor became visible"
             assert images["focused"].tobytes() == images["refocused"].tobytes(), "Refocusing left stale cursor pixels"
             assert images["unfocused"].tobytes() == images["window-blur"].tobytes(), "Widget and window blur differ"
-        print("PASS: filled/outline/hidden terminal cursors, refocus and unchanged row caches in both themes")
+        artifacts = os.environ.get("TERMINAL_CURSOR_ARTIFACTS")
+        if artifacts:
+            shutil.copytree(fixture, artifacts, dirs_exist_ok=True)
+        print("PASS: terminal cursor focus, colors and retained-row comparisons in both themes")
 
 
 if __name__ == "__main__":

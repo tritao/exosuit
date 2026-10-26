@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "package": {"name": "exosuit-terminal-render-benchmark"},
+  "entry": "TerminalRenderBenchmark",
+  "sourceRoots": ["src"],
+  "scopeSourceRoots": false,
+  "dependencies": {"exosuit-graphical": {"path": "../../graphical"}},
+  "target": "host",
+  "outputDir": "../../build/terminal-render-benchmark"
+}

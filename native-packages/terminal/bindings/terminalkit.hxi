@@ -32,6 +32,7 @@ interface TerminalKit @target("portable-abi64") @library("terminalkit") {
 	extern fn terminalkit_restore_screen_snapshot(kit: ptr<terminalkit_handle>, data: ptr<const<void>>, size: u64) -> c_int;
 	extern fn terminalkit_row_cells_copy(kit: ptr<terminalkit_handle>, row: c_int, buffer: nullable<ptr<u8>> @out_buffer("inout_size"), inout_size: ptr<u32> @inout) -> c_int;
 	extern fn terminalkit_row_changed(kit: ptr<terminalkit_handle>, row: c_int) -> c_int;
+	extern fn terminalkit_row_hash(kit: ptr<terminalkit_handle>, row: c_int) -> u64;
 	extern fn terminalkit_row_id(kit: ptr<terminalkit_handle>, row: c_int) -> u64;
 	extern fn terminalkit_row_text_copy(kit: ptr<terminalkit_handle>, row: c_int, buffer: nullable<ptr<u8>> @out_buffer("inout_size"), inout_size: ptr<u32> @inout) -> c_int;
 	extern fn terminalkit_rows(kit: ptr<terminalkit_handle>) -> c_int;
