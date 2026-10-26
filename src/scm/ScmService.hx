@@ -168,9 +168,27 @@ class ScmService {
 				complete(new ScmJobResult<Array<ScmRepository>>(generation, null, result.error));
 				return;
 			}
-			cancelJobs(state);
-			for (handle in state.handles) handle.dispose();
-			state.handles = result.value;
+			// Repositories found again keep their handle and the work running in it (an operation, a blob read); only
+			// the ones that are gone are closed, their callers told so.
+			var kept:Array<ScmRepositoryHandle> = [], next:Array<ScmRepositoryHandle> = [];
+			for (found in result.value) {
+				var existing:Null<ScmRepositoryHandle> = null;
+				for (handle in state.handles)
+					if (kept.indexOf(handle) < 0 && sameRepository(handle.repository(), found.repository())) { existing = handle; break; }
+				if (existing == null) next.push(found);
+				else {
+					kept.push(existing);
+					next.push(existing);
+					found.dispose();
+				}
+			}
+			cancelRootWork(state);
+			for (handle in state.handles)
+				if (kept.indexOf(handle) < 0) {
+					closeOperations(state, handle.repository().id);
+					handle.dispose();
+				}
+			state.handles = next;
 			state.excluded = null;
 			var discovered:Map<String, Bool> = [];
 			for (handle in state.handles) discovered.set(handle.repository().id, true);
@@ -579,20 +597,42 @@ class ScmService {
 	}
 
 	function cancelJobs(state:ScmRootState):Void {
+		cancelRootWork(state);
+		for (id in [for (id in state.operations.keys()) id]) closeOperations(state, id);
+	}
+
+	/** Cancels a root's discovery, exclusion and refresh work, which it starts again itself. Operations are separate. */
+	function cancelRootWork(state:ScmRootState):Void {
 		if (state.detectJob != null) state.detectJob.cancel();
 		state.detectJob = null;
 		for (job in state.exclusionsJobs) job.cancel();
 		state.exclusionsJobs.resize(0);
 		state.exclusionsGeneration++;
 		for (job in state.refreshJobs) job.cancel();
-		for (queue in state.operations) for (request in queue.copy()) if (request.job != null) request.job.cancel();
 		state.refreshJobs.clear();
-		state.operations.clear();
-		state.operationBusy.clear();
 		state.rerun.clear();
 		state.refreshAt = null;
 		state.changedAt = null;
 	}
+
+	/** Ends a closed repository's queued and running operations, telling each caller so rather than leaving it waiting. */
+	function closeOperations(state:ScmRootState, repositoryId:String):Void {
+		var queue = state.operations.get(repositoryId);
+		state.operations.remove(repositoryId);
+		state.operationBusy.remove(repositoryId);
+		if (queue == null) return;
+		for (request in queue.copy()) {
+			var child = request.child;
+			request.child = null;
+			if (child != null) child.cancel();
+			finishOperation(state, queue, request, null,
+				new ScmError("repository_closed", "The repository was closed before the operation finished", true));
+		}
+	}
+
+	static function sameRepository(left:ScmRepository, right:ScmRepository):Bool
+		return left.id == right.id && left.providerId == right.providerId && left.root == right.root && left.kind == right.kind
+			&& left.parentId == right.parentId;
 
 	function cancelRefresh(state:ScmRootState, repositoryId:String):Void {
 		var job = state.refreshJobs.get(repositoryId);
