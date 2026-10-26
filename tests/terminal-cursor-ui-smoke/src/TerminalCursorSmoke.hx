@@ -103,8 +103,12 @@ class CursorApp implements DesktopUiApplication {
 			}
 		}
 		if (frames == 5 && (mode == "unfocused" || mode == "refocused" || mode == "hidden")) ui.clearFocus();
-		if (frames == 5 && mode == "window-blur") ui.windowFocusLost();
+		if (frames == 5 && (mode == "window-blur" || mode == "window-refocused")) ui.windowFocusLost();
 		if (frames == 7 && mode == "refocused") ui.focusWidget(root.id);
+		if (frames == 7 && mode == "window-refocused") ui.windowFocusGained();
+		if (frames == 9 && mode == "window-refocused" &&
+			(!pane.focused || !ui.textInput.isOwner(root.id)))
+			throw "Window activation did not restore terminal keyboard/text input ownership";
 		if (frames == 9 && pane.revisions[1] != unchangedRowRevision)
 			throw "Focus change repainted an unrelated terminal row";
 		host.requestFrame();

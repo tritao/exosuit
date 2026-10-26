@@ -27,7 +27,7 @@ def main():
             foreground = (32, 42, 54) if scheme == "light" else (220, 227, 236)
             background = (255, 255, 255) if scheme == "light" else (23, 28, 35)
             images = {}
-            for mode in ("focused", "unfocused", "refocused", "window-blur", "hidden", "selection", "colors", "row-reuse", "async-echo"):
+            for mode in ("focused", "unfocused", "refocused", "window-blur", "window-refocused", "hidden", "selection", "colors", "row-reuse", "async-echo"):
                 capture = fixture / f"{scheme}-{mode}"
                 command = [str(ROOT / "haxeon/.tools/hashlink/hl"),
                            str(PROJECT.parent / "build/host/main.hl"), str(capture), mode, scheme]
@@ -72,9 +72,9 @@ def main():
                     continue
                 x = math.floor(state["cursorX"] + state["cursorWidth"] / 2)
                 y = math.floor(state["cursorY"] + state["cursorHeight"] / 2)
-                active = mode in ("focused", "refocused")
+                active = mode in ("focused", "refocused", "window-refocused")
                 assert state["focused"] == active, (scheme, mode, state)
-                reports = "\x1b[I" + ("\x1b[O" if mode != "focused" else "") + ("\x1b[I" if mode == "refocused" else "")
+                reports = "\x1b[I" + ("\x1b[O" if mode != "focused" else "") + ("\x1b[I" if mode in ("refocused", "window-refocused") else "")
                 assert state["focusReports"] == reports, (scheme, mode, "missing or duplicate VT focus reports", state)
                 assert image.getpixel((x, y)) == (foreground if active else background), (scheme, mode, "cursor interior")
                 if mode in ("unfocused", "window-blur"):
@@ -83,6 +83,7 @@ def main():
                 if mode == "hidden":
                     assert image.getpixel((x, math.floor(state["cursorY"]))) == background, "Hidden cursor became visible"
             assert images["focused"].tobytes() == images["refocused"].tobytes(), "Refocusing left stale cursor pixels"
+            assert images["focused"].tobytes() == images["window-refocused"].tobytes(), "Window activation left stale cursor pixels"
             assert images["unfocused"].tobytes() == images["window-blur"].tobytes(), "Widget and window blur differ"
         artifacts = os.environ.get("TERMINAL_CURSOR_ARTIFACTS")
         if artifacts:
