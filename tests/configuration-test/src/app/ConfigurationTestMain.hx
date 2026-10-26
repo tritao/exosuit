@@ -192,6 +192,21 @@ class ConfigurationTestMain {
 		untitledView.textInput("!");
 		require(counted.save(application) && countedFiles.writes == 2 && counted.load()[counted.load().length - 1].text == "unsaved untitled!",
 			"a changed buffer was not saved for recovery");
+		// The periodic save writes on another thread; reads wait for it and are served from what was written.
+		var backgroundFiles = new testing.CountingFileSystem(), backgroundPath = arguments[2] + "/state/background-recovery.conf";
+		if (FileSystem.exists(backgroundPath)) FileSystem.deleteFile(backgroundPath);
+		var background = new RecoveryStore(backgroundPath, backgroundFiles);
+		background.saveInBackground(application);
+		var written = background.load();
+		require(backgroundFiles.writes == 1 && backgroundFiles.reads == 0 && written.length == 1
+			&& written[0].text == "unsaved untitled!", "a background recovery save was not read back from what it wrote");
+		background.saveInBackground(application);
+		background.flush();
+		require(backgroundFiles.writes == 1, "a background save with nothing new wrote again");
+		untitledView.textInput("?");
+		background.saveInBackground(application);
+		require(background.load()[0].text == "unsaved untitled!?" && backgroundFiles.writes == 2 && backgroundFiles.reads == 0,
+			"a changed buffer was not saved in the background");
 		var many:Array<RecoverySnapshot> = [];
 		for (index in 0...RecoveryStore.MAX_SNAPSHOTS + 5)
 			many.push(new RecoverySnapshot("bounded-" + (index + 1), "bounded-" + index, null, "value-" + index));
