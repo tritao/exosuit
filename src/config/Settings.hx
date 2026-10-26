@@ -31,6 +31,8 @@ class Settings {
 	public var wordWrap:Bool = false;
 	public var renderWhitespace:String = "selection";
 	public var terminalFontSize:Int = 14;
+	/** Command IDs added to terminal application routing; prefix with '-' to keep a default in the shell. */
+	public var terminalCommandsToSkipShell:Array<String> = [];
 	public var tabWidth:Int = 4;
 	/** Effective indentation step; may differ from hard-tab display width. */
 	public var indentSize:Int = 4;
@@ -100,6 +102,7 @@ class Settings {
 		result.wordWrap = wordWrap;
 		result.renderWhitespace = renderWhitespace;
 		result.terminalFontSize = terminalFontSize;
+		result.terminalCommandsToSkipShell = copyStrings(terminalCommandsToSkipShell);
 		result.tabWidth = tabWidth;
 		result.indentSize = indentSize;
 		result.insertSpaces = insertSpaces;

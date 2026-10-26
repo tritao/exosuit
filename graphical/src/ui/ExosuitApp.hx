@@ -835,6 +835,9 @@ class ExosuitApp implements DesktopUiApplication {
 		} else openTerminal();
 	}
 
+	function terminalCommandSkipsShell(id:String):Bool
+		return TerminalShortcutPolicy.allows(id, application.settings.current.terminalCommandsToSkipShell);
+
 	function terminalPanel():View {
 		if (host.panelTerminals.length == 0) return placeholderPanel("Terminal is closed.");
 		var items:Array<TabItem> = [];
@@ -850,7 +853,7 @@ class ExosuitApp implements DesktopUiApplication {
 				host.activePanelTerminalIndex = host.panelTerminals.indexOf(terminal);
 				showContextMenu([new CommandMenuEntry("terminal:move-to-editor", "Move Terminal to Editor")],
 					event, function() return host.activePanelTerminal() == terminal && !terminal.disposed);
-			});
+			}, terminalCommandSkipsShell);
 			if (host.panelTerminals.length == 1) return view;
 			items.push(new TabItem("terminal:" + terminal.id, terminal.title, view));
 		}
@@ -2707,7 +2710,7 @@ class ExosuitApp implements DesktopUiApplication {
 				var terminalKey = UiEditorTabs.key(item);
 				var terminalTab = new TabItem(terminalKey, terminal.title, new TerminalTabView(terminal,
 					function() host.activateEditorTab(terminalKey, paneId),
-					function(bounds, id) host.editorResolved(paneId, bounds, id)), true, IconName.Terminal);
+					function(bounds, id) host.editorResolved(paneId, bounds, id), null, terminalCommandSkipsShell), true, IconName.Terminal);
 				terminalTab.onClose = function() host.closeTab(item, paneId, true);
 				items.push(terminalTab);
 				continue;

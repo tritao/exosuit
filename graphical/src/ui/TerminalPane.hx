@@ -471,6 +471,7 @@ class TerminalPane implements TerminalPanel {
 				1, LayoutAxis.grow(), LayoutAxis.fixed(rowHeight)));
 		}
 		var node = new Stack("terminal-pane", layers, fill).build(context);
+		node.commandShortcutFilter = function(id) return TerminalShortcutPolicy.allows(id);
 		// A terminal is an input stream, not an editable copy of its screen. Publish
 		// an empty surrounding document so IME edits cannot target the last editor.
 		var syncTextInput = function() {

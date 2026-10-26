@@ -53,6 +53,7 @@ class CursorApp implements DesktopUiApplication {
 		fonts.add(fontDirectory + "IBMPlexSans-Regular.ttf");
 		fonts.add(fontDirectory + "IBMPlexMono-Regular.ttf", haxeon.ui.FontFamily.Monospace);
 		TerminalPollTests.run(fonts);
+		TerminalShortcutTests.run(fonts);
 		pane = new ui.TerminalPane(new TerminalSession(backend, emulator), host.requestFrame,
 			new ui.TerminalPalette(dark), fonts);
 		TerminalNameTests.run();

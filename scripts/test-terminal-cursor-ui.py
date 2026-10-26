@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify terminal cursor focus presentation, retained rows and VT focus reports."""
+"""Verify terminal shortcuts, cursor focus presentation, retained rows and VT focus reports."""
 import json
 import math
 import os
@@ -88,7 +88,7 @@ def main():
         artifacts = os.environ.get("TERMINAL_CURSOR_ARTIFACTS")
         if artifacts:
             shutil.copytree(fixture, artifacts, dirs_exist_ok=True)
-        print("PASS: terminal names, cursor focus, asynchronous echo, retained rows and seamless selection in both themes")
+        print("PASS: terminal shortcuts, names, cursor focus, asynchronous echo, retained rows and seamless selection in both themes")
 
 
 if __name__ == "__main__":

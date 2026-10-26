@@ -14,16 +14,20 @@ class TerminalTabView implements View {
 	final activate:Void->Void;
 	final resolved:Rect->WidgetId->Void;
 	final contextMenu:Null<UiEvent->Void>;
+	final commandFilter:Null<String->Bool>;
 
-	public function new(terminal:UiTerminalTab, activate:Void->Void, resolved:Rect->WidgetId->Void, ?contextMenu:UiEvent->Void) {
+	public function new(terminal:UiTerminalTab, activate:Void->Void, resolved:Rect->WidgetId->Void,
+			?contextMenu:UiEvent->Void, ?commandFilter:String->Bool) {
 		this.terminal = terminal;
 		this.activate = activate;
 		this.resolved = resolved;
 		this.contextMenu = contextMenu;
+		this.commandFilter = commandFilter;
 	}
 
 	public function build(context:BuildContext):RenderNode {
 		var node = terminal.panel.build(context);
+		if (commandFilter != null) node.commandShortcutFilter = commandFilter;
 		node.on(UiEventKind.Focus, function(_) activate(), "capture");
 		node.on(UiEventKind.PointerDown, function(event) {
 			activate();

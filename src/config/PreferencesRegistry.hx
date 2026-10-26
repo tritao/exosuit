@@ -323,6 +323,12 @@ class PreferencesRegistry {
 		}
 		if (!projectOnly) {
 			var options = new SettingOptions();
+			options.tooltip = "Command IDs whose shortcuts run in the application while a terminal is focused. Add IDs to the defaults, or prefix an ID with '-' to send its keys to the terminal. Domain IDs may omit 'exosuit.'.";
+			registry.add(new ArraySettingDefinition("terminal/keyboard/commands_to_skip_shell", PropertyType.Text,
+				PropertyValue.Text(haxe.Json.stringify(defaults.terminalCommandsToSkipShell)), options));
+		}
+		if (!projectOnly) {
+			var options = new SettingOptions();
 			options.minimum = 6; options.maximum = 48;
 			registry.define("terminal/fonts/font_size", PropertyType.Int, PropertyValue.Int(defaults.terminalFontSize), options);
 		}
@@ -393,6 +399,8 @@ class PreferencesRegistry {
 		if (store.registry.exists("editor/keyboard/keybindings") && (base == null || !store.isDefault("editor/keyboard/keybindings"))) value.keybindings = bindings(store.getString("editor/keyboard/keybindings"));
 		if (value.haxeonCommand.length > 0 && value.haxeonCommand[0].length == 0) throw "Language server executable cannot be empty";
 		if (store.registry.exists("terminal/fonts/font_size")) value.terminalFontSize = store.getInt("terminal/fonts/font_size");
+		if (store.registry.exists("terminal/keyboard/commands_to_skip_shell") && (base == null || !store.isDefault("terminal/keyboard/commands_to_skip_shell")))
+			value.terminalCommandsToSkipShell = strings(store.getString("terminal/keyboard/commands_to_skip_shell"));
 		return value;
 	}
 

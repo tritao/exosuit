@@ -35,6 +35,28 @@ multiline Japanese text. Search, links and font roles remain open. `scripts/test
 exercises the live dock, resize, and shell input under Xvfb. The checklist below
 remains open for full terminal behavior and measurement.
 
+Application shortcut routing is command-based in both panel and editor terminals.
+Quick Open (Ctrl+P), the command palette (Ctrl+Shift+P), tab switching
+(Ctrl+Tab / Ctrl+Shift+Tab), sidebar visibility (Ctrl+B), terminal toggles,
+settings, new/open file dialogs, zoom, layout and navigation commands take priority over PTY input.
+Rebinding one of these commands follows its ID, including bindings to plain
+Ctrl letters. Editor editing commands remain with the shell by default, so
+Ctrl+C, Ctrl+D, Ctrl+R and Ctrl+Z retain their terminal meaning. Ctrl+Shift+C/V
+continue to copy/paste in the terminal. Terminal search is not implemented yet;
+Ctrl+F continues to reach the shell.
+
+The user preference `terminal/keyboard/commands_to_skip_shell` is a JSON array
+of overrides to `ui.TerminalShortcutPolicy`'s default command IDs. For example,
+`["-files:open", "my:command"]` returns Quick Open's current shortcut to the
+shell and gives `my:command` application priority. Domain IDs accept the
+optional `exosuit.` bridge prefix; the last override for an ID wins. Changes
+apply to existing terminals immediately. Routing resolves the winning binding
+and focus scope before filtering; a rejected binding cannot expose a lower
+priority command. Disabled or unbound commands fall back to terminal input,
+nonrepeatable commands suppress held-key repeats, and modal focus traps block
+application commands. `scripts/test-terminal-cursor-ui.py` covers routing and
+PTY bytes alongside the rendering checks.
+
 - [ ] Add a grid-rendering view on UIKit `CanvasView`. Redraw only dirty rows.
   Support bold and italic through font roles, 256-color and true color, a
   `theme`/`tango` scheme, `minimum_contrast_ratio` (default 3) with a bounded

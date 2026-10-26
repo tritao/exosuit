@@ -68,6 +68,26 @@ class ConfigurationTestMain {
 			"SCM opt-in settings did not update and copy with the settings snapshot");
 		store.reset("scm/auto_fetch");
 		store.reset("scm/commit_all_when_nothing_staged");
+		var terminalRouting = "terminal/keyboard/commands_to_skip_shell";
+		require(service.current.terminalCommandsToSkipShell.length == 0,
+			"terminal routing overrides should default to empty");
+		require(store.set(terminalRouting, haxeon.ui.properties.PropertyValue.Text('["-files:open","custom:command"]')) == null
+			&& service.current.terminalCommandsToSkipShell.join("|") == "-files:open|custom:command",
+			"terminal routing preference did not update live");
+		var terminalSettingsCopy = service.current.copy();
+		terminalSettingsCopy.terminalCommandsToSkipShell.push("copy-only");
+		require(service.current.terminalCommandsToSkipShell.length == 2,
+			"terminal routing snapshot shared its mutable override array");
+		require(store.set(terminalRouting, haxeon.ui.properties.PropertyValue.Text('[42]')) != null
+			&& service.current.terminalCommandsToSkipShell.length == 2,
+			"invalid terminal routing preference replaced the last valid value");
+		store.save();
+		var reloadedTerminalSettings = new Preferences(userPath);
+		require(reloadedTerminalSettings.current.terminalCommandsToSkipShell.join("|") == "-files:open|custom:command",
+			"terminal routing preference did not persist");
+		store.reset(terminalRouting);
+		require(service.current.terminalCommandsToSkipShell.length == 0,
+			"terminal routing preference did not reset");
 		var notifications = 0, release = service.subscribe(function(_) notifications++);
 		require(notifications == 1, "initial preference notification missing");
 		require(store.set("editor/fonts/font_size", haxeon.ui.properties.PropertyValue.Int(18)) == null,
@@ -129,6 +149,8 @@ class ConfigurationTestMain {
 		var projectPreferences = service.forProject(workspaceSettingsPath);
 		projectPreferences.store.set("languages/haxeon/enabled", haxeon.ui.properties.PropertyValue.Bool(false));
 		require(!projectPreferences.registry.exists("editor/fonts/font_size"), "user preferences leaked into project configuration");
+		require(!projectPreferences.registry.exists("terminal/keyboard/commands_to_skip_shell"),
+			"terminal shortcut routing should be a user preference");
 		application.openArgument(arguments[2]);
 		var configuredProject = application.workspace.activeProject;
 		if (configuredProject == null || configuredProject.settings == null) throw "Project configuration missing";
