@@ -3,7 +3,8 @@
 Measures how long the editor takes to react to real input: from the moment Windows receives a mouse move, button or
 key, to the moment the editor takes it off its queue, and what the UI thread was doing meanwhile. Scripted benchmarks
 (`../live-mode-performance/`) inject input into the app's own queue, so they cannot see this delay; these tools can.
-Windows only for now.
+The Windows tools below are `hook.py`, `driver.py`, `session.sh` and `analyze.py`. Linux has its own, which read the
+profiler's capture instead of three text files: see [Linux](#linux).
 
 ## How it works
 
@@ -70,3 +71,45 @@ Slow inputs spent about 40% of their delay in frames and 40-70% in other UI-thre
 The worst live onsets show the editor drawing frames back to back or pumping short waits while a move goes undequeued
 for 200+ ms. Two explanations remain open: Windows hands an app posted messages (NativeKit's frame message) before
 mouse input, so a stream of frames can starve input; and the bounding-box limit above.
+
+## Linux
+
+`session_linux.sh NAME [--seconds S] [--live]` runs the editor on its own sources in a private Xvfb display, drives it with
+X11 input (`driver_x11.py`, through the XTEST extension), records a profiler capture and prints the tables from
+`analyze_capture.py`. Output is in `runs/NAME/`. Nothing reaches your desktop. Build the editor first
+(`python3 scripts/build.py`).
+
+It reads NativeKit's trace points from the capture (see `haxeon/docs/PROFILING.md`). Each input appears twice on the UI
+thread: when NativeKit's handler had it (`Input age`: time since the X server stamped it) and when the application took
+it off NativeKit's queue (`Input polled age`). A move that the queue merged into a newer one reports the oldest input it
+stands for. ONSET, MOVING and KEYS are the polled ages, as the Windows analyzer defines them, and slow inputs are split by
+what the UI thread was doing (`nk.frame`, `nk.wait`, other).
+
+### Limits
+
+- **Software rendering.** Xvfb draws with llvmpipe, even on a machine with a GPU (Xephyr with glamor does too). Frames are
+  slower than on a real display, and frame cost dominates the numbers.
+- **XTEST skips the kernel.** The X server stamps input when the driver script sends it, so the leg from a device through
+  evdev to the server is not measured. The X time stamp has 1 ms resolution.
+- **The machine's load shows.** The runs below were made at load average 5 to 9 with other jobs running.
+
+### Findings (2026-10-26, Xvfb, software GL, busy machine; 45 s of input, 30 sweeps and 33 key actions)
+
+| Run | HANDLER median / p99 | ONSET median / p90 | MOVING median / p90 / p99 | KEYS median / p99 | FRAMES median / p99 |
+|---|---|---|---|---|---|
+| normal, run 1 | 1.7 / 14.7 ms | 1.7 / 16.9 ms | 17.1 / 35.4 / 41.7 ms | 1.7 / 25.1 ms | 13.6 / 22.6 ms |
+| normal, run 2 | 1.9 / 16.6 ms | 1.7 / 16.5 ms | 17.1 / 34.5 / 42.4 ms | 1.7 / 14.3 ms | 13.4 / 20.6 ms |
+| live | 1.8 / 16.1 ms | 1.7 / 2.2 ms | 16.9 / 33.3 / 39.9 ms | 1.9 / 20.4 ms | 13.6 / 20.9 ms |
+
+- **Live mode matches normal mode** here. The Windows finding that live onsets are worse does not show on Linux.
+- **Handlers and keys are prompt**, and so is the first move after a pause (ONSET). The slow case is continuous movement.
+- **A move reaches NativeKit's handler in about 1.7 ms, and is polled about 15 ms later.** In 80% of the time slow inputs
+  spent, the UI thread was inside `nk.frame` (almost none in GC, and 5% waiting). With input at 1 kHz and frames about
+  14 ms long, the oldest unpolled move is about a frame old when the application polls. `nk_poll_event` pumps the platform
+  first, and a pump can draw a frame, so a move already queued can also wait behind a frame it does not need.
+- **Candidate, not adopted:** handing over a queued event before pumping again (at most 16 polls in a row) left the median
+  unchanged (18.1 and 17.9 ms) and cut MOVING p90 from about 34 ms to 23 ms in both runs, by removing moves that waited
+  through two frames. It was not kept: it changes when frames draw relative to input, and no measurement here shows
+  whether the screen reacts sooner. That needs an input-to-screen measure first.
+- In the probe app under Xvfb every mouse move reaches GTK's handler twice (80 handler events for 40 moves). The editor
+  shows about two handler events per polled move too, with merging. Whether real hardware does it is unchecked.
