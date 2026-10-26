@@ -148,6 +148,9 @@ class ExosuitApp implements DesktopUiApplication {
 	final scmDocumentMarkers:Map<Int, scm.ScmOpenDocumentMarkers> = [];
 	final scmDocumentMarkerKeys:Map<Int, String> = [];
 	final scmMarkerTargets:Map<Int, ScmMarkerTarget> = [];
+	/** The explorer root whose identity is cached, because normalizing it costs a file-system call on every poll. */
+	var localScmRootKey:Null<String>;
+	var localScmIdentity:String = "";
 	var scmBranchStatus:Null<plugin.PluginStatusItem>;
 	var scmPresentationSourceIdentity:Null<String>;
 	var scmBranchJob:Null<scm.ScmJob<Array<scm.ScmBranch>>>;
@@ -2738,7 +2741,8 @@ class ExosuitApp implements DesktopUiApplication {
 			clearLocalScmSource();
 			return null;
 		}
-		if (localScmSource == null || localScmSource.identity() != "local:" + normalizedLocalRoot(explorerRoot)) {
+		if (localScmRootKey != explorerRoot) { localScmRootKey = explorerRoot; localScmIdentity = "local:" + normalizedLocalRoot(explorerRoot); }
+		if (localScmSource == null || localScmSource.identity() != localScmIdentity) {
 			clearLocalScmSource();
 			localScmSource = new LocalScmSource(application.scm, explorerRoot);
 		}

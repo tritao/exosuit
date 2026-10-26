@@ -9,6 +9,8 @@ import sys.io.File;
 class ScmTrustStore {
 	final path:String;
 	final trusted:Map<String, Bool> = [];
+	/** Resolving a path costs a file-system call, and the app asks about each repository on every poll. */
+	final keys:Map<String, String> = [];
 
 	public function new(path:String) {
 		if (path == null || path.length == 0) throw "SCM trust store requires a path";
@@ -60,7 +62,15 @@ class ScmTrustStore {
 		FileSystem.createDirectory(path);
 	}
 
-	static function key(root:String):String {
+	function key(root:String):String {
+		var known = keys.get(root);
+		if (known != null) return known;
+		var value = resolveKey(root);
+		keys.set(root, value);
+		return value;
+	}
+
+	static function resolveKey(root:String):String {
 		var value = StringTools.replace(FileSystem.fullPath(root), "\\", "/");
 		while (value.length > 1 && StringTools.endsWith(value, "/")) value = value.substring(0, value.length - 1);
 		return Sys.systemName() == "Windows" ? value.toLowerCase() : value;
