@@ -11,6 +11,7 @@ class LocalScmSource implements ScmSource {
 	final subscriptions:Array<Void->Void> = [];
 	/** Scope decisions per repository root; resolving paths costs file-system calls and the app asks on every poll. */
 	final scopes:Map<String, Bool> = [];
+	var scopeEpoch:Int = 0;
 	var nextGeneration:Int = 1;
 	var disposed:Bool = false;
 
@@ -111,6 +112,7 @@ class LocalScmSource implements ScmSource {
 	}
 
 	function inScope(repositoryRoot:String):Bool {
+		if (scopeEpoch != service.discoveryEpoch) { scopes.clear(); scopeEpoch = service.discoveryEpoch; }
 		var known = scopes.get(repositoryRoot);
 		if (known != null) return known;
 		var value = within(root, repositoryRoot) || within(repositoryRoot, root);

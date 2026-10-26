@@ -544,7 +544,8 @@ class LanguageServiceClient {
 		if (left.length != right.length) return false;
 		for (index in 0...left.length) {
 			var a = left[index], b = right[index];
-			if (a.start != b.start || a.end != b.end || a.type != b.type || a.modifiers.join(",") != b.modifiers.join(",")) return false;
+			if (a.start != b.start || a.end != b.end || a.type != b.type || a.modifiers.length != b.modifiers.length) return false;
+			for (modifier in 0...a.modifiers.length) if (a.modifiers[modifier] != b.modifiers[modifier]) return false;
 		}
 		return true;
 	}
@@ -560,7 +561,7 @@ class LanguageServiceClient {
 		var state = states.get(document.id), session = transport;
 		if (!ready || !accepts(document) || state == null || session == null || state.revision != document.buffer.stateId) return false;
 		var navigation = method == "textDocument/definition" || method == "textDocument/typeDefinition";
-		if (navigation) for (state in states) if (state.semanticRequest >= 0) invalidateSemanticTokens(state);
+		if (navigation) for (state in states) if (state.semanticRequest >= 0) invalidateSemanticTokens(state, true);
 		var id = -1;
 		id = session.request(method, {textDocument: {uri: state.uri}, position: LspPositionCodec.encode(position)}, now, FEATURE_REQUEST_TIMEOUT, response -> {
 			if (navigation && definitionRequestId == id) definitionRequestId = -1;
