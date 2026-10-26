@@ -23,6 +23,7 @@ import haxeon.ui.widgets.text.Text;
 import haxeon.ui.widgets.text.MiddleEllipsisText;
 import haxeon.ui.widgets.text.TextField;
 import workspace.client.WorkspaceAgentClient;
+import workspace.client.AgentCommandCompletion;
 import workspace.client.CodexPermissions;
 import workspace.service.WorkspaceAgentProtocol.AgentModel;
 import syntax.SyntaxRegistry;
@@ -56,6 +57,8 @@ class CodexSessionPanel implements View {
   var expanded:Map<String, Bool> = [];
   var markdown:Map<String, CodexMarkdownView> = [];
   var promptFocusRequested = false;
+  var suggestionIndex = 0;
+  var dismissSuggestions = false;
 
   static function paragraph(value:String):Text {
     var style = new LayoutStyle();
@@ -190,6 +193,7 @@ class CodexSessionPanel implements View {
     inputStyle.padding = new Insets(12, 10, 12, 10);
     var field = new TextField("codex-prompt", prompt, function(v) {
       prompt = v;
+      suggestionIndex = 0;dismissSuggestions = false;
       frame();
     }, inputStyle, null, null, null, true);
     field.label = view.record.provider == "claude" ? "Claude prompt" : view.record.provider == "pi" ? "Pi prompt" : "Codex prompt";
@@ -391,13 +395,28 @@ class CodexSessionPanel implements View {
     activityStyle.width = LayoutAxis.grow();
     activityStyle.childGap = 16;
     activityStyle.padding = new Insets(0, 12, 0, 12);
-    rows.push(new KeyedView("activity", new ScrollView("codex-activity", new Column("codex-items", activity, activityStyle), style)));
+    rows.push(new KeyedView("activity", new AgentTranscript(new Column("codex-items", activity, activityStyle), style)));
+    var suggestions = canSend && !dismissSuggestions ? AgentCommandCompletion.matches(view.commands,prompt) : [];
+    if (suggestionIndex >= suggestions.length) suggestionIndex = 0;
+    var completionRows:Array<KeyedView> = [];
+    function complete(index:Int):Void {
+      if (index < 0 || index >= suggestions.length) return;
+      prompt = AgentCommandCompletion.insert(suggestions[index]);
+      suggestionIndex = 0;dismissSuggestions = false;promptFocusRequested = false;
+      frame();
+    }
+    for (index in 0...suggestions.length) {
+      var choice = index;
+      var label = AgentCommandCompletion.label(suggestions[index],StringTools.startsWith(prompt,"$"));
+      completionRows.push(new KeyedView("suggestion-"+index,new Button((index == suggestionIndex ? "› " : "")+label,null,
+        function() complete(choice),"agent-command-suggestion-"+index)));
+    }
     var send = new Button("Send", null, submit, "codex-send");
     send.enabled = canSend && StringTools.trim(prompt) != "";
     var footerStyle = new LayoutStyle();
     footerStyle.width = LayoutAxis.grow();
     footerStyle.childGap = 12;
-    var hint = new Text("Enter to send · Shift+Enter for newline", paragraph("").style, tokens.mutedText);
+    var hint = new Text("Enter to send · Shift+Enter for newline" + (view.commands == null ? "" : " · / commands · $ skills"), paragraph("").style, tokens.mutedText);
     var modelControls:Array<KeyedView> = [];
     var moreModels:Button = null;
     if (view.models == null) {
@@ -420,6 +439,7 @@ class CodexSessionPanel implements View {
         client.agentAction(id, "model-settings", "", null, selectedModel == "" ? null : selectedModel, null);
         frame();
       });
+      chooser.placeholder = "Model";
       chooser.enabled = control && !working;
       modelControls.push(new KeyedView("chooser", chooser));
       if (view.modelsNext != null) {
@@ -443,6 +463,12 @@ class CodexSessionPanel implements View {
     effortChooser.enabled = control && !working && effortModel != null && availableEfforts.length > 0;
     modelControls.push(new KeyedView("effort", effortChooser));
     if (moreModels != null) modelControls.push(new KeyedView("more", moreModels));
+    if (view.record.provider == "pi") {
+      var refresh = new Button(view.commandsLoading == true ? "Loading commands…" : "Refresh commands",null,
+        function() client.agentAction(id,"commands","",null),"agent-refresh-commands");
+      refresh.enabled = canSend && view.commandsLoading != true;
+      modelControls.push(new KeyedView("commands",refresh));
+    }
     var modelControlsStyle = footerStyle.copy();
     modelControlsStyle.wrapMode = haxeon.ui.LayoutWrapMode.Wrap;
     var composerStyle = new LayoutStyle();
@@ -456,13 +482,26 @@ class CodexSessionPanel implements View {
     promptStyle.width = LayoutAxis.grow();
     var promptNode = new Column("codex-prompt-keys", [new KeyedView("field", field)], promptStyle).build(context);
     promptNode.walk(function(child) {
-      if (child.focusable && child.semantics != null && (child.semantics.label == "Codex prompt" || child.semantics.label == "Claude prompt")) {
+      if (child.focusable && child.semantics != null && (child.semantics.label == "Codex prompt" || child.semantics.label == "Claude prompt" || child.semantics.label == "Pi prompt")) {
         child.onResolved(function(_) {
           if (!promptFocusRequested && child.enabled) promptFocusRequested = context.requestFocus(child.id);
         });
       }
     });
     promptNode.on(UiEventKind.KeyDown, function(event) {
+      if (suggestions.length > 0 && (event.modifiers & (UiModifier.Shift | UiModifier.Control | UiModifier.Alt)) == 0) {
+        if (event.key == UiKey.Down || event.key == UiKey.Up) {
+          event.preventDefault();event.stopImmediatePropagation();
+          suggestionIndex = (suggestionIndex + (event.key == UiKey.Down ? 1 : suggestions.length-1)) % suggestions.length;
+          frame();return;
+        }
+        if (event.key == UiKey.Tab || event.key == UiKey.Enter) {
+          event.preventDefault();event.stopImmediatePropagation();complete(suggestionIndex);return;
+        }
+        if (event.key == UiKey.Escape) {
+          event.preventDefault();event.stopImmediatePropagation();dismissSuggestions = true;frame();return;
+        }
+      }
       if (event.key == UiKey.Enter && (event.modifiers & UiModifier.Shift) == 0) {
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -472,6 +511,8 @@ class CodexSessionPanel implements View {
     rows.push(new KeyedView("composer", new Column("codex-composer", [
       new KeyedView("models", new Row("codex-model-controls", modelControls, modelControlsStyle)),
       new KeyedView("prompt", new CodexPromptNode(promptNode)),
+      new KeyedView("suggestions", new Column("agent-command-suggestions",completionRows)),
+      new KeyedView("commands-error", new Text(view.commandsError == null ? "" : view.commandsError)),
       new KeyedView("footer", new Row("codex-composer-footer", [new KeyedView("hint", hint), new KeyedView("send", send)], footerStyle))
     ], composerStyle)));
     var viewport = new LayoutStyle();
@@ -494,4 +535,21 @@ private class CodexPromptNode implements View {
   final node:RenderNode;
   public function new(node:RenderNode) this.node = node;
   public function build(context:BuildContext):RenderNode return node;
+}
+
+/** History has its own scroll extent; its natural height must not push the composer out of the viewport. */
+private class AgentTranscript implements View {
+  final content:View;
+  final style:LayoutStyle;
+  public function new(content:View, style:LayoutStyle) {this.content = content;this.style = style;}
+  public function build(context:BuildContext):RenderNode {
+    var node:Null<RenderNode> = null;
+    var scroll = new ScrollView("codex-activity",content,style);
+    scroll.contentExtentProvider = function(width,height) {
+      var geometry = node == null || node.children.length == 0 ? null : node.children[0].resolved;
+      return {width:width,height:geometry == null ? height : Math.max(geometry.height,geometry.contentBounds.y+geometry.contentBounds.height)};
+    };
+    node = scroll.build(context);
+    return node;
+  }
 }

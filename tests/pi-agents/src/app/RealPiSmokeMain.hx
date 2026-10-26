@@ -40,6 +40,11 @@ class RealPiSmokeMain {
    function(_) created=true,function(e) throw e.message);
   wait(function() return created);until("idle");
   require((cast view().models:Array<AgentModel>).length==1,"Real Pi model discovery failed");
+  wait(function() {action("read");return view().commands != null && view().commandsLoading != true;});
+  var commands:Array<AgentCommand>=cast view().commands;
+  require([for(c in commands) if(c.invocation=="/skill:fixture-skill" && c.kind=="skill") true].length==1,"Real Pi skill discovery failed");
+  require([for(c in commands) if(c.invocation=="/fixture-prompt" && c.kind=="prompt") true].length==1,"Real Pi prompt discovery failed");
+  require([for(c in commands) if(c.invocation=="/fixture-command" && c.kind=="command") true].length==1,"Real Pi command discovery failed: "+haxe.Json.stringify(commands));
   action("prompt","hello");until("completed");
   require([for(i in (cast view().items:Array<AgentActivityItem>)) if(i.kind=="agentMessage" && i.text=="Hello from real Pi") true].length==1,"Real Pi streaming failed");
   var session=view().record.thread;require(sys.FileSystem.exists(session),"Native Pi session was not persisted");
@@ -63,6 +68,10 @@ class RealPiSmokeMain {
   require(processes.activeCount()==0,"Pi resumed without explicit connection");
   action("connect");until("idle");require(view().record.thread==session,"Real Pi resume changed native identity");
   action("prompt","after-resume");until("completed");
+  action("prompt","/fixture-command");until("completed");
+  require([for(i in (cast view().items:Array<AgentActivityItem>)) if(i.text=="PI_COMMAND_EXECUTED") true].length==1,"Real Pi extension command was not dispatched natively");
+  action("prompt","/skill:fixture-skill investigate");until("completed");
+  action("prompt","/fixture-prompt check native expansion");until("completed");
   provider.dispose();processes.shutdown();client.close();server.close();
   Sys.println("PASS: real Pi CLI discovery, permission-hook handshake, streaming, native tools, approve/decline, auto-edit, policy restart and persisted resume");
  }

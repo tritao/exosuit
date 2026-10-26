@@ -37,8 +37,21 @@ failure or ambiguous delivery disconnect Pi without retrying the prompt. Activit
 retains 128 items, paged eight at a time, with six shortened items saved across
 restart. This snapshot does not import Pi's full native history.
 
-Skills can still be invoked using Pi's native prompt syntax, but skill discovery,
-active steering, queued messages, usage meters, app-tool/MCP bridging, subagent
+Type `/` at the start of the composer to discover native extension commands and
+prompt templates, or `$` to discover skills. Type more to filter. Up/Down selects
+a suggestion; Tab or Enter inserts it; Escape dismisses suggestions. Selecting a
+skill inserts `/skill:<name> ` so Pi performs its normal expansion. Review or add
+arguments, then send the message. Clicking a suggestion also inserts without
+sending. Shift+Enter still inserts a newline.
+
+The catalog comes from Pi's `get_commands`, including user/project scope when
+reported. It respects what Pi loads for the current workspace and its extension
+trust settings. **Refresh commands** queries the running session again. Newly
+installed resources may require a fresh session. Discovery failures leave the
+conversation usable and show an error beside the composer. TUI-only commands
+that Pi does not advertise are not suggested.
+
+Active steering, queued messages, usage meters, app-tool/MCP bridging, subagent
 presentation, native forks and rollback are follow-up work. Terminal decorations
 from Pi extensions have no UI mapping yet.
 
@@ -58,5 +71,15 @@ The real fixture uses an isolated Pi directory and no account or paid API. It
 checks startup, discovery, streaming, native Write approval/decline, automatic
 edits, Stop, policy restart and native session resume. Pi 1.4.0 is the version
 used during implementation; other versions need the same RPC envelopes and
-extension tool hooks. Desktop compilation is checked separately from interactive
-UI acceptance.
+extension tool hooks. Desktop acceptance is run separately from these protocol tests.
+
+Desktop acceptance uses the actual app and real Pi with an isolated profile and
+local mock model. It exercises pointer/keyboard controls, approvals, stop/resume,
+editor reattachment, skill/command selection and daemon restart:
+
+```sh
+EXOSUIT_PI_BIN=/path/to/pi xvfb-run -a -s "-screen 0 1280x1024x24 -noreset" \
+  python3 scripts/test-pi-desktop.py
+```
+
+Set `PI_UI_ARTIFACTS` to retain screenshots and layout/state captures.

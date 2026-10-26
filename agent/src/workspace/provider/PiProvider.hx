@@ -31,6 +31,9 @@ private typedef PiSession = {
  var conversation:PiConversation;
  var dialogs:Map<String,PiDialog>;
  var models:Array<AgentModel>;
+ var commands:Null<Array<AgentCommand>>;
+ var commandsError:Null<String>;
+ var commandsLoading:Bool;
  var serial:Int;
  var message:Int;
  var interrupted:Bool;
@@ -75,7 +78,7 @@ class PiProvider implements LocalAgentProvider {
  static function sessionPath(v:String):Bool return valid(v,4096) && Path.isAbsolute(v) && v.indexOf("\n") < 0;
  function inside(v:String):Bool return v != null && (v == directories.root || StringTools.startsWith(v,directories.root == "/" ? "/" : directories.root + "/"));
  function session(r:AgentRecord):PiSession return {record:r,process:null,transport:null,ready:false,policyReady:false,busy:false,error:null,
-  conversation:new PiConversation(r.replay),dialogs:[],models:[],serial:0,message:0,interrupted:false,promptDone:false,settled:false,
+  conversation:new PiConversation(r.replay),dialogs:[],models:[],commands:null,commandsError:null,commandsLoading:false,serial:0,message:0,interrupted:false,promptDone:false,settled:false,
   settling:false,currentModel:null,currentEffort:null};
  static function copy(r:AgentRecord):AgentRecord {var result:AgentRecord=cast Reflect.copy(r);result.replay=null;return result;}
  public function owns(id:String):Bool return sessions.exists(id);
@@ -89,14 +92,14 @@ class PiProvider implements LocalAgentProvider {
   record:copy(s.record),activity:"",items:s.conversation.page(before),itemsNext:s.conversation.next(before),itemsOmitted:false,
   requests:[for(id=>d in s.dialogs) {id:id,method:d.method == "confirm" ? "item/commandExecution/requestApproval" : "item/tool/requestUserInput",
    detail:d.detail,reviewable:d.reviewable,inputKind:d.method,options:d.options}],
-  models:s.models,modelsNext:null,currentModel:s.currentModel,currentEffort:s.currentEffort,
+  models:s.models,modelsNext:null,commands:s.commands,commandsError:s.commandsError,commandsLoading:s.commandsLoading,currentModel:s.currentModel,currentEffort:s.currentEffort,
   connectionState:s.ready && s.record.state != "reconnecting" ? "connected" : s.transport == null ? "disconnected" : "reconnecting",
   recoveryReason:s.ready ? null : "explicit-resume",error:s.error
  };
  function fail(s:PiSession,reason:String,terminalState:String="failed"):Void {
   var t=s.transport;s.transport=null;s.ready=false;
   var uncertain=s.busy || s.record.state == "uncertain";
-  s.busy=false;s.settling=false;s.dialogs.clear();s.error=reason.substring(0,2048);
+  s.busy=false;s.settling=false;s.dialogs.clear();s.commands=null;s.commandsLoading=false;s.commandsError=null;s.error=reason.substring(0,2048);
   if(s.record.turn != null) s.conversation.finish(s.record.turn,terminalState);
   s.record.state=uncertain ? "uncertain" : "disconnected";s.record.turn=null;
   if(t != null) t.close(reason);
@@ -109,6 +112,16 @@ class PiProvider implements LocalAgentProvider {
    if(s.transport != t) return;
    if(r.error != null) {fail(s,r.error);return;}
    done(r.result);
+  });
+ }
+ function refreshCommands(s:PiSession):Void {
+  var t=s.transport;if(t == null || s.commandsLoading) return;
+  s.commandsLoading=true;s.commandsError=null;
+  t.request("get_commands",{},clock(),function(r) {
+   if(s.transport != t) return;
+   s.commandsLoading=false;
+   if(r.error != null) {s.commandsError="Pi command discovery failed: "+r.error;return;}
+   try s.commands=PiCommands.parse(r.result) catch(e:Dynamic) s.commandsError=Std.string(e);
   });
  }
  function launch(s:PiSession):Void {
@@ -146,7 +159,8 @@ class PiProvider implements LocalAgentProvider {
      function ready():Void {
       if(!s.policyReady) {fail(s,"Pi permission extension did not initialize; no prompt was sent");return;}
       s.ready=true;s.record.state=s.dialogs.keys().hasNext() ? "needs-attention" : "idle";
-      try save(s) catch(_:Dynamic) fail(s,"Pi initialization could not be saved");
+      try save(s) catch(_:Dynamic) {fail(s,"Pi initialization could not be saved");return;}
+      refreshCommands(s);
      }
      function thinking():Void {
       if(s.record.preferredEffort != null) setThinking(s,s.record.preferredEffort,ready);else ready();
@@ -343,6 +357,10 @@ class PiProvider implements LocalAgentProvider {
   }
   if(!s.ready) {error("provider_starting","Pi is initializing");return;}
   if(q.action == "models") {ctx.respond(view(s));return;}
+  if(q.action == "commands") {
+   if(s.busy || s.dialogs.keys().hasNext()) {error("busy","Wait for Pi to finish before refreshing commands");return;}
+   refreshCommands(s);ctx.respond(view(s));return;
+  }
   if(q.action == "permissions") {
    if(s.busy || s.dialogs.keys().hasNext()) {error("busy","Wait for Pi to finish");return;}
    if(!mode(q.text)) {error("invalid_permissions","Choose supervised, acceptEdits or fullAccess");return;}

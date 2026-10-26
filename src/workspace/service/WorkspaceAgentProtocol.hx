@@ -64,6 +64,15 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(4) var supportedEfforts:Null<Array<String>>;
 }
 
+/** Discovered on the workspace host; invocation is the native text sent to the agent. */
+@:wire typedef AgentCommand = {
+	@:id(1) var name:String;
+	@:id(2) var description:String;
+	@:id(3) var kind:String;
+	@:id(4) var invocation:String;
+	@:optional @:id(5) var scope:Null<String>;
+}
+
 @:wire typedef AgentAction = {
 	@:id(1) var workspace:String;
 	@:id(2) var instance:String;
@@ -103,6 +112,9 @@ import haxeon.wire.MessagePack;
 	/** Stable recovery category for actionable UI; raw diagnostics remain in error. */
 	@:optional @:id(12) var recoveryReason:Null<String>;
 	@:optional @:id(13) var itemsNext:Null<String>;
+	@:optional @:id(14) var commands:Null<Array<AgentCommand>>;
+	@:optional @:id(15) var commandsError:Null<String>;
+	@:optional @:id(16) var commandsLoading:Null<Bool>;
 }
 
 /** Bounded presentation data; provider protocol and policy stay on the host. */

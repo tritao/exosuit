@@ -47,11 +47,33 @@ class PiProviderTestMain {
   }
   create();var id=currentRecord().thread;create();require(currentRecord().thread==id,"Duplicate create changed session id");
   until("idle");id=currentView().record.thread;create();require(currentRecord().thread==id,"Duplicate create changed native session");
+  wait(function() {action("read");return currentView().commands != null && currentView().commandsLoading != true;});
+  var commands:Array<AgentCommand>=cast currentView().commands;
+  require(commands.length==3 && commands[2].kind=="skill" && commands[2].name=="fixture-skill" && commands[2].scope=="project","Native command/skill discovery lost metadata");
+  var matches=workspace.client.AgentCommandCompletion.matches(commands,"$fixture");
+  require(matches.length==1 && workspace.client.AgentCommandCompletion.insert(matches[0])=="/skill:fixture-skill ","Skill completion lost native invocation");
+  require(workspace.client.AgentCommandCompletion.matches(commands,"/fixture-").length==2,"Slash completion lost command/template");
+  require(workspace.client.AgentCommandCompletion.matches(commands,"/fixture-command argument").length==0 && workspace.client.AgentCommandCompletion.matches(commands,"text $fixture").length==0,"Completion consumed prompt arguments or prose");
+  var many:Array<AgentCommand>=[for(i in 0...20) {name:"skill-"+i,description:"A skill",kind:"skill",invocation:"/skill:skill-"+i}];
+  require(workspace.client.AgentCommandCompletion.matches(many,"$").length==8 && workspace.client.AgentCommandCompletion.matches(commands,"$FIXTURE").length==1,"Completion bounds/case filtering failed");
+  var parsed=workspace.provider.PiCommands.parse({commands:[
+   {name:"same",source:"extension",sourceInfo:{scope:""}},{name:"same",source:"prompt",sourceInfo:{scope:""}},{name:"bad command",source:"extension",sourceInfo:{scope:""}},
+   {name:"unknown",source:"other",sourceInfo:{scope:""}},{name:"skill:",source:"skill",sourceInfo:{scope:""}},{name:"valid",source:"skill",sourceInfo:{scope:"global"}}
+  ]});
+  require(parsed.length==2 && parsed[0].kind=="command" && parsed[1].invocation=="/skill:valid" && parsed[1].scope=="user","Catalog validation or native precedence failed");
+  sys.io.File.saveContent(root+"/commands-broken","");action("commands");
+  wait(function() {action("read");return currentView().commandsLoading != true;});
+  require(currentView().commandsError != null && currentView().connectionState=="connected" && (cast currentView().commands:Array<AgentCommand>).length==3,"Optional discovery failure disconnected Pi or erased the catalog");
+  sys.FileSystem.deleteFile(root+"/commands-broken");sys.io.File.saveContent(root+"/commands-new","");action("commands");
+  wait(function() {action("read");return currentView().commandsLoading != true;});
+  require(currentView().commandsError==null && (cast currentView().commands:Array<AgentCommand>).length==4,"Explicit refresh did not update commands");
   var listed=false;
   client.call(WorkspaceAgentProtocol.LIST,{workspace:"w",instance:"owner"},5000,function(r) {require(r.records.length==1 && r.records[0].provider=="pi","Mixed catalog lost Pi identity");listed=true;},function(e) throw e.message);
   wait(function() return listed);
   action("prompt","hello");require(code=="","Prompt rejected");until("completed");
   require(items().length==3 && items()[2].text=="Hello 界\u2028Pi" && items()[1].kind=="reasoning","Streaming/reasoning was duplicated or corrupted");
+  action("prompt","/fixture-command");until("completed");
+  action("prompt","/skill:fixture-skill investigate");until("completed");
   action("model-settings","",null,"fixture/other-model");require(code=="","set_model failed");
   wait(function() {action("read");return currentView().currentModel=="fixture/other-model";});
   until("idle");

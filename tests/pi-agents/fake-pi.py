@@ -42,6 +42,15 @@ if not Path('no-hook').exists():
 for line in sys.stdin:
  v=json.loads(line);log.write(json.dumps(v)+'\n');kind=v['type']
  if kind=='get_state':reply(v,{'sessionFile':session,'model':current,'thinkingLevel':thinking,'isStreaming':streaming})
+ elif kind=='get_commands':
+  if Path('commands-broken').exists():
+   emit({'id':v['id'],'type':'response','command':kind,'success':False,'error':'Discovery unavailable'})
+  else:
+   commands=[{'name':'fixture-command','description':'An extension command','source':'extension','sourceInfo':{'scope':'user'}},
+    {'name':'fixture-prompt','description':'A project prompt template','source':'prompt','sourceInfo':{'scope':'project'}},
+    {'name':'skill:fixture-skill','description':'A project skill','source':'skill','sourceInfo':{'scope':'project'}}]
+   if Path('commands-new').exists(): commands.append({'name':'new-command','source':'extension'})
+   reply(v,{'commands':commands})
  elif kind=='get_available_models':reply(v,{'models':[model,{**model,'id':'other-model'}]})
  elif kind=='set_thinking_level':
   thinking=v['level'];reply(v)
@@ -53,6 +62,10 @@ for line in sys.stdin:
   if text=='crash':os._exit(7)
   if text=='malformed':os.write(sys.stdout.fileno(),b'{broken\n');continue
   if text=='oversized':os.write(sys.stdout.fileno(),b'x'*270000+b'\n');continue
+  if text=='/fixture-command':
+   streaming=False
+   emit({'type':'extension_ui_request','method':'notify','message':'Fixture command ran'})
+   reply(v,{'disposition':'handled'});continue
   reply(v,{'disposition':'started'})
   emit({'type':'agent_start'})
   if text in ('approval','large-approval','wait','select','input','editor'):
