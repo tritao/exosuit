@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+"""Deterministic protocol peer for the native Haxe adapter; not a runtime bridge."""
+import json,sys,os
+args=sys.argv[1:]
+session=args[args.index('--resume')+1] if '--resume' in args else args[args.index('--session-id')+1]
+log=open('wire.jsonl','a',buffering=1)
+def emit(v): print(json.dumps(v),flush=True)
+def reply(v,response=None): emit({'type':'control_response','response':{'subtype':'success','request_id':v['request_id'],'response':response or {}}})
+def result():emit({'type':'result','session_id':session,'is_error':False})
+for line in sys.stdin:
+ if '--silent' in args: continue
+ v=json.loads(line);log.write(json.dumps(v)+'\n');t=v['type']
+ if t=='control_request':
+  sub=v['request']['subtype']
+  if sub=='initialize':reply(v,{'models':[{'value':'test-model','displayName':'Fixture model'}]})
+  elif sub=='interrupt':reply(v);emit({'type':'control_cancel_request','request_id':'cancel-me'});result()
+  else:reply(v)
+ elif t=='user':
+  text=v['message']['content']
+  emit({'type':'system','subtype':'init','session_id':session,'model':'test-model'})
+  if text=='crash':os._exit(7)
+  if text=='malformed':print('{broken',flush=True);continue
+  if text=='oversized':print('x'*270000,flush=True);continue
+  if text in ('approval','question','wait','large-approval'):
+   tool='AskUserQuestion' if text=='question' else 'Bash'
+   inp={'questions':[{'question':'Choose a color','options':[{'label':'Blue'},{'label':'Red'}]}]} if text=='question' else {'command':'sleep 30' if text=='wait' else 'echo '+('x'*3000 if text=='large-approval' else 'ok')}
+   emit({'type':'control_request','request_id':'cancel-me' if text=='wait' else 'approval-1','request':{'subtype':'can_use_tool','tool_name':tool,'input':inp}})
+  else:
+   emit({'type':'stream_event','event':{'type':'message_start','message':{'id':'message-'+text}}})
+   emit({'type':'stream_event','event':{'type':'content_block_delta','delta':{'type':'text_delta','text':'Hello 界'}}})
+   emit({'type':'assistant','message':{'id':'message-'+text,'content':[{'type':'text','text':'Hello 界'}]}})
+   result()
+ elif t=='control_response':
+  r=v['response']['response']
+  if r['behavior']=='allow' and 'questions' in r['updatedInput']:
+   assert r['updatedInput']['answers']=={'Choose a color':'Blue'},r
+  result()

@@ -132,11 +132,14 @@ class WorkbenchPanel implements View {
 		if (key != null && StringTools.startsWith(key, "a:")) {
 			var agent = model.agents.get(key.substring(2));
 			if (agent != null) {
-				items.push(new MenuItem("open-codex", "Open Codex session", function() openAgent(agent.id)));
+				items.push(new MenuItem("open-codex", "Open agent session", function() openAgent(agent.id)));
 				items.push(new MenuItem("delete-codex-leaf", "Remove from Workbench", function() removeAgent(agent.id),
 					client.agentService().canControlAgents() && !client.agentService().agentBusy() && agentCanBeRemoved(agent)));
 			}
 		}
+        items.push(new MenuItem("new-claude", "New Claude session", function() {
+            client.agentService().createAgent(groupId, null, openAgent, {provider:"claude",model:null,effort:null,permissionProfile:"default"});
+        }, group != null && client.agentService().canControlAgents() && !client.agentService().agentBusy()));
 		items.push(new MenuItem("new-codex", "New Codex session", function() createCodex(groupId, openAgent),
             group != null && client.agentService().canControlAgents() && !client.agentService().agentBusy()));
         items.push(new MenuItem("new-terminal", "New terminal", function() createTerminal(groupId), group != null && client.canCreateGroupedTerminals() && !client.terminalCatalogBusy()));

@@ -1,0 +1,5 @@
+{
+ "version":1,"package":{"name":"exosuit-claude-cli-acceptance"},
+ "entry":"app.ClaudeCliAcceptanceMain","sourceRoots":["src"],"scopeSourceRoots":false,
+ "dependencies":{"exosuit-agent":{"path":"../../agent"}},"target":"host","outputDir":"build-real"
+}

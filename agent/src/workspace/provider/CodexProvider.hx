@@ -34,6 +34,7 @@ private typedef PendingApproval = {var wireId:Dynamic; var method:String; var de
 
 /** Shared-daemon adapter. All policy/protocol interpretation stays on the owning machine. */
 class CodexProvider implements WorkspaceAgents {
+	final localProviders:Array<LocalAgentProvider>;
 	final workspace:String;
 	final instance:String;
 	final directories:WorkspaceDirectories;
@@ -67,7 +68,9 @@ class CodexProvider implements WorkspaceAgents {
 	public var status(default, null) = "Codex is not connected";
 
 	public function new(workspace:String, instance:String, directories:WorkspaceDirectories, groups:Void->Array<WorkspaceGroup>, processes:ProcessManager,
-			clock:Void->Float, ?persistence:WorkspaceAgentPersistence, executable:String = "codex", ?bridge:String, ?script:String) {
+			clock:Void->Float, ?persistence:WorkspaceAgentPersistence, executable:String = "codex", ?bridge:String, ?script:String, ?claude:ClaudeProvider, ?additionalProviders:Array<LocalAgentProvider>) {
+		this.localProviders = additionalProviders == null ? [] : additionalProviders.copy();
+		if (claude != null) this.localProviders.push(claude);
 		this.workspace = workspace;
 		this.instance = instance;
 		this.directories = directories;
@@ -80,6 +83,8 @@ class CodexProvider implements WorkspaceAgents {
 		this.bridge = bridge;
 		if (persistence != null)
 			for (r in persistence.loadAgents()) {
+				if (r.provider == "claude") continue;
+				if (r.provider != null && r.provider != "codex") throw "Unknown persisted agent provider";
 				if (!valid(r.id, 128)
 					|| !valid(r.name, 256)
 					|| r.workspaceRoot != directories.root
@@ -138,6 +143,7 @@ class CodexProvider implements WorkspaceAgents {
 	function copy(r:AgentRecord):AgentRecord
 		return {
 			id: r.id,
+			provider: "codex",
 			name: r.name,
 			group: r.group,
 			cwd: r.cwd,
@@ -283,6 +289,7 @@ class CodexProvider implements WorkspaceAgents {
 	}
 
 	public function poll():Void {
+		for (provider in localProviders) provider.poll();
 		if (starter != null) {
 			var process = starter;
 			output += process.readStdout() + process.readStderr();
@@ -746,6 +753,7 @@ class CodexProvider implements WorkspaceAgents {
 				return;
 			}
 			var records = [for (s in sessions) copy(s.record)];
+			for (provider in localProviders) records = records.concat(provider.records());
 			records.sort(function(a, b) return Reflect.compare(a.id, b.id));
 			records = [for (r in records) if (q.after == null || Reflect.compare(r.id, q.after) > 0) r];
 			var more = records.length > 6;
@@ -755,7 +763,7 @@ class CodexProvider implements WorkspaceAgents {
 				instance: instance,
 				root: directories.root,
 				records: records,
-				status: status,
+				status: status + [for (provider in localProviders) "; " + provider.summary()].join(""),
 				next: more ? records[records.length - 1].id : null
 			});
 		});
@@ -859,6 +867,21 @@ class CodexProvider implements WorkspaceAgents {
 				ctx.fail({code: "invalid_request", message: "Invalid agent identity", ambiguous: false});
 				return;
 			}
+			if (q.provider != null && q.provider != "codex" && q.provider != "claude") {
+                ctx.fail({code:"invalid_provider",message:"Unsupported agent provider",ambiguous:false});return;
+            }
+            for (provider in localProviders) if (q.provider == provider.driverKind() || provider.owns(q.id)) {
+                if (q.provider != provider.driverKind() || sessions.exists(q.id) || ownedByOther(q.id,provider)) {
+                    ctx.fail({code:"conflict",message:"Agent id belongs to another provider",ambiguous:false});return;
+                }
+                if (!provider.owns(q.id) && sessionsCount() >= 32) {
+                    ctx.fail({code:"limit",message:"Agent catalog is full",ambiguous:false});return;
+                }
+                provider.create(q,ctx);return;
+            }
+            if (q.provider != null && q.provider != "codex") {
+                ctx.fail({code:"unavailable",message:"Agent provider is unavailable",ambiguous:false});return;
+            }
 			var cwd = directory(q.group);
 			if (cwd == null) {
 				ctx.fail({code: "invalid_request", message: "Invalid agent directory or group", ambiguous: false});
@@ -916,6 +939,7 @@ class CodexProvider implements WorkspaceAgents {
 			var s:Session = {
 				record: {
 					id: q.id,
+					provider: "codex",
 					name: q.name,
 					group: q.group,
 					cwd: cwd,
@@ -1011,6 +1035,7 @@ class CodexProvider implements WorkspaceAgents {
 				ctx.fail({code: "unauthorized", message: "Agent operation denied", ambiguous: false});
 				return;
 			}
+			for (provider in localProviders) if (provider.owns(q.id)) {provider.action(q,ctx);return;}
 			var s = sessions.get(q.id);
 			if (s == null) {
 				ctx.fail({code: "unknown_agent", message: "Unknown agent", ambiguous: false});
@@ -1315,8 +1340,14 @@ class CodexProvider implements WorkspaceAgents {
 		});
 	}
 
+	function ownedByOther(id:String, selected:LocalAgentProvider):Bool {
+		for (provider in localProviders) if (provider != selected && provider.owns(id)) return true;
+		return false;
+	}
+
 	function sessionsCount():Int {
 		var n = 0;
+		for (provider in localProviders) n += provider.records().length;
 		for (_ in sessions)
 			n++;
 		return n;
@@ -1324,6 +1355,7 @@ class CodexProvider implements WorkspaceAgents {
 
 	public function activeCount():Int {
 		var n = 0;
+		for (provider in localProviders) n += provider.activeCount();
 		for (s in sessions)
 			if (s.record.state == "working" || s.record.state == "needs-attention" || s.busy)
 				n++;
@@ -1333,6 +1365,7 @@ class CodexProvider implements WorkspaceAgents {
 	/** Updates also preserve idle attached conversations and pending provider startup. */
 	public function updateActivityCount():Int {
 		var count = starter == null ? 0 : 1;
+		for (provider in localProviders) count += provider.updateActivityCount();
 		for (session in sessions)
 			if (session.attached || session.busy || session.record.state == "creating"
 				|| session.record.state == "working" || session.record.state == "needs-attention") count++;
@@ -1340,6 +1373,7 @@ class CodexProvider implements WorkspaceAgents {
 	}
 
 	public function dispose():Void {
+		for (provider in localProviders) provider.dispose();
 		if (starter != null) {
 			processes.release(starter);
 			starter = null;

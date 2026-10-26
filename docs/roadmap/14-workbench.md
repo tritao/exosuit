@@ -195,12 +195,11 @@ covered. The shared Exosuit client must interoperate with `exosuit-agent`.
 
 ## M14.4 — Providers, policy and supervision
 
-Claude Code and Codex are required agent providers. Claude uses the CLI-in-a-PTY
-pattern from Pragtical's `provider/agent_cli.lua`. Codex uses its structured
-app-server protocol and shared local daemon. Keep provider transport separate
-from terminal sessions: a Codex conversation is a thread with turns and items,
-not a terminal byte stream. Before implementing, check installed CLI help and
-generate the Codex protocol schema for that exact version.
+Claude Code and Codex are required agent providers. Claude uses a native Haxe
+adapter to its bidirectional streaming JSON CLI protocol. Codex uses its
+structured app-server protocol and shared local daemon. Both use the conversation
+UI; provider transport is separate from terminal sessions. Verify installed CLI
+help/protocol behavior and run real acceptance for compatibility changes.
 
 Sakura is useful reference input for workspace ownership, terminal replay,
 bounded queues and failure tests. Its Codex integration predates the shared
@@ -229,28 +228,23 @@ reconciliation are implemented. See [provider details](../../agent/CODEX.md).
 Structured conversation rendering now covers messages, command output and file
 changes with stable turn/item identity, folded details and explicit retention
 limits. The prompt stays outside the scrolling conversation. The full provider
-milestone remains open: the generic registry, Claude, Markdown/diff rendering,
+milestone remains open: the generic registry, broader Markdown/diff rendering,
 additional request kinds, full paged history, resource metadata controls,
 supervision CLI/wait and broader real desktop/shared-daemon qualification.
 
 - [ ] Provider registry with the lifecycle contract (available, create,
   attach, recover, start, stop, restart, send_input, action, refresh_status,
   capabilities, shutdown). Ship `shell`, `claude` and `codex`.
-- [ ] `claude` provider: run the interactive `claude` CLI in a PTY so the
-  user can watch and take over in the terminal view. `TERM=xterm-256color`,
-  scrollback 10000, and cwd is the task's project directory.
-  - Create generates a UUID, passes it with `--session-id`, and stores it as
-    `external_session_id`. Recover and restart use `--resume <id>`, so the
-    conversation survives agent or editor restarts.
-  - Map `--model`, `--add-dir`, `--allowedTools` and an initial prompt from
-    the resource config.
-  - Status comes from Claude Code hooks, not screen-scraping. Pass a
-    per-runtime `--settings` file whose hooks (session start, prompt submit,
-    stop, notification or permission request) run
-    `exosuit-ctl workbench agent event <runtime> <kind>`. This reports
-    working, idle, needs-permission and completed states to the agent, and
-    `agent.wait` relies on it. If the hook command fails or is missing, fall
-    back to process state only and surface a degraded-status warning.
+- [x] `claude` provider: native Haxe bidirectional JSONL, daemon-owned CLI
+  process per session, initialization/request IDs, approve-once/decline,
+  AskUserQuestion, interrupt, model/permission controls and bounded replay.
+  Creation reserves a UUID with `--session-id`; explicit recovery uses `--resume`
+  without resending a prompt. Provider/cwd/model/mode and recent activity persist
+  across daemon restarts. Editor detachment preserves running processes.
+  Native fake-peer failure tests and real CLI 2.1.310 acceptance pass (2026-10-26).
+  Full transcript import, existing-session discovery, effort controls, additional
+  control kinds and desktop click-through qualification remain open.
+  See [Claude provider details](../../agent/CLAUDE-PROVIDER.md).
 - [ ] `codex` provider: connect to the shared local app-server daemon through
   `codex app-server proxy` (or a verified configured local socket). Start it
   through `codex app-server daemon start` when absent. Validate CLI/server
@@ -278,16 +272,14 @@ supervision CLI/wait and broader real desktop/shared-daemon qualification.
     takeover uses the same verified daemon/thread; it is not the status source.
     Test subscription lifetime and active-turn survival before claiming that
     work continues without an editor connection.
-- [ ] Policy mapping for `claude`. Approval `prompt` maps to
-  `--permission-mode manual`. `auto` maps to `acceptEdits`, or to `auto` when
-  the policy also allows process execution. Sandbox `read-only` maps to
-  `plan`. `bypassPermissions` only applies with sandbox `full` and every
-  permission `allow`, and the UI requires explicit confirmation for it.
-  Merge per-runtime overrides as Pragtical's `policy.lua` does.
+- [x] Claude-specific permission choices: `default`, `acceptEdits` and `plan`,
+  persisted and sent via `set_permission_mode`. These are permission modes, not
+  OS sandbox guarantees. Bypass/auto modes and generic policy translation are
+  not exposed; no global CLI configuration is modified.
 - [ ] Supervision commands: `agent.list/status/create/prompt/read/stop/restart/
   delete/wait`. `prompt` starts the runtime if needed, otherwise it sends the
-  prompt through the provider transport (PTY input for Claude; a turn request
-  for Codex). `read` uses a durable provider cursor (byte offset for terminals,
+  prompt through the provider transport (stream-json user input for Claude; a
+  turn request for Codex). `read` uses a durable provider cursor (byte offset for terminals,
   thread/turn/item position for Codex), and `wait` is held by the daemon until
   provider events report a terminal state. Expose them as
   `exosuit-ctl workbench ...` (M13.3) and in the UI, including a
@@ -295,12 +287,13 @@ supervision CLI/wait and broader real desktop/shared-daemon qualification.
 - [ ] Follow-on providers, out of scope for M14 unless separately scheduled:
   `opencode` (HTTP+SSE).
 
-Acceptance: a fake `claude` executable on `PATH` records its argv and emits
-scripted output plus hook invocations. The tests built on it cover create,
-resume after an agent restart, policy-to-flag mapping, hook-driven status, a
-`wait` timeout, and a missing hook. A real Claude Code run is opt-in: create,
-prompt, wait, read, restart with resume. Record it as pending when `claude`
-is unavailable or not authenticated.
+Claude acceptance: `scripts/test-claude-agents.py` builds/runs the native Haxe
+adapter against a fake bidirectional JSONL peer, covering create, approvals,
+questions, interruption, detach, explicit resume, uncertain delivery, malformed
+frames, queue/time bounds and replay. `--real` verifies installed Claude through
+the production Haxe transport with prompt → approval → question → interrupt →
+resume, plus model/permission controls. Both passed with CLI 2.1.310 on 2026-10-26.
+Supervision CLI/wait and desktop interaction qualification remain separate work.
 
 Codex acceptance: a fake app-server transport covers handshake, create,
 prompt, streamed items, approval and user-input requests, turn interruption,

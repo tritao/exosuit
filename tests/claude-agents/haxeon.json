@@ -1,0 +1,5 @@
+{
+ "version":1,"package":{"name":"exosuit-claude-agents-test"},
+ "entry":"app.ClaudeProviderTestMain","sourceRoots":["src"],"scopeSourceRoots":false,
+ "dependencies":{"exosuit-agent":{"path":"../../agent"}},"target":"host","outputDir":"build"
+}

@@ -78,6 +78,7 @@ check service-updates python3 "$root_dir/scripts/test-service-updates.py"
 check agent-idle python3 "$root_dir/scripts/test-agent-idle.py"
 check workspace-terminals python3 "$root_dir/scripts/test-workspace-terminals.py"
 check workspace-agents python3 "$root_dir/scripts/test-workspace-agents.py"
+check claude-agents python3 "$root_dir/scripts/test-claude-agents.py"
 check workspace-rpc-wasm bash "$root_dir/scripts/test-workspace-rpc-wasm.sh"
 run_test application-test
 run_test problems

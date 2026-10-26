@@ -20,6 +20,10 @@ import haxeon.wire.MessagePack;
 	/** Composer overrides retained with the resource across daemon restarts. */
 	@:optional @:id(12) var preferredModel:Null<String>;
 	@:optional @:id(13) var preferredEffort:Null<String>;
+	/** Absent on legacy records means Codex. Claude thread is its CLI session UUID. */
+	@:optional @:id(14) var provider:Null<String>;
+	@:optional @:id(15) var permissionMode:Null<String>;
+	@:optional @:id(16) var replay:Null<Array<AgentActivityItem>>;
 }
 
 @:wire typedef AgentQuery = {
@@ -48,6 +52,7 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(7) var defaultModel:Null<String>;
 	@:optional @:id(8) var defaultEffort:Null<String>;
 	@:optional @:id(9) var permissionProfile:Null<String>;
+	@:optional @:id(10) var provider:Null<String>;
 }
 
 @:wire typedef AgentModel = {
@@ -75,6 +80,7 @@ import haxeon.wire.MessagePack;
 	@:id(2) var method:String;
 	@:id(3) var detail:String;
 	@:id(4) var reviewable:Bool;
+
 }
 
 @:wire typedef AgentView = {
