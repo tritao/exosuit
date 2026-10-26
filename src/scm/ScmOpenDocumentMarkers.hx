@@ -20,6 +20,7 @@ class ScmOpenDocumentMarkers {
 	final onChanged:Void->Void;
 	final subscription:BufferSubscription;
 	var baseRevision:String = "";
+	var baseSnapshot:Null<ScmSnapshot>;
 	var baseText:Null<String>;
 	var baseLoaded:Bool = false;
 	var baseRequestGeneration:Int = 0;
@@ -75,7 +76,9 @@ class ScmOpenDocumentMarkers {
 			return;
 		}
 
-		var revision = haxe.Int64.toStr(snapshot.revision);
+		// The revision string is only needed when the snapshot object changed.
+		var revision = snapshot == baseSnapshot ? baseRevision : haxe.Int64.toStr(snapshot.revision);
+		baseSnapshot = snapshot;
 		if (!wasNeeded || revision != baseRevision || untracked != wasUntracked) {
 			baseRevision = revision;
 			wasNeeded = true;
