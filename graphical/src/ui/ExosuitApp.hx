@@ -1430,6 +1430,9 @@ class ExosuitApp implements DesktopUiApplication {
   var client=workbenchClient, catalog=client==null?null:client.agentService().agents();
   if(catalog==null) return;
   for(record in catalog.records) if(record.id==resource) {
+   var groups = client.terminalCatalog();
+   if (groups != null && groups.workspaceRoot == catalog.root)
+    application.activeContext.openSessionGroup(record.group, groups.groups, catalog.root);
    var id=ResourceViewIdentity.view(catalog.root,resource,"agent");
    host.attachAgent(makeAgentTab(id,resource,catalog.root,record.name));
    requestFrame();return;
@@ -2077,6 +2080,14 @@ class ExosuitApp implements DesktopUiApplication {
 		var savedWorkspace = application.savedWorkspaces.current;
 		var workspaceTitle = savedWorkspace == null ? (explorerRoot == null ? "" : haxe.io.Path.withoutDirectory(explorerRoot)) :
 			savedWorkspace.name + (application.savedWorkspaces.dirty ? " *" : "");
+		if (application.activeContext.kind == workspace.ContextKind.Group) {
+			workspaceTitle = application.activeContext.label;
+			var back = new Button("Back to Workspace", null, function() {
+				application.activeContext.useWorkspace(); requestFrame();
+			}, "context-back-to-workspace");
+			back.variant = ButtonVariant.Navigation;
+			items.push(new KeyedView("context-back", back));
+		}
 		if (custom) {
 			var caption = workspaceTitle + (workspaceStatus.length == 0 ? "" : (workspaceTitle.length == 0 ? "" : " · ") + workspaceStatus);
 			items.push(new KeyedView("workspace-title", new haxeon.ui.widgets.text.MiddleEllipsisText("toolbar-workspace-title", caption, true,

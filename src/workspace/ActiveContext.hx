@@ -43,6 +43,26 @@ class ActiveContext {
 		if (id.length == 0 || directory.length == 0) throw "Group context requires identity and directory";
 		publish(ContextKind.Group, id, label, [directory]);
 	}
+	/** Opening a session resolves inherited cwd from the current catalog, not the rendered tree. */
+	public function openSessionGroup(id:String, groups:Array<workspace.service.WorkspaceProtocol.WorkspaceGroup>, root:String):Bool {
+		var selected:Null<workspace.service.WorkspaceProtocol.WorkspaceGroup> = null;
+		for (group in groups) if (group.id == id) selected = group;
+		if (selected == null) return false;
+		var current = selected;
+		var visited:Map<String, Bool> = [];
+		var directory = root;
+		while (current != null && !visited.exists(current.id)) {
+			visited.set(current.id, true);
+			if (current.cwd != null && current.cwd.length > 0) { directory = current.cwd; break; }
+			var parent = current.parent;
+			current = null;
+			if (parent != null) for (group in groups) if (group.id == parent) current = group;
+		}
+		if (directory.length == 0) return false;
+		focusGroup(selected.id, selected.name, directory);
+		return true;
+	}
+
 	function publish(kind:ContextKind, id:String, label:String, roots:Array<String>):Void {
 		var cwd = roots.length == 0 ? Sys.getCwd() : roots[0];
 		if (this.kind == kind && this.id == id && this.label == label && this.roots.join("\n") == roots.join("\n") && this.cwd == cwd) return;

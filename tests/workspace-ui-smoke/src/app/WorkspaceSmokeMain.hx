@@ -1599,10 +1599,11 @@ class WorkspaceSmokeApp extends ExosuitApp {
 				feedback.Problem.scoped("context-test", "outside", feedback.ProblemScope.File(path), "outside context", 1, "test")]);
 			var output = new build.BuildOutput(); output.reset(root); output.append("outside build\n"); output.finish();
 			host.showBuildOutput("Build Output", output);
-			application.activeContext.focusGroup("test-group", "Test Group", group);
+			application.activeContext.openSessionGroup("test-group", [{id:"test-group", name:"Test Group", cwd:group, parent:null, revision:1, order:0}], root);
 			host.showProblems(); requestFrame();
 		}
 		if (frames == 4) {
+			require(hasText(ui.root, "Test Group") && find(ui.root, "context-back-to-workspace") != null, "group scope or return action was hidden");
 			require(treeRow(ui.root, group) != null && treeRow(ui.root, root) == null, "Files did not follow ActiveContext");
 			require(hasText(ui.root, "inside context") && !hasText(ui.root, "outside context"), "Problems escaped ActiveContext");
 			var source = sourceControlSource();
@@ -1617,7 +1618,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		if (frames == 6) {
 			require(host.panelTerminals.length == 1 && host.panelTerminals[0].cwd == group, "new terminal ignored context cwd");
 			require(application.workspace.projects.length == 1 && application.workspace.projects[0].root == root, "group focus changed saved roots");
-			application.activeContext.useWorkspace();
+			click("context-back-to-workspace");
 		}
 		var result = super.submit(frame);
 		if (frames == 8) {

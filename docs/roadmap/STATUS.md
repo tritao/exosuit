@@ -6680,3 +6680,24 @@ Unavailable saved sessions show their failure in the terminal control bar.
 Isolated real-daemon acceptance passed for two concurrent workspace roots,
 root switching, releasing one root without disconnecting another, an explicit
 workspace-mismatch message and an unavailable restored-session message.
+
+
+### M18.6 — opening an agent session activates its group
+
+Opening an existing or newly created agent session now resolves its group from
+matching service catalogs and switches the window-local ActiveContext before
+attaching the tab. Inherited group directories resolve from the current catalog
+rather than a potentially stale rendered tree. Selecting/expanding a group alone
+still does not change scope. The title bar shows the active group and a Back to
+Workspace button, restoring the existing workspace tabs/layout through the
+context snapshot machinery. No service-side focus state is written.
+
+Validation: active-context core checks passed (inherited/default directories,
+missing group, idempotent reopen and workspace roots retained); graphical build
+passed; Xvfb active-context UI phase passed, including visible group label,
+clicking Back to Workspace and Files/SCM/Problems/build/new-terminal scope.
+Browser build also passed (/tmp/exosuit-session-context-web.log).
+Evidence: /tmp/exosuit-session-context-ui/run.log and
+/tmp/exosuit-session-context-build.log. Real live-provider session clicking has
+not been exercised. Remaining M18.6: attention badges, quick switching and group
+landing cards; explicit Focus Group is superseded by automatic session entry.

@@ -41,6 +41,20 @@ class ActiveContextTestMain {
 		app.savedWorkspaces.restore(workspace.SavedWorkspace.create("Two roots", [first, group]), "");
 		require(replacements == 1 && app.activeContext.roots.length == 2, "workspace replacement published intermediate layout identities");
 		release();
+		var groups:Array<workspace.service.WorkspaceProtocol.WorkspaceGroup> = [
+			{id:"parent", name:"Parent", cwd:group, parent:null, revision:1, order:0},
+			{id:"child", name:"Child", cwd:null, parent:"parent", revision:1, order:0},
+			{id:"default", name:"Default", cwd:null, parent:null, revision:1, order:1}
+		];
+		require(app.activeContext.openSessionGroup("child", groups, first) && app.activeContext.id == "child"
+			&& app.activeContext.cwd == group, "opening session did not inherit group directory");
+		var revision = app.activeContext.revision;
+		app.activeContext.openSessionGroup("child", groups, first);
+		require(app.activeContext.revision == revision, "reopening same group republished context");
+		require(!app.activeContext.openSessionGroup("missing", groups, first) && app.activeContext.id == "child", "missing group changed context");
+		require(app.activeContext.openSessionGroup("default", groups, first) && app.activeContext.cwd == first, "default group did not use catalog root");
+		app.activeContext.useWorkspace();
+		require(app.activeContext.kind == ContextKind.Workspace && app.activeContext.roots.length == 2, "back lost saved workspace roots");
 		app.shutdown();
 		trace("PASS: workspace default, coherent context event, independent group indexes, scoped search/build tasks and stale-result cancellation");
 		return 0;
