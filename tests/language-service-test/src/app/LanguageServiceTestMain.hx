@@ -85,11 +85,13 @@ class LanguageServiceTestMain {
 			[new language.LanguageSemanticToken(0, 6, "futureEntity", [])]);
 		var preserved = editor.SemanticPresentation.foreground(collision, theme, future, 0, 6);
 		require(preserved.length == 1 && preserved[0].color == theme.tokenColor(syntax.HighlightToken.TYPE), "unknown semantic category removed syntax fallback");
-		var before = snapshot;
+		var before = snapshot, changes = 0;
+		client.semanticTokensChanged = () -> changes++;
 		@:privateAccess client.receiveServerRequest("workspace/semanticTokens/refresh", null);
-		require(client.semanticTokensFor(document) == null, "refresh retained old snapshot");
-		pump(client, () -> client.semanticTokensFor(document) != null, 5.0);
-		require(client.semanticTokensFor(document) != before, "refresh did not request new tokens");
+		require(client.semanticTokensFor(document) == before && changes == 0, "refresh dropped tokens that are still valid");
+		pump(client, () -> { var state:Null<language.LanguageDocumentState> = @:privateAccess client.states.get(document.id); return state != null && !state.semanticWanted; }, 5.0);
+		pump(client, () -> { var state:Null<language.LanguageDocumentState> = @:privateAccess client.states.get(document.id); return state != null && state.semanticRequest < 0; }, 5.0);
+		require(client.semanticTokensFor(document) == before && changes == 0, "refresh with unchanged tokens replaced them or requested a redraw");
 		client.stop(Sys.time());
 		require(client.semanticTokensFor(document) == null, "stopped server retained colors");
 		pump(client, () -> client.status == "stopped", 5.0);

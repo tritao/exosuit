@@ -9,6 +9,8 @@ class LocalScmSource implements ScmSource {
 	final root:String;
 	final sourceIdentity:String;
 	final subscriptions:Array<Void->Void> = [];
+	/** Scope decisions per repository root; resolving paths costs file-system calls and the app asks on every poll. */
+	final scopes:Map<String, Bool> = [];
 	var nextGeneration:Int = 1;
 	var disposed:Bool = false;
 
@@ -108,7 +110,13 @@ class LocalScmSource implements ScmSource {
 		return repository != null && inScope(repository.root) ? repository : null;
 	}
 
-	function inScope(repositoryRoot:String):Bool return within(root, repositoryRoot) || within(repositoryRoot, root);
+	function inScope(repositoryRoot:String):Bool {
+		var known = scopes.get(repositoryRoot);
+		if (known != null) return known;
+		var value = within(root, repositoryRoot) || within(repositoryRoot, root);
+		scopes.set(repositoryRoot, value);
+		return value;
+	}
 
 	function failed<T>(value:Null<T>, complete:ScmJobResult<T>->Void, code:String, message:String):ScmJob<T> {
 		if (complete == null) throw "SCM callback cannot be null";
