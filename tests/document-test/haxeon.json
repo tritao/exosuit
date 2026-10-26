@@ -4,7 +4,8 @@
 	"entry": "app.DocumentTestMain",
 	"sourceRoots": ["src"],
 	"dependencies": {
-		"pragtical_hx": { "path": "../.." }
+		"pragtical_hx": { "path": "../.." },
+		"exosuit-model-tests": { "path": "../support" }
 	},
 	"target": "host",
 	"outputDir": "build"
