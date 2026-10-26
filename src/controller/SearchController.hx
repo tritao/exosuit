@@ -65,6 +65,16 @@ class SearchController {
 		if (documentSearchQuery.length > 0) ensureDocumentSearchFresh();
 	}
 
+	public function contextChanged():Void {
+		replacementPreview = null;
+		workspaceSearch.cancel();
+		workspaceSearch.results.resize(0);
+		workspaceSearch.errors.resize(0);
+		if (workspaceSearch.query.length > 0)
+			workspaceSearch.request(workspaceSearch.query, options, effectiveSettings().searchMaxResults);
+		else workspaceSearchChanged();
+	}
+
 	public function update(now:Float):Void {
 		if (workspaceSearch.query.length > 0) {
 			var changed = false;

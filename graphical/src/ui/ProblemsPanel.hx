@@ -26,7 +26,16 @@ import haxeon.ui.widgets.text.MiddleEllipsisText;
 class ProblemsPanel implements View {
 	final host:UiWorkbenchHost;
 	final roots:Array<String>;
-	public function new(host:UiWorkbenchHost, ?roots:Array<String>) { this.host = host; this.roots = roots == null ? [] : roots; }
+	final scoped:Bool;
+	public function new(host:UiWorkbenchHost, ?roots:Array<String>, scoped:Bool = false) {
+		this.host = host; this.roots = roots == null ? [] : roots; this.scoped = scoped;
+	}
+	function includes(problem:Problem):Bool {
+		if (!scoped) return true;
+		var path = switch problem.scope { case File(path): path; case Project(root): root; case Workspace: return true; };
+		for (root in roots) if (path == root || StringTools.startsWith(path, root + "/")) return true;
+		return false;
+	}
 
 	function relative(path:String):String {
 		var best = haxe.io.Path.withoutDirectory(path);
@@ -39,7 +48,7 @@ class ProblemsPanel implements View {
 	}
 
 	public function build(context:BuildContext):RenderNode {
-		var values = host.getProblems().values();
+		var values = [for (problem in host.getProblems().values()) if (includes(problem)) problem];
 		var atlas = context.resourceState(context.id("problem-file-icons"), function() return new SetiIconAtlas(), function(value) value.dispose()).value;
 		var dark = context.environment.colorScheme == haxeon.ui.style.EnvironmentColorScheme.Dark;
 		var selected = context.state(context.id("problem-selection"), "");

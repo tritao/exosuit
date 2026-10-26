@@ -31,6 +31,25 @@ Full browser build passed using the installed sibling Emscripten toolchain
 (`EMSDK_DIR=/home/joao/dev/materia/haxeon/vendor/nativekit/.tools/emsdk`).
 Next: M18.2's window-owned ActiveContext, preserving the default workspace view.
 
+### M18.2 — ActiveContext evidence
+
+M18.1 landed locally as `f472288`. Added one window-owned ActiveContext with
+workspace/group identity, label, ordered roots, cwd and subscription cleanup.
+Workspace remains the default. Explicit group focus creates independent scoped
+indexes without changing saved roots; ordinary tree selection does not focus a
+context. Search and task lookup consume scoped projects, and context switches
+cancel obsolete search generations. Files, local SCM (including multiple
+workspace roots), Problems, build-output visibility and new terminal cwd read
+the same scope. Files has an explicit Context/Workspace scope chooser.
+
+Focused core acceptance passes coherent context events, independent indexing,
+group search and build-task lookup, return to workspace and listener cleanup.
+The `active-context` Xvfb phase passes Files, SCM identity, Problems filtering,
+out-of-context build output, real terminal cwd and return to workspace. Desktop
+and full browser builds pass. These checks are registered with the existing
+runners. No group-focus or mode UI was added ahead of its later milestone.
+Next: M18.3's title-bar controls and persistent right dock region.
+
 Last updated: 2026-10-10.
 
 ## M17 source control — in progress

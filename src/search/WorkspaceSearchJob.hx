@@ -28,7 +28,7 @@ class WorkspaceSearchJob implements JobTask {
 		this.options = options;
 		this.maximum = maximum < 1 ? 1 : maximum;
 		pattern = new SearchPattern(query, options);
-		for (project in workspace.projects)
+		for (project in workspace.scopedProjects())
 			for (file in project.files()) files.push(file);
 	}
 

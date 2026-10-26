@@ -84,6 +84,7 @@ class Application {
 	public final confirmations:ConfirmationService;
 	public final recentProjects:RecentProjects;
 	public final savedWorkspaces:controller.SavedWorkspaceController;
+	public final activeContext:workspace.ActiveContext;
 	final releaseScmSettings:Void->Void;
 	final releaseScmWatchPaths:Void->Void;
 	public var onScmWatchPathsChanged:Null<(String, Array<String>, Array<String>)->Void>;
@@ -101,6 +102,7 @@ class Application {
 		completions.add("core", new DocumentWordCompletionProvider());
 		theme = new Theme();
 		workspace = new Workspace(syntaxes);
+		activeContext = new workspace.ActiveContext(workspace);
 		processes = new ProcessManager(this.capabilities.supports(Processes));
 		scm = new ScmService(processes, workspace.jobs, this.settings.current.scmGitPath,
 			this.settings.current.scmUntrackedLimit, this.settings.current.scmNestedScanDepth, this.settings.current.scmAutoRefresh);
@@ -155,6 +157,7 @@ class Application {
 		keymap.add(Platform.KEY_RIGHT, Platform.MOD_ALT, ["navigation:go-forward"]);
 
 		savedWorkspaces = new controller.SavedWorkspaceController(this);
+		activeContext.subscribe(function() search.contextChanged());
 		root.configureWelcomeActions({
 			recentProjects: this.recentProjects.paths,
 			newFile: function() { newDocument(); },

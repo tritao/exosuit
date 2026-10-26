@@ -32,11 +32,15 @@ class SavedWorkspaceController {
 		app.commands.add("workspace:recent", _ -> recentPicker(), null, "Open Recent Workspace…");
 		app.commands.add("workspace:close", _ -> close(), null, "Close Workspace");
 	}
+	function changed():Void {
+		app.activeContext.updateWorkspace(current == null ? "workspace" : current.id, current == null ? "Workspace" : current.name, roots());
+		onChanged();
+	}
 	public function roots():Array<String>
 		return current == null ? [for (project in app.workspace.projects) project.root] : current.roots.copy();
 	public function folderOpened(root:String):Void {
 		if (current != null && current.roots.indexOf(root) < 0) { current.roots.push(root); dirty = true; }
-		onChanged();
+		changed();
 	}
 	public function restore(record:SavedWorkspace, file:String):Void {
 		for (project in app.workspace.projects.copy()) app.workspace.removeProject(project);
@@ -44,7 +48,7 @@ class SavedWorkspaceController {
 		for (root in record.roots) if (available(root)) app.openArgument(root);
 		current = record.copy(); path = file; dirty = false;
 		savedContent = file.length > 0 && FileSystem.exists(file) ? File.getContent(file) : "";
-		onChanged();
+		changed();
 	}
 	public function open(file:String):Bool {
 		try {
@@ -65,7 +69,7 @@ class SavedWorkspaceController {
 			var content = record.encode();
 			if (FileSystem.exists(target)) sys.io.AtomicFile.write(target, content); else sys.io.AtomicFile.create(target, content);
 			current = record; path = target; savedContent = content; dirty = false;
-			recents.add(target); onChanged(); return true;
+			recents.add(target); changed(); return true;
 		} catch (error:Dynamic) { app.reportError("workspace", "Could not save workspace: " + Std.string(error)); return false; }
 	}
 	public function addFolder(folder:String):Bool {
@@ -75,11 +79,11 @@ class SavedWorkspaceController {
 	public function removeFolder(folder:String):Void {
 		for (project in app.workspace.projects.copy()) if (project.root == folder) app.workspace.removeProject(project);
 		if (current != null) { current.roots.remove(folder); dirty = true; }
-		onChanged();
+		changed();
 	}
 	public function close():Void {
 		for (project in app.workspace.projects.copy()) app.workspace.removeProject(project);
-		current = null; path = ""; savedContent = ""; dirty = false; onChanged();
+		current = null; path = ""; savedContent = ""; dirty = false; changed();
 	}
 	public static function available(root:String):Bool return FileSystem.exists(root) && FileSystem.isDirectory(root);
 	function prompt(label:String, action:String->Bool):Void {

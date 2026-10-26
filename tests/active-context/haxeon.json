@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "package": {
+    "name": "exosuit-active-context-test"
+  },
+  "entry": "app.ActiveContextTestMain",
+  "sourceRoots": [
+    "src"
+  ],
+  "dependencies": {
+    "pragtical_hx": {
+      "path": "../.."
+    },
+    "exosuit-model-tests": {
+      "path": "../support"
+    }
+  },
+  "target": "host",
+  "outputDir": "build"
+}

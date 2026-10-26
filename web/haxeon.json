@@ -248,6 +248,8 @@
     "../src/syntax/TextMateTokenizer.hx",
     "../src/view/LayoutKind.hx",
     "../src/view/View.hx",
+    "../src/workspace/ActiveContext.hx",
+    "../src/workspace/ContextKind.hx",
     "../src/workspace/EditorFileSystem.hx",
     "../src/workspace/FileOperationResult.hx",
     "../src/workspace/FileOperations.hx",

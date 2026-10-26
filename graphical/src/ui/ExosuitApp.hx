@@ -141,6 +141,7 @@ class ExosuitApp implements DesktopUiApplication {
 	final activityIcons:Map<String, IconName> = [];
 	public final sidebar = new haxeon.ui.widgets.sidebar.SidebarModel();
 	var explorerRoot:Null<String>;
+	var filesUseWorkspaceRoots:Bool = false;
 	var explorerModel:Null<ExplorerTreeModel>;
 	var explorerTree:Null<TreeView>;
 	var explorerRename:Null<ExplorerRename>;
@@ -406,8 +407,15 @@ class ExosuitApp implements DesktopUiApplication {
 			CommandBridge.refreshShortcuts(ui.commands, application.commands, application.keymap);
 			requestFrame();
 		});
+		application.activeContext.subscribe(function() {
+			var roots = filesUseWorkspaceRoots ? application.savedWorkspaces.roots() : application.activeContext.roots;
+			explorerRoot = roots.length == 0 ? null : roots[0];
+			clearExplorerModel(); clearLocalScmSource();
+			for (root in roots) if (controller.SavedWorkspaceController.available(root)) application.scm.discover(root, _ -> requestFrame());
+			requestFrame();
+		});
 		application.savedWorkspaces.onChanged = function() {
-			var roots = application.savedWorkspaces.roots();
+			var roots = filesUseWorkspaceRoots ? application.savedWorkspaces.roots() : application.activeContext.roots;
 			explorerRoot = roots.length == 0 ? null : roots[0];
 			clearExplorerModel(); filesScroll.jumpTo(0, 0);
 			if (roots.length > 0) openExplorer(); else sidebar.setVisible(false);
@@ -459,10 +467,10 @@ class ExosuitApp implements DesktopUiApplication {
 				return view;
 			}),
 			new DockPanelContent("editor", function(_) return editorPanel("editor")),
-			new DockPanelContent("problems", function(_) return new ProblemsPanel(host, [for (project in application.workspace.projects) project.root]))
+			new DockPanelContent("problems", function(_) return new ProblemsPanel(host, application.activeContext.roots, application.activeContext.kind == workspace.ContextKind.Group))
 		];
 		if (capabilities.supports(Processes))
-			dockPanelContents.push(new DockPanelContent("build", function(_) return new BuildOutputPanel(host)));
+			dockPanelContents.push(new DockPanelContent("build", function(_) return new BuildOutputPanel(host, application.activeContext.kind == workspace.ContextKind.Group ? application.activeContext.roots : null)));
 		if (terminalUiAvailable)
 			dockPanelContents.push(new DockPanelContent("terminal", function(_) return terminalPanel()));
 		var bottom = capabilities.supports(Processes) ? DockNode.Tabs(["problems", "build"], "problems") : DockNode.Panel("problems");
@@ -663,11 +671,11 @@ class ExosuitApp implements DesktopUiApplication {
 			var root = workspaceAttachment == null ? null : workspaceAttachment.fileScope();
 			if (root == null && catalog != null) root = catalog.workspaceRoot;
 			if (root == null) { application.reportError("terminal", "Workspace is not connected"); return null; }
-			if (group == null && workbenchPanel != null) group = workbenchPanel.selectedGroupId();
+			if (group == null && application.activeContext.kind == workspace.ContextKind.Group) group = application.activeContext.id;
 			// The service resolves a missing group to Work (or its first group),
 			// and resolves the group's inherited directory against the workspace root.
 			if (!client.canCreateGroupedTerminals()) group = null;
-			var cwd = root;
+			var cwd = application.activeContext.kind == workspace.ContextKind.Group ? application.activeContext.cwd : root;
 			if (group != null && workbenchPanel != null) {
 				var selected = workbenchPanel.model.groups.get(group);
 				if (selected != null) {
@@ -681,7 +689,7 @@ class ExosuitApp implements DesktopUiApplication {
 		var number = allocateTerminalNumber(), title = "Terminal " + number;
 		var id = createWorkspaceTerminal != null && application.workspace.activeProject != null
 			? workspace.client.WorkspaceIds.create("workspace-terminal") : "terminal-" + number;
-		return createTerminalTab(id, title, explorerRoot == null ? Sys.getCwd() : explorerRoot, false);
+		return createTerminalTab(id, title, application.activeContext.cwd, false);
 	}
 
 	function allocateTerminalNumber():Int {
@@ -2008,6 +2016,19 @@ class ExosuitApp implements DesktopUiApplication {
 			host.getPluginStatusItems().revision + ":" + (notification == null ? 0 : notification.id) + ":" + center.revision + ":" + notificationsVisible + ":" + ui.animations.revision);
 	}
 
+	function showFilesScope():Void {
+		var entries = [new commandview.CommandViewEntry("Context", application.activeContext.label, "context"),
+			new commandview.CommandViewEntry("Workspace", "All workspace roots", "workspace")];
+		host.openCommandView(new commandview.CommandViewProvider("Files Scope: ", entries, _ -> {}, function(entry, _, _) {
+			if (entry != null) {
+				filesUseWorkspaceRoots = entry.value == "workspace";
+				var roots = localExplorerRoots(); explorerRoot = roots.length == 0 ? null : roots[0];
+				clearExplorerModel(); requestFrame();
+			}
+			host.closeCommandView();
+		}));
+	}
+
 	function explorerHeaderActions():View {
 		var remote = workspaceAttachment != null && !workspaceAttachment.hasLocalFileAccess();
 		var available = explorerRoot != null;
@@ -2016,6 +2037,7 @@ class ExosuitApp implements DesktopUiApplication {
 		style.childGap = 2;
 		style.padding = new Insets(2, 0, 6, 0);
 		return new Row("explorer-header-actions", [
+			new KeyedView("scope", explorerHeaderButton("Files scope", IconName.ChevronDown, showFilesScope, true)),
 			new KeyedView("new-file", explorerHeaderButton("New File", IconName.NewFile,
 				function() createExplorerEntry(false), available && !remote, remote)),
 			new KeyedView("new-folder", explorerHeaderButton("New Folder", IconName.NewFolder,
@@ -2088,7 +2110,8 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function localExplorerRoots():Array<String> {
-		var roots = application.savedWorkspaces.roots();
+		var roots = filesUseWorkspaceRoots ? application.savedWorkspaces.roots() : application.activeContext.roots;
+		if (filesUseWorkspaceRoots) return roots;
 		return roots.length == 0 && explorerRoot != null ? [explorerRoot] : roots;
 	}
 
@@ -2962,9 +2985,11 @@ class ExosuitApp implements DesktopUiApplication {
 			clearLocalScmSource();
 			return null;
 		}
-		if (localScmSource == null || localScmSource.identity() != "local:" + normalizedLocalRoot(explorerRoot)) {
+		var roots = [for (root in application.activeContext.roots) if (controller.SavedWorkspaceController.available(root)) root];
+		if (roots.length == 0) { clearLocalScmSource(); return null; }
+		if (localScmSource == null || localScmSource.identity() != LocalScmSource.identityFor(roots)) {
 			clearLocalScmSource();
-			localScmSource = new LocalScmSource(application.scm, explorerRoot);
+			localScmSource = new LocalScmSource(application.scm, roots[0], roots);
 		}
 		return localScmSource;
 	}

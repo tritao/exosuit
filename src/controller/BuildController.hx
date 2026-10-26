@@ -44,7 +44,7 @@ class BuildController {
 		root.setBuildDiagnosticHandler(activateDiagnostic);
 		if (this.available) {
 			commands.add("build:show-output", context -> root.showBuildOutput("Build Output", output));
-			commands.add("build:run-task", context -> openTaskPicker(), context -> workspace.activeProject != null);
+			commands.add("build:run-task", context -> openTaskPicker(), context -> workspace.buildProject() != null);
 			commands.add("build:cancel-task", context -> cancel(), context -> active != null);
 		}
 	}
@@ -52,7 +52,7 @@ class BuildController {
 	/** Reads project-defined tasks only after this deliberate user command. */
 	public function openTaskPicker():Bool {
 		if (!available) { reportError("build", "Build tasks are unavailable on this host"); return false; }
-		var project = workspace.activeProject;
+		var project = workspace.buildProject();
 		if (project == null) return false;
 		var tasks = loadTasks(project);
 		if (tasks.length == 0) return false;

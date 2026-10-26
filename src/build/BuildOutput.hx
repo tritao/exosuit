@@ -6,7 +6,7 @@ class BuildOutput {
 	public final lines:Array<BuildOutputLine> = [];
 	public var byteCount(default, null):Int = 0;
 	var pending:String = "";
-	var cwd:String = "";
+	public var cwd(default, null):String = "";
 
 	public function new() {}
 

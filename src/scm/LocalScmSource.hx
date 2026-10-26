@@ -7,24 +7,31 @@ import haxe.io.Bytes;
 class LocalScmSource implements ScmSource {
 	final service:ScmService;
 	final root:String;
+	final roots:Array<String>;
 	final sourceIdentity:String;
 	final subscriptions:Array<Void->Void> = [];
 	var nextGeneration:Int = 1;
 	var disposed:Bool = false;
 
-	public function new(service:ScmService, root:String) {
+	public function new(service:ScmService, root:String, ?roots:Array<String>) {
 		if (service == null || root == null || root.length == 0)
 			throw "Local SCM source requires a service and root";
 		this.service = service;
 		this.root = normalize(root);
-		this.sourceIdentity = "local:" + key(this.root);
+		this.roots = roots == null ? [this.root] : [for (path in roots) normalize(path)];
+		this.sourceIdentity = identityFor(this.roots);
 	}
+	public static function identityFor(roots:Array<String>):String return "local:" + [for (root in roots) key(normalize(root))].join("|");
 
 	public function identity():String return sourceIdentity;
 	public function isRemote():Bool return false;
 	public function connected():Bool return !disposed;
-	public function repositories():Array<ScmRepository> return disposed ? []
-		: [for (repository in service.repositories(root)) if (inScope(repository.root)) repository];
+	public function repositories():Array<ScmRepository> {
+		var result:Array<ScmRepository> = [], seen:Map<String, Bool> = [];
+		if (!disposed) for (root in roots) for (repository in service.repositories(root))
+			if (inScope(repository.root) && !seen.exists(repository.id)) { seen.set(repository.id, true); result.push(repository); }
+		return result;
+	}
 	public function repository(repositoryId:String):Null<ScmRepository> return scopedRepository(repositoryId);
 	public function features(repositoryId:String):Null<ScmFeatures> return scopedRepository(repositoryId) == null ? null : service.features(repositoryId);
 	public function branches(repositoryId:String, complete:ScmJobResult<Array<ScmBranch>>->Void):ScmJob<Array<ScmBranch>> {
@@ -48,7 +55,16 @@ class LocalScmSource implements ScmSource {
 	public function discover(complete:ScmJobResult<Array<ScmRepository>>->Void):ScmJob<Array<ScmRepository>> {
 		if (disposed) return failed([], complete, "service_closed", "Source control source is closed");
 		if (complete == null) throw "SCM discovery callback cannot be null";
-		return service.discover(root, complete);
+		var children:Array<ScmJob<Array<ScmRepository>>> = [];
+		var job = new ScmJob<Array<ScmRepository>>(nextGeneration++, function() { for (child in children) child.cancel(); });
+		var remaining = roots.length, failure:Null<ScmError> = null;
+		for (scope in roots) children.push(service.discover(scope, function(result) {
+			if (result.error != null) failure = result.error;
+			remaining--;
+			if (remaining == 0 && job.finish()) complete(new ScmJobResult(job.generation, repositories(), failure));
+		}));
+		if (remaining == 0 && job.finish()) complete(new ScmJobResult(job.generation, repositories(), failure));
+		return job;
 	}
 
 	public function refreshNow(repositoryId:String):Bool return !disposed && scopedRepository(repositoryId) != null && service.refreshNow(repositoryId);
@@ -108,7 +124,10 @@ class LocalScmSource implements ScmSource {
 		return repository != null && inScope(repository.root) ? repository : null;
 	}
 
-	function inScope(repositoryRoot:String):Bool return within(root, repositoryRoot) || within(repositoryRoot, root);
+	function inScope(repositoryRoot:String):Bool {
+		for (root in roots) if (within(root, repositoryRoot) || within(repositoryRoot, root)) return true;
+		return false;
+	}
 
 	function failed<T>(value:Null<T>, complete:ScmJobResult<T>->Void, code:String, message:String):ScmJob<T> {
 		if (complete == null) throw "SCM callback cannot be null";

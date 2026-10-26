@@ -175,10 +175,10 @@ class WorkspaceSearchPanel implements View {
 	}
 
 	function displayPath(path:String):String {
-		for (project in application.workspace.projects) if (StringTools.startsWith(path, project.root + "/")) {
-			var relative = path.substring(project.root.length + 1);
-			return application.workspace.projects.length == 1 ? relative :
-				project.root.substring(project.root.lastIndexOf("/") + 1) + "/" + relative;
+		for (root in application.activeContext.roots) if (StringTools.startsWith(path, root + "/")) {
+			var relative = path.substring(root.length + 1);
+			return application.activeContext.roots.length == 1 ? relative :
+				haxe.io.Path.withoutDirectory(root) + "/" + relative;
 		}
 		return path;
 	}

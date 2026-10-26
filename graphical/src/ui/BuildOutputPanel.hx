@@ -26,13 +26,20 @@ import haxeon.ui.widgets.text.Text;
  */
 class BuildOutputPanel implements View {
 	final host:UiWorkbenchHost;
+	final roots:Null<Array<String>>;
 
-	public function new(host:UiWorkbenchHost) {
+	public function new(host:UiWorkbenchHost, ?roots:Array<String>) {
 		this.host = host;
+		this.roots = roots;
 	}
 
 	public function build(context:BuildContext):RenderNode {
 		var output = host.currentBuildOutput;
+		if (output != null && roots != null) {
+			var included = false;
+			for (root in roots) if (output.cwd == root || StringTools.startsWith(output.cwd, root + "/")) included = true;
+			if (!included) output = null;
+		}
 		var style = new LayoutStyle();
 		style.width = LayoutAxis.grow();
 		style.height = LayoutAxis.grow();
