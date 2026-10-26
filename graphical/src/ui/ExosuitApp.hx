@@ -166,6 +166,7 @@ class ExosuitApp implements DesktopUiApplication {
 	final workspaceFileRefreshPending:Map<String, Bool> = new Map();
 	final tabClicks = new haxeon.ui.core.PointerClickSequence();
 	var statusMessage:String = "Ready";
+	var explorerReturnPath:Null<String>;
 	var zoomOverlayUntil:Float = 0.0;
 	var settingsPanel:Null<haxeon.ui.widgets.settings.SettingsPanel>;
 	var settingsModels:Array<workspace.service.WorkspaceAgentProtocol.AgentModel> = [];
@@ -281,7 +282,20 @@ class ExosuitApp implements DesktopUiApplication {
 				}
 			});
 		}
-		application.openFileView = function(path, preview) return host.openFile(path, preview);
+		application.files.afterFileOperation = function(path) {
+			if (sidebar.visible && sidebar.activeId == "files" && explorerTree != null) {
+				explorerReturnPath = path;
+				explorerTree.select(path);
+				explorerTree.scrollIntoView(path);
+				host.focusExplorer();
+				requestFrame();
+			}
+		};
+		application.openFileView = function(path, preview, focusEditor) {
+			var view = host.openFile(path, preview, focusEditor);
+			if (focusEditor) host.focusActiveEditor();
+			return view;
+		};
 		application.opensDirectly = UiImageTab.supports;
 		application.onBackgroundOpen = requestFrame;
 		host.configureKeybinding = function(command) {
@@ -1205,7 +1219,20 @@ class ExosuitApp implements DesktopUiApplication {
 					range.cursor.line + ":" + range.cursor.column;
 		}
 		submittedBuildKey = key;
-		return ui.submitCached(view, frame, key);
+		var root = ui.submitCached(view, frame, key);
+		if (explorerReturnPath != null && explorerRename == null && trashConfirmationHandler == null) {
+			var target:Null<RenderNode> = null;
+			root.walk(function(node) {
+				if (node.semantics != null && node.semantics.role == haxeon.ui.semantics.AccessibilityRole.TreeItem &&
+					node.semantics.label == explorerReturnPath) target = node;
+			});
+			if (target != null) {
+				explorerReturnPath = null;
+				host.focusExplorer();
+				ui.focusWidget(target.id);
+			}
+		}
+		return root;
 	}
 
 	public function attachWorkbench(client:workspace.client.WorkspaceWorkbenchClient):Void {
@@ -2111,16 +2138,15 @@ class ExosuitApp implements DesktopUiApplication {
 					return;
 				}
 				if (count == 1 && !remoteModel.isDirectoryKey(path)) openWorkspaceFile(remoteModel, path, false);
-				else if (count == 2 && !remoteModel.isDirectoryKey(path)) openWorkspaceFile(remoteModel, path, true);
 				return;
 			}
 			if (localModel != null && localModel.isSyntheticRow(path)) {
 				if (count == 1 && localModel.activateSyntheticRow(path)) requestFrame();
 				return;
 			}
-			if ((count != 1 && count != 2) || (localModel != null && localModel.isDirectoryPath(path))) return;
+			if (count != 1 || (localModel != null && localModel.isDirectoryPath(path))) return;
 			try {
-				application.openInBackground(path, count == 1);
+				application.openInBackground(path, true, false);
 			} catch (error:Dynamic) application.reportError("files", "Could not open file: " + Std.string(error));
 		};
 		if (localModel != null) tree.onItemRename = function(path) {
@@ -2181,7 +2207,7 @@ class ExosuitApp implements DesktopUiApplication {
 		var path = model.relativePath(key), entry = model.entryForKey(key);
 		if (path == null || path.length == 0 || entry == null) return;
 		openWorkspaceFileSnapshot(workspaceAttachment, model.workspaceId(), model.scopeId(), model.rootId(),
-			model.rootDisplayName(), path, entry.revision, WorkspaceFileReader.previewSize(entry.size), sticky, null);
+			model.rootDisplayName(), path, entry.revision, WorkspaceFileReader.previewSize(entry.size), sticky, null, sticky);
 	}
 
 	function openWorkspaceSearchResult(match:FileSearchMatch):Void {
@@ -2229,8 +2255,8 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function openWorkspaceFileSnapshot(attachment:Null<workspace.client.WorkspaceAttachment>, workspace:String,
 			scope:String, root:String, rootName:String, path:String, revision:Null<String>, sizeBytes:Null<Int>,
-			sticky:Bool, match:Null<FileSearchMatch>):Void {
-		if (host.activateWorkspaceFile(scope, root, path, sticky)) {
+			sticky:Bool, match:Null<FileSearchMatch>, focusEditor:Bool = true):Void {
+		if (host.activateWorkspaceFile(scope, root, path, sticky, focusEditor)) {
 			var existing = host.workspaceFile(scope, root, path);
 			if (existing != null && existing.loading)
 				workspaceFileLoader.prioritize(workspaceFileKey(workspace, scope, root, path));
@@ -2250,7 +2276,8 @@ class ExosuitApp implements DesktopUiApplication {
 		var file = new UiWorkspaceFileTab(workspace, root, scope, rootName, path, revision == null ? "" : revision,
 			"", sizeBytes, !sticky, application.syntaxes, editorPalette);
 		file.loading = true;
-		host.openWorkspaceFile(file, !sticky);
+		host.openWorkspaceFile(file, !sticky, focusEditor);
+		if (focusEditor) host.focusActiveEditor();
 		requestFrame();
 		loadWorkspaceFile(file, attachment, revision, match);
 	}

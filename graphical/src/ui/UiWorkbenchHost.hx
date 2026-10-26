@@ -327,24 +327,24 @@ class UiWorkbenchHost implements WorkbenchHost {
 		return false;
 	}
 
-	public function activateEditorTab(key:String, paneId:String):Void {
+	public function activateEditorTab(key:String, paneId:String, focusEditor:Bool = true):Void {
 		var pane = paneById(paneId);
 		if (pane == null) return;
 		for (index in 0...pane.items.length) if (UiEditorTabs.key(pane.items[index]) == key) {
 			activePane = pane;
 			dockActions.model.activate(pane.id);
-			setActiveIndex(index);
-			pendingEditorFocus = true;
+			setActiveIndex(index, focusEditor);
+			if (focusEditor) pendingEditorFocus = true;
 			return;
 		}
 	}
 
-	public function activateWorkspaceFile(scope:String, root:String, path:String, makeSticky:Bool):Bool {
+	public function activateWorkspaceFile(scope:String, root:String, path:String, makeSticky:Bool, focusEditor:Bool = true):Bool {
 		var file = workspaceFile(scope, root, path);
 		if (file == null) return false;
 		if (makeSticky) file.preview = false;
 		for (pane in panes) for (item in pane.items) if (UiEditorTabs.workspaceFile(item) == file) {
-			activateEditorTab(file.id, pane.id);
+			activateEditorTab(file.id, pane.id, focusEditor);
 			return true;
 		}
 		return false;
@@ -373,21 +373,21 @@ class UiWorkbenchHost implements WorkbenchHost {
 	static inline final MAX_WORKSPACE_FILE_TABS = 24;
 	static inline final MAX_WORKSPACE_FILE_BYTES = 33554432;
 
-	public function openWorkspaceFile(file:UiWorkspaceFileTab, preview:Bool):UiWorkspaceFileTab {
+	public function openWorkspaceFile(file:UiWorkspaceFileTab, preview:Bool, focusEditor:Bool = true):UiWorkspaceFileTab {
 		for (pane in panes) for (index in 0...pane.items.length) {
 			var existing = UiEditorTabs.workspaceFile(pane.items[index]);
 			if (existing == null || existing.id != file.id) continue;
 			file.preview = preview && existing.preview;
 			if (!preview) file.preview = false;
 			pane.items[index] = UiEditorTab.WorkspaceFile(file);
-			activateEditorTab(file.id, pane.id);
+			activateEditorTab(file.id, pane.id, focusEditor);
 			requestFrame();
 			return file;
 		}
 		var insertion = removePreviewTab(activePane);
 		file.preview = preview;
 		activePane.items.insert(insertion, UiEditorTab.WorkspaceFile(file));
-		setActiveIndex(insertion);
+		setActiveIndex(insertion, focusEditor);
 		return file;
 	}
 
@@ -473,9 +473,9 @@ class UiWorkbenchHost implements WorkbenchHost {
 		return view == null ? null : view.document;
 	}
 
-	function setActiveIndex(index:Int):Void {
+	function setActiveIndex(index:Int, focusEditor:Bool = true):Void {
 		activeIndex = index;
-		focus.activate(activeView());
+		if (focusEditor) focus.activate(activeView());
 		requestFrame();
 	}
 
@@ -927,37 +927,43 @@ class UiWorkbenchHost implements WorkbenchHost {
 		return function() return closePane(pane, force);
 	}
 
-	public function openFile(path:String, preview:Bool = false):View {
-		if (UiImageTab.supports(path)) return openImage(path, preview);
+	public function focusActiveEditor():Void {
+		pendingEditorFocus = true;
+		focus.activate(activeView());
+		if (activePane.focusTarget != null) dockActions.focusEditor(activePane.focusTarget);
+	}
+
+	public function openFile(path:String, preview:Bool = false, focusEditor:Bool = true):View {
+		if (UiImageTab.supports(path)) return openImage(path, preview, focusEditor);
 		var normalized = workspace.fileSystem.normalize(path);
-		try return openDocumentTab(workspace.documents.open(normalized), preview)
+		try return openDocumentTab(workspace.documents.open(normalized), preview, focusEditor)
 		catch (error:Dynamic) {
 			if (!Std.isOfType(error, UnsupportedTextFile)) throw error;
-			return openUnsupportedFile(cast error, preview);
+			return openUnsupportedFile(cast error, preview, focusEditor);
 		}
 	}
 
-	public function openUnsupportedFile(file:UnsupportedTextFile, preview:Bool):UiUnsupportedFileTab {
+	public function openUnsupportedFile(file:UnsupportedTextFile, preview:Bool, focusEditor:Bool = true):UiUnsupportedFileTab {
 		for (index in 0...activePane.items.length) {
 			var existing = UiEditorTabs.unsupportedFile(activePane.items[index]);
 			if (existing != null && existing.file.path == file.path) {
 				if (!preview) existing.preview = false;
-				setActiveIndex(index); return existing;
+				setActiveIndex(index, focusEditor); return existing;
 			}
 		}
 		var insertion = preview ? removePreviewTab(activePane) : activePane.items.length;
 		var tab = new UiUnsupportedFileTab(file, preview);
 		activePane.items.insert(insertion, UiEditorTab.UnsupportedFile(tab));
-		setActiveIndex(insertion); return tab;
+		setActiveIndex(insertion, focusEditor); return tab;
 	}
 
-	public function openImage(path:String, preview:Bool = false):UiImageTab {
+	public function openImage(path:String, preview:Bool = false, focusEditor:Bool = true):UiImageTab {
 		var normalized = workspace.fileSystem.normalize(path);
 		for (index in 0...activePane.items.length) {
 			var existing = UiEditorTabs.image(activePane.items[index]);
 			if (existing != null && existing.path == normalized) {
 				if (!preview) existing.preview = false;
-				setActiveIndex(index);
+				setActiveIndex(index, focusEditor);
 				return existing;
 			}
 		}
@@ -965,7 +971,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		var image = new UiImageTab(normalized, preview);
 		var insertion = preview ? removePreviewTab(activePane) : activePane.items.length;
 		activePane.items.insert(insertion, UiEditorTab.Image(image));
-		setActiveIndex(insertion);
+		setActiveIndex(insertion, focusEditor);
 		return image;
 	}
 
@@ -983,12 +989,12 @@ class UiWorkbenchHost implements WorkbenchHost {
 		requestFrame();
 	}
 
-	function openDocumentTab(document:Document, preview:Bool):View {
+	function openDocumentTab(document:Document, preview:Bool, focusEditor:Bool = true):View {
 		for (index in 0...activePane.items.length) {
 			var existing = UiEditorTabs.document(activePane.items[index]);
 			if (existing != null && existing.document == document) {
 				if (!preview) existing.preview = false;
-				setActiveIndex(index);
+				setActiveIndex(index, focusEditor);
 				return existing;
 			}
 		}
@@ -996,7 +1002,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		var view = new UiDocumentView(document, new BufferSelection(), scrollSettings);
 		view.preview = preview && !document.dirty;
 		activePane.items.insert(insertion, UiEditorTab.Document(view));
-		setActiveIndex(insertion);
+		setActiveIndex(insertion, focusEditor);
 		return view;
 	}
 

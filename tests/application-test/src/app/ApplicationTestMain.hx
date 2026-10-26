@@ -35,6 +35,28 @@ class ApplicationTestMain {
 			first = new Document("first", "one", application.syntaxes),
 			second = new Document("second", "two", application.syntaxes);
 		var firstView = application.add(first), secondView = application.add(second);
+		var focusPolicies:Array<Bool> = [];
+		application.openFileView = function(_, preview, focusEditor) {
+			require(preview, "preview intent was lost during file loading");
+			focusPolicies.push(focusEditor);
+			return secondView;
+		};
+		application.openInBackground("missing-preview-fixture", true, false);
+		require(focusPolicies.length == 1 && !focusPolicies[0], "immediate preview requested editor focus");
+		var backgroundPath = "/tmp/exosuit-preview-focus-" + Std.string(Sys.time()) + ".txt";
+		sys.io.File.saveContent(backgroundPath, StringTools.lpad("", "x", Application.BACKGROUND_OPEN_BYTES));
+		application.openInBackground(backgroundPath, true, false);
+		var deadline = Sys.time() + 15;
+		while (application.documents.loadingInBackground() && Sys.time() < deadline) {
+			application.documents.poll();
+			Sys.sleep(0.001);
+		}
+		sys.FileSystem.deleteFile(backgroundPath);
+		require(focusPolicies.length == 2 && !focusPolicies[1], "background preview requested editor focus");
+		application.openFileView = null;
+		for (document in application.documents.documents.copy())
+			if (document != first && document != second) application.documents.close(document, true);
+
 		require(style.Theme.contrastRatio(application.theme.editorForeground, application.theme.editorBackground) >= 4.5
 			&& style.Theme.contrastRatio(application.theme.editorBackground, application.theme.accent) >= 4.5
 			&& style.Theme.contrastRatio(application.theme.foregroundMuted, application.theme.surface) >= 4.5,

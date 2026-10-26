@@ -17,6 +17,7 @@ class FileController {
 	public var chooseSaveDestination:Null<(Document, (Null<String>, Bool)->Void)->Void>;
 	/** Return true when the host can edit this path in its tree. */
 	public var renameInPlace:Null<(String, String->Bool)->Bool>;
+	public var afterFileOperation:Null<String->Void>;
 	var saveAsPending:Bool = false;
 
 	final documents:DocumentManager;
@@ -157,6 +158,7 @@ class FileController {
 			for (document in result.documents) root.documentRenamed(document);
 			workspace.refreshProjects();
 			saveRecovery();
+			if (afterFileOperation != null) afterFileOperation(destination);
 			return true;
 		};
 		if (renameInPlace != null && renameInPlace(source, rename)) return;
@@ -184,6 +186,7 @@ class FileController {
 				workspace.refreshProjects();
 			} else reportError("file", 'Could not safely delete "$path": ' + result.detail);
 			root.closeCommandView();
+			if (afterFileOperation != null) afterFileOperation(result.success ? haxe.io.Path.directory(path) : path);
 		});
 	}
 

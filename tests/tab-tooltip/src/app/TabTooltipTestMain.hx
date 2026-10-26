@@ -6,6 +6,22 @@ import haxeon.ui.Rect;
 import haxeon.ui.animation.AnimationScheduler;
 import config.Settings;
 
+private class ExplorerInputModel implements haxeon.ui.widgets.collections.TreeViewModel {
+	public function new() {}
+	public function rootCount():Int return 2;
+	public function rootRange(start:Int, count:Int):Array<haxeon.ui.widgets.collections.TreeRootMetadata>
+		return [for (i in start...Std.int(Math.min(2, start + count))) new haxeon.ui.widgets.collections.TreeRootMetadata("file" + i)];
+	public function rootKeyAt(index:Int):String return "file" + index;
+	public function childCount(key:String):Int return 0;
+	public function childKeyAt(key:String, index:Int):String return "";
+	public function initiallyExpanded(key:String):Bool return false;
+	public function estimatedExtent():Float return 24;
+	public function extentIsUniform():Bool return true;
+	public function extentAt(key:String):Float return 24;
+	public function buildItem(key:String):haxeon.ui.core.View return new haxeon.ui.widgets.text.Text(key);
+	public function revision():Int return 0;
+}
+
 private class NarrowTooltipFixture implements haxeon.ui.core.View {
 	final placement:haxeon.ui.widgets.overlays.TooltipPlacement;
 	public function new(placement:haxeon.ui.widgets.overlays.TooltipPlacement = Below) this.placement = placement;
@@ -212,6 +228,31 @@ class TabTooltipTestMain {
 			require(bounded.width <= 10.5 && bounded.height <= 8.5, "editor measurement exceeded hard constraints");
 			editor.dispose();
 		}
+		var treeStyle = new haxeon.ui.LayoutStyle();
+		treeStyle.width = haxeon.ui.LayoutAxis.fixed(200);
+		treeStyle.height = haxeon.ui.LayoutAxis.fixed(150);
+		var tree = new haxeon.ui.widgets.collections.TreeView("focus-tree", new ExplorerInputModel(), treeStyle);
+		var treeFocused = false;
+		var commands:Array<String> = [];
+		tree.onItemClicked = function(_, _) { /* Preview presentation preserves focus. */ };
+		var treeInput = new ui.ExplorerTreeInput(tree, function() { treeFocused = true; }, function(command) { commands.push(command); });
+		var treeRoot = context.submit(treeInput, new haxeon.ui.LayoutFrame(800, 600));
+		var row:haxeon.ui.core.RenderNode = null;
+		treeRoot.walk(function(node) {
+			if (node.semantics != null && node.semantics.role == haxeon.ui.semantics.AccessibilityRole.TreeItem && node.semantics.label == "file0") row = node;
+		});
+		require(row != null, "missing explorer fixture row");
+		var rowBounds = row.globalBounds();
+		context.pointerDown(rowBounds.x + 50, rowBounds.y + 12, 0);
+		context.pointerUp(rowBounds.x + 50, rowBounds.y + 12, 0);
+		context.submit(treeInput, new haxeon.ui.LayoutFrame(800, 600));
+		require(treeFocused, "preview click retained editor command focus");
+		context.key(haxeon.ui.core.UiEventKind.KeyDown, haxeon.ui.core.UiKey.Delete);
+		context.key(haxeon.ui.core.UiEventKind.KeyDown, haxeon.ui.core.UiKey.F2);
+		require(commands.join(",") == "file:delete,file:rename", "explorer file operation keys escaped the tree");
+		context.key(haxeon.ui.core.UiEventKind.KeyDown, haxeon.ui.core.UiKey.Down);
+		require(tree.selectedKey == "file1", "explorer arrow navigation lost keyboard focus");
+
 		var feedback = new FeedbackFixture(3);
 		context.submit(feedback, new haxeon.ui.LayoutFrame(800, 600));
 		require(feedback.passes == 4, "layout published a frame before dependent geometry settled");

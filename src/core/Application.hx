@@ -174,7 +174,7 @@ class Application {
 	}
 
 	/** Optional host file opener; null falls back to a text document. */
-	public var openFileView:Null<(String, Bool)->Null<View>>;
+	public var openFileView:Null<(String, Bool, Bool)->Null<View>>;
 	/** Files at least this large are read on another thread when opened interactively (see openInBackground). */
 	public static inline final BACKGROUND_OPEN_BYTES = 1024 * 1024;
 	/** The host's files that open directly whatever their size (an image tab reads its own file); null means none. */
@@ -182,9 +182,9 @@ class Application {
 	/** Called once a background open has shown its file, so the host can draw it. */
 	public var onBackgroundOpen:Null<Void->Void>;
 
-	public function open(path:String, preview:Bool = false):View {
+	public function open(path:String, preview:Bool = false, focusEditor:Bool = true):View {
 		if (openFileView != null) {
-			var resource = openFileView(path, preview);
+			var resource = openFileView(path, preview, focusEditor);
 			if (resource != null) return resource;
 		}
 		return root.openDocument(documents.open(path));
@@ -195,15 +195,15 @@ class Application {
 		responsive meanwhile; its tab appears once it is read. For the file finder, the explorer and the open dialog;
 		callers that need the view at once use open.
 	**/
-	public function openInBackground(path:String, preview:Bool = false):Void {
+	public function openInBackground(path:String, preview:Bool = false, focusEditor:Bool = true):Void {
 		var metadata = FileSystem.metadata(path), direct = opensDirectly;
 		if (metadata == null || metadata.size < BACKGROUND_OPEN_BYTES || FileSystem.isDirectory(path) || direct != null && direct(path)) {
-			open(path, preview);
+			open(path, preview, focusEditor);
 			return;
 		}
 		documents.openInBackground(path, function(_, _) {
 			// Read, it is open now and showing it is cheap; failed, opening it again reports the failure as opening does.
-			try open(path, preview) catch (error:Dynamic) reportError("files", "Could not open file: " + Std.string(error));
+			try open(path, preview, focusEditor) catch (error:Dynamic) reportError("files", "Could not open file: " + Std.string(error));
 			var opened = onBackgroundOpen;
 			if (opened != null) opened();
 		});
