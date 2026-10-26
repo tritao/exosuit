@@ -33,11 +33,35 @@ class NativeDesktopServices implements platform.HostFileDialogs {
 		host.events.requests.track(request, function(value) {
 			pending.remove(request);
 			var answer = switch value {
-				case DialogMessage(_, result, button) if (result == Result.Ok):
+				case DialogMessage(_, result, button, _) if (result == Result.Ok):
 					button == MessageResult.Yes ? "save" : button == MessageResult.No ? "discard" : "cancel";
 				case _: "cancel";
 			};
 			handler(answer);
+			host.requestFrame();
+		});
+	}
+
+	public function confirmMoveToTrash(path:String, handler:(Bool, Bool)->Void):Void {
+		var options = new MessageDialogOptions();
+		options.set_title("exosuit");
+		options.set_kind(MessageKind.Question);
+		options.set_yes_label("Move to Trash");
+		options.set_checkbox_label("Do not ask me again");
+		options.set_buttons(MessageButtons.Yes | MessageButtons.Cancel);
+		var name = haxe.io.Path.withoutDirectory(path);
+		var subject = sys.FileSystem.isDirectory(path) ? '"' + name + '" and its contents' : '"' + name + '"';
+		options.set_message('Are you sure you want to delete ' + subject + '?\n\nYou can restore this from the Trash.');
+		var request = NativeKit.nk_dialog_message_checked(parentHandle(), options);
+		pending.push(request);
+		host.events.requests.track(request, function(value) {
+			pending.remove(request);
+			switch value {
+				case DialogMessage(_, result, button, checked):
+					var confirmed = result == Result.Ok && button == MessageResult.Yes;
+					handler(confirmed, confirmed && checked);
+				case _: handler(false, false);
+			}
 			host.requestFrame();
 		});
 	}

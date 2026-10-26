@@ -320,6 +320,21 @@ class ExosuitApp implements DesktopUiApplication {
 		application.confirmations.trashPrompt = function(path, handler) {
 			if (!application.settings.current.confirmTrash) { handler(true); return; }
 			host.closeCommandView();
+			if (desktop != null) {
+				try {
+					desktop.confirmMoveToTrash(path, function(confirmed, skip) {
+						if (confirmed && skip) application.settings.store.set("files/explorer/confirm_trash", haxeon.ui.properties.PropertyValue.Bool(false));
+						handler(confirmed);
+						if (!confirmed) {
+							explorerReturnPath = path;
+							host.focusExplorer();
+							requestFrame();
+						}
+					});
+					return;
+				}
+				catch (_:Dynamic) {} // Hosts without native dialogs use the in-app confirmation.
+			}
 			trashConfirmation = path;
 			trashConfirmationHandler = handler;
 			skipTrashConfirmation = false;

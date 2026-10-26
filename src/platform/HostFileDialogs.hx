@@ -9,5 +9,7 @@ interface HostFileDialogs {
  public function selectDirectory(handler:Bool->Array<String>->Void, ?title:String,
   ?initialPath:String):haxe.Int64;
  public function confirmSaveChanges(filename:String, handler:String->Void):Void;
+ /** Reports (confirmed, doNotAskAgain); suppression applies only after confirmation. */
+ public function confirmMoveToTrash(path:String, handler:(Bool, Bool)->Void):Void;
  public function shutdown():Void;
 }
