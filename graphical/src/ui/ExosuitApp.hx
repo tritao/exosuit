@@ -2903,12 +2903,14 @@ class ExosuitApp implements DesktopUiApplication {
 				var target = scmMarkerTarget(sourceIdentity, repositories, document);
 				if (target == null) continue;
 				var repository = target.repository;
+				var relative = target.relative;
+				if (repository == null || relative == null) continue;
 				var snapshot = source.snapshot(repository.id);
 				if (snapshot == null) continue;
 				// The group scan costs as much as the change list is long, so redo it only for a new snapshot.
 				if (target.snapshot != snapshot) {
 					var untracked = false, worktree = false;
-					for (group in snapshot.groups) for (resource in group.resources) if (resource.path == target.relative) {
+					for (group in snapshot.groups) for (resource in group.resources) if (resource.path == relative) {
 						if (group.id == ScmGroupId.Untracked) untracked = true;
 						if (group.id == ScmGroupId.WorkingTree) worktree = true;
 					}
@@ -2916,7 +2918,7 @@ class ExosuitApp implements DesktopUiApplication {
 					target.untracked = untracked;
 					target.worktree = worktree;
 				}
-				var identity = target.identity, relative = target.relative;
+				var identity = target.identity;
 				var untracked = target.untracked, worktree = target.worktree;
 				var previousIdentity = scmDocumentMarkerKeys.get(document.id);
 				var tracker = scmDocumentMarkers.get(document.id);
