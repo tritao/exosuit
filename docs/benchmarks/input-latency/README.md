@@ -118,13 +118,20 @@ The capture is analyzed when it ends. The recorder is given 30 s to finalize aft
   SCREEN medians unchanged (18 and 33 ms), cut the move p90 from about 34 to 23 ms (polled) and from 50 to 40 ms (SCREEN)
   in two runs each, and made keys about 2 ms slower (SCREEN median 15.6 to 17.4 ms). It removes moves that waited through
   two frames but does not shorten the typical one, and it changes when frames draw relative to input, so it stays out.
-- **What a frame costs** (1 kHz on-CPU profile of the same runs): about a third of the time is llvmpipe (`libgallium`), the
-  software rasterizer, which a GPU would not spend. The rest is layout (`nkui` layout, 7%), the render tree walk (6%),
-  encoding the layout transaction (3%) and allocation. Two fixes came out of it:
-  - GTK resolved `glGetIntegerv` with `dlsym(RTLD_DEFAULT)` on every frame-target query, several times a frame: 4.7% of
-    on-CPU time, now none (NativeKit, "Resolve glGetIntegerv once per surface"). The latency effect is below this
-    machine's run-to-run noise of about a millisecond.
-  - Still open: `BuildContext.pruneKeyCaches` walks every cached key path, hashing strings, on each UI submit, about 2%
-    of on-CPU time. Pruning only when something was unmounted would remove it; the key caches' lifetime rules need care.
+- **What a frame costs** (1 kHz on-CPU profile of the same runs, share of all on-CPU samples after the fixes below):
+  - 37% is llvmpipe and LLVM, the software rasterizer, which a GPU would not spend.
+  - 26% is `UiContext.submitInternal`: building the widget tree 13% (`withScopeUnder`, a rebuild on every submit), native
+    layout 7% (`LayoutSession.submit`), and the tree walks 7% together (`RenderNode.walk` from `submitInternal`, from
+    `UiStyleInvalidationMetrics.compare`, which decides whether native layout can be reused, and from `render`).
+  - Two fixes came out of the first profile:
+    - GTK resolved `glGetIntegerv` with `dlsym(RTLD_DEFAULT)` on every frame-target query, several times a frame: 4.7% of
+      on-CPU time, now none (NativeKit, "Resolve glGetIntegerv once per surface").
+    - `BuildContext.pruneKeyCaches` walked every cached key path, hashing strings, after each UI submit: 3.9% of on-CPU
+      time, now none. It runs when the mounted nodes or the cached ids change; the empty scopes a build creates and drops
+      (about six a frame) wait until 256 have collected.
+  - Their latency effect is below this machine's run-to-run noise of about a millisecond. They are fixed costs off every
+    frame, so they matter more once a GPU makes frames shorter.
+  - Still open: the tree build is the largest Haxe-side cost and is the retained-subtree design itself; the five or so
+    separate walks of the node tree in `submitInternal` could be fused.
 - In the probe app under Xvfb every mouse move reaches GTK's handler twice (80 handler events for 40 moves). The editor
   shows about two handler events per polled move too, with merging. Whether real hardware does it is unchecked.
