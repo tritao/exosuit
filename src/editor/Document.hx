@@ -6,6 +6,7 @@ import syntax.SyntaxDefinition;
 import syntax.SyntaxRegistry;
 import workspace.FileSystemService;
 import workspace.EditorFileSystem;
+import workspace.FileStamp;
 
 class Document {
 	static var nextId:Int = 1;
@@ -22,20 +23,24 @@ class Document {
 	public var dirty(get, never):Bool;
 	public var externalState(default, null):ExternalState = Current;
 	var diskContent:String;
+	/** The backing file's stamp when diskContent was read from it, if that stamp vouches for it; checkExternal reads
+		the file again only when the stamp differs or is null. */
+	var diskStamp:Null<FileStamp> = null;
 	var newline:String = "\n";
 	var hasBom:Bool = false;
 	var savedStateId:Int;
 	var detachedTitle:Null<String>;
 	var highlighterSubscription:Null<BufferSubscription>;
 
-	public function new(path:Null<String>, text:String, registry:SyntaxRegistry, ?fileSystem:EditorFileSystem, ?recoveryId:String, ?pathlessTitle:String) {
+	public function new(path:Null<String>, text:String, registry:SyntaxRegistry, ?fileSystem:EditorFileSystem, ?recoveryId:String, ?pathlessTitle:String,
+			?prepared:TextBuffer) {
 		id = nextId++;
 		this.recoveryId = recoveryId == null ? "document-" + Std.string(Sys.time()) + "-" + id : recoveryId;
 		detachedTitle = pathlessTitle;
 		this.path = path;
 		this.syntaxes = registry;
 		this.fileSystem = fileSystem == null ? new FileSystemService() : fileSystem;
-		buffer = new TextBuffer(text);
+		buffer = prepared == null ? new TextBuffer(text) : prepared;
 		diskContent = text;
 		selectSyntax();
 		indentation = new DocumentIndentation(buffer, highlighter);
@@ -71,6 +76,7 @@ class Document {
 
 	public function setPath(path:String):Void {
 		this.path = path;
+		diskStamp = null;
 		detachedTitle = null;
 		selectSyntax();
 	}
@@ -101,15 +107,26 @@ class Document {
 		if (highlighter != null) highlighter.dispose();
 	}
 
-	public static function open(path:String, registry:SyntaxRegistry, ?fileSystem:EditorFileSystem):Document {
+	public static function open(path:String, registry:SyntaxRegistry, ?fileSystem:EditorFileSystem):Document
+		return fromLoaded(load(path, fileSystem), registry);
+
+	/** Reads and prepares a file for a document. It touches nothing shared, so it can run on another thread; turn the
+		result into a document on the UI thread with fromLoaded. */
+	public static function load(path:String, ?fileSystem:EditorFileSystem):LoadedFile {
 		var service = fileSystem == null ? new FileSystemService() : fileSystem;
+		var stamp = service.stamp(path), readAt = Sys.time();
 		var raw = service.read(path), bom = StringTools.startsWith(raw, "﻿");
 		var body = bom ? raw.substring(1) : raw, newline = body.indexOf("\r\n") >= 0 ? "\r\n" : "\n";
 		body = StringTools.replace(StringTools.replace(body, "\r\n", "\n"), "\r", "\n");
-		var document = new Document(path, body, registry, service);
-		document.hasBom = bom;
-		document.newline = newline;
-		document.diskContent = raw;
+		return new LoadedFile(path, service, raw, bom, newline, new TextBuffer(body), trusted(stamp, readAt));
+	}
+
+	public static function fromLoaded(file:LoadedFile, registry:SyntaxRegistry):Document {
+		var document = new Document(file.path, "", registry, file.fileSystem, null, null, file.buffer);
+		document.hasBom = file.hasBom;
+		document.newline = file.newline;
+		document.diskContent = file.raw;
+		document.diskStamp = file.stamp;
 		return document;
 	}
 
@@ -143,6 +160,7 @@ class Document {
 		if (!fileSystem.writeAtomic(target, encoded)) return false;
 		savedStateId = buffer.stateId;
 		diskContent = encoded;
+		diskStamp = null;
 		externalState = Current;
 		return true;
 	}
@@ -154,6 +172,7 @@ class Document {
 		setPath(path);
 		savedStateId = buffer.stateId;
 		diskContent = encoded;
+		diskStamp = null;
 		externalState = Current;
 		return true;
 	}
@@ -168,6 +187,12 @@ class Document {
 			externalState = Deleted;
 			return externalState;
 		}
+		// Stamped before reading: a write between the two then shows as a changed stamp on the next check.
+		var stamp = fileSystem.stamp(target), readAt = Sys.time();
+		if (stamp != null && stamp.equals(diskStamp)) {
+			externalState = Current;
+			return externalState;
+		}
 		var content:String;
 		try {
 			content = fileSystem.read(target);
@@ -176,6 +201,7 @@ class Document {
 			return externalState;
 		}
 		if (content == diskContent) {
+			diskStamp = trusted(stamp, readAt);
 			externalState = Current;
 			return externalState;
 		}
@@ -195,14 +221,19 @@ class Document {
 		indentation.overrideSpaces = previousIndentation.overrideSpaces;
 		savedStateId = buffer.stateId;
 		diskContent = content;
+		diskStamp = trusted(stamp, readAt);
 		externalState = Current;
 		return externalState;
 	}
+
+	static function trusted(stamp:Null<FileStamp>, readAt:Float):Null<FileStamp>
+		return stamp != null && stamp.settledBefore(readAt) ? stamp : null;
 
 	/** Reloads the backing file after the user explicitly accepts losing buffer edits. */
 	public function reloadFromDisk():Bool {
 		if (path == null) return false;
 		var target = requirePath(), content = "", missing = !fileSystem.exists(target);
+		var stamp = missing ? null : fileSystem.stamp(target), readAt = Sys.time();
 		if (!missing) {
 			try content = fileSystem.read(target) catch (_:Dynamic) return false;
 		}
@@ -215,6 +246,7 @@ class Document {
 		indentation = new DocumentIndentation(buffer, highlighter);
 		savedStateId = buffer.stateId;
 		diskContent = content;
+		diskStamp = trusted(stamp, readAt);
 		externalState = missing ? Deleted : Current;
 		return true;
 	}

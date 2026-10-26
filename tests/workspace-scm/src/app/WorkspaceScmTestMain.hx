@@ -255,6 +255,8 @@ class WorkspaceScmTestMain {
 	}
 
 	static function cancellation(root:String, trustPath:String):Void {
+		// The fake provider has no repository on disk, but a workspace root must still be a directory.
+		if (!sys.FileSystem.exists(root)) sys.FileSystem.createDirectory(root);
 		var scheduler = new JobScheduler(), fake = new FakeScmProvider(scheduler), normalizedRoot = normalize(root);
 		var snapshot = new ScmSnapshot(Int64.ofInt(1), new ScmHead("main", null, false, null, 0, 0, false, ScmHeadOperation.None), []);
 		var script = new FakeScmRepositoryScript(new ScmRepository("fake-repository", "fake", normalizedRoot,

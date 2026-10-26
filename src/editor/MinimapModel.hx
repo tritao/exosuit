@@ -16,6 +16,10 @@ class MinimapModel {
 	var visualRevision:Int = -1;
 	var themeRevision:Int = -1;
 	var themeColors:Array<Int> = [];
+	/** Uncolored rows' spans by the text they show (see rowKey), kept from one update to the next: an edit rebuilds only
+		the rows whose text it changed. */
+	var uncoloredSpans:Map<String, Array<MinimapSpan>> = [];
+	static final noScopes:Array<String> = [];
 
 	public function new() {}
 
@@ -31,6 +35,9 @@ class MinimapModel {
 		if (documentId == document.id && revision == document.buffer.stateId && syntax == document.syntax &&
 			rangeStart == firstLine && rangeEnd == lastLine && visualRevision == geometryRevision &&
 			themeRevision == requestedThemeRevision && sameTheme) return;
+		// Spans depend on the theme as well as the text, so another document or theme starts the cache afresh.
+		var reusable = documentId == document.id && themeRevision == requestedThemeRevision && sameTheme ? uncoloredSpans : new Map();
+		var kept:Map<String, Array<MinimapSpan>> = [];
 		generation++;
 		visualRevision = geometryRevision;
 		rangeStart = firstLine;
@@ -53,6 +60,15 @@ class MinimapModel {
 			var text = document.buffer.line(sourceLine);
 			var startOffset = visualRows == null ? 0 : EditorCoordinates.position(document, visualRows[line].start).column;
 			var endOffset = visualRows == null ? text.length : document.buffer.document.utf16OffsetForCodepoint(visualRows[line].end) - document.buffer.document.utf16OffsetForCodepoint(document.buffer.document.paragraphRangeAtIndex(sourceLine).start);
+			var key = colored ? null : startOffset + ":" + endOffset + ":" + text;
+			if (key != null) {
+				var known = reusable.get(key);
+				if (known != null) {
+					kept.set(key, known);
+					rows.push({line: line, spans: known});
+					continue;
+				}
+			}
 			var tokens = colored ? document.highlighter.line(sourceLine).tokens : [];
 			var spans:Array<MinimapSpan> = [];
 			var offset = startOffset, column = 0, token = 0;
@@ -60,7 +76,7 @@ class MinimapModel {
 				var code = text.charCodeAt(offset);
 				while (token + 1 < tokens.length && offset >= tokens[token].start + tokens[token].length) token++;
 				var kind = tokens.length == 0 ? 0 : tokens[token].kind;
-				var scopes = tokens.length == 0 ? [] : tokens[token].scopes;
+				var scopes = tokens.length == 0 ? noScopes : tokens[token].scopes;
 				var color:Null<Int> = theme == null ? null : theme.tokenColor(kind, scopes);
 				var width = code == 9 ? 4 - column % 4 : 1;
 				if (code != 9 && code != 32 && code != 13) {
@@ -75,8 +91,10 @@ class MinimapModel {
 					if (next >= 0xdc00 && next <= 0xdfff) offset++;
 				}
 			}
+			if (key != null) kept.set(key, spans);
 			rows.push({line: line, spans: spans});
 		}
+		uncoloredSpans = kept;
 	}
 
 	/** A dense preview never expands into thousands of GPU path meshes. */

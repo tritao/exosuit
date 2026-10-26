@@ -264,8 +264,8 @@ class ExosuitApp implements DesktopUiApplication {
 		host = capturedHost;
 		if (hostContext != null) {
 			scmDirectoryWatch = new ScmDirectoryWatch(application.scm, hostContext.events);
-			application.onScmWatchPathsChanged = function(root, paths) {
-				if (scmDirectoryWatch != null) scmDirectoryWatch.update(root, paths);
+			application.onScmWatchPathsChanged = function(root, paths, excluded) {
+				if (scmDirectoryWatch != null) scmDirectoryWatch.update(root, paths, excluded);
 			};
 			scmFocusSubscription = hostContext.events.listen(function(event) {
 				switch event {
@@ -276,6 +276,8 @@ class ExosuitApp implements DesktopUiApplication {
 			});
 		}
 		application.openFileView = function(path, preview) return host.openFile(path, preview);
+		application.opensDirectly = UiImageTab.supports;
+		application.onBackgroundOpen = requestFrame;
 		host.configureKeybinding = function(command) {
 			openSettings();
 			settingsPanel.setShowAdvanced(true);
@@ -1980,7 +1982,7 @@ class ExosuitApp implements DesktopUiApplication {
 				if (remoteModel != null) {
 					if (remoteModel.isMoreKey(key) || remoteModel.isRetryKey(key)) remoteModel.activateSpecial(key);
 					else if (!remoteModel.isDirectoryKey(key)) openWorkspaceFile(remoteModel, key, true);
-				} else if (localModel != null && !localModel.isSyntheticRow(key) && !localModel.isDirectoryPath(key)) application.open(key);
+				} else if (localModel != null && !localModel.isSyntheticRow(key) && !localModel.isDirectoryPath(key)) application.openInBackground(key);
 			}, null, null);
 		tree.indentWidth = 10.0;
 		tree.verticalGuidesOnly = true;
@@ -2015,7 +2017,7 @@ class ExosuitApp implements DesktopUiApplication {
 			}
 			if ((count != 1 && count != 2) || (localModel != null && localModel.isDirectoryPath(path))) return;
 			try {
-				application.open(path, count == 1);
+				application.openInBackground(path, count == 1);
 			} catch (error:Dynamic) application.reportError("files", "Could not open file: " + Std.string(error));
 		};
 		tree.onItemContextMenu = function(path, event) {
@@ -2679,7 +2681,7 @@ class ExosuitApp implements DesktopUiApplication {
 	function openFileDialog():Void {
 		if (desktop == null) { application.workbench.openPathCommandView(false); requestFrame(); return; }
 		desktop.openFile(function(accepted, paths) {
-			if (accepted && paths.length > 0) application.open(paths[0]);
+			if (accepted && paths.length > 0) application.openInBackground(paths[0]);
 			requestFrame();
 		});
 	}

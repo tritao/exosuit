@@ -7,6 +7,8 @@ interface EditorFileSystem {
 	function entries(path:String):Array<String>;
 	function join(parent:String, name:String):String;
 	function read(path:String):String;
+	/** The file's stamp, or null when it is missing or cannot be stamped. */
+	function stamp(path:String):Null<FileStamp>;
 	function writeAtomic(path:String, content:String):Bool;
 	function createFile(path:String):Bool;
 	function createFolder(path:String):Bool;

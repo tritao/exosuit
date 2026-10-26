@@ -12,7 +12,11 @@ class SemanticTokenCodec {
 		var result:Array<LanguageSemanticToken> = [], line = 0, column = 0, previousEnd = 0;
 		for (index in 0...Std.int(values.length / 5)) {
 			var at = index * 5;
-			for (part in 0...5) if (!Std.isOfType(values[at + part], Int) || values[at + part] < 0) return null;
+			for (part in 0...5) {
+				if (!Std.isOfType(values[at + part], Int)) return null;
+				var value:Int = values[at + part];
+				if (value < 0) return null;
+			}
 			var deltaLine:Int = values[at], deltaColumn:Int = values[at + 1], length:Int = values[at + 2],
 				type:Int = values[at + 3], mask:Int = values[at + 4];
 			line += deltaLine;

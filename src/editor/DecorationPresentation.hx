@@ -12,13 +12,18 @@ class DecorationPresentation {
 		if (start < 0 || end < start || end > document.buffer.document.codepointCount)
 			throw "Decoration presentation range is outside the document";
 		var result:Array<DecorationRange> = [];
+		// A decoration lies on one line, so only those on the lines the range touches can reach it; the rest are skipped
+		// before their columns are converted, which is what costs.
+		var text = document.buffer.document;
+		var firstLine = text.paragraphIndexAtOffset(start), lastLine = text.paragraphIndexAtOffset(end);
 		for (value in plugins)
-			if (value.document == document)
+			if (value.document == document && value.line >= firstLine && value.line <= lastLine)
 				append(result, document, value.line, value.startColumn, value.endColumn,
 					value.color, value.kind, start, end);
 		for (match in matches)
 			if ((match.document == null || match.document == document) &&
-				(match.revision < 0 || match.revision == document.buffer.stateId))
+				(match.revision < 0 || match.revision == document.buffer.stateId) &&
+				match.line >= firstLine && match.line <= lastLine)
 				append(result, document, match.line, match.column, match.column + match.length,
 					theme.searchMatch, Background, start, end);
 		return result;

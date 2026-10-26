@@ -70,6 +70,7 @@ class GraphicalMain {
 		var openTerminalBrowser = false;
 		var openWorkbench = false;
 		var themeChoice = "system";
+		var titleOverride:Null<String> = null;
 		var openPaths:Array<String> = [];
 		for (argument in arguments) {
 			if (StringTools.startsWith(argument, "--input-script="))
@@ -92,13 +93,16 @@ class GraphicalMain {
 				openTerminal = true;
 			else if (StringTools.startsWith(argument, "--theme="))
 				themeChoice = argument.substring(8);
+			else if (StringTools.startsWith(argument, "--title="))
+				titleOverride = argument.substring(8);
 			else if (!StringTools.startsWith(argument, "--"))
 				openPaths.push(argument);
 		}
 		var host = new DesktopUiHostOptions();
 		var stableChannel = Sys.getEnv("EXOSUIT_CHANNEL") == "stable";
 		host.applicationId = stableChannel ? "Exosuit.Stable" : "Exosuit.Desktop";
-		host.title = stableChannel ? "Exosuit Stable" : "exosuit";
+		// A benchmark names its window, so its capture screenshots that window rather than another exosuit's.
+		host.title = titleOverride != null && titleOverride.length > 0 ? titleOverride : stableChannel ? "Exosuit Stable" : "exosuit";
 		host.icons = ApplicationIcons.create();
 		host.customTitlebar = true;
 		host.width = 1280;

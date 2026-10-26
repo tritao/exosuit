@@ -18,21 +18,36 @@ if [[ "${HAXEON_SELF_HOSTED:-0}" == "1" ]]; then
 	self_hosted+=(--self-hosted)
 fi
 
+# Each test step runs whatever happened before it: a failure is reported, recorded and listed at the end, so one
+# broken test cannot hide the ones after it. Fixture setup stays fail-fast (set -e), since later steps depend on it.
+failures=()
+steps=0
+check() {
+	local name=$1 status=0
+	shift
+	echo "== $name =="
+	steps=$((steps + 1))
+	"$@" || status=$?
+	if ((status != 0)); then
+		echo "FAIL: $name (exit $status)"
+		failures+=("$name")
+	fi
+}
+
 run_test() {
 	local name=$1
 	shift
-	echo "== $name =="
-	"$haxeon" run --project "$root_dir/tests/$name/haxeon.json" "${self_hosted[@]}" -- "$@"
+	check "$name" "$haxeon" run --project "$root_dir/tests/$name/haxeon.json" "${self_hosted[@]}" -- "$@"
 }
 
 mkdir -p "$root_dir/build"
 
-"$root_dir/scripts/update-plugin-host-bindings.sh" --check
+check plugin-host-bindings "$root_dir/scripts/update-plugin-host-bindings.sh" --check
 
-"$root_dir/native-packages/sqlite/tests/run.sh"
-"$root_dir/native-packages/terminal/tests/run.sh"
-"$root_dir/native-packages/terminal/session/tests/run.sh"
-"$root_dir/native-packages/noise/tests/run.sh"
+check sqlite-native "$root_dir/native-packages/sqlite/tests/run.sh"
+check terminal-native "$root_dir/native-packages/terminal/tests/run.sh"
+check terminal-session-native "$root_dir/native-packages/terminal/session/tests/run.sh"
+check noise-native "$root_dir/native-packages/noise/tests/run.sh"
 terminal_native_dir="$root_dir/native-packages/terminal/session/tests/build/nativekit"
 if [[ $(uname -s) == Darwin ]]; then
 	export DYLD_LIBRARY_PATH="$terminal_native_dir${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
@@ -45,26 +60,25 @@ fi
 	-o "$root_dir/build/process-fixture"
 
 # The core entry checks shared document editing without a simulated native host.
-"$haxeon" run --project "$root_dir/haxeon.json" "${self_hosted[@]}"
-echo "PASS: Haxeon headless application exercised the core document model"
+check core "$haxeon" run --project "$root_dir/haxeon.json" "${self_hosted[@]}"
 
 run_test plugin-host
 run_test command-clipboard
 run_test haxeon-rpc
 run_test scm-git
 run_test scm-watch
-bash "$root_dir/scripts/test-workspace-transport.sh"
-python3 "$root_dir/scripts/test-workspace-scm.py"
-bash "$root_dir/scripts/test-relay.sh"
-bash "$root_dir/scripts/test-workspace-persistence.sh"
-bash "$root_dir/scripts/test-workspace-attachment.sh"
-python3 "$root_dir/scripts/test-relay-setup.py"
+check workspace-transport bash "$root_dir/scripts/test-workspace-transport.sh"
+check workspace-scm python3 "$root_dir/scripts/test-workspace-scm.py"
+check relay bash "$root_dir/scripts/test-relay.sh"
+check workspace-persistence bash "$root_dir/scripts/test-workspace-persistence.sh"
+check workspace-attachment bash "$root_dir/scripts/test-workspace-attachment.sh"
+check relay-setup python3 "$root_dir/scripts/test-relay-setup.py"
 run_test workspace-lifecycle
-python3 "$root_dir/scripts/test-service-updates.py"
-python3 "$root_dir/scripts/test-agent-idle.py"
-python3 "$root_dir/scripts/test-workspace-terminals.py"
-python3 "$root_dir/scripts/test-workspace-agents.py"
-bash "$root_dir/scripts/test-workspace-rpc-wasm.sh"
+check service-updates python3 "$root_dir/scripts/test-service-updates.py"
+check agent-idle python3 "$root_dir/scripts/test-agent-idle.py"
+check workspace-terminals python3 "$root_dir/scripts/test-workspace-terminals.py"
+check workspace-agents python3 "$root_dir/scripts/test-workspace-agents.py"
+check workspace-rpc-wasm bash "$root_dir/scripts/test-workspace-rpc-wasm.sh"
 run_test application-test
 run_test problems
 capabilities_state=$(mktemp -d)
@@ -83,11 +97,9 @@ directory_scan_root=$(mktemp -d)
 mkdir "$directory_scan_root/blocked" "$directory_scan_root/vanishing"
 touch "$directory_scan_root/a.txt"
 chmod 000 "$directory_scan_root/blocked"
-directory_scan_status=0
-run_test directory-scan "$directory_scan_root" || directory_scan_status=$?
+run_test directory-scan "$directory_scan_root"
 chmod 700 "$directory_scan_root/blocked"
 rm -rf "$directory_scan_root"
-if [[ $directory_scan_status -ne 0 ]]; then exit "$directory_scan_status"; fi
 
 mkdir -p "$root_dir/build/process cwd"
 run_test process-test "$root_dir/build/process-fixture" "$root_dir/build/process cwd"
@@ -109,7 +121,7 @@ run_test configuration-test "$configuration_root/user.json" "$configuration_root
 printf 'saved by Haxeon\n' >"$root_dir/build/document-save-smoke.txt"
 chmod 640 "$root_dir/build/document-save-smoke.txt"
 run_test document-test "$root_dir/build/document-save-smoke.txt"
-[[ $(stat -c '%a' "$root_dir/build/document-save-smoke.txt") == 640 ]]
+check document-save-mode test "$(stat -c '%a' "$root_dir/build/document-save-smoke.txt")" = 640
 
 run_test plugin-test "$root_dir/build/process-fixture"
 
@@ -144,4 +156,8 @@ mkdir -p "$dynamic_plugin_dir"
 cp "$root_dir/plugins/example/plugin.conf" "$root_dir/plugins/example/Main.hx" "$dynamic_plugin_dir/"
 run_test dynamic-plugin-test "$dynamic_plugin_dir/plugin.conf" "$dynamic_plugin_dir/Main.hx"
 
-echo "PASS: exosuit headless test suite"
+if ((${#failures[@]} > 0)); then
+	echo "FAIL: ${#failures[@]} of $steps exosuit test steps failed: ${failures[*]}"
+	exit 1
+fi
+echo "PASS: exosuit headless test suite ($steps steps)"

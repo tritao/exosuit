@@ -78,6 +78,10 @@ class ScmWatchTestMain {
 		var service:Null<ScmService> = null, watcher:Null<ScmDirectoryWatch> = null;
 		try {
 			runGit(git, runtime, scheduler, ["init"], root, 2);
+			// Ignored build output is left out of the watch.
+			File.saveContent(root + "/.gitignore", "build/\n");
+			FileSystem.createDirectory(root + "/build");
+			FileSystem.createDirectory(root + "/build/out");
 			var trustPath = root + "/trust.json";
 			service = new ScmService(processes, scheduler, git.executable, 1000, 0, true, trustPath, hooks);
 			var discovery:Null<ScmJobResult<Array<ScmRepository>>> = null;
@@ -86,9 +90,16 @@ class ScmWatchTestMain {
 			if (discovery == null || discovery.error != null || discovery.value == null || discovery.value.length != 1)
 				throw "SCM watch fixture did not produce one repository";
 			var repository = discovery.value[0];
+			pumpNative(runtime, service, scheduler, () -> service.watchExclusions(root).length > 0,
+				"SCM watch exclusions were not computed");
+			var exclusions = service.watchExclusions(root);
+			require(exclusions.indexOf(root + "/build") >= 0 && exclusions.indexOf(root + "/.git/objects") >= 0,
+				"SCM watch exclusions miss the ignored build directory or the object store: " + exclusions);
 			watcher = new ScmDirectoryWatch(service, runtime.events);
-			watcher.update(root, service.watchDirectories(root));
+			watcher.update(root, service.watchDirectories(root), exclusions);
 			require(watcher.isWatching(root), "NativeKit did not arm the SCM worktree watcher: " + watcher.lastError);
+			pumpNative(runtime, service, scheduler, () -> service.isWatchAvailable(root),
+				"The SCM watch did not become available once its directories were registered");
 			pumpNative(runtime, service, scheduler, () -> service.snapshot(repository.id) != null,
 				"SCM watch fixture initial status timed out");
 
@@ -102,8 +113,17 @@ class ScmWatchTestMain {
 				"SCM watcher did not deliver a second change after re-arming", 1.2);
 			require(watcher.isWatching(root), "SCM watcher was lost after a second filesystem event");
 
+			// A second root inside the repository watches the same directories, so it shares the native watch.
+			var nested = root + "/nested-root";
+			FileSystem.createDirectory(nested);
+			watcher.update(nested, service.watchDirectories(root), exclusions);
+			require(watcher.watchCount() == 1 && watcher.isWatching(nested),
+				"Two roots of one repository did not share one native watch: " + watcher.watchCount());
+
 			watcher.update(root, [root + "/missing-watch-directory"]);
 			require(!watcher.isWatching(root), "An invalid watch target unexpectedly remained active");
+			require(watcher.isWatching(nested) && watcher.watchCount() == 1,
+				"A root leaving a shared watch stopped it for the other root");
 			File.saveContent(root + "/poll-fallback.txt", "fallback\n");
 			var fallbackStarted = Sys.time();
 			pumpNative(runtime, service, scheduler, () -> contains(service.snapshot(repository.id), "poll-fallback.txt"),

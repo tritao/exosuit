@@ -71,6 +71,45 @@ class GitScmRepositoryHandle implements ScmRepositoryHandle {
 		return result;
 	}
 
+	/** Directories a watch of this repository can leave out: those Git ignores, which hold build output and other
+		generated trees, and the object store, whose writes never change status on their own. Absolute paths. */
+	public function watchExclusions(generation:Int, complete:ScmJobResult<Array<String>>->Void):ScmJob<Array<String>> {
+		if (disposed) return failed(generation, complete, "repository_closed", "The Git repository handle is closed");
+		var command:Null<ScmJob<GitCommandResult>> = null;
+		var job = new ScmJob<Array<String>>(generation, function() {
+			if (command != null) command.cancel();
+		});
+		command = process.run(["ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"], root, generation,
+			function(result) {
+				if (job.cancelled || job.complete) return;
+				var excluded:Array<String> = [];
+				for (directory in [gitDir, commonDir]) {
+					var objects = directory + "/objects";
+					if (excluded.indexOf(objects) < 0) excluded.push(objects);
+				}
+				// Without the list, the watch covers everything, as it did before exclusions existed.
+				if (result.error == null && result.value != null) {
+					// NUL-separated entries; directories end with "/".
+					var output = result.value.stdout, start = 0;
+					for (index in 0...output.length + 1) {
+						if (index < output.length && output.get(index) != 0) continue;
+						if (index - start > 1 && output.get(index - 1) == "/".code)
+							excluded.push(root + "/" + output.getString(start, index - start - 1));
+						start = index + 1;
+					}
+				}
+				if (job.finish()) complete(new ScmJobResult<Array<String>>(generation, excluded));
+			}, true, !trusted(), 16 * 1024 * 1024);
+		return job;
+	}
+
+	/** Whether a changed path can change which directories Git ignores. */
+	public function ignoreRulesChanged(path:String):Bool {
+		var changed = pathKey(path);
+		return StringTools.endsWith(changed, "/.gitignore") || changed == pathKey(gitDir + "/info/exclude") ||
+			changed == pathKey(commonDir + "/info/exclude");
+	}
+
 	public function metadataChanged(path:String):Bool {
 		var changed = pathKey(path);
 		for (candidate in [root + "/.git", gitDir + "/config", gitDir + "/config.worktree", gitDir + "/commondir", commonDir + "/config"])

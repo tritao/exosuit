@@ -73,6 +73,28 @@ class EditorViewTestMain {
 		require(preview.rows.length == editor.MinimapModel.MAX_ROWS && preview.rows[editor.MinimapModel.MAX_ROWS - 1].line == 9999,
 			"large minimap is unbounded or misses the end of the file");
 		require(preview.rows[0].spans[0].kind == 0, "large minimap unnecessarily requests syntax highlighting");
+		// An edit rebuilds only the uncolored rows whose text it changed; the others keep their spans, and all of them
+		// match a minimap built afresh.
+		var distinct = new Document("distinct.txt", [for (line in 0...3000) "line " + line + "\ttext"].join("\n"), syntaxes);
+		var incremental = new editor.MinimapModel();
+		incremental.update(distinct);
+		var spansBefore = [for (row in incremental.rows) row.spans];
+		distinct.insert(new BufferSelection(), "edited ");
+		incremental.update(distinct);
+		var fresh = new editor.MinimapModel();
+		fresh.update(distinct);
+		require(incremental.rows.length == fresh.rows.length && incremental.rows[0].spans != spansBefore[0],
+			"an edited minimap row kept its old spans");
+		for (index in 1...incremental.rows.length)
+			require(incremental.rows[index].spans == spansBefore[index], "an unedited minimap row was rebuilt");
+		for (index in 0...fresh.rows.length) {
+			var a = incremental.rows[index], b = fresh.rows[index];
+			require(a.line == b.line && a.spans.length == b.spans.length, "an incrementally updated minimap row differs from a fresh one");
+			for (span in 0...a.spans.length)
+				require(a.spans[span].start == b.spans[span].start && a.spans[span].length == b.spans[span].length
+					&& a.spans[span].kind == b.spans[span].kind && a.spans[span].color == b.spans[span].color,
+					"an incrementally updated minimap span differs from a fresh one");
+		}
 		preview.update(largePreview, 9000, 9255);
 		require(preview.rows.length == 256 && preview.rows[0].line == 9000 && preview.rows[255].line == 9255,
 			"proportional minimap page skips nearby lines");
@@ -244,6 +266,13 @@ class EditorViewTestMain {
 			decorationRegistry.forDocument(decorationDocument), [], 0, decorationDocument.buffer.document.codepointCount);
 		require(wholeLines.length == 1 && wholeLines[0].start == wholeLines[0].end,
 			"whole-line presentation lost empty range or accepted reversed columns");
+		// Unchanged decorations come back as the same ordered list; a change orders them afresh.
+		var orderedDecorations = decorationRegistry.forDocument(decorationDocument);
+		require(decorationRegistry.forDocument(decorationDocument) == orderedDecorations, "unchanged decorations were sorted again");
+		decorationRegistry.add("plugin", "first", decorationDocument, 0, 0, 1, syntaxTheme.currentLine, Background);
+		var reordered = decorationRegistry.forDocument(decorationDocument);
+		require(reordered != orderedDecorations && reordered.length == 2 && reordered[0].id == "first" && reordered[1].id == "empty-line",
+			"a new decoration was not ordered in");
 		var caretDocument = new Document("caret.hx", "é🙂(x)\n\n// (ignored)", syntaxes);
 		var caretSelection = new BufferSelection(new BufferPosition(0, 3));
 		var caretPresentation = new CaretPresentation();

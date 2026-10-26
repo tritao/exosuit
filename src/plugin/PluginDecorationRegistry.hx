@@ -5,6 +5,9 @@ import editor.Document;
 class PluginDecorationRegistry {
 	final values:Array<PluginDecoration> = [];
 	public var revision(default, null):Int = 0;
+	/** Each document's decorations in order, as of orderedRevision: an editor asks on every paint, and they rarely change. */
+	final ordered:Map<Int, Array<PluginDecoration>> = [];
+	var orderedRevision:Int = -1;
 
 	public function new() {}
 
@@ -25,7 +28,14 @@ class PluginDecorationRegistry {
 		return null;
 	}
 
+	/** A document's decorations by line, then column, then identity. Shared until they change: do not modify it. */
 	public function forDocument(document:Document):Array<PluginDecoration> {
+		if (orderedRevision != revision) {
+			ordered.clear();
+			orderedRevision = revision;
+		}
+		var known = ordered.get(document.id);
+		if (known != null) return known;
 		var result = [for (value in values) if (value.document == document) value];
 		result.sort(function(a, b) {
 			var order = a.line - b.line;
@@ -33,6 +43,7 @@ class PluginDecorationRegistry {
 			if (order == 0) order = Reflect.compare(a.owner + ":" + a.id, b.owner + ":" + b.id);
 			return order;
 		});
+		ordered.set(document.id, result);
 		return result;
 	}
 

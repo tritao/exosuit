@@ -5,6 +5,7 @@ import editor.Document;
 import sys.FileSystem;
 import workspace.FileSystemService;
 import workspace.EditorFileSystem;
+import workspace.FileStamp;
 
 class RecoveryStore {
 	public static inline final VERSION = 3;
@@ -12,6 +13,13 @@ class RecoveryStore {
 	public final path:String;
 	public final diagnostics:Array<String> = [];
 	final fileSystem:EditorFileSystem;
+	/** The dirty documents and their text states as of the last save, which a save with nothing new skips. */
+	var savedSignature:Null<String> = null;
+	/** The snapshots the file holds, and its stamp then: load reads it again only when the stamp changes. */
+	var cached:Null<Array<RecoverySnapshot>> = null;
+	var cachedStamp:Null<FileStamp> = null;
+	/** A saveInBackground write in progress on another thread. */
+	var writing:Null<RecoveryWrite> = null;
 
 	public function new(path:String, ?fileSystem:EditorFileSystem) {
 		this.path = path;
@@ -19,8 +27,65 @@ class RecoveryStore {
 	}
 
 	public function save(application:Application):Bool {
+		var signature = signatureOf(application);
+		if (signature == savedSignature) return true;
+		var snapshots = snapshotsFor(application);
+		if (snapshots == null) return false;
+		if (!saveSnapshots(snapshots)) return false;
+		savedSignature = signature;
+		return true;
+	}
+
+	/**
+		Saves as save does, but encodes and writes the file on another thread: the periodic save while editing, which for
+		a large buffer would otherwise stall typing. A save while the previous write is still running is left for the next
+		one, which records the latest state; reads and synchronous saves wait for a write in progress first.
+	**/
+	public function saveInBackground(application:Application):Void {
+		if (!finishWrite(false)) return;
+		var signature = signatureOf(application);
+		if (signature == savedSignature) return;
+		var snapshots = snapshotsFor(application);
+		if (snapshots == null || !ensureParent(path)) return;
+		var write = new RecoveryWrite(signature, snapshots), files = fileSystem, target = path;
+		writing = write;
+		haxeon.Threads.create("exo.recovery.save", function() {
+			var ok = false;
+			try ok = files.writeAtomic(target, encode(write.snapshots)) catch (_:Dynamic) {}
+			write.finish(ok);
+		});
+	}
+
+	/** Collects the result of a background write: waiting for it, or only if it is done. False while one still runs. */
+	function finishWrite(wait:Bool):Bool {
+		var write = writing;
+		if (write == null) return true;
+		if (!write.done.wait(wait ? null : 0.0)) return false;
+		writing = null;
+		if (write.ok) {
+			savedSignature = write.signature;
+			remember(write.snapshots);
+		} else
+			cached = null;
+		return true;
+	}
+
+	/** Waits for a background write in progress, as shutdown must before the process ends. */
+	public function flush():Void
+		finishWrite(true);
+
+	static function signatureOf(application:Application):String {
+		var signature = "";
+		for (document in application.documents.documents)
+			if (document.dirty) signature += document.recoveryId + "\n" + document.path + "\n" + document.buffer.stateId + "\n";
+		return signature;
+	}
+
+	/** The snapshots to save: those on file, with each dirty document's replaced by its current text; null if the file
+		could not be read. */
+	function snapshotsFor(application:Application):Null<Array<RecoverySnapshot>> {
 		var snapshots = load();
-		if (diagnostics.length > 0) return false;
+		if (diagnostics.length > 0) return null;
 		for (document in application.documents.documents) {
 			if (!document.dirty) continue;
 			var index = snapshots.length;
@@ -30,20 +95,44 @@ class RecoveryStore {
 			}
 			snapshots.push(new RecoverySnapshot(document.recoveryId, document.title, document.path, document.buffer.text));
 		}
-		return saveSnapshots(snapshots);
+		return snapshots;
 	}
 
 	public function saveSnapshots(snapshots:Array<RecoverySnapshot>):Bool {
+		finishWrite(true);
+		savedSignature = null;
 		if (!ensureParent(path)) return false;
-		var output = "pragtical-recovery=" + VERSION + "\n";
+		if (!fileSystem.writeAtomic(path, encode(snapshots))) {
+			cached = null;
+			return false;
+		}
+		remember(snapshots);
+		return true;
+	}
+
+	/** After writing the file: it holds these snapshots, as of its stamp now. Only another writer changes the stamp. */
+	function remember(snapshots:Array<RecoverySnapshot>):Void {
+		var start = snapshots.length > MAX_SNAPSHOTS ? snapshots.length - MAX_SNAPSHOTS : 0;
+		cached = snapshots.slice(start);
+		cachedStamp = fileSystem.stamp(path);
+		if (cachedStamp == null) cached = null;
+	}
+
+	static function encode(snapshots:Array<RecoverySnapshot>):String {
+		var output = new StringBuf();
+		output.add("pragtical-recovery=" + VERSION + "\n");
 		var start = snapshots.length > MAX_SNAPSHOTS ? snapshots.length - MAX_SNAPSHOTS : 0;
 		for (index in start...snapshots.length) {
 			var snapshot = snapshots[index];
 			var recoveredPath = snapshot.path == null ? "" : snapshot.path;
-			output += snapshot.id.length + ":" + snapshot.title.length + ":" + recoveredPath.length + ":" + snapshot.text.length + ":"
-				+ (snapshot.path == null ? "0" : "1") + ":" + snapshot.id + snapshot.title + recoveredPath + snapshot.text;
+			output.add(snapshot.id.length + ":" + snapshot.title.length + ":" + recoveredPath.length + ":" + snapshot.text.length + ":"
+				+ (snapshot.path == null ? "0" : "1") + ":");
+			output.add(snapshot.id);
+			output.add(snapshot.title);
+			output.add(recoveredPath);
+			output.add(snapshot.text);
 		}
-		return fileSystem.writeAtomic(path, output);
+		return output.toString();
 	}
 
 	public function forget(document:Document):Bool {
@@ -59,11 +148,23 @@ class RecoveryStore {
 	}
 
 	public function load():Array<RecoverySnapshot> {
+		finishWrite(true);
 		diagnostics.resize(0);
-		if (!fileSystem.exists(path) || fileSystem.isDirectory(path)) return [];
+		if (!fileSystem.exists(path) || fileSystem.isDirectory(path)) {
+			cached = null;
+			return [];
+		}
+		var stamp = fileSystem.stamp(path), known = cached, readAt = Sys.time();
+		if (known != null && stamp != null && stamp.equals(cachedStamp)) return known.copy();
 		try {
-			return decode(fileSystem.read(path));
+			var snapshots = decode(fileSystem.read(path));
+			// Another writer's file vouches for what was read only once it has settled (see FileStamp).
+			cached = snapshots.copy();
+			cachedStamp = stamp != null && stamp.settledBefore(readAt) ? stamp : null;
+			return snapshots;
 		} catch (error:Dynamic) {
+			cached = null;
+			savedSignature = null;
 			var quarantined = quarantine();
 			diagnostics.push(quarantined == null
 				? "Could not read recovery data: " + Std.string(error)
@@ -142,5 +243,23 @@ class RecoveryStore {
 		if (!ensureParent(parent)) return false;
 		FileSystem.createDirectory(parent);
 		return FileSystem.exists(parent) && FileSystem.isDirectory(parent);
+	}
+}
+
+/** One background recovery write: what it records, and whether it succeeded once done. */
+private class RecoveryWrite {
+	public final signature:String;
+	public final snapshots:Array<RecoverySnapshot>;
+	public final done = new sys.thread.Lock();
+	public var ok(default, null):Bool = false;
+
+	public function new(signature:String, snapshots:Array<RecoverySnapshot>) {
+		this.signature = signature;
+		this.snapshots = snapshots;
+	}
+
+	public function finish(succeeded:Bool):Void {
+		ok = succeeded;
+		done.release();
 	}
 }

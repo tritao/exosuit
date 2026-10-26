@@ -85,7 +85,7 @@ class Application {
 	public final recentProjects:RecentProjects;
 	final releaseScmSettings:Void->Void;
 	final releaseScmWatchPaths:Void->Void;
-	public var onScmWatchPathsChanged:Null<(String, Array<String>)->Void>;
+	public var onScmWatchPathsChanged:Null<(String, Array<String>, Array<String>)->Void>;
 	public final documentMatches:Array<SearchMatch>;
 	public var documentSearchQuery(get, never):String;
 	public var quitReady(get, never):Bool;
@@ -105,8 +105,8 @@ class Application {
 			this.settings.current.scmUntrackedLimit, this.settings.current.scmNestedScanDepth, this.settings.current.scmAutoRefresh);
 		scm.configure(this.settings.current);
 		releaseScmSettings = this.settings.subscribe(value -> scm.configure(value));
-		releaseScmWatchPaths = scm.subscribeWatchPaths(function(root, paths) {
-			if (onScmWatchPathsChanged != null) onScmWatchPathsChanged(root, paths);
+		releaseScmWatchPaths = scm.subscribeWatchPaths(function(root, paths, excluded) {
+			if (onScmWatchPathsChanged != null) onScmWatchPathsChanged(root, paths, excluded);
 		});
 		fileOperations = new FileOperations(workspace, new TrashService(ConfigurationPaths.trash(), workspace.fileSystem));
 		documents = workspace.documents;
@@ -129,13 +129,13 @@ class Application {
 		session = new SessionController(this, workspace, root, commands, reportError);
 		recovery = session.recovery;
 		files = new FileController(documents, workspace, fileOperations, root, context, commands, confirmations, recovery,
-			path -> { open(path); }, function() { newDocument(); }, function() { recovery.save(this); }, reportError, reportInformation,
+			path -> { openInBackground(path); }, function() { newDocument(); }, function() { recovery.save(this); }, reportError, reportInformation,
 			path -> scm.documentSaved(path));
 		pluginController = new PluginController(commands, keymap, context, syntaxes, completions, root.getPluginPanels(), workspace.jobs,
 			effectiveSettings, root, processes, reportError, reportInformation, this.capabilities.supports(SourcePlugins));
 		plugins = pluginController.manager;
 		workbench = new WorkbenchController(workspace, root, commands, keymap, context, completions, errors, search,
-			path -> { open(path); });
+			path -> { openInBackground(path); });
 		workbench.openPath = function(path) { openArgument(path); };
 		build = new BuildController(workspace, root, context, commands, processes, path -> open(path), reportError, this.capabilities.supports(Processes));
 		var languageCommand = config.LanguageServerCommand.current(this.settings.current);
@@ -175,6 +175,12 @@ class Application {
 
 	/** Optional host file opener; null falls back to a text document. */
 	public var openFileView:Null<(String, Bool)->Null<View>>;
+	/** Files at least this large are read on another thread when opened interactively (see openInBackground). */
+	public static inline final BACKGROUND_OPEN_BYTES = 1024 * 1024;
+	/** The host's files that open directly whatever their size (an image tab reads its own file); null means none. */
+	public var opensDirectly:Null<String->Bool>;
+	/** Called once a background open has shown its file, so the host can draw it. */
+	public var onBackgroundOpen:Null<Void->Void>;
 
 	public function open(path:String, preview:Bool = false):View {
 		if (openFileView != null) {
@@ -182,6 +188,25 @@ class Application {
 			if (resource != null) return resource;
 		}
 		return root.openDocument(documents.open(path));
+	}
+
+	/**
+		Opens a file as open does, but reads and prepares a large one on another thread first, so the window stays
+		responsive meanwhile; its tab appears once it is read. For the file finder, the explorer and the open dialog;
+		callers that need the view at once use open.
+	**/
+	public function openInBackground(path:String, preview:Bool = false):Void {
+		var metadata = FileSystem.metadata(path), direct = opensDirectly;
+		if (metadata == null || metadata.size < BACKGROUND_OPEN_BYTES || FileSystem.isDirectory(path) || direct != null && direct(path)) {
+			open(path, preview);
+			return;
+		}
+		documents.openInBackground(path, function(_, _) {
+			// Read, it is open now and showing it is cheap; failed, opening it again reports the failure as opening does.
+			try open(path, preview) catch (error:Dynamic) reportError("files", "Could not open file: " + Std.string(error));
+			var opened = onBackgroundOpen;
+			if (opened != null) opened();
+		});
 	}
 
 	public function openArgument(path:String):Null<View> {
@@ -301,6 +326,7 @@ class Application {
 
 	public function update():Void {
 		var now = Sys.time();
+		documents.poll();
 		configuration.update();
 		search.update(now);
 		scm.update(now);

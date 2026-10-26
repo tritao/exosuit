@@ -18,7 +18,9 @@ import haxe.io.Bytes;
 import sys.FileSystem;
 import workspace.FileSystemService;
 import workspace.EditorFileSystem;
+import workspace.FileStamp;
 import core.DocumentManager;
+import testing.CountingFileSystem;
 
 class FailingFileSystem implements EditorFileSystem {
 	final delegate = new FileSystemService();
@@ -29,6 +31,7 @@ class FailingFileSystem implements EditorFileSystem {
 	public function entries(path:String):Array<String> return delegate.entries(path);
 	public function join(parent:String, name:String):String return delegate.join(parent, name);
 	public function read(path:String):String return delegate.read(path);
+	public function stamp(path:String):Null<FileStamp> return delegate.stamp(path);
 	public function writeAtomic(path:String, content:String):Bool return false;
 	public function createFile(path:String):Bool return delegate.createFile(path);
 	public function createFolder(path:String):Bool return delegate.createFolder(path);
@@ -107,6 +110,65 @@ class DocumentTestMain {
 		require(EditorActions.backspace(joined, joinedAt, 4) && joined.text == "ab" && joinedAt.cursor.column == 1, "column-zero Backspace did not join lines");
 		joinedAt.setCursor(joined, new BufferPosition(0, 0));
 		require(!EditorActions.backspace(joined, joinedAt, 4), "Backspace at document start changed text");
+	}
+
+	/** The once-a-second external check reads a file only when its stamp changed, or when the stamp cannot vouch for
+		what was read because the file was still changing then. */
+	static function externalChecksReadOnlyChangedFiles(path:String, syntaxes:SyntaxRegistry):Void {
+		File.saveContent(path, "one\n");
+		Sys.sleep(2.1); // settles the file, so its stamp vouches for what is read next
+		var files = new CountingFileSystem(), document = Document.open(path, syntaxes, files);
+		require(document.checkExternal() == ExternalState.Current && document.checkExternal() == ExternalState.Current && files.reads == 1,
+			"an unchanged file was read again");
+		File.saveContent(path, "two\n");
+		require(document.checkExternal() == ExternalState.Current && document.buffer.text == "two\n" && files.reads == 2,
+			"an external edit was missed");
+		// Read in the second it was written: the same-size rewrite below may leave the stamp as it was.
+		File.saveContent(path, "TWO\n");
+		require(document.checkExternal() == ExternalState.Current && document.buffer.text == "TWO\n" && files.reads == 3,
+			"a same-second, same-size rewrite was missed");
+		var selection = new BufferSelection();
+		document.insert(selection, "saved ");
+		require(document.save() && document.checkExternal() == ExternalState.Current && files.reads == 5,
+			"a saved file was not read once to vouch for its stamp");
+		FileSystem.deleteFile(path);
+	}
+
+	/** A file opened in the background is read on another thread and delivered by poll: one load and one document
+		however many ask, a document already open at once, and a failure as an error. */
+	static function backgroundOpens(path:String, syntaxes:SyntaxRegistry):Void {
+		var text = new StringBuf();
+		for (line in 0...20000) text.add("background line " + line + " é🙂\r\n");
+		File.saveContent(path, "\u{FEFF}" + text.toString());
+		var manager = new DocumentManager(syntaxes);
+		var first:Null<Document> = null, second:Null<Document> = null, firstError:Null<Dynamic> = null;
+		manager.openInBackground(path, (document, error) -> { first = document; firstError = error; });
+		manager.openInBackground(path, (document, _) -> second = document);
+		require(first == null && manager.loadingInBackground(), "a background open finished before poll delivered it");
+		var deadline = Sys.time() + 20;
+		while (first == null && firstError == null && Sys.time() < deadline) {
+			manager.poll();
+			Sys.sleep(0.005);
+		}
+		var opened = first;
+		if (opened == null) throw "a background open was not delivered: " + Std.string(firstError);
+		require(second == opened && manager.documents.length == 1 && !manager.loadingInBackground(),
+			"two background opens of one file did not share its load and document");
+		require(opened.buffer.lineCount() == 20001 && opened.buffer.line(19999) == "background line 19999 é🙂"
+			&& opened.newlineLabel() == "CRLF" && opened.encodingLabel() == "UTF-8 with BOM" && !opened.dirty,
+			"a background open lost the file's text, line endings or byte-order mark");
+		var again:Null<Document> = null;
+		manager.openInBackground(path, (document, _) -> again = document);
+		require(again == opened, "a document already open was not passed at once");
+		var missing:Null<Dynamic> = null, delivered = false;
+		manager.openInBackground(path + ".missing", (document, error) -> { delivered = true; missing = error; });
+		deadline = Sys.time() + 20;
+		while (!delivered && Sys.time() < deadline) {
+			manager.poll();
+			Sys.sleep(0.005);
+		}
+		require(delivered && missing != null && manager.documents.length == 1, "a background open of a missing file did not fail");
+		FileSystem.deleteFile(path);
 	}
 
 	static function main():Int {
@@ -476,6 +538,8 @@ class DocumentTestMain {
 			require(saved.checkExternal() == ExternalState.Changed && !saved.save() && File.getContent(arguments[0]) == "other writer\n",
 				"dirty external conflict overwrote disk");
 			require(saved.save(true) && File.getContent(arguments[0]) == saved.buffer.text, "explicit conflict overwrite failed");
+			externalChecksReadOnlyChangedFiles(arguments[0] + ".stamp", syntaxes);
+			backgroundOpens(arguments[0] + ".background", syntaxes);
 			var failing = new Document(arguments[0], File.getContent(arguments[0]), syntaxes, new FailingFileSystem()),
 				failingSelection = new BufferSelection();
 			failing.insert(failingSelection, "unsaved ");

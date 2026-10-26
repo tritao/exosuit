@@ -54,6 +54,19 @@ For iterative development, rebuild and rerun:
 python scripts/build.py && python scripts/run.py
 ```
 
+To rebuild on every save instead, run with `--watch` (relaunches the app) or `--live` (patches Haxe edits into
+the running app):
+
+```sh
+python scripts/run.py --live
+```
+
+> **Warning: a watch or live session keeps the Haxeon compiler it started with.** If you change Haxeon's own
+> compiler (`haxeon/src`, `haxeon/stdlib`) while the session runs, later rebuilds still use the old compiler and
+> nothing reports it. **Restart `run.py` after changing the compiler** before judging whether the change worked.
+> The session logs the compiler it picked once, at startup:
+> `haxeon: compiler worker version <hash> (kept for this watch session)`. See `haxeon/docs/CLI.md`.
+
 ## Headless tests (no UI, no window)
 
 The test suite exercises the headless core (`haxeon.json`, entry `app.Main`)
