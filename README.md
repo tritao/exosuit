@@ -42,7 +42,20 @@ cleanup so the native state is preserved in a dump. Set
 do not enable this diagnostic mode. On Linux with systemd-coredump, inspect a
 failure with `coredumpctl info <pid>` and `coredumpctl debug <pid>`.
 
-On Windows, point `HAXEON_BIN` to the native Haxeon executable:
+On Windows, build everything with the Visual Studio 2026 toolchain from any
+PowerShell prompt (no developer shell needed):
+
+```powershell
+scripts/build-windows.ps1 -Clean     # wipe build outputs, bootstrap Haxeon, build the app
+scripts/build-windows.ps1 -SkipBootstrap   # rebuild only the app
+```
+
+It loads the newest Visual Studio 2026 x64 environment and uses that install's
+bundled CMake, because a system CMake older than 4.2 builds the app's native
+packages with Visual Studio 2022 instead. Pass `-Clean` after switching
+toolchains; CMake will not reuse a build directory made by another generator.
+
+To use a native Haxeon executable instead, point `HAXEON_BIN` to it:
 
 ```powershell
 $env:HAXEON_BIN = 'C:\path\to\haxeon.exe'
