@@ -25,7 +25,8 @@ with tempfile.TemporaryDirectory(prefix='exosuit-codex-') as temporary:
  (runtime/'libsample.so').symlink_to('libsample.so.1')
  subprocess.run([str(HAXEON/'.tools/hashlink/hl'),str(output/'main.hl'),temporary,str(project.parent/'fake-codex.py'),str(ROOT/'scripts/run-codex-proxy.py')],env=env,check=True,timeout=90)
  state=json.loads((root/'fake-codex.json').read_text())
- assert state['starts']==1 and state['prompts']==3,state
+ # One thread for resource "a", however often it is created, and one for the newer-version resource.
+ assert state['starts']==2 and state['prompts']==3,state
  commands=[json.loads(line) for line in (root/'fake-codex-commands.log').read_text().splitlines()]
  assert all(c in [['--version'],['app-server','daemon','start'],['app-server','proxy']] for c in commands),commands
  print('PASS: no duplicate thread/prompt side effects and no shared-daemon stop/restart command')

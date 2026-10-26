@@ -305,7 +305,11 @@ class AgentProviderTestMain {
 		});
 		require(view != null && snapshot().record.state == "working" && snapshot().record.turn != null,
 			"Dropped Codex transport did not automatically restore its active turn");
-		require(snapshot().activity.indexOf("Persisted history") >= 0, "Bounded persisted history not read");
+		// Restored history is conversation items, paged from Codex; the activity text only carries the session's own notes.
+		var restoredHistory = false, restoredItems = snapshot().items;
+		if (restoredItems != null)
+			for (item in restoredItems) if (item.text.indexOf("Persisted history") >= 0) restoredHistory = true;
+		require(restoredHistory, "Bounded persisted history not read");
 		action("stop");
 		wait(function() {
 			action("read");
