@@ -9,6 +9,27 @@ expected range, bisect within it.
 
 Status: ✅ done · 🔨 in progress · ⬜ todo · ⏸ deferred
 
+## Batch measurement after #5, #6, #14, #15, #16 (2026-10-25)
+
+Merged stack (haxeon d091baaf), unprofiled `run.ps1 -NoProfile` captures, same script as the findings doc, tritao's
+editor changes included in both modes. Runs `b-normal`, `b-live`, `b-live-edit` under `runs/`.
+
+| Median / p95 (ms) | Normal | Live | Live, after one edit |
+|---|---|---|---|
+| Hover frame | 10.6 / 13.3 | 10.5 / 15.2 | 11.6 / 13.8 |
+| Scroll frame | 10.9 / 14.1 | 9.9 / 12.9 | 11.8 / 13.8 |
+| Input lag, hover | 1.1 / 7.7 | 1.2 / 18.5 | 1.4 / 18.0 |
+| Input lag, scroll | 0.9 / 8.1 | 1.1 / 7.0 | 1.0 / 6.6 |
+| GC pause mean / max | 4.5 / 9.7 | 5.7 / 6.8 | |
+
+- Run time: live matches normal within noise (the profiled baseline had live scroll at 25 ms vs 19 ms, and live GC
+  pauses averaged ~45 ms). Open: hover p95 input lag is ~18 ms in both live runs vs 7.7 ms in normal.
+- Edit latency: one edit patched 9.5 s after the save (was ~12 s). Compile 6.8 s: **IR assembly 3.9 s** (~1 s of it
+  GC), typing/lowering 0.9 s, incremental backend 0.8 s, frontend 0.65 s (graph 50 ms, was ~0.5 s). IR assembly is
+  now the largest single cost; see #11.
+- The batch also turned up: the editor build broke under Haxeon (#15, fixed in d091baaf; the suites build the compiler
+  with stock Haxe, so the self-hosting check is now part of every merge), and #20 below.
+
 ## Edit latency: save to applied patch (about 10 s now)
 
 | # | Optimization | Expected gain | Effort | Status | Commits / measured |
@@ -23,7 +44,8 @@ Status: ✅ done · 🔨 in progress · ⬜ todo · ⏸ deferred
 | 8 | Live edits write only the patch and stamp; defer the 40 MB `.hl`, its build-id hash and the side files | 0.7–1.1 s | small–medium | ⬜ | |
 | 9 | Incremental inliner: stop re-encoding ~2k function pairs per compile (4e) | 1–1.5 s | medium | ⬜ | |
 | 10 | Edit-local "changed" comparison plus a separate debug-position refresh in patches (4f) | 0.5–1 s, and a much smaller patch | medium | ⬜ | |
-| 11 | Remaining whole-program floor: semantic canonicalization and invalidation, IR assembly, re-reading sources | 1–2 s | large | ⬜ | |
+| 11 | Remaining whole-program floor: semantic canonicalization and invalidation, IR assembly, re-reading sources | 1–2 s; IR assembly alone measured 3.9 s for a 3-function edit, so likely more | large | ⬜ | |
+| 20 | A restarted live session reloads on its first edit: the app starts from a `live.hl` an earlier compile server built, the new worker has no patch history, so the first edit compiles cold (~24 s) and reloads | first edit ~24 s → normal edit | medium | ⬜ | seen in the batch run |
 
 ## Cold build (about 33 s compile)
 
