@@ -2911,7 +2911,7 @@ class ExosuitApp implements DesktopUiApplication {
 				if (snapshot == null) continue;
 				// The group scan costs as much as the change list is long, so redo it only for a new snapshot.
 				var scanned = target.snapshot;
-				if (scanned == null || (scanned != snapshot && !haxe.Int64.eq(scanned.revision, snapshot.revision))) {
+				if (scanned == null || (scanned != snapshot && scanned.revision != snapshot.revision)) {
 					var untracked = false, worktree = false;
 					for (group in snapshot.groups) for (resource in group.resources) if (resource.path == relative) {
 						if (group.id == ScmGroupId.Untracked) untracked = true;
