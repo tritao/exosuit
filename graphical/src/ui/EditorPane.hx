@@ -551,7 +551,7 @@ class EditorPane implements View {
 				new haxeon.ui.GradientStop(0.0, Color.rgba(0, 0, 0, 0)),
 				new haxeon.ui.GradientStop(1.0, Color.rgba(0, 0, 0, editorTheme.lightSyntax ? 0.15 : 0.35))
 			]);
-		});
+		}, "minimap-shadow:" + editorTheme.lightSyntax + ":" + viewportGeometry.overlapsMinimap(scrollController.offsetX));
 		container.add(shadow);
 		// Start from the last layout's placement so an unchanged minimap needs no layout feedback.
 		if (minimapHostWidth > 0.0) {
