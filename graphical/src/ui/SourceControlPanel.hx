@@ -72,7 +72,7 @@ class SourceControlPanel implements View {
 		this.commitMenu = commitMenu;
 		this.retryAction = retryAction == null ? function() {} : retryAction;
 		this.trustAction = trustAction == null ? function(_) {} : trustAction;
-		model = new ScmTreeModel(source, theme, changed, mutationAction);
+		model = new ScmTreeModel(source, theme, changed, mutationAction, this.trustAction);
 	}
 
 	public function dispose():Void {
@@ -112,6 +112,11 @@ class SourceControlPanel implements View {
 			rows.push(message("empty", "No Git repository found in this folder", tokens.textSecondary));
 		}
 
+		if (Lambda.exists(model.repositoriesSnapshot(), function(repository) return !repository.trusted))
+			rows.push(message("trust-summary", source.isRemote()
+				? "Trust restricted repositories on the machine running Git."
+				: "Trust repositories to enable Git changes.", tokens.textSecondary));
+
 		for (repository in model.repositoriesSnapshot()) {
 			var failure = model.error(repository.id);
 			if (failure != null) {
@@ -121,17 +126,7 @@ class SourceControlPanel implements View {
 				retryRepository.variant = ButtonVariant.Secondary;
 				rows.push(new KeyedView("retry:" + repository.id, retryRepository));
 			}
-			if (!repository.trusted) {
-				var messageText = source.isRemote() ? "Trust this repository on the machine that runs Git" :
-					"This repository is restricted until trusted";
-				rows.push(message("trust:" + repository.id, messageText, tokens.warning));
-				if (!source.isRemote()) {
-					var captured = repository;
-					var trust = new Button("Trust Repository", null, function() trustAction(captured), "scm-trust:" + repository.id);
-					trust.variant = ButtonVariant.Secondary;
-					rows.push(new KeyedView("trust-action:" + repository.id, trust));
-				}
-			}
+
 			var snapshot = model.snapshot(repository.id);
 			if (snapshot != null && snapshot.truncated)
 				rows.push(message("truncated:" + repository.id, "Untracked file list is truncated at the configured limit", tokens.warning));

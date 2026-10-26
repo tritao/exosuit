@@ -32,6 +32,7 @@ class ScmTreeModel implements TreeViewModel {
 	final theme:Theme;
 	final changed:Void->Void;
 	final mutationAction:(ScmRepository, Null<ScmGroup>, Null<ScmResource>)->Void;
+	final trustAction:ScmRepository->Void;
 	final cancelSubscription:Void->Void;
 	var repositories:Array<ScmRepository> = [];
 	var roots:Array<ScmRepository> = [];
@@ -45,12 +46,13 @@ class ScmTreeModel implements TreeViewModel {
 	var disposed:Bool = false;
 
 	public function new(source:ScmSource, theme:Theme, changed:Void->Void,
-		?mutationAction:(ScmRepository, Null<ScmGroup>, Null<ScmResource>)->Void) {
+		?mutationAction:(ScmRepository, Null<ScmGroup>, Null<ScmResource>)->Void, ?trustAction:ScmRepository->Void) {
 		if (source == null || theme == null || changed == null) throw "Invalid source-control tree model";
 		this.source = source;
 		this.theme = theme;
 		this.changed = changed;
 		this.mutationAction = mutationAction;
+		this.trustAction = trustAction;
 		cancelSubscription = source.subscribe(function(_, _) refreshData());
 		refreshData();
 		discover();
@@ -140,6 +142,21 @@ class ScmTreeModel implements TreeViewModel {
 				detail += (detail.length > 0 ? "  " : "") + (head.head.ahead > 0 ? "↑" + head.head.ahead : "") +
 					(head.head.behind > 0 ? "↓" + head.head.behind : "");
 			if (head != null && head.head.operation != null) detail += (detail.length > 0 ? "  " : "") + operationLabel(head.head.operation);
+			if (!repo.trusted) {
+				var statusStyle = new LayoutStyle();
+				statusStyle.width = LayoutAxis.fixed(68.0);
+				actionChildren.push(new KeyedView("trust-status", new Text("Restricted", statusStyle,
+					theme.tokens.warning, TextStyleOverride.text(12.0))));
+				if (!source.isRemote() && trustAction != null) {
+					var trustStyle = new LayoutStyle();
+					trustStyle.width = LayoutAxis.fixed(58.0);
+					trustStyle.height = LayoutAxis.fixed(22.0);
+					var trust = new Button("Trust", trustStyle, function() trustAction(repo), "scm-trust:" + repo.id);
+					trust.variant = haxeon.ui.widgets.controls.ButtonVariant.Secondary;
+					trust.accessibilityLabel = "Trust repository " + repo.root;
+					actionChildren.push(new KeyedView("trust-action", trust));
+				}
+			}
 			if (mutationAction != null && source.canWrite(repo.id) && head != null &&
 				(hasGroupResources(head, [ScmGroupId.WorkingTree, ScmGroupId.Untracked]) || hasGroupResources(head, [ScmGroupId.Index]))) {
 				var stage = hasGroupResources(head, [ScmGroupId.WorkingTree, ScmGroupId.Untracked]);
