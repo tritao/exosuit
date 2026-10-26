@@ -47,6 +47,28 @@ def dist(values):
             "max": round(max(values), 1) if values else None}
 
 
+def align(scenario, inputs, tolerance=5_000_000):
+    """The offset from the scenario's clock to the trace's that lines up the most injected keys and clicks with input
+    stamps of the same kind, and how many it lines up; (None, 0) when too few match to trust."""
+    marks = scenario.get("marks") or []
+    stamps = {kind: sorted(t for t, k, _, _ in inputs if k == kind) for kind in ("key", "button")}
+
+    def near(sorted_times, t):
+        i = bisect.bisect_left(sorted_times, t - tolerance)
+        return i < len(sorted_times) and sorted_times[i] <= t + tolerance
+
+    best, best_matched = None, 0
+    for kind, mark in marks[:8]:
+        for stamp in stamps.get(kind, []):
+            candidate = stamp - mark
+            matched = sum(1 for k, t in marks if near(stamps.get(k, []), t + candidate))
+            if matched > best_matched:
+                best, best_matched = candidate, matched
+    if best_matched < max(3, len(marks) // 2):
+        return None, 0
+    return best, best_matched
+
+
 def main():
     trace = sys.argv[1]
     scenario = json.load(open(sys.argv[sys.argv.index("--scenario") + 1])) if "--scenario" in sys.argv else None
@@ -79,11 +101,15 @@ def main():
         latency = (frames[k][1] - os_time) / 1e6 if k < len(frames) else None
         inputs.append((os_time, kinds.get(p.ts, "move"), p.v / 1e6, latency))
 
-    offset = None
-    if scenario and scenario.get("first_move_ns"):
+    offset, matched = align(scenario, inputs) if scenario else (None, 0)
+    if offset is None and scenario and scenario.get("first_move_ns"):
+        # Older scenarios record only the first move; the editor can miss the first moves, so this may be late.
         first = next((d.ts - d.v for d in dequeued if d.ts in moves), None)
         if first is not None:
             offset = first - scenario["first_move_ns"]
+            print("phases aligned on the first move only (no key or click marks matched)")
+    elif offset is not None:
+        print(f"phases aligned on {matched} of {len(scenario['marks'])} injected keys and clicks")
 
     def summarize(a, z):
         fr = [(s, e) for s, e in frames if a <= s < z]

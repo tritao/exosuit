@@ -10,7 +10,8 @@ Phases, after the editor window appears and settles:
   sidebar      4 s clicks on three rows of the side bar's file tree
   idle-end     4 s nothing
 OUT.json gets each phase's start and end on time.perf_counter_ns() (QueryPerformanceCounter, the clock NativeKit stamps
-input with) and the time of the first injected move, which metrics.py aligns with the first input in the trace.
+input with), and the time of every injected key and click, which metrics.py matches against the trace's input stamps to
+align the two clocks. (The first move is not enough: the editor can miss the first moves of the hover phase.)
 Keep the desktop unlocked: SendInput does not reach a locked session."""
 
 import ctypes
@@ -56,6 +57,15 @@ def main():
     text_x, text_y = left + (right - left) * 0.55, top + (bottom - top) * 0.45
     phases = []
     first_move_ns = None
+    marks = []  # (kind, perf_counter_ns) of each key and click, sent right after the stamp
+
+    def key(vk, down):
+        marks.append(("key", time.perf_counter_ns()))
+        driver.key(vk, down)
+
+    def click():
+        marks.append(("button", time.perf_counter_ns()))
+        driver.click()
 
     def phase(name, seconds, body):
         start = time.perf_counter_ns()
@@ -80,21 +90,21 @@ def main():
     def keys(end):
         driver.move(text_x, text_y)
         time.sleep(0.2)
-        driver.click()
+        click()
         time.sleep(0.3)
         for vk in (VK_DOWN, VK_DOWN, VK_RIGHT, VK_RIGHT, VK_UP, VK_LEFT, VK_DOWN, VK_RIGHT):
-            driver.key(vk, True)
+            key(vk, True)
             time.sleep(0.05)
-            driver.key(vk, False)
+            key(vk, False)
             time.sleep(rng.uniform(0.15, 0.3))
         for vk in (VK_DOWN, VK_UP):  # held: autorepeat at about 30 Hz
-            driver.key(vk, True)
+            key(vk, True)
             t = time.perf_counter()
             for _ in range(20):
                 t += 0.033
                 driver.sleep_until(t)
-                driver.key(vk, True)
-            driver.key(vk, False)
+                key(vk, True)
+            key(vk, False)
             time.sleep(0.2)
 
     def scroll(end):
@@ -107,7 +117,7 @@ def main():
         for row in range(3):
             driver.move(left + 110, top + 120 + row * 24)
             time.sleep(0.3)
-            driver.click()
+            click()
             time.sleep(0.9)
         driver.move(text_x, text_y)
 
@@ -119,7 +129,8 @@ def main():
     phase("sidebar", 4, sidebar)
     phase("idle-end", 4, idle)
     with open(out, "w") as f:
-        json.dump({"first_move_ns": first_move_ns, "phases": phases, "window": [left, top, right, bottom]}, f, indent=1)
+        json.dump({"first_move_ns": first_move_ns, "marks": marks, "phases": phases, "window": [left, top, right, bottom]},
+                  f, indent=1)
     print(f"scenario done: {len(phases)} phases")
 
 
