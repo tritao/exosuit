@@ -287,7 +287,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       instance: instance(),
       id: WorkspaceIds.create("agent"),
       group: group,
-      name: defaults != null && defaults.provider == "claude" ? "Claude" : "Codex",
+      name: defaults != null && defaults.provider == "claude" ? "Claude" : defaults != null && defaults.provider == "pi" ? "Pi" : "Codex",
       provider: defaults == null ? null : defaults.provider,
       thread: thread,
       defaultModel: thread == null && defaults != null ? defaults.model : null,

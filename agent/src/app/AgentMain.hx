@@ -81,8 +81,10 @@ class AgentMain {
 		var claudeExecutable = Sys.getEnv("EXOSUIT_CLAUDE_BIN");
         var claude = new workspace.provider.ClaudeProvider(directories, function() return service.snapshot().groups, processes, clock, store,
             process.ExecutablePath.resolve(claudeExecutable == null ? "claude" : claudeExecutable), Sys.getEnv("EXOSUIT_CLAUDE_SCRIPT"));
-
-		var agents = new workspace.provider.CodexProvider("workspace", args.length >= 7 ? args[6] : args[3], directories, function() return service.snapshot().groups, processes, clock, store, process.ExecutablePath.resolve(executable == null ? "codex" : executable), Sys.getEnv("EXOSUIT_CODEX_PROXY_LAUNCHER"), codexScript, claude);
+        var piExecutable = Sys.getEnv("EXOSUIT_PI_BIN");
+        var pi = new workspace.provider.PiProvider(directories, function() return service.snapshot().groups, processes, clock,
+            haxe.io.Path.directory(args[2]), store, process.ExecutablePath.resolve(piExecutable == null ? "pi" : piExecutable), Sys.getEnv("EXOSUIT_PI_SCRIPT"));
+		var agents = new workspace.provider.CodexProvider("workspace", args.length >= 7 ? args[6] : args[3], directories, function() return service.snapshot().groups, processes, clock, store, process.ExecutablePath.resolve(executable == null ? "codex" : executable), Sys.getEnv("EXOSUIT_CODEX_PROXY_LAUNCHER"), codexScript, claude, [pi]);
 		var noiseIdentity:Null<WorkspaceNoiseIdentity> = null;
 		if (relayHost != null && store == null)
 			throw "Remote workspace access requires persistent device storage";

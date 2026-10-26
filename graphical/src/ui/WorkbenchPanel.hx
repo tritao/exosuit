@@ -137,6 +137,9 @@ class WorkbenchPanel implements View {
 					client.agentService().canControlAgents() && !client.agentService().agentBusy() && agentCanBeRemoved(agent)));
 			}
 		}
+        items.push(new MenuItem("new-pi", "New Pi session", function() {
+            client.agentService().createAgent(groupId, null, openAgent, {provider:"pi",model:null,effort:null,permissionProfile:"supervised"});
+        }, group != null && client.agentService().canControlAgents() && !client.agentService().agentBusy()));
         items.push(new MenuItem("new-claude", "New Claude session", function() {
             client.agentService().createAgent(groupId, null, openAgent, {provider:"claude",model:null,effort:null,permissionProfile:"default"});
         }, group != null && client.agentService().canControlAgents() && !client.agentService().agentBusy()));

@@ -24,6 +24,8 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(14) var provider:Null<String>;
 	@:optional @:id(15) var permissionMode:Null<String>;
 	@:optional @:id(16) var replay:Null<Array<AgentActivityItem>>;
+	/** A native conversation must exist after delivery was attempted, independently of bounded replay. */
+	@:optional @:id(17) var nativeSessionRequired:Null<Bool>;
 }
 
 @:wire typedef AgentQuery = {
@@ -80,7 +82,9 @@ import haxeon.wire.MessagePack;
 	@:id(2) var method:String;
 	@:id(3) var detail:String;
 	@:id(4) var reviewable:Bool;
-
+	/** Native extension dialog type. Absent preserves existing provider request semantics. */
+	@:optional @:id(5) var inputKind:Null<String>;
+	@:optional @:id(6) var options:Null<Array<String>>;
 }
 
 @:wire typedef AgentView = {

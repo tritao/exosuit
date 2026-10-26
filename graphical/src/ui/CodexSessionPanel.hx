@@ -90,9 +90,18 @@ class CodexSessionPanel implements View {
     };
   }
 
+  static function piPermissionLabel(mode:String):String {
+    return switch (mode) {
+      case "supervised": "Supervised";
+      case "acceptEdits": "Auto-accept edits";
+      case "fullAccess": "Full access";
+      default: "Supervised";
+    };
+  }
+
   static function recoveryPresentation(reason:Null<String>):CodexRecoveryPresentation {
     return switch (reason) {
-      case "explicit-resume": {label: "Resume Claude session", message: "Resume the saved Claude session explicitly. Any prompt whose delivery was uncertain will not be resent. Activity shows a bounded local snapshot, not the full CLI history.", retryLabel: "Resume session"};
+      case "explicit-resume": {label: "Resume session", message: "Resume the saved conversation. Messages with uncertain delivery will not be resent. Recent activity is a shortened snapshot of the conversation.", retryLabel: "Resume session"};
       case "thread-unavailable": {label: "Thread unavailable", message: "Codex could not locate this thread in the current workspace’s history. Retrying will not create a replacement. Create a new session below, or attach the thread if it is still available. This saved session record will remain in Workbench.", retryLabel: null};
       case "active-writer": {label: "Open in another client", message: "Another Codex client currently owns this thread. Finish or close the session there, then check its availability here.", retryLabel: "Check availability"};
       case "workspace-mismatch": {label: "Different workspace", message: "This thread belongs to a different workspace. Switch to that workspace or attach a thread from the current one.", retryLabel: null};
@@ -104,11 +113,11 @@ class CodexSessionPanel implements View {
   function openPermissionsMenu(client:WorkspaceAgentClient, id:String, thread:String, event:UiEvent):Void {
     var initial = client.agentView(id);
     if (initial == null) return;
-    if (initial.record.provider == "claude") {
+    if (initial.record.provider == "claude" || initial.record.provider == "pi") {
       var choices:Array<MenuItem> = [];
-      for (mode in ["default", "acceptEdits", "plan"]) {
+      for (mode in (initial.record.provider == "pi" ? ["supervised", "acceptEdits", "fullAccess"] : ["default", "acceptEdits", "plan"])) {
         var selectedMode = mode;
-        choices.push(new MenuItem(mode, mode + (initial.record.permissionMode == mode ? "  ✓" : ""), function() {
+        choices.push(new MenuItem(mode, (initial.record.provider == "pi" ? piPermissionLabel(mode) : mode) + (initial.record.permissionMode == mode ? "  ✓" : ""), function() {
           client.agentAction(id, "permissions", selectedMode, null);
         }));
       }
@@ -183,8 +192,8 @@ class CodexSessionPanel implements View {
       prompt = v;
       frame();
     }, inputStyle, null, null, null, true);
-    field.label = view.record.provider == "claude" ? "Claude prompt" : "Codex prompt";
-    field.placeholder = view.record.provider == "claude" ? "Message Claude…" : "Message Codex…";
+    field.label = view.record.provider == "claude" ? "Claude prompt" : view.record.provider == "pi" ? "Pi prompt" : "Codex prompt";
+    field.placeholder = view.record.provider == "claude" ? "Message Claude…" : view.record.provider == "pi" ? "Message Pi…" : "Message Codex…";
     field.enabled = client.canControlAgents() && connectionReady;
     var stop = new Button("Stop", null,
       function() client.agentAction(id, "stop", "", null), "codex-stop");
@@ -196,8 +205,8 @@ class CodexSessionPanel implements View {
     headerButtonStyle.height = LayoutAxis.fixed(40);
     var heading = paragraph(view.record.name + " · " + (working ? "Working…" : stateLabel));
     var header:Array<KeyedView> = [new KeyedView("title", heading)];
-    if (working || ((view.record.provider == "claude") && view.requests.length > 0)) header.push(new KeyedView("stop", stop));
-    var permissions = new Button("Permissions · " + ((view.record.provider == "claude") ? view.record.permissionMode : CodexPermissions.labelForRecord(view.record.permissionProfile,
+    if (working || ((view.record.provider == "claude" || view.record.provider == "pi") && view.requests.length > 0)) header.push(new KeyedView("stop", stop));
+    var permissions = new Button("Permissions · " + (view.record.provider == "pi" ? piPermissionLabel(view.record.permissionMode) : view.record.provider == "claude" ? view.record.permissionMode : CodexPermissions.labelForRecord(view.record.permissionProfile,
       view.record.sandboxPolicy, view.record.approvalPolicy)) + "  ▾", headerButtonStyle, null, "codex-permissions");
     permissions.enabled = control && !working && view.requests.length == 0;
     permissions.onClickEvent = function(event) {
@@ -254,7 +263,7 @@ class CodexSessionPanel implements View {
       ));
       if (r.method == "item/tool/requestUserInput") {
         var answer = new Button(
-          "Answer using prompt (id=value per line)",
+          r.inputKind != null ? "Answer using prompt" : "Answer using prompt (id=value per line)",
           null,
           function() client.agentAction(id, "answer", prompt, r.id),
           "codex-answer-" + r.id
@@ -264,7 +273,7 @@ class CodexSessionPanel implements View {
           "answer-" + r.id,
           answer
         ));
-        if (view.record.provider == "claude") activity.push(new KeyedView("cancel-" + r.id,
+        if (r.inputKind != null || view.record.provider == "claude") activity.push(new KeyedView("cancel-" + r.id,
           new Button("Cancel", null, function() client.agentAction(id, "decline", "", r.id))));
       } else if (r.method == "item/commandExecution/requestApproval" || r.method == "item/fileChange/requestApproval") {
         var approve = new Button(
@@ -372,7 +381,7 @@ class CodexSessionPanel implements View {
       }
     }
     if (details && diagnostics) activity.push(new KeyedView("diagnostics", paragraph(view.activity)));
-    if (working) activity.push(new KeyedView("working", new Text(view.record.provider == "claude" ? "Claude is working…" : "Codex is working…", null, tokens.mutedText)));
+    if (working) activity.push(new KeyedView("working", new Text(view.record.provider == "claude" ? "Claude is working…" : view.record.provider == "pi" ? "Pi is working…" : "Codex is working…", null, tokens.mutedText)));
 
     var error = client.agentError() == null ? view.error : client.agentError();
     if ((view.record.state == "reconnect-failed" || connectionState == "disconnected")

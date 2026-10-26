@@ -83,7 +83,7 @@ class CodexProvider implements WorkspaceAgents {
 		this.bridge = bridge;
 		if (persistence != null)
 			for (r in persistence.loadAgents()) {
-				if (r.provider == "claude") continue;
+				if (r.provider == "claude" || r.provider == "pi") continue;
 				if (r.provider != null && r.provider != "codex") throw "Unknown persisted agent provider";
 				if (!valid(r.id, 128)
 					|| !valid(r.name, 256)
@@ -867,7 +867,7 @@ class CodexProvider implements WorkspaceAgents {
 				ctx.fail({code: "invalid_request", message: "Invalid agent identity", ambiguous: false});
 				return;
 			}
-			if (q.provider != null && q.provider != "codex" && q.provider != "claude") {
+			if (q.provider != null && q.provider != "codex" && q.provider != "claude" && q.provider != "pi") {
                 ctx.fail({code:"invalid_provider",message:"Unsupported agent provider",ambiguous:false});return;
             }
             for (provider in localProviders) if (q.provider == provider.driverKind() || provider.owns(q.id)) {
