@@ -169,6 +169,8 @@ class UiWorkbenchHost implements WorkbenchHost {
 	public var activateSearch:Void->Void = function() {};
 	public var captureSidebar:Null<Void->String>;
 	public var captureDockLayout:Null<Void->String>;
+	public var captureExtraLayout:Null<Void->Array<String>>;
+	public var restoreExtraLayout:Null<Array<String>->Void>;
 	public var restoreSidebar:Null<Array<String>->Void>;
 	public var workspaceSearchQuery(default, null):String = "";
 	public var workspaceSearchResults(default, null):Array<SearchMatch> = [];
@@ -1137,6 +1139,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		result.push("D\tdock\t1\t" + dockSnapshot);
 		result.push("Q\t" + activePane.id);
 		if (captureSidebar != null) result.push(captureSidebar());
+		if (captureExtraLayout != null) for (line in captureExtraLayout()) result.push(line);
 		for (index in 0...panelTerminals.length) {
 			var terminal = panelTerminals[index];
 			if (!terminal.disposed && terminal.cwd.indexOf("\t") < 0 && terminal.cwd.indexOf("\n") < 0)
@@ -1308,6 +1311,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		dockActions.model.setDefaultLayout(fallbackDockLayout(defaultDockLayout, panes[0].id));
 		if (snapshot != null) dockActions.model.restoreJson(snapshot);
 		if (restoreSidebar != null) restoreSidebar(lines);
+		if (restoreExtraLayout != null) restoreExtraLayout(lines);
 		// Invalid/older layouts still reopen every resolved pane and document.
 		for (pane in panes) if (!dockActions.model.isOpen(pane.id)) dockActions.model.open(pane.id);
 		var requested = selectedPane == null ? null : paneById(selectedPane);

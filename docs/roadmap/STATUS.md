@@ -50,6 +50,35 @@ and full browser builds pass. These checks are registered with the existing
 runners. No group-focus or mode UI was added ahead of its later milestone.
 Next: M18.3's title-bar controls and persistent right dock region.
 
+
+### M18.3 — layout controls and right dock evidence
+
+M18.2 landed locally as `f603103`. Added four title-bar controls for the left
+sidebar, bottom tools, right context panel and Layout menu, with commands,
+shortcut tooltips and selected-state feedback. The right Files/Changes panel
+is a real resizable dock region with independent Files state and SCM scrolling.
+Removed the standalone Terminal toolbar button. Bottom visibility retains its
+tabs without creating a shell; closed regions retain their sizes in versioned
+optional session metadata. Ctrl+Alt+J toggles bottom tools, preserving Ctrl+J
+for Join Lines; Ctrl+Alt+B toggles right and Ctrl+Alt+L opens Layout.
+
+Focused dock tests pass closed-region resize persistence, bottom-tab restoration
+and corrupt-metadata fallback. Separate-process Xvfb checks pass all four
+controls, keyboard actions, divider dragging, restart visibility/width and
+phone/desktop transitions, including shutdown on phone and desktop restart.
+Desktop width is preserved separately from the phone sidebar's full-width
+measurement. Desktop and phone captures were reviewed; the full browser build
+passes with the sibling Emscripten toolchain. Tests are wired into existing
+runners. Keyboard pane, saved-workspace and ActiveContext UI regressions pass;
+`tests/application-test` also passes.
+
+The full workspace UI runner stops in its initial `write` phase with
+"terminal did not resize back to editor". The identical phase also fails on
+an isolated archive of pre-layout commit `b91f87a` using the same toolkit;
+this predates M18.3. Logs: `/tmp/exosuit-m18-final-ui-suite.log` and
+`/tmp/exosuit-m18-baseline.log`. Focused M18 captures and restart artifacts:
+`/tmp/exosuit-m18-layout-final`. M18.4 and later remain outside this request.
+
 Last updated: 2026-10-10.
 
 ## M17 source control — in progress

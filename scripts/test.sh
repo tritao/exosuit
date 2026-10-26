@@ -151,6 +151,7 @@ saved_workspace_fixture=$(mktemp -d)
 PRAGTICAL_PORTABLE="$saved_workspace_fixture/state" run_test saved-workspace "$saved_workspace_fixture/roots"
 active_context_fixture=$(mktemp -d)
 PRAGTICAL_PORTABLE="$active_context_fixture/state" run_test active-context "$active_context_fixture/roots"
+run_test layout-controls
 run_test project-scan-yield
 chmod 600 "$workspace_root/unreadable.txt"
 

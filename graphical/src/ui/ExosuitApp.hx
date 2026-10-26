@@ -130,6 +130,8 @@ class ExosuitApp implements DesktopUiApplication {
 	var scmDirectoryWatch:Null<ScmDirectoryWatch>;
 	var scmFocusSubscription:Null<NativeKitEventSubscription>;
 	final dock:DockWorkspaceModel;
+	final layoutControls:WorkbenchLayoutControls;
+	var contextFiles:Null<ContextFilesView>;
 	var dockPanelContents:Array<DockPanelContent>;
 	final editorPanes:Map<Int, EditorPane> = new Map();
 	var nextTerminalId:Int = 1;
@@ -194,6 +196,7 @@ class ExosuitApp implements DesktopUiApplication {
 	static inline var PHONE_LAYOUT_MAX_WIDTH:Float = 640.0;
 	var phoneLayoutActive:Bool = false;
 	var desktopDockRoot:Null<DockNode>;
+	var desktopSidebarWidth:Float = 260;
 	var desktopDockActivePanel:Null<String>;
 	var phoneContentRoot:Null<DockNode>;
 	static inline var TOOLBAR_HEIGHT:Float = 40.0;
@@ -247,6 +250,7 @@ class ExosuitApp implements DesktopUiApplication {
 		if (this.capabilities.supports(HostCapability.SourceControl))
 			registerSidebarDestination("scm", IconName.Hierarchy, sourceControlPanel, new haxeon.ui.widgets.sidebar.SidebarModeOptions("Source Control", 15, true));
 		dock = makeDock();
+		layoutControls = new WorkbenchLayoutControls(dock);
 		if (openPath == null) dock.close("explorer");
 		var capturedHost:UiWorkbenchHost = null;
 		application = new Application(function(exosuitTheme, focus, workspace, settings) {
@@ -372,10 +376,13 @@ class ExosuitApp implements DesktopUiApplication {
 		searchPanel = new WorkspaceSearchPanel(application, host, requestFrame,
 			remoteFileSearch, openWorkspaceSearchResult);
 		host.captureSidebar = function() {
+			if (phoneLayoutActive) sidebar.rememberWidth(desktopSidebarWidth);
 			sidebar.setVisible(dock.isOpen("explorer"));
 			return "B\tsidebar\t1\t" + sidebar.encode();
 		};
 		host.captureDockLayout = captureDockLayout;
+		host.captureExtraLayout = function() return [layoutControls.capture()];
+		host.restoreExtraLayout = layoutControls.restore;
 		host.restoreSidebar = function(lines) {
 			for (line in lines) if (StringTools.startsWith(line, "B\tsidebar\t1\t")) sidebar.restore(line.substring(12));
 		};
@@ -448,6 +455,8 @@ class ExosuitApp implements DesktopUiApplication {
 		var model = new DockWorkspaceModel();
 		var terminalUiAvailable = capabilities.supports(Processes) || createWorkspaceTerminal != null;
 		model.register(new DockPanelDescriptor("explorer", "Sidebar", true, true, IconName.FolderOpen, haxeon.ui.docking.DockPanelHeaderMode.Content, new haxeon.ui.docking.DockPanelGrouping("sidebar")));
+		if (capabilities.supports(HostCapability.Filesystem))
+			model.register(new DockPanelDescriptor("context-panel", "Context", true, true, IconName.FolderOpen, haxeon.ui.docking.DockPanelHeaderMode.Content, new haxeon.ui.docking.DockPanelGrouping("context", false)));
 		model.register(new DockPanelDescriptor("editor", "Editor", false, true, IconName.NewFile, haxeon.ui.docking.DockPanelHeaderMode.Content, new haxeon.ui.docking.DockPanelGrouping("editors", false)));
 		model.register(new DockPanelDescriptor("problems", "Problems", true, true, IconName.AlertTriangle, haxeon.ui.docking.DockPanelHeaderMode.Dock, new haxeon.ui.docking.DockPanelGrouping("tools")));
 		if (capabilities.supports(Processes))
@@ -469,6 +478,8 @@ class ExosuitApp implements DesktopUiApplication {
 			new DockPanelContent("editor", function(_) return editorPanel("editor")),
 			new DockPanelContent("problems", function(_) return new ProblemsPanel(host, application.activeContext.roots, application.activeContext.kind == workspace.ContextKind.Group))
 		];
+		if (capabilities.supports(HostCapability.Filesystem))
+			dockPanelContents.push(new DockPanelContent("context-panel", function(_) return contextPanel()));
 		if (capabilities.supports(Processes))
 			dockPanelContents.push(new DockPanelContent("build", function(_) return new BuildOutputPanel(host, application.activeContext.kind == workspace.ContextKind.Group ? application.activeContext.roots : null)));
 		if (terminalUiAvailable)
@@ -517,9 +528,10 @@ class ExosuitApp implements DesktopUiApplication {
 		var phone = viewportWidth > 0 && viewportWidth <= PHONE_LAYOUT_MAX_WIDTH;
 		if (phone) {
 			if (!phoneLayoutActive) {
+				desktopSidebarWidth = sidebar.width;
 				desktopDockRoot = haxeon.ui.docking.DockNodeTools.clone(dock.root);
 				desktopDockActivePanel = dock.activePanelId;
-				phoneContentRoot = haxeon.ui.docking.DockNodeTools.remove(desktopDockRoot, "explorer");
+				phoneContentRoot = haxeon.ui.docking.DockNodeTools.remove(haxeon.ui.docking.DockNodeTools.remove(desktopDockRoot, "explorer"), "context-panel");
 				phoneLayoutActive = true;
 			} else if (!sidebar.visible) {
 				phoneContentRoot = haxeon.ui.docking.DockNodeTools.clone(dock.root);
@@ -531,12 +543,15 @@ class ExosuitApp implements DesktopUiApplication {
 
 		if (!sidebar.visible) phoneContentRoot = haxeon.ui.docking.DockNodeTools.clone(dock.root);
 		phoneLayoutActive = false;
+		sidebar.rememberWidth(desktopSidebarWidth);
 		var restored = sidebar.visible ?
 			(desktopDockRoot == null ? haxeon.ui.docking.DockNodeTools.clone(dock.root) :
 				haxeon.ui.docking.DockNodeTools.clone(desktopDockRoot)) :
 			(phoneContentRoot == null ? haxeon.ui.docking.DockNodeTools.remove(dock.root, "explorer") :
 				haxeon.ui.docking.DockNodeTools.clone(phoneContentRoot));
 		if (!sidebar.visible) restored = haxeon.ui.docking.DockNodeTools.remove(restored, "explorer");
+		if (desktopDockRoot != null && haxeon.ui.docking.DockNodeTools.contains(desktopDockRoot, "context-panel") && !haxeon.ui.docking.DockNodeTools.contains(restored, "context-panel"))
+			restored = layoutControls.withRight(restored);
 		if (!haxeon.ui.docking.DockNodeTools.same(dock.root, restored)) dock.setRoot(restored);
 		if (sidebar.visible && !dock.isOpen("explorer")) {
 			var target = dock.isOpen(host.activePane.id) ? host.activePane.id :
@@ -580,6 +595,8 @@ class ExosuitApp implements DesktopUiApplication {
 				haxeon.ui.docking.DockNodeTools.clone(phoneContentRoot);
 			active = desktopDockActivePanel;
 		}
+		if (haxeon.ui.docking.DockNodeTools.contains(desktopDockRoot, "context-panel") && !haxeon.ui.docking.DockNodeTools.contains(layout, "context-panel"))
+			layout = layoutControls.withRight(layout);
 		if (active != null && !haxeon.ui.docking.DockNodeTools.contains(layout, active))
 			active = haxeon.ui.docking.DockNodeTools.firstPanel(layout);
 		return haxeon.ui.docking.DockWorkspaceSnapshotCodec.encode(
@@ -915,6 +932,12 @@ class ExosuitApp implements DesktopUiApplication {
 			new Shortcut(UiKey.S, UiModifier.Control)));
 		ui.commands.register(new Command("file.close-tab", "Close Tab", function() application.requestCloseActiveTab(),
 			new Shortcut(87 /* W */, UiModifier.Control)));
+		ui.commands.register(new Command("view.layout-bottom", "Toggle Bottom Panel", function() { layoutControls.toggleBottom(); requestFrame(); },
+			new Shortcut(UiKey.J, UiModifier.Control | UiModifier.Alt), function() return !phoneLayoutActive));
+		if (capabilities.supports(HostCapability.Filesystem)) ui.commands.register(new Command("view.layout-right", "Toggle Right Panel",
+			function() { layoutControls.toggleRight(); requestFrame(); }, new Shortcut(UiKey.B, UiModifier.Control | UiModifier.Alt), function() return !phoneLayoutActive));
+		ui.commands.register(new Command("view.layout-menu", "Layout", showLayoutMenu,
+			new Shortcut(76 /* L */, UiModifier.Control | UiModifier.Alt), function() return !phoneLayoutActive));
 		ui.commands.register(new Command("view.toggle-palette", "Toggle Command Palette",
 			togglePalette, new Shortcut(80 /* P */, UiModifier.Control | UiModifier.Shift)));
 		if (terminalUiAvailable())
@@ -1499,6 +1522,7 @@ class ExosuitApp implements DesktopUiApplication {
 			requestFrame();
 		}
 		if (host.syncSideBySidePanes()) requestFrame();
+		if (contextFiles != null && dock.isOpen("context-panel")) contextFiles.poll(now);
 		pumpApplication();
 		syncScmDocumentMarkers(now);
 		if (now >= nextScmPoll) {
@@ -1675,6 +1699,8 @@ class ExosuitApp implements DesktopUiApplication {
 	public function context():UiContext return ui;
 
 	public function dispose():Void {
+		layoutControls.dispose();
+		if (contextFiles != null) contextFiles.dispose();
 		if (notificationPanel != null) notificationPanel.close();
 		cancelScmBranchRequest();
 		if (hostContext != null) hostContext.onPoll = null;
@@ -1876,9 +1902,77 @@ class ExosuitApp implements DesktopUiApplication {
 		return result;
 	}
 
+	function contextPanel():View {
+		if (contextFiles == null) contextFiles = new ContextFilesView(function() return application.activeContext.roots,
+			function() return workspaceAttachment == null ? "local" : workspaceAttachment.fileWorkspace() + ":" + workspaceAttachment.fileScope(),
+			function(roots) {
+				var attachment = workspaceAttachment;
+				if (attachment != null && !attachment.hasLocalFileAccess()) {
+					var scope = attachment.fileScope(); if (scope == null) scope = roots[0];
+					return new WorkspaceFileTreeModel(function() return workspaceAttachment == null ? null : workspaceAttachment.fileClient(),
+						attachment.fileWorkspace(), scope, application.activeContext.label, theme, requestFrame,
+						function(root) host.markWorkspaceFilesChanged(scope, root), attachment.sourceControlSource());
+				}
+				var model = new DirectoryTreeModel(roots[0], theme, roots);
+				model.fontSize = application.settings.current.explorerFontSize;
+				return model;
+			}, function(model, path, pin) {
+				if (Std.isOfType(model, WorkspaceFileTreeModel)) {
+					var remote:WorkspaceFileTreeModel = cast model;
+					if (remote.isMoreKey(path) || remote.isRetryKey(path)) remote.activateSpecial(path);
+					else if (!remote.isDirectoryKey(path)) openWorkspaceFile(remote, path, pin);
+				} else if (Std.isOfType(model, DirectoryTreeModel)) {
+					var local:DirectoryTreeModel = cast model;
+					if (local.isSyntheticRow(path)) local.activateSyntheticRow(path);
+					else if (!local.isDirectoryPath(path)) application.openInBackground(path, !pin, pin);
+				}
+			}, host, requestFrame, function() return darkPalette, hostContext == null ? null : hostContext.events);
+		var style = fillStyle(); style.childGap = 4;
+		var captionStyle = new LayoutStyle(); captionStyle.padding = new Insets(10, 6, 10, 0);
+		return new Column("context-panel-content", [
+			new KeyedView("scope", new Text(application.activeContext.label, captionStyle, theme.tokens.textSecondary, TextStyleOverride.text(12))),
+			new KeyedView("tabs", new Tabs("context-panel-tabs", [new TabItem("context-files", "Files", contextFiles),
+				new TabItem("context-changes", "Changes", sourceControlPanel())], "context-files", function(_) requestFrame(), fillStyle()))
+		], style);
+	}
+
+	function layoutShortcut(command:String):String return [for (shortcut in ui.commands.shortcutsFor(command)) shortcut.label()].join(", ");
+
+	function layoutButton(region:String, label:String, command:String, selected:Bool):View {
+		var style = new LayoutStyle(); style.width = LayoutAxis.fixed(TOOLBAR_BUTTON_WIDTH); style.height = LayoutAxis.fixed(TOOLBAR_BUTTON_WIDTH);
+		style.padding = new Insets(6, 6, 6, 6);
+		var button = new Button("", style, function() { ui.commands.executeContext(command, ui.commandContext); requestFrame(); }, "layout-" + region);
+		button.variant = ButtonVariant.Navigation; button.selected = selected;
+		button.accessibilityLabel = label;
+		if (region == "menu") button.leadingIcon = IconName.Grid;
+		else button.leadingView = new LayoutControlIcon(region, theme.tokens.textSecondary);
+		var shortcut = layoutShortcut(command);
+		return new TabTooltip("layout-tooltip-" + region, button, new Text(label + (shortcut.length == 0 ? "" : " (" + shortcut + ")")),
+			function() return new Rect(0, 0, viewportWidth, viewportHeight), 0.5);
+	}
+
+	function showLayoutMenu():Void {
+		var items:Array<haxeon.ui.widgets.overlays.MenuItem> = [];
+		var commands = ["exosuit.workbench:toggle-sidebar", "view.layout-bottom", "view.layout-right"];
+		var labels = [(dock.isOpen("explorer") ? "Hide" : "Show") + " Left Sidebar",
+			(layoutControls.bottomOpen() ? "Hide" : "Show") + " Bottom Panel", (layoutControls.rightOpen() ? "Hide" : "Show") + " Right Panel"];
+		for (index in 0...commands.length) {
+			var command = commands[index];
+			if (ui.commands.get(command) != null) items.push(new haxeon.ui.widgets.overlays.MenuItem(command, labels[index], function() {
+				contextMenu = null; ui.commands.executeContext(command, ui.commandContext); requestFrame();
+			}, true, layoutShortcut(command)));
+		}
+		var anchor = findStyleNode(ui.root, "layout-menu");
+		var x = Math.max(0, viewportWidth - 290), y = TOOLBAR_HEIGHT + 4;
+		if (anchor != null) { var bounds = anchor.globalBounds(); x = Math.min(x, bounds.x); y = bounds.y + bounds.height + 4; }
+		contextMenu = new CommandMenu(application.commands, application.context, [], x, y, function() return !phoneLayoutActive,
+			function() { contextMenu = null; requestFrame(); }, items, true);
+		requestFrame();
+	}
+
 	function topBar():View {
 		return new RetainedView("toolbar", function(_) return buildTopBar(),
-			function() return explorerRoot + ":" + workspaceStatus + ":" + canShowTerminal() + ":" + terminalCreationFailure() + ":" + (hostContext == null || hostContext.windowControls == null ? 0 : hostContext.windowControls.revision) + ":" + ui.animations.revision);
+			function() return dock.revision + ":" + phoneLayoutActive + ":" + viewportWidth + ":" + application.activeContext.revision + ":" + application.savedWorkspaces.dirty + ":" + explorerRoot + ":" + workspaceStatus + ":" + canShowTerminal() + ":" + terminalCreationFailure() + ":" + (hostContext == null || hostContext.windowControls == null ? 0 : hostContext.windowControls.revision) + ":" + ui.animations.revision);
 	}
 
 	function buildTopBar():View {
@@ -1912,10 +2006,6 @@ class ExosuitApp implements DesktopUiApplication {
 		if (actions >= 3) items.push(new KeyedView("open-folder", toolbarButton("Open Folder", IconName.FolderClosed, openFolderDialog)));
 		if (actions >= 2) items.push(new KeyedView("save", toolbarButton("Save", IconName.Save,
 			function() application.commands.perform("doc:save", application.context))));
-		if (actions >= 5 && terminalUiAvailable()) {
-			var button = toolbarButton("Terminal", IconName.Terminal, toggleTerminal);
-			items.push(new KeyedView("terminal", button));
-		}
 		var workspaceTitleStyle = new LayoutStyle(); workspaceTitleStyle.width = LayoutAxis.grow();
 		var savedWorkspace = application.savedWorkspaces.current;
 		var workspaceTitle = savedWorkspace == null ? (explorerRoot == null ? "" : haxe.io.Path.withoutDirectory(explorerRoot)) :
@@ -1929,6 +2019,13 @@ class ExosuitApp implements DesktopUiApplication {
 		if (!custom && workspaceStatus.length > 0)
 			items.push(new KeyedView("workspace-status", new Text(workspaceStatus, null, theme.tokens.textSecondary, TextStyleOverride.text(12.0))));
 		items.push(new KeyedView("palette", toolbarButton("Commands", IconName.Search, togglePalette)));
+		if (!phoneLayoutActive) {
+			items.push(new KeyedView("layout-left", layoutButton("left", "Toggle Left Sidebar", "exosuit.workbench:toggle-sidebar", dock.isOpen("explorer"))));
+			items.push(new KeyedView("layout-bottom", layoutButton("bottom", "Toggle Bottom Panel", "view.layout-bottom", layoutControls.bottomOpen())));
+			if (capabilities.supports(HostCapability.Filesystem))
+				items.push(new KeyedView("layout-right", layoutButton("right", "Toggle Right Panel", "view.layout-right", layoutControls.rightOpen())));
+			items.push(new KeyedView("layout-menu", layoutButton("menu", "Layout", "view.layout-menu", false)));
+		}
 		var toolbar:View = new Row("exosuit-toolbar", items, style);
 		return hostContext != null && hostContext.windowControls != null
 			? new haxeon.ui.widgets.WindowTitleBar("exosuit-titlebar", toolbar, hostContext.windowControls, TOOLBAR_HEIGHT) : toolbar;
@@ -1936,7 +2033,7 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function toolbarActionCapacity():Int {
 		if (hostContext == null || hostContext.windowControls == null) return 5;
-		var available = viewportWidth - haxeon.ui.widgets.WindowTitleBar.CONTROLS_WIDTH;
+		var available = viewportWidth - haxeon.ui.widgets.WindowTitleBar.CONTROLS_WIDTH - (phoneLayoutActive ? 0 : 4 * (TOOLBAR_BUTTON_WIDTH + TOOLBAR_GAP));
 		// Brand, horizontal padding, Commands, two gaps and a small title area.
 		var reserved = BRAND_WIDTH + 20.0 + TOOLBAR_BUTTON_WIDTH + 2 * TOOLBAR_GAP + 32.0;
 		return Std.int(Math.max(0, Math.min(5, Math.floor((available - reserved) / (TOOLBAR_BUTTON_WIDTH + TOOLBAR_GAP)))));

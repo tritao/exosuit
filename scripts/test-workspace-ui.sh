@@ -58,6 +58,10 @@ mkdir -p "$fixture/saved-workspace-project"
 printf 'class Main {}\n' > "$fixture/saved-workspace-project/Main.hx"
 run_phase saved-workspace saved-workspace "$fixture/saved-workspace-project/Main.hx"
 run_phase active-context active-context "$fixture/project/Main.hx"
+run_phase layout-write layout-controls
+run_phase layout-read layout-controls
+run_phase layout-phone layout-controls
+run_phase layout-read layout-controls
 run_phase activity-bar activity-bar "$fixture/sidebar-project/Main.hx"
 run_phase sidebar-write sidebar "$fixture/sidebar-project/Main.hx"
 run_phase sidebar-read sidebar "$fixture/sidebar-project/Main.hx"

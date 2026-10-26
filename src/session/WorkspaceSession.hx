@@ -169,6 +169,11 @@ class WorkspaceSession {
 
 	static function validLayout(value:String):Bool {
 		var fields = value.split("\t");
+		if (fields.length == 6 && fields[0] == "L") {
+			var bottom = Std.parseFloat(fields[3]), right = Std.parseFloat(fields[4]);
+			return fields[1] == "regions" && fields[2] == "1" && fields[5].length <= 1048576 &&
+				Math.isFinite(bottom) && Math.isFinite(right) && bottom >= 0.05 && bottom <= 0.95 && right >= 0.05 && right <= 0.95;
+		}
 		if (fields.length == 4 && fields[0] == "B")
 			return fields[1] == "sidebar" && fields[2] == "1" && fields[3].length <= 65536;
 		if (fields.length == 6 && fields[0] == "C")

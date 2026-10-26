@@ -43,7 +43,6 @@ class SourceControlPanel implements View {
 	final canCommit:ScmRepository->Bool;
 	final commitMenu:(ScmRepository, UiEvent)->Void;
 	final model:ScmTreeModel;
-	final scroll = new ScrollController();
 	var disposed:Bool = false;
 
 	public function new(source:ScmSource, theme:Theme, changed:Void->Void,
@@ -142,6 +141,7 @@ class SourceControlPanel implements View {
 		treeStyle.width = LayoutAxis.grow();
 		treeStyle.height = LayoutAxis.grow();
 		treeStyle.clipHorizontal = true;
+		var scroll = context.resourceState(context.id("scm-scroll:" + source.identity()), function() return new ScrollController(), function(_) {}).value;
 		var tree = new TreeView("scm-tree:" + source.identity(), model, treeStyle, scroll, 560.0);
 		tree.indentWidth = 10.0;
 		tree.verticalGuidesOnly = true;
