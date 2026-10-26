@@ -62,6 +62,9 @@ class ScmTrustStore {
 		FileSystem.createDirectory(path);
 	}
 
+	/** Drops the remembered path resolutions, for when a path may lead somewhere else now. */
+	public function forgetKeys():Void keys.clear();
+
 	function key(root:String):String {
 		var known = keys.get(root);
 		if (known != null) return known;

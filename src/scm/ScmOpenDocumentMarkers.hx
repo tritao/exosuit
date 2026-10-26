@@ -76,11 +76,12 @@ class ScmOpenDocumentMarkers {
 			return;
 		}
 
-		// The revision string is only needed when the revision changed.
-		var known = baseSnapshot;
-		var revision = known != null && (known == snapshot || known.revision == snapshot.revision) ? baseRevision : haxe.Int64.toStr(snapshot.revision);
+		// Snapshots are compared by identity: the service keeps one object while content is unchanged, and a
+		// repository that was dropped and found again restarts its revisions, so a revision alone can repeat.
+		var revision = snapshot == baseSnapshot ? baseRevision : haxe.Int64.toStr(snapshot.revision);
+		var replaced = snapshot != baseSnapshot;
 		baseSnapshot = snapshot;
-		if (!wasNeeded || revision != baseRevision || untracked != wasUntracked) {
+		if (!wasNeeded || replaced || untracked != wasUntracked) {
 			baseRevision = revision;
 			wasNeeded = true;
 			wasUntracked = untracked;
