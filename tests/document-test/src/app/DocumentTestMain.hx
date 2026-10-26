@@ -18,7 +18,9 @@ import haxe.io.Bytes;
 import sys.FileSystem;
 import workspace.FileSystemService;
 import workspace.EditorFileSystem;
+import workspace.FileStamp;
 import core.DocumentManager;
+import testing.CountingFileSystem;
 
 class FailingFileSystem implements EditorFileSystem {
 	final delegate = new FileSystemService();
@@ -29,6 +31,7 @@ class FailingFileSystem implements EditorFileSystem {
 	public function entries(path:String):Array<String> return delegate.entries(path);
 	public function join(parent:String, name:String):String return delegate.join(parent, name);
 	public function read(path:String):String return delegate.read(path);
+	public function stamp(path:String):Null<FileStamp> return delegate.stamp(path);
 	public function writeAtomic(path:String, content:String):Bool return false;
 	public function createFile(path:String):Bool return delegate.createFile(path);
 	public function createFolder(path:String):Bool return delegate.createFolder(path);
@@ -107,6 +110,28 @@ class DocumentTestMain {
 		require(EditorActions.backspace(joined, joinedAt, 4) && joined.text == "ab" && joinedAt.cursor.column == 1, "column-zero Backspace did not join lines");
 		joinedAt.setCursor(joined, new BufferPosition(0, 0));
 		require(!EditorActions.backspace(joined, joinedAt, 4), "Backspace at document start changed text");
+	}
+
+	/** The once-a-second external check reads a file only when its stamp changed, or when the stamp cannot vouch for
+		what was read because the file was still changing then. */
+	static function externalChecksReadOnlyChangedFiles(path:String, syntaxes:SyntaxRegistry):Void {
+		File.saveContent(path, "one\n");
+		Sys.sleep(2.1); // settles the file, so its stamp vouches for what is read next
+		var files = new CountingFileSystem(), document = Document.open(path, syntaxes, files);
+		require(document.checkExternal() == ExternalState.Current && document.checkExternal() == ExternalState.Current && files.reads == 1,
+			"an unchanged file was read again");
+		File.saveContent(path, "two\n");
+		require(document.checkExternal() == ExternalState.Current && document.buffer.text == "two\n" && files.reads == 2,
+			"an external edit was missed");
+		// Read in the second it was written: the same-size rewrite below may leave the stamp as it was.
+		File.saveContent(path, "TWO\n");
+		require(document.checkExternal() == ExternalState.Current && document.buffer.text == "TWO\n" && files.reads == 3,
+			"a same-second, same-size rewrite was missed");
+		var selection = new BufferSelection();
+		document.insert(selection, "saved ");
+		require(document.save() && document.checkExternal() == ExternalState.Current && files.reads == 5,
+			"a saved file was not read once to vouch for its stamp");
+		FileSystem.deleteFile(path);
 	}
 
 	static function main():Int {
@@ -476,6 +501,7 @@ class DocumentTestMain {
 			require(saved.checkExternal() == ExternalState.Changed && !saved.save() && File.getContent(arguments[0]) == "other writer\n",
 				"dirty external conflict overwrote disk");
 			require(saved.save(true) && File.getContent(arguments[0]) == saved.buffer.text, "explicit conflict overwrite failed");
+			externalChecksReadOnlyChangedFiles(arguments[0] + ".stamp", syntaxes);
 			var failing = new Document(arguments[0], File.getContent(arguments[0]), syntaxes, new FailingFileSystem()),
 				failingSelection = new BufferSelection();
 			failing.insert(failingSelection, "unsaved ");

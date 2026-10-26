@@ -47,6 +47,11 @@ class FileSystemService implements EditorFileSystem {
 	public function read(path:String):String
 		return TextFileContent.decode(File.getBytes(path), path);
 
+	public function stamp(path:String):Null<FileStamp> {
+		var metadata = FileSystem.metadata(path);
+		return metadata == null ? null : new FileStamp(metadata.size, metadata.modified, metadata.changed);
+	}
+
 	public function readBytes(path:String):Bytes
 		return File.getBytes(path);
 
