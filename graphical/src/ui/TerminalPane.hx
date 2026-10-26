@@ -347,6 +347,8 @@ class TerminalPane implements TerminalPanel {
 			cursorMode = cursor.mode;
 			if (cursorRow >= 0 && cursorRow < revisions.length) revisions[cursorRow]++;
 		}
+		// Output usually arrives while the window is idle; nothing else asks for the frame that shows it.
+		requestFrame();
 	}
 
 	/** Keep codepoint offsets and cursor color roles while decoding only once per run. */
