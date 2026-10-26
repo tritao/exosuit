@@ -84,6 +84,7 @@ def main():
     parser.add_argument('--output', type=Path, default=ROOT / 'out/terminal-render-benchmark')
     parser.add_argument('--skip-build', action='store_true')
     parser.add_argument('--diagnose', action='store_true', help='Sample Linux scheduling and page faults every 20 ms')
+    parser.add_argument('--native-profile', action='store_true', help='Record native CPU stacks with Linux perf; adds profiling overhead')
     parser.add_argument('--display', action='store_true', help='Use existing DISPLAY instead of isolated Xvfb')
     parser.add_argument('--hardware', action='store_true', help='Allow hardware OpenGL on the existing display')
     args = parser.parse_args()
@@ -110,6 +111,7 @@ def main():
                     renderer=renderer.stdout, runs=args.runs, viewport=[1100, 700],
                     timestamp=time.strftime('%Y-%m-%dT%H:%M:%S%z'),
                     rowCache=args.row_cache,
+                    nativeProfiling=args.native_profile,
                     scope='Native TerminalPane + real emulator/session + desktop UI rendering; deterministic echo backend; excludes PTY/RPC, shell and physical input latency')
     metadata['revision'] = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
     metadata['workingTree'] = subprocess.check_output(['git', 'status', '--short'], cwd=ROOT, text=True)
@@ -121,6 +123,10 @@ def main():
         env = dict(environment, XDG_STATE_HOME=str(directory / 'state'),
                    PRAGTICAL_PORTABLE=str(directory / 'settings'))
         command = [*prefix, str(ROOT / 'haxeon/.tools/hashlink/hl'), str(BUILD / 'main.hl'), str(directory)]
+        if args.native_profile:
+            command = [*prefix, 'perf', 'record', '-e', 'cpu-clock:u', '-F', '499',
+                       '--call-graph', 'dwarf,8192', '-m', '1024', '-o', str(directory / 'perf.data'),
+                       '--', *command[len(prefix):]]
         with (directory / 'app.log').open('w') as log:
             if args.diagnose:
                 import threading
@@ -142,6 +148,12 @@ def main():
                 subprocess.run(command, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT,
                                check=True, timeout=180)
         state = json.loads((directory / 'app-state.json').read_text())
+        if args.native_profile:
+            for mode in ('--no-children', '--children'):
+                with (directory / ('native-leaf.txt' if mode == '--no-children' else 'native-calls.txt')).open('w') as report:
+                    subprocess.run(['perf', 'report', '--stdio', mode, '-g', 'none', '--sort', 'dso,symbol',
+                                    '--percent-limit', '0.5', '--field-separator', '|',
+                                    '-i', str(directory / 'perf.data')], stdout=report, stderr=subprocess.STDOUT, check=True)
         timeline = [json.loads(line) for line in (directory / 'frame-timeline.jsonl').read_text().splitlines()]
         if args.diagnose:
             analyze_stalls(directory, state, timeline)
@@ -178,7 +190,8 @@ def main():
                                            p95=percentile([row[metric] for row in rows], .95),
                                            maximum=max(row[metric] for row in rows))
                                for metric in ('totalMs', 'pollMs', 'paintMs', 'submitMs', 'gcMs', 'allocatedKiB', 'intervalMs', 'changedRows')},
-                            framesOver16_67ms=sum(row['totalMs'] > 1000 / 60 for row in rows))
+                            framesOver16_67ms=sum(row['totalMs'] > 1000 / 60 for row in rows),
+                            frameBudgetMissPercent=100 * sum(row['totalMs'] > 1000 / 60 for row in rows) / len(rows))
     (output / 'results.json').write_text(json.dumps(dict(metadata=metadata, scenarios=results,
                                                        runMedianMs=per_run), indent=2) + '\n')
     lines = ['| Scenario | Frame median / p95 (ms) | Poll median (ms) | Paint median (ms) | Alloc KiB/frame | Changed rows | >16.67ms |',
@@ -187,8 +200,8 @@ def main():
         lines.append(f"| {name} | {result['totalMs']['median']:.2f} / {result['totalMs']['p95']:.2f} | "
                      f"{result['pollMs']['median']:.2f} | {result['paintMs']['median']:.2f} | "
                      f"{result['allocatedKiB']['median']:.0f} | {result['changedRows']['median']:.0f} | "
-                     f"{result['framesOver16_67ms']}/{result['samples']} |")
-    report = '\n'.join(lines) + '\n'
+                     f"{result['framesOver16_67ms']}/{result['samples']} ({result['frameBudgetMissPercent']:.1f}%) |")
+    report = ('Native CPU profiling enabled; timings include profiling overhead.\n\n' if args.native_profile else '') + '\n'.join(lines) + '\n'
     (output / 'summary.md').write_text(report)
     print(report)
     print(f'Artifacts: {output}')

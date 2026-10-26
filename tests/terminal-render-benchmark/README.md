@@ -86,7 +86,7 @@ Artifacts are in `out/terminal-hlprof/instrument/`: `profile.hlpc` is the raw re
 
 The analyzer verifies all seven scenarios have 120 measured frames and computes timings only inside those main-thread frames. Warmup, startup, and event waits outside the frames are excluded. The profiler's text reports cover continuous scenario windows, so they can also include pacing waits. Function durations are inclusive and overlap; instrumentation and sampling add overhead, and short-call filtering understates totals for very short functions. Compare profile timings separately from unprofiled benchmark medians.
 
-On Linux, Haxe call instrumentation is supported; native C++ call instrumentation and full mixed native stack walking are not provided by this profiler build. Time inside an opaque native call is charged to its nearest named Haxe boundary. A large `UiHostRuntime.render` sample count therefore does not imply that the Haxe method itself is CPU-heavy. Native rendering needs a native CPU profiler to separate rasterization, compositing, driver work, and blocking.
+The initial Linux recording primarily attributed opaque native execution to its nearest named Haxe boundary. A large `UiHostRuntime.render` sample count therefore does not imply that the Haxe method itself is CPU-heavy. The native CPU capture below separates the native rendering and driver calls that those boundaries did not resolve.
 
 ### Profile findings: 2026-10-26
 
@@ -200,3 +200,43 @@ native-packages/terminal/tests/run.sh
 ```
 
 Final visual artifacts are in `out/terminal-row-reuse-validated-visual/`; the differential captures are the `comparison-*.png` files within each theme's `row-reuse` directory.
+
+## Native text raster caching: 2026-10-26
+
+Linux `perf` identified a second raster layer inside custom text rendering, independently of `CanvasView.cachePolicy`. It admitted stationary text based only on placement, even when its content changed each frame. New row textures caused GPU image creation/destruction and NVIDIA driver waits. The initial whole-process capture had 4,308 samples and zero lost samples; inclusive sampled CPU shares were 28% for `beginRasterPass` and 21% for `create_target`. These overlap and include startup; they are diagnostic CPU attribution, not GPU execution times or measured-frame percentages.
+
+Two internal UIKit changes address that work:
+
+- Admit a row texture only after the same glyph publication repeats at a stable placement. Changing text and colors use the direct glyph path; settled text still gains raster reuse. Candidates follow publication identity across line insertion/deletion, and only the current eligible visible rows are retained (up to 96 per layout).
+- Hash scissor coordinates only when scissoring is enabled. Row textures render locally without a viewport scissor; stale coordinates previously invalidated their cache keys when unchanged rows moved.
+
+These changes are in the `haxeon` submodule's UIKit sources. They add no public ABI or terminal-specific rendering mode. Font, color, atlas, scale and placement changes still participate in the existing glyph publication and raster identities.
+
+The benchmark runner now records native stacks on Linux and reports frame-budget overrun percentages:
+
+```sh
+python3 scripts/benchmark-terminal-render.py --display --hardware --runs 3 --output out/terminal-native-check
+python3 scripts/benchmark-terminal-render.py --skip-build --display --hardware --native-profile --runs 1 --output out/terminal-native-profile
+```
+
+Each profiled run retains `perf.data`, `native-leaf.txt`, and `native-calls.txt`. Profiling uses user-space CPU-clock sampling at 499 Hz with DWARF call stacks. Its timings are labeled as profiled and must be kept separate from unprofiled comparisons. The existing `--diagnose` option can additionally collect scheduling/fault evidence. A frame-budget overrun means the measured host callback cost exceeds 16.67 ms; it does not count physical display drops or establish achieved FPS.
+
+The final comparison alternated three baseline and three optimized GTX 1060 desktop runs, with **360 measured frames per scenario and variant**. Both variants used the same bytecode and dependent libraries; only the UIKit library changed. Source snapshots, native libraries, bytecode hashes, run order, and raw timelines are retained in `out/terminal-native-next/`; `comparison.json` and `comparison.md` contain the final results. The initial candidate and its earlier results are retained separately.
+
+| Scenario | Median before → after | p95 before → after | Budget misses before → after |
+|---|---:|---:|---:|
+| idle | 2.82 → 3.02 ms | 3.45 → 3.69 ms | 0.0% → 0.0% |
+| typing | 3.09 → 2.57 ms | 14.70 → 3.34 ms | 3.3% → 0.0% |
+| progress | 3.20 → 2.56 ms | 17.04 → 3.19 ms | 5.8% → 0.0% |
+| scroll | 19.09 → 8.05 ms | 39.80 → 20.53 ms | 63.1% → 13.3% |
+| ansi-redraw | 24.25 → 6.95 ms | 42.14 → 8.61 ms | 84.7% → 0.0% |
+| unicode-redraw | 23.39 → 6.84 ms | 40.09 → 8.79 ms | 88.1% → 0.0% |
+| scrollback | 19.79 → 6.61 ms | 39.79 → 19.77 ms | 68.9% → 15.6% |
+
+The largest repeatable gains are in full redraws: all 360 ANSI and all 360 Unicode measured frames stayed below 16.67 ms after the change. Scrolling and scrollback still exceed the budget in 13–16% of measured frames, with p95 around 20 ms. Idle median cost increased by about 0.2 ms. Desktop load and driver/presentation timing varied between runs, so these results do not establish consistent 60 Hz rendering.
+
+Whole-scenario row-raster misses fell from 20,260 to 2,185 (about 89%), while hits increased from 4,914 to 10,381. A final native capture is in `out/terminal-native-next/final-native-profile/`, with zero lost samples. Its inclusive sampled CPU shares for `beginRasterPass` / `create_target` fell to about 9% / 8%; sampling percentages are diagnostic and are not additive or unprofiled timings.
+
+One optimized scrollback frame still took 122.20 ms: 118.77 ms in application submission, including only 0.98 ms of polling, and 3.39 ms in native rendering; no frame GC was reported. This points outside the native rendering work addressed here, but the cause is unresolved. It is retained in the raw maximum statistics. The original 1.93-second polling stall was not reproduced or established as fixed.
+
+Validation includes the native backend, text engine, layout/render compiler, public renderer, and session renderer test groups. Tests verify changing text/colors avoid row-raster allocation, settled text resumes caching, inactive clip coordinates preserve cache hits, enabled clips invalidate correctly, and editor edits/newline insertion/deletion retain unchanged rows. The new changing-text regression fails against the baseline library. Terminal visual checks also cover both themes and optimized-versus-full-refresh rendering; the before/after software screenshot comparison is retained in `out/terminal-native-next/visual-comparison.json`. No browser or non-Linux runtime performance was measured.
