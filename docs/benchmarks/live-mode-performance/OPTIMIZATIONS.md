@@ -3,9 +3,11 @@
 The goal is a live mode (`run.py --live`) that is effectively instant: a short save-to-patch latency, and run-time speed
 equal to normal mode. Evidence and root causes are in `../live-mode-performance.md` and `investigations/`.
 
-Work is stacked on local `live-mode-speed` branches (hashlink, haxeon, exosuit). It is reviewed as a whole before it is
-merged to mainline and pushed. Fixes may land in batches that are measured with one capture; if a batch misses its
-expected range, bisect within it.
+Work is stacked on short local branches in each repo it touches, reviewed as a whole, then merged to mainline and pushed.
+Fixes may land in batches that are measured with one capture; if a batch misses its expected range, bisect within it.
+
+**Handoff (2026-10-26):** batches 1-3 are on mainline. The biggest open problem is input latency with real input (#22),
+which the scripted captures here cannot see; start at `../input-latency/README.md`.
 
 Status: ✅ done · 🔨 in progress · ⬜ todo · ⏸ deferred
 
@@ -60,6 +62,23 @@ Unprofiled live capture with one edit (`runs/d-live-edit`), merged stack on `rev
   hover lag p95 from 7.7 to 3.7 ms, but live hover p95 stays at ~18.6 ms (`runs/c-normal`, `runs/c-live`). The live stall
   is something else: a frame starts ~18 ms after input arrives, right after an animation's last frame. Open (#21).
 
+## Batch 3 (2026-10-26): restart, hover wake, watch and IR assembly, worker keepalive
+
+- **#20 fixed (haxeon b07a81a6..a7c80404):** the compiler saves its live history beside the module (`<output>.live.state`,
+  written 1 s after a publish or at exit; ~122 MB, ~2 s, off the edit path) and a new worker resumes it when the marker,
+  configuration and compiler match. `haxeon run --live` warms the worker up in the background after launch (~19 s). First
+  edit after a restart: 20.1 s and a reload -> 3.4 s, patched. A no-change live build keeps its revision instead of
+  forcing a reload. Test: `LiveRestartMain`.
+- **#21 fixed (nativekit f471853a):** a timed wait now also returns when app tasks are queued. A render completion that
+  landed between the host's poll and its wait slept a full 1/60 s; live code is slower, so it hit that window ~3x as
+  often. Scripted live hover p95 17.7 -> 3.3 ms (normal 3.6 ms).
+- **#7, #11 (haxeon ec095950, 55958fb2, 132eaa07):** one watch snapshot per save with one stat per file (106 -> 45 ms,
+  twice per save before); lambda code fingerprints remembered by IR function (85-110 -> 22-32 ms). #9's content memo was
+  measured and not built: an edit's re-inlines are almost all in the edited file, whose bodies must not be reused.
+- **Worker keepalive (haxeon c772f89a):** a live session pings its compiler worker so a pause over 90 s no longer drops it
+  (the next edit used to take ~20 s). The worker exits within 90 s after the session ends. Memory is the cost, by decision.
+- **#22 (open): input latency with real input.** See the row below.
+
 ## Edit latency: save to applied patch (about 4 s now)
 
 | # | Optimization | Expected gain | Effort | Status | Commits / measured |
@@ -70,13 +89,14 @@ Unprofiled live capture with one edit (`runs/d-live-edit`), merged stack on `rev
 | 4 | Stop ~150 functions counting as "changed" each compile: encode unreachable open IR blocks (4a) | 0.3–0.6 s | small | ✅ | haxeon 41facedf; lowering 430–760 → 210–340 ms |
 | 5 | CLI: reuse file digests across watch rebuilds, cache the worker identity and resolved project (4b) | ~1 s | small | ✅ | haxeon 4d9ee155 + review fix aa024d78 (a re-resolved project is kept when its build fails). Measured by the implementer: CLI time before the compile request ~1.14–1.21 s → ~0.13 s on the editor project; end to end on a small project 750–850 → 122–130 ms. Follow-ups: fewer syscalls in `ActionFingerprint.appendPath` (~50–80 ms), and `PackageResolver`'s per-file `fullPath` |
 | 6 | Cache directory listings when resolving imports (4c) | 0.4–0.6 s per edit; several s cold | small | ✅ | haxeon 7b15e72b. A cold compile listed 120 directories 82,513 times. Implementer's paired runs: cold graph 7.6–8.2 → 2.0–2.2 s (cold request 24.8–29.1 → 19.3–19.8 s), no-op frontend 0.91–1.22 → 0.49 s, edit graph 0.50–0.62 → 0.04 s. Output byte-identical |
-| 7 | Watch loop: file-change notifications instead of polling plus a 0.5 s settle (4d) | 0.6–0.8 s | small–medium | ✅ | haxeon 15c08d19..dc7a5340. Windows `ReadDirectoryChangesW` watch in the runtime HDLL wakes the loop; 30 ms coalescing, polling stays as backstop. Save to compile start ~0.5 s in the capture. Linux/macOS still poll; a second watcher beside NativeKit's (NativeKit is only callable from Haxeon-compiled code) |
+| 7 | Watch loop: file-change notifications instead of polling plus a 0.5 s settle (4d) | 0.6–0.8 s | small–medium | ✅ | batch 3: one snapshot per save, one stat per file (~165 ms less). Before: haxeon 15c08d19..dc7a5340. Windows `ReadDirectoryChangesW` watch in the runtime HDLL wakes the loop; 30 ms coalescing, polling stays as backstop. Save to compile start ~0.5 s in the capture. Linux/macOS still poll; a second watcher beside NativeKit's (NativeKit is only callable from Haxeon-compiled code) |
 | 8 | Live edits write only the patch and stamp; defer the 40 MB `.hl`, its build-id hash and the side files | 0.7–1.1 s | small–medium | ✅ | haxeon 3ca31ff7+. Patch, `.live.json` and stamp are published before the module and side files; a `.live.full` marker guards reloads (finding 22). Measured 0.2–0.35 s, not 0.7–1.1 s: most of that estimate was full-module hashing, now after the stamp but still inside the request |
-| 9 | Incremental inliner: stop re-encoding ~2k function pairs per compile (4e) | 1–1.5 s | medium | 🔨 | haxeon 2a9f9cde: the published side's encoding is cached, halving the comparison encodes. Not done: memo by content, so unchanged initializers stop forcing ~2.9k re-inlines |
+| 9 | Incremental inliner: stop re-encoding ~2k function pairs per compile (4e) | 1–1.5 s | medium | ✅ | Content memo measured and dropped in batch 3 (under 100 ms possible; the edited file's bodies must not be reused). Before: haxeon 2a9f9cde: the published side's encoding is cached, halving the comparison encodes. Not done: memo by content, so unchanged initializers stop forcing ~2.9k re-inlines |
 | 10 | Edit-local "changed" comparison plus a separate debug-position refresh in patches (4f) | 0.5–1 s, and a much smaller patch | medium | 🔨 | haxeon b5851e42..c1b11371: the changed comparison ignores the file hash, byte and scope offsets, and functions whose final IR is unchanged are not re-lowered. One-string edit: 478 → 96 changed, patch 2.19 → 0.92 MB, patch phase 242 → 62 ms. Not done: a separate debug-position refresh, so adding lines still marks every later function changed |
-| 11 | Remaining whole-program floor: semantic canonicalization and invalidation, IR assembly, re-reading sources | 1–2 s; IR assembly alone measured 3.9 s for a 3-function edit, so likely more | large | 🔨 | haxeon 86ff2792..457085f3: static null-check copies keep their identity between compiles, so the inliner memo hits (13458/13528 on a no-op). IR assembly on a one-string edit 3.9 s → 0.95 s. Left: whole-program `assemble` (~370 ms) and comparing ~500 regenerated lambdas |
-| 21 | Live hover input lag: after an animation ends, the next frame starts ~18 ms after input arrives in live mode (p95 18.6 ms vs 3.7 ms in normal). Not the stamp read and not timer resolution | p95 lag 18.6 → ~4 ms | unknown | ⬜ | Batch 2: 45 of 50 late live frames are a `PointerMove` right after an `animation` frame that requested a successor; nothing runs for 17.7–18.9 ms, about one full 1/60 s `pump.wait` plus 1 ms. Host-loop time, GC, native events and frame cost match normal. Next: trace each `pump.wait` (requested vs actual), `submitFrameRequest` and `framePending` in `DesktopUiHost.step`, and the native `frame_message_pending`. Hypothesis: on Windows `arm_surface_frames` posts the next frame only once no frame is open, and a frame stays open until `Present(1, 0)` returns at vsync, so input right after an animation frame waits up to one refresh; live may just land in that phase more often |
-| 20 | A restarted live session reloads on its first edit: the app starts from a `live.hl` an earlier compile server built, the new worker has no patch history, so the first edit compiles cold (~24 s) and reloads | first edit ~24 s → normal edit | medium | ⬜ | seen in the batch run |
+| 11 | Remaining whole-program floor: semantic canonicalization and invalidation, IR assembly, re-reading sources | 1–2 s; IR assembly alone measured 3.9 s for a 3-function edit, so likely more | large | 🔨 | batch 3: lambda fingerprints remembered (~70 ms). Left: `assemble` 175 ms, static initializers 100 ms. Before: haxeon 86ff2792..457085f3: static null-check copies keep their identity between compiles, so the inliner memo hits (13458/13528 on a no-op). IR assembly on a one-string edit 3.9 s → 0.95 s. Left: whole-program `assemble` (~370 ms) and comparing ~500 regenerated lambdas |
+| 21 | Live hover input lag: after an animation ends, the next frame starts ~18 ms after input arrives in live mode (p95 18.6 ms vs 3.7 ms in normal). Not the stamp read and not timer resolution | p95 lag 18.6 → ~4 ms | unknown | ✅ | Fixed in batch 3 (nativekit f471853a): the wait ignored queued app tasks. Batch 2: 45 of 50 late live frames are a `PointerMove` right after an `animation` frame that requested a successor; nothing runs for 17.7–18.9 ms, about one full 1/60 s `pump.wait` plus 1 ms. Host-loop time, GC, native events and frame cost match normal. Next: trace each `pump.wait` (requested vs actual), `submitFrameRequest` and `framePending` in `DesktopUiHost.step`, and the native `frame_message_pending`. Hypothesis: on Windows `arm_surface_frames` posts the next frame only once no frame is open, and a frame stays open until `Present(1, 0)` returns at vsync, so input right after an animation frame waits up to one refresh; live may just land in that phase more often |
+| 20 | A restarted live session reloads on its first edit: the app starts from a `live.hl` an earlier compile server built, the new worker has no patch history, so the first edit compiles cold (~24 s) and reloads | first edit ~24 s → normal edit | medium | ✅ | batch 3: live history saved and resumed; 20.1 s + reload → 3.4 s patch |
+| 22 | Input latency with real input: movement onsets wait 24 ms median (normal) and 131 ms p90 / 186 ms p95 (live) before the editor dequeues them; continuous movement p90 ~50 ms in both | the feel of the editor | unknown | ⬜ | Measured with `../input-latency/` (OS hook + NativeKit/HashLink traces). Slow inputs: ~40% frames, 40-70% other UI-thread work, little waiting or GC. Hypotheses: Windows delivers posted messages (the frame message) before mouse input, so a stream of frames starves input; plus a measurement limit (non-client moves not traced). Next: trace `WM_NCMOUSEMOVE` and the window under the cursor, then test with the SendInput driver, animation on vs off |
 
 ## Cold build (about 33 s compile)
 
