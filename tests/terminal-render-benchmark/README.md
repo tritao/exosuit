@@ -240,3 +240,29 @@ Whole-scenario row-raster misses fell from 20,260 to 2,185 (about 89%), while hi
 One optimized scrollback frame still took 122.20 ms: 118.77 ms in application submission, including only 0.98 ms of polling, and 3.39 ms in native rendering; no frame GC was reported. This points outside the native rendering work addressed here, but the cause is unresolved. It is retained in the raw maximum statistics. The original 1.93-second polling stall was not reproduced or established as fixed.
 
 Validation includes the native backend, text engine, layout/render compiler, public renderer, and session renderer test groups. Tests verify changing text/colors avoid row-raster allocation, settled text resumes caching, inactive clip coordinates preserve cache hits, enabled clips invalidate correctly, and editor edits/newline insertion/deletion retain unchanged rows. The new changing-text regression fails against the baseline library. Terminal visual checks also cover both themes and optimized-versus-full-refresh rendering; the before/after software screenshot comparison is retained in `out/terminal-native-next/visual-comparison.json`. No browser or non-Linux runtime performance was measured.
+
+## Reusing evicted raster targets: 2026-10-26
+
+The current NativeKit checkout already incorporates intervening driver improvements, so this pass uses a fresh baseline rather than the previous section's numbers. Native CPU sampling still attributed about 4.8% of inclusive whole-process CPU time to GPU target creation. Scrolling introduces new cached row contents even after repeated-content admission, so a full cache continued destroying and reallocating matching color/depth attachments.
+
+UIKit now transfers an equal-sized target from the existing LRU victim into the replacement entry, then clears and repaints it normally. The replacement preserves the existing 128-entry / 64 MiB estimated color-byte limits and LRU selection. Entries used in the current frame remain protected, incompatible sizes allocate normally, and aborted frames discard unfinished entries. There is no additional spare-target pool or public API change.
+
+Three baseline and three optimized GTX 1060 runs alternated, with 360 measured frames per scenario and variant. The same frozen bytecode and dependent libraries were used; only the UIKit library differed. The frozen bytecode also excludes concurrent Haxe framework edits. Source snapshots, library/bytecode hashes, run order, raw captures, `comparison.json`, and `comparison.md` are retained in `out/terminal-raster-recycle/`.
+
+| Scenario | Median before → after | p95 before → after | Budget misses before → after |
+|---|---:|---:|---:|
+| idle | 2.52 → 2.56 ms | 2.62 → 2.70 ms | 0.0% → 0.0% |
+| typing | 2.35 → 2.37 ms | 2.55 → 2.63 ms | 0.0% → 0.0% |
+| progress | 2.29 → 2.32 ms | 2.44 → 2.44 ms | 0.0% → 0.0% |
+| scroll | 7.08 → 4.51 ms | 9.18 → 4.92 ms | 1.4% → 0.0% |
+| ansi-redraw | 6.67 → 6.70 ms | 7.18 → 7.43 ms | 0.0% → 0.0% |
+| unicode-redraw | 6.86 → 6.91 ms | 7.47 → 7.50 ms | 0.3% → 0.0% |
+| scrollback | 5.75 → 3.86 ms | 6.58 → 4.20 ms | 1.4% → 0.3% |
+
+Scrolling median/p95 improved by about 36%/46%, and scrollback by 33%/36%. Other workloads were essentially unchanged or slightly slower. All optimized p95 frame costs were below 7.6 ms. Across 2,520 measured optimized frames, one scrollback frame exceeded 16.67 ms, reaching 16.69 ms. These measurements cover host frame callback cost after warmup, not physical input-to-screen latency or a guarantee against future stalls.
+
+A new GPU regression overflows the cache and verifies that allocation and destruction counters stop increasing once 128 matching targets are present. It also checks alternating pixel contents, clearing unused pixels, protection of a target referenced in the current frame, incompatible dimensions, and recovery after an aborted replacement. It runs with both immediate and recorded rendering. The baseline fails the allocation assertion; the optimized version passes. The renderer backend, stream-buffer/resource, text engine, layout/render compiler, public renderer and session renderer test groups all pass.
+
+The terminal visual suite passes, including 50 optimized-versus-forced-refresh frame comparisons. All 64 isolated before/after software screenshots are pixel-identical (`visual-comparison.json`). The three hardware benchmark final screens also have identical terminal contents. Two hardware pairs differ only in the two-pixel focus stripe because desktop focus changed; the full images and unmasked difference bounds are retained in `benchmark-pixels.json`.
+
+Native captures are in `profile-before/` and `profile-after/`, both with zero lost samples. Target-creation and raster-pass attribution fell below the report's 0.5% cutoff after reuse; initial allocations still occur. Profiled timings are excluded from the table. The historical 1.93-second polling stall and 122 ms submission outlier were not established as fixed by this change.
