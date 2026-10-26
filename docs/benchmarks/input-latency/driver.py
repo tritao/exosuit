@@ -173,4 +173,5 @@ def main():
     print(f"driver: {sweeps} sweeps, {moves} moves, {presses} key presses")
 
 
-main()
+if __name__ == "__main__":
+    main()
