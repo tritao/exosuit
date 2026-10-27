@@ -13,13 +13,17 @@ import workspace.service.WorkspaceAgentProtocol.AgentModel;
 /** Adds the live Codex model picker to the normal Workbench settings section. */
 class ExosuitSettingsPanel extends SettingsPanel {
 	final models:Void->Array<AgentModel>;
+	final modelState:Void->SettingsModelPickerState;
 	var modelOptionsKey:String = "";
 	final pathEditor:SettingsPathEditor;
 	final listEditors:Array<haxeon.ui.properties.StructuredPropertyEditor> = [];
 
-	public function new(store:SettingsStore, models:Void->Array<AgentModel>, onChanged:Void->Void, ?dialogs:platform.HostFileDialogs) {
+	public function new(store:SettingsStore, models:Void->Array<AgentModel>, onChanged:Void->Void, ?dialogs:platform.HostFileDialogs, ?modelState:Void->SettingsModelPickerState) {
 		super("exosuit-settings", store, onChanged);
 		this.models = models;
+		this.modelState = modelState == null ? function() return new SettingsModelPickerState(false, null, false,
+			function() {}, function() {}, function() {}) : modelState;
+		editorRegistry.register(new SettingsModelEditor(this.modelState));
 		var lists = new haxeon.ui.properties.ListPropertyEditor();
 		trackDrafts(lists);
 		editorRegistry.register(lists);
@@ -88,7 +92,7 @@ class ExosuitSettingsPanel extends SettingsPanel {
 		options.defaultValue = decode(definition.defaultValue);
 		if (typeId != SettingsPathEditor.TYPE)
 			options.structure = haxeon.ui.properties.PropertyStructure.List(
-				haxeon.ui.properties.PropertyStructure.Value(PropertyType.Text), null, null, "Item");
+				haxeon.ui.properties.PropertyStructure.Value(PropertyType.Text), null, null, path == "editor/fonts/font_fallback_paths" ? "Font" : path == "files/explorer/excluded_names" ? "Name" : "Command part");
 		options.validator = function(_, value) return switch value {
 			case Custom(_, data): definition.validate(PropertyValue.Text(typeId == SettingsPathEditor.TYPE ? cast data : haxe.Json.stringify(data)));
 			default: "Invalid setting value";
@@ -112,7 +116,9 @@ class ExosuitSettingsPanel extends SettingsPanel {
 			if (model.model == selected) known = true;
 		}
 		if (!known) options.push(new PropertyOption("model:" + selected, selected + " (saved)"));
-		var nextKey = haxe.Json.stringify([for (option in options) [option.key, option.label]]);
+		var status = modelState();
+		var nextKey = haxe.Json.stringify([for (option in options) [option.key, option.label]])
+			+ haxe.Json.stringify([status.loading, status.error, status.hasMore]);
 		if (nextKey == modelOptionsKey) return super.currentInspector();
 		modelOptionsKey = nextKey;
 		var config = new PropertyDescriptorOptions();
@@ -121,15 +127,16 @@ class ExosuitSettingsPanel extends SettingsPanel {
 		config.description = "Model for new Workbench Codex sessions. Existing sessions keep their selected model.";
 		config.modified = function() return !store.isDefault("workbench/codex/default_model");
 		config.reset = function() store.reset("workbench/codex/default_model");
-		config.defaultValue = PropertyValue.Enum("model-default");
+		config.defaultValue = PropertyValue.Custom(SettingsModelEditor.TYPE, "model-default");
 		config.options = options;
-		var modelSetting = new PropertyDescriptor("workbench/codex/default_model", "Default Model", PropertyType.Enum,
+		var modelSetting = new PropertyDescriptor("workbench/codex/default_model", "Default Model", PropertyType.Custom(SettingsModelEditor.TYPE),
 			function(_) {
 				var id = store.getString("workbench/codex/default_model");
-				return PropertyValue.Enum(id == "" ? "model-default" : "model:" + id);
+				return PropertyValue.Custom(SettingsModelEditor.TYPE, id == "" ? "model-default" : "model:" + id);
 			},
 			function(_, value) switch (value) {
-				case Enum(choice):
+				case Custom(_, selected):
+					var choice:String = cast selected;
 					var id = choice == "model-default" ? "" : choice.substr("model:".length);
 					var error = store.set("workbench/codex/default_model", PropertyValue.Text(id));
 					if (error != null) throw error;

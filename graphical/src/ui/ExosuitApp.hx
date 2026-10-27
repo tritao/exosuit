@@ -175,6 +175,7 @@ class ExosuitApp implements DesktopUiApplication {
 	var settingsClosePending:Bool = false;
 	var settingsModels:Array<workspace.service.WorkspaceAgentProtocol.AgentModel> = [];
 	var settingsModelsNext:Null<String>;
+	var settingsModelsRetryCursor:Null<String>;
 	var settingsModelsPending:Bool = false;
 	var settingsModelsError:Null<String>;
 	var settingsModelsToken:Int = 0;
@@ -898,7 +899,7 @@ class ExosuitApp implements DesktopUiApplication {
 		if (settingsPanel != null) return;
 		settingsClosePending = false;
 		host.closeCommandView();
-		settingsPanel = new ExosuitSettingsPanel(application.settings.store, function() return settingsModels, requestFrame, desktop);
+		settingsPanel = new ExosuitSettingsPanel(application.settings.store, function() return settingsModels, requestFrame, desktop, settingsModelPickerState);
 		settingsModels = [];
 		settingsModelsNext = null;
 		settingsModelsPending = false;
@@ -907,8 +908,15 @@ class ExosuitApp implements DesktopUiApplication {
 		requestFrame();
 	}
 
+	function settingsModelPickerState():SettingsModelPickerState {
+		return new SettingsModelPickerState(settingsModelsPending, settingsModelsError, settingsModelsNext != null,
+			function() loadSettingsModels(null), function() loadSettingsModels(settingsModelsNext),
+			function() loadSettingsModels(settingsModelsRetryCursor));
+	}
+
 	function loadSettingsModels(cursor:Null<String>):Void {
 		if (settingsModelsPending) return;
+		settingsModelsRetryCursor = cursor;
 		var client = workbenchClient == null ? null : workbenchClient.agentService();
 		if (client == null) {
 			settingsModelsError = "Connect a workspace to load Codex models";
@@ -1197,7 +1205,7 @@ class ExosuitApp implements DesktopUiApplication {
 		if (settingsPanel != null) {
 			if (settingsPanel.catalog.store != application.settings.store) {
 				var filter = settingsPanel.filter, advanced = settingsPanel.showAdvanced, category = settingsPanel.selectedCategory;
-				settingsPanel = new ExosuitSettingsPanel(application.settings.store, function() return settingsModels, requestFrame, desktop);
+				settingsPanel = new ExosuitSettingsPanel(application.settings.store, function() return settingsModels, requestFrame, desktop, settingsModelPickerState);
 				settingsPanel.setShowAdvanced(advanced);
 				settingsPanel.setFilter(filter);
 				if (category != null) settingsPanel.select(category);
@@ -1217,14 +1225,7 @@ class ExosuitApp implements DesktopUiApplication {
 				else closeSettings();
 			};
 			var footer:Array<KeyedView> = [];
-			if (panel.selectedCategory == "workbench/codex") {
-				var modelButton = new Button(settingsModelsNext != null ? "More models" : "Refresh models", null,
-					function() loadSettingsModels(settingsModelsNext), "settings-codex-models-load");
-				modelButton.enabled = !settingsModelsPending;
-				footer.push(new KeyedView("models", modelButton));
-				if (settingsModelsPending) footer.push(new KeyedView("status", new Text("Loading Codex models…")));
-				else if (settingsModelsError != null) footer.push(new KeyedView("status", new Text(settingsModelsError)));
-			}
+
 			footer.push(new KeyedView("close", new Button("Close", null, dismiss, "settings-close")));
 			var content = new Column("settings-content", [new KeyedView("panel", panel),
 				new KeyedView("footer", new Row("settings-footer", footer))], settingsStyle);
