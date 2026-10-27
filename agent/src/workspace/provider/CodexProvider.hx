@@ -111,8 +111,7 @@ class CodexProvider implements LocalAgentProvider {
 					|| !valid(r.name, 256)
 					|| r.workspaceRoot != directories.root
 					|| (!valid(r.cwd, 1024)
-						|| (r.cwd != directories.root
-							&& !StringTools.startsWith(r.cwd, directories.root == "/" ? "/" : directories.root + "/")))
+						|| !directories.inside(r.cwd))
 					|| sessions.exists(r.id))
 					throw "Invalid persisted Codex resource";
 				// The proxy subscription/active turn must be reconciled, never invented after restart.

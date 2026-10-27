@@ -144,7 +144,7 @@ class AgentKitProvider implements LocalAgentProvider {
 		return v != null && modes.indexOf(v) >= 0;
 
 	function inside(path:Null<String>):Bool
-		return path != null && (path == directories.root || StringTools.startsWith(path, directories.root == "/" ? "/" : directories.root + "/"));
+		return directories.inside(path);
 
 	static function copy(r:AgentRecord):AgentRecord {
 		var result:AgentRecord = cast Reflect.copy(r);

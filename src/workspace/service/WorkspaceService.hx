@@ -270,16 +270,27 @@ class WorkspaceService {
 			if (request.action == "create" && snapshot().groups.length >= 32) {
 				context.fail({code: "group_limit", message: "Workspace group limit", ambiguous: false}); return;
 			}
+			var cwd:Null<String> = tree ? request.cwd : (group == null ? null : group.cwd);
+			// Store the machine's canonical spelling (separators, case, symlinks) of a newly chosen directory.
+			// A group that keeps its directory can still be renamed or moved after that directory disappears.
+			var chosen:String = cwd == null ? "" : cast cwd;
+			if (chosen.length > 0 && chosen.length <= 1024 && resolveDirectory != null && (group == null || chosen != group.cwd)) {
+				var resolve:String->Null<String> = cast resolveDirectory;
+				var resolved = resolve(chosen);
+				if (resolved == null) {
+					context.fail({code: "invalid_directory", message: "Choose an existing folder inside the workspace folder", ambiguous: false}); return;
+				}
+				cwd = resolved;
+			}
 			var updated:WorkspaceGroup = {
 				id: request.group, name: request.name,
-				cwd: tree ? request.cwd : (group == null ? null : group.cwd),
+				cwd: cwd,
 				parent: tree ? request.parent : (group == null ? null : group.parent),
 				order: tree ? WorkspaceProtocol.order(request.order) : (group == null ? 0 : WorkspaceProtocol.order(group.order)),
 				revision: (group == null ? 0 : group.revision) + 1
 			};
 			if (!validHierarchy(updated.id, updated.parent) || WorkspaceProtocol.order(updated.order) < 0 || WorkspaceProtocol.order(updated.order) > 1000000
-				|| updated.cwd != null && (updated.cwd.length == 0 || updated.cwd.length > 1024
-					|| resolveDirectory != null && resolveDirectory(updated.cwd) != updated.cwd)) {
+				|| updated.cwd != null && (updated.cwd.length == 0 || updated.cwd.length > 1024)) {
 				context.fail({code: "invalid_group", message: "Invalid parent or workspace directory", ambiguous: false}); return;
 			}
 			var outcome:RenameResult = {
