@@ -13,3 +13,6 @@
 **/__pycache__/
 
 /agent/naming/node_modules/
+
+# Independent local reference checkout.
+/t3code/
