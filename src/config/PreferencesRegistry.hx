@@ -28,18 +28,21 @@ class PreferencesRegistry {
 		{
 			var options = new SettingOptions();
 			options.minimum = 6; options.maximum = 96;
+			options.unit = "px";
 			if (!projectOnly) registry.define("editor/fonts/font_size", PropertyType.Int, PropertyValue.Int(defaults.fontSize), options);
 		}
 		{
 			var options = new SettingOptions();
 			options.minimum = 6; options.maximum = 96;
 			options.tooltip = "File tree text size, independent of editor font size.";
+			options.unit = "px";
 			if (!projectOnly) registry.define("files/explorer/font_size", PropertyType.Int, PropertyValue.Int(defaults.explorerFontSize), options);
 		}
 		{
 			var options = new SettingOptions();
 			options.minimum = 70; options.maximum = 200; options.step = 10;
 			options.tooltip = "Scale the whole application independently of editor font size.";
+			options.unit = "%";
 			if (!projectOnly) registry.define("appearance/workbench/zoom_percent", PropertyType.Int, PropertyValue.Int(defaults.applicationZoom), options);
 		}
 		{
@@ -51,6 +54,7 @@ class PreferencesRegistry {
 		{
 			var options = new SettingOptions();
 			options.minimum = 100; options.maximum = 1200;
+			options.unit = "px";
 			if (!projectOnly) registry.define("appearance/workbench/sidebar_width", PropertyType.Int, PropertyValue.Int(defaults.sidebarWidth), options);
 		}
 		{
@@ -103,6 +107,7 @@ class PreferencesRegistry {
 		{
 			var options = new SettingOptions();
 			options.minimum = 0; options.maximum = 5;
+			options.unit = "seconds";
 			if (!projectOnly) registry.define("editor/display/tab_tooltip_delay", PropertyType.Float, PropertyValue.Float(defaults.tabTooltipDelay), options);
 		}
 
@@ -110,6 +115,7 @@ class PreferencesRegistry {
 			var options = new SettingOptions();
 			options.minimum = 1; options.maximum = 16;
 			options.preserveExplicitDefault = true;
+			options.unit = "columns";
 			registry.define("editor/indentation/tab_width", PropertyType.Int, PropertyValue.Int(defaults.tabWidth), options);
 		}
 		{
@@ -125,6 +131,7 @@ class PreferencesRegistry {
 		{
 			var options = new SettingOptions();
 			options.minimum = 0; options.maximum = 0.3;
+			options.unit = "seconds";
 			if (!projectOnly) registry.define("editor/display/scroll_animation_duration", PropertyType.Float, PropertyValue.Float(defaults.scrollAnimationDuration), options);
 		}
 		{
@@ -159,18 +166,21 @@ class PreferencesRegistry {
 			var options = new SettingOptions();
 			options.minimum = 0; options.maximum = 1000000;
 			options.tooltip = "Maximum untracked resources shown per repository.";
+			options.unit = "files";
 			if (!projectOnly) registry.define("scm/untracked_limit", PropertyType.Int, PropertyValue.Int(defaults.scmUntrackedLimit), options);
 		}
 		{
 			var options = new SettingOptions();
 			options.minimum = 1024; options.maximum = 67108864;
 			options.tooltip = "Maximum bytes loaded for a source control diff.";
+			options.unit = "bytes";
 			if (!projectOnly) registry.define("scm/diff_size_limit", PropertyType.Int, PropertyValue.Int(defaults.scmDiffSizeLimit), options);
 		}
 		{
 			var options = new SettingOptions();
 			options.minimum = 0; options.maximum = 8;
 			options.tooltip = "Maximum nested repository scan depth.";
+			options.unit = "levels";
 			if (!projectOnly) registry.define("scm/nested_scan_depth", PropertyType.Int, PropertyValue.Int(defaults.scmNestedScanDepth), options);
 		}
 		{
@@ -209,6 +219,7 @@ class PreferencesRegistry {
 		{
 			var options = new SettingOptions();
 			options.minimum = 1; options.maximum = 1000000;
+			options.unit = "results";
 			if (!projectOnly) registry.define("search/results/max_results", PropertyType.Int, PropertyValue.Int(defaults.searchMaxResults), options);
 		}
 		{
@@ -330,6 +341,7 @@ class PreferencesRegistry {
 		if (!projectOnly) {
 			var options = new SettingOptions();
 			options.minimum = 6; options.maximum = 48;
+			options.unit = "px";
 			registry.define("terminal/fonts/font_size", PropertyType.Int, PropertyValue.Int(defaults.terminalFontSize), options);
 		}
 		if (!projectOnly) {

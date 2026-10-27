@@ -24,6 +24,10 @@ class SettingsUiTests {
   panel.setFilter("default model");
   var inspector = panel.currentInspector();
   check(inspector != null && inspector.descriptors.length == 1, "model picker remains searchable");
+  for (entry in [["editor/fonts/font_size", "px"], ["appearance/workbench/zoom_percent", "%"], ["editor/display/tab_tooltip_delay", "seconds"]]) {
+   var setting:haxeon.ui.settings.SettingDefinition = cast store.registry.get(entry[0]);
+   check(setting.unit == entry[1], "numeric setting exposes readable units: " + entry[0]);
+  }
   Sys.println("Settings UI adapter tests passed");
   return 0;
  }

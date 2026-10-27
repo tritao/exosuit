@@ -14,21 +14,57 @@ import workspace.service.WorkspaceAgentProtocol.AgentModel;
 class ExosuitSettingsPanel extends SettingsPanel {
 	final models:Void->Array<AgentModel>;
 	var modelOptionsKey:String = "";
+	final pathEditor:SettingsPathEditor;
+	final listEditors:Array<haxeon.ui.properties.StructuredPropertyEditor> = [];
 
 	public function new(store:SettingsStore, models:Void->Array<AgentModel>, onChanged:Void->Void, ?dialogs:platform.HostFileDialogs) {
 		super("exosuit-settings", store, onChanged);
 		this.models = models;
-		editorRegistry.register(new haxeon.ui.properties.ListPropertyEditor());
-		editorRegistry.register(new SettingsPathEditor(dialogs));
+		var lists = new haxeon.ui.properties.ListPropertyEditor();
+		trackDrafts(lists);
+		editorRegistry.register(lists);
+		pathEditor = new SettingsPathEditor(dialogs);
+		editorRegistry.register(pathEditor);
 		var fonts = new haxeon.ui.properties.ListPropertyEditor("exosuit.font-list");
 		var chooser = dialogs;
 		if (chooser != null) fonts.chooseItems = function(handler) {
 			chooser.openFile(function(accepted, paths) { if (accepted) handler(paths); }, "Choose fallback fonts", null, true);
 		};
+		trackDrafts(fonts);
 		editorRegistry.register(fonts);
 		for (path in ["editor/fonts/font_fallback_paths", "files/explorer/excluded_names", "languages/haxeon/command"])
 			installEditor(path, path == "editor/fonts/font_fallback_paths" ? "exosuit.font-list" : haxeon.ui.properties.ListPropertyEditor.TYPE);
 		installEditor("editor/fonts/font_path", SettingsPathEditor.TYPE);
+	}
+
+	override public function build(context:haxeon.ui.core.BuildContext):haxeon.ui.core.RenderNode {
+		var node = super.build(context);
+		if (selectedCategory == "editor/fonts") {
+			var style = new haxeon.ui.LayoutStyle();
+			style.width = haxeon.ui.LayoutAxis.grow(); style.height = haxeon.ui.LayoutAxis.fit();
+			var path = pathEditor.previewPath;
+			node.add(new haxeon.ui.widgets.layout.Column("settings-preview", [
+				new haxeon.ui.widgets.KeyedView("label", new haxeon.ui.widgets.text.Text("Font preview · " + catalog.store.getInt("editor/fonts/font_size") + " px")),
+				new haxeon.ui.widgets.KeyedView("sample", new SettingsFontPreview(path == null ? catalog.store.getString("editor/fonts/font_path") : path,
+					catalog.store.getInt("editor/fonts/font_size")))
+			], style).build(context));
+		}
+		return node;
+	}
+
+	function trackDrafts(editor:haxeon.ui.properties.StructuredPropertyEditor):Void {
+		editor.retainDrafts = true;
+		editor.onDraftChanged = function() { if (onChanged != null) onChanged(); };
+		listEditors.push(editor);
+	}
+
+	override public function hasUnsavedChanges():Bool {
+		for (editor in listEditors) if (editor.hasDrafts()) return true;
+		return false;
+	}
+
+	override public function discardUnsavedChanges():Void {
+		for (editor in listEditors) editor.discardDrafts();
 	}
 
 	function installEditor(path:String, typeId:String):Void {
