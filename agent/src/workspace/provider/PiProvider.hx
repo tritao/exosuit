@@ -52,6 +52,12 @@ private typedef PiSession = {
 
 /** Pi owns credentials, extensions and native session files. The daemon owns process lifetime and delivery. */
 class PiProvider implements LocalAgentProvider {
+ public function modelCatalog(q:AgentModelsQuery,ctx:RpcContext<AgentModelsPage>):Void {
+  ctx.fail({code:"unsupported_operation",message:"Load models from an attached session",ambiguous:false});
+ }
+ public function discover(q:AgentDiscoveryQuery,ctx:RpcContext<AgentDiscovery>):Void {
+  ctx.fail({code:"unsupported_operation",message:"Session discovery is not supported by this provider",ambiguous:false});
+ }
  public function driverKind():String return "pi";
  public function summary():String return "Pi: " + [for(s in sessions) true].length + " sessions";
  final directories:WorkspaceDirectories;

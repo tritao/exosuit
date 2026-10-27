@@ -1,7 +1,6 @@
 package app;
 
 import workspace.provider.PiProvider;
-import workspace.provider.CodexProvider;
 import workspace.runtime.WorkspaceDirectories;
 import workspace.storage.WorkspaceSqliteStore;
 import workspace.service.WorkspaceAgentProtocol;
@@ -19,7 +18,7 @@ class RealPiSmokeMain {
   var seed=new WorkspaceService("w","e",[{id:"work",name:"Work",cwd:root,revision:1}]);
   var store=new WorkspaceSqliteStore(root+"/agents.sqlite","w",seed.snapshot(),32,root);
   function pi():PiProvider return new PiProvider(dirs,function() return seed.snapshot().groups,processes,clock,root,store,binary);
-  var provider=new CodexProvider("w","owner",dirs,function() return seed.snapshot().groups,processes,clock,store,"missing-codex",null,null,null,[pi()]);
+  var provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, [new workspace.provider.CodexProvider("owner", dirs, function() return seed.snapshot().groups, processes, clock, store, "missing-codex", null, null), pi()], store);
   var pair=MemoryTransport.pair(),client=new RpcConnection(pair.client,clock),server=new RpcConnection(pair.server,clock);
   provider.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
   var value:Null<AgentView>=null,code="";
@@ -63,7 +62,7 @@ class RealPiSmokeMain {
   // Rebuild the provider as a daemon restart, retaining only the SQLite state.
   provider.dispose();client.close();server.close();
   pair=MemoryTransport.pair();client=new RpcConnection(pair.client,clock);server=new RpcConnection(pair.server,clock);
-  provider=new CodexProvider("w","owner",dirs,function() return seed.snapshot().groups,processes,clock,store,"missing-codex",null,null,null,[pi()]);
+  provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, [new workspace.provider.CodexProvider("owner", dirs, function() return seed.snapshot().groups, processes, clock, store, "missing-codex", null, null), pi()], store);
   provider.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
   require(processes.activeCount()==0,"Pi resumed without explicit connection");
   action("connect");until("idle");require(view().record.thread==session,"Real Pi resume changed native identity");

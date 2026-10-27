@@ -43,6 +43,8 @@ import haxeon.wire.MessagePack;
 	@:id(3) var records:Array<AgentRecord>;
 	@:id(4) var status:String;
 	@:optional @:id(5) var next:Null<String>;
+	/** Missing on legacy daemons, which route every create request to Codex. */
+	@:optional @:id(6) var providers:Null<Array<String>>;
 }
 
 @:wire typedef AgentCreate = {
@@ -161,6 +163,7 @@ import haxeon.wire.MessagePack;
 	@:id(2) var instance:String;
 	@:id(3) var group:String;
 	@:id(4) var cursor:Null<String>;
+	@:optional @:id(5) var provider:Null<String>;
 }
 
 @:wire typedef AgentThread = {
@@ -178,6 +181,7 @@ import haxeon.wire.MessagePack;
 	@:id(1) var workspace:String;
 	@:id(2) var instance:String;
 	@:id(3) var cursor:Null<String>;
+	@:optional @:id(4) var provider:Null<String>;
 }
 
 @:wire typedef AgentModelsPage = {

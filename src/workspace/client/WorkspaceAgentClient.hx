@@ -5,13 +5,15 @@ import workspace.service.WorkspaceAgentProtocol;
 interface WorkspaceAgentClient {
 	public function canReadAgents():Bool;
  public function canControlAgents():Bool;
+ /** Session mutation state; session creation has its own operation below. */
  public function agentBusy():Bool;
+ public function agentCreation():Null<workspace.client.WorkspaceAgentCreation.AgentCreationStatus>;
  public function agentRevision():Int;
 	public function agents():Null<AgentCatalog>;
 	public function agentError():Null<String>;
 	public function refreshAgents():Void;
-	public function createAgent(group:String, thread:Null<String>, ?created:String->Void,
-		?defaults:CodexSessionDefaults):Void;
+	public function createAgent(group:String, thread:Null<String>, ?created:AgentRecord->Void,
+		?defaults:AgentSessionDefaults):Void;
 	public function deleteAgent(id:String, ?deleted:Void->Void):Void;
 	public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String, ?accepted:Void->Void):Void;
 	public function discoverAgents(group:String, cursor:Null<String>):Void;

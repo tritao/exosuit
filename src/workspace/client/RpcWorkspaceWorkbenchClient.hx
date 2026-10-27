@@ -2,6 +2,7 @@ package workspace.client;
 
 import haxeon.rpc.RpcConnection;
 import haxeon.rpc.RpcError;
+import workspace.client.WorkspaceAgentCreation.AgentCreationStatus;
 import workspace.service.WorkspaceAgentProtocol;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceTerminalProtocol;
@@ -35,6 +36,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   var agentReadCount:Int = 0;
   var agentsError:Null<String>;
   var agentActionError:Null<String>;
+  var creationError:Null<String>;
   var agentsPending:Bool = false;
   var agentsRequestToken:Int = 0;
   var agentsNext:Float = 0;
@@ -47,10 +49,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   var discoveryToken:Int = 0;
   var discoveryNext:Float = 0;
   var discoveryDeadline:Float = 0;
-  var pendingAgentCreate:Null<WorkspaceAgentProtocol.AgentCreate>;
-  var agentCreated:Null < String -> Void >;
-  var createNext:Float = 0;
-  var createDeadline:Float = 0;
+  var creation:Null<WorkspaceAgentCreation>;
   var pendingModels:Null<PendingModelList>;
 
   public function new(endpoint:WorkspaceRpcEndpoint, clock:Void -> Float) {
@@ -82,8 +81,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       agentsPending = false;
       agentsRequestToken++;
       agentMutation = false;
-      pendingAgentCreate = null;
-      agentCreated = null;
+      creation = null;
       pendingDiscovery = null;
       discovery = null;
       discoveryToken++;
@@ -94,6 +92,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       agentMutationId = null;
       agentCatalog = null;
       agentActionError = null;
+      creationError = null;
       agentsNext = 0;
       agentsRevision++;
       if (lost) {
@@ -116,8 +115,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     pendingDiscovery = null;
     discovery = null;
     discoveryToken++;
-    pendingAgentCreate = null;
-    agentCreated = null;
+    creation = null;
     agentViews.clear();
     agentTokens.clear();
     agentReadPending.clear();
@@ -131,9 +129,10 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   public function canReadAgents():Bool return rpc() != null && has(WorkspaceAgentProtocol.READ);
   public function canControlAgents():Bool return canReadAgents() && has(WorkspaceAgentProtocol.CONTROL);
   public function agentBusy():Bool return agentMutation;
+  public function agentCreation():Null<AgentCreationStatus> return creation == null ? null : creation.status();
   public function agentRevision():Int return agentsRevision;
   public function agents():Null < WorkspaceAgentProtocol.AgentCatalog > return agentCatalog;
-  public function agentError():Null < String > return agentActionError == null ? agentsError : agentActionError;
+  public function agentError():Null < String > return creationError != null ? creationError : agentActionError == null ? agentsError : agentActionError;
   public function agentView(id:String):Null < WorkspaceAgentProtocol.AgentView > return agentViews.get(id);
   public function listModels(cursor:Null<String>, done:Null<WorkspaceAgentProtocol.AgentModelsPage>->Null<String>->Void):Void {
     var connection = rpc();
@@ -276,79 +275,77 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     );
   }
 
-  public function createAgent(group:String, thread:Null<String>, ? created:String -> Void,
-      ?defaults:CodexSessionDefaults):Void {
-    if (rpc() == null || !canControlAgents() || agentMutation) return;
-    agentMutation = true;
-    agentsError = null;
-    agentCreated = created;
-    pendingAgentCreate = {
-      workspace: "workspace",
-      instance: instance(),
-      id: WorkspaceIds.create("agent"),
-      group: group,
-      name: defaults != null && defaults.provider == "claude" ? "Claude" : defaults != null && defaults.provider == "pi" ? "Pi" : "Codex",
-      provider: defaults == null ? null : defaults.provider,
-      thread: thread,
-      defaultModel: thread == null && defaults != null ? defaults.model : null,
-      defaultEffort: thread == null && defaults != null ? defaults.effort : null,
-      permissionProfile: thread == null && defaults != null ? defaults.permissionProfile : null
-    };
-    createDeadline = clock() + 60000;
-    createNext = 0;
-    continueAgentCreate();
+  public function createAgent(group:String,thread:Null<String>,?created:AgentRecord->Void,?defaults:AgentSessionDefaults):Void {
+    var connection=rpc(),workspaceRoot=root();
+    if(connection == null || workspaceRoot == null || !canControlAgents() || creation != null) {
+      creationError=creation != null ? "A session is already being created. Wait for it to finish."
+        : "Connect to a workspace with agent control permission before creating a session.";
+      agentsRevision++;return;
+    }
+    agentsError=null;creationError=null;
+    var query:AgentCreate={workspace:"workspace",instance:instance(),id:WorkspaceIds.create("agent"),group:group,
+      name:defaults != null && defaults.provider == "claude" ? "Claude" : defaults != null && defaults.provider == "pi" ? "Pi" : "Codex",
+      provider:defaults == null ? null : defaults.provider,thread:thread,
+      defaultModel:thread == null && defaults != null ? defaults.model : null,
+      defaultEffort:thread == null && defaults != null ? defaults.effort : null,
+      permissionProfile:thread == null && defaults != null ? defaults.permissionProfile : null};
+    creation=new WorkspaceAgentCreation(query,connection,workspaceRoot,clock()+60000,created);
+    agentsRevision++;continueAgentCreate();
+  }
+
+  function failCreation(operation:WorkspaceAgentCreation,message:String):Void {
+    if(creation != operation) return;
+    creation=null;creationError=message;agentsRevision++;
   }
 
   function continueAgentCreate():Void {
-    var connection = rpc(), query = pendingAgentCreate;
-    if (connection == null || query == null || clock() < createNext) return;
-    if (clock() >= createDeadline || query.instance != instance()) {
-      pendingAgentCreate = null;
-      agentMutation = false;
-      agentsError = "Codex startup did not complete";
-      agentsRevision++;
-      return;
+    var operation=creation;
+    if(operation == null) return;
+    var connection=operation.connection,query=operation.query;
+    if(rpc() != connection || query.instance != instance() || root() != operation.root) {
+      failCreation(operation,"Workspace changed; reconcile sessions before retrying creation");return;
     }
-    createNext = createDeadline;
-    connection.call(WorkspaceAgentProtocol.CREATE, query, 20000, function(record) {
-      if (rpc() != connection) return;
-      pendingAgentCreate = null;
-      agentMutation = false;
-      agentsNext = 0;
-      agentsRevision++;
-      if (record.workspaceRoot != root()) {
-        agentsError = "Invalid created agent scope";
-        return;
+    if(operation.inFlight || clock()<operation.next) return;
+    if(clock()>=operation.deadline) {failCreation(operation,query.name+" session creation did not complete");return;}
+    if(query.provider != null && query.provider != "codex") {
+      if(agentCatalog == null) {operation.next=clock()+100;refreshAgents();return;}
+      var supported=agentCatalog.providers;
+      if(supported == null || !supported.contains(query.provider)) {
+        failCreation(operation,"This workspace service does not support "+query.name
+          +" sessions. Open Remote Access and update the workspace service, then retry.");return;
       }
-      agentsError = null;
-      if (agentCatalog != null) {
-        var found = false;
-        for (index in 0...agentCatalog.records.length) if (agentCatalog.records[index].id == record.id) {
-          agentCatalog.records[index] = record;
-          found = true;
-          break;
-        }
-        if (!found) agentCatalog.records.push(record);
-      }
-      var callback = agentCreated;
-      agentCreated = null;
-      if (callback != null) callback(record.id);
-      agentAction(record.id, "read", "", null);
-    }, function(error) {
-      if (rpc() != connection) return;
-      if (error.code == "provider_starting" && !error.ambiguous) {
-        createNext = clock() + 500;
-        agentsError = error.message;
-        agentsRevision++;
-        return;
-      }
-      pendingAgentCreate = null;
-      agentMutation = false;
-      agentsError = error.message;
-      agentsNext = 0;
-      agentsRevision++;
     }
-    );
+    operation.inFlight=true;operation.phase="creating";agentsRevision++;
+    connection.call(WorkspaceAgentProtocol.CREATE,query,20000,function(record) {
+      if(creation != operation || rpc() != connection || query.instance != instance() || root() != operation.root) return;
+      var expected=query.provider == null ? "codex" : query.provider;
+      var actual=record.provider == null ? "codex" : record.provider;
+      if(record.workspaceRoot != operation.root || record.id != query.id || record.group != query.group || actual != expected) {
+        failCreation(operation,"Invalid created agent resource; reconcile sessions before retrying");return;
+      }
+      creation=null;agentsError=null;creationError=null;
+      // Fence catalog snapshots issued before this resource was reserved.
+      agentsRequestToken++;agentsPending=false;agentsNext=0;
+      if(agentCatalog != null) {
+        agentCatalog.records=[for(r in agentCatalog.records) if(r.id != record.id) r];
+        agentCatalog.records.push(record);
+        agentCatalog.records.sort(function(a,b) return Reflect.compare(a.id,b.id));
+      }
+      agentsRevision++;
+      // Open from the resource itself, never by looking it up in a mutable catalog.
+      var completed=operation.completed;
+      if(completed != null) completed(record);
+      if(rpc() != connection || query.instance != instance()) return;
+      agentAction(record.id,"read","",null);
+      refreshAgents();
+    },function(error) {
+      if(creation != operation || rpc() != connection) return;
+      operation.inFlight=false;
+      if(error.code == "provider_starting" && !error.ambiguous) {
+        operation.phase="starting-provider";operation.next=clock()+500;agentsRevision++;return;
+      }
+      failCreation(operation,error.message);agentsNext=0;
+    });
   }
 
   public function deleteAgent(id:String, ?deleted:Void->Void):Void {

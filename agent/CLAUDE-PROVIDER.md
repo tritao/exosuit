@@ -23,6 +23,15 @@ profiles**. Existing CLI settings/rules can permit a tool without requesting
 Exosuit approval. Exosuit does not enable bypass mode or change global settings.
 Effort overrides are currently unsupported and rejected rather than ignored.
 
+If the workspace service predates provider support, creating Claude now shows
+an update error above the Workbench tree. Open **Remote Access** to update the
+workspace service. An editor restart alone can reconnect to the same old daemon.
+**Update when idle** waits for sessions to finish; **Restart now…** explicitly
+restarts the service and stops its current terminal/provider processes. The UI
+checks the catalog's advertised providers before creating a non-Codex session,
+so an older daemon cannot silently route a Claude create to Codex. Creation
+errors remain visible through background catalog refreshes until another creation attempt or a workspace connection change.
+
 The executable is resolved on the workspace host from `EXOSUIT_CLAUDE_BIN` or
 `claude` on PATH. Authentication uses the installed CLI's configuration. The
 optional `EXOSUIT_CLAUDE_SCRIPT` launch prefix exists for test executables, like
@@ -40,8 +49,10 @@ Recovery replaces `--session-id` with `--resume <saved-uuid>`. A saved model add
 `--model`. Provider identity, session UUID (`AgentRecord.thread`), canonical cwd,
 model, permission mode, turn state and a bounded activity snapshot live in the
 existing SQLite agent payload. Older records without a provider remain Codex.
-The two providers share authorization, catalog limits and workspace RPC routing.
-The generic provider registry and provider-specific discovery remain future work.
+The provider-neutral `WorkspaceAgentService` shares authorization, catalog limits
+and workspace RPC routing across Codex, Claude and Pi. See
+[session ownership and creation](AGENT-SESSIONS.md). Claude-specific discovery
+remains future work.
 
 ## Failure and replay
 
@@ -99,7 +110,14 @@ streamed prompt, Write approval, AskUserQuestion answer, Bash sleep interruption
 explicit session resume remembering the answer, and model/permission controls.
 The fixture runs in a temporary directory. It adds per-process ask rules to
 make approval callbacks deterministic and does not alter global CLI settings.
-No desktop click-through qualification has been performed for Claude yet.
+Desktop regression: `xvfb-run -a -s '-screen 0 1280x1000x24' python3
+scripts/test-agent-session-creation-ui.py` covers Codex and Claude creation in both
+integrated and terminal modes, including the provider picker, Codex toolbar,
+visible editor tabs, tree selection and reattachment. The compatibility entry
+`scripts/test-claude-workbench-ui.py` selects Claude integrated mode. Add
+`--legacy-agent /path/to/older/main.hl` to check the persistent update error
+without a create side effect. Full real desktop approval/question/interruption
+and daemon-restart qualification remain separate work.
 
 Protocol references:
 

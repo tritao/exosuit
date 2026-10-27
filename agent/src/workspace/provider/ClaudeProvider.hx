@@ -34,6 +34,12 @@ private typedef ClaudeSession = {
 
 /** One native CLI process per session, owned by the workspace daemon, not an editor attachment. */
 class ClaudeProvider implements LocalAgentProvider {
+ public function modelCatalog(q:AgentModelsQuery,ctx:RpcContext<AgentModelsPage>):Void {
+  ctx.fail({code:"unsupported_operation",message:"Load models from an attached session",ambiguous:false});
+ }
+ public function discover(q:AgentDiscoveryQuery,ctx:RpcContext<AgentDiscovery>):Void {
+  ctx.fail({code:"unsupported_operation",message:"Session discovery is not supported by this provider",ambiguous:false});
+ }
  public function driverKind():String return "claude";
  final directories:WorkspaceDirectories;
  final groups:Void->Array<WorkspaceGroup>;

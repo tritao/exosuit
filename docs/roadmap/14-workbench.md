@@ -228,13 +228,16 @@ reconciliation are implemented. See [provider details](../../agent/CODEX.md).
 Structured conversation rendering now covers messages, command output and file
 changes with stable turn/item identity, folded details and explicit retention
 limits. The prompt stays outside the scrolling conversation. The full provider
-milestone remains open: the generic registry, broader Markdown/diff rendering,
+milestone remains open: broader Markdown/diff rendering,
 additional request kinds, full paged history, resource metadata controls,
 supervision CLI/wait and broader real desktop/shared-daemon qualification.
 
-- [ ] Provider registry with the lifecycle contract (available, create,
-  attach, recover, start, stop, restart, send_input, action, refresh_status,
-  capabilities, shutdown). Ship `shell`, `claude` and `codex`.
+- [x] Provider-neutral workspace service: registry, authorization, cross-provider
+  identities and shared catalog limits; vendor adapters own their protocols.
+  Explicit client creation operations hand full resource records to a single UI
+  entry for terminal/integrated modes. Native race/failure tests and a desktop
+  Codex/Claude creation matrix cover both modes. Full supervision CLI/wait remains
+  separate. See [session creation](../../agent/AGENT-SESSIONS.md).
 - [x] `claude` provider: native Haxe bidirectional JSONL, daemon-owned CLI
   process per session, initialization/request IDs, approve-once/decline,
   AskUserQuestion, interrupt, model/permission controls and bounded replay.

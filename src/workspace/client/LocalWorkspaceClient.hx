@@ -401,12 +401,13 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   public function canReadAgents():Bool return workbench.canReadAgents();
   public function canControlAgents():Bool return workbench.canControlAgents();
   public function agentBusy():Bool return workbench.agentBusy();
+  public function agentCreation():Null<workspace.client.WorkspaceAgentCreation.AgentCreationStatus> return workbench.agentCreation();
   public function agentRevision():Int return workbench.agentRevision();
   public function agents():Null<AgentCatalog> return workbench.agents();
   public function agentError():Null<String> return workbench.agentError();
   public function refreshAgents():Void workbench.refreshAgents();
-  public function createAgent(group:String, thread:Null<String>, ?created:String->Void,
-      ?defaults:CodexSessionDefaults):Void
+  public function createAgent(group:String, thread:Null<String>, ?created:AgentRecord->Void,
+      ?defaults:AgentSessionDefaults):Void
     workbench.createAgent(group, thread, created, defaults);
   public function deleteAgent(id:String, ?deleted:Void->Void):Void workbench.deleteAgent(id, deleted);
   public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String, ?accepted:Void->Void):Void

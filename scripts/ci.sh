@@ -13,6 +13,7 @@ python3 "$root_dir/scripts/build.py"
 "$root_dir/scripts/test-uikit-workflow.sh"
 "$root_dir/scripts/test-decoration-ui.sh"
 "$root_dir/scripts/test-workspace-ui.sh"
+xvfb-run -a -s "-screen 0 1280x1000x24" python3 "$root_dir/scripts/test-agent-session-creation-ui.py"
 "$root_dir/scripts/test-release.sh"
 
 "$root_dir/scripts/test-web.sh"

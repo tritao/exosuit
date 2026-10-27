@@ -34,7 +34,6 @@ class WorkbenchPanel implements View {
 	final showMenu:(Array<MenuItem>, UiEvent, Void->Bool)->Void;
 	final attach:WorkspaceGroup->Void;
 	final closeAgentTab:(String, String)->Void;
-	final createCodex:(String, String->Void)->Void;
 	final createProvider:(String, String)->Void;
 	final canCreateAgent:Void->Bool;
 	public final model = new WorkbenchTreeModel();
@@ -55,22 +54,18 @@ class WorkbenchPanel implements View {
     var revealRoot:Null<String>;
     var scrollTarget:Null<String>;
     var scrollPasses = 0;
-    var pendingAgentSelection:Null<{var key:String; var workspaceRoot:String;}>;
+    var pendingSessionSelection:Null<{var key:String; var workspaceRoot:String;}>;
     var observedWorkspaceRoot:Null<String>;
 
 	public function new(client:WorkspaceWorkbenchClient, open:TerminalRecord->Bool, createTerminal:String->Void,
 		edit:(WorkspaceGroup, String)->Void, openFolder:String->Void, terminalActions:TerminalRecord->Array<MenuItem>, requestFrame:Void->Void,
 		openAgent:String->Void, showMenu:(Array<MenuItem>, UiEvent, Void->Bool)->Void, attach:WorkspaceGroup->Void,
-		closeAgentTab:(String, String)->Void, createCodex:(String, String->Void)->Void,
-		?createProvider:(String, String)->Void, ?canCreateAgent:Void->Bool) {
+		closeAgentTab:(String, String)->Void, createProvider:(String, String)->Void, canCreateAgent:Void->Bool) {
 		this.client = client; this.open = open; this.createTerminal = createTerminal; this.edit = edit;
 		this.openFolder = openFolder; this.terminalActions = terminalActions; this.requestFrame = requestFrame;
 		this.openAgent = openAgent; this.showMenu = showMenu; this.attach = attach; this.closeAgentTab = closeAgentTab;
-		this.createCodex = createCodex;
-		this.createProvider = createProvider == null ? function(provider,group) {
-			client.agentService().createAgent(group,null,openAgent,{provider:provider,model:null,effort:null,permissionProfile:provider == "claude" ? "default" : "supervised"});
-		} : createProvider;
-		this.canCreateAgent = canCreateAgent == null ? function() return client.agentService().canControlAgents() && !client.agentService().agentBusy() : canCreateAgent;
+		this.createProvider = createProvider;
+		this.canCreateAgent = canCreateAgent;
 		var style = new LayoutStyle(); style.width = LayoutAxis.stretch(); style.height = LayoutAxis.grow();
 		tree = new TreeView("workbench-tree", model, style);
 		tree.expandOnSingleClick = true;
@@ -215,39 +210,43 @@ class WorkbenchPanel implements View {
         requestFrame();
     }
 
-    /** Keep the tree projection aligned with the active Codex editor tab. */
-    public function syncActiveAgent(resource:Null<String>, workspaceRoot:Null<String>):Void {
-        if (resource == null || workspaceRoot == null) {
-            pendingAgentSelection = null;
+    /** Keep the tree aligned with either kind of service-owned session tab. */
+    public function syncActiveSession(key:Null<String>, workspaceRoot:Null<String>):Void {
+        if (key == null || workspaceRoot == null) {
+            pendingSessionSelection = null;
             return;
         }
-        var key = "a:" + resource;
         if (tree.selectedKey == key) {
-            pendingAgentSelection = null;
+            pendingSessionSelection = null;
             return;
         }
-        if (pendingAgentSelection != null && pendingAgentSelection.key == key
-            && pendingAgentSelection.workspaceRoot == workspaceRoot) return;
-        pendingAgentSelection = {key: key, workspaceRoot: workspaceRoot};
+        if (pendingSessionSelection != null && pendingSessionSelection.key == key
+            && pendingSessionSelection.workspaceRoot == workspaceRoot) return;
+        pendingSessionSelection = {key: key, workspaceRoot: workspaceRoot};
         requestFrame();
     }
 
     /** Discard a delayed tab-to-tree sync when the workspace attachment changes. */
     public function workspaceAttachmentChanged():Void {
-        pendingAgentSelection = null;
-        if (scrollTarget != null && StringTools.startsWith(scrollTarget, "a:")) scrollTarget = null;
+        pendingSessionSelection = null;
+        if (scrollTarget != null && (StringTools.startsWith(scrollTarget, "a:") || StringTools.startsWith(scrollTarget, "t:"))) scrollTarget = null;
     }
 
-    function applyPendingAgentSelection():Void {
-        var target = pendingAgentSelection;
+    function applyPendingSessionSelection():Void {
+        var target = pendingSessionSelection;
         if (target == null) return;
         var terminalCatalog = client.terminalCatalog();
-        var agentCatalog = client.agentService().agents();
-        if (terminalCatalog == null || terminalCatalog.workspaceRoot != target.workspaceRoot
-            || agentCatalog == null || agentCatalog.root != target.workspaceRoot
-            || !model.agents.exists(target.key.substring(2))) return;
-        var agent = model.agents.get(target.key.substring(2));
-        var group = agent == null ? null : model.groups.get(agent.group);
+        if (terminalCatalog == null || terminalCatalog.workspaceRoot != target.workspaceRoot) return;
+        var group:Null<WorkspaceGroup> = null;
+        if (StringTools.startsWith(target.key,"t:")) {
+            var terminal=model.terminals.get(target.key.substring(2));
+            if(terminal != null) group=model.groups.get(terminal.group);
+        } else {
+            var agentCatalog=client.agentService().agents();
+            if(agentCatalog == null || agentCatalog.root != target.workspaceRoot) return;
+            var agent=model.agents.get(target.key.substring(2));
+            if(agent != null) group=model.groups.get(agent.group);
+        }
         if (group == null) return;
         var ancestors:Array<String> = [];
         var visited:Map<String, Bool> = [];
@@ -265,7 +264,7 @@ class WorkbenchPanel implements View {
             scrollTarget = target.key;
             scrollPasses = 2;
         }
-        pendingAgentSelection = null;
+        pendingSessionSelection = null;
     }
 
     function applyPendingReveal():Void {
@@ -362,7 +361,7 @@ class WorkbenchPanel implements View {
 			model.update(catalog, retainedAgents, creating ? draft : null);
 		}
         applyPendingReveal();
-		applyPendingAgentSelection();
+		applyPendingSessionSelection();
 		var selected = groupFor(tree.selectedKey);
 		var terminal = toolbarButton("New terminal", IconName.Terminal, function() {
 			if (selected != null) createTerminal(selected.id);
@@ -370,7 +369,7 @@ class WorkbenchPanel implements View {
 		terminal.enabled = selected != null && client.canCreateGroupedTerminals()
 			&& !client.terminalCatalogBusy();
 		var agent = toolbarButton("New Codex", IconName.Plus, function() {
-			if (selected != null) createCodex(selected.id, openAgent);
+			if (selected != null) createProvider("codex", selected.id);
 		}, "workbench-new-codex");
 		agent.enabled = selected != null && canCreateAgent();
 		var selectedAgent = tree.selectedKey != null && StringTools.startsWith(tree.selectedKey, "a:")
@@ -391,9 +390,14 @@ class WorkbenchPanel implements View {
 			new KeyedView("delete-agent", new haxeon.ui.widgets.overlays.Tooltip("delete-agent-tip", deleteAgent, new Text("Remove from Workbench"), 0, 36)),
 			new KeyedView("more", new haxeon.ui.widgets.overlays.Tooltip("workbench-actions-tip", more, new Text("Actions"), 0, 36))
 		], toolbarStyle)), new KeyedView("tree", tree)];
+		var creation=client.agentService().agentCreation();
+		if (creation != null)
+			rows.insert(1, new KeyedView("operation-pending", new Text("Starting " + creation.name + " session…")));
+		else if (client.agentService().agentBusy() || client.terminalCatalogBusy())
+			rows.insert(1, new KeyedView("operation-pending", new Text("Session operation in progress…")));
 		var error = draftError == null ? client.terminalCatalogError() : draftError;
 		if (error == null) error = client.agentService().agentError();
-		if (error != null) rows.push(new KeyedView("error", new Text(error)));
+		if (error != null) rows.insert(1, new KeyedView("error", new Text(error)));
 		if (agents != null) {
 			var statusStyle = new LayoutStyle(); statusStyle.width = LayoutAxis.stretch();
 			statusStyle.padding = new Insets(6, 4, 6, 4);

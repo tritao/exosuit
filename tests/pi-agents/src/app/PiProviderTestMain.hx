@@ -1,7 +1,6 @@
 package app;
 
 import workspace.provider.PiProvider;
-import workspace.provider.CodexProvider;
 import workspace.runtime.WorkspaceDirectories;
 import workspace.storage.WorkspaceSqliteStore;
 import workspace.service.WorkspaceAgentProtocol;
@@ -18,7 +17,7 @@ class PiProviderTestMain {
   var seed=new WorkspaceService("w","e",[{id:"work",name:"Work",cwd:root,revision:1}]);
   var store=new WorkspaceSqliteStore(root+"/agents.sqlite","w",seed.snapshot(),32,root);
   var pi=new PiProvider(dirs,function() return seed.snapshot().groups,processes,clock,root,store,"python3",script);
-  var provider=new CodexProvider("w","owner",dirs,function() return seed.snapshot().groups,processes,clock,store,"missing-codex",null,null,null,[pi]);
+  var provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, [new workspace.provider.CodexProvider("owner", dirs, function() return seed.snapshot().groups, processes, clock, store, "missing-codex", null, null), pi], store);
   var pair=MemoryTransport.pair(),client=new RpcConnection(pair.client,clock),server=new RpcConnection(pair.server,clock);
   provider.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
   function pump():Void {server.poll();provider.poll();client.poll();Sys.sleep(0.002);}
@@ -116,7 +115,7 @@ class PiProviderTestMain {
   provider.dispose();client.close();server.close();
   pair=MemoryTransport.pair();client=new RpcConnection(pair.client,clock);server=new RpcConnection(pair.server,clock);
   pi=new PiProvider(dirs,function() return seed.snapshot().groups,processes,clock,root,store,"python3",script);
-  provider=new CodexProvider("w","owner",dirs,function() return seed.snapshot().groups,processes,clock,store,"missing-codex",null,null,null,[pi]);
+  provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, [new workspace.provider.CodexProvider("owner", dirs, function() return seed.snapshot().groups, processes, clock, store, "missing-codex", null, null), pi], store);
   provider.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
   for(_ in 0...10) provider.poll();
   require(processes.activeCount()==0,"Persisted Pi session was resumed automatically");

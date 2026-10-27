@@ -23,7 +23,7 @@ class AgentAttachPanel implements View {
 	final cwd:String;
 	final owner:String;
 	final done:Void->Void;
-	final open:String->Void;
+	final open:AgentRecord->Void;
 	final requestFrame:Void->Void;
 	var filter = "";
 	var threadId = "";
@@ -31,7 +31,7 @@ class AgentAttachPanel implements View {
 	final threads:Array<AgentThread> = [];
 
 	public function new(client:WorkspaceWorkbenchClient, group:WorkspaceGroup, cwd:String,
-		done:Void->Void, open:String->Void, requestFrame:Void->Void) {
+		done:Void->Void, open:AgentRecord->Void, requestFrame:Void->Void) {
 		this.client = client; this.group = group; this.cwd = cwd;
 		this.done = done; this.open = open; this.requestFrame = requestFrame;
 		var catalog = client.terminalCatalog(); owner = catalog == null ? "" : catalog.instance;
@@ -46,7 +46,7 @@ class AgentAttachPanel implements View {
 	}
 
 	function attach(id:String):Void {
-		if (!isCurrent() || client.agentService().agentBusy()) return;
+		if (!isCurrent() || client.agentService().agentCreation() != null) return;
 		client.agentService().createAgent(group.id, id, function(resource) { done(); open(resource); });
 		requestFrame();
 	}
@@ -62,7 +62,7 @@ class AgentAttachPanel implements View {
 				if (!duplicate) threads.push(thread);
 			}
 		}
-		var enabled = isCurrent() && service.canControlAgents() && !service.agentBusy();
+		var enabled = isCurrent() && service.canControlAgents() && service.agentCreation() == null;
 		var search = new TextField("codex-thread-search", filter, function(value) { filter = value; requestFrame(); });
 		search.label = "Search Codex threads"; search.placeholder = "Search threads in this directory";
 		var results:Array<KeyedView> = [];

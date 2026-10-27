@@ -1,7 +1,6 @@
 package app;
 
 import workspace.provider.PiProvider;
-import workspace.provider.CodexProvider;
 import workspace.runtime.WorkspaceDirectories;
 import workspace.storage.WorkspaceSqliteStore;
 import workspace.service.WorkspaceAgentProtocol;
@@ -18,8 +17,7 @@ class PiInputTestMain {
   var processes=new ProcessManager(),dirs=new WorkspaceDirectories(root);
   var seed=new WorkspaceService("w","e",[{id:"work",name:"Work",cwd:root,revision:1}]);
   var store=new WorkspaceSqliteStore(root+"/agents.sqlite","w",seed.snapshot(),32,root);
-  function build():CodexProvider return new CodexProvider("w","owner",dirs,function() return seed.snapshot().groups,processes,clock,store,
-   "missing-codex",null,null,null,[new PiProvider(dirs,function() return seed.snapshot().groups,processes,clock,root,store,"python3",script)]);
+  function build():workspace.provider.WorkspaceAgentService return new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, [new workspace.provider.CodexProvider("owner", dirs, function() return seed.snapshot().groups, processes, clock, store, "missing-codex", null, null), new PiProvider(dirs,function() return seed.snapshot().groups,processes,clock,root,store,"python3",script)], store);
   var provider=build(),pair=MemoryTransport.pair(),client=new RpcConnection(pair.client,clock),server=new RpcConnection(pair.server,clock);
   provider.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
   var value:Null<AgentView>=null,code="";

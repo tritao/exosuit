@@ -1,7 +1,6 @@
 package app;
 
 import workspace.provider.ClaudeProvider;
-import workspace.provider.CodexProvider;
 import workspace.runtime.WorkspaceDirectories;
 import workspace.storage.WorkspaceSqliteStore;
 import workspace.service.WorkspaceAgentProtocol;
@@ -18,7 +17,7 @@ class ClaudeProviderTestMain {
   var seed=new WorkspaceService("w","e",[{id:"work",name:"Work",cwd:root,revision:1}]);
   var store=new WorkspaceSqliteStore(root+"/agents.sqlite","w",seed.snapshot(),32,root);
   var claude=new ClaudeProvider(dirs,function() return seed.snapshot().groups,processes,clock,store,"python3",script);
-  var provider=new CodexProvider("w","owner",dirs,function() return seed.snapshot().groups,processes,clock,store,"missing-codex",null,null,claude);
+  var provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, [claude], store);
   var pair=MemoryTransport.pair(),client=new RpcConnection(pair.client,clock),server=new RpcConnection(pair.server,clock);
   provider.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
   function pump():Void {server.poll();provider.poll();client.poll();Sys.sleep(0.002);}
@@ -48,7 +47,8 @@ class ClaudeProviderTestMain {
   create();var id=currentRecord().thread;create();require(currentRecord().thread==id,"Duplicate create changed session id");
   until("idle");
   var listed=false;
-  client.call(WorkspaceAgentProtocol.LIST,{workspace:"w",instance:"owner"},5000,function(r) {require(r.records.length==1 && r.records[0].provider=="claude","Mixed catalog lost Claude identity");listed=true;},function(e) throw e.message);
+  client.call(WorkspaceAgentProtocol.LIST,{workspace:"w",instance:"owner"},5000,function(r) {require(r.records.length==1 && r.records[0].provider=="claude","Mixed catalog lost Claude identity");
+   var supported=r.providers;require(supported != null && supported.contains("claude"),"Catalog omitted Claude support");listed=true;},function(e) throw e.message);
   wait(function() return listed);
   action("prompt","hello");require(code=="","Prompt rejected");until("completed");
   require(items().length==2 && items()[1].text=="Hello 界","Streaming/final message was duplicated or corrupted");
@@ -78,7 +78,7 @@ class ClaudeProviderTestMain {
   provider.dispose();client.close();server.close();
   pair=MemoryTransport.pair();client=new RpcConnection(pair.client,clock);server=new RpcConnection(pair.server,clock);
   claude=new ClaudeProvider(dirs,function() return seed.snapshot().groups,processes,clock,store,"python3",script);
-  provider=new CodexProvider("w","owner",dirs,function() return seed.snapshot().groups,processes,clock,store,"missing-codex",null,null,claude);
+  provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, [claude], store);
   provider.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
   for(_ in 0...10) provider.poll();
   require(processes.activeCount()==0,"Persisted Claude session was resumed automatically");

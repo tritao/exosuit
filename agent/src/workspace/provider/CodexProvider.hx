@@ -6,12 +6,10 @@ import process.ProcessManager;
 import process.OwnedProcess;
 import workspace.service.WorkspaceAgentProtocol;
 import workspace.service.WorkspaceAgentPersistence;
-import workspace.service.WorkspaceAgents;
 import workspace.service.WorkspaceProtocol;
 import workspace.runtime.WorkspaceDirectories;
 import workspace.client.CodexPermissions;
 import workspace.client.CodexPermissions.CodexPermissionProfile;
-import haxeon.rpc.RpcConnection;
 import haxeon.rpc.RpcContext;
 
 private typedef Session = {
@@ -33,9 +31,7 @@ private typedef Session = {
 private typedef PendingApproval = {var wireId:Dynamic; var method:String; var detail:String; var reviewable:Bool; var questions:Array<String>;}
 
 /** Shared-daemon adapter. All policy/protocol interpretation stays on the owning machine. */
-class CodexProvider implements WorkspaceAgents {
-	final localProviders:Array<LocalAgentProvider>;
-	final workspace:String;
+class CodexProvider implements LocalAgentProvider {
 	final instance:String;
 	final directories:WorkspaceDirectories;
 	final groups:Void->Array<WorkspaceGroup>;
@@ -67,11 +63,8 @@ class CodexProvider implements WorkspaceAgents {
 
 	public var status(default, null) = "Codex is not connected";
 
-	public function new(workspace:String, instance:String, directories:WorkspaceDirectories, groups:Void->Array<WorkspaceGroup>, processes:ProcessManager,
-			clock:Void->Float, ?persistence:WorkspaceAgentPersistence, executable:String = "codex", ?bridge:String, ?script:String, ?claude:ClaudeProvider, ?additionalProviders:Array<LocalAgentProvider>) {
-		this.localProviders = additionalProviders == null ? [] : additionalProviders.copy();
-		if (claude != null) this.localProviders.push(claude);
-		this.workspace = workspace;
+	public function new(instance:String, directories:WorkspaceDirectories, groups:Void->Array<WorkspaceGroup>, processes:ProcessManager,
+			clock:Void->Float, ?persistence:WorkspaceAgentPersistence, executable:String = "codex", ?bridge:String, ?script:String) {
 		this.instance = instance;
 		this.directories = directories;
 		this.groups = groups;
@@ -83,8 +76,7 @@ class CodexProvider implements WorkspaceAgents {
 		this.bridge = bridge;
 		if (persistence != null)
 			for (r in persistence.loadAgents()) {
-				if (r.provider == "claude" || r.provider == "pi") continue;
-				if (r.provider != null && r.provider != "codex") throw "Unknown persisted agent provider";
+				if (r.provider != null && r.provider != "codex") continue;
 				if (!valid(r.id, 128)
 					|| !valid(r.name, 256)
 					|| r.workspaceRoot != directories.root
@@ -289,7 +281,6 @@ class CodexProvider implements WorkspaceAgents {
 	}
 
 	public function poll():Void {
-		for (provider in localProviders) provider.poll();
 		if (starter != null) {
 			var process = starter;
 			output += process.readStdout() + process.readStderr();
@@ -740,337 +731,301 @@ class CodexProvider implements WorkspaceAgents {
 		});
 	}
 
-	public function bind(connection:RpcConnection, capabilities:Array<String>):Void {
-		function allowed(workspaceId:String, owner:String, control:Bool):Bool
-			return !storageFailed
-				&& workspaceId == workspace
-				&& owner == instance
-				&& capabilities.indexOf(WorkspaceAgentProtocol.READ) >= 0
-				&& (!control || capabilities.indexOf(WorkspaceAgentProtocol.CONTROL) >= 0);
-		connection.register(WorkspaceAgentProtocol.LIST, function(q, ctx) {
-			if (!allowed(q.workspace, q.instance, false)) {
-				ctx.fail({code: "unauthorized", message: "Agent catalog denied", ambiguous: false});
+	public function driverKind():String return "codex";
+	public function summary():String return status;
+	public function owns(id:String):Bool return sessions.exists(id);
+	public function records():Array<AgentRecord> return [for (s in sessions) copy(s.record)];
+
+	public function modelCatalog(q:AgentModelsQuery, ctx:RpcContext<AgentModelsPage>):Void {
+		if (storageFailed) {
+			ctx.fail({code: "storage_unavailable", message: "Agent storage requires recovery", ambiguous: false});
+			return;
+		}
+		if (q.cursor != null && !valid(q.cursor, 2048)) {
+			ctx.fail({code: "invalid_cursor", message: "Invalid model catalog cursor", ambiguous: false});
+			return;
+		}
+		if (phase != "ready") {
+			start(true);
+			ctx.fail({code: "provider_starting", message: status, ambiguous: false});
+			return;
+		}
+		call("model/list", {limit: 32, includeHidden: false, cursor: q.cursor}, function(r) {
+			if (r.error != null) {
+				ctx.fail({code: "provider_error", message: r.error, ambiguous: false});
 				return;
 			}
-			var records = [for (s in sessions) copy(s.record)];
-			for (provider in localProviders) records = records.concat(provider.records());
-			records.sort(function(a, b) return Reflect.compare(a.id, b.id));
-			records = [for (r in records) if (q.after == null || Reflect.compare(r.id, q.after) > 0) r];
-			var more = records.length > 6;
-			if (more)
-				records.resize(6);
-			ctx.respond({
-				instance: instance,
-				root: directories.root,
-				records: records,
-				status: status + [for (provider in localProviders) "; " + provider.summary()].join(""),
-				next: more ? records[records.length - 1].id : null
-			});
+			var data:Dynamic = Reflect.field(r.result, "data");
+			if (!Std.isOfType(data, Array) || (cast data:Array<Dynamic>).length > 32) {
+				ctx.fail({code: "provider_error", message: "Invalid model catalog", ambiguous: false});
+				return;
+			}
+			var page:Array<AgentModel> = [];
+			for (entry in (cast data:Array<Dynamic>)) {
+				if (Reflect.field(entry, "hidden") == true) continue;
+				var model = string(entry, "model"), name = string(entry, "displayName");
+				if (!valid(model, 256) || !valid(name, 256)) {
+					ctx.fail({code: "provider_error", message: "Invalid model catalog entry", ambiguous: false});
+					return;
+				}
+				page.push({model: model, name: name, defaultEffort: null, supportedEfforts: null});
+			}
+			var next = string(r.result, "nextCursor");
+			if (next.length > 2048) {
+				ctx.fail({code: "provider_error", message: "Invalid model catalog cursor", ambiguous: false});
+				return;
+			}
+			ctx.respond({models: page, next: next == "" ? null : next});
 		});
-		connection.register(WorkspaceAgentProtocol.MODELS, function(q, ctx) {
-			if (!allowed(q.workspace, q.instance, false)) {
-				ctx.fail({code: "unauthorized", message: "Codex model catalog denied", ambiguous: false});
+	}
+
+	public function discover(q:AgentDiscoveryQuery, ctx:RpcContext<AgentDiscovery>):Void {
+		if (storageFailed) {
+			ctx.fail({code: "storage_unavailable", message: "Agent storage requires recovery", ambiguous: false});
+			return;
+		}
+		var cwd = directory(q.group);
+		if (cwd == null || (q.cursor != null && q.cursor.length > 2048)) {
+			ctx.fail({code: "invalid_request", message: "Invalid thread discovery directory or cursor", ambiguous: false});
+			return;
+		}
+		if (phase != "ready") {
+			start(true);
+			ctx.fail({code: "provider_starting", message: status, ambiguous: false});
+			return;
+		}
+		call("thread/list", {
+			cwd: cwd,
+			limit: 6,
+			cursor: q.cursor,
+			archived: false
+		}, function(r) {
+			if (r.error != null) {
+				ctx.fail({code: "provider_error", message: r.error, ambiguous: false});
 				return;
 			}
-			if (q.cursor != null && !valid(q.cursor, 2048)) {
-				ctx.fail({code: "invalid_cursor", message: "Invalid model catalog cursor", ambiguous: false});
+			var data:Array<Dynamic> = Reflect.field(r.result, "data");
+			if (data == null || data.length > 6) {
+				ctx.fail({code: "provider_error", message: "Invalid Codex discovery page", ambiguous: false});
 				return;
 			}
-			if (phase != "ready") {
-				start(true);
-				ctx.fail({code: "provider_starting", message: status, ambiguous: false});
+			var threads:Array<AgentThread> = [];
+			for (t in data) {
+				var id = string(t, "id"),
+					path = directories.resolve(string(t, "cwd"));
+				if (!valid(id, 128) || path != cwd)
+					continue;
+				var title = string(t, "name");
+				if (title == "")
+					title = string(t, "preview");
+				threads.push({id: id, cwd: cwd, title: title.length > 256 ? title.substring(0, 256) : title});
+			}
+			var next:Null<String> = Reflect.field(r.result, "nextCursor");
+			if (next != null && next.length > 2048) {
+				ctx.fail({code: "provider_error", message: "Invalid Codex discovery cursor", ambiguous: false});
 				return;
 			}
-			call("model/list", {limit: 32, includeHidden: false, cursor: q.cursor}, function(r) {
-				if (r.error != null) {
-					ctx.fail({code: "provider_error", message: r.error, ambiguous: false});
-					return;
-				}
-				var data:Dynamic = Reflect.field(r.result, "data");
-				if (!Std.isOfType(data, Array) || (cast data:Array<Dynamic>).length > 32) {
-					ctx.fail({code: "provider_error", message: "Invalid model catalog", ambiguous: false});
-					return;
-				}
-				var page:Array<AgentModel> = [];
-				for (entry in (cast data:Array<Dynamic>)) {
-					if (Reflect.field(entry, "hidden") == true) continue;
-					var model = string(entry, "model"), name = string(entry, "displayName");
-					if (!valid(model, 256) || !valid(name, 256)) {
-						ctx.fail({code: "provider_error", message: "Invalid model catalog entry", ambiguous: false});
-						return;
-					}
-					page.push({model: model, name: name, defaultEffort: null, supportedEfforts: null});
-				}
-				var next = string(r.result, "nextCursor");
-				if (next.length > 2048) {
-					ctx.fail({code: "provider_error", message: "Invalid model catalog cursor", ambiguous: false});
-					return;
-				}
-				ctx.respond({models: page, next: next == "" ? null : next});
-			});
+			ctx.respond({threads: threads, next: next});
 		});
-		connection.register(WorkspaceAgentProtocol.DISCOVER, function(q, ctx) {
-			if (!allowed(q.workspace, q.instance, false)) {
-				ctx.fail({code: "unauthorized", message: "Thread discovery denied", ambiguous: false});
+	}
+
+	public function create(q:AgentCreate, ctx:RpcContext<AgentRecord>):Void {
+		if (storageFailed) {
+			ctx.fail({code: "storage_unavailable", message: "Agent storage requires recovery", ambiguous: false});
+			return;
+		}
+		if (!valid(q.id, 128) || !valid(q.name, 256) || (q.thread != null && !valid(q.thread, 128))) {
+			ctx.fail({code: "invalid_request", message: "Invalid agent identity", ambiguous: false});
+			return;
+		}
+		var cwd = directory(q.group);
+		if (cwd == null) {
+			ctx.fail({code: "invalid_request", message: "Invalid agent directory or group", ambiguous: false});
+			return;
+		}
+		var previous = sessions.get(q.id);
+		if (previous != null) {
+			if (previous.record.group != q.group
+				|| previous.record.name != q.name
+				|| (q.thread != null && previous.record.thread != q.thread)) {
+				ctx.fail({code: "conflict", message: "Agent id already belongs to another resource", ambiguous: false});
 				return;
 			}
-			var cwd = directory(q.group);
-			if (cwd == null || (q.cursor != null && q.cursor.length > 2048)) {
-				ctx.fail({code: "invalid_request", message: "Invalid thread discovery directory or cursor", ambiguous: false});
+			ctx.respond(copy(previous.record));
+			return;
+		}
+		if (sessionsCount() >= 32) {
+			ctx.fail({code: "limit", message: "Agent catalog is full", ambiguous: false});
+			return;
+		}
+		if (q.thread != null && threadSession(q.thread) != null) {
+			ctx.fail({code: "conflict", message: "Thread already attached", ambiguous: false});
+			return;
+		}
+		var defaultModel:Null<String> = null;
+		var defaultEffort:Null<String> = null;
+		var permissionProfile:Null<CodexPermissionProfile> = null;
+		if (q.thread == null) {
+			if (q.defaultModel != null && StringTools.trim(q.defaultModel).length > 0) {
+				defaultModel = StringTools.trim(q.defaultModel);
+				if (!valid(defaultModel, 256)) {
+					ctx.fail({code: "invalid_model", message: "Default Codex model must be a model ID of at most 256 characters", ambiguous: false});
+					return;
+				}
+			}
+			if (q.defaultEffort != null) {
+				defaultEffort = q.defaultEffort;
+				if (!effortSupported(defaultEffort, defaultModel)) {
+					ctx.fail({code: "invalid_effort", message: "Choose an effort supported by the selected Codex model", ambiguous: false});
+					return;
+				}
+			}
+			var profileId = q.permissionProfile == null ? "workspace-write" : q.permissionProfile;
+			permissionProfile = CodexPermissions.find(profileId);
+			if (permissionProfile == null) {
+				ctx.fail({code: "invalid_permissions", message: "Choose a supported default Codex permission preset", ambiguous: false});
 				return;
 			}
-			if (phase != "ready") {
-				start(true);
-				ctx.fail({code: "provider_starting", message: status, ambiguous: false});
-				return;
-			}
-			call("thread/list", {
+		}
+		if (phase != "ready") {
+			start(true);
+			ctx.fail({code: "provider_starting", message: status + "; retry when connected", ambiguous: false});
+			return;
+		}
+		var s:Session = {
+			record: {
+				id: q.id,
+				provider: "codex",
+				name: q.name,
+				group: q.group,
 				cwd: cwd,
-				limit: 6,
-				cursor: q.cursor,
-				archived: false
-			}, function(r) {
-				if (r.error != null) {
-					ctx.fail({code: "provider_error", message: r.error, ambiguous: false});
-					return;
+				thread: q.thread == null ? "" : q.thread,
+				state: "creating",
+				turn: null,
+				workspaceRoot: directories.root,
+				sandboxPolicy: permissionProfile == null ? null : permissionProfile.sandboxPolicy,
+				approvalPolicy: permissionProfile == null ? null : permissionProfile.approvalPolicy,
+				permissionProfile: permissionProfile == null ? null : permissionProfile.id,
+				preferredModel: defaultModel,
+				preferredEffort: defaultEffort
+			},
+			activity: "",
+			conversation: new CodexConversation(),
+			error: null,
+			attached: false,
+			busy: true,
+			requests: [],
+			currentModel: null,
+			currentEffort: null,
+			reconnectAttempts: 0,
+			reconnectAt: 0,
+			reconnectBlocked: false,
+			eventRevision: 0
+		};
+		// Reserve before the side effect. Ambiguous create is retained, never retried as new.
+		try
+			save(s)
+		catch (e:Dynamic) {
+			ctx.fail({code: "storage_unavailable", message: "Agent reservation failed", ambiguous: false});
+			return;
+		}
+		sessions.set(q.id, s);
+		function complete(r:JsonRpcResponse):Void {
+			s.busy = false;
+			if (r.error != null) {
+				s.error = r.error;
+				if (s.record.thread == "") s.record.state = "uncertain";
+				else if (isPermanentSessionError(r.error)) {
+					s.reconnectBlocked = true;
+					s.record.state = "reconnect-failed";
+				} else {
+					s.record.state = "disconnected";
+					scheduleSessionRetry(s);
 				}
-				var data:Array<Dynamic> = Reflect.field(r.result, "data");
-				if (data == null || data.length > 6) {
-					ctx.fail({code: "provider_error", message: "Invalid Codex discovery page", ambiguous: false});
-					return;
-				}
-				var threads:Array<AgentThread> = [];
-				for (t in data) {
-					var id = string(t, "id"),
-						path = directories.resolve(string(t, "cwd"));
-					if (!valid(id, 128) || path != cwd)
-						continue;
-					var title = string(t, "name");
-					if (title == "")
-						title = string(t, "preview");
-					threads.push({id: id, cwd: cwd, title: title.length > 256 ? title.substring(0, 256) : title});
-				}
-				var next:Null<String> = Reflect.field(r.result, "nextCursor");
-				if (next != null && next.length > 2048) {
-					ctx.fail({code: "provider_error", message: "Invalid Codex discovery cursor", ambiguous: false});
-					return;
-				}
-				ctx.respond({threads: threads, next: next});
-			});
-		});
-		connection.register(WorkspaceAgentProtocol.CREATE, function(q, ctx) {
-			if (!allowed(q.workspace, q.instance, true)) {
-				ctx.fail({code: "unauthorized", message: "Agent creation denied", ambiguous: false});
+				try
+					save(s)
+				catch (_:Dynamic) {}
+				ctx.fail({code: "provider_error", message: r.error, ambiguous: true});
 				return;
 			}
-			if (!valid(q.id, 128) || !valid(q.name, 256) || (q.thread != null && !valid(q.thread, 128))) {
-				ctx.fail({code: "invalid_request", message: "Invalid agent identity", ambiguous: false});
+			var thread = Reflect.field(r.result, "thread"),
+				id = string(thread, "id");
+			if (!valid(id, 128)) {
+				s.error = "Invalid Codex thread response";
+				s.record.state = "uncertain";
+				ctx.fail({code: "provider_error", message: s.error, ambiguous: true});
 				return;
 			}
-			if (q.provider != null && q.provider != "codex" && q.provider != "claude" && q.provider != "pi") {
-                ctx.fail({code:"invalid_provider",message:"Unsupported agent provider",ambiguous:false});return;
-            }
-            for (provider in localProviders) if (q.provider == provider.driverKind() || provider.owns(q.id)) {
-                if (q.provider != provider.driverKind() || sessions.exists(q.id) || ownedByOther(q.id,provider)) {
-                    ctx.fail({code:"conflict",message:"Agent id belongs to another provider",ambiguous:false});return;
-                }
-                if (!provider.owns(q.id) && sessionsCount() >= 32) {
-                    ctx.fail({code:"limit",message:"Agent catalog is full",ambiguous:false});return;
-                }
-                provider.create(q,ctx);return;
-            }
-            if (q.provider != null && q.provider != "codex") {
-                ctx.fail({code:"unavailable",message:"Agent provider is unavailable",ambiguous:false});return;
-            }
-			var cwd = directory(q.group);
-			if (cwd == null) {
-				ctx.fail({code: "invalid_request", message: "Invalid agent directory or group", ambiguous: false});
-				return;
-			}
-			var previous = sessions.get(q.id);
-			if (previous != null) {
-				if (previous.record.group != q.group
-					|| previous.record.name != q.name
-					|| (q.thread != null && previous.record.thread != q.thread)) {
-					ctx.fail({code: "conflict", message: "Agent id already belongs to another resource", ambiguous: false});
-					return;
-				}
-				ctx.respond(copy(previous.record));
-				return;
-			}
-			if (sessionsCount() >= 32) {
-				ctx.fail({code: "limit", message: "Agent catalog is full", ambiguous: false});
-				return;
-			}
-			if (q.thread != null && threadSession(q.thread) != null) {
-				ctx.fail({code: "conflict", message: "Thread already attached", ambiguous: false});
-				return;
-			}
-			var defaultModel:Null<String> = null;
-			var defaultEffort:Null<String> = null;
-			var permissionProfile:Null<CodexPermissionProfile> = null;
-			if (q.thread == null) {
-				if (q.defaultModel != null && StringTools.trim(q.defaultModel).length > 0) {
-					defaultModel = StringTools.trim(q.defaultModel);
-					if (!valid(defaultModel, 256)) {
-						ctx.fail({code: "invalid_model", message: "Default Codex model must be a model ID of at most 256 characters", ambiguous: false});
-						return;
-					}
-				}
-				if (q.defaultEffort != null) {
-					defaultEffort = q.defaultEffort;
-					if (!effortSupported(defaultEffort, defaultModel)) {
-						ctx.fail({code: "invalid_effort", message: "Choose an effort supported by the selected Codex model", ambiguous: false});
-						return;
-					}
-				}
-				var profileId = q.permissionProfile == null ? "workspace-write" : q.permissionProfile;
-				permissionProfile = CodexPermissions.find(profileId);
-				if (permissionProfile == null) {
-					ctx.fail({code: "invalid_permissions", message: "Choose a supported default Codex permission preset", ambiguous: false});
-					return;
-				}
-			}
-			if (phase != "ready") {
-				start(true);
-				ctx.fail({code: "provider_starting", message: status + "; retry when connected", ambiguous: false});
-				return;
-			}
-			var s:Session = {
-				record: {
-					id: q.id,
-					provider: "codex",
-					name: q.name,
-					group: q.group,
-					cwd: cwd,
-					thread: q.thread == null ? "" : q.thread,
-					state: "creating",
-					turn: null,
-					workspaceRoot: directories.root,
-					sandboxPolicy: permissionProfile == null ? null : permissionProfile.sandboxPolicy,
-					approvalPolicy: permissionProfile == null ? null : permissionProfile.approvalPolicy,
-					permissionProfile: permissionProfile == null ? null : permissionProfile.id,
-					preferredModel: defaultModel,
-					preferredEffort: defaultEffort
-				},
-				activity: "",
-				conversation: new CodexConversation(),
-				error: null,
-				attached: false,
-				busy: true,
-				requests: [],
-				currentModel: null,
-				currentEffort: null,
-				reconnectAttempts: 0,
-				reconnectAt: 0,
-				reconnectBlocked: false,
-				eventRevision: 0
-			};
-			// Reserve before the side effect. Ambiguous create is retained, never retried as new.
+			s.record.thread = id;
+			if (valid(string(thread, "model"), 256)) s.currentModel = string(thread, "model");
+			var reasoningEffort = string(thread, "reasoningEffort");
+			s.currentEffort = reasoningEffort == "" ? null : reasoningEffort;
+			s.attached = true;
+			if (q.thread == null)
+				s.record.state = "idle";
 			try
 				save(s)
 			catch (e:Dynamic) {
-				ctx.fail({code: "storage_unavailable", message: "Agent reservation failed", ambiguous: false});
+				ctx.fail({code: "storage_unavailable", message: "Codex thread created but resource storage failed", ambiguous: true});
 				return;
 			}
-			sessions.set(q.id, s);
-			function complete(r:JsonRpcResponse):Void {
-				s.busy = false;
-				if (r.error != null) {
-					s.error = r.error;
-					if (s.record.thread == "") s.record.state = "uncertain";
-					else if (isPermanentSessionError(r.error)) {
-						s.reconnectBlocked = true;
-						s.record.state = "reconnect-failed";
-					} else {
-						s.record.state = "disconnected";
-						scheduleSessionRetry(s);
-					}
-					try
-						save(s)
-					catch (_:Dynamic) {}
-					ctx.fail({code: "provider_error", message: r.error, ambiguous: true});
-					return;
-				}
-				var thread = Reflect.field(r.result, "thread"),
-					id = string(thread, "id");
-				if (!valid(id, 128)) {
-					s.error = "Invalid Codex thread response";
-					s.record.state = "uncertain";
-					ctx.fail({code: "provider_error", message: s.error, ambiguous: true});
-					return;
-				}
-				s.record.thread = id;
-				if (valid(string(thread, "model"), 256)) s.currentModel = string(thread, "model");
-				var reasoningEffort = string(thread, "reasoningEffort");
-				s.currentEffort = reasoningEffort == "" ? null : reasoningEffort;
-				s.attached = true;
-				if (q.thread == null)
-					s.record.state = "idle";
-				try
-					save(s)
-				catch (e:Dynamic) {
-					ctx.fail({code: "storage_unavailable", message: "Codex thread created but resource storage failed", ambiguous: true});
-					return;
-				}
-				ctx.respond(copy(s.record));
-			}
-			if (q.thread == null) {
-				var startProfile = permissionProfile;
-				if (startProfile == null) {
-					ctx.fail({code: "invalid_permissions", message: "Missing Codex permission preset", ambiguous: false});
-					return;
-				}
-				call("thread/start", {
-					cwd: cwd,
-					sandbox: startProfile.threadSandbox,
-					approvalPolicy: startProfile.approvalPolicy
-				}, complete);
-			} else
-				loadThread(s, complete);
-		});
-		connection.register(WorkspaceAgentProtocol.ACTION, function(q, ctx) {
-			var control = q.action != "read";
-			if (!allowed(q.workspace, q.instance, control)) {
-				ctx.fail({code: "unauthorized", message: "Agent operation denied", ambiguous: false});
+			ctx.respond(copy(s.record));
+		}
+		if (q.thread == null) {
+			var startProfile = permissionProfile;
+			if (startProfile == null) {
+				ctx.fail({code: "invalid_permissions", message: "Missing Codex permission preset", ambiguous: false});
 				return;
 			}
-			for (provider in localProviders) if (provider.owns(q.id)) {provider.action(q,ctx);return;}
-			var s = sessions.get(q.id);
-			if (s == null) {
-				ctx.fail({code: "unknown_agent", message: "Unknown agent", ambiguous: false});
-				return;
-			}
-			if (q.action == "read") {
-				var before:Null<Int> = null;
-				if (q.after != null) {
-					before = s.conversation.cursorOffset(q.after);
-					if (before == null) {
-						ctx.fail({code: "invalid_cursor", message: "Activity history changed while loading. Refreshing activity.", ambiguous: false});
-						return;
-					}
-				}
-				ctx.respond(view(s, before));
-				return;
-			}
-			if (q.action == "delete") {
-				if (s.busy || s.record.state == "working" || s.record.state == "needs-attention") {
-					ctx.fail({code: "busy", message: "Wait for this Codex turn to finish before removing its Workbench leaf", ambiguous: false});
+			call("thread/start", {
+				cwd: cwd,
+				sandbox: startProfile.threadSandbox,
+				approvalPolicy: startProfile.approvalPolicy
+			}, complete);
+		} else
+			loadThread(s, complete);
+	}
+
+	public function action(q:AgentAction, ctx:RpcContext<AgentView>):Void {
+		if (storageFailed) {
+			ctx.fail({code: "storage_unavailable", message: "Agent storage requires recovery", ambiguous: false});
+			return;
+		}
+		var s = sessions.get(q.id);
+		if (s == null) {
+			ctx.fail({code: "unknown_agent", message: "Unknown agent", ambiguous: false});
+			return;
+		}
+		if (q.action == "read") {
+			var before:Null<Int> = null;
+			if (q.after != null) {
+				before = s.conversation.cursorOffset(q.after);
+				if (before == null) {
+					ctx.fail({code: "invalid_cursor", message: "Activity history changed while loading. Refreshing activity.", ambiguous: false});
 					return;
 				}
-				var result = view(s);
-				try {
-					if (persistence != null) persistence.removeAgent(q.id);
-				} catch (e:Dynamic) {
-					storageFailed = true;
-					ctx.fail({code: "storage_unavailable", message: "Agent leaf could not be removed from storage", ambiguous: false});
-					return;
-				}
-				sessions.remove(q.id);
-				ctx.respond(result);
+			}
+			ctx.respond(view(s, before));
+			return;
+		}
+		if (q.action == "delete") {
+			if (s.busy || s.record.state == "working" || s.record.state == "needs-attention") {
+				ctx.fail({code: "busy", message: "Wait for this Codex turn to finish before removing its Workbench leaf", ambiguous: false});
 				return;
 			}
-			if (q.action == "models") {
+			var result = view(s);
+			try {
+				if (persistence != null) persistence.removeAgent(q.id);
+			} catch (e:Dynamic) {
+				storageFailed = true;
+				ctx.fail({code: "storage_unavailable", message: "Agent leaf could not be removed from storage", ambiguous: false});
+				return;
+			}
+			sessions.remove(q.id);
+			ctx.respond(result);
+			return;
+		}
+		if (q.action == "models") {
                 if (q.request != null && (q.request != modelsNext || models == null || models.length >= 128)) {
                     ctx.fail({code: "invalid_cursor", message: "Refresh the model catalog", ambiguous: false});
                     return;
@@ -1094,26 +1049,26 @@ class CodexProvider implements WorkspaceAgents {
                         }
                         var duplicate = false;
                         for (existing in found) if (existing.model == model) duplicate = true;
-						if (!duplicate && Reflect.field(entry, "hidden") != true) {
-							var efforts:Array<String> = [];
-							var rawEfforts:Dynamic = Reflect.field(entry, "supportedReasoningEfforts");
-							if (rawEfforts != null) {
-								if (!Std.isOfType(rawEfforts, Array) || (cast rawEfforts:Array<Dynamic>).length > 16) {
-									ctx.fail({code: "provider_error", message: "Invalid model effort catalog", ambiguous: false});
-									return;
-								}
-								for (option in (cast rawEfforts:Array<Dynamic>)) {
-									var effort = string(option, "reasoningEffort");
-									if (valid(effort, 64) && !efforts.contains(effort)) efforts.push(effort);
-								}
+					if (!duplicate && Reflect.field(entry, "hidden") != true) {
+						var efforts:Array<String> = [];
+						var rawEfforts:Dynamic = Reflect.field(entry, "supportedReasoningEfforts");
+						if (rawEfforts != null) {
+							if (!Std.isOfType(rawEfforts, Array) || (cast rawEfforts:Array<Dynamic>).length > 16) {
+								ctx.fail({code: "provider_error", message: "Invalid model effort catalog", ambiguous: false});
+								return;
 							}
-						found.push({
-							model: model,
-							name: name,
-							defaultEffort: valid(string(entry, "defaultReasoningEffort"), 64) ? string(entry, "defaultReasoningEffort") : null,
-							supportedEfforts: efforts
-						});
+							for (option in (cast rawEfforts:Array<Dynamic>)) {
+								var effort = string(option, "reasoningEffort");
+								if (valid(effort, 64) && !efforts.contains(effort)) efforts.push(effort);
+							}
 						}
+					found.push({
+						model: model,
+						name: name,
+						defaultEffort: valid(string(entry, "defaultReasoningEffort"), 64) ? string(entry, "defaultReasoningEffort") : null,
+						supportedEfforts: efforts
+					});
+					}
                     }
                     models = found;
                     var next = string(r.result, "nextCursor");
@@ -1122,246 +1077,232 @@ class CodexProvider implements WorkspaceAgents {
                 });
                 return;
             }
-			if (q.action == "permissions") {
-				var profile = CodexPermissions.find(q.text);
-				if (profile == null) {
-					ctx.fail({code: "invalid_permissions", message: "Choose a supported Codex permission preset", ambiguous: false});
-					return;
-				}
-				if (s.busy || s.record.state == "working" || s.record.state == "needs-attention") {
-					ctx.fail({code: "busy", message: "Wait for the Codex turn to finish before changing permissions", ambiguous: false});
-					return;
-				}
-				s.record.sandboxPolicy = profile.sandboxPolicy;
-				s.record.approvalPolicy = profile.approvalPolicy;
-				s.record.permissionProfile = profile.id;
-				try save(s) catch (_:Dynamic) {
-					ctx.fail({code: "storage_unavailable", message: "Codex permission choice could not be saved", ambiguous: false});
-					return;
-				}
-				ctx.respond(view(s));
+		if (q.action == "permissions") {
+			var profile = CodexPermissions.find(q.text);
+			if (profile == null) {
+				ctx.fail({code: "invalid_permissions", message: "Choose a supported Codex permission preset", ambiguous: false});
 				return;
 			}
-			if (q.action == "connect") {
-				if (s.record.thread == "") {
-					ctx.fail({code: "uncertain_create", message: "Creation outcome is uncertain; discover and attach the thread explicitly", ambiguous: false});
-					return;
-				}
-				if (s.busy) {
-					ctx.fail({code: "busy", message: "Agent request in progress", ambiguous: false});
-					return;
-				}
-				if (startupBlocked) for (other in sessions) {
-					other.reconnectBlocked = false;
-					other.reconnectAttempts = 0;
-					other.reconnectAt = 0;
-				}
-				s.reconnectBlocked = false;
-				s.reconnectAttempts = 0;
-				s.reconnectAt = 0;
-				startupBlocked = false;
-				s.record.state = "reconnecting";
-				s.error = null;
-				if (phase != "ready") {
-					start();
-					ctx.fail({code: "provider_starting", message: status, ambiguous: false});
-					return;
-				}
-				s.busy = true;
-				loadThread(s, function(r) {
-					s.busy = false;
-					if (r.error != null) {
-						s.attached = false;
-						s.error = r.error;
-						if (isPermanentSessionError(r.error)) {
-							s.reconnectBlocked = true;
-							s.record.state = "reconnect-failed";
-						} else {
-							s.record.state = "disconnected";
-							scheduleSessionRetry(s);
-						}
+			if (s.busy || s.record.state == "working" || s.record.state == "needs-attention") {
+				ctx.fail({code: "busy", message: "Wait for the Codex turn to finish before changing permissions", ambiguous: false});
+				return;
+			}
+			s.record.sandboxPolicy = profile.sandboxPolicy;
+			s.record.approvalPolicy = profile.approvalPolicy;
+			s.record.permissionProfile = profile.id;
+			try save(s) catch (_:Dynamic) {
+				ctx.fail({code: "storage_unavailable", message: "Codex permission choice could not be saved", ambiguous: false});
+				return;
+			}
+			ctx.respond(view(s));
+			return;
+		}
+		if (q.action == "connect") {
+			if (s.record.thread == "") {
+				ctx.fail({code: "uncertain_create", message: "Creation outcome is uncertain; discover and attach the thread explicitly", ambiguous: false});
+				return;
+			}
+			if (s.busy) {
+				ctx.fail({code: "busy", message: "Agent request in progress", ambiguous: false});
+				return;
+			}
+			if (startupBlocked) for (other in sessions) {
+				other.reconnectBlocked = false;
+				other.reconnectAttempts = 0;
+				other.reconnectAt = 0;
+			}
+			s.reconnectBlocked = false;
+			s.reconnectAttempts = 0;
+			s.reconnectAt = 0;
+			startupBlocked = false;
+			s.record.state = "reconnecting";
+			s.error = null;
+			if (phase != "ready") {
+				start();
+				ctx.fail({code: "provider_starting", message: status, ambiguous: false});
+				return;
+			}
+			s.busy = true;
+			loadThread(s, function(r) {
+				s.busy = false;
+				if (r.error != null) {
+					s.attached = false;
+					s.error = r.error;
+					if (isPermanentSessionError(r.error)) {
+						s.reconnectBlocked = true;
+						s.record.state = "reconnect-failed";
 					} else {
-						s.reconnectAttempts = 0;
-						s.reconnectAt = 0;
-						s.reconnectBlocked = false;
+						s.record.state = "disconnected";
+						scheduleSessionRetry(s);
 					}
-					ctx.respond(view(s));
-				});
-				return;
-			}
-			if (q.action == "model-settings") {
-				if (q.model != null) {
-					if (!valid(q.model, 256) || catalogModel(q.model) == null) {
-						ctx.fail({code: "invalid_model", message: "Choose a model from the current catalog", ambiguous: false});
-						return;
-					}
-				}
-				if (q.effort != null) {
-					var effortModel = q.model == null
-						? (s.record.preferredModel == null ? s.currentModel : s.record.preferredModel) : q.model;
-					if (!effortSupported(q.effort, effortModel)) {
-						ctx.fail({code: "invalid_effort", message: "Choose a reasoning effort supported by the selected model", ambiguous: false});
-						return;
-					}
-				}
-				var previousModel = s.record.preferredModel, previousEffort = s.record.preferredEffort;
-				s.record.preferredModel = q.model;
-				s.record.preferredEffort = q.effort;
-				try save(s) catch (_:Dynamic) {
-					s.record.preferredModel = previousModel;
-					s.record.preferredEffort = previousEffort;
-					ctx.fail({code: "storage_unavailable", message: "Codex model and effort choice could not be saved", ambiguous: false});
-					return;
+				} else {
+					s.reconnectAttempts = 0;
+					s.reconnectAt = 0;
+					s.reconnectBlocked = false;
 				}
 				ctx.respond(view(s));
-				return;
-			}
-			if (!s.attached || phase != "ready") {
-				ctx.fail({code: "disconnected", message: "Reconnect this agent before sending requests", ambiguous: false});
-				return;
-			}
-			if (q.action == "prompt") {
-				if (!valid(q.text, 8192)
-					|| s.busy
-					|| (s.record.state != "idle" && s.record.state != "completed" && s.record.state != "failed" && s.record.state != "interrupted")) {
-					ctx.fail({code: "busy", message: "Agent is busy or prompt is invalid", ambiguous: false});
-					return;
-				}
-				var effectiveModel = q.model == null ? s.record.preferredModel : q.model;
-				var effectiveEffort = q.effort == null ? s.record.preferredEffort : q.effort;
-				if (effectiveModel != null && !valid(effectiveModel, 256)) {
-					ctx.fail({code: "invalid_model", message: "Choose a valid Codex model ID", ambiguous: false});
-					return;
-				}
-				if (effectiveModel != null && models != null && modelsNext == null && catalogModel(effectiveModel) == null) {
+			});
+			return;
+		}
+		if (q.action == "model-settings") {
+			if (q.model != null) {
+				if (!valid(q.model, 256) || catalogModel(q.model) == null) {
 					ctx.fail({code: "invalid_model", message: "Choose a model from the current catalog", ambiguous: false});
 					return;
 				}
-				var effortModel = effectiveModel == null ? s.currentModel : effectiveModel;
-				if (!effortSupported(effectiveEffort, effortModel)) {
+			}
+			if (q.effort != null) {
+				var effortModel = q.model == null
+					? (s.record.preferredModel == null ? s.currentModel : s.record.preferredModel) : q.model;
+				if (!effortSupported(q.effort, effortModel)) {
 					ctx.fail({code: "invalid_effort", message: "Choose a reasoning effort supported by the selected model", ambiguous: false});
 					return;
 				}
-				s.busy = true;
-				s.record.state = "working";
-				s.error = null;
-				append(s, "\nYou: " + q.text + "\n");
+			}
+			var previousModel = s.record.preferredModel, previousEffort = s.record.preferredEffort;
+			s.record.preferredModel = q.model;
+			s.record.preferredEffort = q.effort;
+			try save(s) catch (_:Dynamic) {
+				s.record.preferredModel = previousModel;
+				s.record.preferredEffort = previousEffort;
+				ctx.fail({code: "storage_unavailable", message: "Codex model and effort choice could not be saved", ambiguous: false});
+				return;
+			}
+			ctx.respond(view(s));
+			return;
+		}
+		if (!s.attached || phase != "ready") {
+			ctx.fail({code: "disconnected", message: "Reconnect this agent before sending requests", ambiguous: false});
+			return;
+		}
+		if (q.action == "prompt") {
+			if (!valid(q.text, 8192)
+				|| s.busy
+				|| (s.record.state != "idle" && s.record.state != "completed" && s.record.state != "failed" && s.record.state != "interrupted")) {
+				ctx.fail({code: "busy", message: "Agent is busy or prompt is invalid", ambiguous: false});
+				return;
+			}
+			var effectiveModel = q.model == null ? s.record.preferredModel : q.model;
+			var effectiveEffort = q.effort == null ? s.record.preferredEffort : q.effort;
+			if (effectiveModel != null && !valid(effectiveModel, 256)) {
+				ctx.fail({code: "invalid_model", message: "Choose a valid Codex model ID", ambiguous: false});
+				return;
+			}
+			if (effectiveModel != null && models != null && modelsNext == null && catalogModel(effectiveModel) == null) {
+				ctx.fail({code: "invalid_model", message: "Choose a model from the current catalog", ambiguous: false});
+				return;
+			}
+			var effortModel = effectiveModel == null ? s.currentModel : effectiveModel;
+			if (!effortSupported(effectiveEffort, effortModel)) {
+				ctx.fail({code: "invalid_effort", message: "Choose a reasoning effort supported by the selected model", ambiguous: false});
+				return;
+			}
+			s.busy = true;
+			s.record.state = "working";
+			s.error = null;
+			append(s, "\nYou: " + q.text + "\n");
                 var params:Dynamic = {threadId: s.record.thread, input: [{type: "text", text: q.text, text_elements: new Array<String>()}]};
                 if (effectiveModel != null) Reflect.setField(params, "model", effectiveModel);
                 if (effectiveEffort != null) Reflect.setField(params, "effort", effectiveEffort);
                 if (s.record.approvalPolicy != null) Reflect.setField(params, "approvalPolicy", s.record.approvalPolicy);
                 if (s.record.sandboxPolicy != null) Reflect.setField(params, "sandboxPolicy", {type: s.record.sandboxPolicy});
                 call("turn/start", params, function(r) {
-					s.busy = false;
-					if (r.error != null) {
-						s.error = r.error;
-						s.record.state = "uncertain";
-						ctx.fail({code: "provider_error", message: r.error, ambiguous: true});
-						return;
-					}
-					var t = Reflect.field(r.result, "turn");
-					s.record.turn = string(t, "id");
-					if (effectiveModel != null) {
-						s.currentModel = effectiveModel;
-						s.currentEffort = effectiveEffort;
-					} else if (effectiveEffort != null) s.currentEffort = effectiveEffort;
-					save(s);
-					ctx.respond(view(s));
-				});
-				return;
-			}
-			if (q.action == "stop") {
-				if (s.record.turn == null) {
-					ctx.fail({code: "unknown_turn", message: "Reconcile the active turn before interrupting", ambiguous: false});
+				s.busy = false;
+				if (r.error != null) {
+					s.error = r.error;
+					s.record.state = "uncertain";
+					ctx.fail({code: "provider_error", message: r.error, ambiguous: true});
 					return;
 				}
-				call("turn/interrupt", {threadId: s.record.thread, turnId: s.record.turn}, function(r) {
-					if (r.error != null)
-						s.error = r.error;
-					ctx.respond(view(s));
-				});
+				var t = Reflect.field(r.result, "turn");
+				s.record.turn = string(t, "id");
+				if (effectiveModel != null) {
+					s.currentModel = effectiveModel;
+					s.currentEffort = effectiveEffort;
+				} else if (effectiveEffort != null) s.currentEffort = effectiveEffort;
+				save(s);
+				ctx.respond(view(s));
+			});
+			return;
+		}
+		if (q.action == "stop") {
+			if (s.record.turn == null) {
+				ctx.fail({code: "unknown_turn", message: "Reconcile the active turn before interrupting", ambiguous: false});
 				return;
 			}
-			var pending = q.request == null ? null : s.requests.get(q.request);
-			if (pending == null) {
-				ctx.fail({code: "resolved", message: "This request has already resolved or disconnected", ambiguous: false});
+			call("turn/interrupt", {threadId: s.record.thread, turnId: s.record.turn}, function(r) {
+				if (r.error != null)
+					s.error = r.error;
+				ctx.respond(view(s));
+			});
+			return;
+		}
+		var pending = q.request == null ? null : s.requests.get(q.request);
+		if (pending == null) {
+			ctx.fail({code: "resolved", message: "This request has already resolved or disconnected", ambiguous: false});
+			return;
+		}
+		if (q.text.length > 8192) {
+			ctx.fail({code: "invalid_request", message: "Answer exceeds limit", ambiguous: false});
+			return;
+		}
+		if (q.action == "approve" && !pending.reviewable) {
+			ctx.fail({
+				code: "unsupported_request",
+				message: "Full request exceeds this view; review it in another compatible Codex client",
+				ambiguous: false
+			});
+			return;
+		}
+		var result:Dynamic = null;
+		if (pending.method == "item/commandExecution/requestApproval" || pending.method == "item/fileChange/requestApproval") {
+			if (q.action != "approve" && q.action != "decline") {
+				ctx.fail({code: "invalid_request", message: "Choose approve or decline", ambiguous: false});
 				return;
 			}
-			if (q.text.length > 8192) {
-				ctx.fail({code: "invalid_request", message: "Answer exceeds limit", ambiguous: false});
-				return;
-			}
-			if (q.action == "approve" && !pending.reviewable) {
-				ctx.fail({
-					code: "unsupported_request",
-					message: "Full request exceeds this view; review it in another compatible Codex client",
-					ambiguous: false
-				});
-				return;
-			}
-			var result:Dynamic = null;
-			if (pending.method == "item/commandExecution/requestApproval" || pending.method == "item/fileChange/requestApproval") {
-				if (q.action != "approve" && q.action != "decline") {
-					ctx.fail({code: "invalid_request", message: "Choose approve or decline", ambiguous: false});
+			result = {decision: q.action == "approve" ? "accept" : "decline"};
+		} else if (pending.method == "item/tool/requestUserInput" && q.action == "answer") {
+			// Each question uses its own id. The UI supplies one id=value per line.
+			var answers:Dynamic = {};
+			for (line in q.text.split("\n")) {
+				var at = line.indexOf("=");
+				if (at <= 0) {
+					ctx.fail({code: "invalid_request", message: "Answer each question as id=value", ambiguous: false});
 					return;
 				}
-				result = {decision: q.action == "approve" ? "accept" : "decline"};
-			} else if (pending.method == "item/tool/requestUserInput" && q.action == "answer") {
-				// Each question uses its own id. The UI supplies one id=value per line.
-				var answers:Dynamic = {};
-				for (line in q.text.split("\n")) {
-					var at = line.indexOf("=");
-					if (at <= 0) {
-						ctx.fail({code: "invalid_request", message: "Answer each question as id=value", ambiguous: false});
-						return;
-					}
-					var id = line.substring(0, at);
-					if (pending.questions.indexOf(id) < 0 || Reflect.hasField(answers, id)) {
-						ctx.fail({code: "invalid_request", message: "Unknown or duplicate question", ambiguous: false});
-						return;
-					}
-					Reflect.setField(answers, id, {answers: [line.substring(at + 1)]});
-				}
-				if (Reflect.fields(answers).length != pending.questions.length) {
-					ctx.fail({code: "invalid_request", message: "Answer every question", ambiguous: false});
+				var id = line.substring(0, at);
+				if (pending.questions.indexOf(id) < 0 || Reflect.hasField(answers, id)) {
+					ctx.fail({code: "invalid_request", message: "Unknown or duplicate question", ambiguous: false});
 					return;
 				}
-				result = {answers: answers};
-			} else {
-				ctx.fail({code: "unsupported_request", message: "This Codex request requires another compatible client", ambiguous: false});
+				Reflect.setField(answers, id, {answers: [line.substring(at + 1)]});
+			}
+			if (Reflect.fields(answers).length != pending.questions.length) {
+				ctx.fail({code: "invalid_request", message: "Answer every question", ambiguous: false});
 				return;
 			}
-			if (transport == null || !transport.send({id: pending.wireId, result: result})) {
-				ctx.fail({code: "backpressure", message: "Codex reply was not queued", ambiguous: false});
-				return;
-			}
-			s.requests.remove(q.request);
-			ctx.respond(view(s));
-		});
-	}
-
-	function ownedByOther(id:String, selected:LocalAgentProvider):Bool {
-		for (provider in localProviders) if (provider != selected && provider.owns(id)) return true;
-		return false;
+			result = {answers: answers};
+		} else {
+			ctx.fail({code: "unsupported_request", message: "This Codex request requires another compatible client", ambiguous: false});
+			return;
+		}
+		if (transport == null || !transport.send({id: pending.wireId, result: result})) {
+			ctx.fail({code: "backpressure", message: "Codex reply was not queued", ambiguous: false});
+			return;
+		}
+		s.requests.remove(q.request);
+		ctx.respond(view(s));
 	}
 
 	function sessionsCount():Int {
 		var n = 0;
-		for (provider in localProviders) n += provider.records().length;
 		for (_ in sessions)
 			n++;
 		return n;
 	}
 
-	public function groupIsEmpty(group:String):Bool {
-		for (session in sessions) if (session.record.group == group) return false;
-		for (provider in localProviders) for (record in provider.records()) if (record.group == group) return false;
-		return true;
-	}
-
 	public function activeCount():Int {
 		var n = 0;
-		for (provider in localProviders) n += provider.activeCount();
 		for (s in sessions)
 			if (s.record.state == "working" || s.record.state == "needs-attention" || s.busy)
 				n++;
@@ -1371,7 +1312,6 @@ class CodexProvider implements WorkspaceAgents {
 	/** Updates also preserve idle attached conversations and pending provider startup. */
 	public function updateActivityCount():Int {
 		var count = starter == null ? 0 : 1;
-		for (provider in localProviders) count += provider.updateActivityCount();
 		for (session in sessions)
 			if (session.attached || session.busy || session.record.state == "creating"
 				|| session.record.state == "working" || session.record.state == "needs-attention") count++;
@@ -1379,7 +1319,6 @@ class CodexProvider implements WorkspaceAgents {
 	}
 
 	public function dispose():Void {
-		for (provider in localProviders) provider.dispose();
 		if (starter != null) {
 			processes.release(starter);
 			starter = null;

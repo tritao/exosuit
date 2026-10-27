@@ -1,6 +1,5 @@
 package app;
 
-import workspace.provider.CodexProvider;
 import workspace.runtime.WorkspaceDirectories;
 import workspace.storage.WorkspaceSqliteStore;
 import workspace.service.WorkspaceAgentProtocol;
@@ -67,6 +66,140 @@ class AgentProviderTestMain {
 		Sys.println("PASS: user action preempts a pending background read without stale overwrite or leaked read capacity");
 	}
 
+	static function clientCreateCompatibilityTest():Void {
+		var now:Float = 1000;
+		var clock = function() return now;
+		var pair = MemoryTransport.pair();
+		var connection = new RpcConnection(pair.client, clock);
+		var server = new RpcConnection(pair.server, clock);
+		var providers:Null<Array<String>> = null;
+		var creates = 0, succeed = false, opened = false;
+		server.register(WorkspaceAgentProtocol.LIST, function(q, ctx) {
+			ctx.respond({instance:"test-generation",root:"C:/work",records:[],status:"Fixture",providers:providers});
+		});
+		server.register(WorkspaceAgentProtocol.CREATE, function(q, ctx) {
+			creates++;
+			if (!succeed) {
+				ctx.fail({code:"fixture_error",message:"Fixture launch failure",ambiguous:false});
+				return;
+			}
+			ctx.respond({id:q.id,name:q.name,group:q.group,cwd:"C:/work",thread:"claude-session",state:"idle",turn:null,
+				workspaceRoot:"C:/work",provider:q.provider});
+		});
+		var client = new workspace.client.RpcWorkspaceWorkbenchClient(new AgentTestEndpoint(connection), clock);
+		client.poll();
+		function pump():Void {server.poll();connection.poll();client.poll();}
+		function refresh():Void {now+=2000;client.refreshAgents();pump();}
+		// Creation before the first catalog must wait for provider negotiation.
+		client.createAgent("work",null,function(_) opened=true,{provider:"claude",model:null,effort:null,permissionProfile:"default"});
+		require(client.agentCreation() != null && creates==0,"Claude create was sent before provider negotiation");
+		pump();now+=200;client.poll();pump();
+		var unsupported = client.agentError();
+		require(client.agentCreation() == null && creates==0 && unsupported != null && unsupported.indexOf("update the workspace service")>=0,
+			"Legacy daemon did not produce an actionable error without a create side effect");
+		refresh();
+		require(client.agentError()==unsupported,"Catalog refresh erased the unsupported-provider error");
+		providers=["codex","claude"];
+		refresh();
+		client.createAgent("work",null,function(_) opened=true,{provider:"claude",model:null,effort:null,permissionProfile:"default"});
+		pump();
+		require(creates==1 && client.agentError()=="Fixture launch failure" && !opened,"Create failure was lost or opened a tab");
+		refresh();
+		require(client.agentError()=="Fixture launch failure","Catalog refresh erased the creation error");
+		succeed=true;
+		client.createAgent("work",null,function(_) opened=true,{provider:"claude",model:null,effort:null,permissionProfile:"default"});
+		pump();
+		require(creates==2 && opened && client.agentError()==null,"Supported provider did not clear the error and open its session");
+		client.dispose();connection.close();server.close();
+		Sys.println("PASS: provider negotiation prevents legacy Codex fallback; creation errors survive catalog refresh and clear on retry");
+	}
+
+	static function clientCreationRaceTest():Void {
+		var now:Float=1000,creates=0,opened=0;
+		var clock=function() return now;
+		var pair=MemoryTransport.pair(),connection=new RpcConnection(pair.client,clock),server=new RpcConnection(pair.server,clock);
+		var pages:Array<haxeon.rpc.RpcContext<AgentCatalog>>=[];
+		var saved:Array<AgentRecord>=[];
+		var prompt:Null<haxeon.rpc.RpcContext<AgentView>>=null;
+		server.register(WorkspaceAgentProtocol.LIST,function(q,ctx) {pages.push(ctx);});
+		server.register(WorkspaceAgentProtocol.CREATE,function(q,ctx) {
+			creates++;
+			var record:AgentRecord={id:q.id,name:q.name,group:q.group,cwd:"C:/work",thread:q.id,state:"idle",turn:null,workspaceRoot:"C:/work",provider:q.provider};
+			saved.push(record);ctx.respond(record);
+		});
+		function view(id:String):AgentView return {record:{id:id,name:"Other",group:"work",cwd:"C:/work",thread:id,state:"idle",turn:null,workspaceRoot:"C:/work"},activity:"",requests:[],error:null};
+		server.register(WorkspaceAgentProtocol.ACTION,function(q,ctx) {
+			if(q.action=="prompt") prompt=ctx;else ctx.respond(view(q.id));
+		});
+		var client=new workspace.client.RpcWorkspaceWorkbenchClient(new AgentTestEndpoint(connection),clock);
+		client.poll();
+		function pump():Void {server.poll();connection.poll();client.poll();}
+		function open(record:AgentRecord):Void {
+			require(record.id!="" && record.workspaceRoot=="C:/work" && record.group=="work","Completion lost resource identity");opened++;
+		}
+		client.refreshAgents();pump();require(pages.length==1,"Initial catalog was not delayed");
+		client.createAgent("work",null,open);
+		client.agentAction("other","prompt","hello",null);
+		require(client.agentCreation()!=null && client.agentBusy(),"Create and unrelated action did not proceed independently");
+		pump();
+		require(creates==1 && opened==1 && client.agents()==null,"Initial create still depends on a catalog lookup");
+		require(client.agentCreation()==null && client.agentBusy(),"Create completion cleared unrelated action state");
+		pages[0].respond({instance:"test-generation",root:"C:/work",records:[],status:"Stale"});connection.poll();
+		require(client.agents()==null,"Pre-create catalog was accepted");
+		pump();require(pages.length==2,"Fresh catalog was not requested");
+		pages[1].respond({instance:"test-generation",root:"C:/work",records:saved.copy(),status:"Fixture",providers:["codex","claude"]});connection.poll();
+		now+=2000;client.refreshAgents();pump();require(pages.length==3,"Second catalog race was not started");
+		client.createAgent("work",null,open,{provider:"claude",model:null,effort:null,permissionProfile:"default"});pump();
+		require(creates==2 && opened==2 && client.agentBusy(),"Other session mutation blocked or was cleared by Claude creation");
+		pages[2].respond({instance:"test-generation",root:"C:/work",records:[saved[0]],status:"Stale"});connection.poll();
+		var catalog=client.agents();require(catalog!=null && catalog.records.length==2,"Old catalog erased a newly created session");
+		if(prompt==null) throw "Unrelated prompt was not received";
+		prompt.fail({code:"provider_error",message:"Existing session failure",ambiguous:false});connection.poll();
+		require(!client.agentBusy() && client.agentError()=="Existing session failure","Unrelated mutation error was lost");
+		client.createAgent("work",null,open);pump();
+		require(creates==3 && opened==3 && client.agentError()=="Existing session failure","Creation erased another session's action error");
+		client.dispose();connection.close();server.close();
+		Sys.println("PASS: creation hands off records without a catalog; independent action state and stale catalog fencing");
+	}
+
+	static function clientCreationLifecycleTest():Void {
+		var now:Float=1000,calls=0,opened=0;
+		var clock=function() return now;
+		var pair=MemoryTransport.pair(),connection=new RpcConnection(pair.client,clock),server=new RpcConnection(pair.server,clock);
+		var held:Null<haxeon.rpc.RpcContext<AgentRecord>>=null;
+		var query:Null<AgentCreate>=null;
+		var id="",mode="starting";
+		server.register(WorkspaceAgentProtocol.CREATE,function(q,ctx) {
+			calls++;
+			if(id=="") id=q.id;else require(id==q.id,"Startup retry allocated a different resource");
+			if(mode=="starting") ctx.fail({code:"provider_starting",message:"Starting fixture",ambiguous:false});
+			else if(mode=="ambiguous") ctx.fail({code:"provider_error",message:"Delivery uncertain",ambiguous:true});
+			else {held=ctx;query=q;}
+		});
+		var endpoint=new AgentTestEndpoint(connection);
+		var client=new workspace.client.RpcWorkspaceWorkbenchClient(endpoint,clock);
+		client.poll();
+		function pump():Void {server.poll();connection.poll();client.poll();}
+		client.createAgent("work",null,function(_) opened++);pump();
+		var pending=client.agentCreation();
+		require(pending!=null && pending.phase=="starting-provider" && !client.agentBusy(),"Startup state was not explicit and separate");
+		client.createAgent("work",null,function(_) throw "Duplicate create completed");
+		require(calls==1 && client.agentCreation()!=null,"Repeated click replaced the pending reservation");
+		mode="ambiguous";now+=500;client.poll();pump();
+		require(calls==2 && client.agentCreation()==null && opened==0,"Ambiguous create completed or remained queued");
+		now+=60000;client.poll();pump();require(calls==2,"Ambiguous create was resent automatically");
+		id="";mode="hold";
+		client.createAgent("work",null,function(_) opened++);pump();
+		if(held==null || query==null) throw "Creation fixture was not held";
+		// A generation can change before its transport object is replaced.
+		endpoint.generation="new-generation";client.poll();
+		require(client.agentCreation()==null,"In-flight creation survived a scope change");
+		var result:AgentRecord={id:query.id,name:query.name,group:query.group,cwd:"C:/work",thread:query.id,state:"idle",turn:null,workspaceRoot:"C:/work"};
+		held.respond(result);connection.poll();require(opened==0,"Late completion opened a session in another generation");
+		client.dispose();connection.close();server.close();
+		Sys.println("PASS: stable creation reservations, explicit startup, duplicate fencing, ambiguous failure and generation-safe handoff");
+	}
+
 	static function conversationTests():Void {
         var blocks = workspace.client.CodexMarkdown.parse("Before\n\n```python\ndef primes():\n    return 2\n```\nAfter");
         require(blocks.length == 3 && blocks[1].kind == "code" && blocks[1].language == "python", "Markdown fences not parsed");
@@ -116,8 +249,12 @@ class AgentProviderTestMain {
 	}
 
 	static function main():Void {
+		AgentServiceTest.run();
 		conversationTests();
 		clientActionPriorityTest();
+		clientCreateCompatibilityTest();
+		clientCreationRaceTest();
+		clientCreationLifecycleTest();
 
 		var root = Sys.args()[0],
 			executable = Sys.args()[1], bridge=Sys.args()[2],
@@ -146,8 +283,7 @@ class AgentProviderTestMain {
 			}
 		]);
 		var store = new WorkspaceSqliteStore(root + "/agents.sqlite", "w", seed.snapshot(), 32, root);
-		var provider = new CodexProvider("w", "owner", new WorkspaceDirectories(root), function() return seed.snapshot().groups, processes, clock, store,
-			executable,bridge,codexScript);
+		var provider = new workspace.provider.WorkspaceAgentService("w", "owner", new WorkspaceDirectories(root).root, [new workspace.provider.CodexProvider("owner", new WorkspaceDirectories(root), function() return seed.snapshot().groups, processes, clock, store, executable, bridge, codexScript)], store);
 		var pair = MemoryTransport.pair(),
 			client = new RpcConnection(pair.client, clock),
 			server = new RpcConnection(pair.server, clock);
@@ -174,7 +310,7 @@ class AgentProviderTestMain {
 			}
 		}
 		var code = "", record:Null<AgentRecord> = null;
-		function create(id:String, thread:Null<String>, ?defaults:workspace.client.CodexSessionDefaults):Void {
+		function create(id:String, thread:Null<String>, ?defaults:workspace.client.AgentSessionDefaults):Void {
 			code = "";
 			record = null;
 			var finished = false;
@@ -197,7 +333,7 @@ class AgentProviderTestMain {
 			});
 			wait(function() return finished);
 		}
-		var defaults:workspace.client.CodexSessionDefaults = {model: "fixture-model", effort: "high", permissionProfile: "workspace-write"};
+		var defaults:workspace.client.AgentSessionDefaults = {model: "fixture-model", effort: "high", permissionProfile: "workspace-write"};
 		create("a", null, defaults);
 		require(code == "provider_starting", "Lazy provider startup did not report state");
 		wait(function() return StringTools.startsWith(provider.status, "Codex connected"));
@@ -331,8 +467,7 @@ class AgentProviderTestMain {
 		processes.shutdown();
 		store = new WorkspaceSqliteStore(root + "/agents.sqlite", "w", seed.snapshot(), 32, root);
 		processes = new ProcessManager();
-		provider = new CodexProvider("w", "next-owner", new WorkspaceDirectories(root), function() return seed.snapshot().groups, processes, clock, store,
-			executable,bridge,codexScript);
+		provider = new workspace.provider.WorkspaceAgentService("w", "next-owner", new WorkspaceDirectories(root).root, [new workspace.provider.CodexProvider("next-owner", new WorkspaceDirectories(root), function() return seed.snapshot().groups, processes, clock, store, executable, bridge, codexScript)], store);
 		var saved = store.loadAgents();
 		require(saved.length == 4
 			&& [for (r in saved) if (r.thread == thread) r].length == 1, "Thread identity did not survive workspace restart");
@@ -395,8 +530,7 @@ class AgentProviderTestMain {
 		store.close();
 		processes.shutdown();
 		sys.io.File.saveContent(root + "/newer-version", "1");
-		provider = new CodexProvider("w", "bad-version", new WorkspaceDirectories(root), function() return seed.snapshot().groups, processes, clock, null,
-			executable,bridge,codexScript);
+		provider = new workspace.provider.WorkspaceAgentService("w", "bad-version", new WorkspaceDirectories(root).root, [new workspace.provider.CodexProvider("bad-version", new WorkspaceDirectories(root), function() return seed.snapshot().groups, processes, clock, null, executable, bridge, codexScript)], null);
 		var badPair = MemoryTransport.pair(),
 			badClient = new RpcConnection(badPair.client, clock),
 			badServer = new RpcConnection(badPair.server, clock);
@@ -456,7 +590,8 @@ private class AgentTestEndpoint implements workspace.client.WorkspaceRpcEndpoint
 	final connection:haxeon.rpc.RpcConnection;
 	public function new(connection:haxeon.rpc.RpcConnection) this.connection = connection;
 	public function rootPath():Null<String> return "C:/work";
-	public function serviceGeneration():String return "test-generation";
+	public var generation:String = "test-generation";
+	public function serviceGeneration():String return generation;
 	var eventRouter:Null<workspace.client.WorkspaceTerminalEvents>;
 	public function terminalEvents():Null<workspace.client.WorkspaceTerminalEvents> {
 		if (connection == null) return null;
