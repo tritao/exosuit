@@ -52,11 +52,17 @@ class CursorApp implements DesktopUiApplication {
 		var fontDirectory = "haxeon/packages/ui/vendor/skribidi/example/data/";
 		fonts.add(fontDirectory + "IBMPlexSans-Regular.ttf");
 		fonts.add(fontDirectory + "IBMPlexMono-Regular.ttf", haxeon.ui.FontFamily.Monospace);
+		if (mode == "system-symbols") fonts.addSystemFallbacks();
+		else ui.TerminalSymbolFont.addTo(fonts);
 		TerminalPollTests.run(fonts);
 		TerminalShortcutTests.run(fonts);
 		pane = new ui.TerminalPane(new TerminalSession(backend, emulator), host.requestFrame,
 			new ui.TerminalPalette(dark), fonts);
 		TerminalNameTests.run();
+		if (mode == "symbols" || mode == "system-symbols") {
+			emulator.feedString("\x1b[2J\x1b[H\x1b[?25l⠁⠂⠄⠈⠐⠠⡀⢀⣿\r\n⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏\r\n░▒▓█▁▂▃▄▅▆▇");
+		}
+		if (mode == "system-symbols") emulator.feedString("\x1b[2;1H🬀🬁🬂🬃🬄🬅🬆🬇🬈");
 		if (mode == "colors") {
 			emulator.feedString("\x1b[2J\x1b[H\x1b[31mRED RED\x1b[0m gap \x1b[31mRED\x1b[32mGREEN\x1b[0m"
 				+ "\r\n\x1b[38;5;196mINDEXED\x1b[38;2;255;0;0m TRUECOLOR\x1b[0m"
@@ -81,6 +87,7 @@ class CursorApp implements DesktopUiApplication {
 		lines: [for (row in pane.renderedRows) row.text],
 		focusReports: backend.replies,
 		cellWidth: pane.cellWidth,
+		symbolAdvances: mode == "system-symbols" ? [for (row in 0...2) pane.renderedRows[row].layout.caret(new haxeon.ui.TextLayout.TextPosition(1, 0)).x] : null,
 		rowHeight: pane.rowHeight,
 		selectionText: mode == "selection" ? pane.session.emulator.selectionText() : null
 	};
@@ -97,10 +104,15 @@ class CursorApp implements DesktopUiApplication {
 		if (frames == 3) ui.focusWidget(root.id);
 		if (frames == 4) {
 			unchangedRowRevision = pane.revisions[1];
-			for (column in 0...14) {
+			if (mode != "system-symbols") for (column in 0...14) {
 				var caret = pane.renderedRows[0].layout.caret(new haxeon.ui.TextLayout.TextPosition(column, 0));
 				if (Math.abs(caret.x - column * pane.cellWidth) > 0.1)
 					throw "Terminal text and cursor grid disagree at column " + column;
+			}
+			if (mode == "symbols") for (row in 0...2) for (column in 0...10) {
+				var caret = pane.renderedRows[row].layout.caret(new haxeon.ui.TextLayout.TextPosition(column, 0));
+				if (Math.abs(caret.x - column * pane.cellWidth) > 0.1)
+					throw "Terminal symbol fallback drifted from the cell grid";
 			}
 		}
 		if (frames == 5 && (mode == "unfocused" || mode == "refocused" || mode == "hidden")) ui.clearFocus();

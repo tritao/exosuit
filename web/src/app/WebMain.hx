@@ -46,6 +46,7 @@ class WebMain {
 			new BrowserUiFontAsset("NotoEmoji-Regular", "assets/NotoEmoji-Regular.ttf", "/assets/NotoEmoji-Regular.ttf", FontFamily.Emoji)
 		];
 		var started = BrowserUiHost.start(options, function(context) {
+			ui.TerminalSymbolFont.addTo(context.fonts);
 			var browserApp:Null<ExosuitApp> = null;
 			var redraw = function() {
 				if (browserApp == null) context.requestFrame(); else browserApp.requestFrame();

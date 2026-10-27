@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify terminal shortcuts, cursor focus presentation, retained rows and VT focus reports."""
+"""Verify terminal symbols, shortcuts, cursor focus, retained rows and VT focus reports."""
 import json
 import math
 import os
@@ -27,7 +27,10 @@ def main():
             foreground = (32, 42, 54) if scheme == "light" else (220, 227, 236)
             background = (255, 255, 255) if scheme == "light" else (23, 28, 35)
             images = {}
-            for mode in ("focused", "unfocused", "refocused", "window-blur", "window-refocused", "hidden", "selection", "colors", "row-reuse", "async-echo"):
+            modes = ["focused", "unfocused", "refocused", "window-blur", "window-refocused", "hidden", "selection", "colors", "symbols", "row-reuse", "async-echo"]
+            if shutil.which("fc-list") and all(subprocess.check_output(["fc-list", ":charset=" + cp, "--format=%{file}"], text=True).strip() for cp in ("2801", "1fb00")):
+                modes.append("system-symbols")
+            for mode in modes:
                 capture = fixture / f"{scheme}-{mode}"
                 command = [str(ROOT / "haxeon/.tools/hashlink/hl"),
                            str(PROJECT.parent / "build/host/main.hl"), str(capture), mode, scheme]
@@ -37,6 +40,41 @@ def main():
                 state = json.loads((capture / "app-state.json").read_text())
                 image = Image.open(capture / "frame.png").convert("RGB")
                 images[mode] = image
+                if mode in ("symbols", "system-symbols"):
+                    # A missing glyph also has ink: verify actual Braille dot geometry,
+                    # including eight separate dots, rather than just nonblank pixels.
+                    def cell_ink(column, row):
+                        advance = state['symbolAdvances'][row] if mode == 'system-symbols' else state['cellWidth']
+                        left = round(8 + column * advance)
+                        top = round(4 + row * state['rowHeight'])
+                        width = round(advance)
+                        height = round(state['rowHeight'])
+                        return {(x, y) for y in range(height) for x in range(width)
+                                if max(abs(a - b) for a, b in zip(image.getpixel((left + x, top + y)), background)) > 40}
+
+                    for column in range(8):
+                        ink = cell_ink(column, 0)
+                        assert ink, (scheme, 'missing Braille dot', column)
+                        assert max(x for x, y in ink) - min(x for x, y in ink) < state['cellWidth'] / 2, (scheme, 'tofu instead of Braille', column)
+                        assert max(y for x, y in ink) - min(y for x, y in ink) < state['rowHeight'] / 3, (scheme, 'tofu instead of Braille', column)
+                    pending = cell_ink(8, 0)
+                    components = 0
+                    while pending:
+                        frontier = [pending.pop()]
+                        components += 1
+                        while frontier:
+                            x, y = frontier.pop()
+                            for dx in (-1, 0, 1):
+                                for dy in (-1, 0, 1):
+                                    neighbor = (x + dx, y + dy)
+                                    if neighbor in pending:
+                                        pending.remove(neighbor)
+                                        frontier.append(neighbor)
+                    assert components == 8, (scheme, 'full Braille cell did not render eight dots', components)
+                    count = 9 if mode == 'system-symbols' else 10
+                    patterns = [frozenset(cell_ink(column, 1)) for column in range(count)]
+                    assert all(patterns) and len(set(patterns)) >= 6, (scheme, mode, 'symbols rendered as repeated missing glyphs')
+                    continue
                 if mode == "async-echo":
                     assert state["batches"] == state["renderedBatches"] == 10, state
                     assert state["renderedColumn"] == 30 and state["echoToSubmitMs"], state
@@ -88,7 +126,7 @@ def main():
         artifacts = os.environ.get("TERMINAL_CURSOR_ARTIFACTS")
         if artifacts:
             shutil.copytree(fixture, artifacts, dirs_exist_ok=True)
-        print("PASS: terminal shortcuts, names, cursor focus, asynchronous echo, retained rows and seamless selection in both themes")
+        print("PASS: terminal symbols, shortcuts, names, cursor focus, asynchronous echo, retained rows and seamless selection in both themes")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,16 @@
+Exosuit Terminal Symbols is a fixed-pitch subset of Noto Sans Symbols2,
+version 2.003, distributed under the SIL Open Font License 1.1 (OFL.txt).
+Upstream: https://github.com/notofonts/symbols
+Source font SHA-256: 876598db5f1e3bef2bc77c4d94c5b0d5d2c1620be4878a06f18fb5434e331688
+
+The subset covers all 256 Braille patterns (U+2800..U+28FF), used by
+terminal splash screens, spinners, and plotting tools.
+Its glyphs use a 0.6em advance and the browser terminal font's line metrics.
+The primary text font continues to supply ordinary characters.
+
+To update from an upstream NotoSansSymbols2-Regular.ttf, install fontTools:
+  python3 scripts/generate-terminal-symbol-font.py --source /path/to/NotoSansSymbols2-Regular.ttf
+To regenerate the embedded Haxe source from the checked-in subset:
+  python3 scripts/generate-terminal-symbol-font.py
+To check that the embedded source matches the font:
+  python3 scripts/generate-terminal-symbol-font.py --check

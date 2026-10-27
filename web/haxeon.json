@@ -382,6 +382,7 @@
     "../graphical/src/ui/TerminalPalette.hx",
     "../graphical/src/ui/TerminalPane.hx",
     "../graphical/src/ui/TerminalPanel.hx",
+    "../graphical/src/ui/TerminalSymbolFont.hx",
     "../graphical/src/ui/TerminalTabView.hx",
     "../graphical/src/ui/TooltipHoverGroup.hx",
     "../graphical/src/ui/TooltipOverlayHost.hx",

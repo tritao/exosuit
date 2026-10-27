@@ -116,6 +116,8 @@ cp "$app_dir/web/index.html" "$app_dir/web/exosuit.js" "$app_dir/web/remote-devi
 fonts="$haxeon_dir/packages/ui/vendor/skribidi/example/data"
 cp "$fonts/IBMPlexSans-Regular.ttf" "$fonts/IBMPlexMono-Regular.ttf" "$fonts/NotoEmoji-Regular.ttf" "$site_dir/assets/"
 mkdir -p "$site_dir/licenses/seti"
+mkdir -p "$site_dir/licenses/terminal-symbols"
+cp "$app_dir/graphical/assets/fonts/OFL.txt" "$app_dir/graphical/assets/fonts/SOURCE.txt" "$site_dir/licenses/terminal-symbols/"
 cp "$app_dir/graphical/assets/seti/LICENSE.txt" "$app_dir/graphical/assets/seti/ThirdPartyNotices.txt" "$app_dir/graphical/assets/seti/SOURCE.txt" "$site_dir/licenses/seti/"
 echo "Built $site_dir"
 echo "Serve it with: python3 -m http.server --directory \"$site_dir\" 8080"
