@@ -80,7 +80,7 @@ class ClaudeProvider implements LocalAgentProvider {
   var x = v == null ? null : Reflect.field(v,key);
   return Std.isOfType(x,String) ? x : "";
  }
- function inside(path:String):Bool return path != null && (path == directories.root || StringTools.startsWith(path,directories.root == "/" ? "/" : directories.root + "/"));
+ function inside(path:String):Bool return directories.inside(path);
  function session(r:AgentRecord):ClaudeSession return {
   record:r,process:null,transport:null,ready:false,busy:false,error:null,conversation:new ClaudeConversation(r.replay),
   approvals:[],models:[],message:"",currentModel:r.preferredModel,serial:0,interrupting:false

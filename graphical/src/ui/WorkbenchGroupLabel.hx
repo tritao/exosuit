@@ -31,14 +31,15 @@ class WorkbenchGroupLabel implements View {
 				haxeon.ui.core.TextStyleOverride.text(ExosuitPalette.WORKBENCH_TEXT_SIZE)))
 		];
 		if (directory != null) {
-			var path = directory;
+			// Windows directories arrive with backslashes; show them with the same short forms.
+			var path = directory, separator = path.indexOf("\\") >= 0 && path.indexOf("/") < 0 ? "\\" : "/";
+			var parts = path.split(separator).filter(function(part) return part != "");
+			var next = root == null ? "" : path.charAt(root.length);
 			if (root != null && path == root) {
-				var parts = path.split("/"); path = parts[parts.length - 1];
-			} else if (root != null && StringTools.startsWith(path, root + "/")) path = "./" + path.substring(root.length + 1);
-			else {
-				var parts = path.split("/");
-				if (parts.length > 2) path = "…/" + parts[parts.length - 2] + "/" + parts[parts.length - 1];
-			}
+				if (parts.length > 0) path = parts[parts.length - 1];
+			} else if (root != null && StringTools.startsWith(path, root) && (next == "/" || next == "\\"))
+				path = "./" + path.substring(root.length + 1).split("\\").join("/");
+			else if (parts.length > 2) path = "…" + separator + parts[parts.length - 2] + separator + parts[parts.length - 1];
 			children.push(new KeyedView("directory", new MutedDirectory(path)));
 		}
 		var row = new Row("workbench-group-label", children, style);

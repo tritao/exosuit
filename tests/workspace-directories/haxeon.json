@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "package": {"name": "exosuit-workspace-directories-test"},
+  "entry": "app.WorkspaceDirectoriesTestMain",
+  "sourceRoots": ["src", "../../src", "../../agent/src"],
+  "scopeSourceRoots": false,
+  "target": "host",
+  "outputDir": "build"
+}

@@ -17,10 +17,26 @@ class WorkspaceDirectories {
 			if (value == null || value.length == 0 || value.length > 1024)
 				return null;
 			var result = FileSystem.fullPath(Path.isAbsolute(value) ? value : Path.join([root, value]));
-			if ((result != root && !StringTools.startsWith(result, root == "/" ? "/" : root + "/")) || !FileSystem.isDirectory(result))
+			if (!contains(root, result, Sys.systemName() == "Windows") || !FileSystem.isDirectory(result))
 				return null;
 			return result;
 		} catch (_:Dynamic)
 			return null;
 	}
+
+	/** Whether `path` is `root` or below it. Full paths on Windows use `\` and ignore case. */
+	public function inside(path:Null<String>):Bool
+		return contains(root, path, Sys.systemName() == "Windows");
+
+	public static function contains(root:String, path:Null<String>, windows:Bool):Bool {
+		if (path == null || root.length == 0) return false;
+		var base = windows ? root.toLowerCase() : root, candidate = windows ? path.toLowerCase() : path;
+		if (candidate == base) return true;
+		if (!StringTools.startsWith(candidate, base)) return false;
+		if (separator(base.charAt(base.length - 1), windows)) return true;
+		return separator(candidate.charAt(base.length), windows);
+	}
+
+	static function separator(value:String, windows:Bool):Bool
+		return value == "/" || windows && value == "\\";
 }

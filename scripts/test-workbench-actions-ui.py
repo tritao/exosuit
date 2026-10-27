@@ -56,7 +56,7 @@ with tempfile.TemporaryDirectory(prefix='exactions-') as temporary:
                     group = next(n for n in nodes if n.get('label') == 'g:work' and n['visible'])['bounds']
                     subprocess.run(['xdotool', 'mousemove', '--window', window, str(round(group['x'] + group['width']/2)), str(round(group['y'] + group['height']/2)), 'click', '3'], check=True)
                     time.sleep(.4)
-                    if index == 7: click(window, locate(layout(5), 'More Group Actions…'))
+                    if index == 7: click(window, locate(layout(5), 'Change Sort Order…'))
                     if index == 6:
                         click(window, locate(layout(5), 'New Agent Session…')); time.sleep(.4)
                         subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Return'], check=True)
@@ -81,7 +81,7 @@ with tempfile.TemporaryDirectory(prefix='exactions-') as temporary:
                 # The group row is near the toolbar, with no permanent attachment form above it.
                 groups = [node for node in nodes if node.get('label') == 'g:work' and node['visible']]
                 assert groups and groups[0]['bounds']['y'] < 150, (groups, json.loads((fixture / str(index) / 'app-state.json').read_text()))
-            if index == 1: assert all(label in labels for label in ['New Agent Session…', 'New terminal', 'New group', 'Rename group', 'Change Working Directory…', 'More Group Actions…', 'Open folder', 'Refresh Workbench']), labels
+            if index == 1: assert all(label in labels for label in ['New Agent Session…', 'New terminal', 'New group', 'Rename group', 'Change Working Directory…', 'Change Sort Order…', 'Open folder', 'Refresh Workbench']), labels
             if index == 2:
                 assert 'Existing work' in labels and 'Other directory' not in labels and 'Existing Codex thread id' in labels, labels
                 assert (project / 'fake-codex.json').exists()
@@ -92,10 +92,12 @@ with tempfile.TemporaryDirectory(prefix='exactions-') as temporary:
                 assert len(records) == 1 and records[0]['thread'] == 'existing' and records[0]['group'] == 'work', diagnostic
                 assert len(diagnostic['agentTabs']) == 1, diagnostic
             if index == 5:
-                assert not any(label in labels for label in ['Change Sort Order…', 'Remove Group', 'Refresh Workbench', 'New Pi session', 'New Claude session']), labels
-                assert all(label in labels for label in ['New Agent Session…', 'New terminal', 'New group', 'Rename group', 'Change Working Directory…', 'More Group Actions…']), labels
+                # Group actions sit directly in the menu; an occupied top-level group cannot move or be removed.
+                assert not any(label in labels for label in ['More Group Actions…', 'Remove Group', 'Move to Group…', 'Refresh Workbench', 'New Pi session', 'New Claude session']), labels
+                assert all(label in labels for label in ['New Agent Session…', 'New terminal', 'New group', 'Rename group', 'Change Working Directory…', 'Change Sort Order…']), labels
             if index == 7:
-                assert 'Change Sort Order…' in labels and 'More Group Actions…' not in labels, labels
+                # Choosing the item runs the action itself: the menu closes into the sort-order prompt.
+                assert 'Change Sort Order…' not in labels and 'Rename group' not in labels, labels
             if index == 8:
                 assert 'Open agent session' in labels and 'Remove from Workbench' in labels, labels
                 assert not any(label in labels for label in ['New group', 'Rename group', 'Change Working Directory…', 'Refresh Workbench', 'New Agent Session…']), labels

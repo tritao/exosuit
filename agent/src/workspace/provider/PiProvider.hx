@@ -89,7 +89,7 @@ class PiProvider implements LocalAgentProvider {
   var x=v == null ? null : Reflect.field(v,key);return Std.isOfType(x,String) ? x : "";
  }
  static function sessionPath(v:String):Bool return valid(v,4096) && Path.isAbsolute(v) && v.indexOf("\n") < 0;
- function inside(v:String):Bool return v != null && (v == directories.root || StringTools.startsWith(v,directories.root == "/" ? "/" : directories.root + "/"));
+ function inside(v:String):Bool return directories.inside(v);
  function session(r:AgentRecord):PiSession return {record:r,process:null,transport:null,ready:false,policyReady:false,busy:false,error:null,
   conversation:new PiConversation(r.replay),dialogs:[],models:[],commands:null,commandsError:null,commandsLoading:false,serial:0,message:0,interrupted:false,pendingPrompts:0,revision:0,probe:0,inputs:new PiInputQueue(r),nativePending:[],nativeKnown:false,settled:false,
   settling:false,currentModel:null,currentEffort:null};
