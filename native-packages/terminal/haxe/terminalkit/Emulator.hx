@@ -7,6 +7,8 @@ import haxe.io.BytesOutput;
 
 /** Headless terminal emulator. Close it when the session ends. */
 class Emulator {
+    /** Foreground attribute bit; selection never changes underlying terminal colours. */
+    public static inline final SELECTED:Int = 64;
     final handle:TerminalHandle;
     var closed:Bool = false;
 
@@ -133,6 +135,8 @@ class Emulator {
     public function selectionStart(column:Int, row:Int):Void selection(column, row, 1);
     public function selectionTarget(column:Int, row:Int):Void selection(column, row, 2);
     public function selectionWord(column:Int, row:Int):Void selection(column, row, 3);
+    public function selectionLine(column:Int, row:Int):Void selection(column, row, 4);
+    public function selectionExtend(column:Int, row:Int):Void selection(column, row, 5);
     public function selectionClear():Void selection(0, 0, 0);
 
     /** Copies the native selection directly into binding-owned UTF-8 storage. */

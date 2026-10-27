@@ -103,6 +103,7 @@ typedef union terminal_color {
 #define TERMINAL_ATTRIBUTE_BOLD 8
 #define TERMINAL_ATTRIBUTE_ITALIC 16
 #define TERMINAL_ATTRIBUTE_UNDERLINE 32
+#define TERMINAL_ATTRIBUTE_SELECTED 64
 
 typedef struct terminal_history {
   uint8_t* data;
@@ -416,7 +417,7 @@ static uint64_t style_from_attr(const terminal_t* terminal,
     attr->fg, attr->fb, 1);
   terminal_color_t background = color_from_attr(terminal, attr->bccode, attr->br,
     attr->bg, attr->bb, 0);
-  if (attr->inverse) {
+  if (attr->inverse != attr->selected) {
     /* Defaults need an explicit opposite-role marker after swapping. */
     if (foreground.parts.attributes == TERMINAL_ATTRIBUTE_UNSET_COLOR)
       foreground.parts.attributes = TERMINAL_ATTRIBUTE_INVERSE_COLOR;
@@ -426,6 +427,7 @@ static uint64_t style_from_attr(const terminal_t* terminal,
     foreground = background;
     background = swapped;
   }
+  if (attr->selected) foreground.parts.attributes |= TERMINAL_ATTRIBUTE_SELECTED;
   if (attr->bold)
     foreground.parts.attributes |= TERMINAL_ATTRIBUTE_BOLD;
   if (attr->italic)
@@ -1163,7 +1165,7 @@ int terminal_emulator_for_each_history_line(terminal_emulator_t* emulator,
 int terminal_emulator_selection(terminal_emulator_t* emulator,
     unsigned int column, unsigned int row, int operation) {
   terminal_t* terminal = (terminal_t*)emulator;
-  if (!terminal || terminal->closed || operation < 0 || operation > 3) return -1;
+  if (!terminal || terminal->closed || operation < 0 || operation > 5) return -1;
   if (operation == 0) {
     tsm_screen_selection_reset(terminal->screen);
     return 0;
@@ -1171,7 +1173,9 @@ int terminal_emulator_selection(terminal_emulator_t* emulator,
   if (column >= (unsigned int)terminal->columns || row >= (unsigned int)terminal->rows) return -1;
   if (operation == 1) tsm_screen_selection_start(terminal->screen, column, row);
   else if (operation == 2) tsm_screen_selection_target(terminal->screen, column, row);
-  else tsm_screen_selection_word(terminal->screen, column, row);
+  else if (operation == 3) tsm_screen_selection_word(terminal->screen, column, row);
+  else if (operation == 4) tsm_screen_selection_line(terminal->screen, column, row);
+  else tsm_screen_selection_extend(terminal->screen, column, row);
   return 0;
 }
 

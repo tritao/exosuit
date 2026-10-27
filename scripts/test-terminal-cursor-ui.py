@@ -114,6 +114,11 @@ def main():
                             math.ceil(8 + (start + .2) * state['cellWidth']),
                             math.floor(8 + (end + .8) * state['cellWidth']))]
                         assert len(set(colors)) == 1, (scheme, 'selection has cell seams', set(colors))
+                        tint = state['selectionColor']
+                        expected = tuple(round(tint[channel] * 255 * tint['alpha'] + base * (1 - tint['alpha']))
+                                         for channel, base in zip(('red', 'green', 'blue'), background))
+                        assert all(abs(actual - wanted) <= 3 for actual, wanted in zip(colors[0], expected)), \
+                            (scheme, 'selection did not use the editor theme highlight', colors[0], expected)
                     continue
                 x = math.floor(state["cursorX"] + state["cursorWidth"] / 2)
                 y = math.floor(state["cursorY"] + state["cursorHeight"] / 2)

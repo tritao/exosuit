@@ -58,6 +58,7 @@ class CursorApp implements DesktopUiApplication {
 		TerminalGridTests.run(fonts);
 		TerminalShortcutTests.run(fonts);
 		TerminalPointerTests.run(fonts);
+		TerminalSelectionTests.run(fonts);
 		pane = new ui.TerminalPane(new TerminalSession(backend, emulator), host.requestFrame,
 			new ui.TerminalPalette(dark), fonts);
 		TerminalNameTests.run();
@@ -90,7 +91,8 @@ class CursorApp implements DesktopUiApplication {
 		focusReports: backend.replies,
 		cellWidth: pane.cellWidth,
 		rowHeight: pane.rowHeight,
-		selectionText: mode == "selection" ? pane.session.emulator.selectionText() : null
+		selectionText: mode == "selection" ? pane.session.emulator.selectionText() : null,
+		selectionColor: {red:pane.selectionColor.red,green:pane.selectionColor.green,blue:pane.selectionColor.blue,alpha:pane.selectionColor.alpha}
 	};
 
 	public function submit(frame:LayoutFrame):RenderNode {

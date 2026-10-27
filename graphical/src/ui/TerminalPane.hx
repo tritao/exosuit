@@ -34,7 +34,7 @@ import terminalkit.Cell;
 private typedef TerminalBackground = {start:Int, end:Int, color:Color};
 private typedef TerminalForeground = {start:Int, end:Int, packed:Int, background:Bool};
 private typedef TerminalRow = {
-	layout:TextLayout, text:String, fills:Array<TerminalBackground>, grid:Bool,
+	layout:TextLayout, text:String, fills:Array<TerminalBackground>, grid:Bool, selected:Bool,
 	id:haxe.Int64, hash:haxe.Int64, reusable:Bool, serial:Int, paintRevision:Int, paintKey:String
 };
 
@@ -72,6 +72,11 @@ class TerminalPane implements AgentTerminalPanel {
 	var selectionColumn:Int = 0;
 	var selectionRow:Int = 0;
 	var selectionMoved:Bool = false;
+	final selectionGesture = new haxeon.ui.core.SelectionGesture();
+	final selectionDrag = new haxeon.ui.widgets.text.SelectionDragController();
+	var selectionScroll:Float = 0;
+	var selectionColor:Color = Color.rgba(0.2, 0.43, 0.82, 0.55);
+	var selectionPaintChanged:Bool = false;
 	var hasSelection:Bool = false;
 	var mouseButton:Int = -1;
 	var mousePointer:Int = -1;
@@ -296,7 +301,7 @@ class TerminalPane implements AgentTerminalPanel {
 		cursor.column = Std.int(Math.min(cursor.column, emulator.columns() - 1));
 		cursor.row += emulator.scrollback(-1).current;
 		var count = emulator.rows();
-		if (!force && !focusChanged && changed == 0 && count == renderedRows.length
+		if (!force && !focusChanged && !selectionPaintChanged && changed == 0 && count == renderedRows.length
 			&& cursorRow == cursor.row && cursorColumn == cursor.column && cursorMode == cursor.mode) return false;
 		while (renderedRows.length > count) {
 			renderedRows.pop().layout.dispose();
@@ -305,7 +310,7 @@ class TerminalPane implements AgentTerminalPanel {
 		while (renderedRows.length < count) {
 			var layout = TextLayout.create(fonts, "", 8192.0, gridTextStyle(), new ParagraphStyle(TextWrap.None));
 			layout.setColor(foreground);
-			renderedRows.push({layout: layout, text: "", fills: [], grid: false, id: 0, hash: 0, reusable: false, serial: ++rowSerial, paintRevision: 0, paintKey: ""});
+			renderedRows.push({layout: layout, text: "", fills: [], grid: false, selected: false, id: 0, hash: 0, reusable: false, serial: ++rowSerial, paintRevision: 0, paintKey: ""});
 			revisions.push(fontRevision);
 			force = true;
 		}
@@ -316,10 +321,12 @@ class TerminalPane implements AgentTerminalPanel {
 		var sources = moved ? relocateRows(cursor.row, cursor.mode, focusChanged) : null;
 		for (row in 0...count) {
 			var repaintCursor = focusChanged && (row == cursor.row || row == cursorRow);
+			var repaintSelection = selectionPaintChanged && renderedRows[row].selected;
 			if (sources != null) {
-				if (sources[row] >= 0) continue;
-			} else if (!force && !repaintCursor && !emulator.rowChanged(row)) continue;
+				if (sources[row] >= 0 && !repaintSelection) continue;
+			} else if (!force && !repaintCursor && !repaintSelection && !emulator.rowChanged(row)) continue;
 			var entry = renderedRows[row];
+			entry.selected = false;
 			entry.id = emulator.rowId(row); entry.hash = emulator.rowHash(row);
 			entry.reusable = cursor.mode == 1 || row != cursor.row;
 			var cells = emulator.rowCells(row);
@@ -357,6 +364,10 @@ class TerminalPane implements AgentTerminalPanel {
 					if ((bg & 3) != 0) appendBackground(fills, column, column + cell.width,
 						TerminalColors.decode(bg, background, palette, true));
 				}
+				if ((fg & terminalkit.Emulator.SELECTED) != 0) {
+					entry.selected = true;
+					appendBackground(fills, column, column + cell.width, selectionColor);
+				}
 				offset += count;
 			}
 			var next = buffer.toString();
@@ -382,6 +393,7 @@ class TerminalPane implements AgentTerminalPanel {
 			if (cursorRow >= 0 && cursorRow < revisions.length) revisions[cursorRow]++;
 		}
 		terminalsession.TerminalLatencyTrace.mark("terminal.rows.ready");
+		selectionPaintChanged = false;
 		return true;
 	}
 
@@ -426,6 +438,8 @@ class TerminalPane implements AgentTerminalPanel {
 	}
 
 	public function build(context:BuildContext):RenderNode {
+		var highlight = focused ? context.theme.textSelection : context.theme.textSelectionInactive;
+		if (selectionColor != highlight) { selectionColor = highlight; selectionPaintChanged = true; refreshRows(false); }
 		// Resize before creating row painters; painting must not invalidate this frame.
 		resizeToViewport(resolvedWidth, resolvedHeight);
 		var fill = new LayoutStyle();
@@ -510,6 +524,7 @@ class TerminalPane implements AgentTerminalPanel {
 					cellWidth, rowHeight), [], []);
 		};
 		node.onResolved(function(_) {
+			selectionDrag.layoutResolved();
 			syncTextInput();
 			var bounds = node.globalBounds();
 			if (bounds.width != resolvedWidth || bounds.height != resolvedHeight) {
@@ -519,6 +534,20 @@ class TerminalPane implements AgentTerminalPanel {
 			}
 		});
 		node.focusable = true;
+		selectionDrag.configureAdapter(context.animations, function() return !closed && selectionPointer >= 0,
+			function() return node.resolved, function(x, y) {
+				var point = node.globalToLocal(new haxeon.ui.Point(x, y));
+				updateSelectionAt(point.x, point.y);
+			}, function(delta) {
+				selectionScroll += delta / rowHeight;
+				var lines = Std.int(selectionScroll);
+				if (lines == 0) return true;
+				selectionScroll -= lines;
+				var before = session.emulator.scrollback(-1).current;
+				var after = session.emulator.scrollback(Std.int(Math.max(0, before - lines))).current;
+				if (before == after) return false;
+				selectionMoved = true; refreshRows(false); requestFrame(); return true;
+			});
 		node.on(UiEventKind.PointerDown, function(event) {
 			context.requestFocus(node.id);
 			if (closed) return;
@@ -537,8 +566,19 @@ class TerminalPane implements AgentTerminalPanel {
 				selectionPointer = event.pointerId;
 				selectionColumn = cell.column;
 				selectionRow = cell.row;
-				selectionMoved = false;
-				session.emulator.selectionStart(cell.column, cell.row);
+				selectionScroll = 0;
+				// With mouse tracking Shift means "select locally"; outside a TUI it extends the anchor.
+				var extend = (event.modifiers & UiModifier.Shift) != 0 && session.emulator.mouseMode() == 0 && hasSelection;
+				if (extend) selectionGesture.cancel();
+				// Row identity plus shared pixel slop tolerates clicks straddling a cell edge.
+				var clicks = extend ? 1 : selectionGesture.register(haxe.Int64.toStr(session.emulator.rowId(cell.row)),
+					context.gestures.timeSeconds(), event.x, event.y);
+				selectionGesture.granularity = clicks;
+				selectionMoved = clicks > 1 || extend;
+				if (extend) session.emulator.selectionExtend(cell.column, cell.row);
+				else if (clicks == 2) session.emulator.selectionWord(cell.column, cell.row);
+				else if (clicks == 3) session.emulator.selectionLine(cell.column, cell.row);
+				else session.emulator.selectionStart(cell.column, cell.row);
 				hasSelection = true;
 				refreshRows(false);
 				requestFrame();
@@ -564,7 +604,9 @@ class TerminalPane implements AgentTerminalPanel {
 			if (controlPointer >= 0) return;
 			if (selectionPointer >= 0) {
 				if (event.pointerId != selectionPointer || closed) return;
+				selectionGesture.cancelIfMoved(event.x, event.y);
 				updateSelection(event);
+				selectionDrag.update(event.x, event.y);
 				return;
 			}
 			if (mouseButton >= 0 && event.pointerId != mousePointer) return;
@@ -584,6 +626,9 @@ class TerminalPane implements AgentTerminalPanel {
 			}
 			if (selectionPointer == event.pointerId) {
 				if (!closed && event.kind != UiEventKind.PointerCancel) updateSelection(event);
+				selectionDrag.stop();
+				if (event.kind == UiEventKind.PointerCancel) selectionGesture.cancel();
+				else selectionGesture.complete(event.x, event.y);
 				selectionPointer = -1;
 				if (!selectionMoved) clearSelection();
 				event.releasePointer();
@@ -674,16 +719,19 @@ class TerminalPane implements AgentTerminalPanel {
 		return node;
 	}
 
-	function pointerCell(event:UiEvent):{column:Int, row:Int} {
-		var column = Std.int(Math.floor((event.localX - 8.0) / cellWidth));
+	function pointerCell(event:UiEvent):{column:Int, row:Int} return cellAt(event.localX, event.localY);
+
+	function cellAt(x:Float, y:Float):{column:Int, row:Int} {
+		var column = Std.int(Math.floor((x - 8.0) / cellWidth));
 		var top = showControlNotice() ? CONTROL_BAR_HEIGHT + 4.0 : 4.0;
-		var row = Std.int(Math.floor((event.localY - top) / rowHeight));
+		var row = Std.int(Math.floor((y - top) / rowHeight));
 		column = Std.int(Math.max(0, Math.min(session.emulator.columns() - 1, column)));
 		row = Std.int(Math.max(0, Math.min(session.emulator.rows() - 1, row)));
 		return {column: column, row: row};
 	}
 
 	function prepareInput():Void {
+		selectionGesture.cancel();
 		clearSelection();
 		if (session.emulator.scrollback(-1).current == 0) return;
 		session.emulator.scrollback(0);
@@ -700,13 +748,17 @@ class TerminalPane implements AgentTerminalPanel {
 	}
 
 	function updateSelection(event:UiEvent):Void {
-		var cell = pointerCell(event);
+		updateSelectionAt(event.localX, event.localY);
+		event.preventDefault();
+		event.stopPropagation();
+	}
+
+	function updateSelectionAt(x:Float, y:Float):Void {
+		var cell = cellAt(x, y);
 		if (cell.column != selectionColumn || cell.row != selectionRow) selectionMoved = true;
 		session.emulator.selectionTarget(cell.column, cell.row);
 		refreshRows(false);
 		requestFrame();
-		event.preventDefault();
-		event.stopPropagation();
 	}
 
 	/** UIKit button/modifier values differ from the terminal wire protocol. */
@@ -811,6 +863,7 @@ class TerminalPane implements AgentTerminalPanel {
 
 	public function close():Void {
 		if (closed) return;
+		selectionDrag.dispose();
 		closed = true;
 		for (row in renderedRows) row.layout.dispose();
 		renderedRows.resize(0);
