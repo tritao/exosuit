@@ -586,6 +586,10 @@ class TerminalPane implements AgentTerminalPanel {
 				default: -1;
 			};
 			if (button < 0 || mouseButton >= 0) return;
+			if (button == 0) {
+				selectionGesture.cancel();
+				clearSelection();
+			}
 			if (reportMouse(event, button, 1)) {
 				mouseButton = button;
 				mousePointer = event.pointerId;

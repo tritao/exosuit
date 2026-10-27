@@ -38,6 +38,9 @@ class TerminalSelectionTests {
   pane.clearSelection();pane.selectionGesture.cancel();emulator.feedString("\x1b[?1003h\x1b[?1006h");backend.replies="";
   click(2,0);require(backend.replies.length>0 && !pane.hasSelection,"TUI mouse reporting was intercepted");
   pane.selectionGesture.cancel();click(2,0,UiModifier.Shift);click(2,0,UiModifier.Shift);selected("alpha");
+  backend.replies="";click(20,4);
+  require(!pane.hasSelection && emulator.selectionText()==null,"TUI click on empty space retained local selection");
+  require(backend.replies.length>0,"Clearing local selection swallowed the TUI click");
   pane.clearSelection();emulator.feedString("\x1b[?1003l");
   for(i in 0...40) emulator.feedString("\r\nHISTORY_"+i);
   pane.poll();submit();pane.selectionGesture.cancel();
