@@ -1636,25 +1636,11 @@ class ExosuitApp implements DesktopUiApplication {
 			requestFrame();
 		};
 		switch action {
-			case "more":
-				var entries:Array<commandview.CommandViewEntry> = [];
-				if (group.cwd != null) entries.push(new commandview.CommandViewEntry("Use Inherited Working Directory", "", "inherit"));
-				for (candidate in catalog.groups) if (candidate.id != group.parent && GroupContextActions.canParent(group.id, candidate.id, catalog.groups)) {
-					entries.push(new commandview.CommandViewEntry("Move to Group…", "", "parent")); break;
-				}
-				if (group.parent != null && ![for (entry in entries) entry.value].contains("parent"))
-					entries.push(new commandview.CommandViewEntry("Move to Group…", "", "parent"));
-				entries.push(new commandview.CommandViewEntry("Change Sort Order…", "", "order"));
-				if (client.canRemoveGroups() && !client.agentService().agentBusy() && GroupContextActions.empty(group.id,catalog,client.agentService().agents()))
-					entries.push(new commandview.CommandViewEntry("Remove Group", "Empty groups only", "remove"));
-				host.openCommandView(new commandview.CommandViewProvider("Group Actions: ", entries, function(_) {}, function(entry, _, _) {
-					if (entry == null) return;
-					host.closeCommandView();
-					if (valid()) editWorkspaceGroup(group,entry.value);
-				}));
-			case "inherit": save(group.parent, null, workspace.service.WorkspaceProtocol.order(group.order));
+			case "inherit":
+				if (GroupContextActions.canInherit(group)) save(group.parent, null, workspace.service.WorkspaceProtocol.order(group.order));
 			case "remove":
-				if (client.canRemoveGroups() && GroupContextActions.empty(group.id, client.terminalCatalog(), client.agentService().agents())) {
+				if (GroupContextActions.canRemove(group, client.canRemoveGroups() && !client.agentService().agentBusy(),
+					client.terminalCatalog(), client.agentService().agents())) {
 					client.removeGroup(catalog.instance, group); requestFrame();
 				}
 			case "parent":

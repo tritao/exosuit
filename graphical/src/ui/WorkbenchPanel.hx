@@ -342,12 +342,22 @@ class WorkbenchPanel implements View {
 			if (group != null) {
 				items.push(new MenuItem("rename-group", "Rename group", function() beginGroup(group, false), editable && !pending, null, true));
 				items.push(new MenuItem("group-directory", "Change Working Directory…", function() edit(group, "directory"), editable));
-				items.push(new MenuItem("group-more", "More Group Actions…", function() edit(group, "more"), editable));
+				if (GroupContextActions.canInherit(group))
+					items.push(new MenuItem("group-inherit", "Use Inherited Working Directory", function() edit(group, "inherit"), editable));
+				var moveSeparator = true;
+				if (catalog != null && GroupContextActions.canMove(group, catalog.groups)) {
+					items.push(new MenuItem("group-parent", "Move to Group…", function() edit(group, "parent"), editable, null, true));
+					moveSeparator = false;
+				}
+				items.push(new MenuItem("group-order", "Change Sort Order…", function() edit(group, "order"), editable, null, moveSeparator));
 			}
 		}
-		if (cwd != null) items.push(new MenuItem("open-folder", "Open folder", function() openFolder(cwd)));
+		if (cwd != null) items.push(new MenuItem("open-folder", "Open folder", function() openFolder(cwd), true, null, group != null));
 		if (group != null && client.agentService().canControlAgents())
 			items.push(new MenuItem("attach-codex", "Attach existing Codex thread…", function() attach(group)));
+		if (group != null && client.canEditGroups() && GroupContextActions.canRemove(group,
+			client.canRemoveGroups() && !client.agentService().agentBusy(), catalog, client.agentService().agents()))
+			items.push(new MenuItem("group-remove", "Remove Group", function() edit(group, "remove"), editable, null, true));
 		if (key == null) {
 			items.push(new MenuItem("refresh", "Refresh Workbench", function() {
 				if (client.canReadTerminals()) client.refreshTerminals(true);
