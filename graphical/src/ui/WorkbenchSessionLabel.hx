@@ -1,5 +1,6 @@
 package ui;
 
+import haxeon.ui.Insets;
 import haxeon.ui.LayoutAxis;
 import haxeon.ui.LayoutStyle;
 import haxeon.ui.Rect;
@@ -43,9 +44,17 @@ class WorkbenchSessionLabel implements View {
 		};
 		var style = new LayoutStyle(); style.width = LayoutAxis.stretch(); style.height = LayoutAxis.fixed(ROW_HEIGHT);
 		style.childAlignY = haxeon.ui.LayoutAlignmentY.Center; style.childGap = 6;
+		style.padding = new Insets(0, 0, context.theme.tokens.spacingLarge, 0);
+		var statusStyle = new LayoutStyle();
+		statusStyle.width = LayoutAxis.fixed(24);
+		statusStyle.height = LayoutAxis.grow();
+		statusStyle.childDistribution = haxeon.ui.LayoutDistribution.Center;
+		statusStyle.childAlignY = haxeon.ui.LayoutAlignmentY.Center;
 		var row = new Row("workbench-session-label", [
 			new KeyedView("name", new MiddleEllipsisText("session-name", name, false, TextStyleOverride.text(ExosuitPalette.WORKBENCH_TEXT_SIZE))),
-			new KeyedView("status", new Icon("session-status", icon, 14, color))
+			new KeyedView("status", new Row("session-status-slot", [
+				new KeyedView("icon", new Icon("session-status", icon, 14, color))
+			], statusStyle))
 		], style);
 		var description = name + " · " + status;
 		var tooltip = new TabTooltip("session-details", row, new Text(description),
