@@ -1,5 +1,7 @@
 package ui;
 
+import haxeon.ui.widgets.overlays.TooltipHoverGroup;
+
 import haxeon.ui.widgets.overlays.TooltipPlacement;
 
 import haxeon.ui.Rect;

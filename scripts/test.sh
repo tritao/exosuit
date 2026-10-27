@@ -90,6 +90,7 @@ rm -rf "$capabilities_state"
 run_test command-test
 run_test editor-view-test
 run_test tab-tooltip
+run_test quick-picker
 run_test narrow-tabs
 run_test status-bar
 run_test terminal-context-menu

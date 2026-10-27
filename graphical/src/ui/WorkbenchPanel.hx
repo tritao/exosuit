@@ -1,5 +1,7 @@
 package ui;
 
+import haxeon.ui.widgets.overlays.TooltipHoverGroup;
+
 import haxeon.ui.LayoutAxis;
 import haxeon.ui.LayoutStyle;
 import haxeon.ui.Insets;

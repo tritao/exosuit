@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "package": { "name": "exosuit-quick-picker-test" },
+  "entry": "app.QuickPickerTestMain",
+  "sourceRoots": ["src"],
+  "scopeSourceRoots": false,
+  "dependencies": { "exosuit-graphical": { "path": "../../graphical" } },
+  "target": "host",
+  "outputDir": "build"
+}

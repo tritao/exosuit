@@ -1,6 +1,6 @@
 package app;
 
-import ui.TabHoverDelay;
+import haxeon.ui.widgets.overlays.TooltipHoverDelay;
 import ui.TabTooltip;
 import haxeon.ui.Rect;
 import haxeon.ui.animation.AnimationScheduler;
@@ -59,7 +59,7 @@ private class TooltipTypographyFixture implements haxeon.ui.core.View {
 		if (standard) tooltip = new haxeon.ui.widgets.overlays.Tooltip("typography-tooltip", anchor, content, 0, 36);
 		else tooltip = new TabTooltip("typography-tab-tooltip", anchor, content,
 			function() return new Rect(0, 0, context.viewportWidth, context.viewportHeight), 0,
-			Below, new ui.TooltipHoverGroup(context.animations, function(_) {}, 0), true);
+			Below, new haxeon.ui.widgets.overlays.TooltipHoverGroup(context.animations, function(_) {}, 0), true);
 		return new haxeon.ui.widgets.layout.Column("typography-fixture", [
 			new haxeon.ui.widgets.KeyedView("outside", new haxeon.ui.widgets.text.Text("Outside text")),
 			new haxeon.ui.widgets.KeyedView("tooltip", tooltip)
@@ -77,7 +77,7 @@ private class NarrowTooltipFixture implements haxeon.ui.core.View {
 		var anchorStyle = new haxeon.ui.LayoutStyle();
 		anchorStyle.width = haxeon.ui.LayoutAxis.fixed(24);
 		anchorStyle.height = haxeon.ui.LayoutAxis.fixed(24);
-		var group = new ui.TooltipHoverGroup(context.animations, function(_) {}, 0);
+		var group = new haxeon.ui.widgets.overlays.TooltipHoverGroup(context.animations, function(_) {}, 0);
 		var tooltip = new TabTooltip("narrow-tooltip", new haxeon.ui.widgets.text.Text("+", anchorStyle),
 			new haxeon.ui.widgets.text.Text("Open", null, null,
 				new haxeon.ui.core.TextStyleOverride(null, 13, null, haxeon.ui.TextWrap.WordCharacter)),
@@ -149,7 +149,7 @@ class TabTooltipTestMain {
 			if (size != 13) theme.tokens.tooltipFontSize = size;
 			var context = new haxeon.ui.core.UiContext(null, fonts, theme);
 			context.buildContext.environment.pixelDensity = density;
-			var fixture = new ui.TooltipOverlayHost(new TooltipTypographyFixture(standard));
+			var fixture = new haxeon.ui.widgets.overlays.TooltipOverlayHost(new TooltipTypographyFixture(standard));
 			var root = context.submit(fixture, new haxeon.ui.LayoutFrame(320, 240));
 			var anchor:haxeon.ui.core.RenderNode = null;
 			root.walk(function(node) { if (node.styleKey == "typography-trigger") anchor = node; });
@@ -181,7 +181,7 @@ class TabTooltipTestMain {
 	static function sharedControlTiming():Void {
 		var scheduler=new AnimationScheduler();
 		var visible:Null<String>=null;
-		var group=new ui.TooltipHoverGroup(scheduler,function(key) visible=key,Settings.DEFAULT_TOOLTIP_DELAY);
+		var group=new haxeon.ui.widgets.overlays.TooltipHoverGroup(scheduler,function(key) visible=key,Settings.DEFAULT_TOOLTIP_DELAY);
 		group.enter("terminal");scheduler.advance(0.4);
 		require(visible==null,"Workbench control tooltip opened before the configured delay");
 		group.leave("terminal");scheduler.advance(1);
@@ -232,7 +232,7 @@ class TabTooltipTestMain {
 		var scheduler = new AnimationScheduler();
 		var visible = false;
 		var reveals = 0;
-		var delay = new TabHoverDelay(scheduler, function(value) { visible = value; if (value) reveals++; });
+		var delay = new TooltipHoverDelay(scheduler, function(value) { visible = value; if (value) reveals++; });
 		delay.start(); scheduler.advance(0.4);
 		require(!visible, "tooltip appeared before the delay");
 		delay.cancel(); scheduler.advance(1);
@@ -289,7 +289,7 @@ class TabTooltipTestMain {
 		require(paintedTooltip, "tooltip fixture did not build a styled tooltip");
 		require(open != null && open.globalBounds().width > 25 && open.globalBounds().height < 25,
 			"short tooltip wrapped to its narrow anchor: " + (open == null ? "missing" : open.globalBounds().width + " x " + open.globalBounds().height));
-		var midpointRoot = context.submit(new ui.TooltipOverlayHost(new NarrowTooltipFixture(Below, true)),
+		var midpointRoot = context.submit(new haxeon.ui.widgets.overlays.TooltipOverlayHost(new NarrowTooltipFixture(Below, true)),
 			new haxeon.ui.LayoutFrame(800, 600));
 		var midpointTip:haxeon.ui.core.RenderNode = null;
 		midpointRoot.walk(function(node) { if (node.styleType == "tooltip") midpointTip = node; });
@@ -304,7 +304,7 @@ class TabTooltipTestMain {
 		require(escapedGeometry.clipBounds.width == 800 && escapedGeometry.clipBounds.height == 600,
 			"unclipped tooltip inherited sidebar clipping instead of viewport clipping");
 
-		var overlayFixture = new ui.TooltipOverlayHost(new ClippedToolbarFixture());
+		var overlayFixture = new haxeon.ui.widgets.overlays.TooltipOverlayHost(new ClippedToolbarFixture());
 		for (_ in 0...3) {
 			var overlayRoot = context.submit(overlayFixture, new haxeon.ui.LayoutFrame(800, 600));
 			var liftedTip:haxeon.ui.core.RenderNode = null;
@@ -316,7 +316,7 @@ class TabTooltipTestMain {
 		}
 
 		for (offset in [-32.0, -200.0, 900.0]) {
-			var toolbarFixture = new ui.TooltipOverlayHost(new ToolbarTooltipFixture(offset));
+			var toolbarFixture = new haxeon.ui.widgets.overlays.TooltipOverlayHost(new ToolbarTooltipFixture(offset));
 			context.submit(toolbarFixture, new haxeon.ui.LayoutFrame(800, 600));
 			context.pointerMove(90, 50);
 			var toolbarRoot = context.submit(toolbarFixture, new haxeon.ui.LayoutFrame(800, 600));
