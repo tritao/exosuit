@@ -3874,8 +3874,8 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function scmRelativePath(root:String, path:String):Null<String> {
-		var base = StringTools.replace(application.workspace.fileSystem.normalize(root), "\\", "/");
-		var full = StringTools.replace(application.workspace.fileSystem.normalize(path), "\\", "/");
+		var base = comparablePath(root);
+		var full = comparablePath(path);
 		while (base.length > 1 && StringTools.endsWith(base, "/")) base = base.substr(0, base.length - 1);
 		var compareBase = Sys.systemName() == "Windows" ? base.toLowerCase() : base;
 		var compareFull = Sys.systemName() == "Windows" ? full.toLowerCase() : full;
@@ -4015,10 +4015,15 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function findDocument(path:String):Null<editor.Document> {
-		var normalized = StringTools.replace(application.workspace.fileSystem.normalize(path), "\\", "/");
-		for (document in application.documents.documents) if (document.path != null &&
-			StringTools.replace(application.workspace.fileSystem.normalize(document.path), "\\", "/") == normalized) return document;
+		var normalized = comparablePath(path);
+		for (document in application.documents.documents) if (document.path != null && comparablePath(document.path) == normalized) return document;
 		return null;
+	}
+
+	/** An open document whose folder was deleted or renamed cannot be normalized; compare it as written rather than fail the lookup. */
+	function comparablePath(path:String):String {
+		var normalized = try application.workspace.fileSystem.normalize(path) catch (_:Dynamic) path;
+		return StringTools.replace(normalized, "\\", "/");
 	}
 
 	function openRemoteScmFile(repository:scm.ScmRepository, relative:String, line:Int):Void {
