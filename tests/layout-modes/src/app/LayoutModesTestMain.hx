@@ -48,7 +48,8 @@ class LayoutModesTestMain {
 		// Agents keeps Files, Search and Source Control off the rail; the right panel shows the group's instead.
 		require(side.activeId == "workbench" && modes.hides("files") && modes.hides("search") && modes.hides("scm") && !modes.hides("workbench"),
 			"Agents left an editor-workspace destination selected or on the rail");
-		require(side.find("files") != null && side.find("files").visible && side.find("scm").visible, "Agents changed the user's own destination visibility");
+		var filesMode = side.find("files"), scmMode = side.find("scm");
+		require(filesMode != null && filesMode.visible && scmMode != null && scmMode.visible, "Agents changed the user's own destination visibility");
 		var context = modes.captureContext(), window = modes.captureWindow(), snapshot = dock.snapshotJson();
 		var next = model(), nextSide = sidebar(next), nextRegions = new WorkbenchLayoutControls(next), nextModes = new WorkbenchLayoutModes(next, nextSide, nextRegions, function() {});
 		next.restoreJson(snapshot); nextSide.restore(side.encode()); nextModes.restoreWindow([window]); nextModes.restoreContext([context]); nextModes.start("auto");

@@ -3708,8 +3708,9 @@ class ExosuitApp implements DesktopUiApplication {
 		if (localScmSource == null || localScmSource.identity() != localScmIdentity) {
 			clearLocalScmSource();
 			localScmSource = new LocalScmSource(application.scm, roots[0], roots, narrow);
-			// A group folder outside the workspace is not discovered by the context listener.
-			if (narrow) application.scm.discover(roots[0], _ -> requestFrame());
+			// A group folder may be any folder: outside the workspace, its own repository, or none. Discover it unless a
+			// discovered root already covers it, which would only duplicate that root's polling.
+			if (narrow && application.scm.repositories(roots[0]).length == 0) application.scm.discover(roots[0], _ -> requestFrame());
 		}
 		return localScmSource;
 	}

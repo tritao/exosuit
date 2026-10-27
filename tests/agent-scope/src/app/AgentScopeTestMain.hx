@@ -74,6 +74,13 @@ class AgentScopeTestMain {
 		var removed = model([group("resume", "resume-2026", "C:/work/exosuit", null, 0)]);
 		var orphan = AgentScope.resolve(removed, null, ui);
 		require(orphan != null && orphan.equals(ui), "deleting the scoped group changed the scope");
+		// A group folder may be any folder, inside the workspace or not; the scope takes it as given.
+		var outside = model([group("resume", "resume-2026", "C:/work/exosuit", null, 0), group("elsewhere", "elsewhere", "D:/scratch/other-repo", "resume", 1),
+			group("under", "under", null, "elsewhere", 2)]);
+		var far = AgentScope.resolve(outside, "g:elsewhere", resume);
+		require(far != null && far.directory == "D:/scratch/other-repo", "a folder outside the workspace was not used");
+		var inherited = AgentScope.resolve(outside, "g:under", far);
+		require(inherited != null && inherited.directory == "D:/scratch/other-repo", "a sub-group did not inherit an outside folder");
 		// No groups at all: no scope.
 		require(AgentScope.resolve(new WorkbenchTreeModel(), null, null) == null, "empty Workbench produced a scope");
 	}

@@ -37,6 +37,8 @@ class ScopedSearchPanel implements View {
 	var query:String = "";
 	var searchedDirectory:Null<String>;
 	var ownProject:Null<Project>;
+	/** The query ran over a folder index that was still filling, so it runs again once the index is complete. */
+	var searchedPartial:Bool = false;
 
 	public function new(workspace:Workspace, directory:Void->Null<String>, open:SearchMatch->Void, requestFrame:Void->Void, maximum:Void->Int) {
 		this.workspace = workspace; this.directory = directory; this.open = open; this.requestFrame = requestFrame; this.maximum = maximum;
@@ -57,6 +59,7 @@ class ScopedSearchPanel implements View {
 	function run(value:String):Void {
 		query = value == null ? "" : value;
 		searchedDirectory = directory();
+		searchedPartial = false;
 		search.request(query, new SearchOptions(), maximum());
 		scroll.jumpTo(0, 0);
 		requestFrame();
@@ -80,7 +83,9 @@ class ScopedSearchPanel implements View {
 			}
 		}
 		var project = ownProject;
-		return project == null ? [] : project.files();
+		if (project == null) return [];
+		searchedPartial = project.indexing();
+		return project.files();
 	}
 
 	static function key(path:String):String {
@@ -97,7 +102,8 @@ class ScopedSearchPanel implements View {
 	public function build(context:BuildContext):RenderNode {
 		var current = directory();
 		// A new scope reruns the query there instead of showing another folder's results.
-		if (query.length > 0 && current != searchedDirectory) run(query);
+		var partial = ownProject;
+		if (query.length > 0 && (current != searchedDirectory || searchedPartial && partial != null && !partial.indexing())) run(query);
 		var style = fill(); style.padding = new Insets(6, 8, 6, 8); style.childGap = 4;
 		var rows:Array<KeyedView> = [new KeyedView("query", new SearchField("scoped-search-query", query, run, null, "Search in folder"))];
 		var status = current == null ? "No folder to search" : query.length == 0 ? "Search this folder" : search.complete
