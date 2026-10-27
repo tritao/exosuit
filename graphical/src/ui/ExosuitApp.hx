@@ -1504,7 +1504,8 @@ class ExosuitApp implements DesktopUiApplication {
    application.reportError("agent", "Cannot create an agent session while the workspace is disconnected or another session operation is in progress. Wait and try again.");
    requestFrame(); return;
   }
-  if (application.settings.current.agentSessionMode == "terminal") { createAgentTerminal(provider, group); return; }
+  // The built-in agent has no CLI to host in a terminal, so it is always an integrated conversation.
+  if (provider != "agentkit" && application.settings.current.agentSessionMode == "terminal") { createAgentTerminal(provider, group); return; }
   var client=workbenchClient;
   if(client == null) return;
   var defaults:workspace.client.AgentSessionDefaults={provider:provider,model:null,effort:null,
@@ -1590,8 +1591,8 @@ class ExosuitApp implements DesktopUiApplication {
 		if (client == null || catalog == null) return;
 		if (action == "new-agent") {
 			if (!canCreateAgentSession()) { application.reportError("agent", "Wait for the current workspace operation to finish before creating an agent session"); return; }
-			var entries = [for (provider in ["codex", "claude", "pi"])
-				new commandview.CommandViewEntry(provider == "codex" ? "Codex" : provider == "claude" ? "Claude" : "Pi", "New agent session", provider)];
+			var entries = [for (provider in ["codex", "claude", "pi", "agentkit"])
+				new commandview.CommandViewEntry(provider == "codex" ? "Codex" : provider == "claude" ? "Claude" : provider == "pi" ? "Pi" : "Exosuit", "New agent session", provider)];
 			host.openCommandView(new commandview.CommandViewProvider("New Agent Session: ", entries, function(_) {}, function(entry, _, _) {
 				if (entry == null) return;
 				host.closeCommandView();

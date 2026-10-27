@@ -94,6 +94,15 @@ class CodexSessionPanel implements View {
     };
   }
 
+  /** Pi and the built-in Exosuit agent share the supervised / auto-accept / full-access permission modes. */
+  static function usesSupervisedModes(provider:Null<String>):Bool {
+    return provider == "pi" || provider == "agentkit";
+  }
+
+  static function providerName(provider:Null<String>):String {
+    return provider == "claude" ? "Claude" : provider == "pi" ? "Pi" : provider == "agentkit" ? "Exosuit" : "Codex";
+  }
+
   static function piPermissionLabel(mode:String):String {
     return switch (mode) {
       case "supervised": "Supervised";
@@ -117,11 +126,11 @@ class CodexSessionPanel implements View {
   function openPermissionsMenu(client:WorkspaceAgentClient, id:String, thread:String, event:UiEvent):Void {
     var initial = client.agentView(id);
     if (initial == null) return;
-    if (initial.record.provider == "claude" || initial.record.provider == "pi") {
+    if (initial.record.provider == "claude" || usesSupervisedModes(initial.record.provider)) {
       var choices:Array<MenuItem> = [];
-      for (mode in (initial.record.provider == "pi" ? ["supervised", "acceptEdits", "fullAccess"] : ["default", "acceptEdits", "plan"])) {
+      for (mode in (usesSupervisedModes(initial.record.provider) ? ["supervised", "acceptEdits", "fullAccess"] : ["default", "acceptEdits", "plan"])) {
         var selectedMode = mode;
-        choices.push(new MenuItem(mode, (initial.record.provider == "pi" ? piPermissionLabel(mode) : mode) + (initial.record.permissionMode == mode ? "  ✓" : ""), function() {
+        choices.push(new MenuItem(mode, (usesSupervisedModes(initial.record.provider) ? piPermissionLabel(mode) : mode) + (initial.record.permissionMode == mode ? "  ✓" : ""), function() {
           client.agentAction(id, "permissions", selectedMode, null);
         }));
       }
@@ -204,8 +213,8 @@ class CodexSessionPanel implements View {
       suggestionIndex = 0;dismissSuggestions = false;
       frame();
     }, inputStyle, null, null, null, true);
-    field.label = view.record.provider == "claude" ? "Claude prompt" : view.record.provider == "pi" ? "Pi prompt" : "Codex prompt";
-    field.placeholder = view.record.provider == "claude" ? "Message Claude…" : view.record.provider == "pi" ? "Message Pi…" : "Message Codex…";
+    field.label = providerName(view.record.provider) + " prompt";
+    field.placeholder = "Message " + providerName(view.record.provider) + "…";
     field.enabled = client.canControlAgents() && connectionReady;
     var stop = new Button("Stop", null,
       function() client.agentAction(id, "stop", "", null), "codex-stop");
@@ -217,8 +226,8 @@ class CodexSessionPanel implements View {
     headerButtonStyle.height = LayoutAxis.fixed(40);
     var heading = paragraph(view.record.name + " · " + (working ? "Working…" : stateLabel));
     var header:Array<KeyedView> = [new KeyedView("title", heading)];
-    if (working || ((view.record.provider == "claude" || view.record.provider == "pi") && view.requests.length > 0)) header.push(new KeyedView("stop", stop));
-    var permissions = new Button("Permissions · " + (view.record.provider == "pi" ? piPermissionLabel(view.record.permissionMode) : view.record.provider == "claude" ? view.record.permissionMode : CodexPermissions.labelForRecord(view.record.permissionProfile,
+    if (working || ((view.record.provider == "claude" || usesSupervisedModes(view.record.provider)) && view.requests.length > 0)) header.push(new KeyedView("stop", stop));
+    var permissions = new Button("Permissions · " + (usesSupervisedModes(view.record.provider) ? piPermissionLabel(view.record.permissionMode) : view.record.provider == "claude" ? view.record.permissionMode : CodexPermissions.labelForRecord(view.record.permissionProfile,
       view.record.sandboxPolicy, view.record.approvalPolicy)) + "  ▾", headerButtonStyle, null, "codex-permissions");
     permissions.enabled = control && !working && view.requests.length == 0;
     permissions.onClickEvent = function(event) {
@@ -232,7 +241,8 @@ class CodexSessionPanel implements View {
     var rows:Array<KeyedView> = [new KeyedView("header", new Row("codex-header", header, headerStyle))];
     if (details) {
       rows.push(new KeyedView("directory", paragraph(view.record.cwd)));
-      rows.push(new KeyedView("thread", paragraph((view.record.provider == "claude" ? "Claude session: " : "Thread: ") + view.record.thread)));
+      // The built-in agent has no native thread to show; its identity is the Workbench resource.
+      if (view.record.provider != "agentkit") rows.push(new KeyedView("thread", paragraph((view.record.provider == "claude" ? "Claude session: " : "Thread: ") + view.record.thread)));
       rows.push(new KeyedView("connection", paragraph("Connection: " + connectionState)));
       rows.push(new KeyedView("diagnostics-toggle", new Button(diagnostics ? "Hide diagnostics" : "Show diagnostics", null, function() {
         diagnostics = !diagnostics;
@@ -439,7 +449,7 @@ class CodexSessionPanel implements View {
       }
     }
     if (details && diagnostics) activity.push(new KeyedView("diagnostics", paragraph(view.activity)));
-    if (working) activity.push(new KeyedView("working", new Text(view.record.provider == "claude" ? "Claude is working…" : view.record.provider == "pi" ? "Pi is working…" : "Codex is working…", null, tokens.mutedText)));
+    if (working) activity.push(new KeyedView("working", new Text(providerName(view.record.provider) + " is working…", null, tokens.mutedText)));
 
     var error = client.agentError() == null ? view.error : client.agentError();
     if ((view.record.state == "reconnect-failed" || connectionState == "disconnected")

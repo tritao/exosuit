@@ -1,0 +1,12 @@
+{
+	"version": 1,
+	"package": { "name": "exosuit-agentkit-provider-test" },
+	"entry": "app.AgentKitProviderTestMain",
+	"sourceRoots": ["src"],
+	"scopeSourceRoots": false,
+	"dependencies": {
+		"exosuit-agent": { "path": "../../agent" }
+	},
+	"target": "host",
+	"outputDir": "build"
+}

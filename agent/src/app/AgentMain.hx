@@ -84,11 +84,14 @@ class AgentMain {
         var piExecutable = Sys.getEnv("EXOSUIT_PI_BIN");
         var pi = new workspace.provider.PiProvider(directories, function() return service.snapshot().groups, processes, clock,
             haxe.io.Path.directory(args[2]), store, process.ExecutablePath.resolve(piExecutable == null ? "pi" : piExecutable), Sys.getEnv("EXOSUIT_PI_SCRIPT"));
+        var agentKitSettings = workspace.provider.AgentKitSettings.fromEnvironment(haxe.io.Path.join([haxe.io.Path.directory(args[2]), "agentkit"]));
+        var agentKit = new workspace.provider.AgentKitProvider(directories, function() return service.snapshot().groups, clock,
+            new haxeon.agent.nativekit.NativeKitHttpTransport(runtime.events, agentKitSettings.allowsPlainHttp()), agentKitSettings, store);
         var codex = new workspace.provider.CodexProvider(args.length >= 7 ? args[6] : args[3], directories,
             function() return service.snapshot().groups, processes, clock, store,
             process.ExecutablePath.resolve(executable == null ? "codex" : executable), Sys.getEnv("EXOSUIT_CODEX_PROXY_LAUNCHER"), codexScript);
         var agents = new workspace.provider.WorkspaceAgentService("workspace", args.length >= 7 ? args[6] : args[3],
-            directories.root, [codex, claude, pi], store);
+            directories.root, [codex, claude, pi, agentKit], store);
 		service.canRemoveGroup = function(group) {
 			for (terminal in terminals.snapshot().terminals) if (terminal.group == group) return false;
 			return agents.groupIsEmpty(group);

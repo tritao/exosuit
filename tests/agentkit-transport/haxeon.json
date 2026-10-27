@@ -1,0 +1,13 @@
+{
+	"version": 1,
+	"package": { "name": "exosuit-agentkit-transport-test" },
+	"entry": "NativeTransportCheck",
+	"sourceRoots": ["src"],
+	"scopeSourceRoots": false,
+	"dependencies": {
+		"exosuit-agent": { "path": "../../agent" },
+		"haxeon-agentkit-nativekit": { "path": "../../haxeon/packages/agentkit-nativekit" }
+	},
+	"target": "host",
+	"outputDir": "build"
+}

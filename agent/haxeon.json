@@ -19,6 +19,12 @@
     "haxeon-filesystem": {
       "path": "../haxeon/packages/filesystem"
     },
+    "haxeon-agentkit": {
+      "path": "../haxeon/packages/agentkit"
+    },
+    "haxeon-agentkit-nativekit": {
+      "path": "../haxeon/packages/agentkit-nativekit"
+    },
     "haxeon-gpu": {
       "path": "../haxeon/packages/gpu"
     },

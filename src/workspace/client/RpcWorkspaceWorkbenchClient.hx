@@ -295,7 +295,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     }
     agentsError=null;creationError=null;
     var query:AgentCreate={workspace:"workspace",instance:instance(),id:WorkspaceIds.create("agent"),group:group,
-      name:defaults != null && defaults.provider == "claude" ? "Claude" : defaults != null && defaults.provider == "pi" ? "Pi" : "Codex",
+      name:defaults != null && defaults.provider == "claude" ? "Claude" : defaults != null && defaults.provider == "pi" ? "Pi" : defaults != null && defaults.provider == "agentkit" ? "Exosuit" : "Codex",
       provider:defaults == null ? null : defaults.provider,thread:thread,
       defaultModel:thread == null && defaults != null ? defaults.model : null,
       defaultEffort:thread == null && defaults != null ? defaults.effort : null,
