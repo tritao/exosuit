@@ -87,7 +87,13 @@ class QuickPickView implements View {
 			cells.push(new KeyedView("name", new Row("cv-name-column", [new KeyedView("name", labelView)], nameStyle)));
 			cells.push(new KeyedView("path", detailView));
 		} else {
-			cells.push(new KeyedView("name", labelView));
+			if (!commands && detail.length > 0) {
+				// Keep descriptions aligned regardless of each option's label length.
+				var nameStyle = new LayoutStyle();
+				nameStyle.width = LayoutAxis.fixed(Math.max(1.0, (width - 36.0) * 0.45));
+				nameStyle.clipHorizontal = true;
+				cells.push(new KeyedView("name", new Row("cv-option-name", [new KeyedView("label", labelView)], nameStyle)));
+			} else cells.push(new KeyedView("name", labelView));
 			if (!commands && detail.length > 0) cells.push(new KeyedView("detail", detailView));
 			if (entry.trailing.length > 0) cells.push(new KeyedView("shortcut", new ShortcutKeycaps(entry.trailing, selected)));
 			if (commands && configureKeybinding != null && (selected || hovered)) {
