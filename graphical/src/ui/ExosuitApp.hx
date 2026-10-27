@@ -158,8 +158,7 @@ class ExosuitApp implements DesktopUiApplication {
 	final scmDocumentMarkerKeys:Map<Int, String> = [];
 	var scmBranchStatus:Null<plugin.PluginStatusItem>;
 	var scmPresentationSourceIdentity:Null<String>;
-	var scmBranchJob:Null<scm.ScmJob<Array<scm.ScmBranch>>>;
-	var scmBranchRequestToken:Int = 0;
+	final scmBranches:ScmBranchController;
 	var pendingScmSource:Null<ScmSource>;
 	var pendingScmRepository:Null<scm.ScmRepository>;
 	var pendingScmGroup:Null<scm.ScmGroup>;
@@ -278,6 +277,9 @@ class ExosuitApp implements DesktopUiApplication {
 			return capturedHost;
 		}, preferences, null, this.capabilities);
 		host = capturedHost;
+		scmBranches = new ScmBranchController(host, sourceControlSource, canCheckoutScmRepository,
+			activateSidebarDestination, requestFrame, function(message) application.reportError("source-control", message),
+			function() return "ui-" + Std.string(nextScmOperationId++));
 		if (hostContext != null) {
 			scmDirectoryWatch = new ScmDirectoryWatch(application.scm, hostContext.events);
 			application.onScmWatchPathsChanged = function(root, paths, excluded) {
@@ -1038,11 +1040,11 @@ class ExosuitApp implements DesktopUiApplication {
 		application.commands.add("scm:fetch", function(_) applyPendingScmRemote(scm.ScmOperation.Fetch(null)), function(_) return canUsePendingScmRemotes());
 		application.commands.add("scm:pull", function(_) applyPendingScmRemote(scm.ScmOperation.Pull), function(_) return canUsePendingScmRemotes());
 		application.commands.add("scm:push", function(_) applyPendingScmRemote(scm.ScmOperation.Push), function(_) return canUsePendingScmRemotes());
-		application.commands.add("scm:branches", function(_) openScmBranchPicker(null), function(_) return true, "Switch Git Branch…");
-		application.commands.add("scm:checkout", function(_) openScmBranchPicker(null), function(_) return canCheckoutScmRepository(null));
-		application.commands.add("scm:checkout-selected", function(_) openScmBranchPicker(pendingScmRepository), function(_) return canCheckoutScmRepository(pendingScmRepository));
-		application.commands.add("scm:create-branch", function(_) openScmCreateBranchPrompt(null), function(_) return canCheckoutScmRepository(null));
-		application.commands.add("scm:create-branch-selected", function(_) openScmCreateBranchPrompt(pendingScmRepository), function(_) return canCheckoutScmRepository(pendingScmRepository));
+		application.commands.add("scm:branches", function(_) scmBranches.open(null), function(_) return true, "Switch Git Branch…");
+		application.commands.add("scm:checkout", function(_) scmBranches.open(null), function(_) return canCheckoutScmRepository(null));
+		application.commands.add("scm:checkout-selected", function(_) scmBranches.open(pendingScmRepository), function(_) return canCheckoutScmRepository(pendingScmRepository));
+		application.commands.add("scm:create-branch", function(_) scmBranches.createPrompt(null), function(_) return canCheckoutScmRepository(null));
+		application.commands.add("scm:create-branch-selected", function(_) scmBranches.createPrompt(pendingScmRepository), function(_) return canCheckoutScmRepository(pendingScmRepository));
 		application.commands.add("scm:trust-repository", function(_) {
 			var source = pendingScmSource, repository = pendingScmRepository;
 			if (source != null && repository != null && !source.isRemote()) trustScmRepository(repository);
@@ -2027,7 +2029,7 @@ class ExosuitApp implements DesktopUiApplication {
 		layoutControls.dispose();
 		if (contextFiles != null) contextFiles.dispose();
 		if (notificationPanel != null) notificationPanel.close();
-		cancelScmBranchRequest();
+		scmBranches.cancel();
 		if (hostContext != null) hostContext.onPoll = null;
 		application.onScmWatchPathsChanged = null;
 		if (scmFocusSubscription != null) scmFocusSubscription.dispose();
@@ -3554,7 +3556,7 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function clearScmPresentation():Void {
-		cancelScmBranchRequest();
+		scmBranches.cancel();
 		for (owner in [for (value in scmDecorationOwners.keys()) value]) host.getResourceDecorations().removeOwner(owner);
 		scmDecorationOwners.clear(); scmDecorationRevisions.clear();
 		scmPresentationSourceIdentity = null;
@@ -3943,135 +3945,6 @@ class ExosuitApp implements DesktopUiApplication {
 	function isScmSourceActive(identity:String):Bool {
 		var source = sourceControlSource();
 		return source != null && source.identity() == identity;
-	}
-
-	function cancelScmBranchRequest():Void {
-		scmBranchRequestToken++;
-		if (scmBranchJob != null) scmBranchJob.cancel();
-		scmBranchJob = null;
-	}
-
-	function showScmBranchUnavailable(reason:String, label:String = "Branch switching unavailable"):Void {
-		cancelScmBranchRequest();
-		var entry = new commandview.CommandViewEntry(label, reason, "@unavailable");
-		entry.enabled = false;
-		host.openCommandView(new commandview.CommandViewProvider("Switch Branch: ", [entry], function(_) {}, function(_, _, _) {}, function() cancelScmBranchRequest()));
-		requestFrame();
-	}
-
-	function openScmBranchPicker(repository:Null<scm.ScmRepository>):Void {
-		var source = sourceControlSource();
-		if (source == null) { showScmBranchUnavailable("No source control repository is available."); return; }
-		var target = repository;
-		if (target == null) {
-			var repositories = source.repositories();
-			target = repositories.length == 0 ? null : repositories[0];
-		}
-		if (target == null) { showScmBranchUnavailable("Repository discovery is still in progress."); return; }
-		if (!source.connected()) { showScmBranchUnavailable("Reconnect the workspace to switch branches."); return; }
-		var error = source.error(target.id);
-		if (!canCheckoutScmRepository(target)) {
-			var features = source.features(target.id);
-			showScmBranchUnavailable(error != null ? error.message : !target.trusted ? "Trust this repository before switching branches." :
-				features == null ? "Repository capabilities are still loading." : !features.branches ? "This source control provider does not support branch switching." :
-				"Branch switching is unavailable with the current repository permissions.");
-			return;
-		}
-		var selectedRepository:scm.ScmRepository = cast target;
-		showScmBranchUnavailable("Reading repository branches.", "Loading branches…");
-		var token = scmBranchRequestToken;
-		var identity = source.identity();
-		requestFrame();
-		var job = source.branches(selectedRepository.id, function(result) {
-			if (token != scmBranchRequestToken || !isScmSourceActive(identity)) return;
-			scmBranchJob = null;
-			if (result.error != null) {
-				showScmBranchUnavailable(result.error.message);
-				requestFrame();
-				return;
-			}
-			showScmBranchPicker(source, selectedRepository, result.value == null ? [] : result.value);
-		});
-		if (!job.complete && !job.cancelled) scmBranchJob = job;
-	}
-
-	function showScmBranchPicker(source:ScmSource, repository:scm.ScmRepository, branches:Array<scm.ScmBranch>):Void {
-		var entries:Array<commandview.CommandViewEntry> = [
-			new commandview.CommandViewEntry("Create Branch…", "Create a branch from the current HEAD", "@create", null,
-				"create branch new", "Actions"),
-			new commandview.CommandViewEntry("Open Source Control", "Show repository changes", "@source-control", null,
-				"open changes repository source control", "Actions")
-		];
-		for (branch in branches) {
-			var section = branch.remote ? "Remote Branches" : "Local Branches";
-			var detail = branch.current ? "Current branch" : branch.remote ? "Remote branch" : "Local branch";
-			entries.push(new commandview.CommandViewEntry(branch.name, detail, branch.reference, null,
-				branch.name + " " + branch.reference + " " + detail, section));
-		}
-		var valid = function() return isScmSourceActive(source.identity())
-			&& canCheckoutScmRepository(repository);
-		host.openCommandView(new commandview.CommandViewProvider("Switch Branch: ", entries, function(_) {}, function(entry, _, _) {
-			if (!valid()) { host.closeCommandView(); return; }
-			host.closeCommandView();
-			if (entry == null) return;
-			if (entry.value == "@create") openScmCreateBranchPrompt(repository);
-			else if (entry.value == "@source-control") activateSidebarDestination("scm");
-			else checkoutScmBranch(source, repository, entry.value);
-		}, function() cancelScmBranchRequest()));
-	}
-
-	function openScmCreateBranchPrompt(repository:Null<scm.ScmRepository>):Void {
-		var source = sourceControlSource();
-		if (source == null) return;
-		var target = repository;
-		if (target == null) {
-			var repositories = source.repositories();
-			target = repositories.length == 0 ? null : repositories[0];
-		}
-		if (target == null || !canCheckoutScmRepository(target)) return;
-		var selectedRepository:scm.ScmRepository = cast target;
-		var identity = source.identity();
-		var selected = selectedRepository;
-		host.openCommandView(new commandview.CommandViewProvider("New Branch: ", [], function(_) {}, function(_, name, _) {
-			host.closeCommandView();
-			if (!isScmSourceActive(identity)) return;
-			createScmBranch(source, selected, name);
-		}, function() {}));
-	}
-
-	function checkoutScmBranch(source:ScmSource, repository:scm.ScmRepository, reference:String):Void {
-		applyScmBranchOperation(source, repository, scm.ScmOperation.Checkout(reference), "Switched branch");
-	}
-
-	function createScmBranch(source:ScmSource, repository:scm.ScmRepository, name:String):Void {
-		var branch = StringTools.trim(name);
-		if (branch.length == 0) {
-			application.reportError("source-control", "Enter a branch name");
-			return;
-		}
-		applyScmBranchOperation(source, repository, scm.ScmOperation.CreateBranch(branch), "Created branch " + branch);
-	}
-
-	function applyScmBranchOperation(source:ScmSource, repository:scm.ScmRepository, operation:scm.ScmOperation, label:String):Void {
-		if (!isScmSourceActive(source.identity()) || !canCheckoutScmRepository(repository)) return;
-		var snapshot = source.snapshot(repository.id);
-		if (snapshot == null) {
-			application.reportError("source-control", "Refresh the repository before changing branches");
-			return;
-		}
-		host.getNotifications().publish(label + " in progress…", feedback.NotificationKind.Information, "source-control");
-		var operationId = "ui-" + Std.string(nextScmOperationId++);
-		source.apply(repository.id, operationId, snapshot.revision, operation, function(result) {
-			if (result.error != null) {
-				host.getNotifications().publish("Branch operation failed: " + result.error.message,
-					feedback.NotificationKind.Error, "source-control");
-				application.reportError("source-control", result.error.message);
-			} else {
-				host.getNotifications().publish(label, feedback.NotificationKind.Information, "source-control");
-				source.refreshNow(repository.id);
-			}
-			requestFrame();
-		});
 	}
 
 	function canUsePendingScmRemotes():Bool {
@@ -4541,7 +4414,7 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function clearLocalScmSource():Void {
 		if (localScmSource == null) return;
-		cancelScmBranchRequest();
+		scmBranches.cancel();
 		localScmSource.dispose();
 		localScmSource = null;
 	}
