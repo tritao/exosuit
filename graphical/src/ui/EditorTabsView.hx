@@ -1,5 +1,7 @@
 package ui;
 
+import config.Settings;
+
 import haxeon.ui.widgets.overlays.TooltipHoverGroup;
 
 import haxeon.ui.widgets.overlays.TooltipPlacement;
@@ -35,7 +37,7 @@ class EditorTabsView implements View {
 	final decorationRevision:Int;
 	final tooltips:Map<String, String>;
 
-	public function new(tabs:Tabs, filenames:Map<String, String>, dark:Bool, tooltipDelay:Float = config.Settings.DEFAULT_TOOLTIP_DELAY,
+	public function new(tabs:Tabs, filenames:Map<String, String>, dark:Bool, tooltipDelay:Float = Settings.DEFAULT_TOOLTIP_DELAY,
 			?tabColors:Map<String, Color>, decorationRevision:Int = 0, ?tooltips:Map<String, String>) {
 		this.tooltips = tooltips == null ? new Map() : tooltips;
 		this.tabs = tabs;
