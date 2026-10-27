@@ -82,6 +82,40 @@ def main():
                 if not initial_visibility:
                     click(original)
                     wait(lambda s: not s['sidebarVisible'], 'Could not restore sidebar visibility')
+                if os.environ.get("EXOSUIT_MENU_TERMINAL"):
+                    wait(lambda s: any(n["key"] == "terminal-pane" for n in s["nodes"]), "Terminal did not open")
+                    for cycle in range(20 if os.environ.get("EXOSUIT_MENU_BUSY") else 4):
+                        terminal = next(n for n in state["nodes"] if n["key"] == "terminal-pane")
+                        click(terminal)
+                        wait(lambda s: s["focusKey"] == "terminal-pane", "Terminal did not receive focus")
+                        if cycle == 0 and os.environ.get("EXOSUIT_MENU_BUSY"):
+                            command = "printf '\\033[?1000h\\033[?1006h\\033[?1004h'; while :; do printf 'redraw\\r\\n'; sleep 0.01; done"
+                            xdo("type", "--clearmodifiers", "--delay", 1, command)
+                            xdo("key", "Return")
+                            time.sleep(.2)
+                        layout = next(n for n in state["nodes"] if n["key"] == "layout-menu")
+                        xdo("mousemove", "--window", window, int(layout["x"] + layout["width"] / 2), int(layout["y"] + layout["height"] / 2))
+                        before = fixture / "before-menu.png"
+                        after = fixture / "after-menu.png"
+                        subprocess.run(["import", "-window", window, str(before)], check=True)
+                        if cycle % 2:
+                            xdo("mousedown", 1)
+                            time.sleep(.15)
+                            xdo("mouseup", 1)
+                        else:
+                            xdo("click", 1)
+                        wait(lambda s: s["menuOpen"] and any(n["key"] == "view.layout-bottom" for n in s["nodes"]), "First Layout click failed after terminal focus")
+                        time.sleep(.08)
+                        subprocess.run(["import", "-window", window, str(after)], check=True)
+                        from PIL import Image, ImageChops
+                        item = next(n for n in state["nodes"] if n["key"] == "view.layout-bottom")
+                        box = (int(item["x"]), int(item["y"]), int(item["x"] + item["width"]), int(item["y"] + item["height"]))
+                        with Image.open(before) as before_image, Image.open(after) as after_image:
+                            assert ImageChops.difference(before_image.convert("RGB").crop(box), after_image.convert("RGB").crop(box)).getbbox(), "Layout exists in UI state but was not painted"
+                        xdo("key", "Escape")
+                        wait(lambda s: not s["menuOpen"], "Escape did not close Layout")
+                    print("PASS: first Layout click after terminal focus (" + os.environ["EXOSUIT_MENU_TERMINAL"] + ")")
+                    return
                 for cycle in range(3):
                     click(gear)
                     wait(lambda s: s["menuOpen"] and s["focusLabel"] == "Menu", "Mouse menu retained a selection")
