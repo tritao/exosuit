@@ -433,7 +433,6 @@ class TerminalPane implements AgentTerminalPanel {
 		fill.height = LayoutAxis.grow();
 		var backdrop = new CanvasView("terminal-backdrop", function(canvas:Canvas, geometry) {
 			canvas.fillRectIfPositive(new Rect(0.0, 0.0, geometry.width, geometry.height), background);
-			if (focused) canvas.fillRectIfPositive(new Rect(0.0, 0.0, geometry.width, 2.0), palette.cursor);
 		}, fill, "Terminal", true);
 		var layers:Array<StackChild> = [new StackChild("background", backdrop, 0.0, 0.0, 0,
 			LayoutAxis.grow(), LayoutAxis.grow())];
