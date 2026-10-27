@@ -13,18 +13,23 @@ class LocalScmSource implements ScmSource {
 	/** Scope decisions per repository root; resolving paths costs file-system calls and the app asks on every poll. */
 	final scopes:Map<String, Bool> = [];
 	var scopeEpoch:Int = 0;
+	/** Whether a root inside a repository shows only that folder's changes. */
+	final narrow:Bool;
+	final narrowed:Map<String, {var source:ScmSnapshot; var result:ScmSnapshot;}> = [];
 	var nextGeneration:Int = 1;
 	var disposed:Bool = false;
 
-	public function new(service:ScmService, root:String, ?roots:Array<String>) {
+	public function new(service:ScmService, root:String, ?roots:Array<String>, narrow:Bool = false) {
 		if (service == null || root == null || root.length == 0)
 			throw "Local SCM source requires a service and root";
 		this.service = service;
 		this.root = normalize(root);
 		this.roots = roots == null ? [this.root] : [for (path in roots) normalize(path)];
-		this.sourceIdentity = identityFor(this.roots);
+		this.narrow = narrow;
+		this.sourceIdentity = identityFor(this.roots, narrow);
 	}
-	public static function identityFor(roots:Array<String>):String return "local:" + [for (root in roots) key(normalize(root))].join("|");
+	public static function identityFor(roots:Array<String>, narrow:Bool = false):String
+		return "local:" + [for (root in roots) key(normalize(root))].join("|") + (narrow ? "|narrow" : "");
 
 	public function identity():String return sourceIdentity;
 	public function isRemote():Bool return false;
@@ -51,7 +56,10 @@ class LocalScmSource implements ScmSource {
 		var repository = scopedRepository(repositoryId), value = repository == null ? null : service.features(repositoryId);
 		return !disposed && repository != null && repository.trusted && value != null && value.remotes;
 	}
-	public function snapshot(repositoryId:String):Null<ScmSnapshot> return scopedRepository(repositoryId) == null ? null : service.snapshot(repositoryId);
+	public function snapshot(repositoryId:String):Null<ScmSnapshot> {
+		var repository = scopedRepository(repositoryId);
+		return repository == null ? null : narrowedSnapshot(repository, service.snapshot(repositoryId));
+	}
 	public function error(repositoryId:String):Null<ScmError> return disposed ? new ScmError("service_closed", "Source control source is closed")
 		: scopedRepository(repositoryId) == null ? new ScmError("not_found", "Repository is outside this workspace root") : service.error(repositoryId);
 
@@ -104,7 +112,7 @@ class LocalScmSource implements ScmSource {
 	public function subscribe(listener:(ScmRepository, Null<ScmSnapshot>)->Void):Void->Void {
 		if (disposed || listener == null) return function() {};
 		var cancel = service.subscribe(function(repository, snapshot) {
-			if (!disposed && inScope(repository.root)) listener(repository, snapshot);
+			if (!disposed && inScope(repository.root)) listener(repository, narrowedSnapshot(repository, snapshot));
 		});
 		subscriptions.push(cancel);
 		return function() {
@@ -135,6 +143,43 @@ class LocalScmSource implements ScmSource {
 		for (root in roots) if (within(root, repositoryRoot) || within(repositoryRoot, root)) { value = true; break; }
 		scopes.set(repositoryRoot, value);
 		return value;
+	}
+
+	/** The repository-relative folders this source narrows a repository to; null shows the whole repository. */
+	function prefixes(repository:ScmRepository):Null<Array<String>> {
+		var result:Array<String> = [], repositoryRoot = normalize(repository.root);
+		for (root in roots) {
+			if (!within(repositoryRoot, root)) continue;
+			if (key(root) == key(repositoryRoot)) return null;
+			result.push(root.substring(repositoryRoot.length + (StringTools.endsWith(repositoryRoot, "/") ? 0 : 1)) + "/");
+		}
+		return result.length == 0 ? null : result;
+	}
+
+	function narrowedSnapshot(repository:ScmRepository, snapshot:Null<ScmSnapshot>):Null<ScmSnapshot> {
+		if (!narrow || snapshot == null) return snapshot;
+		var cached = narrowed.get(repository.id);
+		if (cached != null && cached.source == snapshot) return cached.result;
+		var folders = prefixes(repository);
+		var result = folders == null ? snapshot : narrowSnapshot(snapshot, folders);
+		narrowed.set(repository.id, {source: snapshot, result: result});
+		return result;
+	}
+
+	/** Keeps the changes under any of the repository-relative folders (each ending in `/`); empty groups are dropped. */
+	public static function narrowSnapshot(snapshot:ScmSnapshot, folders:Array<String>):ScmSnapshot {
+		var inside = function(path:Null<String>):Bool {
+			if (path == null) return false;
+			var value = key(path);
+			for (folder in folders) if (StringTools.startsWith(value, key(folder))) return true;
+			return false;
+		};
+		var groups:Array<ScmGroup> = [];
+		for (group in snapshot.groups) {
+			var kept = [for (resource in group.resources) if (inside(resource.path) || inside(resource.originalPath)) resource];
+			if (kept.length > 0) groups.push(new ScmGroup(group.id, kept, false));
+		}
+		return new ScmSnapshot(snapshot.revision, snapshot.head, groups, snapshot.truncated);
 	}
 
 	function failed<T>(value:Null<T>, complete:ScmJobResult<T>->Void, code:String, message:String):ScmJob<T> {

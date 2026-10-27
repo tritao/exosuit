@@ -70,6 +70,7 @@ import ui.BuildOutputPanel;
 import ui.ProblemsPanel;
 import ui.UiDocumentView;
 import ui.UiWorkbenchHost;
+import editor.BufferPosition;
 import workspace.service.WorkspaceFileProtocol.FileSearchMatch;
 import controller.WorkspaceFileSearchController;
 import scm.LocalScmSource;
@@ -132,6 +133,12 @@ class ExosuitApp implements DesktopUiApplication {
 	final layoutControls:WorkbenchLayoutControls;
 	final layoutModes:WorkbenchLayoutModes;
 	var contextFiles:Null<ContextFilesView>;
+	/** The Workbench group the Agents layout's right panel works in; it stays when the selection has no folder. */
+	var agentScope:Null<AgentScope>;
+	var agentScopeSource:String = "";
+	var agentScopeDirectory:String = "";
+	var contextTab:String = "context-files";
+	var scopedSearch:Null<ScopedSearchPanel>;
 	var contextLayoutsReady:Bool = false;
 	var dockPanelContents:Array<DockPanelContent>;
 	final editorPanes:Map<Int, EditorPane> = new Map();
@@ -562,6 +569,7 @@ class ExosuitApp implements DesktopUiApplication {
 	function openExplorer():Bool return showSidebarMode("files");
 
 	public function showSidebarMode(id:String):Bool {
+		if (layoutModes.hides(id)) return showContextTab(id);
 		if (!sidebar.select(id)) return false;
 		layoutModes.markLeft();
 		if (!dock.isOpen("explorer")) return false;
@@ -1255,6 +1263,7 @@ class ExosuitApp implements DesktopUiApplication {
 		var activityBar = new ActivityBar(sidebar, activityIcons, activateSidebarDestination,
 			application.settings.current.tabTooltipDelay, showManageMenu, manageMenu != null && contextMenu == manageMenu);
 		activityBar.onContextMenu = showActivityBarMenu;
+		activityBar.hiddenIds = [for (id in layoutModes.current.hiddenDestinations) if (layoutModes.hides(id)) id];
 		var workspace:View = new Row("workspace-with-activity-bar", [
 			new KeyedView("activity-bar", activityBar),
 			new KeyedView("workspace:" + host.layoutContextKey, workspaceView)
@@ -1487,6 +1496,7 @@ class ExosuitApp implements DesktopUiApplication {
 		layoutModes.setServiceAvailable(false);
 		host.onActiveTabChanged = null;
 		workbenchPanel = null;
+		agentScope = null;
 		agentAttach = null;
 		agentRevision = -1;
 		requestFrame();
@@ -1949,6 +1959,7 @@ class ExosuitApp implements DesktopUiApplication {
 		}
 		if (host.syncSideBySidePanes()) requestFrame();
 		if (contextFiles != null && dock.isOpen("context-panel")) contextFiles.poll(now);
+		if (scopedSearch != null) scopedSearch.update(now);
 		pumpApplication();
 		syncScmDocumentMarkers(now);
 		if (now >= nextScmPoll) {
@@ -2138,6 +2149,7 @@ class ExosuitApp implements DesktopUiApplication {
 		layoutModes.dispose();
 		layoutControls.dispose();
 		if (contextFiles != null) contextFiles.dispose();
+		if (scopedSearch != null) scopedSearch.dispose();
 		if (notificationPanel != null) notificationPanel.close();
 		scmBranches.cancel();
 		if (hostContext != null) hostContext.onPoll = null;
@@ -2340,7 +2352,7 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function contextPanel():View {
-		if (contextFiles == null) contextFiles = new ContextFilesView(function() return application.activeContext.roots,
+		if (contextFiles == null) contextFiles = new ContextFilesView(contextRoots,
 			function() return workspaceAttachment == null ? "local" : workspaceAttachment.fileWorkspace() + ":" + workspaceAttachment.fileScope(),
 			function(roots) {
 				var attachment = workspaceAttachment;
@@ -2364,13 +2376,91 @@ class ExosuitApp implements DesktopUiApplication {
 					else if (!local.isDirectoryPath(path)) application.openInBackground(path, !pin, pin);
 				}
 			}, host, requestFrame, function() return darkPalette, hostContext == null ? null : hostContext.events);
+		if (scopedSearch == null) scopedSearch = new ScopedSearchPanel(application.workspace, function() {
+			var scope = contextScope(); return scope == null ? null : scope.directory;
+		}, openScopedSearchResult, requestFrame, function() return application.settings.current.searchMaxResults);
+		var scope = contextScope();
 		var style = fillStyle(); style.childGap = 4;
-		var captionStyle = new LayoutStyle(); captionStyle.padding = new Insets(10, 6, 10, 0);
+		var captionStyle = new LayoutStyle(); captionStyle.padding = new Insets(10, 6, 10, 0); captionStyle.width = LayoutAxis.grow();
+		var caption = scope == null ? application.activeContext.label : scope.caption();
+		// Search here follows the scope; outside the Agents layout it is the workspace's Search, unless the sidebar shows it.
+		var searchContent:View = scope != null ? scopedSearch : sidebar.visible && sidebar.activeId == "search"
+			? new Text("Search is open in the sidebar.", null, theme.tokens.textSecondary, TextStyleOverride.text(12)) : searchPanel;
+		// Labels give way to icons when the panel is too narrow for all three.
+		var compact = dock.isOpen("context-panel") && contextPanelWidth() < 230;
+		var tab = function(key:String, label:String, icon:IconName, content:View):TabItem
+			return new TabItem(key, label, content, true, icon, compact ? "" : null);
+		var tabs = new Tabs("context-panel-tabs", [tab("context-files", "Files", IconName.FolderOpen, contextFiles),
+			tab("context-search", "Search", IconName.Search, searchContent),
+			tab("context-changes", "Changes", IconName.Hierarchy, sourceControlPanel())], contextTab,
+			function(next) { contextTab = next; requestFrame(); }, fillStyle(), null, null, null, null, TabsSelectionMode.Controlled);
 		return new Column("context-panel-content", [
-			new KeyedView("scope", new Text(application.activeContext.label, captionStyle, theme.tokens.textSecondary, TextStyleOverride.text(12))),
-			new KeyedView("tabs", new Tabs("context-panel-tabs", [new TabItem("context-files", "Files", contextFiles),
-				new TabItem("context-changes", "Changes", sourceControlPanel())], "context-files", function(_) requestFrame(), fillStyle()))
+			new KeyedView("scope", new Column("context-panel-scope", [new KeyedView("caption",
+				new haxeon.ui.widgets.text.MiddleEllipsisText("context-panel-scope-text", caption, true,
+					new TextStyleOverride(null, 12, null, haxeon.ui.TextWrap.None, null, null, null, theme.tokens.textSecondary)))], captionStyle)),
+			new KeyedView("tabs", tabs)
 		], style);
+	}
+
+	/** Folders the right panel's Files and Changes show: the Agents scope's folder, else the active context's roots. */
+	function contextRoots():Array<String> {
+		var scope = contextScope();
+		return scope == null ? application.activeContext.roots : [scope.directory];
+	}
+
+	/**
+		The right panel's scope in the Agents layout (see AgentScope.resolve). Null outside that layout and for a workspace
+		without local file access, whose file and search services cannot narrow to a folder yet; the panel then shows the
+		active context as before.
+	**/
+	function contextScope():Null<AgentScope> {
+		var panel = workbenchPanel;
+		if (layoutModes.current != LayoutMode.Agents || panel == null) return null;
+		if (workspaceAttachment != null && !workspaceAttachment.hasLocalFileAccess()) return null;
+		var next = AgentScope.resolve(panel.model, panel.tree.selectedKey, agentScope);
+		if (next == null) return null;
+		if (next.directory != agentScopeSource) {
+			agentScopeSource = next.directory;
+			agentScopeDirectory = next.directory;
+			try agentScopeDirectory = application.workspace.fileSystem.normalize(next.directory) catch (_:Dynamic) {}
+		}
+		var scoped = new AgentScope(next.groupId, next.label, agentScopeDirectory);
+		if (!scoped.equals(agentScope)) agentScope = scoped;
+		return agentScope;
+	}
+
+	/** The right panel's approximate width, from the split ratios on its path (dividers ignored). */
+	function contextPanelWidth():Float return panelWidth(dock.root, Math.max(0, viewportWidth - ActivityBar.WIDTH), "context-panel");
+
+	static function panelWidth(node:DockNode, available:Float, id:String):Float {
+		return switch node {
+			case Split(axis, ratio, first, second):
+				var inFirst = haxeon.ui.docking.DockNodeTools.contains(first, id);
+				var share = axis == DockSplitAxis.Horizontal ? (inFirst ? ratio : 1 - ratio) : 1.0;
+				panelWidth(inFirst ? first : second, available * share, id);
+			case _: available;
+		};
+	}
+
+	/** In the Agents layout the rail's Files, Search and Source Control open the right panel's tab instead. */
+	function showContextTab(destination:String):Bool {
+		contextTab = destination == "search" ? "context-search" : destination == "scm" ? "context-changes" : "context-files";
+		if (!layoutControls.rightOpen()) layoutControls.toggleRight();
+		if (destination == "search") {
+			if (contextScope() == null) searchPanel.focusQuery = true;
+			else if (scopedSearch != null) scopedSearch.focusQuery = true;
+		}
+		dock.activate("context-panel");
+		requestFrame();
+		return true;
+	}
+
+	function openScopedSearchResult(match:search.SearchMatch):Void {
+		var document = application.workspace.documents.open(match.path);
+		if (!search.DocumentSearch.valid(document, match)) { if (scopedSearch != null) scopedSearch.rerun(); return; }
+		var view = host.openDocument(document);
+		view.selectRange(new BufferPosition(match.line, match.column), new BufferPosition(match.line, match.column + match.length));
+		view.cursorChanged(); requestFrame();
 	}
 
 	function layoutShortcut(command:String):String return [for (shortcut in ui.commands.shortcutsFor(command)) shortcut.label()].join(", ");
@@ -3076,6 +3166,7 @@ class ExosuitApp implements DesktopUiApplication {
 
 	public function activateSidebarDestination(id:String):Void {
 		if (sidebar.find(id) == null) return;
+		if (layoutModes.hides(id)) { showContextTab(id); return; }
 		if (dock.isOpen("explorer") && sidebar.activeId == id) sidebar.setVisible(false);
 		else showSidebarMode(id);
 	}
@@ -3418,7 +3509,7 @@ class ExosuitApp implements DesktopUiApplication {
 		leading entry that hides it. The last visible destination cannot be hidden. */
 	function activityBarItems(id:Null<String>):Array<haxeon.ui.widgets.overlays.MenuItem> {
 		var shown = 0;
-		for (mode in sidebar.modes) if (mode.visible) shown++;
+		for (mode in sidebar.modes) if (mode.visible && !modeHidesDestination(mode.id)) shown++;
 		var items:Array<haxeon.ui.widgets.overlays.MenuItem> = [];
 		var target = id == null ? null : sidebar.find(id);
 		if (target != null && target.visible) {
@@ -3428,6 +3519,8 @@ class ExosuitApp implements DesktopUiApplication {
 		}
 		var first = true;
 		for (mode in sidebar.modes) {
+			// The layout mode hides these regardless of the user's choice, so they are not offered here.
+			if (modeHidesDestination(mode.id)) continue;
 			var modeId = mode.id, visible = mode.visible;
 			items.push(new haxeon.ui.widgets.overlays.MenuItem("activity-toggle:" + modeId,
 				(visible ? "Hide " : "Show ") + mode.label, function() setActivityVisible(modeId, !visible),
@@ -3439,9 +3532,12 @@ class ExosuitApp implements DesktopUiApplication {
 		return items;
 	}
 
+	function modeHidesDestination(id:String):Bool
+		return layoutModes.hides(id);
+
 	function setActivityVisible(id:String, visible:Bool):Void {
 		var shown = 0;
-		for (mode in sidebar.modes) if (mode.visible) shown++;
+		for (mode in sidebar.modes) if (mode.visible && !modeHidesDestination(mode.id)) shown++;
 		var mode = sidebar.find(id);
 		if (mode == null || mode.visible == visible || (!visible && shown <= 1)) return;
 		sidebar.setModeVisible(id, visible);
@@ -3636,17 +3732,21 @@ class ExosuitApp implements DesktopUiApplication {
 			clearLocalScmSource();
 			return workspaceAttachment.sourceControlSource();
 		}
-		if (!capabilities.supports(HostCapability.SourceControl) || explorerRoot == null) {
+		if (!capabilities.supports(HostCapability.SourceControl) || explorerRoot == null && contextScope() == null) {
 			clearLocalScmSource();
 			return null;
 		}
-		var roots = [for (root in application.activeContext.roots) if (controller.SavedWorkspaceController.available(root)) root];
+		var scope = contextScope(), narrow = scope != null;
+		var roots = [for (root in contextRoots()) if (controller.SavedWorkspaceController.available(root)) root];
 		if (roots.length == 0) { clearLocalScmSource(); return null; }
-		var rootsKey = haxe.Json.stringify(roots);
-		if (localScmRootKey != rootsKey) { localScmRootKey = rootsKey; localScmIdentity = LocalScmSource.identityFor(roots); }
+		var rootsKey = haxe.Json.stringify(roots) + (narrow ? ":narrow" : "");
+		if (localScmRootKey != rootsKey) { localScmRootKey = rootsKey; localScmIdentity = LocalScmSource.identityFor(roots, narrow); }
 		if (localScmSource == null || localScmSource.identity() != localScmIdentity) {
 			clearLocalScmSource();
-			localScmSource = new LocalScmSource(application.scm, roots[0], roots);
+			localScmSource = new LocalScmSource(application.scm, roots[0], roots, narrow);
+			// A group folder may be any folder: outside the workspace, its own repository, or none. Discover it unless a
+			// discovered root already covers it, which would only duplicate that root's polling.
+			if (narrow && application.scm.repositories(roots[0]).length == 0) application.scm.discover(roots[0], _ -> requestFrame());
 		}
 		return localScmSource;
 	}
@@ -3673,7 +3773,7 @@ class ExosuitApp implements DesktopUiApplication {
 		var source = sourceControlSource();
 		if (source == null) {
 			clearSourceControlPanel();
-			return new Text(explorerRoot == null ? "Open a folder to view source control" : "Source control access is unavailable",
+			return new Text(explorerRoot == null && contextScope() == null ? "Open a folder to view source control" : "Source control access is unavailable",
 				null, theme.tokens.textSecondary, new TextStyleOverride(null, 13.0, null, haxeon.ui.TextWrap.WordCharacter));
 		}
 		if (sourceControlPanelValue == null || sourceControlPanelIdentity != source.identity()) {

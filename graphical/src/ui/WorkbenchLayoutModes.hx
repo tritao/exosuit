@@ -81,6 +81,11 @@ class WorkbenchLayoutModes {
 		var mode = LayoutMode.find(id); if (mode == null) return;
 		current = mode; apply(); changed();
 	}
+	/** Whether the current mode leaves a destination off the rail; only once its own default destination exists. */
+	public function hides(destination:Null<String>):Bool {
+		var own = sidebar.find(current.selectedSidebar);
+		return current.hides(destination) && own != null && own.visible;
+	}
 	public function refreshContext():Void { if (ready) { apply(); changed(); } }
 	public function refreshSidebar():Void { if (ready) { apply(); changed(); } }
 	/** The preset supplies the default order; a user's Activity Bar order still wins. */
@@ -94,10 +99,12 @@ class WorkbenchLayoutModes {
 	}
 	function apply():Void {
 		suspend(); beforeApply(); orderSidebar();
-		if (!leftChanged) {
+		if (!leftChanged || hides(sidebar.activeId)) {
 			var selected = sidebar.find(current.selectedSidebar);
 			if (selected == null || !selected.visible) selected = sidebar.find("files");
-			if (selected != null && selected.visible) sidebar.select(selected.id);
+			if (selected != null && selected.visible && !hides(selected.id)) sidebar.select(selected.id);
+		}
+		if (!leftChanged) {
 			sidebar.setVisible(current.left);
 			if (current.left && !dock.isOpen("explorer")) dock.dock("explorer", DockNodeTools.firstPanel(dock.root), haxeon.ui.docking.DockDropZone.Left);
 			else if (!current.left && dock.isOpen("explorer")) dock.close("explorer");
