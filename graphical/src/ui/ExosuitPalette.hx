@@ -48,11 +48,7 @@ class ExosuitPalette {
 		result.styles.rule(StyleSelector.widget("split-divider"), [
 			StyleValue.background(hex(dark ? WorkbenchColors.darkDivider : WorkbenchColors.lightDivider))
 		]);
-		result.styles.rule(StyleSelector.widget("button").className("tab-header"), [
-			StyleValue.fontSize(WORKBENCH_TEXT_SIZE),
-			// Smaller labels retain the existing tab target height.
-			StyleValue.height(haxeon.ui.LayoutAxis.fit(34))
-		]);
+
 		// Status actions meet the window edge: explicit zero radii override button defaults.
 		result.styles.rule(StyleSelector.widget("button").className("status-remote"), [
 			StyleValue.background(tokens.surfaceRaised),

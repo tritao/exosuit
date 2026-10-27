@@ -79,7 +79,7 @@ class EditorTabsView implements View {
 				});
 			};
 			var memo = context.state(context.id("tab-labels"), new Map<String, String>()).value;
-			var typography = context.resolveTextRole(TextRole.Button, new TextStyleOverride(null, ExosuitPalette.WORKBENCH_TEXT_SIZE, null, TextWrap.None));
+			var typography = context.resolveTextRole(TextRole.Button, new TextStyleOverride(null, context.theme.tokens.tabHeaderFontSize, null, TextWrap.None));
 			var widths = context.state(context.id("tab-natural-widths"), new Map<String, Float>()).value;
 			var naturalWidths:Array<Float> = [];
 			var chrome = Math.max(0, tabs.items.length - 1) * 4.0;
@@ -168,7 +168,7 @@ class EditorTabsView implements View {
 		}
 		var style = new LayoutStyle();
 		style.width = LayoutAxis.grow();
-		style.height = LayoutAxis.fixed(40);
+		style.height = LayoutAxis.fixed(context.theme.tokens.tabHeaderHeight);
 		var scroll = new ScrollView("editor-tab-scroll", new BuiltTabView(strip), style, ScrollAxis.Horizontal, state.controller);
 		scroll.showScrollbar = false;
 		scroll.onScroll = function(event) {
