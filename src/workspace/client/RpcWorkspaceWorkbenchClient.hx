@@ -28,6 +28,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   var catalogMutation:Bool = false;
   var catalogNext:Float = 0;
   var catalogKey:String = "";
+  var observedTerminalCreation:Int = 0;
 
   var agentCatalog:Null<WorkspaceAgentProtocol.AgentCatalog>;
   var agentViews:Map<String, WorkspaceAgentProtocol.AgentView> = [];
@@ -77,6 +78,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       catalogMutation = false;
       catalogNext = 0;
       catalogKey = "";
+      observedTerminalCreation = 0;
       catalogRevision++;
       agentsPending = false;
       agentsRequestToken++;
@@ -99,6 +101,13 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
         catalogError = "Workspace connection changed; refresh terminal sessions";
         agentsError = "Workspace connection changed; reconcile agents before retrying";
       }
+    }
+    var terminalEvents = current == null ? null : endpoint.terminalEvents();
+    if (terminalEvents != null && terminalEvents.catalogRevision != observedTerminalCreation && !catalogPending) {
+      // Leave an invalidation unconsumed while a paged catalog read is in flight.
+      // Its snapshot may predate creation; fetch again as soon as it completes.
+      observedTerminalCreation = terminalEvents.catalogRevision;
+      refreshTerminals(true);
     }
     continueDiscovery();
     continueAgentCreate();

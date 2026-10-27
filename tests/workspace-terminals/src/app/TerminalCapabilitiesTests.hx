@@ -44,6 +44,56 @@ class TerminalCapabilitiesTests {
     endpoint.connection = null;
     require(!client.canReadTerminals() && !client.canControlTerminals() && !client.canCreateTerminals(), "Disconnected device retained terminal actions");
     connection.close();
+    creationCatalog(false);
+    creationCatalog(true);
     Sys.println("PASS: remote terminal availability, read-only grants, group permissions and disconnect");
+  }
+  static function creationCatalog(holdInitial:Bool):Void {
+    var pair=MemoryTransport.pair(), connection=new RpcConnection(pair.client,() -> 0.0);
+    var server=new RpcConnection(pair.server,() -> 0.0), endpoint=new CapabilityEndpoint(connection);
+    endpoint.grants=[WorkspaceTerminalProtocol.READ,WorkspaceTerminalProtocol.CONTROL,WorkspaceTerminalProtocol.CATALOG];
+    var client=new RpcWorkspaceWorkbenchClient(endpoint,() -> 0.0);
+    var lists=0, opened=false;
+    var release:Void->Void=function() throw "Missing held catalog response";
+    server.register(WorkspaceTerminalProtocol.LIST,function(_,context) {
+      lists++;
+      var records:Array<WorkspaceTerminalProtocol.TerminalRecord>=opened ? [{id:"created",name:"Terminal 1",group:"work",cwd:"/fixture",
+        workspaceRoot:"/fixture",instance:"fixture",state:"running",exitCode:0,available:true,revision:1}] : [];
+      var snapshot:WorkspaceTerminalProtocol.TerminalCatalog={instance:"fixture",workspaceRoot:"/fixture",groups:[],terminals:records,next:null};
+      if (holdInitial && lists==1) release=function() context.respond(snapshot);
+      else context.respond(snapshot);
+    });
+    server.register(WorkspaceTerminalProtocol.OPEN,function(request,context) {
+      if (request.id=="failed") { context.fail({code:"terminal_spawn_failed",message:"fixture failure",ambiguous:false});return; }
+      opened=true;
+      context.respond({id:request.id,cwd:"/fixture",state:"running",exitCode:0,columns:80,rows:24,start:0,end:0});
+    });
+    var step=function() { connection.poll();server.poll();connection.poll();client.poll(); };
+    client.poll();client.refreshTerminals(false);
+    for (_ in 0...5) step();
+    require(lists==1,"Initial terminal catalog was not requested");
+    var backend=new workspace.client.RpcTerminalBackend(() -> endpoint,"created","/fixture",true);
+    backend.pollEvents(function(_) {});
+    for (_ in 0...5) step();
+    if (holdInitial) {
+      require(lists==1,"Creation started an overlapping catalog request");
+      release();for (_ in 0...5) step();
+    }
+    var catalog=client.terminalCatalog();
+    require(lists==2 && catalog!=null && catalog.terminals.length==1,
+      "Confirmed creation waited for the periodic catalog timer or accepted a stale in-flight snapshot");
+    for (_ in 0...5) { client.refreshTerminals(false);step(); }
+    require(lists==2,"Creation invalidation disabled idle catalog throttling");
+    var attached=new workspace.client.RpcTerminalBackend(() -> endpoint,"created","/fixture",false);
+    attached.pollEvents(function(_) {});for (_ in 0...5) step();
+    require(lists==2,"Reattaching an existing terminal invalidated the catalog");
+    var failed=new workspace.client.RpcTerminalBackend(() -> endpoint,"failed","/fixture",true);
+    failed.pollEvents(function(_) {});for (_ in 0...5) step();
+    require(lists==2,"Failed creation triggered a success refresh");
+    var closed=new workspace.client.RpcTerminalBackend(() -> endpoint,"created","/fixture",true);
+    closed.pollEvents(function(_) {});closed.close();for (_ in 0...5) step();
+    require(lists==3,"Closing the view discarded confirmed creation invalidation");
+    backend.close();attached.close();failed.close();client.dispose();connection.close();server.close();
+    Sys.println("PASS: confirmed terminal creation refreshes discovery with a fixed clock, including in-flight catalogs and closed views");
   }
 }

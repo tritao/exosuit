@@ -7,6 +7,9 @@ import workspace.service.WorkspaceTerminalProtocol.TerminalTarget;
 /** One notification handler per connection, shared by all attached terminal panes. */
 class WorkspaceTerminalEvents {
   public final connection:RpcConnection;
+  /** Local confirmed creations invalidate discovery independently of output notifications. */
+  public var catalogRevision(default, null):Int = 0;
+  public function invalidateCatalog():Void catalogRevision++;
   final listeners:Map<String, Array<TerminalTarget->Void>> = [];
   public function new(connection:RpcConnection) {
     this.connection = connection;

@@ -368,6 +368,7 @@ class RpcTerminalBackend implements TerminalBackend {
         if (create && (group != null || directory != null) && !client.supportsWorkspaceGroups()) { fail("Workspace service does not support grouped terminals"); return; }
         pending = true;
         var router = client.terminalEvents();
+        var creating = create;
         c.call(WorkspaceTerminalProtocol.OPEN, {
           workspace: "workspace",
           instance: instance,
@@ -377,6 +378,9 @@ class RpcTerminalBackend implements TerminalBackend {
           rows: rows,
           group: group, directory: directory, watch: true, theme: theme, agentProvider: agentProvider
         }, 2000, function(info) {
+          // The daemon owns the resource even if its view closed before the reply.
+          // Keep this on the captured connection's router across reconnects.
+          if (creating && router != null && info.id == terminalId) router.invalidateCatalog();
           if (closed || connection != c) {
             if (info.notifications == true && c.isOpen() && router != null && !router.hasListeners(terminalId)) {
               c.call(WorkspaceTerminalProtocol.UNWATCH, {workspace:"workspace", instance:instance, id:terminalId},
