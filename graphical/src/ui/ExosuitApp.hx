@@ -181,6 +181,7 @@ class ExosuitApp implements DesktopUiApplication {
 	var settingsModelsToken:Int = 0;
 	var contextMenu:Null<CommandMenu> = null;
 	var manageMenu:Null<CommandMenu> = null;
+	var layoutMenu:Null<CommandMenu> = null;
 	var viewRevision:Int = 0;
 	var submittedBuildKey:Null<String>;
 	var nextBackgroundPoll:Float = 0.0;
@@ -1304,7 +1305,10 @@ class ExosuitApp implements DesktopUiApplication {
 		var menu = contextMenu;
 		if (menu != null) {
 			if (!menu.isCurrent()) contextMenu = null;
-			else layers.push(new StackChild("context-menu", menu, 0.0, 0.0, 40));
+			else {
+				menu.onOutsideClick = handleMenuTriggerClick;
+				layers.push(new StackChild("context-menu", menu, 0.0, 0.0, 40));
+			}
 		}
 		var result:View = new TooltipOverlayHost(new Stack("exosuit-overlay-host", layers));
 		return hostContext != null && hostContext.windowControls != null
@@ -2055,7 +2059,29 @@ class ExosuitApp implements DesktopUiApplication {
 			function() return new Rect(0, 0, viewportWidth, viewportHeight), 0.5);
 	}
 
+	/** Menu backdrops consume outside clicks, except for explicit menu triggers. */
+	function handleMenuTriggerClick(event:UiEvent):Bool {
+		if (event.button != 0 || ui.root == null) return false;
+		var point = new haxeon.ui.Point(event.x, event.y);
+		var layout = findStyleNode(ui.root, "layout-menu");
+		if (!phoneLayoutActive && layout != null && layout.enabled && layout.resolved != null && layout.containsGlobalPoint(point)) {
+			ui.commands.executeContext("view.layout-menu", ui.commandContext);
+			return true;
+		}
+		var manage = findStyleNode(ui.root, "activity-manage");
+		if (manage != null && manage.enabled && manage.resolved != null && manage.containsGlobalPoint(point)) {
+			showManageMenu(event);
+			return true;
+		}
+		return false;
+	}
+
 	function showLayoutMenu():Void {
+		if (layoutMenu != null && contextMenu == layoutMenu) {
+			contextMenu = null;
+			requestFrame();
+			return;
+		}
 		var items:Array<haxeon.ui.widgets.overlays.MenuItem> = [];
 		var commands = ["exosuit.workbench:toggle-sidebar", "view.layout-bottom", "view.layout-right"];
 		var labels = [(dock.isOpen("explorer") ? "Hide" : "Show") + " Left Sidebar",
@@ -2074,8 +2100,9 @@ class ExosuitApp implements DesktopUiApplication {
 		var anchor = findStyleNode(ui.root, "layout-menu");
 		var x = Math.max(0, viewportWidth - 290), y = TOOLBAR_HEIGHT + 4;
 		if (anchor != null) { var bounds = anchor.globalBounds(); x = Math.min(x, bounds.x); y = bounds.y + bounds.height + 4; }
-		contextMenu = new CommandMenu(application.commands, application.context, [], x, y, function() return !phoneLayoutActive,
+		layoutMenu = new CommandMenu(application.commands, application.context, [], x, y, function() return !phoneLayoutActive,
 			function() { contextMenu = null; requestFrame(); }, items, true);
+		contextMenu = layoutMenu;
 		requestFrame();
 	}
 

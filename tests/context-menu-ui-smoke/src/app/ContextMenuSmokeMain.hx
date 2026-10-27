@@ -30,7 +30,7 @@ class ContextMenuSmokeApp extends ExosuitApp {
 		root.walk(function(node) {
 			if (node.resolved == null) return;
 			var isItem = node.semantics != null && node.semantics.role == AccessibilityRole.MenuItem;
-			if (node.styleKey == "activity-manage" || isItem ||
+			if (node.styleKey == "activity-manage" || node.styleKey == "layout-menu" || isItem ||
 				(node.semantics != null && node.semantics.role == AccessibilityRole.TextField)) {
 				var bounds = node.globalBounds();
 				nodes.push({key: node.styleKey, label: node.semantics == null ? "" : node.semantics.label,
@@ -54,7 +54,7 @@ class ContextMenuSmokeMain {
 		options.title = "Context menu native input smoke";
 		options.width = 1100; options.height = 760;
 		options.captureDirectory = Sys.args()[0] + "/capture";
-		options.captureSeconds = 20;
+		options.captureSeconds = 35;
 		return DesktopUiHost.run(options, function(context) return new ContextMenuSmokeApp(context, Sys.args()[0]));
 	}
 }

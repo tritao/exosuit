@@ -10,6 +10,7 @@ import haxeon.ui.widgets.overlays.MenuItem;
 
 /** A contextual command surface whose target and predicates stay live. */
 class CommandMenu implements View {
+	public var onOutsideClick:Null<haxeon.ui.core.UiEvent->Bool> = null;
 	static var nextOpeningId:Int = 0;
 	final surfaceKey:String;
 	final registry:CommandRegistry;
@@ -52,6 +53,7 @@ class CommandMenu implements View {
 		}
 		var menu = new Menu(surfaceKey, items, x, y, dismiss);
 		menu.selectFirstOnOpen = selectFirstOnOpen;
+		menu.onOutsideClick = onOutsideClick;
 		return menu.build(context);
 	}
 }
