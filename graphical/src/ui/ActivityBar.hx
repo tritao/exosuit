@@ -207,12 +207,13 @@ private class ActivityBarDrag {
 				event.preventDefault(); event.stopPropagation();
 				return;
 			}
-			if (event.button != 0 || source != null) return;
+			if (event.button != 0) return;
 			clear(); suppressClick = false;
 			var id = itemAt(event.x, event.y);
 			if (id == null || order.length < 2) return;
+			// No pointer capture: the release still reaches the rail through the pressed button's path, and the
+			// button's pressed state clears normally.
 			source = id; pointer = event.pointerId; startX = event.x; startY = event.y;
-			event.capturePointer(false);
 		});
 		root.on(UiEventKind.PointerMove, function(event) {
 			if (source == null || pointer != event.pointerId) return;
@@ -228,18 +229,18 @@ private class ActivityBarDrag {
 			if (event.button != 0 || source == null || pointer != event.pointerId) return;
 			var from:String = source;
 			var moved = dragging, target = dragging ? insertionAt(event.y) : -1;
-			clear(); event.releasePointer(); repaint();
+			clear(); repaint();
 			if (!moved) return;
 			event.preventDefault();
 			if (target >= 0) model.moveMode(from, target < order.length ? order[target] : null);
 		});
 		root.on(UiEventKind.PointerCancel, function(event) {
 			if (pointer != event.pointerId) return;
-			clear(); event.releasePointer(); repaint();
+			clear(); repaint();
 		});
 		root.on(UiEventKind.KeyDown, function(event) {
 			if (source != null && event.key == UiKey.Escape) {
-				clear(); suppressClick = true; event.cancelPointerCapture(); event.preventDefault(); repaint();
+				clear(); suppressClick = true; event.preventDefault(); repaint();
 				return;
 			}
 			if (menu == null || !UiKey.isContextMenuRequest(event.key, event.modifiers)) return;
