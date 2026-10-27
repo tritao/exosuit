@@ -1008,6 +1008,23 @@ class CodexProvider implements LocalAgentProvider {
 			ctx.respond(view(s, before));
 			return;
 		}
+		if (q.action == "move" || q.action == "rename") {
+			try {
+				var error = q.action == "move"
+					? AgentMetadata.move(s.record, q.request, q.text, groups(), function() save(s))
+					: AgentMetadata.rename(s.record, q.request, q.text, function() save(s));
+				if (error != null) {
+					ctx.fail({code: error, message: "Session metadata changed or the new name or destination is invalid", ambiguous: false});
+					return;
+				}
+			} catch (_:Dynamic) {
+				storageFailed = true;
+				ctx.fail({code: "storage_unavailable", message: "Session metadata could not be saved", ambiguous: false});
+				return;
+			}
+			ctx.respond(view(s));
+			return;
+		}
 		if (q.action == "delete") {
 			if (s.busy || s.record.state == "working" || s.record.state == "needs-attention") {
 				ctx.fail({code: "busy", message: "Wait for this Codex turn to finish before removing its Workbench leaf", ambiguous: false});

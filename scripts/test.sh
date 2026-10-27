@@ -95,6 +95,7 @@ run_test narrow-tabs
 run_test status-bar
 run_test terminal-context-menu
 run_test sidebar-layout
+run_test workbench-drag
 run_test remote-access-panel
 run_test browser-pairing-url
 

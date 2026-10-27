@@ -52,7 +52,7 @@ class WorkspaceAgentService implements WorkspaceAgents {
    var more=found.length>6;
    if(more) found.resize(6);
    ctx.respond({instance:instance,root:root,records:found,status:status,
-    providers:[for(p in providers) p.driverKind()],next:more ? found[found.length-1].id : null});
+    canMove:true,canRename:true,providers:[for(p in providers) p.driverKind()],next:more ? found[found.length-1].id : null});
   });
   connection.register(WorkspaceAgentProtocol.CREATE,function(q,ctx) {
    if(!allowed(q.workspace,q.instance,true)) {ctx.fail({code:"unauthorized",message:"Agent creation denied",ambiguous:false});return;}

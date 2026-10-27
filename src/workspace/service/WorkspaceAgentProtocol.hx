@@ -45,6 +45,9 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(5) var next:Null<String>;
 	/** Missing on legacy daemons, which route every create request to Codex. */
 	@:optional @:id(6) var providers:Null<Array<String>>;
+	/** Explicit feature negotiation; absent on services that cannot move agent leaves. */
+	@:optional @:id(7) var canMove:Null<Bool>;
+	@:optional @:id(8) var canRename:Null<Bool>;
 }
 
 @:wire typedef AgentCreate = {
@@ -99,6 +102,7 @@ import haxeon.wire.MessagePack;
 	@:id(1) var workspace:String;
 	@:id(2) var instance:String;
 	@:id(3) var id:String;
+	/** Move uses text as destination group and request as expected source group. Rename uses text as new name and request as expected old name. Neither changes native cwd. */
 	@:id(4) var action:String;
 	@:id(5) var text:String;
 	@:id(6) var request:Null<String>;

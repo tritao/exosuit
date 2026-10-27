@@ -42,6 +42,13 @@ class WorkbenchPanel implements View {
 	final tooltipDelay:Void->Float;
 	public final model = new WorkbenchTreeModel();
 	public final tree:TreeView;
+	public var onError:Null<String->Void>;
+	var lastReportedError:Null<String>;
+	var agentDraft:Null<AgentRecord>;
+	var agentDraftOwner = "";
+	var agentDraftName = "";
+	var agentPending = false;
+	var agentEditor:Null<WorkbenchNameEditor>;
 	var catalogRevision = -1;
 	var agentKey = -1;
 	var retainedAgents:Null<workspace.service.WorkspaceAgentProtocol.AgentCatalog>;
@@ -52,7 +59,7 @@ class WorkbenchPanel implements View {
     var pending = false;
     var pendingSince = 0.0;
     var draftError:Null<String>;
-    var inlineEditor:Null<WorkbenchGroupNameEditor>;
+    var inlineEditor:Null<WorkbenchNameEditor>;
     var refreshModel = false;
     var pendingReveal:Null<String>;
     var revealRoot:Null<String>;
@@ -60,6 +67,7 @@ class WorkbenchPanel implements View {
     var scrollPasses = 0;
     var pendingSessionSelection:Null<{var key:String; var workspaceRoot:String;}>;
     var observedWorkspaceRoot:Null<String>;
+    var observedWorkspaceInstance:Null<String>;
 
 	public function new(client:WorkspaceWorkbenchClient, open:TerminalRecord->Bool, createTerminal:String->Void,
 		edit:(WorkspaceGroup, String)->Void, openFolder:String->Void, terminalActions:TerminalRecord->Array<MenuItem>, requestFrame:Void->Void,
@@ -74,6 +82,9 @@ class WorkbenchPanel implements View {
 		var style = new LayoutStyle(); style.width = LayoutAxis.stretch(); style.height = LayoutAxis.grow();
 		tree = new TreeView("workbench-tree", model, style);
 		tree.expandOnSingleClick = true;
+		tree.canDragItem = canDragNode;
+		tree.canDropItem = canDropNode;
+		tree.onItemDrop = dropNode;
 		tree.onSelectionChanged = function(_) requestFrame();
 		tree.onExpandedChanged = function(_, _) requestFrame();
 		tree.onItemContextMenu = function(key, event) {
@@ -81,7 +92,9 @@ class WorkbenchPanel implements View {
             menu(groupFor(key), event, key);
         };
         model.groupEditor = function(id) return draft != null && draft.id == id ? inlineEditor : null;
+		model.agentEditor = function(id) return agentDraft != null && agentDraft.id == id ? agentEditor : null;
 		tree.onItemClicked = function(key, _) {
+			if (agentDraft != null || draft != null) return;
 			if (StringTools.startsWith(key, "a:")) {
 				client.agentService().agentAction(key.substring(2), "read", "", null);
 				openAgent(key.substring(2));
@@ -90,6 +103,48 @@ class WorkbenchPanel implements View {
 				if (terminal != null) open(terminal);
 			}
 		};
+	}
+
+	function canDragNode(key:String):Bool {
+		if (draft != null || agentDraft != null || pending || client.terminalCatalogBusy()) return false;
+		if (StringTools.startsWith(key, "g:")) return client.canEditGroups() && model.groups.exists(key.substring(2));
+		if (StringTools.startsWith(key, "t:")) return client.canControlTerminals() && model.terminals.exists(key.substring(2));
+		return StringTools.startsWith(key, "a:") && client.agentService().canControlAgents()
+			&& !client.agentService().agentBusy() && model.agents.exists(key.substring(2));
+	}
+
+	function canDropNode(source:String, target:String):Bool {
+		var catalog = client.terminalCatalog();
+		if (catalog == null || catalog.instance != observedWorkspaceInstance || catalog.workspaceRoot != observedWorkspaceRoot
+			|| !canDragNode(source)) return false;
+		return WorkbenchDropRules.canDrop(source, target, catalog, client.agentService().agents());
+	}
+
+	function dropNode(source:String, target:String):Void {
+		// Recheck the live catalog at release, including permissions and mutation state.
+		if (!canDropNode(source, target)) return;
+		var catalog = client.terminalCatalog();
+		if (catalog == null) return;
+		var targetId = target.substring(2);
+		var id = source.substring(2);
+		if (StringTools.startsWith(source, "g:")) {
+			for (group in catalog.groups) if (group.id == id)
+				client.changeGroup(catalog.instance, group, group.name, targetId, group.cwd, model.nextOrder(targetId), false);
+		} else if (StringTools.startsWith(source, "t:")) {
+			for (terminal in catalog.terminals) if (terminal.id == id) client.renameTerminal(terminal, terminal.name, targetId);
+		} else {
+			var agents = client.agentService().agents();
+			if (agents == null) return;
+			for (agent in agents.records) if (agent.id == id)
+				client.agentService().agentAction(id, "move", targetId, agent.group);
+		}
+		tree.setExpanded(target, true);
+		requestFrame();
+	}
+
+	function reportError(message:String):Void {
+		var handler = onError;
+		if (handler != null) handler(message);
 	}
 
 	public function selectedGroupId():Null<String> {
@@ -151,6 +206,8 @@ class WorkbenchPanel implements View {
 			var agent = model.agents.get(key.substring(2));
 			if (agent == null) return;
 			items.push(new MenuItem("open-codex", "Open agent session", function() openAgent(agent.id)));
+			items.push(new MenuItem("rename-agent", "Rename…", function() beginAgentRename(agent.id),
+				client.agentService().canControlAgents() && !client.agentService().agentBusy() && !pending && !agentPending, "F2"));
 			if (client.agentService().canControlAgents() && agentCanBeRemoved(agent))
 				items.push(new MenuItem("delete-codex-leaf", "Remove from Workbench", function() removeAgent(agent.id), !client.agentService().agentBusy()));
 			showMenu(items, event, valid);
@@ -197,10 +254,11 @@ class WorkbenchPanel implements View {
 
     function beginGroup(group:WorkspaceGroup, create:Bool):Void {
         var catalog = client.terminalCatalog();
-        if (catalog == null || !client.canEditGroups() || pending) return;
+        if (catalog == null || !client.canEditGroups() || pending || agentPending) return;
+        cancelAgentRename();
         draft = group; creating = create; draftName = group.name;
         draftOwner = catalog.instance; draftError = null;
-        inlineEditor = new WorkbenchGroupNameEditor(group.id, draftName, function(value) draftName = value, saveGroup, cancelGroup);
+        inlineEditor = new WorkbenchNameEditor(group.id, draftName, function(value) draftName = value, saveGroup, cancelGroup);
         model.update(catalog, client.agentService().agents(), creating ? draft : null);
         revealNode("g:" + group.id);
         applyPendingReveal();
@@ -233,6 +291,8 @@ class WorkbenchPanel implements View {
 
     /** Discard a delayed tab-to-tree sync when the workspace attachment changes. */
     public function workspaceAttachmentChanged():Void {
+        tree.cancelDrag();
+        agentPending = false; cancelAgentRename();
         pendingSessionSelection = null;
         if (scrollTarget != null && (StringTools.startsWith(scrollTarget, "a:") || StringTools.startsWith(scrollTarget, "t:"))) scrollTarget = null;
     }
@@ -305,6 +365,51 @@ class WorkbenchPanel implements View {
         pendingReveal = null;
     }
 
+	function beginAgentRename(id:String):Void {
+		var service = client.agentService(), catalog = service.agents();
+		if (catalog == null || draft != null || pending || agentPending || !service.canControlAgents() || service.agentBusy()) return;
+		if (catalog.canRename != true) {
+			reportError("Update the workspace service in Remote Access to rename agent sessions. Restarting the app does not update a service with active sessions.");
+			return;
+		}
+		var record:Null<AgentRecord> = null;
+		for (candidate in catalog.records) if (candidate.id == id) record = candidate;
+		if (record == null || catalog.root != observedWorkspaceRoot || catalog.instance != observedWorkspaceInstance) return;
+		agentDraft = record; agentDraftOwner = catalog.instance; agentDraftName = record.name;
+		agentEditor = new WorkbenchNameEditor(id, record.name, function(value) agentDraftName = value,
+			saveAgentName, cancelAgentRename, "agent");
+		agentEditor.onBlur = function() finishAgentRename(false);
+		refreshModel = true; revealNode("a:" + id); requestFrame();
+	}
+
+	function cancelAgentRename():Void finishAgentRename(true);
+
+	function finishAgentRename(restoreRowFocus:Bool):Void {
+		if (agentPending || agentDraft == null) return;
+		var editor = agentEditor;
+		var restore = editor == null ? null : editor.restoreFocus;
+		if (restoreRowFocus && restore != null) restore();
+		agentDraft = null; agentEditor = null; refreshModel = true; requestFrame();
+	}
+
+	function saveAgentName():Void {
+		var base = agentDraft;
+		var service = client.agentService(), catalog = service.agents();
+		if (base == null || agentPending || service.agentBusy() || !service.canControlAgents()) return;
+		var name = workspace.service.AgentNames.normalize(agentDraftName);
+		if (name == null) {reportError("Enter a session name of 1–256 characters without line breaks or control characters.");return;}
+		if (catalog == null || catalog.instance != agentDraftOwner || catalog.root != base.workspaceRoot) {
+			reportError("The workspace changed. Cancel and try again.");return;
+		}
+		if (name == base.name) {cancelAgentRename();return;}
+		agentPending = true;
+		service.agentAction(base.id, "rename", name, base.name, null, null, function() {
+			if (agentDraft != base) return;
+			agentPending = false; cancelAgentRename();
+		});
+		requestFrame();
+	}
+
     function cancelGroup():Void {
         if (pending) return;
         draft = null; inlineEditor = null; draftError = null;
@@ -336,9 +441,10 @@ class WorkbenchPanel implements View {
     function syncState():Void {
         var catalog:Null<TerminalCatalog> = client.terminalCatalog();
         var currentRoot = catalog == null ? null : catalog.workspaceRoot;
-        if (currentRoot != null) {
-            if (observedWorkspaceRoot != null && observedWorkspaceRoot != currentRoot) workspaceAttachmentChanged();
+        if (currentRoot != null && catalog != null) {
+            if (observedWorkspaceRoot != null && (observedWorkspaceRoot != currentRoot || observedWorkspaceInstance != catalog.instance)) workspaceAttachmentChanged();
             observedWorkspaceRoot = currentRoot;
+            observedWorkspaceInstance = catalog.instance;
         }
         if (pending && !client.terminalCatalogBusy()) {
             var saved = false;
@@ -352,6 +458,8 @@ class WorkbenchPanel implements View {
             }
         }
         if (inlineEditor != null) inlineEditor.enabled = !pending;
+		if (agentPending && !client.agentService().agentBusy()) agentPending = false;
+		if (agentEditor != null) agentEditor.enabled = !agentPending;
 		var agents = client.agentService().agents();
 		if (agents != null && (catalog == null || agents.root != catalog.workspaceRoot)) agents = null;
 		var nextAgentKey = client.agentService().agentRevision();
@@ -416,14 +524,17 @@ class WorkbenchPanel implements View {
 		syncState();
 		var selected = groupFor(tree.selectedKey);
 		var rows:Array<KeyedView> = [new KeyedView("tree", tree)];
-		var creation=client.agentService().agentCreation();
-		if (creation != null)
-			rows.insert(0, new KeyedView("operation-pending", new Text("Starting " + creation.name + " session…")));
-		else if (client.agentService().agentBusy() || client.terminalCatalogBusy())
-			rows.insert(0, new KeyedView("operation-pending", new Text("Session operation in progress…")));
 		var error = draftError == null ? client.terminalCatalogError() : draftError;
 		if (error == null) error = client.agentService().agentError();
-		if (error != null) rows.insert(0, new KeyedView("error", new Text(error)));
+		if (error != lastReportedError) {
+			lastReportedError = error;
+			if (error != null) reportError(error);
+		}
+		var creation = client.agentService().agentCreation();
+		var progress = creation != null ? "Starting " + creation.name + " session…"
+			: client.agentService().agentBusy() || client.terminalCatalogBusy() ? "Session operation in progress…" : null;
+		if (progress != null) rows.push(new KeyedView("operation-pending", new Text(progress, null, null,
+			haxeon.ui.core.TextStyleOverride.text(12))));
 
 		var style = new LayoutStyle(); style.width = LayoutAxis.stretch(); style.height = LayoutAxis.grow();
 		var node = new Column("workbench", rows, style).build(context);
@@ -438,8 +549,13 @@ class WorkbenchPanel implements View {
             }
         });
         node.on(haxeon.ui.core.UiEventKind.KeyDown, function(event) {
-            if (event.key == haxeon.ui.core.UiKey.F2 && draft == null && selected != null && client.canEditGroups()) {
-                event.preventDefault(); event.stopPropagation(); beginGroup(selected, false);
+            if (event.key == haxeon.ui.core.UiKey.F2 && draft == null && agentDraft == null) {
+				var key = tree.selectedKey;
+				if (key != null && StringTools.startsWith(key, "a:")) {
+					event.preventDefault(); event.stopPropagation(); beginAgentRename(key.substring(2));
+				} else if (key != null && StringTools.startsWith(key, "g:") && selected != null && client.canEditGroups()) {
+					event.preventDefault(); event.stopPropagation(); beginGroup(selected, false);
+				}
             }
         }, "capture");
         node.on(haxeon.ui.core.UiEventKind.PointerDown, function(event) {
@@ -452,28 +568,47 @@ class WorkbenchPanel implements View {
 }
 
 /** Stable parent handles commit/cancel while the text field patches its own state. */
-private class WorkbenchGroupNameEditor implements View {
+private class WorkbenchNameEditor implements View {
     final id:String;
     var value:String;
     public var enabled = true;
+	public var restoreFocus:Null<Void->Void>;
+	public var onBlur:Null<Void->Void>;
     final change:String->Void;
     final save:Void->Void;
     final cancel:Void->Void;
     var focusRequested = false;
-    public function new(id:String, value:String, change:String->Void, save:Void->Void, cancel:Void->Void) {
+	final kind:String;
+	var selection:haxeon.ui.widgets.text.TextSelection;
+    public function new(id:String, value:String, change:String->Void, save:Void->Void, cancel:Void->Void, kind:String = "group") {
         this.id = id; this.value = value; this.change = change; this.save = save; this.cancel = cancel;
+		this.kind = kind; selection = new haxeon.ui.widgets.text.TextSelection(0, new haxeon.editor.TextDocument(value).codepointCount);
     }
     public function build(context:BuildContext):RenderNode {
         var style = new LayoutStyle(); style.width = LayoutAxis.grow(); style.height = LayoutAxis.fixed(28);
         style.padding = new Insets(4, 2, 4, 2);
-        var field = new haxeon.ui.widgets.text.TextField("group-name-" + id, value, function(next) { value = next; change(next); }, style, "Group name");
-        field.placeholder = "New group";
+        var field = new haxeon.ui.widgets.text.TextField(kind + "-name-" + id, value, function(next) { value = next; change(next); }, style, kind == "agent" ? "Agent session name" : "Group name");
+        field.placeholder = kind == "agent" ? "Session name" : "New group";
+		field.selectionProvider = function() return selection;
+		field.onSelectionChange = function(value) selection = value;
         field.enabled = enabled;
         var input = field.build(context);
+		var blur = function(_:UiEvent) {
+			var handler = onBlur;
+			if (handler != null) handler();
+		};
+		input.on(haxeon.ui.core.UiEventKind.Blur, blur);
+		input.on(haxeon.ui.core.UiEventKind.FocusLost, blur);
         input.onResolved(function(_) { if (!focusRequested) focusRequested = context.requestFocus(input.id); });
         var containerStyle = new LayoutStyle(); containerStyle.width = LayoutAxis.grow(); containerStyle.height = LayoutAxis.fixed(28);
-        var node = new RenderNode(context.id("group-name-editor"), haxeon.ui.LayoutVisualKind.Box, containerStyle);
+        var node = new RenderNode(context.id(kind + "-name-editor"), haxeon.ui.LayoutVisualKind.Box, containerStyle);
         node.add(input);
+		restoreFocus = function() {
+			var row = node.parent;
+			while (row != null && !row.focusable) row = row.parent;
+			if (row != null) context.requestFocusAfterLayout(row.id);
+		};
+		node.on(haxeon.ui.core.UiEventKind.Click, function(event) event.stopPropagation());
         node.on(haxeon.ui.core.UiEventKind.KeyDown, function(event) {
             if (event.key == haxeon.ui.core.UiKey.Enter || event.key == haxeon.ui.core.UiKey.Escape) {
                 event.preventDefault(); event.stopImmediatePropagation();

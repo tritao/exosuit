@@ -1,0 +1,6 @@
+{
+ "version":1,"package":{"name":"exosuit-workbench-drag-test"},
+ "entry":"app.WorkbenchDragTestMain","sourceRoots":["src"],"scopeSourceRoots":false,
+ "dependencies":{"exosuit-graphical":{"path":"../../graphical"},"exosuit-agent":{"path":"../../agent"}},
+ "target":"host","outputDir":"build"
+}

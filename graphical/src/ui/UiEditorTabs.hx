@@ -1,6 +1,19 @@
 package ui;
 
 class UiEditorTabs {
+	/** Apply authoritative names to every open view of this workspace's agent resources. */
+	public static function syncAgentNames(panes:Array<UiEditorPane>, catalog:workspace.service.WorkspaceAgentProtocol.AgentCatalog):Bool {
+		var names:Map<String, String> = [for (record in catalog.records) record.id => record.name];
+		var changed = false;
+		for (pane in panes) for (item in pane.items) {
+			var tab = agent(item);
+			if (tab == null || tab.workspaceRoot != catalog.root) continue;
+			var name = names.get(tab.resource);
+			if (name != null && tab.title != name) {tab.title = name; changed = true;}
+		}
+		return changed;
+	}
+
 	public static function document(tab:UiEditorTab):Null<UiDocumentView>
 		return switch tab {
 			case Document(view): view;

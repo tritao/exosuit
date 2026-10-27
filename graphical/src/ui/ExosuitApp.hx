@@ -1375,6 +1375,12 @@ class ExosuitApp implements DesktopUiApplication {
 			function(path) application.openArgument(path), catalogTerminalActions, requestFrame, openCodexAgent, showWorkbenchMenu,
 			attachCodexThread, function(resource, workspaceRoot) host.closeAgentTabs(resource, workspaceRoot),
 			createProviderAgent, canCreateAgentSession, function() return application.settings.current.tabTooltipDelay);
+		workbenchPanel.onError = function(message) {
+			var actions = StringTools.startsWith(message, "Update the workspace service")
+				? [new feedback.NotificationAction("Remote Access", function() showSidebarMode("remote-access"))] : null;
+			host.getNotifications().publish(message, feedback.NotificationKind.Error, "workbench", actions);
+			requestFrame();
+		};
 		host.onActiveTabChanged = syncWorkbenchSessionSelection;
 		syncWorkbenchSessionSelection(host.activeTab());
 		if (sidebar.find("workbench") == null)
@@ -1895,7 +1901,12 @@ class ExosuitApp implements DesktopUiApplication {
 		if(workbenchClient!=null) {
    var agentService=workbenchClient.agentService();
    agentService.refreshAgents();
-   if(agentRevision!=agentService.agentRevision()) {agentRevision=agentService.agentRevision();requestFrame();}
+   if(agentRevision!=agentService.agentRevision()) {
+    agentRevision=agentService.agentRevision();
+    var names=agentService.agents();
+    if(names!=null) UiEditorTabs.syncAgentNames(host.panes,names);
+    requestFrame();
+   }
    var now=Sys.time(), catalog=agentService.agents();
    if(catalog!=null && catalog.records.length>0 && now>=codexPoll) {
     codexPoll=now+0.2;

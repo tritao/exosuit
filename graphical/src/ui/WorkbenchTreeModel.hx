@@ -17,6 +17,7 @@ class WorkbenchTreeModel implements TreeViewModel {
 	final roots:Array<String> = [];
 	var version:Int = 0;
 	public var groupEditor:Null<String->Null<View>>;
+	public var agentEditor:Null<String->Null<View>>;
 	var workspaceRoot:Null<String>;
 
 	public function new() {}
@@ -132,6 +133,8 @@ class WorkbenchTreeModel implements TreeViewModel {
 			return new WorkbenchGroupLabel(group.name, directory(group), workspaceRoot, running);
 		}
 		if (StringTools.startsWith(key, "a:")) {
+			var editing = agentEditor == null ? null : agentEditor(key.substring(2));
+			if (editing != null) return editing;
 			var a = agents.get(key.substring(2));
 			return new Text(a == null ? "" : a.name + " · " + agentStateLabel(a.state), null, null,
 				haxeon.ui.core.TextStyleOverride.text(ExosuitPalette.WORKBENCH_TEXT_SIZE));
