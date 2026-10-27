@@ -21,6 +21,8 @@ import haxeon.wire.MessagePack;
 /** Opt in to connection-scoped change notifications. */
 @:optional @:id(9) var watch:Null<Bool>;
 @:optional @:id(10) var theme:Null<TerminalTheme>;
+/** Fixed provider command, resolved on the workspace host; never shell text. */
+@:optional @:id(11) var agentProvider:Null<String>;
 }
 @:wire typedef TerminalInfo = {@: id(1) var id: String;
 @:id(2) var cwd:String;
@@ -39,6 +41,7 @@ import haxeon.wire.MessagePack;
 @:optional @:id(13) var historyError:Null<Bool>;
 @:optional @:id(14) var restartable:Null<Bool>;
 @:optional @:id(15) var historyAvailable:Null<Bool>;
+@:optional @:id(16) var agentProvider:Null<String>;
 }
 @:wire typedef TerminalRead = {@: id(1) var workspace: String;
 @:id(2) var instance:String;
@@ -118,12 +121,15 @@ import haxeon.wire.MessagePack;
 @:id(8) var available:Bool;
 @:id(9) var revision:Int64;
 @:optional @:id(10) var workspaceRoot:Null<String>;
+@:optional @:id(11) var agentProvider:Null<String>;
 }
 @:wire typedef TerminalCatalog = {@: id(1) var instance: String;
 @:id(2) var groups:Array<workspace.service.WorkspaceProtocol.WorkspaceGroup>;
 @:id(3) var terminals:Array<TerminalRecord>;
 @:id(4) var next:Null<String>;
 @:optional @:id(5) var workspaceRoot:Null<String>;
+/** Providers supported by this daemon's interactive terminal launcher. */
+@:optional @:id(6) var agentProviders:Null<Array<String>>;
 }
 @:wire typedef TerminalRename = {@: id(1) var workspace: String;
 @:id(2) var instance:String;

@@ -16,6 +16,8 @@ with tempfile.TemporaryDirectory(prefix='exactions-') as temporary:
     fixture = Path(temporary)
     project = fixture / 'project'; project.mkdir()
     state = fixture / 'state'
+    (fixture / 'settings').mkdir()
+    (fixture / 'settings/settings.json').write_text(json.dumps({'values': {'workbench/agents/session_mode': 'integrated'}}))
     (project / 'fake-codex.json').write_text(json.dumps({'starts': 0, 'prompts': 0, 'threads': {
         'existing': {'id': 'existing', 'name': 'Existing work', 'cwd': str(project), 'status': {'type': 'idle'}, 'turn': None},
         'foreign': {'id': 'foreign', 'name': 'Other directory', 'cwd': str(fixture), 'status': {'type': 'idle'}, 'turn': None}}}))

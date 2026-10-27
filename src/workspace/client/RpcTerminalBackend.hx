@@ -16,6 +16,7 @@ class RpcTerminalBackend implements TerminalBackend {
   final directory:Null<String>;
   final provider:Void -> Null<WorkspaceRpcEndpoint>;
   var create:Bool;
+  var agentProvider:Null<String>;
   var connection:Null<RpcConnection>;
   var instance:String = "";
   var attached:Bool = false;
@@ -71,6 +72,11 @@ class RpcTerminalBackend implements TerminalBackend {
     this.directory = directory;
   }
   public function id():String return terminalId;
+  public function configureAgent(provider:String):Void {
+    if (!create || attached || pending || ["codex","claude","pi"].indexOf(provider) < 0)
+      throw "Agent launch mode must be selected before creating the terminal";
+    agentProvider = provider;
+  }
   public function isAttached():Bool return attached;
   public function usesNotifications():Bool return eventDriven;
   /** False once the terminal failed or closed: write throws, so input must not reach it. */
@@ -102,7 +108,7 @@ class RpcTerminalBackend implements TerminalBackend {
     if (controlled) return "Read only · another client controls this terminal";
     return "Read only · no client is controlling this terminal";
   }
-  public function controlAction():String return !attached || !synchronized || controlUnavailable || !hasControlGrant() || controlPending ? "" : terminalState != "running" ? (restartable ? "Restart shell" : "") : controller ? "Release" : "Take control";
+  public function controlAction():String return !attached || !synchronized || controlUnavailable || !hasControlGrant() || controlPending ? "" : terminalState != "running" ? (restartable ? (agentProvider == null ? "Restart shell" : "Restart agent") : "") : controller ? "Release" : "Take control";
   public function activateControl():Void {
     if (terminalState != "running") { restartShell(); return; }
     controlReleased = controller;
@@ -159,6 +165,7 @@ class RpcTerminalBackend implements TerminalBackend {
     if (info.name != null && StringTools.trim(info.name) != "") name = info.name;
     observedRows = info.rows;
     terminalState = info.state;
+    if (info.agentProvider != null) agentProvider = info.agentProvider;
     historyError = info.historyError == true;
     historyAvailable = info.historyAvailable != false;
     restartable = info.restartable == true;
@@ -368,7 +375,7 @@ class RpcTerminalBackend implements TerminalBackend {
           create: create,
           columns: columns,
           rows: rows,
-          group: group, directory: directory, watch: true, theme: theme
+          group: group, directory: directory, watch: true, theme: theme, agentProvider: agentProvider
         }, 2000, function(info) {
           if (closed || connection != c) {
             if (info.notifications == true && c.isOpen() && router != null && !router.hasListeners(terminalId)) {

@@ -35,6 +35,8 @@ class WorkbenchPanel implements View {
 	final attach:WorkspaceGroup->Void;
 	final closeAgentTab:(String, String)->Void;
 	final createCodex:(String, String->Void)->Void;
+	final createProvider:(String, String)->Void;
+	final canCreateAgent:Void->Bool;
 	public final model = new WorkbenchTreeModel();
 	public final tree:TreeView;
 	var catalogRevision = -1;
@@ -59,11 +61,16 @@ class WorkbenchPanel implements View {
 	public function new(client:WorkspaceWorkbenchClient, open:TerminalRecord->Bool, createTerminal:String->Void,
 		edit:(WorkspaceGroup, Bool)->Void, openFolder:String->Void, manage:Void->Void, requestFrame:Void->Void,
 		openAgent:String->Void, showMenu:(Array<MenuItem>, UiEvent, Void->Bool)->Void, attach:WorkspaceGroup->Void,
-		closeAgentTab:(String, String)->Void, createCodex:(String, String->Void)->Void) {
+		closeAgentTab:(String, String)->Void, createCodex:(String, String->Void)->Void,
+		?createProvider:(String, String)->Void, ?canCreateAgent:Void->Bool) {
 		this.client = client; this.open = open; this.createTerminal = createTerminal; this.edit = edit;
 		this.openFolder = openFolder; this.manage = manage; this.requestFrame = requestFrame;
 		this.openAgent = openAgent; this.showMenu = showMenu; this.attach = attach; this.closeAgentTab = closeAgentTab;
 		this.createCodex = createCodex;
+		this.createProvider = createProvider == null ? function(provider,group) {
+			client.agentService().createAgent(group,null,openAgent,{provider:provider,model:null,effort:null,permissionProfile:provider == "claude" ? "default" : "supervised"});
+		} : createProvider;
+		this.canCreateAgent = canCreateAgent == null ? function() return client.agentService().canControlAgents() && !client.agentService().agentBusy() : canCreateAgent;
 		var style = new LayoutStyle(); style.width = LayoutAxis.stretch(); style.height = LayoutAxis.grow();
 		tree = new TreeView("workbench-tree", model, style);
 		tree.expandOnSingleClick = true;
@@ -138,13 +145,13 @@ class WorkbenchPanel implements View {
 			}
 		}
         items.push(new MenuItem("new-pi", "New Pi session", function() {
-            client.agentService().createAgent(groupId, null, openAgent, {provider:"pi",model:null,effort:null,permissionProfile:"supervised"});
-        }, group != null && client.agentService().canControlAgents() && !client.agentService().agentBusy()));
+            createProvider("pi", groupId);
+        }, group != null && canCreateAgent()));
         items.push(new MenuItem("new-claude", "New Claude session", function() {
-            client.agentService().createAgent(groupId, null, openAgent, {provider:"claude",model:null,effort:null,permissionProfile:"default"});
-        }, group != null && client.agentService().canControlAgents() && !client.agentService().agentBusy()));
+            createProvider("claude", groupId);
+        }, group != null && canCreateAgent()));
 		items.push(new MenuItem("new-codex", "New Codex session", function() createCodex(groupId, openAgent),
-            group != null && client.agentService().canControlAgents() && !client.agentService().agentBusy()));
+            group != null && canCreateAgent()));
         items.push(new MenuItem("new-terminal", "New terminal", function() createTerminal(groupId), group != null && client.canCreateGroupedTerminals() && !client.terminalCatalogBusy()));
         items.push(new MenuItem("new-group", "New group", function() beginGroup({id: workspace.client.WorkspaceIds.create("group"),
             name: "", cwd: null, revision: 0, parent: group == null ? null : group.id,
@@ -348,7 +355,7 @@ class WorkbenchPanel implements View {
 		var agent = toolbarButton("New Codex", IconName.Plus, function() {
 			if (selected != null) createCodex(selected.id, openAgent);
 		}, "workbench-new-codex");
-		agent.enabled = selected != null && client.agentService().canControlAgents() && !client.agentService().agentBusy();
+		agent.enabled = selected != null && canCreateAgent();
 		var selectedAgent = tree.selectedKey != null && StringTools.startsWith(tree.selectedKey, "a:")
 			? model.agents.get(tree.selectedKey.substring(2)) : null;
 		var deleteAgent = toolbarButton("Remove selected leaf from Workbench", IconName.Trash, function() {

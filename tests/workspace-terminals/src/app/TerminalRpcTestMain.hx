@@ -44,6 +44,7 @@ class TerminalRpcTestMain {
       TerminalCapabilitiesTests.run();
       TerminalReplayTests.run();
       TerminalThemeTests.run(root);
+      TerminalAgentTests.run(root);
       TerminalHistoryTests.run(root);
       TerminalServiceTests.run(root);
       TerminalCatalogTests.run(root);

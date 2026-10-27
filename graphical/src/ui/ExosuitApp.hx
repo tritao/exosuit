@@ -722,7 +722,7 @@ class ExosuitApp implements DesktopUiApplication {
         requestFrame();
     }
 
-	function newTerminalTab(?group:String):Null<UiTerminalTab> {
+	function newTerminalTab(?group:String, ?agentProvider:String):Null<UiTerminalTab> {
 		var failure = terminalCreationFailure();
 		if (failure != null) { application.reportError("terminal", failure); return null; }
 		var client = workbenchClient;
@@ -744,7 +744,8 @@ class ExosuitApp implements DesktopUiApplication {
 				}
 			}
 			var resource = workspace.client.WorkspaceIds.create("workspace-terminal");
-			return createTerminalTab(ResourceViewIdentity.view(root, resource), "Terminal", cwd, false, true, resource, root, group);
+			return createTerminalTab(ResourceViewIdentity.view(root, resource), agentProvider == null ? "Terminal" : agentProvider,
+				cwd, false, true, resource, root, group, null, agentProvider);
 		}
 		var number = allocateTerminalNumber(), title = "Terminal " + number;
 		var id = createWorkspaceTerminal != null && application.workspace.activeProject != null
@@ -768,7 +769,7 @@ class ExosuitApp implements DesktopUiApplication {
             return terminal;
         }
 
-	function createTerminalTab(id:String, title:String, cwd:String, restored:Bool, ?remoteOwner:Bool, ?resource:String, ?workspaceRoot:String, ?group:String, ?directory:String):Null<UiTerminalTab> {
+	function createTerminalTab(id:String, title:String, cwd:String, restored:Bool, ?remoteOwner:Bool, ?resource:String, ?workspaceRoot:String, ?group:String, ?directory:String, ?agentProvider:String):Null<UiTerminalTab> {
 		var isRemote = remoteOwner == null ? StringTools.startsWith(id, "workspace-terminal-") : remoteOwner;
 		if (restored && !isRemote && ~/^Terminal [1-9][0-9]*$/.match(title)) {
 			for (existing in host.allTerminalTabs()) if (!existing.disposed && existing.title == title) {
@@ -791,6 +792,11 @@ class ExosuitApp implements DesktopUiApplication {
 				panel = create(localDirectory, requestFrame, terminalPalette);
 			else
 				return null;
+			if (agentProvider != null) {
+				if (!Std.isOfType(panel, AgentTerminalPanel)) { panel.close(); throw "This terminal host cannot launch agent CLIs"; }
+				var agentPanel:AgentTerminalPanel = cast panel;
+				try agentPanel.configureAgent(agentProvider) catch (failure:Dynamic) { panel.close(); throw failure; }
+			}
 			return new UiTerminalTab(id, title, cwd, panel,isRemote,resource,workspaceRoot);
 		} catch (error:Dynamic) {
 			statusMessage = "Terminal: " + Std.string(error);
@@ -1370,7 +1376,7 @@ class ExosuitApp implements DesktopUiApplication {
 		workbenchPanel = new WorkbenchPanel(client, openCatalogTerminal, newGroupedTerminal, editWorkspaceGroup,
 			function(path) application.openArgument(path), openWorkspaceTerminals, requestFrame, openCodexAgent, showWorkbenchMenu,
 			attachCodexThread, function(resource, workspaceRoot) host.closeAgentTabs(resource, workspaceRoot),
-			createCodexAgent);
+			createCodexAgent, createProviderAgent, canCreateAgentSession);
 		host.onActiveTabChanged = syncWorkbenchAgentSelection;
 		syncWorkbenchAgentSelection(host.activeTab());
 		if (sidebar.find("workbench") == null)
@@ -1413,6 +1419,7 @@ class ExosuitApp implements DesktopUiApplication {
  }
 
  function createCodexAgent(group:String, created:String->Void):Void {
+  if (application.settings.current.agentSessionMode == "terminal") { createAgentTerminal("codex", group); return; }
   var client = workbenchClient;
   if (client == null) return;
   var settings = application.settings.current;
@@ -1423,6 +1430,30 @@ class ExosuitApp implements DesktopUiApplication {
    permissionProfile: settings.codexDefaultPermissions
   };
   client.agentService().createAgent(group, null, created, defaults);
+ }
+
+ function canCreateAgentSession():Bool {
+  var client = workbenchClient;
+  if (client == null) return false;
+  if (application.settings.current.agentSessionMode == "terminal")
+   return client.canCreateGroupedTerminals() && !client.terminalCatalogBusy();
+  return client.agentService().canControlAgents() && !client.agentService().agentBusy();
+ }
+
+ function createProviderAgent(provider:String, group:String):Void {
+  if (application.settings.current.agentSessionMode == "terminal") { createAgentTerminal(provider, group); return; }
+  if (provider == "codex") { createCodexAgent(group, openCodexAgent); return; }
+  if (workbenchClient != null) workbenchClient.agentService().createAgent(group, null, openCodexAgent,
+   {provider:provider,model:null,effort:null,permissionProfile:provider == "claude" ? "default" : "supervised"});
+ }
+
+ function createAgentTerminal(provider:String, group:String):Void {
+  var client = workbenchClient, catalog = client == null ? null : client.terminalCatalog();
+  if (catalog == null || catalog.agentProviders == null || catalog.agentProviders.indexOf(provider) < 0) {
+   application.reportError("agent", "Update the workspace service to launch interactive agent terminals"); return;
+  }
+  var terminal = newTerminalTab(group, provider);
+  if (terminal != null) showTerminalInEditor(terminal);
  }
 
  function syncWorkbenchAgentSelection(tab:Null<UiEditorTab>):Void {

@@ -100,7 +100,10 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
     && name.length <= 128 && name.indexOf("\t") < 0 && name.indexOf("\n") < 0 && name.indexOf("\r") < 0;
   static function validTheme(theme:Null<TerminalTheme>):Bool return theme == null
     || theme.foreground >= 0 && theme.foreground <= 0xffffff && theme.background >= 0 && theme.background <= 0xffffff;
-  function validRecord(r:TerminalRecord):Bool return r != null && r.id != null && r.id.length > 0
+  static function validAgentProvider(provider:Null<String>):Bool return provider == null || ["codex", "claude", "pi"].indexOf(provider) >= 0;
+  static function profile(record:TerminalRecord):TerminalProfile return record.agentProvider == null
+    ? TerminalProfile.shell(record.cwd) : TerminalProfile.agent(record.agentProvider, record.cwd);
+  function validRecord(r:TerminalRecord):Bool return r != null && validAgentProvider(r.agentProvider) && r.id != null && r.id.length > 0
     && r.id.length <= 128 && validName(r.name) && knownGroup(r.group) && r.workspaceRoot == root && r.cwd != null && r.cwd.length > 0 && r.cwd.length <= 1024 && r.instance != null
     && r.instance.length > 0 && r.instance.length <= 128 && r.revision > 0 && r.revision < Int64.make(
       0x7fffffff,
@@ -132,7 +135,8 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
     // older daemon never saved output. Opening must never spawn a replacement.
     available: true,
     revision: r.revision,
-    workspaceRoot: root
+    workspaceRoot: root,
+    agentProvider: r.agentProvider
   };
   function save(r:TerminalRecord):Void {
     if (storageFailed) throw "Terminal metadata storage unavailable";
@@ -177,7 +181,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
   public function snapshot():TerminalCatalog {
     var records = [for (r in catalog) copy(r)];
     records.sort(function(a, b) return Reflect.compare(a.id, b.id));
-    return {instance: instance, groups: groups(), terminals: records, next: null, workspaceRoot: root};
+    return {instance: instance, groups: groups(), terminals: records, next: null, workspaceRoot: root, agentProviders:["codex","claude","pi"]};
   }
   function controller(id:String):Null<RpcConnection> {
     var owner = controllers.get(id);
@@ -205,6 +209,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
     historyError: t.historyError,
     restartable: true,
     historyAvailable: t.hasHistory,
+    agentProvider: record == null ? null : record.agentProvider,
     controlled: owner != null
     };
   }
@@ -249,7 +254,8 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         groups: groups(),
         terminals: records,
         next: more ? records[records.length - 1].id : null,
-        workspaceRoot: root
+        workspaceRoot: root,
+        agentProviders: ["codex","claude","pi"]
       }
       );
     }
@@ -339,7 +345,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         return;
       }
       if ((r.group != null || r.directory != null) && capabilities.indexOf(WorkspaceProtocol.TREE) < 0) { c.fail(error("unsupported")); return; }
-      if (!valid(r.workspace, r.instance, r.id) || !size(r.columns, r.rows) || !validTheme(r.theme)) {
+      if (!valid(r.workspace, r.instance, r.id) || !size(r.columns, r.rows) || !validTheme(r.theme) || !validAgentProvider(r.agentProvider)) {
         c.fail(error("invalid_request"));
         return;
       }
@@ -390,7 +396,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         if (resolved == null) { c.fail(error("invalid_directory")); return; }
         var record:TerminalRecord = {
           id: r.id,
-          name: nextTerminalName(),
+          name: r.agentProvider == null ? nextTerminalName() : (r.agentProvider == "claude" ? "Claude Code" : r.agentProvider == "codex" ? "Codex" : "Pi") + " · Terminal",
           group: selectedGroup,
           cwd : resolved,
           workspaceRoot: root,
@@ -398,7 +404,8 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
           state : "starting",
           exitCode : 0,
           available : false,
-          revision : 1
+          revision : 1,
+          agentProvider: r.agentProvider
         };
         try {
           save(record);
@@ -412,7 +419,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
           created = new RuntimeTerminal(
             r.id,
             resolved,
-            LocalPtyBackend.spawn(TerminalProfile.shell(resolved), r.columns, r.rows),
+            LocalPtyBackend.spawn(profile(record), r.columns, r.rows),
             r.columns,
             r.rows,
             historyLimit
@@ -660,7 +667,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         if (t.backend != null) t.backend.close();
         var restartingTheme:Null<TerminalTheme> = r.theme;
         if (restartingTheme != null) t.emulator.setDefaultColors(restartingTheme.foreground, restartingTheme.background);
-        t.backend = LocalPtyBackend.spawn(TerminalProfile.shell(record.cwd), t.columns, t.rows);
+        t.backend = LocalPtyBackend.spawn(profile(record), t.columns, t.rows);
         t.state = "running"; t.exitCode = 0;
         var running = copy(starting); running.state = "running"; running.revision += 1;
         save(running);

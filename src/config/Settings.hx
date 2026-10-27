@@ -17,6 +17,8 @@ class Settings {
 	}
 	public var applicationZoom:Int = 100;
 	public var layoutMode:String = "auto";
+	/** Launch mode for newly created agent sessions across providers. */
+	public var agentSessionMode:String = "terminal";
 	/** Codex defaults used when Workbench creates a new thread. */
 	public var codexDefaultModel:String = "";
 	public var codexDefaultEffort:String = "model-default";
@@ -89,6 +91,7 @@ class Settings {
 		result.fontFallbackPaths = copyStrings(fontFallbackPaths);
 		result.applicationZoom = applicationZoom;
 		result.layoutMode = layoutMode;
+		result.agentSessionMode = agentSessionMode;
 		result.codexDefaultModel = codexDefaultModel;
 		result.codexDefaultEffort = codexDefaultEffort;
 		result.codexDefaultPermissions = codexDefaultPermissions;

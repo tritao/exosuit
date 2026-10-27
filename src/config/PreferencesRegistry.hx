@@ -332,11 +332,19 @@ class PreferencesRegistry {
 			options.minimum = 6; options.maximum = 48;
 			registry.define("terminal/fonts/font_size", PropertyType.Int, PropertyValue.Int(defaults.terminalFontSize), options);
 		}
+		if (!projectOnly) {
+			var options = new SettingOptions();
+			options.label = "Agent session mode";
+			options.options = [new PropertyOption("integrated", "Integrated"), new PropertyOption("terminal", "Terminal")];
+			options.tooltip = "How new Codex, Claude Code and Pi sessions open. Integrated uses Exosuit's structured interface. Terminal runs the interactive CLI with its own model and approval settings. Existing sessions keep their mode.";
+			registry.define("workbench/agents/session_mode", PropertyType.Enum, PropertyValue.Enum(defaults.agentSessionMode), options);
+		}
 		return registry;
 	}
 
 	public static function snapshot(store:SettingsStore, ?base:Settings):Settings {
 		var value = base == null ? new Settings() : base.copy();
+		if (store.registry.exists("workbench/agents/session_mode") && (base == null || !store.isDefault("workbench/agents/session_mode"))) value.agentSessionMode = store.getString("workbench/agents/session_mode");
 		if (store.registry.exists("appearance/workbench/zoom_percent") && (base == null || !store.isDefault("appearance/workbench/zoom_percent"))) value.applicationZoom = store.getInt("appearance/workbench/zoom_percent");
 		if (store.registry.exists("appearance/workbench/layout_mode") && (base == null || !store.isDefault("appearance/workbench/layout_mode"))) value.layoutMode = store.getString("appearance/workbench/layout_mode");
 		if (store.registry.exists("workbench/codex/default_model") && (base == null || !store.isDefault("workbench/codex/default_model"))) value.codexDefaultModel = store.getString("workbench/codex/default_model");

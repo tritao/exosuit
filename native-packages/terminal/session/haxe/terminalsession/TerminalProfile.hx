@@ -24,6 +24,38 @@ class TerminalProfile {
         return new TerminalProfile(path, [], cwd);
     }
 
+    /** Interactive CLI, without a command string injected into a shell. */
+    public static function agent(provider:String, cwd:String):TerminalProfile {
+        if (["codex", "claude", "pi"].indexOf(provider) < 0) throw "Unsupported terminal agent provider";
+        var overrideName = "EXOSUIT_" + provider.toUpperCase() + "_BIN";
+        var configured = Sys.getEnv(overrideName);
+        var command = configured == null || StringTools.trim(configured) == "" ? provider : configured;
+        var script = Sys.getEnv("EXOSUIT_" + provider.toUpperCase() + "_SCRIPT");
+        var arguments = script == null || script.length == 0 ? [] : [script];
+        var candidates:Array<String> = [];
+        if (absolute(command)) candidates.push(command);
+        else {
+            var path = Sys.getEnv("PATH");
+            var extensions = Sys.systemName() == "Windows" ? [".exe", ".cmd", ".bat", ""] : [""];
+            if (path != null) for (directory in path.split(Sys.systemName() == "Windows" ? ";" : ":")) {
+                if (directory.length == 0) continue;
+                for (extension in extensions) candidates.push(haxe.io.Path.join([directory, command + extension]));
+            }
+        }
+        for (candidate in candidates) {
+            if (!sys.FileSystem.exists(candidate) || sys.FileSystem.isDirectory(candidate)) continue;
+            var resolved = sys.FileSystem.fullPath(candidate);
+            if (Sys.systemName() == "Windows" && (StringTools.endsWith(resolved.toLowerCase(), ".cmd") || StringTools.endsWith(resolved.toLowerCase(), ".bat"))) {
+                var processor = Sys.getEnv("ComSpec");
+                if (processor == null || !absolute(processor)) throw "Command processor is unavailable";
+                if (arguments.length > 0) throw "Script overrides require an executable rather than a command shim";
+                return new TerminalProfile(processor, ["/d", "/s", "/c", '""' + resolved + '""'], cwd);
+            }
+            return new TerminalProfile(resolved, arguments, cwd);
+        }
+        throw 'The $provider CLI was not found on the workspace host PATH';
+    }
+
     /** PowerShell 7 from PATH, then Windows PowerShell, then the command processor. */
     static function windowsShell(?cwd:String):TerminalProfile {
         var path = Sys.getEnv("PATH");

@@ -170,6 +170,28 @@ A restored grid replays raw bytes at its current size; exact historical resize
 reconstruction awaits state checkpoints. Closing an individual tab also detaches.
 Use Workspace Terminals to reopen or stop a detached session.
 
+### Agent session mode
+
+Global Settings → Workbench → Agents → Agent session mode controls how new Codex,
+Claude Code and Pi sessions open. `Integrated` uses the existing structured
+provider integrations. `Terminal` (the default) launches the provider's interactive
+CLI directly in a workspace-owned PTY, in the selected group's working directory.
+The saved setting is `workbench/agents/session_mode`; it is global, with no project
+override. Changing it only affects new sessions.
+
+Interactive agents use the CLI's own model, authentication and approval settings.
+Their executables must be installed on the workspace host's PATH; the existing
+`EXOSUIT_CODEX_BIN`, `EXOSUIT_CLAUDE_BIN` and `EXOSUIT_PI_BIN` overrides also apply.
+The service records the provider with the terminal. Closing/reopening a view
+reattaches the same process; “Restart agent” starts the original CLI explicitly
+after it ends, preserving saved terminal output. It never silently substitutes a
+shell or converts an existing structured conversation. Older workspace services
+must be updated before they can launch interactive agent terminals.
+
+Run `xvfb-run -a python3 scripts/test-agent-session-mode-ui.py` for desktop coverage
+of both modes, interactive input and retaining a CLI while changing the default.
+The workspace terminal contract suite also exercises all three provider CLIs.
+
 
 ### Terminal catalog
 

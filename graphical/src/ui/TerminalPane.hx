@@ -39,7 +39,7 @@ private typedef TerminalRow = {
 };
 
 /** Retained terminal rows; each row reuses a display list and shaped text. */
-class TerminalPane implements TerminalPanel {
+class TerminalPane implements AgentTerminalPanel {
 	static inline final CONTROL_BAR_HEIGHT:Float = 26.0;
 	public final session:TerminalSession;
 	final requestFrame:Void->Void;
@@ -109,6 +109,10 @@ class TerminalPane implements TerminalPanel {
 
 	public function terminate(force:Bool):Void session.terminate(force);
 
+	public function configureAgent(provider:String):Void {
+		if (remoteBackend == null) throw "Agent CLIs require a workspace-owned terminal";
+		remoteBackend.configureAgent(provider);
+	}
 	public function controlStatus():Null<String> return remoteBackend == null ? null : remoteBackend.controlStatus();
 
 	public function status():String
