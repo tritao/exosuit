@@ -4,6 +4,20 @@ import haxe.io.Bytes;
 import haxeon.rpc.RpcMethod;
 import haxeon.wire.MessagePack;
 
+/** Durable intent written before changing a native tool's title. */
+@:wire typedef AgentRenameIntent = {
+ @:id(1) var expected:Null<String>;
+ @:id(2) var target:String;
+ @:id(3) var session:String;
+}
+
+@:wire typedef AgentNameMetadata = {
+ /** Legacy/explicit local labels are workbench; confirmed native renames are native. */
+ @:id(1) var source:String;
+ @:id(2) var nativeName:Null<String>;
+ @:optional @:id(3) var pending:Null<AgentRenameIntent>;
+}
+
 @:wire typedef AgentRecord = {
 	@:id(1) var id:String;
 	@:id(2) var name:String;
@@ -29,6 +43,7 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(18) var inputSerial:Null<Int>;
 	@:optional @:id(19) var inputMessages:Null<Array<AgentInputMessage>>;
 	@:optional @:id(20) var queuePaused:Null<Bool>;
+	@:optional @:id(21) var nameMetadata:Null<AgentNameMetadata>;
 }
 
 @:wire typedef AgentQuery = {
@@ -48,6 +63,8 @@ import haxeon.wire.MessagePack;
 	/** Explicit feature negotiation; absent on services that cannot move agent leaves. */
 	@:optional @:id(7) var canMove:Null<Bool>;
 	@:optional @:id(8) var canRename:Null<Bool>;
+	/** Providers implementing inspect-name/rename-native; rename retains its local-only meaning. */
+	@:optional @:id(9) var nativeRenameProviders:Null<Array<String>>;
 }
 
 @:wire typedef AgentCreate = {
@@ -110,6 +127,8 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(8) var effort:Null<String>;
 	/** Older activity page; absent starts with the newest items. */
 	@:optional @:id(9) var after:Null<String>;
+	/** Expected native custom title, captured by inspect-name before opening an editor. */
+	@:optional @:id(10) var expectedNativeName:Null<String>;
 }
 
 @:wire typedef AgentRequest = {

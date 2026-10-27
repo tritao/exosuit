@@ -17,6 +17,7 @@ import ui.WorkbenchTreeModel;
 class WorkbenchDragTestMain {
  static function require(ok:Bool, message:String):Void {if (!ok) throw message;}
  static function main():Void {
+  AgentNameSyncTest.run();
   AgentMoveTest.run();
   WorkbenchFeedbackTest.run();
   var catalog:TerminalCatalog = {instance:"owner",workspaceRoot:"/workspace",next:null,
