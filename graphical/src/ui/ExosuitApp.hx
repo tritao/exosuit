@@ -952,6 +952,7 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function installCommands():Void {
+		application.commands.add("preferences:theme-toggle", function(_) setDarkTheme(!darkPalette), null, "Toggle Light/Dark Theme");
 		application.commands.add("preferences:theme-dark", function(_) setDarkTheme(true), null, "Use Dark Theme");
 		application.commands.add("preferences:theme-light", function(_) setDarkTheme(false), null, "Use Light Theme");
 		var modifier = Sys.systemName() == "Mac" ? UiModifier.Super : UiModifier.Control;
