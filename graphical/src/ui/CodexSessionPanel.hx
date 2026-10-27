@@ -12,7 +12,6 @@ import haxeon.ui.core.RenderNode;
 import haxeon.ui.core.View;
 import haxeon.ui.widgets.KeyedView;
 import haxeon.ui.widgets.controls.Button;
-import haxeon.ui.widgets.controls.ComboBox;
 import haxeon.ui.widgets.controls.Select;
 import haxeon.ui.widgets.controls.SelectOption;
 import haxeon.ui.widgets.layout.Column;
@@ -495,13 +494,13 @@ class CodexSessionPanel implements View {
     } else {
       var options = [new SelectOption<String>("current", "Conversation model", "")];
       for (model in view.models) options.push(new SelectOption<String>(model.model, model.name, model.model));
-      var chooser = new ComboBox<String>("codex-model", options, selectedModel, function(value) {
+      var chooser = new Select<String>("codex-model", options, selectedModel, function(value) {
         selectedModel = value;
         selectedEffort = "";
         client.agentAction(id, "model-settings", "", null, selectedModel == "" ? null : selectedModel, null);
         frame();
       });
-      chooser.placeholder = "Model";
+      chooser.accessibilityLabel = "Conversation model";
       chooser.enabled = control && !working;
       modelControls.push(new KeyedView("chooser", chooser));
       if (view.modelsNext != null) {

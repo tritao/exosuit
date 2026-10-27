@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Xvfb desktop acceptance with fake Codex, including saved conversation tabs."""
-import json,os,signal,subprocess,tempfile,time,sys
+import json,os,signal,subprocess,tempfile,time,sys,shutil
 from pathlib import Path
 ROOT=Path(__file__).resolve().parent.parent
 INSTALL=Path(sys.argv[1]).resolve() if len(sys.argv)>1 else None
@@ -22,7 +22,7 @@ with tempfile.TemporaryDirectory(prefix='excodexui-') as temporary:
   subprocess.run(['xdotool','key','--clearmodifiers','ctrl+a'],check=True)
   subprocess.run(['xdotool','type','--clearmodifiers','--delay','1',value],check=True)
  try:
-  for index in range(8):
+  for index in range(9):
    capture=fixture/str(index)
    with (fixture/('app-'+str(index)+'.log')).open('w') as log:
     app=subprocess.Popen([*RUNNER,str(project),'--open-workbench','--capture-dir='+str(capture),'--capture-seconds=10'],env=env,cwd=ROOT,stdout=log,stderr=subprocess.STDOUT)
@@ -35,28 +35,41 @@ with tempfile.TemporaryDirectory(prefix='excodexui-') as temporary:
      click(window,locate(nodes(1),'Codex · idle'));time.sleep(1)
      # Opening changes the layout; capture here via the next restart before prompting.
     elif index==3:
-     model_button=locate(nodes(2),'Choose model…')
-     click(window,model_button);time.sleep(1)
+     click(window,locate(nodes(2),'Choose model…'))
+    elif index==4:
+     model_button=locate(nodes(3),'Conversation model',True)
      click(window,model_button)
-     subprocess.run(['xdotool','key','--clearmodifiers','ctrl+a'],check=True)
-     subprocess.run(['xdotool','type','--clearmodifiers','Fixture model'],check=True)
-     subprocess.run(['xdotool','key','--clearmodifiers','Return'],check=True)
+     # Double-clicking the label must remain button activation, never text selection.
+     if shutil.which('xclip'):
+      subprocess.run(['xclip','-selection','clipboard'],input='model-selection-sentinel',text=True,check=True)
+     subprocess.run(['xdotool','mousemove','--window',window,str(round(model_button['x']+45)),
+                     str(round(model_button['y']+model_button['height']/2)),
+                     'click','--repeat','2','--delay','100','1'],check=True)
+     if shutil.which('xclip'):
+      subprocess.run(['xdotool','key','--clearmodifiers','ctrl+c'],check=True);time.sleep(.15)
+      assert subprocess.check_output(['xclip','-selection','clipboard','-o'],text=True)=='model-selection-sentinel', 'Model label became selectable text'
+     # The label double-click leaves the popup open. Clicking its arrow closes it.
+     subprocess.run(['xdotool','mousemove','--window',window,str(round(model_button['x']+model_button['width']-16)),
+                     str(round(model_button['y']+model_button['height']/2)),'click','1'],check=True)
+     # From closed: Down opens on the current value; another Down chooses Fixture.
+     # A failed close would instead advance twice and submit Override model.
+     subprocess.run(['xdotool','key','--clearmodifiers','Down','Down','Return'],check=True)
      time.sleep(.3)
-     field(window,nodes(2),'hello')
+     field(window,nodes(3),'hello')
      subprocess.run(['xdotool','key','--clearmodifiers','shift+KP_Enter'],check=True)
      time.sleep(.2)
      result=json.loads((project/'fake-codex.json').read_text())
      assert result['prompts']==0, 'Shift+keypad Enter submitted the draft'
      subprocess.run(['xdotool','type','--clearmodifiers','--delay','1','second line'],check=True)
      subprocess.run(['xdotool','key','--clearmodifiers','KP_Enter'],check=True)
-    elif index==4: click(window,locate(nodes(3),'Approve once'))
-    elif index==5:
-     field(window,nodes(4),'choice=yes')
-     click(window,locate(nodes(4),'Answer using prompt (id=value per line)'))
-    elif index==6: click(window,locate(nodes(5),'Show details'))
-    elif index==7:
+    elif index==5: click(window,locate(nodes(4),'Approve once'))
+    elif index==6:
+     field(window,nodes(5),'choice=yes')
+     click(window,locate(nodes(5),'Answer using prompt (id=value per line)'))
+    elif index==7: click(window,locate(nodes(6),'Show details'))
+    elif index==8:
      # Restored agent shares the editor rail; close its view through the tab button.
-     layout=nodes(6)
+     layout=nodes(7)
      close=[n for n in layout if n.get('label')=='Close Codex' and n['visible']]
      if close: click(window,close[0]['bounds'])
      else: subprocess.run(['xdotool','key','--clearmodifiers','ctrl+w'],check=True)
@@ -65,10 +78,10 @@ with tempfile.TemporaryDirectory(prefix='excodexui-') as temporary:
    diagnostic=json.loads((capture/'app-state.json').read_text())
    if index>=1:
     assert len(diagnostic['agentCatalog']['records'])==1,diagnostic
-   if 2<=index<=6:
+   if 2<=index<=7:
     assert len(diagnostic['agentTabs'])==1,diagnostic
-   if index==5: assert diagnostic['agentCatalog']['records'][0]['state']=='completed',diagnostic
-   if index==3:
+   if index==6: assert diagnostic['agentCatalog']['records'][0]['state']=='completed',diagnostic
+   if index==4:
     labels=[(n.get('label') or '') for n in nodes(index) if n['visible']]
     assert labels.count('Hello streamed world')==1,labels
     assert 'Command · completed · echo test' in labels and 'update README.md' in labels,labels
@@ -84,9 +97,9 @@ with tempfile.TemporaryDirectory(prefix='excodexui-') as temporary:
     assert not any('item/completed' in label for label in labels),labels
     wrapped=[n for n in nodes(index) if (n.get('label') or '').startswith('Wrapped conversation text')]
     assert len(wrapped)==1 and wrapped[0]['bounds']['height']>30,wrapped
-   if index==6:
+   if index==7:
     assert any('Exit code: 0' in (n.get('label') or '') for n in nodes(index) if n['visible']),nodes(index)
-   if index==7: assert diagnostic['agentTabs']==[],diagnostic
+   if index==8: assert diagnostic['agentTabs']==[],diagnostic
   result=json.loads((project/'fake-codex.json').read_text())
   assert result['starts']==1 and result['prompts']==1,result
   print('PASS: one-click Codex creation, shared editor tab, structured messages/commands/files, folded tool details, approval/input controls, saved resource restoration and close-view lifecycle')
