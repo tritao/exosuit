@@ -63,8 +63,9 @@ class DecorationSmokeApp extends ExosuitApp {
 	var scmExplorerStatusVerified:Bool = false;
 
 	public function new(context:haxeon.ui.host.DesktopUiHostContext, path:String, phase:String) {
-		super(context.fonts, phase == "popup-completion-light" ? ExosuitPalette.theme(false) : null, context, path, null, null, phase == "popup-completion-light" ? false : null, DecorationSmokeMain.createTerminal);
+		super(context.fonts, phase == "popup-completion-light" ? ExosuitPalette.theme(false) : null, context, StringTools.startsWith(phase, "scm-") ? haxe.io.Path.directory(path) : path, null, null, phase == "popup-completion-light" ? false : null, DecorationSmokeMain.createTerminal);
 		this.phase = phase;
+		if (StringTools.startsWith(phase, "scm-")) application.open(path);
 		installMarks(0);
 		if (phase == "scm-panel-remote-read") {
 			scmPanelRemoteSource = new ReadOnlyRemoteScmPanelSource();

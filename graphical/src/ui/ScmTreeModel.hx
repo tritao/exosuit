@@ -15,6 +15,9 @@ import haxeon.ui.widgets.layout.SizedBox;
 import haxeon.ui.widgets.text.MiddleEllipsisText;
 import haxeon.ui.widgets.text.Text;
 import haxeon.ui.widgets.KeyedView;
+import haxeon.ui.widgets.Icon;
+import haxeon.ui.icons.IconName;
+import haxeon.ui.widgets.overlays.Tooltip;
 import haxeon.ui.widgets.controls.Button;
 import haxeon.ui.core.TextStyleOverride;
 import haxeon.ui.theme.Theme;
@@ -127,6 +130,7 @@ class ScmTreeModel implements TreeViewModel {
 		style.padding = new Insets(0.0, 0.0, 16.0, 0.0);
 		var children:Array<KeyedView> = [];
 		var actionChildren:Array<KeyedView> = [];
+		var syncChildren:Array<KeyedView> = [];
 		var foreground = theme.tokens.text;
 		var label = "";
 		var badge = "";
@@ -138,9 +142,16 @@ class ScmTreeModel implements TreeViewModel {
 			label = repositoryName(repo.root);
 			if (head != null && head.head.branch != null) detail = head.head.branch;
 			else if (head != null && head.head.detachedCommit != null) detail = "detached " + head.head.detachedCommit.substr(0, 8);
-			if (head != null && head.head.upstream != null && (head.head.ahead > 0 || head.head.behind > 0))
-				detail += (detail.length > 0 ? "  " : "") + (head.head.ahead > 0 ? "↑" + head.head.ahead : "") +
-					(head.head.behind > 0 ? "↓" + head.head.behind : "");
+			if (head != null && head.head.upstream != null) {
+				for (direction in ["ahead", "behind"]) {
+					var count = direction == "ahead" ? head.head.ahead : head.head.behind;
+					if (count <= 0) continue;
+					var description = count + (count == 1 ? " commit " : " commits ") + direction
+						+ (direction == "ahead" ? " of " : " ") + head.head.upstream;
+					var counter = new ScmSyncCount(direction, count, description, theme.tokens.textSecondary);
+					syncChildren.push(new KeyedView(direction, new Tooltip("sync-" + direction, counter, new Text(description), 0.0, 28.0)));
+				}
+			}
 			if (head != null && head.head.operation != null) detail += (detail.length > 0 ? "  " : "") + operationLabel(head.head.operation);
 			if (!repo.trusted) {
 				var statusStyle = new LayoutStyle();
@@ -192,12 +203,20 @@ class ScmTreeModel implements TreeViewModel {
 			}
 		}
 		var textStyle = new TextStyleOverride(null, 13.0, null, TextWrap.None, null, null, null, foreground);
-		if (detail.length > 0) label = repo == null ? detail + label : label + " · " + detail;
+		if (repo == null && detail.length > 0) label = detail + label;
 		// A no-wrap text node cannot shrink along a row's main axis. Give it a
 		// bounded box so ellipsis leaves room for the fixed status/action columns.
 		var labelBox = new SizedBox("label-box", new MiddleEllipsisText("label", label, true, textStyle));
 		labelBox.style.clipHorizontal = true;
 		children.push(new KeyedView("label", labelBox));
+		if (repo != null && detail.length > 0) {
+			var branch = new SizedBox("branch-box", new MiddleEllipsisText("branch", detail, true,
+				new TextStyleOverride(null, 12.0, null, TextWrap.None, null, null, null, theme.tokens.textSecondary)));
+			branch.style.width = LayoutAxis.grow(0.0, 120.0);
+			branch.style.clipHorizontal = true;
+			children.push(new KeyedView("branch", branch));
+		}
+		for (counter in syncChildren) children.push(counter);
 		if (badge.length > 0) {
 			var badgeStyle = new LayoutStyle();
 			badgeStyle.width = LayoutAxis.fixed(24.0);
@@ -338,4 +357,33 @@ private class ScmTreeResource {
 	public function new(repository:ScmRepository, group:ScmGroup, resource:ScmResource) {
 		this.repository = repository; this.group = group; this.resource = resource;
 	}
+}
+
+/** Vector direction indicators and explicit accessible descriptions, independent of font coverage. */
+private class ScmSyncCount implements View {
+  final direction:String;
+  final count:Int;
+  final description:String;
+  final color:haxeon.ui.Color;
+  public function new(direction:String, count:Int, description:String, color:haxeon.ui.Color) {
+    this.direction = direction;
+    this.count = count;
+    this.description = description;
+    this.color = color;
+  }
+  public function build(context:haxeon.ui.core.BuildContext):haxeon.ui.core.RenderNode {
+    var style = new LayoutStyle();
+    style.width = LayoutAxis.fit();
+    style.height = LayoutAxis.fixed(22.0);
+    style.childAlignY = LayoutAlignmentY.Center;
+    style.childGap = 3.0;
+    style.padding = new Insets(3.0, 0.0, 3.0, 0.0);
+    var node = new Row("scm-sync-count", [
+      new KeyedView("direction", new Icon("arrow", direction == "ahead" ? IconName.ArrowUp : IconName.ArrowDown, 14.0, color)),
+      new KeyedView("count", new Text(Std.string(count), null, color, TextStyleOverride.text(12.0)))
+    ], style).build(context);
+    for (child in node.children) child.semantics = null;
+    node.semantics = new haxeon.ui.semantics.Semantics(haxeon.ui.semantics.AccessibilityRole.Text, description);
+    return node;
+  }
 }
