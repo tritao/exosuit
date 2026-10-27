@@ -623,7 +623,7 @@ class ExosuitApp implements DesktopUiApplication {
 				phoneContentRoot = haxeon.ui.docking.DockNodeTools.remove(haxeon.ui.docking.DockNodeTools.remove(desktopDockRoot, "explorer"), "context-panel");
 				phoneLayoutActive = true;
 				// An open editor/agent/terminal remains the task when the window narrows.
-				if (host.activeTab() != null || dock.activePanelId == "terminal") sidebar.setVisible(false);
+				if ((host.activeTab() != null && desktopDockActivePanel != "explorer") || desktopDockActivePanel == "terminal") sidebar.setVisible(false);
 			} else if (!sidebar.visible) {
 				phoneContentRoot = haxeon.ui.docking.DockNodeTools.clone(dock.root);
 			}

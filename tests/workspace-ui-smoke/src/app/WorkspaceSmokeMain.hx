@@ -1615,6 +1615,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 				haxeon.ui.docking.DockNode.Panel("explorer"),
 				haxeon.ui.docking.DockNode.Split(haxeon.ui.docking.DockSplitAxis.Horizontal,0.72,
 					haxeon.ui.docking.DockNode.Panel(host.activePane.id),haxeon.ui.docking.DockNode.Panel("context-panel"))));
+			dock.activate(host.activePane.id);
 		}
 		if (frames == 6) activateSidebarDestination("files");
 		if (frames == 7) showTerminalInEditor(responsiveTerminal);
