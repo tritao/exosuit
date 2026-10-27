@@ -313,12 +313,16 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         return;
       }
       var t = terminals.get(r.id);
-      if (t != null && t.state == "running") {
+      if (t != null && t.state == "running" && r.terminate != true) {
         c.fail(error("terminal_running"));
         return;
       }
       try {
         if (storageFailed) throw "Terminal metadata storage unavailable";
+        if (r.terminate == true && t != null && t.backend != null) {
+          if (t.state == "running") t.backend.terminate(true);
+          t.backend.close();t.backend = null;t.state = "exited";
+        }
         if (persistence != null) persistence.removeTerminal(r.id);
         catalog.remove(r.id);
       } catch (_:Dynamic) {
@@ -333,6 +337,8 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         terminals.remove(r.id);
         count--;
       }
+      controllers.remove(r.id);
+      notifyChanges();
       c.respond({workspace: r.workspace, instance: r.instance, id: r.id}
       );
     }

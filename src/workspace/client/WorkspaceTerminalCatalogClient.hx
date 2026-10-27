@@ -19,4 +19,5 @@ interface WorkspaceTerminalCatalogClient {
   public function stopTerminal(record:TerminalRecord):Void;
   public function restartTerminal(record:TerminalRecord):Void;
   public function forgetTerminal(record:TerminalRecord):Void;
+  public function closeTerminal(record:TerminalRecord, ?closed:Void->Void):Void;
 }

@@ -143,6 +143,8 @@ import haxeon.wire.MessagePack;
 @:id(3) var id:String;
 @:id(4) var resourceInstance:String;
 @:id(5) var expectedRevision:Int64;
+/** Explicit resource close: stop a live process before removing metadata and history. */
+@:optional @:id(6) var terminate:Null<Bool>;
 }
 /** Permanent method ids; output offsets count bytes. Input is never retried across connections. */
 class WorkspaceTerminalProtocol {

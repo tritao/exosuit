@@ -437,6 +437,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   public function stopTerminal(record:TerminalRecord):Void workbench.stopTerminal(record);
   public function restartTerminal(record:TerminalRecord):Void workbench.restartTerminal(record);
   public function forgetTerminal(record:TerminalRecord):Void workbench.forgetTerminal(record);
+  public function closeTerminal(record:TerminalRecord, ?closed:Void->Void):Void workbench.closeTerminal(record, closed);
 
   public function failure():Null < String > return error;
 

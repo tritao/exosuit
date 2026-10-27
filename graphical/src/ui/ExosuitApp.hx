@@ -1739,7 +1739,7 @@ class ExosuitApp implements DesktopUiApplication {
 					case "group": moveCatalogTerminalGroup(record);
 					case "stop": client.stopTerminal(record);
 					case "restart": client.restartTerminal(record);
-					case "remove": forgetCatalogTerminal(record);
+					case "close": closeCatalogTerminal(record);
 					case "editor", "panel":
 						if (openCatalogTerminal(record)) for (tab in host.allTerminalTabs())
 							if (matchesCatalogTerminal(tab, record)) { placeTerminal(tab, action == "editor"); break; }
@@ -1849,27 +1849,41 @@ class ExosuitApp implements DesktopUiApplication {
 				requestFrame();
 			}));
 		}
-		items.push(new haxeon.ui.widgets.overlays.MenuItem("terminal-close", "Close Terminal View", function() closeTerminalView(terminal), true, null, true));
+		if (!terminal.remote) items.push(new haxeon.ui.widgets.overlays.MenuItem("terminal-close", "Close Terminal", function() {
+			if (terminal.disposed) return;
+			try {
+				var state=terminal.panel.status();
+				if(state=="running" || state=="starting") terminal.panel.terminate(true);
+				terminal.retainOnClose=false;closeTerminalView(terminal);
+			} catch (failure:Dynamic) application.reportError("terminal",Std.string(failure));
+		},true,null,true));
 		var selectedRecord = record;
 		var owner = catalog == null ? null : catalog.instance;
 		showWorkbenchMenu(items, event, function() return !terminal.disposed &&
 			(selectedRecord == null || currentCatalogTerminal(selectedRecord, owner)));
 	}
 
-	function forgetCatalogTerminal(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Void {
-		if (workbenchClient == null || !workbenchClient.canControlTerminals()
-			|| record.state == "running" || record.state == "starting") return;
-		workbenchClient.forgetTerminal(record);
-		for (tab in host.allTerminalTabs()) if (matchesCatalogTerminal(tab, record)) {
-			host.detachTerminal(tab);
-			var index = host.panelTerminals.indexOf(tab);
-			if (index >= 0) {
-				host.panelTerminals.splice(index, 1);
-				host.activePanelTerminalIndex = Std.int(Math.min(host.activePanelTerminalIndex, host.panelTerminals.length - 1));
+	function closeCatalogTerminal(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Void {
+		var client=workbenchClient;
+		if(client==null || !client.canControlTerminals()) return;
+		client.closeTerminal(record,function() {
+			// Dispose views only after the owning service confirms permanent removal.
+			if(client!=workbenchClient) return;
+			for(tab in host.allTerminalTabs()) if(matchesCatalogTerminal(tab,record)) {
+				tab.retainOnClose=false;
+				for(pane in host.panes.copy()) for(item in pane.items.copy())
+					if(UiEditorTabs.terminal(item)==tab) host.closeTab(item,pane.id,true);
+				var index=host.panelTerminals.indexOf(tab);
+				if(index>=0) {
+					host.panelTerminals.splice(index,1);
+					if(index<host.activePanelTerminalIndex) host.activePanelTerminalIndex--;
+					else if(index==host.activePanelTerminalIndex) host.activePanelTerminalIndex=Std.int(Math.min(index,host.panelTerminals.length-1));
+				}
+				host.hiddenTerminals.remove(tab);tab.dispose();
 			}
-            host.hiddenTerminals.remove(tab);
-			tab.dispose();
-		}
+			if(host.panelTerminals.length==0) dock.close("terminal");
+			requestFrame();
+		});
 		requestFrame();
 	}
 

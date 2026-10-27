@@ -41,14 +41,14 @@ class TerminalContextMenuTestMain {
 		var calls:Array<String> = [];
 		var run = function(action:String) { calls.push(action); };
 		var running = TerminalContextActions.build(record, true, true, false, run);
-		require(item(running,"stop").enabled && ![for (entry in running) entry.key].contains("terminal-remove"), "running terminal offered removal");
+		require(item(running,"stop").enabled && item(running,"close").enabled && item(running,"close").label=="Close Terminal", "running terminal lacked close action");
 		require(![for (entry in running) entry.key].contains("terminal-restart"), "running terminal offered restart");
 		for (entry in TerminalContextActions.build(record, true, false, false, run))
 			if (["terminal-open","terminal-editor","terminal-panel"].indexOf(entry.key) < 0)
 				require(!entry.enabled, "read-only terminal offered a mutation");
 		for (entry in TerminalContextActions.build(record, true, true, true, run)) require(!entry.enabled, "busy catalog offered an action");
 		record.state = "starting";
-		require(![for (entry in TerminalContextActions.build(record,true,true,false,run)) entry.key].contains("terminal-remove"), "starting terminal offered removal");
+		require(item(TerminalContextActions.build(record,true,true,false,run),"close").enabled, "starting terminal lacked close action");
 		record.state = "exited";
 		require(item(TerminalContextActions.build(record,true,true,false,run),"restart").enabled,"ended terminal lacked restart");
 		for (entry in TerminalContextActions.build(record,true,false,false,run))
@@ -56,11 +56,11 @@ class TerminalContextMenuTestMain {
 		require(!item(TerminalContextActions.build(record,true,true,true,run),"restart").enabled,"busy terminal offered restart");
 		record.state = "lost"; record.available = false;
 		var lost = TerminalContextActions.build(record,true,true,false,run);
-		require(item(lost,"remove").enabled && ![for (entry in lost) entry.key].contains("terminal-stop") && ![for (entry in lost) entry.key].contains("terminal-open"),
+		require(item(lost,"close").enabled && ![for (entry in lost) entry.key].contains("terminal-stop") && ![for (entry in lost) entry.key].contains("terminal-open"),
 			"lost terminal actions confused attachment, process state, and removal");
 		item(lost,"restart").onSelect();
-		item(lost,"remove").onSelect();
-		require(calls.join(",") == "restart,remove", "lost terminal removal did not reach its action");
+		item(lost,"close").onSelect();
+		require(calls.join(",") == "restart,close", "lost terminal removal did not reach its action");
 
 		var catalog:workspace.service.WorkspaceTerminalProtocol.TerminalCatalog = {
 			instance:"restarted-daemon", groups:[], terminals:[record], next:null
@@ -120,8 +120,9 @@ class TerminalContextMenuTestMain {
 		app.host.activePanelTerminalIndex = app.host.panelTerminals.indexOf(second);
 		app.showTerminalContextMenu(first,event);
 		action(app,"close").onSelect();
-		require(firstPanel.closes == 1 && secondPanel.closes == 0 && app.host.panelTerminals.indexOf(first) < 0 && app.host.activePanelTerminal() == second,
+		require(firstPanel.closes == 1 && firstPanel.stops == 2 && secondPanel.closes == 0 && app.host.panelTerminals.indexOf(first) < 0 && app.host.activePanelTerminal() == second,
 			"closing a view affected a different terminal");
+		TerminalCloseTests.run(app);
 		app.dispose();
 		fonts.dispose();
 		Sys.println("PASS: terminal action permissions, lifecycle states, clicked targets, rename, placement, stop and close");

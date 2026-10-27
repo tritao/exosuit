@@ -833,6 +833,34 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     );
   }
 
+  public function closeTerminal(record:TerminalRecord, ?closed:Void->Void):Void {
+    var connection=rpc(),snapshot=catalog,owner=instance(),scope=root();
+    if(connection==null || snapshot==null || !canControlTerminals() || catalogMutation) return;
+    if(record.workspaceRoot!=scope || !Lambda.exists(snapshot.terminals,function(current)
+      return current.id==record.id && current.instance==record.instance && haxe.Int64.compare(current.revision,record.revision)==0)) {
+      catalogActionError="This terminal changed. Refresh before closing it.";catalogRevision++;return;
+    }
+    if(!catalogReady()) return;
+    connection.call(WorkspaceTerminalProtocol.FORGET,{
+      workspace:"workspace",instance:owner,id:record.id,resourceInstance:record.instance,
+      expectedRevision:record.revision,terminate:true
+    },5000,function(result) {
+      if(rpc()!=connection || instance()!=owner || root()!=scope) return;
+      if(result.id!=record.id || result.instance!=owner || result.workspace!="workspace") {
+        catalogFailed(connection,{code:"invalid_response",message:"Terminal close could not be confirmed. Refresh before retrying.",ambiguous:false});return;
+      }
+      if(catalog!=null) catalog.terminals=[for(current in catalog.terminals) if(current.id!=record.id) current];
+      catalogCompleted(connection);
+      if(closed!=null) closed();
+    },function(error) {
+      var message=error.code=="terminal_running" || error.code=="unknown_method"
+        ? "Update the workspace service in Remote Access to close running terminals."
+        : error.ambiguous || error.code=="timeout" ? "Terminal close could not be confirmed. Refresh before retrying; its views have been kept open."
+        : error.message;
+      catalogFailed(connection,{code:error.code,message:message,ambiguous:false});
+    });
+  }
+
   public function forgetTerminal(record:WorkspaceTerminalProtocol.TerminalRecord):Void {
     var connection = rpc();
     if (record.workspaceRoot != root() || connection == null || !catalogReady()) return;

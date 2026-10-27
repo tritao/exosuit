@@ -29,7 +29,7 @@ class TerminalContextActions {
 		if (canRead && record.available) add("panel", "Move Terminal to Panel", readable);
 		if (canRead && canControl && !live) add("restart", "Restart Terminal", editable, true);
 		if (canControl && live && record.available) add("stop", "Stop Terminal", editable, true);
-		if (canControl && !live) add("remove", "Remove from Workbench", editable, true);
+		if (canControl) add("close", "Close Terminal", editable, true);
 		return items;
 	}
 }
