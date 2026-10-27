@@ -45,6 +45,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	var languageFeatureStage = 0;
 	var languageOriginal = "";
 	var settingsTerminalColumns = 0;
+	var settingsSourceView:Null<UiDocumentView>;
 	var closePrimary:UiDocumentView;
 	var closeOther:UiDocumentView;
 	var closeWidth:Float = 0;
@@ -885,11 +886,16 @@ class WorkspaceSmokeApp extends ExosuitApp {
 
 	function settingsStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		frame.setViewport(1100, 760);
-		var activeSettingsView = host.activeView();
+		if (frames == 1) settingsSourceView = host.activeView();
+		var activeSettingsView = settingsSourceView;
 		if (activeSettingsView == null) throw "Settings test missing editor";
 		if (frames == 2) ui.key(UiEventKind.KeyDown, UiKey.Comma, UiModifier.Control);
 		if (frames == 3) {
-			require(node("settings-dialog") != null, "settings shortcut did not open modal");
+			require(UiEditorTabs.settings(host.activeTab()) != null && find(ui.root,"settings-dialog") == null,
+				"settings shortcut did not open a normal editor tab");
+			application.commands.perform("settings:open",application.context);
+			require([for (item in host.activePane.items) if (UiEditorTabs.settings(item) != null) item].length == 1,
+				"opening settings twice created duplicate tabs");
 			// The panel chooses a category from the user's search, as it does during typing.
 			settingsPanel.setFilter("minimap");
 		}
@@ -902,14 +908,15 @@ class WorkspaceSmokeApp extends ExosuitApp {
 			ui.key(UiEventKind.KeyDown, UiKey.Escape, 0);
 		}
 		if (frames == 6) {
-			require(find(ui.root, "settings-dialog") == null, "Escape did not dismiss settings");
+			require(UiEditorTabs.settings(host.activeTab()) != null,"Escape unexpectedly closed the settings tab");
+			host.closeActiveTab(true);
 			application.commands.perform("settings:open", application.context);
 			settingsPanel.setFilter("font size");
 		}
 		if (frames == 7) {
 			var store = application.settings.store;
 			store.set("editor/fonts/font_size", haxeon.ui.properties.PropertyValue.Int(22));
-			click("settings-close");
+			host.closeActiveTab(true);
 			openTerminal();
 		}
 		var result = super.submit(frame);
@@ -920,7 +927,11 @@ class WorkspaceSmokeApp extends ExosuitApp {
 				if (child.layout.visualKind == LayoutVisualKind.Custom && child.layout.textStyle.fontSize == 22 && child.layout.intrinsicContent != null) fontApplied = true;
 			});
 			require(fontApplied, "editor font size did not apply live");
-			var gutter = node("gutter:" + activeSettingsView.document.id);
+			var gutter:Null<haxeon.ui.core.RenderNode> = null;
+			ui.root.walk(function(child) {
+				if (child.styleKey != null && StringTools.startsWith(child.styleKey,"gutter:"+activeSettingsView.document.id+":markers:")) gutter = child;
+			});
+			if (gutter == null) throw "Settings test missing retained gutter";
 			var gutterProbe = TextLayout.create(testFonts, Std.string(activeSettingsView.document.buffer.lineCount()), 1.0,
 				new TextStyle(22.0, FontFamily.Monospace), new ParagraphStyle(TextWrap.None));
 			var gutterGeometry = gutter.resolved;
@@ -928,7 +939,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 			require(Math.abs(gutterGeometry.width - (gutterProbe.measure().width + 12.0)) < 0.01,
 				"gutter font size did not follow editor font size");
 			gutterProbe.dispose();
-			require(find(ui.root, "settings-dialog") == null, "Close did not dismiss settings");
+			require(find(ui.root, "settings-dialog") == null, "Closing the settings tab left a modal");
 			application.settings.store.reset("editor/display/minimap_enabled");
 			var terminal = host.activePanelTerminal();
 			if (terminal == null) throw "Settings test missing terminal";
@@ -942,7 +953,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 			var terminal = host.activePanelTerminal();
 			if (terminal == null) throw "Settings test lost terminal";
 			require(terminal.panel.columns() < settingsTerminalColumns, "terminal font size did not resize live");
-			trace("PASS: settings shortcut, searchable panel, checkbox persistence, live editor and terminal font size, reset and modal dismissal");
+			trace("PASS: settings shortcut, searchable panel, checkbox persistence, live editor and terminal font size, reset and normal settings-tab lifecycle");
 		}
 		return result;
 	}

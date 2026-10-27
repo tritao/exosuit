@@ -318,6 +318,14 @@ class UiWorkbenchHost implements WorkbenchHost {
 		return null;
 	}
 
+	public function attachSettings(tab:UiSettingsTab):Void {
+		for (pane in panes) for (item in pane.items) if (UiEditorTabs.settings(item) != null) {
+			activateEditorTab(UiSettingsTab.KEY, pane.id); return;
+		}
+		activePane.items.push(UiEditorTab.Settings(tab));
+		activateEditorTab(UiSettingsTab.KEY, activePane.id);
+	}
+
  public function attachAgent(agent:UiAgentTab):Void {
   for(pane in panes) for(item in pane.items) {var a=UiEditorTabs.agent(item);if(a!=null&&a.id==agent.id) {activateEditorTab("agent:"+a.id,pane.id);return;}}
   activePane.items.push(UiEditorTab.Agent(agent));activateEditorTab("agent:"+agent.id,activePane.id);
@@ -1107,6 +1115,8 @@ class UiWorkbenchHost implements WorkbenchHost {
 		if (pane == null) return false;
 		var index = pane.items.indexOf(item);
 		if (index < 0) return false;
+		var settings = UiEditorTabs.settings(item);
+		if (settings != null && !settings.allowClose && !settings.requestClose()) return false;
 		var wasActive = pane == activePane && pane.activeIndex == index;
 		var lost = documentsLostByClosingTab(item);
 		if (!force) for (document in lost) if (document.dirty) return false;
@@ -1174,6 +1184,10 @@ class UiWorkbenchHost implements WorkbenchHost {
 	function closePane(id:String, force:Bool):Bool {
 		var removed = paneById(id);
 		if (removed == null || !canCloseActivePane()) return false;
+		for (item in removed.items) {
+			var settings = UiEditorTabs.settings(item);
+			if (settings != null && !settings.allowClose && !settings.requestClose()) return false;
+		}
 		var lost = documentsLostByClosingPane(removed);
 		if (!force) for (document in lost) if (document.dirty) return false;
 		panes.remove(removed);

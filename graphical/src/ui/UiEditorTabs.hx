@@ -17,8 +17,11 @@ class UiEditorTabs {
 	public static function document(tab:UiEditorTab):Null<UiDocumentView>
 		return switch tab {
 			case Document(view): view;
-			case Terminal(_), Agent(_), WorkspaceFile(_), Image(_), UnsupportedFile(_): null;
+			case Settings(_), Terminal(_), Agent(_), WorkspaceFile(_), Image(_), UnsupportedFile(_): null;
 		};
+
+	public static function settings(tab:UiEditorTab):Null<UiSettingsTab>
+		return switch tab { case Settings(value): value; case _: null; };
 
 	public static function unsupportedFile(tab:UiEditorTab):Null<UiUnsupportedFileTab>
 		return switch tab { case UnsupportedFile(value): value; case _: null; };
@@ -40,7 +43,7 @@ class UiEditorTabs {
 
 	public static function terminal(tab:UiEditorTab):Null<UiTerminalTab>
 		return switch tab {
-			case Document(_), Agent(_), WorkspaceFile(_), Image(_), UnsupportedFile(_): null;
+			case Settings(_), Document(_), Agent(_), WorkspaceFile(_), Image(_), UnsupportedFile(_): null;
 			case Terminal(value): value;
 		};
 
@@ -53,6 +56,7 @@ class UiEditorTabs {
 			case Terminal(value): "terminal:" + value.id;
 			case Agent(value): "agent:" + value.id;
 			case WorkspaceFile(value): value.id;
+			case Settings(_): UiSettingsTab.KEY;
 		};
 
 	public static function dispose(tab:UiEditorTab):Void
@@ -65,6 +69,7 @@ class UiEditorTabs {
 				value.dispose();
 			case WorkspaceFile(value):
 				value.dispose();
+			case Settings(value): value.onClosed();
 			case Agent(_), UnsupportedFile(_):
 		}
 }

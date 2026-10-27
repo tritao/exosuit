@@ -173,6 +173,7 @@ class ExosuitApp implements DesktopUiApplication {
 	var zoomOverlayUntil:Float = 0.0;
 	var settingsPanel:Null<haxeon.ui.widgets.settings.SettingsPanel>;
 	var settingsClosePending:Bool = false;
+	var closingSettingsTab:Null<UiSettingsTab>;
 	var settingsModels:Array<workspace.service.WorkspaceAgentProtocol.AgentModel> = [];
 	var settingsModelsNext:Null<String>;
 	var settingsModelsRetryCursor:Null<String>;
@@ -943,10 +944,44 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	public function openSettings():Void {
-		if (settingsPanel != null) return;
-		settingsClosePending = false;
 		host.closeCommandView();
+		for (pane in host.panes) for (item in pane.items) {
+			var existing = UiEditorTabs.settings(item);
+			if (existing != null) {
+				settingsPanel = existing.panel;
+				existing.panel.requestSearchFocus();
+				host.activateEditorTab(UiSettingsTab.KEY, pane.id); requestFrame(); return;
+			}
+		}
 		settingsPanel = new ExosuitSettingsPanel(application.settings.store, function() return settingsModels, requestFrame, desktop, settingsModelPickerState);
+		var tab = new UiSettingsTab(settingsPanel);
+		tab.content = function(paneId) {
+			if (tab.panel.catalog.store != application.settings.store) {
+				var previous = tab.panel;
+				tab.panel = new ExosuitSettingsPanel(application.settings.store, function() return settingsModels, requestFrame, desktop, settingsModelPickerState);
+				tab.panel.setShowAdvanced(previous.showAdvanced);
+				tab.panel.setModifiedOnly(previous.modifiedOnly);
+				if (previous.restartOnly) tab.panel.showRestartChanges();
+				tab.panel.setFilter(previous.filter);
+				if (previous.selectedCategory != null) tab.panel.select(previous.selectedCategory);
+			}
+			settingsPanel = tab.panel;
+			return new SettingsTabView(tab, requestFrame, function(bounds, id) host.editorResolved(paneId, bounds, id));
+		};
+		tab.requestClose = function() {
+			if (!tab.panel.hasUnsavedChanges()) return true;
+			closingSettingsTab = tab; settingsClosePending = true; requestFrame(); return false;
+		};
+		tab.onClosed = function() {
+			tab.panel.discardUnsavedChanges();
+			if (settingsPanel == tab.panel) {
+				settingsPanel = null; settingsModelsToken++; settingsModelsPending = false;
+			}
+			if (closingSettingsTab == tab) { closingSettingsTab = null; settingsClosePending = false; }
+			requestFrame();
+		};
+		tab.panel.requestSearchFocus();
+		host.attachSettings(tab);
 		settingsModels = [];
 		settingsModelsNext = null;
 		settingsModelsPending = false;
@@ -1140,7 +1175,7 @@ class ExosuitApp implements DesktopUiApplication {
 		}, function(_) return canCommitAllCurrentScmRepository());
 		application.keymap.add(UiKey.Enter, UiModifier.Control, ["scm:commit"]);
 		application.commands.add("settings:open", function(_) openSettings());
-		ui.commands.register(new Command("preferences.open", "Settings…", openSettings,
+		ui.commands.register(new Command("preferences.open", "Settings", openSettings,
 			new Shortcut(UiKey.Comma, UiModifier.Control)));
 		CommandBridge.install(ui.commands, application.commands, application.keymap, application.context);
 		application.workbench.commandPaletteSource = new commandview.CommandPaletteSource(paletteEntries,
@@ -1250,47 +1285,25 @@ class ExosuitApp implements DesktopUiApplication {
 			}
 		}
 
-		if (settingsPanel != null) {
-			if (settingsPanel.catalog.store != application.settings.store) {
-				var filter = settingsPanel.filter, advanced = settingsPanel.showAdvanced, category = settingsPanel.selectedCategory;
-				settingsPanel = new ExosuitSettingsPanel(application.settings.store, function() return settingsModels, requestFrame, desktop, settingsModelPickerState);
-				settingsPanel.setShowAdvanced(advanced);
-				settingsPanel.setFilter(filter);
-				if (category != null) settingsPanel.select(category);
-			}
-			var panel:haxeon.ui.widgets.settings.SettingsPanel = cast settingsPanel;
-			panel.compact = viewportWidth < 760;
-			var settingsStyle = new LayoutStyle();
-			settingsStyle.width = LayoutAxis.grow();
-			settingsStyle.height = LayoutAxis.fixed(Math.max(180.0, Math.min(560.0, viewportHeight - 160.0)));
-			var closeSettings = function() {
-				panel.discardUnsavedChanges();
-				settingsPanel = null; settingsClosePending = false;
-				settingsModelsToken++; settingsModelsPending = false; requestFrame();
+		if (settingsClosePending && closingSettingsTab != null) {
+			var tab = closingSettingsTab;
+			var keepEditing = function() { settingsClosePending = false; closingSettingsTab = null; requestFrame(); };
+			var discard = function() {
+				tab.allowClose = true;
+				for (pane in host.panes.copy()) for (item in pane.items.copy()) if (UiEditorTabs.settings(item) == tab)
+					host.closeTab(item, pane.id, true);
+				keepEditing();
 			};
-			var dismiss = function() {
-				if (panel.hasUnsavedChanges()) { settingsClosePending = true; requestFrame(); }
-				else closeSettings();
-			};
-			var footer:Array<KeyedView> = [];
-
-			footer.push(new KeyedView("close", new Button("Close", null, dismiss, "settings-close")));
-			var content = new Column("settings-content", [new KeyedView("panel", panel),
-				new KeyedView("footer", new Row("settings-footer", footer))], settingsStyle);
-			if (settingsClosePending) {
-				var keepEditing = function() { settingsClosePending = false; requestFrame(); };
-				var settingsMessageStyle = new LayoutStyle(); settingsMessageStyle.width = LayoutAxis.grow();
-				content = new Column("settings-unsaved", [
-					new KeyedView("message", new Text("Lists have unsaved changes. Keep editing to apply them, or discard the drafts.",
-						settingsMessageStyle, null, haxeon.ui.core.TextStyleOverride.paragraph(haxeon.ui.TextWrap.WordCharacter))),
-					new KeyedView("keep", new Button("Keep editing", null, keepEditing, "settings-keep-editing")),
-					new KeyedView("discard", new Button("Discard and close", null, closeSettings, "settings-discard-close"))
-				]);
-				dismiss = keepEditing;
-			}
-			var dialog = new haxeon.ui.widgets.overlays.Dialog("settings-dialog", settingsClosePending ? "Unsaved settings changes" : "Settings", content, dismiss,
-				Math.max(240.0, Math.min(860.0, viewportWidth - 48.0)));
-			layers.push(new StackChild("settings", dialog, 0.0, 0.0, 50, LayoutAxis.grow(), LayoutAxis.grow()));
+			var style = new LayoutStyle(); style.width = LayoutAxis.grow(); style.childGap = 8;
+			var content = new Column("settings-unsaved", [
+				new KeyedView("message", new Text("Lists have unsaved changes. Keep editing to apply them, or discard the drafts.", style, null,
+					haxeon.ui.core.TextStyleOverride.paragraph(haxeon.ui.TextWrap.WordCharacter))),
+				new KeyedView("keep", new Button("Keep editing", null, keepEditing, "settings-keep-editing")),
+				new KeyedView("discard", new Button("Discard and close", null, discard, "settings-discard-close"))
+			], style);
+			var dialog = new haxeon.ui.widgets.overlays.Dialog("settings-close-dialog", "Unsaved settings changes", content, keepEditing,
+				Math.max(240, Math.min(560, viewportWidth - 48)));
+			layers.push(new StackChild("settings-confirmation", dialog, 0, 0, 50, LayoutAxis.grow(), LayoutAxis.grow()));
 		}
 		if (trashConfirmation != null) {
 			var path = trashConfirmation;
@@ -3083,6 +3096,12 @@ class ExosuitApp implements DesktopUiApplication {
 		var tooltips:Map<String, String> = new Map();
 		var tabColors:Map<String, haxeon.ui.Color> = new Map();
 		for (item in editorPane.items) {
+			var settings = UiEditorTabs.settings(item);
+			if (settings != null) {
+				var tab = new TabItem(UiSettingsTab.KEY, "Settings", settings.content(paneId), true, IconName.Settings);
+				tab.onClose = function() host.closeTab(item, paneId, true);
+				items.push(tab); continue;
+			}
 			var unsupported = UiEditorTabs.unsupportedFile(item);
 			if (unsupported != null) {
 				var key = UiEditorTabs.key(item);

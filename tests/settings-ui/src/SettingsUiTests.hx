@@ -5,6 +5,31 @@ import ui.ExosuitSettingsPanel;
 
 class SettingsUiTests {
  static function check(value:Bool, message:String):Void { if (!value) throw message; }
+ static function tabLifecycle():Void {
+  var workspace = new workspace.Workspace(new syntax.SyntaxRegistry());
+  var dock = new haxeon.ui.docking.DockWorkspaceModel();
+  dock.register(new haxeon.ui.docking.DockPanelDescriptor("editor", "Editor"));
+  dock.setDefaultLayout(haxeon.ui.docking.DockNode.Panel("editor"));
+  var host = new ui.UiWorkbenchHost(new style.Theme(), new core.FocusManager(), workspace,
+   new config.Settings(), function() {}, {
+    model:dock, focusEditor:function(_) {}, editorPreedit:function(_,_) {},
+    toggleSidebar:function() return false, activateExplorer:function() {}, activateProblems:function() {}, activateBuild:function() {}
+   });
+  var panel = new ExosuitSettingsPanel(new SettingsStore(PreferencesRegistry.create()), function() return [], function() {});
+  var tab = new ui.UiSettingsTab(panel);
+  var disposed = false;
+  tab.onClosed = function() disposed = true;
+  host.attachSettings(tab);
+  host.attachSettings(new ui.UiSettingsTab(panel));
+  check(host.activePane.items.length == 1 && ui.UiEditorTabs.settings(host.activeTab()) == tab,
+   "opening settings again focuses its existing editor tab");
+  check(host.activeView() == null && workspace.documents.documents.length == 0, "settings does not create a fake document");
+  tab.requestClose = function() return false;
+  check(!host.closeActiveTab(true) && !disposed, "close shortcuts respect the settings draft guard even with force");
+  tab.allowClose = true;
+  check(host.closeActiveTab(true) && disposed && host.activePane.items.length == 0, "confirmed discard closes the tab normally");
+ }
+
  static function modelControls():Void {
   var refreshes = 0, retries = 0, pages = 0;
   var state = new ui.SettingsModelPickerState(false, null, true, function() { refreshes++; },
@@ -85,6 +110,7 @@ class SettingsUiTests {
   preferences.reload(true);
   check(preferences.store.restartChanges().length == 0, "external reversion clears pending restart changes");
   sys.FileSystem.deleteFile(reloadFile);
+  tabLifecycle();
   modelControls();
   Sys.println("Settings UI adapter tests passed");
   return 0;
