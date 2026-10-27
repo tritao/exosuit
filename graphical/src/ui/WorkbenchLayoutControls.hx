@@ -11,6 +11,7 @@ import haxeon.ui.docking.DockWorkspaceSnapshotCodec;
 class WorkbenchLayoutControls {
 	final model:DockWorkspaceModel;
 	final release:Void->Void;
+	public var bottomMaximized(default, null):Bool = false;
 	var bottom:DockNode;
 	var bottomRatio:Float = 0.72;
 	var rightRatio:Float = 0.75;
@@ -21,7 +22,10 @@ class WorkbenchLayoutControls {
 		var ids = [for (id in tools) if (id != "terminal" && model.get(id) != null) id];
 		bottom = ids.length == 1 ? DockNode.Panel(ids[0]) : DockNode.Tabs(ids, ids[0]);
 		remember(model.root);
-		release = model.listen(function() { if (!changing) remember(model.root); });
+		release = model.listen(function() {
+			if (!changing) remember(model.root);
+			if (!bottomOpen()) bottomMaximized = false;
+		});
 	}
 	public function dispose():Void release();
 	public function bottomOpen():Bool { for (id in tools) if (model.isOpen(id)) return true; return false; }
@@ -44,11 +48,29 @@ class WorkbenchLayoutControls {
 			case _:
 		}
 	}
-	public function toggleBottom():Void {
+	public function isToolGroup(ids:Array<String>):Bool {
+		if (ids.length == 0) return false;
+		for (id in ids) if (tools.indexOf(id) < 0) return false;
+		return true;
+	}
+	public function expandedPanels():Null<Array<String>> return bottomMaximized && bottomOpen() ? tools.copy() : null;
+	public function toggleBottomMaximized():Void {
+		if (bottomOpen()) bottomMaximized = !bottomMaximized;
+	}
+	public function hideBottom():Void {
+		if (!bottomOpen()) return;
 		remember(model.root); changing = true;
-		if (bottomOpen()) for (id in tools) model.close(id);
-		else model.setRoot(insertBottom(model.root));
+		bottomMaximized = false;
+		for (id in tools) model.close(id);
 		changing = false;
+	}
+	public function toggleBottom():Void {
+		if (bottomOpen()) hideBottom();
+		else {
+			changing = true;
+			model.setRoot(insertBottom(model.root));
+			changing = false;
+		}
 	}
 	function insertBottom(node:DockNode):DockNode {
 		return switch node {
@@ -78,6 +100,7 @@ class WorkbenchLayoutControls {
 		return "L\tregions\t1\t" + bottomRatio + "\t" + rightRatio + "\t" + haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(snapshot));
 	}
 	public function restore(lines:Array<String>):Void {
+		bottomMaximized = false;
 		for (line in lines) {
 			var fields = line.split("\t");
 			if (fields.length != 6 || fields[0] != "L" || fields[1] != "regions" || fields[2] != "1") continue;

@@ -1132,6 +1132,9 @@ class ExosuitApp implements DesktopUiApplication {
 			}
 		}
 		var workspaceView = new DockWorkspace("exosuit-workspace", dock, dockPanelContents);
+		workspaceView.headerActions = function(ids, _) return layoutControls.isToolGroup(ids) ? bottomPanelActions() : null;
+		workspaceView.headerActionsRevision = Std.string(layoutControls.bottomMaximized);
+		workspaceView.expandedGroup = layoutControls.expandedPanels();
 		workspaceView.availableWidth = Math.max(0, viewportWidth - ActivityBar.WIDTH);
 		workspaceView.availableHeight = Math.max(0.0, viewportHeight - TOOLBAR_HEIGHT - STATUS_HEIGHT);
 		var workspace:View = new Row("workspace-with-activity-bar", [
@@ -2207,6 +2210,33 @@ class ExosuitApp implements DesktopUiApplication {
 			}
 			host.closeCommandView();
 		}));
+	}
+
+	function bottomPanelActions():View {
+		var maximized = layoutControls.bottomMaximized;
+		var style = new LayoutStyle();
+		style.childAlignY = LayoutAlignmentY.Center;
+		style.childGap = 2;
+		style.padding = new Insets(0, 4, 0, 4);
+		return new Row("bottom-panel-actions", [
+			new KeyedView("maximize", bottomPanelButton("bottom-panel-maximize", maximized ? "Restore Panel" : "Maximize Panel",
+				maximized ? IconName.ArrowDown : IconName.ArrowUp, function() { layoutControls.toggleBottomMaximized(); requestFrame(); })),
+			new KeyedView("hide", bottomPanelButton("bottom-panel-hide", "Hide Panel", IconName.Close,
+				function() { layoutControls.hideBottom(); requestFrame(); }))
+		], style);
+	}
+
+	function bottomPanelButton(key:String, label:String, icon:IconName, action:Void->Void):View {
+		var style = new LayoutStyle();
+		style.width = LayoutAxis.fixed(28); style.height = LayoutAxis.fixed(28);
+		style.padding = new Insets(6, 6, 6, 6);
+		style.childAlignY = LayoutAlignmentY.Center;
+		var button = new Button("", style, action, key);
+		button.variant = ButtonVariant.Navigation;
+		button.leadingIcon = icon; button.iconSize = 16;
+		button.accessibilityLabel = label;
+		return new TabTooltip(key + "-tooltip", button, new Text(label),
+			function() return new Rect(0, 0, viewportWidth, viewportHeight), application.settings.current.tabTooltipDelay);
 	}
 
 	function explorerHeaderActions():View {

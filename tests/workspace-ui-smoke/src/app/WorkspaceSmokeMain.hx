@@ -50,6 +50,9 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	var closeWidth:Float = 0;
 	var selectionDragOffset:Float = 0.0;
 	var selectionStoppedOffset:Float = 0.0;
+	var panelControlsLayout = "";
+	var panelControlsHeight = 0.0;
+	var panelControlsTerminal:Null<ui.TerminalPanel>;
 	var remoteOpenTests:Null<RemoteFileOpenTests>;
 
 	public function new(context:haxeon.ui.host.DesktopUiHostContext, path:String, phase:String) {
@@ -128,6 +131,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		if (phase == "active-context") return activeContextStep(frame);
 		if (StringTools.startsWith(phase, "mode-")) return modeStep(frame);
 		if (StringTools.startsWith(phase, "context-layout-")) return contextLayoutStep(frame);
+		if (phase == "layout-panel-controls") return bottomPanelControlsStep(frame);
 		if (StringTools.startsWith(phase, "layout-")) return layoutControlsStep(frame);
 		if (phase == "remote-open") {
 			if (frames == 1) { remoteOpenTests = new RemoteFileOpenTests(this); remoteOpenTests.start(); }
@@ -1536,6 +1540,64 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		return super.submit(frame);
 	}
 
+	function bottomPanelControlsStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
+		var result = super.submit(frame);
+		if (frames == 2) openTerminal();
+		if (frames == 4) {
+			panelControlsLayout = dock.snapshotJson();
+			panelControlsHeight = node("bottom-panel-hide").globalBounds().y;
+			panelControlsTerminal = host.allTerminalTabs()[0].panel;
+			click("bottom-panel-maximize");
+		}
+		if (frames == 5) {
+			var semantics = node("bottom-panel-maximize").semantics;
+			require(layoutControls.bottomMaximized && semantics != null && semantics.label == "Restore Panel", "maximize action missing");
+			require(node("bottom-panel-hide").globalBounds().y < panelControlsHeight - 100, "panel did not expand vertically");
+			require(dock.snapshotJson() == panelControlsLayout, "maximization rewrote saved layout");
+			click("bottom-panel-maximize");
+		}
+		if (frames == 6) {
+			require(Math.abs(node("bottom-panel-hide").globalBounds().y - panelControlsHeight) < 1, "restore changed panel height");
+			click("bottom-panel-hide");
+		}
+		if (frames == 7) {
+			require(!layoutControls.bottomOpen() && !layoutControls.bottomMaximized, "hide did not close the region");
+			require(host.allTerminalTabs().length == 1 && host.allTerminalTabs()[0].panel == panelControlsTerminal, "hide terminated the shell");
+			layoutControls.toggleBottom();
+		}
+		if (frames == 8) {
+			require(find(ui.root, "bottom-panel-hide") != null && host.allTerminalTabs()[0].panel == panelControlsTerminal, "reopen replaced terminal");
+			dock.activate("problems");
+		}
+		if (frames == 9) {
+			require(find(ui.root, "bottom-panel-hide") != null, "Problems lacks shared controls");
+			dock.activate("build");
+		}
+		if (frames == 10) {
+			require(find(ui.root, "bottom-panel-hide") != null, "Build Output lacks shared controls");
+			click("bottom-panel-maximize");
+		}
+		if (frames == 11) click("bottom-panel-hide");
+		if (frames == 12) {
+			require(!layoutControls.bottomMaximized && host.allTerminalTabs()[0].panel == panelControlsTerminal, "hiding maximized panel lost state");
+			layoutControls.toggleBottom(); dock.activate("terminal");
+		}
+		if (frames == 13) {
+			require(Math.abs(node("bottom-panel-hide").globalBounds().y - panelControlsHeight) < 1, "reopen retained maximized height");
+			dock.close("problems"); dock.close("build");
+		}
+		if (frames == 14) {
+			require(find(ui.root, "bottom-panel-hide") != null, "single-panel header lost controls");
+			click("bottom-panel-maximize");
+		}
+		if (frames == 15) {
+			require(layoutControls.bottomMaximized, "single panel did not maximize");
+			click("bottom-panel-maximize");
+			trace("PASS: shared and single-panel controls maximize, restore and hide without replacing terminal sessions or saved layout");
+		}
+		return result;
+	}
+
 	function layoutControlsStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		var expectedFile = config.ConfigurationPaths.stateRoot() + "/layout-controls-width.txt";
 		if (phase == "layout-phone") frame.setViewport(480, 720);
@@ -2091,7 +2153,7 @@ class WorkspaceSmokeMain {
 			zoomWidth = options.width;
 		}
 		options.captureDirectory = args[1];
-		options.frameLimit = args[2] == "mode-write" ? 16 : args[2] == "mode-read" ? 12 : args[2] == "mode-phone-default" ? 10 : args[2] == "context-layout-write" ? 14 : args[2] == "context-layout-read" ? 9 : StringTools.startsWith(args[2], "context-layout-") ? 7 : args[2] == "layout-read" ? 15 : args[2] == "layout-write" ? 13 : args[2] == "layout-phone" ? 6 : args[2] == "active-context" ? 10 : args[2] == "saved-workspace" ? 10 : args[2] == "divider-chrome" ? 10 : args[2] == "explorer-rename" ? 40 : args[2] == "editor-geometry" ? 25 : args[2] == "file-deletion" ? 10 : args[2] == "blank-editor-click" ? 11 : args[2] == "zoom" ? 75 : args[2] == "save-as" ? 10 : args[2] == "exit-confirmation" ? 11 : args[2] == "tab-close" ? 13 : args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 11 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
+		options.frameLimit = args[2] == "mode-write" ? 16 : args[2] == "mode-read" ? 12 : args[2] == "mode-phone-default" ? 10 : args[2] == "context-layout-write" ? 14 : args[2] == "context-layout-read" ? 9 : StringTools.startsWith(args[2], "context-layout-") ? 7 : args[2] == "layout-panel-controls" ? 17 : args[2] == "layout-read" ? 15 : args[2] == "layout-write" ? 13 : args[2] == "layout-phone" ? 6 : args[2] == "active-context" ? 10 : args[2] == "saved-workspace" ? 10 : args[2] == "divider-chrome" ? 10 : args[2] == "explorer-rename" ? 40 : args[2] == "editor-geometry" ? 25 : args[2] == "file-deletion" ? 10 : args[2] == "blank-editor-click" ? 11 : args[2] == "zoom" ? 75 : args[2] == "save-as" ? 10 : args[2] == "exit-confirmation" ? 11 : args[2] == "tab-close" ? 13 : args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 11 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
 		var status = DesktopUiHost.run(options, context -> new WorkspaceSmokeApp(context, args[0], args[2]));
 
 		return status;

@@ -28,6 +28,16 @@ class LayoutControlsTestMain {
 		require(ratio == 0.63, "closed right panel forgot its resized ratio across restart");
 		restored.toggleBottom();
 		require(second.isOpen("problems") && second.isOpen("build") && second.isOpen("context-panel"), "bottom restore lost tabs or right region");
+		var normalLayout = second.snapshotJson();
+		restored.toggleBottomMaximized();
+		require(restored.bottomMaximized && restored.expandedPanels() != null, "panel did not maximize");
+		require(second.snapshotJson() == normalLayout, "maximization changed the saved dock layout");
+		restored.toggleBottomMaximized();
+		require(!restored.bottomMaximized && second.snapshotJson() == normalLayout, "restore lost the panel size");
+		restored.toggleBottomMaximized(); restored.hideBottom(); restored.hideBottom();
+		require(!restored.bottomMaximized && !restored.bottomOpen() && second.isOpen("editor"), "hide was not idempotent");
+		restored.toggleBottom();
+		require(second.isOpen("build") && second.isOpen("problems") && !restored.bottomMaximized, "reopen lost panel tabs");
 		var before = restored.capture(); restored.restore(["L\tregions\t1\t0.2\t0.2\tinvalid-base64"]);
 		require(restored.capture() == before, "corrupt optional region metadata changed layout");
 		var windowSession = new session.WorkspaceSession(); windowSession.layout.push(metadata);

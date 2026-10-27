@@ -80,6 +80,7 @@ PYCONTEXT
 run_phase context-layout-corrupt context-layout-corrupt
 run_phase context-layout-save-inactive context-layout
 run_phase context-layout-read-inactive-save context-layout
+run_phase layout-panel-controls panel-controls
 run_phase layout-write layout-controls
 run_phase layout-read layout-controls
 run_phase layout-phone layout-controls
