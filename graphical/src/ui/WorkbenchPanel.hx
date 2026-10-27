@@ -47,6 +47,7 @@ class WorkbenchPanel implements View {
 	var agentDraft:Null<AgentRecord>;
 	var agentDraftOwner = "";
 	var agentDraftName = "";
+	var agentRenameNative = false;
 	var agentPending = false;
 	var agentEditor:Null<WorkbenchNameEditor>;
 	var catalogRevision = -1;
@@ -206,8 +207,12 @@ class WorkbenchPanel implements View {
 			var agent = model.agents.get(key.substring(2));
 			if (agent == null) return;
 			items.push(new MenuItem("open-codex", "Open agent session", function() openAgent(agent.id)));
-			items.push(new MenuItem("rename-agent", "Rename…", function() beginAgentRename(agent.id),
-				client.agentService().canControlAgents() && !client.agentService().agentBusy() && !pending && !agentPending, "F2"));
+			var nativeName = canRenameNative(agent.id);
+			var canRename = client.agentService().canControlAgents() && !client.agentService().agentBusy() && !pending && !agentPending;
+			items.push(new MenuItem("rename-agent", nativeName ? "Rename session…" : "Rename in Workbench…",
+				function() beginAgentRename(agent.id,nativeName), canRename, "F2"));
+			if(nativeName) items.push(new MenuItem("rename-agent-label", "Rename in Workbench…",
+				function() beginAgentRename(agent.id,false),canRename));
 			if (client.agentService().canControlAgents() && agentCanBeRemoved(agent))
 				items.push(new MenuItem("delete-codex-leaf", "Remove from Workbench", function() removeAgent(agent.id), !client.agentService().agentBusy()));
 			showMenu(items, event, valid);
@@ -366,7 +371,14 @@ class WorkbenchPanel implements View {
         pendingReveal = null;
     }
 
-	function beginAgentRename(id:String):Void {
+	function canRenameNative(id:String):Bool {
+		var catalog=client.agentService().agents();
+		if(catalog==null || catalog.nativeRenameProviders==null) return false;
+		for(record in catalog.records) if(record.id==id) return record.thread!="" && catalog.nativeRenameProviders.indexOf(record.provider==null ? "codex" : record.provider)>=0;
+		return false;
+	}
+
+	function beginAgentRename(id:String,nativeName:Bool=false,inspected:Bool=false):Void {
 		var service = client.agentService(), catalog = service.agents();
 		if (catalog == null || draft != null || pending || agentPending || !service.canControlAgents() || service.agentBusy()) return;
 		if (catalog.canRename != true) {
@@ -376,9 +388,21 @@ class WorkbenchPanel implements View {
 		var record:Null<AgentRecord> = null;
 		for (candidate in catalog.records) if (candidate.id == id) record = candidate;
 		if (record == null || catalog.root != observedWorkspaceRoot || catalog.instance != observedWorkspaceInstance) return;
-		agentDraft = record; agentDraftOwner = catalog.instance; agentDraftName = record.name;
-		agentEditor = new WorkbenchNameEditor(id, record.name, function(value) agentDraftName = value,
-			saveAgentName, cancelAgentRename, "agent");
+		if(nativeName && !canRenameNative(id)) {reportError("Native renaming is no longer available. Reopen the session menu.");return;}
+		if(nativeName && !inspected) {
+			var owner=catalog.instance,root=catalog.root;
+			service.agentAction(id,"inspect-name","",null,null,null,function() {
+				var current=service.agents();
+				if(current!=null && current.instance==owner && current.root==root) beginAgentRename(id,true,true);
+			});
+			requestFrame();return;
+		}
+		if(nativeName && record.nameMetadata==null) {reportError("Refresh the native session name before renaming.");return;}
+		agentDraft = record; agentDraftOwner = catalog.instance; agentRenameNative=nativeName;
+		var naming=record.nameMetadata;
+		agentDraftName = nativeName && naming!=null && naming.nativeName!=null ? naming.nativeName : record.name;
+		agentEditor = new WorkbenchNameEditor(id, agentDraftName, function(value) agentDraftName = value,
+			saveAgentName, cancelAgentRename, "agent",nativeName ? "Session name" : "Workbench label");
 		agentEditor.onBlur = function() finishAgentRename(false);
 		refreshModel = true; revealNode("a:" + id); requestFrame();
 	}
@@ -402,12 +426,13 @@ class WorkbenchPanel implements View {
 		if (catalog == null || catalog.instance != agentDraftOwner || catalog.root != base.workspaceRoot) {
 			reportError("The workspace changed. Cancel and try again.");return;
 		}
-		if (name == base.name) {cancelAgentRename();return;}
+		if (name == base.name && !agentRenameNative) {cancelAgentRename();return;}
 		agentPending = true;
-		service.agentAction(base.id, "rename", name, base.name, null, null, function() {
+		var metadata=base.nameMetadata;
+		service.agentAction(base.id, agentRenameNative ? "rename-native" : "rename", name, base.name, null, null, function() {
 			if (agentDraft != base) return;
 			agentPending = false; cancelAgentRename();
-		});
+		},agentRenameNative && metadata!=null ? metadata.nativeName : null);
 		requestFrame();
 	}
 
@@ -559,7 +584,7 @@ class WorkbenchPanel implements View {
             if (event.key == haxeon.ui.core.UiKey.F2 && draft == null && agentDraft == null) {
 				var key = tree.selectedKey;
 				if (key != null && StringTools.startsWith(key, "a:")) {
-					event.preventDefault(); event.stopPropagation(); beginAgentRename(key.substring(2));
+					event.preventDefault(); event.stopPropagation(); beginAgentRename(key.substring(2),canRenameNative(key.substring(2)));
 				} else if (key != null && StringTools.startsWith(key, "g:") && selected != null && client.canEditGroups()) {
 					event.preventDefault(); event.stopPropagation(); beginGroup(selected, false);
 				}
@@ -586,15 +611,16 @@ private class WorkbenchNameEditor implements View {
     final cancel:Void->Void;
     var focusRequested = false;
 	final kind:String;
+	final label:String;
 	var selection:haxeon.ui.widgets.text.TextSelection;
-    public function new(id:String, value:String, change:String->Void, save:Void->Void, cancel:Void->Void, kind:String = "group") {
+    public function new(id:String, value:String, change:String->Void, save:Void->Void, cancel:Void->Void, kind:String = "group", ?label:String) {
         this.id = id; this.value = value; this.change = change; this.save = save; this.cancel = cancel;
-		this.kind = kind; selection = new haxeon.ui.widgets.text.TextSelection(0, new haxeon.editor.TextDocument(value).codepointCount);
+		this.kind = kind; this.label=label==null ? "Group name" : label; selection = new haxeon.ui.widgets.text.TextSelection(0, new haxeon.editor.TextDocument(value).codepointCount);
     }
     public function build(context:BuildContext):RenderNode {
         var style = new LayoutStyle(); style.width = LayoutAxis.grow(); style.height = LayoutAxis.fixed(28);
         style.padding = new Insets(4, 2, 4, 2);
-        var field = new haxeon.ui.widgets.text.TextField(kind + "-name-" + id, value, function(next) { value = next; change(next); }, style, kind == "agent" ? "Agent session name" : "Group name");
+        var field = new haxeon.ui.widgets.text.TextField(kind + "-name-" + id, value, function(next) { value = next; change(next); }, style, label);
         field.placeholder = kind == "agent" ? "Session name" : "New group";
 		field.selectionProvider = function() return selection;
 		field.onSelectionChange = function(value) selection = value;

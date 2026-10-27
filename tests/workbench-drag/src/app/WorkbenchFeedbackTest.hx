@@ -12,6 +12,7 @@ class WorkbenchFeedbackTest {
  static function require(ok:Bool,why:String):Void {if(!ok) throw why;}
  public static function run():Void {
   var now=1000.0, supported:Null<Bool>=null, requests=0;
+  var nativeSupported=false,inspections=0,nativeTitle="Native Claude title";
   var deferCatalog=false;
   var pendingCatalog:Null<haxeon.rpc.RpcContext<AgentCatalog>>=null;
   var clock=function() return now;
@@ -21,14 +22,26 @@ class WorkbenchFeedbackTest {
    state:"disconnected",turn:null,workspaceRoot:"/workspace",provider:"claude"};
   server.register(WorkspaceAgentProtocol.LIST,function(q,ctx) {
    if(deferCatalog) pendingCatalog=ctx;
-   else ctx.respond({instance:"owner",root:"/workspace",records:[agent],status:"",canMove:supported,canRename:supported});
+   else ctx.respond({instance:"owner",root:"/workspace",records:[agent],status:"",canMove:supported,canRename:supported,nativeRenameProviders:nativeSupported ? ["claude"] : []});
   });
   server.register(WorkspaceTerminalProtocol.LIST,function(q,ctx)
    ctx.respond({instance:"owner",workspaceRoot:"/workspace",next:null,terminals:[],groups:[
     {id:"work",name:"Work",parent:null,cwd:null,revision:1},{id:"other",name:"Other",parent:null,cwd:null,revision:1}]}));
   server.register(WorkspaceAgentProtocol.ACTION,function(q,ctx) {
-   requests++;require(q.action=="move" || q.action=="rename","metadata edit sent a native-session command");
-   if(q.action=="move") agent.group=q.text;else agent.name=q.text;
+   require(["move","rename","inspect-name","rename-native"].indexOf(q.action)>=0,"metadata edit sent a native-session command");
+   if(q.action=="inspect-name") {
+    inspections++;agent.nameMetadata={source:"workbench",nativeName:nativeTitle};
+   } else {
+    requests++;
+    if(q.action=="move") agent.group=q.text;
+    else {
+     if(q.action=="rename-native") {
+      require(q.expectedNativeName==nativeTitle,"native rename omitted editor's inspected baseline");
+      nativeTitle=q.text;agent.nameMetadata={source:"native",nativeName:nativeTitle};
+     }
+     agent.name=q.text;
+    }
+   }
    ctx.respond({record:agent,activity:"",requests:[],error:null});
   });
   var client=new RpcWorkspaceWorkbenchClient(new FeedbackEndpoint(connection),clock);
@@ -58,6 +71,10 @@ class WorkbenchFeedbackTest {
   require(requests==0 && center.entries.length==1 && center.entries[0].message.indexOf("rename agent sessions")>=0,
    "legacy service received rename or did not explain upgrade");
   center.clear();
+  client.agentAction("agent","rename-native","Not supported","Claude",null,null,null,"Native old");pump();submit();
+  require(requests==0 && center.entries.length==1 && center.entries[0].message.indexOf("Native session renaming is unavailable")>=0,
+   "legacy service received a native rename or silently used local rename");
+  center.clear();
   var initialY=row("g:work").y;drop();
   require(requests==0 && center.entries.length==1,"legacy daemon received unsupported move or missing notification");
   require(center.entries[0].message.indexOf("Update the workspace service")>=0,"legacy move showed native resume error");
@@ -84,7 +101,7 @@ class WorkbenchFeedbackTest {
   require(current!=null && current.records[0].name=="Design session","accepted rename was missing or overwritten by stale catalog");
   context.key(haxeon.ui.core.UiEventKind.KeyDown,haxeon.ui.core.UiKey.F2);submit();
   var hasEditor=false;
-  root.walk(function(node) {if(node.semantics!=null && node.semantics.label=="Agent session name") hasEditor=true;});
+  root.walk(function(node) {if(node.semantics!=null && node.semantics.label=="Workbench label") hasEditor=true;});
   require(hasEditor,"F2 did not start agent rename");
   context.text(haxeon.ui.core.UiEventKind.TextInput,"   ");submit();
   context.key(haxeon.ui.core.UiEventKind.KeyDown,haxeon.ui.core.UiKey.Enter);pump();submit();
@@ -96,7 +113,7 @@ class WorkbenchFeedbackTest {
   context.text(haxeon.ui.core.UiEventKind.TextInput,"Unsaved blur");submit();
   var group=row("g:work");context.pointerDown(120,group.y+15,0);context.pointerUp(120,group.y+15,0);submit();
   var editorAfterBlur=false;
-  root.walk(function(node) {if(node.semantics!=null && node.semantics.label=="Agent session name") editorAfterBlur=true;});
+  root.walk(function(node) {if(node.semantics!=null && node.semantics.label=="Workbench label") editorAfterBlur=true;});
   require(!editorAfterBlur && requests==2 && agent.name=="Design session","leaving rename editor saved or stranded the draft: editor="+editorAfterBlur+", requests="+requests+", name="+agent.name+", selected="+panel.tree.selectedKey);
   var unusedPanel:ui.CodexSessionPanel=null;
   var pane=new ui.UiEditorPane("first"),second=new ui.UiEditorPane("second");
@@ -131,6 +148,25 @@ class WorkbenchFeedbackTest {
    if(width<210) require(hasAction("New Codex"),"overflow lost the hidden Codex action");
    if(width<260) require(hasAction("Remove from Workbench"),"overflow lost selected-session removal");
   }
+  nativeSupported=true;now+=2000;client.refreshAgents();pump();submit();
+  var nativeBounds=row("a:agent");
+  context.pointerDown(120,nativeBounds.y+15,1);context.pointerUp(120,nativeBounds.y+15,1);submit();
+  var nativeRename:haxeon.ui.widgets.overlays.MenuItem=null,localRename:haxeon.ui.widgets.overlays.MenuItem=null;
+  for(item in menuItems) {
+   if(item.key=="rename-agent") nativeRename=item;
+   if(item.key=="rename-agent-label") localRename=item;
+  }
+  require(nativeRename!=null && nativeRename.label=="Rename session…" && localRename!=null && localRename.label=="Rename in Workbench…",
+   "menu did not distinguish native rename from local label");
+  nativeRename.onSelect();pump();submit();
+  var nativeEditor=false;
+  root.walk(function(node) {if(node.semantics!=null && node.semantics.label=="Session name") nativeEditor=true;});
+  require(inspections==1 && nativeEditor,"native rename opened without inspecting the current native title");
+  context.text(haxeon.ui.core.UiEventKind.TextInput,"Native rename from UI");submit();
+  context.key(haxeon.ui.core.UiEventKind.KeyDown,haxeon.ui.core.UiKey.Enter);pump();submit();
+  require(nativeTitle=="Native rename from UI" && agent.name==nativeTitle && requests==3,"native editor did not rename both stores");
+  var renamed=client.agents();require(renamed!=null && ui.UiEditorTabs.syncAgentNames([pane,second],renamed),"native name did not update open tabs");
+  require(firstTab.title==nativeTitle && secondTab.title==nativeTitle && foreignTab.title=="Foreign","native rename missed a pane or crossed workspace scope");
   context.dispose();fonts.dispose();client.dispose();connection.close();server.close();
   trace("PASS: old-service feature negotiation, notification routing without tree displacement, dismissal updated-service moves, rename menu, F2, Enter and Escape");
  }

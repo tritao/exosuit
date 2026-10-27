@@ -425,7 +425,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     });
   }
 
-  public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String, ?accepted:Void->Void):Void {
+  public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String, ?accepted:Void->Void, ?expectedNativeName:String):Void {
     var connection = rpc();
     if (connection == null ||(action == "read" ? !canReadAgents() : !canControlAgents())) return;
     if ((action == "move" && (agentCatalog == null || agentCatalog.canMove != true))
@@ -434,6 +434,15 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
         + " agent sessions. Restarting the app does not update a service with active sessions.";
       agentsRevision++;
       return;
+    }
+    if (action == "inspect-name" || action == "rename-native") {
+      var catalog = agentCatalog;
+      var record = catalog == null ? null : Lambda.find(catalog.records,function(record) return record.id==id);
+      var kind = record == null || record.provider == null ? "codex" : record.provider;
+      if (catalog == null || catalog.nativeRenameProviders == null || catalog.nativeRenameProviders.indexOf(kind)<0) {
+        agentActionError = "Native session renaming is unavailable. Use Rename in Workbench, or update the workspace service and provider adapter.";
+        agentsRevision++;return;
+      }
     }
     if (request == null && (action == "queue" || action == "steer" || action == "clear-native-queue")) {
       var current = agentViews.get(id);
@@ -471,8 +480,9 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       text: text,
       request: request,
       model: model,
-      effort: effort
-    }, 20000, function(value) {
+      effort: effort,
+      expectedNativeName:expectedNativeName
+    }, action == "rename-native" ? 60000 : 20000, function(value) {
       if (rpc() != connection || agentTokens.get(id) != selected) return;
       if (mutate) {
         agentMutation = false;
@@ -486,7 +496,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       // Admission metadata is authoritative immediately; older history can finish loading later.
       var currentView = agentViews.get(id);
       if (currentView != null && value.inputToken != null) currentView.inputToken = value.inputToken;
-      if ((action == "rename" || action == "move") && agentCatalog != null) {
+      if ((action == "rename" || action == "move" || action == "inspect-name" || action == "rename-native") && agentCatalog != null) {
         // A catalog read started before this edit must not restore stale metadata.
         agentsRequestToken++; agentsPending = false; agentsNext = 0;
         for (index in 0...agentCatalog.records.length)
