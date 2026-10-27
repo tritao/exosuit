@@ -41,18 +41,16 @@ class TerminalContextMenuTestMain {
 		var calls:Array<String> = [];
 		var run = function(action:String) { calls.push(action); };
 		var running = TerminalContextActions.build(record, true, true, false, run);
-		require(item(running,"stop").enabled && !item(running,"remove").enabled, "running terminal could be removed");
-		item(running,"remove").onSelect();
-		require(calls.length == 0, "disabled destructive action ran");
+		require(item(running,"stop").enabled && ![for (entry in running) entry.key].contains("terminal-remove"), "running terminal offered removal");
 		for (entry in TerminalContextActions.build(record, true, false, false, run))
 			if (["terminal-open","terminal-editor","terminal-panel"].indexOf(entry.key) < 0)
 				require(!entry.enabled, "read-only terminal offered a mutation");
 		for (entry in TerminalContextActions.build(record, true, true, true, run)) require(!entry.enabled, "busy catalog offered an action");
 		record.state = "starting";
-		require(!item(TerminalContextActions.build(record,true,true,false,run),"remove").enabled, "starting terminal could be removed");
+		require(![for (entry in TerminalContextActions.build(record,true,true,false,run)) entry.key].contains("terminal-remove"), "starting terminal offered removal");
 		record.state = "lost"; record.available = false;
 		var lost = TerminalContextActions.build(record,true,true,false,run);
-		require(item(lost,"remove").enabled && !item(lost,"stop").enabled && !item(lost,"open").enabled,
+		require(item(lost,"remove").enabled && ![for (entry in lost) entry.key].contains("terminal-stop") && ![for (entry in lost) entry.key].contains("terminal-open"),
 			"lost terminal actions confused attachment, process state, and removal");
 		item(lost,"remove").onSelect();
 		require(calls.join(",") == "remove", "lost terminal removal did not reach its action");

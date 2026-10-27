@@ -149,35 +149,36 @@ class WorkbenchPanel implements View {
         }
 		if (key != null && StringTools.startsWith(key, "a:")) {
 			var agent = model.agents.get(key.substring(2));
-			if (agent != null) {
-				items.push(new MenuItem("open-codex", "Open agent session", function() openAgent(agent.id)));
-				items.push(new MenuItem("delete-codex-leaf", "Remove from Workbench", function() removeAgent(agent.id),
-					client.agentService().canControlAgents() && !client.agentService().agentBusy() && agentCanBeRemoved(agent)));
+			if (agent == null) return;
+			items.push(new MenuItem("open-codex", "Open agent session", function() openAgent(agent.id)));
+			if (client.agentService().canControlAgents() && agentCanBeRemoved(agent))
+				items.push(new MenuItem("delete-codex-leaf", "Remove from Workbench", function() removeAgent(agent.id), !client.agentService().agentBusy()));
+			showMenu(items, event, valid);
+			return;
+		}
+		if (group != null) {
+			if (canCreateAgent()) items.push(new MenuItem("new-agent", "New Agent Session…", function() edit(group, "new-agent")));
+			if (client.canCreateGroupedTerminals()) items.push(new MenuItem("new-terminal", "New terminal", function() createTerminal(groupId), !client.terminalCatalogBusy()));
+		}
+		if (client.canEditGroups()) {
+			items.push(new MenuItem("new-group", "New group", function() beginGroup({id: workspace.client.WorkspaceIds.create("group"),
+				name: "", cwd: null, revision: 0, parent: group == null ? null : group.id,
+				order: model.nextOrder(group == null ? null : group.id)}, true), editable && !pending));
+			if (group != null) {
+				items.push(new MenuItem("rename-group", "Rename group", function() beginGroup(group, false), editable && !pending, null, true));
+				items.push(new MenuItem("group-directory", "Change Working Directory…", function() edit(group, "directory"), editable));
+				items.push(new MenuItem("group-more", "More Group Actions…", function() edit(group, "more"), editable));
 			}
 		}
-        items.push(new MenuItem("new-pi", "New Pi session", function() {
-            createProvider("pi", groupId);
-        }, group != null && canCreateAgent()));
-        items.push(new MenuItem("new-claude", "New Claude session", function() {
-            createProvider("claude", groupId);
-        }, group != null && canCreateAgent()));
-		items.push(new MenuItem("new-codex", "New Codex session", function() createCodex(groupId, openAgent),
-            group != null && canCreateAgent()));
-        items.push(new MenuItem("new-terminal", "New terminal", function() createTerminal(groupId), group != null && client.canCreateGroupedTerminals() && !client.terminalCatalogBusy()));
-        items.push(new MenuItem("new-group", "New group", function() beginGroup({id: workspace.client.WorkspaceIds.create("group"),
-            name: "", cwd: null, revision: 0, parent: group == null ? null : group.id,
-            order: model.nextOrder(group == null ? null : group.id)}, true), editable && !pending));
-        items.push(new MenuItem("rename-group", "Rename group", function() beginGroup(group, false), group != null && editable && !pending));
-        items.push(new MenuItem("group-directory", "Change Working Directory…", function() edit(group, "directory"), group != null && editable));
-        items.push(new MenuItem("group-inherit", "Use Inherited Working Directory", function() edit(group, "inherit"), group != null && group.cwd != null && editable));
-        items.push(new MenuItem("group-parent", "Move to Group…", function() edit(group, "parent"), group != null && editable));
-        items.push(new MenuItem("group-order", "Change Sort Order…", function() edit(group, "order"), group != null && editable));
-        items.push(new MenuItem("group-remove", "Remove Group", function() edit(group, "remove"), group != null && editable &&
-            client.canRemoveGroups() && !client.agentService().agentBusy() && GroupContextActions.empty(group.id, catalog, client.agentService().agents()), null, true));
-        items.push(new MenuItem("open-folder", "Open folder", function() openFolder(cwd), cwd != null));
-        items.push(new MenuItem("attach-codex", "Attach existing Codex thread…", function() attach(group), group != null && client.agentService().canControlAgents()));
-        items.push(new MenuItem("refresh-terminals", "Refresh terminals", function() client.refreshTerminals(true), client.canReadTerminals()));
-        items.push(new MenuItem("refresh-agents", "Refresh agent status", function() client.agentService().refreshAgents(), client.agentService().canReadAgents()));
+		if (cwd != null) items.push(new MenuItem("open-folder", "Open folder", function() openFolder(cwd)));
+		if (group != null && client.agentService().canControlAgents())
+			items.push(new MenuItem("attach-codex", "Attach existing Codex thread…", function() attach(group)));
+		if (key == null) {
+			items.push(new MenuItem("refresh", "Refresh Workbench", function() {
+				if (client.canReadTerminals()) client.refreshTerminals(true);
+				if (client.agentService().canReadAgents()) client.agentService().refreshAgents();
+			}, client.canReadTerminals() || client.agentService().canReadAgents(), null, true));
+		}
 		showMenu(items, event, valid);
 	}
 
@@ -418,7 +419,7 @@ class WorkbenchPanel implements View {
         }, "capture");
         node.on(haxeon.ui.core.UiEventKind.PointerDown, function(event) {
             if (event.button == 1 && !event.defaultPrevented) {
-                event.preventDefault(); event.stopPropagation(); menu(model.groups.get("work"), event);
+                event.preventDefault(); event.stopPropagation(); menu(null, event);
             }
         });
         return node;

@@ -1497,6 +1497,20 @@ class ExosuitApp implements DesktopUiApplication {
 		var client = workbenchClient;
 		var catalog = client == null ? null : client.terminalCatalog();
 		if (client == null || catalog == null) return;
+		if (action == "new-agent") {
+			if (!canCreateAgentSession()) return;
+			var entries = [for (provider in ["codex", "claude", "pi"])
+				new commandview.CommandViewEntry(provider == "codex" ? "Codex" : provider == "claude" ? "Claude" : "Pi", "New agent session", provider)];
+			host.openCommandView(new commandview.CommandViewProvider("New Agent Session: ", entries, function(_) {}, function(entry, _, _) {
+				if (entry == null) return;
+				host.closeCommandView();
+				if (client != workbenchClient || !canCreateAgentSession()) return;
+				var current = client.terminalCatalog();
+				if (current == null || current.instance != catalog.instance) return;
+				for (candidate in current.groups) if (candidate.id == group.id) { createProviderAgent(entry.value, group.id); break; }
+			}));
+			requestFrame(); return;
+		}
 		var valid = function() {
 			if (client != workbenchClient || !client.canEditGroups() || client.terminalCatalogBusy()) return false;
 			var current = client.terminalCatalog();
@@ -1511,6 +1525,22 @@ class ExosuitApp implements DesktopUiApplication {
 			requestFrame();
 		};
 		switch action {
+			case "more":
+				var entries:Array<commandview.CommandViewEntry> = [];
+				if (group.cwd != null) entries.push(new commandview.CommandViewEntry("Use Inherited Working Directory", "", "inherit"));
+				for (candidate in catalog.groups) if (candidate.id != group.parent && GroupContextActions.canParent(group.id, candidate.id, catalog.groups)) {
+					entries.push(new commandview.CommandViewEntry("Move to Group…", "", "parent")); break;
+				}
+				if (group.parent != null && ![for (entry in entries) entry.value].contains("parent"))
+					entries.push(new commandview.CommandViewEntry("Move to Group…", "", "parent"));
+				entries.push(new commandview.CommandViewEntry("Change Sort Order…", "", "order"));
+				if (client.canRemoveGroups() && !client.agentService().agentBusy() && GroupContextActions.empty(group.id,catalog,client.agentService().agents()))
+					entries.push(new commandview.CommandViewEntry("Remove Group", "Empty groups only", "remove"));
+				host.openCommandView(new commandview.CommandViewProvider("Group Actions: ", entries, function(_) {}, function(entry, _, _) {
+					if (entry == null) return;
+					host.closeCommandView();
+					if (valid()) editWorkspaceGroup(group,entry.value);
+				}));
 			case "inherit": save(group.parent, null, workspace.service.WorkspaceProtocol.order(group.order));
 			case "remove":
 				if (client.canRemoveGroups() && GroupContextActions.empty(group.id, client.terminalCatalog(), client.agentService().agents())) {

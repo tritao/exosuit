@@ -22,13 +22,13 @@ class TerminalContextActions {
 		var add = function(id:String, label:String, enabled:Bool, separator:Bool = false) {
 			items.push(new MenuItem("terminal-" + id, label, function() { if (enabled) run(id); }, enabled, null, separator));
 		};
-		add("open", "Open Terminal", readable);
-		add("rename", "Rename Terminal…", editable);
-		add("group", "Move to Group…", editable);
-		add("editor", "Move Terminal to Editor", readable);
-		add("panel", "Move Terminal to Panel", readable);
-		add("stop", "Stop Terminal", editable && live && record.available, true);
-		add("remove", "Remove from Workbench", editable && !live);
+		if (canRead && record.available) add("open", "Open Terminal", readable);
+		if (canControl) add("rename", "Rename Terminal…", editable);
+		if (canControl) add("group", "Move to Group…", editable);
+		if (canRead && record.available) add("editor", "Move Terminal to Editor", readable);
+		if (canRead && record.available) add("panel", "Move Terminal to Panel", readable);
+		if (canControl && live && record.available) add("stop", "Stop Terminal", editable, true);
+		if (canControl && !live) add("remove", "Remove from Workbench", editable, true);
 		return items;
 	}
 }

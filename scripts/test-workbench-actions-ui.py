@@ -35,7 +35,7 @@ with tempfile.TemporaryDirectory(prefix='exactions-') as temporary:
         subprocess.run(['xdotool', 'mousemove', '--window', window,
                         str(round(bounds['x'] + bounds['width'] / 2)), str(round(bounds['y'] + bounds['height'] / 2)), 'click', '1'], check=True)
     try:
-        for index in range(7):
+        for index in range(9):
             with (fixture / ('app-' + str(index) + '.log')).open('w') as log:
                 app = subprocess.Popen([*RUNNER, str(project), '--open-workbench',
                                         '--capture-dir=' + str(fixture / str(index)), '--capture-seconds=9'],
@@ -51,12 +51,20 @@ with tempfile.TemporaryDirectory(prefix='exactions-') as temporary:
                     subprocess.run(['xdotool', 'type', '--clearmodifiers', 'unmatched-title'], check=True)
                 if index == 4:
                     click(window, locate(layout(2), 'Existing work'))
-                if index in (5, 6):
+                if index in (5, 6, 7):
                     nodes = layout(0)
                     group = next(n for n in nodes if n.get('label') == 'g:work' and n['visible'])['bounds']
                     subprocess.run(['xdotool', 'mousemove', '--window', window, str(round(group['x'] + group['width']/2)), str(round(group['y'] + group['height']/2)), 'click', '3'], check=True)
                     time.sleep(.4)
-                    if index == 6: click(window, locate(layout(5), 'New Codex session'))
+                    if index == 7: click(window, locate(layout(5), 'More Group Actions…'))
+                    if index == 6:
+                        click(window, locate(layout(5), 'New Agent Session…')); time.sleep(.4)
+                        subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Return'], check=True)
+                if index == 8:
+                    diagnostic = json.loads((fixture / '6/app-state.json').read_text())
+                    agent_id = diagnostic['agentCatalog']['records'][0]['id']
+                    node = next(n for n in layout(6) if n.get('label') == 'a:' + agent_id and n['visible'])['bounds']
+                    subprocess.run(['xdotool', 'mousemove', '--window', window, str(round(node['x'] + node['width']/2)), str(round(node['y'] + node['height']/2)), 'click', '3'], check=True)
                 assert app.wait(timeout=90) == 0, (fixture / ('app-' + str(index) + '.log')).read_text()[-4000:]
                 app = None
             nodes = layout(index)
@@ -67,7 +75,7 @@ with tempfile.TemporaryDirectory(prefix='exactions-') as temporary:
                 # The group row is near the toolbar, with no permanent attachment form above it.
                 groups = [node for node in nodes if node.get('label') == 'g:work' and node['visible']]
                 assert groups and groups[0]['bounds']['y'] < 150, (groups, json.loads((fixture / str(index) / 'app-state.json').read_text()))
-            if index == 1: assert all(label in labels for label in ['New Codex session', 'New terminal', 'New group', 'Rename group', 'Change Working Directory…', 'Move to Group…', 'Remove Group', 'Open folder', 'Refresh terminals'])
+            if index == 1: assert all(label in labels for label in ['New Agent Session…', 'New terminal', 'New group', 'Rename group', 'Change Working Directory…', 'More Group Actions…', 'Open folder', 'Refresh Workbench'])
             if index == 2:
                 assert 'Existing work' in labels and 'Other directory' not in labels and 'Existing Codex thread id' in labels, labels
                 assert (project / 'fake-codex.json').exists()
@@ -78,7 +86,13 @@ with tempfile.TemporaryDirectory(prefix='exactions-') as temporary:
                 assert len(records) == 1 and records[0]['thread'] == 'existing' and records[0]['group'] == 'work', diagnostic
                 assert len(diagnostic['agentTabs']) == 1, diagnostic
             if index == 5:
-                assert all(label in labels for label in ['New Codex session', 'New terminal', 'New group', 'Rename group', 'Change Working Directory…', 'Move to Group…']), labels
+                assert not any(label in labels for label in ['Change Sort Order…', 'Remove Group', 'Refresh Workbench', 'New Pi session', 'New Claude session']), labels
+                assert all(label in labels for label in ['New Agent Session…', 'New terminal', 'New group', 'Rename group', 'Change Working Directory…', 'More Group Actions…']), labels
+            if index == 7:
+                assert 'Change Sort Order…' in labels and 'More Group Actions…' not in labels, labels
+            if index == 8:
+                assert 'Open agent session' in labels and 'Remove from Workbench' in labels, labels
+                assert not any(label in labels for label in ['New group', 'Rename group', 'Change Working Directory…', 'Refresh Workbench', 'New Agent Session…']), labels
             if index == 6:
                 diagnostic = json.loads((fixture / str(index) / 'app-state.json').read_text())
                 assert len(diagnostic['agentCatalog']['records']) == 2, diagnostic
