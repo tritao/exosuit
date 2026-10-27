@@ -1252,9 +1252,11 @@ class ExosuitApp implements DesktopUiApplication {
 		workspaceView.hiddenPanels = responsiveRightHidden ? ["context-panel"] : [];
 		workspaceView.availableWidth = Math.max(0, viewportWidth - ActivityBar.WIDTH);
 		workspaceView.availableHeight = Math.max(0.0, viewportHeight - TOOLBAR_HEIGHT - STATUS_HEIGHT);
+		var activityBar = new ActivityBar(sidebar, activityIcons, activateSidebarDestination,
+			application.settings.current.tabTooltipDelay, showManageMenu, manageMenu != null && contextMenu == manageMenu);
+		activityBar.onContextMenu = showActivityBarMenu;
 		var workspace:View = new Row("workspace-with-activity-bar", [
-			new KeyedView("activity-bar", new ActivityBar(sidebar, activityIcons, activateSidebarDestination,
-				application.settings.current.tabTooltipDelay, showManageMenu, manageMenu != null && contextMenu == manageMenu)),
+			new KeyedView("activity-bar", activityBar),
 			new KeyedView("workspace:" + host.layoutContextKey, workspaceView)
 		], fillStyle());
 		var body = new Column("exosuit-body", [
@@ -3417,11 +3419,55 @@ class ExosuitApp implements DesktopUiApplication {
 			new haxeon.ui.widgets.overlays.MenuItem("manage-themes", "Themes…",
 				function() openPreferences("appearance/colors", true))
 		];
+		for (item in activityBarItems(null)) actions.push(item);
 		if (host.isCommandViewActive()) host.closeCommandView();
 		host.dismissLanguagePopup();
 		manageMenu = new CommandMenu(application.commands, application.context, [], x, y, function() return true,
 			function() { contextMenu = null; requestFrame(); }, actions, menuOpenedWithKeyboard(event));
 		contextMenu = manageMenu;
+		requestFrame();
+	}
+
+	/** Show/hide entries for every destination, so a hidden icon can always come back. A destination id adds a
+		leading entry that hides it. The last visible destination cannot be hidden. */
+	function activityBarItems(id:Null<String>):Array<haxeon.ui.widgets.overlays.MenuItem> {
+		var shown = 0;
+		for (mode in sidebar.modes) if (mode.visible) shown++;
+		var items:Array<haxeon.ui.widgets.overlays.MenuItem> = [];
+		var target = id == null ? null : sidebar.find(id);
+		if (target != null && target.visible) {
+			var targetId = target.id;
+			items.push(new haxeon.ui.widgets.overlays.MenuItem("activity-hide", "Hide '" + target.label + "'",
+				function() setActivityVisible(targetId, false), shown > 1));
+		}
+		var first = true;
+		for (mode in sidebar.modes) {
+			var modeId = mode.id, visible = mode.visible;
+			items.push(new haxeon.ui.widgets.overlays.MenuItem("activity-toggle:" + modeId,
+				(visible ? "Hide " : "Show ") + mode.label, function() setActivityVisible(modeId, !visible),
+				!visible || shown > 1, null, first));
+			first = false;
+		}
+		items.push(new haxeon.ui.widgets.overlays.MenuItem("activity-reset-order", "Reset Activity Bar Order",
+			function() { sidebar.resetOrder(); }, sidebar.customOrder, null, true));
+		return items;
+	}
+
+	function setActivityVisible(id:String, visible:Bool):Void {
+		var shown = 0;
+		for (mode in sidebar.modes) if (mode.visible) shown++;
+		var mode = sidebar.find(id);
+		if (mode == null || mode.visible == visible || (!visible && shown <= 1)) return;
+		sidebar.setModeVisible(id, visible);
+	}
+
+	function showActivityBarMenu(id:Null<String>, event:UiEvent):Void {
+		var anchor = contextMenuAnchor(event);
+		if (host.isCommandViewActive()) host.closeCommandView();
+		host.dismissLanguagePopup();
+		contextMenu = new CommandMenu(application.commands, application.context, [], anchor.x, anchor.y,
+			function() return true, function() { contextMenu = null; requestFrame(); }, activityBarItems(id),
+			menuOpenedWithKeyboard(event));
 		requestFrame();
 	}
 

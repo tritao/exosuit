@@ -14,16 +14,40 @@ class SidebarLayoutTestMain {
 		var restored = new haxeon.ui.widgets.sidebar.SidebarModel();
 		require(restored.restore(sidebar.encode()) && restored.width == 410, "shared width did not round trip");
 		var before = restored.encode();
-		for (invalid in ["2|search|1|NaN|", "2|search|1|20|", "2|search|1|410|files,1;files,0", "1|search|1|search,320oops,1"])
+		for (invalid in ["2|search|1|NaN|", "2|search|1|20|", "2|search|1|410|files,1;files,0", "1|search|1|search,320oops,1",
+			"3|search|1|410||files,files", "3|search|1|410|files,1", "3|search|1|410||bad id"])
 			require(!restored.restore(invalid) && restored.encode() == before, "invalid layout changed saved state");
 		require(restored.restore("1|agents|1|agents,480,1;files,220,1"), "deferred destination migration failed");
 		restored.register("agents", function() return new haxeon.ui.widgets.text.Text("Agents"), new haxeon.ui.widgets.sidebar.SidebarModeOptions("Agents"));
 		require(restored.width == 480 && restored.activeId == "agents", "late destination registration changed migrated width");
 
+		checkOrder();
 		checkNarrowLayout();
-		trace("PASS: shared sidebar width, legacy migration, deferred registration, atomic persistence, aligned shared header metrics, narrow clipping and selected-tab reveal through resize");
+		trace("PASS: Activity Bar order and visibility persistence, shared sidebar width, legacy migration, deferred registration, atomic persistence, aligned shared header metrics, narrow clipping and selected-tab reveal through resize");
 		return 0;
 	}
+ static function ids(model:haxeon.ui.widgets.sidebar.SidebarModel):String return [for (mode in model.modes) mode.id].join(",");
+ static function destinations(model:haxeon.ui.widgets.sidebar.SidebarModel):Void {
+  for (name in ["files", "search", "scm"]) model.register(name, function() return new haxeon.ui.widgets.text.Text(name),
+   new haxeon.ui.widgets.sidebar.SidebarModeOptions(name));
+ }
+ /** Reordered and hidden destinations survive a restart; older layouts keep the default order. */
+ static function checkOrder():Void {
+  var sidebar = new haxeon.ui.widgets.sidebar.SidebarModel();
+  destinations(sidebar);
+  require(sidebar.moveMode("scm", "files") && ids(sidebar) == "scm,files,search", "drop before an icon did not reorder");
+  require(sidebar.setModeVisible("files", false) && sidebar.moveMode("search", "scm") && ids(sidebar) == "search,scm,files",
+   "hidden destination lost its place");
+  var restarted = new haxeon.ui.widgets.sidebar.SidebarModel();
+  require(restarted.restore(sidebar.encode()), "saved order rejected");
+  destinations(restarted);
+  require(ids(restarted) == "search,scm,files" && !restarted.find("files").visible, "order or visibility lost on restart");
+  require(restarted.setModeVisible("files", true) && ids(restarted) == "search,scm,files", "re-added destination moved");
+  var legacy = new haxeon.ui.widgets.sidebar.SidebarModel();
+  destinations(legacy);
+  require(legacy.restore("2|files|1|240|files,1;scm,0") && ids(legacy) == "files,search,scm" && !legacy.find("scm").visible,
+   "version 2 layout did not migrate");
+ }
  static function checkHeaderAlignment(fonts:haxeon.ui.FontCollection):Void {
   for (dark in [false, true]) for (width in [180.0, 300.0]) for (height in [36.0, 44.0]) {
    var theme = ui.ExosuitPalette.theme(dark);

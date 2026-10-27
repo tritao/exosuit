@@ -83,9 +83,10 @@ class WorkbenchLayoutModes {
 	}
 	public function refreshContext():Void { if (ready) { apply(); changed(); } }
 	public function refreshSidebar():Void { if (ready) { apply(); changed(); } }
+	/** The preset supplies the default order; a user's Activity Bar order still wins. */
 	function orderSidebar():Void {
 		var order = current.sidebarOrder;
-		sidebar.modes.sort(function(a, b) {
+		sidebar.setDefaultOrder(function(a, b) {
 			var ai = order.indexOf(a.id), bi = order.indexOf(b.id);
 			if (ai < 0) ai = order.length + a.order; if (bi < 0) bi = order.length + b.order;
 			return ai == bi ? a.sequence - b.sequence : ai - bi;

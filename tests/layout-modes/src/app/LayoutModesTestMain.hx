@@ -72,8 +72,16 @@ class LayoutModesTestMain {
 		legacyModes.restoreContext(["D\tdock\t1\t" + legacyDock.snapshotJson(), "L\tregions\t1\t0.5\t0.6\tunused"]);
 		require(legacyModes.bottomChanged && legacyModes.rightChanged, "legacy saved region sizes were not protected");
 		legacyModes.dispose(); legacyRegions.dispose();
+		var userDock = model(), userSide = sidebar(userDock), userRegions = new WorkbenchLayoutControls(userDock);
+		var userModes = new WorkbenchLayoutModes(userDock, userSide, userRegions, function() {});
+		userModes.start("auto");
+		require(userSide.moveMode("scm", "files") && userSide.modes[0].id == "scm", "Activity Bar move did not reorder");
+		userModes.setServiceAvailable(true);
+		require(userSide.modes[0].id == "scm" && userSide.modes[1].id == "files", "Agents preset overrode the user's Activity Bar order");
+		require(userSide.resetOrder() && userSide.modes[0].id == "workbench", "reset did not return to the preset order");
+		userModes.dispose(); userRegions.dispose();
 		modes.dispose(); regions.dispose(); nextModes.dispose(); nextRegions.dispose();
-		trace("PASS: mode defaults, automatic/explicit/preference precedence, reversible presets, manual resize/visibility, sidebar reachability, context flags and restart metadata");
+		trace("PASS: user Activity Bar order over presets, mode defaults, automatic/explicit/preference precedence, reversible presets, manual resize/visibility, sidebar reachability, context flags and restart metadata");
 		return 0;
 	}
 }
