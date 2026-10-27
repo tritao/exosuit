@@ -46,3 +46,17 @@ checkpoint replay and the pinned libtsm combining-mark limit. On POSIX, a
 separate smoke feeds a real PTY stream into the emulator and sends input back.
 NativeKit `nk_pty` session integration and the Pragtical Lua terminal session
 fixtures remain for M12.
+
+Hosts can update the terminal defaults with `Emulator.setDefaultColors()`.
+OSC 10/11 queries then report the current RGB palette. Applications can query
+light/dark appearance with `CSI ? 996 n`, or subscribe to palette updates with
+`CSI ? 2031 h` (disable with `CSI ? 2031 l`). Replies use `CSI ? 997 ; 1 n` for
+dark backgrounds and `CSI ? 997 ; 2 n` for light backgrounds. DECRQM reports the
+subscription state. Only actual palette changes notify subscribers; terminal
+reset disables the subscription. Hosts must drain generated replies after a
+palette update even when the PTY is idle. Remote renderers discard their mirror's
+notifications because the workspace service owns the PTY reply stream.
+
+Applications that cache startup RGB colours without subscribing or re-querying
+will retain their old styling across a host theme change. Codex CLI 0.164.0 has
+this limitation; terminal notifications alone cannot refresh its cached palette.

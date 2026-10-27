@@ -44,6 +44,20 @@ class TerminalThemeTests {
       +"  if select.select([fd],[],[],.1)[0]: result+=os.read(fd,4096)\n"
       +"finally: termios.tcsetattr(fd,termios.TCSANOW,old); os.close(fd)\n"
       +"print(sys.argv[1]+result.hex(),flush=True)\n");
+    var subscriber=root+"/watch-terminal-colors.py";
+    sys.io.File.saveContent(subscriber,
+      "import os,termios,tty,select,time\n"
+      +"fd=os.open('/dev/tty',os.O_RDWR); old=termios.tcgetattr(fd); result=b''\n"
+      +"try:\n"
+      +" tty.setraw(fd); os.write(fd,b'\\x1b[?2031h'); print('THEME_READY',flush=True); end=time.monotonic()+5\n"
+      +" while b'\\x1b[?997;1n' not in result and time.monotonic()<end:\n"
+      +"  if select.select([fd],[],[],.1)[0]: result+=os.read(fd,4096)\n"
+      +" assert b'\\x1b[?997;1n' in result, result\n"
+      +" result=b''; os.write(fd,b'\\x1b]11;?\\x07')\n"
+      +" while not result.endswith(b'\\x07') and time.monotonic()<end:\n"
+      +"  if select.select([fd],[],[],.1)[0]: result+=os.read(fd,4096)\n"
+      +"finally: os.write(fd,b'\\x1b[?2031l'); termios.tcsetattr(fd,termios.TCSANOW,old); os.close(fd)\n"
+      +"print('NOTIFIED:'+result.hex(),flush=True)\n");
     var clock=function() return Sys.time()*1000;
     var pair=MemoryTransport.pair(), client=new RpcConnection(pair.client,clock), server=new RpcConnection(pair.server,clock);
     var manager=new WorkspaceTerminalManager("workspace","theme-test",root);
@@ -63,7 +77,11 @@ class TerminalThemeTests {
     until(function() return text(session.emulator).indexOf(light)>=0,"Initial light theme was not reported by the service");
     // No geometry changes: theme-only updates must reach the service before
     // input starts another application that probes its background.
+    session.write(Bytes.ofString("python3 '"+subscriber+"'\n"));
+    until(function() return text(session.emulator).indexOf("THEME_READY")>=0,"Theme subscriber did not start");
     backend.setDefaultColors(0xdce3ec,0x171c23);
+    until(function() return text(session.emulator).indexOf("NOTIFIED:1b5d31313b7267623a313731372f316331632f3233323307")>=0,
+      "Idle TUI did not receive a live notification followed by the updated OSC palette");
     session.write(Bytes.ofString("python3 '"+script+"' DARK:\n"));
     var dark="DARK:1b5d31303b7267623a646364632f653365332f656365631b5c1b5d31313b7267623a313731372f316331632f323332331b5c";
     until(function() return text(session.emulator).indexOf(dark)>=0,"Theme change at unchanged geometry was not reported");

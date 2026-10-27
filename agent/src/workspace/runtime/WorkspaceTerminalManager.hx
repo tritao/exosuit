@@ -100,6 +100,13 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
     && name.length <= 128 && name.indexOf("\t") < 0 && name.indexOf("\n") < 0 && name.indexOf("\r") < 0;
   static function validTheme(theme:Null<TerminalTheme>):Bool return theme == null
     || theme.foreground >= 0 && theme.foreground <= 0xffffff && theme.background >= 0 && theme.background <= 0xffffff;
+  static function applyTheme(t:RuntimeTerminal, theme:Null<TerminalTheme>):Void {
+    if (theme == null) return;
+    t.emulator.setDefaultColors(theme.foreground, theme.background);
+    // A subscribed, idle TUI must receive the notification without writing output first.
+    var replies = t.emulator.takeReplies();
+    if (t.state == "running" && t.backend != null && replies.length > 0) t.backend.write(replies);
+  }
   static function validAgentProvider(provider:Null<String>):Bool return provider == null || ["codex", "claude", "pi"].indexOf(provider) >= 0;
   static function profile(record:TerminalRecord):TerminalProfile return record.agentProvider == null
     ? TerminalProfile.shell(record.cwd) : TerminalProfile.agent(record.agentProvider, record.cwd);
@@ -455,7 +462,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
       if (control && t.state == "running" && controller(r.id) == null) controllers.set(r.id, connection);
       var openingTheme:Null<TerminalTheme> = r.theme;
       if (openingTheme != null && controller(r.id) == connection)
-        t.emulator.setDefaultColors(openingTheme.foreground, openingTheme.background);
+        applyTheme(t, openingTheme);
       if (r.watch == true) {
         var watch = Lambda.find(watchers, function(w) return w.connection == connection && w.id == r.id);
         if (watch == null) watchers.push({connection:connection, id:r.id, stamp:changeStamp(t, connection)});
@@ -599,7 +606,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
       }
       try {
         var resizedTheme:Null<TerminalTheme> = r.theme;
-        if (resizedTheme != null) t.emulator.setDefaultColors(resizedTheme.foreground, resizedTheme.background);
+        applyTheme(t, resizedTheme);
         if (t.columns != r.columns || t.rows != r.rows) {
           if (t.state == "running") t.backend.resize(r.columns, r.rows);
           t.emulator.resize(r.columns, r.rows);
@@ -666,7 +673,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         save(starting);
         if (t.backend != null) t.backend.close();
         var restartingTheme:Null<TerminalTheme> = r.theme;
-        if (restartingTheme != null) t.emulator.setDefaultColors(restartingTheme.foreground, restartingTheme.background);
+        applyTheme(t, restartingTheme);
         t.backend = LocalPtyBackend.spawn(profile(record), t.columns, t.rows);
         t.state = "running"; t.exitCode = 0;
         var running = copy(starting); running.state = "running"; running.revision += 1;

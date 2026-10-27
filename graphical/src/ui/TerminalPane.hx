@@ -168,7 +168,11 @@ class TerminalPane implements AgentTerminalPanel {
 	function syncDefaultColors():Void {
 		var fg = rgbColor(foreground), bg = rgbColor(background);
 		session.emulator.setDefaultColors(fg, bg);
-		if (remoteBackend != null) remoteBackend.setDefaultColors(fg, bg);
+		if (remoteBackend != null) {
+			// The service owns query replies and palette notifications for remote PTYs.
+			session.emulator.takeReplies();
+			remoteBackend.setDefaultColors(fg, bg);
+		}
 	}
 
 	static function rgbColor(color:Color):Int

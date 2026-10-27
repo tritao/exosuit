@@ -109,6 +109,42 @@ static int default_colors_contract(void) {
     return 0;
 }
 
+static int theme_notifications_contract(void) {
+    terminalkit_handle *kit = NULL;
+    REQUIRE(terminalkit_open(32, 4, 1000, "xterm-256color", &kit));
+    terminalkit_set_output_callback(kit, collect_reply, NULL);
+    terminalkit_set_default_colors(kit, 0x202a36, 0xffffff);
+    clear_replies();
+    REQUIRE(feed(kit, "\033[?996n\033[?2031$p") >= 0);
+    REQUIRE(!strcmp(replies, "\033[?997;2n\033[?2031;2$y"));
+    clear_replies();
+    terminalkit_set_default_colors(kit, 0xdce3ec, 0x171c23);
+    REQUIRE(reply_size == 0); /* Opt-in only; shells must not receive notifications. */
+    REQUIRE(feed(kit, "\033[?2031h\033[?2031$p") >= 0);
+    REQUIRE(!strcmp(replies, "\033[?2031;1$y"));
+    clear_replies();
+    terminalkit_set_default_colors(kit, 0x202a36, 0xffffff);
+    REQUIRE(!strcmp(replies, "\033[?997;2n"));
+    clear_replies();
+    terminalkit_set_default_colors(kit, 0x202a36, 0xffffff);
+    REQUIRE(reply_size == 0);
+    terminalkit_set_default_colors(kit, 0xdce3ec, 0x171c23);
+    REQUIRE(!strcmp(replies, "\033[?997;1n"));
+    clear_replies();
+    REQUIRE(feed(kit, "\033]11;?\007") >= 0);
+    REQUIRE(!strcmp(replies, "\033]11;rgb:1717/1c1c/2323\007"));
+    REQUIRE(feed(kit, "\033[?2031l") >= 0);
+    clear_replies();
+    terminalkit_set_default_colors(kit, 0x202a36, 0xffffff);
+    REQUIRE(reply_size == 0);
+    REQUIRE(feed(kit, "\033[?2031h\033c") >= 0);
+    clear_replies();
+    terminalkit_set_default_colors(kit, 0xdce3ec, 0x171c23);
+    REQUIRE(reply_size == 0); /* Reset clears the subscription. */
+    terminalkit_close(kit);
+    return 0;
+}
+
 static int history_contract(void) {
     terminalkit_handle *source = NULL, *restored = NULL;
     REQUIRE(terminalkit_open(32, 4, 1000, "xterm-256color", &source));
@@ -174,6 +210,7 @@ static int history_contract(void) {
 
 int main(void) {
     REQUIRE(default_colors_contract() == 0);
+    REQUIRE(theme_notifications_contract() == 0);
     REQUIRE(history_contract() == 0);
     REQUIRE(row_fingerprints() == 0);
     terminalkit_handle *kit = NULL, *restored = NULL;
