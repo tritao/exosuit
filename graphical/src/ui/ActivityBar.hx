@@ -63,7 +63,7 @@ class ActivityBar implements View {
 			button.accessibilityLabel = mode.label;
 			button.selected = model.visible && model.activeId == id;
 			items.push(new KeyedView(id, new ActivityBarItem(new TabTooltip("activity-tooltip:" + id, button,
-				new Text(mode.label, null, context.theme.tokens.textPrimary, new TextStyleOverride(null, 13, null, TextWrap.None)),
+				new Text(mode.label, null, null, TextStyleOverride.paragraph(TextWrap.None)),
 				function() return new Rect(0, 0, context.viewportWidth, context.viewportHeight), tooltipDelay, Right,
 				hover, visibleTooltip.value == "activity-tooltip:" + id), button.selected)));
 		}
@@ -79,7 +79,7 @@ class ActivityBar implements View {
 		gear.accessibilityLabel = "Manage";
 		gear.selected = manageOpen;
 		items.push(new KeyedView("manage", new ActivityBarItem(new TabTooltip("activity-tooltip:manage", gear,
-			new Text("Manage", null, context.theme.tokens.textPrimary, TextStyleOverride.text(13)),
+			new Text("Manage"),
 			function() return new Rect(0, 0, context.viewportWidth, context.viewportHeight), tooltipDelay, Right,
 			hover, visibleTooltip.value == "activity-tooltip:manage"), manageOpen)));
 		return new Column("activity-bar", items, style).build(context);

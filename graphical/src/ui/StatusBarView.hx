@@ -248,7 +248,7 @@ class StatusBarView implements View {
 	}
 	function tooltip(key:String, anchor:View, text:String):TabTooltip {
 		var tip = new TabTooltip("status-tooltip:" + key, anchor,
-			new Text(text, null, null, new TextStyleOverride(null, 12, null, TextWrap.WordCharacter)),
+			new Text(text, null, null, TextStyleOverride.paragraph(TextWrap.WordCharacter)),
 			data.viewport, 0.5, Above);
 		tip.fillAnchor = true;
 		return tip;

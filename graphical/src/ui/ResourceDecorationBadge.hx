@@ -29,7 +29,7 @@ class ResourceDecorationBadge implements View {
 		if (decoration.inherited) description += "\nFrom " + decoration.sourcePath;
 		var tooltip = new TabTooltip("resource-decoration:" + decoration.owner + ":" + decoration.id + ":" + decoration.path,
 			anchor, new Text(description, null, null,
-				new TextStyleOverride(null, 12, null, TextWrap.WordCharacter)),
+				TextStyleOverride.paragraph(TextWrap.WordCharacter)),
 			function() return new Rect(0, 0, context.viewportWidth, context.viewportHeight), 0.5, Above);
 		tooltip.fillAnchor = true;
 		var node = tooltip.build(context);

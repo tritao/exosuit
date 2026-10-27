@@ -158,8 +158,8 @@ class EditorTabsView implements View {
 			if (tabs.items[index].key == tabs.selectedKey) active = header;
 			var textStyle = new LayoutStyle();
 			var tooltip = new TabTooltip("tab-tooltip:" + tabs.items[index].key,
-				new BuiltTabView(header), new Text(tooltips.exists(tabs.items[index].key) ? tooltips.get(tabs.items[index].key) : tabs.items[index].label, textStyle, context.theme.tokens.textPrimary,
-					new TextStyleOverride(null, 13, null, TextWrap.WordCharacter)),
+				new BuiltTabView(header), new Text(tooltips.exists(tabs.items[index].key) ? tooltips.get(tabs.items[index].key) : tabs.items[index].label, textStyle, null,
+					TextStyleOverride.paragraph(TextWrap.WordCharacter)),
 				function() return viewport == null ? new Rect(0, 0, context.viewportWidth, context.viewportHeight) : viewport.globalBounds(),
 				tooltipDelay, Below, hover, visibleTooltip == "tab-tooltip:" + tabs.items[index].key);
 			tooltip.startAtAnchorMiddle = true;

@@ -2400,7 +2400,7 @@ class ExosuitApp implements DesktopUiApplication {
 		button.variant = custom ? ButtonVariant.Navigation : ButtonVariant.Secondary;
 		button.leadingIcon = icon;
 		return custom || label == "Terminal" ? new TabTooltip("toolbar-tooltip:" + label, button,
-			new Text(label == "Terminal" && !canShowTerminal() ? terminalCreationFailure() : label, null, theme.tokens.textPrimary, TextStyleOverride.text(12)),
+			new Text(label == "Terminal" && !canShowTerminal() ? terminalCreationFailure() : label),
 			function() return new Rect(0, 0, viewportWidth, viewportHeight), 0.5) : button;
 	}
 
@@ -2542,7 +2542,7 @@ class ExosuitApp implements DesktopUiApplication {
 		button.iconSize = 16;
 		button.accessibilityLabel = label;
 		return new TabTooltip("explorer-action-tooltip:" + label, button,
-			new Text(readOnly ? label + " (remote files are read-only)" : label, null, theme.tokens.textPrimary, TextStyleOverride.text(12)),
+			new Text(readOnly ? label + " (remote files are read-only)" : label),
 			function() return new Rect(0, 0, viewportWidth, viewportHeight), 0.5);
 	}
 

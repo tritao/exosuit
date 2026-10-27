@@ -41,6 +41,32 @@ private class ToolbarTooltipFixture implements haxeon.ui.core.View {
 	}
 }
 
+private class TooltipTypographyFixture implements haxeon.ui.core.View {
+	final standard:Bool;
+	public function new(standard:Bool) this.standard = standard;
+	public function build(context:haxeon.ui.core.BuildContext):haxeon.ui.core.RenderNode {
+		var anchorStyle = new haxeon.ui.LayoutStyle();
+		anchorStyle.width = haxeon.ui.LayoutAxis.fixed(32); anchorStyle.height = haxeon.ui.LayoutAxis.fixed(32);
+		var anchor = new haxeon.ui.widgets.controls.Button("+", anchorStyle, null, "typography-trigger");
+		var content = new haxeon.ui.widgets.layout.Column("typography-content", [
+			new haxeon.ui.widgets.KeyedView("plain", new haxeon.ui.widgets.text.Text("Plain tooltip")),
+			new haxeon.ui.widgets.KeyedView("wrapped", new haxeon.ui.widgets.text.Text("Wrapped tooltip", null, null,
+				haxeon.ui.core.TextStyleOverride.paragraph(haxeon.ui.TextWrap.WordCharacter))),
+			new haxeon.ui.widgets.KeyedView("rich", new haxeon.ui.widgets.text.Text("Rich tooltip", null, null,
+				haxeon.ui.core.TextStyleOverride.text(17)))
+		]);
+		var tooltip:haxeon.ui.core.View;
+		if (standard) tooltip = new haxeon.ui.widgets.overlays.Tooltip("typography-tooltip", anchor, content, 0, 36);
+		else tooltip = new TabTooltip("typography-tab-tooltip", anchor, content,
+			function() return new Rect(0, 0, context.viewportWidth, context.viewportHeight), 0,
+			Below, new ui.TooltipHoverGroup(context.animations, function(_) {}, 0), true);
+		return new haxeon.ui.widgets.layout.Column("typography-fixture", [
+			new haxeon.ui.widgets.KeyedView("outside", new haxeon.ui.widgets.text.Text("Outside text")),
+			new haxeon.ui.widgets.KeyedView("tooltip", tooltip)
+		]).build(context);
+	}
+}
+
 private class NarrowTooltipFixture implements haxeon.ui.core.View {
 	final placement:haxeon.ui.widgets.overlays.TooltipPlacement;
 	final midpoint:Bool;
@@ -117,6 +143,41 @@ private class FeedbackFixture implements haxeon.ui.core.View {
 
 class TabTooltipTestMain {
 	static function require(value:Bool, message:String):Void { if (!value) throw message; }
+	static function checkTooltipTypography(fonts:haxeon.ui.FontCollection):Void {
+		for (dark in [false, true]) for (standard in [false, true]) for (size in [13.0, 15.0]) for (density in [1.0, 2.0]) {
+			var theme = ui.ExosuitPalette.theme(dark);
+			if (size != 13) theme.tokens.tooltipFontSize = size;
+			var context = new haxeon.ui.core.UiContext(null, fonts, theme);
+			context.buildContext.environment.pixelDensity = density;
+			var fixture = new ui.TooltipOverlayHost(new TooltipTypographyFixture(standard));
+			var root = context.submit(fixture, new haxeon.ui.LayoutFrame(320, 240));
+			var anchor:haxeon.ui.core.RenderNode = null;
+			root.walk(function(node) { if (node.styleKey == "typography-trigger") anchor = node; });
+			var bounds = anchor.globalBounds();
+			context.pointerMove(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+			root = context.submit(fixture, new haxeon.ui.LayoutFrame(320, 240));
+			var labels = 0;
+			root.walk(function(node) {
+				if (node.styleType == "tooltip") {
+					var border = node.computedStyle.get(haxeon.ui.style.StyleProperty.BorderColor);
+					require(border.red == theme.tokens.border.red && border.green == theme.tokens.border.green && border.blue == theme.tokens.border.blue,
+						"tooltip border is not the subtle theme border");
+				}
+				if (node.layout.text == null) return;
+				var expected = switch node.layout.text {
+					case "Plain tooltip", "Wrapped tooltip": size;
+					case "Rich tooltip": 17.0;
+					case "Outside text": 16.0;
+					case _: return;
+				};
+				require(node.layout.textStyle.fontSize == expected, "tooltip typography lost inheritance or an explicit override: " + node.layout.text + " actual=" + node.layout.textStyle.fontSize + " expected=" + expected + " standard=" + standard);
+				labels++;
+			});
+			require(labels == 4, "tooltip typography fixture lost labels");
+			context.dispose();
+		}
+	}
+
 	static function main():Int {
 		// Every rim point has one resize direction, including the wider corner
 		// arms; inset controls remain client space even close to a corner.
@@ -175,6 +236,7 @@ class TabTooltipTestMain {
 		require(edge.x == -108 && 580 + edge.y + 30 <= 594, "right tooltip did not flip or clamp at viewport edges");
 		var fonts = haxeon.ui.FontCollection.create();
 		fonts.add(Sys.getCwd() + "/../../haxeon/packages/ui/vendor/skribidi/example/data/IBMPlexSans-Regular.ttf");
+		checkTooltipTypography(fonts);
 		var session = haxeon.ui.LayoutSession.create();
 		var context = new haxeon.ui.core.UiContext(session, fonts, ui.ExosuitPalette.theme(false));
 		var fixture = new NarrowTooltipFixture();
@@ -312,7 +374,7 @@ class TabTooltipTestMain {
 		context.dispose(); session.dispose(); fonts.dispose();
 		var settings = new Settings(); settings.tabTooltipDelay = 1.2;
 		require(settings.copy().tabTooltipDelay == 1.2, "settings copy lost tooltip delay");
-		trace("PASS: tooltip timing and placement, text fit, ellipsis boundaries, and fractional editor measurement");
+		trace("PASS: shared tooltip typography, inheritance and overrides; tooltip timing/placement, text fit and fractional measurement");
 		return 0;
 	}
 }
