@@ -3096,10 +3096,12 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function readScmOriginal(source:ScmSource, repositoryId:String, reference:scm.ScmRef, path:haxe.io.Bytes,
 		complete:Null<String>->Null<scm.ScmError>->Void):Void {
+		// A remote source answers over the workspace connection, whose events do not redraw the window.
 		source.originalBytes(repositoryId, reference, path, function(result) {
-			if (result.error != null || result.value == null) { complete(null, result.error); return; }
-			if (result.value.binary) { complete(null, new scm.ScmError("binary", "Binary files cannot be shown as text diffs")); return; }
-			complete(result.value.bytes.toString(), null);
+			if (result.error != null || result.value == null) complete(null, result.error);
+			else if (result.value.binary) complete(null, new scm.ScmError("binary", "Binary files cannot be shown as text diffs"));
+			else complete(result.value.bytes.toString(), null);
+			requestFrame();
 		});
 	}
 
@@ -3112,8 +3114,10 @@ class ExosuitApp implements DesktopUiApplication {
 			var repoRelative = pathUnderScope(scope, repository.root);
 			if (repoRelative == null) { complete(null, null, null); return; }
 			var path = repoRelative.length == 0 ? relative : repoRelative + "/" + relative;
+			// The result arrives over the workspace connection, whose events do not redraw the window.
 			WorkspaceFileReader.read(client, attachment.fileWorkspace(), "root", path, null, function(result) {
 				complete(null, result.error == null ? result.contents : null, null);
+				requestFrame();
 			});
 			return;
 		}
@@ -3142,7 +3146,9 @@ class ExosuitApp implements DesktopUiApplication {
 		var workspaceId = attachment.fileWorkspace();
 		client.stat(workspaceId, "root", path, function(stat) {
 			if (workspaceAttachment != attachment || stat == null || stat.entry == null || stat.entry.kind != "file") {
-				reportScmReadError("The changed file is no longer available"); return;
+				reportScmReadError("The changed file is no longer available");
+				requestFrame();
+				return;
 			}
 			var rootName = scope;
 			var slash = rootName.lastIndexOf("/");
@@ -3153,7 +3159,11 @@ class ExosuitApp implements DesktopUiApplication {
 				var existing = host.workspaceFile(scope, "root", path);
 				if (existing != null) existing.selectSearchMatch(line, 0, 0);
 			}
-		}, function(error) reportScmReadError(error == null ? "Could not open changed workspace file" : error.message));
+			requestFrame();
+		}, function(error) {
+			reportScmReadError(error == null ? "Could not open changed workspace file" : error.message);
+			requestFrame();
+		});
 	}
 
 	static function pathUnderScope(scope:String, root:String):Null<String> {
