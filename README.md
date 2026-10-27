@@ -121,6 +121,65 @@ Selection and Reindent Document are available in Commands for Haxe files; each
 changes leading indentation as one undoable operation, preserving selections
 and multiline literal/comment contents. Opening a file never rewrites whitespace.
 
+## DevTools
+
+Run Exosuit with a separate Haxeon DevTools window and an available HLDI profiler endpoint:
+
+```sh
+python scripts/devtools.py --launch-exosuit
+```
+
+For an existing development session, use **Developer: Open DevTools** in the command palette.
+`python scripts/run.py --open-devtools` opens the inspector at startup. These paths provide UI
+frame metrics without function instrumentation. Function sampling additionally requires a runtime
+launched with `hl --diagnostics PORT`; pass `--profiler-port=PORT` to `scripts/devtools.py`, or set
+`EXOSUIT_DEVTOOLS_PROFILER_PORT` before opening DevTools from Exosuit. HLDI supports one profiler
+client at a time, so use either DevTools or the `--profile` recorder for that endpoint.
+
+DevTools shows CPU frame history, phase durations, heap/GC counters, a live render tree, computed
+properties with style provenance, and a selection overlay in the application. **Follow hovered
+widget** follows the target's hovered element. **Track widget invalidations and paint** enables
+bounded per-frame widget events; selecting an event selects its widget in the current application.
+Properties always describe the current tree, even when an older frame is selected. The frame chart
+measures UI submission and rendering CPU time; background polling, host preparation, GPU execution
+and end-of-frame GC are outside that total. Use HLDI/Perfetto for the broader trace. Paint durations
+measure custom Haxe painters; native rendering and layout durations remain frame-level totals.
+
+The viewer polls at most four times per second and retains 240 frames and up to 1000 tree nodes.
+Payload limits may reduce the visible tree further. Truncation and frame-history gaps are reported.
+Closing or disconnecting the viewer clears highlighting and detailed probes. The local endpoint is
+created only on demand, in a private directory on Unix or a same-user named pipe on Windows.
+
+**Start sampling** uses 250 Hz sampling. **Record HLPC** records through the existing HLDI client;
+**Stop capture** ends the sampling session before closing the capture. **Export Perfetto trace**
+writes a `.pftrace` beside that file for full trace analysis. Choose the output with
+`--capture-path=/absolute/path/session.hlpc`. An existing capture can be viewed as a report with
+`python scripts/devtools.py --profile-capture=/path/session.hlpc`.
+
+**Save inspection** writes `<capture-path>.ui.json`, containing the retained frame metrics, compact
+tree, selected widget properties and selected frame's widget events. Open it with
+`python scripts/devtools.py --inspection-capture=/path/session.hlpc.ui.json`.
+This is a saved inspection snapshot; it does not reconstruct every widget's properties at every frame.
+
+The native UI libraries must be built as for the editor. The launcher adds the standard
+`haxeon/out/packages/ui/native` library directories and preserves an existing library search path.
+The viewer uses NativeKit's bounded local transport. HLDI decoding runs in a bootstrap-Haxe helper
+process, reusing `ProfilerService`; its output worker coalesces live snapshots so a slow viewer does
+not block the decoder. Runtime profiler buffer pressure is still visible through its stall counters.
+
+Focused validation (Linux/X11):
+
+```sh
+./haxeon/scripts/haxeon run --project tests/devtools/haxeon.json
+xvfb-run -a python scripts/test-devtools.py
+xvfb-run -a python scripts/benchmark-devtools.py
+```
+
+The smoke test covers local attachment, selection, deltas, detailed events, reconnect, a slow
+profiler consumer, HLPC recording/export, separate-window rendering and offline inspection loading.
+The synthetic overhead runner compares a continuously rendered 202-node UI with no client, an idle
+client, inspection and detailed tracking, writing results under `build/devtools-overhead`.
+
 ## Local stable build
 
 Save the current host build outside the disposable build directories, then launch

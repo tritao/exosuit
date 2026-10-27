@@ -1,5 +1,7 @@
 package app;
 
+import haxe.io.Bytes;
+
 import haxeon.ui.host.DesktopUiHost;
 import haxeon.ui.host.DesktopUiHostSession;
 import haxeon.ui.host.DesktopUiHostOptions;
@@ -18,6 +20,9 @@ class GraphicalMain {
 	static var session:Null<DesktopUiHostSession> = null;
 	static var terminalWorkspaces:Null<workspace.client.LocalTerminalWorkspacePool> = null;
 	static var allocationProfile:Null<String> = null;
+	static var inspection:Null<devtools.InspectionAgent> = null;
+	static var devtoolsProcess:Null<sys.io.ChildProcess> = null;
+	static final devtoolsOutput:haxe.io.Bytes = haxe.io.Bytes.alloc(4096);
 
 	static function main():Int {
 		open(Sys.args());
@@ -37,6 +42,11 @@ class GraphicalMain {
 		var current = session;
 		if (current == null) return 0;
 		session = null;
+		if (inspection != null) {
+			var target:devtools.InspectionAgent = cast inspection;
+			var endpoint = target.path;
+			inspection.dispose(); inspection = null; devtools.DevToolsEndpoint.cleanup(endpoint);
+		}
 		var workspaces = terminalWorkspaces;
 		terminalWorkspaces = null;
 		if (workspaces != null) workspaces.dispose();
@@ -119,6 +129,7 @@ class GraphicalMain {
 		var reportedFirstFrame = false;
 		var memoryFrames = 0;
 		host.captureReady = function() {
+			if (inspection != null) inspection.recordFrame();
 			if (startupMemory != null) {
 				memoryFrames++;
 				if (memoryFrames == 1) StartupMemory.sample(startupMemory, "03-first-frame");
@@ -170,12 +181,43 @@ class GraphicalMain {
 			if (pluginManifest != null && !instance.application.loadPluginManifest(pluginManifest))
 				Sys.println('exosuit: could not load plugin manifest "$pluginManifest"');
 			var applicationPoll = context.onPoll;
+			instance.context().commands.register(new haxeon.ui.core.Command("devtools.open", "Developer: Open DevTools", function() {
+				try {
+					var projectRoot = Sys.getEnv("EXOSUIT_PROJECT_ROOT");
+					if (projectRoot == null) throw "Launch through scripts/run.py to locate DevTools";
+					if (inspection == null) {
+						var endpoint = devtools.DevToolsEndpoint.create();
+						inspection = new devtools.InspectionAgent(endpoint, context, instance.context());
+					}
+					if (devtoolsProcess != null && devtoolsProcess.pollExit() == -1) return;
+					if (devtoolsProcess != null) devtoolsProcess.close();
+					var python = Sys.getEnv("EXOSUIT_HAXEON_CLI_PYTHON");
+					var activeInspection:devtools.InspectionAgent = cast inspection;
+					var toolArguments = [projectRoot + "/scripts/devtools.py", "--endpoint=" + activeInspection.path];
+					var profilerPort = Sys.getEnv("EXOSUIT_DEVTOOLS_PROFILER_PORT");
+					if (profilerPort != null) toolArguments.push("--profiler-port=" + profilerPort);
+					devtoolsProcess = sys.io.Process.spawn(python == null ? "python3" : python,
+						toolArguments, projectRoot);
+				} catch (error:Dynamic) instance.application.reportError("devtools", Std.string(error));
+			}));
 			context.onPoll = function() {
+				if (inspection != null) inspection.poll();
+				if (devtoolsProcess != null) {
+					devtoolsProcess.readStdout(devtoolsOutput, 0, devtoolsOutput.length);
+					var count = devtoolsProcess.readStderr(devtoolsOutput, 0, devtoolsOutput.length);
+					if (count > 0) Sys.println(devtoolsOutput.getString(0, count));
+					var code = devtoolsProcess.pollExit();
+					if (code != -1) {
+						devtoolsProcess.close(); devtoolsProcess = null;
+						if (code != 0) instance.application.reportError("devtools", "DevTools exited with status " + code);
+					}
+				}
 				if (terminalWorkspaces != null) terminalWorkspaces.poll();
 				if (applicationPoll != null) applicationPoll();
 				if (terminalWorkspaces != null) terminalWorkspaces.retainRoots(
 					[for (terminal in instance.host.allTerminalTabs()) if (terminal.remote && !terminal.disposed) terminal.workspaceRoot]);
 			};
+			if (arguments.indexOf("--open-devtools") >= 0) instance.context().commands.execute("devtools.open");
 			app = instance;
 			if (startupMemory != null) StartupMemory.sample(startupMemory, "02-app-created");
 			return instance;

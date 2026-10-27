@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "package": {
+    "name": "exosuit-devtools-test"
+  },
+  "entry": "app.DevToolsTests",
+  "sourceRoots": [
+    "src"
+  ],
+  "scopeSourceRoots": false,
+  "dependencies": {
+    "pragtical_hx": {
+      "path": "../.."
+    }
+  },
+  "target": "host",
+  "outputDir": "build"
+}

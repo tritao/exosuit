@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "package": {
+    "name": "haxeon-devtools"
+  },
+  "entry": "app.DevToolsMain",
+  "sourceRoots": [
+    "src"
+  ],
+  "scopeSourceRoots": false,
+  "dependencies": {
+    "pragtical_hx": {
+      "path": ".."
+    }
+  },
+  "target": "host",
+  "outputDir": "build"
+}

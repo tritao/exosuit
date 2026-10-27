@@ -111,10 +111,12 @@ class NativeRpcHub {
 			case Raw(kind, source, _, result, _, _, data):
 				var key = source.rawValue();
 				if (kind == EventKind.TransportAccepted) {
+					// All hubs observe the shared pump. Only the listener's owner may adopt its transport.
+					var callback = listeners.get(key);
+					if (callback == null) return;
 					var payload:TransportAcceptedEvent = data;
 					var handle = OwnedTransportHandle.adopt(payload.get_transport());
-					var callback = listeners.get(key);
-					if (callback == null || streamsCount() >= 32) {
+					if (streamsCount() >= 32) {
 						handle.close();
 						return;
 					}
