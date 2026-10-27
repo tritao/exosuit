@@ -211,6 +211,17 @@ static int history_contract(void) {
 int main(void) {
     REQUIRE(default_colors_contract() == 0);
     REQUIRE(theme_notifications_contract() == 0);
+    terminalkit_handle *sync = NULL;
+    REQUIRE(terminalkit_open(20, 4, 16, "xterm-256color", &sync));
+    int generation = terminalkit_synchronized_output_generation(sync);
+    REQUIRE(feed(sync, "\033[?2026h") >= 0);
+    REQUIRE(terminalkit_synchronized_output(sync));
+    REQUIRE(terminalkit_synchronized_output_generation(sync) != generation);
+    generation = terminalkit_synchronized_output_generation(sync);
+    REQUIRE(feed(sync, "\033[?2026l\033[?2026h") >= 0);
+    REQUIRE(terminalkit_synchronized_output(sync));
+    REQUIRE(terminalkit_synchronized_output_generation(sync) != generation);
+    terminalkit_close(sync);
     REQUIRE(history_contract() == 0);
     REQUIRE(row_fingerprints() == 0);
     terminalkit_handle *kit = NULL, *restored = NULL;

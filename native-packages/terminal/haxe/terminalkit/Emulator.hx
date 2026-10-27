@@ -42,6 +42,8 @@ class Emulator {
     public function columns():Int return TerminalKit.terminalkit_columns(live());
     public function rows():Int return TerminalKit.terminalkit_rows(live());
     public function title():String return TerminalKit.terminalkit_title(live());
+    public function synchronizedOutputGeneration():Int
+        return TerminalKit.terminalkit_synchronized_output_generation(live());
     public function synchronizedOutput():Bool
         return TerminalKit.terminalkit_synchronized_output(live()) != 0;
     public function alternateScreen():Bool

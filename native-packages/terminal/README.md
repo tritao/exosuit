@@ -60,3 +60,11 @@ notifications because the workspace service owns the PTY reply stream.
 Applications that cache startup RGB colours without subscribing or re-querying
 will retain their old styling across a host theme change. Codex CLI 0.164.0 has
 this limitation; terminal notifications alone cannot refresh its cached palette.
+
+`Emulator.synchronizedOutput()` exposes DEC synchronized output (mode 2026).
+Renderers should retain the last complete rows and cursor while it is enabled,
+then snapshot the accumulated changes when it ends. `synchronizedOutputGeneration()`
+changes at every begin, including repeated begins and end/begin pairs in a single
+feed. It allows a renderer to bound each redraw independently without confusing
+continuous resize redraws with a single stuck transaction. Exosuit uses a one-second
+safety timeout and continues ordinary terminal output during panel drags.

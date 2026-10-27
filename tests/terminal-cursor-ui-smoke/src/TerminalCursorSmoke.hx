@@ -55,6 +55,7 @@ class CursorApp implements DesktopUiApplication {
 		if (mode == "system-symbols") fonts.addSystemFallbacks();
 		else ui.TerminalSymbolFont.addTo(fonts);
 		TerminalPollTests.run(fonts);
+		TerminalSyncOutputTests.run(fonts);
 		TerminalGridTests.run(fonts);
 		TerminalShortcutTests.run(fonts);
 		TerminalPointerTests.run(fonts);

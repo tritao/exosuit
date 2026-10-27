@@ -54,6 +54,8 @@ TERMINALKIT_API int terminalkit_cursor(terminalkit_handle *kit, int *column TK_O
 TERMINALKIT_API int terminalkit_mouse_mode(terminalkit_handle *kit);
 TERMINALKIT_API int terminalkit_focus_reporting(terminalkit_handle *kit);
 TERMINALKIT_API int terminalkit_synchronized_output(terminalkit_handle *kit);
+/** Changes whenever the application begins a synchronized redraw (including within one feed). */
+TERMINALKIT_API int terminalkit_synchronized_output_generation(terminalkit_handle *kit);
 TERMINALKIT_API int terminalkit_alternate_screen(terminalkit_handle *kit);
 /* Nonzero while the application wants keys as Win32 key events (DECSET 9001).
  * The Windows pseudoconsole asks for it; terminalkit_input_text and terminalkit_paste

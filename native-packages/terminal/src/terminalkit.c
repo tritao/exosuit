@@ -120,6 +120,10 @@ int terminalkit_focus_reporting(terminalkit_handle *kit) {
     if (kit) terminal_emulator_modes(kit->emulator, NULL, NULL, NULL, NULL, NULL, &mode);
     return mode;
 }
+int terminalkit_synchronized_output_generation(terminalkit_handle *kit) {
+    return kit ? terminal_emulator_synchronized_output_generation(kit->emulator) : 0;
+}
+
 int terminalkit_synchronized_output(terminalkit_handle *kit) {
     return kit && terminal_emulator_synchronized_output(kit->emulator);
 }

@@ -1186,6 +1186,12 @@ int terminal_emulator_selection_copy(terminal_emulator_t* emulator, char* buffer
   return tsm_screen_selection_copy_into(terminal->screen, buffer, capacity, written);
 }
 
+int terminal_emulator_synchronized_output_generation(terminal_emulator_t* emulator) {
+  terminal_t* terminal = (terminal_t*)emulator;
+  return terminal && !terminal->closed
+    ? (int)tsm_vte_get_synchronized_output_generation(terminal->vte) : 0;
+}
+
 int terminal_emulator_synchronized_output(terminal_emulator_t* emulator) {
   terminal_t* terminal = (terminal_t*)emulator;
   return terminal && !terminal->closed

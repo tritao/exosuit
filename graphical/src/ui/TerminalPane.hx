@@ -64,6 +64,9 @@ class TerminalPane implements AgentTerminalPanel {
 	var resolvedHeight:Float = 0.0;
 	var focusRequested:Bool = false;
 	var focused:Bool = false;
+	var synchronizedOutputSince:Float = -1;
+	var synchronizedOutputGeneration:Int = 0;
+	static inline final SYNCHRONIZED_OUTPUT_TIMEOUT:Float = 1.0;
 	var focusGeneration:Int = 0;
 	var closed:Bool = false;
 	var selectionPointer:Int = -1;
@@ -287,6 +290,17 @@ class TerminalPane implements AgentTerminalPanel {
 
 	function refreshRows(force:Bool, focusChanged:Bool = false):Bool {
 		var emulator = session.emulator;
+		// A redraw can span several PTY/RPC reads. Keep the retained rows and
+		// cursor together until it completes, including while the viewport resizes.
+		if (emulator.synchronizedOutput() && session.status == "running") {
+			var now = Sys.time();
+			var generation = emulator.synchronizedOutputGeneration();
+			if (synchronizedOutputSince < 0 || generation != synchronizedOutputGeneration) {
+				synchronizedOutputGeneration = generation;
+				synchronizedOutputSince = now;
+			}
+			if (now - synchronizedOutputSince < SYNCHRONIZED_OUTPUT_TIMEOUT) return false;
+		} else synchronizedOutputSince = -1;
 		var changed = emulator.snapshot();
 		var cursor = emulator.cursor();
 		cursor.column = Std.int(Math.min(cursor.column, emulator.columns() - 1));

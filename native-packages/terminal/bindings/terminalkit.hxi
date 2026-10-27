@@ -44,6 +44,10 @@ interface TerminalKit @target("portable-abi64") @library("terminalkit") {
 	extern fn terminalkit_set_output_callback(kit: ptr<terminalkit_handle>, callback: terminalkit_output_callback, user_data: ptr<void>) -> void;
 	extern fn terminalkit_snapshot(kit: ptr<terminalkit_handle>) -> c_int;
 	extern fn terminalkit_synchronized_output(kit: ptr<terminalkit_handle>) -> c_int;
+	/**
+	 * Changes whenever the application begins a synchronized redraw (including within one feed).
+	 */
+	extern fn terminalkit_synchronized_output_generation(kit: ptr<terminalkit_handle>) -> c_int;
 	extern fn terminalkit_take_replies(kit: ptr<terminalkit_handle>, buffer: nullable<ptr<u8>> @out_buffer("inout_size"), inout_size: ptr<u32> @inout) -> c_int;
 	extern fn terminalkit_text(kit: ptr<terminalkit_handle>) -> ptr<const<u8>> @borrowed;
 	extern fn terminalkit_text_size(kit: ptr<terminalkit_handle>) -> u64;

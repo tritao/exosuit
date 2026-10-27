@@ -114,6 +114,7 @@ uint64_t terminal_emulator_row_id(terminal_emulator_t* emulator, int row);
 int terminal_emulator_for_each_cell(terminal_emulator_t* emulator,
   terminal_emulator_cell_callback callback, void* user_data);
 int terminal_emulator_synchronized_output(terminal_emulator_t* emulator);
+int terminal_emulator_synchronized_output_generation(terminal_emulator_t* emulator);
 int terminal_emulator_alternate_screen(terminal_emulator_t* emulator);
 /* Whether the application asked for win32-input-mode (DECSET 9001). */
 int terminal_emulator_win32_input_mode(terminal_emulator_t* emulator);
