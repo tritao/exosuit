@@ -10,6 +10,7 @@ import haxeon.ui.style.StyleState;
 
 /** Shared workbench colors. Keep terminal defaults and chrome in one scheme. */
 class ExosuitPalette {
+	public static inline final WORKBENCH_TEXT_SIZE:Float = 14.0;
 	public static function theme(dark:Bool, ?target:Theme):Theme {
 		var result = dark ? Theme.dark() : Theme.light();
 		if (target != null) {
@@ -44,6 +45,11 @@ class ExosuitPalette {
 			dark ? 0.47 : 0.63, dark ? 0.76 : 0.89, dark ? 0.65 : 0.50);
 		result.textCaret = tokens.textPrimary;
 		result.refreshStyles();
+		result.styles.rule(StyleSelector.widget("button").className("tab-header"), [
+			StyleValue.fontSize(WORKBENCH_TEXT_SIZE),
+			// Smaller labels retain the existing tab target height.
+			StyleValue.height(haxeon.ui.LayoutAxis.fit(34))
+		]);
 		// Status actions meet the window edge: explicit zero radii override button defaults.
 		result.styles.rule(StyleSelector.widget("button").className("status-remote"), [
 			StyleValue.background(tokens.surfaceRaised),

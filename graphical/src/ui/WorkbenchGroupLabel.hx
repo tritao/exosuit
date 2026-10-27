@@ -27,7 +27,11 @@ class WorkbenchGroupLabel implements View {
 		var style = new LayoutStyle(); style.width = LayoutAxis.stretch(); style.childGap = 6;
 		style.childAlignY = haxeon.ui.LayoutAlignmentY.Center; style.clipHorizontal = true;
 		var label = name + (running > 0 ? " · " + running + " running" : "");
-		var children = [new KeyedView("icon", new Icon("group-folder", IconName.FolderClosed, 14)), new KeyedView("name", new Text(label))];
+		var children = [
+			new KeyedView("icon", new Icon("group-folder", IconName.FolderClosed, 14)),
+			new KeyedView("name", new Text(label, null, null,
+				haxeon.ui.core.TextStyleOverride.text(ExosuitPalette.WORKBENCH_TEXT_SIZE)))
+		];
 		if (directory != null) {
 			var path = directory;
 			if (root != null && path == root) {

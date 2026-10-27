@@ -133,10 +133,12 @@ class WorkbenchTreeModel implements TreeViewModel {
 		}
 		if (StringTools.startsWith(key, "a:")) {
 			var a = agents.get(key.substring(2));
-			return new Text(a == null ? "" : a.name + " · " + agentStateLabel(a.state));
+			return new Text(a == null ? "" : a.name + " · " + agentStateLabel(a.state), null, null,
+				haxeon.ui.core.TextStyleOverride.text(ExosuitPalette.WORKBENCH_TEXT_SIZE));
 		}
 		var terminal = terminals.get(key.substring(2));
-		return new Text(terminal == null ? "" : terminal.name + " · " + TerminalStateLabels.display(terminal.state));
+		return new Text(terminal == null ? "" : terminal.name + " · " + TerminalStateLabels.display(terminal.state), null, null,
+			haxeon.ui.core.TextStyleOverride.text(ExosuitPalette.WORKBENCH_TEXT_SIZE));
 	}
 
 	public function directory(group:WorkspaceGroup):Null<String> {

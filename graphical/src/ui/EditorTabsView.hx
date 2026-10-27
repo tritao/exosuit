@@ -79,7 +79,7 @@ class EditorTabsView implements View {
 				});
 			};
 			var memo = context.state(context.id("tab-labels"), new Map<String, String>()).value;
-			var typography = context.resolveTextRole(TextRole.Button, TextStyleOverride.paragraph(TextWrap.None));
+			var typography = context.resolveTextRole(TextRole.Button, new TextStyleOverride(null, ExosuitPalette.WORKBENCH_TEXT_SIZE, null, TextWrap.None));
 			var widths = context.state(context.id("tab-natural-widths"), new Map<String, Float>()).value;
 			var naturalWidths:Array<Float> = [];
 			var chrome = Math.max(0, tabs.items.length - 1) * 4.0;
