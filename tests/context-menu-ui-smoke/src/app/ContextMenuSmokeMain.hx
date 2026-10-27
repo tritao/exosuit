@@ -12,12 +12,18 @@ import ui.ExosuitApp;
 @:access(ui.CommandMenu)
 class ContextMenuSmokeApp extends ExosuitApp {
 	final report:String;
+	var pointerUps = 0;
+	var observedRoot:Null<RenderNode> = null;
 	public function new(context:haxeon.ui.host.UiHostContext, directory:String) {
 		super(context.fonts, ui.ExosuitPalette.theme(false), context, directory + "/Main.hx", null, null, false);
 		report = directory + "/state.json";
 	}
 	override public function submit(frame:LayoutFrame):RenderNode {
 		var root = super.submit(frame);
+		if (root != observedRoot) {
+			observedRoot = root;
+			root.on(haxeon.ui.core.UiEventKind.PointerUp, function(_) { pointerUps++; requestFrame(); }, "capture");
+		}
 		// Exercise the workbench custom-action entry point with the same native
 		// editor input target, without depending on a running workspace agent.
 		if (sys.FileSystem.exists(haxe.io.Path.directory(report) + "/workbench-menu")) {
@@ -30,7 +36,8 @@ class ContextMenuSmokeApp extends ExosuitApp {
 		root.walk(function(node) {
 			if (node.resolved == null) return;
 			var isItem = node.semantics != null && node.semantics.role == AccessibilityRole.MenuItem;
-			if (node.styleKey == "activity-manage" || node.styleKey == "layout-menu" || isItem ||
+			if ((node.styleKey != null && StringTools.startsWith(node.styleKey, "activity:")) ||
+				node.styleKey == "activity-manage" || node.styleKey == "layout-menu" || isItem ||
 				(node.semantics != null && node.semantics.role == AccessibilityRole.TextField)) {
 				var bounds = node.globalBounds();
 				nodes.push({key: node.styleKey, label: node.semantics == null ? "" : node.semantics.label,
@@ -40,6 +47,7 @@ class ContextMenuSmokeApp extends ExosuitApp {
 		});
 		var focused = ui.focus.focusedNode();
 		sys.io.File.saveContent(report, haxe.Json.stringify({menuOpen: contextMenu != null,
+			activityId: sidebar.activeId, sidebarVisible: sidebar.visible, pointerUps: pointerUps,
 			anchor: contextMenu == null ? null : {x: contextMenu.x, y: contextMenu.y},
 			focus: focused == null ? -1 : focused.id.value,
 			focusLabel: focused == null || focused.semantics == null ? "" : focused.semantics.label,

@@ -57,6 +57,31 @@ def main():
                 window = xdo("search", "--name", "^Context menu native input smoke$").splitlines()[-1]
                 xdo("windowfocus", "--sync", window)
                 gear = next(n for n in state["nodes"] if n["key"] == "activity-manage")
+                destinations = [n for n in state['nodes'] if isinstance(n['key'], str) and n['key'].startswith('activity:')]
+                initial_activity = state['activityId']
+                initial_visibility = state['sidebarVisible']
+
+                def auxiliary_click(node, button):
+                    releases = state['pointerUps']
+                    click(node, button)
+                    wait(lambda s: s['pointerUps'] > releases, 'Auxiliary pointer release was not processed')
+
+                for destination in [*destinations, gear]:
+                    for button in (3, 2):
+                        auxiliary_click(destination, button)
+                        assert (state['activityId'], state['sidebarVisible'], state['menuOpen']) == \
+                               (initial_activity, initial_visibility, False), ('Auxiliary click activated sidebar', destination, state)
+                other = next(n for n in destinations if n['key'] != 'activity:' + initial_activity)
+                click(other)
+                wait(lambda s: s['activityId'] == other['key'][9:] and s['sidebarVisible'], 'Primary sidebar click failed')
+                auxiliary_click(other, 3)
+                assert state['sidebarVisible'], 'Right-click collapsed the selected sidebar'
+                original = next(n for n in destinations if n['key'] == 'activity:' + initial_activity)
+                click(original)
+                wait(lambda s: s['activityId'] == initial_activity and s['sidebarVisible'], 'Could not restore sidebar')
+                if not initial_visibility:
+                    click(original)
+                    wait(lambda s: not s['sidebarVisible'], 'Could not restore sidebar visibility')
                 for cycle in range(3):
                     click(gear)
                     wait(lambda s: s["menuOpen"] and s["focusLabel"] == "Menu", "Mouse menu retained a selection")
