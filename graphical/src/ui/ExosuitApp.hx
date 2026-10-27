@@ -1368,7 +1368,7 @@ class ExosuitApp implements DesktopUiApplication {
 		workbenchPanel = new WorkbenchPanel(client, openCatalogTerminal, newGroupedTerminal, editWorkspaceGroup,
 			function(path) application.openArgument(path), catalogTerminalActions, requestFrame, openCodexAgent, showWorkbenchMenu,
 			attachCodexThread, function(resource, workspaceRoot) host.closeAgentTabs(resource, workspaceRoot),
-			createProviderAgent, canCreateAgentSession);
+			createProviderAgent, canCreateAgentSession, function() return application.settings.current.tabTooltipDelay);
 		host.onActiveTabChanged = syncWorkbenchSessionSelection;
 		syncWorkbenchSessionSelection(host.activeTab());
 		if (sidebar.find("workbench") == null)
@@ -2271,7 +2271,7 @@ class ExosuitApp implements DesktopUiApplication {
 		else button.leadingView = new LayoutControlIcon(region, theme.tokens.textSecondary);
 		var shortcut = layoutShortcut(command);
 		return new TabTooltip("layout-tooltip-" + region, button, new Text(label + (shortcut.length == 0 ? "" : " (" + shortcut + ")")),
-			function() return new Rect(0, 0, viewportWidth, viewportHeight), 0.5);
+			function() return new Rect(0, 0, viewportWidth, viewportHeight), application.settings.current.tabTooltipDelay);
 	}
 
 	/** Menu backdrops consume outside clicks, except for explicit menu triggers. */
@@ -2409,7 +2409,7 @@ class ExosuitApp implements DesktopUiApplication {
 		button.leadingIcon = icon;
 		return custom || label == "Terminal" ? new TabTooltip("toolbar-tooltip:" + label, button,
 			new Text(label == "Terminal" && !canShowTerminal() ? terminalCreationFailure() : label),
-			function() return new Rect(0, 0, viewportWidth, viewportHeight), 0.5) : button;
+			function() return new Rect(0, 0, viewportWidth, viewportHeight), application.settings.current.tabTooltipDelay) : button;
 	}
 
 	function showNotifications(?entry:feedback.Notification):Void {
@@ -2464,12 +2464,13 @@ class ExosuitApp implements DesktopUiApplication {
 			notificationsVisible: notificationsVisible,
 			unread: center.unreadCount(),
 			viewport: function() return new Rect(0, 0, viewportWidth, viewportHeight),
+			tooltipDelay: application.settings.current.tabTooltipDelay,
 			openRemote: function() showSidebarMode("remote-access"),
 			showNotification: function(entry) showNotifications(entry),
 			dismissNotification: function() { center.dismissToast(); requestFrame(); },
 			toggleNotifications: function() { if (notificationsVisible) hideNotifications(); else showNotifications(); }
 		}), function() return indentationDetails + ":" + remoteDetails + ":" + label + ":" + trailing + ":" +
-			host.getPluginStatusItems().revision + ":" + (notification == null ? 0 : notification.id) + ":" + center.revision + ":" + notificationsVisible + ":" + ui.animations.revision);
+			host.getPluginStatusItems().revision + ":" + (notification == null ? 0 : notification.id) + ":" + center.revision + ":" + notificationsVisible + ":" + ui.animations.revision + ":" + application.settings.current.tabTooltipDelay);
 	}
 
 	function showFilesScope():Void {
@@ -2551,7 +2552,7 @@ class ExosuitApp implements DesktopUiApplication {
 		button.accessibilityLabel = label;
 		return new TabTooltip("explorer-action-tooltip:" + label, button,
 			new Text(readOnly ? label + " (remote files are read-only)" : label),
-			function() return new Rect(0, 0, viewportWidth, viewportHeight), 0.5);
+			function() return new Rect(0, 0, viewportWidth, viewportHeight), application.settings.current.tabTooltipDelay);
 	}
 
 	function createExplorerEntry(folder:Bool):Void {

@@ -10,7 +10,7 @@ class TabHoverDelay implements Animation {
 	var pending:Bool = false;
 	var disposed:Bool = false;
 	public var delaySeconds:Float;
-	public function new(scheduler:AnimationScheduler, changed:Bool->Void, delaySeconds:Float = 0.8) {
+	public function new(scheduler:AnimationScheduler, changed:Bool->Void, delaySeconds:Float = config.Settings.DEFAULT_TOOLTIP_DELAY) {
 		this.delaySeconds = delaySeconds;
 		this.scheduler = scheduler; this.changed = changed;
 	}

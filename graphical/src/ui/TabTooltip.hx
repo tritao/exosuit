@@ -31,7 +31,7 @@ class TabTooltip implements View {
 	final boundsProvider:Void->Rect;
 	static inline final PADDING = 10.0;
 	static inline final EDGE = 6.0;
-	public function new(key:String, anchor:View, content:View, boundsProvider:Void->Rect, delaySeconds:Float = 0.8, placement:TooltipPlacement = Below,
+	public function new(key:String, anchor:View, content:View, boundsProvider:Void->Rect, delaySeconds:Float = config.Settings.DEFAULT_TOOLTIP_DELAY, placement:TooltipPlacement = Below,
 			?hoverGroup:TooltipHoverGroup, groupVisible:Bool = false) {
 		this.hoverGroup = hoverGroup;
 		this.groupVisible = groupVisible;

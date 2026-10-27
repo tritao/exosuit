@@ -250,7 +250,7 @@ class StatusBarView implements View {
 	function tooltip(key:String, anchor:View, text:String):TabTooltip {
 		var tip = new TabTooltip("status-tooltip:" + key, anchor,
 			new Text(text, null, null, TextStyleOverride.paragraph(TextWrap.WordCharacter)),
-			data.viewport, 0.5, Above);
+			data.viewport, data.tooltipDelay == null ? config.Settings.DEFAULT_TOOLTIP_DELAY : data.tooltipDelay, Above);
 		tip.fillAnchor = true;
 		return tip;
 	}
@@ -274,6 +274,7 @@ typedef StatusBarData = {
 	var notificationsVisible:Bool;
 	var unread:Int;
 	var viewport:Void->Rect;
+	@:optional var tooltipDelay:Null<Float>;
 	var openRemote:Void->Void;
 	var showNotification:Notification->Void;
 	var dismissNotification:Void->Void;

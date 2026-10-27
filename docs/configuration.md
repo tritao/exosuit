@@ -107,7 +107,7 @@ neutral strokes to avoid forcing full-document syntax highlighting. The preview
 is cached as an 80-column bitmap with at most 1,024 rows, keeping GPU geometry
 bounded even for dense files.
 
-`editor/display/tab_tooltip_delay` controls the tab tooltip hover delay in seconds (default `0.8`, range `0`–`5`). Tooltips hide when leaving or clicking a tab.
+`editor/display/tab_tooltip_delay` controls the shared hover delay for tabs, the Activity Bar, Workbench toolbar, window/header controls and status bar (default `0.8` seconds, range `0`–`5`). The existing key is retained for compatibility. Neighboring Workbench toolbar controls share the initial delay: once a tooltip is visible, moving to the next control switches its label promptly. Clicking dismisses the tooltip and resets the delay.
 
 The sidebar uses one shared width across Activity Bar destinations. Resizing, collapsing, and reopening retain that width. Older sessions migrate from the selected destination’s saved width.
 

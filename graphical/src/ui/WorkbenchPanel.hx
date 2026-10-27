@@ -3,6 +3,7 @@ package ui;
 import haxeon.ui.LayoutAxis;
 import haxeon.ui.LayoutStyle;
 import haxeon.ui.Insets;
+import haxeon.ui.Rect;
 import haxeon.ui.core.BuildContext;
 import haxeon.ui.core.RenderNode;
 import haxeon.ui.core.View;
@@ -36,6 +37,7 @@ class WorkbenchPanel implements View {
 	final closeAgentTab:(String, String)->Void;
 	final createProvider:(String, String)->Void;
 	final canCreateAgent:Void->Bool;
+	final tooltipDelay:Void->Float;
 	public final model = new WorkbenchTreeModel();
 	public final tree:TreeView;
 	var catalogRevision = -1;
@@ -60,12 +62,13 @@ class WorkbenchPanel implements View {
 	public function new(client:WorkspaceWorkbenchClient, open:TerminalRecord->Bool, createTerminal:String->Void,
 		edit:(WorkspaceGroup, String)->Void, openFolder:String->Void, terminalActions:TerminalRecord->Array<MenuItem>, requestFrame:Void->Void,
 		openAgent:String->Void, showMenu:(Array<MenuItem>, UiEvent, Void->Bool)->Void, attach:WorkspaceGroup->Void,
-		closeAgentTab:(String, String)->Void, createProvider:(String, String)->Void, canCreateAgent:Void->Bool) {
+		closeAgentTab:(String, String)->Void, createProvider:(String, String)->Void, canCreateAgent:Void->Bool, ?tooltipDelay:Void->Float) {
 		this.client = client; this.open = open; this.createTerminal = createTerminal; this.edit = edit;
 		this.openFolder = openFolder; this.terminalActions = terminalActions; this.requestFrame = requestFrame;
 		this.openAgent = openAgent; this.showMenu = showMenu; this.attach = attach; this.closeAgentTab = closeAgentTab;
 		this.createProvider = createProvider;
 		this.canCreateAgent = canCreateAgent;
+		this.tooltipDelay = tooltipDelay == null ? function() return config.Settings.DEFAULT_TOOLTIP_DELAY : tooltipDelay;
 		var style = new LayoutStyle(); style.width = LayoutAxis.stretch(); style.height = LayoutAxis.grow();
 		tree = new TreeView("workbench-tree", model, style);
 		tree.expandOnSingleClick = true;
@@ -382,13 +385,22 @@ class WorkbenchPanel implements View {
 		more.onClickEvent = function(event) menu(selected, event);
 		var toolbarStyle = new LayoutStyle(); toolbarStyle.width = LayoutAxis.stretch(); toolbarStyle.childGap = 2;
 		toolbarStyle.padding = new Insets(4, 2, 4, 2);
+		var delay = tooltipDelay();
+		var visibleTooltip = context.resourceState(context.id("workbench-tooltip-visible"),
+			function():Null<String> return null, function(_) {});
+		var hover = context.resourceState(context.id("workbench-tooltip-hover"),
+			function() return new TooltipHoverGroup(context.animations, function(key) visibleTooltip.update(key), delay),
+			function(value) value.dispose()).value;
+		hover.delaySeconds = delay;
+		function tip(key:String, anchor:View, label:String):View return new TabTooltip(key, anchor, new Text(label),
+			function() return new Rect(0, 0, context.viewportWidth, context.viewportHeight), delay, Below, hover, visibleTooltip.value == key);
 		var rows:Array<KeyedView> = [new KeyedView("toolbar", new Row("workbench-toolbar", [
-			new KeyedView("terminal", new haxeon.ui.widgets.overlays.Tooltip("new-terminal-tip", terminal, new Text(!client.canReadTerminals() ? "Connect to a workspace with terminal read permission"
+			new KeyedView("terminal", tip("new-terminal-tip", terminal, !client.canReadTerminals() ? "Connect to a workspace with terminal read permission"
 				: !client.canControlTerminals() ? "Terminal creation requires terminal control permission"
-				: !client.canCreateGroupedTerminals() ? "This workspace does not support grouped terminals" : "New terminal"), 0, 36)),
-			new KeyedView("agent", new haxeon.ui.widgets.overlays.Tooltip("new-agent-tip", agent, new Text("New Codex"), 0, 36)),
-			new KeyedView("delete-agent", new haxeon.ui.widgets.overlays.Tooltip("delete-agent-tip", deleteAgent, new Text("Remove from Workbench"), 0, 36)),
-			new KeyedView("more", new haxeon.ui.widgets.overlays.Tooltip("workbench-actions-tip", more, new Text("Actions"), 0, 36))
+				: !client.canCreateGroupedTerminals() ? "This workspace does not support grouped terminals" : "New terminal")),
+			new KeyedView("agent", tip("new-agent-tip", agent, "New Codex")),
+			new KeyedView("delete-agent", tip("delete-agent-tip", deleteAgent, "Remove from Workbench")),
+			new KeyedView("more", tip("workbench-actions-tip", more, "Actions"))
 		], toolbarStyle)), new KeyedView("tree", tree)];
 		var creation=client.agentService().agentCreation();
 		if (creation != null)

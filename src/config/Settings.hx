@@ -1,6 +1,8 @@
 package config;
 
 class Settings {
+	/** Shared hover delay for application controls; keep the existing preference key. */
+	public static inline final DEFAULT_TOOLTIP_DELAY = 0.8;
 	public var fontPath:String = ApplicationPaths.resource("data/fonts/JetBrainsMono-Regular.ttf");
 	public var fontFallbackPaths:Array<String> = defaultFontFallbackPaths();
 
@@ -28,7 +30,7 @@ class Settings {
 	public var confirmTrash:Bool = true;
 	public var sidebarWidth:Int = 220;
 	public var scrollbarVisibility:String = "auto";
-	public var tabTooltipDelay:Float = 0.8;
+	public var tabTooltipDelay:Float = DEFAULT_TOOLTIP_DELAY;
 	public var minimapEnabled:Bool = true;
 	public var wordWrap:Bool = false;
 	public var renderWhitespace:String = "selection";

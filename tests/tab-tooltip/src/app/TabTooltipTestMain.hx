@@ -178,7 +178,34 @@ class TabTooltipTestMain {
 		}
 	}
 
+	static function sharedControlTiming():Void {
+		var scheduler=new AnimationScheduler();
+		var visible:Null<String>=null;
+		var group=new ui.TooltipHoverGroup(scheduler,function(key) visible=key,Settings.DEFAULT_TOOLTIP_DELAY);
+		group.enter("terminal");scheduler.advance(0.4);
+		require(visible==null,"Workbench control tooltip opened before the configured delay");
+		group.leave("terminal");scheduler.advance(1);
+		require(visible==null && scheduler.activeCount==0,"Passing over a control left a pending tooltip");
+		group.enter("terminal");scheduler.advance(0.81);
+		require(visible=="terminal","Deliberate hover did not reveal the control tooltip");
+		group.leave("terminal");group.enter("agent");
+		require(visible=="agent","Adjacent control restarted the delay after the group was warm");
+		group.cancel();scheduler.advance(1);
+		require(visible==null && scheduler.activeCount==0,"Click dismissal left a visible or pending tooltip");
+		group.enter("actions");scheduler.advance(0.4);
+		require(visible==null,"A click did not reset the group's initial delay");
+		group.cancel();group.delaySeconds=1.2;
+		group.enter("actions");scheduler.advance(0.9);
+		require(visible==null,"Control tooltips ignored a customized delay");
+		scheduler.advance(0.31);require(visible=="actions","Custom control tooltip delay never completed");
+		group.cancel();group.delaySeconds=0;group.enter("terminal");
+		require(visible=="terminal","Zero delay preference was not honored");
+		group.cancel();group.delaySeconds=1.2;group.enter("agent");group.dispose();scheduler.advance(2);
+		require(visible==null && scheduler.activeCount==0,"Unmounted controls left a hover timer running");
+	}
+
 	static function main():Int {
+		sharedControlTiming();
 		// Every rim point has one resize direction, including the wider corner
 		// arms; inset controls remain client space even close to a corner.
 		for (size in [[900, 600], [32, 24], [8, 8]]) {
