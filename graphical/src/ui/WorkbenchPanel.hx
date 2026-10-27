@@ -387,9 +387,9 @@ class WorkbenchPanel implements View {
 			new KeyedView("terminal", new haxeon.ui.widgets.overlays.Tooltip("new-terminal-tip", terminal, new Text(!client.canReadTerminals() ? "Connect to a workspace with terminal read permission"
 				: !client.canControlTerminals() ? "Terminal creation requires terminal control permission"
 				: !client.canCreateGroupedTerminals() ? "This workspace does not support grouped terminals" : "New terminal"), 0, 36)),
-			new KeyedView("agent", new haxeon.ui.widgets.overlays.Tooltip("new-agent-tip", agent, new Text("New Codex"), -32, 36)),
-			new KeyedView("delete-agent", new haxeon.ui.widgets.overlays.Tooltip("delete-agent-tip", deleteAgent, new Text("Remove from Workbench"), -64, 36)),
-			new KeyedView("more", new haxeon.ui.widgets.overlays.Tooltip("workbench-actions-tip", more, new Text("Actions"), -96, 36))
+			new KeyedView("agent", new haxeon.ui.widgets.overlays.Tooltip("new-agent-tip", agent, new Text("New Codex"), 0, 36)),
+			new KeyedView("delete-agent", new haxeon.ui.widgets.overlays.Tooltip("delete-agent-tip", deleteAgent, new Text("Remove from Workbench"), 0, 36)),
+			new KeyedView("more", new haxeon.ui.widgets.overlays.Tooltip("workbench-actions-tip", more, new Text("Actions"), 0, 36))
 		], toolbarStyle)), new KeyedView("tree", tree)];
 		var error = draftError == null ? client.terminalCatalogError() : draftError;
 		if (error == null) error = client.agentService().agentError();
