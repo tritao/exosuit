@@ -65,6 +65,8 @@ class EditorPane implements View {
 	public final selection:BufferSelection;
 	final scrollController:ScrollController;
 	final viewportGeometry = new editor.EditorViewportGeometry();
+	/** Width the editor and minimap shared at the last layout; a rebuild places the minimap from it. */
+	var minimapHostWidth = 0.0;
 	var previousWrap:Null<Bool> = null;
 	var wrapAnchorLine:Int = -1;
 	final minimap:EditorMinimap;
@@ -551,9 +553,17 @@ class EditorPane implements View {
 				new haxeon.ui.GradientStop(0.0, Color.rgba(0, 0, 0, 0)),
 				new haxeon.ui.GradientStop(1.0, Color.rgba(0, 0, 0, editorTheme.lightSyntax ? 0.15 : 0.35))
 			]);
-		});
+		}, "minimap-shadow:" + editorTheme.lightSyntax + ":" + viewportGeometry.overlapsMinimap(scrollController.offsetX));
 		container.add(shadow);
+		// Start from the last layout's placement so an unchanged minimap needs no layout feedback.
+		if (minimapHostWidth > 0.0) {
+			var seededX = Math.max(0.0, minimapHostWidth - viewportGeometry.minimapWidth);
+			shadowStyle.positionX = seededX - 8.0;
+			preview.layout.style.positionX = seededX;
+			preview.layout.style.width = LayoutAxis.fixed(viewportGeometry.minimapWidth);
+		}
 		container.onResolved(function(geometry) {
+			minimapHostWidth = geometry.width;
 			var width = viewportGeometry.minimapWidth;
 			var x = Math.max(0.0, geometry.width - width);
 			if (shadowStyle.positionX != x - 8.0) { shadowStyle.positionX = x - 8.0; context.requestLayoutFeedback(); }

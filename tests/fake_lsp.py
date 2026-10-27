@@ -38,6 +38,8 @@ def send(message):
 
 held = None
 held_rename = None
+semantic_requests = 0
+semantic_shift = 0
 documents = {}
 while True:
     message = read_message()
@@ -160,12 +162,18 @@ while True:
         if name == "stale": held_rename = response
         else: send(response)
     elif method == "textDocument/semanticTokens/full":
+        semantic_requests += 1
         item = documents[message["params"]["textDocument"]["uri"]]
         version = item["version"]
-        response = {"jsonrpc": "2.0", "id": message["id"], "result": {"data": [0, 3 + version - 1, 5, 0, 1]}}
+        response = {"jsonrpc": "2.0", "id": message["id"], "result": {"data": [0, 3 + version - 1, 5 - semantic_shift, 0, 1]}}
         timer = threading.Timer(0.3, send, args=[response])
         timer.daemon = True
         timer.start()
+    elif method == "semanticStats":
+        send({"jsonrpc": "2.0", "id": message["id"], "result": {"requests": semantic_requests}})
+    elif method == "semanticShift":
+        semantic_shift += 1
+        send({"jsonrpc": "2.0", "id": message["id"], "result": True})
     elif method == "shutdown":
         send({"jsonrpc": "2.0", "id": message["id"], "result": None})
     elif method == "exit":

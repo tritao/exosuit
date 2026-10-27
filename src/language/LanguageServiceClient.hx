@@ -23,6 +23,8 @@ class LanguageServiceClient {
 	public var ready(default, null):Bool = false;
 	public var semanticTokensSupported(default, null):Bool = false;
 	public var semanticTokensChanged:Void->Void = function() {};
+	/** Called after a server-initiated workspace edit changed open documents. */
+	public var editsApplied:Void->Void = function() {};
 	public var preferredDocument:Null<Document>;
 	var semanticTypes:Array<String> = [];
 	var semanticModifiers:Array<String> = [];
@@ -68,8 +70,9 @@ class LanguageServiceClient {
 		this.documents = documents;
 		this.executable = executable;
 		this.arguments = arguments.copy();
-		this.rootPath = rootPath;
-		includesDocument = document -> document.path != null && StringTools.startsWith(document.path, StringTools.endsWith(rootPath, "/") ? rootPath : rootPath + "/");
+		// Documents carry the file system's canonical path (on-disk casing, drive letter), so the root must too.
+		this.rootPath = canonicalRoot(documents, rootPath);
+		includesDocument = document -> document.path != null && StringTools.startsWith(document.path, StringTools.endsWith(this.rootPath, "/") ? this.rootPath : this.rootPath + "/");
 	}
 
 	public function start(now:Float):Bool {
@@ -384,11 +387,13 @@ class LanguageServiceClient {
 
 	function receiveServerRequest(method:String, params:Dynamic):JsonRpcResponse {
 		if (method == "workspace/semanticTokens/refresh") {
-			for (state in states) invalidateSemanticTokens(state);
+			// A refresh asks for new tokens, but the ones shown stay valid until different ones arrive.
+			for (state in states) invalidateSemanticTokens(state, true);
 			return new JsonRpcResponse(null);
 		}
 		if (method != "workspace/applyEdit") return new JsonRpcResponse(null, "Method not found");
 		var result = applyWorkspaceEdit(params == null ? null : Reflect.field(params, "edit"), captureDocuments());
+		if (result.applied) editsApplied();
 		return new JsonRpcResponse({applied: result.applied, failureReason: result.error});
 	}
 
@@ -500,13 +505,13 @@ class LanguageServiceClient {
 			state.semanticSnapshot == null || state.semanticSnapshot.revision != document.buffer.stateId ? null : state.semanticSnapshot;
 	}
 
-	function invalidateSemanticTokens(state:LanguageDocumentState):Void {
+	function invalidateSemanticTokens(state:LanguageDocumentState, keepSnapshot:Bool = false):Void {
 		state.semanticEpoch++;
 		var request = state.semanticRequest;
 		state.semanticRequest = -1;
 		state.semanticWanted = true;
 		state.semanticDue = clock + 0.15;
-		if (state.semanticSnapshot != null) { state.semanticSnapshot = null; semanticTokensChanged(); }
+		if (state.semanticSnapshot != null && !keepSnapshot) { state.semanticSnapshot = null; semanticTokensChanged(); }
 		if (request >= 0 && transport != null) transport.cancel(request);
 	}
 
@@ -530,11 +535,23 @@ class LanguageServiceClient {
 				var data:Dynamic = response.result == null ? new Array<Int>() : Reflect.field(response.result, "data");
 				var tokens = SemanticTokenCodec.decode(state.document, data, semanticTypes, semanticModifiers);
 				if (tokens == null) { if (verbose) log("Ignored malformed semantic tokens for " + state.uri); return; }
+				var shown = state.semanticSnapshot;
+				if (shown != null && shown.revision == revision && sameSemanticTokens(shown.tokens, tokens)) return;
 				state.semanticSnapshot = new LanguageSemanticSnapshot(state.document.id, revision, tokens);
 				semanticTokensChanged();
 			});
 			return;
 		}
+	}
+
+	static function sameSemanticTokens(left:Array<LanguageSemanticToken>, right:Array<LanguageSemanticToken>):Bool {
+		if (left.length != right.length) return false;
+		for (index in 0...left.length) {
+			var a = left[index], b = right[index];
+			if (a.start != b.start || a.end != b.end || a.type != b.type || a.modifiers.length != b.modifiers.length) return false;
+			for (modifier in 0...a.modifiers.length) if (a.modifiers[modifier] != b.modifiers[modifier]) return false;
+		}
+		return true;
 	}
 
 	static function stringArray(raw:Dynamic):Array<String> {
@@ -548,7 +565,7 @@ class LanguageServiceClient {
 		var state = states.get(document.id), session = transport;
 		if (!ready || !accepts(document) || state == null || session == null || state.revision != document.buffer.stateId) return false;
 		var navigation = method == "textDocument/definition" || method == "textDocument/typeDefinition";
-		if (navigation) for (state in states) if (state.semanticRequest >= 0) invalidateSemanticTokens(state);
+		if (navigation) for (state in states) if (state.semanticRequest >= 0) invalidateSemanticTokens(state, true);
 		var id = -1;
 		id = session.request(method, {textDocument: {uri: state.uri}, position: LspPositionCodec.encode(position)}, now, FEATURE_REQUEST_TIMEOUT, response -> {
 			if (navigation && definitionRequestId == id) definitionRequestId = -1;
@@ -647,6 +664,9 @@ class LanguageServiceClient {
 		return null;
 	}
 
+	static function canonicalRoot(documents:DocumentManager, rootPath:String):String {
+		try return documents.fileSystem.normalize(rootPath) catch (_:Dynamic) return rootPath;
+	}
 	static function eligible(document:Document):Bool
 		return document.path != null && StringTools.endsWith(document.path.toLowerCase(), ".hx");
 

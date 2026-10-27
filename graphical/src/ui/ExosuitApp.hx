@@ -156,6 +156,10 @@ class ExosuitApp implements DesktopUiApplication {
 	final scmDecorationRevisions:Map<String, String> = [];
 	final scmDocumentMarkers:Map<Int, scm.ScmOpenDocumentMarkers> = [];
 	final scmDocumentMarkerKeys:Map<Int, String> = [];
+	final scmMarkerTargets:Map<Int, ScmMarkerTarget> = [];
+	/** The explorer root whose identity is cached, because normalizing it costs a file-system call on every poll. */
+	var localScmRootKey:Null<String>;
+	var localScmIdentity:String = "";
 	var scmBranchStatus:Null<plugin.PluginStatusItem>;
 	var scmPresentationSourceIdentity:Null<String>;
 	final scmBranches:ScmBranchController;
@@ -2040,6 +2044,7 @@ class ExosuitApp implements DesktopUiApplication {
 		var previousDecorations = host.getPluginDecorations().revision;
 		var previousPluginStatus = host.getPluginStatusItems().revision;
 		var previousPluginPanels = host.getPluginPanels().revision;
+		var previousExternal = application.documents.externalRevision;
 		application.update();
 		var attachment = workspaceAttachment;
 		if (attachment != null) {
@@ -2074,7 +2079,8 @@ class ExosuitApp implements DesktopUiApplication {
 			previousBuildBytes != application.build.output.byteCount || previousBuild != application.build.active ||
 			previousDecorations != host.getPluginDecorations().revision ||
 			previousPluginStatus != host.getPluginStatusItems().revision ||
-			previousPluginPanels != host.getPluginPanels().revision)
+			previousPluginPanels != host.getPluginPanels().revision ||
+			previousExternal != application.documents.externalRevision)
 			requestFrame();
 		visibleNotification = host.getNotifications().current();
 		if (notificationRevision != host.getNotifications().revision) {
@@ -3603,7 +3609,9 @@ class ExosuitApp implements DesktopUiApplication {
 		}
 		var roots = [for (root in application.activeContext.roots) if (controller.SavedWorkspaceController.available(root)) root];
 		if (roots.length == 0) { clearLocalScmSource(); return null; }
-		if (localScmSource == null || localScmSource.identity() != LocalScmSource.identityFor(roots)) {
+		var rootsKey = haxe.Json.stringify(roots);
+		if (localScmRootKey != rootsKey) { localScmRootKey = rootsKey; localScmIdentity = LocalScmSource.identityFor(roots); }
+		if (localScmSource == null || localScmSource.identity() != localScmIdentity) {
 			clearLocalScmSource();
 			localScmSource = new LocalScmSource(application.scm, roots[0], roots);
 		}
@@ -3776,28 +3784,35 @@ class ExosuitApp implements DesktopUiApplication {
 	function syncScmDocumentMarkers(now:Float):Void {
 		var source = sourceControlSource();
 		var desired:Map<Int, Bool> = [];
+		var visited:Map<Int, Bool> = [];
 		if (source != null && !source.isRemote()) {
 			var repositories = source.repositories();
+			var sourceIdentity = source.identity();
 			for (view in host.allViews()) {
 				var document = view.document;
 				if (view.diffDocument != null || document.path == null) continue;
-				var repository:Null<scm.ScmRepository> = null, relative:Null<String> = null;
-				for (candidate in repositories) {
-					var candidatePath = scmRelativePath(candidate.root, document.path);
-					if (candidatePath != null && (repository == null || candidate.root.length > repository.root.length)) {
-						repository = candidate;
-						relative = candidatePath;
-					}
-				}
-				if (repository == null || relative == null || relative.length == 0) continue;
+				visited.set(document.id, true);
+				var target = scmMarkerTarget(sourceIdentity, repositories, document);
+				if (target == null) continue;
+				var repository = target.repository;
+				var relative = target.relative;
+				if (repository == null || relative == null) continue;
 				var snapshot = source.snapshot(repository.id);
 				if (snapshot == null) continue;
-				var untracked = false, worktree = false;
-				for (group in snapshot.groups) for (resource in group.resources) if (resource.path == relative) {
-					if (group.id == ScmGroupId.Untracked) untracked = true;
-					if (group.id == ScmGroupId.WorkingTree) worktree = true;
+				// The group scan costs as much as the change list is long, so redo it only for a new snapshot.
+				var scanned = target.snapshot;
+				if (scanned != snapshot) {
+					var untracked = false, worktree = false;
+					for (group in snapshot.groups) for (resource in group.resources) if (resource.path == relative) {
+						if (group.id == ScmGroupId.Untracked) untracked = true;
+						if (group.id == ScmGroupId.WorkingTree) worktree = true;
+					}
+					target.snapshot = snapshot;
+					target.untracked = untracked;
+					target.worktree = worktree;
 				}
-				var identity = source.identity() + "|" + repository.id + "|" + relative;
+				var identity = target.identity;
+				var untracked = target.untracked, worktree = target.worktree;
 				var previousIdentity = scmDocumentMarkerKeys.get(document.id);
 				var tracker = scmDocumentMarkers.get(document.id);
 				if (tracker != null && previousIdentity != identity) {
@@ -3824,6 +3839,37 @@ class ExosuitApp implements DesktopUiApplication {
 			scmDocumentMarkers.remove(id);
 			scmDocumentMarkerKeys.remove(id);
 		}
+		for (id in [for (id in scmMarkerTargets.keys()) if (!visited.exists(id)) id]) scmMarkerTargets.remove(id);
+	}
+
+	/** Resolves a document to its repository, recomputing only when its path or the repository list changed. */
+	function scmMarkerTarget(sourceIdentity:String, repositories:Array<scm.ScmRepository>, document:editor.Document):Null<ScmMarkerTarget> {
+		var cached = scmMarkerTargets.get(document.id);
+		if (cached != null && cached.path == document.path && cached.sourceIdentity == sourceIdentity
+			&& sameScmRepositories(cached.repositories, repositories)) return cached.repository == null ? null : cached;
+		var repository:Null<scm.ScmRepository> = null, relative:Null<String> = null;
+		for (candidate in repositories) {
+			var candidatePath = scmRelativePath(candidate.root, document.path);
+			if (candidatePath != null && (repository == null || candidate.root.length > repository.root.length)) {
+				repository = candidate;
+				relative = candidatePath;
+			}
+		}
+		if (relative == null || relative.length == 0) repository = null;
+		var target:ScmMarkerTarget = {
+			path: document.path, sourceIdentity: sourceIdentity, repositories: repositories, repository: repository,
+			relative: relative, identity: repository == null ? "" : sourceIdentity + "|" + repository.id + "|" + relative,
+			snapshot: null, untracked: false, worktree: false
+		};
+		scmMarkerTargets.set(document.id, target);
+		return repository == null ? null : target;
+	}
+
+	static function sameScmRepositories(left:Array<scm.ScmRepository>, right:Array<scm.ScmRepository>):Bool {
+		if (left.length != right.length) return false;
+		for (index in 0...left.length)
+			if (left[index] != right[index] && (left[index].id != right[index].id || left[index].root != right[index].root)) return false;
+		return true;
 	}
 
 	function scmRelativePath(root:String, path:String):Null<String> {
@@ -3934,10 +3980,12 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function readScmOriginal(source:ScmSource, repositoryId:String, reference:scm.ScmRef, path:haxe.io.Bytes,
 		complete:Null<String>->Null<scm.ScmError>->Void):Void {
+		// A remote source answers over the workspace connection, whose events do not redraw the window.
 		source.originalBytes(repositoryId, reference, path, function(result) {
-			if (result.error != null || result.value == null) { complete(null, result.error); return; }
-			if (result.value.binary) { complete(null, new scm.ScmError("binary", "Binary files cannot be shown as text diffs")); return; }
-			complete(result.value.bytes.toString(), null);
+			if (result.error != null || result.value == null) complete(null, result.error);
+			else if (result.value.binary) complete(null, new scm.ScmError("binary", "Binary files cannot be shown as text diffs"));
+			else complete(result.value.bytes.toString(), null);
+			requestFrame();
 		});
 	}
 
@@ -3950,8 +3998,10 @@ class ExosuitApp implements DesktopUiApplication {
 			var repoRelative = pathUnderScope(scope, repository.root);
 			if (repoRelative == null) { complete(null, null, null); return; }
 			var path = repoRelative.length == 0 ? relative : repoRelative + "/" + relative;
+			// The result arrives over the workspace connection, whose events do not redraw the window.
 			WorkspaceFileReader.read(client, attachment.fileWorkspace(), "root", path, null, function(result) {
 				complete(null, result.error == null ? result.contents : null, null);
+				requestFrame();
 			});
 			return;
 		}
@@ -3980,7 +4030,9 @@ class ExosuitApp implements DesktopUiApplication {
 		var workspaceId = attachment.fileWorkspace();
 		client.stat(workspaceId, "root", path, function(stat) {
 			if (workspaceAttachment != attachment || stat == null || stat.entry == null || stat.entry.kind != "file") {
-				reportScmReadError("The changed file is no longer available"); return;
+				reportScmReadError("The changed file is no longer available");
+				requestFrame();
+				return;
 			}
 			var rootName = scope;
 			var slash = rootName.lastIndexOf("/");
@@ -3991,7 +4043,11 @@ class ExosuitApp implements DesktopUiApplication {
 				var existing = host.workspaceFile(scope, "root", path);
 				if (existing != null) existing.selectSearchMatch(line, 0, 0);
 			}
-		}, function(error) reportScmReadError(error == null ? "Could not open changed workspace file" : error.message));
+			requestFrame();
+		}, function(error) {
+			reportScmReadError(error == null ? "Could not open changed workspace file" : error.message);
+			requestFrame();
+		});
 	}
 
 	static function pathUnderScope(scope:String, root:String):Null<String> {
@@ -4551,4 +4607,17 @@ class ExosuitApp implements DesktopUiApplication {
 		viewRevision++;
 		if (hostContext != null) hostContext.requestFrame();
 	}
+}
+
+/** A document's resolved repository, with the snapshot scan cached so unchanged state costs nothing per poll. */
+private typedef ScmMarkerTarget = {
+	final path:String;
+	final sourceIdentity:String;
+	final repositories:Array<scm.ScmRepository>;
+	final repository:Null<scm.ScmRepository>;
+	final relative:Null<String>;
+	final identity:String;
+	var snapshot:Null<scm.ScmSnapshot>;
+	var untracked:Bool;
+	var worktree:Bool;
 }
