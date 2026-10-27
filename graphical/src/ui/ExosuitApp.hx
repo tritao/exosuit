@@ -196,7 +196,11 @@ class ExosuitApp implements DesktopUiApplication {
 	final terminalErrors:Map<String, String> = [];
 	var viewportWidth:Float = 1280.0;
 	var viewportHeight:Float = 840.0;
-	static inline var PHONE_LAYOUT_MAX_WIDTH:Float = 640.0;
+	static inline var MINIMUM_COMPACT_WIDTH:Float = 480.0;
+	static inline var RESPONSIVE_RESTORE_MARGIN:Float = 48.0;
+	static inline var MINIMUM_CONTENT_WIDTH:Float = 320.0;
+	var responsiveRightHidden:Bool = false;
+	var desktopSidebarVisible:Bool = true;
 	var phoneLayoutActive:Bool = false;
 	var phoneModeApplying:Bool = false;
 	var desktopDockRoot:Null<DockNode>;
@@ -384,7 +388,12 @@ class ExosuitApp implements DesktopUiApplication {
 		searchPanel = new WorkspaceSearchPanel(application, host, requestFrame,
 			remoteFileSearch, openWorkspaceSearchResult);
 		host.captureSidebar = function() {
-			if (phoneLayoutActive) sidebar.rememberWidth(desktopSidebarWidth);
+			if (phoneLayoutActive) {
+				var saved = sidebar.encode().split("|");
+				saved[2] = desktopSidebarVisible ? "1" : "0";
+				saved[3] = Std.string(desktopSidebarWidth);
+				return "B\tsidebar\t1\t" + saved.join("|");
+			}
 			sidebar.setVisible(dock.isOpen("explorer"));
 			return "B\tsidebar\t1\t" + sidebar.encode();
 		};
@@ -447,7 +456,7 @@ class ExosuitApp implements DesktopUiApplication {
 		});
 		host.initializeContext(session.ContextLayoutStore.key(application.activeContext.kind, application.activeContext.id));
 		host.beforeContextRestore = function() {
-			phoneLayoutActive = false; desktopDockRoot = null; desktopDockActivePanel = null; phoneContentRoot = null;
+			phoneLayoutActive = false; responsiveRightHidden = false; desktopDockRoot = null; desktopDockActivePanel = null; phoneContentRoot = null;
 			contextMenu = null;
 		};
 		application.activeContext.subscribe(function() {
@@ -571,16 +580,50 @@ class ExosuitApp implements DesktopUiApplication {
 		requestFrame();
 	}
 
+	/** Evaluate the saved splits, even while secondary panels are suppressed. */
+	function preferredContentWidth(node:DockNode, width:Float):Float {
+		return switch node {
+			case Split(axis, ratio, first, second):
+				var firstWidth = width;
+				var secondWidth = width;
+				if (axis == DockSplitAxis.Horizontal) {
+					var extent = switch first { case Panel("explorer"): sidebar.width; case _: ratio * width; };
+					firstWidth = Math.max(DockWorkspace.MinimumHorizontalExtent,
+						Math.min(extent,Math.max(DockWorkspace.MinimumHorizontalExtent,width-DockWorkspace.MinimumHorizontalExtent)));
+					secondWidth = Math.max(0,width-firstWidth-DockWorkspace.DividerExtent);
+				}
+				haxeon.ui.docking.DockNodeTools.contains(first,host.activePane.id)
+					? preferredContentWidth(first,firstWidth) : preferredContentWidth(second,secondWidth);
+			case _: width;
+		};
+	}
+
+	function syncResponsiveRightLayout():Void {
+		if (phoneLayoutActive) { responsiveRightHidden = true; return; }
+		var available = preferredContentWidth(dock.root,Math.max(0,viewportWidth-ActivityBar.WIDTH));
+		responsiveRightHidden = dock.isOpen("context-panel") && available < MINIMUM_CONTENT_WIDTH
+			+ (responsiveRightHidden ? RESPONSIVE_RESTORE_MARGIN : 0);
+	}
+
 	/** At phone width, show the sidebar or editor as one full-width workspace. */
 	function syncResponsiveDockLayout():Void {
-		var phone = viewportWidth > 0 && viewportWidth <= PHONE_LAYOUT_MAX_WIDTH;
+		var preferredSidebarWidth = phoneLayoutActive ? desktopSidebarWidth : sidebar.width;
+		var prefersSidebar = phoneLayoutActive ? desktopSidebarVisible : sidebar.visible;
+		var compactWidth = Math.max(MINIMUM_COMPACT_WIDTH, ActivityBar.WIDTH + MINIMUM_CONTENT_WIDTH
+			+ (prefersSidebar ? preferredSidebarWidth + DockWorkspace.DividerExtent : 0));
+		var phone = viewportWidth > 0 && viewportWidth <= compactWidth
+			+ (phoneLayoutActive ? RESPONSIVE_RESTORE_MARGIN : 0);
+
 		if (phone) {
 			if (!phoneLayoutActive) {
 				desktopSidebarWidth = sidebar.width;
+				desktopSidebarVisible = sidebar.visible;
 				desktopDockRoot = haxeon.ui.docking.DockNodeTools.clone(dock.root);
 				desktopDockActivePanel = dock.activePanelId;
 				phoneContentRoot = haxeon.ui.docking.DockNodeTools.remove(haxeon.ui.docking.DockNodeTools.remove(desktopDockRoot, "explorer"), "context-panel");
 				phoneLayoutActive = true;
+				// An open editor/agent/terminal remains the task when the window narrows.
+				if (host.activeTab() != null || dock.activePanelId == "terminal") sidebar.setVisible(false);
 			} else if (!sidebar.visible) {
 				phoneContentRoot = haxeon.ui.docking.DockNodeTools.clone(dock.root);
 			}
@@ -591,7 +634,10 @@ class ExosuitApp implements DesktopUiApplication {
 
 		if (!sidebar.visible) phoneContentRoot = haxeon.ui.docking.DockNodeTools.clone(dock.root);
 		phoneLayoutActive = false;
+		phoneModeApplying = true;
+		sidebar.setVisible(desktopSidebarVisible);
 		sidebar.rememberWidth(desktopSidebarWidth);
+		phoneModeApplying = false;
 		var restored = sidebar.visible ?
 			(desktopDockRoot == null ? haxeon.ui.docking.DockNodeTools.clone(dock.root) :
 				haxeon.ui.docking.DockNodeTools.clone(desktopDockRoot)) :
@@ -626,14 +672,14 @@ class ExosuitApp implements DesktopUiApplication {
 		if (!phoneLayoutActive || desktopDockRoot == null) return dock.snapshotJson();
 		var layout:DockNode;
 		var active:Null<String>;
-		if (sidebar.visible) {
+		if (desktopSidebarVisible) {
 			layout = haxeon.ui.docking.DockNodeTools.clone(desktopDockRoot);
 			if (!haxeon.ui.docking.DockNodeTools.contains(layout, "explorer")) {
 				var content = phoneContentRoot == null ?
 					haxeon.ui.docking.DockNodeTools.remove(layout, "explorer") :
 					haxeon.ui.docking.DockNodeTools.clone(phoneContentRoot);
 				var width = Math.max(1.0, 1280.0 - ActivityBar.WIDTH - DockWorkspace.DividerExtent);
-				layout = DockNode.Split(DockSplitAxis.Horizontal, Math.min(0.9, sidebar.width / width),
+				layout = DockNode.Split(DockSplitAxis.Horizontal, Math.min(0.9, desktopSidebarWidth / width),
 					DockNode.Panel("explorer"), content);
 			}
 			active = "explorer";
@@ -721,6 +767,7 @@ class ExosuitApp implements DesktopUiApplication {
     function showTerminalInEditor(terminal:UiTerminalTab):Void {
         terminal.retainOnClose = true;
         host.attachTerminal(terminal);
+        if (phoneLayoutActive && sidebar.visible) sidebar.setVisible(false);
         if (workbenchPanel != null && sidebar.activeId == "workbench") workbenchPanel.revealNode("t:" + terminal.resourceId);
         dock.close("terminal");
         pendingTerminalFocus = false;
@@ -1163,6 +1210,7 @@ class ExosuitApp implements DesktopUiApplication {
 		workspaceView.headerActions = function(ids, _) return layoutControls.isToolGroup(ids) ? bottomPanelActions() : null;
 		workspaceView.headerActionsRevision = Std.string(layoutControls.bottomMaximized);
 		workspaceView.expandedGroup = layoutControls.expandedPanels();
+		workspaceView.hiddenPanels = responsiveRightHidden ? ["context-panel"] : [];
 		workspaceView.availableWidth = Math.max(0, viewportWidth - ActivityBar.WIDTH);
 		workspaceView.availableHeight = Math.max(0.0, viewportHeight - TOOLBAR_HEIGHT - STATUS_HEIGHT);
 		var workspace:View = new Row("workspace-with-activity-bar", [
@@ -1351,6 +1399,7 @@ class ExosuitApp implements DesktopUiApplication {
 			if (mode != null) dock.setPanelWidth("explorer", sidebar.width, Math.max(0, viewportWidth - ActivityBar.WIDTH),
 				DockWorkspace.DividerExtent, DockWorkspace.MinimumHorizontalExtent);
 		}
+		syncResponsiveRightLayout();
 		layoutModes.resume();
 		dock.setPanelBadge("problems", host.getProblems().values().length);
 		var key = (hostContext == null || hostContext.windowControls == null ? 0 : hostContext.windowControls.revision) + ":" + viewRevision + ":" + dock.revision + ":" +
@@ -1358,7 +1407,7 @@ class ExosuitApp implements DesktopUiApplication {
 			application.settings.current.minimapEnabled + ":problems=" + host.getProblems().revision + ":prefs=" + application.settings.store.revision +
 			":decorations=" + host.getPluginDecorations().revision + ":gutter-markers=" + host.getPluginGutterMarkers().revision +
 			":resource-decorations=" + host.getResourceDecorations().revision + ":status-items=" + host.getPluginStatusItems().revision +
-			":panels=" + host.getPluginPanels().revision;
+			":panels=" + host.getPluginPanels().revision + ":responsive-right=" + responsiveRightHidden;
 		var activeView = host.activeView();
 		key += ":active=" + (activeView == null ? -1 : activeView.id);
 		for (view in host.allViews()) {
@@ -1495,6 +1544,7 @@ class ExosuitApp implements DesktopUiApplication {
   if(groups != null) application.activeContext.openSessionGroup(record.group,groups.groups,record.workspaceRoot);
   var id=ResourceViewIdentity.view(record.workspaceRoot,record.id,"agent");
   host.attachAgent(makeAgentTab(id,record.id,record.workspaceRoot,record.name));
+  if (phoneLayoutActive && sidebar.visible) sidebar.setVisible(false);
   requestFrame();
  }
 

@@ -6,6 +6,7 @@ from agent_test_runtime import manager_environment
 ROOT=Path(__file__).resolve().parent.parent
 p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('--output',type=Path,required=True)
+p.add_argument('--responsive',action='store_true',help='Resize the window through responsive pane transitions')
 p.add_argument('--resize',action='store_true',help='Drag the Workbench divider while a synchronized TUI redraws')
 p.add_argument('--pixels',action='store_true',help='Capture every rendered frame; excludes meaningful latency measurements')
 p.add_argument('--skip-build',action='store_true')
@@ -56,6 +57,24 @@ try:
   time.sleep(.2)
  f=wait(lambda f:len([x for x in f['state']['treeItems'] if x['key'].startswith('t:')])==2);rows=[x for x in f['state']['treeItems'] if x['key'].startswith('t:')]
  assert len(rows)==2,rows
+ if a.responsive:
+  observations=[]
+  for width in [1200,960,840,713,680,640,600,660,700,840,960,1200]:
+   xdo('windowsize','--sync',window,width,840)
+   f=wait(lambda f:f['state']['viewport']['width']==width)
+   time.sleep(.15);f=frames()[-1]
+   terminal=f['state']['testTargets']['terminalPane'];right=any(n['key']=='context-panel-content' for n in f['nodes'])
+   observations.append({'width':width,'compact':f['state']['viewport']['phoneLayout'],'sidebar':f['state']['viewport']['sidebarVisible'],'right':right,'terminalWidth':terminal['width'] if terminal else 0})
+   assert terminal is not None,'Responsive resize replaced the active terminal with navigation'
+   assert width>713 or not right,'Secondary panel remained at narrow width'
+  assert observations[-1]['right'],'Widening did not restore the preferred right panel'
+  xdo('windowsize','--sync',window,600,840);f=wait(lambda f:f['state']['viewport']['width']==600)
+  click(f['state']['testTargets']['workbenchActivity']);f=wait(lambda f:f['state']['viewport']['sidebarVisible'])
+  row=next(x for x in f['state']['treeItems'] if x['key'].startswith('t:'));click(row['bounds'])
+  f=wait(lambda f:not f['state']['viewport']['sidebarVisible'] and f['state']['testTargets']['terminalPane'] is not None)
+  assert len(f['state']['terminalEditorTabs'])==2,'Responsive navigation replaced terminal sessions'
+  result={'scenario':'responsive-window','observations':observations,'drawerSelectionPassed':True}
+  (out/'result.json').write_text(json.dumps(result,indent=2));print(json.dumps(result,indent=2));sys.exit(0)
  if a.resize:
   first=frames()[-1]['index']
   for side in ('left','right'):

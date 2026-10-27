@@ -51,6 +51,9 @@ class WorkspaceSmokeApp extends ExosuitApp {
 	var selectionDragOffset:Float = 0.0;
 	var selectionStoppedOffset:Float = 0.0;
 	var panelControlsLayout = "";
+	var responsiveTerminal:ui.UiTerminalTab;
+	var responsiveSidebarWidth:Float = 0;
+	var responsiveRightWidth:Float = 0;
 	var panelControlsHeight = 0.0;
 	var panelControlsTerminal:Null<ui.TerminalPanel>;
 	var remoteOpenTests:Null<RemoteFileOpenTests>;
@@ -131,6 +134,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		if (phase == "active-context") return activeContextStep(frame);
 		if (StringTools.startsWith(phase, "mode-")) return modeStep(frame);
 		if (StringTools.startsWith(phase, "context-layout-")) return contextLayoutStep(frame);
+		if (phase == "layout-responsive") return responsiveLayoutStep(frame);
 		if (phase == "layout-panel-controls") return bottomPanelControlsStep(frame);
 		if (StringTools.startsWith(phase, "layout-")) return layoutControlsStep(frame);
 		if (phase == "remote-open") {
@@ -1598,6 +1602,57 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		return result;
 	}
 
+	function responsiveLayoutStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
+		var widths = [1200.0,1200,713,700,640,660,660,680,700,1200,1200,713,1200];
+		frame.setViewport(widths[Std.int(Math.min(frames-1,widths.length-1))],720);
+		if (frames == 1) {
+			openTerminal(); moveTerminalToEditor();
+			responsiveTerminal = UiEditorTabs.terminal(host.activeTab());
+			require(responsiveTerminal != null,"Responsive fixture did not open a terminal");
+			showSidebarMode("files");
+			sidebar.rememberWidth(260);
+			dock.setRoot(haxeon.ui.docking.DockNode.Split(haxeon.ui.docking.DockSplitAxis.Horizontal,260.0/1144,
+				haxeon.ui.docking.DockNode.Panel("explorer"),
+				haxeon.ui.docking.DockNode.Split(haxeon.ui.docking.DockSplitAxis.Horizontal,0.72,
+					haxeon.ui.docking.DockNode.Panel(host.activePane.id),haxeon.ui.docking.DockNode.Panel("context-panel"))));
+		}
+		if (frames == 6) activateSidebarDestination("files");
+		if (frames == 7) showTerminalInEditor(responsiveTerminal);
+		var result = super.submit(frame);
+		if (frames == 2) {
+			responsiveSidebarWidth = node("sidebar-modes").globalBounds().width;
+			responsiveRightWidth = node("context-panel-content").globalBounds().width;
+		}
+		if (frames == 3 || frames == 4 || frames == 9 || frames == 12) {
+			require(!phoneLayoutActive && responsiveRightHidden,"Intermediate width did not collapse the secondary region: frame="+frames+", width="+frame.width+", sidebar="+sidebar.width+", phone="+phoneLayoutActive+", hidden="+responsiveRightHidden+", dock="+dock.snapshotJson());
+			require(dock.isOpen("context-panel") && find(ui.root,"context-panel-content")==null,"Responsive collapse changed the saved region or kept rendering it");
+			require(node("terminal-pane").globalBounds().width >= 320,"Responsive layout squeezed the terminal below its usable width");
+			require(Math.abs(node("sidebar-modes").globalBounds().width-responsiveSidebarWidth)<2,"Workbench width followed content or window resizing");
+			var saved=haxeon.ui.docking.DockWorkspaceSnapshotCodec.decode(captureDockLayout());
+			if (saved == null) throw "Responsive layout snapshot did not decode";
+			require(haxeon.ui.docking.DockNodeTools.contains(saved.root,"context-panel"),"Responsive collapse leaked into persisted layout");
+		}
+		if (frames == 5 || frames == 7 || frames == 8) {
+			require(phoneLayoutActive && !sidebar.visible,"Narrow layout replaced the active terminal with navigation");
+			require(find(ui.root,"terminal-pane")!=null,"Narrow layout lost the active terminal");
+			require(UiEditorTabs.terminal(host.activeTab())==responsiveTerminal,"Responsive layout recreated the terminal session");
+			var saved=haxeon.ui.docking.DockWorkspaceSnapshotCodec.decode(captureDockLayout());
+			if (saved == null) throw "Responsive layout snapshot did not decode";
+			require(haxeon.ui.docking.DockNodeTools.contains(saved.root,"explorer") && haxeon.ui.docking.DockNodeTools.contains(saved.root,"context-panel"),"Narrow layout lost desktop region preferences");
+			var capture:Void->String = cast host.captureSidebar;
+			var savedSidebar=capture().split("|");
+			require(savedSidebar[2]=="1" && Math.abs(Std.parseFloat(savedSidebar[3])-responsiveSidebarWidth)<2,"Narrow navigation state overwrote saved sidebar visibility/width");
+		}
+		if (frames == 6) require(phoneLayoutActive && sidebar.visible && find(ui.root,"sidebar-modes")!=null,"Collapsed navigation was unreachable from the activity button");
+		if (frames == 10 || frames == 11 || frames == 13) {
+			require(!phoneLayoutActive && !responsiveRightHidden && sidebar.visible,"Growing the window did not restore preferred regions");
+			require(Math.abs(node("context-panel-content").globalBounds().width-responsiveRightWidth)<2,"Growing the window lost the right region width");
+			require(Math.abs(node("sidebar-modes").globalBounds().width-responsiveSidebarWidth)<2,"Growing the window lost the sidebar width");
+		}
+		if (frames == 13) trace("PASS: responsive right-first collapse, active terminal, navigation drawer, hysteresis, restored widths and saved layout");
+		return result;
+	}
+
 	function layoutControlsStep(frame:LayoutFrame):haxeon.ui.core.RenderNode {
 		var expectedFile = config.ConfigurationPaths.stateRoot() + "/layout-controls-width.txt";
 		if (phase == "layout-phone") frame.setViewport(480, 720);
@@ -2153,7 +2208,7 @@ class WorkspaceSmokeMain {
 			zoomWidth = options.width;
 		}
 		options.captureDirectory = args[1];
-		options.frameLimit = args[2] == "mode-write" ? 16 : args[2] == "mode-read" ? 12 : args[2] == "mode-phone-default" ? 10 : args[2] == "context-layout-write" ? 14 : args[2] == "context-layout-read" ? 9 : StringTools.startsWith(args[2], "context-layout-") ? 7 : args[2] == "layout-panel-controls" ? 17 : args[2] == "layout-read" ? 15 : args[2] == "layout-write" ? 13 : args[2] == "layout-phone" ? 6 : args[2] == "active-context" ? 10 : args[2] == "saved-workspace" ? 10 : args[2] == "divider-chrome" ? 10 : args[2] == "explorer-rename" ? 40 : args[2] == "editor-geometry" ? 25 : args[2] == "file-deletion" ? 10 : args[2] == "blank-editor-click" ? 11 : args[2] == "zoom" ? 75 : args[2] == "save-as" ? 10 : args[2] == "exit-confirmation" ? 11 : args[2] == "tab-close" ? 13 : args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 11 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
+		options.frameLimit = args[2] == "layout-responsive" ? 13 : args[2] == "mode-write" ? 16 : args[2] == "mode-read" ? 12 : args[2] == "mode-phone-default" ? 10 : args[2] == "context-layout-write" ? 14 : args[2] == "context-layout-read" ? 9 : StringTools.startsWith(args[2], "context-layout-") ? 7 : args[2] == "layout-panel-controls" ? 17 : args[2] == "layout-read" ? 15 : args[2] == "layout-write" ? 13 : args[2] == "layout-phone" ? 6 : args[2] == "active-context" ? 10 : args[2] == "saved-workspace" ? 10 : args[2] == "divider-chrome" ? 10 : args[2] == "explorer-rename" ? 40 : args[2] == "editor-geometry" ? 25 : args[2] == "file-deletion" ? 10 : args[2] == "blank-editor-click" ? 11 : args[2] == "zoom" ? 75 : args[2] == "save-as" ? 10 : args[2] == "exit-confirmation" ? 11 : args[2] == "tab-close" ? 13 : args[2] == "selection" ? 10 : args[2] == "problems" ? 10 : args[2] == "settings" ? 11 : args[2] == "editor-tabs" ? 11 : args[2] == "explorer-icons" ? 14 : args[2] == "editor-minimap" ? 11 : args[2] == "scrollbar-visibility" ? 12 : args[2] == "explorer-preview" ? 12 : args[2] == "language-folder" ? 121 : args[2] == "editor-scroll" ? 13 : args[2] == "sidebar-preview" ? 18 : args[2] == "sidebar-search" || args[2] == "sidebar-stale-preview" ? 20 : args[2] == "sidebar-write" ? 11 : args[2] == "keyboard" ? 17 : args[2] == "write" ? 12 : 7;
 		var status = DesktopUiHost.run(options, context -> new WorkspaceSmokeApp(context, args[0], args[2]));
 
 		return status;

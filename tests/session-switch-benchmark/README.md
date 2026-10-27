@@ -37,3 +37,8 @@ split across delayed PTY writes, add `--resize --pixels`. The report checks ever
 submitted terminal row set for partial/empty output, verifies multiple grid widths,
 and checks presented screenshots for retained text. This uses deterministic fake
 Codex output through the real workspace PTY/RPC path; it does not run Codex itself.
+
+Add `--responsive --pixels` to resize the native window across desktop, two-pane,
+and compact layouts. It checks that the active terminal remains visible, the
+secondary region collapses first, widening restores it, and Workbench navigation
+can select an existing terminal and return to content without replacing sessions.
