@@ -274,3 +274,48 @@ Fast frame rendering did not ensure prompt shell echo. `TerminalPane.poll()` app
 Polling now requests a frame when refreshing rows detects changed screen or cursor state. An unchanged poll requests no frame. This preserves the authoritative terminal stream and does not predict shell input, add a timer, or enable continuous rendering.
 
 The cursor suite includes delayed echo, cursor-only output, batched output and settled-idle assertions. An additional real desktop-host fixture emits ten three-character batches from background polling with no continuous redraw requests, waits after the final batch, and checks the rendered text/cursor state and final cursor pixels in both themes. Against the original pane, none of the ten batches reached a submitted frame; the fixed pane displayed all ten and the final cursor at column 30. The complete cursor/color/selection suite and 50 retained-versus-forced-refresh comparisons pass under isolated Xvfb. Captures and baseline failure logs are retained in `out/terminal-async-echo/`. This proves the missed-redraw fix; it does not measure keyboard-to-photon latency or remove PTY/RPC round trips.
+
+## Real terminal input to echoed pixels: 2026-10-26
+
+[`benchmark-terminal-input-latency.py`](../../scripts/benchmark-terminal-input-latency.py) measures the actual graphical application, its authenticated workspace RPC connection and daemon, a real PTY, and Bash line editing. It injects XTEST keys and polls X11 window pixels for the echoed cursor position. Burst captures also verify visible glyph ink in every echoed cell. It always creates a private Xvfb display and separate state/workspace; no input reaches the user's desktop. Build first, then run:
+
+```sh
+python3 scripts/benchmark-terminal-input-latency.py --output out/terminal-input-latency/run-1 --pairs 20
+python3 scripts/benchmark-terminal-input-latency.py --output out/terminal-input-latency/profile --pairs 10 --profile
+```
+
+Two unprofiled runs with identical application/agent bytecode hashes measured 80 isolated inputs (alternating `x` and Backspace, waiting for each echo) and 180 burst inputs (six bursts of 30 `x` keys at approximately 5 ms intervals). Results pooled across those runs:
+
+| Input to echoed cursor pixels | Median | p95 | Maximum |
+|---|---:|---:|---:|
+| Isolated key | 367 ms | 411 ms | 439 ms |
+| Fast burst, per key | 548 ms | 653 ms | 697 ms |
+
+After the last injected burst key, the cursor needed another 496–620 ms to catch up. All final burst glyph/cursor checks passed, without dropped characters. The median XGetImage readback call was about 0.06 ms. Steady frame callback medians were 2.6–2.8 ms, with p95 4.9–5.7 ms; the large input delay is not explained by frame execution time alone.
+
+A separate `hlprof-live` run (1 kHz sampling, zero dropped records) reproduced the echo delay. Across all key transitions in that diagnostic run, including setup/calibration, NativeKit's polled input age was 6.4 ms median / 10.7 ms p95. The existing analyzer's next-frame proxy was 20.1 / 24.3 ms: that early frame does not establish that shell echo has arrived. Its numbers must not be presented as terminal echo latency.
+
+Source inspection found two scheduling contributors to investigate. `TransportResource::run()` snapshots whether output is queued, then waits for socket readiness with a 100 ms timeout. Queueing a new send notifies a condition variable and calls `wake_service()`, but the ordinary socket poll is not waiting on that condition; `wake_service()` only wakes libwebsockets service. A newly queued local RPC write can therefore wait for the socket timeout. Separately, `ExosuitApp.pollBackground()` gates terminal polling behind its 50 ms background-service throttle. These are strong candidates for the accumulated round-trip delay; neither was changed or isolated with an A/B experiment in this measurement pass.
+
+Raw events, observed cursor positions, screenshots, bytecode hashes/copies, per-run results and a pooled `summary.json` are retained in `out/terminal-input-latency/`, with the completed unprofiled runs named `software-2` and `software-3`. `profile-1/` contains the capture, Perfetto export, CPU report and input-age analysis. Failed desktop calibration attempts are excluded. The measurement uses an empty workspace, plain Bash without startup files, software rendering, and X11 readback; it excludes physical keyboard hardware, compositor scanout and monitor response. No valid hardware-rendered end-to-end result was obtained in this pass.
+
+## Transport wakeups and terminal polling: 2026-10-26
+
+NativeKit now includes a private wakeup socket in each ordinary transport worker's socket-readiness wait. Queueing output signals that endpoint; the worker drains the signal and rechecks its existing output queue. Notifications coalesce, descriptors are nonblocking and not inherited across exec, and resource destruction joins the worker before closing its wakeup endpoints. POSIX uses a socket pair; Windows socket transports use a connected loopback datagram pair. Windows named-pipe output instead wakes its existing condition-variable wait. The secure WebSocket client continues using its libwebsockets service wakeup. Public APIs, output ordering and queue limits are unchanged.
+
+`ExosuitApp` now polls terminal sessions on each host event-loop iteration. Filesystem, catalog and other background maintenance retain their existing slower cadence. Terminal output continues requesting frames only when its visible state changes.
+
+Two unprofiled runs of the updated build repeated the same empty-workspace, real RPC/PTY/Bash test above: 80 isolated inputs and 180 burst inputs. Both updated runs used identical application and agent bytecode hashes. The earlier baseline runs and these runs include intervening working-tree changes, so this is not a byte-for-byte ablation of the two application changes. The native regression below independently isolates the transport change.
+
+| Input to echoed cursor pixels | Median before → after | p95 before → after | Maximum before → after |
+|---|---:|---:|---:|
+| Isolated key | 367 → 23.4 ms | 411 → 26.1 ms | 439 → 35.0 ms |
+| Fast burst, per key | 548 → 15.8 ms | 653 → 23.8 ms | 697 → 25.8 ms |
+
+Final cursor catch-up after the last burst key fell from 496–620 ms to 14.8–17.6 ms across six bursts. All burst glyph/cursor checks passed. These remain software-rendered X11 pixel-readback measurements, excluding physical keyboard and display response. A separate 1 kHz `hlprof-live` run reproduced the improvement with zero dropped records; its timings are excluded from the table.
+
+The transport regression queues sends after idle periods in both directions over TCP, local sockets and plain WebSockets. The baseline failed at 665 ms total for eight TCP sends; the updated worker completed eight sends in 0.54 ms (TCP), 0.56 ms (WebSocket), and 0.22 ms (local). Existing transport checks for UDP, message boundaries, fragmented writes, empty messages, invalid input, cancellation and local-socket security pass. The aggregate timing assertion allows 400 ms for eight sends to tolerate scheduling noise while detecting the old timeout-bound behavior.
+
+The new `tests/terminal-polling-smoke` fixture verifies that terminal polling proceeds twice while the maintenance deadline is deliberately an hour away, and that disposed sessions are skipped. The cursor/color/selection suite passes, including window-focus restoration, asynchronous echo and all 50 retained-versus-forced-refresh comparisons. The actual workspace-terminal lifecycle test passes rapid resizing and restores the same terminal ID, shell PID and shell environment after the window closes. That test now opens its new terminal after workspace attachment and explicitly focuses the visible pane after resizing through compact layouts.
+
+Source snapshots, before/after native test logs, both updated runs (`after-1/`, `after-2/`), `summary.json`, the profiler capture/export (`profile-after/`), polling fixture and visual captures, and lifecycle logs are retained in `out/terminal-latency-fix/`. Runtime validation was on Linux; Windows and macOS were not run. Existing processes keep their loaded native library until their app/workspace service restarts; the validation used fresh isolated processes and did not restart user-owned shells.

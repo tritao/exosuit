@@ -1576,6 +1576,9 @@ class ExosuitApp implements DesktopUiApplication {
 
 	/** Drain services without requesting a render merely because they are running. */
 	function pollBackground():Void {
+		// Terminal IO follows the host event pump. Filesystem/catalog maintenance
+		// keeps its slower cadence without delaying asynchronous shell echo.
+		pollTerminals();
 		var now = Sys.time();
 		if (now < nextBackgroundPoll) return;
 		nextBackgroundPoll = now + 0.05;
@@ -1708,6 +1711,9 @@ class ExosuitApp implements DesktopUiApplication {
 		}
 		if (notificationsVisible && notificationPanel != null) notificationPanel.poll();
 		ui.buildContext.environment.scrollbarVisibility = host.scrollbarVisibility;
+	}
+
+	function pollTerminals():Void {
 		for (terminal in host.allTerminalTabs()) {
 			if (terminal.disposed) continue;
 			try {

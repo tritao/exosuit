@@ -354,6 +354,7 @@ class TerminalPane implements TerminalPanel {
 			cursorMode = cursor.mode;
 			if (cursorRow >= 0 && cursorRow < revisions.length) revisions[cursorRow]++;
 		}
+		terminalsession.TerminalLatencyTrace.mark("terminal.rows.ready");
 		return true;
 	}
 

@@ -1,0 +1,1 @@
+{"version":1,"package":{"name":"exosuit-terminal-polling-smoke"},"entry":"TerminalPollingSmoke","sourceRoots":["src"],"scopeSourceRoots":false,"dependencies":{"exosuit-graphical":{"path":"../../graphical"}},"target":"host","outputDir":"build"}

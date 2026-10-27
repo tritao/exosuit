@@ -166,6 +166,7 @@ class RpcTerminalBackend implements TerminalBackend {
     if (bytes == null || bytes.length == 0) return;
     if (writeBytes + bytes.length > 65536) throw "Terminal input queue exceeds limit";
     writes.push(bytes.sub(0, bytes.length));
+    terminalsession.TerminalLatencyTrace.mark("terminal.input.queued");
     writeBytes += bytes.length;
     interactiveUntil = Sys.time() + 0.25;
     nextRead = 0;
@@ -186,6 +187,7 @@ class RpcTerminalBackend implements TerminalBackend {
     writeBytes = 0;
     writing = true;
     sequence++;
+    terminalsession.TerminalLatencyTrace.mark("terminal.input.sent");
     c.call(WorkspaceTerminalProtocol.INPUT, {
       workspace: "workspace",
       instance: instance,
@@ -195,6 +197,7 @@ class RpcTerminalBackend implements TerminalBackend {
     }, 2000, function(_) {
       if (connection == c) {
         writing = false;
+        terminalsession.TerminalLatencyTrace.mark("terminal.input.acknowledged");
         nextRead = 0;
         flushInput(c);
       }
@@ -397,6 +400,7 @@ class RpcTerminalBackend implements TerminalBackend {
     pending = true;
     replayDirty = false;
     var requested = replayCursor;
+    terminalsession.TerminalLatencyTrace.mark("terminal.replay.requested");
     c.call(WorkspaceTerminalProtocol.REPLAY, {
       workspace:"workspace", instance:instance, id:terminalId, cursor:requested
     }, 2000, function(value) {
@@ -424,6 +428,7 @@ class RpcTerminalBackend implements TerminalBackend {
       }
       if (bytes > 65536 || nextOffset > value.terminal.end) { fail("Invalid terminal replay bounds"); return; }
       if (!observe(value.terminal)) return;
+      terminalsession.TerminalLatencyTrace.mark("terminal.replay.received");
       for (event in value.events) output.push(event.data.length == 0
         ? TerminalEvent.geometry(event.columns, event.rows) : TerminalEvent.output(event.offset, event.data));
       position = nextOffset;

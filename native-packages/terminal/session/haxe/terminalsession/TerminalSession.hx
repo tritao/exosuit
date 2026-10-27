@@ -113,6 +113,7 @@ class TerminalSession {
         var skip = haxe.Int64.toInt(alreadyApplied);
         var count = event.length - skip;
         emulator.feedRange(event.data, skip, count);
+        TerminalLatencyTrace.mark("terminal.output.applied");
         offset += count;
         replayAt = -1;
     }
