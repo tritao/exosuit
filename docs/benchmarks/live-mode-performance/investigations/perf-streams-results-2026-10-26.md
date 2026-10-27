@@ -28,8 +28,9 @@ Idle after scrolling (2.0/s) is the caret blink. Idle-start includes the editor'
 ## What changed, by problem
 
 - #1, #2, #11 input starvation and waits (NativeKit Windows pump): input is drained before posted messages (with sent
-  messages), typed characters follow their keys, a frame message waits at most one pump for an unpolled event, and the
-  idle wait is `MsgWaitForMultipleObjectsEx` on a wake event plus window input.
+  messages), typed characters follow their keys (system keys keep their own place), `nk_poll_event` returns queued
+  events before pumping again (at most 64 polls between pumps), a frame message waits at most one pump for an unpolled
+  event, and the idle wait is `MsgWaitForMultipleObjectsEx` on a wake event plus window input.
 - #3 animations: delayed animations (scrollbar fade countdown) sleep until their deadline instead of drawing.
 - #4 layout feedback loop: tooltips, minimap and scrollbar seed rebuilt placements from the last layout.
 - #5 glyph republishing: row glyph snapshots are retained between frames; per-row colour ranges are a slice.
@@ -57,6 +58,9 @@ Idle after scrolling (2.0/s) is the caret blink. Idle-start includes the editor'
 - Long-line file: one ~200 ms frame when scrolling crosses a 1024-unit glyph window chunk.
 - One move with a 295 ms input→frame and a 250 ms input age in `main-final2-sampling`, outside the scenario phases
   (startup), not investigated.
+- #12 big rebuilds: not started. The first frame takes 1.48 s (a 1.41 s whole-tree build), some clicks rebuild for
+  35–40 ms and opening a tab takes 377 ms. The next candidate after these streams.
+- #13 (profiler overhead) needs no fix: these results come from sampling captures, as it recommends.
 - Pre-existing test failures (fail identically before the streams): language-controller-test (definition picker),
   scm-watch, NativeKit transport_contract / win_create_destroy / capability_conformance, nkui backend_smoke /
   session_render_smoke / path_cache_retention, FrameworkSmoke scaled click. win_file_watch is flaky on both.
