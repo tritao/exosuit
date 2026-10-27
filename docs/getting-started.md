@@ -61,6 +61,10 @@ the running app):
 python scripts/run.py --live
 ```
 
+An edit live mode cannot patch (a new runtime native, a changed class layout) reloads the app with its saved state,
+and the console says why. To catch reloads an edit should not need, run with `--strict-live`: it refuses such an
+edit with a banner naming the cause and keeps the app on its running revision.
+
 > **Warning: a watch or live session keeps the Haxeon compiler it started with.** If you change Haxeon's own
 > compiler (`haxeon/src`, `haxeon/stdlib`) while the session runs, later rebuilds still use the old compiler and
 > nothing reports it. **Restart `run.py` after changing the compiler** before judging whether the change worked.
