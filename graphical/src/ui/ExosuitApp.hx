@@ -3,6 +3,7 @@ package ui;
 import haxeon.ui.widgets.overlays.TooltipOverlayHost;
 
 import haxeon.ui.widgets.overlays.TooltipPlacement;
+import haxeon.ui.widgets.overlays.MenuItem;
 
 import haxeon.ui.FontFamily;
 import haxeon.ui.Path;
@@ -2635,7 +2636,8 @@ class ExosuitApp implements DesktopUiApplication {
 		style.childGap = 2;
 		style.padding = new Insets(2, 0, 6, 0);
 		return new Row("explorer-header-actions", [
-			new KeyedView("scope", explorerHeaderButton("Files scope", IconName.ChevronDown, showFilesScope, true)),
+			new KeyedView("scope", explorerHeaderButton("Files scope and workspace", IconName.ChevronDown, showFilesScope, true, false,
+				function(event) showWorkbenchMenu(filesMenuItems(), event, function() return true))),
 			new KeyedView("new-file", explorerHeaderButton("New File", IconName.NewFile,
 				function() createExplorerEntry(false), available && !remote, remote)),
 			new KeyedView("new-folder", explorerHeaderButton("New Folder", IconName.NewFolder,
@@ -2651,7 +2653,8 @@ class ExosuitApp implements DesktopUiApplication {
 		], style);
 	}
 
-	function explorerHeaderButton(label:String, icon:IconName, action:Void->Void, enabled:Bool, readOnly:Bool = false):View {
+	function explorerHeaderButton(label:String, icon:IconName, action:Void->Void, enabled:Bool, readOnly:Bool = false,
+			?onEvent:UiEvent->Void):View {
 		var style = new LayoutStyle();
 		style.width = LayoutAxis.fixed(24);
 		style.height = LayoutAxis.fixed(24);
@@ -2659,6 +2662,7 @@ class ExosuitApp implements DesktopUiApplication {
 		style.childDistribution = haxeon.ui.LayoutDistribution.Center;
 		style.childAlignY = LayoutAlignmentY.Center;
 		var button = new Button("", style, action, "explorer-action:" + label);
+		if (onEvent != null) button.onClickEvent = onEvent;
 		button.enabled = enabled;
 		button.variant = ButtonVariant.Navigation;
 		button.leadingIcon = icon;
@@ -2667,6 +2671,44 @@ class ExosuitApp implements DesktopUiApplication {
 		return new TabTooltip("explorer-action-tooltip:" + label, button,
 			new Text(readOnly ? label + " (remote files are read-only)" : label),
 			function() return new Rect(0, 0, viewportWidth, viewportHeight), application.settings.current.tabTooltipDelay);
+	}
+
+	/** Files header menu: the scope picker and the window's workspace actions (desktop only). */
+	function filesMenuItems():Array<MenuItem> {
+		var items:Array<MenuItem> = [new MenuItem("files-scope", "Files Scope…", showFilesScope)];
+		for (item in [commandMenuItem("workspace:add-folder", "Add Folder to Workspace…", true),
+				commandMenuItem("workspace:remove-folder", "Remove Folder from Workspace…"),
+				commandMenuItem("workspace:close", "Close Workspace")])
+			if (item != null) items.push(item);
+		return items;
+	}
+
+	/** A workspace root row: folder creation plus workspace membership for that root, with no picker. */
+	function workspaceRootMenuItems(root:String):Array<MenuItem> {
+		var items:Array<MenuItem> = [];
+		var available = controller.SavedWorkspaceController.available(root);
+		for (item in [commandMenuItem("file:new", "New File…", false, available), commandMenuItem("folder:new", "New Folder…", false, available),
+				commandMenuItem("workspace:add-folder", "Add Folder to Workspace…", true)])
+			if (item != null) items.push(item);
+		items.push(new MenuItem("workspace-remove-root", "Remove Folder from Workspace",
+			function() application.savedWorkspaces.removeFolder(root), application.savedWorkspaces.hasRoot(root)));
+		var close = commandMenuItem("workspace:close", "Close Workspace");
+		if (close != null) items.push(close);
+		return items;
+	}
+
+	/** Remote Files are read-only and owned by the workspace service: only view actions are offered. */
+	function remoteExplorerMenuItems():Array<MenuItem> {
+		return [
+			new MenuItem("files-refresh", "Refresh", function() if (explorerModel != null) explorerModel.refreshAll()),
+			new MenuItem("files-collapse", "Collapse All", function() if (explorerTree != null) explorerTree.collapseAll(true))
+		];
+	}
+
+	function commandMenuItem(command:String, label:String, separatorBefore:Bool = false, enabled:Bool = true):Null<MenuItem> {
+		if (!application.commands.contains(command)) return null;
+		return new MenuItem(command, label, function() application.commands.perform(command, application.context),
+			enabled && application.commands.isValid(command, application.context), null, separatorBefore);
 	}
 
 	function createExplorerEntry(folder:Bool):Void {
@@ -2824,9 +2866,19 @@ class ExosuitApp implements DesktopUiApplication {
 			application.files.openRenameFile();
 		};
 		tree.onItemContextMenu = function(path, event) {
-			if (remoteModel != null || (localModel != null && localModel.isSyntheticRow(path))) return;
+			if (remoteModel != null) {
+				if (path == remoteModel.rootKeyAt(0))
+					showWorkbenchMenu(remoteExplorerMenuItems(), event, function() return explorerModel == remoteModel);
+				return;
+			}
+			if (localModel != null && localModel.isSyntheticRow(path)) return;
 			var menuRoot = explorerRoot;
 			host.setSelectedExplorerPath(path);
+			if (application.savedWorkspaces.hasRoot(path)) {
+				showWorkbenchMenu(workspaceRootMenuItems(path), event,
+					function() return explorerRoot == menuRoot && application.savedWorkspaces.hasRoot(path));
+				return;
+			}
 			showContextMenu([
 				new CommandMenuEntry("file:new", "New File…"),
 				new CommandMenuEntry("folder:new", "New Folder…"),
@@ -3522,11 +3574,18 @@ class ExosuitApp implements DesktopUiApplication {
 			items.push(new KeyedView("add-folder", new Button("Add Folder to Workspace…", null, application.savedWorkspaces.addPicker, "welcome-add-folder")));
 			if (application.savedWorkspaces.roots().length > 0)
 				items.push(new KeyedView("save-workspace", new Button("Save Workspace As…", null, application.savedWorkspaces.savePicker, "welcome-save-workspace")));
+			if (application.savedWorkspaces.isOpen())
+				items.push(new KeyedView("close-workspace", new Button("Close Workspace", null, function() {
+					application.savedWorkspaces.close(); requestFrame();
+				}, "welcome-close-workspace")));
 			for (index in 0...application.savedWorkspaces.recents.paths.length) {
 				var file = application.savedWorkspaces.recents.paths[index];
 				var available = FileSystem.exists(file);
-				items.push(new KeyedView("workspace-recent-" + index, new Button(workspace.SavedWorkspace.nameFromPath(file) +
-					(available ? "" : " (unavailable)"), null, function() application.savedWorkspaces.open(file), "welcome-workspace-recent-" + index)));
+				var recent = new Button(workspace.SavedWorkspace.nameFromPath(file) +
+					(available ? "" : " (unavailable)"), null, function() application.savedWorkspaces.open(file), "welcome-workspace-recent-" + index);
+				items.push(new KeyedView("workspace-recent-" + index, new ContextMenuTarget(recent, function(event) showWorkbenchMenu([
+					new MenuItem("remove-recent-workspace", "Remove from Recent Workspaces", function() application.savedWorkspaces.recents.remove(file))
+				], event, function() return application.savedWorkspaces.recents.paths.indexOf(file) >= 0))));
 			}
 		}
 		if (actions != null && actions.recentProjects.length > 0) {
@@ -4658,4 +4717,18 @@ private typedef ScmMarkerTarget = {
 	var snapshot:Null<scm.ScmSnapshot>;
 	var untracked:Bool;
 	var worktree:Bool;
+}
+
+/** Opens a context menu for a child view on right-click or the keyboard context-menu request. */
+private class ContextMenuTarget implements View {
+	final child:View;
+	final request:UiEvent->Void;
+	public function new(child:View, request:UiEvent->Void) { this.child = child; this.request = request; }
+	public function build(context:haxeon.ui.core.BuildContext):RenderNode {
+		var node = child.build(context);
+		var open = function(event:UiEvent) { request(event); event.preventDefault(); event.stopPropagation(); };
+		node.on(UiEventKind.PointerDown, function(event) if (event.button == 1) open(event));
+		node.on(UiEventKind.KeyDown, function(event) if (UiKey.isContextMenuRequest(event.key, event.modifiers)) open(event));
+		return node;
+	}
 }
