@@ -18,7 +18,7 @@ class SavedWorkspaceTestMain {
 		return value;
 	}
 	static function main():Int {
-		var root = Sys.args()[0]; FileSystem.createDirectory(root); root = FileSystem.fullPath(root);
+		var root = Sys.args()[0]; FileSystem.createDirectory(root); root = StringTools.replace(FileSystem.fullPath(root), "\\", "/");
 		var roots = [root + "/one", root + "/two", root + "/three"];
 		for (path in roots) FileSystem.createDirectory(path);
 		for (count in [1, 3]) {
