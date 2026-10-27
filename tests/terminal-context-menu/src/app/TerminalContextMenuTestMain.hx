@@ -42,18 +42,25 @@ class TerminalContextMenuTestMain {
 		var run = function(action:String) { calls.push(action); };
 		var running = TerminalContextActions.build(record, true, true, false, run);
 		require(item(running,"stop").enabled && ![for (entry in running) entry.key].contains("terminal-remove"), "running terminal offered removal");
+		require(![for (entry in running) entry.key].contains("terminal-restart"), "running terminal offered restart");
 		for (entry in TerminalContextActions.build(record, true, false, false, run))
 			if (["terminal-open","terminal-editor","terminal-panel"].indexOf(entry.key) < 0)
 				require(!entry.enabled, "read-only terminal offered a mutation");
 		for (entry in TerminalContextActions.build(record, true, true, true, run)) require(!entry.enabled, "busy catalog offered an action");
 		record.state = "starting";
 		require(![for (entry in TerminalContextActions.build(record,true,true,false,run)) entry.key].contains("terminal-remove"), "starting terminal offered removal");
+		record.state = "exited";
+		require(item(TerminalContextActions.build(record,true,true,false,run),"restart").enabled,"ended terminal lacked restart");
+		for (entry in TerminalContextActions.build(record,true,false,false,run))
+			require(entry.key != "terminal-restart","read-only terminal offered restart");
+		require(!item(TerminalContextActions.build(record,true,true,true,run),"restart").enabled,"busy terminal offered restart");
 		record.state = "lost"; record.available = false;
 		var lost = TerminalContextActions.build(record,true,true,false,run);
 		require(item(lost,"remove").enabled && ![for (entry in lost) entry.key].contains("terminal-stop") && ![for (entry in lost) entry.key].contains("terminal-open"),
 			"lost terminal actions confused attachment, process state, and removal");
+		item(lost,"restart").onSelect();
 		item(lost,"remove").onSelect();
-		require(calls.join(",") == "remove", "lost terminal removal did not reach its action");
+		require(calls.join(",") == "restart,remove", "lost terminal removal did not reach its action");
 
 		var catalog:workspace.service.WorkspaceTerminalProtocol.TerminalCatalog = {
 			instance:"restarted-daemon", groups:[], terminals:[record], next:null
@@ -75,6 +82,7 @@ class TerminalContextMenuTestMain {
 
 		var fonts = haxeon.ui.FontCollection.create();
 		fonts.add("../../haxeon/packages/ui/vendor/skribidi/example/data/IBMPlexSans-Regular.ttf");
+		TerminalRestartTests.run(fonts);
 		var app = new ui.ExosuitApp(fonts, ui.ExosuitPalette.theme(false), null, null, null, null, false,
 			function(_, _, _) return new TerminalFixture());
 		var firstPanel = new TerminalFixture(), secondPanel = new TerminalFixture();

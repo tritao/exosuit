@@ -93,7 +93,9 @@ run_test tab-tooltip
 run_test quick-picker
 run_test narrow-tabs
 run_test status-bar
-run_test terminal-context-menu
+terminal_context_state=$(mktemp -d)
+PRAGTICAL_PORTABLE="$terminal_context_state" run_test terminal-context-menu
+rm -rf "$terminal_context_state"
 run_test sidebar-layout
 run_test workbench-drag
 run_test remote-access-panel

@@ -126,7 +126,7 @@ class TerminalHistoryTests {
     until(function() return backend.isSynchronized() && session.status=="lost","Existing pane did not recover after generation change");
     var text = allText(session.emulator);
     require(text.indexOf("SAVED_000")>=0 && text.indexOf("SAVED_059")>=0,"Recovered pane lost scrollback or active output");
-    require(!backend.canControl() && backend.controlAction()=="Restart shell","Archived history was writable or lacked restart action");
+    require(!backend.canControl() && backend.controlAction()=="Restart Terminal","Archived history was writable or lacked restart action");
     // Read-only peers cannot start a shell from archived output.
     var pair = MemoryTransport.pair(), clock = function() return Sys.time()*1000;
     var reader = new RpcConnection(pair.client,clock), readServer = new RpcConnection(pair.server,clock);
@@ -182,7 +182,7 @@ class TerminalHistoryTests {
     };
     until(function() return backend.isSynchronized(),"Metadata-only terminal recovery failed");
     require(session.status=="lost" && manager.activeCount()==0,"Recovery view silently spawned a replacement");
-    require(backend.controlStatus()=="Session ended · no saved history" && backend.controlAction()=="Restart shell",
+    require(backend.controlStatus()=="Session ended · no saved history" && backend.controlAction()=="Restart Terminal",
       "Metadata-only terminal lacks an honest explanation or restart action");
     backend.activateControl();
     until(function() return backend.canControl() && session.status=="running","Metadata-only terminal could not restart explicitly");

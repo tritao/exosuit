@@ -17,5 +17,6 @@ interface WorkspaceTerminalCatalogClient {
   public function changeGroup(owner:String, group:workspace.service.WorkspaceProtocol.WorkspaceGroup, name:String, parent:Null<String>, cwd:Null<String>, order:Int, create:Bool):Void;
   public function removeGroup(owner:String, group:workspace.service.WorkspaceProtocol.WorkspaceGroup):Void;
   public function stopTerminal(record:TerminalRecord):Void;
+  public function restartTerminal(record:TerminalRecord):Void;
   public function forgetTerminal(record:TerminalRecord):Void;
 }

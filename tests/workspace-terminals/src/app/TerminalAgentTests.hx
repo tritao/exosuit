@@ -101,7 +101,7 @@ class TerminalAgentTests {
   until(function() return backend.isSynchronized(),"Interactive agent did not reconnect");
   require(sys.io.File.getContent(countPath)=="1" && manager.activeCount()==1,"View reconnection restarted the CLI");
   session.write(Bytes.ofString("exit\n"));until(function() return session.status=="exited","Interactive CLI did not exit");
-  require(backend.controlAction()=="Restart agent","CLI session offered a shell replacement");
+  require(backend.controlAction()=="Restart Terminal","CLI session offered a shell replacement");
   manager.dispose();store.close();
   store=new WorkspaceSqliteStore(path,"workspace",seed);
   manager=new WorkspaceTerminalManager("workspace","second",root,16777216,store,function() return seed.groups);

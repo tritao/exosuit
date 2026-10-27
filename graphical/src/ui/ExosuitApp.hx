@@ -1664,6 +1664,7 @@ class ExosuitApp implements DesktopUiApplication {
 					case "rename": renameCatalogTerminal(record);
 					case "group": moveCatalogTerminalGroup(record);
 					case "stop": client.stopTerminal(record);
+					case "restart": client.restartTerminal(record);
 					case "remove": forgetCatalogTerminal(record);
 					case "editor", "panel":
 						if (openCatalogTerminal(record)) for (tab in host.allTerminalTabs())

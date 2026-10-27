@@ -35,6 +35,7 @@ class RpcTerminalBackend implements TerminalBackend {
   var historyError:Bool = false;
   var historyAvailable:Bool = true;
   var restartable:Bool = false;
+  var restartError:Null<String>;
   var pending:Bool = false;
   var closed:Bool = false;
   var columns:Int = 80;
@@ -100,7 +101,14 @@ class RpcTerminalBackend implements TerminalBackend {
     }
     if (!synchronized) return "Loading terminal history…";
     if (historyError) return "Terminal history could not be saved";
-    if (terminalState != "running") return historyAvailable ? "Session ended · saved history" : "Session ended · no saved history";
+    if (terminalState == "starting") return "Starting terminal…";
+    if (terminalState != "running") {
+      if (controlPending) return "Restarting terminal…";
+      if (restartError != null) return restartError;
+      if (!hasControlGrant()) return "Session ended · restarting requires terminal control permission";
+      if (!restartable || controlUnavailable) return "Session ended · update the workspace service in Remote Access to restart";
+      return historyAvailable ? "Session ended · saved history" : "Session ended · no saved history";
+    }
     if (controlUnavailable) return "Read only · update the workspace daemon to control this terminal";
     if (!hasControlGrant()) return "Read only · control permission was not granted";
     if (controlPending) return "Updating terminal control…";
@@ -108,7 +116,7 @@ class RpcTerminalBackend implements TerminalBackend {
     if (controlled) return "Read only · another client controls this terminal";
     return "Read only · no client is controlling this terminal";
   }
-  public function controlAction():String return !attached || !synchronized || controlUnavailable || !hasControlGrant() || controlPending ? "" : terminalState != "running" ? (restartable ? (agentProvider == null ? "Restart shell" : "Restart agent") : "") : controller ? "Release" : "Take control";
+  public function controlAction():String return !attached || !synchronized || controlUnavailable || !hasControlGrant() || controlPending || terminalState == "starting" ? "" : terminalState != "running" ? (restartable ? "Restart Terminal" : "") : controller ? "Release" : "Take control";
   public function activateControl():Void {
     if (terminalState != "running") { restartShell(); return; }
     controlReleased = controller;
@@ -117,8 +125,10 @@ class RpcTerminalBackend implements TerminalBackend {
   function restartShell():Void {
     var c = connection;
     if (closed || !attached || !synchronized || !restartable || controlPending || c == null || !c.isOpen() || !hasControlGrant()) return;
-    controlPending = true;
-    c.call(WorkspaceTerminalProtocol.RESTART, {workspace:"workspace", instance:instance, id:terminalId, theme:theme}, 5000, function(info) {
+    controlPending = true; restartError = null;
+    var owner = instance;
+    WorkspaceTerminalRestart.request(c,owner,terminalId,theme,
+      function() return !closed && connection == c && instance == owner && hasControlGrant(), function(info) {
       if (closed || connection != c) return;
       controlPending = false;
       if (!observe(info)) return;
@@ -128,7 +138,8 @@ class RpcTerminalBackend implements TerminalBackend {
       controlPending = false;
       // Another viewer may have restarted it first. Refresh rather than retry input.
       replayDirty = true; nextRead = 0;
-      if (error.code != "terminal_running") fail(error.code);
+      if (error.code != "terminal_running") restartError = WorkspaceTerminalRestart.message(error);
+      if (error.code == "unknown_method" || error.code == "unsupported") restartable = false;
     });
   }
   function setControl(claim:Bool, takeover:Bool = false):Void {
@@ -165,6 +176,7 @@ class RpcTerminalBackend implements TerminalBackend {
     if (info.name != null && StringTools.trim(info.name) != "") name = info.name;
     observedRows = info.rows;
     terminalState = info.state;
+    if (terminalState == "running") restartError = null;
     if (info.agentProvider != null) agentProvider = info.agentProvider;
     historyError = info.historyError == true;
     historyAvailable = info.historyAvailable != false;
@@ -351,6 +363,7 @@ class RpcTerminalBackend implements TerminalBackend {
       controlled = false;
       controlPending = false;
       controlUnavailable = false;
+      restartError = null;
     }
     if (c != null && attached) flushInput(c);
     if (c != null && !pending) {

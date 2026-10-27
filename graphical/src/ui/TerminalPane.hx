@@ -49,8 +49,6 @@ class TerminalPane implements AgentTerminalPanel {
 	final palette:TerminalPalette;
 	final ownsFonts:Bool;
 	final remoteBackend:Null<workspace.client.RpcTerminalBackend>;
-	var controlLayout:Null<TextLayout>;
-	var controlActionLayout:Null<TextLayout>;
 	var controlStatusText:String = "";
 	var controlActionText:String = "";
 	var foreground:Color;
@@ -80,7 +78,6 @@ class TerminalPane implements AgentTerminalPanel {
 	var hasSelection:Bool = false;
 	var mouseButton:Int = -1;
 	var mousePointer:Int = -1;
-	var controlPointer:Int = -1;
 	var cursorRow:Int = -1;
 	var cursorColumn:Int = -1;
 	var cursorMode:Int = 1;
@@ -164,13 +161,7 @@ class TerminalPane implements AgentTerminalPanel {
 			fonts.addSystemFallbacks();
 		}
 		updateFontSize();
-		if (remoteBackend != null) {
-			controlLayout = TextLayout.create(fonts, "", 8192.0, new TextStyle(fontSize), new ParagraphStyle(TextWrap.None));
-			controlLayout.setColor(foreground);
-			controlActionLayout = TextLayout.create(fonts, "", 1024.0, new TextStyle(fontSize), new ParagraphStyle(TextWrap.None));
-			controlActionLayout.setColor(palette.cursor);
-			syncControlLayout();
-		}
+		if (remoteBackend != null) syncControlLayout();
 		refreshRows(true);
 	}
 
@@ -191,8 +182,6 @@ class TerminalPane implements AgentTerminalPanel {
 			cursorOutlineColor = foreground;
 			syncDefaultColors();
 			for (row in renderedRows) row.layout.setColor(foreground);
-			if (controlLayout != null) controlLayout.setColor(foreground);
-			if (controlActionLayout != null) controlActionLayout.setColor(palette.cursor);
 			refreshRows(true);
 			requestFrame();
 		}
@@ -218,12 +207,10 @@ class TerminalPane implements AgentTerminalPanel {
 		if (status != controlStatusText) {
 			viewportHeight = -1; // The notice can appear or disappear without a viewport resize.
 			controlStatusText = status;
-			controlLayout.setText(status);
 			requestFrame();
 		}
 		if (action != controlActionText) {
 			controlActionText = action;
-			controlActionLayout.setText(action);
 			requestFrame();
 		}
 	}
@@ -450,25 +437,37 @@ class TerminalPane implements AgentTerminalPanel {
 		}, fill, "Terminal", true);
 		var layers:Array<StackChild> = [new StackChild("background", backdrop, 0.0, 0.0, 0,
 			LayoutAxis.grow(), LayoutAxis.grow())];
+		var terminalNode:Null<RenderNode> = null;
 		if (showControlNotice()) {
 			var controlStyle = new LayoutStyle();
 			controlStyle.width = LayoutAxis.grow();
 			controlStyle.height = LayoutAxis.fixed(CONTROL_BAR_HEIGHT);
-			var action = controlActionLayout;
-			var status = controlLayout;
-			var tint = Color.rgba(palette.cursor.red, palette.cursor.green, palette.cursor.blue, 0.12);
-			var strip = new CanvasView("terminal-control-strip", function(canvas:Canvas, geometry) {
-				canvas.fillRectIfPositive(new Rect(0.0, 0.0, geometry.width, geometry.height), tint);
-				canvas.fillRectIfPositive(new Rect(0.0, 0.0, 3.0, geometry.height), palette.cursor);
-				if (status != null) canvas.drawText(status, 10.0, 4.0);
-				if (action != null && controlActionText.length > 0) {
-					var metrics = action.measure();
-					var width = metrics.width + 20.0;
-					var x = Math.max(8.0, geometry.width - width - 8.0);
-					canvas.fillRectIfPositive(new Rect(x, 2.0, width, geometry.height - 4.0), background);
-					canvas.drawText(action, x + 10.0, 4.0);
-				}
-			}, controlStyle, "Terminal control", true);
+			controlStyle.direction = haxeon.ui.LayoutDirection.LeftToRight;
+			controlStyle.childAlignY = haxeon.ui.LayoutAlignmentY.Center;
+			controlStyle.childGap = 8;
+			controlStyle.padding = new haxeon.ui.Insets(8, 1, 8, 1);
+			controlStyle.background = Color.rgba(palette.cursor.red, palette.cursor.green, palette.cursor.blue, 0.12);
+			var status = new haxeon.ui.widgets.text.MiddleEllipsisText("terminal-control-status",controlStatusText,false,
+				haxeon.ui.core.TextStyleOverride.text(ExosuitPalette.WORKBENCH_TEXT_SIZE));
+			var hint = new haxeon.ui.widgets.overlays.Tooltip("terminal-control-status-tip",status,
+				new haxeon.ui.widgets.text.Text(controlStatusText));
+			hint.fillAnchor = true;
+			hint.placement = haxeon.ui.widgets.overlays.TooltipPlacement.Below;
+			hint.showWhen = function() return status.truncated;
+			var controls:Array<haxeon.ui.widgets.KeyedView> = [new haxeon.ui.widgets.KeyedView("status",hint)];
+			if (controlActionText.length > 0) {
+				var buttonStyle = new LayoutStyle();
+				buttonStyle.height = LayoutAxis.fixed(CONTROL_BAR_HEIGHT - 2);
+				buttonStyle.padding = new haxeon.ui.Insets(8, 0, 8, 0);
+				var action = new haxeon.ui.widgets.controls.Button(controlActionText == "Restart Terminal" ? "Restart" : controlActionText,buttonStyle,function() {
+					remoteBackend.activateControl();syncControlLayout();requestFrame();
+					if (terminalNode != null) context.requestFocusAfterLayout(terminalNode.id);
+				},"terminal-control-action");
+				action.variant = haxeon.ui.widgets.controls.ButtonVariant.Secondary;
+				action.accessibilityLabel = controlActionText;
+				controls.push(new haxeon.ui.widgets.KeyedView("action",action));
+			}
+			var strip = new haxeon.ui.widgets.layout.Row("terminal-control-strip",controls,controlStyle);
 			layers.push(new StackChild("control-strip", strip, 0.0, 0.0, 2,
 				LayoutAxis.grow(), LayoutAxis.fixed(CONTROL_BAR_HEIGHT)));
 		}
@@ -512,6 +511,7 @@ class TerminalPane implements AgentTerminalPanel {
 				1, LayoutAxis.grow(), LayoutAxis.fixed(rowHeight)));
 		}
 		var node = new Stack("terminal-pane", layers, fill).build(context);
+		terminalNode = node;
 		node.commandShortcutFilter = function(id) return TerminalShortcutPolicy.allows(id);
 		// A terminal is an input stream, not an editable copy of its screen. Publish
 		// an empty surrounding document so IME edits cannot target the last editor.
@@ -549,17 +549,9 @@ class TerminalPane implements AgentTerminalPanel {
 				selectionMoved = true; refreshRows(false); requestFrame(); return true;
 			});
 		node.on(UiEventKind.PointerDown, function(event) {
-			context.requestFocus(node.id);
 			if (closed) return;
-			if (showControlNotice() && event.localY >= 0 && event.localY < CONTROL_BAR_HEIGHT) {
-				if (event.button == 0) {
-					controlPointer = event.pointerId;
-					event.capturePointer();
-					event.preventDefault();
-					event.stopPropagation();
-				}
-				return;
-			}
+			if (showControlNotice() && event.localY >= 0 && event.localY < CONTROL_BAR_HEIGHT) return;
+			context.requestFocus(node.id);
 			if ((event.modifiers & UiModifier.Shift) != 0 || session.emulator.mouseMode() == 0) {
 				if (event.button != 0 || selectionPointer >= 0) return;
 				var cell = pointerCell(event);
@@ -601,7 +593,6 @@ class TerminalPane implements AgentTerminalPanel {
 			}
 		});
 		node.on(UiEventKind.PointerMove, function(event) {
-			if (controlPointer >= 0) return;
 			if (selectionPointer >= 0) {
 				if (event.pointerId != selectionPointer || closed) return;
 				selectionGesture.cancelIfMoved(event.x, event.y);
@@ -615,15 +606,6 @@ class TerminalPane implements AgentTerminalPanel {
 				reportMouse(event, mouseButton >= 0 ? mouseButton + 32 : 0, 4);
 		});
 		var releaseMouse = function(event:UiEvent) {
-			if (controlPointer == event.pointerId) {
-				if (showControlNotice() && event.kind != UiEventKind.PointerCancel && event.localY >= 0 && event.localY < CONTROL_BAR_HEIGHT)
-					remoteBackend.activateControl();
-				controlPointer = -1;
-				event.releasePointer();
-				event.preventDefault();
-				event.stopPropagation();
-				return;
-			}
 			if (selectionPointer == event.pointerId) {
 				if (!closed && event.kind != UiEventKind.PointerCancel) updateSelection(event);
 				selectionDrag.stop();
@@ -645,6 +627,7 @@ class TerminalPane implements AgentTerminalPanel {
 		node.on(UiEventKind.PointerUp, releaseMouse);
 		node.on(UiEventKind.PointerCancel, releaseMouse);
 		node.on(UiEventKind.TextInput, function(event:UiEvent) {
+			if (event.target != node.id) return;
 			if (event.text != null && event.text.length > 0) {
 				if (!canSendInput()) { event.preventDefault(); return; }
 				prepareInput();
@@ -664,6 +647,7 @@ class TerminalPane implements AgentTerminalPanel {
 			event.preventDefault();
 		});
 		node.on(UiEventKind.KeyDown, function(event) {
+			if (event.target != node.id) return;
 			if (event.key == UiKey.C &&
 				(event.modifiers & (UiModifier.Control | UiModifier.Shift)) ==
 				(UiModifier.Control | UiModifier.Shift)) {
@@ -689,7 +673,7 @@ class TerminalPane implements AgentTerminalPanel {
 				event.preventDefault();
 			} else handleKey(event);
 		});
-		node.on(UiEventKind.KeyRepeat, handleKey);
+		node.on(UiEventKind.KeyRepeat, function(event) { if (event.target == node.id) handleKey(event); });
 		node.on(UiEventKind.Focus, function(_) {
 			setFocused(true);
 			context.textInput.activate(node.id);
@@ -867,8 +851,6 @@ class TerminalPane implements AgentTerminalPanel {
 		closed = true;
 		for (row in renderedRows) row.layout.dispose();
 		renderedRows.resize(0);
-		if (controlLayout != null) controlLayout.dispose();
-		if (controlActionLayout != null) controlActionLayout.dispose();
 		if (ownsFonts) fonts.dispose();
 		session.close();
 	}

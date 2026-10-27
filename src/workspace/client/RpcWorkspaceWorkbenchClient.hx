@@ -23,6 +23,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
 
   var catalog:Null<WorkspaceTerminalProtocol.TerminalCatalog>;
   var catalogError:Null<String>;
+  var catalogActionError:Null<String>;
   var catalogRevision:Int = 0;
   var catalogPending:Bool = false;
   var catalogMutation:Bool = false;
@@ -73,6 +74,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       }
       var lost = observedConnection != null;
       observedConnection = current;
+      catalogActionError = null;
       catalog = null;
       catalogPending = false;
       catalogMutation = false;
@@ -588,7 +590,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     && endpoint.supportsWorkspaceGroups() && has(WorkspaceProtocol.TREE);
 
   public function terminalCatalog():Null < WorkspaceTerminalProtocol.TerminalCatalog > return catalog;
-  public function terminalCatalogError():Null < String > return catalogError;
+  public function terminalCatalogError():Null < String > return catalogActionError == null ? catalogError : catalogActionError;
   public function terminalCatalogRevision():Int return catalogRevision;
   public function terminalCatalogBusy():Bool return catalogMutation;
 
@@ -609,7 +611,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       }
       return;
     }
-    if (force) catalogError = null;
+    if (force) {catalogError = null;catalogActionError = null;}
     catalogPending = true;
     catalogNext = clock() + 1000;
     loadTerminalPage(connection, null, []);
@@ -695,7 +697,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       catalogRevision++;
       return false;
     }
-    catalogError = null;
+    catalogError = null;catalogActionError = null;
     catalogMutation = true;
     catalogRevision++;
     return true;
@@ -712,7 +714,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   function catalogFailed(connection:RpcConnection, error:RpcError):Void {
     if (rpc() != connection) return;
     catalogMutation = false;
-    catalogError = error.ambiguous ? "Session change may have completed; refresh before retrying"
+    catalogActionError = error.ambiguous ? "Session change may have completed; refresh before retrying"
       : error.code == "stale_revision" ? "This session changed. Reload its name/group before saving." : error.message;
     catalogNext = 0;
     catalogRevision++;
@@ -787,6 +789,23 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       workspace:"workspace", epoch:epoch, operation:WorkspaceIds.create("operation"), group:group.id,
       expectedRevision:group.revision, name:group.name, action:"delete", parent:group.parent, cwd:group.cwd, order:group.order
     }, 2000, function(_) catalogCompleted(connection), function(error) catalogFailed(connection,error));
+  }
+
+  public function restartTerminal(record:TerminalRecord):Void {
+    var connection = rpc(), snapshot = catalog;
+    if (connection == null || snapshot == null || !canReadTerminals() || !canControlTerminals() || catalogMutation) return;
+    if (record.workspaceRoot != root() || !Lambda.exists(snapshot.terminals, function(current)
+      return current.id == record.id && current.instance == record.instance && haxe.Int64.compare(current.revision, record.revision) == 0)) {
+      catalogActionError = "This terminal changed. Refresh before restarting it.";catalogRevision++;return;
+    }
+    if (record.state == "running" || record.state == "starting" || !catalogReady()) return;
+    var owner = instance();
+    WorkspaceTerminalRestart.request(connection,owner,record.id,null,
+      function() return rpc() == connection && instance() == owner && root() == record.workspaceRoot && canReadTerminals() && canControlTerminals(),
+      function(_) catalogCompleted(connection),function(error) {
+        if (error.code == "terminal_running") {catalogCompleted(connection);return;}
+        catalogFailed(connection,{code:error.code,message:WorkspaceTerminalRestart.message(error),ambiguous:false});
+      });
   }
 
   public function stopTerminal(record:WorkspaceTerminalProtocol.TerminalRecord):Void {

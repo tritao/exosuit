@@ -27,6 +27,7 @@ class TerminalContextActions {
 		if (canControl) add("group", "Move to Group…", editable);
 		if (canRead && record.available) add("editor", "Move Terminal to Editor", readable);
 		if (canRead && record.available) add("panel", "Move Terminal to Panel", readable);
+		if (canRead && canControl && !live) add("restart", "Restart Terminal", editable, true);
 		if (canControl && live && record.available) add("stop", "Stop Terminal", editable, true);
 		if (canControl && !live) add("remove", "Remove from Workbench", editable, true);
 		return items;
