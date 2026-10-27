@@ -56,7 +56,7 @@ class PreferencesRegistry {
 		{
 			var options = new SettingOptions();
 			// The settings dialog renders this persisted value with the live Codex model picker.
-			options.internal = true;
+			options.tooltip = "Model for new Workbench Codex sessions. Existing sessions keep their selected model.";
 			if (!projectOnly) registry.define("workbench/codex/default_model", PropertyType.Text, PropertyValue.Text(defaults.codexDefaultModel), options);
 		}
 		{
