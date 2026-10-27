@@ -42,6 +42,36 @@ class CodexProvider implements LocalAgentProvider {
 	final commandPrefix:Array<String>;
 	final bridge:Null<String>;
 	final sessions:Map<String, Session> = [];
+	final nameSync:Map<String,AgentNameSync> = [];
+	var nativeNamingUnsupported=false;
+	public function nativeNamingSupported():Bool return !nativeNamingUnsupported;
+	function nameError(message:String):haxeon.rpc.RpcError {
+		var lower=message.toLowerCase();
+		var unsupported=lower.indexOf("method not found")>=0 || lower.indexOf("unknown method")>=0 || lower.indexOf("unsupported method")>=0;
+		if(unsupported) nativeNamingUnsupported=true;
+		return {code:unsupported ? "unsupported_operation" : phase!="ready" ? "provider_starting" : "provider_error",message:unsupported ? "This Codex version does not support native session naming. Update Codex or use Rename in Workbench." : message,ambiguous:lower.indexOf("timeout")>=0};
+	}
+	function names(s:Session):AgentNameSync {
+		var existing=nameSync.get(s.record.id);if(existing!=null) return existing;
+		var sync=new AgentNameSync(s.record,function() save(s),function(done) {
+			if(s.record.thread=="") {done(null,{code:"unknown_session",message:"The native Codex thread has not been created",ambiguous:false});return;}
+			call("thread/read",{threadId:s.record.thread,includeTurns:false},function(result) {
+				if(result.error!=null) {done(null,nameError(result.error));return;}
+				var thread=Reflect.field(result.result,"thread");
+				if(string(thread,"id")!=s.record.thread || string(thread,"cwd")!=s.record.cwd) {
+					done(null,{code:"invalid_scope",message:"Codex thread does not belong to this workspace resource",ambiguous:false});return;
+				}
+				var name:Dynamic=Reflect.field(thread,"name");
+				if(name!=null && (!Std.isOfType(name,String) || Std.string(name).length>2048)) {
+					done(null,{code:"invalid_response",message:"Invalid native Codex name",ambiguous:false});return;
+				}
+				done(name,null);
+			});
+		},function(name,expected,done) {
+			call("thread/name/set",{threadId:s.record.thread,name:name},function(result) done(result.error==null ? null : nameError(result.error)));
+		},clock);
+		nameSync.set(s.record.id,sync);return sync;
+	}
 	var models:Null<Array<AgentModel>>;
 	var modelsNext:Null<String>;
 	var transport:Null<CodexTransport>;
@@ -147,7 +177,8 @@ class CodexProvider implements LocalAgentProvider {
 			approvalPolicy: r.approvalPolicy,
 			permissionProfile: r.permissionProfile,
 			preferredModel: r.preferredModel,
-			preferredEffort: r.preferredEffort
+			preferredEffort: r.preferredEffort,
+			nameMetadata:r.nameMetadata
 		};
 
 	function view(s:Session, ?before:Int):AgentView
@@ -356,6 +387,7 @@ class CodexProvider implements LocalAgentProvider {
 		if ((phase == "stopped" || phase == "failed") && !startupBlocked && hasRecoverableSessions() && clock() >= retryAt)
 			start();
 		if (phase == "ready") {
+			if(!storageFailed && !nativeNamingUnsupported) for(s in sessions) if(names(s).poll()) break;
 			reconcileNextSession();
 			updateRecoveryStatus();
 		}
@@ -545,6 +577,11 @@ class CodexProvider implements LocalAgentProvider {
 		}
 		if (s == null)
 			return;
+		if (method == "thread/name/updated") {
+			var name:Dynamic=Reflect.field(params,"threadName");
+			if(name==null || Std.isOfType(name,String) && Std.string(name).length<=2048) names(s).observeExternal(name);
+			return;
+		}
 		if (method == "turn/started") {
 			s.eventRevision++;
 			var t = Reflect.field(params, "turn");
@@ -907,7 +944,8 @@ class CodexProvider implements LocalAgentProvider {
 				approvalPolicy: permissionProfile == null ? null : permissionProfile.approvalPolicy,
 				permissionProfile: permissionProfile == null ? null : permissionProfile.id,
 				preferredModel: defaultModel,
-				preferredEffort: defaultEffort
+				preferredEffort: defaultEffort,
+				nameMetadata:{source:"native",nativeName:null}
 			},
 			activity: "",
 			conversation: new CodexConversation(),
@@ -996,6 +1034,14 @@ class CodexProvider implements LocalAgentProvider {
 			ctx.fail({code: "unknown_agent", message: "Unknown agent", ambiguous: false});
 			return;
 		}
+		if(q.action == "inspect-name" || q.action == "rename-native") {
+			if(!nativeNamingSupported()) {ctx.fail({code:"unsupported_operation",message:"This Codex version does not support native naming. Use Rename in Workbench or update Codex.",ambiguous:false});return;}
+			var sync=names(s);
+			if(q.action == "inspect-name") sync.inspect(function() ctx.respond(view(s)),function(problem) ctx.fail(problem));
+			else if(q.request==null) ctx.fail({code:"invalid_request",message:"Reopen Rename before saving",ambiguous:false});
+			else sync.rename(q.request,q.expectedNativeName,q.text,function() ctx.respond(view(s)),function(problem) ctx.fail(problem));
+			return;
+		}
 		if (q.action == "read") {
 			var before:Null<Int> = null;
 			if (q.after != null) {
@@ -1038,6 +1084,7 @@ class CodexProvider implements LocalAgentProvider {
 				ctx.fail({code: "storage_unavailable", message: "Agent leaf could not be removed from storage", ambiguous: false});
 				return;
 			}
+			var sync=nameSync.get(q.id);if(sync!=null) sync.dispose();nameSync.remove(q.id);
 			sessions.remove(q.id);
 			ctx.respond(result);
 			return;
@@ -1332,10 +1379,12 @@ class CodexProvider implements LocalAgentProvider {
 		for (session in sessions)
 			if (session.attached || session.busy || session.record.state == "creating"
 				|| session.record.state == "working" || session.record.state == "needs-attention") count++;
+		for(sync in nameSync) if(sync.busy) count++;
 		return count;
 	}
 
 	public function dispose():Void {
+		for(sync in nameSync) sync.dispose();
 		if (starter != null) {
 			processes.release(starter);
 			starter = null;

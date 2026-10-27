@@ -32,7 +32,7 @@ class AgentNameSync {
  function observed(nativeName:Null<String>):Void {
   var metadata=record.nameMetadata;
   var source=metadata==null ? "workbench" : metadata.source;
-  var name=source=="native" ? (nativeName==null ? fallback() : nativeName.substring(0,256)) : record.name;
+  var name=source=="native" ? (nativeName==null ? (metadata!=null && metadata.nativeName!=null ? fallback() : record.name) : nativeName.substring(0,256)) : record.name;
   if(metadata!=null && metadata.pending==null && metadata.nativeName==nativeName && record.name==name) return;
   update(name,{source:source,nativeName:nativeName});
  }
@@ -79,6 +79,11 @@ class AgentNameSync {
     busy=false;
     try observed(actual) catch(_:Dynamic) {}
     failed(error("conflict","The name changed in the native tool. Reopen Rename before saving."));return;
+   }
+   if(actual==target) {
+    busy=false;
+    try update(target,{source:"native",nativeName:actual}) catch(_:Dynamic) {failed(error("storage_unavailable","The existing native name could not be saved locally"));return;}
+    done();return;
    }
    var source=record.nameMetadata==null ? "workbench" : record.nameMetadata.source;
    try update(record.name,{source:source,nativeName:actual,pending:{expected:actual,target:target,session:record.thread}})

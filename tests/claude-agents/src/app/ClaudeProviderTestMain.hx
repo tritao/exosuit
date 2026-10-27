@@ -9,6 +9,7 @@ import haxeon.rpc.MemoryTransport;
 import haxeon.rpc.RpcConnection;
 import process.ProcessManager;
 
+@:access(workspace.provider.ClaudeProvider)
 class ClaudeProviderTestMain {
  static function require(ok:Bool,why:String):Void {if(!ok) throw why;}
  static function main():Void {
@@ -69,7 +70,8 @@ class ClaudeProviderTestMain {
   // Closing the editor connection must leave the daemon-owned process alive.
   client.close();server.close();
   for(_ in 0...10) {provider.poll();Sys.sleep(0.002);}
-  require(processes.activeCount()==1,"Editor detachment killed Claude");
+  var detached=claude.sessions.get("a");
+  require(detached!=null && detached.transport!=null,"Editor detachment killed Claude");
   pair=MemoryTransport.pair();client=new RpcConnection(pair.client,clock);server=new RpcConnection(pair.server,clock);
   provider.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
   action("prompt","crash");until("uncertain");
@@ -81,7 +83,8 @@ class ClaudeProviderTestMain {
   provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, [claude], store);
   provider.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
   for(_ in 0...10) provider.poll();
-  require(processes.activeCount()==0,"Persisted Claude session was resumed automatically");
+  var restored=claude.sessions.get("a");
+  require(restored!=null && restored.transport==null,"Persisted Claude session was resumed automatically");
   action("read");require(items().length>0 && currentView().record.state=="uncertain","Restart lost uncertain state or replay");
   action("connect");until("idle");require(currentView().record.thread==id,"Resume changed session id");
   action("prompt","after-resume");until("completed");

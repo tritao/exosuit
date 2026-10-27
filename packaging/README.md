@@ -25,3 +25,5 @@ daemons; it does not change an already-running daemon's policy. It keeps the
 loopback service available, but away-from-home connectivity still needs the
 planned secure relay. Discovery and state live below `$XDG_STATE_HOME/exosuit`.
 Send SIGTERM to the descriptor's manager PID to explicitly stop the service.
+
+Native Claude Code session naming uses a pinned Claude Agent SDK metadata adapter. Build preparation installs only that package with optional executables and peer dependencies omitted; the release includes the SDK and its upstream README/legal notice under `tools/claude-naming`. Node.js 18.14 or newer is required on the workspace host for this optional feature. The daemon does not download dependencies, launch Claude, or send model requests to read or rename a session. Without the adapter/runtime, the UI offers an explicitly local Workbench label instead.

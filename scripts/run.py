@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from haxeon_cli import ensure_language_server, run_cli
+from prepare_agent_naming import prepare
 
 
 def _windows_npm_codex_environment() -> dict[str, str]:
@@ -53,6 +54,7 @@ def main() -> int:
     if self_hosted:
         agent_arguments.append("--self-hosted")
     try:
+        prepare(root_dir)
         status = ensure_language_server(root_dir)
         if status != 0:
             return status

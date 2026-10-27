@@ -6,6 +6,7 @@ import workspace.service.WorkspaceAgentProtocol;
 /** Small daemon-owned provider surface. Native protocol details stay in each implementation. */
 interface LocalAgentProvider {
  public function driverKind():String;
+ public function nativeNamingSupported():Bool;
  public function summary():String;
  public function owns(id:String):Bool;
  public function records():Array<AgentRecord>;

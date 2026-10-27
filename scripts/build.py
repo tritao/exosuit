@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from haxeon_cli import ensure_language_server, run_cli
+from prepare_agent_naming import prepare
 
 
 def main() -> int:
@@ -23,6 +24,7 @@ def main() -> int:
     agent_arguments.extend(sys.argv[1:])
 
     try:
+        prepare(root_dir)
         status = ensure_language_server(root_dir)
         if status != 0:
             return status

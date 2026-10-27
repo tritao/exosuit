@@ -11,3 +11,5 @@
 /web/build/
 /web/**/__pycache__/
 **/__pycache__/
+
+/agent/naming/node_modules/

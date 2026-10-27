@@ -49,11 +49,22 @@ class ClaudeProvider implements LocalAgentProvider {
  final executable:String;
  final prefix:Array<String>;
  final sessions:Map<String,ClaudeSession> = [];
+ final nameBridge:ClaudeNameBridge;
+ final nameSync:Map<String,AgentNameSync> = [];
+ public function nativeNamingSupported():Bool return nameBridge.available();
+ function names(s:ClaudeSession):AgentNameSync {
+  var existing=nameSync.get(s.record.id);if(existing!=null) return existing;
+  var sync=new AgentNameSync(s.record,function() save(s),
+   function(done) nameBridge.read(s.record.thread,s.record.cwd,done),
+   function(name,expected,done) nameBridge.write(s.record.thread,s.record.cwd,name,expected,done),clock);
+  nameSync.set(s.record.id,sync);return sync;
+ }
  var storageFailed = false;
  public function new(directories:WorkspaceDirectories, groups:Void->Array<WorkspaceGroup>, processes:ProcessManager,
    clock:Void->Float, ?persistence:WorkspaceAgentPersistence, executable:String = "claude", ?script:String) {
   this.directories=directories;this.groups=groups;this.processes=processes;this.clock=clock;this.persistence=persistence;
   this.executable=executable;prefix=script == null ? [] : [script];
+  nameBridge=new ClaudeNameBridge(processes,clock,directories.root,ClaudeNameBridge.findScript());
   if (persistence != null) for (r in persistence.loadAgents()) if (r.provider == "claude") {
    if (!valid(r.id,128) || !valid(r.name,256) || !uuid(r.thread) || r.workspaceRoot != directories.root
       || !valid(r.cwd,1024) || !inside(r.cwd) || !mode(r.permissionMode) || sessions.exists(r.id)) throw "Invalid persisted Claude session";
@@ -198,6 +209,8 @@ class ClaudeProvider implements LocalAgentProvider {
   }
  }
  public function poll():Void {
+  nameBridge.poll();
+  if(!storageFailed && nameBridge.available()) for(s in sessions) if(names(s).poll()) break;
   for(s in sessions) {
    var t=s.transport;
    if(t != null) {t.poll(clock());if(t.failure != null && s.transport == t) fail(s,t.failure);}
@@ -225,7 +238,7 @@ class ClaudeProvider implements LocalAgentProvider {
   var hex=haxe.crypto.Sha256.encode(Std.string(clock()) + ":" + Math.random() + ":" + q.id);
   var id=hex.substr(0,8)+"-"+hex.substr(8,4)+"-4"+hex.substr(13,3)+"-a"+hex.substr(17,3)+"-"+hex.substr(20,12);
   var s=session({id:q.id,name:q.name,group:q.group,cwd:cwd,thread:q.thread == null ? id : q.thread,state:"disconnected",turn:null,
-   workspaceRoot:directories.root,provider:"claude",permissionMode:selected,preferredModel:q.defaultModel});
+   workspaceRoot:directories.root,provider:"claude",nameMetadata:{source:"native",nativeName:null},permissionMode:selected,preferredModel:q.defaultModel});
   try save(s) catch(_:Dynamic) {ctx.fail({code:"storage_unavailable",message:"Claude reservation failed",ambiguous:false});return;}
   sessions.set(q.id,s);launch(s,q.thread != null);ctx.respond(copy(s.record));
  }
@@ -251,6 +264,14 @@ class ClaudeProvider implements LocalAgentProvider {
    }
    ctx.respond(view(s));return;
   }
+  if(q.action == "inspect-name" || q.action == "rename-native") {
+   if(!nativeNamingSupported()) {error("unsupported_operation","Native Claude naming is unavailable. Use Rename in Workbench or install the metadata adapter.");return;}
+   var sync=names(s);
+   if(q.action == "inspect-name") sync.inspect(function() ctx.respond(view(s)),function(problem) ctx.fail(problem));
+   else if(q.request==null) error("invalid_request","Reopen Rename before saving");
+   else sync.rename(q.request,q.expectedNativeName,q.text,function() ctx.respond(view(s)),function(problem) ctx.fail(problem));
+   return;
+  }
   if(q.action == "connect") {
    if(s.transport == null) launch(s,true);
    ctx.respond(view(s));return;
@@ -260,6 +281,7 @@ class ClaudeProvider implements LocalAgentProvider {
    var result=view(s);
    try {if(persistence != null) persistence.removeAgent(q.id);} catch(_:Dynamic) {storageFailed=true;error("storage_unavailable","Session could not be removed");return;}
    if(s.process != null) processes.release(s.process);
+   var sync=nameSync.get(q.id);if(sync!=null) sync.dispose();nameSync.remove(q.id);
    sessions.remove(q.id);ctx.respond(result);return;
   }
   if(!s.ready || s.transport == null) {error("disconnected","Explicitly resume this Claude session before sending requests");return;}
@@ -320,6 +342,10 @@ class ClaudeProvider implements LocalAgentProvider {
   ctx.respond(view(s));
  }
  public function activeCount():Int return [for(s in sessions) if(s.busy || s.record.state == "needs-attention") true].length;
- public function updateActivityCount():Int return [for(s in sessions) if(s.transport != null) true].length;
- public function dispose():Void {for(s in sessions) if(s.transport != null) fail(s,"Workspace daemon closed; explicitly resume this session");}
+ public function updateActivityCount():Int return [for(s in sessions) if(s.transport != null) true].length
+  + [for(sync in nameSync) if(sync.busy) true].length;
+ public function dispose():Void {
+  for(sync in nameSync) sync.dispose();nameBridge.dispose();
+  for(s in sessions) if(s.transport != null) fail(s,"Workspace daemon closed; explicitly resume this session");
+ }
 }

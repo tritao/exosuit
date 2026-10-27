@@ -487,7 +487,7 @@ class AgentManager {
 		var files = collector.files;
 		if (repository != null) {
 			for (relative in ["agent/haxeon.json", "haxeon.json", "release.lock", "scripts/run-codex-proxy.py",
-				"scripts/run-agent.py",
+				"scripts/run-agent.py", "agent/naming/claude-session-names.mjs", "agent/naming/package.json", "agent/naming/package-lock.json",
 				"haxeon/vendor/nativekit/CMakeLists.txt"])
 				collector.add(Path.join([repository, relative]));
 			for (relative in ["agent/src", "agent/native", "src", "native-packages", "haxeon/src", "haxeon/stdlib",
@@ -498,6 +498,12 @@ class AgentManager {
 		var launcher = managerBytecode();
 		var proxy = findProxy(launcher);
 		if (proxy != null) collector.add(proxy);
+		var names=workspace.provider.ClaudeNameBridge.findScript(launcher);
+		if(names!=null) {
+			collector.add(names);
+			collector.add(haxe.io.Path.directory(names)+"/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs");
+			collector.add(haxe.io.Path.directory(names)+"/node_modules/@anthropic-ai/claude-agent-sdk/package.json");
+		}
 		var installRoot = Path.directory(Path.directory(launcher));
 		if (repository == null) {
 			// Bundles do not include sources, so fingerprint the installed runtime itself.

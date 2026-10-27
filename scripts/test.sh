@@ -79,6 +79,8 @@ check agent-idle python3 "$root_dir/scripts/test-agent-idle.py"
 check workspace-terminals python3 "$root_dir/scripts/test-workspace-terminals.py"
 check workspace-agents python3 "$root_dir/scripts/test-workspace-agents.py"
 check claude-agents python3 "$root_dir/scripts/test-claude-agents.py"
+check claude-session-names python3 "$root_dir/scripts/test-claude-session-names.py"
+check native-session-names python3 "$root_dir/scripts/test-native-session-names.py"
 check pi-agents python3 "$root_dir/scripts/test-pi-agents.py"
 check pi-inputs python3 "$root_dir/scripts/test-pi-agents.py" --inputs
 check workspace-rpc-wasm bash "$root_dir/scripts/test-workspace-rpc-wasm.sh"

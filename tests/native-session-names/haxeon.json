@@ -1,0 +1,1 @@
+{"version":1,"package":{"name":"exosuit-native-session-names-test"},"entry":"app.NativeSessionNamesTestMain","sourceRoots":["src"],"scopeSourceRoots":false,"dependencies":{"exosuit-agent":{"path":"../../agent"}},"target":"host","outputDir":"build"}

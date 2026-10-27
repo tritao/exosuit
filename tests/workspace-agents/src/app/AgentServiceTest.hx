@@ -54,6 +54,7 @@ private class FixtureProvider implements LocalAgentProvider {
   for(i in 0...count) entries.push({id:kind+"-"+i,name:"Fixture",group:"work",cwd:"/work",thread:kind+"-"+i,state:"idle",turn:null,workspaceRoot:"/work",provider:kind});
  }
  public function driverKind():String return kind;
+ public function nativeNamingSupported():Bool return false;
  public function summary():String return kind;
  public function owns(id:String):Bool {for(r in entries) if(r.id==id) return true;return false;}
  public function records():Array<AgentRecord> return entries.copy();
