@@ -39,7 +39,12 @@ class WorkbenchGroupLabel implements View {
 			}
 			children.push(new KeyedView("directory", new MutedDirectory(path)));
 		}
-		var node = new Row("workbench-group-label", children, style).build(context);
+		var row = new Row("workbench-group-label", children, style);
+		var tooltip = new haxeon.ui.widgets.overlays.Tooltip("group-directory-tooltip", row,
+			new Text(directory == null ? name : name + "\n" + directory), 0, 28);
+		tooltip.requirePointerMovement = true;
+		tooltip.fillAnchor = true;
+		var node = tooltip.build(context);
 		node.semantics = new Semantics(AccessibilityRole.Text);
 		node.semantics.label = label + (directory == null ? "" : " · " + directory);
 		return node;

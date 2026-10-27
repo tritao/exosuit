@@ -67,7 +67,7 @@ with tempfile.TemporaryDirectory(prefix='exactions-') as temporary:
                 # The group row is near the toolbar, with no permanent attachment form above it.
                 groups = [node for node in nodes if node.get('label') == 'g:work' and node['visible']]
                 assert groups and groups[0]['bounds']['y'] < 150, (groups, json.loads((fixture / str(index) / 'app-state.json').read_text()))
-            if index == 1: assert all(label in labels for label in ['New Codex session', 'New terminal', 'New group', 'Rename group', 'Group settings…', 'Open folder', 'Manage terminals…'])
+            if index == 1: assert all(label in labels for label in ['New Codex session', 'New terminal', 'New group', 'Rename group', 'Change Working Directory…', 'Move to Group…', 'Remove Group', 'Open folder', 'Refresh terminals'])
             if index == 2:
                 assert 'Existing work' in labels and 'Other directory' not in labels and 'Existing Codex thread id' in labels, labels
                 assert (project / 'fake-codex.json').exists()
@@ -78,7 +78,7 @@ with tempfile.TemporaryDirectory(prefix='exactions-') as temporary:
                 assert len(records) == 1 and records[0]['thread'] == 'existing' and records[0]['group'] == 'work', diagnostic
                 assert len(diagnostic['agentTabs']) == 1, diagnostic
             if index == 5:
-                assert all(label in labels for label in ['New Codex session', 'New terminal', 'New group', 'Rename group', 'Group settings…']), labels
+                assert all(label in labels for label in ['New Codex session', 'New terminal', 'New group', 'Rename group', 'Change Working Directory…', 'Move to Group…']), labels
             if index == 6:
                 diagnostic = json.loads((fixture / str(index) / 'app-state.json').read_text())
                 assert len(diagnostic['agentCatalog']['records']) == 2, diagnostic

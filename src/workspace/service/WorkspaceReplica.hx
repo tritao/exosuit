@@ -167,7 +167,10 @@ class WorkspaceReplica {
 		if (previous == null ? event.group.revision != 1 || view().length >= 32
 			: previous.revision == 0x7fffffff || event.group.revision != previous.revision + 1)
 			return false;
-		groups.set(event.group.id, WorkspaceProtocol.copyGroup(event.group));
+		if (event.deleted == true) {
+			if (previous == null) return false;
+			groups.remove(event.group.id);
+		} else groups.set(event.group.id, WorkspaceProtocol.copyGroup(event.group));
 		cursor = event.sequence;
 		return true;
 	}

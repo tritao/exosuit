@@ -428,6 +428,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   public function refreshTerminals(force:Bool):Void workbench.refreshTerminals(force);
   public function renameTerminal(record:TerminalRecord, name:String, group:String):Void
     workbench.renameTerminal(record, name, group);
+  public function canRemoveGroups():Bool return workbench.canRemoveGroups();
+  public function removeGroup(owner:String, group:WorkspaceGroup):Void workbench.removeGroup(owner, group);
   public function changeGroup(owner:String, group:WorkspaceGroup, name:String, parent:Null<String>,
       cwd:Null<String>, order:Int, create:Bool):Void
     workbench.changeGroup(owner, group, name, parent, cwd, order, create);
@@ -606,6 +608,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     var caps = required.copy();
     caps.push(WorkspaceProtocol.WRITE);
     caps.push(WorkspaceProtocol.TREE);
+    caps.push(WorkspaceProtocol.REMOVE);
     caps.push(WorkspaceTerminalProtocol.CATALOG);
     caps.push(WorkspaceAgentProtocol.READ);
     caps.push(WorkspaceAgentProtocol.CONTROL);

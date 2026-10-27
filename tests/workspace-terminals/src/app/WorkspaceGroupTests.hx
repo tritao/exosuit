@@ -40,6 +40,7 @@ class WorkspaceGroupTests {
 			WorkspaceProtocol.READ,
 			WorkspaceProtocol.WRITE,
 			WorkspaceProtocol.TREE,
+			WorkspaceProtocol.REMOVE,
 			WorkspaceProtocol.EVENTS,
 			WorkspaceTerminalProtocol.READ,
 			WorkspaceTerminalProtocol.CONTROL,
@@ -54,6 +55,12 @@ class WorkspaceGroupTests {
 		replica.restore(readClient, function() return true);
 		var terminals = new WorkspaceTerminalManager("w", "owner", root, 65536, store, function() return service.snapshot().groups);
 		terminals.bind(server, grants);
+		var allowRemoval = true;
+		service.canRemoveGroup = function(group) {
+			if (!allowRemoval) return false;
+			for (terminal in terminals.snapshot().terminals) if (terminal.group == group) return false;
+			return true;
+		};
 		function pump():Void {
 			client.poll();
 			server.poll();
@@ -199,6 +206,37 @@ class WorkspaceGroupTests {
 		}, 1000, function(v) overrideInfo = v, function(e) throw e.message);
 		pump();
 		require(overrideInfo != null && overrideInfo.cwd == child, "Explicit directory override lost");
+		for (occupied in ["work", "nested"]) {
+			var base = Lambda.find(service.snapshot().groups,function(group) return group.id == occupied);
+			if (base == null) throw "missing occupied group";
+			var deniedRemoval = "";
+			client.call(WorkspaceProtocol.GROUP,{workspace:"w",epoch:"groups",operation:"reject-delete-" + occupied,
+				group:base.id,expectedRevision:base.revision,name:base.name,action:"delete",parent:base.parent,cwd:base.cwd,order:base.order},1000,
+				function(_) throw "removed an occupied group",function(error) deniedRemoval=error.code);
+			pump();
+			require(deniedRemoval == "group_not_empty", "group removal ignored children or retained terminals");
+		}
+		change("delete-me", "Empty group", null, null, 0, "create");
+		var deletionBase = Lambda.find(service.snapshot().groups, function(group) return group.id == "delete-me");
+		if (deletionBase == null) throw "missing deletion fixture";
+		var deletion:RenameGroup = {workspace:"w",epoch:"groups",operation:"delete-empty",group:deletionBase.id,
+			expectedRevision:deletionBase.revision,name:deletionBase.name,action:"delete",parent:deletionBase.parent,cwd:deletionBase.cwd,order:deletionBase.order};
+		var deletionResult:Null<RenameResult> = null, deletionError = "";
+		allowRemoval = false;
+		client.call(WorkspaceProtocol.GROUP,deletion,1000,function(value) deletionResult=value,function(error) deletionError=error.code);
+		pump();
+		require(deletionError == "group_not_empty" && deletionResult == null, "nonempty host group was removed");
+		allowRemoval = true;
+		deletionError = "";
+		client.call(WorkspaceProtocol.GROUP,deletion,1000,function(value) deletionResult=value,function(error) deletionError=error.code);
+		pump();
+		require(deletionResult != null && deletionResult.deleted == true && deletionError == "", "empty group removal failed");
+		require(!Lambda.exists(service.snapshot().groups,function(group) return group.id == "delete-me") &&
+			!Lambda.exists(replica.view(),function(group) return group.id == "delete-me"), "group removal was not replicated");
+		client.call(WorkspaceProtocol.GROUP,deletion,1000,function(value) deletionResult=value,function(error) deletionError=error.code);
+		pump();
+		require(deletionError == "" && deletionResult != null && deletionResult.deleted == true, "group deletion retry was not idempotent");
+		change("delete-me", "Reused identity", null, null, 0, "create", "group_exists");
 		client.close();
 		server.close();
 		readClient.close();
@@ -260,6 +298,6 @@ class WorkspaceGroupTests {
 		var wideRead = wideStore.loadTerminals();
 		require(wideRead.length == 1 && wideRead[0].workspaceRoot == wideRoot, "Large bounded Unicode metadata failed SQLite roundtrip");
 		wideStore.close();
-		Sys.println("PASS: nested groups, duplicate names, CAS/idempotency, cycles, directory inheritance/overrides, running cwd stability and SQLite restart");
+		Sys.println("PASS: nested groups, empty-only removal, deletion replay/restart, CAS/idempotency, cycles, directory inheritance and running cwd stability");
 	}
 }

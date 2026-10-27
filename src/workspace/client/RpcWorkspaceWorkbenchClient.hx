@@ -554,6 +554,8 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   public function canEditGroups():Bool return rpc() != null
     && endpoint.supportsWorkspaceGroups() && has(WorkspaceProtocol.TREE) && has(WorkspaceProtocol.WRITE);
 
+  public function canRemoveGroups():Bool return canEditGroups() && has(WorkspaceProtocol.REMOVE);
+
   public function canReadTerminals():Bool return rpc() != null && has(WorkspaceTerminalProtocol.READ);
 
   public function canControlTerminals():Bool return rpc() != null
@@ -730,7 +732,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   ):Void {
     var connection = rpc(), epoch = endpoint.workspaceEpoch();
     if (owner != instance()) {
-      catalogError = "Workspace changed; reopen the group editor";
+      catalogError = "Workspace changed; reopen the group action";
       catalogRevision++;
       return;
     }
@@ -756,6 +758,15 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
         error
       )
     );
+  }
+
+  public function removeGroup(owner:String, group:WorkspaceProtocol.WorkspaceGroup):Void {
+    var connection = rpc(), epoch = endpoint.workspaceEpoch();
+    if (owner != instance() || connection == null || epoch == null || !canRemoveGroups() || !catalogReady()) return;
+    connection.call(WorkspaceProtocol.GROUP, {
+      workspace:"workspace", epoch:epoch, operation:WorkspaceIds.create("operation"), group:group.id,
+      expectedRevision:group.revision, name:group.name, action:"delete", parent:group.parent, cwd:group.cwd, order:group.order
+    }, 2000, function(_) catalogCompleted(connection), function(error) catalogFailed(connection,error));
   }
 
   public function stopTerminal(record:WorkspaceTerminalProtocol.TerminalRecord):Void {

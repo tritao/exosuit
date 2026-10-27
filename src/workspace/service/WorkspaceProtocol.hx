@@ -45,6 +45,7 @@ import haxeon.wire.MessagePack;
 	@:id(1) var epoch:String;
 	@:id(2) var sequence:Int;
 	@:id(3) var group:WorkspaceGroup;
+	@:optional @:id(4) var deleted:Null<Bool>;
 }
 
 @:wire typedef WorkspaceWatch = {
@@ -78,6 +79,7 @@ import haxeon.wire.MessagePack;
 	@:id(2) var operation:String;
 	@:id(3) var sequence:Int;
 	@:id(4) var group:WorkspaceGroup;
+	@:optional @:id(5) var deleted:Null<Bool>;
 }
 
 @:wire typedef OperationQuery = {
@@ -102,6 +104,7 @@ class WorkspaceProtocol {
 	public static inline final READ = "workspace.read";
 	public static inline final EVENTS = "workspace.events";
 	public static inline final TREE = "workspace.groups.tree";
+	public static inline final REMOVE = "workspace.groups.remove";
 	public static inline final WRITE = "workspace.groups.write";
 	public static inline final IDENTITY_CAPABILITY = "workspace.identity";
 	public static inline final CHANGED = 200;
@@ -152,6 +155,6 @@ class WorkspaceProtocol {
 			epoch: value.epoch,
 			operation: value.operation,
 			sequence: value.sequence,
-			group: copyGroup(value.group)
+			group: copyGroup(value.group), deleted: value.deleted
 		};
 }

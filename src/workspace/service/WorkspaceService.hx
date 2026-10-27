@@ -12,6 +12,9 @@ private typedef Observer = {var connection:RpcConnection; var watching:Bool; var
 class WorkspaceService {
 	public final id:String;
 	public final epoch:String;
+	/** Host-owned check includes every terminal and agent, not a paginated client projection. */
+	public var canRemoveGroup:Null<String->Bool>;
+	final removedGroups:Map<String, Bool> = [];
 
 	final persistence:Null<WorkspacePersistence>;
 	final resolveDirectory:Null<String->Null<String>>;
@@ -70,12 +73,13 @@ class WorkspaceService {
 				throw "Missing persisted operation";
 			var request = entry.request, outcome = entry.outcome;
 			var previous = latest.get(request.group);
+			if (removedGroups.exists(request.group)) throw "Deleted group identity reused";
 			if (request.workspace != id
 				|| request.epoch != epoch
 				|| !validId(request.operation)
 				|| !validId(request.group)
 				|| !validName(request.name)
-				|| (request.action != null && request.action != "create" && request.action != "update")
+				|| (request.action != null && request.action != "create" && request.action != "update" && request.action != "delete")
 				|| request.expectedRevision < (request.action == "create" ? 0 : 1)
 				|| request.expectedRevision == 0x7fffffff
 				|| (request.action == "create" && (request.expectedRevision != 0 || previous != null))
@@ -86,19 +90,20 @@ class WorkspaceService {
 				|| outcome.group.name != request.name
 				|| outcome.group.revision != request.expectedRevision + 1
 				|| operations.exists(request.operation)
-				|| !groups.exists(request.group)
 				|| (request.action == null && previous != null && (outcome.group.cwd != previous.cwd || outcome.group.parent != previous.parent || WorkspaceProtocol.order(outcome.group.order) != WorkspaceProtocol.order(previous.order)))
 				|| (request.action != null && (outcome.group.cwd != request.cwd || outcome.group.parent != request.parent || WorkspaceProtocol.order(outcome.group.order) != WorkspaceProtocol.order(request.order)))
 				|| previous != null
 				&& request.expectedRevision != previous.revision)
 				throw "Invalid persisted operation";
 			operations.set(request.operation, {request: request, outcome: outcome});
+			if ((outcome.deleted == true) != (request.action == "delete")) throw "Invalid persisted deletion";
 			latest.set(request.group, outcome.group);
+			if (outcome.deleted == true) removedGroups.set(request.group, true);
 			expected++;
 		}
 		for (groupId => last in latest) {
 			var group = groups.get(groupId);
-			if (group == null || !sameGroup(group, last))
+			if (removedGroups.exists(groupId) ? group != null : group == null || !sameGroup(group, last))
 				throw "Persisted group does not match its latest outcome";
 		}
 		sequence = stored.snapshot.cursor;
@@ -110,7 +115,7 @@ class WorkspaceService {
 			if (event == null || event.group == null || event.epoch != epoch || event.sequence != expected)
 				throw "Invalid persisted event sequence";
 			var outcome = stored.operations[expected - 1].outcome;
-			if (!sameGroup(event.group, outcome.group))
+			if (!sameGroup(event.group, outcome.group) || (event.deleted == true) != (outcome.deleted == true))
 				throw "Invalid persisted event sequence";
 			history.push(event);
 			expected++;
@@ -219,7 +224,7 @@ class WorkspaceService {
 				return;
 			}
 			if (!validId(request.operation) || !validId(request.group) || !validName(request.name) || request.expectedRevision < (request.action == "create" ? 0 : 1)
-				|| (tree ? request.action != "create" && request.action != "update" : request.action != null || request.parent != null || request.cwd != null || request.order != null)) {
+				|| (tree ? request.action != "create" && request.action != "update" && request.action != "delete" : request.action != null || request.parent != null || request.cwd != null || request.order != null)) {
 				context.fail({code: "invalid_request", message: "Invalid rename", ambiguous: false});
 				return;
 			}
@@ -233,13 +238,30 @@ class WorkspaceService {
 				return;
 			}
 			var group = groups.get(request.group);
-			if (request.action == "create" ? group != null : group == null) {
+			if (request.action == "create" ? group != null || removedGroups.exists(request.group) : group == null) {
 				context.fail({code: request.action == "create" ? "group_exists" : "unknown_group", message: "Group identity unavailable", ambiguous: false});
 				return;
 			}
 			if ((group == null ? 0 : group.revision) != request.expectedRevision) {
 				context.fail({code: "stale_revision", message: "Group changed", ambiguous: false});
 				return;
+			}
+			if (request.action == "delete") {
+				if (capabilities.indexOf(WorkspaceProtocol.REMOVE) < 0 || canRemoveGroup == null) {
+					context.fail({code:"unsupported", message:"Group removal is not available", ambiguous:false}); return;
+				}
+				for (child in groups) if (child.parent == request.group) {
+					context.fail({code:"group_not_empty", message:"Remove or move child groups first", ambiguous:false}); return;
+				}
+				var permitsRemoval:String->Bool = cast canRemoveGroup;
+				if (!permitsRemoval(request.group)) {
+					context.fail({code:"group_not_empty", message:"Remove or move the group's terminals and agents first", ambiguous:false}); return;
+				}
+				var deletedGroup:WorkspaceGroup = cast group;
+				if (request.name != deletedGroup.name || request.parent != deletedGroup.parent || request.cwd != deletedGroup.cwd ||
+					WorkspaceProtocol.order(request.order) != WorkspaceProtocol.order(deletedGroup.order)) {
+					context.fail({code:"stale_revision", message:"Group changed", ambiguous:false}); return;
+				}
 			}
 			if (operationCount >= operationLimit || sequence == 0x7fffffff || (group != null && group.revision == 0x7fffffff)) {
 				context.fail({code: "operation_limit", message: "Operation retention full", ambiguous: false});
@@ -264,9 +286,9 @@ class WorkspaceService {
 				epoch: epoch,
 				operation: request.operation,
 				sequence: sequence + 1,
-				group: updated
+				group: updated, deleted: request.action == "delete" ? true : null
 			};
-			var event:WorkspaceEvent = {epoch: epoch, sequence: outcome.sequence, group: updated};
+			var event:WorkspaceEvent = {epoch: epoch, sequence: outcome.sequence, group: updated, deleted: outcome.deleted};
 			if (persistence != null) {
 				try
 					persistence.commit(request, outcome, event)
@@ -278,7 +300,8 @@ class WorkspaceService {
 			}
 			// Durable commit precedes every in-memory update, reply and event.
 
-			groups.set(updated.id, updated);
+			if (outcome.deleted == true) { groups.remove(updated.id); removedGroups.set(updated.id, true); }
+			else groups.set(updated.id, updated);
 			sequence++;
 			operationCount++;
 			operations.set(request.operation, {

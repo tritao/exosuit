@@ -101,16 +101,13 @@ class ExosuitApp implements DesktopUiApplication {
 	var pairingClient:Null<workspace.client.WorkspacePairingClient>;
 	var remoteAccessPanel:Null<RemoteAccessPanel>;
 	var pairingRevision:Int = -1;
-	var terminalBrowserVisible:Bool = false;
-	var terminalBrowserRevision:Int = -1;
-	var terminalBrowserPanel:Null<WorkspaceTerminalsPanel>;
+	var lastTerminalCatalogRevision:Int = -1;
 	var workbenchPanel:Null<WorkbenchPanel>;
 
  var codexPoll:Float=0;
  var nextActiveCodexRead:Float=0;
  var codexReadIndex:Int=0;
  var agentRevision=-1;
-	var groupEditor:Null<GroupEditorPanel>;
 	var agentAttach:Null<AgentAttachPanel>;
 	var workspaceAttachment:Null<workspace.client.WorkspaceAttachment>;
 	var searchFileClient:Null<workspace.client.WorkspaceFileClient>;
@@ -719,7 +716,6 @@ class ExosuitApp implements DesktopUiApplication {
         if (workbenchPanel != null && sidebar.activeId == "workbench") workbenchPanel.revealNode("t:" + terminal.resourceId);
         dock.close("terminal");
         pendingTerminalFocus = false;
-        terminalBrowserVisible = false;
         requestFrame();
     }
 
@@ -858,12 +854,19 @@ class ExosuitApp implements DesktopUiApplication {
 				}
 			}, function(event) {
 				host.activePanelTerminalIndex = host.panelTerminals.indexOf(terminal);
-				showContextMenu([new CommandMenuEntry("terminal:move-to-editor", "Move Terminal to Editor")],
-					event, function() return host.activePanelTerminal() == terminal && !terminal.disposed);
+				showTerminalContextMenu(terminal, event);
 			}, terminalCommandSkipsShell);
 			if (host.panelTerminals.length == 1) return view;
 			items.push(new TabItem("terminal:" + terminal.id, terminal.title, view));
 		}
+		var options = terminalTabsOptions();
+		options.onTabContextMenu = function(key, event) {
+			for (terminal in host.panelTerminals) if (key == "terminal:" + terminal.id) {
+				host.activePanelTerminalIndex = host.panelTerminals.indexOf(terminal);
+				showTerminalContextMenu(terminal, event);
+				return;
+			}
+		};
 		var active = host.activePanelTerminal();
 		return Tabs.withOptions("terminal-sessions", items, active == null ? "" : "terminal:" + active.id, function(key) {
 			for (index in 0...host.panelTerminals.length) if (key == "terminal:" + host.panelTerminals[index].id) {
@@ -871,7 +874,7 @@ class ExosuitApp implements DesktopUiApplication {
 				pendingTerminalFocus = true;
 				requestFrame();
 			}
-		}, terminalTabsOptions());
+		}, options);
 	}
 
 	function terminalTabsOptions():TabsOptions {
@@ -1004,7 +1007,7 @@ class ExosuitApp implements DesktopUiApplication {
 		if (terminalUiAvailable()) {
 			ui.commands.register(new Command("terminal:new", "New Terminal", newTerminal,
 				new Shortcut(96 /* ` */, UiModifier.Control | UiModifier.Shift), canCreateTerminal));
-			ui.commands.register(new Command("terminal:browse", "Workspace Terminals…", openWorkspaceTerminals, null, function() return workbenchClient != null && workbenchClient.canReadTerminals()));
+			ui.commands.register(new Command("terminal:browse", "Show Workspace Terminals", openWorkspaceTerminals, null, function() return workbenchClient != null && workbenchClient.canReadTerminals()));
 			ui.commands.register(new Command("terminal:terminate", "Terminate Active Terminal", function() {
 				var terminal = activeTerminal();
 				if (terminal != null) {
@@ -1169,23 +1172,7 @@ class ExosuitApp implements DesktopUiApplication {
 			layers.push(new StackChild("notifications", popup, 0, 0, 45, LayoutAxis.grow(), LayoutAxis.grow()));
 		}
 
-        if(terminalBrowserVisible) {
-            var dismiss=function() {terminalBrowserVisible=false;requestFrame();};
-            var browserStyle=new LayoutStyle();browserStyle.width=LayoutAxis.grow();
-            browserStyle.height=LayoutAxis.fixed(Math.max(180.0,Math.min(480.0,viewportHeight-160.0)));
-            var browser:View=terminalBrowserPanel==null ? new Text("Workspace terminals are not connected") : terminalBrowserPanel;
-            var content=new Column("workspace-terminals-content",[new KeyedView("browser",browser),
-                new KeyedView("close",new Button("Close",null,dismiss,"workspace-terminals-close"))],browserStyle);
-            layers.push(new StackChild("workspace-terminals",new haxeon.ui.widgets.overlays.Dialog("workspace-terminals-dialog","Workspace Terminals",content,dismiss,
-                Math.max(240.0,Math.min(640.0,viewportWidth-48.0))),0.0,0.0,50,LayoutAxis.grow(),LayoutAxis.grow()));
-        }
 
-		if (groupEditor != null) {
-			var dismiss = function() { groupEditor = null; requestFrame(); };
-			layers.push(new StackChild("workbench-group-dialog", new haxeon.ui.widgets.overlays.Dialog(
-				"workbench-group-dialog", "Group", groupEditor, dismiss, Math.max(240.0, Math.min(520.0, viewportWidth - 48.0))),
-				0.0, 0.0, 60, LayoutAxis.grow(), LayoutAxis.grow()));
-		}
 
 		if (agentAttach != null) {
 			if (!agentAttach.isCurrent()) agentAttach = null;
@@ -1376,9 +1363,8 @@ class ExosuitApp implements DesktopUiApplication {
 	public function attachWorkbench(client:workspace.client.WorkspaceWorkbenchClient):Void {
 		layoutModes.suspend();
 		workbenchClient = client;
-		terminalBrowserPanel = new WorkspaceTerminalsPanel(client, openCatalogTerminal, forgetCatalogTerminal, requestFrame);
 		workbenchPanel = new WorkbenchPanel(client, openCatalogTerminal, newGroupedTerminal, editWorkspaceGroup,
-			function(path) application.openArgument(path), openWorkspaceTerminals, requestFrame, openCodexAgent, showWorkbenchMenu,
+			function(path) application.openArgument(path), catalogTerminalActions, requestFrame, openCodexAgent, showWorkbenchMenu,
 			attachCodexThread, function(resource, workspaceRoot) host.closeAgentTabs(resource, workspaceRoot),
 			createCodexAgent, createProviderAgent, canCreateAgentSession);
 		host.onActiveTabChanged = syncWorkbenchAgentSelection;
@@ -1395,9 +1381,6 @@ class ExosuitApp implements DesktopUiApplication {
 		layoutModes.setServiceAvailable(false);
 		host.onActiveTabChanged = null;
 		workbenchPanel = null;
-		terminalBrowserPanel = null;
-		terminalBrowserVisible = false;
-		groupEditor = null;
 		agentAttach = null;
 		agentRevision = -1;
 		requestFrame();
@@ -1503,21 +1486,81 @@ class ExosuitApp implements DesktopUiApplication {
 				contextMenu = null;
 				if (valid() && action.enabled) action.onSelect();
 				requestFrame();
-			}, item.enabled));
+			}, item.enabled, item.shortcut, item.separatorBefore));
 		}
 		contextMenu = new CommandMenu(application.commands, application.context, [], anchor.x, anchor.y, valid,
 			function() { contextMenu = null; requestFrame(); }, actions, menuOpenedWithKeyboard(event));
 		requestFrame();
 	}
 
-	function editWorkspaceGroup(group:workspace.service.WorkspaceProtocol.WorkspaceGroup, create:Bool):Void {
-		if (workbenchClient == null) return;
-		groupEditor = new GroupEditorPanel(workbenchClient, group, create, function() { groupEditor = null; requestFrame(); }, requestFrame);
+	function editWorkspaceGroup(group:workspace.service.WorkspaceProtocol.WorkspaceGroup, action:String):Void {
+		var client = workbenchClient;
+		var catalog = client == null ? null : client.terminalCatalog();
+		if (client == null || catalog == null) return;
+		var valid = function() {
+			if (client != workbenchClient || !client.canEditGroups() || client.terminalCatalogBusy()) return false;
+			var current = client.terminalCatalog();
+			if (current == null || current.instance != catalog.instance) return false;
+			for (candidate in current.groups) if (candidate.id == group.id) return candidate.revision == group.revision;
+			return false;
+		};
+		if (!valid()) return;
+		var save = function(parent:Null<String>, cwd:Null<String>, order:Int) {
+			if (!valid()) return;
+			client.changeGroup(catalog.instance, group, group.name, parent, cwd, order, false);
+			requestFrame();
+		};
+		switch action {
+			case "inherit": save(group.parent, null, workspace.service.WorkspaceProtocol.order(group.order));
+			case "remove":
+				if (client.canRemoveGroups() && GroupContextActions.empty(group.id, client.terminalCatalog(), client.agentService().agents())) {
+					client.removeGroup(catalog.instance, group); requestFrame();
+				}
+			case "parent":
+				var entries = [new commandview.CommandViewEntry("Top level", group.parent == null ? "Current parent" : "Move out of the current group", "")];
+				for (candidate in catalog.groups) if (GroupContextActions.canParent(group.id, candidate.id, catalog.groups))
+					entries.push(new commandview.CommandViewEntry(candidate.name, candidate.id == group.parent ? "Current parent" : "Move group here", candidate.id));
+				host.openCommandView(new commandview.CommandViewProvider("Move Group: ", entries, function(_) {}, function(entry, _, _) {
+					if (entry == null) return;
+					host.closeCommandView();
+					if (!valid()) return;
+					var parent = entry.value == "" ? null : entry.value;
+					var current = client.terminalCatalog();
+					if (current != null && parent != group.parent && GroupContextActions.canParent(group.id,parent,current.groups))
+						save(parent,group.cwd,workspace.service.WorkspaceProtocol.order(group.order));
+				}));
+			case "directory":
+				var promptDirectory = function() {
+					host.openCommandView(new commandview.CommandViewProvider("Group Working Directory (empty inherits): ", [], function(_) {}, function(_, path, _) {
+						host.closeCommandView();
+						path = StringTools.trim(path);
+						save(group.parent,path == "" ? null : path,workspace.service.WorkspaceProtocol.order(group.order));
+					}));
+					if (group.cwd != null) host.commandViewTextInput(group.cwd);
+					host.commandView.input.selectAll();
+				};
+				var local = workspaceAttachment == null || workspaceAttachment.hasLocalFileAccess();
+				if (desktop != null && local) {
+					try desktop.selectDirectory(function(accepted, paths) {
+						if (accepted && paths.length > 0) save(group.parent,paths[0],workspace.service.WorkspaceProtocol.order(group.order));
+					}, "Choose Group Working Directory", workbenchPanel == null ?
+						(group.cwd == null ? catalog.workspaceRoot : group.cwd) : workbenchPanel.model.directory(group))
+					catch (_:Dynamic) promptDirectory();
+				} else promptDirectory();
+			case "order":
+				host.openCommandView(new commandview.CommandViewProvider("Group Sort Order (0–1000000): ", [], function(_) {}, function(_, value, _) {
+					var order = Std.parseInt(value);
+					if (!~/^[0-9]+$/.match(value) || order == null || order < 0 || order > 1000000) return;
+					host.closeCommandView(); save(group.parent,group.cwd,order);
+				}));
+				host.commandViewTextInput(Std.string(workspace.service.WorkspaceProtocol.order(group.order)));
+				host.commandView.input.selectAll();
+		}
 		requestFrame();
 	}
 
 	public function openWorkspaceTerminals():Void {
-		terminalBrowserVisible = true;
+		showSidebarMode("workbench");
 		if (workbenchClient != null) workbenchClient.refreshTerminals(true);
 		requestFrame();
 	}
@@ -1537,7 +1580,6 @@ class ExosuitApp implements DesktopUiApplication {
 				dock.activate("terminal");
 				pendingTerminalFocus = true;
 			}
-			terminalBrowserVisible = false;
 			requestFrame();
 			return true;
 		}
@@ -1549,16 +1591,152 @@ class ExosuitApp implements DesktopUiApplication {
 		dock.open("terminal");
 		dock.activate("terminal");
 		pendingTerminalFocus = true;
-		terminalBrowserVisible = false;
 		requestFrame();
 		return true;
+	}
+
+	function currentCatalogTerminal(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord, ?owner:String):Bool
+		return TerminalContextActions.isCurrent(record, workbenchClient == null ? null : workbenchClient.terminalCatalog(), owner);
+
+	function catalogTerminalActions(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Array<haxeon.ui.widgets.overlays.MenuItem> {
+		var client = workbenchClient;
+		var catalog = client == null ? null : client.terminalCatalog();
+		var owner = catalog == null ? null : catalog.instance;
+		return TerminalContextActions.build(record, client != null && client.canReadTerminals(),
+			client != null && client.canControlTerminals(), client == null || client.terminalCatalogBusy(), function(action) {
+				if (client != workbenchClient || !currentCatalogTerminal(record, owner)) return;
+				// Menus and command pickers can outlive a permission or state change.
+				var allowed = false;
+				for (item in TerminalContextActions.build(record, client.canReadTerminals(), client.canControlTerminals(),
+					client.terminalCatalogBusy(), function(_) {})) if (item.key == "terminal-" + action) allowed = item.enabled;
+				if (!allowed) return;
+				switch action {
+					case "open": openCatalogTerminal(record);
+					case "rename": renameCatalogTerminal(record);
+					case "group": moveCatalogTerminalGroup(record);
+					case "stop": client.stopTerminal(record);
+					case "remove": forgetCatalogTerminal(record);
+					case "editor", "panel":
+						if (openCatalogTerminal(record)) for (tab in host.allTerminalTabs())
+							if (matchesCatalogTerminal(tab, record)) { placeTerminal(tab, action == "editor"); break; }
+				}
+				requestFrame();
+			});
+	}
+
+	static function matchesCatalogTerminal(tab:UiTerminalTab, record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Bool
+		return tab.remote && !tab.disposed && tab.resourceId == record.id &&
+			tab.workspaceRoot == (record.workspaceRoot == null ? record.cwd : record.workspaceRoot);
+
+	function renameCatalogTerminal(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Void {
+		var catalog = workbenchClient == null ? null : workbenchClient.terminalCatalog();
+		if (catalog == null) return;
+		var owner = catalog.instance;
+		host.openCommandView(new commandview.CommandViewProvider("Rename Terminal: ", [], function(_) {}, function(_, name, _) {
+			name = StringTools.trim(name);
+			if (name.length == 0) return;
+			host.closeCommandView();
+			if (currentCatalogTerminal(record, owner) && workbenchClient.canControlTerminals() && !workbenchClient.terminalCatalogBusy())
+				workbenchClient.renameTerminal(record, name, record.group);
+			requestFrame();
+		}));
+		host.commandViewTextInput(record.name);
+		host.commandView.input.selectAll();
+		requestFrame();
+	}
+
+	function moveCatalogTerminalGroup(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Void {
+		var catalog = workbenchClient == null ? null : workbenchClient.terminalCatalog();
+		if (catalog == null) return;
+		var entries = [for (group in catalog.groups) new commandview.CommandViewEntry(group.name,
+			group.id == record.group ? "Current group" : "Move " + record.name + " here", group.id)];
+		host.openCommandView(new commandview.CommandViewProvider("Move Terminal to Group: ", entries, function(_) {}, function(entry, _, _) {
+			if (entry == null) return;
+			host.closeCommandView();
+			if (!currentCatalogTerminal(record, catalog.instance) || !workbenchClient.canControlTerminals() || workbenchClient.terminalCatalogBusy()) return;
+			var current = workbenchClient.terminalCatalog();
+			if (current != null) for (group in current.groups) if (group.id == entry.value) {
+				if (group.id != record.group) workbenchClient.renameTerminal(record, record.name, group.id);
+				break;
+			}
+			requestFrame();
+		}));
+		requestFrame();
+	}
+
+	function placeTerminal(terminal:UiTerminalTab, editor:Bool):Void {
+		if (terminal.disposed) return;
+		if (editor) {
+			host.attachTerminal(terminal);
+			if (host.panelTerminals.length == 0) dock.close("terminal");
+			pendingTerminalFocus = false;
+		} else {
+			host.detachTerminal(terminal);
+			host.hiddenTerminals.remove(terminal);
+			if (host.panelTerminals.indexOf(terminal) < 0) host.panelTerminals.push(terminal);
+			host.activePanelTerminalIndex = host.panelTerminals.indexOf(terminal);
+			openTerminalPanel();
+		}
+		requestFrame();
+	}
+
+	function closeTerminalView(terminal:UiTerminalTab):Void {
+		var pane = host.terminalPaneFor(terminal);
+		if (pane != null) {
+			for (item in pane.items) if (UiEditorTabs.terminal(item) == terminal) { host.closeTab(item, pane.id, true); break; }
+		} else {
+			var index = host.panelTerminals.indexOf(terminal);
+			if (index < 0) return;
+			host.panelTerminals.splice(index, 1);
+			if (index < host.activePanelTerminalIndex) host.activePanelTerminalIndex--;
+			else if (index == host.activePanelTerminalIndex)
+				host.activePanelTerminalIndex = Std.int(Math.min(index, host.panelTerminals.length - 1));
+			if (terminal.retainOnClose) host.hiddenTerminals.push(terminal); else terminal.dispose();
+			if (host.panelTerminals.length == 0) dock.close("terminal");
+		}
+		requestFrame();
+	}
+
+	function showTerminalContextMenu(terminal:UiTerminalTab, event:UiEvent):Void {
+		if (terminal.remote && workbenchClient != null) workbenchClient.refreshTerminals(false);
+		var record:Null<workspace.service.WorkspaceTerminalProtocol.TerminalRecord> = null;
+		var catalog = workbenchClient == null ? null : workbenchClient.terminalCatalog();
+		if (catalog != null) for (candidate in catalog.terminals) if (matchesCatalogTerminal(terminal, candidate)) { record = candidate; break; }
+		var items:Array<haxeon.ui.widgets.overlays.MenuItem> = [];
+		var inEditor = host.terminalPaneFor(terminal) != null;
+		if (record != null) items = catalogTerminalActions(record).filter(function(item)
+			return item.key != "terminal-open" && item.key != (inEditor ? "terminal-editor" : "terminal-panel"));
+		else {
+			if (terminal.remote) items.push(new haxeon.ui.widgets.overlays.MenuItem("terminal-unavailable",
+				workbenchClient == null ? "Workspace disconnected" : "Terminal details unavailable", null, false));
+			if (!terminal.remote) items.push(new haxeon.ui.widgets.overlays.MenuItem("terminal-rename", "Rename Terminal…", function() {
+				host.openCommandView(new commandview.CommandViewProvider("Rename Terminal: ", [], function(_) {}, function(_, name, _) {
+					name = StringTools.trim(name);
+					if (name.length == 0) return;
+					if (!terminal.disposed) terminal.title = name;
+					host.closeCommandView(); requestFrame();
+				}));
+				host.commandViewTextInput(terminal.title); host.commandView.input.selectAll(); requestFrame();
+			}));
+			if (!inEditor) items.push(new haxeon.ui.widgets.overlays.MenuItem("terminal-editor", "Move Terminal to Editor", function() placeTerminal(terminal, true)));
+			if (inEditor) items.push(new haxeon.ui.widgets.overlays.MenuItem("terminal-panel", "Move Terminal to Panel", function() placeTerminal(terminal, false)));
+			if (!terminal.remote) items.push(new haxeon.ui.widgets.overlays.MenuItem("terminal-stop", "Stop Terminal", function() {
+				try terminal.panel.terminate(true) catch (failure:Dynamic) application.reportError("terminal", Std.string(failure));
+				requestFrame();
+			}));
+		}
+		items.push(new haxeon.ui.widgets.overlays.MenuItem("terminal-close", "Close Terminal View", function() closeTerminalView(terminal), true, null, true));
+		var selectedRecord = record;
+		var owner = catalog == null ? null : catalog.instance;
+		showWorkbenchMenu(items, event, function() return !terminal.disposed &&
+			(selectedRecord == null || currentCatalogTerminal(selectedRecord, owner)));
 	}
 
 	function forgetCatalogTerminal(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Void {
 		if (workbenchClient == null || !workbenchClient.canControlTerminals()
 			|| record.state == "running" || record.state == "starting") return;
 		workbenchClient.forgetTerminal(record);
-		for (tab in host.allTerminalTabs()) if (tab.remote && tab.resourceId == record.id && tab.workspaceRoot == record.workspaceRoot) {
+		for (tab in host.allTerminalTabs()) if (matchesCatalogTerminal(tab, record)) {
 			host.detachTerminal(tab);
 			var index = host.panelTerminals.indexOf(tab);
 			if (index >= 0) {
@@ -1690,9 +1868,9 @@ class ExosuitApp implements DesktopUiApplication {
     agentService.agentAction(selected,"read","",null);
    }
   }
-        if((terminalBrowserVisible || groupEditor != null || (sidebar.visible && sidebar.activeId == "workbench")) && workbenchClient!=null) workbenchClient.refreshTerminals(false);
-        if(workbenchClient!=null && workbenchClient.terminalCatalogRevision()!=terminalBrowserRevision) {
-            terminalBrowserRevision=workbenchClient.terminalCatalogRevision();
+        if((sidebar.visible && sidebar.activeId == "workbench") && workbenchClient!=null) workbenchClient.refreshTerminals(false);
+        if(workbenchClient!=null && workbenchClient.terminalCatalogRevision()!=lastTerminalCatalogRevision) {
+            lastTerminalCatalogRevision=workbenchClient.terminalCatalogRevision();
             var catalog=workbenchClient.terminalCatalog();
             if(catalog!=null) for(record in catalog.terminals) for(tab in host.allTerminalTabs())
                 if(tab.remote && tab.resourceId==record.id && tab.workspaceRoot==record.workspaceRoot) { tab.updateWorkspaceName(record.name); tab.cwd=record.cwd; }
@@ -1927,7 +2105,6 @@ class ExosuitApp implements DesktopUiApplication {
 			plugins: application.plugins.enabledIds(),
 			terminalIds: [for (terminal in host.allTerminalTabs()) terminal.id],
 			terminalResourceIds: [for (terminal in host.allTerminalTabs()) terminal.resourceId],
-			terminalBrowserVisible: terminalBrowserVisible,
 			terminalCreationFailure: terminalCreationFailure(),
             terminalEditorTabs: host.terminalEditorResourceIds(),
             terminalPanelTabs: [for (terminal in host.panelTerminals) terminal.resourceId],
@@ -2804,7 +2981,8 @@ class ExosuitApp implements DesktopUiApplication {
 				var terminalKey = UiEditorTabs.key(item);
 				var terminalTab = new TabItem(terminalKey, terminal.title, new TerminalTabView(terminal,
 					function() host.activateEditorTab(terminalKey, paneId),
-					function(bounds, id) host.editorResolved(paneId, bounds, id), null, terminalCommandSkipsShell), true, IconName.Terminal);
+					function(bounds, id) host.editorResolved(paneId, bounds, id),
+					function(event) showTerminalContextMenu(terminal, event), terminalCommandSkipsShell), true, IconName.Terminal);
 				terminalTab.onClose = function() host.closeTab(item, paneId, true);
 				items.push(terminalTab);
 				continue;
@@ -2973,10 +3151,7 @@ class ExosuitApp implements DesktopUiApplication {
 				var terminal = UiEditorTabs.terminal(item);
 				if (terminal == null || key != UiEditorTabs.key(item)) continue;
 				host.activateEditorTab(key, paneId);
-				showContextMenu([
-					new CommandMenuEntry("terminal:move-to-panel", "Move Terminal to Panel"),
-					new CommandMenuEntry("root:close", "Close Terminal")
-				], event, function() return host.activeTab() == item);
+				showTerminalContextMenu(terminal, event);
 				return;
 			}
 			for (view in tabs) {

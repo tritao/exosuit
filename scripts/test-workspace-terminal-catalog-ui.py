@@ -32,15 +32,20 @@ with tempfile.TemporaryDirectory(prefix='extcatui-') as temporary:
         for index in range(3):
             capture = fixture / str(index)
             runner = [str(INSTALL / 'exosuit')] if INSTALL else [HAXEON, 'run', '--project', str(ROOT / 'graphical/haxeon.json'), *MODE, '--']
-            arguments = ['--open-workspace-terminals'] if index < 2 else []
+            arguments = []
             with (fixture / ('app-' + str(index) + '.log')).open('w') as log:
                 app = subprocess.Popen([*runner, str(project), *arguments, '--capture-dir=' + str(capture), '--capture-seconds=10'], cwd=fixture if INSTALL else ROOT, env=environment, stdout=log, stderr=subprocess.STDOUT)
                 window = subprocess.check_output(['timeout', '60', 'xdotool', 'search', '--sync', '--onlyvisible', '--name', '^exosuit$'], text=True).splitlines()[0]
                 subprocess.run(['xdotool', 'windowfocus', '--sync', window], check=True)
                 time.sleep(3)
+                if index < 2:
+                    subprocess.run(['xdotool', 'key', 'ctrl+shift+p'], check=True)
+                    subprocess.run(['xdotool', 'type', '--clearmodifiers', 'Show Workspace Terminals'], check=True)
+                    subprocess.run(['xdotool', 'key', 'Return'], check=True)
+                    time.sleep(1)
                 if index == 1:
                     layout = json.loads((fixture / '0/layout.json').read_text())
-                    buttons = [node for node in layout if node.get('label') == 'Open' and node['visible'] and node['enabled'] and node['bounds']['y'] > 80]
+                    buttons = [node for node in layout if str(node.get('label', '')).startswith('t:') and node['visible'] and node['enabled'] and node['bounds']['y'] > 80]
                     assert len(buttons) == 1, buttons
                     bounds = buttons[0]['bounds']
                     subprocess.run(['xdotool', 'mousemove', '--window', window, str(round(bounds['x'] + bounds['width'] / 2)), str(round(bounds['y'] + bounds['height'] / 2)), 'click', '1'], check=True)

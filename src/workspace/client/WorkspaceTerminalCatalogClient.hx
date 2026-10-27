@@ -7,6 +7,7 @@ interface WorkspaceTerminalCatalogClient {
   public function canCreateTerminals():Bool;
   public function canCreateGroupedTerminals():Bool;
   public function canEditGroups():Bool;
+  public function canRemoveGroups():Bool;
   public function terminalCatalog():Null<TerminalCatalog>;
   public function terminalCatalogError():Null<String>;
   public function terminalCatalogRevision():Int;
@@ -14,6 +15,7 @@ interface WorkspaceTerminalCatalogClient {
   public function refreshTerminals(force:Bool):Void;
   public function renameTerminal(record:TerminalRecord, name:String, group:String):Void;
   public function changeGroup(owner:String, group:workspace.service.WorkspaceProtocol.WorkspaceGroup, name:String, parent:Null<String>, cwd:Null<String>, order:Int, create:Bool):Void;
+  public function removeGroup(owner:String, group:workspace.service.WorkspaceProtocol.WorkspaceGroup):Void;
   public function stopTerminal(record:TerminalRecord):Void;
   public function forgetTerminal(record:TerminalRecord):Void;
 }

@@ -1353,6 +1353,12 @@ class CodexProvider implements WorkspaceAgents {
 		return n;
 	}
 
+	public function groupIsEmpty(group:String):Bool {
+		for (session in sessions) if (session.record.group == group) return false;
+		for (provider in localProviders) for (record in provider.records()) if (record.group == group) return false;
+		return true;
+	}
+
 	public function activeCount():Int {
 		var n = 0;
 		for (provider in localProviders) n += provider.activeCount();

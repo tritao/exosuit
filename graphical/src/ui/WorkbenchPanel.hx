@@ -27,9 +27,9 @@ class WorkbenchPanel implements View {
 	final open:TerminalRecord->Bool;
 	final createTerminal:String->Void;
 	final openAgent:String->Void;
-	final edit:(WorkspaceGroup, Bool)->Void;
+	final edit:(WorkspaceGroup, String)->Void;
 	final openFolder:String->Void;
-	final manage:Void->Void;
+	final terminalActions:TerminalRecord->Array<MenuItem>;
 	final requestFrame:Void->Void;
 	final showMenu:(Array<MenuItem>, UiEvent, Void->Bool)->Void;
 	final attach:WorkspaceGroup->Void;
@@ -59,12 +59,12 @@ class WorkbenchPanel implements View {
     var observedWorkspaceRoot:Null<String>;
 
 	public function new(client:WorkspaceWorkbenchClient, open:TerminalRecord->Bool, createTerminal:String->Void,
-		edit:(WorkspaceGroup, Bool)->Void, openFolder:String->Void, manage:Void->Void, requestFrame:Void->Void,
+		edit:(WorkspaceGroup, String)->Void, openFolder:String->Void, terminalActions:TerminalRecord->Array<MenuItem>, requestFrame:Void->Void,
 		openAgent:String->Void, showMenu:(Array<MenuItem>, UiEvent, Void->Bool)->Void, attach:WorkspaceGroup->Void,
 		closeAgentTab:(String, String)->Void, createCodex:(String, String->Void)->Void,
 		?createProvider:(String, String)->Void, ?canCreateAgent:Void->Bool) {
 		this.client = client; this.open = open; this.createTerminal = createTerminal; this.edit = edit;
-		this.openFolder = openFolder; this.manage = manage; this.requestFrame = requestFrame;
+		this.openFolder = openFolder; this.terminalActions = terminalActions; this.requestFrame = requestFrame;
 		this.openAgent = openAgent; this.showMenu = showMenu; this.attach = attach; this.closeAgentTab = closeAgentTab;
 		this.createCodex = createCodex;
 		this.createProvider = createProvider == null ? function(provider,group) {
@@ -134,7 +134,18 @@ class WorkbenchPanel implements View {
         var items:Array<MenuItem> = [];
         if (key != null && StringTools.startsWith(key, "t:")) {
             var terminal = model.terminals.get(key.substring(2));
-            if (terminal != null) items.push(new MenuItem("open-terminal", "Open terminal", function() open(terminal), terminal.available));
+            if (terminal != null) {
+                var terminalValid = function() {
+                    if (!valid()) return false;
+                    var current = client.terminalCatalog();
+                    if (current == null) return false;
+                    for (candidate in current.terminals) if (candidate.id == terminal.id)
+                        return candidate.instance == terminal.instance && haxe.Int64.compare(candidate.revision, terminal.revision) == 0;
+                    return false;
+                };
+                showMenu(terminalActions(terminal), event, terminalValid);
+                return;
+            }
         }
 		if (key != null && StringTools.startsWith(key, "a:")) {
 			var agent = model.agents.get(key.substring(2));
@@ -157,10 +168,15 @@ class WorkbenchPanel implements View {
             name: "", cwd: null, revision: 0, parent: group == null ? null : group.id,
             order: model.nextOrder(group == null ? null : group.id)}, true), editable && !pending));
         items.push(new MenuItem("rename-group", "Rename group", function() beginGroup(group, false), group != null && editable && !pending));
-        items.push(new MenuItem("edit-group", "Group settings…", function() edit(group, false), group != null && editable));
+        items.push(new MenuItem("group-directory", "Change Working Directory…", function() edit(group, "directory"), group != null && editable));
+        items.push(new MenuItem("group-inherit", "Use Inherited Working Directory", function() edit(group, "inherit"), group != null && group.cwd != null && editable));
+        items.push(new MenuItem("group-parent", "Move to Group…", function() edit(group, "parent"), group != null && editable));
+        items.push(new MenuItem("group-order", "Change Sort Order…", function() edit(group, "order"), group != null && editable));
+        items.push(new MenuItem("group-remove", "Remove Group", function() edit(group, "remove"), group != null && editable &&
+            client.canRemoveGroups() && !client.agentService().agentBusy() && GroupContextActions.empty(group.id, catalog, client.agentService().agents()), null, true));
         items.push(new MenuItem("open-folder", "Open folder", function() openFolder(cwd), cwd != null));
         items.push(new MenuItem("attach-codex", "Attach existing Codex thread…", function() attach(group), group != null && client.agentService().canControlAgents()));
-        items.push(new MenuItem("manage-terminals", "Manage terminals…", manage));
+        items.push(new MenuItem("refresh-terminals", "Refresh terminals", function() client.refreshTerminals(true), client.canReadTerminals()));
         items.push(new MenuItem("refresh-agents", "Refresh agent status", function() client.agentService().refreshAgents(), client.agentService().canReadAgents()));
 		showMenu(items, event, valid);
 	}

@@ -228,6 +228,9 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
 				row.bindInt64(2, Int64.ofInt(outcome.group.revision));
 				row.bindBlob(3, MessagePack.encode(outcome.group)); row.step();
 			});
+			else if (request.action == "delete") statement("DELETE FROM workspace_groups WHERE id=?1 AND revision=?2", function(row) {
+				row.bindText(1, request.group); row.bindInt64(2, Int64.ofInt(request.expectedRevision)); row.step();
+			});
 			else statement("UPDATE workspace_groups SET revision=?1,payload=?2 WHERE id=?3 AND revision=?4", function(row) {
 				row.bindInt64(1, Int64.ofInt(outcome.group.revision));
 				row.bindBlob(2, MessagePack.encode(outcome.group));
