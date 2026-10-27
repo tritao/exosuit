@@ -71,7 +71,110 @@ static int row_fingerprints(void) {
     return 0;
 }
 
+
+
+static int default_colors_contract(void) {
+    terminalkit_handle *kit = NULL;
+    REQUIRE(terminalkit_open(32, 4, 1000, "xterm-256color", &kit));
+    terminalkit_set_output_callback(kit, collect_reply, NULL);
+    REQUIRE(feed(kit, "\033[1;31mKEEP\033[?2004h\033[?1000h") >= 0);
+    REQUIRE(terminalkit_snapshot(kit) > 0);
+    uint64_t style = terminalkit_cells(kit)[0].style;
+    terminalkit_set_default_colors(kit, 0x202a36, 0xffffff);
+    clear_replies();
+    REQUIRE(feed(kit, "\033]10;?\033\\\033]11;?\007") >= 0);
+    REQUIRE(!strcmp(replies, "\033]10;rgb:2020/2a2a/3636\033\\\033]11;rgb:ffff/ffff/ffff\007"));
+    REQUIRE(terminalkit_snapshot(kit) >= 0);
+    REQUIRE(terminalkit_cells(kit)[0].style == style);
+    uint32_t size = 32; uint8_t text[32];
+    REQUIRE(terminalkit_row_text_copy(kit, 0, text, &size) == 0 && !memcmp(text, "KEEP", 4));
+    int keys, keypad, mouse, encoding, paste, focus;
+    terminalkit_modes(kit, &keys, &keypad, &mouse, &encoding, &paste, &focus);
+    REQUIRE(mouse != 0 && paste != 0);
+    /* Host theme changes preserve application palette overrides and SGR state. */
+    REQUIRE(feed(kit, "\033]4;1;rgb:12/34/56\007") >= 0);
+    terminalkit_set_default_colors(kit, 0xdce3ec, 0x171c23);
+    clear_replies();
+    REQUIRE(feed(kit, "\033]10;?\007\033]11;?\033\\\033]4;1;?\007") >= 0);
+    REQUIRE(!strcmp(replies, "\033]10;rgb:dcdc/e3e3/ecec\007\033]11;rgb:1717/1c1c/2323\033\\\033]4;1;rgb:1212/3434/5656\007"));
+    REQUIRE(feed(kit, "X") >= 0);
+    REQUIRE(terminalkit_snapshot(kit) >= 0);
+    REQUIRE((terminalkit_cells(kit)[4].style & 8) != 0);
+    REQUIRE(feed(kit, "\033c") >= 0);
+    clear_replies();
+    REQUIRE(feed(kit, "\033]11;?\007") >= 0);
+    REQUIRE(!strcmp(replies, "\033]11;rgb:1717/1c1c/2323\007"));
+    terminalkit_close(kit);
+    clear_replies();
+    return 0;
+}
+
+static int history_contract(void) {
+    terminalkit_handle *source = NULL, *restored = NULL;
+    REQUIRE(terminalkit_open(32, 4, 1000, "xterm-256color", &source));
+    REQUIRE(terminalkit_open(32, 4, 1000, "xterm-256color", &restored));
+    terminalkit_disable_checkpoints(source);
+    for (int i = 0; i < 80; ++i) {
+        char line[128];
+        snprintf(line, sizeof(line), "\033[1;38;2;12;34;56mline-%03d 界 é\033[0m\r\n", i);
+        REQUIRE(feed(source, line) >= 0);
+    }
+    /* Transient cursor and input modes must not become saved content. */
+    REQUIRE(feed(source, "\033[?2004h\033[?1000h") >= 0);
+    terminalkit_scrollback(source, 12, NULL, NULL);
+    uint32_t length = 0;
+    REQUIRE(terminalkit_history_copy(source, NULL, &length) == 1);
+    REQUIRE(length > 0 && length <= 4u * 1024u * 1024u);
+    uint8_t *history = malloc(length);
+    REQUIRE(history && terminalkit_history_copy(source, history, &length) == 0);
+    REQUIRE(terminalkit_feed(restored, history, length) >= 0);
+    int current = 0, total = 0, saved_total = 0;
+    terminalkit_scrollback(source, -1, &current, &total);
+    REQUIRE(current == 12);
+    terminalkit_scrollback(restored, -1, &current, &saved_total);
+    REQUIRE(saved_total == total);
+    int cursor_keys, keypad, mouse, encoding, paste, focus;
+    terminalkit_modes(restored, &cursor_keys, &keypad, &mouse, &encoding, &paste, &focus);
+    REQUIRE(mouse == 0 && paste == 0);
+    terminalkit_scrollback(source, 0, NULL, NULL);
+    REQUIRE(same_screen(source, restored));
+    terminalkit_scrollback(source, total, NULL, NULL);
+    terminalkit_scrollback(restored, total, NULL, NULL);
+    REQUIRE(same_screen(source, restored));
+    /* Re-exporting never accumulates cursor inversion or extra blank history. */
+    uint32_t second_length = 0;
+    REQUIRE(terminalkit_history_copy(restored, NULL, &second_length) == 1);
+    uint8_t *second = malloc(second_length);
+    REQUIRE(second && terminalkit_history_copy(restored, second, &second_length) == 0);
+    REQUIRE(second_length == length && !memcmp(history, second, length));
+    free(second); free(history);
+    terminalkit_close(source); terminalkit_close(restored);
+    /* A long, densely styled session must retain complete newest rows within
+       the byte budget, even when raw output and the screen outgrow that budget. */
+    REQUIRE(terminalkit_open(512, 4, 1000, "xterm-256color", &source));
+    char dense[18000]; size_t used = 0;
+    for (int column = 0; column < 512; ++column)
+        used += (size_t)sprintf(dense + used, "\033[38;2;%d;34;56mX", column % 2 ? 12 : 13);
+    used += (size_t)sprintf(dense + used, "\r\n");
+    for (int row = 0; row < 900; ++row) REQUIRE(feed(source, dense) >= 0);
+    REQUIRE(feed(source, "\033[0mNEWEST_RETAINED") >= 0);
+    length = 0;
+    REQUIRE(terminalkit_history_copy(source, NULL, &length) == 1);
+    REQUIRE(length < 4u * 1024u * 1024u && length > 3u * 1024u * 1024u);
+    history = malloc((size_t)length + 16);
+    memset(history + length, 0x5a, 16);
+    REQUIRE(terminalkit_history_copy(source, history, &length) == 0);
+    for (int i = 0; i < 16; ++i) REQUIRE(history[length + i] == 0x5a);
+    REQUIRE(terminalkit_open(512, 4, 1000, "xterm-256color", &restored));
+    REQUIRE(terminalkit_feed(restored, history, length) >= 0);
+    REQUIRE(same_screen(source, restored));
+    free(history); terminalkit_close(source); terminalkit_close(restored);
+    return 0;
+}
+
 int main(void) {
+    REQUIRE(default_colors_contract() == 0);
+    REQUIRE(history_contract() == 0);
     REQUIRE(row_fingerprints() == 0);
     terminalkit_handle *kit = NULL, *restored = NULL;
     REQUIRE(terminalkit_open(20, 4, 8, "xterm-256color", &kit));

@@ -63,6 +63,8 @@ TERMINALKIT_API int terminalkit_alternate_screen(terminalkit_handle *kit);
 TERMINALKIT_API int terminalkit_win32_input_mode(terminalkit_handle *kit);
 TERMINALKIT_API const char *terminalkit_title(terminalkit_handle *kit) TK_RETURNS_BORROWED_UTF8;
 TERMINALKIT_API void terminalkit_focus(terminalkit_handle *kit, int focused);
+/* Set host default colours, 0xRRGGBB. Does not clear content or reset VT modes. */
+TERMINALKIT_API void terminalkit_set_default_colors(terminalkit_handle *kit, uint32_t foreground, uint32_t background);
 TERMINALKIT_API void terminalkit_set_output_callback(terminalkit_handle *kit,
     terminalkit_output_callback callback, void *user_data);
 /** Emits length-delimited paste through the output callback or reply queue.
@@ -92,6 +94,10 @@ TERMINALKIT_API uint64_t terminalkit_checkpoint_size(terminalkit_handle *kit);
 TERMINALKIT_API int terminalkit_checkpoint(terminalkit_handle *kit, void *buffer,
     uint64_t capacity, uint64_t *written TK_OUT);
 TERMINALKIT_API int terminalkit_restore(terminalkit_handle *kit, const void *data, uint64_t size);
+/* Rendered scrollback and screen as bounded UTF-8/SGR, independent of live VT
+ * modes and checkpoint recording. Oldest whole rows are trimmed at 4 MiB. */
+TERMINALKIT_API int terminalkit_history_copy(terminalkit_handle *kit,
+    uint8_t *buffer TK_OUT_BUFFER(inout_size), uint32_t *inout_size TK_INOUT);
 /* Replaces the active viewport from a bounded, versioned screen snapshot and
  * disables replay-log checkpoints on this emulator. */
 TERMINALKIT_API int terminalkit_restore_screen_snapshot(terminalkit_handle *kit,

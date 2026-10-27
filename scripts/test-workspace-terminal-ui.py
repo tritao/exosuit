@@ -31,26 +31,46 @@ with tempfile.TemporaryDirectory(prefix='exttyui-') as temporary:
             os.pathsep+environment['LD_LIBRARY_PATH'] if environment.get('LD_LIBRARY_PATH') else '')
     app=None
     try:
-        for index in range(2):
+        for index in range(3):
+            if index == 2:
+                # Stop this fixture's service as well as its window. The third
+                # window must recover displayed output without spawning a shell.
+                for endpoint in state.glob('exosuit/workspaces/*/endpoint.json'):
+                    os.kill(json.loads(endpoint.read_text())['managerPid'],signal.SIGTERM)
+                deadline=time.monotonic()+10
+                while list(state.glob('exosuit/workspaces/*/endpoint.json')) and time.monotonic()<deadline:
+                    time.sleep(.05)
+                assert not list(state.glob('exosuit/workspaces/*/endpoint.json'))
             capture=fixture/str(index)
             with (fixture/('app-'+str(index)+'.log')).open('w') as log:
                 # Observe the app process itself. CLI output pipes can remain open
                 # in detached daemon children after the window has closed.
                 runner=[str(INSTALL/'exosuit')] if INSTALL else [str(HAXEON_ROOT/'.tools/hashlink/hl'),str(ROOT/'graphical/build/host/main.hl')]
-                app=subprocess.Popen([*runner,str(project),'--open-terminal','--capture-dir='+str(capture),'--capture-seconds=10'],cwd=fixture if INSTALL else ROOT,env=environment,stdout=log,stderr=subprocess.STDOUT)
+                app=subprocess.Popen([*runner,str(project),'--capture-dir='+str(capture),'--capture-seconds=10'],cwd=fixture if INSTALL else ROOT,env=environment,stdout=log,stderr=subprocess.STDOUT)
                 window=subprocess.check_output(['timeout','45','xdotool','search','--sync','--onlyvisible','--name','^exosuit$'],text=True).splitlines()[0]
                 subprocess.run(['xdotool','windowfocus','--sync',window],check=True)
                 time.sleep(2)
                 if index == 0:
+                    # Opening a new terminal requires an attached workspace. On
+                    # restart the saved dock/session restores the existing one.
+                    subprocess.run(['xdotool','key','--clearmodifiers','ctrl+grave'],check=True)
+                    time.sleep(.5)
                     # Resize requests can supersede one another while RPC output
                     # is in flight. The shell must remain usable after settling.
                     for width,height in [(420,300),(1280,840),(320,200),(800,600),(480,400),(1100,700)]*2:
                         subprocess.run(['xdotool','windowsize',window,str(width),str(height)],check=True)
                         time.sleep(.06)
                     subprocess.run(['xdotool','windowsize',window,'1280','840'],check=True)
-                command="KEEP=desktop; printf '%s\\n' $$ > shell-pid; sleep 12; printf 'WHILE_%s\\n' DETACHED; printf detached > detached-output" if index==0 else "printf '%s %s\\n' \"$KEEP\" $$ > reattached; exit 0"
-                subprocess.run(['xdotool','type','--clearmodifiers','--delay','2',command],check=True)
-                subprocess.run(['xdotool','key','Return'],check=True)
+                # Compact layouts may unmount the focused pane during resizing;
+                # address the visible terminal explicitly before testing its IO.
+                time.sleep(.3)
+                geometry=subprocess.check_output(['xdotool','getwindowgeometry','--shell',window],text=True)
+                size=dict(line.split('=',1) for line in geometry.splitlines() if '=' in line)
+                subprocess.run(['xdotool','mousemove','--window',window,str(int(size['WIDTH'])*3//5),str(int(size['HEIGHT'])*6//7),'click','1'],check=True)
+                if index < 2:
+                    command="KEEP=desktop; printf '%s\\n' $$ > shell-pid; sleep 12; printf 'WHILE_%s\\n' DETACHED; printf detached > detached-output" if index==0 else "printf '%s %s\\n' \"$KEEP\" $$ > reattached; exit 0"
+                    subprocess.run(['xdotool','type','--clearmodifiers','--delay','2',command],check=True)
+                    subprocess.run(['xdotool','key','Return'],check=True)
                 assert app.wait(timeout=30)==0,(fixture/('app-'+str(index)+'.log')).read_text()[-4000:]
             snapshot=json.loads((capture/'app-state.json').read_text())
             assert snapshot['workspaceConnection']=='Workspace connected',snapshot
@@ -66,9 +86,13 @@ with tempfile.TemporaryDirectory(prefix='exttyui-') as temporary:
                     time.sleep(.05)
                 assert (project/'detached-output').exists(), 'PTY stopped executing after window shutdown'
                 assert entries[0].exists(),'Active shell was killed with the window'
-            else:
+            elif index == 1:
                 assert (project/'reattached').read_text().strip()=='desktop '+(project/'shell-pid').read_text().strip(),'Desktop recreated shell ('+str(snapshot['terminalIds'])+'): ' + (project/'reattached').read_text() + ' expected desktop ' + (project/'shell-pid').read_text()
-        print('PASS: actual desktop survives rapid resizing and restores terminal ID, shell PID and environment after window shutdown',flush=True)
+            else:
+                assert snapshot['terminal']=='exited',snapshot
+                assert snapshot['terminalControl']=='Session ended · saved history',snapshot
+                assert 'WHILE_DETACHED' in '\n'.join(snapshot['terminalScreen']['lines']),snapshot
+        print('PASS: desktop resize and shell reconnection; daemon restart restores read-only terminal history without spawning a replacement',flush=True)
     finally:
         if app and app.poll() is None: app.terminate(); app.wait(timeout=10)
         for endpoint in state.glob('exosuit/workspaces/*/endpoint.json'):

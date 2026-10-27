@@ -46,6 +46,21 @@ with tempfile.TemporaryDirectory(prefix='extty-') as temporary:
             assert manager.wait(timeout=12)==0,'Exited terminal prevented idle shutdown'
             assert not endpoints()
             print('PASS: PTY survives complete client-process exit; active runtime retains daemon; shell exit restores idle shutdown',flush=True)
+            manager=subprocess.Popen([*MANAGER_COMMAND,str(root),'--idle-seconds','2'],env=environment,stdout=log,stderr=subprocess.STDOUT)
+            deadline=time.monotonic()+30
+            while not endpoints():
+                assert manager.poll() is None and time.monotonic()<deadline
+                time.sleep(.05)
+            subprocess.run([*RUNNER,'history-create',str(root),str(MANAGER)],env=environment,check=True,timeout=40)
+            manager.terminate(); manager.wait(timeout=10)
+            assert not endpoints(), 'Stopped manager retained its endpoint'
+            manager=subprocess.Popen([*MANAGER_COMMAND,str(root),'--idle-seconds','2'],env=environment,stdout=log,stderr=subprocess.STDOUT)
+            deadline=time.monotonic()+30
+            while not endpoints():
+                assert manager.poll() is None and time.monotonic()<deadline
+                time.sleep(.05)
+            subprocess.run([*RUNNER,'history-restore',str(root),str(MANAGER)],env=environment,check=True,timeout=40)
+            assert manager.wait(timeout=12)==0
         except Exception:
             print((fixture/'manager.log').read_text()[-6000:],file=sys.stderr)
             raise

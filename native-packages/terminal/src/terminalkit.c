@@ -135,6 +135,9 @@ const char *terminalkit_title(terminalkit_handle *kit) {
 void terminalkit_focus(terminalkit_handle *kit, int focused) {
     if (kit) terminal_emulator_focus(kit->emulator, focused);
 }
+void terminalkit_set_default_colors(terminalkit_handle *kit, uint32_t foreground, uint32_t background) {
+    if (kit) terminal_emulator_set_default_colors(kit->emulator, foreground, background);
+}
 void terminalkit_set_output_callback(terminalkit_handle *kit,
     terminalkit_output_callback callback, void *user_data) {
     if (!kit) return;
@@ -260,6 +263,90 @@ void terminalkit_scrollback(terminalkit_handle *kit, int position, int *current,
     terminal_emulator_scrollback(kit->emulator, position, current, total);
     if (position >= 0 && current && *current != before) kit->dirty = 1;
 }
+
+#define TERMINALKIT_HISTORY_LIMIT (4u * 1024u * 1024u)
+typedef struct history_export {
+    uint32_t *sizes;
+    int origin, first, previous;
+    uint8_t *buffer;
+    size_t written;
+} history_export;
+
+static int history_color(char *out, uint32_t color, int foreground) {
+    unsigned mode = color & 3u;
+    if (mode == 2)
+        return sprintf(out, ";%d;5;%u", foreground ? 38 : 48, (color >> 8) & 255u);
+    if (mode == 3)
+        return sprintf(out, ";%d;2;%u;%u;%u", foreground ? 38 : 48,
+            (color >> 8) & 255u, (color >> 16) & 255u, color >> 24);
+    return 0;
+}
+
+static void history_line(int row, int column, int cells, uint64_t style,
+    const char *text, int length, int overflow, void *data) {
+    (void)column; (void)cells; (void)overflow;
+    history_export *out = data;
+    if (row < out->first || length < 0) return;
+    uint32_t fg = (uint32_t)style, bg = (uint32_t)(style >> 32);
+    int inverse = (fg & 3u) == 1 || (bg & 3u) == 1;
+    char sgr[128];
+    int n = sprintf(sgr, "\033[0%s%s%s%s", (fg & 8) ? ";1" : "",
+        (fg & 16) ? ";3" : "", (fg & 32) ? ";4" : "", inverse ? ";7" : "");
+    if (inverse) {
+        uint32_t swap = fg; fg = bg; bg = swap;
+        if ((fg & 3u) == 1) fg &= ~3u;
+        if ((bg & 3u) == 1) bg &= ~3u;
+    }
+    n += history_color(sgr + n, fg, 1);
+    n += history_color(sgr + n, bg, 0);
+    sgr[n++] = 'm';
+    if (out->sizes) {
+        out->sizes[row - out->origin] += (uint32_t)n + (uint32_t)length;
+        return;
+    }
+    if (row != out->previous && out->previous != INT_MIN) {
+        memcpy(out->buffer + out->written, "\r\n", 2); out->written += 2;
+    }
+    out->previous = row;
+    memcpy(out->buffer + out->written, sgr, (size_t)n); out->written += (size_t)n;
+    memcpy(out->buffer + out->written, text, (size_t)length); out->written += (size_t)length;
+}
+
+int terminalkit_history_copy(terminalkit_handle *kit, uint8_t *buffer, uint32_t *inout_size) {
+    if (!kit || !inout_size) return -1;
+    int current = 0, total = 0, x = 0, y = 0, mode = 0;
+    terminal_emulator_scrollback(kit->emulator, -1, &current, &total);
+    /* The owner uses at most 1000 history rows; bound standalone callers too. */
+    if (total > 1000) total = 1000;
+    if (kit->columns > 512 || kit->rows > 256) return -1;
+    size_t count = (size_t)total + (size_t)kit->rows;
+    uint32_t *sizes = calloc(count, sizeof(*sizes));
+    if (!sizes) return -1;
+    history_export out = {.sizes = sizes, .origin = -total, .first = -total};
+    terminal_emulator_for_each_history_line(kit->emulator, -total, kit->rows - 1, history_line, &out);
+    size_t body = 0, first = 0;
+    for (size_t i = 0; i < count; ++i) body += sizes[i] + 2;
+    /* Every retained row starts with a complete SGR reset. Never cut UTF-8 or VT. */
+    while (first + 1 < count && body > TERMINALKIT_HISTORY_LIMIT - 128) body -= sizes[first++] + 2;
+    free(sizes);
+    if (body > TERMINALKIT_HISTORY_LIMIT - 128) return -1;
+    if (body >= 2) body -= 2;
+    static const char prefix[] = "\033[3J\033c\033[?7l";
+    char suffix[64];
+    terminal_emulator_cursor(kit->emulator, &x, &y, &mode);
+    int n = snprintf(suffix, sizeof(suffix), "\033[0m\033[?7h\033[%d;%dH", y + 1, x + 1);
+    size_t needed = sizeof(prefix) - 1 + body + (size_t)n;
+    uint32_t capacity = *inout_size;
+    *inout_size = (uint32_t)needed;
+    if (!buffer || capacity < needed) return 1;
+    memcpy(buffer, prefix, sizeof(prefix) - 1);
+    out.sizes = NULL; out.first = (int)first - total; out.previous = INT_MIN;
+    out.buffer = buffer; out.written = sizeof(prefix) - 1;
+    terminal_emulator_for_each_history_line(kit->emulator, out.first, kit->rows - 1, history_line, &out);
+    memcpy(buffer + out.written, suffix, (size_t)n);
+    return out.written + (size_t)n == needed ? 0 : -1;
+}
+
 void terminalkit_disable_checkpoints(terminalkit_handle *kit) {
     if (kit) terminal_emulator_disable_checkpoints(kit->emulator);
 }

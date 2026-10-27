@@ -35,7 +35,7 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
 					throw "Missing SQLite schema version";
 				version = integer(row.columnInt64(0));
 			});
-			if (version < 0 || version > 7)
+			if (version < 0 || version > 8)
 				throw "Unsupported workspace schema version";
 			if (version == 0) {
 				var count = 0;
@@ -92,6 +92,10 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
 				db.exec("PRAGMA user_version=7");
 			});
 
+            if (version < 8) transaction(function() {
+                db.exec("CREATE TABLE IF NOT EXISTS workspace_terminal_history (id TEXT PRIMARY KEY REFERENCES workspace_terminals(id) ON DELETE CASCADE, payload BLOB NOT NULL CHECK(length(payload)<=4194432))");
+                db.exec("PRAGMA user_version=8");
+            });
 		} catch (error:Dynamic) {
 			db.close();
 			throw error;
@@ -276,7 +280,38 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
  }
  public function removeTerminal(id:String):Void {
   transaction(function() {
+   statement("DELETE FROM workspace_terminal_history WHERE id=?1",function(row) {row.bindText(1,id);row.step();});
    statement("DELETE FROM workspace_terminals WHERE id=?1",function(row) {row.bindText(1,id);row.step();});
+  });
+ }
+
+ public function hasTerminalHistory(id:String):Bool {
+  var found = false;
+  statement("SELECT 1 FROM workspace_terminal_history WHERE id=?1", function(row) {
+   row.bindText(1,id); found = row.step();
+  });
+  return found;
+ }
+ public function loadTerminalHistory(id:String):Null<workspace.service.TerminalHistory> {
+  var result:Null<workspace.service.TerminalHistory> = null;
+  statement("SELECT payload,length(payload) FROM workspace_terminal_history WHERE id=?1", function(row) {
+   row.bindText(1,id);
+   if (row.step()) result = MessagePack.decode(blob(row,0,integer(row.columnInt64(1)),4194432));
+  });
+  if (result != null) validateTerminalHistory(result);
+  return result;
+ }
+ static function validateTerminalHistory(h:workspace.service.TerminalHistory):Void {
+  if (h == null || h.version != 1 || h.columns < 1 || h.columns > 512 || h.rows < 1 || h.rows > 256
+   || h.data == null || h.data.length == 0 || h.data.length > 4194304) throw "Invalid terminal history";
+ }
+ public function saveTerminalHistory(id:String, history:workspace.service.TerminalHistory):Void {
+  validateTerminalHistory(history);
+  var payload = MessagePack.encode(history);
+  transaction(function() {
+   statement("INSERT INTO workspace_terminal_history(id,payload) SELECT id,?2 FROM workspace_terminals WHERE id=?1 ON CONFLICT(id) DO UPDATE SET payload=excluded.payload", function(row) {
+    row.bindText(1,id); row.bindBlob(2,payload); row.step();
+   });
   });
  }
 

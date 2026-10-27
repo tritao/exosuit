@@ -35,6 +35,10 @@ class TerminalEvent {
     public static function status(state:String, exitCode:Int = 0):TerminalEvent
         return new TerminalEvent("status", 0, null, 0, state, exitCode);
 
+    /** A new service owns an independent replay stream for the same terminal. */
+    public static function resetReplay():TerminalEvent
+        return new TerminalEvent("reset", 0, null, 0, "", 0);
+
     /** A bounded active-screen snapshot replaces the renderer before replay resumes. */
     public static function screenSnapshot(offset:haxe.Int64, data:Bytes):TerminalEvent {
         if (offset < 0 || data == null || data.length == 0)

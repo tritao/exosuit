@@ -5,6 +5,11 @@ import haxe.Int64;
 import haxeon.rpc.RpcMethod;
 import haxeon.wire.MessagePack;
 
+@:wire typedef TerminalTheme = {
+@:id(1) var foreground:Int;
+@:id(2) var background:Int;
+}
+
 @:wire typedef TerminalOpen = {@: id(1) var workspace: String;
 @:id(2) var instance:String;
 @:id(3) var id:String;
@@ -15,6 +20,7 @@ import haxeon.wire.MessagePack;
 @:optional @:id(8) var directory:Null<String>;
 /** Opt in to connection-scoped change notifications. */
 @:optional @:id(9) var watch:Null<Bool>;
+@:optional @:id(10) var theme:Null<TerminalTheme>;
 }
 @:wire typedef TerminalInfo = {@: id(1) var id: String;
 @:id(2) var cwd:String;
@@ -29,6 +35,9 @@ import haxeon.wire.MessagePack;
 /** Service-owned display name; optional for older daemons. */
 @:optional @:id(11) var name:Null<String>;
 @:optional @:id(12) var notifications:Null<Bool>;
+/** The current rendered history could not be committed to durable storage. */
+@:optional @:id(13) var historyError:Null<Bool>;
+@:optional @:id(14) var restartable:Null<Bool>;
 }
 @:wire typedef TerminalRead = {@: id(1) var workspace: String;
 @:id(2) var instance:String;
@@ -75,10 +84,17 @@ import haxeon.wire.MessagePack;
 @:id(3) var id:String;
 @:id(4) var columns:Int;
 @:id(5) var rows:Int;
+@:optional @:id(6) var theme:Null<TerminalTheme>;
 }
 @:wire typedef TerminalTarget = {@: id(1) var workspace: String;
 @:id(2) var instance:String;
 @:id(3) var id:String;
+}
+@:wire typedef TerminalRestart = {
+@:id(1) var workspace:String;
+@:id(2) var instance:String;
+@:id(3) var id:String;
+@:optional @:id(4) var theme:Null<TerminalTheme>;
 }
 @:wire typedef TerminalControl = {@: id(1) var workspace:String;
 @:id(2) var instance:String;
@@ -122,6 +138,11 @@ import haxeon.wire.MessagePack;
 }
 /** Permanent method ids; output offsets count bytes. Input is never retried across connections. */
 class WorkspaceTerminalProtocol {
+  public static final RESTART = new RpcMethod<TerminalRestart, TerminalInfo>(156,
+    function(v:TerminalRestart) return MessagePack.encode(v),
+    function(b:Bytes):TerminalRestart return MessagePack.decode(b),
+    function(v:TerminalInfo) return MessagePack.encode(v),
+    function(b:Bytes):TerminalInfo return MessagePack.decode(b));
   public static inline final CHANGED = 139;
   public static function encodeChange(value:TerminalTarget):Bytes return MessagePack.encode(value);
   public static function decodeChange(bytes:Bytes):TerminalTarget return MessagePack.decode(bytes);

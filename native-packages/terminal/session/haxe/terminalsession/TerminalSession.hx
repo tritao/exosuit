@@ -87,7 +87,13 @@ class TerminalSession {
     }
 
     private function applyEvent(event:TerminalEvent):Void {
-        if (event.kind == "status") {
+        if (event.kind == "reset") {
+            offset = 0;
+            pending.resize(0);
+            pendingBytes = 0;
+            replayAt = -1;
+            emulator.feedString("\033[3J\033c");
+        } else if (event.kind == "status") {
             status = event.state;
             exitCode = event.exitCode;
         } else if (event.kind == "geometry") {

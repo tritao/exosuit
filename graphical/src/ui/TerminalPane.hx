@@ -142,6 +142,7 @@ class TerminalPane implements TerminalPanel {
 		foreground = palette.foreground;
 		background = palette.background;
 		cursorOutlineColor = foreground;
+		syncDefaultColors();
 		fonts = providedFonts == null ? FontCollection.create() : providedFonts;
 		if (ownsFonts) {
 			// The first monospace face present on this host; system fallbacks are proportional.
@@ -164,12 +165,22 @@ class TerminalPane implements TerminalPanel {
 		refreshRows(true);
 	}
 
+	function syncDefaultColors():Void {
+		var fg = rgbColor(foreground), bg = rgbColor(background);
+		session.emulator.setDefaultColors(fg, bg);
+		if (remoteBackend != null) remoteBackend.setDefaultColors(fg, bg);
+	}
+
+	static function rgbColor(color:Color):Int
+		return (Math.round(color.red * 255) << 16) | (Math.round(color.green * 255) << 8) | Math.round(color.blue * 255);
+
 	public function poll():Void {
 		if (closed) return;
 		if (foreground != palette.foreground || background != palette.background) {
 			foreground = palette.foreground;
 			background = palette.background;
 			cursorOutlineColor = foreground;
+			syncDefaultColors();
 			for (row in renderedRows) row.layout.setColor(foreground);
 			if (controlLayout != null) controlLayout.setColor(foreground);
 			if (controlActionLayout != null) controlActionLayout.setColor(palette.cursor);

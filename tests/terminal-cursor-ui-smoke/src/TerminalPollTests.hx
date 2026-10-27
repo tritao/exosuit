@@ -3,6 +3,7 @@ import haxeon.ui.FontCollection;
 import terminalsession.TerminalBackend;
 import terminalsession.TerminalEvent;
 import terminalsession.TerminalSession;
+import TerminalCursorSmoke.QuietBackend;
 
 /** Echo arrives after input handling has returned, as it does through a PTY/RPC. */
 class DelayedEchoBackend implements TerminalBackend {
@@ -29,7 +30,29 @@ class DelayedEchoBackend implements TerminalBackend {
 
 @:access(ui.TerminalPane)
 class TerminalPollTests {
+	static function defaultColors(fonts:FontCollection):Void {
+		var backend = new QuietBackend();
+		var emulator = terminalkit.Emulator.open(80, 24);
+		emulator.feedString("KEEP");
+		var palette = new ui.TerminalPalette(false);
+		var pane = new ui.TerminalPane(new TerminalSession(backend, emulator), function() {}, palette, fonts);
+		for (dark in [false, true, false]) {
+			palette.setDark(dark);
+			pane.poll();
+			backend.replies = "";
+			emulator.feedString("\033]10;?\033\\\033]11;?\033\\");
+			pane.poll();
+			var expected = dark
+				? "\033]10;rgb:dcdc/e3e3/ecec\033\\\033]11;rgb:1717/1c1c/2323\033\\"
+				: "\033]10;rgb:2020/2a2a/3636\033\\\033]11;rgb:ffff/ffff/ffff\033\\";
+			if (backend.replies != expected) throw "Terminal pane reported colours from another theme";
+			if (!StringTools.startsWith(emulator.rowText(0), "KEEP")) throw "Theme change erased terminal content";
+		}
+		pane.close();
+	}
+
 	public static function run(fonts:FontCollection):Void {
+		defaultColors(fonts);
 		var backend = new DelayedEchoBackend();
 		var requests = 0;
 		var pane = new ui.TerminalPane(new TerminalSession(backend, terminalkit.Emulator.open(80, 24)),

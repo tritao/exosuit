@@ -29,6 +29,11 @@ typedef void (*terminal_emulator_cell_callback)(
   int row, int column, int width, uint64_t style,
   const char* text, int length, void* user_data
 );
+void terminal_emulator_set_default_colors(terminal_emulator_t* emulator,
+  uint32_t foreground, uint32_t background);
+/* Rendered history without the transient cursor inversion. */
+int terminal_emulator_for_each_history_line(terminal_emulator_t* emulator,
+  int first_row, int last_row, terminal_emulator_line_callback callback, void* user_data);
 
 terminal_emulator_t* terminal_emulator_new(
   int columns,

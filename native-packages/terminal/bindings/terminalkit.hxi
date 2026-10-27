@@ -12,6 +12,7 @@ interface TerminalKit @target("portable-abi64") @library("terminalkit") {
 	extern fn terminalkit_feed_range(kit: ptr<terminalkit_handle>, bytes: ptr<const<u8>>, buffer_size: u64, offset: u64, size: u64) -> c_int;
 	extern fn terminalkit_focus(kit: ptr<terminalkit_handle>, focused: c_int) -> void;
 	extern fn terminalkit_focus_reporting(kit: ptr<terminalkit_handle>) -> c_int;
+	extern fn terminalkit_history_copy(kit: ptr<terminalkit_handle>, buffer: nullable<ptr<u8>> @out_buffer("inout_size"), inout_size: ptr<u32> @inout) -> c_int;
 	/**
 	 * Emits typed or committed UTF-8 text like terminalkit_paste, without paste brackets.
 	 */
@@ -39,6 +40,7 @@ interface TerminalKit @target("portable-abi64") @library("terminalkit") {
 	extern fn terminalkit_scrollback(kit: ptr<terminalkit_handle>, position: c_int, current: ptr<c_int> @out, total: ptr<c_int> @out) -> void;
 	extern fn terminalkit_selection(kit: ptr<terminalkit_handle>, column: u32, row: u32, operation: c_int) -> c_int;
 	extern fn terminalkit_selection_copy(kit: ptr<terminalkit_handle>, buffer: nullable<ptr<u8>> @out_buffer("inout_size"), inout_size: ptr<u32> @inout) -> c_int;
+	extern fn terminalkit_set_default_colors(kit: ptr<terminalkit_handle>, foreground: u32, background: u32) -> void;
 	extern fn terminalkit_set_output_callback(kit: ptr<terminalkit_handle>, callback: terminalkit_output_callback, user_data: ptr<void>) -> void;
 	extern fn terminalkit_snapshot(kit: ptr<terminalkit_handle>) -> c_int;
 	extern fn terminalkit_synchronized_output(kit: ptr<terminalkit_handle>) -> c_int;

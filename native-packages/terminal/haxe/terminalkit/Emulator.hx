@@ -146,6 +146,9 @@ class Emulator {
     public function focus(focused:Bool):Void
         TerminalKit.terminalkit_focus(live(), focused ? 1 : 0);
 
+    public function setDefaultColors(foreground:Int, background:Int):Void
+        TerminalKit.terminalkit_set_default_colors(live(), foreground, background);
+
     public function checkpoint():haxe.io.Bytes {
         var size = haxe.Int64.toInt(TerminalKit.terminalkit_checkpoint_size(live()));
         if (size <= 0) throw "Terminal checkpoint unavailable";
@@ -159,6 +162,13 @@ class Emulator {
     public function restore(checkpoint:haxe.io.Bytes):Void {
         if (TerminalKit.terminalkit_restore(live(), checkpoint, checkpoint.length) != 1)
             throw "Terminal checkpoint restore failed";
+    }
+
+    /** Bounded rendered history, safe to replay into a fresh, ordinary terminal. */
+    public function historySnapshot():Bytes {
+        var copied = TerminalKit.terminalkit_history_copy(live());
+        if (copied.status != 0) throw "Terminal history export failed";
+        return copied.buffer;
     }
 
     /** Compact active-screen state for bounded remote terminal recovery. */

@@ -21,6 +21,9 @@ private class FaultyTerminalStore implements workspace.service.WorkspaceTerminal
     else records[0] = r;
   }
   public function removeTerminal(id:String):Void records.resize(0);
+  public function hasTerminalHistory(id:String):Bool return false;
+  public function loadTerminalHistory(id:String):Null<workspace.service.TerminalHistory> return null;
+  public function saveTerminalHistory(id:String, history:workspace.service.TerminalHistory):Void {}
 }
 class TerminalCatalogTests {
   static function require(v:Bool, message:String):Void {
@@ -234,7 +237,7 @@ class TerminalCatalogTests {
     manager = new WorkspaceTerminalManager("w", "second", root, 65536, store, function() return groups);
     record = manager.snapshot().terminals[0];
     require(
-      record.name == "Build shell" && record.group == "other" && record.state == "lost" && !record.available,
+      record.name == "Build shell" && record.group == "other" && record.state == "lost" && manager.activeCount() == 0,
       "Restart falsely resurrected shell or lost metadata"
     );
     pair = MemoryTransport.pair();

@@ -139,9 +139,16 @@ the daemon alive; the idle grace resumes after all terminals exit and clients le
 The first runtime slice permits 16 terminal records per daemon instance, including
 exited records. Each retains at most 16 MiB of output in owned 64 KiB chunks, with
 64-bit byte cursors. Replay reads and input batches are bounded to 64 KiB. Restoring
-beyond retained history reports a replay gap; daemon restart reports a lost session.
-No durable terminal history, checkpoint rotation, provider sessions are delivered yet. Terminals are rooted at the canonical project
+beyond retained replay recovers the active screen from a snapshot. A daemon restart
+ends its shells, but preserves bounded rendered history. Terminals are rooted at the canonical project
 folder, use the default user shell and accept dimensions up to 512 columns × 256 rows.
+
+The controlling view supplies its default foreground/background on attachment,
+resize/theme changes and explicit shell restart. The daemon answers OSC 10/11
+queries with those RGB values, so terminal applications detect the displayed
+light/dark theme. These updates preserve content, SGR styles and input modes;
+observers cannot overwrite the controller's colours. Existing applications may
+need to probe again or restart if they cache their theme at startup.
 
 Only the daemon responds to VT queries. Client emulators replay output without
 responding to queries, but still send explicit keyboard/paste/mouse input. Both
@@ -173,9 +180,25 @@ be forgotten. Removal releases replay/emulator retention and runtime slots.
 
 The existing database migrates from schema 1/2 to 3 and stores at most 256 terminal
 records; discovery returns six per page. Names/group membership and last known
-state survive service restart, but old active records become lost and cannot open
-or silently respawn. Output remains volatile. Sixteen runtime/replay records can be
-held at once; removing finished records makes room for new terminals.
+state survive service restart. Old active records become lost; those with saved
+history can open read-only without starting a process. “Restart shell” explicitly
+starts a fresh shell under the same terminal identity and appends a visible separator,
+retaining previous output. Variables, jobs and other process state are not restored.
+
+Schema 8 adds a separate SQLite history row per terminal. Rendered UTF-8, colours
+and text attributes are retained from the daemon's 1000-line scrollback plus screen,
+up to 4 MiB, trimming oldest whole rows. This stores displayed rows rather than an
+unbounded raw VT journal; dead-shell input modes, replies and cursor inversion are
+excluded. Dirty history saves at most once every two seconds and flushes on shell
+exit or orderly daemon shutdown. A crash/forced termination can lose output since
+the last successful save. Storage errors appear in the terminal control notice and
+retry at the same bounded cadence. Removing a terminal deletes its history in the
+same transaction. Previously lost sessions without a saved history cannot recover
+their old output.
+
+Archived history never counts as an active shell for service lifetime or updates.
+Sixteen runtime/replay records can be loaded at once; removing finished records
+makes room for new terminals.
 
 The catalog uses current workspace groups. Tasks and
 provider resources are later work. Run `xvfb-run -a python3
@@ -200,7 +223,8 @@ group deletion, drag-and-drop and saved tree expansion/selection are later work.
 Group changes reuse durable revisions, operation IDs and the event journal; schema
 3 migrates older catalogs and refuses unknown schemas. Bounds remain 32 groups and
 256 retained operations. Names/group metadata and terminal owner scope persist;
-output replay stays volatile.
+the live ordered replay stays in memory, while bounded rendered history persists
+as described above.
 
 Run `xvfb-run -a python3 scripts/test-workbench-groups-ui.py` for real controls,
 nested directory creation and subdirectory terminal restoration. It accepts a

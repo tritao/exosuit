@@ -43,6 +43,8 @@ class TerminalRpcTestMain {
     if (mode == "contracts") {
       TerminalCapabilitiesTests.run();
       TerminalReplayTests.run();
+      TerminalThemeTests.run(root);
+      TerminalHistoryTests.run(root);
       TerminalServiceTests.run(root);
       TerminalCatalogTests.run(root);
       WorkspaceGroupTests.run(root);
@@ -55,6 +57,10 @@ class TerminalRpcTestMain {
     var clock = function() return NativeKit.nk_time_seconds() * 1000;
     var client = new LocalWorkspaceClient(runtime.events, processes, launcher, clock);
     client.select(root);
+    if (mode == "history-create" || mode == "history-restore") {
+      TerminalHistoryTests.process(client,runtime,root,mode == "history-create");
+      client.dispose(); processes.shutdown(); runtime.dispose(); return;
+    }
     if(mode=="catalog") {
       TerminalCatalogClientTests.run(client,runtime);
       client.dispose();processes.shutdown();runtime.dispose();return;

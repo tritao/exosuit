@@ -603,6 +603,13 @@ void terminal_emulator_set_input_callback(terminal_emulator_t* emulator,
   terminal->input_callback_data = user_data;
 }
 
+void terminal_emulator_set_default_colors(terminal_emulator_t* emulator,
+    uint32_t foreground, uint32_t background) {
+  terminal_t* terminal = (terminal_t*)emulator;
+  if (terminal && !terminal->closed)
+    tsm_vte_set_default_colors(terminal->vte, foreground, background);
+}
+
 int terminal_emulator_feed(terminal_emulator_t* emulator,
     const char* data, size_t length) {
   return terminal_emulator_feed_internal((terminal_t*)emulator, data, length, 1);
@@ -1140,6 +1147,17 @@ int terminal_emulator_for_each_line(terminal_emulator_t* emulator,
   free(context.pending_text);
   int rows = last_row - first_row + 1;
   return context.emitted < rows ? context.emitted : rows;
+}
+
+int terminal_emulator_for_each_history_line(terminal_emulator_t* emulator,
+    int first_row, int last_row, terminal_emulator_line_callback callback, void* user_data) {
+  terminal_t* terminal = (terminal_t*)emulator;
+  if (!terminal || terminal->closed) return 0;
+  unsigned int flags = tsm_screen_get_flags(terminal->screen);
+  tsm_screen_set_flags(terminal->screen, TSM_SCREEN_HIDE_CURSOR);
+  int result = terminal_emulator_for_each_line(emulator, first_row, last_row, callback, user_data);
+  if (!(flags & TSM_SCREEN_HIDE_CURSOR)) tsm_screen_reset_flags(terminal->screen, TSM_SCREEN_HIDE_CURSOR);
+  return result;
 }
 
 int terminal_emulator_selection(terminal_emulator_t* emulator,

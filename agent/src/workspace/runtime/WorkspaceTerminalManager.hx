@@ -14,28 +14,32 @@ import terminalkit.Emulator;
 private class RuntimeTerminal {
   public final id:String;
   public final cwd:String;
-  public final backend:LocalPtyBackend;
+  public var backend:Null<LocalPtyBackend>;
   public final emulator:Emulator;
   public var columns:Int;
   public var rows:Int;
   public var state:String = "running";
   public var exitCode:Int = 0;
   public final replay:TerminalReplayLog;
+  public var historyDirty:Bool = false;
+  public var nextHistorySave:Float = 0;
+  public var historyError:Bool = false;
   public var start(get, never):Int64;
   public var end(get, never):Int64;
   function get_start():Int64 return replay.startOffset;
   function get_end():Int64 return replay.endOffset;
-  public function new(id:String, cwd:String, backend:LocalPtyBackend, columns:Int, rows:Int, historyLimit:Int) {
+  public function new(id:String, cwd:String, backend:Null<LocalPtyBackend>, columns:Int, rows:Int, historyLimit:Int) {
     this.id = id;
     this.cwd = cwd;
     this.backend = backend;
     replay = new TerminalReplayLog(columns, rows, historyLimit);
     try emulator = Emulator.open(columns, rows, 1000, "xterm-256color", false) catch (failure:Dynamic) {
-      backend.close();
+      if (backend != null) backend.close();
       throw failure;
     }
     this.columns = columns;
     this.rows = rows;
+    historyDirty = backend != null;
   }
 }
 
@@ -93,6 +97,8 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
   }
   function validName(name:String):Bool return name != null && StringTools.trim(name).length > 0
     && name.length <= 128 && name.indexOf("\t") < 0 && name.indexOf("\n") < 0 && name.indexOf("\r") < 0;
+  static function validTheme(theme:Null<TerminalTheme>):Bool return theme == null
+    || theme.foreground >= 0 && theme.foreground <= 0xffffff && theme.background >= 0 && theme.background <= 0xffffff;
   function validRecord(r:TerminalRecord):Bool return r != null && r.id != null && r.id.length > 0
     && r.id.length <= 128 && validName(r.name) && knownGroup(r.group) && r.workspaceRoot == root && r.cwd != null && r.cwd.length > 0 && r.cwd.length <= 1024 && r.instance != null
     && r.instance.length > 0 && r.instance.length <= 128 && r.revision > 0 && r.revision < Int64.make(
@@ -121,7 +127,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
     instance: r.instance,
     state: r.state,
     exitCode: r.exitCode,
-    available: terminals.exists(r.id) && r.instance == instance,
+    available: terminals.exists(r.id) || persistence != null && persistence.hasTerminalHistory(r.id),
     revision: r.revision,
     workspaceRoot: root
   };
@@ -135,6 +141,32 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
       throw e;
     }
     catalog.set(r.id, r);
+  }
+  function restoreHistory(id:String):Null<RuntimeTerminal> {
+    var record = catalog.get(id);
+    if (record == null || persistence == null) return null;
+    if (count >= 16) throw "Terminal limit";
+    var history = persistence.loadTerminalHistory(id);
+    if (history == null) return null;
+    var t = new RuntimeTerminal(id, record.cwd, null, history.columns, history.rows, historyLimit);
+    try {
+      t.emulator.feed(history.data);
+      t.emulator.takeReplies();
+      t.replay.output(history.data, history.data.length);
+    } catch (failure:Dynamic) { t.emulator.close(); throw failure; }
+    t.state = record.state;
+    t.exitCode = record.exitCode;
+    terminals.set(id, t);
+    count++;
+    return t;
+  }
+  function saveHistory(t:RuntimeTerminal):Void {
+    if (persistence == null || !t.historyDirty) return;
+    try persistence.saveTerminalHistory(t.id, {version:1, columns:t.columns, rows:t.rows, data:t.emulator.historySnapshot()})
+    catch (failure:Dynamic) { t.historyError = true; throw failure; }
+    t.historyError = false;
+    t.historyDirty = false;
+    t.nextHistorySave = Sys.time() + 2;
   }
   public function snapshot():TerminalCatalog {
     var records = [for (r in catalog) copy(r)];
@@ -164,6 +196,8 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
     end: t.end,
     controller: owner == viewer,
     notifications: true,
+    historyError: t.historyError,
+    restartable: true,
     controlled: owner != null
     };
   }
@@ -274,7 +308,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         return;
       }
       if (t != null) {
-        t.backend.close();
+        if (t.backend != null) t.backend.close();
         t.emulator.close();
         terminals.remove(r.id);
         count--;
@@ -298,11 +332,14 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         return;
       }
       if ((r.group != null || r.directory != null) && capabilities.indexOf(WorkspaceProtocol.TREE) < 0) { c.fail(error("unsupported")); return; }
-      if (!valid(r.workspace, r.instance, r.id) || !size(r.columns, r.rows)) {
+      if (!valid(r.workspace, r.instance, r.id) || !size(r.columns, r.rows) || !validTheme(r.theme)) {
         c.fail(error("invalid_request"));
         return;
       }
       var t = terminals.get(r.id);
+      if (t == null && !r.create && catalog.exists(r.id)) {
+        try t = restoreHistory(r.id) catch (_:Dynamic) { c.fail(error("history_unavailable")); return; }
+      }
       if (t == null) {
         if (!r.create) {
           c.fail(error("unknown_terminal"));
@@ -401,7 +438,10 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         terminals.set(r.id, created);
         count++;
       }
-      if (control && controller(r.id) == null) controllers.set(r.id, connection);
+      if (control && t.state == "running" && controller(r.id) == null) controllers.set(r.id, connection);
+      var openingTheme:Null<TerminalTheme> = r.theme;
+      if (openingTheme != null && controller(r.id) == connection)
+        t.emulator.setDefaultColors(openingTheme.foreground, openingTheme.background);
       if (r.watch == true) {
         var watch = Lambda.find(watchers, function(w) return w.connection == connection && w.id == r.id);
         if (watch == null) watchers.push({connection:connection, id:r.id, stamp:changeStamp(t, connection)});
@@ -481,6 +521,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         c.fail(error("unknown_terminal"));
         return;
       }
+      if (t.state != "running") { c.respond(info(t, connection)); return; }
       var owner = controller(r.id);
       if (r.claim) {
         if (owner == null || owner == connection || r.takeover) controllers.set(r.id, connection);
@@ -529,7 +570,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         c.fail(error("unauthorized"));
         return;
       }
-      if (!valid(r.workspace, r.instance, r.id) || !size(r.columns, r.rows)) {
+      if (!valid(r.workspace, r.instance, r.id) || !size(r.columns, r.rows) || !validTheme(r.theme)) {
         c.fail(error("invalid_request"));
         return;
       }
@@ -543,12 +584,15 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         return;
       }
       try {
+        var resizedTheme:Null<TerminalTheme> = r.theme;
+        if (resizedTheme != null) t.emulator.setDefaultColors(resizedTheme.foreground, resizedTheme.background);
         if (t.columns != r.columns || t.rows != r.rows) {
           if (t.state == "running") t.backend.resize(r.columns, r.rows);
           t.emulator.resize(r.columns, r.rows);
           t.replay.geometry(r.columns, r.rows);
           t.columns = r.columns;
           t.rows = r.rows;
+          t.historyDirty = true;
         }
         c.respond(info(t, connection));
       } catch (_:Dynamic) {
@@ -574,13 +618,70 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
       c.respond(info(t, connection));
     }
     );
+    connection.register(WorkspaceTerminalProtocol.RESTART, function(r, c) {
+      if (!read || !control) { c.fail(error("unauthorized")); return; }
+      if (!valid(r.workspace, r.instance, r.id) || !validTheme(r.theme)) { c.fail(error("invalid_request")); return; }
+      var record = catalog.get(r.id);
+      if (record == null) { c.fail(error("unknown_terminal")); return; }
+      var t = terminals.get(r.id);
+      if (record.state == "running" || record.state == "starting" || t != null && t.state == "running") {
+        c.fail(error("terminal_running")); return;
+      }
+      if (storageFailed) { c.fail(error("storage_unavailable")); return; }
+      try {
+        if (t == null) t = restoreHistory(r.id);
+        // Legacy records may predate history persistence. Keep the same identity.
+        if (t == null) {
+          if (count >= 16) throw "Terminal limit";
+          t = new RuntimeTerminal(r.id, record.cwd, null, 80, 24, historyLimit);
+          t.state = record.state;
+          terminals.set(r.id, t); count++;
+        }
+        var normalized = t.emulator.historySnapshot();
+        t.emulator.feed(normalized);
+        t.replay.output(normalized, normalized.length);
+        // Move the entire old viewport into scrollback before a fresh shell's
+        // startup code can clear its screen. Keep the separator on a fresh page.
+        var boundary = new StringBuf();
+        boundary.add('\033[${t.rows};1H');
+        for (_ in 0...t.rows) boundary.add("\r\n");
+        boundary.add("\033[H── Shell restarted ──\r\n");
+        var separator = haxe.io.Bytes.ofString(boundary.toString());
+        t.emulator.feed(separator);
+        t.emulator.takeReplies();
+        t.replay.output(separator, separator.length);
+        t.historyDirty = true;
+        saveHistory(t);
+        var starting = copy(record);
+        starting.instance = instance; starting.state = "starting"; starting.exitCode = 0; starting.revision += 1;
+        save(starting);
+        if (t.backend != null) t.backend.close();
+        var restartingTheme:Null<TerminalTheme> = r.theme;
+        if (restartingTheme != null) t.emulator.setDefaultColors(restartingTheme.foreground, restartingTheme.background);
+        t.backend = LocalPtyBackend.spawn(TerminalProfile.shell(record.cwd), t.columns, t.rows);
+        t.state = "running"; t.exitCode = 0;
+        var running = copy(starting); running.state = "running"; running.revision += 1;
+        save(running);
+        controllers.set(r.id, connection);
+        c.respond(info(t, connection));
+      } catch (_:Dynamic) {
+        if (t != null) {
+          if (t.backend != null) t.backend.close();
+          t.backend = null; t.state = "failed";
+          var current = catalog.get(r.id);
+          var failed = copy(current == null ? record : current); failed.state = "failed"; failed.revision += 1;
+          try save(failed) catch (_:Dynamic) {}
+        }
+        c.fail({code:"terminal_restart_failed", message:"Could not restart shell; saved history was retained", ambiguous:true});
+      }
+    });
   }
   // Replay remains authoritative. Invalidation is coalesced once per terminal per daemon tick.
   function changeStamp(t:RuntimeTerminal, connection:RpcConnection):String {
     var record = catalog.get(t.id);
     return Std.string(t.replay.endCursor) + ":" + t.state + ":" + t.exitCode + ":"
       + (controller(t.id) == connection) + ":" + (controller(t.id) != null) + ":"
-      + (record == null ? "" : Std.string(record.revision));
+      + (record == null ? "" : Std.string(record.revision)) + ":" + t.historyError;
   }
   function notifyChanges():Void {
     for (watch in watchers.copy()) {
@@ -598,13 +699,18 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
   public function poll():Void {
     for (id in [for (id in controllers.keys()) id]) controller(id);
     for (t in terminals) {
-      if (t.state != "running") continue;
+      if (t.state != "running") {
+        if (t.historyDirty && Sys.time() >= t.nextHistorySave)
+          try saveHistory(t) catch (_:Dynamic) { t.nextHistorySave = Sys.time() + 2; }
+        continue;
+      }
       try t.backend.pollEvents(function(event) {
         if (event.kind == "output") {
           t.emulator.feedRange(event.data, 0, event.length);
           var replies = t.emulator.takeReplies();
           if (replies.length > 0) t.backend.write(replies);
           t.replay.output(event.data, event.length);
+          t.historyDirty = true;
         } else if (event.kind == "status") {
           t.state = event.state;
           t.exitCode = event.exitCode;
@@ -615,6 +721,8 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         t.backend.close();
       }
       if (t.state != "running") t.backend.close();
+      if (t.historyDirty && (t.state != "running" || Sys.time() >= t.nextHistorySave))
+        try saveHistory(t) catch (_:Dynamic) { t.nextHistorySave = Sys.time() + 2; }
       var record = catalog.get(t.id);
       if (record != null &&(record.state != t.state || record.exitCode != t.exitCode) && !storageFailed) {
         var updated = copy(record);
@@ -634,7 +742,8 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
   }
   public function dispose():Void {
     for (t in terminals) {
-      t.backend.close();
+      try saveHistory(t) catch (_:Dynamic) { Sys.println("Terminal history could not be saved: " + t.id); }
+      if (t.backend != null) t.backend.close();
       t.emulator.close();
     }
     terminals.clear();

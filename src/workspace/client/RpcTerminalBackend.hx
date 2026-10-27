@@ -30,11 +30,16 @@ class RpcTerminalBackend implements TerminalBackend {
   final autoClaimControl:Bool;
   var controlReleased:Bool = false;
   var controlUnavailable:Bool = false;
+  var terminalState:String = "running";
+  var historyError:Bool = false;
+  var restartable:Bool = false;
   var pending:Bool = false;
   var closed:Bool = false;
   var columns:Int = 80;
   var rows:Int = 24;
   var resizePending:Bool = false;
+  var theme:Null<TerminalTheme>;
+  var themePending:Bool = false;
   var position:Int64 = 0;
   var sequence:Int = 0;
   final writes:Array<Bytes> = [];
@@ -70,14 +75,14 @@ class RpcTerminalBackend implements TerminalBackend {
   /** False once the terminal failed or closed: write throws, so input must not reach it. */
   public function isAvailable():Bool return !closed && failure == null;
   public function isSynchronized():Bool return synchronized;
-  public function canControl():Bool return controller;
+  public function canControl():Bool return controller && terminalState == "running";
   public function hasControlGrant():Bool {
     var client = provider();
     return client != null && client.hasCapability(WorkspaceTerminalProtocol.CONTROL);
   }
   /** Normal writable sessions need no persistent control notice. */
   public function needsControlNotice():Bool
-    return failure != null || !attached || !synchronized || controlUnavailable || !hasControlGrant() || controlPending || !controller;
+    return failure != null || !attached || !synchronized || historyError || terminalState != "running" || controlUnavailable || !hasControlGrant() || controlPending || !controller;
   public function controlStatus():String {
     if (failure != null) return "Terminal unavailable: " + failure;
     if (!attached) {
@@ -87,6 +92,8 @@ class RpcTerminalBackend implements TerminalBackend {
       return "Connecting to workspace terminal…";
     }
     if (!synchronized) return "Loading terminal history…";
+    if (historyError) return "Terminal history could not be saved";
+    if (terminalState != "running") return "Session ended · saved history";
     if (controlUnavailable) return "Read only · update the workspace daemon to control this terminal";
     if (!hasControlGrant()) return "Read only · control permission was not granted";
     if (controlPending) return "Updating terminal control…";
@@ -94,10 +101,28 @@ class RpcTerminalBackend implements TerminalBackend {
     if (controlled) return "Read only · another client controls this terminal";
     return "Read only · no client is controlling this terminal";
   }
-  public function controlAction():String return !attached || !synchronized || controlUnavailable || !hasControlGrant() || controlPending ? "" : controller ? "Release" : "Take control";
+  public function controlAction():String return !attached || !synchronized || controlUnavailable || !hasControlGrant() || controlPending ? "" : terminalState != "running" ? (restartable ? "Restart shell" : "") : controller ? "Release" : "Take control";
   public function activateControl():Void {
+    if (terminalState != "running") { restartShell(); return; }
     controlReleased = controller;
     setControl(!controller, true);
+  }
+  function restartShell():Void {
+    var c = connection;
+    if (closed || !attached || !synchronized || !restartable || controlPending || c == null || !c.isOpen() || !hasControlGrant()) return;
+    controlPending = true;
+    c.call(WorkspaceTerminalProtocol.RESTART, {workspace:"workspace", instance:instance, id:terminalId, theme:theme}, 5000, function(info) {
+      if (closed || connection != c) return;
+      controlPending = false;
+      if (!observe(info)) return;
+      replayDirty = true; nextRead = 0;
+    }, function(error) {
+      if (closed || connection != c) return;
+      controlPending = false;
+      // Another viewer may have restarted it first. Refresh rather than retry input.
+      replayDirty = true; nextRead = 0;
+      if (error.code != "terminal_running") fail(error.code);
+    });
   }
   function setControl(claim:Bool, takeover:Bool = false):Void {
     var c = connection;
@@ -132,9 +157,13 @@ class RpcTerminalBackend implements TerminalBackend {
     observedColumns = info.columns;
     if (info.name != null && StringTools.trim(info.name) != "") name = info.name;
     observedRows = info.rows;
+    terminalState = info.state;
+    historyError = info.historyError == true;
+    restartable = info.restartable == true;
+    if (!controller && info.controller == true && theme != null) themePending = true;
     controller = info.controller == true;
     controlled = info.controlled == true;
-    resizePending = controller && (columns != observedColumns || rows != observedRows);
+    resizePending = terminalState == "running" && controller && (columns != observedColumns || rows != observedRows);
     if (attached && !controller) {
       writes.resize(0);
       writeBytes = 0;
@@ -174,7 +203,7 @@ class RpcTerminalBackend implements TerminalBackend {
     if (c != null && c.isOpen()) flushInput(c);
   }
   function flushInput(c:RpcConnection):Void {
-    if (writing || writeBytes == 0 || resizePending || !synchronized || !attached || !controller) return;
+    if (writing || writeBytes == 0 || resizePending || themePending || !synchronized || !attached || !controller) return;
     var bytes = writes.length == 1 ? writes[0] : Bytes.alloc(writeBytes);
     if (writes.length > 1) {
       var offset = 0;
@@ -222,6 +251,12 @@ class RpcTerminalBackend implements TerminalBackend {
     snapshotPending = true;
     replayDirty = true;
     nextRead = 0;
+  }
+  /** Only the controlling attachment configures the service's VT query replies. */
+  public function setDefaultColors(foreground:Int, background:Int):Void {
+    if (theme != null && theme.foreground == foreground && theme.background == background) return;
+    theme = {foreground:foreground, background:background};
+    themePending = true;
   }
   public function terminate(force:Bool):Void {
     if (!force) {
@@ -311,8 +346,13 @@ class RpcTerminalBackend implements TerminalBackend {
     if (c != null && attached) flushInput(c);
     if (c != null && !pending) {
       if (instance.length > 0 && instance != client.serviceGeneration()) {
-        fail("Terminal service restarted; session was lost");
-        return;
+        // A new owner can provide persisted history, but must never receive
+        // input queued for the old shell. Its replay has an independent cursor.
+        writes.resize(0); writeBytes = 0;
+        position = 0; replayCursor = 0;
+        output = [TerminalEvent.resetReplay()];
+        snapshotOnly = false; snapshotPending = false; replayAfterResize = false;
+        replayDirty = true; nextRead = 0;
       }
       instance = client.serviceGeneration();
       if (!attached) {
@@ -326,7 +366,7 @@ class RpcTerminalBackend implements TerminalBackend {
           create: create,
           columns: columns,
           rows: rows,
-          group: group, directory: directory, watch: true
+          group: group, directory: directory, watch: true, theme: theme
         }, 2000, function(info) {
           if (closed || connection != c) {
             if (info.notifications == true && c.isOpen() && router != null && !router.hasListeners(terminalId)) {
@@ -353,15 +393,17 @@ class RpcTerminalBackend implements TerminalBackend {
         );
       } else if (snapshotPending) {
         requestScreenSnapshot(c);
-      } else if (resizePending && !replayAfterResize) {
+      } else if ((resizePending || themePending && controller && terminalState == "running") && !replayAfterResize) {
         resizePending = false;
+        themePending = false;
         pending = true;
         c.call(WorkspaceTerminalProtocol.RESIZE, {
           workspace: "workspace",
           instance: instance,
           id: terminalId,
           columns: columns,
-          rows: rows
+          rows: rows,
+          theme: theme
         }, 2000, function(info) {
           if (connection == c) {
             pending = false;
@@ -374,7 +416,7 @@ class RpcTerminalBackend implements TerminalBackend {
           if (connection == c) {
             pending = false;
             if (e.code == "terminal_controlled") loseControl();
-            else if (retryable(e.code)) resizePending = true;
+            else if (retryable(e.code)) { resizePending = true; themePending = theme != null; }
             else fail(e.code);
           }
         }
