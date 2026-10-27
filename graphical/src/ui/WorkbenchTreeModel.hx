@@ -90,13 +90,13 @@ class WorkbenchTreeModel implements TreeViewModel {
 		return roots.indexOf(key) >= 0;
 
 	public function estimatedExtent():Float
-		return 30;
+		return WorkbenchSessionLabel.ROW_HEIGHT;
 
 	public function extentIsUniform():Bool
 		return true;
 
 	public function extentAt(key:String):Float
-		return 30;
+		return WorkbenchSessionLabel.ROW_HEIGHT;
 
 	public function revision():Int
 		return version;
@@ -136,12 +136,10 @@ class WorkbenchTreeModel implements TreeViewModel {
 			var editing = agentEditor == null ? null : agentEditor(key.substring(2));
 			if (editing != null) return editing;
 			var a = agents.get(key.substring(2));
-			return new Text(a == null ? "" : a.name + " · " + agentStateLabel(a.state), null, null,
-				haxeon.ui.core.TextStyleOverride.text(ExosuitPalette.WORKBENCH_TEXT_SIZE));
+			return a == null ? new Text("") : new WorkbenchSessionLabel(a.name, a.state, agentStateLabel(a.state));
 		}
 		var terminal = terminals.get(key.substring(2));
-		return new Text(terminal == null ? "" : terminal.name + " · " + TerminalStateLabels.display(terminal.state), null, null,
-			haxeon.ui.core.TextStyleOverride.text(ExosuitPalette.WORKBENCH_TEXT_SIZE));
+		return terminal == null ? new Text("") : new WorkbenchSessionLabel(terminal.name, terminal.state, TerminalStateLabels.display(terminal.state));
 	}
 
 	public function directory(group:WorkspaceGroup):Null<String> {

@@ -173,7 +173,7 @@ class WorkbenchPanel implements View {
 			&& agent.state != "working" && agent.state != "needs-attention";
 	}
 
-	function menu(group:Null<WorkspaceGroup>, event:UiEvent, ?key:String):Void {
+	function menu(group:Null<WorkspaceGroup>, event:UiEvent, ?key:String, ?overflow:Array<MenuItem>):Void {
 		var catalog = client.terminalCatalog();
 		var owner = catalog == null ? "" : catalog.instance;
 		var valid = function() {
@@ -236,6 +236,7 @@ class WorkbenchPanel implements View {
 				if (client.agentService().canReadAgents()) client.agentService().refreshAgents();
 			}, client.canReadTerminals() || client.agentService().canReadAgents(), null, true));
 		}
+		if (overflow != null) for (item in overflow) items.push(item);
 		showMenu(items, event, valid);
 	}
 
@@ -477,9 +478,9 @@ class WorkbenchPanel implements View {
 		applyPendingSessionSelection();
     }
 
-	public function headerActions():View return new WorkbenchHeaderActions(this);
+	public function headerActions(availableWidth:Float = 260):View return new WorkbenchHeaderActions(this, availableWidth);
 
-	public function buildHeaderActions(context:BuildContext):RenderNode {
+	public function buildHeaderActions(context:BuildContext, availableWidth:Float):RenderNode {
 		syncState();
 		var selected = groupFor(tree.selectedKey);
 		var terminal = toolbarButton("New terminal", IconName.Terminal, function() {
@@ -497,8 +498,14 @@ class WorkbenchPanel implements View {
 			if (selectedAgent != null) removeAgent(selectedAgent.id);
 		}, "workbench-delete-codex");
 		deleteAgent.enabled = agentCanBeRemoved(selectedAgent) && client.agentService().canControlAgents() && !client.agentService().agentBusy();
+		var overflow:Array<MenuItem> = [];
+		if (availableWidth < 210) overflow.push(new MenuItem("new-codex", "New Codex", function() {
+			if (selected != null) createProvider("codex", selected.id);
+		}, agent.enabled));
+		if (availableWidth < 260 && selectedAgent != null)
+			overflow.push(new MenuItem("delete-selected-agent", "Remove from Workbench", function() removeAgent(selectedAgent.id), deleteAgent.enabled));
 		var more = toolbarButton("Workbench actions", IconName.ChevronDown, null, "workbench-actions");
-		more.onClickEvent = function(event) menu(selected, event);
+		more.onClickEvent = function(event) menu(selected, event, null, overflow);
 		var toolbarStyle = new LayoutStyle(); toolbarStyle.childAlignY = haxeon.ui.LayoutAlignmentY.Center; toolbarStyle.childGap = 2;
 		toolbarStyle.padding = new Insets(2, 0, 4, 0);
 		var delay = tooltipDelay();
@@ -510,14 +517,14 @@ class WorkbenchPanel implements View {
 		hover.delaySeconds = delay;
 		function tip(key:String, anchor:View, label:String):View return new TabTooltip(key, anchor, new Text(label),
 			function() return new Rect(0, 0, context.viewportWidth, context.viewportHeight), delay, Below, hover, visibleTooltip.value == key);
-		return new Row("workbench-header-actions", [
-			new KeyedView("terminal", tip("new-terminal-tip", terminal, !client.canReadTerminals() ? "Connect to a workspace with terminal read permission"
+		var actions:Array<KeyedView> = [];
+		if (availableWidth >= 170) actions.push(new KeyedView("terminal", tip("new-terminal-tip", terminal, !client.canReadTerminals() ? "Connect to a workspace with terminal read permission"
 				: !client.canControlTerminals() ? "Terminal creation requires terminal control permission"
-				: !client.canCreateGroupedTerminals() ? "This workspace does not support grouped terminals" : "New terminal")),
-			new KeyedView("agent", tip("new-agent-tip", agent, "New Codex")),
-			new KeyedView("delete-agent", tip("delete-agent-tip", deleteAgent, "Remove from Workbench")),
-			new KeyedView("more", tip("workbench-actions-tip", more, "Actions"))
-		], toolbarStyle).build(context);
+				: !client.canCreateGroupedTerminals() ? "This workspace does not support grouped terminals" : "New terminal")));
+		if (availableWidth >= 210) actions.push(new KeyedView("agent", tip("new-agent-tip", agent, "New Codex")));
+		if (availableWidth >= 260) actions.push(new KeyedView("delete-agent", tip("delete-agent-tip", deleteAgent, "Remove from Workbench")));
+		actions.push(new KeyedView("more", tip("workbench-actions-tip", more, "Actions")));
+		return new Row("workbench-header-actions", actions, toolbarStyle).build(context);
 	}
 
 	public function build(context:BuildContext):RenderNode {
@@ -622,6 +629,7 @@ private class WorkbenchNameEditor implements View {
 /** Header actions share the panel selection and current service capabilities. */
 private class WorkbenchHeaderActions implements View {
 	final panel:WorkbenchPanel;
-	public function new(panel:WorkbenchPanel) this.panel = panel;
-	public function build(context:BuildContext):RenderNode return panel.buildHeaderActions(context);
+	final width:Float;
+	public function new(panel:WorkbenchPanel, width:Float) { this.panel = panel; this.width = width; }
+	public function build(context:BuildContext):RenderNode return panel.buildHeaderActions(context, width);
 }

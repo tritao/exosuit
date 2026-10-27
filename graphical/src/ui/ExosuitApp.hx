@@ -509,7 +509,7 @@ class ExosuitApp implements DesktopUiApplication {
 				var view = new haxeon.ui.widgets.sidebar.SidebarHost("sidebar-modes", sidebar,
 					function(id) { showSidebarMode(id); }, function(id) return activityIcons.get(id), true);
 				view.headerActions = function(id) return id == "files" ? explorerHeaderActions()
-					: id == "workbench" && workbenchPanel != null ? workbenchPanel.headerActions() : null;
+					: id == "workbench" && workbenchPanel != null ? workbenchPanel.headerActions(sidebar.width) : null;
 				view.headerActionsVisible = function(node) {
 					if (sidebar.activeId == "workbench") return true;
 					var focused = ui.focus.focusedId;

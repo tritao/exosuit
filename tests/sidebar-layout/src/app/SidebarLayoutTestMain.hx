@@ -78,6 +78,7 @@ class SidebarLayoutTestMain {
   var fonts = haxeon.ui.FontCollection.create();
   fonts.add("../../haxeon/packages/ui/vendor/skribidi/example/data/IBMPlexSans-Regular.ttf");
   checkHeaderAlignment(fonts);
+  checkSessionRows(fonts);
   var session = haxeon.ui.LayoutSession.create();
   var context = new haxeon.ui.core.UiContext(session, fonts);
   var model = new haxeon.ui.widgets.sidebar.SidebarModel();
@@ -111,6 +112,47 @@ class SidebarLayoutTestMain {
    }
   }
   context.dispose(); session.dispose(); fonts.dispose();
+ }
+
+ static function checkSessionRows(fonts:haxeon.ui.FontCollection):Void {
+  var name="A long terminal or agent session name with Unicode — revisão 日本語";
+  for (dark in [false,true]) {
+   var context=new haxeon.ui.core.UiContext(null,fonts,ui.ExosuitPalette.theme(dark));
+   for (width in [90.0,120.0,180.0,220.0,320.0]) {
+    var style=new haxeon.ui.LayoutStyle();style.width=haxeon.ui.LayoutAxis.stretch();
+    var view=new haxeon.ui.widgets.layout.Column("session-rows",[
+     new haxeon.ui.widgets.KeyedView("terminal",new ui.WorkbenchSessionLabel(name,"lost","session ended")),
+     new haxeon.ui.widgets.KeyedView("agent",new ui.WorkbenchSessionLabel(name,"reconnect-failed","Session unavailable"))
+    ],style);
+    var root:haxeon.ui.core.RenderNode=null;
+    for (_ in 0...4) root=context.submit(view,new haxeon.ui.LayoutFrame(width,120));
+    require(root.children.length==2,"session rows disappeared");
+    var previousBottom=0.0;
+    for (index in 0...2) {
+     var row=root.children[index],bounds=row.globalBounds();
+     require(Math.abs(bounds.height-30)<0.01 && Math.abs(bounds.y-previousBottom)<0.01,"wrapped label changed fixed tree row geometry");
+     require(row.semantics!=null && row.semantics.label.indexOf(name)==0
+      && row.semantics.label.indexOf(index==0 ? "session ended" : "Session unavailable")>=0,"accessible session description lost its name or status");
+     previousBottom=bounds.y+bounds.height;
+     var labels=0,icons=0;
+     row.walk(function(node) {
+      if (node.resolved==null || !node.resolved.visible) return;
+      var box=node.globalBounds();
+      if (node.layout.text!=null && node.layout.text.length>0) {
+       labels++;
+       require(box.height<=30 && box.y>=bounds.y-0.1 && box.y+box.height<=previousBottom+0.1,"session text escaped its row");
+       require(node.layout.text.indexOf("…")>=0,"long session name was clipped instead of ellipsized");
+      }
+      if (node.layout.visualKind==haxeon.ui.LayoutVisualKind.Custom && box.width==14 && box.height==14) {
+       icons++;
+       require(box.width==14 && box.x>=0 && box.x+box.width<=width+0.1,"status icon was clipped by a narrow row: width="+width+", x="+box.x+", row="+bounds.width);
+      }
+     });
+     require(labels==1 && icons==1,"session row lost its single-line name or compact status");
+    }
+   }
+   context.dispose();
+  }
  }
 
 }

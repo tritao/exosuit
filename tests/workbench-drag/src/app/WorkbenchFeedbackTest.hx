@@ -108,6 +108,29 @@ class WorkbenchFeedbackTest {
   require(current!=null && ui.UiEditorTabs.syncAgentNames([pane,second],current),"tab titles did not synchronize");
   require(firstTab.title=="Design session" && secondTab.title=="Design session" && foreignTab.title=="Foreign",
    "rename missed a view or changed another workspace's tab");
+  panel.tree.select("a:agent");
+  var sidebar=new haxeon.ui.widgets.sidebar.SidebarModel();
+  sidebar.register("workbench",function() return panel,new haxeon.ui.widgets.sidebar.SidebarModeOptions("Workbench"));
+  for (width in [160.0,190.0,220.0,320.0,180.0,300.0]) {
+   var host=new haxeon.ui.widgets.sidebar.SidebarHost("responsive-workbench",sidebar,function(_) {},null,true);
+   host.headerActions=function(_) return panel.headerActions(width);
+   for (_ in 0...3) root=context.submit(host,new haxeon.ui.LayoutFrame(width,240));
+   var more:RenderNode=null,actions=0;
+   root.walk(function(node) {
+    if (node.styleKey==null || !StringTools.startsWith(node.styleKey,"workbench-") || node.semantics==null
+     || node.semantics.role!=haxeon.ui.semantics.AccessibilityRole.Button) return;
+    var box=node.globalBounds();
+    require(box.x>=0 && box.x+box.width<=width+0.1,"header action escaped narrow sidebar");
+    if(node.styleKey=="workbench-actions") more=node;
+    actions++;
+   });
+   require(more!=null && actions==(width>=260 ? 4 : width>=210 ? 3 : width>=170 ? 2 : 1),"header actions did not adapt to width");
+   var box=more.globalBounds();context.pointerDown(box.x+12,box.y+12,0);context.pointerUp(box.x+12,box.y+12,0);
+   function hasAction(label:String):Bool {for(item in menuItems) if(item.label==label) return true;return false;}
+   require(hasAction("New terminal"),"overflow lost terminal creation");
+   if(width<210) require(hasAction("New Codex"),"overflow lost the hidden Codex action");
+   if(width<260) require(hasAction("Remove from Workbench"),"overflow lost selected-session removal");
+  }
   context.dispose();fonts.dispose();client.dispose();connection.close();server.close();
   trace("PASS: old-service feature negotiation, notification routing without tree displacement, dismissal updated-service moves, rename menu, F2, Enter and Escape");
  }

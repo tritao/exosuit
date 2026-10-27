@@ -72,7 +72,7 @@ with tempfile.TemporaryDirectory(prefix='exactions-') as temporary:
             if index == 0:
                 assert 'Workbench actions' in labels and 'New terminal' in labels and 'New Codex' in labels
                 header = next(node['bounds'] for node in nodes if node.get('label') == 'Workbench' and node['visible'])
-                for label in ['New terminal', 'New Codex', 'Remove selected leaf from Workbench', 'Workbench actions']:
+                for label in ['New terminal', 'New Codex', 'Workbench actions']:
                     action = next(node['bounds'] for node in nodes if node.get('label') == label and node['visible'])
                     assert header['y'] <= action['y'] + action['height'] / 2 <= header['y'] + header['height'], (label, header, action)
                     assert action['x'] >= header['x'] + header['width'], (label, header, action)
