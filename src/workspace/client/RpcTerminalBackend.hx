@@ -32,6 +32,7 @@ class RpcTerminalBackend implements TerminalBackend {
   var controlUnavailable:Bool = false;
   var terminalState:String = "running";
   var historyError:Bool = false;
+  var historyAvailable:Bool = true;
   var restartable:Bool = false;
   var pending:Bool = false;
   var closed:Bool = false;
@@ -93,7 +94,7 @@ class RpcTerminalBackend implements TerminalBackend {
     }
     if (!synchronized) return "Loading terminal history…";
     if (historyError) return "Terminal history could not be saved";
-    if (terminalState != "running") return "Session ended · saved history";
+    if (terminalState != "running") return historyAvailable ? "Session ended · saved history" : "Session ended · no saved history";
     if (controlUnavailable) return "Read only · update the workspace daemon to control this terminal";
     if (!hasControlGrant()) return "Read only · control permission was not granted";
     if (controlPending) return "Updating terminal control…";
@@ -159,6 +160,7 @@ class RpcTerminalBackend implements TerminalBackend {
     observedRows = info.rows;
     terminalState = info.state;
     historyError = info.historyError == true;
+    historyAvailable = info.historyAvailable != false;
     restartable = info.restartable == true;
     if (!controller && info.controller == true && theme != null) themePending = true;
     controller = info.controller == true;

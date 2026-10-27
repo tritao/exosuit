@@ -24,6 +24,7 @@ private class RuntimeTerminal {
   public var historyDirty:Bool = false;
   public var nextHistorySave:Float = 0;
   public var historyError:Bool = false;
+  public var hasHistory:Bool = false;
   public var start(get, never):Int64;
   public var end(get, never):Int64;
   function get_start():Int64 return replay.startOffset;
@@ -127,7 +128,9 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
     instance: r.instance,
     state: r.state,
     exitCode: r.exitCode,
-    available: terminals.exists(r.id) || persistence != null && persistence.hasTerminalHistory(r.id),
+    // Every retained record can open a read-only recovery view, even if an
+    // older daemon never saved output. Opening must never spawn a replacement.
+    available: true,
     revision: r.revision,
     workspaceRoot: root
   };
@@ -144,15 +147,18 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
   }
   function restoreHistory(id:String):Null<RuntimeTerminal> {
     var record = catalog.get(id);
-    if (record == null || persistence == null) return null;
+    if (record == null) return null;
     if (count >= 16) throw "Terminal limit";
-    var history = persistence.loadTerminalHistory(id);
-    if (history == null) return null;
-    var t = new RuntimeTerminal(id, record.cwd, null, history.columns, history.rows, historyLimit);
+    var history = persistence == null ? null : persistence.loadTerminalHistory(id);
+    var t = new RuntimeTerminal(id, record.cwd, null, history == null ? 80 : history.columns,
+      history == null ? 24 : history.rows, historyLimit);
     try {
-      t.emulator.feed(history.data);
-      t.emulator.takeReplies();
-      t.replay.output(history.data, history.data.length);
+      if (history != null) {
+        t.emulator.feed(history.data);
+        t.emulator.takeReplies();
+        t.replay.output(history.data, history.data.length);
+        t.hasHistory = true;
+      }
     } catch (failure:Dynamic) { t.emulator.close(); throw failure; }
     t.state = record.state;
     t.exitCode = record.exitCode;
@@ -198,6 +204,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
     notifications: true,
     historyError: t.historyError,
     restartable: true,
+    historyAvailable: t.hasHistory,
     controlled: owner != null
     };
   }
@@ -630,13 +637,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
       if (storageFailed) { c.fail(error("storage_unavailable")); return; }
       try {
         if (t == null) t = restoreHistory(r.id);
-        // Legacy records may predate history persistence. Keep the same identity.
-        if (t == null) {
-          if (count >= 16) throw "Terminal limit";
-          t = new RuntimeTerminal(r.id, record.cwd, null, 80, 24, historyLimit);
-          t.state = record.state;
-          terminals.set(r.id, t); count++;
-        }
+        if (t == null) throw "Unknown terminal";
         var normalized = t.emulator.historySnapshot();
         t.emulator.feed(normalized);
         t.replay.output(normalized, normalized.length);
@@ -650,6 +651,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         t.emulator.feed(separator);
         t.emulator.takeReplies();
         t.replay.output(separator, separator.length);
+        t.hasHistory = true;
         t.historyDirty = true;
         saveHistory(t);
         var starting = copy(record);
@@ -710,6 +712,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
           var replies = t.emulator.takeReplies();
           if (replies.length > 0) t.backend.write(replies);
           t.replay.output(event.data, event.length);
+          if (event.length > 0) t.hasHistory = true;
           t.historyDirty = true;
         } else if (event.kind == "status") {
           t.state = event.state;

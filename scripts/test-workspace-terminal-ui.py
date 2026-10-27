@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -87,6 +88,8 @@ with tempfile.TemporaryDirectory(prefix='exttyui-') as temporary:
                 assert (project/'detached-output').exists(), 'PTY stopped executing after window shutdown'
                 assert entries[0].exists(),'Active shell was killed with the window'
             elif index == 1:
+                current=json.loads(entries[0].read_text())
+                assert current['generation']==first['generation'] and current['managerPid']==first['managerPid'], 'Window restart replaced the workspace service'
                 assert (project/'reattached').read_text().strip()=='desktop '+(project/'shell-pid').read_text().strip(),'Desktop recreated shell ('+str(snapshot['terminalIds'])+'): ' + (project/'reattached').read_text() + ' expected desktop ' + (project/'shell-pid').read_text()
             else:
                 assert snapshot['terminal']=='exited',snapshot
@@ -100,3 +103,7 @@ with tempfile.TemporaryDirectory(prefix='exttyui-') as temporary:
             except (FileNotFoundError,ProcessLookupError): pass
         deadline=time.monotonic()+10
         while list(state.glob('exosuit/workspaces/*/endpoint.json')) and time.monotonic()<deadline: time.sleep(.05)
+        artifacts=os.environ.get('TERMINAL_UI_ARTIFACTS')
+        if artifacts:
+            shutil.copytree(fixture,Path(artifacts),dirs_exist_ok=True,
+                            ignore=shutil.ignore_patterns('*.sock','credential'))

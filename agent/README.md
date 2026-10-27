@@ -180,8 +180,10 @@ be forgotten. Removal releases replay/emulator retention and runtime slots.
 
 The existing database migrates from schema 1/2 to 3 and stores at most 256 terminal
 records; discovery returns six per page. Names/group membership and last known
-state survive service restart. Old active records become lost; those with saved
-history can open read-only without starting a process. “Restart shell” explicitly
+state survive service restart. Old active records become lost internally and are
+shown as “session ended”. Every record can open a read-only recovery view without
+starting a process, including records from older services with no saved output.
+The view clearly distinguishes saved history from missing history. “Restart shell” explicitly
 starts a fresh shell under the same terminal identity and appends a visible separator,
 retaining previous output. Variables, jobs and other process state are not restored.
 

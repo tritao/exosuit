@@ -81,6 +81,7 @@ class TerminalHistoryTests {
     session.close();
   }
   public static function run(root:String):Void {
+    legacyRecovery(root);
     var path = root + "/terminal-history.sqlite";
     var seed:WorkspaceSnapshot = {epoch:"history", cursor:0, groups:[{id:"work",name:"Work",cwd:root,revision:1}]};
     var store = new WorkspaceSqliteStore(path,"workspace",seed);
@@ -159,5 +160,36 @@ class TerminalHistoryTests {
     require(!store.hasTerminalHistory("history-shell") && store.loadTerminals().length==0,"Forget retained terminal history");
     session.close(); endpoint.connection.close(); server.close(); store.close();
     Sys.println("PASS: durable styled history, live-pane recovery, explicit restart, permission checks and atomic removal");
+  }
+
+  static function legacyRecovery(root:String):Void {
+    var seed:WorkspaceSnapshot = {epoch:"legacy-recovery",cursor:0,groups:[{id:"work",name:"Work",cwd:root,revision:1}]};
+    var store = new WorkspaceSqliteStore(root+"/legacy-terminal-history.sqlite","workspace",seed);
+    store.saveTerminal({id:"legacy-shell",name:"Legacy shell",group:"work",cwd:root,workspaceRoot:root,
+      instance:"previous-service",state:"running",exitCode:0,available:false,revision:1});
+    var manager = new WorkspaceTerminalManager("workspace","legacy-current",root,16777216,store);
+    require(manager.snapshot().terminals[0].available,"Metadata-only terminal cannot open its recovery view");
+    var pair = MemoryTransport.pair(), clock = function() return Sys.time()*1000;
+    var client = new RpcConnection(pair.client,clock), server = new RpcConnection(pair.server,clock);
+    manager.bind(server,[WorkspaceTerminalProtocol.READ,WorkspaceTerminalProtocol.CONTROL,WorkspaceTerminalProtocol.CATALOG]);
+    var endpoint = new HistoryEndpoint(root); endpoint.connection=client; endpoint.generation="legacy-current";
+    var backend = new RpcTerminalBackend(function() return endpoint,"legacy-shell",root,false);
+    var session = new TerminalSession(backend,Emulator.open(80,24),false);
+    var step = function() { client.poll();server.poll();manager.poll();client.poll();session.pollEvents(); };
+    var until = function(check:Void->Bool,message:String) {
+      var deadline=Sys.time()+5;
+      while (!check()) { require(Sys.time()<deadline,message);step();Sys.sleep(0.005); }
+    };
+    until(function() return backend.isSynchronized(),"Metadata-only terminal recovery failed");
+    require(session.status=="lost" && manager.activeCount()==0,"Recovery view silently spawned a replacement");
+    require(backend.controlStatus()=="Session ended · no saved history" && backend.controlAction()=="Restart shell",
+      "Metadata-only terminal lacks an honest explanation or restart action");
+    backend.activateControl();
+    until(function() return backend.canControl() && session.status=="running","Metadata-only terminal could not restart explicitly");
+    session.write(Bytes.ofString("printf 'RECOVERED_%s\\n' LEGACY\n"));
+    until(function() return allText(session.emulator).indexOf("RECOVERED_LEGACY")>=0,"Recovered shell did not accept input");
+    require(manager.snapshot().terminals[0].id=="legacy-shell" && manager.activeCount()==1,"Recovery changed terminal identity");
+    session.close();client.close();server.close();manager.dispose();store.close();
+    Sys.println("PASS: metadata-only terminal opens without spawning and restarts explicitly under the same identity");
   }
 }

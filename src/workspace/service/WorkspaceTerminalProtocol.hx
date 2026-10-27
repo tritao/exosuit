@@ -38,6 +38,7 @@ import haxeon.wire.MessagePack;
 /** The current rendered history could not be committed to durable storage. */
 @:optional @:id(13) var historyError:Null<Bool>;
 @:optional @:id(14) var restartable:Null<Bool>;
+@:optional @:id(15) var historyAvailable:Null<Bool>;
 }
 @:wire typedef TerminalRead = {@: id(1) var workspace: String;
 @:id(2) var instance:String;
@@ -113,6 +114,7 @@ import haxeon.wire.MessagePack;
 @:id(5) var instance:String;
 @:id(6) var state:String;
 @:id(7) var exitCode:Int;
+/** Can open a live attachment or a read-only recovery view; not a process-alive flag. */
 @:id(8) var available:Bool;
 @:id(9) var revision:Int64;
 @:optional @:id(10) var workspaceRoot:Null<String>;

@@ -127,7 +127,7 @@ class WorkspaceTerminalsPanel implements View {
           [
             new KeyedView(
               "summary",
-              new Text(groupName + " · " + record.state +(record.available
+              new Text(groupName + " · " + TerminalStateLabels.display(record.state) +(record.available
           ? "" : " · unavailable") + " · " + record.cwd)
         ),
           new KeyedView(

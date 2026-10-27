@@ -136,7 +136,7 @@ class WorkbenchTreeModel implements TreeViewModel {
 			return new Text(a == null ? "" : a.name + " · " + agentStateLabel(a.state));
 		}
 		var terminal = terminals.get(key.substring(2));
-		return new Text(terminal == null ? "" : terminal.name + " · " + terminal.state);
+		return new Text(terminal == null ? "" : terminal.name + " · " + TerminalStateLabels.display(terminal.state));
 	}
 
 	public function directory(group:WorkspaceGroup):Null<String> {
