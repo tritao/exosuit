@@ -15,8 +15,14 @@ class ContextMenuSmokeApp extends ExosuitApp {
 	var pointerUps = 0;
 	var observedRoot:Null<RenderNode> = null;
 	public function new(context:haxeon.ui.host.UiHostContext, directory:String) {
-		super(context.fonts, ui.ExosuitPalette.theme(false), context, directory + "/Main.hx", null, null, false);
+		super(context.fonts, ui.ExosuitPalette.theme(false), context, directory + "/Main.hx", null, null, false,
+			function(cwd, requestFrame, palette) return ui.TerminalPane.open(cwd, requestFrame, palette));
 		report = directory + "/state.json";
+		var terminal = Sys.getEnv("EXOSUIT_MENU_TERMINAL");
+		if (terminal != null) {
+			openTerminal();
+			if (terminal == "editor") moveTerminalToEditor();
+		}
 	}
 	override public function submit(frame:LayoutFrame):RenderNode {
 		var root = super.submit(frame);
@@ -37,7 +43,7 @@ class ContextMenuSmokeApp extends ExosuitApp {
 			if (node.resolved == null) return;
 			var isItem = node.semantics != null && node.semantics.role == AccessibilityRole.MenuItem;
 			if ((node.styleKey != null && StringTools.startsWith(node.styleKey, "activity:")) ||
-				node.styleKey == "activity-manage" || node.styleKey == "layout-menu" || isItem ||
+				node.styleKey == "activity-manage" || node.styleKey == "layout-menu" || node.styleKey == "terminal-pane" || isItem ||
 				(node.semantics != null && node.semantics.role == AccessibilityRole.TextField)) {
 				var bounds = node.globalBounds();
 				nodes.push({key: node.styleKey, label: node.semantics == null ? "" : node.semantics.label,
@@ -50,6 +56,7 @@ class ContextMenuSmokeApp extends ExosuitApp {
 			activityId: sidebar.activeId, sidebarVisible: sidebar.visible, pointerUps: pointerUps,
 			anchor: contextMenu == null ? null : {x: contextMenu.x, y: contextMenu.y},
 			focus: focused == null ? -1 : focused.id.value,
+			focusKey: focused == null ? "" : focused.styleKey,
 			focusLabel: focused == null || focused.semantics == null ? "" : focused.semantics.label,
 			nodes: nodes}));
 		return root;
@@ -60,6 +67,7 @@ class ContextMenuSmokeMain {
 	static function main():Int {
 		var options = new DesktopUiHostOptions();
 		options.title = "Context menu native input smoke";
+		options.customTitlebar = true;
 		options.width = 1100; options.height = 760;
 		options.captureDirectory = Sys.args()[0] + "/capture";
 		options.captureSeconds = 35;

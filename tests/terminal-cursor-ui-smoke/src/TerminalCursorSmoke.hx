@@ -57,6 +57,7 @@ class CursorApp implements DesktopUiApplication {
 		TerminalPollTests.run(fonts);
 		TerminalGridTests.run(fonts);
 		TerminalShortcutTests.run(fonts);
+		TerminalPointerTests.run(fonts);
 		pane = new ui.TerminalPane(new TerminalSession(backend, emulator), host.requestFrame,
 			new ui.TerminalPalette(dark), fonts);
 		TerminalNameTests.run();
