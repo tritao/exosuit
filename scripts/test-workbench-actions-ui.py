@@ -71,11 +71,17 @@ with tempfile.TemporaryDirectory(prefix='exactions-') as temporary:
             labels = [node.get('label') for node in nodes if node['visible']]
             if index == 0:
                 assert 'Workbench actions' in labels and 'New terminal' in labels and 'New Codex' in labels
+                header = next(node['bounds'] for node in nodes if node.get('label') == 'Workbench' and node['visible'])
+                for label in ['New terminal', 'New Codex', 'Remove selected leaf from Workbench', 'Workbench actions']:
+                    action = next(node['bounds'] for node in nodes if node.get('label') == label and node['visible'])
+                    assert header['y'] <= action['y'] + action['height'] / 2 <= header['y'] + header['height'], (label, header, action)
+                    assert action['x'] >= header['x'] + header['width'], (label, header, action)
+                assert not any(label and ('codex-tui/' in label or 'Codex · on demand' in label) for label in labels), labels
                 assert 'New group' not in labels and 'Manage terminals…' not in labels and 'Existing Codex thread id' not in labels
                 # The group row is near the toolbar, with no permanent attachment form above it.
                 groups = [node for node in nodes if node.get('label') == 'g:work' and node['visible']]
                 assert groups and groups[0]['bounds']['y'] < 150, (groups, json.loads((fixture / str(index) / 'app-state.json').read_text()))
-            if index == 1: assert all(label in labels for label in ['New Agent Session…', 'New terminal', 'New group', 'Rename group', 'Change Working Directory…', 'More Group Actions…', 'Open folder', 'Refresh Workbench'])
+            if index == 1: assert all(label in labels for label in ['New Agent Session…', 'New terminal', 'New group', 'Rename group', 'Change Working Directory…', 'More Group Actions…', 'Open folder', 'Refresh Workbench']), labels
             if index == 2:
                 assert 'Existing work' in labels and 'Other directory' not in labels and 'Existing Codex thread id' in labels, labels
                 assert (project / 'fake-codex.json').exists()

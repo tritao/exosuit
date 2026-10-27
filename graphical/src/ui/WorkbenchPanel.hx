@@ -326,15 +326,15 @@ class WorkbenchPanel implements View {
     }
 
 	function toolbarButton(label:String, icon:IconName, action:Void->Void, key:String):Button {
-		var style = new LayoutStyle(); style.width = LayoutAxis.fixed(32); style.height = LayoutAxis.fixed(32);
-		style.padding = new Insets(8, 8, 8, 8);
+		var style = new LayoutStyle(); style.width = LayoutAxis.fixed(24); style.height = LayoutAxis.fixed(24);
+		style.padding = new Insets(4, 4, 4, 4);
 		var button = new Button("", style, action, key);
 		button.accessibilityLabel = label; button.leadingIcon = icon; button.variant = ButtonVariant.Navigation;
 		return button;
 	}
 
-    public function build(context:BuildContext):RenderNode {
-        var catalog = client.terminalCatalog();
+    function syncState():Void {
+        var catalog:Null<TerminalCatalog> = client.terminalCatalog();
         var currentRoot = catalog == null ? null : catalog.workspaceRoot;
         if (currentRoot != null) {
             if (observedWorkspaceRoot != null && observedWorkspaceRoot != currentRoot) workspaceAttachmentChanged();
@@ -367,6 +367,12 @@ class WorkbenchPanel implements View {
 		}
         applyPendingReveal();
 		applyPendingSessionSelection();
+    }
+
+	public function headerActions():View return new WorkbenchHeaderActions(this);
+
+	public function buildHeaderActions(context:BuildContext):RenderNode {
+		syncState();
 		var selected = groupFor(tree.selectedKey);
 		var terminal = toolbarButton("New terminal", IconName.Terminal, function() {
 			if (selected != null) createTerminal(selected.id);
@@ -385,8 +391,8 @@ class WorkbenchPanel implements View {
 		deleteAgent.enabled = agentCanBeRemoved(selectedAgent) && client.agentService().canControlAgents() && !client.agentService().agentBusy();
 		var more = toolbarButton("Workbench actions", IconName.ChevronDown, null, "workbench-actions");
 		more.onClickEvent = function(event) menu(selected, event);
-		var toolbarStyle = new LayoutStyle(); toolbarStyle.width = LayoutAxis.stretch(); toolbarStyle.childGap = 2;
-		toolbarStyle.padding = new Insets(4, 2, 4, 2);
+		var toolbarStyle = new LayoutStyle(); toolbarStyle.childAlignY = haxeon.ui.LayoutAlignmentY.Center; toolbarStyle.childGap = 2;
+		toolbarStyle.padding = new Insets(2, 0, 4, 0);
 		var delay = tooltipDelay();
 		var visibleTooltip = context.resourceState(context.id("workbench-tooltip-visible"),
 			function():Null<String> return null, function(_) {});
@@ -396,28 +402,29 @@ class WorkbenchPanel implements View {
 		hover.delaySeconds = delay;
 		function tip(key:String, anchor:View, label:String):View return new TabTooltip(key, anchor, new Text(label),
 			function() return new Rect(0, 0, context.viewportWidth, context.viewportHeight), delay, Below, hover, visibleTooltip.value == key);
-		var rows:Array<KeyedView> = [new KeyedView("toolbar", new Row("workbench-toolbar", [
+		return new Row("workbench-header-actions", [
 			new KeyedView("terminal", tip("new-terminal-tip", terminal, !client.canReadTerminals() ? "Connect to a workspace with terminal read permission"
 				: !client.canControlTerminals() ? "Terminal creation requires terminal control permission"
 				: !client.canCreateGroupedTerminals() ? "This workspace does not support grouped terminals" : "New terminal")),
 			new KeyedView("agent", tip("new-agent-tip", agent, "New Codex")),
 			new KeyedView("delete-agent", tip("delete-agent-tip", deleteAgent, "Remove from Workbench")),
 			new KeyedView("more", tip("workbench-actions-tip", more, "Actions"))
-		], toolbarStyle)), new KeyedView("tree", tree)];
+		], toolbarStyle).build(context);
+	}
+
+	public function build(context:BuildContext):RenderNode {
+		syncState();
+		var selected = groupFor(tree.selectedKey);
+		var rows:Array<KeyedView> = [new KeyedView("tree", tree)];
 		var creation=client.agentService().agentCreation();
 		if (creation != null)
-			rows.insert(1, new KeyedView("operation-pending", new Text("Starting " + creation.name + " session…")));
+			rows.insert(0, new KeyedView("operation-pending", new Text("Starting " + creation.name + " session…")));
 		else if (client.agentService().agentBusy() || client.terminalCatalogBusy())
-			rows.insert(1, new KeyedView("operation-pending", new Text("Session operation in progress…")));
+			rows.insert(0, new KeyedView("operation-pending", new Text("Session operation in progress…")));
 		var error = draftError == null ? client.terminalCatalogError() : draftError;
 		if (error == null) error = client.agentService().agentError();
-		if (error != null) rows.insert(1, new KeyedView("error", new Text(error)));
-		if (agents != null) {
-			var statusStyle = new LayoutStyle(); statusStyle.width = LayoutAxis.stretch();
-			statusStyle.padding = new Insets(6, 4, 6, 4);
-			rows.push(new KeyedView("status", new Text(agents.status == "Codex is not connected" ? "Codex · on demand" : agents.status, statusStyle, context.theme.tokens.textSecondary,
-				null, haxeon.ui.theme.TextRole.Caption)));
-		}
+		if (error != null) rows.insert(0, new KeyedView("error", new Text(error)));
+
 		var style = new LayoutStyle(); style.width = LayoutAxis.stretch(); style.height = LayoutAxis.grow();
 		var node = new Column("workbench", rows, style).build(context);
         node.onResolved(function(_) {
@@ -475,4 +482,11 @@ private class WorkbenchGroupNameEditor implements View {
         }, "capture");
         return node;
     }
+}
+
+/** Header actions share the panel selection and current service capabilities. */
+private class WorkbenchHeaderActions implements View {
+	final panel:WorkbenchPanel;
+	public function new(panel:WorkbenchPanel) this.panel = panel;
+	public function build(context:BuildContext):RenderNode return panel.buildHeaderActions(context);
 }
