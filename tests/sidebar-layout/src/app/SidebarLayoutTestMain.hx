@@ -26,6 +26,7 @@ class SidebarLayoutTestMain {
 		trace("PASS: Activity Bar order and visibility persistence, shared sidebar width, legacy migration, deferred registration, atomic persistence, aligned shared header metrics, narrow clipping and selected-tab reveal through resize");
 		return 0;
 	}
+ static function shown(model:haxeon.ui.widgets.sidebar.SidebarModel, id:String):Bool { var mode = model.find(id); return mode != null && mode.visible; }
  static function ids(model:haxeon.ui.widgets.sidebar.SidebarModel):String return [for (mode in model.modes) mode.id].join(",");
  static function destinations(model:haxeon.ui.widgets.sidebar.SidebarModel):Void {
   for (name in ["files", "search", "scm"]) model.register(name, function() return new haxeon.ui.widgets.text.Text(name),
@@ -41,11 +42,11 @@ class SidebarLayoutTestMain {
   var restarted = new haxeon.ui.widgets.sidebar.SidebarModel();
   require(restarted.restore(sidebar.encode()), "saved order rejected");
   destinations(restarted);
-  require(ids(restarted) == "search,scm,files" && !restarted.find("files").visible, "order or visibility lost on restart");
+  require(ids(restarted) == "search,scm,files" && !shown(restarted, "files"), "order or visibility lost on restart");
   require(restarted.setModeVisible("files", true) && ids(restarted) == "search,scm,files", "re-added destination moved");
   var legacy = new haxeon.ui.widgets.sidebar.SidebarModel();
   destinations(legacy);
-  require(legacy.restore("2|files|1|240|files,1;scm,0") && ids(legacy) == "files,search,scm" && !legacy.find("scm").visible,
+  require(legacy.restore("2|files|1|240|files,1;scm,0") && ids(legacy) == "files,search,scm" && !shown(legacy, "scm"),
    "version 2 layout did not migrate");
  }
  static function checkHeaderAlignment(fonts:haxeon.ui.FontCollection):Void {
