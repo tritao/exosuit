@@ -42,8 +42,13 @@ class LayoutModesTestMain {
 		require(regions.rightOpen() && dock.snapshotJson() == resized, "mode switch changed a manually resized right region");
 		regions.toggleBottom(); require(modes.bottomChanged, "manual bottom toggle was not tracked");
 		modes.select("agents"); require(regions.bottomOpen(), "Agents hid a manually opened bottom region");
-		modes.markLeft(); side.select("files"); modes.select("editor"); modes.select("agents");
-		require(side.activeId == "files" && side.find("workbench") != null && side.find("files") != null, "mode replaced manual sidebar selection or hid destinations");
+		modes.markLeft(); side.select("files"); modes.select("editor");
+		require(side.activeId == "files" && !modes.hides("files"), "Editor replaced a manual sidebar selection or hid Files");
+		modes.select("agents");
+		// Agents keeps Files, Search and Source Control off the rail; the right panel shows the group's instead.
+		require(side.activeId == "workbench" && modes.hides("files") && modes.hides("search") && modes.hides("scm") && !modes.hides("workbench"),
+			"Agents left an editor-workspace destination selected or on the rail");
+		require(side.find("files") != null && side.find("files").visible && side.find("scm").visible, "Agents changed the user's own destination visibility");
 		var context = modes.captureContext(), window = modes.captureWindow(), snapshot = dock.snapshotJson();
 		var next = model(), nextSide = sidebar(next), nextRegions = new WorkbenchLayoutControls(next), nextModes = new WorkbenchLayoutModes(next, nextSide, nextRegions, function() {});
 		next.restoreJson(snapshot); nextSide.restore(side.encode()); nextModes.restoreWindow([window]); nextModes.restoreContext([context]); nextModes.start("auto");

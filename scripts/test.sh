@@ -163,6 +163,7 @@ active_context_fixture=$(mktemp -d)
 PRAGTICAL_PORTABLE="$active_context_fixture/state" run_test active-context "$active_context_fixture/roots"
 run_test layout-controls
 run_test layout-modes
+run_test agent-scope
 run_test project-scan-yield
 chmod 600 "$workspace_root/unreadable.txt"
 

@@ -32,6 +32,8 @@ class ActivityBar implements View {
 	final tooltipDelay:Float;
 	final manage:UiEvent->Void;
 	final manageOpen:Bool;
+	/** Destinations the layout mode leaves out; the user's own visibility stays in the model. */
+	public var hiddenIds:Array<String> = [];
 	public function new(model:SidebarModel, icons:Map<String, IconName>, activate:String->Void, tooltipDelay:Float,
 			manage:UiEvent->Void, manageOpen:Bool = false) {
 		this.manage = manage;
@@ -53,7 +55,7 @@ class ActivityBar implements View {
 		style.background = context.theme.tokens.surfaceRaised;
 		var items:Array<KeyedView> = [];
 		for (mode in model.modes) {
-			if (!mode.visible) continue;
+			if (!mode.visible || hiddenIds.indexOf(mode.id) >= 0) continue;
 			var id = mode.id;
 			var buttonStyle = new LayoutStyle();
 			buttonStyle.width = LayoutAxis.fixed(40);

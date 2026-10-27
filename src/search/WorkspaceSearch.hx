@@ -2,6 +2,7 @@ package search;
 
 import jobs.JobHandle;
 import jobs.JobScheduler;
+import workspace.ProjectNode;
 import workspace.Workspace;
 
 class WorkspaceSearch {
@@ -15,16 +16,19 @@ class WorkspaceSearch {
 	final workspace:Workspace;
 	final scheduler:JobScheduler;
 	final onChange:Void->Void;
+	/** The files to search; defaults to the active context's projects. */
+	final scope:Null<Void->Array<ProjectNode>>;
 	var handle:Null<JobHandle>;
 	var pendingOptions:SearchOptions;
 	var pendingMaximum:Int = 10000;
 	var requestedAt:Float = 0.0;
 	var pending:Bool = false;
 
-	public function new(workspace:Workspace, scheduler:JobScheduler, onChange:Void->Void) {
+	public function new(workspace:Workspace, scheduler:JobScheduler, onChange:Void->Void, ?scope:Void->Array<ProjectNode>) {
 		this.workspace = workspace;
 		this.scheduler = scheduler;
 		this.onChange = onChange;
+		this.scope = scope;
 		pendingOptions = new SearchOptions();
 	}
 
@@ -60,7 +64,9 @@ class WorkspaceSearch {
 			return;
 		}
 		try {
-			var task = new WorkspaceSearchJob(this, generation, workspace, query, pendingOptions, pendingMaximum);
+			var source = scope;
+			var task = new WorkspaceSearchJob(this, generation, workspace, query, pendingOptions, pendingMaximum,
+				source == null ? null : source());
 			handle = scheduler.schedule(task);
 		} catch (error:Dynamic) {
 			errors.push('Invalid search pattern: ' + Std.string(error));

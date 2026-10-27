@@ -20,7 +20,8 @@ class WorkspaceSearchJob implements JobTask {
 	var retained:Int = 0;
 	var cancelled:Bool = false;
 
-	public function new(owner:WorkspaceSearch, generation:Int, workspace:Workspace, query:String, options:SearchOptions, maximum:Int) {
+	public function new(owner:WorkspaceSearch, generation:Int, workspace:Workspace, query:String, options:SearchOptions, maximum:Int,
+			?scoped:Array<ProjectNode>) {
 		this.owner = owner;
 		this.generation = generation;
 		this.workspace = workspace;
@@ -28,7 +29,8 @@ class WorkspaceSearchJob implements JobTask {
 		this.options = options;
 		this.maximum = maximum < 1 ? 1 : maximum;
 		pattern = new SearchPattern(query, options);
-		for (project in workspace.scopedProjects())
+		if (scoped != null) for (file in scoped) files.push(file);
+		else for (project in workspace.scopedProjects())
 			for (file in project.files()) files.push(file);
 	}
 
