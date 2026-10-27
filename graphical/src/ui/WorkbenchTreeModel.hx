@@ -117,20 +117,7 @@ class WorkbenchTreeModel implements TreeViewModel {
 			var group = groups.get(key.substring(2));
 			if (group == null)
 				return new Text("");
-			var running = 0;
-			for (t in terminals) {
-				var parent:Null<String> = t.group;
-				while (parent != null) {
-					if (parent == group.id) {
-						if (t.state == "running")
-							running++;
-						break;
-					}
-					var ancestor = groups.get(parent);
-					parent = ancestor == null ? null : ancestor.parent;
-				}
-			}
-			return new WorkbenchGroupLabel(group.name, directory(group), workspaceRoot, running);
+			return new WorkbenchGroupLabel(group.name, directory(group), workspaceRoot);
 		}
 		if (StringTools.startsWith(key, "a:")) {
 			var editing = agentEditor == null ? null : agentEditor(key.substring(2));

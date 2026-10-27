@@ -19,17 +19,15 @@ class WorkbenchGroupLabel implements View {
 	final name:String;
 	final directory:Null<String>;
 	final root:Null<String>;
-	final running:Int;
-	public function new(name:String, directory:Null<String>, root:Null<String>, running:Int) {
-		this.name = name; this.directory = directory; this.root = root; this.running = running;
+	public function new(name:String, directory:Null<String>, root:Null<String>) {
+		this.name = name; this.directory = directory; this.root = root;
 	}
 	public function build(context:BuildContext):RenderNode {
 		var style = new LayoutStyle(); style.width = LayoutAxis.stretch(); style.childGap = 6;
 		style.childAlignY = haxeon.ui.LayoutAlignmentY.Center; style.clipHorizontal = true;
-		var label = name + (running > 0 ? " · " + running + " running" : "");
 		var children = [
 			new KeyedView("icon", new Icon("group-folder", IconName.FolderClosed, 14)),
-			new KeyedView("name", new Text(label, null, null,
+			new KeyedView("name", new Text(name, null, null,
 				haxeon.ui.core.TextStyleOverride.text(ExosuitPalette.WORKBENCH_TEXT_SIZE)))
 		];
 		if (directory != null) {
@@ -50,7 +48,7 @@ class WorkbenchGroupLabel implements View {
 		tooltip.fillAnchor = true;
 		var node = tooltip.build(context);
 		node.semantics = new Semantics(AccessibilityRole.Text);
-		node.semantics.label = label + (directory == null ? "" : " · " + directory);
+		node.semantics.label = name + (directory == null ? "" : " · " + directory);
 		return node;
 	}
 }
