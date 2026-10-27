@@ -413,7 +413,7 @@ class RpcTerminalBackend implements TerminalBackend {
         }, function(e) {
           if (!closed && connection == c) {
             pending = false;
-            if (!retryable(e.code)) fail(e.code);
+            if (!retryable(e.code)) fail(e.message == null || StringTools.trim(e.message) == "" ? e.code : e.message);
           }
         }
         );

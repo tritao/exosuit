@@ -64,7 +64,7 @@ class TerminalCapabilitiesTests {
       else context.respond(snapshot);
     });
     server.register(WorkspaceTerminalProtocol.OPEN,function(request,context) {
-      if (request.id=="failed") { context.fail({code:"terminal_spawn_failed",message:"fixture failure",ambiguous:false});return; }
+      if (request.id=="failed") { context.fail({code:"terminal_spawn_failed",message:"Terminal creation failed: The pi CLI was not found on the workspace host PATH",ambiguous:false});return; }
       opened=true;
       context.respond({id:request.id,cwd:"/fixture",state:"running",exitCode:0,columns:80,rows:24,start:0,end:0});
     });
@@ -90,6 +90,8 @@ class TerminalCapabilitiesTests {
     var failed=new workspace.client.RpcTerminalBackend(() -> endpoint,"failed","/fixture",true);
     failed.pollEvents(function(_) {});for (_ in 0...5) step();
     require(lists==2,"Failed creation triggered a success refresh");
+    require(failed.controlStatus()=="Terminal unavailable: Terminal creation failed: The pi CLI was not found on the workspace host PATH",
+      "Terminal startup discarded the actionable service error");
     var closed=new workspace.client.RpcTerminalBackend(() -> endpoint,"created","/fixture",true);
     closed.pollEvents(function(_) {});closed.close();for (_ in 0...5) step();
     require(lists==3,"Closing the view discarded confirmed creation invalidation");
