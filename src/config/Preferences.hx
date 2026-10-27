@@ -77,6 +77,7 @@ class Preferences {
 		}
 		var previousRelease = releaseStore;
 		if (previousRelease != null) previousRelease();
+		candidate.inheritRestartBaseline(store);
 		store = candidate;
 		attach();
 		signature = next;

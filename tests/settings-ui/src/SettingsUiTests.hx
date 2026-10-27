@@ -73,6 +73,18 @@ class SettingsUiTests {
    var setting:haxeon.ui.settings.SettingDefinition = cast store.registry.get(entry[0]);
    check(setting.unit == entry[1], "numeric setting exposes readable units: " + entry[0]);
   }
+  var reloadFile = "/tmp/exosuit-settings-reload-" + Sys.getPid() + ".json";
+  sys.io.File.saveContent(reloadFile, '{"version":1,"values":{}}');
+  var preferences = new config.Preferences(reloadFile);
+  sys.io.File.saveContent(reloadFile, '{"version":1,"values":{"editor/fonts/font_path":"external.ttf"}}');
+  preferences.reload(true);
+  check(preferences.store.restartChanges().length == 1, "external edits preserve the application startup baseline");
+  preferences.reload(true);
+  check(preferences.store.restartChanges().length == 1, "reloading again keeps pending restart changes");
+  sys.io.File.saveContent(reloadFile, '{"version":1,"values":{}}');
+  preferences.reload(true);
+  check(preferences.store.restartChanges().length == 0, "external reversion clears pending restart changes");
+  sys.FileSystem.deleteFile(reloadFile);
   modelControls();
   Sys.println("Settings UI adapter tests passed");
   return 0;
