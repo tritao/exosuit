@@ -18,14 +18,17 @@ param(
 	[string]$File = 'src/editor/TextBuffer.hx',
 	[switch]$Live,
 	[int]$DeadlineSeconds = 0,
-	[int]$LockWaitMinutes = 60,
+	[int]$LockWaitMinutes = 7,
 	# The checkout to measure; this script's own by default. Output still goes under this script's runs folder.
 	[string]$Root = ''
 )
 $ErrorActionPreference = 'Stop'
-# Instrumented runs build and export more slowly; after a clean build their first launch also builds build-instrument.
-if (-not $DeadlineSeconds) { $DeadlineSeconds = if ($Profile -eq 'instrument') { 900 } else { 300 } }
-$editorLimit = if ($Profile -eq 'instrument') { 600 } else { 240 }
+# A whole capture takes at most 7 minutes. Instrumented runs build and export more slowly; after a clean build, build
+# build-instrument before measuring, because building it from scratch does not fit.
+if (-not $DeadlineSeconds) { $DeadlineSeconds = if ($Profile -eq 'instrument') { 420 } else { 300 } }
+$editorLimit = if ($Profile -eq 'instrument') { 240 } else { 150 }
+# A capture records at most two minutes of the editor, from its launch to its exit; the build before it does not count.
+$editorSeconds = 120
 Import-Module (Join-Path $PSScriptRoot 'guard.psm1') -Force
 $root = if ($Root) { (Resolve-Path $Root).Path } else { (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path }
 $out = Join-Path $PSScriptRoot "runs\$Name"
@@ -52,7 +55,7 @@ try {
 	$runArgs += @("--profile=$Profile", $root, (Join-Path $root $File))
 	$scenarioJson = Join-Path $out 'scenario.json'
 	$log = Join-Path $out 'run.log'
-	$state = @{ editor = $null; scenario = $null; stopped = $false; quietSince = 0; lastLength = -1 }
+	$state = @{ editor = $null; editorAt = 0; scenario = $null; stopped = $false; quietSince = 0; lastLength = -1 }
 	# hl.exe gets paths with forward slashes; compare with both kinds of separator made alike.
 	# Instrumented runs use graphical/build-instrument.
 	$appPattern = [regex]::Escape(($root -replace '\\', '/')) + '/graphical/build[^/]*/host/'
@@ -63,12 +66,14 @@ try {
 				Where-Object { $tree.Contains([int]$_.ProcessId) -and ($_.CommandLine -replace '\\', '/') -match $appPattern -and $_.CommandLine -notmatch 'haxeon[\\/]compiler|--output' } |
 				Select-Object -First 1
 			if ($state.editor) {
+				$state.editorAt = $elapsed
 				Note "editor started: pid $($state.editor.ProcessId) after $([int]$elapsed) s"
 				$state.scenario = Start-Process python -ArgumentList @('-I', (Join-Path $PSScriptRoot 'scenario.py'), $scenarioJson, '--wait-window', '120') `
 					-RedirectStandardOutput (Join-Path $out 'scenario.log') -RedirectStandardError (Join-Path $out 'scenario.err') -PassThru -WindowStyle Hidden
 			}
 		}
 		if (-not $state.editor -and $elapsed -gt $editorLimit) { return "no editor process recognized after $editorLimit s (build failed, or the editor runs from an unexpected path)" }
+		if ($state.editor -and -not $state.stopped -and $elapsed - $state.editorAt -gt $editorSeconds) { return "the editor ran over $editorSeconds s" }
 		if ($state.scenario -and -not $state.stopped -and $state.scenario.HasExited) {
 			Note "scenario finished (exit $($state.scenario.ExitCode)); stopping the editor so the profiler exports"
 			Stop-Process -Id $state.editor.ProcessId -Force -ErrorAction SilentlyContinue
@@ -101,7 +106,7 @@ if (-not $trace) { Note 'no trace was written; see run.log and run.log.err'; exi
 $trace | Set-Content (Join-Path $out 'trace.txt')
 $metricArgs = @('-I', (Join-Path $PSScriptRoot 'metrics.py'), $trace, '--json', (Join-Path $out 'metrics.json'))
 if (Test-Path $scenarioJson) { $metricArgs += @('--scenario', $scenarioJson) }
-$m = Invoke-Guarded -FilePath python -ArgumentList $metricArgs -WorkingDirectory $root -TimeoutSeconds 900 -LogPath (Join-Path $out 'metrics.txt')
+$m = Invoke-Guarded -FilePath python -ArgumentList $metricArgs -WorkingDirectory $root -TimeoutSeconds 300 -LogPath (Join-Path $out 'metrics.txt')
 Get-Content (Join-Path $out 'metrics.txt')
 Note "metrics: $(Format-GuardResult $m)"
 exit $(if ($exit) { $exit } elseif ($m.ExitCode -ne 0) { $m.ExitCode } else { 0 })

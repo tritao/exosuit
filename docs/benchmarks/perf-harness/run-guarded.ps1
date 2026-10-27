@@ -4,7 +4,7 @@ Runs one command under the crash-dialog guard with a hard timeout. Use it for ev
 window: the app, hl.exe, test executables, ctest, build scripts.
 
 .EXAMPLE
-pwsh -NoProfile -File docs/benchmarks/perf-harness/run-guarded.ps1 -TimeoutSeconds 900 -Log build.log -Exe pwsh -ArgLine "-NoProfile -File scripts/build-windows.ps1 -SkipBootstrap"
+pwsh -NoProfile -File docs/benchmarks/perf-harness/run-guarded.ps1 -TimeoutSeconds 300 -Log build.log -Exe pwsh -ArgLine "-NoProfile -File scripts/build-windows.ps1 -SkipBootstrap"
 
 `ArgLine` is passed to the program as one command line, exactly as written. Exit status: the command's own, 124 on
 timeout, 125 when a crash or error dialog appeared (its text is printed and the process tree is stopped).

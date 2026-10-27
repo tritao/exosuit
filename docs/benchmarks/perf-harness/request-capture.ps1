@@ -17,7 +17,8 @@ param(
 	[string]$File = 'src/editor/TextBuffer.hx',
 	[switch]$Live,
 	[string]$Root = '',
-	[int]$WaitMinutes = 120,
+	# One capture takes at most 7 minutes (measure.ps1); a request waits for one, plus the queue picking it up.
+	[int]$WaitMinutes = 10,
 	[string]$QueueDir = 'C:\Users\corbi\projects\exosuit\.claude\perf-captures'
 )
 $ErrorActionPreference = 'Stop'
