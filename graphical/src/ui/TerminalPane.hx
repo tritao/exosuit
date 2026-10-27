@@ -34,7 +34,7 @@ import terminalkit.Cell;
 private typedef TerminalBackground = {start:Int, end:Int, color:Color};
 private typedef TerminalForeground = {start:Int, end:Int, packed:Int, background:Bool};
 private typedef TerminalRow = {
-	layout:TextLayout, text:String, fills:Array<TerminalBackground>,
+	layout:TextLayout, text:String, fills:Array<TerminalBackground>, grid:Bool,
 	id:haxe.Int64, hash:haxe.Int64, reusable:Bool, serial:Int, paintRevision:Int, paintKey:String
 };
 
@@ -305,7 +305,7 @@ class TerminalPane implements AgentTerminalPanel {
 		while (renderedRows.length < count) {
 			var layout = TextLayout.create(fonts, "", 8192.0, gridTextStyle(), new ParagraphStyle(TextWrap.None));
 			layout.setColor(foreground);
-			renderedRows.push({layout: layout, text: "", fills: [], id: 0, hash: 0, reusable: false, serial: ++rowSerial, paintRevision: 0, paintKey: ""});
+			renderedRows.push({layout: layout, text: "", fills: [], grid: false, id: 0, hash: 0, reusable: false, serial: ++rowSerial, paintRevision: 0, paintKey: ""});
 			revisions.push(fontRevision);
 			force = true;
 		}
@@ -324,6 +324,8 @@ class TerminalPane implements AgentTerminalPanel {
 			entry.reusable = cursor.mode == 1 || row != cursor.row;
 			var cells = emulator.rowCells(row);
 			var buffer = new StringBuf();
+			var grid:Array<Float> = [];
+			var gridRequired = false;
 			var inkRuns:Array<TerminalForeground> = [];
 			var fills:Array<TerminalBackground> = [];
 			var offset = 0;
@@ -333,6 +335,11 @@ class TerminalPane implements AgentTerminalPanel {
 				var content = cell.text.length == 0 ? " " : cell.text;
 				buffer.add(content);
 				var count = codepoints(content);
+				if (!gridRequired && (count != 1 || content.charCodeAt(0) >= 127)) {
+					gridRequired = true;
+					for (previous in 0...offset) grid.push(previous * cellWidth);
+				}
+				if (gridRequired) for (_ in 0...count) grid.push(column * cellWidth);
 				var fg = haxe.Int64.toInt(cell.style);
 				var bg = haxe.Int64.toInt(cell.style >>> 32);
 				if (!focused && cursor.mode != 1 && row == cursor.row && column == cursor.column) {
@@ -354,6 +361,11 @@ class TerminalPane implements AgentTerminalPanel {
 			}
 			var next = buffer.toString();
 			if (next != entry.text) entry.layout.setText(next);
+			if (gridRequired) {
+				grid.push(cells.length * cellWidth);
+				entry.layout.setGridPositions(grid);
+			} else if (entry.grid) entry.layout.setGridPositions([]);
+			entry.grid = gridRequired;
 			entry.layout.setColorRanges([for (run in inkRuns) new TextColorRange(run.start, run.end,
 				TerminalColors.decode(run.packed, run.background ? background : foreground, palette, run.background))]);
 			entry.text = next;

@@ -44,7 +44,7 @@ def main():
                     # A missing glyph also has ink: verify actual Braille dot geometry,
                     # including eight separate dots, rather than just nonblank pixels.
                     def cell_ink(column, row):
-                        advance = state['symbolAdvances'][row] if mode == 'system-symbols' else state['cellWidth']
+                        advance = state['cellWidth']
                         left = round(8 + column * advance)
                         top = round(4 + row * state['rowHeight'])
                         width = round(advance)
@@ -74,6 +74,13 @@ def main():
                     count = 9 if mode == 'system-symbols' else 10
                     patterns = [frozenset(cell_ink(column, 1)) for column in range(count)]
                     assert all(patterns) and len(set(patterns)) >= 6, (scheme, mode, 'symbols rendered as repeated missing glyphs')
+                    if mode == 'system-symbols':
+                        # Spaces use the primary font; fallback glyphs must not
+                        # accumulate their wider natural advance between them.
+                        for column in (0, 2, 5, 10):
+                            assert cell_ink(column, 3), (scheme, 'Braille drifted from cell', column)
+                        for column in (1, 3, 4, 6, 7, 8, 9):
+                            assert not cell_ink(column, 3), (scheme, 'Braille invaded a space', column)
                     continue
                 if mode == "async-echo":
                     assert state["batches"] == state["renderedBatches"] == 10, state

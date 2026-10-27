@@ -55,6 +55,7 @@ class CursorApp implements DesktopUiApplication {
 		if (mode == "system-symbols") fonts.addSystemFallbacks();
 		else ui.TerminalSymbolFont.addTo(fonts);
 		TerminalPollTests.run(fonts);
+		TerminalGridTests.run(fonts);
 		TerminalShortcutTests.run(fonts);
 		pane = new ui.TerminalPane(new TerminalSession(backend, emulator), host.requestFrame,
 			new ui.TerminalPalette(dark), fonts);
@@ -62,7 +63,7 @@ class CursorApp implements DesktopUiApplication {
 		if (mode == "symbols" || mode == "system-symbols") {
 			emulator.feedString("\x1b[2J\x1b[H\x1b[?25l⠁⠂⠄⠈⠐⠠⡀⢀⣿\r\n⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏\r\n░▒▓█▁▂▃▄▅▆▇");
 		}
-		if (mode == "system-symbols") emulator.feedString("\x1b[2;1H🬀🬁🬂🬃🬄🬅🬆🬇🬈");
+		if (mode == "system-symbols") emulator.feedString("\x1b[2;1H🬀🬁🬂🬃🬄🬅🬆🬇🬈\x1b[4;1H⣿ ⣿  ⣿    ⣿ ASCII");
 		if (mode == "colors") {
 			emulator.feedString("\x1b[2J\x1b[H\x1b[31mRED RED\x1b[0m gap \x1b[31mRED\x1b[32mGREEN\x1b[0m"
 				+ "\r\n\x1b[38;5;196mINDEXED\x1b[38;2;255;0;0m TRUECOLOR\x1b[0m"
@@ -87,7 +88,6 @@ class CursorApp implements DesktopUiApplication {
 		lines: [for (row in pane.renderedRows) row.text],
 		focusReports: backend.replies,
 		cellWidth: pane.cellWidth,
-		symbolAdvances: mode == "system-symbols" ? [for (row in 0...2) pane.renderedRows[row].layout.caret(new haxeon.ui.TextLayout.TextPosition(1, 0)).x] : null,
 		rowHeight: pane.rowHeight,
 		selectionText: mode == "selection" ? pane.session.emulator.selectionText() : null
 	};
@@ -104,7 +104,7 @@ class CursorApp implements DesktopUiApplication {
 		if (frames == 3) ui.focusWidget(root.id);
 		if (frames == 4) {
 			unchangedRowRevision = pane.revisions[1];
-			if (mode != "system-symbols") for (column in 0...14) {
+			for (column in 0...14) {
 				var caret = pane.renderedRows[0].layout.caret(new haxeon.ui.TextLayout.TextPosition(column, 0));
 				if (Math.abs(caret.x - column * pane.cellWidth) > 0.1)
 					throw "Terminal text and cursor grid disagree at column " + column;
