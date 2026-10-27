@@ -889,7 +889,7 @@ class ExosuitApp implements DesktopUiApplication {
 
 	public function openSettings():Void {
 		host.closeCommandView();
-		settingsPanel = new ExosuitSettingsPanel(application.settings.store, function() return settingsModels, requestFrame);
+		settingsPanel = new ExosuitSettingsPanel(application.settings.store, function() return settingsModels, requestFrame, desktop);
 		settingsModels = [];
 		settingsModelsNext = null;
 		settingsModelsPending = false;
@@ -1188,12 +1188,13 @@ class ExosuitApp implements DesktopUiApplication {
 		if (settingsPanel != null) {
 			if (settingsPanel.catalog.store != application.settings.store) {
 				var filter = settingsPanel.filter, advanced = settingsPanel.showAdvanced, category = settingsPanel.selectedCategory;
-				settingsPanel = new ExosuitSettingsPanel(application.settings.store, function() return settingsModels, requestFrame);
+				settingsPanel = new ExosuitSettingsPanel(application.settings.store, function() return settingsModels, requestFrame, desktop);
 				settingsPanel.setShowAdvanced(advanced);
 				settingsPanel.setFilter(filter);
 				if (category != null) settingsPanel.select(category);
 			}
 			var panel:haxeon.ui.widgets.settings.SettingsPanel = cast settingsPanel;
+			panel.compact = viewportWidth < 760;
 			var settingsStyle = new LayoutStyle();
 			settingsStyle.width = LayoutAxis.grow();
 			settingsStyle.height = LayoutAxis.fixed(Math.max(180.0, Math.min(560.0, viewportHeight - 160.0)));
