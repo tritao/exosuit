@@ -24,6 +24,8 @@ class WorkbenchColors {
 	public static inline var lightSurfaceSunken:Int = 0xffffff;
 	public static inline var darkSurfaceHover:Int = 0x303b49;
 	public static inline var lightSurfaceHover:Int = 0xdce5f1;
+	public static inline var darkDivider:Int = 0x3b4149;
+	public static inline var lightDivider:Int = 0xd1d5db;
 	public static inline var darkBorder:Int = 0x526071;
 	public static inline var lightBorder:Int = 0x8b9aad;
 	public static inline var darkBorderStrong:Int = 0x657489;

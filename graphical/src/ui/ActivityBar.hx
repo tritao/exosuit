@@ -82,7 +82,9 @@ class ActivityBar implements View {
 			new Text("Manage"),
 			function() return new Rect(0, 0, context.viewportWidth, context.viewportHeight), tooltipDelay, Right,
 			hover, visibleTooltip.value == "activity-tooltip:manage"), manageOpen)));
-		return new Column("activity-bar", items, style).build(context);
+		var node = new Column("activity-bar", items, style).build(context);
+		WorkbenchBoundary.right(context, node);
+		return node;
 	}
 }
 

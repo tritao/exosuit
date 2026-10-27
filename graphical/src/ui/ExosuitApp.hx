@@ -2384,8 +2384,8 @@ class ExosuitApp implements DesktopUiApplication {
 			items.push(new KeyedView("layout-menu", layoutButton("menu", "Layout", "view.layout-menu", false)));
 		}
 		var toolbar:View = new Row("exosuit-toolbar", items, style);
-		return hostContext != null && hostContext.windowControls != null
-			? new haxeon.ui.widgets.WindowTitleBar("exosuit-titlebar", toolbar, hostContext.windowControls, TOOLBAR_HEIGHT) : toolbar;
+		return new WorkbenchBoundary(hostContext != null && hostContext.windowControls != null
+			? new haxeon.ui.widgets.WindowTitleBar("exosuit-titlebar", toolbar, hostContext.windowControls, TOOLBAR_HEIGHT) : toolbar);
 	}
 
 	function toolbarActionCapacity():Int {

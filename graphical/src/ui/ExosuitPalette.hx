@@ -45,6 +45,9 @@ class ExosuitPalette {
 			dark ? 0.47 : 0.63, dark ? 0.76 : 0.89, dark ? 0.65 : 0.50);
 		result.textCaret = tokens.textPrimary;
 		result.refreshStyles();
+		result.styles.rule(StyleSelector.widget("split-divider"), [
+			StyleValue.background(hex(dark ? WorkbenchColors.darkDivider : WorkbenchColors.lightDivider))
+		]);
 		result.styles.rule(StyleSelector.widget("button").className("tab-header"), [
 			StyleValue.fontSize(WORKBENCH_TEXT_SIZE),
 			// Smaller labels retain the existing tab target height.

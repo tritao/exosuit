@@ -57,6 +57,7 @@ class StatusBarView implements View {
 			style.background = context.theme.tokens.surfaceRaised;
 			// Clip bounded labels and controls, leaving tooltip overlays free.
 			var root = new RenderNode(context.id("status-bar"), LayoutVisualKind.Box, style);
+			WorkbenchBoundary.top(context, root);
 
 			if (remote) {
 				var connectionStyle = controlStyle(sizes.remote, HEIGHT);
