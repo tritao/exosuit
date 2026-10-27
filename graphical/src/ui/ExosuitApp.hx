@@ -1470,6 +1470,7 @@ class ExosuitApp implements DesktopUiApplication {
 			host.getNotifications().publish(message, feedback.NotificationKind.Error, "workbench", actions);
 			requestFrame();
 		};
+		workbenchPanel.closeTerminal = closeCatalogTerminal;
 		host.onActiveTabChanged = syncWorkbenchSessionSelection;
 		syncWorkbenchSessionSelection(host.activeTab());
 		if (sidebar.find("workbench") == null)

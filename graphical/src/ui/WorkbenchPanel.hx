@@ -43,7 +43,15 @@ class WorkbenchPanel implements View {
 	public final model = new WorkbenchTreeModel();
 	public final tree:TreeView;
 	public var onError:Null<String->Void>;
+	/** Closes a catalog terminal and its views; selection actions use it. */
+	public var closeTerminal:Null<TerminalRecord->Void>;
 	var lastReportedError:Null<String>;
+	// Selection actions run one step at a time: the service drops a mutation while another is in flight.
+	var batchKeys:Array<String> = [];
+	var batchTarget:Null<String>;
+	var batchOwner = "";
+	var batchTerminalError:Null<String>;
+	var batchAgentError:Null<String>;
 	var agentDraft:Null<AgentRecord>;
 	var agentDraftOwner = "";
 	var agentDraftName = "";
@@ -83,6 +91,7 @@ class WorkbenchPanel implements View {
 		var style = new LayoutStyle(); style.width = LayoutAxis.stretch(); style.height = LayoutAxis.grow();
 		tree = new TreeView("workbench-tree", model, style);
 		tree.expandOnSingleClick = true;
+		tree.multiSelect = true;
 		tree.canDragItem = canDragNode;
 		tree.canDropItem = canDropNode;
 		tree.onItemDrop = dropNode;
@@ -122,6 +131,14 @@ class WorkbenchPanel implements View {
 	}
 
 	function dropNode(source:String, target:String):Void {
+		var keys = tree.isSelected(source) ? outermost(tree.selectedKeys()).filter(function(key) return key != target) : [source];
+		if (keys.length > 1) startBatch(keys, target);
+		else moveNode(source, target);
+		tree.setExpanded(target, true);
+		requestFrame();
+	}
+
+	function moveNode(source:String, target:String):Void {
 		// Recheck the live catalog at release, including permissions and mutation state.
 		if (!canDropNode(source, target)) return;
 		var catalog = client.terminalCatalog();
@@ -139,8 +156,97 @@ class WorkbenchPanel implements View {
 			for (agent in agents.records) if (agent.id == id)
 				client.agentService().agentAction(id, "move", targetId, agent.group);
 		}
-		tree.setExpanded(target, true);
+	}
+
+	function parentGroupId(key:String):Null<String> {
+		var id = key.substring(2);
+		if (StringTools.startsWith(key, "g:")) { var group = model.groups.get(id); return group == null ? null : group.parent; }
+		if (StringTools.startsWith(key, "t:")) { var terminal = model.terminals.get(id); return terminal == null ? null : terminal.group; }
+		var agent = model.agents.get(id);
+		return agent == null ? null : agent.group;
+	}
+
+	/** A moved group carries its contents, so selected rows inside a selected group stay where they are. */
+	function outermost(keys:Array<String>):Array<String> {
+		var selected = [for (key in keys) key => true];
+		return keys.filter(function(key) {
+			var visited:Map<String, Bool> = [];
+			var parent = parentGroupId(key);
+			while (parent != null && !visited.exists(parent)) {
+				if (selected.exists("g:" + parent)) return false;
+				visited.set(parent, true);
+				var group = model.groups.get(parent);
+				parent = group == null ? null : group.parent;
+			}
+			return true;
+		});
+	}
+
+	/** Selected terminals and agent sessions that can be closed or removed now. */
+	function removableKeys(keys:Array<String>):Array<String> {
+		return keys.filter(function(key) {
+			if (StringTools.startsWith(key, "t:"))
+				return closeTerminal != null && client.canControlTerminals() && model.terminals.exists(key.substring(2));
+			return StringTools.startsWith(key, "a:") && client.agentService().canControlAgents()
+				&& agentCanBeRemoved(model.agents.get(key.substring(2)));
+		});
+	}
+
+	function removeNode(key:String):Void {
+		var id = key.substring(2);
+		if (StringTools.startsWith(key, "a:")) { removeAgent(id, false); return; }
+		var catalog = client.terminalCatalog(), close = closeTerminal;
+		if (catalog == null || close == null) return;
+		for (terminal in catalog.terminals) if (terminal.id == id) { close(terminal); return; }
+	}
+
+	function batchIdle():Bool
+		return batchKeys.length == 0 && !client.terminalCatalogBusy() && !client.agentService().agentBusy();
+
+	/** Removes (null target) or moves rows in order, each against the catalog current at its turn. */
+	function startBatch(keys:Array<String>, target:Null<String>):Void {
+		var catalog = client.terminalCatalog();
+		if (catalog == null || keys.length == 0 || batchKeys.length > 0) return;
+		batchKeys = keys.copy(); batchTarget = target; batchOwner = catalog.instance;
+		batchTerminalError = client.terminalCatalogError(); batchAgentError = client.agentService().agentError();
+		runBatch();
+	}
+
+	function runBatch():Void {
+		if (batchKeys.length == 0) return;
+		var catalog = client.terminalCatalog(), service = client.agentService();
+		if (catalog == null || catalog.instance != batchOwner) { batchKeys = []; return; }
+		if (client.terminalCatalogBusy() || service.agentBusy()) return;
+		// A failed step stops the rest; the panel already reports its error.
+		var terminalError = client.terminalCatalogError(), agentError = service.agentError();
+		if ((terminalError != null && terminalError != batchTerminalError) || (agentError != null && agentError != batchAgentError)) {
+			batchKeys = []; return;
+		}
+		batchTerminalError = terminalError; batchAgentError = agentError;
+		var key = batchKeys.shift(), target = batchTarget;
+		if (target == null) removeNode(key); else moveNode(key, target);
 		requestFrame();
+	}
+
+	static function plural(count:Int, noun:String):String return count + " " + noun + (count == 1 ? "" : "s");
+
+	function selectionMenu(keys:Array<String>, event:UiEvent):Void {
+		var catalog = client.terminalCatalog();
+		var owner = catalog == null ? "" : catalog.instance;
+		var removable = removableKeys(keys);
+		var terminals = removable.filter(function(key) return StringTools.startsWith(key, "t:"));
+		var agents = removable.filter(function(key) return StringTools.startsWith(key, "a:"));
+		var idle = batchIdle();
+		var items = [new MenuItem("selection-count", keys.length + " items selected", null, false)];
+		if (terminals.length > 0)
+			items.push(new MenuItem("close-selected-terminals", "Close " + plural(terminals.length, "Terminal"), function() startBatch(terminals, null), idle));
+		if (agents.length > 0)
+			items.push(new MenuItem("remove-selected-agents", "Remove " + plural(agents.length, "Session") + " from Workbench",
+				function() startBatch(agents, null), idle));
+		showMenu(items, event, function() {
+			var current = client.terminalCatalog();
+			return current != null && current.instance == owner;
+		});
 	}
 
 	function reportError(message:String):Void {
@@ -175,6 +281,10 @@ class WorkbenchPanel implements View {
 	}
 
 	function menu(group:Null<WorkspaceGroup>, event:UiEvent, ?key:String, ?overflow:Array<MenuItem>):Void {
+		if (key != null && tree.isSelected(key)) {
+			var selection = tree.selectedKeys();
+			if (selection.length > 1) { selectionMenu(selection, event); return; }
+		}
 		var catalog = client.terminalCatalog();
 		var owner = catalog == null ? "" : catalog.instance;
 		var valid = function() {
@@ -245,14 +355,14 @@ class WorkbenchPanel implements View {
 		showMenu(items, event, valid);
 	}
 
-	function removeAgent(id:String):Void {
+	function removeAgent(id:String, select:Bool = true):Void {
 		var agent = model.agents.get(id);
 		if (agent == null || !agentCanBeRemoved(agent) || !client.agentService().canControlAgents() || client.agentService().agentBusy()) return;
-		tree.select("a:" + id);
+		if (select) tree.select("a:" + id);
 		var group = agent.group;
 		client.agentService().deleteAgent(id, function() {
 			closeAgentTab(id, agent.workspaceRoot);
-			if (model.groups.exists(group)) tree.select("g:" + group);
+			if (select && model.groups.exists(group)) tree.select("g:" + group);
 			requestFrame();
 		});
 		requestFrame();
@@ -501,6 +611,7 @@ class WorkbenchPanel implements View {
 		}
         applyPendingReveal();
 		applyPendingSessionSelection();
+		runBatch();
     }
 
 	public function headerActions(availableWidth:Float = 260):View return new WorkbenchHeaderActions(this, availableWidth);
@@ -519,16 +630,23 @@ class WorkbenchPanel implements View {
 		agent.enabled = selected != null && canCreateAgent();
 		var selectedAgent = tree.selectedKey != null && StringTools.startsWith(tree.selectedKey, "a:")
 			? model.agents.get(tree.selectedKey.substring(2)) : null;
-		var deleteAgent = toolbarButton("Remove selected leaf from Workbench", IconName.Trash, function() {
-			if (selectedAgent != null) removeAgent(selectedAgent.id);
-		}, "workbench-delete-codex");
-		deleteAgent.enabled = agentCanBeRemoved(selectedAgent) && client.agentService().canControlAgents() && !client.agentService().agentBusy();
+		var selection = tree.selectedKeys();
+		var multiple = selection.length > 1;
+		var removable = multiple ? removableKeys(selection) : [];
+		var removeSelected = function() {
+			if (multiple) startBatch(removable, null);
+			else if (selectedAgent != null) removeAgent(selectedAgent.id);
+		};
+		var deleteAgent = toolbarButton("Remove selected leaf from Workbench", IconName.Trash, removeSelected, "workbench-delete-codex");
+		deleteAgent.enabled = multiple ? removable.length > 0 && batchIdle()
+			: agentCanBeRemoved(selectedAgent) && client.agentService().canControlAgents() && !client.agentService().agentBusy();
 		var overflow:Array<MenuItem> = [];
 		if (availableWidth < 210) overflow.push(new MenuItem("new-codex", "New Codex", function() {
 			if (selected != null) createProvider("codex", selected.id);
 		}, agent.enabled));
-		if (availableWidth < 260 && selectedAgent != null)
-			overflow.push(new MenuItem("delete-selected-agent", "Remove from Workbench", function() removeAgent(selectedAgent.id), deleteAgent.enabled));
+		if (availableWidth < 260 && (selectedAgent != null || multiple))
+			overflow.push(new MenuItem("delete-selected-agent", multiple ? "Remove " + plural(removable.length, "Item") : "Remove from Workbench",
+				removeSelected, deleteAgent.enabled));
 		var more = toolbarButton("Workbench actions", IconName.ChevronDown, null, "workbench-actions");
 		more.onClickEvent = function(event) menu(selected, event, null, overflow);
 		var toolbarStyle = new LayoutStyle(); toolbarStyle.childAlignY = haxeon.ui.LayoutAlignmentY.Center; toolbarStyle.childGap = 2;
