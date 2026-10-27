@@ -230,19 +230,22 @@ class WorkbenchPanel implements View {
 
 	static function plural(count:Int, noun:String):String return count + " " + noun + (count == 1 ? "" : "s");
 
+	/** Closing treats every row alike: terminals stop and are forgotten, sessions leave Workbench. */
+	static function closeSelectionLabel(keys:Array<String>, removable:Array<String>):String {
+		var terminals = removable.filter(function(key) return StringTools.startsWith(key, "t:")).length;
+		var noun = terminals == removable.length ? "Terminal" : terminals == 0 ? "Session" : "Item";
+		var busy = keys.filter(function(key) return StringTools.startsWith(key, "a:")).length
+			- (removable.length - terminals);
+		return "Close " + plural(removable.length, noun) + (busy > 0 ? ' ($busy busy)' : "");
+	}
+
 	function selectionMenu(keys:Array<String>, event:UiEvent):Void {
 		var catalog = client.terminalCatalog();
 		var owner = catalog == null ? "" : catalog.instance;
 		var removable = removableKeys(keys);
-		var terminals = removable.filter(function(key) return StringTools.startsWith(key, "t:"));
-		var agents = removable.filter(function(key) return StringTools.startsWith(key, "a:"));
-		var idle = batchIdle();
 		var items = [new MenuItem("selection-count", keys.length + " items selected", null, false)];
-		if (terminals.length > 0)
-			items.push(new MenuItem("close-selected-terminals", "Close " + plural(terminals.length, "Terminal"), function() startBatch(terminals, null), idle));
-		if (agents.length > 0)
-			items.push(new MenuItem("remove-selected-agents", "Remove " + plural(agents.length, "Session") + " from Workbench",
-				function() startBatch(agents, null), idle));
+		if (removable.length > 0)
+			items.push(new MenuItem("close-selection", closeSelectionLabel(keys, removable), function() startBatch(removable, null), batchIdle()));
 		showMenu(items, event, function() {
 			var current = client.terminalCatalog();
 			return current != null && current.instance == owner;
@@ -645,7 +648,7 @@ class WorkbenchPanel implements View {
 			if (selected != null) createProvider("codex", selected.id);
 		}, agent.enabled));
 		if (availableWidth < 260 && (selectedAgent != null || multiple))
-			overflow.push(new MenuItem("delete-selected-agent", multiple ? "Remove " + plural(removable.length, "Item") : "Remove from Workbench",
+			overflow.push(new MenuItem("delete-selected-agent", multiple ? closeSelectionLabel(selection, removable) : "Remove from Workbench",
 				removeSelected, deleteAgent.enabled));
 		var more = toolbarButton("Workbench actions", IconName.ChevronDown, null, "workbench-actions");
 		more.onClickEvent = function(event) menu(selected, event, null, overflow);
