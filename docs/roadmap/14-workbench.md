@@ -74,8 +74,10 @@ and project them into the same tree on desktop and connected web/mobile.
 - New terminals/agents use an explicit session directory override, otherwise
   the nearest ancestor group's directory, otherwise the workspace default.
   Resolve and validate it on the machine, then persist the chosen session cwd.
-  Remote clients select authorized directory references, not arbitrary host
-  paths; assigning a group directory never grants access by itself.
+  A group directory may be any existing folder on the owning machine, inside
+  the workspace root or not; the service stores the machine's spelling of it.
+  Choosing one is a write-permission action (workspace.write + tree), and it
+  scopes the group's agents (AgentKit file tools are confined to it).
 - Moving a running session or changing a group directory affects organization
   and future launches only, never silently changes cwd or restarts work. Restart
   retains the session's persisted cwd unless explicitly changed. Missing or

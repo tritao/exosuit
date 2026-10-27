@@ -278,7 +278,7 @@ class WorkspaceService {
 				var resolve:String->Null<String> = cast resolveDirectory;
 				var resolved = resolve(chosen);
 				if (resolved == null) {
-					context.fail({code: "invalid_directory", message: "Choose an existing folder inside the workspace folder", ambiguous: false}); return;
+					context.fail({code: "invalid_directory", message: "Choose an existing folder", ambiguous: false}); return;
 				}
 				cwd = resolved;
 			}

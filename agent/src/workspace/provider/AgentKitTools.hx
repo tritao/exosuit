@@ -39,10 +39,10 @@ private class AgentKitSandbox {
 	}
 
 	public function contains(path:String):Bool
-		return path == root || StringTools.startsWith(path, root == "/" ? "/" : root + "/");
+		return workspace.runtime.WorkspaceDirectories.contains(root, path, Sys.systemName() == "Windows");
 
 	public function relative(path:String):String
-		return path == root ? "." : path.substr(root.length + 1);
+		return path.length <= root.length ? "." : path.substr(StringTools.endsWith(root, "/") || StringTools.endsWith(root, "\\") ? root.length : root.length + 1);
 }
 
 private class SandboxTool extends AgentTool {

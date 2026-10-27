@@ -80,7 +80,7 @@ class ClaudeProvider implements LocalAgentProvider {
   var x = v == null ? null : Reflect.field(v,key);
   return Std.isOfType(x,String) ? x : "";
  }
- function inside(path:String):Bool return directories.inside(path);
+ function inside(path:String):Bool return WorkspaceDirectories.persisted(path);
  function session(r:AgentRecord):ClaudeSession return {
   record:r,process:null,transport:null,ready:false,busy:false,error:null,conversation:new ClaudeConversation(r.replay),
   approvals:[],models:[],message:"",currentModel:r.preferredModel,serial:0,interrupting:false
@@ -117,7 +117,7 @@ class ClaudeProvider implements LocalAgentProvider {
  }
  function launch(s:ClaudeSession,resume:Bool):Void {
   if (s.transport != null) return;
-  if (directories.resolve(s.record.cwd) != s.record.cwd) {fail(s,"Claude session directory no longer resolves inside this workspace");return;}
+  if (directories.resolve(s.record.cwd) != s.record.cwd) {fail(s,"Claude session directory no longer exists: " + s.record.cwd);return;}
   var args=prefix.concat(["-p","--input-format","stream-json","--output-format","stream-json","--verbose",
    "--include-partial-messages","--permission-prompt-tool","stdio","--permission-mode",s.record.permissionMode]);
   args=args.concat(resume ? ["--resume",s.record.thread] : ["--session-id",s.record.thread]);
@@ -229,9 +229,8 @@ class ClaudeProvider implements LocalAgentProvider {
    else ctx.respond(copy(previous.record));
    return;
   }
-  var cwd:Null<String>=null;
-  for(g in groups()) if(g.id == q.group) cwd=directories.resolve(g.cwd);
-  if(cwd == null || !inside(cwd)) {ctx.fail({code:"invalid_request",message:"Invalid agent group directory",ambiguous:false});return;}
+  var cwd=directories.forGroup(groups(),q.group);
+  if(cwd == null) {ctx.fail({code:"invalid_request",message:"Invalid agent group directory",ambiguous:false});return;}
   var selected=q.permissionProfile == null ? "default" : q.permissionProfile;
   if(!mode(selected)) {ctx.fail({code:"invalid_permissions",message:"Choose default, acceptEdits or plan",ambiguous:false});return;}
   if(q.thread != null) for(s in sessions) if(s.record.thread == q.thread) {ctx.fail({code:"conflict",message:"Session is already attached",ambiguous:false});return;}

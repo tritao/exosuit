@@ -89,7 +89,7 @@ class PiProvider implements LocalAgentProvider {
   var x=v == null ? null : Reflect.field(v,key);return Std.isOfType(x,String) ? x : "";
  }
  static function sessionPath(v:String):Bool return valid(v,4096) && Path.isAbsolute(v) && v.indexOf("\n") < 0;
- function inside(v:String):Bool return directories.inside(v);
+ function inside(v:String):Bool return WorkspaceDirectories.persisted(v);
  function session(r:AgentRecord):PiSession return {record:r,process:null,transport:null,ready:false,policyReady:false,busy:false,error:null,
   conversation:new PiConversation(r.replay),dialogs:[],models:[],commands:null,commandsError:null,commandsLoading:false,serial:0,message:0,interrupted:false,pendingPrompts:0,revision:0,probe:0,inputs:new PiInputQueue(r),nativePending:[],nativeKnown:false,settled:false,
   settling:false,currentModel:null,currentEffort:null};
@@ -442,8 +442,8 @@ class PiProvider implements LocalAgentProvider {
    if(previous.record.name != q.name || previous.record.group != q.group) ctx.fail({code:"conflict",message:"Agent identity is reserved",ambiguous:false});
    else ctx.respond(copy(previous.record));return;
   }
-  var cwd:Null<String>=null;for(g in groups()) if(g.id == q.group) cwd=directories.resolve(g.cwd);
-  if(cwd == null || !inside(cwd)) {ctx.fail({code:"invalid_request",message:"Invalid Pi group directory",ambiguous:false});return;}
+  var cwd=directories.forGroup(groups(),q.group);
+  if(cwd == null) {ctx.fail({code:"invalid_request",message:"Invalid Pi group directory",ambiguous:false});return;}
   var s=session({id:q.id,name:q.name,group:q.group,cwd:cwd,thread:"",state:"disconnected",turn:null,workspaceRoot:directories.root,
    provider:"pi",permissionMode:selected,preferredModel:q.defaultModel,preferredEffort:q.defaultEffort});
   try save(s) catch(_:Dynamic) {ctx.fail({code:"storage_unavailable",message:"Pi reservation failed",ambiguous:false});return;}
