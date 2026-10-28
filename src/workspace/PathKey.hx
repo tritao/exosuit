@@ -54,8 +54,8 @@ class PathKey {
 
 	static function ignores(ignoreCase:Null<Bool>):Bool return ignoreCase == null ? IGNORE_CASE : ignoreCase == true;
 
-	/** Whether two ranges spell the same segment; ASCII folds in place, anything else through full case mapping. */
-	static function sameRange(left:String, leftStart:Int, leftEnd:Int, right:String, rightStart:Int, rightEnd:Int, fold:Bool):Bool {
+	/** Whether two ranges spell the same path text; ASCII folds in place, anything else through full case mapping. */
+	public static function sameRange(left:String, leftStart:Int, leftEnd:Int, right:String, rightStart:Int, rightEnd:Int, fold:Bool):Bool {
 		var length = leftEnd - leftStart;
 		if (length == rightEnd - rightStart) {
 			var ascii = true;

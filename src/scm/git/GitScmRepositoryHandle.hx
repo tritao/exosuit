@@ -38,8 +38,10 @@ class GitScmRepositoryHandle implements ScmRepositoryHandle {
 	var revision:Int64 = Int64.ofInt(0);
 	var disposed:Bool = false;
 	/** Git's `core.ignorecase`, read with `git config` before the first status and again after a configuration change. */
-	var ignoreCase:Bool = ScmRepository.PLATFORM_IGNORES_CASE;
+	var ignoreCase:Bool = false;
 	var ignoreCaseRead:Bool = false;
+	/** Counts configuration changes, so a read that started before one does not count as current. */
+	var configurationEpoch:Int = 0;
 
 	public final id:String;
 	public final root:String;
@@ -66,14 +68,18 @@ class GitScmRepositoryHandle implements ScmRepositoryHandle {
 
 	/**
 		Reads `core.ignorecase` through Git, so includes, global and system configuration and every boolean spelling count;
-		unset keeps the platform's default. Runs `next` once it is known.
+		unset means false, as in Git, which sets it at init on case-insensitive file systems. Runs `next` once it is read;
+		a read that fails, or that a configuration change overtook, is tried again before the next status.
 	**/
 	function readIgnoreCase(generation:Int, next:Void->Void):ScmJob<GitCommandResult> {
+		var epoch = configurationEpoch;
 		return process.run(["config", "--type=bool", "--get", "core.ignorecase"], root, generation, function(result) {
-			var value = result.value;
-			var text = result.error == null && value != null ? StringTools.trim(value.stdout.toString()) : "";
-			ignoreCase = text == "true" ? true : text == "false" ? false : ScmRepository.PLATFORM_IGNORES_CASE;
-			ignoreCaseRead = true;
+			var value = result.value, error = result.error;
+			// `git config --get` exits 1, saying nothing, when the key is unset.
+			var unset = error != null && error.message == "Git command failed with status 1";
+			if (error == null && value != null) ignoreCase = StringTools.trim(value.stdout.toString()) == "true";
+			else if (unset) ignoreCase = false;
+			if (epoch == configurationEpoch && (error == null || unset)) ignoreCaseRead = true;
 			next();
 		}, true, !trusted(), 4096);
 	}
@@ -136,6 +142,7 @@ class GitScmRepositoryHandle implements ScmRepositoryHandle {
 
 	public function configurationChanged():Void {
 		ignoreCaseRead = false;
+		configurationEpoch++;
 		if (!disposed) blobReader.configurationChanged();
 	}
 
@@ -215,25 +222,25 @@ class GitScmRepositoryHandle implements ScmRepositoryHandle {
 				finishStatus, true, !trusted(), GitProcess.DEFAULT_MAX_STDOUT, disabledFilters);
 		}
 		function start():Void {
-		if (trusted()) {
-			runStatus([]);
-		} else {
-			// `status` may run clean filters while comparing a worktree file. Inspect
-			// config names first, then override every external command for those filters.
-			command = process.run(["config", "--null", "--name-only", "--list"], root, generation, function(result) {
-				if (job.cancelled || job.complete) return;
-				if (result.error != null || result.value == null) {
-					var message = "Git configuration could not be inspected safely; repository status was not read";
-					if (job.finish()) complete(new ScmJobResult<ScmSnapshot>(generation, null,
-						new ScmError("restricted_config_failed", message)));
-					return;
-				}
-				try runStatus(configuredFilters(result.value.stdout)) catch (failure:Dynamic) {
-					if (job.finish()) complete(new ScmJobResult<ScmSnapshot>(generation, null,
-						new ScmError("restricted_config_failed", "Git filter configuration was malformed; repository status was not read")));
-				}
-			}, true, true, 1024 * 1024);
-		}
+			if (trusted()) {
+				runStatus([]);
+			} else {
+				// `status` may run clean filters while comparing a worktree file. Inspect
+				// config names first, then override every external command for those filters.
+				command = process.run(["config", "--null", "--name-only", "--list"], root, generation, function(result) {
+					if (job.cancelled || job.complete) return;
+					if (result.error != null || result.value == null) {
+						var message = "Git configuration could not be inspected safely; repository status was not read";
+						if (job.finish()) complete(new ScmJobResult<ScmSnapshot>(generation, null,
+							new ScmError("restricted_config_failed", message)));
+						return;
+					}
+					try runStatus(configuredFilters(result.value.stdout)) catch (failure:Dynamic) {
+						if (job.finish()) complete(new ScmJobResult<ScmSnapshot>(generation, null,
+							new ScmError("restricted_config_failed", "Git filter configuration was malformed; repository status was not read")));
+					}
+				}, true, true, 1024 * 1024);
+			}
 		}
 		if (ignoreCaseRead) start();
 		else command = readIgnoreCase(generation, function() { if (!job.cancelled && !job.complete) start(); });

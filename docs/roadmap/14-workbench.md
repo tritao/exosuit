@@ -120,12 +120,15 @@ Editor layout's rail and panels.
   the new commit (submodules included; for an amend, from each parent of the
   commit it rewrites, so an amended merge is checked too), commits exactly that
   snapshot and moves the branch only if it has not moved. An amend on a branch
-  with no commits is refused. Folder matching follows the repository's
-  `core.ignorecase` (unset: ignore case on Windows and macOS).
-  Limitation: with a pre-commit, prepare-commit-msg or commit-msg hook, or with
-  `commit.gpgsign`, the check is followed by a normal `git commit`, so hooks
-  and signing work but a change staged between the check and the commit is not
-  caught; hook support for the atomic path is a later follow-up.
+  with no commits is refused, and so is any commit while a merge, cherry-pick,
+  revert or rebase is in progress (finish or abort it from the Editor layout).
+  Folder matching follows the repository's `core.ignorecase` (unset: case
+  matters, as in Git).
+  Limitation: with a pre-commit, prepare-commit-msg, commit-msg or post-commit
+  hook (post-rewrite for an amend), `commit.gpgsign` or a `commit.cleanup`
+  setting, the check is followed by a normal `git commit`, so those work but a
+  change staged between the check and the commit is not caught; hook support
+  for the atomic path is a later follow-up.
 - **Editor hunk actions are not narrowed.** The editor's change markers and its
   hunk actions (stage, unstage and revert a hunk) use the editor's own source,
   which covers the active context's folders and the group's folder whole, never
