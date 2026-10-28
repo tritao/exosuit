@@ -3,7 +3,6 @@
 import json, os, shutil, subprocess, sys, tempfile
 from pi_test_runtime import Model, configure_pi
 from pathlib import Path
-os.environ.setdefault("EXOSUIT_SUIT_AUTOSTART", "0")  # tests must not start the user's suit daemon
 ROOT=Path(__file__).resolve().parent.parent
 HAXEON=ROOT/'haxeon'
 real='--real' in sys.argv[1:]

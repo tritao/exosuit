@@ -1,5 +1,6 @@
 package suit;
 
+import suit.SuitGroup;
 import suit.SuitInventory.SuitProcess;
 
 /** Where a menu is built: the native tray popup, or text for `suit menu` and tests. Parents are submenu ids; 0 is the root. */
@@ -17,19 +18,23 @@ typedef SuitMenuHandlers = {
 	var quit:Void->Void;
 }
 
-/** The tray menu: a title with counts, processes grouped by editor (orphans last), remote access, then bulk actions. */
+/**
+	The tray menu: a title with counts, processes grouped by editor (orphans, then processes exosuit did not
+	start, last), remote access, then bulk actions. Bulk actions cover only exosuit's processes; one not
+	started by exosuit can still be terminated from its own submenu.
+**/
 class SuitMenuModel {
 	static inline var GROUP_LIMIT:Int = 30;
 
 	public static function build(menu:SuitMenuSink, inventory:SuitInventory, handlers:SuitMenuHandlers):Void {
 		menu.item(inventory.summary(), null, 0);
-		var group:Null<String> = null, shown = 0;
+		var group:Null<SuitGroup> = null, shown = 0;
 		for (process in inventory.processes) {
-			if (process.group != group) {
+			if (group == null || !SuitGroups.same(process.group, group)) {
 				group = process.group;
 				shown = 0;
 				menu.separator(0);
-				menu.item(group, null, 0);
+				menu.item(inventory.groupLabel(process.group), null, 0);
 			}
 			if (shown++ >= GROUP_LIMIT) {
 				if (shown == GROUP_LIMIT + 1)
@@ -41,9 +46,10 @@ class SuitMenuModel {
 			var relay = SuitReport.relayState(process);
 			if (relay.length > 0)
 				menu.item("Remote access: " + relay, null, entry);
-			if (!process.registered)
-				menu.item("Found by scanning; not registered", null, entry);
-			menu.item(process.kind == "editor" ? "Close" : "Terminate", function() handlers.terminate([target]), entry);
+			var source = SuitReport.sourceNote(process);
+			if (source.length > 0)
+				menu.item(source, null, entry);
+			menu.item(SuitKind.SuitKinds.stopVerb(process.kind), function() handlers.terminate([target]), entry);
 		}
 		var hosted = inventory.hosted();
 		if (hosted.length > 0) {

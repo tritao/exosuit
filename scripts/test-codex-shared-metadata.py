@@ -2,7 +2,6 @@
 """Read-only real-daemon qualification. No daemon start, threads or inference turns."""
 import json,os,queue,shutil,subprocess,sys,tempfile,threading
 from pathlib import Path
-os.environ.setdefault("EXOSUIT_SUIT_AUTOSTART", "0")  # tests must not start the user's suit daemon
 ROOT=Path(__file__).resolve().parent.parent
 peers=[]
 servers=[]

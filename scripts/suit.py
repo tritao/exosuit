@@ -17,6 +17,25 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def library_path(bytecode: Path, runtime: Path, haxeon: Path, inherited: str = "") -> str:
+    """The library path suit runs with.
+
+    The same rule as SuitClient.nativePath in src/suit/SuitClient.hx, which starts suit from an editor or a
+    bundle; keep the two in the same order: the directories under <bytecode dir>/native, lib beside the
+    bytecode directory (a bundle keeps tools/ and lib/ side by side),
+    the HashLink runtime's directory, Haxeon's out and .tools/hashlink, then the inherited value.
+    """
+    native = bytecode.parent / "native"
+    directories = sorted(path for path in native.iterdir() if path.is_dir()) if native.is_dir() else []
+    directories += [bytecode.parent.parent / "lib", runtime.parent, haxeon / "out", haxeon / ".tools" / "hashlink"]
+    unique = list(dict.fromkeys(str(path) for path in directories if path.is_dir()))
+    return os.pathsep.join(unique + ([inherited] if inherited else []))
+
+
+def library_variable() -> str:
+    return "PATH" if os.name == "nt" else "DYLD_LIBRARY_PATH" if sys.platform == "darwin" else "LD_LIBRARY_PATH"
+
+
 def main() -> int:
     if sys.argv[1:2] == ["build"]:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -31,12 +50,9 @@ def main() -> int:
     if not runtime.is_file():
         print(f"HashLink runtime not found: {runtime}", file=sys.stderr)
         return 127
-    native = bytecode.parent / "native"
-    directories = [path for path in sorted(native.iterdir()) if path.is_dir()] if native.is_dir() else []
-    directories += [haxeon / "out", runtime.parent]
-    variable = "PATH" if os.name == "nt" else "DYLD_LIBRARY_PATH" if sys.platform == "darwin" else "LD_LIBRARY_PATH"
     environment = dict(os.environ)
-    environment[variable] = os.pathsep.join([str(path) for path in directories if path.is_dir()] + [environment.get(variable, "")])
+    variable = library_variable()
+    environment[variable] = library_path(bytecode, runtime, haxeon, environment.get(variable, ""))
     environment.setdefault("EXOSUIT_SUIT_LAUNCHER", str(bytecode))
     return subprocess.run([str(runtime), str(bytecode), *sys.argv[1:]], env=environment).returncode
 

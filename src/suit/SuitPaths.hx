@@ -2,6 +2,9 @@ package suit;
 
 import haxe.io.Path;
 
+@:hlNative("haxeon_runtime", "__host_prepare_private_directory")
+extern function preparePrivateDirectory(path:String):Bool;
+
 /**
 	Where the per-user suit daemon keeps its state and listens.
 
@@ -34,7 +37,7 @@ class SuitPaths {
 		var parent = Path.directory(directory);
 		if (parent.length > 0 && !sys.FileSystem.exists(parent))
 			sys.FileSystem.createDirectory(parent);
-		return SuitNative.prepareDirectory(directory) && SuitNative.prepareDirectory(registry());
+		return preparePrivateDirectory(directory) && preparePrivateDirectory(registry());
 	}
 
 	/** One `<pid>.json` record per registered process. */
