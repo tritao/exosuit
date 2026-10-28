@@ -45,9 +45,9 @@ class SessionDiff {
         inHunk = oldRemaining > 0 || newRemaining > 0;
       } else if (inHunk && line.length > 0) {
         switch (line.charAt(0)) {
-          case "+": kind = "added"; newNumber = newLine++; newRemaining--;
-          case "-": kind = "removed"; oldNumber = oldLine++; oldRemaining--;
-          case " ": kind = "context"; oldNumber = oldLine++; newNumber = newLine++; oldRemaining--; newRemaining--;
+          case "+" if (newRemaining > 0): kind = "added"; newNumber = newLine++; newRemaining--;
+          case "-" if (oldRemaining > 0): kind = "removed"; oldNumber = oldLine++; oldRemaining--;
+          case " " if (oldRemaining > 0 && newRemaining > 0): kind = "context"; oldNumber = oldLine++; newNumber = newLine++; oldRemaining--; newRemaining--;
           default:
         }
         if (oldRemaining <= 0 && newRemaining <= 0) inHunk = false;

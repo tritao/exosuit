@@ -62,7 +62,9 @@ class SessionDiffView implements View {
         files.push({title: reported.kind + " " + reported.path, path: validPath, lines: lines});
         truncations.push(reported.truncated);
       }
-    } else files = SessionDiff.parse(source);
+    }
+    // Older or malformed metadata must never make the original patch disappear.
+    if (files.length == 0) files = SessionDiff.parse(source);
     for (index in 0...files.length) {
       var file = files[index], fileIndex = index;
       var collapsed = context.state(context.id("diff-collapsed-" + index), false);
@@ -75,7 +77,8 @@ class SessionDiffView implements View {
       }, "diff-file-toggle-" + index);
       toggle.style.width = LayoutAxis.grow(); toggle.ellipsizeLabel = true;
       var header:Array<KeyedView> = [new KeyedView("toggle", toggle),
-        new KeyedView("counts", new Text("+" + additions + "  −" + removals, null, tokens.textSecondary, TextStyleOverride.text(12)))];
+        new KeyedView("counts", new Text("+" + additions + "  −" + removals
+          + (index < truncations.length && truncations[index] ? " · partial" : ""), null, tokens.textSecondary, TextStyleOverride.text(12)))];
       if (file.path != null && openLink != null) {
         var path = file.path;
         var navigate:String->Void = cast openLink;

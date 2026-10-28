@@ -12,7 +12,7 @@ import workspace.service.WorkspaceScmProtocol.WorkspaceScmSnapshot;
 private typedef SourceListener = ScmRepository->Null<ScmSnapshot>->Void;
 
 /** Reconnecting, root-scoped SCM view over an authenticated workspace RPC connection. */
-class RpcScmSource implements ScmSource {
+class RpcScmSource implements ScmSource implements ScmRemoteReader {
 	final clientProvider:Void->Null<WorkspaceScmClient>;
 	final workspace:String;
 	final root:String;
@@ -23,6 +23,7 @@ class RpcScmSource implements ScmSource {
 	final repositoryValues:Array<ScmRepository> = [];
 	final repositoryById:Map<String, ScmRepository> = [];
 	final featureValues:Map<String, ScmFeatures> = [];
+	final originCapabilities:Map<String, Bool> = [];
 	final snapshots:Map<String, ScmSnapshot> = [];
 	final errors:Map<String, ScmError> = [];
 	final activeJobs:Array<ScmJob<Dynamic>> = [];
@@ -56,6 +57,21 @@ class RpcScmSource implements ScmSource {
 	public function identity():String return sourceIdentity;
 	public function isRemote():Bool return true;
 	public function connected():Bool return !disposed && activeClient != null && activeClient.connection.isOpen();
+	public function canReadOrigin(repositoryId:String):Bool return connected() && originCapabilities.get(repositoryId) == true;
+	public function origin(repositoryId:String, complete:ScmJobResult<String>->Void):ScmJob<String> {
+		var job = newJob(complete), client = activeClient;
+		if (!canReadOrigin(repositoryId) || client == null) {
+			finish(job, complete, null, new ScmError("unsupported_operation", "Origin metadata is unavailable")); return job;
+		}
+		client.origin(workspace, repositoryId, function(result) {
+			if (!current(client)) return;
+			var canonical = result.origin == null ? null : GithubRemote.repository(result.origin);
+			if (result.workspace != workspace || result.repository != repositoryId || canonical == null)
+				finish(job, complete, null, new ScmError("invalid_response", "Invalid origin metadata"));
+			else finish(job, complete, canonical, null);
+		}, function(error) { if (current(client)) finish(job, complete, null, fromRpcError(error)); });
+		return job;
+	}
 	public function repositories():Array<ScmRepository> return disposed ? [] : repositoryValues.copy();
 	public function repository(repositoryId:String):Null<ScmRepository> return disposed ? null : repositoryById.get(repositoryId);
 	public function features(repositoryId:String):Null<ScmFeatures> return disposed ? null : featureValues.get(repositoryId);
@@ -382,11 +398,13 @@ class RpcScmSource implements ScmSource {
 		repositoryValues.resize(0);
 		repositoryById.clear();
 		featureValues.clear();
+		originCapabilities.clear();
 		for (record in values) {
 			if (record == null || record.id == null || record.id.length == 0 || seen.exists(record.id)) continue;
 			seen.set(record.id, true);
 			var repository = decodeRepository(record);
 			putRepository(repository, decodeFeatures(record));
+			originCapabilities.set(repository.id, record.originRead == true);
 		}
 		for (id in [for (id in prior.keys()) id])
 			if (!seen.exists(id)) {
@@ -478,6 +496,7 @@ class RpcScmSource implements ScmSource {
 			case RevertPatch(path, patch): request.kind = "revert_patch"; request.path = path; request.patch = patch;
 			case Checkout(reference): request.kind = "checkout"; request.reference = reference;
 			case CreateBranch(name): request.kind = "create_branch"; request.name = name;
+			case CreateWorktree(directory, branch): request.kind = "create_worktree"; request.path = directory; request.name = branch;
 			case Fetch(remote): request.kind = "fetch"; request.remote = remote;
 			case Pull: request.kind = "pull";
 			case Push: request.kind = "push";
@@ -496,7 +515,7 @@ class RpcScmSource implements ScmSource {
 	}
 
 	static function decodeFeatures(value:WorkspaceScmRepository):ScmFeatures
-		return new ScmFeatures(value.staging, value.partialStaging, value.amend, value.branches, value.remotes, value.stash);
+		return new ScmFeatures(value.staging, value.partialStaging, value.amend, value.branches, value.remotes, value.stash, value.worktrees == true);
 
 	static function decodeSnapshot(value:WorkspaceScmSnapshot):ScmSnapshot
 		return workspace.service.WorkspaceScmSnapshotCodec.decode(value);

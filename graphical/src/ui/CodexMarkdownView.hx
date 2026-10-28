@@ -108,6 +108,26 @@ class CodexMarkdownView implements View {
       } else if (block.kind == "image") {
         rows.push(new KeyedView(key, new SessionImageView(key, block.text, block.language, resolveImage, openLink, frame)));
       } else if (block.kind == "code") {
+        var artifact = workspace.client.SessionArtifact.label(block.language, block.text, block.closed == true);
+        var shown = context.state(context.id(key + "-artifact-open"), false);
+        var raw = block.source == null ? block.text : block.source;
+        if (artifact != null && shown.value != true) {
+          var bar = new LayoutStyle(); bar.width = LayoutAxis.grow(); bar.childGap = 8; bar.wrapMode = LayoutWrapMode.Wrap;
+          bar.padding = new Insets(12, 8, 12, 8); bar.background = context.theme.tokens.surfaceSunken;
+          bar.radiusTopLeft = bar.radiusTopRight = bar.radiusBottomLeft = bar.radiusBottomRight = 6;
+          var title = new LayoutStyle(); title.width = LayoutAxis.grow();
+          var actionStyle = new LayoutStyle(); actionStyle.height = LayoutAxis.fixed(30); actionStyle.padding = new Insets(6, 4, 6, 4);
+          var show = new Button("Show source", actionStyle, function() shown.update(true), key + "-show-source");
+          show.variant = ButtonVariant.Navigation;
+          var copy = new Button("", actionStyle, function() context.clipboard.writeText(raw), key + "-copy-source");
+          copy.accessibilityLabel = "Copy source"; copy.leadingIcon = IconName.Copy; copy.iconSize = 16; copy.variant = ButtonVariant.Navigation;
+          rows.push(new KeyedView(key, new Row(key + "-artifact", [
+            new KeyedView("title", new Text(artifact, title, context.theme.tokens.textSecondary)),
+            new KeyedView("show", show), new KeyedView("copy", copy)
+          ], bar)));
+          if (block.language == "svg") rows.push(new KeyedView(key + "-svg", new SessionSvgView(key + "-svg", raw, frame)));
+          continue;
+        }
         var model = models.get(key);
         if (model == null || model.buffer.text != block.text || model.syntax != syntaxes.find("snippet." + extension(block.language))) {
           model = new WorkspaceFileTextModel("snippet." + extension(block.language), block.text, syntaxes, palette);
@@ -125,7 +145,7 @@ class CodexMarkdownView implements View {
         field.readOnly = true;
         field.colorRangeProvider = model.foregroundProvider;
         field.presentationRevision = model.presentationRevision;
-        var code = block.text;
+        var code = raw;
         var copyStyle = new LayoutStyle(); copyStyle.height = LayoutAxis.fixed(30); copyStyle.padding = new Insets(8, 4, 8, 4);
         var copy = new Button("", copyStyle, function() context.clipboard.writeText(code), key + "-copy");
         copy.accessibilityLabel = "Copy code";
@@ -142,13 +162,14 @@ class CodexMarkdownView implements View {
         card.radiusTopLeft = card.radiusTopRight = card.radiusBottomLeft = card.radiusBottomRight = 8;
         header.width = LayoutAxis.grow();
         label.width = LayoutAxis.grow();
+        var heading:Array<KeyedView> = [new KeyedView("language", new Text(artifact == null ? (block.language == "" ? "Code" : block.language) : artifact, label, context.theme.tokens.mutedText))];
+        if (artifact != null) heading.push(new KeyedView("hide", new Button("Hide source", null, function() shown.update(false), key + "-hide-source")));
+        heading.push(new KeyedView("copy", copy));
         rows.push(new KeyedView(key, new Column(key, [
-          new KeyedView("header", new Row(key + "-header", [
-            new KeyedView("language", new Text(block.language == "" ? "Code" : block.language, label, context.theme.tokens.mutedText)),
-            new KeyedView("copy", copy)
-          ], header)),
+          new KeyedView("header", new Row(key + "-header", heading, header)),
           new KeyedView("code", new ScrollView(key + "-scroll", field, scroll, ScrollAxis.Horizontal))
         ], card)));
+        if (artifact != null && block.language == "svg") rows.push(new KeyedView(key + "-svg", new SessionSvgView(key + "-svg", raw, frame)));
       } else if (isTable(block.text)) {
         var tableRows:Array<KeyedView> = [];
         var lines = block.text.split("\n");

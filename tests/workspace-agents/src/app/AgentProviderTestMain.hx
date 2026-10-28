@@ -201,6 +201,11 @@ class AgentProviderTestMain {
 	}
 
 	static function conversationTests():Void {
+		var withImage = new workspace.provider.CodexConversation();
+		var imageParts:Array<Dynamic> = [{type:"text",text:"Inspect"},
+			{type:"localImage",path:"/private/secret.png"}, {type:"image",url:"https://example.invalid/private"}];
+		withImage.put("turn", {id:"user", type:"userMessage", content:imageParts}, true);
+		require(withImage.items()[0].text == "Inspect\n[2 images attached]", "Image history lost count or exposed a private image path");
         var blocks = workspace.client.CodexMarkdown.parse("Before\n\n```python\ndef primes():\n    return 2\n```\nAfter");
         require(blocks.length == 3 && blocks[1].kind == "code" && blocks[1].language == "python", "Markdown fences not parsed");
         require(blocks[1].text == "def primes():\n    return 2", "Code indentation changed");
@@ -249,6 +254,7 @@ class AgentProviderTestMain {
 	}
 
 	static function main():Void {
+		AgentImageStagingTest.run();
 		AgentServiceTest.run();
 		conversationTests();
 		clientActionPriorityTest();

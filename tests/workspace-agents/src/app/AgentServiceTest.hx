@@ -38,6 +38,14 @@ class AgentServiceTest {
   ro.call(WorkspaceAgentProtocol.CREATE,{workspace:"w",instance:"owner",id:"alpha-0",name:"Fixture",group:"work",thread:null,provider:"alpha"},1000,
    function(_) throw "Read-only create was accepted",function(error) denied=error.code=="unauthorized");
   roServer.poll();ro.poll();require(denied && alpha.creates==1,"Authorization did not fence the adapter side effect");
+  denied=false;
+  ro.call(WorkspaceAgentProtocol.IMAGE_UPLOAD,{workspace:"w",instance:"owner",session:"alpha-0",operation:"begin",
+   upload:null,size:64,offset:0,bytes:null},1000,function(_) throw "Read-only image upload was accepted",function(error) denied=error.code=="unauthorized");
+  roServer.poll();ro.poll();require(denied,"Image upload ignored control permission");
+  var unsupported=false;
+  client.call(WorkspaceAgentProtocol.IMAGE_UPLOAD,{workspace:"w",instance:"owner",session:"beta-0",operation:"begin",
+   upload:null,size:64,offset:0,bytes:null},1000,function(_) throw "Non-Codex image upload was accepted",function(error) unsupported=error.code=="unsupported_operation");
+  server.poll();client.poll();require(unsupported,"Non-Codex provider advertised image upload");
   service.dispose();require(alpha.disposed && beta.disposed,"Service lifecycle did not reach every adapter");
   client.close();server.close();ro.close();roServer.close();
   Sys.println("PASS: provider-neutral routing, combined limits/pagination, cross-provider identity and authorization");

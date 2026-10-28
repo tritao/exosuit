@@ -63,6 +63,25 @@ class CodexMarkdownLayoutMain {
     var codeHeader = find(root, "python").globalBounds();
     require(codeLabel.y >= codeHeader.y + codeHeader.height, "Code block header must precede its body");
     find(root, "Copy code");
+    var artifactSource = "<!doctype html>\r\n<h1>Hello</h1>\r\n";
+    var artifact = workspace.client.CodexMarkdown.parse("```html\r\n" + artifactSource + "```\r\n")[0];
+    require(artifact.closed == true && artifact.source == artifactSource, "Artifact lost exact source or fence state");
+    var unfinished = workspace.client.CodexMarkdown.parse("```html\n<h1>Still streaming")[0];
+    require(unfinished.closed == false && workspace.client.SessionArtifact.label(unfinished.language, unfinished.text, unfinished.closed == true) == null, "Unfinished fence promoted to artifact");
+    require(workspace.client.SessionArtifact.label("diff", StringTools.lpad("", "x", 4000), true) == null, "Diff promoted to source artifact");
+    var svg = workspace.client.SessionSvg.parse('<svg viewBox="0 0 100 50"><rect x="2" y="3" width="20" height="10" fill="#123456"/><path d="M 0 0 l 10 10 H 20 V 4 Z" stroke="red" fill="none"/></svg>');
+    require(svg != null && svg.shapes.length == 2 && svg.shapes[1].commands[2].values[0] == 20, "Valid SVG geometry was not parsed");
+    for (unsafe in ['<svg viewBox="0 0 10 10"><script/></svg>', '<svg viewBox="0 0 10 10"><rect width="1" height="1" fill="url(http://x)"/></svg>', '<svg viewBox="0 0 10 10"><path d="M0 0 A1 1 0 0 0 2 2"/></svg>', '<svg viewBox="0 0 10 10"><rect width="1" height="1" transform="scale(2)"/></svg>', '<svg viewBox="0 0 10 10"><svg viewBox="0 0 2 2"><rect width="1" height="1"/></svg></svg>', '<svg viewBox="0 0 10 10"><path d="M 999999 0 l 2 0"/></svg>', '<svg viewBox="0 0 10 10"><rect width="1e999" height="1"/></svg>'])
+      require(workspace.client.SessionSvg.parse(unsafe) == null, "Unsafe or unsupported SVG was accepted");
+    view.update("```html\r\n" + artifactSource + "```\r\n");
+    root = context.submit(view, new LayoutFrame(600, 400));
+    find(root, "HTML source");
+    var showSource = find(root, "Show source");
+    var showBounds = showSource.globalBounds();
+    context.pointerDown(showBounds.x + showBounds.width / 2, showBounds.y + showBounds.height / 2, 0);
+    context.pointerUp(showBounds.x + showBounds.width / 2, showBounds.y + showBounds.height / 2, 0);
+    root = context.submit(view, new LayoutFrame(600, 400));
+    find(root, "Hide source"); find(root, "Code block: html");
     view.update("> Quoted note\n> Second line");
     root = context.submit(view, new LayoutFrame(1000, 400));
     find(root, "Quoted note\nSecond line");
@@ -88,6 +107,22 @@ class CodexMarkdownLayoutMain {
     require(ui.SessionImageProbe.dimensions(png) == null, "Accepted oversized PNG dimensions");
     require(workspace.client.SessionLinkTarget.parse("C:/project/file.txt:stream") == null, "Accepted an extra drive-path colon");
     var patch = "diff --git a/old.txt b/new.txt\n--- a/old.txt\n+++ b/new.txt\n@@ -2,2 +4,2 @@\n same\n-old\n+new\n";
+    var fallbackPath:String = null;
+    var fallback = new ui.SessionDiffView(patch, function(path) fallbackPath = path,
+      [{path:"bad.txt",kind:"update",offset:999999,length:20,truncated:false}]);
+    root = context.submit(fallback, new LayoutFrame(600, 500));
+    var openDiff = find(root, "Open file"), openBounds = openDiff.globalBounds();
+    context.pointerDown(openBounds.x + openBounds.width / 2, openBounds.y + openBounds.height / 2, 0);
+    context.pointerUp(openBounds.x + openBounds.width / 2, openBounds.y + openBounds.height / 2, 0);
+    require(fallbackPath == "new.txt", "Invalid metadata hid original diff path");
+    var partial = new ui.SessionDiffView(patch, null,
+      [{path:"new.txt",kind:"update",offset:0,length:patch.length,truncated:true}]);
+    root = context.submit(partial, new LayoutFrame(600, 500));
+    var toggleDiff = find(root, "▾ update new.txt"), toggleBounds = toggleDiff.globalBounds();
+    context.pointerDown(toggleBounds.x + toggleBounds.width / 2, toggleBounds.y + toggleBounds.height / 2, 0);
+    context.pointerUp(toggleBounds.x + toggleBounds.width / 2, toggleBounds.y + toggleBounds.height / 2, 0);
+    root = context.submit(partial, new LayoutFrame(600, 500));
+    find(root, "+1  −1 · partial");
     var parsed = workspace.client.SessionDiff.parse(patch);
     require(parsed.length == 1 && parsed[0].path == "new.txt", "Rename did not target the new file");
     var body = parsed[0].lines;

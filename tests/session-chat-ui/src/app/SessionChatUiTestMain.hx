@@ -45,6 +45,13 @@ class SessionChatUiTestMain {
 		});
 	}
 	static function main():Int {
+		for (remote in ["https://github.com/example/project.git", "git@github.com:example/project.git", "ssh://git@github.com/example/project"])
+			require(scm.GithubRemote.repository(remote) == "https://github.com/example/project", "GitHub origin parsing failed");
+		for (remote in ["https://user:secret@github.com/example/project", "https://github.com.evil.test/example/project", "https://github.com/example/project?token=x", "file:///tmp/project"])
+			require(scm.GithubRemote.repository(remote) == null, "Unsafe GitHub origin accepted");
+		require(scm.GithubRemote.pullRequestPage("https://github.com/example/project", "feature/name") == "https://github.com/example/project/compare/feature%2Fname?expand=1", "Branch was not encoded for GitHub");
+		require(scm.GithubRemote.pullRequestPage("https://evil.test/x/y", "main") == null
+			&& scm.GithubRemote.pullRequestPage("https://github.com/example/project", "bad\nbranch") == null, "Unsafe pull request URL accepted");
 		ButtonThemeTestMain.main();
 		SidebarLayoutTestMain.main();
 		StatusBarTestMain.main();
@@ -179,6 +186,55 @@ class SessionChatUiTestMain {
 		click(summaryContext, find(summaryRoot, "README.md"), 500, 300);
 		require(summaryOpened == "README.md", "Changed file summary opened the wrong file");
 		summaryContext.dispose();
+		var draftClient = new FakeAgent(), draftContext = new UiContext(null, fonts, ui.ExosuitPalette.theme(true));
+		draftClient.view.supportsImageUpload = true; draftClient.uploadEnabled = true;
+		var requestedPath:String = null;
+		var worktreeOpens = 0, githubOpens = 0, pullRequestOpens = 0, availableActions = true;
+		var draftPanel = new CodexSessionPanel(function() return draftClient, "session", "/repo", function() {},
+			new style.Theme(), new syntax.SyntaxRegistry(), function(_, _, _) {}, function(_) {}, null,
+			{context:function() return "Project", explore:function() {}, reviewChanges:function() {},
+			 readContext:function(path, done) { requestedPath = path; done("actual contents\n", null); },
+			 chooseImage:function(done) done("photo.png", haxe.io.Bytes.ofString("fixture"), null),
+			 canCreateWorktree:function() return availableActions, newWorktree:function() worktreeOpens++,
+			 canOpenGithub:function() return availableActions, githubRepository:function() githubOpens++,
+			 canOpenPullRequest:function() return availableActions, githubPullRequest:function() pullRequestOpens++});
+		function draftBuild():RenderNode return draftContext.submit(draftPanel, new LayoutFrame(1000, 1000));
+		var draftRoot = draftBuild();
+		click(draftContext, find(draftRoot, "New worktree"), 1000, 1000);
+		click(draftContext, find(draftRoot, "Open GitHub"), 1000, 1000);
+		click(draftContext, find(draftRoot, "Open pull request page"), 1000, 1000);
+		require(worktreeOpens == 1 && githubOpens == 1 && pullRequestOpens == 1, "Workspace actions did not invoke their callbacks");
+		availableActions = false; draftRoot = draftBuild();
+		var unavailableVisible = false;
+		draftRoot.walk(function(node) { if (node.semantics != null && node.semantics.label == "New worktree") unavailableVisible = true; });
+		require(!unavailableVisible, "Unavailable worktree action remained visible");
+		click(draftContext, find(draftRoot, "Add workspace text"), 1000, 1000);
+		draftRoot = draftBuild();
+		require(draftContext.focusWidget(find(draftRoot, "Workspace text path").id), "Cannot focus context path");
+		draftContext.text(UiEventKind.TextInput, "src/Main.hx");
+		draftRoot = draftBuild(); click(draftContext, find(draftRoot, "Include text"), 1000, 1000);
+		require(requestedPath == "src/Main.hx" && draftPanel.textContext.length == 1, "Workspace text was not read into the draft");
+		draftRoot = draftBuild(); click(draftContext, find(draftRoot, "Add image"), 1000, 1000);
+		require(draftPanel.imageDrafts.length == 1, "Image upload did not enter the draft");
+		draftRoot = draftBuild(); require(draftContext.focusWidget(find(draftRoot, "Codex prompt").id), "Cannot focus context draft");
+		draftContext.text(UiEventKind.TextInput, "Explain"); draftRoot = draftBuild();
+		draftClient.acceptActions = false; click(draftContext, find(draftRoot, "Send"), 1000, 1000);
+		require(draftClient.actions[0].indexOf("actual contents") >= 0 && draftClient.actions[0].indexOf("src/Main.hx") >= 0, "Sent only a path instead of file contents");
+		require(draftClient.lastImageIds != null && draftClient.lastImageIds[0] == "opaque-image", "Image handle did not reach provider action");
+		require(draftPanel.prompt == "Explain" && draftPanel.textContext.length == 1 && draftPanel.imageDrafts.length == 1, "Rejected send lost draft context");
+		draftClient.acceptActions = true; draftClient.deferAcceptance = true;
+		draftRoot = draftBuild(); click(draftContext, find(draftRoot, "Send"), 1000, 1000);
+		draftPanel.prompt = "Edited while sending";
+		var accepted:Void->Void = cast draftClient.pendingAcceptance; accepted();
+		require(draftPanel.prompt == "Edited while sending" && draftPanel.textContext.length == 0 && draftPanel.imageDrafts.length == 0
+			&& draftClient.removedImages.indexOf("opaque-image") >= 0, "Late acknowledgement lost edited text or retained submitted attachments");
+		draftClient.deferAcceptance = false; draftRoot = draftBuild(); click(draftContext, find(draftRoot, "Send"), 1000, 1000);
+		require(draftPanel.prompt == "" && draftPanel.textContext.length == 0, "Accepted send did not clear the unchanged draft");
+		draftRoot = draftBuild(); click(draftContext, find(draftRoot, "Add image"), 1000, 1000);
+		draftRoot = draftBuild(); click(draftContext, find(draftRoot, "Send"), 1000, 1000);
+		require(draftClient.actions[draftClient.actions.length - 1] == "prompt::null"
+			&& draftClient.lastImageIds != null && draftClient.lastImageIds[0] == "opaque-image", "Image-only send invented text or lost its image");
+		draftContext.dispose();
 		fonts.dispose();
 		trace("PASS: session rendering and provider actions across themes and widths");
 		return 0;

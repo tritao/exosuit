@@ -32,6 +32,13 @@ private typedef PendingApproval = {var wireId:Dynamic; var method:String; var de
 
 /** Shared-daemon adapter. All policy/protocol interpretation stays on the owning machine. */
 class CodexProvider implements LocalAgentProvider {
+	public var imageUploadAvailable:Bool = false;
+	public static function turnInput(text:String, imagePaths:Array<String>):Array<Dynamic> {
+		var input:Array<Dynamic> = [];
+		if (text != "") input.push({type:"text", text:text, text_elements:new Array<String>()});
+		for (path in imagePaths) input.push({type:"localImage", path:path});
+		return input;
+	}
 	final instance:String;
 	final directories:WorkspaceDirectories;
 	final groups:Void->Array<WorkspaceGroup>;
@@ -187,6 +194,7 @@ class CodexProvider implements LocalAgentProvider {
 			items: s.conversation.page(before),
 			itemsOmitted: false,
 			itemsNext: s.conversation.next(before),
+			supportsImageUpload: imageUploadAvailable,
 			models: models,
 			modelsNext: modelsNext,
 			currentModel: s.currentModel,
@@ -1023,7 +1031,9 @@ class CodexProvider implements LocalAgentProvider {
 			loadThread(s, complete);
 	}
 
-	public function action(q:AgentAction, ctx:RpcContext<AgentView>):Void {
+	public function action(q:AgentAction, ctx:RpcContext<AgentView>):Void actionWithImages(q, ctx, []);
+
+	public function actionWithImages(q:AgentAction, ctx:RpcContext<AgentView>, imagePaths:Array<String>, ?pinImages:String->Bool):Void {
 		if (storageFailed) {
 			ctx.fail({code: "storage_unavailable", message: "Agent storage requires recovery", ambiguous: false});
 			return;
@@ -1239,7 +1249,7 @@ class CodexProvider implements LocalAgentProvider {
 			return;
 		}
 		if (q.action == "prompt") {
-			if (!valid(q.text, 8192)
+			if (q.text == null || q.text.length > 8192 || (q.text.length == 0 && imagePaths.length == 0)
 				|| s.busy
 				|| (s.record.state != "idle" && s.record.state != "completed" && s.record.state != "failed" && s.record.state != "interrupted")) {
 				ctx.fail({code: "busy", message: "Agent is busy or prompt is invalid", ambiguous: false});
@@ -1260,11 +1270,14 @@ class CodexProvider implements LocalAgentProvider {
 				ctx.fail({code: "invalid_effort", message: "Choose a reasoning effort supported by the selected model", ambiguous: false});
 				return;
 			}
+			if (imagePaths.length > 0 && (pinImages == null || !pinImages(s.record.thread))) {
+				ctx.fail({code:"image_unavailable",message:"An image expired or is unavailable. Remove it and upload it again.",ambiguous:false}); return;
+			}
 			s.busy = true;
 			s.record.state = "working";
 			s.error = null;
 			append(s, "\nYou: " + q.text + "\n");
-                var params:Dynamic = {threadId: s.record.thread, input: [{type: "text", text: q.text, text_elements: new Array<String>()}]};
+                var params:Dynamic = {threadId: s.record.thread, input: turnInput(q.text, imagePaths)};
                 if (effectiveModel != null) Reflect.setField(params, "model", effectiveModel);
                 if (effectiveEffort != null) Reflect.setField(params, "effort", effectiveEffort);
                 if (s.record.approvalPolicy != null) Reflect.setField(params, "approvalPolicy", s.record.approvalPolicy);
@@ -1272,9 +1285,11 @@ class CodexProvider implements LocalAgentProvider {
                 call("turn/start", params, function(r) {
 				s.busy = false;
 				if (r.error != null) {
-					s.error = r.error;
+					var message = r.error;
+					for (path in imagePaths) message = StringTools.replace(message, path, "[attached image]");
+					s.error = message;
 					s.record.state = "uncertain";
-					ctx.fail({code: "provider_error", message: r.error, ambiguous: true});
+					ctx.fail({code: "provider_error", message: message, ambiguous: true});
 					return;
 				}
 				var t = Reflect.field(r.result, "turn");

@@ -16,6 +16,7 @@ The visual direction includes crisp, defined borders, restrained corner rounding
 - Keep command and reasoning disclosures collapsed initially; show supplied details on request. Display actual file-change patches with numbered hunk rows, addition/removal tint, per-file disclosure and copy/open actions. Preserve source fidelity and label truncated data.
 - Associate edits with files from optional provider-reported metadata. Codex reports bounded slices into its existing patch payload, keeping legacy fields available without duplicating patch data on the wire. Legacy unattributed output stays unattributed. Counts describe observed patch lines, not a net Git checkpoint.
 - Recognize standalone Markdown image blocks. Offer a user-initiated native preview for authorized local PNG/JPEG/GIF images with bounded file/header validation, fit without upscaling and managed resource disposal. Preserve alt text, source navigation and an explanatory fallback for unsupported locations.
+- Completed HTML/SVG and substantial code fences have compact source artifact cards. Preserve original line endings and final newlines for copy. Incomplete fences remain visible inline while streaming. SVG offers an explicit native preview for supported shapes and paths; unsupported SVG retains source with an explanation. HTML is source-only.
 - Group pending requests after the conversation with their existing approve/decline/answer actions. Preserve reviewability restrictions, queue/steer controls, uncertain delivery and recovery behavior.
 - Keep the composer visible when space permits; scroll the whole document when the dock becomes too short. New output follows the transcript only while the reader is at its bottom. Retain the draft and model/effort choices through ordinary renders.
 
@@ -26,6 +27,10 @@ The visual direction includes crisp, defined borders, restrained corner rounding
 - Explicit Markdown file links open in Exosuit at optional `:line:column` or `#Lline` locations. Resolve relative paths against the session working directory. Validate workspace identity on activation and asynchronous completion. Remote host paths use workspace file RPC, never the local OS shell.
 - External HTTP(S)/mailto links open only on activation. Unsupported schemes remain literal. Local paths never go to the OS shell. Out-of-workspace file links report an actionable error.
 - Commit, branch, push and other Git mutations continue through Source Control's existing review and permission flows. A chat action must not silently commit or invent a GitHub PR integration.
+- Include up to two bounded workspace text snapshots through the owning host's file service. Label them as text context, show removal and read errors, and preserve edits made while a submission is awaiting acknowledgement.
+- Codex can negotiate native image input separately from text context. Upload bounded chunks to private host staging and send opaque session-scoped handles; the provider resolves these to host-local image input. Show upload/failure/removal states and retain unsent draft content. Claude/Pi must not advertise this capability until their adapters and queue persistence support it.
+- A negotiated Git worktree operation creates a new branch and a new child checkout inside the workspace. Start the integrated session only after its group is bound to the resulting directory. Preserve the original checkout and report the recoverable destination if later group/session creation fails.
+- GitHub actions use an authoritative host-side origin query, allowlisted canonical URLs and explicit activation. Revalidate before opening the repository or a comparison/PR creation page for the current named branch. Opening that page does not push a branch or submit a PR.
 
 ## Theme workstream
 
@@ -35,10 +40,9 @@ Both light and dark modes share semantic colors, geometry and interaction hierar
 
 These are part of the intended complete experience, but must be implemented end to end before exposing their controls:
 
-1. **Image/file attachments:** typed input parts and negotiated provider capabilities; bounded workspace-host staging/upload; Codex/Claude/Pi adapters; durable attachment references in queued inputs; exact draft preservation on rejection; remove/preview/upload/failure UI; image clipboard support in the native platform bridge. Current RPC and Pi queue only persist text. Passing client-local filenames as though they were remote attachments is incorrect.
-2. **HTML/SVG artifacts:** explicit inert preview separate from source, no automatic execution/navigation, known resource origin and lifetime, and a native renderer or hardened webview boundary. Existing image tabs do not decode SVG. Code fences remain syntax-highlighted, selectable/copyable source until that preview contract exists. [Renderer contracts](renderer-contracts.md) records the references' artifact dispatch, source/rendered modes and platform requirements.
-3. **New worktree from composer:** negotiated workspace-host operation with directory and branch validation, cancellation, cleanup and session creation bound to the resulting group. Existing SCM can discover linked worktrees but does not expose creation.
-4. **PR/open GitHub:** authoritative remote metadata and supported review/network workflow. Do not infer a public GitHub URL or expose a button that cannot complete its action.
+1. **Broader attachment input:** Claude/Pi adapters, durable attachment references in queued inputs, image clipboard support in the native platform bridge, and persisted input thumbnails. Codex's staged-image path and workspace text snapshots do not imply these capabilities. Passing client-local filenames as though they were remote attachments is incorrect.
+2. **Full HTML/SVG artifacts:** a rendered/source toggle for arbitrary HTML and SVG needs a native renderer or hardened WebView boundary with known resource origin and lifetime. The native SVG subset deliberately rejects unsupported features. [Renderer contracts](renderer-contracts.md) records the references' artifact dispatch, source/rendered modes and platform requirements.
+3. **PR submission:** opening an authoritative GitHub comparison page is supported separately from submitting a PR. Actual submission needs a supported authenticated review/network workflow.
 
 These are explicit remaining capabilities, not implied by the visual implementation. The local-source audit identifies the exact current boundaries.
 

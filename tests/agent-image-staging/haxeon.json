@@ -1,0 +1,9 @@
+{
+ "version":1,
+ "package":{"name":"exosuit-agent-image-staging-test"},
+ "entry":"app.AgentImageStagingTest",
+ "sourceRoots":["../workspace-agents/src"],
+ "scopeSourceRoots":false,
+ "dependencies":{"exosuit-agent":{"path":"../../agent"}},
+ "target":"host","outputDir":"build"
+}

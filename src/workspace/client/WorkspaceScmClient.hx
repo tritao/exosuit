@@ -48,6 +48,9 @@ class WorkspaceScmClient {
 		connection.call(WorkspaceScmProtocol.BRANCHES, request, timeoutMs, onSuccess, onError);
 	}
 
+	public function origin(workspace:String, repository:String, onSuccess:workspace.service.WorkspaceScmProtocol.ScmOriginResult->Void, onError:RpcError->Void):Void
+		connection.call(WorkspaceScmProtocol.ORIGIN, {workspace:workspace, repository:repository}, 10000, onSuccess, onError);
+
 	public function watch(workspace:String, root:String, epoch:Null<String>, cursor:Int, listener:ScmWatchEvent->Void,
 		onSuccess:ScmWatchResult->Void, onError:RpcError->Void, ?timeoutMs:Int = 5000):Void {
 		var key = watchKey(workspace, root), listeners = watchListeners.get(key);

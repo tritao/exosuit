@@ -129,6 +129,25 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(9) var after:Null<String>;
 	/** Expected native custom title, captured by inspect-name before opening an editor. */
 	@:optional @:id(10) var expectedNativeName:Null<String>;
+	/** Opaque host-staged image IDs; accepted only by providers advertising support. */
+	@:optional @:id(11) var imageIds:Null<Array<String>>;
+}
+
+@:wire typedef AgentImageUpload = {
+  @:id(1) var workspace:String;
+  @:id(2) var instance:String;
+  @:id(3) var session:String;
+  @:id(4) var operation:String;
+  @:id(5) var upload:Null<String>;
+  @:id(6) var size:Int;
+  @:id(7) var offset:Int;
+  @:id(8) var bytes:Null<Bytes>;
+}
+
+@:wire typedef AgentImageUploadResult = {
+  @:id(1) var upload:String;
+  @:id(2) var offset:Int;
+  @:id(3) var complete:Bool;
 }
 
 @:wire typedef AgentRequest = {
@@ -167,6 +186,7 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(21) var inputBusy:Null<Bool>;
 	@:optional @:id(22) var supportsSteering:Null<Bool>;
 	@:optional @:id(23) var supportsQueue:Null<Bool>;
+	@:optional @:id(24) var supportsImageUpload:Null<Bool>;
 }
 
 /** Bounded presentation data; provider protocol and policy stay on the host. */
@@ -241,4 +261,7 @@ class WorkspaceAgentProtocol {
 	public static final ACTION = new RpcMethod<AgentAction, AgentView>(122, function(v:AgentAction) return MessagePack.encode(v),
 		function(b:Bytes):AgentAction return MessagePack.decode(b), function(v:AgentView) return MessagePack.encode(v),
 		function(b:Bytes):AgentView return MessagePack.decode(b));
+	public static final IMAGE_UPLOAD = new RpcMethod<AgentImageUpload, AgentImageUploadResult>(125,
+		function(v:AgentImageUpload) return MessagePack.encode(v), function(b:Bytes):AgentImageUpload return MessagePack.decode(b),
+		function(v:AgentImageUploadResult) return MessagePack.encode(v), function(b:Bytes):AgentImageUploadResult return MessagePack.decode(b));
 }

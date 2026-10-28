@@ -14,7 +14,7 @@ interface WorkspaceTerminalCatalogClient {
   public function terminalCatalogBusy():Bool;
   public function refreshTerminals(force:Bool):Void;
   public function renameTerminal(record:TerminalRecord, name:String, group:String):Void;
-  public function changeGroup(owner:String, group:workspace.service.WorkspaceProtocol.WorkspaceGroup, name:String, parent:Null<String>, cwd:Null<String>, order:Int, create:Bool):Void;
+  public function changeGroup(owner:String, group:workspace.service.WorkspaceProtocol.WorkspaceGroup, name:String, parent:Null<String>, cwd:Null<String>, order:Int, create:Bool, ?done:(Null<workspace.service.WorkspaceProtocol.WorkspaceGroup>, Null<String>)->Void):Void;
   public function removeGroup(owner:String, group:workspace.service.WorkspaceProtocol.WorkspaceGroup):Void;
   public function stopTerminal(record:TerminalRecord):Void;
   public function restartTerminal(record:TerminalRecord):Void;

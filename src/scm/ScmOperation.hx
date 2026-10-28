@@ -18,6 +18,7 @@ enum ScmOperation {
 	RevertPatch(path:String, patch:Bytes);
 	Checkout(reference:String);
 	CreateBranch(name:String);
+	CreateWorktree(directory:String, branch:String);
 	Fetch(remote:Null<String>);
 	Pull;
 	Push;

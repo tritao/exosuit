@@ -91,7 +91,8 @@ class AgentMain {
             function() return service.snapshot().groups, processes, clock, store,
             process.ExecutablePath.resolve(executable == null ? "codex" : executable), Sys.getEnv("EXOSUIT_CODEX_PROXY_LAUNCHER"), codexScript);
         var agents = new workspace.provider.WorkspaceAgentService("workspace", args.length >= 7 ? args[6] : args[3],
-            directories.root, [codex, claude, pi, agentKit], store);
+            directories.root, [codex, claude, pi, agentKit], store,
+            args.length >= 5 ? FileSystem.fullPath(args[4]) : FileSystem.fullPath(Path.directory(args[2])));
 		service.canRemoveGroup = function(group) {
 			for (terminal in terminals.snapshot().terminals) if (terminal.group == group) return false;
 			return agents.groupIsEmpty(group);

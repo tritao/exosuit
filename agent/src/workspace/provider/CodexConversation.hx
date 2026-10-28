@@ -89,14 +89,18 @@ class CodexConversation {
       case "userMessage":
         entry.title = "You";
         var content:Array<Dynamic> = Reflect.field(item, "content");
+        var images = 0;
         if (content != null) for (part in content) {
+          var partType = string(part, "type");
+          if (partType == "image" || partType == "localImage") { images++; continue; }
           var text = string(part, "text");
-          entry.text += (entry.text == "" ? "" : "\n") + (text == "" ? "[" + string(part, "type") + "]" : text);
+          entry.text += (entry.text == "" ? "" : "\n") + (text == "" ? "[" + partType + "]" : text);
           if (entry.text.length > 4096) {
             entry.truncated = true;
             break;
           }
         }
+        if (images > 0) entry.text += (entry.text == "" ? "" : "\n") + "[" + images + (images == 1 ? " image attached]" : " images attached]");
       case "reasoning":
         entry.title = "Reasoning";
         var summary:Array<String> = Reflect.field(item, "summary");

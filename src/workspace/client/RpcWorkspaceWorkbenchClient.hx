@@ -4,6 +4,7 @@ import haxeon.rpc.RpcConnection;
 import haxeon.rpc.RpcError;
 import workspace.client.WorkspaceAgentCreation.AgentCreationStatus;
 import workspace.service.WorkspaceAgentProtocol;
+import workspace.service.WorkspaceAgentProtocol.AgentImageUploadResult;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceTerminalProtocol;
 
@@ -428,7 +429,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     });
   }
 
-  public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String, ?accepted:Void->Void, ?expectedNativeName:String):Void {
+  public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String, ?accepted:Void->Void, ?expectedNativeName:String, ?imageIds:Array<String>):Void {
     var connection = rpc();
     if (connection == null ||(action == "read" ? !canReadAgents() : !canControlAgents())) return;
     if ((action == "move" && (agentCatalog == null || agentCatalog.canMove != true))
@@ -484,7 +485,8 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       request: request,
       model: model,
       effort: effort,
-      expectedNativeName:expectedNativeName
+      expectedNativeName:expectedNativeName,
+      imageIds:imageIds
     }, action == "rename-native" ? 60000 : 20000, function(value) {
       if (rpc() != connection || agentTokens.get(id) != selected) return;
       var errorsBefore = agentsError + "\n" + agentActionError;
@@ -545,6 +547,53 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       }
     }
     );
+  }
+
+  public function uploadAgentImage(id:String, bytes:haxe.io.Bytes, done:(Null<String>, Null<String>)->Void):Void {
+    var connection = rpc(), view = agentViews.get(id), generation = instance();
+    if (connection == null || !canControlAgents() || view == null || view.supportsImageUpload != true
+      || bytes == null || bytes.length == 0 || bytes.length > 2 * 1024 * 1024) { done(null, "Image upload is unavailable or the image exceeds 2 MiB."); return; }
+    var upload:Null<String> = null, finished = false;
+    function fail(message:String):Void {
+      if (finished) return; finished = true;
+      if (upload != null && rpc() == connection && instance() == generation) removeAgentImage(id, upload);
+      done(null, message);
+    }
+    function send(operation:String, offset:Int, chunk:Null<haxe.io.Bytes>, success:AgentImageUploadResult->Void):Void {
+      if (rpc() != connection || instance() != generation) { fail("Workspace connection changed; upload the image again."); return; }
+      connection.call(WorkspaceAgentProtocol.IMAGE_UPLOAD, {workspace:"workspace", instance:generation, session:id,
+        operation:operation, upload:upload, size:bytes.length, offset:offset, bytes:chunk}, 20000,
+        function(result) {
+          if (finished) return;
+          if (rpc() != connection || instance() != generation) { fail("Workspace connection changed; upload the image again."); return; }
+          success(result);
+        }, function(error) fail(error == null ? "Image upload failed; select the image to retry" : error.message + "; select the image to retry"));
+    }
+    var next:Int->Void = null;
+    next = function(offset:Int) {
+      if (offset == bytes.length) {
+        send("finish", offset, null, function(result) {
+          if (result == null || result.upload != upload || result.offset != bytes.length || !result.complete) { fail("Invalid image upload response"); return; }
+          finished = true; done(upload, null);
+        }); return;
+      }
+      var count = Std.int(Math.min(32768, bytes.length - offset));
+      send("chunk", offset, bytes.sub(offset,count), function(result) {
+        if (result == null || result.upload != upload || result.offset != offset + count || result.complete) { fail("Invalid image upload response"); return; }
+        next(offset + count);
+      });
+    };
+    send("begin", 0, null, function(result) {
+      if (result == null || result.upload == null || result.upload.length == 0 || result.offset != 0 || result.complete) { fail("Invalid image upload response"); return; }
+      upload = result.upload; next(0);
+    });
+  }
+
+  public function removeAgentImage(id:String, upload:String):Void {
+    var connection = rpc();
+    if (connection == null || !canControlAgents() || upload == null || upload == "") return;
+    connection.call(WorkspaceAgentProtocol.IMAGE_UPLOAD, {workspace:"workspace", instance:instance(), session:id,
+      operation:"remove", upload:upload, size:0, offset:0, bytes:null}, 5000, function(_) {}, function(_) {});
   }
 
   function finishAgentRead(id:String):Void {
@@ -776,15 +825,20 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     parent:Null<String>,
     cwd:Null<String>,
     order:Int,
-    create:Bool
+    create:Bool,
+    ?done:(Null<WorkspaceProtocol.WorkspaceGroup>, Null<String>)->Void
   ):Void {
     var connection = rpc(), epoch = endpoint.workspaceEpoch();
     if (owner != instance()) {
       catalogError = "Workspace changed; reopen the group action";
       catalogRevision++;
+      if (done != null) done(null, catalogError);
       return;
     }
-    if (connection == null || epoch == null || !canEditGroups() || !catalogReady()) return;
+    if (connection == null || epoch == null || !canEditGroups() || !catalogReady()) {
+      if (done != null) done(null, "Workspace group editing is unavailable");
+      return;
+    }
     connection.call(
       WorkspaceProtocol.GROUP,
       {
@@ -800,11 +854,8 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       order : order
     },
       2000,
-      function(_) catalogCompleted(connection),
-      function(error) catalogFailed(
-        connection,
-        error
-      )
+      function(result) { catalogCompleted(connection); if (done != null) done(result.group, null); },
+      function(error) { catalogFailed(connection, error); if (done != null) done(null, error.message); }
     );
   }
 

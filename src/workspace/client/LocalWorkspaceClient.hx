@@ -410,8 +410,10 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
       ?defaults:AgentSessionDefaults):Void
     workbench.createAgent(group, thread, created, defaults);
   public function deleteAgent(id:String, ?deleted:Void->Void):Void workbench.deleteAgent(id, deleted);
-  public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String, ?accepted:Void->Void, ?expectedNativeName:String):Void
-    workbench.agentAction(id, action, text, request, model, effort, accepted, expectedNativeName);
+  public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String, ?accepted:Void->Void, ?expectedNativeName:String, ?imageIds:Array<String>):Void
+    workbench.agentAction(id, action, text, request, model, effort, accepted, expectedNativeName, imageIds);
+  public function uploadAgentImage(id:String, bytes:haxe.io.Bytes, done:(Null<String>, Null<String>)->Void):Void workbench.uploadAgentImage(id, bytes, done);
+  public function removeAgentImage(id:String, upload:String):Void workbench.removeAgentImage(id, upload);
   public function discoverAgents(group:String, cursor:Null<String>):Void workbench.discoverAgents(group, cursor);
   public function discoveredAgents():Null<AgentDiscovery> return workbench.discoveredAgents();
   public function agentView(id:String):Null<AgentView> return workbench.agentView(id);
@@ -432,8 +434,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   public function canRemoveGroups():Bool return workbench.canRemoveGroups();
   public function removeGroup(owner:String, group:WorkspaceGroup):Void workbench.removeGroup(owner, group);
   public function changeGroup(owner:String, group:WorkspaceGroup, name:String, parent:Null<String>,
-      cwd:Null<String>, order:Int, create:Bool):Void
-    workbench.changeGroup(owner, group, name, parent, cwd, order, create);
+      cwd:Null<String>, order:Int, create:Bool, ?done:(Null<WorkspaceGroup>, Null<String>)->Void):Void
+    workbench.changeGroup(owner, group, name, parent, cwd, order, create, done);
   public function stopTerminal(record:TerminalRecord):Void workbench.stopTerminal(record);
   public function restartTerminal(record:TerminalRecord):Void workbench.restartTerminal(record);
   public function forgetTerminal(record:TerminalRecord):Void workbench.forgetTerminal(record);

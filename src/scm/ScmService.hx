@@ -226,6 +226,14 @@ class ScmService {
 		return handle == null ? null : handle.features();
 	}
 
+	public function origin(repositoryId:String, generation:Int, complete:ScmJobResult<String>->Void):ScmJob<String> {
+		var state = stateForRepository(repositoryId), handle = state == null ? null : findHandle(state, repositoryId);
+		if (!enabled || disposed || handle == null || !Std.isOfType(handle, ScmOriginHandle))
+			return failedAt(generation, null, complete, "unsupported_operation", "Origin metadata is unavailable");
+		var reader:ScmOriginHandle = cast handle;
+		return reader.origin(generation, complete);
+	}
+
 	public function branches(repositoryId:String, generation:Int, complete:ScmJobResult<Array<ScmBranch>>->Void):ScmJob<Array<ScmBranch>> {
 		var state = stateForRepository(repositoryId), handle = state == null ? null : findHandle(state, repositoryId);
 		if (!enabled || disposed || handle == null)

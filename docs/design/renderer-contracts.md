@@ -1,5 +1,21 @@
 # Reference renderer contracts
 
+## Rendering acceptance matrix
+
+The visual treatment and the underlying data contract must both hold. A polished card must not imply a capability that its payload or provider does not supply.
+
+| Content | Presentation and actions | Fidelity checks |
+| --- | --- | --- |
+| Streaming prose | Readable measure, roles, links and native selection | Incomplete Markdown remains visible; reading position survives updates |
+| Code fence | Language header, syntax, horizontal scroll, exact copy | Copy retains original line endings and final newline independently of display normalization |
+| Inline edit | Numbered unified hunks, change markers/tints, per-file disclosure, open/copy | File association comes from headers or validated provider slices; invalid metadata cannot hide the original patch |
+| Changed-file summary | Clickable path, kind, observed additions/removals and partial indicator | Edit-event totals are distinct from net turn/checkpoint or current working-tree changes |
+| Generated HTML/SVG | Explicit artifact kind, source disclosure/copy and a separately supported rendered mode | An unfinished fence cannot become a completed artifact; source is retained even when rendering is unsupported |
+| Image output | Alt/caption, bounded preview, open action, loading/error state | Asset identity belongs to the session/workspace host; decoded resources are disposed |
+| Attachment input | Add/remove/preview and clear delivery state | The provider receives actual content or an authorized host asset; failed delivery retains the draft and attachments |
+
+Collapsed cards must retain information needed to interpret them, including partial/truncated status. Unsupported rendering must offer source or an explanatory fallback. The acceptance fixtures should cover narrow and wide layouts in both themes, streaming completion, disclosure and keyboard activation as well as successful decoding.
+
 Local source inspected 2026-10-27: `.local/references/t3code` at `c570c2cd5cdf433ea0e38914ba6d92f6df13715c`, `.local/references/hermes-agent` at `392c6f7d9ec64db759baf81c6321c34a78f85898`. Paths below are relative to those checkouts. This records observed behavior and separates suggested Exosuit adaptations from what exists today.
 
 ## Inline edit diffs and changed-file summaries
@@ -37,3 +53,7 @@ Hermes `tool/fallback-model/index.ts:805` searches result fields `image_url`, `u
 T3 `ChatMarkdown.tsx:1450` distinguishes direct image/video URLs from workspace-file image assets; the latter carries environment, thread and path into `ChatMarkdownAssetImage`. `chat/ChatMarkdownMedia.tsx` obtains scoped asset URLs and renders fallback/error states with original Markdown copy. `files/AttachmentFilePreview.tsx` dispatches by name/MIME/size, creates and revokes Blob URLs for local files, requests renewable authorized URLs for remote assets, and exposes rendered/source modes for Markdown, HTML, Mermaid and tables. It shows loading and errors and limits large text previews. `media/AttachmentImage.tsx` falls back to lazy HEIC/TIFF decoding and revokes the generated object URL.
 
 **Exosuit path:** use typed asset identity, session/workspace scope and bounded bytes; retain loading, unsupported and error states and dispose decoded resources. Existing `UiImageTab` is local raster-file-only, while `ClipboardService` and agent action protocol are text-only. Adding image output display, image input upload, and SVG/HTML rendering are separate transport and security tasks; implement only capabilities supported end to end.
+
+## Implemented follow-up
+
+Exosuit now marks fenced blocks as closed or still streaming and keeps their original body separately for source copy. Completed HTML and SVG fences and substantial non-shell code can be opened as source artifacts; incomplete fences stay inline. HTML remains source-only. SVG has an opt-in native preview for a deliberately limited subset: root `svg` and `g`, `rect`, `circle`, `line`, and paths using M/L/H/V/Q/C/Z, with solid fill/stroke and a viewBox. Unsupported elements, attributes, transforms, arc commands, styles, external references and oversized or nonfinite geometry reject the whole preview and leave source available. `SessionSvg` bounds source characters, depth, nodes, path commands and coordinate magnitude; `SessionSvgView` creates disposable native paths, never a WebView or network request. It is not a full SVG implementation.

@@ -93,6 +93,9 @@ class ExosuitApp implements DesktopUiApplication {
 	public final ui:UiContext;
 	public final theme:Theme;
 	var darkPalette:Bool;
+	final githubOrigins:Map<String, String> = [];
+	final githubOriginsPending:Map<String, Bool> = [];
+	final githubOriginsCheckedAt:Map<String, Float> = [];
 	final editorPalette:style.Theme;
 	final terminalPalette:TerminalPalette;
 	public final application:Application;
@@ -1518,8 +1521,133 @@ class ExosuitApp implements DesktopUiApplication {
     explore: function() { if (sessionRecord(resource, root) != null) showSidebarMode("files"); },
     reviewChanges: function() { if (sessionRecord(resource, root) != null) showSidebarMode("scm"); },
     context: function() return sessionWorkspaceLabel(resource, root),
-    resolveImage: function(destination) return resolveSessionImage(resource, root, destination)
+    resolveImage: function(destination) return resolveSessionImage(resource, root, destination),
+    readContext: function(path, done) readSessionContext(resource, root, path, done),
+    canCreateWorktree: function() return sessionWorktreeRepository(resource, root) != null,
+    newWorktree: function() createSessionWorktree(resource, root),
+    chooseImage: desktop == null ? null : function(done) chooseSessionImage(resource, root, done),
+    canOpenGithub: function() return sessionGithubOrigin(resource, root) != null,
+    canOpenPullRequest: function() return sessionGithubOrigin(resource, root) != null && sessionGithubBranch(resource, root) != null,
+    githubRepository: function() openSessionGithub(resource, root, false),
+    githubPullRequest: function() openSessionGithub(resource, root, true)
    }));
+ }
+
+ function sessionGithubSource(resource:String, root:String):Null<{source:scm.ScmRemoteReader, repository:scm.ScmRepository}> {
+  var record = sessionRecord(resource, root), source = sourceControlSource();
+  if (record == null || source == null || !Std.isOfType(source, scm.ScmRemoteReader)) return null;
+  var reader:scm.ScmRemoteReader = cast source, nearest:Null<scm.ScmRepository> = null;
+  for (repository in source.repositories()) if (reader.canReadOrigin(repository.id)
+    && workspace.client.SessionLinkTarget.relativeWithin(repository.root, record.cwd) != null
+    && (nearest == null || repository.root.length > nearest.root.length)) nearest = repository;
+  return nearest == null ? null : {source:reader, repository:nearest};
+ }
+
+ function sessionGithubOrigin(resource:String, root:String):Null<String> {
+  var selected = sessionGithubSource(resource, root);
+  if (selected == null) return null;
+  var key = root + ":" + selected.repository.id + ":" + sourceControlSource().identity();
+	  var checked = githubOriginsCheckedAt.get(key);
+	  if (checked != null && Sys.time() - checked >= 30) { githubOrigins.remove(key); githubOriginsCheckedAt.remove(key); }
+  if (!githubOrigins.exists(key) && !githubOriginsPending.exists(key)) {
+   githubOriginsPending.set(key, true);
+   selected.source.origin(selected.repository.id, function(result) {
+    githubOriginsPending.remove(key);
+    var current = sessionGithubSource(resource, root);
+    if (current == null || current.source != selected.source || current.repository.id != selected.repository.id) return;
+    githubOrigins.set(key, result.error == null && result.value != null ? result.value : "");
+	   githubOriginsCheckedAt.set(key, Sys.time());
+    requestFrame();
+   });
+  }
+  var origin = githubOrigins.get(key);
+  return origin == null || origin == "" ? null : origin;
+ }
+
+ function sessionGithubBranch(resource:String, root:String):Null<String> {
+  var selected = sessionGithubSource(resource, root), source = sourceControlSource();
+  if (selected == null || source == null) return null;
+  var snapshot = source.snapshot(selected.repository.id);
+  return snapshot == null ? null : snapshot.head.branch;
+ }
+
+ function openSessionGithub(resource:String, root:String, pullRequest:Bool):Void {
+  var selected = sessionGithubSource(resource, root), branch = pullRequest ? sessionGithubBranch(resource, root) : null;
+  if (selected == null || (pullRequest && branch == null)) return;
+  selected.source.origin(selected.repository.id, function(result) {
+   var current = sessionGithubSource(resource, root);
+   if (current == null || current.source != selected.source || current.repository.id != selected.repository.id
+     || (pullRequest && branch != sessionGithubBranch(resource, root))) return;
+   var url = result.error == null ? result.value : null;
+   if (url == null) { application.reportError("source-control", "GitHub origin is unavailable"); return; }
+   if (pullRequest) url = scm.GithubRemote.pullRequestPage(url, branch);
+   if (url == null || nativekit.ffi.NativeKit.nk_shell_open_url(url) != Result.Ok)
+    application.reportError("source-control", "Could not open GitHub");
+  });
+ }
+
+ function chooseSessionImage(resource:String, root:String, done:(Null<String>, Null<haxe.io.Bytes>, Null<String>)->Void):Void {
+  var dialogs = desktop, initial = sessionRecord(resource, root);
+  if (dialogs == null || initial == null) { done(null, null, "Image selection is unavailable"); return; }
+  dialogs.openFile(function(accepted, paths) {
+   if (!accepted || paths == null || paths.length == 0) { done(null, null, null); return; }
+   var current = sessionRecord(resource, root);
+   if (current == null || current.thread != initial.thread || current.cwd != initial.cwd) { done(null, null, "Session changed while choosing an image"); return; }
+   var path = paths[0];
+   try {
+    var metadata = sys.FileSystem.metadata(path);
+    if (metadata == null || metadata.size <= 0 || metadata.size > 2 * 1024 * 1024 || sys.FileSystem.isDirectory(path)) {
+     done(null, null, "Choose an image of at most 2 MiB"); return;
+    }
+    var bytes = sys.io.File.getBytes(path);
+    if (bytes.length == 0 || bytes.length > 2 * 1024 * 1024) { done(null, null, "Image is too large"); return; }
+    done(haxe.io.Path.withoutDirectory(path), bytes, null);
+   } catch (_:Dynamic) done(null, null, "Could not read the selected image");
+  }, "Choose an image");
+ }
+
+ function readSessionContext(resource:String, root:String, input:String, done:(Null<String>, Null<String>)->Void):Void {
+  var record = sessionRecord(resource, root), attachment = workspaceAttachment;
+  var target = workspace.client.SessionLinkTarget.parse(input);
+  if (record == null || target == null || target.line >= 0 || StringTools.startsWith(target.path, "/")
+      || ~/^[A-Za-z]:/.match(target.path) || StringTools.startsWith(target.path, "\\")) {
+   done(null, "Choose a relative file path in this workspace"); return;
+  }
+  var path = target.resolve(record.cwd);
+  if (workspace.client.SessionLinkTarget.relativeWithin(root, path) == null) { done(null, "File is outside this workspace"); return; }
+  function wanted():Bool {
+   var current = sessionRecord(resource, root);
+   return workspaceAttachment == attachment && current != null && current.cwd == record.cwd && current.thread == record.thread;
+  }
+  if (attachment != null && !attachment.hasLocalFileAccess()) {
+   var client = attachment.fileClient(), scope = attachment.fileScope();
+   var relative = scope == null ? null : workspace.client.SessionLinkTarget.relativeWithin(scope, path);
+   if (client == null || relative == null) { done(null, "Workspace file service is unavailable"); return; }
+   var workspaceId = attachment.fileWorkspace();
+   client.stat(workspaceId, "root", relative, function(stat) {
+    if (!wanted()) { done(null, "Session changed while reading the file"); return; }
+    if (stat == null || stat.workspace != workspaceId || stat.root != "root" || stat.path != relative || stat.entry == null
+      || stat.entry.kind != "file" || stat.entry.revision == null || stat.entry.size == null
+      || haxe.Int64.compare(stat.entry.size, haxe.Int64.ofInt(4096)) > 0 || haxe.Int64.compare(stat.entry.size, haxe.Int64.ofInt(0)) < 0) {
+     done(null, "Choose a text file of at most 4096 bytes"); return;
+    }
+    WorkspaceFileReader.read(client, workspaceId, "root", relative, stat.entry.revision, function(result) {
+     if (!wanted()) done(null, "Session changed while reading the file");
+     else if (result.error != null || result.sizeBytes > 4096) done(null, result.error == null ? "File is too large" : result.error);
+     else done(result.contents, null);
+    }, wanted);
+   }, function(error) done(null, error == null ? "Could not read workspace file" : error.message));
+  } else try {
+   var fs = application.workspace.fileSystem;
+   if (!fs.exists(path) || fs.isDirectory(path)) { done(null, "File is unavailable"); return; }
+   path = fs.normalize(path);
+   if (scmRelativePath(root, path) == null) { done(null, "File is outside this workspace"); return; }
+   var metadata = sys.FileSystem.metadata(path);
+   if (metadata == null || metadata.size < 0 || metadata.size > 4096) { done(null, "Choose a text file of at most 4096 bytes"); return; }
+   var bytes = sys.io.File.getBytes(path);
+   if (bytes.length > 4096) { done(null, "File is too large"); return; }
+   done(workspace.TextFileContent.decode(bytes, path), null);
+  } catch (_:Dynamic) done(null, "Could not read a UTF-8 text file");
  }
 
  function sessionRecord(resource:String, root:String):Null<workspace.service.WorkspaceAgentProtocol.AgentRecord> {
@@ -1543,6 +1671,62 @@ class ExosuitApp implements DesktopUiApplication {
    if (snapshot != null && snapshot.head.branch != null) label += " · " + snapshot.head.branch;
   }
   return label;
+ }
+
+ function sessionWorktreeRepository(resource:String, root:String):Null<scm.ScmRepository> {
+  var record = sessionRecord(resource, root), source = sourceControlSource(), client = workbenchClient;
+  if (record == null || source == null || client == null || !source.connected() || !client.canEditGroups()
+    || client.terminalCatalogBusy() || !client.agentService().canControlAgents() || client.agentService().agentCreation() != null) return null;
+  var nearest:Null<scm.ScmRepository> = null;
+  for (repository in source.repositories()) {
+   var features = source.features(repository.id);
+   if (repository.providerId == "git" && features != null && features.worktrees && source.canWrite(repository.id)
+     && workspace.client.SessionLinkTarget.relativeWithin(repository.root, record.cwd) != null
+     && workspace.client.SessionLinkTarget.relativeWithin(root, repository.root) != null
+     && source.snapshot(repository.id) != null && (nearest == null || repository.root.length > nearest.root.length)) nearest = repository;
+  }
+  return nearest;
+ }
+
+ function createSessionWorktree(resource:String, root:String):Void {
+  var record = sessionRecord(resource, root), repository = sessionWorktreeRepository(resource, root), source = sourceControlSource();
+  var client = workbenchClient, catalog = client == null ? null : client.terminalCatalog();
+  if (record == null || repository == null || source == null || client == null || catalog == null) return;
+  var owner = catalog.instance, provider = record.provider == null ? "codex" : record.provider;
+  function valid():Bool {
+   var current = client.terminalCatalog(), session = sessionRecord(resource, root);
+   return workbenchClient == client && sourceControlSource() == source && session != null
+    && session.cwd == record.cwd && session.thread == record.thread && session.provider == record.provider && session.group == record.group
+    && current != null && current.instance == owner;
+  }
+  host.openCommandView(new commandview.CommandViewProvider("New worktree branch: ", [], function(_) {}, function(_, branch, _) {
+   host.closeCommandView();
+   branch = StringTools.trim(branch);
+   if (!valid()) return;
+   if (branch.length == 0 || branch.length > 128 || branch.charAt(0) == "-" || ~/[\x00-\x20\x7f]/.match(branch)) {
+    application.reportError("agent", "Enter a valid branch name of at most 128 characters"); return;
+   }
+   host.openCommandView(new commandview.CommandViewProvider("New worktree folder name inside repository: ", [], function(_) {}, function(_, directory, _) {
+    host.closeCommandView(); directory = StringTools.trim(directory);
+    if (!valid()) { application.reportError("agent", "Workspace changed before worktree creation"); return; }
+    var current = source.snapshot(repository.id);
+    var selected = sessionWorktreeRepository(resource, root);
+    if (current == null || selected == null || selected.id != repository.id) { application.reportError("agent", "Repository is unavailable or changed"); return; }
+    var destination = repository.root + "/" + directory;
+    source.apply(repository.id, workspace.client.WorkspaceIds.create("worktree"), current.revision,
+      scm.ScmOperation.CreateWorktree(directory, branch), function(result) {
+       if (result.error != null) { application.reportError("agent", result.error.message); requestFrame(); return; }
+       if (!valid()) { application.reportError("agent", "Worktree created at " + destination + "; workspace changed before a session group could be created"); requestFrame(); return; }
+       var group:workspace.service.WorkspaceProtocol.WorkspaceGroup = {id:workspace.client.WorkspaceIds.create("group"), name:branch, cwd:destination, revision:0};
+       client.changeGroup(owner, group, branch, null, destination, 0, true, function(created, error) {
+        if (error != null || created == null) application.reportError("agent", "Worktree created at " + destination + "; could not create its session group: " + (error == null ? "unknown error" : error));
+        else if (!valid()) application.reportError("agent", "Worktree and group created at " + destination + "; reconnect to start a session");
+        else createIntegratedAgent(provider, created.id);
+        requestFrame();
+       });
+      });
+   }));
+  }));
  }
 
  function resolveSessionImage(resource:String, root:String, destination:String):Null<String> {
@@ -1627,8 +1811,14 @@ class ExosuitApp implements DesktopUiApplication {
   }
   // The built-in agent has no CLI to host in a terminal, so it is always an integrated conversation.
   if (provider != "agentkit" && application.settings.current.agentSessionMode == "terminal") { createAgentTerminal(provider, group); return; }
+  createIntegratedAgent(provider, group);
+ }
+
+ function createIntegratedAgent(provider:String, group:String):Void {
   var client=workbenchClient;
-  if(client == null) return;
+  if(client == null || !client.agentService().canControlAgents() || client.agentService().agentCreation() != null) {
+   application.reportError("agent", "The worktree group is ready; connect to start an integrated session"); return;
+  }
   var defaults:workspace.client.AgentSessionDefaults={provider:provider,model:null,effort:null,
    permissionProfile:provider == "claude" ? "default" : "supervised"};
   if(provider == "codex") {

@@ -3,6 +3,7 @@ package app;
 import haxeon.ui.LayoutFrame;
 import haxeon.ui.core.RenderNode;
 import haxeon.ui.core.UiContext;
+import haxeon.ui.core.UiEventKind;
 import haxeon.ui.host.DesktopUiApplication;
 import haxeon.ui.host.DesktopUiHost;
 import haxeon.ui.host.DesktopUiHostContext;
@@ -29,6 +30,7 @@ private class PreviewApplication implements DesktopUiApplication {
  final agent:FakeAgent;
  final host:DesktopUiHostContext;
  var clickLabel:Null<String>;
+ var workflowStep:Int = 0;
  public function new(host:DesktopUiHostContext, dark:Bool, args:Array<String>) {
   this.host = host;
   contextValue = new UiContext(null, host.fonts, ui.ExosuitPalette.theme(dark));
@@ -56,12 +58,36 @@ private class PreviewApplication implements DesktopUiApplication {
     {id:"assistant",turn:"turn",kind:"agentMessage",title:"",text:"Here is the icon:\n\n![Exosuit icon](fixture-icon.png)",detail:"",state:"completed",truncated:false}
    ];
    if (args.indexOf("--load-image") >= 0) clickLabel = "Preview image";
+  } else if (args.indexOf("--svg") >= 0) {
+   agent.view.items = [
+    {id:"user",turn:"turn",kind:"userMessage",title:"",text:"Draw a simple diagram.",detail:"",state:"completed",truncated:false},
+    {id:"assistant",turn:"turn",kind:"agentMessage",title:"",text:"Here is the SVG:\n\n```svg\n<svg viewBox=\"0 0 100 60\"><rect x=\"5\" y=\"5\" width=\"90\" height=\"50\" fill=\"#3468cf\"/><circle cx=\"50\" cy=\"30\" r=\"17\" fill=\"white\"/><path d=\"M 32 30 L 45 42 L 70 17\" fill=\"none\" stroke=\"#3468cf\" stroke-width=\"4\"/></svg>\n```",detail:"",state:"completed",truncated:false}
+   ];
+   clickLabel = "Preview SVG";
+  } else if (args.indexOf("--artifact") >= 0) {
+   agent.view.items = [
+    {id:"user",turn:"turn",kind:"userMessage",title:"",text:"Draft a small page.",detail:"",state:"completed",truncated:false},
+    {id:"assistant",turn:"turn",kind:"agentMessage",title:"",text:"Here is the source:\n\n```html\n<!doctype html>\n<h1>Hello, Exosuit</h1>\n```",detail:"",state:"completed",truncated:false}
+   ];
+   if (args.indexOf("--expand-artifact") >= 0) clickLabel = "Show source";
   }
   if (args.indexOf("--models") >= 0) clickLabel = "Conversation model";
+  var workflow = args.indexOf("--workflow") >= 0;
+  if (workflow) {
+   agent.view.supportsImageUpload = true;
+   agent.uploadEnabled = true;
+   workflowStep = 1;
+   clickLabel = "Add image";
+  }
   panel = new CodexSessionPanel(function() return agent, "session", "/repo", host.requestFrame,
    dark ? new style.Theme() : ui.ExosuitPalette.lightEditor(), new syntax.SyntaxRegistry(), null, function(_) {},
    function(_) {}, {context: function() return "/workspace/exosuit · ui-exploration", explore: function() {}, reviewChanges: function() {},
-    resolveImage: function(path) return path == "fixture-icon.png" ? Sys.getCwd() + "/graphical/assets/icons/exosuit-256.png" : null});
+    resolveImage: function(path) return path == "fixture-icon.png" ? Sys.getCwd() + "/graphical/assets/icons/exosuit-256.png" : null,
+    readContext: workflow ? function(_, done) done("class Main {}", null) : null,
+    chooseImage: workflow ? function(done) done("diagram.png", sys.io.File.getBytes(Sys.getCwd() + "/graphical/assets/icons/exosuit-256.png"), null) : null,
+    canCreateWorktree: workflow ? function() return true : null, newWorktree: workflow ? function() {} : null,
+    canOpenGithub: workflow ? function() return true : null, githubRepository: workflow ? function() {} : null,
+    canOpenPullRequest: workflow ? function() return true : null, githubPullRequest: workflow ? function() {} : null});
  }
  public function context():UiContext return contextValue;
  public function submit(frame:LayoutFrame):RenderNode {
@@ -75,7 +101,18 @@ private class PreviewApplication implements DesktopUiApplication {
     var bounds = target.globalBounds();
     contextValue.pointerDown(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
     contextValue.pointerUp(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
+    if (workflowStep == 1) { workflowStep = 2; clickLabel = "Add workspace text"; }
+    else if (workflowStep == 2) { workflowStep = 3; }
+    else if (workflowStep == 4) { workflowStep = 0; }
     host.requestFrame();
+   }
+  }
+  if (workflowStep == 3 && clickLabel == null) {
+   var field:RenderNode = null;
+   root.walk(function(node) { if (field == null && node.semantics != null && node.semantics.label == "Workspace text path") field = node; });
+   if (field != null && contextValue.focusWidget(field.id)) {
+    contextValue.text(UiEventKind.TextInput, "src/Main.hx");
+    workflowStep = 4; clickLabel = "Include text"; host.requestFrame();
    }
   }
   return root;

@@ -28,6 +28,11 @@ class SessionLinksMain {
     require(blocks.length == 3 && blocks[1].kind == "code" && blocks[1].text == "<svg>```</svg>", "Source fidelity");
     var stream = CodexMarkdown.parse("~~~html\n<script>literal</script>");
     require(stream.length == 1 && stream[0].kind == "code" && stream[0].text == "<script>literal</script>", "Unfinished fence fidelity");
-    trace("PASS: session link targets, locations, schemes, streaming and source fidelity");
+    var invalidHunk = workspace.client.SessionDiff.parse("@@ -0,0 +1,2 @@\n-unattributed\n+first\n+second")[0].lines;
+    require(invalidHunk[1].kind == "meta" && invalidHunk[1].oldLine == -1,
+      "Malformed hunk invented removed-line attribution");
+    require(invalidHunk[2].newLine == 1 && invalidHunk[3].newLine == 2,
+      "Malformed row corrupted subsequent valid hunk counters");
+    trace("PASS: session link targets, locations, schemes, streaming, source fidelity and hunk bounds");
   }
 }

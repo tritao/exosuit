@@ -11,6 +11,11 @@ class FakeAgent implements WorkspaceAgentClient {
 	public var chosenModel:Null<String>;
 	public var control:Bool = true;
 	public var acceptActions:Bool = true;
+	public var deferAcceptance:Bool = false;
+	public var pendingAcceptance:Null<Void->Void>;
+	public var uploadEnabled:Bool = false;
+	public var lastImageIds:Null<Array<String>>;
+	public var removedImages:Array<String> = [];
 	public function new() {
 		view = {record:record, activity:"", requests:[], error:null, connectionState:"connected", items:[
 			{id:"user", turn:"turn", kind:"userMessage", title:"", text:"Please inspect this project.", detail:"", state:"completed", truncated:false},
@@ -27,11 +32,18 @@ class FakeAgent implements WorkspaceAgentClient {
 	public function refreshAgents():Void {}
 	public function createAgent(group:String, thread:Null<String>, ?created:AgentRecord->Void, ?defaults:AgentSessionDefaults):Void {}
 	public function deleteAgent(id:String, ?deleted:Void->Void):Void {}
-	public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String, ?accepted:Void->Void, ?expectedNativeName:String):Void {
+	public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String, ?accepted:Void->Void, ?expectedNativeName:String, ?imageIds:Array<String>):Void {
 		actions.push(action + ":" + text + ":" + request);
 		if (action == "model-settings") chosenModel = model;
-		if (accepted != null && acceptActions) accepted();
+		if (action == "prompt") lastImageIds = imageIds;
+		if (accepted != null && acceptActions) {
+			if (deferAcceptance) pendingAcceptance = accepted; else accepted();
+		}
 	}
+	public function uploadAgentImage(id:String, bytes:haxe.io.Bytes, done:(Null<String>, Null<String>)->Void):Void {
+		if (uploadEnabled) done("opaque-image", null); else done(null, "Unavailable");
+	}
+	public function removeAgentImage(id:String, upload:String):Void removedImages.push(upload);
 	public function discoverAgents(group:String, cursor:Null<String>):Void {}
 	public function discoveredAgents():Null<AgentDiscovery> return null;
 	public function agentView(id:String):Null<AgentView> return id == record.id ? view : null;

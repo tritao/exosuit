@@ -5,6 +5,9 @@ typedef CodexMarkdownBlock = {
   var kind:String;
   var text:String;
   var language:String;
+  /** Fence completeness and verbatim body, when this is a code block. */
+  @:optional var closed:Null<Bool>;
+  @:optional var source:Null<String>;
 }
 
 typedef CodexMarkdownInline = {
@@ -90,22 +93,25 @@ class CodexMarkdown {
   public static function parse(value:String):Array<CodexMarkdownBlock> {
     var blocks:Array<CodexMarkdownBlock> = [];
     var prose:Array<String> = [], code:Array<String> = [];
-    var fence = "", language = "";
+    var fence = "", language = "", raw = "";
     function flush():Void {
       if (prose.length > 0) {
         blocks.push({kind: "text", text: prose.join("\n"), language: ""});
         prose = [];
       }
     }
-    for (line in StringTools.replace(value, "\r\n", "\n").split("\n")) {
+    var sourceLines = value.split("\n"), lineNumber = 0;
+    for (sourceLine in sourceLines) {
+      var line = StringTools.endsWith(sourceLine, "\r") ? sourceLine.substr(0, sourceLine.length - 1) : sourceLine;
+      var ending = lineNumber++ < sourceLines.length - 1 ? "\n" : "";
       var trimmed = StringTools.ltrim(line);
       var indent = line.length - trimmed.length;
       if (fence != "") {
         if (indent <= 3 && StringTools.startsWith(trimmed, fence)
           && StringTools.trim(trimmed.substr(fence.length)).split(fence.charAt(0)).join("") == "") {
-          blocks.push({kind: "code", text: code.join("\n"), language: language});
-          fence = ""; code = [];
-        } else code.push(line);
+          blocks.push({kind: "code", text: code.join("\n"), language: language, closed: true, source: raw});
+          fence = ""; code = []; raw = "";
+        } else { code.push(line); raw += sourceLine + ending; }
       } else if (indent <= 3 && (StringTools.startsWith(trimmed, "```") || StringTools.startsWith(trimmed, "~~~"))) {
         flush();
         var marker = trimmed.charAt(0), length = 0;
@@ -121,7 +127,7 @@ class CodexMarkdown {
     }
     flush();
     // An unfinished fence remains a code block while tokens arrive.
-    if (fence != "") blocks.push({kind: "code", text: code.join("\n"), language: language});
+    if (fence != "") blocks.push({kind: "code", text: code.join("\n"), language: language, closed: false, source: raw});
     return blocks;
   }
 }

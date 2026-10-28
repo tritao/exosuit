@@ -39,6 +39,9 @@ private typedef CodexRecoveryPresentation = {
   var retryLabel:Null<String>;
 }
 
+private typedef SessionTextContext = { var path:String; var text:String; }
+private typedef SessionImageDraft = { var name:String; var id:String; }
+
 /** Conversation controls are a client projection; shared provider owns requests and turns. */
 class CodexSessionPanel implements View {
   static inline final MIN_ACTIVITY_HEIGHT:Float = 180;
@@ -69,6 +72,17 @@ class CodexSessionPanel implements View {
   var promptFocusRequested = false;
   var suggestionIndex = 0;
   var dismissSuggestions = false;
+  var addingContext = false;
+  var contextPath = "";
+  var contextError:Null<String> = null;
+  var contextLoading = false;
+  var contextGeneration = 0;
+  var contextRevision = 0;
+  var textContext:Array<SessionTextContext> = [];
+  var imageDrafts:Array<SessionImageDraft> = [];
+  var imageUploading = false;
+  var imageError:Null<String> = null;
+  var imageGeneration = 0;
 
   static function paragraph(value:String):Text {
     var style = new LayoutStyle();
@@ -84,6 +98,18 @@ class CodexSessionPanel implements View {
     button.variant = ButtonVariant.Navigation;
     button.classes.push("viewport-tool");
     return button;
+  }
+
+  static function withTextContext(prompt:String, files:Array<SessionTextContext>):String {
+    var result = prompt;
+    for (file in files) result += "\n\n[Workspace text snapshot: " + file.path + "]\n" + file.text + "\n[End workspace text snapshot]";
+    return result;
+  }
+
+  static function validContextText(value:String):Bool {
+    var bytes = haxe.io.Bytes.ofString(value);
+    for (index in 0...bytes.length) if (bytes.get(index) == 0) return false;
+    return workspace.TextFileContent.validUtf8(bytes);
   }
 
   public function new(getClient:Void -> Null<WorkspaceAgentClient>, resource:String, root:String, frame:Void -> Void,
@@ -215,14 +241,24 @@ class CodexSessionPanel implements View {
     var stateLabel = view.record.state == "reconnecting" ? "Reconnecting…"
       : view.record.state == "reconnect-failed" ? recovery.label : view.record.state;
     var effortModel = findModel(view.models, selectedModel == "" ? view.currentModel : selectedModel);
+    var composedPrompt = withTextContext(prompt, textContext);
+    var promptBytes = haxe.io.Bytes.ofString(composedPrompt).length;
+    var submitLimit = piActive ? 4096 : 8192;
     var submitAction = function(action:String) {
       var allowed = action == "queue" ? canQueue : action == "steer" ? canSteer : canSend;
-      if (allowed && StringTools.trim(prompt) != "") {
-        var sent = prompt;
+      var limit = action == "queue" || action == "steer" ? 4096 : 8192;
+      if (allowed && !contextLoading && !imageUploading && promptBytes <= limit && (StringTools.trim(prompt) != "" || imageDrafts.length > 0)) {
+        var sent = composedPrompt, draft = prompt;
+        var submittedText = textContext.copy(), submittedImageDrafts = imageDrafts.copy();
+        var submittedImages = [for (image in submittedImageDrafts) image.id];
         client.agentAction(id,action,sent,null,null,null,function() {
-          if (prompt == sent) prompt = "";
+          if (prompt == draft) prompt = "";
+          for (file in submittedText) if (textContext.remove(file)) contextRevision++;
+          for (image in submittedImageDrafts) if (imageDrafts.remove(image)) {
+            contextRevision++; client.removeAgentImage(id, image.id);
+          }
           frame();
-        });
+        }, null, submittedImages.length == 0 ? null : submittedImages);
       }
     };
     var submit = function() {if (view.requests.length == 0) submitAction(piActive ? "queue" : "prompt");};
@@ -280,6 +316,21 @@ class CodexSessionPanel implements View {
         new KeyedView("files", filesButton),
         new KeyedView("changes", changesButton)
       ], groupStyle)));
+      if (workspaceActions.newWorktree != null && workspaceActions.canCreateWorktree != null) {
+        var canCreate:Void->Bool = cast workspaceActions.canCreateWorktree;
+        var createWorktree:Void->Void = cast workspaceActions.newWorktree;
+        if (canCreate()) workspaceControls.push(new KeyedView("new-worktree", quietButton("New worktree", createWorktree, "agent-new-worktree")));
+      }
+      if (workspaceActions.githubRepository != null && workspaceActions.canOpenGithub != null) {
+        var canOpen:Void->Bool = cast workspaceActions.canOpenGithub;
+        var open:Void->Void = cast workspaceActions.githubRepository;
+        if (canOpen()) workspaceControls.push(new KeyedView("github", quietButton("Open GitHub", open, "agent-open-github")));
+      }
+      if (workspaceActions.githubPullRequest != null && workspaceActions.canOpenPullRequest != null) {
+        var canOpen:Void->Bool = cast workspaceActions.canOpenPullRequest;
+        var open:Void->Void = cast workspaceActions.githubPullRequest;
+        if (canOpen()) workspaceControls.push(new KeyedView("pull-request", quietButton("Open pull request page", open, "agent-open-pull-request")));
+      }
     }
     var workspaceStyle = new LayoutStyle(); workspaceStyle.width = LayoutAxis.grow(); workspaceStyle.childGap = 8;
     workspaceStyle.wrapMode = haxeon.ui.LayoutWrapMode.Wrap;
@@ -590,7 +641,7 @@ class CodexSessionPanel implements View {
     }
     var send = new Button(piActive ? "Queue message" : "Send", null, function() submitAction(piActive ? "queue" : "prompt"), "codex-send");
     send.variant = ButtonVariant.Primary;
-    send.enabled = (piActive ? canQueue : canSend) && StringTools.trim(prompt) != "";
+    send.enabled = (piActive ? canQueue : canSend) && !contextLoading && !imageUploading && promptBytes <= submitLimit && (StringTools.trim(prompt) != "" || imageDrafts.length > 0);
     var footerStyle = new LayoutStyle();
     footerStyle.width = LayoutAxis.grow();
     footerStyle.childGap = 12;
@@ -599,7 +650,7 @@ class CodexSessionPanel implements View {
     var footerControls:Array<KeyedView> = [new KeyedView("hint",hint)];
     if (piActive) {
       var steer = new Button("Steer now",null,function() submitAction("steer"),"agent-steer");
-      steer.enabled = canSteer && StringTools.trim(prompt) != "";
+      steer.enabled = canSteer && !contextLoading && !imageUploading && promptBytes <= 4096 && StringTools.trim(prompt) != "";
       footerControls.push(new KeyedView("steer",steer));
     }
     footerControls.push(new KeyedView("send",send));
@@ -705,8 +756,101 @@ class CodexSessionPanel implements View {
     composerFrame.padding = new Insets(1, 1, 1, 1);
     composerFrame.background = tokens.border;
     composerFrame.radiusTopLeft = composerFrame.radiusTopRight = composerFrame.radiusBottomLeft = composerFrame.radiusBottomRight = 8;
+    var contextRows:Array<KeyedView> = [];
+    var contextActions:Array<KeyedView> = [];
+    if (workspaceActions != null && workspaceActions.chooseImage != null && view.supportsImageUpload == true && view.record.provider == "codex") {
+      var chooseImage:((Null<String>, Null<haxe.io.Bytes>, Null<String>)->Void)->Void = cast workspaceActions.chooseImage;
+      var imageAction = quietButton(imageUploading ? "Cancel image upload" : imageError == null ? "Add image" : "Try image again", function() {
+        if (imageUploading) { imageGeneration++; imageUploading = false; frame(); return; }
+        var generation = ++imageGeneration;
+        imageUploading = true; imageError = null; frame();
+        chooseImage(function(name, bytes, error) {
+          if (generation != imageGeneration) return;
+          if (error != null || bytes == null || name == null) {
+            imageUploading = false; imageError = error; frame(); return;
+          }
+          client.uploadAgentImage(id, bytes, function(upload, problem) {
+            if (generation != imageGeneration) { if (upload != null) client.removeAgentImage(id, upload); return; }
+            imageUploading = false;
+            if (problem != null || upload == null) imageError = problem == null ? "Image upload failed" : problem;
+            else { imageDrafts.push({name:name, id:upload}); contextRevision++; imageError = null; }
+            frame();
+          });
+        });
+      }, "agent-add-image");
+      imageAction.leadingIcon = IconName.Plus; imageAction.iconSize = 14;
+      imageAction.enabled = control && connectionReady && (imageUploading || imageDrafts.length < 2);
+      contextActions.push(new KeyedView("image-action", imageAction));
+    }
+    for (index in 0...imageDrafts.length) {
+      var image = imageDrafts[index], imageIndex = index;
+      var imageStyle = new LayoutStyle(); imageStyle.width = LayoutAxis.grow(); imageStyle.childGap = 8;
+      var imageLabel = new MiddleEllipsisText("image-label-" + index, image.name + " · image attached", true,
+        TextStyleOverride.text(12, null, tokens.textSecondary));
+      contextRows.push(new KeyedView("image-" + index, new Row("agent-image-" + index, [
+        new KeyedView("name", imageLabel), new KeyedView("remove", quietButton("Remove image", function() {
+          imageDrafts.splice(imageIndex, 1); contextRevision++; client.removeAgentImage(id, image.id); frame();
+        }, "agent-remove-image-" + index))
+      ], imageStyle)));
+    }
+    if (imageError != null) contextRows.push(new KeyedView("image-error", new Text(imageError, null, tokens.danger)));
+    if (workspaceActions != null && workspaceActions.readContext != null) {
+      var readContext:(String, (Null<String>, Null<String>)->Void)->Void = cast workspaceActions.readContext;
+      var addContext = quietButton(addingContext ? "Cancel adding text" : "Add workspace text", function() {
+        addingContext = !addingContext; contextGeneration++; contextLoading = false; contextError = null; frame();
+      }, "agent-add-context");
+      addContext.enabled = control && connectionReady;
+      contextActions.push(new KeyedView("add", addContext));
+      if (addingContext) {
+        var pathStyle = new LayoutStyle(); pathStyle.width = LayoutAxis.grow(); pathStyle.height = LayoutAxis.fixed(32);
+        var pathField = new TextField("agent-context-path", contextPath, function(value) { contextPath = value; contextError = null; frame(); }, pathStyle);
+        pathField.label = "Workspace text path"; pathField.placeholder = "Path relative to session directory";
+        pathField.enabled = !contextLoading;
+        contextRows.push(new KeyedView("path", pathField));
+        var load = quietButton(contextLoading ? "Reading…" : "Include text", function() {
+          var path = StringTools.trim(contextPath);
+          if (path == "" || ~/[\x00-\x1f\x7f]/.match(path)) { contextError = "Enter a valid workspace path."; frame(); return; }
+          var generation = ++contextGeneration;
+          contextLoading = true; contextError = null; frame();
+          readContext(path, function(value, error) {
+            if (generation != contextGeneration) return;
+            contextLoading = false;
+            if (error != null || value == null) contextError = error == null ? "Could not read workspace text" : error;
+            else if (!validContextText(value))
+              contextError = "Only UTF-8 text files can be included.";
+            else if (textContext.length >= 2 || haxe.io.Bytes.ofString(value).length > 4096)
+              contextError = "Add up to two text files of at most 4096 bytes each.";
+            else {
+              textContext.push({path:path, text:value}); contextRevision++; contextPath = ""; addingContext = false;
+            }
+            frame();
+          });
+        }, "agent-include-context");
+        load.enabled = !contextLoading && StringTools.trim(contextPath) != "" && textContext.length < 2;
+        contextRows.push(new KeyedView("load", load));
+      }
+    }
+    if (contextActions.length > 0) {
+      var actionStyle = new LayoutStyle(); actionStyle.width = LayoutAxis.grow(); actionStyle.childGap = 6;
+      actionStyle.wrapMode = haxeon.ui.LayoutWrapMode.Wrap;
+      contextRows.unshift(new KeyedView("actions", new Row("agent-context-actions", contextActions, actionStyle)));
+    }
+    for (index in 0...textContext.length) {
+      var file = textContext[index], fileIndex = index;
+      var fileStyle = new LayoutStyle(); fileStyle.width = LayoutAxis.grow(); fileStyle.childGap = 8;
+      var pathLabel = new MiddleEllipsisText("context-file-label-" + index, file.path + " · included as text", true,
+        TextStyleOverride.text(12, null, tokens.textSecondary));
+      contextRows.push(new KeyedView("file-" + index, new Row("agent-context-file-" + index, [
+        new KeyedView("path", pathLabel), new KeyedView("remove", quietButton("Remove", function() {
+          textContext.splice(fileIndex, 1); contextRevision++; frame();
+        }, "agent-remove-context-" + index))
+      ], fileStyle)));
+    }
+    if (contextError != null) contextRows.push(new KeyedView("error", new Text(contextError, null, tokens.danger)));
+    if (promptBytes > submitLimit) contextRows.push(new KeyedView("limit", new Text("Message and included text exceed the " + submitLimit + " byte limit.", null, tokens.danger)));
     rows.push(new KeyedView("composer", new Column("codex-composer-frame", [new KeyedView("content", new Column("codex-composer", [
       new KeyedView("prompt", new CodexPromptNode(promptNode)),
+      new KeyedView("context", new Column("agent-context", contextRows)),
       new KeyedView("suggestions", new Column("agent-command-suggestions",completionRows)),
       new KeyedView("commands-error", new Text(view.commandsError == null ? "" : view.commandsError)),
       new KeyedView("models", new Row("codex-model-controls", modelControls, modelControlsStyle)),

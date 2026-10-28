@@ -701,6 +701,22 @@ class ScmGitTestMain {
 		for (branch in initialBranches.value) if (branch.current && !branch.remote) currentReference = branch.reference;
 		require(currentReference != null, "Git branch listing did not identify the current local branch");
 		var originalBranchReference:String = cast currentReference;
+		require(mutationHandle.features().worktrees, "Trusted Git repository did not advertise worktrees");
+		for (name in ["../escape", "CON", "name.", "existing/path"]) {
+			var invalid = applyOperation(mutationHandle, gitScheduler, ScmOperation.CreateWorktree(name, "invalid-test"), 7650);
+			require(invalid.error != null, "Unsafe worktree directory accepted: " + name);
+		}
+		var invalidBranch = applyOperation(mutationHandle, gitScheduler, ScmOperation.CreateWorktree("branch-invalid", "-unsafe"), 76500);
+		require(invalidBranch.error != null && !sys.FileSystem.exists(mutationRoot + "/branch-invalid"), "Invalid branch created a worktree");
+		var worktree = applyOperation(mutationHandle, gitScheduler, ScmOperation.CreateWorktree("linked-worktree", "linked-worktree-test"), 76501);
+		require(worktree.error == null && sys.FileSystem.exists(mutationRoot + "/linked-worktree/tracked.txt"), "Could not create a linked worktree");
+		require(runGit(git, gitScheduler, ["symbolic-ref", "--short", "HEAD"], mutationRoot, 76502).stdout.toString()
+			== originalBranchReference.substring("refs/heads/".length) + "\n", "Creating a worktree changed the original branch");
+		var existingPath = applyOperation(mutationHandle, gitScheduler, ScmOperation.CreateWorktree("linked-worktree", "another-branch"), 76503);
+		require(existingPath.error != null, "Existing worktree directory was accepted");
+		var existingBranch = applyOperation(mutationHandle, gitScheduler, ScmOperation.CreateWorktree("other-worktree", "linked-worktree-test"), 76504);
+		require(existingBranch.error != null, "Existing branch was accepted");
+		runGit(git, gitScheduler, ["worktree", "remove", "--force", mutationRoot + "/linked-worktree"], mutationRoot, 76505);
 		var createBranchResult = applyOperation(mutationHandle, gitScheduler, ScmOperation.CreateBranch("scm-branch-test"), 7652);
 		require(createBranchResult.error == null && runGit(git, gitScheduler, ["symbolic-ref", "--short", "HEAD"], mutationRoot, 7653).stdout.toString() == "scm-branch-test\n",
 			"Git branch creation did not create and check out the requested branch");
