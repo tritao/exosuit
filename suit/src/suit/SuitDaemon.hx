@@ -32,7 +32,8 @@ class SuitDaemon {
 	var refreshedAt:Float = 0;
 	var idleSince:Float;
 	var stopAfterJobs:Bool = false;
-	var stopNow:Bool = false;
+	/** When set, the loop ends at this time; the delay lets the reply to a stop or quit request flush. */
+	var stopAt:Float = -1;
 	var menuRequested:Bool = false;
 	final idleSeconds:Float;
 
@@ -78,7 +79,7 @@ class SuitDaemon {
 	}
 
 	function loop():Void {
-		while (!stopNow) {
+		while (stopAt < 0 || Sys.time() < stopAt) {
 			runtime.events.wait(jobs.length > 0 || clients.length > 0 ? 0.1 : 1.0);
 			for (_ in 0...128)
 				if (!runtime.events.poll())
@@ -97,8 +98,8 @@ class SuitDaemon {
 				}
 			if (Sys.time() - refreshedAt >= REFRESH_SECONDS)
 				refresh();
-			if (stopAfterJobs && jobs.length == 0)
-				break;
+			if (stopAfterJobs && jobs.length == 0 && stopAt < 0)
+				stopAt = Sys.time() + 0.3;
 			if (inventory.processes.length > 0 || clients.length > 0 || jobs.length > 0)
 				idleSince = Sys.time();
 			else if (Sys.time() - idleSince >= idleSeconds)
@@ -245,7 +246,7 @@ class SuitDaemon {
 				quitEverything();
 				return {ok: true, terminating: count};
 			case "stop":
-				stopNow = true;
+				stopAt = Sys.time() + 0.3;
 				return {ok: true};
 			default:
 				return {ok: false, error: "unknown request"};
