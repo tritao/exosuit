@@ -1,0 +1,12 @@
+{
+  "interface": "ProcessKit",
+  "package": "processkit.ffi",
+  "modules": {
+    "functions": "ProcessKit",
+    "types": "ProcessKitTypes",
+    "constants": "ProcessKitConstants"
+  },
+  "typeNames": {
+    "processkit_list": "ProcessListHandle"
+  }
+}

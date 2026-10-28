@@ -31,6 +31,14 @@ def main() -> int:
         status = run_cli(root_dir, agent_arguments)
         if status != 0:
             return status
+        # suit, the per-user tray daemon that tracks the processes editors and workspaces start.
+        suit_arguments = ["build", "--project", str(root_dir / "suit" / "haxeon.json")]
+        if self_hosted:
+            suit_arguments.append("--self-hosted")
+        suit_arguments.extend(sys.argv[1:])
+        status = run_cli(root_dir, suit_arguments)
+        if status != 0:
+            return status
         arguments = ["build", "--project", str(root_dir / "graphical" / "haxeon.json")]
         if self_hosted:
             arguments.append("--self-hosted")

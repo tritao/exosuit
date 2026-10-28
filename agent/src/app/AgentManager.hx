@@ -711,6 +711,9 @@ class AgentManager {
 						};
 						AtomicFile.write(endpointPath, Json.stringify(descriptor) + "\n");
 						ready = true;
+						// Fire-and-forget: suit (the tray daemon) lists, and can cooperatively stop, this manager.
+						suit.SuitClient.register("workspace-manager", {root: options.root, stateDir: directory, generation: generation});
+						if (options.background) suit.SuitClient.ensureDaemon();
 						if (!options.background) emitDiscovery(descriptor, options.wire);
 					}
 					newline = pending.indexOf("\n");
@@ -722,6 +725,7 @@ class AgentManager {
 				}
 				if (AgentManagerNative.stopRequested()) { exitCode = 0; break; }
 				if (consumeRestartRequest(directory, generation)) { restartRequested = true; exitCode = 0; break; }
+				if (consumeStopRequest(directory, generation)) { exitCode = 0; break; }
 				if (!ready && Sys.time() >= deadline)
 					throw "Workspace daemon did not become ready";
 				if (ready && AgentManagerNative.fileIdentity(database) != databaseIdentity)
@@ -750,6 +754,7 @@ class AgentManager {
 			}
 		}
 		cleanupEndpoint(endpointPath, generation);
+		suit.SuitClient.unregister();
 		if (relayBootstrap != null && FileSystem.exists(relayBootstrap))
 			try FileSystem.deleteFile(relayBootstrap) catch (_:Dynamic) {}
 		try AgentManagerNative.releaseLock(lock) catch (_:Dynamic) { exitCode = 1; }
@@ -791,6 +796,19 @@ class AgentManager {
 		if (!isObject(request) || intField(request, "version") != 1 || stringField(request, "generation") != generation)
 			return false;
 		return true;
+	}
+
+	/**
+		suit's graceful stop: like a restart request for this generation, except that the manager does not
+		start again. The daemon stops as on any manager exit; relay settings and device grants stay on disk.
+	**/
+	static function consumeStopRequest(directory:String, generation:String):Bool {
+		var path = Path.join([directory, "stop-request.json"]);
+		if (!FileSystem.exists(path)) return false;
+		var request:Dynamic = null;
+		try request = readPrivateJson(path, 4096) catch (_:Dynamic) {}
+		try FileSystem.deleteFile(path) catch (_:Dynamic) {}
+		return isObject(request) && intField(request, "version") == 1 && stringField(request, "generation") == generation;
 	}
 
 	static function ensureCredential(path:String):Void {

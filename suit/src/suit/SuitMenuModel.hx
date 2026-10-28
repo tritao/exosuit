@@ -1,0 +1,109 @@
+package suit;
+
+import suit.SuitInventory.SuitProcess;
+
+/** Where a menu is built: the native tray popup, or text for `suit menu` and tests. Parents are submenu ids; 0 is the root. */
+interface SuitMenuSink {
+	/** A command item; disabled (a label) when `action` is null. */
+	function item(label:String, action:Null<Void->Void>, parent:Int):Void;
+	function submenu(label:String, parent:Int):Int;
+	function separator(parent:Int):Void;
+}
+
+/** What the menu's commands do; the daemon supplies the real ones. */
+typedef SuitMenuHandlers = {
+	var terminate:Array<SuitProcess>->Void;
+	var openViewer:Array<String>->Void;
+	var quit:Void->Void;
+}
+
+/** The tray menu: a title with counts, processes grouped by editor (orphans last), remote access, then bulk actions. */
+class SuitMenuModel {
+	static inline var GROUP_LIMIT:Int = 30;
+
+	public static function build(menu:SuitMenuSink, inventory:SuitInventory, handlers:SuitMenuHandlers):Void {
+		menu.item(inventory.summary(), null, 0);
+		var group:Null<String> = null, shown = 0;
+		for (process in inventory.processes) {
+			if (process.group != group) {
+				group = process.group;
+				shown = 0;
+				menu.separator(0);
+				menu.item(group, null, 0);
+			}
+			if (shown++ >= GROUP_LIMIT) {
+				if (shown == GROUP_LIMIT + 1)
+					menu.item("    … more in the process viewer", null, 0);
+				continue;
+			}
+			var target = process;
+			var entry = menu.submenu("    " + SuitReport.label(process), 0);
+			var relay = SuitReport.relayState(process);
+			if (relay.length > 0)
+				menu.item("Remote access: " + relay, null, entry);
+			if (!process.registered)
+				menu.item("Found by scanning; not registered", null, entry);
+			menu.item(process.kind == "editor" ? "Close" : "Terminate", function() handlers.terminate([target]), entry);
+		}
+		var hosted = inventory.hosted();
+		if (hosted.length > 0) {
+			menu.separator(0);
+			var remote = menu.submenu("Remote access (" + hosted.length + ")", 0);
+			for (process in hosted) {
+				var target = process;
+				menu.item(SuitReport.workspace(process) + ": " + SuitReport.relayState(process), null, remote);
+				menu.item("    Stop hosting " + SuitReport.workspace(process), function() handlers.terminate([target]), remote);
+			}
+			menu.separator(remote);
+			menu.item("Stop all hosting", function() handlers.terminate(SuitActions.hosting(inventory)), remote);
+			menu.item("Open Remote Access…", function() handlers.openViewer(["watch", "--relay"]), remote);
+		}
+		menu.separator(0);
+		var orphans = inventory.orphans();
+		menu.item("Terminate orphaned processes (" + orphans.length + ")",
+			orphans.length == 0 ? null : function() handlers.terminate(SuitActions.orphans(inventory)), 0);
+		var background = inventory.background();
+		menu.item("Terminate all background processes (" + background.length + ")",
+			background.length == 0 ? null : function() handlers.terminate(SuitActions.background(inventory)), 0);
+		menu.item("Open process viewer…", function() handlers.openViewer(["watch"]), 0);
+		menu.separator(0);
+		menu.item("Quit Exosuit", handlers.quit, 0);
+	}
+}
+
+/** Renders a menu as indented text; disabled items in brackets. */
+class SuitTextMenu implements SuitMenuSink {
+	final lines:Array<String> = [];
+	final depth:Map<Int, Int> = [0 => 0];
+	var nextId:Int = 1;
+
+	public function new() {}
+
+	public function item(label:String, action:Null<Void->Void>, parent:Int):Void
+		lines.push(indent(parent) + (action == null ? "[" + StringTools.trim(label) + "]" : StringTools.trim(label)));
+
+	public function submenu(label:String, parent:Int):Int {
+		var id = nextId++;
+		depth.set(id, level(parent) + 1);
+		lines.push(indent(parent) + StringTools.trim(label) + " >");
+		return id;
+	}
+
+	public function separator(parent:Int):Void
+		lines.push(indent(parent) + "----");
+
+	function indent(parent:Int):String {
+		var result = "";
+		for (_ in 0...level(parent))
+			result += "    ";
+		return result;
+	}
+
+	function level(parent:Int):Int {
+		var value = depth.get(parent);
+		return value == null ? 0 : value;
+	}
+
+	public function toString():String
+		return lines.join("\n");
+}

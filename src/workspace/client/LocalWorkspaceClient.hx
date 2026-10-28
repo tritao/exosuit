@@ -532,6 +532,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     errors = "";
     helperMode = mode;
     try {
+      suit.SuitClient.editorUsesRoot(path);
       var arguments = [launcher, "--manager", path];
       if (mode == "configure-relay") {
         arguments.push("--configure-relay");
@@ -558,6 +559,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
       for (key => value in environment)
         result.set(key, value);
     result.set("EXOSUIT_AGENT_LAUNCHER", launcher);
+    // Services started for this editor name it as their owner in suit's registry.
+    result.set(suit.SuitClient.OWNER_VARIABLE, suit.SuitClient.ownerValue());
     for (key in ["EXOSUIT_AGENT_STATE_HOME", "EXOSUIT_AGENT_MANAGED_UPDATES", "EXOSUIT_STABLE_BUNDLE"])
       if (!result.exists(key)) {
         var inheritedValue = Sys.getEnv(key);
