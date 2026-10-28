@@ -2,7 +2,7 @@ package suit;
 
 import suit.SuitInventory.SuitProcess;
 
-/** The process selections behind the menu items and CLI verbs. */
+/** The process selections behind the menu items and CLI verbs. Bulk selections hold only exosuit's processes. */
 class SuitActions {
 	public static function orphans(inventory:SuitInventory):Array<SuitProcess>
 		return inventory.orphans();
@@ -11,7 +11,7 @@ class SuitActions {
 	public static function background(inventory:SuitInventory):Array<SuitProcess>
 		return inventory.background();
 
-	/** Quit: background services first so editors do not respawn them, then the editors. */
+	/** Quit: exosuit's background services first so editors do not respawn them, then the editors. */
 	public static function everything(inventory:SuitInventory):Array<SuitProcess>
 		return inventory.background().concat(inventory.editors());
 

@@ -11,13 +11,23 @@ import suit.SuitInventory.SuitProcess;
 import workspace.transport.NativeRpcHub;
 import workspace.transport.NativeRpcTransport;
 
+typedef SuitLockHandle = hl.Abstract<"realtime_file_lock">;
+
+/** The single-instance lock: the exclusive file lock the workspace manager also uses. Null when another process holds it. */
+@:hlNative("haxeon_runtime", "__host_file_lock_acquire")
+extern function acquireLock(path:String):Null<SuitLockHandle>;
+
+@:hlNative("haxeon_runtime", "__host_file_lock_release")
+extern function releaseLock(lock:SuitLockHandle):Void;
+
 /**
 	The per-user daemon: one per user (an exclusive lock in suit's home), a control endpoint for the CLI,
 	and on Windows the tray icon.
 
 	Idle cost: it sleeps in the NativeKit event wait, which a tray click or a control connection wakes,
 	and rescans processes every REFRESH_SECONDS to keep the tooltip current. It exits after
-	`EXOSUIT_SUIT_IDLE_SECONDS` (default 120) with nothing to track: no editor and no background process.
+	`EXOSUIT_SUIT_IDLE_SECONDS` (default 120) with nothing of exosuit's to track: processes it did not
+	start (a terminal build's compiler worker) do not keep it running.
 **/
 class SuitDaemon {
 	static inline var REFRESH_SECONDS:Float = 10;
@@ -43,7 +53,7 @@ class SuitDaemon {
 ");
 			return 1;
 		}
-		var lock = SuitNative.acquireLock(Path.join([home, "suit.lock"]));
+		var lock = acquireLock(Path.join([home, "suit.lock"]));
 		if (lock == null)
 			return 0; // Another suit owns this home; starting one is always safe to repeat.
 		var code = 0;
@@ -56,7 +66,7 @@ class SuitDaemon {
 			try sys.io.File.saveContent(Path.join([home, "daemon-error.txt"]), Std.string(error) + "\n") catch (_:Dynamic) {}
 		}
 		try FileSystem.deleteFile(Path.join([home, "daemon.json"])) catch (_:Dynamic) {}
-		SuitNative.releaseLock(lock);
+		releaseLock(lock);
 		return code;
 	}
 
@@ -99,7 +109,7 @@ class SuitDaemon {
 				refresh();
 			if (stopAfterJobs && jobs.length == 0 && stopAt < 0)
 				stopAt = Sys.time() + 0.3;
-			if (inventory.processes.length > 0 || clients.length > 0 || jobs.length > 0)
+			if (inventory.owned().length > 0 || clients.length > 0 || jobs.length > 0)
 				idleSince = Sys.time();
 			else if (Sys.time() - idleSince >= idleSeconds)
 				break;

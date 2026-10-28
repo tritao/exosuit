@@ -712,7 +712,8 @@ class AgentManager {
 						AtomicFile.write(endpointPath, Json.stringify(descriptor) + "\n");
 						ready = true;
 						// Fire-and-forget: suit (the tray daemon) lists, and can cooperatively stop, this manager.
-						suit.SuitClient.register("workspace-manager", {root: options.root, stateDir: directory, generation: generation});
+						suit.SuitClient.registerWorkspaceService(suit.SuitKind.WorkspaceManager,
+							{root: options.root, stateDir: directory, generation: generation});
 						if (options.background) suit.SuitClient.ensureDaemon();
 						if (!options.background) emitDiscovery(descriptor, options.wire);
 					}
@@ -803,12 +804,12 @@ class AgentManager {
 		start again. The daemon stops as on any manager exit; relay settings and device grants stay on disk.
 	**/
 	static function consumeStopRequest(directory:String, generation:String):Bool {
-		var path = Path.join([directory, "stop-request.json"]);
+		var path = suit.WorkspaceStopRequest.path(directory);
 		if (!FileSystem.exists(path)) return false;
 		var request:Dynamic = null;
-		try request = readPrivateJson(path, 4096) catch (_:Dynamic) {}
+		try request = readPrivateJson(path, suit.WorkspaceStopRequest.MAX_BYTES) catch (_:Dynamic) {}
 		try FileSystem.deleteFile(path) catch (_:Dynamic) {}
-		return isObject(request) && intField(request, "version") == 1 && stringField(request, "generation") == generation;
+		return suit.WorkspaceStopRequest.matches(request, generation);
 	}
 
 	static function ensureCredential(path:String):Void {
