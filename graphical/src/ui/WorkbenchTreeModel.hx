@@ -113,8 +113,9 @@ class WorkbenchTreeModel implements TreeViewModel {
 	public function buildItem(key:String):View {
 		var row = WorkbenchRowKey.parse(key);
 		if (row == null) return new Text("");
-		var editor = row.kind == WorkbenchRowKind.Group ? groupEditor : row.kind == WorkbenchRowKind.Agent ? agentEditor : null;
-		var editing = editor == null ? null : editor(row.id);
+		var editing:Null<View> = null;
+		if (row.kind == WorkbenchRowKind.Group && groupEditor != null) editing = groupEditor(row.id);
+		if (row.kind == WorkbenchRowKind.Agent && agentEditor != null) editing = agentEditor(row.id);
 		if (editing != null) return editing;
 		switch row.kind {
 			case WorkbenchRowKind.Group:

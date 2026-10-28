@@ -59,6 +59,16 @@ class ActivityBarMenu {
 		if (sidebar.resetOrder()) changed();
 	}
 
+	/**
+		After a window layout's own sidebar restore, put back the user's rail from `saved` (the user setting). Layouts saved
+		before the rail was kept for every window carry their own order and hidden icons: while the setting is still
+		empty, the first such layout restored becomes the user's rail, once.
+	**/
+	public function restoreUserChoices(saved:String, layoutSaved:Bool):Void {
+		if (saved != "") sidebar.restoreDestinations(saved);
+		else if (layoutSaved && sidebar.customDestinations) changed();
+	}
+
 	/** A drag on the rail moved `id` before `before`, or to the end. */
 	public function move(id:String, before:Null<String>):Void {
 		if (sidebar.moveMode(id, before)) changed();

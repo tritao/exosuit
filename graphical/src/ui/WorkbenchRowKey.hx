@@ -2,12 +2,6 @@ package ui;
 
 import workspace.service.WorkspaceProtocol.WorkspaceGroup;
 
-enum WorkbenchRowKind {
-	Group;
-	Terminal;
-	Agent;
-}
-
 /**
 	A Workbench tree row: what it shows and that thing's id. The tree stores rows as strings (`g:`, `t:` or `a:` plus the
 	id); this is the one place that writes and reads that spelling.
@@ -29,9 +23,9 @@ class WorkbenchRowKey {
 		if (key == null || key.length < 3 || key.charAt(1) != ":") return null;
 		var id = key.substring(2);
 		return switch key.charAt(0) {
-			case "g": new WorkbenchRowKey(Group, id);
-			case "t": new WorkbenchRowKey(Terminal, id);
-			case "a": new WorkbenchRowKey(Agent, id);
+			case "g": new WorkbenchRowKey(WorkbenchRowKind.Group, id);
+			case "t": new WorkbenchRowKey(WorkbenchRowKind.Terminal, id);
+			case "a": new WorkbenchRowKey(WorkbenchRowKind.Agent, id);
 			default: null;
 		};
 	}
@@ -55,20 +49,20 @@ class WorkbenchRowKey {
 		var row = parse(key);
 		if (row == null) return null;
 		return switch row.kind {
-			case Group: var group = model.groups.get(row.id); group == null ? null : group.parent;
-			case Terminal: var terminal = model.terminals.get(row.id); terminal == null ? null : terminal.group;
-			case Agent: var agent = model.agents.get(row.id); agent == null ? null : agent.group;
+			case WorkbenchRowKind.Group: var group = model.groups.get(row.id); group == null ? null : group.parent;
+			case WorkbenchRowKind.Terminal: var terminal = model.terminals.get(row.id); terminal == null ? null : terminal.group;
+			case WorkbenchRowKind.Agent: var agent = model.agents.get(row.id); agent == null ? null : agent.group;
 		};
 	}
 
 	function owningGroup(model:WorkbenchTreeModel):Null<WorkspaceGroup> {
-		var groupId = kind == Group ? id : parentGroupId(model, toString());
+		var groupId = kind == WorkbenchRowKind.Group ? id : parentGroupId(model, toString());
 		return groupId == null ? null : model.groups.get(groupId);
 	}
 
 	public function toString():String return switch kind {
-		case Group: group(id);
-		case Terminal: terminal(id);
-		case Agent: agent(id);
+		case WorkbenchRowKind.Group: group(id);
+		case WorkbenchRowKind.Terminal: terminal(id);
+		case WorkbenchRowKind.Agent: agent(id);
 	};
 }

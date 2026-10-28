@@ -439,7 +439,7 @@ class ExosuitApp implements DesktopUiApplication {
 			var saved = defaultSidebar, layoutSaved = false;
 			for (line in lines) if (StringTools.startsWith(line, "B\tsidebar\t1\t")) { saved = line.substring(12); layoutSaved = true; }
 			sidebar.restore(saved);
-			restoreActivityBar(layoutSaved);
+			activityMenu.restoreUserChoices(application.settings.current.activityBar, layoutSaved);
 		};
 		host.activateSearch = function() showSidebarMode("search");
 		host.restoreAgent=makeAgentTab;
@@ -3594,16 +3594,6 @@ class ExosuitApp implements DesktopUiApplication {
 	/** The rail's shown destinations and order are the user's, kept for every window and folder like VS Code's. */
 	function saveActivityBar():Void {
 		application.settings.store.set("appearance/workbench/activity_bar", haxeon.ui.properties.PropertyValue.Text(sidebar.encodeDestinations()));
-	}
-
-	/**
-		After a layout's sidebar restore, put back the user's rail. Layouts saved before the rail was kept for every window
-		carry their own order and hidden icons: the first such layout restored becomes the user's rail, once.
-	**/
-	function restoreActivityBar(layoutSaved:Bool):Void {
-		var saved = application.settings.current.activityBar;
-		if (saved != "") sidebar.restoreDestinations(saved);
-		else if (layoutSaved && sidebar.customDestinations) saveActivityBar();
 	}
 
 	function showActivityBarMenu(id:Null<String>, event:UiEvent):Void {
