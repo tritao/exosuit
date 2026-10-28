@@ -334,7 +334,7 @@ def test_relay(base: Path) -> None:
     agent_state = base / "agent-state"
     relay = Relay(base)
     suit = Suit(base, {
-        "EXOSUIT_SUIT_IDLE_SECONDS": "3", "EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP": "1", "EXOSUIT_RELAY_VIA_SUIT": "1",
+        "EXOSUIT_SUIT_IDLE_SECONDS": "12", "EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP": "1", "EXOSUIT_RELAY_VIA_SUIT": "1",
         "EXOSUIT_RELAY_TEST_CREDENTIALS_DIR": str(credentials), "EXOSUIT_AGENT_STATE_HOME": str(agent_state),
         "EXOSUIT_SUIT_LOGIN_KEY": "HKCU\\Software\\ExosuitSuitTest\\unused"})
     # What the editor sets for the workspace manager it starts. suit's environment lacks it: its on-demand
@@ -345,6 +345,10 @@ def test_relay(base: Path) -> None:
     pipe: PipeDaemon | None = None
     try:
         assert "started" in suit("start")
+        # An editor is open (this test process stands in for it), so suit has something to track.
+        editor_record = suit.home / "registry" / f"{os.getpid()}.json"
+        editor_record.write_text(json.dumps({"version": 1, "pid": os.getpid(), "kind": "editor",
+                                             "registeredAt": time.time() * 1000, "roots": [str(workspace)]}))
         # The editor's side: start the workspace service and turn on remote access.
         for arguments in (["--detach"], ["--configure-relay", relay.origin]):
             result = subprocess.run([*manager, *arguments], env=editor_environment, timeout=120, capture_output=True, text=True)
@@ -369,12 +373,13 @@ def test_relay(base: Path) -> None:
         status_code, _ = relay.http("PUT", f"/v1/machines/{machine}/devices/{device}", machine_token, {"token": device_token})
         assert status_code in (201, 204), status_code
 
-        # The editor goes away: its workspace service stops. suit keeps the machine socket.
+        # The editor goes away, and its workspace service stops. suit keeps the machine socket.
+        editor_record.unlink()
         manager_pid = json.loads((state / "endpoint.json").read_text())["managerPid"]
         assert "stopped" in suit("kill", str(manager_pid))
         wait_until(lambda: not (state / "endpoint.json").exists(), 30, "the workspace manager did not stop")
         wait_until(lambda: not suit.hosts()[0]["serviceRunning"], 30, "suit still shows the service running")
-        time.sleep(6)  # twice suit's idle timeout, with nothing registered
+        time.sleep(26)  # twice suit's idle timeout (it rescans every 10 s), with nothing registered
         assert suit.running(), "suit idled out while hosting"
         assert suit.hosts()[0]["state"] == "connected", suit.hosts()
         print("  service stopped; suit stays up and connected past its idle timeout")
@@ -423,6 +428,52 @@ def test_relay(base: Path) -> None:
             assert parse_envelope(answer)[2] == b"pong through suit", answer
             assert suit.hosts()[0]["starts"] == starts, "suit started a service although a daemon was attached"
             print("  frames pass both ways between a device and the attached daemon")
+
+            # Two clients: both listed with their details, one disconnected from the CLI, the list follows.
+            second, second_token = secrets.token_hex(16), secrets.token_hex(32)
+            status_code, _ = relay.http("PUT", f"/v1/machines/{machine}/devices/{second}", machine_token, {"token": second_token})
+            assert status_code in (201, 204), status_code
+            socket_d = relay.device_socket(machine, second, second_token); devices.append(socket_d)
+            assert socket_d.status == 101, socket_d.status
+            socket_d.send(envelope(second, b"second client"))
+            report = {"devices": [{"deviceId": device, "grants": ["workspace.files.read"], "connected": True}],
+                      "pending": [second], "open": {"terminals": 1, "agents": 2}}
+            pipe.send(bytes([0x11]) + json.dumps(report).encode())
+            def clients() -> dict:
+                return {client["id"]: client for client in suit.hosts()[0]["clients"]}
+            listed = wait_until(lambda: (lambda value: value if set(value) == {device, second}
+                                         and value[device]["kind"] == "device" and value[second]["kind"] == "pairing" else None)(clients()),
+                                15, f"suit does not list both clients: {suit('relay', 'list')}")
+            assert listed[device]["grants"] == ["workspace.files.read"], listed
+            for client in listed.values():
+                assert client["connectedAt"] > 0 and client["lastActivity"] >= client["connectedAt"] and client["framesIn"] >= 1, client
+            view = suit.hosts()[0]
+            assert view["open"] == {"terminals": 1, "agents": 2}, view
+            text = suit("relay", "list")
+            assert device in text and second in text and "2 clients connected" in text and "1 terminal(s), 2 agent session(s)" in text, text
+            assert "2 devices connected" in json.loads(suit("status", "--json"))["tooltip"]
+            menu = suit("menu")
+            assert f"device {device[:12]}" in menu and f"pairing request {second[:12]}" in menu and "Disconnect" in menu, menu
+            output = suit("relay", "disconnect", device[:8])
+            assert f"disconnected {device}" in output, output
+            reset = None
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline and reset is None:
+                message = pipe.receive(1)
+                if message and message[0] == 2 and message[1:17].hex() == device:
+                    reset = message
+            assert reset is not None, "the disconnected client's session was not reset in the daemon"
+            wait_until(lambda: set(clients()) == {second}, 10, "the disconnected client is still listed")
+            socket_b.send(envelope(device, b"after disconnect"))
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                message = pipe.receive(0.5)
+                assert not (message and message[0] == 1 and message[1:17].hex() == device), "a disconnected client's frame was forwarded"
+            assert "1 device connected" in json.loads(suit("status", "--json"))["tooltip"]
+            # The other client closes its socket: the Worker resets its channel and suit drops it at once.
+            socket_d.close()
+            wait_until(lambda: not clients(), 10, "a closed client is still listed")
+            print("  two clients listed with details; one disconnected from the CLI; a closed one dropped promptly")
             pipe.close(); pipe = None
             socket_b.close()
 
@@ -435,7 +486,7 @@ def test_relay(base: Path) -> None:
             probe.close()
             return probe.status == 503
         wait_until(device_refused, 30, "the relay still sees the machine online after Stop hosting", interval=0.5)
-        wait_until(lambda: not suit.running(), 30, "suit did not idle out once hosting was paused")
+        wait_until(lambda: not suit.running(), 45, "suit did not idle out once hosting was paused")
         print("  Stop hosting paused the workspace; the relay sees it offline and suit idled out")
 
         # Resume without suit running, then suit hosts again from its records when it starts.
@@ -450,7 +501,8 @@ def test_relay(base: Path) -> None:
     except BaseException:
         print("--- suit relay list\n" + suit.run("relay", "list", check=False).stdout, file=sys.stderr)
         print("--- worker log\n" + relay.tail(), file=sys.stderr)
-        for log in agent_state.glob("workspaces/*/manager.log"):
+        for log in [*agent_state.glob("workspaces/*/manager.log"), *agent_state.glob("workspaces/*/relay-*.json"),
+                    *suit.home.glob("*.json"), *suit.home.glob("*.txt"), *suit.home.glob("relay-hosts/*.json")]:
             print(f"--- {log}\n" + log.read_text(errors="replace")[-3000:], file=sys.stderr)
         raise
     finally:
