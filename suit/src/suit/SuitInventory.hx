@@ -264,6 +264,11 @@ class SuitInventory {
 		var editorPids = new Map<Int, SuitProcess>();
 		var claimed = new Map<String, SuitProcess>();
 		var haxeonInUse = false;
+		var hostedWorkspaces = new Map<String, Bool>();
+		for (host in suit.relay.SuitRelayHosts.active()) {
+			hostedWorkspaces.set("state:" + rootKey(host.stateDir), true);
+			hostedWorkspaces.set("root:" + rootKey(host.root), true);
+		}
 		for (process in processes) {
 			if (process.source == Scanned)
 				continue;
@@ -294,7 +299,7 @@ class SuitInventory {
 					holder = SuitKinds.headsOwnGroup(process.kind) ? process : null;
 				case NoEditorUsesRoot:
 					holder = process.root == null ? null : claimed.get(rootKey(process.root));
-					process.orphaned = holder == null;
+					process.orphaned = holder == null && !keptByHosting(process, hostedWorkspaces);
 				case NoHaxeonUser:
 					process.orphaned = !haxeonInUse;
 				case OwnerGone:
@@ -323,6 +328,17 @@ class SuitInventory {
 			normalized = normalized.substr(0, normalized.length - 1);
 		var name = Path.withoutDirectory(normalized);
 		return name.length > 0 ? name : normalized;
+	}
+
+	/**
+		True for a workspace service of a workspace suit hosts (SuitRelayHosts.active): suit starts and
+		keeps those services itself while hosting is on, so they are in use without an editor. A service is
+		matched by its state directory, or by its root when it names no state directory.
+	**/
+	static function keptByHosting(process:SuitProcess, hostedWorkspaces:Map<String, Bool>):Bool {
+		if (process.stateDir != null)
+			return hostedWorkspaces.exists("state:" + rootKey(process.stateDir));
+		return process.root != null && hostedWorkspaces.exists("root:" + rootKey(process.root));
 	}
 
 	public static function rootKey(root:String):String {

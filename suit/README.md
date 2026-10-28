@@ -64,7 +64,10 @@ python scripts/suit.py help            all commands
 - **Orphans.** Each kind has one rule (`SuitKinds.orphanRule`):
   - A workspace manager or daemon belongs to every registered editor that
     uses its root, whichever editor started it. It is orphaned when none
-    does.
+    does, unless suit hosts that workspace for remote access
+    (`SuitRelayHosts.active`: a host record, and relay settings that are not
+    paused). suit starts and keeps those services itself, so while hosting
+    is on they are listed under Other and Terminate orphaned leaves them.
   - Compiler workers are resident by design, so they are orphaned only when
     no exosuit editor and no exosuit live session is running.
   - Anything else is orphaned when the process it belongs to is gone: its

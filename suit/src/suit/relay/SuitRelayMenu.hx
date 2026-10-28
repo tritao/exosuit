@@ -7,6 +7,7 @@ import suit.SuitMenuModel.SuitMenuSink;
 import suit.SuitReport;
 import suit.relay.SuitRelayBridge.SuitRelayHostView;
 import suit.relay.SuitRelayClients.SuitRelayClientView;
+import suit.SuitRecord.SuitRecords;
 
 /** What the tray's Remote access and Start at login items do; the suit daemon supplies them. */
 typedef SuitHostingActions = {
@@ -97,7 +98,7 @@ class SuitRelayMenu {
 	}
 
 	static function openText(open:Dynamic):String {
-		var terminals = SuitInventory.intField(open, "terminals"), agents = SuitInventory.intField(open, "agents");
+		var terminals = SuitRecords.intField(open, "terminals"), agents = SuitRecords.intField(open, "agents");
 		return (terminals == null ? 0 : terminals) + " terminal(s), " + (agents == null ? 0 : agents) + " agent session(s)";
 	}
 

@@ -6,14 +6,14 @@ control endpoint. Most tests also set EXOSUIT_SUIT_SCAN=0, so suit sees only the
 registers. The ownership test scans, so it lists the user's processes too, but it only reads that listing,
 checks with --dry-run that bulk kills would touch none of them, and kills only its own processes by pid.
 
-Covers: registration and pid-reuse checks (including old whole-second records), orphan detection,
-workspaces shared by editors, positive ownership (adoption only of exosuit kinds exosuit started itself, never
-through a terminal, never of EXOSUIT_SUIT=off; scanned processes kept out of bulk kills), listing without side
-effects, graceful stops that then kill only exosuit kinds (a terminal's programs survive Quit, a worker started
-during the grace period does not), relay listing and stop, the daemon's control endpoint (status, quit, stop),
-suit's unit tests, and, with --real-manager, a real workspace manager that registers itself and stops
-cooperatively through stop-request.json, and EXOSUIT_SUIT=off, isolated and unset-with-temporary-state keeping a
-real manager out of the default registry.
+Covers: registration and pid-reuse checks (including old whole-second records), orphan detection, workspaces
+shared by editors or kept by suit's relay hosting, positive ownership (adoption only of exosuit kinds exosuit
+started itself, never through a terminal, never of EXOSUIT_SUIT=off; scanned processes kept out of bulk
+kills), listing without side effects, graceful stops that then kill only exosuit kinds (a terminal's programs
+survive Quit, a worker started during the grace period does not), relay listing and stop, the daemon's control
+endpoint (status, quit, stop), suit's unit tests, and, with --real-manager, a real workspace manager that
+registers itself and stops cooperatively through stop-request.json, and EXOSUIT_SUIT=off, isolated and unset-
+with-temporary-state keeping a real manager out of the default registry.
 """
 from __future__ import annotations
 
@@ -284,6 +284,39 @@ def test_shared_workspace(fixture: Fixture, directory: Path) -> None:
     planned = fixture.suit("kill", "--orphans", "--dry-run")
     assert f"{manager.pid} workspace-manager: would stop" in planned and f"{host.pid} workspace-host" in planned, planned
     assert alive(manager) and alive(host), "--dry-run stopped something"
+
+
+def test_hosted_workspace(fixture: Fixture, directory: Path) -> None:
+    """Services suit starts for a workspace it hosts are in use while hosting is on: not orphaned, and
+    Terminate orphaned leaves them. Paused hosting makes them ordinary orphans again."""
+    root = directory / "hosted"; root.mkdir(parents=True)
+    state = directory / "hosted-state"; state.mkdir()
+    settings = state / "relay-settings.json"
+    settings.write_text(json.dumps({"version": 1, "origin": "http://127.0.0.1:1"}))
+    machine = "ab" * 16
+    hosts = fixture.home / "relay-hosts"; hosts.mkdir()
+    (hosts / f"{machine}.json").write_text(json.dumps({
+        "version": 1, "root": str(root), "stateDir": str(state), "machineId": machine, "origin": "http://127.0.0.1:1",
+        "executable": str(HL), "launcher": str(SUIT)}))
+    manager, host = fixture.spawn(), fixture.spawn()
+    fixture.register(manager.pid, "workspace-manager", root=str(root), stateDir=str(state), generation="g1")
+    fixture.register(host.pid, "workspace-host", root=str(root), stateDir=str(state), owner=manager.pid)
+    # Another workspace's manager with no editor and no hosting stays an orphan.
+    other = fixture.spawn()
+    fixture.register(other.pid, "workspace-manager", root=str(directory / "other"), stateDir=str(directory / "other-state"))
+    listing = fixture.listing()
+    for service in (manager, host):
+        entry = find(listing, service.pid)
+        assert entry["orphaned"] is False and entry["group"] == "Other", entry
+    assert find(listing, other.pid)["orphaned"] is True, find(listing, other.pid)
+    output = fixture.suit("kill", "--orphans")
+    assert f"{other.pid} workspace-manager" in output and str(manager.pid) not in output and str(host.pid) not in output, output
+    wait_until(lambda: not alive(other), 10, "the unhosted orphan survived")
+    time.sleep(0.5)
+    assert alive(manager) and alive(host), "Terminate orphaned stopped a hosted workspace's services"
+    settings.write_text(json.dumps({"version": 1, "origin": "http://127.0.0.1:1", "hosting": "paused"}))
+    listing = fixture.listing()
+    assert all(find(listing, service.pid)["orphaned"] for service in (manager, host)), listing
 
 
 def test_late_child(fixture: Fixture, directory: Path) -> None:
@@ -600,6 +633,7 @@ def main() -> int:
         tests = [("registry and termination", lambda f: test_registry_and_termination(f, directory / "a")),
                  ("shared workspace", lambda f: test_shared_workspace(f, directory / "s")),
                  ("quit spares terminals", test_quit_spares_terminals),
+                 ("hosted workspace", lambda f: test_hosted_workspace(f, directory / "h")),
                  ("late child", lambda f: test_late_child(f, directory / "l")),
                  ("ownership", lambda f: test_ownership(f, directory / "o")), ("daemon", test_daemon)]
         if options.real_manager:

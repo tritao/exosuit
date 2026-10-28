@@ -1,6 +1,7 @@
 package suit.relay;
 
 import suit.SuitInventory;
+import suit.SuitRecord.SuitRecords;
 
 /** One remote client as suit shows it. Times are seconds since the epoch. */
 typedef SuitRelayClientView = {
@@ -114,7 +115,7 @@ class SuitRelayClients {
 		var value:Dynamic = report == null ? null : Reflect.field(report, "open");
 		if (value == null)
 			return null;
-		var terminals = SuitInventory.intField(value, "terminals"), agents = SuitInventory.intField(value, "agents");
+		var terminals = SuitRecords.intField(value, "terminals"), agents = SuitRecords.intField(value, "agents");
 		return {terminals: terminals == null ? 0 : terminals, agents: agents == null ? 0 : agents};
 	}
 
@@ -125,7 +126,7 @@ class SuitRelayClients {
 			var devices:Dynamic = report == null ? null : Reflect.field(report, "devices");
 			if (Std.isOfType(devices, Array))
 				for (device in (devices : Array<Dynamic>))
-					if (SuitInventory.stringField(device, "deviceId") == client.id) {
+					if (SuitRecords.stringField(device, "deviceId") == client.id) {
 						kind = "device";
 						var listed:Dynamic = Reflect.field(device, "grants");
 						if (Std.isOfType(listed, Array))
