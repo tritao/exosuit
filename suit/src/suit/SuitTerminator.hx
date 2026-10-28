@@ -114,7 +114,7 @@ class SuitTerminator {
 	static function requestStop(process:SuitProcess):Bool {
 		switch process.kind {
 			case "editor":
-				return Processes.requestClose(process.pid, process.started) == Processes.OK;
+				return Processes.requestClose(process.pid, process.started) == processkit.ffi.ProcessKitConstants.PROCESSKIT_OK;
 			case "workspace-manager":
 				if (process.stateDir == null || process.generation == null)
 					return false;
