@@ -27,7 +27,8 @@ Lua plugin binary/source compatibility is not assumed.
 
 Read [the execution contract](EXECUTION.md) and
 [the compiler policy](COMPILER-TYPING.md) before implementing any stage.
-Record progress in [STATUS.md](STATUS.md). Use [OVERNIGHT.md](OVERNIGHT.md)
+Record progress in [STATUS.md](STATUS.md). Deferred review findings for the next
+phase are in [NEXT-PHASE.md](NEXT-PHASE.md). Use [OVERNIGHT.md](OVERNIGHT.md)
 as the launch handoff. Task IDs are stable; check a task only after its
 acceptance criteria have evidence. Each numbered task is a bounded delivery
 unit, not a promise that a whole milestone fits in one night.
