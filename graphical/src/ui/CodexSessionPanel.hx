@@ -1059,6 +1059,7 @@ class CodexSessionPanel implements View {
     }
     var modelControlsStyle = new LayoutStyle();
     modelControlsStyle.width = LayoutAxis.grow(); modelControlsStyle.childGap = 6;
+    modelControlsStyle.childAlignY = haxeon.ui.LayoutAlignmentY.Center;
     modelControlsStyle.wrapMode = haxeon.ui.LayoutWrapMode.Wrap;
     var composerStyle = new LayoutStyle();
     composerStyle.width = LayoutAxis.grow();
@@ -1143,6 +1144,7 @@ class CodexSessionPanel implements View {
       if (imageUploading) imageAction.leadingIcon = IconName.Close;
       else imageAction.leadingView = new SessionLineIcon("attachment", tokens.textSecondary);
       imageAction.iconSize = 16; imageAction.style.width = LayoutAxis.fixed(34);
+      imageAction.style.height = LayoutAxis.fixed(34); imageAction.style.padding = new Insets(9, 9, 9, 9);
       imageAction.enabled = control && connectionReady && (imageUploading || imageDrafts.length < 2);
       contextActions.push(new KeyedView("image-action", imageAction));
     }
@@ -1173,6 +1175,7 @@ class CodexSessionPanel implements View {
       }, "agent-add-context");
       addContext.accessibilityLabel = addingContext ? "Cancel adding text" : "Add workspace text";
       addContext.leadingIcon = IconName.NewFile; addContext.iconSize = 16; addContext.style.width = LayoutAxis.fixed(34);
+      addContext.style.height = LayoutAxis.fixed(34); addContext.style.padding = new Insets(9, 9, 9, 9);
       addContext.enabled = control && connectionReady;
       contextActions.push(new KeyedView("add", addContext));
       if (addingContext) {
@@ -1228,6 +1231,7 @@ class CodexSessionPanel implements View {
     for (action in contextActions) trailing.push(action);
     for (action in footerControls) trailing.push(action);
     var trailingStyle = new LayoutStyle(); trailingStyle.width = LayoutAxis.grow(piActive ? 170 : 110); trailingStyle.childGap = 6;
+    trailingStyle.childAlignY = haxeon.ui.LayoutAlignmentY.Center;
     modelControls.push(new KeyedView("trailing", new Row("composer-trailing", trailing, trailingStyle)));
     var composerChildren:Array<KeyedView> = [new KeyedView("content", new Column("codex-composer", [
       new KeyedView("prompt", new CodexPromptNode(promptNode)),

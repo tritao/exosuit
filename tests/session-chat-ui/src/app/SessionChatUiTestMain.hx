@@ -47,7 +47,18 @@ class SessionChatUiTestMain {
 		require(button.children.length>0,"Send button icon is missing");
 		var bounds=button.globalBounds(),icon=button.children[0].globalBounds();
 		var dx=icon.x+icon.width/2-(bounds.x+bounds.width/2),dy=icon.y+icon.height/2-(bounds.y+bounds.height/2);
-		require(Math.abs(dx)<0.6 && Math.abs(dy)<0.6,"Send icon is off center: "+dx+","+dy);
+		require(Math.abs(dx)<0.6 && Math.abs(dy)<0.6,label+" icon is off center: "+dx+","+dy);
+	}
+	static function checkComposerActions(root:RenderNode,queued:Bool):Void {
+		var names=queued ? ["Add image","Add workspace text","Steer now","Queue message"] : ["Add image","Add workspace text","Send"];
+		var previous:Null<haxeon.ui.Rect>=null, center:Null<Float>=null;
+		for (label in names) {
+			var node=find(root,label), bounds=node.globalBounds(), y=bounds.y+bounds.height/2;
+			if (center==null) center=y; else require(Math.abs(y-center)<0.6,label+" is vertically misaligned");
+			if (previous!=null) require(Math.abs(bounds.x-(previous.x+previous.width)-6)<0.6,label+" has incorrect action spacing");
+			previous=bounds;
+			if (label!="Steer now") checkSendIcon(root,label);
+		}
 	}
 	static function settingValue(root:RenderNode,label:String,value:String):Void {
 		var semantics:haxeon.ui.semantics.Semantics=cast find(root,label).semantics;
@@ -472,15 +483,21 @@ class SessionChatUiTestMain {
         oldContext.dispose();
         for (footerDark in [true,false]) for (footerWidth in [320.0,1000.0,1920.0,2560.0,5120.0]) {
           var footerClient=new FakeAgent(),worktreeCalls=0,branchCalls=0,worktreeAllowed=true,branchAllowed=true;
+          footerClient.view.supportsImageUpload=true;
           var footerContext=new UiContext(null,fonts,ui.ExosuitPalette.theme(footerDark));
           var footerPanel=new CodexSessionPanel(function() return footerClient,"session","/repo",function() {},new style.Theme(),new syntax.SyntaxRegistry(),
             function(_,_,_) {},function(_) {},null,{context:function() return "Project",explore:function() {},reviewChanges:function() {},
               worktreeLabel:function() return "ui-exploration",branchLabel:function() return "feature/chat",
               canSelectWorktree:function() return worktreeAllowed,canSelectBranch:function() return branchAllowed,
-              selectWorktree:function() worktreeCalls++,selectBranch:function() branchCalls++});
+              selectWorktree:function() worktreeCalls++,selectBranch:function() branchCalls++,
+              chooseImage:function(done) done(null,null,null),readContext:function(_,done) done(null,"Unavailable")});
           var footerHeight=footerWidth>=2560 ? 1440.0 : footerWidth>=1920 ? 1080.0 : 900.0;
           function footerBuild():RenderNode return footerContext.submit(footerPanel,new LayoutFrame(footerWidth,footerHeight));
           var footerRoot=footerBuild();checkHorizontalBounds(footerRoot,footerWidth);
+          checkComposerActions(footerRoot,false);
+          footerPanel.prompt="message";footerRoot=footerBuild();checkComposerActions(footerRoot,false);
+          footerClient.control=false;footerRoot=footerBuild();checkComposerActions(footerRoot,false);
+          footerClient.control=true;footerPanel.prompt="";footerRoot=footerBuild();
           var joinedFrame:RenderNode=null,draftSurface:RenderNode=null,joinedFooter:RenderNode=null;
           footerRoot.walk(function(node) {
             if(node.styleKey=="codex-composer-frame") joinedFrame=node;
@@ -522,8 +539,8 @@ class SessionChatUiTestMain {
           require(worktreeCalls==1 && branchCalls==1,"Stale footer controls followed a replaced session");
           footerClient.record.thread="thread";footerClient.record.state="working";
           footerClient.view.supportsQueue=true;footerClient.view.inputToken="input";footerRoot=footerBuild();
-          checkSendIcon(footerRoot,"Queue message");
-          footerPanel.prompt="queued message";footerRoot=footerBuild();checkSendIcon(footerRoot,"Queue message");
+          checkComposerActions(footerRoot,true);
+          footerPanel.prompt="queued message";footerRoot=footerBuild();checkComposerActions(footerRoot,true);
           footerContext.dispose();
         }
         var modelClient=new FakeAgent();modelClient.deferModelSettings=true;
