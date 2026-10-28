@@ -188,7 +188,14 @@ private class PreviewApplication implements DesktopUiApplication {
    host.onPoll = function() { if (Sys.time() - started > 12) host.requestClose(); };
   }
   var workflow = args.indexOf("--workflow") >= 0 || args.indexOf("--repository-menu") >= 0;
+  var composerPreview = args.indexOf("--composer") >= 0;
+  var workspaceCapabilities = workflow || composerPreview;
   menuLayer = workflow;
+  if (composerPreview) {
+   agent.view.supportsImageUpload = true; agent.uploadEnabled = true;
+   agent.view.models = [{model:"fixture-model", name:"Codex model", supportedEfforts:["low", "medium", "high"]}];
+   agent.view.currentModel = "fixture-model"; agent.view.currentEffort = "high";
+  }
   if (workflow) {
    agent.view.supportsImageUpload = true;
    agent.uploadEnabled = true;
@@ -213,15 +220,16 @@ private class PreviewApplication implements DesktopUiApplication {
      if (path == "fixture-remote.png" || (nativeImagePlan && path == "/repo/generated.png")) pendingPreview=done;
      else done(null,"Image unavailable");
     } : null,
-    readContext: workflow ? function(_, done) done("class Main {}", null) : null,
-    chooseImage: workflow ? function(done) done("diagram.png", sys.io.File.getBytes(Sys.getCwd() + "/graphical/assets/icons/exosuit-256.png"), null) : null,
-    canCreateWorktree: workflow ? function() return true : null, newWorktree: workflow ? function() {} : null,
+    readContext: workspaceCapabilities ? function(_, done) done("class Main {}", null) : null,
+    chooseImage: workspaceCapabilities ? function(done) done("diagram.png", sys.io.File.getBytes(Sys.getCwd() + "/graphical/assets/icons/exosuit-256.png"), null) : null,
+    canCreateWorktree: workspaceCapabilities ? function() return true : null, newWorktree: workspaceCapabilities ? function() {} : null,
     canCommitChanges: workflow ? function() return true : null, commitChanges: workflow ? function() {} : null,
     canOpenGithub: workflow ? function() return true : null, githubRepository: workflow ? function() {} : null,
     canOpenPullRequest: workflow ? function() return true : null, githubPullRequest: workflow ? function() {} : null,
     previewArtifact: renderHtml || renderSvg ? function(_, source) {
      if (!ui.SessionArtifactPreview.open(host.window.rawValue(), source)) throw "Native artifact preview unavailable";
     } : null});
+  if (composerPreview) panel.prompt = "Can you review the changes and run the relevant tests?";
  }
  public function context():UiContext return contextValue;
  public function submit(frame:LayoutFrame):RenderNode {

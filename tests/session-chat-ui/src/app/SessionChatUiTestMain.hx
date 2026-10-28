@@ -37,6 +37,19 @@ class SessionChatUiTestMain {
 		context.pointerDown(b.x + b.width / 2, b.y + b.height / 2, 0);
 		context.pointerUp(b.x + b.width / 2, b.y + b.height / 2, 0);
 	}
+	static function activate(context:UiContext,node:RenderNode):Void {
+		require(context.focusWidget(node.id),"Control is not keyboard focusable");
+		context.key(UiEventKind.KeyDown,UiKey.Enter);
+	}
+	static function settingValue(root:RenderNode,label:String,value:String):Void {
+		var semantics:haxeon.ui.semantics.Semantics=cast find(root,label).semantics;
+		require(semantics.value==value && (semantics.states & haxeon.ui.semantics.AccessibilityState.HasPopup)!=0,
+			"Setting menu lost its accessible value or popup state: "+label);
+	}
+	static function selectMenu(items:Array<haxeon.ui.widgets.overlays.MenuItem>,label:String):Void {
+		if (items != null) for (item in items) if (item.label==label && item.enabled) {item.onSelect();return;}
+		throw "Missing menu item: "+label;
+	}
 	static function chooseMenu(items:Array<haxeon.ui.widgets.overlays.MenuItem>, label:String):Void {
 		if (items != null) for (item in items) if (item.label == label && item.enabled) { item.onSelect(); return; }
 		throw "Missing menu action: " + label;
@@ -88,15 +101,15 @@ class SessionChatUiTestMain {
 			require(context.focusWidget(field.id), "Cannot focus composer");
 			context.text(UiEventKind.TextInput, "Hello agent");
 			root = build();
-			click(context, find(root, "Send"), width, height);
+			activate(context, find(root, "Send"));
 			require(client.actions.indexOf("prompt:Hello agent:null") >= 0, "Send did not deliver composer text");
 			root = build();
-			click(context, find(root, "Permissions · " + workspace.client.CodexPermissions.labelForRecord(null, null, null) + "  ▾"), width, height);
+			settingValue(root,"Permissions · " + workspace.client.CodexPermissions.labelForRecord(null,null,null) + "  ▾",workspace.client.CodexPermissions.labelForRecord(null,null,null));
+			activate(context, find(root, "Permissions · " + workspace.client.CodexPermissions.labelForRecord(null, null, null) + "  ▾"));
 			require(menu != null && menu.length > 0, "Permissions menu did not open");
 			root = build();
-			click(context, find(root, "Conversation model"), width, height);
-			root = build();
-			click(context, find(root, "Test model"), width, height);
+			activate(context, find(root, "Conversation model"));
+			selectMenu(menu,"Test model");
 			require(client.chosenModel == "test-model", "Model choice did not reach provider");
 			client.record.state = "working";
 			root = build();
@@ -439,9 +452,70 @@ class SessionChatUiTestMain {
         oldRoot=oldBuild(); var oldRendered:ui.CodexMarkdownView=cast oldPanel.markdown.get("turn:older");
         require(oldClient.contentRequests == 1 && oldRendered.value == "older full response", "Older response did not load on request");
         oldContext.dispose();
+        var modelClient=new FakeAgent();modelClient.deferModelSettings=true;
+        modelClient.record.preferredModel="test-model";modelClient.record.preferredEffort="low";
+        modelClient.view.models.push({model:"other-model",name:"Other model",supportedEfforts:["low","high"]});
+        var modelContext=new UiContext(null,fonts,ui.ExosuitPalette.theme(true)), modelMenu:Array<haxeon.ui.widgets.overlays.MenuItem>=null;
+        var modelPanel=new CodexSessionPanel(function() return modelClient,"session","/repo",function() {},new style.Theme(),new syntax.SyntaxRegistry(),function(items,_,_) modelMenu=items,function(_) {});
+        function modelBuild():RenderNode return modelContext.submit(modelPanel,new LayoutFrame(1000,900));
+        var modelRoot=modelBuild();activate(modelContext,find(modelRoot,"Conversation model"));selectMenu(modelMenu,"Other model");
+        modelRoot=modelBuild();require(modelClient.modelBusy && modelPanel.selectedModel=="test-model" && modelPanel.selectedEffort=="low",
+          "Pending model selection changed the displayed provider settings");
+        settingValue(modelRoot,"Conversation model","Test model");settingValue(modelRoot,"Reasoning effort","Low");
+        modelClient.finishModelSettings(false);modelRoot=modelBuild();
+        require(modelPanel.selectedModel=="test-model" && modelPanel.selectedEffort=="low","Rejected model selection was displayed");
+        settingValue(modelRoot,"Conversation model","Test model");settingValue(modelRoot,"Reasoning effort","Low");
+        activate(modelContext,find(modelRoot,"Conversation model"));selectMenu(modelMenu,"Other model");
+        modelClient.finishModelSettings(true);modelRoot=modelBuild();
+        require(modelPanel.selectedModel=="other-model" && modelPanel.selectedEffort=="","Accepted model selection was not reconciled");
+        settingValue(modelRoot,"Conversation model","Other model");settingValue(modelRoot,"Reasoning effort","Model default");
+        activate(modelContext,find(modelRoot,"Reasoning effort"));selectMenu(modelMenu,"High effort");
+        modelRoot=modelBuild();require(modelPanel.selectedEffort=="","Pending effort was displayed before acceptance");
+        settingValue(modelRoot,"Reasoning effort","Model default");
+        modelClient.finishModelSettings(false);modelRoot=modelBuild();require(modelPanel.selectedEffort=="","Rejected effort was displayed");
+        settingValue(modelRoot,"Reasoning effort","Model default");
+        activate(modelContext,find(modelRoot,"Reasoning effort"));selectMenu(modelMenu,"High effort");
+        modelClient.finishModelSettings(true);modelRoot=modelBuild();require(modelPanel.selectedEffort=="high","Accepted effort was not reconciled");
+        settingValue(modelRoot,"Reasoning effort","High");
+        modelClient.record.preferredModel="test-model";modelClient.record.preferredEffort="low";modelRoot=modelBuild();
+        require(modelPanel.selectedModel=="test-model" && modelPanel.selectedEffort=="low","External model settings did not update the selectors");
+        activate(modelContext,find(modelRoot,"Conversation model"));
+        var beforeStale=modelClient.actions.length;modelClient.catalogRoot="/different";selectMenu(modelMenu,"Other model");
+        require(modelClient.actions.length==beforeStale,"Stale model menu changed settings in another workspace");
+        modelClient.catalogRoot="/repo";modelRoot=modelBuild();
+        activate(modelContext,find(modelRoot,"Reasoning effort"));
+        modelClient.record.preferredModel="other-model";selectMenu(modelMenu,"High effort");
+        require(modelClient.actions.length==beforeStale,"Stale effort menu applied to a changed model");
+        modelClient.record.preferredModel="unlisted-model";modelRoot=modelBuild();
+        settingValue(modelRoot,"Conversation model","unlisted-model");
+        modelContext.dispose();
 		var draftClient = new FakeAgent(), draftContext = new UiContext(null, fonts, ui.ExosuitPalette.theme(true));
 		draftClient.view.supportsImageUpload = true; draftClient.uploadEnabled = true;
 		var fixtureImage = sys.io.File.getBytes("../../graphical/assets/icons/exosuit-16.png");
+        var cancelClient=new FakeAgent();cancelClient.view.supportsImageUpload=true;cancelClient.deferUpload=true;
+        var pickerDone:Null<(Null<String>,Null<haxe.io.Bytes>,Null<String>)->Void>=null;
+        var cancelContext=new UiContext(null,fonts,ui.ExosuitPalette.theme(true));
+        var cancelPanel=new CodexSessionPanel(function() return cancelClient,"session","/repo",function() {},new style.Theme(),new syntax.SyntaxRegistry(),function(_,_,_) {},function(_) {},null,
+          {context:function() return "Project",explore:function() {},reviewChanges:function() {},
+           chooseImage:function(done) pickerDone=done,pasteImage:function() return {bytes:fixtureImage,error:null}});
+        function cancelBuild():RenderNode return cancelContext.submit(cancelPanel,new LayoutFrame(1000,900));
+        var cancelRoot=cancelBuild();activate(cancelContext,find(cancelRoot,"Add image"));
+        cancelRoot=cancelBuild();find(cancelRoot,"Adding image…");click(cancelContext,find(cancelRoot,"Cancel image upload"),1000,900);
+        cancelRoot=cancelBuild();var stillAdding=false;
+        cancelRoot.walk(function(node) {if(node.semantics!=null && node.semantics.label=="Adding image…") stillAdding=true;});
+        require(!stillAdding,"Cancelled upload still shows a pending status");
+        var finishPicker:(Null<String>,Null<haxe.io.Bytes>,Null<String>)->Void=cast pickerDone;finishPicker("late.png",fixtureImage,null);
+        require(cancelClient.pendingUpload==null && cancelPanel.imageDrafts.length==0,"Cancelled picker started a late upload");
+        cancelRoot=cancelBuild();require(cancelContext.focusWidget(find(cancelRoot,"Codex prompt").id),"Cannot focus paste cancellation fixture");
+        cancelContext.key(UiEventKind.KeyDown,UiKey.V,UiModifier.Control);cancelRoot=cancelBuild();
+        click(cancelContext,find(cancelRoot,"Cancel image upload"),1000,900);
+        var finishUpload:(Null<String>,Null<String>)->Void=cast cancelClient.pendingUpload;finishUpload("late-paste",null);
+        require(cancelClient.removedImages.indexOf("late-paste")>=0 && cancelPanel.imageDrafts.length==0,"Cancelled pasted upload was retained");
+        cancelClient.pendingUpload=null;cancelRoot=cancelBuild();click(cancelContext,find(cancelRoot,"Add image"),1000,900);
+        finishPicker=cast pickerDone;finishPicker("photo.png",fixtureImage,null);
+        cancelClient.record.thread="other-thread";finishUpload=cast cancelClient.pendingUpload;finishUpload("stale-picker",null);
+        require(cancelClient.removedImages.indexOf("stale-picker")>=0 && cancelPanel.imageDrafts.length==0,
+          "Session replacement retained a stale image upload");cancelContext.dispose();
 		var requestedPath:String = null; var clipboardBytes:Null<haxe.io.Bytes> = null; var pasteReads = 0;
 		var worktreeOpens = 0, githubOpens = 0, pullRequestOpens = 0, availableActions = true;
 		var repositoryMenu:Array<haxeon.ui.widgets.overlays.MenuItem> = null;

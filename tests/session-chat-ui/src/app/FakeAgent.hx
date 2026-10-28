@@ -9,11 +9,18 @@ class FakeAgent implements WorkspaceAgentClient {
 	public var view:AgentView;
 	public var actions:Array<String> = [];
 	public var chosenModel:Null<String>;
+	public var catalogRoot:String = "/repo";
 	public var control:Bool = true;
 	public var acceptActions:Bool = true;
 	public var deferAcceptance:Bool = false;
 	public var pendingAcceptance:Null<Void->Void>;
 	public var uploadEnabled:Bool = false;
+	public var deferUpload:Bool = false;
+	public var pendingUpload:Null<(Null<String>,Null<String>)->Void>;
+	public var deferModelSettings:Bool = false;
+	public var modelBusy:Bool = false;
+	public var pendingModel:Null<String>;
+	public var pendingEffort:Null<String>;
 	public var lastImageIds:Null<Array<String>>;
 	public var removedImages:Array<String> = [];
 	public var history:workspace.client.AgentHistoryState = {loading:false,error:null,hasOlder:false,detached:false,resetRequired:false};
@@ -34,24 +41,33 @@ class FakeAgent implements WorkspaceAgentClient {
 	}
 	public function canReadAgents():Bool return true;
 	public function canControlAgents():Bool return control;
-	public function agentBusy():Bool return false;
+	public function agentBusy():Bool return modelBusy;
 	public function agentCreation():Null<workspace.client.WorkspaceAgentCreation.AgentCreationStatus> return null;
 	public function agentRevision():Int return 0;
-	public function agents():Null<AgentCatalog> return {instance:"fixture", root:"/repo", records:[record], status:"ready"};
+	public function agents():Null<AgentCatalog> return {instance:"fixture", root:catalogRoot, records:[record], status:"ready"};
 	public function agentError():Null<String> return null;
 	public function refreshAgents():Void {}
 	public function createAgent(group:String, thread:Null<String>, ?created:AgentRecord->Void, ?defaults:AgentSessionDefaults):Void {}
 	public function deleteAgent(id:String, ?deleted:Void->Void):Void {}
 	public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String, ?accepted:Void->Void, ?expectedNativeName:String, ?imageIds:Array<String>):Void {
 		actions.push(action + ":" + text + ":" + request);
-		if (action == "model-settings") chosenModel = model;
+		if (action == "model-settings") {
+			chosenModel=model;
+			if (deferModelSettings) {modelBusy=true;pendingModel=model;pendingEffort=effort;}
+			else if (acceptActions) {record.preferredModel=model;record.preferredEffort=effort;}
+		}
 		if (action == "prompt" || action == "queue" || action == "steer") lastImageIds = imageIds;
 		if (accepted != null && acceptActions) {
 			if (deferAcceptance) pendingAcceptance = accepted; else accepted();
 		}
 	}
 	public function uploadAgentImage(id:String, bytes:haxe.io.Bytes, done:(Null<String>, Null<String>)->Void):Void {
-		if (uploadEnabled) done("opaque-image", null); else done(null, "Unavailable");
+		if (deferUpload) pendingUpload=done;
+		else if (uploadEnabled) done("opaque-image", null); else done(null, "Unavailable");
+	}
+	public function finishModelSettings(accepted:Bool):Void {
+		if (accepted) {record.preferredModel=pendingModel;record.preferredEffort=pendingEffort;}
+		modelBusy=false;
 	}
 	public function removeAgentImage(id:String, upload:String):Void removedImages.push(upload);
 	public function loadAgentImage(id:String,turn:String,item:String,imageId:String,done:(Null<haxe.io.Bytes>,Null<String>)->Void):Void {

@@ -43,7 +43,7 @@ Claude, Pi and AgentKit retain bounded live/replayed activity. Known eviction is
 
 ## Composer and IDE navigation
 
-- A rounded, lightly raised multiline composer groups model/effort controls, draft, command completion and send/queue/steer actions. Preserve Enter, keypad Enter, Shift+Enter and command-completion handling.
+- A lightly raised multiline composer gives the draft a spacious, quiet surface. Model, reasoning and permissions use compact text controls with chevrons rather than a row of boxed fields; attachment and send use accessible icon actions. Put workspace/worktree context in a separate strip below the main input. Keep the edge crisp with restrained rounding and subtle elevation. Preserve Enter, keypad Enter, Shift+Enter, command completion and provider-specific send/queue/steer handling.
 - Show the actual session working directory and known branch. Keep Permissions, Files and Review changes immediately available and group secondary worktree/commit/GitHub/PR actions in a compact keyboard-accessible Git menu, revalidating target and capability on activation. Offer Files and Review changes as navigation actions; review means current workspace changes, not turn-attributed checkpoints.
 - Explicit Markdown file links open in Exosuit at optional `:line:column` or `#Lline` locations. Resolve relative paths against the session working directory. Validate workspace identity on activation and asynchronous completion. Remote host paths use workspace file RPC, never the local OS shell.
 - External HTTP(S)/mailto links open only on activation. Unsupported schemes remain literal. Local paths never go to the OS shell. Out-of-workspace file links report an actionable error.

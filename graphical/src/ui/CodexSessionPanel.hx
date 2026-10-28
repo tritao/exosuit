@@ -15,8 +15,6 @@ import haxeon.ui.widgets.KeyedView;
 import haxeon.ui.widgets.controls.Button;
 import haxeon.ui.widgets.controls.ButtonVariant;
 import haxeon.ui.icons.IconName;
-import haxeon.ui.widgets.controls.Select;
-import haxeon.ui.widgets.controls.SelectOption;
 import haxeon.ui.widgets.layout.Column;
 import haxeon.ui.widgets.layout.Row;
 import haxeon.ui.widgets.overlays.MenuItem;
@@ -68,7 +66,6 @@ class CodexSessionPanel implements View {
   var promptRevision = 0;
   var selectedModel = "";
   var selectedEffort = "";
-  var selectionLoaded = false;
   var modelCatalogRequested = false;
   var diagnostics = false;
   var details = false;
@@ -97,6 +94,25 @@ class CodexSessionPanel implements View {
   var contentErrors:Map<String,String> = [];
   var contentErrorTokens:Map<String,String> = [];
   var contentLoading:Null<String> = null;
+  function imageSessionCurrent(client:WorkspaceAgentClient,id:String,thread:String):Bool {
+    var current=getClient();
+    if (current != client || current == null) return false;
+    var catalog=current.agents(), view=current.agentView(id);
+    return catalog != null && catalog.root == root && view != null && view.record.thread == thread;
+  }
+  function uploadImage(client:WorkspaceAgentClient,id:String,thread:String,name:String,bytes:haxe.io.Bytes,generation:Int):Void {
+    client.uploadAgentImage(id,bytes,function(upload,problem) {
+      if (generation != imageGeneration || !imageSessionCurrent(client,id,thread)) {
+        if (upload != null) client.removeAgentImage(id,upload);
+        if (generation == imageGeneration) {imageUploading=false;imageError="Session changed while uploading the image";frame();}
+        return;
+      }
+      imageUploading=false;
+      if (problem != null || upload == null) imageError=problem == null ? "Image upload failed" : problem;
+      else {imageDrafts.push({name:name,id:upload,bytes:bytes,key:generation});contextRevision++;imageError=null;}
+      frame();
+    });
+  }
   function rememberHistoryAnchor():Void {
     historyAnchor = null;
     if (transcriptViewport == null || transcriptViewport.resolved == null) return;
@@ -275,11 +291,11 @@ class CodexSessionPanel implements View {
     if (view == null) return paragraph(client.agentError()
       == null ? "Loading Codex session…" : client.agentError()).build(context);
     var id = view.record.id;
-    if (!selectionLoaded) {
-      selectedModel = view.record.preferredModel == null ? "" : view.record.preferredModel;
-      selectedEffort = view.record.preferredEffort == null ? "" : view.record.preferredEffort;
-      selectionLoaded = true;
-    }
+    var imageThread = view.record.thread;
+    // The service record is authoritative, including after rejection or an
+    // external settings change. Do not present an unaccepted selection.
+    selectedModel = view.record.preferredModel == null ? "" : view.record.preferredModel;
+    selectedEffort = view.record.preferredEffort == null ? "" : view.record.preferredEffort;
     var control = client.canControlAgents() && !client.agentBusy();
     var tokens = context.theme.tokens;
     var working = view.record.state == "working";
@@ -322,7 +338,8 @@ class CodexSessionPanel implements View {
     var inputStyle = new LayoutStyle();
     inputStyle.height = LayoutAxis.fixed(Math.min(160, 56 + (prompt.split("\n").length - 1) * 22));
     inputStyle.width = LayoutAxis.grow();
-    inputStyle.padding = new Insets(12, 10, 12, 10);
+    inputStyle.padding = new Insets(2, 8, 2, 8);
+    inputStyle.background = tokens.surfaceRaised;
     var field = new TextField("codex-prompt", prompt, function(v) {
       prompt = v;
       promptRevision++;
@@ -350,8 +367,10 @@ class CodexSessionPanel implements View {
     ], titleStyle);
     var header:Array<KeyedView> = [new KeyedView("title", heading)];
     if (working || ((view.record.provider == "claude" || usesSupervisedModes(view.record.provider)) && view.requests.length > 0)) header.push(new KeyedView("stop", stop));
-    var permissions = new Button("Permissions · " + (usesSupervisedModes(view.record.provider) ? piPermissionLabel(view.record.permissionMode) : view.record.provider == "claude" ? view.record.permissionMode : CodexPermissions.labelForRecord(view.record.permissionProfile,
-      view.record.sandboxPolicy, view.record.approvalPolicy)) + "  ▾", headerButtonStyle, null, "codex-permissions");
+    var permissionLabel = usesSupervisedModes(view.record.provider) ? piPermissionLabel(view.record.permissionMode) : view.record.provider == "claude" ? view.record.permissionMode : CodexPermissions.labelForRecord(view.record.permissionProfile,
+      view.record.sandboxPolicy, view.record.approvalPolicy);
+    var permissions = new Button(permissionLabel + "  ▾", headerButtonStyle, null, "codex-permissions");
+    permissions.accessibilityLabel = "Permissions · " + permissionLabel + "  ▾";
     permissions.enabled = control && !working && view.requests.length == 0;
     permissions.onClickEvent = function(event) {
       if (permissions.enabled) openPermissionsMenu(client, id, view.record.thread, event);
@@ -361,10 +380,13 @@ class CodexSessionPanel implements View {
       frame();
     }, "codex-details")));
     var rows:Array<KeyedView> = [new KeyedView("header", new Row("codex-header", header, headerStyle))];
-    var workspaceControls:Array<KeyedView> = [new KeyedView("permissions", permissions)];
+    permissions.variant = ButtonVariant.Navigation;
+    permissions.classes.push("chrome-action");
+    var workspaceControls:Array<KeyedView> = [];
+    var workspaceStrip:Null<KeyedView> = null;
     if (workspaceActions != null) {
-      rows.push(new KeyedView("workspace-context", new MiddleEllipsisText("workspace-context", workspaceActions.context(), true,
-        TextStyleOverride.text(12, null, tokens.textSecondary))));
+      var stripItems:Array<KeyedView> = [new KeyedView("workspace-context", new MiddleEllipsisText("workspace-context", workspaceActions.context(), true,
+        TextStyleOverride.text(12, null, tokens.textSecondary)))];
       var groupStyle = new LayoutStyle(); groupStyle.width = LayoutAxis.fit(); groupStyle.childGap = 4;
       var filesButton = quietButton("Files", workspaceActions.explore, "agent-open-files");
       filesButton.leadingIcon = IconName.FolderOpen; filesButton.iconSize = 14;
@@ -398,9 +420,15 @@ class CodexSessionPanel implements View {
         var repository = quietButton("Git ▾", function() {}, "agent-repository-actions");
         repository.accessibilityLabel = "Repository actions";
         repository.onClickEvent = function(event) { if (menuValid()) showMenu(repositoryItems, event, menuValid); };
-        workspaceControls.push(new KeyedView("repository-actions", repository));
+        stripItems.push(new KeyedView("repository-actions", repository));
       }
       workspaceControls.push(navigation);
+      var stripStyle = new LayoutStyle(); stripStyle.width = LayoutAxis.grow(0, 880);
+      stripStyle.padding = new Insets(10, 2, 10, 2); stripStyle.childGap = 8;
+      stripStyle.background = tokens.surfaceRaised;
+      stripStyle.radiusTopLeft = stripStyle.radiusTopRight = stripStyle.radiusBottomLeft = stripStyle.radiusBottomRight = 5;
+      stripStyle.childAlignY = haxeon.ui.LayoutAlignmentY.Center;
+      workspaceStrip = new KeyedView("workspace-strip", new Row("agent-workspace-strip", stripItems, stripStyle));
     }
     var workspaceStyle = new LayoutStyle(); workspaceStyle.width = LayoutAxis.grow(); workspaceStyle.childGap = 8;
     workspaceStyle.wrapMode = haxeon.ui.LayoutWrapMode.Wrap;
@@ -889,21 +917,30 @@ class CodexSessionPanel implements View {
       completionRows.push(new KeyedView("suggestion-"+index,new Button((index == suggestionIndex ? "› " : "")+label,null,
         function() complete(choice),"agent-command-suggestion-"+index)));
     }
-    var send = new Button(piActive ? "Queue message" : "Send", null, function() submitAction(piActive ? "queue" : "prompt"), "codex-send");
+    var sendStyle = new LayoutStyle(); sendStyle.width = LayoutAxis.fixed(34); sendStyle.height = LayoutAxis.fixed(34);
+    sendStyle.radiusTopLeft = sendStyle.radiusTopRight = sendStyle.radiusBottomLeft = sendStyle.radiusBottomRight = 17;
+    var send = new Button("", sendStyle, function() submitAction(piActive ? "queue" : "prompt"), "codex-send");
+    send.accessibilityLabel = piActive ? "Queue message" : "Send";
+    send.leadingIcon = IconName.ArrowUp; send.iconSize = 16;
     send.variant = ButtonVariant.Primary;
     send.enabled = (piActive ? canQueue : canSend) && imagesSupported && !contextLoading && !imageUploading && promptBytes <= submitLimit && (StringTools.trim(prompt) != "" || imageDrafts.length > 0);
-    var footerStyle = new LayoutStyle();
-    footerStyle.width = LayoutAxis.grow();
-    footerStyle.childGap = 12;
-    footerStyle.wrapMode = haxeon.ui.LayoutWrapMode.Wrap;
     var hint = new Text((piActive ? (view.requests.length > 0 ? "Answer the request, or use Queue / Steer" : "Enter to queue · Shift+Enter for newline") : "Enter to send · Shift+Enter for newline") + (view.commands == null ? "" : " · / commands · $ skills"), paragraph("").style, tokens.mutedText);
-    var footerControls:Array<KeyedView> = [new KeyedView("hint",hint)];
+    var footerControls:Array<KeyedView> = [];
     if (piActive) {
       var steer = new Button("Steer now",null,function() submitAction("steer"),"agent-steer");
       steer.enabled = canSteer && imagesSupported && !contextLoading && !imageUploading && promptBytes <= 4096 && (StringTools.trim(prompt) != "" || imageDrafts.length > 0);
       footerControls.push(new KeyedView("steer",steer));
     }
     footerControls.push(new KeyedView("send",send));
+    var settingThread = view.record.thread;
+    var settingValid = function() {
+      var current = getClient();
+      if (current == null || current != client || !current.canControlAgents() || current.agentBusy()) return false;
+      var currentCatalog = current.agents();
+      if (currentCatalog == null || currentCatalog.root != root) return false;
+      var latest = current.agentView(id);
+      return latest != null && latest.record.thread == settingThread && latest.record.state != "working";
+    };
     var modelControls:Array<KeyedView> = [];
     var moreModels:Button = null;
     if (view.models == null) {
@@ -920,19 +957,25 @@ class CodexSessionPanel implements View {
     } else {
       var currentModel = findModel(view.models, view.currentModel);
       var currentModelLabel = currentModel != null ? currentModel.name : view.currentModel == null || view.currentModel == "" ? "Current model" : view.currentModel;
-      var options = [new SelectOption<String>("current", currentModelLabel, "")];
-      for (model in view.models) options.push(new SelectOption<String>(model.model, model.name, model.model));
-      var modelStyle = new LayoutStyle(); modelStyle.width = LayoutAxis.fixed(172); modelStyle.height = LayoutAxis.fixed(32);
-      modelStyle.radiusTopLeft = modelStyle.radiusTopRight = modelStyle.radiusBottomLeft = modelStyle.radiusBottomRight = 8;
-      var chooser = new Select<String>("codex-model", options, selectedModel, function(value) {
-        selectedModel = value;
-        selectedEffort = "";
-        client.agentAction(id, "model-settings", "", null, selectedModel == "" ? null : selectedModel, null);
-        frame();
-      }, modelStyle);
-      chooser.accessibilityLabel = "Conversation model";
-      chooser.enabled = control && !working;
-      modelControls.push(new KeyedView("chooser", chooser));
+      var chosenModel = findModel(view.models, selectedModel);
+      var modelLabel = chosenModel != null ? chosenModel.name : selectedModel != "" ? selectedModel : currentModelLabel;
+      var chooser = quietButton(modelLabel + " ▾", function() {}, "codex-model");
+      chooser.accessibilityLabel = "Conversation model"; chooser.ellipsizeLabel = true;
+      chooser.style.width = LayoutAxis.fixed(124); chooser.enabled = control && !working;
+      chooser.onClickEvent = function(event) {
+        var items:Array<MenuItem> = [];
+        items.push(new MenuItem("current", currentModelLabel, function() {
+          if (settingValid()) { client.agentAction(id, "model-settings", "", null, null, null); frame(); }
+        }));
+        for (model in view.models) {
+          var choice = model;
+          items.push(new MenuItem(choice.model, choice.name, function() {
+            if (settingValid()) { client.agentAction(id, "model-settings", "", null, choice.model, null); frame(); }
+          }));
+        }
+        showMenu(items, event, settingValid);
+      };
+      modelControls.push(new KeyedView("chooser", new SettingMenuButton(chooser, modelLabel)));
       if (view.modelsNext != null) {
         moreModels = new Button("More models", null, function() client.agentAction(id, "models", "", view.modelsNext));
         moreModels.enabled = control && !working;
@@ -940,21 +983,36 @@ class CodexSessionPanel implements View {
     }
     var defaultEffortLabel = selectedModel == "" && view.currentEffort != null
       ? "Keep current (" + view.currentEffort + ")" : "Model default";
-    var effortOptions = [new SelectOption<String>("model-default", defaultEffortLabel, "")];
     var availableEfforts:Array<String> = effortModel == null || effortModel.supportedEfforts == null
       ? [] : effortModel.supportedEfforts;
-    for (effort in availableEfforts) effortOptions.push(new SelectOption<String>("effort-" + effort, effortLabel(effort), effort));
-    var effortStyle = new LayoutStyle(); effortStyle.width = LayoutAxis.fixed(150); effortStyle.height = LayoutAxis.fixed(32);
-    effortStyle.radiusTopLeft = effortStyle.radiusTopRight = effortStyle.radiusBottomLeft = effortStyle.radiusBottomRight = 8;
-    var effortChooser = new Select<String>("codex-effort", effortOptions, selectedEffort, function(value) {
-      selectedEffort = value;
-      client.agentAction(id, "model-settings", "", null, selectedModel == "" ? null : selectedModel,
-        selectedEffort == "" ? null : selectedEffort);
-      frame();
-    }, effortStyle);
-    effortChooser.accessibilityLabel = "Reasoning effort";
+    var effortText = selectedEffort != "" ? effortLabel(selectedEffort)
+      : (selectedModel == "" && view.currentEffort != null ? effortLabel(view.currentEffort) : "Model default");
+    if (StringTools.endsWith(effortText, " effort")) effortText = effortText.substr(0, effortText.length - 7);
+    var effortChooser = quietButton(effortText + " ▾", function() {}, "codex-effort");
+    effortChooser.accessibilityLabel = "Reasoning effort"; effortChooser.ellipsizeLabel = true;
+    effortChooser.style.width = LayoutAxis.fixed(100);
     effortChooser.enabled = control && !working && effortModel != null && availableEfforts.length > 0;
-    modelControls.push(new KeyedView("effort", effortChooser));
+    effortChooser.onClickEvent = function(event) {
+      var expectedModel = selectedModel;
+      var expectedCurrentModel = view.currentModel;
+      var effortValid = function() {
+        if (!settingValid()) return false;
+        var latest = client.agentView(id);
+        return latest != null && (latest.record.preferredModel == null ? "" : latest.record.preferredModel) == expectedModel
+          && (expectedModel != "" || latest.currentModel == expectedCurrentModel);
+      };
+      var items:Array<MenuItem> = [new MenuItem("model-default", defaultEffortLabel, function() {
+        if (effortValid()) { client.agentAction(id, "model-settings", "", null, expectedModel == "" ? null : expectedModel, null); frame(); }
+      })];
+      for (effort in availableEfforts) {
+        var choice = effort;
+        items.push(new MenuItem("effort-" + choice, effortLabel(choice), function() {
+          if (effortValid()) { client.agentAction(id, "model-settings", "", null, expectedModel == "" ? null : expectedModel, choice); frame(); }
+        }));
+      }
+      showMenu(items, event, effortValid);
+    };
+    modelControls.push(new KeyedView("effort", new SettingMenuButton(effortChooser, effortText)));
     if (moreModels != null) modelControls.push(new KeyedView("more", moreModels));
     if (view.record.provider == "pi") {
       var refresh = new Button(view.commandsLoading == true ? "Loading commands…" : "Refresh commands",null,
@@ -962,12 +1020,13 @@ class CodexSessionPanel implements View {
       refresh.enabled = canSend && view.commandsLoading != true;
       modelControls.push(new KeyedView("commands",refresh));
     }
-    var modelControlsStyle = footerStyle.copy();
+    var modelControlsStyle = new LayoutStyle();
+    modelControlsStyle.width = LayoutAxis.grow(); modelControlsStyle.childGap = 6;
     modelControlsStyle.wrapMode = haxeon.ui.LayoutWrapMode.Wrap;
     var composerStyle = new LayoutStyle();
     composerStyle.width = LayoutAxis.grow();
     composerStyle.childGap = 8;
-    composerStyle.padding = new Insets(16, 14, 16, 14);
+    composerStyle.padding = new Insets(14, 12, 14, 12);
     composerStyle.background = tokens.surfaceRaised;
     composerStyle.radiusTopLeft = composerStyle.radiusTopRight = composerStyle.radiusBottomLeft = composerStyle.radiusBottomRight = 8;
     // Capture on a stable parent so the field's own patch updates retain keyboard behavior.
@@ -995,13 +1054,7 @@ class CodexSessionPanel implements View {
           else {
             var generation = ++imageGeneration;
             imageUploading = true; imageError = null;
-            client.uploadAgentImage(id, cast pasted.bytes, function(upload, problem) {
-              if (generation != imageGeneration) { if (upload != null) client.removeAgentImage(id, upload); return; }
-              imageUploading = false;
-              if (problem != null || upload == null) imageError = problem == null ? "Image upload failed" : problem;
-              else { imageDrafts.push({name:"Pasted image.png", id:upload, bytes:cast pasted.bytes, key:generation}); contextRevision++; imageError = null; }
-              frame();
-            });
+            uploadImage(client,id,imageThread,"Pasted image.png",cast pasted.bytes,generation);
           }
           frame(); return;
         }
@@ -1034,25 +1087,21 @@ class CodexSessionPanel implements View {
     var contextActions:Array<KeyedView> = [];
     if (workspaceActions != null && workspaceActions.chooseImage != null && view.supportsImageUpload == true) {
       var chooseImage:((Null<String>, Null<haxe.io.Bytes>, Null<String>)->Void)->Void = cast workspaceActions.chooseImage;
-      var imageAction = quietButton(imageUploading ? "Cancel image upload" : imageError == null ? "Add image" : "Try image again", function() {
+      var imageAction = quietButton("", function() {
         if (imageUploading) { imageGeneration++; imageUploading = false; frame(); return; }
         var generation = ++imageGeneration;
         imageUploading = true; imageError = null; frame();
         chooseImage(function(name, bytes, error) {
           if (generation != imageGeneration) return;
+          if (!imageSessionCurrent(client,id,imageThread)) {imageUploading=false;imageError="Session changed while choosing an image";frame();return;}
           if (error != null || bytes == null || name == null) {
             imageUploading = false; imageError = error; frame(); return;
           }
-          client.uploadAgentImage(id, bytes, function(upload, problem) {
-            if (generation != imageGeneration) { if (upload != null) client.removeAgentImage(id, upload); return; }
-            imageUploading = false;
-            if (problem != null || upload == null) imageError = problem == null ? "Image upload failed" : problem;
-            else { imageDrafts.push({name:name, id:upload, bytes:bytes, key:generation}); contextRevision++; imageError = null; }
-            frame();
-          });
+          uploadImage(client,id,imageThread,name,bytes,generation);
         });
       }, "agent-add-image");
-      imageAction.leadingIcon = IconName.Plus; imageAction.iconSize = 14;
+      imageAction.accessibilityLabel = imageUploading ? "Cancel image upload" : imageError == null ? "Add image" : "Try image again";
+      imageAction.leadingIcon = imageUploading ? IconName.Close : IconName.Plus; imageAction.iconSize = 16; imageAction.style.width = LayoutAxis.fixed(34);
       imageAction.enabled = control && connectionReady && (imageUploading || imageDrafts.length < 2);
       contextActions.push(new KeyedView("image-action", imageAction));
     }
@@ -1074,12 +1123,15 @@ class CodexSessionPanel implements View {
       ], imageStyle)));
     }
     if (!imagesSupported) contextRows.push(new KeyedView("images-unavailable", new Text("Image input is unavailable; remove images or reconnect.", null, tokens.textSecondary)));
+    if (imageUploading) contextRows.push(new KeyedView("image-progress", new Text("Adding image…", null, tokens.textSecondary)));
     if (imageError != null) contextRows.push(new KeyedView("image-error", new Text(imageError, null, tokens.danger)));
     if (workspaceActions != null && workspaceActions.readContext != null) {
       var readContext:(String, (Null<String>, Null<String>)->Void)->Void = cast workspaceActions.readContext;
-      var addContext = quietButton(addingContext ? "Cancel adding text" : "Add workspace text", function() {
+      var addContext = quietButton("", function() {
         addingContext = !addingContext; contextGeneration++; contextLoading = false; contextError = null; frame();
       }, "agent-add-context");
+      addContext.accessibilityLabel = addingContext ? "Cancel adding text" : "Add workspace text";
+      addContext.leadingIcon = IconName.NewFile; addContext.iconSize = 16; addContext.style.width = LayoutAxis.fixed(34);
       addContext.enabled = control && connectionReady;
       contextActions.push(new KeyedView("add", addContext));
       if (addingContext) {
@@ -1111,11 +1163,6 @@ class CodexSessionPanel implements View {
         contextRows.push(new KeyedView("load", load));
       }
     }
-    if (contextActions.length > 0) {
-      var actionStyle = new LayoutStyle(); actionStyle.width = LayoutAxis.grow(); actionStyle.childGap = 6;
-      actionStyle.wrapMode = haxeon.ui.LayoutWrapMode.Wrap;
-      contextRows.unshift(new KeyedView("actions", new Row("agent-context-actions", contextActions, actionStyle)));
-    }
     for (index in 0...textContext.length) {
       var file = textContext[index], fileIndex = index;
       var fileStyle = new LayoutStyle(); fileStyle.width = LayoutAxis.grow(); fileStyle.childGap = 8;
@@ -1134,14 +1181,20 @@ class CodexSessionPanel implements View {
     }
     if (contextError != null) contextRows.push(new KeyedView("error", new Text(contextError, null, tokens.danger)));
     if (promptBytes > submitLimit) contextRows.push(new KeyedView("limit", new Text("Message and included text exceed the " + submitLimit + " byte limit.", null, tokens.danger)));
+    modelControls.push(new KeyedView("permissions", new SettingMenuButton(permissions, permissionLabel)));
+    var spacerStyle = new LayoutStyle(); spacerStyle.width = LayoutAxis.grow();
+    modelControls.push(new KeyedView("spacer", new Column("composer-spacer", [], spacerStyle)));
+    for (action in contextActions) modelControls.push(action);
+    for (action in footerControls) modelControls.push(action);
     rows.push(new KeyedView("composer", new Column("codex-composer-frame", [new KeyedView("content", new Column("codex-composer", [
       new KeyedView("prompt", new CodexPromptNode(promptNode)),
       new KeyedView("context", new Column("agent-context", contextRows)),
       new KeyedView("suggestions", new Column("agent-command-suggestions",completionRows)),
       new KeyedView("commands-error", new Text(view.commandsError == null ? "" : view.commandsError)),
-      new KeyedView("models", new Row("codex-model-controls", modelControls, modelControlsStyle)),
-      new KeyedView("footer", new Row("codex-composer-footer", footerControls, footerStyle))
+      new KeyedView("models", new Row("codex-model-controls", modelControls, modelControlsStyle))
     ], composerStyle))], composerFrame)));
+    if (workspaceStrip != null) rows.push(workspaceStrip);
+    if (piActive) rows.push(new KeyedView("composer-hint", hint));
     var viewport = new LayoutStyle();
     viewport.height = LayoutAxis.grow(MIN_SESSION_HEIGHT + inputStyle.height.value - 56);
     viewport.width = LayoutAxis.grow();
@@ -1158,6 +1211,21 @@ class CodexSessionPanel implements View {
     var session = new ScrollView("codex-session-viewport", new Column("codex-session", rows, viewport), scrollStyle);
     session.fillViewport = true;
     return session.build(context);
+  }
+}
+
+/** Expose the selected setting and menu affordance on the native button. */
+private class SettingMenuButton implements View {
+  final button:Button;
+  final value:String;
+  public function new(button:Button, value:String) { this.button = button; this.value = value; }
+  public function build(context:BuildContext):RenderNode {
+    var node = button.build(context);
+    if (node.semantics != null) {
+      node.semantics.value = value;
+      node.semantics.states |= haxeon.ui.semantics.AccessibilityState.HasPopup;
+    }
+    return node;
   }
 }
 
