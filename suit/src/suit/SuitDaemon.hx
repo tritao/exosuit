@@ -8,16 +8,20 @@ import haxeon.platform.NativeKitEventValue;
 import nativekit.ffi.NativeKitTypes;
 import sys.FileSystem;
 import suit.SuitInventory.SuitProcess;
+import suit.relay.SuitRelayHosting;
+import suit.relay.SuitRelayHosts;
 import workspace.transport.NativeRpcHub;
 import workspace.transport.NativeRpcTransport;
 
 /**
 	The per-user daemon: one per user (an exclusive lock in suit's home), a control endpoint for the CLI,
-	and on Windows the tray icon.
+	and on Windows the tray icon. It also holds the relay machine socket of every hosted workspace
+	(`suit.relay.SuitRelayHosting`).
 
 	Idle cost: it sleeps in the NativeKit event wait, which a tray click or a control connection wakes,
 	and rescans processes every REFRESH_SECONDS to keep the tooltip current. It exits after
-	`EXOSUIT_SUIT_IDLE_SECONDS` (default 120) with nothing to track: no editor and no background process.
+	`EXOSUIT_SUIT_IDLE_SECONDS` (default 120) with nothing to track: no editor, no background process and
+	no hosted workspace. Started at login (`daemon --login`) it stays resident.
 **/
 class SuitDaemon {
 	static inline var REFRESH_SECONDS:Float = 10;
@@ -35,8 +39,11 @@ class SuitDaemon {
 	var stopAt:Float = -1;
 	var menuRequested:Bool = false;
 	final idleSeconds:Float;
+	final relay:SuitRelayHosting;
+	/** Started at login: stays up with nothing to track, so the tray icon stays. */
+	final resident:Bool;
 
-	public static function run():Int {
+	public static function run(login:Bool = false):Int {
 		var home = SuitPaths.home();
 		if (!SuitPaths.prepare()) {
 			Sys.stderr().writeString("suit: " + home + " is not a private directory of this user
@@ -48,7 +55,7 @@ class SuitDaemon {
 			return 0; // Another suit owns this home; starting one is always safe to repeat.
 		var code = 0;
 		try {
-			var daemon = new SuitDaemon();
+			var daemon = new SuitDaemon(login);
 			daemon.loop();
 			daemon.dispose();
 		} catch (error:Dynamic) {
@@ -60,13 +67,15 @@ class SuitDaemon {
 		return code;
 	}
 
-	function new() {
+	function new(login:Bool) {
+		resident = login;
 		var configured = Std.parseFloat(Sys.getEnv("EXOSUIT_SUIT_IDLE_SECONDS"));
 		idleSeconds = Math.isNaN(configured) || configured < 1 ? 120 : configured;
 		idleSince = Sys.time();
 		runtime = NativeKitRuntime.start();
 		hub = new NativeRpcHub(runtime.events);
 		hub.listen(NativeRpcHub.local(SuitPaths.endpoint()), function(transport) clients.push(transport));
+		relay = new SuitRelayHosting(runtime.events, hub);
 		runtime.events.listen(onEvent);
 		inventory = new SuitInventory();
 		refreshedAt = Sys.time();
@@ -79,7 +88,7 @@ class SuitDaemon {
 
 	function loop():Void {
 		while (stopAt < 0 || Sys.time() < stopAt) {
-			runtime.events.wait(jobs.length > 0 || clients.length > 0 ? 0.1 : 1.0);
+			runtime.events.wait(jobs.length > 0 || clients.length > 0 || relay.busy() ? 0.1 : 1.0);
 			for (_ in 0...128)
 				if (!runtime.events.poll())
 					break;
@@ -89,6 +98,7 @@ class SuitDaemon {
 				showMenu();
 			}
 			serveClients();
+			relay.poll();
 			var index = jobs.length;
 			while (index-- > 0)
 				if (jobs[index].tick()) {
@@ -99,7 +109,7 @@ class SuitDaemon {
 				refresh();
 			if (stopAfterJobs && jobs.length == 0 && stopAt < 0)
 				stopAt = Sys.time() + 0.3;
-			if (inventory.processes.length > 0 || clients.length > 0 || jobs.length > 0)
+			if (inventory.processes.length > 0 || clients.length > 0 || jobs.length > 0 || relay.hostingCount() > 0 || resident)
 				idleSince = Sys.time();
 			else if (Sys.time() - idleSince >= idleSeconds)
 				break;
@@ -136,7 +146,22 @@ class SuitDaemon {
 		var current = tray;
 		if (current == null)
 			return;
-		current.show(function(menu) SuitMenuModel.build(menu, inventory, {terminate: terminate, openViewer: openViewer, quit: quitEverything}));
+		current.show(function(menu) SuitMenuModel.build(menu, inventory, {
+			terminate: terminate, openViewer: openViewer, quit: quitEverything,
+			hosting: {
+				hosts: relay.views, stopHosting: stopHosting, resumeHosting: function(root) relay.resume(root),
+				loginEnabled: SuitLogin.enabled, toggleLogin: function() try SuitLogin.toggle() catch (_:Dynamic) {}
+			}
+		}));
+	}
+
+	/** Stop hosting: pause it in relay-settings.json (so nothing restarts it) and stop the workspace service. */
+	function stopHosting(root:Null<String>):Void {
+		relay.pause(root);
+		var targets = SuitActions.hosting(inventory, root);
+		for (process in targets)
+			SuitRelayHosts.setPaused(process.stateDir, true);
+		terminate(targets);
 	}
 
 	/** Stops everything, editors included (asked to close first), then exits. */
@@ -176,8 +201,16 @@ class SuitDaemon {
 			}
 			if (message == null)
 				continue;
+			var request:Dynamic = null;
+			try request = Json.parse(message.toString()) catch (_:Dynamic) {}
+			if (SuitRelayHosting.isAttach(request)) {
+				// A hosting daemon's relay link: from here on it carries relay frames, not control requests.
+				clients.splice(index, 1);
+				relay.attach(client, request);
+				continue;
+			}
 			var reply:Dynamic;
-			try reply = handle(Json.parse(message.toString())) catch (error:Dynamic) reply = {ok: false, error: Std.string(error)};
+			try reply = handle(request) catch (error:Dynamic) reply = {ok: false, error: Std.string(error)};
 			client.send(Bytes.ofString(Json.stringify(reply)));
 		}
 	}
@@ -190,7 +223,7 @@ class SuitDaemon {
 				return {
 					ok: true, pid: Sys.getPid(), home: SuitPaths.home(), summary: inventory.summary(), tray: tray != null,
 					editors: inventory.editors().length, background: inventory.background().length,
-					orphaned: inventory.orphans().length, terminating: jobs.length
+					orphaned: inventory.orphans().length, terminating: jobs.length, hosting: relay.hostingCount()
 				};
 			case "refresh":
 				refresh();
@@ -204,7 +237,8 @@ class SuitDaemon {
 				stopAt = Sys.time() + 0.3;
 				return {ok: true};
 			default:
-				return {ok: false, error: "unknown request"};
+				var relayReply = relay.handle(request);
+				return relayReply != null ? relayReply : {ok: false, error: "unknown request"};
 		}
 	}
 
@@ -229,6 +263,7 @@ class SuitDaemon {
 		tray = null;
 		for (client in clients)
 			client.close();
+		relay.dispose();
 		hub.dispose();
 		runtime.dispose();
 	}
