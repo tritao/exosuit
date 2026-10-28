@@ -68,8 +68,9 @@ static int start_child(const char *self, child_process *out_child) {
     if (pid < 0)
         return 0;
     if (pid == 0) {
-        sleep(60);
-        _exit(0);
+        /* exec, so /proc/<pid>/environ holds the environment set for the child */
+        execl("/proc/self/exe", "processkit_contract", "--sleep", (char *)NULL);
+        _exit(1);
     }
     *out_child = pid;
     return (int)pid;
@@ -96,7 +97,7 @@ static void pause_briefly(void) { usleep(50000); }
 
 static void test_snapshot(int self) {
     processkit_list list = {0};
-    int status = processkit_list_open("*", &list);
+    int status = processkit_list_open("*", "", &list);
     if (status == PROCESSKIT_UNSUPPORTED) {
         printf("SKIP: process listing is not implemented on this platform\n");
         return;
@@ -121,10 +122,12 @@ static void test_snapshot(int self) {
     require(strcmp(processkit_list_name(list, 0), "") == 0, "a closed handle has no names");
     processkit_list_close(list); /* closing twice is harmless */
 
-    require(processkit_list_open("", &list) == PROCESSKIT_OK, "a snapshot without command lines opens");
+    require(processkit_list_open("", "PATH", &list) == PROCESSKIT_OK, "a snapshot without command lines opens");
     for (int index = 0; index < processkit_list_count(list); index++)
         if (processkit_list_pid(list, index) == self)
-            require(strcmp(processkit_list_command_line(list, index), "") == 0, "an empty name list reads no command lines");
+            require(strcmp(processkit_list_command_line(list, index), "") == 0 &&
+                        strcmp(processkit_list_environment(list, index), "") == 0,
+                    "an empty name list reads no command lines or environments");
     processkit_list_close(list);
 
     /* Handles are a bounded table: opening more than it holds fails cleanly, and closing frees slots. */
@@ -132,15 +135,15 @@ static void test_snapshot(int self) {
     int opened = 0;
     for (int index = 0; index < 40; index++) {
         lists[index].id = 0;
-        if (processkit_list_open("", &lists[index]) == PROCESSKIT_OK)
+        if (processkit_list_open("", "", &lists[index]) == PROCESSKIT_OK)
             opened++;
     }
     require(opened > 0 && opened < 40, "the handle table is bounded");
     for (int index = 0; index < 40; index++)
         processkit_list_close(lists[index]);
-    require(processkit_list_open("", &list) == PROCESSKIT_OK, "closed handles free their slots");
+    require(processkit_list_open("", "", &list) == PROCESSKIT_OK, "closed handles free their slots");
     processkit_list_close(list);
-    require(processkit_list_open("", NULL) == PROCESSKIT_FAILED, "a missing out slot is an error");
+    require(processkit_list_open("", "", NULL) == PROCESSKIT_FAILED, "a missing out slot is an error");
 }
 
 static void test_identity(int self) {
@@ -157,8 +160,29 @@ static void test_identity(int self) {
     require(processkit_request_close(self, 0) == PROCESSKIT_UNKNOWN_START, "request_close refuses an unknown start time");
 }
 
+/* The child's environment holds only what was asked for, from the variables it was started with. */
+static void check_child_environment(int pid) {
+    processkit_list list = {0};
+    if (processkit_list_open("*", "PROCESSKIT_CONTRACT;PROCESSKIT_ABSENT", &list) != PROCESSKIT_OK)
+        return; /* listing unsupported; test_snapshot reported it */
+    int found = 0;
+    for (int index = 0; index < processkit_list_count(list); index++)
+        if (processkit_list_pid(list, index) == pid) {
+            found = 1;
+            require(strcmp(processkit_list_environment(list, index), "PROCESSKIT_CONTRACT=child\n") == 0,
+                    "a listed process's requested environment variables are read");
+        }
+    require(found, "the child is listed");
+    processkit_list_close(list);
+}
+
 static void test_terminate(const char *program) {
     child_process child;
+#if defined(_WIN32)
+    SetEnvironmentVariableA("PROCESSKIT_CONTRACT", "child");
+#else
+    setenv("PROCESSKIT_CONTRACT", "child", 1);
+#endif
     int pid = start_child(program, &child);
     require(pid > 0, "the child starts");
     if (pid <= 0)
@@ -170,6 +194,7 @@ static void test_terminate(const char *program) {
             pause_briefly();
     }
     require(started > 0, "the child has a start time");
+    check_child_environment(pid);
     require(processkit_terminate(pid, started + 1) == PROCESSKIT_NOT_FOUND, "a wrong start time leaves the child alone");
     require(!child_exited(child, 0), "the child survives a mismatched terminate");
     require(processkit_terminate(pid, started) == PROCESSKIT_OK, "a matching terminate succeeds");
