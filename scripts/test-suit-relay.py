@@ -14,7 +14,22 @@ Covers:
 - a device frame with no service running starts the workspace manager on demand;
 - frames pass both ways between a device and an attached daemon (a stand-in daemon on suit's pipe);
 - Stop hosting pauses (the relay sees the machine offline), resume works without suit, and suit hosts
-  again from its records when it starts.
+  again from its records when it starts; a pause alone makes a running workspace manager exit;
+- Disconnect closes the device's socket (close code 4001) and refuses it for the cooldown;
+- a forged attach naming a foreign executable is refused, and a refused attach keeps suit from dialling
+  while the refused process runs;
+- the workspace manager is started at most 5 times without attaching; a permanent relay error lets
+  suit idle out;
+- a pre-created pipe instance makes suit fail clearly instead of sharing the name;
+- toggling Start at login from the daemon does not block it, and the Run command works from a home and
+  LOCALAPPDATA with `&`, `(`, `^` and `%` in them.
+
+Setup: `npm ci --no-audit --no-fund` in relay/worker. Wrangler runs the workerd binary from the
+platform package (@cloudflare/workerd-windows-64 and so on), which npm installs without any script;
+workerd's own postinstall only checks and links it. The test checks that the binary is there before it
+starts. If npm's install-script policy blocked workerd and wrangler still cannot start it, approve it
+(`npm install-scripts approve workerd`) and run `npm rebuild workerd`; neither edits tracked files. Every exosuit
+process here gets a fresh PRAGTICAL_PORTABLE, so the user's editor state is never read or written.
 """
 from __future__ import annotations
 
@@ -43,6 +58,25 @@ HL = HAXEON / ".tools" / "hashlink" / ("hl.exe" if os.name == "nt" else "hl")
 SUIT = ROOT / "suit" / "build" / "host" / "main.hl"
 AGENT = ROOT / "agent" / "build" / "host" / "main.hl"
 WRANGLER = ROOT / "relay" / "worker" / "node_modules" / "wrangler" / "bin" / "wrangler.js"
+WORKERD = ROOT / "relay" / "worker" / "node_modules" / "@cloudflare" / ("workerd-windows-64" if os.name == "nt" else "workerd-linux-64")
+SPECIAL = "&(^%x%)"
+
+
+def own_image() -> str:
+    """This Python process's executable as the OS reports it (a venv's python.exe may start another one)."""
+    if os.name != "nt":
+        return os.path.realpath(f"/proc/{os.getpid()}/exe")
+    buffer = ctypes.create_unicode_buffer(32768)
+    size = ctypes.c_ulong(32768)
+    kernel32 = ctypes.windll.kernel32
+    kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+    assert kernel32.QueryFullProcessImageNameW(ctypes.c_void_p(kernel32.GetCurrentProcess()), 0, buffer, ctypes.byref(size))
+    return buffer.value
+
+
+def pipe_name(home: Path) -> str:
+    user = "".join(c if c.isascii() and (c.isalnum() or c in "-_") else "_" for c in os.environ.get("USERNAME", "user")) or "user"
+    return "\\\\.\\pipe\\exosuit-suit-" + user + "-" + hashlib.sha256(str(home).encode()).hexdigest()[:12]
 
 
 def library_path() -> str:
@@ -93,10 +127,12 @@ def kill_tree(pid: int) -> None:
 
 
 class Suit:
-    def __init__(self, base: Path, extra: dict[str, str]) -> None:
-        self.home = base / "suit-home"
+    def __init__(self, base: Path, extra: dict[str, str], home: str = "suit-home") -> None:
+        self.home = base / home
+        portable = base / "portable"
+        portable.mkdir(exist_ok=True)
         self.environment = dict(os.environ, EXOSUIT_SUIT="isolated", EXOSUIT_SUIT_HOME=str(self.home), EXOSUIT_SUIT_SCAN="0", EXOSUIT_SUIT_TRAY="0",
-                                EXOSUIT_SUIT_AUTOSTART="0", EXOSUIT_SUIT_LAUNCHER=str(SUIT), **extra)
+                                EXOSUIT_SUIT_AUTOSTART="0", EXOSUIT_SUIT_LAUNCHER=str(SUIT), PRAGTICAL_PORTABLE=str(portable), **extra)
         self.environment["PATH" if os.name == "nt" else "LD_LIBRARY_PATH"] = library_path()
 
     def run(self, *arguments: str, timeout: float = 60, check: bool = True) -> subprocess.CompletedProcess:
@@ -115,17 +151,33 @@ class Suit:
     def hosts(self) -> list[dict]:
         return json.loads(self("relay", "list", "--json"))["hosts"]
 
+    def control(self, request: dict) -> dict:
+        """One control request over suit's pipe, as the CLI sends it."""
+        endpoint = json.loads((self.home / "daemon.json").read_text())["endpoint"]
+        client = PipeDaemon(endpoint, request)
+        try:
+            return json.loads(client.receive(10) or b"{}")
+        finally:
+            client.close()
+
+    def pid(self) -> int:
+        return json.loads((self.home / "daemon.json").read_text())["pid"]
+
 
 # --- Start at login ---------------------------------------------------------------------------------------------
 
 def test_login(base: Path) -> None:
     scratch = f"HKCU\\Software\\ExosuitSuitTest\\login-{secrets.token_hex(6)}"
     autostart = base / "autostart"
+    # A user name or home with cmd's special characters: the Run command and script must still work.
+    local = base / f"local {SPECIAL}"
+    local.mkdir()
     suit = Suit(base, {"EXOSUIT_SUIT_LOGIN_KEY": scratch, "EXOSUIT_SUIT_AUTOSTART_DIR": str(autostart),
-                       "EXOSUIT_SUIT_IDLE_SECONDS": "2"})
+                       "EXOSUIT_SUIT_IDLE_SECONDS": "2", "LOCALAPPDATA": str(local)}, home=f"suit home {SPECIAL}")
     real_run_key = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
-    value_name = "Exosuit suit " + hashlib.sha256(str(suit.home).encode()).hexdigest()[:12]
-    script = suit.home / ("start-at-login.cmd" if os.name == "nt" else "start-at-login.sh")
+    tag = hashlib.sha256(str(suit.home).encode()).hexdigest()[:12]
+    value_name = "Exosuit suit " + tag
+    script = local / "Exosuit" / "suit-login" / f"start-{tag}.cmd" if os.name == "nt" else suit.home / "start-at-login.sh"
     try:
         assert "start at login: off" in suit("login", "status")
         assert "[ ] Start at login" in suit("menu"), suit("menu")
@@ -137,20 +189,31 @@ def test_login(base: Path) -> None:
         if os.name == "nt":
             query = subprocess.run(["reg", "query", scratch, "/v", value_name], capture_output=True, text=True, timeout=30)
             assert query.returncode == 0, query.stdout + query.stderr
-            assert "--headless" in query.stdout and str(script) in query.stdout and "conhost.exe" in query.stdout, query.stdout
+            assert "--headless" in query.stdout and "%LOCALAPPDATA%" in query.stdout and "conhost.exe" in query.stdout, query.stdout
+            assert SPECIAL not in query.stdout, "the Run command holds a user path: " + query.stdout
+            run_command = query.stdout.split("REG_SZ", 1)[1].strip()
             # The user's real Run key is never touched.
             real = subprocess.run(["reg", "query", real_run_key, "/v", value_name], capture_output=True, text=True, timeout=30)
             assert real.returncode != 0, "the test wrote to the real Run key"
         else:
             assert any(autostart.glob("exosuit-suit-*.desktop")), "no autostart entry"
         assert "[x] Start at login" in suit("menu")
-        # The script starts a resident suit: it stays past its idle timeout with nothing to track.
-        starter = subprocess.Popen(["cmd.exe", "/d", "/c", str(script)] if os.name == "nt" else ["/bin/sh", str(script)],
+        # The Run command, exactly as Windows runs it, starts a resident suit: it stays past its idle timeout.
+        starter = subprocess.Popen(run_command if os.name == "nt" else ["/bin/sh", str(script)],
                                    env=suit.environment, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
             wait_until(suit.running, 30, "the start-at-login script did not start suit")
             time.sleep(5)
             assert suit.running(), "a suit started at login idled out"
+            if os.name == "nt":
+                # The daemon's toggle (the tray checkbox) answers at once and runs reg.exe in the background.
+                started = time.monotonic()
+                assert suit.control({"op": "login-toggle"}).get("ok") is True
+                assert time.monotonic() - started < 2, "the login toggle blocked the daemon"
+                assert suit.running(), "the daemon stopped answering during the toggle"
+                wait_until(lambda: "start at login: off" in suit("login", "status"), 20, "the background toggle did not turn it off")
+                suit.control({"op": "login-toggle"})
+                wait_until(lambda: "start at login: on" in suit("login", "status"), 20, "the background toggle did not turn it on")
             assert "stopped" in suit("stop")
             starter.wait(timeout=30)
         finally:
@@ -205,6 +268,8 @@ class WebSocket:
             response += chunk
         head, _, self.buffer = response.partition(b"\r\n\r\n")
         self.status = int(head.split(b" ")[1]) if head else 0
+        self.close_code: int | None = None
+        self.close_reason = ""
 
     def send(self, data: bytes) -> None:
         mask = os.urandom(4)
@@ -236,6 +301,9 @@ class WebSocket:
                 if opcode == 2:
                     return payload
                 if opcode == 8:
+                    if len(payload) >= 2:
+                        self.close_code = int.from_bytes(payload[:2], "big")
+                        self.close_reason = payload[2:].decode(errors="replace")
                     return None
         except (socket.timeout, ConnectionError, OSError):
             return None
@@ -339,15 +407,21 @@ def stored_secret(credentials: Path, account: str) -> str:
 
 def test_relay(base: Path) -> None:
     assert WRANGLER.is_file(), f"run `npm ci` in relay/worker first ({WRANGLER} is missing)"
+    assert any(WORKERD.glob("bin/workerd*")), (f"workerd's binary is missing under {WORKERD}: run `npm ci --no-audit --no-fund` in relay/worker; "
+                                              "if npm blocked workerd's install script, `npm install-scripts approve workerd` "
+                                              "then `npm rebuild workerd`")
     assert AGENT.is_file(), f"build the agent first: {AGENT}"
     credentials = base / "credentials"; credentials.mkdir()
     workspace = base / "workspace"; workspace.mkdir()
     agent_state = base / "agent-state"
     relay = Relay(base)
-    suit = Suit(base, {
+    suit_settings = {
         "EXOSUIT_SUIT_IDLE_SECONDS": "12", "EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP": "1", "EXOSUIT_RELAY_VIA_SUIT": "1",
         "EXOSUIT_RELAY_TEST_CREDENTIALS_DIR": str(credentials), "EXOSUIT_AGENT_STATE_HOME": str(agent_state),
-        "EXOSUIT_SUIT_LOGIN_KEY": "HKCU\\Software\\ExosuitSuitTest\\unused"})
+        "EXOSUIT_SUIT_LOGIN_KEY": "HKCU\\Software\\ExosuitSuitTest\\unused",
+        # This Python process stands in for an attached daemon on suit's pipe (PipeDaemon).
+        "EXOSUIT_SUIT_TEST_ATTACH_CALLER": own_image()}
+    suit = Suit(base, suit_settings)
     # What the editor sets for the workspace manager it starts. suit's environment lacks it: its on-demand
     # start must set it itself.
     editor_environment = dict(suit.environment, EXOSUIT_AGENT_LAUNCHER=str(AGENT))
@@ -406,8 +480,14 @@ def test_relay(base: Path) -> None:
         socket_a.close()
         manager_pid = wait_until(lambda: json.loads((state / "endpoint.json").read_text())["managerPid"]
                                  if (state / "endpoint.json").exists() else None, 30, "no endpoint for the started manager")
-        assert "stopped" in suit("kill", str(manager_pid))
+        # A pause alone (nothing killed): the daemon is refused with hosting_paused, counts as idle, and the
+        # manager exits on its own once its idle timeout (60 s) passes.
+        assert suit.control({"op": "relay-pause", "workspace": workspace.name}).get("ok") is True
+        wait_until(lambda: not pid_alive(manager_pid), 120, "a paused workspace manager kept running", interval=1)
         wait_until(lambda: not suit.hosts()[0]["serviceRunning"], 30, "the started service did not stop")
+        assert "resumed hosting" in suit("relay", "resume", workspace.name)
+        wait_until(lambda: suit.hosts()[0]["state"] == "connected", 30, "suit did not host again after resume")
+        print("  a paused workspace's manager exited on its own; resumed")
 
         if os.name == "nt":
             # Both directions through suit, with a stand-in daemon on suit's pipe.
@@ -451,7 +531,7 @@ def test_relay(base: Path) -> None:
                       "pending": [second], "open": {"terminals": 1, "agents": 2}}
             pipe.send(bytes([0x11]) + json.dumps(report).encode())
             def clients() -> dict:
-                return {client["id"]: client for client in suit.hosts()[0]["clients"]}
+                return {client["id"]: client for client in suit.hosts()[0]["clients"] if client["kind"] != "disconnected"}
             listed = wait_until(lambda: (lambda value: value if set(value) == {device, second}
                                          and value[device]["kind"] == "device" and value[second]["kind"] == "pairing" else None)(clients()),
                                 15, f"suit does not list both clients: {suit('relay', 'list')}")
@@ -474,8 +554,17 @@ def test_relay(base: Path) -> None:
                 if message and message[0] == 2 and message[1:17].hex() == device:
                     reset = message
             assert reset is not None, "the disconnected client's session was not reset in the daemon"
-            wait_until(lambda: set(clients()) == {second}, 10, "the disconnected client is still listed")
-            socket_b.send(envelope(device, b"after disconnect"))
+            # The Worker closed the device's socket with a code the app can show.
+            assert socket_b.receive(10) is None and socket_b.close_code == 4001, (socket_b.close_code, socket_b.close_reason)
+            assert socket_b.close_reason == "disconnected_by_host", socket_b.close_reason
+            wait_until(lambda: set(clients()) == {second}, 10, "the disconnected client is still listed as connected")
+            assert any(client["id"] == device and client["kind"] == "disconnected" for client in suit.hosts()[0]["clients"]), \
+                "the disconnected client is not listed as disconnected"
+            # It reconnects during the cooldown: suit closes it again and forwards nothing.
+            socket_e = relay.device_socket(machine, device, device_token); devices.append(socket_e)
+            assert socket_e.status == 101, socket_e.status
+            socket_e.send(envelope(device, b"after disconnect"))
+            assert socket_e.receive(10) is None and socket_e.close_code == 4001, "a client in its cooldown was not refused"
             deadline = time.monotonic() + 2
             while time.monotonic() < deadline:
                 message = pipe.receive(0.5)
@@ -487,6 +576,24 @@ def test_relay(base: Path) -> None:
             print("  two clients listed with details; one disconnected from the CLI; a closed one dropped promptly")
             pipe.close(); pipe = None
             socket_b.close()
+
+            # A forged attach naming a foreign executable is refused, and suit leaves the machine to the
+            # refused process while it runs (one dialer): the relay sees the machine offline meanwhile.
+            forger = subprocess.Popen([sys.executable, "-c", FORGER, endpoint, json.dumps(
+                {"op": "relay-attach", "version": 1, "root": host["root"], "stateDir": host["stateDir"], "machineId": machine,
+                 "origin": relay.origin, "executable": own_image(), "launcher": str(AGENT)})],
+                stdout=subprocess.PIPE, text=True)
+            try:
+                refusal = json.loads(forger.stdout.readline() or "{}")
+                assert refusal.get("error") == "relay_attach_untrusted", refusal
+                wait_until(lambda: suit.hosts()[0]["state"] == "direct", 10, "suit did not hold off for the refused process")
+                probe = relay.device_socket(machine, device, device_token)
+                probe.close()
+                assert probe.status == 503, f"suit kept dialling while a refused daemon held the machine ({probe.status})"
+            finally:
+                forger.wait(timeout=30)
+            wait_until(lambda: suit.hosts()[0]["state"] == "connected", 30, "suit did not dial again once the refused process exited")
+            print("  a forged attach was refused; suit held off while the refused process ran, then hosted again")
 
         # Stop hosting: paused in the workspace's settings, the machine socket closes, suit may idle out.
         output = suit("relay", "stop", workspace.name)
@@ -510,7 +617,53 @@ def test_relay(base: Path) -> None:
                    "suit did not host again from its records")
         socket_c = relay.device_socket(machine, device, device_token); devices.append(socket_c)
         assert socket_c.status == 101, socket_c.status
+        socket_c.close()
         print("  resumed: suit hosts again from its records after a restart")
+
+        # The workspace manager cannot start (its folder moved): suit tries 5 times, then stops with an error
+        # it shows, stops counting the workspace as hosted, and idles out.
+        suit("stop")
+        wait_until(lambda: not suit.running(), 20, "suit did not stop")
+        quick = Suit(base, dict(suit_settings, EXOSUIT_SUIT_TEST_START_COOLDOWN="0.5"))
+        assert "started" in quick("start")
+        wait_until(lambda: quick.hosts()[0]["state"] == "connected", 60, "suit did not host again")
+        moved = workspace.with_name(workspace.name + "-moved")
+        workspace.rename(moved)
+        try:
+            def failed():
+                view = quick.hosts()[0]
+                if view["state"] == "failed":
+                    return view
+                probe = relay.device_socket(machine, device, device_token)
+                if probe.status == 101:
+                    probe.send(envelope(device, b"start please"))
+                    time.sleep(0.7)
+                probe.close()
+                return None
+            view = wait_until(failed, 60, "suit kept starting a workspace service that never attaches", interval=0.1)
+            assert view["error"] == "service_start_failed_repeatedly" and view["starts"] == 5, view
+            assert "failed: service_start_failed_repeatedly" in quick("relay", "list"), quick("relay", "list")
+            quick_pid = quick.pid()
+            wait_until(lambda: not pid_alive(quick_pid), 45, "a failed workspace kept suit running", interval=1)
+        finally:
+            moved.rename(workspace)
+        print("  the on-demand start gave up after 5 attempts; suit idled out")
+
+        # A permanent relay error (a wrong bearer) is shown and does not keep suit running.
+        account = f"relay:{relay.origin}/machine/{machine}"
+        secret_file = credentials / (hashlib.sha256(("com.exosuit.workspace-relay\n" + account).encode()).hexdigest()[:32] + ".secret")
+        original = secret_file.read_text()
+        secret_file.write_text(secrets.token_hex(32).encode().hex())
+        try:
+            assert "started" in quick("start")
+            view = wait_until(lambda: (lambda item: item if item["state"] == "failed" else None)(quick.hosts()[0]), 60,
+                              "a wrong bearer did not fail hosting")
+            assert view["error"] == "relay_unauthorized", view
+            quick_pid = quick.pid()
+            wait_until(lambda: not pid_alive(quick_pid), 45, "a permanent relay error kept suit running", interval=1)
+        finally:
+            secret_file.write_text(original)
+        print("  a permanent relay error is shown and lets suit idle out")
     except BaseException:
         print("--- suit relay list\n" + suit.run("relay", "list", check=False).stdout, file=sys.stderr)
         print("--- suit list, status\n" + suit.run("list", "--json", check=False).stdout
@@ -533,6 +686,34 @@ def test_relay(base: Path) -> None:
             relay.stop()
 
 
+FORGER = r'''
+import json, sys, time
+endpoint, request = sys.argv[1], sys.argv[2].encode()
+with open(endpoint, "r+b", buffering=0) as pipe:
+    pipe.write(b"HMPK\x01\x00" + len(request).to_bytes(4, "big") + request)
+    header = pipe.read(10)
+    reply = pipe.read(int.from_bytes(header[6:10], "big"))
+    print(reply.decode(), flush=True)
+    time.sleep(8)
+'''
+
+
+def test_squat(base: Path) -> None:
+    """Someone else creates suit's pipe name first: suit refuses to share it and says so."""
+    suit = Suit(base, {})
+    kernel32 = ctypes.windll.kernel32
+    kernel32.CreateNamedPipeW.restype = ctypes.c_void_p
+    squatter = kernel32.CreateNamedPipeW(pipe_name(suit.home), 3, 0, 255, 1024, 1024, 0, None)
+    assert squatter not in (None, ctypes.c_void_p(-1).value), "could not create the squatting pipe"
+    try:
+        result = suit.run("daemon", timeout=30, check=False)
+        assert result.returncode == 1, (result.returncode, result.stdout, result.stderr)
+        assert "held by another process" in result.stderr, result.stderr
+        assert not suit.run("status", "--json", check=False).stdout.count('"ok":true'), "a client trusted the squatter"
+    finally:
+        kernel32.CloseHandle(ctypes.c_void_p(squatter))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--login-only", action="store_true", help="skip the relay test (no Worker needed)")
@@ -543,6 +724,10 @@ def main() -> int:
         (base / "login").mkdir()
         test_login(base / "login")
         print("PASS start at login (scratch key)")
+        if os.name == "nt":
+            (base / "squat").mkdir()
+            test_squat(base / "squat")
+            print("PASS a squatted pipe name makes suit fail clearly")
         if not options.login_only:
             (base / "relay").mkdir()
             test_relay(base / "relay")

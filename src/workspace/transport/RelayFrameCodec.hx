@@ -9,6 +9,8 @@ class RelayFrameCodec {
 	public static inline final ENVELOPE_BYTES:Int = 1 + ROUTE_BYTES;
 	public static inline final VERSION:Int = 1;
 	public static inline final RESET_VERSION:Int = 2;
+	/** Machine to Worker: close the channel's device or pairing socket (close code 4001, disconnected_by_host). */
+	public static inline final CLOSE_VERSION:Int = 3;
 
 	public static function encode(channelId:String, payload:Bytes, maxMessageBytes:Int = 262144):Bytes {
 		var route = decodeChannelId(channelId);
@@ -28,6 +30,13 @@ class RelayFrameCodec {
 		var packet = Bytes.alloc(ENVELOPE_BYTES);
 		packet.set(0, RESET_VERSION);
 		packet.blit(1, route, 0, route.length);
+		return packet;
+	}
+
+	/** Asks the Worker to close a channel's device or pairing socket; the client sees disconnected_by_host. */
+	public static function encodeClose(channelId:String):Bytes {
+		var packet = encodeReset(channelId);
+		packet.set(0, CLOSE_VERSION);
 		return packet;
 	}
 

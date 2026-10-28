@@ -37,6 +37,7 @@ class WorkspaceRelayStatusFile {
 			var state:WorkspaceRelayState = {
 				configured: true,
 				connected: relay != null && relay.connected,
+				viaSuit: relay != null && relay.viaSuit,
 				origin: relay == null ? null : relay.pairingEndpoint().origin,
 				error: setupError != null ? setupError : relay == null ? null : relay.lastError,
 				devices: devices,

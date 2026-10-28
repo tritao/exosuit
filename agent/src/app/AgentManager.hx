@@ -210,8 +210,7 @@ class AgentManager {
 				throw "This workspace already has a relay configured";
 			// Enabling remote access again resumes hosting that suit's Stop hosting paused.
 			if (stringField(settings, "hosting") == "paused")
-				AtomicFile.write(settingsPath, Json.stringify({version: 1, origin: relay.origin}) + "
-");
+				AtomicFile.write(settingsPath, Json.stringify({version: 1, origin: relay.origin}) + "\n");
 		} else {
 			AtomicFile.create(settingsPath, Json.stringify({version: 1, origin: relay.origin}) + "\n");
 		}

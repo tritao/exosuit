@@ -23,6 +23,18 @@ class NativeKitByteStream implements RelayByteStream {
 	public function failureReason():Null<String>
 		return failure;
 
+	/** The process at the other end of a local stream, as the OS reports it; 0 when unknown. */
+	public function peerProcess():Int {
+		if (!isOpen())
+			return 0;
+		try {
+			var result = NativeKit.nk_transport_get_peer_process(handle.borrow());
+			return result.status == Result.Ok ? haxe.Int64.toInt(result.out_process_id) : 0;
+		} catch (_:Dynamic) {
+			return 0;
+		}
+	}
+
 	/** Sends one copied buffer. NativeKit reports bounded-queue pressure as false. */
 	public function send(bytes:Bytes):Bool {
 		if (!isOpen())

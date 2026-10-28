@@ -31,7 +31,9 @@ class SuitMain {
 		"  relay stop <workspace>    stop hosting one workspace (root or folder name); grants persist",
 		"  relay stop --all          stop all hosting",
 		"  relay resume <workspace>|--all  host again what relay stop paused",
-		"  relay disconnect <client>  end one remote client's session (id or a prefix of 4+ characters)",
+		"  relay disconnect <client>  end one remote client's session (id or a prefix of 4+ characters); it is refused for 60 s",
+		"  relay retry <workspace>   try again to host a workspace that failed",
+		"  relay forget <workspace>  stop hosting it from suit and forget its record (needed after moving a build)",
 		"  login [on|off|status]     start suit at login (off by default; Windows Run key, XDG autostart elsewhere)",
 		"  quit                      quit Exosuit: stop everything, editors asked to close first",
 		"  start                     start the daemon if it is not running",
@@ -159,18 +161,43 @@ class SuitMain {
 					print("disconnected " + Reflect.field(reply, "client") + " from " + Reflect.field(reply, "root"));
 					return 0;
 				}
+				if ((verb == "retry" || verb == "forget") && rest.length >= 2) {
+					var reply = SuitControl.request({op: "relay-" + verb, workspace: rest[1]}, 3);
+					var roots:Array<String> = [];
+					if (reply != null && Std.isOfType(Reflect.field(reply, "roots"), Array))
+						roots = (Reflect.field(reply, "roots") : Array<String>);
+					if (reply == null && verb == "forget")
+						for (host in SuitRelayHosts.load())
+							if (SuitRelayHosts.matches(host, rest[1])) {
+								SuitRelayHosts.remove(host.machineId);
+								roots.push(host.root);
+							}
+					if (roots.length == 0)
+						throw 'No hosted workspace matches ${rest[1]} (see `suit relay list`)' + (reply == null && verb == "retry" ? "; suit is not running" : "");
+					for (root in roots)
+						print((verb == "retry" ? "retrying " : "forgot ") + root);
+					return 0;
+				}
 				if ((verb != "stop" && verb != "resume") || rest.length < 2)
 					throw USAGE;
 				var all = rest[1] == "--all";
 				var query:Null<String> = all ? null : rest[1];
-				// The running daemon pauses or resumes its machine sockets; without it the settings are edited here.
-				var reply = SuitControl.request({op: verb == "stop" ? "relay-pause" : "relay-resume", workspace: query}, 3);
+				// The running daemon pauses or resumes its machine sockets and stops the services; without it, this process does.
+				var reply = SuitControl.request({op: verb == "stop" ? "relay-stop" : "relay-resume", workspace: query}, 5);
 				var roots:Array<String> = [];
 				if (reply != null && Std.isOfType(Reflect.field(reply, "roots"), Array))
 					roots = (Reflect.field(reply, "roots") : Array<String>);
-				if (reply == null)
+				if (verb == "stop" && reply != null) {
+					if (roots.length == 0 && Reflect.field(reply, "terminating") == 0 && !all)
+						throw 'No hosted workspace matches ${rest[1]} (see `suit relay list`)';
+					for (root in roots)
+						print("paused hosting " + root);
+					print("stopping " + Reflect.field(reply, "terminating") + " workspace service(s)");
+					return 0;
+				}
+				if (reply == null && verb == "resume")
 					for (host in SuitRelayHosts.load())
-						if (SuitRelayHosts.matches(host, query) && SuitRelayHosts.setPaused(host.stateDir, verb == "stop"))
+						if (SuitRelayHosts.matches(host, query) && SuitRelayHosts.setPaused(host.stateDir, false))
 							roots.push(host.root);
 				if (verb == "resume") {
 					if (roots.length == 0 && !all)
@@ -179,14 +206,12 @@ class SuitMain {
 						print("resumed hosting " + root + (reply == null ? " (suit is not running; it hosts again when it starts)" : ""));
 					return 0;
 				}
-				var targets = SuitActions.hosting(inventory, query);
-				for (process in targets)
-					SuitRelayHosts.setPaused(process.stateDir, true);
-				if (targets.length == 0 && roots.length == 0 && !all)
+				var plan = SuitRelayHosting.stop(inventory, query, null);
+				if (plan.terminate.length == 0 && plan.roots.length == 0 && !all)
 					throw 'No hosted workspace matches ${rest[1]} (see `suit relay list`)';
-				for (root in roots)
+				for (root in plan.roots)
 					print("paused hosting " + root);
-				print(StringTools.trim(SuitReport.results(new SuitTerminator(inventory, targets).run())));
+				print(StringTools.trim(SuitReport.results(new SuitTerminator(inventory, plan.terminate).run())));
 				return 0;
 			case "login":
 				var verb = rest.length > 0 ? rest[0] : "status";

@@ -9,7 +9,7 @@ import nativekit.ffi.NativeKitTypes;
 import sys.FileSystem;
 import suit.SuitInventory.SuitProcess;
 import suit.relay.SuitRelayHosting;
-import suit.relay.SuitRelayHosts;
+import suit.relay.SuitRelayHosting.SuitRelayStopPlan;
 import workspace.transport.NativeRpcHub;
 import workspace.transport.NativeRpcTransport;
 
@@ -70,6 +70,7 @@ class SuitDaemon {
 			daemon.dispose();
 		} catch (error:Dynamic) {
 			code = 1;
+			Sys.stderr().writeString("suit: " + Std.string(error) + "\n");
 			try sys.io.File.saveContent(Path.join([home, "daemon-error.txt"]), Std.string(error) + "\n") catch (_:Dynamic) {}
 		}
 		try FileSystem.deleteFile(Path.join([home, "daemon.json"])) catch (_:Dynamic) {}
@@ -84,13 +85,19 @@ class SuitDaemon {
 		idleSince = Sys.time();
 		runtime = NativeKitRuntime.start();
 		hub = new NativeRpcHub(runtime.events);
-		hub.listen(NativeRpcHub.local(SuitPaths.endpoint()), function(transport) clients.push(transport));
+		try {
+			hub.listen(NativeRpcHub.local(SuitPaths.endpoint()), function(transport) clients.push(transport));
+		} catch (error:Dynamic) {
+			// The first pipe instance is exclusive: another process holding the name is never shared with.
+			throw "suit's control endpoint " + SuitPaths.endpoint() + " is held by another process; suit will not share it (" + error + ")";
+		}
 		relay = new SuitRelayHosting(runtime.events, hub);
 		runtime.events.listen(onEvent);
 		inventory = new SuitInventory();
 		refreshedAt = Sys.time();
 		sys.io.AtomicFile.write(Path.join([SuitPaths.home(), "daemon.json"]),
 			Json.stringify({version: 1, pid: Sys.getPid(), endpoint: SuitPaths.endpoint()}) + "\n");
+		SuitLogin.refresh();
 		if (Sys.systemName() == "Windows" && Sys.getEnv("EXOSUIT_SUIT_TRAY") != "0") {
 			try tray = new SuitTray(inventory.summary(), findIcon()) catch (_:Dynamic) tray = null;
 		}
@@ -104,11 +111,13 @@ class SuitDaemon {
 					break;
 			if (menuRequested) {
 				menuRequested = false;
+				SuitLogin.refresh();
 				refresh();
 				showMenu();
 			}
 			serveClients();
 			relay.poll();
+			SuitLogin.poll();
 			var relayRevision = relay.revision();
 			if (relayRevision != shownRelay) {
 				// A remote client came or went: update the tooltip now, not on the next rescan.
@@ -140,8 +149,7 @@ class SuitDaemon {
 
 	function tooltip():String {
 		var hosting = relay.summary();
-		return hosting.length == 0 ? inventory.summary() : inventory.summary() + "
-" + hosting;
+		return hosting.length == 0 ? inventory.summary() : inventory.summary() + "\n" + hosting;
 	}
 
 	function updateTooltip():Void {
@@ -175,26 +183,19 @@ class SuitDaemon {
 		current.show(function(menu) SuitMenuModel.build(menu, inventory, {
 			terminate: terminate, openViewer: openViewer, quit: quitEverything,
 			hosting: {
-				hosts: relay.views, stopHosting: stopHosting, resumeHosting: function(root) relay.resume(root),
-				disconnect: function(client) relay.handle({op: "relay-disconnect", client: client}),
-				loginEnabled: SuitLogin.enabled, toggleLogin: toggleLogin
+				hosts: relay.views, stopHosting: function(root) stopHosting(root), resumeHosting: function(root) relay.resume(root),
+				disconnect: function(client) relay.disconnect(client),
+				retry: function(machineId) relay.retry(machineId), dismiss: function(machineId) relay.dismiss(machineId),
+				loginEnabled: SuitLogin.cached, toggleLogin: SuitLogin.toggleInBackground
 			}
 		}));
 	}
 
-	function toggleLogin():Void {
-		try {
-			SuitLogin.toggle();
-		} catch (_:Dynamic) {}
-	}
-
 	/** Stop hosting: pause it in relay-settings.json (so nothing restarts it) and stop the workspace service. */
-	function stopHosting(root:Null<String>):Void {
-		relay.pause(root);
-		var targets = SuitActions.hosting(inventory, root);
-		for (process in targets)
-			SuitRelayHosts.setPaused(process.stateDir, true);
-		terminate(targets);
+	function stopHosting(root:Null<String>):SuitRelayStopPlan {
+		var plan = SuitRelayHosting.stop(inventory, root, relay);
+		terminate(plan.terminate);
+		return plan;
 	}
 
 	/** Stops everything, editors included (asked to close first), then exits. */
@@ -269,6 +270,18 @@ class SuitDaemon {
 				return {ok: true, terminating: count};
 			case "stop":
 				stopAt = Sys.time() + 0.3;
+				return {ok: true};
+			case "relay-stop":
+				refresh();
+				var plan = stopHosting(SuitInventory.stringField(request, "workspace"));
+				return {ok: true, roots: plan.roots, terminating: plan.terminate.length};
+			case "relay-pause":
+				// Pause without stopping the services: their daemons see the pause and exit on their own.
+				refresh();
+				return {ok: true, roots: SuitRelayHosting.stop(inventory, SuitInventory.stringField(request, "workspace"), relay).roots};
+			case "login-toggle":
+				// As the tray's checkbox does: in the background, answered at once.
+				SuitLogin.toggleInBackground();
 				return {ok: true};
 			default:
 				var relayReply = relay.handle(request);

@@ -14,6 +14,8 @@ typedef WorkspaceRelayDevice = {
 typedef WorkspaceRelayState = {
 	var configured:Bool;
 	var connected:Bool;
+	/** True while suit holds the machine socket for this daemon; false while the daemon holds it itself. */
+	var viaSuit:Bool;
 	var origin:Null<String>;
 	var error:Null<String>;
 	var devices:Array<WorkspaceRelayDevice>;
@@ -41,6 +43,7 @@ class WorkspaceRelayStatus {
 			updatedAt: updatedAt,
 			configured: state.configured,
 			connected: state.connected,
+			viaSuit: state.viaSuit,
 			origin: state.origin,
 			error: state.error,
 			devices: [
