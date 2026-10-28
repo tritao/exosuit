@@ -31,6 +31,7 @@ class SuitMenuModel {
 			hosts: suit.relay.SuitRelayHosting.readViews,
 			stopHosting: function(_) {},
 			resumeHosting: function(_) {},
+			disconnect: function(_) {},
 			loginEnabled: SuitLogin.enabled,
 			toggleLogin: function() {}
 		};

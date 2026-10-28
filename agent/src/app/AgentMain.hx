@@ -176,6 +176,7 @@ class AgentMain {
 		suit.SuitClient.register("workspace-host", {root: directories.root, stateDir: stateDirectory,
 			generation: args.length >= 7 ? args[6] : null});
 		var relayStatus = new WorkspaceRelayStatusFile(stateDirectory);
+		var clientReportAt:Float = 0;
 		while (true) {
 			runtime.events.wait(0.01);
 			for (_ in 0...128)
@@ -199,6 +200,19 @@ class AgentMain {
 			}
 			if (relayHost != null || relaySetupError != null)
 				relayStatus.update(clock(), relayHost, pairingManager, relaySetupError);
+			if (relayHost != null && relayHost.viaSuit && clock() >= clientReportAt) {
+				clientReportAt = clock() + 1000;
+				var devices:Array<Dynamic> = [], pendingDevices:Array<String> = [];
+				if (pairingManager != null) {
+					for (device in pairingManager.listDevices())
+						if (!device.revoked)
+							devices.push({deviceId: device.deviceId, grants: device.grants, connected: device.connected});
+					for (request in pairingManager.listPending())
+						pendingDevices.push(request.deviceId);
+				}
+				relayHost.reportClients({devices: devices, pending: pendingDevices,
+					open: {terminals: terminals.activeCount(), agents: agents.activeCount()}});
+			}
 			server.poll();
 			files.poll();
 			scm.poll();

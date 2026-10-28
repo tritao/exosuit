@@ -40,6 +40,7 @@ class SuitDaemon {
 	var menuRequested:Bool = false;
 	final idleSeconds:Float;
 	final relay:SuitRelayHosting;
+	var shownRelay:String = "";
 	/** Started at login: stays up with nothing to track, so the tray icon stays. */
 	final resident:Bool;
 
@@ -99,6 +100,12 @@ class SuitDaemon {
 			}
 			serveClients();
 			relay.poll();
+			var relayRevision = relay.revision();
+			if (relayRevision != shownRelay) {
+				// A remote client came or went: update the tooltip now, not on the next rescan.
+				shownRelay = relayRevision;
+				updateTooltip();
+			}
 			var index = jobs.length;
 			while (index-- > 0)
 				if (jobs[index].tick()) {
@@ -119,8 +126,18 @@ class SuitDaemon {
 	function refresh():Void {
 		inventory = new SuitInventory();
 		refreshedAt = Sys.time();
+		updateTooltip();
+	}
+
+	function tooltip():String {
+		var hosting = relay.summary();
+		return hosting.length == 0 ? inventory.summary() : inventory.summary() + "
+" + hosting;
+	}
+
+	function updateTooltip():Void {
 		if (tray != null)
-			tray.setTooltip(inventory.summary());
+			tray.setTooltip(tooltip());
 	}
 
 	function onEvent(value:NativeKitEventValue):Void {
@@ -150,6 +167,7 @@ class SuitDaemon {
 			terminate: terminate, openViewer: openViewer, quit: quitEverything,
 			hosting: {
 				hosts: relay.views, stopHosting: stopHosting, resumeHosting: function(root) relay.resume(root),
+				disconnect: function(client) relay.handle({op: "relay-disconnect", client: client}),
 				loginEnabled: SuitLogin.enabled, toggleLogin: toggleLogin
 			}
 		}));
@@ -229,7 +247,8 @@ class SuitDaemon {
 				return {
 					ok: true, pid: Sys.getPid(), home: SuitPaths.home(), summary: inventory.summary(), tray: tray != null,
 					editors: inventory.editors().length, background: inventory.background().length,
-					orphaned: inventory.orphans().length, terminating: jobs.length, hosting: relay.hostingCount()
+					orphaned: inventory.orphans().length, terminating: jobs.length, hosting: relay.hostingCount(),
+					tooltip: tooltip()
 				};
 			case "refresh":
 				refresh();

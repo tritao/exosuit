@@ -4,6 +4,7 @@ import haxe.io.Bytes;
 import haxeon.platform.NativeKitEvents;
 import haxeon.wire.MessagePackFrame;
 import suit.SuitClient;
+import suit.relay.SuitRelayClients.SuitRelayClientView;
 import suit.relay.SuitRelayHosts.SuitRelayHost;
 import workspace.runtime.WorkspaceCredentialStores;
 import workspace.transport.NativeRpcHub;
@@ -28,6 +29,10 @@ typedef SuitRelayHostView = {
 	var servicePid:Int;
 	/** How many times suit started the workspace service for a device. */
 	var starts:Int;
+	/** Remote clients on suit's machine socket. */
+	var clients:Array<SuitRelayClientView>;
+	/** What the workspace has open (`{terminals, agents}`), from the attached daemon; null when unknown. */
+	var open:Dynamic;
 }
 
 /**
@@ -50,6 +55,7 @@ class SuitRelayBridge {
 	public var lastError(default, null):Null<String> = null;
 	public var servicePid(default, null):Int = 0;
 	public var starts(default, null):Int = 0;
+	public final clients:SuitRelayClients = new SuitRelayClients();
 
 	final connector:RelayMachineConnector;
 	final pending:Array<RelayFrame> = [];
@@ -95,7 +101,9 @@ class SuitRelayBridge {
 			error: paused ? null : lastError,
 			serviceRunning: attached(),
 			servicePid: attached() ? servicePid : 0,
-			starts: starts
+			starts: starts,
+			clients: clients.views(),
+			open: attached() ? clients.open() : null
 		};
 	}
 
@@ -138,6 +146,26 @@ class SuitRelayBridge {
 			current.close();
 		pending.resize(0);
 		pendingBytes = 0;
+		clients.clear();
+	}
+
+	/** Ends one client's session (see SuitRelayClients); returns its full id, or null when none matches. */
+	public function disconnect(query:String):Null<String> {
+		var id = clients.disconnect(query);
+		if (id == null)
+			return null;
+		dropPending(id);
+		toDaemon(new RelayFrame(id, Bytes.alloc(0), true));
+		return id;
+	}
+
+	function dropPending(id:String):Void {
+		var index = pending.length;
+		while (index-- > 0)
+			if (pending[index].channelId == id) {
+				pendingBytes -= pending[index].payload.length;
+				pending.splice(index, 1);
+			}
 	}
 
 	public function resume():Void {
@@ -174,6 +202,7 @@ class SuitRelayBridge {
 			socket.poll();
 			if (!socket.isOpen()) {
 				link = null;
+				clients.clear();
 				scheduleRetry(now, socket.failure);
 			}
 		}
@@ -234,15 +263,14 @@ class SuitRelayBridge {
 
 	/** A frame from the relay: to the daemon, or into the buffer while the service starts. */
 	function onFrame(frame:RelayFrame):Bool {
+		if (frame.reset)
+			clients.reset(frame.channelId);
+		else if (!clients.fromDevice(frame.channelId, Sys.time()))
+			return true; // disconnected from suit until the device reconnects
 		if (attached() && toDaemon(frame))
 			return true;
 		if (frame.reset) {
-			var index = pending.length;
-			while (index-- > 0)
-				if (pending[index].channelId == frame.channelId) {
-					pendingBytes -= pending[index].payload.length;
-					pending.splice(index, 1);
-				}
+			dropPending(frame.channelId);
 			return true;
 		}
 		// Over the bound the frame is dropped; the device's handshake times out and it retries.
@@ -269,8 +297,16 @@ class SuitRelayBridge {
 		return false;
 	}
 
-	/** One relay envelope from the daemon, checked and sent on; false for anything that is not one. */
+	/** One relay envelope (or client report) from the daemon, checked and sent on; false for anything else. */
 	function fromDaemon(message:Bytes):Bool {
+		if (message.length > 0 && message.get(0) == SuitRelayProtocol.CLIENTS_KIND) {
+			var report:Dynamic = null;
+			try report = SuitRelayProtocol.parseClients(message) catch (_:Dynamic) {}
+			if (report == null)
+				return false;
+			clients.setReport(report);
+			return true;
+		}
 		if (message.length < RelayFrameCodec.ENVELOPE_BYTES + MessagePackFrame.HEADER_BYTES || message.get(0) != RelayFrameCodec.VERSION)
 			return false;
 		var channelId:String, payload:Bytes;
@@ -284,8 +320,8 @@ class SuitRelayBridge {
 			return false;
 		}
 		var socket = link;
-		if (socket != null && socket.isOpen())
-			socket.sendRouted(channelId, payload); // While reconnecting a frame is lost; Noise peers recover by reconnecting.
+		if (socket != null && socket.isOpen() && socket.sendRouted(channelId, payload)) // While reconnecting a frame is lost; Noise peers recover.
+			clients.toDevice(channelId, Sys.time());
 		return true;
 	}
 

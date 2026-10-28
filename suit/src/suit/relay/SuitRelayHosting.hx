@@ -136,6 +136,18 @@ class SuitRelayHosting {
 				return {ok: true, roots: resume(workspace)};
 			case "relay-state":
 				return {ok: true, hosts: views()};
+			case "relay-disconnect":
+				var client = SuitInventory.stringField(request, "client");
+				if (client == null)
+					return {ok: false, error: "client required"};
+				for (bridge in bridges) {
+					var id = bridge.disconnect(client);
+					if (id != null) {
+						writtenAt = -1e9;
+						return {ok: true, client: id, root: bridge.host.root};
+					}
+				}
+				return {ok: false, error: 'no connected client matches $client (see `suit relay list`)'};
 			default:
 				return null;
 		}
@@ -143,6 +155,27 @@ class SuitRelayHosting {
 
 	public function views():Array<SuitRelayHostView>
 		return [for (bridge in bridges) bridge.view()];
+
+	/** Changes whenever a client connects or goes, or hosting state changes; the daemon updates the tray then. */
+	public function revision():String {
+		var parts:Array<String> = [];
+		for (bridge in bridges)
+			parts.push(bridge.view().state + "/" + bridge.clients.revision + "/" + bridge.attached());
+		return parts.join(",");
+	}
+
+	/** For the tooltip: "Hosting · 2 devices connected", or "" when nothing is hosted. */
+	public function summary():String {
+		var hosted = hostingCount();
+		if (hosted == 0)
+			return "";
+		var connected = 0;
+		for (bridge in bridges)
+			if (!bridge.paused)
+				connected += bridge.clients.count();
+		return "Hosting" + (hosted > 1 ? " " + hosted + " workspaces" : "") + " · "
+			+ (connected == 1 ? "1 device connected" : connected + " devices connected");
+	}
 
 	function pauseBridges(machineId:Null<String>):Void {
 		var bridge = machineId == null ? null : find(machineId);
@@ -162,7 +195,8 @@ class SuitRelayHosting {
 
 	function writeState(now:Float):Void {
 		var hosts = views();
-		var text = Json.stringify(hosts);
+		// Activity times change with every frame; the file is rewritten when clients come or go, and every 30 s.
+		var text = revision();
 		if (text == writtenState && now - writtenAt < STATE_REFRESH_SECONDS)
 			return;
 		try {
@@ -191,6 +225,13 @@ class SuitRelayHosting {
 		not running, the host records (shown as not hosted, or paused).
 	**/
 	public static function readViews():Array<SuitRelayHostView> {
+		// The running daemon's live view first: it has current activity times.
+		try {
+			var reply:Dynamic = suit.SuitControl.request({op: "relay-state"}, 1);
+			var hosts:Dynamic = reply == null ? null : Reflect.field(reply, "hosts");
+			if (Std.isOfType(hosts, Array))
+				return [for (item in (hosts : Array<Dynamic>)) viewOf(item)];
+		} catch (_:Dynamic) {}
 		try {
 			var path = statePath();
 			if (FileSystem.exists(path)) {
@@ -207,7 +248,7 @@ class SuitRelayHosting {
 			result.push({
 				root: host.root, stateDir: host.stateDir, machineId: host.machineId, origin: host.origin,
 				state: paused ? "paused" : "not hosted", error: paused ? null : "suit is not running",
-				serviceRunning: false, servicePid: 0, starts: 0
+				serviceRunning: false, servicePid: 0, starts: 0, clients: [], open: null
 			});
 		}
 		return result;
@@ -224,7 +265,30 @@ class SuitRelayHosting {
 			error: SuitInventory.stringField(item, "error"),
 			serviceRunning: Reflect.field(item, "serviceRunning") == true,
 			servicePid: pid == null ? 0 : pid,
-			starts: starts == null ? 0 : starts
+			starts: starts == null ? 0 : starts,
+			clients: clientsOf(Reflect.field(item, "clients")),
+			open: Reflect.field(item, "open")
 		};
+	}
+
+	static function clientsOf(value:Dynamic):Array<suit.relay.SuitRelayClients.SuitRelayClientView> {
+		var result:Array<suit.relay.SuitRelayClients.SuitRelayClientView> = [];
+		if (!Std.isOfType(value, Array))
+			return result;
+		for (item in (value : Array<Dynamic>)) {
+			var listed:Dynamic = Reflect.field(item, "grants");
+			var framesIn = SuitInventory.intField(item, "framesIn"), framesOut = SuitInventory.intField(item, "framesOut");
+			var connectedAt = SuitInventory.floatField(item, "connectedAt"), lastActivity = SuitInventory.floatField(item, "lastActivity");
+			result.push({
+				id: SuitInventory.stringField(item, "id"),
+				kind: SuitInventory.stringField(item, "kind"),
+				connectedAt: connectedAt == null ? 0 : connectedAt,
+				lastActivity: lastActivity == null ? 0 : lastActivity,
+				framesIn: framesIn == null ? 0 : framesIn,
+				framesOut: framesOut == null ? 0 : framesOut,
+				grants: Std.isOfType(listed, Array) ? [for (grant in (listed : Array<Dynamic>)) Std.string(grant)] : []
+			});
+		}
+		return result;
 	}
 }

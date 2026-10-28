@@ -30,6 +30,7 @@ class SuitMain {
 		"  relay stop <workspace>    stop hosting one workspace (root or folder name); grants persist",
 		"  relay stop --all          stop all hosting",
 		"  relay resume <workspace>|--all  host again what relay stop paused",
+		"  relay disconnect <client>  end one remote client's session (id or a prefix of 4+ characters)",
 		"  login [on|off|status]     start suit at login (off by default; Windows Run key, XDG autostart elsewhere)",
 		"  quit                      quit Exosuit: stop everything, editors asked to close first",
 		"  start                     start the daemon if it is not running",
@@ -137,6 +138,17 @@ class SuitMain {
 						print(Json.stringify(SuitRelayMenu.json(inventory, hosts)));
 					else
 						print(StringTools.trim(SuitRelayMenu.text(inventory, hosts)));
+					return 0;
+				}
+				if (verb == "disconnect") {
+					if (rest.length < 2)
+						throw USAGE;
+					var reply = SuitControl.request({op: "relay-disconnect", client: rest[1]}, 3);
+					if (reply == null)
+						throw "suit is not running, so no remote client is connected through it";
+					if (Reflect.field(reply, "ok") != true)
+						throw Std.string(Reflect.field(reply, "error"));
+					print("disconnected " + Reflect.field(reply, "client") + " from " + Reflect.field(reply, "root"));
 					return 0;
 				}
 				if ((verb != "stop" && verb != "resume") || rest.length < 2)

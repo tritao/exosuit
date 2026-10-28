@@ -45,6 +45,7 @@ class WorkspaceRelayHost implements WorkspacePairingRelay {
 	var retryDelay:Float = 1000;
 	var suitProbeAt:Float = 0;
 	var permanentFailure:Bool = false;
+	var reportedClients:String = "";
 	var disposed:Bool = false;
 
 	public function new(events:NativeKitEvents, hub:NativeRpcHub, settings:WorkspaceRelaySettings,
@@ -209,9 +210,25 @@ class WorkspaceRelayHost implements WorkspacePairingRelay {
 			attempt = returned;
 	}
 
+	/**
+		Through suit, tells it who is connected and what the workspace has open (see SuitRelayProtocol);
+		sent only when the report changes. Does nothing on a direct socket.
+	**/
+	public function reportClients(report:Dynamic):Void {
+		var stream = suitStream;
+		if (stream == null || !viaSuit)
+			return;
+		var text = haxe.Json.stringify(report);
+		if (text == reportedClients)
+			return;
+		if (stream.send(suit.relay.SuitRelayProtocol.clientsMessage(report)))
+			reportedClients = text;
+	}
+
 	function adopt(opened:RelaySocketLink, stream:Null<SuitRelayStream>):Void {
 		link = opened;
 		suitStream = stream;
+		reportedClients = "";
 		opened.onChannel = function(channel) {
 			var callback = onChannel;
 			if (callback == null)
