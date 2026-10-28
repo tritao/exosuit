@@ -149,8 +149,8 @@ class SuitInventory {
 			var path = Path.join([directory, name]);
 			var record:Dynamic = null;
 			try {
-				var info = FileSystem.stat(path);
-				if (info.size > 65536)
+				var info = FileSystem.metadata(path);
+				if (info == null || info.size > 65536)
 					throw "too large";
 				record = Json.parse(File.getContent(path));
 			} catch (_:Dynamic) {
@@ -175,7 +175,7 @@ class SuitInventory {
 						roots.push(value);
 			var kind = stringField(record, "kind");
 			processes.push({
-				pid: pid,
+				pid: info.pid,
 				started: info.started,
 				parent: info.parent,
 				kind: kind == null ? "other" : kind,
@@ -309,14 +309,15 @@ class SuitInventory {
 
 	/** Reads `relay-status.json`, which a hosting workspace daemon rewrites while it runs. */
 	public static function readRelay(stateDir:String):Null<SuitRelayStatus> {
-		var configured = FileSystem.exists(Path.join([stateDir, "relay-settings.json"]))
-			|| (Sys.getEnv("EXOSUIT_RELAY_ORIGIN") != null && Sys.getEnv("EXOSUIT_RELAY_ORIGIN").length > 0);
+		// A daemon can also host because EXOSUIT_RELAY_ORIGIN was set in its environment; its status file says so.
+		var configured = FileSystem.exists(Path.join([stateDir, "relay-settings.json"]));
 		var path = Path.join([stateDir, "relay-status.json"]);
 		var status:Dynamic = null;
-		try
-			if (FileSystem.exists(path) && FileSystem.stat(path).size < 262144)
-				status = Json.parse(File.getContent(path))
-		catch (_:Dynamic) {}
+		try {
+			var metadata = FileSystem.exists(path) ? FileSystem.metadata(path) : null;
+			if (metadata != null && metadata.size < 262144)
+				status = Json.parse(File.getContent(path));
+		} catch (_:Dynamic) {}
 		if (status == null)
 			return configured ? {configured: true, connected: false, origin: null, error: null, devices: [], pending: 0, updatedAt: 0} : null;
 		var devices:Array<{deviceId:String, connected:Bool, revoked:Bool}> = [];

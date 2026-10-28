@@ -61,7 +61,7 @@ class SuitTerminator {
 			targets.push({
 				process: target,
 				tree: inventory.descendants(target.pid),
-				deadline: now + (graceful ? (target.kind == "editor" ? EDITOR_GRACE_SECONDS : SERVICE_GRACE_SECONDS) : 0),
+				deadline: now + (graceful ? (target.kind == "editor" ? EDITOR_GRACE_SECONDS : SERVICE_GRACE_SECONDS) : 0.0),
 				forceAtDeadline: target.kind != "editor",
 				done: false
 			});

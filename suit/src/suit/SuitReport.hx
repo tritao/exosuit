@@ -131,6 +131,8 @@ class SuitReport {
 		var output = new StringBuf();
 		for (process in hosted) {
 			var relay = process.relay;
+			if (relay == null)
+				continue;
 			output.add(column(workspace(process), 22) + column(relayState(process), 16)
 				+ (relay.origin == null ? "" : relay.origin) + "  (pid " + process.pid + ")\n");
 			output.add("    root: " + process.root + "\n");
