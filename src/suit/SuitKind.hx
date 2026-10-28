@@ -1,6 +1,6 @@
 package suit;
 
-/** How suit stops a process of one kind before it kills what is left of the process tree. */
+/** How suit stops a process of one kind; afterwards it kills the process if it still runs, and its exosuit-kind descendants. */
 enum SuitStop {
 	/** Ask it to close its windows, so it can save or prompt. Never forced: it may hold unsaved work. */
 	CloseWindows;
@@ -11,7 +11,7 @@ enum SuitStop {
 	/** Stop it through the workspace manager that started it, so the manager neither restarts nor outlives it. */
 	ThroughManager;
 
-	/** Kill it with its descendants at once. */
+	/** Kill it at once. The stop's sweep then kills only its exosuit-kind descendants (SuitLineage), never the whole tree. */
 	Kill;
 }
 

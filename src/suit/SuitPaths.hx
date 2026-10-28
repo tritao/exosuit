@@ -16,6 +16,11 @@ class SuitPaths {
 		var configured = Sys.getEnv("EXOSUIT_SUIT_HOME");
 		if (configured != null && configured.length > 0)
 			return configured;
+		return defaultHome();
+	}
+
+	/** The user's suit home, where suit lives without `EXOSUIT_SUIT_HOME`. */
+	public static function defaultHome():String {
 		if (Sys.systemName() == "Windows") {
 			var local = Sys.getEnv("LOCALAPPDATA");
 			if (local == null || local.length == 0)

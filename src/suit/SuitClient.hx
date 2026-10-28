@@ -30,31 +30,82 @@ enum SuitMode {
 
 	When it is unset, a process whose state is disposable, kept under the system temp folder, is off: that
 	is how every test isolates an editor (`PRAGTICAL_PORTABLE`, `XDG_STATE_HOME`) or a workspace (its state
-	directory), and a user's own editor never keeps its state there. Such a process then exports
-	`EXOSUIT_SUIT=off`, so what it starts is off too.
+	directory). A real editor can land there too (a portable build unzipped under %TEMP% or /tmp), so the
+	rule is visible: `resolve`, called once at startup, logs it, and the editor shows a notice.
 **/
 class SuitClient {
 	/** Variables that hold an editor's or a workspace service's state; a temp-folder value marks a test. */
-	static final STATE_VARIABLES:Array<String> = ["PRAGTICAL_PORTABLE", "XDG_STATE_HOME", "EXOSUIT_AGENT_STATE_HOME"];
+	public static final STATE_VARIABLES:Array<String> = ["PRAGTICAL_PORTABLE", "XDG_STATE_HOME", "EXOSUIT_AGENT_STATE_HOME"];
+
+	public static inline var TEMPORARY_STATE_MESSAGE:String = "suit disabled: state folder is temporary (set EXOSUIT_SUIT=on to enable)";
 
 	static var editorRoots:Array<String> = [];
 	static var registeredKind:Null<SuitKind> = null;
 	static var daemonRequested:Bool = false;
+	static var resolved:Null<SuitMode> = null;
+	static var offForTemporaryState:Bool = false;
+	static var noticeTaken:Bool = false;
 
-	/** This process's mode. `stateDir` is a workspace service's state directory, when it has one. */
+	/**
+		This process's mode from its environment; `stateDir` is a workspace service's state directory, when
+		it has one. A query only: it changes nothing.
+	**/
 	public static function mode(?stateDir:String):SuitMode {
-		var explicit = Sys.getEnv("EXOSUIT_SUIT");
-		if (explicit != null && explicit.length > 0)
-			return modeFor(explicit, Sys.getEnv("EXOSUIT_SUIT_HOME"));
 		var states = [for (name in STATE_VARIABLES) Sys.getEnv(name)];
 		states.push(stateDir);
+		return modeOf(Sys.getEnv("EXOSUIT_SUIT"), Sys.getEnv("EXOSUIT_SUIT_HOME"), states);
+	}
+
+	/**
+		The mode rule, for this process or one suit reads: a set `EXOSUIT_SUIT` decides (modeFor); unset, it
+		is Off when any of `states` lies under the temp folder, and On otherwise.
+	**/
+	public static function modeOf(value:Null<String>, home:Null<String>, states:Array<Null<String>>):SuitMode {
+		if (nonempty(value) != null)
+			return modeFor(value, home);
 		for (state in states)
-			if (state != null && state.length > 0 && underTemp(state)) {
-				// Decided once here; children inherit it instead of guessing again.
-				Sys.putEnv("EXOSUIT_SUIT", "off");
+			if (state != null && state.length > 0 && underTemp(state))
 				return Off;
-			}
 		return On;
+	}
+
+	/**
+		Settles this process's mode once, at startup, before it starts any child; later calls return the
+		same mode. When it is Off only because the state folder is temporary, it logs one line and sets
+		`EXOSUIT_SUIT=off` in this process's environment, the one place that happens, so every child spawned
+		afterwards starts with it and does not guess again. Registration, the daemon start and the relay all
+		use this mode (`current`).
+	**/
+	public static function resolve(?stateDir:String):SuitMode {
+		if (resolved != null)
+			return resolved;
+		var result = mode(stateDir);
+		if (result == Off && nonempty(Sys.getEnv("EXOSUIT_SUIT")) == null) {
+			offForTemporaryState = true;
+			try {
+				Sys.stderr().writeString(TEMPORARY_STATE_MESSAGE + "\n");
+				Sys.stderr().flush();
+			} catch (_:Dynamic) {}
+			Sys.putEnv("EXOSUIT_SUIT", "off");
+		}
+		resolved = result;
+		return result;
+	}
+
+	/** The mode `resolve` settled on, or, before it ran, the mode the environment gives. */
+	public static function current():SuitMode
+		return resolved != null ? resolved : mode();
+
+	/** True when `resolve` turned suit off because the state folder is temporary. */
+	public static function disabledForTemporaryState():Bool
+		return offForTemporaryState;
+
+	/** True once per process when suit is off for temporary state: the editor's cue to show its notice. */
+	public static function takeTemporaryStateNotice():Bool {
+		if (!offForTemporaryState || noticeTaken)
+			return false;
+		noticeTaken = true;
+		return true;
 	}
 
 	/** The mode a process with these EXOSUIT_SUIT and EXOSUIT_SUIT_HOME values has, when the value is set. */
@@ -64,20 +115,6 @@ class SuitClient {
 			case "isolated": nonempty(home) != null ? Isolated : Off;
 			default: Off;
 		};
-	}
-
-	/**
-		True when a process whose environment holds these values registers with the suit at `ownHome` (null:
-		the default home). suit adopts only such processes, so it never takes one that is off, or one that
-		belongs to another (isolated) suit.
-	**/
-	public static function registersWith(value:Null<String>, home:Null<String>, ownHome:Null<String>):Bool {
-		if (modeFor(value, home) == Off)
-			return false;
-		var target = nonempty(home), own = nonempty(ownHome);
-		if (target == null || own == null)
-			return target == null && own == null;
-		return normalized(target) == normalized(own);
 	}
 
 	/** True when `path` is inside the system temp folder (TEMP or TMP on Windows, TMPDIR or /tmp elsewhere). */
@@ -100,6 +137,7 @@ class SuitClient {
 
 	/** Registers the editor and starts suit. Call once at editor startup. */
 	public static function announceEditor():Void {
+		resolve();
 		writeRecord(SuitKind.Editor, null);
 		ensureDaemon();
 	}
@@ -133,7 +171,7 @@ class SuitClient {
 	}
 
 	static function writeRecord(kind:SuitKind, workspace:Null<SuitWorkspace>):Void {
-		if (mode(workspace == null ? null : workspace.stateDir) == Off)
+		if (resolve(workspace == null ? null : workspace.stateDir) == Off)
 			return;
 		try {
 			if (!SuitPaths.prepare())
@@ -157,7 +195,7 @@ class SuitClient {
 		not check.
 	**/
 	public static function ensureDaemon():Void {
-		if (daemonRequested || mode() == Off || Sys.getEnv("EXOSUIT_SUIT_AUTOSTART") == "0")
+		if (daemonRequested || current() == Off || Sys.getEnv("EXOSUIT_SUIT_AUTOSTART") == "0")
 			return;
 		daemonRequested = true;
 		try {

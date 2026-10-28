@@ -70,9 +70,14 @@ class Processes {
 
 	/** The value of `name` in an environment read by `list`, or null when the process did not have it. */
 	public static function variable(info:ProcessInfo, name:String):Null<String> {
+		var foldCase = Sys.systemName() == "Windows";
+		var wanted = foldCase ? name.toUpperCase() : name;
 		for (line in info.environment.split("\n")) {
 			var equals = line.indexOf("=");
-			if (equals > 0 && (Sys.systemName() == "Windows" ? line.substr(0, equals).toUpperCase() == name.toUpperCase() : line.substr(0, equals) == name))
+			if (equals <= 0)
+				continue;
+			var key = line.substr(0, equals);
+			if ((foldCase ? key.toUpperCase() : key) == wanted)
 				return line.substr(equals + 1);
 		}
 		return null;
