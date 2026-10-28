@@ -15,7 +15,7 @@ class SessionChatPreviewMain {
  static function main():Int {
   var args = Sys.args();
   var dark = args.indexOf("--light") < 0;
-  var width = args.indexOf("--wide") >= 0 ? 1000 : 420;
+  var width = args.indexOf("--wide") >= 0 ? 1000 : args.indexOf("--narrow") >= 0 ? 320 : 420;
   var options = new DesktopUiHostOptions();
   options.title = "Exosuit UI exploration";
   options.applicationId = "Exosuit.UiExploration";
@@ -33,6 +33,7 @@ private class PreviewApplication implements DesktopUiApplication {
  var clickLabel:Null<String>;
  var workflowStep:Int = 0;
  var keyboardReview:Bool = false;
+ var keyboardLabel:String = "Review request";
  var reviewFrames:Int = 0;
  var historyMode:Bool = false;
  var historyActivate:Bool = false;
@@ -40,10 +41,26 @@ private class PreviewApplication implements DesktopUiApplication {
  var historyStarted:Float = 0;
  var sentImagePreview:Bool = false;
  var sentImageFrames:Int = 0;
+ var menuItems:Null<Array<haxeon.ui.widgets.overlays.MenuItem>>;
+ var menuLayer:Bool = false;
+ var menuX:Float = 0;
+ var menuY:Float = 0;
  var pendingPreview:Null<(Null<haxe.io.Bytes>, Null<String>)->Void>;
  public function new(host:DesktopUiHostContext, dark:Bool, args:Array<String>) {
   this.host = host;
   keyboardReview = args.indexOf("--review-request") >= 0;
+  // Match the IDE's explicit monospace registration; system UI fallbacks alone
+  // do not provide a monospace family in this standalone preview.
+  host.fonts.add(Sys.getCwd() + "/haxeon/packages/ui/vendor/skribidi/example/data/IBMPlexMono-Regular.ttf", haxeon.ui.FontFamily.Monospace);
+  if (args.indexOf("--tool-output") >= 0) {
+   var mono = haxeon.ui.TextLayout.create(host.fonts, "iiiiWWWW", 200,
+    new haxeon.ui.TextStyle(13, haxeon.ui.FontFamily.Monospace), new haxeon.ui.ParagraphStyle(haxeon.ui.TextWrap.None));
+   var iWidth = mono.caret(new haxeon.ui.TextLayout.TextPosition(1, 0)).x - mono.caret(new haxeon.ui.TextLayout.TextPosition(0, 0)).x;
+   var wWidth = mono.caret(new haxeon.ui.TextLayout.TextPosition(5, 0)).x - mono.caret(new haxeon.ui.TextLayout.TextPosition(4, 0)).x;
+   mono.dispose();
+   if (Math.abs(iWidth - wWidth) > 0.05 || iWidth <= 0) throw "Preview monospace face has unequal advances";
+   Sys.println("PASS: native monospace i/W advances " + iWidth + " / " + wWidth);
+  }
   contextValue = new UiContext(null, host.fonts, ui.ExosuitPalette.theme(dark));
   contextValue.setStyleSheet(ui.ExosuitPalette.styleSheet(contextValue.buildContext.theme, dark));
   agent = new FakeAgent();
@@ -83,6 +100,13 @@ private class PreviewApplication implements DesktopUiApplication {
   if (args.indexOf("--emphasis") >= 0) agent.view.items = [
    {id:"emphasis",turn:"turn",kind:"agentMessage",title:"",text:"## Review summary\n\nThis is normal text, **strong emphasis**, *italic emphasis*, and ***bold italic***.\n\nThe **important [linked result](src/Main.hx)** remains actionable.",detail:"",state:"completed",truncated:false}
   ];
+  if (args.indexOf("--tool-output") >= 0) {
+   var commandFailed = args.indexOf("--tool-failed") >= 0;
+   agent.view.items = [
+    {id:"command",turn:"turn",kind:"commandExecution",title:"Run command",text:"npm run test -- --verbose",detail:commandFailed ? "cwd: /workspace/project\nexit: 1\n\nFAIL src/example.test.ts\nTests: 1 failed" : "cwd: /workspace/project\nexit: 0\n\n> test\niiiiiiiiiiii\nWWWWWWWWWWWW\nPASS src/example.test.ts\n  ✓ preserves a long output line with details that should remain horizontally scrollable\n\nTests: 1 passed",state:commandFailed ? "failed" : "completed",truncated:false}
+   ];
+   clickLabel = "Show details";
+  }
   var nativeImagePlan = args.indexOf("--native-image-plan") >= 0;
   if (nativeImagePlan) {
    agent.view.items = [
@@ -163,15 +187,26 @@ private class PreviewApplication implements DesktopUiApplication {
    var started = Sys.time();
    host.onPoll = function() { if (Sys.time() - started > 12) host.requestClose(); };
   }
-  var workflow = args.indexOf("--workflow") >= 0;
+  var workflow = args.indexOf("--workflow") >= 0 || args.indexOf("--repository-menu") >= 0;
+  menuLayer = workflow;
   if (workflow) {
    agent.view.supportsImageUpload = true;
    agent.uploadEnabled = true;
    workflowStep = 1;
    clickLabel = "Add image";
   }
+  if (args.indexOf("--repository-menu") >= 0) { workflowStep = 0; clickLabel = null; keyboardReview = true; keyboardLabel = "Repository actions"; }
   panel = new CodexSessionPanel(function() return agent, "session", "/repo", host.requestFrame,
-   dark ? new style.Theme() : ui.ExosuitPalette.lightEditor(), new syntax.SyntaxRegistry(), null, function(_) {},
+   dark ? new style.Theme() : ui.ExosuitPalette.lightEditor(), new syntax.SyntaxRegistry(), function(items, event, valid) {
+    if (valid()) {
+     menuX=event.x; menuY=event.y;
+     if (contextValue.root != null && (event.kind == UiEventKind.KeyDown || event.kind == UiEventKind.Activate)) {
+      var trigger=contextValue.root.find(event.target);
+      if (trigger != null && trigger.resolved != null) { var bounds=trigger.globalBounds(); menuX=bounds.x; menuY=bounds.y+bounds.height; }
+     }
+     menuItems = items; host.requestFrame();
+    }
+   }, function(_) {},
    function(_) {}, {context: function() return "/workspace/exosuit · ui-exploration", explore: function() {}, reviewChanges: function() {},
     resolveImage: function(path) return path == "fixture-icon.png" ? Sys.getCwd() + "/graphical/assets/icons/exosuit-256.png" : null,
     loadImage: (inlineImages && remoteImage) || nativeImagePlan ? function(path,done) {
@@ -181,6 +216,7 @@ private class PreviewApplication implements DesktopUiApplication {
     readContext: workflow ? function(_, done) done("class Main {}", null) : null,
     chooseImage: workflow ? function(done) done("diagram.png", sys.io.File.getBytes(Sys.getCwd() + "/graphical/assets/icons/exosuit-256.png"), null) : null,
     canCreateWorktree: workflow ? function() return true : null, newWorktree: workflow ? function() {} : null,
+    canCommitChanges: workflow ? function() return true : null, commitChanges: workflow ? function() {} : null,
     canOpenGithub: workflow ? function() return true : null, githubRepository: workflow ? function() {} : null,
     canOpenPullRequest: workflow ? function() return true : null, githubPullRequest: workflow ? function() {} : null,
     previewArtifact: renderHtml || renderSvg ? function(_, source) {
@@ -189,7 +225,13 @@ private class PreviewApplication implements DesktopUiApplication {
  }
  public function context():UiContext return contextValue;
  public function submit(frame:LayoutFrame):RenderNode {
-  var root = contextValue.submit(panel, frame);
+  var view:haxeon.ui.core.View = panel;
+  if (menuLayer) {
+   var layers:Array<haxeon.ui.widgets.layout.StackChild> = [new haxeon.ui.widgets.layout.StackChild("content",panel,0,0,0,haxeon.ui.LayoutAxis.grow(),haxeon.ui.LayoutAxis.grow())];
+   if (menuItems != null) layers.push(new haxeon.ui.widgets.layout.StackChild("menu",new haxeon.ui.widgets.overlays.Menu("preview-repository",menuItems,menuX,menuY,function() {menuItems=null;host.requestFrame();}),0,0,40));
+   view = new haxeon.ui.widgets.layout.Stack("preview-overlay",layers);
+  }
+  var root = contextValue.submit(view, frame);
   if (sentImagePreview) {
    sentImageFrames++;
    if (sentImageFrames < 4) host.requestFrame();
@@ -218,7 +260,7 @@ private class PreviewApplication implements DesktopUiApplication {
    if (reviewFrames < 4) host.requestFrame();
    else {
     var review:RenderNode = null;
-    root.walk(function(node) { if (review == null && node.semantics != null && node.semantics.label == "Review request") review = node; });
+    root.walk(function(node) { if (review == null && node.semantics != null && node.semantics.label == keyboardLabel) review = node; });
     if (review != null && contextValue.focusWidget(review.id)) {
      keyboardReview = false;
      contextValue.key(UiEventKind.KeyDown, haxeon.ui.core.UiKey.Enter);

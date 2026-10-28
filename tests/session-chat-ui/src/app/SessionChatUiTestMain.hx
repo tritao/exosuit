@@ -37,6 +37,10 @@ class SessionChatUiTestMain {
 		context.pointerDown(b.x + b.width / 2, b.y + b.height / 2, 0);
 		context.pointerUp(b.x + b.width / 2, b.y + b.height / 2, 0);
 	}
+	static function chooseMenu(items:Array<haxeon.ui.widgets.overlays.MenuItem>, label:String):Void {
+		if (items != null) for (item in items) if (item.label == label && item.enabled) { item.onSelect(); return; }
+		throw "Missing menu action: " + label;
+	}
 	static function checkHorizontalBounds(root:RenderNode, width:Float):Void {
 		root.walk(function(node) {
 			if (!node.layout.style.visible || !node.focusable || node.resolved == null) return;
@@ -144,17 +148,17 @@ class SessionChatUiTestMain {
 		var answerClient = new FakeAgent();
 		answerClient.view.requests = [{id:"question", method:"item/tool/requestUserInput", detail:"Choose", reviewable:true, inputKind:"text"}];
 		var answerContext = new UiContext(null, fonts, ui.ExosuitPalette.theme(true));
-		var commits = 0, mayCommit = true;
+		var commits = 0, mayCommit = true, answerMenu:Array<haxeon.ui.widgets.overlays.MenuItem> = null;
 		var answerPanel = new CodexSessionPanel(function() return answerClient, "session", "/repo", function() {},
-			new style.Theme(), new syntax.SyntaxRegistry(), function(_, _, _) {}, function(_) {}, null,
+			new style.Theme(), new syntax.SyntaxRegistry(), function(items, _, _) answerMenu = items, function(_) {}, null,
 			{context:function() return "Project", explore:function() {}, reviewChanges:function() {},
 			 canCommitChanges:function() return mayCommit, commitChanges:function() commits++});
 		function answerBuild():RenderNode return answerContext.submit(answerPanel, new LayoutFrame(1000, 900));
 		var answerRoot = answerBuild();
-		click(answerContext, find(answerRoot, "Commit changes"), 1000, 900);
+		click(answerContext, find(answerRoot, "Repository actions"), 1000, 900); chooseMenu(answerMenu, "Commit changes");
 		require(commits == 1 && answerClient.actions.length == 0, "Commit navigation performed an agent action");
 		mayCommit = false; answerRoot = answerBuild();
-		var foundCommit = false; answerRoot.walk(function(node) { if (node.semantics != null && node.semantics.label == "Commit changes") foundCommit = true; });
+		var foundCommit = false; answerRoot.walk(function(node) { if (node.semantics != null && node.semantics.label == "Repository actions") foundCommit = true; });
 		require(!foundCommit, "Unavailable commit action was shown");
 		require(answerContext.focusWidget(find(answerRoot, "Codex prompt").id), "Cannot focus answer draft");
 		answerContext.text(UiEventKind.TextInput, "My answer"); answerRoot = answerBuild();
@@ -352,6 +356,25 @@ class SessionChatUiTestMain {
         find(nativeRoot,"Generated image, 16 by 16 pixels");
         click(nativeContext,find(nativeRoot,"Open image"),500,900);
         require(nativeOpen=="/repo/assets/output.png","Native image open did not preserve validated path");nativeContext.dispose();
+        for (outputDark in [true,false]) for (outputWidth in [320.0,1000.0]) {
+        var outputClient=new FakeAgent();
+        outputClient.view.items=[{id:"command",turn:"turn",kind:"commandExecution",title:"Command",text:"npm test",
+          detail:"/repo\nExit code: 1\nfailed    test",state:"failed",truncated:false}];
+        var outputContext=new UiContext(null,fonts,ui.ExosuitPalette.theme(outputDark));
+        var outputPanel=new CodexSessionPanel(function() return outputClient,"session","/repo",function() {},new style.Theme(),new syntax.SyntaxRegistry(),
+          function(_,_,_) {},function(_) {});
+        var outputRoot=outputContext.submit(outputPanel,new LayoutFrame(outputWidth,700));
+        var failed=find(outputRoot,"Failed"), failedBounds=failed.globalBounds(), danger=outputContext.buildContext.theme.tokens.danger;
+        require(failedBounds.width>0 && failedBounds.x>=0 && failedBounds.x+failedBounds.width<=outputWidth
+          && failed.layout.textColor.red==danger.red && failed.layout.textColor.green==danger.green && failed.layout.textColor.blue==danger.blue,
+          "Command failure status was clipped or lost its error color");
+        var disclosure=find(outputRoot,"Show details");
+        require(outputContext.focusWidget(disclosure.id),"Command disclosure was not keyboard focusable");
+        outputContext.key(UiEventKind.KeyDown,UiKey.Enter);
+        outputRoot=outputContext.submit(outputPanel,new LayoutFrame(outputWidth,700));
+        require(find(outputRoot,"Tool output").focusable,"Expanded command lost selectable output");
+        find(outputRoot,"Copy output");find(outputRoot,"Hide details");outputContext.dispose();
+        }
         var embedded="data:image/png;base64,"+haxe.crypto.Base64.encode(rasterBytes);
         var dataContext=new UiContext(null,fonts,ui.ExosuitPalette.theme(true));
         var dataView=new ui.SessionImageView("embedded","Icon",embedded,null,function(_) throw "Data URL opened externally",function(){});
@@ -421,8 +444,9 @@ class SessionChatUiTestMain {
 		var fixtureImage = sys.io.File.getBytes("../../graphical/assets/icons/exosuit-16.png");
 		var requestedPath:String = null; var clipboardBytes:Null<haxe.io.Bytes> = null; var pasteReads = 0;
 		var worktreeOpens = 0, githubOpens = 0, pullRequestOpens = 0, availableActions = true;
+		var repositoryMenu:Array<haxeon.ui.widgets.overlays.MenuItem> = null;
 		var draftPanel = new CodexSessionPanel(function() return draftClient, "session", "/repo", function() {},
-			new style.Theme(), new syntax.SyntaxRegistry(), function(_, _, _) {}, function(_) {}, null,
+			new style.Theme(), new syntax.SyntaxRegistry(), function(items, _, _) repositoryMenu = items, function(_) {}, null,
 			{context:function() return "Project", explore:function() {}, reviewChanges:function() {},
 			 readContext:function(path, done) { requestedPath = path; done("actual contents\n", null); },
 			 chooseImage:function(done) done("photo.png", fixtureImage, null),
@@ -432,13 +456,22 @@ class SessionChatUiTestMain {
 			 canOpenPullRequest:function() return availableActions, githubPullRequest:function() pullRequestOpens++});
 		function draftBuild():RenderNode return draftContext.submit(draftPanel, new LayoutFrame(1000, 1000));
 		var draftRoot = draftBuild();
-		click(draftContext, find(draftRoot, "New worktree"), 1000, 1000);
-		click(draftContext, find(draftRoot, "Open GitHub"), 1000, 1000);
-		click(draftContext, find(draftRoot, "Open pull request page"), 1000, 1000);
+		var repositoryButton = find(draftRoot, "Repository actions");
+		require(draftContext.focusWidget(repositoryButton.id), "Repository actions cannot receive keyboard focus");
+		draftContext.key(UiEventKind.KeyDown, UiKey.Enter);
+		chooseMenu(repositoryMenu, "New worktree"); chooseMenu(repositoryMenu, "Open GitHub"); chooseMenu(repositoryMenu, "Open pull request page");
 		require(worktreeOpens == 1 && githubOpens == 1 && pullRequestOpens == 1, "Workspace actions did not invoke their callbacks");
-		availableActions = false; draftRoot = draftBuild();
+		availableActions = false; chooseMenu(repositoryMenu, "New worktree");
+		require(worktreeOpens == 1, "Stale repository action bypassed its capability check");
+		availableActions = true; draftClient.record.cwd = "/repo/other"; chooseMenu(repositoryMenu, "Open GitHub");
+		require(githubOpens == 1, "Repository menu followed a moved session");
+		draftClient.record.cwd = "/repo"; draftClient.control = false; draftRoot = draftBuild();
+		click(draftContext, find(draftRoot, "Repository actions"), 1000, 1000); chooseMenu(repositoryMenu, "Open GitHub");
+		require(githubOpens == 2, "Read-only repository navigation became unavailable");
+		draftClient.control = true; availableActions = false;
+		draftRoot = draftBuild();
 		var unavailableVisible = false;
-		draftRoot.walk(function(node) { if (node.semantics != null && node.semantics.label == "New worktree") unavailableVisible = true; });
+		draftRoot.walk(function(node) { if (node.semantics != null && node.semantics.label == "Repository actions") unavailableVisible = true; });
 		require(!unavailableVisible, "Unavailable worktree action remained visible");
 		click(draftContext, find(draftRoot, "Add workspace text"), 1000, 1000);
 		draftRoot = draftBuild();
@@ -515,18 +548,19 @@ class SessionChatUiTestMain {
         click(planContext,find(planRoot,"source"),1000,1000);
         require(planOpened=="src/Main.hx","Native plan file link did not use IDE navigation");
         planContext.dispose();
-        for (imageAction in ["prompt", "queue", "steer"]) {
-          var piImageClient = new FakeAgent();piImageClient.record.provider="pi";
+        for (imageInput in [{provider:"pi",action:"prompt"},{provider:"pi",action:"queue"},{provider:"pi",action:"steer"},{provider:"claude",action:"prompt"}]) {
+          var imageAction=imageInput.action;
+          var piImageClient = new FakeAgent();piImageClient.record.provider=imageInput.provider;
           piImageClient.record.state=imageAction=="prompt" ? "idle" : "working";
           piImageClient.view.supportsImageUpload=true;piImageClient.uploadEnabled=true;
-          piImageClient.view.supportsQueue=true;piImageClient.view.supportsSteering=true;piImageClient.view.inputToken="input";
+          piImageClient.view.supportsQueue=imageInput.provider=="pi";piImageClient.view.supportsSteering=imageInput.provider=="pi";piImageClient.view.inputToken="input";
           var piImageContext=new UiContext(null,fonts,ui.ExosuitPalette.theme(true));
           var piImagePanel=new CodexSessionPanel(function() return piImageClient,"session","/repo",function() {},new style.Theme(),new syntax.SyntaxRegistry(),function(_,_,_) {},function(_) {},null,
             {context:function() return "Project",explore:function() {},reviewChanges:function() {},
              chooseImage:function(done) done("pi-photo.png",fixtureImage,null),pasteImage:function() return {bytes:fixtureImage,error:null}});
           var piImageRoot=piImageContext.submit(piImagePanel,new LayoutFrame(1000,1000));
           click(piImageContext,find(piImageRoot,"Add image"),1000,1000);
-          require(piImagePanel.imageDrafts.length==1,"Pi capability did not enable image picker");
+          require(piImagePanel.imageDrafts.length==1,"Negotiated provider capability did not enable image picker: "+imageInput.provider);
           piImageRoot=piImageContext.submit(piImagePanel,new LayoutFrame(1000,1000));
           piImageClient.acceptActions=false;
           click(piImageContext,find(piImageRoot,imageAction=="prompt" ? "Send" : imageAction=="queue" ? "Queue message" : "Steer now"),1000,1000);

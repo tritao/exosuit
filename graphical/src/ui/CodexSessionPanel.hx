@@ -136,6 +136,16 @@ class CodexSessionPanel implements View {
     return new Text(value, style);
   }
 
+  static function commandStatus(state:String):String return switch state {
+    case "inProgress", "running": "Running";
+    case "completed": "Completed";
+    case "failed": "Failed";
+    case "interrupted": "Interrupted";
+    case "cancelled", "canceled": "Cancelled";
+    case "pending": "Pending";
+    case _: "Unknown";
+  }
+
   static function quietButton(label:String, action:Void->Void, ?key:String):Button {
     var compact = new LayoutStyle();
     compact.height = LayoutAxis.fixed(30);
@@ -360,30 +370,37 @@ class CodexSessionPanel implements View {
       filesButton.leadingIcon = IconName.FolderOpen; filesButton.iconSize = 14;
       var changesButton = quietButton("Review changes", workspaceActions.reviewChanges, "agent-review-changes");
       changesButton.leadingIcon = IconName.Activity; changesButton.iconSize = 14;
-      workspaceControls.push(new KeyedView("navigation", new Row("agent-workspace-navigation", [
+      var navigation = new KeyedView("navigation", new Row("agent-workspace-navigation", [
         new KeyedView("files", filesButton),
         new KeyedView("changes", changesButton)
-      ], groupStyle)));
-      if (workspaceActions.newWorktree != null && workspaceActions.canCreateWorktree != null) {
-        var canCreate:Void->Bool = cast workspaceActions.canCreateWorktree;
-        var createWorktree:Void->Void = cast workspaceActions.newWorktree;
-        if (canCreate()) workspaceControls.push(new KeyedView("new-worktree", quietButton("New worktree", createWorktree, "agent-new-worktree")));
+      ], groupStyle));
+      var repositoryItems:Array<MenuItem> = [];
+      var initialThread = view.record.thread, initialCwd = view.record.cwd, initialProvider = view.record.provider;
+      var menuValid = function() {
+        var current = getClient();
+        if (current == null || current != client) return false;
+        var catalog = current.agents(), session = current.agentView(id);
+        return catalog != null && catalog.root == root && session != null && session.record.thread == initialThread
+          && session.record.cwd == initialCwd && session.record.provider == initialProvider;
+      };
+      function repositoryAction(key:String, label:String, available:Null<Void->Bool>, action:Null<Void->Void>):Void {
+        if (available == null || action == null) return;
+        var permitted:Void->Bool = cast available, run:Void->Void = cast action;
+        if (permitted()) repositoryItems.push(new MenuItem(key, label, function() {
+          if (menuValid() && permitted()) run();
+        }));
       }
-      if (workspaceActions.commitChanges != null && workspaceActions.canCommitChanges != null) {
-        var canCommit:Void->Bool = cast workspaceActions.canCommitChanges;
-        var commit:Void->Void = cast workspaceActions.commitChanges;
-        if (canCommit()) workspaceControls.push(new KeyedView("commit", quietButton("Commit changes", commit, "agent-commit-changes")));
+      repositoryAction("worktree", "New worktree", workspaceActions.canCreateWorktree, workspaceActions.newWorktree);
+      repositoryAction("commit", "Commit changes", workspaceActions.canCommitChanges, workspaceActions.commitChanges);
+      repositoryAction("github", "Open GitHub", workspaceActions.canOpenGithub, workspaceActions.githubRepository);
+      repositoryAction("pull-request", "Open pull request page", workspaceActions.canOpenPullRequest, workspaceActions.githubPullRequest);
+      if (repositoryItems.length > 0) {
+        var repository = quietButton("Git ▾", function() {}, "agent-repository-actions");
+        repository.accessibilityLabel = "Repository actions";
+        repository.onClickEvent = function(event) { if (menuValid()) showMenu(repositoryItems, event, menuValid); };
+        workspaceControls.push(new KeyedView("repository-actions", repository));
       }
-      if (workspaceActions.githubRepository != null && workspaceActions.canOpenGithub != null) {
-        var canOpen:Void->Bool = cast workspaceActions.canOpenGithub;
-        var open:Void->Void = cast workspaceActions.githubRepository;
-        if (canOpen()) workspaceControls.push(new KeyedView("github", quietButton("Open GitHub", open, "agent-open-github")));
-      }
-      if (workspaceActions.githubPullRequest != null && workspaceActions.canOpenPullRequest != null) {
-        var canOpen:Void->Bool = cast workspaceActions.canOpenPullRequest;
-        var open:Void->Void = cast workspaceActions.githubPullRequest;
-        if (canOpen()) workspaceControls.push(new KeyedView("pull-request", quietButton("Open pull request page", open, "agent-open-pull-request")));
-      }
+      workspaceControls.push(navigation);
     }
     var workspaceStyle = new LayoutStyle(); workspaceStyle.width = LayoutAxis.grow(); workspaceStyle.childGap = 8;
     workspaceStyle.wrapMode = haxeon.ui.LayoutWrapMode.Wrap;
@@ -688,13 +705,18 @@ class CodexSessionPanel implements View {
           var commandStyle = new LayoutStyle();
           commandStyle.width = LayoutAxis.grow();
           commandStyle.childGap = 8;
+          commandStyle.childAlignY = haxeon.ui.LayoutAlignmentY.Center;
+          var toggle=quietButton("",function() {expanded.set(key,expanded.get(key)!=true);frame();},"command-toggle-"+key);
+          toggle.style.width=LayoutAxis.fixed(30);
+          toggle.accessibilityLabel=expanded.get(key)==true ? "Hide details" : "Show details";
+          toggle.leadingIcon=expanded.get(key)==true ? IconName.ChevronDown : IconName.ChevronRight;
+          toggle.iconSize=16;
+          var status=commandStatus(item.state);
           message.push(new KeyedView("command-" + key, new Row("codex-command-" + key, [
             new KeyedView("summary", new MiddleEllipsisText("summary",
-              item.title + " · " + item.state + (summary == "" ? "" : " · " + summary), false)),
-            new KeyedView("toggle", quietButton(expanded.get(key) == true ? "Hide details" : "Show details", function() {
-              expanded.set(key, expanded.get(key) != true);
-              frame();
-            }))
+              item.title + (summary == "" ? "" : " · " + summary), false)),
+            new KeyedView("status",new Text(status,null,item.state=="failed" ? tokens.danger : tokens.textSecondary,TextStyleOverride.text(12))),
+            new KeyedView("toggle",toggle)
           ], commandStyle)));
         } else if (reasoning) message.push(new KeyedView("reasoning-" + key,
           quietButton((expanded.get(key) == true ? "Hide reasoning" : "Show reasoning") + (item.state == "completed" ? "" : " · " + item.state), function() {
@@ -759,7 +781,8 @@ class CodexSessionPanel implements View {
           }
         }
         if (detail != "" && reasoning && expanded.get(key) == true) message.push(new KeyedView("detail-" + key, paragraph(detail)));
-        if (detail != "" && command && expanded.get(key) == true) message.push(new KeyedView("detail-" + key, paragraph(detail)));
+        if (detail != "" && command && expanded.get(key) == true) message.push(new KeyedView("detail-" + key,
+          new SessionToolOutputView("tool-output-" + key,detail,item.truncated)));
         if ((detail != "" || (item.kind == "fileChange" && item.files != null && item.files.length > 0)) && !reasoning && !command) {
           message.push(new KeyedView("toggle-" + key,
             quietButton(expanded.get(key) == true ? "Hide details" : "Show details", function() {
@@ -773,7 +796,7 @@ class CodexSessionPanel implements View {
               if (rendered == null) { rendered = new SessionDiffView(detail, openLink, item.files); diffs.set(key, rendered); }
               rendered.update(detail, item.files);
               message.push(new KeyedView("detail-" + key, rendered));
-            } else message.push(new KeyedView("detail-" + key, paragraph(detail)));
+            } else message.push(new KeyedView("detail-" + key, new SessionToolOutputView("tool-output-" + key,detail,item.truncated)));
           }
         }
         if (item.truncated && (!command || expanded.get(key) == true)) {

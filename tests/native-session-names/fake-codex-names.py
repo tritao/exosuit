@@ -2,6 +2,8 @@
 """Metadata-only JSONL peer; tests inject it at the initialized proxy boundary."""
 import json,sys
 from pathlib import Path
+sys.stdin.reconfigure(encoding='utf-8')
+sys.stdout.reconfigure(encoding='utf-8')
 root=Path(sys.argv[1])
 for line in sys.stdin:
  q=json.loads(line);method=q['method'];p=q['params']

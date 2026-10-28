@@ -300,6 +300,24 @@ class CodexMarkdownLayoutMain {
     }
     for (literal in ["[unfinished](https://example.com", "[unsafe](javascript:alert(1))", "`[literal](https://example.com)`"])
       for (span in workspace.client.CodexMarkdown.inlineSpans(literal)) require(span.kind != "link", "Made literal or unsupported content clickable");
+    var output="cwd /repo\nExit code: 1\n"+[for (_ in 0...180) "x"].join("")+"\n"+[for (i in 0...30) "line "+i].join("\n");
+    for (dark in [false,true]) for (width in [320.0,1000.0]) {
+      var outputContext=new UiContext(null,fonts,ui.ExosuitPalette.theme(dark)), copied:Null<String>=null;
+      var outputView=new ui.SessionToolOutputView("output-fixture",output,true,function(value) copied=value);
+      var outputRoot=outputContext.submit(outputView,new LayoutFrame(width,500));
+      var outputScroll:RenderNode=null;
+      outputRoot.walk(function(node) {if (node.styleType=="scroll-view" && node.styleKey=="output-fixture-scroll") outputScroll=node;});
+      require(outputScroll!=null && outputScroll.globalBounds().height<=280.1 && outputScroll.layout.style.clipHorizontal
+        && outputScroll.layout.style.clipVertical && find(outputRoot,"Tool output").focusable,
+        "Tool output lost bounded scrolling or text selection");
+      var copyOutput=find(outputRoot,"Copy output preview").globalBounds();
+      require(copyOutput.x>=0 && copyOutput.x+copyOutput.width<=width+0.1,"Output copy action escaped viewport");
+      outputContext.pointerDown(copyOutput.x+copyOutput.width/2,copyOutput.y+copyOutput.height/2,0);
+      outputContext.pointerUp(copyOutput.x+copyOutput.width/2,copyOutput.y+copyOutput.height/2,0);
+      require(copied==output,"Output copy changed source or line endings");
+      outputRoot=outputContext.submit(outputView,new LayoutFrame(width,500));find(outputRoot,"Copied output");
+      outputContext.dispose();
+    }
     context.dispose(); session.dispose(); fonts.dispose();
     require(ui.MarkdownEmphasis.leases == initialFaceLeases, "Unmounted Markdown retained emphasis font collections");
     trace("PASS: Markdown spacing, punctuation, wrapping, line breaks, link labels, destinations and activation");

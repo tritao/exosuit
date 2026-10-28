@@ -44,6 +44,12 @@ class WorkspaceAgentService implements WorkspaceAgents {
     pi.imagePrepare=function(session,ids,turn,item) return images.piImages(session,ids,turn,item);
     pi.imageHold=function(session,thread,turn,item,ids) return images.holdInput(session,thread,turn,item,ids);
    }
+   if(kind=="claude" && Std.isOfType(provider,ClaudeProvider)) {
+    var claude:ClaudeProvider=cast provider;
+    claude.imageUploadAvailable=images.supported();
+    claude.imagePrepare=function(session,ids,turn,item) return images.piImages(session,ids,turn,item);
+    claude.imageHold=function(session,thread,turn,item,ids) return images.holdInput(session,thread,turn,item,ids);
+   }
    for(record in provider.records()) {
     if(identities.exists(record.id)) throw "Agent identity belongs to multiple providers";
     identities.set(record.id,true);
@@ -96,6 +102,10 @@ class WorkspaceAgentService implements WorkspaceAgents {
    var provider=owner(q.id);
    if(provider == null) {ctx.fail({code:"unknown_agent",message:"Unknown agent",ambiguous:false});return;}
    if (q.imageIds != null && q.imageIds.length > 0) {
+    if(Std.isOfType(provider,ClaudeProvider)) {
+     if(q.action!="prompt") {ctx.fail({code:"unsupported_operation",message:"This Claude action cannot attach images",ambiguous:false});return;}
+     provider.action(q,ctx);return;
+    }
     if(Std.isOfType(provider,PiProvider)) {
      if(q.action!="prompt" && q.action!="queue" && q.action!="steer") {ctx.fail({code:"unsupported_operation",message:"This Pi action cannot attach images",ambiguous:false});return;}
      provider.action(q,ctx);return;
@@ -154,7 +164,7 @@ class WorkspaceAgentService implements WorkspaceAgents {
   connection.register(WorkspaceAgentProtocol.IMAGE_UPLOAD,function(q,ctx) {
    if(!allowed(q.workspace,q.instance,true)) {ctx.fail({code:"unauthorized",message:"Image upload denied",ambiguous:false});return;}
    var provider = owner(q.session);
-   if (provider == null || (!Std.isOfType(provider,CodexProvider) && !Std.isOfType(provider,PiProvider))) {ctx.fail({code:"unsupported_operation",message:"Image upload is unavailable for this session",ambiguous:false});return;}
+   if (provider == null || (!Std.isOfType(provider,CodexProvider) && !Std.isOfType(provider,PiProvider) && !Std.isOfType(provider,ClaudeProvider))) {ctx.fail({code:"unsupported_operation",message:"Image upload is unavailable for this session",ambiguous:false});return;}
    try ctx.respond(images.process(q)) catch (error:Dynamic) {
     var message = Std.string(error);
     var safe = ["Image staging requires recovery; check the workspace service", "Invalid session", "Image must be at most 2 MiB",

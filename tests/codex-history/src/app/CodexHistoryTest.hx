@@ -17,7 +17,8 @@ class CodexHistoryTest {
   var directories=new WorkspaceDirectories(root);root=directories.root;
   var source:Array<Dynamic>=[];
   var longMessage="Older source 界\n\n```haxe\n"+StringTools.rpad("", "x", 5000)+"\n```\n";
-  for (i in 0...96) source.push({turnId:"history",completedAtMs:1,item:{id:"history-"+i,type:"agentMessage",text:i==8 ? longMessage : "Message "+i+" 界"}});
+  var largeMessage="Large source 雪\n\n```text\n"+StringTools.rpad("", "x",270000)+"\n```\n";
+  for (i in 0...96) source.push({turnId:"history",completedAtMs:1,item:{id:"history-"+i,type:"agentMessage",text:i==8 ? longMessage : i==9 ? largeMessage : "Message "+i+" 界"}});
   sys.io.File.saveContent(root+"/history-fixture.json",Json.stringify(source));
   var threads:Dynamic={};
   Reflect.setField(threads,"history-thread",{id:"history-thread",cwd:root,status:{type:"idle"},turn:null});
@@ -79,6 +80,24 @@ class CodexHistoryTest {
   var fullReply:AgentContentChunk=cast full;
   var fullBytes:haxe.io.Bytes=cast fullReply.bytes;
   require(fullBytes.toString()==longMessage,"Older native page full source was clipped or changed");
+  var largeItem:Null<AgentActivityItem>=null;
+  for(item in older) if(item.id=="history-9") largeItem=item;
+  require(largeItem!=null && largeItem.contentToken!=null,"Large native JSON envelope lost its retained source");
+  var retainedLarge:AgentActivityItem=cast largeItem;
+  var assembled=new haxe.io.BytesBuffer(),position=0,total=-1;
+  while(total<0 || position<total) {
+   full=null;contentDone=false;
+   client.call(WorkspaceAgentProtocol.MESSAGE_CONTENT,{workspace:"w",instance:"owner",session:"a",turn:"history",item:"history-9",token:retainedLarge.contentToken,offset:position},5000,
+    function(chunk) {full=chunk;contentDone=true;},function(e) throw e.message);
+   wait(function() return contentDone);
+   var chunk:AgentContentChunk=cast full;
+   require(chunk.partial && chunk.offset==position && chunk.bytes.length<=24576 && chunk.bytes.length>0,"Large native source chunk lost its explicit display bound");
+   if(total<0) total=chunk.total;require(total==chunk.total,"Large native source changed during transfer");
+   assembled.addBytes(chunk.bytes,0,chunk.bytes.length);position+=chunk.bytes.length;
+  }
+  var expected=haxe.io.Bytes.ofString(largeMessage).sub(0,workspace.provider.AgentContentCache.MAX_MESSAGE);
+  require(total==workspace.provider.AgentContentCache.MAX_MESSAGE && assembled.getBytes().compare(expected)==0,
+   "Large native response was disconnected or changed instead of bounded after JSON framing");
   var next=second.itemsNext,seen:Map<String,Bool>=[];
   while(next!=null) {
    var requested:String=cast next;require(!seen.exists(requested),"Native history cursor cycled");seen.set(requested,true);
@@ -89,6 +108,6 @@ class CodexHistoryTest {
   require(requests()==13 && refetchedItems[0].id==older[0].id,"Evicted page could not be re-fetched from native history");
   require(action("read").itemsNext==first.itemsNext,"Older paging changed the newest history boundary");
   service.dispose();client.close();server.close();processes.shutdown();
-  Sys.println("PASS: native Codex lazy attachment, demand paging, cursor idempotency and stable epoch");
+  Sys.println("PASS: native Codex lazy attachment, demand paging, cursor idempotency, large native frames and stable epoch");
  }
 }

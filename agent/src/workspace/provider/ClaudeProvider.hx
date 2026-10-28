@@ -35,6 +35,9 @@ private typedef ClaudeSession = {
 
 /** One native CLI process per session, owned by the workspace daemon, not an editor attachment. */
 class ClaudeProvider implements AgentMessageSource {
+ public var imageUploadAvailable:Bool=false;
+ public var imagePrepare:Null<(String,Array<String>,Null<String>,Null<String>)->Null<Array<Dynamic>>>;
+ public var imageHold:Null<(String,String,String,String,Array<String>)->Bool>;
  public function modelCatalog(q:AgentModelsQuery,ctx:RpcContext<AgentModelsPage>):Void {
   ctx.fail({code:"unsupported_operation",message:"Load models from an attached session",ambiguous:false});
  }
@@ -103,7 +106,7 @@ class ClaudeProvider implements AgentMessageSource {
  function view(s:ClaudeSession,?before:Int):AgentView {
   var pending = AgentRequestPage.project([for(id=>r in s.approvals) {id:id,method:r.tool == "AskUserQuestion" ? "item/tool/requestUserInput" : "item/commandExecution/requestApproval",detail:r.detail,reviewable:r.reviewable,questions:r.structured}]);
   return {
-  record:copy(s.record),activity:"",items:s.conversation.page(before),itemsNext:s.conversation.next(before),itemsOmitted:false,supportsMessageContent:true,historyEpoch:s.conversation.epoch(),historyOmitted:s.conversation.hasOmitted(),
+  record:copy(s.record),activity:"",items:s.conversation.page(before),itemsNext:s.conversation.next(before),itemsOmitted:false,supportsMessageContent:true,supportsImageUpload:imageUploadAvailable,historyEpoch:s.conversation.epoch(),historyOmitted:s.conversation.hasOmitted(),
   requests:pending.requests,requestsOmitted:pending.omitted,
   models:s.models,modelsNext:null,currentModel:s.currentModel,currentEffort:null,
   connectionState:s.ready ? "connected" : s.transport == null ? "disconnected" : "reconnecting",
@@ -316,14 +319,27 @@ class ClaudeProvider implements AgentMessageSource {
    });return;
   }
   if(q.action == "prompt") {
-   if(!valid(q.text,8192) || s.busy || s.record.state == "uncertain") {error("busy","Claude is busy or delivery requires reconciliation");return;}
+   if(q.text==null || q.text.length>8192 || (StringTools.trim(q.text)=="" && (q.imageIds==null || q.imageIds.length==0)) || s.busy || s.record.state == "uncertain") {error("busy","Claude is busy or delivery requires reconciliation");return;}
    if(q.effort != null || (q.model != null && q.model != s.record.preferredModel)) {error("invalid_request","Set the Claude model before sending; effort overrides are unsupported");return;}
    var turn="turn-" + (++s.serial) + "-" + Std.string(clock());
+   var content:Dynamic=q.text;
+   if(q.imageIds!=null && q.imageIds.length>0) {
+    var images=imagePrepare==null ? null : imagePrepare(s.record.id,q.imageIds,null,null);
+    if(images==null) {error("image_unavailable","An image is unavailable; remove it and upload it again");return;}
+    var blocks:Array<Dynamic>=[];
+    if(q.text!="") blocks.push({type:"text",text:q.text});
+    for(image in images) blocks.push({type:"image",source:{type:"base64",media_type:Reflect.field(image,"mimeType"),data:Reflect.field(image,"data")}});
+    content=blocks;
+    var encoded=haxe.io.Bytes.ofString(Json.stringify({type:"user",session_id:s.record.thread,message:{role:"user",content:content},parent_tool_use_id:null}));
+    if(encoded.length+1>ClaudeTransport.MAX_FRAME_BYTES) {error("image_unavailable","Images exceed the Claude input limit");return;}
+    if(imageHold==null || !imageHold(s.record.id,s.record.thread,turn,turn,q.imageIds)) {error("image_unavailable","Could not retain this image for Claude");return;}
+   }
    s.record.state="working";s.record.turn=turn;s.error=null;s.busy=true;
    s.conversation.put(turn,turn,"userMessage","You",q.text,"","completed");
+   if(q.imageIds!=null && q.imageIds.length>0) s.conversation.attachImages(turn,turn,q.imageIds);
    // Write-ahead state: a daemon crash must never cause an automatic prompt retry.
    try save(s) catch(_:Dynamic) {s.busy=false;s.record.state="uncertain";error("storage_unavailable","Prompt was not queued");return;}
-   if(!t.send({type:"user",session_id:s.record.thread,message:{role:"user",content:q.text},parent_tool_use_id:null})) {
+   if(!t.send({type:"user",session_id:s.record.thread,message:{role:"user",content:content},parent_tool_use_id:null})) {
     fail(s,"Claude prompt queue failed; explicitly resume before another prompt");error("backpressure","Claude prompt was not queued");return;
    }
    ctx.respond(view(s));return;

@@ -30,10 +30,14 @@ class ClaudeConversation {
    put(entry.id, entry.turn, entry.kind, entry.title, entry.text, entry.detail, entry.state, !entry.truncated);
    for (restored in entries) if (restored.id == entry.id && restored.turn == entry.turn) {
     restored.truncated = entry.truncated;restored.contentDigest=entry.contentDigest;
+    restored.images=entry.images;
     if(entry.truncated && archive!=null) restored.contentToken=archive.restore(cacheKey(entry.turn,entry.id),restored);
    }
   }
   restoring=false;
+ }
+ public function attachImages(turn:String,id:String,ids:Array<String>):Void {
+  for(entry in entries) if(entry.turn==turn && entry.id==id) entry.images=[for(imageId in ids) {id:imageId}];
  }
  public function put(id:String, turn:String, kind:String, title:String, text:String, detail:String, state:String, retainContent:Bool = true):Void {
   if (id == null || id.length == 0 || id.length > 128 || turn.length > 128) return;
@@ -84,7 +88,7 @@ class ClaudeConversation {
  public function snapshot():Array<AgentActivityItem> {
   var saved:Array<AgentActivityItem> = [for (e in entries.slice(Std.int(Math.max(0,entries.length-6)))) {
    id:e.id,turn:e.turn,kind:e.kind,title:e.title,text:e.text.substring(0,384),detail:e.detail.substring(0,128),state:e.state,
-   contentDigest:e.contentDigest,truncated:e.truncated || e.text.length > 384 || e.detail.length > 128
+   contentDigest:e.contentDigest,truncated:e.truncated || e.text.length > 384 || e.detail.length > 128,images:e.images
   }];
   while (saved.length > 0 && haxeon.wire.MessagePack.encode(saved).length > 6144) saved.shift();
   return saved;
