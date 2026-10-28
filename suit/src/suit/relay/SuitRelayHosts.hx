@@ -7,6 +7,7 @@ import sys.io.File;
 import suit.SuitInventory;
 import suit.SuitPaths;
 import workspace.transport.RelayMachineEndpoint;
+import suit.SuitRecord.SuitRecords;
 
 /** Creates a directory readable only by this user, or checks that an existing one is. */
 @:hlNative("haxeon_runtime", "__host_prepare_private_directory")
@@ -54,6 +55,26 @@ class SuitRelayHosts {
 		return result;
 	}
 
+	/**
+		The workspaces suit hosts now: valid records whose workspace has relay settings that are not paused.
+		Reads only, so a listing can use it; `load` is the daemon's, and removes records that went stale.
+	**/
+	public static function active():Array<SuitRelayHost> {
+		var result:Array<SuitRelayHost> = [];
+		var folder = directory();
+		if (!FileSystem.exists(folder))
+			return result;
+		for (name in FileSystem.readDirectory(folder)) {
+			if (!StringTools.endsWith(name, ".json"))
+				continue;
+			var host:Null<SuitRelayHost> = null;
+			try host = parse(readJson(Path.join([folder, name]))) catch (_:Dynamic) {}
+			if (host != null && readSettings(host.stateDir) != null && !isPaused(host.stateDir))
+				result.push(host);
+		}
+		return result;
+	}
+
 	public static function save(host:SuitRelayHost):Void {
 		var folder = directory();
 		if (!preparePrivateRelayDirectory(folder))
@@ -79,7 +100,7 @@ class SuitRelayHosts {
 		Throws a short reason the daemon can act on: `hosting_paused` keeps it from dialling the relay itself.
 	**/
 	public static function validate(request:Dynamic):SuitRelayHost {
-		if (SuitInventory.intField(request, "version") != SuitRelayProtocol.VERSION)
+		if (SuitRecords.intField(request, "version") != SuitRelayProtocol.VERSION)
 			throw "unsupported_relay_attach";
 		var host:Null<SuitRelayHost> = parse(request);
 		if (host == null)
@@ -88,21 +109,21 @@ class SuitRelayHosts {
 			throw "workspace_state_not_private";
 		var identity:Dynamic = null;
 		try identity = readJson(Path.join([host.stateDir, "workspace.json"])) catch (_:Dynamic) {}
-		if (identity == null || SuitInventory.stringField(identity, "root") != host.root)
+		if (identity == null || SuitRecords.stringField(identity, "root") != host.root)
 			throw "workspace_mismatch";
 		var settings = readSettings(host.stateDir);
 		if (settings == null)
 			throw "relay_not_configured";
-		var configured = new RelayMachineEndpoint(SuitInventory.stringField(settings, "origin"), host.machineId);
+		var configured = new RelayMachineEndpoint(SuitRecords.stringField(settings, "origin"), host.machineId);
 		if (configured.origin != new RelayMachineEndpoint(host.origin, host.machineId).origin)
 			throw "relay_mismatch";
 		if (configured.isLoopbackHttp && Sys.getEnv("EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP") != "1")
 			throw "relay_loopback_disabled";
-		if (SuitInventory.stringField(settings, "hosting") == "paused")
+		if (SuitRecords.stringField(settings, "hosting") == "paused")
 			throw "hosting_paused";
 		var machine:Dynamic = null;
 		try machine = readJson(Path.join([host.stateDir, "relay-machine.json"])) catch (_:Dynamic) {}
-		if (machine == null || SuitInventory.stringField(machine, "machineId") != host.machineId)
+		if (machine == null || SuitRecords.stringField(machine, "machineId") != host.machineId)
 			throw "relay_mismatch";
 		if (!FileSystem.exists(host.executable) || !FileSystem.exists(host.launcher))
 			throw "invalid_relay_attach";
@@ -122,12 +143,12 @@ class SuitRelayHosts {
 			return null;
 		var settings:Dynamic = null;
 		try settings = readJson(path) catch (_:Dynamic) {}
-		return settings != null && SuitInventory.intField(settings, "version") == 1 ? settings : null;
+		return settings != null && SuitRecords.intField(settings, "version") == 1 ? settings : null;
 	}
 
 	public static function isPaused(stateDir:Null<String>):Bool {
 		var settings = readSettings(stateDir);
-		return settings != null && SuitInventory.stringField(settings, "hosting") == "paused";
+		return settings != null && SuitRecords.stringField(settings, "hosting") == "paused";
 	}
 
 	/** Pauses or resumes hosting in `relay-settings.json`; false when the workspace has no relay settings. */
@@ -135,9 +156,9 @@ class SuitRelayHosts {
 		var settings = readSettings(stateDir);
 		if (settings == null || stateDir == null)
 			return false;
-		if ((SuitInventory.stringField(settings, "hosting") == "paused") == paused)
+		if ((SuitRecords.stringField(settings, "hosting") == "paused") == paused)
 			return true;
-		var origin = SuitInventory.stringField(settings, "origin");
+		var origin = SuitRecords.stringField(settings, "origin");
 		var updated:Dynamic = paused ? {version: 1, origin: origin, hosting: "paused"} : {version: 1, origin: origin};
 		try sys.io.AtomicFile.write(Path.join([stateDir, "relay-settings.json"]), Json.stringify(updated) + "\n") catch (_:Dynamic) return false;
 		return true;
@@ -157,12 +178,12 @@ class SuitRelayHosts {
 		if (value == null)
 			return null;
 		var host:SuitRelayHost = {
-			root: SuitInventory.stringField(value, "root"),
-			stateDir: SuitInventory.stringField(value, "stateDir"),
-			machineId: SuitInventory.stringField(value, "machineId"),
-			origin: SuitInventory.stringField(value, "origin"),
-			executable: SuitInventory.stringField(value, "executable"),
-			launcher: SuitInventory.stringField(value, "launcher")
+			root: SuitRecords.stringField(value, "root"),
+			stateDir: SuitRecords.stringField(value, "stateDir"),
+			machineId: SuitRecords.stringField(value, "machineId"),
+			origin: SuitRecords.stringField(value, "origin"),
+			executable: SuitRecords.stringField(value, "executable"),
+			launcher: SuitRecords.stringField(value, "launcher")
 		};
 		for (field in [host.root, host.stateDir, host.machineId, host.origin, host.executable, host.launcher])
 			if (field == null || field.length == 0)

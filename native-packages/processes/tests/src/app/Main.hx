@@ -7,7 +7,7 @@ import processkit.ffi.ProcessKitConstants;
 class Main {
 	static function main():Void {
 		var self = Processes.currentPid();
-		var listed = Processes.list("*");
+		var listed = Processes.list("*", "PATH;PROCESSKIT_ABSENT");
 		if (listed == null) {
 			Sys.println("SKIP: process listing is not implemented on this platform");
 		} else {
@@ -19,6 +19,8 @@ class Main {
 			if (mine != null) {
 				require(mine.started == Processes.started(self), "listing and started agree");
 				require(mine.commandLine.length > 0, "\"*\" reads this process's command line");
+				require(Processes.variable(mine, "PATH") == Sys.getEnv("PATH"), "a requested variable is read");
+				require(Processes.variable(mine, "PROCESSKIT_ABSENT") == null, "an unset variable is absent");
 			}
 			// Each list closes its owned snapshot, so many in a row never exhaust processkit's handle table.
 			for (_ in 0...100)
