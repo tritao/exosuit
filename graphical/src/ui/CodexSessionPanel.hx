@@ -950,6 +950,7 @@ class CodexSessionPanel implements View {
         function() complete(choice),"agent-command-suggestion-"+index)));
     }
     var sendStyle = new LayoutStyle(); sendStyle.width = LayoutAxis.fixed(34); sendStyle.height = LayoutAxis.fixed(34);
+    sendStyle.padding = new Insets(9, 9, 9, 9);
     sendStyle.radiusTopLeft = sendStyle.radiusTopRight = sendStyle.radiusBottomLeft = sendStyle.radiusBottomRight = 17;
     var send = new Button("", sendStyle, function() submitAction(piActive ? "queue" : "prompt"), "codex-send");
     send.accessibilityLabel = piActive ? "Queue message" : "Send";

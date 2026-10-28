@@ -42,6 +42,13 @@ class SessionChatUiTestMain {
 		require(context.focusWidget(node.id),"Control is not keyboard focusable");
 		context.key(UiEventKind.KeyDown,UiKey.Enter);
 	}
+	static function checkSendIcon(root:RenderNode,label:String):Void {
+		var button=find(root,label);
+		require(button.children.length>0,"Send button icon is missing");
+		var bounds=button.globalBounds(),icon=button.children[0].globalBounds();
+		var dx=icon.x+icon.width/2-(bounds.x+bounds.width/2),dy=icon.y+icon.height/2-(bounds.y+bounds.height/2);
+		require(Math.abs(dx)<0.6 && Math.abs(dy)<0.6,"Send icon is off center: "+dx+","+dy);
+	}
 	static function settingValue(root:RenderNode,label:String,value:String):Void {
 		var semantics:haxeon.ui.semantics.Semantics=cast find(root,label).semantics;
 		require(semantics.value==value && (semantics.states & haxeon.ui.semantics.AccessibilityState.HasPopup)!=0,
@@ -99,6 +106,7 @@ class SessionChatUiTestMain {
 				{context:function() return "Project", explore:function() files++, reviewChanges:function() changes++});
 			function build():RenderNode return context.submit(panel, new LayoutFrame(width, height));
 			var root = build();
+			checkSendIcon(root,"Send");
 			checkHorizontalBounds(root, width);
 			find(root, "You"); find(root, "Codex"); find(root, "Copy message");
 			click(context, find(root, "Files"), width, height);
@@ -110,6 +118,7 @@ class SessionChatUiTestMain {
 			require(context.focusWidget(field.id), "Cannot focus composer");
 			context.text(UiEventKind.TextInput, "Hello agent");
 			root = build();
+			checkSendIcon(root,"Send");
 			activate(context, find(root, "Send"));
 			require(client.actions.indexOf("prompt:Hello agent:null") >= 0, "Send did not deliver composer text");
 			root = build();
@@ -511,6 +520,10 @@ class SessionChatUiTestMain {
           worktreeAllowed=true;branchAllowed=true;footerRoot=footerBuild();footerClient.record.thread="another-thread";
           activate(footerContext,find(footerRoot,"Select worktree"));activate(footerContext,find(footerRoot,"Select branch"));
           require(worktreeCalls==1 && branchCalls==1,"Stale footer controls followed a replaced session");
+          footerClient.record.thread="thread";footerClient.record.state="working";
+          footerClient.view.supportsQueue=true;footerClient.view.inputToken="input";footerRoot=footerBuild();
+          checkSendIcon(footerRoot,"Queue message");
+          footerPanel.prompt="queued message";footerRoot=footerBuild();checkSendIcon(footerRoot,"Queue message");
           footerContext.dispose();
         }
         var modelClient=new FakeAgent();modelClient.deferModelSettings=true;
