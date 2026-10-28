@@ -25,20 +25,77 @@ enum SuitMode {
 	written the process simply goes unregistered. The daemon checks each record's pid against the process
 	start time, so a stale record for a reused pid is discarded rather than trusted.
 
-	`EXOSUIT_SUIT` decides whether any of this happens (see SuitMode): unset or "on", "isolated", or "off".
-	Any other value counts as "off", so a typo never reaches the user's registry.
+	`EXOSUIT_SUIT` decides whether any of this happens (see SuitMode): "on", "isolated", or "off". Any
+	other value counts as "off", so a typo never reaches the user's registry.
+
+	When it is unset, a process whose state is disposable, kept under the system temp folder, is off: that
+	is how every test isolates an editor (`PRAGTICAL_PORTABLE`, `XDG_STATE_HOME`) or a workspace (its state
+	directory), and a user's own editor never keeps its state there. Such a process then exports
+	`EXOSUIT_SUIT=off`, so what it starts is off too.
 **/
 class SuitClient {
+	/** Variables that hold an editor's or a workspace service's state; a temp-folder value marks a test. */
+	static final STATE_VARIABLES:Array<String> = ["PRAGTICAL_PORTABLE", "XDG_STATE_HOME", "EXOSUIT_AGENT_STATE_HOME"];
+
 	static var editorRoots:Array<String> = [];
 	static var registeredKind:Null<SuitKind> = null;
 	static var daemonRequested:Bool = false;
 
-	public static function mode():SuitMode {
-		return switch Sys.getEnv("EXOSUIT_SUIT") {
+	/** This process's mode. `stateDir` is a workspace service's state directory, when it has one. */
+	public static function mode(?stateDir:String):SuitMode {
+		var explicit = Sys.getEnv("EXOSUIT_SUIT");
+		if (explicit != null && explicit.length > 0)
+			return modeFor(explicit, Sys.getEnv("EXOSUIT_SUIT_HOME"));
+		var states = [for (name in STATE_VARIABLES) Sys.getEnv(name)];
+		states.push(stateDir);
+		for (state in states)
+			if (state != null && state.length > 0 && underTemp(state)) {
+				// Decided once here; children inherit it instead of guessing again.
+				Sys.putEnv("EXOSUIT_SUIT", "off");
+				return Off;
+			}
+		return On;
+	}
+
+	/** The mode a process with these EXOSUIT_SUIT and EXOSUIT_SUIT_HOME values has, when the value is set. */
+	public static function modeFor(value:Null<String>, home:Null<String>):SuitMode {
+		return switch value {
 			case null | "" | "on": On;
-			case "isolated": nonempty(Sys.getEnv("EXOSUIT_SUIT_HOME")) != null ? Isolated : Off;
+			case "isolated": nonempty(home) != null ? Isolated : Off;
 			default: Off;
 		};
+	}
+
+	/**
+		True when a process whose environment holds these values registers with the suit at `ownHome` (null:
+		the default home). suit adopts only such processes, so it never takes one that is off, or one that
+		belongs to another (isolated) suit.
+	**/
+	public static function registersWith(value:Null<String>, home:Null<String>, ownHome:Null<String>):Bool {
+		if (modeFor(value, home) == Off)
+			return false;
+		var target = nonempty(home), own = nonempty(ownHome);
+		if (target == null || own == null)
+			return target == null && own == null;
+		return normalized(target) == normalized(own);
+	}
+
+	/** True when `path` is inside the system temp folder (TEMP or TMP on Windows, TMPDIR or /tmp elsewhere). */
+	public static function underTemp(path:String):Bool {
+		var windows = Sys.systemName() == "Windows";
+		var roots = windows ? [Sys.getEnv("TEMP"), Sys.getEnv("TMP")] : [Sys.getEnv("TMPDIR"), "/tmp"];
+		var candidate = normalized(path) + "/";
+		for (root in roots)
+			if (root != null && root.length > 0 && StringTools.startsWith(candidate, normalized(root) + "/"))
+				return true;
+		return false;
+	}
+
+	static function normalized(path:String):String {
+		var result = StringTools.replace(path, "\\", "/");
+		while (result.length > 1 && StringTools.endsWith(result, "/"))
+			result = result.substr(0, result.length - 1);
+		return Sys.systemName() == "Windows" ? result.toLowerCase() : result;
 	}
 
 	/** Registers the editor and starts suit. Call once at editor startup. */
@@ -76,22 +133,20 @@ class SuitClient {
 	}
 
 	static function writeRecord(kind:SuitKind, workspace:Null<SuitWorkspace>):Void {
-		if (mode() == Off)
+		if (mode(workspace == null ? null : workspace.stateDir) == Off)
 			return;
 		try {
 			if (!SuitPaths.prepare())
 				return;
-			SuitRecords.write(SuitPaths.registry(), {
-				pid: Sys.getPid(),
-				kind: kind,
-				registeredAt: Date.now().getTime(),
-				roots: kind == SuitKind.Editor ? editorRoots.copy() : [],
-				root: workspace == null ? null : workspace.root,
-				stateDir: workspace == null ? null : workspace.stateDir,
-				generation: workspace == null ? null : workspace.generation,
-				owner: null,
-				adopted: false
-			});
+			var record = SuitRecords.create(Sys.getPid(), kind);
+			if (kind == SuitKind.Editor)
+				record.roots = editorRoots.copy();
+			if (workspace != null) {
+				record.root = workspace.root;
+				record.stateDir = workspace.stateDir;
+				record.generation = workspace.generation;
+			}
+			SuitRecords.write(SuitPaths.registry(), record);
 			registeredKind = kind;
 		} catch (_:Dynamic) {}
 	}

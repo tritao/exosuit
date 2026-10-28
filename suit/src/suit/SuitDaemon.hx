@@ -77,7 +77,7 @@ class SuitDaemon {
 		hub = new NativeRpcHub(runtime.events);
 		hub.listen(NativeRpcHub.local(SuitPaths.endpoint()), function(transport) clients.push(transport));
 		runtime.events.listen(onEvent);
-		inventory = new SuitInventory();
+		inventory = new SuitInventory(true);
 		refreshedAt = Sys.time();
 		sys.io.AtomicFile.write(Path.join([SuitPaths.home(), "daemon.json"]),
 			Json.stringify({version: 1, pid: Sys.getPid(), endpoint: SuitPaths.endpoint()}) + "\n");
@@ -116,7 +116,7 @@ class SuitDaemon {
 	}
 
 	function refresh():Void {
-		inventory = new SuitInventory();
+		inventory = new SuitInventory(true);
 		refreshedAt = Sys.time();
 		if (tray != null)
 			tray.setTooltip(inventory.summary());
@@ -192,7 +192,7 @@ class SuitDaemon {
 	}
 
 	function handle(request:Dynamic):Dynamic {
-		var op = SuitInventory.stringField(request, "op");
+		var op = suit.SuitRecord.SuitRecords.stringField(request, "op");
 		switch op {
 			case "status":
 				refresh();

@@ -78,6 +78,22 @@ class SuitKinds {
 		};
 	}
 
+	/**
+		A kind exosuit starts itself: a workspace manager starts its daemon, a live session its host and
+		compiler workers. Only these are adopted by descent, and only these are stopped as part of a tree.
+		Editors are started by the user, and are never stopped by force.
+	**/
+	public static function spawnedByExosuit(kind:SuitKind):Bool {
+		return switch kind {
+			case SuitKind.WorkspaceManager | SuitKind.WorkspaceHost | SuitKind.CompilerWorker | SuitKind.LiveSession | SuitKind.LiveHost: true;
+			default: false;
+		};
+	}
+
+	/** True for a kind that heads its own group in the menu: an editor, with its workspaces' services. */
+	public static function headsOwnGroup(kind:SuitKind):Bool
+		return kind == SuitKind.Editor;
+
 	/** A Haxeon process, grouped under "Haxeon" while it is in use. */
 	public static function isHaxeon(kind:SuitKind):Bool
 		return kind == SuitKind.CompilerWorker || kind == SuitKind.LiveSession || kind == SuitKind.LiveHost;
