@@ -61,6 +61,8 @@ pending={}
 loaded=set()
 for line in messages():
  message=json.loads(line); method=message.get('method');params=message.get('params',{});i=message.get('id')
+ if (root/'history-fixture.json').exists():
+  with (root/'history-requests.jsonl').open('a',encoding='utf-8') as log: log.write(json.dumps({'method':method,'params':params})+'\n')
  if method=='initialize':
   assert message.get('jsonrpc') is None
   reply(i,{'userAgent':'codex-cli/0.162.0','codexHome':'fixture','platformFamily':'unix','platformOs':'linux'})
@@ -91,7 +93,12 @@ for line in messages():
   t=load()['threads'][params['threadId']]
   reply(i,{'data':[] if not t['turn'] else [t['turn']]})
  elif method=='thread/items/list':
-  reply(i,{'data':[{'turnId':'history','item':{'id':'historical-message','type':'agentMessage','text':'Persisted history'}}]})
+  if (root/'history-fixture.json').exists():
+   items=json.loads((root/'history-fixture.json').read_text(encoding='utf-8'))
+   start=int(params.get('cursor') or 0);limit=min(int(params.get('limit') or 8),8)
+   end=min(start+limit,len(items))
+   reply(i,{'data':items[start:end],'nextCursor':str(end) if end<len(items) else None})
+  else: reply(i,{'data':[{'turnId':'history','item':{'id':'historical-message','type':'agentMessage','text':'Persisted history'}}]})
  elif method=='model/list':
   reply(i,{'data':[
    {'id':'fixture-model','model':'fixture-model','displayName':'Fixture model','hidden':False,

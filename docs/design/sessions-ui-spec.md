@@ -30,6 +30,16 @@ The visual direction includes crisp, defined borders, restrained corner rounding
 - Bound an individual snapshot to 4 MiB, four stored snapshots and 8 MiB per connection, with 30-second idle and 120-second absolute expiry. Release storage on completion, disconnection and service disposal. Report explicit capacity/expiry/oversize errors without silently trimming view fields.
 - Keep pending requests discoverable above the transcript. Review request scrolls to the request heading on explicit pointer or keyboard activation; it does not move a reader automatically.
 
+## Incremental transcript history
+
+Publish the latest page immediately. Load earlier messages is explicit and fetches one older page per activation; preserve the first visible message position after prepending. Show loading, retry, unavailable-history and reset states without replacing the composer. Returning to latest restores the separately retained current view.
+
+The client reading window holds at most 256 activity items and 4 MiB of encoded item data. Keep older reading context stable while live activity arrives; if the ranges disconnect or retention would evict that context, show that the reader is detached and offer Return to latest. Reconcile retained in-progress items through continuation reads so completion outside the latest eight items cannot remain stale indefinitely. Reject cursor cycles and stale connection, selection or history generations. An epoch change requires an explicit reset rather than joining unrelated ranges.
+
+Codex attachment reads one native page of eight items. Older pages are fetched on demand, normalized into an eight-page refetchable cache, with full-message retrieval available while its source is retained. Public cursors preserve the legacy two-part decreasing numeric shape. Native tokens stay in a session/epoch-scoped table retaining the first continuation and newest 127 handles; expired intermediate handles fail explicitly, while forward traversal can continue. Restarting from the beginning reconstructs an expired path. Local Codex live entries are still unbounded; this cache policy does not establish bounded lifetime host memory.
+
+Claude, Pi and AgentKit retain bounded live/replayed activity. Known eviction is labeled; an older replay without that flag does not prove complete native history. Do not imply that unavailable history or expired full-message source has been recovered.
+
 ## Composer and IDE navigation
 
 - A rounded, lightly raised multiline composer groups model/effort controls, draft, command completion and send/queue/steer actions. Preserve Enter, keypad Enter, Shift+Enter and command-completion handling.

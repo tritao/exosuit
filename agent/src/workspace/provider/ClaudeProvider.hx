@@ -103,7 +103,7 @@ class ClaudeProvider implements AgentMessageSource {
  function view(s:ClaudeSession,?before:Int):AgentView {
   var pending = AgentRequestPage.project([for(id=>r in s.approvals) {id:id,method:r.tool == "AskUserQuestion" ? "item/tool/requestUserInput" : "item/commandExecution/requestApproval",detail:r.detail,reviewable:r.reviewable,questions:r.structured}]);
   return {
-  record:copy(s.record),activity:"",items:s.conversation.page(before),itemsNext:s.conversation.next(before),itemsOmitted:false,supportsMessageContent:true,
+  record:copy(s.record),activity:"",items:s.conversation.page(before),itemsNext:s.conversation.next(before),itemsOmitted:false,supportsMessageContent:true,historyEpoch:s.conversation.epoch(),historyOmitted:s.conversation.hasOmitted(),
   requests:pending.requests,requestsOmitted:pending.omitted,
   models:s.models,modelsNext:null,currentModel:s.currentModel,currentEffort:null,
   connectionState:s.ready ? "connected" : s.transport == null ? "disconnected" : "reconnecting",

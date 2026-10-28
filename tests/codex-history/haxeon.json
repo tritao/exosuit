@@ -1,0 +1,1 @@
+{"version":1,"package":{"name":"exosuit-codex-history-test"},"entry":"app.CodexHistoryTest","sourceRoots":["src"],"scopeSourceRoots":false,"dependencies":{"exosuit-agent":{"path":"../../agent"}},"target":"host","outputDir":"build"}

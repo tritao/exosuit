@@ -16,6 +16,9 @@ class FakeAgent implements WorkspaceAgentClient {
 	public var uploadEnabled:Bool = false;
 	public var lastImageIds:Null<Array<String>>;
 	public var removedImages:Array<String> = [];
+	public var history:workspace.client.AgentHistoryState = {loading:false,error:null,hasOlder:false,detached:false,resetRequired:false};
+	public var historyDone:Null<Null<String>->Void>;
+	public var historyResets:Int = 0;
  public var messageContent:Null<String>;
  public var contentRequests:Int = 0;
  public var deferContent:Bool = false;
@@ -55,6 +58,9 @@ class FakeAgent implements WorkspaceAgentClient {
 	public function discoverAgents(group:String, cursor:Null<String>):Void {}
 	public function discoveredAgents():Null<AgentDiscovery> return null;
 	public function agentView(id:String):Null<AgentView> return id == record.id ? view : null;
+	public function agentHistory(id:String):workspace.client.AgentHistoryState return history;
+	public function loadOlderAgentItems(id:String, done:Null<String>->Void):Void { history.loading = true; historyDone = done; }
+	public function resetAgentHistory(id:String):Void { historyResets++; history.detached = false; history.resetRequired = false; }
 	public function listModels(cursor:Null<String>, done:Null<AgentModelsPage>->Null<String>->Void):Void done(null, null);
 }
 

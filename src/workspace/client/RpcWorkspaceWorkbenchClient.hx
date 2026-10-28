@@ -36,6 +36,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
 
   var agentCatalog:Null<WorkspaceAgentProtocol.AgentCatalog>;
   var agentViews:Map<String, WorkspaceAgentProtocol.AgentView> = [];
+  var agentHistoryWindows:Map<String,AgentHistoryWindow> = [];
   var agentTokens:Map<String, Int> = [];
   var agentReadPending:Map<String, Bool> = [];
   var agentReadCount:Int = 0;
@@ -95,6 +96,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       discovery = null;
       discoveryToken++;
       agentViews.clear();
+      agentHistoryWindows.clear();
       agentTokens.clear();
       agentReadPending.clear();
       agentReadCount = 0;
@@ -136,6 +138,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     discoveryToken++;
     creation = null;
     agentViews.clear();
+    agentHistoryWindows.clear();
     agentTokens.clear();
     agentReadPending.clear();
     agentReadCount = 0;
@@ -468,6 +471,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       // token below makes the read response stale, and removing it here keeps
       // the bounded read count accurate when that response eventually arrives.
       if (agentReadPending.exists(id)) {
+        cancelHistoryLoad(id,"History loading was interrupted by a session action.");
         agentReadPending.remove(id);
         agentReadCount = Std.int(Math.max(0, agentReadCount - 1));
       }
@@ -503,8 +507,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
         agentsRequestToken++; agentsPending=false; agentsNext=0;
         for (index in 0...agentCatalog.records.length) if (agentCatalog.records[index].id == id) agentCatalog.records[index]=value.record;
       }
-      if (!agentViews.exists(id)) { agentViews.set(id,value); agentsRevision++; }
-      loadAgentPages(connection,id,selected,value);
+      publishLatestAgentView(connection,id,selected,value);
     },function(error,acknowledged) {
       if (rpc()!=connection || instance()!=generation || agentTokens.get(id)!=selected) return;
       var errorsBefore=agentsError+"\n"+agentActionError;
@@ -653,39 +656,149 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     },function(error) { if (!done && current()) {done=true; failure(error,false);} });
   }
 
-  function loadAgentPages(connection:RpcConnection, id:String, selected:Int, value:AgentView):Void {
-    var next = value.itemsNext;
-    if (next == null) {
-      finishAgentRead(id);
-      // Background reads repeat every fraction of a second; only a changed view is news to the catalog and the screen.
-      // The first page of a new view is stored before its later pages arrive, so the same object counts as changed.
-      var previous = agentViews.get(id);
-      agentViews.set(id, value);
-      if (previous == null || previous == value || haxe.Json.stringify(previous) != haxe.Json.stringify(value)) {
-        agentsNext = 0;
-        agentsRevision++;
-      }
-      return;
-    }
-    var generation=instance();
-    var query:AgentAction={workspace:"workspace",instance:generation,id:id,action:"read",text:"",request:null,after:next};
-    requestAgentView(connection,id,selected,generation,query,function(_) {},function(page) {
-      if (page.items == null || (page.itemsNext != null && !earlierAgentCursor(page.itemsNext,next))) {
-        finishAgentRead(id); agentsError="Invalid agent activity page"; agentsRevision++; return;
-      }
-      value.items=page.items.concat(value.items == null ? [] : value.items);
-      value.itemsNext=page.itemsNext;
-      loadAgentPages(connection,id,selected,value);
-    },function(error,_) {
-      finishAgentRead(id); agentsError=error.message; agentsRevision++;
-    });
+  function historyWindow(id:String):AgentHistoryWindow {
+    var state=agentHistoryWindows.get(id);
+    if (state == null) {state=new AgentHistoryWindow(); agentHistoryWindows.set(id,state);}
+    return state;
   }
-
-  static function earlierAgentCursor(cursor:String, previous:String):Bool {
-    var parts = cursor.split(":"), old = previous.split(":");
-    if (parts.length != 2 || old.length != 2 || parts[0] != old[0]) return false;
-    var offset = Std.parseInt(parts[1]), before = Std.parseInt(old[1]);
-    return offset != null && before != null && offset >= 0 && offset < before && Std.string(offset) == parts[1];
+  public function agentHistory(id:String):AgentHistoryState {
+    var state=agentHistoryWindows.get(id);
+    return state == null ? {loading:false,error:null,hasOlder:false,detached:false,resetRequired:false} : state.status();
+  }
+  function cancelHistoryLoad(id:String,reason:String):Void {
+    var state=agentHistoryWindows.get(id); if (state == null || !state.loading) return;
+    state.loading=false; state.error=reason;
+    var done=state.pendingDone; state.pendingDone=null;
+    if (done != null) done(reason);
+  }
+  function publishAgentView(id:String,value:AgentView):Void {
+    var previous=agentViews.get(id); agentViews.set(id,value);
+    if (previous == null || haxe.Json.stringify(previous) != haxe.Json.stringify(value)) { agentsNext=0; agentsRevision++; }
+  }
+  function publishLatestAgentView(connection:RpcConnection,id:String,selected:Int,value:AgentView):Void {
+    var state=historyWindow(id), previous=agentViews.get(id);
+    state.remember(value);
+    if (previous == null || previous.items == null || value.items == null) {
+      state.cursor=value.itemsNext; state.epoch=value.historyEpoch; state.seen=[]; state.detached=false; state.resetRequired=false; state.error=null;
+      finishAgentRead(id); publishAgentView(id,value); return;
+    }
+    var old:Array<AgentActivityItem>=cast previous.items, fresh:Array<AgentActivityItem>=cast value.items;
+    var same=AgentHistoryWindow.sameEpoch(state.epoch,value.historyEpoch);
+    // A legacy first page can be reconciled only while no older cursor has been consumed.
+    var legacySafe=state.epoch == null && value.historyEpoch == null && state.seen.keys().hasNext() == false;
+    if (!same && !legacySafe) {
+      state.resetRequired=true; state.error="Activity history changed. Reset to latest to continue.";
+      value.items=old.copy(); value.itemsNext=state.cursor;
+      finishAgentRead(id); publishAgentView(id,value); return;
+    }
+    if (state.resetRequired) {
+      value.items=old.copy(); value.itemsNext=state.cursor;
+      finishAgentRead(id); publishAgentView(id,value); return;
+    }
+    var watched:Map<String,Bool>=[];
+    for (item in old) if (item.state == "inProgress") watched.set(AgentHistoryWindow.key(item),true);
+    for (item in fresh) watched.remove(AgentHistoryWindow.key(item));
+    if (watched.keys().hasNext()) {
+      value.items=old.copy(); value.itemsNext=state.cursor; publishAgentView(id,value);
+      bridgeAgentHistory(connection,id,selected,state,old,fresh,cast state.latest,watched,state.detached); return;
+    }
+    if (state.detached) {
+      var replacements:Map<String,AgentActivityItem>=[];
+      for (item in fresh) replacements.set(AgentHistoryWindow.key(item),item);
+      value.items=[for (item in old) replacements.exists(AgentHistoryWindow.key(item)) ? replacements.get(AgentHistoryWindow.key(item)) : item];
+      value.itemsNext=state.cursor; finishAgentRead(id); publishAgentView(id,value); return;
+    }
+    var combined=AgentHistoryWindow.merge(old,fresh);
+    if (combined == null && fresh.length > 0 && old.length > 0) {
+      value.items=old.copy(); value.itemsNext=state.cursor; publishAgentView(id,value);
+      bridgeAgentHistory(connection,id,selected,state,old,fresh,cast state.latest,[],false); return;
+    }
+    if (combined == null) combined=old.copy();
+    if (!AgentHistoryWindow.within(combined)) {state.detached=true; value.items=old.copy();}
+    else value.items=combined;
+    if (state.cursor == null && state.seen.keys().hasNext() == false && old.length == 0) state.cursor=value.itemsNext;
+    value.itemsNext=state.cursor; state.epoch=value.historyEpoch;
+    finishAgentRead(id); publishAgentView(id,value);
+  }
+  function bridgeAgentHistory(connection:RpcConnection,id:String,selected:Int,state:AgentHistoryWindow,
+      old:Array<AgentActivityItem>,fresh:Array<AgentActivityItem>,latest:AgentView,
+      watched:Map<String,Bool>,detached:Bool):Void {
+    var generation=instance(), cursor=latest.itemsNext, visited:Map<String,Bool>=[];
+    state.loading=true; state.error=null; agentsRevision++;
+    function fail(reason:String):Void {
+      state.loading=false; state.resetRequired=true; state.error=reason;
+      finishAgentRead(id); agentsRevision++;
+    }
+    var step:Void->Void=null;
+    step=function() {
+      if (rpc()!=connection || instance()!=generation || agentTokens.get(id)!=selected) return;
+      if (cursor == null || visited.exists(cursor) || !AgentHistoryWindow.within(fresh)) { fail("History has a gap. Reset to latest to continue."); return; }
+      var requested:String=cast cursor; visited.set(requested,true);
+      var query:AgentAction={workspace:"workspace",instance:generation,id:id,action:"read",text:"",request:null,after:requested};
+      requestAgentView(connection,id,selected,generation,query,function(_) {},function(page) {
+        if (page.items == null || (state.epoch != null && page.historyEpoch != state.epoch)
+            || (page.itemsNext != null && visited.exists(page.itemsNext))) { fail("History changed while connecting pages. Reset to latest."); return; }
+        var pageItems:Array<AgentActivityItem>=cast page.items;
+        for (item in pageItems) watched.remove(AgentHistoryWindow.key(item));
+        fresh=AgentHistoryWindow.prepend(fresh,pageItems);
+        if (!AgentHistoryWindow.within(fresh)) { fail("History has a gap. Reset to latest to continue."); return; }
+        var merged=AgentHistoryWindow.merge(old,fresh);
+        if (merged != null && !watched.keys().hasNext()) {
+          var current=agentViews.get(id);
+          if (current != null) {
+            var updated=AgentHistoryWindow.copyView(current);
+            if (detached || !AgentHistoryWindow.within(merged)) {
+              var replacements:Map<String,AgentActivityItem>=[];
+              for (item in fresh) replacements.set(AgentHistoryWindow.key(item),item);
+              updated.items=[for (item in old) replacements.exists(AgentHistoryWindow.key(item)) ? replacements.get(AgentHistoryWindow.key(item)) : item];
+              state.detached=true;
+            } else updated.items=merged;
+            updated.itemsNext=state.cursor; publishAgentView(id,updated);
+          }
+          state.loading=false; state.error=null; finishAgentRead(id); agentsRevision++; return;
+        }
+        cursor=page.itemsNext; step();
+      },function(_,_) fail("History changed while connecting pages. Reset to latest."));
+    };
+    step();
+  }
+  public function loadOlderAgentItems(id:String,done:Null<String>->Void):Void {
+    var state=agentHistoryWindows.get(id), connection=rpc(), current=agentViews.get(id);
+    if (state == null || connection == null || current == null || state.cursor == null || state.loading || state.resetRequired
+        || agentReadPending.exists(id) || (agentMutation && agentMutationId == id) || agentReadCount >= 4) {
+      done("Older activity is unavailable right now."); return;
+    }
+    var requested:String=cast state.cursor, generation=instance(), selected=++agentSelection;
+    agentTokens.set(id,selected); agentReadPending.set(id,true); agentReadCount++;
+    state.loading=true; state.error=null; state.pendingDone=done; agentsRevision++;
+    var query:AgentAction={workspace:"workspace",instance:generation,id:id,action:"read",text:"",request:null,after:requested};
+    function fail(reason:String,reset:Bool):Void {
+      state.loading=false; state.error=reason; state.resetRequired=reset;
+      finishAgentRead(id); var callback=state.pendingDone; state.pendingDone=null; agentsRevision++;
+      if (callback != null) callback(reason);
+    }
+    requestAgentView(connection,id,selected,generation,query,function(_) {},function(page) {
+      if (page.items == null || (state.epoch != null && page.historyEpoch != state.epoch)
+        || (page.itemsNext != null && (page.itemsNext == requested || state.seen.exists(page.itemsNext)))) {
+        fail("History changed or returned an invalid cursor. Reset to latest.",true); return;
+      }
+      var old:Array<AgentActivityItem>=current.items == null ? [] : cast current.items;
+      var older:Array<AgentActivityItem>=cast page.items;
+      var merged=AgentHistoryWindow.prepend(old,older);
+      if (merged.length == old.length && page.itemsNext != null) {fail("History page made no progress. Reset to latest.",true);return;}
+      while (!AgentHistoryWindow.within(merged) && merged.length > older.length) { merged.pop(); state.detached=true; }
+      if (!AgentHistoryWindow.within(merged)) {fail("This activity page exceeds the history window limit.",false);return;}
+      state.seen.set(requested,true); state.cursor=page.itemsNext; state.loading=false; state.error=null;
+      var updated=AgentHistoryWindow.copyView(current); updated.items=merged; updated.itemsNext=state.cursor;
+      finishAgentRead(id); publishAgentView(id,updated);
+      var callback=state.pendingDone; state.pendingDone=null; agentsRevision++;
+      if (callback != null) callback(null);
+    },function(error,_) fail(error.code == "invalid_cursor" ? "History changed. Reset to latest." : error.message,error.code == "invalid_cursor"));
+  }
+  public function resetAgentHistory(id:String):Void {
+    var state=agentHistoryWindows.get(id); if (state == null) return;
+    if (state.loading) { agentTokens.set(id,++agentSelection); cancelHistoryLoad(id,"History loading was cancelled."); finishAgentRead(id); }
+    var latest=state.reset(); if (latest != null) { publishAgentView(id,latest); agentsRevision++; }
   }
 
   public function canEditGroups():Bool return rpc() != null

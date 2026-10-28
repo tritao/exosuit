@@ -110,7 +110,7 @@ class PiProvider implements AgentMessageSource {
    detail:d.detail,reviewable:d.reviewable,inputKind:d.method,options:d.options}];
   var page=AgentRequestPage.project(pending);
   return {
-  record:copy(s.record),activity:"",items:s.conversation.page(before),itemsNext:s.conversation.next(before),itemsOmitted:false,supportsMessageContent:true,
+  record:copy(s.record),activity:"",items:s.conversation.page(before),itemsNext:s.conversation.next(before),itemsOmitted:false,supportsMessageContent:true,historyEpoch:s.conversation.epoch(),historyOmitted:s.conversation.hasOmitted(),
   requests:page.requests,requestsOmitted:page.omitted,
   models:s.models,modelsNext:null,commands:s.commands,commandsError:s.commandsError,commandsLoading:s.commandsLoading,currentModel:s.currentModel,currentEffort:s.currentEffort,
   connectionState:s.ready && s.record.state != "reconnecting" ? "connected" : s.transport == null ? "disconnected" : "reconnecting",

@@ -218,6 +218,10 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(25) var supportsMessageContent:Null<Bool>;
 	/** Number of pending requests omitted from the bounded current view. */
 	@:optional @:id(26) var requestsOmitted:Null<Int>;
+	/** Changes whenever previously issued activity cursors become invalid. */
+	@:optional @:id(27) var historyEpoch:Null<String>;
+	/** True only when activity was evicted from this in-memory conversation. */
+	@:optional @:id(28) var historyOmitted:Null<Bool>;
 }
 
 @:wire typedef AgentContentQuery = {

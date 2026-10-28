@@ -418,6 +418,9 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   public function discoverAgents(group:String, cursor:Null<String>):Void workbench.discoverAgents(group, cursor);
   public function discoveredAgents():Null<AgentDiscovery> return workbench.discoveredAgents();
   public function agentView(id:String):Null<AgentView> return workbench.agentView(id);
+  public function agentHistory(id:String):AgentHistoryState return workbench.agentHistory(id);
+  public function loadOlderAgentItems(id:String, done:Null<String>->Void):Void workbench.loadOlderAgentItems(id,done);
+  public function resetAgentHistory(id:String):Void workbench.resetAgentHistory(id);
   public function listModels(cursor:Null<String>, done:Null<AgentModelsPage>->Null<String>->Void):Void
     workbench.listModels(cursor, done);
 

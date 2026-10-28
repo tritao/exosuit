@@ -201,6 +201,74 @@ class AgentProviderTestMain {
 	}
 
 	static function conversationTests():Void {
+		var epochs=new workspace.provider.ClaudeConversation();
+		var startEpoch=epochs.epoch();
+		for(i in 0...8) epochs.put("epoch-"+i,"t","userMessage","You","text","","completed");
+		require(epochs.epoch()==startEpoch && !epochs.hasOmitted(),"Appending changed history epoch");
+		for(i in 8...129) epochs.put("epoch-"+i,"t","userMessage","You","text","","completed");
+		require(epochs.epoch()!=startEpoch && epochs.hasOmitted(),"Eviction did not invalidate history epoch");
+		require(new workspace.provider.ClaudeConversation().epoch()!=startEpoch,"New conversation reused history epoch");
+		require(new workspace.provider.PiConversation().epoch()!=new workspace.provider.PiConversation().epoch(),"Pi conversation reused history epoch");
+		require(new workspace.provider.AgentKitConversation().epoch()!=new workspace.provider.AgentKitConversation().epoch(),"AgentKit conversation reused history epoch");
+		require(new workspace.provider.CodexConversation().epoch()!=new workspace.provider.CodexConversation().epoch(),"Codex conversation reused history epoch");
+		var historyPages=new workspace.provider.CodexHistoryPages();
+		var legacyLive=new workspace.provider.CodexConversation();
+		for(i in 0...20) legacyLive.put("turn",{id:"entry-"+i,type:"agentMessage",text:"body"},true);
+		var legacyEpoch=legacyLive.epoch(), localCursor=legacyLive.next(), localOffset=legacyLive.cursorOffset(localCursor);
+		var laterLocal=legacyLive.next(localOffset);
+		historyPages.reset("native-first");
+		var nativeFirst=historyPages.firstCursor(legacyEpoch);
+		function oldClientEarlier(next:String,previous:String):Bool {
+			var parts=next.split(":"), old=previous.split(":");
+			if(parts.length!=2 || old.length!=2 || parts[0]!=old[0]) return false;
+			var offset=Std.parseInt(parts[1]), before=Std.parseInt(old[1]);
+			return offset!=null && before!=null && offset>=0 && offset<before && Std.string(offset)==parts[1];
+		}
+		require(localCursor!=null && laterLocal!=null && nativeFirst!=null
+			&& oldClientEarlier(laterLocal,localCursor) && oldClientEarlier(nativeFirst,laterLocal),"Legacy client rejected local/native cursor boundary");
+		var nextNative=historyPages.following(legacyEpoch,nativeFirst,"native-next");
+		require(nextNative!=null && oldClientEarlier(nextNative,nativeFirst)
+			&& historyPages.resolve(legacyEpoch,nativeFirst)=="native-first"
+			&& historyPages.resolve(legacyEpoch,nextNative)=="native-next"
+			&& historyPages.following(legacyEpoch,nativeFirst,"native-next")==nextNative
+			&& historyPages.resolve("stale",nativeFirst)==null
+			&& historyPages.following(legacyEpoch,nextNative,"native-first")==null,"Native handle ordering, replay, scope or cycle was invalid");
+		var boundedHandle:String=cast nextNative;
+		for(i in 2...128) {
+			var previousHandle=boundedHandle, allocated=historyPages.following(legacyEpoch,previousHandle,"native-"+i);
+			require(allocated!=null && oldClientEarlier(cast allocated,previousHandle),"Native handle sequence lost compatibility");
+			boundedHandle=cast allocated;
+		}
+		var pastLimit=historyPages.following(legacyEpoch,boundedHandle,"native-over-limit");
+		require(pastLimit!=null && oldClientEarlier(cast pastLimit,boundedHandle)
+			&& historyPages.resolve(legacyEpoch,cast nextNative)==null
+			&& historyPages.resolve(legacyEpoch,cast nativeFirst)=="native-first", "Native handle expiry did not preserve forward history");
+		historyPages.reset("fresh");
+		require(historyPages.resolve(legacyEpoch,cast nextNative)==null && historyPages.firstCursor(legacyEpoch)!=null,"History reset retained old handles");
+		var pageCursor=workspace.provider.CodexHistoryPages.cursor("epoch","native cursor:界");
+		require(pageCursor != null && workspace.provider.CodexHistoryPages.decode("epoch",pageCursor)=="native cursor:界"
+			&& workspace.provider.CodexHistoryPages.decode("other",pageCursor)==null,"Native history cursor was not scoped to its epoch");
+		var longCursor=StringTools.rpad("","界",2048), longEnvelope=workspace.provider.CodexHistoryPages.cursor("epoch",longCursor);
+		require(longEnvelope != null && workspace.provider.CodexHistoryPages.decode("epoch",longEnvelope)==longCursor,"Long native cursor did not round trip");
+		require(!workspace.provider.CodexHistoryPages.validNext("epoch","same","same",1)
+			&& !workspace.provider.CodexHistoryPages.validNext("epoch","one","two",0),"Invalid native cursor progression accepted");
+		historyPages.remember("one","two",[{turnId:"old",item:{id:"reply",type:"agentMessage",text:"Complete older response"}}]);
+		var cached=historyPages.get("one");
+		require(cached!=null && cached.next=="two" && cached.conversation.items().length==1,"Native history page was not retained");
+		var page:workspace.provider.CodexHistoryPages.NativePage=cast cached;
+		var old=page.conversation.items()[0];
+		require(old.contentToken!=null && historyPages.content("old","reply",cast old.contentToken,0)!=null,"Native page full content unavailable");
+		var live=new workspace.provider.CodexConversation();
+		live.put("old",{id:"reply",type:"agentMessage",text:"New live response"},true);
+		var merged=workspace.provider.CodexHistoryPages.merge(page,live)[0];
+		require(merged.text=="New live response" && merged.contentToken!=old.contentToken
+			&& merged.contentToken!=null && live.content("old","reply",cast merged.contentToken,0)!=null,"Live message or full-content token lost to stale history");
+		merged.contentToken=null;
+		require(workspace.provider.CodexHistoryPages.merge(page,live)[0].contentToken==null,"Stale historical token substituted for unavailable live content");
+		for(i in 0...8) historyPages.remember("page-"+i,null,[]);
+		require(historyPages.get("one")==null,"Native history cache exceeded its page limit");
+		historyPages.remember("one","two",[{turnId:"old",item:{id:"reply",type:"agentMessage",text:"Complete older response"}}]);
+		require(historyPages.get("one")!=null,"Evicted native page could not be refetched");
 		var withImage = new workspace.provider.CodexConversation();
 		var imageParts:Array<Dynamic> = [{type:"text",text:"Inspect"},
 			{type:"localImage",path:"/private/secret.png"}, {type:"image",url:"https://example.invalid/private"}];

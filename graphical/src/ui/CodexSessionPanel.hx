@@ -61,6 +61,9 @@ class CodexSessionPanel implements View {
   final transcriptScroll = new ScrollController();
   var requestAnchor:Null<RenderNode> = null;
   var transcriptViewport:Null<RenderNode> = null;
+  var historyNodes:Map<String, RenderNode> = [];
+  var historyAnchor:Null<{key:String, y:Float}> = null;
+  var historyReturnToLatest = false;
   var prompt = "";
   var promptRevision = 0;
   var selectedModel = "";
@@ -94,6 +97,17 @@ class CodexSessionPanel implements View {
   var contentErrors:Map<String,String> = [];
   var contentErrorTokens:Map<String,String> = [];
   var contentLoading:Null<String> = null;
+  function rememberHistoryAnchor():Void {
+    historyAnchor = null;
+    if (transcriptViewport == null || transcriptViewport.resolved == null) return;
+    var viewport = transcriptViewport.globalBounds(), firstY = Math.POSITIVE_INFINITY;
+    for (key => node in historyNodes) if (node.resolved != null) {
+      var bounds = node.globalBounds();
+      if (bounds.y + bounds.height > viewport.y && bounds.y < viewport.y + viewport.height && bounds.y < firstY) {
+        firstY = bounds.y; historyAnchor = {key:key, y:bounds.y - viewport.y};
+      }
+    }
+  }
   function loadContent(client:WorkspaceAgentClient, session:String, item:workspace.service.WorkspaceAgentProtocol.AgentActivityItem, key:String):Void {
     if (contentLoading != null || item.contentToken == null) return;
     var token:String = cast item.contentToken;
@@ -582,7 +596,34 @@ class CodexSessionPanel implements View {
     expandedRequestDetails = retainedRequestDetails;
     if (view.requestsOmitted != null && view.requestsOmitted > 0)
       requestCards.push(new KeyedView("requests-omitted", paragraph(view.requestsOmitted + " additional requests waiting. Resolve a displayed request to continue.")));
+    var history = client.agentHistory(id);
+    if (history.detached || history.resetRequired) {
+      activity.push(new KeyedView("history-window-note", paragraph(history.resetRequired
+        ? "This history window changed. Return to the latest messages to continue."
+        : "Showing an older history window; newer messages are outside this view.")));
+      activity.push(new KeyedView("history-reset", quietButton("Return to latest messages", function() {
+        historyAnchor = null; historyReturnToLatest = true; client.resetAgentHistory(id); frame();
+      }, "agent-history-reset")));
+    }
+    if (history.error != null) activity.push(new KeyedView("history-error", paragraph(history.error)));
+    if (history.hasOlder && !history.resetRequired) {
+      var earlier = quietButton(history.loading ? "Loading earlier messages…" : history.error != null ? "Retry earlier messages" : "Load earlier messages", function() {
+        client.loadOlderAgentItems(id, function(error) {
+          if (error == null) rememberHistoryAnchor();
+          frame();
+        });
+        frame();
+      }, "agent-history-earlier");
+      earlier.enabled = !history.loading;
+      activity.push(new KeyedView("history-earlier", earlier));
+    }
     var items = view.items;
+    historyNodes = [];
+    if (historyAnchor != null && items != null) {
+      var stillPresent = false;
+      for (item in items) if (item.turn + ":" + item.id == historyAnchor.key) stillPresent = true;
+      if (!stillPresent) historyAnchor = null;
+    }
     if (items == null) activity.push(new KeyedView(
       "legacy",
       paragraph(view.activity == "" ? "No activity yet" : view.activity)
@@ -729,7 +770,17 @@ class CodexSessionPanel implements View {
         messageStyle.childGap = tool ? 4 : 8;
         messageStyle.background = item.kind == "userMessage" ? tokens.surfaceRaised : tokens.surface;
         messageStyle.radiusTopLeft = messageStyle.radiusTopRight = messageStyle.radiusBottomLeft = messageStyle.radiusBottomRight = 6;
-        activity.push(new KeyedView("message-" + key, new Column("codex-message-" + key, message, messageStyle)));
+        activity.push(new KeyedView("message-" + key, new RequestAnchor(new Column("codex-message-" + key, message, messageStyle), function(node) {
+          historyNodes.set(key, node);
+          if (historyAnchor != null && historyAnchor.key == key) node.onResolved(function(_) {
+            var anchor = historyAnchor;
+            if (anchor == null || transcriptViewport == null || transcriptViewport.resolved == null) return;
+            var delta = node.globalBounds().y - transcriptViewport.globalBounds().y - anchor.y;
+            if (Math.abs(delta) <= 0.5) { historyAnchor = null; return; }
+            if (transcriptScroll.jumpTo(transcriptScroll.offsetX, transcriptScroll.offsetY + delta)) context.requestLayoutFeedback();
+            else historyAnchor = null;
+          });
+        })));
       }
     }
     for (requestCard in requestCards) activity.push(requestCard);
@@ -766,7 +817,8 @@ class CodexSessionPanel implements View {
       ], noticeStyle)));
     }
     rows.push(new KeyedView("activity", new AgentTranscript(new Column("codex-items", activity, activityStyle), style, transcriptScroll, frame,
-      function(node) transcriptViewport = node)));
+      function(node) transcriptViewport = node, historyAnchor != null, historyReturnToLatest,
+      function() historyReturnToLatest = false)));
     if (transcriptScroll.maxScrollY - transcriptScroll.offsetY > 2) rows.push(new KeyedView("jump-latest",
       new Button("Jump to latest", null, function() {
         transcriptScroll.jumpTo(transcriptScroll.offsetX, transcriptScroll.maxScrollY);
@@ -1079,11 +1131,14 @@ private class AgentTranscript implements View {
   final controller:ScrollController;
   final frame:Void->Void;
   final capture:RenderNode->Void;
-  public function new(content:View, style:LayoutStyle, controller:ScrollController, frame:Void->Void, capture:RenderNode->Void) {this.content = content;this.style = style;this.controller = controller;this.frame = frame;this.capture = capture;}
+  final preserveAnchor:Bool;
+  final forceFollow:Bool;
+  final followed:Void->Void;
+  public function new(content:View, style:LayoutStyle, controller:ScrollController, frame:Void->Void, capture:RenderNode->Void, preserveAnchor:Bool, forceFollow:Bool, followed:Void->Void) {this.content = content;this.style = style;this.controller = controller;this.frame = frame;this.capture = capture;this.preserveAnchor = preserveAnchor;this.forceFollow = forceFollow;this.followed = followed;}
   public function build(context:BuildContext):RenderNode {
     var node:Null<RenderNode> = null;
     // Follow new output only while the reader is already at the bottom.
-    var follow = controller.maxScrollY - controller.offsetY <= 2;
+    var follow = forceFollow || (!preserveAnchor && controller.maxScrollY - controller.offsetY <= 2);
     var scroll = new ScrollView("codex-activity",content,style, haxeon.ui.widgets.scroll.ScrollAxis.Vertical, controller);
     scroll.onScroll = function(_) frame();
     scroll.contentExtentProvider = function(width,height) {
@@ -1096,6 +1151,7 @@ private class AgentTranscript implements View {
     node.on(UiEventKind.PointerUp, function(_) frame());
     if (node.children.length > 0) node.children[0].onResolved(function(_) {
       if (follow && controller.jumpTo(controller.offsetX, controller.maxScrollY)) context.requestLayoutFeedback();
+      if (forceFollow) followed();
     });
     return node;
   }

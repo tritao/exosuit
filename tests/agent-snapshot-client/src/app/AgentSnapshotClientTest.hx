@@ -61,9 +61,13 @@ class AgentSnapshotClientTest {
   require(accepted==3 && client.agentError()=="Rejected" && actions==4, "Rejected action was acknowledged or replayed");
   client.agentAction("a","prompt","scope",null,null,null,function() accepted++);server.poll();conn.poll();
   require(accepted==3 && actions==5, "Invalid snapshot scope acknowledged an action");
-  client.agentAction("a","prompt","page",null,null,null,function() accepted++);server.poll();conn.poll();server.poll();conn.poll();
+  client.agentAction("a","prompt","page",null,null,null,function() accepted++);server.poll();conn.poll();
   current=cast client.agentView("a");
-  require(accepted==4 && current.items != null && current.items.length==2 && current.items[0].id=="old", "Snapshot history page did not aggregate in order");
+  require(accepted==4 && current.items != null && current.items.length==1 && client.agentHistory("a").hasOlder, "Initial snapshot did not publish only its first page");
+  var pageError:Null<String>="pending";
+  client.loadOlderAgentItems("a",function(error) pageError=error); server.poll();conn.poll();
+  current=cast client.agentView("a");
+  require(pageError==null && current.items != null && current.items.length==2 && current.items[0].id=="old", "Explicit snapshot history page did not aggregate in order");
   client.agentAction("a","prompt","generation",null,null,null,function() accepted++);server.poll();
   endpoint.generation="changed";conn.poll();client.poll();
   require(accepted==4 && !client.agentBusy(), "Changed service generation acknowledged stale action or left it busy");
@@ -80,6 +84,7 @@ class AgentSnapshotClientTest {
   }
   require(assembler.view().activity==longText,"Large view was not assembled losslessly");
   client.dispose();conn.close();server.close();
+  AgentHistoryClientTest.run();
   disposalDuringSnapshot();
   realServiceRoundTrip();
   Sys.println("PASS: negotiated snapshot acknowledgement, stale fencing, errors and bounded assembly");
@@ -119,6 +124,11 @@ class AgentSnapshotClientTest {
   server.poll(); conn.poll();
   require(accepted==1 && provider.mutations==1 && client.agentView("a") == null,"Real service did not acknowledge before the full snapshot");
   for (_ in 0...40) {server.poll();conn.poll();}
+  require(provider.historyReads==0 && client.agentHistory("a").hasOlder,"Real service loaded old history without a request");
+  var olderError:Null<String>="pending";
+  client.loadOlderAgentItems("a",function(error) olderError=error);
+  for (_ in 0...40) {server.poll();conn.poll();}
+  require(olderError==null,"Real service older history did not finish");
   var actual:AgentView=cast client.agentView("a"), expected=provider.expected();
   var older:Array<AgentActivityItem>=[provider.oldItem()], newer:Array<AgentActivityItem>=cast expected.items;
   expected.items=older.concat(newer); expected.itemsNext=null;

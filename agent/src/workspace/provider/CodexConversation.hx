@@ -10,6 +10,8 @@ class CodexConversation {
   final cacheId:Int;
   var entries:Array<AgentActivityItem> = [];
   var historyRevision:Int = 0;
+  final incarnation:String = AgentHistoryEpoch.create();
+  public function epoch():String return incarnation + "-" + historyRevision;
 
   public function new() { cacheId = ++nextCacheId; }
   function cacheKey(turn:String, id:String):String return cacheId + ":" + turn.length + ":" + turn + id;
@@ -20,11 +22,14 @@ class CodexConversation {
   }
 
   public function items():Array<AgentActivityItem> return entries.copy();
+  public function current(turn:String,id:String):Null<AgentActivityItem> return find(turn,id);
   public function cursorOffset(cursor:String):Null<Int> {
     var parts = cursor.split(":");
-    if (parts.length != 2 || parts[0] != Std.string(historyRevision)) return null;
+    if (parts.length != 2 || parts[0] != epoch()) return null;
     var offset = Std.parseInt(parts[1]);
-    return offset != null && offset >= 0 && offset <= entries.length && Std.string(offset) == parts[1] ? offset : null;
+    if(offset == null || offset < CodexHistoryPages.CURSOR_BASE || Std.string(offset) != parts[1]) return null;
+    offset-=CodexHistoryPages.CURSOR_BASE;
+    return offset <= entries.length ? offset : null;
   }
   public function page(?before:Int):Array<AgentActivityItem> {
     var end = before == null ? entries.length : before;
@@ -32,7 +37,7 @@ class CodexConversation {
   }
   public function next(?before:Int):Null<String> {
     var end = before == null ? entries.length : before;
-    return end > PAGE_ITEMS ? historyRevision + ":" + (end - PAGE_ITEMS) : null;
+    return end > PAGE_ITEMS ? epoch() + ":" + (CodexHistoryPages.CURSOR_BASE + end - PAGE_ITEMS) : null;
   }
   public function finish(turn:String, state:String):Void {
     for (entry in entries)

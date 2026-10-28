@@ -16,6 +16,7 @@ private typedef Session = {
 	var record:AgentRecord;
 	var activity:String;
 	var conversation:CodexConversation;
+	var historyPages:CodexHistoryPages;
 	var error:Null<String>;
 	var attached:Bool;
 	var busy:Bool;
@@ -127,6 +128,7 @@ class CodexProvider implements AgentMessageSource {
 					record: r,
 					activity: "",
 					conversation: new CodexConversation(),
+					historyPages: new CodexHistoryPages(),
 					error: null,
 					attached: false,
 					busy: false,
@@ -196,7 +198,9 @@ class CodexProvider implements AgentMessageSource {
 			activity: s.activity,
 			items: s.conversation.page(before),
 			itemsOmitted: false,
-			itemsNext: s.conversation.next(before),
+			itemsNext: s.conversation.next(before) != null ? s.conversation.next(before)
+				: s.historyPages.firstCursor(s.conversation.epoch()),
+			historyEpoch: s.conversation.epoch(),
 			supportsImageUpload: imageUploadAvailable,
             supportsMessageContent: true,
 			models: models,
@@ -211,9 +215,41 @@ class CodexProvider implements AgentMessageSource {
 		};
 	}
 
+	function nativeHistory(s:Session, cursor:String, ctx:RpcContext<AgentView>):Void {
+		var epoch=s.conversation.epoch(), native=s.historyPages.resolve(epoch,cursor);
+		if(native==null) {ctx.fail({code:"invalid_cursor",message:"Activity history changed; refresh the session",ambiguous:false});return;}
+		function respond(page:workspace.provider.CodexHistoryPages.NativePage):Void {
+			var result=view(s);
+			result.items=CodexHistoryPages.merge(page,s.conversation);
+			result.itemsNext=page.next==null ? null : s.historyPages.following(epoch,cursor,page.next);
+			if(page.next!=null && result.itemsNext==null) {
+				ctx.fail({code:"history_unavailable",message:"Earlier activity cursor limit or cycle reached; reconnect the session to restart history",ambiguous:false});return;
+			}
+			ctx.respond(result);
+		}
+		var cached=s.historyPages.get(native);
+		if(cached!=null) {respond(cached);return;}
+		var generation=connectionGeneration;
+		call("thread/items/list",{threadId:s.record.thread,limit:8,sortDirection:"desc",cursor:native},function(reply) {
+			if(ctx.isCancelled()) return;
+			if(sessions.get(s.record.id)!=s || generation!=connectionGeneration || s.conversation.epoch()!=epoch) {
+				ctx.fail({code:"invalid_cursor",message:"Activity history changed; refresh the session",ambiguous:false});return;
+			}
+			if(reply.error!=null) {ctx.fail({code:"history_unavailable",message:"Could not load earlier activity: "+reply.error,ambiguous:false});return;}
+			var data:Dynamic=Reflect.field(reply.result,"data"), next=string(reply.result,"nextCursor");
+			if(!Std.isOfType(data,Array) || (cast data:Array<Dynamic>).length>8
+				|| !CodexHistoryPages.validNext(epoch,native,next,(cast data:Array<Dynamic>).length)) {
+				ctx.fail({code:"invalid_response",message:"Invalid native activity history page",ambiguous:false});return;
+			}
+			respond(s.historyPages.remember(native,next=="" ? null : next,cast data));
+		});
+	}
+
     public function messageContent(session:String, turn:String, item:String, token:String, offset:Int):Null<AgentContentChunk> {
         var s=sessions.get(session);
-        return s == null ? null : s.conversation.content(turn,item,token,offset);
+        if(s == null) return null;
+        var live=s.conversation.content(turn,item,token,offset);
+        return live == null ? s.historyPages.content(turn,item,token,offset) : live;
     }
 
 	function recoveryReason(s:Session):Null<String> {
@@ -728,49 +764,20 @@ class CodexProvider implements AgentMessageSource {
 							restoredTurn = string(data[0], "id");
 						}
 						var historyBaseline = s.conversation.historyBaseline();
-						var history:Array<Dynamic> = [];
-						var cursors:Map<String, Bool> = [];
-						var ready = false;
-						function historyPage(cursor:Null<String>):Void {
-							var query:Dynamic = {threadId: s.record.thread, limit: 8, sortDirection: "desc"};
-							if (cursor != null) Reflect.setField(query, "cursor", cursor);
-							call("thread/items/list", query, function(items) {
-								if (stale() || sessions.get(s.record.id) != s) {
-									if (!ready) connectionChanged();
-									return;
-								}
-								var next = items.error == null ? string(items.result, "nextCursor") : "";
-								if (next != "" && cursors.exists(next)) items = new JsonRpcResponse(null, "Repeated conversation history cursor");
-								if (items.error != null) {
-									if (!ready) done(items);
-									else s.error = "Could not load earlier activity: " + items.error;
-									return;
-								}
-								var data:Array<Dynamic> = Reflect.field(items.result, "data");
-								if (data != null) for (item in data) history.push(item);
-								// Attach promptly; continue fetching older pages in the background.
-								if (!ready || next == "") {
-									var historyTurn = s.eventRevision == eventRevision ? restoredTurn : s.record.turn;
-									s.conversation.history(history, historyTurn, historyBaseline);
-								}
-								if (!ready) {
-									s.attached = true;
-									s.error = null;
-									if (s.eventRevision == eventRevision) {
-										s.record.turn = restoredTurn;
-										s.record.state = restoredTurn != null || restoredActive ? "working" : "idle";
-									}
-									save(s);
-									ready = true;
-									done(resumed);
-								}
-								if (next != "") {
-									cursors.set(next, true);
-									historyPage(next);
-								} else append(s, "\nLoaded conversation history (" + history.length + " items)\n");
-							});
-						}
-						historyPage(null);
+						call("thread/items/list", {threadId:s.record.thread,limit:8,sortDirection:"desc"}, function(items) {
+							if(stale() || sessions.get(s.record.id)!=s) {connectionChanged();return;}
+							if(items.error != null) {done(items);return;}
+							var data:Dynamic=Reflect.field(items.result,"data"), next=string(items.result,"nextCursor");
+							if(!Std.isOfType(data,Array) || (cast data:Array<Dynamic>).length>8 || (next!="" && CodexHistoryPages.cursor(s.conversation.epoch(),next)==null)) {
+								done(new JsonRpcResponse(null,"Invalid conversation history page"));return;
+							}
+							var historyTurn=s.eventRevision==eventRevision ? restoredTurn : s.record.turn;
+							s.conversation.history(cast data,historyTurn,historyBaseline);
+							s.historyPages.reset(next);
+							s.attached=true;s.error=null;
+							if(s.eventRevision==eventRevision) {s.record.turn=restoredTurn;s.record.state=restoredTurn!=null || restoredActive ? "working" : "idle";}
+							save(s);done(resumed);
+						});
 					});
 					return;
 				}
@@ -960,6 +967,7 @@ class CodexProvider implements AgentMessageSource {
 			},
 			activity: "",
 			conversation: new CodexConversation(),
+			historyPages: new CodexHistoryPages(),
 			error: null,
 			attached: false,
 			busy: true,
@@ -1056,6 +1064,7 @@ class CodexProvider implements AgentMessageSource {
 			return;
 		}
 		if (q.action == "read") {
+			if(q.after != null && CodexHistoryPages.isNative(q.after)) {nativeHistory(s,q.after,ctx);return;}
 			var before:Null<Int> = null;
 			if (q.after != null) {
 				before = s.conversation.cursorOffset(q.after);

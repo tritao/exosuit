@@ -257,6 +257,8 @@ class AgentKitProvider implements LocalAgentProvider {
 			activity: "",
 			items: s.conversation.page(before),
 			itemsNext: s.conversation.next(before),
+			historyEpoch: s.conversation.epoch(),
+			historyOmitted: s.conversation.hasOmitted(),
 			itemsOmitted: false,
 			requests: page.requests,
 			requestsOmitted: page.omitted,

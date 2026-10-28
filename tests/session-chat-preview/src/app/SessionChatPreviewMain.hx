@@ -24,6 +24,7 @@ class SessionChatPreviewMain {
  }
 }
 
+@:access(ui.CodexSessionPanel)
 private class PreviewApplication implements DesktopUiApplication {
  final contextValue:UiContext;
  final panel:CodexSessionPanel;
@@ -33,6 +34,10 @@ private class PreviewApplication implements DesktopUiApplication {
  var workflowStep:Int = 0;
  var keyboardReview:Bool = false;
  var reviewFrames:Int = 0;
+ var historyMode:Bool = false;
+ var historyActivate:Bool = false;
+ var historyFrames:Int = 0;
+ var historyStarted:Float = 0;
  var pendingPreview:Null<(Null<haxe.io.Bytes>, Null<String>)->Void>;
  public function new(host:DesktopUiHostContext, dark:Bool, args:Array<String>) {
   this.host = host;
@@ -45,6 +50,20 @@ private class PreviewApplication implements DesktopUiApplication {
    {id:"tool",turn:"turn",kind:"commandExecution",title:"Run tests",text:"",detail:"Running the test suite",state:"completed",truncated:false},
    {id:"assistant",turn:"turn",kind:"agentMessage",title:"",text:"## Findings\n\nThe project is ready for review. The key change is in `src/app.hx`.\n\n```haxe\ntrace(\"Hello from Exosuit\");\n```",detail:"",state:"completed",truncated:false}
   ];
+  historyMode = args.indexOf("--history") >= 0;
+  historyActivate = args.indexOf("--history-loaded") >= 0;
+  if (historyMode) {
+   agent.history.hasOlder = true;
+   agent.view.items = [for (i in 0...12) {id:"history-" + i,turn:"turn",kind:"agentMessage",title:"",text:"Current page message " + (i + 1) + ": the visible conversation stays in place.",detail:"",state:"completed",truncated:false}];
+   host.onPoll = function() {
+    if (agent.historyDone != null && historyStarted > 0 && Sys.time() - historyStarted > 0.3) {
+     var before:Array<workspace.service.WorkspaceAgentProtocol.AgentActivityItem> = cast agent.view.items;
+     var older:Array<workspace.service.WorkspaceAgentProtocol.AgentActivityItem> = [for (i in 0...5) {id:"old-" + i,turn:"turn",kind:"agentMessage",title:"",text:"Earlier page message " + (i + 1),detail:"",state:"completed",truncated:false}];
+     agent.view.items = older.concat(before); agent.history.loading = false; agent.history.hasOlder = false;
+     var done:Null<String>->Void = cast agent.historyDone; agent.historyDone = null; done(null); host.requestFrame();
+    }
+   };
+  }
   var inlineImages = args.indexOf("--inline-images") >= 0;
   var remoteImage = args.indexOf("--remote-image") >= 0;
   if (inlineImages && remoteImage) host.onPoll = function() {
@@ -144,6 +163,18 @@ private class PreviewApplication implements DesktopUiApplication {
  public function context():UiContext return contextValue;
  public function submit(frame:LayoutFrame):RenderNode {
   var root = contextValue.submit(panel, frame);
+  if (historyMode && historyFrames < 8) {
+   historyFrames++;
+   if (historyFrames == 3) panel.transcriptScroll.jumpTo(0, 0);
+   if (historyFrames == 6 && historyActivate) {
+    var load:RenderNode = null;
+    root.walk(function(node) { if (load == null && node.semantics != null && node.semantics.label == "Load earlier messages") load = node; });
+    if (load != null && contextValue.focusWidget(load.id)) {
+     historyStarted = Sys.time(); contextValue.key(UiEventKind.KeyDown, haxeon.ui.core.UiKey.Enter);
+    }
+   }
+   host.requestFrame();
+  }
   if (keyboardReview) {
    reviewFrames++;
    if (reviewFrames < 4) host.requestFrame();

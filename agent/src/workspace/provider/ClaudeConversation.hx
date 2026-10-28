@@ -8,6 +8,10 @@ class ClaudeConversation {
  final cacheId:Int;
  final entries:Array<AgentActivityItem> = [];
  var revision = 0;
+ final incarnation:String = AgentHistoryEpoch.create();
+ var omitted:Bool = false;
+ public function epoch():String return incarnation + "-" + revision;
+ public function hasOmitted():Bool return omitted;
  function cacheKey(turn:String,id:String):String return "claude-"+cacheId+":"+turn.length+":"+turn+id;
  public function content(turn:String,id:String,token:String,offset:Int):Null<AgentContentChunk> {
   for (entry in entries) if (entry.turn == turn && entry.id == id && entry.kind == "agentMessage" && entry.contentToken == token)
@@ -35,7 +39,7 @@ class ClaudeConversation {
   // Tool results carry no input detail; keep the arguments received at tool_use.
   entry.detail = detail == "" ? entry.detail : detail.substring(0,2048); entry.state = state;
   entry.truncated = entry.truncated || text.length > 4096 || detail.length > 2048;
-  if (entries.length > 128) { entries.shift(); revision++; }
+  if (entries.length > 128) { entries.shift(); revision++; omitted=true; }
  }
  public function delta(id:String, turn:String, text:String):Void {
   var previous = "", existing:Null<AgentActivityItem> = null;
@@ -50,7 +54,7 @@ class ClaudeConversation {
  }
  public function offset(cursor:String):Null<Int> {
   var parts = cursor.split(":");
-  if (parts.length != 2 || parts[0] != Std.string(revision)) return null;
+  if (parts.length != 2 || parts[0] != epoch()) return null;
   var n = Std.parseInt(parts[1]);
   return n != null && n >= 0 && n <= entries.length && Std.string(n) == parts[1] ? n : null;
  }
@@ -60,7 +64,7 @@ class ClaudeConversation {
  }
  public function next(?before:Int):Null<String> {
   var end = before == null ? entries.length : before;
-  return end > 8 ? revision + ":" + (end-8) : null;
+  return end > 8 ? epoch() + ":" + (end-8) : null;
  }
  /** Keep the resource payload below the existing 16 KiB storage bound. */
  public function snapshot():Array<AgentActivityItem> {

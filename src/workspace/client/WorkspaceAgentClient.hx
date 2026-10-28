@@ -22,5 +22,8 @@ interface WorkspaceAgentClient {
 	public function discoverAgents(group:String, cursor:Null<String>):Void;
 	public function discoveredAgents():Null<AgentDiscovery>;
 	public function agentView(id:String):Null<AgentView>;
+	public function agentHistory(id:String):AgentHistoryState;
+	public function loadOlderAgentItems(id:String, done:Null<String>->Void):Void;
+	public function resetAgentHistory(id:String):Void;
 	public function listModels(cursor:Null<String>, done:Null<AgentModelsPage>->Null<String>->Void):Void;
 }
