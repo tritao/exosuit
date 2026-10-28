@@ -3815,7 +3815,8 @@ class ExosuitApp implements DesktopUiApplication {
 		var panel = sourceControlSource(), scope = contextScope();
 		if (scope == null || panel == null || panel.isRemote()) { editorScm.clear(); return panel; }
 		var roots = [for (root in application.activeContext.roots) if (controller.SavedWorkspaceController.available(root)) root];
-		if (!Lambda.exists(roots, function(root) return PathKey.within(root, scope.directory))) roots.push(scope.directory);
+		var folder = scope.directory;
+		if (!Lambda.exists(roots, function(root) return PathKey.within(root, folder))) roots.push(folder);
 		return editorScm.get(application.scm, roots, false);
 	}
 

@@ -51,7 +51,7 @@ class GroupContextActions {
 		return catalog != null && catalog.next == null && agents != null && agents.root == catalog.workspaceRoot && agents.next == null;
 
 	public static function empty(group:String, catalog:Null<TerminalCatalog>, agents:Null<AgentCatalog>):Bool {
-		if (!complete(catalog, agents)) return false;
+		if (catalog == null || agents == null || !complete(catalog, agents)) return false;
 		for (child in catalog.groups) if (child.parent == group) return false;
 		for (terminal in catalog.terminals) if (terminal.group == group) return false;
 		for (agent in agents.records) if (agent.group == group) return false;

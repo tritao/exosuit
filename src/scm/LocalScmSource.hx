@@ -111,8 +111,9 @@ class LocalScmSource implements ScmSource {
 		var folders = narrowToFolders ? prefixes(repository) : null;
 		if (folders != null) {
 			var narrowed = narrowOperation(operation, folders, current);
-			if (narrowed.error != null) return failed(null, complete, "outside_folder", narrowed.error);
-			operation = narrowed.operation;
+			var allowed = narrowed.operation, refusal = narrowed.error;
+			if (allowed == null) return failed(null, complete, "outside_folder", refusal == null ? "Operation is outside this folder" : refusal);
+			operation = allowed;
 		}
 		return service.apply(repositoryId, operation, nextGeneration++, complete);
 	}

@@ -127,8 +127,10 @@ class AgentScopeTestMain {
 		require(row != null && row.kind == WorkbenchRowKind.Agent && row.id == "a1" && row.toString() == "a:a1", "agent row key");
 		require(WorkbenchRowKey.parse("x:1") == null && WorkbenchRowKey.parse("g:") == null && WorkbenchRowKey.parse(null) == null
 			&& WorkbenchRowKey.parse("g1") == null, "malformed row keys parsed");
-		require(WorkbenchRowKey.parse(WorkbenchRowKey.group("a:b")).id == "a:b", "ids keep their own colons");
-		require(WorkbenchRowKey.groupOf(tree, "t:t2").id == "ui" && WorkbenchRowKey.groupOf(tree, "g:resume").id == "resume"
+		var colon = WorkbenchRowKey.parse(WorkbenchRowKey.group("a:b"));
+		require(colon != null && colon.id == "a:b", "ids keep their own colons");
+		var terminalGroup = WorkbenchRowKey.groupOf(tree, "t:t2"), ownGroup = WorkbenchRowKey.groupOf(tree, "g:resume");
+		require(terminalGroup != null && terminalGroup.id == "ui" && ownGroup != null && ownGroup.id == "resume"
 			&& WorkbenchRowKey.groupOf(tree, "a:gone") == null, "row group");
 		require(WorkbenchRowKey.parentGroupId(tree, "g:ui") == "resume" && WorkbenchRowKey.parentGroupId(tree, "g:resume") == null
 			&& WorkbenchRowKey.parentGroupId(tree, "a:a1") == "ui", "row parent group");
@@ -201,7 +203,8 @@ class AgentScopeTestMain {
 		for (operation in [ScmOperation.Stage("README.md"), ScmOperation.Discard("src/B.hx"), ScmOperation.Unstage("graphicalish/x"),
 			ScmOperation.StagePaths(["graphical/a", "README.md"]), ScmOperation.RevertPatch("docs/x.md", haxe.io.Bytes.alloc(0))]) {
 			var refused = LocalScmSource.narrowOperation(operation, folders, inside);
-			require(refused.operation == null && refused.error != null && refused.error.indexOf("outside graphical/") >= 0,
+			var refusal = refused.error;
+			require(refused.operation == null && refusal != null && refusal.indexOf("outside graphical/") >= 0,
 				"an operation outside the folder was allowed: " + operationText(operation));
 		}
 		var stage = LocalScmSource.narrowOperation(ScmOperation.Discard("graphical/src/A.hx"), folders, inside);
@@ -211,7 +214,8 @@ class AgentScopeTestMain {
 		var mixed = new ScmSnapshot(Int64.make(0, 8), head, [new ScmGroup(ScmGroupId.Index, [resource("graphical/src/A.hx", ScmChangeKind.Modified),
 			resource("README.md", ScmChangeKind.Modified)])]);
 		var outside = LocalScmSource.narrowOperation(ScmOperation.Commit("m", true), folders, mixed);
-		require(outside.operation == null && outside.error.indexOf("README.md") >= 0, "a commit took staged changes from outside the folder");
+		var outsideError = outside.error;
+		require(outside.operation == null && outsideError != null && outsideError.indexOf("README.md") >= 0, "a commit took staged changes from outside the folder");
 		var moved = new ScmSnapshot(Int64.make(0, 9), head, [new ScmGroup(ScmGroupId.Index, [resource("graphical/New.hx", ScmChangeKind.Renamed, "src/Old.hx")])]);
 		require(LocalScmSource.narrowOperation(ScmOperation.Commit("m", false), folders, moved).operation == null, "a commit took a rename from outside the folder");
 		var truncated = new ScmSnapshot(Int64.make(0, 10), head, [], true);

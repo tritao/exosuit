@@ -106,7 +106,9 @@ class ActivityBar implements View {
 			function() return new Rect(0, 0, context.viewportWidth, context.viewportHeight), tooltipDelay, Right,
 			hover, visibleTooltip.value == "activity-tooltip:manage"), manageOpen, DropMarker.None, null)));
 		var node = new Column("activity-bar", items, style).build(context);
-		var move:(String, Null<String>)->Void = onMove != null ? onMove : function(id, before) { model.moveMode(id, before); };
+		var move:(String, Null<String>)->Void = function(id, before) { model.moveMode(id, before); };
+		var moved = onMove;
+		if (moved != null) move = moved;
 		drag.attach(node, order, model, move, context, onContextMenu, hover.cancel);
 		WorkbenchBoundary.right(context, node);
 		return node;
