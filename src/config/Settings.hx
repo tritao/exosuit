@@ -19,6 +19,8 @@ class Settings {
 	}
 	public var applicationZoom:Int = 100;
 	public var layoutMode:String = "auto";
+	/** The Activity Bar's shown destinations and their order for every window (SidebarModel.encodeDestinations); empty until the user changes them. */
+	public var activityBar:String = "";
 	/** Launch mode for newly created agent sessions across providers. */
 	public var agentSessionMode:String = "terminal";
 	/** Codex defaults used when Workbench creates a new thread. */
@@ -93,6 +95,7 @@ class Settings {
 		result.fontFallbackPaths = copyStrings(fontFallbackPaths);
 		result.applicationZoom = applicationZoom;
 		result.layoutMode = layoutMode;
+		result.activityBar = activityBar;
 		result.agentSessionMode = agentSessionMode;
 		result.codexDefaultModel = codexDefaultModel;
 		result.codexDefaultEffort = codexDefaultEffort;

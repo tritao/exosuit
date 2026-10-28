@@ -35,7 +35,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-os.environ.setdefault("EXOSUIT_SUIT_AUTOSTART", "0")  # tests must not start the user's suit daemon
+os.environ.setdefault("EXOSUIT_SUIT", "off")  # tests must not reach the user's suit
 
 ROOT = Path(__file__).resolve().parent.parent
 HAXEON = Path(os.environ.get("HAXEON_ROOT", ROOT / "haxeon"))
@@ -95,7 +95,7 @@ def kill_tree(pid: int) -> None:
 class Suit:
     def __init__(self, base: Path, extra: dict[str, str]) -> None:
         self.home = base / "suit-home"
-        self.environment = dict(os.environ, EXOSUIT_SUIT_HOME=str(self.home), EXOSUIT_SUIT_SCAN="0", EXOSUIT_SUIT_TRAY="0",
+        self.environment = dict(os.environ, EXOSUIT_SUIT="isolated", EXOSUIT_SUIT_HOME=str(self.home), EXOSUIT_SUIT_SCAN="0", EXOSUIT_SUIT_TRAY="0",
                                 EXOSUIT_SUIT_AUTOSTART="0", EXOSUIT_SUIT_LAUNCHER=str(SUIT), **extra)
         self.environment["PATH" if os.name == "nt" else "LD_LIBRARY_PATH"] = library_path()
 

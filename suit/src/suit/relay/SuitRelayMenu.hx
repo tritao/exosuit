@@ -153,7 +153,7 @@ class SuitRelayMenu {
 				error: host.error, serviceRunning: host.serviceRunning, servicePid: host.servicePid, starts: host.starts,
 				clients: host.clients, open: host.open, devices: devicesOf(host)
 			}],
-			processes: [for (process in directProcesses(inventory, hosts)) SuitReport.processJson(process)]
+			processes: [for (process in directProcesses(inventory, hosts)) SuitReport.processJson(inventory, process)]
 		};
 	}
 

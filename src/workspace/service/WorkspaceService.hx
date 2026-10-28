@@ -273,9 +273,8 @@ class WorkspaceService {
 			var cwd:Null<String> = tree ? request.cwd : (group == null ? null : group.cwd);
 			// Store the machine's canonical spelling (separators, case, symlinks) of a newly chosen directory.
 			// A group that keeps its directory can still be renamed or moved after that directory disappears.
-			var chosen:String = cwd == null ? "" : cast cwd;
-			if (chosen.length > 0 && chosen.length <= 1024 && resolveDirectory != null && (group == null || chosen != group.cwd)) {
-				var resolve:String->Null<String> = cast resolveDirectory;
+			var chosen = cwd == null ? "" : cwd, resolve = resolveDirectory;
+			if (chosen.length > 0 && chosen.length <= 1024 && resolve != null && (group == null || chosen != group.cwd)) {
 				var resolved = resolve(chosen);
 				if (resolved == null) {
 					context.fail({code: "invalid_directory", message: "Choose an existing folder", ambiguous: false}); return;

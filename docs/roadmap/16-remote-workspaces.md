@@ -384,9 +384,9 @@ under each part.
   missing credential). While it is connected directly it retries suit every
   30 s and drops its own socket once suit accepts. suit's socket always wins,
   and a daemon evicted by suit comes back through suit. A daemon started with
-  `EXOSUIT_RELAY_VIA_SUIT=0` (the default when `EXOSUIT_SUIT_AUTOSTART=0`,
-  which test scripts and the run guard set) never uses suit, so tests cannot
-  attach to the user's suit.
+  `EXOSUIT_RELAY_VIA_SUIT=0`, or with `EXOSUIT_SUIT=off` (which test scripts and the run guard
+  set), never uses suit; with `EXOSUIT_SUIT=isolated` it reaches only the suit at
+  `EXOSUIT_SUIT_HOME`, so tests cannot attach to the user's suit.
 - **Starting the daemon on demand.** When a frame arrives for a workspace
   with no attached daemon, suit buffers it (at most 64 frames and 2 MiB per
   workspace; a reset drops that channel's frames) and runs the recorded
@@ -428,14 +428,31 @@ under each part.
   device frame. Terminate all background processes no longer ends hosting;
   only Stop hosting and Quit Exosuit do, and Quit lasts until suit starts
   again.
+- **Remote clients.** suit records every client on a hosted workspace's
+  machine socket from the frames it forwards: its channel id (the device id
+  for a paired device), when it connected, its last activity and frame
+  counts. A client appears with its first frame and goes with a reset. The
+  Worker now also sends the machine that reset when a device or pairing
+  socket closes, not only when it is replaced, so disconnects show at once
+  (machines already end the channel on a reset; the change is not deployed,
+  and against an older Worker a vanished client stays listed until it
+  reconnects). The attached daemon adds a client report over the relay link
+  (first byte `0x11`, JSON: paired devices with grants, pairing requests,
+  open terminals and agents); it holds no keys. *Disconnect* resets the
+  channel in the daemon, which ends that session, and drops the client's
+  frames until the Worker resets the channel, which happens when the device
+  reconnects. A device may reconnect on its own; revoking stays in the
+  editor's Remote Access panel.
 - **Tray.** Remote access lists each hosted workspace with its state
   (connected, connecting, error, paused), whether its service is running,
-  and its connected devices (from the daemon's `relay-status.json` while it
-  runs; with no daemon running no device can be connected). It keeps Stop
-  hosting per workspace, Stop all hosting and Open Remote Access…, and adds
-  Resume hosting. The suit daemon publishes the same state in
-  `relay-state.json` in its home, which `suit relay list` and `suit menu`
-  read.
+  what it has open, and each client: id, kind, when it connected and its last
+  activity, with a Disconnect item. It keeps Stop hosting per workspace,
+  Stop all hosting and Open Remote Access…, and adds Resume hosting. The
+  tooltip adds "Hosting · N devices connected" and changes as soon as a client
+  comes or goes. `suit relay list [--json]` shows the same, live from the
+  daemon, and `suit relay disconnect <client>` drops one. The daemon also
+  publishes `relay-state.json` in its home, rewritten when clients come or go
+  and every 30 s.
 
 The alternative was suit supervising the hosting daemons and restarting them
 when they exit. That is smaller, but it keeps one full daemon per hosted

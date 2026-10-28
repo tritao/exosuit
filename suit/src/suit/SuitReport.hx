@@ -1,5 +1,6 @@
 package suit;
 
+import suit.SuitGroup;
 import suit.SuitInventory.SuitProcess;
 import suit.SuitTerminator.TerminationResult;
 
@@ -40,15 +41,29 @@ class SuitReport {
 
 	/** Short label for a menu item: kind, workspace, uptime. */
 	public static function label(process:SuitProcess):String {
-		var parts = [process.kind];
+		var parts:Array<String> = [process.kind];
 		var name = workspace(process);
 		if (name.length > 0)
 			parts.push(name);
 		parts.push(uptime(process.started));
-		var text = parts.join(" · ") + "  (pid " + process.pid + ")";
-		if (!process.registered)
-			text += " unregistered";
-		return text;
+		return parts.join(" · ") + "  (pid " + process.pid + ")";
+	}
+
+	/** How suit knows a process, when it did not register itself; empty when it did. */
+	public static function sourceNote(process:SuitProcess):String {
+		return switch process.source {
+			case Registered: "";
+			case Adopted: "Started by exosuit process " + process.owner + "; found by scanning";
+			case Scanned: "Not started by exosuit; found by scanning";
+		};
+	}
+
+	public static function sourceName(source:SuitSource):String {
+		return switch source {
+			case Registered: "registered";
+			case Adopted: "adopted";
+			case Scanned: "scanned";
+		};
 	}
 
 	public static function relayState(process:SuitProcess):String {
@@ -69,21 +84,21 @@ class SuitReport {
 			output.add("suit daemon: " + (daemon ? "running" : "not running") + "\n");
 		if (!inventory.scanning)
 			output.add("(scanning disabled; registered processes only)\n");
-		var group:Null<String> = null;
+		var group:Null<SuitGroup> = null;
 		for (process in inventory.processes) {
-			if (process.group != group) {
+			if (group == null || !SuitGroups.same(process.group, group)) {
 				group = process.group;
-				output.add("\n" + group + "\n");
+				output.add("\n" + inventory.groupLabel(process.group) + "\n");
 			}
 			var notes:Array<String> = [];
-			if (!process.registered)
-				notes.push("unregistered");
+			if (process.source == Adopted)
+				notes.push("adopted");
 			if (process.orphaned)
 				notes.push("orphaned");
 			var relay = relayState(process);
 			if (relay.length > 0)
 				notes.push("relay " + relay);
-			output.add("  " + column(Std.string(process.pid), 7) + column(process.kind, 19) + column(workspace(process), 22)
+			output.add("  " + column(Std.string(process.pid), 7) + column((process.kind : String), 19) + column(workspace(process), 22)
 				+ column(uptime(process.started), 8) + notes.join(", ") + "\n");
 		}
 		if (inventory.processes.length == 0)
@@ -91,15 +106,17 @@ class SuitReport {
 		return output.toString();
 	}
 
-	public static function processJson(process:SuitProcess):Dynamic {
+	public static function processJson(inventory:SuitInventory, process:SuitProcess):Dynamic {
 		return {
 			pid: process.pid,
 			started: process.started,
 			parent: process.parent,
-			kind: process.kind,
-			registered: process.registered,
+			kind: (process.kind : String),
+			registered: process.source == Registered,
+			source: sourceName(process.source),
+			startedByExosuit: process.source != Scanned,
 			orphaned: process.orphaned,
-			group: process.group,
+			group: inventory.groupLabel(process.group),
 			workspace: workspace(process),
 			root: process.root,
 			roots: process.roots,
@@ -120,7 +137,8 @@ class SuitReport {
 			editors: inventory.editors().length,
 			background: inventory.background().length,
 			orphaned: inventory.orphans().length,
-			processes: [for (process in inventory.processes) processJson(process)]
+			notStartedByExosuit: inventory.foreign().length,
+			processes: [for (process in inventory.processes) processJson(inventory, process)]
 		};
 	}
 
@@ -147,6 +165,13 @@ class SuitReport {
 	public static function results(results:Array<TerminationResult>):String {
 		if (results.length == 0)
 			return "Nothing to terminate.\n";
-		return [for (result in results) '${result.pid} ${result.kind}: ${result.outcome}'].join("\n") + "\n";
+		return [for (result in results) '${result.pid} ${(result.kind : String)}: ${result.outcome}'].join("\n") + "\n";
+	}
+
+	/** What `kill --dry-run` prints: the processes a kill would stop, one per line. */
+	public static function plan(processes:Array<SuitProcess>):String {
+		if (processes.length == 0)
+			return "Nothing to terminate.\n";
+		return [for (process in processes) '${process.pid} ${(process.kind : String)}: would stop'].join("\n") + "\n";
 	}
 }

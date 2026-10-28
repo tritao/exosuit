@@ -4,6 +4,7 @@ import haxe.Int64;
 import haxe.io.Bytes;
 import scm.LocalScmSource;
 import scm.ScmChangeKind;
+import scm.ScmOperation;
 import scm.ScmGroup;
 import scm.ScmGroupId;
 import scm.ScmHead;
@@ -11,7 +12,13 @@ import scm.ScmHeadOperation;
 import scm.ScmResource;
 import scm.ScmSnapshot;
 import ui.AgentScope;
+import ui.AgentScopeTracker;
+import ui.GroupContextActions;
+import ui.GroupRemoval;
 import ui.LayoutMode;
+import ui.WorkbenchGroupLabel;
+import ui.WorkbenchRowKey;
+import ui.WorkbenchRowKind;
 import ui.WorkbenchTreeModel;
 import workspace.service.WorkspaceAgentProtocol.AgentCatalog;
 import workspace.service.WorkspaceProtocol.WorkspaceGroup;
@@ -70,10 +77,20 @@ class AgentScopeTestMain {
 		var moved = model([group("resume", "resume-2026", "C:/work/exosuit", null, 0), group("ui", "web", "C:/work/exosuit/web", "resume", 1)]);
 		var followed = AgentScope.resolve(moved, null, ui);
 		require(followed != null && followed.label == "web" && followed.directory == "C:/work/exosuit/web", "kept scope missed its group's change");
-		// A deleted group keeps its last scope rather than jumping elsewhere.
-		var removed = model([group("resume", "resume-2026", "C:/work/exosuit", null, 0)]);
-		var orphan = AgentScope.resolve(removed, null, ui);
-		require(orphan != null && orphan.equals(ui), "deleting the scoped group changed the scope");
+		// A deleted group's scope falls back to its nearest surviving parent group, then the first group, then nothing.
+		var removed = model([group("resume", "resume-2026", "C:/work/exosuit", null, 0), group("loose", "loose", null, null, 3)]);
+		var parent = AgentScope.resolve(removed, null, ui);
+		require(parent != null && parent.groupId == "resume" && parent.directory == "C:/work/exosuit", "a deleted group's scope did not fall back to its parent");
+		var nested = model([group("resume", "resume-2026", "C:/work/exosuit", null, 0), group("ui", "ui", "C:/work/exosuit/graphical", "resume", 1),
+			group("deep", "deep", "C:/work/exosuit/graphical/src", "ui", 2)]);
+		var deep = AgentScope.resolve(nested, "g:deep", ui);
+		require(deep != null && deep.ancestors.join(",") == "ui,resume", "a scope did not record its parent groups");
+		var grand = AgentScope.resolve(removed, null, deep);
+		require(grand != null && grand.groupId == "resume", "a scope whose group and parent were deleted skipped the surviving grandparent");
+		var unrelated = model([group("loose", "loose", null, null, 3), group("other", "other", "D:/other", null, 1)]);
+		var remaining = AgentScope.resolve(unrelated, null, deep);
+		require(remaining != null && remaining.groupId == "other", "with no surviving parent the scope did not move to the first group");
+		require(AgentScope.resolve(new WorkbenchTreeModel(), null, deep) == null, "a scope survived every group being deleted");
 		// A group folder may be any folder, inside the workspace or not; the scope takes it as given.
 		var outside = model([group("resume", "resume-2026", "C:/work/exosuit", null, 0), group("elsewhere", "elsewhere", "D:/scratch/other-repo", "resume", 1),
 			group("under", "under", null, "elsewhere", 2)]);
@@ -83,6 +100,69 @@ class AgentScopeTestMain {
 		require(inherited != null && inherited.directory == "D:/scratch/other-repo", "a sub-group did not inherit an outside folder");
 		// No groups at all: no scope.
 		require(AgentScope.resolve(new WorkbenchTreeModel(), null, null) == null, "empty Workbench produced a scope");
+	}
+
+	/** The tracker keeps the normalized spelling for the panel but resolves against the service's spelling. */
+	static function tracker():Void {
+		var groups = [group("resume", "resume-2026", "C:/work/exosuit", null, 0), group("ui", "ui", "C:/work/exosuit/graphical", "resume", 1)];
+		var calls = 0;
+		var scopes = new AgentScopeTracker(function(path) { calls++; return StringTools.replace(path, "/", "\\"); });
+		var tree = model(groups);
+		var ui = scopes.resolve(tree, "g:ui");
+		require(ui != null && ui.directory == "C:\\work\\exosuit\\graphical" && calls == 1, "tracker did not normalize the scope folder");
+		var kept = scopes.resolve(tree, null);
+		require(kept == ui && calls == 1, "an unchanged scope was normalized again or replaced");
+		var fallback = scopes.resolve(model([groups[0]]), null);
+		require(fallback != null && fallback.groupId == "resume" && fallback.directory == "C:\\work\\exosuit", "tracker lost the parent fallback");
+		var failing = new AgentScopeTracker(function(path):String throw "gone");
+		var gone = failing.resolve(tree, "g:ui");
+		require(gone != null && gone.directory == "C:/work/exosuit/graphical", "a folder that cannot be normalized lost its scope");
+		scopes.reset();
+		require(scopes.resolve(new WorkbenchTreeModel(), null) == null, "reset kept the last scope");
+	}
+
+	static function rowKeys():Void {
+		var tree = model([group("resume", "resume-2026", "C:/work/exosuit", null, 0), group("ui", "ui", "C:/work/exosuit/graphical", "resume", 1)]);
+		var row = WorkbenchRowKey.parse("a:a1");
+		require(row != null && row.kind == WorkbenchRowKind.Agent && row.id == "a1" && row.toString() == "a:a1", "agent row key");
+		require(WorkbenchRowKey.parse("x:1") == null && WorkbenchRowKey.parse("g:") == null && WorkbenchRowKey.parse(null) == null
+			&& WorkbenchRowKey.parse("g1") == null, "malformed row keys parsed");
+		var colon = WorkbenchRowKey.parse(WorkbenchRowKey.group("a:b"));
+		require(colon != null && colon.id == "a:b", "ids keep their own colons");
+		var terminalGroup = WorkbenchRowKey.groupOf(tree, "t:t2"), ownGroup = WorkbenchRowKey.groupOf(tree, "g:resume");
+		require(terminalGroup != null && terminalGroup.id == "ui" && ownGroup != null && ownGroup.id == "resume"
+			&& WorkbenchRowKey.groupOf(tree, "a:gone") == null, "row group");
+		require(WorkbenchRowKey.parentGroupId(tree, "g:ui") == "resume" && WorkbenchRowKey.parentGroupId(tree, "g:resume") == null
+			&& WorkbenchRowKey.parentGroupId(tree, "a:a1") == "ui", "row parent group");
+		require(WorkbenchRowKey.idOf("t:t1", WorkbenchRowKind.Terminal) == "t1"
+			&& WorkbenchRowKey.idOf("t:t1", WorkbenchRowKind.Agent) == null, "row id by kind");
+	}
+
+	/** Group rows show the folder relative to the workspace root in any case or separator, also below a drive root. */
+	static function groupLabels():Void {
+		require(WorkbenchGroupLabel.shortDirectory("C:\\Users\\Me\\work\\a\\b", "c:\\users\\me\\WORK") == "./a/b", "case-insensitive Windows root");
+		require(WorkbenchGroupLabel.shortDirectory("C:\\work\\a", "C:/work/") == "./a", "root with a trailing separator");
+		require(WorkbenchGroupLabel.shortDirectory("C:\\a\\b", "C:\\") == "./a/b", "drive root");
+		require(WorkbenchGroupLabel.shortDirectory("C:\\Work", "c:\\work") == "Work", "the root itself");
+		require(WorkbenchGroupLabel.shortDirectory("C:\\workshop\\x\\y", "C:\\work") == "…\\x\\y", "a sibling with a shared prefix");
+		require(WorkbenchGroupLabel.shortDirectory("/Home/me/a", "/home/me") == "…/me/a", "POSIX paths compare case-sensitively");
+		require(WorkbenchGroupLabel.shortDirectory("/home/me/a/b", "/home/me/") == "./a/b", "POSIX root with a trailing separator");
+		require(WorkbenchGroupLabel.shortDirectory("/srv/x", null) == "/srv/x", "short path without a root");
+	}
+
+	/** Remove Group stays in the menu while the group has contents, disabled with the reason. */
+	static function groupRemoval():Void {
+		var groups = [group("resume", "resume-2026", "C:/work/exosuit", null, 0), group("ui", "ui", null, "resume", 1), group("empty", "empty", null, null, 2)];
+		var catalog:TerminalCatalog = {instance: "i", groups: groups, terminals: [terminal("t1", "ui")], next: null, workspaceRoot: "C:/work"};
+		var agents:AgentCatalog = {instance: "i", root: "C:/work", status: "ready", next: null, records: []};
+		require(GroupContextActions.removalOf("empty", true, false, catalog, agents) == GroupRemoval.Allowed, "an empty group cannot be removed");
+		var full = GroupContextActions.removalOf("ui", true, false, catalog, agents), parent = GroupContextActions.removalOf("resume", true, false, catalog, agents);
+		require(full == GroupRemoval.NotEmpty && parent == GroupRemoval.NotEmpty, "a group with a terminal or a sub-group is removable");
+		require(GroupContextActions.removeLabel(full) == "Remove Group (not empty)" && GroupContextActions.removeLabel(GroupRemoval.Allowed) == "Remove Group",
+			"Remove Group label");
+		require(GroupContextActions.removalOf("empty", false, false, catalog, agents) == GroupRemoval.NotPermitted, "removal without the grant");
+		require(GroupContextActions.removalOf("empty", true, true, catalog, agents) == GroupRemoval.Busy
+			&& GroupContextActions.removalOf("empty", true, false, catalog, null) == GroupRemoval.Busy, "removal while busy or loading");
 	}
 
 	static function resource(path:String, kind:ScmChangeKind, ?original:String):ScmResource
@@ -107,6 +187,43 @@ class AgentScopeTestMain {
 		require(LocalScmSource.identityFor(["C:/"], true) != LocalScmSource.identityFor(["C:/"]), "narrowed source shares the workspace source's identity");
 	}
 
+	static function operationText(operation:Null<ScmOperation>):String return operation == null ? "null" : Std.string(operation);
+
+	/** Writes from narrowed Changes act only inside the group's folder; a commit never takes staged files from outside it. */
+	static function narrowedOperations():Void {
+		var head = new ScmHead("main", null, false, null, 0, 0, false, ScmHeadOperation.None);
+		var inside = new ScmSnapshot(Int64.make(0, 7), head, [
+			new ScmGroup(ScmGroupId.Index, [resource("graphical/src/A.hx", ScmChangeKind.Modified)]),
+			new ScmGroup(ScmGroupId.WorkingTree, [resource("README.md", ScmChangeKind.Modified)])]);
+		var folders = ["graphical/"];
+		var all = LocalScmSource.narrowOperation(ScmOperation.StageAll, folders, inside);
+		require(all.error == null && operationText(all.operation) == operationText(ScmOperation.StagePaths(["graphical"])), "stage-all was not limited to the folder");
+		var none = LocalScmSource.narrowOperation(ScmOperation.UnstageAll, folders, inside);
+		require(none.error == null && operationText(none.operation) == operationText(ScmOperation.UnstagePaths(["graphical"])), "unstage-all was not limited to the folder");
+		for (operation in [ScmOperation.Stage("README.md"), ScmOperation.Discard("src/B.hx"), ScmOperation.Unstage("graphicalish/x"),
+			ScmOperation.StagePaths(["graphical/a", "README.md"]), ScmOperation.RevertPatch("docs/x.md", haxe.io.Bytes.alloc(0))]) {
+			var refused = LocalScmSource.narrowOperation(operation, folders, inside);
+			var refusal = refused.error;
+			require(refused.operation == null && refusal != null && refusal.indexOf("outside graphical/") >= 0,
+				"an operation outside the folder was allowed: " + operationText(operation));
+		}
+		var stage = LocalScmSource.narrowOperation(ScmOperation.Discard("graphical/src/A.hx"), folders, inside);
+		require(stage.error == null && operationText(stage.operation) == operationText(ScmOperation.Discard("graphical/src/A.hx")), "an operation inside the folder changed");
+		var commit = LocalScmSource.narrowOperation(ScmOperation.Commit("m", false), folders, inside);
+		require(commit.error == null && commit.operation != null, "a commit of the folder's own staged changes was refused");
+		var mixed = new ScmSnapshot(Int64.make(0, 8), head, [new ScmGroup(ScmGroupId.Index, [resource("graphical/src/A.hx", ScmChangeKind.Modified),
+			resource("README.md", ScmChangeKind.Modified)])]);
+		var outside = LocalScmSource.narrowOperation(ScmOperation.Commit("m", true), folders, mixed);
+		var outsideError = outside.error;
+		require(outside.operation == null && outsideError != null && outsideError.indexOf("README.md") >= 0, "a commit took staged changes from outside the folder");
+		var moved = new ScmSnapshot(Int64.make(0, 9), head, [new ScmGroup(ScmGroupId.Index, [resource("graphical/New.hx", ScmChangeKind.Renamed, "src/Old.hx")])]);
+		require(LocalScmSource.narrowOperation(ScmOperation.Commit("m", false), folders, moved).operation == null, "a commit took a rename from outside the folder");
+		var truncated = new ScmSnapshot(Int64.make(0, 10), head, [], true);
+		require(LocalScmSource.narrowOperation(ScmOperation.Commit("m", false), folders, truncated).operation == null
+			&& LocalScmSource.narrowOperation(ScmOperation.Commit("m", false), folders, null).operation == null, "a commit went ahead without a complete snapshot");
+		require(LocalScmSource.narrowOperation(ScmOperation.Push, folders, mixed).operation != null, "a repository-wide operation was refused");
+	}
+
 	static function modeHiding():Void {
 		require(LayoutMode.Agents.hides("files") && LayoutMode.Agents.hides("search") && LayoutMode.Agents.hides("scm"), "Agents shows an editor destination");
 		require(!LayoutMode.Agents.hides("workbench") && !LayoutMode.Agents.hides(null), "Agents hides its own destination");
@@ -115,9 +232,14 @@ class AgentScopeTestMain {
 
 	static function main():Int {
 		scopeRule();
+		tracker();
+		rowKeys();
+		groupLabels();
+		groupRemoval();
 		narrowedChanges();
+		narrowedOperations();
 		modeHiding();
-		trace("PASS: Agents scope from group, sub-group, session and terminal rows; last-group fallback; folder-narrowed changes; mode-hidden rail destinations");
+		trace("PASS: Agents scope from group, sub-group, session and terminal rows; last-group and deleted-group fallback; row keys; group labels; Remove Group; folder-narrowed changes and writes; mode-hidden rail destinations");
 		return 0;
 	}
 }

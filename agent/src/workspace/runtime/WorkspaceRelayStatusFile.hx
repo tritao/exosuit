@@ -1,14 +1,11 @@
 package workspace.runtime;
 
-import haxe.Json;
-import haxe.io.Path;
+import suit.WorkspaceRelayStatus;
 import sys.FileSystem;
 
 /**
 	Publishes this daemon's relay hosting state as `relay-status.json` in its private state directory, so
-	the suit tray daemon can show it without an RPC client. It holds the relay origin, the connection
-	state, the last error and device ids with their connected and revoked flags. It never holds bearers,
-	tokens, keys or pairing codes.
+	the suit tray daemon can show it without an RPC client. The format is WorkspaceRelayStatus's.
 
 	Rewritten when the state changes, and every 30 s so readers can tell a live file from a stale one.
 **/
@@ -22,7 +19,7 @@ class WorkspaceRelayStatusFile {
 	var written:String = "";
 
 	public function new(stateDirectory:String) {
-		path = Path.join([stateDirectory, "relay-status.json"]);
+		path = WorkspaceRelayStatus.path(stateDirectory);
 	}
 
 	public function update(now:Float, relay:Null<WorkspaceRelayHost>, pairing:Null<WorkspacePairingManager>, setupError:Null<String>):Void {
@@ -30,27 +27,27 @@ class WorkspaceRelayStatusFile {
 			return;
 		checkedAt = now;
 		try {
-			var devices:Array<Dynamic> = [];
+			var devices:Array<WorkspaceRelayDevice> = [];
 			var pending = 0;
 			if (pairing != null) {
 				for (device in pairing.listDevices())
 					devices.push({deviceId: device.deviceId, connected: device.connected, revoked: device.revoked});
 				pending = pairing.listPending().length;
 			}
-			var error = setupError != null ? setupError : relay == null ? null : relay.lastError;
-			var state = Json.stringify({
+			var state:WorkspaceRelayState = {
 				configured: true,
 				connected: relay != null && relay.connected,
 				origin: relay == null ? null : relay.pairingEndpoint().origin,
-				error: error,
+				error: setupError != null ? setupError : relay == null ? null : relay.lastError,
 				devices: devices,
 				pending: pending
-			});
-			if (state == written && now - writtenAt < REFRESH_MILLISECONDS)
+			};
+			// The state alone, without the volatile pid and time, decides whether the file is rewritten early.
+			var key = WorkspaceRelayStatus.encode(state, 0, 0);
+			if (key == written && now - writtenAt < REFRESH_MILLISECONDS)
 				return;
-			var document = state.substr(0, state.length - 1) + ',"version":1,"pid":' + Sys.getPid() + ',"updatedAt":' + Date.now().getTime() + "}";
-			sys.io.AtomicFile.write(path, document + "\n");
-			written = state;
+			sys.io.AtomicFile.write(path, WorkspaceRelayStatus.encode(state, Sys.getPid(), Date.now().getTime()) + "\n");
+			written = key;
 			writtenAt = now;
 		} catch (_:Dynamic) {}
 	}

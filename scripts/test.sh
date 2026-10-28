@@ -6,8 +6,8 @@
 # that need files on disk lives here, matching what each project test entry
 # expects on Sys.args().
 set -euo pipefail
-# Tests must not start the user's suit daemon.
-export EXOSUIT_SUIT_AUTOSTART=${EXOSUIT_SUIT_AUTOSTART:-0}
+# What tests start neither registers with the user's suit nor starts it (see suit/README.md).
+export EXOSUIT_SUIT=${EXOSUIT_SUIT:-off}
 
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 haxeon_root=${HAXEON_ROOT:-"$root_dir/haxeon"}
@@ -50,6 +50,7 @@ check sqlite-native "$root_dir/native-packages/sqlite/tests/run.sh"
 check terminal-native "$root_dir/native-packages/terminal/tests/run.sh"
 check terminal-session-native "$root_dir/native-packages/terminal/session/tests/run.sh"
 check noise-native "$root_dir/native-packages/noise/tests/run.sh"
+check processes-native "$root_dir/native-packages/processes/tests/run.sh"
 terminal_native_dir="$root_dir/native-packages/terminal/session/tests/build/nativekit"
 if [[ $(uname -s) == Darwin ]]; then
 	export DYLD_LIBRARY_PATH="$terminal_native_dir${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
@@ -166,6 +167,7 @@ PRAGTICAL_PORTABLE="$active_context_fixture/state" run_test active-context "$act
 run_test layout-controls
 run_test layout-modes
 run_test agent-scope
+run_test path-key
 run_test project-scan-yield
 chmod 600 "$workspace_root/unreadable.txt"
 

@@ -40,25 +40,25 @@ class WorkbenchTreeModel implements TreeViewModel {
 		});
 		for (g in ordered) {
 			groups.set(g.id, g);
-			children.set("g:" + g.id, []);
+			children.set(WorkbenchRowKey.group(g.id), []);
 		}
 		for (g in ordered) {
-			var siblings = g.parent == null ? roots : children.get("g:" + g.parent);
+			var siblings = g.parent == null ? roots : children.get(WorkbenchRowKey.group(g.parent));
 			if (siblings != null)
-				siblings.push("g:" + g.id);
+				siblings.push(WorkbenchRowKey.group(g.id));
 		}
 		for (t in catalog.terminals) {
 			terminals.set(t.id, t);
-			var siblings = children.get("g:" + t.group);
+			var siblings = children.get(WorkbenchRowKey.group(t.group));
 			if (siblings != null)
-				siblings.push("t:" + t.id);
+				siblings.push(WorkbenchRowKey.terminal(t.id));
 		}
 		if (agentCatalog != null)
 			for (a in agentCatalog.records) {
 				agents.set(a.id, a);
-				var siblings = children.get("g:" + a.group);
+				var siblings = children.get(WorkbenchRowKey.group(a.group));
 				if (siblings != null)
-					siblings.push("a:" + a.id);
+					siblings.push(WorkbenchRowKey.agent(a.id));
 			}
 	}
 
@@ -111,22 +111,24 @@ class WorkbenchTreeModel implements TreeViewModel {
 	}
 
 	public function buildItem(key:String):View {
-		if (StringTools.startsWith(key, "g:")) {
-            var editing = groupEditor == null ? null : groupEditor(key.substring(2));
-            if (editing != null) return editing;
-			var group = groups.get(key.substring(2));
-			if (group == null)
-				return new Text("");
-			return new WorkbenchGroupLabel(group.name, directory(group), workspaceRoot);
+		var row = WorkbenchRowKey.parse(key);
+		if (row == null) return new Text("");
+		var editing:Null<View> = null;
+		if (row.kind == WorkbenchRowKind.Group && groupEditor != null) editing = groupEditor(row.id);
+		if (row.kind == WorkbenchRowKind.Agent && agentEditor != null) editing = agentEditor(row.id);
+		if (editing != null) return editing;
+		switch row.kind {
+			case WorkbenchRowKind.Group:
+				var group = groups.get(row.id);
+				if (group != null) return new WorkbenchGroupLabel(group.name, directory(group), workspaceRoot);
+			case WorkbenchRowKind.Agent:
+				var a = agents.get(row.id);
+				if (a != null) return new WorkbenchSessionLabel(a.name, a.state, agentStateLabel(a.state));
+			case WorkbenchRowKind.Terminal:
+				var terminal = terminals.get(row.id);
+				if (terminal != null) return new WorkbenchSessionLabel(terminal.name, terminal.state, TerminalStateLabels.display(terminal.state));
 		}
-		if (StringTools.startsWith(key, "a:")) {
-			var editing = agentEditor == null ? null : agentEditor(key.substring(2));
-			if (editing != null) return editing;
-			var a = agents.get(key.substring(2));
-			return a == null ? new Text("") : new WorkbenchSessionLabel(a.name, a.state, agentStateLabel(a.state));
-		}
-		var terminal = terminals.get(key.substring(2));
-		return terminal == null ? new Text("") : new WorkbenchSessionLabel(terminal.name, terminal.state, TerminalStateLabels.display(terminal.state));
+		return new Text("");
 	}
 
 	public function directory(group:WorkspaceGroup):Null<String> {

@@ -2,6 +2,8 @@ package suit.relay;
 
 import haxe.Json;
 import haxe.io.Bytes;
+import suit.SuitClient;
+import suit.SuitClient.SuitMode;
 
 /** What a hosting workspace daemon tells suit when it attaches to suit's machine socket. */
 typedef SuitRelayAttachRequest = {
@@ -90,13 +92,13 @@ class SuitRelayProtocol {
 		return {connected: connected == true, error: Std.isOfType(error, String) ? cast error : null};
 	}
 
-	/** EXOSUIT_RELAY_VIA_SUIT=1|0 decides; unset, a daemon uses suit unless suit autostart is off (tests, the run guard). */
+	/**
+		A daemon uses suit unless `EXOSUIT_RELAY_VIA_SUIT=0` or `EXOSUIT_SUIT` is off (tests and the
+		run guard), so a test reaches at most its own isolated suit, never the user's.
+	**/
 	public static function viaSuitEnabled():Bool {
-		var configured = Sys.getEnv("EXOSUIT_RELAY_VIA_SUIT");
-		if (configured == "1")
-			return true;
-		if (configured == "0")
+		if (Sys.getEnv("EXOSUIT_RELAY_VIA_SUIT") == "0")
 			return false;
-		return Sys.getEnv("EXOSUIT_SUIT_AUTOSTART") != "0";
+		return SuitClient.mode() != SuitMode.Off;
 	}
 }

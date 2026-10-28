@@ -16,6 +16,7 @@ import haxeon.ui.widgets.text.Text;
 import search.SearchMatch;
 import search.SearchOptions;
 import search.WorkspaceSearch;
+import workspace.PathKey;
 import workspace.Project;
 import workspace.ProjectNode;
 import workspace.Workspace;
@@ -39,6 +40,8 @@ class ScopedSearchPanel implements View {
 	var ownProject:Null<Project>;
 	/** The query ran over a folder index that was still filling, so it runs again once the index is complete. */
 	var searchedPartial:Bool = false;
+	/** The query's text input from the last build, so a focus request goes straight to it. */
+	var queryInput:Null<RenderNode>;
 
 	public function new(workspace:Workspace, directory:Void->Null<String>, open:SearchMatch->Void, requestFrame:Void->Void, maximum:Void->Int) {
 		this.workspace = workspace; this.directory = directory; this.open = open; this.requestFrame = requestFrame; this.maximum = maximum;
@@ -70,10 +73,10 @@ class ScopedSearchPanel implements View {
 		var root = directory();
 		if (root == null) return [];
 		for (project in workspace.projects) {
-			if (same(project.root, root)) return project.files();
-			if (within(project.root, root)) return [for (file in project.files()) if (within(root, file.path)) file];
+			if (PathKey.same(project.root, root)) return project.files();
+			if (PathKey.within(project.root, root)) return [for (file in project.files()) if (PathKey.within(root, file.path)) file];
 		}
-		if (ownProject == null || !same(ownProject.root, root)) {
+		if (ownProject == null || !PathKey.same(ownProject.root, root)) {
 			if (ownProject != null) ownProject.cancelIndex();
 			ownProject = null;
 			try {
@@ -88,29 +91,19 @@ class ScopedSearchPanel implements View {
 		return project.files();
 	}
 
-	static function key(path:String):String {
-		var value = StringTools.replace(path, "\\", "/");
-		return Sys.systemName() == "Windows" ? value.toLowerCase() : value;
-	}
-	static function same(left:String, right:String):Bool return key(left) == key(right);
-	static function within(parent:String, child:String):Bool {
-		var prefix = key(parent);
-		if (!StringTools.endsWith(prefix, "/")) prefix += "/";
-		return StringTools.startsWith(key(child), prefix);
-	}
-
 	public function build(context:BuildContext):RenderNode {
 		var current = directory();
 		// A new scope reruns the query there instead of showing another folder's results.
 		var partial = ownProject;
 		if (query.length > 0 && (current != searchedDirectory || searchedPartial && partial != null && !partial.indexing())) run(query);
 		var style = fill(); style.padding = new Insets(6, 8, 6, 8); style.childGap = 4;
-		var rows:Array<KeyedView> = [new KeyedView("query", new SearchField("scoped-search-query", query, run, null, "Search in folder"))];
+		var rows:Array<KeyedView> = [new KeyedView("query", new QueryField(new SearchField("scoped-search-query", query, run, null, "Search in folder"),
+			function(input) queryInput = input))];
 		var status = current == null ? "No folder to search" : query.length == 0 ? "Search this folder" : search.complete
 			? search.results.length + " results" : "Searching… " + search.results.length + " results";
 		if (search.capped) status += " (limit reached)";
 		var indexed = ownProject;
-		if (indexed != null && indexed.indexing() && current != null && same(indexed.root, current)) status += " · indexing folder";
+		if (indexed != null && indexed.indexing() && current != null && PathKey.same(indexed.root, current)) status += " · indexing folder";
 		if (search.errors.length > 0) status += " — " + search.errors.length + " skipped";
 		rows.push(new KeyedView("status", new Text(status)));
 		var generation = search.generation;
@@ -125,21 +118,14 @@ class ScopedSearchPanel implements View {
 			return button;
 		}, fill(), null, scroll)));
 		var node = new Column("scoped-search-panel", rows, style).build(context);
-		if (focusQuery) {
-			var input = findQuery(node);
-			if (input != null) { context.requestFocusAfterLayout(input.id); focusQuery = false; }
-		}
+		var input = queryInput;
+		if (focusQuery && input != null) { context.requestFocusAfterLayout(input.id); focusQuery = false; }
 		return node;
 	}
 
-	static function relative(root:Null<String>, path:String):String
-		return root != null && within(root, path) ? StringTools.replace(path, "\\", "/").substring(key(root).length + (StringTools.endsWith(key(root), "/") ? 0 : 1)) : path;
-
-	static function findQuery(node:RenderNode):Null<RenderNode> {
-		if (node.semantics != null && node.semantics.role == haxeon.ui.semantics.AccessibilityRole.TextField
-			&& node.semantics.label == "Search in folder") return node;
-		for (child in node.children) { var found = findQuery(child); if (found != null) return found; }
-		return null;
+	static function relative(root:Null<String>, path:String):String {
+		var inside = root == null ? null : PathKey.relative(root, path);
+		return inside == null || inside == "" ? path : inside;
 	}
 
 	static function rowStyle(height:Float):LayoutStyle {
@@ -147,5 +133,23 @@ class ScopedSearchPanel implements View {
 	}
 	static function fill():LayoutStyle {
 		var style = new LayoutStyle(); style.width = LayoutAxis.grow(); style.height = LayoutAxis.grow(); return style;
+	}
+}
+
+/** Builds the search field and hands back its text input node. */
+private class QueryField implements View {
+	final field:SearchField;
+	final built:RenderNode->Void;
+	public function new(field:SearchField, built:RenderNode->Void) { this.field = field; this.built = built; }
+	public function build(context:BuildContext):RenderNode {
+		var node = field.build(context);
+		var input = textInput(node);
+		if (input != null) built(input);
+		return node;
+	}
+	static function textInput(node:RenderNode):Null<RenderNode> {
+		if (node.semantics != null && node.semantics.role == haxeon.ui.semantics.AccessibilityRole.TextField) return node;
+		for (child in node.children) { var found = textInput(child); if (found != null) return found; }
+		return null;
 	}
 }

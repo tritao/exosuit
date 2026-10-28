@@ -1,13 +1,13 @@
 package suit;
 
-import haxe.Json;
-import haxe.io.Path;
 import processkit.Processes;
-import processkit.Processes.ProcessInfo;
+import processkit.ffi.ProcessKitConstants;
 import suit.SuitInventory.SuitProcess;
+import suit.SuitKind;
 
 private typedef Target = {
 	var process:SuitProcess;
+	/** Descendants captured before anything was stopped. */
 	var tree:Array<ProcessInfo>;
 	var deadline:Float;
 	var forceAtDeadline:Bool;
@@ -17,52 +17,64 @@ private typedef Target = {
 /** What happened to one terminated process. */
 typedef TerminationResult = {
 	var pid:Int;
-	var kind:String;
+	var kind:SuitKind;
 	var outcome:String;
 }
 
 /**
-	Stops processes the way suit's menu and CLI promise: gracefully first, then the whole tree.
+	Stops processes the way suit's menu and CLI promise: gracefully first, then the whole tree. Each kind's
+	SuitStop says how:
 
-	- A workspace manager gets `stop-request.json` in its state directory, the same cooperative path as a
-	  restart request: it stops its daemon, removes its endpoint and releases its lock. Relay hosting
+	- CloseWindows (editors): asked to close, so they can save or prompt. An editor still open when the
+	  grace period ends is left running and reported, never killed with unsaved work.
+	- StopRequest (workspace managers): `stop-request.json` in the state directory, the cooperative path a
+	  restart uses: the manager stops its daemon, removes its endpoint and releases its lock. Relay hosting
 	  ends with it; device grants and relay settings stay on disk, so nothing is revoked.
-	- A workspace daemon is stopped through its manager when the manager is running.
-	- An editor is asked to close its windows, so it can save or prompt. An editor that is still open
-	  when the grace period ends is left running and reported, never killed with unsaved work.
-	- Everything else is killed with its descendants at once.
+	- ThroughManager (workspace daemons): stopped through their running manager.
+	- Kill: killed with its descendants at once.
 
-	After the grace period, whatever remains of each tree (captured before anything was stopped) is killed
-	deepest first. Every kill re-checks the pid's start time. The job is ticked; it never blocks.
+	When the grace period ends, suit takes a fresh process snapshot and kills the tree deepest first: the
+	descendants captured before anything was stopped, plus any started since. It repeats until a snapshot
+	finds nothing new, so a child started during the grace period or the kill does not survive. Every kill
+	re-checks the pid's start time, and a process whose start time is unknown is reported, not touched.
+	The job is ticked; it never blocks.
 **/
 class SuitTerminator {
 	public static inline var SERVICE_GRACE_SECONDS:Float = 3;
 	public static inline var EDITOR_GRACE_SECONDS:Float = 10;
 
+	/** Snapshot-and-kill rounds before suit gives up on a tree that keeps spawning. */
+	static inline var KILL_ROUNDS:Int = 4;
+
 	final targets:Array<Target> = [];
 	public final results:Array<TerminationResult> = [];
+	final self:Int;
 
 	public function new(inventory:SuitInventory, processes:Array<SuitProcess>) {
 		var now = Sys.time();
 		var chosen = new Map<Int, Bool>();
-		var self = Sys.getPid();
+		self = Sys.getPid();
 		for (process in processes) {
 			var target = process;
-			// Stop a daemon through its running manager, so the manager does not restart or outlive it.
-			if (process.kind == "workspace-host") {
+			if (SuitKinds.stop(process.kind) == ThroughManager) {
 				var manager = inventory.find(process.parent);
-				if (manager != null && manager.kind == "workspace-manager")
+				if (manager != null && SuitKinds.stop(manager.kind) == StopRequest)
 					target = manager;
 			}
 			if (target.pid == self || chosen.exists(target.pid))
 				continue;
 			chosen.set(target.pid, true);
-			var graceful = requestStop(target);
+			if (target.started <= 0) {
+				results.push({pid: target.pid, kind: target.kind, outcome: "not stopped: its start time is unknown"});
+				continue;
+			}
+			var strategy = SuitKinds.stop(target.kind);
+			var graceful = requestStop(target, strategy);
 			targets.push({
 				process: target,
-				tree: inventory.descendants(target.pid),
-				deadline: now + (graceful ? (target.kind == "editor" ? EDITOR_GRACE_SECONDS : SERVICE_GRACE_SECONDS) : 0.0),
-				forceAtDeadline: target.kind != "editor",
+				tree: inventory.descendants(target.pid, target.started),
+				deadline: now + (graceful ? (strategy == CloseWindows ? EDITOR_GRACE_SECONDS : SERVICE_GRACE_SECONDS) : 0.0),
+				forceAtDeadline: strategy != CloseWindows,
 				done: false
 			});
 		}
@@ -88,9 +100,7 @@ class SuitTerminator {
 				finish(target, "still open");
 				continue;
 			}
-			// Kill what is left of the tree, deepest first, then the process itself.
-			for (child in target.tree)
-				Processes.terminate(child.pid, child.started);
+			killTree(target);
 			if (alive)
 				Processes.terminate(target.process.pid, target.process.started);
 			finish(target, alive ? "killed" : "stopped");
@@ -105,27 +115,57 @@ class SuitTerminator {
 		return results;
 	}
 
+	/**
+		Kills the target's descendants, deepest first: those captured at the start and any a fresh snapshot
+		finds under the target or under them. Repeats while a snapshot finds a live one not yet killed.
+	**/
+	function killTree(target:Target):Void {
+		var killed = new Map<String, Bool>();
+		for (_ in 0...KILL_ROUNDS) {
+			var snapshot = Processes.list("");
+			var tree:Array<ProcessInfo> = [];
+			if (snapshot != null) {
+				tree = SuitInventory.descendantsIn(snapshot, target.process.pid, target.process.started, self);
+				for (captured in target.tree)
+					for (child in SuitInventory.descendantsIn(snapshot, captured.pid, captured.started, self))
+						tree.push(child);
+			}
+			for (captured in target.tree)
+				tree.push(captured);
+			var progress = false;
+			for (child in tree) {
+				var key = child.pid + "@" + child.started;
+				if (killed.exists(key) || !Processes.alive(child.pid, child.started))
+					continue;
+				killed.set(key, true);
+				if (Processes.terminate(child.pid, child.started) == ProcessKitConstants.PROCESSKIT_OK)
+					progress = true;
+			}
+			if (!progress)
+				return;
+		}
+	}
+
 	function finish(target:Target, outcome:String):Void {
 		target.done = true;
 		results.push({pid: target.process.pid, kind: target.process.kind, outcome: outcome});
 	}
 
-	/** Starts a graceful stop when the process kind has one. Returns false when it must simply be killed. */
-	static function requestStop(process:SuitProcess):Bool {
-		switch process.kind {
-			case "editor":
-				return Processes.requestClose(process.pid, process.started) == Processes.OK;
-			case "workspace-manager":
+	/** Starts a graceful stop. Returns false when there is none and the process must simply be killed. */
+	static function requestStop(process:SuitProcess, strategy:SuitStop):Bool {
+		switch strategy {
+			case CloseWindows:
+				return Processes.requestClose(process.pid, process.started) == ProcessKitConstants.PROCESSKIT_OK;
+			case StopRequest:
 				if (process.stateDir == null || process.generation == null)
 					return false;
 				try {
-					sys.io.AtomicFile.write(Path.join([process.stateDir, "stop-request.json"]),
-						Json.stringify({version: 1, generation: process.generation}) + "\n");
+					WorkspaceStopRequest.write(process.stateDir, process.generation);
 					return true;
 				} catch (_:Dynamic) {
 					return false;
 				}
-			default:
+			case ThroughManager | Kill:
 				return false;
 		}
 	}

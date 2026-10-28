@@ -173,7 +173,7 @@ class AgentMain {
 		Sys.println("READY: exosuit-agent local and loopback WebSocket");
 		Sys.stdout().flush();
 		var stateDirectory = haxe.io.Path.directory(args[2]);
-		suit.SuitClient.register("workspace-host", {root: directories.root, stateDir: stateDirectory,
+		suit.SuitClient.registerWorkspaceService(suit.SuitKind.WorkspaceHost, {root: directories.root, stateDir: stateDirectory,
 			generation: args.length >= 7 ? args[6] : null});
 		var relayStatus = new WorkspaceRelayStatusFile(stateDirectory);
 		var clientReportAt:Float = 0;

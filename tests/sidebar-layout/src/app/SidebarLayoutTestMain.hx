@@ -22,8 +22,10 @@ class SidebarLayoutTestMain {
 		require(restored.width == 480 && restored.activeId == "agents", "late destination registration changed migrated width");
 
 		checkOrder();
+		checkUserDestinations();
+		checkRailMigration();
 		checkNarrowLayout();
-		trace("PASS: Activity Bar order and visibility persistence, shared sidebar width, legacy migration, deferred registration, atomic persistence, aligned shared header metrics, narrow clipping and selected-tab reveal through resize");
+		trace("PASS: Activity Bar order and visibility persistence, user-wide rail choices and their one-time migration, shared sidebar width, legacy migration, deferred registration, atomic persistence, aligned shared header metrics, narrow clipping and selected-tab reveal through resize");
 		return 0;
 	}
  static function shown(model:haxeon.ui.widgets.sidebar.SidebarModel, id:String):Bool { var mode = model.find(id); return mode != null && mode.visible; }
@@ -48,6 +50,60 @@ class SidebarLayoutTestMain {
   destinations(legacy);
   require(legacy.restore("2|files|1|240|files,1;scm,0") && ids(legacy) == "files,search,scm" && !shown(legacy, "scm"),
    "version 2 layout did not migrate");
+ }
+ /** The rail's own choices travel apart from a layout's selection, width and visibility, to another window or folder. */
+ static function checkUserDestinations():Void {
+  var first = new haxeon.ui.widgets.sidebar.SidebarModel();
+  destinations(first);
+  require(!first.customDestinations, "an untouched rail counted as customized");
+  first.moveMode("scm", "files"); first.setModeVisible("search", false);
+  require(first.customDestinations, "a reordered rail with a hidden icon did not count as customized");
+  var saved = first.encodeDestinations();
+  var other = new haxeon.ui.widgets.sidebar.SidebarModel();
+  destinations(other);
+  other.rememberWidth(333); other.select("files"); other.setVisible(false);
+  require(other.restoreDestinations(saved) && ids(other) == "scm,files,search" && !shown(other, "search"), "user choices did not reach another window");
+  require(other.width == 333 && other.activeId == "files" && !other.visible, "user choices changed the layout's selection, width or visibility");
+  var late = new haxeon.ui.widgets.sidebar.SidebarModel();
+  require(late.restoreDestinations(saved), "user choices before registration were rejected");
+  destinations(late);
+  require(ids(late) == "scm,files,search" && !shown(late, "search"), "destinations registered later missed the user's choices");
+  for (invalid in ["", "2|files,1|", "1|files,2|", "1|files,1|files,files", "1|bad id,1|", "1|files,1"])
+   require(!other.restoreDestinations(invalid) && other.encodeDestinations() == saved, "invalid user choices changed the rail: " + invalid);
+ }
+ /** Older windows saved the rail per layout: the first customized one restored becomes everyone's rail, once. */
+ static function checkRailMigration():Void {
+  var stored = "";
+  var model = new haxeon.ui.widgets.sidebar.SidebarModel();
+  destinations(model);
+  var menu = new ui.ActivityBarMenu(model, function(_) return false, function() { stored = model.encodeDestinations(); });
+  var defaultLayout = model.encode();
+  menu.restoreUserChoices(stored, true);
+  require(stored == "", "an untouched layout became the user's rail");
+  var legacy = new haxeon.ui.widgets.sidebar.SidebarModel();
+  destinations(legacy); legacy.moveMode("search", "files"); legacy.setModeVisible("scm", false);
+  require(model.restore(legacy.encode()), "legacy layout rejected");
+  menu.restoreUserChoices(stored, true);
+  require(stored != "" && ids(model) == "search,files,scm" && !shown(model, "scm"), "an older layout's order was not migrated");
+  var stale = new haxeon.ui.widgets.sidebar.SidebarModel();
+  destinations(stale); stale.moveMode("scm", "files");
+  require(model.restore(stale.encode()), "second legacy layout rejected");
+  menu.restoreUserChoices(stored, true);
+  require(ids(model) == "search,files,scm" && !shown(model, "scm"), "a second older layout replaced the migrated rail");
+  var window = new haxeon.ui.widgets.sidebar.SidebarModel();
+  destinations(window);
+  require(window.restore(defaultLayout), "default layout rejected");
+  new ui.ActivityBarMenu(window, function(_) return false, function() {}).restoreUserChoices(stored, false);
+  require(ids(window) == "search,files,scm" && !shown(window, "scm"), "a new window or folder lost the user's rail");
+  menu.setVisible("scm", true);
+  require(stored.indexOf("scm,1") >= 0, "showing an icon was not saved for every window");
+  menu.move("scm", "search");
+  require(ids(model) == "scm,search,files" && stored == model.encodeDestinations(), "a drag was not saved for every window");
+  menu.resetOrder();
+  require(ids(model) == "files,search,scm" && stored == model.encodeDestinations(), "resetting the order was not saved");
+  var hidesFiles = new ui.ActivityBarMenu(model, function(id) return id == "files", function() {});
+  require(hidesFiles.shownCount() == 2 && [for (item in hidesFiles.items(null)) item.key].indexOf("activity-toggle:files") < 0,
+   "the menu offered a destination the layout mode hides");
  }
  static function checkHeaderAlignment(fonts:haxeon.ui.FontCollection):Void {
   for (dark in [false, true]) for (width in [180.0, 300.0]) for (height in [36.0, 44.0]) {

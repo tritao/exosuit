@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # Developer acceptance uses the production staging routine, without release publication/pin changes.
 set -euo pipefail
-# Tests must not start the user's suit daemon.
-export EXOSUIT_SUIT_AUTOSTART=${EXOSUIT_SUIT_AUTOSTART:-0}
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 fixture=$(mktemp -d /tmp/exstage.XXXXXX)
 trap 'rm -rf -- "$fixture"' EXIT

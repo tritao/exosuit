@@ -20,12 +20,13 @@ class SuitMain {
 	static final USAGE:String = [
 		"usage: suit <command>",
 		"  status [--json]           daemon state and process counts",
-		"  list [--json]             every exosuit process, grouped by editor; orphans last",
+		"  list [--json]             every exosuit process, grouped by editor; orphans, then others found, last",
 		"  menu                      print the tray menu as text (disabled items in brackets)",
 		"  watch [--relay] [--once]  the process viewer: list, refreshed every 2 s",
-		"  kill <pid>...             stop exosuit processes (graceful first, then the tree)",
-		"  kill --orphans            stop processes whose editor is gone",
-		"  kill --all                stop every background process; editors keep running",
+		"  kill <pid>...             stop listed processes (graceful first, then the tree)",
+		"  kill --orphans            stop exosuit's processes whose editor is gone",
+		"  kill --all                stop exosuit's background processes; editors keep running",
+		"  kill ... --dry-run        print what a kill would stop, and stop nothing",
 		"  relay list [--json]       workspaces hosting remote access, with devices",
 		"  relay stop <workspace>    stop hosting one workspace (root or folder name); grants persist",
 		"  relay stop --all          stop all hosting",
@@ -36,7 +37,8 @@ class SuitMain {
 		"  start                     start the daemon if it is not running",
 		"  stop                      stop only the daemon",
 		"  daemon [--login]          run the daemon in this process (--login: stay resident)",
-		"environment: EXOSUIT_SUIT_HOME (isolated home and endpoint), EXOSUIT_SUIT_SCAN=0 (registered processes only)"
+		"environment: EXOSUIT_SUIT_HOME (isolated home and endpoint), EXOSUIT_SUIT_SCAN=0 (registered processes only)",
+		"bulk kills and quit stop only processes exosuit started (registered, or descended from one); see suit/README.md"
 	].join("\n");
 
 	static function main():Void {
@@ -111,6 +113,7 @@ class SuitMain {
 			case "kill":
 				var inventory = new SuitInventory();
 				var targets:Array<SuitInventory.SuitProcess> = [];
+				var dryRun = rest.remove("--dry-run");
 				if (rest.indexOf("--all") >= 0)
 					targets = SuitActions.background(inventory);
 				else if (rest.indexOf("--orphans") >= 0)
@@ -118,6 +121,7 @@ class SuitMain {
 				else {
 					if (rest.length == 0)
 						throw USAGE;
+					// One process named by pid may be stopped even when exosuit did not start it.
 					for (value in rest) {
 						var pid = Std.parseInt(value);
 						var process = pid == null ? null : inventory.find(pid);
@@ -125,6 +129,10 @@ class SuitMain {
 							throw '$value is not an exosuit process suit knows about (see `suit list`)';
 						targets.push(process);
 					}
+				}
+				if (dryRun) {
+					print(StringTools.trim(SuitReport.plan(targets)));
+					return 0;
 				}
 				print(StringTools.trim(SuitReport.results(new SuitTerminator(inventory, targets).run())));
 				SuitControl.request({op: "refresh"}, 1);
@@ -214,9 +222,7 @@ class SuitMain {
 				var launcher = SuitClient.findLauncher();
 				if (launcher == null)
 					launcher = sys.FileSystem.fullPath(Sys.programPath());
-				var child = sys.io.Process.spawn(Sys.executablePath(), [launcher, "daemon"], haxe.io.Path.directory(launcher),
-					[SuitClient.libraryVariable()], [SuitClient.nativePath(launcher)], true);
-				child.close();
+				SuitClient.startDaemon(launcher);
 				var deadline = Sys.time() + 10;
 				while (Sys.time() < deadline) {
 					if (SuitControl.request({op: "status"}, 1) != null) {

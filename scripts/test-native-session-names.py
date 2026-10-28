@@ -3,7 +3,6 @@
 import json,os,subprocess,tempfile
 from pathlib import Path
 from prepare_agent_naming import prepare
-os.environ.setdefault("EXOSUIT_SUIT_AUTOSTART", "0")  # tests must not start the user's suit daemon
 ROOT=Path(__file__).resolve().parent.parent
 prepare(ROOT, required=True)
 subprocess.run([str(ROOT/'haxeon/scripts/haxeon'),'build','--project',str(ROOT/'tests/native-session-names/haxeon.json')],check=True)

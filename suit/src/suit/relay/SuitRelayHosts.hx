@@ -5,9 +5,12 @@ import haxe.io.Path;
 import sys.FileSystem;
 import sys.io.File;
 import suit.SuitInventory;
-import suit.SuitNative;
 import suit.SuitPaths;
 import workspace.transport.RelayMachineEndpoint;
+
+/** Creates a directory readable only by this user, or checks that an existing one is. */
+@:hlNative("haxeon_runtime", "__host_prepare_private_directory")
+extern function preparePrivateRelayDirectory(path:String):Bool;
 
 /** A workspace suit hosts: what it needs to hold its machine socket and start its manager. No secrets. */
 typedef SuitRelayHost = {
@@ -53,7 +56,7 @@ class SuitRelayHosts {
 
 	public static function save(host:SuitRelayHost):Void {
 		var folder = directory();
-		if (!SuitNative.prepareDirectory(folder))
+		if (!preparePrivateRelayDirectory(folder))
 			throw "suit's relay-hosts directory is not private";
 		sys.io.AtomicFile.write(Path.join([folder, host.machineId + ".json"]), Json.stringify({
 			version: 1,
@@ -81,7 +84,7 @@ class SuitRelayHosts {
 		var host:Null<SuitRelayHost> = parse(request);
 		if (host == null)
 			throw "invalid_relay_attach";
-		if (!FileSystem.exists(host.stateDir) || !FileSystem.isDirectory(host.stateDir) || !SuitNative.prepareDirectory(host.stateDir))
+		if (!FileSystem.exists(host.stateDir) || !FileSystem.isDirectory(host.stateDir) || !preparePrivateRelayDirectory(host.stateDir))
 			throw "workspace_state_not_private";
 		var identity:Dynamic = null;
 		try identity = readJson(Path.join([host.stateDir, "workspace.json"])) catch (_:Dynamic) {}

@@ -10,7 +10,6 @@ import sys
 import tempfile
 import time
 from agent_test_runtime import manager_environment
-os.environ.setdefault("EXOSUIT_SUIT_AUTOSTART", "0")  # tests must not start the user's suit daemon
 
 ROOT = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)

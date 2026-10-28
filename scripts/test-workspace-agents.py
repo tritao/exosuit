@@ -2,7 +2,6 @@
 """Native fake-Codex acceptance; never starts a real inference turn."""
 import os,subprocess,tempfile,json
 from pathlib import Path
-os.environ.setdefault("EXOSUIT_SUIT_AUTOSTART", "0")  # tests must not start the user's suit daemon
 ROOT=Path(__file__).resolve().parent.parent
 HAXEON=ROOT/'haxeon'
 project=ROOT/'tests/workspace-agents/haxeon.json'

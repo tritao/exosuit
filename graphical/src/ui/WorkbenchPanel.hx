@@ -105,11 +105,13 @@ class WorkbenchPanel implements View {
 		model.agentEditor = function(id) return agentDraft != null && agentDraft.id == id ? agentEditor : null;
 		tree.onItemClicked = function(key, _) {
 			if (agentDraft != null || draft != null) return;
-			if (StringTools.startsWith(key, "a:")) {
-				client.agentService().agentAction(key.substring(2), "read", "", null);
-				openAgent(key.substring(2));
-			} else if (StringTools.startsWith(key, "t:")) {
-				var terminal = model.terminals.get(key.substring(2));
+			var row = WorkbenchRowKey.parse(key);
+			if (row == null) return;
+			if (row.kind == WorkbenchRowKind.Agent) {
+				client.agentService().agentAction(row.id, "read", "", null);
+				openAgent(row.id);
+			} else if (row.kind == WorkbenchRowKind.Terminal) {
+				var terminal = model.terminals.get(row.id);
 				if (terminal != null) open(terminal);
 			}
 		};
@@ -117,10 +119,13 @@ class WorkbenchPanel implements View {
 
 	function canDragNode(key:String):Bool {
 		if (draft != null || agentDraft != null || pending || client.terminalCatalogBusy()) return false;
-		if (StringTools.startsWith(key, "g:")) return client.canEditGroups() && model.groups.exists(key.substring(2));
-		if (StringTools.startsWith(key, "t:")) return client.canControlTerminals() && model.terminals.exists(key.substring(2));
-		return StringTools.startsWith(key, "a:") && client.agentService().canControlAgents()
-			&& !client.agentService().agentBusy() && model.agents.exists(key.substring(2));
+		var row = WorkbenchRowKey.parse(key);
+		if (row == null) return false;
+		return switch row.kind {
+			case WorkbenchRowKind.Group: client.canEditGroups() && model.groups.exists(row.id);
+			case WorkbenchRowKind.Terminal: client.canControlTerminals() && model.terminals.exists(row.id);
+			case WorkbenchRowKind.Agent: client.agentService().canControlAgents() && !client.agentService().agentBusy() && model.agents.exists(row.id);
+		};
 	}
 
 	function canDropNode(source:String, target:String):Bool {
@@ -143,27 +148,21 @@ class WorkbenchPanel implements View {
 		if (!canDropNode(source, target)) return;
 		var catalog = client.terminalCatalog();
 		if (catalog == null) return;
-		var targetId = target.substring(2);
-		var id = source.substring(2);
-		if (StringTools.startsWith(source, "g:")) {
-			for (group in catalog.groups) if (group.id == id)
-				client.changeGroup(catalog.instance, group, group.name, targetId, group.cwd, model.nextOrder(targetId), false);
-		} else if (StringTools.startsWith(source, "t:")) {
-			for (terminal in catalog.terminals) if (terminal.id == id) client.renameTerminal(terminal, terminal.name, targetId);
-		} else {
-			var agents = client.agentService().agents();
-			if (agents == null) return;
-			for (agent in agents.records) if (agent.id == id)
-				client.agentService().agentAction(id, "move", targetId, agent.group);
+		var targetId = WorkbenchRowKey.idOf(target, WorkbenchRowKind.Group), row = WorkbenchRowKey.parse(source);
+		if (targetId == null || row == null) return;
+		var id = row.id;
+		switch row.kind {
+			case WorkbenchRowKind.Group:
+				for (group in catalog.groups) if (group.id == id)
+					client.changeGroup(catalog.instance, group, group.name, targetId, group.cwd, model.nextOrder(targetId), false);
+			case WorkbenchRowKind.Terminal:
+				for (terminal in catalog.terminals) if (terminal.id == id) client.renameTerminal(terminal, terminal.name, targetId);
+			case WorkbenchRowKind.Agent:
+				var agents = client.agentService().agents();
+				if (agents == null) return;
+				for (agent in agents.records) if (agent.id == id)
+					client.agentService().agentAction(id, "move", targetId, agent.group);
 		}
-	}
-
-	function parentGroupId(key:String):Null<String> {
-		var id = key.substring(2);
-		if (StringTools.startsWith(key, "g:")) { var group = model.groups.get(id); return group == null ? null : group.parent; }
-		if (StringTools.startsWith(key, "t:")) { var terminal = model.terminals.get(id); return terminal == null ? null : terminal.group; }
-		var agent = model.agents.get(id);
-		return agent == null ? null : agent.group;
 	}
 
 	/** A moved group carries its contents, so selected rows inside a selected group stay where they are. */
@@ -171,9 +170,9 @@ class WorkbenchPanel implements View {
 		var selected = [for (key in keys) key => true];
 		return keys.filter(function(key) {
 			var visited:Map<String, Bool> = [];
-			var parent = parentGroupId(key);
+			var parent = WorkbenchRowKey.parentGroupId(model, key);
 			while (parent != null && !visited.exists(parent)) {
-				if (selected.exists("g:" + parent)) return false;
+				if (selected.exists(WorkbenchRowKey.group(parent))) return false;
 				visited.set(parent, true);
 				var group = model.groups.get(parent);
 				parent = group == null ? null : group.parent;
@@ -185,19 +184,23 @@ class WorkbenchPanel implements View {
 	/** Selected terminals and agent sessions that can be closed or removed now. */
 	function removableKeys(keys:Array<String>):Array<String> {
 		return keys.filter(function(key) {
-			if (StringTools.startsWith(key, "t:"))
-				return closeTerminal != null && client.canControlTerminals() && model.terminals.exists(key.substring(2));
-			return StringTools.startsWith(key, "a:") && client.agentService().canControlAgents()
-				&& agentCanBeRemoved(model.agents.get(key.substring(2)));
+			var row = WorkbenchRowKey.parse(key);
+			if (row == null) return false;
+			return switch row.kind {
+				case WorkbenchRowKind.Terminal: closeTerminal != null && client.canControlTerminals() && model.terminals.exists(row.id);
+				case WorkbenchRowKind.Agent: client.agentService().canControlAgents() && agentCanBeRemoved(model.agents.get(row.id));
+				case WorkbenchRowKind.Group: false;
+			};
 		});
 	}
 
 	function removeNode(key:String):Void {
-		var id = key.substring(2);
-		if (StringTools.startsWith(key, "a:")) { removeAgent(id, false); return; }
+		var row = WorkbenchRowKey.parse(key);
+		if (row == null || row.kind == WorkbenchRowKind.Group) return;
+		if (row.kind == WorkbenchRowKind.Agent) { removeAgent(row.id, false); return; }
 		var catalog = client.terminalCatalog(), close = closeTerminal;
 		if (catalog == null || close == null) return;
-		for (terminal in catalog.terminals) if (terminal.id == id) { close(terminal); return; }
+		for (terminal in catalog.terminals) if (terminal.id == row.id) { close(terminal); return; }
 	}
 
 	function batchIdle():Bool
@@ -232,9 +235,9 @@ class WorkbenchPanel implements View {
 
 	/** Closing treats every row alike: terminals stop and are forgotten, sessions leave Workbench. */
 	static function closeSelectionLabel(keys:Array<String>, removable:Array<String>):String {
-		var terminals = removable.filter(function(key) return StringTools.startsWith(key, "t:")).length;
+		var terminals = removable.filter(function(key) return WorkbenchRowKey.isKind(key, WorkbenchRowKind.Terminal)).length;
 		var noun = terminals == removable.length ? "Terminal" : terminals == 0 ? "Session" : "Item";
-		var busy = keys.filter(function(key) return StringTools.startsWith(key, "a:")).length
+		var busy = keys.filter(function(key) return WorkbenchRowKey.isKind(key, WorkbenchRowKind.Agent)).length
 			- (removable.length - terminals);
 		return "Close " + plural(removable.length, noun) + (busy > 0 ? ' ($busy busy)' : "");
 	}
@@ -262,19 +265,10 @@ class WorkbenchPanel implements View {
 		return group == null ? null : group.id;
 	}
 
+	/** The selected row's group; without one, the default "work" group. */
 	function groupFor(key:Null<String>):Null<WorkspaceGroup> {
-		if (key != null) {
-			if (StringTools.startsWith(key, "g:")) return model.groups.get(key.substring(2));
-			if (StringTools.startsWith(key, "t:")) {
-				var terminal = model.terminals.get(key.substring(2));
-				if (terminal != null) return model.groups.get(terminal.group);
-			}
-			if (StringTools.startsWith(key, "a:")) {
-				var agent = model.agents.get(key.substring(2));
-				if (agent != null) return model.groups.get(agent.group);
-			}
-		}
-		return model.groups.get("work");
+		var group = WorkbenchRowKey.groupOf(model, key);
+		return group != null ? group : model.groups.get("work");
 	}
 
 	function agentCanBeRemoved(agent:Null<WorkspaceAgentProtocol.AgentRecord>):Bool {
@@ -301,8 +295,9 @@ class WorkbenchPanel implements View {
 		var cwd = group == null ? null : model.directory(group);
         var groupId = group == null ? "" : group.id;
         var items:Array<MenuItem> = [];
-        if (key != null && StringTools.startsWith(key, "t:")) {
-            var terminal = model.terminals.get(key.substring(2));
+        var terminalId = WorkbenchRowKey.idOf(key, WorkbenchRowKind.Terminal);
+        if (terminalId != null) {
+            var terminal = model.terminals.get(terminalId);
             if (terminal != null) {
                 var terminalValid = function() {
                     if (!valid()) return false;
@@ -316,8 +311,9 @@ class WorkbenchPanel implements View {
                 return;
             }
         }
-		if (key != null && StringTools.startsWith(key, "a:")) {
-			var agent = model.agents.get(key.substring(2));
+		var agentId = WorkbenchRowKey.idOf(key, WorkbenchRowKind.Agent);
+		if (agentId != null) {
+			var agent = model.agents.get(agentId);
 			if (agent == null) return;
 			items.push(new MenuItem("open-codex", "Open agent session", function() openAgent(agent.id)));
 			var nativeName = canRenameNative(agent.id);
@@ -355,9 +351,11 @@ class WorkbenchPanel implements View {
 		if (cwd != null) items.push(new MenuItem("open-folder", "Open folder", function() openFolder(cwd), true, null, group != null));
 		if (group != null && client.agentService().canControlAgents())
 			items.push(new MenuItem("attach-codex", "Attach existing Codex thread…", function() attach(group)));
-		if (group != null && client.canEditGroups() && GroupContextActions.canRemove(group,
-			client.canRemoveGroups() && !client.agentService().agentBusy(), catalog, client.agentService().agents()))
-			items.push(new MenuItem("group-remove", "Remove Group", function() edit(group, "remove"), editable, null, true));
+		// Shown whenever the service can remove groups; disabled, with the reason, while this one still has contents.
+		var removal = group == null ? GroupRemoval.NotPermitted : GroupContextActions.removal(group, client);
+		if (group != null && removal != GroupRemoval.NotPermitted)
+			items.push(new MenuItem("group-remove", GroupContextActions.removeLabel(removal), function() edit(group, "remove"),
+				editable && removal == GroupRemoval.Allowed, null, true));
 		if (key == null) {
 			items.push(new MenuItem("refresh", "Refresh Workbench", function() {
 				if (client.canReadTerminals()) client.refreshTerminals(true);
@@ -371,11 +369,11 @@ class WorkbenchPanel implements View {
 	function removeAgent(id:String, select:Bool = true):Void {
 		var agent = model.agents.get(id);
 		if (agent == null || !agentCanBeRemoved(agent) || !client.agentService().canControlAgents() || client.agentService().agentBusy()) return;
-		if (select) tree.select("a:" + id);
+		if (select) tree.select(WorkbenchRowKey.agent(id));
 		var group = agent.group;
 		client.agentService().deleteAgent(id, function() {
 			closeAgentTab(id, agent.workspaceRoot);
-			if (select && model.groups.exists(group)) tree.select("g:" + group);
+			if (select && model.groups.exists(group)) tree.select(WorkbenchRowKey.group(group));
 			requestFrame();
 		});
 		requestFrame();
@@ -389,7 +387,7 @@ class WorkbenchPanel implements View {
         draftOwner = catalog.instance; draftError = null;
         inlineEditor = new WorkbenchNameEditor(group.id, draftName, function(value) draftName = value, saveGroup, cancelGroup);
         model.update(catalog, client.agentService().agents(), creating ? draft : null);
-        revealNode("g:" + group.id);
+        revealNode(WorkbenchRowKey.group(group.id));
         applyPendingReveal();
         requestFrame();
     }
@@ -423,7 +421,8 @@ class WorkbenchPanel implements View {
         tree.cancelDrag();
         agentPending = false; cancelAgentRename();
         pendingSessionSelection = null;
-        if (scrollTarget != null && (StringTools.startsWith(scrollTarget, "a:") || StringTools.startsWith(scrollTarget, "t:"))) scrollTarget = null;
+        var scrolled = WorkbenchRowKey.parse(scrollTarget);
+        if (scrolled != null && scrolled.kind != WorkbenchRowKind.Group) scrollTarget = null;
     }
 
     function applyPendingSessionSelection():Void {
@@ -431,28 +430,12 @@ class WorkbenchPanel implements View {
         if (target == null) return;
         var terminalCatalog = client.terminalCatalog();
         if (terminalCatalog == null || terminalCatalog.workspaceRoot != target.workspaceRoot) return;
-        var group:Null<WorkspaceGroup> = null;
-        if (StringTools.startsWith(target.key,"t:")) {
-            var terminal=model.terminals.get(target.key.substring(2));
-            if(terminal != null) group=model.groups.get(terminal.group);
-        } else {
+        if (!WorkbenchRowKey.isKind(target.key, WorkbenchRowKind.Terminal)) {
             var agentCatalog=client.agentService().agents();
             if(agentCatalog == null || agentCatalog.root != target.workspaceRoot) return;
-            var agent=model.agents.get(target.key.substring(2));
-            if(agent != null) group=model.groups.get(agent.group);
         }
-        if (group == null) return;
-        var ancestors:Array<String> = [];
-        var visited:Map<String, Bool> = [];
-        var parent:Null<String> = group.id;
-        while (parent != null && !visited.exists(parent)) {
-            visited.set(parent, true);
-            ancestors.unshift("g:" + parent);
-            var ancestor = model.groups.get(parent);
-            if (ancestor == null) return;
-            parent = ancestor.parent;
-        }
-        for (ancestor in ancestors) tree.setExpanded(ancestor, true);
+        var group = WorkbenchRowKey.groupOf(model, target.key);
+        if (group == null || !expandAncestors(group.id)) return;
         if (tree.selectedKey != target.key) {
             tree.select(target.key);
             scrollTarget = target.key;
@@ -461,33 +444,30 @@ class WorkbenchPanel implements View {
         pendingSessionSelection = null;
     }
 
+    /** Expands `groupId` and every group above it so a row inside shows; false when the chain is broken. */
+    function expandAncestors(groupId:Null<String>):Bool {
+        var ancestors:Array<String> = [];
+        var visited:Map<String, Bool> = [];
+        var parent = groupId;
+        while (parent != null && !visited.exists(parent)) {
+            visited.set(parent, true);
+            ancestors.unshift(WorkbenchRowKey.group(parent));
+            var ancestor = model.groups.get(parent);
+            if (ancestor == null) return false;
+            parent = ancestor.parent;
+        }
+        for (ancestor in ancestors) tree.setExpanded(ancestor, true);
+        return true;
+    }
+
     function applyPendingReveal():Void {
         var key = pendingReveal;
         if (key == null) return;
         var catalog = client.terminalCatalog();
         if (catalog == null) return;
         if (catalog.workspaceRoot != revealRoot) { pendingReveal = null; return; }
-        var group:Null<WorkspaceGroup> = null;
-        if (StringTools.startsWith(key, "g:")) group = model.groups.get(key.substring(2));
-        else if (StringTools.startsWith(key, "t:")) {
-            var terminal = model.terminals.get(key.substring(2));
-            if (terminal != null) group = model.groups.get(terminal.group);
-        } else if (StringTools.startsWith(key, "a:")) {
-            var agent = model.agents.get(key.substring(2));
-            if (agent != null) group = model.groups.get(agent.group);
-        }
-        if (group == null) return;
-        var ancestors:Array<String> = [];
-        var visited:Map<String, Bool> = [];
-        var parent = StringTools.startsWith(key, "g:") ? group.parent : group.id;
-        while (parent != null && !visited.exists(parent)) {
-            visited.set(parent, true);
-            ancestors.unshift("g:" + parent);
-            var ancestor = model.groups.get(parent);
-            if (ancestor == null) return;
-            parent = ancestor.parent;
-        }
-        for (ancestor in ancestors) tree.setExpanded(ancestor, true);
+        var group = WorkbenchRowKey.groupOf(model, key);
+        if (group == null || !expandAncestors(WorkbenchRowKey.isKind(key, WorkbenchRowKind.Group) ? group.parent : group.id)) return;
         tree.select(key);
         scrollTarget = key;
         scrollPasses = 2;
@@ -527,7 +507,7 @@ class WorkbenchPanel implements View {
 		agentEditor = new WorkbenchNameEditor(id, agentDraftName, function(value) agentDraftName = value,
 			saveAgentName, cancelAgentRename, "agent",nativeName ? "Session name" : "Workbench label");
 		agentEditor.onBlur = function() finishAgentRename(false);
-		refreshModel = true; revealNode("a:" + id); requestFrame();
+		refreshModel = true; revealNode(WorkbenchRowKey.agent(id)); requestFrame();
 	}
 
 	function cancelAgentRename():Void finishAgentRename(true);
@@ -600,7 +580,7 @@ class WorkbenchPanel implements View {
             var base = draft;
             if (catalog != null && catalog.instance == draftOwner && base != null)
                 for (group in catalog.groups) if (group.id == base.id && group.name == draftName && group.revision > base.revision) saved = true;
-            if (saved) { pending = false; cancelGroup(); if (base != null) revealNode("g:" + base.id); }
+            if (saved) { pending = false; cancelGroup(); if (base != null) revealNode(WorkbenchRowKey.group(base.id)); }
             else if (client.terminalCatalogError() != null || Sys.time() - pendingSince > 10) {
                 pending = false;
                 draftError = client.terminalCatalogError() == null ? "Could not confirm the save. Refresh before retrying." : client.terminalCatalogError();
@@ -641,8 +621,8 @@ class WorkbenchPanel implements View {
 			if (selected != null) createProvider("codex", selected.id);
 		}, "workbench-new-codex");
 		agent.enabled = selected != null && canCreateAgent();
-		var selectedAgent = tree.selectedKey != null && StringTools.startsWith(tree.selectedKey, "a:")
-			? model.agents.get(tree.selectedKey.substring(2)) : null;
+		var selectedAgentId = WorkbenchRowKey.idOf(tree.selectedKey, WorkbenchRowKind.Agent);
+		var selectedAgent = selectedAgentId == null ? null : model.agents.get(selectedAgentId);
 		var selection = tree.selectedKeys();
 		var multiple = selection.length > 1;
 		var removable = multiple ? removableKeys(selection) : [];
@@ -713,10 +693,10 @@ class WorkbenchPanel implements View {
         });
         node.on(haxeon.ui.core.UiEventKind.KeyDown, function(event) {
             if (event.key == haxeon.ui.core.UiKey.F2 && draft == null && agentDraft == null) {
-				var key = tree.selectedKey;
-				if (key != null && StringTools.startsWith(key, "a:")) {
-					event.preventDefault(); event.stopPropagation(); beginAgentRename(key.substring(2),canRenameNative(key.substring(2)));
-				} else if (key != null && StringTools.startsWith(key, "g:") && selected != null && client.canEditGroups()) {
+				var key = tree.selectedKey, agentId = WorkbenchRowKey.idOf(key, WorkbenchRowKind.Agent);
+				if (agentId != null) {
+					event.preventDefault(); event.stopPropagation(); beginAgentRename(agentId, canRenameNative(agentId));
+				} else if (WorkbenchRowKey.isKind(key, WorkbenchRowKind.Group) && selected != null && client.canEditGroups()) {
 					event.preventDefault(); event.stopPropagation(); beginGroup(selected, false);
 				}
             }
