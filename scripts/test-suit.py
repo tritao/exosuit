@@ -111,6 +111,16 @@ def find(listing: dict, pid: int) -> dict | None:
     return next((entry for entry in listing["processes"] if entry["pid"] == pid), None)
 
 
+def write_private(path: Path, text: str) -> None:
+    """Writes a file only this user can read, as suit requires of relay records and settings."""
+    path.write_text(text)
+    if os.name == "nt":
+        user = f"{os.environ['USERDOMAIN']}\\{os.environ['USERNAME']}"
+        subprocess.run(["icacls", str(path), "/inheritance:r", "/grant:r", f"{user}:F"], check=True, capture_output=True)
+    else:
+        path.chmod(0o600)
+
+
 def wait_until(condition, timeout: float, message: str) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -292,10 +302,10 @@ def test_hosted_workspace(fixture: Fixture, directory: Path) -> None:
     root = directory / "hosted"; root.mkdir(parents=True)
     state = directory / "hosted-state"; state.mkdir()
     settings = state / "relay-settings.json"
-    settings.write_text(json.dumps({"version": 1, "origin": "http://127.0.0.1:1"}))
+    write_private(settings, json.dumps({"version": 1, "origin": "http://127.0.0.1:1"}))
     machine = "ab" * 16
     hosts = fixture.home / "relay-hosts"; hosts.mkdir()
-    (hosts / f"{machine}.json").write_text(json.dumps({
+    write_private(hosts / f"{machine}.json", json.dumps({
         "version": 1, "root": str(root), "stateDir": str(state), "machineId": machine, "origin": "http://127.0.0.1:1",
         "executable": str(HL), "launcher": str(SUIT)}))
     manager, host = fixture.spawn(), fixture.spawn()
