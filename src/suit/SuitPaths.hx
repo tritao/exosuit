@@ -16,6 +16,11 @@ class SuitPaths {
 		var configured = Sys.getEnv("EXOSUIT_SUIT_HOME");
 		if (configured != null && configured.length > 0)
 			return configured;
+		return defaultHome();
+	}
+
+	/** The user's suit home, where suit lives without `EXOSUIT_SUIT_HOME`. */
+	public static function defaultHome():String {
 		if (Sys.systemName() == "Windows") {
 			var local = Sys.getEnv("LOCALAPPDATA");
 			if (local == null || local.length == 0)
@@ -34,10 +39,18 @@ class SuitPaths {
 	**/
 	public static function prepare():Bool {
 		var directory = home();
-		var parent = Path.directory(directory);
-		if (parent.length > 0 && !sys.FileSystem.exists(parent))
-			sys.FileSystem.createDirectory(parent);
+		createAncestors(Path.directory(directory));
 		return preparePrivateDirectory(directory) && preparePrivateDirectory(registry());
+	}
+
+	/** Creates `directory` and any missing parents; createDirectory makes one level only. */
+	static function createAncestors(directory:String):Void {
+		if (directory.length == 0 || sys.FileSystem.exists(directory))
+			return;
+		var parent = Path.directory(directory);
+		if (parent != directory)
+			createAncestors(parent);
+		try sys.FileSystem.createDirectory(directory) catch (_:Dynamic) {}
 	}
 
 	/** One `<pid>.json` record per registered process. */

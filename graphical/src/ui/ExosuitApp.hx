@@ -456,6 +456,9 @@ class ExosuitApp implements DesktopUiApplication {
 		updateEditorPalette();
 		for (error in fontErrors) application.reportError("fonts", error);
 		installCommands();
+		// Once per session: a real window whose suit is off only because its state folder is temporary.
+		if (suit.SuitClient.takeTemporaryStateNotice())
+			host.getNotifications().publish(suit.SuitClient.TEMPORARY_STATE_MESSAGE, feedback.NotificationKind.Warning, "suit");
 		syncScmSidebar();
 		var previousSidebarWidth = application.settings.current.sidebarWidth;
 		sidebar.rememberWidth(previousSidebarWidth);

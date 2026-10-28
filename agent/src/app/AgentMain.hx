@@ -39,6 +39,8 @@ class AgentMain {
 		}
 		if (args.length < 4 || args.length > 9)
 			throw "Usage: exosuit-agent PRIVATE_SOCKET LOOPBACK_WS_PORT TOKEN_FILE SEED_EPOCH [DATABASE [WORKSPACE_ROOT [INSTANCE [IDLE_MILLISECONDS [RELAY_BOOTSTRAP]]]]]";
+		// Settles EXOSUIT_SUIT once, before this daemon spawns terminals or compiler workers, so they inherit it.
+		suit.SuitClient.resolve(haxe.io.Path.directory(args[2]));
 		var idleMilliseconds = args.length >= 8 ? Std.parseInt(args[7]) : 60000;
 		if (idleMilliseconds == null || idleMilliseconds < 0)
 			throw "Invalid workspace idle timeout";

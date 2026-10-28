@@ -26,8 +26,9 @@ python scripts/suit.py help            all commands
 - **Validation.** suit trusts a record only while the pid's start time is no
   later than the time the record was written. A record for a pid that has
   since been reused is ignored, and so is a record for a process that has
-  exited; the daemon deletes both. A process whose start time cannot be read
-  (including one this user may not open) is not trusted.
+  exited; the daemon deletes both. A running process whose start time cannot
+  be read (one this user may not open) keeps its record: it is listed with an
+  unknown start and never acted on (`SuitInventory.keepsRecord`).
 - **Record times.** Records are written with `SuitClock.now()`, the wall
   clock in milliseconds with sub-second precision (`Sys.time()`; HashLink's
   `Date.now()` has whole seconds only, which made a record written in its
@@ -36,7 +37,8 @@ python scripts/suit.py help            all commands
   second before the start time (`SuitClock.registeredAfterStart`).
 - **Scanning.** Unless `EXOSUIT_SUIT_SCAN=0` is set, suit also reads the
   command lines of `hl`, `exosuit` and `exosuit-agent` processes, and from
-  each one its `EXOSUIT_SUIT`, `EXOSUIT_SUIT_HOME` and `PATH` variables. It
+  each one its `EXOSUIT_SUIT`, `EXOSUIT_SUIT_HOME`, state (`PRAGTICAL_PORTABLE`,
+  `XDG_STATE_HOME`, `EXOSUIT_AGENT_STATE_HOME`) and `PATH` variables. It
   recognizes editors, workspace managers and daemons, Haxeon compiler workers,
   and live sessions and live hosts.
 - **Ownership is positive.** A process is exosuit's only when it registered,
@@ -44,9 +46,11 @@ python scripts/suit.py help            all commands
   of these:
   - it is of a kind exosuit starts itself (`SuitKinds.spawnedByExosuit`): a
     workspace manager or daemon, a compiler worker, a live session or host;
-  - its environment registers with this suit: `EXOSUIT_SUIT` is not `off`,
-    and `EXOSUIT_SUIT_HOME` names this suit's home or, for the user's suit,
-    nothing. An environment suit cannot read (`PATH` missing) does not count;
+  - its environment registers with this suit (`SuitLineage.registersWith`,
+    the one place this policy lives): its mode by the rule below is not off,
+    and its suit home, resolved (`EXOSUIT_SUIT_HOME`, else the default home),
+    is this suit's resolved home. An environment suit cannot read (`PATH`
+    missing) does not count;
   - its parent chain reaches a registered process through processes of those
     kinds only, each started no earlier than its parent.
 
@@ -81,7 +85,14 @@ Windows, `processkit_started` reports a process it may not open as
 `PROCESSKIT_STARTED_DENIED` (-2), not as gone. `processkit_list_open` reads
 the environment variables it is asked for from the processes whose command
 lines it reads (the process's PEB on Windows, `/proc/<pid>/environ` on
-Linux).
+Linux). Windows shows the current environment, Linux the one the process
+started with; the adoption rule re-applies the temp-folder rule to the state
+variables, so a process that set `EXOSUIT_SUIT=off` on itself at startup is
+judged alike on both. A block that is not double-NUL terminated (a read torn
+by the process changing it) reads as unreadable. A 32-bit processkit reads
+no environments, since it cannot follow a 64-bit process's PEB; there every
+environment is unreadable, so suit adopts nothing (registered processes and
+stops still work).
 
 ## Stopping
 
@@ -106,7 +117,9 @@ terminal.
 Once the grace period ends (3 s for services), suit kills the target if it
 still runs, and then sweeps: it kills the target's descendants of kinds
 exosuit starts itself (`SuitKinds.spawnedByExosuit`), reached through such
-processes only (`SuitLineage.exosuitDescendants`). The sweep covers the
+processes only (`SuitLineage.exosuitDescendants`), and never one whose
+environment says it belongs elsewhere (`EXOSUIT_SUIT=off`, another suit's
+home); an unreadable environment does not exclude. The sweep covers the
 descendants captured before anything was stopped and whatever a fresh
 snapshot finds under the target or under them. Killing the target first means
 it cannot start a child after the sweep's last snapshot; the sweep repeats
@@ -115,8 +128,10 @@ that reach their deadline together share each round's snapshot.
 
 A child counts as one only if it started no earlier than its parent; an older
 process naming that pid as its parent belongs to a reused pid. If a snapshot
-lists the target's pid with a different start time, the pid has been reused,
-and suit does not look below it.
+lists the target's pid with a later start time, the target exited and its pid
+was reused: only children that started before the new process are the
+target's. With an earlier start time the snapshot predates the target, and
+suit does not look below it.
 
 ## Tray menu (Windows)
 
@@ -165,15 +180,25 @@ Two commands show the menu without clicking. `suit menu` prints it as text.
 - unset: `on`, unless the process keeps its state in the system temp folder
   (`TEMP`/`TMP` on Windows, `TMPDIR` or `/tmp` elsewhere): its
   `PRAGTICAL_PORTABLE`, `XDG_STATE_HOME` or `EXOSUIT_AGENT_STATE_HOME`, or a
-  workspace manager's `--state-dir`. Then it is `off`, and the process sets
-  `EXOSUIT_SUIT=off` in its own environment so that what it starts inherits
-  it (`SuitClient.mode`).
+  workspace manager's `--state-dir`. Then it is `off` (`SuitClient.modeOf`).
+
+`SuitClient.mode` only answers. Each process settles its mode once at
+startup, before it spawns anything (`SuitClient.resolve`, called by the
+editor, the workspace manager and the workspace daemon). When the mode is
+off only because the state folder is temporary, `resolve` logs `suit
+disabled: state folder is temporary (set EXOSUIT_SUIT=on to enable)`, sets
+`EXOSUIT_SUIT=off` in its own environment so every child it spawns starts
+with it, and an editor window shows that message as a notice once per
+session. Registration, the daemon start and relay hosting all use the
+resolved mode (`SuitClient.current`).
 
 The temp-folder rule is the central fix for tests run by hand: every test
 keeps its state in a disposable temp directory (the suites require a
 disposable `PRAGTICAL_PORTABLE`), and a user's editor never does, so a test
 script run outside the suites and the guard still stays out of the user's
-suit. An explicit `EXOSUIT_SUIT` always wins.
+suit. An explicit `EXOSUIT_SUIT` always wins. A real editor can land there
+too, for example a portable build unzipped under `%TEMP%` or `/tmp`; the log
+line and the notice say so, and `EXOSUIT_SUIT=on` turns suit back on.
 
 `off` is also set in a few central places, and everything they start
 inherits it: the run guard (`docs/benchmarks/perf-harness/run-guarded.ps1`),

@@ -352,9 +352,20 @@ typedef struct processkit_basic_information {
     PVOID reserved3;
 } processkit_basic_information;
 
-/* Reads `size` bytes at `address`, shrinking the read when the end of the block is not mapped. */
+/* Offsets in a 64-bit process: PEB.ProcessParameters, then RTL_USER_PROCESS_PARAMETERS.Environment and .EnvironmentSize. */
+#define PROCESSKIT_PEB_PROCESS_PARAMETERS 0x20
+#define PROCESSKIT_PARAMETERS_ENVIRONMENT 0x80
+#define PROCESSKIT_PARAMETERS_ENVIRONMENT_SIZE 0x3F0
+/* Read when EnvironmentSize is missing or implausible; larger blocks are never read. */
+#define PROCESSKIT_ENVIRONMENT_FALLBACK_BYTES 65536
+#define PROCESSKIT_ENVIRONMENT_MAX_BYTES (1u << 20)
+
+/*
+ * Reads `size` bytes at `address`: the exact size first, then halving when the end of
+ * the block is not mapped, down to one wide character.
+ */
 static SIZE_T read_remote(HANDLE process, const char *address, char *buffer, SIZE_T size) {
-    while (size >= 4096) {
+    while (size >= sizeof(wchar_t)) {
         SIZE_T read = 0;
         if (ReadProcessMemory(process, address, buffer, size, &read) && read > 0)
             return read;
@@ -364,9 +375,25 @@ static SIZE_T read_remote(HANDLE process, const char *address, char *buffer, SIZ
 }
 
 /*
- * The requested variables of a 64-bit process's environment block, read from its
- * PEB: ProcessParameters (PEB + 0x20), then Environment (+ 0x80) and
- * EnvironmentSize (+ 0x3F0) in RTL_USER_PROCESS_PARAMETERS. Needs PROCESS_VM_READ.
+ * The length in characters of a well-formed environment block within `count`
+ * characters: pairs ending in a double NUL (a lone NUL for an empty block). Returns
+ * 0 when there is none, as when the read caught the block while the process changed it.
+ */
+static size_t environment_block_length(const wchar_t *text, size_t count) {
+    if (count >= 1 && text[0] == L'\0')
+        return 1;
+    for (size_t index = 1; index < count; index++)
+        if (text[index] == L'\0' && text[index - 1] == L'\0')
+            return index + 1;
+    return 0;
+}
+
+/*
+ * The requested variables of a 64-bit process's environment block, read from its PEB
+ * (see the offsets above). Needs PROCESS_VM_READ. Returns NULL (unreadable) for a block
+ * that is not well formed. A 32-bit processkit does not read environments: it cannot
+ * follow a 64-bit process's PEB, so every process reads as unreadable there, and suit,
+ * which adopts only processes whose environment it read, adopts nothing.
  */
 static char *read_environment(HANDLE process, const char *variables) {
 #if defined(_WIN64)
@@ -379,19 +406,23 @@ static char *read_environment(HANDLE process, const char *variables) {
         return NULL;
     char *parameters = NULL, *block = NULL;
     SIZE_T block_size = 0;
-    if (!ReadProcessMemory(process, (char *)basic.peb + 0x20, &parameters, sizeof(parameters), NULL) || !parameters)
+    if (!ReadProcessMemory(process, (char *)basic.peb + PROCESSKIT_PEB_PROCESS_PARAMETERS, &parameters, sizeof(parameters), NULL) ||
+        !parameters)
         return NULL;
-    if (!ReadProcessMemory(process, parameters + 0x80, &block, sizeof(block), NULL) || !block)
+    if (!ReadProcessMemory(process, parameters + PROCESSKIT_PARAMETERS_ENVIRONMENT, &block, sizeof(block), NULL) || !block)
         return NULL;
-    if (!ReadProcessMemory(process, parameters + 0x3F0, &block_size, sizeof(block_size), NULL) || block_size == 0 ||
-        block_size > (1u << 20))
-        block_size = 65536;
+    if (!ReadProcessMemory(process, parameters + PROCESSKIT_PARAMETERS_ENVIRONMENT_SIZE, &block_size, sizeof(block_size), NULL) ||
+        block_size == 0 || block_size > PROCESSKIT_ENVIRONMENT_MAX_BYTES)
+        block_size = PROCESSKIT_ENVIRONMENT_FALLBACK_BYTES;
     wchar_t *text = (wchar_t *)malloc(block_size + 2 * sizeof(wchar_t));
     if (!text)
         return NULL;
     SIZE_T read = read_remote(process, block, (char *)text, block_size);
-    size_t count = read / sizeof(wchar_t);
-    text[count] = L'\0';
+    size_t count = environment_block_length(text, read / sizeof(wchar_t));
+    if (count == 0) {
+        free(text);
+        return NULL;
+    }
     char *result = NULL;
     size_t result_length = 0;
     size_t index = 0;
@@ -407,6 +438,7 @@ static char *read_environment(HANDLE process, const char *variables) {
     free(text);
     return result;
 #else
+    /* 32-bit: environments are not read (see above). */
     (void)process;
     (void)variables;
     return NULL;
@@ -650,8 +682,22 @@ static char *read_environment(int pid, const char *variables) {
     FILE *file = fopen(path, "r");
     if (!file)
         return NULL;
-    char *block = (char *)malloc(1u << 20);
-    size_t length = block ? fread(block, 1, (1u << 20) - 1, file) : 0;
+    /* procfs reports no size, so the block grows in chunks, up to 1 MiB. */
+    size_t capacity = 4096, length = 0;
+    char *block = (char *)malloc(capacity);
+    while (block) {
+        length += fread(block + length, 1, capacity - 1 - length, file);
+        if (length < capacity - 1 || capacity >= (1u << 20))
+            break;
+        char *grown = (char *)realloc(block, capacity * 2);
+        if (!grown) {
+            free(block);
+            block = NULL;
+            break;
+        }
+        block = grown;
+        capacity *= 2;
+    }
     fclose(file);
     if (!block)
         return NULL;

@@ -29,8 +29,18 @@ static void require(int condition, const char *message) {
 #if defined(_WIN32)
 typedef HANDLE child_process;
 
-static int start_child(const char *self, child_process *out_child) {
+/* Starts the child; with `tiny`, its whole environment is PROCESSKIT_CONTRACT=tiny (and SystemRoot). */
+static int start_child(const char *self, child_process *out_child, int tiny) {
     (void)self;
+    static char tiny_environment[MAX_PATH + 64];
+    if (tiny) {
+        char system_root[MAX_PATH];
+        if (!GetEnvironmentVariableA("SystemRoot", system_root, MAX_PATH))
+            strcpy(system_root, "C:\\Windows");
+        int length = snprintf(tiny_environment, sizeof(tiny_environment) - 1, "PROCESSKIT_CONTRACT=tiny%cSystemRoot=%s%c",
+                              0, system_root, 0);
+        tiny_environment[length] = '\0';
+    }
     char program[MAX_PATH];
     if (!GetModuleFileNameA(NULL, program, MAX_PATH))
         return 0;
@@ -40,7 +50,8 @@ static int start_child(const char *self, child_process *out_child) {
     PROCESS_INFORMATION info;
     memset(&startup, 0, sizeof(startup));
     startup.cb = sizeof(startup);
-    if (!CreateProcessA(NULL, command, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &startup, &info))
+    if (!CreateProcessA(NULL, command, NULL, NULL, FALSE, CREATE_NO_WINDOW, tiny ? tiny_environment : NULL, NULL, &startup,
+                        &info))
         return 0;
     CloseHandle(info.hThread);
     *out_child = info.hProcess;
@@ -62,14 +73,18 @@ static void pause_briefly(void) { Sleep(50); }
 #else
 typedef pid_t child_process;
 
-static int start_child(const char *self, child_process *out_child) {
+static int start_child(const char *self, child_process *out_child, int tiny) {
     (void)self;
     pid_t pid = fork();
     if (pid < 0)
         return 0;
     if (pid == 0) {
         /* exec, so /proc/<pid>/environ holds the environment set for the child */
-        execl("/proc/self/exe", "processkit_contract", "--sleep", (char *)NULL);
+        char *tiny_environment[] = {"PROCESSKIT_CONTRACT=tiny", NULL};
+        if (tiny)
+            execle("/proc/self/exe", "processkit_contract", "--sleep", (char *)NULL, tiny_environment);
+        else
+            execl("/proc/self/exe", "processkit_contract", "--sleep", (char *)NULL);
         _exit(1);
     }
     *out_child = pid;
@@ -161,7 +176,7 @@ static void test_identity(int self) {
 }
 
 /* The child's environment holds only what was asked for, from the variables it was started with. */
-static void check_child_environment(int pid) {
+static void check_child_environment(int pid, const char *expected) {
     processkit_list list = {0};
     if (processkit_list_open("*", "PROCESSKIT_CONTRACT;PROCESSKIT_ABSENT", &list) != PROCESSKIT_OK)
         return; /* listing unsupported; test_snapshot reported it */
@@ -169,7 +184,7 @@ static void check_child_environment(int pid) {
     for (int index = 0; index < processkit_list_count(list); index++)
         if (processkit_list_pid(list, index) == pid) {
             found = 1;
-            require(strcmp(processkit_list_environment(list, index), "PROCESSKIT_CONTRACT=child\n") == 0,
+            require(strcmp(processkit_list_environment(list, index), expected) == 0,
                     "a listed process's requested environment variables are read");
         }
     require(found, "the child is listed");
@@ -183,7 +198,7 @@ static void test_terminate(const char *program) {
 #else
     setenv("PROCESSKIT_CONTRACT", "child", 1);
 #endif
-    int pid = start_child(program, &child);
+    int pid = start_child(program, &child, 0);
     require(pid > 0, "the child starts");
     if (pid <= 0)
         return;
@@ -194,13 +209,30 @@ static void test_terminate(const char *program) {
             pause_briefly();
     }
     require(started > 0, "the child has a start time");
-    check_child_environment(pid);
+    check_child_environment(pid, "PROCESSKIT_CONTRACT=child\n");
     require(processkit_terminate(pid, started + 1) == PROCESSKIT_NOT_FOUND, "a wrong start time leaves the child alone");
     require(!child_exited(child, 0), "the child survives a mismatched terminate");
     require(processkit_terminate(pid, started) == PROCESSKIT_OK, "a matching terminate succeeds");
     require(child_exited(child, 10), "the child exits once terminated");
     reap_child(child);
     require(processkit_identify(pid, started) == PROCESSKIT_NOT_FOUND, "an exited child is not found");
+}
+
+/* A child with a minimal environment (far under a page) still has its environment read. */
+static void test_tiny_environment(const char *program) {
+    child_process child;
+    int pid = start_child(program, &child, 1);
+    require(pid > 0, "the tiny-environment child starts");
+    if (pid <= 0)
+        return;
+    double started = -1;
+    for (int attempt = 0; attempt < 100 && started <= 0; attempt++) {
+        started = processkit_started(pid);
+        if (started <= 0)
+            pause_briefly();
+    }
+    check_child_environment(pid, "PROCESSKIT_CONTRACT=tiny\n");
+    reap_child(child);
 }
 
 int main(int argc, char **argv) {
@@ -216,6 +248,7 @@ int main(int argc, char **argv) {
     test_snapshot(self);
     test_identity(self);
     test_terminate(argv[0]);
+    test_tiny_environment(argv[0]);
     if (failures == 0)
         printf("PASS: processkit contract\n");
     return failures == 0 ? 0 : 1;

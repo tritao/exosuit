@@ -72,6 +72,7 @@ class SuitInventory {
 	final listed:Bool;
 	/** True for the daemon's inventory: it prunes stale records and persists adoptions. */
 	final maintain:Bool;
+	final lineage:SuitLineage;
 
 	public function new(maintain:Bool = false) {
 		self = Sys.getPid();
@@ -82,6 +83,7 @@ class SuitInventory {
 		snapshot = list == null ? [] : list;
 		for (info in snapshot)
 			byPid.set(info.pid, info);
+		lineage = new SuitLineage(snapshot, SuitPaths.home());
 		readRegistry();
 		if (scanning && listed)
 			scan();
@@ -155,7 +157,7 @@ class SuitInventory {
 
 	/** The descendants of `pid` that exosuit spawned (SuitLineage.exosuitDescendants), from this inventory's snapshot. */
 	public function exosuitDescendants(pid:Int, started:Float):Array<ProcessInfo>
-		return SuitLineage.exosuitDescendants(snapshot, pid, started, self);
+		return lineage.exosuitDescendants(pid, started, self);
 
 	/** The running process with `pid`, from the snapshot or, where listing is unsupported, asked directly. */
 	function lookup(pid:Int):Null<ProcessInfo> {
@@ -163,7 +165,7 @@ class SuitInventory {
 		if (info != null || listed)
 			return info;
 		var started = Processes.started(pid);
-		// A process this user may not open is running, but its start time is unknown, so it never validates.
+		// A process this user may not open is running, but its start time is unknown (0).
 		if (started == Processes.STARTED_DENIED)
 			started = 0;
 		return started < 0 ? null : {pid: pid, parent: 0, started: started, name: "", commandLine: "", environment: ""};
@@ -186,8 +188,7 @@ class SuitInventory {
 			if (record.pid == self)
 				continue;
 			var info = lookup(record.pid);
-			// A process registers after it starts; one that started later reused the pid.
-			if (info == null || !SuitClock.registeredAfterStart(info.started, record.registeredAt, record.version)) {
+			if (info == null || !keepsRecord(info, record.registeredAt, record.version)) {
 				prune(path);
 				continue;
 			}
@@ -210,6 +211,17 @@ class SuitInventory {
 		}
 	}
 
+	/**
+		Whether a record still describes the running process `info`. A process registers after it starts, so
+		one that started later reused the pid. A running process whose start time is unknown (one this user may
+		not open) keeps its record: it is listed with an unknown start, and never acted on.
+	**/
+	public static function keepsRecord(info:Null<ProcessInfo>, registeredAt:Float, version:Int):Bool {
+		if (info == null)
+			return false;
+		return info.started <= 0 || SuitClock.registeredAfterStart(info.started, registeredAt, version);
+	}
+
 	function scan():Void {
 		var known = new Map<Int, Bool>();
 		var owned = new Map<Int, Bool>();
@@ -217,14 +229,13 @@ class SuitInventory {
 			known.set(process.pid, true);
 			owned.set(process.pid, true);
 		}
-		var ownHome = Sys.getEnv("EXOSUIT_SUIT_HOME");
 		for (info in snapshot) {
 			if (known.exists(info.pid) || info.pid == self || info.commandLine.length == 0)
 				continue;
 			var found = SuitClassifier.classify(info.name, info.commandLine);
 			if (found == null || found.kind == SuitKind.Suit)
 				continue;
-			var owner = SuitLineage.adoptionOwner(info, byPid, owned, ownHome);
+			var owner = lineage.adoptionOwner(info, owned);
 			var process:SuitProcess = {
 				pid: info.pid,
 				started: info.started,

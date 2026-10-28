@@ -132,14 +132,15 @@ class SuitTerminator {
 	function sweep(due:Array<Target>):Void {
 		var killed = new Map<String, Bool>();
 		for (_ in 0...SWEEP_ROUNDS) {
-			var snapshot = Processes.list(SuitInventory.SCANNED_NAMES);
+			var snapshot = Processes.list(SuitInventory.SCANNED_NAMES, SuitLineage.VARIABLES);
+			var lineage = snapshot == null ? null : new SuitLineage(snapshot, SuitPaths.home());
 			var found:Array<ProcessInfo> = [];
 			for (target in due) {
-				if (snapshot != null) {
-					for (child in SuitLineage.exosuitDescendants(snapshot, target.process.pid, target.process.started, self))
+				if (lineage != null) {
+					for (child in lineage.exosuitDescendants(target.process.pid, target.process.started, self))
 						found.push(child);
 					for (captured in target.tree)
-						for (child in SuitLineage.exosuitDescendants(snapshot, captured.pid, captured.started, self))
+						for (child in lineage.exosuitDescendants(captured.pid, captured.started, self))
 							found.push(child);
 				}
 				for (captured in target.tree)
