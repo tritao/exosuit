@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "package": {"name": "exosuit-session-diff-regression"},
+  "entry": "app.SessionDiffRegressionMain",
+  "sourceRoots": ["src", "../../agent/src"],
+  "scopeSourceRoots": false,
+  "dependencies": {"exosuit-graphical": {"path": "../../graphical"}},
+  "target": "host",
+  "outputDir": "build"
+}

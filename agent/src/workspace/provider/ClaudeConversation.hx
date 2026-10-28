@@ -4,20 +4,33 @@ import workspace.service.WorkspaceAgentProtocol;
 
 /** Bounded normalized conversation. Cursors are invalidated when old items are evicted. */
 class ClaudeConversation {
+ static var nextCacheId:Int = 0;
+ final cacheId:Int;
  final entries:Array<AgentActivityItem> = [];
  var revision = 0;
- public function new(?saved:Array<AgentActivityItem>) {
-  if (saved != null) for (entry in saved) put(entry.id, entry.turn, entry.kind, entry.title, entry.text, entry.detail, entry.state);
+ function cacheKey(turn:String,id:String):String return "claude-"+cacheId+":"+turn.length+":"+turn+id;
+ public function content(turn:String,id:String,token:String,offset:Int):Null<AgentContentChunk> {
+  for (entry in entries) if (entry.turn == turn && entry.id == id && entry.kind == "agentMessage" && entry.contentToken == token)
+   return AgentContentCache.chunk(cacheKey(turn,id),token,offset);
+  return null;
  }
- public function put(id:String, turn:String, kind:String, title:String, text:String, detail:String, state:String):Void {
+ public function new(?saved:Array<AgentActivityItem>) {
+  cacheId=++nextCacheId;
+  if (saved != null) for (entry in saved) {
+   put(entry.id, entry.turn, entry.kind, entry.title, entry.text, entry.detail, entry.state, !entry.truncated);
+   for (restored in entries) if (restored.id == entry.id && restored.turn == entry.turn) restored.truncated = entry.truncated;
+  }
+ }
+ public function put(id:String, turn:String, kind:String, title:String, text:String, detail:String, state:String, retainContent:Bool = true):Void {
   if (id == null || id.length == 0 || id.length > 128 || turn.length > 128) return;
   title = title.substring(0,256);
   var entry:Null<AgentActivityItem> = null;
-  for (e in entries) if (e.id == id) entry = e;
+  for (e in entries) if (e.id == id && e.turn == turn) entry = e;
   if (entry == null) {
    entry = {id:id, turn:turn, kind:kind, title:title, text:"", detail:"", state:state, truncated:false};
    entries.push(entry);
   }
+  if (kind == "agentMessage" && retainContent) entry.contentToken = AgentContentCache.replace(cacheKey(turn,id),text);
   entry.text = text.substring(0,4096);
   // Tool results carry no input detail; keep the arguments received at tool_use.
   entry.detail = detail == "" ? entry.detail : detail.substring(0,2048); entry.state = state;
@@ -25,9 +38,12 @@ class ClaudeConversation {
   if (entries.length > 128) { entries.shift(); revision++; }
  }
  public function delta(id:String, turn:String, text:String):Void {
-  var previous = "";
-  for (entry in entries) if (entry.id == id) previous = entry.text;
-  put(id,turn,"agentMessage","Claude",previous + text,"","inProgress");
+  var previous = "", existing:Null<AgentActivityItem> = null;
+  for (entry in entries) if (entry.id == id && entry.turn == turn) { previous = entry.text; existing=entry; }
+  if (existing == null) { put(id,turn,"agentMessage","Claude",text,"","inProgress"); return; }
+  var token = existing.contentToken == null ? null : AgentContentCache.append(cacheKey(turn,id),text);
+  put(id,turn,"agentMessage","Claude",previous + text,"","inProgress",false);
+  existing.contentToken=token;
  }
  public function finish(turn:String, state:String):Void {
   for (entry in entries) if (entry.turn == turn && entry.state == "inProgress") entry.state = state;

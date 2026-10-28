@@ -30,7 +30,8 @@ class SessionChangeSummaryView implements View {
     var rows:Array<KeyedView> = [], tokens = context.theme.tokens;
     for (index in 0...files.length) {
       var file = files[index], path = file.path;
-      var validSlice = file.offset >= 0 && file.length >= 0 && file.offset <= detail.length && file.length <= detail.length - file.offset;
+      var validSlice = file.offset >= 0 && file.length >= 0 && file.offset <= detail.length && file.length <= detail.length - file.offset
+        && !(file.length == 0 && file.truncated);
       var additions = 0, removals = 0, hasHunk = false;
       if (validSlice) for (part in SessionDiff.parse(detail.substring(file.offset, file.offset + file.length))) for (line in part.lines) {
         if (line.kind == "hunk") hasHunk = true;

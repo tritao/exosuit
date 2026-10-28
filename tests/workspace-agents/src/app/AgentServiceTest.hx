@@ -4,6 +4,7 @@ import haxeon.rpc.RpcConnection;
 import haxeon.rpc.RpcContext;
 import haxeon.rpc.MemoryTransport;
 import workspace.provider.LocalAgentProvider;
+import workspace.provider.AgentMessageSource;
 import workspace.provider.WorkspaceAgentService;
 import workspace.service.WorkspaceAgentProtocol;
 
@@ -11,7 +12,7 @@ import workspace.service.WorkspaceAgentProtocol;
 class AgentServiceTest {
  static function require(ok:Bool,message:String):Void {if(!ok) throw message;}
  public static function run():Void {
-  var alpha=new FixtureProvider("alpha",31),beta=new FixtureProvider("beta",1);
+  var alpha=new MessageFixtureProvider("alpha",31),beta=new FixtureProvider("beta",1);
   var service=new WorkspaceAgentService("w","owner","/work",[alpha,beta]);
   var clock=function() return Sys.time()*1000;
   var pair=MemoryTransport.pair(),client=new RpcConnection(pair.client,clock),server=new RpcConnection(pair.server,clock);
@@ -55,10 +56,28 @@ class AgentServiceTest {
   ro.call(WorkspaceAgentProtocol.MESSAGE_CONTENT,{workspace:"w",instance:"owner",session:"beta-0",turn:"t",item:"i",token:"1",offset:0},1000,
    function(_) throw "Non-Codex content was accepted",function(error) unsupported=error.code=="content_unavailable");
   roServer.poll();ro.poll();require(unsupported,"Message content ignored provider ownership");
+  var loaded:Null<AgentContentChunk>=null;
+  ro.call(WorkspaceAgentProtocol.MESSAGE_CONTENT,{workspace:"w",instance:"owner",session:"alpha-0",turn:"t",item:"i",token:"1",offset:0},1000,
+   function(chunk) loaded=chunk,function(error) throw error.message);
+  roServer.poll();ro.poll();require(loaded != null && loaded.bytes.toString()=="Complete response" && alpha.reads==1,"Optional message source was not routed with read permission");
+  denied=false;
+  ro.call(WorkspaceAgentProtocol.MESSAGE_CONTENT,{workspace:"other",instance:"owner",session:"alpha-0",turn:"t",item:"i",token:"1",offset:0},1000,
+   function(_) throw "Cross-workspace message read accepted",function(error) denied=error.code=="unauthorized");
+  roServer.poll();ro.poll();require(denied && alpha.reads==1,"Workspace check did not fence message source");
   noRead.close();noReadServer.close();
   service.dispose();require(alpha.disposed && beta.disposed,"Service lifecycle did not reach every adapter");
   client.close();server.close();ro.close();roServer.close();
   Sys.println("PASS: provider-neutral routing, combined limits/pagination, cross-provider identity and authorization");
+ }
+}
+
+private class MessageFixtureProvider extends FixtureProvider implements AgentMessageSource {
+ public var reads=0;
+ public function messageContent(session:String,turn:String,item:String,token:String,offset:Int):Null<AgentContentChunk> {
+  reads++;
+  if (session!="alpha-0" || turn!="t" || item!="i" || token!="1" || offset!=0) return null;
+  var bytes=haxe.io.Bytes.ofString("Complete response");
+  return {token:token,offset:0,total:bytes.length,bytes:bytes,partial:false};
  }
 }
 

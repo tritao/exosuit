@@ -31,7 +31,7 @@ private typedef Session = {
 private typedef PendingApproval = {var wireId:Dynamic; var method:String; var detail:String; var reviewable:Bool; var questions:Array<String>;}
 
 /** Shared-daemon adapter. All policy/protocol interpretation stays on the owning machine. */
-class CodexProvider implements LocalAgentProvider {
+class CodexProvider implements AgentMessageSource {
 	public var imageUploadAvailable:Bool = false;
 	public static function turnInput(text:String, imagePaths:Array<String>):Array<Dynamic> {
 		var input:Array<Dynamic> = [];

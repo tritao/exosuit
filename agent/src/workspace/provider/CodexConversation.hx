@@ -135,20 +135,22 @@ class CodexConversation {
           var path = string(change, "path"), kind = string(Reflect.field(change, "kind"), "type");
           var diff = string(change, "diff");
           var retainedPath = clipped(path, Std.int(Math.min(512, pathBudget)));
+          var offset = entry.detail.length;
+          var remaining = Std.int(Math.max(0, 2048 - offset));
+          var retainedDiff = clipped(diff, remaining);
+          entry.detail += retainedDiff;
+          if (entry.detail.length < 2048) entry.detail += "\n";
+          var partial = retainedDiff.length != diff.length;
+          if (partial) entry.truncated = true;
           if (fileChanges.length < 8 && retainedPath == path && path != "") {
-            fileChanges.push({path: path, kind: clipped(kind, 32), offset: entry.detail.length,
-              length: diff.length, truncated: false});
+            fileChanges.push({path: path, kind: clipped(kind, 32), offset: offset,
+              length: retainedDiff.length, truncated: partial});
             pathBudget -= retainedPath.length;
           } else entry.truncated = true;
-          entry.text += (entry.text == "" ? "" : "\n") + string(Reflect.field(change, "kind"), "type") + " " + string(
-            change,
-            "path"
-          );
-          entry.detail += diff + "\n";
-          if (entry.text.length > 4096 || entry.detail.length > 2048) {
-            entry.truncated = true;
-            break;
-          }
+          var line = (entry.text == "" ? "" : "\n") + kind + " " + path;
+          var retainedLine = clipped(line, Std.int(Math.max(0, 4096 - entry.text.length)));
+          entry.text += retainedLine;
+          if (retainedLine.length != line.length) entry.truncated = true;
         }
       case "mcpToolCall":
         entry.title = "Tool";

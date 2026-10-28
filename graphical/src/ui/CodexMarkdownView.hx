@@ -169,16 +169,19 @@ class CodexMarkdownView implements View {
         var scroll = new LayoutStyle(); scroll.width = LayoutAxis.grow(); scroll.height = body.height;
         var card = new LayoutStyle(); card.width = LayoutAxis.grow(); card.childGap = 12;
         card.padding = new Insets(12, 10, 12, 10); card.background = context.theme.tokens.surfaceSunken;
-        card.radiusTopLeft = card.radiusTopRight = card.radiusBottomLeft = card.radiusBottomRight = 8;
+        card.radiusTopLeft = card.radiusTopRight = card.radiusBottomLeft = card.radiusBottomRight = 7;
+        var cardFrame = new LayoutStyle(); cardFrame.width = LayoutAxis.grow();
+        cardFrame.padding = new Insets(1, 1, 1, 1); cardFrame.background = WorkbenchBoundary.color(context);
+        cardFrame.radiusTopLeft = cardFrame.radiusTopRight = cardFrame.radiusBottomLeft = cardFrame.radiusBottomRight = 8;
         header.width = LayoutAxis.grow();
         label.width = LayoutAxis.grow();
         var heading:Array<KeyedView> = [new KeyedView("language", new Text(artifact == null ? (block.language == "" ? "Code" : block.language) : artifact, label, context.theme.tokens.mutedText))];
         if (artifact != null) heading.push(new KeyedView("hide", new Button("Hide source", null, function() shown.update(false), key + "-hide-source")));
         heading.push(new KeyedView("copy", copy));
-        rows.push(new KeyedView(key, new Column(key, [
+        rows.push(new KeyedView(key, new Column(key + "-frame", [new KeyedView("card", new Column(key, [
           new KeyedView("header", new Row(key + "-header", heading, header)),
           new KeyedView("code", new ScrollView(key + "-scroll", field, scroll, ScrollAxis.Horizontal))
-        ], card)));
+        ], card))], cardFrame)));
         if (artifact != null && block.language == "svg") rows.push(new KeyedView(key + "-svg", new SessionSvgView(key + "-svg", raw, frame)));
       } else if (isTable(block.text)) {
         var tableRows:Array<KeyedView> = [];

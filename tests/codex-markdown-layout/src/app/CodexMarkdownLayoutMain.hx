@@ -76,6 +76,28 @@ class CodexMarkdownLayoutMain {
     var codeHeader = find(root, "python").globalBounds();
     require(codeLabel.y >= codeHeader.y + codeHeader.height, "Code block header must precede its body");
     find(root, "Copy code");
+    for (dark in [false, true]) {
+      var themed = new UiContext(null, fonts, ui.ExosuitPalette.theme(dark));
+      var longCode = new CodexMarkdownView("```python\n" + [for (_ in 0...100) "x"].join("") + "\n```", new style.Theme(), syntaxes);
+      for (width in [320.0, 1000.0]) {
+        var cardRoot = themed.submit(longCode, new LayoutFrame(width, 400));
+        var frame:RenderNode = null, scroll:RenderNode = null;
+        cardRoot.walk(function(node) {
+          if (node.styleKey != null && StringTools.endsWith(node.styleKey, "-frame")) frame = node;
+          if (node.styleType == "scroll-view") scroll = node;
+        });
+        require(frame != null && frame.children.length == 1, "Code card edge or content missing");
+        var outer = frame.globalBounds(), inner = frame.children[0].globalBounds();
+        require(Math.abs(inner.x - outer.x - 1) < 0.1 && Math.abs(inner.width - outer.width + 2) < 0.1,
+          "Code card edge changed content bounds at " + width);
+        var copyBounds = find(cardRoot, "Copy code").globalBounds();
+        require(copyBounds.x >= outer.x && copyBounds.x + copyBounds.width <= outer.x + outer.width + 0.1,
+          "Code copy action escapes its card");
+        require(scroll != null && scroll.layout.style.clipHorizontal && find(cardRoot, "Code block: python").focusable,
+          "Code card lost horizontal clipping or selectable content");
+      }
+      themed.dispose();
+    }
     var oldModel = codeModel(context); oldModel.highlighter.line(0);
     view.update("```python\nprint('updated')\n```");
     root = context.submit(view,new LayoutFrame(1000,400));

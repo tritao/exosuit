@@ -33,7 +33,7 @@ private typedef ClaudeSession = {
 }
 
 /** One native CLI process per session, owned by the workspace daemon, not an editor attachment. */
-class ClaudeProvider implements LocalAgentProvider {
+class ClaudeProvider implements AgentMessageSource {
  public function modelCatalog(q:AgentModelsQuery,ctx:RpcContext<AgentModelsPage>):Void {
   ctx.fail({code:"unsupported_operation",message:"Load models from an attached session",ambiguous:false});
  }
@@ -100,12 +100,15 @@ class ClaudeProvider implements LocalAgentProvider {
   return result;
  }
  function view(s:ClaudeSession,?before:Int):AgentView return {
-  record:copy(s.record),activity:"",items:s.conversation.page(before),itemsNext:s.conversation.next(before),itemsOmitted:false,
+  record:copy(s.record),activity:"",items:s.conversation.page(before),itemsNext:s.conversation.next(before),itemsOmitted:false,supportsMessageContent:true,
   requests:[for(id=>r in s.approvals) {id:id,method:r.tool == "AskUserQuestion" ? "item/tool/requestUserInput" : "item/commandExecution/requestApproval",detail:r.detail,reviewable:r.reviewable}],
   models:s.models,modelsNext:null,currentModel:s.currentModel,currentEffort:null,
   connectionState:s.ready ? "connected" : s.transport == null ? "disconnected" : "reconnecting",
   recoveryReason:s.ready ? null : "explicit-resume",error:s.error
  };
+ public function messageContent(session:String,turn:String,item:String,token:String,offset:Int):Null<AgentContentChunk> {
+  var s=sessions.get(session); return s == null ? null : s.conversation.content(turn,item,token,offset);
+ }
  function fail(s:ClaudeSession,reason:String):Void {
   s.ready=false;s.busy=false;s.error=reason.substring(0,2048);s.approvals.clear();
   s.record.state = s.record.state == "working" || s.record.state == "needs-attention" ? "uncertain" : "disconnected";
@@ -186,7 +189,7 @@ class ClaudeProvider implements LocalAgentProvider {
     var text="";
     for(part in (cast content:Array<Dynamic>)) {
      switch(str(part,"type")) {
-      case "text": text += str(part,"text");
+      case "text": if (text.length <= AgentContentCache.MAX_MESSAGE) text += str(part,"text");
       case "tool_use":
        var tool=str(part,"name");
        s.conversation.put(str(part,"id"),turn,"tool",tool,"",Json.stringify(Reflect.field(part,"input")),"inProgress");
@@ -195,7 +198,6 @@ class ClaudeProvider implements LocalAgentProvider {
        s.conversation.put(str(part,"tool_use_id"),turn,"tool","Tool",Std.isOfType(result,String) ? result : Json.stringify(result),"",Reflect.field(part,"is_error") == true ? "failed" : "completed");
       default:
      }
-     if(text.length > 8192) break;
     }
     if(text != "") s.conversation.put(id,turn,type == "assistant" ? "agentMessage" : "userMessage",type == "assistant" ? "Claude" : "You",text,"","completed");
    case "result":

@@ -43,7 +43,7 @@ Both light and dark modes share semantic colors, geometry and interaction hierar
 These are part of the intended complete experience, but must be implemented end to end before exposing their controls:
 
 1. **Broader input and history:** Claude/Pi image adapters and durable queued attachment references remain unsupported. Draft thumbnails are temporary; sent-image thumbnails and an attachment archive require durable, scoped asset identity. Non-Windows image clipboard support remains to be implemented. Passing client-local filenames as though they were remote attachments is incorrect.
-2. **Long responses for other providers:** Claude/Pi still use bounded activity previews; their full-message retrieval requires provider-specific retention and recovery. Codex snapshots can be evicted, exceed the display cap, or be unavailable after recovery.
+2. **Durable response recovery:** Codex, Claude and Pi support bounded full-message retrieval from retained authoritative source. Snapshots can be evicted or exceed the display cap. Persisted truncated Claude/Pi snippets deliberately have no full-content token until an authoritative response is recovered. A durable full-response archive remains separate work.
 3. **Broader artifacts:** Windows static HTML/SVG preview is intentionally inert and availability-dependent; it does not implement arbitrary interactive web applications. The native SVG subset rejects unsupported features. [Renderer contracts](renderer-contracts.md) records the actual boundary and platform requirements.
 4. **PR submission:** opening an authoritative GitHub comparison page is supported separately from submitting a PR. Actual submission needs a supported authenticated review/network workflow.
 

@@ -52,9 +52,11 @@ class SessionDiffView implements View {
     ], top)));
     var files:Array<SessionDiffFile> = [];
     var truncations:Array<Bool> = [];
+    var invalidSlice = false;
     if (reportedFiles != null && reportedFiles.length > 0) {
       for (reported in reportedFiles) {
-        if (reported.offset < 0 || reported.length < 0 || reported.offset > source.length || reported.length > source.length - reported.offset) continue;
+        if (reported.length == 0 && reported.truncated) continue;
+        if (reported.offset < 0 || reported.length < 0 || reported.offset > source.length || reported.length > source.length - reported.offset) { invalidSlice = true; continue; }
         var lines:Array<workspace.client.SessionDiff.SessionDiffLine> = [];
         for (part in SessionDiff.parse(source.substring(reported.offset, reported.offset + reported.length)))
           for (line in part.lines) lines.push(line);
@@ -118,6 +120,10 @@ class SessionDiffView implements View {
       fileStyle.background = tokens.surfaceSunken;
       fileStyle.radiusTopLeft = fileStyle.radiusTopRight = fileStyle.radiusBottomLeft = fileStyle.radiusBottomRight = 6;
       rows.push(new KeyedView("file-" + index, new Column("diff-file-" + index, fileRows, fileStyle)));
+    }
+    if (invalidSlice && truncations.length > 0) {
+      rows.push(new KeyedView("unassociated-label", new Text("Full patch · file metadata incomplete", null, tokens.textSecondary)));
+      rows.push(new KeyedView("unassociated-patch", new SessionDiffView(source)));
     }
     var style = new LayoutStyle(); style.width = LayoutAxis.grow(); style.childGap = 4;
     return new Column("session-diff", rows, style).build(context);

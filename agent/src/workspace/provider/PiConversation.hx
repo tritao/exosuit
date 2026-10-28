@@ -4,11 +4,20 @@ import workspace.service.WorkspaceAgentProtocol;
 
 /** Bounded normalized conversation. Cursors are invalidated when old items are evicted. */
 class PiConversation {
+ static var nextCacheId:Int = 0;
+ final cacheId:Int;
  final entries:Array<AgentActivityItem> = [];
  var revision = 0;
+ function cacheKey(turn:String,id:String):String return "pi-"+cacheId+":"+turn.length+":"+turn+id;
+ public function content(turn:String,id:String,token:String,offset:Int):Null<AgentContentChunk> {
+  for (entry in entries) if (entry.turn == turn && entry.id == id && entry.kind == "agentMessage" && entry.contentToken == token)
+   return AgentContentCache.chunk(cacheKey(turn,id),token,offset);
+  return null;
+ }
  public function new(?saved:Array<AgentActivityItem>) {
+  cacheId=++nextCacheId;
   if (saved != null) for (entry in saved) {
-   put(entry.id, entry.turn, entry.kind, entry.title, entry.text, entry.detail, entry.state);
+   put(entry.id, entry.turn, entry.kind, entry.title, entry.text, entry.detail, entry.state, !entry.truncated);
    entries[entries.length-1].truncated=entry.truncated;
    entries[entries.length-1].files=retainedFiles(entry,2048);
   }
@@ -49,23 +58,27 @@ class PiConversation {
   }
   return result.length == 0 ? null : result;
  }
- public function put(id:String, turn:String, kind:String, title:String, text:String, detail:String, state:String):Void {
+ public function put(id:String, turn:String, kind:String, title:String, text:String, detail:String, state:String, retainContent:Bool = true):Void {
   if (id.length > 512 || turn.length > 128) throw "Pi activity identity exceeds bound";
   var entry:Null<AgentActivityItem> = null;
-  for (e in entries) if (e.id == id) entry = e;
+  for (e in entries) if (e.id == id && e.turn == turn) entry = e;
   if (entry == null) {
    entry = {id:id, turn:turn, kind:kind, title:title, text:"", detail:"", state:state, truncated:false};
    entries.push(entry);
   }
   entry.title=title.substring(0,256); entry.kind=kind;
+  if (kind == "agentMessage" && retainContent) entry.contentToken = AgentContentCache.replace(cacheKey(turn,id),text);
   entry.text = text.substring(0,4096); entry.detail = detail == "" ? entry.detail : detail.substring(0,2048); entry.state = state;
   entry.truncated = entry.truncated || title.length > 256 || text.length > 4096 || detail.length > 2048;
   if (entries.length > 128) { entries.shift(); revision++; }
  }
  public function delta(id:String, turn:String, text:String, kind:String = "agentMessage"):Void {
-  var previous = "";
-  for (entry in entries) if (entry.id == id) previous = entry.text;
-  put(id,turn,kind,kind == "reasoning" ? "Reasoning" : "Pi",previous + text,"","inProgress");
+  var previous = "", existing:Null<AgentActivityItem> = null;
+  for (entry in entries) if (entry.id == id && entry.turn == turn) { previous = entry.text; existing=entry; }
+  if (existing == null) { put(id,turn,kind,kind == "reasoning" ? "Reasoning" : "Pi",text,"","inProgress"); return; }
+  var token = kind == "agentMessage" && existing.contentToken != null ? AgentContentCache.append(cacheKey(turn,id),text) : null;
+  put(id,turn,kind,kind == "reasoning" ? "Reasoning" : "Pi",previous + text,"","inProgress",false);
+  if (kind == "agentMessage") existing.contentToken=token;
  }
  public function finish(turn:String, state:String):Void {
   for (entry in entries) if (entry.turn == turn && entry.state == "inProgress") entry.state = state;
