@@ -150,9 +150,15 @@ class SuitDaemon {
 			terminate: terminate, openViewer: openViewer, quit: quitEverything,
 			hosting: {
 				hosts: relay.views, stopHosting: stopHosting, resumeHosting: function(root) relay.resume(root),
-				loginEnabled: SuitLogin.enabled, toggleLogin: function() try SuitLogin.toggle() catch (_:Dynamic) {}
+				loginEnabled: SuitLogin.enabled, toggleLogin: toggleLogin
 			}
 		}));
+	}
+
+	function toggleLogin():Void {
+		try {
+			SuitLogin.toggle();
+		} catch (_:Dynamic) {}
 	}
 
 	/** Stop hosting: pause it in relay-settings.json (so nothing restarts it) and stop the workspace service. */
