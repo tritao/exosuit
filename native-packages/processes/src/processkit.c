@@ -10,6 +10,7 @@ typedef struct processkit_entry {
     double started;
     char *name;
     char *command_line;
+    char *path;
 } processkit_entry;
 
 typedef struct processkit_snapshot {
@@ -49,6 +50,7 @@ static void free_snapshot(processkit_snapshot *snapshot) {
     for (int index = 0; index < snapshot->count; index++) {
         free(snapshot->entries[index].name);
         free(snapshot->entries[index].command_line);
+        free(snapshot->entries[index].path);
     }
     free(snapshot->entries);
     free(snapshot);
@@ -221,6 +223,11 @@ const char *processkit_list_command_line(processkit_list list, int index) {
     return entry && entry->command_line ? entry->command_line : empty_text;
 }
 
+const char *processkit_list_path(processkit_list list, int index) {
+    processkit_entry *entry = entry_at(list, index);
+    return entry && entry->path ? entry->path : empty_text;
+}
+
 int processkit_identify(int pid, double started) { return identity_status(started, processkit_started(pid)); }
 
 #if defined(_WIN32)
@@ -293,6 +300,14 @@ static char *read_command_line(HANDLE process) {
     return result;
 }
 
+static char *read_image_path(HANDLE process) {
+    wchar_t buffer[32768];
+    DWORD size = (DWORD)(sizeof(buffer) / sizeof(buffer[0]));
+    if (!QueryFullProcessImageNameW(process, 0, buffer, &size))
+        return NULL;
+    return utf8_from_wide(buffer, (int)size);
+}
+
 int processkit_list_open(const char *names, processkit_list *out_list) {
     if (!out_list)
         return PROCESSKIT_FAILED;
@@ -318,13 +333,16 @@ int processkit_list_open(const char *names, processkit_list *out_list) {
         HANDLE handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, process.th32ProcessID);
         if (handle) {
             entry.started = handle_started(handle);
-            if (name_listed(names, entry.name))
+            if (name_listed(names, entry.name)) {
                 entry.command_line = read_command_line(handle);
+                entry.path = read_image_path(handle);
+            }
             CloseHandle(handle);
         }
         if (!append_entry(snapshot, &entry)) {
             free(entry.name);
             free(entry.command_line);
+            free(entry.path);
             free_snapshot(snapshot);
             CloseHandle(system);
             return PROCESSKIT_FAILED;
@@ -541,10 +559,16 @@ int processkit_list_open(const char *names, processkit_list *out_list) {
         if (name_listed(names, entry.name)) {
             snprintf(path, sizeof(path), "/proc/%d/cmdline", pid);
             entry.command_line = read_file_text(path, 1);
+            snprintf(path, sizeof(path), "/proc/%d/exe", pid);
+            char target[4096];
+            ssize_t length = readlink(path, target, sizeof(target) - 1);
+            if (length > 0)
+                entry.path = copy_text(target, (size_t)length);
         }
         if (!append_entry(snapshot, &entry)) {
             free(entry.name);
             free(entry.command_line);
+            free(entry.path);
             free_snapshot(snapshot);
             closedir(directory);
             return PROCESSKIT_FAILED;
