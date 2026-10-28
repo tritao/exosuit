@@ -123,8 +123,8 @@ class SuitInventory {
 		var result:Array<SuitProcess> = [];
 		for (kind in [SuitKind.WorkspaceManager, SuitKind.WorkspaceHost])
 			for (process in processes)
-				if (process.kind == kind && process.source != Scanned && process.relay != null && process.relay.configured
-					&& process.root != null && !seen.exists(rootKey(process.root))) {
+				if (process.kind == kind && process.relay != null && process.relay.configured && process.root != null
+					&& !seen.exists(rootKey(process.root))) {
 					seen.set(rootKey(process.root), true);
 					result.push(process);
 				}

@@ -1,5 +1,6 @@
 package suit;
 
+import suit.SuitGroup;
 import suit.SuitInventory.SuitProcess;
 
 /** The process selections behind the menu items and CLI verbs. Bulk selections hold only exosuit's processes. */
@@ -15,11 +16,14 @@ class SuitActions {
 	public static function everything(inventory:SuitInventory):Array<SuitProcess>
 		return inventory.background().concat(inventory.editors());
 
-	/** The processes serving relay hosting for one workspace root, or every hosted workspace when root is null. */
+	/**
+		The processes serving relay hosting for one workspace root, or, when root is null, for every hosted
+		workspace exosuit started (a bulk stop leaves the others alone).
+	**/
 	public static function hosting(inventory:SuitInventory, ?root:String):Array<SuitProcess> {
 		var result:Array<SuitProcess> = [];
 		for (hosted in inventory.hosted())
-			if (root == null || matchesWorkspace(hosted, root))
+			if (root == null ? hosted.source != Scanned : matchesWorkspace(hosted, root))
 				result.push(hosted);
 		return result;
 	}
