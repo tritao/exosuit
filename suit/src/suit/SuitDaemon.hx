@@ -85,11 +85,12 @@ class SuitDaemon {
 		idleSince = Sys.time();
 		runtime = NativeKitRuntime.start();
 		hub = new NativeRpcHub(runtime.events);
-		try {
-			hub.listen(NativeRpcHub.local(SuitPaths.endpoint()), function(transport) clients.push(transport));
-		} catch (error:Dynamic) {
+		var listenError = listen();
+		if (listenError != null) {
 			// The first pipe instance is exclusive: another process holding the name is never shared with.
-			throw "suit's control endpoint " + SuitPaths.endpoint() + " is held by another process; suit will not share it (" + error + ")";
+			hub.dispose();
+			runtime.dispose();
+			throw "suit's control endpoint " + SuitPaths.endpoint() + " is held by another process; suit will not share it (" + listenError + ")";
 		}
 		relay = new SuitRelayHosting(runtime.events, hub);
 		runtime.events.listen(onEvent);
@@ -101,6 +102,15 @@ class SuitDaemon {
 		if (Sys.systemName() == "Windows" && Sys.getEnv("EXOSUIT_SUIT_TRAY") != "0") {
 			try tray = new SuitTray(inventory.summary(), findIcon()) catch (_:Dynamic) tray = null;
 		}
+	}
+
+	function listen():Null<String> {
+		try {
+			hub.listen(NativeRpcHub.local(SuitPaths.endpoint()), function(transport) clients.push(transport));
+		} catch (error:Dynamic) {
+			return Std.string(error);
+		}
+		return null;
 	}
 
 	function loop():Void {

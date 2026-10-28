@@ -363,7 +363,8 @@ under each part.
 - **One relay link per workspace, dialled by the daemon.** A hosting daemon
   connects to suit's control endpoint and sends
   `{"op":"relay-attach","version":1,root,stateDir,machineId,origin,...}`. suit
-  checks the request against the private state directory (`workspace.json`,
+  checks who sent it and what it names before anything else (see *Attach
+  checks*), then the private state directory (`workspace.json`,
   `relay-settings.json`, `relay-machine.json`) and the stored bearer, replies
   `{"ok":true}`, and from then on the connection carries whole relay
   envelopes, byte for byte the format the Worker uses (version byte, 16-byte
@@ -376,14 +377,37 @@ under each part.
   workspace RPC preflight, a second protocol on it would change the RPC
   server's accept path, and suit would need one handle per channel. A newer
   attach for the same workspace replaces the older link.
+- **Attach checks.** suit later runs the recorded executable and launcher to
+  start the workspace, so an attach must not be able to point them anywhere.
+  suit takes the caller's process id from the pipe itself
+  (`nk_transport_get_peer_process`: `GetNamedPipeClientProcessId`,
+  `SO_PEERCRED`, `LOCAL_PEERPID`), never from the request, and reads that
+  process's executable path from the OS (processkit). The request's
+  `executable` must be that file, named `hl`/`hl.exe`, and its `launcher` must
+  be an exosuit agent (`agent/build/host/main.hl`, `tools/exosuit-agent.hl`
+  or `agent/main.hl`). Once a machine is recorded, an attach must name the same
+  root, state directory, executable and launcher (`relay_host_changed`);
+  `suit relay forget <workspace>` clears a record after a build moves. Roots
+  and paths compare as `PathKey`s, so case and separators do not matter on
+  Windows. Every file suit reads from the state directory must pass the
+  private-file check (this user's, no other ACE, one link, no reparse point)
+  before it is read. *Pipe squatting:* suit's pipe name is predictable, so
+  NativeKit creates the first instance with `FILE_FLAG_FIRST_PIPE_INSTANCE`
+  (suit exits with "held by another process" if someone else has the name)
+  and a client refuses a server that does not run as the current user.
 - **One machine socket.** The Worker keeps one machine socket per machine id
   and closes the older one when another connects ("machine reconnected"). If
   suit and a daemon both dialled, they would evict each other forever.
-  *Rule:* a daemon tries suit first on every (re)connect and dials the relay
-  itself only when suit is not running or refuses (`hosting_paused`,
-  missing credential). While it is connected directly it retries suit every
-  30 s and drops its own socket once suit accepts. suit's socket always wins,
-  and a daemon evicted by suit comes back through suit. A daemon started with
+  *Rule:* one dialer per machine. A daemon tries suit first on every
+  (re)connect and dials the relay itself only when suit is not running or
+  refuses. While it is connected directly it retries suit every 30 s and
+  drops its own socket once suit accepts. A refusal other than
+  `hosting_paused` makes suit close its own socket for that machine and leave
+  it to the refused process (state `direct`) until that process exits or
+  attaches. Before dialling, suit also checks the workspace's
+  `relay-status.json`: a live daemon whose status says `viaSuit: false` and
+  connected holds the machine, and suit waits for its next probe instead of
+  evicting it. `hosting_paused` makes the daemon stop dialling altogether. A daemon started with
   `EXOSUIT_RELAY_VIA_SUIT=0`, or with `EXOSUIT_SUIT=off` (which test scripts and the run guard
   set), never uses suit; with `EXOSUIT_SUIT=isolated` it reaches only the suit at
   `EXOSUIT_SUIT_HOME`, so tests cannot attach to the user's suit.
@@ -391,8 +415,10 @@ under each part.
   with no attached daemon, suit buffers it (at most 64 frames and 2 MiB per
   workspace; a reset drops that channel's frames) and runs the recorded
   manager with `--manager <root> --state-dir <dir> --detach`, at most once
-  every 30 s. The manager's daemon attaches and receives the buffered frames
-  in order. The device needs no change: its Noise handshake allows 5 s, and a
+  every 30 s and at most 5 times in 10 minutes; past that the workspace shows
+  `failed: service_start_failed_repeatedly` until Retry. Buffered frames older
+  than 30 s are dropped. The manager's daemon attaches and receives the
+  buffered frames in order. The device needs no change: its Noise handshake allows 5 s, and a
   cold start that takes longer fails that attempt with the retryable
   `noise_timeout`; the next retry opens a new device socket and reaches the
   now running daemon.
@@ -403,18 +429,29 @@ under each part.
   closes, so a device that vanishes without closing its session keeps the
   daemon up until that device reconnects. Fixing it needs an RPC keepalive.
 - **suit itself does not idle out while it hosts.** Its 120 s idle exit
-  applies only when no workspace is hosted (paused workspaces do not count).
+  applies only when no workspace is hosted. Paused workspaces, workspaces left
+  to a direct daemon, and failed ones do not count. *Failed* means an error a
+  retry cannot fix: `relay_unauthorized`, `machine_identity_conflict`, a
+  missing bearer, or repeated failed starts. The tray shows it with Retry and
+  Dismiss (Dismiss stops hosting it from suit and forgets the record; the
+  next daemon attach adds it back); the CLI has `suit relay retry` and
+  `suit relay forget`.
 - **Start at login (opt-in, off by default).** The tray's "Start at login"
   item and `suit login on|off|status` toggle it. On Windows suit writes the
   value `Exosuit suit` under the per-user Run key
   `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. *Why the Run key and
   not a Startup-folder shortcut:* a shortcut needs COM to write, while a Run
   value is one `reg.exe` call that is easy to inspect and remove. The value
-  runs `conhost.exe --headless cmd.exe /d /c "<suit home>\start-at-login.cmd"`.
-  The script sets the PATH HashLink needs for suit's native libraries (a Run
-  command is limited to 260 characters, too short for that PATH) and starts
+  runs `conhost.exe --headless cmd.exe /d /s /c
+  ""%LOCALAPPDATA%\Exosuit\suit-login\start-<home>.cmd""`. It names the
+  script through `%LOCALAPPDATA%` and fixed names only, so a user name or
+  home with `&`, `(`, `^` or `%` never passes through cmd's quoting; inside
+  the script every path is quoted and `%` is doubled. The script sets the
+  PATH HashLink needs for suit's native libraries (a Run command is limited
+  to 260 characters, too short for that PATH) and starts
   `hl <suit> daemon --login`. `--headless` keeps a console window from
-  appearing at login. A suit started at login stays resident even with
+  appearing at login. The tray never waits for `reg.exe`: it shows a cached
+  state and toggles in the background. A suit started at login stays resident even with
   nothing to track, so its tray icon stays. Outside Windows the same toggle
   writes an XDG autostart entry. Tests point `EXOSUIT_SUIT_LOGIN_KEY` (or
   `EXOSUIT_SUIT_AUTOSTART_DIR`) at a scratch location.
@@ -425,7 +462,9 @@ under each part.
   `suit relay resume`) or enabling remote access again in the editor (which
   runs `--configure-relay` with the same origin) removes the field. *Why it
   is required now:* without it, suit would restart the daemon on the next
-  device frame. Terminate all background processes no longer ends hosting;
+  device frame. A daemon refused with `hosting_paused` counts as idle, so a
+  manager suit started for a device exits after its normal idle timeout.
+  Terminate all background processes no longer ends hosting;
   only Stop hosting and Quit Exosuit do, and Quit lasts until suit starts
   again.
 - **Remote clients.** suit records every client on a hosted workspace's
@@ -438,13 +477,18 @@ under each part.
   and against an older Worker a vanished client stays listed until it
   reconnects). The attached daemon adds a client report over the relay link
   (first byte `0x11`, JSON: paired devices with grants, pairing requests,
-  open terminals and agents); it holds no keys. *Disconnect* resets the
-  channel in the daemon, which ends that session, and drops the client's
-  frames until the Worker resets the channel, which happens when the device
-  reconnects. A device may reconnect on its own; revoking stays in the
-  editor's Remote Access panel.
+  open terminals and agents); it holds no keys. *Disconnect* sends the
+  Worker a close envelope (version 3), and the Worker closes that client's
+  socket with close code 4001 and reason `disconnected_by_host`, which the
+  app shows. suit resets the channel in the daemon, which ends that session,
+  refuses the client for 60 s (any frame it sends gets its socket closed
+  again), and lists it as *disconnected* for 20 s. After the cooldown the
+  device may reconnect; *Revoke*, in the editor's Remote Access panel, is the
+  permanent cut-off. While a daemon holds the machine directly, its connected
+  devices (from `relay-status.json`) are listed and counted as `direct`
+  clients; Disconnect is only offered for clients on suit's socket.
 - **Tray.** Remote access lists each hosted workspace with its state
-  (connected, connecting, error, paused), whether its service is running,
+  (connected, connecting, error, failed, direct, paused), whether its service is running,
   what it has open, and each client: id, kind, when it connected and its last
   activity, with a Disconnect item. It keeps Stop hosting per workspace,
   Stop all hosting and Open Remote Access…, and adds Resume hosting. The

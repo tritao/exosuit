@@ -140,8 +140,8 @@ class SuitLogin {
 			toggle();
 			return;
 		}
-		if (job != null || queued.length > 0)
-			return; // a change is already running
+		if (changing())
+			return; // a change is already running; its result shows next
 		if (cached()) {
 			queued.push(deleteArguments());
 			removeScript();
@@ -164,8 +164,15 @@ class SuitLogin {
 				try current.child.cancel() catch (_:Dynamic) {}
 			current.child.close();
 			job = null;
-			if (current.arguments[0] == "query")
-				known = status == 0;
+			switch current.arguments[0] {
+				case "query":
+					known = status == 0;
+				case "add":
+					if (status == 0) known = true;
+				case "delete":
+					if (status == 0) known = false;
+				default:
+			}
 		}
 		if (queued.length == 0)
 			return false;
@@ -176,6 +183,17 @@ class SuitLogin {
 			job = null;
 		}
 		return job != null || queued.length > 0;
+	}
+
+	/** An add or delete is running or queued (a query alone is not a change). */
+	static function changing():Bool {
+		var current = job;
+		if (current != null && current.arguments[0] != "query")
+			return true;
+		for (item in queued)
+			if (item[0] != "query")
+				return true;
+		return false;
 	}
 
 	static function addArguments():Array<String>
@@ -192,9 +210,7 @@ class SuitLogin {
 			launcher = FileSystem.fullPath(Sys.programPath());
 		if (!SuitPaths.prepare())
 			throw "suit's home is not a private directory of this user";
-		var directory = Path.directory(scriptPath());
-		if (!FileSystem.exists(directory))
-			FileSystem.createDirectory(directory);
+		createDirectories(Path.directory(scriptPath()));
 		AtomicFile.write(scriptPath(), script(launcher));
 	}
 
@@ -202,13 +218,18 @@ class SuitLogin {
 		try if (FileSystem.exists(scriptPath())) FileSystem.deleteFile(scriptPath()) catch (_:Dynamic) {}
 
 	static function writeDesktopEntry():Void {
-		var directory = Path.directory(desktopPath());
-		if (!FileSystem.exists(directory))
-			FileSystem.createDirectory(directory);
+		createDirectories(Path.directory(desktopPath()));
 		AtomicFile.write(desktopPath(), [
 			"[Desktop Entry]", "Type=Application", "Name=Exosuit suit", "Comment=Exosuit background processes and remote access",
 			"Exec=/bin/sh \"" + scriptPath() + "\"", "X-GNOME-Autostart-enabled=true", ""
 		].join("\n"));
+	}
+
+	static function createDirectories(directory:String):Void {
+		if (directory.length == 0 || FileSystem.exists(directory))
+			return;
+		createDirectories(Path.directory(directory));
+		FileSystem.createDirectory(directory);
 	}
 
 	static function script(launcher:String):String {

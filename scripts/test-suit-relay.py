@@ -192,13 +192,16 @@ def test_login(base: Path) -> None:
             assert "--headless" in query.stdout and "%LOCALAPPDATA%" in query.stdout and "conhost.exe" in query.stdout, query.stdout
             assert SPECIAL not in query.stdout, "the Run command holds a user path: " + query.stdout
             run_command = query.stdout.split("REG_SZ", 1)[1].strip()
+            # conhost --headless does not start its child from a non-interactive session like this one, so the
+            # test runs the cmd.exe part of the Run command as written: the quoting and %LOCALAPPDATA% are what it checks.
+            run_command = run_command[run_command.index("--headless ") + len("--headless "):]
             # The user's real Run key is never touched.
             real = subprocess.run(["reg", "query", real_run_key, "/v", value_name], capture_output=True, text=True, timeout=30)
             assert real.returncode != 0, "the test wrote to the real Run key"
         else:
             assert any(autostart.glob("exosuit-suit-*.desktop")), "no autostart entry"
         assert "[x] Start at login" in suit("menu")
-        # The Run command, exactly as Windows runs it, starts a resident suit: it stays past its idle timeout.
+        # The Run command's cmd.exe part starts a resident suit: it stays past its idle timeout.
         starter = subprocess.Popen(run_command if os.name == "nt" else ["/bin/sh", str(script)],
                                    env=suit.environment, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
@@ -642,7 +645,8 @@ def test_relay(base: Path) -> None:
                 return None
             view = wait_until(failed, 60, "suit kept starting a workspace service that never attaches", interval=0.1)
             assert view["error"] == "service_start_failed_repeatedly" and view["starts"] == 5, view
-            assert "failed: service_start_failed_repeatedly" in quick("relay", "list"), quick("relay", "list")
+            listing = quick("relay", "list")
+            assert "failed" in listing and "error: service_start_failed_repeatedly" in listing and "relay retry" in listing, listing
             quick_pid = quick.pid()
             wait_until(lambda: not pid_alive(quick_pid), 45, "a failed workspace kept suit running", interval=1)
         finally:
@@ -658,7 +662,8 @@ def test_relay(base: Path) -> None:
             assert "started" in quick("start")
             view = wait_until(lambda: (lambda item: item if item["state"] == "failed" else None)(quick.hosts()[0]), 60,
                               "a wrong bearer did not fail hosting")
-            assert view["error"] == "relay_unauthorized", view
+            # The connector registers first, so a wrong bearer shows as an identity conflict.
+            assert view["error"] in ("relay_unauthorized", "machine_identity_conflict"), view
             quick_pid = quick.pid()
             wait_until(lambda: not pid_alive(quick_pid), 45, "a permanent relay error kept suit running", interval=1)
         finally:

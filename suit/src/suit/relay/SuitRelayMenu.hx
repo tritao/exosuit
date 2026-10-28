@@ -132,7 +132,10 @@ class SuitRelayMenu {
 			output.add("    root: " + host.root + "\n");
 			if ((host.state == "error" || host.state == "failed") && host.error != null)
 				output.add("    error: " + host.error + "\n");
-			if (host.state != "paused" && host.state != "not hosted")
+			if (host.state == "failed")
+				output.add("    stopped trying: `suit relay retry` tries again, `suit relay forget` stops hosting it from suit
+");
+			else if (host.state != "paused" && host.state != "not hosted")
 				output.add("    " + (host.serviceRunning ? "workspace service running (pid " + host.servicePid + ")" : "workspace service starts when a device connects")
 					+ (host.starts > 0 ? "; started for a device " + host.starts + " time(s)" : "") + "\n");
 			if (host.open != null && host.serviceRunning)
