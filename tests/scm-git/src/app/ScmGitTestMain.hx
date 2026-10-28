@@ -113,6 +113,16 @@ class ScmGitTestMain {
 		return result;
 	}
 
+	/** Runs a folder-scoped commit of `sub/` directly, with `afterCheck` racing it between the check and the commit. */
+	static function scopedCommit(git:GitProcess, scheduler:JobScheduler, root:String, generation:Int, message:String, amend:Bool,
+			?afterCheck:Void->Void):Null<scm.ScmError> {
+		var failure:Null<scm.ScmError> = null, finished = false;
+		new GitScopedCommit(git, root, generation, message, amend, ["sub/"], false, function(_, error) { failure = error; finished = true; },
+			afterCheck).start();
+		pump(scheduler, () -> finished, "a folder-scoped commit did not finish");
+		return failure;
+	}
+
 	static function deleteTree(path:String):Void {
 		if (!FileSystem.exists(path)) return;
 		if (FileSystem.isDirectory(path)) {
@@ -828,17 +838,9 @@ class ScmGitTestMain {
 		require(mutationHandle.repository().ignoreCase == (configuredValue == "true"),
 			"the repository did not report its core.ignorecase");
 		runGit(git, gitScheduler, ["reset", "-q", "--", "scoped-outside.txt"], mutationRoot, 77104);
-		// Runs a folder-scoped commit directly, with `afterCheck` racing it between the check and the commit.
-		function scopedCommit(root:String, generation:Int, message:String, amend:Bool, ?afterCheck:Void->Void):Null<scm.ScmError> {
-			var failure:Null<scm.ScmError> = null, finished = false;
-			new GitScopedCommit(git, root, generation, message, amend, ["sub/"], false, function(_, error) { failure = error; finished = true; },
-				afterCheck).start();
-			pump(gitScheduler, () -> finished, "a folder-scoped commit did not finish");
-			return failure;
-		}
 		// Another process stages an outside file after the check (as an agent's `git add` could): the commit keeps the
 		// checked tree, and the outside file stays staged, uncommitted.
-		var scopedError = scopedCommit(mutationRoot, 77105, "Scoped", false,
+		var scopedError = scopedCommit(git, gitScheduler, mutationRoot, 77105, "Scoped", false,
 			function() { Sys.command("git", ["-C", mutationRoot, "add", "--", "scoped-outside.txt"]); });
 		var committedNames = runGit(git, gitScheduler, ["show", "--name-only", "--format=", "HEAD"], mutationRoot, 77106).stdout.toString();
 		var stillStaged = runGit(git, gitScheduler, ["diff", "--cached", "--name-only"], mutationRoot, 77113).stdout.toString();
@@ -848,7 +850,7 @@ class ScmGitTestMain {
 		// HEAD moving after the check fails the commit instead of dropping the other commit.
 		File.saveContent(mutationRoot + "/sub/b.txt", "inside b\n");
 		runGit(git, gitScheduler, ["add", "--", "sub/b.txt"], mutationRoot, 77115);
-		var moved = scopedCommit(mutationRoot, 77116, "Lost", false,
+		var moved = scopedCommit(git, gitScheduler, mutationRoot, 77116, "Lost", false,
 			function() { Sys.command("git", ["-C", mutationRoot, "commit", "-q", "--allow-empty", "-m", "Moved"]); });
 		require(moved != null && moved.code == "head_moved" && lastSubject() == "Moved\n",
 			"a folder-scoped commit replaced a commit made after its check");
@@ -916,13 +918,13 @@ class ScmGitTestMain {
 		runGit(git, gitScheduler, ["config", "user.name", "SCM Test"], unbornRoot, 77152);
 		runGit(git, gitScheduler, ["config", "user.email", "scm@example.invalid"], unbornRoot, 77153);
 		runGit(git, gitScheduler, ["config", "core.hooksPath", emptyHooks], unbornRoot, 77154);
-		var unbornError = scopedCommit(unbornRoot, 77151, "First", true);
+		var unbornError = scopedCommit(git, gitScheduler, unbornRoot, 77151, "First", true);
 		require(unbornError != null && unbornError.code == "nothing_to_amend", "an amend on an unborn branch did not say there is nothing to amend");
 		// A first commit on an unborn branch, and one that another first commit overtakes.
 		FileSystem.createDirectory(unbornRoot + "/sub");
 		File.saveContent(unbornRoot + "/sub/first.txt", "first\n");
 		runGit(git, gitScheduler, ["add", "--", "sub/first.txt"], unbornRoot, 77155);
-		var racedFirst = scopedCommit(unbornRoot, 77156, "Overtaken", false,
+		var racedFirst = scopedCommit(git, gitScheduler, unbornRoot, 77156, "Overtaken", false,
 			function() { Sys.command("git", ["-C", unbornRoot, "commit", "-q", "--allow-empty", "-m", "Elsewhere"]); });
 		var unbornSubject = runGit(git, gitScheduler, ["log", "-1", "--format=%s"], unbornRoot, 77157).stdout.toString();
 		require(racedFirst != null && racedFirst.code == "head_moved" && unbornSubject == "Elsewhere\n",
@@ -936,7 +938,7 @@ class ScmGitTestMain {
 		runGit(git, gitScheduler, ["config", "core.hooksPath", emptyHooks], firstRoot, 77163);
 		File.saveContent(firstRoot + "/sub/first.txt", "first\n");
 		runGit(git, gitScheduler, ["add", "--", "sub/first.txt"], firstRoot, 77164);
-		var firstError = scopedCommit(firstRoot, 77165, "First", false);
+		var firstError = scopedCommit(git, gitScheduler, firstRoot, 77165, "First", false);
 		var firstLog = runGit(git, gitScheduler, ["log", "--format=%s"], firstRoot, 77166).stdout.toString();
 		require(firstError == null && firstLog == "First\n", "a first folder-scoped commit on an unborn branch failed: "
 			+ (firstError == null ? firstLog : firstError.message));
@@ -946,7 +948,7 @@ class ScmGitTestMain {
 		runGit(git, gitScheduler, ["commit", "-q", "--author=Original Author <original@example.invalid>", "--date=1700000000 +0100", "-m", "Authored"], firstRoot, 77168);
 		File.saveContent(firstRoot + "/sub/third.txt", "third\n");
 		runGit(git, gitScheduler, ["add", "--", "sub/third.txt"], firstRoot, 77169);
-		var amendError = scopedCommit(firstRoot, 77170, "Authored again", true);
+		var amendError = scopedCommit(git, gitScheduler, firstRoot, 77170, "Authored again", true);
 		var author = runGit(git, gitScheduler, ["log", "-1", "--format=%an <%ae> %at %s"], firstRoot, 77171).stdout.toString();
 		require(amendError == null && author == "Original Author <original@example.invalid> 1700000000 Authored again\n",
 			"a folder-scoped amend changed the author: " + author);
@@ -960,7 +962,7 @@ class ScmGitTestMain {
 		runGitResult(git, gitScheduler, ["merge", "merge-side"], firstRoot, 77176);
 		File.saveContent(firstRoot + "/sub/first.txt", "resolved\n");
 		runGit(git, gitScheduler, ["add", "--", "sub/first.txt"], firstRoot, 77177);
-		var merging = scopedCommit(firstRoot, 77178, "Resolved", false);
+		var merging = scopedCommit(git, gitScheduler, firstRoot, 77178, "Resolved", false);
 		require(merging != null && merging.code == GitScopedCommit.OPERATION_IN_PROGRESS && merging.message.indexOf("merge") >= 0
 			&& runGit(git, gitScheduler, ["log", "-1", "--format=%s"], firstRoot, 77179).stdout.toString() == "Main change\n",
 			"a folder-scoped commit went ahead during a merge");
