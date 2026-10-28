@@ -486,7 +486,8 @@ def test_relay(base: Path) -> None:
             probe.close()
             return probe.status == 503
         wait_until(device_refused, 30, "the relay still sees the machine online after Stop hosting", interval=0.5)
-        wait_until(lambda: not suit.running(), 45, "suit did not idle out once hosting was paused")
+        wait_until(lambda: not suit.running(), 45, "suit did not idle out once hosting was paused",
+                   interval=4)  # each status request is a client that keeps suit awake
         print("  Stop hosting paused the workspace; the relay sees it offline and suit idled out")
 
         # Resume without suit running, then suit hosts again from its records when it starts.
