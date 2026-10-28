@@ -238,9 +238,48 @@ def test_real_manager(fixture: Fixture, directory: Path) -> None:
     assert fixture.listing()["processes"] == []
 
 
+def test_editor(fixture: Fixture, directory: Path) -> None:
+    """A real editor registers, starts suit, and closes when suit quits Exosuit."""
+    directory.mkdir(parents=True, exist_ok=True)
+    workspace = directory / "editor-workspace"; workspace.mkdir()
+    graphical = ROOT / "graphical/build/host"
+    native = sorted(path for path in (graphical / "native").iterdir() if path.is_dir())
+    environment = dict(fixture.environment, PRAGTICAL_PORTABLE=str(directory / "settings"),
+                       EXOSUIT_AGENT_STATE_HOME=str(directory / "agent-state"), XDG_STATE_HOME=str(directory / "state"),
+                       EXOSUIT_AGENT_LAUNCHER=str(ROOT / "agent/build/host/main.hl"))
+    environment.pop("EXOSUIT_SUIT_AUTOSTART")
+    variable = "PATH" if os.name == "nt" else "LD_LIBRARY_PATH"
+    environment[variable] = os.pathsep.join([str(path) for path in native] + [environment[variable]])
+    log = (directory / "editor.log").open("w")
+    editor = subprocess.Popen([str(HL), str(graphical / "main.hl"), "--title=suit-test-editor", str(workspace)], cwd=ROOT,
+                              env=environment, stdout=log, stderr=subprocess.STDOUT)
+    fixture.children.append(editor)
+    wait_until(lambda: editor.poll() is not None or find(fixture.listing(), editor.pid) is not None, 60,
+               "the editor did not register")
+    assert editor.poll() is None, (directory / "editor.log").read_text()[-3000:]
+    entry = find(fixture.listing(), editor.pid)
+    assert entry["kind"] == "editor" and entry["registered"], entry
+    wait_until(lambda: json.loads(fixture.suit("status", "--json")).get("ok") is True, 30, "the editor did not start suit")
+    # The workspace service follows if the editor opens one for the folder; report rather than require it.
+    try:
+        wait_until(lambda: any(item["kind"] == "workspace-manager" for item in fixture.listing()["processes"]), 30, "")
+        services = [item for item in fixture.listing()["processes"] if item["kind"] != "editor"]
+        assert all(not item["orphaned"] for item in services), services
+        print(f"  editor started {len(services)} registered service(s), none orphaned")
+    except AssertionError as error:
+        if str(error):
+            raise
+        print("  (the editor started no workspace service for the folder)")
+    assert "Quitting Exosuit" in fixture.suit("quit")
+    wait_until(lambda: editor.poll() is not None, 30, "the editor did not close when suit quit Exosuit")
+    wait_until(lambda: fixture.listing()["processes"] == [], 30, "processes survived quit")
+    wait_until(lambda: "not running" in fixture.suit("status"), 30, "suit did not exit after quit")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--real-manager", action="store_true", help="also run a real workspace manager (needs agent build)")
+    parser.add_argument("--editor", action="store_true", help="also run a real editor window (needs graphical build)")
     options = parser.parse_args()
     assert SUIT.is_file(), f"build suit first: {SUIT}"
     with tempfile.TemporaryDirectory(prefix="suit-test-") as temporary:
@@ -249,6 +288,8 @@ def main() -> int:
                  ("tree kill", test_tree_kill), ("daemon", test_daemon)]
         if options.real_manager:
             tests.append(("real manager", lambda f: test_real_manager(f, directory / "r")))
+        if options.editor:
+            tests.append(("editor", lambda f: test_editor(f, directory / "e")))
         for name, test in tests:
             (directory / "a").mkdir(exist_ok=True); (directory / "r").mkdir(exist_ok=True)
             fixture_directory = Path(tempfile.mkdtemp(dir=temporary))
