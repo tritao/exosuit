@@ -589,6 +589,37 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     });
   }
 
+  public function loadAgentContent(id:String, turn:String, item:String, token:String, done:(Null<String>, Bool, Null<String>)->Void):Void {
+    var connection=rpc(), generation=instance(), view=agentViews.get(id);
+    if (connection == null || !canReadAgents() || view == null || view.supportsMessageContent != true || token == null || token == "") {
+      done(null,false,"Full message is unavailable"); return;
+    }
+    var finished=false, data:Null<haxe.io.Bytes> = null, total = -1, partial=false;
+    function fail(message:String):Void { if (!finished) { finished=true; done(null,false,message); } }
+    var next:Int->Void = null;
+    next=function(offset:Int) {
+      if (rpc()!=connection || instance()!=generation) { fail("Workspace connection changed; retry loading the message"); return; }
+      connection.call(WorkspaceAgentProtocol.MESSAGE_CONTENT,{workspace:"workspace",instance:generation,session:id,turn:turn,item:item,token:token,offset:offset},20000,
+        function(chunk) {
+          if (finished) return;
+          if (rpc()!=connection || instance()!=generation) { fail("Workspace connection changed; retry loading the message"); return; }
+          if (chunk == null || chunk.token != token || chunk.offset != offset || chunk.total < 0 || chunk.total > 256*1024
+            || chunk.bytes == null || chunk.bytes.length > 24*1024 || chunk.offset+chunk.bytes.length > chunk.total
+            || (chunk.bytes.length == 0 && offset != chunk.total) || (total >= 0 && (chunk.total != total || chunk.partial != partial))) {
+            fail("Invalid message content response"); return;
+          }
+          if (data == null) { total=chunk.total; partial=chunk.partial; data=haxe.io.Bytes.alloc(total); }
+          var target:haxe.io.Bytes = cast data; target.blit(offset,chunk.bytes,0,chunk.bytes.length);
+          var end=offset+chunk.bytes.length;
+          if (end == total) {
+            if (!workspace.TextFileContent.validUtf8(target)) { fail("Message content has invalid text encoding"); return; }
+            finished=true; done(target.toString(),partial,null);
+          } else next(end);
+        },function(error) fail(error == null ? "Message content is unavailable" : error.message));
+    };
+    next(0);
+  }
+
   public function removeAgentImage(id:String, upload:String):Void {
     var connection = rpc();
     if (connection == null || !canControlAgents() || upload == null || upload == "") return;

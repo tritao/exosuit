@@ -187,6 +187,16 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(22) var supportsSteering:Null<Bool>;
 	@:optional @:id(23) var supportsQueue:Null<Bool>;
 	@:optional @:id(24) var supportsImageUpload:Null<Bool>;
+	@:optional @:id(25) var supportsMessageContent:Null<Bool>;
+}
+
+@:wire typedef AgentContentQuery = {
+ @:id(1) var workspace:String; @:id(2) var instance:String; @:id(3) var session:String;
+ @:id(4) var turn:String; @:id(5) var item:String; @:id(6) var token:String; @:id(7) var offset:Int;
+}
+@:wire typedef AgentContentChunk = {
+ @:id(1) var token:String; @:id(2) var offset:Int; @:id(3) var total:Int;
+ @:id(4) var bytes:Bytes; @:id(5) var partial:Bool;
 }
 
 /** Bounded presentation data; provider protocol and policy stay on the host. */
@@ -210,6 +220,7 @@ import haxeon.wire.MessagePack;
 	@:id(8) var truncated:Bool;
 	/** Authoritative file association, absent on legacy services and unstructured tool output. */
 	@:optional @:id(9) var files:Null<Array<AgentFileChange>>;
+	@:optional @:id(10) var contentToken:Null<String>;
 }
 
 @:wire typedef AgentDiscoveryQuery = {
@@ -261,6 +272,9 @@ class WorkspaceAgentProtocol {
 	public static final ACTION = new RpcMethod<AgentAction, AgentView>(122, function(v:AgentAction) return MessagePack.encode(v),
 		function(b:Bytes):AgentAction return MessagePack.decode(b), function(v:AgentView) return MessagePack.encode(v),
 		function(b:Bytes):AgentView return MessagePack.decode(b));
+	public static final MESSAGE_CONTENT = new RpcMethod<AgentContentQuery, AgentContentChunk>(126,
+        function(v:AgentContentQuery) return MessagePack.encode(v), function(b:Bytes):AgentContentQuery return MessagePack.decode(b),
+        function(v:AgentContentChunk) return MessagePack.encode(v), function(b:Bytes):AgentContentChunk return MessagePack.decode(b));
 	public static final IMAGE_UPLOAD = new RpcMethod<AgentImageUpload, AgentImageUploadResult>(125,
 		function(v:AgentImageUpload) return MessagePack.encode(v), function(b:Bytes):AgentImageUpload return MessagePack.decode(b),
 		function(v:AgentImageUploadResult) return MessagePack.encode(v), function(b:Bytes):AgentImageUploadResult return MessagePack.decode(b));

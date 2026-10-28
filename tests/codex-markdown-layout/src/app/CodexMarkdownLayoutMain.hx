@@ -7,8 +7,21 @@ import haxeon.ui.core.UiContext;
 import haxeon.ui.core.RenderNode;
 import ui.CodexMarkdownView;
 
+@:access(haxeon.ui.core.StateStore)
+@:access(syntax.Highlighter)
 class CodexMarkdownLayoutMain {
   static function require(value:Bool, message:String):Void { if (!value) throw message; }
+
+  static function codeModel(context:UiContext):ui.WorkspaceFileTextModel {
+    for (id in context.stateStore.paths.keys()) {
+      var path = context.stateStore.paths.get(id);
+      if (path != null && path.indexOf("code-model") >= 0 && context.stateStore.values.exists(id)) {
+        var model:ui.WorkspaceFileTextModel = cast Reflect.field(context.stateStore.values.get(id),"model");
+        if (model != null) return model;
+      }
+    }
+    throw "Code model resource missing";
+  }
 
   static function find(root:RenderNode, label:String):RenderNode {
     var found:RenderNode = null;
@@ -63,9 +76,25 @@ class CodexMarkdownLayoutMain {
     var codeHeader = find(root, "python").globalBounds();
     require(codeLabel.y >= codeHeader.y + codeHeader.height, "Code block header must precede its body");
     find(root, "Copy code");
+    var oldModel = codeModel(context); oldModel.highlighter.line(0);
+    view.update("```python\nprint('updated')\n```");
+    root = context.submit(view,new LayoutFrame(1000,400));
+    require(oldModel.highlighter.validatedThrough == -1,"Replaced code retained its grammar resources");
+    var currentModel = codeModel(context); currentModel.highlighter.line(0);
+    view.update("Code removed");
+    root = context.submit(view,new LayoutFrame(1000,400));
+    require(currentModel.highlighter.validatedThrough == -1,"Removed code retained its grammar resources");
     var artifactSource = "<!doctype html>\r\n<h1>Hello</h1>\r\n";
     var artifact = workspace.client.CodexMarkdown.parse("```html\r\n" + artifactSource + "```\r\n")[0];
     require(artifact.closed == true && artifact.source == artifactSource, "Artifact lost exact source or fence state");
+    var previewLanguage:Null<String> = null, previewSource:Null<String> = null;
+    var previewView = new CodexMarkdownView("```html\r\n" + artifactSource + "```\r\n", new style.Theme(), syntaxes,
+      null, null, null, function(language, source) { previewLanguage = language; previewSource = source; });
+    var previewRoot = context.submit(previewView, new LayoutFrame(600, 400));
+    var previewBounds = find(previewRoot, "Preview HTML").globalBounds();
+    context.pointerDown(previewBounds.x + previewBounds.width / 2, previewBounds.y + previewBounds.height / 2, 0);
+    context.pointerUp(previewBounds.x + previewBounds.width / 2, previewBounds.y + previewBounds.height / 2, 0);
+    require(previewLanguage == "html" && previewSource == artifactSource, "Preview did not receive exact artifact source");
     var unfinished = workspace.client.CodexMarkdown.parse("```html\n<h1>Still streaming")[0];
     require(unfinished.closed == false && workspace.client.SessionArtifact.label(unfinished.language, unfinished.text, unfinished.closed == true) == null, "Unfinished fence promoted to artifact");
     require(workspace.client.SessionArtifact.label("diff", StringTools.lpad("", "x", 4000), true) == null, "Diff promoted to source artifact");

@@ -18,6 +18,8 @@ import ui.CodexSessionPanel;
 @:access(app.CodexMarkdownLayoutMain)
 @:access(app.SidebarLayoutTestMain)
 @:access(app.StatusBarTestMain)
+@:access(haxeon.ui.core.StateStore)
+@:access(ui.CodexMarkdownView)
 @:access(ui.CodexSessionPanel)
 class SessionChatUiTestMain {
 	static function require(value:Bool, message:String):Void { if (!value) throw message; }
@@ -186,15 +188,51 @@ class SessionChatUiTestMain {
 		click(summaryContext, find(summaryRoot, "README.md"), 500, 300);
 		require(summaryOpened == "README.md", "Changed file summary opened the wrong file");
 		summaryContext.dispose();
+        var longClient = new FakeAgent(), longContext = new UiContext(null, fonts, ui.ExosuitPalette.theme(true));
+        var htmlSource = "<main>"; var padding="x"; for (_ in 0...13) padding += padding;
+        htmlSource += padding + "</main>"; var fullResponse="```html\n" + htmlSource + "\n```";
+        longClient.messageContent = fullResponse; longClient.view.supportsMessageContent = true;
+        longClient.view.items = [{id:"long",turn:"turn",kind:"agentMessage",title:"Codex",text:fullResponse.substr(0,4096),detail:"",state:"completed",truncated:true,contentToken:"v1"}];
+        var previewed:String = null;
+        var longPanel = new CodexSessionPanel(function() return longClient,"session","/repo",function() {},new style.Theme(),new syntax.SyntaxRegistry(),
+          function(_,_,_) {},function(_) {},null,{context:function() return "Project", explore:function() {}, reviewChanges:function() {}, previewArtifact:function(_,source) previewed=source});
+        function longBuild():RenderNode return longContext.submit(longPanel,new LayoutFrame(1000,1000));
+        var longRoot=longBuild(); longRoot=longBuild();
+        var renderedLong:ui.CodexMarkdownView = cast longPanel.markdown.get("turn:long");
+        require(longClient.contentRequests == 1 && renderedLong.value == fullResponse, "Latest completed message was not fully loaded");
+        find(longRoot,"Copy message"); click(longContext,find(longRoot,"Preview HTML"),1000,1000);
+        require(previewed != null && StringTools.trim(previewed) == htmlSource, "HTML preview received clipped content");
+        longClient.deferContent=true;
+        longClient.view.items.push({id:"later",turn:"turn",kind:"agentMessage",title:"Codex",text:"preview",detail:"",state:"completed",truncated:true,contentToken:"old"});
+        longRoot=longBuild();
+        require(longClient.pendingContent != null, "New completed message did not begin loading");
+        longClient.view.items[1].contentToken="new";
+        var late:(Null<String>,Bool,Null<String>)->Void = cast longClient.pendingContent; late("stale response",false,null);
+        require(!longPanel.loadedContent.exists("turn:later"), "Stale message snapshot replaced a newer revision");
+        longContext.dispose();
+        var oldClient=new FakeAgent(), oldContext=new UiContext(null,fonts,ui.ExosuitPalette.theme(true));
+        oldClient.view.supportsMessageContent=true; oldClient.messageContent="older full response";
+        oldClient.view.items=[{id:"older",turn:"turn",kind:"agentMessage",title:"Codex",text:"older preview",detail:"",state:"completed",truncated:true,contentToken:"old"},
+          {id:"newer",turn:"turn",kind:"agentMessage",title:"Codex",text:"newer response",detail:"",state:"completed",truncated:false}];
+        var oldPanel=new CodexSessionPanel(function() return oldClient,"session","/repo",function(){},new style.Theme(),new syntax.SyntaxRegistry(),function(_,_,_){},function(_){});
+        function oldBuild():RenderNode return oldContext.submit(oldPanel,new LayoutFrame(1000,1000));
+        var oldRoot=oldBuild();
+        require(oldClient.contentRequests == 0,"Older response loaded automatically");
+        find(oldRoot,"Copy preview"); click(oldContext,find(oldRoot,"Load full response"),1000,1000);
+        oldRoot=oldBuild(); var oldRendered:ui.CodexMarkdownView=cast oldPanel.markdown.get("turn:older");
+        require(oldClient.contentRequests == 1 && oldRendered.value == "older full response", "Older response did not load on request");
+        oldContext.dispose();
 		var draftClient = new FakeAgent(), draftContext = new UiContext(null, fonts, ui.ExosuitPalette.theme(true));
 		draftClient.view.supportsImageUpload = true; draftClient.uploadEnabled = true;
-		var requestedPath:String = null;
+		var fixtureImage = sys.io.File.getBytes("../../graphical/assets/icons/exosuit-16.png");
+		var requestedPath:String = null; var clipboardBytes:Null<haxe.io.Bytes> = null; var pasteReads = 0;
 		var worktreeOpens = 0, githubOpens = 0, pullRequestOpens = 0, availableActions = true;
 		var draftPanel = new CodexSessionPanel(function() return draftClient, "session", "/repo", function() {},
 			new style.Theme(), new syntax.SyntaxRegistry(), function(_, _, _) {}, function(_) {}, null,
 			{context:function() return "Project", explore:function() {}, reviewChanges:function() {},
 			 readContext:function(path, done) { requestedPath = path; done("actual contents\n", null); },
-			 chooseImage:function(done) done("photo.png", haxe.io.Bytes.ofString("fixture"), null),
+			 chooseImage:function(done) done("photo.png", fixtureImage, null),
+             pasteImage:function() { pasteReads++; return {bytes:clipboardBytes, error:null}; },
 			 canCreateWorktree:function() return availableActions, newWorktree:function() worktreeOpens++,
 			 canOpenGithub:function() return availableActions, githubRepository:function() githubOpens++,
 			 canOpenPullRequest:function() return availableActions, githubPullRequest:function() pullRequestOpens++});
@@ -216,7 +254,15 @@ class SessionChatUiTestMain {
 		require(requestedPath == "src/Main.hx" && draftPanel.textContext.length == 1, "Workspace text was not read into the draft");
 		draftRoot = draftBuild(); click(draftContext, find(draftRoot, "Add image"), 1000, 1000);
 		require(draftPanel.imageDrafts.length == 1, "Image upload did not enter the draft");
-		draftRoot = draftBuild(); require(draftContext.focusWidget(find(draftRoot, "Codex prompt").id), "Cannot focus context draft");
+		draftRoot = draftBuild(); find(draftRoot, "photo.png preview");
+        var firstThumbnail:Null<haxeon.ui.Image> = null;
+        for (stateId in draftContext.stateStore.paths.keys()) {
+          var statePath = draftContext.stateStore.paths.get(stateId);
+          if (statePath != null && statePath.indexOf("draft-thumbnail") >= 0 && draftContext.stateStore.values.exists(stateId))
+            firstThumbnail = cast Reflect.field(draftContext.stateStore.values.get(stateId), "image");
+        }
+        require(firstThumbnail != null && !firstThumbnail.isDisposed(), "Thumbnail texture was not created");
+        require(draftContext.focusWidget(find(draftRoot, "Codex prompt").id), "Cannot focus context draft");
 		draftContext.text(UiEventKind.TextInput, "Explain"); draftRoot = draftBuild();
 		draftClient.acceptActions = false; click(draftContext, find(draftRoot, "Send"), 1000, 1000);
 		require(draftClient.actions[0].indexOf("actual contents") >= 0 && draftClient.actions[0].indexOf("src/Main.hx") >= 0, "Sent only a path instead of file contents");
@@ -228,13 +274,41 @@ class SessionChatUiTestMain {
 		var accepted:Void->Void = cast draftClient.pendingAcceptance; accepted();
 		require(draftPanel.prompt == "Edited while sending" && draftPanel.textContext.length == 0 && draftPanel.imageDrafts.length == 0
 			&& draftClient.removedImages.indexOf("opaque-image") >= 0, "Late acknowledgement lost edited text or retained submitted attachments");
-		draftClient.deferAcceptance = false; draftRoot = draftBuild(); click(draftContext, find(draftRoot, "Send"), 1000, 1000);
+		draftClient.deferAcceptance = false; draftRoot = draftBuild();
+        require(firstThumbnail.isDisposed(), "Acknowledged image thumbnail was not disposed");
+        click(draftContext, find(draftRoot, "Send"), 1000, 1000);
 		require(draftPanel.prompt == "" && draftPanel.textContext.length == 0, "Accepted send did not clear the unchanged draft");
-		draftRoot = draftBuild(); click(draftContext, find(draftRoot, "Add image"), 1000, 1000);
-		draftRoot = draftBuild(); click(draftContext, find(draftRoot, "Send"), 1000, 1000);
+		draftRoot = draftBuild(); require(draftContext.focusWidget(find(draftRoot, "Codex prompt").id), "Cannot focus paste composer");
+        var textPasteReachedField = false;
+        try draftContext.key(UiEventKind.KeyDown, UiKey.V, UiModifier.Control) catch (_:Dynamic) textPasteReachedField = true;
+        require(textPasteReachedField && pasteReads == 1 && draftPanel.imageDrafts.length == 0, "Text paste was treated as an image");
+        clipboardBytes = fixtureImage;
+        draftContext.key(UiEventKind.KeyDown, UiKey.V, UiModifier.Control);
+        require(draftPanel.imageDrafts.length == 1 && draftPanel.imageDrafts[0].name == "Pasted image.png", "Image paste did not attach to draft");
+		draftRoot = draftBuild(); find(draftRoot, "Pasted image.png preview"); click(draftContext, find(draftRoot, "Send"), 1000, 1000);
 		require(draftClient.actions[draftClient.actions.length - 1] == "prompt::null"
 			&& draftClient.lastImageIds != null && draftClient.lastImageIds[0] == "opaque-image", "Image-only send invented text or lost its image");
-		draftContext.dispose();
+        draftRoot = draftBuild(); click(draftContext, find(draftRoot, "Add image"), 1000, 1000);
+        draftRoot = draftBuild();
+        var removedThumbnail:Null<haxeon.ui.Image> = null;
+        for (stateId in draftContext.stateStore.paths.keys()) {
+          var statePath = draftContext.stateStore.paths.get(stateId);
+          if (statePath != null && statePath.indexOf("draft-thumbnail") >= 0 && draftContext.stateStore.values.exists(stateId))
+            removedThumbnail = cast Reflect.field(draftContext.stateStore.values.get(stateId), "image");
+        }
+        require(removedThumbnail != null && !removedThumbnail.isDisposed(), "Remove test thumbnail missing");
+        click(draftContext, find(draftRoot, "Remove image"), 1000, 1000); draftRoot = draftBuild();
+        require(removedThumbnail.isDisposed(), "Removed thumbnail was not disposed");
+        click(draftContext, find(draftRoot, "Add image"), 1000, 1000); draftRoot = draftBuild();
+        var unmountedThumbnail:Null<haxeon.ui.Image> = null;
+        for (stateId in draftContext.stateStore.paths.keys()) {
+          var statePath = draftContext.stateStore.paths.get(stateId);
+          if (statePath != null && statePath.indexOf("draft-thumbnail") >= 0 && draftContext.stateStore.values.exists(stateId))
+            unmountedThumbnail = cast Reflect.field(draftContext.stateStore.values.get(stateId), "image");
+        }
+        require(unmountedThumbnail != null && !unmountedThumbnail.isDisposed(), "Unmount test thumbnail missing");
+        draftContext.dispose();
+        require(unmountedThumbnail.isDisposed(), "Unmounted thumbnail was not disposed");
 		fonts.dispose();
 		trace("PASS: session rendering and provider actions across themes and widths");
 		return 0;

@@ -36,21 +36,22 @@ import syntax.SyntaxRegistry;
 /** Read-only Markdown projection using the editor's syntax engine and palette. */
 class CodexMarkdownView implements View {
   var value:String;
-  final models:Map<String, WorkspaceFileTextModel> = [];
   final diffs:Map<String, SessionDiffView> = [];
   final palette:style.Theme;
   final syntaxes:SyntaxRegistry;
   final openLink:String->Void;
   final resolveImage:Null<String->Null<String>>;
   final frame:Void->Void;
+  final previewArtifact:Null<(String, String)->Void>;
 
   public function new(value:String, palette:style.Theme, syntaxes:SyntaxRegistry, ?openLink:String->Void,
-      ?resolveImage:String->Null<String>, ?frame:Void->Void) {
+      ?resolveImage:String->Null<String>, ?frame:Void->Void, ?previewArtifact:(String, String)->Void) {
     this.value = value;
     this.palette = palette;
     this.syntaxes = syntaxes;
     this.resolveImage = resolveImage;
     this.frame = frame == null ? function() {} : frame;
+    this.previewArtifact = previewArtifact;
     this.openLink = openLink == null ? function(destination) {
       if (workspace.client.SessionLinkTarget.external(destination) && NativeKit.nk_shell_open_url(destination) != Result.Ok)
         throw "Unable to open link: " + NativeKit.nk_last_error();
@@ -121,17 +122,26 @@ class CodexMarkdownView implements View {
           show.variant = ButtonVariant.Navigation;
           var copy = new Button("", actionStyle, function() context.clipboard.writeText(raw), key + "-copy-source");
           copy.accessibilityLabel = "Copy source"; copy.leadingIcon = IconName.Copy; copy.iconSize = 16; copy.variant = ButtonVariant.Navigation;
-          rows.push(new KeyedView(key, new Row(key + "-artifact", [
-            new KeyedView("title", new Text(artifact, title, context.theme.tokens.textSecondary)),
-            new KeyedView("show", show), new KeyedView("copy", copy)
-          ], bar)));
+          var controls:Array<KeyedView> = [new KeyedView("title", new Text(artifact, title, context.theme.tokens.textSecondary))];
+          if (previewArtifact != null && (block.language == "html" || block.language == "htm" || block.language == "svg")) {
+            var preview:(String, String)->Void = cast previewArtifact;
+            var language = block.language;
+            var button = new Button(language == "svg" ? "Open static SVG" : "Preview HTML", actionStyle, function() preview(language, raw), key + "-render");
+            button.variant = ButtonVariant.Navigation;
+            controls.push(new KeyedView("preview", button));
+          }
+          controls.push(new KeyedView("show", show)); controls.push(new KeyedView("copy", copy));
+          rows.push(new KeyedView(key, new Row(key + "-artifact", controls, bar)));
           if (block.language == "svg") rows.push(new KeyedView(key + "-svg", new SessionSvgView(key + "-svg", raw, frame)));
           continue;
         }
-        var model = models.get(key);
-        if (model == null || model.buffer.text != block.text || model.syntax != syntaxes.find("snippet." + extension(block.language))) {
-          model = new WorkspaceFileTextModel("snippet." + extension(block.language), block.text, syntaxes, palette);
-          models.set(key, model);
+        var state = context.resourceState(context.id(key + "-code-model"), function() return new SessionCodeModelState(), function(value) value.dispose()).value;
+        var model = state.model;
+        var path = "snippet." + extension(block.language);
+        if (model == null || model.buffer.text != block.text || model.syntax != syntaxes.find(path, block.text.substr(0,128))) {
+          state.dispose();
+          model = new WorkspaceFileTextModel(path, block.text, syntaxes, palette);
+          state.model = model;
         }
         model.updateTheme(palette);
         var lines = block.text.split("\n"), longest = 0;
@@ -266,6 +276,13 @@ class CodexMarkdownView implements View {
     var layout = new LayoutStyle(); layout.width = LayoutAxis.grow(); layout.childGap = 12;
     return new Column("codex-markdown", rows, layout).build(context);
   }
+}
+
+/** Native grammar scanners follow the lifetime of the displayed code block. */
+private class SessionCodeModelState {
+  public var model:Null<WorkspaceFileTextModel>;
+  public function new() {}
+  public function dispose():Void { if (model != null) model.dispose(); model = null; }
 }
 
 private class CodexMarkdownLink implements View {

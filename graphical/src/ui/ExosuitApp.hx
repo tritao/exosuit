@@ -1514,6 +1514,7 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
  function makeAgentTab(id:String,resource:String,root:String,title:String):UiAgentTab {
+  var artifactPreviewAvailable = Std.isOfType(hostContext, haxeon.ui.host.DesktopUiHostContext) && SessionArtifactPreview.available();
   return new UiAgentTab(id,resource,root,title,new CodexSessionPanel(function() return workbenchClient==null?null:workbenchClient.agentService(),resource,root,requestFrame,editorPalette,application.syntaxes,showWorkbenchMenu,
    function(group:String) {
     createProviderAgent("codex", group);
@@ -1526,10 +1527,16 @@ class ExosuitApp implements DesktopUiApplication {
     canCreateWorktree: function() return sessionWorktreeRepository(resource, root) != null,
     newWorktree: function() createSessionWorktree(resource, root),
     chooseImage: desktop == null ? null : function(done) chooseSessionImage(resource, root, done),
+    pasteImage: desktop == null ? null : function() return SessionClipboardImage.read(),
     canOpenGithub: function() return sessionGithubOrigin(resource, root) != null,
     canOpenPullRequest: function() return sessionGithubOrigin(resource, root) != null && sessionGithubBranch(resource, root) != null,
     githubRepository: function() openSessionGithub(resource, root, false),
-    githubPullRequest: function() openSessionGithub(resource, root, true)
+    githubPullRequest: function() openSessionGithub(resource, root, true),
+    previewArtifact: artifactPreviewAvailable ? function(_, source) {
+     var desktopHost:haxeon.ui.host.DesktopUiHostContext = cast hostContext;
+     if (!SessionArtifactPreview.open(desktopHost.window.rawValue(), source))
+      application.reportError("agent", "Static artifact preview is unavailable or the source exceeds 512 KiB");
+    } : null
    }));
  }
 

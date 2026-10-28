@@ -195,6 +195,7 @@ class CodexProvider implements LocalAgentProvider {
 			itemsOmitted: false,
 			itemsNext: s.conversation.next(before),
 			supportsImageUpload: imageUploadAvailable,
+            supportsMessageContent: true,
 			models: models,
 			modelsNext: modelsNext,
 			currentModel: s.currentModel,
@@ -212,6 +213,11 @@ class CodexProvider implements LocalAgentProvider {
 			],
 			error: s.error
 		};
+
+    public function messageContent(session:String, turn:String, item:String, token:String, offset:Int):Null<AgentContentChunk> {
+        var s=sessions.get(session);
+        return s == null ? null : s.conversation.content(turn,item,token,offset);
+    }
 
 	function recoveryReason(s:Session):Null<String> {
 		if (s.record.thread == "" || s.attached

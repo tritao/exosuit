@@ -16,6 +16,10 @@ class FakeAgent implements WorkspaceAgentClient {
 	public var uploadEnabled:Bool = false;
 	public var lastImageIds:Null<Array<String>>;
 	public var removedImages:Array<String> = [];
+ public var messageContent:Null<String>;
+ public var contentRequests:Int = 0;
+ public var deferContent:Bool = false;
+ public var pendingContent:Null<(Null<String>, Bool, Null<String>)->Void>;
 	public function new() {
 		view = {record:record, activity:"", requests:[], error:null, connectionState:"connected", items:[
 			{id:"user", turn:"turn", kind:"userMessage", title:"", text:"Please inspect this project.", detail:"", state:"completed", truncated:false},
@@ -44,6 +48,10 @@ class FakeAgent implements WorkspaceAgentClient {
 		if (uploadEnabled) done("opaque-image", null); else done(null, "Unavailable");
 	}
 	public function removeAgentImage(id:String, upload:String):Void removedImages.push(upload);
+	public function loadAgentContent(id:String, turn:String, item:String, token:String, done:(Null<String>, Bool, Null<String>)->Void):Void {
+  contentRequests++; if (deferContent) pendingContent=done;
+  else done(messageContent,false,messageContent == null ? "Message content unavailable" : null);
+ }
 	public function discoverAgents(group:String, cursor:Null<String>):Void {}
 	public function discoveredAgents():Null<AgentDiscovery> return null;
 	public function agentView(id:String):Null<AgentView> return id == record.id ? view : null;

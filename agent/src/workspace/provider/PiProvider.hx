@@ -414,6 +414,8 @@ class PiProvider implements LocalAgentProvider {
     if(Std.isOfType(content,Array)) for(part in (cast content:Array<Dynamic>)) if(str(part,"type") == "text" && text.length < 8192) text += str(part,"text");
     s.conversation.put(turn+":tool:"+id,turn,"tool",str(v,"toolName"),text,type == "tool_execution_start" ? Json.stringify(Reflect.field(v,"args")) : "",
      type == "tool_execution_end" ? Reflect.field(v,"isError") == true ? "failed" : "completed" : "inProgress");
+    if (type == "tool_execution_end" && Reflect.field(v,"isError") != true)
+     s.conversation.toolPatch(turn+":tool:"+id,turn,output);
    case "agent_settled": s.settled=true;settle(s);
    case "compaction_end": settle(s);
    default:

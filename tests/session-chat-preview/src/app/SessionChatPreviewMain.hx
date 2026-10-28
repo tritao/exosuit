@@ -72,6 +72,16 @@ private class PreviewApplication implements DesktopUiApplication {
    if (args.indexOf("--expand-artifact") >= 0) clickLabel = "Show source";
   }
   if (args.indexOf("--models") >= 0) clickLabel = "Conversation model";
+  var renderHtml = args.indexOf("--render-html") >= 0;
+  var renderSvg = args.indexOf("--render-svg") >= 0;
+  if (renderSvg) agent.view.items = [
+   {id:"assistant",turn:"turn",kind:"agentMessage",title:"",text:"```svg\n<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 360 200\"><defs><linearGradient id=\"g\"><stop stop-color=\"#3869db\"/><stop offset=\"1\" stop-color=\"#6ad7d1\"/></linearGradient><rect id=\"tile\" width=\"100\" height=\"70\" rx=\"12\" fill=\"url(#g)\"/></defs><use href=\"#tile\" x=\"35\" y=\"35\"/><use href=\"#tile\" transform=\"translate(160 35) rotate(8 50 35)\"/><text x=\"35\" y=\"160\" font-size=\"24\">SVG gradients and reuse</text></svg>\n```",detail:"",state:"completed",truncated:false}
+  ];
+  if (renderHtml || renderSvg) {
+   clickLabel = renderSvg ? "Open static SVG" : "Preview HTML";
+   var started = Sys.time();
+   host.onPoll = function() { if (Sys.time() - started > 12) host.requestClose(); };
+  }
   var workflow = args.indexOf("--workflow") >= 0;
   if (workflow) {
    agent.view.supportsImageUpload = true;
@@ -87,7 +97,10 @@ private class PreviewApplication implements DesktopUiApplication {
     chooseImage: workflow ? function(done) done("diagram.png", sys.io.File.getBytes(Sys.getCwd() + "/graphical/assets/icons/exosuit-256.png"), null) : null,
     canCreateWorktree: workflow ? function() return true : null, newWorktree: workflow ? function() {} : null,
     canOpenGithub: workflow ? function() return true : null, githubRepository: workflow ? function() {} : null,
-    canOpenPullRequest: workflow ? function() return true : null, githubPullRequest: workflow ? function() {} : null});
+    canOpenPullRequest: workflow ? function() return true : null, githubPullRequest: workflow ? function() {} : null,
+    previewArtifact: renderHtml || renderSvg ? function(_, source) {
+     if (!ui.SessionArtifactPreview.open(host.window.rawValue(), source)) throw "Native artifact preview unavailable";
+    } : null});
  }
  public function context():UiContext return contextValue;
  public function submit(frame:LayoutFrame):RenderNode {

@@ -40,7 +40,8 @@ private typedef CodexRecoveryPresentation = {
 }
 
 private typedef SessionTextContext = { var path:String; var text:String; }
-private typedef SessionImageDraft = { var name:String; var id:String; }
+private typedef LoadedMessageContent = { var token:String; var text:String; var partial:Bool; }
+private typedef SessionImageDraft = { var name:String; var id:String; var bytes:haxe.io.Bytes; var key:Int; }
 
 /** Conversation controls are a client projection; shared provider owns requests and turns. */
 class CodexSessionPanel implements View {
@@ -83,6 +84,32 @@ class CodexSessionPanel implements View {
   var imageUploading = false;
   var imageError:Null<String> = null;
   var imageGeneration = 0;
+  var loadedContent:Map<String,LoadedMessageContent> = [];
+  var contentOrder:Array<String> = [];
+  var contentErrors:Map<String,String> = [];
+  var contentErrorTokens:Map<String,String> = [];
+  var contentLoading:Null<String> = null;
+  function loadContent(client:WorkspaceAgentClient, session:String, item:workspace.service.WorkspaceAgentProtocol.AgentActivityItem, key:String):Void {
+    if (contentLoading != null || item.contentToken == null) return;
+    var token:String = cast item.contentToken;
+    contentLoading = key; contentErrors.remove(key); contentErrorTokens.remove(key); frame();
+    client.loadAgentContent(session,item.turn,item.id,token,function(text,partial,error) {
+      contentLoading = null;
+      var current = client.agentView(session), valid = false;
+      if (current != null && current.items != null) for (candidate in current.items)
+        if (candidate.turn == item.turn && candidate.id == item.id && candidate.contentToken == token) valid=true;
+      if (valid && text != null && error == null) {
+        loadedContent.set(key,{token:token,text:text,partial:partial}); contentOrder.remove(key); contentOrder.push(key);
+        var bytes=0; for (saved in contentOrder) { var entry=loadedContent.get(saved); if (entry != null) bytes+=haxe.io.Bytes.ofString(entry.text).length; }
+        while (contentOrder.length > 16 || bytes > 4*1024*1024) {
+          var oldest=contentOrder.shift(), removed=loadedContent.get(oldest);
+          if (removed != null) bytes-=haxe.io.Bytes.ofString(removed.text).length;
+          loadedContent.remove(oldest);
+        }
+      } else if (valid) { contentErrors.set(key,error == null ? "Message content is unavailable" : error); contentErrorTokens.set(key,token); }
+      frame();
+    });
+  }
 
   static function paragraph(value:String):Text {
     var style = new LayoutStyle();
@@ -488,14 +515,21 @@ class CodexSessionPanel implements View {
       var retainedMarkdown:Map<String, CodexMarkdownView> = [];
       var retainedDiffs:Map<String, SessionDiffView> = [];
       var retainedCopies:Map<String, String> = [];
+      var retainedErrors:Map<String, String> = [], retainedErrorTokens:Map<String, String> = [];
       for (item in items) {
         var key = item.turn + ":" + item.id;
+        if (contentErrorTokens.exists(key) && contentErrorTokens.get(key) != item.contentToken) { contentErrors.remove(key); contentErrorTokens.remove(key); }
+        var content = loadedContent.get(key);
+        if (content != null && content.token != item.contentToken) { loadedContent.remove(key); contentOrder.remove(key); contentErrors.remove(key); }
         if (markdown.exists(key)) retainedMarkdown.set(key, markdown.get(key));
         if (markdown.exists(key + ":detail")) retainedMarkdown.set(key + ":detail", markdown.get(key + ":detail"));
         if (diffs.exists(key)) retainedDiffs.set(key, diffs.get(key));
         if (expanded.get(key) == true) retained.set(key, true);
-        if (copiedMessages.get(key) == item.text) retainedCopies.set(key, item.text);
+        var visibleText = content == null ? item.text : content.text;
+        if (copiedMessages.get(key) == visibleText) retainedCopies.set(key, visibleText);
+        if (contentErrors.exists(key)) { retainedErrors.set(key,contentErrors.get(key)); retainedErrorTokens.set(key,contentErrorTokens.get(key)); }
       }
+      contentErrors = retainedErrors; contentErrorTokens = retainedErrorTokens;
       expanded = retained;
       markdown = retainedMarkdown;
       diffs = retainedDiffs;
@@ -512,8 +546,18 @@ class CodexSessionPanel implements View {
           new KeyedView("description", new Text("Ask " + providerName(view.record.provider) + " a question or describe a task in this workspace.", null, tokens.textSecondary))
         ], emptyStyle)));
       }
+      if (view.supportsMessageContent == true && contentLoading == null) {
+        var latest:Null<workspace.service.WorkspaceAgentProtocol.AgentActivityItem> = null;
+        for (candidate in items) if (candidate.kind == "agentMessage" && candidate.state == "completed") latest=candidate;
+        if (latest != null && latest.truncated && latest.contentToken != null) {
+          var latestKey = latest.turn + ":" + latest.id;
+          if (!loadedContent.exists(latestKey) && !contentErrors.exists(latestKey)) loadContent(client,id,latest,latestKey);
+        }
+      }
       for (item in items) {
         var key = item.turn + ":" + item.id;
+        var full = loadedContent.get(key);
+        var displayText = full != null && full.token == item.contentToken ? full.text : item.text;
         var reasoning = item.kind == "reasoning";
         var command = item.kind == "commandExecution";
         if (reasoning && item.state == "completed" && StringTools.trim(item.text + item.detail) == "" && !item.truncated) continue;
@@ -547,11 +591,11 @@ class CodexSessionPanel implements View {
           var role = item.kind == "userMessage" ? "You" : item.kind == "agentMessage" ? providerName(view.record.provider) : item.title + " · " + item.state;
           var roleChildren:Array<KeyedView> = [new KeyedView("label", new Text(role, labelStyle,
             item.kind == "agentMessage" ? tokens.accent : tokens.textSecondary, TextStyleOverride.text(12)))];
-          if (!tool && item.text != "") {
-            var copyText = item.text;
+          if (!tool && displayText != "") {
+            var copyText = displayText;
             var copied = copiedMessages.get(key) == copyText;
             var copy = quietButton("", function() { context.clipboard.writeText(copyText); copiedMessages.set(key, copyText); frame(); }, "agent-copy-" + key);
-            copy.accessibilityLabel = copied ? "Copied" : "Copy message";
+            copy.accessibilityLabel = copied ? "Copied" : item.truncated && (full == null || full.partial) ? "Copy preview" : "Copy message";
             copy.leadingIcon = copied ? IconName.Check : IconName.Copy;
             copy.iconSize = 16;
             roleChildren.push(new KeyedView("copy", copy));
@@ -560,12 +604,13 @@ class CodexSessionPanel implements View {
         }
         if (item.kind == "fileChange" && item.files != null && item.files.length > 0) {
           message.push(new KeyedView("files-" + key, new SessionChangeSummaryView(item.files, detail, openLink)));
-        } else if (item.text != "" && ((!reasoning && !command) || expanded.get(key) == true)) {
+        } else if (displayText != "" && ((!reasoning && !command) || expanded.get(key) == true)) {
           if (item.kind == "agentMessage") {
             var rendered = markdown.get(key);
-            if (rendered == null) { rendered = new CodexMarkdownView(item.text, editorPalette, syntaxes, openLink,
-              workspaceActions == null ? null : workspaceActions.resolveImage, frame); markdown.set(key, rendered); }
-            rendered.update(item.text);
+            if (rendered == null) { rendered = new CodexMarkdownView(displayText, editorPalette, syntaxes, openLink,
+              workspaceActions == null ? null : workspaceActions.resolveImage, frame,
+              workspaceActions == null ? null : workspaceActions.previewArtifact); markdown.set(key, rendered); }
+            rendered.update(displayText);
             message.push(new KeyedView("text-" + key, rendered));
           } else message.push(new KeyedView("text-" + key, paragraph(item.text)));
         }
@@ -587,10 +632,19 @@ class CodexSessionPanel implements View {
             } else message.push(new KeyedView("detail-" + key, paragraph(detail)));
           }
         }
-        if (item.truncated && (!command || expanded.get(key) == true)) message.push(new KeyedView(
-          "truncated-" + key,
-          paragraph("This item is truncated in the current view.")
-        ));
+        if (item.truncated && (!command || expanded.get(key) == true)) {
+          if (item.kind == "agentMessage" && full != null && !full.partial) {}
+          else if (item.kind == "agentMessage" && full != null && full.partial)
+            message.push(new KeyedView("truncated-" + key, paragraph("Response exceeds the 256 KiB display limit; showing its beginning.")));
+          else {
+            message.push(new KeyedView("truncated-" + key, paragraph(contentErrors.exists(key) ? contentErrors.get(key) : "This item is truncated in the current view.")));
+            if (item.kind == "agentMessage" && item.state == "completed" && view.supportsMessageContent == true && item.contentToken != null) {
+              var load = quietButton(contentLoading == key ? "Loading response…" : contentErrors.exists(key) ? "Retry full response" : "Load full response", function() loadContent(client,id,item,key));
+              load.enabled = contentLoading == null;
+              message.push(new KeyedView("load-content-" + key,load));
+            }
+          }
+        }
         var messageStyle = new LayoutStyle();
         messageStyle.width = LayoutAxis.grow(0, 880);
         messageStyle.padding = tool ? new Insets(8, 3, 8, 3) : new Insets(16, 12, 16, 12);
@@ -732,6 +786,30 @@ class CodexSessionPanel implements View {
       }
     });
     promptNode.on(UiEventKind.KeyDown, function(event) {
+      if (event.key == UiKey.V && (event.modifiers & (UiModifier.Control | UiModifier.Super)) != 0
+          && (event.modifiers & UiModifier.Alt) == 0 && workspaceActions != null && workspaceActions.pasteImage != null
+          && view.supportsImageUpload == true && view.record.provider == "codex" && control && connectionReady) {
+        var readClipboard:Void->{bytes:Null<haxe.io.Bytes>, error:Null<String>} = cast workspaceActions.pasteImage;
+        var pasted = readClipboard();
+        if (pasted.bytes != null || pasted.error != null) {
+          event.preventDefault(); event.stopImmediatePropagation();
+          if (imageUploading) imageError = "Wait for the current image upload";
+          else if (imageDrafts.length >= 2) imageError = "Remove an image before pasting another";
+          else if (pasted.error != null) imageError = pasted.error;
+          else {
+            var generation = ++imageGeneration;
+            imageUploading = true; imageError = null;
+            client.uploadAgentImage(id, cast pasted.bytes, function(upload, problem) {
+              if (generation != imageGeneration) { if (upload != null) client.removeAgentImage(id, upload); return; }
+              imageUploading = false;
+              if (problem != null || upload == null) imageError = problem == null ? "Image upload failed" : problem;
+              else { imageDrafts.push({name:"Pasted image.png", id:upload, bytes:cast pasted.bytes, key:generation}); contextRevision++; imageError = null; }
+              frame();
+            });
+          }
+          frame(); return;
+        }
+      }
       if (suggestions.length > 0 && (event.modifiers & (UiModifier.Shift | UiModifier.Control | UiModifier.Alt)) == 0) {
         if (event.key == UiKey.Down || event.key == UiKey.Up) {
           event.preventDefault();event.stopImmediatePropagation();
@@ -773,7 +851,7 @@ class CodexSessionPanel implements View {
             if (generation != imageGeneration) { if (upload != null) client.removeAgentImage(id, upload); return; }
             imageUploading = false;
             if (problem != null || upload == null) imageError = problem == null ? "Image upload failed" : problem;
-            else { imageDrafts.push({name:name, id:upload}); contextRevision++; imageError = null; }
+            else { imageDrafts.push({name:name, id:upload, bytes:bytes, key:generation}); contextRevision++; imageError = null; }
             frame();
           });
         });
@@ -785,12 +863,18 @@ class CodexSessionPanel implements View {
     for (index in 0...imageDrafts.length) {
       var image = imageDrafts[index], imageIndex = index;
       var imageStyle = new LayoutStyle(); imageStyle.width = LayoutAxis.grow(); imageStyle.childGap = 8;
+      imageStyle.childAlignY = haxeon.ui.LayoutAlignmentY.Center;
       var imageLabel = new MiddleEllipsisText("image-label-" + index, image.name + " · image attached", true,
         TextStyleOverride.text(12, null, tokens.textSecondary));
-      contextRows.push(new KeyedView("image-" + index, new Row("agent-image-" + index, [
-        new KeyedView("name", imageLabel), new KeyedView("remove", quietButton("Remove image", function() {
-          imageDrafts.splice(imageIndex, 1); contextRevision++; client.removeAgentImage(id, image.id); frame();
-        }, "agent-remove-image-" + index))
+      var removeImage = quietButton("", function() {
+        imageDrafts.splice(imageIndex, 1); contextRevision++; client.removeAgentImage(id, image.id); frame();
+      }, "agent-remove-image-" + index);
+      removeImage.accessibilityLabel = "Remove image";
+      removeImage.leadingIcon = IconName.Close; removeImage.iconSize = 14;
+      removeImage.style.width = LayoutAxis.fixed(30);
+      contextRows.push(new KeyedView("image-" + image.key, new Row("agent-image-" + image.key, [
+        new KeyedView("thumbnail", new SessionDraftThumbnail("draft-preview-" + image.key, image.name, image.bytes)),
+        new KeyedView("name", imageLabel), new KeyedView("remove", removeImage)
       ], imageStyle)));
     }
     if (imageError != null) contextRows.push(new KeyedView("image-error", new Text(imageError, null, tokens.danger)));
@@ -838,12 +922,17 @@ class CodexSessionPanel implements View {
     for (index in 0...textContext.length) {
       var file = textContext[index], fileIndex = index;
       var fileStyle = new LayoutStyle(); fileStyle.width = LayoutAxis.grow(); fileStyle.childGap = 8;
+      fileStyle.childAlignY = haxeon.ui.LayoutAlignmentY.Center;
       var pathLabel = new MiddleEllipsisText("context-file-label-" + index, file.path + " · included as text", true,
         TextStyleOverride.text(12, null, tokens.textSecondary));
+      var removeText = quietButton("", function() {
+        textContext.splice(fileIndex, 1); contextRevision++; frame();
+      }, "agent-remove-context-" + index);
+      removeText.accessibilityLabel = "Remove";
+      removeText.leadingIcon = IconName.Close; removeText.iconSize = 14;
+      removeText.style.width = LayoutAxis.fixed(30);
       contextRows.push(new KeyedView("file-" + index, new Row("agent-context-file-" + index, [
-        new KeyedView("path", pathLabel), new KeyedView("remove", quietButton("Remove", function() {
-          textContext.splice(fileIndex, 1); contextRevision++; frame();
-        }, "agent-remove-context-" + index))
+        new KeyedView("path", pathLabel), new KeyedView("remove", removeText)
       ], fileStyle)));
     }
     if (contextError != null) contextRows.push(new KeyedView("error", new Text(contextError, null, tokens.danger)));

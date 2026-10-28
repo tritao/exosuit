@@ -53,6 +53,11 @@ try {
 using System;
 using System.Runtime.InteropServices;
 public static class PreviewWindowBounds {
+    public delegate bool EnumProc(IntPtr hwnd, IntPtr param);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc callback, IntPtr param);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr window, System.Text.StringBuilder text, int max);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr window);
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
     [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr window, out Rect rect);
@@ -65,7 +70,25 @@ public static class PreviewWindowBounds {
 		$tickPreview = {
 			param($process, $elapsed, $tree)
 			if ($preview.handle -eq [IntPtr]::Zero) {
+				# Owned native windows are not reported as Process.MainWindowHandle.
+				$findWindow = [PreviewWindowBounds+EnumProc] {
+					param($hwnd, $unused)
+					[uint32]$ownerId = 0
+					[void][PreviewWindowBounds]::GetWindowThreadProcessId($hwnd, [ref]$ownerId)
+					$title = [System.Text.StringBuilder]::new(512)
+					[void][PreviewWindowBounds]::GetWindowText($hwnd, $title, $title.Capacity)
+					if ($tree -contains [int]$ownerId -and [PreviewWindowBounds]::IsWindowVisible($hwnd) -and $title.ToString() -eq $UiPreviewTitle) {
+						$preview.handle = $hwnd; return $false
+					}
+					return $true
+				}
+				[void][PreviewWindowBounds]::EnumWindows($findWindow, [IntPtr]::Zero)
+				if ($preview.handle -ne [IntPtr]::Zero) {
+					$preview.foundAt = $elapsed
+					if (-not [PreviewWindowBounds]::SetWindowPos($preview.handle, [IntPtr](-1), 0, 0, 0, 0, 0x53)) { $preview.error = 'Could not raise preview window' }
+				}
 				foreach ($id in $tree) {
+					if ($preview.handle -ne [IntPtr]::Zero) { break }
 					$p = Get-Process -Id $id -ErrorAction SilentlyContinue
 					if ($p -and $p.MainWindowTitle -eq $UiPreviewTitle -and $p.MainWindowHandle -ne [IntPtr]::Zero) {
 						$preview.handle = $p.MainWindowHandle; $preview.foundAt = $elapsed

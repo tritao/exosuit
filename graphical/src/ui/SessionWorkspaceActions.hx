@@ -10,10 +10,13 @@ typedef SessionWorkspaceActions = {
   @:optional var readContext:Null<(String, (Null<String>, Null<String>)->Void)->Void>;
   @:optional var newWorktree:Null<Void->Void>;
   @:optional var canCreateWorktree:Null<Void->Bool>;
+  /** Clipboard image bytes are read locally and uploaded through the session. */
+  @:optional var pasteImage:Null<Void->{bytes:Null<haxe.io.Bytes>, error:Null<String>}>;
   /** Local chooser returns a display name and bytes; the host path is never sent. */
   @:optional var chooseImage:Null<((Null<String>, Null<haxe.io.Bytes>, Null<String>)->Void)->Void>;
   @:optional var githubRepository:Null<Void->Void>;
   @:optional var githubPullRequest:Null<Void->Void>;
   @:optional var canOpenGithub:Null<Void->Bool>;
   @:optional var canOpenPullRequest:Null<Void->Bool>;
+  @:optional var previewArtifact:Null<(String, String)->Void>;
 }

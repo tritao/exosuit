@@ -46,6 +46,16 @@ class AgentServiceTest {
   client.call(WorkspaceAgentProtocol.IMAGE_UPLOAD,{workspace:"w",instance:"owner",session:"beta-0",operation:"begin",
    upload:null,size:64,offset:0,bytes:null},1000,function(_) throw "Non-Codex image upload was accepted",function(error) unsupported=error.code=="unsupported_operation");
   server.poll();client.poll();require(unsupported,"Non-Codex provider advertised image upload");
+  var noReadPair=MemoryTransport.pair(), noRead=new RpcConnection(noReadPair.client,clock), noReadServer=new RpcConnection(noReadPair.server,clock);
+  service.bind(noReadServer,[]); denied=false;
+  noRead.call(WorkspaceAgentProtocol.MESSAGE_CONTENT,{workspace:"w",instance:"owner",session:"alpha-0",turn:"t",item:"i",token:"1",offset:0},1000,
+   function(_) throw "Content read without authorization was accepted",function(error) denied=error.code=="unauthorized");
+  noReadServer.poll();noRead.poll();require(denied,"Message content ignored read permission");
+  unsupported=false;
+  ro.call(WorkspaceAgentProtocol.MESSAGE_CONTENT,{workspace:"w",instance:"owner",session:"beta-0",turn:"t",item:"i",token:"1",offset:0},1000,
+   function(_) throw "Non-Codex content was accepted",function(error) unsupported=error.code=="content_unavailable");
+  roServer.poll();ro.poll();require(unsupported,"Message content ignored provider ownership");
+  noRead.close();noReadServer.close();
   service.dispose();require(alpha.disposed && beta.disposed,"Service lifecycle did not reach every adapter");
   client.close();server.close();ro.close();roServer.close();
   Sys.println("PASS: provider-neutral routing, combined limits/pagination, cross-provider identity and authorization");

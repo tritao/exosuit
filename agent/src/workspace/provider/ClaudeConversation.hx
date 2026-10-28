@@ -18,8 +18,10 @@ class ClaudeConversation {
    entry = {id:id, turn:turn, kind:kind, title:title, text:"", detail:"", state:state, truncated:false};
    entries.push(entry);
   }
-  entry.text = text.substring(0,4096); entry.detail = detail.substring(0,2048); entry.state = state;
-  entry.truncated = text.length > 4096 || detail.length > 2048;
+  entry.text = text.substring(0,4096);
+  // Tool results carry no input detail; keep the arguments received at tool_use.
+  entry.detail = detail == "" ? entry.detail : detail.substring(0,2048); entry.state = state;
+  entry.truncated = entry.truncated || text.length > 4096 || detail.length > 2048;
   if (entries.length > 128) { entries.shift(); revision++; }
  }
  public function delta(id:String, turn:String, text:String):Void {

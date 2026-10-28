@@ -92,6 +92,21 @@ class WorkspaceAgentService implements WorkspaceAgents {
    }
    provider.action(q,ctx);
   });
+  connection.register(WorkspaceAgentProtocol.MESSAGE_CONTENT,function(q,ctx) {
+   if (!allowed(q.workspace,q.instance,false)) {ctx.fail({code:"unauthorized",message:"Message content denied",ambiguous:false});return;}
+   if (q.session == null || q.session.length == 0 || q.session.length > 128 || q.turn == null || q.item == null || q.token == null
+       || q.turn.length > 128 || q.item.length > 128 || q.token.length > 32 || q.offset < 0) {
+    ctx.fail({code:"content_unavailable",message:"Message content is unavailable",ambiguous:false});return;
+   }
+   var provider=owner(q.session);
+   if (provider == null || !Std.isOfType(provider,CodexProvider)) {
+    ctx.fail({code:"content_unavailable",message:"Message content is unavailable",ambiguous:false});return;
+   }
+   var codex:CodexProvider = cast provider;
+   var chunk=codex.messageContent(q.session,q.turn,q.item,q.token,q.offset);
+   if (chunk == null) ctx.fail({code:"content_unavailable",message:"Message content changed or is no longer available",ambiguous:false});
+   else ctx.respond(chunk);
+  });
   connection.register(WorkspaceAgentProtocol.IMAGE_UPLOAD,function(q,ctx) {
    if(!allowed(q.workspace,q.instance,true)) {ctx.fail({code:"unauthorized",message:"Image upload denied",ambiguous:false});return;}
    var provider = owner(q.session);

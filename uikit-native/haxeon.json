@@ -8,7 +8,8 @@
 			"source": ".",
 			"target": "exosuit_ui_native",
 			"inputs": [
-				"CMakeLists.txt",
+				"CMakeLists.txt", "clipboard.cpp", "thumbnail.cpp",
+                "../haxeon/packages/ui/vendor/nanovg/src/stb_image.h", "artifact_preview.cpp",
 				"windows/app-icon.rc.in",
 				"../graphical/assets/exosuit.ico",
 				"../haxeon/vendor/nativekit/CMakeLists.txt",

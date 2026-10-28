@@ -6,10 +6,17 @@ import workspace.service.WorkspaceAgentProtocol;
 /** Stable turn/item identity across live events and persisted history. */
 class CodexConversation {
   public static inline final PAGE_ITEMS = 8;
+  static var nextCacheId:Int = 0;
+  final cacheId:Int;
   var entries:Array<AgentActivityItem> = [];
   var historyRevision:Int = 0;
 
-  public function new() {
+  public function new() { cacheId = ++nextCacheId; }
+  function cacheKey(turn:String, id:String):String return cacheId + ":" + turn.length + ":" + turn + id;
+  public function content(turn:String, id:String, token:String, offset:Int):Null<AgentContentChunk> {
+    var entry = find(turn,id);
+    if (entry == null || entry.kind != "agentMessage" || entry.contentToken != token) return null;
+    return AgentContentCache.chunk(cacheKey(turn,id),token,offset);
   }
 
   public function items():Array<AgentActivityItem> return entries.copy();
@@ -154,6 +161,7 @@ class CodexConversation {
     }
     var state = string(item, "status");
     if (state != "") entry.state = clipped(state, 64);
+    if (kind == "agentMessage") entry.contentToken = AgentContentCache.replace(cacheKey(turn,id),entry.text);
     bounded(entry);
     if (existing == null) entries.push(entry);
     else entries[entries.indexOf(existing)] = entry;
@@ -167,7 +175,10 @@ class CodexConversation {
     }
     if (entry == null || entry.state != "inProgress") return;
     if (kind == "commandExecution") entry.detail += text;
-    else entry.text += text;
+    else {
+      if (kind == "agentMessage") entry.contentToken = AgentContentCache.append(cacheKey(turn,id),text);
+      entry.text += text;
+    }
     bounded(entry);
   }
 
