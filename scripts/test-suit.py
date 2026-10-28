@@ -30,7 +30,8 @@ PARENT = [sys.executable, "-c",
 
 
 def library_path() -> str:
-    directories = [ROOT / "suit/build/host/native" / name for name in ("exosuit-suit", "processkit")]
+    suit_native = ROOT / "suit/build/host/native"
+    directories = sorted(path for path in suit_native.iterdir() if path.is_dir()) if suit_native.is_dir() else []
     directories += [HAXEON / "out", HAXEON / ".tools" / "hashlink"]
     agent_native = ROOT / "agent/build/host/native"
     if agent_native.is_dir():
