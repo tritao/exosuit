@@ -31,7 +31,7 @@ import haxeon.ui.widgets.text.Text;
 class ActivityBar implements View {
 	public static inline final WIDTH = 56.0;
 	/** Style key prefix of a destination's button; the destination id follows it. */
-	public static inline final BUTTON_KEY_PREFIX = "activity:";
+	public static inline final BUTTON_KEY_PREFIX:String = "activity:";
 	/** Opens the rail's menu for a destination, or for the rail itself when the id is null. */
 	public var onContextMenu:Null<(Null<String>, UiEvent)->Void> = null;
 	/** Moves a dragged destination before another one, or to the end for null; the sidebar model's own move by default. */

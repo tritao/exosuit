@@ -56,7 +56,11 @@ class WorkbenchRowKey {
 	}
 
 	function owningGroup(model:WorkbenchTreeModel):Null<WorkspaceGroup> {
-		var groupId = kind == WorkbenchRowKind.Group ? id : parentGroupId(model, toString());
+		var groupId:Null<String> = switch kind {
+			case WorkbenchRowKind.Group: id;
+			case WorkbenchRowKind.Terminal: var terminal = model.terminals.get(id); terminal == null ? null : terminal.group;
+			case WorkbenchRowKind.Agent: var agent = model.agents.get(id); agent == null ? null : agent.group;
+		};
 		return groupId == null ? null : model.groups.get(groupId);
 	}
 

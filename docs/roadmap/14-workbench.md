@@ -113,15 +113,27 @@ Editor layout's rail and panels.
 - **Changes in a sub-folder.** When the scope is a folder inside a larger
   repository, Changes lists only that folder's changes, and writes stay there:
   stage all and unstage all act on the folder, per-file actions outside it are
-  refused, and a commit is refused while files outside it are staged (it would
-  take the whole index). The editor's change markers and hunk actions are not
-  narrowed: a file opened from anywhere keeps its markers.
+  refused, and so is any path that is not plain (a `..` or `.` segment, a
+  leading separator, a drive letter). A commit is refused while files outside
+  the folder are staged (it would take the whole index); Git checks the index
+  again right before committing, and an amend is refused when the commit it
+  rewrites touches files outside the folder. Folder matching follows the
+  repository's `core.ignorecase`.
+- **Editor hunk actions are not narrowed.** The editor's change markers and its
+  hunk actions (stage, unstage and revert a hunk) use the editor's own source,
+  which covers the active context's folders and the group's folder whole, never
+  the group-narrowed Changes source. A file opened from anywhere keeps its
+  markers, and a hunk action on a file outside the group's folder is applied,
+  not refused.
 - **Left rail.** Files, Search and Source Control leave the rail while the
   right panel stands in for them; choosing them by command or shortcut opens the
   right panel's tab. When the panel cannot stand in (phone width, a window too
   narrow to show it, a remote workspace, a host without file access), they come
-  back so files stay reachable. With nothing left for the left sidebar, such as
-  before a Workbench exists, it stays closed.
+  back so files stay reachable; closing the right panel brings them back too.
+  They also stay while nothing else would be left on the rail, such as before a
+  Workbench exists, so the sidebar never closes with nothing to reach. When the
+  panel comes back (a window widened), a sidebar showing one of them switches to
+  the layout's default.
 - **Remote workspaces.** Their file, search and change services cannot narrow to
   a folder yet. The right panel says "Not scoped for remote workspaces" instead
   of showing the whole workspace as the group's, and the rail keeps Files,
@@ -136,7 +148,8 @@ Activity Bar Order" returns to the layout mode's order. Like VS Code, the order
 and hidden icons are the user's (the internal `appearance/workbench/activity_bar`
 setting), the same in every window and folder; the selected destination, sidebar
 width and visibility stay with each window layout. The first customized
-per-layout rail saved before this migrates to the setting once.
+per-layout rail saved before this migrates to the setting once. A setting that
+cannot be read is reported and replaced with the window's current rail.
 
 ### Group menu and selection
 

@@ -27,12 +27,15 @@ class WorkbenchLayoutModes {
 	public var afterApply:Void->Void = function() {};
 	/**
 		Whether the right panel can show the destinations a mode hides. By default, whenever it is registered; the app also
-		turns it off where the panel cannot show or cannot follow the group's folder. Without it the rail keeps them.
+		says no where the panel cannot show or cannot follow the group's folder. Without it the rail keeps them.
 	**/
-	public var contextPanelAvailable:Void->Bool;
-	public function new(dock:DockWorkspaceModel, sidebar:SidebarModel, regions:WorkbenchLayoutControls, changed:Void->Void) {
+	final contextPanelAvailable:Void->Bool;
+	/** The destinations the rail left out when it was last applied or synced (see syncRail). */
+	var railHidden:String = "";
+	public function new(dock:DockWorkspaceModel, sidebar:SidebarModel, regions:WorkbenchLayoutControls, changed:Void->Void,
+			?contextPanelAvailable:Void->Bool) {
 		this.dock = dock; this.sidebar = sidebar; this.regions = regions; this.changed = changed;
-		contextPanelAvailable = function() return dock.get("context-panel") != null;
+		this.contextPanelAvailable = contextPanelAvailable != null ? contextPanelAvailable : function() return dock.get("context-panel") != null;
 		previous = signatures();
 		release = dock.listen(observe);
 	}
@@ -87,8 +90,34 @@ class WorkbenchLayoutModes {
 		var mode = LayoutMode.find(id); if (mode == null) return;
 		current = mode; apply(); changed();
 	}
-	/** Whether the current mode leaves a destination off the rail: only while the right panel shows it instead. */
-	public function hides(destination:Null<String>):Bool return current.hides(destination) && contextPanelAvailable();
+	/**
+		Whether the current mode leaves a destination off the rail: only while the right panel is open and shows it instead,
+		and only while something else stays on the rail, so the sidebar never ends up closed with nothing to reach.
+	**/
+	public function hides(destination:Null<String>):Bool
+		return current.hides(destination) && contextPanelAvailable() && regions.rightOpen() && keepsAnother();
+	function keepsAnother():Bool {
+		for (mode in sidebar.modes) if (mode.visible && !current.hides(mode.id)) return true;
+		return false;
+	}
+	/** The destinations the current mode leaves off the rail right now. */
+	public function hiddenOnRail():Array<String> return [for (id in current.hiddenDestinations) if (hides(id)) id];
+	/**
+		Follows changes to what the rail hides that happen outside a mode change, e.g. the window widening so the right
+		panel shows again, or the panel closing: when the sidebar shows a destination that just left the rail, it switches
+		to the mode's default. Call once per frame; returns whether anything changed.
+	**/
+	public function syncRail():Bool {
+		if (!ready) return false;
+		var key = hiddenOnRail().join(",");
+		if (key == railHidden) return false;
+		railHidden = key;
+		if (hides(sidebar.activeId)) {
+			var next = railDefault();
+			if (next != null) { suspend(); sidebar.select(next.id); resume(); }
+		}
+		return true;
+	}
 	/** The destination the mode opens on the rail: its own default, else the first one it leaves on the rail. */
 	function railDefault():Null<haxeon.ui.widgets.sidebar.SidebarMode> {
 		var own = sidebar.find(current.selectedSidebar);
@@ -109,6 +138,9 @@ class WorkbenchLayoutModes {
 	}
 	function apply():Void {
 		suspend(); beforeApply(); orderSidebar();
+		// The right region first: whether it is open decides what the rail hides.
+		if (!bottomChanged && regions.bottomOpen() != current.bottom) regions.toggleBottom();
+		if (!rightChanged && regions.rightOpen() != current.right) regions.toggleRight();
 		var selected = railDefault();
 		if ((!leftChanged || hides(sidebar.activeId)) && selected != null) sidebar.select(selected.id);
 		if (!leftChanged) {
@@ -118,8 +150,7 @@ class WorkbenchLayoutModes {
 			if (left && !dock.isOpen("explorer")) dock.dock("explorer", DockNodeTools.firstPanel(dock.root), haxeon.ui.docking.DockDropZone.Left);
 			else if (!left && dock.isOpen("explorer")) dock.close("explorer");
 		}
-		if (!bottomChanged && regions.bottomOpen() != current.bottom) regions.toggleBottom();
-		if (!rightChanged && regions.rightOpen() != current.right) regions.toggleRight();
+		railHidden = hiddenOnRail().join(",");
 		applied = current.id; afterApply(); resume();
 	}
 	public function captureContext():String return "N\tlayout-mode\t1\t" + applied + "\t" + (leftChanged ? "1" : "0") + "\t" + (bottomChanged ? "1" : "0") + "\t" + (rightChanged ? "1" : "0");
