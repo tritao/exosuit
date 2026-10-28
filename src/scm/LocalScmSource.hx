@@ -2,6 +2,13 @@ package scm;
 
 import haxe.Int64;
 import haxe.io.Bytes;
+import workspace.PathKey;
+
+/** An operation limited to a source's folders, or why it was refused (see LocalScmSource.narrowOperation). */
+typedef NarrowedOperation = {
+	var operation:Null<ScmOperation>;
+	var error:Null<String>;
+}
 
 /** Root-scoped view of the desktop's in-process SCM service. */
 class LocalScmSource implements ScmSource {
@@ -13,23 +20,27 @@ class LocalScmSource implements ScmSource {
 	/** Scope decisions per repository root; resolving paths costs file-system calls and the app asks on every poll. */
 	final scopes:Map<String, Bool> = [];
 	var scopeEpoch:Int = 0;
-	/** Whether a root inside a repository shows only that folder's changes. */
-	final narrow:Bool;
-	final narrowed:Map<String, {var source:ScmSnapshot; var result:ScmSnapshot;}> = [];
+	/**
+		Whether a root inside a repository limits that repository to the root's folder: its snapshot shows only the folder's
+		changes, and staging, discarding and committing act only inside it.
+	**/
+	final narrowToFolders:Bool;
+	/** The last folder-narrowed snapshot per repository, with the full snapshot it came from. */
+	final narrowedSnapshots:Map<String, {var source:ScmSnapshot; var result:ScmSnapshot;}> = [];
 	var nextGeneration:Int = 1;
 	var disposed:Bool = false;
 
-	public function new(service:ScmService, root:String, ?roots:Array<String>, narrow:Bool = false) {
+	public function new(service:ScmService, root:String, ?roots:Array<String>, narrowToFolders:Bool = false) {
 		if (service == null || root == null || root.length == 0)
 			throw "Local SCM source requires a service and root";
 		this.service = service;
 		this.root = normalize(root);
 		this.roots = roots == null ? [this.root] : [for (path in roots) normalize(path)];
-		this.narrow = narrow;
-		this.sourceIdentity = identityFor(this.roots, narrow);
+		this.narrowToFolders = narrowToFolders;
+		this.sourceIdentity = identityFor(this.roots, narrowToFolders);
 	}
-	public static function identityFor(roots:Array<String>, narrow:Bool = false):String
-		return "local:" + [for (root in roots) key(normalize(root))].join("|") + (narrow ? "|narrow" : "");
+	public static function identityFor(roots:Array<String>, narrowToFolders:Bool = false):String
+		return "local:" + [for (root in roots) PathKey.of(normalize(root))].join("|") + (narrowToFolders ? "|narrow" : "");
 
 	public function identity():String return sourceIdentity;
 	public function isRemote():Bool return false;
@@ -92,10 +103,18 @@ class LocalScmSource implements ScmSource {
 			complete:ScmApplyCompletion):ScmJob<ScmApplyResult> {
 		if (disposed) return failed(null, complete, "service_closed", "Source control source is closed");
 		if (complete == null) throw "SCM operation callback cannot be null";
-		if (scopedRepository(repositoryId) == null) return failed(null, complete, "not_found", "Repository is outside this workspace root");
+		var repository = scopedRepository(repositoryId);
+		if (repository == null) return failed(null, complete, "not_found", "Repository is outside this workspace root");
 		var current = service.snapshot(repositoryId);
 		if (current == null || Int64.compare(current.revision, expectedRevision) != 0)
 			return failed(null, complete, "stale_revision", "Repository changed before the operation started");
+		var folders = narrowToFolders ? prefixes(repository) : null;
+		if (folders != null) {
+			var narrowed = narrowOperation(operation, folders, current);
+			var allowed = narrowed.operation, refusal = narrowed.error;
+			if (allowed == null) return failed(null, complete, "outside_folder", refusal == null ? "Operation is outside this folder" : refusal);
+			operation = allowed;
+		}
 		return service.apply(repositoryId, operation, nextGeneration++, complete);
 	}
 
@@ -149,37 +168,79 @@ class LocalScmSource implements ScmSource {
 	function prefixes(repository:ScmRepository):Null<Array<String>> {
 		var result:Array<String> = [], repositoryRoot = normalize(repository.root);
 		for (root in roots) {
-			if (!within(repositoryRoot, root)) continue;
-			if (key(root) == key(repositoryRoot)) return null;
-			result.push(root.substring(repositoryRoot.length + (StringTools.endsWith(repositoryRoot, "/") ? 0 : 1)) + "/");
+			var folder = PathKey.relative(repositoryRoot, root);
+			if (folder == null) continue;
+			if (folder == "") return null;
+			result.push(folder + "/");
 		}
 		return result.length == 0 ? null : result;
 	}
 
 	function narrowedSnapshot(repository:ScmRepository, snapshot:Null<ScmSnapshot>):Null<ScmSnapshot> {
-		if (!narrow || snapshot == null) return snapshot;
-		var cached = narrowed.get(repository.id);
+		if (!narrowToFolders || snapshot == null) return snapshot;
+		var cached = narrowedSnapshots.get(repository.id);
 		if (cached != null && cached.source == snapshot) return cached.result;
 		var folders = prefixes(repository);
 		var result = folders == null ? snapshot : narrowSnapshot(snapshot, folders);
-		narrowed.set(repository.id, {source: snapshot, result: result});
+		narrowedSnapshots.set(repository.id, {source: snapshot, result: result});
 		return result;
+	}
+
+	static function insideFolders(path:Null<String>, folders:Array<String>):Bool {
+		if (path == null) return false;
+		for (folder in folders) if (PathKey.within(folder, path)) return true;
+		return false;
 	}
 
 	/** Keeps the changes under any of the repository-relative folders (each ending in `/`); empty groups are dropped. */
 	public static function narrowSnapshot(snapshot:ScmSnapshot, folders:Array<String>):ScmSnapshot {
-		var inside = function(path:Null<String>):Bool {
-			if (path == null) return false;
-			var value = key(path);
-			for (folder in folders) if (StringTools.startsWith(value, key(folder))) return true;
-			return false;
-		};
 		var groups:Array<ScmGroup> = [];
 		for (group in snapshot.groups) {
-			var kept = [for (resource in group.resources) if (inside(resource.path) || inside(resource.originalPath)) resource];
+			var kept = [for (resource in group.resources)
+				if (insideFolders(resource.path, folders) || insideFolders(resource.originalPath, folders)) resource];
 			if (kept.length > 0) groups.push(new ScmGroup(group.id, kept, false));
 		}
 		return new ScmSnapshot(snapshot.revision, snapshot.head, groups, snapshot.truncated);
+	}
+
+	/**
+		An operation limited to the repository-relative folders (each ending in `/`), checked against the repository's full
+		snapshot. Paths outside them are refused; stage-all and unstage-all become the folders themselves. A commit takes
+		the whole index, so it is refused while changes outside the folders are staged. Branch and remote operations act
+		on the repository as before.
+	**/
+	public static function narrowOperation(operation:ScmOperation, folders:Array<String>, full:Null<ScmSnapshot>):NarrowedOperation {
+		var names = folders.join(", ");
+		function result(next:Null<ScmOperation>, error:Null<String>):NarrowedOperation return {operation: next, error: error};
+		function allow(paths:Array<String>):NarrowedOperation {
+			for (path in paths) if (!insideFolders(path, folders)) return result(null, path + " is outside " + names);
+			return result(operation, null);
+		}
+		var whole = [for (folder in folders) folder.substring(0, folder.length - 1)];
+		switch operation {
+			case Stage(path) | Unstage(path) | Discard(path) | RestoreDiscard(path, _) | ResolveConflict(path, _)
+				| StagePatch(path, _) | UnstagePatch(path, _) | RevertPatch(path, _):
+				return allow([path]);
+			case StagePaths(paths) | UnstagePaths(paths):
+				return allow(paths);
+			case StageAll:
+				return result(ScmOperation.StagePaths(whole), null);
+			case UnstageAll:
+				return result(ScmOperation.UnstagePaths(whole), null);
+			case Commit(_, _):
+				if (full == null) return result(null, "Refresh the repository before committing");
+				if (full.truncated) return result(null, "Too many changes to confirm this commit stays inside " + names);
+				var staged:Array<String> = [];
+				for (group in full.groups) if (group.id == ScmGroupId.Index) for (resource in group.resources)
+					if (!insideFolders(resource.path, folders) || resource.originalPath != null && !insideFolders(resource.originalPath, folders))
+						staged.push(resource.path);
+				if (staged.length == 0) return result(operation, null);
+				return result(null, "Staged changes outside " + names + " would be committed too: " + staged.slice(0, 3).join(", ")
+					+ (staged.length > 3 ? " and " + (staged.length - 3) + " more" : "")
+					+ ". Unstage them, or commit from the Editor layout's Source Control.");
+			case Checkout(_) | CreateBranch(_) | Fetch(_) | Pull | Push:
+				return result(operation, null);
+		}
 	}
 
 	function failed<T>(value:Null<T>, complete:ScmJobResult<T>->Void, code:String, message:String):ScmJob<T> {
@@ -189,16 +250,8 @@ class LocalScmSource implements ScmSource {
 		return job;
 	}
 
-	static function normalize(path:String):String {
-		var value = StringTools.replace(sys.FileSystem.fullPath(path), "\\", "/");
-		while (value.length > 1 && StringTools.endsWith(value, "/")) value = value.substring(0, value.length - 1);
-		return value;
-	}
+	/** The machine's full spelling with `/` separators and no trailing one; case is kept for display. */
+	static function normalize(path:String):String return PathKey.of(sys.FileSystem.fullPath(path), false);
 
-	static function within(parent:String, child:String):Bool {
-		var left = key(parent), right = key(normalize(child)), prefix = StringTools.endsWith(left, "/") ? left : left + "/";
-		return left == right || StringTools.startsWith(right, prefix);
-	}
-
-	static function key(path:String):String return Sys.systemName() == "Windows" ? path.toLowerCase() : path;
+	static function within(parent:String, child:String):Bool return PathKey.within(parent, normalize(child));
 }

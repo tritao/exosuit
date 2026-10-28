@@ -1157,6 +1157,50 @@ class ScmGitTestMain {
 			"SCM continuous-change debounce did not issue its trailing refresh");
 		require(firstContinuousRefresh != null && firstContinuousRefresh <= continuousStart + 2.0,
 			"A continuous change stream postponed SCM refresh for more than two seconds");
+
+		// A source narrowed to a sub-folder (the Agents layout's Changes) shows and writes only inside it.
+		var narrowRoot = StringTools.replace(newPath(fixtureBase + "/narrowed-source"), "\\", "/");
+		FileSystem.createDirectory(narrowRoot);
+		FileSystem.createDirectory(narrowRoot + "/sub");
+		var mixedSnapshot = new ScmSnapshot(Int64.ofInt(1), orderedSnapshot.head, [new scm.ScmGroup(ScmGroupId.Index, [
+			new scm.ScmResource(Bytes.ofString("sub/inside.txt"), ScmChangeKind.Modified),
+			new scm.ScmResource(Bytes.ofString("outside.txt"), ScmChangeKind.Modified)])]);
+		var narrowScript = new FakeScmRepositoryScript(new ScmRepository("narrowed", "fake", narrowRoot), new ScmFeatures(true), [mixedSnapshot], 0);
+		operationsProvider.add(narrowScript);
+		var narrowDiscovery:Null<ScmJobResult<Array<ScmRepository>>> = null;
+		operationService.discover(narrowRoot, value -> narrowDiscovery = value);
+		pumpService(operationService, gitScheduler, () -> narrowDiscovery != null, "Fake SCM narrowed discovery timed out");
+		if (narrowDiscovery == null || narrowDiscovery.value == null || narrowDiscovery.value.length != 1)
+			throw "Fake SCM narrowed service returned no repository";
+		var narrowRepository = narrowDiscovery.value[0];
+		operationService.setWatchAvailable(narrowRoot, true);
+		pumpService(operationService, gitScheduler, () -> operationService.snapshot(narrowRepository.id) != null,
+			"Fake SCM narrowed initial refresh timed out");
+		var narrowed = new scm.LocalScmSource(operationService, narrowRoot + "/sub", null, true);
+		var narrowedView = narrowed.snapshot(narrowRepository.id);
+		require(narrowedView != null && narrowedView.groups.length == 1 && narrowedView.groups[0].resources.length == 1
+			&& narrowedView.groups[0].resources[0].path == "sub/inside.txt", "a narrowed source showed changes outside its folder");
+		var narrowedStep = 0;
+		function applyNarrowed(operation:ScmOperation):Null<scm.ScmError> {
+			var latest = operationService.snapshot(narrowRepository.id);
+			if (latest == null) throw "Fake SCM narrowed repository lost its snapshot";
+			var done = false, error:Null<scm.ScmError> = null;
+			narrowed.apply(narrowRepository.id, "narrowed-" + (narrowedStep++), latest.revision, operation, function(result) {
+				done = true; error = result.error;
+			});
+			pumpService(operationService, gitScheduler, () -> done && gitScheduler.activeCount() == 0, "A narrowed SCM operation did not finish");
+			return error;
+		}
+		var outsideStage = applyNarrowed(ScmOperation.Stage("outside.txt"));
+		var mixedCommit = applyNarrowed(ScmOperation.Commit("message", false));
+		require(outsideStage != null && outsideStage.code == "outside_folder" && mixedCommit != null && mixedCommit.code == "outside_folder"
+			&& mixedCommit.message.indexOf("outside.txt") >= 0 && narrowScript.operations.length == 0,
+			"a narrowed source staged outside its folder or committed changes staged outside it");
+		var stagedFolder = applyNarrowed(ScmOperation.StageAll);
+		var stagedOperation = narrowScript.operations.length == 1 ? Std.string(narrowScript.operations[0]) : "none";
+		require(stagedFolder == null && stagedOperation == Std.string(ScmOperation.StagePaths(["sub"])),
+			"a narrowed stage-all did not stage only its folder: " + stagedOperation);
+		narrowed.dispose();
 		operationService.dispose();
 
 		var mergeRoot = fixtureBase + "/merge-conflict";

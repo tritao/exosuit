@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "package": {"name": "exosuit-path-key-test"},
+  "entry": "app.PathKeyTestMain",
+  "sourceRoots": ["src", "../../src"],
+  "scopeSourceRoots": false,
+  "target": "host",
+  "outputDir": "build"
+}

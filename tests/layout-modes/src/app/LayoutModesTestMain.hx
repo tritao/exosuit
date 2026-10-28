@@ -66,9 +66,25 @@ class LayoutModesTestMain {
 		require(session.WorkspaceSession.decode(saved.encode()).layout.length == 2, "mode metadata was discarded by session codec");
 		var offlineDock = model(), offlineSide = sidebar(offlineDock); offlineSide.unregister("workbench");
 		var offlineRegions = new WorkbenchLayoutControls(offlineDock), offlineModes = new WorkbenchLayoutModes(offlineDock, offlineSide, offlineRegions, function() {});
-		offlineModes.start("agents"); require(offlineSide.activeId == "files", "offline Agents lost the Files fallback");
+		offlineModes.start("agents");
+		// The right panel stands in for Files, Search and Source Control even before a Workbench exists, so they stay off
+		// the rail and the sidebar, with nothing left to show, stays closed.
+		require(offlineModes.hides("files") && offlineModes.hides("search") && offlineModes.hides("scm") && !offlineSide.visible
+			&& !offlineDock.isOpen("explorer") && offlineRegions.rightOpen(), "Agents without a Workbench brought back a hidden destination");
+		// Without the right panel (phone width, a hidden panel, a remote workspace) the rail keeps them and Files opens.
+		var panelAvailable = false;
+		offlineModes.contextPanelAvailable = function() return panelAvailable;
+		offlineModes.refreshSidebar();
+		require(!offlineModes.hides("files") && offlineSide.activeId == "files" && offlineSide.visible && offlineDock.isOpen("explorer"),
+			"without the right panel Files was not reachable");
+		panelAvailable = true; offlineModes.refreshSidebar();
+		require(offlineModes.hides("files") && !offlineSide.visible, "the right panel's return left Files on the rail");
 		offlineSide.register("workbench", function() return new Text("Workbench"), new SidebarModeOptions("Workbench", 20, true));
-		offlineModes.refreshSidebar(); require(offlineSide.activeId == "workbench" && !offlineModes.leftChanged, "late Workbench provider did not activate the untouched default");
+		offlineModes.refreshSidebar();
+		require(offlineSide.activeId == "workbench" && offlineSide.visible && !offlineModes.leftChanged, "late Workbench provider did not activate the untouched default");
+		// With the Workbench there but no right panel, Agents still opens the Workbench and leaves Files on the rail.
+		panelAvailable = false; offlineModes.refreshSidebar();
+		require(offlineSide.activeId == "workbench" && !offlineModes.hides("files"), "Agents without a right panel hid Files or left the Workbench");
 		offlineModes.dispose(); offlineRegions.dispose();
 		var legacyDock = model(), legacySide = sidebar(legacyDock), legacyRegions = new WorkbenchLayoutControls(legacyDock);
 		var legacyModes = new WorkbenchLayoutModes(legacyDock, legacySide, legacyRegions, function() {});
@@ -87,7 +103,7 @@ class LayoutModesTestMain {
 		require(userSide.resetOrder() && userSide.modes[0].id == "workbench", "reset did not return to the preset order");
 		userModes.dispose(); userRegions.dispose();
 		modes.dispose(); regions.dispose(); nextModes.dispose(); nextRegions.dispose();
-		trace("PASS: user Activity Bar order over presets, mode defaults, automatic/explicit/preference precedence, reversible presets, manual resize/visibility, sidebar reachability, context flags and restart metadata");
+		trace("PASS: user Activity Bar order over presets, mode defaults, automatic/explicit/preference precedence, reversible presets, manual resize/visibility, sidebar reachability with and without the right panel, context flags and restart metadata");
 		return 0;
 	}
 }

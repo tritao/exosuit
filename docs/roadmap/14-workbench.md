@@ -91,6 +91,68 @@ cycle rejection, move/rename without runtime disruption, invalid directories,
 service restart and two-client synchronization. Desktop and phone display the
 same hierarchy; selecting/expanding it remains independent.
 
+## Agents layout
+
+The Agents layout (Agent Mode) puts the Workbench first on the Activity Rail and
+opens the right panel. It is a presentation preset: it never adds, removes or
+replaces the Editor layout's workspace folders, and switching back restores the
+Editor layout's rail and panels.
+
+- **Right panel.** Three tabs, Files · Search · Changes, work in one folder, the
+  scope, captioned `group — path`. Search keeps its own query and results apart
+  from the editor workspace's Search; files come from an open project holding the
+  folder, else from an index of the folder that is never added to the workspace.
+- **Scope.** The selected Workbench row decides it: a group row uses the group's
+  folder, a session or terminal row its group's. A sub-group narrows to its own
+  folder; a group without one inherits its parent's, a top-level one the
+  workspace root. With no selection, or a row without a group, the last group
+  stays, following its rename or new folder. When that group is deleted, its
+  nearest surviving parent group takes over, else the first group, else nothing.
+  Before any group was chosen, the first top-level group stands in, so the panel
+  never shows the editor's folders.
+- **Changes in a sub-folder.** When the scope is a folder inside a larger
+  repository, Changes lists only that folder's changes, and writes stay there:
+  stage all and unstage all act on the folder, per-file actions outside it are
+  refused, and a commit is refused while files outside it are staged (it would
+  take the whole index). The editor's change markers and hunk actions are not
+  narrowed: a file opened from anywhere keeps its markers.
+- **Left rail.** Files, Search and Source Control leave the rail while the
+  right panel stands in for them; choosing them by command or shortcut opens the
+  right panel's tab. When the panel cannot stand in (phone width, a window too
+  narrow to show it, a remote workspace, a host without file access), they come
+  back so files stay reachable. With nothing left for the left sidebar, such as
+  before a Workbench exists, it stays closed.
+- **Remote workspaces.** Their file, search and change services cannot narrow to
+  a folder yet. The right panel says "Not scoped for remote workspaces" instead
+  of showing the whole workspace as the group's, and the rail keeps Files,
+  Search and Source Control for the whole remote workspace.
+
+### Activity Rail
+
+Drag an icon to reorder the rail; right-click it, or the rail, to hide or show
+destinations, and Manage lists the same entries. The last icon on the rail cannot
+be hidden, and destinations the layout mode leaves out are not offered. "Reset
+Activity Bar Order" returns to the layout mode's order. Like VS Code, the order
+and hidden icons are the user's (the internal `appearance/workbench/activity_bar`
+setting), the same in every window and folder; the selected destination, sidebar
+width and visibility stay with each window layout. The first customized
+per-layout rail saved before this migrates to the setting once.
+
+### Group menu and selection
+
+A group's context menu is flat: New Agent Session…, New terminal, New group,
+Rename group, Change Working Directory…, Use Inherited Working Directory, Move to
+Group…, Change Sort Order…, Open folder, Attach existing Codex thread… and Remove
+Group. Remove Group stays listed while the group holds groups, terminals or
+sessions, disabled as "Remove Group (not empty)".
+
+The Workbench tree selects several rows: Shift-click extends a range and
+Control-click toggles a row. Dragging a selection moves its outermost rows (a
+moved group carries its contents) into the target group one step at a time.
+With several rows selected, the context menu and the toolbar's remove button
+close the selected terminals and remove the idle sessions, naming any that are
+busy (for example "Close 3 Items (1 busy)").
+
 ## M14.1 — Shared protocol, client and initial service
 
 - [ ] Deliver Haxeon RPC.1 with an Exosuit consumer, including reconnect,
@@ -149,8 +211,9 @@ revision-checked metadata editing/removal and the desktop “Workspace Terminals
 browser allow detached sessions to be found and reattached independently of tabs.
 The Workbench sidebar now supports named nested groups, directory inheritance,
 revision-checked create/edit/move/order changes and grouped terminal creation.
-Directories are scoped to the current authorized project root. Task/provider
-catalog integration and a multi-project root registry remain pending. Output history is still volatile.
+A group directory may be any existing folder on the owning machine (see
+[Named groups](#named-groups-and-working-directories)). Task/provider catalog
+integration and a multi-project root registry remain pending. Output history is still volatile.
 
 Delivered first terminal slice: the Linux desktop attaches folder-scoped terminals
 through typed RPC to daemon-owned PTYs. Saved IDs restore the same shell across

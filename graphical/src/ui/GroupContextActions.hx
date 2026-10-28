@@ -3,6 +3,7 @@ package ui;
 import workspace.service.WorkspaceProtocol.WorkspaceGroup;
 import workspace.service.WorkspaceTerminalProtocol.TerminalCatalog;
 import workspace.service.WorkspaceAgentProtocol.AgentCatalog;
+import workspace.client.WorkspaceWorkbenchClient;
 
 /** Group actions share the service's hierarchy and empty-group rules. */
 class GroupContextActions {
@@ -27,12 +28,30 @@ class GroupContextActions {
 		return false;
 	}
 
-	/** `allowed` is the caller's permission and idle check (remove grant, no agent operation running). */
-	public static function canRemove(group:WorkspaceGroup, allowed:Bool, catalog:Null<TerminalCatalog>, agents:Null<AgentCatalog>):Bool
-		return allowed && empty(group.id, catalog, agents);
+	/** The menu and the remove action both decide here, against the client's current catalogs and permissions. */
+	public static function removal(group:WorkspaceGroup, client:WorkspaceWorkbenchClient):GroupRemoval {
+		var agents = client.agentService();
+		return removalOf(group.id, client.canEditGroups() && client.canRemoveGroups(),
+			client.terminalCatalogBusy() || agents.agentBusy(), client.terminalCatalog(), agents.agents());
+	}
+
+	/** `permitted`: the service grants editing and removing groups; `busy`: a workspace operation is running. */
+	public static function removalOf(group:String, permitted:Bool, busy:Bool, catalog:Null<TerminalCatalog>, agents:Null<AgentCatalog>):GroupRemoval {
+		if (!permitted) return GroupRemoval.NotPermitted;
+		if (busy || !complete(catalog, agents)) return GroupRemoval.Busy;
+		return empty(group, catalog, agents) ? GroupRemoval.Allowed : GroupRemoval.NotEmpty;
+	}
+
+	/** The menu entry, which says why it is disabled when the group still has contents. */
+	public static function removeLabel(removal:GroupRemoval):String
+		return removal == GroupRemoval.NotEmpty ? "Remove Group (not empty)" : "Remove Group";
+
+	/** Both catalogs are fully loaded and describe the same workspace, so emptiness can be decided. */
+	static function complete(catalog:Null<TerminalCatalog>, agents:Null<AgentCatalog>):Bool
+		return catalog != null && catalog.next == null && agents != null && agents.root == catalog.workspaceRoot && agents.next == null;
 
 	public static function empty(group:String, catalog:Null<TerminalCatalog>, agents:Null<AgentCatalog>):Bool {
-		if (catalog == null || catalog.next != null || agents == null || agents.root != catalog.workspaceRoot || agents.next != null) return false;
+		if (catalog == null || agents == null || !complete(catalog, agents)) return false;
 		for (child in catalog.groups) if (child.parent == group) return false;
 		for (terminal in catalog.terminals) if (terminal.group == group) return false;
 		for (agent in agents.records) if (agent.group == group) return false;
