@@ -38,7 +38,7 @@ class GroupContextActions {
 	/** `permitted`: the service grants editing and removing groups; `busy`: a workspace operation is running. */
 	public static function removalOf(group:String, permitted:Bool, busy:Bool, catalog:Null<TerminalCatalog>, agents:Null<AgentCatalog>):GroupRemoval {
 		if (!permitted) return GroupRemoval.NotPermitted;
-		if (busy || !complete(catalog, agents)) return GroupRemoval.Busy;
+		if (busy || catalog == null || agents == null || !complete(catalog, agents)) return GroupRemoval.Busy;
 		return empty(group, catalog, agents) ? GroupRemoval.Allowed : GroupRemoval.NotEmpty;
 	}
 
@@ -47,8 +47,8 @@ class GroupContextActions {
 		return removal == GroupRemoval.NotEmpty ? "Remove Group (not empty)" : "Remove Group";
 
 	/** Both catalogs are fully loaded and describe the same workspace, so emptiness can be decided. */
-	static function complete(catalog:Null<TerminalCatalog>, agents:Null<AgentCatalog>):Bool
-		return catalog != null && catalog.next == null && agents != null && agents.root == catalog.workspaceRoot && agents.next == null;
+	static function complete(catalog:TerminalCatalog, agents:AgentCatalog):Bool
+		return catalog.next == null && agents.next == null && agents.root == catalog.workspaceRoot;
 
 	public static function empty(group:String, catalog:Null<TerminalCatalog>, agents:Null<AgentCatalog>):Bool {
 		if (catalog == null || agents == null || !complete(catalog, agents)) return false;

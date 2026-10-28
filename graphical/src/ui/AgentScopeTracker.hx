@@ -19,7 +19,10 @@ class AgentScopeTracker {
 		// `current` carries the normalized directory, which never compares with the service's; resolve against that.
 		var previous = current == null ? null : current.withDirectory(serviceDirectory);
 		var next = AgentScope.resolve(model, selectedKey, previous);
-		if (next == null) return current = null;
+		if (next == null) {
+			current = null;
+			return null;
+		}
 		if (next.directory != serviceDirectory) {
 			serviceDirectory = next.directory;
 			normalizedDirectory = try normalize(next.directory) catch (_:Dynamic) next.directory;
