@@ -18,6 +18,7 @@ import ui.ExosuitPalette;
 **/
 class GraphicalMain {
 	static var session:Null<DesktopUiHostSession> = null;
+	static var app:Null<ExosuitApp> = null;
 	static var terminalWorkspaces:Null<workspace.client.LocalTerminalWorkspacePool> = null;
 	static var allocationProfile:Null<String> = null;
 	static var inspection:Null<devtools.InspectionAgent> = null;
@@ -42,6 +43,7 @@ class GraphicalMain {
 		var current = session;
 		if (current == null) return 0;
 		session = null;
+		app = null;
 		suit.SuitClient.unregister();
 		if (inspection != null) {
 			var target:devtools.InspectionAgent = cast inspection;
@@ -67,6 +69,21 @@ class GraphicalMain {
 		return "";
 
 	@:keep public static function restoreState(state:String):Void {}
+
+	/**
+		Before a live patch that drops functions: let go of the UI tree and the handlers it holds, so the patch is not
+		refused for closures only the old UI kept (haxeon docs/LIVE_PATCHING.md, "Stored closures").
+	**/
+	@:keep public static function liveRelease():Void {
+		var current = app;
+		if (current != null) current.ui.releaseRetained();
+	}
+
+	/** After that patch, applied or refused: the next frame builds the UI from the code that now runs. */
+	@:keep public static function liveRebuild():Void {
+		var current = app;
+		if (current != null) current.requestFrame();
+	}
 
 	static function open(arguments:Array<String>):Void {
 		var startupMemory = Sys.getEnv("EXOSUIT_STARTUP_MEMORY_DIR");
@@ -157,7 +174,6 @@ class GraphicalMain {
 			}
 			return true;
 		};
-		var app:Null<ExosuitApp> = null;
 		session = DesktopUiHost.open(host, function(context) {
 			var dark = prefersDark(themeChoice);
 			var workspaceClient:Null<workspace.client.LocalWorkspaceClient> = null;
