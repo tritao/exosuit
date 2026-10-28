@@ -11,3 +11,17 @@ else()
     find_package(Threads REQUIRED)
     target_link_libraries(processkit PRIVATE Threads::Threads)
 endif()
+
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    include(CTest)
+    if(BUILD_TESTING)
+        add_executable(processkit_contract tests/contract.c)
+        target_link_libraries(processkit_contract PRIVATE processkit)
+        add_test(NAME processkit_contract COMMAND processkit_contract)
+        if(WIN32)
+            # The contract test loads processkit.dll from its own directory.
+            set_target_properties(processkit processkit_contract PROPERTIES
+                RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+        endif()
+    endif()
+endif()
