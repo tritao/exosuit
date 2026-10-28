@@ -317,6 +317,71 @@ relay restart, machine offline and network changes. This slice includes an
 actual outbound-relay/browser path, not a mocked LAN-only demonstration.
 Deployment/publication requires separate authorization under EXECUTION.md.
 
+### Relay hosting under suit
+
+suit is the per-user tray daemon (see [suit/README.md](../../suit/README.md)).
+
+**Visibility and control: done.**
+
+- **Status file.** A hosting workspace daemon publishes `relay-status.json`
+  in its private state directory. The file holds the relay origin, the
+  connection state, the last error, and each device id with its connected and
+  revoked flags. It never holds bearers, tokens, keys or pairing codes.
+- **What suit shows.** The tray's Remote access submenu and
+  `suit relay list` show each hosting workspace as connected, reconnecting,
+  configured or in error, with its devices and how many pairing requests are
+  waiting.
+- **Stopping.** Stop hosting, `suit relay stop <workspace>|--all`, Terminate
+  all background processes and Quit Exosuit all stop the workspace manager
+  through `stop-request.json`. That disconnects the relay and revokes
+  nothing: `relay-settings.json`, the machine identity, the OS-stored bearer
+  and the device grants all stay. Hosting resumes the next time the
+  workspace service starts.
+- **Open Remote Access.** It opens `suit watch --relay`. suit cannot yet drive
+  an editor's Remote Access panel; that needs an editor control endpoint.
+
+**Ownership: designed, not built.**
+
+Today, explicit hosting keeps each hosting daemon alive for as long as hosting
+is configured. The chosen design is that suit holds the relay machine
+connection and starts a workspace daemon on demand.
+
+- **What suit holds.** For each workspace whose `relay-settings.json` says it
+  hosts, suit keeps the machine WebSocket open. It reads the workspace's
+  bearer from NativeKit credentials under the key the daemon uses today, and
+  stores nothing new. It never holds the Noise static key, device pins or
+  grants. Those stay in the daemon and its SQLite catalog.
+- **What suit relays.** When the relay opens a device channel, suit starts
+  the workspace manager (`--detach`) if it is not running. It then hands the
+  channel to the daemon over a new same-user local transport, for example
+  `NativeRpcHub.local` on the daemon's private pipe with a `relay-channel`
+  hello. suit forwards relay frames without reading them. Noise XX still runs
+  end to end between the device and the daemon, so suit sees only
+  ciphertext, the same as the relay.
+- **Idle.** The daemon goes back to its normal idle timeout once no channel or
+  client remains. suit keeps the single machine socket, so a device can reach
+  a workspace while no editor is open, and no per-workspace daemon stays up
+  forever.
+- **Pausing.** A `hosting: "paused"` field in `relay-settings.json`, set from
+  the tray, keeps suit from connecting at all. Stop hosting would then stay
+  in effect across restarts.
+
+The alternative was suit supervising the hosting daemons and restarting them
+when they exit. That is smaller, but it keeps one full daemon per hosted
+workspace resident, which is the cost this design removes.
+
+What the work needs:
+
+- move `WorkspaceRelayHost`'s machine connector into a part both suit and the
+  daemon can use
+- a daemon entry point that accepts a relay channel over the local
+  transport, with the same pairing gate
+- an on-demand start that a remote device can wait for (a retry window on
+  the device side)
+- tests against the local Wrangler Worker with
+  `EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP=1`, covering a channel that arrives while
+  the daemon is down
+
 ## M16.2 — Files, agents and terminals in the web build
 
 - [ ] Deliver [filesystem protocol F1–F5](WORKSPACE-FILES.md): typed root-relative
