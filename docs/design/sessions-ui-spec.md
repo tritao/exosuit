@@ -1,0 +1,53 @@
+# Sessions UI refinement
+
+## Product contract
+
+Sessions are first-class IDE documents backed by the existing workspace agent service. Codex, Claude, Pi and the built-in agent use the same visual language, with controls driven by provider capabilities. Terminals, editor documents, workspace groups, remote workspaces and source control retain their existing ownership and behavior. Work is isolated on branch `ui-exploration`.
+
+The desired experience combines the readable conversation and compact composer of T3 Code with the quiet hierarchy of Hermes Desktop. The code references and commits are recorded in [the reference research](chat-ui-reference-research.md). Exosuit remains an IDE: opening a file or reviewing changes uses its established editor and Source Control surfaces.
+
+The visual direction includes crisp, defined borders, restrained corner rounding and subtle contact/ambient shadows. A palette change alone does not meet the quality bar. Use a recessed application frame, a defined workspace surface, quiet navigation controls and a composed, elevated input area; inspect real native pixels in both themes.
+
+## Conversation
+
+- Give assistant prose a comfortable reading measure. Distinguish user messages with a subtle surface, role labels and consistent spacing. Keep provider identity and readable connection/turn status in the header.
+- Render streaming Markdown without losing incomplete content. Support headings, lists, inline code, explicit links, fenced code, quotes and tables using native views. Preserve literal content where typography cannot faithfully represent unsupported Markdown.
+- Put language and copy above code. Preserve exact source on copy, syntax highlighting, native selection and horizontal scrolling for wide code and tables. Offer separate whole-message copy with confirmation.
+- Keep command and reasoning disclosures collapsed initially; show supplied details on request. Display actual file-change patches with numbered hunk rows, addition/removal tint, per-file disclosure and copy/open actions. Preserve source fidelity and label truncated data.
+- Associate edits with files from optional provider-reported metadata. Codex reports bounded slices into its existing patch payload, keeping legacy fields available without duplicating patch data on the wire. Legacy unattributed output stays unattributed. Counts describe observed patch lines, not a net Git checkpoint.
+- Recognize standalone Markdown image blocks. Offer a user-initiated native preview for authorized local PNG/JPEG/GIF images with bounded file/header validation, fit without upscaling and managed resource disposal. Preserve alt text, source navigation and an explanatory fallback for unsupported locations.
+- Group pending requests after the conversation with their existing approve/decline/answer actions. Preserve reviewability restrictions, queue/steer controls, uncertain delivery and recovery behavior.
+- Keep the composer visible when space permits; scroll the whole document when the dock becomes too short. New output follows the transcript only while the reader is at its bottom. Retain the draft and model/effort choices through ordinary renders.
+
+## Composer and IDE navigation
+
+- A rounded, lightly raised multiline composer groups model/effort controls, draft, command completion and send/queue/steer actions. Preserve Enter, keypad Enter, Shift+Enter and command-completion handling.
+- Show the actual session working directory and known branch. Offer Files and Review changes as navigation actions; review means current workspace changes, not turn-attributed checkpoints.
+- Explicit Markdown file links open in Exosuit at optional `:line:column` or `#Lline` locations. Resolve relative paths against the session working directory. Validate workspace identity on activation and asynchronous completion. Remote host paths use workspace file RPC, never the local OS shell.
+- External HTTP(S)/mailto links open only on activation. Unsupported schemes remain literal. Local paths never go to the OS shell. Out-of-workspace file links report an actionable error.
+- Commit, branch, push and other Git mutations continue through Source Control's existing review and permission flows. A chat action must not silently commit or invent a GitHub PR integration.
+
+## Theme workstream
+
+Both light and dark modes share semantic colors, geometry and interaction hierarchy. Dark is the first visual evaluation target. Use neutral, layered surfaces; readable secondary text; crisp borders; a consistent blue focus/action accent; and compact tab labels. Selected tabs connect visually to the editor canvas. Workspace and selection surfaces use native geometry shadows; the composer uses a defined one-pixel edge and raised native box. Respect explicit appearance settings and preserve syntax/diagnostic meaning. Details are in [theme polish](theme-polish.md).
+
+## Follow-on capabilities requiring transport/native changes
+
+These are part of the intended complete experience, but must be implemented end to end before exposing their controls:
+
+1. **Image/file attachments:** typed input parts and negotiated provider capabilities; bounded workspace-host staging/upload; Codex/Claude/Pi adapters; durable attachment references in queued inputs; exact draft preservation on rejection; remove/preview/upload/failure UI; image clipboard support in the native platform bridge. Current RPC and Pi queue only persist text. Passing client-local filenames as though they were remote attachments is incorrect.
+2. **HTML/SVG artifacts:** explicit inert preview separate from source, no automatic execution/navigation, known resource origin and lifetime, and a native renderer or hardened webview boundary. Existing image tabs do not decode SVG. Code fences remain syntax-highlighted, selectable/copyable source until that preview contract exists. [Renderer contracts](renderer-contracts.md) records the references' artifact dispatch, source/rendered modes and platform requirements.
+3. **New worktree from composer:** negotiated workspace-host operation with directory and branch validation, cancellation, cleanup and session creation bound to the resulting group. Existing SCM can discover linked worktrees but does not expose creation.
+4. **PR/open GitHub:** authoritative remote metadata and supported review/network workflow. Do not infer a public GitHub URL or expose a button that cannot complete its action.
+
+These are explicit remaining capabilities, not implied by the visual implementation. The local-source audit identifies the exact current boundaries.
+
+## Acceptance and regression checks
+
+- Build the graphical app and agent from this isolated worktree with independent dependency/build outputs.
+- Native layout checks cover code header order, inline spacing, wrapping, quote/table rendering and keyboard-accessible links.
+- Presentation checks cover both themes and multiple providers, empty/streaming/request states, draft submission, model/effort controls, and narrow/wide layouts.
+- Pure link tests cover Windows/POSIX paths, relative navigation, location suffixes, nested URL parentheses, unsupported schemes and incomplete streaming syntax.
+- Existing theme tests verify control state colors, selected-tab canvas, readable contrast and editor/default consistency.
+- Run provider/state tests where the platform supports them. Linux Xvfb scenarios are not evidence of Windows validation unless actually run on a Linux host.
+- Visual QA must inspect the real native UI; a successful build or token contrast calculation alone does not establish production polish.

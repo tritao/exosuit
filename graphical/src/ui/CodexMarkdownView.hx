@@ -25,6 +25,8 @@ import haxeon.ui.widgets.KeyedView;
 import haxeon.ui.widgets.layout.Column;
 import haxeon.ui.widgets.layout.Row;
 import haxeon.ui.widgets.controls.Button;
+import haxeon.ui.widgets.controls.ButtonVariant;
+import haxeon.ui.icons.IconName;
 import haxeon.ui.widgets.text.Text;
 import haxeon.ui.widgets.text.TextArea;
 import haxeon.ui.widgets.scroll.ScrollView;
@@ -35,16 +37,22 @@ import syntax.SyntaxRegistry;
 class CodexMarkdownView implements View {
   var value:String;
   final models:Map<String, WorkspaceFileTextModel> = [];
+  final diffs:Map<String, SessionDiffView> = [];
   final palette:style.Theme;
   final syntaxes:SyntaxRegistry;
   final openLink:String->Void;
+  final resolveImage:Null<String->Null<String>>;
+  final frame:Void->Void;
 
-  public function new(value:String, palette:style.Theme, syntaxes:SyntaxRegistry, ?openLink:String->Void) {
+  public function new(value:String, palette:style.Theme, syntaxes:SyntaxRegistry, ?openLink:String->Void,
+      ?resolveImage:String->Null<String>, ?frame:Void->Void) {
     this.value = value;
     this.palette = palette;
     this.syntaxes = syntaxes;
+    this.resolveImage = resolveImage;
+    this.frame = frame == null ? function() {} : frame;
     this.openLink = openLink == null ? function(destination) {
-      if (NativeKit.nk_shell_open_url(destination) != Result.Ok)
+      if (workspace.client.SessionLinkTarget.external(destination) && NativeKit.nk_shell_open_url(destination) != Result.Ok)
         throw "Unable to open link: " + NativeKit.nk_last_error();
     } : openLink;
   }
@@ -58,9 +66,33 @@ class CodexMarkdownView implements View {
     case "c++", "cpp", "cxx": "cpp";
     case "haxe", "hx": "hx";
     case "json": "json";
+    case "html", "htm": "html";
+    case "svg", "xml": "xml";
+    case "css", "scss": "css";
+    case "bash", "sh", "shell", "zsh": "sh";
+    case "yaml", "yml": "yaml";
+    case "rust", "rs": "rs";
+    case "diff", "patch": "diff";
     case "c", "h": "c";
     default: "txt";
   };
+
+  static function tableCells(line:String):Array<String> {
+    var value = StringTools.trim(line);
+    if (StringTools.startsWith(value, "|")) value = value.substr(1);
+    if (StringTools.endsWith(value, "|")) value = value.substr(0, value.length - 1);
+    return [for (cell in value.split("|")) StringTools.trim(cell)];
+  }
+
+  static function isTable(text:String):Bool {
+    var lines = text.split("\n");
+    if (lines.length < 2 || lines[0].indexOf("|") < 0 || text.indexOf("\\|") >= 0) return false;
+    var heading = tableCells(lines[0]), divider = tableCells(lines[1]);
+    if (heading.length < 2 || heading.length != divider.length) return false;
+    for (cell in divider) if (!~/^:?-{3,}:?$/.match(cell)) return false;
+    for (index in 2...lines.length) if (tableCells(lines[index]).length != heading.length) return false;
+    return true;
+  }
 
   public function build(context:BuildContext):RenderNode {
     var rows:Array<KeyedView> = [];
@@ -68,7 +100,14 @@ class CodexMarkdownView implements View {
     var index = 0;
     for (block in CodexMarkdown.parse(value)) {
       var key = "block-" + index++;
-      if (block.kind == "code") {
+      if (block.kind == "code" && (block.language == "diff" || block.language == "patch")) {
+        var diff = diffs.get(key);
+        if (diff == null) { diff = new SessionDiffView(block.text, openLink); diffs.set(key, diff); }
+        diff.update(block.text);
+        rows.push(new KeyedView(key, diff));
+      } else if (block.kind == "image") {
+        rows.push(new KeyedView(key, new SessionImageView(key, block.text, block.language, resolveImage, openLink, frame)));
+      } else if (block.kind == "code") {
         var model = models.get(key);
         if (model == null || model.buffer.text != block.text || model.syntax != syntaxes.find("snippet." + extension(block.language))) {
           model = new WorkspaceFileTextModel("snippet." + extension(block.language), block.text, syntaxes, palette);
@@ -87,7 +126,13 @@ class CodexMarkdownView implements View {
         field.colorRangeProvider = model.foregroundProvider;
         field.presentationRevision = model.presentationRevision;
         var code = block.text;
-        var copy = new Button("Copy code", null, function() context.clipboard.writeText(code), key + "-copy");
+        var copyStyle = new LayoutStyle(); copyStyle.height = LayoutAxis.fixed(30); copyStyle.padding = new Insets(8, 4, 8, 4);
+        var copy = new Button("", copyStyle, function() context.clipboard.writeText(code), key + "-copy");
+        copy.accessibilityLabel = "Copy code";
+        copy.leadingIcon = IconName.Copy;
+        copy.iconSize = 16;
+        copy.variant = ButtonVariant.Navigation;
+        copy.classes.push("viewport-tool");
         var header = new LayoutStyle(); header.width = LayoutAxis.fit(); header.childGap = 8;
         header.childAlignY = haxeon.ui.LayoutAlignmentY.Center;
         var label = new LayoutStyle(); label.width = LayoutAxis.fit();
@@ -95,19 +140,50 @@ class CodexMarkdownView implements View {
         var card = new LayoutStyle(); card.width = LayoutAxis.grow(); card.childGap = 12;
         card.padding = new Insets(12, 10, 12, 10); card.background = context.theme.tokens.surfaceSunken;
         card.radiusTopLeft = card.radiusTopRight = card.radiusBottomLeft = card.radiusBottomRight = 8;
-        rows.push(new KeyedView(key, new Row(key, [
-          new KeyedView("code", new ScrollView(key + "-scroll", field, scroll, ScrollAxis.Horizontal)),
+        header.width = LayoutAxis.grow();
+        label.width = LayoutAxis.grow();
+        rows.push(new KeyedView(key, new Column(key, [
           new KeyedView("header", new Row(key + "-header", [
             new KeyedView("language", new Text(block.language == "" ? "Code" : block.language, label, context.theme.tokens.mutedText)),
             new KeyedView("copy", copy)
-          ], header))
+          ], header)),
+          new KeyedView("code", new ScrollView(key + "-scroll", field, scroll, ScrollAxis.Horizontal))
         ], card)));
+      } else if (isTable(block.text)) {
+        var tableRows:Array<KeyedView> = [];
+        var lines = block.text.split("\n");
+        for (rowIndex in 0...lines.length) {
+          if (rowIndex == 1) continue;
+          var cells:Array<KeyedView> = [];
+          var values = tableCells(lines[rowIndex]);
+          for (cellIndex in 0...values.length) {
+            var cellStyle = new LayoutStyle(); cellStyle.width = LayoutAxis.fixed(180);
+            cellStyle.padding = new Insets(10, 7, 10, 7);
+            cells.push(new KeyedView("cell-" + cellIndex, new Text(values[cellIndex], cellStyle,
+              rowIndex == 0 ? context.theme.tokens.textPrimary : context.theme.tokens.textSecondary)));
+          }
+          var rowStyle = new LayoutStyle(); rowStyle.width = LayoutAxis.fit();
+          rowStyle.background = rowIndex == 0 ? context.theme.tokens.surfaceRaised : context.theme.tokens.surfaceSunken;
+          tableRows.push(new KeyedView("row-" + rowIndex, new Row(key + "-row-" + rowIndex, cells, rowStyle)));
+        }
+        var tableStyle = new LayoutStyle(); tableStyle.width = LayoutAxis.fit(); tableStyle.childGap = 1;
+        var tableScroll = new LayoutStyle(); tableScroll.width = LayoutAxis.grow(); tableScroll.height = LayoutAxis.fit();
+        rows.push(new KeyedView(key, new ScrollView(key + "-table-scroll", new Column(key + "-table", tableRows, tableStyle), tableScroll, ScrollAxis.Horizontal)));
       } else {
         var text = block.text;
+        var quote = ~/^\s*> ?/;
+        var quoted = true;
+        for (line in text.split("\n")) if (!quote.match(line)) quoted = false;
+        if (quoted) text = ~/^\s*> ?/gm.replace(text, "");
         var heading = ~/^(#{1,6}) +/;
         var size = 16.0;
         if (heading.match(text)) { size = 24 - heading.matched(1).length; text = heading.replace(text, ""); }
         var prose = new LayoutStyle(); prose.width = LayoutAxis.grow();
+        if (quoted) {
+          prose.padding = new Insets(14, 8, 14, 8);
+          prose.background = context.theme.tokens.surfaceRaised;
+          prose.radiusTopLeft = prose.radiusTopRight = prose.radiusBottomLeft = prose.radiusBottomRight = 6;
+        }
         text = ~/^[-*+] /gm.replace(text, "• ");
         if (text.indexOf("`") < 0 && text.indexOf("](") < 0) rows.push(new KeyedView(key, new Text(text, prose, null, TextStyleOverride.text(size))));
         else {

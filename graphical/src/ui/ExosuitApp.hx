@@ -252,6 +252,7 @@ class ExosuitApp implements DesktopUiApplication {
 			}
 		}
 		ui = new UiContext(null, fonts, this.theme);
+		ui.setStyleSheet(ExosuitPalette.styleSheet(this.theme, darkPalette));
 		ui.onModifiersChanged = function(modifiers) {
 			for (pane in editorPanes) pane.pointerModifiersChanged(modifiers);
 		};
@@ -579,7 +580,7 @@ class ExosuitApp implements DesktopUiApplication {
 		} else {
 			if (!dock.isOpen("explorer")) dock.dock("explorer", host.activePane.id, DockDropZone.Left);
 			var mode = sidebar.selected();
-			if (mode != null) dock.setPanelWidth("explorer", sidebar.width, Math.max(0, viewportWidth - ActivityBar.WIDTH),
+			if (mode != null) dock.setPanelWidth("explorer", sidebar.width, workbenchAvailableWidth(),
 				DockWorkspace.DividerExtent, DockWorkspace.MinimumHorizontalExtent);
 		}
 		requestFrame();
@@ -1048,6 +1049,7 @@ class ExosuitApp implements DesktopUiApplication {
 		darkPalette = dark;
 		ExosuitPalette.theme(dark, theme);
 		ui.setTheme(theme);
+		ui.setStyleSheet(ExosuitPalette.styleSheet(theme, dark));
 		ui.buildContext.environment.colorScheme = dark ? EnvironmentColorScheme.Dark : EnvironmentColorScheme.Light;
 		updateEditorPalette();
 		terminalPalette.setDark(dark);
@@ -1230,10 +1232,13 @@ class ExosuitApp implements DesktopUiApplication {
 			default:
 		}
 		var content = haxeon.ui.docking.DockNodeTools.remove(dock.root, "explorer");
-		var width = Math.max(1.0, viewportWidth - ActivityBar.WIDTH - DockWorkspace.DividerExtent);
+		var width = Math.max(1.0, workbenchAvailableWidth() - DockWorkspace.DividerExtent);
 		dock.setRoot(DockNode.Split(DockSplitAxis.Horizontal, sidebar.width / width,
 			DockNode.Panel("explorer"), content));
 	}
+
+	function workbenchAvailableWidth():Float
+		return Math.max(0, viewportWidth - ActivityBar.WIDTH - (phoneLayoutActive ? 0 : WorkbenchSurface.INSET * 2));
 
 	public function view():View {
 		pruneStaleEditorPanes(host.allViews());
@@ -1250,14 +1255,15 @@ class ExosuitApp implements DesktopUiApplication {
 		workspaceView.headerActionsRevision = Std.string(layoutControls.bottomMaximized);
 		workspaceView.expandedGroup = layoutControls.expandedPanels();
 		workspaceView.hiddenPanels = responsiveRightHidden ? ["context-panel"] : [];
-		workspaceView.availableWidth = Math.max(0, viewportWidth - ActivityBar.WIDTH);
-		workspaceView.availableHeight = Math.max(0.0, viewportHeight - TOOLBAR_HEIGHT - STATUS_HEIGHT);
+		var surfaceInset = phoneLayoutActive ? 0.0 : WorkbenchSurface.INSET * 2;
+		workspaceView.availableWidth = workbenchAvailableWidth();
+		workspaceView.availableHeight = Math.max(0.0, viewportHeight - TOOLBAR_HEIGHT - STATUS_HEIGHT - surfaceInset);
 		var activityBar = new ActivityBar(sidebar, activityIcons, activateSidebarDestination,
 			application.settings.current.tabTooltipDelay, showManageMenu, manageMenu != null && contextMenu == manageMenu);
 		activityBar.onContextMenu = showActivityBarMenu;
 		var workspace:View = new Row("workspace-with-activity-bar", [
 			new KeyedView("activity-bar", activityBar),
-			new KeyedView("workspace:" + host.layoutContextKey, workspaceView)
+			new KeyedView("workspace:" + host.layoutContextKey, phoneLayoutActive ? workspaceView : new WorkbenchSurface(workspaceView))
 		], fillStyle());
 		var body = new Column("exosuit-body", [
 			new KeyedView("workspace", workspace),
@@ -1415,7 +1421,7 @@ class ExosuitApp implements DesktopUiApplication {
 		keepSidebarFullHeight();
 		if (widthChanged && !phoneLayoutActive && dock.isOpen("explorer")) {
 			var mode = sidebar.selected();
-			if (mode != null) dock.setPanelWidth("explorer", sidebar.width, Math.max(0, viewportWidth - ActivityBar.WIDTH),
+			if (mode != null) dock.setPanelWidth("explorer", sidebar.width, workbenchAvailableWidth(),
 				DockWorkspace.DividerExtent, DockWorkspace.MinimumHorizontalExtent);
 		}
 		syncResponsiveRightLayout();
@@ -1508,7 +1514,102 @@ class ExosuitApp implements DesktopUiApplication {
   return new UiAgentTab(id,resource,root,title,new CodexSessionPanel(function() return workbenchClient==null?null:workbenchClient.agentService(),resource,root,requestFrame,editorPalette,application.syntaxes,showWorkbenchMenu,
    function(group:String) {
     createProviderAgent("codex", group);
+   }, function(destination) openSessionLink(resource, root, destination), {
+    explore: function() { if (sessionRecord(resource, root) != null) showSidebarMode("files"); },
+    reviewChanges: function() { if (sessionRecord(resource, root) != null) showSidebarMode("scm"); },
+    context: function() return sessionWorkspaceLabel(resource, root),
+    resolveImage: function(destination) return resolveSessionImage(resource, root, destination)
    }));
+ }
+
+ function sessionRecord(resource:String, root:String):Null<workspace.service.WorkspaceAgentProtocol.AgentRecord> {
+  var client = workbenchClient == null ? null : workbenchClient.agentService();
+  var catalog = client == null ? null : client.agents();
+  if (catalog == null || catalog.root != root) return null;
+  var view = client.agentView(resource);
+  return view == null ? null : view.record;
+ }
+
+ function sessionWorkspaceLabel(resource:String, root:String):String {
+  var record = sessionRecord(resource, root);
+  if (record == null) return "Workspace disconnected";
+  var label = record.cwd;
+  var source = sourceControlSource();
+  if (source != null) {
+   var nearest:Null<scm.ScmRepository> = null;
+   for (repository in source.repositories())
+    if (workspace.client.SessionLinkTarget.relativeWithin(repository.root, record.cwd) != null && (nearest == null || repository.root.length > nearest.root.length)) nearest = repository;
+   var snapshot = nearest == null ? null : source.snapshot(nearest.id);
+   if (snapshot != null && snapshot.head.branch != null) label += " · " + snapshot.head.branch;
+  }
+  return label;
+ }
+
+ function resolveSessionImage(resource:String, root:String, destination:String):Null<String> {
+  var record = sessionRecord(resource, root);
+  if (record == null || (workspaceAttachment != null && !workspaceAttachment.hasLocalFileAccess())) return null;
+  var target = workspace.client.SessionLinkTarget.parse(destination);
+  if (target == null || !UiImageTab.supports(target.path)) return null;
+  var path = target.resolve(record.cwd);
+  try {
+   if (!application.workspace.fileSystem.exists(path) || application.workspace.fileSystem.isDirectory(path)) return null;
+   path = application.workspace.fileSystem.normalize(path);
+   if (scmRelativePath(root, path) == null) return null;
+   var metadata = sys.FileSystem.metadata(path);
+   return metadata != null && metadata.size <= 4 * 1024 * 1024 ? path : null;
+  } catch (_:Dynamic) return null;
+ }
+
+ /** Route explicit file links to the owning workspace; external URLs require activation. */
+ function openSessionLink(resource:String, root:String, destination:String):Void {
+  var record = sessionRecord(resource, root);
+  if (record == null) { application.reportError("agent", "Reconnect this session’s workspace to open its links"); return; }
+  if (workspace.client.SessionLinkTarget.external(destination)) {
+   try {
+    if (nativekit.ffi.NativeKit.nk_shell_open_url(destination) != Result.Ok)
+     application.reportError("agent", "Could not open link");
+   } catch (error:Dynamic) application.reportError("agent", Std.string(error));
+   return;
+  }
+  var target = workspace.client.SessionLinkTarget.parse(destination);
+  if (target == null) return;
+  var path = target.resolve(record.cwd);
+  // A response is workspace content: never resolve a stale/remote host path locally.
+  var attachment = workspaceAttachment;
+  var remote = attachment != null && !attachment.hasLocalFileAccess();
+  var relative = remote ? workspace.client.SessionLinkTarget.relativeWithin(root, path) : scmRelativePath(root, path);
+  if (relative == null) { application.reportError("agent", "This file link is outside the session’s workspace"); return; }
+  if (remote) {
+   var client = attachment.fileClient(), scope = attachment.fileScope();
+   if (client == null || scope == null) { application.reportError("agent", "Workspace file service is unavailable"); return; }
+   var scopedPath = workspace.client.SessionLinkTarget.relativeWithin(scope, path);
+   if (scopedPath == null) { application.reportError("agent", "This file is outside the connected file root"); return; }
+   var workspaceId = attachment.fileWorkspace();
+   client.stat(workspaceId, "root", scopedPath, function(stat) {
+    var current = sessionRecord(resource, root);
+    if (workspaceAttachment != attachment || current == null || current.cwd != record.cwd || current.thread != record.thread) return;
+    if (stat == null || stat.workspace != workspaceId || stat.root != "root" || stat.path != scopedPath
+      || stat.entry == null || stat.entry.kind != "file" || stat.entry.revision == null) {
+     application.reportError("agent", "The linked workspace file is no longer available"); requestFrame(); return;
+    }
+    var match:Null<FileSearchMatch> = target.line < 0 ? null : {path: scopedPath, kind: "file", revision: stat.entry.revision,
+     line: target.line, column: target.column, length: 0, preview: ""};
+    openWorkspaceFileSnapshot(attachment, workspaceId, scope, "root", scope, scopedPath, stat.entry.revision,
+     WorkspaceFileReader.previewSize(stat.entry.size), false, match);
+    requestFrame();
+   }, function(error) { if (workspaceAttachment == attachment) application.reportError("agent", error == null ? "Could not open workspace file" : error.message); requestFrame(); });
+  } else {
+   try {
+    if (!application.workspace.fileSystem.exists(path) || application.workspace.fileSystem.isDirectory(path)) {
+     application.reportError("agent", "The linked file is no longer available"); return;
+    }
+    host.openFile(path, true);
+    var view = host.activeView();
+    if (view != null && target.line >= 0) { view.restoreCursor(target.line, target.column); host.cursorChanged(); }
+    host.focusActiveEditor();
+    requestFrame();
+   } catch (error:Dynamic) application.reportError("agent", "Could not open file: " + Std.string(error));
+  }
  }
 
  function canCreateAgentSession():Bool {
@@ -2380,6 +2481,7 @@ class ExosuitApp implements DesktopUiApplication {
 		style.padding = new Insets(6, 6, 6, 6);
 		var button = new Button("", style, function() { ui.commands.executeContext(command, ui.commandContext); requestFrame(); }, "layout-" + region);
 		button.variant = ButtonVariant.Navigation; button.selected = selected;
+		button.classes.push("chrome-action");
 		button.accessibilityLabel = label;
 		if (region == "menu") button.leadingIcon = IconName.Grid;
 		else button.leadingView = new LayoutControlIcon(region, theme.tokens.textSecondary);
@@ -2520,6 +2622,7 @@ class ExosuitApp implements DesktopUiApplication {
 		button.accessibilityLabel = label;
 		if (label == "Terminal") button.enabled = canShowTerminal();
 		button.variant = custom ? ButtonVariant.Navigation : ButtonVariant.Secondary;
+		if (custom) button.classes.push("chrome-action");
 		button.leadingIcon = icon;
 		return custom || label == "Terminal" ? new TabTooltip("toolbar-tooltip:" + label, button,
 			new Text(label == "Terminal" && !canShowTerminal() ? terminalCreationFailure() : label),
@@ -3235,6 +3338,13 @@ class ExosuitApp implements DesktopUiApplication {
 				var prefix = StringTools.endsWith(root, "/") ? root : root + "/";
 				if (StringTools.startsWith(path, prefix) && (breadcrumbRoot == null || root.length > breadcrumbRoot.length))
 					breadcrumbRoot = root;
+			}
+			// The file explorer can also own a local folder outside a saved workspace.
+			if (breadcrumbRoot == null && document.path != null && explorerRoot != null) {
+				var root = StringTools.replace(explorerRoot, "\\", "/");
+				var path = StringTools.replace(document.path, "\\", "/");
+				var prefix = StringTools.endsWith(root, "/") ? root : root + "/";
+				if (StringTools.startsWith(path, prefix)) breadcrumbRoot = root;
 			}
 			var contentStyle = new LayoutStyle();
 			contentStyle.width = LayoutAxis.grow();

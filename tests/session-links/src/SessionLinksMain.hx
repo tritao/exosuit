@@ -1,0 +1,33 @@
+import workspace.client.SessionLinkTarget;
+import workspace.client.CodexMarkdown;
+
+class SessionLinksMain {
+  static function require(value:Bool, message:String):Void { if (!value) throw message; }
+  static function main():Void {
+    for (value in ["javascript:alert(1)", "file:///etc/passwd", "data:text/html,hi", "command:run", "//server/share", "\\\\server\\share", "#anchor", "src/a.hx\n"])
+      require(SessionLinkTarget.parse(value) == null, "Accepted invalid link: " + value);
+    for (value in ["https://example.com/a_(b)?x=1", "http://localhost:3000", "mailto:hello@example.com"])
+      require(SessionLinkTarget.external(value) && SessionLinkTarget.parse(value) == null, "External classification: " + value);
+    var target = SessionLinkTarget.parse("src/Main.hx:42:7");
+    require(SessionLinkTarget.parse("Justfile").resolve("/repo") == "/repo/Justfile", "Rejected an extensionless file");
+    require(SessionLinkTarget.relativeWithin("/repo", "/repository/a.hx") == null, "Containment prefix collision");
+    require(SessionLinkTarget.relativeWithin("/repo", "/Repo/a.hx") == null, "Remote POSIX case changed");
+    require(SessionLinkTarget.relativeWithin("C:/Repo", "c:/repo/a.hx") == "a.hx", "Remote drive case handling");
+    require(target != null && target.line == 41 && target.column == 6 && target.resolve("C:\\repo") == "C:/repo/src/Main.hx", "Windows relative location");
+    target = SessionLinkTarget.parse("C:\\repo\\src\\Main.hx:12");
+    require(target != null && target.line == 11 && target.resolve("/other") == "C:/repo/src/Main.hx", "Drive path location");
+    target = SessionLinkTarget.parse("../README.md#L3-L8");
+    require(target != null && target.line == 2 && target.resolve("/repo/src") == "/repo/README.md", "POSIX relative range");
+    target = SessionLinkTarget.parse("/repo/a b.svg#L2C4");
+    require(target != null && target.line == 1 && target.column == 3 && target.resolve("/other") == "/repo/a b.svg", "Space-containing artifact location");
+    var spans = CodexMarkdown.inlineSpans("[source](src/Main.hx:4) and [docs](https://example.com/a_(b))");
+    require(spans.length == 3 && spans[0].kind == "link" && spans[2].kind == "link", "Explicit links");
+    for (value in ["[unsafe](javascript:alert(1))", "`[literal](src/a.hx)`", "[unfinished](src/a.hx"])
+      for (span in CodexMarkdown.inlineSpans(value)) require(span.kind != "link", "Unsafe/unfinished links became active");
+    var blocks = CodexMarkdown.parse("Before\r\n\r\n````svg\r\n<svg>```</svg>\r\n````\r\nAfter");
+    require(blocks.length == 3 && blocks[1].kind == "code" && blocks[1].text == "<svg>```</svg>", "Source fidelity");
+    var stream = CodexMarkdown.parse("~~~html\n<script>literal</script>");
+    require(stream.length == 1 && stream[0].kind == "code" && stream[0].text == "<script>literal</script>", "Unfinished fence fidelity");
+    trace("PASS: session link targets, locations, schemes, streaming and source fidelity");
+  }
+}

@@ -66,7 +66,8 @@ class StatusBarTestMain {
 					var root = context.submit(fixture, new LayoutFrame(1000, 200)).children[1];
 					require(root.globalBounds().height == 26, "status bar changed height");
 					var previousRight = 0.0;
-					for (child in root.children) {
+					// The first child is the non-interactive painted top boundary, not a slot.
+					for (child in root.children.slice(1)) {
 						if (!child.layout.style.visible) continue;
 						var bounds = child.globalBounds();
 						require(bounds.x >= previousRight - 0.1 && bounds.x + bounds.width <= width + 0.1,
@@ -107,7 +108,7 @@ class StatusBarTestMain {
 						}
 						var bounds = message.globalBounds();
 						context.pointerMove(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
-						context.animations.advance(0.6);
+						context.animations.advance(config.Settings.DEFAULT_TOOLTIP_DELAY + 0.1);
 						root = context.submit(fixture, new LayoutFrame(1000, 200)).children[1];
 						var fullTip = false;
 						root.walk(function(node) {

@@ -170,6 +170,15 @@ import haxeon.wire.MessagePack;
 }
 
 /** Bounded presentation data; provider protocol and policy stay on the host. */
+@:wire typedef AgentFileChange = {
+	@:id(1) var path:String;
+	@:id(2) var kind:String;
+	/** Slice of the containing item's detail. Avoids duplicating bounded patch data on the wire. */
+	@:id(3) var offset:Int;
+	@:id(4) var length:Int;
+	@:id(5) var truncated:Bool;
+}
+
 @:wire typedef AgentActivityItem = {
 	@:id(1) var id:String;
 	@:id(2) var turn:String;
@@ -179,6 +188,8 @@ import haxeon.wire.MessagePack;
 	@:id(6) var detail:String;
 	@:id(7) var state:String;
 	@:id(8) var truncated:Bool;
+	/** Authoritative file association, absent on legacy services and unstructured tool output. */
+	@:optional @:id(9) var files:Null<Array<AgentFileChange>>;
 }
 
 @:wire typedef AgentDiscoveryQuery = {

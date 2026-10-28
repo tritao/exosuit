@@ -58,6 +58,12 @@ class CodexConversation {
     entry.title = title;
     entry.text = text;
     entry.detail = detail;
+    if (entry.files != null) for (file in entry.files) {
+      var available = Std.int(Math.max(0, Math.min(file.length, detail.length - file.offset)));
+      if (available != file.length) file.truncated = true;
+      file.length = available;
+      file.offset = Std.int(Math.min(file.offset, detail.length));
+    }
   }
 
   public function put(turn:String, item:Dynamic, completed:Bool):Void {
@@ -110,13 +116,24 @@ class CodexConversation {
         entry.detail += "\n" + string(item, "aggregatedOutput");
       case "fileChange":
         entry.title = "File changes";
+        var fileChanges:Array<AgentFileChange> = [];
+        entry.files = fileChanges;
+        var pathBudget = 1024;
         var changes:Array<Dynamic> = Reflect.field(item, "changes");
         if (changes != null) for (change in changes) {
+          var path = string(change, "path"), kind = string(Reflect.field(change, "kind"), "type");
+          var diff = string(change, "diff");
+          var retainedPath = clipped(path, Std.int(Math.min(512, pathBudget)));
+          if (fileChanges.length < 8 && retainedPath == path && path != "") {
+            fileChanges.push({path: path, kind: clipped(kind, 32), offset: entry.detail.length,
+              length: diff.length, truncated: false});
+            pathBudget -= retainedPath.length;
+          } else entry.truncated = true;
           entry.text += (entry.text == "" ? "" : "\n") + string(Reflect.field(change, "kind"), "type") + " " + string(
             change,
             "path"
           );
-          entry.detail += string(change, "diff") + "\n";
+          entry.detail += diff + "\n";
           if (entry.text.length > 4096 || entry.detail.length > 2048) {
             entry.truncated = true;
             break;

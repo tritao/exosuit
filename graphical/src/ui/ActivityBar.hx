@@ -74,6 +74,7 @@ class ActivityBar implements View {
 			buttonStyle.height = LayoutAxis.fixed(40);
 			var button = new Button("", buttonStyle, function() activate(id), "activity:" + id);
 			button.variant = ButtonVariant.Navigation;
+			button.classes.push("chrome-action");
 			button.leadingIcon = icons.exists(id) ? icons.get(id) : IconName.FolderOpen;
 			button.iconSize = 20;
 			button.accessibilityLabel = mode.label;
@@ -91,6 +92,7 @@ class ActivityBar implements View {
 		var gear = new Button("", manageStyle, null, "activity-manage");
 		gear.onClickEvent = function(event) { hover.cancel(); manage(event); };
 		gear.variant = ButtonVariant.Navigation;
+		gear.classes.push("chrome-action");
 		gear.leadingIcon = IconName.Settings;
 		gear.iconSize = 22;
 		gear.accessibilityLabel = "Manage";

@@ -46,7 +46,7 @@ class ClaudeConversation {
  }
  /** Keep the resource payload below the existing 16 KiB storage bound. */
  public function snapshot():Array<AgentActivityItem> {
-  var saved = [for (e in entries.slice(Std.int(Math.max(0,entries.length-6)))) {
+  var saved:Array<AgentActivityItem> = [for (e in entries.slice(Std.int(Math.max(0,entries.length-6)))) {
    id:e.id,turn:e.turn,kind:e.kind,title:e.title,text:e.text.substring(0,384),detail:e.detail.substring(0,128),state:e.state,
    truncated:e.truncated || e.text.length > 384 || e.detail.length > 128
   }];

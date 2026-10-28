@@ -20,7 +20,11 @@ param(
 	[int]$DeadlineSeconds = 0,
 	[int]$LockWaitMinutes = 7,
 	# The checkout to measure; this script's own by default. Output still goes under this script's runs folder.
-	[string]$Root = ''
+	[string]$Root = '',
+	# Optional deterministic native fixture; capture its uniquely titled window without input.
+	[string]$UiPreviewExecutable = '',
+	[string[]]$UiPreviewArgs = @(),
+	[string]$UiPreviewTitle = 'Exosuit UI exploration'
 )
 $ErrorActionPreference = 'Stop'
 # A whole capture takes at most 7 minutes. Instrumented runs build and export more slowly; after a clean build, build
@@ -43,6 +47,63 @@ if (-not $acquired) { Note "screen lock not free after $LockWaitMinutes min"; ex
 $exit = 0
 function Get-CpuLoad { [int]((Get-Counter '\Processor(_Total)\% Processor Time' -SampleInterval 1 -MaxSamples 3).CounterSamples | Measure-Object CookedValue -Average).Average }
 try {
+	if ($UiPreviewExecutable) {
+		Add-Type -AssemblyName System.Drawing
+		Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class PreviewWindowBounds {
+    [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
+    [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr window, out Rect rect);
+    [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr window, ref Point point);
+    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
+    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr window, uint message, IntPtr w, IntPtr l);
+}
+'@
+		$preview = @{ handle = [IntPtr]::Zero; foundAt = 0.0; captured = $false; error = $null }
+		$tickPreview = {
+			param($process, $elapsed, $tree)
+			if ($preview.handle -eq [IntPtr]::Zero) {
+				foreach ($id in $tree) {
+					$p = Get-Process -Id $id -ErrorAction SilentlyContinue
+					if ($p -and $p.MainWindowTitle -eq $UiPreviewTitle -and $p.MainWindowHandle -ne [IntPtr]::Zero) {
+						$preview.handle = $p.MainWindowHandle; $preview.foundAt = $elapsed
+						# Raise only this fixture, without focus or pointer movement, then let it repaint.
+						if (-not [PreviewWindowBounds]::SetWindowPos($preview.handle, [IntPtr](-1), 0, 0, 0, 0, 0x53)) { $preview.error = 'Could not raise preview window' }
+						break
+					}
+				}
+			}
+			if ($preview.handle -ne [IntPtr]::Zero -and -not $preview.captured -and $elapsed - $preview.foundAt -ge 3) {
+				try {
+				if ($preview.error) { throw $preview.error }
+				$rect = [PreviewWindowBounds+Rect]::new()
+				if (-not [PreviewWindowBounds]::GetClientRect($preview.handle, [ref]$rect)) { throw 'Could not get preview client bounds' }
+				$origin = [PreviewWindowBounds+Point]::new()
+				if (-not [PreviewWindowBounds]::ClientToScreen($preview.handle, [ref]$origin)) { throw 'Could not locate preview client' }
+				$width = $rect.Right - $rect.Left; $height = $rect.Bottom - $rect.Top
+				if ($width -le 0 -or $height -le 0) { throw 'Preview window has empty bounds' }
+				$bitmap = [System.Drawing.Bitmap]::new($width, $height)
+				$graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+				try {
+					$graphics.CopyFromScreen($origin.X, $origin.Y, 0, 0, $bitmap.Size)
+					$bitmap.Save((Join-Path $out 'frame.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+				} finally { $graphics.Dispose(); $bitmap.Dispose() }
+				$preview.captured = $true
+				} catch { $preview.error = $_.Exception.Message }
+				[void][PreviewWindowBounds]::PostMessage($preview.handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
+			}
+			return $null
+		}
+		$result = Invoke-Guarded -FilePath $UiPreviewExecutable -ArgumentList $UiPreviewArgs -WorkingDirectory $root -TimeoutSeconds 60 -LogPath (Join-Path $out 'run.log') -OnTick $tickPreview
+		Format-GuardResult $result | Set-Content (Join-Path $out 'guard.txt')
+		Note (Format-GuardResult $result)
+		if ($result.ExitCode -ne 0) { exit $result.ExitCode }
+		if (-not $preview.captured) { Note "preview screenshot failed: $($preview.error)"; exit 1 }
+		Note "captured $(Join-Path $out 'frame.png')"
+		exit 0
+	}
 	# Parallel builds skew a capture; wait (bounded) for the machine to be quiet, and record the load either way.
 	$quietDeadline = (Get-Date).AddMinutes(10)
 	while (($load = Get-CpuLoad) -ge 30 -and (Get-Date) -lt $quietDeadline) { Note "CPU at $load%; waiting for a quiet machine"; Start-Sleep -Seconds 10 }
@@ -94,8 +155,10 @@ try {
 	if ($result.ExitCode -in 124, 125) { $exit = $result.ExitCode }
 } finally {
 	# Compile servers and workspace agents of this checkout outlive the run; leave other checkouts' processes alone.
-	Get-CimInstance Win32_Process -Filter "Name='hl.exe'" | Where-Object { $_.CommandLine -and ($_.CommandLine -replace '\\', '/').Contains(($root -replace '\\', '/')) } |
-		ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+	if (-not $UiPreviewExecutable) {
+		Get-CimInstance Win32_Process -Filter "Name='hl.exe'" | Where-Object { $_.CommandLine -and ($_.CommandLine -replace '\\', '/').Contains(($root -replace '\\', '/')) } |
+			ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+	}
 	$lock.ReleaseMutex()
 	$lock.Dispose()
 }

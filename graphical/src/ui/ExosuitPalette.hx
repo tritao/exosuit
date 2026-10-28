@@ -25,6 +25,11 @@ class ExosuitPalette {
 			result = target;
 		}
 		var tokens = result.tokens;
+		// Compact workbench chrome leaves content as the visual focus.
+		tokens.tabHeaderFontSize = 13.0;
+		tokens.radiusSmall = 3.0;
+		tokens.radiusMedium = 5.0;
+		tokens.radiusLarge = 8.0;
 		tokens.accent = hex(dark ? WorkbenchColors.darkAccent : WorkbenchColors.lightAccent);
 		tokens.accentHover = hex(dark ? WorkbenchColors.darkAccentHover : WorkbenchColors.lightAccentHover);
 		tokens.accentPressed = hex(dark ? WorkbenchColors.darkAccentPressed : WorkbenchColors.lightAccentPressed);
@@ -45,23 +50,59 @@ class ExosuitPalette {
 			dark ? 0.47 : 0.63, dark ? 0.76 : 0.89, dark ? 0.65 : 0.50);
 		result.textCaret = tokens.textPrimary;
 		result.refreshStyles();
-		result.styles.rule(StyleSelector.widget("split-divider"), [
+		applyWorkbenchRules(result.styles, tokens, dark);
+		return result;
+	}
+
+	/** Application rules survive UiContext's theme refresh and are rebuilt on theme switches. */
+	public static function styleSheet(theme:Theme, dark:Bool):haxeon.ui.style.StyleSheet {
+		var sheet = new haxeon.ui.style.StyleSheet("exosuit-workbench");
+		applyWorkbenchRules(sheet, theme.tokens, dark);
+		return sheet;
+	}
+
+	static function applyWorkbenchRules(sheet:haxeon.ui.style.StyleSheet, tokens:haxeon.ui.theme.ThemeTokens, dark:Bool):Void {
+		sheet.rule(StyleSelector.widget("split-divider"), [
 			StyleValue.background(hex(dark ? WorkbenchColors.darkDivider : WorkbenchColors.lightDivider))
 		]);
 
+		// Chrome actions stay quiet until hovered or selected; focus keeps the framework outline.
+		var transparent = Color.rgba(0, 0, 0, 0);
+		sheet.rule(StyleSelector.widget("button").className("chrome-action"), [StyleValue.background(transparent)]);
+		sheet.rule(StyleSelector.widget("button").className("chrome-action").state(StyleState.Hovered), [StyleValue.background(tokens.surfaceHover)]);
+		sheet.rule(StyleSelector.widget("button").className("chrome-action").state(StyleState.Pressed), [StyleValue.background(tokens.surfaceSunken)]);
+		sheet.rule(StyleSelector.widget("button").className("navigation").className("chrome-action").state(StyleState.Selected), [StyleValue.background(tokens.surfaceHover)]);
+		sheet.rule(StyleSelector.widget("button").className("chrome-action").state(StyleState.Disabled), [StyleValue.background(transparent)]);
+
+		sheet.rule(StyleSelector.widget("selection-popup"), [
+			StyleValue.borderColor(tokens.border),
+			StyleValue.decorations(WorkbenchElevation.surface(dark, 2))
+		]);
+
+		// Selected tabs connect visually to the editor canvas.
+		sheet.rule(StyleSelector.widget("button").className("tab-header").state(StyleState.Selected), [
+			StyleValue.background(hex(dark ? WorkbenchColors.darkEditorBackground : WorkbenchColors.lightEditorBackground))
+		]);
+		// Soften toolbar hover surfaces without changing their hit targets.
+		sheet.rule(StyleSelector.widget("button").className("viewport-tool"), [
+			StyleValue.radius(StyleProperty.RadiusTopLeft, tokens.radiusSmall),
+			StyleValue.radius(StyleProperty.RadiusTopRight, tokens.radiusSmall),
+			StyleValue.radius(StyleProperty.RadiusBottomLeft, tokens.radiusSmall),
+			StyleValue.radius(StyleProperty.RadiusBottomRight, tokens.radiusSmall)
+		]);
+
 		// Status actions meet the window edge: explicit zero radii override button defaults.
-		result.styles.rule(StyleSelector.widget("button").className("status-remote"), [
+		sheet.rule(StyleSelector.widget("button").className("status-remote"), [
 			StyleValue.background(tokens.surfaceRaised),
 			StyleValue.radius(StyleProperty.RadiusTopLeft, 0),
 			StyleValue.radius(StyleProperty.RadiusTopRight, 0),
 			StyleValue.radius(StyleProperty.RadiusBottomLeft, 0),
 			StyleValue.radius(StyleProperty.RadiusBottomRight, 0)
 		]);
-		result.styles.rule(StyleSelector.widget("button").className("status-remote").state(StyleState.Hovered),
+		sheet.rule(StyleSelector.widget("button").className("status-remote").state(StyleState.Hovered),
 			[StyleValue.background(tokens.surfaceHover)]);
-		result.styles.rule(StyleSelector.widget("button").className("status-remote").state(StyleState.Pressed),
+		sheet.rule(StyleSelector.widget("button").className("status-remote").state(StyleState.Pressed),
 			[StyleValue.background(tokens.surfaceSunken)]);
-		return result;
 	}
 
 	public static function lightEditor():style.Theme {
@@ -74,9 +115,10 @@ class ExosuitPalette {
 		result.surfaceInactive = WorkbenchColors.opaque(WorkbenchColors.lightEditorInactive);
 		result.surfaceHover = WorkbenchColors.opaque(WorkbenchColors.lightEditorHover);
 		result.border = WorkbenchColors.opaque(WorkbenchColors.lightBorder);
-		result.divider = WorkbenchColors.opaque(WorkbenchColors.lightBorder);
+		result.divider = WorkbenchColors.opaque(WorkbenchColors.lightDivider);
 		result.foregroundMuted = WorkbenchColors.opaque(WorkbenchColors.lightForegroundMuted);
 		result.foregroundSubtle = WorkbenchColors.opaque(WorkbenchColors.lightForegroundDisabled);
+		result.foregroundDisabled = WorkbenchColors.opaque(WorkbenchColors.lightForegroundDisabled);
 		result.caret = WorkbenchColors.opaque(WorkbenchColors.lightForeground);
 		result.currentLine = WorkbenchColors.opaque(WorkbenchColors.lightCurrentLine);
 		result.selection = WorkbenchColors.opaque(WorkbenchColors.lightSelection);

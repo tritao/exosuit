@@ -584,6 +584,7 @@ class WorkbenchPanel implements View {
 		style.padding = new Insets(4, 4, 4, 4);
 		var button = new Button("", style, action, key);
 		button.accessibilityLabel = label; button.leadingIcon = icon; button.variant = ButtonVariant.Navigation;
+		button.classes.push("chrome-action");
 		return button;
 	}
 

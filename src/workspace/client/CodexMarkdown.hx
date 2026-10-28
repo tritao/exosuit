@@ -14,6 +14,22 @@ typedef CodexMarkdownInline = {
 }
 
 class CodexMarkdown {
+  /** A complete standalone image; unfinished, unsafe and embedded markup stays prose. */
+  public static function image(value:String):Null<CodexMarkdownBlock> {
+    if (value == null) return null;
+    var line = StringTools.trim(value);
+    if (!StringTools.startsWith(line, "![")) return null;
+    var labelEnd = closing(line, 1, "[", "]");
+    if (labelEnd < 0 || line.charAt(labelEnd + 1) != "(") return null;
+    var end = closing(line, labelEnd + 1, "(", ")");
+    if (end != line.length - 1) return null;
+    var target = StringTools.trim(line.substring(labelEnd + 2, end));
+    if (StringTools.startsWith(target, "<") && StringTools.endsWith(target, ">"))
+      target = target.substring(1, target.length - 1);
+    var webImage = ~/^https?:\/\/[^\s<>]+$/i.match(target);
+    if (!webImage && SessionLinkTarget.parse(target) == null) return null;
+    return {kind: "image", text: line.substring(2, labelEnd), language: target};
+  }
   /** Recognizes complete inline code and external links; unfinished syntax remains text. */
   public static function inlineSpans(value:String):Array<CodexMarkdownInline> {
     var spans:Array<CodexMarkdownInline> = [], plain = "", cursor = 0;
@@ -39,7 +55,7 @@ class CodexMarkdown {
             var destination = StringTools.trim(value.substring(labelEnd + 2, end));
             if (StringTools.startsWith(destination, "<") && StringTools.endsWith(destination, ">"))
               destination = destination.substring(1, destination.length - 1);
-            if (~/^(https?:\/\/|mailto:)[^\s<>]+$/i.match(destination)) {
+            if (SessionLinkTarget.external(destination) || SessionLinkTarget.parse(destination) != null) {
               flush();
               spans.push({kind: "link", text: value.substring(cursor + 1, labelEnd), destination: destination});
               cursor = end + 1;
@@ -97,7 +113,11 @@ class CodexMarkdown {
         fence = trimmed.substr(0, length);
         language = StringTools.trim(trimmed.substr(length)).split(" ")[0].toLowerCase();
       } else if (StringTools.trim(line) == "") flush();
-      else prose.push(line);
+      else {
+        var imageBlock = image(line);
+        if (imageBlock != null) { flush(); blocks.push(imageBlock); }
+        else prose.push(line);
+      }
     }
     flush();
     // An unfinished fence remains a code block while tokens arrive.

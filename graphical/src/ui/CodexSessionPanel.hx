@@ -10,14 +10,18 @@ import haxeon.ui.LayoutStyle;
 import haxeon.ui.core.BuildContext;
 import haxeon.ui.core.RenderNode;
 import haxeon.ui.core.View;
+import haxeon.ui.core.TextStyleOverride;
 import haxeon.ui.widgets.KeyedView;
 import haxeon.ui.widgets.controls.Button;
+import haxeon.ui.widgets.controls.ButtonVariant;
+import haxeon.ui.icons.IconName;
 import haxeon.ui.widgets.controls.Select;
 import haxeon.ui.widgets.controls.SelectOption;
 import haxeon.ui.widgets.layout.Column;
 import haxeon.ui.widgets.layout.Row;
 import haxeon.ui.widgets.overlays.MenuItem;
 import haxeon.ui.widgets.scroll.ScrollView;
+import haxeon.ui.widgets.scroll.ScrollController;
 import haxeon.ui.widgets.text.Text;
 import haxeon.ui.widgets.text.MiddleEllipsisText;
 import haxeon.ui.widgets.text.TextField;
@@ -48,6 +52,9 @@ class CodexSessionPanel implements View {
   final syntaxes:SyntaxRegistry;
   final showMenu:(Array<MenuItem>, UiEvent, Void->Bool)->Void;
   final createReplacement:String->Void;
+  final openLink:Null<String->Void>;
+  final workspaceActions:Null<SessionWorkspaceActions>;
+  final transcriptScroll = new ScrollController();
   var prompt = "";
   var selectedModel = "";
   var selectedEffort = "";
@@ -57,6 +64,8 @@ class CodexSessionPanel implements View {
   var details = false;
   var expanded:Map<String, Bool> = [];
   var markdown:Map<String, CodexMarkdownView> = [];
+  var diffs:Map<String, SessionDiffView> = [];
+  var copiedMessages:Map<String, String> = [];
   var promptFocusRequested = false;
   var suggestionIndex = 0;
   var dismissSuggestions = false;
@@ -67,8 +76,19 @@ class CodexSessionPanel implements View {
     return new Text(value, style);
   }
 
+  static function quietButton(label:String, action:Void->Void, ?key:String):Button {
+    var compact = new LayoutStyle();
+    compact.height = LayoutAxis.fixed(30);
+    compact.padding = new Insets(8, 4, 8, 4);
+    var button = new Button(label, compact, action, key);
+    button.variant = ButtonVariant.Navigation;
+    button.classes.push("viewport-tool");
+    return button;
+  }
+
   public function new(getClient:Void -> Null<WorkspaceAgentClient>, resource:String, root:String, frame:Void -> Void,
-      editorPalette:style.Theme, syntaxes:SyntaxRegistry, showMenu:(Array<MenuItem>, UiEvent, Void->Bool)->Void, createReplacement:String->Void) {
+      editorPalette:style.Theme, syntaxes:SyntaxRegistry, showMenu:(Array<MenuItem>, UiEvent, Void->Bool)->Void, createReplacement:String->Void,
+      ?openLink:String->Void, ?workspaceActions:SessionWorkspaceActions) {
     this.getClient = getClient;
     this.resource = resource;
     this.root = root;
@@ -77,6 +97,8 @@ class CodexSessionPanel implements View {
     this.syntaxes = syntaxes;
     this.showMenu = showMenu;
     this.createReplacement = createReplacement;
+    this.openLink = openLink;
+    this.workspaceActions = workspaceActions;
   }
 
   static function findModel(models:Null<Array<AgentModel>>, slug:String):Null<AgentModel> {
@@ -222,9 +244,16 @@ class CodexSessionPanel implements View {
     var headerStyle = new LayoutStyle();
     headerStyle.width = LayoutAxis.grow();
     headerStyle.childGap = 12;
+    headerStyle.wrapMode = haxeon.ui.LayoutWrapMode.Wrap;
     var headerButtonStyle = new LayoutStyle();
-    headerButtonStyle.height = LayoutAxis.fixed(40);
-    var heading = paragraph(view.record.name + " · " + (working ? "Working…" : stateLabel));
+    headerButtonStyle.height = LayoutAxis.fixed(32);
+    var titleStyle = new LayoutStyle();
+    titleStyle.width = LayoutAxis.grow();
+    var heading = new Column("codex-session-heading", [
+      new KeyedView("name", new Text(view.record.name, null, tokens.textPrimary, TextStyleOverride.text(18))),
+      new KeyedView("status", new Text(providerName(view.record.provider) + " · " + (working ? "Working…" : stateLabel), null,
+        working ? tokens.accent : tokens.textSecondary, TextStyleOverride.text(12)))
+    ], titleStyle);
     var header:Array<KeyedView> = [new KeyedView("title", heading)];
     if (working || ((view.record.provider == "claude" || usesSupervisedModes(view.record.provider)) && view.requests.length > 0)) header.push(new KeyedView("stop", stop));
     var permissions = new Button("Permissions · " + (usesSupervisedModes(view.record.provider) ? piPermissionLabel(view.record.permissionMode) : view.record.provider == "claude" ? view.record.permissionMode : CodexPermissions.labelForRecord(view.record.permissionProfile,
@@ -233,12 +262,28 @@ class CodexSessionPanel implements View {
     permissions.onClickEvent = function(event) {
       if (permissions.enabled) openPermissionsMenu(client, id, view.record.thread, event);
     };
-    header.push(new KeyedView("permissions", permissions));
-    header.push(new KeyedView("details", new Button(details ? "Hide session details" : "Session details", headerButtonStyle, function() {
+    header.push(new KeyedView("details", quietButton(details ? "Hide session details" : "Session details", function() {
       details = !details;
       frame();
     }, "codex-details")));
     var rows:Array<KeyedView> = [new KeyedView("header", new Row("codex-header", header, headerStyle))];
+    var workspaceControls:Array<KeyedView> = [new KeyedView("permissions", permissions)];
+    if (workspaceActions != null) {
+      rows.push(new KeyedView("workspace-context", new MiddleEllipsisText("workspace-context", workspaceActions.context(), true,
+        TextStyleOverride.text(12, null, tokens.textSecondary))));
+      var groupStyle = new LayoutStyle(); groupStyle.width = LayoutAxis.fit(); groupStyle.childGap = 4;
+      var filesButton = quietButton("Files", workspaceActions.explore, "agent-open-files");
+      filesButton.leadingIcon = IconName.FolderOpen; filesButton.iconSize = 14;
+      var changesButton = quietButton("Review changes", workspaceActions.reviewChanges, "agent-review-changes");
+      changesButton.leadingIcon = IconName.Activity; changesButton.iconSize = 14;
+      workspaceControls.push(new KeyedView("navigation", new Row("agent-workspace-navigation", [
+        new KeyedView("files", filesButton),
+        new KeyedView("changes", changesButton)
+      ], groupStyle)));
+    }
+    var workspaceStyle = new LayoutStyle(); workspaceStyle.width = LayoutAxis.grow(); workspaceStyle.childGap = 8;
+    workspaceStyle.wrapMode = haxeon.ui.LayoutWrapMode.Wrap;
+    rows.push(new KeyedView("workspace", new Row("agent-workspace-actions", workspaceControls, workspaceStyle)));
     if (details) {
       rows.push(new KeyedView("directory", paragraph(view.record.cwd)));
       // The built-in agent has no native thread to show; its identity is the Workbench resource.
@@ -317,15 +362,17 @@ class CodexSessionPanel implements View {
         activity.push(new KeyedView("native-input-"+index,paragraph("Pi pending · "+(nativeInput.kind == "steer" ? "Steering" : "Follow-up")+"\n"+nativeInput.text+(nativeInput.truncated ? "\nPreview shortened" : ""))));
       }
     }
+    var requestCards:Array<KeyedView> = [];
     for (request in view.requests) {
       var r = request;
-      activity.push(new KeyedView(
+      var requestRows:Array<KeyedView> = [];
+      requestRows.push(new KeyedView(
         "request-" + r.id,
         paragraph((r.method == "item/tool/requestUserInput"
         ? "Input needed" : r.method == "item/fileChange/requestApproval" ? "File change approval" : r.method
         == "item/commandExecution/requestApproval" ? "Command approval" : "Additional request") + "\n" + r.detail)
       ));
-      if (!r.reviewable) activity.push(new KeyedView(
+      if (!r.reviewable) requestRows.push(new KeyedView(
         "full-" + r.id,
         paragraph("Full request exceeds this view. Decline it or use a client that can display the full request.")
       ));
@@ -337,11 +384,11 @@ class CodexSessionPanel implements View {
           "codex-answer-" + r.id
         );
         answer.enabled = control && r.reviewable;
-        activity.push(new KeyedView(
+        requestRows.push(new KeyedView(
           "answer-" + r.id,
           answer
         ));
-        if (r.inputKind != null || view.record.provider == "claude") activity.push(new KeyedView("cancel-" + r.id,
+        if (r.inputKind != null || view.record.provider == "claude") requestRows.push(new KeyedView("cancel-" + r.id,
           new Button("Cancel", null, function() client.agentAction(id, "decline", "", r.id))));
       } else if (r.method == "item/commandExecution/requestApproval" || r.method == "item/fileChange/requestApproval") {
         var approve = new Button(
@@ -358,7 +405,7 @@ class CodexSessionPanel implements View {
           "codex-decline-" + r.id
         );
         decline.enabled = control;
-        activity.push(new KeyedView(
+        requestRows.push(new KeyedView(
           "approval-" + r.id,
           new Row(
             "codex-approval-" + r.id,
@@ -368,10 +415,17 @@ class CodexSessionPanel implements View {
             ]
           )
         ));
-      } else activity.push(new KeyedView(
+      } else requestRows.push(new KeyedView(
         "unsupported-" + r.id,
         paragraph("Answer this request in another compatible Codex client.")
       ));
+      var requestStyle = new LayoutStyle();
+      requestStyle.width = LayoutAxis.grow(0, 880);
+      requestStyle.padding = new Insets(16, 14, 16, 14);
+      requestStyle.childGap = 10;
+      requestStyle.background = tokens.surfaceRaised;
+      requestStyle.radiusTopLeft = requestStyle.radiusTopRight = requestStyle.radiusBottomLeft = requestStyle.radiusBottomRight = 10;
+      requestCards.push(new KeyedView("request-card-" + r.id, new Column("agent-request-" + r.id, requestRows, requestStyle)));
     }
     var items = view.items;
     if (items == null) activity.push(new KeyedView(
@@ -381,14 +435,32 @@ class CodexSessionPanel implements View {
     else {
       var retained:Map<String, Bool> = [];
       var retainedMarkdown:Map<String, CodexMarkdownView> = [];
+      var retainedDiffs:Map<String, SessionDiffView> = [];
+      var retainedCopies:Map<String, String> = [];
       for (item in items) {
         var key = item.turn + ":" + item.id;
         if (markdown.exists(key)) retainedMarkdown.set(key, markdown.get(key));
+        if (markdown.exists(key + ":detail")) retainedMarkdown.set(key + ":detail", markdown.get(key + ":detail"));
+        if (diffs.exists(key)) retainedDiffs.set(key, diffs.get(key));
         if (expanded.get(key) == true) retained.set(key, true);
+        if (copiedMessages.get(key) == item.text) retainedCopies.set(key, item.text);
       }
       expanded = retained;
       markdown = retainedMarkdown;
-      if (items.length == 0) activity.push(new KeyedView("empty", paragraph("No messages yet")));
+      diffs = retainedDiffs;
+      copiedMessages = retainedCopies;
+      if (items.length == 0) {
+        var emptyStyle = new LayoutStyle();
+        emptyStyle.width = LayoutAxis.grow();
+        emptyStyle.padding = new Insets(20, 28, 20, 28);
+        emptyStyle.childGap = 8;
+        emptyStyle.background = tokens.surfaceRaised;
+        emptyStyle.radiusTopLeft = emptyStyle.radiusTopRight = emptyStyle.radiusBottomLeft = emptyStyle.radiusBottomRight = 12;
+        activity.push(new KeyedView("empty", new Column("codex-empty", [
+          new KeyedView("title", new Text("Start a conversation", null, tokens.textPrimary, TextStyleOverride.text(18))),
+          new KeyedView("description", new Text("Ask " + providerName(view.record.provider) + " a question or describe a task in this workspace.", null, tokens.textSecondary))
+        ], emptyStyle)));
+      }
       for (item in items) {
         var key = item.turn + ":" + item.id;
         var reasoning = item.kind == "reasoning";
@@ -405,35 +477,64 @@ class CodexSessionPanel implements View {
           message.push(new KeyedView("command-" + key, new Row("codex-command-" + key, [
             new KeyedView("summary", new MiddleEllipsisText("summary",
               item.title + " · " + item.state + (summary == "" ? "" : " · " + summary), false)),
-            new KeyedView("toggle", new Button(expanded.get(key) == true ? "Hide details" : "Show details", null, function() {
+            new KeyedView("toggle", quietButton(expanded.get(key) == true ? "Hide details" : "Show details", function() {
               expanded.set(key, expanded.get(key) != true);
               frame();
             }))
           ], commandStyle)));
         } else if (reasoning) message.push(new KeyedView("reasoning-" + key,
-          new Button((expanded.get(key) == true ? "Hide reasoning" : "Show reasoning") + (item.state == "completed" ? "" : " · " + item.state), null, function() {
+          quietButton((expanded.get(key) == true ? "Hide reasoning" : "Show reasoning") + (item.state == "completed" ? "" : " · " + item.state), function() {
             expanded.set(key, expanded.get(key) != true);
             frame();
           })));
-        else message.push(new KeyedView("title-" + key, new Text(item.title + (tool ? " · " + item.state : ""), null, tokens.mutedText)));
-        if (item.text != "" && ((!reasoning && !command) || expanded.get(key) == true)) {
+        else {
+          var roleStyle = new LayoutStyle();
+          roleStyle.width = LayoutAxis.grow();
+          roleStyle.childGap = 8;
+          var labelStyle = new LayoutStyle();
+          labelStyle.width = LayoutAxis.grow();
+          var role = item.kind == "userMessage" ? "You" : item.kind == "agentMessage" ? providerName(view.record.provider) : item.title + " · " + item.state;
+          var roleChildren:Array<KeyedView> = [new KeyedView("label", new Text(role, labelStyle,
+            item.kind == "agentMessage" ? tokens.accent : tokens.textSecondary, TextStyleOverride.text(12)))];
+          if (!tool && item.text != "") {
+            var copyText = item.text;
+            var copied = copiedMessages.get(key) == copyText;
+            var copy = quietButton("", function() { context.clipboard.writeText(copyText); copiedMessages.set(key, copyText); frame(); }, "agent-copy-" + key);
+            copy.accessibilityLabel = copied ? "Copied" : "Copy message";
+            copy.leadingIcon = copied ? IconName.Check : IconName.Copy;
+            copy.iconSize = 16;
+            roleChildren.push(new KeyedView("copy", copy));
+          }
+          message.push(new KeyedView("title-" + key, new Row("codex-message-heading-" + key, roleChildren, roleStyle)));
+        }
+        if (item.kind == "fileChange" && item.files != null && item.files.length > 0) {
+          message.push(new KeyedView("files-" + key, new SessionChangeSummaryView(item.files, detail, openLink)));
+        } else if (item.text != "" && ((!reasoning && !command) || expanded.get(key) == true)) {
           if (item.kind == "agentMessage") {
             var rendered = markdown.get(key);
-            if (rendered == null) { rendered = new CodexMarkdownView(item.text, editorPalette, syntaxes); markdown.set(key, rendered); }
+            if (rendered == null) { rendered = new CodexMarkdownView(item.text, editorPalette, syntaxes, openLink,
+              workspaceActions == null ? null : workspaceActions.resolveImage, frame); markdown.set(key, rendered); }
             rendered.update(item.text);
             message.push(new KeyedView("text-" + key, rendered));
           } else message.push(new KeyedView("text-" + key, paragraph(item.text)));
         }
         if (detail != "" && reasoning && expanded.get(key) == true) message.push(new KeyedView("detail-" + key, paragraph(detail)));
         if (detail != "" && command && expanded.get(key) == true) message.push(new KeyedView("detail-" + key, paragraph(detail)));
-        if (detail != "" && !reasoning && !command) {
+        if ((detail != "" || (item.kind == "fileChange" && item.files != null && item.files.length > 0)) && !reasoning && !command) {
           message.push(new KeyedView("toggle-" + key,
-            new Button(expanded.get(key) == true ? "Hide details" : "Show details", null, function() {
+            quietButton(expanded.get(key) == true ? "Hide details" : "Show details", function() {
             expanded.set(key, expanded.get(key) != true);
             frame();
           }
           )));
-          if (expanded.get(key) == true) message.push(new KeyedView("detail-" + key, paragraph(detail)));
+          if (expanded.get(key) == true) {
+            if (item.kind == "fileChange") {
+              var rendered = diffs.get(key);
+              if (rendered == null) { rendered = new SessionDiffView(detail, openLink, item.files); diffs.set(key, rendered); }
+              rendered.update(detail, item.files);
+              message.push(new KeyedView("detail-" + key, rendered));
+            } else message.push(new KeyedView("detail-" + key, paragraph(detail)));
+          }
         }
         if (item.truncated && (!command || expanded.get(key) == true)) message.push(new KeyedView(
           "truncated-" + key,
@@ -441,15 +542,21 @@ class CodexSessionPanel implements View {
         ));
         var messageStyle = new LayoutStyle();
         messageStyle.width = LayoutAxis.grow(0, 880);
-        messageStyle.padding = new Insets(16, item.kind == "userMessage" ? 8 : 0, 16, item.kind == "userMessage" ? 8 : 0);
-        messageStyle.childGap = 4;
+        messageStyle.padding = tool ? new Insets(8, 3, 8, 3) : new Insets(16, 12, 16, 12);
+        messageStyle.childGap = tool ? 4 : 8;
         messageStyle.background = item.kind == "userMessage" ? tokens.surfaceRaised : tokens.surface;
-        messageStyle.radiusTopLeft = messageStyle.radiusTopRight = messageStyle.radiusBottomLeft = messageStyle.radiusBottomRight = 10;
+        messageStyle.radiusTopLeft = messageStyle.radiusTopRight = messageStyle.radiusBottomLeft = messageStyle.radiusBottomRight = 6;
         activity.push(new KeyedView("message-" + key, new Column("codex-message-" + key, message, messageStyle)));
       }
     }
+    for (requestCard in requestCards) activity.push(requestCard);
     if (details && diagnostics) activity.push(new KeyedView("diagnostics", paragraph(view.activity)));
-    if (working) activity.push(new KeyedView("working", new Text(providerName(view.record.provider) + " is working…", null, tokens.mutedText)));
+    if (working) {
+      var workingStyle = new LayoutStyle();
+      workingStyle.width = LayoutAxis.grow();
+      workingStyle.padding = new Insets(16, 10, 16, 10);
+      activity.push(new KeyedView("working", new Text("●  " + providerName(view.record.provider) + " is working…", workingStyle, tokens.accent)));
+    }
 
     var error = client.agentError() == null ? view.error : client.agentError();
     if ((view.record.state == "reconnect-failed" || connectionState == "disconnected")
@@ -457,9 +564,15 @@ class CodexSessionPanel implements View {
     if (error != null) activity.push(new KeyedView("error", paragraph(error)));
     var activityStyle = new LayoutStyle();
     activityStyle.width = LayoutAxis.grow();
-    activityStyle.childGap = 16;
-    activityStyle.padding = new Insets(0, 12, 0, 12);
-    rows.push(new KeyedView("activity", new AgentTranscript(new Column("codex-items", activity, activityStyle), style)));
+    activityStyle.childAlignX = haxeon.ui.LayoutAlignmentX.Center;
+    activityStyle.childGap = 12;
+    activityStyle.padding = new Insets(0, 12, 0, 16);
+    rows.push(new KeyedView("activity", new AgentTranscript(new Column("codex-items", activity, activityStyle), style, transcriptScroll, frame)));
+    if (transcriptScroll.maxScrollY - transcriptScroll.offsetY > 2) rows.push(new KeyedView("jump-latest",
+      new Button("Jump to latest", null, function() {
+        transcriptScroll.jumpTo(transcriptScroll.offsetX, transcriptScroll.maxScrollY);
+        frame();
+      }, "agent-jump-latest")));
     var suggestions = (canSend || (canQueue && view.requests.length == 0)) && !dismissSuggestions ? AgentCommandCompletion.matches(view.commands,prompt) : [];
     if (suggestionIndex >= suggestions.length) suggestionIndex = 0;
     var completionRows:Array<KeyedView> = [];
@@ -476,10 +589,12 @@ class CodexSessionPanel implements View {
         function() complete(choice),"agent-command-suggestion-"+index)));
     }
     var send = new Button(piActive ? "Queue message" : "Send", null, function() submitAction(piActive ? "queue" : "prompt"), "codex-send");
+    send.variant = ButtonVariant.Primary;
     send.enabled = (piActive ? canQueue : canSend) && StringTools.trim(prompt) != "";
     var footerStyle = new LayoutStyle();
     footerStyle.width = LayoutAxis.grow();
     footerStyle.childGap = 12;
+    footerStyle.wrapMode = haxeon.ui.LayoutWrapMode.Wrap;
     var hint = new Text((piActive ? (view.requests.length > 0 ? "Answer the request, or use Queue / Steer" : "Enter to queue · Shift+Enter for newline") : "Enter to send · Shift+Enter for newline") + (view.commands == null ? "" : " · / commands · $ skills"), paragraph("").style, tokens.mutedText);
     var footerControls:Array<KeyedView> = [new KeyedView("hint",hint)];
     if (piActive) {
@@ -502,14 +617,18 @@ class CodexSessionPanel implements View {
       load.enabled = control && !working;
       modelControls.push(new KeyedView("load", load));
     } else {
-      var options = [new SelectOption<String>("current", "Conversation model", "")];
+      var currentModel = findModel(view.models, view.currentModel);
+      var currentModelLabel = currentModel != null ? currentModel.name : view.currentModel == null || view.currentModel == "" ? "Current model" : view.currentModel;
+      var options = [new SelectOption<String>("current", currentModelLabel, "")];
       for (model in view.models) options.push(new SelectOption<String>(model.model, model.name, model.model));
+      var modelStyle = new LayoutStyle(); modelStyle.width = LayoutAxis.fixed(172); modelStyle.height = LayoutAxis.fixed(32);
+      modelStyle.radiusTopLeft = modelStyle.radiusTopRight = modelStyle.radiusBottomLeft = modelStyle.radiusBottomRight = 8;
       var chooser = new Select<String>("codex-model", options, selectedModel, function(value) {
         selectedModel = value;
         selectedEffort = "";
         client.agentAction(id, "model-settings", "", null, selectedModel == "" ? null : selectedModel, null);
         frame();
-      });
+      }, modelStyle);
       chooser.accessibilityLabel = "Conversation model";
       chooser.enabled = control && !working;
       modelControls.push(new KeyedView("chooser", chooser));
@@ -524,12 +643,14 @@ class CodexSessionPanel implements View {
     var availableEfforts:Array<String> = effortModel == null || effortModel.supportedEfforts == null
       ? [] : effortModel.supportedEfforts;
     for (effort in availableEfforts) effortOptions.push(new SelectOption<String>("effort-" + effort, effortLabel(effort), effort));
+    var effortStyle = new LayoutStyle(); effortStyle.width = LayoutAxis.fixed(150); effortStyle.height = LayoutAxis.fixed(32);
+    effortStyle.radiusTopLeft = effortStyle.radiusTopRight = effortStyle.radiusBottomLeft = effortStyle.radiusBottomRight = 8;
     var effortChooser = new Select<String>("codex-effort", effortOptions, selectedEffort, function(value) {
       selectedEffort = value;
       client.agentAction(id, "model-settings", "", null, selectedModel == "" ? null : selectedModel,
         selectedEffort == "" ? null : selectedEffort);
       frame();
-    });
+    }, effortStyle);
     effortChooser.accessibilityLabel = "Reasoning effort";
     effortChooser.enabled = control && !working && effortModel != null && availableEfforts.length > 0;
     modelControls.push(new KeyedView("effort", effortChooser));
@@ -545,15 +666,15 @@ class CodexSessionPanel implements View {
     var composerStyle = new LayoutStyle();
     composerStyle.width = LayoutAxis.grow();
     composerStyle.childGap = 8;
-    composerStyle.padding = new Insets(12, 12, 12, 12);
+    composerStyle.padding = new Insets(16, 14, 16, 14);
     composerStyle.background = tokens.surfaceRaised;
-    composerStyle.radiusTopLeft = composerStyle.radiusTopRight = composerStyle.radiusBottomLeft = composerStyle.radiusBottomRight = 12;
+    composerStyle.radiusTopLeft = composerStyle.radiusTopRight = composerStyle.radiusBottomLeft = composerStyle.radiusBottomRight = 8;
     // Capture on a stable parent so the field's own patch updates retain keyboard behavior.
     var promptStyle = new LayoutStyle();
     promptStyle.width = LayoutAxis.grow();
     var promptNode = new Column("codex-prompt-keys", [new KeyedView("field", field)], promptStyle).build(context);
     promptNode.walk(function(child) {
-      if (child.focusable && child.semantics != null && (child.semantics.label == "Codex prompt" || child.semantics.label == "Claude prompt" || child.semantics.label == "Pi prompt")) {
+      if (child.focusable && child.semantics != null && (child.semantics.label == "Codex prompt" || child.semantics.label == "Claude prompt" || child.semantics.label == "Pi prompt" || child.semantics.label == "Exosuit prompt")) {
         child.onResolved(function(_) {
           if (!promptFocusRequested && child.enabled) promptFocusRequested = context.requestFocus(child.id);
         });
@@ -579,16 +700,23 @@ class CodexSessionPanel implements View {
         submit();
       }
     }, "capture");
-    rows.push(new KeyedView("composer", new Column("codex-composer", [
-      new KeyedView("models", new Row("codex-model-controls", modelControls, modelControlsStyle)),
+    var composerFrame = new LayoutStyle();
+    composerFrame.width = LayoutAxis.grow(0, 880);
+    composerFrame.padding = new Insets(1, 1, 1, 1);
+    composerFrame.background = tokens.border;
+    composerFrame.radiusTopLeft = composerFrame.radiusTopRight = composerFrame.radiusBottomLeft = composerFrame.radiusBottomRight = 8;
+    rows.push(new KeyedView("composer", new Column("codex-composer-frame", [new KeyedView("content", new Column("codex-composer", [
       new KeyedView("prompt", new CodexPromptNode(promptNode)),
       new KeyedView("suggestions", new Column("agent-command-suggestions",completionRows)),
       new KeyedView("commands-error", new Text(view.commandsError == null ? "" : view.commandsError)),
+      new KeyedView("models", new Row("codex-model-controls", modelControls, modelControlsStyle)),
       new KeyedView("footer", new Row("codex-composer-footer", footerControls, footerStyle))
-    ], composerStyle)));
+    ], composerStyle))], composerFrame)));
     var viewport = new LayoutStyle();
     viewport.height = LayoutAxis.grow(MIN_SESSION_HEIGHT + inputStyle.height.value - 56);
     viewport.width = LayoutAxis.grow();
+    viewport.childAlignX = haxeon.ui.LayoutAlignmentX.Center;
+    viewport.background = tokens.surface;
     viewport.padding = new Insets(20, 16, 20, 16);
     viewport.childGap = 12;
     // Preserve a usable activity viewport. When the header and composer cannot
@@ -596,6 +724,7 @@ class CodexSessionPanel implements View {
     var scrollStyle = new LayoutStyle();
     scrollStyle.height = LayoutAxis.grow();
     scrollStyle.width = LayoutAxis.grow();
+    scrollStyle.background = tokens.surface;
     var session = new ScrollView("codex-session-viewport", new Column("codex-session", rows, viewport), scrollStyle);
     session.fillViewport = true;
     return session.build(context);
@@ -612,15 +741,25 @@ private class CodexPromptNode implements View {
 private class AgentTranscript implements View {
   final content:View;
   final style:LayoutStyle;
-  public function new(content:View, style:LayoutStyle) {this.content = content;this.style = style;}
+  final controller:ScrollController;
+  final frame:Void->Void;
+  public function new(content:View, style:LayoutStyle, controller:ScrollController, frame:Void->Void) {this.content = content;this.style = style;this.controller = controller;this.frame = frame;}
   public function build(context:BuildContext):RenderNode {
     var node:Null<RenderNode> = null;
-    var scroll = new ScrollView("codex-activity",content,style);
+    // Follow new output only while the reader is already at the bottom.
+    var follow = controller.maxScrollY - controller.offsetY <= 2;
+    var scroll = new ScrollView("codex-activity",content,style, haxeon.ui.widgets.scroll.ScrollAxis.Vertical, controller);
+    scroll.onScroll = function(_) frame();
     scroll.contentExtentProvider = function(width,height) {
       var geometry = node == null || node.children.length == 0 ? null : node.children[0].resolved;
       return {width:width,height:geometry == null ? height : Math.max(geometry.height,geometry.contentBounds.y+geometry.contentBounds.height)};
     };
     node = scroll.build(context);
+    node.on(UiEventKind.KeyDown, function(_) frame());
+    node.on(UiEventKind.PointerUp, function(_) frame());
+    if (node.children.length > 0) node.children[0].onResolved(function(_) {
+      if (follow && controller.jumpTo(controller.offsetX, controller.maxScrollY)) context.requestLayoutFeedback();
+    });
     return node;
   }
 }
