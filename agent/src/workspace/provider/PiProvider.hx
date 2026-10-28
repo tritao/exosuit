@@ -105,16 +105,20 @@ class PiProvider implements AgentMessageSource {
   if(MessagePack.encode(s.record).length>16384) throw "Pi input state exceeds storage bound";
   if(persistence != null) try persistence.saveAgent(s.record) catch(e:Dynamic) {storageFailed=true;throw e;}
  }
- function view(s:PiSession,?before:Int):AgentView return {
+ function view(s:PiSession,?before:Int):AgentView {
+  var pending:Array<AgentRequest>=[for(id=>d in s.dialogs) {id:id,method:d.method == "confirm" ? "item/commandExecution/requestApproval" : "item/tool/requestUserInput",
+   detail:d.detail,reviewable:d.reviewable,inputKind:d.method,options:d.options}];
+  var page=AgentRequestPage.project(pending);
+  return {
   record:copy(s.record),activity:"",items:s.conversation.page(before),itemsNext:s.conversation.next(before),itemsOmitted:false,supportsMessageContent:true,
-  requests:[for(id=>d in s.dialogs) {id:id,method:d.method == "confirm" ? "item/commandExecution/requestApproval" : "item/tool/requestUserInput",
-   detail:d.detail,reviewable:d.reviewable,inputKind:d.method,options:d.options}],
+  requests:page.requests,requestsOmitted:page.omitted,
   models:s.models,modelsNext:null,commands:s.commands,commandsError:s.commandsError,commandsLoading:s.commandsLoading,currentModel:s.currentModel,currentEffort:s.currentEffort,
   connectionState:s.ready && s.record.state != "reconnecting" ? "connected" : s.transport == null ? "disconnected" : "reconnecting",
   recoveryReason:s.ready ? null : "explicit-resume",error:s.error,
   inputToken:s.inputs.token(),pendingInputs:[for(m in s.inputs.pending()) cast Reflect.copy(m)],queuePaused:s.record.queuePaused==true,
   nativePending:s.nativePending,inputBusy:s.inputs.hasNativeOperation(),supportsSteering:true,supportsQueue:true
- };
+  };
+ }
  public function messageContent(session:String,turn:String,item:String,token:String,offset:Int):Null<AgentContentChunk> {
   var s=sessions.get(session); return s == null ? null : s.conversation.content(turn,item,token,offset);
  }

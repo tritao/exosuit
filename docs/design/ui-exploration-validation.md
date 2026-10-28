@@ -63,6 +63,16 @@ The complete workspace smoke fixture compiled in `image-fidelity-workspace-build
 
 Image reads use 32 KiB chunks within the current encrypted relay envelope. Inputs are bounded to 4 MiB and 4096 pixels per side; chat previews use at most 512 pixels, original-resolution remote tabs share a 128 MiB texture cap, and no temporary local image paths are created. External HTTP images remain explicit links rather than implicit network fetches. Commit changes selects the nearest writable session repository and focuses the existing Source Control message editor without submitting a commit.
 
+## Structured question and decision follow-up
+
+The matching full app/agent build passed under the guard in `.local/questions-app-agent-build.log`. The native UI composite passed in `questions-composite-final-test.log`, including exact Pi choice dispatch without composer mutation, confirmation labels, retries, read-only/unreviewable restrictions, question-form keyboard selection, single/multiple/custom answers, retained drafts, provider-specific comma validation, detail disclosure and waiting-request counts. Projection, retained-request answer validation and request-page budget/advancement tests passed in `questions-provider-test.log`.
+
+The actual Claude adapter passed against the deterministic local Python peer in `questions-claude-test.log` after its guarded build (`questions-claude-build.log`). This covers native structured single/multiple response encoding, rejected ambiguous values, legacy answers, controls, interrupt/detach/resume, malformed frames and replay. It is a local protocol fixture, not actual Claude inference. The Linux-oriented complete Codex provider process harness was not run in this phase; its structured-response fixture was updated, while the shared validator was exercised natively.
+
+Five serialized native captures passed and were inspected: `chat-questions-dark-narrow`, `chat-questions-dark-wide`, `chat-questions-light-narrow`, `chat-questions-light-wide` and `chat-pi-choice-dark-narrow`. The narrow two-question card follows the transcript tail; its heading may be above the viewport while choices and submit remain visible. Raw provider details are collapsed initially and remain available explicitly. Secret input is unavailable without a masked native field; legacy requests retain their existing answer path.
+
+Pending requests now use an 8 KiB encoded page with a waiting count, reducing the existing request payload. This does not establish a maximum for the entire snapshot: existing activity, item and model metadata can still combine above a remote relay frame. Whole-snapshot transport budgeting remains an identified follow-up rather than a guarantee of this page helper.
+
 ## Remaining product scope
 
 Remaining capabilities include non-Windows image clipboard input, sent-image thumbnails and an attachment archive, Claude/Pi image adapters and durable queued attachments, durable full-response recovery, interactive or broader HTML/SVG rendering, and authenticated PR submission beyond opening its creation page. These are specified in [the Sessions spec](sessions-ui-spec.md) and grounded in [the reference renderer contracts](renderer-contracts.md). The current implementation does not advertise those capabilities.

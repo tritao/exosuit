@@ -430,7 +430,11 @@ class AgentProviderTestMain {
 			return snapshot().requests.length == 1 && snapshot().requests[0].method == "item/tool/requestUserInput";
 		});
 		require(snapshot().requests[0].detail.indexOf("Pick a choice") >= 0 && snapshot().requests[0].detail.indexOf("yes: Proceed") >= 0, "Input question/options lost in presentation");
-		action("answer", "choice=yes", snapshot().requests[0].id);
+		require(snapshot().requests[0].questions != null && snapshot().requests[0].questions[0].id == "choice", "Structured Codex question missing");
+		action("answer-questions", '[{"id":"unknown","answers":["yes"]}]', snapshot().requests[0].id);
+		require(code == "invalid_request", "Unknown question accepted");
+		action("answer-questions", '[{"id":"choice","answers":["yes"]}]', snapshot().requests[0].id);
+		require(code == "", "Structured Codex answer rejected");
 		wait(function() {
 			action("read");
 			return snapshot().record.state == "completed";

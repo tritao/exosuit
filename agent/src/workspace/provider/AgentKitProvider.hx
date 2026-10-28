@@ -249,22 +249,17 @@ class AgentKitProvider implements LocalAgentProvider {
 		}
 	}
 
-	function view(s:KitSession, ?before:Int):AgentView
+	function view(s:KitSession, ?before:Int):AgentView {
+		var pending:Array<AgentRequest> = [for (id => r in s.approvals) {id:id,method:"item/commandExecution/requestApproval",detail:r.detail,reviewable:r.reviewable}];
+		var page = AgentRequestPage.project(pending);
 		return {
 			record: copy(s.record),
 			activity: "",
 			items: s.conversation.page(before),
 			itemsNext: s.conversation.next(before),
 			itemsOmitted: false,
-			requests: [
-				for (id => r in s.approvals)
-					{
-						id: id,
-						method: "item/commandExecution/requestApproval",
-						detail: r.detail,
-						reviewable: r.reviewable
-					}
-			],
+			requests: page.requests,
+			requestsOmitted: page.omitted,
 			models: catalog,
 			modelsNext: null,
 			currentModel: s.model,
@@ -273,6 +268,7 @@ class AgentKitProvider implements LocalAgentProvider {
 			recoveryReason: null,
 			error: s.error != null ? s.error : settings.apiKey == null ? "No API key: set ANTHROPIC_API_KEY or EXOSUIT_AGENT_API_KEY where the workspace daemon runs" : null
 		};
+	}
 
 	public function create(q:AgentCreate, ctx:RpcContext<AgentRecord>):Void {
 		if (storageFailed) {

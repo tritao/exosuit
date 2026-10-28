@@ -14,10 +14,11 @@ class ClaudeProviderTestMain {
  static function require(ok:Bool,why:String):Void {if(!ok) throw why;}
  static function main():Void {
   var args=Sys.args(),root=args[0],script=args[1],clock=function() return Sys.time()*1000;
+  var python=Sys.getEnv("EXOSUIT_TEST_PYTHON"); if (python == null || python == "") python="python3";
   var processes=new ProcessManager(),dirs=new WorkspaceDirectories(root);
   var seed=new WorkspaceService("w","e",[{id:"work",name:"Work",cwd:root,revision:1}]);
   var store=new WorkspaceSqliteStore(root+"/agents.sqlite","w",seed.snapshot(),32,root);
-  var claude=new ClaudeProvider(dirs,function() return seed.snapshot().groups,processes,clock,store,"python3",script);
+  var claude=new ClaudeProvider(dirs,function() return seed.snapshot().groups,processes,clock,store,python,script);
   var provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, [claude], store);
   var pair=MemoryTransport.pair(),client=new RpcConnection(pair.client,clock),server=new RpcConnection(pair.server,clock);
   provider.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
@@ -66,6 +67,13 @@ class ClaudeProviderTestMain {
   action("prompt","question");until("needs-attention");request=currentView().requests[0].id;
   action("answer","0=Blue\n0=Red",request);require(code=="invalid_request","Duplicate question answer accepted");
   action("answer","0=Blue",request);require(code=="","Question response failed");until("completed");
+  action("prompt","question-structured");until("needs-attention");request=currentView().requests[0].id;
+  var questions=currentView().requests[0].questions;
+  require(questions != null && questions.length==2 && questions[1].multiple,"Structured Claude questions missing");
+  action("answer-questions",'[{"id":"0","answers":["Blue"]},{"id":"1","answers":["Red, Green"]}]',request);
+  require(code=="invalid_request","Ambiguous multiselect accepted");
+  action("answer-questions",'[{"id":"0","answers":["Blue"]},{"id":"1","answers":["Red","Green"]}]',request);
+  require(code=="","Structured Claude response failed");until("completed");
   action("prompt","wait");until("needs-attention");action("stop");require(code=="","Interrupt failed");until("interrupted");
   // Closing the editor connection must leave the daemon-owned process alive.
   client.close();server.close();
@@ -79,7 +87,7 @@ class ClaudeProviderTestMain {
   var persisted=store.loadAgents();require(persisted[0].thread==id && persisted[0].provider=="claude" && persisted[0].replay != null,"Persisted session/replay missing");
   provider.dispose();client.close();server.close();
   pair=MemoryTransport.pair();client=new RpcConnection(pair.client,clock);server=new RpcConnection(pair.server,clock);
-  claude=new ClaudeProvider(dirs,function() return seed.snapshot().groups,processes,clock,store,"python3",script);
+  claude=new ClaudeProvider(dirs,function() return seed.snapshot().groups,processes,clock,store,python,script);
   provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, [claude], store);
   provider.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
   for(_ in 0...10) provider.poll();
@@ -102,7 +110,7 @@ class ClaudeProviderTestMain {
   for(i in 20...160) c.put(Std.string(i),"t","agentMessage","Claude","text","","completed");
   require(c.offset(cursor)==null && c.snapshot().length==6,"Replay bounds/cursors failed");
   provider.dispose();client.close();server.close();ro.close();roServer.close();
-  var silent=processes.start("python3",[script,"--session-id","11111111-1111-4111-a111-111111111111","--silent"],root);
+  var silent=processes.start(python,[script,"--session-id","11111111-1111-4111-a111-111111111111","--silent"],root);
   var t=new workspace.provider.ClaudeTransport(silent),callbacks=0;
   t.request("initialize",{},0,function(r) {require(r.error != null,"Missing control timeout");callbacks++;});
   t.poll(60001);require(callbacks==1,"Control request did not time out");

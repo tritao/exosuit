@@ -15,6 +15,7 @@ private typedef ClaudeApproval = {
  var detail:String;
  var reviewable:Bool;
  var questions:Array<String>;
+ var structured:Null<Array<AgentQuestion>>;
 }
 private typedef ClaudeSession = {
  var record:AgentRecord;
@@ -99,13 +100,16 @@ class ClaudeProvider implements AgentMessageSource {
   result.replay=null;
   return result;
  }
- function view(s:ClaudeSession,?before:Int):AgentView return {
+ function view(s:ClaudeSession,?before:Int):AgentView {
+  var pending = AgentRequestPage.project([for(id=>r in s.approvals) {id:id,method:r.tool == "AskUserQuestion" ? "item/tool/requestUserInput" : "item/commandExecution/requestApproval",detail:r.detail,reviewable:r.reviewable,questions:r.structured}]);
+  return {
   record:copy(s.record),activity:"",items:s.conversation.page(before),itemsNext:s.conversation.next(before),itemsOmitted:false,supportsMessageContent:true,
-  requests:[for(id=>r in s.approvals) {id:id,method:r.tool == "AskUserQuestion" ? "item/tool/requestUserInput" : "item/commandExecution/requestApproval",detail:r.detail,reviewable:r.reviewable}],
+  requests:pending.requests,requestsOmitted:pending.omitted,
   models:s.models,modelsNext:null,currentModel:s.currentModel,currentEffort:null,
   connectionState:s.ready ? "connected" : s.transport == null ? "disconnected" : "reconnecting",
   recoveryReason:s.ready ? null : "explicit-resume",error:s.error
- };
+  };
+ }
  public function messageContent(session:String,turn:String,item:String,token:String,offset:Int):Null<AgentContentChunk> {
   var s=sessions.get(session); return s == null ? null : s.conversation.content(turn,item,token,offset);
  }
@@ -160,7 +164,9 @@ class ClaudeProvider implements AgentMessageSource {
   }
   var detail=tool + "\n" + raw;
   if(questions.length > 0) detail += "\n" + [for(i in 0...questions.length) i + "=" + questions[i]].join("\n");
-  s.approvals.set(id,{input:input,tool:tool,detail:detail.substring(0,2048),reviewable:detail.length <= 2048 && (tool != "AskUserQuestion" || questions.length > 0),questions:questions});
+  var reviewable = detail.length <= 2048 && (tool != "AskUserQuestion" || questions.length > 0);
+  s.approvals.set(id,{input:input,tool:tool,detail:detail.substring(0,2048),reviewable:reviewable,questions:questions,
+   structured:reviewable && tool == "AskUserQuestion" ? StructuredQuestions.project("claude",input) : null});
   s.record.state="needs-attention";
  }
  function event(s:ClaudeSession,type:String,v:Dynamic):Void {
@@ -324,11 +330,22 @@ class ClaudeProvider implements AgentMessageSource {
   }
   var r=q.request == null ? null : s.approvals.get(q.request);
   if(r == null) {error("resolved","Request has resolved or disconnected");return;}
-  if(q.text == null || q.text.length > 8192) {error("invalid_request","Answer exceeds limit");return;}
+  if(q.text == null || haxe.io.Bytes.ofString(q.text).length > 8192) {error("invalid_request","Answer exceeds limit");return;}
   var response:Dynamic;
   if(q.action == "decline") response={behavior:"deny",message:"Declined by user"};
   else if(q.action == "approve" && r.tool != "AskUserQuestion" && r.reviewable) response={behavior:"allow",updatedInput:r.input};
-  else if(q.action == "answer" && r.tool == "AskUserQuestion" && r.reviewable) {
+  else if(q.action == "answer-questions" && r.tool == "AskUserQuestion" && r.reviewable) {
+   var validated = StructuredQuestions.answers(r.structured,q.text,"claude");
+   if (validated == null) {error("invalid_request","Review and answer every question");return;}
+   var answers:Dynamic = {};
+   for (id => values in validated) {
+    var index = Std.parseInt(id);
+    if (index == null || index < 0 || index >= r.questions.length) {error("invalid_request","Unknown question");return;}
+    Reflect.setField(answers,r.questions[index],values.join(", "));
+   }
+   var updated = Reflect.copy(r.input); Reflect.setField(updated,"answers",answers);
+   response = {behavior:"allow",updatedInput:updated};
+  } else if(q.action == "answer" && r.tool == "AskUserQuestion" && r.reviewable) {
    var answers:Dynamic={},seen:Map<Int,Bool>=[];
    for(line in q.text.split("\n")) {
     var at=line.indexOf("="),index=Std.parseInt(line.substring(0,at));

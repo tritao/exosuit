@@ -61,6 +61,7 @@ class SessionChatUiTestMain {
 		SessionProjectionTestMain.main();
 		var fonts = FontCollection.create();
 		fonts.add("../../haxeon/packages/ui/vendor/skribidi/example/data/IBMPlexSans-Regular.ttf");
+		SessionQuestionFormTest.run(fonts);
 		for (dark in [true, false]) for (width in [320.0, 420.0, 1000.0]) {
 			var height = 900.0, client = new FakeAgent(), menu:Array<haxeon.ui.widgets.overlays.MenuItem> = null;
 			var opened:String = null, files = 0, changes = 0;
@@ -172,6 +173,57 @@ class SessionChatUiTestMain {
 		answerClient.control = false; answerRoot = answerBuild();
 		require(!find(answerRoot, "Cancel").enabled, "Read-only user can cancel a pending request");
 		answerContext.dispose();
+		var piDialogClient = new FakeAgent(); piDialogClient.record.provider = "pi";
+		piDialogClient.view.requests = [{id:"pick", method:"item/tool/requestUserInput", detail:"Pick a mode", reviewable:true,
+			inputKind:"select", options:["safe = exact", "fast"]}];
+		var piDialogContext = new UiContext(null, fonts, ui.ExosuitPalette.theme(true));
+		var piDialog = new CodexSessionPanel(function() return piDialogClient, "session", "/repo", function() {},
+			new style.Theme(), new syntax.SyntaxRegistry(), function(_, _, _) {}, function(_) {});
+		function piDialogBuild():RenderNode return piDialogContext.submit(piDialog, new LayoutFrame(320, 900));
+		piDialog.prompt = "Keep this draft";
+		var piRoot = piDialogBuild(); piDialogClient.acceptActions = false;
+		click(piDialogContext, find(piRoot, "Choose safe = exact"), 320, 900);
+		require(piDialogClient.actions.indexOf("answer:safe = exact:pick") >= 0 && piDialog.prompt == "Keep this draft", "Pi choice changed draft or response");
+		piRoot = piDialogBuild(); click(piDialogContext, find(piRoot, "Choose safe = exact"), 320, 900);
+		require(piDialogClient.actions.length == 2, "Rejected Pi choice could not be retried");
+		piDialogClient.control = false; piRoot = piDialogBuild();
+		require(!find(piRoot, "Choose fast").enabled && !find(piRoot, "Cancel").enabled, "Read-only Pi choice remained enabled");
+		piDialogClient.control = true; piDialogClient.view.requests[0].reviewable = false; piRoot = piDialogBuild();
+		require(!find(piRoot, "Choose fast").enabled && find(piRoot, "Cancel").enabled, "Unreviewable Pi choice could be submitted");
+		piDialogClient.view.requests = [{id:"confirm", method:"item/commandExecution/requestApproval", detail:"Continue?", reviewable:true, inputKind:"confirm"}];
+		piRoot = piDialogBuild(); click(piDialogContext, find(piRoot, "Confirm"), 320, 900);
+		click(piDialogContext, find(piRoot, "Cancel"), 320, 900);
+		require(piDialogClient.actions.indexOf("approve::confirm") >= 0 && piDialogClient.actions.indexOf("decline::confirm") >= 0, "Pi confirmation did not preserve action mapping");
+		piDialogClient.view.requests = [{id:"legacy", method:"item/tool/requestUserInput", detail:"Choose", reviewable:true, inputKind:"select"}];
+		find(piDialogBuild(), "Answer using prompt");
+		piDialogContext.dispose();
+		var questionsClient = new FakeAgent();
+		questionsClient.view.requests = [{id:"structured", method:"item/tool/requestUserInput", detail:"Full provider detail", reviewable:true,
+			questions:[{id:"mode",header:"Mode",question:"Which mode?",multiple:false,secret:false,allowOther:false,
+				options:[{label:"Safe",description:""},{label:"Fast",description:""}]}]}];
+		questionsClient.view.requestsOmitted = 2;
+		var questionsContext = new UiContext(null, fonts, ui.ExosuitPalette.theme(true));
+		var questionsPanel = new CodexSessionPanel(function() return questionsClient, "session", "/repo", function() {},
+			new style.Theme(), new syntax.SyntaxRegistry(), function(_, _, _) {}, function(_) {});
+		function questionsBuild():RenderNode return questionsContext.submit(questionsPanel, new LayoutFrame(1000, 900));
+		questionsPanel.prompt = "Unsent composer";
+		var questionsRoot = questionsBuild();
+		find(questionsRoot, "2 additional requests waiting. Resolve a displayed request to continue.");
+		var detailsVisible = false;
+		questionsRoot.walk(function(node) { if (node.semantics != null && node.semantics.label == "Full provider detail") detailsVisible = true; });
+		require(!detailsVisible, "Structured request duplicated its raw details by default");
+		click(questionsContext, find(questionsRoot, "Request details"), 1000, 900); questionsRoot = questionsBuild();
+		find(questionsRoot, "Full provider detail");
+		click(questionsContext, find(questionsRoot, "Hide request details"), 1000, 900); questionsRoot = questionsBuild();
+		click(questionsContext, find(questionsRoot, "Safe"), 1000, 900); questionsRoot = questionsBuild();
+		click(questionsContext, find(questionsRoot, "Submit answers"), 1000, 900);
+		require(questionsClient.actions.length == 1 && questionsClient.actions[0].indexOf("answer-questions:") == 0
+			&& questionsClient.actions[0].indexOf('"Safe"') >= 0 && questionsPanel.prompt == "Unsent composer", "Structured answer lost identity or modified composer");
+		questionsRoot = questionsBuild(); require(find(questionsRoot, "Submit answers").enabled, "Unacknowledged structured answer was lost on rebuild");
+		questionsClient.view.requests = []; questionsBuild();
+		require(!questionsPanel.questionForms.exists("structured"), "Resolved question retained its draft");
+		require(!questionsPanel.expandedRequestDetails.exists("structured"), "Resolved request retained disclosure state");
+		questionsContext.dispose();
 		var historyClient = new FakeAgent();
 		var historyContext = new UiContext(null, fonts, ui.ExosuitPalette.theme(true));
 		historyContext.setStyleSheet(ui.ExosuitPalette.styleSheet(historyContext.buildContext.theme, true));

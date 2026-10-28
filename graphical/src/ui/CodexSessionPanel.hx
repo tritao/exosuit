@@ -70,6 +70,8 @@ class CodexSessionPanel implements View {
   var expanded:Map<String, Bool> = [];
   var markdown:Map<String, CodexMarkdownView> = [];
   var diffs:Map<String, SessionDiffView> = [];
+  var questionForms:Map<String, SessionQuestionForm> = [];
+  var expandedRequestDetails:Map<String, Bool> = [];
   var copiedMessages:Map<String, String> = [];
   var promptFocusRequested = false;
   var suggestionIndex = 0;
@@ -448,20 +450,66 @@ class CodexSessionPanel implements View {
       }
     }
     var requestCards:Array<KeyedView> = [];
+    var retainedQuestions:Map<String, SessionQuestionForm> = [];
+    var retainedRequestDetails:Map<String, Bool> = [];
     for (request in view.requests) {
       var r = request;
       var requestRows:Array<KeyedView> = [];
+      var structured = r.method == "item/tool/requestUserInput" && r.questions != null && r.questions.length > 0 && r.reviewable;
+      var detailExpanded = expandedRequestDetails.get(r.id) == true;
+      if (detailExpanded) retainedRequestDetails.set(r.id, true);
       requestRows.push(new KeyedView(
         "request-" + r.id,
-        paragraph((r.method == "item/tool/requestUserInput"
+        paragraph((r.inputKind == "confirm" ? "Confirmation" : r.method == "item/tool/requestUserInput"
         ? "Input needed" : r.method == "item/fileChange/requestApproval" ? "File change approval" : r.method
-        == "item/commandExecution/requestApproval" ? "Command approval" : "Additional request") + "\n" + r.detail)
+        == "item/commandExecution/requestApproval" ? "Command approval" : "Additional request") + (structured ? "" : "\n" + r.detail))
       ));
+      if (structured && r.detail != "") {
+        requestRows.push(new KeyedView("request-detail-toggle", quietButton(detailExpanded ? "Hide request details" : "Request details", function() {
+          expandedRequestDetails.set(r.id, !detailExpanded); frame();
+        }, "request-detail-toggle-" + r.id)));
+        if (detailExpanded) requestRows.push(new KeyedView("request-details", paragraph(r.detail)));
+      }
       if (!r.reviewable) requestRows.push(new KeyedView(
         "full-" + r.id,
-        paragraph("Full request exceeds this view. Decline it or use a client that can display the full request.")
+        paragraph("Full request exceeds this view. Review it in another compatible client.")
       ));
       if (r.method == "item/tool/requestUserInput") {
+        var questions = r.questions;
+        if (questions != null && questions.length > 0 && r.reviewable) {
+          var form = questionForms.get(r.id);
+          if (form == null) form = new SessionQuestionForm(r.id, questions, control && connectionReady, frame,
+            function(json) {
+              var current = getClient();
+              if (current == null || !current.canControlAgents() || current.agentBusy()) return;
+              var currentView = current.agentView(id), active = false;
+              if (currentView != null && currentView.connectionState != "disconnected" && currentView.connectionState != "reconnecting")
+                for (pending in currentView.requests) if (pending.id == r.id && pending.reviewable && pending.questions != null) active = true;
+              if (active) current.agentAction(id, "answer-questions", json, r.id);
+            }, view.record.provider);
+          else form.update(questions, control && connectionReady);
+          retainedQuestions.set(r.id, form);
+          requestRows.push(new KeyedView("question-form", form));
+          if (r.inputKind != null || view.record.provider == "claude") {
+            var cancel = new Button("Cancel", null, function() client.agentAction(id, "decline", "", r.id));
+            cancel.enabled = control;
+            requestRows.push(new KeyedView("cancel-" + r.id, cancel));
+          }
+        } else {
+        var choices = r.inputKind == "select" && r.options != null && r.options.length > 0;
+        if (choices) {
+          var options:Array<String> = cast r.options;
+          for (index in 0...options.length) {
+            var option = options[index];
+            var optionStyle = new LayoutStyle(); optionStyle.width = LayoutAxis.grow(); optionStyle.height = LayoutAxis.fixed(36);
+            optionStyle.padding = new Insets(10, 0, 10, 0); optionStyle.clipHorizontal = true;
+            var choice = new Button(option, optionStyle, function() client.agentAction(id, "answer", option, r.id), "agent-choice-" + r.id + "-" + index);
+            choice.labelView = new MiddleEllipsisText("choice-label", option, false, TextStyleOverride.text(14));
+            choice.accessibilityLabel = "Choose " + option;
+            choice.enabled = control && r.reviewable;
+            requestRows.push(new KeyedView("choice-" + index, choice));
+          }
+        } else {
         if (textContext.length > 0 || imageDrafts.length > 0) requestRows.push(new KeyedView("answer-context-note-" + r.id,
           paragraph("Answer uses prompt text only; attachments stay in the composer.")));
         var answer = new Button(
@@ -481,21 +529,23 @@ class CodexSessionPanel implements View {
           "answer-" + r.id,
           answer
         ));
+        }
         if (r.inputKind != null || view.record.provider == "claude") {
           var cancel = new Button("Cancel", null, function() client.agentAction(id, "decline", "", r.id));
           cancel.enabled = control;
           requestRows.push(new KeyedView("cancel-" + r.id, cancel));
         }
+        }
       } else if (r.method == "item/commandExecution/requestApproval" || r.method == "item/fileChange/requestApproval") {
         var approve = new Button(
-          "Approve once",
+          r.inputKind == "confirm" ? "Confirm" : "Approve once",
           null,
           function() client.agentAction(id, "approve", "", r.id),
           "codex-approve-" + r.id
         );
         approve.enabled = control && r.reviewable;
         var decline = new Button(
-          "Decline",
+          r.inputKind == "confirm" ? "Cancel" : "Decline",
           null,
           function() client.agentAction(id, "decline", "", r.id),
           "codex-decline-" + r.id
@@ -523,6 +573,10 @@ class CodexSessionPanel implements View {
       requestStyle.radiusTopLeft = requestStyle.radiusTopRight = requestStyle.radiusBottomLeft = requestStyle.radiusBottomRight = 10;
       requestCards.push(new KeyedView("request-card-" + r.id, new Column("agent-request-" + r.id, requestRows, requestStyle)));
     }
+    questionForms = retainedQuestions;
+    expandedRequestDetails = retainedRequestDetails;
+    if (view.requestsOmitted != null && view.requestsOmitted > 0)
+      requestCards.push(new KeyedView("requests-omitted", paragraph(view.requestsOmitted + " additional requests waiting. Resolve a displayed request to continue.")));
     var items = view.items;
     if (items == null) activity.push(new KeyedView(
       "legacy",

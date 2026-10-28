@@ -12,6 +12,35 @@ import workspace.service.WorkspaceAgentProtocol;
 class AgentServiceTest {
  static function require(ok:Bool,message:String):Void {if(!ok) throw message;}
  public static function run():Void {
+  var questions=workspace.provider.StructuredQuestions.project("codex",{questions:[{id:"mode",header:"Mode",question:"Choose a mode",isOther:false,isSecret:false,
+   options:[{label:"Careful",description:"Run checks"},{label:"Fast",description:"Short run"}]}]});
+  require(questions != null && questions.length==1 && !questions[0].multiple,"Native question projection failed");
+  require(workspace.provider.StructuredQuestions.answers(questions,'[{"id":"mode","answers":["Careful"]}]',"codex") != null,
+   "Exact native choice was rejected");
+  require(workspace.provider.StructuredQuestions.answers(questions,'[{"id":"mode","answers":["invented"]}]',"codex") == null
+   && workspace.provider.StructuredQuestions.answers(questions,'[{"id":"mode","answers":["Careful","Fast"]}]',"codex") == null
+   && workspace.provider.StructuredQuestions.answers(questions,'[{"id":"other","answers":["Careful"]}]',"codex") == null,
+   "Structured answers bypassed retained question constraints");
+  var multi=workspace.provider.StructuredQuestions.project("claude",{questions:[{header:"Checks",question:"Which checks?",multiSelect:true,
+   options:[{label:"Build",description:""},{label:"Tests",description:""}]}]});
+  require(multi != null && multi[0].multiple && workspace.provider.StructuredQuestions.answers(multi,'[{"id":"0","answers":["Build","Tests"]}]',"claude") != null,
+   "Claude multiple selections were not preserved");
+  require(workspace.provider.StructuredQuestions.project("codex",{questions:[{id:"mode",header:"Mode",question:StringTools.rpad("", "界", 1000),options:null}]}) == null,
+   "Oversized UTF-8 question was presented as complete");
+  var pending:Array<AgentRequest> = [];
+  for (i in 0...16) pending.push({id:"request-"+i,method:"item/tool/requestUserInput",detail:StringTools.rpad("", "界", 1800),reviewable:true});
+  var page=workspace.provider.AgentRequestPage.project(pending);
+  require(page.requests.length>0 && page.omitted==pending.length-page.requests.length
+   && haxeon.wire.MessagePack.encode(page.requests).length <= workspace.provider.AgentRequestPage.MAX_BYTES,
+   "Pending request page exceeded its relay budget");
+  pending.shift();
+  var next=workspace.provider.AgentRequestPage.project(pending);
+  require(next.requests[0].id=="request-1","Resolved request blocked the next queued decision");
+  var oversized:Array<AgentRequest>=[{id:"huge",method:"item/tool/requestUserInput",detail:"Question",reviewable:true,
+   options:[StringTools.rpad("", "x", 12000)]}];
+  var fallback=workspace.provider.AgentRequestPage.project(oversized);
+  require(fallback.requests.length==1 && fallback.requests[0].id=="huge" && !fallback.requests[0].reviewable
+   && fallback.requests[0].options==null && fallback.omitted==0,"Oversized request lost its safe decline path");
   var alpha=new MessageFixtureProvider("alpha",31),beta=new FixtureProvider("beta",1);
   var service=new WorkspaceAgentService("w","owner","/work",[alpha,beta]);
   var clock=function() return Sys.time()*1000;

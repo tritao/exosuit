@@ -88,6 +88,21 @@ private class PreviewApplication implements DesktopUiApplication {
    ];
    if (args.indexOf("--expand-artifact") >= 0) clickLabel = "Show source";
   }
+  if (args.indexOf("--questions") >= 0) {
+   agent.view.items = [{id:"assistant",turn:"turn",kind:"agentMessage",title:"",text:"Before I continue, I need your preferences.",detail:"",state:"completed",truncated:false}];
+   agent.view.requests=[{id:"question-fixture",method:"item/tool/requestUserInput",detail:"Select your preferences",reviewable:true,questions:[
+    {id:"approach",header:"Approach",question:"How should I make the change?",multiple:false,secret:false,allowOther:true,
+     options:[{label:"Minimal",description:"Keep the scope focused"},{label:"Thorough",description:"Include related cleanup"}]},
+    {id:"checks",header:"Validation",question:"Which checks should I run?",multiple:true,secret:false,allowOther:true,
+     options:[{label:"Build",description:"Compile the application"},{label:"Tests",description:"Run the test suite"}]}
+   ]}];
+  }
+  if (args.indexOf("--pi-choice") >= 0) {
+   agent.record.provider="pi";
+   agent.view.items=[{id:"assistant",turn:"turn",kind:"agentMessage",title:"",text:"Select a deployment target.",detail:"",state:"completed",truncated:false}];
+   agent.view.requests=[{id:"pi-select",method:"item/tool/requestUserInput",detail:"Choose one destination",reviewable:true,
+    inputKind:"select",options:["Development","Staging","Production"]}];
+  }
   if (args.indexOf("--models") >= 0) clickLabel = "Conversation model";
   var renderHtml = args.indexOf("--render-html") >= 0;
   var renderSvg = args.indexOf("--render-svg") >= 0;

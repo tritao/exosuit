@@ -150,6 +150,21 @@ import haxeon.wire.MessagePack;
   @:id(3) var complete:Bool;
 }
 
+@:wire typedef AgentQuestionOption = {
+	@:id(1) var label:String;
+	@:id(2) var description:String;
+}
+
+@:wire typedef AgentQuestion = {
+	@:id(1) var id:String;
+	@:id(2) var header:String;
+	@:id(3) var question:String;
+	@:id(4) var multiple:Bool;
+	@:id(5) var secret:Bool;
+	@:id(6) var allowOther:Bool;
+	@:id(7) var options:Array<AgentQuestionOption>;
+}
+
 @:wire typedef AgentRequest = {
 	@:id(1) var id:String;
 	@:id(2) var method:String;
@@ -158,6 +173,8 @@ import haxeon.wire.MessagePack;
 	/** Native extension dialog type. Absent preserves existing provider request semantics. */
 	@:optional @:id(5) var inputKind:Null<String>;
 	@:optional @:id(6) var options:Null<Array<String>>;
+	/** Complete, bounded provider questions; absent means use legacy request display. */
+	@:optional @:id(7) var questions:Null<Array<AgentQuestion>>;
 }
 
 @:wire typedef AgentView = {
@@ -188,6 +205,8 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(23) var supportsQueue:Null<Bool>;
 	@:optional @:id(24) var supportsImageUpload:Null<Bool>;
 	@:optional @:id(25) var supportsMessageContent:Null<Bool>;
+	/** Number of pending requests omitted from the bounded current view. */
+	@:optional @:id(26) var requestsOmitted:Null<Int>;
 }
 
 @:wire typedef AgentContentQuery = {

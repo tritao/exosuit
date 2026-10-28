@@ -28,7 +28,7 @@ private typedef Session = {
 	var eventRevision:Int;
 }
 
-private typedef PendingApproval = {var wireId:Dynamic; var method:String; var detail:String; var reviewable:Bool; var questions:Array<String>;}
+private typedef PendingApproval = {var wireId:Dynamic; var method:String; var detail:String; var reviewable:Bool; var questions:Array<String>; var structured:Null<Array<AgentQuestion>>;}
 
 /** Shared-daemon adapter. All policy/protocol interpretation stays on the owning machine. */
 class CodexProvider implements AgentMessageSource {
@@ -187,7 +187,10 @@ class CodexProvider implements AgentMessageSource {
 			nameMetadata:r.nameMetadata
 		};
 
-	function view(s:Session, ?before:Int):AgentView
+	function view(s:Session, ?before:Int):AgentView {
+		var pending = AgentRequestPage.project([for (id => r in s.requests) {
+			id:id, method:r.method, detail:r.detail, reviewable:r.reviewable, questions:r.structured
+		}]);
 		return {
 			record: copy(s.record),
 			activity: s.activity,
@@ -202,17 +205,11 @@ class CodexProvider implements AgentMessageSource {
 			currentEffort: s.currentEffort,
 			connectionState: s.attached ? "connected" : s.record.state == "reconnecting" ? "reconnecting" : "disconnected",
 			recoveryReason: recoveryReason(s),
-			requests: [
-				for (id => r in s.requests)
-					{
-						id: id,
-						method: r.method,
-						detail: r.detail,
-						reviewable: r.reviewable
-					}
-			],
+			requests: pending.requests,
+			requestsOmitted: pending.omitted,
 			error: s.error
 		};
+	}
 
     public function messageContent(session:String, turn:String, item:String, token:String, offset:Int):Null<AgentContentChunk> {
         var s=sessions.get(session);
@@ -531,7 +528,8 @@ class CodexProvider implements AgentMessageSource {
 			method: method,
 			detail: detail,
 			reviewable: reviewable,
-			questions: questions
+			questions: questions,
+			structured: reviewable && method == "item/tool/requestUserInput" ? StructuredQuestions.project("codex", params) : null
 		});
 		s.record.state = "needs-attention";
 		append(s, "\n" + method + "\n" + detail + "\n");
@@ -1326,7 +1324,7 @@ class CodexProvider implements AgentMessageSource {
 			ctx.fail({code: "resolved", message: "This request has already resolved or disconnected", ambiguous: false});
 			return;
 		}
-		if (q.text.length > 8192) {
+		if (q.text == null || haxe.io.Bytes.ofString(q.text).length > 8192) {
 			ctx.fail({code: "invalid_request", message: "Answer exceeds limit", ambiguous: false});
 			return;
 		}
@@ -1345,6 +1343,12 @@ class CodexProvider implements AgentMessageSource {
 				return;
 			}
 			result = {decision: q.action == "approve" ? "accept" : "decline"};
+		} else if (pending.method == "item/tool/requestUserInput" && q.action == "answer-questions") {
+			var validated = pending.reviewable ? StructuredQuestions.answers(pending.structured, q.text, "codex") : null;
+			if (validated == null) { ctx.fail({code:"invalid_request", message:"Review and answer every question", ambiguous:false}); return; }
+			var answers:Dynamic = {};
+			for (id => values in validated) Reflect.setField(answers, id, {answers:values});
+			result = {answers:answers};
 		} else if (pending.method == "item/tool/requestUserInput" && q.action == "answer") {
 			// Each question uses its own id. The UI supplies one id=value per line.
 			var answers:Dynamic = {};
