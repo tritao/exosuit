@@ -13,6 +13,15 @@ bytes 1-16  random channel ID
 bytes 17+   opaque Noise handshake or encrypted application payload
 ```
 
+Envelope versions: `1` carries data, both ways. `2` (Worker to machine, no
+payload) is a reset: the channel's device or pairing socket was replaced or
+closed, once per ended socket. `3` (machine to Worker, no payload) disconnects
+the channel: the Worker closes its device or pairing socket with close code
+`4001` and reason `disconnected_by_host`, which the app should show, and sends
+no reset back. A disconnected device may reconnect; the machine decides whether
+to accept it (suit refuses it for 60 s). Revoking the device is the permanent
+cut-off.
+
 The machine service selects a channel for every outgoing frame. Pairing and
 device sockets may send only on their attached channel. This lets the Worker
 unicast frames without reading Noise or workspace RPC contents. Frames are
