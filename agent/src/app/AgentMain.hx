@@ -18,6 +18,7 @@ import workspace.runtime.NativeWorkspaceCredentialStore;
 import workspace.runtime.WorkspaceNoiseIdentity;
 import workspace.transport.NoiseMessageTransport;
 import workspace.runtime.WorkspacePairingManager;
+import workspace.runtime.WorkspaceRelayStatusFile;
 
 /** Catalog daemon. The managed launcher owns exclusive startup and discovery. */
 class AgentMain {
@@ -155,6 +156,10 @@ class AgentMain {
 		});
 		Sys.println("READY: exosuit-agent local and loopback WebSocket");
 		Sys.stdout().flush();
+		var stateDirectory = haxe.io.Path.directory(args[2]);
+		suit.SuitClient.register("workspace-host", {root: directories.root, stateDir: stateDirectory,
+			generation: args.length >= 7 ? args[6] : null});
+		var relayStatus = new WorkspaceRelayStatusFile(stateDirectory);
 		while (true) {
 			runtime.events.wait(0.01);
 			for (_ in 0...128)
@@ -176,6 +181,8 @@ class AgentMain {
 					}
 				}
 			}
+			if (relayHost != null || relaySetupError != null)
+				relayStatus.update(clock(), relayHost, pairingManager, relaySetupError);
 			server.poll();
 			files.poll();
 			scm.poll();
@@ -196,6 +203,8 @@ class AgentMain {
 			if (lifetime.shouldStop(clock(), server.clientCount(), terminals.activeCount() + agents.activeCount() + remoteAccess))
 				break;
 		}
+		relayStatus.remove();
+		suit.SuitClient.unregister();
 		if (pairingManager != null)
 			pairingManager.dispose();
 		if (relayHost != null)

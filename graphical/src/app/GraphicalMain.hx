@@ -42,6 +42,7 @@ class GraphicalMain {
 		var current = session;
 		if (current == null) return 0;
 		session = null;
+		suit.SuitClient.unregister();
 		if (inspection != null) {
 			var target:devtools.InspectionAgent = cast inspection;
 			var endpoint = target.path;
@@ -108,6 +109,8 @@ class GraphicalMain {
 			else if (!StringTools.startsWith(argument, "--"))
 				openPaths.push(argument);
 		}
+		// Tell the per-user suit daemon (the tray icon) this editor is running; never blocks or throws.
+		suit.SuitClient.announceEditor();
 		var host = new DesktopUiHostOptions();
 		var stableChannel = Sys.getEnv("EXOSUIT_CHANNEL") == "stable";
 		host.applicationId = stableChannel ? "Exosuit.Stable" : "Exosuit.Desktop";
