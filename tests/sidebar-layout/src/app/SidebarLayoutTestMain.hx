@@ -118,6 +118,18 @@ class SidebarLayoutTestMain {
   require(writes == 1 && stored == model.encodeDestinations() && ids(model) == "scm,files,search", "a corrupt rail setting was not replaced with the rail");
   rail.settingChanged(stored);
   require(writes == 1 && reports.length == 1, "the repaired setting was applied or written again");
+  // Two windows reading the same unreadable setting: the first repairs it, the second takes that repair.
+  var shared = "1|bad id,1|", sharedWrites = 0, sharedReports = 0;
+  var firstWindow = new haxeon.ui.widgets.sidebar.SidebarModel(), secondWindow = new haxeon.ui.widgets.sidebar.SidebarModel();
+  destinations(firstWindow); destinations(secondWindow);
+  var windows = [firstWindow, secondWindow];
+  firstWindow.moveMode("scm", "files");
+  var rails = [for (window in windows) new ui.ActivityRailPreference(window, function(value) { shared = value; sharedWrites++; },
+   function(_) sharedReports++, function() return shared)];
+  rails[0].restore("1|bad id,1|", false);
+  rails[1].restore("1|bad id,1|", false);
+  require(sharedWrites == 1 && sharedReports == 1, "two windows each repaired the unreadable setting");
+  require(ids(windows[1]) == "scm,files,search", "the second window did not take the first window's repair");
   // A window that knows a destination the setting does not mention still treats the setting as unchanged.
   var other = new haxeon.ui.widgets.sidebar.SidebarModel();
   destinations(other);

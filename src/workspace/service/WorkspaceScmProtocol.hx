@@ -127,7 +127,7 @@ typedef ScmUnwatchResult = WorkspaceUnwatchResult;
 	@:id(2) var repository:String;
 	@:id(3) var operationId:String;
 	@:id(4) var expectedRevision:Int64;
-	/** stage, stage_all, stage_paths, unstage, unstage_all, unstage_paths, discard, restore_discard, resolve_conflict, commit, stage_patch, unstage_patch, revert_patch, checkout, create_branch, fetch, pull, push */
+	/** stage, stage_all, stage_paths, unstage, unstage_all, unstage_paths, discard, restore_discard, resolve_conflict, commit, scoped_commit, stage_patch, unstage_patch, revert_patch, checkout, create_branch, fetch, pull, push */
 	@:id(5) var kind:String;
 	@:optional @:id(6) var path:Null<String>;
 	@:optional @:id(7) var message:Null<String>;
@@ -139,6 +139,8 @@ typedef ScmUnwatchResult = WorkspaceUnwatchResult;
 	@:optional @:id(13) var paths:Null<Array<String>>;
 	@:optional @:id(14) var recoveryToken:Null<String>;
 	@:optional @:id(15) var choice:Null<String>;
+	/** scoped_commit: the repository-relative folders (each ending in `/`) the commit may change. */
+	@:optional @:id(16) var folders:Null<Array<String>>;
 }
 
 @:wire typedef ScmApplyResult = {

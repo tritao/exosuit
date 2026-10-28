@@ -7,8 +7,10 @@ class ScmRepository {
 	public final kind:ScmRepositoryKind;
 	public final parentId:Null<String>;
 	public final trusted:Bool;
-	/** Whether the repository compares paths case-insensitively (Git's `core.ignorecase`); null when the provider does not say. */
-	public final ignoreCase:Null<Bool>;
+	/** Case-insensitive file systems by default: Git sets `core.ignorecase` there, and treats it as unset elsewhere. */
+	public static final PLATFORM_IGNORES_CASE:Bool = Sys.systemName() == "Windows" || Sys.systemName() == "Mac";
+	/** Whether the repository compares paths case-insensitively (Git's `core.ignorecase`, else the platform default). */
+	public final ignoreCase:Bool;
 
 	public function new(id:String, providerId:String, root:String, kind:ScmRepositoryKind = ScmRepositoryKind.Worktree,
 			?parentId:String, trusted:Bool = false, ?ignoreCase:Bool) {
@@ -18,6 +20,6 @@ class ScmRepository {
 		this.kind = kind;
 		this.parentId = parentId;
 		this.trusted = trusted;
-		this.ignoreCase = ignoreCase;
+		this.ignoreCase = ignoreCase == null ? PLATFORM_IGNORES_CASE : ignoreCase == true;
 	}
 }

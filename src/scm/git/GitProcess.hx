@@ -33,13 +33,13 @@ class GitProcess {
 
 	public function run(arguments:Array<String>, cwd:String, generation:Int, complete:ScmJobResult<GitCommandResult>->Void,
 			readOnly:Bool = true, restricted:Bool = false, maxStdout:Int = DEFAULT_MAX_STDOUT,
-			?disabledFilters:Array<String>, ?stdin:Bytes):ScmJob<GitCommandResult> {
+			?disabledFilters:Array<String>, ?stdin:Bytes, ?environment:Map<String, String>):ScmJob<GitCommandResult> {
 		var task:Null<GitCommandTask> = null, handle:Null<JobHandle> = null;
 		var job = new ScmJob<GitCommandResult>(generation, function() {
 			if (handle != null) scheduler.cancel(handle); else if (task != null) task.cancel();
 		});
 		task = new GitCommandTask(processes, configuredPath, emptyHooksPath, arguments, cwd, readOnly, restricted, maxStdout, disabledFilters,
-			stdin,
+			stdin, environment,
 			function(result, error) {
 				if (result != null) executable = result.executable;
 				if (job.finish()) complete(new ScmJobResult<GitCommandResult>(generation, result, error));
@@ -149,6 +149,8 @@ private class GitCommandTask implements JobTask {
 	final maxStdout:Int;
 	final disabledFilters:Array<String>;
 	final stdin:Null<Bytes>;
+	/** Variables added to Git's environment, e.g. GIT_AUTHOR_* for a commit that keeps its author. */
+	final extraEnvironment:Map<String, String>;
 	final complete:(Null<GitCommandResult>, Null<ScmError>)->Void;
 	final output:BytesBuffer = new BytesBuffer();
 	var outputLength:Int = 0;
@@ -166,8 +168,8 @@ private class GitCommandTask implements JobTask {
 
 	public function new(processes:ProcessManager, configuredPath:Null<String>, emptyHooksPath:Null<String>, arguments:Array<String>, cwd:String,
 			readOnly:Bool, restricted:Bool, maxStdout:Int, ?disabledFilters:Array<String>,
-			?stdin:Bytes,
-			complete:(Null<GitCommandResult>, Null<ScmError>)->Void) {
+			?stdin:Bytes, ?environment:Map<String, String>,
+			?complete:(Null<GitCommandResult>, Null<ScmError>)->Void) {
 		this.processes = processes;
 		this.configuredPath = configuredPath;
 		this.emptyHooksPath = emptyHooksPath;
@@ -178,6 +180,8 @@ private class GitCommandTask implements JobTask {
 		this.maxStdout = maxStdout < 1 ? 1 : maxStdout;
 		this.disabledFilters = disabledFilters == null ? [] : disabledFilters.copy();
 		this.stdin = stdin == null ? null : stdin.sub(0, stdin.length);
+		this.extraEnvironment = environment == null ? [] : environment.copy();
+		if (complete == null) throw "Git command callback cannot be null";
 		this.complete = complete;
 	}
 
@@ -261,6 +265,10 @@ private class GitCommandTask implements JobTask {
 		environment.set("GIT_LITERAL_PATHSPECS", "1");
 		environment.set("GIT_PAGER", "cat");
 		environment.set("LC_ALL", "C");
+		for (name in extraEnvironment.keys()) {
+			var value = extraEnvironment.get(name);
+			if (value != null) environment.set(name, value);
+		}
 		try {
 			child = processes.start(path, launchArguments, cwd, environment);
 			if (stdin == null || stdin.length == 0) {

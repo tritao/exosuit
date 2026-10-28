@@ -30,8 +30,15 @@ class WorkbenchLayoutModes {
 		says no where the panel cannot show or cannot follow the group's folder. Without it the rail keeps them.
 	**/
 	final contextPanelAvailable:Void->Bool;
-	/** The destinations the rail left out when it was last applied or synced (see syncRail). */
-	var railHidden:String = "";
+	static final NONE_HIDDEN:Array<String> = [];
+	/** The destinations the rail leaves out: the mode's own list or none, so it is never rebuilt (see syncRail). */
+	var railHidden:Array<String> = NONE_HIDDEN;
+	/** Set when something the rail depends on may have changed: the mode, the dock, the sidebar's destinations. */
+	var railStale:Bool = true;
+	/** The app's own inputs to contextPanelAvailable, as last passed to syncRail. */
+	var railInputs:Int = -1;
+	/** How often the rail was worked out again; a test seam for syncRail's steady state. */
+	public var railComputations(default, null):Int = 0;
 	public function new(dock:DockWorkspaceModel, sidebar:SidebarModel, regions:WorkbenchLayoutControls, changed:Void->Void,
 			?contextPanelAvailable:Void->Bool) {
 		this.dock = dock; this.sidebar = sidebar; this.regions = regions; this.changed = changed;
@@ -69,6 +76,7 @@ class WorkbenchLayoutModes {
 			if (next[2] != previous[2]) rightChanged = true;
 		}
 		previous = next;
+		railStale = true;
 	}
 	public function start(setting:String):Void { preference = validChoice(setting) ? setting : "auto"; ready = true; reconcile(); }
 	static function validChoice(value:String):Bool return value == "auto" || LayoutMode.find(value) != null;
@@ -100,22 +108,33 @@ class WorkbenchLayoutModes {
 		for (mode in sidebar.modes) if (mode.visible && !current.hides(mode.id)) return true;
 		return false;
 	}
-	/** The destinations the current mode leaves off the rail right now. */
-	public function hiddenOnRail():Array<String> return [for (id in current.hiddenDestinations) if (hides(id)) id];
+	/** The destinations the rail leaves out, as of the last apply or syncRail. Shared; do not change it. */
+	public function hiddenOnRail():Array<String> return railHidden;
+	/** Something the rail depends on changed outside this class, e.g. a destination was registered or shown. */
+	public function invalidateRail():Void railStale = true;
 	/**
 		Follows changes to what the rail hides that happen outside a mode change, e.g. the window widening so the right
 		panel shows again, or the panel closing: when the sidebar shows a destination that just left the rail, it switches
-		to the mode's default. Call once per frame; returns whether anything changed.
+		to the mode's default. `inputs` packs the app's own inputs to contextPanelAvailable (phone layout, hidden panel,
+		workspace access). Call once per frame update; it only works the rail out again when an input changed.
 	**/
-	public function syncRail():Bool {
-		if (!ready) return false;
-		var key = hiddenOnRail().join(",");
-		if (key == railHidden) return false;
-		railHidden = key;
+	public function syncRail(inputs:Int):Void {
+		if (!ready || !railStale && inputs == railInputs) return;
+		railStale = false;
+		railInputs = inputs;
+		if (!computeRail()) return;
 		if (hides(sidebar.activeId)) {
 			var next = railDefault();
 			if (next != null) { suspend(); sidebar.select(next.id); resume(); }
 		}
+		changed();
+	}
+	/** Works out what the rail hides; true when that changed. */
+	function computeRail():Bool {
+		railComputations++;
+		var hidden = current.hiddenDestinations.length > 0 && hides(current.hiddenDestinations[0]) ? current.hiddenDestinations : NONE_HIDDEN;
+		if (hidden == railHidden) return false;
+		railHidden = hidden;
 		return true;
 	}
 	/** The destination the mode opens on the rail: its own default, else the first one it leaves on the rail. */
@@ -150,7 +169,8 @@ class WorkbenchLayoutModes {
 			if (left && !dock.isOpen("explorer")) dock.dock("explorer", DockNodeTools.firstPanel(dock.root), haxeon.ui.docking.DockDropZone.Left);
 			else if (!left && dock.isOpen("explorer")) dock.close("explorer");
 		}
-		railHidden = hiddenOnRail().join(",");
+		computeRail();
+		railStale = false;
 		applied = current.id; afterApply(); resume();
 	}
 	public function captureContext():String return "N\tlayout-mode\t1\t" + applied + "\t" + (leftChanged ? "1" : "0") + "\t" + (bottomChanged ? "1" : "0") + "\t" + (rightChanged ? "1" : "0");

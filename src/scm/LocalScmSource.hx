@@ -197,8 +197,9 @@ class LocalScmSource implements ScmSource {
 		snapshot. Paths outside them are refused, and so is any path that is not plain (a `..` or `.` segment, a leading
 		separator or `:`, a drive letter), since it could name a file outside the folder it starts with. Stage-all and
 		unstage-all become the folders themselves. A commit takes the whole index, so it is refused while changes outside
-		the folders are staged, and goes to the provider as a ScopedCommit that checks the index again, and with amend
-		the commit it rewrites, right before committing. Branch and remote operations act on the repository as before.
+		the folders are staged, and goes to the provider as a ScopedCommit, which checks the exact tree it commits (see
+		GitScopedCommit). A ScopedCommit asked for here keeps only the folders inside these, so a request can narrow the
+		scope but never widen it. Branch and remote operations act on the repository as before.
 	**/
 	public static function narrowOperation(operation:ScmOperation, folders:Array<String>, full:Null<ScmSnapshot>,
 			?ignoreCase:Bool):NarrowedOperation {
@@ -221,19 +222,28 @@ class LocalScmSource implements ScmSource {
 				return Allowed(ScmOperation.StagePaths(whole));
 			case UnstageAll:
 				return Allowed(ScmOperation.UnstagePaths(whole));
-			case Commit(message, amend) | ScopedCommit(message, amend, _):
-				if (full == null) return Refused("Refresh the repository before committing");
-				if (full.truncated) return Refused("Too many changes to confirm this commit stays inside " + names);
-				var staged:Array<String> = [];
-				for (group in full.groups) if (group.id == ScmGroupId.Index) for (resource in group.resources)
-					if (!ScmFolderScope.inside(resource.path, folders, ignoreCase)
-						|| resource.originalPath != null && !ScmFolderScope.inside(resource.originalPath, folders, ignoreCase))
-						staged.push(resource.path);
-				if (staged.length > 0) return Refused(ScmFolderScope.refusal("Staged changes", staged, folders));
-				return Allowed(ScmOperation.ScopedCommit(message, amend, folders));
+			case Commit(message, amend):
+				return commit(message, amend, folders, full, ignoreCase);
+			case ScopedCommit(message, amend, requested):
+				var scope = ScmFolderScope.intersect(requested, folders, ignoreCase);
+				if (scope.length == 0) return Refused("The commit's folders " + requested.join(", ") + " are outside " + names);
+				return commit(message, amend, scope, full, ignoreCase);
 			case Checkout(_) | CreateBranch(_) | Fetch(_) | Pull | Push:
 				return Allowed(operation);
 		}
+	}
+
+	static function commit(message:String, amend:Bool, folders:Array<String>, full:Null<ScmSnapshot>, ?ignoreCase:Bool):NarrowedOperation {
+		var names = folders.join(", ");
+		if (full == null) return Refused("Refresh the repository before committing");
+		if (full.truncated) return Refused("Too many changes to confirm this commit stays inside " + names);
+		var staged:Array<String> = [];
+		for (group in full.groups) if (group.id == ScmGroupId.Index) for (resource in group.resources)
+			if (!ScmFolderScope.inside(resource.path, folders, ignoreCase)
+				|| resource.originalPath != null && !ScmFolderScope.inside(resource.originalPath, folders, ignoreCase))
+				staged.push(resource.path);
+		if (staged.length > 0) return Refused(ScmFolderScope.refusal("Staged changes", staged, folders));
+		return Allowed(ScmOperation.ScopedCommit(message, amend, folders));
 	}
 
 	function failed<T>(value:Null<T>, complete:ScmJobResult<T>->Void, code:String, message:String):ScmJob<T> {
