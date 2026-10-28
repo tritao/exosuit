@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "package": {
+    "name": "exosuit-suit"
+  },
+  "entry": "app.SuitMain",
+  "sourceRoots": [
+    "src",
+    "../src"
+  ],
+  "scopeSourceRoots": false,
+  "dependencies": {
+    "haxeon-platform": {
+      "path": "../haxeon/packages/platform"
+    },
+    "processkit": {
+      "path": "../native-packages/processes"
+    }
+  },
+  "native": {
+    "cmake": {
+      "source": "native",
+      "target": "exosuit_suit_native",
+      "inputs": [
+        "native/CMakeLists.txt",
+        "../haxeon/vendor/nativekit/CMakeLists.txt"
+      ]
+    }
+  },
+  "target": "host",
+  "outputDir": "build"
+}
