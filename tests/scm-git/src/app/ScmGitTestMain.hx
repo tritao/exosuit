@@ -890,14 +890,29 @@ class ScmGitTestMain {
 		require(hooked.error == null && lastSubject() == "Hooked\n" && FileSystem.exists(gitDirectory + "/scoped-hook-ran"),
 			"a folder-scoped commit skipped the repository's pre-commit hook: " + (hooked.error == null ? "" : hooked.error.message));
 		runGit(git, gitScheduler, ["config", "core.hooksPath", emptyHooks], mutationRoot, 77144);
+		// With core.ignorecase unset the repository keeps the platform's rule: ignore case on Windows and macOS.
+		var savedCase = runGitResult(git, gitScheduler, ["config", "--get", "core.ignorecase"], mutationRoot, 77145, true);
+		if (savedCase.value != null) runGit(git, gitScheduler, ["config", "--unset", "core.ignorecase"], mutationRoot, 77146);
+		var gitHandle = Std.downcast(mutationHandle, scm.git.GitScmRepositoryHandle);
+		if (gitHandle == null) throw "the real-operations repository is not a Git handle";
+		gitHandle.configurationChanged();
+		var caseRefreshed = false;
+		mutationHandle.refresh(77147, _ -> caseRefreshed = true);
+		pump(gitScheduler, () -> caseRefreshed, "the refresh after unsetting core.ignorecase did not finish");
+		require(mutationHandle.repository().ignoreCase == ScmRepository.PLATFORM_IGNORES_CASE
+			&& (Sys.systemName() != "Windows" || mutationHandle.repository().ignoreCase), "an unset core.ignorecase did not keep the platform default");
+		var savedCaseValue = savedCase.value;
+		if (savedCaseValue != null) runGit(git, gitScheduler, ["config", "core.ignorecase", StringTools.trim(savedCaseValue.stdout.toString())], mutationRoot, 77148);
+		gitHandle.configurationChanged();
 		// Amending on a branch without commits is refused clearly, before Git is asked to commit.
 		var unbornRoot = fixtureBase + "/scoped-unborn";
 		FileSystem.createDirectory(unbornRoot);
 		runGit(git, gitScheduler, ["init", "-q"], unbornRoot, 77150);
-		var unborn:Null<scm.ScmError> = null, unbornDone = false;
-		new GitScopedCommit(git, unbornRoot, 77151, "First", true, ["sub/"], false, function(_, error) { unborn = error; unbornDone = true; }).start();
+		var unbornAmend:Null<scm.ScmError> = null, unbornDone = false;
+		new GitScopedCommit(git, unbornRoot, 77151, "First", true, ["sub/"], false, function(_, error) { unbornAmend = error; unbornDone = true; }).start();
 		pump(gitScheduler, () -> unbornDone, "the unborn-branch amend did not finish");
-		require(unborn != null && unborn.code == "nothing_to_amend", "an amend on an unborn branch did not say there is nothing to amend");
+		var unbornError = unbornAmend;
+		require(unbornError != null && unbornError.code == "nothing_to_amend", "an amend on an unborn branch did not say there is nothing to amend");
 		File.saveContent(mutationRoot + "/other.txt", "other changed\n");
 		var foreignPatch = runGit(git, gitScheduler, ["diff", "--", "other.txt"], mutationRoot, 776).stdout;
 		applyOperation(mutationHandle, gitScheduler, ScmOperation.StagePatch("tracked.txt", foreignPatch), 777);
