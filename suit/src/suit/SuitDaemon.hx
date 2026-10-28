@@ -49,8 +49,7 @@ class SuitDaemon {
 	public static function run():Int {
 		var home = SuitPaths.home();
 		if (!SuitPaths.prepare()) {
-			Sys.stderr().writeString("suit: " + home + " is not a private directory of this user
-");
+			Sys.stderr().writeString("suit: " + home + " is not a private directory of this user\n");
 			return 1;
 		}
 		var lock = acquireLock(Path.join([home, "suit.lock"]));

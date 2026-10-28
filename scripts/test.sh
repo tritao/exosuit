@@ -6,8 +6,8 @@
 # that need files on disk lives here, matching what each project test entry
 # expects on Sys.args().
 set -euo pipefail
-# Tests must not start the user's suit daemon.
-export EXOSUIT_SUIT_AUTOSTART=${EXOSUIT_SUIT_AUTOSTART:-0}
+# What tests start neither registers with the user's suit nor starts it (see suit/README.md).
+export EXOSUIT_SUIT=${EXOSUIT_SUIT:-off}
 
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 haxeon_root=${HAXEON_ROOT:-"$root_dir/haxeon"}

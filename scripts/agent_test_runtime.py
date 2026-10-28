@@ -53,4 +53,6 @@ def manager_environment(root: Path, launcher: Path | None = None) -> dict[str, s
     inherited = environment.get(variable, "")
     environment[variable] = os.pathsep.join(libraries + ([inherited] if inherited else []))
     environment["EXOSUIT_AGENT_LAUNCHER"] = str(launcher or bytecode)
+    # Test managers neither register with the user's suit nor start it (see suit/README.md).
+    environment.setdefault("EXOSUIT_SUIT", "off")
     return environment

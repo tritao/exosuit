@@ -2,7 +2,6 @@
 """Installed Codex app-server metadata acceptance on a disposable thread; no turn or prompt."""
 import json,os,selectors,shutil,subprocess,sys,tempfile,time
 from pathlib import Path
-os.environ.setdefault("EXOSUIT_SUIT_AUTOSTART", "0")  # tests must not start the user's suit daemon
 ROOT=Path(__file__).resolve().parent.parent
 codex=shutil.which(os.environ.get('EXOSUIT_CODEX_BIN','codex'))
 if not codex: raise SystemExit('Install Codex to run this metadata-only acceptance test')

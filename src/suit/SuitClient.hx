@@ -147,7 +147,7 @@ class SuitClient {
 		starts suit from a source tree; keep the two in the same order:
 
 		1. every directory under `<launcher dir>/native` (suit's own native packages)
-		2. `<install>/lib`, two levels above the launcher (a bundle's shared libraries)
+		2. `lib` beside the launcher's directory (a bundle keeps tools/ and lib/ side by side)
 		3. the directory of the HashLink runtime that runs suit
 		4. `out` and `.tools/hashlink` under the Haxeon checkout (`HAXEON_HOME`; scripts/suit.py uses `HAXEON_ROOT`)
 		5. the inherited value
