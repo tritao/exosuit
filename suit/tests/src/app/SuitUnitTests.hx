@@ -138,6 +138,16 @@ class SuitUnitTests {
 		var before = Sys.getEnv("EXOSUIT_SUIT");
 		SuitClient.mode(temp + "/suit-test/state");
 		check(Sys.getEnv("EXOSUIT_SUIT") == before, "mode() is a query: it does not change EXOSUIT_SUIT");
+		// Last use of the environment in this test: an explicit on registers even with temporary state, in a
+		// home whose parent folders do not exist yet.
+		Sys.putEnv("EXOSUIT_SUIT", "on");
+		Sys.putEnv("EXOSUIT_SUIT_HOME", temp + "/suit-unit-" + Std.random(1000000) + "/a/b/home");
+		Sys.putEnv("EXOSUIT_SUIT_AUTOSTART", "0");
+		check(SuitClient.resolve(temp + "/suit-test/state") == SuitMode.On, "resolve() keeps an explicit on");
+		SuitClient.registerWorkspaceService(suit.SuitKind.WorkspaceManager, {root: temp, stateDir: temp + "/suit-test/state", generation: "g"});
+		check(sys.FileSystem.exists(suit.SuitRecord.SuitRecords.path(SuitPaths.registry(), Sys.getPid())),
+			"an explicit on registers, creating the home's missing parent folders");
+		SuitClient.unregister();
 	}
 
 	static function registryTimes():Void {
