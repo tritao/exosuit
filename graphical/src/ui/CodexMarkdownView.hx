@@ -114,8 +114,8 @@ class CodexMarkdownView implements View {
       var key = "block-" + index++;
       if (block.kind == "code" && (block.language == "diff" || block.language == "patch")) {
         var diff = diffs.get(key);
-        if (diff == null) { diff = new SessionDiffView(block.text, openLink); diffs.set(key, diff); }
-        diff.update(block.text);
+        if (diff == null) { diff = new SessionDiffView(block.text, openLink, null, block.source); diffs.set(key, diff); }
+        diff.update(block.text, null, block.source);
         rows.push(new KeyedView(key, diff));
       } else if (block.kind == "image") {
         rows.push(new KeyedView(key, new SessionImageView(key, block.text, block.language, resolveImage, openLink, frame, loadImage)));

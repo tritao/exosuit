@@ -58,6 +58,8 @@ class AgentImageStagingTest {
   var paths = stage.resolve("one",[start.upload]);
   require(paths != null && paths.length == 1 && sys.FileSystem.exists(paths[0]),"Staged image unavailable");
   require(stage.pin("one","thread",[start.upload]),"Could not pin image");
+  require(stage.resolve("one",[start.upload]) == null && !stage.pin("one","other-thread",[start.upload]),
+   "An in-flight Codex image could be admitted or pinned twice");
   stage.process(request("one","remove",start.upload,0,0,null));
   stage.dispose();
   require(sys.FileSystem.exists(paths[0]),"Disposal removed an in-flight image");
@@ -80,6 +82,9 @@ class AgentImageStagingTest {
    "Provider did not associate the native user item with its staged image");
   require(restored.readArchive("two","turn","user",archived.upload,0) == null && restored.readArchive("one","other","user",archived.upload,0) == null
    && restored.readArchive("one","turn","other",archived.upload,0) == null,"Archived image escaped its item scope");
+  restored.clean(function(_) return true,function(_,_) return false);
+  require(restored.resolve("one",[archived.upload]) == null && !restored.pin("one","thread",[archived.upload]),
+   "An archived image could be admitted to a second Codex turn");
   restored.process(request("one","remove",archived.upload,0,0,null));
   restored.clean(function(_) return true,function(_,_) return false);restored.dispose();
   restored=new AgentImageStaging(base, root, random, function() return now, secureDir, function(_) return true, function(_) return true, function() {});

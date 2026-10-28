@@ -27,12 +27,15 @@ import workspace.service.WorkspaceAgentProtocol.AgentFileChange;
 /** Unified diff presentation; the raw input is retained for exact copying. */
 class SessionDiffView implements View {
   var source:String;
+  var copySource:String;
   var reportedFiles:Null<Array<AgentFileChange>>;
   final openLink:Null<String->Void>;
-  public function new(source:String, ?openLink:String->Void, ?reportedFiles:Array<AgentFileChange>) {
-    this.source = source; this.openLink = openLink; this.reportedFiles = reportedFiles;
+  public function new(source:String, ?openLink:String->Void, ?reportedFiles:Array<AgentFileChange>, ?copySource:String) {
+    this.source = source; this.copySource = copySource == null ? source : copySource; this.openLink = openLink; this.reportedFiles = reportedFiles;
   }
-  public function update(source:String, ?reportedFiles:Array<AgentFileChange>):Void { this.source = source; this.reportedFiles = reportedFiles; }
+  public function update(source:String, ?reportedFiles:Array<AgentFileChange>, ?copySource:String):Void {
+    this.source = source; this.copySource = copySource == null ? source : copySource; this.reportedFiles = reportedFiles;
+  }
 
   static function action(label:String, handler:Void->Void, key:String):Button {
     var style = new LayoutStyle(); style.height = LayoutAxis.fixed(30); style.padding = new Insets(8, 4, 8, 4);
@@ -42,7 +45,7 @@ class SessionDiffView implements View {
 
   public function build(context:BuildContext):RenderNode {
     var tokens = context.theme.tokens, rows:Array<KeyedView> = [];
-    var copy = action("", function() context.clipboard.writeText(source), "copy-diff");
+    var copy = action("", function() context.clipboard.writeText(copySource), "copy-diff");
     copy.accessibilityLabel = "Copy diff"; copy.leadingIcon = IconName.Copy; copy.iconSize = 16;
     var top = new LayoutStyle(); top.width = LayoutAxis.grow(); top.childGap = 8;
     var title = new LayoutStyle(); title.width = LayoutAxis.grow();

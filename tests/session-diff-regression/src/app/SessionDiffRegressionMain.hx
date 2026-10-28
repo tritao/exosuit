@@ -7,6 +7,8 @@ import haxeon.ui.core.RenderNode;
 import haxeon.ui.core.UiContext;
 import ui.SessionDiffView;
 
+@:access(ui.CodexMarkdownView)
+@:access(ui.SessionDiffView)
 class SessionDiffRegressionMain {
   static function find(root:RenderNode, label:String):RenderNode {
     var found:RenderNode = null;
@@ -41,6 +43,16 @@ class SessionDiffRegressionMain {
     context.pointerDown(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
     context.pointerUp(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, 0);
     if (opened != "first.txt") throw "Valid file association was lost";
+    var rawPatch = "--- a/file.txt\r\n+++ b/file.txt\r\n@@ -1 +1 @@\r\n-old\r\n+new\r\n";
+    var markdown = new ui.CodexMarkdownView("```diff\r\n" + rawPatch + "```\r\n", new style.Theme(), new syntax.SyntaxRegistry());
+    context.submit(markdown, new LayoutFrame(800, 1400));
+    var projected = markdown.diffs.get("block-0");
+    if (projected == null || projected.copySource != rawPatch || projected.source.indexOf("\r") >= 0)
+      throw "Diff copy source lost CRLF or trailing newline";
+    var streaming = "@@ -1 +1 @@\r\n-old\r\n+new";
+    markdown.update("```patch\r\n" + streaming);
+    context.submit(markdown, new LayoutFrame(800, 1400));
+    if (projected.copySource != streaming) throw "Streaming diff copy source was not updated";
     var conversation = new workspace.provider.CodexConversation();
     var large = StringTools.rpad("@@ -1 +1 @@\n-old\n+", "x", 3000);
     conversation.put("turn", {id:"changes", type:"fileChange", changes:[

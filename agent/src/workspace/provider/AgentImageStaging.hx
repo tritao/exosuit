@@ -148,7 +148,7 @@ class AgentImageStaging {
     for (id in ids) {
       if (id == null || id.length < 24 || id.length > 256 || !~/^[A-Za-z0-9_-]+$/.match(id)) return null;
       var item = entries.get(id);
-      if (item == null || item.session != session || item.path == null || item.removed || seen.exists(id)
+      if (item == null || item.session != session || item.path == null || item.removed || item.pinned || item.turn != null || seen.exists(id)
         || clock() - item.updated > TTL || !FileSystem.exists(item.path)) return null;
       seen.set(id,true); result.push(item.path);
     }
