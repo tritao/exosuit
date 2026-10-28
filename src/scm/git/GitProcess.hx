@@ -38,9 +38,10 @@ class GitProcess {
 		var job = new ScmJob<GitCommandResult>(generation, function() {
 			if (handle != null) scheduler.cancel(handle); else if (task != null) task.cancel();
 		});
-		task = new GitCommandTask(processes, configuredPath, emptyHooksPath, arguments, cwd, readOnly, restricted, maxStdout, disabledFilters,
-			stdin, environment,
-			function(result, error) {
+		task = new GitCommandTask(processes, {
+			configuredPath: configuredPath, emptyHooksPath: emptyHooksPath, arguments: arguments, cwd: cwd, readOnly: readOnly,
+			restricted: restricted, maxStdout: maxStdout, disabledFilters: disabledFilters, stdin: stdin, environment: environment
+		}, function(result, error) {
 				if (result != null) executable = result.executable;
 				if (job.finish()) complete(new ScmJobResult<GitCommandResult>(generation, result, error));
 			});
@@ -138,6 +139,21 @@ class GitProcess {
 	static function normalize(path:String):String return StringTools.replace(path, "\\", "/");
 }
 
+/** What one Git command runs with (see GitProcess.run). */
+private typedef GitCommandOptions = {
+	var configuredPath:Null<String>;
+	var emptyHooksPath:Null<String>;
+	var arguments:Array<String>;
+	var cwd:String;
+	var readOnly:Bool;
+	var restricted:Bool;
+	var maxStdout:Int;
+	var disabledFilters:Null<Array<String>>;
+	var stdin:Null<Bytes>;
+	/** Variables added to Git's environment, e.g. GIT_AUTHOR_* for a commit that keeps its author. */
+	var environment:Null<Map<String, String>>;
+}
+
 private class GitCommandTask implements JobTask {
 	final processes:ProcessManager;
 	final configuredPath:Null<String>;
@@ -166,22 +182,19 @@ private class GitCommandTask implements JobTask {
 	var stdinOffset:Int = 0;
 	var stdinClosed:Bool = false;
 
-	public function new(processes:ProcessManager, configuredPath:Null<String>, emptyHooksPath:Null<String>, arguments:Array<String>, cwd:String,
-			readOnly:Bool, restricted:Bool, maxStdout:Int, ?disabledFilters:Array<String>,
-			?stdin:Bytes, ?environment:Map<String, String>,
-			?complete:(Null<GitCommandResult>, Null<ScmError>)->Void) {
+	public function new(processes:ProcessManager, options:GitCommandOptions, complete:(Null<GitCommandResult>, Null<ScmError>)->Void) {
 		this.processes = processes;
-		this.configuredPath = configuredPath;
-		this.emptyHooksPath = emptyHooksPath;
-		this.arguments = arguments.copy();
-		this.cwd = cwd;
-		this.readOnly = readOnly;
-		this.restricted = restricted;
-		this.maxStdout = maxStdout < 1 ? 1 : maxStdout;
-		this.disabledFilters = disabledFilters == null ? [] : disabledFilters.copy();
-		this.stdin = stdin == null ? null : stdin.sub(0, stdin.length);
+		this.configuredPath = options.configuredPath;
+		this.emptyHooksPath = options.emptyHooksPath;
+		this.arguments = options.arguments.copy();
+		this.cwd = options.cwd;
+		this.readOnly = options.readOnly;
+		this.restricted = options.restricted;
+		this.maxStdout = options.maxStdout < 1 ? 1 : options.maxStdout;
+		var filters = options.disabledFilters, input = options.stdin, environment = options.environment;
+		this.disabledFilters = filters == null ? [] : filters.copy();
+		this.stdin = input == null ? null : input.sub(0, input.length);
 		this.extraEnvironment = environment == null ? [] : environment.copy();
-		if (complete == null) throw "Git command callback cannot be null";
 		this.complete = complete;
 	}
 
