@@ -21,7 +21,6 @@ import workspace.transport.NativeRpcTransport;
 **/
 class SuitDaemon {
 	static inline var REFRESH_SECONDS:Float = 10;
-	static inline var MENU_GROUP_LIMIT:Int = 30;
 
 	final runtime:NativeKitRuntime;
 	final hub:NativeRpcHub;
@@ -137,51 +136,7 @@ class SuitDaemon {
 		var current = tray;
 		if (current == null)
 			return;
-		current.show(function(menu) {
-			menu.item(inventory.summary());
-			var group:Null<String> = null, shown = 0;
-			for (process in inventory.processes) {
-				if (process.group != group) {
-					group = process.group;
-					shown = 0;
-					menu.separator();
-					menu.item(group);
-				}
-				if (shown++ >= MENU_GROUP_LIMIT) {
-					if (shown == MENU_GROUP_LIMIT + 1)
-						menu.item("    … more in the process viewer");
-					continue;
-				}
-				var target = process;
-				var entry = menu.submenu("    " + SuitReport.label(process));
-				var relay = SuitReport.relayState(process);
-				if (relay.length > 0)
-					menu.item("Remote access: " + relay, null, entry);
-				menu.item(process.kind == "editor" ? "Close" : "Terminate", function() terminate([target]), entry);
-			}
-			var hosted = inventory.hosted();
-			if (hosted.length > 0) {
-				menu.separator();
-				var remote = menu.submenu("Remote access (" + hosted.length + ")");
-				for (process in hosted) {
-					var target = process;
-					menu.item(SuitReport.workspace(process) + ": " + SuitReport.relayState(process), null, remote);
-					menu.item("    Stop hosting " + SuitReport.workspace(process), function() terminate([target]), remote);
-				}
-				menu.separator(remote);
-				menu.item("Stop all hosting", function() terminate(SuitActions.hosting(inventory)), remote);
-				menu.item("Open Remote Access…", function() openViewer(["watch", "--relay"]), remote);
-			}
-			menu.separator();
-			var orphans = inventory.orphans();
-			menu.item("Terminate orphaned processes (" + orphans.length + ")", orphans.length == 0 ? null : function() terminate(SuitActions.orphans(inventory)));
-			var background = inventory.background();
-			menu.item("Terminate all background processes (" + background.length + ")",
-				background.length == 0 ? null : function() terminate(SuitActions.background(inventory)));
-			menu.item("Open process viewer…", function() openViewer(["watch"]));
-			menu.separator();
-			menu.item("Quit Exosuit", quitEverything);
-		});
+		current.show(function(menu) SuitMenuModel.build(menu, inventory, {terminate: terminate, openViewer: openViewer, quit: quitEverything}));
 	}
 
 	/** Stops everything, editors included (asked to close first), then exits. */

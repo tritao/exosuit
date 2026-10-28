@@ -6,6 +6,7 @@ import suit.SuitClient;
 import suit.SuitControl;
 import suit.SuitDaemon;
 import suit.SuitInventory;
+import suit.SuitMenuModel;
 import suit.SuitPaths;
 import suit.SuitReport;
 import suit.SuitTerminator;
@@ -16,6 +17,7 @@ class SuitMain {
 		"usage: suit <command>",
 		"  status [--json]           daemon state and process counts",
 		"  list [--json]             every exosuit process, grouped by editor; orphans last",
+		"  menu                      print the tray menu as text (disabled items in brackets)",
 		"  watch [--relay] [--once]  the process viewer: list, refreshed every 2 s",
 		"  kill <pid>...             stop exosuit processes (graceful first, then the tree)",
 		"  kill --orphans            stop processes whose editor is gone",
@@ -68,6 +70,24 @@ class SuitMain {
 				var running = SuitControl.request({op: "refresh"}, 1) != null;
 				var inventory = new SuitInventory();
 				print(json ? Json.stringify(SuitReport.json(inventory, running)) : SuitReport.text(inventory, running));
+				return 0;
+			case "menu":
+				var menu = new suit.SuitMenuModel.SuitTextMenu();
+				var ignore = function(_:Dynamic) {};
+				SuitMenuModel.build(menu, new SuitInventory(), {terminate: ignore, openViewer: ignore, quit: function() {}});
+				print(menu.toString());
+				return 0;
+			case "tray-check":
+				// Creates the tray icon and builds the native menu without showing it, then removes both.
+				var runtime = haxeon.platform.NativeKitRuntime.start();
+				var inventory = new SuitInventory();
+				var tray = new suit.SuitTray(inventory.summary(), null);
+				var items = tray.build(function(menu) SuitMenuModel.build(menu, inventory,
+					{terminate: function(_) {}, openViewer: function(_) {}, quit: function() {}}));
+				tray.setTooltip(inventory.summary() + " ");
+				tray.dispose();
+				runtime.dispose();
+				print('tray icon created and removed; native menu built with $items command items');
 				return 0;
 			case "watch":
 				var relay = rest.indexOf("--relay") >= 0, once = rest.indexOf("--once") >= 0;

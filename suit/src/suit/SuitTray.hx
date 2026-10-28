@@ -3,10 +3,11 @@ package suit;
 import nativekit.ffi.NativeKit;
 import nativekit.ffi.NativeKitTypes;
 
-/** Builds one popup menu; item actions stay valid until the next menu is built. */
-class SuitMenu {
+/** Builds one native popup menu; item actions stay valid until the next menu is built. */
+class SuitMenu implements SuitMenuModel.SuitMenuSink {
 	final menu:OwnedMenuHandle;
 	final actions:Map<Int, Void->Void>;
+	final parents:Map<Int, OwnedMenuItemHandle> = [];
 	var nextId:Int = 1;
 
 	public function new(menu:OwnedMenuHandle, actions:Map<Int, Void->Void>) {
@@ -14,7 +15,7 @@ class SuitMenu {
 		this.actions = actions;
 	}
 
-	public function item(label:String, ?action:Void->Void, ?parent:OwnedMenuItemHandle):OwnedMenuItemHandle {
+	public function item(label:String, action:Null<Void->Void>, parent:Int):Void {
 		var options = new MenuItemOptions();
 		options.set_kind(MenuItemKind.Command);
 		options.set_label(label);
@@ -25,24 +26,28 @@ class SuitMenu {
 			actions.set(id, action);
 			options.set_command_id(haxe.Int64.ofInt(id));
 		}
-		return add(options, parent);
+		add(options, parent);
 	}
 
-	public function submenu(label:String, ?parent:OwnedMenuItemHandle):OwnedMenuItemHandle {
+	public function submenu(label:String, parent:Int):Int {
 		var options = new MenuItemOptions();
 		options.set_kind(MenuItemKind.Submenu);
 		options.set_label(label);
-		return add(options, parent);
+		var id = nextId++;
+		parents.set(id, add(options, parent));
+		return id;
 	}
 
-	public function separator(?parent:OwnedMenuItemHandle):Void {
+	public function separator(parent:Int):Void {
 		var options = new MenuItemOptions();
 		options.set_kind(MenuItemKind.Separator);
 		add(options, parent);
 	}
 
-	function add(options:MenuItemOptions, parent:Null<OwnedMenuItemHandle>):OwnedMenuItemHandle
-		return NativeKit.nk_menu_add_item_checked(menu.borrow(), parent == null ? MenuItemHandle.invalid() : parent.borrow(), options);
+	function add(options:MenuItemOptions, parent:Int):OwnedMenuItemHandle {
+		var owner = parents.get(parent);
+		return NativeKit.nk_menu_add_item_checked(menu.borrow(), owner == null ? MenuItemHandle.invalid() : owner.borrow(), options);
+	}
 }
 
 /**
@@ -74,7 +79,7 @@ class SuitTray {
 	}
 
 	/** Shows a menu built by `build`; returns once it closes. The choice arrives later as an event. */
-	public function show(build:SuitMenu->Void):Void {
+	public function show(build:SuitMenuModel.SuitMenuSink->Void):Void {
 		actions.clear();
 		var menu = NativeKit.nk_menu_create_checked(new MenuOptions());
 		try {
@@ -85,6 +90,21 @@ class SuitTray {
 			throw error;
 		}
 		menu.close();
+	}
+
+	/** Builds the native menu without showing it; returns its command count. For `suit tray-check`. */
+	public function build(build:SuitMenuModel.SuitMenuSink->Void):Int {
+		actions.clear();
+		var menu = NativeKit.nk_menu_create_checked(new MenuOptions());
+		try build(new SuitMenu(menu, actions)) catch (error:Dynamic) {
+			menu.close();
+			throw error;
+		}
+		menu.close();
+		var count = 0;
+		for (_ in actions)
+			count++;
+		return count;
 	}
 
 	/** Runs the action for a chosen command id. */
