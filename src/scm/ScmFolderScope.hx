@@ -45,25 +45,9 @@ class ScmFolderScope {
 
 	static function under(folder:String, path:String, fold:Bool):Bool {
 		// `folder` ends in `/`; the path is inside when it starts with it, or is the folder itself.
-		var length = folder.length;
-		if (length == 0) return false;
-		if (path.length == length - 1) { if (!sameRange(folder, path, length - 1, fold)) return false; return true; }
-		if (path.length < length) return false;
-		if (StringTools.fastCodeAt(path, length - 1) != "/".code) return false;
-		return sameRange(folder, path, length - 1, fold);
-	}
-
-	static function sameRange(left:String, right:String, length:Int, fold:Bool):Bool {
-		for (index in 0...length) {
-			var a = StringTools.fastCodeAt(left, index), b = StringTools.fastCodeAt(right, index);
-			if (a == b) continue;
-			if (!fold) return false;
-			if (a > 127 || b > 127) return PathKey.within(left.substring(0, length), right.substring(0, length), true);
-			if (a >= "A".code && a <= "Z".code) a += 32;
-			if (b >= "A".code && b <= "Z".code) b += 32;
-			if (a != b) return false;
-		}
-		return true;
+		var length = folder.length - 1;
+		if (length < 0 || path.length < length || path.length > length && StringTools.fastCodeAt(path, length) != "/".code) return false;
+		return PathKey.sameRange(folder, 0, length, path, 0, length, fold);
 	}
 
 	/** The paths that are not inside the folders. */

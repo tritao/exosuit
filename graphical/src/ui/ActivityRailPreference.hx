@@ -21,7 +21,7 @@ class ActivityRailPreference {
 
 	/**
 		`write` stores a value in the setting; `report` tells the user about one that could not be read; `read` returns the
-		setting's value now, shared by every window, so only the first window to find it unreadable repairs it.
+		setting's value now, shared by every window, so a window that finds it already repaired takes that repair instead of writing its own.
 	**/
 	public function new(sidebar:SidebarModel, write:String->Void, report:String->Void, ?read:Void->String) {
 		this.sidebar = sidebar; this.write = write; this.report = report; this.read = read;
@@ -55,7 +55,8 @@ class ActivityRailPreference {
 	function applySetting(value:String):Void {
 		known = value;
 		if (sidebar.restoreDestinations(value)) return;
-		// Compare and set: when another window already replaced the unreadable value, take its repair instead.
+		// Read, then write: when another window already replaced the unreadable value, take its repair instead. Two windows
+		// reading at once may both write a repair; both write a valid rail and the last one wins, which is enough here.
 		var reader = read;
 		var now = reader == null ? value : reader();
 		if (now != value) {

@@ -4590,7 +4590,9 @@ class ExosuitApp implements DesktopUiApplication {
 	/** A Source Control error as the user reads it, with what to do when a folder-narrowed source refused it. */
 	static function scmErrorText(error:scm.ScmError):String
 		return error.code == scm.ScmFolderScope.OUTSIDE_FOLDER
-			? error.message + " Unstage them, or commit from the Editor layout's Source Control." : error.message;
+			? error.message + " Unstage them, or commit from the Editor layout's Source Control."
+			: error.code == scm.git.GitScopedCommit.OPERATION_IN_PROGRESS
+			? error.message + " Finish or abort it from the Editor layout's Source Control." : error.message;
 
 	function scmCommitRepository(source:ScmSource):Null<scm.ScmRepository> {
 		if (source == null) return null;

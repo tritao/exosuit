@@ -12,14 +12,20 @@ import sys.FileSystem;
 
 	It snapshots the index with `write-tree`, compares that tree with every parent the new commit gets (HEAD, or with
 	amend HEAD's own parents, so an amended merge is compared with each side), and refuses when a path outside the
-	folders differs, submodules included. Without commit hooks or signing it then commits that exact tree with
-	`commit-tree` and moves HEAD with `update-ref` against the HEAD it started from, so nothing staged meanwhile can
-	enter and a HEAD that moved fails the commit. With a pre-commit, prepare-commit-msg or commit-msg hook, or
-	`commit.gpgsign`, it runs `git commit` right after the check instead, so hooks and signing behave as usual; a
-	change staged between the check and that commit (by a hook or another process) is not caught then.
+	folders differs, submodules included. Without commit hooks, signing or a `commit.cleanup` setting it then commits
+	that exact tree with `commit-tree` and moves HEAD with `update-ref` against the HEAD it started from (the zero id on
+	an unborn branch), so nothing staged meanwhile can enter and a HEAD that moved fails the commit. With a pre-commit,
+	prepare-commit-msg, commit-msg or post-commit hook (post-rewrite too for an amend), `commit.gpgsign` or a
+	`commit.cleanup` setting, it runs `git commit` right after the check instead, so those behave as usual; a change
+	staged between the check and that commit (by a hook or another process) is not caught then. It refuses to commit
+	while a merge, cherry-pick, revert or rebase is in progress, since the commit would drop that operation's state.
 **/
 class GitScopedCommit {
-	static final COMMIT_HOOKS:Array<String> = ["pre-commit", "prepare-commit-msg", "commit-msg"];
+	static final COMMIT_HOOKS:Array<String> = ["pre-commit", "prepare-commit-msg", "commit-msg", "post-commit"];
+	/** The error code while another operation is in progress; the UI says how to finish it. */
+	public static inline final OPERATION_IN_PROGRESS:String = "operation_in_progress";
+	static final OPERATION_STATE:Array<String> = ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply"];
+	static final OPERATION_NAMES:Array<String> = ["A merge", "A cherry-pick", "A revert", "A rebase", "A rebase"];
 
 	final process:GitProcess;
 	final root:String;
@@ -34,14 +40,14 @@ class GitScopedCommit {
 	var head:Null<String>;
 	var tree:String = "";
 	var parents:Array<String> = [];
-	/** Test seam: runs after the tree passed the check and before the commit is written. */
-	public static var afterCheck:Null<Void->Void>;
+	/** Runs after the tree passed the check and before the commit is written; tests use it to race the commit. */
+	final afterCheck:Null<Void->Void>;
 
 	/** `complete` gets the result message, or the error that stopped the commit. */
 	public function new(process:GitProcess, root:String, generation:Int, message:String, amend:Bool, folders:Array<String>,
-			ignoreCase:Bool, complete:(Null<String>, Null<ScmError>)->Void) {
+			ignoreCase:Bool, complete:(Null<String>, Null<ScmError>)->Void, ?afterCheck:Void->Void) {
 		this.process = process; this.root = root; this.generation = generation; this.message = message; this.amend = amend;
-		this.folders = folders; this.ignoreCase = ignoreCase; this.complete = complete;
+		this.folders = folders; this.ignoreCase = ignoreCase; this.complete = complete; this.afterCheck = afterCheck;
 	}
 
 	public function start():Void {
@@ -49,6 +55,22 @@ class GitScopedCommit {
 		if (folders.length == 0) return fail("outside_folder", "No folder to commit");
 		for (folder in folders) if (!ScmFolderScope.plain(folder) || !StringTools.endsWith(folder, "/"))
 			return fail("outside_folder", folder + " is not a plain repository folder");
+		var arguments = ["rev-parse"];
+		for (name in OPERATION_STATE) { arguments.push("--git-path"); arguments.push(name); }
+		run(arguments, null, function(output) {
+			var paths = StringTools.replace(output.toString(), "\r", "").split("\n");
+			for (index in 0...OPERATION_STATE.length) {
+				var path = index < paths.length ? StringTools.trim(paths[index]) : "";
+				if (path.length == 0) continue;
+				if (!haxe.io.Path.isAbsolute(path)) path = root + "/" + path;
+				if (FileSystem.exists(path))
+					return fail(OPERATION_IN_PROGRESS, OPERATION_NAMES[index] + " is in progress, so this folder's changes cannot be committed on their own.");
+			}
+			readHead();
+		});
+	}
+
+	function readHead():Void {
 		// A missing HEAD is an unborn branch: a first commit has no parents and there is nothing to amend.
 		git(["rev-parse", "--verify", "--quiet", "HEAD"], null, function(result) {
 			var value = result.value;
@@ -106,16 +128,20 @@ class GitScopedCommit {
 		usesCommitCommand(function(porcelain) porcelain ? commitCommand() : commitTree());
 	}
 
-	/** Whether hooks or signing need `git commit` to run them. */
+	/** Whether hooks, signing or a message cleanup setting need `git commit` to apply them. */
 	function usesCommitCommand(next:Bool->Void):Void {
 		git(["config", "--type=bool", "--get", "commit.gpgsign"], null, function(signing) {
 			var value = signing.value;
 			if (signing.error == null && value != null && StringTools.trim(value.stdout.toString()) == "true") return next(true);
-			run(["rev-parse", "--git-path", "hooks"], null, function(output) {
-				var hooks = StringTools.trim(output.toString());
-				if (!haxe.io.Path.isAbsolute(hooks)) hooks = root + "/" + hooks;
-				for (name in COMMIT_HOOKS) if (FileSystem.exists(hooks + "/" + name)) return next(true);
-				next(false);
+			git(["config", "--get", "commit.cleanup"], null, function(cleanup) {
+				var mode = cleanup.value;
+				if (cleanup.error == null && mode != null && StringTools.trim(mode.stdout.toString()) != "default") return next(true);
+				run(["rev-parse", "--git-path", "hooks"], null, function(output) {
+					var hooks = StringTools.trim(output.toString());
+					if (!haxe.io.Path.isAbsolute(hooks)) hooks = root + "/" + hooks;
+					for (name in COMMIT_HOOKS) if (FileSystem.exists(hooks + "/" + name)) return next(true);
+					next(amend && FileSystem.exists(hooks + "/post-rewrite"));
+				});
 			});
 		});
 	}
@@ -137,7 +163,9 @@ class GitScopedCommit {
 				var commit = StringTools.trim(created.toString()), subject = text.split("\n")[0];
 				var reason = (amend ? "commit (amend): " : head == null ? "commit (initial): " : "commit: ") + subject;
 				var previous = head;
-				git(["update-ref", "-m", reason, "HEAD", commit, previous == null ? "" : previous], null, function(moved) {
+				// On an unborn branch the zero id (as long as the tree id: SHA-1 or SHA-256) says HEAD must not exist yet.
+				var expected = previous == null ? StringTools.lpad("", "0", tree.length) : previous;
+				git(["update-ref", "-m", reason, "HEAD", commit, expected], null, function(moved) {
 					var error = moved.error;
 					if (error != null) return fail("head_moved",
 						"The branch changed while committing, so nothing was committed. Refresh and try again. (" + error.message + ")");
@@ -145,13 +173,29 @@ class GitScopedCommit {
 				});
 			}, environment);
 			if (!amend) { write(null); return; }
-			// An amended commit keeps its author, as `git commit --amend` does.
-			run(["log", "-1", "--date=raw", "--format=%an%n%ae%n%ad", "HEAD"], null, function(output) {
-				var fields = StringTools.replace(output.toString(), "\r", "").split("\n");
-				if (fields.length < 3) return fail("operation_failed", "Git did not return the author of the commit being amended");
-				write(["GIT_AUTHOR_NAME" => fields[0], "GIT_AUTHOR_EMAIL" => fields[1], "GIT_AUTHOR_DATE" => fields[2]]);
+			// An amended commit keeps its author, as `git commit --amend` does, read from the raw commit so log settings
+			// (signatures, output encoding) cannot change it.
+			var amended = head;
+			if (amended == null) return fail("nothing_to_amend", "There is no commit to amend yet on this branch");
+			run(["cat-file", "commit", amended], null, function(output) {
+				var author = authorOf(output.toString());
+				if (author == null) return fail("operation_failed", "Git did not return the author of the commit being amended");
+				write(author);
 			});
 		});
+	}
+
+	/** GIT_AUTHOR_* from a raw commit's `author Name <email> 1700000000 +0100` header line. */
+	public static function authorOf(commit:String):Null<Map<String, String>> {
+		for (line in commit.split("\n")) {
+			if (line == "") break;
+			if (!StringTools.startsWith(line, "author ")) continue;
+			var open = line.indexOf(" <"), close = line.lastIndexOf("> ");
+			if (open < 0 || close < open) return null;
+			return ["GIT_AUTHOR_NAME" => line.substring(7, open), "GIT_AUTHOR_EMAIL" => line.substring(open + 2, close),
+				"GIT_AUTHOR_DATE" => StringTools.trim(line.substring(close + 2))];
+		}
+		return null;
 	}
 
 	function succeed():Void {
