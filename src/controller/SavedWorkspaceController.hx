@@ -32,7 +32,7 @@ class SavedWorkspaceController {
 		app.commands.add("workspace:add-folder", _ -> addPicker(), null, "Add Folder to Workspace…");
 		app.commands.add("workspace:remove-folder", _ -> removePicker(), _ -> roots().length > 0, "Remove Folder from Workspace…");
 		app.commands.add("workspace:recent", _ -> recentPicker(), null, "Open Recent Workspace…");
-		app.commands.add("workspace:close", _ -> close(), null, "Close Workspace");
+		app.commands.add("workspace:close", _ -> close(), _ -> isOpen(), "Close Workspace");
 	}
 	function changed():Void {
 		if (restoring) return;
@@ -41,6 +41,9 @@ class SavedWorkspaceController {
 	}
 	public function roots():Array<String>
 		return current == null ? [for (project in app.workspace.projects) project.root] : current.roots.copy();
+	/** True while the window shows any workspace folder or a named workspace. */
+	public function isOpen():Bool return current != null || roots().length > 0;
+	public function hasRoot(folder:String):Bool return roots().indexOf(folder) >= 0;
 	public function folderOpened(root:String):Void {
 		if (current != null && current.roots.indexOf(root) < 0) { current.roots.push(root); dirty = true; }
 		changed();

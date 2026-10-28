@@ -23,6 +23,13 @@ class RecentWorkspaces {
 	public function add(value:String):Void {
 		reload(); paths.remove(value); paths.unshift(value);
 		if (paths.length > 10) paths.resize(10);
+		write();
+	}
+	public function remove(value:String):Void {
+		reload();
+		if (paths.remove(value)) write();
+	}
+	function write():Void {
 		if (path.length == 0) return;
 		var parent = haxe.io.Path.directory(path);
 		if (parent.length > 0 && !FileSystem.exists(parent)) FileSystem.createDirectory(parent);
