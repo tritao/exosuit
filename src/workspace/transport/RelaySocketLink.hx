@@ -14,9 +14,17 @@ class RelaySocketLink {
 	public static inline final MAX_CHANNEL_QUEUE_MESSAGES:Int = 32;
 
 	public var onChannel:Null<RelayChannel->Void>;
+
+	/**
+		Raw mode, for suit, which forwards frames without opening them: when set, every decoded frame
+		(resets included) goes here instead of to a channel. Returning false fails the link as a slow
+		consumer. Send with `sendRouted`.
+	**/
+	public var onFrame:Null<RelayFrame->Bool>;
+
 	public var failure(default, null):Null<String>;
 
-	final stream:NativeKitByteStream;
+	final stream:RelayByteStream;
 	final reader = new RelayFrameReader(MAX_MESSAGE_BYTES, 1048576, 32);
 	final channels:Map<String, RelayChannel> = [];
 	final rejected:Map<String, Bool> = [];
@@ -26,7 +34,7 @@ class RelaySocketLink {
 	var terminal:Bool = false;
 	var polling:Bool = false;
 
-	public function new(stream:NativeKitByteStream) {
+	public function new(stream:RelayByteStream) {
 		if (stream == null || !stream.isOpen())
 			throw "Relay socket must be connected";
 		this.stream = stream;
@@ -74,7 +82,8 @@ class RelaySocketLink {
 				if (read == 0)
 					return;
 				if (read < 0) {
-					fail(stream.failure == null ? "relay_disconnected" : stream.failure);
+					var reason = stream.failureReason();
+					fail(reason == null ? "relay_disconnected" : reason);
 					return;
 				}
 			length = read;
@@ -95,7 +104,13 @@ class RelaySocketLink {
 		var frame = reader.take();
 		while (frame != null) {
 			var current = frame;
-			if (current.reset) {
+			var raw = onFrame;
+			if (raw != null) {
+				if (!raw(current)) {
+					fail("relay_slow_consumer");
+					return;
+				}
+			} else if (current.reset) {
 				var channel = channels.get(current.channelId);
 				if (channel != null) {
 					channel.linkClosed("relay_device_reconnected");
@@ -131,10 +146,21 @@ class RelaySocketLink {
 			return false;
 		if (!channels.exists(channelId) || rejected.exists(channelId))
 			return false;
-		var packet = RelayFrameCodec.encode(channelId, message, MAX_MESSAGE_BYTES);
+		return sendPacket(RelayFrameCodec.encode(channelId, message, MAX_MESSAGE_BYTES));
+	}
+
+	/** Raw mode: sends a payload on any channel; the peer that owns the channels decides which exist. */
+	public function sendRouted(channelId:String, message:Bytes):Bool {
+		if (!isOpen() || onFrame == null)
+			return false;
+		return sendPacket(RelayFrameCodec.encode(channelId, message, MAX_MESSAGE_BYTES));
+	}
+
+	function sendPacket(packet:Bytes):Bool {
 		var sent = stream.send(packet);
-		if (!sent && stream.failure != null)
-			fail(stream.failure);
+		var reason = stream.failureReason();
+		if (!sent && reason != null)
+			fail(reason);
 		return sent;
 	}
 

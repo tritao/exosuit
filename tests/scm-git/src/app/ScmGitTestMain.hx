@@ -812,6 +812,33 @@ class ScmGitTestMain {
 			: stagedForAmend;
 		require(amended.error == null && runGit(git, gitScheduler, ["log", "-1", "--format=%s"], mutationRoot, 775).stdout.toString() == "Amended SCM message\n",
 			"the SCM amend operation did not replace HEAD with the supplied message");
+		// A folder-scoped commit (the Agents layout's narrowed Changes) reads the index, and with amend HEAD's paths,
+		// right before committing, so files staged after the source checked its snapshot cannot slip in.
+		var configuredCase = runGitResult(git, gitScheduler, ["config", "--get", "core.ignorecase"], mutationRoot, 77100, true);
+		var configuredValue = configuredCase.value == null ? "" : StringTools.trim(configuredCase.value.stdout.toString());
+		require(mutationHandle.repository().ignoreCase == (configuredValue == "true"), "the repository did not report its core.ignorecase");
+		FileSystem.createDirectory(mutationRoot + "/sub");
+		File.saveContent(mutationRoot + "/sub/a.txt", "inside\n");
+		File.saveContent(mutationRoot + "/scoped-outside.txt", "outside\n");
+		runGit(git, gitScheduler, ["add", "--", "sub/a.txt", "scoped-outside.txt"], mutationRoot, 77101);
+		var lateOutside = applyOperation(mutationHandle, gitScheduler, ScmOperation.ScopedCommit("Scoped", false, ["sub/"]), 77102);
+		require(lateOutside.error != null && lateOutside.error.code == "outside_folder" && lateOutside.error.message.indexOf("scoped-outside.txt") >= 0
+			&& runGit(git, gitScheduler, ["log", "-1", "--format=%s"], mutationRoot, 77103).stdout.toString() == "Amended SCM message\n",
+			"a folder-scoped commit took a file staged outside its folder");
+		runGit(git, gitScheduler, ["reset", "-q", "--", "scoped-outside.txt"], mutationRoot, 77104);
+		var scoped = applyOperation(mutationHandle, gitScheduler, ScmOperation.ScopedCommit("Scoped", false, ["sub/"]), 77105);
+		require(scoped.error == null && runGit(git, gitScheduler, ["log", "-1", "--format=%s"], mutationRoot, 77106).stdout.toString() == "Scoped\n",
+			"a folder-scoped commit of the folder's own changes failed");
+		var scopedAmend = applyOperation(mutationHandle, gitScheduler, ScmOperation.ScopedCommit("Scoped again", true, ["sub/"]), 77107);
+		require(scopedAmend.error == null && runGit(git, gitScheduler, ["log", "-1", "--format=%s"], mutationRoot, 77108).stdout.toString() == "Scoped again\n",
+			"amending a commit inside the folder was refused");
+		runGit(git, gitScheduler, ["add", "--", "scoped-outside.txt"], mutationRoot, 77109);
+		runGit(git, gitScheduler, ["commit", "-q", "-m", "Outside"], mutationRoot, 77110);
+		var outsideAmend = applyOperation(mutationHandle, gitScheduler, ScmOperation.ScopedCommit("Rewritten", true, ["sub/"]), 77111);
+		require(outsideAmend.error != null && outsideAmend.error.code == "outside_folder"
+			&& outsideAmend.error.message.indexOf("commit being amended") >= 0 && outsideAmend.error.message.indexOf("scoped-outside.txt") >= 0
+			&& runGit(git, gitScheduler, ["log", "-1", "--format=%s"], mutationRoot, 77112).stdout.toString() == "Outside\n",
+			"a folder-scoped amend rewrote a commit that touches paths outside the folder");
 		File.saveContent(mutationRoot + "/other.txt", "other changed\n");
 		var foreignPatch = runGit(git, gitScheduler, ["diff", "--", "other.txt"], mutationRoot, 776).stdout;
 		applyOperation(mutationHandle, gitScheduler, ScmOperation.StagePatch("tracked.txt", foreignPatch), 777);
@@ -1192,6 +1219,12 @@ class ScmGitTestMain {
 			return error;
 		}
 		var outsideStage = applyNarrowed(ScmOperation.Stage("outside.txt"));
+		var climbingStage = applyNarrowed(ScmOperation.Stage("sub/../outside.txt"));
+		var climbingDiscard = applyNarrowed(ScmOperation.Discard("sub/../outside.txt"));
+		var climbingPaths = applyNarrowed(ScmOperation.StagePaths(["sub/inside.txt", "sub/../outside.txt"]));
+		require(climbingStage != null && climbingStage.code == "outside_folder" && climbingDiscard != null && climbingDiscard.code == "outside_folder"
+			&& climbingPaths != null && climbingPaths.code == "outside_folder" && narrowScript.operations.length == 0,
+			"a narrowed source let a path climb out of its folder with ..");
 		var mixedCommit = applyNarrowed(ScmOperation.Commit("message", false));
 		require(outsideStage != null && outsideStage.code == "outside_folder" && mixedCommit != null && mixedCommit.code == "outside_folder"
 			&& mixedCommit.message.indexOf("outside.txt") >= 0 && narrowScript.operations.length == 0,

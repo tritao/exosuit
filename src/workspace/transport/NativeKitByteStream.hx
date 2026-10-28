@@ -7,7 +7,7 @@ import nativekit.ffi.NativeKitTypes.TransportError;
 import nativekit.ffi.NativeKitTypes;
 
 /** Owned NativeKit byte stream shared by framed local RPC and relay framing. */
-class NativeKitByteStream {
+class NativeKitByteStream implements RelayByteStream {
 	public final handle:OwnedTransportHandle;
 	public var connected:Bool = false;
 	public var terminal:Bool = false;
@@ -19,6 +19,9 @@ class NativeKitByteStream {
 
 	public function isOpen():Bool
 		return connected && !terminal;
+
+	public function failureReason():Null<String>
+		return failure;
 
 	/** Sends one copied buffer. NativeKit reports bounded-queue pressure as false. */
 	public function send(bytes:Bytes):Bool {

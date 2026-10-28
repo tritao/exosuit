@@ -9,6 +9,8 @@ interface SuitMenuSink {
 	function item(label:String, action:Null<Void->Void>, parent:Int):Void;
 	function submenu(label:String, parent:Int):Int;
 	function separator(parent:Int):Void;
+	/** A checkbox item. */
+	function check(label:String, checked:Bool, action:Void->Void, parent:Int):Void;
 }
 
 /** What the menu's commands do; the daemon supplies the real ones. */
@@ -16,6 +18,8 @@ typedef SuitMenuHandlers = {
 	var terminate:Array<SuitProcess>->Void;
 	var openViewer:Array<String>->Void;
 	var quit:Void->Void;
+	/** Relay hosting and Start at login; where the menu is only printed, suit's published state is shown. */
+	@:optional var hosting:suit.relay.SuitRelayMenu.SuitHostingActions;
 }
 
 /**
@@ -25,6 +29,17 @@ typedef SuitMenuHandlers = {
 **/
 class SuitMenuModel {
 	static inline var GROUP_LIMIT:Int = 30;
+
+	/** For `suit menu`: hosting as the running daemon published it; the commands do nothing. */
+	static function printedHosting():suit.relay.SuitRelayMenu.SuitHostingActions
+		return {
+			hosts: suit.relay.SuitRelayHosting.readViews,
+			stopHosting: function(_) {},
+			resumeHosting: function(_) {},
+			disconnect: function(_) {},
+			loginEnabled: SuitLogin.enabled,
+			toggleLogin: function() {}
+		};
 
 	public static function build(menu:SuitMenuSink, inventory:SuitInventory, handlers:SuitMenuHandlers):Void {
 		menu.item(inventory.summary(), null, 0);
@@ -51,19 +66,8 @@ class SuitMenuModel {
 				menu.item(source, null, entry);
 			menu.item(SuitKind.SuitKinds.stopVerb(process.kind), function() handlers.terminate([target]), entry);
 		}
-		var hosted = inventory.hosted();
-		if (hosted.length > 0) {
-			menu.separator(0);
-			var remote = menu.submenu("Remote access (" + hosted.length + ")", 0);
-			for (process in hosted) {
-				var target = process;
-				menu.item(SuitReport.workspace(process) + ": " + SuitReport.relayState(process), null, remote);
-				menu.item("    Stop hosting " + SuitReport.workspace(process), function() handlers.terminate([target]), remote);
-			}
-			menu.separator(remote);
-			menu.item("Stop all hosting", function() handlers.terminate(SuitActions.hosting(inventory)), remote);
-			menu.item("Open Remote Access…", function() handlers.openViewer(["watch", "--relay"]), remote);
-		}
+		var hosting = handlers.hosting != null ? handlers.hosting : printedHosting();
+		suit.relay.SuitRelayMenu.build(menu, inventory, hosting, handlers.openViewer);
 		menu.separator(0);
 		var orphans = inventory.orphans();
 		menu.item("Terminate orphaned processes (" + orphans.length + ")",
@@ -72,6 +76,7 @@ class SuitMenuModel {
 		menu.item("Terminate all background processes (" + background.length + ")",
 			background.length == 0 ? null : function() handlers.terminate(SuitActions.background(inventory)), 0);
 		menu.item("Open process viewer…", function() handlers.openViewer(["watch"]), 0);
+		suit.relay.SuitRelayMenu.login(menu, hosting);
 		menu.separator(0);
 		menu.item("Quit Exosuit", handlers.quit, 0);
 	}
@@ -97,6 +102,9 @@ class SuitTextMenu implements SuitMenuSink {
 
 	public function separator(parent:Int):Void
 		lines.push(indent(parent) + "----");
+
+	public function check(label:String, checked:Bool, action:Void->Void, parent:Int):Void
+		lines.push(indent(parent) + (checked ? "[x] " : "[ ] ") + StringTools.trim(label));
 
 	function indent(parent:Int):String {
 		var result = "";

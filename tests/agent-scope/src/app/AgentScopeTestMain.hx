@@ -3,6 +3,9 @@ package app;
 import haxe.Int64;
 import haxe.io.Bytes;
 import scm.LocalScmSource;
+import scm.NarrowedOperation;
+import scm.ScmFolderScope;
+import scm.git.GitConfigFile;
 import scm.ScmChangeKind;
 import scm.ScmOperation;
 import scm.ScmGroup;
@@ -148,6 +151,7 @@ class AgentScopeTestMain {
 		require(WorkbenchGroupLabel.shortDirectory("/Home/me/a", "/home/me") == "…/me/a", "POSIX paths compare case-sensitively");
 		require(WorkbenchGroupLabel.shortDirectory("/home/me/a/b", "/home/me/") == "./a/b", "POSIX root with a trailing separator");
 		require(WorkbenchGroupLabel.shortDirectory("/srv/x", null) == "/srv/x", "short path without a root");
+		require(WorkbenchGroupLabel.shortDirectory("/home/me/a/b", "") == "…/a/b", "an empty root acted as the parent of every path");
 	}
 
 	/** Remove Group stays in the menu while the group has contents, disabled with the reason. */
@@ -189,6 +193,12 @@ class AgentScopeTestMain {
 
 	static function operationText(operation:Null<ScmOperation>):String return operation == null ? "null" : Std.string(operation);
 
+	static function allowed(narrowed:NarrowedOperation):Null<ScmOperation>
+		return switch narrowed { case Allowed(operation): operation; case Refused(_): null; };
+
+	static function refusal(narrowed:NarrowedOperation):Null<String>
+		return switch narrowed { case Allowed(_): null; case Refused(reason): reason; };
+
 	/** Writes from narrowed Changes act only inside the group's folder; a commit never takes staged files from outside it. */
 	static function narrowedOperations():Void {
 		var head = new ScmHead("main", null, false, null, 0, 0, false, ScmHeadOperation.None);
@@ -197,31 +207,58 @@ class AgentScopeTestMain {
 			new ScmGroup(ScmGroupId.WorkingTree, [resource("README.md", ScmChangeKind.Modified)])]);
 		var folders = ["graphical/"];
 		var all = LocalScmSource.narrowOperation(ScmOperation.StageAll, folders, inside);
-		require(all.error == null && operationText(all.operation) == operationText(ScmOperation.StagePaths(["graphical"])), "stage-all was not limited to the folder");
+		require(operationText(allowed(all)) == operationText(ScmOperation.StagePaths(["graphical"])), "stage-all was not limited to the folder");
 		var none = LocalScmSource.narrowOperation(ScmOperation.UnstageAll, folders, inside);
-		require(none.error == null && operationText(none.operation) == operationText(ScmOperation.UnstagePaths(["graphical"])), "unstage-all was not limited to the folder");
+		require(operationText(allowed(none)) == operationText(ScmOperation.UnstagePaths(["graphical"])), "unstage-all was not limited to the folder");
 		for (operation in [ScmOperation.Stage("README.md"), ScmOperation.Discard("src/B.hx"), ScmOperation.Unstage("graphicalish/x"),
 			ScmOperation.StagePaths(["graphical/a", "README.md"]), ScmOperation.RevertPatch("docs/x.md", haxe.io.Bytes.alloc(0))]) {
-			var refused = LocalScmSource.narrowOperation(operation, folders, inside);
-			var refusal = refused.error;
-			require(refused.operation == null && refusal != null && refusal.indexOf("outside graphical/") >= 0,
-				"an operation outside the folder was allowed: " + operationText(operation));
+			var reason = refusal(LocalScmSource.narrowOperation(operation, folders, inside));
+			require(reason != null && reason.indexOf("outside graphical/") >= 0, "an operation outside the folder was allowed: " + operationText(operation));
+		}
+		// Paths that start inside the folder but are not plain could name files outside it.
+		for (operation in [ScmOperation.Stage("graphical/../README.md"), ScmOperation.Discard("graphical/./../src/B.hx"),
+			ScmOperation.StagePaths(["graphical/a", "graphical\\..\\README.md"]), ScmOperation.Unstage("/graphical/a"),
+			ScmOperation.Stage("C:/repo/graphical/a"), ScmOperation.Stage("c:graphical/a"), ScmOperation.Stage(":(top)graphical/a"),
+			ScmOperation.Stage("")]) {
+			var reason = refusal(LocalScmSource.narrowOperation(operation, folders, inside));
+			require(reason != null && reason.indexOf("not a plain path") >= 0, "a path that is not plain was allowed: " + operationText(operation));
 		}
 		var stage = LocalScmSource.narrowOperation(ScmOperation.Discard("graphical/src/A.hx"), folders, inside);
-		require(stage.error == null && operationText(stage.operation) == operationText(ScmOperation.Discard("graphical/src/A.hx")), "an operation inside the folder changed");
+		require(operationText(allowed(stage)) == operationText(ScmOperation.Discard("graphical/src/A.hx")), "an operation inside the folder changed");
 		var commit = LocalScmSource.narrowOperation(ScmOperation.Commit("m", false), folders, inside);
-		require(commit.error == null && commit.operation != null, "a commit of the folder's own staged changes was refused");
+		require(operationText(allowed(commit)) == operationText(ScmOperation.ScopedCommit("m", false, folders)),
+			"a commit of the folder's own staged changes was not passed on as a folder-scoped commit");
+		var amend = LocalScmSource.narrowOperation(ScmOperation.Commit("m", true), folders, inside);
+		require(operationText(allowed(amend)) == operationText(ScmOperation.ScopedCommit("m", true, folders)), "an amend was not scoped to the folder");
 		var mixed = new ScmSnapshot(Int64.make(0, 8), head, [new ScmGroup(ScmGroupId.Index, [resource("graphical/src/A.hx", ScmChangeKind.Modified),
 			resource("README.md", ScmChangeKind.Modified)])]);
-		var outside = LocalScmSource.narrowOperation(ScmOperation.Commit("m", true), folders, mixed);
-		var outsideError = outside.error;
-		require(outside.operation == null && outsideError != null && outsideError.indexOf("README.md") >= 0, "a commit took staged changes from outside the folder");
+		var outsideError = refusal(LocalScmSource.narrowOperation(ScmOperation.Commit("m", true), folders, mixed));
+		require(outsideError != null && outsideError.indexOf("README.md") >= 0, "a commit took staged changes from outside the folder");
 		var moved = new ScmSnapshot(Int64.make(0, 9), head, [new ScmGroup(ScmGroupId.Index, [resource("graphical/New.hx", ScmChangeKind.Renamed, "src/Old.hx")])]);
-		require(LocalScmSource.narrowOperation(ScmOperation.Commit("m", false), folders, moved).operation == null, "a commit took a rename from outside the folder");
+		require(allowed(LocalScmSource.narrowOperation(ScmOperation.Commit("m", false), folders, moved)) == null, "a commit took a rename from outside the folder");
 		var truncated = new ScmSnapshot(Int64.make(0, 10), head, [], true);
-		require(LocalScmSource.narrowOperation(ScmOperation.Commit("m", false), folders, truncated).operation == null
-			&& LocalScmSource.narrowOperation(ScmOperation.Commit("m", false), folders, null).operation == null, "a commit went ahead without a complete snapshot");
-		require(LocalScmSource.narrowOperation(ScmOperation.Push, folders, mixed).operation != null, "a repository-wide operation was refused");
+		require(allowed(LocalScmSource.narrowOperation(ScmOperation.Commit("m", false), folders, truncated)) == null
+			&& allowed(LocalScmSource.narrowOperation(ScmOperation.Commit("m", false), folders, null)) == null, "a commit went ahead without a complete snapshot");
+		require(allowed(LocalScmSource.narrowOperation(ScmOperation.Push, folders, mixed)) != null, "a repository-wide operation was refused");
+	}
+
+	/** Folder matching follows the repository's core.ignorecase, not the machine's. */
+	static function folderCase():Void {
+		var head = new ScmHead("main", null, false, null, 0, 0, false, ScmHeadOperation.None);
+		var index = new ScmSnapshot(Int64.make(0, 7), head, [new ScmGroup(ScmGroupId.Index, [resource("Sub/x.txt", ScmChangeKind.Modified)])]);
+		require(refusal(LocalScmSource.narrowOperation(ScmOperation.Stage("Sub/x.txt"), ["sub/"], index, false)) != null,
+			"a case-sensitive repository let Sub/ match its sibling sub/");
+		require(allowed(LocalScmSource.narrowOperation(ScmOperation.Stage("Sub/x.txt"), ["sub/"], index, true)) != null,
+			"a case-insensitive repository refused another spelling of its folder");
+		require(refusal(LocalScmSource.narrowOperation(ScmOperation.Commit("m", false), ["sub/"], index, false)) != null,
+			"a case-sensitive commit took Sub/ for sub/");
+		require(LocalScmSource.narrowSnapshot(index, ["sub/"], false).groups.length == 0
+			&& LocalScmSource.narrowSnapshot(index, ["sub/"], true).groups.length == 1, "snapshot narrowing ignored core.ignorecase");
+		require(ScmFolderScope.outside(["sub/a", "Sub/b", "sub/../c"], ["sub/"], false).join(",") == "Sub/b,sub/../c", "folder scope outside list");
+		require(GitConfigFile.boolean("[core]\n\tignorecase = true\n", "core", "ignorecase") == true, "config true");
+		require(GitConfigFile.boolean("[Core]\n\tIgnoreCase = false ; comment\n", "core", "ignorecase") == false, "config false with a comment");
+		require(GitConfigFile.boolean("[core]\n\tignorecase\n[core]\nignorecase=no\n", "core", "ignorecase") == false, "the last value wins");
+		require(GitConfigFile.boolean("[core \"x\"]\nignorecase=true\n[user]\nignorecase=true\n", "core", "ignorecase") == null, "a subsection or another section counted");
 	}
 
 	static function modeHiding():Void {
@@ -238,6 +275,7 @@ class AgentScopeTestMain {
 		groupRemoval();
 		narrowedChanges();
 		narrowedOperations();
+		folderCase();
 		modeHiding();
 		trace("PASS: Agents scope from group, sub-group, session and terminal rows; last-group and deleted-group fallback; row keys; group labels; Remove Group; folder-narrowed changes and writes; mode-hidden rail destinations");
 		return 0;

@@ -473,6 +473,8 @@ class RpcScmSource implements ScmSource {
 			case RestoreDiscard(path, recoveryToken): request.kind = "restore_discard"; request.path = path; request.recoveryToken = recoveryToken;
 			case ResolveConflict(path, choice): request.kind = "resolve_conflict"; request.path = path; request.choice = choice;
 			case Commit(message, amend): request.kind = "commit"; request.message = message; request.amend = amend;
+			// Folder-scoped commits are a local-source operation; a workspace service refuses the unknown kind.
+			case ScopedCommit(message, amend, _): request.kind = "scoped_commit"; request.message = message; request.amend = amend;
 			case StagePatch(path, patch): request.kind = "stage_patch"; request.path = path; request.patch = patch;
 			case UnstagePatch(path, patch): request.kind = "unstage_patch"; request.path = path; request.patch = patch;
 			case RevertPatch(path, patch): request.kind = "revert_patch"; request.path = path; request.patch = patch;

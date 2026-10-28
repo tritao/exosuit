@@ -13,6 +13,9 @@
     "haxeon-platform": {
       "path": "../haxeon/packages/platform"
     },
+    "haxeon-credentials": {
+      "path": "../haxeon/packages/credentials"
+    },
     "processkit": {
       "path": "../native-packages/processes"
     }

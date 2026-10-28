@@ -14,7 +14,7 @@ import workspace.storage.WorkspaceSqliteStore;
 import workspace.runtime.WorkspaceTerminalManager;
 import workspace.runtime.WorkspaceRelayHost;
 import workspace.runtime.WorkspaceRelaySettings;
-import workspace.runtime.NativeWorkspaceCredentialStore;
+import workspace.runtime.WorkspaceCredentialStores;
 import workspace.runtime.WorkspaceNoiseIdentity;
 import workspace.transport.NoiseMessageTransport;
 import workspace.runtime.WorkspacePairingManager;
@@ -58,9 +58,25 @@ class AgentMain {
 		var allowLoopbackHttp = Sys.getEnv("EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP") == "1";
 		var relayHost:Null<WorkspaceRelayHost> = null;
 		var relaySetupError:Null<String> = null;
+		var relayRoot = FileSystem.fullPath(args.length >= 6 ? args[5] : Sys.getCwd());
+		// suit holds the machine socket when it runs, so a device can reach this workspace with no editor open.
+		function suitAttach(settings:WorkspaceRelaySettings):Null<suit.relay.SuitRelayProtocol.SuitRelayAttachRequest> {
+			if (!suit.relay.SuitRelayProtocol.viaSuitEnabled())
+				return null;
+			return {
+				root: relayRoot,
+				stateDir: haxe.io.Path.directory(args[2]),
+				machineId: settings.endpoint.machineId,
+				origin: settings.endpoint.origin,
+				executable: Sys.executablePath(),
+				launcher: FileSystem.fullPath(Sys.programPath())
+			};
+		}
 		if (args.length == 9) {
-			try relayHost = new WorkspaceRelayHost(runtime.events, hub, WorkspaceRelaySettings.loadBootstrap(args[8]), allowLoopbackHttp)
-			catch (error:Dynamic) relaySetupError = Std.string(error);
+			try {
+				var settings = WorkspaceRelaySettings.loadBootstrap(args[8]);
+				relayHost = new WorkspaceRelayHost(runtime.events, hub, settings, allowLoopbackHttp, suitAttach(settings));
+			} catch (error:Dynamic) relaySetupError = Std.string(error);
 		}
 		var directories = new workspace.runtime.WorkspaceDirectories(args.length >= 6 ? args[5] : Sys.getCwd());
 		var files = new workspace.runtime.WorkspaceFileService("workspace", [directories.root], clock, runtime.events);
@@ -104,7 +120,7 @@ class AgentMain {
 		var pairingManager:Null<WorkspacePairingManager> = null;
 		function installPairing():Void {
 			if (relayHost == null || store == null) throw "Remote access requires persistent workspace storage";
-			noiseIdentity = new WorkspaceNoiseIdentity(relayHost.endpoint.machineId, new NativeWorkspaceCredentialStore());
+			noiseIdentity = new WorkspaceNoiseIdentity(relayHost.endpoint.machineId, WorkspaceCredentialStores.relay());
 			var activeStore = store, activeRelay = relayHost, activeIdentity = noiseIdentity;
 			pairingManager = new WorkspacePairingManager(activeStore, activeRelay, activeIdentity.privateKeyForHandshake(),
 				function() return serverRef == null ? [] : serverRef.options.offered(), clock,
@@ -160,6 +176,7 @@ class AgentMain {
 		suit.SuitClient.registerWorkspaceService(suit.SuitKind.WorkspaceHost, {root: directories.root, stateDir: stateDirectory,
 			generation: args.length >= 7 ? args[6] : null});
 		var relayStatus = new WorkspaceRelayStatusFile(stateDirectory);
+		var clientReportAt:Float = 0;
 		while (true) {
 			runtime.events.wait(0.01);
 			for (_ in 0...128)
@@ -170,7 +187,7 @@ class AgentMain {
 				if (sys.FileSystem.exists(setupPath)) {
 					try {
 						var settings = WorkspaceRelaySettings.loadBootstrap(setupPath);
-						relayHost = new WorkspaceRelayHost(runtime.events, hub, settings, allowLoopbackHttp);
+						relayHost = new WorkspaceRelayHost(runtime.events, hub, settings, allowLoopbackHttp, suitAttach(settings));
 						installPairing();
 						server.enablePairing(pairingManager);
 						relaySetupError = null;
@@ -183,6 +200,19 @@ class AgentMain {
 			}
 			if (relayHost != null || relaySetupError != null)
 				relayStatus.update(clock(), relayHost, pairingManager, relaySetupError);
+			if (relayHost != null && relayHost.viaSuit && clock() >= clientReportAt) {
+				clientReportAt = clock() + 1000;
+				var devices:Array<Dynamic> = [], pendingDevices:Array<String> = [];
+				if (pairingManager != null) {
+					for (device in pairingManager.listDevices())
+						if (!device.revoked)
+							devices.push({deviceId: device.deviceId, grants: device.grants, connected: device.connected});
+					for (request in pairingManager.listPending())
+						pendingDevices.push(request.deviceId);
+				}
+				relayHost.reportClients({devices: devices, pending: pendingDevices,
+					open: {terminals: terminals.activeCount(), agents: agents.activeCount()}});
+			}
 			server.poll();
 			files.poll();
 			scm.poll();

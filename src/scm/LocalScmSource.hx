@@ -4,12 +4,6 @@ import haxe.Int64;
 import haxe.io.Bytes;
 import workspace.PathKey;
 
-/** An operation limited to a source's folders, or why it was refused (see LocalScmSource.narrowOperation). */
-typedef NarrowedOperation = {
-	var operation:Null<ScmOperation>;
-	var error:Null<String>;
-}
-
 /** Root-scoped view of the desktop's in-process SCM service. */
 class LocalScmSource implements ScmSource {
 	final service:ScmService;
@@ -109,11 +103,9 @@ class LocalScmSource implements ScmSource {
 		if (current == null || Int64.compare(current.revision, expectedRevision) != 0)
 			return failed(null, complete, "stale_revision", "Repository changed before the operation started");
 		var folders = narrowToFolders ? prefixes(repository) : null;
-		if (folders != null) {
-			var narrowed = narrowOperation(operation, folders, current);
-			var allowed = narrowed.operation, refusal = narrowed.error;
-			if (allowed == null) return failed(null, complete, "outside_folder", refusal == null ? "Operation is outside this folder" : refusal);
-			operation = allowed;
+		if (folders != null) switch narrowOperation(operation, folders, current, repository.ignoreCase) {
+			case Allowed(allowed): operation = allowed;
+			case Refused(reason): return failed(null, complete, "outside_folder", reason);
 		}
 		return service.apply(repositoryId, operation, nextGeneration++, complete);
 	}
@@ -181,23 +173,20 @@ class LocalScmSource implements ScmSource {
 		var cached = narrowedSnapshots.get(repository.id);
 		if (cached != null && cached.source == snapshot) return cached.result;
 		var folders = prefixes(repository);
-		var result = folders == null ? snapshot : narrowSnapshot(snapshot, folders);
+		var result = folders == null ? snapshot : narrowSnapshot(snapshot, folders, repository.ignoreCase);
 		narrowedSnapshots.set(repository.id, {source: snapshot, result: result});
 		return result;
 	}
 
-	static function insideFolders(path:Null<String>, folders:Array<String>):Bool {
-		if (path == null) return false;
-		for (folder in folders) if (PathKey.within(folder, path)) return true;
-		return false;
-	}
-
-	/** Keeps the changes under any of the repository-relative folders (each ending in `/`); empty groups are dropped. */
-	public static function narrowSnapshot(snapshot:ScmSnapshot, folders:Array<String>):ScmSnapshot {
+	/**
+		Keeps the changes under any of the repository-relative folders (each ending in `/`); empty groups are dropped.
+		`ignoreCase` is the repository's (see ScmRepository.ignoreCase).
+	**/
+	public static function narrowSnapshot(snapshot:ScmSnapshot, folders:Array<String>, ?ignoreCase:Bool):ScmSnapshot {
 		var groups:Array<ScmGroup> = [];
 		for (group in snapshot.groups) {
 			var kept = [for (resource in group.resources)
-				if (insideFolders(resource.path, folders) || insideFolders(resource.originalPath, folders)) resource];
+				if (ScmFolderScope.inside(resource.path, folders, ignoreCase) || ScmFolderScope.inside(resource.originalPath, folders, ignoreCase)) resource];
 			if (kept.length > 0) groups.push(new ScmGroup(group.id, kept, false));
 		}
 		return new ScmSnapshot(snapshot.revision, snapshot.head, groups, snapshot.truncated);
@@ -205,16 +194,21 @@ class LocalScmSource implements ScmSource {
 
 	/**
 		An operation limited to the repository-relative folders (each ending in `/`), checked against the repository's full
-		snapshot. Paths outside them are refused; stage-all and unstage-all become the folders themselves. A commit takes
-		the whole index, so it is refused while changes outside the folders are staged. Branch and remote operations act
-		on the repository as before.
+		snapshot. Paths outside them are refused, and so is any path that is not plain (a `..` or `.` segment, a leading
+		separator or `:`, a drive letter), since it could name a file outside the folder it starts with. Stage-all and
+		unstage-all become the folders themselves. A commit takes the whole index, so it is refused while changes outside
+		the folders are staged, and goes to the provider as a ScopedCommit that checks the index again, and with amend
+		the commit it rewrites, right before committing. Branch and remote operations act on the repository as before.
 	**/
-	public static function narrowOperation(operation:ScmOperation, folders:Array<String>, full:Null<ScmSnapshot>):NarrowedOperation {
+	public static function narrowOperation(operation:ScmOperation, folders:Array<String>, full:Null<ScmSnapshot>,
+			?ignoreCase:Bool):NarrowedOperation {
 		var names = folders.join(", ");
-		function result(next:Null<ScmOperation>, error:Null<String>):NarrowedOperation return {operation: next, error: error};
 		function allow(paths:Array<String>):NarrowedOperation {
-			for (path in paths) if (!insideFolders(path, folders)) return result(null, path + " is outside " + names);
-			return result(operation, null);
+			for (path in paths) {
+				if (!ScmFolderScope.plain(path)) return Refused((path == null ? "An empty path" : path) + " is not a plain path inside " + names);
+				if (!ScmFolderScope.inside(path, folders, ignoreCase)) return Refused(path + " is outside " + names);
+			}
+			return Allowed(operation);
 		}
 		var whole = [for (folder in folders) folder.substring(0, folder.length - 1)];
 		switch operation {
@@ -224,22 +218,21 @@ class LocalScmSource implements ScmSource {
 			case StagePaths(paths) | UnstagePaths(paths):
 				return allow(paths);
 			case StageAll:
-				return result(ScmOperation.StagePaths(whole), null);
+				return Allowed(ScmOperation.StagePaths(whole));
 			case UnstageAll:
-				return result(ScmOperation.UnstagePaths(whole), null);
-			case Commit(_, _):
-				if (full == null) return result(null, "Refresh the repository before committing");
-				if (full.truncated) return result(null, "Too many changes to confirm this commit stays inside " + names);
+				return Allowed(ScmOperation.UnstagePaths(whole));
+			case Commit(message, amend) | ScopedCommit(message, amend, _):
+				if (full == null) return Refused("Refresh the repository before committing");
+				if (full.truncated) return Refused("Too many changes to confirm this commit stays inside " + names);
 				var staged:Array<String> = [];
 				for (group in full.groups) if (group.id == ScmGroupId.Index) for (resource in group.resources)
-					if (!insideFolders(resource.path, folders) || resource.originalPath != null && !insideFolders(resource.originalPath, folders))
+					if (!ScmFolderScope.inside(resource.path, folders, ignoreCase)
+						|| resource.originalPath != null && !ScmFolderScope.inside(resource.originalPath, folders, ignoreCase))
 						staged.push(resource.path);
-				if (staged.length == 0) return result(operation, null);
-				return result(null, "Staged changes outside " + names + " would be committed too: " + staged.slice(0, 3).join(", ")
-					+ (staged.length > 3 ? " and " + (staged.length - 3) + " more" : "")
-					+ ". Unstage them, or commit from the Editor layout's Source Control.");
+				if (staged.length > 0) return Refused(ScmFolderScope.refusal("Staged changes", staged, folders));
+				return Allowed(ScmOperation.ScopedCommit(message, amend, folders));
 			case Checkout(_) | CreateBranch(_) | Fetch(_) | Pull | Push:
-				return result(operation, null);
+				return Allowed(operation);
 		}
 	}
 

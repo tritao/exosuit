@@ -6,10 +6,14 @@ import suit.SuitClient;
 import suit.SuitControl;
 import suit.SuitDaemon;
 import suit.SuitInventory;
+import suit.SuitLogin;
 import suit.SuitMenuModel;
 import suit.SuitPaths;
 import suit.SuitReport;
 import suit.SuitTerminator;
+import suit.relay.SuitRelayHosting;
+import suit.relay.SuitRelayHosts;
+import suit.relay.SuitRelayMenu;
 
 /** `suit`: the per-user daemon behind the Exosuit tray icon, and its command line. */
 class SuitMain {
@@ -26,10 +30,13 @@ class SuitMain {
 		"  relay list [--json]       workspaces hosting remote access, with devices",
 		"  relay stop <workspace>    stop hosting one workspace (root or folder name); grants persist",
 		"  relay stop --all          stop all hosting",
+		"  relay resume <workspace>|--all  host again what relay stop paused",
+		"  relay disconnect <client>  end one remote client's session (id or a prefix of 4+ characters)",
+		"  login [on|off|status]     start suit at login (off by default; Windows Run key, XDG autostart elsewhere)",
 		"  quit                      quit Exosuit: stop everything, editors asked to close first",
 		"  start                     start the daemon if it is not running",
 		"  stop                      stop only the daemon",
-		"  daemon                    run the daemon in this process",
+		"  daemon [--login]          run the daemon in this process (--login: stay resident)",
 		"environment: EXOSUIT_SUIT_HOME (isolated home and endpoint), EXOSUIT_SUIT_SCAN=0 (registered processes only)",
 		"bulk kills and quit stop only processes exosuit started (registered, or descended from one); see suit/README.md"
 	].join("\n");
@@ -55,7 +62,7 @@ class SuitMain {
 		var json = rest.indexOf("--json") >= 0;
 		switch command {
 			case "daemon":
-				return SuitDaemon.run();
+				return SuitDaemon.run(rest.indexOf("--login") >= 0);
 			case "status":
 				var reply = SuitControl.request({op: "status"});
 				if (json) {
@@ -95,7 +102,7 @@ class SuitMain {
 				var relay = rest.indexOf("--relay") >= 0, once = rest.indexOf("--once") >= 0;
 				while (true) {
 					var inventory = new SuitInventory();
-					var text = relay ? SuitReport.relayText(inventory) : SuitReport.text(inventory, null);
+					var text = relay ? SuitRelayMenu.text(inventory, SuitRelayHosting.readViews()) : SuitReport.text(inventory, null);
 					if (!once)
 						Sys.stdout().writeString("\x1b[2J\x1b[H");
 					print(text + (once ? "" : "\n(refreshes every 2 s; use `suit kill` to stop processes; Ctrl+C closes)"));
@@ -134,19 +141,69 @@ class SuitMain {
 				var inventory = new SuitInventory();
 				var verb = rest.length > 0 ? rest[0] : "list";
 				if (verb == "list") {
+					var hosts = SuitRelayHosting.readViews();
 					if (json)
-						print(Json.stringify([for (process in inventory.hosted()) SuitReport.processJson(inventory, process)]));
+						print(Json.stringify(SuitRelayMenu.json(inventory, hosts)));
 					else
-						print(StringTools.trim(SuitReport.relayText(inventory)));
+						print(StringTools.trim(SuitRelayMenu.text(inventory, hosts)));
 					return 0;
 				}
-				if (verb != "stop" || rest.length < 2)
+				if (verb == "disconnect") {
+					if (rest.length < 2)
+						throw USAGE;
+					var reply = SuitControl.request({op: "relay-disconnect", client: rest[1]}, 3);
+					if (reply == null)
+						throw "suit is not running, so no remote client is connected through it";
+					if (Reflect.field(reply, "ok") != true)
+						throw Std.string(Reflect.field(reply, "error"));
+					print("disconnected " + Reflect.field(reply, "client") + " from " + Reflect.field(reply, "root"));
+					return 0;
+				}
+				if ((verb != "stop" && verb != "resume") || rest.length < 2)
 					throw USAGE;
 				var all = rest[1] == "--all";
-				var targets = SuitActions.hosting(inventory, all ? null : rest[1]);
-				if (targets.length == 0 && !all)
+				var query:Null<String> = all ? null : rest[1];
+				// The running daemon pauses or resumes its machine sockets; without it the settings are edited here.
+				var reply = SuitControl.request({op: verb == "stop" ? "relay-pause" : "relay-resume", workspace: query}, 3);
+				var roots:Array<String> = [];
+				if (reply != null && Std.isOfType(Reflect.field(reply, "roots"), Array))
+					roots = (Reflect.field(reply, "roots") : Array<String>);
+				if (reply == null)
+					for (host in SuitRelayHosts.load())
+						if (SuitRelayHosts.matches(host, query) && SuitRelayHosts.setPaused(host.stateDir, verb == "stop"))
+							roots.push(host.root);
+				if (verb == "resume") {
+					if (roots.length == 0 && !all)
+						throw 'No paused workspace matches ${rest[1]} (see `suit relay list`)';
+					for (root in roots)
+						print("resumed hosting " + root + (reply == null ? " (suit is not running; it hosts again when it starts)" : ""));
+					return 0;
+				}
+				var targets = SuitActions.hosting(inventory, query);
+				for (process in targets)
+					SuitRelayHosts.setPaused(process.stateDir, true);
+				if (targets.length == 0 && roots.length == 0 && !all)
 					throw 'No hosted workspace matches ${rest[1]} (see `suit relay list`)';
+				for (root in roots)
+					print("paused hosting " + root);
 				print(StringTools.trim(SuitReport.results(new SuitTerminator(inventory, targets).run())));
+				return 0;
+			case "login":
+				var verb = rest.length > 0 ? rest[0] : "status";
+				switch verb {
+					case "on":
+						SuitLogin.enable();
+					case "off":
+						SuitLogin.disable();
+					case "status":
+					default:
+						throw USAGE;
+				}
+				if (!SuitLogin.supported()) {
+					print("start at login: not supported on this system");
+					return 0;
+				}
+				print("start at login: " + (SuitLogin.enabled() ? "on" : "off") + (Sys.systemName() == "Windows" ? " (" + SuitLogin.key() + "\\" + SuitLogin.valueName() + ")" : ""));
 				return 0;
 			case "quit":
 				var reply = SuitControl.request({op: "quit"});

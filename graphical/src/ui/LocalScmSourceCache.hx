@@ -11,8 +11,12 @@ class LocalScmSourceCache {
 
 	public function new() {}
 
-	/** The source for `roots` (the first one is its root); `created` runs when a new source replaces the last one. */
-	public function get(service:ScmService, roots:Array<String>, narrowToFolders:Bool, ?created:LocalScmSource->Void):LocalScmSource {
+	/**
+		The source for `roots` (the first one is its root); `created` runs when a new source replaces the last one. Null,
+		with the last source disposed, when there are no roots.
+	**/
+	public function get(service:ScmService, roots:Array<String>, narrowToFolders:Bool, ?created:LocalScmSource->Void):Null<LocalScmSource> {
+		if (roots.length == 0) { clear(); rootsKey = null; return null; }
 		var key = haxe.Json.stringify(roots) + (narrowToFolders ? ":narrow" : "");
 		if (rootsKey != key) { rootsKey = key; identity = LocalScmSource.identityFor(roots, narrowToFolders); }
 		var current = source;

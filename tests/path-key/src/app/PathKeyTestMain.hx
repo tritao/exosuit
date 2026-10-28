@@ -36,10 +36,29 @@ class PathKeyTestMain {
 		require(!PathKey.windowsStyle("/home/me") && !PathKey.windowsStyle("relative/path") && !PathKey.windowsStyle("1:/x"), "POSIX spellings");
 	}
 
+	/** Inputs that used to compare wrongly: empty and drive-relative parents, long-path prefixes, doubled separators. */
+	static function edges():Void {
+		require(PathKey.of("") == "" && !PathKey.within("", "/home/me", false) && !PathKey.within("", "C:/work", true)
+			&& PathKey.relative("", "", false) == "", "an empty parent contained other paths");
+		require(PathKey.relative("C:", "C:/work", true) == null && PathKey.relative("C:/", "C:/work", true) == "work"
+			&& PathKey.relative("C:", "C:", true) == "", "the drive-relative C: acted as the drive root");
+		require(PathKey.same("\\\\?\\C:\\Work\\a", "c:/work/a", true) && PathKey.relative("C:\\work", "\\\\?\\C:\\work\\b", true) == "b",
+			"a long-path prefix changed the path");
+		require(PathKey.same("\\\\?\\UNC\\server\\share\\x", "\\\\server\\share\\x", true), "a long UNC path differed from its short form");
+		require(PathKey.of("C:\\work\\\\a//b/", true) == "c:/work/a/b" && PathKey.of("/home//me///x", false) == "/home/me/x",
+			"doubled separators were kept");
+		require(PathKey.of("\\\\server\\share\\", true) == "//server/share" && PathKey.within("//server/share", "\\\\SERVER\\Share\\x", true)
+			&& !PathKey.within("/server", "//server/x", false), "a UNC root lost or gained its double separator");
+		// Case mapping may change a string's length (U+0130 lowercases to two code units on some targets); matching by
+		// segment keeps the child's own spelling of what follows.
+		require(PathKey.relative("C:/\u0130stanbul", "c:/\u0130STANBUL/Sub/File.hx", true) == "Sub/File.hx", "a length-changing case mapping shifted the match");
+	}
+
 	static function main():Void {
 		windows();
 		posix();
 		style();
+		edges();
 		Sys.println("PASS: path keys ignore separators, trailing separators and Windows case; containment respects roots and sibling prefixes");
 	}
 }

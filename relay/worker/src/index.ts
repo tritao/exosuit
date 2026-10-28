@@ -204,6 +204,31 @@ export class MachineRelay extends DurableObject<Env> {
 
   webSocketError(socket: WebSocket): void {
     closeSocket(socket, 1011, "relay socket error");
+    this.channelEnded(socket);
+  }
+
+  webSocketClose(socket: WebSocket): void {
+    closeSocket(socket, 1000, "closed");
+    this.channelEnded(socket);
+  }
+
+  /**
+   * Tells the machine that a device or pairing channel has no socket left, with the same reset
+   * envelope a reconnect sends, so the machine can end that channel's session at once. A socket
+   * replaced by a reconnect sends nothing: its successor already reset the route.
+   */
+  private channelEnded(socket: WebSocket): void {
+    const attachment = readAttachment(socket);
+    if (!attachment || attachment.role === "machine" || !attachment.channelId) return;
+    const sockets = this.ctx.getWebSockets();
+    const successor = sockets.some((candidate) => {
+      if (candidate === socket) return false;
+      const current = readAttachment(candidate);
+      return current?.role !== "machine" && current?.channelId === attachment.channelId;
+    });
+    if (successor) return;
+    const machine = sockets.find((candidate) => readAttachment(candidate)?.role === "machine");
+    if (machine) sendFrame(machine, resetFrame(attachment.channelId));
   }
 
   private async registerMachine(request: Request): Promise<Response> {

@@ -134,6 +134,7 @@ class ExosuitApp implements DesktopUiApplication {
 	final layoutControls:WorkbenchLayoutControls;
 	final layoutModes:WorkbenchLayoutModes;
 	final activityMenu:ActivityBarMenu;
+	final activityRail:ActivityRailPreference;
 	var contextFiles:Null<ContextFilesView>;
 	/** The Workbench group the Agents layout's right panel works in; it stays when the selection has no folder. */
 	var agentScopes:Null<AgentScopeTracker>;
@@ -272,9 +273,9 @@ class ExosuitApp implements DesktopUiApplication {
 			registerSidebarDestination("scm", IconName.Hierarchy, sourceControlPanel, new haxeon.ui.widgets.sidebar.SidebarModeOptions("Source Control", 15, true));
 		dock = makeDock();
 		layoutControls = new WorkbenchLayoutControls(dock);
-		layoutModes = new WorkbenchLayoutModes(dock, sidebar, layoutControls, requestFrame);
-		layoutModes.contextPanelAvailable = contextPanelProvidesDestinations;
-		activityMenu = new ActivityBarMenu(sidebar, layoutModes.hides, saveActivityBar);
+		layoutModes = new WorkbenchLayoutModes(dock, sidebar, layoutControls, requestFrame, contextPanelProvidesDestinations);
+		activityRail = new ActivityRailPreference(sidebar, saveActivityBar, function(message) application.reportError("activity-bar", message));
+		activityMenu = new ActivityBarMenu(sidebar, layoutModes.hides, activityRail.save);
 		if (openPath == null) dock.close("explorer");
 		var capturedHost:UiWorkbenchHost = null;
 		application = new Application(function(exosuitTheme, focus, workspace, settings) {
@@ -439,7 +440,7 @@ class ExosuitApp implements DesktopUiApplication {
 			var saved = defaultSidebar, layoutSaved = false;
 			for (line in lines) if (StringTools.startsWith(line, "B\tsidebar\t1\t")) { saved = line.substring(12); layoutSaved = true; }
 			sidebar.restore(saved);
-			activityMenu.restoreUserChoices(application.settings.current.activityBar, layoutSaved);
+			activityRail.restore(application.settings.current.activityBar, layoutSaved);
 		};
 		host.activateSearch = function() showSidebarMode("search");
 		host.restoreAgent=makeAgentTab;
@@ -461,7 +462,7 @@ class ExosuitApp implements DesktopUiApplication {
 			updateEditorPalette();
 			layoutModes.setPreference(value.layoutMode);
 			// Another window changed the rail.
-			if (value.activityBar != "" && value.activityBar != sidebar.encodeDestinations()) sidebar.restoreDestinations(value.activityBar);
+			activityRail.settingChanged(value.activityBar);
 			if (hostContext != null) hostContext.zoom = value.applicationZoom / 100.0;
 			terminalPalette.fontSize = value.terminalFontSize;
 			if (value.sidebarWidth != previousSidebarWidth) {
@@ -1250,6 +1251,8 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	public function view():View {
+		// The window size, the right panel and the workspace decide what the rail hides; follow them before drawing it.
+		layoutModes.syncRail();
 		pruneStaleEditorPanes(host.allViews());
 		for (pane in host.panes) {
 			var found = false;
@@ -1270,7 +1273,7 @@ class ExosuitApp implements DesktopUiApplication {
 			application.settings.current.tabTooltipDelay, showManageMenu, manageMenu != null && contextMenu == manageMenu);
 		activityBar.onContextMenu = showActivityBarMenu;
 		activityBar.onMove = activityMenu.move;
-		activityBar.hiddenIds = [for (id in layoutModes.current.hiddenDestinations) if (layoutModes.hides(id)) id];
+		activityBar.hiddenIds = layoutModes.hiddenOnRail();
 		var workspace:View = new Row("workspace-with-activity-bar", [
 			new KeyedView("activity-bar", activityBar),
 			new KeyedView("workspace:" + host.layoutContextKey, workspaceView)
@@ -3591,9 +3594,9 @@ class ExosuitApp implements DesktopUiApplication {
 		requestFrame();
 	}
 
-	/** The rail's shown destinations and order are the user's, kept for every window and folder like VS Code's. */
-	function saveActivityBar():Void {
-		application.settings.store.set("appearance/workbench/activity_bar", haxeon.ui.properties.PropertyValue.Text(sidebar.encodeDestinations()));
+	/** Stores the rail's shown destinations and order for every window (see ActivityRailPreference). */
+	function saveActivityBar(value:String):Void {
+		application.settings.store.set("appearance/workbench/activity_bar", haxeon.ui.properties.PropertyValue.Text(value));
 	}
 
 	function showActivityBarMenu(id:Null<String>, event:UiEvent):Void {
