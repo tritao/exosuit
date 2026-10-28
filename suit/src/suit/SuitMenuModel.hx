@@ -2,9 +2,6 @@ package suit;
 
 import suit.SuitGroup;
 import suit.SuitInventory.SuitProcess;
-import suit.relay.SuitRelayHosting;
-import suit.relay.SuitRelayMenu;
-import SuitHostingActions;
 
 /** Where a menu is built: the native tray popup, or text for `suit menu` and tests. Parents are submenu ids; 0 is the root. */
 interface SuitMenuSink {
@@ -22,7 +19,7 @@ typedef SuitMenuHandlers = {
 	var openViewer:Array<String>->Void;
 	var quit:Void->Void;
 	/** Relay hosting and Start at login; where the menu is only printed, suit's published state is shown. */
-	@:optional var hosting:SuitHostingActions;
+	@:optional var hosting:suit.relay.SuitRelayMenu.SuitHostingActions;
 }
 
 /**
@@ -34,9 +31,9 @@ class SuitMenuModel {
 	static inline var GROUP_LIMIT:Int = 30;
 
 	/** For `suit menu`: hosting as the running daemon published it; the commands do nothing. */
-	static function printedHosting():SuitHostingActions
+	static function printedHosting():suit.relay.SuitRelayMenu.SuitHostingActions
 		return {
-			hosts: SuitRelayHosting.readViews,
+			hosts: suit.relay.SuitRelayHosting.readViews,
 			stopHosting: function(_) {},
 			resumeHosting: function(_) {},
 			disconnect: function(_) {},
@@ -72,7 +69,7 @@ class SuitMenuModel {
 			menu.item(SuitKind.SuitKinds.stopVerb(process.kind), function() handlers.terminate([target]), entry);
 		}
 		var hosting = handlers.hosting != null ? handlers.hosting : printedHosting();
-		SuitRelayMenu.build(menu, inventory, hosting, handlers.openViewer);
+		suit.relay.SuitRelayMenu.build(menu, inventory, hosting, handlers.openViewer);
 		menu.separator(0);
 		var orphans = inventory.orphans();
 		menu.item("Terminate orphaned processes (" + orphans.length + ")",
@@ -81,7 +78,7 @@ class SuitMenuModel {
 		menu.item("Terminate all background processes (" + background.length + ")",
 			background.length == 0 ? null : function() handlers.terminate(SuitActions.background(inventory)), 0);
 		menu.item("Open process viewer…", function() handlers.openViewer(["watch"]), 0);
-		SuitRelayMenu.login(menu, hosting);
+		suit.relay.SuitRelayMenu.login(menu, hosting);
 		menu.separator(0);
 		menu.item("Quit Exosuit", handlers.quit, 0);
 	}
