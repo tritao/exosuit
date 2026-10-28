@@ -38,6 +38,18 @@ class SuitMenu implements SuitMenuModel.SuitMenuSink {
 		return id;
 	}
 
+	public function check(label:String, checked:Bool, action:Void->Void, parent:Int):Void {
+		var options = new MenuItemOptions();
+		options.set_kind(MenuItemKind.Checkbox);
+		options.set_label(label);
+		if (checked)
+			options.set_flags(MenuItemFlags.Checked);
+		var id = nextId++;
+		actions.set(id, action);
+		options.set_command_id(haxe.Int64.ofInt(id));
+		add(options, parent);
+	}
+
 	public function separator(parent:Int):Void {
 		var options = new MenuItemOptions();
 		options.set_kind(MenuItemKind.Separator);

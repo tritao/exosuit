@@ -1,7 +1,8 @@
 cmake_minimum_required(VERSION 3.21)
 project(exosuit_suit_native LANGUAGES C CXX)
-# suit needs NativeKit for its event loop, the local control endpoint and the
-# Windows tray icon. It makes no HTTP requests.
+# suit needs NativeKit for its event loop, the local control endpoint, the
+# Windows tray icon, and the HTTPS ticket requests and WebSocket of the relay
+# machine sockets it holds for hosted workspaces.
 set(NK_BUILD_SHARED ON CACHE BOOL "" FORCE)
 set(NK_BUILD_GPU OFF CACHE BOOL "" FORCE)
 set(NK_BUILD_TESTS OFF CACHE BOOL "" FORCE)

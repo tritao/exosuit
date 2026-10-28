@@ -290,6 +290,25 @@ describe("bounded channel forwarding", () => {
     secondDevice.close();
   });
 
+  it("resets the machine-side route when a device socket closes", async () => {
+    const id = nextMachineId();
+    const machineToken = secret(38);
+    const deviceId = idFromNumber(1211);
+    const deviceToken = secret(39);
+    await registerMachine(id, machineToken);
+    const machine = await openMachine(id, machineToken);
+    await registerDevice(id, machineToken, deviceId, deviceToken);
+
+    const initialReset = waitForMessage(machine);
+    const device = socketOf(await connectDevice(id, await issueTicket(id, deviceToken)));
+    expect([...new Uint8Array(await initialReset)]).toEqual([...resetFrame(deviceId)]);
+
+    const closed = waitForMessage(machine);
+    device.close(1000, "done");
+    expect([...new Uint8Array(await closed)]).toEqual([...resetFrame(deviceId)]);
+    machine.close();
+  });
+
   it("caps the number of connected browser channels", async () => {
     const id = nextMachineId();
     const machineToken = secret(34);
