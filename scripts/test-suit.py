@@ -410,7 +410,8 @@ def test_suit_switch(fixture: Fixture, directory: Path) -> None:
             suit_home = default_parent / "exosuit" / "suit"
             if mode == "on":
                 record = suit_home / "registry" / f"{endpoint['managerPid']}.json"
-                assert record.is_file(), f"EXOSUIT_SUIT=on: the manager did not register in the moved default home {suit_home}"
+                # The daemon registers once it is ready, which can take a few seconds after endpoint.json.
+                wait_until(record.is_file, 15, f"EXOSUIT_SUIT=on: the manager did not register in the moved default home {suit_home}")
                 assert not (suit_home / "suit.lock").exists(), "EXOSUIT_SUIT_AUTOSTART=0 still started suit"
             else:
                 assert not suit_home.exists(), f"EXOSUIT_SUIT={mode}: the manager registered or started suit in {suit_home}"
