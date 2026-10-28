@@ -1521,8 +1521,19 @@ class ExosuitApp implements DesktopUiApplication {
    }, function(destination) openSessionLink(resource, root, destination), {
     explore: function() { if (sessionRecord(resource, root) != null) showSidebarMode("files"); },
     reviewChanges: function() { if (sessionRecord(resource, root) != null) showSidebarMode("scm"); },
+    canCommitChanges: function() return sessionCommitRepository(resource, root) != null,
+    commitChanges: function() {
+     var repository = sessionCommitRepository(resource, root), source = sourceControlSource();
+     if (repository == null || source == null) return;
+     rememberScmResource(source, repository, null, null);
+     showSidebarMode("scm");
+     sourceControlPanel();
+     if (sourceControlPanelValue != null) sourceControlPanelValue.focusCommitMessage();
+     requestFrame();
+    },
     context: function() return sessionWorkspaceLabel(resource, root),
     resolveImage: function(destination) return resolveSessionImage(resource, root, destination),
+    loadImage: function(destination, done) readSessionImage(resource, root, destination, done),
     readContext: function(path, done) readSessionContext(resource, root, path, done),
     canCreateWorktree: function() return sessionWorktreeRepository(resource, root) != null,
     newWorktree: function() createSessionWorktree(resource, root),
@@ -1680,6 +1691,17 @@ class ExosuitApp implements DesktopUiApplication {
   return label;
  }
 
+ function sessionCommitRepository(resource:String, root:String):Null<scm.ScmRepository> {
+  var record = sessionRecord(resource, root), source = sourceControlSource();
+  if (record == null || source == null || !source.connected()) return null;
+  var nearest:Null<scm.ScmRepository> = null;
+  for (repository in source.repositories()) if (repository.providerId == "git" && source.canWrite(repository.id)
+    && workspace.client.SessionLinkTarget.relativeWithin(repository.root, record.cwd) != null
+    && workspace.client.SessionLinkTarget.relativeWithin(root, repository.root) != null
+    && source.snapshot(repository.id) != null && (nearest == null || repository.root.length > nearest.root.length)) nearest = repository;
+  return nearest;
+ }
+
  function sessionWorktreeRepository(resource:String, root:String):Null<scm.ScmRepository> {
   var record = sessionRecord(resource, root), source = sourceControlSource(), client = workbenchClient;
   if (record == null || source == null || client == null || !source.connected() || !client.canEditGroups()
@@ -1751,6 +1773,35 @@ class ExosuitApp implements DesktopUiApplication {
   } catch (_:Dynamic) return null;
  }
 
+ function readSessionImage(resource:String, root:String, destination:String, done:(Null<haxe.io.Bytes>, Null<String>)->Void):Void {
+  var record = sessionRecord(resource, root), attachment = workspaceAttachment;
+  var target = workspace.client.SessionLinkTarget.parse(destination);
+  if (attachment == null || attachment.hasLocalFileAccess()) {
+   try {
+    var local = resolveSessionImage(resource, root, destination);
+    var bytes = local == null ? null : SessionImageProbe.readBounded(local);
+    done(bytes, bytes == null ? "Image preview is unavailable for this location" : null);
+   } catch (_:Dynamic) done(null, "Could not read workspace image");
+   return;
+  }
+  if (record == null || attachment == null || attachment.hasLocalFileAccess() || target == null || target.line >= 0) {
+   done(null, "Image preview is unavailable for this location"); return;
+  }
+  var cwd = record.cwd, thread = record.thread, path = target.resolve(cwd);
+  var scope = attachment.fileScope(), client = attachment.fileClient();
+  var relative = scope == null ? null : workspace.client.SessionLinkTarget.relativeWithin(scope, path);
+  if (client == null || relative == null || workspace.client.SessionLinkTarget.relativeWithin(root, path) == null) {
+   done(null, "Image is outside the connected workspace"); return;
+  }
+  var workspaceId = attachment.fileWorkspace();
+  function wanted():Bool {
+   var current = sessionRecord(resource, root);
+   return workspaceAttachment == attachment && current != null && current.cwd == cwd && current.thread == thread
+    && attachment.fileClient() == client && attachment.fileWorkspace() == workspaceId && attachment.fileScope() == scope;
+  }
+  WorkspaceImageReader.read(client, workspaceId, "root", relative, done, wanted);
+ }
+
  /** Route explicit file links to the owning workspace; external URLs require activation. */
  function openSessionLink(resource:String, root:String, destination:String):Void {
   var record = sessionRecord(resource, root);
@@ -1776,6 +1827,28 @@ class ExosuitApp implements DesktopUiApplication {
    var scopedPath = workspace.client.SessionLinkTarget.relativeWithin(scope, path);
    if (scopedPath == null) { application.reportError("agent", "This file is outside the connected file root"); return; }
    var workspaceId = attachment.fileWorkspace();
+   if (UiImageTab.supports(scopedPath)) {
+    readSessionImage(resource, root, destination, function(bytes, error) {
+     if (error != null || bytes == null) { application.reportError("agent", error == null ? "Could not load workspace image" : error); requestFrame(); return; }
+     var image:Null<haxeon.ui.Image> = null;
+     try {
+      var digest = haxe.crypto.Sha256.make(bytes), fingerprint = "";
+      for (index in 0...digest.length) fingerprint += StringTools.hex(digest.get(index), 2);
+      var identity = "remote-image:" + workspaceId.length + ":" + workspaceId + scope.length + ":" + scope
+       + scopedPath.length + ":" + scopedPath + ":" + fingerprint;
+      if (host.activateRemoteImage(identity)) { requestFrame(); return; }
+      var dimensions = SessionImageProbe.dimensions(bytes);
+      if (dimensions == null) throw "Unsupported or invalid workspace image";
+      if (!host.canOpenRemoteImage(dimensions.width, dimensions.height)) throw "Remote image memory limit reached; close an image and try again";
+      image = SessionImageProbe.decodeFull(bytes);
+      if (image == null) throw "Unsupported or invalid workspace image";
+      host.openRemoteImage(identity, scopedPath, image, bytes.length);
+      image = null;
+     } catch (error:Dynamic) { if (image != null) image.dispose(); application.reportError("agent", Std.string(error)); }
+     requestFrame();
+    });
+    return;
+   }
    client.stat(workspaceId, "root", scopedPath, function(stat) {
     var current = sessionRecord(resource, root);
     if (workspaceAttachment != attachment || current == null || current.cwd != record.cwd || current.thread != record.thread) return;

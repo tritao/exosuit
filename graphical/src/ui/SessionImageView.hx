@@ -19,31 +19,51 @@ import haxeon.ui.widgets.text.Text;
 class SessionImageView implements View {
  final key:String; final alt:String; final destination:String;
  final resolvePath:String->Null<String>; final openLink:String->Void; final frame:Void->Void;
- public function new(key:String, alt:String, destination:String, resolvePath:String->Null<String>, openLink:String->Void, frame:Void->Void) {
-  this.key=key; this.alt=alt; this.destination=destination; this.resolvePath=resolvePath; this.openLink=openLink; this.frame=frame;
+ final loadImage:Null<(String, (Null<haxe.io.Bytes>, Null<String>)->Void)->Void>;
+ public function new(key:String, alt:String, destination:String, resolvePath:String->Null<String>, openLink:String->Void, frame:Void->Void,
+   ?loadImage:(String, (Null<haxe.io.Bytes>, Null<String>)->Void)->Void) {
+  this.key=key; this.alt=alt; this.destination=destination; this.resolvePath=resolvePath; this.openLink=openLink; this.frame=frame; this.loadImage=loadImage;
  }
  public function build(context:BuildContext):RenderNode {
   return context.withScope(new Key(key), function() {
-   var state = context.resourceState(context.id("image-resource:" + destination), function() return new SessionImageState(), function(value) value.dispose()).value;
+   var state = context.resourceState(context.id("image-resource"), function() return new SessionImageState(), function(value) value.dispose()).value;
+   state.target(destination);
    var rows:Array<KeyedView> = [];
    var label = alt == "" ? "Image" : alt;
    rows.push(new KeyedView("caption", new Text(label)));
-   if (state.image == null && state.error == null) {
-    rows.push(new KeyedView("preview", new Button("Preview image", null, function() {
+   var data = StringTools.startsWith(destination.toLowerCase(),"data:");
+   var web = ~/^https?:\/\//i.match(destination);
+   if (state.image == null) {
+    var preview = new Button(state.loading ? "Loading image…" : state.error == null ? "Preview image" : "Retry image preview", null, function() {
+     if (state.loading) return;
+     state.error=null; state.loading=true; var generation=++state.generation;
+     function finish(bytes:Null<haxe.io.Bytes>, error:Null<String>):Void {
+      if (state.closed || state.generation != generation) return;
+      state.loading=false;
+      try {
+       if (error != null) throw error;
+       if (bytes == null) throw "Image preview is unavailable for this location";
+       var loaded=SessionImageProbe.decode(bytes);
+       if (loaded == null) throw "Unsupported image or dimensions exceed 4096 pixels";
+       state.image=loaded;
+      } catch (problem:Dynamic) state.error=Std.string(problem);
+      frame();
+     }
+     if (data) { var bytes=SessionImageProbe.dataUrl(destination); finish(bytes,bytes == null ? "Invalid or unsupported image data" : null); return; }
+     if (web) { finish(null,"External image previews are unavailable"); return; }
+     if (loadImage != null) {
+      var loader:(String, (Null<haxe.io.Bytes>, Null<String>)->Void)->Void=cast loadImage;
+      try loader(destination,finish) catch (problem:Dynamic) finish(null,Std.string(problem));
+      frame(); return;
+     }
      try {
-      var path = resolvePath == null ? null : resolvePath(destination);
+      var path=resolvePath == null ? null : resolvePath(destination);
       if (path == null) throw "Image preview is unavailable for this location";
-      var metadata = sys.FileSystem.metadata(path);
-      if (metadata == null || metadata.size <= 0 || metadata.size > SessionImageProbe.MAX_BYTES) throw "Image exceeds the 4 MiB preview limit";
-      var bytes = SessionImageProbe.readBounded(path);
-      var size = SessionImageProbe.dimensions(bytes);
-      if (size == null) throw "Unsupported image or dimensions exceed 4096 pixels";
-      var loaded = Image.loadFile(path);
-      if (loaded.width != size.width || loaded.height != size.height) { loaded.dispose(); throw "Image changed while loading"; }
-      state.image = loaded;
-     } catch (error:Dynamic) state.error = Std.string(error);
-     frame();
-    }, key + "-preview")));
+      finish(SessionImageProbe.readBounded(path),null);
+     } catch (problem:Dynamic) finish(null,Std.string(problem));
+    },key+"-preview");
+    preview.enabled=!state.loading;
+    rows.push(new KeyedView("preview",preview));
    }
    if (state.error != null) rows.push(new KeyedView("error", new Text(state.error)));
    if (state.image != null) {
@@ -57,7 +77,7 @@ class SessionImageView implements View {
     }, key + ":" + image.identity);
     rows.push(new KeyedView("image", new SessionImageNode(node)));
    }
-   if (openLink != null) rows.push(new KeyedView("open", new Button("Open image", null, function() openLink(destination), key + "-open")));
+   if (openLink != null && !data) rows.push(new KeyedView("open", new Button("Open image", null, function() openLink(destination), key + "-open")));
    var layout = new LayoutStyle(); layout.width = LayoutAxis.grow(); layout.childGap = 8; layout.padding = new Insets(0, 4, 0, 4);
    return new Column(key + "-image", rows, layout).build(context);
   });
@@ -65,8 +85,15 @@ class SessionImageView implements View {
 }
 private class SessionImageState {
  public var image:Null<Image>; public var error:Null<String>;
+ public var loading:Bool=false; public var closed:Bool=false; public var generation:Int=0;
+ var destination:Null<String>;
  public function new() {}
- public function dispose():Void { if (image != null) image.dispose(); image = null; }
+ public function target(next:String):Void {
+  if (destination == next) return;
+  destination=next; generation++; loading=false; error=null;
+  if (image != null) image.dispose(); image=null;
+ }
+ public function dispose():Void { closed=true; generation++; if (image != null) image.dispose(); image = null; }
 }
 private class SessionImageNode implements View {
  final node:RenderNode;

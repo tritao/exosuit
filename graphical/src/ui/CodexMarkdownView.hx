@@ -43,15 +43,18 @@ class CodexMarkdownView implements View {
   final resolveImage:Null<String->Null<String>>;
   final frame:Void->Void;
   final previewArtifact:Null<(String, String)->Void>;
+  final loadImage:Null<(String, (Null<haxe.io.Bytes>, Null<String>)->Void)->Void>;
 
   public function new(value:String, palette:style.Theme, syntaxes:SyntaxRegistry, ?openLink:String->Void,
-      ?resolveImage:String->Null<String>, ?frame:Void->Void, ?previewArtifact:(String, String)->Void) {
+      ?resolveImage:String->Null<String>, ?frame:Void->Void, ?previewArtifact:(String, String)->Void,
+      ?loadImage:(String, (Null<haxe.io.Bytes>, Null<String>)->Void)->Void) {
     this.value = value;
     this.palette = palette;
     this.syntaxes = syntaxes;
     this.resolveImage = resolveImage;
     this.frame = frame == null ? function() {} : frame;
     this.previewArtifact = previewArtifact;
+    this.loadImage = loadImage;
     this.openLink = openLink == null ? function(destination) {
       if (workspace.client.SessionLinkTarget.external(destination) && NativeKit.nk_shell_open_url(destination) != Result.Ok)
         throw "Unable to open link: " + NativeKit.nk_last_error();
@@ -107,7 +110,7 @@ class CodexMarkdownView implements View {
         diff.update(block.text);
         rows.push(new KeyedView(key, diff));
       } else if (block.kind == "image") {
-        rows.push(new KeyedView(key, new SessionImageView(key, block.text, block.language, resolveImage, openLink, frame)));
+        rows.push(new KeyedView(key, new SessionImageView(key, block.text, block.language, resolveImage, openLink, frame, loadImage)));
       } else if (block.kind == "code") {
         var artifact = workspace.client.SessionArtifact.label(block.language, block.text, block.closed == true);
         var shown = context.state(context.id(key + "-artifact-open"), false);

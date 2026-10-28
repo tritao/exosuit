@@ -17,21 +17,38 @@ typedef CodexMarkdownInline = {
 }
 
 class CodexMarkdown {
-  /** A complete standalone image; unfinished, unsafe and embedded markup stays prose. */
+  /** Complete image markup, optionally extracted from a prose line. */
+  static function imageAt(value:String, start:Int):Null<{block:CodexMarkdownBlock, end:Int}> {
+    if (value.substr(start,2) != "![") return null;
+    var labelEnd = closing(value, start+1, "[", "]");
+    if (labelEnd < 0 || value.charAt(labelEnd+1) != "(") return null;
+    var end = closing(value,labelEnd+1,"(",")");
+    if (end < 0) return null;
+    var target = StringTools.trim(value.substring(labelEnd+2,end));
+    if (StringTools.startsWith(target,"<") && StringTools.endsWith(target,">")) target=target.substring(1,target.length-1);
+    var webImage = ~/^https?:\/\/[^\s<>]+$/i.match(target);
+    var lower = target.toLowerCase();
+    var dataImage = dataImageTarget(target,lower);
+    if (!webImage && !dataImage && SessionLinkTarget.parse(target) == null) return null;
+    return {block:{kind:"image",text:value.substring(start+2,labelEnd),language:target},end:end+1};
+  }
+  static function dataImageTarget(target:String, lower:String):Bool {
+    if (target.length > 5592440 || !(StringTools.startsWith(lower,"data:image/png;base64,")
+      || StringTools.startsWith(lower,"data:image/jpeg;base64,") || StringTools.startsWith(lower,"data:image/gif;base64,"))) return false;
+    var comma=target.indexOf(","), length=target.length-comma-1;
+    if (length == 0 || length % 4 != 0 || length > 5592408) return false;
+    var padding=false, paddingCount=0;
+    for (index in comma+1...target.length) {
+      var ch=target.charAt(index);
+      if (ch == "=") { padding=true; paddingCount++; if (paddingCount > 2) return false; }
+      else if (padding || "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".indexOf(ch) < 0) return false;
+    }
+    return true;
+  }
   public static function image(value:String):Null<CodexMarkdownBlock> {
     if (value == null) return null;
-    var line = StringTools.trim(value);
-    if (!StringTools.startsWith(line, "![")) return null;
-    var labelEnd = closing(line, 1, "[", "]");
-    if (labelEnd < 0 || line.charAt(labelEnd + 1) != "(") return null;
-    var end = closing(line, labelEnd + 1, "(", ")");
-    if (end != line.length - 1) return null;
-    var target = StringTools.trim(line.substring(labelEnd + 2, end));
-    if (StringTools.startsWith(target, "<") && StringTools.endsWith(target, ">"))
-      target = target.substring(1, target.length - 1);
-    var webImage = ~/^https?:\/\/[^\s<>]+$/i.match(target);
-    if (!webImage && SessionLinkTarget.parse(target) == null) return null;
-    return {kind: "image", text: line.substring(2, labelEnd), language: target};
+    var line=StringTools.trim(value), found=imageAt(line,0);
+    return found != null && found.end == line.length ? found.block : null;
   }
   /** Recognizes complete inline code and external links; unfinished syntax remains text. */
   public static function inlineSpans(value:String):Array<CodexMarkdownInline> {
@@ -120,9 +137,18 @@ class CodexMarkdown {
         language = StringTools.trim(trimmed.substr(length)).split(" ")[0].toLowerCase();
       } else if (StringTools.trim(line) == "") flush();
       else {
-        var imageBlock = image(line);
-        if (imageBlock != null) { flush(); blocks.push(imageBlock); }
-        else prose.push(line);
+        var cursor=0, segment=0, inCode=false;
+        while (cursor < line.length) {
+          var ch=line.charAt(cursor);
+          if (ch == "\\") { cursor += 2; continue; }
+          if (ch == "`") { inCode=!inCode; cursor++; continue; }
+          var found = !inCode && ch == "!" ? imageAt(line,cursor) : null;
+          if (found != null) {
+            if (cursor > segment) prose.push(line.substring(segment,cursor));
+            flush(); blocks.push(found.block); cursor=found.end; segment=cursor;
+          } else cursor++;
+        }
+        if (segment < line.length) prose.push(line.substring(segment));
       }
     }
     flush();

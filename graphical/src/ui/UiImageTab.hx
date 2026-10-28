@@ -8,6 +8,7 @@ class UiImageTab extends view.View {
 	public final path:String;
 	public final image:Image;
 	public final sizeBytes:Int;
+	public final remote:Bool;
 	public var preview:Bool;
 
 	public static function supports(path:String):Bool {
@@ -19,11 +20,17 @@ class UiImageTab extends view.View {
 			extension == "bmp" || extension == "gif" || extension == "tga";
 	}
 
-	public function new(path:String, preview:Bool) {
-		super(haxe.io.Path.withoutDirectory(path));
+	public function new(path:String, preview:Bool, ?remoteImage:Image, ?remoteBytes:Int = 0, ?remoteId:String) {
+		super(haxe.io.Path.withoutDirectory(path) + (remoteImage == null ? "" : " · remote"));
 		this.path = path;
-		this.id = "image:" + path;
+		this.remote = remoteImage != null;
+		this.id = remoteImage == null ? "image:" + path : remoteId;
 		this.preview = preview;
+		if (remoteImage != null) {
+			this.sizeBytes = remoteBytes;
+			this.image = remoteImage;
+			return;
+		}
 		var metadata = sys.FileSystem.metadata(path);
 		if (metadata == null) throw "Could not read image file metadata";
 		this.sizeBytes = metadata.size;

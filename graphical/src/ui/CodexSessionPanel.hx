@@ -60,6 +60,7 @@ class CodexSessionPanel implements View {
   final workspaceActions:Null<SessionWorkspaceActions>;
   final transcriptScroll = new ScrollController();
   var prompt = "";
+  var promptRevision = 0;
   var selectedModel = "";
   var selectedEffort = "";
   var selectionLoaded = false;
@@ -295,6 +296,7 @@ class CodexSessionPanel implements View {
     inputStyle.padding = new Insets(12, 10, 12, 10);
     var field = new TextField("codex-prompt", prompt, function(v) {
       prompt = v;
+      promptRevision++;
       suggestionIndex = 0;dismissSuggestions = false;
       frame();
     }, inputStyle, null, null, null, true);
@@ -347,6 +349,11 @@ class CodexSessionPanel implements View {
         var canCreate:Void->Bool = cast workspaceActions.canCreateWorktree;
         var createWorktree:Void->Void = cast workspaceActions.newWorktree;
         if (canCreate()) workspaceControls.push(new KeyedView("new-worktree", quietButton("New worktree", createWorktree, "agent-new-worktree")));
+      }
+      if (workspaceActions.commitChanges != null && workspaceActions.canCommitChanges != null) {
+        var canCommit:Void->Bool = cast workspaceActions.canCommitChanges;
+        var commit:Void->Void = cast workspaceActions.commitChanges;
+        if (canCommit()) workspaceControls.push(new KeyedView("commit", quietButton("Commit changes", commit, "agent-commit-changes")));
       }
       if (workspaceActions.githubRepository != null && workspaceActions.canOpenGithub != null) {
         var canOpen:Void->Bool = cast workspaceActions.canOpenGithub;
@@ -412,7 +419,7 @@ class CodexSessionPanel implements View {
         remove.enabled = control;
         controls.push(new KeyedView("remove",remove));
         if (entry.text != "") {
-          var draft = new Button("Use as draft",null,function() {prompt=entry.text;promptFocusRequested=false;frame();});
+          var draft = new Button("Use as draft",null,function() {prompt=entry.text;promptRevision++;promptFocusRequested=false;frame();});
           draft.enabled = control;
           controls.push(new KeyedView("draft",draft));
         }
@@ -455,10 +462,18 @@ class CodexSessionPanel implements View {
         paragraph("Full request exceeds this view. Decline it or use a client that can display the full request.")
       ));
       if (r.method == "item/tool/requestUserInput") {
+        if (textContext.length > 0 || imageDrafts.length > 0) requestRows.push(new KeyedView("answer-context-note-" + r.id,
+          paragraph("Answer uses prompt text only; attachments stay in the composer.")));
         var answer = new Button(
           r.inputKind != null ? "Answer using prompt" : "Answer using prompt (id=value per line)",
           null,
-          function() client.agentAction(id, "answer", prompt, r.id),
+          function() {
+            var submitted = prompt, revision = promptRevision;
+            client.agentAction(id, "answer", submitted, r.id, null, null, function() {
+              if (promptRevision == revision && prompt == submitted) { prompt = ""; promptRevision++; }
+              frame();
+            });
+          },
           "codex-answer-" + r.id
         );
         answer.enabled = control && r.reviewable;
@@ -466,8 +481,11 @@ class CodexSessionPanel implements View {
           "answer-" + r.id,
           answer
         ));
-        if (r.inputKind != null || view.record.provider == "claude") requestRows.push(new KeyedView("cancel-" + r.id,
-          new Button("Cancel", null, function() client.agentAction(id, "decline", "", r.id))));
+        if (r.inputKind != null || view.record.provider == "claude") {
+          var cancel = new Button("Cancel", null, function() client.agentAction(id, "decline", "", r.id));
+          cancel.enabled = control;
+          requestRows.push(new KeyedView("cancel-" + r.id, cancel));
+        }
       } else if (r.method == "item/commandExecution/requestApproval" || r.method == "item/fileChange/requestApproval") {
         var approve = new Button(
           "Approve once",
@@ -609,7 +627,8 @@ class CodexSessionPanel implements View {
             var rendered = markdown.get(key);
             if (rendered == null) { rendered = new CodexMarkdownView(displayText, editorPalette, syntaxes, openLink,
               workspaceActions == null ? null : workspaceActions.resolveImage, frame,
-              workspaceActions == null ? null : workspaceActions.previewArtifact); markdown.set(key, rendered); }
+              workspaceActions == null ? null : workspaceActions.previewArtifact,
+              workspaceActions == null ? null : workspaceActions.loadImage); markdown.set(key, rendered); }
             rendered.update(displayText);
             message.push(new KeyedView("text-" + key, rendered));
           } else message.push(new KeyedView("text-" + key, paragraph(item.text)));
@@ -684,6 +703,7 @@ class CodexSessionPanel implements View {
     function complete(index:Int):Void {
       if (index < 0 || index >= suggestions.length) return;
       prompt = AgentCommandCompletion.insert(suggestions[index]);
+      promptRevision++;
       suggestionIndex = 0;dismissSuggestions = false;promptFocusRequested = false;
       frame();
     }

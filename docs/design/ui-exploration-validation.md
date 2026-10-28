@@ -53,7 +53,15 @@ The matching application/agent build passed in `.local/parity-app-agent-build2.l
 
 The dedicated `tests/session-diff-regression` fixture built in `parity-diff-build2.log` and passed in `parity-diff-test.log`: mixed valid/invalid file metadata retains a labeled raw-patch fallback, valid file navigation remains functional, and later Codex changed-file paths remain visible after the first diff exhausts its preview budget. Zero-length partial slices explicitly report preview unavailable. Fresh `parity-code-light` (wide) and `parity-code-dark` (narrow) captures were inspected for quiet, crisp code-card borders.
 
-An additional image audit identified remaining fidelity gaps: remote workspace binary image references cannot preview or open as images, and inline/data-URL Markdown images currently remain text. Existing local standalone image previews do not prove those paths work.
+That audit identified remote workspace binary image and inline/data-URL rendering gaps; the subsequent image fidelity work below addresses them.
+
+## Image fidelity and request workflow follow-up
+
+The matching full application/agent build passed in `.local/image-fidelity-app-agent-build.log`. The guarded composite and native raster codec tests passed in `inline-images-composite-test.log` and `inline-images-native-test.log`, covering inline surrounding prose, literal code/escaped/incomplete markup, bounded raster data URLs, MIME rejection, stale/unmounted async callbacks, preview/full-resolution pixels and capacity checks. Request tests cover answer rejection, delayed acknowledgement, newer edits, preserved attachments, read-only Cancel and the conditional Commit changes navigation callback.
+
+The complete workspace smoke fixture compiled in `image-fidelity-workspace-build3.log`. The `remote-image-lifecycle` guarded run exited 0 and reported its remote-file acceptance pass, including binary image RPC bounds/revisions/cancellation/handle closure, in-memory remote tab identity, exclusion from local layout restore and texture disposal. This fast fixture exited before the measurement wrapper's three-second screenshot; the wrapper therefore returned a missing-capture error. Its runtime pass is evidence for the assertions, not a screenshot. The separate inline image fixtures were captured successfully: `chat-inline-dark`, `chat-inline-light` and `chat-inline-remote` (the last uses a delayed workspace-byte callback). Their native pixels were inspected; they do not establish a real remote-server session acceptance run.
+
+Image reads use 32 KiB chunks within the current encrypted relay envelope. Inputs are bounded to 4 MiB and 4096 pixels per side; chat previews use at most 512 pixels, original-resolution remote tabs share a 128 MiB texture cap, and no temporary local image paths are created. External HTTP images remain explicit links rather than implicit network fetches. Commit changes selects the nearest writable session repository and focuses the existing Source Control message editor without submitting a commit.
 
 ## Remaining product scope
 

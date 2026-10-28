@@ -44,6 +44,10 @@ class SourceControlPanel implements View {
 	final commitMenu:(ScmRepository, UiEvent)->Void;
 	final model:ScmTreeModel;
 	var disposed:Bool = false;
+	var commitFocusRequested:Bool = false;
+
+	/** Focus the existing draft editor; choosing this workflow never submits a commit. */
+	public function focusCommitMessage():Void { commitFocusRequested = true; changed(); }
 
 	public function new(source:ScmSource, theme:Theme, changed:Void->Void,
 		openResource:(ScmRepository, ScmGroup, ScmResource)->Void,
@@ -194,7 +198,12 @@ class SourceControlPanel implements View {
 		style.height = LayoutAxis.grow();
 		style.direction = haxeon.ui.LayoutDirection.TopToBottom;
 		style.childGap = 2.0;
-		return new Column("source-control-panel", rows, style).build(context);
+		var node = new Column("source-control-panel", rows, style).build(context);
+		if (commitFocusRequested) node.walk(function(child) {
+			if (child.focusable && child.semantics != null && child.semantics.label == "Commit message")
+				child.onResolved(function(_) { if (commitFocusRequested && child.enabled && context.requestFocus(child.id)) commitFocusRequested = false; });
+		});
+		return node;
 	}
 
 	function message(key:String, value:String, color:haxeon.ui.Color):KeyedView {

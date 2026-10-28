@@ -31,6 +31,7 @@ private class PreviewApplication implements DesktopUiApplication {
  final host:DesktopUiHostContext;
  var clickLabel:Null<String>;
  var workflowStep:Int = 0;
+ var pendingPreview:Null<(Null<haxe.io.Bytes>, Null<String>)->Void>;
  public function new(host:DesktopUiHostContext, dark:Bool, args:Array<String>) {
   this.host = host;
   contextValue = new UiContext(null, host.fonts, ui.ExosuitPalette.theme(dark));
@@ -41,7 +42,23 @@ private class PreviewApplication implements DesktopUiApplication {
    {id:"tool",turn:"turn",kind:"commandExecution",title:"Run tests",text:"",detail:"Running the test suite",state:"completed",truncated:false},
    {id:"assistant",turn:"turn",kind:"agentMessage",title:"",text:"## Findings\n\nThe project is ready for review. The key change is in `src/app.hx`.\n\n```haxe\ntrace(\"Hello from Exosuit\");\n```",detail:"",state:"completed",truncated:false}
   ];
-  if (args.indexOf("--diff") >= 0 || args.indexOf("--rich") >= 0 || args.indexOf("--summary") >= 0) {
+  var inlineImages = args.indexOf("--inline-images") >= 0;
+  var remoteImage = args.indexOf("--remote-image") >= 0;
+  if (inlineImages && remoteImage) host.onPoll = function() {
+   if (pendingPreview != null) {
+    var done:(Null<haxe.io.Bytes>, Null<String>)->Void = cast pendingPreview; pendingPreview=null;
+    done(sys.io.File.getBytes(Sys.getCwd()+"/graphical/assets/icons/exosuit-256.png"),null);
+   }
+  };
+  if (inlineImages) {
+   var imagePath=Sys.getCwd()+"/graphical/assets/icons/exosuit-256.png";
+   var imageDestination=remoteImage ? "fixture-remote.png" : "data:image/png;base64,"+haxe.crypto.Base64.encode(sys.io.File.getBytes(imagePath));
+   agent.view.items = [
+    {id:"user",turn:"turn",kind:"userMessage",title:"",text:"Show the project icon in context.",detail:"",state:"completed",truncated:false},
+    {id:"assistant",turn:"turn",kind:"agentMessage",title:"",text:"Here is the project icon ![Exosuit icon]("+imageDestination+") and the surrounding explanation stays visible.",detail:"",state:"completed",truncated:false}
+   ];
+   clickLabel="Preview image";
+  } else if (args.indexOf("--diff") >= 0 || args.indexOf("--rich") >= 0 || args.indexOf("--summary") >= 0) {
    var first = "--- a/src/Main.hx\n+++ b/src/Main.hx\n@@ -1,2 +1,2 @@\n-old()\n+new()\n";
    var second = "--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old docs\n+new docs\n";
    agent.view.items = [
@@ -93,6 +110,10 @@ private class PreviewApplication implements DesktopUiApplication {
    dark ? new style.Theme() : ui.ExosuitPalette.lightEditor(), new syntax.SyntaxRegistry(), null, function(_) {},
    function(_) {}, {context: function() return "/workspace/exosuit · ui-exploration", explore: function() {}, reviewChanges: function() {},
     resolveImage: function(path) return path == "fixture-icon.png" ? Sys.getCwd() + "/graphical/assets/icons/exosuit-256.png" : null,
+    loadImage: inlineImages && remoteImage ? function(path,done) {
+     if (path == "fixture-remote.png") pendingPreview=done;
+     else done(null,"Image unavailable");
+    } : null,
     readContext: workflow ? function(_, done) done("class Main {}", null) : null,
     chooseImage: workflow ? function(done) done("diagram.png", sys.io.File.getBytes(Sys.getCwd() + "/graphical/assets/icons/exosuit-256.png"), null) : null,
     canCreateWorktree: workflow ? function() return true : null, newWorktree: workflow ? function() {} : null,

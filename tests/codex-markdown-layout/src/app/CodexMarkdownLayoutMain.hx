@@ -148,6 +148,20 @@ class CodexMarkdownLayoutMain {
     require(image.length == 3 && image[1].kind == "image" && image[1].text == "Diagram" && image[1].language == "images/flow.png", "Image block lost its identity");
     for (bad in ["![bad](javascript:alert(1))", "![bad](data:image/png;base64,AA)", "![unfinished](x.png", "Text ![inline](x.png)"])
       require(workspace.client.CodexMarkdown.image(bad) == null, "Accepted unsafe or incomplete image syntax");
+    var inlineImages = workspace.client.CodexMarkdown.parse("Before ![one](image.png) between ![two](folder/other.png) after");
+    require(inlineImages.length == 5 && inlineImages[0].text == "Before " && inlineImages[1].kind == "image" && inlineImages[2].text == " between "
+      && inlineImages[3].kind == "image" && inlineImages[4].text == " after", "Inline image lost adjacent prose");
+    var literal = workspace.client.CodexMarkdown.parse("`![code](x.png)` and \\![escaped](y.png) and ![unfinished](x.png");
+    require(literal.length == 1 && literal[0].kind == "text", "Code, escaped or incomplete image markup was interpreted");
+    var raster = sys.io.File.getBytes("../../graphical/assets/icons/exosuit-16.png");
+    var dataUrl = "data:image/png;base64," + haxe.crypto.Base64.encode(raster);
+    var inlineData = workspace.client.CodexMarkdown.parse("before ![icon](" + dataUrl + ") after");
+    var decodedData:haxe.io.Bytes = cast ui.SessionImageProbe.dataUrl(dataUrl);
+    require(inlineData.length == 3 && inlineData[1].language == dataUrl && decodedData != null && decodedData.length == raster.length,
+      "Inline data image lost its source or bytes");
+    require(ui.SessionImageProbe.dataUrl("data:image/jpeg;base64," + haxe.crypto.Base64.encode(raster)) == null
+      && ui.SessionImageProbe.dataUrl("data:image/png;base64,AA=A") == null
+      && ui.SessionImageProbe.dataUrl("data:image/svg+xml;base64,AAAA") == null, "Invalid image data was accepted");
     var png = haxe.io.Bytes.alloc(24);
     var signature = [137,80,78,71,13,10,26,10];
     for (i in 0...signature.length) png.set(i, signature[i]);

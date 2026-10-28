@@ -33,3 +33,38 @@ EXPORT int exosuit_image_thumbnail(const uint8_t *input, int length, uint8_t *ou
     }
     stbi_image_free(pixels); return (tw<<16)|th;
 }
+
+// Bounded byte-backed output preview; the caller owns the fixed output buffer.
+EXPORT int exosuit_image_preview(const uint8_t *input, int length, uint8_t *output, int capacity) {
+    if (!input || !output || length <= 0 || length > 4*1024*1024 || capacity < 512*512*4) return 0;
+    int w=0,h=0,channels=0;
+    if (!stbi_info_from_memory(input,length,&w,&h,&channels) || w <= 0 || h <= 0 || w > 4096 || h > 4096 || (int64_t)w*h > 16777216) return 0;
+    int actualW=0,actualH=0;
+    unsigned char *pixels=stbi_load_from_memory(input,length,&actualW,&actualH,&channels,4);
+    if (!pixels) return 0;
+    if (actualW != w || actualH != h) { stbi_image_free(pixels); return 0; }
+    int maxSide=w>h?w:h;
+    int tw=maxSide<=512?w:(w*512+maxSide/2)/maxSide;
+    int th=maxSide<=512?h:(h*512+maxSide/2)/maxSide;
+    if(tw<1) tw=1; if(th<1) th=1;
+    for(int y=0;y<th;y++) for(int x=0;x<tw;x++) {
+        int src=((int)((int64_t)y*h/th)*w+(int)((int64_t)x*w/tw))*4, dst=(y*tw+x)*4;
+        for(int c=0;c<4;c++) output[dst+c]=pixels[src+c];
+    }
+    stbi_image_free(pixels); return (tw<<16)|th;
+}
+
+// Original-resolution bounded raster decode for workspace image documents.
+EXPORT int exosuit_image_full(const uint8_t *input, int length, uint8_t *output, int capacity) {
+    if (!input || !output || length <= 0 || length > 4*1024*1024) return 0;
+    int w=0,h=0,channels=0;
+    if (!stbi_info_from_memory(input,length,&w,&h,&channels) || w<=0 || h<=0 || w>4096 || h>4096 || (int64_t)w*h>16777216) return 0;
+    int64_t expected=(int64_t)w*h*4;
+    if (capacity < expected) return 0;
+    int actualW=0,actualH=0;
+    unsigned char *pixels=stbi_load_from_memory(input,length,&actualW,&actualH,&channels,4);
+    if(!pixels) return 0;
+    if(actualW != w || actualH != h) { stbi_image_free(pixels); return 0; }
+    for(int64_t i=0;i<expected;i++) output[i]=pixels[i];
+    stbi_image_free(pixels); return (w<<16)|h;
+}

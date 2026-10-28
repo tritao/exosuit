@@ -3,6 +3,8 @@
 #include <vector>
 #include <cstdio>
 extern "C" int exosuit_image_thumbnail(const uint8_t *, int, uint8_t *, int);
+extern "C" int exosuit_image_preview(const uint8_t *, int, uint8_t *, int);
+extern "C" int exosuit_image_full(const uint8_t *, int, uint8_t *, int);
 
 static bool check(int width, int height, bool topdown) {
     BITMAPINFO bi = {}; bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -31,6 +33,23 @@ static bool check(int width, int height, bool topdown) {
     for (int y=0; ok && y<th; ++y) for (int x=0; x<tw; ++x) {
         int sx=x*width/tw, sy=y*height/th, i=(y*tw+x)*4;
         if (thumbnail[i] != (uint8_t)(80+sx+sy) || thumbnail[i+1] != (uint8_t)(40+sy) || thumbnail[i+2] != (uint8_t)(20+sx) || thumbnail[i+3] != 255) ok = false;
+    }
+    std::vector<uint8_t> preview(512*512*4);
+    int previewSize=exosuit_image_preview(data.data(),size,preview.data(),(int)preview.size());
+    int pw=maxSide<=512?width:(width*512+maxSide/2)/maxSide;
+    int ph=maxSide<=512?height:(height*512+maxSide/2)/maxSide;
+    if(pw<1) pw=1; if(ph<1) ph=1;
+    ok = ok && (previewSize>>16)==pw && (previewSize&65535)==ph;
+    for (int y=0; ok && y<ph; ++y) for (int x=0; x<pw; ++x) {
+        int sx=x*width/pw, sy=y*height/ph, i=(y*pw+x)*4;
+        if(preview[i]!=(uint8_t)(80+sx+sy) || preview[i+1]!=(uint8_t)(40+sy) || preview[i+2]!=(uint8_t)(20+sx) || preview[i+3]!=255) ok=false;
+    }
+    std::vector<uint8_t> full(width*height*4);
+    int fullSize=exosuit_image_full(data.data(),size,full.data(),(int)full.size());
+    ok=ok && fullSize==((width<<16)|height) && exosuit_image_full(data.data(),size,full.data(),1)==0;
+    for (int y=0;ok && y<height;y++) for(int x=0;x<width;x++) {
+        int i=(y*width+x)*4;
+        if(full[i]!=(uint8_t)(80+x+y) || full[i+1]!=(uint8_t)(40+y) || full[i+2]!=(uint8_t)(20+x) || full[i+3]!=255) ok=false;
     }
     if (!ok) return false;
     HRESULT init = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
@@ -67,7 +86,11 @@ int main() {
     bounded = bounded && exosuit_image_thumbnail(invalid, sizeof(invalid), thumb, sizeof(thumb)) == 0
         && exosuit_image_thumbnail(invalid, 2*1024*1024+1, thumb, sizeof(thumb)) == 0
         && exosuit_image_thumbnail(invalid, sizeof(invalid), thumb, 1) == 0;
-    if (!bounded || !check(2,2,false) || !check(3,2,false) || !check(3,2,true) || !check(200,100,true)) {
+    std::vector<uint8_t> preview(512*512*4);
+    bounded = bounded && exosuit_image_preview(invalid,sizeof(invalid),preview.data(),(int)preview.size())==0
+        && exosuit_image_preview(invalid,4*1024*1024+1,preview.data(),(int)preview.size())==0
+        && exosuit_image_preview(invalid,sizeof(invalid),preview.data(),1)==0;
+    if (!bounded || !check(2,2,false) || !check(3,2,false) || !check(3,2,true) || !check(200,100,true) || !check(1000,500,true)) {
         std::fprintf(stderr,"FAIL: clipboard bitmap PNG codec\n"); return 1;
     }
     std::puts("PASS: clipboard PNG and thumbnail codec pixels, scaling, orientation and bounds"); return 0;

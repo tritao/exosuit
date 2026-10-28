@@ -1,11 +1,50 @@
 package ui;
 
 import haxe.io.Bytes;
+import haxeon.ui.Image;
+import haxeon.ui.ImageFormat;
 
 /** Bounded header probe before asking the native decoder to allocate pixels. */
 class SessionImageProbe {
  public static inline final MAX_BYTES = 4 * 1024 * 1024;
  public static inline final MAX_DIMENSION = 4096;
+ /** Decode a bounded data URL only when the user requests a preview. */
+ public static function dataUrl(value:String):Null<Bytes> {
+  if (value == null || value.length > 5592440) return null;
+  var comma=value.indexOf(","); if (comma < 0) return null;
+  var header=value.substring(0,comma).toLowerCase();
+  if (header != "data:image/png;base64" && header != "data:image/jpeg;base64" && header != "data:image/gif;base64") return null;
+  var encoded=value.substr(comma+1);
+  if (encoded.length == 0 || encoded.length % 4 != 0 || encoded.length > 5592408) return null;
+  var bytes:Bytes;
+  try { bytes=haxe.crypto.Base64.decode(encoded); } catch (_:Dynamic) return null;
+  if (bytes.length == 0 || bytes.length > MAX_BYTES || haxe.crypto.Base64.encode(bytes) != encoded || dimensions(bytes) == null) return null;
+  if (header == "data:image/png;base64" && bytes.get(0) != 137) return null;
+  if (header == "data:image/jpeg;base64" && bytes.get(0) != 255) return null;
+  if (header == "data:image/gif;base64" && bytes.get(0) != 71) return null;
+  return bytes;
+ }
+ /** Decode bounded raster bytes in memory; never creates a client-side file. */
+ public static function decode(bytes:Bytes):Null<Image> {
+  if (dimensions(bytes) == null) return null;
+  try {
+   var pixels=Bytes.alloc(512*512*4);
+   var size=decodeSessionPreview(SessionImageBytes.data(bytes),bytes.length,SessionImageBytes.data(pixels),pixels.length);
+   var width=size >>> 16, height=size & 65535;
+   if (width <= 0 || height <= 0 || width > 512 || height > 512) return null;
+   return Image.create(width,height,ImageFormat.RGBA8,pixels.sub(0,width*height*4));
+  } catch (_:Dynamic) return null;
+ }
+ /** Decode an original-resolution bounded image for the workspace editor. */
+ public static function decodeFull(bytes:Bytes):Null<Image> {
+  var size=dimensions(bytes); if (size == null) return null;
+  try {
+   var pixels=Bytes.alloc(size.width*size.height*4);
+   var actual=decodeSessionFull(SessionImageBytes.data(bytes),bytes.length,SessionImageBytes.data(pixels),pixels.length);
+   if ((actual >>> 16) != size.width || (actual & 65535) != size.height) return null;
+   return Image.create(size.width,size.height,ImageFormat.RGBA8,pixels);
+  } catch (_:Dynamic) return null;
+ }
  public static function readBounded(path:String):Null<Bytes> {
   var metadata = sys.FileSystem.metadata(path);
   if (metadata == null || metadata.size <= 0 || metadata.size > MAX_BYTES) return null;
@@ -48,4 +87,12 @@ class SessionImageProbe {
  }
  static function be32(b:Bytes, p:Int):Int
   return (b.get(p) << 24) | (b.get(p + 1) << 16) | (b.get(p + 2) << 8) | b.get(p + 3);
+}
+
+@:cNative("exosuit_clipboard", "exosuit_image_preview", "11,5,11,5>5")
+extern function decodeSessionPreview(input:hl.Bytes, length:Int, output:hl.Bytes, capacity:Int):Int;
+@:cNative("exosuit_clipboard", "exosuit_image_full", "11,5,11,5>5")
+extern function decodeSessionFull(input:hl.Bytes, length:Int, output:hl.Bytes, capacity:Int):Int;
+private extern class SessionImageBytes {
+ @:hlNative("haxeon_runtime", "__bytes_get_data") public static function data(value:Bytes):hl.Bytes;
 }

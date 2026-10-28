@@ -140,6 +140,38 @@ class SessionChatUiTestMain {
 			require(!find(root, provider == "pi" ? "Pi prompt" : "Claude prompt").enabled, "Disconnected prompt remained enabled");
 			context.dispose();
 		}
+		var answerClient = new FakeAgent();
+		answerClient.view.requests = [{id:"question", method:"item/tool/requestUserInput", detail:"Choose", reviewable:true, inputKind:"text"}];
+		var answerContext = new UiContext(null, fonts, ui.ExosuitPalette.theme(true));
+		var commits = 0, mayCommit = true;
+		var answerPanel = new CodexSessionPanel(function() return answerClient, "session", "/repo", function() {},
+			new style.Theme(), new syntax.SyntaxRegistry(), function(_, _, _) {}, function(_) {}, null,
+			{context:function() return "Project", explore:function() {}, reviewChanges:function() {},
+			 canCommitChanges:function() return mayCommit, commitChanges:function() commits++});
+		function answerBuild():RenderNode return answerContext.submit(answerPanel, new LayoutFrame(1000, 900));
+		var answerRoot = answerBuild();
+		click(answerContext, find(answerRoot, "Commit changes"), 1000, 900);
+		require(commits == 1 && answerClient.actions.length == 0, "Commit navigation performed an agent action");
+		mayCommit = false; answerRoot = answerBuild();
+		var foundCommit = false; answerRoot.walk(function(node) { if (node.semantics != null && node.semantics.label == "Commit changes") foundCommit = true; });
+		require(!foundCommit, "Unavailable commit action was shown");
+		require(answerContext.focusWidget(find(answerRoot, "Codex prompt").id), "Cannot focus answer draft");
+		answerContext.text(UiEventKind.TextInput, "My answer"); answerRoot = answerBuild();
+		answerClient.acceptActions = false;
+		click(answerContext, find(answerRoot, "Answer using prompt"), 1000, 900);
+		require(answerClient.actions.indexOf("answer:My answer:question") >= 0 && answerPanel.prompt == "My answer", "Rejected answer lost draft or request identity");
+		answerClient.acceptActions = true; answerClient.deferAcceptance = true;
+		answerRoot = answerBuild(); click(answerContext, find(answerRoot, "Answer using prompt"), 1000, 900);
+		require(answerContext.focusWidget(find(answerRoot, "Codex prompt").id), "Cannot edit pending answer");
+		answerContext.text(UiEventKind.TextInput, " edited");
+		var answerAccepted:Void->Void = cast answerClient.pendingAcceptance; answerAccepted();
+		require(answerPanel.prompt == "My answer edited", "Answer acknowledgement cleared a later edit");
+		answerClient.deferAcceptance = false; answerRoot = answerBuild();
+		click(answerContext, find(answerRoot, "Answer using prompt"), 1000, 900);
+		require(answerPanel.prompt == "", "Accepted unchanged answer remained in composer");
+		answerClient.control = false; answerRoot = answerBuild();
+		require(!find(answerRoot, "Cancel").enabled, "Read-only user can cancel a pending request");
+		answerContext.dispose();
 		var historyClient = new FakeAgent();
 		var historyContext = new UiContext(null, fonts, ui.ExosuitPalette.theme(true));
 		historyContext.setStyleSheet(ui.ExosuitPalette.styleSheet(historyContext.buildContext.theme, true));
@@ -173,7 +205,24 @@ class SessionChatUiTestMain {
 		find(imageRoot, "Image preview is unavailable for this location");
 		click(imageContext, find(imageRoot, "Open image"), 500, 300);
 		require(imageOpened == "images/flow.png", "Image fallback lost its destination");
-		imageContext.dispose();
+        imageContext.dispose();
+        var rasterBytes=sys.io.File.getBytes("../../graphical/assets/icons/exosuit-16.png");
+        var embedded="data:image/png;base64,"+haxe.crypto.Base64.encode(rasterBytes);
+        var dataContext=new UiContext(null,fonts,ui.ExosuitPalette.theme(true));
+        var dataView=new ui.SessionImageView("embedded","Icon",embedded,null,function(_) throw "Data URL opened externally",function(){});
+        var dataRoot=dataContext.submit(dataView,new LayoutFrame(500,300));
+        click(dataContext,find(dataRoot,"Preview image"),500,300);
+        dataRoot=dataContext.submit(dataView,new LayoutFrame(500,300));
+        find(dataRoot,"Icon, 16 by 16 pixels"); dataContext.dispose();
+        var remoteContext=new UiContext(null,fonts,ui.ExosuitPalette.theme(true)), remoteFrames=0;
+        var pendingImage:Null<(Null<haxe.io.Bytes>,Null<String>)->Void>=null;
+        var remoteView=new ui.SessionImageView("remote","Remote","assets/test.png",null,null,function() remoteFrames++,function(_,done) pendingImage=done);
+        var remoteRoot=remoteContext.submit(remoteView,new LayoutFrame(500,300));
+        click(remoteContext,find(remoteRoot,"Preview image"),500,300);
+        require(pendingImage != null,"Remote preview did not request workspace bytes");
+        remoteContext.dispose(); var beforeLate=remoteFrames;
+        var lateImage:(Null<haxe.io.Bytes>,Null<String>)->Void=cast pendingImage; lateImage(rasterBytes,null);
+        require(remoteFrames == beforeLate,"Unmounted image accepted a late load callback");
 		var summaryContext = new UiContext(null, fonts, ui.ExosuitPalette.theme(true));
 		var summaryOpened:String = null;
 		var firstPatch = "@@ -1 +1 @@\n-old\n+new\n", secondPatch = "@@ -1 +1,2 @@\n keep\n+extra\n";
