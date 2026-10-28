@@ -1042,7 +1042,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		return total <= 128.0 * 1024 * 1024;
 	}
 
-	public function openRemoteImage(identity:String, path:String, image:haxeon.ui.Image, sizeBytes:Int):UiImageTab {
+	public function openRemoteImage(identity:String, path:String, image:haxeon.ui.Image, sizeBytes:Int, ?sourceLabel:String = "remote"):UiImageTab {
 		for (index in 0...activePane.items.length) {
 			var existing = UiEditorTabs.image(activePane.items[index]);
 			if (existing != null && existing.id == identity) {
@@ -1050,7 +1050,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 			}
 		}
 		if (!canOpenRemoteImage(image.width, image.height)) throw "Remote image memory limit reached; close an image and try again";
-		var tab = new UiImageTab(path, true, image, sizeBytes, identity);
+		var tab = new UiImageTab(path, true, image, sizeBytes, identity, sourceLabel);
 		var insertion = removePreviewTab(activePane);
 		activePane.items.insert(insertion, UiEditorTab.Image(tab));
 		setActiveIndex(insertion, true); return tab;

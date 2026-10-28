@@ -34,6 +34,10 @@ private typedef PendingApproval = {var wireId:Dynamic; var method:String; var de
 /** Shared-daemon adapter. All policy/protocol interpretation stays on the owning machine. */
 class CodexProvider implements AgentMessageSource {
 	public var imageUploadAvailable:Bool = false;
+	public var imageIdentity:Null<(String,String,String,String)->Null<String>>;
+	function imageFor(session:String):(String,String,String)->Null<String> {
+		return function(turn,item,path) return imageIdentity == null ? null : imageIdentity(session,turn,item,path);
+	}
 	public static function turnInput(text:String, imagePaths:Array<String>):Array<Dynamic> {
 		var input:Array<Dynamic> = [];
 		if (text != "") input.push({type:"text", text:text, text_elements:new Array<String>()});
@@ -127,8 +131,8 @@ class CodexProvider implements AgentMessageSource {
 				sessions.set(r.id, {
 					record: r,
 					activity: "",
-					conversation: new CodexConversation(),
-					historyPages: new CodexHistoryPages(),
+					conversation: new CodexConversation(imageFor(r.id)),
+					historyPages: new CodexHistoryPages(imageFor(r.id)),
 					error: null,
 					attached: false,
 					busy: false,
@@ -966,8 +970,8 @@ class CodexProvider implements AgentMessageSource {
 				nameMetadata:{source:"native",nativeName:null}
 			},
 			activity: "",
-			conversation: new CodexConversation(),
-			historyPages: new CodexHistoryPages(),
+			conversation: new CodexConversation(imageFor(q.id)),
+			historyPages: new CodexHistoryPages(imageFor(q.id)),
 			error: null,
 			attached: false,
 			busy: true,

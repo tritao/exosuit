@@ -60,13 +60,26 @@ class CodexMarkdown {
     while (cursor < value.length) {
       var character = value.charAt(cursor);
       if (character == "`") {
-        var end = value.indexOf("`", cursor + 1);
+        var length = 1;
+        while (value.charAt(cursor + length) == "`") length++;
+        var marker = value.substr(cursor, length), search = cursor + length, end = -1;
+        while (search < value.length) {
+          var candidate = value.indexOf(marker, search);
+          if (candidate < 0) break;
+          if (value.charAt(candidate - 1) != "`" && value.charAt(candidate + length) != "`") { end = candidate; break; }
+          search = candidate + length;
+        }
         if (end >= 0) {
           flush();
-          spans.push({kind: "code", text: value.substring(cursor + 1, end), destination: null});
-          cursor = end + 1;
+          var body = value.substring(cursor + length, end);
+          // CommonMark removes one enclosing space, unless the span is all spaces.
+          if (StringTools.startsWith(body, " ") && StringTools.endsWith(body, " ") && StringTools.trim(body) != "")
+            body = body.substring(1, body.length - 1);
+          spans.push({kind: "code", text: body, destination: null});
+          cursor = end + length;
           continue;
         }
+        plain += marker; cursor += length; continue;
       } else if (character == "[" && (cursor == 0 || value.charAt(cursor - 1) != "!")) {
         var labelEnd = closing(value, cursor, "[", "]");
         if (labelEnd > cursor + 1 && value.charAt(labelEnd + 1) == "(") {
@@ -110,12 +123,13 @@ class CodexMarkdown {
   public static function parse(value:String):Array<CodexMarkdownBlock> {
     var blocks:Array<CodexMarkdownBlock> = [];
     var prose:Array<String> = [], code:Array<String> = [];
-    var fence = "", language = "", raw = "";
+    var fence = "", language = "", raw = "", proseKind = "";
     function flush():Void {
       if (prose.length > 0) {
         blocks.push({kind: "text", text: prose.join("\n"), language: ""});
         prose = [];
       }
+      proseKind = "";
     }
     var sourceLines = value.split("\n"), lineNumber = 0;
     for (sourceLine in sourceLines) {
@@ -137,18 +151,28 @@ class CodexMarkdown {
         language = StringTools.trim(trimmed.substr(length)).split(" ")[0].toLowerCase();
       } else if (StringTools.trim(line) == "") flush();
       else {
-        var cursor=0, segment=0, inCode=false;
+        var heading = ~/^#{1,6} +/.match(trimmed) && indent <= 3;
+        var kind = heading ? "heading" : ~/^> ?/.match(trimmed) && indent <= 3 ? "quote"
+          : ~/^(?:[-*+] |[0-9]+[.)] )/.match(trimmed) ? "list" : "paragraph";
+        if (prose.length > 0 && (heading || proseKind != kind)) flush();
+        proseKind = kind;
+        var cursor=0, segment=0, codeMarker=0;
         while (cursor < line.length) {
           var ch=line.charAt(cursor);
           if (ch == "\\") { cursor += 2; continue; }
-          if (ch == "`") { inCode=!inCode; cursor++; continue; }
-          var found = !inCode && ch == "!" ? imageAt(line,cursor) : null;
+          if (ch == "`") {
+            var run=1; while(line.charAt(cursor+run)=="`") run++;
+            if(codeMarker==0) codeMarker=run; else if(codeMarker==run) codeMarker=0;
+            cursor+=run; continue;
+          }
+          var found = codeMarker == 0 && ch == "!" ? imageAt(line,cursor) : null;
           if (found != null) {
             if (cursor > segment) prose.push(line.substring(segment,cursor));
             flush(); blocks.push(found.block); cursor=found.end; segment=cursor;
           } else cursor++;
         }
         if (segment < line.length) prose.push(line.substring(segment));
+        if (heading) flush();
       }
     }
     flush();

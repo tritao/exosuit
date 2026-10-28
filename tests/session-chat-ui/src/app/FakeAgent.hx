@@ -23,6 +23,9 @@ class FakeAgent implements WorkspaceAgentClient {
  public var contentRequests:Int = 0;
  public var deferContent:Bool = false;
  public var pendingContent:Null<(Null<String>, Bool, Null<String>)->Void>;
+ public var imageRequests=0;
+ public var imageRequestIdentity:Null<String>;
+ public var pendingImage:Null<(Null<haxe.io.Bytes>,Null<String>)->Void>;
 	public function new() {
 		view = {record:record, activity:"", requests:[], error:null, connectionState:"connected", items:[
 			{id:"user", turn:"turn", kind:"userMessage", title:"", text:"Please inspect this project.", detail:"", state:"completed", truncated:false},
@@ -51,6 +54,9 @@ class FakeAgent implements WorkspaceAgentClient {
 		if (uploadEnabled) done("opaque-image", null); else done(null, "Unavailable");
 	}
 	public function removeAgentImage(id:String, upload:String):Void removedImages.push(upload);
+	public function loadAgentImage(id:String,turn:String,item:String,imageId:String,done:(Null<haxe.io.Bytes>,Null<String>)->Void):Void {
+  imageRequests++;imageRequestIdentity=id+":"+turn+":"+item+":"+imageId;pendingImage=done;
+ }
 	public function loadAgentContent(id:String, turn:String, item:String, token:String, done:(Null<String>, Bool, Null<String>)->Void):Void {
   contentRequests++; if (deferContent) pendingContent=done;
   else done(messageContent,false,messageContent == null ? "Message content unavailable" : null);

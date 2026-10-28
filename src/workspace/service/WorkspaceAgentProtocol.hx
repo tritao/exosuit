@@ -243,6 +243,10 @@ import haxeon.wire.MessagePack;
 	@:id(5) var truncated:Bool;
 }
 
+@:wire typedef AgentMessageImage = {
+ @:id(1) var id:Null<String>;
+}
+
 @:wire typedef AgentActivityItem = {
 	@:id(1) var id:String;
 	@:id(2) var turn:String;
@@ -255,6 +259,7 @@ import haxeon.wire.MessagePack;
 	/** Authoritative file association, absent on legacy services and unstructured tool output. */
 	@:optional @:id(9) var files:Null<Array<AgentFileChange>>;
 	@:optional @:id(10) var contentToken:Null<String>;
+	@:optional @:id(11) var images:Null<Array<AgentMessageImage>>;
 }
 
 @:wire typedef AgentDiscoveryQuery = {
@@ -307,6 +312,9 @@ class WorkspaceAgentProtocol {
 		function(b:Bytes):AgentAction return MessagePack.decode(b), function(v:AgentView) return MessagePack.encode(v),
 		function(b:Bytes):AgentView return MessagePack.decode(b));
 	public static final MESSAGE_CONTENT = new RpcMethod<AgentContentQuery, AgentContentChunk>(126,
+        function(v:AgentContentQuery) return MessagePack.encode(v), function(b:Bytes):AgentContentQuery return MessagePack.decode(b),
+        function(v:AgentContentChunk) return MessagePack.encode(v), function(b:Bytes):AgentContentChunk return MessagePack.decode(b));
+	public static final MESSAGE_IMAGE = new RpcMethod<AgentContentQuery, AgentContentChunk>(129,
         function(v:AgentContentQuery) return MessagePack.encode(v), function(b:Bytes):AgentContentQuery return MessagePack.decode(b),
         function(v:AgentContentChunk) return MessagePack.encode(v), function(b:Bytes):AgentContentChunk return MessagePack.decode(b));
 	public static final IMAGE_UPLOAD = new RpcMethod<AgentImageUpload, AgentImageUploadResult>(125,

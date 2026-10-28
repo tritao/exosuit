@@ -415,6 +415,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   public function uploadAgentImage(id:String, bytes:haxe.io.Bytes, done:(Null<String>, Null<String>)->Void):Void workbench.uploadAgentImage(id, bytes, done);
   public function removeAgentImage(id:String, upload:String):Void workbench.removeAgentImage(id, upload);
   public function loadAgentContent(id:String, turn:String, item:String, token:String, done:(Null<String>, Bool, Null<String>)->Void):Void workbench.loadAgentContent(id,turn,item,token,done);
+  public function loadAgentImage(id:String, turn:String, item:String, imageId:String, done:(Null<haxe.io.Bytes>, Null<String>)->Void):Void workbench.loadAgentImage(id,turn,item,imageId,done);
   public function discoverAgents(group:String, cursor:Null<String>):Void workbench.discoverAgents(group, cursor);
   public function discoveredAgents():Null<AgentDiscovery> return workbench.discoveredAgents();
   public function agentView(id:String):Null<AgentView> return workbench.agentView(id);

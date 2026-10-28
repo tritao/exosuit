@@ -17,7 +17,8 @@ class CodexHistoryPages {
  final pages:Array<NativePage> = [];
  final handles:Map<Int,String> = [];
  public var first:Null<String> = null;
- public function new() {}
+ final imageIdentity:Null<(String,String,String)->Null<String>>;
+ public function new(?imageIdentity:(String,String,String)->Null<String>) {this.imageIdentity=imageIdentity;}
  public function reset(next:Null<String>):Void {pages.resize(0);handles.clear();first=next == null || next == "" ? null : next;}
  static function number(epoch:String,value:String):Null<Int> {
   if(value == null) return null;
@@ -73,7 +74,7 @@ class CodexHistoryPages {
  }
  public function remember(cursor:String,next:Null<String>,data:Array<Dynamic>):NativePage {
   for(existing in pages.copy()) if(existing.cursor==cursor) pages.remove(existing);
-  var conversation=new CodexConversation();conversation.history(data);
+  var conversation=new CodexConversation(imageIdentity);conversation.history(data);
   var page:NativePage={cursor:cursor,next:next,conversation:conversation};
   pages.push(page);if(pages.length>MAX_PAGES) pages.shift();return page;
  }

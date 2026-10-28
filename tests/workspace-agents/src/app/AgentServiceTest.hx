@@ -93,6 +93,22 @@ class AgentServiceTest {
   ro.call(WorkspaceAgentProtocol.MESSAGE_CONTENT,{workspace:"other",instance:"owner",session:"alpha-0",turn:"t",item:"i",token:"1",offset:0},1000,
    function(_) throw "Cross-workspace message read accepted",function(error) denied=error.code=="unauthorized");
   roServer.poll();ro.poll();require(denied && alpha.reads==1,"Workspace check did not fence message source");
+  denied=false;
+  noRead.call(WorkspaceAgentProtocol.MESSAGE_IMAGE,{workspace:"w",instance:"owner",session:"alpha-0",turn:"t",item:"i",token:"image",offset:0},1000,
+   function(_) throw "Sent image read without permission was accepted",function(error) denied=error.code=="unauthorized");
+  noReadServer.poll();noRead.poll();require(denied,"Sent image ignored read permission");
+  denied=false;
+  ro.call(WorkspaceAgentProtocol.MESSAGE_IMAGE,{workspace:"other",instance:"owner",session:"alpha-0",turn:"t",item:"i",token:"image",offset:0},1000,
+   function(_) throw "Cross-workspace sent image read accepted",function(error) denied=error.code=="unauthorized");
+  roServer.poll();ro.poll();require(denied,"Sent image ignored workspace ownership");
+  denied=false;
+  ro.call(WorkspaceAgentProtocol.MESSAGE_IMAGE,{workspace:"w",instance:"other",session:"alpha-0",turn:"t",item:"i",token:"image",offset:0},1000,
+   function(_) throw "Cross-instance sent image read accepted",function(error) denied=error.code=="unauthorized");
+  roServer.poll();ro.poll();require(denied,"Sent image ignored service instance");
+  unsupported=false;
+  ro.call(WorkspaceAgentProtocol.MESSAGE_IMAGE,{workspace:"w",instance:"owner",session:"beta-0",turn:"t",item:"i",token:"image",offset:0},1000,
+   function(_) throw "Unknown sent image accepted",function(error) unsupported=error.code=="image_unavailable");
+  roServer.poll();ro.poll();require(unsupported,"Missing sent image did not report unavailable");
   noRead.close();noReadServer.close();
   service.dispose();require(alpha.disposed && beta.disposed,"Service lifecycle did not reach every adapter");
   client.close();server.close();ro.close();roServer.close();

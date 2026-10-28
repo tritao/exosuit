@@ -11,9 +11,10 @@ class CodexConversation {
   var entries:Array<AgentActivityItem> = [];
   var historyRevision:Int = 0;
   final incarnation:String = AgentHistoryEpoch.create();
+  final imageIdentity:Null<(String,String,String)->Null<String>>;
   public function epoch():String return incarnation + "-" + historyRevision;
 
-  public function new() { cacheId = ++nextCacheId; }
+  public function new(?imageIdentity:(String,String,String)->Null<String>) { cacheId = ++nextCacheId; this.imageIdentity=imageIdentity; }
   function cacheKey(turn:String, id:String):String return cacheId + ":" + turn.length + ":" + turn + id;
   public function content(turn:String, id:String, token:String, offset:Int):Null<AgentContentChunk> {
     var entry = find(turn,id);
@@ -104,7 +105,15 @@ class CodexConversation {
         var images = 0;
         if (content != null) for (part in content) {
           var partType = string(part, "type");
-          if (partType == "image" || partType == "localImage") { images++; continue; }
+          if (partType == "image" || partType == "localImage") {
+            images++;
+            var imageId=imageIdentity != null && partType == "localImage" ? imageIdentity(turn,id,string(part,"path")) : null;
+            if (images <= 8) {
+              if (entry.images == null) entry.images=[];
+              (cast entry.images:Array<AgentMessageImage>).push({id:imageId});
+            }
+            continue;
+          }
           var text = string(part, "text");
           entry.text += (entry.text == "" ? "" : "\n") + (text == "" ? "[" + partType + "]" : text);
           if (entry.text.length > 4096) {

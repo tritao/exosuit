@@ -66,6 +66,57 @@ class AgentImageStagingTest {
   require(sys.FileSystem.exists(paths[0]),"Expiry removed an unresolved image");
   restored.clean(function(_) return true, function(_,_) return false);
   require(!sys.FileSystem.exists(paths[0]),"Reconciled removed image was not cleaned");
+  var archived = restored.process(request("one","begin",null,png.length,0,null));
+  restored.process(request("one","chunk",archived.upload,png.length,0,png));
+  restored.process(request("one","finish",archived.upload,png.length,png.length,null));
+  var archivePaths=restored.resolve("one",[archived.upload]);
+  require(restored.archive("one","turn","user",archivePaths[0]) == null,"Unpinned path was archived");
+  require(restored.pin("one","thread",[archived.upload]),"Archive image could not be pinned");
+  require(restored.archive("two","turn","user",archivePaths[0]) == null,"Archive accepted a different session");
+  var conversation=new workspace.provider.CodexConversation(function(turn,item,path) return restored.archive("one",turn,item,path));
+  conversation.put("turn",{id:"user",type:"userMessage",content:[{type:"localImage",path:archivePaths[0]}]},true);
+  var projected=conversation.current("turn","user");
+  require(projected != null && projected.images != null && (cast projected.images:Array<workspace.service.WorkspaceAgentProtocol.AgentMessageImage>)[0].id == archived.upload,
+   "Provider did not associate the native user item with its staged image");
+  require(restored.readArchive("two","turn","user",archived.upload,0) == null && restored.readArchive("one","other","user",archived.upload,0) == null
+   && restored.readArchive("one","turn","other",archived.upload,0) == null,"Archived image escaped its item scope");
+  restored.process(request("one","remove",archived.upload,0,0,null));
+  restored.clean(function(_) return true,function(_,_) return false);restored.dispose();
+  restored=new AgentImageStaging(base, root, random, function() return now, secureDir, function(_) return true, function(_) return true, function() {});
+  var imageChunk=restored.readArchive("one","turn","user",archived.upload,0);
+  require(imageChunk != null && imageChunk.total == png.length && imageChunk.bytes.compare(png)==0,"Archived image did not survive service restart");
+  require(restored.archive("one","turn","user",archivePaths[0]) == archived.upload,"Recovered native history did not resolve the archive");
+  restored.clean(function(_) return false,function(_,_) return false);
+  require(restored.readArchive("one","turn","user",archived.upload,0)==null,"Deleting a session retained its archived image");
+  var large=Bytes.alloc(70000);large.blit(0,Bytes.ofString("GIF89a"),0,6);large.set(6,1);large.set(8,1);large.set(large.length-1,0x3b);
+  var largeUpload=restored.process(request("one","begin",null,large.length,0,null));
+  var pos=0;while(pos<large.length) {var n=Std.int(Math.min(AgentImageStaging.MAX_CHUNK,large.length-pos));
+   restored.process(request("one","chunk",largeUpload.upload,large.length,pos,large.sub(pos,n)));pos+=n;}
+  restored.process(request("one","finish",largeUpload.upload,large.length,pos,null));
+  var largePath=restored.resolve("one",[largeUpload.upload]);restored.pin("one","thread",[largeUpload.upload]);
+  require(restored.archive("one","turn2","user2",largePath[0])==largeUpload.upload,"Large image association failed");
+  var assembled=Bytes.alloc(large.length);pos=0;
+  while(pos<large.length) {var chunk:workspace.service.WorkspaceAgentProtocol.AgentContentChunk=cast restored.readArchive("one","turn2","user2",largeUpload.upload,pos);
+   require(chunk!=null && chunk.offset==pos && chunk.total==large.length && chunk.bytes.length<=24*1024,
+    "Archived image returned an invalid chunk");
+   require(haxeon.wire.MessagePack.encode(chunk).length<workspace.transport.NoiseMessageTransport.MAX_PLAINTEXT_BYTES,
+    "Archived image chunk exceeded relay bounds");
+   assembled.blit(pos,chunk.bytes,0,chunk.bytes.length);pos+=chunk.bytes.length;}
+  require(assembled.compare(large)==0,"Chunked archived image changed bytes");
+  restored.clean(function(_) return false,function(_,_) return false);
+  var oldest:Null<String>=null;
+  for (i in 0...33) {
+   now+=1; var upload=restored.process(request("one","begin",null,png.length,0,null));
+   restored.process(request("one","chunk",upload.upload,png.length,0,png));
+   restored.process(request("one","finish",upload.upload,png.length,png.length,null));
+   var path=restored.resolve("one",[upload.upload]);restored.pin("one","thread",[upload.upload]);
+   require(restored.archive("one","turn-"+i,"item",path[0])==upload.upload,"Archive quota rejected a recoverable oldest entry");
+   if (i==0) oldest=upload.upload;
+   restored.process(request("one","remove",upload.upload,0,0,null));
+   restored.clean(function(_) return true,function(_,_) return false);
+  }
+  require(restored.readArchive("one","turn-0","item",oldest,0)==null,"Archive failed to evict its oldest unpinned item at its limit");
+  restored.clean(function(_) return false,function(_,_) return false);
   var missing = restored.process(request("one","begin",null,png.length,0,null));
   restored.process(request("one","chunk",missing.upload,png.length,0,png));
   restored.process(request("one","finish",missing.upload,png.length,png.length,null));

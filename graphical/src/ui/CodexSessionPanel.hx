@@ -733,6 +733,18 @@ class CodexSessionPanel implements View {
             message.push(new KeyedView("text-" + key, rendered));
           } else message.push(new KeyedView("text-" + key, paragraph(item.text)));
         }
+        if (item.kind == "userMessage" && item.images != null) for (index in 0...item.images.length) {
+          var image=item.images[index], imageId=image.id, turn=item.turn, itemId=item.id;
+          var imageKey="sent-image-"+key+"-"+index;
+          var opener=workspaceActions == null ? null : workspaceActions.openMessageImage;
+          if(imageId==null) message.push(new KeyedView(imageKey,new Text("Sent image is unavailable",null,tokens.textSecondary)));
+          else {
+           var retainedId:String=cast imageId;
+           message.push(new KeyedView(imageKey,new SessionMessageImageView(imageKey,retainedId,
+             function(done) client.loadAgentImage(id,turn,itemId,retainedId,done),
+             opener == null ? null : function(bytes) opener(turn,itemId,retainedId,bytes),frame)));
+          }
+        }
         if (detail != "" && reasoning && expanded.get(key) == true) message.push(new KeyedView("detail-" + key, paragraph(detail)));
         if (detail != "" && command && expanded.get(key) == true) message.push(new KeyedView("detail-" + key, paragraph(detail)));
         if ((detail != "" || (item.kind == "fileChange" && item.files != null && item.files.length > 0)) && !reasoning && !command) {

@@ -36,6 +36,7 @@ class WorkspaceAgentService implements WorkspaceAgents {
    if (kind == "codex" && Std.isOfType(provider, CodexProvider)) {
     var codex:CodexProvider = cast provider;
     codex.imageUploadAvailable = images.supported();
+    codex.imageIdentity = images.archive;
    }
    for(record in provider.records()) {
     if(identities.exists(record.id)) throw "Agent identity belongs to multiple providers";
@@ -152,6 +153,16 @@ class WorkspaceAgentService implements WorkspaceAgents {
      "Choose a valid PNG, JPEG, or GIF image up to 4096 pixels per side", "Could not stage image"];
     ctx.fail({code:"invalid_image_upload",message:safe.indexOf(message) >= 0 ? message : "Image staging failed; retry or check the workspace service",ambiguous:false});
    }
+  });
+  connection.register(WorkspaceAgentProtocol.MESSAGE_IMAGE,function(q,ctx) {
+   if (!allowed(q.workspace,q.instance,false)) {ctx.fail({code:"unauthorized",message:"Image access denied",ambiguous:false});return;}
+   if (q.session == null || q.turn == null || q.item == null || q.token == null || q.session.length > 128
+       || q.turn.length > 128 || q.item.length > 128 || q.token.length > 256 || q.offset < 0 || owner(q.session) == null) {
+    ctx.fail({code:"image_unavailable",message:"Sent image is unavailable",ambiguous:false});return;
+   }
+   var chunk=images.readArchive(q.session,q.turn,q.item,q.token,q.offset);
+   if (chunk == null) ctx.fail({code:"image_unavailable",message:"Sent image is no longer available",ambiguous:false});
+   else ctx.respond(chunk);
   });
   connection.register(WorkspaceAgentProtocol.MODELS,function(q,ctx) {
    if(!allowed(q.workspace,q.instance,false)) {ctx.fail({code:"unauthorized",message:"Model catalog denied",ambiguous:false});return;}

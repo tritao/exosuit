@@ -118,8 +118,13 @@ class SessionDiffView implements View {
       }
       var fileStyle = new LayoutStyle(); fileStyle.width = LayoutAxis.grow(); fileStyle.childGap = 2;
       fileStyle.background = tokens.surfaceSunken;
-      fileStyle.radiusTopLeft = fileStyle.radiusTopRight = fileStyle.radiusBottomLeft = fileStyle.radiusBottomRight = 6;
-      rows.push(new KeyedView("file-" + index, new Column("diff-file-" + index, fileRows, fileStyle)));
+      fileStyle.radiusTopLeft = fileStyle.radiusTopRight = fileStyle.radiusBottomLeft = fileStyle.radiusBottomRight = 5;
+      var frameStyle = new LayoutStyle(); frameStyle.width = LayoutAxis.grow();
+      frameStyle.padding = new Insets(1, 1, 1, 1); frameStyle.background = WorkbenchBoundary.color(context);
+      frameStyle.radiusTopLeft = frameStyle.radiusTopRight = frameStyle.radiusBottomLeft = frameStyle.radiusBottomRight = 6;
+      rows.push(new KeyedView("file-" + index, new Column("diff-file-frame-" + index, [
+        new KeyedView("content", new Column("diff-file-" + index, fileRows, fileStyle))
+      ], frameStyle)));
     }
     if (invalidSlice && truncations.length > 0) {
       rows.push(new KeyedView("unassociated-label", new Text("Full patch · file metadata incomplete", null, tokens.textSecondary)));

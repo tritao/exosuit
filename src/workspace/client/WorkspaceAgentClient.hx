@@ -19,6 +19,7 @@ interface WorkspaceAgentClient {
 	public function uploadAgentImage(id:String, bytes:haxe.io.Bytes, done:(Null<String>, Null<String>)->Void):Void;
 	public function removeAgentImage(id:String, upload:String):Void;
 	public function loadAgentContent(id:String, turn:String, item:String, token:String, done:(Null<String>, Bool, Null<String>)->Void):Void;
+	public function loadAgentImage(id:String, turn:String, item:String, imageId:String, done:(Null<haxe.io.Bytes>, Null<String>)->Void):Void;
 	public function discoverAgents(group:String, cursor:Null<String>):Void;
 	public function discoveredAgents():Null<AgentDiscovery>;
 	public function agentView(id:String):Null<AgentView>;

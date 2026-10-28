@@ -300,6 +300,38 @@ class SessionChatUiTestMain {
 		require(imageOpened == "images/flow.png", "Image fallback lost its destination");
         imageContext.dispose();
         var rasterBytes=sys.io.File.getBytes("../../graphical/assets/icons/exosuit-16.png");
+        var sentContext=new UiContext(null,fonts,ui.ExosuitPalette.theme(true)), sentLoads=0, sentOpens=0;
+        var sentPending:Null<(Null<haxe.io.Bytes>,Null<String>)->Void>=null;
+        var sentView=new ui.SessionMessageImageView("sent-test","opaque",function(done) {sentLoads++;sentPending=done;},function(_) sentOpens++,function() {});
+        var sentRoot=sentContext.submit(sentView,new LayoutFrame(500,300));
+        require(sentLoads==0,"Sent image loaded without user action");
+        click(sentContext,find(sentRoot,"Preview image"),500,300);
+        sentRoot=sentContext.submit(sentView,new LayoutFrame(500,300));find(sentRoot,"Loading image…");
+        var sentDone:(Null<haxe.io.Bytes>,Null<String>)->Void=cast sentPending;sentDone(null,"This sent image is no longer available");
+        sentRoot=sentContext.submit(sentView,new LayoutFrame(500,300));find(sentRoot,"This sent image is no longer available");
+        click(sentContext,find(sentRoot,"Retry image preview"),500,300);
+        sentDone=cast sentPending;sentDone(rasterBytes,null);
+        sentRoot=sentContext.submit(sentView,new LayoutFrame(500,300));find(sentRoot,"Sent image, 16 by 16 pixels");
+        click(sentContext,find(sentRoot,"Open image"),500,300);sentDone=cast sentPending;sentDone(rasterBytes,null);
+        require(sentLoads==3 && sentOpens==1,"Sent image open did not use explicit scoped bytes");
+        sentContext.dispose();
+        var staleContext=new UiContext(null,fonts,ui.ExosuitPalette.theme(true)),staleFrames=0;
+        var staleView=new ui.SessionMessageImageView("sent-stale","opaque",function(done) sentPending=done,function(_) throw "Unmounted image opened",function() staleFrames++);
+        var staleRoot=staleContext.submit(staleView,new LayoutFrame(500,300));click(staleContext,find(staleRoot,"Open image"),500,300);
+        staleContext.dispose();var framesBefore=staleFrames;sentDone=cast sentPending;sentDone(rasterBytes,null);
+        require(staleFrames==framesBefore,"Unmounted sent image accepted a late callback");
+        var sentClient=new FakeAgent();
+        sentClient.view.items=[{id:"user",turn:"turn",kind:"userMessage",title:"",text:"Inspect",detail:"",state:"completed",truncated:false,images:[{id:"opaque-id"},{id:null}]}];
+        var sentPanelContext=new UiContext(null,fonts,ui.ExosuitPalette.theme(true)),sentPanelOpens=0;
+        var sentPanel=new CodexSessionPanel(function() return sentClient,"session","/repo",function() {},new style.Theme(),new syntax.SyntaxRegistry(),
+          function(_,_,_) {},function(_) {},null,{context:function() return "Project",explore:function() {},reviewChanges:function() {},
+           openMessageImage:function(turn,item,imageId,bytes) {require(turn=="turn" && item=="user" && imageId=="opaque-id" && bytes.length==rasterBytes.length,"Sent image open identity changed");sentPanelOpens++;}});
+        var sentPanelRoot=sentPanelContext.submit(sentPanel,new LayoutFrame(500,700));
+        find(sentPanelRoot,"Sent image is unavailable");
+        click(sentPanelContext,find(sentPanelRoot,"Open image"),500,700);
+        require(sentClient.imageRequestIdentity=="session:turn:user:opaque-id","Sent image request was not scoped to the activity");
+        var panelDone:(Null<haxe.io.Bytes>,Null<String>)->Void=cast sentClient.pendingImage;panelDone(rasterBytes,null);
+        require(sentPanelOpens==1,"Sent image open did not reach the host");sentPanelContext.dispose();
         var embedded="data:image/png;base64,"+haxe.crypto.Base64.encode(rasterBytes);
         var dataContext=new UiContext(null,fonts,ui.ExosuitPalette.theme(true));
         var dataView=new ui.SessionImageView("embedded","Icon",embedded,null,function(_) throw "Data URL opened externally",function(){});

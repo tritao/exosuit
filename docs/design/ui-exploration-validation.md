@@ -85,7 +85,7 @@ Repeated image staging validation reproduced a Windows atomic journal replacemen
 
 ## Remaining product scope
 
-Remaining capabilities include non-Windows image clipboard input, sent-image thumbnails and an attachment archive, Claude/Pi image adapters and durable queued attachments, durable full-response recovery, interactive or broader HTML/SVG rendering, and authenticated PR submission beyond opening its creation page. These are specified in [the Sessions spec](sessions-ui-spec.md) and grounded in [the reference renderer contracts](renderer-contracts.md). The current implementation does not advertise those capabilities.
+Remaining capabilities include non-Windows image clipboard input, broader attachment archives beyond bounded Codex sent images, Claude/Pi image adapters and durable queued attachments, durable full-response recovery, interactive or broader HTML/SVG rendering, and authenticated PR submission beyond opening its creation page. These are specified in [the Sessions spec](sessions-ui-spec.md) and grounded in [the reference renderer contracts](renderer-contracts.md). The current implementation does not advertise those capabilities.
 
 
 ## Incremental history and native Codex paging
@@ -98,6 +98,19 @@ The native Codex fixture was rebuilt against that cursor change (`history-codex-
 
 The guarded preview build passed in `history-preview-build.log`. Native dark/light narrow captures under `docs/benchmarks/perf-harness/runs/sticky-history-{dark,light}-narrow{,-review}/frame.png` were inspected: loading older content preserves the visible message position while earlier messages become available above it, and the composer and Jump to latest remain reachable.
 
-The bounded client window and native Codex cache do not bound the existing Codex live-entry array. Claude/Pi/AgentKit replay is bounded and does not establish complete native history. Durable response and attachment recovery remain separate capabilities.
+The bounded client window and native Codex cache do not bound the existing Codex live-entry array. Claude/Pi/AgentKit replay is bounded and does not establish complete native history. Durable response recovery and broader attachment recovery remain separate capabilities; the subsequent sent-image phase adds a bounded Codex archive.
 
 The matching final graphical application and agent build passed in .local/history-compat-app-agent-build.log after the compatibility fix.
+
+
+## Sent-image history, diff edges and Markdown boundaries
+
+Codex native user messages now associate managed local-image paths with opaque session/turn/item-scoped archive identities. Private managed files and bindings survive service restart, while remove-after-ack preserves accepted images. The archive retains up to 32 images / 64 MiB with oldest-unpinned eviction; active leases retain their existing protection. Unknown native paths remain unavailable and never become arbitrary host-file reads. These limits deliberately do not promise indefinite image retention.
+
+The guarded staging build/run passed in `.local/sent-image-staging-build.log` and `sent-image-staging-test.log`, covering binding, scope, restart, cleanup, exact 24 KiB chunks, relay bounds and eviction. The provider-neutral authorization/encrypted-snapshot integration passed in `sent-image-auth-build.log` and `sent-image-auth-test.log`; MESSAGE_IMAGE specifically rejects missing READ permission and wrong workspace/instance. Client checks passed in `sent-image-client-extra-build.log` and `sent-image-client-extra-test.log`: exact 70,000-byte assembly, malformed token/offset, changed or oversized totals, generation/connection/session changes and once-only completion.
+
+The combined native UI suite passed in `diff-edge-ui-build3.log` and `diff-edge-ui-test2.log`, including sent-image preview/open callback scope, unavailable/error/retry, bounded decode and late-unmount protection. It also verifies diff-card one-pixel edges, selection, two-axis clipping and file actions at narrow/wide widths in both themes. Markdown tests now cover heading/quote/list boundaries without blank lines, multi-backtick code spans, literal images inside code and unfinished delimiters. Unsupported emphasis remains literal; these checks do not establish full CommonMark compliance.
+
+Native 420-pixel dark/light captures were inspected under `docs/benchmarks/perf-harness/runs/sticky-diff-{dark,light}-narrow/frame.png` and `sticky-sent-image-{dark,light}-narrow-review/frame.png`. Sent-image fixtures activate preview through keyboard events and validate scope before returning local fixture PNG bytes. This proves native pixels and the UI callback path, not real provider inference. The guarded preview builds/captures passed in `diff-edge-preview-build.log`, `sent-image-preview-build.log`, and their corresponding capture logs.
+
+The matching full graphical application and agent build passed in `.local/sent-image-app-agent-build.log`, including the session image editor-tab wiring. These changes have not been exercised against a real Codex inference turn or deployed relay.

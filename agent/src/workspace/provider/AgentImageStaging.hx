@@ -11,6 +11,7 @@ import workspace.service.WorkspaceAgentProtocol.AgentImageUploadResult;
 private typedef StagedImage = {
   var session:String; var id:String; var size:Int; var offset:Int; var bytes:BytesBuffer;
   var path:Null<String>; var updated:Float; var pinned:Bool; var removed:Bool; var thread:Null<String>;
+  var turn:Null<String>; var item:Null<String>;
 }
 
 /** Ephemeral, bounded image staging on the provider host. IDs never expose local paths. */
@@ -44,7 +45,7 @@ class AgentImageStaging {
     if (directory == null || failed) throw "Image lease storage requires recovery";
     var records:Array<Dynamic> = [];
     for (item in entries) if (item.path != null) records.push({id:item.id,session:item.session,size:item.size,
-      ext:item.path.substr(item.path.lastIndexOf(".") + 1),updated:item.updated,pinned:item.pinned,removed:item.removed,thread:item.thread});
+      ext:item.path.substr(item.path.lastIndexOf(".") + 1),updated:item.updated,pinned:item.pinned,removed:item.removed,thread:item.thread,turn:item.turn,item:item.item});
     var path = manifestPath();
     var content=haxe.Json.stringify({version:1, entries:records});
     AgentJournalPublisher.write(path,content,Sys.systemName()=="Windows",sys.io.AtomicFile.write,Sys.sleep);
@@ -58,16 +59,19 @@ class AgentImageStaging {
     if (journalMetadata == null || journalMetadata.size < 0 || journalMetadata.size > 65536) throw "Image lease journal is too large";
     var data:Dynamic = haxe.Json.parse(File.getContent(path));
     var records:Dynamic = Reflect.field(data,"entries");
-    if (Reflect.field(data,"version") != 1 || !Std.isOfType(records,Array) || (cast records:Array<Dynamic>).length > 8) throw "Invalid image lease journal";
+    if (Reflect.field(data,"version") != 1 || !Std.isOfType(records,Array) || (cast records:Array<Dynamic>).length > 40) throw "Invalid image lease journal";
     var total = 0, dirty = false;
     for (record in (cast records:Array<Dynamic>)) {
       var id:Dynamic = Reflect.field(record,"id"), session:Dynamic = Reflect.field(record,"session"), ext:Dynamic = Reflect.field(record,"ext");
       var size:Dynamic = Reflect.field(record,"size"), updated:Dynamic = Reflect.field(record,"updated"), thread:Dynamic = Reflect.field(record,"thread");
+      var turn:Dynamic=Reflect.field(record,"turn"), itemId:Dynamic=Reflect.field(record,"item");
       if (!Std.isOfType(id,String) || id.length < 24 || id.length > 256 || !~/^[A-Za-z0-9_-]+$/.match(id)
         || !Std.isOfType(session,String) || session.length == 0 || session.length > 128
         || !Std.isOfType(size,Int) || size <= 0 || size > MAX_IMAGE || ["png","jpg","gif"].indexOf(ext) < 0
         || !Std.isOfType(updated,Float) && !Std.isOfType(updated,Int) || !Math.isFinite(updated)
-        || (thread != null && (!Std.isOfType(thread,String) || thread.length > 1024)) || entries.exists(id)) throw "Invalid image lease";
+        || (thread != null && (!Std.isOfType(thread,String) || thread.length > 1024))
+        || ((turn == null) != (itemId == null)) || (turn != null && (!Std.isOfType(turn,String) || turn.length == 0 || turn.length > 128
+          || !Std.isOfType(itemId,String) || itemId.length == 0 || itemId.length > 128)) || entries.exists(id)) throw "Invalid image lease";
       var file = Path.join([directory, id + "." + ext]);
       var pinned = Reflect.field(record,"pinned") == true;
       if (!FileSystem.exists(file)) {
@@ -80,9 +84,9 @@ class AgentImageStaging {
           FileSystem.deleteFile(file); dirty = true; continue;
         }
       }
-      total += size; if (total > MAX_TOTAL) throw "Image lease quota exceeded";
+      total += size; if (total > 72 * 1024 * 1024) throw "Image lease quota exceeded";
       entries.set(id,{session:session,id:id,size:size,offset:size,bytes:new BytesBuffer(),path:file,updated:updated,
-        pinned:pinned, removed:Reflect.field(record,"removed") == true,thread:thread});
+        pinned:pinned, removed:Reflect.field(record,"removed") == true,thread:thread,turn:turn,item:itemId});
     }
     if (dirty) persist();
   }
@@ -94,20 +98,22 @@ class AgentImageStaging {
       if (q.size <= 0 || q.size > MAX_IMAGE) throw "Image must be at most 2 MiB";
       var ready = 0, partial = 0, total = 0, count = 0;
       for (item in entries) {
-        total += item.size; count++;
-        if (item.session == q.session && !item.removed) { if (item.path == null) partial++; else ready++; }
+        if (item.turn == null) {
+          total += item.size; count++;
+          if (item.session == q.session && !item.removed) { if (item.path == null) partial++; else ready++; }
+        }
       }
       if (ready >= 2 || partial >= 4 || count >= 8 || total + q.size > MAX_TOTAL) throw "Image staging quota reached; wait for abandoned uploads to expire or reconcile the session";
       var id = random();
       if (id == null || id.length < 24 || !~/^[A-Za-z0-9_-]+$/.match(id) || entries.exists(id)) throw "Could not create image identity";
-      entries.set(id,{session:q.session,id:id,size:q.size,offset:0,bytes:new BytesBuffer(),path:null,updated:clock(),pinned:false,removed:false,thread:null});
+      entries.set(id,{session:q.session,id:id,size:q.size,offset:0,bytes:new BytesBuffer(),path:null,updated:clock(),pinned:false,removed:false,thread:null,turn:null,item:null});
       return {upload:id,offset:0,complete:false};
     }
     var entry = q.upload == null ? null : entries.get(q.upload);
     if (entry == null || entry.session != q.session || entry.removed) throw "Image upload expired or is unavailable";
     entry.updated = clock();
     if (q.operation == "remove") {
-      entry.removed = true; if (!entry.pinned) discard(entry); else persist();
+      entry.removed = true; if (!entry.pinned && entry.turn == null) discard(entry); else persist();
       return {upload:entry.id,offset:entry.offset,complete:entry.path != null};
     }
     if (q.operation == "chunk") {
@@ -154,6 +160,44 @@ class AgentImageStaging {
     try persist() catch (_:Dynamic) { failed = true; return false; }
     return true;
   }
+  /** Associate only a path that this service itself staged for this active session. */
+  public function archive(session:String,turn:String,itemId:String,path:String):Null<String> {
+    if (!available() || turn == null || turn == "" || turn.length > 128 || itemId == null || itemId == "" || itemId.length > 128 || path == null) return null;
+    var candidate:Null<StagedImage>=null;
+    for (entry in entries) if (entry.session == session && entry.path == path) candidate=entry;
+    if (candidate == null || candidate.path == null || !FileSystem.exists(candidate.path)) return null;
+    if (candidate.turn != null) return candidate.turn == turn && candidate.item == itemId ? candidate.id : null;
+    if (!candidate.pinned) return null;
+    var archived:Array<StagedImage>=[for (entry in entries) if (entry.turn != null) entry];
+    var total=0; for (entry in archived) total+=entry.size;
+    archived.sort(function(a,b) return Reflect.compare(a.updated,b.updated));
+    while (archived.length >= 32 || total + candidate.size > 64 * 1024 * 1024) {
+      var victim:Null<StagedImage>=null;
+      for (entry in archived) if (!entry.pinned && victim == null) victim=entry;
+      if (victim == null) return null;
+      var before=entries.exists(victim.id); discard(victim);
+      if (before && entries.exists(victim.id)) return null;
+      archived.remove(victim); total-=victim.size;
+    }
+    candidate.turn=turn; candidate.item=itemId; candidate.updated=clock();
+    try persist() catch (_:Dynamic) {candidate.turn=null; candidate.item=null; failed=true; return null;}
+    return candidate.id;
+  }
+  public function readArchive(session:String,turn:String,itemId:String,id:String,offset:Int):Null<workspace.service.WorkspaceAgentProtocol.AgentContentChunk> {
+    if (!available() || id == null || offset < 0) return null;
+    var entry=entries.get(id);
+    if (entry == null || entry.session != session || entry.turn != turn || entry.item != itemId || entry.path == null) return null;
+    try {
+      var metadata=FileSystem.metadata(entry.path);
+      if (metadata == null || metadata.size != entry.size || !secureFile(entry.path)) return null;
+      var bytes=File.getBytes(entry.path);
+      // Validate the complete encoded image at the start of a read. Repeating
+      // PNG CRC validation for every 24 KiB slice makes large images quadratic.
+      if (bytes.length != entry.size || (offset == 0 && imageExtension(bytes) == null) || offset >= bytes.length) return null;
+      var length=Std.int(Math.min(24*1024,bytes.length-offset));
+      return {token:id,offset:offset,total:bytes.length,bytes:bytes.sub(offset,length),partial:false};
+    } catch (_:Dynamic) return null;
+  }
   public function clean(exists:String->Bool, active:(String, Null<String>)->Bool):Void {
     var now = clock();
     for (item in [for (v in entries) v]) {
@@ -161,7 +205,7 @@ class AgentImageStaging {
         item.pinned = false;
         try persist() catch (_:Dynamic) { item.pinned = true; failed = true; }
       }
-      if (!item.pinned && (item.removed || now - item.updated > TTL || !exists(item.session))) discard(item);
+      if (!item.pinned && (!exists(item.session) || (item.turn == null && (item.removed || now - item.updated > TTL)))) discard(item);
     }
   }
   function discard(item:StagedImage):Void {
@@ -172,7 +216,7 @@ class AgentImageStaging {
     if (item.path != null) try persist() catch (_:Dynamic) { entries.set(item.id,item); failed = true; }
   }
   public function dispose():Void {
-    for (item in [for (v in entries) v]) if (!item.pinned) discard(item);
+    for (item in [for (v in entries) v]) if (!item.pinned && item.turn == null) discard(item);
     if (directory != null) unlock();
   }
   static function be32(b:Bytes,p:Int):Int return (b.get(p)<<24)|(b.get(p+1)<<16)|(b.get(p+2)<<8)|b.get(p+3);

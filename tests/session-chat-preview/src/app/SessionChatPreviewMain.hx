@@ -38,6 +38,8 @@ private class PreviewApplication implements DesktopUiApplication {
  var historyActivate:Bool = false;
  var historyFrames:Int = 0;
  var historyStarted:Float = 0;
+ var sentImagePreview:Bool = false;
+ var sentImageFrames:Int = 0;
  var pendingPreview:Null<(Null<haxe.io.Bytes>, Null<String>)->Void>;
  public function new(host:DesktopUiHostContext, dark:Bool, args:Array<String>) {
   this.host = host;
@@ -61,6 +63,20 @@ private class PreviewApplication implements DesktopUiApplication {
      var older:Array<workspace.service.WorkspaceAgentProtocol.AgentActivityItem> = [for (i in 0...5) {id:"old-" + i,turn:"turn",kind:"agentMessage",title:"",text:"Earlier page message " + (i + 1),detail:"",state:"completed",truncated:false}];
      agent.view.items = older.concat(before); agent.history.loading = false; agent.history.hasOlder = false;
      var done:Null<String>->Void = cast agent.historyDone; agent.historyDone = null; done(null); host.requestFrame();
+    }
+   };
+  }
+  if (args.indexOf("--sent-image") >= 0) {
+   sentImagePreview = args.indexOf("--sent-image-preview") >= 0;
+   agent.view.items = [
+    {id:"sent-user",turn:"sent-turn",kind:"userMessage",title:"",text:"Please review this image.",detail:"",state:"completed",truncated:false,images:[{id:"opaque-image-fixture"}]},
+    {id:"sent-reply",turn:"sent-turn",kind:"agentMessage",title:"",text:"I can inspect the attached image.",detail:"",state:"completed",truncated:false}
+   ];
+   host.onPoll = function() {
+    if (agent.pendingImage != null) {
+     var done:(Null<haxe.io.Bytes>,Null<String>)->Void = cast agent.pendingImage; agent.pendingImage = null;
+     if (agent.imageRequestIdentity != "session:sent-turn:sent-user:opaque-image-fixture") done(null,"Image identity mismatch");
+     else done(sys.io.File.getBytes(Sys.getCwd()+"/graphical/assets/icons/exosuit-256.png"),null);
     }
    };
   }
@@ -163,6 +179,17 @@ private class PreviewApplication implements DesktopUiApplication {
  public function context():UiContext return contextValue;
  public function submit(frame:LayoutFrame):RenderNode {
   var root = contextValue.submit(panel, frame);
+  if (sentImagePreview) {
+   sentImageFrames++;
+   if (sentImageFrames < 4) host.requestFrame();
+   else {
+    var preview:RenderNode = null;
+    root.walk(function(node) { if (preview == null && node.semantics != null && node.semantics.label == "Preview image") preview = node; });
+    if (preview != null && contextValue.focusWidget(preview.id)) {
+     sentImagePreview = false; contextValue.key(UiEventKind.KeyDown, haxeon.ui.core.UiKey.Enter); host.requestFrame();
+    }
+   }
+  }
   if (historyMode && historyFrames < 8) {
    historyFrames++;
    if (historyFrames == 3) panel.transcriptScroll.jumpTo(0, 0);

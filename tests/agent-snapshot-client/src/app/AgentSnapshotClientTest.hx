@@ -68,6 +68,16 @@ class AgentSnapshotClientTest {
   client.loadOlderAgentItems("a",function(error) pageError=error); server.poll();conn.poll();
   current=cast client.agentView("a");
   require(pageError==null && current.items != null && current.items.length==2 && current.items[0].id=="old", "Explicit snapshot history page did not aggregate in order");
+  var imageBytes=Bytes.alloc(70000);for (i in 0...imageBytes.length) imageBytes.set(i,i%251);
+  var imageReads=0, loaded:Null<Bytes>=null, imageError:Null<String>="pending";
+  server.register(WorkspaceAgentProtocol.MESSAGE_IMAGE,function(q,ctx) {
+   require(q.session=="a" && q.turn=="t" && q.item=="old" && q.token=="opaque", "Image read lost its item scope");
+   imageReads++;var count=Std.int(Math.min(24*1024,imageBytes.length-q.offset));
+   ctx.respond({token:q.token,offset:q.offset,total:imageBytes.length,bytes:imageBytes.sub(q.offset,count),partial:false});
+  });
+  client.loadAgentImage("a","t","old","opaque",function(bytes,error) {loaded=bytes;imageError=error;});
+  for (_ in 0...5) {server.poll();conn.poll();}
+  require(imageError==null && loaded!=null && (cast loaded:Bytes).compare(imageBytes)==0 && imageReads==3,"Sent image chunks did not assemble exactly");
   client.agentAction("a","prompt","generation",null,null,null,function() accepted++);server.poll();
   endpoint.generation="changed";conn.poll();client.poll();
   require(accepted==4 && !client.agentBusy(), "Changed service generation acknowledged stale action or left it busy");
@@ -84,10 +94,36 @@ class AgentSnapshotClientTest {
   }
   require(assembler.view().activity==longText,"Large view was not assembled losslessly");
   client.dispose();conn.close();server.close();
+  for (mode in ["token","offset","total","oversize","generation","connection","session"]) malformedImage(mode);
   AgentHistoryClientTest.run();
   disposalDuringSnapshot();
   realServiceRoundTrip();
   Sys.println("PASS: negotiated snapshot acknowledgement, stale fencing, errors and bounded assembly");
+ }
+ static function malformedImage(mode:String):Void {
+  var clock=function() return 1000.0,pair=MemoryTransport.pair(),conn=new RpcConnection(pair.client,clock),server=new RpcConnection(pair.server,clock);
+  var endpoint=new SnapshotEndpoint(conn),client=new workspace.client.RpcWorkspaceWorkbenchClient(endpoint,clock);
+  client.poll();client.agentCatalog={instance:"test",root:"/fixture",records:[],status:"ready"};client.agentViews.set("a",view("token",""));
+  var held:Null<RpcContext<AgentContentChunk>>=null,callbacks=0,error:Null<String>=null,result:Null<Bytes>=null;
+  server.register(WorkspaceAgentProtocol.MESSAGE_IMAGE,function(q,ctx) {
+   if(q.offset==0 && (mode=="generation" || mode=="connection" || mode=="session")) {held=ctx;return;}
+   if(q.offset==0) {ctx.respond({token:"image",offset:0,total:30000,bytes:Bytes.alloc(24576),partial:false});return;}
+   ctx.respond({token:mode=="token" ? "other" : "image",offset:mode=="offset" ? q.offset+1 : q.offset,
+    total:mode=="total" ? 30001 : mode=="oversize" ? 2*1024*1024+1 : 30000,bytes:Bytes.alloc(5424),partial:false});
+  });
+  client.loadAgentImage("a","turn","item","image",function(bytes,message) {callbacks++;result=bytes;error=message;});
+  server.poll();conn.poll();
+  if(held!=null) {
+   if(mode=="generation") endpoint.generation="replacement";
+   if(mode=="connection") endpoint.conn=null;
+   if(mode=="session") client.agentViews.remove("a");
+   var pending:RpcContext<AgentContentChunk>=cast held;
+   var payload:AgentContentChunk={token:"image",offset:0,total:1,bytes:Bytes.alloc(1),partial:false};
+   require(pending.respond(payload) && !pending.respond(payload),"Provider delivered duplicate completion");
+   conn.poll();
+  } else {server.poll();conn.poll();}
+  require(callbacks==1 && result==null && error!=null,"Invalid or stale sent image accepted: "+mode);
+  client.dispose();conn.close();server.close();
  }
  static function disposalDuringSnapshot():Void {
   var clock=function() return 1000.0, pair=MemoryTransport.pair();
@@ -172,7 +208,7 @@ private class SnapshotProvider implements workspace.provider.LocalAgentProvider 
  public function dispose():Void {}
 }
 private class SnapshotEndpoint implements workspace.client.WorkspaceRpcEndpoint {
- final conn:RpcConnection;
+ public var conn:Null<RpcConnection>;
  public var generation:String="test";
  public function new(conn:RpcConnection) this.conn=conn;
  public function rootPath():Null<String> return "/fixture";

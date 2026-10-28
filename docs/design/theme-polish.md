@@ -6,7 +6,7 @@ The editor and graphical controls share semantic defaults through `WorkbenchColo
 
 Selected tabs connect to the editor canvas and retain the existing accent indicator. Compact tab labels and softly rounded toolbar hover surfaces keep the chrome quiet while preserving established hit targets, sidebar selection rails, and status bar geometry.
 
-The desktop dock sits inside a narrow framed surface with a crisp edge and contact shadow. Navigation actions use quiet surfaces until interaction; selection remains clear through the activity rail and tab indicators. The composer uses a plain outlined box, while selection surfaces use a subtle rim and soft shadows.
+The desktop dock sits inside a narrow framed surface with a crisp edge and contact shadow. Navigation actions use quiet surfaces until interaction; selection remains clear through the activity rail and tab indicators. Code and per-file diff cards share a fine one-pixel edge in both themes, keeping change tints distinct and preserving native text selection and scroll clipping. The composer uses a plain outlined box, while selection surfaces use a subtle rim and soft shadows.
 
 Acceptance criteria:
 

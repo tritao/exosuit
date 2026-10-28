@@ -1534,6 +1534,7 @@ class ExosuitApp implements DesktopUiApplication {
     context: function() return sessionWorkspaceLabel(resource, root),
     resolveImage: function(destination) return resolveSessionImage(resource, root, destination),
     loadImage: function(destination, done) readSessionImage(resource, root, destination, done),
+    openMessageImage: function(turn,item,imageId,bytes) openSentSessionImage(resource,root,turn,item,imageId,bytes),
     readContext: function(path, done) readSessionContext(resource, root, path, done),
     canCreateWorktree: function() return sessionWorktreeRepository(resource, root) != null,
     newWorktree: function() createSessionWorktree(resource, root),
@@ -1771,6 +1772,24 @@ class ExosuitApp implements DesktopUiApplication {
    var metadata = sys.FileSystem.metadata(path);
    return metadata != null && metadata.size <= 4 * 1024 * 1024 ? path : null;
   } catch (_:Dynamic) return null;
+ }
+
+ function openSentSessionImage(resource:String,root:String,turn:String,item:String,imageId:String,bytes:haxe.io.Bytes):Void {
+  if(sessionRecord(resource,root)==null) {application.reportError("agent","Reconnect this session to open its image");return;}
+  var image:Null<haxeon.ui.Image>=null;
+  try {
+   var dimensions=SessionImageProbe.dimensions(bytes);
+   if(dimensions==null) throw "Unsupported or invalid sent image";
+   var digest=haxe.crypto.Sha256.make(bytes), fingerprint="";
+   for(index in 0...digest.length) fingerprint+=StringTools.hex(digest.get(index),2);
+   var identity="sent-image:"+root.length+":"+root+resource.length+":"+resource+turn.length+":"+turn+item.length+":"+item+imageId.length+":"+imageId+":"+fingerprint;
+   if(host.activateRemoteImage(identity)) {requestFrame();return;}
+   if(!host.canOpenRemoteImage(dimensions.width,dimensions.height)) throw "Image memory limit reached; close an image and try again";
+   image=SessionImageProbe.decodeFull(bytes);
+   if(image==null) throw "Unsupported or invalid sent image";
+   host.openRemoteImage(identity,"Sent image",image,bytes.length,"session");image=null;
+  } catch(problem:Dynamic) {if(image!=null) image.dispose();application.reportError("agent",Std.string(problem));}
+  requestFrame();
  }
 
  function readSessionImage(resource:String, root:String, destination:String, done:(Null<haxe.io.Bytes>, Null<String>)->Void):Void {

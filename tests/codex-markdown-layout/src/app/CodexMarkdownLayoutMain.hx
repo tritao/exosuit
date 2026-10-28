@@ -51,6 +51,23 @@ class CodexMarkdownLayoutMain {
     view.update("First `line`.\nSecond `line`.");
     root = context.submit(view, new LayoutFrame(1000, 400));
     require(find(root, "Second").globalBounds().y > find(root, "First").globalBounds().y + 10, "Merged explicit lines");
+    var boundarySource = "# Result\nBody text\n> Quoted text\n- First item\n- Second item\nNext paragraph";
+    var boundaryBlocks = workspace.client.CodexMarkdown.parse(boundarySource);
+    require(boundaryBlocks.length == 5 && boundaryBlocks[0].text == "# Result" && boundaryBlocks[1].text == "Body text"
+      && boundaryBlocks[2].text == "> Quoted text" && boundaryBlocks[3].text == "- First item\n- Second item",
+      "Markdown structural lines merged without blank separators");
+    var boundaries = new CodexMarkdownView(boundarySource, new style.Theme(), syntaxes);
+    root = context.submit(boundaries,new LayoutFrame(420,600));
+    require(find(root,"Body text").globalBounds().y > find(root,"Result").globalBounds().y + 20,
+      "Heading swallowed the following paragraph");
+    require(find(root,"Quoted text").globalBounds().y > find(root,"Body text").globalBounds().y,
+      "Quote did not retain its block");
+    var multiCode = workspace.client.CodexMarkdown.inlineSpans("Use `` `literal` `` and ` normal `, then ``unfinished");
+    require(multiCode.length == 5 && multiCode[1].kind == "code" && multiCode[1].text == "`literal`"
+      && multiCode[3].text == "normal" && multiCode[4].text == ", then ``unfinished",
+      "Multi-backtick or unfinished inline code lost source");
+    var literalImage = workspace.client.CodexMarkdown.parse("`` ` ![literal](x.png) ``");
+    require(literalImage.length == 1 && literalImage[0].kind == "text", "Inline-code image became a preview");
     var destination = "https://learn.microsoft.com/en-us/cpp/c-runtime-library/reference/rename-wrename?view=msvc-170";
     var opened:String = null;
     var links = new CodexMarkdownView("Microsoft documents `_wrename` ([Microsoft Learn](" + destination + ")).", new style.Theme(), syntaxes, function(url) opened = url);
@@ -219,6 +236,29 @@ class CodexMarkdownLayoutMain {
     root.walk(function(node) { if (node.styleType == "scroll-view" && node.styleKey == "diff-scroll-0") diffScroll = node; });
     require(diffScroll != null && diffScroll.globalBounds().height <= 320.1, "Long diff exceeded its viewport");
     require(diffScroll.layout.style.clipHorizontal && diffScroll.layout.style.clipVertical, "Diff must scroll on both axes");
+    for (dark in [false, true]) {
+      var themed = new UiContext(null, fonts, ui.ExosuitPalette.theme(dark));
+      var borderedDiff = new ui.SessionDiffView(patch, function(_) {});
+      for (width in [320.0, 1000.0]) {
+        var diffRoot = themed.submit(borderedDiff, new LayoutFrame(width, 800));
+        var diffFrame:RenderNode = null, framedScroll:RenderNode = null;
+        diffRoot.walk(function(node) {
+          if (node.styleKey == "diff-file-frame-0") diffFrame = node;
+          if (node.styleType == "scroll-view" && node.styleKey == "diff-scroll-0") framedScroll = node;
+        });
+        require(diffFrame != null && diffFrame.children.length == 1, "Diff edge or content missing");
+        var outer = diffFrame.globalBounds(), inner = diffFrame.children[0].globalBounds();
+        require(Math.abs(inner.x - outer.x - 1) < 0.1 && Math.abs(inner.width - outer.width + 2) < 0.1,
+          "Diff edge changed viewport bounds at " + width);
+        require(framedScroll != null && framedScroll.layout.style.clipHorizontal && framedScroll.layout.style.clipVertical,
+          "Framed diff lost two-axis clipping");
+        require(find(diffRoot, "Diff line 5").focusable, "Framed diff lost selectable text");
+        var action = find(diffRoot, "Open file").globalBounds();
+        require(action.x >= outer.x && action.x + action.width <= outer.x + outer.width + 0.1,
+          "Diff action escaped its edge");
+      }
+      themed.dispose();
+    }
     for (literal in ["[unfinished](https://example.com", "[unsafe](javascript:alert(1))", "`[literal](https://example.com)`"])
       for (span in workspace.client.CodexMarkdown.inlineSpans(literal)) require(span.kind != "link", "Made literal or unsupported content clickable");
     context.dispose(); session.dispose(); fonts.dispose();

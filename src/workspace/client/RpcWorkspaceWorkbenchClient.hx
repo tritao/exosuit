@@ -565,6 +565,29 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     });
   }
 
+  public function loadAgentImage(id:String,turn:String,item:String,imageId:String,done:(Null<haxe.io.Bytes>,Null<String>)->Void):Void {
+    var connection=rpc(),generation=instance();
+    if (connection == null || !canReadAgents() || agentViews.get(id) == null || imageId == null || imageId == "") {done(null,"Sent image is unavailable");return;}
+    var finished=false,total = -1,data:Null<haxe.io.Bytes>=null;
+    function fail(message:String):Void {if (!finished) {finished=true;done(null,message);}}
+    var next:Int->Void=null;
+    next=function(offset:Int) {
+      if (rpc()!=connection || instance()!=generation || agentViews.get(id)==null) {fail("Workspace connection changed; retry the image");return;}
+      connection.call(WorkspaceAgentProtocol.MESSAGE_IMAGE,{workspace:"workspace",instance:generation,session:id,turn:turn,item:item,token:imageId,offset:offset},20000,function(chunk) {
+        if (finished) return;
+        if (rpc()!=connection || instance()!=generation || agentViews.get(id)==null) {fail("Workspace connection changed; retry the image");return;}
+        if (chunk == null || chunk.token != imageId || chunk.offset != offset || chunk.total <= 0 || chunk.total > 2*1024*1024
+            || chunk.bytes == null || chunk.bytes.length <= 0 || chunk.bytes.length > 24*1024 || offset+chunk.bytes.length > chunk.total
+            || chunk.partial || (total >= 0 && total != chunk.total)) {fail("Invalid sent image response");return;}
+        if (data == null) {total=chunk.total;data=haxe.io.Bytes.alloc(total);}
+        var target:haxe.io.Bytes=cast data;target.blit(offset,chunk.bytes,0,chunk.bytes.length);
+        var end=offset+chunk.bytes.length;
+        if (end==total) {finished=true;done(target,null);} else next(end);
+      },function(_) fail("Sent image is no longer available"));
+    };
+    next(0);
+  }
+
   public function loadAgentContent(id:String, turn:String, item:String, token:String, done:(Null<String>, Bool, Null<String>)->Void):Void {
     var connection=rpc(), generation=instance(), view=agentViews.get(id);
     if (connection == null || !canReadAgents() || view == null || view.supportsMessageContent != true || token == null || token == "") {
