@@ -28,6 +28,8 @@ extern function releaseLock(lock:SuitLockHandle):Void;
 	and on Windows the tray icon. It also holds the relay machine socket of every hosted workspace
 	(`suit.relay.SuitRelayHosting`).
 
+	The tray menu does not stop this loop: NativeKit runs the popup on its own thread (`SuitTray.show`).
+
 	Idle cost: it sleeps in the NativeKit event wait, which a tray click or a control connection wakes,
 	and rescans processes every REFRESH_SECONDS to keep the tooltip current. It exits after
 	`EXOSUIT_SUIT_IDLE_SECONDS` (default 120) with nothing of exosuit's to track and no hosted workspace:
@@ -290,6 +292,21 @@ class SuitDaemon {
 				// Pause without stopping the services: their daemons see the pause and exit on their own.
 				refresh();
 				return {ok: true, roots: SuitRelayHosting.stop(inventory, SuitRecords.stringField(request, "workspace"), relay).roots};
+			case "test-menu":
+				// Tests only: open the tray menu as a click does (adding the icon if needed), or close it by
+				// removing the icon, so a test can check that the daemon keeps working while it is open.
+				if (Sys.getEnv("EXOSUIT_SUIT_HOME") == null || Sys.getEnv("EXOSUIT_SUIT_TEST_MENU") != "1")
+					return {ok: false, error: "unknown request"};
+				if (Reflect.field(request, "close") == true) {
+					if (tray != null)
+						tray.dispose();
+					tray = null;
+					return {ok: true};
+				}
+				if (tray == null)
+					tray = new SuitTray(tooltip(), findIcon());
+				menuRequested = true;
+				return {ok: true};
 			case "login-toggle":
 				// As the tray's checkbox does: in the background, answered at once.
 				SuitLogin.toggleInBackground();

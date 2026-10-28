@@ -12,7 +12,8 @@ Covers:
   service (the editor's side) stops;
 - suit does not idle out while it hosts, and does once hosting is paused;
 - a device frame with no service running starts the workspace manager on demand;
-- frames pass both ways between a device and an attached daemon (a stand-in daemon on suit's pipe);
+- frames pass both ways between a device and an attached daemon (a stand-in daemon on suit's pipe),
+  with suit's tray menu open (a test op opens a real popup briefly), and `suit status` answers meanwhile;
 - Stop hosting pauses (the relay sees the machine offline), resume works without suit, and suit hosts
   again from its records when it starts; a pause alone makes a running workspace manager exit;
 - Disconnect closes the device's socket (close code 4001) and refuses it for the cooldown;
@@ -72,6 +73,25 @@ def own_image() -> str:
     kernel32.GetCurrentProcess.restype = ctypes.c_void_p
     assert kernel32.QueryFullProcessImageNameW(ctypes.c_void_p(kernel32.GetCurrentProcess()), 0, buffer, ctypes.byref(size))
     return buffer.value
+
+
+def open_menu(pid: int) -> bool:
+    """Whether process `pid` shows a popup menu (window class #32768)."""
+    user32 = ctypes.windll.user32
+    found = []
+    callback_type = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+
+    def visit(window, _):
+        owner = ctypes.c_ulong(0)
+        user32.GetWindowThreadProcessId(ctypes.c_void_p(window), ctypes.byref(owner))
+        name = ctypes.create_unicode_buffer(16)
+        user32.GetClassNameW(ctypes.c_void_p(window), name, 16)
+        if owner.value == pid and name.value == "#32768" and user32.IsWindowVisible(ctypes.c_void_p(window)):
+            found.append(window)
+        return True
+
+    user32.EnumWindows(callback_type(visit), None)
+    return bool(found)
 
 
 def pipe_name(home: Path) -> str:
@@ -423,7 +443,7 @@ def test_relay(base: Path) -> None:
         "EXOSUIT_RELAY_TEST_CREDENTIALS_DIR": str(credentials), "EXOSUIT_AGENT_STATE_HOME": str(agent_state),
         "EXOSUIT_SUIT_LOGIN_KEY": "HKCU\\Software\\ExosuitSuitTest\\unused",
         # This Python process stands in for an attached daemon on suit's pipe (PipeDaemon).
-        "EXOSUIT_SUIT_TEST_ATTACH_CALLER": own_image()}
+        "EXOSUIT_SUIT_TEST_ATTACH_CALLER": own_image(), "EXOSUIT_SUIT_TEST_MENU": "1"}
     suit = Suit(base, suit_settings)
     # What the editor sets for the workspace manager it starts. suit's environment lacks it: its on-demand
     # start must set it itself.
@@ -503,6 +523,9 @@ def test_relay(base: Path) -> None:
             assert reply.get("ok") is True, reply
             first = pipe.receive(10)
             assert first is not None and first[0] == 0x10 and json.loads(first[1:])["connected"] is True, first
+            # The tray menu stays open through the exchange: its modal loop must not stop suit's.
+            assert suit.control({"op": "test-menu"}).get("ok") is True
+            wait_until(lambda: open_menu(suit.pid()), 10, "the tray menu did not open")
             socket_b = relay.device_socket(machine, device, device_token); devices.append(socket_b)
             assert socket_b.status == 101, socket_b.status
             socket_b.send(envelope(device, b"ping through suit"))
@@ -521,7 +544,11 @@ def test_relay(base: Path) -> None:
             assert answer is not None, "the daemon's frame did not reach the device"
             assert parse_envelope(answer)[2] == b"pong through suit", answer
             assert suit.hosts()[0]["starts"] == starts, "suit started a service although a daemon was attached"
-            print("  frames pass both ways between a device and the attached daemon")
+            assert suit.running(), "suit status got no answer while the tray menu was open"
+            assert open_menu(suit.pid()), "the tray menu closed before the checks ran"
+            assert suit.control({"op": "test-menu", "close": True}).get("ok") is True
+            wait_until(lambda: not open_menu(suit.pid()), 10, "removing the tray icon left its menu open")
+            print("  frames pass both ways between a device and the attached daemon, with the tray menu open")
 
             # Two clients: both listed with their details, one disconnected from the CLI, the list follows.
             second, second_token = secrets.token_hex(16), secrets.token_hex(32)
