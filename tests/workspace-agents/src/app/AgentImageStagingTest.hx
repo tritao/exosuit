@@ -9,6 +9,20 @@ class AgentImageStagingTest {
  static function require(value:Bool, message:String):Void if (!value) throw message;
  static function main():Void run();
  public static function run():Void {
+  var attempts=0, delays:Array<Float>=[];
+  workspace.provider.AgentJournalPublisher.write("journal","unchanged",true,function(path,content) {
+   require(path=="journal" && content=="unchanged","Journal retry changed publication");
+   attempts++;if(attempts<3) throw "transient";
+  },function(delay) delays.push(delay));
+  require(attempts==3 && delays.length==2 && delays[0]==0.01 && delays[1]==0.02,"Transient journal retry failed");
+  attempts=0;delays=[];var retryFailed=false;
+  try workspace.provider.AgentJournalPublisher.write("journal","unchanged",true,function(_,_) {attempts++;throw "persistent";},function(delay) delays.push(delay))
+  catch (_:Dynamic) retryFailed=true;
+  require(retryFailed && attempts==4 && delays.length==3 && delays[2]==0.04,"Persistent journal retry was not bounded");
+  attempts=0;delays=[];retryFailed=false;
+  try workspace.provider.AgentJournalPublisher.write("journal","unchanged",false,function(_,_) {attempts++;throw "persistent";},function(delay) delays.push(delay))
+  catch (_:Dynamic) retryFailed=true;
+  require(retryFailed && attempts==1 && delays.length==0,"Non-Windows publication unexpectedly retried");
   var base = Sys.args()[0], root = "image-test-" + Std.string(Sys.time()), serial = 0, now = 1000.0;
   function random():String return StringTools.lpad(Std.string(++serial), "0", 32);
   function secureDir(path:String):Bool { if (!sys.FileSystem.exists(path)) sys.FileSystem.createDirectory(path); return true; }

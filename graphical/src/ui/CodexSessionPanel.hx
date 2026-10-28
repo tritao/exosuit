@@ -59,6 +59,8 @@ class CodexSessionPanel implements View {
   final openLink:Null<String->Void>;
   final workspaceActions:Null<SessionWorkspaceActions>;
   final transcriptScroll = new ScrollController();
+  var requestAnchor:Null<RenderNode> = null;
+  var transcriptViewport:Null<RenderNode> = null;
   var prompt = "";
   var promptRevision = 0;
   var selectedModel = "";
@@ -450,6 +452,7 @@ class CodexSessionPanel implements View {
       }
     }
     var requestCards:Array<KeyedView> = [];
+    requestAnchor = null;
     var retainedQuestions:Map<String, SessionQuestionForm> = [];
     var retainedRequestDetails:Map<String, Bool> = [];
     for (request in view.requests) {
@@ -571,7 +574,9 @@ class CodexSessionPanel implements View {
       requestStyle.childGap = 10;
       requestStyle.background = tokens.surfaceRaised;
       requestStyle.radiusTopLeft = requestStyle.radiusTopRight = requestStyle.radiusBottomLeft = requestStyle.radiusBottomRight = 10;
-      requestCards.push(new KeyedView("request-card-" + r.id, new Column("agent-request-" + r.id, requestRows, requestStyle)));
+      var requestCard:View = new Column("agent-request-" + r.id, requestRows, requestStyle);
+      if (requestCards.length == 0) requestCard = new RequestAnchor(requestCard, function(node) requestAnchor = node);
+      requestCards.push(new KeyedView("request-card-" + r.id, requestCard));
     }
     questionForms = retainedQuestions;
     expandedRequestDetails = retainedRequestDetails;
@@ -745,7 +750,23 @@ class CodexSessionPanel implements View {
     activityStyle.childAlignX = haxeon.ui.LayoutAlignmentX.Center;
     activityStyle.childGap = 12;
     activityStyle.padding = new Insets(0, 12, 0, 16);
-    rows.push(new KeyedView("activity", new AgentTranscript(new Column("codex-items", activity, activityStyle), style, transcriptScroll, frame)));
+    if (view.requests.length > 0) {
+      var requestCount = view.requests.length + (view.requestsOmitted == null ? 0 : view.requestsOmitted);
+      var noticeStyle = new LayoutStyle(); noticeStyle.width = LayoutAxis.grow(); noticeStyle.childGap = 8;
+      noticeStyle.childAlignY = haxeon.ui.LayoutAlignmentY.Center; noticeStyle.wrapMode = haxeon.ui.LayoutWrapMode.Wrap;
+      var noticeLabel = new LayoutStyle(); noticeLabel.width = LayoutAxis.grow();
+      rows.push(new KeyedView("request-notice", new Row("agent-request-notice", [
+        new KeyedView("label", new Text("Input needed · " + requestCount + (requestCount == 1 ? " request" : " requests"), noticeLabel, tokens.textSecondary)),
+        new KeyedView("review", quietButton("Review request", function() {
+          if (requestAnchor == null || transcriptViewport == null || requestAnchor.resolved == null || transcriptViewport.resolved == null) return;
+          var target = requestAnchor.globalBounds(), viewport = transcriptViewport.globalBounds();
+          transcriptScroll.jumpTo(transcriptScroll.offsetX, transcriptScroll.offsetY + target.y - viewport.y - 4);
+          frame();
+        }, "agent-review-request"))
+      ], noticeStyle)));
+    }
+    rows.push(new KeyedView("activity", new AgentTranscript(new Column("codex-items", activity, activityStyle), style, transcriptScroll, frame,
+      function(node) transcriptViewport = node)));
     if (transcriptScroll.maxScrollY - transcriptScroll.offsetY > 2) rows.push(new KeyedView("jump-latest",
       new Button("Jump to latest", null, function() {
         transcriptScroll.jumpTo(transcriptScroll.offsetX, transcriptScroll.maxScrollY);
@@ -1044,13 +1065,21 @@ private class CodexPromptNode implements View {
   public function build(context:BuildContext):RenderNode return node;
 }
 
+private class RequestAnchor implements View {
+  final child:View;
+  final capture:RenderNode->Void;
+  public function new(child:View, capture:RenderNode->Void) { this.child = child; this.capture = capture; }
+  public function build(context:BuildContext):RenderNode { var node = child.build(context); capture(node); return node; }
+}
+
 /** History has its own scroll extent; its natural height must not push the composer out of the viewport. */
 private class AgentTranscript implements View {
   final content:View;
   final style:LayoutStyle;
   final controller:ScrollController;
   final frame:Void->Void;
-  public function new(content:View, style:LayoutStyle, controller:ScrollController, frame:Void->Void) {this.content = content;this.style = style;this.controller = controller;this.frame = frame;}
+  final capture:RenderNode->Void;
+  public function new(content:View, style:LayoutStyle, controller:ScrollController, frame:Void->Void, capture:RenderNode->Void) {this.content = content;this.style = style;this.controller = controller;this.frame = frame;this.capture = capture;}
   public function build(context:BuildContext):RenderNode {
     var node:Null<RenderNode> = null;
     // Follow new output only while the reader is already at the bottom.
@@ -1062,6 +1091,7 @@ private class AgentTranscript implements View {
       return {width:width,height:geometry == null ? height : Math.max(geometry.height,geometry.contentBounds.y+geometry.contentBounds.height)};
     };
     node = scroll.build(context);
+    capture(node);
     node.on(UiEventKind.KeyDown, function(_) frame());
     node.on(UiEventKind.PointerUp, function(_) frame());
     if (node.children.length > 0) node.children[0].onResolved(function(_) {

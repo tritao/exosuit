@@ -6,6 +6,7 @@ import workspace.service.WorkspaceAgentPersistence;
 import workspace.service.WorkspaceAgentProtocol;
 
 /** Workspace authorization, provider routing and resource limits; adapters own only their protocols. */
+@:access(haxeon.rpc.RpcConnection)
 class WorkspaceAgentService implements WorkspaceAgents {
  final workspace:String;
  final instance:String;
@@ -13,6 +14,7 @@ class WorkspaceAgentService implements WorkspaceAgents {
  final providers:Array<LocalAgentProvider>;
  final registry:Map<String,LocalAgentProvider> = [];
  final images:AgentImageStaging;
+ final snapshots:Array<{connection:RpcConnection,cache:AgentSnapshotCache}> = [];
  public var status(get,never):String;
  function get_status():String return [for(provider in providers) provider.summary()].join("; ");
 
@@ -55,6 +57,8 @@ class WorkspaceAgentService implements WorkspaceAgents {
   return found;
  }
  public function bind(connection:RpcConnection,capabilities:Array<String>):Void {
+  var cache=new AgentSnapshotCache(root,Sys.time,app.AgentManagerNative.randomToken);
+  snapshots.push({connection:connection,cache:cache});
   function allowed(w:String,i:String,control:Bool):Bool return w == workspace && i == instance
    && capabilities.contains(WorkspaceAgentProtocol.READ) && (!control || capabilities.contains(WorkspaceAgentProtocol.CONTROL));
   connection.register(WorkspaceAgentProtocol.LIST,function(q,ctx) {
@@ -65,7 +69,7 @@ class WorkspaceAgentService implements WorkspaceAgents {
    var more=found.length>6;
    if(more) found.resize(6);
    ctx.respond({instance:instance,root:root,records:found,status:status,
-    canMove:true,canRename:true,nativeRenameProviders:[for(p in providers) if(p.nativeNamingSupported()) p.driverKind()],providers:[for(p in providers) p.driverKind()],next:more ? found[found.length-1].id : null});
+    canMove:true,canRename:true,supportsSnapshots:true,nativeRenameProviders:[for(p in providers) if(p.nativeNamingSupported()) p.driverKind()],providers:[for(p in providers) p.driverKind()],next:more ? found[found.length-1].id : null});
   });
   connection.register(WorkspaceAgentProtocol.CREATE,function(q,ctx) {
    if(!allowed(q.workspace,q.instance,true)) {ctx.fail({code:"unauthorized",message:"Agent creation denied",ambiguous:false});return;}
@@ -80,7 +84,7 @@ class WorkspaceAgentService implements WorkspaceAgents {
    if(existing == null && records().length>=32) {ctx.fail({code:"limit",message:"Agent catalog is full",ambiguous:false});return;}
    provider.create(q,ctx);
   });
-  connection.register(WorkspaceAgentProtocol.ACTION,function(q,ctx) {
+  function action(q:AgentAction,ctx:haxeon.rpc.RpcContext<AgentView>):Void {
    if(!allowed(q.workspace,q.instance,q.action != "read")) {ctx.fail({code:"unauthorized",message:"Agent operation denied",ambiguous:false});return;}
    var provider=owner(q.id);
    if(provider == null) {ctx.fail({code:"unknown_agent",message:"Unknown agent",ambiguous:false});return;}
@@ -91,6 +95,35 @@ class WorkspaceAgentService implements WorkspaceAgents {
     (cast provider:CodexProvider).actionWithImages(q,ctx,paths,function(thread) return images.pin(q.id,thread,q.imageIds)); return;
    }
    provider.action(q,ctx);
+  }
+  connection.register(WorkspaceAgentProtocol.ACTION,function(q,ctx) {
+   var adapter=new AgentSnapshotContext(cast ctx,function(value) {
+    var encoded:Null<haxe.io.Bytes> = null;
+    try encoded=haxeon.wire.MessagePack.encode(value) catch (_:Dynamic) {}
+    if(encoded == null || encoded.length > connection.maxMessageBytes - 128)
+     return ctx.fail({code:"snapshot_too_large",message:q.action == "read"
+      ? "Agent view exceeds this client's transport limit. Update the client and refresh the session."
+      : "Action completed, but its view exceeds this client's transport limit. Update the client and refresh the session.",ambiguous:q.action != "read"});
+    return ctx.respond(value);
+   });
+   action(q,adapter);
+  });
+  connection.register(WorkspaceAgentProtocol.ACTION_SNAPSHOT,function(q,ctx) {
+   var adapter=new AgentSnapshotContext(cast ctx,function(value) {
+    var bytes:Null<haxe.io.Bytes> = null;
+    try bytes=haxeon.wire.MessagePack.encode(value) catch (_:Dynamic) {}
+    var reply:AgentSnapshotReply;
+    try reply=cache.create(q.id,bytes,value.inputToken) catch (_:Dynamic)
+     reply=cache.failed(q.id,value.inputToken,"Snapshot could not be prepared");
+    return ctx.respond(reply);
+   });
+   action(q,adapter);
+  });
+  connection.register(WorkspaceAgentProtocol.SNAPSHOT_READ,function(q,ctx) {
+   if(!allowed(q.workspace,q.instance,false)) {ctx.fail({code:"unauthorized",message:"Snapshot denied",ambiguous:false});return;}
+   var reply=q.session == null || q.token == null || q.token.length > 128 ? null : cache.read(q.session,q.token,q.offset);
+   if(reply == null) ctx.fail({code:"snapshot_unavailable",message:"Snapshot expired or is unavailable",ambiguous:false});
+   else ctx.respond(reply);
   });
   connection.register(WorkspaceAgentProtocol.MESSAGE_CONTENT,function(q,ctx) {
    if (!allowed(q.workspace,q.instance,false)) {ctx.fail({code:"unauthorized",message:"Message content denied",ambiguous:false});return;}
@@ -134,6 +167,8 @@ class WorkspaceAgentService implements WorkspaceAgents {
   });
  }
  public function poll():Void {
+  var index=snapshots.length;
+  while(index>0) {index--;var entry=snapshots[index];if(!entry.connection.isOpen()) {entry.cache.clear();snapshots.splice(index,1);} else entry.cache.clean();}
   for(p in providers) p.poll();
   images.clean(function(id) return owner(id) != null, function(id, thread) {
    var provider=owner(id);
@@ -154,5 +189,5 @@ class WorkspaceAgentService implements WorkspaceAgents {
  public function updateActivityCount():Int {
   var count=0;for(p in providers) count+=p.updateActivityCount();return count;
  }
- public function dispose():Void {for(p in providers) p.dispose(); images.dispose();}
+ public function dispose():Void {for(entry in snapshots) entry.cache.clear();snapshots.resize(0);for(p in providers) p.dispose(); images.dispose();}
 }

@@ -31,9 +31,12 @@ private class PreviewApplication implements DesktopUiApplication {
  final host:DesktopUiHostContext;
  var clickLabel:Null<String>;
  var workflowStep:Int = 0;
+ var keyboardReview:Bool = false;
+ var reviewFrames:Int = 0;
  var pendingPreview:Null<(Null<haxe.io.Bytes>, Null<String>)->Void>;
  public function new(host:DesktopUiHostContext, dark:Bool, args:Array<String>) {
   this.host = host;
+  keyboardReview = args.indexOf("--review-request") >= 0;
   contextValue = new UiContext(null, host.fonts, ui.ExosuitPalette.theme(dark));
   contextValue.setStyleSheet(ui.ExosuitPalette.styleSheet(contextValue.buildContext.theme, dark));
   agent = new FakeAgent();
@@ -141,6 +144,19 @@ private class PreviewApplication implements DesktopUiApplication {
  public function context():UiContext return contextValue;
  public function submit(frame:LayoutFrame):RenderNode {
   var root = contextValue.submit(panel, frame);
+  if (keyboardReview) {
+   reviewFrames++;
+   if (reviewFrames < 4) host.requestFrame();
+   else {
+    var review:RenderNode = null;
+    root.walk(function(node) { if (review == null && node.semantics != null && node.semantics.label == "Review request") review = node; });
+    if (review != null && contextValue.focusWidget(review.id)) {
+     keyboardReview = false;
+     contextValue.key(UiEventKind.KeyDown, haxeon.ui.core.UiKey.Enter);
+     host.requestFrame();
+    }
+   }
+  }
   var label = clickLabel;
   if (label != null) {
    var target:RenderNode = null;

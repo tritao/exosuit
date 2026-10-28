@@ -46,7 +46,8 @@ class AgentImageStaging {
     for (item in entries) if (item.path != null) records.push({id:item.id,session:item.session,size:item.size,
       ext:item.path.substr(item.path.lastIndexOf(".") + 1),updated:item.updated,pinned:item.pinned,removed:item.removed,thread:item.thread});
     var path = manifestPath();
-    sys.io.AtomicFile.write(path, haxe.Json.stringify({version:1, entries:records}));
+    var content=haxe.Json.stringify({version:1, entries:records});
+    AgentJournalPublisher.write(path,content,Sys.systemName()=="Windows",sys.io.AtomicFile.write,Sys.sleep);
     if (!secureFile(path)) throw "Image lease journal is not private";
   }
   function load():Void {

@@ -65,6 +65,17 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(8) var canRename:Null<Bool>;
 	/** Providers implementing inspect-name/rename-native; rename retains its local-only meaning. */
 	@:optional @:id(9) var nativeRenameProviders:Null<Array<String>>;
+	@:optional @:id(10) var supportsSnapshots:Null<Bool>;
+}
+
+@:wire typedef AgentSnapshotReply = {
+ @:id(1) var session:String; @:id(2) var root:String; @:id(3) var token:Null<String>;
+ @:id(4) var total:Int; @:id(5) var offset:Int; @:id(6) var bytes:Null<Bytes>;
+ @:id(7) var inputToken:Null<String>; @:id(8) var snapshotError:Null<String>;
+}
+@:wire typedef AgentSnapshotQuery = {
+ @:id(1) var workspace:String; @:id(2) var instance:String; @:id(3) var session:String;
+ @:id(4) var token:String; @:id(5) var offset:Int;
 }
 
 @:wire typedef AgentCreate = {
@@ -297,4 +308,10 @@ class WorkspaceAgentProtocol {
 	public static final IMAGE_UPLOAD = new RpcMethod<AgentImageUpload, AgentImageUploadResult>(125,
 		function(v:AgentImageUpload) return MessagePack.encode(v), function(b:Bytes):AgentImageUpload return MessagePack.decode(b),
 		function(v:AgentImageUploadResult) return MessagePack.encode(v), function(b:Bytes):AgentImageUploadResult return MessagePack.decode(b));
+	public static final ACTION_SNAPSHOT = new RpcMethod<AgentAction, AgentSnapshotReply>(127,
+        function(v:AgentAction) return MessagePack.encode(v), function(b:Bytes):AgentAction return MessagePack.decode(b),
+        function(v:AgentSnapshotReply) return MessagePack.encode(v), function(b:Bytes):AgentSnapshotReply return MessagePack.decode(b));
+	public static final SNAPSHOT_READ = new RpcMethod<AgentSnapshotQuery, AgentSnapshotReply>(128,
+        function(v:AgentSnapshotQuery) return MessagePack.encode(v), function(b:Bytes):AgentSnapshotQuery return MessagePack.decode(b),
+        function(v:AgentSnapshotReply) return MessagePack.encode(v), function(b:Bytes):AgentSnapshotReply return MessagePack.decode(b));
 }

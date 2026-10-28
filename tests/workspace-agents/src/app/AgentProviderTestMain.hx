@@ -256,6 +256,7 @@ class AgentProviderTestMain {
 	static function main():Void {
 		AgentImageStagingTest.run();
 		AgentServiceTest.run();
+		AgentSnapshotTest.run();
 		conversationTests();
 		clientActionPriorityTest();
 		clientCreateCompatibilityTest();

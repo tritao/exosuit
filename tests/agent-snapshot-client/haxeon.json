@@ -1,0 +1,1 @@
+{"version":1,"package":{"name":"exosuit-agent-snapshot-client-test"},"entry":"app.AgentSnapshotClientTest","sourceRoots":["src"],"scopeSourceRoots":false,"dependencies":{"exosuit-agent":{"path":"../../agent"}},"target":"host","outputDir":"build"}

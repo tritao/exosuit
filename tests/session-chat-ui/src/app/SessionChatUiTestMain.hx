@@ -224,6 +224,29 @@ class SessionChatUiTestMain {
 		require(!questionsPanel.questionForms.exists("structured"), "Resolved question retained its draft");
 		require(!questionsPanel.expandedRequestDetails.exists("structured"), "Resolved request retained disclosure state");
 		questionsContext.dispose();
+		for (requestWidth in [320.0, 420.0]) {
+			var reviewClient = new FakeAgent();
+			for (i in 0...20) reviewClient.view.items.push({id:"history-" + i,turn:"turn",kind:"agentMessage",title:"",text:"Earlier transcript message",detail:"",state:"completed",truncated:false});
+			var reviewContext = new UiContext(null, fonts, ui.ExosuitPalette.theme(true));
+			var reviewPanel = new CodexSessionPanel(function() return reviewClient, "session", "/repo", function() {},
+				new style.Theme(), new syntax.SyntaxRegistry(), function(_, _, _) {}, function(_) {});
+			function reviewBuild():RenderNode return reviewContext.submit(reviewPanel, new LayoutFrame(requestWidth, 900));
+			reviewBuild(); reviewBuild(); reviewPanel.transcriptScroll.jumpTo(0, 0); reviewBuild();
+			reviewClient.view.requests = [{id:"long-request",method:"item/tool/requestUserInput",detail:"Details",reviewable:true,
+				questions:[for (i in 0...8) {id:"q" + i,header:"Question " + i,question:"Choose a response",multiple:false,secret:false,allowOther:false,
+					options:[{label:"One",description:""},{label:"Two",description:""}]}]}];
+			var reviewRoot = reviewBuild(); reviewRoot = reviewBuild();
+			require(reviewPanel.transcriptScroll.offsetY <= 2, "New request displaced a reader reviewing earlier history");
+			var reviewAction = find(reviewRoot, "Review request");
+			require(reviewContext.focusWidget(reviewAction.id), "Review request cannot receive keyboard focus");
+			reviewContext.key(UiEventKind.KeyDown, UiKey.Enter); reviewRoot = reviewBuild();
+			var requestHeading = find(reviewRoot, "Input needed").globalBounds();
+			var requestViewport = reviewPanel.transcriptViewport.globalBounds();
+			require(requestHeading.y >= requestViewport.y && requestHeading.y + requestHeading.height <= requestViewport.y + requestViewport.height,
+				"Review request did not reveal the heading at " + requestWidth);
+			find(reviewRoot, "Codex prompt");
+			reviewContext.dispose();
+		}
 		var historyClient = new FakeAgent();
 		var historyContext = new UiContext(null, fonts, ui.ExosuitPalette.theme(true));
 		historyContext.setStyleSheet(ui.ExosuitPalette.styleSheet(historyContext.buildContext.theme, true));
