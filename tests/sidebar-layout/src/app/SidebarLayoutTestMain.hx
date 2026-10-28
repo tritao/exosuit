@@ -24,6 +24,7 @@ class SidebarLayoutTestMain {
 		checkOrder();
 		checkUserDestinations();
 		checkRailMigration();
+		checkRailSetting();
 		checkNarrowLayout();
 		trace("PASS: Activity Bar order and visibility persistence, user-wide rail choices and their one-time migration, shared sidebar width, legacy migration, deferred registration, atomic persistence, aligned shared header metrics, narrow clipping and selected-tab reveal through resize");
 		return 0;
@@ -76,24 +77,25 @@ class SidebarLayoutTestMain {
   var stored = "";
   var model = new haxeon.ui.widgets.sidebar.SidebarModel();
   destinations(model);
-  var menu = new ui.ActivityBarMenu(model, function(_) return false, function() { stored = model.encodeDestinations(); });
+  var rail = new ui.ActivityRailPreference(model, function(value) stored = value, function(message) throw message);
+  var menu = new ui.ActivityBarMenu(model, function(_) return false, rail.save);
   var defaultLayout = model.encode();
-  menu.restoreUserChoices(stored, true);
+  rail.restore(stored, true);
   require(stored == "", "an untouched layout became the user's rail");
   var legacy = new haxeon.ui.widgets.sidebar.SidebarModel();
   destinations(legacy); legacy.moveMode("search", "files"); legacy.setModeVisible("scm", false);
   require(model.restore(legacy.encode()), "legacy layout rejected");
-  menu.restoreUserChoices(stored, true);
+  rail.restore(stored, true);
   require(stored != "" && ids(model) == "search,files,scm" && !shown(model, "scm"), "an older layout's order was not migrated");
   var stale = new haxeon.ui.widgets.sidebar.SidebarModel();
   destinations(stale); stale.moveMode("scm", "files");
   require(model.restore(stale.encode()), "second legacy layout rejected");
-  menu.restoreUserChoices(stored, true);
+  rail.restore(stored, true);
   require(ids(model) == "search,files,scm" && !shown(model, "scm"), "a second older layout replaced the migrated rail");
   var window = new haxeon.ui.widgets.sidebar.SidebarModel();
   destinations(window);
   require(window.restore(defaultLayout), "default layout rejected");
-  new ui.ActivityBarMenu(window, function(_) return false, function() {}).restoreUserChoices(stored, false);
+  new ui.ActivityRailPreference(window, function(_) {}, function(message) throw message).restore(stored, false);
   require(ids(window) == "search,files,scm" && !shown(window, "scm"), "a new window or folder lost the user's rail");
   menu.setVisible("scm", true);
   require(stored.indexOf("scm,1") >= 0, "showing an icon was not saved for every window");
@@ -104,6 +106,37 @@ class SidebarLayoutTestMain {
   var hidesFiles = new ui.ActivityBarMenu(model, function(id) return id == "files", function() {});
   require(hidesFiles.shownCount() == 2 && [for (item in hidesFiles.items(null)) item.key].indexOf("activity-toggle:files") < 0,
    "the menu offered a destination the layout mode hides");
+ }
+ /** A setting that cannot be read is reported and replaced; an unchanged setting is not applied again. */
+ static function checkRailSetting():Void {
+  var stored = "", reports:Array<String> = [], writes = 0;
+  var model = new haxeon.ui.widgets.sidebar.SidebarModel();
+  destinations(model); model.moveMode("scm", "files");
+  var rail = new ui.ActivityRailPreference(model, function(value) { stored = value; writes++; }, function(message) reports.push(message));
+  rail.restore("1|bad id,1|", false);
+  require(reports.length == 1 && reports[0].indexOf("1|bad id,1|") >= 0, "a corrupt rail setting was not reported");
+  require(writes == 1 && stored == model.encodeDestinations() && ids(model) == "scm,files,search", "a corrupt rail setting was not replaced with the rail");
+  rail.settingChanged(stored);
+  require(writes == 1 && reports.length == 1, "the repaired setting was applied or written again");
+  // A window that knows a destination the setting does not mention still treats the setting as unchanged.
+  var other = new haxeon.ui.widgets.sidebar.SidebarModel();
+  destinations(other);
+  var narrow = new haxeon.ui.widgets.sidebar.SidebarModel();
+  narrow.register("files", function() return new haxeon.ui.widgets.text.Text("files"), new haxeon.ui.widgets.sidebar.SidebarModeOptions("files", 0, true));
+  narrow.register("search", function() return new haxeon.ui.widgets.text.Text("search"), new haxeon.ui.widgets.sidebar.SidebarModeOptions("search", 1, true));
+  narrow.moveMode("search", "files"); narrow.setModeVisible("search", false);
+  var partial = narrow.encodeDestinations();
+  var otherRail = new ui.ActivityRailPreference(other, function(_) throw "an unchanged setting was written", function(message) throw message);
+  otherRail.restore(partial, false);
+  require(other.encodeDestinations() != partial, "the fixture does not cover a destination the setting lacks");
+  other.select("files");
+  other.moveMode("files", null);
+  var order = ids(other);
+  otherRail.settingChanged(partial);
+  require(ids(other) == order, "an unchanged setting re-applied the rail");
+  otherRail.settingChanged("");
+  otherRail.settingChanged(partial);
+  require(ids(other) != order, "a changed setting was not applied");
  }
  static function checkHeaderAlignment(fonts:haxeon.ui.FontCollection):Void {
   for (dark in [false, true]) for (width in [180.0, 300.0]) for (height in [36.0, 44.0]) {
