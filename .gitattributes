@@ -1,0 +1,2 @@
+# Generated bindings are compared byte for byte by tools/update-hxi.sh --check.
+*.hxi text eol=lf
