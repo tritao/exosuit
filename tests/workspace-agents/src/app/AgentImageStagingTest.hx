@@ -88,6 +88,15 @@ class AgentImageStagingTest {
   require(restored.archive("one","turn","user",archivePaths[0]) == archived.upload,"Recovered native history did not resolve the archive");
   restored.clean(function(_) return false,function(_,_) return false);
   require(restored.readArchive("one","turn","user",archived.upload,0)==null,"Deleting a session retained its archived image");
+  var held=restored.process(request("one","begin",null,png.length,0,null));
+  restored.process(request("one","chunk",held.upload,png.length,0,png));
+  restored.process(request("one","finish",held.upload,png.length,png.length,null));
+  require(!restored.holdInput("one","thread","pi-turn","input",[held.upload,StringTools.lpad("missing","0",32)]),"Partial Pi hold accepted unavailable image");
+  require(restored.resolve("one",[held.upload])!=null && restored.holdInput("one","thread","pi-turn","input",[held.upload]),"Failed multi-image hold consumed a valid draft");
+  restored.process(request("one","remove",held.upload,0,0,null));
+  require(restored.piImages("one",[held.upload],"pi-turn","input")!=null
+   && restored.piImages("two",[held.upload],"pi-turn","input")==null
+   && restored.piImages("one",[held.upload],"other","input")==null,"Held Pi image did not survive draft removal or escaped scope");
   var large=Bytes.alloc(70000);large.blit(0,Bytes.ofString("GIF89a"),0,6);large.set(6,1);large.set(8,1);large.set(large.length-1,0x3b);
   var largeUpload=restored.process(request("one","begin",null,large.length,0,null));
   var pos=0;while(pos<large.length) {var n=Std.int(Math.min(AgentImageStaging.MAX_CHUNK,large.length-pos));

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Deterministic native Pi RPC peer. Never used by the application runtime."""
-import json, os, sys
+import base64, json, os, sys
 from pathlib import Path
 args=sys.argv[1:]
 if '--silent' in args:
@@ -26,8 +26,9 @@ race=False
 def emit(v):
  # Preserve Unicode and unusual separators; LF is the only frame delimiter.
  data=(json.dumps(v,ensure_ascii=False)+'\r\n').encode()
- for i in range(0,len(data),37):
-  os.write(sys.stdout.fileno(),data[i:i+37])
+ size=4096 if len(data)>100000 else 37
+ for i in range(0,len(data),size):
+  os.write(sys.stdout.fileno(),data[i:i+size])
 def reply(v,data=None):emit({'id':v['id'],'type':'response','command':v['type'],'success':True,'data':data or {}})
 def queue_update():emit({'type':'queue_update','steering':steering,'followUp':[]})
 def complete():
@@ -73,6 +74,15 @@ for line in sys.stdin:
  elif kind=='prompt':
   active=v
   text=v['message']
+  if v.get('images'):
+   if text.startswith('image echo '):
+    expected=Path('expected-pi-image.png').read_bytes()
+    assert len(v['images'])==2 and len(expected)==2*1024*1024
+    assert all(base64.b64decode(image['data'],validate=True)==expected for image in v['images'])
+   for image in v['images']:
+    assert image['type']=='image' and image['mimeType'] in ('image/png','image/jpeg','image/gif')
+    assert len(base64.b64decode(image['data'],validate=True))>0
+   emit({'type':'message_start','message':{'role':'user','content':v['images']}})
   if v.get('streamingBehavior')=='steer' and streaming:
    if text=='reject-steer':
     emit({'id':v['id'],'type':'response','command':'prompt','success':False,'error':'Steer rejected before acceptance'});continue
@@ -86,7 +96,7 @@ for line in sys.stdin:
   streaming=True
   if text=='crash':os._exit(7)
   if text=='malformed':os.write(sys.stdout.fileno(),b'{broken\n');continue
-  if text=='oversized':os.write(sys.stdout.fileno(),b'x'*270000+b'\n');continue
+  if text=='oversized':os.write(sys.stdout.fileno(),b'x'*(6*1024*1024+1));continue
   if text=='/fixture-command':
    streaming=False
    emit({'type':'extension_ui_request','method':'notify','message':'Fixture command ran'})

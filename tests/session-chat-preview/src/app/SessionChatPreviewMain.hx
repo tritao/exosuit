@@ -83,9 +83,17 @@ private class PreviewApplication implements DesktopUiApplication {
   if (args.indexOf("--emphasis") >= 0) agent.view.items = [
    {id:"emphasis",turn:"turn",kind:"agentMessage",title:"",text:"## Review summary\n\nThis is normal text, **strong emphasis**, *italic emphasis*, and ***bold italic***.\n\nThe **important [linked result](src/Main.hx)** remains actionable.",detail:"",state:"completed",truncated:false}
   ];
+  var nativeImagePlan = args.indexOf("--native-image-plan") >= 0;
+  if (nativeImagePlan) {
+   agent.view.items = [
+    {id:"plan",turn:"turn",kind:"plan",title:"Plan",text:"## Implementation plan\n\nFirst **inspect** the source, then *verify* the result.",detail:"",state:"completed",truncated:false},
+    {id:"generated",turn:"turn",kind:"imageGeneration",title:"Generated image",text:"",detail:"",state:"completed",truncated:false,imagePath:"/repo/generated.png"}
+   ];
+   clickLabel = "Preview image";
+  }
   var inlineImages = args.indexOf("--inline-images") >= 0;
   var remoteImage = args.indexOf("--remote-image") >= 0;
-  if (inlineImages && remoteImage) host.onPoll = function() {
+  if ((inlineImages && remoteImage) || nativeImagePlan) host.onPoll = function() {
    if (pendingPreview != null) {
     var done:(Null<haxe.io.Bytes>, Null<String>)->Void = cast pendingPreview; pendingPreview=null;
     done(sys.io.File.getBytes(Sys.getCwd()+"/graphical/assets/icons/exosuit-256.png"),null);
@@ -166,8 +174,8 @@ private class PreviewApplication implements DesktopUiApplication {
    dark ? new style.Theme() : ui.ExosuitPalette.lightEditor(), new syntax.SyntaxRegistry(), null, function(_) {},
    function(_) {}, {context: function() return "/workspace/exosuit · ui-exploration", explore: function() {}, reviewChanges: function() {},
     resolveImage: function(path) return path == "fixture-icon.png" ? Sys.getCwd() + "/graphical/assets/icons/exosuit-256.png" : null,
-    loadImage: inlineImages && remoteImage ? function(path,done) {
-     if (path == "fixture-remote.png") pendingPreview=done;
+    loadImage: (inlineImages && remoteImage) || nativeImagePlan ? function(path,done) {
+     if (path == "fixture-remote.png" || (nativeImagePlan && path == "/repo/generated.png")) pendingPreview=done;
      else done(null,"Image unavailable");
     } : null,
     readContext: workflow ? function(_, done) done("class Main {}", null) : null,

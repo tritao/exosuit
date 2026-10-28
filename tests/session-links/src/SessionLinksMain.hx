@@ -13,6 +13,14 @@ class SessionLinksMain {
     require(SessionLinkTarget.relativeWithin("/repo", "/repository/a.hx") == null, "Containment prefix collision");
     require(SessionLinkTarget.relativeWithin("/repo", "/Repo/a.hx") == null, "Remote POSIX case changed");
     require(SessionLinkTarget.relativeWithin("C:/Repo", "c:/repo/a.hx") == "a.hx", "Remote drive case handling");
+    require(workspace.client.SessionImageActivity.target("/repo","/repo/project","../assets/image.png")=="/repo/assets/image.png",
+      "Workspace image path did not resolve against session cwd");
+    require(workspace.client.SessionImageActivity.target("C:/Repo","C:/Repo/project","..\\images\\icon.png")=="C:/Repo/images/icon.png",
+      "Native Windows image path did not resolve inside the workspace");
+    require(workspace.client.SessionImageActivity.target("C:/Repo","C:/Repo/project","D:\\other\\image.png")==null,
+      "Native image crossed a drive boundary");
+    for (path in ["../../secret.png", "/elsewhere/image.png", "https://example.com/image.png", "image.png:12", "image.png#L1", "//server/file.png"])
+      require(workspace.client.SessionImageActivity.target("/repo","/repo/project",path)==null,"Unsafe native image path was accepted: "+path);
     require(target != null && target.line == 41 && target.column == 6 && target.resolve("C:\\repo") == "C:/repo/src/Main.hx", "Windows relative location");
     target = SessionLinkTarget.parse("C:\\repo\\src\\Main.hx:12");
     require(target != null && target.line == 11 && target.resolve("/other") == "C:/repo/src/Main.hx", "Drive path location");

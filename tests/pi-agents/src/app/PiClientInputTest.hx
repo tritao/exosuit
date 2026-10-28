@@ -24,7 +24,9 @@ class PiClientInputTest {
   var client=new workspace.client.RpcWorkspaceWorkbenchClient(new PiClientEndpoint(connection),clock);
   client.poll();client.agentAction("a","read","",null);server.poll();connection.poll();
   client.agentAction("a","queue","first",null,null,null,function() accepted++);server.poll();connection.poll();server.poll();
-  require(pending!=null && accepted==1,"Fixture did not hold the first action's history page");
+  require(pending==null && accepted==1,"First action eagerly loaded older history");
+  client.loadOlderAgentItems("a",function(_) {});server.poll();
+  require(pending!=null,"Explicit history request was not held");
   client.agentAction("a","queue","second",null,null,null,function() accepted++);server.poll();connection.poll();
   require(sequence==2 && accepted==2,"A slow history page blocked or lost the second submission");
   pending.respond(view("stale-token",false));connection.poll();

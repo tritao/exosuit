@@ -46,7 +46,10 @@ class ExplorerTreeView implements View {
 				style.childAlignY = haxeon.ui.LayoutAlignmentY.Center;
 				style.childGap = 2;
 				var children:Array<haxeon.ui.widgets.KeyedView> = [];
-				if (!rename.directory) children.push(new haxeon.ui.widgets.KeyedView("icon",
+				if (rename.directory) children.push(new haxeon.ui.widgets.KeyedView("icon",
+					new haxeon.ui.widgets.Icon("folder-icon", expanded ? haxeon.ui.icons.IconName.FolderOpen : haxeon.ui.icons.IconName.FolderClosed,
+						16, context.theme.tokens.textSecondary)));
+				else children.push(new haxeon.ui.widgets.KeyedView("icon",
 					new SetiFileIcon(atlas, haxe.io.Path.withoutDirectory(key), dark, true)));
 				children.push(new haxeon.ui.widgets.KeyedView("name", rename));
 				return new haxeon.ui.widgets.layout.Row("explorer-rename-row", children, style);

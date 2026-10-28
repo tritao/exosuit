@@ -25,6 +25,35 @@ class SessionProjectionTestMain {
     var legacy:AgentActivityItem = {id:"old", turn:"t", kind:"agentMessage", title:"", text:"hello", detail:"", state:"completed", truncated:false};
     var restored:AgentActivityItem = MessagePack.decode(MessagePack.encode(legacy));
     require(restored.files == null && restored.text == "hello", "Legacy wire compatibility changed");
+    var nativeImages=new CodexConversation();
+    nativeImages.put("turn",{id:"view",type:"imageView",path:"/repo/assets/input.png"},true);
+    nativeImages.put("turn",{id:"generated",type:"imageGeneration",status:"completed",savedPath:"/repo/assets/output.png",
+      revisedPrompt:"A mountain",result:"private inline bytes"},true);
+    nativeImages.put("turn",{id:"failed",type:"imageGeneration",status:"failed",savedPath:null,failure:{type:"usageLimitExceeded",limitId:"image"}},true);
+    var imageItems=nativeImages.items();
+    require(imageItems[0].title=="Viewed image" && imageItems[0].imagePath=="/repo/assets/input.png"
+      && imageItems[0].detail.indexOf("imageView")>=0,"Native image view lost its source or path");
+    require(imageItems[1].title=="Generated image" && imageItems[1].imagePath=="/repo/assets/output.png"
+      && imageItems[1].text=="A mountain" && imageItems[1].detail.indexOf("private inline bytes")<0,
+      "Generated image metadata or inline result bounds failed");
+    require(imageItems[2].state=="failed" && imageItems[2].imagePath==null && imageItems[2].detail.indexOf("usageLimitExceeded")>=0,
+      "Generation failure lost its native state or details");
+    var decodedImage:AgentActivityItem=MessagePack.decode(MessagePack.encode(imageItems[1]));
+    require(decodedImage.imagePath=="/repo/assets/output.png", "Native image path did not survive the wire");
+    var plan=new CodexConversation();
+    plan.put("turn",{id:"plan",type:"plan",text:""},false);
+    var longPlan="step ";for (_ in 0...11) longPlan+=longPlan;
+    plan.delta("turn","plan","plan",longPlan);
+    var streamingPlan:AgentActivityItem=cast plan.current("turn","plan");
+    require(streamingPlan.kind=="plan" && streamingPlan.title=="Plan" && streamingPlan.truncated && streamingPlan.contentToken!=null,
+      "Streaming plan did not retain bounded preview and full source token");
+    var fullPlan:workspace.service.WorkspaceAgentProtocol.AgentContentChunk=cast plan.content("turn","plan",streamingPlan.contentToken,0);
+    require(fullPlan!=null && fullPlan.bytes.toString()==longPlan,"Plan delta content was clipped before retention");
+    plan.put("turn",{id:"plan",type:"plan",text:"# Authoritative plan\n- Final step"},true);
+    var completedPlan:AgentActivityItem=cast plan.current("turn","plan");
+    require(completedPlan.state=="completed" && completedPlan.text=="# Authoritative plan\n- Final step"
+      && plan.content("turn","plan",streamingPlan.contentToken,0)==null,
+      "Completed native plan did not replace streamed text and token");
     var large = ""; for (_ in 0...3000) large += "x";
     conversation.put("turn", {id:"large", type:"fileChange", changes:[{path:"large.txt", kind:{type:"update"}, diff:large}]}, true);
     var bounded = conversation.items()[1];

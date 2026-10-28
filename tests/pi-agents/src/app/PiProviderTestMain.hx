@@ -125,6 +125,7 @@ class PiProviderTestMain {
   action("prompt","after-resume");until("completed");
   action("prompt","malformed");until("uncertain");
   action("connect");until("idle");action("prompt","oversized");until("uncertain");
+  require(currentView().error!=null && currentView().error.indexOf("Pi frame exceeded bound")>=0,"Oversized unterminated Pi frame did not hit its bound");
   sys.FileSystem.deleteFile(id);
   action("connect");require(currentView().connectionState=="disconnected" && currentView().error.indexOf("missing")>=0,"Missing native session silently created a replacement");
   // A read-only attachment cannot mutate Pi through the Codex routing boundary.
@@ -169,13 +170,16 @@ class PiProviderTestMain {
   t.poll(60001);require(callbacks==1,"Control request did not time out");
   for(i in 0...33) t.request("set_model",{model:"fixture"},60001,function(r) {require(r.error != null,"Unexpected control completion");callbacks++;});
   require(callbacks==2,"Pending request limit was not enforced");
-  require(!t.send({text:StringTools.lpad("","x",270000)}),"Oversized outgoing frame accepted");
-  var accepted=0;
-  while(t.send({text:StringTools.lpad("","x",200000)})) {accepted++;require(accepted<8,"Output queue was unbounded");}
-  require(accepted>0,"Bounded output queue accepted nothing");
   t.close("Fixture shutdown");require(callbacks==34,"Control callbacks were lost or completed twice");
   t.close("Duplicate shutdown");require(callbacks==34,"Close completed callbacks twice");
-  processes.release(silent);processes.shutdown();
+  processes.release(silent);
+  var silentQueue=processes.start(python,[script,"--session-id","11111111-1111-4111-a111-111111111111","--silent"],root);
+  var bounded=new workspace.provider.PiTransport(silentQueue);
+  require(!bounded.send({text:StringTools.lpad("","x",workspace.provider.PiTransport.MAX_FRAME_BYTES)}),"Oversized outgoing frame accepted");
+  var accepted=0;
+  while(bounded.send({text:StringTools.lpad("","x",200000)})) {accepted++;require(accepted<=32,"Output queue was unbounded");}
+  require(accepted>0,"Bounded output queue accepted nothing");
+  bounded.close("Fixture shutdown");processes.release(silentQueue);processes.shutdown();
   Sys.println("PASS: native Pi routing, streaming, controls, approval/questions, interrupt, detach, explicit resume, uncertain delivery, malformed/bounded frames and replay");
  }
 }

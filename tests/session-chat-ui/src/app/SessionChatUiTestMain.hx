@@ -332,6 +332,26 @@ class SessionChatUiTestMain {
         require(sentClient.imageRequestIdentity=="session:turn:user:opaque-id","Sent image request was not scoped to the activity");
         var panelDone:(Null<haxe.io.Bytes>,Null<String>)->Void=cast sentClient.pendingImage;panelDone(rasterBytes,null);
         require(sentPanelOpens==1,"Sent image open did not reach the host");sentPanelContext.dispose();
+        var nativeClient=new FakeAgent(), nativeLoads=0, nativeOpen:Null<String>=null;
+        nativeClient.record.cwd="/repo/project";
+        nativeClient.view.items=[
+          {id:"native",turn:"turn",kind:"imageGeneration",title:"Generated image",text:"",detail:"",state:"completed",truncated:false,imagePath:"../assets/output.png"},
+          {id:"outside",turn:"turn",kind:"imageView",title:"Viewed image",text:"",detail:"",state:"completed",truncated:false,imagePath:"/outside/private.png"}
+        ];
+        var nativeContext=new UiContext(null,fonts,ui.ExosuitPalette.theme(true));
+        var nativePanel=new CodexSessionPanel(function() return nativeClient,"session","/repo",function() {},new style.Theme(),new syntax.SyntaxRegistry(),
+          function(_,_,_) {},function(_) {},function(path) nativeOpen=path,
+          {context:function() return "Project",explore:function() {},reviewChanges:function() {},
+           loadImage:function(path,done) {require(path=="/repo/assets/output.png","Native image used the wrong workspace path");nativeLoads++;done(rasterBytes,null);}});
+        var nativeRoot=nativeContext.submit(nativePanel,new LayoutFrame(500,900));
+        find(nativeRoot,"Image preview is unavailable in this workspace");
+        require(nativeLoads==0,"Native image loaded before an explicit action");
+        click(nativeContext,find(nativeRoot,"Preview image"),500,900);
+        require(nativeLoads==1,"Native image did not use workspace file callback");
+        nativeRoot=nativeContext.submit(nativePanel,new LayoutFrame(500,900));
+        find(nativeRoot,"Generated image, 16 by 16 pixels");
+        click(nativeContext,find(nativeRoot,"Open image"),500,900);
+        require(nativeOpen=="/repo/assets/output.png","Native image open did not preserve validated path");nativeContext.dispose();
         var embedded="data:image/png;base64,"+haxe.crypto.Base64.encode(rasterBytes);
         var dataContext=new UiContext(null,fonts,ui.ExosuitPalette.theme(true));
         var dataView=new ui.SessionImageView("embedded","Icon",embedded,null,function(_) throw "Data URL opened externally",function(){});
@@ -483,6 +503,43 @@ class SessionChatUiTestMain {
         require(unmountedThumbnail != null && !unmountedThumbnail.isDisposed(), "Unmount test thumbnail missing");
         draftContext.dispose();
         require(unmountedThumbnail.isDisposed(), "Unmounted thumbnail was not disposed");
+        var planClient=new FakeAgent(),planContext=new UiContext(null,fonts,ui.ExosuitPalette.theme(true));
+        planClient.view.supportsMessageContent=true;
+        planClient.messageContent="## Implementation plan\n\n1. Inspect the **current code**.\n2. Update [source](src/Main.hx).";
+        planClient.view.items=[{id:"native-plan",turn:"turn",kind:"plan",title:"Plan",text:"Plan preview",detail:"",state:"completed",truncated:true,contentToken:"plan-token"}];
+        var planOpened:Null<String>=null;
+        var planPanel=new CodexSessionPanel(function() return planClient,"session","/repo",function() {},new style.Theme(),new syntax.SyntaxRegistry(),function(_,_,_) {},function(_) {},function(path) planOpened=path);
+        var planRoot=planContext.submit(planPanel,new LayoutFrame(1000,1000));
+        require(planClient.contentRequests==1,"Latest native plan did not retrieve its full source");
+        find(planRoot,"Implementation plan");find(planRoot,"Copy plan");
+        click(planContext,find(planRoot,"source"),1000,1000);
+        require(planOpened=="src/Main.hx","Native plan file link did not use IDE navigation");
+        planContext.dispose();
+        for (imageAction in ["prompt", "queue", "steer"]) {
+          var piImageClient = new FakeAgent();piImageClient.record.provider="pi";
+          piImageClient.record.state=imageAction=="prompt" ? "idle" : "working";
+          piImageClient.view.supportsImageUpload=true;piImageClient.uploadEnabled=true;
+          piImageClient.view.supportsQueue=true;piImageClient.view.supportsSteering=true;piImageClient.view.inputToken="input";
+          var piImageContext=new UiContext(null,fonts,ui.ExosuitPalette.theme(true));
+          var piImagePanel=new CodexSessionPanel(function() return piImageClient,"session","/repo",function() {},new style.Theme(),new syntax.SyntaxRegistry(),function(_,_,_) {},function(_) {},null,
+            {context:function() return "Project",explore:function() {},reviewChanges:function() {},
+             chooseImage:function(done) done("pi-photo.png",fixtureImage,null),pasteImage:function() return {bytes:fixtureImage,error:null}});
+          var piImageRoot=piImageContext.submit(piImagePanel,new LayoutFrame(1000,1000));
+          click(piImageContext,find(piImageRoot,"Add image"),1000,1000);
+          require(piImagePanel.imageDrafts.length==1,"Pi capability did not enable image picker");
+          piImageRoot=piImageContext.submit(piImagePanel,new LayoutFrame(1000,1000));
+          piImageClient.acceptActions=false;
+          click(piImageContext,find(piImageRoot,imageAction=="prompt" ? "Send" : imageAction=="queue" ? "Queue message" : "Steer now"),1000,1000);
+          require(piImageClient.actions.length==1 && piImageClient.actions[0].indexOf(imageAction+"::")==0
+            && piImageClient.lastImageIds!=null && piImageClient.lastImageIds[0]=="opaque-image" && piImagePanel.imageDrafts.length==1,
+            "Pi image-only action lost image scope or failed draft retention: "+imageAction);
+          piImageClient.view.supportsImageUpload=false;
+          piImageRoot=piImageContext.submit(piImagePanel,new LayoutFrame(1000,1000));
+          find(piImageRoot,"Image input is unavailable; remove images or reconnect.");
+          require(!find(piImageRoot,imageAction=="prompt" ? "Send" : imageAction=="queue" ? "Queue message" : "Steer now").enabled,
+            "Unavailable image capability left submission enabled");
+          piImageContext.dispose();
+        }
 		fonts.dispose();
 		trace("PASS: session rendering and provider actions across themes and widths");
 		return 0;

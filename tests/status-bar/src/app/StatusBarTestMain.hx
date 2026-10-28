@@ -29,6 +29,7 @@ private class StatusFixture implements haxeon.ui.core.View {
 	}
 }
 
+@:access(haxeon.ui.core.RenderNode)
 class StatusBarTestMain {
 	static function require(value:Bool, message:String):Void { if (!value) throw message; }
 	static function main():Int {
@@ -36,6 +37,7 @@ class StatusBarTestMain {
 		fonts.add("../../haxeon/packages/ui/vendor/skribidi/example/data/IBMPlexSans-Regular.ttf");
 		resourceDecorationRollup();
 		resourceDecorationRendering(fonts);
+		folderIconRendering(fonts);
 		editorTabResourceDecoration(fonts);
 		statusContributions(fonts);
 		var status = "Haxeon: disabled after repeated failures";
@@ -175,6 +177,34 @@ class StatusBarTestMain {
 		require(model.revision() > before && !badgeRemains && restoredName,
 			"explorer decoration did not clear its badge and tint after owner removal");
 		model.dispose(); atlas.dispose(); context.dispose();
+	}
+
+	static function folderIconRendering(fonts:haxeon.ui.FontCollection):Void {
+		for (dark in [false, true]) {
+			var theme = ui.ExosuitPalette.theme(dark), context = new UiContext(null, fonts, theme);
+			var atlas = new ui.SetiIconAtlas();
+			var local = new ui.DirectoryTreeModel(Sys.getCwd(), theme);
+			var remote = new ui.WorkspaceFileTreeModel(function() return null, "workspace", "root", "Project", theme, function() {});
+			var models:Array<ui.ExplorerTreeModel> = [local, remote];
+			var keys = [Sys.getCwd(), remote.rootKeyAt(0)];
+			for (index in 0...models.length) for (width in [120.0, 320.0]) {
+				var closed = context.submit(models[index].buildItemWithIcons(keys[index], false, atlas, dark), new LayoutFrame(width, 30));
+				var icon = closed.children[0];
+				require(!icon.hitTestSelf && icon.semantics == null && icon.globalBounds().width == 16, "Folder icon changed hit testing or size");
+				var closedPaint = icon.paintCacheKeys[0];
+				var opened = context.submit(models[index].buildItemWithIcons(keys[index], true, atlas, dark), new LayoutFrame(width, 30));
+				require(opened.children[0].paintCacheKeys[0] != closedPaint, "Folder icon did not reflect expansion");
+				require(opened.globalBounds().width <= width + 0.1, "Folder row overflowed its viewport");
+			}
+			var tree = new haxeon.ui.widgets.collections.TreeView("folder-rename-tree", local);
+			var rename = new ui.ExplorerRename(Sys.getCwd(), true, function(_) return true, function(_) {}, function() {}, function(_) {});
+			var renameRoot = context.submit(new ui.ExplorerTreeView(tree, local, dark, null, rename), new LayoutFrame(160, 160));
+			var renameField:RenderNode = null;
+			renameRoot.walk(function(node) { if (node.semantics != null && node.semantics.label == "Rename file or folder") renameField = node; });
+			require(renameField != null && renameField.globalBounds().width > 20 && renameField.globalBounds().x + renameField.globalBounds().width <= 160.1,
+				"Folder rename field was clipped by its icon");
+			local.dispose(); remote.dispose(); context.dispose(); atlas.dispose();
+		}
 	}
 
 	static function sameColor(a:Null<haxeon.ui.Color>, b:haxeon.ui.Color):Bool

@@ -160,6 +160,55 @@ class AgentImageStaging {
     try persist() catch (_:Dynamic) { failed = true; return false; }
     return true;
   }
+  /** Holds a durable queue submission before it can be acknowledged. */
+  public function holdInput(session:String,thread:String,turn:String,item:String,ids:Array<String>):Bool {
+    var paths=resolve(session,ids);
+    if(paths==null || thread==null || thread=="" || turn==null || turn=="" || turn.length>128 || item==null || item=="" || item.length>128) return false;
+    var selected:Array<StagedImage>=[], requested=0;
+    for(id in ids) {
+      var entry=entries.get(id);
+      if(entry==null || entry.turn!=null || entry.pinned) return false;
+      selected.push(entry);requested+=entry.size;
+    }
+    var archived:Array<StagedImage>=[for(entry in entries) if(entry.turn!=null) entry];
+    var total=0;for(entry in archived) total+=entry.size;
+    archived.sort(function(a,b) return Reflect.compare(a.updated,b.updated));
+    while(archived.length+selected.length>32 || total+requested>64*1024*1024) {
+      var victim:Null<StagedImage>=null;
+      for(entry in archived) if(!entry.pinned && victim==null) victim=entry;
+      if(victim==null) return false;
+      discard(victim);if(entries.exists(victim.id) || failed) return false;
+      archived.remove(victim);total-=victim.size;
+    }
+    var previous=[for(entry in selected) {pinned:entry.pinned,thread:entry.thread,updated:entry.updated,turn:entry.turn,item:entry.item}];
+    for(entry in selected) {entry.pinned=true;entry.thread=thread;entry.updated=clock();entry.turn=turn;entry.item=item;}
+    try {persist();return true;} catch(_:Dynamic) {
+      for(index in 0...selected.length) {var entry=selected[index],old=previous[index];entry.pinned=old.pinned;entry.thread=old.thread;entry.updated=old.updated;entry.turn=old.turn;entry.item=old.item;}
+      failed=true;return false;
+    }
+  }
+  /** Build Pi's native image blocks from authorized staged bytes, never from client paths. */
+  public function piImages(session:String,ids:Array<String>,?turn:String,?item:String):Null<Array<Dynamic>> {
+    if(ids==null || ids.length==0 || ids.length>2 || !available()) return null;
+    var result:Array<Dynamic>=[], seen:Map<String,Bool>=[];
+    for(id in ids) {
+      if(id==null || seen.exists(id)) return null;
+      var entry=entries.get(id);
+      if(entry==null || entry.session!=session || entry.path==null) return null;
+      if(turn==null) {
+        if(entry.removed || clock()-entry.updated>TTL) return null;
+      } else if(!entry.pinned || entry.turn!=turn || entry.item!=item) return null;
+      try {
+        var metadata=FileSystem.metadata(entry.path);
+        if(metadata==null || metadata.size!=entry.size || !secureFile(entry.path)) return null;
+        var bytes=File.getBytes(entry.path), ext=imageExtension(bytes);
+        if(bytes.length!=entry.size || ext==null) return null;
+        var mime=ext=="jpg" ? "image/jpeg" : ext=="gif" ? "image/gif" : "image/png";
+        result.push({type:"image",data:haxe.crypto.Base64.encode(bytes),mimeType:mime});seen.set(id,true);
+      } catch(_:Dynamic) return null;
+    }
+    return result;
+  }
   /** Associate only a path that this service itself staged for this active session. */
   public function archive(session:String,turn:String,itemId:String,path:String):Null<String> {
     if (!available() || turn == null || turn == "" || turn.length > 128 || itemId == null || itemId == "" || itemId.length > 128 || path == null) return null;

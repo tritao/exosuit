@@ -117,6 +117,8 @@ import haxeon.wire.MessagePack;
 	@:id(4) var fingerprint:String;
 	@:id(5) var state:String;
 	@:optional @:id(6) var error:Null<String>;
+	/** Opaque staged asset references retained for queued Pi input. */
+	@:optional @:id(7) var imageIds:Null<Array<String>>;
 }
 
 /** Native queue contents can be expanded or transformed by Pi extensions. */
@@ -260,6 +262,8 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(9) var files:Null<Array<AgentFileChange>>;
 	@:optional @:id(10) var contentToken:Null<String>;
 	@:optional @:id(11) var images:Null<Array<AgentMessageImage>>;
+	/** Native image tool output path; the client must validate workspace containment before use. */
+	@:optional @:id(13) var imagePath:Null<String>;
 	/** Digest binds durable captured source to this exact response version. */
 	@:optional @:id(12) var contentDigest:Null<String>;
 }

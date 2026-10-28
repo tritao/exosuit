@@ -31,6 +31,7 @@ class PiConversation {
    var restored=entries[entries.length-1];restored.truncated=entry.truncated;restored.contentDigest=entry.contentDigest;
    if(entry.truncated && archive!=null) restored.contentToken=archive.restore(cacheKey(entry.turn,entry.id),restored);
    entries[entries.length-1].files=retainedFiles(entry,2048);
+   entries[entries.length-1].images=entry.images;
   }
   restoring=false;
  }
@@ -86,6 +87,10 @@ class PiConversation {
   if(!restoring && archive!=null) archive.capture(cacheKey(turn,id),entry);
   if (entries.length > 128) { entries.shift(); revision++; omitted=true; }
  }
+ public function attachImages(turn:String,id:String,ids:Array<String>):Void {
+  for(entry in entries) if(entry.turn==turn && entry.id==id)
+   entry.images=[for(imageId in ids) {id:imageId}];
+ }
  public function delta(id:String, turn:String, text:String, kind:String = "agentMessage"):Void {
   var previous = "", existing:Null<AgentActivityItem> = null;
   for (entry in entries) if (entry.id == id && entry.turn == turn) { previous = entry.text; existing=entry; }
@@ -117,7 +122,7 @@ class PiConversation {
  public function snapshot():Array<AgentActivityItem> {
   var saved:Array<AgentActivityItem> = [for (e in entries.slice(Std.int(Math.max(0,entries.length-6)))) {
    id:e.id,turn:e.turn,kind:e.kind,title:e.title,text:e.text.substring(0,384),detail:e.detail.substring(0,128),state:e.state,
-   contentDigest:e.contentDigest,truncated:e.truncated || e.text.length > 384 || e.detail.length > 128,files:retainedFiles(e,128)
+   contentDigest:e.contentDigest,truncated:e.truncated || e.text.length > 384 || e.detail.length > 128,files:retainedFiles(e,128),images:e.images
   }];
   while (saved.length > 0 && haxeon.wire.MessagePack.encode(saved).length > 6144) saved.shift();
   return saved;

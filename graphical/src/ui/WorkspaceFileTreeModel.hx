@@ -266,7 +266,9 @@ class WorkspaceFileTreeModel implements ExplorerTreeModel {
 		style.childAlignY = LayoutAlignmentY.Center;
 		style.childGap = 2.0;
 		var children:Array<KeyedView> = [];
-		if (!directory) children.push(new KeyedView("icon", new SetiFileIcon(atlas, label, dark, true)));
+		if (directory) children.push(new KeyedView("icon", new haxeon.ui.widgets.Icon("folder-icon",
+			expanded ? haxeon.ui.icons.IconName.FolderOpen : haxeon.ui.icons.IconName.FolderClosed, 16, theme.tokens.textSecondary)));
+		else children.push(new KeyedView("icon", new SetiFileIcon(atlas, label, dark, true)));
 		var relative = relativePath(key);
 		var decorationPath = relative == null ? null : relative.length == 0 ? "." : relative;
 		var decoration = decorationProvider == null || decorationPath == null ? null : decorationProvider.forPath(decorationPath);

@@ -290,10 +290,11 @@ class CodexSessionPanel implements View {
     var composedPrompt = withTextContext(prompt, textContext);
     var promptBytes = haxe.io.Bytes.ofString(composedPrompt).length;
     var submitLimit = piActive ? 4096 : 8192;
+    var imagesSupported = imageDrafts.length == 0 || view.supportsImageUpload == true;
     var submitAction = function(action:String) {
       var allowed = action == "queue" ? canQueue : action == "steer" ? canSteer : canSend;
       var limit = action == "queue" || action == "steer" ? 4096 : 8192;
-      if (allowed && !contextLoading && !imageUploading && promptBytes <= limit && (StringTools.trim(prompt) != "" || imageDrafts.length > 0)) {
+      if (allowed && imagesSupported && !contextLoading && !imageUploading && promptBytes <= limit && (StringTools.trim(prompt) != "" || imageDrafts.length > 0)) {
         var sent = composedPrompt, draft = prompt;
         var submittedText = textContext.copy(), submittedImageDrafts = imageDrafts.copy();
         var submittedImages = [for (image in submittedImageDrafts) image.id];
@@ -666,7 +667,7 @@ class CodexSessionPanel implements View {
       }
       if (view.supportsMessageContent == true && contentLoading == null) {
         var latest:Null<workspace.service.WorkspaceAgentProtocol.AgentActivityItem> = null;
-        for (candidate in items) if (candidate.kind == "agentMessage" && candidate.state == "completed") latest=candidate;
+        for (candidate in items) if ((candidate.kind == "agentMessage" || candidate.kind == "plan") && candidate.state == "completed") latest=candidate;
         if (latest != null && latest.truncated && latest.contentToken != null) {
           var latestKey = latest.turn + ":" + latest.id;
           if (!loadedContent.exists(latestKey) && !contentErrors.exists(latestKey)) loadContent(client,id,latest,latestKey);
@@ -709,11 +710,11 @@ class CodexSessionPanel implements View {
           var role = item.kind == "userMessage" ? "You" : item.kind == "agentMessage" ? providerName(view.record.provider) : item.title + " · " + item.state;
           var roleChildren:Array<KeyedView> = [new KeyedView("label", new Text(role, labelStyle,
             item.kind == "agentMessage" ? tokens.accent : tokens.textSecondary, TextStyleOverride.text(12)))];
-          if (!tool && displayText != "") {
+          if ((!tool || item.kind == "plan") && displayText != "") {
             var copyText = displayText;
             var copied = copiedMessages.get(key) == copyText;
             var copy = quietButton("", function() { context.clipboard.writeText(copyText); copiedMessages.set(key, copyText); frame(); }, "agent-copy-" + key);
-            copy.accessibilityLabel = copied ? "Copied" : item.truncated && (full == null || full.partial) ? "Copy preview" : "Copy message";
+            copy.accessibilityLabel = copied ? "Copied" : item.truncated && (full == null || full.partial) ? "Copy preview" : item.kind == "plan" ? "Copy plan" : "Copy message";
             copy.leadingIcon = copied ? IconName.Check : IconName.Copy;
             copy.iconSize = 16;
             roleChildren.push(new KeyedView("copy", copy));
@@ -723,7 +724,7 @@ class CodexSessionPanel implements View {
         if (item.kind == "fileChange" && item.files != null && item.files.length > 0) {
           message.push(new KeyedView("files-" + key, new SessionChangeSummaryView(item.files, detail, openLink)));
         } else if (displayText != "" && ((!reasoning && !command) || expanded.get(key) == true)) {
-          if (item.kind == "agentMessage") {
+          if (item.kind == "agentMessage" || item.kind == "plan") {
             var rendered = markdown.get(key);
             if (rendered == null) { rendered = new CodexMarkdownView(displayText, editorPalette, syntaxes, openLink,
               workspaceActions == null ? null : workspaceActions.resolveImage, frame,
@@ -745,6 +746,18 @@ class CodexSessionPanel implements View {
              opener == null ? null : function(bytes) opener(turn,itemId,retainedId,bytes),frame)));
           }
         }
+        if (item.kind == "imageView" || item.kind == "imageGeneration") {
+          var destination=workspace.client.SessionImageActivity.target(root,view.record.cwd,item.imagePath);
+          if (destination == null) message.push(new KeyedView("native-image-unavailable-" + key,
+            new Text(item.imagePath == null && item.state == "inProgress" ? "Image is not available yet"
+              : "Image preview is unavailable in this workspace",null,tokens.textSecondary)));
+          else {
+            var resolve=workspaceActions == null ? null : workspaceActions.resolveImage;
+            var load=workspaceActions == null ? null : workspaceActions.loadImage;
+            message.push(new KeyedView("native-image-" + key,new SessionImageView("native-image-" + key,
+              item.kind == "imageView" ? "Viewed image" : "Generated image",destination,resolve,openLink,frame,load)));
+          }
+        }
         if (detail != "" && reasoning && expanded.get(key) == true) message.push(new KeyedView("detail-" + key, paragraph(detail)));
         if (detail != "" && command && expanded.get(key) == true) message.push(new KeyedView("detail-" + key, paragraph(detail)));
         if ((detail != "" || (item.kind == "fileChange" && item.files != null && item.files.length > 0)) && !reasoning && !command) {
@@ -764,13 +777,14 @@ class CodexSessionPanel implements View {
           }
         }
         if (item.truncated && (!command || expanded.get(key) == true)) {
-          if (item.kind == "agentMessage" && full != null && !full.partial) {}
-          else if (item.kind == "agentMessage" && full != null && full.partial)
+          if ((item.kind == "agentMessage" || item.kind == "plan") && full != null && !full.partial) {}
+          else if ((item.kind == "agentMessage" || item.kind == "plan") && full != null && full.partial)
             message.push(new KeyedView("truncated-" + key, paragraph("Response exceeds the 256 KiB display limit; showing its beginning.")));
           else {
             message.push(new KeyedView("truncated-" + key, paragraph(contentErrors.exists(key) ? contentErrors.get(key) : "This item is truncated in the current view.")));
-            if (item.kind == "agentMessage" && item.state == "completed" && view.supportsMessageContent == true && item.contentToken != null) {
-              var load = quietButton(contentLoading == key ? "Loading response…" : contentErrors.exists(key) ? "Retry full response" : "Load full response", function() loadContent(client,id,item,key));
+            if ((item.kind == "agentMessage" || item.kind == "plan") && item.state == "completed" && view.supportsMessageContent == true && item.contentToken != null) {
+              var contentLabel = item.kind == "plan" ? "plan" : "response";
+              var load = quietButton(contentLoading == key ? "Loading " + contentLabel + "…" : contentErrors.exists(key) ? "Retry full " + contentLabel : "Load full " + contentLabel, function() loadContent(client,id,item,key));
               load.enabled = contentLoading == null;
               message.push(new KeyedView("load-content-" + key,load));
             }
@@ -854,7 +868,7 @@ class CodexSessionPanel implements View {
     }
     var send = new Button(piActive ? "Queue message" : "Send", null, function() submitAction(piActive ? "queue" : "prompt"), "codex-send");
     send.variant = ButtonVariant.Primary;
-    send.enabled = (piActive ? canQueue : canSend) && !contextLoading && !imageUploading && promptBytes <= submitLimit && (StringTools.trim(prompt) != "" || imageDrafts.length > 0);
+    send.enabled = (piActive ? canQueue : canSend) && imagesSupported && !contextLoading && !imageUploading && promptBytes <= submitLimit && (StringTools.trim(prompt) != "" || imageDrafts.length > 0);
     var footerStyle = new LayoutStyle();
     footerStyle.width = LayoutAxis.grow();
     footerStyle.childGap = 12;
@@ -863,7 +877,7 @@ class CodexSessionPanel implements View {
     var footerControls:Array<KeyedView> = [new KeyedView("hint",hint)];
     if (piActive) {
       var steer = new Button("Steer now",null,function() submitAction("steer"),"agent-steer");
-      steer.enabled = canSteer && !contextLoading && !imageUploading && promptBytes <= 4096 && StringTools.trim(prompt) != "";
+      steer.enabled = canSteer && imagesSupported && !contextLoading && !imageUploading && promptBytes <= 4096 && (StringTools.trim(prompt) != "" || imageDrafts.length > 0);
       footerControls.push(new KeyedView("steer",steer));
     }
     footerControls.push(new KeyedView("send",send));
@@ -947,7 +961,7 @@ class CodexSessionPanel implements View {
     promptNode.on(UiEventKind.KeyDown, function(event) {
       if (event.key == UiKey.V && (event.modifiers & (UiModifier.Control | UiModifier.Super)) != 0
           && (event.modifiers & UiModifier.Alt) == 0 && workspaceActions != null && workspaceActions.pasteImage != null
-          && view.supportsImageUpload == true && view.record.provider == "codex" && control && connectionReady) {
+          && view.supportsImageUpload == true && control && connectionReady) {
         var readClipboard:Void->{bytes:Null<haxe.io.Bytes>, error:Null<String>} = cast workspaceActions.pasteImage;
         var pasted = readClipboard();
         if (pasted.bytes != null || pasted.error != null) {
@@ -995,7 +1009,7 @@ class CodexSessionPanel implements View {
     composerFrame.radiusTopLeft = composerFrame.radiusTopRight = composerFrame.radiusBottomLeft = composerFrame.radiusBottomRight = 8;
     var contextRows:Array<KeyedView> = [];
     var contextActions:Array<KeyedView> = [];
-    if (workspaceActions != null && workspaceActions.chooseImage != null && view.supportsImageUpload == true && view.record.provider == "codex") {
+    if (workspaceActions != null && workspaceActions.chooseImage != null && view.supportsImageUpload == true) {
       var chooseImage:((Null<String>, Null<haxe.io.Bytes>, Null<String>)->Void)->Void = cast workspaceActions.chooseImage;
       var imageAction = quietButton(imageUploading ? "Cancel image upload" : imageError == null ? "Add image" : "Try image again", function() {
         if (imageUploading) { imageGeneration++; imageUploading = false; frame(); return; }
@@ -1036,6 +1050,7 @@ class CodexSessionPanel implements View {
         new KeyedView("name", imageLabel), new KeyedView("remove", removeImage)
       ], imageStyle)));
     }
+    if (!imagesSupported) contextRows.push(new KeyedView("images-unavailable", new Text("Image input is unavailable; remove images or reconnect.", null, tokens.textSecondary)));
     if (imageError != null) contextRows.push(new KeyedView("image-error", new Text(imageError, null, tokens.danger)));
     if (workspaceActions != null && workspaceActions.readContext != null) {
       var readContext:(String, (Null<String>, Null<String>)->Void)->Void = cast workspaceActions.readContext;

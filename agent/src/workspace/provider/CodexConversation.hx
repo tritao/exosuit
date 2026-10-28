@@ -18,7 +18,7 @@ class CodexConversation {
   function cacheKey(turn:String, id:String):String return cacheId + ":" + turn.length + ":" + turn + id;
   public function content(turn:String, id:String, token:String, offset:Int):Null<AgentContentChunk> {
     var entry = find(turn,id);
-    if (entry == null || entry.kind != "agentMessage" || entry.contentToken != token) return null;
+    if (entry == null || (entry.kind != "agentMessage" && entry.kind != "plan") || entry.contentToken != token) return null;
     return AgentContentCache.chunk(cacheKey(turn,id),token,offset);
   }
 
@@ -99,6 +99,9 @@ class CodexConversation {
       case "agentMessage":
         entry.title = "Codex";
         entry.text = string(item, "text");
+      case "plan":
+        entry.title = "Plan";
+        entry.text = string(item, "text");
       case "userMessage":
         entry.title = "You";
         var content:Array<Dynamic> = Reflect.field(item, "content");
@@ -170,6 +173,21 @@ class CodexConversation {
         entry.title = "Tool";
         entry.text = string(item, "server") + " / " + string(item, "tool");
         entry.detail = Json.stringify(Reflect.field(item, "result"));
+      case "imageView", "imageGeneration":
+        entry.title = kind == "imageView" ? "Viewed image" : "Generated image";
+        var path=string(item,kind == "imageView" ? "path" : "savedPath");
+        if (path != "" && path.length <= 1024) entry.imagePath=path;
+        else if (path.length > 1024) entry.truncated=true;
+        if (kind == "imageGeneration") {
+          var failure=Reflect.field(item,"failure"), revised=string(item,"revisedPrompt");
+          if (failure != null) entry.text="Image generation reported a failure.";
+          else if (revised != "") entry.text=revised;
+        }
+        // Preserve the provider source as bounded detail without duplicating
+        // potentially large inline image bytes in the compact activity view.
+        var source:Dynamic=Reflect.copy(item);
+        if (Reflect.hasField(source,"result")) Reflect.setField(source,"result","[image data omitted]");
+        entry.detail=Json.stringify(source);
       case _:
         entry.title = "Additional activity";
         entry.text = kind;
@@ -177,7 +195,7 @@ class CodexConversation {
     }
     var state = string(item, "status");
     if (state != "") entry.state = clipped(state, 64);
-    if (kind == "agentMessage") entry.contentToken = AgentContentCache.replace(cacheKey(turn,id),entry.text);
+    if (kind == "agentMessage" || kind == "plan") entry.contentToken = AgentContentCache.replace(cacheKey(turn,id),entry.text);
     bounded(entry);
     if (existing == null) entries.push(entry);
     else entries[entries.indexOf(existing)] = entry;
@@ -192,7 +210,7 @@ class CodexConversation {
     if (entry == null || entry.state != "inProgress") return;
     if (kind == "commandExecution") entry.detail += text;
     else {
-      if (kind == "agentMessage") entry.contentToken = AgentContentCache.append(cacheKey(turn,id),text);
+      if (kind == "agentMessage" || kind == "plan") entry.contentToken = AgentContentCache.append(cacheKey(turn,id),text);
       entry.text += text;
     }
     bounded(entry);

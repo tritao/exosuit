@@ -660,8 +660,9 @@ class CodexProvider implements AgentMessageSource {
 				s.record.state = s.requests.keys().hasNext() ? "needs-attention" : "working";
 			else if (type == "idle" && s.record.turn == null)
 				s.record.state = "idle";
-		} else if (method == "item/agentMessage/delta" || method == "item/commandExecution/outputDelta") {
-			s.conversation.delta(string(params, "turnId"), string(params, "itemId"), method == "item/agentMessage/delta" ? "agentMessage" : "commandExecution", string(params, "delta"));
+		} else if (method == "item/agentMessage/delta" || method == "item/plan/delta" || method == "item/commandExecution/outputDelta") {
+			var kind=method == "item/agentMessage/delta" ? "agentMessage" : method == "item/plan/delta" ? "plan" : "commandExecution";
+			s.conversation.delta(string(params, "turnId"), string(params, "itemId"), kind, string(params, "delta"));
 			append(s, string(params, "delta"));
 		} else if (method == "item/completed" || method == "item/started" || method == "error") {
 			if (method != "error") s.conversation.put(string(params, "turnId"), Reflect.field(params, "item"), method == "item/completed");

@@ -45,7 +45,7 @@ class FakeAgent implements WorkspaceAgentClient {
 	public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String, ?accepted:Void->Void, ?expectedNativeName:String, ?imageIds:Array<String>):Void {
 		actions.push(action + ":" + text + ":" + request);
 		if (action == "model-settings") chosenModel = model;
-		if (action == "prompt") lastImageIds = imageIds;
+		if (action == "prompt" || action == "queue" || action == "steer") lastImageIds = imageIds;
 		if (accepted != null && acceptActions) {
 			if (deferAcceptance) pendingAcceptance = accepted; else accepted();
 		}
