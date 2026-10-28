@@ -248,7 +248,7 @@ class SuitDaemon {
 					ok: true, pid: Sys.getPid(), home: SuitPaths.home(), summary: inventory.summary(), tray: tray != null,
 					editors: inventory.editors().length, background: inventory.background().length,
 					orphaned: inventory.orphans().length, terminating: jobs.length, hosting: relay.hostingCount(),
-					tooltip: tooltip()
+					tooltip: tooltip(), connections: clients.length, idleFor: Sys.time() - idleSince
 				};
 			case "refresh":
 				refresh();

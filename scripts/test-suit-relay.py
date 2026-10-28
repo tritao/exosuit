@@ -71,6 +71,17 @@ def free_port() -> int:
         return probe.getsockname()[1]
 
 
+def pid_alive(pid: int) -> bool:
+    if os.name == "nt":
+        output = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True, timeout=30).stdout
+        return str(pid) in output
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
 def kill_tree(pid: int) -> None:
     if os.name == "nt":
         subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True, timeout=30)
@@ -486,8 +497,9 @@ def test_relay(base: Path) -> None:
             probe.close()
             return probe.status == 503
         wait_until(device_refused, 30, "the relay still sees the machine online after Stop hosting", interval=0.5)
-        wait_until(lambda: not suit.running(), 45, "suit did not idle out once hosting was paused",
-                   interval=4)  # each status request is a client that keeps suit awake
+        # Watch the process, not `suit status`: every control request counts as activity and resets the idle clock.
+        suit_pid = json.loads((suit.home / "daemon.json").read_text())["pid"]
+        wait_until(lambda: not pid_alive(suit_pid), 45, "suit did not idle out once hosting was paused", interval=1)
         print("  Stop hosting paused the workspace; the relay sees it offline and suit idled out")
 
         # Resume without suit running, then suit hosts again from its records when it starts.
@@ -501,6 +513,8 @@ def test_relay(base: Path) -> None:
         print("  resumed: suit hosts again from its records after a restart")
     except BaseException:
         print("--- suit relay list\n" + suit.run("relay", "list", check=False).stdout, file=sys.stderr)
+        print("--- suit list, status\n" + suit.run("list", "--json", check=False).stdout
+              + suit.run("status", "--json", check=False).stdout, file=sys.stderr)
         print("--- worker log\n" + relay.tail(), file=sys.stderr)
         for log in [*agent_state.glob("workspaces/*/manager.log"), *agent_state.glob("workspaces/*/relay-*.json"),
                     *suit.home.glob("*.json"), *suit.home.glob("*.txt"), *suit.home.glob("relay-hosts/*.json")]:
