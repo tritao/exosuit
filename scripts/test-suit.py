@@ -43,12 +43,14 @@ class Fixture:
     def __init__(self, directory: Path) -> None:
         self.home = directory / "suit-home"
         self.registry = self.home / "registry"
-        self.registry.mkdir(parents=True)
         self.environment = dict(os.environ, EXOSUIT_SUIT_HOME=str(self.home), EXOSUIT_SUIT_SCAN="0",
                                 EXOSUIT_SUIT_TRAY="0", EXOSUIT_SUIT_AUTOSTART="0", EXOSUIT_SUIT_IDLE_SECONDS="30",
                                 EXOSUIT_SUIT_LAUNCHER=str(SUIT))
         self.environment["PATH" if os.name == "nt" else "LD_LIBRARY_PATH"] = library_path()
         self.children: list[subprocess.Popen] = []
+        # suit creates its home with an owner-only ACL; the test writes records into it afterwards.
+        self.suit("status")
+        assert self.registry.is_dir()
 
     def suit(self, *arguments: str, timeout: float = 60) -> str:
         result = subprocess.run([str(HL), str(SUIT), *arguments], env=self.environment, capture_output=True,

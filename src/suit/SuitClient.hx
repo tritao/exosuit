@@ -41,9 +41,9 @@ class SuitClient {
 					if (value != null)
 						Reflect.setField(record, field, value);
 				}
+			if (!SuitPaths.prepare())
+				return;
 			var directory = SuitPaths.registry();
-			if (!FileSystem.exists(directory))
-				FileSystem.createDirectory(directory);
 			sys.io.AtomicFile.write(Path.join([directory, Sys.getPid() + ".json"]), Json.stringify(record) + "\n");
 			registeredKind = kind;
 		} catch (_:Dynamic) {}

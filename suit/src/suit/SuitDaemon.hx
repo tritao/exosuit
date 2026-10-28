@@ -38,8 +38,11 @@ class SuitDaemon {
 
 	public static function run():Int {
 		var home = SuitPaths.home();
-		if (!FileSystem.exists(home))
-			FileSystem.createDirectory(home);
+		if (!SuitPaths.prepare()) {
+			Sys.stderr().writeString("suit: " + home + " is not a private directory of this user
+");
+			return 1;
+		}
 		var lock = SuitNative.acquireLock(Path.join([home, "suit.lock"]));
 		if (lock == null)
 			return 0; // Another suit owns this home; starting one is always safe to repeat.

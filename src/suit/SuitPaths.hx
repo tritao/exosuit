@@ -25,6 +25,18 @@ class SuitPaths {
 		return Path.join([state, "exosuit", "suit"]);
 	}
 
+	/**
+		Creates suit's home and registry, readable only by this user (the daemon's lock requires it).
+		Returns false when they cannot be made private, for example when another account owns them.
+	**/
+	public static function prepare():Bool {
+		var directory = home();
+		var parent = Path.directory(directory);
+		if (parent.length > 0 && !sys.FileSystem.exists(parent))
+			sys.FileSystem.createDirectory(parent);
+		return SuitNative.prepareDirectory(directory) && SuitNative.prepareDirectory(registry());
+	}
+
 	/** One `<pid>.json` record per registered process. */
 	public static function registry():String
 		return Path.join([home(), "registry"]);

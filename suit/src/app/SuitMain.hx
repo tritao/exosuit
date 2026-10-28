@@ -45,6 +45,8 @@ class SuitMain {
 
 	static function run(args:Array<String>):Int {
 		var command = args.length > 0 ? args[0] : "status";
+		// suit's home must be private before anything is written to it; editors create it the same way.
+		try SuitPaths.prepare() catch (_:Dynamic) {}
 		var rest = args.slice(1);
 		var json = rest.indexOf("--json") >= 0;
 		switch command {
