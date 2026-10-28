@@ -14,7 +14,6 @@ import sys
 import tempfile
 import threading
 import time
-os.environ.setdefault("EXOSUIT_SUIT_AUTOSTART", "0")  # tests must not start the user's suit daemon
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 HAXEON = os.environ.get('HAXEON_BIN', str(pathlib.Path(os.environ.get('HAXEON_ROOT', str(ROOT / 'haxeon'))) / 'scripts/haxeon'))

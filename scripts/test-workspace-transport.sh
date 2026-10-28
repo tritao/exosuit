@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Tests must not start the user's suit daemon.
-export EXOSUIT_SUIT_AUTOSTART=${EXOSUIT_SUIT_AUTOSTART:-0}
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 python3 - "$root_dir" <<'PY'
 import json, os, pathlib, secrets, socket, subprocess, sys, tempfile, time, urllib.error, urllib.request

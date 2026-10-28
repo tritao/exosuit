@@ -2,7 +2,6 @@
 """Xvfb desktop acceptance with fake Codex, including saved conversation tabs."""
 import json,os,signal,subprocess,tempfile,time,sys,shutil
 from pathlib import Path
-os.environ.setdefault("EXOSUIT_SUIT_AUTOSTART", "0")  # tests must not start the user's suit daemon
 ROOT=Path(__file__).resolve().parent.parent
 INSTALL=Path(sys.argv[1]).resolve() if len(sys.argv)>1 else None
 RUNNER=[str(INSTALL/'exosuit')] if INSTALL else [str(ROOT/'haxeon/scripts/haxeon'),'run','--project',str(ROOT/'graphical/haxeon.json'),'--']

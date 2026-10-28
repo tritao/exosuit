@@ -3,7 +3,7 @@ package suit;
 import haxe.io.Path;
 
 typedef SuitClassification = {
-	var kind:String;
+	var kind:SuitKind;
 	var root:Null<String>;
 	var stateDir:Null<String>;
 	var generation:Null<String>;
@@ -16,14 +16,14 @@ class SuitClassifier {
 		var lowered = StringTools.replace(commandLine, "\\", "/").toLowerCase();
 		var exe = name.toLowerCase();
 		if (lowered.indexOf("/haxeon/compiler/") >= 0 && lowered.indexOf(".hl") >= 0)
-			return result("compiler-worker");
+			return result(SuitKind.CompilerWorker);
 		if (lowered.indexOf("live-host.hl") >= 0)
-			return result("live-host");
+			return result(SuitKind.LiveHost);
 		if (lowered.indexOf("haxeon-cli.hl") >= 0)
-			return lowered.indexOf("--live") >= 0 ? result("live-session") : null;
+			return lowered.indexOf("--live") >= 0 ? result(SuitKind.LiveSession) : null;
 		var program = programIndex(arguments, ["suit/build/host/main.hl", "exosuit-suit.hl"]);
 		if (program >= 0)
-			return result("suit");
+			return result(SuitKind.Suit);
 		program = programIndex(arguments, ["agent/build/host/main.hl", "exosuit-agent.hl"]);
 		if (program < 0 && (exe == "exosuit-agent.exe" || exe == "exosuit-agent"))
 			program = 0;
@@ -33,7 +33,7 @@ class SuitClassifier {
 				var stateIndex = arguments.indexOf("--state-dir");
 				var generationIndex = arguments.indexOf("--generation");
 				return {
-					kind: "workspace-manager",
+					kind: SuitKind.WorkspaceManager,
 					root: at(arguments, manager + 1),
 					stateDir: stateIndex > 0 ? at(arguments, stateIndex + 1) : null,
 					generation: generationIndex > 0 ? at(arguments, generationIndex + 1) : null
@@ -42,18 +42,18 @@ class SuitClassifier {
 			// The daemon: SOCKET PORT CREDENTIAL SEED [DATABASE [ROOT [INSTANCE ...]]].
 			var credential = at(arguments, program + 3);
 			return {
-				kind: "workspace-host",
+				kind: SuitKind.WorkspaceHost,
 				root: at(arguments, program + 6),
 				stateDir: credential == null ? null : Path.directory(credential),
 				generation: at(arguments, program + 7)
 			};
 		}
 		if (programIndex(arguments, ["graphical/build/host/main.hl", "tools/exosuit.hl"]) >= 0 || exe == "exosuit.exe" || exe == "exosuit")
-			return result("editor");
+			return result(SuitKind.Editor);
 		return null;
 	}
 
-	static function result(kind:String):SuitClassification
+	static function result(kind:SuitKind):SuitClassification
 		return {kind: kind, root: null, stateDir: null, generation: null};
 
 	static function at(arguments:Array<String>, index:Int):Null<String>

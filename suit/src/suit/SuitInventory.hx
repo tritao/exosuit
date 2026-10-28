@@ -3,16 +3,22 @@ package suit;
 import haxe.Json;
 import haxe.io.Path;
 import processkit.Processes;
+import suit.SuitGroup;
+import suit.SuitKind;
+import suit.SuitRecord.SuitRecords;
 import sys.FileSystem;
 import sys.io.File;
 
-/** One process suit tracks. `pid` plus `started` identifies it; `registered` is false for processes found only by scanning. */
+/**
+	One process suit lists. `pid` plus `started` identifies it. Only registered and adopted processes
+	(`source`) are exosuit's; a scanned one is shown but never stopped in bulk.
+**/
 typedef SuitProcess = {
 	var pid:Int;
 	var started:Float;
 	var parent:Int;
-	var kind:String;
-	var registered:Bool;
+	var kind:SuitKind;
+	var source:SuitSource;
 	var root:Null<String>;
 	var roots:Array<String>;
 	var stateDir:Null<String>;
@@ -20,7 +26,7 @@ typedef SuitProcess = {
 	var owner:Null<Int>;
 	var commandLine:String;
 	var orphaned:Bool;
-	var group:String;
+	var group:SuitGroup;
 	var relay:Null<SuitRelayStatus>;
 }
 
@@ -37,45 +43,72 @@ typedef SuitRelayStatus = {
 
 /**
 	Builds the picture suit shows: registered processes (validated against their start time) plus, unless
-	`EXOSUIT_SUIT_SCAN=0`, exosuit-related processes found by scanning command lines, so stragglers from
-	older builds or crashes appear too.
+	`EXOSUIT_SUIT_SCAN=0`, exosuit-related processes found by scanning command lines.
 
-	Ownership: an editor owns the services it started (`owner`) and the workspaces it reports using
-	(`roots`). A workspace service is orphaned when no running editor owns it or uses its root. Haxeon
-	compiler workers are resident by design; they count as orphaned only when no editor or live session
-	is running. Anything else is orphaned when its owner, or failing that its parent, is gone.
+	Ownership is positive, never guessed from a command line. A process is exosuit's when it registered
+	itself, or when its parent chain leads to a registered process; suit then adopts it, writing a record
+	that keeps the tie after that ancestor exits. Anything else found by scanning (a compiler worker of a
+	terminal build, a test's workspace manager) is listed as not started by exosuit and left out of every
+	bulk stop.
+
+	Orphans follow each kind's SuitOrphanRule: a workspace service is orphaned when no registered editor
+	uses its root, a compiler worker when no editor or live session runs, and anything else when the
+	process it belongs to is gone.
 **/
 class SuitInventory {
 	/** Executables whose command lines suit reads when scanning. */
 	public static inline var SCANNED_NAMES:String = "hl.exe;hl;exosuit.exe;exosuit;exosuit-agent.exe;exosuit-agent";
 
+	/** How far up a parent chain suit looks for a registered ancestor. */
+	static inline var MAX_ANCESTRY:Int = 64;
+
 	public final processes:Array<SuitProcess> = [];
 	public final snapshot:Array<ProcessInfo>;
 	public final scanning:Bool;
 	final self:Int;
+	final byPid:Map<Int, ProcessInfo> = new Map();
+	/** False when this platform cannot list processes; records are then checked one pid at a time. */
+	final listed:Bool;
 
 	public function new(?snapshotOverride:Array<ProcessInfo>) {
 		self = Sys.getPid();
 		scanning = Sys.getEnv("EXOSUIT_SUIT_SCAN") != "0";
-		var listed = snapshotOverride != null ? snapshotOverride : Processes.list(SCANNED_NAMES);
-		snapshot = listed == null ? [] : listed;
-		var byPid = new Map<Int, ProcessInfo>();
+		var list = snapshotOverride != null ? snapshotOverride : Processes.list(SCANNED_NAMES);
+		listed = list != null;
+		snapshot = list == null ? [] : list;
 		for (info in snapshot)
 			byPid.set(info.pid, info);
-		readRegistry(byPid);
-		if (scanning && listed != null)
+		readRegistry();
+		if (scanning && listed)
 			scan();
-		classify(byPid);
+		classify();
 	}
 
-	public function editors():Array<SuitProcess>
-		return [for (process in processes) if (process.kind == "editor") process];
+	/**
+		The start-order rule every ownership link uses: `earlier` started no later than `later`. A child
+		never starts before its parent, and a process starts before it registers, so a link that breaks
+		this belongs to a reused pid. Unknown times (0) prove nothing and never link.
+	**/
+	public static function startedBefore(earlier:Float, later:Float):Bool
+		return earlier > 0 && later > 0 && earlier <= later;
 
+	/** Processes exosuit started: registered or adopted. */
+	public function owned():Array<SuitProcess>
+		return [for (process in processes) if (process.source != Scanned) process];
+
+	public function editors():Array<SuitProcess>
+		return [for (process in processes) if (process.source != Scanned && process.kind == SuitKind.Editor) process];
+
+	/** exosuit's processes other than editors. */
 	public function background():Array<SuitProcess>
-		return [for (process in processes) if (process.kind != "editor") process];
+		return [for (process in processes) if (process.source != Scanned && process.kind != SuitKind.Editor) process];
 
 	public function orphans():Array<SuitProcess>
 		return [for (process in processes) if (process.orphaned) process];
+
+	/** Processes found by scanning that exosuit did not start. */
+	public function foreign():Array<SuitProcess>
+		return [for (process in processes) if (process.source == Scanned) process];
 
 	public function find(pid:Int):Null<SuitProcess> {
 		for (process in processes)
@@ -88,7 +121,7 @@ class SuitInventory {
 	public function hosted():Array<SuitProcess> {
 		var seen = new Map<String, Bool>();
 		var result:Array<SuitProcess> = [];
-		for (kind in ["workspace-manager", "workspace-host"])
+		for (kind in [SuitKind.WorkspaceManager, SuitKind.WorkspaceHost])
 			for (process in processes)
 				if (process.kind == kind && process.relay != null && process.relay.configured && process.root != null
 					&& !seen.exists(rootKey(process.root))) {
@@ -104,15 +137,39 @@ class SuitInventory {
 		var text = 'Exosuit: $editorCount ${editorCount == 1 ? "editor" : "editors"}, $backgroundCount background ${backgroundCount == 1 ? "process" : "processes"}';
 		if (orphanCount > 0)
 			text += ' ($orphanCount orphaned)';
+		var foreignCount = foreign().length;
+		if (foreignCount > 0)
+			text += ', $foreignCount not started by exosuit';
 		return text;
 	}
 
-	/** Every live descendant of `pid`, deepest first, as pid/start pairs. */
-	public function descendants(pid:Int):Array<ProcessInfo> {
+	/** The heading of a group: an editor's pid and workspaces, or the section name. */
+	public function groupLabel(group:SuitGroup):String {
+		return switch group {
+			case EditorGroup(pid):
+				var editor = find(pid);
+				var names = editor == null ? [] : [for (root in editor.roots) workspaceName(root)];
+				'Editor $pid' + (names.length > 0 ? ": " + names.join(", ") : "");
+			case HaxeonGroup: "Haxeon";
+			case OtherGroup: "Other";
+			case OrphanedGroup: "Orphaned";
+			case NotStartedByExosuit: "Not started by exosuit";
+		};
+	}
+
+	/** Every descendant of `pid` (which started at `started`) in this inventory's snapshot, deepest first. */
+	public function descendants(pid:Int, started:Float):Array<ProcessInfo>
+		return descendantsIn(snapshot, pid, started, self);
+
+	/**
+		Every descendant of `pid` in `snapshot`, deepest first. A child is linked to its parent only when it
+		started no earlier (startedBefore): an older process that names the pid as its parent belongs to an
+		earlier owner of that pid. Processes with an unknown start time are left out, because processkit
+		would refuse to stop them anyway.
+	**/
+	public static function descendantsIn(snapshot:Array<ProcessInfo>, pid:Int, started:Float, exclude:Int):Array<ProcessInfo> {
 		var children = new Map<Int, Array<ProcessInfo>>();
-		var started = new Map<Int, Float>();
 		for (info in snapshot) {
-			started.set(info.pid, info.started);
 			var list = children.get(info.parent);
 			if (list == null) {
 				list = [];
@@ -127,19 +184,27 @@ class SuitInventory {
 			if (list == null)
 				return;
 			for (child in list) {
-				// A child cannot predate its parent; an older process with this ppid belongs to a reused pid.
-				if (visited.exists(child.pid) || child.pid == self || (parentStarted > 0 && child.started > 0 && child.started + 1000 < parentStarted))
+				if (visited.exists(child.pid) || child.pid == exclude || child.pid == parent || !startedBefore(parentStarted, child.started))
 					continue;
 				visited.set(child.pid, true);
 				visit(child.pid, child.started);
 				result.push(child);
 			}
 		}
-		visit(pid, started.exists(pid) ? started.get(pid) : 0);
+		visit(pid, started);
 		return result;
 	}
 
-	function readRegistry(byPid:Map<Int, ProcessInfo>):Void {
+	/** The running process with `pid`, from the snapshot or, where listing is unsupported, asked directly. */
+	function lookup(pid:Int):Null<ProcessInfo> {
+		var info = byPid.get(pid);
+		if (info != null || listed)
+			return info;
+		var started = Processes.started(pid);
+		return started < 0 ? null : {pid: pid, parent: 0, started: started, name: "", commandLine: ""};
+	}
+
+	function readRegistry():Void {
 		var directory = SuitPaths.registry();
 		if (!FileSystem.exists(directory))
 			return;
@@ -147,138 +212,157 @@ class SuitInventory {
 			if (!StringTools.endsWith(name, ".json"))
 				continue;
 			var path = Path.join([directory, name]);
-			var record:Dynamic = null;
-			try {
-				var info = FileSystem.metadata(path);
-				if (info == null || info.size > 65536)
-					throw "too large";
-				record = Json.parse(File.getContent(path));
-			} catch (_:Dynamic) {
-				// A record being replaced is renamed into place atomically; an unreadable one is junk.
+			// Records are renamed into place atomically, so an unreadable one is junk.
+			var record = SuitRecords.read(path);
+			if (record == null) {
 				removeRecord(path);
 				continue;
 			}
-			var pid = intField(record, "pid");
-			var registeredAt = floatField(record, "registeredAt");
-			var info = pid == null ? null : byPid.get(pid);
-			// A reused pid starts after the record was written; give clocks a little slack.
-			if (info == null || pid == self || registeredAt == null || (info.started > 0 && info.started > registeredAt + 5000)) {
-				if (info == null || pid != self)
-					removeRecord(path);
+			if (record.pid == self)
+				continue;
+			var info = lookup(record.pid);
+			// A process registers after it starts; one that started later reused the pid.
+			if (info == null || !startedBefore(info.started, record.registeredAt)) {
+				removeRecord(path);
 				continue;
 			}
-			var roots:Array<String> = [];
-			var listed:Dynamic = Reflect.field(record, "roots");
-			if (Std.isOfType(listed, Array))
-				for (value in (listed : Array<Dynamic>))
-					if (Std.isOfType(value, String))
-						roots.push(value);
-			var kind = stringField(record, "kind");
 			processes.push({
 				pid: info.pid,
 				started: info.started,
 				parent: info.parent,
-				kind: kind == null ? "other" : kind,
-				registered: true,
-				root: stringField(record, "root"),
-				roots: roots,
-				stateDir: stringField(record, "stateDir"),
-				generation: stringField(record, "generation"),
-				owner: intField(record, "owner"),
+				kind: record.kind,
+				source: record.adopted ? Adopted : Registered,
+				root: record.root,
+				roots: record.roots,
+				stateDir: record.stateDir,
+				generation: record.generation,
+				owner: record.owner,
 				commandLine: info.commandLine,
 				orphaned: false,
-				group: "",
+				group: OtherGroup,
 				relay: null
 			});
 		}
 	}
 
 	function scan():Void {
-		var known = new Map<Int, Bool>();
+		var exosuit = new Map<Int, SuitProcess>();
 		for (process in processes)
-			known.set(process.pid, true);
+			exosuit.set(process.pid, process);
 		for (info in snapshot) {
-			if (known.exists(info.pid) || info.pid == self || info.commandLine.length == 0)
+			if (exosuit.exists(info.pid) || info.pid == self || info.commandLine.length == 0)
 				continue;
 			var found = SuitClassifier.classify(info.name, info.commandLine);
-			if (found == null || found.kind == "suit")
+			if (found == null || found.kind == SuitKind.Suit)
 				continue;
-			processes.push({
+			var ancestor = exosuitAncestor(info, exosuit);
+			var process:SuitProcess = {
 				pid: info.pid,
 				started: info.started,
 				parent: info.parent,
 				kind: found.kind,
-				registered: false,
+				source: ancestor == null ? Scanned : Adopted,
 				root: found.root,
 				roots: [],
 				stateDir: found.stateDir,
 				generation: found.generation,
-				owner: null,
+				owner: ancestor == null ? null : ancestor.pid,
 				commandLine: info.commandLine,
 				orphaned: false,
-				group: "",
+				group: OtherGroup,
 				relay: null
-			});
+			};
+			processes.push(process);
+			if (ancestor != null)
+				adopt(process);
 		}
 	}
 
-	function classify(byPid:Map<Int, ProcessInfo>):Void {
+	/** The nearest registered or adopted process up `info`'s parent chain, or null when nothing ties it to exosuit. */
+	function exosuitAncestor(info:ProcessInfo, exosuit:Map<Int, SuitProcess>):Null<SuitProcess> {
+		var current = info;
+		for (_ in 0...MAX_ANCESTRY) {
+			var parent = byPid.get(current.parent);
+			if (parent == null || parent.pid == current.pid || !startedBefore(parent.started, current.started))
+				return null;
+			var known = exosuit.get(parent.pid);
+			if (known != null && known.source != Scanned)
+				return known;
+			current = parent;
+		}
+		return null;
+	}
+
+	/** Records an adopted process, so it stays exosuit's after the ancestor that tied it exits. */
+	function adopt(process:SuitProcess):Void {
+		try {
+			SuitRecords.write(SuitPaths.registry(), {
+				pid: process.pid,
+				kind: process.kind,
+				registeredAt: Sys.time() * 1000,
+				roots: [],
+				root: process.root,
+				stateDir: process.stateDir,
+				generation: process.generation,
+				owner: process.owner,
+				adopted: true
+			});
+		} catch (_:Dynamic) {}
+	}
+
+	function classify():Void {
 		var editorPids = new Map<Int, SuitProcess>();
 		var claimed = new Map<String, SuitProcess>();
-		var liveSession = false;
+		var haxeonInUse = false;
 		for (process in processes) {
-			if (process.kind == "editor") {
+			if (process.source == Scanned)
+				continue;
+			if (process.kind == SuitKind.Editor) {
 				editorPids.set(process.pid, process);
 				for (root in process.roots)
 					if (!claimed.exists(rootKey(root)))
 						claimed.set(rootKey(root), process);
+				haxeonInUse = true;
 			}
-			if (process.kind == "live-session" || process.kind == "live-host")
-				liveSession = true;
+			if (process.kind == SuitKind.LiveSession || process.kind == SuitKind.LiveHost)
+				haxeonInUse = true;
 		}
-		var anyEditor = editorPids.keys().hasNext();
 		for (process in processes) {
-			var owner:Null<SuitProcess> = process.owner == null ? null : editorPids.get(process.owner);
-			var parentAlive = isAlive(byPid, process.parent, process.started);
-			switch process.kind {
-				case "editor":
-					process.orphaned = false;
-					process.group = editorGroup(process);
-				case "workspace-manager" | "workspace-host":
-					var user = process.root == null ? null : claimed.get(rootKey(process.root));
-					var holder = user != null ? user : owner;
-					process.orphaned = holder == null;
-					process.group = holder == null ? "Orphaned" : editorGroup(holder);
-				case "compiler-worker":
-					process.orphaned = !anyEditor && !liveSession;
-					process.group = process.orphaned ? "Orphaned" : "Haxeon";
-				case "live-session" | "live-host":
-					process.orphaned = !parentAlive;
-					process.group = process.orphaned ? "Orphaned" : "Haxeon";
-				default:
-					process.orphaned = process.owner != null ? owner == null && !isAlive(byPid, process.owner, 0) : !parentAlive;
-					process.group = process.orphaned ? "Orphaned" : owner != null ? editorGroup(owner) : "Other";
-			}
-			if ((process.kind == "workspace-manager" || process.kind == "workspace-host") && process.stateDir != null)
+			if (SuitKinds.isWorkspaceService(process.kind) && process.stateDir != null)
 				process.relay = readRelay(process.stateDir);
+			if (process.source == Scanned) {
+				process.orphaned = false;
+				process.group = NotStartedByExosuit;
+				continue;
+			}
+			// The process this one belongs to: its recorded owner, else its parent.
+			var belongsTo = process.owner != null ? process.owner : process.parent;
+			var holder:Null<SuitProcess> = null;
+			switch SuitKinds.orphanRule(process.kind) {
+				case Never:
+					process.orphaned = false;
+					holder = process.kind == SuitKind.Editor ? process : null;
+				case NoEditorUsesRoot:
+					holder = process.root == null ? null : claimed.get(rootKey(process.root));
+					process.orphaned = holder == null;
+				case NoHaxeonUser:
+					process.orphaned = !haxeonInUse;
+				case OwnerGone:
+					process.orphaned = !isAlive(belongsTo, process.started);
+					holder = process.orphaned ? null : editorPids.get(belongsTo);
+			}
+			process.group = if (process.orphaned) OrphanedGroup else if (holder != null) EditorGroup(holder.pid) else if (SuitKinds.isHaxeon(process.kind))
+				HaxeonGroup else OtherGroup;
 		}
 		processes.sort(function(left, right) {
-			var byGroup = Reflect.compare(groupRank(left.group), groupRank(right.group));
+			var byGroup = Reflect.compare(SuitGroups.rank(left.group), SuitGroups.rank(right.group));
 			if (byGroup != 0)
 				return byGroup;
-			var byName = Reflect.compare(left.group, right.group);
-			if (byName != 0)
-				return byName;
+			var byEditor = Reflect.compare(SuitGroups.editorOf(left.group), SuitGroups.editorOf(right.group));
+			if (byEditor != 0)
+				return byEditor;
 			return Reflect.compare(left.started, right.started);
 		});
-	}
-
-	static function groupRank(group:String):Int
-		return StringTools.startsWith(group, "Editor") ? 0 : group == "Haxeon" ? 1 : group == "Other" ? 2 : 3;
-
-	static function editorGroup(editor:SuitProcess):String {
-		var names = [for (root in editor.roots) workspaceName(root)];
-		return 'Editor ${editor.pid}' + (names.length > 0 ? ": " + names.join(", ") : "");
 	}
 
 	public static function workspaceName(root:Null<String>):String {
@@ -298,13 +382,12 @@ class SuitInventory {
 		return Sys.systemName() == "Windows" ? normalized.toLowerCase() : normalized;
 	}
 
-	static function isAlive(byPid:Map<Int, ProcessInfo>, pid:Null<Int>, childStarted:Float):Bool {
-		if (pid == null || pid <= 0)
+	/** True when `pid` runs and started before `childStarted`, so it can be the process that child belongs to. */
+	function isAlive(pid:Int, childStarted:Float):Bool {
+		if (pid <= 0)
 			return false;
-		var info = byPid.get(pid);
-		if (info == null)
-			return false;
-		return childStarted <= 0 || info.started <= 0 || info.started <= childStarted + 1000;
+		var info = lookup(pid);
+		return info != null && startedBefore(info.started, childStarted);
 	}
 
 	/** Reads `relay-status.json`, which a hosting workspace daemon rewrites while it runs. */
@@ -344,28 +427,12 @@ class SuitInventory {
 	static function removeRecord(path:String):Void
 		try FileSystem.deleteFile(path) catch (_:Dynamic) {}
 
-	public static function stringField(value:Dynamic, field:String):Null<String> {
-		if (value == null || !Reflect.isObject(value))
-			return null;
-		var result:Dynamic = Reflect.field(value, field);
-		return Std.isOfType(result, String) && (result : String).length > 0 ? result : null;
-	}
+	public static function stringField(value:Dynamic, field:String):Null<String>
+		return SuitRecords.stringField(value, field);
 
-	public static function intField(value:Dynamic, field:String):Null<Int> {
-		if (value == null || !Reflect.isObject(value))
-			return null;
-		var result:Dynamic = Reflect.field(value, field);
-		if (Std.isOfType(result, Int))
-			return result;
-		if (Std.isOfType(result, Float) && Math.ffloor(result) == result)
-			return Std.int(result);
-		return null;
-	}
+	public static function intField(value:Dynamic, field:String):Null<Int>
+		return SuitRecords.intField(value, field);
 
-	public static function floatField(value:Dynamic, field:String):Null<Float> {
-		if (value == null || !Reflect.isObject(value))
-			return null;
-		var result:Dynamic = Reflect.field(value, field);
-		return Std.isOfType(result, Float) || Std.isOfType(result, Int) ? (result : Float) : null;
-	}
+	public static function floatField(value:Dynamic, field:String):Null<Float>
+		return SuitRecords.floatField(value, field);
 }

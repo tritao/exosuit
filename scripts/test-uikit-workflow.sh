@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # Real X11 input, real UIKit widgets and real process/plugin services.
 set -euo pipefail
-# Tests must not start the user's suit daemon.
-export EXOSUIT_SUIT_AUTOSTART=${EXOSUIT_SUIT_AUTOSTART:-0}
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 if [[ ${1:-} == --drive ]]; then
 	fixture=$2

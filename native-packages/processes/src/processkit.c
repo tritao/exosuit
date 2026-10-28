@@ -12,11 +12,11 @@ typedef struct processkit_entry {
     char *command_line;
 } processkit_entry;
 
-struct processkit_list {
+typedef struct processkit_snapshot {
     processkit_entry *entries;
     int count;
     int capacity;
-};
+} processkit_snapshot;
 
 static char empty_text[] = "";
 
@@ -29,25 +29,38 @@ static char *copy_text(const char *text, size_t length) {
     return result;
 }
 
-static int append_entry(processkit_list *list, const processkit_entry *entry) {
-    if (list->count == list->capacity) {
-        int capacity = list->capacity ? list->capacity * 2 : 256;
+static int append_entry(processkit_snapshot *snapshot, const processkit_entry *entry) {
+    if (snapshot->count == snapshot->capacity) {
+        int capacity = snapshot->capacity ? snapshot->capacity * 2 : 256;
         processkit_entry *grown =
-            (processkit_entry *)realloc(list->entries, (size_t)capacity * sizeof(processkit_entry));
+            (processkit_entry *)realloc(snapshot->entries, (size_t)capacity * sizeof(processkit_entry));
         if (!grown)
             return 0;
-        list->entries = grown;
-        list->capacity = capacity;
+        snapshot->entries = grown;
+        snapshot->capacity = capacity;
     }
-    list->entries[list->count++] = *entry;
+    snapshot->entries[snapshot->count++] = *entry;
     return 1;
+}
+
+static void free_snapshot(processkit_snapshot *snapshot) {
+    if (!snapshot)
+        return;
+    for (int index = 0; index < snapshot->count; index++) {
+        free(snapshot->entries[index].name);
+        free(snapshot->entries[index].command_line);
+    }
+    free(snapshot->entries);
+    free(snapshot);
 }
 
 static int ascii_lower(int c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
 
-/* True when `name` equals one entry of the ';'-separated `names` list, ignoring ASCII case. */
+/* True when `name` equals one entry of the ';'-separated `names` list, ignoring ASCII case; "*" lists all. */
 static int name_listed(const char *names, const char *name) {
-    if (!names || !*names)
+    if (!names || !*names || !name)
+        return 0;
+    if (strcmp(names, "*") == 0)
         return 1;
     size_t length = strlen(name);
     const char *cursor = names;
@@ -68,56 +81,150 @@ static int name_listed(const char *names, const char *name) {
     return 0;
 }
 
-static processkit_entry *entry_at(processkit_list *list, int index) {
-    if (!list || index < 0 || index >= list->count)
-        return NULL;
-    return &list->entries[index];
+/*
+ * The one identity rule. Start times are compared exactly: each platform reads
+ * them from the same kernel record the same way every time, so a match means
+ * the same process and anything else means the pid now names another one. An
+ * unknown time (0) never matches anything.
+ */
+static int identity_status(double expected, double current) {
+    if (current < 0)
+        return PROCESSKIT_NOT_FOUND;
+    if (!(expected > 0) || !(current > 0))
+        return PROCESSKIT_UNKNOWN_START;
+    return expected == current ? PROCESSKIT_OK : PROCESSKIT_NOT_FOUND;
 }
 
-int processkit_list_count(processkit_list *list) { return list ? list->count : 0; }
-
-int processkit_list_pid(processkit_list *list, int index) {
-    processkit_entry *entry = entry_at(list, index);
-    return entry ? entry->pid : 0;
-}
-
-int processkit_list_parent(processkit_list *list, int index) {
-    processkit_entry *entry = entry_at(list, index);
-    return entry ? entry->parent : 0;
-}
-
-double processkit_list_started(processkit_list *list, int index) {
-    processkit_entry *entry = entry_at(list, index);
-    return entry ? entry->started : 0;
-}
-
-const char *processkit_list_name(processkit_list *list, int index) {
-    processkit_entry *entry = entry_at(list, index);
-    return entry && entry->name ? entry->name : empty_text;
-}
-
-const char *processkit_list_command_line(processkit_list *list, int index) {
-    processkit_entry *entry = entry_at(list, index);
-    return entry && entry->command_line ? entry->command_line : empty_text;
-}
-
-void processkit_list_close(processkit_list *list) {
-    if (!list)
-        return;
-    for (int index = 0; index < list->count; index++) {
-        free(list->entries[index].name);
-        free(list->entries[index].command_line);
-    }
-    free(list->entries);
-    free(list);
-}
+/* Open snapshots, by handle id. A handle is a small id rather than a pointer, so a stale one is rejected. */
 
 #if defined(_WIN32)
-
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+static SRWLOCK table_mutex = SRWLOCK_INIT;
+static void table_lock(void) { AcquireSRWLockExclusive(&table_mutex); }
+static void table_unlock(void) { ReleaseSRWLockExclusive(&table_mutex); }
+#else
+#include <pthread.h>
+static pthread_mutex_t table_mutex = PTHREAD_MUTEX_INITIALIZER;
+static void table_lock(void) { pthread_mutex_lock(&table_mutex); }
+static void table_unlock(void) { pthread_mutex_unlock(&table_mutex); }
+#endif
+
+#define PROCESSKIT_MAX_OPEN_LISTS 32
+
+static struct {
+    uint32_t id;
+    processkit_snapshot *snapshot;
+} open_lists[PROCESSKIT_MAX_OPEN_LISTS];
+static uint32_t next_list_id = 1;
+
+/* Stores a snapshot and returns its handle id, or 0 when too many are open. */
+static uint32_t publish_snapshot(processkit_snapshot *snapshot) {
+    uint32_t id = 0;
+    table_lock();
+    for (int slot = 0; slot < PROCESSKIT_MAX_OPEN_LISTS; slot++) {
+        if (open_lists[slot].id != 0)
+            continue;
+        id = next_list_id++;
+        if (next_list_id == 0)
+            next_list_id = 1;
+        open_lists[slot].id = id;
+        open_lists[slot].snapshot = snapshot;
+        break;
+    }
+    table_unlock();
+    return id;
+}
+
+/* The snapshot behind a handle. It stays valid until that handle is closed, which only its owner does. */
+static processkit_snapshot *find_snapshot(processkit_list list) {
+    processkit_snapshot *result = NULL;
+    if (list.id == 0)
+        return NULL;
+    table_lock();
+    for (int slot = 0; slot < PROCESSKIT_MAX_OPEN_LISTS; slot++)
+        if (open_lists[slot].id == list.id) {
+            result = open_lists[slot].snapshot;
+            break;
+        }
+    table_unlock();
+    return result;
+}
+
+void processkit_list_close(processkit_list list) {
+    processkit_snapshot *snapshot = NULL;
+    if (list.id == 0)
+        return;
+    table_lock();
+    for (int slot = 0; slot < PROCESSKIT_MAX_OPEN_LISTS; slot++)
+        if (open_lists[slot].id == list.id) {
+            snapshot = open_lists[slot].snapshot;
+            open_lists[slot].id = 0;
+            open_lists[slot].snapshot = NULL;
+            break;
+        }
+    table_unlock();
+    free_snapshot(snapshot);
+}
+
+static processkit_snapshot *new_snapshot(void) {
+    return (processkit_snapshot *)calloc(1, sizeof(processkit_snapshot));
+}
+
+/* Publishes a finished snapshot through `out_list`, or frees it when the table is full. */
+static int finish_open(processkit_snapshot *snapshot, processkit_list *out_list) {
+    uint32_t id = publish_snapshot(snapshot);
+    if (id == 0) {
+        free_snapshot(snapshot);
+        return PROCESSKIT_FAILED;
+    }
+    out_list->id = id;
+    return PROCESSKIT_OK;
+}
+
+static processkit_entry *entry_at(processkit_list list, int index) {
+    processkit_snapshot *snapshot = find_snapshot(list);
+    if (!snapshot || index < 0 || index >= snapshot->count)
+        return NULL;
+    return &snapshot->entries[index];
+}
+
+int processkit_list_count(processkit_list list) {
+    processkit_snapshot *snapshot = find_snapshot(list);
+    return snapshot ? snapshot->count : 0;
+}
+
+int processkit_list_pid(processkit_list list, int index) {
+    processkit_entry *entry = entry_at(list, index);
+    return entry ? entry->pid : 0;
+}
+
+int processkit_list_parent(processkit_list list, int index) {
+    processkit_entry *entry = entry_at(list, index);
+    return entry ? entry->parent : 0;
+}
+
+double processkit_list_started(processkit_list list, int index) {
+    processkit_entry *entry = entry_at(list, index);
+    return entry ? entry->started : 0;
+}
+
+const char *processkit_list_name(processkit_list list, int index) {
+    processkit_entry *entry = entry_at(list, index);
+    return entry && entry->name ? entry->name : empty_text;
+}
+
+const char *processkit_list_command_line(processkit_list list, int index) {
+    processkit_entry *entry = entry_at(list, index);
+    return entry && entry->command_line ? entry->command_line : empty_text;
+}
+
+int processkit_identify(int pid, double started) { return identity_status(started, processkit_started(pid)); }
+
+#if defined(_WIN32)
+
 #include <tlhelp32.h>
 
 typedef LONG(NTAPI *query_information_fn)(HANDLE, ULONG, PVOID, ULONG, PULONG);
@@ -186,21 +293,21 @@ static char *read_command_line(HANDLE process) {
     return result;
 }
 
-int processkit_list_open(const char *names, processkit_list **out_list) {
+int processkit_list_open(const char *names, processkit_list *out_list) {
     if (!out_list)
         return PROCESSKIT_FAILED;
-    *out_list = NULL;
-    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snapshot == INVALID_HANDLE_VALUE)
+    out_list->id = 0;
+    HANDLE system = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (system == INVALID_HANDLE_VALUE)
         return PROCESSKIT_FAILED;
-    processkit_list *list = (processkit_list *)calloc(1, sizeof(processkit_list));
-    if (!list) {
-        CloseHandle(snapshot);
+    processkit_snapshot *snapshot = new_snapshot();
+    if (!snapshot) {
+        CloseHandle(system);
         return PROCESSKIT_FAILED;
     }
     PROCESSENTRY32W process;
     process.dwSize = sizeof(process);
-    for (BOOL more = Process32FirstW(snapshot, &process); more; more = Process32NextW(snapshot, &process)) {
+    for (BOOL more = Process32FirstW(system, &process); more; more = Process32NextW(system, &process)) {
         if (process.th32ProcessID == 0)
             continue;
         processkit_entry entry;
@@ -211,52 +318,60 @@ int processkit_list_open(const char *names, processkit_list **out_list) {
         HANDLE handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, process.th32ProcessID);
         if (handle) {
             entry.started = handle_started(handle);
-            if (entry.name && name_listed(names, entry.name))
+            if (name_listed(names, entry.name))
                 entry.command_line = read_command_line(handle);
             CloseHandle(handle);
         }
-        if (!append_entry(list, &entry)) {
+        if (!append_entry(snapshot, &entry)) {
             free(entry.name);
             free(entry.command_line);
-            processkit_list_close(list);
-            CloseHandle(snapshot);
+            free_snapshot(snapshot);
+            CloseHandle(system);
             return PROCESSKIT_FAILED;
         }
     }
-    CloseHandle(snapshot);
-    *out_list = list;
+    CloseHandle(system);
+    return finish_open(snapshot, out_list);
+}
+
+/*
+ * Opens `pid` with `access` when processkit's identity rule accepts it. The
+ * open handle pins the process, so its pid cannot be reused while it is held.
+ */
+static int open_identified(int pid, double started, DWORD access, HANDLE *out_handle) {
+    *out_handle = NULL;
+    if (pid <= 0)
+        return PROCESSKIT_NOT_FOUND;
+    if (!(started > 0))
+        return PROCESSKIT_UNKNOWN_START;
+    HANDLE handle = OpenProcess(access | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
+    if (!handle)
+        return GetLastError() == ERROR_ACCESS_DENIED ? PROCESSKIT_ACCESS_DENIED : PROCESSKIT_NOT_FOUND;
+    int status = identity_status(started, handle_running(handle) ? handle_started(handle) : -1);
+    if (status != PROCESSKIT_OK) {
+        CloseHandle(handle);
+        return status;
+    }
+    *out_handle = handle;
     return PROCESSKIT_OK;
 }
 
-static HANDLE open_matching(int pid, double started, DWORD access) {
-    if (pid <= 0)
-        return NULL;
-    HANDLE handle = OpenProcess(access | PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
-    if (!handle)
-        return NULL;
-    if (!handle_running(handle) || (started > 0 && handle_started(handle) != started)) {
-        CloseHandle(handle);
-        return NULL;
-    }
-    return handle;
-}
-
 double processkit_started(int pid) {
-    HANDLE handle = open_matching(pid, 0, 0);
+    if (pid <= 0)
+        return -1;
+    HANDLE handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
     if (!handle)
         return -1;
-    double started = handle_started(handle);
+    double started = handle_running(handle) ? handle_started(handle) : -1;
     CloseHandle(handle);
     return started;
 }
 
 int processkit_terminate(int pid, double started) {
-    HANDLE handle = open_matching(pid, started, PROCESS_TERMINATE);
-    if (!handle) {
-        if (GetLastError() == ERROR_ACCESS_DENIED)
-            return PROCESSKIT_ACCESS_DENIED;
-        return PROCESSKIT_NOT_FOUND;
-    }
+    HANDLE handle = NULL;
+    int status = open_identified(pid, started, PROCESS_TERMINATE, &handle);
+    if (status != PROCESSKIT_OK)
+        return status;
     BOOL ended = TerminateProcess(handle, 1);
     CloseHandle(handle);
     return ended ? PROCESSKIT_OK : PROCESSKIT_ACCESS_DENIED;
@@ -279,12 +394,14 @@ static BOOL CALLBACK close_window(HWND window, LPARAM parameter) {
 }
 
 int processkit_request_close(int pid, double started) {
-    HANDLE handle = open_matching(pid, started, 0);
-    if (!handle)
-        return PROCESSKIT_NOT_FOUND;
-    CloseHandle(handle);
+    HANDLE handle = NULL;
+    int status = open_identified(pid, started, 0, &handle);
+    if (status != PROCESSKIT_OK)
+        return status;
+    // The handle is held while posting, so the windows found belong to this process and not a pid reuser.
     processkit_close_request request = {(DWORD)pid, 0};
     EnumWindows(close_window, (LPARAM)&request);
+    CloseHandle(handle);
     return request.posted > 0 ? PROCESSKIT_OK : PROCESSKIT_NOT_FOUND;
 }
 
@@ -353,10 +470,12 @@ static int read_stat(int pid, int *out_parent, double *out_started) {
     if (state == 'Z' || state == 'X')
         return 0;
     long ticks = sysconf(_SC_CLK_TCK);
+    double boot = boot_seconds();
     if (out_parent)
         *out_parent = parent;
+    /* The boot time is cached, so one process computes the same start time on every read. */
     if (out_started)
-        *out_started = ticks > 0 ? (boot_seconds() + (double)start_ticks / (double)ticks) * 1000.0 : 0;
+        *out_started = ticks > 0 && boot > 0 ? (boot + (double)start_ticks / (double)ticks) * 1000.0 : 0;
     return 1;
 }
 
@@ -394,15 +513,15 @@ static char *read_file_text(const char *path, int nul_to_space) {
     return text;
 }
 
-int processkit_list_open(const char *names, processkit_list **out_list) {
+int processkit_list_open(const char *names, processkit_list *out_list) {
     if (!out_list)
         return PROCESSKIT_FAILED;
-    *out_list = NULL;
+    out_list->id = 0;
     DIR *directory = opendir("/proc");
     if (!directory)
         return PROCESSKIT_FAILED;
-    processkit_list *list = (processkit_list *)calloc(1, sizeof(processkit_list));
-    if (!list) {
+    processkit_snapshot *snapshot = new_snapshot();
+    if (!snapshot) {
         closedir(directory);
         return PROCESSKIT_FAILED;
     }
@@ -419,29 +538,20 @@ int processkit_list_open(const char *names, processkit_list **out_list) {
         char path[64];
         snprintf(path, sizeof(path), "/proc/%d/comm", pid);
         entry.name = read_file_text(path, 0);
-        if (entry.name && name_listed(names, entry.name)) {
+        if (name_listed(names, entry.name)) {
             snprintf(path, sizeof(path), "/proc/%d/cmdline", pid);
             entry.command_line = read_file_text(path, 1);
         }
-        if (!append_entry(list, &entry)) {
+        if (!append_entry(snapshot, &entry)) {
             free(entry.name);
             free(entry.command_line);
-            processkit_list_close(list);
+            free_snapshot(snapshot);
             closedir(directory);
             return PROCESSKIT_FAILED;
         }
     }
     closedir(directory);
-    *out_list = list;
-    return PROCESSKIT_OK;
-}
-
-static int matches(int pid, double started) {
-    double current = 0;
-    if (pid <= 0 || !read_stat(pid, NULL, &current))
-        return 0;
-    /* /proc start times have clock-tick resolution; allow for rounding. */
-    return started <= 0 || (current - started < 20 && started - current < 20);
+    return finish_open(snapshot, out_list);
 }
 
 double processkit_started(int pid) {
@@ -449,17 +559,58 @@ double processkit_started(int pid) {
     return pid > 0 && read_stat(pid, NULL, &started) ? started : -1;
 }
 
-int processkit_terminate(int pid, double started) {
-    if (!matches(pid, started))
-        return PROCESSKIT_NOT_FOUND;
-    return kill((pid_t)pid, SIGKILL) == 0 ? PROCESSKIT_OK : PROCESSKIT_ACCESS_DENIED;
+/*
+ * Linux has no handle to hold across the check and the signal, so a pid freed
+ * and reused in between could still be hit. pids are handed out in sequence
+ * and wrap only after pid_max allocations, so that window is very small.
+ */
+static int signal_identified(int pid, double started, int signal_number) {
+    int status = processkit_identify(pid, started);
+    if (status != PROCESSKIT_OK)
+        return status;
+    return kill((pid_t)pid, signal_number) == 0 ? PROCESSKIT_OK : PROCESSKIT_ACCESS_DENIED;
 }
 
-int processkit_request_close(int pid, double started) {
-    if (!matches(pid, started))
-        return PROCESSKIT_NOT_FOUND;
-    return kill((pid_t)pid, SIGTERM) == 0 ? PROCESSKIT_OK : PROCESSKIT_ACCESS_DENIED;
+int processkit_terminate(int pid, double started) { return signal_identified(pid, started, SIGKILL); }
+
+int processkit_request_close(int pid, double started) { return signal_identified(pid, started, SIGTERM); }
+
+int processkit_current_pid(void) { return (int)getpid(); }
+
+#elif defined(__APPLE__)
+
+#include <libproc.h>
+#include <signal.h>
+#include <sys/proc_info.h>
+#include <unistd.h>
+
+/* Listing needs proc_listallpids; until it is written only direct pid checks work. */
+int processkit_list_open(const char *names, processkit_list *out_list) {
+    (void)names;
+    if (out_list)
+        out_list->id = 0;
+    return PROCESSKIT_UNSUPPORTED;
 }
+
+double processkit_started(int pid) {
+    if (pid <= 0)
+        return -1;
+    struct proc_bsdinfo info;
+    if (proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, PROC_PIDTBSDINFO_SIZE) != PROC_PIDTBSDINFO_SIZE)
+        return kill((pid_t)pid, 0) == 0 ? 0 : -1;
+    return (double)info.pbi_start_tvsec * 1000.0 + (double)(info.pbi_start_tvusec / 1000);
+}
+
+static int signal_identified(int pid, double started, int signal_number) {
+    int status = processkit_identify(pid, started);
+    if (status != PROCESSKIT_OK)
+        return status;
+    return kill((pid_t)pid, signal_number) == 0 ? PROCESSKIT_OK : PROCESSKIT_ACCESS_DENIED;
+}
+
+int processkit_terminate(int pid, double started) { return signal_identified(pid, started, SIGKILL); }
+
+int processkit_request_close(int pid, double started) { return signal_identified(pid, started, SIGTERM); }
 
 int processkit_current_pid(void) { return (int)getpid(); }
 
@@ -468,29 +619,19 @@ int processkit_current_pid(void) { return (int)getpid(); }
 #include <signal.h>
 #include <unistd.h>
 
-/* Listing needs libproc on macOS; until then only direct pid checks work. */
-int processkit_list_open(const char *names, processkit_list **out_list) {
+int processkit_list_open(const char *names, processkit_list *out_list) {
     (void)names;
     if (out_list)
-        *out_list = NULL;
+        out_list->id = 0;
     return PROCESSKIT_UNSUPPORTED;
 }
 
+/* Start times are unknown here, so processkit never acts on a process on this platform. */
 double processkit_started(int pid) { return pid > 0 && kill((pid_t)pid, 0) == 0 ? 0 : -1; }
 
-int processkit_terminate(int pid, double started) {
-    (void)started;
-    if (processkit_started(pid) < 0)
-        return PROCESSKIT_NOT_FOUND;
-    return kill((pid_t)pid, SIGKILL) == 0 ? PROCESSKIT_OK : PROCESSKIT_ACCESS_DENIED;
-}
+int processkit_terminate(int pid, double started) { return processkit_identify(pid, started); }
 
-int processkit_request_close(int pid, double started) {
-    (void)started;
-    if (processkit_started(pid) < 0)
-        return PROCESSKIT_NOT_FOUND;
-    return kill((pid_t)pid, SIGTERM) == 0 ? PROCESSKIT_OK : PROCESSKIT_ACCESS_DENIED;
-}
+int processkit_request_close(int pid, double started) { return processkit_identify(pid, started); }
 
 int processkit_current_pid(void) { return (int)getpid(); }
 
