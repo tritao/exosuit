@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import uuid
 from prepare_agent_naming import prepare
+os.environ.setdefault("EXOSUIT_SUIT_AUTOSTART", "0")  # tests must not start the user's suit daemon
 
 ROOT = Path(__file__).resolve().parent.parent
 prepare(ROOT, required=True)

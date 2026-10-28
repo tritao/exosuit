@@ -4,6 +4,7 @@ import hashlib, json, os, shutil, subprocess, tempfile, time, sys
 from pathlib import Path
 from agent_test_runtime import manager_command, manager_environment
 from pi_test_runtime import Model, configure_pi
+os.environ.setdefault("EXOSUIT_SUIT_AUTOSTART", "0")  # tests must not start the user's suit daemon
 
 ROOT=Path(__file__).resolve().parent.parent
 HAXEON=ROOT/'haxeon'

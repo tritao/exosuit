@@ -17,6 +17,8 @@ param(
 	[string]$WorkingDirectory = (Get-Location).Path
 )
 $ErrorActionPreference = 'Stop'
+# Guarded runs are unattended; they must not start the user's suit daemon.
+if (-not $env:EXOSUIT_SUIT_AUTOSTART) { $env:EXOSUIT_SUIT_AUTOSTART = '0' }
 Import-Module (Join-Path $PSScriptRoot 'guard.psm1') -Force
 $arguments = if ($ArgLine) { @($ArgLine) } else { @() }
 $result = Invoke-Guarded -FilePath $Exe -ArgumentList $arguments -WorkingDirectory $WorkingDirectory -TimeoutSeconds $TimeoutSeconds -LogPath $Log

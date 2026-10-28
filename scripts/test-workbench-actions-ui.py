@@ -8,6 +8,7 @@ import sys
 import subprocess
 import tempfile
 import time
+os.environ.setdefault("EXOSUIT_SUIT_AUTOSTART", "0")  # tests must not start the user's suit daemon
 
 ROOT = Path(__file__).resolve().parent.parent
 INSTALL = Path(sys.argv[1]).resolve(strict=True) if len(sys.argv) > 1 else None

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Tests must not start the user's suit daemon.
+export EXOSUIT_SUIT_AUTOSTART=${EXOSUIT_SUIT_AUTOSTART:-0}
 exosuit_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 root_dir=${HAXEON_ROOT:-"$exosuit_dir/haxeon"}
 root_dir=$(cd "$root_dir" && pwd)

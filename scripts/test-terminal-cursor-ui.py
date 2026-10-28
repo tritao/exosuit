@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 
 from PIL import Image, ImageChops
+os.environ.setdefault("EXOSUIT_SUIT_AUTOSTART", "0")  # tests must not start the user's suit daemon
 
 ROOT = Path(__file__).resolve().parent.parent
 PROJECT = ROOT / "tests/terminal-cursor-ui-smoke/haxeon.json"

@@ -86,7 +86,9 @@ Two commands show the menu without clicking. `suit menu` prints it as text.
   the registry, the lock and the endpoint, which is how tests stay isolated
   from the user's suit.
 - **Started by.** The editor and the background workspace manager start it,
-  detached. Set `EXOSUIT_SUIT_AUTOSTART=0` to prevent this.
+  detached. Set `EXOSUIT_SUIT_AUTOSTART=0` to prevent this. The test scripts
+  (`scripts/test*.sh`, `scripts/test-*.py`) and the run guard set it by default;
+  export `EXOSUIT_SUIT_AUTOSTART=1` to test autostart itself.
 - **Idle cost.** It sleeps in the NativeKit event wait and rescans every 10 s
   for the tooltip. It exits after `EXOSUIT_SUIT_IDLE_SECONDS` (default 120)
   with nothing to track, so tests and editors that come and go never leave it

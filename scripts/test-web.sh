@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Optional composed browser gate; missing platform tools stay pending.
 set -euo pipefail
+# Tests must not start the user's suit daemon.
+export EXOSUIT_SUIT_AUTOSTART=${EXOSUIT_SUIT_AUTOSTART:-0}
 root_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 if [[ ${EXOSUIT_CI_WEB:-0} != 1 ]]; then
 	echo "PENDING: browser gate (set EXOSUIT_CI_WEB=1)"
