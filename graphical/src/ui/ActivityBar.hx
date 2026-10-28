@@ -30,8 +30,12 @@ import haxeon.ui.widgets.text.Text;
 	Dragging an icon reorders the destinations; a secondary click asks for the rail's menu. */
 class ActivityBar implements View {
 	public static inline final WIDTH = 56.0;
+	/** Style key prefix of a destination's button; the destination id follows it. */
+	public static inline final BUTTON_KEY_PREFIX = "activity:";
 	/** Opens the rail's menu for a destination, or for the rail itself when the id is null. */
 	public var onContextMenu:Null<(Null<String>, UiEvent)->Void> = null;
+	/** Moves a dragged destination before another one, or to the end for null; the sidebar model's own move by default. */
+	public var onMove:Null<(String, Null<String>)->Void> = null;
 	final model:SidebarModel;
 	final icons:Map<String, IconName>;
 	final activate:String->Void;
@@ -69,12 +73,12 @@ class ActivityBar implements View {
 			if (!mode.visible || hiddenIds.indexOf(mode.id) >= 0) continue;
 			var id = mode.id;
 			var index = order.indexOf(id);
-			var marker = drag.insertion < 0 ? 0 : drag.insertion == index ? 1 :
-				drag.insertion == order.length && index == order.length - 1 ? 2 : 0;
+			var marker = drag.insertion < 0 ? DropMarker.None : drag.insertion == index ? DropMarker.Above :
+				drag.insertion == order.length && index == order.length - 1 ? DropMarker.Below : DropMarker.None;
 			var buttonStyle = new LayoutStyle();
 			buttonStyle.width = LayoutAxis.fixed(40);
 			buttonStyle.height = LayoutAxis.fixed(40);
-			var button = new Button("", buttonStyle, function() activate(id), "activity:" + id);
+			var button = new Button("", buttonStyle, function() activate(id), BUTTON_KEY_PREFIX + id);
 			button.variant = ButtonVariant.Navigation;
 			button.leadingIcon = icons.exists(id) ? icons.get(id) : IconName.FolderOpen;
 			button.iconSize = 20;
@@ -100,22 +104,29 @@ class ActivityBar implements View {
 		items.push(new KeyedView("manage", new ActivityBarItem(new TabTooltip("activity-tooltip:manage", gear,
 			new Text("Manage"),
 			function() return new Rect(0, 0, context.viewportWidth, context.viewportHeight), tooltipDelay, Right,
-			hover, visibleTooltip.value == "activity-tooltip:manage"), manageOpen, 0, null)));
+			hover, visibleTooltip.value == "activity-tooltip:manage"), manageOpen, DropMarker.None, null)));
 		var node = new Column("activity-bar", items, style).build(context);
-		drag.attach(node, order, model, context, onContextMenu, hover.cancel);
+		var move:(String, Null<String>)->Void = onMove != null ? onMove : function(id, before) { model.moveMode(id, before); };
+		drag.attach(node, order, model, move, context, onContextMenu, hover.cancel);
 		WorkbenchBoundary.right(context, node);
 		return node;
 	}
+}
+
+/** Where a drag would drop relative to an icon, shown as a line in the gap beside it. */
+private enum DropMarker {
+	None;
+	Above;
+	Below;
 }
 
 /** Full-width slot keeps the selection rail at the bar edge, outside the button. */
 private class ActivityBarItem implements View {
 	final child:View;
 	final selected:Bool;
-	/** 0: none, 1: drop line above, 2: drop line below. */
-	final marker:Int;
+	final marker:DropMarker;
 	final built:Null<RenderNode->Void>;
-	public function new(child:View, selected:Bool, marker:Int, built:Null<RenderNode->Void>) {
+	public function new(child:View, selected:Bool, marker:DropMarker, built:Null<RenderNode->Void>) {
 		this.child = child; this.selected = selected; this.marker = marker; this.built = built;
 	}
 	public function build(context:BuildContext):RenderNode {
@@ -136,12 +147,12 @@ private class ActivityBarItem implements View {
 			rail.hitTestSelf = false;
 			node.add(rail);
 		}
-		if (marker != 0) {
+		if (marker != DropMarker.None) {
 			// Centered in the 6 px gap between items.
 			var lineStyle = new LayoutStyle();
 			lineStyle.positioning = haxeon.ui.LayoutPositioning.Absolute;
 			lineStyle.positionX = 8;
-			lineStyle.positionY = marker == 1 ? -4 : 42;
+			lineStyle.positionY = marker == DropMarker.Above ? -4 : 42;
 			lineStyle.width = LayoutAxis.fixed(40);
 			lineStyle.height = LayoutAxis.fixed(2);
 			lineStyle.background = context.theme.tokens.accent;
@@ -196,7 +207,7 @@ private class ActivityBarDrag {
 		}
 		return index == from || index == from + 1 ? -1 : index;
 	}
-	public function attach(root:RenderNode, order:Array<String>, model:haxeon.ui.widgets.sidebar.SidebarModel,
+	public function attach(root:RenderNode, order:Array<String>, model:SidebarModel, move:(String, Null<String>)->Void,
 			context:BuildContext, menu:Null<(Null<String>, UiEvent)->Void>, started:Void->Void):Void {
 		this.order = order;
 		revision = context.state(context.id("activity-drag-revision"), 0);
@@ -234,7 +245,7 @@ private class ActivityBarDrag {
 			clear(); repaint();
 			if (!moved) return;
 			event.preventDefault();
-			if (target >= 0) model.moveMode(from, target < order.length ? order[target] : null);
+			if (target >= 0) move(from, target < order.length ? order[target] : null);
 		});
 		root.on(UiEventKind.PointerCancel, function(event) {
 			if (pointer != event.pointerId) return;
@@ -248,7 +259,8 @@ private class ActivityBarDrag {
 			if (menu == null || !UiKey.isContextMenuRequest(event.key, event.modifiers)) return;
 			var focused = root.find(event.target);
 			var key = focused == null ? null : focused.styleKey;
-			var id = key != null && StringTools.startsWith(key, "activity:") ? key.substr(9) : null;
+			var prefix = ActivityBar.BUTTON_KEY_PREFIX;
+			var id = key != null && StringTools.startsWith(key, prefix) ? key.substr(prefix.length) : null;
 			menu(id != null && model.find(id) != null ? id : null, event);
 			event.preventDefault(); event.stopPropagation();
 		}, "capture");

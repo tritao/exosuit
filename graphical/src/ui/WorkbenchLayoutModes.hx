@@ -25,8 +25,14 @@ class WorkbenchLayoutModes {
 	var applied:String = "";
 	public var beforeApply:Void->Void = function() {};
 	public var afterApply:Void->Void = function() {};
+	/**
+		Whether the right panel can show the destinations a mode hides. By default, whenever it is registered; the app also
+		turns it off where the panel cannot show or cannot follow the group's folder. Without it the rail keeps them.
+	**/
+	public var contextPanelAvailable:Void->Bool;
 	public function new(dock:DockWorkspaceModel, sidebar:SidebarModel, regions:WorkbenchLayoutControls, changed:Void->Void) {
 		this.dock = dock; this.sidebar = sidebar; this.regions = regions; this.changed = changed;
+		contextPanelAvailable = function() return dock.get("context-panel") != null;
 		previous = signatures();
 		release = dock.listen(observe);
 	}
@@ -81,10 +87,14 @@ class WorkbenchLayoutModes {
 		var mode = LayoutMode.find(id); if (mode == null) return;
 		current = mode; apply(); changed();
 	}
-	/** Whether the current mode leaves a destination off the rail; only once its own default destination exists. */
-	public function hides(destination:Null<String>):Bool {
+	/** Whether the current mode leaves a destination off the rail: only while the right panel shows it instead. */
+	public function hides(destination:Null<String>):Bool return current.hides(destination) && contextPanelAvailable();
+	/** The destination the mode opens on the rail: its own default, else the first one it leaves on the rail. */
+	function railDefault():Null<haxeon.ui.widgets.sidebar.SidebarMode> {
 		var own = sidebar.find(current.selectedSidebar);
-		return current.hides(destination) && own != null && own.visible;
+		if (own != null && own.visible && !hides(own.id)) return own;
+		for (mode in sidebar.modes) if (mode.visible && !hides(mode.id)) return mode;
+		return null;
 	}
 	public function refreshContext():Void { if (ready) { apply(); changed(); } }
 	public function refreshSidebar():Void { if (ready) { apply(); changed(); } }
@@ -99,15 +109,14 @@ class WorkbenchLayoutModes {
 	}
 	function apply():Void {
 		suspend(); beforeApply(); orderSidebar();
-		if (!leftChanged || hides(sidebar.activeId)) {
-			var selected = sidebar.find(current.selectedSidebar);
-			if (selected == null || !selected.visible) selected = sidebar.find("files");
-			if (selected != null && selected.visible && !hides(selected.id)) sidebar.select(selected.id);
-		}
+		var selected = railDefault();
+		if ((!leftChanged || hides(sidebar.activeId)) && selected != null) sidebar.select(selected.id);
 		if (!leftChanged) {
-			sidebar.setVisible(current.left);
-			if (current.left && !dock.isOpen("explorer")) dock.dock("explorer", DockNodeTools.firstPanel(dock.root), haxeon.ui.docking.DockDropZone.Left);
-			else if (!current.left && dock.isOpen("explorer")) dock.close("explorer");
+			// With nothing left on the rail for the sidebar, e.g. Agents before its Workbench exists, the sidebar stays closed.
+			var left = current.left && selected != null;
+			sidebar.setVisible(left);
+			if (left && !dock.isOpen("explorer")) dock.dock("explorer", DockNodeTools.firstPanel(dock.root), haxeon.ui.docking.DockDropZone.Left);
+			else if (!left && dock.isOpen("explorer")) dock.close("explorer");
 		}
 		if (!bottomChanged && regions.bottomOpen() != current.bottom) regions.toggleBottom();
 		if (!rightChanged && regions.rightOpen() != current.right) regions.toggleRight();

@@ -53,6 +53,12 @@ class PreferencesRegistry {
 		}
 		{
 			var options = new SettingOptions();
+			// Changed from the Activity Bar itself, like VS Code, so every window and folder keeps the same rail.
+			options.internal = true;
+			if (!projectOnly) registry.define("appearance/workbench/activity_bar", PropertyType.Text, PropertyValue.Text(defaults.activityBar), options);
+		}
+		{
+			var options = new SettingOptions();
 			options.minimum = 100; options.maximum = 1200;
 			options.unit = "px";
 			if (!projectOnly) registry.define("appearance/workbench/sidebar_width", PropertyType.Int, PropertyValue.Int(defaults.sidebarWidth), options);
@@ -359,6 +365,7 @@ class PreferencesRegistry {
 		if (store.registry.exists("workbench/agents/session_mode") && (base == null || !store.isDefault("workbench/agents/session_mode"))) value.agentSessionMode = store.getString("workbench/agents/session_mode");
 		if (store.registry.exists("appearance/workbench/zoom_percent") && (base == null || !store.isDefault("appearance/workbench/zoom_percent"))) value.applicationZoom = store.getInt("appearance/workbench/zoom_percent");
 		if (store.registry.exists("appearance/workbench/layout_mode") && (base == null || !store.isDefault("appearance/workbench/layout_mode"))) value.layoutMode = store.getString("appearance/workbench/layout_mode");
+		if (store.registry.exists("appearance/workbench/activity_bar") && (base == null || !store.isDefault("appearance/workbench/activity_bar"))) value.activityBar = store.getString("appearance/workbench/activity_bar");
 		if (store.registry.exists("workbench/codex/default_model") && (base == null || !store.isDefault("workbench/codex/default_model"))) value.codexDefaultModel = store.getString("workbench/codex/default_model");
 		if (store.registry.exists("workbench/codex/default_effort") && (base == null || !store.isDefault("workbench/codex/default_effort"))) value.codexDefaultEffort = store.getString("workbench/codex/default_effort");
 		if (store.registry.exists("workbench/codex/default_permissions") && (base == null || !store.isDefault("workbench/codex/default_permissions"))) value.codexDefaultPermissions = store.getString("workbench/codex/default_permissions");

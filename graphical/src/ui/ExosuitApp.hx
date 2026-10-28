@@ -73,8 +73,8 @@ import ui.UiDocumentView;
 import ui.UiWorkbenchHost;
 import editor.BufferPosition;
 import workspace.service.WorkspaceFileProtocol.FileSearchMatch;
+import workspace.PathKey;
 import controller.WorkspaceFileSearchController;
-import scm.LocalScmSource;
 import scm.ScmGroupId;
 import scm.ScmSource;
 
@@ -133,12 +133,11 @@ class ExosuitApp implements DesktopUiApplication {
 	final dock:DockWorkspaceModel;
 	final layoutControls:WorkbenchLayoutControls;
 	final layoutModes:WorkbenchLayoutModes;
+	final activityMenu:ActivityBarMenu;
 	var contextFiles:Null<ContextFilesView>;
 	/** The Workbench group the Agents layout's right panel works in; it stays when the selection has no folder. */
-	var agentScope:Null<AgentScope>;
-	var agentScopeSource:String = "";
-	var agentScopeDirectory:String = "";
-	var contextTab:String = "context-files";
+	var agentScopes:Null<AgentScopeTracker>;
+	var contextTab:ContextPanelTab = ContextPanelTab.Files;
 	var scopedSearch:Null<ScopedSearchPanel>;
 	var contextLayoutsReady:Bool = false;
 	var dockPanelContents:Array<DockPanelContent>;
@@ -157,7 +156,10 @@ class ExosuitApp implements DesktopUiApplication {
 	var explorerTree:Null<TreeView>;
 	var explorerRename:Null<ExplorerRename>;
 	var renamedExplorerPath:Null<String>;
-	var localScmSource:Null<LocalScmSource>;
+	/** The Source Control view's and Changes tab's source; in the Agents layout it narrows to the group's folder. */
+	final panelScm = new LocalScmSourceCache();
+	/** The editor's source while the panel's narrows (see editorSourceControlSource). */
+	final editorScm = new LocalScmSourceCache();
 	var sourceControlPanelValue:Null<SourceControlPanel>;
 	var sourceControlPanelIdentity:Null<String>;
 	final scmDecorationOwners:Map<String, Bool> = [];
@@ -166,8 +168,6 @@ class ExosuitApp implements DesktopUiApplication {
 	final scmDocumentMarkerKeys:Map<Int, String> = [];
 	final scmMarkerTargets:Map<Int, ScmMarkerTarget> = [];
 	/** The explorer root whose identity is cached, because normalizing it costs a file-system call on every poll. */
-	var localScmRootKey:Null<String>;
-	var localScmIdentity:String = "";
 	var scmBranchStatus:Null<plugin.PluginStatusItem>;
 	var scmPresentationSourceIdentity:Null<String>;
 	final scmBranches:ScmBranchController;
@@ -273,6 +273,8 @@ class ExosuitApp implements DesktopUiApplication {
 		dock = makeDock();
 		layoutControls = new WorkbenchLayoutControls(dock);
 		layoutModes = new WorkbenchLayoutModes(dock, sidebar, layoutControls, requestFrame);
+		layoutModes.contextPanelAvailable = contextPanelProvidesDestinations;
+		activityMenu = new ActivityBarMenu(sidebar, layoutModes.hides, saveActivityBar);
 		if (openPath == null) dock.close("explorer");
 		var capturedHost:UiWorkbenchHost = null;
 		application = new Application(function(exosuitTheme, focus, workspace, settings) {
@@ -434,9 +436,10 @@ class ExosuitApp implements DesktopUiApplication {
 		host.afterContextRestore = function() { layoutModes.resume(); layoutModes.refreshContext(); };
 		var defaultSidebar = sidebar.encode();
 		host.restoreSidebar = function(lines) {
-			var saved = defaultSidebar;
-			for (line in lines) if (StringTools.startsWith(line, "B\tsidebar\t1\t")) saved = line.substring(12);
+			var saved = defaultSidebar, layoutSaved = false;
+			for (line in lines) if (StringTools.startsWith(line, "B\tsidebar\t1\t")) { saved = line.substring(12); layoutSaved = true; }
 			sidebar.restore(saved);
+			restoreActivityBar(layoutSaved);
 		};
 		host.activateSearch = function() showSidebarMode("search");
 		host.restoreAgent=makeAgentTab;
@@ -457,6 +460,8 @@ class ExosuitApp implements DesktopUiApplication {
 		application.settings.subscribe(function(value) {
 			updateEditorPalette();
 			layoutModes.setPreference(value.layoutMode);
+			// Another window changed the rail.
+			if (value.activityBar != "" && value.activityBar != sidebar.encodeDestinations()) sidebar.restoreDestinations(value.activityBar);
 			if (hostContext != null) hostContext.zoom = value.applicationZoom / 100.0;
 			terminalPalette.fontSize = value.terminalFontSize;
 			if (value.sidebarWidth != previousSidebarWidth) {
@@ -782,7 +787,7 @@ class ExosuitApp implements DesktopUiApplication {
         terminal.retainOnClose = true;
         host.attachTerminal(terminal);
         if (phoneLayoutActive && sidebar.visible) sidebar.setVisible(false);
-        if (workbenchPanel != null && sidebar.activeId == "workbench") workbenchPanel.revealNode("t:" + terminal.resourceId);
+        if (workbenchPanel != null && sidebar.activeId == "workbench") workbenchPanel.revealNode(WorkbenchRowKey.terminal(terminal.resourceId));
         dock.close("terminal");
         pendingTerminalFocus = false;
         requestFrame();
@@ -1264,6 +1269,7 @@ class ExosuitApp implements DesktopUiApplication {
 		var activityBar = new ActivityBar(sidebar, activityIcons, activateSidebarDestination,
 			application.settings.current.tabTooltipDelay, showManageMenu, manageMenu != null && contextMenu == manageMenu);
 		activityBar.onContextMenu = showActivityBarMenu;
+		activityBar.onMove = activityMenu.move;
 		activityBar.hiddenIds = [for (id in layoutModes.current.hiddenDestinations) if (layoutModes.hides(id)) id];
 		var workspace:View = new Row("workspace-with-activity-bar", [
 			new KeyedView("activity-bar", activityBar),
@@ -1497,7 +1503,7 @@ class ExosuitApp implements DesktopUiApplication {
 		layoutModes.setServiceAvailable(false);
 		host.onActiveTabChanged = null;
 		workbenchPanel = null;
-		agentScope = null;
+		if (agentScopes != null) agentScopes.reset();
 		agentAttach = null;
 		agentRevision = -1;
 		requestFrame();
@@ -1563,8 +1569,8 @@ class ExosuitApp implements DesktopUiApplication {
   if(workbenchPanel == null) return;
   var agent=tab == null ? null : UiEditorTabs.agent(tab);
   var terminal=tab == null ? null : UiEditorTabs.terminal(tab);
-  if(agent != null) workbenchPanel.syncActiveSession("a:"+agent.resource,agent.workspaceRoot);
-  else if(terminal != null && terminal.remote) workbenchPanel.syncActiveSession("t:"+terminal.resourceId,terminal.workspaceRoot);
+  if(agent != null) workbenchPanel.syncActiveSession(WorkbenchRowKey.agent(agent.resource),agent.workspaceRoot);
+  else if(terminal != null && terminal.remote) workbenchPanel.syncActiveSession(WorkbenchRowKey.terminal(terminal.resourceId),terminal.workspaceRoot);
   else workbenchPanel.syncActiveSession(null,null);
  }
 
@@ -1600,12 +1606,12 @@ class ExosuitApp implements DesktopUiApplication {
 		requestFrame();
 	}
 
-	function showWorkbenchMenu(items:Array<haxeon.ui.widgets.overlays.MenuItem>, event:UiEvent, valid:Void->Bool):Void {
+	function showWorkbenchMenu(items:Array<MenuItem>, event:UiEvent, valid:Void->Bool):Void {
 		var anchor = contextMenuAnchor(event);
-		var actions:Array<haxeon.ui.widgets.overlays.MenuItem> = [];
+		var actions:Array<MenuItem> = [];
 		for (item in items) {
 			var action = item;
-			actions.push(new haxeon.ui.widgets.overlays.MenuItem(item.key, item.label, function() {
+			actions.push(new MenuItem(item.key, item.label, function() {
 				contextMenu = null;
 				if (valid() && action.enabled) action.onSelect();
 				requestFrame();
@@ -1652,8 +1658,7 @@ class ExosuitApp implements DesktopUiApplication {
 			case "inherit":
 				if (GroupContextActions.canInherit(group)) save(group.parent, null, workspace.service.WorkspaceProtocol.order(group.order));
 			case "remove":
-				if (GroupContextActions.canRemove(group, client.canRemoveGroups() && !client.agentService().agentBusy(),
-					client.terminalCatalog(), client.agentService().agents())) {
+				if (GroupContextActions.removal(group, client) == GroupRemoval.Allowed) {
 					client.removeGroup(catalog.instance, group); requestFrame();
 				}
 			case "parent":
@@ -1738,7 +1743,7 @@ class ExosuitApp implements DesktopUiApplication {
 	function currentCatalogTerminal(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord, ?owner:String):Bool
 		return TerminalContextActions.isCurrent(record, workbenchClient == null ? null : workbenchClient.terminalCatalog(), owner);
 
-	function catalogTerminalActions(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Array<haxeon.ui.widgets.overlays.MenuItem> {
+	function catalogTerminalActions(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Array<MenuItem> {
 		var client = workbenchClient;
 		var catalog = client == null ? null : client.terminalCatalog();
 		var owner = catalog == null ? null : catalog.instance;
@@ -1843,14 +1848,14 @@ class ExosuitApp implements DesktopUiApplication {
 		var record:Null<workspace.service.WorkspaceTerminalProtocol.TerminalRecord> = null;
 		var catalog = workbenchClient == null ? null : workbenchClient.terminalCatalog();
 		if (catalog != null) for (candidate in catalog.terminals) if (matchesCatalogTerminal(terminal, candidate)) { record = candidate; break; }
-		var items:Array<haxeon.ui.widgets.overlays.MenuItem> = [];
+		var items:Array<MenuItem> = [];
 		var inEditor = host.terminalPaneFor(terminal) != null;
 		if (record != null) items = catalogTerminalActions(record).filter(function(item)
 			return item.key != "terminal-open" && item.key != (inEditor ? "terminal-editor" : "terminal-panel"));
 		else {
-			if (terminal.remote) items.push(new haxeon.ui.widgets.overlays.MenuItem("terminal-unavailable",
+			if (terminal.remote) items.push(new MenuItem("terminal-unavailable",
 				workbenchClient == null ? "Workspace disconnected" : "Terminal details unavailable", null, false));
-			if (!terminal.remote) items.push(new haxeon.ui.widgets.overlays.MenuItem("terminal-rename", "Rename Terminal…", function() {
+			if (!terminal.remote) items.push(new MenuItem("terminal-rename", "Rename Terminal…", function() {
 				host.openCommandView(new commandview.CommandViewProvider("Rename Terminal: ", [], function(_) {}, function(_, name, _) {
 					name = StringTools.trim(name);
 					if (name.length == 0) return;
@@ -1859,14 +1864,14 @@ class ExosuitApp implements DesktopUiApplication {
 				}));
 				host.commandViewTextInput(terminal.title); host.commandView.input.selectAll(); requestFrame();
 			}));
-			if (!inEditor) items.push(new haxeon.ui.widgets.overlays.MenuItem("terminal-editor", "Move Terminal to Editor", function() placeTerminal(terminal, true)));
-			if (inEditor) items.push(new haxeon.ui.widgets.overlays.MenuItem("terminal-panel", "Move Terminal to Panel", function() placeTerminal(terminal, false)));
-			if (!terminal.remote) items.push(new haxeon.ui.widgets.overlays.MenuItem("terminal-stop", "Stop Terminal", function() {
+			if (!inEditor) items.push(new MenuItem("terminal-editor", "Move Terminal to Editor", function() placeTerminal(terminal, true)));
+			if (inEditor) items.push(new MenuItem("terminal-panel", "Move Terminal to Panel", function() placeTerminal(terminal, false)));
+			if (!terminal.remote) items.push(new MenuItem("terminal-stop", "Stop Terminal", function() {
 				try terminal.panel.terminate(true) catch (failure:Dynamic) application.reportError("terminal", Std.string(failure));
 				requestFrame();
 			}));
 		}
-		if (!terminal.remote) items.push(new haxeon.ui.widgets.overlays.MenuItem("terminal-close", "Close Terminal", function() {
+		if (!terminal.remote) items.push(new MenuItem("terminal-close", "Close Terminal", function() {
 			if (terminal.disposed) return;
 			try {
 				var state=terminal.panel.status();
@@ -2353,6 +2358,7 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function contextPanel():View {
+		if (remoteAgentsLayout()) return unscopedRemoteContextPanel();
 		if (contextFiles == null) contextFiles = new ContextFilesView(contextRoots,
 			function() return workspaceAttachment == null ? "local" : workspaceAttachment.fileWorkspace() + ":" + workspaceAttachment.fileScope(),
 			function(roots) {
@@ -2382,26 +2388,64 @@ class ExosuitApp implements DesktopUiApplication {
 		}, openScopedSearchResult, requestFrame, function() return application.settings.current.searchMaxResults);
 		var scope = contextScope();
 		var style = fillStyle(); style.childGap = 4;
-		var captionStyle = new LayoutStyle(); captionStyle.padding = new Insets(10, 6, 10, 0); captionStyle.width = LayoutAxis.grow();
 		var caption = scope == null ? application.activeContext.label : scope.caption();
 		// Search here follows the scope; outside the Agents layout it is the workspace's Search, unless the sidebar shows it.
 		var searchContent:View = scope != null ? scopedSearch : sidebar.visible && sidebar.activeId == "search"
 			? new Text("Search is open in the sidebar.", null, theme.tokens.textSecondary, TextStyleOverride.text(12)) : searchPanel;
 		// Labels give way to icons when the panel is too narrow for all three.
 		var compact = dock.isOpen("context-panel") && contextPanelWidth() < 230;
-		var tab = function(key:String, label:String, icon:IconName, content:View):TabItem
+		var tab = function(key:ContextPanelTab, label:String, icon:IconName, content:View):TabItem
 			return new TabItem(key, label, content, true, icon, compact ? "" : null);
-		var tabs = new Tabs("context-panel-tabs", [tab("context-files", "Files", IconName.FolderOpen, contextFiles),
-			tab("context-search", "Search", IconName.Search, searchContent),
-			tab("context-changes", "Changes", IconName.Hierarchy, sourceControlPanel())], contextTab,
-			function(next) { contextTab = next; requestFrame(); }, fillStyle(), null, null, null, null, TabsSelectionMode.Controlled);
+		var tabs = new Tabs("context-panel-tabs", [tab(ContextPanelTab.Files, "Files", IconName.FolderOpen, contextFiles),
+			tab(ContextPanelTab.Search, "Search", IconName.Search, searchContent),
+			tab(ContextPanelTab.Changes, "Changes", IconName.Hierarchy, sourceControlPanel())], contextTab,
+			function(next) {
+				var selected = ContextPanelTab.fromKey(next);
+				if (selected != null) contextTab = selected;
+				requestFrame();
+			}, fillStyle(), null, null, null, null, TabsSelectionMode.Controlled);
 		return new Column("context-panel-content", [
-			new KeyedView("scope", new Column("context-panel-scope", [new KeyedView("caption",
-				new haxeon.ui.widgets.text.MiddleEllipsisText("context-panel-scope-text", caption, true,
-					new TextStyleOverride(null, 12, null, haxeon.ui.TextWrap.None, null, null, null, theme.tokens.textSecondary)))], captionStyle)),
+			new KeyedView("scope", contextCaption(caption)),
 			new KeyedView("tabs", tabs)
 		], style);
 	}
+
+	function contextCaption(caption:String):View {
+		var captionStyle = new LayoutStyle(); captionStyle.padding = new Insets(10, 6, 10, 0); captionStyle.width = LayoutAxis.grow();
+		return new Column("context-panel-scope", [new KeyedView("caption",
+			new haxeon.ui.widgets.text.MiddleEllipsisText("context-panel-scope-text", caption, true,
+				new TextStyleOverride(null, 12, null, haxeon.ui.TextWrap.None, null, null, null, theme.tokens.textSecondary)))], captionStyle);
+	}
+
+	/**
+		A remote workspace's file, search and change services cannot narrow to a folder yet, so the Agents layout's right
+		panel says so instead of showing the whole workspace as if it were the group's. The rail keeps Files, Search and
+		Source Control for that workspace (see contextPanelProvidesDestinations).
+	**/
+	function unscopedRemoteContextPanel():View {
+		var style = fillStyle(); style.childGap = 6;
+		var bodyStyle = new LayoutStyle(); bodyStyle.padding = new Insets(10, 0, 10, 0); bodyStyle.width = LayoutAxis.grow();
+		var text = new TextStyleOverride(null, 13.0, null, haxeon.ui.TextWrap.WordCharacter);
+		return new Column("context-panel-content", [
+			new KeyedView("scope", contextCaption("Not scoped for remote workspaces")),
+			new KeyedView("body", new Column("context-panel-remote", [
+				new KeyedView("reason", new Text("Files, Search and Changes follow the selected group only in local workspaces.", null, null, text)),
+				new KeyedView("hint", new Text("Use Files, Search and Source Control on the Activity Bar for the whole remote workspace.",
+					null, theme.tokens.textSecondary, text))
+			], bodyStyle))
+		], style);
+	}
+
+	/** The Agents layout over a workspace without local file access: the right panel cannot follow the group's folder. */
+	function remoteAgentsLayout():Bool
+		return layoutModes.current == LayoutMode.Agents && workspaceAttachment != null && !workspaceAttachment.hasLocalFileAccess();
+
+	/**
+		Whether the right panel can stand in for the rail's Files, Search and Source Control: it is registered, shown at
+		this window size, and can follow the group's folder. Otherwise the rail keeps them, so files stay reachable.
+	**/
+	function contextPanelProvidesDestinations():Bool
+		return dock.get("context-panel") != null && !phoneLayoutActive && !responsiveRightHidden && !remoteAgentsLayout();
 
 	/** Folders the right panel's Files and Changes show: the Agents scope's folder, else the active context's roots. */
 	function contextRoots():Array<String> {
@@ -2410,24 +2454,14 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	/**
-		The right panel's scope in the Agents layout (see AgentScope.resolve). Null outside that layout and for a workspace
-		without local file access, whose file and search services cannot narrow to a folder yet; the panel then shows the
-		active context as before.
+		The right panel's scope in the Agents layout (see AgentScope.resolve). Null outside that layout, without a Workbench,
+		and for a workspace without local file access (see unscopedRemoteContextPanel).
 	**/
 	function contextScope():Null<AgentScope> {
 		var panel = workbenchPanel;
-		if (layoutModes.current != LayoutMode.Agents || panel == null) return null;
-		if (workspaceAttachment != null && !workspaceAttachment.hasLocalFileAccess()) return null;
-		var next = AgentScope.resolve(panel.model, panel.tree.selectedKey, agentScope);
-		if (next == null) return null;
-		if (next.directory != agentScopeSource) {
-			agentScopeSource = next.directory;
-			agentScopeDirectory = next.directory;
-			try agentScopeDirectory = application.workspace.fileSystem.normalize(next.directory) catch (_:Dynamic) {}
-		}
-		var scoped = new AgentScope(next.groupId, next.label, agentScopeDirectory);
-		if (!scoped.equals(agentScope)) agentScope = scoped;
-		return agentScope;
+		if (layoutModes.current != LayoutMode.Agents || panel == null || remoteAgentsLayout()) return null;
+		if (agentScopes == null) agentScopes = new AgentScopeTracker(application.workspace.fileSystem.normalize);
+		return agentScopes.resolve(panel.model, panel.tree.selectedKey);
 	}
 
 	/** The right panel's approximate width, from the split ratios on its path (dividers ignored). */
@@ -2445,9 +2479,9 @@ class ExosuitApp implements DesktopUiApplication {
 
 	/** In the Agents layout the rail's Files, Search and Source Control open the right panel's tab instead. */
 	function showContextTab(destination:String):Bool {
-		contextTab = destination == "search" ? "context-search" : destination == "scm" ? "context-changes" : "context-files";
+		contextTab = ContextPanelTab.forDestination(destination);
 		if (!layoutControls.rightOpen()) layoutControls.toggleRight();
-		if (destination == "search") {
+		if (contextTab == ContextPanelTab.Search) {
 			if (contextScope() == null) searchPanel.focusQuery = true;
 			else if (scopedSearch != null) scopedSearch.focusQuery = true;
 		}
@@ -2502,21 +2536,21 @@ class ExosuitApp implements DesktopUiApplication {
 			requestFrame();
 			return;
 		}
-		var items:Array<haxeon.ui.widgets.overlays.MenuItem> = [];
+		var items:Array<MenuItem> = [];
 		var commands = ["exosuit.workbench:toggle-sidebar", "view.layout-bottom", "view.layout-right"];
 		var labels = [(dock.isOpen("explorer") ? "Hide" : "Show") + " Left Sidebar",
 			(layoutControls.bottomOpen() ? "Hide" : "Show") + " Bottom Panel", (layoutControls.rightOpen() ? "Hide" : "Show") + " Right Panel"];
 		for (index in 0...commands.length) {
 			var command = commands[index];
-			if (ui.commands.get(command) != null) items.push(new haxeon.ui.widgets.overlays.MenuItem(command, labels[index], function() {
+			if (ui.commands.get(command) != null) items.push(new MenuItem(command, labels[index], function() {
 				contextMenu = null; ui.commands.executeContext(command, ui.commandContext); requestFrame();
 			}, true, layoutShortcut(command)));
 		}
 		for (mode in [LayoutMode.Editor, LayoutMode.Agents]) {
 			var selected = mode;
-			items.push(new haxeon.ui.widgets.overlays.MenuItem("view.mode-" + mode.id, (layoutModes.current.id == mode.id ? "✓ " : "") + mode.label + " Layout", function() { contextMenu = null; layoutModes.select(selected.id); requestFrame(); }));
+			items.push(new MenuItem("view.mode-" + mode.id, (layoutModes.current.id == mode.id ? "✓ " : "") + mode.label + " Layout", function() { contextMenu = null; layoutModes.select(selected.id); requestFrame(); }));
 		}
-		items.push(new haxeon.ui.widgets.overlays.MenuItem("view.mode-auto", "Automatic Layout", function() { contextMenu = null; layoutModes.automatic(); requestFrame(); }));
+		items.push(new MenuItem("view.mode-auto", "Automatic Layout", function() { contextMenu = null; layoutModes.automatic(); requestFrame(); }));
 		var anchor = findStyleNode(ui.root, "layout-menu");
 		var x = Math.max(0, viewportWidth - 290), y = TOOLBAR_HEIGHT + 4;
 		if (anchor != null) { var bounds = anchor.globalBounds(); x = Math.min(x, bounds.x); y = bounds.y + bounds.height + 4; }
@@ -3394,7 +3428,7 @@ class ExosuitApp implements DesktopUiApplication {
 				documentView.sideBySideDiff ? document.title : haxe.io.Path.withoutDirectory(diffDocument.path) + " (diff)";
 			if (diffDocument != null) {
 				var path = diffDocument.path;
-				var source = sourceControlSource();
+				var source = editorSourceControlSource();
 				if (source != null) for (repository in source.repositories())
 					if (repository.id == diffDocument.repositoryId) {
 						var relative = pathUnderScope(repository.root, path);
@@ -3474,7 +3508,7 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function showBreadcrumbMenu(document:editor.Document, paneId:String, path:String, event:UiEvent):Void {
 		var directory = haxe.io.Path.directory(path);
-		var items:Array<haxeon.ui.widgets.overlays.MenuItem> = [];
+		var items:Array<MenuItem> = [];
 		try {
 			var entries = FileSystem.readDirectory(directory);
 			entries.sort(function(a, b) {
@@ -3484,7 +3518,7 @@ class ExosuitApp implements DesktopUiApplication {
 			for (name in entries) {
 				var target = directory + "/" + name;
 				var folder = FileSystem.isDirectory(target);
-				items.push(new haxeon.ui.widgets.overlays.MenuItem(target, name + (folder ? "  ›" : ""), function() {
+				items.push(new MenuItem(target, name + (folder ? "  ›" : ""), function() {
 					contextMenu = null;
 					if (folder) showBreadcrumbMenu(document, paneId, target + "/_", event);
 					else { host.activateTab(document, paneId); application.open(target); }
@@ -3539,16 +3573,16 @@ class ExosuitApp implements DesktopUiApplication {
 			if (category != null) settingsPanel.select(category);
 		};
 		var actions = [
-			new haxeon.ui.widgets.overlays.MenuItem("manage-palette", "Command Palette…", togglePalette,
+			new MenuItem("manage-palette", "Command Palette…", togglePalette,
 				true, shortcut("view.toggle-palette")),
-			new haxeon.ui.widgets.overlays.MenuItem("manage-settings", "Settings", openSettings,
+			new MenuItem("manage-settings", "Settings", openSettings,
 				true, shortcut("preferences.open"), true),
-			new haxeon.ui.widgets.overlays.MenuItem("manage-keyboard", "Keyboard Shortcuts",
+			new MenuItem("manage-keyboard", "Keyboard Shortcuts",
 				function() openPreferences("editor/keyboard", true)),
-			new haxeon.ui.widgets.overlays.MenuItem("manage-themes", "Themes…",
+			new MenuItem("manage-themes", "Themes…",
 				function() openPreferences("appearance/colors", true))
 		];
-		for (item in activityBarItems(null)) actions.push(item);
+		for (item in activityMenu.items(null)) actions.push(item);
 		if (host.isCommandViewActive()) host.closeCommandView();
 		host.dismissLanguagePopup();
 		manageMenu = new CommandMenu(application.commands, application.context, [], x, y, function() return true,
@@ -3557,42 +3591,19 @@ class ExosuitApp implements DesktopUiApplication {
 		requestFrame();
 	}
 
-	/** Show/hide entries for every destination, so a hidden icon can always come back. A destination id adds a
-		leading entry that hides it. The last visible destination cannot be hidden. */
-	function activityBarItems(id:Null<String>):Array<haxeon.ui.widgets.overlays.MenuItem> {
-		var shown = 0;
-		for (mode in sidebar.modes) if (mode.visible && !modeHidesDestination(mode.id)) shown++;
-		var items:Array<haxeon.ui.widgets.overlays.MenuItem> = [];
-		var target = id == null ? null : sidebar.find(id);
-		if (target != null && target.visible) {
-			var targetId = target.id;
-			items.push(new haxeon.ui.widgets.overlays.MenuItem("activity-hide", "Hide '" + target.label + "'",
-				function() setActivityVisible(targetId, false), shown > 1));
-		}
-		var first = true;
-		for (mode in sidebar.modes) {
-			// The layout mode hides these regardless of the user's choice, so they are not offered here.
-			if (modeHidesDestination(mode.id)) continue;
-			var modeId = mode.id, visible = mode.visible;
-			items.push(new haxeon.ui.widgets.overlays.MenuItem("activity-toggle:" + modeId,
-				(visible ? "Hide " : "Show ") + mode.label, function() setActivityVisible(modeId, !visible),
-				!visible || shown > 1, null, first));
-			first = false;
-		}
-		items.push(new haxeon.ui.widgets.overlays.MenuItem("activity-reset-order", "Reset Activity Bar Order",
-			function() { sidebar.resetOrder(); }, sidebar.customOrder, null, true));
-		return items;
+	/** The rail's shown destinations and order are the user's, kept for every window and folder like VS Code's. */
+	function saveActivityBar():Void {
+		application.settings.store.set("appearance/workbench/activity_bar", haxeon.ui.properties.PropertyValue.Text(sidebar.encodeDestinations()));
 	}
 
-	function modeHidesDestination(id:String):Bool
-		return layoutModes.hides(id);
-
-	function setActivityVisible(id:String, visible:Bool):Void {
-		var shown = 0;
-		for (mode in sidebar.modes) if (mode.visible && !modeHidesDestination(mode.id)) shown++;
-		var mode = sidebar.find(id);
-		if (mode == null || mode.visible == visible || (!visible && shown <= 1)) return;
-		sidebar.setModeVisible(id, visible);
+	/**
+		After a layout's sidebar restore, put back the user's rail. Layouts saved before the rail was kept for every window
+		carry their own order and hidden icons: the first such layout restored becomes the user's rail, once.
+	**/
+	function restoreActivityBar(layoutSaved:Bool):Void {
+		var saved = application.settings.current.activityBar;
+		if (saved != "") sidebar.restoreDestinations(saved);
+		else if (layoutSaved && sidebar.customDestinations) saveActivityBar();
 	}
 
 	function showActivityBarMenu(id:Null<String>, event:UiEvent):Void {
@@ -3600,7 +3611,7 @@ class ExosuitApp implements DesktopUiApplication {
 		if (host.isCommandViewActive()) host.closeCommandView();
 		host.dismissLanguagePopup();
 		contextMenu = new CommandMenu(application.commands, application.context, [], anchor.x, anchor.y,
-			function() return true, function() { contextMenu = null; requestFrame(); }, activityBarItems(id),
+			function() return true, function() { contextMenu = null; requestFrame(); }, activityMenu.items(id),
 			menuOpenedWithKeyboard(event));
 		requestFrame();
 	}
@@ -3785,7 +3796,7 @@ class ExosuitApp implements DesktopUiApplication {
 		explorerTree = null;
 	}
 
-	/** Select exactly the source owned by the active explorer root. */
+	/** The Source Control view's source: the active explorer root's, or in the Agents layout the group folder's. */
 	public function sourceControlSource():Null<ScmSource> {
 		if (workspaceAttachment != null && !workspaceAttachment.hasLocalFileAccess()) {
 			clearLocalScmSource();
@@ -3798,16 +3809,24 @@ class ExosuitApp implements DesktopUiApplication {
 		var scope = contextScope(), narrow = scope != null;
 		var roots = [for (root in contextRoots()) if (controller.SavedWorkspaceController.available(root)) root];
 		if (roots.length == 0) { clearLocalScmSource(); return null; }
-		var rootsKey = haxe.Json.stringify(roots) + (narrow ? ":narrow" : "");
-		if (localScmRootKey != rootsKey) { localScmRootKey = rootsKey; localScmIdentity = LocalScmSource.identityFor(roots, narrow); }
-		if (localScmSource == null || localScmSource.identity() != localScmIdentity) {
-			clearLocalScmSource();
-			localScmSource = new LocalScmSource(application.scm, roots[0], roots, narrow);
+		return panelScm.get(application.scm, roots, narrow, function(_) {
 			// A group folder may be any folder: outside the workspace, its own repository, or none. Discover it unless a
 			// discovered root already covers it, which would only duplicate that root's polling.
 			if (narrow && application.scm.repositories(roots[0]).length == 0) application.scm.discover(roots[0], _ -> requestFrame());
-		}
-		return localScmSource;
+		});
+	}
+
+	/**
+		The source behind the editor's change markers and hunk actions. It never narrows to the Agents group's folder: a
+		file opened from anywhere keeps its markers. While the Source Control source narrows, this one covers the active
+		context's folders and the group's folder whole; otherwise it is the same source.
+	**/
+	function editorSourceControlSource():Null<ScmSource> {
+		var panel = sourceControlSource(), scope = contextScope();
+		if (scope == null || panel == null || panel.isRemote()) { editorScm.clear(); return panel; }
+		var roots = [for (root in application.activeContext.roots) if (controller.SavedWorkspaceController.available(root)) root];
+		if (!Lambda.exists(roots, function(root) return PathKey.within(root, scope.directory))) roots.push(scope.directory);
+		return editorScm.get(application.scm, roots, false);
 	}
 
 	function syncScmSidebar():Void {
@@ -3974,7 +3993,7 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function syncScmDocumentMarkers(now:Float):Void {
-		var source = sourceControlSource();
+		var source = editorSourceControlSource();
 		var desired:Map<Int, Bool> = [];
 		var visited:Map<Int, Bool> = [];
 		if (source != null && !source.isRemote()) {
@@ -4064,16 +4083,7 @@ class ExosuitApp implements DesktopUiApplication {
 		return true;
 	}
 
-	function scmRelativePath(root:String, path:String):Null<String> {
-		var base = comparablePath(root);
-		var full = comparablePath(path);
-		while (base.length > 1 && StringTools.endsWith(base, "/")) base = base.substr(0, base.length - 1);
-		var compareBase = Sys.systemName() == "Windows" ? base.toLowerCase() : base;
-		var compareFull = Sys.systemName() == "Windows" ? full.toLowerCase() : full;
-		if (compareFull == compareBase) return "";
-		var prefix = compareBase + "/";
-		return StringTools.startsWith(compareFull, prefix) ? full.substring(prefix.length) : null;
-	}
+	function scmRelativePath(root:String, path:String):Null<String> return PathKey.relative(normalizedPath(root), normalizedPath(path));
 
 	static function scmStatusBadge(resource:scm.ScmResource):String {
 		if (resource.conflictKind != null) return "!";
@@ -4206,16 +4216,13 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function findDocument(path:String):Null<editor.Document> {
-		var normalized = comparablePath(path);
-		for (document in application.documents.documents) if (document.path != null && comparablePath(document.path) == normalized) return document;
+		var normalized = normalizedPath(path);
+		for (document in application.documents.documents) if (document.path != null && PathKey.same(normalizedPath(document.path), normalized)) return document;
 		return null;
 	}
 
 	/** An open document whose folder was deleted or renamed cannot be normalized; compare it as written rather than fail the lookup. */
-	function comparablePath(path:String):String {
-		var normalized = try application.workspace.fileSystem.normalize(path) catch (_:Dynamic) path;
-		return StringTools.replace(normalized, "\\", "/");
-	}
+	function normalizedPath(path:String):String return try application.workspace.fileSystem.normalize(path) catch (_:Dynamic) path;
 
 	function openRemoteScmFile(repository:scm.ScmRepository, relative:String, line:Int):Void {
 		var attachment = workspaceAttachment, client = attachment == null ? null : attachment.fileClient();
@@ -4477,7 +4484,7 @@ class ExosuitApp implements DesktopUiApplication {
 		var relative = resource.pathBytes.getString(0, resource.pathBytes.length);
 		var path = repository.root + "/" + StringTools.replace(relative, "\\", "/");
 		var dirty = [for (document in application.documents.documents)
-			if (document.dirty && document.hasBackingPath() && sameScmPath(document.requirePath(), path)) document];
+			if (document.dirty && document.hasBackingPath() && PathKey.same(document.requirePath(), path)) document];
 		function confirmDiscard(reloadBuffers:Bool):Void {
 			application.confirmations.choose("Discard changes to 1 file?",
 				["discard", "cancel"], function(answer) {
@@ -4531,11 +4538,6 @@ class ExosuitApp implements DesktopUiApplication {
 					else if (choice == "keep") confirmDiscard(false);
 				});
 		} else confirmDiscard(false);
-	}
-
-	static function sameScmPath(left:String, right:String):Bool {
-		var a = StringTools.replace(left, "\\", "/"), b = StringTools.replace(right, "\\", "/");
-		return Sys.systemName() == "Windows" ? a.toLowerCase() == b.toLowerCase() : a == b;
 	}
 
 	function canStagePendingScmGroup():Bool {
@@ -4724,7 +4726,7 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function canApplyActiveScmHunk(action:String):Bool {
-		var source = sourceControlSource(), view = host.activeView();
+		var source = editorSourceControlSource(), view = host.activeView();
 		if (source == null || view == null) return false;
 		if (view.diffDocument != null) {
 			if (view.sideBySideDiff) return false;
@@ -4749,7 +4751,7 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function applyActiveScmHunk(action:String):Void {
 		if (!canApplyActiveScmHunk(action)) return;
-		var source = sourceControlSource(), view = host.activeView();
+		var source = editorSourceControlSource(), view = host.activeView();
 		if (source == null || view == null) return;
 		var repository:Null<scm.ScmRepository> = null, pathBytes:haxe.io.Bytes = null, patch:haxe.io.Bytes = null;
 		if (view.diffDocument != null) {
@@ -4779,7 +4781,7 @@ class ExosuitApp implements DesktopUiApplication {
 	function openActiveDiffSourceAtLine():Void {
 		var view = activeDiffView(), diff = view == null ? null : view.diffDocument;
 		if (view == null || diff == null) return;
-		var source = sourceControlSource();
+		var source = editorSourceControlSource();
 		if (source != null && source.isRemote()) {
 			var repository = source.repository(diff.repositoryId);
 			if (repository != null) openRemoteScmFile(repository, diff.path, diff.sourceLine(view.selection.cursor.line));
@@ -4787,10 +4789,8 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function clearLocalScmSource():Void {
-		if (localScmSource == null) return;
-		scmBranches.cancel();
-		localScmSource.dispose();
-		localScmSource = null;
+		if (panelScm.clear()) scmBranches.cancel();
+		editorScm.clear();
 	}
 
 	static function normalizedLocalRoot(path:String):String {
