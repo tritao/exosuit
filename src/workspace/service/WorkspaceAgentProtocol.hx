@@ -260,6 +260,8 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(9) var files:Null<Array<AgentFileChange>>;
 	@:optional @:id(10) var contentToken:Null<String>;
 	@:optional @:id(11) var images:Null<Array<AgentMessageImage>>;
+	/** Digest binds durable captured source to this exact response version. */
+	@:optional @:id(12) var contentDigest:Null<String>;
 }
 
 @:wire typedef AgentDiscoveryQuery = {

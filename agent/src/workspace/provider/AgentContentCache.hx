@@ -39,6 +39,18 @@ class AgentContentCache {
   used-=entry.bytes.length; entry.bytes=joined; used+=joined.length;
   entry.partial=entry.partial || added.length > keep.length; entry.token=Std.string(++serial); retain(entry); return entry.token;
  }
+ /** Immutable captured source for durable terminal-message retention. */
+ public static function snapshot(key:String,token:String):Null<workspace.service.WorkspaceAgentContentPersistence.AgentStoredContent> {
+  var entry=find(key);return entry==null || entry.token!=token ? null : {bytes:entry.bytes,partial:entry.partial};
+ }
+ /** Restore a verified source while preserving a still-published token when requested. */
+ public static function recover(key:String,bytes:Bytes,partial:Bool,?token:String):String {
+  if(bytes==null || bytes.length>MAX_MESSAGE || !workspace.TextFileContent.validUtf8(bytes)) throw "Invalid retained response";
+  var old=find(key);if(old!=null) {used-=old.bytes.length;entries.remove(old);}
+  var version=token==null ? Std.string(++serial) : token;
+  var entry:ContentEntry={key:key,token:version,bytes:bytes,partial:partial};
+  entries.push(entry);used+=bytes.length;retain(entry);return version;
+ }
  public static function chunk(key:String, token:String, offset:Int):Null<AgentContentChunk> {
   var entry=find(key); if (entry == null || token != entry.token || offset < 0 || offset > entry.bytes.length) return null;
   retain(entry); var count=Std.int(Math.min(CHUNK,entry.bytes.length-offset));

@@ -24,6 +24,34 @@ class SessionLinksMain {
     require(spans.length == 3 && spans[0].kind == "link" && spans[2].kind == "link", "Explicit links");
     for (value in ["[unsafe](javascript:alert(1))", "`[literal](src/a.hx)`", "[unfinished](src/a.hx"])
       for (span in CodexMarkdown.inlineSpans(value)) require(span.kind != "link", "Unsafe/unfinished links became active");
+    var styled=CodexMarkdown.inlineSpans("**bold *nested*** and ***both***");
+    require(styled.length==4 && styled[0].text=="bold " && styled[0].bold==true && styled[0].italic!=true
+      && styled[1].text=="nested" && styled[1].bold==true && styled[1].italic==true
+      && styled[3].text=="both" && styled[3].bold==true && styled[3].italic==true,"Nested emphasis styles");
+    styled=CodexMarkdown.inlineSpans("*[**docs** and `code`](https://example.com/a*b)*");
+    require(styled.length==3 && styled[0].kind=="link" && styled[0].bold==true && styled[0].italic==true
+      && styled[2].kind=="code" && styled[2].italic==true && styled[2].destination=="https://example.com/a*b",
+      "Styled link and code lost content or destination");
+    styled=CodexMarkdown.inlineSpans("\\*literal\\* and **unfinished and snake_case");
+    require(styled.length==1 && styled[0].text=="*literal* and **unfinished and snake_case" && styled[0].bold!=true,
+      "Escaped or unfinished emphasis was consumed");
+    styled=CodexMarkdown.inlineSpans("*outer **inner***");
+    require(styled.length==2 && styled[0].italic==true && styled[1].italic==true && styled[1].bold==true,
+      "Nested strong inside emphasis failed");
+    styled=CodexMarkdown.inlineSpans("*italic **bold** italic*");
+    require(styled.length==3 && styled[0].text=="italic " && styled[0].italic==true && styled[0].bold!=true
+      && styled[1].text=="bold" && styled[1].bold==true && styled[1].italic==true
+      && styled[2].text==" italic" && styled[2].italic==true && styled[2].bold!=true,"Inner strong closed outer emphasis");
+    styled=CodexMarkdown.inlineSpans("**bold *italic* bold**");
+    require(styled.length==3 && styled[0].bold==true && styled[1].bold==true && styled[1].italic==true
+      && styled[2].text==" bold" && styled[2].bold==true && styled[2].italic!=true,"Inner emphasis closed outer strong");
+    styled=CodexMarkdown.inlineSpans("(*emphasis*), **bold!** and *unfinished");
+    require(styled.length==5 && styled[1].text=="emphasis" && styled[1].italic==true
+      && styled[3].text=="bold!" && styled[3].bold==true && styled[4].text==" and *unfinished",
+      "Punctuation or incomplete delimiter changed");
+    var malformed=""; for (_ in 0...19) malformed=malformed=="" ? "[" : malformed+malformed;
+    styled=CodexMarkdown.inlineSpans(malformed);
+    require(styled.length==1 && styled[0].text==malformed,"Long malformed input lost literal source");
     var blocks = CodexMarkdown.parse("Before\r\n\r\n````svg\r\n<svg>```</svg>\r\n````\r\nAfter");
     require(blocks.length == 3 && blocks[1].kind == "code" && blocks[1].text == "<svg>```</svg>", "Source fidelity");
     var stream = CodexMarkdown.parse("~~~html\n<script>literal</script>");

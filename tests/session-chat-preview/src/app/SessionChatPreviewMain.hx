@@ -80,6 +80,9 @@ private class PreviewApplication implements DesktopUiApplication {
     }
    };
   }
+  if (args.indexOf("--emphasis") >= 0) agent.view.items = [
+   {id:"emphasis",turn:"turn",kind:"agentMessage",title:"",text:"## Review summary\n\nThis is normal text, **strong emphasis**, *italic emphasis*, and ***bold italic***.\n\nThe **important [linked result](src/Main.hx)** remains actionable.",detail:"",state:"completed",truncated:false}
+  ];
   var inlineImages = args.indexOf("--inline-images") >= 0;
   var remoteImage = args.indexOf("--remote-image") >= 0;
   if (inlineImages && remoteImage) host.onPoll = function() {

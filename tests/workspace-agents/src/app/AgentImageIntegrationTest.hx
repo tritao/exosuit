@@ -7,6 +7,8 @@ class AgentImageIntegrationTest {
   AgentImageStagingTest.run();
   AgentServiceTest.run();
   AgentSnapshotTest.run();
+  AgentContentStorageTest.run();
+  AgentResponseArchiveTest.run();
   AgentProviderTestMain.conversationTests();
  }
 }

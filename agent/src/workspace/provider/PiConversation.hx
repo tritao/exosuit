@@ -6,6 +6,9 @@ import workspace.service.WorkspaceAgentProtocol;
 class PiConversation {
  static var nextCacheId:Int = 0;
  final cacheId:Int;
+ final archive:Null<AgentResponseArchive>;
+ var restoring=true;
+ public function archiveError():Null<String> return archive==null ? null : archive.problem;
  final entries:Array<AgentActivityItem> = [];
  var revision = 0;
  final incarnation:String = AgentHistoryEpoch.create();
@@ -14,17 +17,22 @@ class PiConversation {
  public function hasOmitted():Bool return omitted;
  function cacheKey(turn:String,id:String):String return "pi-"+cacheId+":"+turn.length+":"+turn+id;
  public function content(turn:String,id:String,token:String,offset:Int):Null<AgentContentChunk> {
-  for (entry in entries) if (entry.turn == turn && entry.id == id && entry.kind == "agentMessage" && entry.contentToken == token)
-   return AgentContentCache.chunk(cacheKey(turn,id),token,offset);
+  for (entry in entries) if (entry.turn == turn && entry.id == id && entry.kind == "agentMessage" && entry.contentToken == token) {
+   var key=cacheKey(turn,id),chunk=AgentContentCache.chunk(key,token,offset);
+   if(chunk==null && archive!=null && archive.restore(key,entry,token)!=null) return AgentContentCache.chunk(key,token,offset);
+   return chunk;
+  }
   return null;
  }
- public function new(?saved:Array<AgentActivityItem>) {
-  cacheId=++nextCacheId;
+ public function new(?saved:Array<AgentActivityItem>,?archive:AgentResponseArchive) {
+  cacheId=++nextCacheId;this.archive=archive;
   if (saved != null) for (entry in saved) {
    put(entry.id, entry.turn, entry.kind, entry.title, entry.text, entry.detail, entry.state, !entry.truncated);
-   entries[entries.length-1].truncated=entry.truncated;
+   var restored=entries[entries.length-1];restored.truncated=entry.truncated;restored.contentDigest=entry.contentDigest;
+   if(entry.truncated && archive!=null) restored.contentToken=archive.restore(cacheKey(entry.turn,entry.id),restored);
    entries[entries.length-1].files=retainedFiles(entry,2048);
   }
+  restoring=false;
  }
  /** Preserve the original tool record; expose a real edit patch as its own activity. */
  public function toolPatch(id:String, turn:String, output:Dynamic):Void {
@@ -71,9 +79,11 @@ class PiConversation {
    entries.push(entry);
   }
   entry.title=title.substring(0,256); entry.kind=kind;
+  if(kind=="agentMessage" && (retainContent || state=="inProgress")) entry.contentDigest=null;
   if (kind == "agentMessage" && retainContent) entry.contentToken = AgentContentCache.replace(cacheKey(turn,id),text);
   entry.text = text.substring(0,4096); entry.detail = detail == "" ? entry.detail : detail.substring(0,2048); entry.state = state;
   entry.truncated = entry.truncated || title.length > 256 || text.length > 4096 || detail.length > 2048;
+  if(!restoring && archive!=null) archive.capture(cacheKey(turn,id),entry);
   if (entries.length > 128) { entries.shift(); revision++; omitted=true; }
  }
  public function delta(id:String, turn:String, text:String, kind:String = "agentMessage"):Void {
@@ -85,7 +95,9 @@ class PiConversation {
   if (kind == "agentMessage") existing.contentToken=token;
  }
  public function finish(turn:String, state:String):Void {
-  for (entry in entries) if (entry.turn == turn && entry.state == "inProgress") entry.state = state;
+  for (entry in entries) if (entry.turn == turn && entry.state == "inProgress") {
+   entry.state = state;if(archive!=null) archive.capture(cacheKey(turn,entry.id),entry);
+  }
  }
  public function offset(cursor:String):Null<Int> {
   var parts = cursor.split(":");
@@ -105,7 +117,7 @@ class PiConversation {
  public function snapshot():Array<AgentActivityItem> {
   var saved:Array<AgentActivityItem> = [for (e in entries.slice(Std.int(Math.max(0,entries.length-6)))) {
    id:e.id,turn:e.turn,kind:e.kind,title:e.title,text:e.text.substring(0,384),detail:e.detail.substring(0,128),state:e.state,
-   truncated:e.truncated || e.text.length > 384 || e.detail.length > 128,files:retainedFiles(e,128)
+   contentDigest:e.contentDigest,truncated:e.truncated || e.text.length > 384 || e.detail.length > 128,files:retainedFiles(e,128)
   }];
   while (saved.length > 0 && haxeon.wire.MessagePack.encode(saved).length > 6144) saved.shift();
   return saved;

@@ -99,6 +99,14 @@ class CodexMarkdownView implements View {
   }
 
   public function build(context:BuildContext):RenderNode {
+    var faces = context.resourceState(context.id("markdown-emphasis-faces"), MarkdownEmphasis.acquire, function(value) value.dispose()).value;
+    var emphasisRuns = 0;
+    function emphasisFace(value:String, bold:Bool, italic:Bool):Null<haxeon.ui.FontCollection> {
+      if ((!bold && !italic) || emphasisRuns >= 256 || haxe.io.Bytes.ofString(value).length > 512) return null;
+      var face = faces.face(bold, italic);
+      if (face != null) emphasisRuns++;
+      return face;
+    }
     var rows:Array<KeyedView> = [];
     var spaceWidths:Map<String, Float> = [];
     var index = 0;
@@ -212,7 +220,7 @@ class CodexMarkdownView implements View {
         var quoted = true;
         for (line in text.split("\n")) if (!quote.match(line)) quoted = false;
         if (quoted) text = ~/^\s*> ?/gm.replace(text, "");
-        var heading = ~/^(#{1,6}) +/;
+        var heading = ~/^ {0,3}(#{1,6}) +/;
         var size = 16.0;
         if (heading.match(text)) { size = 24 - heading.matched(1).length; text = heading.replace(text, ""); }
         var prose = new LayoutStyle(); prose.width = LayoutAxis.grow();
@@ -222,7 +230,7 @@ class CodexMarkdownView implements View {
           prose.radiusTopLeft = prose.radiusTopRight = prose.radiusBottomLeft = prose.radiusBottomRight = 6;
         }
         text = ~/^[-*+] /gm.replace(text, "• ");
-        if (text.indexOf("`") < 0 && text.indexOf("](") < 0) rows.push(new KeyedView(key, new Text(text, prose, null, TextStyleOverride.text(size))));
+        if (text.indexOf("`") < 0 && text.indexOf("](") < 0 && text.indexOf("*") < 0 && text.indexOf("_") < 0) rows.push(new KeyedView(key, new Text(text, prose, null, TextStyleOverride.text(size))));
         else {
           var lines:Array<KeyedView> = [], lineIndex = 0;
           for (line in text.split("\n")) {
@@ -236,19 +244,26 @@ class CodexMarkdownView implements View {
               pieces.push(new KeyedView("word-" + part++, new Row(lineKey + "-word-" + part, word, wordStyle)));
               word = [];
             }
-            function appendText(value:String):Void {
+            function appendText(value:String, bold:Bool, italic:Bool):Void {
               var tokens = ~/\s+|\S+/g, offset = 0;
               while (tokens.matchSub(value, offset)) {
                 var token = tokens.matched(0), position = tokens.matchedPos();
                 offset = position.pos + position.len;
                 if (~/^\s/.match(token)) flushWord();
-                else word.push(new KeyedView("text-" + part++, new Text(token, null, null, TextStyleOverride.text(size))));
+                else {
+                  var face = emphasisFace(token, bold, italic);
+                  var run:View = face == null ? new Text(token, null, null, TextStyleOverride.text(size)) :
+                    new ui.MarkdownEmphasis.MarkdownEmphasisText(token, size, context.theme.tokens.textPrimary, face, (bold ? "b" : "") + (italic ? "i" : ""));
+                  word.push(new KeyedView("text-" + part++, run));
+                }
               }
             }
             for (span in CodexMarkdown.inlineSpans(line)) {
-              if (span.kind == "text") appendText(span.text);
-              else if (span.kind == "link") word.push(new KeyedView("link-" + part++,
-                new CodexMarkdownLink(span.text, span.destination, size, openLink)));
+              if (span.kind == "text") appendText(span.text, span.bold == true, span.italic == true);
+              else if (span.destination != null) word.push(new KeyedView("link-" + part++,
+                new CodexMarkdownLink(span.text, span.destination, size, openLink,
+                  span.kind == "code" ? null : emphasisFace(span.text, span.bold == true, span.italic == true), span.kind == "code",
+                  (span.bold == true ? "b" : "") + (span.italic == true ? "i" : ""))));
               else {
                 var chip = new LayoutStyle(); chip.padding = new Insets(4, 1, 4, 1); chip.background = context.theme.tokens.surfaceSunken;
                 word.push(new KeyedView("inline-" + part++, new Text(span.text, chip, null,
@@ -296,14 +311,20 @@ private class CodexMarkdownLink implements View {
   final destination:String;
   final size:Float;
   final openLink:String->Void;
+  final face:Null<haxeon.ui.FontCollection>;
+  final code:Bool;
+  final variant:String;
 
-  public function new(label:String, destination:String, size:Float, openLink:String->Void) {
-    this.label = label; this.destination = destination; this.size = size; this.openLink = openLink;
+  public function new(label:String, destination:String, size:Float, openLink:String->Void, ?face:haxeon.ui.FontCollection, code:Bool = false, variant:String = "") {
+    this.label = label; this.destination = destination; this.size = size; this.openLink = openLink; this.face = face; this.code = code; this.variant = variant;
   }
 
   public function build(context:BuildContext):RenderNode {
     var layout = new LayoutStyle(); layout.width = LayoutAxis.fit();
-    var node = new Text(label, layout, context.theme.tokens.accent, TextStyleOverride.text(size)).build(context);
+    var view:View = face == null || code ? new Text(label, layout, context.theme.tokens.accent,
+      TextStyleOverride.text(size, null, null, code ? FontFamily.Monospace : FontFamily.Default)) :
+      new ui.MarkdownEmphasis.MarkdownEmphasisText(label, size, context.theme.tokens.accent, face, variant);
+    var node = view.build(context);
     node.focusable = true;
     node.cursor = CursorShape.Hand;
     var semantics = new Semantics(AccessibilityRole.Link, label, destination);

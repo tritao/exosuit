@@ -83,7 +83,7 @@ class ClaudeProvider implements AgentMessageSource {
  }
  function inside(path:String):Bool return directories.inside(path);
  function session(r:AgentRecord):ClaudeSession return {
-  record:r,process:null,transport:null,ready:false,busy:false,error:null,conversation:new ClaudeConversation(r.replay),
+  record:r,process:null,transport:null,ready:false,busy:false,error:null,conversation:new ClaudeConversation(r.replay,new AgentResponseArchive("claude",r.id,persistence)),
   approvals:[],models:[],message:"",currentModel:r.preferredModel,serial:0,interrupting:false
  };
  function save(s:ClaudeSession):Void {
@@ -107,7 +107,7 @@ class ClaudeProvider implements AgentMessageSource {
   requests:pending.requests,requestsOmitted:pending.omitted,
   models:s.models,modelsNext:null,currentModel:s.currentModel,currentEffort:null,
   connectionState:s.ready ? "connected" : s.transport == null ? "disconnected" : "reconnecting",
-  recoveryReason:s.ready ? null : "explicit-resume",error:s.error
+  recoveryReason:s.ready ? null : "explicit-resume",error:s.error == null ? s.conversation.archiveError() : s.error
   };
  }
  public function messageContent(session:String,turn:String,item:String,token:String,offset:Int):Null<AgentContentChunk> {

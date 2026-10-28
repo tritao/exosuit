@@ -14,6 +14,8 @@ typedef CodexMarkdownInline = {
   var kind:String;
   var text:String;
   var destination:Null<String>;
+  @:optional var bold:Null<Bool>;
+  @:optional var italic:Null<Bool>;
 }
 
 class CodexMarkdown {
@@ -50,12 +52,18 @@ class CodexMarkdown {
     var line=StringTools.trim(value), found=imageAt(line,0);
     return found != null && found.end == line.length ? found.block : null;
   }
-  /** Recognizes complete inline code and external links; unfinished syntax remains text. */
+  /** Recognizes complete inline syntax; unfinished delimiters remain visible. */
   public static function inlineSpans(value:String):Array<CodexMarkdownInline> {
-    var spans:Array<CodexMarkdownInline> = [], plain = "", cursor = 0;
+    var spans:Array<CodexMarkdownInline> = [];
+    inlineInto(value,spans,false,false,null,0,{remaining:Std.int(Math.min(4*1024*1024,Math.max(4096,value.length*16)))});
+    return spans;
+  }
+  static function inlineInto(value:String,spans:Array<CodexMarkdownInline>,bold:Bool,italic:Bool,destination:Null<String>,depth:Int,budget:{remaining:Int}):Void {
+    var plain = new StringBuf(), cursor = 0;
     function flush():Void {
-      if (plain != "") spans.push({kind: "text", text: plain, destination: null});
-      plain = "";
+      var text=plain.toString();
+      if (text != "") spans.push({kind: destination == null ? "text" : "link", text: text, destination: destination,bold:bold,italic:italic});
+      plain = new StringBuf();
     }
     while (cursor < value.length) {
       var character = value.charAt(cursor);
@@ -63,9 +71,10 @@ class CodexMarkdown {
         var length = 1;
         while (value.charAt(cursor + length) == "`") length++;
         var marker = value.substr(cursor, length), search = cursor + length, end = -1;
-        while (search < value.length) {
+        while (search < value.length && budget.remaining>0) {
           var candidate = value.indexOf(marker, search);
-          if (candidate < 0) break;
+          if (candidate < 0) { budget.remaining-=value.length-search; break; }
+          budget.remaining-=candidate-search+length;
           if (value.charAt(candidate - 1) != "`" && value.charAt(candidate + length) != "`") { end = candidate; break; }
           search = candidate + length;
         }
@@ -75,35 +84,107 @@ class CodexMarkdown {
           // CommonMark removes one enclosing space, unless the span is all spaces.
           if (StringTools.startsWith(body, " ") && StringTools.endsWith(body, " ") && StringTools.trim(body) != "")
             body = body.substring(1, body.length - 1);
-          spans.push({kind: "code", text: body, destination: null});
+          spans.push({kind: "code", text: body, destination: destination,bold:bold,italic:italic});
           cursor = end + length;
           continue;
         }
-        plain += marker; cursor += length; continue;
-      } else if (character == "[" && (cursor == 0 || value.charAt(cursor - 1) != "!")) {
-        var labelEnd = closing(value, cursor, "[", "]");
+        plain.add(marker); cursor += length; continue;
+      } else if (character == "[" && destination == null && (cursor == 0 || value.charAt(cursor - 1) != "!")) {
+        var labelEnd = inlineClosing(value, cursor, "[", "]",budget);
         if (labelEnd > cursor + 1 && value.charAt(labelEnd + 1) == "(") {
-          var end = closing(value, labelEnd + 1, "(", ")");
+          var end = inlineClosing(value, labelEnd + 1, "(", ")",budget);
           if (end >= 0) {
             var destination = StringTools.trim(value.substring(labelEnd + 2, end));
             if (StringTools.startsWith(destination, "<") && StringTools.endsWith(destination, ">"))
               destination = destination.substring(1, destination.length - 1);
             if (SessionLinkTarget.external(destination) || SessionLinkTarget.parse(destination) != null) {
               flush();
-              spans.push({kind: "link", text: value.substring(cursor + 1, labelEnd), destination: destination});
+              inlineInto(value.substring(cursor + 1, labelEnd),spans,bold,italic,destination,depth+1,budget);
               cursor = end + 1;
               continue;
             }
           }
         }
       }
-      if (character == "\\" && "\\`[]()".indexOf(value.charAt(cursor + 1)) >= 0 && cursor + 1 < value.length)
+      if ((character == "*" || character == "_") && depth < 12) {
+        var count=1; while (value.charAt(cursor+count)==character) count++;
+        var width=count>=3 ? 3 : count;
+        var next=value.charAt(cursor+width), previous=cursor==0 ? "" : value.charAt(cursor-1);
+        var intraword=character=="_" && word(previous) && word(next);
+        if (next!="" && !space(next) && !intraword) {
+          var end=emphasisEnd(value,cursor+width,character,width,budget);
+          if (end>=0) {
+            flush();
+            inlineInto(value.substring(cursor+width,end),spans,bold || width>=2,italic || width==1 || width==3,destination,depth+1,budget);
+            cursor=end+width; continue;
+          }
+        }
+        plain.add(value.substr(cursor,count));cursor+=count;continue;
+      }
+      if (character == "\\" && "\\`[]()*_".indexOf(value.charAt(cursor + 1)) >= 0 && cursor + 1 < value.length)
         character = value.charAt(++cursor);
-      plain += character;
+      plain.add(character);
       cursor++;
     }
     flush();
-    return spans;
+  }
+
+  static function space(ch:String):Bool return ch==" " || ch=="\t" || ch=="\n" || ch=="\r";
+  static function word(ch:String):Bool return ch!="" && ~/^[A-Za-z0-9]$/.match(ch);
+  static function punctuation(ch:String):Bool return ch!="" && "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~".indexOf(ch)>=0;
+  static function inlineClosing(value:String,start:Int,open:String,close:String,budget:{remaining:Int}):Int {
+    var depth=0,index=start;
+    while (index<value.length && budget.remaining>0) {
+      budget.remaining--;
+      var ch=value.charAt(index);
+      if(ch=="\\") {index+=2;continue;}
+      if(ch==open) depth++; else if(ch==close && --depth==0) return index;
+      index++;
+    }
+    return -1;
+  }
+  static function emphasisEnd(value:String,start:Int,marker:String,width:Int,budget:{remaining:Int}):Int {
+    var index=start, nested:Array<Int>=[];
+    while (index<value.length && budget.remaining>0) {
+      budget.remaining--;
+      var ch=value.charAt(index);
+      if (ch=="\\") {index+=2;continue;}
+      if (ch=="[") {
+        var labelEnd=inlineClosing(value,index,"[","]",budget);
+        if (labelEnd>=0 && value.charAt(labelEnd+1)=="(") {
+          var end=inlineClosing(value,labelEnd+1,"(",")",budget);
+          if (end>=0) {index=end+1;continue;}
+        }
+      }
+      if (ch=="`") {
+        var count=1;while(value.charAt(index+count)=="`") count++;
+        var fence=value.substr(index,count), end=value.indexOf(fence,index+count);
+        budget.remaining-=end<0 ? value.length-index : end-index+count;
+        if (end>=0) {index=end+count;continue;}
+      }
+      if (ch==marker) {
+        var count=1;while(value.charAt(index+count)==marker) count++;
+        var before=index>start ? value.charAt(index-1) : "", after=value.charAt(index+count);
+        var left=after!="" && !space(after) && (!punctuation(after) || before=="" || space(before) || punctuation(before));
+        var right=before!="" && !space(before) && (!punctuation(before) || after=="" || space(after) || punctuation(after));
+        if (marker=="_" && word(before) && word(after)) {left=false;right=false;}
+        var remaining=count, consumed=0;
+        if (right) {
+          while (nested.length>0 && remaining>=nested[nested.length-1]) {
+            var nestedWidth=nested[nested.length-1];
+            // An outer-sized closer can still close the outer delimiter when
+            // an inner marker was never completed while streaming.
+            if (remaining==width && nestedWidth!=width) break;
+            nested.pop();remaining-=nestedWidth;consumed+=nestedWidth;
+          }
+          if (remaining>=width) return index+consumed+remaining-width;
+        }
+        if (left && !right && nested.length<12) nested.push(count>=3 ? 3 : count);
+        index+=count;continue;
+      }
+      index++;
+    }
+    return -1;
   }
 
   static function closing(value:String, start:Int, open:String, close:String):Int {

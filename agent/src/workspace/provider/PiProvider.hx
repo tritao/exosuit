@@ -91,7 +91,7 @@ class PiProvider implements AgentMessageSource {
  static function sessionPath(v:String):Bool return valid(v,4096) && Path.isAbsolute(v) && v.indexOf("\n") < 0;
  function inside(v:String):Bool return directories.inside(v);
  function session(r:AgentRecord):PiSession return {record:r,process:null,transport:null,ready:false,policyReady:false,busy:false,error:null,
-  conversation:new PiConversation(r.replay),dialogs:[],models:[],commands:null,commandsError:null,commandsLoading:false,serial:0,message:0,interrupted:false,pendingPrompts:0,revision:0,probe:0,inputs:new PiInputQueue(r),nativePending:[],nativeKnown:false,settled:false,
+  conversation:new PiConversation(r.replay,new AgentResponseArchive("pi",r.id,persistence)),dialogs:[],models:[],commands:null,commandsError:null,commandsLoading:false,serial:0,message:0,interrupted:false,pendingPrompts:0,revision:0,probe:0,inputs:new PiInputQueue(r),nativePending:[],nativeKnown:false,settled:false,
   settling:false,currentModel:null,currentEffort:null};
  static function copy(r:AgentRecord):AgentRecord {var result:AgentRecord=cast Reflect.copy(r);result.replay=null;result.inputMessages=null;return result;}
  public function owns(id:String):Bool return sessions.exists(id);
@@ -114,7 +114,7 @@ class PiProvider implements AgentMessageSource {
   requests:page.requests,requestsOmitted:page.omitted,
   models:s.models,modelsNext:null,commands:s.commands,commandsError:s.commandsError,commandsLoading:s.commandsLoading,currentModel:s.currentModel,currentEffort:s.currentEffort,
   connectionState:s.ready && s.record.state != "reconnecting" ? "connected" : s.transport == null ? "disconnected" : "reconnecting",
-  recoveryReason:s.ready ? null : "explicit-resume",error:s.error,
+  recoveryReason:s.ready ? null : "explicit-resume",error:s.error == null ? s.conversation.archiveError() : s.error,
   inputToken:s.inputs.token(),pendingInputs:[for(m in s.inputs.pending()) cast Reflect.copy(m)],queuePaused:s.record.queuePaused==true,
   nativePending:s.nativePending,inputBusy:s.inputs.hasNativeOperation(),supportsSteering:true,supportsQueue:true
   };

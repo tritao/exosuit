@@ -1,6 +1,9 @@
 package workspace.storage;
 
 import haxe.Int64;
+import haxe.io.Bytes;
+import workspace.service.WorkspaceAgentContentPersistence;
+import workspace.TextFileContent;
 import sqlitekit.Database;
 import sqlitekit.Statement;
 import haxeon.wire.MessagePack;
@@ -12,8 +15,11 @@ import workspace.service.WorkspaceTerminalProtocol;
 
 /** Agent-owned schema; small typed rows, not a copied full-catalog checkpoint.
  * The manager owns the exclusive process lock. SQL cursor/revision CAS fences stale writers. */
-class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceTerminalPersistence implements workspace.service.WorkspaceAgentPersistence implements workspace.service.WorkspaceDevicePersistence {
+class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceTerminalPersistence implements workspace.service.WorkspaceAgentPersistence implements workspace.service.WorkspaceDevicePersistence implements WorkspaceAgentContentPersistence {
 	static inline final MAX_DEVICES:Int = 64;
+	static inline final CONTENT_TABLE = "CREATE TABLE workspace_agent_content (seq INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT NOT NULL, session TEXT NOT NULL, turn TEXT NOT NULL, item TEXT NOT NULL, payload BLOB NOT NULL CHECK(length(payload)<=262144), partial INTEGER NOT NULL CHECK(partial IN (0,1)), UNIQUE(provider,session,turn,item))";
+	static inline final CONTENT_META = "CREATE TABLE workspace_agent_content_meta (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL CHECK(version>=1))";
+	static inline final CONTENT_INDEX = "CREATE INDEX workspace_agent_content_session ON workspace_agent_content(session)";
 	final db:Database;
 	final workspace:String;
 	final historyLimit:Int;
@@ -96,6 +102,11 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
                 db.exec("CREATE TABLE IF NOT EXISTS workspace_terminal_history (id TEXT PRIMARY KEY REFERENCES workspace_terminals(id) ON DELETE CASCADE, payload BLOB NOT NULL CHECK(length(payload)<=4194432))");
                 db.exec("PRAGMA user_version=8");
             });
+			// Check database ownership before extension initialization or orphan cleanup.
+			statement("SELECT workspace FROM workspace_meta WHERE id=1",function(row) {
+				if(!row.step() || row.columnText(0)!=workspace || row.step()) throw "Workspace database identity mismatch";
+			});
+			initializeContentExtension();
 		} catch (error:Dynamic) {
 			db.close();
 			throw error;
@@ -132,6 +143,29 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
 			catch (_:Dynamic) {}
 			throw error;
 		}
+	}
+
+	/** Optional extension keeps the v8 core readable by older workspace daemons. */
+	function initializeContentExtension():Void {
+		transaction(function() {
+			var schemas:Map<String,String>=[];
+			statement("SELECT name,sql FROM sqlite_master WHERE name IN ('workspace_agent_content','workspace_agent_content_meta','workspace_agent_content_session')",function(row) {
+				while(row.step()) schemas.set(row.columnText(0),row.columnText(1));
+			});
+			var table=schemas.get("workspace_agent_content"),meta=schemas.get("workspace_agent_content_meta"),index=schemas.get("workspace_agent_content_session");
+			if(table==null && meta==null && index==null) {
+				db.exec(CONTENT_TABLE);db.exec(CONTENT_META);db.exec(CONTENT_INDEX);
+				db.exec("INSERT INTO workspace_agent_content_meta(id,version) VALUES(1,1)");
+			} else {
+				if(table!=CONTENT_TABLE || meta!=CONTENT_META || index!=CONTENT_INDEX) throw "Unsupported agent content extension schema";
+				statement("SELECT id,version FROM workspace_agent_content_meta",function(row) {
+					if(!row.step() || integer(row.columnInt64(0))!=1 || integer(row.columnInt64(1))!=1 || row.step())
+						throw "Unsupported agent content extension version";
+				});
+			}
+			// An older v8 daemon removes the agent row without knowing this extension.
+			db.exec("DELETE FROM workspace_agent_content WHERE NOT EXISTS (SELECT 1 FROM workspace_agents WHERE workspace_agents.id=workspace_agent_content.session)");
+		});
 	}
 
 	function initialize(seed:WorkspaceSnapshot):Void {
@@ -340,7 +374,59 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
  }
  public function removeAgent(id:String):Void {
   transaction(function() {
+   statement("DELETE FROM workspace_agent_content WHERE session=?1",function(row) {row.bindText(1,id);row.step();});
    statement("DELETE FROM workspace_agents WHERE id=?1",function(row) {row.bindText(1,id);row.step();});
+  });
+ }
+
+ static function contentIdentity(provider:String,session:String,turn:String,item:String):Bool {
+  return provider!=null && provider.length>0 && provider.length<=64 && session!=null && session.length>0 && session.length<=128
+   && turn!=null && turn.length>0 && turn.length<=128 && item!=null && item.length>0 && item.length<=512;
+ }
+ function contentOwner(provider:String,session:String):Bool {
+  var accepted=false;
+  statement("SELECT payload,length(payload) FROM workspace_agents WHERE id=?1",function(row) {
+   row.bindText(1,session);
+   if(row.step()) {
+    var record:workspace.service.WorkspaceAgentProtocol.AgentRecord=MessagePack.decode(blob(row,0,integer(row.columnInt64(1)),16384));
+    accepted=record.id==session && (record.provider==null ? "codex" : record.provider)==provider;
+   }
+  });
+  return accepted;
+ }
+ public function loadAgentContent(provider:String,session:String,turn:String,item:String):Null<AgentStoredContent> {
+  if(!contentIdentity(provider,session,turn,item) || !contentOwner(provider,session)) return null;
+  var result:Null<AgentStoredContent>=null;
+  statement("SELECT payload,length(payload),partial FROM workspace_agent_content WHERE provider=?1 AND session=?2 AND turn=?3 AND item=?4",function(row) {
+   row.bindText(1,provider);row.bindText(2,session);row.bindText(3,turn);row.bindText(4,item);
+   if(row.step()) {
+    var size=integer(row.columnInt64(1)), partial=integer(row.columnInt64(2));
+    if(size>262144 || partial>1) throw "Invalid stored agent content";
+    var bytes=row.columnBlob(0);
+    if(bytes==null || bytes.length!=size || !TextFileContent.validUtf8(bytes)) throw "Invalid stored agent content";
+    result={bytes:bytes,partial:partial==1};
+   }
+  });
+  return result;
+ }
+ public function saveAgentContent(provider:String,session:String,turn:String,item:String,bytes:Bytes,partial:Bool):Void {
+  if(!contentIdentity(provider,session,turn,item) || bytes==null || bytes.length>262144 || !TextFileContent.validUtf8(bytes)) throw "Invalid agent content";
+  transaction(function() {
+   if(!contentOwner(provider,session)) throw "Unknown agent content owner";
+   statement("DELETE FROM workspace_agent_content WHERE provider=?1 AND session=?2 AND turn=?3 AND item=?4",function(row) {
+    row.bindText(1,provider);row.bindText(2,session);row.bindText(3,turn);row.bindText(4,item);row.step();
+   });
+   statement("INSERT INTO workspace_agent_content(provider,session,turn,item,payload,partial) VALUES(?1,?2,?3,?4,?5,?6)",function(row) {
+    row.bindText(1,provider);row.bindText(2,session);row.bindText(3,turn);row.bindText(4,item);row.bindBlob(5,bytes);row.bindInt64(6,Int64.ofInt(partial ? 1 : 0));row.step();
+   });
+   var count=0,total=0;
+   statement("SELECT count(*),coalesce(sum(length(payload)),0) FROM workspace_agent_content",function(row) {row.step();count=integer(row.columnInt64(0));total=integer(row.columnInt64(1));});
+   while(count>128 || total>4*1024*1024) {
+    var size=0;
+    statement("SELECT length(payload) FROM workspace_agent_content ORDER BY seq LIMIT 1",function(row) {if(!row.step()) throw "Invalid content quota";size=integer(row.columnInt64(0));});
+    db.exec("DELETE FROM workspace_agent_content WHERE seq=(SELECT seq FROM workspace_agent_content ORDER BY seq LIMIT 1)");
+    count--;total-=size;
+   }
   });
  }
 

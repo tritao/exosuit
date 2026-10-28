@@ -9,6 +9,8 @@ import ui.CodexMarkdownView;
 
 @:access(haxeon.ui.core.StateStore)
 @:access(syntax.Highlighter)
+@:access(ui.MarkdownEmphasis)
+@:access(haxeon.ui.core.RenderNode)
 class CodexMarkdownLayoutMain {
   static function require(value:Bool, message:String):Void { if (!value) throw message; }
 
@@ -33,6 +35,7 @@ class CodexMarkdownLayoutMain {
   }
 
   static function main():Int {
+    var initialFaceLeases = ui.MarkdownEmphasis.leases;
     var fonts = FontCollection.create();
     fonts.add("../../haxeon/packages/ui/vendor/skribidi/example/data/IBMPlexSans-Regular.ttf");
     var session = LayoutSession.create();
@@ -87,6 +90,42 @@ class CodexMarkdownLayoutMain {
     require(context.focus.focus(link.id), "Could not focus the link");
     context.events.key(haxeon.ui.core.UiEventKind.KeyDown, haxeon.ui.core.UiKey.Enter);
     require(opened == destination, "Keyboard activation did not open the link");
+    var emphasis = new CodexMarkdownView("Normal **strong** and *italic* with **[bold link](src/Main.hx)**.\n\nA second **paragraph**.", new style.Theme(), syntaxes, function(url) opened=url);
+    root = context.submit(emphasis, new LayoutFrame(400, 400));
+    var strong = find(root, "strong"), italic = find(root, "italic"), emphasizedLink = find(root, "bold link");
+    if (Sys.systemName() == "Windows" && sys.FileSystem.exists("C:/Windows/Fonts/segoeuib.ttf") && sys.FileSystem.exists("C:/Windows/Fonts/segoeuii.ttf")) {
+      require(strong.styleType == "markdown-emphasis" && italic.styleType == "markdown-emphasis", "Emphasis did not use real font faces");
+      var faces = ui.MarkdownEmphasis.acquire(), boldFonts = faces.face(true, false);
+      var normalFonts = FontCollection.create(); normalFonts.add("C:/Windows/Fonts/segoeui.ttf");
+      var normal = haxeon.ui.TextLayout.create(normalFonts, "Strong emphasis sample", 1000, new haxeon.ui.TextStyle(16));
+      var bold = haxeon.ui.TextLayout.create(boldFonts, "Strong emphasis sample", 1000, new haxeon.ui.TextStyle(16));
+      var end = new haxeon.ui.TextLayout.TextPosition("Strong emphasis sample".length, 0);
+      require(Math.abs(normal.caret(end).x - bold.caret(end).x) > 0.1, "Bold font metrics matched regular font");
+      normal.dispose(); bold.dispose(); normalFonts.dispose(); faces.dispose();
+    }
+    var emphasizedSemantics:haxeon.ui.semantics.Semantics = cast emphasizedLink.semantics;
+    require(emphasizedLink.focusable && emphasizedSemantics.role == haxeon.ui.semantics.AccessibilityRole.Link,
+      "Emphasized link lost its accessible action");
+    var emphasizedBounds = emphasizedLink.globalBounds(); opened = null;
+    context.pointerDown(emphasizedBounds.x + emphasizedBounds.width / 2, emphasizedBounds.y + emphasizedBounds.height / 2, 0);
+    context.pointerUp(emphasizedBounds.x + emphasizedBounds.width / 2, emphasizedBounds.y + emphasizedBounds.height / 2, 0);
+    require(opened == "src/Main.hx", "Emphasized link did not activate");
+    var changing = new CodexMarkdownView("**tone**", new style.Theme(), syntaxes);
+    var changingRoot = context.submit(changing, new LayoutFrame(400, 200));
+    var boldKey = find(changingRoot, "tone").paintCacheKeys[0];
+    changing.update("*tone*"); changingRoot = context.submit(changing, new LayoutFrame(400, 200));
+    require(boldKey != find(changingRoot, "tone").paintCacheKeys[0], "Changing emphasis retained the old paint cache");
+    root = context.submit(emphasis, new LayoutFrame(160, 400));
+    require(find(root, "italic").globalBounds().y >= find(root, "Normal").globalBounds().y, "Emphasis wrapping lost text");
+    var international = new CodexMarkdownView("**Résumé 日本語**", new style.Theme(), syntaxes);
+    root = context.submit(international, new LayoutFrame(400, 200));
+    find(root, "Résumé"); find(root, "日本語");
+    ui.MarkdownEmphasis.unavailable.set("bold", true);
+    root = context.submit(new CodexMarkdownView("**Readable**", new style.Theme(), syntaxes), new LayoutFrame(400, 200));
+    require(find(root, "Readable").styleType != "markdown-emphasis", "Missing face did not use readable text fallback");
+    ui.MarkdownEmphasis.unavailable.remove("bold");
+    root = context.submit(new CodexMarkdownView("   ## Indented heading", new style.Theme(), syntaxes), new LayoutFrame(400, 200));
+    find(root, "Indented heading");
     view.update("```python\nprint('hello')\n```");
     root = context.submit(view, new LayoutFrame(1000, 400));
     var codeLabel = find(root, "Code block: python").globalBounds();
@@ -262,6 +301,7 @@ class CodexMarkdownLayoutMain {
     for (literal in ["[unfinished](https://example.com", "[unsafe](javascript:alert(1))", "`[literal](https://example.com)`"])
       for (span in workspace.client.CodexMarkdown.inlineSpans(literal)) require(span.kind != "link", "Made literal or unsupported content clickable");
     context.dispose(); session.dispose(); fonts.dispose();
+    require(ui.MarkdownEmphasis.leases == initialFaceLeases, "Unmounted Markdown retained emphasis font collections");
     trace("PASS: Markdown spacing, punctuation, wrapping, line breaks, link labels, destinations and activation");
     return 0;
   }

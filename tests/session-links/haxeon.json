@@ -1,0 +1,1 @@
+{"version":1,"package":{"name":"exosuit-session-links-test"},"entry":"SessionLinksMain","sourceRoots":["src"],"scopeSourceRoots":false,"dependencies":{"pragtical_hx":{"path":"../.."}},"target":"host","outputDir":"build"}
