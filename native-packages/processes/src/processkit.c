@@ -11,6 +11,7 @@ typedef struct processkit_entry {
     char *name;
     char *command_line;
     char *path;
+    char *environment;
 } processkit_entry;
 
 typedef struct processkit_snapshot {
@@ -51,6 +52,7 @@ static void free_snapshot(processkit_snapshot *snapshot) {
         free(snapshot->entries[index].name);
         free(snapshot->entries[index].command_line);
         free(snapshot->entries[index].path);
+        free(snapshot->entries[index].environment);
     }
     free(snapshot->entries);
     free(snapshot);
@@ -90,6 +92,8 @@ static int name_listed(const char *names, const char *name) {
  * unknown time (0) never matches anything.
  */
 static int identity_status(double expected, double current) {
+    if (current == PROCESSKIT_STARTED_DENIED)
+        return PROCESSKIT_ACCESS_DENIED;
     if (current < 0)
         return PROCESSKIT_NOT_FOUND;
     if (!(expected > 0) || !(current > 0))
@@ -228,6 +232,48 @@ const char *processkit_list_path(processkit_list list, int index) {
     return entry && entry->path ? entry->path : empty_text;
 }
 
+const char *processkit_list_environment(processkit_list list, int index) {
+    processkit_entry *entry = entry_at(list, index);
+    return entry && entry->environment ? entry->environment : empty_text;
+}
+
+/*
+ * Appends "NAME=value\n" to `out` when NAME is in the ';'-separated `variables`
+ * list. Names compare without case on Windows, where the environment does too.
+ */
+static void keep_variable(const char *variables, const char *pair, size_t length, char **out, size_t *out_length, int fold_case) {
+    const char *equals = memchr(pair, '=', length);
+    if (!equals || equals == pair)
+        return;
+    size_t name_length = (size_t)(equals - pair);
+    const char *cursor = variables;
+    int wanted = 0;
+    while (*cursor && !wanted) {
+        const char *end = strchr(cursor, ';');
+        size_t span = end ? (size_t)(end - cursor) : strlen(cursor);
+        if (span == name_length) {
+            size_t index = 0;
+            while (index < span && (fold_case ? ascii_lower((unsigned char)cursor[index]) == ascii_lower((unsigned char)pair[index])
+                                              : cursor[index] == pair[index]))
+                index++;
+            wanted = index == span;
+        }
+        if (!end)
+            break;
+        cursor = end + 1;
+    }
+    if (!wanted)
+        return;
+    char *grown = (char *)realloc(*out, *out_length + length + 2);
+    if (!grown)
+        return;
+    memcpy(grown + *out_length, pair, length);
+    *out_length += length;
+    grown[(*out_length)++] = '\n';
+    grown[*out_length] = '\0';
+    *out = grown;
+}
+
 int processkit_identify(int pid, double started) { return identity_status(started, processkit_started(pid)); }
 
 #if defined(_WIN32)
@@ -277,15 +323,20 @@ static int handle_running(HANDLE process) {
     return GetExitCodeProcess(process, &code) && code == STILL_ACTIVE;
 }
 
-static char *read_command_line(HANDLE process) {
+static query_information_fn command_line_query(void) {
     static query_information_fn query = NULL;
     if (!query) {
         HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
         if (ntdll)
             query = (query_information_fn)(void *)GetProcAddress(ntdll, "NtQueryInformationProcess");
-        if (!query)
-            return NULL;
     }
+    return query;
+}
+
+static char *read_command_line(HANDLE process) {
+    query_information_fn query = command_line_query();
+    if (!query)
+        return NULL;
     ULONG size = 0;
     query(process, PROCESSKIT_COMMAND_LINE_CLASS, NULL, 0, &size);
     if (size < sizeof(processkit_unicode_string) || size > (1u << 20))
@@ -308,7 +359,109 @@ static char *read_image_path(HANDLE process) {
     return utf8_from_wide(buffer, (int)size);
 }
 
-int processkit_list_open(const char *names, processkit_list *out_list) {
+
+typedef struct processkit_basic_information {
+    PVOID reserved1;
+    PVOID peb;
+    PVOID reserved2[2];
+    ULONG_PTR pid;
+    PVOID reserved3;
+} processkit_basic_information;
+
+/* Offsets in a 64-bit process: PEB.ProcessParameters, then RTL_USER_PROCESS_PARAMETERS.Environment and .EnvironmentSize. */
+#define PROCESSKIT_PEB_PROCESS_PARAMETERS 0x20
+#define PROCESSKIT_PARAMETERS_ENVIRONMENT 0x80
+#define PROCESSKIT_PARAMETERS_ENVIRONMENT_SIZE 0x3F0
+/* Read when EnvironmentSize is missing or implausible; larger blocks are never read. */
+#define PROCESSKIT_ENVIRONMENT_FALLBACK_BYTES 65536
+#define PROCESSKIT_ENVIRONMENT_MAX_BYTES (1u << 20)
+
+/*
+ * Reads `size` bytes at `address`: the exact size first, then halving when the end of
+ * the block is not mapped, down to one wide character.
+ */
+static SIZE_T read_remote(HANDLE process, const char *address, char *buffer, SIZE_T size) {
+    while (size >= sizeof(wchar_t)) {
+        SIZE_T read = 0;
+        if (ReadProcessMemory(process, address, buffer, size, &read) && read > 0)
+            return read;
+        size /= 2;
+    }
+    return 0;
+}
+
+/*
+ * The length in characters of a well-formed environment block within `count`
+ * characters: pairs ending in a double NUL (a lone NUL for an empty block). Returns
+ * 0 when there is none, as when the read caught the block while the process changed it.
+ */
+static size_t environment_block_length(const wchar_t *text, size_t count) {
+    if (count >= 1 && text[0] == L'\0')
+        return 1;
+    for (size_t index = 1; index < count; index++)
+        if (text[index] == L'\0' && text[index - 1] == L'\0')
+            return index + 1;
+    return 0;
+}
+
+/*
+ * The requested variables of a 64-bit process's environment block, read from its PEB
+ * (see the offsets above). Needs PROCESS_VM_READ. Returns NULL (unreadable) for a block
+ * that is not well formed. A 32-bit processkit does not read environments: it cannot
+ * follow a 64-bit process's PEB, so every process reads as unreadable there, and suit,
+ * which adopts only processes whose environment it read, adopts nothing.
+ */
+static char *read_environment(HANDLE process, const char *variables) {
+#if defined(_WIN64)
+    if (!variables || !*variables)
+        return NULL;
+    query_information_fn query = command_line_query();
+    processkit_basic_information basic;
+    ULONG size = 0;
+    if (!query || query(process, 0, &basic, sizeof(basic), &size) < 0 || !basic.peb)
+        return NULL;
+    char *parameters = NULL, *block = NULL;
+    SIZE_T block_size = 0;
+    if (!ReadProcessMemory(process, (char *)basic.peb + PROCESSKIT_PEB_PROCESS_PARAMETERS, &parameters, sizeof(parameters), NULL) ||
+        !parameters)
+        return NULL;
+    if (!ReadProcessMemory(process, parameters + PROCESSKIT_PARAMETERS_ENVIRONMENT, &block, sizeof(block), NULL) || !block)
+        return NULL;
+    if (!ReadProcessMemory(process, parameters + PROCESSKIT_PARAMETERS_ENVIRONMENT_SIZE, &block_size, sizeof(block_size), NULL) ||
+        block_size == 0 || block_size > PROCESSKIT_ENVIRONMENT_MAX_BYTES)
+        block_size = PROCESSKIT_ENVIRONMENT_FALLBACK_BYTES;
+    wchar_t *text = (wchar_t *)malloc(block_size + 2 * sizeof(wchar_t));
+    if (!text)
+        return NULL;
+    SIZE_T read = read_remote(process, block, (char *)text, block_size);
+    size_t count = environment_block_length(text, read / sizeof(wchar_t));
+    if (count == 0) {
+        free(text);
+        return NULL;
+    }
+    char *result = NULL;
+    size_t result_length = 0;
+    size_t index = 0;
+    while (index < count && text[index] != L'\0') {
+        size_t length = wcsnlen(text + index, count - index);
+        char *pair = utf8_from_wide(text + index, (int)length);
+        if (pair) {
+            keep_variable(variables, pair, strlen(pair), &result, &result_length, 1);
+            free(pair);
+        }
+        index += length + 1;
+    }
+    free(text);
+    return result;
+#else
+    /* 32-bit: environments are not read (see above). */
+    (void)process;
+    (void)variables;
+    return NULL;
+#endif
+}
+
+int processkit_list_open(const char *names, const char *variables, processkit_list *out_list) {
     if (!out_list)
         return PROCESSKIT_FAILED;
     out_list->id = 0;
@@ -330,12 +483,18 @@ int processkit_list_open(const char *names, processkit_list *out_list) {
         entry.pid = (int)process.th32ProcessID;
         entry.parent = (int)process.th32ParentProcessID;
         entry.name = utf8_from_wide(process.szExeFile, (int)wcslen(process.szExeFile));
-        HANDLE handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, process.th32ProcessID);
+        int listed = name_listed(names, entry.name);
+        HANDLE handle = NULL;
+        if (listed && variables && *variables)
+            handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE, process.th32ProcessID);
+        if (!handle)
+            handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, process.th32ProcessID);
         if (handle) {
             entry.started = handle_started(handle);
-            if (name_listed(names, entry.name)) {
+            if (listed) {
                 entry.command_line = read_command_line(handle);
                 entry.path = read_image_path(handle);
+                entry.environment = read_environment(handle, variables);
             }
             CloseHandle(handle);
         }
@@ -343,6 +502,7 @@ int processkit_list_open(const char *names, processkit_list *out_list) {
             free(entry.name);
             free(entry.command_line);
             free(entry.path);
+            free(entry.environment);
             free_snapshot(snapshot);
             CloseHandle(system);
             return PROCESSKIT_FAILED;
@@ -379,7 +539,7 @@ double processkit_started(int pid) {
         return -1;
     HANDLE handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, (DWORD)pid);
     if (!handle)
-        return -1;
+        return GetLastError() == ERROR_ACCESS_DENIED ? PROCESSKIT_STARTED_DENIED : -1;
     double started = handle_running(handle) ? handle_started(handle) : -1;
     CloseHandle(handle);
     return started;
@@ -531,7 +691,47 @@ static char *read_file_text(const char *path, int nul_to_space) {
     return text;
 }
 
-int processkit_list_open(const char *names, processkit_list *out_list) {
+/* The requested variables from /proc/<pid>/environ: the environment the process was started with. */
+static char *read_environment(int pid, const char *variables) {
+    if (!variables || !*variables)
+        return NULL;
+    char path[64];
+    snprintf(path, sizeof(path), "/proc/%d/environ", pid);
+    FILE *file = fopen(path, "r");
+    if (!file)
+        return NULL;
+    /* procfs reports no size, so the block grows in chunks, up to 1 MiB. */
+    size_t capacity = 4096, length = 0;
+    char *block = (char *)malloc(capacity);
+    while (block) {
+        length += fread(block + length, 1, capacity - 1 - length, file);
+        if (length < capacity - 1 || capacity >= (1u << 20))
+            break;
+        char *grown = (char *)realloc(block, capacity * 2);
+        if (!grown) {
+            free(block);
+            block = NULL;
+            break;
+        }
+        block = grown;
+        capacity *= 2;
+    }
+    fclose(file);
+    if (!block)
+        return NULL;
+    block[length] = '\0';
+    char *result = NULL;
+    size_t result_length = 0, index = 0;
+    while (index < length) {
+        size_t pair = strlen(block + index);
+        keep_variable(variables, block + index, pair, &result, &result_length, 0);
+        index += pair + 1;
+    }
+    free(block);
+    return result;
+}
+
+int processkit_list_open(const char *names, const char *variables, processkit_list *out_list) {
     if (!out_list)
         return PROCESSKIT_FAILED;
     out_list->id = 0;
@@ -564,11 +764,13 @@ int processkit_list_open(const char *names, processkit_list *out_list) {
             ssize_t length = readlink(path, target, sizeof(target) - 1);
             if (length > 0)
                 entry.path = copy_text(target, (size_t)length);
+            entry.environment = read_environment(pid, variables);
         }
         if (!append_entry(snapshot, &entry)) {
             free(entry.name);
             free(entry.command_line);
             free(entry.path);
+            free(entry.environment);
             free_snapshot(snapshot);
             closedir(directory);
             return PROCESSKIT_FAILED;
@@ -609,8 +811,9 @@ int processkit_current_pid(void) { return (int)getpid(); }
 #include <unistd.h>
 
 /* Listing needs proc_listallpids; until it is written only direct pid checks work. */
-int processkit_list_open(const char *names, processkit_list *out_list) {
+int processkit_list_open(const char *names, const char *variables, processkit_list *out_list) {
     (void)names;
+    (void)variables;
     if (out_list)
         out_list->id = 0;
     return PROCESSKIT_UNSUPPORTED;
@@ -643,8 +846,9 @@ int processkit_current_pid(void) { return (int)getpid(); }
 #include <signal.h>
 #include <unistd.h>
 
-int processkit_list_open(const char *names, processkit_list *out_list) {
+int processkit_list_open(const char *names, const char *variables, processkit_list *out_list) {
     (void)names;
+    (void)variables;
     if (out_list)
         out_list->id = 0;
     return PROCESSKIT_UNSUPPORTED;

@@ -44,7 +44,8 @@ class PathKeyTestMain {
 			&& PathKey.relative("C:", "C:", true) == "", "the drive-relative C: acted as the drive root");
 		require(PathKey.same("\\\\?\\C:\\Work\\a", "c:/work/a", true) && PathKey.relative("C:\\work", "\\\\?\\C:\\work\\b", true) == "b",
 			"a long-path prefix changed the path");
-		require(PathKey.same("\\\\?\\UNC\\server\\share\\x", "\\\\server\\share\\x", true), "a long UNC path differed from its short form");
+		require(PathKey.same("\\\\?\\UNC\\server\\share\\x", "\\\\server\\share\\x", true)
+			&& PathKey.same("\\\\?\\unc\\server\\share\\x", "//server/share/x", true), "a long UNC path differed from its short form");
 		require(PathKey.of("C:\\work\\\\a//b/", true) == "c:/work/a/b" && PathKey.of("/home//me///x", false) == "/home/me/x",
 			"doubled separators were kept");
 		require(PathKey.of("\\\\server\\share\\", true) == "//server/share" && PathKey.within("//server/share", "\\\\SERVER\\Share\\x", true)

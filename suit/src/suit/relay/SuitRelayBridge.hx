@@ -1,5 +1,6 @@
 package suit.relay;
 
+import suit.SuitRecord.SuitRecords;
 import haxe.Json;
 import haxe.io.Bytes;
 import haxe.io.Path;
@@ -303,8 +304,8 @@ class SuitRelayBridge {
 		holderCheckedAt = now;
 		var status:Dynamic = null;
 		try status = SuitRelayHosts.readPrivateJson(Path.join([host.stateDir, "relay-status.json"])) catch (_:Dynamic) {}
-		var statusPid = status == null ? null : SuitInventory.intField(status, "pid");
-		var updatedAt = status == null ? null : SuitInventory.floatField(status, "updatedAt");
+		var statusPid = status == null ? null : SuitRecords.intField(status, "pid");
+		var updatedAt = status == null ? null : SuitRecords.floatField(status, "updatedAt");
 		var directStatus = status != null && Reflect.field(status, "viaSuit") == false && statusPid != null && updatedAt != null
 			&& Date.now().getTime() - updatedAt < STATUS_FRESH_SECONDS * 1000 && alive(statusPid);
 		var current = holder;
@@ -322,7 +323,7 @@ class SuitRelayBridge {
 			if (Std.isOfType(listed, Array))
 				for (device in (listed : Array<Dynamic>))
 					if (Reflect.field(device, "connected") == true && Reflect.field(device, "revoked") != true) {
-						var id = SuitInventory.stringField(device, "deviceId");
+						var id = SuitRecords.stringField(device, "deviceId");
 						if (id != null)
 							directDevices.push(id);
 					}

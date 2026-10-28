@@ -38,20 +38,25 @@ class GroupContextActions {
 	/** `permitted`: the service grants editing and removing groups; `busy`: a workspace operation is running. */
 	public static function removalOf(group:String, permitted:Bool, busy:Bool, catalog:Null<TerminalCatalog>, agents:Null<AgentCatalog>):GroupRemoval {
 		if (!permitted) return GroupRemoval.NotPermitted;
-		if (busy || catalog == null || agents == null || !complete(catalog, agents)) return GroupRemoval.Busy;
-		return empty(group, catalog, agents) ? GroupRemoval.Allowed : GroupRemoval.NotEmpty;
+		var contents = busy ? null : emptiness(group, catalog, agents);
+		return contents == null ? GroupRemoval.Busy : contents == true ? GroupRemoval.Allowed : GroupRemoval.NotEmpty;
 	}
 
 	/** The menu entry, which says why it is disabled when the group still has contents. */
 	public static function removeLabel(removal:GroupRemoval):String
 		return removal == GroupRemoval.NotEmpty ? "Remove Group (not empty)" : "Remove Group";
 
-	/** Both catalogs are fully loaded and describe the same workspace, so emptiness can be decided. */
-	static function complete(catalog:TerminalCatalog, agents:AgentCatalog):Bool
-		return catalog.next == null && agents.next == null && agents.root == catalog.workspaceRoot;
+	/** Whether the group has no sub-group, terminal or agent; false until both catalogs are complete. */
+	public static function empty(group:String, catalog:Null<TerminalCatalog>, agents:Null<AgentCatalog>):Bool
+		return emptiness(group, catalog, agents) == true;
 
-	public static function empty(group:String, catalog:Null<TerminalCatalog>, agents:Null<AgentCatalog>):Bool {
-		if (catalog == null || agents == null || !complete(catalog, agents)) return false;
+	/**
+		Whether the group has no contents, or null until both catalogs are loaded in full and describe the same workspace,
+		so emptiness can be decided.
+	**/
+	static function emptiness(group:String, catalog:Null<TerminalCatalog>, agents:Null<AgentCatalog>):Null<Bool> {
+		if (catalog == null || agents == null || catalog.next != null || agents.next != null || agents.root != catalog.workspaceRoot)
+			return null;
 		for (child in catalog.groups) if (child.parent == group) return false;
 		for (terminal in catalog.terminals) if (terminal.group == group) return false;
 		for (agent in agents.records) if (agent.group == group) return false;

@@ -360,7 +360,7 @@ class WorkspaceScmService {
 		return {workspace: workspace, repository: repository, operationId: operationId, message: value.message,
 			snapshot: value.snapshot == null ? null : snapshotRecord(value.snapshot), recoveryToken: value.recoveryToken};
 
-	static function decodeOperation(request:WorkspaceScmProtocol.ScmApplyRequest):ScmOperation {
+	public static function decodeOperation(request:WorkspaceScmProtocol.ScmApplyRequest):ScmOperation {
 		return switch request.kind {
 			case "stage": Stage(required(request.path, "path"));
 			case "stage_all": StageAll;
@@ -372,6 +372,7 @@ class WorkspaceScmService {
 			case "restore_discard": RestoreDiscard(required(request.path, "path"), required(request.recoveryToken, "recovery token"));
 			case "resolve_conflict": ResolveConflict(required(request.path, "path"), required(request.choice, "choice"));
 			case "commit": Commit(required(request.message, "message"), request.amend == true);
+			case "scoped_commit": ScopedCommit(required(request.message, "message"), request.amend == true, required(request.folders, "folders").copy());
 			case "stage_patch": StagePatch(required(request.path, "path"), required(request.patch, "patch"));
 			case "unstage_patch": UnstagePatch(required(request.path, "path"), required(request.patch, "patch"));
 			case "revert_patch": RevertPatch(required(request.path, "path"), required(request.patch, "patch"));

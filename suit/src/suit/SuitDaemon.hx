@@ -1,5 +1,6 @@
 package suit;
 
+import suit.SuitRecord.SuitRecords;
 import haxe.Json;
 import haxe.io.Bytes;
 import haxe.io.Path;
@@ -94,7 +95,7 @@ class SuitDaemon {
 		}
 		relay = new SuitRelayHosting(runtime.events, hub);
 		runtime.events.listen(onEvent);
-		inventory = new SuitInventory();
+		inventory = new SuitInventory(true);
 		refreshedAt = Sys.time();
 		sys.io.AtomicFile.write(Path.join([SuitPaths.home(), "daemon.json"]),
 			Json.stringify({version: 1, pid: Sys.getPid(), endpoint: SuitPaths.endpoint()}) + "\n");
@@ -152,7 +153,7 @@ class SuitDaemon {
 	}
 
 	function refresh():Void {
-		inventory = new SuitInventory();
+		inventory = new SuitInventory(true);
 		refreshedAt = Sys.time();
 		updateTooltip();
 	}
@@ -260,7 +261,7 @@ class SuitDaemon {
 	}
 
 	function handle(request:Dynamic):Dynamic {
-		var op = SuitInventory.stringField(request, "op");
+		var op = suit.SuitRecord.SuitRecords.stringField(request, "op");
 		switch op {
 			case "status":
 				refresh();
@@ -283,12 +284,12 @@ class SuitDaemon {
 				return {ok: true};
 			case "relay-stop":
 				refresh();
-				var plan = stopHosting(SuitInventory.stringField(request, "workspace"));
+				var plan = stopHosting(SuitRecords.stringField(request, "workspace"));
 				return {ok: true, roots: plan.roots, terminating: plan.terminate.length};
 			case "relay-pause":
 				// Pause without stopping the services: their daemons see the pause and exit on their own.
 				refresh();
-				return {ok: true, roots: SuitRelayHosting.stop(inventory, SuitInventory.stringField(request, "workspace"), relay).roots};
+				return {ok: true, roots: SuitRelayHosting.stop(inventory, SuitRecords.stringField(request, "workspace"), relay).roots};
 			case "login-toggle":
 				// As the tray's checkbox does: in the background, answered at once.
 				SuitLogin.toggleInBackground();

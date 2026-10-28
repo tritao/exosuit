@@ -1,6 +1,6 @@
 package suit;
 
-/** How suit stops a process of one kind before it kills what is left of the process tree. */
+/** How suit stops a process of one kind; afterwards it kills the process if it still runs, and its exosuit-kind descendants. */
 enum SuitStop {
 	/** Ask it to close its windows, so it can save or prompt. Never forced: it may hold unsaved work. */
 	CloseWindows;
@@ -11,7 +11,7 @@ enum SuitStop {
 	/** Stop it through the workspace manager that started it, so the manager neither restarts nor outlives it. */
 	ThroughManager;
 
-	/** Kill it with its descendants at once. */
+	/** Kill it at once. The stop's sweep then kills only its exosuit-kind descendants (SuitLineage), never the whole tree. */
 	Kill;
 }
 
@@ -77,6 +77,22 @@ class SuitKinds {
 			default: OwnerGone;
 		};
 	}
+
+	/**
+		A kind exosuit starts itself: a workspace manager starts its daemon, a live session its host and
+		compiler workers. Only these are adopted by descent, and only these are stopped as part of a tree.
+		Editors are started by the user, and are never stopped by force.
+	**/
+	public static function spawnedByExosuit(kind:SuitKind):Bool {
+		return switch kind {
+			case SuitKind.WorkspaceManager | SuitKind.WorkspaceHost | SuitKind.CompilerWorker | SuitKind.LiveSession | SuitKind.LiveHost: true;
+			default: false;
+		};
+	}
+
+	/** True for a kind that heads its own group in the menu: an editor, with its workspaces' services. */
+	public static function headsOwnGroup(kind:SuitKind):Bool
+		return kind == SuitKind.Editor;
 
 	/** A Haxeon process, grouped under "Haxeon" while it is in use. */
 	public static function isHaxeon(kind:SuitKind):Bool

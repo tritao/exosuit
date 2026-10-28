@@ -630,6 +630,8 @@ class AgentManager {
 	}
 
 	static function runManaged(options:ManagerOptions, directory:String):Int {
+		// Settles EXOSUIT_SUIT once, before the daemon and anything else is spawned, so they inherit it.
+		suit.SuitClient.resolve(directory);
 		var lockPath = Path.join([directory, "agent.lock"]);
 		var lock = AgentManagerNative.acquireLock(lockPath);
 		if (lock == null) {

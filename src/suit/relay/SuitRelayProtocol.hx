@@ -145,6 +145,6 @@ class SuitRelayProtocol {
 	public static function viaSuitEnabled():Bool {
 		if (Sys.getEnv("EXOSUIT_RELAY_VIA_SUIT") == "0")
 			return false;
-		return SuitClient.mode() != SuitMode.Off;
+		return SuitClient.current() != SuitMode.Off;
 	}
 }

@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "package": { "name": "exosuit-suit-tests" },
+  "entry": "app.SuitUnitTests",
+  "sourceRoots": ["src", "../src", "../../src"],
+  "scopeSourceRoots": false,
+  "dependencies": {
+    "processkit": { "path": "../../native-packages/processes" }
+  },
+  "target": "host",
+  "outputDir": "build"
+}

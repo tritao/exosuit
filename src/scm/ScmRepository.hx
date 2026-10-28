@@ -7,11 +7,11 @@ class ScmRepository {
 	public final kind:ScmRepositoryKind;
 	public final parentId:Null<String>;
 	public final trusted:Bool;
-	/** Whether the repository compares paths case-insensitively (Git's `core.ignorecase`); null when the provider does not say. */
-	public final ignoreCase:Null<Bool>;
+	/** Whether the repository compares paths case-insensitively: Git's `core.ignorecase`, false when unset as in Git. */
+	public final ignoreCase:Bool;
 
 	public function new(id:String, providerId:String, root:String, kind:ScmRepositoryKind = ScmRepositoryKind.Worktree,
-			?parentId:String, trusted:Bool = false, ?ignoreCase:Bool) {
+			?parentId:String, trusted:Bool = false, ignoreCase:Bool = false) {
 		this.id = id;
 		this.providerId = providerId;
 		this.root = root;

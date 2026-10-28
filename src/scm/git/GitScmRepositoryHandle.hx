@@ -8,7 +8,6 @@ import process.ProcessManager;
 import scm.ScmApplyResult;
 import scm.ScmBlob;
 import scm.ScmError;
-import scm.ScmFolderScope;
 import scm.ScmFeatures;
 import scm.ScmJob;
 import scm.ScmJobResult;
@@ -27,7 +26,6 @@ class GitScmRepositoryHandle implements ScmRepositoryHandle {
 	final scheduler:JobScheduler;
 	final gitDir:String;
 	final commonDir:String;
-	var ignoreCaseCache:Null<Bool>;
 	final trustStore:Null<scm.ScmTrustStore>;
 	final untrackedLimit:Int;
 	final kind:scm.ScmRepositoryKind;
@@ -39,6 +37,11 @@ class GitScmRepositoryHandle implements ScmRepositoryHandle {
 	var signatureOperation:Null<scm.ScmHeadOperation>;
 	var revision:Int64 = Int64.ofInt(0);
 	var disposed:Bool = false;
+	/** Git's `core.ignorecase`, read with `git config` before the first status and again after a configuration change. */
+	var ignoreCase:Bool = false;
+	var ignoreCaseRead:Bool = false;
+	/** Counts configuration changes, so a read that started before one does not count as current. */
+	var configurationEpoch:Int = 0;
 
 	public final id:String;
 	public final root:String;
@@ -61,20 +64,24 @@ class GitScmRepositoryHandle implements ScmRepositoryHandle {
 		blobReader = new GitBlobReader(processes, scheduler, process, root, blobReaderRestricted, 64 * 1024 * 1024);
 	}
 
-	public function repository():ScmRepository return new ScmRepository(id, "git", root, kind, parentId, trusted(), ignoresCase());
+	public function repository():ScmRepository return new ScmRepository(id, "git", root, kind, parentId, trusted(), ignoreCase);
 
-	/** Git's `core.ignorecase` from the repository's own configuration (worktree configuration wins); false when unset. */
-	public function ignoresCase():Bool {
-		var cached = ignoreCaseCache;
-		if (cached != null) return cached;
-		var value = false;
-		for (path in [commonDir + "/config", gitDir + "/config.worktree"]) {
-			var text = try FileSystem.exists(path) ? File.getContent(path) : null catch (_:Dynamic) null;
-			var setting = text == null ? null : GitConfigFile.boolean(text, "core", "ignorecase");
-			if (setting != null) value = setting;
-		}
-		ignoreCaseCache = value;
-		return value;
+	/**
+		Reads `core.ignorecase` through Git, so includes, global and system configuration and every boolean spelling count;
+		unset means false, as in Git, which sets it at init on case-insensitive file systems. Runs `next` once it is read;
+		a read that fails, or that a configuration change overtook, is tried again before the next status.
+	**/
+	function readIgnoreCase(generation:Int, next:Void->Void):ScmJob<GitCommandResult> {
+		var epoch = configurationEpoch;
+		return process.run(["config", "--type=bool", "--get", "core.ignorecase"], root, generation, function(result) {
+			var value = result.value, error = result.error;
+			// `git config --get` exits 1, saying nothing, when the key is unset.
+			var unset = error != null && error.message == "Git command failed with status 1";
+			if (error == null && value != null) ignoreCase = StringTools.trim(value.stdout.toString()) == "true";
+			else if (unset) ignoreCase = false;
+			if (epoch == configurationEpoch && (error == null || unset)) ignoreCaseRead = true;
+			next();
+		}, true, !trusted(), 4096);
 	}
 
 	/** Directories whose changes can affect this repository's status or refs. */
@@ -133,18 +140,9 @@ class GitScmRepositoryHandle implements ScmRepositoryHandle {
 		return false;
 	}
 
-	/** The non-empty names in Git's `-z` output, decoded one at a time so a NUL never reaches a string. */
-	static function nulSeparated(bytes:Bytes):Array<String> {
-		var names:Array<String> = [], start = 0;
-		for (index in 0...bytes.length + 1) if (index == bytes.length || bytes.get(index) == 0) {
-			if (index > start) names.push(bytes.getString(start, index - start));
-			start = index + 1;
-		}
-		return names;
-	}
-
 	public function configurationChanged():Void {
-		ignoreCaseCache = null;
+		ignoreCaseRead = false;
+		configurationEpoch++;
 		if (!disposed) blobReader.configurationChanged();
 	}
 
@@ -223,25 +221,29 @@ class GitScmRepositoryHandle implements ScmRepositoryHandle {
 			command = process.run(["status", "--porcelain=v2", "-z", "--branch", "--untracked-files=all"], root, generation,
 				finishStatus, true, !trusted(), GitProcess.DEFAULT_MAX_STDOUT, disabledFilters);
 		}
-		if (trusted()) {
-			runStatus([]);
-		} else {
-			// `status` may run clean filters while comparing a worktree file. Inspect
-			// config names first, then override every external command for those filters.
-			command = process.run(["config", "--null", "--name-only", "--list"], root, generation, function(result) {
-				if (job.cancelled || job.complete) return;
-				if (result.error != null || result.value == null) {
-					var message = "Git configuration could not be inspected safely; repository status was not read";
-					if (job.finish()) complete(new ScmJobResult<ScmSnapshot>(generation, null,
-						new ScmError("restricted_config_failed", message)));
-					return;
-				}
-				try runStatus(configuredFilters(result.value.stdout)) catch (failure:Dynamic) {
-					if (job.finish()) complete(new ScmJobResult<ScmSnapshot>(generation, null,
-						new ScmError("restricted_config_failed", "Git filter configuration was malformed; repository status was not read")));
-				}
-			}, true, true, 1024 * 1024);
+		function start():Void {
+			if (trusted()) {
+				runStatus([]);
+			} else {
+				// `status` may run clean filters while comparing a worktree file. Inspect
+				// config names first, then override every external command for those filters.
+				command = process.run(["config", "--null", "--name-only", "--list"], root, generation, function(result) {
+					if (job.cancelled || job.complete) return;
+					if (result.error != null || result.value == null) {
+						var message = "Git configuration could not be inspected safely; repository status was not read";
+						if (job.finish()) complete(new ScmJobResult<ScmSnapshot>(generation, null,
+							new ScmError("restricted_config_failed", message)));
+						return;
+					}
+					try runStatus(configuredFilters(result.value.stdout)) catch (failure:Dynamic) {
+						if (job.finish()) complete(new ScmJobResult<ScmSnapshot>(generation, null,
+							new ScmError("restricted_config_failed", "Git filter configuration was malformed; repository status was not read")));
+					}
+				}, true, true, 1024 * 1024);
+			}
 		}
+		if (ignoreCaseRead) start();
+		else command = readIgnoreCase(generation, function() { if (!job.cancelled && !job.complete) start(); });
 		return job;
 	}
 
@@ -265,9 +267,11 @@ class GitScmRepositoryHandle implements ScmRepositoryHandle {
 		if (disposed) return failed(generation, complete, "repository_closed", "The Git repository handle is closed");
 		if (!trusted()) return failed(generation, complete, "untrusted", "Trust this repository on this machine before changing it");
 		var child:Null<ScmJob<GitCommandResult>> = null;
+		var scoped:Null<GitScopedCommit> = null;
 		var recoveryToken:Null<String> = null;
 		var job = new ScmJob<ScmApplyResult>(generation, function() {
 			if (child != null) child.cancel();
+			if (scoped != null) scoped.cancel();
 		});
 		function finish(result:ScmJobResult<GitCommandResult>, message:String):Void {
 			if (job.cancelled || job.complete) return;
@@ -491,39 +495,18 @@ class GitScmRepositoryHandle implements ScmRepositoryHandle {
 					run(args, Bytes.ofString(message), amend ? "Amended commit" : "Created commit");
 				}
 			case ScopedCommit(message, amend, folders):
-				if (StringTools.trim(message).length == 0) {
-					if (job.finish()) complete(new ScmJobResult<ScmApplyResult>(generation, null,
-						new ScmError("empty_commit_message", "Commit message cannot be empty")));
-				} else {
-					// Read the paths again right before committing, inside this one queued operation, so changes staged
-					// since the snapshot cannot slip into the commit unchecked.
-					var ignoreCase = ignoresCase();
-					function outside(result:ScmJobResult<GitCommandResult>, what:String, next:Void->Void):Void {
+				// The folder check needs the repository's case rule; read it first when no status has yet.
+				function startScoped():Void {
+					if (job.cancelled || job.complete) return;
+					var commit = new GitScopedCommit(process, root, generation, message, amend, folders, ignoreCase, function(result, error) {
 						if (job.cancelled || job.complete) return;
-						var value = result.value;
-						if (result.error != null || value == null) {
-							if (job.finish()) complete(new ScmJobResult<ScmApplyResult>(generation, null,
-								result.error != null ? result.error : new ScmError("operation_failed", "Git returned no list of " + what.toLowerCase())));
-							return;
-						}
-						var paths = nulSeparated(value.stdout);
-						var refused = ScmFolderScope.outside(paths, folders, ignoreCase);
-						if (refused.length == 0) { next(); return; }
-						if (job.finish()) complete(new ScmJobResult<ScmApplyResult>(generation, null,
-							new ScmError("outside_folder", ScmFolderScope.refusal(what, refused, folders))));
-					}
-					function commit():Void {
-						var args = ["commit", "--file=-"];
-						if (amend) args.insert(1, "--amend");
-						run(args, Bytes.ofString(message), amend ? "Amended commit" : "Created commit");
-					}
-					child = process.run(["diff", "--cached", "--name-only", "--no-renames", "-z"], root, generation,
-						result -> outside(result, "Staged changes", function() {
-							if (!amend) { commit(); return; }
-							child = process.run(["diff-tree", "--no-commit-id", "--name-only", "--no-renames", "-r", "-z", "--root", "HEAD"],
-								root, generation, last -> outside(last, "Changes in the commit being amended", commit), true);
-						}), true);
+						if (job.finish()) complete(new ScmJobResult<ScmApplyResult>(generation,
+							error == null ? new ScmApplyResult(current, result == null ? "Created commit" : result) : null, error));
+					});
+					scoped = commit;
+					commit.start();
 				}
+				if (ignoreCaseRead) startScoped(); else child = readIgnoreCase(generation, startScoped);
 			case StagePatch(path, patch): runCheckedPatch(path, ["apply", "--cached", "--recount"], patch, "Staged hunk in " + path);
 			case UnstagePatch(path, patch): runCheckedPatch(path, ["apply", "--cached", "--recount", "--reverse"], patch, "Unstaged hunk in " + path);
 			case RevertPatch(path, patch): runCheckedPatch(path, ["apply", "--recount", "--reverse"], patch, "Reverted hunk in " + path);

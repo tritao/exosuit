@@ -21,6 +21,7 @@ import workspace.PathKey;
 import workspace.runtime.WorkspaceCredentialStores;
 import workspace.transport.NativeRpcHub;
 import workspace.transport.NativeRpcTransport;
+import suit.SuitRecord.SuitRecords;
 
 /** What Stop hosting did: the roots paused, and the workspace services that must stop. */
 typedef SuitRelayStopPlan = {
@@ -54,7 +55,7 @@ class SuitRelayHosting {
 	}
 
 	public static function isAttach(request:Dynamic):Bool
-		return SuitInventory.stringField(request, "op") == SuitRelayProtocol.ATTACH_OP;
+		return SuitRecords.stringField(request, "op") == SuitRelayProtocol.ATTACH_OP;
 
 	/** Workspaces suit must stay up for: hosted, not paused, not failed, not left to a direct daemon. */
 	public function hostingCount():Int {
@@ -79,7 +80,7 @@ class SuitRelayHosting {
 	**/
 	public function attach(transport:NativeRpcTransport, request:Dynamic):Void {
 		var pid = transport.peerProcess();
-		var machineId = SuitInventory.stringField(request, "machineId");
+		var machineId = SuitRecords.stringField(request, "machineId");
 		var existing = machineId == null ? null : find(machineId);
 		var host:SuitRelayHost;
 		try {
@@ -125,7 +126,7 @@ class SuitRelayHosting {
 		var image = Processes.executablePath(pid);
 		var home = Sys.getEnv("EXOSUIT_SUIT_HOME"), standIn = Sys.getEnv("EXOSUIT_SUIT_TEST_ATTACH_CALLER");
 		if (image != null && home != null && home.length > 0 && standIn != null && standIn.length > 0 && PathKey.same(image, standIn))
-			return SuitInventory.stringField(request, "executable");
+			return SuitRecords.stringField(request, "executable");
 		return image;
 	}
 
@@ -228,14 +229,14 @@ class SuitRelayHosting {
 		other ops. `relay-stop` needs the daemon's inventory and jobs, so the daemon handles it.
 	**/
 	public function handle(request:Dynamic):Null<Dynamic> {
-		var workspace = SuitInventory.stringField(request, "workspace");
-		switch SuitInventory.stringField(request, "op") {
+		var workspace = SuitRecords.stringField(request, "workspace");
+		switch SuitRecords.stringField(request, "op") {
 			case "relay-resume":
 				return {ok: true, roots: resume(workspace)};
 			case "relay-state":
 				return {ok: true, hosts: views()};
 			case "relay-disconnect":
-				var client = SuitInventory.stringField(request, "client");
+				var client = SuitRecords.stringField(request, "client");
 				if (client == null)
 					return {ok: false, error: "client required"};
 				var result = disconnect(client);
@@ -245,7 +246,7 @@ class SuitRelayHosting {
 			case "relay-retry", "relay-forget":
 				var matched = [for (bridge in bridges) if (matchesRequest(bridge, request)) bridge.host];
 				for (host in matched)
-					if (SuitInventory.stringField(request, "op") == "relay-retry")
+					if (SuitRecords.stringField(request, "op") == "relay-retry")
 						retry(host.machineId);
 					else
 						dismiss(host.machineId);
@@ -256,10 +257,10 @@ class SuitRelayHosting {
 	}
 
 	static function matchesRequest(bridge:SuitRelayBridge, request:Dynamic):Bool {
-		var machineId = SuitInventory.stringField(request, "machineId");
+		var machineId = SuitRecords.stringField(request, "machineId");
 		if (machineId != null)
 			return bridge.host.machineId == machineId;
-		return SuitRelayHosts.matches(bridge.host, SuitInventory.stringField(request, "workspace"));
+		return SuitRelayHosts.matches(bridge.host, SuitRecords.stringField(request, "workspace"));
 	}
 
 	public function views():Array<SuitRelayHostView> {
@@ -349,7 +350,7 @@ class SuitRelayHosting {
 			var path = statePath();
 			if (FileSystem.exists(path)) {
 				var state:Dynamic = Json.parse(File.getContent(path));
-				var updatedAt = SuitInventory.floatField(state, "updatedAt");
+				var updatedAt = SuitRecords.floatField(state, "updatedAt");
 				var listed:Dynamic = Reflect.field(state, "hosts");
 				if (updatedAt != null && Sys.time() - updatedAt < STATE_FRESH_SECONDS && Std.isOfType(listed, Array))
 					return [for (item in (listed : Array<Dynamic>)) viewOf(item)];
@@ -368,18 +369,18 @@ class SuitRelayHosting {
 	}
 
 	static function viewOf(item:Dynamic):SuitRelayHostView {
-		var pid = SuitInventory.intField(item, "servicePid"), starts = SuitInventory.intField(item, "starts");
+		var pid = SuitRecords.intField(item, "servicePid"), starts = SuitRecords.intField(item, "starts");
 		var open:Dynamic = Reflect.field(item, "open");
-		var terminals = open == null ? null : SuitInventory.intField(open, "terminals");
-		var agents = open == null ? null : SuitInventory.intField(open, "agents");
+		var terminals = open == null ? null : SuitRecords.intField(open, "terminals");
+		var agents = open == null ? null : SuitRecords.intField(open, "agents");
 		var parsedOpen:Null<SuitRelayOpen> = open == null ? null : {terminals: terminals == null ? 0 : terminals, agents: agents == null ? 0 : agents};
 		return {
-			root: SuitInventory.stringField(item, "root"),
-			stateDir: SuitInventory.stringField(item, "stateDir"),
-			machineId: SuitInventory.stringField(item, "machineId"),
-			origin: SuitInventory.stringField(item, "origin"),
-			state: SuitInventory.stringField(item, "state"),
-			error: SuitInventory.stringField(item, "error"),
+			root: SuitRecords.stringField(item, "root"),
+			stateDir: SuitRecords.stringField(item, "stateDir"),
+			machineId: SuitRecords.stringField(item, "machineId"),
+			origin: SuitRecords.stringField(item, "origin"),
+			state: SuitRecords.stringField(item, "state"),
+			error: SuitRecords.stringField(item, "error"),
 			serviceRunning: Reflect.field(item, "serviceRunning") == true,
 			servicePid: pid == null ? 0 : pid,
 			starts: starts == null ? 0 : starts,
@@ -394,12 +395,12 @@ class SuitRelayHosting {
 			return result;
 		for (item in (value : Array<Dynamic>)) {
 			var listed:Dynamic = Reflect.field(item, "grants");
-			var framesIn = SuitInventory.intField(item, "framesIn"), framesOut = SuitInventory.intField(item, "framesOut");
-			var connectedAt = SuitInventory.floatField(item, "connectedAt"), lastActivity = SuitInventory.floatField(item, "lastActivity");
-			var route = SuitInventory.stringField(item, "route");
+			var framesIn = SuitRecords.intField(item, "framesIn"), framesOut = SuitRecords.intField(item, "framesOut");
+			var connectedAt = SuitRecords.floatField(item, "connectedAt"), lastActivity = SuitRecords.floatField(item, "lastActivity");
+			var route = SuitRecords.stringField(item, "route");
 			result.push({
-				id: SuitInventory.stringField(item, "id"),
-				kind: SuitInventory.stringField(item, "kind"),
+				id: SuitRecords.stringField(item, "id"),
+				kind: SuitRecords.stringField(item, "kind"),
 				connectedAt: connectedAt == null ? 0 : connectedAt,
 				lastActivity: lastActivity == null ? 0 : lastActivity,
 				framesIn: framesIn == null ? 0 : framesIn,

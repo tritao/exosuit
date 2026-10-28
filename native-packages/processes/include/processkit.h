@@ -57,12 +57,17 @@ enum {
     PROCESSKIT_UNKNOWN_START = 5 /* no start time to check the pid against, so it is left alone */
 };
 
+/** What processkit_started returns for a running process this user may not open. */
+#define PROCESSKIT_STARTED_DENIED (-2.0)
+
 /**
  * Snapshots running processes. Command lines are read only for processes whose
  * executable base name is in `names`, a ';'-separated, case-insensitive list
  * (for example "hl.exe;exosuit.exe"). An empty list reads none; "*" reads all.
+ * For the same processes, the environment variables named in the ';'-separated
+ * `variables` list are read (none when it is empty).
  */
-PROCESSKIT_API int processkit_list_open(const char *names PROCESSKIT_UTF8,
+PROCESSKIT_API int processkit_list_open(const char *names PROCESSKIT_UTF8, const char *variables PROCESSKIT_UTF8,
                                         processkit_list *out_list PROCESSKIT_OUT PROCESSKIT_OWNED);
 PROCESSKIT_API int processkit_list_count(processkit_list list);
 PROCESSKIT_API int processkit_list_pid(processkit_list list, int index);
@@ -78,13 +83,24 @@ PROCESSKIT_API const char *processkit_list_command_line(processkit_list list, in
  * processes as command lines; empty when not read. Borrowed until processkit_list_close.
  */
 PROCESSKIT_API const char *processkit_list_path(processkit_list list, int index) PROCESSKIT_RETURNS_BORROWED_UTF8;
+/**
+ * The requested environment variables the process has, as "NAME=value" lines
+ * joined by '\n'; empty when none was set or the environment could not be read.
+ * Borrowed until processkit_list_close.
+ */
+PROCESSKIT_API const char *processkit_list_environment(processkit_list list, int index) PROCESSKIT_RETURNS_BORROWED_UTF8;
 PROCESSKIT_API void processkit_list_close(processkit_list list);
 
-/** Start time of a running process in milliseconds since the Unix epoch, 0 when unknown, or -1 when it is not running. */
+/**
+ * Start time of a running process in milliseconds since the Unix epoch, 0 when
+ * unknown, -1 when it is not running, or PROCESSKIT_STARTED_DENIED (-2) when it
+ * runs but this user may not open it.
+ */
 PROCESSKIT_API double processkit_started(int pid);
 /**
  * PROCESSKIT_OK when `pid` is running and is the process that started at
  * `started`; PROCESSKIT_NOT_FOUND when it is gone or the pid was reused;
+ * PROCESSKIT_ACCESS_DENIED when it runs but may not be opened;
  * PROCESSKIT_UNKNOWN_START when either start time is unknown.
  */
 PROCESSKIT_API int processkit_identify(int pid, double started);

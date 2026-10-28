@@ -21,8 +21,11 @@ typedef SuitRecord = {
 	var pid:Int;
 	var kind:SuitKind;
 
-	/** When the record was written, in ms since the epoch. A pid that started later was reused; the record is stale. */
+	/** When the record was written (SuitClock.now). A pid that started later was reused; the record is stale. */
 	var registeredAt:Float;
+
+	/** The format the record was written in: before 2, registeredAt was whole seconds (see SuitClock). */
+	var version:Int;
 
 	/** An editor's workspace roots. */
 	var roots:Array<String>;
@@ -41,10 +44,27 @@ typedef SuitRecord = {
 
 /** Reads and writes registry records. The only code that knows the record's JSON form. */
 class SuitRecords {
-	public static inline var VERSION:Int = 1;
+	/** 2: registeredAt has millisecond resolution. */
+	public static inline var VERSION:Int = 2;
 
 	/** Records larger than this are junk. */
 	public static inline var MAX_BYTES:Int = 65536;
+
+	/** A new record for `pid`, stamped now in the current format. */
+	public static function create(pid:Int, kind:SuitKind):SuitRecord {
+		return {
+			pid: pid,
+			kind: kind,
+			registeredAt: SuitClock.now(),
+			version: VERSION,
+			roots: [],
+			root: null,
+			stateDir: null,
+			generation: null,
+			owner: null,
+			adopted: false
+		};
+	}
 
 	public static function path(directory:String, pid:Int):String
 		return Path.join([directory, pid + ".json"]);
@@ -77,7 +97,7 @@ class SuitRecords {
 		} catch (_:Dynamic) {
 			return null;
 		}
-		var pid = intField(document, "pid"), registeredAt = floatField(document, "registeredAt");
+		var pid = intField(document, "pid"), registeredAt = floatField(document, "registeredAt"), version = intField(document, "version");
 		if (pid == null || pid <= 0 || registeredAt == null)
 			return null;
 		var roots:Array<String> = [];
@@ -90,6 +110,7 @@ class SuitRecords {
 			pid: pid,
 			kind: SuitKind.SuitKinds.parse(stringField(document, "kind")),
 			registeredAt: registeredAt,
+			version: version == null ? 1 : version,
 			roots: roots,
 			root: stringField(document, "root"),
 			stateDir: stringField(document, "stateDir"),

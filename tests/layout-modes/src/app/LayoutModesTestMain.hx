@@ -84,15 +84,24 @@ class LayoutModesTestMain {
 		require(offlineSide.activeId == "workbench" && !offlineModes.hides("files"), "Agents without a right panel hid Files or left the Workbench");
 		// The panel coming and going without a mode change (a narrow window widening) re-applies the rail: Files, opened
 		// while the rail had it, leaves the sidebar for the mode's default once the right panel shows it again.
-		require(!offlineModes.syncRail(), "an unchanged rail was synced again");
+		var inputs = function() return panelAvailable ? 1 : 0;
+		offlineModes.syncRail(inputs());
+		var computed = offlineModes.railComputations, hidden = offlineModes.hiddenOnRail();
+		for (_ in 0...3) offlineModes.syncRail(inputs());
+		require(offlineModes.railComputations == computed && offlineModes.hiddenOnRail() == hidden,
+			"syncRail worked the rail out again, or rebuilt its list, with nothing changed");
 		offlineModes.markLeft(); offlineSide.select("files");
 		panelAvailable = true;
-		require(offlineModes.syncRail() && offlineModes.hiddenOnRail().join(",") == "files,search,scm", "widening the window did not re-apply the rail");
+		offlineModes.syncRail(inputs());
+		require(offlineModes.hiddenOnRail().join(",") == "files,search,scm", "widening the window did not re-apply the rail");
 		require(offlineSide.activeId == "workbench" && offlineSide.visible, "the sidebar still showed Files after it left the rail");
-		require(!offlineModes.syncRail(), "the rail was synced twice for one change");
+		computed = offlineModes.railComputations;
+		offlineModes.syncRail(inputs());
+		require(offlineModes.railComputations == computed, "the rail was worked out twice for one change");
 		// Closing the right panel by hand brings them back to the rail, and the sidebar keeps what it shows.
 		offlineRegions.toggleRight();
-		require(offlineModes.syncRail() && offlineModes.hiddenOnRail().length == 0 && offlineSide.activeId == "workbench",
+		offlineModes.syncRail(inputs());
+		require(offlineModes.hiddenOnRail().length == 0 && offlineSide.activeId == "workbench",
 			"closing the right panel did not return Files to the rail");
 		offlineModes.dispose(); offlineRegions.dispose();
 		var legacyDock = model(), legacySide = sidebar(legacyDock), legacyRegions = new WorkbenchLayoutControls(legacyDock);

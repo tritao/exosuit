@@ -5,7 +5,6 @@ import haxe.io.Bytes;
 import scm.LocalScmSource;
 import scm.NarrowedOperation;
 import scm.ScmFolderScope;
-import scm.git.GitConfigFile;
 import scm.ScmChangeKind;
 import scm.ScmOperation;
 import scm.ScmGroup;
@@ -255,10 +254,14 @@ class AgentScopeTestMain {
 		require(LocalScmSource.narrowSnapshot(index, ["sub/"], false).groups.length == 0
 			&& LocalScmSource.narrowSnapshot(index, ["sub/"], true).groups.length == 1, "snapshot narrowing ignored core.ignorecase");
 		require(ScmFolderScope.outside(["sub/a", "Sub/b", "sub/../c"], ["sub/"], false).join(",") == "Sub/b,sub/../c", "folder scope outside list");
-		require(GitConfigFile.boolean("[core]\n\tignorecase = true\n", "core", "ignorecase") == true, "config true");
-		require(GitConfigFile.boolean("[Core]\n\tIgnoreCase = false ; comment\n", "core", "ignorecase") == false, "config false with a comment");
-		require(GitConfigFile.boolean("[core]\n\tignorecase\n[core]\nignorecase=no\n", "core", "ignorecase") == false, "the last value wins");
-		require(GitConfigFile.boolean("[core \"x\"]\nignorecase=true\n[user]\nignorecase=true\n", "core", "ignorecase") == null, "a subsection or another section counted");
+		// A scoped commit asked of a narrowed source can narrow its folders but never widen them.
+		require(ScmFolderScope.intersect(["sub/inner/", "other/", "../x/"], ["sub/"], false).join(",") == "sub/inner/"
+			&& ScmFolderScope.intersect(["sub/"], ["sub/inner/", "sub/b/"], false).join(",") == "sub/inner/,sub/b/", "folder intersection");
+		var clean = new ScmSnapshot(Int64.make(0, 8), head, []);
+		require(operationText(allowed(LocalScmSource.narrowOperation(ScmOperation.ScopedCommit("m", false, ["sub/inner/", "other/"]), ["sub/"], clean, false)))
+			== operationText(ScmOperation.ScopedCommit("m", false, ["sub/inner/"])), "a scoped commit widened or lost its folders");
+		require(refusal(LocalScmSource.narrowOperation(ScmOperation.ScopedCommit("m", false, ["other/"]), ["sub/"], clean, false)) != null,
+			"a scoped commit outside the source's folder was allowed");
 	}
 
 	static function modeHiding():Void {

@@ -109,7 +109,9 @@ class GraphicalMain {
 			else if (!StringTools.startsWith(argument, "--"))
 				openPaths.push(argument);
 		}
-		// Tell the per-user suit daemon (the tray icon) this editor is running; never blocks or throws.
+		// Settle EXOSUIT_SUIT once, before anything is spawned, then tell the per-user suit daemon (the tray
+		// icon) this editor is running; never blocks or throws.
+		suit.SuitClient.resolve();
 		suit.SuitClient.announceEditor();
 		var host = new DesktopUiHostOptions();
 		var stableChannel = Sys.getEnv("EXOSUIT_CHANNEL") == "stable";

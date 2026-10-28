@@ -29,6 +29,7 @@ import scm.fake.FakeScmRepositoryScript;
 import scm.git.GitStatusParser;
 import scm.git.GitBranchParser;
 import scm.git.GitProcess;
+import scm.git.GitScopedCommit;
 import scm.git.GitBlobReader;
 import scm.git.GitScmProvider;
 import scm.git.GitVersion;
@@ -110,6 +111,16 @@ class ScmGitTestMain {
 		pump(scheduler, () -> result != null, "Git SCM operation timed out: " + Std.string(operation));
 		if (result == null) throw "Git SCM operation returned no result: " + Std.string(operation);
 		return result;
+	}
+
+	/** Runs a folder-scoped commit of `sub/` directly, with `afterCheck` racing it between the check and the commit. */
+	static function scopedCommit(git:GitProcess, scheduler:JobScheduler, root:String, generation:Int, message:String, amend:Bool,
+			?afterCheck:Void->Void):Null<scm.ScmError> {
+		var failure:Null<scm.ScmError> = null, finished = false;
+		new GitScopedCommit(git, root, generation, message, amend, ["sub/"], false, function(_, error) { failure = error; finished = true; },
+			afterCheck).start();
+		pump(scheduler, () -> finished, "a folder-scoped commit did not finish");
+		return failure;
 	}
 
 	static function deleteTree(path:String):Void {
@@ -812,33 +823,152 @@ class ScmGitTestMain {
 			: stagedForAmend;
 		require(amended.error == null && runGit(git, gitScheduler, ["log", "-1", "--format=%s"], mutationRoot, 775).stdout.toString() == "Amended SCM message\n",
 			"the SCM amend operation did not replace HEAD with the supplied message");
-		// A folder-scoped commit (the Agents layout's narrowed Changes) reads the index, and with amend HEAD's paths,
-		// right before committing, so files staged after the source checked its snapshot cannot slip in.
-		var configuredCase = runGitResult(git, gitScheduler, ["config", "--get", "core.ignorecase"], mutationRoot, 77100, true);
-		var configuredValue = configuredCase.value == null ? "" : StringTools.trim(configuredCase.value.stdout.toString());
-		require(mutationHandle.repository().ignoreCase == (configuredValue == "true"), "the repository did not report its core.ignorecase");
+		// A folder-scoped commit (the Agents layout's narrowed Changes) snapshots the index, checks that tree against the
+		// new commit's parents and commits exactly it, so files staged after the check cannot slip in.
 		FileSystem.createDirectory(mutationRoot + "/sub");
 		File.saveContent(mutationRoot + "/sub/a.txt", "inside\n");
 		File.saveContent(mutationRoot + "/scoped-outside.txt", "outside\n");
 		runGit(git, gitScheduler, ["add", "--", "sub/a.txt", "scoped-outside.txt"], mutationRoot, 77101);
+		function lastSubject():String return runGit(git, gitScheduler, ["log", "-1", "--format=%s"], mutationRoot, 77199).stdout.toString();
 		var lateOutside = applyOperation(mutationHandle, gitScheduler, ScmOperation.ScopedCommit("Scoped", false, ["sub/"]), 77102);
 		require(lateOutside.error != null && lateOutside.error.code == "outside_folder" && lateOutside.error.message.indexOf("scoped-outside.txt") >= 0
-			&& runGit(git, gitScheduler, ["log", "-1", "--format=%s"], mutationRoot, 77103).stdout.toString() == "Amended SCM message\n",
-			"a folder-scoped commit took a file staged outside its folder");
+			&& lastSubject() == "Amended SCM message\n", "a folder-scoped commit took a file staged outside its folder");
+		var configuredCase = runGitResult(git, gitScheduler, ["config", "--type=bool", "--get", "core.ignorecase"], mutationRoot, 77100, true);
+		var configuredValue = configuredCase.value == null ? "" : StringTools.trim(configuredCase.value.stdout.toString());
+		require(mutationHandle.repository().ignoreCase == (configuredValue == "true"),
+			"the repository did not report its core.ignorecase");
 		runGit(git, gitScheduler, ["reset", "-q", "--", "scoped-outside.txt"], mutationRoot, 77104);
-		var scoped = applyOperation(mutationHandle, gitScheduler, ScmOperation.ScopedCommit("Scoped", false, ["sub/"]), 77105);
-		require(scoped.error == null && runGit(git, gitScheduler, ["log", "-1", "--format=%s"], mutationRoot, 77106).stdout.toString() == "Scoped\n",
-			"a folder-scoped commit of the folder's own changes failed");
+		// Another process stages an outside file after the check (as an agent's `git add` could): the commit keeps the
+		// checked tree, and the outside file stays staged, uncommitted.
+		var scopedError = scopedCommit(git, gitScheduler, mutationRoot, 77105, "Scoped", false,
+			function() { Sys.command("git", ["-C", mutationRoot, "add", "--", "scoped-outside.txt"]); });
+		var committedNames = runGit(git, gitScheduler, ["show", "--name-only", "--format=", "HEAD"], mutationRoot, 77106).stdout.toString();
+		var stillStaged = runGit(git, gitScheduler, ["diff", "--cached", "--name-only"], mutationRoot, 77113).stdout.toString();
+		require(scopedError == null && lastSubject() == "Scoped\n" && StringTools.trim(committedNames) == "sub/a.txt"
+			&& StringTools.trim(stillStaged) == "scoped-outside.txt", "a file staged after the check entered the folder-scoped commit: " + committedNames);
+		runGit(git, gitScheduler, ["reset", "-q", "--", "scoped-outside.txt"], mutationRoot, 77114);
+		// HEAD moving after the check fails the commit instead of dropping the other commit.
+		File.saveContent(mutationRoot + "/sub/b.txt", "inside b\n");
+		runGit(git, gitScheduler, ["add", "--", "sub/b.txt"], mutationRoot, 77115);
+		var moved = scopedCommit(git, gitScheduler, mutationRoot, 77116, "Lost", false,
+			function() { Sys.command("git", ["-C", mutationRoot, "commit", "-q", "--allow-empty", "-m", "Moved"]); });
+		require(moved != null && moved.code == "head_moved" && lastSubject() == "Moved\n",
+			"a folder-scoped commit replaced a commit made after its check");
 		var scopedAmend = applyOperation(mutationHandle, gitScheduler, ScmOperation.ScopedCommit("Scoped again", true, ["sub/"]), 77107);
-		require(scopedAmend.error == null && runGit(git, gitScheduler, ["log", "-1", "--format=%s"], mutationRoot, 77108).stdout.toString() == "Scoped again\n",
-			"amending a commit inside the folder was refused");
+		require(scopedAmend.error == null && lastSubject() == "Scoped again\n", "amending a commit inside the folder was refused");
 		runGit(git, gitScheduler, ["add", "--", "scoped-outside.txt"], mutationRoot, 77109);
 		runGit(git, gitScheduler, ["commit", "-q", "-m", "Outside"], mutationRoot, 77110);
 		var outsideAmend = applyOperation(mutationHandle, gitScheduler, ScmOperation.ScopedCommit("Rewritten", true, ["sub/"]), 77111);
 		require(outsideAmend.error != null && outsideAmend.error.code == "outside_folder"
 			&& outsideAmend.error.message.indexOf("commit being amended") >= 0 && outsideAmend.error.message.indexOf("scoped-outside.txt") >= 0
-			&& runGit(git, gitScheduler, ["log", "-1", "--format=%s"], mutationRoot, 77112).stdout.toString() == "Outside\n",
-			"a folder-scoped amend rewrote a commit that touches paths outside the folder");
+			&& lastSubject() == "Outside\n", "a folder-scoped amend rewrote a commit that touches paths outside the folder");
+		// An amended merge is compared with each parent: the side it merged in brought an outside file.
+		var mainBranch = StringTools.trim(runGit(git, gitScheduler, ["branch", "--show-current"], mutationRoot, 77120).stdout.toString());
+		runGit(git, gitScheduler, ["checkout", "-q", "-b", "scoped-side"], mutationRoot, 77121);
+		File.saveContent(mutationRoot + "/side-outside.txt", "side\n");
+		runGit(git, gitScheduler, ["add", "--", "side-outside.txt"], mutationRoot, 77122);
+		runGit(git, gitScheduler, ["commit", "-q", "-m", "Side"], mutationRoot, 77123);
+		runGit(git, gitScheduler, ["checkout", "-q", mainBranch], mutationRoot, 77124);
+		File.saveContent(mutationRoot + "/sub/c.txt", "inside c\n");
+		runGit(git, gitScheduler, ["add", "--", "sub/c.txt"], mutationRoot, 77125);
+		runGit(git, gitScheduler, ["commit", "-q", "-m", "Inside c"], mutationRoot, 77126);
+		runGit(git, gitScheduler, ["merge", "-q", "--no-ff", "-m", "Merge side", "scoped-side"], mutationRoot, 77127);
+		var mergeAmend = applyOperation(mutationHandle, gitScheduler, ScmOperation.ScopedCommit("Merge rewritten", true, ["sub/"]), 77128);
+		require(mergeAmend.error != null && mergeAmend.error.code == "outside_folder" && mergeAmend.error.message.indexOf("side-outside.txt") >= 0
+			&& lastSubject() == "Merge side\n", "a folder-scoped amend of a merge ignored what the merge brought in");
+		// A staged submodule outside the folder counts even when diff.ignoreSubmodules hides it from porcelain diffs.
+		var headCommit = StringTools.trim(runGit(git, gitScheduler, ["rev-parse", "HEAD"], mutationRoot, 77130).stdout.toString());
+		runGit(git, gitScheduler, ["config", "diff.ignoreSubmodules", "all"], mutationRoot, 77131);
+		runGit(git, gitScheduler, ["update-index", "--add", "--cacheinfo", "160000," + headCommit + ",vendor-module"], mutationRoot, 77132);
+		File.saveContent(mutationRoot + "/sub/d.txt", "inside d\n");
+		runGit(git, gitScheduler, ["add", "--", "sub/d.txt"], mutationRoot, 77133);
+		var submodule = applyOperation(mutationHandle, gitScheduler, ScmOperation.ScopedCommit("With module", false, ["sub/"]), 77134);
+		require(submodule.error != null && submodule.error.code == "outside_folder" && submodule.error.message.indexOf("vendor-module") >= 0,
+			"a staged submodule outside the folder was committed");
+		runGit(git, gitScheduler, ["rm", "-q", "--cached", "vendor-module"], mutationRoot, 77135);
+		runGit(git, gitScheduler, ["config", "--unset", "diff.ignoreSubmodules"], mutationRoot, 77136);
+		// With a commit hook the provider runs `git commit` after the check, so the hook still runs.
+		var scopedHooks = fixtureBase + "/scoped-hooks";
+		FileSystem.createDirectory(scopedHooks);
+		File.saveBytes(scopedHooks + "/pre-commit", Bytes.ofString("#!/bin/sh\necho ran > \"$(git rev-parse --absolute-git-dir)/scoped-hook-ran\"\nexit 0\n"));
+		if (Sys.systemName() != "Windows") require(Sys.command("chmod", ["+x", scopedHooks + "/pre-commit"]) == 0, "the pre-commit hook could not be made executable");
+		runGit(git, gitScheduler, ["config", "core.hooksPath", scopedHooks], mutationRoot, 77140);
+		var hooked = applyOperation(mutationHandle, gitScheduler, ScmOperation.ScopedCommit("Hooked", false, ["sub/"]), 77142);
+		var gitDirectory = StringTools.trim(runGit(git, gitScheduler, ["rev-parse", "--absolute-git-dir"], mutationRoot, 77143).stdout.toString());
+		require(hooked.error == null && lastSubject() == "Hooked\n" && FileSystem.exists(gitDirectory + "/scoped-hook-ran"),
+			"a folder-scoped commit skipped the repository's pre-commit hook: " + (hooked.error == null ? "" : hooked.error.message));
+		runGit(git, gitScheduler, ["config", "core.hooksPath", emptyHooks], mutationRoot, 77144);
+		// With core.ignorecase unset the repository keeps the platform's rule: ignore case on Windows and macOS.
+		var savedCase = runGitResult(git, gitScheduler, ["config", "--get", "core.ignorecase"], mutationRoot, 77145, true);
+		if (savedCase.value != null) runGit(git, gitScheduler, ["config", "--unset", "core.ignorecase"], mutationRoot, 77146);
+		var gitHandle = Std.downcast(mutationHandle, scm.git.GitScmRepositoryHandle);
+		if (gitHandle == null) throw "the real-operations repository is not a Git handle";
+		gitHandle.configurationChanged();
+		var caseRefreshed = false;
+		mutationHandle.refresh(77147, _ -> caseRefreshed = true);
+		pump(gitScheduler, () -> caseRefreshed, "the refresh after unsetting core.ignorecase did not finish");
+		require(!mutationHandle.repository().ignoreCase, "an unset core.ignorecase did not mean false, as in Git");
+		var savedCaseValue = savedCase.value;
+		if (savedCaseValue != null) runGit(git, gitScheduler, ["config", "core.ignorecase", StringTools.trim(savedCaseValue.stdout.toString())], mutationRoot, 77148);
+		gitHandle.configurationChanged();
+		// Amending on a branch without commits is refused clearly, before Git is asked to commit.
+		var unbornRoot = fixtureBase + "/scoped-unborn";
+		FileSystem.createDirectory(unbornRoot);
+		runGit(git, gitScheduler, ["init", "-q"], unbornRoot, 77150);
+		runGit(git, gitScheduler, ["config", "user.name", "SCM Test"], unbornRoot, 77152);
+		runGit(git, gitScheduler, ["config", "user.email", "scm@example.invalid"], unbornRoot, 77153);
+		runGit(git, gitScheduler, ["config", "core.hooksPath", emptyHooks], unbornRoot, 77154);
+		var unbornError = scopedCommit(git, gitScheduler, unbornRoot, 77151, "First", true);
+		require(unbornError != null && unbornError.code == "nothing_to_amend", "an amend on an unborn branch did not say there is nothing to amend");
+		// A first commit on an unborn branch, and one that another first commit overtakes.
+		FileSystem.createDirectory(unbornRoot + "/sub");
+		File.saveContent(unbornRoot + "/sub/first.txt", "first\n");
+		runGit(git, gitScheduler, ["add", "--", "sub/first.txt"], unbornRoot, 77155);
+		var racedFirst = scopedCommit(git, gitScheduler, unbornRoot, 77156, "Overtaken", false,
+			function() { Sys.command("git", ["-C", unbornRoot, "commit", "-q", "--allow-empty", "-m", "Elsewhere"]); });
+		var unbornSubject = runGit(git, gitScheduler, ["log", "-1", "--format=%s"], unbornRoot, 77157).stdout.toString();
+		require(racedFirst != null && racedFirst.code == "head_moved" && unbornSubject == "Elsewhere\n",
+			"a first commit replaced the commit that beat it to the unborn branch");
+		var firstRoot = fixtureBase + "/scoped-first";
+		FileSystem.createDirectory(firstRoot);
+		FileSystem.createDirectory(firstRoot + "/sub");
+		runGit(git, gitScheduler, ["init", "-q"], firstRoot, 77160);
+		runGit(git, gitScheduler, ["config", "user.name", "SCM Test"], firstRoot, 77161);
+		runGit(git, gitScheduler, ["config", "user.email", "scm@example.invalid"], firstRoot, 77162);
+		runGit(git, gitScheduler, ["config", "core.hooksPath", emptyHooks], firstRoot, 77163);
+		File.saveContent(firstRoot + "/sub/first.txt", "first\n");
+		runGit(git, gitScheduler, ["add", "--", "sub/first.txt"], firstRoot, 77164);
+		var firstError = scopedCommit(git, gitScheduler, firstRoot, 77165, "First", false);
+		var firstLog = runGit(git, gitScheduler, ["log", "--format=%s"], firstRoot, 77166).stdout.toString();
+		require(firstError == null && firstLog == "First\n", "a first folder-scoped commit on an unborn branch failed: "
+			+ (firstError == null ? firstLog : firstError.message));
+		// An amend keeps the author from the raw commit.
+		File.saveContent(firstRoot + "/sub/second.txt", "second\n");
+		runGit(git, gitScheduler, ["add", "--", "sub/second.txt"], firstRoot, 77167);
+		runGit(git, gitScheduler, ["commit", "-q", "--author=Original Author <original@example.invalid>", "--date=1700000000 +0100", "-m", "Authored"], firstRoot, 77168);
+		File.saveContent(firstRoot + "/sub/third.txt", "third\n");
+		runGit(git, gitScheduler, ["add", "--", "sub/third.txt"], firstRoot, 77169);
+		var amendError = scopedCommit(git, gitScheduler, firstRoot, 77170, "Authored again", true);
+		var author = runGit(git, gitScheduler, ["log", "-1", "--format=%an <%ae> %at %s"], firstRoot, 77171).stdout.toString();
+		require(amendError == null && author == "Original Author <original@example.invalid> 1700000000 Authored again\n",
+			"a folder-scoped amend changed the author: " + author);
+		// A merge in progress is refused: committing the folder alone would drop the merge's second parent.
+		runGit(git, gitScheduler, ["checkout", "-q", "-b", "merge-side"], firstRoot, 77172);
+		File.saveContent(firstRoot + "/sub/first.txt", "side\n");
+		runGit(git, gitScheduler, ["commit", "-q", "-am", "Side change"], firstRoot, 77173);
+		runGit(git, gitScheduler, ["checkout", "-q", "-"], firstRoot, 77174);
+		File.saveContent(firstRoot + "/sub/first.txt", "main\n");
+		runGit(git, gitScheduler, ["commit", "-q", "-am", "Main change"], firstRoot, 77175);
+		runGitResult(git, gitScheduler, ["merge", "merge-side"], firstRoot, 77176);
+		File.saveContent(firstRoot + "/sub/first.txt", "resolved\n");
+		runGit(git, gitScheduler, ["add", "--", "sub/first.txt"], firstRoot, 77177);
+		var merging = scopedCommit(git, gitScheduler, firstRoot, 77178, "Resolved", false);
+		require(merging != null && merging.code == GitScopedCommit.OPERATION_IN_PROGRESS && merging.message.indexOf("merge") >= 0
+			&& runGit(git, gitScheduler, ["log", "-1", "--format=%s"], firstRoot, 77179).stdout.toString() == "Main change\n",
+			"a folder-scoped commit went ahead during a merge");
+		var parsedAuthor = GitScopedCommit.authorOf("tree x\nauthor A B <a@b> 1 +0000\ncommitter C <c@d> 2 +0000\n\nmessage author X <y> 3\n");
+		require(parsedAuthor != null && parsedAuthor.get("GIT_AUTHOR_NAME") == "A B" && parsedAuthor.get("GIT_AUTHOR_DATE") == "1 +0000",
+			"the raw commit author was not parsed");
 		File.saveContent(mutationRoot + "/other.txt", "other changed\n");
 		var foreignPatch = runGit(git, gitScheduler, ["diff", "--", "other.txt"], mutationRoot, 776).stdout;
 		applyOperation(mutationHandle, gitScheduler, ScmOperation.StagePatch("tracked.txt", foreignPatch), 777);

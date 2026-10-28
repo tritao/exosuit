@@ -11,15 +11,20 @@ class ActivityRailPreference {
 	final sidebar:SidebarModel;
 	final write:String->Void;
 	final report:String->Void;
+	/** The setting's current value, which another window may have changed since this one was told. */
+	final read:Null<Void->String>;
 	/**
 		The setting's value as this window last applied or wrote it. A window can know destinations the setting does not
 		mention yet, so comparing with the rail's own encoding would never match; this does.
 	**/
 	var known:Null<String> = null;
 
-	/** `write` stores a value in the setting; `report` tells the user about one that could not be read. */
-	public function new(sidebar:SidebarModel, write:String->Void, report:String->Void) {
-		this.sidebar = sidebar; this.write = write; this.report = report;
+	/**
+		`write` stores a value in the setting; `report` tells the user about one that could not be read; `read` returns the
+		setting's value now, shared by every window, so a window that finds it already repaired takes that repair instead of writing its own.
+	**/
+	public function new(sidebar:SidebarModel, write:String->Void, report:String->Void, ?read:Void->String) {
+		this.sidebar = sidebar; this.write = write; this.report = report; this.read = read;
 	}
 
 	/** Keep the rail as it is now for every window. */
@@ -50,6 +55,13 @@ class ActivityRailPreference {
 	function applySetting(value:String):Void {
 		known = value;
 		if (sidebar.restoreDestinations(value)) return;
+		// Read, then write: when another window already replaced the unreadable value, take its repair instead. Two windows
+		// reading at once may both write a repair; both write a valid rail and the last one wins, which is enough here.
+		var reader = read;
+		var now = reader == null ? value : reader();
+		if (now != value) {
+			if (now != "" && sidebar.restoreDestinations(now)) { known = now; return; }
+		}
 		var shown = value.length > 80 ? value.substring(0, 80) + "…" : value;
 		report("The Activity Bar setting could not be read, so it was replaced with the current icons and order: " + shown);
 		save();
