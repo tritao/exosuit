@@ -115,10 +115,17 @@ Editor layout's rail and panels.
   stage all and unstage all act on the folder, per-file actions outside it are
   refused, and so is any path that is not plain (a `..` or `.` segment, a
   leading separator, a drive letter). A commit is refused while files outside
-  the folder are staged (it would take the whole index); Git checks the index
-  again right before committing, and an amend is refused when the commit it
-  rewrites touches files outside the folder. Folder matching follows the
-  repository's `core.ignorecase`.
+  the folder are staged (it would take the whole index). Git then snapshots the
+  index, refuses it if anything outside the folder differs from any parent of
+  the new commit (submodules included; for an amend, from each parent of the
+  commit it rewrites, so an amended merge is checked too), commits exactly that
+  snapshot and moves the branch only if it has not moved. An amend on a branch
+  with no commits is refused. Folder matching follows the repository's
+  `core.ignorecase` (unset: ignore case on Windows and macOS).
+  Limitation: with a pre-commit, prepare-commit-msg or commit-msg hook, or with
+  `commit.gpgsign`, the check is followed by a normal `git commit`, so hooks
+  and signing work but a change staged between the check and the commit is not
+  caught; hook support for the atomic path is a later follow-up.
 - **Editor hunk actions are not narrowed.** The editor's change markers and its
   hunk actions (stage, unstage and revert a hunk) use the editor's own source,
   which covers the active context's folders and the group's folder whole, never

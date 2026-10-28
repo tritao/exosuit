@@ -35,7 +35,34 @@ class TerminalContextMenuTestMain {
 		var entries:Array<MenuItem> = cast menu.customItems;
 		return item(entries,key);
 	}
+	/**
+		The app restores and saves the window session under PRAGTICAL_PORTABLE, else the user's own state folder. A
+		session left there by an earlier run brings its terminals back and duplicates the ones this test adds, so run in a
+		fresh folder unless the caller gave one (scripts/test.sh does).
+	**/
+	static function isolateState():Null<String> {
+		var given = Sys.getEnv("PRAGTICAL_PORTABLE");
+		if (given != null && given.length > 0) return null;
+		var base = Sys.getEnv("TEMP");
+		if (base == null || base.length == 0) base = Sys.getEnv("TMPDIR");
+		if (base == null || base.length == 0) base = "/tmp";
+		var folder = base + "/exosuit-terminal-context-menu-" + Std.int(Sys.time() * 1000) + "-" + Std.random(1000000);
+		sys.FileSystem.createDirectory(folder);
+		Sys.putEnv("PRAGTICAL_PORTABLE", folder);
+		return folder;
+	}
+
+	static function removeState(folder:Null<String>):Void {
+		if (folder == null || !sys.FileSystem.exists(folder)) return;
+		for (name in sys.FileSystem.readDirectory(folder)) {
+			var path = folder + "/" + name;
+			if (sys.FileSystem.isDirectory(path)) removeState(path); else sys.FileSystem.deleteFile(path);
+		}
+		sys.FileSystem.deleteDirectory(folder);
+	}
+
 	static function main():Int {
+		var isolatedState = isolateState();
 		var record:TerminalRecord = {id:"fixture", name:"Terminal 1", group:"work", cwd:"/tmp", instance:"test",
 			state:"running", exitCode:0, available:true, revision:haxe.Int64.ofInt(1)};
 		var calls:Array<String> = [];
@@ -126,6 +153,7 @@ class TerminalContextMenuTestMain {
 		app.dispose();
 		fonts.dispose();
 		Sys.println("PASS: terminal action permissions, lifecycle states, clicked targets, rename, placement, stop and close");
+		removeState(isolatedState);
 		return 0;
 	}
 }

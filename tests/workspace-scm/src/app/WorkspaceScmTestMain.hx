@@ -51,6 +51,11 @@ class WorkspaceScmTestMain {
 			&& WorkspaceScmProtocol.WRITE == "workspace.scm.write"
 			&& WorkspaceScmProtocol.REMOTE == "workspace.scm.remote",
 			"SCM capabilities must remain stable protocol identifiers");
+		// A folder-scoped commit keeps its folders across the wire.
+		var scoped = ScmOperation.ScopedCommit("message", true, ["sub/", "docs/"]);
+		var request = RpcScmSource.encodeOperation("w", "r", "op", Int64.ofInt(1), scoped);
+		var received = WorkspaceScmProtocol.APPLY.decodeRequest(WorkspaceScmProtocol.APPLY.encodeRequest(request));
+		require(Std.string(WorkspaceScmService.decodeOperation(received)) == Std.string(scoped), "a scoped commit lost its folders over RPC");
 	}
 
 	static function serviceAndClient(root:String, trustPath:String):Void {
