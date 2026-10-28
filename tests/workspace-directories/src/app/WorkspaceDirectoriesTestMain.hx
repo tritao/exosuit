@@ -6,7 +6,7 @@ import workspace.runtime.WorkspaceDirectories;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceService;
 
-/** Group working directories resolve inside the workspace with the host's own path spelling (Windows included). */
+/** Group working directories may be any existing folder, stored in the host's own path spelling (Windows included). */
 class WorkspaceDirectoriesTestMain {
 	static function require(value:Bool, message:String):Void {
 		if (!value) throw message;
@@ -16,7 +16,7 @@ class WorkspaceDirectoriesTestMain {
 		containment();
 		var base = Sys.args().length > 0 ? Sys.args()[0] : Sys.getCwd() + "/build/fixture";
 		groupDirectories(base);
-		Sys.println("PASS: workspace directory containment and group directory changes");
+		Sys.println("PASS: group directories accept any existing folder; New group, rename, directory, inherit, move, order and remove");
 	}
 
 	static function containment():Void {
@@ -50,13 +50,17 @@ class WorkspaceDirectoriesTestMain {
 		var directories = new WorkspaceDirectories(base + "/root");
 		var root = directories.root, windows = Sys.systemName() == "Windows";
 		var resume = directories.resolve("resume");
-		require(resume != null && directories.inside(resume) && resume != root, "Subdirectory did not resolve inside the workspace: " + resume);
+		require(resume != null && WorkspaceDirectories.contains(root, resume, windows) && resume != root, "Subdirectory did not resolve: " + resume);
 		require(directories.resolve(root + "/resume") == resume, "Slash spelling resolved differently");
 		if (windows) {
 			require(directories.resolve(root + "\\resume") == resume, "Backslash spelling did not resolve");
 			require(directories.resolve(root.toUpperCase() + "\\RESUME") != null, "Different case did not resolve");
 		}
-		require(directories.resolve(base + "/outside") == null, "Directory outside the workspace was authorized");
+		var outsideFolder = directories.resolve(base + "/outside");
+		require(outsideFolder != null && !WorkspaceDirectories.contains(root, outsideFolder, windows), "Folder outside the workspace was rejected");
+		require(directories.resolve(base + "/root/../outside") == outsideFolder, "Outside folder spellings resolved differently");
+		require(WorkspaceDirectories.persisted(outsideFolder) && !WorkspaceDirectories.persisted("relative/dir")
+			&& !WorkspaceDirectories.persisted(null), "Persisted session directories must be absolute");
 		require(directories.resolve(root + "/missing") == null, "Missing directory was authorized");
 
 		var service = new WorkspaceService("w", "e", [{id: "work", name: "Work", cwd: null, revision: 1}], 32, 256, 16, null,
@@ -82,16 +86,22 @@ class WorkspaceDirectoriesTestMain {
 		var typed = change(root + "/gone", 2);
 		require(typed.result != null && typed.result.group.cwd == directories.resolve("gone"), "Typed directory was not canonicalized: " + typed.code);
 		var outside = change(base + "/outside", 3);
-		require(outside.result == null && outside.code == "invalid_directory" && outside.message.indexOf("inside the workspace") >= 0,
-			"Outside directory was not rejected clearly: " + outside.code);
+		require(outside.result != null && outside.result.group.cwd == outsideFolder, "Folder outside the workspace was not accepted: " + outside.code);
+		var missing = change(base + "/missing", 4);
+		require(missing.result == null && missing.code == "invalid_directory" && missing.message.indexOf("existing folder") >= 0,
+			"Missing folder was not rejected clearly: " + missing.code);
+		var back = change(root + "/gone", 4);
+		require(back.result != null, "Could not return to a workspace folder: " + back.code);
 		remove(root + "/gone");
-		var kept:RenameResult = cast typed.result;
-		var renamed = change(kept.group.cwd, 3, "renamed");
+		var kept:RenameResult = cast back.result;
+		var renamed = change(kept.group.cwd, 5, "renamed");
 		require(renamed.result != null, "Group with a vanished directory could not be renamed: " + renamed.code);
-		var inherit = change(null, 4);
+		var inherit = change(null, 6);
 		require(inherit.result != null && inherit.result.group.cwd == null, "Group could not return to the inherited directory");
 		var group = service.snapshot().groups[0];
-		require(group.revision == 5 && group.cwd == null, "Service snapshot did not follow the changes");
+		require(group.revision == 7 && group.cwd == null, "Service snapshot did not follow the changes");
+		var flowOutside:String = cast outsideFolder;
+		GroupFlowTests.run(directories, flowOutside);
 		remove(base);
 	}
 }

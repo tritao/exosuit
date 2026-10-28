@@ -144,7 +144,7 @@ class AgentKitProvider implements LocalAgentProvider {
 		return v != null && modes.indexOf(v) >= 0;
 
 	function inside(path:Null<String>):Bool
-		return directories.inside(path);
+		return WorkspaceDirectories.persisted(path);
 
 	static function copy(r:AgentRecord):AgentRecord {
 		var result:AgentRecord = cast Reflect.copy(r);
@@ -295,11 +295,8 @@ class AgentKitProvider implements LocalAgentProvider {
 				ctx.respond(copy(previous.record));
 			return;
 		}
-		var cwd:Null<String> = null;
-		for (g in groups())
-			if (g.id == q.group)
-				cwd = directories.resolve(g.cwd);
-		if (cwd == null || !inside(cwd)) {
+		var cwd = directories.forGroup(groups(), q.group);
+		if (cwd == null) {
 			ctx.fail({code: "invalid_request", message: "Invalid agent group directory", ambiguous: false});
 			return;
 		}

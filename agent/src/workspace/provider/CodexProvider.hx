@@ -111,7 +111,7 @@ class CodexProvider implements LocalAgentProvider {
 					|| !valid(r.name, 256)
 					|| r.workspaceRoot != directories.root
 					|| (!valid(r.cwd, 1024)
-						|| !directories.inside(r.cwd))
+						|| !WorkspaceDirectories.persisted(r.cwd))
 					|| sessions.exists(r.id))
 					throw "Invalid persisted Codex resource";
 				// The proxy subscription/active turn must be reconciled, never invented after restart.
@@ -618,24 +618,8 @@ class CodexProvider implements LocalAgentProvider {
 		}
 	}
 
-	function directory(group:String):Null<String> {
-		var map:Map<String, WorkspaceGroup> = [];
-		for (g in groups())
-			map.set(g.id, g);
-		var current = map.get(group);
-		if (current == null)
-			return null;
-		var seen:Map<String, Bool> = [];
-		while (current != null) {
-			if (seen.exists(current.id))
-				return null;
-			seen.set(current.id, true);
-			if (current.cwd != null)
-				return directories.resolve(current.cwd);
-			current = current.parent == null ? null : map.get(current.parent);
-		}
-		return directories.root;
-	}
+	function directory(group:String):Null<String>
+		return directories.forGroup(groups(), group);
 
 	/** Metadata reads require loaded threads on some supported servers. The
 	 * directory-filtered catalog also exposes persisted threads without loading history. */

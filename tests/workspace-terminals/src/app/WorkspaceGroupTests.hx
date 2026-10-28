@@ -21,7 +21,8 @@ class WorkspaceGroupTests {
 		FileSystem.createDirectory(child);
 		var directories = new WorkspaceDirectories(root);
 		require(directories.resolve("group dir") == child, "Relative directory did not resolve inside root");
-		require(directories.resolve(root + "/../") == null, "Outside directory authorized");
+		require(directories.resolve(root + "/../") != null, "An existing folder outside the workspace was refused");
+		require(directories.resolve(root + "/missing") == null, "A missing folder was accepted");
 		var seed = new WorkspaceService("w", "groups", [
 			{
 				id: "work",
@@ -134,7 +135,7 @@ class WorkspaceGroupTests {
 		require(legacy == "invalid_request", "Legacy rename accepted group creation");
 		change("parent", "Same", "nested", child, 1, "update", "invalid_group");
 		change("nested", "Same", "missing", null, 1, "update", "invalid_group");
-		change("other", "Same", "work", root + "/../", 1, "update", "invalid_directory");
+		change("other", "Same", "work", root + "/missing", 1, "update", "invalid_directory");
 		var canonical = change("other", "Same", "work", root + "/./group dir", 1, "update");
 		require(canonical != null && canonical.group.cwd == child, "Group directory was not stored in its canonical form");
 		change("other", "Same", "work", root, 2, "update");
