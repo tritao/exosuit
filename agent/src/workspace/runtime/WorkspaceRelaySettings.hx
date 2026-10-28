@@ -25,7 +25,7 @@ class WorkspaceRelaySettings {
 		if (path == null || path == "")
 			throw "Relay bootstrap path is required";
 		if (credentials == null)
-			credentials = new NativeWorkspaceCredentialStore();
+			credentials = WorkspaceCredentialStores.relay();
 		var metadata = sys.FileSystem.metadata(path);
 		if (metadata == null || metadata.size <= 0 || metadata.size > 4096)
 			throw "Invalid relay bootstrap file";
@@ -86,7 +86,7 @@ class WorkspaceRelaySettings {
 	}
 
 	static function credentialAccount(endpoint:RelayMachineEndpoint):String
-		return "relay:" + endpoint.origin + "/machine/" + endpoint.machineId;
+		return WorkspaceCredentialStores.machineAccount(endpoint);
 
 	static function clear(bytes:Bytes):Void {
 		for (index in 0...bytes.length)

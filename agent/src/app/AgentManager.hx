@@ -208,6 +208,10 @@ class AgentManager {
 			var settings = readPrivateJson(settingsPath, 4096);
 			if (intField(settings, "version") != 1 || stringField(settings, "origin") != relay.origin)
 				throw "This workspace already has a relay configured";
+			// Enabling remote access again resumes hosting that suit's Stop hosting paused.
+			if (stringField(settings, "hosting") == "paused")
+				AtomicFile.write(settingsPath, Json.stringify({version: 1, origin: relay.origin}) + "
+");
 		} else {
 			AtomicFile.create(settingsPath, Json.stringify({version: 1, origin: relay.origin}) + "\n");
 		}
@@ -231,6 +235,8 @@ class AgentManager {
 		if (!FileSystem.exists(settingsPath)) return null;
 		var settings = readPrivateJson(settingsPath, 4096);
 		if (intField(settings, "version") != 1) throw "Invalid workspace relay settings";
+		// Paused from suit's tray or `suit relay stop`: neither suit nor this workspace hosts until resumed.
+		if (stringField(settings, "hosting") == "paused") return null;
 		var origin = stringField(settings, "origin");
 		var relay = relayEndpoint(origin);
 		if (relay.isLoopbackHttp && Sys.getEnv("EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP") != "1")
