@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "package": { "name": "processkit" },
+  "sourceRoots": ["haxe"],
+  "scopeSourceRoots": false,
+  "native": {
+    "cmake": {
+      "source": ".",
+      "target": "processkit",
+      "library": "processkit",
+      "inputs": [
+        "CMakeLists.txt",
+        "include/processkit.h",
+        "src/processkit.c"
+      ]
+    }
+  },
+  "ffi": {
+    "interfaces": ["bindings/processkit.hxi"],
+    "projections": ["bindings/processkit.hxmap"]
+  },
+  "target": "host"
+}

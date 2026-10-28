@@ -1,0 +1,10 @@
+cmake_minimum_required(VERSION 3.21)
+project(processkit LANGUAGES C)
+
+add_library(processkit SHARED src/processkit.c)
+target_compile_features(processkit PRIVATE c_std_11)
+target_include_directories(processkit PUBLIC include)
+set_target_properties(processkit PROPERTIES C_VISIBILITY_PRESET hidden)
+if(WIN32)
+    target_link_libraries(processkit PRIVATE user32)
+endif()
