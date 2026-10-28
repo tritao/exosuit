@@ -297,8 +297,9 @@ class SuitRelayBridge {
 		startedAt = now;
 		starts++;
 		try {
-			var keys = [SuitClient.libraryVariable(), "EXOSUIT_RELAY_VIA_SUIT"];
-			var values = [SuitClient.nativePath(host.launcher), "1"];
+			// The manager finds its daemon bytecode through EXOSUIT_AGENT_LAUNCHER, as when an editor starts it.
+			var keys = [SuitClient.libraryVariable(), "EXOSUIT_RELAY_VIA_SUIT", "EXOSUIT_AGENT_LAUNCHER"];
+			var values = [SuitClient.nativePath(host.launcher), "1", host.launcher];
 			var child = sys.io.Process.spawn(host.executable,
 				[host.launcher, "--manager", host.root, "--state-dir", host.stateDir, "--detach"], host.root, keys, values, true);
 			child.close();

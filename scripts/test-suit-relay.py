@@ -279,7 +279,7 @@ class Relay:
     def __init__(self, base: Path) -> None:
         self.port = free_port()
         self.origin = f"http://127.0.0.1:{self.port}"
-        self.log = (base / "worker.log").open("w+")
+        self.log = (base / "worker.log").open("w+", encoding="utf-8", errors="replace")
         self.process = subprocess.Popen(
             ["node", str(WRANGLER), "dev", "--local", "--ip", "127.0.0.1", "--port", str(self.port),
              "--persist-to", str(base / "wrangler-state"), "--var", "ALLOWED_ORIGINS:http://localhost:5173"],
@@ -337,15 +337,18 @@ def test_relay(base: Path) -> None:
         "EXOSUIT_SUIT_IDLE_SECONDS": "3", "EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP": "1", "EXOSUIT_RELAY_VIA_SUIT": "1",
         "EXOSUIT_RELAY_TEST_CREDENTIALS_DIR": str(credentials), "EXOSUIT_AGENT_STATE_HOME": str(agent_state),
         "EXOSUIT_SUIT_LOGIN_KEY": "HKCU\\Software\\ExosuitSuitTest\\unused"})
+    # What the editor sets for the workspace manager it starts. suit's environment lacks it: its on-demand
+    # start must set it itself.
+    editor_environment = dict(suit.environment, EXOSUIT_AGENT_LAUNCHER=str(AGENT))
     manager = [str(HL), str(AGENT), "--manager", str(workspace)]
     devices: list[WebSocket] = []
     pipe: PipeDaemon | None = None
     try:
         assert "started" in suit("start")
         # The editor's side: start the workspace service and turn on remote access.
-        subprocess.run([*manager, "--detach"], env=suit.environment, check=True, timeout=120, capture_output=True)
-        subprocess.run([*manager, "--configure-relay", relay.origin], env=suit.environment, check=True, timeout=120,
-                       capture_output=True)
+        for arguments in (["--detach"], ["--configure-relay", relay.origin]):
+            result = subprocess.run([*manager, *arguments], env=editor_environment, timeout=120, capture_output=True, text=True)
+            assert result.returncode == 0, f"manager {arguments[0]} failed: {result.stderr}{result.stdout}"
         state = wait_until(lambda: next(iter(agent_state.glob("workspaces/*/relay-machine.json")), None), 30,
                            "no relay identity was created").parent
         machine = json.loads((state / "relay-machine.json").read_text())["machineId"]
@@ -457,7 +460,10 @@ def test_relay(base: Path) -> None:
             item.close()
         suit.run("kill", "--all", check=False)
         suit.run("stop", check=False)
-        relay.stop()
+        try:
+            wait_until(lambda: not suit.running(), 20, "suit did not stop")
+        finally:
+            relay.stop()
 
 
 def main() -> int:
@@ -465,7 +471,7 @@ def main() -> int:
     parser.add_argument("--login-only", action="store_true", help="skip the relay test (no Worker needed)")
     options = parser.parse_args()
     assert SUIT.is_file(), f"build suit first: {SUIT}"
-    with tempfile.TemporaryDirectory(prefix="suit-relay-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="suit-relay-", ignore_cleanup_errors=True) as temporary:
         base = Path(temporary)
         (base / "login").mkdir()
         test_login(base / "login")
