@@ -14,8 +14,10 @@ enum ScmOperation {
 	ResolveConflict(path:String, choice:String);
 	Commit(message:String, amend:Bool);
 	/**
-		A commit that may only touch paths under the repository-relative `folders` (each ending in `/`). The provider
-		checks the staged paths, and with `amend` the paths of the commit it rewrites, right before committing.
+		A commit that may only touch paths under the repository-relative `folders` (each ending in `/`). The Git provider
+		commits a snapshot of the index after checking it against every parent of the new commit (HEAD's parents with
+		`amend`), and moves HEAD only if it has not moved; with commit hooks or signing it runs `git commit` right after
+		that check instead (see GitScopedCommit).
 	**/
 	ScopedCommit(message:String, amend:Bool, folders:Array<String>);
 	StagePatch(path:String, patch:Bytes);

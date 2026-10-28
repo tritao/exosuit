@@ -274,7 +274,8 @@ class ExosuitApp implements DesktopUiApplication {
 		dock = makeDock();
 		layoutControls = new WorkbenchLayoutControls(dock);
 		layoutModes = new WorkbenchLayoutModes(dock, sidebar, layoutControls, requestFrame, contextPanelProvidesDestinations);
-		activityRail = new ActivityRailPreference(sidebar, saveActivityBar, function(message) application.reportError("activity-bar", message));
+		activityRail = new ActivityRailPreference(sidebar, saveActivityBar, function(message) application.reportError("activity-bar", message),
+			function() return application.settings.current.activityBar);
 		activityMenu = new ActivityBarMenu(sidebar, layoutModes.hides, activityRail.save);
 		if (openPath == null) dock.close("explorer");
 		var capturedHost:UiWorkbenchHost = null;
@@ -586,6 +587,7 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function syncSidebar():Void {
 		viewRevision++;
+		layoutModes.invalidateRail();
 		if (phoneModeApplying) { requestFrame(); return; }
 		if (phoneLayoutActive) {
 			syncPhoneDockRoot();
@@ -1251,8 +1253,6 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	public function view():View {
-		// The window size, the right panel and the workspace decide what the rail hides; follow them before drawing it.
-		layoutModes.syncRail();
 		pruneStaleEditorPanes(host.allViews());
 		for (pane in host.panes) {
 			var found = false;
@@ -1958,6 +1958,8 @@ class ExosuitApp implements DesktopUiApplication {
 		// Terminal IO follows the host event pump. Filesystem/catalog maintenance
 		// keeps its slower cadence without delaying asynchronous shell echo.
 		pollTerminals();
+		// The window size, the right panel and the workspace decide what the rail hides.
+		layoutModes.syncRail((phoneLayoutActive ? 1 : 0) | (responsiveRightHidden ? 2 : 0) | (remoteAgentsLayout() ? 4 : 0));
 		var now = Sys.time();
 		if (now < nextBackgroundPoll) return;
 		nextBackgroundPoll = now + 0.05;
@@ -4576,11 +4578,16 @@ class ExosuitApp implements DesktopUiApplication {
 		operation:scm.ScmOperation):Void {
 		var operationId = "ui-" + Std.string(nextScmOperationId++);
 		source.apply(repository.id, operationId, snapshot.revision, operation, function(result) {
-			if (result.error != null) application.reportError("source-control", result.error.message);
+			if (result.error != null) application.reportError("source-control", scmErrorText(result.error));
 			source.refreshNow(repository.id);
 			requestFrame();
 		});
 	}
+
+	/** A Source Control error as the user reads it, with what to do when a folder-narrowed source refused it. */
+	static function scmErrorText(error:scm.ScmError):String
+		return error.code == scm.ScmFolderScope.OUTSIDE_FOLDER
+			? error.message + " Unstage them, or commit from the Editor layout's Source Control." : error.message;
 
 	function scmCommitRepository(source:ScmSource):Null<scm.ScmRepository> {
 		if (source == null) return null;
@@ -4652,10 +4659,10 @@ class ExosuitApp implements DesktopUiApplication {
 				source.apply(repository.id, operationId, expected.revision, scm.ScmOperation.Commit(commitMessage, amend), function(result) {
 					if (result.error != null) {
 						application.build.output.reset(repository.root);
-						application.build.output.append("Git commit failed\n" + result.error.message + "\n");
+						application.build.output.append("Git commit failed\n" + scmErrorText(result.error) + "\n");
 						application.build.output.finish();
 						host.showBuildOutput("Source Control Commit", application.build.output);
-						application.reportError("source-control", result.error.message);
+						application.reportError("source-control", scmErrorText(result.error));
 						return;
 					}
 					application.scmCommitDrafts.set(repository.id, "");
