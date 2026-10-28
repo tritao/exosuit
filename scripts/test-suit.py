@@ -345,28 +345,51 @@ def test_real_manager(fixture: Fixture, directory: Path) -> None:
     workspace = directory / "real-workspace"; workspace.mkdir()
     state = directory / "real-state"
     environment = dict(manager_environment(ROOT, launcher_path(ROOT)), **{
-        key: value for key, value in fixture.environment.items() if key.startswith("EXOSUIT_SUIT_")})
+        key: value for key, value in fixture.environment.items() if key.startswith("EXOSUIT_SUIT")})
     subprocess.run([*manager_command(ROOT), str(workspace), "--state-dir", str(state), "--detach", "--idle-seconds", "60"],
                    env=environment, check=True, timeout=100, capture_output=True)
-    wait_until(lambda: {"workspace-manager", "workspace-host"} <= {entry["kind"] for entry in fixture.listing()["processes"]},
-               30, "real manager and daemon did not register")
-    listing = fixture.listing()
-    manager = next(entry for entry in listing["processes"] if entry["kind"] == "workspace-manager")
-    host = next(entry for entry in listing["processes"] if entry["kind"] == "workspace-host")
-    assert manager["orphaned"] is True and manager["stateDir"], manager
-    output = fixture.suit("kill", str(manager["pid"]))
-    assert f"{manager['pid']} workspace-manager: stopped" in output, f"manager was not stopped cooperatively: {output}"
-    wait_until(lambda: not pid_alive(host["pid"]), 15, "workspace daemon survived its manager")
-    assert not (state / "endpoint.json").exists(), "manager did not clean up its endpoint"
-    assert fixture.listing()["processes"] == []
+    try:
+        wait_until(lambda: {"workspace-manager", "workspace-host"} <= {entry["kind"] for entry in fixture.listing()["processes"]},
+                   30, "real manager and daemon did not register")
+        listing = fixture.listing()
+        manager = next(entry for entry in listing["processes"] if entry["kind"] == "workspace-manager")
+        host = next(entry for entry in listing["processes"] if entry["kind"] == "workspace-host")
+        assert manager["orphaned"] is True and manager["stateDir"], manager
+        output = fixture.suit("kill", str(manager["pid"]))
+        assert f"{manager['pid']} workspace-manager: stopped" in output, f"manager was not stopped cooperatively: {output}"
+        wait_until(lambda: not pid_alive(host["pid"]), 15, "workspace daemon survived its manager")
+        assert not (state / "endpoint.json").exists(), "manager did not clean up its endpoint"
+        assert fixture.listing()["processes"] == []
+    finally:
+        stop_manager_tree(state)
+
+
+def stop_manager_tree(state: Path) -> None:
+    """After a failure, kills the manager this test started (named in its state directory) with its daemon."""
+    try:
+        pid = json.loads((state / "endpoint.json").read_text())["managerPid"]
+    except (OSError, ValueError, KeyError):
+        return
+    if not pid_alive(pid):
+        return
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True, timeout=30)
+    else:
+        for child in child_pids(pid):
+            kill_pid(child)
+        kill_pid(pid)
 
 
 def test_suit_switch(fixture: Fixture, directory: Path) -> None:
-    """EXOSUIT_SUIT=off, and isolated without a home, keep a real manager out of the default registry and suit."""
+    """EXOSUIT_SUIT=off, and isolated without a home, keep a real manager out of the default registry and suit.
+
+    The default home is moved into the test directory, and a last run with EXOSUIT_SUIT=on (autostart off)
+    checks that the manager does register there, so the first two cannot pass because nothing registers.
+    """
     sys.path.insert(0, str(ROOT / "scripts"))
     from agent_test_runtime import manager_command, manager_environment, launcher_path
     directory.mkdir(parents=True, exist_ok=True)
-    for index, mode in enumerate(("off", "isolated")):
+    for index, mode in enumerate(("off", "isolated", "on")):
         workspace = directory / f"switch-workspace-{index}"; workspace.mkdir()
         state = directory / f"switch-state-{index}"
         # The default home moves into the test directory, so a registration there cannot reach the user's suit.
@@ -376,6 +399,8 @@ def test_suit_switch(fixture: Fixture, directory: Path) -> None:
             del environment[key]
         environment.update(EXOSUIT_SUIT=mode, LOCALAPPDATA=str(default_parent), XDG_STATE_HOME=str(default_parent),
                            EXOSUIT_SUIT_LAUNCHER=str(SUIT))
+        if mode == "on":
+            environment["EXOSUIT_SUIT_AUTOSTART"] = "0"
         subprocess.run([*manager_command(ROOT), str(workspace), "--state-dir", str(state), "--detach", "--idle-seconds", "60"],
                        env=environment, check=True, timeout=100, capture_output=True)
         wait_until(lambda: (state / "endpoint.json").is_file(), 30, f"EXOSUIT_SUIT={mode}: the manager did not start")
@@ -383,13 +408,18 @@ def test_suit_switch(fixture: Fixture, directory: Path) -> None:
         try:
             time.sleep(1)  # registration and autostart happen as the manager becomes ready
             suit_home = default_parent / "exosuit" / "suit"
-            assert not suit_home.exists(), f"EXOSUIT_SUIT={mode}: the manager registered or started suit in {suit_home}"
+            if mode == "on":
+                record = suit_home / "registry" / f"{endpoint['managerPid']}.json"
+                assert record.is_file(), f"EXOSUIT_SUIT=on: the manager did not register in the moved default home {suit_home}"
+                assert not (suit_home / "suit.lock").exists(), "EXOSUIT_SUIT_AUTOSTART=0 still started suit"
+            else:
+                assert not suit_home.exists(), f"EXOSUIT_SUIT={mode}: the manager registered or started suit in {suit_home}"
         finally:
             (state / "stop-request.json").write_text(json.dumps({"version": 1, "generation": endpoint["generation"]}))
             try:
                 wait_until(lambda: not pid_alive(endpoint["managerPid"]), 20, "")
             except AssertionError:
-                kill_pid(endpoint["managerPid"])
+                stop_manager_tree(state)
                 raise AssertionError(f"EXOSUIT_SUIT={mode}: the manager ignored stop-request.json")
 
 
@@ -435,6 +465,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--real-manager", action="store_true", help="also run a real workspace manager (needs agent build)")
     parser.add_argument("--editor", action="store_true", help="also run a real editor window (needs graphical build)")
+    parser.add_argument("--only", help="run only the tests whose name contains this text")
     options = parser.parse_args()
     assert SUIT.is_file(), f"build suit first: {SUIT}"
     with tempfile.TemporaryDirectory(prefix="suit-test-") as temporary:
@@ -449,6 +480,8 @@ def main() -> int:
         if options.editor:
             tests.append(("editor", lambda f: test_editor(f, directory / "e")))
         for name, test in tests:
+            if options.only and options.only not in name:
+                continue
             (directory / "a").mkdir(exist_ok=True); (directory / "r").mkdir(exist_ok=True)
             fixture_directory = Path(tempfile.mkdtemp(dir=temporary))
             fixture = Fixture(fixture_directory)
