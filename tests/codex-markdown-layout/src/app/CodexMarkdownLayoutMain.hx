@@ -11,6 +11,7 @@ import ui.CodexMarkdownView;
 @:access(syntax.Highlighter)
 @:access(ui.MarkdownEmphasis)
 @:access(haxeon.ui.core.RenderNode)
+@:access(haxeon.ui.widgets.text.TextEditorLayout)
 class CodexMarkdownLayoutMain {
   static function require(value:Bool, message:String):Void { if (!value) throw message; }
 
@@ -41,6 +42,52 @@ class CodexMarkdownLayoutMain {
     var session = LayoutSession.create();
     var context = new UiContext(session, fonts);
     var syntaxes = new syntax.SyntaxRegistry();
+    syntax.BuiltinSyntax.install(syntaxes);
+    var samples=[
+      {hint:"haxeon",name:"Haxe",text:"class Example { static function main() { var n = 42; } }"},
+      {hint:"c",name:"C",text:"int main() { return 42; }"},
+      {hint:"cpp",name:"C++",text:"class Example { public: int value = 42; };"},
+      {hint:"rust",name:"Rust",text:"fn main() { let value = 42; }"},
+      {hint:"javascript",name:"JavaScript",text:"const value = 42;"},
+      {hint:"typescript",name:"TypeScript",text:"const value: number = 42;"},
+      {hint:"python",name:"Python",text:"def main(): return 42"}
+    ];
+    for (sample in samples) {
+      var highlightedContext=new UiContext(null,fonts,ui.ExosuitPalette.theme(true));
+      var palette=new style.Theme();
+      var highlightedView=new CodexMarkdownView("```"+sample.hint+"\n"+sample.text+"\n```",palette,syntaxes);
+      var highlightedRoot=highlightedContext.submit(highlightedView,new LayoutFrame(700,300));
+      var highlightedModel=codeModel(highlightedContext);
+      require(highlightedModel.syntax.name==sample.name,"Fence selected the wrong grammar: "+sample.hint);
+      var codeNode=find(highlightedRoot,"Code block: "+sample.hint);
+      var codeState:haxeon.ui.core.State<haxeon.ui.widgets.text.TextEditorState>=highlightedContext.buildContext.existingState(codeNode.id);
+      require(codeState!=null && codeNode.focusable,"Highlighted code lost its native selectable editor");
+      var layout=codeState.value.layout;
+      require(layout.colorRangeProvider!=null && layout.paragraphs.length>0,"Native code editor has no foreground provider");
+      var paragraph=layout.paragraphs[0];layout.applyForegroundRanges(paragraph);
+      require(paragraph.renderRanges!=null && paragraph.renderRanges.length>0,"No native syntax colors reached the editor layout: "+sample.hint);
+      var oldColor=paragraph.renderRanges[0].color;
+      palette.lightSyntax=true;highlightedRoot=highlightedContext.submit(highlightedView,new LayoutFrame(700,300));
+      codeNode=find(highlightedRoot,"Code block: "+sample.hint);
+      codeState=highlightedContext.buildContext.existingState(codeNode.id);layout=codeState.value.layout;
+      paragraph=layout.paragraphs[0];layout.applyForegroundRanges(paragraph);
+      var updatedColor=paragraph.renderRanges[0].color;
+      require(oldColor.red!=updatedColor.red || oldColor.green!=updatedColor.green || oldColor.blue!=updatedColor.blue,
+        "Theme change did not update native syntax colors: "+sample.hint);
+      highlightedContext.dispose();
+    }
+    var streamContext=new UiContext(null,fonts,ui.ExosuitPalette.theme(true));
+    var streamView=new CodexMarkdownView("```haxeon\nclass Example {",new style.Theme(),syntaxes);
+    var streamRoot=streamContext.submit(streamView,new LayoutFrame(700,300));
+    require(codeModel(streamContext).syntax.name=="Haxe" && find(streamRoot,"Code block: haxeon").focusable,
+      "Incomplete streaming fence lost highlighting or selection");
+    streamView.update("```haxeon\nclass Example { var value = 42; }\n```");
+    streamRoot=streamContext.submit(streamView,new LayoutFrame(700,300));
+    require(codeModel(streamContext).buffer.text.indexOf("value = 42")>=0,"Streaming code update remained stale");
+    streamView.update("```unknown\n#!/usr/bin/env python3\nprint(42)\n```");
+    streamRoot=streamContext.submit(streamView,new LayoutFrame(700,300));
+    require(codeModel(streamContext).syntax==syntaxes.plainText,"Unknown fence inferred a grammar from content");
+    streamContext.dispose();
     var view = new CodexMarkdownView("Pushed `main` to `origin`. It now points to `e53ac13`, and the local branch is up to date with the remote.", new style.Theme(), syntaxes);
     var root = context.submit(view, new LayoutFrame(1400, 400));
     for (pair in [["Pushed", "main"], ["main", "to"], ["It", "now"], ["now", "points"]]) {

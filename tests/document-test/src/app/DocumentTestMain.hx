@@ -174,6 +174,22 @@ class DocumentTestMain {
 	static function main():Int {
 		var syntaxes = new SyntaxRegistry();
 		BuiltinSyntax.install(syntaxes);
+		for (pair in [["haxeon", "Haxe"], ["haxe", "Haxe"], ["hx", "Haxe"], ["c", "C"], ["c++", "C++"],
+			["cpp", "C++"], ["rust", "Rust"], ["rs", "Rust"], ["javascript", "JavaScript"], ["js", "JavaScript"],
+			["typescript", "TypeScript"], ["ts", "TypeScript"], ["python", "Python"], ["py", "Python"]])
+			require(syntaxes.findFence(pair[0]).name == pair[1], "fence language selection failed: " + pair[0]);
+		require(syntaxes.findFence("HAXEON").name == "Haxe" && syntaxes.findFence("../file.hx") == syntaxes.plainText
+			&& syntaxes.findFence("unknown") == syntaxes.plainText, "unsafe or unknown fence hint selected a syntax");
+		var custom = new syntax.SyntaxDefinition("Custom", [".demo"], true);
+		syntaxes.add(custom, "plugin-definition"); syntaxes.addFenceAlias("custom-alias", custom, "plugin-alias");
+		require(syntaxes.findFence("custom-alias") == custom && syntaxes.findFence("demo") == custom, "plugin fence selection failed");
+		syntaxes.removeOwner("plugin-definition");
+		require(syntaxes.findFence("custom-alias") == syntaxes.plainText, "removed definition retained fence alias");
+		var replacement = new syntax.SyntaxDefinition("Replacement", [".demo"], true);
+		syntaxes.add(replacement, "replacement"); syntaxes.addFenceAlias("custom-alias", replacement, "replacement");
+		syntaxes.removeOwner("plugin-alias");
+		require(syntaxes.findFence("custom-alias") == replacement, "removing stale alias owner removed a replacement");
+		syntaxes.removeOwner("replacement");
 		editingPolicy(syntaxes);
 		IndentationTests.run(syntaxes);
 		require(syntaxes.find("script", "#!/usr/bin/env lua\n").name == "Lua" && syntaxes.find("data.json").name == "JSON"

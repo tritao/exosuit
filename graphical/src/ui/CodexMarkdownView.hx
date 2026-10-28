@@ -63,24 +63,6 @@ class CodexMarkdownView implements View {
 
   public function update(value:String):Void this.value = value;
 
-  static function extension(language:String):String return switch language {
-    case "python", "py": "py";
-    case "javascript", "js", "jsx": "js";
-    case "typescript", "ts", "tsx": "ts";
-    case "c++", "cpp", "cxx": "cpp";
-    case "haxe", "hx": "hx";
-    case "json": "json";
-    case "html", "htm": "html";
-    case "svg", "xml": "xml";
-    case "css", "scss": "css";
-    case "bash", "sh", "shell", "zsh": "sh";
-    case "yaml", "yml": "yaml";
-    case "rust", "rs": "rs";
-    case "diff", "patch": "diff";
-    case "c", "h": "c";
-    default: "txt";
-  };
-
   static function tableCells(line:String):Array<String> {
     var value = StringTools.trim(line);
     if (StringTools.startsWith(value, "|")) value = value.substr(1);
@@ -148,10 +130,10 @@ class CodexMarkdownView implements View {
         }
         var state = context.resourceState(context.id(key + "-code-model"), function() return new SessionCodeModelState(), function(value) value.dispose()).value;
         var model = state.model;
-        var path = "snippet." + extension(block.language);
-        if (model == null || model.buffer.text != block.text || model.syntax != syntaxes.find(path, block.text.substr(0,128))) {
+        var definition=syntaxes.findFence(block.language);
+        if (model == null || model.buffer.text != block.text || model.syntax != definition) {
           state.dispose();
-          model = new WorkspaceFileTextModel(path, block.text, syntaxes, palette);
+          model = new WorkspaceFileTextModel("snippet", block.text, syntaxes, palette, definition);
           state.model = model;
         }
         model.updateTheme(palette);
