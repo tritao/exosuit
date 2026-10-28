@@ -2700,8 +2700,8 @@ class ExosuitApp implements DesktopUiApplication {
 	/** Remote Files are read-only and owned by the workspace service: only view actions are offered. */
 	function remoteExplorerMenuItems():Array<MenuItem> {
 		return [
-			new MenuItem("files-refresh", "Refresh", function() if (explorerModel != null) explorerModel.refreshAll()),
-			new MenuItem("files-collapse", "Collapse All", function() if (explorerTree != null) explorerTree.collapseAll(true))
+			new MenuItem("files-refresh", "Refresh", function() { if (explorerModel != null) explorerModel.refreshAll(); }),
+			new MenuItem("files-collapse", "Collapse All", function() { if (explorerTree != null) explorerTree.collapseAll(true); })
 		];
 	}
 
@@ -4727,8 +4727,8 @@ private class ContextMenuTarget implements View {
 	public function build(context:haxeon.ui.core.BuildContext):RenderNode {
 		var node = child.build(context);
 		var open = function(event:UiEvent) { request(event); event.preventDefault(); event.stopPropagation(); };
-		node.on(UiEventKind.PointerDown, function(event) if (event.button == 1) open(event));
-		node.on(UiEventKind.KeyDown, function(event) if (UiKey.isContextMenuRequest(event.key, event.modifiers)) open(event));
+		node.on(UiEventKind.PointerDown, function(event) { if (event.button == 1) open(event); });
+		node.on(UiEventKind.KeyDown, function(event) { if (UiKey.isContextMenuRequest(event.key, event.modifiers)) open(event); });
 		return node;
 	}
 }
