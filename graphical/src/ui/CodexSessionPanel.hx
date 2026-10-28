@@ -369,8 +369,9 @@ class CodexSessionPanel implements View {
     if (working || ((view.record.provider == "claude" || usesSupervisedModes(view.record.provider)) && view.requests.length > 0)) header.push(new KeyedView("stop", stop));
     var permissionLabel = usesSupervisedModes(view.record.provider) ? piPermissionLabel(view.record.permissionMode) : view.record.provider == "claude" ? view.record.permissionMode : CodexPermissions.labelForRecord(view.record.permissionProfile,
       view.record.sandboxPolicy, view.record.approvalPolicy);
-    var permissions = new Button(permissionLabel + "  ▾", headerButtonStyle, null, "codex-permissions");
+    var permissions = new Button("Permissions · " + permissionLabel + "  ▾", headerButtonStyle, null, "codex-permissions");
     permissions.accessibilityLabel = "Permissions · " + permissionLabel + "  ▾";
+    permissions.leadingView = new SessionLineIcon("lock", tokens.textSecondary);
     permissions.enabled = control && !working && view.requests.length == 0;
     permissions.onClickEvent = function(event) {
       if (permissions.enabled) openPermissionsMenu(client, id, view.record.thread, event);
@@ -385,8 +386,7 @@ class CodexSessionPanel implements View {
     var workspaceControls:Array<KeyedView> = [];
     var workspaceStrip:Null<KeyedView> = null;
     if (workspaceActions != null) {
-      var stripItems:Array<KeyedView> = [new KeyedView("workspace-context", new MiddleEllipsisText("workspace-context", workspaceActions.context(), true,
-        TextStyleOverride.text(12, null, tokens.textSecondary)))];
+      var stripItems:Array<KeyedView> = [];
       var groupStyle = new LayoutStyle(); groupStyle.width = LayoutAxis.fit(); groupStyle.childGap = 4;
       var filesButton = quietButton("Files", workspaceActions.explore, "agent-open-files");
       filesButton.leadingIcon = IconName.FolderOpen; filesButton.iconSize = 14;
@@ -405,6 +405,27 @@ class CodexSessionPanel implements View {
         return catalog != null && catalog.root == root && session != null && session.record.thread == initialThread
           && session.record.cwd == initialCwd && session.record.provider == initialProvider;
       };
+      if (workspaceActions.worktreeLabel != null && workspaceActions.selectWorktree != null && workspaceActions.canSelectWorktree != null) {
+        var worktreeLabel:Void->String = cast workspaceActions.worktreeLabel;
+        var label = worktreeLabel();
+        var worktreeAction:Void->Void = cast workspaceActions.selectWorktree;
+        var worktreeAvailable:Void->Bool = cast workspaceActions.canSelectWorktree;
+        var worktree = quietButton(label + " ▾", function() { if (menuValid() && worktreeAvailable()) worktreeAction(); }, "agent-select-worktree");
+        worktree.accessibilityLabel = "Select worktree"; worktree.leadingView = new SessionLineIcon("worktree", tokens.textSecondary);
+        worktree.ellipsizeLabel = true; worktree.style.width = LayoutAxis.grow(124, 220); worktree.enabled = worktreeAvailable();
+        stripItems.push(new KeyedView("worktree", new SettingMenuButton(worktree, label)));
+      } else stripItems.push(new KeyedView("workspace-context", new MiddleEllipsisText("workspace-context", workspaceActions.context(), true,
+        TextStyleOverride.text(12, null, tokens.textSecondary))));
+      if (workspaceActions.branchLabel != null && workspaceActions.selectBranch != null && workspaceActions.canSelectBranch != null) {
+        var branchLabel:Void->String = cast workspaceActions.branchLabel;
+        var label = branchLabel();
+        var branchAction:Void->Void = cast workspaceActions.selectBranch;
+        var branchAvailable:Void->Bool = cast workspaceActions.canSelectBranch;
+        var branch = quietButton(label + " ▾", function() { if (menuValid() && branchAvailable()) branchAction(); }, "agent-select-branch");
+        branch.accessibilityLabel = "Select branch"; branch.leadingView = new SessionLineIcon("branch", tokens.textSecondary);
+        branch.ellipsizeLabel = true; branch.style.width = LayoutAxis.grow(112, 180); branch.enabled = branchAvailable();
+        stripItems.push(new KeyedView("branch", new SettingMenuButton(branch, label)));
+      }
       function repositoryAction(key:String, label:String, available:Null<Void->Bool>, action:Null<Void->Void>):Void {
         if (available == null || action == null) return;
         var permitted:Void->Bool = cast available, run:Void->Void = cast action;
@@ -424,7 +445,8 @@ class CodexSessionPanel implements View {
       }
       workspaceControls.push(navigation);
       var stripStyle = new LayoutStyle(); stripStyle.width = LayoutAxis.grow(0, 880);
-      stripStyle.padding = new Insets(10, 2, 10, 2); stripStyle.childGap = 8;
+      stripStyle.padding = new Insets(10, 2, 10, 2); stripStyle.childGap = 4;
+      stripStyle.wrapMode = haxeon.ui.LayoutWrapMode.Wrap;
       stripStyle.background = tokens.surfaceRaised;
       stripStyle.radiusTopLeft = stripStyle.radiusTopRight = stripStyle.radiusBottomLeft = stripStyle.radiusBottomRight = 5;
       stripStyle.childAlignY = haxeon.ui.LayoutAlignmentY.Center;
@@ -961,7 +983,9 @@ class CodexSessionPanel implements View {
       var modelLabel = chosenModel != null ? chosenModel.name : selectedModel != "" ? selectedModel : currentModelLabel;
       var chooser = quietButton(modelLabel + " ▾", function() {}, "codex-model");
       chooser.accessibilityLabel = "Conversation model"; chooser.ellipsizeLabel = true;
-      chooser.style.width = LayoutAxis.fixed(124); chooser.enabled = control && !working;
+      chooser.leadingView = new SessionLineIcon("model", tokens.textSecondary);
+      chooser.style.width = LayoutAxis.fixed(145); chooser.style.padding = new Insets(4, 4, 4, 4); chooser.style.childGap = 4;
+      chooser.enabled = control && !working;
       chooser.onClickEvent = function(event) {
         var items:Array<MenuItem> = [];
         items.push(new MenuItem("current", currentModelLabel, function() {
@@ -990,7 +1014,9 @@ class CodexSessionPanel implements View {
     if (StringTools.endsWith(effortText, " effort")) effortText = effortText.substr(0, effortText.length - 7);
     var effortChooser = quietButton(effortText + " ▾", function() {}, "codex-effort");
     effortChooser.accessibilityLabel = "Reasoning effort"; effortChooser.ellipsizeLabel = true;
-    effortChooser.style.width = LayoutAxis.fixed(100);
+    effortChooser.leadingView = new SessionLineIcon("reasoning", tokens.textSecondary);
+    effortChooser.style.width = LayoutAxis.fixed(90);
+    effortChooser.style.padding = new Insets(4, 4, 4, 4); effortChooser.style.childGap = 4;
     effortChooser.enabled = control && !working && effortModel != null && availableEfforts.length > 0;
     effortChooser.onClickEvent = function(event) {
       var expectedModel = selectedModel;
@@ -1101,7 +1127,9 @@ class CodexSessionPanel implements View {
         });
       }, "agent-add-image");
       imageAction.accessibilityLabel = imageUploading ? "Cancel image upload" : imageError == null ? "Add image" : "Try image again";
-      imageAction.leadingIcon = imageUploading ? IconName.Close : IconName.Plus; imageAction.iconSize = 16; imageAction.style.width = LayoutAxis.fixed(34);
+      if (imageUploading) imageAction.leadingIcon = IconName.Close;
+      else imageAction.leadingView = new SessionLineIcon("attachment", tokens.textSecondary);
+      imageAction.iconSize = 16; imageAction.style.width = LayoutAxis.fixed(34);
       imageAction.enabled = control && connectionReady && (imageUploading || imageDrafts.length < 2);
       contextActions.push(new KeyedView("image-action", imageAction));
     }
@@ -1183,9 +1211,11 @@ class CodexSessionPanel implements View {
     if (promptBytes > submitLimit) contextRows.push(new KeyedView("limit", new Text("Message and included text exceed the " + submitLimit + " byte limit.", null, tokens.danger)));
     modelControls.push(new KeyedView("permissions", new SettingMenuButton(permissions, permissionLabel)));
     var spacerStyle = new LayoutStyle(); spacerStyle.width = LayoutAxis.grow();
-    modelControls.push(new KeyedView("spacer", new Column("composer-spacer", [], spacerStyle)));
-    for (action in contextActions) modelControls.push(action);
-    for (action in footerControls) modelControls.push(action);
+    var trailing:Array<KeyedView> = [new KeyedView("spacer", new Column("composer-spacer", [], spacerStyle))];
+    for (action in contextActions) trailing.push(action);
+    for (action in footerControls) trailing.push(action);
+    var trailingStyle = new LayoutStyle(); trailingStyle.width = LayoutAxis.grow(piActive ? 170 : 110); trailingStyle.childGap = 6;
+    modelControls.push(new KeyedView("trailing", new Row("composer-trailing", trailing, trailingStyle)));
     rows.push(new KeyedView("composer", new Column("codex-composer-frame", [new KeyedView("content", new Column("codex-composer", [
       new KeyedView("prompt", new CodexPromptNode(promptNode)),
       new KeyedView("context", new Column("agent-context", contextRows)),

@@ -15,11 +15,14 @@ class SessionChatPreviewMain {
  static function main():Int {
   var args = Sys.args();
   var dark = args.indexOf("--light") < 0;
-  var width = args.indexOf("--wide") >= 0 ? 1000 : args.indexOf("--narrow") >= 0 ? 320 : 420;
+  var superwide = args.indexOf("--superwide") >= 0;
+  var ultra = args.indexOf("--ultrawide") >= 0;
+  var fullHd = args.indexOf("--full-hd") >= 0;
+  var width = superwide ? 5120 : ultra ? 2560 : fullHd ? 1920 : args.indexOf("--wide") >= 0 ? 1000 : args.indexOf("--narrow") >= 0 ? 320 : 420;
   var options = new DesktopUiHostOptions();
   options.title = "Exosuit UI exploration";
   options.applicationId = "Exosuit.UiExploration";
-  options.width = width; options.height = 900;
+  options.width = width; options.height = superwide || ultra ? 1440 : fullHd ? 1080 : 900;
   return DesktopUiHost.run(options, function(host) return new PreviewApplication(host, dark, args));
  }
 }
@@ -222,6 +225,12 @@ private class PreviewApplication implements DesktopUiApplication {
     } : null,
     readContext: workspaceCapabilities ? function(_, done) done("class Main {}", null) : null,
     chooseImage: workspaceCapabilities ? function(done) done("diagram.png", sys.io.File.getBytes(Sys.getCwd() + "/graphical/assets/icons/exosuit-256.png"), null) : null,
+    worktreeLabel: composerPreview ? function() return "ui-exploration" : null,
+    branchLabel: composerPreview ? function() return "main" : null,
+    canSelectWorktree: composerPreview ? function() return true : null,
+    selectWorktree: composerPreview ? function() {} : null,
+    canSelectBranch: composerPreview ? function() return true : null,
+    selectBranch: composerPreview ? function() {} : null,
     canCreateWorktree: workspaceCapabilities ? function() return true : null, newWorktree: workspaceCapabilities ? function() {} : null,
     canCommitChanges: workflow ? function() return true : null, commitChanges: workflow ? function() {} : null,
     canOpenGithub: workflow ? function() return true : null, githubRepository: workflow ? function() {} : null,

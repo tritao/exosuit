@@ -1538,6 +1538,12 @@ class ExosuitApp implements DesktopUiApplication {
     readContext: function(path, done) readSessionContext(resource, root, path, done),
     canCreateWorktree: function() return sessionWorktreeRepository(resource, root) != null,
     newWorktree: function() createSessionWorktree(resource, root),
+    worktreeLabel: function() return sessionDirectoryLabel(resource, root),
+    branchLabel: function() return sessionBranchLabel(resource, root),
+    canSelectWorktree: function() return canSelectSessionDirectory(resource, root),
+    selectWorktree: function() selectSessionDirectory(resource, root),
+    canSelectBranch: function() return sessionBranchSelectable(resource, root),
+    selectBranch: function() selectSessionBranch(resource, root),
     chooseImage: desktop == null ? null : function(done) chooseSessionImage(resource, root, done),
     pasteImage: desktop == null ? null : function() return SessionClipboardImage.read(),
     canOpenGithub: function() return sessionGithubOrigin(resource, root) != null,
@@ -1690,6 +1696,118 @@ class ExosuitApp implements DesktopUiApplication {
    if (snapshot != null && snapshot.head.branch != null) label += " · " + snapshot.head.branch;
   }
   return label;
+ }
+
+ function nearestSessionGitRepository(resource:String, root:String):Null<scm.ScmRepository> {
+  var record = sessionRecord(resource, root), source = sourceControlSource();
+  if (record == null || source == null || !source.connected()) return null;
+  var nearest:Null<scm.ScmRepository> = null;
+  for (repository in source.repositories()) if (repository.providerId == "git"
+    && workspace.client.SessionLinkTarget.relativeWithin(repository.root, record.cwd) != null
+    && workspace.client.SessionLinkTarget.relativeWithin(root, repository.root) != null
+    && (nearest == null || repository.root.length > nearest.root.length)) nearest = repository;
+  return nearest;
+ }
+
+ function sessionDirectoryLabel(resource:String, root:String):String {
+  var record = sessionRecord(resource, root);
+  if (record == null) return "Directory unavailable";
+  var path = StringTools.replace(record.cwd, "\\", "/");
+  while (path.length > 1 && StringTools.endsWith(path, "/")) path = path.substr(0, path.length - 1);
+  var name = path.substr(path.lastIndexOf("/") + 1);
+  return name == "" ? path : name;
+ }
+
+ function sessionBranchLabel(resource:String, root:String):String {
+  var repository = nearestSessionGitRepository(resource, root), source = sourceControlSource();
+  if (repository == null || source == null) return "Branch unavailable";
+  var snapshot = source.snapshot(repository.id);
+  if (snapshot == null) return "Branch unavailable";
+  if (snapshot.head.branch != null && snapshot.head.branch != "") return snapshot.head.branch;
+  return snapshot.head.detachedCommit == null ? "Branch unavailable" : "Detached HEAD";
+ }
+
+ function sessionBranchSelectable(resource:String, root:String):Bool {
+  var client = workbenchClient == null ? null : workbenchClient.agentService();
+  var view = client == null ? null : client.agentView(resource);
+  var repository = nearestSessionGitRepository(resource, root);
+  return sessionRecord(resource, root) != null && client != null && client.canControlAgents() && !client.agentBusy()
+   && view != null && ["idle", "completed", "failed", "interrupted"].indexOf(view.record.state) >= 0
+   && (view.connectionState == null || view.connectionState == "connected") && view.requests.length == 0
+   && repository != null && canCheckoutScmRepository(repository);
+ }
+
+ function selectSessionBranch(resource:String, root:String):Void {
+  if (!sessionBranchSelectable(resource, root)) return;
+  var client = workbenchClient, source = sourceControlSource(), record = sessionRecord(resource, root);
+  var repository = nearestSessionGitRepository(resource, root);
+  var agents = client == null ? null : client.agentService(), catalog = agents == null ? null : agents.agents();
+  var terminals = client == null ? null : client.terminalCatalog();
+  if (client == null || source == null || record == null || repository == null || catalog == null || terminals == null
+    || catalog.root != root || terminals.workspaceRoot != root) return;
+  var instance = catalog.instance, terminalInstance = terminals.instance, repositoryId = repository.id;
+  var thread = record.thread, cwd = record.cwd, group = record.group, provider = record.provider;
+  function valid():Bool {
+   var currentAgents = workbenchClient == null ? null : workbenchClient.agentService();
+   var currentCatalog = currentAgents == null ? null : currentAgents.agents();
+   var currentTerminals = workbenchClient == null ? null : workbenchClient.terminalCatalog();
+   var current = sessionRecord(resource, root), selected = nearestSessionGitRepository(resource, root);
+   return workbenchClient == client && currentAgents == agents && sourceControlSource() == source
+    && currentCatalog != null && currentCatalog.instance == instance && currentCatalog.root == root
+    && currentTerminals != null && currentTerminals.instance == terminalInstance && currentTerminals.workspaceRoot == root
+    && current != null && current.thread == thread && current.cwd == cwd && current.group == group && current.provider == provider
+    && selected != null && selected.id == repositoryId && sessionBranchSelectable(resource, root);
+  }
+  if (valid()) scmBranches.open(repository, valid);
+ }
+
+ function canSelectSessionDirectory(resource:String, root:String):Bool {
+  var client = workbenchClient, record = sessionRecord(resource, root);
+  var catalog = client == null ? null : client.terminalCatalog();
+  if (client == null || record == null || catalog == null || catalog.workspaceRoot != root
+   || !client.agentService().canControlAgents() || client.agentService().agentCreation() != null) return false;
+  if (sessionWorktreeRepository(resource, root) != null) return true;
+  for (candidate in catalog.groups) if (candidate.cwd != null && candidate.cwd != ""
+   && workspace.client.SessionLinkTarget.relativeWithin(root, candidate.cwd) != null) return true;
+  return false;
+ }
+
+ /** Starts a new session in an existing group; it never retargets this native thread. */
+ function selectSessionDirectory(resource:String, root:String):Void {
+  if (!canSelectSessionDirectory(resource, root)) return;
+  var client = workbenchClient, record = sessionRecord(resource, root);
+  if (client == null || record == null) return;
+  var catalog:Null<workspace.service.WorkspaceTerminalProtocol.TerminalCatalog> = client.terminalCatalog();
+  if (catalog == null) return;
+  var source = sourceControlSource(), owner = catalog.instance;
+  var thread = record.thread, cwd = record.cwd, provider = record.provider, group = record.group;
+  var entries:Array<commandview.CommandViewEntry> = [];
+  var offered:Map<String,{cwd:String, revision:Int}> = [];
+  if (sessionWorktreeRepository(resource, root) != null)
+   entries.push(new commandview.CommandViewEntry("New worktree…", "Create a worktree and start a new session", "@new"));
+  for (candidate in catalog.groups) if (candidate.cwd != null && candidate.cwd != ""
+    && workspace.client.SessionLinkTarget.relativeWithin(root, candidate.cwd) != null) {
+   offered.set(candidate.id, {cwd:candidate.cwd, revision:candidate.revision});
+   entries.push(new commandview.CommandViewEntry("New session in " + candidate.name, candidate.cwd, "group:" + candidate.id));
+  }
+  if (entries.length == 0) return;
+  host.openCommandView(new commandview.CommandViewProvider("New session directory: ", entries, function(_) {}, function(entry, _, _) {
+   host.closeCommandView();
+   var current = sessionRecord(resource, root), latest = client.terminalCatalog();
+   if (entry == null || workbenchClient != client || sourceControlSource() != source || current == null
+     || current.thread != thread || current.cwd != cwd || current.provider != provider || current.group != group
+     || latest == null || latest.instance != owner || latest.workspaceRoot != root || !canSelectSessionDirectory(resource, root)) return;
+   if (entry.value == "@new") { if (sessionWorktreeRepository(resource, root) != null) createSessionWorktree(resource, root); return; }
+   if (!StringTools.startsWith(entry.value, "group:")) return;
+   var id = entry.value.substr(6);
+   var candidate = offered.get(id);
+   if (candidate != null) {
+    for (fresh in latest.groups) if (fresh.id == id && fresh.cwd == candidate.cwd && fresh.revision == candidate.revision) {
+     createIntegratedAgent(provider == null ? "codex" : provider, id); return;
+    }
+   }
+  }));
+  requestFrame();
  }
 
  function sessionCommitRepository(resource:String, root:String):Null<scm.ScmRepository> {

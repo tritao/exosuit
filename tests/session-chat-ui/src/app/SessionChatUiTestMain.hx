@@ -21,6 +21,7 @@ import ui.CodexSessionPanel;
 @:access(haxeon.ui.core.StateStore)
 @:access(ui.CodexMarkdownView)
 @:access(ui.CodexSessionPanel)
+@:access(ui.ScmBranchController)
 class SessionChatUiTestMain {
 	static function require(value:Bool, message:String):Void { if (!value) throw message; }
 	static function find(root:RenderNode, label:String):RenderNode {
@@ -64,6 +65,14 @@ class SessionChatUiTestMain {
 		});
 	}
 	static function main():Int {
+        var staleBranchSourceReads=0;
+        var staleBranch=new ui.ScmBranchController(null,function() {staleBranchSourceReads++;throw "Stale scope reached source";},
+          function(_) throw "Stale scope checked repository",function(_) {},function() {},function(_) {},function() return "test");
+        staleBranch.open(null,function() return false);
+        staleBranch.createPrompt(null,function() return false);
+        staleBranch.checkout(null,null,"refs/heads/main",function() return false);
+        staleBranch.create(null,null,"new-branch",function() return false);
+        require(staleBranchSourceReads==0,"Stale branch operation accessed its source");
 		for (remote in ["https://github.com/example/project.git", "git@github.com:example/project.git", "ssh://git@github.com/example/project"])
 			require(scm.GithubRemote.repository(remote) == "https://github.com/example/project", "GitHub origin parsing failed");
 		for (remote in ["https://user:secret@github.com/example/project", "https://github.com.evil.test/example/project", "https://github.com/example/project?token=x", "file:///tmp/project"])
@@ -452,6 +461,44 @@ class SessionChatUiTestMain {
         oldRoot=oldBuild(); var oldRendered:ui.CodexMarkdownView=cast oldPanel.markdown.get("turn:older");
         require(oldClient.contentRequests == 1 && oldRendered.value == "older full response", "Older response did not load on request");
         oldContext.dispose();
+        for (footerDark in [true,false]) for (footerWidth in [320.0,1000.0,1920.0,2560.0,5120.0]) {
+          var footerClient=new FakeAgent(),worktreeCalls=0,branchCalls=0,worktreeAllowed=true,branchAllowed=true;
+          var footerContext=new UiContext(null,fonts,ui.ExosuitPalette.theme(footerDark));
+          var footerPanel=new CodexSessionPanel(function() return footerClient,"session","/repo",function() {},new style.Theme(),new syntax.SyntaxRegistry(),
+            function(_,_,_) {},function(_) {},null,{context:function() return "Project",explore:function() {},reviewChanges:function() {},
+              worktreeLabel:function() return "ui-exploration",branchLabel:function() return "feature/chat",
+              canSelectWorktree:function() return worktreeAllowed,canSelectBranch:function() return branchAllowed,
+              selectWorktree:function() worktreeCalls++,selectBranch:function() branchCalls++});
+          var footerHeight=footerWidth>=2560 ? 1440.0 : footerWidth>=1920 ? 1080.0 : 900.0;
+          function footerBuild():RenderNode return footerContext.submit(footerPanel,new LayoutFrame(footerWidth,footerHeight));
+          var footerRoot=footerBuild();checkHorizontalBounds(footerRoot,footerWidth);
+          if (footerWidth>=1920) {
+            var composer:RenderNode=null,strip:RenderNode=null,message:RenderNode=null;
+            footerRoot.walk(function(node) {
+              if(node.styleKey=="codex-composer-frame") composer=node;
+              if(node.styleKey=="agent-workspace-strip") strip=node;
+              if(node.styleKey=="codex-message-turn:user") message=node;
+            });
+            require(composer!=null && strip!=null && message!=null,"Wide session reading regions are missing");
+            var cb=composer.globalBounds(),sb=strip.globalBounds(),mb=message.globalBounds();
+            require(cb.width<=880.1 && sb.width<=880.1 && mb.width<=880.1
+              && Math.abs(cb.x+cb.width/2-footerWidth/2)<2 && Math.abs(sb.x+sb.width/2-footerWidth/2)<2,
+              "Wide composer or reading measure escaped its centered bounds");
+          }
+          settingValue(footerRoot,"Select worktree","ui-exploration");settingValue(footerRoot,"Select branch","feature/chat");
+          activate(footerContext,find(footerRoot,"Select worktree"));activate(footerContext,find(footerRoot,"Select branch"));
+          require(worktreeCalls==1 && branchCalls==1,"Footer keyboard actions did not invoke host callbacks");
+          worktreeAllowed=false;branchAllowed=false;
+          activate(footerContext,find(footerRoot,"Select worktree"));activate(footerContext,find(footerRoot,"Select branch"));
+          require(worktreeCalls==1 && branchCalls==1,"Stale footer controls ignored capability changes");
+          footerRoot=footerBuild();
+          require(!find(footerRoot,"Select worktree").enabled && !find(footerRoot,"Select branch").enabled,
+            "Unavailable footer actions remained enabled");
+          worktreeAllowed=true;branchAllowed=true;footerRoot=footerBuild();footerClient.record.thread="another-thread";
+          activate(footerContext,find(footerRoot,"Select worktree"));activate(footerContext,find(footerRoot,"Select branch"));
+          require(worktreeCalls==1 && branchCalls==1,"Stale footer controls followed a replaced session");
+          footerContext.dispose();
+        }
         var modelClient=new FakeAgent();modelClient.deferModelSettings=true;
         modelClient.record.preferredModel="test-model";modelClient.record.preferredEffort="low";
         modelClient.view.models.push({model:"other-model",name:"Other model",supportedEfforts:["low","high"]});

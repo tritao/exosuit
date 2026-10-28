@@ -14,6 +14,12 @@ typedef SessionWorkspaceActions = {
   @:optional var readContext:Null<(String, (Null<String>, Null<String>)->Void)->Void>;
   @:optional var newWorktree:Null<Void->Void>;
   @:optional var canCreateWorktree:Null<Void->Bool>;
+  @:optional var worktreeLabel:Null<Void->String>;
+  @:optional var branchLabel:Null<Void->String>;
+  @:optional var selectWorktree:Null<Void->Void>;
+  @:optional var selectBranch:Null<Void->Void>;
+  @:optional var canSelectWorktree:Null<Void->Bool>;
+  @:optional var canSelectBranch:Null<Void->Bool>;
   /** Clipboard image bytes are read locally and uploaded through the session. */
   @:optional var pasteImage:Null<Void->{bytes:Null<haxe.io.Bytes>, error:Null<String>}>;
   /** Local chooser returns a display name and bytes; the host path is never sent. */
