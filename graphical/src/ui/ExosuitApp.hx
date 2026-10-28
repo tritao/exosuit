@@ -2400,7 +2400,7 @@ class ExosuitApp implements DesktopUiApplication {
 			tab(ContextPanelTab.Search, "Search", IconName.Search, searchContent),
 			tab(ContextPanelTab.Changes, "Changes", IconName.Hierarchy, sourceControlPanel())], contextTab,
 			function(next) {
-				var selected = ContextPanelTab.fromKey(next);
+				var selected = ContextPanelTabs.fromKey(next);
 				if (selected != null) contextTab = selected;
 				requestFrame();
 			}, fillStyle(), null, null, null, null, TabsSelectionMode.Controlled);
@@ -2479,7 +2479,7 @@ class ExosuitApp implements DesktopUiApplication {
 
 	/** In the Agents layout the rail's Files, Search and Source Control open the right panel's tab instead. */
 	function showContextTab(destination:String):Bool {
-		contextTab = ContextPanelTab.forDestination(destination);
+		contextTab = ContextPanelTabs.forDestination(destination);
 		if (!layoutControls.rightOpen()) layoutControls.toggleRight();
 		if (contextTab == ContextPanelTab.Search) {
 			if (contextScope() == null) searchPanel.focusQuery = true;
