@@ -33,6 +33,7 @@ private class PreviewApplication implements DesktopUiApplication {
  final panel:CodexSessionPanel;
  final agent:FakeAgent;
  final host:DesktopUiHostContext;
+ var wholeApp:Null<ui.ExosuitApp> = null;
  var clickLabel:Null<String>;
  var workflowStep:Int = 0;
  var keyboardReview:Bool = false;
@@ -102,6 +103,9 @@ private class PreviewApplication implements DesktopUiApplication {
   }
   if (args.indexOf("--emphasis") >= 0) agent.view.items = [
    {id:"emphasis",turn:"turn",kind:"agentMessage",title:"",text:"## Review summary\n\nThis is normal text, **strong emphasis**, *italic emphasis*, and ***bold italic***.\n\nThe **important [linked result](src/Main.hx)** remains actionable.",detail:"",state:"completed",truncated:false}
+  ];
+  if (args.indexOf("--syntax") >= 0) agent.view.items = [
+   {id:"syntax",turn:"turn",kind:"agentMessage",title:"",text:"## Syntax highlighting\n\n```haxeon\nclass Greeting {\n  static function main() {\n    var message = \"Hello, Haxeon!\";\n    trace(message); // show the result\n  }\n}\n```\n\n```python\ndef greet(name: str):\n    message = f\"Hello, {name}!\"\n    return message  # return greeting\n```",detail:"",state:"completed",truncated:false}
   ];
   if (args.indexOf("--tool-output") >= 0) {
    var commandFailed = args.indexOf("--tool-failed") >= 0;
@@ -206,8 +210,9 @@ private class PreviewApplication implements DesktopUiApplication {
    clickLabel = "Add image";
   }
   if (args.indexOf("--repository-menu") >= 0) { workflowStep = 0; clickLabel = null; keyboardReview = true; keyboardLabel = "Repository actions"; }
+  var syntaxes = new syntax.SyntaxRegistry(); syntax.BuiltinSyntax.install(syntaxes);
   panel = new CodexSessionPanel(function() return agent, "session", "/repo", host.requestFrame,
-   dark ? new style.Theme() : ui.ExosuitPalette.lightEditor(), new syntax.SyntaxRegistry(), function(items, event, valid) {
+   dark ? new style.Theme() : ui.ExosuitPalette.lightEditor(), syntaxes, function(items, event, valid) {
     if (valid()) {
      menuX=event.x; menuY=event.y;
      if (contextValue.root != null && (event.kind == UiEventKind.KeyDown || event.kind == UiEventKind.Activate)) {
@@ -239,9 +244,16 @@ private class PreviewApplication implements DesktopUiApplication {
      if (!ui.SessionArtifactPreview.open(host.window.rawValue(), source)) throw "Native artifact preview unavailable";
     } : null});
   if (composerPreview) panel.prompt = "Can you review the changes and run the relevant tests?";
+  if (args.indexOf("--whole-ide") >= 0) {
+   var app = new ui.ExosuitApp(host.fonts, ui.ExosuitPalette.theme(dark), host,
+    Sys.getCwd() + "/.local/preview-project/Hello.hx", null, null, dark);
+   app.host.attachAgent(new ui.UiAgentTab("fixture-session", "session", "/repo", "Session", panel));
+   wholeApp = app;
+  }
  }
- public function context():UiContext return contextValue;
+ public function context():UiContext return wholeApp == null ? contextValue : wholeApp.context();
  public function submit(frame:LayoutFrame):RenderNode {
+  if (wholeApp != null) return wholeApp.submit(frame);
   var view:haxeon.ui.core.View = panel;
   if (menuLayer) {
    var layers:Array<haxeon.ui.widgets.layout.StackChild> = [new haxeon.ui.widgets.layout.StackChild("content",panel,0,0,0,haxeon.ui.LayoutAxis.grow(),haxeon.ui.LayoutAxis.grow())];
@@ -311,5 +323,5 @@ private class PreviewApplication implements DesktopUiApplication {
   return root;
  }
  public function diagnosticState():Dynamic return {};
- public function dispose():Void contextValue.dispose();
+ public function dispose():Void { if (wholeApp != null) wholeApp.dispose(); contextValue.dispose(); }
 }

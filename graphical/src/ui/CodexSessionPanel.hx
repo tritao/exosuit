@@ -387,6 +387,8 @@ class CodexSessionPanel implements View {
     var workspaceStrip:Null<KeyedView> = null;
     if (workspaceActions != null) {
       var stripItems:Array<KeyedView> = [];
+      var stripTrailing:Array<KeyedView> = [];
+      var hasBranch = false;
       var groupStyle = new LayoutStyle(); groupStyle.width = LayoutAxis.fit(); groupStyle.childGap = 4;
       var filesButton = quietButton("Files", workspaceActions.explore, "agent-open-files");
       filesButton.leadingIcon = IconName.FolderOpen; filesButton.iconSize = 14;
@@ -424,7 +426,8 @@ class CodexSessionPanel implements View {
         var branch = quietButton(label + " ▾", function() { if (menuValid() && branchAvailable()) branchAction(); }, "agent-select-branch");
         branch.accessibilityLabel = "Select branch"; branch.leadingView = new SessionLineIcon("branch", tokens.textSecondary);
         branch.ellipsizeLabel = true; branch.style.width = LayoutAxis.grow(112, 180); branch.enabled = branchAvailable();
-        stripItems.push(new KeyedView("branch", new SettingMenuButton(branch, label)));
+        hasBranch = true;
+        stripTrailing.push(new KeyedView("branch", new SettingMenuButton(branch, label)));
       }
       function repositoryAction(key:String, label:String, available:Null<Void->Bool>, action:Null<Void->Void>):Void {
         if (available == null || action == null) return;
@@ -441,14 +444,21 @@ class CodexSessionPanel implements View {
         var repository = quietButton("Git ▾", function() {}, "agent-repository-actions");
         repository.accessibilityLabel = "Repository actions";
         repository.onClickEvent = function(event) { if (menuValid()) showMenu(repositoryItems, event, menuValid); };
-        stripItems.push(new KeyedView("repository-actions", repository));
+        stripTrailing.push(new KeyedView("repository-actions", repository));
+      }
+      if (stripTrailing.length > 0) {
+        var trailingSpace = new LayoutStyle(); trailingSpace.width = LayoutAxis.grow();
+        stripTrailing.unshift(new KeyedView("spacer", new Column("workspace-strip-spacer", [], trailingSpace)));
+        var trailingStyle = new LayoutStyle(); trailingStyle.width = LayoutAxis.grow(hasBranch ? 180 : 70); trailingStyle.childGap = 4;
+        stripItems.push(new KeyedView("trailing", new Row("workspace-strip-trailing", stripTrailing, trailingStyle)));
       }
       workspaceControls.push(navigation);
       var stripStyle = new LayoutStyle(); stripStyle.width = LayoutAxis.grow(0, 880);
       stripStyle.padding = new Insets(10, 2, 10, 2); stripStyle.childGap = 4;
       stripStyle.wrapMode = haxeon.ui.LayoutWrapMode.Wrap;
       stripStyle.background = tokens.surfaceRaised;
-      stripStyle.radiusTopLeft = stripStyle.radiusTopRight = stripStyle.radiusBottomLeft = stripStyle.radiusBottomRight = 5;
+      stripStyle.radiusTopLeft = stripStyle.radiusTopRight = 0;
+      stripStyle.radiusBottomLeft = stripStyle.radiusBottomRight = 7;
       stripStyle.childAlignY = haxeon.ui.LayoutAlignmentY.Center;
       workspaceStrip = new KeyedView("workspace-strip", new Row("agent-workspace-strip", stripItems, stripStyle));
     }
@@ -1055,6 +1065,7 @@ class CodexSessionPanel implements View {
     composerStyle.padding = new Insets(14, 12, 14, 12);
     composerStyle.background = tokens.surfaceRaised;
     composerStyle.radiusTopLeft = composerStyle.radiusTopRight = composerStyle.radiusBottomLeft = composerStyle.radiusBottomRight = 8;
+    if (workspaceStrip != null) composerStyle.radiusBottomLeft = composerStyle.radiusBottomRight = 0;
     // Capture on a stable parent so the field's own patch updates retain keyboard behavior.
     var promptStyle = new LayoutStyle();
     promptStyle.width = LayoutAxis.grow();
@@ -1107,6 +1118,7 @@ class CodexSessionPanel implements View {
     var composerFrame = new LayoutStyle();
     composerFrame.width = LayoutAxis.grow(0, 880);
     composerFrame.padding = new Insets(1, 1, 1, 1);
+    composerFrame.childGap = workspaceStrip == null ? 0 : 1;
     composerFrame.background = tokens.border;
     composerFrame.radiusTopLeft = composerFrame.radiusTopRight = composerFrame.radiusBottomLeft = composerFrame.radiusBottomRight = 8;
     var contextRows:Array<KeyedView> = [];
@@ -1216,14 +1228,15 @@ class CodexSessionPanel implements View {
     for (action in footerControls) trailing.push(action);
     var trailingStyle = new LayoutStyle(); trailingStyle.width = LayoutAxis.grow(piActive ? 170 : 110); trailingStyle.childGap = 6;
     modelControls.push(new KeyedView("trailing", new Row("composer-trailing", trailing, trailingStyle)));
-    rows.push(new KeyedView("composer", new Column("codex-composer-frame", [new KeyedView("content", new Column("codex-composer", [
+    var composerChildren:Array<KeyedView> = [new KeyedView("content", new Column("codex-composer", [
       new KeyedView("prompt", new CodexPromptNode(promptNode)),
       new KeyedView("context", new Column("agent-context", contextRows)),
       new KeyedView("suggestions", new Column("agent-command-suggestions",completionRows)),
       new KeyedView("commands-error", new Text(view.commandsError == null ? "" : view.commandsError)),
       new KeyedView("models", new Row("codex-model-controls", modelControls, modelControlsStyle))
-    ], composerStyle))], composerFrame)));
-    if (workspaceStrip != null) rows.push(workspaceStrip);
+    ], composerStyle))];
+    if (workspaceStrip != null) composerChildren.push(workspaceStrip);
+    rows.push(new KeyedView("composer", new Column("codex-composer-frame", composerChildren, composerFrame)));
     if (piActive) rows.push(new KeyedView("composer-hint", hint));
     var viewport = new LayoutStyle();
     viewport.height = LayoutAxis.grow(MIN_SESSION_HEIGHT + inputStyle.height.value - 56);

@@ -472,6 +472,20 @@ class SessionChatUiTestMain {
           var footerHeight=footerWidth>=2560 ? 1440.0 : footerWidth>=1920 ? 1080.0 : 900.0;
           function footerBuild():RenderNode return footerContext.submit(footerPanel,new LayoutFrame(footerWidth,footerHeight));
           var footerRoot=footerBuild();checkHorizontalBounds(footerRoot,footerWidth);
+          var joinedFrame:RenderNode=null,draftSurface:RenderNode=null,joinedFooter:RenderNode=null;
+          footerRoot.walk(function(node) {
+            if(node.styleKey=="codex-composer-frame") joinedFrame=node;
+            if(node.styleKey=="codex-composer") draftSurface=node;
+            if(node.styleKey=="agent-workspace-strip") joinedFooter=node;
+          });
+          require(joinedFrame!=null && draftSurface!=null && joinedFooter!=null
+            && joinedFrame.children.indexOf(draftSurface)>=0 && joinedFrame.children.indexOf(joinedFooter)>=0,
+            "Composer and workspace footer do not share their outer frame");
+          var frameBounds=joinedFrame.globalBounds(),draftBounds=draftSurface.globalBounds(),footerBounds=joinedFooter.globalBounds();
+          require(Math.abs(footerBounds.y-(draftBounds.y+draftBounds.height)-1)<0.2
+            && Math.abs(draftBounds.x-footerBounds.x)<0.2 && Math.abs(draftBounds.width-footerBounds.width)<0.2
+            && footerBounds.y+footerBounds.height<=frameBounds.y+frameBounds.height+0.1,
+            "Composer/footer divider or shared edge is not contiguous");
           if (footerWidth>=1920) {
             var composer:RenderNode=null,strip:RenderNode=null,message:RenderNode=null;
             footerRoot.walk(function(node) {

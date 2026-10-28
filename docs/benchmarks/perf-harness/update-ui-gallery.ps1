@@ -7,10 +7,10 @@ $ErrorActionPreference = 'Stop'
 $items = @(Get-ChildItem -LiteralPath $RunsDirectory -Filter frame.png -Recurse |
     Sort-Object FullName | ForEach-Object {
         $name = $_.Directory.Name
-        $current = $name -match '^(composer-reference-|folder-icons-|sticky-|failed-tool-output-|parity-code-|html-ui-end-to-end$|svg-ui-end-to-end$|svg-(dark|light)-rendered$|remote-image-lifecycle$)'
+        $current = $name -match '^(ide-sessions-|chat-syntax-|composer-reference-|folder-icons-|sticky-|failed-tool-output-|parity-code-|html-ui-end-to-end$|svg-ui-end-to-end$|svg-(dark|light)-rendered$|remote-image-lifecycle$)'
         $category = if ($name -match '^composer-reference-') { 'Updated composer' }
-            elseif ($name -match '^folder-icons-') { 'Workbench' }
-            elseif ($name -match 'diff|tool-output|emphasis|parity-code') { 'Code and output' }
+            elseif ($name -match '^(ide-sessions-|folder-icons-)') { 'Workbench' }
+            elseif ($name -match 'chat-syntax|diff|tool-output|emphasis|parity-code') { 'Code and output' }
             elseif ($name -match 'image|svg|html') { 'Images and artifacts' }
             elseif ($name -match 'questions|history|repository|workflow') { 'Chat and workflows' }
             else { 'Earlier captures' }
@@ -25,6 +25,11 @@ $items = @(Get-ChildItem -LiteralPath $RunsDirectory -Filter frame.png -Recurse 
             category = $category
             theme = $theme
             final = $current
+            featured = $name -match '^(ide-sessions-|chat-syntax-)'
+            surface = if ($name -match '^ide-sessions-') { 'Full IDE with fixture conversation' }
+                elseif ($name -match '^(folder-icons-|ide-)') { 'Full IDE' }
+                elseif ($name -match '^(composer-reference-|chat-syntax-)') { 'Sessions pane only' }
+                else { 'Feature fixture' }
             width = [System.Net.IPAddress]::NetworkToHostOrder([BitConverter]::ToInt32($bytes, 16))
             height = [System.Net.IPAddress]::NetworkToHostOrder([BitConverter]::ToInt32($bytes, 20))
             src = 'data:image/png;base64,' + [Convert]::ToBase64String($bytes)
