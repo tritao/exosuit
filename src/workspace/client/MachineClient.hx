@@ -86,7 +86,10 @@ class MachineClient {
 		return current != null || queue.length > 0;
 
 	function workspaceReply(done:Null<(Null<MachineWorkspace>, Null<String>) -> Void>):(Null<Dynamic>, Null<String>) -> Void
-		return function(reply, failure) if (done != null) done(reply == null ? null : reply.workspace, failure);
+		return function(reply, failure) {
+			if (done != null)
+				done(reply == null ? null : reply.workspace, failure);
+		};
 
 	function request(message:Dynamic, ?done:(Null<Dynamic>, Null<String>) -> Void):Void {
 		if (!enabled) {
