@@ -60,6 +60,9 @@ for the next work phase. Severity is the reviewer's, not a priority order.
 - `Runtime.hx`: two doc comments are stacked above `patchSetRebuilding`. The first belongs on `patchSet`.
 - Static closures are guarded only on x64. The arm64 JIT (`jit_arm64.c`) was not updated.
 - No constructor-specific adapter test.
+- A throwing `liveRelease`/`liveRebuild` is reported with a generic message, because `callVoid` does not pass on the
+  app's exception text.
+- Arena blocks the patch JIT allocates (`temp.ctx.alloc`) are leaked instead of freed with the module.
 - Diff matching (`SourceLineMap`) lives only in memory, so a restored session matches lambdas by code alone. Persist
   the places and sources.
 - Adapters fill in only literal defaults. Any other default forces a guard.
