@@ -184,7 +184,7 @@ class SuitUnitTests {
 	/** The machine's workspaces: first-start import, edits, persistence, and the rules each edit keeps. */
 	static function machineCatalog():Void {
 		var temp = Sys.systemName() == "Windows" ? Sys.getEnv("TEMP") : "/tmp";
-		var base = haxe.io.Path.join([temp, "suit-machine-" + Std.random(1000000000)]);
+		var base = haxe.io.Path.join([temp, "suit-machine-" + Sys.getPid() + "-" + Std.int(Sys.time())]);
 		var one = haxe.io.Path.join([base, "one"]), two = haxe.io.Path.join([base, "two"]), gone = haxe.io.Path.join([base, "gone"]);
 		sys.FileSystem.createDirectory(one);
 		sys.FileSystem.createDirectory(two);
