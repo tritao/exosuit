@@ -15,6 +15,8 @@ using System.Text;
 namespace PerfHarness {
 	public class TopWindow {
 		public IntPtr Handle; public int ProcessId; public string ClassName; public string Title; public string Text;
+		/* A common Open/Save dialog: it hosts a shell view, which no crash or error box does. */
+		public bool FileDialog;
 	}
 
 	public static class Windows {
@@ -48,6 +50,7 @@ namespace PerfHarness {
 				if (w.ClassName == "#32770") {
 					var text = new StringBuilder();
 					EnumChildWindows(hwnd, (child, __) => {
+						if (ClassOf(child) == "SHELLDLL_DefView") w.FileDialog = true;
 						var t = TextOf(child);
 						if (t.Length > 0) text.Append(t.Replace("\r", " ").Replace("\n", " ")).Append(" | ");
 						return true;
@@ -94,7 +97,7 @@ by WerFault.exe or csrss.exe, or naming the run's programs.
 function Find-CrashDialogs($Baseline, $Tree) {
 	$found = @()
 	foreach ($w in [PerfHarness.Windows]::Visible()) {
-		if ($Baseline.Contains($w.Handle.ToInt64())) { continue }
+		if ($Baseline.Contains($w.Handle.ToInt64()) -or $w.FileDialog) { continue }
 		$owner = try { (Get-Process -Id $w.ProcessId -ErrorAction Stop).ProcessName } catch { '' }
 		$ownedByRun = $Tree.Contains($w.ProcessId)
 		$reporter = $owner -match '^(WerFault|csrss)$'
