@@ -24,6 +24,43 @@ for the next work phase. Severity is the reviewer's, not a priority order.
 - **Workbench: `syncScmDocumentMarkers` runs every 50 ms.** It resolves the scope three times per tick and stats
   folders, so a network drive can block the UI thread. Cache the scope and recompute on change.
 
+### From the landing review (2026-10-28)
+
+Agent sessions (`ui-exploration`):
+
+- `RpcWorkspaceWorkbenchClient.hx` (around 697 and 740) runs `Json.stringify` on the old and new view and a
+  `MessagePack.encode` on every publish, on the UI thread, for up to 4 MiB of history. Compare by revision instead.
+- `CodexSessionPanel.hx` Ctrl+V reads the clipboard synchronously and can PNG-encode a 4096-square bitmap on the UI
+  thread.
+- `AgentImageStaging.hx`: draft images expire after 10 minutes, but the composer still shows them as attached until
+  sending fails.
+- `CodexProvider.hx` pins images before `turn/start`. If that fails, the session is "uncertain", the images stay
+  pinned, and the two-image limit blocks new uploads until it reconciles. Pi and Claude have similar leftovers.
+- `uikit-native/artifact_preview.cpp` `fail()` opens a modal `MessageBoxW`, which stalls unattended smoke runs
+  (`CLAUDE.md`). Report the failure through the return value.
+- `GitScmRepositoryHandle` creates worktrees inside the repository, so the parent's status shows them as untracked.
+  This is part of "worktrees outside the project folder" above.
+- `SessionSvgView.hx` hashes the whole SVG twice per build. Cache the hash.
+- `CodexMarkdown.imageAt` runs without the inline budget for every `!`, so a line like `![![![` is quadratic.
+- `CodexHistoryPages.following` evicts the newest older cursor after 128 handles, so very deep paging forces
+  "Reset to latest".
+
+Live mode and suit:
+
+- The patching thread's callee-saved registers are not scanned (`hlpatch.c` and `hl_gc_root_holder`), so a static
+  closure held only in a register by a JIT caller is missed. LiveHost patches between ticks and is not affected;
+  embedders that patch from inside the app are. `setjmp` into a local and scan it.
+- The conservative scan of other threads' stacks can refuse a patch over a stale spill slot that `liveRelease`
+  cannot clear.
+- `SuitTray.show` clears its actions even when NativeKit ignores the call because a menu is already open, so a choice
+  from the visible menu does nothing.
+- `nativekit_win.cpp` `cancel_tray_menu`: after the 3 s timeout the abandoned thread can still post its close message,
+  which a newer menu may take as its own choice. Tag the message with the menu's generation.
+- `run_tray_menu` registers its window class under the exe's `HINSTANCE`. Use the DLL's, so a reload doesn't keep the
+  old window procedure.
+- `UiContext.releaseRetained` leaves animations and commands in place, so handlers they hold can still refuse a
+  guarded patch after release. Note this in `LIVE_PATCHING.md`.
+
 ## Low
 
 ### suit
