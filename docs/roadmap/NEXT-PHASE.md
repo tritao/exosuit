@@ -61,6 +61,22 @@ Live mode and suit:
 - `UiContext.releaseRetained` leaves animations and commands in place, so handlers they hold can still refuse a
   guarded patch after release. Note this in `LIVE_PATCHING.md`.
 
+### From GUI verification (2026-10-28)
+
+- Agent CLIs that are command shims (`codex.cmd`) start as `cmd /d /c <path>`. A path with parentheses (for example
+  under `Program Files (x86)`) or with `&` or `^` still fails, because NativeKit's `append_argument` escapes quotes in
+  a way `cmd` does not understand. Add a NativeKit spawn option that takes a verbatim command line, then pass
+  `/d /s /c ""<path>""`.
+- A live patch without guards calls `liveRebuild` but not `liveRelease`, so `UiContext.customPaintKeys` and
+  self-updating builders are kept. An edit to a custom paint handler's body may not show until its key changes.
+- The workspace service keeps its state in `%LOCALAPPDATA%\Exosuit\workspaces\<hash>`, which `PRAGTICAL_PORTABLE`
+  does not cover, so editor sessions on a test workspace leave state there.
+- `scripts/test-workspace-agents.py` is POSIX-only (the bash `haxeon` wrapper, symlinks, `LD_LIBRARY_PATH`, running
+  `fake-codex.py` directly). A Windows run works with a `.cmd` wrapper around the fake, `;`-joined `PATH` entries and
+  `hl.exe`; make the script do that.
+- Starting a Claude session asks to trust the folder in Claude's own terminal UI, and Codex shows its own trust prompt.
+  Consider passing the workspace's trust decision through, or explaining the prompt.
+
 ## Low
 
 ### suit
