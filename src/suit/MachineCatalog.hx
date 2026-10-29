@@ -138,7 +138,9 @@ class MachineCatalog {
 		var directory = Path.directory(path);
 		if (directory.length > 0 && !FileSystem.exists(directory))
 			FileSystem.createDirectory(directory);
-		sys.io.AtomicFile.write(path, Json.stringify({version: VERSION, id: state.id, name: state.name, workspaces: state.workspaces}, null, "\t") + "\n");
+		var content = Json.stringify({version: VERSION, id: state.id, name: state.name, workspaces: state.workspaces}, null, "	") + "
+";
+		if (FileSystem.exists(path)) sys.io.AtomicFile.write(path, content) else sys.io.AtomicFile.create(path, content);
 	}
 
 	static function copy(workspace:MachineWorkspace):MachineWorkspace
