@@ -58,7 +58,7 @@ class RpcCompatibilityTests {
   var agentAction:AgentAction={workspace:"w",instance:"i",id:"a",action:"prompt",text:"hi",request:null};
   require(WorkspaceAgentProtocol.ACTION.decodeRequest(bytes("8601a17702a16903a16104a670726f6d707405a2686906c0")).action == "prompt",
     "Legacy Agent prompt vector no longer decodes");
-  require(WorkspaceAgentProtocol.ACTION.encodeRequest(agentAction).compare(bytes("8901a17702a16903a16104a670726f6d707405a2686906c007c008c009c0"))==0,"Agent prompt vector changed");
+  require(WorkspaceAgentProtocol.ACTION.encodeRequest(agentAction).compare(bytes("8b01a17702a16903a16104a670726f6d707405a2686906c007c008c009c00ac00bc0"))==0,"Agent prompt vector changed");
   var agentWideRoot="";for(_ in 0...1024) agentWideRoot+="😀";
   var agentWideName="";for(_ in 0...256) agentWideName+="😀";
   var agents:Array<AgentRecord> = [];
@@ -187,7 +187,7 @@ class RpcCompatibilityTests {
 		var createGroup:RenameGroup={workspace:"w",epoch:"e",operation:"op",group:"g",expectedRevision:0,name:"N",action:"create",parent:"work",cwd:null,order:2};
 		require(WorkspaceProtocol.GROUP.encodeRequest(createGroup).compare(bytes("8a01a17702a16503a26f7004a167050006a14e07a663726561746508a4776f726b09c00a02"))==0,"Group tree mutation vector changed");
 		var groupedOpen:TerminalOpen={workspace:"w",instance:"i",id:"t",create:true,columns:80,rows:24,group:"g",directory:"/w"};
-		require(WorkspaceTerminalProtocol.OPEN.encodeRequest(groupedOpen).compare(bytes("8801a17702a16903a17404c30550061807a16708a22f77"))==0,"Grouped terminal open vector changed");
+		require(WorkspaceTerminalProtocol.OPEN.encodeRequest(groupedOpen).compare(bytes("8b01a17702a16903a17404c30550061807a16708a22f7709c00ac00bc0"))==0,"Grouped terminal open vector changed");
 
 		require(MessagePackFrame.pack(query).compare(bytes("484d504b0100000000048101a177")) == 0, "Frame vector changed");
 		// Unknown map fields are skipped even when they contain nested values; scalar/collection wire defaults remain domain-validated.
