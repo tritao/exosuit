@@ -93,6 +93,15 @@ import scm.ScmSource;
  */
 class ExosuitApp implements DesktopUiApplication {
 	public final ui:UiContext;
+
+	/** Let go of every retained UI tree before a guarded live patch: the context's, and the nodes session panels keep. */
+	public function releaseRetained():Void {
+		for (pane in host.panes) for (item in pane.items) {
+			var agent = UiEditorTabs.agent(item);
+			if (agent != null) agent.panel.releaseRetained();
+		}
+		ui.releaseRetained();
+	}
 	public final theme:Theme;
 	var darkPalette:Bool;
 	final githubOrigins:Map<String, String> = [];

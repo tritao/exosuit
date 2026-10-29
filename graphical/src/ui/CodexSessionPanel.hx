@@ -60,6 +60,11 @@ class CodexSessionPanel implements View {
   var requestAnchor:Null<RenderNode> = null;
   var transcriptViewport:Null<RenderNode> = null;
   var historyNodes:Map<String, RenderNode> = [];
+
+  /** Drop the render nodes kept for scrolling. They link the whole old tree and its handlers (GraphicalMain.liveRelease). */
+  public function releaseRetained():Void {
+    requestAnchor = null; transcriptViewport = null; historyNodes = [];
+  }
   var historyAnchor:Null<{key:String, y:Float}> = null;
   var historyReturnToLatest = false;
   var prompt = "";

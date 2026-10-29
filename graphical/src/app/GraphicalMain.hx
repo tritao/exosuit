@@ -76,7 +76,7 @@ class GraphicalMain {
 	**/
 	@:keep public static function liveRelease():Void {
 		var current = app;
-		if (current != null) current.ui.releaseRetained();
+		if (current != null) current.releaseRetained();
 	}
 
 	/** After that patch, applied or refused: the next frame builds the UI from the code that now runs. */
