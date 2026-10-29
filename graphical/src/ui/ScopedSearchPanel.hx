@@ -43,6 +43,10 @@ class ScopedSearchPanel implements View {
 	/** The query's text input from the last build, so a focus request goes straight to it. */
 	var queryInput:Null<RenderNode>;
 
+	/** Drop the kept input node, which links the whole old tree and its handlers (GraphicalMain.liveRelease). */
+	public function releaseRetained():Void
+		queryInput = null;
+
 	public function new(workspace:Workspace, directory:Void->Null<String>, open:SearchMatch->Void, requestFrame:Void->Void, maximum:Void->Int) {
 		this.workspace = workspace; this.directory = directory; this.open = open; this.requestFrame = requestFrame; this.maximum = maximum;
 		search = new WorkspaceSearch(workspace, workspace.jobs, requestFrame, scopedFiles);

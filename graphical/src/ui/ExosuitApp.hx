@@ -100,6 +100,7 @@ class ExosuitApp implements DesktopUiApplication {
 			var agent = UiEditorTabs.agent(item);
 			if (agent != null) agent.panel.releaseRetained();
 		}
+		if (scopedSearch != null) scopedSearch.releaseRetained();
 		ui.releaseRetained();
 	}
 	public final theme:Theme;

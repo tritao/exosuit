@@ -79,7 +79,7 @@ class GraphicalMain {
 		if (current != null) current.releaseRetained();
 	}
 
-	/** After that patch, applied or refused: the next frame builds the UI from the code that now runs. */
+	/** After every live patch, applied or refused: the next frame builds the UI from the code that now runs. */
 	@:keep public static function liveRebuild():Void {
 		var current = app;
 		if (current != null) current.requestFrame();
