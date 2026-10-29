@@ -45,6 +45,9 @@ class WorkbenchPanel implements View {
 	public var onError:Null<String->Void>;
 	/** Closes a catalog terminal and its views; selection actions use it. */
 	public var closeTerminal:Null<TerminalRecord->Void>;
+	/** Opens a folder picker; with `hasFolder`, the empty Workbench offers it when no folder is open. */
+	public var chooseFolder:Null<Void->Void>;
+	public var hasFolder:Null<Void->Bool>;
 	var lastReportedError:Null<String>;
 	// Selection actions run one step at a time: the service drops a mutation while another is in flight.
 	var batchKeys:Array<String> = [];
@@ -664,10 +667,39 @@ class WorkbenchPanel implements View {
 		return new Row("workbench-header-actions", actions, toolbarStyle).build(context);
 	}
 
+	/** What to do first when the Workbench has nothing: open a folder, or make the first group. */
+	function emptyState():Null<View> {
+		var catalog = client.terminalCatalog();
+		var choose = chooseFolder, folder = hasFolder;
+		var style = new LayoutStyle(); style.width = LayoutAxis.stretch(); style.childGap = 8; style.padding = new Insets(12, 8, 12, 8);
+		var hint = haxeon.ui.core.TextStyleOverride.text(12);
+		if (catalog == null && choose != null && folder != null && !folder()) {
+			var button = new Button("Open Folder…", null, function() choose(), "workbench-open-folder");
+			button.variant = ButtonVariant.Primary;
+			return new Column("workbench-empty", [
+				new KeyedView("text", new Text("Open a folder to start. Its groups, sessions and terminals appear here.", null, null, hint)),
+				new KeyedView("open", button)
+			], style);
+		}
+		if (catalog != null && catalog.groups.length == 0 && draft == null && client.canEditGroups()) {
+			var button = new Button("New group", null, function() beginGroup({id: workspace.client.WorkspaceIds.create("group"),
+				name: "", cwd: null, revision: 0, parent: null, order: model.nextOrder(null)}, true), "workbench-first-group");
+			button.variant = ButtonVariant.Primary;
+			button.enabled = !pending;
+			return new Column("workbench-empty", [
+				new KeyedView("text", new Text("No groups yet. A group holds agent sessions and terminals for a folder.", null, null, hint)),
+				new KeyedView("new", button)
+			], style);
+		}
+		return null;
+	}
+
 	public function build(context:BuildContext):RenderNode {
 		syncState();
 		var selected = groupFor(tree.selectedKey);
 		var rows:Array<KeyedView> = [new KeyedView("tree", tree)];
+		var start = emptyState();
+		if (start != null) rows.push(new KeyedView("empty-state", start));
 		var error = draftError == null ? client.terminalCatalogError() : draftError;
 		if (error == null) error = client.agentService().agentError();
 		if (error != lastReportedError) {

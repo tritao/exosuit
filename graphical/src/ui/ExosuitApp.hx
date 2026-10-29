@@ -1520,6 +1520,8 @@ class ExosuitApp implements DesktopUiApplication {
 			requestFrame();
 		};
 		workbenchPanel.closeTerminal = closeCatalogTerminal;
+		workbenchPanel.chooseFolder = function() application.savedWorkspaces.addPicker();
+		workbenchPanel.hasFolder = function() return application.savedWorkspaces.isOpen();
 		host.onActiveTabChanged = syncWorkbenchSessionSelection;
 		syncWorkbenchSessionSelection(host.activeTab());
 		if (sidebar.find("workbench") == null)
