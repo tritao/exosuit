@@ -13,10 +13,11 @@ class PiProviderTestMain {
  static function require(ok:Bool,why:String):Void {if(!ok) throw why;}
  static function main():Void {
   var args=Sys.args(),root=args[0],script=args[1],clock=function() return Sys.time()*1000;
+  var python=Sys.getEnv("EXOSUIT_TEST_PYTHON");if(python==null || python=="") python="python3";
   var processes=new ProcessManager(),dirs=new WorkspaceDirectories(root);
   var seed=new WorkspaceService("w","e",[{id:"work",name:"Work",cwd:root,revision:1}]);
   var store=new WorkspaceSqliteStore(root+"/agents.sqlite","w",seed.snapshot(),32,root);
-  var pi=new PiProvider(dirs,function() return seed.snapshot().groups,processes,clock,root,store,"python3",script);
+  var pi=new PiProvider(dirs,function() return seed.snapshot().groups,processes,clock,root,store,python,script);
   var provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, [new workspace.provider.CodexProvider("owner", dirs, function() return seed.snapshot().groups, processes, clock, store, "missing-codex", null, null), pi], store);
   var pair=MemoryTransport.pair(),client=new RpcConnection(pair.client,clock),server=new RpcConnection(pair.server,clock);
   provider.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
@@ -114,7 +115,7 @@ class PiProviderTestMain {
   var persisted=store.loadAgents();require(persisted[0].thread==id && persisted[0].provider=="pi" && persisted[0].replay != null,"Persisted session/replay missing");
   provider.dispose();client.close();server.close();
   pair=MemoryTransport.pair();client=new RpcConnection(pair.client,clock);server=new RpcConnection(pair.server,clock);
-  pi=new PiProvider(dirs,function() return seed.snapshot().groups,processes,clock,root,store,"python3",script);
+  pi=new PiProvider(dirs,function() return seed.snapshot().groups,processes,clock,root,store,python,script);
   provider=new workspace.provider.WorkspaceAgentService("w", "owner", dirs.root, [new workspace.provider.CodexProvider("owner", dirs, function() return seed.snapshot().groups, processes, clock, store, "missing-codex", null, null), pi], store);
   provider.bind(server,[WorkspaceAgentProtocol.READ,WorkspaceAgentProtocol.CONTROL]);
   for(_ in 0...10) provider.poll();
@@ -124,6 +125,7 @@ class PiProviderTestMain {
   action("prompt","after-resume");until("completed");
   action("prompt","malformed");until("uncertain");
   action("connect");until("idle");action("prompt","oversized");until("uncertain");
+  require(currentView().error!=null && currentView().error.indexOf("Pi frame exceeded bound")>=0,"Oversized unterminated Pi frame did not hit its bound");
   sys.FileSystem.deleteFile(id);
   action("connect");require(currentView().connectionState=="disconnected" && currentView().error.indexOf("missing")>=0,"Missing native session silently created a replacement");
   // A read-only attachment cannot mutate Pi through the Codex routing boundary.
@@ -162,19 +164,22 @@ class PiProviderTestMain {
   c.put("long-title","t","tool",StringTools.lpad("","x",3000),"text","","completed");
   require(c.snapshot()[5].title.length==256 && c.snapshot()[5].truncated,"Tool title retention was unbounded");
   provider.dispose();client.close();server.close();ro.close();roServer.close();
-  var silent=processes.start("python3",[script,"--session-id","11111111-1111-4111-a111-111111111111","--silent"],root);
+  var silent=processes.start(python,[script,"--session-id","11111111-1111-4111-a111-111111111111","--silent"],root);
   var t=new workspace.provider.PiTransport(silent),callbacks=0;
   t.request("initialize",{},0,function(r) {require(r.error != null,"Missing control timeout");callbacks++;});
   t.poll(60001);require(callbacks==1,"Control request did not time out");
   for(i in 0...33) t.request("set_model",{model:"fixture"},60001,function(r) {require(r.error != null,"Unexpected control completion");callbacks++;});
   require(callbacks==2,"Pending request limit was not enforced");
-  require(!t.send({text:StringTools.lpad("","x",270000)}),"Oversized outgoing frame accepted");
-  var accepted=0;
-  while(t.send({text:StringTools.lpad("","x",200000)})) {accepted++;require(accepted<8,"Output queue was unbounded");}
-  require(accepted>0,"Bounded output queue accepted nothing");
   t.close("Fixture shutdown");require(callbacks==34,"Control callbacks were lost or completed twice");
   t.close("Duplicate shutdown");require(callbacks==34,"Close completed callbacks twice");
-  processes.release(silent);processes.shutdown();
+  processes.release(silent);
+  var silentQueue=processes.start(python,[script,"--session-id","11111111-1111-4111-a111-111111111111","--silent"],root);
+  var bounded=new workspace.provider.PiTransport(silentQueue);
+  require(!bounded.send({text:StringTools.lpad("","x",workspace.provider.PiTransport.MAX_FRAME_BYTES)}),"Oversized outgoing frame accepted");
+  var accepted=0;
+  while(bounded.send({text:StringTools.lpad("","x",200000)})) {accepted++;require(accepted<=32,"Output queue was unbounded");}
+  require(accepted>0,"Bounded output queue accepted nothing");
+  bounded.close("Fixture shutdown");processes.release(silentQueue);processes.shutdown();
   Sys.println("PASS: native Pi routing, streaming, controls, approval/questions, interrupt, detach, explicit resume, uncertain delivery, malformed/bounded frames and replay");
  }
 }

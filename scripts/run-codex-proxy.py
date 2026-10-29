@@ -5,9 +5,20 @@ Owns only the proxy child. No daemon lifetime or inference policy is changed.
 """
 import base64,hashlib,json,os,queue,selectors,struct,subprocess,sys,threading,time,signal
 
-LIMIT=262144
-QUEUE=1048576
+# Keep these byte limits in sync with CodexTransport. Each queue is bounded;
+# a complete maximum-sized message and its WebSocket framing fit at once.
+LIMIT=6*1024*1024
+QUEUE=8*1024*1024
 GUID=b'258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
+
+def jsonl_payload(payload):
+    payload.decode('utf-8')
+    if b'\n' in payload:
+        value=json.loads(payload)
+        try: payload=json.dumps(value,ensure_ascii=False,separators=(',',':')).encode('utf-8')
+        except UnicodeEncodeError: payload=json.dumps(value,ensure_ascii=True,separators=(',',':')).encode('utf-8')
+    if len(payload)>LIMIT: raise ValueError('Codex JSONL frame exceeds bound')
+    return payload
 
 def frame(payload,opcode=1):
     mask=os.urandom(4)
@@ -81,10 +92,12 @@ def main_windows():
                     at=lines.find(b'\n')
                     if at<0: break
                     if at>LIMIT: raise ValueError('Codex JSONL frame exceeds bound')
-                    line=bytes(lines[:at]);del lines[:at+1]
-                    if not line: continue
+                    line=bytes(lines[:at])
+                    if not line: del lines[:at+1];continue
                     line.decode('utf-8')
-                    append(network,frame(line))
+                    framed=frame(line)
+                    if len(framed)>QUEUE-len(network): break
+                    del lines[:at+1];append(network,framed)
                 if len(lines)>LIMIT and b'\n' not in lines: raise ValueError('Codex JSONL frame exceeds bound')
                 for _ in range(32):
                     if len(incoming)<2: break
@@ -98,6 +111,7 @@ def main_windows():
                         n=struct.unpack('!Q',incoming[2:10])[0];offset=10
                     if n>LIMIT or (opcode>=8 and (not fin or n>125)): raise ValueError('Codex WebSocket frame exceeds bound')
                     if len(incoming)<offset+n: break
+                    if fin and opcode in (0,1) and QUEUE-len(output)<LIMIT+1: break
                     payload=bytes(incoming[offset:offset+n]);del incoming[:offset+n]
                     if opcode==8: closing=True;break
                     if opcode==9: append(network,frame(payload,10));continue
@@ -110,9 +124,7 @@ def main_windows():
                     fragment.extend(payload)
                     if fin:
                         fragmenting=False
-                        fragment.decode('utf-8')
-                        payload=bytes(fragment)
-                        if b'\n' in payload: payload=json.dumps(json.loads(payload),separators=(',',':')).encode()
+                        payload=jsonl_payload(bytes(fragment))
                         append(output,payload+b'\n');fragment.clear()
 
             if network:
@@ -197,10 +209,12 @@ def main():
                 at=lines.find(b'\n')
                 if at<0: break
                 if at>LIMIT: raise ValueError('Codex JSONL frame exceeds bound')
-                line=bytes(lines[:at]);del lines[:at+1]
-                if not line: continue
+                line=bytes(lines[:at])
+                if not line: del lines[:at+1];continue
                 line.decode('utf-8')  # Text frames must carry valid UTF-8.
-                append(network,frame(line))
+                framed=frame(line)
+                if len(framed)>QUEUE-len(network): break
+                del lines[:at+1];append(network,framed)
             if len(lines)>LIMIT and b'\n' not in lines: raise ValueError('Codex JSONL frame exceeds bound')
             for _ in range(32):
                 if len(incoming)<2: break
@@ -214,6 +228,7 @@ def main():
                     n=struct.unpack('!Q',incoming[2:10])[0];offset=10
                 if n>LIMIT or (opcode>=8 and (not fin or n>125)): raise ValueError('Codex WebSocket frame exceeds bound')
                 if len(incoming)<offset+n: break
+                if fin and opcode in (0,1) and QUEUE-len(output)<LIMIT+1: break
                 payload=bytes(incoming[offset:offset+n]);del incoming[:offset+n]
                 if opcode==8: closing=True;break
                 if opcode==9: append(network,frame(payload,10));continue
@@ -226,9 +241,7 @@ def main():
                 fragment.extend(payload)
                 if fin:
                     fragmenting=False
-                    fragment.decode('utf-8')
-                    payload=bytes(fragment)
-                    if b'\n' in payload: payload=json.dumps(json.loads(payload),separators=(',',':')).encode()
+                    payload=jsonl_payload(bytes(fragment))
                     append(output,payload+b'\n');fragment.clear()
     finally:
         selector.close()

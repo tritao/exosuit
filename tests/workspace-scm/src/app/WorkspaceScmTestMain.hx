@@ -44,6 +44,12 @@ class WorkspaceScmTestMain {
 	}
 
 	static function compatibility():Void {
+		var legacy:workspace.service.WorkspaceScmProtocol.WorkspaceScmRepository = {
+			id:"legacy", provider:"git", root:"/repo", kind:"worktree", trusted:true,
+			staging:true, partialStaging:true, amend:true, branches:true, remotes:true, stash:false
+		};
+		var decoded:workspace.service.WorkspaceScmProtocol.WorkspaceScmRepository = haxeon.wire.MessagePack.decode(haxeon.wire.MessagePack.encode(legacy));
+		require(decoded.worktrees != true, "Legacy repository unexpectedly advertised worktree creation");
 		var oldRequest = WorkspaceScmProtocol.SNAPSHOT.decodeRequest(bytes("8301a17702a17263928101a17892c301"));
 		require(oldRequest.workspace == "w" && oldRequest.repository == "r",
 			"an older SCM client must ignore an unknown optional field containing nested values");
@@ -59,6 +65,8 @@ class WorkspaceScmTestMain {
 	}
 
 	static function serviceAndClient(root:String, trustPath:String):Void {
+		require(Sys.command(gitPath(), ["-C", root, "remote", "add", "origin", "git@github.com:example/project.git"]) == 0,
+			"could not set isolated GitHub origin fixture");
 		var processes = new ProcessManager(), now = function() return Sys.time() * 1000;
 		var workspaces = new WorkspaceService("workspace", "test-epoch", [{id: "work", name: "Work", cwd: root, revision: 1}]);
 		var scm = new WorkspaceScmService("workspace", [root], processes, gitPath(), null, trustPath);
@@ -85,6 +93,11 @@ class WorkspaceScmTestMain {
 		wait(server, scm, connections, source, function() return source.repositories().length == 1
 			&& source.snapshot(source.repositories()[0].id) != null, "read-only client receives the real Git snapshot");
 		var repository = source.repositories()[0];
+		require(source.canReadOrigin(repository.id), "Origin capability was not advertised");
+		var origin:Null<String> = null;
+		source.origin(repository.id, function(result) { if (result.value != null) origin = result.value; });
+		wait(server, scm, connections, source, function() return origin != null, "GitHub origin read resolves");
+		require(origin == "https://github.com/example/project", "GitHub origin was not canonicalized over RPC");
 		var initialSnapshot = source.snapshot(repository.id);
 		require(initialSnapshot != null && repository.providerId == "git" && initialSnapshot.head.branch != null,
 			"the RPC source decodes the agent's Git repository and branch state");
@@ -203,6 +216,25 @@ class WorkspaceScmTestMain {
 		var writerSnapshot = writerSource.snapshot(repository.id);
 		if (writerSnapshot == null) throw "Missing writer SCM snapshot";
 		var revision = writerSnapshot.revision;
+		var worktreeFeature = writerSource.features(repository.id);
+		require(worktreeFeature != null && worktreeFeature.worktrees, "Trusted workspace did not advertise worktree capability");
+		var worktreeResult:Null<String> = null;
+		writerSource.apply(repository.id, "dedupe-worktree", revision, ScmOperation.CreateWorktree("rpc-worktree", "rpc-worktree-branch"),
+			function(result) worktreeResult = result.error == null ? "success" : result.error.code);
+		wait(server, scm, connections, writerSource, function() return worktreeResult != null, "worktree operation resolves");
+		require(worktreeResult == "success" && sys.FileSystem.exists(root + "/rpc-worktree/tracked.txt"), "RPC worktree was not created: " + worktreeResult);
+		worktreeResult = null;
+		writerSource.apply(repository.id, "dedupe-worktree", revision, ScmOperation.CreateWorktree("rpc-worktree", "rpc-worktree-branch"),
+			function(result) worktreeResult = result.error == null ? "success" : result.error.code);
+		wait(server, scm, connections, writerSource, function() return worktreeResult != null, "worktree retry resolves");
+		require(worktreeResult == "success", "Worktree retry did not return its recorded outcome");
+		wait(server, scm, connections, writerSource, function() {
+			var latest = writerSource.snapshot(repository.id);
+			return latest != null && Int64.compare(latest.revision, revision) > 0;
+		}, "worktree creation refreshes the repository snapshot");
+		var afterWorktree = writerSource.snapshot(repository.id);
+		if (afterWorktree == null) throw "Missing snapshot after worktree creation";
+		revision = afterWorktree.revision;
 		var applied = 0, failures:Array<String> = [];
 		writerSource.apply(repository.id, "dedupe-create-branch", revision,
 			ScmOperation.CreateBranch("scm-dedupe-test"), function(result) {

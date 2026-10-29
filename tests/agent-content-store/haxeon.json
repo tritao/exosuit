@@ -1,0 +1,1 @@
+{"version":1,"package":{"name":"exosuit-agent-content-store-test"},"entry":"app.AgentContentStorageTest","sourceRoots":["../workspace-agents/src"],"scopeSourceRoots":false,"dependencies":{"exosuit-agent":{"path":"../../agent"}},"target":"host","outputDir":"build"}

@@ -30,6 +30,7 @@ import plugin.PluginStatusSide;
 /** A fixed-height status line: actions first, then messages, then document context. */
 class StatusBarView implements View {
 	public static inline final HEIGHT:Float = 26;
+	static inline final LABEL_SIZE:Float = 13;
 	final data:StatusBarData;
 	public function new(data:StatusBarData) this.data = data;
 
@@ -67,7 +68,7 @@ class StatusBarView implements View {
 				connection.classes.push("status-remote");
 				connection.leadingView = new Icon("remote-icon", IconName.Remote, 16, context.theme.tokens.accent);
 				connection.labelView = new Text("Remote", null, null,
-					new TextStyleOverride(null, 12, null, TextWrap.None, null, null, null, context.theme.tokens.textSecondary));
+					new TextStyleOverride(null, LABEL_SIZE, null, TextWrap.None, null, null, null, context.theme.tokens.textSecondary));
 				connection.accessibilityLabel = data.remoteDetails + ". Open Remote Access";
 				remoteNode = tooltip("remote", connection, data.remoteDetails).build(context);
 				remoteNode.layout.style.width = LayoutAxis.fixed(sizes.remote);
@@ -90,7 +91,7 @@ class StatusBarView implements View {
 				button.variant = ButtonVariant.Navigation;
 				button.accessibilityLabel = data.indentation + ". Choose document indentation";
 				button.labelView = new MiddleEllipsisText("status-indentation-label", data.indentation, false,
-					new TextStyleOverride(null, 12, null, TextWrap.None, null, null, null, context.theme.tokens.textSecondary));
+					new TextStyleOverride(null, LABEL_SIZE, null, TextWrap.None, null, null, null, context.theme.tokens.textSecondary));
 				indentationNode = tooltip("indentation", button, data.indentationDetails == null ? data.indentation : data.indentationDetails).build(context);
 				root.add(indentationNode);
 			}
@@ -207,7 +208,7 @@ class StatusBarView implements View {
 			button.leadingIcon = item.icon;
 			button.iconSize = 14;
 			button.labelView = new MiddleEllipsisText("status-item-label", item.text, false,
-				new TextStyleOverride(null, 12, null, TextWrap.None, null, null, null, context.theme.tokens.textSecondary));
+				new TextStyleOverride(null, LABEL_SIZE, null, TextWrap.None, null, null, null, context.theme.tokens.textSecondary));
 			var description = item.tooltip.length == 0 ? item.text : item.tooltip;
 			children.push(new KeyedView(item.owner + ":" + item.id,
 				tooltip("status-item:" + item.owner + ":" + item.id, button, description)));
@@ -257,7 +258,7 @@ class StatusBarView implements View {
 	function label(key:String, text:String, middle:Bool, context:BuildContext):View {
 		var singleLine = ~/\s*[\r\n]+\s*/g.replace(text, " ");
 		return new MiddleEllipsisText(key, singleLine, middle,
-			new TextStyleOverride(null, 12, null, TextWrap.None, null, null, null, context.theme.tokens.textSecondary));
+			new TextStyleOverride(null, LABEL_SIZE, null, TextWrap.None, null, null, null, context.theme.tokens.textSecondary));
 	}
 }
 

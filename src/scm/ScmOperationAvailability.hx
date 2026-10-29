@@ -7,6 +7,7 @@ class ScmOperationAvailability {
 			case Commit(_, amend) | ScopedCommit(_, amend, _): features.staging && (!amend || features.amend);
 			case StagePatch(_, _) | UnstagePatch(_, _) | RevertPatch(_, _): features.partialStaging;
 			case Checkout(_) | CreateBranch(_): features.branches;
+			case CreateWorktree(_, _): features.worktrees;
 			case Fetch(_) | Pull | Push: features.remotes;
 		};
 	}

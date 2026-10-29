@@ -158,6 +158,11 @@ class WorkspaceScmService {
 		return core.branches(repositoryId, nextGeneration++, complete);
 	}
 
+	public function origin(repositoryId:String, complete:ScmJobResult<String>->Void):ScmJob<String> {
+		if (!knownRepository(repositoryId)) return failed(null, complete, "not_found", "Repository is outside this workspace");
+		return core.origin(repositoryId, nextGeneration++, complete);
+	}
+
 	public function error(repositoryId:String):Null<WorkspaceScmError> {
 		if (!knownRepository(repositoryId)) return null;
 		var error = core.error(repositoryId);
@@ -225,6 +230,11 @@ class WorkspaceScmService {
 		var operation:ScmOperation;
 		try operation = decodeOperation(request) catch (failure:Dynamic)
 			return failed(null, complete, "invalid_request", Std.string(failure));
+		switch operation {
+			case CreateWorktree(_, _):
+				if (!worktreeInScope(request.repository)) return failed(null, complete, "invalid_directory", "Worktrees must be created inside the workspace");
+			case _:
+		}
 		if (!makeRoom()) return failed(null, complete, "operation_limit", "SCM operation history is full");
 		var record = new ScmOperationRecord(request.operationId, signature);
 		operations.set(record.id, record);
@@ -343,7 +353,17 @@ class WorkspaceScmService {
 		return {id: value.id, provider: value.providerId, root: value.root, kind: value.kind,
 			parentId: value.parentId, trusted: value.trusted, staging: features.staging,
 			partialStaging: features.partialStaging, amend: features.amend, branches: features.branches,
-			remotes: features.remotes, stash: features.stash};
+			remotes: features.remotes, stash: features.stash, worktrees: features.worktrees && worktreeInScope(value.id), originRead: value.providerId == "git"};
+	}
+
+	function worktreeInScope(id:String):Bool {
+		var repository = core.repository(id), mapped = repositoryRoots.get(id);
+		if (repository == null || mapped == null) return false;
+		for (rootId in mapped) {
+			var root = rootsById.get(rootId);
+			if (root != null && within(root.path, normalize(repository.root))) return true;
+		}
+		return false;
 	}
 
 	static function snapshotRecord(value:ScmSnapshot):WorkspaceScmProtocol.WorkspaceScmSnapshot {
@@ -378,6 +398,7 @@ class WorkspaceScmService {
 			case "revert_patch": RevertPatch(required(request.path, "path"), required(request.patch, "patch"));
 			case "checkout": Checkout(required(request.reference, "reference"));
 			case "create_branch": CreateBranch(required(request.name, "name"));
+			case "create_worktree": CreateWorktree(required(request.path, "directory"), required(request.name, "branch"));
 			case "fetch": Fetch(request.remote);
 			case "pull": Pull;
 			case "push": Push;
@@ -500,6 +521,24 @@ private class WorkspaceScmBinding {
 				}
 				context.respond({workspace: service.workspace, repository: request.repository,
 					branches: [for (branch in result.value) WorkspaceScmService.branchRecord(branch)]});
+			});
+			cancel = track(job);
+		});
+
+		connection.register(WorkspaceScmProtocol.ORIGIN, function(request, context) {
+			if (!allowRead(context) || !checkWorkspace(request == null ? null : request.workspace, context)) return;
+			if (request.repository == null || request.repository.length == 0 || request.repository.length > 256) {
+				fail(context, "invalid_request", "Invalid repository identity"); return;
+			}
+			var cancel:Void->Void = null;
+			var job = service.origin(request.repository, function(result) {
+				untrack(cancel);
+				if (closed || context.isCancelled()) return;
+				if (result.error != null || result.value == null) {
+					var error = result.error;
+					fail(context, error == null ? "not_found" : error.code, error == null ? "Origin is unavailable" : error.message); return;
+				}
+				context.respond({workspace:service.workspace, repository:request.repository, origin:result.value});
 			});
 			cancel = track(job);
 		});

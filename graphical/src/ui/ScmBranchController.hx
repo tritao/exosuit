@@ -45,7 +45,8 @@ class ScmBranchController {
 		requestFrame();
 	}
 
-	public function open(repository:Null<scm.ScmRepository>):Void {
+	public function open(repository:Null<scm.ScmRepository>, ?scopeValid:Void->Bool):Void {
+		if (scopeValid != null && !scopeValid()) return;
 		var source = sourceControlSource();
 		if (source == null) { showUnavailable("No source control repository is available."); return; }
 		var target = repository;
@@ -71,17 +72,18 @@ class ScmBranchController {
 		var job = source.branches(selectedRepository.id, function(result) {
 			if (token != scmBranchRequestToken || !isScmSourceActive(identity)) return;
 			scmBranchJob = null;
+			if (scopeValid != null && !scopeValid()) { host.closeCommandView(); return; }
 			if (result.error != null) {
 				showUnavailable(result.error.message);
 				requestFrame();
 				return;
 			}
-			showBranches(source, selectedRepository, result.value == null ? [] : result.value);
+			showBranches(source, selectedRepository, result.value == null ? [] : result.value, scopeValid);
 		});
 		if (!job.complete && !job.cancelled) scmBranchJob = job;
 	}
 
-	function showBranches(source:ScmSource, repository:scm.ScmRepository, branches:Array<scm.ScmBranch>):Void {
+	function showBranches(source:ScmSource, repository:scm.ScmRepository, branches:Array<scm.ScmBranch>, ?scopeValid:Void->Bool):Void {
 		var entries:Array<commandview.CommandViewEntry> = [
 			new commandview.CommandViewEntry("Create Branch…", "Create a branch from the current HEAD", "@create", null,
 				"create branch new", "Actions"),
@@ -94,19 +96,20 @@ class ScmBranchController {
 			entries.push(new commandview.CommandViewEntry(branch.name, detail, branch.reference, null,
 				branch.name + " " + branch.reference + " " + detail, section));
 		}
-		var valid = function() return isScmSourceActive(source.identity())
+		var valid = function() return (scopeValid == null || scopeValid()) && isScmSourceActive(source.identity())
 			&& canCheckoutScmRepository(repository);
 		host.openCommandView(new commandview.CommandViewProvider("Switch Branch: ", entries, function(_) {}, function(entry, _, _) {
 			if (!valid()) { host.closeCommandView(); return; }
 			host.closeCommandView();
 			if (entry == null) return;
-			if (entry.value == "@create") createPrompt(repository);
+			if (entry.value == "@create") createPrompt(repository, scopeValid);
 			else if (entry.value == "@source-control") activateSidebarDestination("scm");
-			else checkout(source, repository, entry.value);
+			else checkout(source, repository, entry.value, scopeValid);
 		}, function() cancel()));
 	}
 
-	public function createPrompt(repository:Null<scm.ScmRepository>):Void {
+	public function createPrompt(repository:Null<scm.ScmRepository>, ?scopeValid:Void->Bool):Void {
+		if (scopeValid != null && !scopeValid()) return;
 		var source = sourceControlSource();
 		if (source == null) return;
 		var target = repository;
@@ -120,26 +123,26 @@ class ScmBranchController {
 		var selected = selectedRepository;
 		host.openCommandView(new commandview.CommandViewProvider("New Branch: ", [], function(_) {}, function(_, name, _) {
 			host.closeCommandView();
-			if (!isScmSourceActive(identity)) return;
-			create(source, selected, name);
+			if (!isScmSourceActive(identity) || (scopeValid != null && !scopeValid())) return;
+			create(source, selected, name, scopeValid);
 		}, function() {}));
 	}
 
-	function checkout(source:ScmSource, repository:scm.ScmRepository, reference:String):Void {
-		apply(source, repository, scm.ScmOperation.Checkout(reference), "Switched branch");
+	function checkout(source:ScmSource, repository:scm.ScmRepository, reference:String, ?scopeValid:Void->Bool):Void {
+		apply(source, repository, scm.ScmOperation.Checkout(reference), "Switched branch", scopeValid);
 	}
 
-	function create(source:ScmSource, repository:scm.ScmRepository, name:String):Void {
+	function create(source:ScmSource, repository:scm.ScmRepository, name:String, ?scopeValid:Void->Bool):Void {
 		var branch = StringTools.trim(name);
 		if (branch.length == 0) {
 			reportError("Enter a branch name");
 			return;
 		}
-		apply(source, repository, scm.ScmOperation.CreateBranch(branch), "Created branch " + branch);
+		apply(source, repository, scm.ScmOperation.CreateBranch(branch), "Created branch " + branch, scopeValid);
 	}
 
-	function apply(source:ScmSource, repository:scm.ScmRepository, operation:scm.ScmOperation, label:String):Void {
-		if (!isScmSourceActive(source.identity()) || !canCheckoutScmRepository(repository)) return;
+	function apply(source:ScmSource, repository:scm.ScmRepository, operation:scm.ScmOperation, label:String, ?scopeValid:Void->Bool):Void {
+		if ((scopeValid != null && !scopeValid()) || !isScmSourceActive(source.identity()) || !canCheckoutScmRepository(repository)) return;
 		var snapshot = source.snapshot(repository.id);
 		if (snapshot == null) {
 			reportError("Refresh the repository before changing branches");

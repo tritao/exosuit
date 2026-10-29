@@ -21,11 +21,11 @@ class WorkspaceFileTextModel {
 	var previousColors:Array<Int> = [];
 	var previousThemeRevision:Int = -1;
 
-	public function new(path:String, contents:String, syntaxes:SyntaxRegistry, editorTheme:Theme) {
+	public function new(path:String, contents:String, syntaxes:SyntaxRegistry, editorTheme:Theme, ?explicitSyntax:SyntaxDefinition) {
 		if (path == null || contents == null || syntaxes == null || editorTheme == null)
 			throw "Invalid workspace file text model";
 		buffer = new TextBuffer(contents);
-		syntax = syntaxes.find(path, contents.substr(0, 128));
+		syntax = explicitSyntax == null ? syntaxes.find(path, contents.substr(0, 128)) : explicitSyntax;
 		highlighter = new Highlighter(buffer, syntax, syntaxes);
 		foregroundProvider = function(start, end) return provideForeground(start, end);
 		updateTheme(editorTheme);

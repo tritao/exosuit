@@ -4,6 +4,7 @@ import haxeon.rpc.RpcConnection;
 import haxeon.rpc.RpcError;
 import workspace.client.WorkspaceAgentCreation.AgentCreationStatus;
 import workspace.service.WorkspaceAgentProtocol;
+import workspace.service.WorkspaceAgentProtocol.AgentImageUploadResult;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceTerminalProtocol;
 
@@ -19,7 +20,9 @@ private typedef PendingModelList = {
 class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements WorkspaceAgentClient {
   final endpoint:WorkspaceRpcEndpoint;
   final clock:Void -> Float;
+  var disposed:Bool = false;
   var observedConnection:Null<RpcConnection>;
+  var observedGeneration:Null<String>;
 
   var catalog:Null<WorkspaceTerminalProtocol.TerminalCatalog>;
   var catalogError:Null<String>;
@@ -33,6 +36,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
 
   var agentCatalog:Null<WorkspaceAgentProtocol.AgentCatalog>;
   var agentViews:Map<String, WorkspaceAgentProtocol.AgentView> = [];
+  var agentHistoryWindows:Map<String,AgentHistoryWindow> = [];
   var agentTokens:Map<String, Int> = [];
   var agentReadPending:Map<String, Bool> = [];
   var agentReadCount:Int = 0;
@@ -59,14 +63,15 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     this.clock = clock;
   }
 
-  function rpc():Null < RpcConnection > return endpoint.rpcConnection();
+  function rpc():Null < RpcConnection > return disposed ? null : endpoint.rpcConnection();
   function root():Null < String > return endpoint.rootPath();
   function instance():String return endpoint.serviceGeneration();
   function has(capability:String):Bool return endpoint.hasCapability(capability);
 
   public function poll():Void {
     var current = rpc();
-    if (current != observedConnection) {
+    var generation = current == null ? null : instance();
+    if (current != observedConnection || generation != observedGeneration) {
       if (pendingModels != null) {
         var cancelled = pendingModels;
         pendingModels = null;
@@ -74,6 +79,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       }
       var lost = observedConnection != null;
       observedConnection = current;
+      observedGeneration = generation;
       catalogActionError = null;
       catalog = null;
       catalogPending = false;
@@ -90,6 +96,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       discovery = null;
       discoveryToken++;
       agentViews.clear();
+      agentHistoryWindows.clear();
       agentTokens.clear();
       agentReadPending.clear();
       agentReadCount = 0;
@@ -117,17 +124,21 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   }
 
   public function dispose():Void {
+    if (disposed) return;
+    disposed=true;
     if (pendingModels != null) {
       var cancelled = pendingModels;
       pendingModels = null;
       cancelled.done(null, "Workspace connection closed");
     }
     observedConnection = null;
+    observedGeneration = null;
     pendingDiscovery = null;
     discovery = null;
     discoveryToken++;
     creation = null;
     agentViews.clear();
+    agentHistoryWindows.clear();
     agentTokens.clear();
     agentReadPending.clear();
     agentReadCount = 0;
@@ -428,7 +439,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     });
   }
 
-  public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String, ?accepted:Void->Void, ?expectedNativeName:String):Void {
+  public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String, ?accepted:Void->Void, ?expectedNativeName:String, ?imageIds:Array<String>):Void {
     var connection = rpc();
     if (connection == null ||(action == "read" ? !canReadAgents() : !canControlAgents())) return;
     if ((action == "move" && (agentCatalog == null || agentCatalog.canMove != true))
@@ -460,6 +471,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       // token below makes the read response stale, and removing it here keeps
       // the bounded read count accurate when that response eventually arrives.
       if (agentReadPending.exists(id)) {
+        cancelHistoryLoad(id,"History loading was interrupted by a session action.");
         agentReadPending.remove(id);
         agentReadCount = Std.int(Math.max(0, agentReadCount - 1));
       }
@@ -475,76 +487,143 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       agentsError = null;
       agentActionError = null;
     }
-    connection.call(WorkspaceAgentProtocol.ACTION, {
-      workspace: "workspace",
-      instance: instance(),
-      id: id,
-      action: action,
-      text: text,
-      request: request,
-      model: model,
-      effort: effort,
-      expectedNativeName:expectedNativeName
-    }, action == "rename-native" ? 60000 : 20000, function(value) {
-      if (rpc() != connection || agentTokens.get(id) != selected) return;
-      var errorsBefore = agentsError + "\n" + agentActionError;
+    var generation=instance();
+    var query:AgentAction = {workspace:"workspace",instance:generation,id:id,action:action,text:text,request:request,
+      model:model,effort:effort,expectedNativeName:expectedNativeName,imageIds:imageIds};
+    requestAgentView(connection,id,selected,generation,query,function(inputToken) {
       if (mutate) {
-        agentMutation = false;
-        agentMutationId = null;
+        agentMutation=false; agentMutationId=null;
+        // Keep assembly as a preemptible background read. New mutations invalidate it.
+        if (!agentReadPending.exists(id)) { agentReadPending.set(id,true); agentReadCount++; }
       }
-      if (value.record.workspaceRoot != root() || value.record.id != id) {
-        finishAgentRead(id);
-        agentsError = "Invalid agent view";
-        agentsRevision++;
-        return;
-      }
-      // Admission metadata is authoritative immediately; older history can finish loading later.
-      var currentView = agentViews.get(id);
-      if (currentView != null && value.inputToken != null) currentView.inputToken = value.inputToken;
-      if ((action == "rename" || action == "move" || action == "inspect-name" || action == "rename-native") && agentCatalog != null) {
-        // A catalog read started before this edit must not restore stale metadata.
-        agentsRequestToken++; agentsPending = false; agentsNext = 0;
-        for (index in 0...agentCatalog.records.length)
-          if (agentCatalog.records[index].id == id) agentCatalog.records[index] = value.record;
-        agentsRevision++;
-      }
+      var current=agentViews.get(id);
+      if (current != null && inputToken != null) current.inputToken=inputToken;
       if (accepted != null) accepted();
-      if (mutate) agentActionError = null;
-      else agentsError = null;
-      // A finished action, or a cleared error, shows on screen even when the view itself is unchanged.
-      if (mutate || errorsBefore != agentsError + "\n" + agentActionError) agentsRevision++;
-      if (mutate && value.itemsNext != null) {
-        agentReadPending.set(id, true);
-        agentReadCount++;
+      if (mutate) agentActionError=null; else agentsError=null;
+      agentsRevision++;
+    },function(value) {
+      if (rpc()!=connection || instance()!=generation || agentTokens.get(id)!=selected) return;
+      if ((action == "rename" || action == "move" || action == "inspect-name" || action == "rename-native") && agentCatalog != null) {
+        agentsRequestToken++; agentsPending=false; agentsNext=0;
+        for (index in 0...agentCatalog.records.length) if (agentCatalog.records[index].id == id) agentCatalog.records[index]=value.record;
       }
-      if (!agentViews.exists(id)) {
-        agentViews.set(id, value);
-        agentsRevision++;
-      }
-      loadAgentPages(connection, id, selected, value);
-    }, function(error) {
-      if (rpc() == connection && agentTokens.get(id) == selected) {
-        var errorsBefore = agentsError + "\n" + agentActionError;
-        if (mutate) {
-          agentMutation = false;
-          agentMutationId = null;
-        } else {
-          agentReadPending.remove(id);
-          agentReadCount--;
-        }
-        if (mutate) {
-          if (error.code == "provider_starting") {
-            agentActionError = null;
-            agentsError = error.message;
-          } else agentActionError = action == "permissions" && error.code == "resolved"
-            ? "This workspace service does not support permission changes yet. Update it from Remote Access, then try again."
-            : error.message;
-        } else agentsError = error.message;
-        // A background read that keeps failing the same way must not redraw on every attempt.
-        if (mutate || errorsBefore != agentsError + "\n" + agentActionError) agentsRevision++;
-      }
+      publishLatestAgentView(connection,id,selected,value);
+    },function(error,acknowledged) {
+      if (rpc()!=connection || instance()!=generation || agentTokens.get(id)!=selected) return;
+      var errorsBefore=agentsError+"\n"+agentActionError;
+      if (mutate) { agentMutation=false; agentMutationId=null; }
+      finishAgentRead(id);
+      if (acknowledged) {
+        var message=mutate ? "Action completed, but the session view is unavailable. Refresh the session." : "Session view is unavailable. Refresh the session.";
+        if (mutate) agentActionError=message; else agentsError=message;
+      } else if (mutate) {
+        if (error.code == "provider_starting") { agentActionError=null; agentsError=error.message; }
+        else agentActionError=action == "permissions" && error.code == "resolved"
+          ? "This workspace service does not support permission changes yet. Update it from Remote Access, then try again." : error.message;
+      } else agentsError=error.message;
+      if (mutate || errorsBefore != agentsError+"\n"+agentActionError) agentsRevision++;
+    });
+  }
+
+  public function uploadAgentImage(id:String, bytes:haxe.io.Bytes, done:(Null<String>, Null<String>)->Void):Void {
+    var connection = rpc(), view = agentViews.get(id), generation = instance();
+    if (connection == null || !canControlAgents() || view == null || view.supportsImageUpload != true
+      || bytes == null || bytes.length == 0 || bytes.length > 2 * 1024 * 1024) { done(null, "Image upload is unavailable or the image exceeds 2 MiB."); return; }
+    var upload:Null<String> = null, finished = false;
+    function fail(message:String):Void {
+      if (finished) return; finished = true;
+      if (upload != null && rpc() == connection && instance() == generation) removeAgentImage(id, upload);
+      done(null, message);
     }
-    );
+    function send(operation:String, offset:Int, chunk:Null<haxe.io.Bytes>, success:AgentImageUploadResult->Void):Void {
+      if (rpc() != connection || instance() != generation) { fail("Workspace connection changed; upload the image again."); return; }
+      connection.call(WorkspaceAgentProtocol.IMAGE_UPLOAD, {workspace:"workspace", instance:generation, session:id,
+        operation:operation, upload:upload, size:bytes.length, offset:offset, bytes:chunk}, 20000,
+        function(result) {
+          if (finished) return;
+          if (rpc() != connection || instance() != generation) { fail("Workspace connection changed; upload the image again."); return; }
+          success(result);
+        }, function(error) fail(error == null ? "Image upload failed; select the image to retry" : error.message + "; select the image to retry"));
+    }
+    var next:Int->Void = null;
+    next = function(offset:Int) {
+      if (offset == bytes.length) {
+        send("finish", offset, null, function(result) {
+          if (result == null || result.upload != upload || result.offset != bytes.length || !result.complete) { fail("Invalid image upload response"); return; }
+          finished = true; done(upload, null);
+        }); return;
+      }
+      var count = Std.int(Math.min(32768, bytes.length - offset));
+      send("chunk", offset, bytes.sub(offset,count), function(result) {
+        if (result == null || result.upload != upload || result.offset != offset + count || result.complete) { fail("Invalid image upload response"); return; }
+        next(offset + count);
+      });
+    };
+    send("begin", 0, null, function(result) {
+      if (result == null || result.upload == null || result.upload.length == 0 || result.offset != 0 || result.complete) { fail("Invalid image upload response"); return; }
+      upload = result.upload; next(0);
+    });
+  }
+
+  public function loadAgentImage(id:String,turn:String,item:String,imageId:String,done:(Null<haxe.io.Bytes>,Null<String>)->Void):Void {
+    var connection=rpc(),generation=instance();
+    if (connection == null || !canReadAgents() || agentViews.get(id) == null || imageId == null || imageId == "") {done(null,"Sent image is unavailable");return;}
+    var finished=false,total = -1,data:Null<haxe.io.Bytes>=null;
+    function fail(message:String):Void {if (!finished) {finished=true;done(null,message);}}
+    var next:Int->Void=null;
+    next=function(offset:Int) {
+      if (rpc()!=connection || instance()!=generation || agentViews.get(id)==null) {fail("Workspace connection changed; retry the image");return;}
+      connection.call(WorkspaceAgentProtocol.MESSAGE_IMAGE,{workspace:"workspace",instance:generation,session:id,turn:turn,item:item,token:imageId,offset:offset},20000,function(chunk) {
+        if (finished) return;
+        if (rpc()!=connection || instance()!=generation || agentViews.get(id)==null) {fail("Workspace connection changed; retry the image");return;}
+        if (chunk == null || chunk.token != imageId || chunk.offset != offset || chunk.total <= 0 || chunk.total > 2*1024*1024
+            || chunk.bytes == null || chunk.bytes.length <= 0 || chunk.bytes.length > 24*1024 || offset+chunk.bytes.length > chunk.total
+            || chunk.partial || (total >= 0 && total != chunk.total)) {fail("Invalid sent image response");return;}
+        if (data == null) {total=chunk.total;data=haxe.io.Bytes.alloc(total);}
+        var target:haxe.io.Bytes=cast data;target.blit(offset,chunk.bytes,0,chunk.bytes.length);
+        var end=offset+chunk.bytes.length;
+        if (end==total) {finished=true;done(target,null);} else next(end);
+      },function(_) fail("Sent image is no longer available"));
+    };
+    next(0);
+  }
+
+  public function loadAgentContent(id:String, turn:String, item:String, token:String, done:(Null<String>, Bool, Null<String>)->Void):Void {
+    var connection=rpc(), generation=instance(), view=agentViews.get(id);
+    if (connection == null || !canReadAgents() || view == null || view.supportsMessageContent != true || token == null || token == "") {
+      done(null,false,"Full message is unavailable"); return;
+    }
+    var finished=false, data:Null<haxe.io.Bytes> = null, total = -1, partial=false;
+    function fail(message:String):Void { if (!finished) { finished=true; done(null,false,message); } }
+    var next:Int->Void = null;
+    next=function(offset:Int) {
+      if (rpc()!=connection || instance()!=generation) { fail("Workspace connection changed; retry loading the message"); return; }
+      connection.call(WorkspaceAgentProtocol.MESSAGE_CONTENT,{workspace:"workspace",instance:generation,session:id,turn:turn,item:item,token:token,offset:offset},20000,
+        function(chunk) {
+          if (finished) return;
+          if (rpc()!=connection || instance()!=generation) { fail("Workspace connection changed; retry loading the message"); return; }
+          if (chunk == null || chunk.token != token || chunk.offset != offset || chunk.total < 0 || chunk.total > 256*1024
+            || chunk.bytes == null || chunk.bytes.length > 24*1024 || chunk.offset+chunk.bytes.length > chunk.total
+            || (chunk.bytes.length == 0 && offset != chunk.total) || (total >= 0 && (chunk.total != total || chunk.partial != partial))) {
+            fail("Invalid message content response"); return;
+          }
+          if (data == null) { total=chunk.total; partial=chunk.partial; data=haxe.io.Bytes.alloc(total); }
+          var target:haxe.io.Bytes = cast data; target.blit(offset,chunk.bytes,0,chunk.bytes.length);
+          var end=offset+chunk.bytes.length;
+          if (end == total) {
+            if (!workspace.TextFileContent.validUtf8(target)) { fail("Message content has invalid text encoding"); return; }
+            finished=true; done(target.toString(),partial,null);
+          } else next(end);
+        },function(error) fail(error == null ? "Message content is unavailable" : error.message));
+    };
+    next(0);
+  }
+
+  public function removeAgentImage(id:String, upload:String):Void {
+    var connection = rpc();
+    if (connection == null || !canControlAgents() || upload == null || upload == "") return;
+    connection.call(WorkspaceAgentProtocol.IMAGE_UPLOAD, {workspace:"workspace", instance:instance(), session:id,
+      operation:"remove", upload:upload, size:0, offset:0, bytes:null}, 5000, function(_) {}, function(_) {});
   }
 
   function finishAgentRead(id:String):Void {
@@ -554,47 +633,195 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     }
   }
 
-  function loadAgentPages(connection:RpcConnection, id:String, selected:Int, value:AgentView):Void {
-    var next = value.itemsNext;
-    if (next == null) {
-      finishAgentRead(id);
-      // Background reads repeat every fraction of a second; only a changed view is news to the catalog and the screen.
-      // The first page of a new view is stored before its later pages arrive, so the same object counts as changed.
-      var previous = agentViews.get(id);
-      agentViews.set(id, value);
-      if (previous == null || previous == value || haxe.Json.stringify(previous) != haxe.Json.stringify(value)) {
-        agentsNext = 0;
-        agentsRevision++;
-      }
+  /** Snapshot acknowledgement is independent of assembling its potentially large view. */
+  function requestAgentView(connection:RpcConnection,id:String,selected:Int,generation:String,query:AgentAction,
+      acknowledged:Null<String>->Void, success:AgentView->Void, failure:(RpcError,Bool)->Void):Void {
+    var expectedRoot=root(), done=false, ack=false;
+    function current():Bool return rpc()==connection && instance()==generation && root()==expectedRoot && agentTokens.get(id)==selected;
+    function fail(message:String):Void {
+      if (!done && current()) { done=true; failure({code:"invalid_snapshot",message:message,ambiguous:false},ack); }
+    }
+    if (expectedRoot == null) { fail("Workspace is unavailable"); return; }
+    if (agentCatalog == null || agentCatalog.supportsSnapshots != true) {
+      connection.call(WorkspaceAgentProtocol.ACTION,query,query.action == "rename-native" ? 60000 : 20000,function(view) {
+        if (done || !current()) return;
+        if (view == null || view.record == null || view.record.id != id || view.record.workspaceRoot != expectedRoot) { fail("Invalid agent view"); return; }
+        ack=true; acknowledged(view.inputToken);
+        if (!current()) return;
+        done=true; success(view);
+      },function(error) { if (!done && current()) {done=true; failure(error,false);} });
       return;
     }
-    connection.call(WorkspaceAgentProtocol.ACTION, {
-      workspace: "workspace", instance: instance(), id: id, action: "read", text: "", request: null, after: next
-    }, 20000, function(page) {
-      if (rpc() != connection || agentTokens.get(id) != selected) return;
-      if (page.record.workspaceRoot != root() || page.record.id != id || page.items == null
-        || (page.itemsNext != null && !earlierAgentCursor(page.itemsNext, next))) {
-        finishAgentRead(id);
-        agentsError = "Invalid agent activity page";
-        agentsRevision++;
-        return;
-      }
-      value.items = page.items.concat(value.items == null ? [] : value.items);
-      value.itemsNext = page.itemsNext;
-      loadAgentPages(connection, id, selected, value);
-    }, function(error) {
-      if (rpc() != connection || agentTokens.get(id) != selected) return;
-      finishAgentRead(id);
-      agentsError = error.message;
-      agentsRevision++;
-    });
+    connection.call(WorkspaceAgentProtocol.ACTION_SNAPSHOT,query,query.action == "rename-native" ? 60000 : 20000,function(first) {
+      if (done || !current()) return;
+      if (first == null || first.session != id || first.root != expectedRoot) { fail("Invalid session snapshot scope"); return; }
+      ack=true; acknowledged(first.inputToken);
+      if (!current()) return;
+      if (first.snapshotError != null) { fail("Session snapshot unavailable"); return; }
+      var assembler:AgentSnapshotAssembler;
+      try assembler=new AgentSnapshotAssembler(first,id,cast expectedRoot) catch (_:Dynamic) { fail("Invalid session snapshot"); return; }
+      var next:Void->Void = null;
+      next=function() {
+        if (done || !current()) return;
+        if (assembler.complete()) {
+          try { var view=assembler.view(); done=true; success(view); } catch (_:Dynamic) fail("Invalid session snapshot view");
+          return;
+        }
+        var offset=assembler.offset;
+        connection.call(WorkspaceAgentProtocol.SNAPSHOT_READ,{workspace:"workspace",instance:generation,session:id,
+          token:assembler.snapshotToken(),offset:offset},20000,function(chunk) {
+          if (done || !current()) return;
+          try assembler.add(chunk) catch (_:Dynamic) { fail("Invalid session snapshot chunk"); return; }
+          next();
+        },function(_) fail("Session snapshot unavailable"));
+      };
+      next();
+    },function(error) { if (!done && current()) {done=true; failure(error,false);} });
   }
 
-  static function earlierAgentCursor(cursor:String, previous:String):Bool {
-    var parts = cursor.split(":"), old = previous.split(":");
-    if (parts.length != 2 || old.length != 2 || parts[0] != old[0]) return false;
-    var offset = Std.parseInt(parts[1]), before = Std.parseInt(old[1]);
-    return offset != null && before != null && offset >= 0 && offset < before && Std.string(offset) == parts[1];
+  function historyWindow(id:String):AgentHistoryWindow {
+    var state=agentHistoryWindows.get(id);
+    if (state == null) {state=new AgentHistoryWindow(); agentHistoryWindows.set(id,state);}
+    return state;
+  }
+  public function agentHistory(id:String):AgentHistoryState {
+    var state=agentHistoryWindows.get(id);
+    return state == null ? {loading:false,error:null,hasOlder:false,detached:false,resetRequired:false} : state.status();
+  }
+  function cancelHistoryLoad(id:String,reason:String):Void {
+    var state=agentHistoryWindows.get(id); if (state == null || !state.loading) return;
+    state.loading=false; state.error=reason;
+    var done=state.pendingDone; state.pendingDone=null;
+    if (done != null) done(reason);
+  }
+  function publishAgentView(id:String,value:AgentView):Void {
+    var previous=agentViews.get(id); agentViews.set(id,value);
+    if (previous == null || haxe.Json.stringify(previous) != haxe.Json.stringify(value)) { agentsNext=0; agentsRevision++; }
+  }
+  function publishLatestAgentView(connection:RpcConnection,id:String,selected:Int,value:AgentView):Void {
+    var state=historyWindow(id), previous=agentViews.get(id);
+    state.remember(value);
+    if (previous == null || previous.items == null || value.items == null) {
+      state.cursor=value.itemsNext; state.epoch=value.historyEpoch; state.seen=[]; state.detached=false; state.resetRequired=false; state.error=null;
+      finishAgentRead(id); publishAgentView(id,value); return;
+    }
+    var old:Array<AgentActivityItem>=cast previous.items, fresh:Array<AgentActivityItem>=cast value.items;
+    var same=AgentHistoryWindow.sameEpoch(state.epoch,value.historyEpoch);
+    // A legacy first page can be reconciled only while no older cursor has been consumed.
+    var legacySafe=state.epoch == null && value.historyEpoch == null && state.seen.keys().hasNext() == false;
+    if (!same && !legacySafe) {
+      state.resetRequired=true; state.error="Activity history changed. Reset to latest to continue.";
+      value.items=old.copy(); value.itemsNext=state.cursor;
+      finishAgentRead(id); publishAgentView(id,value); return;
+    }
+    if (state.resetRequired) {
+      value.items=old.copy(); value.itemsNext=state.cursor;
+      finishAgentRead(id); publishAgentView(id,value); return;
+    }
+    var watched:Map<String,Bool>=[];
+    for (item in old) if (item.state == "inProgress") watched.set(AgentHistoryWindow.key(item),true);
+    for (item in fresh) watched.remove(AgentHistoryWindow.key(item));
+    if (watched.keys().hasNext()) {
+      value.items=old.copy(); value.itemsNext=state.cursor; publishAgentView(id,value);
+      bridgeAgentHistory(connection,id,selected,state,old,fresh,cast state.latest,watched,state.detached); return;
+    }
+    if (state.detached) {
+      var replacements:Map<String,AgentActivityItem>=[];
+      for (item in fresh) replacements.set(AgentHistoryWindow.key(item),item);
+      value.items=[for (item in old) replacements.exists(AgentHistoryWindow.key(item)) ? replacements.get(AgentHistoryWindow.key(item)) : item];
+      value.itemsNext=state.cursor; finishAgentRead(id); publishAgentView(id,value); return;
+    }
+    var combined=AgentHistoryWindow.merge(old,fresh);
+    if (combined == null && fresh.length > 0 && old.length > 0) {
+      value.items=old.copy(); value.itemsNext=state.cursor; publishAgentView(id,value);
+      bridgeAgentHistory(connection,id,selected,state,old,fresh,cast state.latest,[],false); return;
+    }
+    if (combined == null) combined=old.copy();
+    if (!AgentHistoryWindow.within(combined)) {state.detached=true; value.items=old.copy();}
+    else value.items=combined;
+    if (state.cursor == null && state.seen.keys().hasNext() == false && old.length == 0) state.cursor=value.itemsNext;
+    value.itemsNext=state.cursor; state.epoch=value.historyEpoch;
+    finishAgentRead(id); publishAgentView(id,value);
+  }
+  function bridgeAgentHistory(connection:RpcConnection,id:String,selected:Int,state:AgentHistoryWindow,
+      old:Array<AgentActivityItem>,fresh:Array<AgentActivityItem>,latest:AgentView,
+      watched:Map<String,Bool>,detached:Bool):Void {
+    var generation=instance(), cursor=latest.itemsNext, visited:Map<String,Bool>=[];
+    state.loading=true; state.error=null; agentsRevision++;
+    function fail(reason:String):Void {
+      state.loading=false; state.resetRequired=true; state.error=reason;
+      finishAgentRead(id); agentsRevision++;
+    }
+    var step:Void->Void=null;
+    step=function() {
+      if (rpc()!=connection || instance()!=generation || agentTokens.get(id)!=selected) return;
+      if (cursor == null || visited.exists(cursor) || !AgentHistoryWindow.within(fresh)) { fail("History has a gap. Reset to latest to continue."); return; }
+      var requested:String=cast cursor; visited.set(requested,true);
+      var query:AgentAction={workspace:"workspace",instance:generation,id:id,action:"read",text:"",request:null,after:requested};
+      requestAgentView(connection,id,selected,generation,query,function(_) {},function(page) {
+        if (page.items == null || (state.epoch != null && page.historyEpoch != state.epoch)
+            || (page.itemsNext != null && visited.exists(page.itemsNext))) { fail("History changed while connecting pages. Reset to latest."); return; }
+        var pageItems:Array<AgentActivityItem>=cast page.items;
+        for (item in pageItems) watched.remove(AgentHistoryWindow.key(item));
+        fresh=AgentHistoryWindow.prepend(fresh,pageItems);
+        if (!AgentHistoryWindow.within(fresh)) { fail("History has a gap. Reset to latest to continue."); return; }
+        var merged=AgentHistoryWindow.merge(old,fresh);
+        if (merged != null && !watched.keys().hasNext()) {
+          var current=agentViews.get(id);
+          if (current != null) {
+            var updated=AgentHistoryWindow.copyView(current);
+            if (detached || !AgentHistoryWindow.within(merged)) {
+              var replacements:Map<String,AgentActivityItem>=[];
+              for (item in fresh) replacements.set(AgentHistoryWindow.key(item),item);
+              updated.items=[for (item in old) replacements.exists(AgentHistoryWindow.key(item)) ? replacements.get(AgentHistoryWindow.key(item)) : item];
+              state.detached=true;
+            } else updated.items=merged;
+            updated.itemsNext=state.cursor; publishAgentView(id,updated);
+          }
+          state.loading=false; state.error=null; finishAgentRead(id); agentsRevision++; return;
+        }
+        cursor=page.itemsNext; step();
+      },function(_,_) fail("History changed while connecting pages. Reset to latest."));
+    };
+    step();
+  }
+  public function loadOlderAgentItems(id:String,done:Null<String>->Void):Void {
+    var state=agentHistoryWindows.get(id), connection=rpc(), current=agentViews.get(id);
+    if (state == null || connection == null || current == null || state.cursor == null || state.loading || state.resetRequired
+        || agentReadPending.exists(id) || (agentMutation && agentMutationId == id) || agentReadCount >= 4) {
+      done("Older activity is unavailable right now."); return;
+    }
+    var requested:String=cast state.cursor, generation=instance(), selected=++agentSelection;
+    agentTokens.set(id,selected); agentReadPending.set(id,true); agentReadCount++;
+    state.loading=true; state.error=null; state.pendingDone=done; agentsRevision++;
+    var query:AgentAction={workspace:"workspace",instance:generation,id:id,action:"read",text:"",request:null,after:requested};
+    function fail(reason:String,reset:Bool):Void {
+      state.loading=false; state.error=reason; state.resetRequired=reset;
+      finishAgentRead(id); var callback=state.pendingDone; state.pendingDone=null; agentsRevision++;
+      if (callback != null) callback(reason);
+    }
+    requestAgentView(connection,id,selected,generation,query,function(_) {},function(page) {
+      if (page.items == null || (state.epoch != null && page.historyEpoch != state.epoch)
+        || (page.itemsNext != null && (page.itemsNext == requested || state.seen.exists(page.itemsNext)))) {
+        fail("History changed or returned an invalid cursor. Reset to latest.",true); return;
+      }
+      var old:Array<AgentActivityItem>=current.items == null ? [] : cast current.items;
+      var older:Array<AgentActivityItem>=cast page.items;
+      var merged=AgentHistoryWindow.prepend(old,older);
+      if (merged.length == old.length && page.itemsNext != null) {fail("History page made no progress. Reset to latest.",true);return;}
+      while (!AgentHistoryWindow.within(merged) && merged.length > older.length) { merged.pop(); state.detached=true; }
+      if (!AgentHistoryWindow.within(merged)) {fail("This activity page exceeds the history window limit.",false);return;}
+      state.seen.set(requested,true); state.cursor=page.itemsNext; state.loading=false; state.error=null;
+      var updated=AgentHistoryWindow.copyView(current); updated.items=merged; updated.itemsNext=state.cursor;
+      finishAgentRead(id); publishAgentView(id,updated);
+      var callback=state.pendingDone; state.pendingDone=null; agentsRevision++;
+      if (callback != null) callback(null);
+    },function(error,_) fail(error.code == "invalid_cursor" ? "History changed. Reset to latest." : error.message,error.code == "invalid_cursor"));
+  }
+  public function resetAgentHistory(id:String):Void {
+    var state=agentHistoryWindows.get(id); if (state == null) return;
+    if (state.loading) { agentTokens.set(id,++agentSelection); cancelHistoryLoad(id,"History loading was cancelled."); finishAgentRead(id); }
+    var latest=state.reset(); if (latest != null) { publishAgentView(id,latest); agentsRevision++; }
   }
 
   public function canEditGroups():Bool return rpc() != null
@@ -776,15 +1003,20 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     parent:Null<String>,
     cwd:Null<String>,
     order:Int,
-    create:Bool
+    create:Bool,
+    ?done:(Null<WorkspaceProtocol.WorkspaceGroup>, Null<String>)->Void
   ):Void {
     var connection = rpc(), epoch = endpoint.workspaceEpoch();
     if (owner != instance()) {
       catalogError = "Workspace changed; reopen the group action";
       catalogRevision++;
+      if (done != null) done(null, catalogError);
       return;
     }
-    if (connection == null || epoch == null || !canEditGroups() || !catalogReady()) return;
+    if (connection == null || epoch == null || !canEditGroups() || !catalogReady()) {
+      if (done != null) done(null, "Workspace group editing is unavailable");
+      return;
+    }
     connection.call(
       WorkspaceProtocol.GROUP,
       {
@@ -800,11 +1032,8 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       order : order
     },
       2000,
-      function(_) catalogCompleted(connection),
-      function(error) catalogFailed(
-        connection,
-        error
-      )
+      function(result) { catalogCompleted(connection); if (done != null) done(result.group, null); },
+      function(error) { catalogFailed(connection, error); if (done != null) done(null, error.message); }
     );
   }
 

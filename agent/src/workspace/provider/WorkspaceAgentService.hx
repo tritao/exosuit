@@ -6,22 +6,50 @@ import workspace.service.WorkspaceAgentPersistence;
 import workspace.service.WorkspaceAgentProtocol;
 
 /** Workspace authorization, provider routing and resource limits; adapters own only their protocols. */
+@:access(haxeon.rpc.RpcConnection)
 class WorkspaceAgentService implements WorkspaceAgents {
  final workspace:String;
  final instance:String;
  final root:String;
  final providers:Array<LocalAgentProvider>;
  final registry:Map<String,LocalAgentProvider> = [];
+ final images:AgentImageStaging;
+ final snapshots:Array<{connection:RpcConnection,cache:AgentSnapshotCache}> = [];
  public var status(get,never):String;
  function get_status():String return [for(provider in providers) provider.summary()].join("; ");
 
- public function new(workspace:String,instance:String,root:String,providers:Array<LocalAgentProvider>,?persistence:WorkspaceAgentPersistence) {
+ public function new(workspace:String,instance:String,root:String,providers:Array<LocalAgentProvider>,?persistence:WorkspaceAgentPersistence, ?imageStorageIdentity:String) {
   this.workspace=workspace;this.instance=instance;this.root=root;this.providers=providers.copy();
+  var tempBase = Sys.systemName() == "Windows" ? Sys.getEnv("TEMP") : Sys.getEnv("TMPDIR");
+  if (tempBase == null && Sys.systemName() != "Windows") tempBase = "/tmp";
+  var stageLock:Null<app.AgentManagerNative.AgentLockHandle> = null;
+  if (imageStorageIdentity == null || imageStorageIdentity == "") tempBase = null;
+  images = new AgentImageStaging(tempBase, root + "\n" + imageStorageIdentity, app.AgentManagerNative.randomToken, Sys.time,
+   app.AgentManagerNative.prepareDirectory, app.AgentManagerNative.privateFile,
+   function(path) { stageLock = app.AgentManagerNative.acquireLock(path); return stageLock != null; },
+   function() { if (stageLock != null) { app.AgentManagerNative.releaseLock(stageLock); stageLock = null; } });
   var identities:Map<String,Bool>=[];
   for(provider in providers) {
    var kind=provider.driverKind();
    if(kind == null || kind == "" || registry.exists(kind)) throw "Duplicate or invalid agent provider";
    registry.set(kind,provider);
+   if (kind == "codex" && Std.isOfType(provider, CodexProvider)) {
+    var codex:CodexProvider = cast provider;
+    codex.imageUploadAvailable = images.supported();
+    codex.imageIdentity = images.archive;
+   }
+   if(kind=="pi" && Std.isOfType(provider,PiProvider)) {
+    var pi:PiProvider=cast provider;
+    pi.imageUploadAvailable=images.supported();
+    pi.imagePrepare=function(session,ids,turn,item) return images.piImages(session,ids,turn,item);
+    pi.imageHold=function(session,thread,turn,item,ids) return images.holdInput(session,thread,turn,item,ids);
+   }
+   if(kind=="claude" && Std.isOfType(provider,ClaudeProvider)) {
+    var claude:ClaudeProvider=cast provider;
+    claude.imageUploadAvailable=images.supported();
+    claude.imagePrepare=function(session,ids,turn,item) return images.piImages(session,ids,turn,item);
+    claude.imageHold=function(session,thread,turn,item,ids) return images.holdInput(session,thread,turn,item,ids);
+   }
    for(record in provider.records()) {
     if(identities.exists(record.id)) throw "Agent identity belongs to multiple providers";
     identities.set(record.id,true);
@@ -42,6 +70,8 @@ class WorkspaceAgentService implements WorkspaceAgents {
   return found;
  }
  public function bind(connection:RpcConnection,capabilities:Array<String>):Void {
+  var cache=new AgentSnapshotCache(root,Sys.time,app.AgentManagerNative.randomToken);
+  snapshots.push({connection:connection,cache:cache});
   function allowed(w:String,i:String,control:Bool):Bool return w == workspace && i == instance
    && capabilities.contains(WorkspaceAgentProtocol.READ) && (!control || capabilities.contains(WorkspaceAgentProtocol.CONTROL));
   connection.register(WorkspaceAgentProtocol.LIST,function(q,ctx) {
@@ -52,7 +82,7 @@ class WorkspaceAgentService implements WorkspaceAgents {
    var more=found.length>6;
    if(more) found.resize(6);
    ctx.respond({instance:instance,root:root,records:found,status:status,
-    canMove:true,canRename:true,nativeRenameProviders:[for(p in providers) if(p.nativeNamingSupported()) p.driverKind()],providers:[for(p in providers) p.driverKind()],next:more ? found[found.length-1].id : null});
+    canMove:true,canRename:true,supportsSnapshots:true,nativeRenameProviders:[for(p in providers) if(p.nativeNamingSupported()) p.driverKind()],providers:[for(p in providers) p.driverKind()],next:more ? found[found.length-1].id : null});
   });
   connection.register(WorkspaceAgentProtocol.CREATE,function(q,ctx) {
    if(!allowed(q.workspace,q.instance,true)) {ctx.fail({code:"unauthorized",message:"Agent creation denied",ambiguous:false});return;}
@@ -67,11 +97,92 @@ class WorkspaceAgentService implements WorkspaceAgents {
    if(existing == null && records().length>=32) {ctx.fail({code:"limit",message:"Agent catalog is full",ambiguous:false});return;}
    provider.create(q,ctx);
   });
-  connection.register(WorkspaceAgentProtocol.ACTION,function(q,ctx) {
+  function action(q:AgentAction,ctx:haxeon.rpc.RpcContext<AgentView>):Void {
    if(!allowed(q.workspace,q.instance,q.action != "read")) {ctx.fail({code:"unauthorized",message:"Agent operation denied",ambiguous:false});return;}
    var provider=owner(q.id);
    if(provider == null) {ctx.fail({code:"unknown_agent",message:"Unknown agent",ambiguous:false});return;}
+   if (q.imageIds != null && q.imageIds.length > 0) {
+    if(Std.isOfType(provider,ClaudeProvider)) {
+     if(q.action!="prompt") {ctx.fail({code:"unsupported_operation",message:"This Claude action cannot attach images",ambiguous:false});return;}
+     provider.action(q,ctx);return;
+    }
+    if(Std.isOfType(provider,PiProvider)) {
+     if(q.action!="prompt" && q.action!="queue" && q.action!="steer") {ctx.fail({code:"unsupported_operation",message:"This Pi action cannot attach images",ambiguous:false});return;}
+     provider.action(q,ctx);return;
+    }
+    if (q.action != "prompt" || !Std.isOfType(provider, CodexProvider)) {ctx.fail({code:"unsupported_operation",message:"This provider does not support image attachments",ambiguous:false});return;}
+    var paths = images.resolve(q.id, q.imageIds);
+    if (paths == null) {ctx.fail({code:"image_unavailable",message:"An image expired or is unavailable. Remove it and upload it again.",ambiguous:false});return;}
+    (cast provider:CodexProvider).actionWithImages(q,ctx,paths,function(thread) return images.pin(q.id,thread,q.imageIds)); return;
+   }
    provider.action(q,ctx);
+  }
+  connection.register(WorkspaceAgentProtocol.ACTION,function(q,ctx) {
+   var adapter=new AgentSnapshotContext(cast ctx,function(value) {
+    var encoded:Null<haxe.io.Bytes> = null;
+    try encoded=haxeon.wire.MessagePack.encode(value) catch (_:Dynamic) {}
+    if(encoded == null || encoded.length > connection.maxMessageBytes - 128)
+     return ctx.fail({code:"snapshot_too_large",message:q.action == "read"
+      ? "Agent view exceeds this client's transport limit. Update the client and refresh the session."
+      : "Action completed, but its view exceeds this client's transport limit. Update the client and refresh the session.",ambiguous:q.action != "read"});
+    return ctx.respond(value);
+   });
+   action(q,adapter);
+  });
+  connection.register(WorkspaceAgentProtocol.ACTION_SNAPSHOT,function(q,ctx) {
+   var adapter=new AgentSnapshotContext(cast ctx,function(value) {
+    var bytes:Null<haxe.io.Bytes> = null;
+    try bytes=haxeon.wire.MessagePack.encode(value) catch (_:Dynamic) {}
+    var reply:AgentSnapshotReply;
+    try reply=cache.create(q.id,bytes,value.inputToken) catch (_:Dynamic)
+     reply=cache.failed(q.id,value.inputToken,"Snapshot could not be prepared");
+    return ctx.respond(reply);
+   });
+   action(q,adapter);
+  });
+  connection.register(WorkspaceAgentProtocol.SNAPSHOT_READ,function(q,ctx) {
+   if(!allowed(q.workspace,q.instance,false)) {ctx.fail({code:"unauthorized",message:"Snapshot denied",ambiguous:false});return;}
+   var reply=q.session == null || q.token == null || q.token.length > 128 ? null : cache.read(q.session,q.token,q.offset);
+   if(reply == null) ctx.fail({code:"snapshot_unavailable",message:"Snapshot expired or is unavailable",ambiguous:false});
+   else ctx.respond(reply);
+  });
+  connection.register(WorkspaceAgentProtocol.MESSAGE_CONTENT,function(q,ctx) {
+   if (!allowed(q.workspace,q.instance,false)) {ctx.fail({code:"unauthorized",message:"Message content denied",ambiguous:false});return;}
+   if (q.session == null || q.session.length == 0 || q.session.length > 128 || q.turn == null || q.item == null || q.token == null
+       || q.turn.length > 128 || q.item.length > 512 || q.token.length > 32 || q.offset < 0) {
+    ctx.fail({code:"content_unavailable",message:"Message content is unavailable",ambiguous:false});return;
+   }
+   var provider=owner(q.session);
+   if (provider == null || !Std.isOfType(provider,AgentMessageSource)) {
+    ctx.fail({code:"content_unavailable",message:"Message content is unavailable",ambiguous:false});return;
+   }
+   var source:AgentMessageSource = cast provider;
+   var chunk=source.messageContent(q.session,q.turn,q.item,q.token,q.offset);
+   if (chunk == null) ctx.fail({code:"content_unavailable",message:"Message content changed or is no longer available",ambiguous:false});
+   else ctx.respond(chunk);
+  });
+  connection.register(WorkspaceAgentProtocol.IMAGE_UPLOAD,function(q,ctx) {
+   if(!allowed(q.workspace,q.instance,true)) {ctx.fail({code:"unauthorized",message:"Image upload denied",ambiguous:false});return;}
+   var provider = owner(q.session);
+   if (provider == null || (!Std.isOfType(provider,CodexProvider) && !Std.isOfType(provider,PiProvider) && !Std.isOfType(provider,ClaudeProvider))) {ctx.fail({code:"unsupported_operation",message:"Image upload is unavailable for this session",ambiguous:false});return;}
+   try ctx.respond(images.process(q)) catch (error:Dynamic) {
+    var message = Std.string(error);
+    var safe = ["Image staging requires recovery; check the workspace service", "Invalid session", "Image must be at most 2 MiB",
+     "Image staging quota reached; wait for abandoned uploads to expire or reconcile the session", "Could not create image identity",
+     "Image upload expired or is unavailable", "Invalid image upload chunk", "Image upload is incomplete",
+     "Choose a valid PNG, JPEG, or GIF image up to 4096 pixels per side", "Could not stage image"];
+    ctx.fail({code:"invalid_image_upload",message:safe.indexOf(message) >= 0 ? message : "Image staging failed; retry or check the workspace service",ambiguous:false});
+   }
+  });
+  connection.register(WorkspaceAgentProtocol.MESSAGE_IMAGE,function(q,ctx) {
+   if (!allowed(q.workspace,q.instance,false)) {ctx.fail({code:"unauthorized",message:"Image access denied",ambiguous:false});return;}
+   if (q.session == null || q.turn == null || q.item == null || q.token == null || q.session.length > 128
+       || q.turn.length > 128 || q.item.length > 128 || q.token.length > 256 || q.offset < 0 || owner(q.session) == null) {
+    ctx.fail({code:"image_unavailable",message:"Sent image is unavailable",ambiguous:false});return;
+   }
+   var chunk=images.readArchive(q.session,q.turn,q.item,q.token,q.offset);
+   if (chunk == null) ctx.fail({code:"image_unavailable",message:"Sent image is no longer available",ambiguous:false});
+   else ctx.respond(chunk);
   });
   connection.register(WorkspaceAgentProtocol.MODELS,function(q,ctx) {
    if(!allowed(q.workspace,q.instance,false)) {ctx.fail({code:"unauthorized",message:"Model catalog denied",ambiguous:false});return;}
@@ -86,7 +197,20 @@ class WorkspaceAgentService implements WorkspaceAgents {
    provider.discover(q,ctx);
   });
  }
- public function poll():Void {for(p in providers) p.poll();}
+ public function poll():Void {
+  var index=snapshots.length;
+  while(index>0) {index--;var entry=snapshots[index];if(!entry.connection.isOpen()) {entry.cache.clear();snapshots.splice(index,1);} else entry.cache.clean();}
+  for(p in providers) p.poll();
+  images.clean(function(id) return owner(id) != null, function(id, thread) {
+   var provider=owner(id);
+   if (provider == null) return true; // An orphaned pinned lease has no proof that the native turn finished.
+   if(Std.isOfType(provider,PiProvider) && (cast provider:PiProvider).hasHeldImages(id)) return true;
+   for (record in provider.records()) if (record.id == id)
+    return record.thread != thread || record.state == "working" || record.state == "needs-attention" || record.state == "uncertain"
+     || record.state == "disconnected" || record.state == "reconnecting" || record.state == "reconnect-failed";
+   return true;
+  });
+ }
  public function groupIsEmpty(group:String):Bool {
   for(r in records()) if(r.group == group) return false;
   return true;
@@ -97,5 +221,5 @@ class WorkspaceAgentService implements WorkspaceAgents {
  public function updateActivityCount():Int {
   var count=0;for(p in providers) count+=p.updateActivityCount();return count;
  }
- public function dispose():Void {for(p in providers) p.dispose();}
+ public function dispose():Void {for(entry in snapshots) entry.cache.clear();snapshots.resize(0);for(p in providers) p.dispose(); images.dispose();}
 }

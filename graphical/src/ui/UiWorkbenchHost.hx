@@ -667,7 +667,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		}
 		if (movingImage != null) for (index in 0...target.items.length) {
 			var candidate = UiEditorTabs.image(target.items[index]);
-			if (candidate != null && candidate.path == movingImage.path) {
+			if (candidate != null && candidate.id == movingImage.id) {
 				candidate.preview = false;
 				duplicate = index;
 				break;
@@ -1008,7 +1008,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 		var normalized = workspace.fileSystem.normalize(path);
 		for (index in 0...activePane.items.length) {
 			var existing = UiEditorTabs.image(activePane.items[index]);
-			if (existing != null && existing.path == normalized) {
+			if (existing != null && !existing.remote && existing.path == normalized) {
 				if (!preview) existing.preview = false;
 				setActiveIndex(index, focusEditor);
 				return existing;
@@ -1020,6 +1020,40 @@ class UiWorkbenchHost implements WorkbenchHost {
 		activePane.items.insert(insertion, UiEditorTab.Image(image));
 		setActiveIndex(insertion, focusEditor);
 		return image;
+	}
+
+	/** In-memory remote image; never resolve or persist the remote path locally. */
+	public function activateRemoteImage(identity:String):Bool {
+		for (index in 0...activePane.items.length) {
+			var existing = UiEditorTabs.image(activePane.items[index]);
+			if (existing != null && existing.remote && existing.id == identity) { setActiveIndex(index, true); return true; }
+		}
+		return false;
+	}
+
+	/** Cap retained remote decoded textures at 128 MiB across panes. */
+	public function canOpenRemoteImage(width:Int, height:Int):Bool {
+		if (width <= 0 || height <= 0 || width > 4096 || height > 4096) return false;
+		var total:Float = width * 1.0 * height * 4;
+		for (pane in panes) for (item in pane.items) {
+			var image = UiEditorTabs.image(item);
+			if (image != null && image.remote) total += image.image.width * 1.0 * image.image.height * 4;
+		}
+		return total <= 128.0 * 1024 * 1024;
+	}
+
+	public function openRemoteImage(identity:String, path:String, image:haxeon.ui.Image, sizeBytes:Int, ?sourceLabel:String = "remote"):UiImageTab {
+		for (index in 0...activePane.items.length) {
+			var existing = UiEditorTabs.image(activePane.items[index]);
+			if (existing != null && existing.id == identity) {
+				image.dispose(); setActiveIndex(index, true); return existing;
+			}
+		}
+		if (!canOpenRemoteImage(image.width, image.height)) throw "Remote image memory limit reached; close an image and try again";
+		var tab = new UiImageTab(path, true, image, sizeBytes, identity, sourceLabel);
+		var insertion = removePreviewTab(activePane);
+		activePane.items.insert(insertion, UiEditorTab.Image(tab));
+		setActiveIndex(insertion, true); return tab;
 	}
 
 	public function keepImage(image:UiImageTab):Void {
@@ -1234,7 +1268,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 				}
 				var image = UiEditorTabs.image(item);
 				if (image != null) {
-					if (image.path.indexOf("\t") < 0 && image.path.indexOf("\n") < 0)
+					if (!image.remote && image.path.indexOf("\t") < 0 && image.path.indexOf("\n") < 0)
 						result.push("I\t" + pane.id + "\t" + (index == pane.activeIndex ? "1" : "0") + "\t" + image.path);
 					continue;
 				}

@@ -16,6 +16,7 @@ private typedef Session = {
 	var record:AgentRecord;
 	var activity:String;
 	var conversation:CodexConversation;
+	var historyPages:CodexHistoryPages;
 	var error:Null<String>;
 	var attached:Bool;
 	var busy:Bool;
@@ -28,10 +29,21 @@ private typedef Session = {
 	var eventRevision:Int;
 }
 
-private typedef PendingApproval = {var wireId:Dynamic; var method:String; var detail:String; var reviewable:Bool; var questions:Array<String>;}
+private typedef PendingApproval = {var wireId:Dynamic; var method:String; var detail:String; var reviewable:Bool; var questions:Array<String>; var structured:Null<Array<AgentQuestion>>;}
 
 /** Shared-daemon adapter. All policy/protocol interpretation stays on the owning machine. */
-class CodexProvider implements LocalAgentProvider {
+class CodexProvider implements AgentMessageSource {
+	public var imageUploadAvailable:Bool = false;
+	public var imageIdentity:Null<(String,String,String,String)->Null<String>>;
+	function imageFor(session:String):(String,String,String)->Null<String> {
+		return function(turn,item,path) return imageIdentity == null ? null : imageIdentity(session,turn,item,path);
+	}
+	public static function turnInput(text:String, imagePaths:Array<String>):Array<Dynamic> {
+		var input:Array<Dynamic> = [];
+		if (text != "") input.push({type:"text", text:text, text_elements:new Array<String>()});
+		for (path in imagePaths) input.push({type:"localImage", path:path});
+		return input;
+	}
 	final instance:String;
 	final directories:WorkspaceDirectories;
 	final groups:Void->Array<WorkspaceGroup>;
@@ -119,7 +131,8 @@ class CodexProvider implements LocalAgentProvider {
 				sessions.set(r.id, {
 					record: r,
 					activity: "",
-					conversation: new CodexConversation(),
+					conversation: new CodexConversation(imageFor(r.id)),
+					historyPages: new CodexHistoryPages(imageFor(r.id)),
 					error: null,
 					attached: false,
 					busy: false,
@@ -180,30 +193,68 @@ class CodexProvider implements LocalAgentProvider {
 			nameMetadata:r.nameMetadata
 		};
 
-	function view(s:Session, ?before:Int):AgentView
+	function view(s:Session, ?before:Int):AgentView {
+		var pending = AgentRequestPage.project([for (id => r in s.requests) {
+			id:id, method:r.method, detail:r.detail, reviewable:r.reviewable, questions:r.structured
+		}]);
 		return {
 			record: copy(s.record),
 			activity: s.activity,
 			items: s.conversation.page(before),
 			itemsOmitted: false,
-			itemsNext: s.conversation.next(before),
+			itemsNext: s.conversation.next(before) != null ? s.conversation.next(before)
+				: s.historyPages.firstCursor(s.conversation.epoch()),
+			historyEpoch: s.conversation.epoch(),
+			supportsImageUpload: imageUploadAvailable,
+            supportsMessageContent: true,
 			models: models,
 			modelsNext: modelsNext,
 			currentModel: s.currentModel,
 			currentEffort: s.currentEffort,
 			connectionState: s.attached ? "connected" : s.record.state == "reconnecting" ? "reconnecting" : "disconnected",
 			recoveryReason: recoveryReason(s),
-			requests: [
-				for (id => r in s.requests)
-					{
-						id: id,
-						method: r.method,
-						detail: r.detail,
-						reviewable: r.reviewable
-					}
-			],
+			requests: pending.requests,
+			requestsOmitted: pending.omitted,
 			error: s.error
 		};
+	}
+
+	function nativeHistory(s:Session, cursor:String, ctx:RpcContext<AgentView>):Void {
+		var epoch=s.conversation.epoch(), native=s.historyPages.resolve(epoch,cursor);
+		if(native==null) {ctx.fail({code:"invalid_cursor",message:"Activity history changed; refresh the session",ambiguous:false});return;}
+		function respond(page:workspace.provider.CodexHistoryPages.NativePage):Void {
+			var result=view(s);
+			result.items=CodexHistoryPages.merge(page,s.conversation);
+			result.itemsNext=page.next==null ? null : s.historyPages.following(epoch,cursor,page.next);
+			if(page.next!=null && result.itemsNext==null) {
+				ctx.fail({code:"history_unavailable",message:"Earlier activity cursor limit or cycle reached; reconnect the session to restart history",ambiguous:false});return;
+			}
+			ctx.respond(result);
+		}
+		var cached=s.historyPages.get(native);
+		if(cached!=null) {respond(cached);return;}
+		var generation=connectionGeneration;
+		call("thread/items/list",{threadId:s.record.thread,limit:8,sortDirection:"desc",cursor:native},function(reply) {
+			if(ctx.isCancelled()) return;
+			if(sessions.get(s.record.id)!=s || generation!=connectionGeneration || s.conversation.epoch()!=epoch) {
+				ctx.fail({code:"invalid_cursor",message:"Activity history changed; refresh the session",ambiguous:false});return;
+			}
+			if(reply.error!=null) {ctx.fail({code:"history_unavailable",message:"Could not load earlier activity: "+reply.error,ambiguous:false});return;}
+			var data:Dynamic=Reflect.field(reply.result,"data"), next=string(reply.result,"nextCursor");
+			if(!Std.isOfType(data,Array) || (cast data:Array<Dynamic>).length>8
+				|| !CodexHistoryPages.validNext(epoch,native,next,(cast data:Array<Dynamic>).length)) {
+				ctx.fail({code:"invalid_response",message:"Invalid native activity history page",ambiguous:false});return;
+			}
+			respond(s.historyPages.remember(native,next=="" ? null : next,cast data));
+		});
+	}
+
+    public function messageContent(session:String, turn:String, item:String, token:String, offset:Int):Null<AgentContentChunk> {
+        var s=sessions.get(session);
+        if(s == null) return null;
+        var live=s.conversation.content(turn,item,token,offset);
+        return live == null ? s.historyPages.content(turn,item,token,offset) : live;
+    }
 
 	function recoveryReason(s:Session):Null<String> {
 		if (s.record.thread == "" || s.attached
@@ -517,7 +568,8 @@ class CodexProvider implements LocalAgentProvider {
 			method: method,
 			detail: detail,
 			reviewable: reviewable,
-			questions: questions
+			questions: questions,
+			structured: reviewable && method == "item/tool/requestUserInput" ? StructuredQuestions.project("codex", params) : null
 		});
 		s.record.state = "needs-attention";
 		append(s, "\n" + method + "\n" + detail + "\n");
@@ -608,8 +660,9 @@ class CodexProvider implements LocalAgentProvider {
 				s.record.state = s.requests.keys().hasNext() ? "needs-attention" : "working";
 			else if (type == "idle" && s.record.turn == null)
 				s.record.state = "idle";
-		} else if (method == "item/agentMessage/delta" || method == "item/commandExecution/outputDelta") {
-			s.conversation.delta(string(params, "turnId"), string(params, "itemId"), method == "item/agentMessage/delta" ? "agentMessage" : "commandExecution", string(params, "delta"));
+		} else if (method == "item/agentMessage/delta" || method == "item/plan/delta" || method == "item/commandExecution/outputDelta") {
+			var kind=method == "item/agentMessage/delta" ? "agentMessage" : method == "item/plan/delta" ? "plan" : "commandExecution";
+			s.conversation.delta(string(params, "turnId"), string(params, "itemId"), kind, string(params, "delta"));
 			append(s, string(params, "delta"));
 		} else if (method == "item/completed" || method == "item/started" || method == "error") {
 			if (method != "error") s.conversation.put(string(params, "turnId"), Reflect.field(params, "item"), method == "item/completed");
@@ -700,49 +753,20 @@ class CodexProvider implements LocalAgentProvider {
 							restoredTurn = string(data[0], "id");
 						}
 						var historyBaseline = s.conversation.historyBaseline();
-						var history:Array<Dynamic> = [];
-						var cursors:Map<String, Bool> = [];
-						var ready = false;
-						function historyPage(cursor:Null<String>):Void {
-							var query:Dynamic = {threadId: s.record.thread, limit: 8, sortDirection: "desc"};
-							if (cursor != null) Reflect.setField(query, "cursor", cursor);
-							call("thread/items/list", query, function(items) {
-								if (stale() || sessions.get(s.record.id) != s) {
-									if (!ready) connectionChanged();
-									return;
-								}
-								var next = items.error == null ? string(items.result, "nextCursor") : "";
-								if (next != "" && cursors.exists(next)) items = new JsonRpcResponse(null, "Repeated conversation history cursor");
-								if (items.error != null) {
-									if (!ready) done(items);
-									else s.error = "Could not load earlier activity: " + items.error;
-									return;
-								}
-								var data:Array<Dynamic> = Reflect.field(items.result, "data");
-								if (data != null) for (item in data) history.push(item);
-								// Attach promptly; continue fetching older pages in the background.
-								if (!ready || next == "") {
-									var historyTurn = s.eventRevision == eventRevision ? restoredTurn : s.record.turn;
-									s.conversation.history(history, historyTurn, historyBaseline);
-								}
-								if (!ready) {
-									s.attached = true;
-									s.error = null;
-									if (s.eventRevision == eventRevision) {
-										s.record.turn = restoredTurn;
-										s.record.state = restoredTurn != null || restoredActive ? "working" : "idle";
-									}
-									save(s);
-									ready = true;
-									done(resumed);
-								}
-								if (next != "") {
-									cursors.set(next, true);
-									historyPage(next);
-								} else append(s, "\nLoaded conversation history (" + history.length + " items)\n");
-							});
-						}
-						historyPage(null);
+						call("thread/items/list", {threadId:s.record.thread,limit:8,sortDirection:"desc"}, function(items) {
+							if(stale() || sessions.get(s.record.id)!=s) {connectionChanged();return;}
+							if(items.error != null) {done(items);return;}
+							var data:Dynamic=Reflect.field(items.result,"data"), next=string(items.result,"nextCursor");
+							if(!Std.isOfType(data,Array) || (cast data:Array<Dynamic>).length>8 || (next!="" && CodexHistoryPages.cursor(s.conversation.epoch(),next)==null)) {
+								done(new JsonRpcResponse(null,"Invalid conversation history page"));return;
+							}
+							var historyTurn=s.eventRevision==eventRevision ? restoredTurn : s.record.turn;
+							s.conversation.history(cast data,historyTurn,historyBaseline);
+							s.historyPages.reset(next);
+							s.attached=true;s.error=null;
+							if(s.eventRevision==eventRevision) {s.record.turn=restoredTurn;s.record.state=restoredTurn!=null || restoredActive ? "working" : "idle";}
+							save(s);done(resumed);
+						});
 					});
 					return;
 				}
@@ -931,7 +955,8 @@ class CodexProvider implements LocalAgentProvider {
 				nameMetadata:{source:"native",nativeName:null}
 			},
 			activity: "",
-			conversation: new CodexConversation(),
+			conversation: new CodexConversation(imageFor(q.id)),
+			historyPages: new CodexHistoryPages(imageFor(q.id)),
 			error: null,
 			attached: false,
 			busy: true,
@@ -1007,7 +1032,9 @@ class CodexProvider implements LocalAgentProvider {
 			loadThread(s, complete);
 	}
 
-	public function action(q:AgentAction, ctx:RpcContext<AgentView>):Void {
+	public function action(q:AgentAction, ctx:RpcContext<AgentView>):Void actionWithImages(q, ctx, []);
+
+	public function actionWithImages(q:AgentAction, ctx:RpcContext<AgentView>, imagePaths:Array<String>, ?pinImages:String->Bool):Void {
 		if (storageFailed) {
 			ctx.fail({code: "storage_unavailable", message: "Agent storage requires recovery", ambiguous: false});
 			return;
@@ -1026,6 +1053,7 @@ class CodexProvider implements LocalAgentProvider {
 			return;
 		}
 		if (q.action == "read") {
+			if(q.after != null && CodexHistoryPages.isNative(q.after)) {nativeHistory(s,q.after,ctx);return;}
 			var before:Null<Int> = null;
 			if (q.after != null) {
 				before = s.conversation.cursorOffset(q.after);
@@ -1223,7 +1251,7 @@ class CodexProvider implements LocalAgentProvider {
 			return;
 		}
 		if (q.action == "prompt") {
-			if (!valid(q.text, 8192)
+			if (q.text == null || q.text.length > 8192 || (q.text.length == 0 && imagePaths.length == 0)
 				|| s.busy
 				|| (s.record.state != "idle" && s.record.state != "completed" && s.record.state != "failed" && s.record.state != "interrupted")) {
 				ctx.fail({code: "busy", message: "Agent is busy or prompt is invalid", ambiguous: false});
@@ -1244,11 +1272,14 @@ class CodexProvider implements LocalAgentProvider {
 				ctx.fail({code: "invalid_effort", message: "Choose a reasoning effort supported by the selected model", ambiguous: false});
 				return;
 			}
+			if (imagePaths.length > 0 && (pinImages == null || !pinImages(s.record.thread))) {
+				ctx.fail({code:"image_unavailable",message:"An image expired or is unavailable. Remove it and upload it again.",ambiguous:false}); return;
+			}
 			s.busy = true;
 			s.record.state = "working";
 			s.error = null;
 			append(s, "\nYou: " + q.text + "\n");
-                var params:Dynamic = {threadId: s.record.thread, input: [{type: "text", text: q.text, text_elements: new Array<String>()}]};
+                var params:Dynamic = {threadId: s.record.thread, input: turnInput(q.text, imagePaths)};
                 if (effectiveModel != null) Reflect.setField(params, "model", effectiveModel);
                 if (effectiveEffort != null) Reflect.setField(params, "effort", effectiveEffort);
                 if (s.record.approvalPolicy != null) Reflect.setField(params, "approvalPolicy", s.record.approvalPolicy);
@@ -1256,9 +1287,11 @@ class CodexProvider implements LocalAgentProvider {
                 call("turn/start", params, function(r) {
 				s.busy = false;
 				if (r.error != null) {
-					s.error = r.error;
+					var message = r.error;
+					for (path in imagePaths) message = StringTools.replace(message, path, "[attached image]");
+					s.error = message;
 					s.record.state = "uncertain";
-					ctx.fail({code: "provider_error", message: r.error, ambiguous: true});
+					ctx.fail({code: "provider_error", message: message, ambiguous: true});
 					return;
 				}
 				var t = Reflect.field(r.result, "turn");
@@ -1289,7 +1322,7 @@ class CodexProvider implements LocalAgentProvider {
 			ctx.fail({code: "resolved", message: "This request has already resolved or disconnected", ambiguous: false});
 			return;
 		}
-		if (q.text.length > 8192) {
+		if (q.text == null || haxe.io.Bytes.ofString(q.text).length > 8192) {
 			ctx.fail({code: "invalid_request", message: "Answer exceeds limit", ambiguous: false});
 			return;
 		}
@@ -1308,6 +1341,12 @@ class CodexProvider implements LocalAgentProvider {
 				return;
 			}
 			result = {decision: q.action == "approve" ? "accept" : "decline"};
+		} else if (pending.method == "item/tool/requestUserInput" && q.action == "answer-questions") {
+			var validated = pending.reviewable ? StructuredQuestions.answers(pending.structured, q.text, "codex") : null;
+			if (validated == null) { ctx.fail({code:"invalid_request", message:"Review and answer every question", ambiguous:false}); return; }
+			var answers:Dynamic = {};
+			for (id => values in validated) Reflect.setField(answers, id, {answers:values});
+			result = {answers:answers};
 		} else if (pending.method == "item/tool/requestUserInput" && q.action == "answer") {
 			// Each question uses its own id. The UI supplies one id=value per line.
 			var answers:Dynamic = {};

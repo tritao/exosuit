@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "package": {"name": "exosuit-session-chat-ui-test"},
+  "entry": "app.SessionChatUiTestMain",
+  "sourceRoots": ["src", "../button-theme/src", "../codex-markdown-layout/src", "../sidebar-layout/src", "../status-bar/src", "../session-projection/src", "../../agent/src"],
+  "scopeSourceRoots": false,
+  "dependencies": {"exosuit-graphical": {"path": "../../graphical"}},
+  "target": "host",
+  "outputDir": "build"
+}

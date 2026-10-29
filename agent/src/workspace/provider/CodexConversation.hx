@@ -6,18 +6,31 @@ import workspace.service.WorkspaceAgentProtocol;
 /** Stable turn/item identity across live events and persisted history. */
 class CodexConversation {
   public static inline final PAGE_ITEMS = 8;
+  static var nextCacheId:Int = 0;
+  final cacheId:Int;
   var entries:Array<AgentActivityItem> = [];
   var historyRevision:Int = 0;
+  final incarnation:String = AgentHistoryEpoch.create();
+  final imageIdentity:Null<(String,String,String)->Null<String>>;
+  public function epoch():String return incarnation + "-" + historyRevision;
 
-  public function new() {
+  public function new(?imageIdentity:(String,String,String)->Null<String>) { cacheId = ++nextCacheId; this.imageIdentity=imageIdentity; }
+  function cacheKey(turn:String, id:String):String return cacheId + ":" + turn.length + ":" + turn + id;
+  public function content(turn:String, id:String, token:String, offset:Int):Null<AgentContentChunk> {
+    var entry = find(turn,id);
+    if (entry == null || (entry.kind != "agentMessage" && entry.kind != "plan") || entry.contentToken != token) return null;
+    return AgentContentCache.chunk(cacheKey(turn,id),token,offset);
   }
 
   public function items():Array<AgentActivityItem> return entries.copy();
+  public function current(turn:String,id:String):Null<AgentActivityItem> return find(turn,id);
   public function cursorOffset(cursor:String):Null<Int> {
     var parts = cursor.split(":");
-    if (parts.length != 2 || parts[0] != Std.string(historyRevision)) return null;
+    if (parts.length != 2 || parts[0] != epoch()) return null;
     var offset = Std.parseInt(parts[1]);
-    return offset != null && offset >= 0 && offset <= entries.length && Std.string(offset) == parts[1] ? offset : null;
+    if(offset == null || offset < CodexHistoryPages.CURSOR_BASE || Std.string(offset) != parts[1]) return null;
+    offset-=CodexHistoryPages.CURSOR_BASE;
+    return offset <= entries.length ? offset : null;
   }
   public function page(?before:Int):Array<AgentActivityItem> {
     var end = before == null ? entries.length : before;
@@ -25,7 +38,7 @@ class CodexConversation {
   }
   public function next(?before:Int):Null<String> {
     var end = before == null ? entries.length : before;
-    return end > PAGE_ITEMS ? historyRevision + ":" + (end - PAGE_ITEMS) : null;
+    return end > PAGE_ITEMS ? epoch() + ":" + (CodexHistoryPages.CURSOR_BASE + end - PAGE_ITEMS) : null;
   }
   public function finish(turn:String, state:String):Void {
     for (entry in entries)
@@ -58,6 +71,12 @@ class CodexConversation {
     entry.title = title;
     entry.text = text;
     entry.detail = detail;
+    if (entry.files != null) for (file in entry.files) {
+      var available = Std.int(Math.max(0, Math.min(file.length, detail.length - file.offset)));
+      if (available != file.length) file.truncated = true;
+      file.length = available;
+      file.offset = Std.int(Math.min(file.offset, detail.length));
+    }
   }
 
   public function put(turn:String, item:Dynamic, completed:Bool):Void {
@@ -80,17 +99,32 @@ class CodexConversation {
       case "agentMessage":
         entry.title = "Codex";
         entry.text = string(item, "text");
+      case "plan":
+        entry.title = "Plan";
+        entry.text = string(item, "text");
       case "userMessage":
         entry.title = "You";
         var content:Array<Dynamic> = Reflect.field(item, "content");
+        var images = 0;
         if (content != null) for (part in content) {
+          var partType = string(part, "type");
+          if (partType == "image" || partType == "localImage") {
+            images++;
+            var imageId=imageIdentity != null && partType == "localImage" ? imageIdentity(turn,id,string(part,"path")) : null;
+            if (images <= 8) {
+              if (entry.images == null) entry.images=[];
+              (cast entry.images:Array<AgentMessageImage>).push({id:imageId});
+            }
+            continue;
+          }
           var text = string(part, "text");
-          entry.text += (entry.text == "" ? "" : "\n") + (text == "" ? "[" + string(part, "type") + "]" : text);
+          entry.text += (entry.text == "" ? "" : "\n") + (text == "" ? "[" + partType + "]" : text);
           if (entry.text.length > 4096) {
             entry.truncated = true;
             break;
           }
         }
+        if (images > 0) entry.text += (entry.text == "" ? "" : "\n") + "[" + images + (images == 1 ? " image attached]" : " images attached]");
       case "reasoning":
         entry.title = "Reasoning";
         var summary:Array<String> = Reflect.field(item, "summary");
@@ -110,22 +144,50 @@ class CodexConversation {
         entry.detail += "\n" + string(item, "aggregatedOutput");
       case "fileChange":
         entry.title = "File changes";
+        var fileChanges:Array<AgentFileChange> = [];
+        entry.files = fileChanges;
+        var pathBudget = 1024;
         var changes:Array<Dynamic> = Reflect.field(item, "changes");
         if (changes != null) for (change in changes) {
-          entry.text += (entry.text == "" ? "" : "\n") + string(Reflect.field(change, "kind"), "type") + " " + string(
-            change,
-            "path"
-          );
-          entry.detail += string(change, "diff") + "\n";
-          if (entry.text.length > 4096 || entry.detail.length > 2048) {
-            entry.truncated = true;
-            break;
-          }
+          var path = string(change, "path"), kind = string(Reflect.field(change, "kind"), "type");
+          var diff = string(change, "diff");
+          var retainedPath = clipped(path, Std.int(Math.min(512, pathBudget)));
+          var offset = entry.detail.length;
+          var remaining = Std.int(Math.max(0, 2048 - offset));
+          var retainedDiff = clipped(diff, remaining);
+          entry.detail += retainedDiff;
+          if (entry.detail.length < 2048) entry.detail += "\n";
+          var partial = retainedDiff.length != diff.length;
+          if (partial) entry.truncated = true;
+          if (fileChanges.length < 8 && retainedPath == path && path != "") {
+            fileChanges.push({path: path, kind: clipped(kind, 32), offset: offset,
+              length: retainedDiff.length, truncated: partial});
+            pathBudget -= retainedPath.length;
+          } else entry.truncated = true;
+          var line = (entry.text == "" ? "" : "\n") + kind + " " + path;
+          var retainedLine = clipped(line, Std.int(Math.max(0, 4096 - entry.text.length)));
+          entry.text += retainedLine;
+          if (retainedLine.length != line.length) entry.truncated = true;
         }
       case "mcpToolCall":
         entry.title = "Tool";
         entry.text = string(item, "server") + " / " + string(item, "tool");
         entry.detail = Json.stringify(Reflect.field(item, "result"));
+      case "imageView", "imageGeneration":
+        entry.title = kind == "imageView" ? "Viewed image" : "Generated image";
+        var path=string(item,kind == "imageView" ? "path" : "savedPath");
+        if (path != "" && path.length <= 1024) entry.imagePath=path;
+        else if (path.length > 1024) entry.truncated=true;
+        if (kind == "imageGeneration") {
+          var failure=Reflect.field(item,"failure"), revised=string(item,"revisedPrompt");
+          if (failure != null) entry.text="Image generation reported a failure.";
+          else if (revised != "") entry.text=revised;
+        }
+        // Preserve the provider source as bounded detail without duplicating
+        // potentially large inline image bytes in the compact activity view.
+        var source:Dynamic=Reflect.copy(item);
+        if (Reflect.hasField(source,"result")) Reflect.setField(source,"result","[image data omitted]");
+        entry.detail=Json.stringify(source);
       case _:
         entry.title = "Additional activity";
         entry.text = kind;
@@ -133,6 +195,7 @@ class CodexConversation {
     }
     var state = string(item, "status");
     if (state != "") entry.state = clipped(state, 64);
+    if (kind == "agentMessage" || kind == "plan") entry.contentToken = AgentContentCache.replace(cacheKey(turn,id),entry.text);
     bounded(entry);
     if (existing == null) entries.push(entry);
     else entries[entries.indexOf(existing)] = entry;
@@ -146,7 +209,10 @@ class CodexConversation {
     }
     if (entry == null || entry.state != "inProgress") return;
     if (kind == "commandExecution") entry.detail += text;
-    else entry.text += text;
+    else {
+      if (kind == "agentMessage" || kind == "plan") entry.contentToken = AgentContentCache.append(cacheKey(turn,id),text);
+      entry.text += text;
+    }
     bounded(entry);
   }
 

@@ -22,6 +22,8 @@ import workspace.service.WorkspaceProtocol.WorkspaceUnwatchResult;
 	@:id(10) var branches:Bool;
 	@:id(11) var remotes:Bool;
 	@:id(12) var stash:Bool;
+	@:optional @:id(13) var worktrees:Null<Bool>;
+	@:optional @:id(14) var originRead:Null<Bool>;
 }
 
 @:wire typedef WorkspaceScmHead = {
@@ -169,6 +171,12 @@ typedef ScmTrustRequest = WorkspaceRepositoryRequest;
 
 typedef ScmBranchesRequest = WorkspaceRepositoryRequest;
 
+@:wire typedef ScmOriginResult = {
+	@:id(1) var workspace:String;
+	@:id(2) var repository:String;
+	@:optional @:id(3) var origin:Null<String>;
+}
+
 @:wire typedef ScmBranchesResult = {
 	@:id(1) var workspace:String;
 	@:id(2) var repository:String;
@@ -208,6 +216,9 @@ class WorkspaceScmProtocol {
 	public static final BRANCHES = new RpcMethod<ScmBranchesRequest, ScmBranchesResult>(168,
 		function(value) return MessagePack.encode(value), function(bytes:Bytes):ScmBranchesRequest return MessagePack.decode(bytes),
 		function(value) return MessagePack.encode(value), function(bytes:Bytes):ScmBranchesResult return MessagePack.decode(bytes));
+	public static final ORIGIN = new RpcMethod<WorkspaceRepositoryRequest, ScmOriginResult>(169,
+		function(value) return MessagePack.encode(value), function(bytes:Bytes):WorkspaceRepositoryRequest return MessagePack.decode(bytes),
+		function(value) return MessagePack.encode(value), function(bytes:Bytes):ScmOriginResult return MessagePack.decode(bytes));
 
 	public static function encodeEvent(value:ScmWatchEvent):Bytes return MessagePack.encode(value);
 	public static function decodeEvent(bytes:Bytes):ScmWatchEvent return MessagePack.decode(bytes);

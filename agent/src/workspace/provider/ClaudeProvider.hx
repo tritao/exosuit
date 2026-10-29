@@ -15,6 +15,7 @@ private typedef ClaudeApproval = {
  var detail:String;
  var reviewable:Bool;
  var questions:Array<String>;
+ var structured:Null<Array<AgentQuestion>>;
 }
 private typedef ClaudeSession = {
  var record:AgentRecord;
@@ -33,7 +34,10 @@ private typedef ClaudeSession = {
 }
 
 /** One native CLI process per session, owned by the workspace daemon, not an editor attachment. */
-class ClaudeProvider implements LocalAgentProvider {
+class ClaudeProvider implements AgentMessageSource {
+ public var imageUploadAvailable:Bool=false;
+ public var imagePrepare:Null<(String,Array<String>,Null<String>,Null<String>)->Null<Array<Dynamic>>>;
+ public var imageHold:Null<(String,String,String,String,Array<String>)->Bool>;
  public function modelCatalog(q:AgentModelsQuery,ctx:RpcContext<AgentModelsPage>):Void {
   ctx.fail({code:"unsupported_operation",message:"Load models from an attached session",ambiguous:false});
  }
@@ -82,7 +86,7 @@ class ClaudeProvider implements LocalAgentProvider {
  }
  function inside(path:String):Bool return WorkspaceDirectories.persisted(path);
  function session(r:AgentRecord):ClaudeSession return {
-  record:r,process:null,transport:null,ready:false,busy:false,error:null,conversation:new ClaudeConversation(r.replay),
+  record:r,process:null,transport:null,ready:false,busy:false,error:null,conversation:new ClaudeConversation(r.replay,new AgentResponseArchive("claude",r.id,persistence)),
   approvals:[],models:[],message:"",currentModel:r.preferredModel,serial:0,interrupting:false
  };
  function save(s:ClaudeSession):Void {
@@ -99,13 +103,19 @@ class ClaudeProvider implements LocalAgentProvider {
   result.replay=null;
   return result;
  }
- function view(s:ClaudeSession,?before:Int):AgentView return {
-  record:copy(s.record),activity:"",items:s.conversation.page(before),itemsNext:s.conversation.next(before),itemsOmitted:false,
-  requests:[for(id=>r in s.approvals) {id:id,method:r.tool == "AskUserQuestion" ? "item/tool/requestUserInput" : "item/commandExecution/requestApproval",detail:r.detail,reviewable:r.reviewable}],
+ function view(s:ClaudeSession,?before:Int):AgentView {
+  var pending = AgentRequestPage.project([for(id=>r in s.approvals) {id:id,method:r.tool == "AskUserQuestion" ? "item/tool/requestUserInput" : "item/commandExecution/requestApproval",detail:r.detail,reviewable:r.reviewable,questions:r.structured}]);
+  return {
+  record:copy(s.record),activity:"",items:s.conversation.page(before),itemsNext:s.conversation.next(before),itemsOmitted:false,supportsMessageContent:true,supportsImageUpload:imageUploadAvailable,historyEpoch:s.conversation.epoch(),historyOmitted:s.conversation.hasOmitted(),
+  requests:pending.requests,requestsOmitted:pending.omitted,
   models:s.models,modelsNext:null,currentModel:s.currentModel,currentEffort:null,
   connectionState:s.ready ? "connected" : s.transport == null ? "disconnected" : "reconnecting",
-  recoveryReason:s.ready ? null : "explicit-resume",error:s.error
- };
+  recoveryReason:s.ready ? null : "explicit-resume",error:s.error == null ? s.conversation.archiveError() : s.error
+  };
+ }
+ public function messageContent(session:String,turn:String,item:String,token:String,offset:Int):Null<AgentContentChunk> {
+  var s=sessions.get(session); return s == null ? null : s.conversation.content(turn,item,token,offset);
+ }
  function fail(s:ClaudeSession,reason:String):Void {
   s.ready=false;s.busy=false;s.error=reason.substring(0,2048);s.approvals.clear();
   s.record.state = s.record.state == "working" || s.record.state == "needs-attention" ? "uncertain" : "disconnected";
@@ -157,7 +167,9 @@ class ClaudeProvider implements LocalAgentProvider {
   }
   var detail=tool + "\n" + raw;
   if(questions.length > 0) detail += "\n" + [for(i in 0...questions.length) i + "=" + questions[i]].join("\n");
-  s.approvals.set(id,{input:input,tool:tool,detail:detail.substring(0,2048),reviewable:detail.length <= 2048 && (tool != "AskUserQuestion" || questions.length > 0),questions:questions});
+  var reviewable = detail.length <= 2048 && (tool != "AskUserQuestion" || questions.length > 0);
+  s.approvals.set(id,{input:input,tool:tool,detail:detail.substring(0,2048),reviewable:reviewable,questions:questions,
+   structured:reviewable && tool == "AskUserQuestion" ? StructuredQuestions.project("claude",input) : null});
   s.record.state="needs-attention";
  }
  function event(s:ClaudeSession,type:String,v:Dynamic):Void {
@@ -186,7 +198,7 @@ class ClaudeProvider implements LocalAgentProvider {
     var text="";
     for(part in (cast content:Array<Dynamic>)) {
      switch(str(part,"type")) {
-      case "text": text += str(part,"text");
+      case "text": if (text.length <= AgentContentCache.MAX_MESSAGE) text += str(part,"text");
       case "tool_use":
        var tool=str(part,"name");
        s.conversation.put(str(part,"id"),turn,"tool",tool,"",Json.stringify(Reflect.field(part,"input")),"inProgress");
@@ -195,7 +207,6 @@ class ClaudeProvider implements LocalAgentProvider {
        s.conversation.put(str(part,"tool_use_id"),turn,"tool","Tool",Std.isOfType(result,String) ? result : Json.stringify(result),"",Reflect.field(part,"is_error") == true ? "failed" : "completed");
       default:
      }
-     if(text.length > 8192) break;
     }
     if(text != "") s.conversation.put(id,turn,type == "assistant" ? "agentMessage" : "userMessage",type == "assistant" ? "Claude" : "You",text,"","completed");
    case "result":
@@ -307,25 +318,49 @@ class ClaudeProvider implements LocalAgentProvider {
    });return;
   }
   if(q.action == "prompt") {
-   if(!valid(q.text,8192) || s.busy || s.record.state == "uncertain") {error("busy","Claude is busy or delivery requires reconciliation");return;}
+   if(q.text==null || q.text.length>8192 || (StringTools.trim(q.text)=="" && (q.imageIds==null || q.imageIds.length==0)) || s.busy || s.record.state == "uncertain") {error("busy","Claude is busy or delivery requires reconciliation");return;}
    if(q.effort != null || (q.model != null && q.model != s.record.preferredModel)) {error("invalid_request","Set the Claude model before sending; effort overrides are unsupported");return;}
    var turn="turn-" + (++s.serial) + "-" + Std.string(clock());
+   var content:Dynamic=q.text;
+   if(q.imageIds!=null && q.imageIds.length>0) {
+    var images=imagePrepare==null ? null : imagePrepare(s.record.id,q.imageIds,null,null);
+    if(images==null) {error("image_unavailable","An image is unavailable; remove it and upload it again");return;}
+    var blocks:Array<Dynamic>=[];
+    if(q.text!="") blocks.push({type:"text",text:q.text});
+    for(image in images) blocks.push({type:"image",source:{type:"base64",media_type:Reflect.field(image,"mimeType"),data:Reflect.field(image,"data")}});
+    content=blocks;
+    var encoded=haxe.io.Bytes.ofString(Json.stringify({type:"user",session_id:s.record.thread,message:{role:"user",content:content},parent_tool_use_id:null}));
+    if(encoded.length+1>ClaudeTransport.MAX_FRAME_BYTES) {error("image_unavailable","Images exceed the Claude input limit");return;}
+    if(imageHold==null || !imageHold(s.record.id,s.record.thread,turn,turn,q.imageIds)) {error("image_unavailable","Could not retain this image for Claude");return;}
+   }
    s.record.state="working";s.record.turn=turn;s.error=null;s.busy=true;
    s.conversation.put(turn,turn,"userMessage","You",q.text,"","completed");
+   if(q.imageIds!=null && q.imageIds.length>0) s.conversation.attachImages(turn,turn,q.imageIds);
    // Write-ahead state: a daemon crash must never cause an automatic prompt retry.
    try save(s) catch(_:Dynamic) {s.busy=false;s.record.state="uncertain";error("storage_unavailable","Prompt was not queued");return;}
-   if(!t.send({type:"user",session_id:s.record.thread,message:{role:"user",content:q.text},parent_tool_use_id:null})) {
+   if(!t.send({type:"user",session_id:s.record.thread,message:{role:"user",content:content},parent_tool_use_id:null})) {
     fail(s,"Claude prompt queue failed; explicitly resume before another prompt");error("backpressure","Claude prompt was not queued");return;
    }
    ctx.respond(view(s));return;
   }
   var r=q.request == null ? null : s.approvals.get(q.request);
   if(r == null) {error("resolved","Request has resolved or disconnected");return;}
-  if(q.text == null || q.text.length > 8192) {error("invalid_request","Answer exceeds limit");return;}
+  if(q.text == null || haxe.io.Bytes.ofString(q.text).length > 8192) {error("invalid_request","Answer exceeds limit");return;}
   var response:Dynamic;
   if(q.action == "decline") response={behavior:"deny",message:"Declined by user"};
   else if(q.action == "approve" && r.tool != "AskUserQuestion" && r.reviewable) response={behavior:"allow",updatedInput:r.input};
-  else if(q.action == "answer" && r.tool == "AskUserQuestion" && r.reviewable) {
+  else if(q.action == "answer-questions" && r.tool == "AskUserQuestion" && r.reviewable) {
+   var validated = StructuredQuestions.answers(r.structured,q.text,"claude");
+   if (validated == null) {error("invalid_request","Review and answer every question");return;}
+   var answers:Dynamic = {};
+   for (id => values in validated) {
+    var index = Std.parseInt(id);
+    if (index == null || index < 0 || index >= r.questions.length) {error("invalid_request","Unknown question");return;}
+    Reflect.setField(answers,r.questions[index],values.join(", "));
+   }
+   var updated = Reflect.copy(r.input); Reflect.setField(updated,"answers",answers);
+   response = {behavior:"allow",updatedInput:updated};
+  } else if(q.action == "answer" && r.tool == "AskUserQuestion" && r.reviewable) {
    var answers:Dynamic={},seen:Map<Int,Bool>=[];
    for(line in q.text.split("\n")) {
     var at=line.indexOf("="),index=Std.parseInt(line.substring(0,at));

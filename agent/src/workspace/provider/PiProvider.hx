@@ -51,7 +51,15 @@ private typedef PiSession = {
 }
 
 /** Pi owns credentials, extensions and native session files. The daemon owns process lifetime and delivery. */
-class PiProvider implements LocalAgentProvider {
+class PiProvider implements AgentMessageSource {
+ public var imageUploadAvailable:Bool=false;
+ public var imagePrepare:Null<(String,Array<String>,Null<String>,Null<String>)->Null<Array<Dynamic>>>;
+ public var imageHold:Null<(String,String,String,String,Array<String>)->Bool>;
+ public function hasHeldImages(id:String):Bool {
+  var session=sessions.get(id);if(session==null) return false;
+  for(input in session.inputs.pending()) if(input.imageIds!=null && input.imageIds.length>0) return true;
+  return false;
+ }
  public function nativeNamingSupported():Bool return false;
  public function modelCatalog(q:AgentModelsQuery,ctx:RpcContext<AgentModelsPage>):Void {
   ctx.fail({code:"unsupported_operation",message:"Load models from an attached session",ambiguous:false});
@@ -91,7 +99,7 @@ class PiProvider implements LocalAgentProvider {
  static function sessionPath(v:String):Bool return valid(v,4096) && Path.isAbsolute(v) && v.indexOf("\n") < 0;
  function inside(v:String):Bool return WorkspaceDirectories.persisted(v);
  function session(r:AgentRecord):PiSession return {record:r,process:null,transport:null,ready:false,policyReady:false,busy:false,error:null,
-  conversation:new PiConversation(r.replay),dialogs:[],models:[],commands:null,commandsError:null,commandsLoading:false,serial:0,message:0,interrupted:false,pendingPrompts:0,revision:0,probe:0,inputs:new PiInputQueue(r),nativePending:[],nativeKnown:false,settled:false,
+  conversation:new PiConversation(r.replay,new AgentResponseArchive("pi",r.id,persistence)),dialogs:[],models:[],commands:null,commandsError:null,commandsLoading:false,serial:0,message:0,interrupted:false,pendingPrompts:0,revision:0,probe:0,inputs:new PiInputQueue(r),nativePending:[],nativeKnown:false,settled:false,
   settling:false,currentModel:null,currentEffort:null};
  static function copy(r:AgentRecord):AgentRecord {var result:AgentRecord=cast Reflect.copy(r);result.replay=null;result.inputMessages=null;return result;}
  public function owns(id:String):Bool return sessions.exists(id);
@@ -105,16 +113,23 @@ class PiProvider implements LocalAgentProvider {
   if(MessagePack.encode(s.record).length>16384) throw "Pi input state exceeds storage bound";
   if(persistence != null) try persistence.saveAgent(s.record) catch(e:Dynamic) {storageFailed=true;throw e;}
  }
- function view(s:PiSession,?before:Int):AgentView return {
-  record:copy(s.record),activity:"",items:s.conversation.page(before),itemsNext:s.conversation.next(before),itemsOmitted:false,
-  requests:[for(id=>d in s.dialogs) {id:id,method:d.method == "confirm" ? "item/commandExecution/requestApproval" : "item/tool/requestUserInput",
-   detail:d.detail,reviewable:d.reviewable,inputKind:d.method,options:d.options}],
+ function view(s:PiSession,?before:Int):AgentView {
+  var pending:Array<AgentRequest>=[for(id=>d in s.dialogs) {id:id,method:d.method == "confirm" ? "item/commandExecution/requestApproval" : "item/tool/requestUserInput",
+   detail:d.detail,reviewable:d.reviewable,inputKind:d.method,options:d.options}];
+  var page=AgentRequestPage.project(pending);
+  return {
+  record:copy(s.record),activity:"",items:s.conversation.page(before),itemsNext:s.conversation.next(before),itemsOmitted:false,supportsMessageContent:true,supportsImageUpload:imageUploadAvailable,historyEpoch:s.conversation.epoch(),historyOmitted:s.conversation.hasOmitted(),
+  requests:page.requests,requestsOmitted:page.omitted,
   models:s.models,modelsNext:null,commands:s.commands,commandsError:s.commandsError,commandsLoading:s.commandsLoading,currentModel:s.currentModel,currentEffort:s.currentEffort,
   connectionState:s.ready && s.record.state != "reconnecting" ? "connected" : s.transport == null ? "disconnected" : "reconnecting",
-  recoveryReason:s.ready ? null : "explicit-resume",error:s.error,
+  recoveryReason:s.ready ? null : "explicit-resume",error:s.error == null ? s.conversation.archiveError() : s.error,
   inputToken:s.inputs.token(),pendingInputs:[for(m in s.inputs.pending()) cast Reflect.copy(m)],queuePaused:s.record.queuePaused==true,
   nativePending:s.nativePending,inputBusy:s.inputs.hasNativeOperation(),supportsSteering:true,supportsQueue:true
- };
+  };
+ }
+ public function messageContent(session:String,turn:String,item:String,token:String,offset:Int):Null<AgentContentChunk> {
+  var s=sessions.get(session); return s == null ? null : s.conversation.content(turn,item,token,offset);
+ }
  function fail(s:PiSession,reason:String,terminalState:String="failed"):Void {
   var t=s.transport;s.transport=null;s.ready=false;
   var uncertain=s.busy || s.record.state == "uncertain";
@@ -277,19 +292,35 @@ class PiProvider implements LocalAgentProvider {
    drain(s);
   });
  }
- function startRun(s:PiSession,text:String,?message:AgentInputMessage):Void {
-  var turn=message == null ? "pi-turn-"+(++s.serial)+"-"+Std.string(clock()) : "pi-turn-"+message.id;
+ function imageBlocks(s:PiSession,ids:Null<Array<String>>,?turn:String,?item:String):Null<Array<Dynamic>> {
+  if(ids==null || ids.length==0) return [];
+  return imagePrepare==null ? null : imagePrepare(s.record.id,ids,turn,item);
+ }
+ function imageFrameFits(text:String,images:Array<Dynamic>):Bool {
+  var payload:Dynamic={type:"prompt",id:"2147483647",message:text,streamingBehavior:"steer",images:images};
+  return haxe.io.Bytes.ofString(haxe.Json.stringify(payload)).length+1 <= PiTransport.MAX_FRAME_BYTES;
+ }
+ function startRun(s:PiSession,text:String,?message:AgentInputMessage,?directIds:Array<String>,?directTurn:String):Bool {
+  var turn=message == null ? directTurn == null ? "pi-turn-"+(++s.serial)+"-"+Std.string(clock()) : directTurn : "pi-turn-"+message.id;
+  var ids=message==null ? directIds : message.imageIds, itemId=message==null ? turn : message.id;
+  var blocks=imageBlocks(s,ids,turn,itemId);
+  if(blocks==null || !imageFrameFits(text,blocks)) {
+   s.record.queuePaused=true;s.error="Queued image is unavailable or exceeds the Pi frame limit; remove this input and retry";
+   try save(s) catch(_:Dynamic) fail(s,"Pi queue state could not be saved");return false;
+  }
   s.record.nativeSessionRequired=true;s.record.state="working";s.record.turn=turn;s.busy=true;s.error=null;
   s.message=0;s.interrupted=false;s.settled=false;s.settling=false;s.probe++;s.revision++;
   if(message != null) message.state="sending";
-  s.conversation.put(message == null ? turn : message.id,turn,"userMessage","You",text,"","completed");
-  try save(s) catch(_:Dynamic) {fail(s,"Pi prompt could not be saved before delivery");return;}
-  sendPrompt(s,text,message,false);
+  s.conversation.put(itemId,turn,"userMessage","You",text,"","completed");
+  if(ids!=null && ids.length>0) s.conversation.attachImages(turn,itemId,ids);
+  try save(s) catch(_:Dynamic) {fail(s,"Pi prompt could not be saved before delivery");return false;}
+  sendPrompt(s,text,message,false,blocks);return true;
  }
- function sendPrompt(s:PiSession,text:String,message:Null<AgentInputMessage>,activeSteer:Bool):Void {
+ function sendPrompt(s:PiSession,text:String,message:Null<AgentInputMessage>,activeSteer:Bool,?images:Array<Dynamic>):Void {
   var t=s.transport;if(t == null) return;
   s.pendingPrompts++;
   var params:Dynamic={message:text};
+  if(images!=null && images.length>0) Reflect.setField(params,"images",images);
   if(message != null && message.kind=="steer") Reflect.setField(params,"streamingBehavior","steer");
   t.request("prompt",params,clock(),function(r) {
    if(s.transport!=t) return;
@@ -343,27 +374,38 @@ class PiProvider implements LocalAgentProvider {
  }
  function submitInput(s:PiSession,q:AgentAction,ctx:RpcContext<AgentView>):Void {
   var kind=q.action=="queue" ? "queue" : q.action=="steer" ? "steer" : "clear",text=kind=="clear" ? "" : q.text;
-  if(text == null || (kind!="clear" && (!valid(text,4096) || StringTools.trim(text)=="")) || q.request==null || !valid(q.request,128)) {
+  var ids=q.imageIds;
+  if(text == null || (kind!="clear" && (text.length>4096 || (StringTools.trim(text)=="" && (ids==null || ids.length==0))))
+   || (kind=="clear" && ids!=null && ids.length>0) || q.request==null || !valid(q.request,128)) {
    ctx.fail({code:"invalid_request",message:"A current input token and a message of at most 4096 bytes are required",ambiguous:false});return;
   }
   var existing=s.inputs.find(q.request);
   if(existing != null) {
-   if(existing.kind!=kind || existing.fingerprint!=PiInputQueue.fingerprint(kind,text)) ctx.fail({code:"conflict",message:"Input token already belongs to another message",ambiguous:false});
+   if(existing.kind!=kind || existing.fingerprint!=PiInputQueue.fingerprint(kind,text,ids)) ctx.fail({code:"conflict",message:"Input token already belongs to another message",ambiguous:false});
    else ctx.respond(view(s));return;
   }
   if(q.request!=s.inputs.token()) {ctx.fail({code:"stale_input",message:"The input token has expired; refresh the session before submitting again",ambiguous:false});return;}
   if(!s.ready || s.transport==null) {ctx.fail({code:"disconnected",message:"Resume Pi before submitting messages",ambiguous:false});return;}
   if((kind!="queue" && s.inputs.hasNativeOperation()) || (s.busy && s.record.turn==null)) {ctx.fail({code:"busy",message:"Wait for the pending Pi operation",ambiguous:false});return;}
   if(kind=="steer" && !canSteerText(s,text)) {ctx.fail({code:"invalid_request",message:"Send extension commands when Pi is idle; steering supports text, skills and prompt templates",ambiguous:false});return;}
-  if(!s.inputs.canAdd(text,kind)) {ctx.fail({code:"limit",message:"Pending inputs are limited to eight messages and 4096 total bytes",ambiguous:false});return;}
-  var input=s.inputs.add(q.request,kind,text);
+  if(!s.inputs.canAdd(text,kind,ids)) {ctx.fail({code:"limit",message:"Pending inputs are limited to eight messages and 4096 total bytes",ambiguous:false});return;}
+  var blocks=imageBlocks(s,ids);
+  if(blocks==null || !imageFrameFits(text,blocks)) {ctx.fail({code:"image_unavailable",message:"An image is unavailable or exceeds the Pi input limit",ambiguous:false});return;}
+  if(ids!=null && ids.length>0) {
+   var turn=kind=="steer" && s.busy ? s.record.turn : "pi-turn-"+q.request;
+   if(turn==null || imageHold==null || !imageHold(s.record.id,s.record.thread,turn,q.request,ids)) {
+    ctx.fail({code:"image_unavailable",message:"Could not retain this image for the Pi input",ambiguous:false});return;
+   }
+  }
+  var input=s.inputs.add(q.request,kind,text,ids);
   try save(s) catch(_:Dynamic) {fail(s,"Pi input could not be saved before delivery");ctx.fail({code:"storage_unavailable",message:"Pi input could not be saved",ambiguous:false});return;}
   if(kind=="steer") {
    if(s.busy) {
     s.revision++;s.settled=false;
     s.conversation.put(input.id,s.record.turn,"userMessage","You · Steering",text,"","completed");
+    if(ids!=null && ids.length>0) s.conversation.attachImages(s.record.turn,input.id,ids);
     try save(s) catch(_:Dynamic) {fail(s,"Steering could not be saved");ctx.respond(view(s));return;}
-    sendPrompt(s,text,input,true);
+    sendPrompt(s,text,input,true,blocks);
    } else startRun(s,text,input);
   } else if(kind=="clear") {
    var t=s.transport;s.revision++;
@@ -414,6 +456,8 @@ class PiProvider implements LocalAgentProvider {
     if(Std.isOfType(content,Array)) for(part in (cast content:Array<Dynamic>)) if(str(part,"type") == "text" && text.length < 8192) text += str(part,"text");
     s.conversation.put(turn+":tool:"+id,turn,"tool",str(v,"toolName"),text,type == "tool_execution_start" ? Json.stringify(Reflect.field(v,"args")) : "",
      type == "tool_execution_end" ? Reflect.field(v,"isError") == true ? "failed" : "completed" : "inProgress");
+    if (type == "tool_execution_end" && Reflect.field(v,"isError") != true)
+     s.conversation.toolPatch(turn+":tool:"+id,turn,output);
    case "agent_settled": s.settled=true;settle(s);
    case "compaction_end": settle(s);
    default:
@@ -551,10 +595,17 @@ class PiProvider implements LocalAgentProvider {
    ctx.respond(view(s));return;
   }
   if(q.action != "prompt") {error("unsupported_request","Unsupported Pi action");return;}
-  if(!valid(q.text,8192) || s.busy || s.dialogs.keys().hasNext()) {error("busy","Pi is busy or the prompt is empty/too large");return;}
+  if(q.text==null || q.text.length>8192 || (StringTools.trim(q.text)=="" && (q.imageIds==null || q.imageIds.length==0)) || s.busy || s.dialogs.keys().hasNext()) {error("busy","Pi is busy or the prompt is empty/too large");return;}
   if((q.effort != null && q.effort != s.currentEffort) || (q.model != null && q.model != s.currentModel)) {error("invalid_request","Apply Pi model/thinking settings before sending");return;}
   if(s.inputs.next()!=null && s.record.queuePaused!=true) {error("busy","Queued messages will run first");return;}
-  startRun(s,q.text);
+  var directTurn:Null<String>=null;
+  if(q.imageIds!=null && q.imageIds.length>0) {
+   var blocks=imageBlocks(s,q.imageIds);
+   if(blocks==null || !imageFrameFits(q.text,blocks)) {error("image_unavailable","An image is unavailable or exceeds the Pi input limit");return;}
+   directTurn="pi-turn-"+(++s.serial)+"-"+Std.string(clock());
+   if(imageHold==null || !imageHold(s.record.id,s.record.thread,directTurn,directTurn,q.imageIds)) {error("image_unavailable","Could not retain this image for the Pi input");return;}
+  }
+  if(!startRun(s,q.text,null,q.imageIds,directTurn)) {error("image_unavailable","Pi input could not be prepared");return;}
   ctx.respond(view(s));
  }
  public function activeCount():Int return [for(s in sessions) if(s.busy || s.dialogs.keys().hasNext() || (s.inputs.next()!=null && s.record.queuePaused!=true)) true].length;

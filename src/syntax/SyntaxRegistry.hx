@@ -5,6 +5,9 @@ class SyntaxRegistry {
 	final owners:Map<String, Array<SyntaxDefinition>> = [];
 	final grammars:Map<String, TextMateGrammar> = [];
 	final grammarOwners:Map<String, Array<String>> = [];
+	final fenceAliases:Map<String, SyntaxDefinition> = [];
+	final fenceAliasOwners:Map<String, Array<String>> = [];
+	final fenceAliasOwner:Map<String, String> = [];
 	public final plainText = new SyntaxDefinition("Plain Text", [], false);
 
 	public function new() {}
@@ -23,8 +26,15 @@ class SyntaxRegistry {
 
 	public function removeOwner(owner:String):Void {
 		var owned = owners.get(owner);
+		if (owned != null) for (alias in [for (key in fenceAliases.keys()) key])
+			if (owned.indexOf(fenceAliases.get(alias)) >= 0) { fenceAliases.remove(alias); fenceAliasOwner.remove(alias); }
 		if (owned != null) for (definition in owned) definitions.remove(definition);
 		owners.remove(owner);
+		var ownedAliases = fenceAliasOwners.get(owner);
+		if (ownedAliases != null) for (alias in ownedAliases) if (fenceAliasOwner.get(alias) == owner) {
+			fenceAliases.remove(alias); fenceAliasOwner.remove(alias);
+		}
+		fenceAliasOwners.remove(owner);
 		var ownedGrammars = grammarOwners.get(owner);
 		if (ownedGrammars != null) {
 			for (scope in ownedGrammars) grammars.remove(scope);
@@ -48,6 +58,36 @@ class SyntaxRegistry {
 
 	public function grammar(scopeName:String):Null<TextMateGrammar>
 		return grammars.get(scopeName);
+
+	/** Register a fence alias for an existing definition; aliases follow owner removal. */
+	public function addFenceAlias(alias:String, definition:SyntaxDefinition, owner:String = "core"):Void {
+		var key = alias == null ? "" : alias.toLowerCase();
+		if (!~/^[a-z0-9][a-z0-9_+.-]{0,63}$/.match(key) || definition == null || definitions.indexOf(definition) < 0)
+			throw "Invalid syntax fence alias";
+		if (fenceAliases.exists(key)) throw 'syntax fence alias "${key}" is already registered';
+		fenceAliases.set(key, definition);
+		fenceAliasOwner.set(key, owner);
+		var owned = fenceAliasOwners.get(owner);
+		if (owned == null) { owned = []; fenceAliasOwners.set(owner, owned); }
+		owned.push(key);
+	}
+
+	/** Resolve a language hint without treating it as a path or inspecting code content. */
+	public function findFence(hint:String):SyntaxDefinition {
+		var key = hint == null ? "" : StringTools.trim(hint).toLowerCase();
+		if (!~/^[a-z0-9][a-z0-9_+.-]{0,63}$/.match(key)) return plainText;
+		var alias = fenceAliases.get(key);
+		if (alias != null) return alias;
+		var index = definitions.length;
+		while (index > 0) {
+			index--;
+			var definition = definitions[index];
+			if (definition.name.toLowerCase() == key) return definition;
+			for (extension in definition.extensions)
+				if (extension.toLowerCase() == "." + key) return definition;
+		}
+		return plainText;
+	}
 
 	public function find(path:String, header:String = ""):SyntaxDefinition {
 		var lower = path.toLowerCase(), index = definitions.length;

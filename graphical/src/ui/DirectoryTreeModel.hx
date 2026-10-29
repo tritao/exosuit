@@ -208,7 +208,9 @@ class DirectoryTreeModel implements ExplorerTreeModel {
 		style.childAlignY = LayoutAlignmentY.Center;
 		style.childGap = 2.0;
 		var children:Array<KeyedView> = [];
-		if (!directory) children.push(new KeyedView("icon", new SetiFileIcon(atlas, name, dark, true)));
+		if (directory) children.push(new KeyedView("icon", new haxeon.ui.widgets.Icon("folder-icon",
+			expanded ? haxeon.ui.icons.IconName.FolderOpen : haxeon.ui.icons.IconName.FolderClosed, 16, theme.tokens.textSecondary)));
+		else children.push(new KeyedView("icon", new SetiFileIcon(atlas, name, dark, true)));
 		var decoration = decorationProvider == null ? null : decorationProvider.forPath(key);
 		var foreground = decoration == null ? theme.tokens.text : decorationColor(decoration);
 		var filename = new SizedBox("filename-box", new MiddleEllipsisText("filename", name, false,

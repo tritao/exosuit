@@ -9,6 +9,10 @@ class AgentKitConversation {
 
 	final entries:Array<AgentActivityItem> = [];
 	var revision = 0;
+	final incarnation:String = AgentHistoryEpoch.create();
+	var omitted:Bool = false;
+	public function epoch():String return incarnation + "-" + revision;
+	public function hasOmitted():Bool return omitted;
 
 	public function new(?saved:Array<AgentActivityItem>) {
 		if (saved != null)
@@ -45,6 +49,7 @@ class AgentKitConversation {
 		if (entries.length > MaxEntries) {
 			entries.shift();
 			revision++;
+			omitted = true;
 		}
 	}
 
@@ -64,7 +69,7 @@ class AgentKitConversation {
 
 	public function offset(cursor:String):Null<Int> {
 		var parts = cursor.split(":");
-		if (parts.length != 2 || parts[0] != Std.string(revision))
+		if (parts.length != 2 || parts[0] != epoch())
 			return null;
 		var n = Std.parseInt(parts[1]);
 		return n != null && n >= 0 && n <= entries.length && Std.string(n) == parts[1] ? n : null;
@@ -77,7 +82,7 @@ class AgentKitConversation {
 
 	public function next(?before:Int):Null<String> {
 		var end = before == null ? entries.length : before;
-		return end > PageSize ? revision + ":" + (end - PageSize) : null;
+		return end > PageSize ? epoch() + ":" + (end - PageSize) : null;
 	}
 
 	/** Keeps the stored resource below the existing 16 KiB storage bound. */

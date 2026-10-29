@@ -1,0 +1,184 @@
+package app;
+
+import workspace.provider.CodexConversation;
+import workspace.service.WorkspaceAgentProtocol.AgentActivityItem;
+import workspace.service.WorkspaceAgentProtocol.AgentFileChange;
+import haxeon.wire.MessagePack;
+
+class SessionProjectionTestMain {
+  static function require(value:Bool, message:String):Void { if (!value) throw message; }
+  public static function main():Int {
+    var conversation = new CodexConversation();
+    var first = "@@ -1 +1 @@\n-old\n+new", second = "@@ -0,0 +1 @@\n+created";
+    conversation.put("turn", {id:"edit", type:"fileChange", changes:[
+      {path:"src/First.hx", kind:{type:"update"}, diff:first},
+      {path:"src/Second.hx", kind:{type:"add"}, diff:second}
+    ]}, true);
+    var item = conversation.items()[0];
+    var files:Array<AgentFileChange> = cast item.files;
+    require(files != null && files.length == 2, "Lost reported file associations");
+    require(item.detail.substr(files[0].offset, files[0].length) == first, "First file patch misattributed");
+    require(item.detail.substr(files[1].offset, files[1].length) == second, "Second file patch misattributed");
+    var roundTrip:AgentActivityItem = MessagePack.decode(MessagePack.encode(item));
+    var decodedFiles:Array<AgentFileChange> = cast roundTrip.files;
+    require(decodedFiles != null && decodedFiles.length == 2 && decodedFiles[1].path == "src/Second.hx", "File metadata lost over wire");
+    var legacy:AgentActivityItem = {id:"old", turn:"t", kind:"agentMessage", title:"", text:"hello", detail:"", state:"completed", truncated:false};
+    var restored:AgentActivityItem = MessagePack.decode(MessagePack.encode(legacy));
+    require(restored.files == null && restored.text == "hello", "Legacy wire compatibility changed");
+    var nativeImages=new CodexConversation();
+    nativeImages.put("turn",{id:"view",type:"imageView",path:"/repo/assets/input.png"},true);
+    nativeImages.put("turn",{id:"generated",type:"imageGeneration",status:"completed",savedPath:"/repo/assets/output.png",
+      revisedPrompt:"A mountain",result:"private inline bytes"},true);
+    nativeImages.put("turn",{id:"failed",type:"imageGeneration",status:"failed",savedPath:null,failure:{type:"usageLimitExceeded",limitId:"image"}},true);
+    var imageItems=nativeImages.items();
+    require(imageItems[0].title=="Viewed image" && imageItems[0].imagePath=="/repo/assets/input.png"
+      && imageItems[0].detail.indexOf("imageView")>=0,"Native image view lost its source or path");
+    require(imageItems[1].title=="Generated image" && imageItems[1].imagePath=="/repo/assets/output.png"
+      && imageItems[1].text=="A mountain" && imageItems[1].detail.indexOf("private inline bytes")<0,
+      "Generated image metadata or inline result bounds failed");
+    require(imageItems[2].state=="failed" && imageItems[2].imagePath==null && imageItems[2].detail.indexOf("usageLimitExceeded")>=0,
+      "Generation failure lost its native state or details");
+    var decodedImage:AgentActivityItem=MessagePack.decode(MessagePack.encode(imageItems[1]));
+    require(decodedImage.imagePath=="/repo/assets/output.png", "Native image path did not survive the wire");
+    var plan=new CodexConversation();
+    plan.put("turn",{id:"plan",type:"plan",text:""},false);
+    var longPlan="step ";for (_ in 0...11) longPlan+=longPlan;
+    plan.delta("turn","plan","plan",longPlan);
+    var streamingPlan:AgentActivityItem=cast plan.current("turn","plan");
+    require(streamingPlan.kind=="plan" && streamingPlan.title=="Plan" && streamingPlan.truncated && streamingPlan.contentToken!=null,
+      "Streaming plan did not retain bounded preview and full source token");
+    var fullPlan:workspace.service.WorkspaceAgentProtocol.AgentContentChunk=cast plan.content("turn","plan",streamingPlan.contentToken,0);
+    require(fullPlan!=null && fullPlan.bytes.toString()==longPlan,"Plan delta content was clipped before retention");
+    plan.put("turn",{id:"plan",type:"plan",text:"# Authoritative plan\n- Final step"},true);
+    var completedPlan:AgentActivityItem=cast plan.current("turn","plan");
+    require(completedPlan.state=="completed" && completedPlan.text=="# Authoritative plan\n- Final step"
+      && plan.content("turn","plan",streamingPlan.contentToken,0)==null,
+      "Completed native plan did not replace streamed text and token");
+    var large = ""; for (_ in 0...3000) large += "x";
+    conversation.put("turn", {id:"large", type:"fileChange", changes:[{path:"large.txt", kind:{type:"update"}, diff:large}]}, true);
+    var bounded = conversation.items()[1];
+    var boundedFiles:Array<AgentFileChange> = cast bounded.files;
+    require(bounded.truncated && bounded.detail.length == 2048 && boundedFiles[0].truncated,
+      "Patch bounds and truncation are inconsistent");
+    require(boundedFiles[0].offset + boundedFiles[0].length <= bounded.detail.length, "Patch slice exceeds retained source");
+    var many:Array<Dynamic> = [];
+    for (index in 0...24) many.push({path:"file-" + index + ".txt", kind:{type:"update"}, diff:""});
+    conversation.put("turn", {id:"many", type:"fileChange", changes:many}, true);
+    var manyFiles:Array<AgentFileChange> = cast conversation.items()[2].files;
+    require(manyFiles.length == 8 && conversation.items()[2].truncated, "Metadata is unbounded");
+    var pi = new workspace.provider.PiConversation();
+    var arguments = '{"path":"src/Pi.hx","oldText":"old","newText":"new"}';
+    pi.put("edit","t","tool","edit","",arguments,"inProgress");
+    pi.put("edit","t","tool","edit","Successfully replaced text","","completed");
+    var patch = "--- src/Pi.hx\n+++ src/Pi.hx\n@@ -1 +1 @@\n-old\n+new\n";
+    pi.toolPatch("edit","t",{details:{patch:patch,diff:"-1 old\n+1 new"}});
+    var projected = pi.page();
+    require(projected.length == 2 && projected[0].detail == arguments && projected[0].text == "Successfully replaced text",
+      "Pi patch projection erased original tool input/output");
+    require(projected[1].kind == "fileChange" && projected[1].detail == patch && projected[1].files[0].path == "src/Pi.hx",
+      "Pi edit patch lost actual source or file attribution");
+    pi.toolPatch("edit","t",{details:{patch:patch}});
+    require(pi.page().length == 2,"Replayed Pi completion duplicated its patch");
+    pi.put("failed","t","tool","edit","Failed",arguments,"failed");
+    pi.toolPatch("failed","t",{details:{patch:patch}});
+    require(pi.page().length == 3,"Failed edit was presented as a completed file change");
+    pi.put("legacy","t","tool","edit","Done",arguments,"completed");
+    pi.toolPatch("legacy","t",{details:{diff:"-1 old\n+1 new"}});
+    require(pi.page().length == 4,"Pi display-oriented diff was mistaken for a unified patch");
+    var longPatch = patch; for (_ in 0...250) longPatch += " context line\n";
+    pi.toolPatch("edit","t",{details:{patch:longPatch}});
+    var retained = pi.page()[1];
+    require(retained.detail.length == 2048 && retained.truncated && retained.files[0].truncated,
+      "Pi patch retention exceeded its bound or hid partial status");
+    var restoredPi = new workspace.provider.PiConversation(pi.snapshot());
+    var restoredPatch = restoredPi.page()[1];
+    require(restoredPatch.files[0].path == "src/Pi.hx" && restoredPatch.files[0].length <= restoredPatch.detail.length
+      && restoredPatch.files[0].truncated,"Pi restart lost bounded patch metadata");
+    var claude = new workspace.provider.ClaudeConversation();
+    claude.put("tool","t","tool","Edit","",arguments,"inProgress");
+    claude.put("tool","t","tool","Tool","Edit succeeded","","completed");
+    require(claude.page()[0].title == "Edit" && claude.page()[0].detail == arguments && claude.page()[0].text == "Edit succeeded",
+      "Claude tool completion erased its arguments or result");
+    claude.put("bounded","t","tool","Edit","",longPatch,"inProgress");
+    claude.put("bounded","t","tool","Tool","Done","","completed");
+    require(claude.page()[1].truncated && claude.page()[1].detail.length == 2048,
+      "Claude completion hid retained-input truncation");
+    var longText = "```html\n"; for (_ in 0...13000) longText += "é"; longText += "\n```";
+    conversation.put("content-turn", {id:"reply", type:"agentMessage", text:longText}, true);
+    var reply:AgentActivityItem = null; for (value in conversation.items()) if (value.id == "reply") reply=value;
+    require(reply != null && reply.truncated && reply.contentToken != null && reply.text.length <= 4096, "Long response preview or token missing");
+    var offset = 0, assembled = haxe.io.Bytes.alloc(haxe.io.Bytes.ofString(longText).length);
+    while (offset < assembled.length) {
+      var chunk = conversation.content("content-turn", "reply", reply.contentToken, offset);
+      if (chunk == null) throw "Missing content chunk";
+      var part:workspace.service.WorkspaceAgentProtocol.AgentContentChunk = cast chunk;
+      require(part.offset == offset && !part.partial && part.bytes.length <= 24*1024, "Invalid bounded content chunk");
+      require(MessagePack.encode(part).length < 65536, "Content response exceeds relay frame");
+      assembled.blit(offset,part.bytes,0,part.bytes.length); offset += part.bytes.length;
+    }
+    require(assembled.toString() == longText && assembled.toString().indexOf("\n```") > 4096, "Full closed fence did not survive chunk assembly");
+    var streamed = new CodexConversation();
+    streamed.put("stream-turn",{id:"stream",type:"agentMessage",text:""},false);
+    var segment="z"; for (_ in 0...13) segment+=segment;
+    streamed.delta("stream-turn","stream","agentMessage",segment);
+    streamed.delta("stream-turn","stream","agentMessage","tail after clipped preview");
+    streamed.finish("stream-turn","completed");
+    var liveItem = streamed.items()[0], livePart=streamed.content("stream-turn","stream",liveItem.contentToken,0);
+    require(livePart != null && livePart.bytes.toString() == segment + "tail after clipped preview", "Streaming used clipped preview instead of retained content");
+    var prior = reply.contentToken;
+    conversation.put("content-turn", {id:"reply", type:"agentMessage", text:longText+"updated"}, true);
+    require(conversation.content("content-turn", "reply", prior, 0) == null, "Changed snapshot accepted a stale token");
+    require(conversation.content("other-turn", "reply", prior, 0) == null, "Content escaped turn identity");
+    var almost="x"; for (_ in 0...18) almost+=almost; almost=almost.substr(0,256*1024-1);
+    var cacheToken=workspace.provider.AgentContentCache.replace("utf8-boundary",almost);
+    cacheToken=workspace.provider.AgentContentCache.append("utf8-boundary","😀");
+    cacheToken=workspace.provider.AgentContentCache.append("utf8-boundary","Z");
+    var tail=workspace.provider.AgentContentCache.chunk("utf8-boundary",cacheToken,256*1024-2);
+    require(tail != null && tail.partial && tail.total == 256*1024-1 && tail.bytes.toString() == "x", "Truncated UTF-8 prefix accepted later bytes");
+    var oversize = "x"; for (_ in 0...19) oversize += oversize;
+    conversation.put("content-turn", {id:"oversize", type:"agentMessage", text:oversize}, true);
+    var big:AgentActivityItem = null; for (value in conversation.items()) if (value.id == "oversize") big=value;
+    var partial = conversation.content("content-turn", "oversize", big.contentToken, 0);
+    require(partial != null && partial.partial && partial.total == 256*1024, "Large content did not report bounded partial snapshot");
+    var textBlock="é"; for (_ in 0...13) textBlock+=textBlock;
+    var streamedClaude=new workspace.provider.ClaudeConversation();
+    streamedClaude.delta("reply","ct",textBlock);
+    var cItem=streamedClaude.page()[0], cOld=cItem.contentToken;
+    streamedClaude.delta("reply","ct"," tail"); streamedClaude.finish("ct","completed");
+    cItem=streamedClaude.page()[0];
+    require(cItem.truncated && cItem.contentToken != null && cItem.contentToken != cOld, "Claude streaming lost snapshot revision");
+    require(streamedClaude.content("ct","reply",cOld,0) == null && streamedClaude.content("wrong","reply",cItem.contentToken,0) == null, "Claude accepted a stale or wrong-turn token");
+    var cChunk=streamedClaude.content("ct","reply",cItem.contentToken,0);
+    require(cChunk != null && !cChunk.partial && cChunk.bytes.toString() == textBlock+" tail", "Claude lost UTF-8 streamed source");
+    var savedClaude=streamedClaude.snapshot();
+    require(MessagePack.encode(savedClaude).length <= 6144 && savedClaude[0].contentToken == null, "Claude persisted an ephemeral content token");
+    var replayClaude=new workspace.provider.ClaudeConversation(savedClaude), cReplay=replayClaude.page()[0];
+    require(cReplay.truncated && cReplay.contentToken == null, "Claude restored a truncated snippet as full content");
+    replayClaude.delta("reply","ct","later"); cReplay=replayClaude.page()[0];
+    require(cReplay.contentToken == null, "Claude invented full content when appending to a restored snippet");
+    replayClaude.put("reply","ct","agentMessage","Claude",textBlock+" authoritative","","completed");
+    cReplay=replayClaude.page()[0]; cChunk=replayClaude.content("ct","reply",cReplay.contentToken,0);
+    require(cChunk != null && cChunk.bytes.toString() == textBlock+" authoritative", "Claude authoritative completion did not restore full content");
+    var streamedPi=new workspace.provider.PiConversation();
+    streamedPi.delta("reply","pt",textBlock);
+    var pItem=streamedPi.page()[0], pOld=pItem.contentToken;
+    streamedPi.delta("reply","pt"," tail"); streamedPi.finish("pt","completed");
+    pItem=streamedPi.page()[0];
+    require(pItem.truncated && pItem.contentToken != null && pItem.contentToken != pOld, "Pi streaming lost snapshot revision");
+    require(streamedPi.content("pt","reply",pOld,0) == null && streamedPi.content("wrong","reply",pItem.contentToken,0) == null, "Pi accepted a stale or wrong-turn token");
+    var pChunk=streamedPi.content("pt","reply",pItem.contentToken,0);
+    require(pChunk != null && !pChunk.partial && pChunk.bytes.toString() == textBlock+" tail", "Pi lost UTF-8 streamed source");
+    var savedPi=streamedPi.snapshot();
+    require(MessagePack.encode(savedPi).length <= 6144 && savedPi[0].contentToken == null, "Pi persisted an ephemeral content token");
+    var replayPi=new workspace.provider.PiConversation(savedPi), pReplay=replayPi.page()[0];
+    require(pReplay.truncated && pReplay.contentToken == null, "Pi restored a truncated snippet as full content");
+    replayPi.delta("reply","pt","later"); pReplay=replayPi.page()[0];
+    require(pReplay.contentToken == null, "Pi invented full content when appending to a restored snippet");
+    replayPi.put("reply","pt","agentMessage","Pi",textBlock+" authoritative","","completed");
+    pReplay=replayPi.page()[0]; pChunk=replayPi.content("pt","reply",pReplay.contentToken,0);
+    require(pChunk != null && pChunk.bytes.toString() == textBlock+" authoritative", "Pi authoritative completion did not restore full content");
+    require(streamedClaude.content("ct","reply",pItem.contentToken,0) == null, "Provider cache identity crossed session scope");
+    trace("PASS: structured file associations, bounded patch slices, full-message chunks and legacy wire compatibility");
+    return 0;
+  }
+}

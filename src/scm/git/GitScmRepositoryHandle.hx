@@ -20,7 +20,7 @@ import sys.FileSystem;
 import sys.io.File;
 
 /** Git status and original-content access for one worktree. */
-class GitScmRepositoryHandle implements ScmRepositoryHandle {
+class GitScmRepositoryHandle implements ScmRepositoryHandle implements scm.ScmOriginHandle {
 	final process:GitProcess;
 	final processes:ProcessManager;
 	final scheduler:JobScheduler;
@@ -148,10 +148,26 @@ class GitScmRepositoryHandle implements ScmRepositoryHandle {
 
 	public function features():ScmFeatures {
 		var allowed = trusted();
-		return new ScmFeatures(allowed, allowed, allowed, allowed, allowed, false);
+		return new ScmFeatures(allowed, allowed, allowed, allowed, allowed, false, allowed);
 	}
 
 	public function trusted():Bool return trustStore != null && trustStore.isTrusted(root);
+
+	public function origin(generation:Int, complete:ScmJobResult<String>->Void):ScmJob<String> {
+		if (disposed) return failed(generation, complete, "repository_closed", "The Git repository handle is closed");
+		var command:Null<ScmJob<GitCommandResult>> = null;
+		var job = new ScmJob<String>(generation, function() { if (command != null) command.cancel(); });
+		command = process.run(["remote", "get-url", "origin"], root, generation, function(result) {
+			if (!job.finish()) return;
+			if (result.error != null || result.value == null) complete(new ScmJobResult<String>(generation, null, result.error));
+			else {
+				var canonical = scm.GithubRemote.repository(StringTools.trim(result.value.stdout.toString()));
+				if (canonical == null) complete(new ScmJobResult<String>(generation, null, new ScmError("unsupported_remote", "Origin is not a supported GitHub repository")));
+				else complete(new ScmJobResult<String>(generation, canonical));
+			}
+		}, true, !trusted(), 4096);
+		return job;
+	}
 
 	public function branches(generation:Int, complete:ScmJobResult<Array<ScmBranch>>->Void):ScmJob<Array<ScmBranch>> {
 		if (disposed) return failed(generation, complete, "repository_closed", "The Git repository handle is closed");
@@ -519,6 +535,16 @@ class GitScmRepositoryHandle implements ScmRepositoryHandle {
 				else run(["switch", "--quiet", reference.substr(localPrefix.length)], null, "Checked out " + reference);
 			case CreateBranch(name):
 				if (!validBranchName(name)) invalidBranch(); else run(["checkout", "--quiet", "-b", name], null, "Created branch " + name);
+			case CreateWorktree(directory, branch):
+				// A single new child of the canonical repository root keeps the session in the workspace.
+				var safeName = directory != null && ~/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.match(directory)
+					&& directory.indexOf("..") < 0 && !StringTools.endsWith(directory, ".")
+					&& !~/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.match(directory);
+				if (!safeName || FileSystem.exists(root + "/" + directory)) {
+					if (job.finish()) complete(new ScmJobResult<ScmApplyResult>(generation, null,
+						new ScmError("invalid_directory", "Choose a new folder name directly inside the repository")));
+				} else if (!validBranchName(branch)) invalidBranch();
+				else run(["worktree", "add", "-b", branch, "--", root + "/" + directory, "HEAD"], null, "Created worktree " + directory);
 			case Fetch(remote):
 				if (remote != null && (remote.length == 0 || remote.charAt(0) == "-" || remote.indexOf("\n") >= 0 || remote.indexOf("\r") >= 0)) {
 					if (job.finish()) complete(new ScmJobResult<ScmApplyResult>(generation, null, new ScmError("invalid_remote", "Enter a valid Git remote name")));

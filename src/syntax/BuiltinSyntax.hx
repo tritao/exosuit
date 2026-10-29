@@ -17,6 +17,9 @@ class BuiltinSyntax {
 				"sizeof", "static", "struct", "switch", "template", "throw", "try", "typedef", "typename", "union", "using", "virtual", "while"],
 			["bool", "char", "char8_t", "char16_t", "char32_t", "double", "float", "int", "long", "short", "signed", "unsigned", "void", "wchar_t"],
 			["false", "NULL", "nullptr", "this", "true"]));
+		registry.add(definition("Rust", [".rs"],
+			["as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum", "extern", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return", "self", "static", "struct", "super", "trait", "type", "unsafe", "use", "where", "while"],
+			["bool", "char", "f32", "f64", "i8", "i16", "i32", "i64", "i128", "isize", "str", "u8", "u16", "u32", "u64", "u128", "usize"], ["false", "true"]));
 		installGrammar(registry, "JSON", [".json"], [], jsonGrammar());
 		registry.add(new SyntaxDefinition("Markdown", [".md", ".markdown"], true, [], [], "", "<!--", "-->", "```", "```"));
 		registry.add(new SyntaxDefinition("Lua", [".lua"], true, symbols(
@@ -26,6 +29,9 @@ class BuiltinSyntax {
 		installGrammar(registry, "TypeScript", [".ts", ".tsx", ".mts", ".cts"], [], typescriptGrammar());
 		installGrammar(registry, "Python", [".py", ".pyw"], ["#!/usr/bin/env python", "#!/usr/bin/env python3"], pythonGrammar());
 		installGrammar(registry, "Shell", [".sh", ".bash", ".zsh"], ["#!/bin/sh", "#!/bin/bash", "#!/usr/bin/env sh", "#!/usr/bin/env bash"], shellGrammar());
+		for (pair in [["haxeon", "hx"], ["haxe", "hx"], ["c++", "cpp"], ["cplusplus", "cpp"],
+			["javascript", "js"], ["typescript", "ts"], ["python", "py"], ["rust", "rs"], ["shell", "sh"]])
+			registry.addFenceAlias(pair[0], registry.find("snippet." + pair[1]));
 	}
 
 	static function haxeGrammar():Dynamic {

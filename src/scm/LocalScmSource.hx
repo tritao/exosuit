@@ -5,7 +5,7 @@ import haxe.io.Bytes;
 import workspace.PathKey;
 
 /** Root-scoped view of the desktop's in-process SCM service. */
-class LocalScmSource implements ScmSource {
+class LocalScmSource implements ScmSource implements ScmRemoteReader {
 	final service:ScmService;
 	final root:String;
 	final roots:Array<String>;
@@ -39,6 +39,14 @@ class LocalScmSource implements ScmSource {
 	public function identity():String return sourceIdentity;
 	public function isRemote():Bool return false;
 	public function connected():Bool return !disposed;
+	public function canReadOrigin(repositoryId:String):Bool {
+		var repository = scopedRepository(repositoryId);
+		return repository != null && repository.providerId == "git";
+	}
+	public function origin(repositoryId:String, complete:ScmJobResult<String>->Void):ScmJob<String> {
+		if (scopedRepository(repositoryId) == null) return failed(null, complete, "not_found", "Repository is outside this workspace root");
+		return service.origin(repositoryId, nextGeneration++, complete);
+	}
 	public function repositories():Array<ScmRepository> {
 		var result:Array<ScmRepository> = [], seen:Map<String, Bool> = [];
 		if (!disposed) for (root in roots) for (repository in service.repositories(root))
@@ -46,7 +54,13 @@ class LocalScmSource implements ScmSource {
 		return result;
 	}
 	public function repository(repositoryId:String):Null<ScmRepository> return scopedRepository(repositoryId);
-	public function features(repositoryId:String):Null<ScmFeatures> return scopedRepository(repositoryId) == null ? null : service.features(repositoryId);
+	public function features(repositoryId:String):Null<ScmFeatures> {
+		var repository = scopedRepository(repositoryId), value = repository == null ? null : service.features(repositoryId);
+		if (value == null || repository == null || !value.worktrees) return value;
+		var allowed = false;
+		for (scope in roots) if (within(scope, repository.root)) allowed = true;
+		return new ScmFeatures(value.staging, value.partialStaging, value.amend, value.branches, value.remotes, value.stash, allowed);
+	}
 	public function branches(repositoryId:String, complete:ScmJobResult<Array<ScmBranch>>->Void):ScmJob<Array<ScmBranch>> {
 		if (disposed) return failed(null, complete, "service_closed", "Source control source is closed");
 		if (complete == null) throw "SCM branch callback cannot be null";
@@ -99,6 +113,12 @@ class LocalScmSource implements ScmSource {
 		if (complete == null) throw "SCM operation callback cannot be null";
 		var repository = scopedRepository(repositoryId);
 		if (repository == null) return failed(null, complete, "not_found", "Repository is outside this workspace root");
+		switch operation {
+			case CreateWorktree(_, _):
+				var available = features(repositoryId);
+				if (available == null || !available.worktrees) return failed(null, complete, "invalid_directory", "Worktrees must be created inside the workspace");
+			case _:
+		}
 		var current = service.snapshot(repositoryId);
 		if (current == null || Int64.compare(current.revision, expectedRevision) != 0)
 			return failed(null, complete, "stale_revision", "Repository changed before the operation started");
@@ -228,7 +248,7 @@ class LocalScmSource implements ScmSource {
 				var scope = ScmFolderScope.intersect(requested, folders, ignoreCase);
 				if (scope.length == 0) return Refused("The commit's folders " + requested.join(", ") + " are outside " + names);
 				return commit(message, amend, scope, full, ignoreCase);
-			case Checkout(_) | CreateBranch(_) | Fetch(_) | Pull | Push:
+			case Checkout(_) | CreateBranch(_) | CreateWorktree(_, _) | Fetch(_) | Pull | Push:
 				return Allowed(operation);
 		}
 	}

@@ -65,6 +65,17 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(8) var canRename:Null<Bool>;
 	/** Providers implementing inspect-name/rename-native; rename retains its local-only meaning. */
 	@:optional @:id(9) var nativeRenameProviders:Null<Array<String>>;
+	@:optional @:id(10) var supportsSnapshots:Null<Bool>;
+}
+
+@:wire typedef AgentSnapshotReply = {
+ @:id(1) var session:String; @:id(2) var root:String; @:id(3) var token:Null<String>;
+ @:id(4) var total:Int; @:id(5) var offset:Int; @:id(6) var bytes:Null<Bytes>;
+ @:id(7) var inputToken:Null<String>; @:id(8) var snapshotError:Null<String>;
+}
+@:wire typedef AgentSnapshotQuery = {
+ @:id(1) var workspace:String; @:id(2) var instance:String; @:id(3) var session:String;
+ @:id(4) var token:String; @:id(5) var offset:Int;
 }
 
 @:wire typedef AgentCreate = {
@@ -106,6 +117,8 @@ import haxeon.wire.MessagePack;
 	@:id(4) var fingerprint:String;
 	@:id(5) var state:String;
 	@:optional @:id(6) var error:Null<String>;
+	/** Opaque staged asset references retained for queued Pi input. */
+	@:optional @:id(7) var imageIds:Null<Array<String>>;
 }
 
 /** Native queue contents can be expanded or transformed by Pi extensions. */
@@ -129,6 +142,40 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(9) var after:Null<String>;
 	/** Expected native custom title, captured by inspect-name before opening an editor. */
 	@:optional @:id(10) var expectedNativeName:Null<String>;
+	/** Opaque host-staged image IDs; accepted only by providers advertising support. */
+	@:optional @:id(11) var imageIds:Null<Array<String>>;
+}
+
+@:wire typedef AgentImageUpload = {
+  @:id(1) var workspace:String;
+  @:id(2) var instance:String;
+  @:id(3) var session:String;
+  @:id(4) var operation:String;
+  @:id(5) var upload:Null<String>;
+  @:id(6) var size:Int;
+  @:id(7) var offset:Int;
+  @:id(8) var bytes:Null<Bytes>;
+}
+
+@:wire typedef AgentImageUploadResult = {
+  @:id(1) var upload:String;
+  @:id(2) var offset:Int;
+  @:id(3) var complete:Bool;
+}
+
+@:wire typedef AgentQuestionOption = {
+	@:id(1) var label:String;
+	@:id(2) var description:String;
+}
+
+@:wire typedef AgentQuestion = {
+	@:id(1) var id:String;
+	@:id(2) var header:String;
+	@:id(3) var question:String;
+	@:id(4) var multiple:Bool;
+	@:id(5) var secret:Bool;
+	@:id(6) var allowOther:Bool;
+	@:id(7) var options:Array<AgentQuestionOption>;
 }
 
 @:wire typedef AgentRequest = {
@@ -139,6 +186,8 @@ import haxeon.wire.MessagePack;
 	/** Native extension dialog type. Absent preserves existing provider request semantics. */
 	@:optional @:id(5) var inputKind:Null<String>;
 	@:optional @:id(6) var options:Null<Array<String>>;
+	/** Complete, bounded provider questions; absent means use legacy request display. */
+	@:optional @:id(7) var questions:Null<Array<AgentQuestion>>;
 }
 
 @:wire typedef AgentView = {
@@ -167,9 +216,39 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(21) var inputBusy:Null<Bool>;
 	@:optional @:id(22) var supportsSteering:Null<Bool>;
 	@:optional @:id(23) var supportsQueue:Null<Bool>;
+	@:optional @:id(24) var supportsImageUpload:Null<Bool>;
+	@:optional @:id(25) var supportsMessageContent:Null<Bool>;
+	/** Number of pending requests omitted from the bounded current view. */
+	@:optional @:id(26) var requestsOmitted:Null<Int>;
+	/** Changes whenever previously issued activity cursors become invalid. */
+	@:optional @:id(27) var historyEpoch:Null<String>;
+	/** True only when activity was evicted from this in-memory conversation. */
+	@:optional @:id(28) var historyOmitted:Null<Bool>;
+}
+
+@:wire typedef AgentContentQuery = {
+ @:id(1) var workspace:String; @:id(2) var instance:String; @:id(3) var session:String;
+ @:id(4) var turn:String; @:id(5) var item:String; @:id(6) var token:String; @:id(7) var offset:Int;
+}
+@:wire typedef AgentContentChunk = {
+ @:id(1) var token:String; @:id(2) var offset:Int; @:id(3) var total:Int;
+ @:id(4) var bytes:Bytes; @:id(5) var partial:Bool;
 }
 
 /** Bounded presentation data; provider protocol and policy stay on the host. */
+@:wire typedef AgentFileChange = {
+	@:id(1) var path:String;
+	@:id(2) var kind:String;
+	/** Slice of the containing item's detail. Avoids duplicating bounded patch data on the wire. */
+	@:id(3) var offset:Int;
+	@:id(4) var length:Int;
+	@:id(5) var truncated:Bool;
+}
+
+@:wire typedef AgentMessageImage = {
+ @:id(1) var id:Null<String>;
+}
+
 @:wire typedef AgentActivityItem = {
 	@:id(1) var id:String;
 	@:id(2) var turn:String;
@@ -179,6 +258,14 @@ import haxeon.wire.MessagePack;
 	@:id(6) var detail:String;
 	@:id(7) var state:String;
 	@:id(8) var truncated:Bool;
+	/** Authoritative file association, absent on legacy services and unstructured tool output. */
+	@:optional @:id(9) var files:Null<Array<AgentFileChange>>;
+	@:optional @:id(10) var contentToken:Null<String>;
+	@:optional @:id(11) var images:Null<Array<AgentMessageImage>>;
+	/** Native image tool output path; the client must validate workspace containment before use. */
+	@:optional @:id(13) var imagePath:Null<String>;
+	/** Digest binds durable captured source to this exact response version. */
+	@:optional @:id(12) var contentDigest:Null<String>;
 }
 
 @:wire typedef AgentDiscoveryQuery = {
@@ -230,4 +317,19 @@ class WorkspaceAgentProtocol {
 	public static final ACTION = new RpcMethod<AgentAction, AgentView>(122, function(v:AgentAction) return MessagePack.encode(v),
 		function(b:Bytes):AgentAction return MessagePack.decode(b), function(v:AgentView) return MessagePack.encode(v),
 		function(b:Bytes):AgentView return MessagePack.decode(b));
+	public static final MESSAGE_CONTENT = new RpcMethod<AgentContentQuery, AgentContentChunk>(126,
+        function(v:AgentContentQuery) return MessagePack.encode(v), function(b:Bytes):AgentContentQuery return MessagePack.decode(b),
+        function(v:AgentContentChunk) return MessagePack.encode(v), function(b:Bytes):AgentContentChunk return MessagePack.decode(b));
+	public static final MESSAGE_IMAGE = new RpcMethod<AgentContentQuery, AgentContentChunk>(129,
+        function(v:AgentContentQuery) return MessagePack.encode(v), function(b:Bytes):AgentContentQuery return MessagePack.decode(b),
+        function(v:AgentContentChunk) return MessagePack.encode(v), function(b:Bytes):AgentContentChunk return MessagePack.decode(b));
+	public static final IMAGE_UPLOAD = new RpcMethod<AgentImageUpload, AgentImageUploadResult>(125,
+		function(v:AgentImageUpload) return MessagePack.encode(v), function(b:Bytes):AgentImageUpload return MessagePack.decode(b),
+		function(v:AgentImageUploadResult) return MessagePack.encode(v), function(b:Bytes):AgentImageUploadResult return MessagePack.decode(b));
+	public static final ACTION_SNAPSHOT = new RpcMethod<AgentAction, AgentSnapshotReply>(127,
+        function(v:AgentAction) return MessagePack.encode(v), function(b:Bytes):AgentAction return MessagePack.decode(b),
+        function(v:AgentSnapshotReply) return MessagePack.encode(v), function(b:Bytes):AgentSnapshotReply return MessagePack.decode(b));
+	public static final SNAPSHOT_READ = new RpcMethod<AgentSnapshotQuery, AgentSnapshotReply>(128,
+        function(v:AgentSnapshotQuery) return MessagePack.encode(v), function(b:Bytes):AgentSnapshotQuery return MessagePack.decode(b),
+        function(v:AgentSnapshotReply) return MessagePack.encode(v), function(b:Bytes):AgentSnapshotReply return MessagePack.decode(b));
 }

@@ -24,7 +24,9 @@ class NativeSessionNamesTestMain {
    var provider:LocalAgentProvider;
    if(kind=="codex") {
     var selected=new CodexProvider("owner",directories,function() return [],processes,clock,store);
-    var child=processes.start("python3",[repo+"/tests/native-session-names/fake-codex-names.py",root],root);
+    var python=Sys.getEnv("EXOSUIT_TEST_PYTHON");
+    if (python==null || python=="") python="python3";
+    var child=processes.start(python,[repo+"/tests/native-session-names/fake-codex-names.py",root],root);
     selected.transport=new CodexTransport(child);selected.proxy=child;selected.phase="ready";
     var session=selected.sessions.get(kind);if(session==null) throw "missing seeded Codex session";
     session.reconnectBlocked=true;selected.names(session).nextRead=clock()+100000;

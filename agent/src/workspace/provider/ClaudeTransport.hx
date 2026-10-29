@@ -2,12 +2,15 @@ package workspace.provider;
 
 import haxe.Json;
 import haxe.io.Bytes;
+import haxe.io.BytesBuffer;
 import process.OwnedProcess;
 import language.JsonRpcResponse;
 import language.JsonRpcPending;
 
 /** Native Claude CLI bidirectional JSONL control protocol. No intermediary process. */
 class ClaudeTransport {
+	public static inline final MAX_FRAME_BYTES:Int = 6 * 1024 * 1024;
+	static inline final MAX_QUEUE_BYTES:Int = 8 * 1024 * 1024;
 	public var notification:(String, Dynamic) -> Void = function(_, _) {};
 	public var serverRequest:(Dynamic, String, Dynamic) -> Void = function(_, _, _) {};
 	public var failure(default, null):Null<String>;
@@ -18,7 +21,10 @@ class ClaudeTransport {
 	final sizes:Array<Int> = [];
 	var offset = 0;
 	var queued = 0;
-	var input = "";
+	var input = new BytesBuffer();
+	var inputLength=0;
+	var pendingInput:Null<Bytes>;
+	var pendingOffset=0;
 	var next = 1;
 	var exited = 0;
 
@@ -46,13 +52,12 @@ class ClaudeTransport {
 	public function send(value:Dynamic):Bool {
 		if (failure != null)
 			return false;
-		var line = Json.stringify(value) + "\n",
-			bytes = Bytes.ofString(line).length;
-		if (bytes > 262144 || queued + bytes > 1048576)
+		var bytes=Bytes.ofString(Json.stringify(value)+"\n");
+		if (bytes.length > MAX_FRAME_BYTES || queued + bytes.length > MAX_QUEUE_BYTES || queue.length>=32)
 			return false;
-		queue.push(Bytes.ofString(line));
-		sizes.push(bytes);
-		queued += bytes;
+		queue.push(bytes);
+		sizes.push(bytes.length);
+		queued += bytes.length;
 		return true;
 	}
 
@@ -79,30 +84,24 @@ class ClaudeTransport {
 			for (_ in 0...8) {
 				if (messages >= 32)
 					break;
-				if (input.indexOf("\n") < 0) {
-					var chunk = process.readStdout();
-					if (chunk.length == 0)
-						break;
-					received = true;
-					input += chunk;
-					if (Bytes.ofString(input).length > 1048576)
-						throw "Claude input queue exceeded bound";
+				var chunk=pendingInput;
+				if(chunk==null) {chunk=process.readStdoutBytes();pendingOffset=0;if(chunk.length>0) pendingInput=chunk;}
+				var bytes:Bytes=cast chunk;if(bytes.length==0) break;
+				received=true;
+				while(pendingOffset<bytes.length && messages<32) {
+					var value=bytes.get(pendingOffset++);
+					if(value==10) {
+						if(inputLength>0) {
+							var line=input.getBytes();input=new BytesBuffer();inputLength=0;
+							if(!workspace.TextFileContent.validUtf8(line)) throw "Invalid Claude UTF-8 frame";
+							messages++;dispatch(Json.parse(line.toString()));
+						}
+					} else {
+						if(++inputLength>MAX_FRAME_BYTES) throw "Claude frame exceeded bound";
+						input.addByte(value);
+					}
 				}
-				while (messages < 32) {
-					var at = input.indexOf("\n");
-					if (at < 0)
-						break;
-					var line = input.substring(0, at);
-					input = input.substring(at + 1);
-					if (Bytes.ofString(line).length > 262144)
-						throw "Claude message exceeded bound";
-					if (line.length == 0)
-						continue;
-					messages++;
-					dispatch(Json.parse(line));
-				}
-				if (Bytes.ofString(input).length > 262144 && input.indexOf("\n") < 0)
-					throw "Claude frame exceeded bound";
+				if(pendingOffset==bytes.length) {pendingInput=null;pendingOffset=0;}
 			}
 			// Drain bounded stderr without forwarding credentials/config to UI.
 			for (_ in 0...8)
@@ -165,6 +164,7 @@ class ClaudeTransport {
 			return;
 		failure = reason;
 		queue.resize(0);
+		input=new BytesBuffer();inputLength=0;pendingInput=null;pendingOffset=0;
 		sizes.resize(0);
 		offset = 0;
 		queued = 0;
