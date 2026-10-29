@@ -150,10 +150,10 @@ class MachineWorkspaces {
 
 	/**
 		A short name for the build a launcher belongs to: a worktree's name, "this editor's build", or the checkout's
-		folder name.
+		folder name. A manager from before launchers were reported cannot say.
 	**/
 	public static function buildLabel(launcher:String, editorLauncher:String):String {
-		if (launcher.length == 0) return "older build";
+		if (launcher.length == 0) return "build not reported";
 		if (normalPath(launcher) == normalPath(editorLauncher)) return "this editor's build";
 		var parts = normalPath(launcher).split("/"), original = StringTools.replace(launcher, "\\", "/").split("/");
 		var worktrees = parts.indexOf("worktrees");
