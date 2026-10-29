@@ -24,11 +24,12 @@ private typedef ManagerOptions = {
 	var background:Bool;
 	var wire:Bool;
 	var generation:Null<String>;
+	var seedFrom:Null<String>;
 }
 
 /** Exosuit workspace daemon supervisor and discovery launcher. */
 class AgentManager {
-	static final DISCOVERY_FIELDS = ["version", "protocol", "codec", "workspace", "root", "managerPid", "generation", "socket", "websocket", "credentialFile", "expectedBuild"];
+	static final DISCOVERY_FIELDS = ["version", "protocol", "codec", "workspace", "root", "managerPid", "generation", "socket", "websocket", "credentialFile", "expectedBuild", "launcher"];
 	static final MAX_OUTPUT_LINE = 1048576;
 
 	public static function run(arguments:Array<String>):Int {
@@ -72,6 +73,9 @@ class AgentManager {
 				return 0;
 			}
 			ensureStateDirectory(directory);
+			// Now that it exists, the path takes the folder's own spelling, as the manager started below sees it;
+			// the pipe name derives from it, so both must agree.
+			directory = absoluteStatePath(directory);
 			if (options.detach)
 				return startDetached(options, directory);
 			return runManaged(options, directory);
@@ -91,7 +95,7 @@ class AgentManager {
 			alwaysAvailable: Sys.getEnv("EXOSUIT_AGENT_ALWAYS_AVAILABLE") == "1",
 			discover: false, configureRelay: null, prepareUpdate: false,
 			restart: false, expectedGeneration: null,
-			detach: false, background: false, wire: false, generation: null
+			detach: false, background: false, wire: false, generation: null, seedFrom: null
 		};
 		var index = 1;
 		while (index < arguments.length) {
@@ -111,6 +115,9 @@ class AgentManager {
 					if (seconds == null || seconds < 1 || seconds > 86400) throw "Invalid idle timeout";
 					options.idleSeconds = seconds;
 				case "--always-available": options.alwaysAvailable = true;
+				case "--seed-from":
+					if (index >= arguments.length) throw "--seed-from requires a state directory";
+					options.seedFrom = absoluteStatePath(arguments[index++]);
 				case "--discover": options.discover = true;
 				case "--configure-relay":
 					if (index >= arguments.length) throw "--configure-relay requires an origin";
@@ -138,6 +145,8 @@ class AgentManager {
 			throw "Restart requires the expected service generation";
 		if (!options.restart && options.expectedGeneration != null)
 			throw "--expected-generation requires --restart";
+		if (options.seedFrom != null && (options.discover || maintenanceModes > 0))
+			throw "--seed-from applies only when starting a manager";
 		if (options.discover && (options.detach || options.background))
 			throw "Discovery cannot be combined with manager startup";
 		if (options.detach && options.background)
@@ -147,21 +156,26 @@ class AgentManager {
 
 	static function stateDirectory(options:ManagerOptions):String {
 		if (options.stateDir != null) return options.stateDir;
+		return absoluteStatePath(Path.join([stateBase(), "workspaces", Sha256.encode(options.root).substr(0, 20)]));
+	}
+
+	/** The per-user folder holding `workspaces` (each root's default state) and `managers` (this machine's registry). */
+	public static function stateBase():String {
 		var stateHome = nonempty(Sys.getEnv("EXOSUIT_AGENT_STATE_HOME")), base:String;
 		if (stateHome != null) {
-			base = Path.join([stateHome, "workspaces"]);
+			base = stateHome;
 		} else if (Sys.systemName() == "Windows") {
 			var local = nonempty(Sys.getEnv("LOCALAPPDATA"));
 			if (local == null) local = nonempty(Sys.getEnv("APPDATA"));
 			if (local == null) local = Path.join([Sys.getEnv("USERPROFILE") == null ? Sys.getCwd() : Sys.getEnv("USERPROFILE"), "AppData", "Local"]);
-			base = Path.join([local, "Exosuit", "workspaces"]);
+			base = Path.join([local, "Exosuit"]);
 		} else {
 			var state = nonempty(Sys.getEnv("XDG_STATE_HOME"));
 			var home = nonempty(Sys.getEnv("HOME"));
 			if (home == null) home = Sys.getCwd();
-			base = Path.join([state == null ? Path.join([home, ".local", "state"]) : state, "exosuit", "workspaces"]);
+			base = Path.join([state == null ? Path.join([home, ".local", "state"]) : state, "exosuit"]);
 		}
-		return absoluteStatePath(Path.join([base, Sha256.encode(options.root).substr(0, 20)]));
+		return base;
 	}
 
 	static function absoluteStatePath(path:String):String {
@@ -597,6 +611,7 @@ class AgentManager {
 		var command = [launcher, "--manager", options.root, "--state-dir", directory, "--port", Std.string(options.port),
 			"--idle-seconds", Std.string(options.idleSeconds), "--generation", generation, "--background"];
 		if (options.alwaysAvailable) command.push("--always-available");
+		if (options.seedFrom != null) command = command.concat(["--seed-from", options.seedFrom]);
 		var child = sys.io.Process.spawn(Sys.executablePath(), command, options.root, null, null, true);
 		var buffer = Bytes.alloc(16384), deadline = Sys.time() + 90.0;
 		var complete = false, result = 1;
@@ -654,6 +669,7 @@ class AgentManager {
 		var restartRequested = false;
 		var ready = false;
 		var databaseIdentity:Null<String> = null;
+		var registryRecord:Null<String> = null;
 		var pending = "";
 		var exitCode = 0;
 		try {
@@ -667,6 +683,8 @@ class AgentManager {
 			if (generation.length == 0) generation = AgentManagerNative.randomToken().substr(0, 32);
 			prepareLog(logPath);
 			ensureIdentity(identityPath, options.root);
+			if (options.seedFrom != null && !FileSystem.exists(database))
+				AgentManagerSeed.copyCatalog(options.seedFrom, directory, options.root);
 			prepareEndpointForLaunch(endpointPath);
 			clearRestartRequest(directory);
 			ensureCredential(credentialPath);
@@ -714,10 +732,12 @@ class AgentManager {
 						var descriptor:Dynamic = {
 							version: 1, protocol: 1, codec: 1, workspace: "workspace", root: options.root,
 							managerPid: Sys.getPid(), generation: generation, socket: socket,
-							websocket: "ws://127.0.0.1:" + port + "/workspace", credentialFile: credentialPath
+							websocket: "ws://127.0.0.1:" + port + "/workspace", credentialFile: credentialPath,
+							launcher: launcher
 						};
 						AtomicFile.write(endpointPath, Json.stringify(descriptor) + "\n");
 						ready = true;
+						registryRecord = AgentMachine.register(stateBase(), options.root, directory, generation, launcher);
 						// Fire-and-forget: suit (the tray daemon) lists, and can cooperatively stop, this manager.
 						suit.SuitClient.registerWorkspaceService(suit.SuitKind.WorkspaceManager,
 							{root: options.root, stateDir: directory, generation: generation});
@@ -762,6 +782,7 @@ class AgentManager {
 			}
 		}
 		cleanupEndpoint(endpointPath, generation);
+		if (registryRecord != null) AgentMachine.unregister(registryRecord, generation);
 		suit.SuitClient.unregister();
 		if (relayBootstrap != null && FileSystem.exists(relayBootstrap))
 			try FileSystem.deleteFile(relayBootstrap) catch (_:Dynamic) {}
@@ -932,6 +953,8 @@ class AgentManager {
 		} else {
 			var values:Array<Dynamic> = [];
 			for (index in 0...DISCOVERY_FIELDS.length) {
+				// A manager from before the launcher field leaves it out.
+				if (Reflect.field(endpoint, DISCOVERY_FIELDS[index]) == null) continue;
 				var pair:Array<Dynamic> = [];
 				pair.push(Std.string(index + 1) + ":" + DISCOVERY_FIELDS[index]);
 				pair.push(Reflect.field(endpoint, DISCOVERY_FIELDS[index]));

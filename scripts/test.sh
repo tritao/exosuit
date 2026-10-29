@@ -79,6 +79,7 @@ check relay-setup python3 "$root_dir/scripts/test-relay-setup.py"
 run_test workspace-lifecycle
 check service-updates python3 "$root_dir/scripts/test-service-updates.py"
 check agent-idle python3 "$root_dir/scripts/test-agent-idle.py"
+check agent-machine python3 "$root_dir/scripts/test-agent-machine.py"
 check workspace-terminals python3 "$root_dir/scripts/test-workspace-terminals.py"
 check workspace-agents python3 "$root_dir/scripts/test-workspace-agents.py"
 check claude-agents python3 "$root_dir/scripts/test-claude-agents.py"

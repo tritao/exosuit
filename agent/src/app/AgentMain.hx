@@ -32,6 +32,10 @@ class AgentMain {
 			Sys.exit(AgentManager.run(args.slice(1)));
 			return;
 		}
+		if (args.length > 0 && args[0] == "--machine") {
+			Sys.exit(AgentMachine.run(args.slice(1)));
+			return;
+		}
 		var stableLease:Null<String> = null;
 		var stableBundle = Sys.getEnv("EXOSUIT_STABLE_BUNDLE");
 		if (stableBundle != null && stableBundle.length > 0) {
