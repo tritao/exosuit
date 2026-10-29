@@ -48,7 +48,7 @@ class RpcCompatibilityTests {
   var legacyCreateBytes = bytes("8601a17702a16903a16104a16705a5436f64657806c0");
   require(WorkspaceAgentProtocol.CREATE.decodeRequest(legacyCreateBytes).id == "a",
     "Legacy Agent create vector no longer decodes");
-  require(WorkspaceAgentProtocol.CREATE.encodeRequest(agentCreate).compare(bytes("8901a17702a16903a16104a16705a5436f64657806c007c008c009c0")) == 0,
+  require(WorkspaceAgentProtocol.CREATE.encodeRequest(agentCreate).compare(bytes("8a01a17702a16903a16104a16705a5436f64657806c007c008c009c00ac0")) == 0,
     "Agent create vector changed");
   var configuredCreate:AgentCreate={workspace:"w",instance:"i",id:"b",group:"g",name:"Codex",thread:null,
     defaultModel:"fixture-model",defaultEffort:"high",permissionProfile:"read-only"};
