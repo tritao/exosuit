@@ -513,6 +513,8 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       if (accepted != null && updatesRecord) accepted();
     },function(error,acknowledged) {
       if (rpc()!=connection || instance()!=generation || agentTokens.get(id)!=selected) return;
+      // The service applied it but its view did not arrive: the edit happened, so its editor must not stay open.
+      if (acknowledged && accepted != null && updatesRecord && action != "inspect-name") accepted();
       var errorsBefore=agentsError+"\n"+agentActionError;
       if (mutate) { agentMutation=false; agentMutationId=null; }
       finishAgentRead(id);
