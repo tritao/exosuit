@@ -106,8 +106,8 @@ private class MachineMenuTarget implements View {
 			event.preventDefault();
 			event.stopPropagation();
 		};
-		node.on(UiEventKind.PointerDown, function(event) if (event.button == 1) open(event));
-		node.on(UiEventKind.KeyDown, function(event) if (UiKey.isContextMenuRequest(event.key, event.modifiers)) open(event));
+		node.on(UiEventKind.PointerDown, function(event) { if (event.button == 1) open(event); });
+		node.on(UiEventKind.KeyDown, function(event) { if (UiKey.isContextMenuRequest(event.key, event.modifiers)) open(event); });
 		return node;
 	}
 }
