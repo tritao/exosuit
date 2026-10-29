@@ -1,6 +1,6 @@
 # ADR 0006: Workspaces and groups do not need folders; a workspace service per workspace
 
-Status: proposed
+Status: accepted (2026-10-29; agreed with tritao). Plan of work: [M19](../roadmap/19-machine-workspaces.md).
 
 Amends [ADR 0005](0005-machines-and-workspaces.md), which keeps one workspace service per folder and makes a
 workspace "one or more folders".
@@ -38,11 +38,19 @@ directory. A workspace or a group does not. Tying the other two jobs to a folder
   1. the directory chosen for the session;
   2. else its group's folder, or the nearest ancestor group's;
   3. else the workspace's first attached folder;
-  4. else the workspace's **scratch folder**, `<state>/workspaces/<workspace id>/scratch`, created on demand.
+  4. else the workspace's **scratch folder**, a visible folder `~/Exosuit/<workspace name>`. It is created on
+     demand. Its path is recorded in suit's catalog when it is created, so renaming the workspace does not move it.
+     A name that is already taken gets a numeric suffix.
 
   The scratch folder is the default instead of the home folder, so that by default an agent writes files somewhere
-  that belongs to the workspace. The session's directory is shown where the session is, and it can be changed for
-  new sessions, as group folders can be today.
+  that belongs to the workspace. Starting a session or terminal offers its resolved folder with **Change…**, which
+  uses the existing folder picker (the one groups use); the home folder is one choice there. The session's directory
+  is shown where the session is.
+- **Groups are collections of sessions, chats and terminals.** Each group also has its own set of open tabs, so
+  switching groups is instant and swaps the tabs with it (M18.4's per-context layouts, keyed by workspace and group).
+- **Every window sees the whole machine.** Several editor windows or instances can be open, each focused on its own
+  workspace and group. Each still shows every workspace on the machine with its groups, sessions and terminals,
+  updated live. Focus and tabs belong to a window; the workspaces, groups and sessions are shared.
 
 ### A workspace service per workspace
 
@@ -128,11 +136,10 @@ stitching is never built.
 - Migration has to be careful. It moves the state that today's sessions and terminals depend on, so it runs once,
   keeps a backup of each state folder, and refuses rather than guessing on anything it does not recognise.
 
-## Open questions
+## Resolved questions
 
-1. **Scratch folder location.** Should it live in the workspace's state folder (hidden, cleaned up with the
-   workspace), or in a visible folder such as `~/Exosuit/<workspace name>`? Default: the state folder, with a
-   command to reveal it.
-2. **A group with a folder outside every attached folder.** Should Files, Search and Changes show it when the group
-   is selected? Default: yes, as session folders outside the workspace are shown today.
-3. **Upstream.** The per-folder service is tritao's design, so this needs his agreement before step 3.
+1. **Scratch folder:** it is visible, at `~/Exosuit/<workspace name>`. When a session starts, its folder can be
+   changed with the existing folder picker.
+2. **A group's folder outside every attached folder:** Files, Search and Changes show it. This is an editor, so
+   everything a group works in is visible.
+3. **Upstream:** tritao agrees with the per-workspace service.

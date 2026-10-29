@@ -71,6 +71,7 @@ onto Haxeon, NativeKit and UIKit; Lua code is not reused.
 | M16 | [Remote workspaces](16-remote-workspaces.md) | M14, M15, Haxeon RPC | Existing web/Android access through a Cloudflare Workers relay |
 | M17 | [Source control](17-source-control.md) | M9, M15.1; M14 for remote | Git changes view, gutter/explorer status, staging and commits ([ADR 0004](../architecture/0004-source-control.md)) |
 | M18 | [Contexts and modes](18-contexts-and-modes.md) | M9, M14, M17 | Saved workspaces, group-scoped contexts, layout controls and Agents/Editor modes |
+| M19 | [Machine workspaces](19-machine-workspaces.md) | M14, M18 | One tree of machine, workspaces, groups and sessions; folderless workspaces; instant group switching; many windows |
 
 M14 uses the [Haxeon RPC foundation plan](HAXEON-RPC.md): typed wire codecs,
 bounded dispatch and reconnect in the first slice, with Exosuit-owned durable
