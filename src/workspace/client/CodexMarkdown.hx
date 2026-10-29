@@ -204,7 +204,9 @@ class CodexMarkdown {
   public static function parse(value:String):Array<CodexMarkdownBlock> {
     var blocks:Array<CodexMarkdownBlock> = [];
     var prose:Array<String> = [], code:Array<String> = [];
-    var fence = "", language = "", raw = "", proseKind = "";
+    var fence = "", language = "", proseKind = "";
+    // Joined once per fence: appending to a string per line made long fences quadratic.
+    var raw:Array<String> = [];
     function flush():Void {
       if (prose.length > 0) {
         blocks.push({kind: "text", text: prose.join("\n"), language: ""});
@@ -221,9 +223,9 @@ class CodexMarkdown {
       if (fence != "") {
         if (indent <= 3 && StringTools.startsWith(trimmed, fence)
           && StringTools.trim(trimmed.substr(fence.length)).split(fence.charAt(0)).join("") == "") {
-          blocks.push({kind: "code", text: code.join("\n"), language: language, closed: true, source: raw});
-          fence = ""; code = []; raw = "";
-        } else { code.push(line); raw += sourceLine + ending; }
+          blocks.push({kind: "code", text: code.join("\n"), language: language, closed: true, source: raw.join("")});
+          fence = ""; code = []; raw = [];
+        } else { code.push(line); raw.push(sourceLine + ending); }
       } else if (indent <= 3 && (StringTools.startsWith(trimmed, "```") || StringTools.startsWith(trimmed, "~~~"))) {
         flush();
         var marker = trimmed.charAt(0), length = 0;
@@ -258,7 +260,7 @@ class CodexMarkdown {
     }
     flush();
     // An unfinished fence remains a code block while tokens arrive.
-    if (fence != "") blocks.push({kind: "code", text: code.join("\n"), language: language, closed: false, source: raw});
+    if (fence != "") blocks.push({kind: "code", text: code.join("\n"), language: language, closed: false, source: raw.join("")});
     return blocks;
   }
 }

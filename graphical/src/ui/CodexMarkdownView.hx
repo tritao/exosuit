@@ -36,6 +36,9 @@ import syntax.SyntaxRegistry;
 /** Read-only Markdown projection using the editor's syntax engine and palette. */
 class CodexMarkdownView implements View {
   var value:String;
+  // The last parse, reused while the text is unchanged; a streaming transcript rebuilds every frame.
+  var parsedValue:Null<String> = null;
+  var parsedBlocks:Array<CodexMarkdownBlock> = [];
   final diffs:Map<String, SessionDiffView> = [];
   final palette:style.Theme;
   final syntaxes:SyntaxRegistry;
@@ -92,7 +95,8 @@ class CodexMarkdownView implements View {
     var rows:Array<KeyedView> = [];
     var spaceWidths:Map<String, Float> = [];
     var index = 0;
-    for (block in CodexMarkdown.parse(value)) {
+    if (parsedValue != value) { parsedBlocks = CodexMarkdown.parse(value); parsedValue = value; }
+    for (block in parsedBlocks) {
       var key = "block-" + index++;
       if (block.kind == "code" && (block.language == "diff" || block.language == "patch")) {
         var diff = diffs.get(key);
