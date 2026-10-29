@@ -500,9 +500,11 @@ class AgentProviderTestMain {
 		});
 		require(snapshot().requests[0].detail.indexOf("Pick a choice") >= 0 && snapshot().requests[0].detail.indexOf("yes: Proceed") >= 0, "Input question/options lost in presentation");
 		require(snapshot().requests[0].questions != null && snapshot().requests[0].questions[0].id == "choice", "Structured Codex question missing");
-		action("answer-questions", '[{"id":"unknown","answers":["yes"]}]', snapshot().requests[0].id);
+		// A rejected action leaves no view, so keep the request id for the retry.
+		var question = snapshot().requests[0].id;
+		action("answer-questions", '[{"id":"unknown","answers":["yes"]}]', question);
 		require(code == "invalid_request", "Unknown question accepted");
-		action("answer-questions", '[{"id":"choice","answers":["yes"]}]', snapshot().requests[0].id);
+		action("answer-questions", '[{"id":"choice","answers":["yes"]}]', question);
 		require(code == "", "Structured Codex answer rejected");
 		wait(function() {
 			action("read");
