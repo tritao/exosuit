@@ -1262,7 +1262,7 @@ class CodexSessionPanel implements View {
   }
 }
 
-/** Expose the selected setting and menu affordance on the native button. */
+/** Show the session's full directory in a tooltip over the worktree menu button. */
 private class SessionDirectoryTooltip implements View {
   final button:Button;
   final path:String;
@@ -1278,6 +1278,7 @@ private class SessionDirectoryTooltip implements View {
   }
 }
 
+/** Expose the selected setting and menu affordance on the native button. */
 private class SettingMenuButton implements View {
   final button:Button;
   final value:String;
