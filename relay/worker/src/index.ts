@@ -9,6 +9,13 @@ const MAX_PENDING_TICKETS_PER_PRINCIPAL = 8;
 const MAX_ACTIVE_DEVICES = 128;
 const MAX_CONNECTED_CLIENTS = 8;
 const FRAME_HEADER_BYTES = 17;
+const DATA_ENVELOPE = 1;
+const RESET_ENVELOPE = 2;
+/** Machine to Worker only: close the device or pairing socket on this channel. */
+const CLOSE_ENVELOPE = 3;
+/** Close code and reason a device or pairing socket gets when its machine disconnects it. */
+const DISCONNECTED_BY_HOST_CODE = 4001;
+const DISCONNECTED_BY_HOST_REASON = "disconnected_by_host";
 
 interface Route {
   machineId: string;
@@ -20,6 +27,8 @@ interface SocketAttachment {
   role: "machine" | "pairing" | "device";
   channelId?: string;
   deviceId?: string;
+  /** Set once the machine has been told this channel ended, so an error and a close send one reset. */
+  ended?: boolean;
 }
 
 interface PairingRequest {
@@ -171,12 +180,18 @@ export class MachineRelay extends DurableObject<Env> {
       closeSocket(socket, 1009, "frame too large");
       return;
     }
-    if (bytes.byteLength < FRAME_HEADER_BYTES || bytes[0] !== 1) {
+    const closing = attachment.role === "machine" && bytes[0] === CLOSE_ENVELOPE;
+    if (bytes.byteLength < FRAME_HEADER_BYTES || (bytes[0] !== DATA_ENVELOPE && !closing) ||
+      (closing && bytes.byteLength !== FRAME_HEADER_BYTES)) {
       closeSocket(socket, 1002, "invalid frame envelope");
       return;
     }
 
     const channelId = bytesToHex(bytes.subarray(1, FRAME_HEADER_BYTES));
+    if (closing) {
+      this.disconnectChannel(channelId);
+      return;
+    }
     if (attachment.role !== "machine" && channelId !== attachment.channelId) {
       closeSocket(socket, 1008, "channel mismatch");
       return;
@@ -203,8 +218,23 @@ export class MachineRelay extends DurableObject<Env> {
   }
 
   webSocketError(socket: WebSocket): void {
-    closeSocket(socket, 1011, "relay socket error");
     this.channelEnded(socket);
+    closeSocket(socket, 1011, "relay socket error");
+  }
+
+  /**
+   * The machine disconnected a client: its sockets on the channel close with
+   * DISCONNECTED_BY_HOST_CODE, which the app shows. The machine gets no reset for
+   * a channel it closed itself. The client may connect again; the machine decides
+   * whether to accept it, and revoking the device is the permanent cut-off.
+   */
+  private disconnectChannel(channelId: string): void {
+    for (const candidate of this.ctx.getWebSockets()) {
+      const current = readAttachment(candidate);
+      if (!current || current.role === "machine" || current.channelId !== channelId) continue;
+      markEnded(candidate, current);
+      closeSocket(candidate, DISCONNECTED_BY_HOST_CODE, DISCONNECTED_BY_HOST_REASON);
+    }
   }
 
   webSocketClose(socket: WebSocket): void {
@@ -219,12 +249,13 @@ export class MachineRelay extends DurableObject<Env> {
    */
   private channelEnded(socket: WebSocket): void {
     const attachment = readAttachment(socket);
-    if (!attachment || attachment.role === "machine" || !attachment.channelId) return;
+    if (!attachment || attachment.role === "machine" || !attachment.channelId || attachment.ended) return;
+    markEnded(socket, attachment);
     const sockets = this.ctx.getWebSockets();
     const successor = sockets.some((candidate) => {
       if (candidate === socket) return false;
       const current = readAttachment(candidate);
-      return current?.role !== "machine" && current?.channelId === attachment.channelId;
+      return current?.role !== "machine" && current?.channelId === attachment.channelId && current?.ended !== true;
     });
     if (successor) return;
     const machine = sockets.find((candidate) => readAttachment(candidate)?.role === "machine");
@@ -682,6 +713,14 @@ function readAttachment(socket: WebSocket): SocketAttachment | null {
   }
 }
 
+function markEnded(socket: WebSocket, attachment: SocketAttachment): void {
+  try {
+    socket.serializeAttachment({ ...attachment, ended: true });
+  } catch {
+    // A socket that is already closing keeps its last attachment.
+  }
+}
+
 function closeSocket(socket: WebSocket, code: number, reason: string): void {
   try {
     socket.close(code, reason);
@@ -700,7 +739,7 @@ function sendFrame(socket: WebSocket, bytes: Uint8Array): void {
 
 function resetFrame(channelId: string): Uint8Array {
   const frame = new Uint8Array(17);
-  frame[0] = 2;
+  frame[0] = RESET_ENVELOPE;
   for (let index = 0; index < 16; index += 1)
     frame[index + 1] = Number.parseInt(channelId.slice(index * 2, index * 2 + 2), 16);
   return frame;

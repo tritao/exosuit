@@ -79,6 +79,11 @@ PROCESSKIT_API const char *processkit_list_name(processkit_list list, int index)
 /** Command line, or empty when it was not or could not be read. Borrowed until processkit_list_close. */
 PROCESSKIT_API const char *processkit_list_command_line(processkit_list list, int index) PROCESSKIT_RETURNS_BORROWED_UTF8;
 /**
+ * Full executable path as the OS reports it (not the command line), read for the same
+ * processes as command lines; empty when not read. Borrowed until processkit_list_close.
+ */
+PROCESSKIT_API const char *processkit_list_path(processkit_list list, int index) PROCESSKIT_RETURNS_BORROWED_UTF8;
+/**
  * The requested environment variables the process has, as "NAME=value" lines
  * joined by '\n'; empty when none was set or the environment could not be read.
  * Borrowed until processkit_list_close.

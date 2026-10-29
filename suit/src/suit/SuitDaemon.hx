@@ -1,5 +1,6 @@
 package suit;
 
+import suit.SuitRecord.SuitRecords;
 import haxe.Json;
 import haxe.io.Bytes;
 import haxe.io.Path;
@@ -9,7 +10,7 @@ import nativekit.ffi.NativeKitTypes;
 import sys.FileSystem;
 import suit.SuitInventory.SuitProcess;
 import suit.relay.SuitRelayHosting;
-import suit.relay.SuitRelayHosts;
+import suit.relay.SuitRelayHosting.SuitRelayStopPlan;
 import workspace.transport.NativeRpcHub;
 import workspace.transport.NativeRpcTransport;
 
@@ -26,6 +27,8 @@ extern function releaseLock(lock:SuitLockHandle):Void;
 	The per-user daemon: one per user (an exclusive lock in suit's home), a control endpoint for the CLI,
 	and on Windows the tray icon. It also holds the relay machine socket of every hosted workspace
 	(`suit.relay.SuitRelayHosting`).
+
+	The tray menu does not stop this loop: NativeKit runs the popup on its own thread (`SuitTray.show`).
 
 	Idle cost: it sleeps in the NativeKit event wait, which a tray click or a control connection wakes,
 	and rescans processes every REFRESH_SECONDS to keep the tooltip current. It exits after
@@ -70,6 +73,7 @@ class SuitDaemon {
 			daemon.dispose();
 		} catch (error:Dynamic) {
 			code = 1;
+			Sys.stderr().writeString("suit: " + Std.string(error) + "\n");
 			try sys.io.File.saveContent(Path.join([home, "daemon-error.txt"]), Std.string(error) + "\n") catch (_:Dynamic) {}
 		}
 		try FileSystem.deleteFile(Path.join([home, "daemon.json"])) catch (_:Dynamic) {}
@@ -84,16 +88,32 @@ class SuitDaemon {
 		idleSince = Sys.time();
 		runtime = NativeKitRuntime.start();
 		hub = new NativeRpcHub(runtime.events);
-		hub.listen(NativeRpcHub.local(SuitPaths.endpoint()), function(transport) clients.push(transport));
+		var listenError = listen();
+		if (listenError != null) {
+			// The first pipe instance is exclusive: another process holding the name is never shared with.
+			hub.dispose();
+			runtime.dispose();
+			throw "suit's control endpoint " + SuitPaths.endpoint() + " is held by another process; suit will not share it (" + listenError + ")";
+		}
 		relay = new SuitRelayHosting(runtime.events, hub);
 		runtime.events.listen(onEvent);
 		inventory = new SuitInventory(true);
 		refreshedAt = Sys.time();
 		sys.io.AtomicFile.write(Path.join([SuitPaths.home(), "daemon.json"]),
 			Json.stringify({version: 1, pid: Sys.getPid(), endpoint: SuitPaths.endpoint()}) + "\n");
+		SuitLogin.refresh();
 		if (Sys.systemName() == "Windows" && Sys.getEnv("EXOSUIT_SUIT_TRAY") != "0") {
 			try tray = new SuitTray(inventory.summary(), findIcon()) catch (_:Dynamic) tray = null;
 		}
+	}
+
+	function listen():Null<String> {
+		try {
+			hub.listen(NativeRpcHub.local(SuitPaths.endpoint()), function(transport) clients.push(transport));
+		} catch (error:Dynamic) {
+			return Std.string(error);
+		}
+		return null;
 	}
 
 	function loop():Void {
@@ -104,11 +124,13 @@ class SuitDaemon {
 					break;
 			if (menuRequested) {
 				menuRequested = false;
+				SuitLogin.refresh();
 				refresh();
 				showMenu();
 			}
 			serveClients();
 			relay.poll();
+			SuitLogin.poll();
 			var relayRevision = relay.revision();
 			if (relayRevision != shownRelay) {
 				// A remote client came or went: update the tooltip now, not on the next rescan.
@@ -140,8 +162,7 @@ class SuitDaemon {
 
 	function tooltip():String {
 		var hosting = relay.summary();
-		return hosting.length == 0 ? inventory.summary() : inventory.summary() + "
-" + hosting;
+		return hosting.length == 0 ? inventory.summary() : inventory.summary() + "\n" + hosting;
 	}
 
 	function updateTooltip():Void {
@@ -175,26 +196,19 @@ class SuitDaemon {
 		current.show(function(menu) SuitMenuModel.build(menu, inventory, {
 			terminate: terminate, openViewer: openViewer, quit: quitEverything,
 			hosting: {
-				hosts: relay.views, stopHosting: stopHosting, resumeHosting: function(root) relay.resume(root),
-				disconnect: function(client) relay.handle({op: "relay-disconnect", client: client}),
-				loginEnabled: SuitLogin.enabled, toggleLogin: toggleLogin
+				hosts: relay.views, stopHosting: function(root) stopHosting(root), resumeHosting: function(root) relay.resume(root),
+				disconnect: function(client) relay.disconnect(client),
+				retry: function(machineId) relay.retry(machineId), dismiss: function(machineId) relay.dismiss(machineId),
+				loginEnabled: SuitLogin.cached, toggleLogin: SuitLogin.toggleInBackground
 			}
 		}));
 	}
 
-	function toggleLogin():Void {
-		try {
-			SuitLogin.toggle();
-		} catch (_:Dynamic) {}
-	}
-
 	/** Stop hosting: pause it in relay-settings.json (so nothing restarts it) and stop the workspace service. */
-	function stopHosting(root:Null<String>):Void {
-		relay.pause(root);
-		var targets = SuitActions.hosting(inventory, root);
-		for (process in targets)
-			SuitRelayHosts.setPaused(process.stateDir, true);
-		terminate(targets);
+	function stopHosting(root:Null<String>):SuitRelayStopPlan {
+		var plan = SuitRelayHosting.stop(inventory, root, relay);
+		terminate(plan.terminate);
+		return plan;
 	}
 
 	/** Stops everything, editors included (asked to close first), then exits. */
@@ -269,6 +283,33 @@ class SuitDaemon {
 				return {ok: true, terminating: count};
 			case "stop":
 				stopAt = Sys.time() + 0.3;
+				return {ok: true};
+			case "relay-stop":
+				refresh();
+				var plan = stopHosting(SuitRecords.stringField(request, "workspace"));
+				return {ok: true, roots: plan.roots, terminating: plan.terminate.length};
+			case "relay-pause":
+				// Pause without stopping the services: their daemons see the pause and exit on their own.
+				refresh();
+				return {ok: true, roots: SuitRelayHosting.stop(inventory, SuitRecords.stringField(request, "workspace"), relay).roots};
+			case "test-menu":
+				// Tests only: open the tray menu as a click does (adding the icon if needed), or close it by
+				// removing the icon, so a test can check that the daemon keeps working while it is open.
+				if (Sys.getEnv("EXOSUIT_SUIT_HOME") == null || Sys.getEnv("EXOSUIT_SUIT_TEST_MENU") != "1")
+					return {ok: false, error: "unknown request"};
+				if (Reflect.field(request, "close") == true) {
+					if (tray != null)
+						tray.dispose();
+					tray = null;
+					return {ok: true};
+				}
+				if (tray == null)
+					tray = new SuitTray(tooltip(), findIcon());
+				menuRequested = true;
+				return {ok: true};
+			case "login-toggle":
+				// As the tray's checkbox does: in the background, answered at once.
+				SuitLogin.toggleInBackground();
 				return {ok: true};
 			default:
 				var relayReply = relay.handle(request);

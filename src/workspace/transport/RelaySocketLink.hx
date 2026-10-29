@@ -156,6 +156,13 @@ class RelaySocketLink {
 		return sendPacket(RelayFrameCodec.encode(channelId, message, MAX_MESSAGE_BYTES));
 	}
 
+	/** Raw mode: asks the Worker to close a channel's client socket (see RelayFrameCodec.encodeClose). */
+	public function closeRouted(channelId:String):Bool {
+		if (!isOpen() || onFrame == null)
+			return false;
+		return sendPacket(RelayFrameCodec.encodeClose(channelId));
+	}
+
 	function sendPacket(packet:Bytes):Bool {
 		var sent = stream.send(packet);
 		var reason = stream.failureReason();

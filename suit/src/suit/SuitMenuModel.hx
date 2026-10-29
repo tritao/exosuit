@@ -37,6 +37,8 @@ class SuitMenuModel {
 			stopHosting: function(_) {},
 			resumeHosting: function(_) {},
 			disconnect: function(_) {},
+			retry: function(_) {},
+			dismiss: function(_) {},
 			loginEnabled: SuitLogin.enabled,
 			toggleLogin: function() {}
 		};

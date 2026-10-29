@@ -309,6 +309,85 @@ describe("bounded channel forwarding", () => {
     machine.close();
   });
 
+  it("resets the machine-side route when a pairing socket closes", async () => {
+    const id = nextMachineId();
+    const machineToken = secret(60);
+    const channelId = idFromNumber(1311);
+    const inviteSecret = secret(61);
+    await registerMachine(id, machineToken);
+    const machine = await openMachine(id, machineToken);
+    await createPairing(id, machineToken, channelId, inviteSecret, 60);
+    const pairing = socketOf(await connectPairing(id, channelId, inviteSecret));
+
+    const closed = waitForMessage(machine);
+    pairing.close(1000, "done");
+    expect([...new Uint8Array(await closed)]).toEqual([...resetFrame(channelId)]);
+    await expectNoMessage(machine);
+    machine.close();
+  });
+
+  it("closes a device socket the machine disconnects, without a reset back", async () => {
+    const id = nextMachineId();
+    const machineToken = secret(62);
+    const deviceId = idFromNumber(1312);
+    const deviceToken = secret(63);
+    await registerMachine(id, machineToken);
+    const machine = await openMachine(id, machineToken);
+    await registerDevice(id, machineToken, deviceId, deviceToken);
+    const initialReset = waitForMessage(machine);
+    const device = socketOf(await connectDevice(id, await issueTicket(id, deviceToken)));
+    await initialReset;
+
+    const closed = waitForCloseEvent(device);
+    machine.send(closeFrame(deviceId).buffer);
+    expect(await closed).toEqual({ code: 4001, reason: "disconnected_by_host" });
+    await expectNoMessage(machine);
+
+    // The device may connect again; the machine decides whether to accept it.
+    const reconnectReset = waitForMessage(machine);
+    socketOf(await connectDevice(id, await issueTicket(id, deviceToken)));
+    expect([...new Uint8Array(await reconnectReset)]).toEqual([...resetFrame(deviceId)]);
+    machine.close();
+  });
+
+  it("closes a pairing socket the machine disconnects", async () => {
+    const id = nextMachineId();
+    const machineToken = secret(64);
+    const channelId = idFromNumber(1313);
+    const inviteSecret = secret(65);
+    await registerMachine(id, machineToken);
+    const machine = await openMachine(id, machineToken);
+    await createPairing(id, machineToken, channelId, inviteSecret, 60);
+    const pairing = socketOf(await connectPairing(id, channelId, inviteSecret));
+
+    const closed = waitForCloseEvent(pairing);
+    machine.send(closeFrame(channelId).buffer);
+    expect(await closed).toEqual({ code: 4001, reason: "disconnected_by_host" });
+    await expectNoMessage(machine);
+    machine.close();
+  });
+
+  it("accepts the close envelope only from the machine, and only without payload", async () => {
+    const id = nextMachineId();
+    const machineToken = secret(66);
+    const deviceId = idFromNumber(1314);
+    const deviceToken = secret(67);
+    await registerMachine(id, machineToken);
+    const machine = await openMachine(id, machineToken);
+    await registerDevice(id, machineToken, deviceId, deviceToken);
+    const device = socketOf(await connectDevice(id, await issueTicket(id, deviceToken)));
+
+    const deviceClosed = waitForClose(device);
+    device.send(closeFrame(deviceId).buffer);
+    expect(await deviceClosed).toBe(1002);
+
+    const machineClosed = waitForClose(machine);
+    const oversized = new Uint8Array(18);
+    oversized.set(closeFrame(deviceId));
+    machine.send(oversized.buffer);
+    expect(await machineClosed).toBe(1002);
+  });
+
   it("caps the number of connected browser channels", async () => {
     const id = nextMachineId();
     const machineToken = secret(34);
@@ -527,6 +606,37 @@ function resetFrame(channelId: string): Uint8Array {
     bytes[index + 1] = Number.parseInt(channelId.slice(index * 2, index * 2 + 2), 16);
   }
   return bytes;
+}
+
+function closeFrame(channelId: string): Uint8Array {
+  const bytes = resetFrame(channelId);
+  bytes[0] = 3;
+  return bytes;
+}
+
+/** Fails if the socket receives a message within `milliseconds`. */
+function expectNoMessage(socket: WebSocket, milliseconds = 200): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const listener = (): void => {
+      clearTimeout(timeout);
+      reject(new Error("relay sent an unexpected frame"));
+    };
+    const timeout = setTimeout(() => {
+      socket.removeEventListener("message", listener);
+      resolve();
+    }, milliseconds);
+    socket.addEventListener("message", listener, { once: true });
+  });
+}
+
+function waitForCloseEvent(socket: WebSocket): Promise<{ code: number; reason: string }> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("timed out waiting for WebSocket close")), 1000);
+    socket.addEventListener("close", (event) => {
+      clearTimeout(timeout);
+      resolve({ code: event.code, reason: event.reason });
+    }, { once: true });
+  });
 }
 
 function waitForMessage(socket: WebSocket): Promise<ArrayBuffer> {

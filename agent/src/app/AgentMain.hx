@@ -19,6 +19,9 @@ import workspace.runtime.WorkspaceNoiseIdentity;
 import workspace.transport.NoiseMessageTransport;
 import workspace.runtime.WorkspacePairingManager;
 import workspace.runtime.WorkspaceRelayStatusFile;
+import suit.relay.SuitRelayProtocol;
+import suit.relay.SuitRelayProtocol.SuitRelayAttachRequest;
+import suit.relay.SuitRelayProtocol.SuitRelayReportedDevice;
 
 /** Catalog daemon. The managed launcher owns exclusive startup and discovery. */
 class AgentMain {
@@ -62,8 +65,8 @@ class AgentMain {
 		var relaySetupError:Null<String> = null;
 		var relayRoot = FileSystem.fullPath(args.length >= 6 ? args[5] : Sys.getCwd());
 		// suit holds the machine socket when it runs, so a device can reach this workspace with no editor open.
-		function suitAttach(settings:WorkspaceRelaySettings):Null<suit.relay.SuitRelayProtocol.SuitRelayAttachRequest> {
-			if (!suit.relay.SuitRelayProtocol.viaSuitEnabled())
+		function suitAttach(settings:WorkspaceRelaySettings):Null<SuitRelayAttachRequest> {
+			if (!SuitRelayProtocol.viaSuitEnabled())
 				return null;
 			return {
 				root: relayRoot,
@@ -204,7 +207,7 @@ class AgentMain {
 				relayStatus.update(clock(), relayHost, pairingManager, relaySetupError);
 			if (relayHost != null && relayHost.viaSuit && clock() >= clientReportAt) {
 				clientReportAt = clock() + 1000;
-				var devices:Array<Dynamic> = [], pendingDevices:Array<String> = [];
+				var devices:Array<SuitRelayReportedDevice> = [], pendingDevices:Array<String> = [];
 				if (pairingManager != null) {
 					for (device in pairingManager.listDevices())
 						if (!device.revoked)

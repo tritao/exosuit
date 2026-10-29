@@ -50,6 +50,32 @@ class Processes {
 		return result;
 	}
 
+	/**
+		The full executable path of a running process as the OS reports it (not its command line), or null
+		when it cannot be read.
+	**/
+	public static function executablePath(pid:Int):Null<String> {
+		var opened = ProcessKit.processkit_list_open("*", "");
+		if (opened.status != ProcessKitConstants.PROCESSKIT_OK)
+			return null;
+		var owner = opened.out_list;
+		var handle = owner.borrow();
+		var result:Null<String> = null;
+		try {
+			for (index in 0...ProcessKit.processkit_list_count(handle))
+				if (ProcessKit.processkit_list_pid(handle, index) == pid) {
+					var path = ProcessKit.processkit_list_path(handle, index);
+					result = path == null || path.length == 0 ? null : path;
+					break;
+				}
+		} catch (error:Dynamic) {
+			owner.close();
+			throw error;
+		}
+		owner.close();
+		return result;
+	}
+
 	/** What `started` returns for a running process this user may not open. */
 	public static inline var STARTED_DENIED:Float = -2;
 

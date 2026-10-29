@@ -33,6 +33,10 @@ class NativeRpcTransport implements MessageTransport {
 	public function isOpen():Bool
 		return connected && !terminal && stream.isOpen();
 
+	/** The process at the other end of a local transport, from the OS rather than anything it sent; 0 when unknown. */
+	public function peerProcess():Int
+		return stream.peerProcess();
+
 	public function send(message:Bytes):Bool {
 		if (!isOpen())
 			return false;

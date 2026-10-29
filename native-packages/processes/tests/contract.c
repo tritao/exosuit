@@ -130,6 +130,8 @@ static void test_snapshot(int self) {
         require(strlen(processkit_list_name(list, found)) > 0, "this process has a name");
         require(strstr(processkit_list_command_line(list, found), "processkit_contract") != NULL,
                 "\"*\" reads every command line");
+        require(strstr(processkit_list_path(list, found), "processkit_contract") != NULL,
+                "\"*\" reads every executable path");
     }
     require(processkit_list_count(list) == count, "a snapshot does not change");
     processkit_list_close(list);
@@ -141,8 +143,9 @@ static void test_snapshot(int self) {
     for (int index = 0; index < processkit_list_count(list); index++)
         if (processkit_list_pid(list, index) == self)
             require(strcmp(processkit_list_command_line(list, index), "") == 0 &&
+                        strcmp(processkit_list_path(list, index), "") == 0 &&
                         strcmp(processkit_list_environment(list, index), "") == 0,
-                    "an empty name list reads no command lines or environments");
+                    "an empty name list reads no command lines, paths or environments");
     processkit_list_close(list);
 
     /* Handles are a bounded table: opening more than it holds fails cleanly, and closing frees slots. */

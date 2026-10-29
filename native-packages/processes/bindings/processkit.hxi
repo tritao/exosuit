@@ -39,6 +39,11 @@ interface ProcessKit @target("portable-abi64") @library("processkit") {
 	 */
 	extern fn processkit_list_open(names: utf8, variables: utf8, out_list: ptr<processkit_list> @out @owned) -> c_int;
 	extern fn processkit_list_parent(list: processkit_list, index: c_int) -> c_int;
+	/**
+	 * Full executable path as the OS reports it (not the command line), read for the same
+	 * processes as command lines; empty when not read. Borrowed until processkit_list_close.
+	 */
+	extern fn processkit_list_path(list: processkit_list, index: c_int) -> utf8 @borrowed;
 	extern fn processkit_list_pid(list: processkit_list, index: c_int) -> c_int;
 	/**
 	 * Start time in milliseconds since the Unix epoch; 0 when it could not be read.

@@ -1,23 +1,35 @@
 package suit;
 
+import haxe.crypto.Sha256;
 import haxe.io.Path;
 import sys.FileSystem;
+import sys.io.AtomicFile;
 
 /**
 	"Start at login", opt-in and off by default.
 
 	Windows: a value under the per-user Run key (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`),
 	written and removed with `reg.exe`. The value runs
-	`conhost.exe --headless cmd.exe /d /c "<suit home>\start-at-login.cmd"`: the script sets the PATH
-	HashLink needs for suit's native libraries (a Run command is limited to 260 characters, too short
-	for that PATH) and starts `hl <suit> daemon --login`; `--headless` keeps a console window from
-	appearing. Elsewhere it is an XDG autostart entry running `start-at-login.sh`.
+	`conhost.exe --headless cmd.exe /d /s /c ""%LOCALAPPDATA%\Exosuit\suit-login\<name>.cmd""`. The script
+	sets the PATH HashLink needs for suit's native libraries (a Run command is limited to 260 characters,
+	too short for that PATH) and starts `hl <suit> daemon --login`; `--headless` keeps a console window from
+	appearing. The command names the script through `%LOCALAPPDATA%` and fixed names only, so a user or
+	home path containing `&`, `(`, `^` or `%` never passes through cmd's quoting; inside the script every
+	path is quoted and `%` is doubled. Elsewhere it is an XDG autostart entry running `start-at-login.sh`.
 
 	`EXOSUIT_SUIT_LOGIN_KEY` (a registry key) and `EXOSUIT_SUIT_AUTOSTART_DIR` (a directory) move where the
 	entry is written, so tests never touch the user's real Run key or autostart folder.
+
+	The CLI uses the blocking calls. The daemon's tray uses `cached`, `refresh` and `toggleInBackground`
+	with `poll` from its loop, so opening the menu never waits for `reg.exe`.
 **/
 class SuitLogin {
 	public static inline var RUN_KEY:String = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+	static inline var REG_TIMEOUT_SECONDS:Float = 15;
+
+	static var known:Null<Bool> = null;
+	static var job:Null<RegJob> = null;
+	static var queued:Array<Array<String>> = [];
 
 	public static function supported():Bool
 		return Sys.systemName() == "Windows" || Sys.systemName() == "Linux";
@@ -29,59 +41,74 @@ class SuitLogin {
 
 	/** One entry per suit home, so an isolated suit (EXOSUIT_SUIT_HOME) never replaces the user's. */
 	public static function valueName():String {
-		var home = Sys.getEnv("EXOSUIT_SUIT_HOME");
-		return home != null && home.length > 0 ? "Exosuit suit " + haxe.crypto.Sha256.encode(home).substr(0, 12) : "Exosuit suit";
+		var tag = homeTag();
+		return tag == null ? "Exosuit suit" : "Exosuit suit " + tag;
 	}
 
-	public static function scriptPath():String
-		return Sys.systemName() == "Windows" ? native(Path.join([SuitPaths.home(), "start-at-login.cmd"])) : Path.join([SuitPaths.home(), "start-at-login.sh"]);
+	static function homeTag():Null<String> {
+		var home = Sys.getEnv("EXOSUIT_SUIT_HOME");
+		return home != null && home.length > 0 ? Sha256.encode(home).substr(0, 12) : null;
+	}
+
+	/** The script the entry runs. On Windows it lives under %LOCALAPPDATA% with a fixed name (see above). */
+	public static function scriptPath():String {
+		if (Sys.systemName() != "Windows")
+			return Path.join([SuitPaths.home(), "start-at-login.sh"]);
+		return native(Path.join([localAppData(), "Exosuit", "suit-login", scriptName()]));
+	}
+
+	static function scriptName():String {
+		var tag = homeTag();
+		return "start-" + (tag == null ? "default" : tag) + ".cmd";
+	}
+
+	static function localAppData():String {
+		var value = Sys.getEnv("LOCALAPPDATA");
+		if (value == null || value.length == 0)
+			throw "Start at login needs LOCALAPPDATA";
+		return value;
+	}
 
 	/** Backslashes only: cmd.exe reads a forward slash in a path as a switch. */
 	static function native(path:String):String
 		return StringTools.replace(path, "/", "\\");
 
+	/** Blocking: whether the entry exists (runs reg.exe on Windows). */
 	public static function enabled():Bool {
-		if (Sys.systemName() == "Windows")
-			return reg(["query", key(), "/v", valueName()]) == 0;
-		return FileSystem.exists(desktopPath());
+		var result = Sys.systemName() == "Windows" ? reg(["query", key(), "/v", valueName()]) == 0 : FileSystem.exists(desktopPath());
+		known = result;
+		return result;
 	}
 
-	/** The command the Run value holds. */
+	/** The command the Run value holds: system paths and %LOCALAPPDATA%, never a user path. */
 	public static function command():String {
 		var system = native(systemRoot()) + "\\System32\\";
-		return '"' + system + 'conhost.exe" --headless "' + system + 'cmd.exe" /d /c "' + scriptPath() + '"';
+		return '"' + system + 'conhost.exe" --headless "' + system + 'cmd.exe" /d /s /c ""%LOCALAPPDATA%\\Exosuit\\suit-login\\' + scriptName()
+			+ '""';
 	}
 
+	/** Blocking. */
 	public static function enable():Void {
-		if (!supported())
-			throw "Start at login is not supported on this system";
-		var launcher = SuitClient.findLauncher();
-		if (launcher == null)
-			launcher = FileSystem.fullPath(Sys.programPath());
-		if (!SuitPaths.prepare())
-			throw "suit's home is not a private directory of this user";
-		sys.io.AtomicFile.write(scriptPath(), script(launcher));
+		writeScript();
 		if (Sys.systemName() == "Windows") {
-			if (reg(["add", key(), "/v", valueName(), "/t", "REG_SZ", "/d", command(), "/f"]) != 0)
+			if (reg(addArguments()) != 0)
 				throw "Could not write " + key() + "\\" + valueName();
+			known = true;
 			return;
 		}
-		var directory = Path.directory(desktopPath());
-		if (!FileSystem.exists(directory))
-			FileSystem.createDirectory(directory);
-		sys.io.AtomicFile.write(desktopPath(), [
-			"[Desktop Entry]", "Type=Application", "Name=Exosuit suit", "Comment=Exosuit background processes and remote access",
-			"Exec=/bin/sh \"" + scriptPath() + "\"", "X-GNOME-Autostart-enabled=true", ""
-		].join("\n"));
+		writeDesktopEntry();
+		known = true;
 	}
 
+	/** Blocking. */
 	public static function disable():Void {
 		if (Sys.systemName() == "Windows") {
-			if (enabled() && reg(["delete", key(), "/v", valueName(), "/f"]) != 0)
+			if (enabled() && reg(deleteArguments()) != 0)
 				throw "Could not remove " + key() + "\\" + valueName();
 		} else if (FileSystem.exists(desktopPath()))
 			FileSystem.deleteFile(desktopPath());
-		try if (FileSystem.exists(scriptPath())) FileSystem.deleteFile(scriptPath()) catch (_:Dynamic) {}
+		removeScript();
+		known = false;
 	}
 
 	public static function toggle():Bool {
@@ -90,6 +117,119 @@ class SuitLogin {
 		else
 			enable();
 		return enabled();
+	}
+
+	/** The last known state, without waiting; false until the first check finishes. */
+	public static function cached():Bool
+		return known == true;
+
+	/** Checks the entry again in the background (see `poll`). */
+	public static function refresh():Void {
+		if (Sys.systemName() != "Windows") {
+			known = FileSystem.exists(desktopPath());
+			return;
+		}
+		if (job == null && queued.length == 0)
+			queued.push(["query", key(), "/v", valueName()]);
+		poll();
+	}
+
+	/** Turns the entry on or off in the background, from the last known state; the menu shows the result. */
+	public static function toggleInBackground():Void {
+		if (Sys.systemName() != "Windows") {
+			toggle();
+			return;
+		}
+		if (changing())
+			return; // a change is already running; its result shows next
+		if (cached()) {
+			queued.push(deleteArguments());
+			removeScript();
+		} else {
+			writeScript();
+			queued.push(addArguments());
+		}
+		queued.push(["query", key(), "/v", valueName()]);
+		poll();
+	}
+
+	/** Advances background registry work; call from the daemon loop. True while work is running. */
+	public static function poll():Bool {
+		var current = job;
+		if (current != null) {
+			var status = current.child.pollExit();
+			if (status < 0 && Sys.time() < current.deadline)
+				return true;
+			if (status < 0)
+				try current.child.cancel() catch (_:Dynamic) {}
+			current.child.close();
+			job = null;
+			switch current.arguments[0] {
+				case "query":
+					known = status == 0;
+				case "add":
+					if (status == 0) known = true;
+				case "delete":
+					if (status == 0) known = false;
+				default:
+			}
+		}
+		if (queued.length == 0)
+			return false;
+		var next = queued.shift();
+		try {
+			job = {child: spawnReg(next), deadline: Sys.time() + REG_TIMEOUT_SECONDS, arguments: next};
+		} catch (_:Dynamic) {
+			job = null;
+		}
+		return job != null || queued.length > 0;
+	}
+
+	/** An add or delete is running or queued (a query alone is not a change). */
+	static function changing():Bool {
+		var current = job;
+		if (current != null && current.arguments[0] != "query")
+			return true;
+		for (item in queued)
+			if (item[0] != "query")
+				return true;
+		return false;
+	}
+
+	static function addArguments():Array<String>
+		return ["add", key(), "/v", valueName(), "/t", "REG_SZ", "/d", command(), "/f"];
+
+	static function deleteArguments():Array<String>
+		return ["delete", key(), "/v", valueName(), "/f"];
+
+	static function writeScript():Void {
+		if (!supported())
+			throw "Start at login is not supported on this system";
+		var launcher = SuitClient.findLauncher();
+		if (launcher == null)
+			launcher = FileSystem.fullPath(Sys.programPath());
+		if (!SuitPaths.prepare())
+			throw "suit's home is not a private directory of this user";
+		createDirectories(Path.directory(scriptPath()));
+		AtomicFile.write(scriptPath(), script(launcher));
+	}
+
+	static function removeScript():Void
+		try if (FileSystem.exists(scriptPath())) FileSystem.deleteFile(scriptPath()) catch (_:Dynamic) {}
+
+	static function writeDesktopEntry():Void {
+		createDirectories(Path.directory(desktopPath()));
+		AtomicFile.write(desktopPath(), [
+			"[Desktop Entry]", "Type=Application", "Name=Exosuit suit", "Comment=Exosuit background processes and remote access",
+			"Exec=/bin/sh \"" + scriptPath() + "\"", "X-GNOME-Autostart-enabled=true", ""
+		].join("\n"));
+	}
+
+	static function createDirectories(directory:String):Void {
+		if (directory.length == 0 || FileSystem.exists(directory))
+			return;
+		createDirectories(Path.directory(directory));
+		FileSystem.createDirectory(directory);
 	}
 
 	static function script(launcher:String):String {
@@ -106,12 +246,12 @@ class SuitLogin {
 			var lines = [
 				"@echo off",
 				"rem Written by suit (Exosuit) for Start at login. Turn it off from the tray or with `suit login off`.",
-				'set "PATH=' + path + ';%PATH%"',
-				'set "EXOSUIT_SUIT_LAUNCHER=' + native(launcher) + '"'
+				'set "PATH=' + batchText(path) + ';%PATH%"',
+				'set "EXOSUIT_SUIT_LAUNCHER=' + batchText(native(launcher)) + '"'
 			];
 			if (home != null && home.length > 0)
-				lines.push('set "EXOSUIT_SUIT_HOME=' + home + '"');
-			lines.push('"' + native(Sys.executablePath()) + '" "' + native(launcher) + '" daemon --login');
+				lines.push('set "EXOSUIT_SUIT_HOME=' + batchText(home) + '"');
+			lines.push('"' + batchText(native(Sys.executablePath())) + '" "' + batchText(native(launcher)) + '" daemon --login');
 			return lines.join("\r\n") + "\r\n";
 		}
 		var lines = [
@@ -126,6 +266,13 @@ class SuitLogin {
 		return lines.join("\n") + "\n";
 	}
 
+	/**
+		A path inside a double-quoted batch-file argument: `&`, `(`, `)` and `^` are literal there, and `%` is
+		doubled so it is not expanded. Windows paths cannot contain `"`.
+	**/
+	static function batchText(value:String):String
+		return StringTools.replace(value, "%", "%%");
+
 	static function desktopPath():String {
 		var directory = Sys.getEnv("EXOSUIT_SUIT_AUTOSTART_DIR");
 		if (directory == null || directory.length == 0) {
@@ -134,8 +281,8 @@ class SuitLogin {
 				config = Path.join([Sys.getEnv("HOME"), ".config"]);
 			directory = Path.join([config, "autostart"]);
 		}
-		var home = Sys.getEnv("EXOSUIT_SUIT_HOME");
-		return Path.join([directory, home != null && home.length > 0 ? "exosuit-suit-" + haxe.crypto.Sha256.encode(home).substr(0, 12) + ".desktop" : "exosuit-suit.desktop"]);
+		var tag = homeTag();
+		return Path.join([directory, tag == null ? "exosuit-suit.desktop" : "exosuit-suit-" + tag + ".desktop"]);
 	}
 
 	static function shellQuote(value:String):String
@@ -146,10 +293,13 @@ class SuitLogin {
 		return root != null && root.length > 0 ? root : "C:\\Windows";
 	}
 
-	/** Runs reg.exe without a console window and returns its exit code (-1 when it could not run or hung). */
+	static function spawnReg(arguments:Array<String>):sys.io.ChildProcess
+		return sys.io.Process.spawn(native(systemRoot()) + "\\System32\\reg.exe", arguments, "", null, null, true);
+
+	/** Blocking, for the CLI: runs reg.exe without a console window; its exit code, or -1 when it could not run or hung. */
 	static function reg(arguments:Array<String>):Int {
-		var child = sys.io.Process.spawn(native(systemRoot()) + "\\System32\\reg.exe", arguments, "", null, null, true);
-		var deadline = Sys.time() + 15;
+		var child = spawnReg(arguments);
+		var deadline = Sys.time() + REG_TIMEOUT_SECONDS;
 		var status = -1;
 		while (Sys.time() < deadline) {
 			status = child.pollExit();
@@ -162,4 +312,10 @@ class SuitLogin {
 		child.close();
 		return status;
 	}
+}
+
+private typedef RegJob = {
+	var child:sys.io.ChildProcess;
+	var deadline:Float;
+	var arguments:Array<String>;
 }

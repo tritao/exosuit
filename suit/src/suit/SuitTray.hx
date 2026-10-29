@@ -3,16 +3,21 @@ package suit;
 import nativekit.ffi.NativeKit;
 import nativekit.ffi.NativeKitTypes;
 
-/** Builds one native popup menu; item actions stay valid until the next menu is built. */
+/**
+	Builds one native popup menu; item actions stay valid until the next menu is built. Ids continue from
+	`firstId`, so a choice from an older menu never runs a newer menu's action.
+**/
 class SuitMenu implements SuitMenuModel.SuitMenuSink {
 	final menu:OwnedMenuHandle;
 	final actions:Map<Int, Void->Void>;
 	final parents:Map<Int, OwnedMenuItemHandle> = [];
-	var nextId:Int = 1;
 
-	public function new(menu:OwnedMenuHandle, actions:Map<Int, Void->Void>) {
+	public var nextId(default, null):Int;
+
+	public function new(menu:OwnedMenuHandle, actions:Map<Int, Void->Void>, firstId:Int = 1) {
 		this.menu = menu;
 		this.actions = actions;
+		nextId = firstId;
 	}
 
 	public function item(label:String, action:Null<Void->Void>, parent:Int):Void {
@@ -70,6 +75,7 @@ class SuitTray {
 	final tray:OwnedTrayHandle;
 	final actions:Map<Int, Void->Void> = [];
 	var tooltip:String;
+	var nextCommand:Int = 1;
 
 	public function new(tooltip:String, icon:Null<String>) {
 		this.tooltip = tooltip;
@@ -90,12 +96,17 @@ class SuitTray {
 		NativeKit.nk_tray_set_tooltip(tray.borrow(), text);
 	}
 
-	/** Shows a menu built by `build`; returns once it closes. The choice arrives later as an event. */
+	/**
+		Shows a menu built by `build` and returns at once: NativeKit runs the popup on its own thread, so the
+		daemon keeps relaying frames and answering the CLI while it is open. The choice arrives later as an event.
+	**/
 	public function show(build:SuitMenuModel.SuitMenuSink->Void):Void {
 		actions.clear();
 		var menu = NativeKit.nk_menu_create_checked(new MenuOptions());
 		try {
-			build(new SuitMenu(menu, actions));
+			var sink = new SuitMenu(menu, actions, nextCommand);
+			build(sink);
+			nextCommand = sink.nextId;
 			NativeKit.nk_tray_show_menu(tray.borrow(), menu.borrow());
 		} catch (error:Dynamic) {
 			menu.close();

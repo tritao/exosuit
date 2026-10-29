@@ -7,7 +7,7 @@ import suit.SuitMenuModel.SuitMenuSink;
 import suit.SuitReport;
 import suit.relay.SuitRelayBridge.SuitRelayHostView;
 import suit.relay.SuitRelayClients.SuitRelayClientView;
-import suit.SuitRecord.SuitRecords;
+import suit.relay.SuitRelayProtocol.SuitRelayOpen;
 
 /** What the tray's Remote access and Start at login items do; the suit daemon supplies them. */
 typedef SuitHostingActions = {
@@ -17,6 +17,9 @@ typedef SuitHostingActions = {
 	var resumeHosting:Null<String>->Void;
 	/** Ends one remote client's session, by client id. */
 	var disconnect:String->Void;
+	/** For a failed workspace, by machine id: try again now, or stop hosting it and forget its record. */
+	var retry:String->Void;
+	var dismiss:String->Void;
 	var loginEnabled:Void->Bool;
 	var toggleLogin:Void->Void;
 }
@@ -37,8 +40,13 @@ class SuitRelayMenu {
 		var remote = menu.submenu("Remote access (" + (hosts.length + direct.length) + ")", 0);
 		var active = 0;
 		for (host in hosts) {
-			var root = host.root;
+			var root = host.root, machineId = host.machineId;
 			menu.item(SuitInventory.workspaceName(host.root) + ": " + describe(host), null, remote);
+			if (host.state == "failed") {
+				menu.item("    Retry " + SuitInventory.workspaceName(host.root), function() actions.retry(machineId), remote);
+				menu.item("    Dismiss (stop hosting it from suit)", function() actions.dismiss(machineId), remote);
+				continue;
+			}
 			if (host.open != null && host.serviceRunning)
 				menu.item("    open: " + openText(host.open), null, remote);
 			for (client in host.clients) {
@@ -49,7 +57,8 @@ class SuitRelayMenu {
 				if (client.grants.length > 0)
 					menu.item("Allowed: " + client.grants.join(", "), null, entry);
 				menu.item(client.framesIn + " frames in, " + client.framesOut + " out", null, entry);
-				menu.item("Disconnect", function() actions.disconnect(id), entry);
+				if (client.kind != "disconnected" && client.route == "suit")
+					menu.item("Disconnect", function() actions.disconnect(id), entry);
 			}
 			for (line in pendingLines(host))
 				menu.item("    " + line, null, remote);
@@ -76,31 +85,36 @@ class SuitRelayMenu {
 		if (!SuitLogin.supported())
 			return;
 		var enabled = false;
+		// The daemon passes its cached state, so opening the menu never waits for reg.exe.
 		try enabled = actions.loginEnabled() catch (_:Dynamic) {}
 		menu.check("Start at login", enabled, actions.toggleLogin, 0);
 	}
 
 	/** State, whether the workspace service runs, connected clients. */
 	public static function describe(host:SuitRelayHostView):String {
-		var parts = [host.state == "error" && host.error != null ? "error: " + host.error : host.state];
-		if (host.state != "paused" && host.state != "not hosted") {
+		var parts = [(host.state == "error" || host.state == "failed") && host.error != null ? host.state + ": " + host.error : host.state];
+		if (host.state != "paused" && host.state != "not hosted" && host.state != "failed") {
 			parts.push(host.serviceRunning ? "service running" : "service starts on demand");
 			var connected = host.clients.length;
-			parts.push(connected == 1 ? "1 device connected" : connected + " devices connected");
+			parts.push(connected == 1 ? "1 client" : connected + " clients");
 		}
 		return parts.join(" · ");
 	}
 
 	/** "device 3fa2c1d07b19 · active 4s ago". */
 	public static function clientLabel(client:SuitRelayClientView):String {
-		var kind = client.kind == "device" ? "device" : client.kind == "pairing" ? "pairing request" : "client";
-		return kind + " " + client.id.substr(0, 12) + " · active " + ago(client.lastActivity);
+		var kind = switch client.kind {
+			case "device": "device";
+			case "pairing": "pairing request";
+			case "disconnected": "disconnected";
+			default: "client";
+		};
+		var label = kind + " " + client.id.substr(0, 12);
+		return client.route == "direct" ? label + " (direct)" : label + " · active " + ago(client.lastActivity);
 	}
 
-	static function openText(open:Dynamic):String {
-		var terminals = SuitRecords.intField(open, "terminals"), agents = SuitRecords.intField(open, "agents");
-		return (terminals == null ? 0 : terminals) + " terminal(s), " + (agents == null ? 0 : agents) + " agent session(s)";
-	}
+	static function openText(open:SuitRelayOpen):String
+		return open.terminals + " terminal(s), " + open.agents + " agent session(s)";
 
 	public static function ago(time:Float):String {
 		if (time <= 0)
@@ -116,9 +130,12 @@ class SuitRelayMenu {
 		for (host in hosts) {
 			output.add(column(SuitInventory.workspaceName(host.root), 22) + column(host.state, 16) + host.origin + "  (via suit)\n");
 			output.add("    root: " + host.root + "\n");
-			if (host.state == "error" && host.error != null)
+			if ((host.state == "error" || host.state == "failed") && host.error != null)
 				output.add("    error: " + host.error + "\n");
-			if (host.state != "paused" && host.state != "not hosted")
+			if (host.state == "failed")
+				output.add("    stopped trying: `suit relay retry` tries again, `suit relay forget` stops hosting it from suit
+");
+			else if (host.state != "paused" && host.state != "not hosted")
 				output.add("    " + (host.serviceRunning ? "workspace service running (pid " + host.servicePid + ")" : "workspace service starts when a device connects")
 					+ (host.starts > 0 ? "; started for a device " + host.starts + " time(s)" : "") + "\n");
 			if (host.open != null && host.serviceRunning)

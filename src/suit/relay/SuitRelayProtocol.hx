@@ -16,6 +16,27 @@ typedef SuitRelayAttachRequest = {
 	var launcher:String;
 }
 
+/** What the workspace has open, for suit's tray. */
+typedef SuitRelayOpen = {
+	var terminals:Int;
+	var agents:Int;
+}
+
+/** A paired device as the daemon reports it to suit: no keys or tokens. */
+typedef SuitRelayReportedDevice = {
+	var deviceId:String;
+	var grants:Array<String>;
+	var connected:Bool;
+}
+
+/** The daemon's client report (kind 0x11). */
+typedef SuitRelayClientReport = {
+	var devices:Array<SuitRelayReportedDevice>;
+	/** Device ids of pairing requests waiting for approval. */
+	var pending:Array<String>;
+	var open:SuitRelayOpen;
+}
+
 /** suit's view of its machine socket, sent to the attached daemon whenever it changes. */
 typedef SuitRelayLinkStatus = {
 	var connected:Bool;
@@ -27,7 +48,8 @@ typedef SuitRelayLinkStatus = {
 
 	The daemon sends `{"op":"relay-attach","version":1,...}` as JSON; suit answers `{"ok":true}` or
 	`{"ok":false,"error":...}`. After an accepted attach every message is either a whole relay envelope,
-	byte for byte what the Worker sends and receives (first byte 1 for data, 2 for a channel reset), or a
+	byte for byte what the Worker sends and receives (first byte 1 for data, 2 for a channel reset;
+	suit itself sends 3 to the Worker to close a client), or a
 	suit status message: the byte 0x10 followed by JSON `{connected, error}`. suit reads only the envelope's
 	channel id; the payload is a Noise handshake message or Noise ciphertext.
 
@@ -54,23 +76,47 @@ class SuitRelayProtocol {
 			launcher: request.launcher
 		}));
 
-	public static function statusMessage(status:SuitRelayLinkStatus):Bytes {
-		var json = Bytes.ofString(Json.stringify({connected: status.connected, error: status.error}));
-		var message = Bytes.alloc(json.length + 1);
-		message.set(0, STATUS_KIND);
-		message.blit(1, json, 0, json.length);
-		return message;
-	}
+	public static function statusMessage(status:SuitRelayLinkStatus):Bytes
+		return tagged(STATUS_KIND, Json.stringify({connected: status.connected, error: status.error}));
 
-	public static function clientsMessage(report:Dynamic):Bytes
+	public static function clientsMessage(report:SuitRelayClientReport):Bytes
 		return tagged(CLIENTS_KIND, Json.stringify(report));
 
-	/** Parses a client report; null when it is not one. */
-	public static function parseClients(message:Bytes):Null<Dynamic> {
+	/** Parses and checks a client report; null when it is not one or is malformed. */
+	public static function parseClients(message:Bytes):Null<SuitRelayClientReport> {
 		if (message == null || message.length < 2 || message.get(0) != CLIENTS_KIND)
 			return null;
 		var value:Dynamic = Json.parse(Bytes.view(message, 1, message.length - 1).toString());
-		return value != null && Reflect.isObject(value) ? value : null;
+		if (value == null || !Reflect.isObject(value))
+			return null;
+		var devices:Array<SuitRelayReportedDevice> = [];
+		var listed:Dynamic = Reflect.field(value, "devices");
+		if (Std.isOfType(listed, Array))
+			for (item in (listed : Array<Dynamic>)) {
+				var id:Dynamic = Reflect.field(item, "deviceId");
+				if (!Std.isOfType(id, String))
+					continue;
+				var grants:Array<String> = [];
+				var rawGrants:Dynamic = Reflect.field(item, "grants");
+				if (Std.isOfType(rawGrants, Array))
+					for (grant in (rawGrants : Array<Dynamic>))
+						if (Std.isOfType(grant, String))
+							grants.push(grant);
+				devices.push({deviceId: id, grants: grants, connected: Reflect.field(item, "connected") == true});
+			}
+		var pending:Array<String> = [];
+		var waiting:Dynamic = Reflect.field(value, "pending");
+		if (Std.isOfType(waiting, Array))
+			for (id in (waiting : Array<Dynamic>))
+				if (Std.isOfType(id, String))
+					pending.push(id);
+		var open:Dynamic = Reflect.field(value, "open");
+		return {devices: devices, pending: pending, open: {terminals: count(open, "terminals"), agents: count(open, "agents")}};
+	}
+
+	static function count(value:Dynamic, field:String):Int {
+		var raw:Dynamic = value == null ? null : Reflect.field(value, field);
+		return Std.isOfType(raw, Int) ? raw : Std.isOfType(raw, Float) ? Std.int(raw) : 0;
 	}
 
 	static function tagged(kind:Int, json:String):Bytes {

@@ -6,12 +6,17 @@ import sys.FileSystem;
 import sys.io.File;
 import suit.SuitInventory;
 import suit.SuitPaths;
+import workspace.PathKey;
 import workspace.transport.RelayMachineEndpoint;
 import suit.SuitRecord.SuitRecords;
 
 /** Creates a directory readable only by this user, or checks that an existing one is. */
 @:hlNative("haxeon_runtime", "__host_prepare_private_directory")
 extern function preparePrivateRelayDirectory(path:String):Bool;
+
+/** A regular file of this user's, readable only by them, with one link and no reparse point. */
+@:hlNative("haxeon_runtime", "__host_check_private_file")
+extern function checkPrivateRelayFile(path:String):Bool;
 
 /** A workspace suit hosts: what it needs to hold its machine socket and start its manager. No secrets. */
 typedef SuitRelayHost = {
@@ -45,7 +50,7 @@ class SuitRelayHosts {
 				continue;
 			var path = Path.join([folder, name]);
 			var host:Null<SuitRelayHost> = null;
-			try host = parse(readJson(path)) catch (_:Dynamic) {}
+			try host = parse(readPrivateJson(path)) catch (_:Dynamic) {}
 			if (host == null || readSettings(host.stateDir) == null) {
 				try FileSystem.deleteFile(path) catch (_:Dynamic) {}
 				continue;
@@ -68,7 +73,7 @@ class SuitRelayHosts {
 			if (!StringTools.endsWith(name, ".json"))
 				continue;
 			var host:Null<SuitRelayHost> = null;
-			try host = parse(readJson(Path.join([folder, name]))) catch (_:Dynamic) {}
+			try host = parse(readPrivateJson(Path.join([folder, name]))) catch (_:Dynamic) {}
 			if (host != null && readSettings(host.stateDir) != null && !isPaused(host.stateDir))
 				result.push(host);
 		}
@@ -96,20 +101,35 @@ class SuitRelayHosts {
 	}
 
 	/**
-		Checks a daemon's `relay-attach` request against its private state directory and returns the host.
-		Throws a short reason the daemon can act on: `hosting_paused` keeps it from dialling the relay itself.
+		Checks a daemon's `relay-attach` request and returns the host. Throws a short reason the daemon can
+		act on: `hosting_paused` keeps it from dialling the relay itself.
+
+		`caller` is the executable of the process at the other end of the pipe, from the OS. It must be the
+		executable the request names, and that executable and the launcher must be an exosuit agent
+		(`trustedAgent`), since suit runs them later to start the workspace on demand. Once a machine is
+		recorded, an attach must name the same root, state directory, executable and launcher
+		(`relay_host_changed`); `suit relay forget` clears a record. Everything read from the workspace's
+		state directory is checked to be this user's private file first.
 	**/
-	public static function validate(request:Dynamic):SuitRelayHost {
+	public static function validate(request:Dynamic, caller:Null<String>, recorded:Null<SuitRelayHost>):SuitRelayHost {
 		if (SuitRecords.intField(request, "version") != SuitRelayProtocol.VERSION)
 			throw "unsupported_relay_attach";
 		var host:Null<SuitRelayHost> = parse(request);
 		if (host == null)
 			throw "invalid_relay_attach";
+		if (caller == null)
+			throw "relay_attach_unverified";
+		if (!PathKey.same(caller, host.executable) || !trustedAgent(host.executable, host.launcher)
+			|| !FileSystem.exists(host.executable) || !FileSystem.exists(host.launcher))
+			throw "relay_attach_untrusted";
+		if (recorded != null && !sameHost(recorded, host))
+			throw "relay_host_changed";
 		if (!FileSystem.exists(host.stateDir) || !FileSystem.isDirectory(host.stateDir) || !preparePrivateRelayDirectory(host.stateDir))
 			throw "workspace_state_not_private";
 		var identity:Dynamic = null;
-		try identity = readJson(Path.join([host.stateDir, "workspace.json"])) catch (_:Dynamic) {}
-		if (identity == null || SuitRecords.stringField(identity, "root") != host.root)
+		try identity = readPrivateJson(Path.join([host.stateDir, "workspace.json"])) catch (_:Dynamic) {}
+		var identityRoot = identity == null ? null : SuitRecords.stringField(identity, "root");
+		if (identityRoot == null || !PathKey.same(identityRoot, host.root))
 			throw "workspace_mismatch";
 		var settings = readSettings(host.stateDir);
 		if (settings == null)
@@ -122,13 +142,44 @@ class SuitRelayHosts {
 		if (SuitRecords.stringField(settings, "hosting") == "paused")
 			throw "hosting_paused";
 		var machine:Dynamic = null;
-		try machine = readJson(Path.join([host.stateDir, "relay-machine.json"])) catch (_:Dynamic) {}
+		try machine = readPrivateJson(Path.join([host.stateDir, "relay-machine.json"])) catch (_:Dynamic) {}
 		if (machine == null || SuitRecords.stringField(machine, "machineId") != host.machineId)
 			throw "relay_mismatch";
-		if (!FileSystem.exists(host.executable) || !FileSystem.exists(host.launcher))
-			throw "invalid_relay_attach";
 		host.origin = configured.origin;
+		if (recorded != null) {
+			// Keep the recorded spelling, so records and bridges compare alike.
+			host.root = recorded.root;
+			host.stateDir = recorded.stateDir;
+		}
 		return host;
+	}
+
+	/**
+		An exosuit agent suit may run: HashLink (`hl`) running the agent bytecode of a source build
+		(`agent/build/host/main.hl`), an installed bundle (`tools/exosuit-agent.hl`) or a stable snapshot
+		(`agent/main.hl`).
+	**/
+	public static function trustedAgent(executable:String, launcher:String):Bool {
+		var name = Path.withoutDirectory(StringTools.replace(executable, "\\", "/")).toLowerCase();
+		if (name != "hl.exe" && name != "hl")
+			return false;
+		var key = PathKey.of(launcher, true);
+		for (suffix in ["/agent/build/host/main.hl", "/tools/exosuit-agent.hl", "/agent/main.hl"])
+			if (StringTools.endsWith(key, suffix))
+				return true;
+		return false;
+	}
+
+	public static function sameHost(left:SuitRelayHost, right:SuitRelayHost):Bool
+		return left.machineId == right.machineId && PathKey.same(left.root, right.root) && PathKey.same(left.stateDir, right.stateDir)
+			&& PathKey.same(left.executable, right.executable) && PathKey.same(left.launcher, right.launcher);
+
+	/** The recorded host for a machine id, or null. */
+	public static function find(machineId:String):Null<SuitRelayHost> {
+		for (host in load())
+			if (host.machineId == machineId)
+				return host;
+		return null;
 	}
 
 	public static function endpoint(host:SuitRelayHost):RelayMachineEndpoint
@@ -142,7 +193,7 @@ class SuitRelayHosts {
 		if (!FileSystem.exists(path))
 			return null;
 		var settings:Dynamic = null;
-		try settings = readJson(path) catch (_:Dynamic) {}
+		try settings = readPrivateJson(path) catch (_:Dynamic) {}
 		return settings != null && SuitRecords.intField(settings, "version") == 1 ? settings : null;
 	}
 
@@ -168,7 +219,7 @@ class SuitRelayHosts {
 	public static function matches(host:SuitRelayHost, query:Null<String>):Bool {
 		if (query == null)
 			return true;
-		if (SuitInventory.rootKey(host.root) == SuitInventory.rootKey(query))
+		if (PathKey.same(host.root, query))
 			return true;
 		var name = SuitInventory.workspaceName(host.root);
 		return Sys.systemName() == "Windows" ? name.toLowerCase() == query.toLowerCase() : name == query;
@@ -194,7 +245,10 @@ class SuitRelayHosts {
 		return host;
 	}
 
-	static function readJson(path:String):Dynamic {
+	/** Reads a small JSON file after checking that it is this user's private file (see checkPrivateRelayFile). */
+	public static function readPrivateJson(path:String):Dynamic {
+		if (!checkPrivateRelayFile(path))
+			throw "not a private file";
 		var info = FileSystem.metadata(path);
 		if (info == null || info.size > MAX_JSON_BYTES)
 			throw "file too large";
