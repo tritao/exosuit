@@ -190,9 +190,11 @@ class MachineClient {
 		if (request != null && request.message.op == "machine" || problem == null)
 			error = problem;
 		revision++;
-		var done = request == null ? null : request.done;
-		if (done != null)
-			done(problem == null ? reply : null, problem);
+		if (request != null) {
+			var callback:Null<(Null<Dynamic>, Null<String>) -> Void> = request.done;
+			if (callback != null)
+				callback(problem == null ? reply : null, problem);
+		}
 	}
 
 	function close():Void {
