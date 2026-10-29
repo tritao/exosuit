@@ -164,18 +164,19 @@ class MachineCatalog {
 		var entries:Dynamic = Reflect.field(value, "workspaces");
 		if (id == null || id.length == 0 || name == null || !Std.isOfType(entries, Array))
 			throw "Invalid machine.json";
-		var workspaces:Array<MachineWorkspace> = [];
-		for (entry in (entries : Array<Dynamic>)) {
-			var workspaceId = SuitRecord.SuitRecords.stringField(entry, "id"), workspaceName = SuitRecord.SuitRecords.stringField(entry, "name");
-			var folders:Dynamic = Reflect.field(entry, "folders");
-			if (workspaceId == null || workspaceId.length == 0 || workspaceName == null || !Std.isOfType(folders, Array))
-				throw "Invalid workspace in machine.json";
-			var list = [for (folder in (folders : Array<Dynamic>)) if (Std.isOfType(folder, String)) (folder : String)];
-			if (list.length == 0 || list.length > FOLDER_LIMIT)
-				throw "Invalid workspace folders in machine.json";
-			workspaces.push({id: workspaceId, name: workspaceName, folders: list});
-		}
-		return {id: id, name: name, workspaces: workspaces};
+		return {id: id, name: name, workspaces: [for (entry in (entries : Array<Dynamic>)) decodeWorkspace(entry)]};
+	}
+
+	/** One workspace from parsed JSON (machine.json, or a reply); parsed objects are not records until copied into one. */
+	public static function decodeWorkspace(entry:Dynamic):MachineWorkspace {
+		var workspaceId = SuitRecord.SuitRecords.stringField(entry, "id"), workspaceName = SuitRecord.SuitRecords.stringField(entry, "name");
+		var folders:Dynamic = entry == null ? null : Reflect.field(entry, "folders");
+		if (workspaceId == null || workspaceId.length == 0 || workspaceName == null || !Std.isOfType(folders, Array))
+			throw "Invalid workspace";
+		var list = [for (folder in (folders : Array<Dynamic>)) if (Std.isOfType(folder, String)) (folder : String)];
+		if (list.length == 0 || list.length > FOLDER_LIMIT)
+			throw "Invalid workspace folders";
+		return {id: workspaceId, name: workspaceName, folders: list};
 	}
 
 	/** An existing folder's absolute, normalized path. A folder that is gone later stays listed, shown as missing. */

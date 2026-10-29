@@ -87,8 +87,13 @@ class MachineClient {
 
 	function workspaceReply(done:Null<(Null<MachineWorkspace>, Null<String>) -> Void>):(Null<Dynamic>, Null<String>) -> Void
 		return function(reply, failure) {
-			if (done != null)
-				done(reply == null ? null : reply.workspace, failure);
+			if (done == null)
+				return;
+			var workspace:Null<MachineWorkspace> = null;
+			var entry:Dynamic = reply == null ? null : Reflect.field(reply, "workspace");
+			if (entry != null)
+				try workspace = MachineCatalog.decodeWorkspace(entry) catch (error:Dynamic) failure = "suit sent an invalid workspace: " + Std.string(error);
+			done(workspace, failure);
 		};
 
 	function request(message:Dynamic, ?done:(Null<Dynamic>, Null<String>) -> Void):Void {
@@ -192,8 +197,12 @@ class MachineClient {
 		revision++;
 		if (request != null) {
 			var callback:Null<(Null<Dynamic>, Null<String>) -> Void> = request.answer;
+			// A failing callback must not take the editor's frame loop down with it.
 			if (callback != null)
-				callback(problem == null ? reply : null, problem);
+				try callback(problem == null ? reply : null, problem) catch (thrown:Dynamic) {
+					error = Std.string(thrown);
+					revision++;
+				}
 		}
 	}
 
