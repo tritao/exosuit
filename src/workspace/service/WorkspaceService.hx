@@ -91,7 +91,7 @@ class WorkspaceService {
 				|| outcome.group.revision != request.expectedRevision + 1
 				|| operations.exists(request.operation)
 				|| (request.action == null && previous != null && (outcome.group.cwd != previous.cwd || outcome.group.parent != previous.parent || WorkspaceProtocol.order(outcome.group.order) != WorkspaceProtocol.order(previous.order)))
-				|| (request.action != null && (outcome.group.cwd != request.cwd || outcome.group.parent != request.parent || WorkspaceProtocol.order(outcome.group.order) != WorkspaceProtocol.order(request.order)))
+				|| (request.action != null && (!persistedDirectory(request.cwd, outcome.group.cwd, previous) || outcome.group.parent != request.parent || WorkspaceProtocol.order(outcome.group.order) != WorkspaceProtocol.order(request.order)))
 				|| previous != null
 				&& request.expectedRevision != previous.revision)
 				throw "Invalid persisted operation";
@@ -120,6 +120,16 @@ class WorkspaceService {
 			history.push(event);
 			expected++;
 		}
+	}
+
+	/**
+		A tree mutation's stored directory: a newly chosen one is kept in the machine's canonical spelling (mutate), so it
+		may differ from the request's text; a kept one, or none, must match exactly.
+	**/
+	static function persistedDirectory(requested:Null<String>, stored:Null<String>, previous:Null<WorkspaceGroup>):Bool {
+		if (requested == stored) return true;
+		var kept = previous != null && requested == previous.cwd;
+		return requested != null && requested.length > 0 && !kept && stored != null && stored.length > 0;
 	}
 
 	static function sameGroup(a:WorkspaceGroup, b:WorkspaceGroup):Bool return a.id == b.id && a.name == b.name

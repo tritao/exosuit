@@ -149,8 +149,44 @@ class PersistenceTestMain {
 		if (sys.FileSystem.exists(path + ".sqlitekit-lock")) sys.FileSystem.deleteFile(path + ".sqlitekit-lock");
 	}
 
+	/** A group directory stored in its canonical spelling must not stop the catalog from reopening. */
+	static function canonicalDirectory(path:String):Void {
+		for (file in [path, path + ".sqlitekit-lock"]) if (sys.FileSystem.exists(file)) sys.FileSystem.deleteFile(file);
+		var resolve = function(value:String):Null<String> return value.toLowerCase();
+		var caps = [WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS, WorkspaceProtocol.WRITE, WorkspaceProtocol.TREE];
+		function open():{store:WorkspaceSqliteStore, link:Link, service:WorkspaceService} {
+			var store = new WorkspaceSqliteStore(path, "workspace", seed());
+			var service = new WorkspaceService("workspace", "ignored-on-reopen", seed().groups, 32, 256, 16, store, resolve);
+			var pair = MemoryTransport.pair(1048576, 128), clock = function() return 0.0;
+			var client = RpcHandshake.client(pair.client, clock, new RpcPeerOptions("test", caps), caps);
+			var server = RpcHandshake.server(pair.server, clock, new RpcPeerOptions("test", caps));
+			for (_ in 0...8) { client.poll(); server.poll(); }
+			service.bind(server.connection, caps);
+			return {store: store, link: {client: client.connection, server: server.connection}, service: service};
+		}
+		var first = open();
+		function group(link:Link, operation:String, action:String, revision:Int, cwd:Null<String>):Void {
+			var done = false;
+			link.client.call(WorkspaceProtocol.GROUP, {workspace: "workspace", epoch: "first", operation: operation, group: "docs",
+				expectedRevision: revision, name: "Docs", action: action, parent: "work", cwd: cwd, order: 0}, 100,
+				function(_) done = true, function(error) throw operation + " failed: " + error.code);
+			pump(link);
+			require(done, operation + " did not complete");
+		}
+		group(first.link, "create-docs", "create", 0, null);
+		group(first.link, "move-docs", "update", 1, "/Workspace/Docs");
+		group(first.link, "rename-docs", "update", 2, "/workspace/docs");
+		first.store.close();
+		var reopened = open();
+		var docs = Lambda.find(reopened.service.snapshot().groups, function(g) return g.id == "docs");
+		require(docs != null && docs.cwd == "/workspace/docs" && docs.revision == 3, "Canonical group directory did not reopen");
+		reopened.store.close();
+		for (file in [path, path + ".sqlitekit-lock"]) if (sys.FileSystem.exists(file)) sys.FileSystem.deleteFile(file);
+	}
+
 	static function main():Void {
 		var path = Sys.args()[0];
+		canonicalDirectory(path + ".canonical");
 		devicePersistence(path + ".devices");
 		var store = new WorkspaceSqliteStore(path, "workspace", seed());
 		var catalog = service(store), link = connect(catalog);
