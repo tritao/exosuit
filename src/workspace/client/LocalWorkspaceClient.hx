@@ -30,6 +30,7 @@ import workspace.service.WorkspacePairingProtocol.PairingList;
 @:id(9) var websocket:String;
 @:id(10) var credentialFile:String;
 @:optional @:id(11) var expectedBuild:Null<String>;
+@:optional @:id(12) var launcher:Null<String>;
 }
 
 /** Nonblocking native attachment. Closing a client never owns/stops the shared daemon. */
@@ -45,6 +46,12 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   final clock:Void -> Float;
   final environment:Null<Map < String, String>>;
   final workbench:RpcWorkspaceWorkbenchClient;
+  final choices:WorkspaceManagerChoices;
+  /** The chosen manager's state folder; null for the folder's default state. */
+  var stateDir:Null<String>;
+  var choiceRevision:Int = -1;
+  /** The attached manager's launcher, from discovery; empty for a manager from before it was reported. */
+  var managerLauncher:String = "";
   var client:Null<RpcClient>;
   var fileApiConnection:Null<RpcConnection>;
   var fileApiClient:Null<WorkspaceFileClient>;
@@ -97,13 +104,15 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     ? environment:Map<
       String,
       String
-  >
+  >,
+    ? choices:WorkspaceManagerChoices
   ) {
     this.hub = new NativeRpcHub(events);
     this.processes = processes;
     this.launcher = launcher;
     this.clock = clock;
     this.environment = environment;
+    this.choices = choices == null ? WorkspaceManagerChoices.instance() : choices;
     this.workbench = new RpcWorkspaceWorkbenchClient(this, clock);
   }
 
@@ -157,7 +166,12 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
 
   public function workspaceConnected():Bool return ready;
   public function serviceStatus():Null<workspace.service.WorkspaceLifecycleProtocol.WorkspaceServiceStatus> return lifecycle;
-  public function serviceUpdateAvailable():Bool return ready && (!hasCapability(workspace.service.WorkspaceLifecycleProtocol.CAPABILITY)
+  /** The attached manager runs another build tree's launcher, another worktree's say: this editor never updates it. */
+  public function managerFromOtherBuild():Bool
+    return managerLauncher.length > 0 && !samePath(managerLauncher, launcher);
+  /** The manager's state folder this client uses; null for the folder's default state. */
+  public function attachedState():Null<String> return stateDir;
+  public function serviceUpdateAvailable():Bool return ready && !managerFromOtherBuild() && (!hasCapability(workspace.service.WorkspaceLifecycleProtocol.CAPABILITY)
     || lifecycle != null && (lifecycle.protocol != workspace.service.WorkspaceLifecycleProtocol.VERSION
       || expectedBuild.length > 0 && lifecycle.build != expectedBuild));
   public function serviceUpdateBusy():Bool return updateHelper != null || updateRequestPending;
@@ -165,6 +179,11 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
 
   public function requestServiceUpdate(mode:String):Void {
     if (!ready || serviceUpdateBusy() || root == null || mode != "idle" && mode != "now" && mode != "cancel") return;
+    if (managerFromOtherBuild()) {
+      updateFailure = "This workspace service runs another build. Use the Machine view to start one on this editor's build.";
+      pairingsRevision++;
+      return;
+    }
     autoUpdateAttempted = true;
     updateFailure = null;
     if (mode == "cancel") { sendServiceUpdate(mode); return; }
@@ -180,7 +199,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
       var executable:String;
       var arguments:Array<String>;
       executable = Sys.executablePath();
-      arguments = [launcher, "--manager", root];
+      var target:String = root;
+      arguments = [launcher, "--manager", target].concat(stateArguments());
       if (managed) {
         arguments.push("--prepare-update");
       } else {
@@ -256,7 +276,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
         || lifecycle.terminals != value.terminals || lifecycle.agents != value.agents || lifecycle.updatePending != value.updatePending;
       lifecycle = value;
       if (changed) pairingsRevision++;
-      if (serviceUpdateAvailable() && value.protocol == workspace.service.WorkspaceLifecycleProtocol.VERSION
+      // Only a manager known to run this editor's launcher updates by itself: an older one may be another build's.
+      if (serviceUpdateAvailable() && managerLauncher.length > 0 && value.protocol == workspace.service.WorkspaceLifecycleProtocol.VERSION
         && value.terminals == 0 && value.agents == 0 && !value.updatePending
         && !serviceUpdateBusy() && !autoUpdateAttempted) {
         autoUpdateAttempted = true;
@@ -455,7 +476,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   public function statusLabel():String {
     if (root == null) return "";
     if (error != null) return "Workspace unavailable";
-    if (ready) return serviceUpdateAvailable() ? "Workspace update available" : "Workspace connected";
+    if (ready) return serviceUpdateAvailable() ? "Workspace update available"
+      : managerFromOtherBuild() ? "Workspace connected (another build)" : "Workspace connected";
     return wasReady ? "Workspace reconnecting" : "Connecting workspace…";
   }
 
@@ -487,12 +509,21 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
       return;
     }
     if (canonical == root) return;
+    attach(canonical, canonical == null ? null : choices.stateFor(canonical));
+  }
+
+  /** Starts over on `path`'s manager on `state` (null: the default state). */
+  function attach(path:Null<String>, state:Null<String>):Void {
     selection++;
     if (updateHelper != null) processes.release(updateHelper);
     updateHelper = null; updateFailure = null; autoUpdateAttempted = false; recoveringUntil = 0;
     stopConnection();
     stopHelper();
-    root = canonical;
+    root = path;
+    stateDir = state;
+    choiceRevision = choices.revision;
+    managerLauncher = "";
+    expectedBuild = "";
     error = null;
     instance = "";
     replica = null;
@@ -500,9 +531,32 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     wasReady = false;
     spawned = false;
     retryAt = 0;
-    if (canonical == null) return;
+    if (path == null) return;
     startupDeadline = clock() + 120000;
     startHelper("discover");
+  }
+
+  /**
+    Starts a manager only on the folder's default state or on this editor's own state folder: a state folder chosen
+    from another build stays that build's, even after its manager stops.
+  **/
+  function mayStart():Bool {
+    if (stateDir == null) return true;
+    var name = haxe.io.Path.withoutDirectory(MachineWorkspaces.normalPath(stateDir));
+    if (StringTools.endsWith(name, "-" + MachineWorkspaces.launcherKey(launcher))) return true;
+    fail("The workspace service chosen for this folder has stopped. Choose another in the Machine view.");
+    return false;
+  }
+
+  function stateArguments():Array<String> return stateDir == null ? [] : ["--state-dir", stateDir];
+
+  static function samePath(a:String, b:String):Bool {
+    function normal(path:String):String {
+      var value = StringTools.replace(path, "\\", "/");
+      try value = StringTools.replace(FileSystem.fullPath(path), "\\", "/") catch (_:Dynamic) {}
+      return Sys.systemName() == "Windows" ? value.toLowerCase() : value;
+    }
+    return normal(a) == normal(b);
   }
 
   function stopConnection():Void {
@@ -540,7 +594,10 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     helperMode = mode;
     try {
       suit.SuitClient.editorUsesRoot(path);
-      var arguments = [launcher, "--manager", path];
+      var target:String = path;
+      var arguments = [launcher, "--manager", target].concat(stateArguments());
+      var seed = stateDir == null ? null : choices.seedFor(path);
+      if (mode == "launch" && seed != null) arguments = arguments.concat(["--seed-from", seed]);
       if (mode == "configure-relay") {
         arguments.push("--configure-relay");
         arguments.push(relayOrigin);
@@ -560,7 +617,10 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     }
   }
 
-  function helperEnvironment():Map<String, String> {
+  function helperEnvironment():Map<String, String> return agentEnvironment(launcher, environment);
+
+  /** The environment an agent helper started with `launcher` needs: the launcher itself and its native libraries. */
+  public static function agentEnvironment(launcher:String, environment:Null<Map<String, String>>):Map<String, String> {
     var result = new Map<String, String>();
     if (environment != null)
       for (key => value in environment)
@@ -613,6 +673,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     var expectedInstance = endpoint.generation, expectedRoot = path, selected = selection;
     instance = expectedInstance;
     expectedBuild = endpoint.expectedBuild == null ? "" : endpoint.expectedBuild;
+    managerLauncher = endpoint.launcher == null ? "" : endpoint.launcher;
     verified = false;
     if (replica == null) replica = new WorkspaceReplica("workspace", 2000);
     var required = [WorkspaceProtocol.READ, WorkspaceProtocol.EVENTS, WorkspaceProtocol.IDENTITY_CAPABILITY];
@@ -663,6 +724,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
           return;
         }
         verified = true;
+        if (stateDir != null) choices.connected(expectedRoot);
         deadline = clock() + 6000;
         spawned = false;
         var view = replica;
@@ -681,6 +743,11 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   public function poll():Void {
     pollUpdateHelper();
     workbench.poll();
+    if (!disposed && root != null && choices.revision != choiceRevision) {
+      choiceRevision = choices.revision;
+      var chosen = choices.stateFor(root);
+      if (chosen != stateDir) attach(root, chosen);
+    }
     if (disposed || root == null || error != null) return;
     var now = clock(), process = helper;
     if (recoveringUntil > 0 && now >= recoveringUntil && !ready) { fail("Workspace service did not reconnect after updating"); return; }
@@ -719,7 +786,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
         pairingsRevision++;
       } else if (mode == "discover" && code == 4) {
         spawned = true;
-        startHelper("launch");
+        if (mayStart()) startHelper("launch");
       } else if (mode == "launch" && code == 3) {
         retryAt = now + 250;
       } else {
@@ -763,7 +830,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     if (now >= deadline) {
       if (!spawned) {
         spawned = true;
-        startHelper("launch");
+        if (mayStart()) startHelper("launch");
       } else {
         stopConnection();
         retryAt = now + 1000;

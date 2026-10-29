@@ -107,6 +107,10 @@ class AttachmentTestMain {
       Sys.println("PASS: terminals attach to independent workspace daemons and retain endpoints across root switches");
       return;
     }
+    if (mode == "manager-choice") {
+      managerChoice(runtime, processes, clock, root, launcher);
+      return;
+    }
     var a = new LocalWorkspaceClient(runtime.events, processes, launcher, clock);
     var b = new LocalWorkspaceClient(runtime.events, processes, launcher, clock);
     var step = function() {
@@ -364,5 +368,74 @@ class AttachmentTestMain {
     require(processes.activeCount() == 0, "Attachment helper leaked");
     runtime.dispose();
 
+  }
+
+  /**
+    The folder's default state is served by another build's manager (args: root, this build's launcher). The client
+    attaches without offering it an update, starts its own from a copy, switches back, and never starts its build on a
+    state folder that is not its own.
+  **/
+  static function managerChoice(runtime:NativeKitRuntime, processes:ProcessManager, clock:Void->Float, root:String, launcher:String):Void {
+    var choices = new workspace.client.WorkspaceManagerChoices(null);
+    var client = new LocalWorkspaceClient(runtime.events, processes, launcher, clock, null, choices);
+    var machine = new workspace.client.MachineWorkspaces(processes, launcher, clock);
+    var tick = function() {
+      runtime.events.wait(0.005);
+      for (_ in 0...128) if (!runtime.events.poll()) break;
+      client.poll();
+      machine.poll();
+    };
+    function until(condition:Void->Bool, timeout:Float, message:String):Void {
+      var deadline = clock() + timeout;
+      while (!condition() && clock() < deadline) tick();
+      require(condition(), message + (client.error == null ? "" : ": " + client.error));
+    }
+    function list():workspace.client.MachineWorkspaces.MachineListing {
+      var revision = machine.revision;
+      machine.refresh();
+      until(function() return machine.revision != revision, 30000, "Machine listing did not finish");
+      require(machine.error == null && machine.listing != null, "Machine listing failed: " + machine.error);
+      return machine.listing;
+    }
+    client.select(root);
+    until(function() return client.ready, 60000, "Did not attach to the other build's manager");
+    var other = client.serviceGeneration();
+    require(client.managerFromOtherBuild(), "Another build's manager was not recognized");
+    require(!client.serviceUpdateAvailable(), "Another build's manager was offered an update");
+    require(client.statusLabel() == "Workspace connected (another build)", "Status hides the other build: " + client.statusLabel());
+
+    client.refreshTerminals(true);
+    until(function() return client.terminalCatalog() != null, 10000, "Terminal catalog did not load");
+    var created = false;
+    client.changeGroup(other, {id: "copied", name: "Copied", cwd: null, revision: 0, parent: null, order: 5}, "Copied", null, null, 5, true,
+      function(group, error) created = group != null);
+    until(function() return [for (group in client.view()) group.id].indexOf("copied") >= 0, 10000, "Group was not created");
+
+    var listing = list();
+    require(listing.managers.length == 1 && listing.managers[0].generation == other && listing.managers[0].defaultState,
+      "Listing does not show the other build's manager on the default state");
+    require(workspace.client.MachineWorkspaces.buildLabel(listing.managers[0].launcher, listing.launcher) == "other build",
+      "Other build label: " + workspace.client.MachineWorkspaces.buildLabel(listing.managers[0].launcher, listing.launcher));
+    var defaultState = listing.managers[0].stateDir;
+
+    choices.chooseCopy(root, workspace.client.MachineWorkspaces.ownState(listing, root, launcher), defaultState);
+    until(function() return client.ready && client.serviceGeneration() != other, 90000, "Did not move to a manager on this build");
+    var own = client.serviceGeneration();
+    require(!client.managerFromOtherBuild() && client.attachedState() != null, "The new manager is not this build's own");
+    require([for (group in client.view()) group.id].indexOf("copied") >= 0, "The copy lost the other manager's groups");
+    require(choices.seedFor(root) == null, "The copy is still requested after connecting");
+    listing = list();
+    require(listing.managers.length == 2, "Listing does not show both managers: " + listing.managers.length);
+
+    choices.choose(root, null);
+    until(function() return client.ready && client.serviceGeneration() == other, 30000, "Did not return to the default state");
+    choices.choose(root, haxe.io.Path.join([haxe.io.Path.directory(defaultState), "stopped-other-build"]));
+    until(function() return client.error != null, 30000, "Started this build on a state folder that is not its own");
+    require(client.error.indexOf("Machine view") >= 0, "Unexpected refusal: " + client.error);
+    choices.choose(root, null);
+    until(function() return client.ready && client.serviceGeneration() == other, 30000, "Did not recover after choosing again");
+
+    machine.dispose(); client.dispose(); processes.shutdown(); runtime.dispose();
+    Sys.println("PASS: the editor uses, copies and switches between this machine's managers for one folder (own " + own + ")");
   }
 }

@@ -26,9 +26,8 @@ class AgentManagerSeed {
 		try {
 			var copy = Database.open(staging, 1000);
 			try {
-				// A new epoch, so no client takes this catalog for a continuation of the source's.
-				copy.exec("UPDATE workspace_meta SET epoch='" + AgentManagerNative.randomToken().substr(0, 32) + "'");
-				copy.exec("DELETE FROM workspace_events");
+				// The epoch, operation log and events stay: the log is checked against the epoch on startup. A client reaches
+				// this state only by attaching to it afresh, never by resuming a replica of the source's.
 				// Paired devices trust the source's relay identity, which this state does not share.
 				if (hasTable(copy, "workspace_devices")) copy.exec("DELETE FROM workspace_devices");
 			} catch (error:Dynamic) {

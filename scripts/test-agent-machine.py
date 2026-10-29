@@ -66,8 +66,8 @@ with tempfile.TemporaryDirectory(prefix="exosuit-machine-") as temporary:
 
     source, copy = catalog(default_state), catalog(own)
     assert copy[0] == source[0] and copy[0], "the copy keeps the source's groups"
-    assert copy[1] != source[1] and len(copy[1]) == 32, "the copy has its own epoch"
-    assert copy[2] == 0 and copy[3] == 0, "the copy has no event log or paired devices"
+    assert copy[1] == source[1], "the copy keeps the epoch its operation log is checked against"
+    assert copy[3] == 0, "the copy has no paired devices"
     assert not list(own.glob("catalog.sqlite.seed*"))
     found = json.loads(run(environment, root, "--manager", str(root), "--discover", "--state-dir", str(own)).stdout)
     assert found["generation"] == second["generation"]

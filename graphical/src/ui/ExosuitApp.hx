@@ -118,6 +118,9 @@ class ExosuitApp implements DesktopUiApplication {
 	var pairingClient:Null<workspace.client.WorkspacePairingClient>;
 	var remoteAccessPanel:Null<RemoteAccessPanel>;
 	var pairingRevision:Int = -1;
+	var machineWorkspaces:Null<workspace.client.MachineWorkspaces>;
+	var machinePanel:Null<MachinePanel>;
+	var machineRevision:Int = -1;
 	var lastTerminalCatalogRevision:Int = -1;
 	var workbenchPanel:Null<WorkbenchPanel>;
 
@@ -1549,6 +1552,36 @@ class ExosuitApp implements DesktopUiApplication {
 			new haxeon.ui.widgets.sidebar.SidebarModeOptions("Remote Access", 30, true));
 	}
 
+	/** The Machine view: this machine's workspace services, and which one `client` uses for each folder. */
+	public function attachMachine(machine:workspace.client.MachineWorkspaces, client:workspace.client.LocalWorkspaceClient):Void {
+		machineWorkspaces = machine;
+		var choices = workspace.client.WorkspaceManagerChoices.instance();
+		machinePanel = new MachinePanel(machine, {
+			attachedGeneration: function() return client.workspaceConnected() ? client.serviceGeneration() : "",
+			attach: function(root, stateDir, defaultState) {
+				choices.choose(root, defaultState ? null : stateDir);
+				openMachineRoot(root);
+			},
+			startOwn: function(root, fromState) {
+				var listing = machine.listing;
+				if (listing == null) return;
+				try choices.chooseCopy(root, workspace.client.MachineWorkspaces.ownState(listing, root, listing.launcher), fromState)
+				catch (failure:Dynamic) { application.reportError("workspace", Std.string(failure)); return; }
+				openMachineRoot(root);
+			}
+		}, requestFrame);
+		registerSidebarDestination("machine", IconName.Cube, function() return machinePanel,
+			new haxeon.ui.widgets.sidebar.SidebarModeOptions("Machine", 35, true));
+	}
+
+	/** Opens `root` as the workspace unless it already is; its clients then follow the folder's manager choice. */
+	function openMachineRoot(root:String):Void {
+		var project = application.workspace.activeProject;
+		var normal = workspace.client.MachineWorkspaces.normalPath;
+		if (project == null || normal(project.root) != normal(root)) openArgument(root);
+		requestFrame();
+	}
+
  function makeAgentTab(id:String,resource:String,root:String,title:String):UiAgentTab {
   var artifactPreviewAvailable = Std.isOfType(hostContext, haxeon.ui.host.DesktopUiHostContext) && SessionArtifactPreview.available();
   return new UiAgentTab(id,resource,root,title,new CodexSessionPanel(function() return workbenchClient==null?null:workbenchClient.agentService(),resource,root,requestFrame,editorPalette,application.syntaxes,showWorkbenchMenu,
@@ -2609,6 +2642,14 @@ class ExosuitApp implements DesktopUiApplication {
 			}
 		}
 		remoteFileSearch.update(Sys.time());
+		var machine = machineWorkspaces;
+		if (machine != null) {
+			machine.poll(sidebar.visible && sidebar.activeId == "machine" ? 3000 : 0);
+			if (machineRevision != machine.revision) {
+				machineRevision = machine.revision;
+				requestFrame();
+			}
+		}
 		if (pairingClient != null) {
 			if (sidebar.visible && sidebar.activeId == "remote-access") pairingClient.refreshPairings(false);
 			if (pairingRevision != pairingClient.pairingRevision()) {

@@ -42,7 +42,8 @@ class AgentMachine {
 	}
 
 	/**
-		`--machine`: prints this machine's name, the launcher answering, and every running manager as JSON. Managers
+		`--machine`: prints this machine's name, the launcher answering, the state base its folders live in, and every
+		running manager as JSON. Managers
 		from before the registry are found through their default state folder; stale records are removed.
 	**/
 	public static function run(arguments:Array<String>):Int {
@@ -83,7 +84,8 @@ class AgentMachine {
 					} catch (_:Dynamic) {}
 				}
 			}
-			Sys.println(Json.stringify({version: 1, machine: machineName(), launcher: AgentManager.managerBytecode(), managers: managers}));
+			Sys.println(Json.stringify({version: 1, machine: machineName(), launcher: AgentManager.managerBytecode(), stateBase: base,
+				managers: managers}));
 			Sys.stdout().flush();
 			return 0;
 		} catch (error:Dynamic) {

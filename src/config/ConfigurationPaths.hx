@@ -13,6 +13,11 @@ class ConfigurationPaths {
 		return child(stateRoot(), "recent-projects.conf");
 	}
 
+	/** Which workspace manager the editor uses per folder (see WorkspaceManagerChoices). */
+	public static function workspaceManagers():String {
+		return child(stateRoot(), "workspace-managers.conf");
+	}
+
 	public static function configurationRoot():String {
 		var portable = environment("PRAGTICAL_PORTABLE");
 		if (portable != null) return trim(portable);
