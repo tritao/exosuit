@@ -197,6 +197,9 @@ class SuitUnitTests {
 			check(catalog.state.name.length > 0 && StringTools.startsWith(catalog.state.id, "machine-"), "a new machine has a name and an id");
 			var created = catalog.create(null, two);
 			check(created.name == "two" && created.folders.length == 1, "a workspace defaults to its folder's name");
+			var replied = MachineCatalog.decodeWorkspace(haxe.Json.parse(haxe.Json.stringify({ok: true, workspace: created})).workspace);
+			check(replied.id == created.id && replied.folders[0] == created.folders[0], "a reply's workspace decodes into a record");
+			check(fails(function() MachineCatalog.decodeWorkspace(haxe.Json.parse('{"id":"x","name":"x","folders":[]}'))), "a workspace has a folder");
 			check(fails(function() catalog.create("x", gone)), "a workspace's folder must exist");
 			check(fails(function() catalog.create("x", "relative/folder")), "a workspace's folder must be absolute");
 			var both = catalog.addFolder(created.id, one);
