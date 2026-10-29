@@ -415,7 +415,7 @@ class CodexSessionPanel implements View {
         var worktree = quietButton(label + " ▾", function() { if (menuValid() && worktreeAvailable()) worktreeAction(); }, "agent-select-worktree");
         worktree.accessibilityLabel = "Select worktree"; worktree.leadingView = new SessionLineIcon("worktree", tokens.textSecondary);
         worktree.ellipsizeLabel = true; worktree.style.width = LayoutAxis.grow(124, 220); worktree.enabled = worktreeAvailable();
-        stripItems.push(new KeyedView("worktree", new SettingMenuButton(worktree, label)));
+        stripItems.push(new KeyedView("worktree", new SessionDirectoryTooltip(worktree, view.record.cwd)));
       } else stripItems.push(new KeyedView("workspace-context", new MiddleEllipsisText("workspace-context", workspaceActions.context(), true,
         TextStyleOverride.text(12, null, tokens.textSecondary))));
       if (workspaceActions.branchLabel != null && workspaceActions.selectBranch != null && workspaceActions.canSelectBranch != null) {
@@ -1263,6 +1263,21 @@ class CodexSessionPanel implements View {
 }
 
 /** Expose the selected setting and menu affordance on the native button. */
+private class SessionDirectoryTooltip implements View {
+  final button:Button;
+  final path:String;
+  public function new(button:Button, path:String) { this.button = button; this.path = path; }
+  public function build(context:BuildContext):RenderNode {
+    var tip = new TabTooltip("session-directory-tooltip", new SettingMenuButton(button, path), new Text(path),
+      function() return new haxeon.ui.Rect(0, 0, context.viewportWidth, context.viewportHeight),
+      config.Settings.DEFAULT_TOOLTIP_DELAY, haxeon.ui.widgets.overlays.TooltipPlacement.Above);
+    tip.fillAnchor = true;
+    var node = tip.build(context);
+    node.layout.style.width = LayoutAxis.grow(124, 220);
+    return node;
+  }
+}
+
 private class SettingMenuButton implements View {
   final button:Button;
   final value:String;

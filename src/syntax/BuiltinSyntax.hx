@@ -31,7 +31,7 @@ class BuiltinSyntax {
 		installGrammar(registry, "Shell", [".sh", ".bash", ".zsh"], ["#!/bin/sh", "#!/bin/bash", "#!/usr/bin/env sh", "#!/usr/bin/env bash"], shellGrammar());
 		for (pair in [["haxeon", "hx"], ["haxe", "hx"], ["c++", "cpp"], ["cplusplus", "cpp"],
 			["javascript", "js"], ["typescript", "ts"], ["python", "py"], ["rust", "rs"], ["shell", "sh"]])
-			registry.addFenceAlias(pair[0], registry.find("snippet." + pair[1]));
+			registry.addFenceExtensionAlias(pair[0], pair[1]);
 	}
 
 	static function haxeGrammar():Dynamic {

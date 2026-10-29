@@ -83,6 +83,25 @@ class SessionChatUiTestMain {
 		});
 	}
 	static function main():Int {
+		var groups:Array<workspace.service.WorkspaceProtocol.WorkspaceGroup> = [
+			{id:"parent",name:"Parent",cwd:"C:/workspace/project",parent:null,revision:1,order:0},
+			{id:"child",name:"Child",cwd:null,parent:"parent",revision:1,order:0},
+			{id:"root",name:"Root",cwd:null,parent:null,revision:1,order:0}
+		];
+		var inherited = ui.SessionGroupDirectory.resolve(groups,"C:/workspace","child","codex");
+		require(inherited != null && inherited.cwd == "C:/workspace/project", "Codex group did not inherit its parent directory");
+		var workspaceRoot = ui.SessionGroupDirectory.resolve(groups,"C:/workspace","root","codex");
+		require(workspaceRoot != null && workspaceRoot.cwd == "C:/workspace", "Codex root group did not resolve to workspace root");
+		require(ui.SessionGroupDirectory.resolve(groups,"C:/workspace","child","claude") == null
+			&& ui.SessionGroupDirectory.resolve(groups,"C:/workspace","root","pi") == null, "Provider unsupported inherited directory offered");
+		groups[0].revision = 2;
+		var updated = ui.SessionGroupDirectory.resolve(groups,"C:/workspace","child","codex");
+		var oldStamp = inherited == null ? "" : inherited.stamp;
+		require(updated != null && updated.stamp != oldStamp, "Ancestor update did not invalidate offered directory");
+		groups[0].parent = "child"; groups[0].cwd = null;
+		require(ui.SessionGroupDirectory.resolve(groups,"C:/workspace","child","codex") == null, "Cyclic group ancestry was offered");
+		groups[0].parent = null; groups[0].cwd = "C:/outside";
+		require(ui.SessionGroupDirectory.resolve(groups,"C:/workspace","child","codex") == null, "Out-of-workspace ancestor was offered");
         var staleBranchSourceReads=0;
         var staleBranch=new ui.ScmBranchController(null,function() {staleBranchSourceReads++;throw "Stale scope reached source";},
           function(_) throw "Stale scope checked repository",function(_) {},function() {},function(_) {},function() return "test");
@@ -483,6 +502,7 @@ class SessionChatUiTestMain {
         oldContext.dispose();
         for (footerDark in [true,false]) for (footerWidth in [320.0,1000.0,1920.0,2560.0,5120.0]) {
           var footerClient=new FakeAgent(),worktreeCalls=0,branchCalls=0,worktreeAllowed=true,branchAllowed=true;
+          footerClient.record.cwd="/repo/worktrees/ui-exploration";
           footerClient.view.supportsImageUpload=true;
           var footerContext=new UiContext(null,fonts,ui.ExosuitPalette.theme(footerDark));
           var footerPanel=new CodexSessionPanel(function() return footerClient,"session","/repo",function() {},new style.Theme(),new syntax.SyntaxRegistry(),
@@ -525,7 +545,17 @@ class SessionChatUiTestMain {
               && Math.abs(cb.x+cb.width/2-footerWidth/2)<2 && Math.abs(sb.x+sb.width/2-footerWidth/2)<2,
               "Wide composer or reading measure escaped its centered bounds");
           }
-          settingValue(footerRoot,"Select worktree","ui-exploration");settingValue(footerRoot,"Select branch","feature/chat");
+          settingValue(footerRoot,"Select worktree",footerClient.record.cwd);settingValue(footerRoot,"Select branch","feature/chat");
+          var worktreeBounds=find(footerRoot,"Select worktree").globalBounds();
+          footerContext.pointerMove(worktreeBounds.x+worktreeBounds.width/2,worktreeBounds.y+worktreeBounds.height/2);
+          footerContext.animations.advance(config.Settings.DEFAULT_TOOLTIP_DELAY+0.1);
+          footerRoot=footerBuild();
+          var fullDirectoryTip=false;
+          footerRoot.walk(function(node) {
+            if (node.styleType != "tooltip" || !node.layout.style.visible) return;
+            node.walk(function(child) { if (child.layout.text == footerClient.record.cwd) fullDirectoryTip=true; });
+          });
+          require(fullDirectoryTip,"Worktree tooltip did not expose the complete session directory");
           activate(footerContext,find(footerRoot,"Select worktree"));activate(footerContext,find(footerRoot,"Select branch"));
           require(worktreeCalls==1 && branchCalls==1,"Footer keyboard actions did not invoke host callbacks");
           worktreeAllowed=false;branchAllowed=false;
