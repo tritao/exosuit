@@ -174,6 +174,8 @@ class ExosuitApp implements DesktopUiApplication {
 	final panelScm = new LocalScmSourceCache();
 	/** The editor's source while the panel's narrows (see editorSourceControlSource). */
 	final editorScm = new LocalScmSourceCache();
+	/** The sources behind Agent session controls, per session folder (see sessionSourceControlSource). */
+	final sessionScm = new SessionScmSources();
 	var sourceControlPanelValue:Null<SourceControlPanel>;
 	var sourceControlPanelIdentity:Null<String>;
 	final scmDecorationOwners:Map<String, Bool> = [];
@@ -314,7 +316,8 @@ class ExosuitApp implements DesktopUiApplication {
 			return capturedHost;
 		}, preferences, null, this.capabilities);
 		host = capturedHost;
-		scmBranches = new ScmBranchController(host, sourceControlSource, canCheckoutScmRepository,
+		scmBranches = new ScmBranchController(host, sourceControlSource,
+			function(repository, through) return canCheckoutScmRepository(repository, through),
 			activateSidebarDestination, requestFrame, function(message) application.reportError("source-control", message),
 			function() return "ui-" + Std.string(nextScmOperationId++));
 		if (hostContext != null) {
@@ -1592,7 +1595,7 @@ class ExosuitApp implements DesktopUiApplication {
  }
 
  function sessionGithubSource(resource:String, root:String):Null<{source:scm.ScmRemoteReader, repository:scm.ScmRepository}> {
-  var record = sessionRecord(resource, root), source = sourceControlSource();
+  var record = sessionRecord(resource, root), source = record == null ? null : sessionSourceControlSource(record.cwd);
   if (record == null || source == null || !Std.isOfType(source, scm.ScmRemoteReader)) return null;
   var reader:scm.ScmRemoteReader = cast source, nearest:Null<scm.ScmRepository> = null;
   for (repository in source.repositories()) if (reader.canReadOrigin(repository.id)
@@ -1604,7 +1607,8 @@ class ExosuitApp implements DesktopUiApplication {
  function sessionGithubOrigin(resource:String, root:String):Null<String> {
   var selected = sessionGithubSource(resource, root);
   if (selected == null) return null;
-  var key = root + ":" + selected.repository.id + ":" + sourceControlSource().identity();
+  // An origin belongs to the repository, not to the source viewing it, so switching groups neither refetches nor grows this.
+  var key = root + ":" + selected.repository.id;
 	  var checked = githubOriginsCheckedAt.get(key);
 	  if (checked != null && Sys.time() - checked >= 30) { githubOrigins.remove(key); githubOriginsCheckedAt.remove(key); }
   if (!githubOrigins.exists(key) && !githubOriginsPending.exists(key)) {
@@ -1623,7 +1627,7 @@ class ExosuitApp implements DesktopUiApplication {
  }
 
  function sessionGithubBranch(resource:String, root:String):Null<String> {
-  var selected = sessionGithubSource(resource, root), source = sourceControlSource();
+  var selected = sessionGithubSource(resource, root), source = sessionScmSource(resource, root);
   if (selected == null || source == null) return null;
   var snapshot = source.snapshot(selected.repository.id);
   return snapshot == null ? null : snapshot.head.branch;
@@ -1672,7 +1676,10 @@ class ExosuitApp implements DesktopUiApplication {
    done(null, "Choose a relative file path in this workspace"); return;
   }
   var path = target.resolve(record.cwd);
-  if (workspace.client.SessionLinkTarget.relativeWithin(root, path) == null) { done(null, "File is outside this workspace"); return; }
+  var localFiles = attachment == null || attachment.hasLocalFileAccess();
+  if (!workspace.client.SessionFileScope.allows(root, record.cwd, path, localFiles, workspace.client.SessionLinkTarget.relativeWithin)) {
+   done(null, "File is outside this workspace"); return;
+  }
   function wanted():Bool {
    var current = sessionRecord(resource, root);
    return workspaceAttachment == attachment && current != null && current.cwd == record.cwd && current.thread == record.thread;
@@ -1699,7 +1706,7 @@ class ExosuitApp implements DesktopUiApplication {
    var fs = application.workspace.fileSystem;
    if (!fs.exists(path) || fs.isDirectory(path)) { done(null, "File is unavailable"); return; }
    path = fs.normalize(path);
-   if (scmRelativePath(root, path) == null) { done(null, "File is outside this workspace"); return; }
+   if (!workspace.client.SessionFileScope.allows(root, record.cwd, path, true, scmRelativePath)) { done(null, "File is outside this workspace"); return; }
    var metadata = sys.FileSystem.metadata(path);
    if (metadata == null || metadata.size < 0 || metadata.size > 4096) { done(null, "Choose a text file of at most 4096 bytes"); return; }
    var bytes = sys.io.File.getBytes(path);
@@ -1720,7 +1727,7 @@ class ExosuitApp implements DesktopUiApplication {
   var record = sessionRecord(resource, root);
   if (record == null) return "Workspace disconnected";
   var label = record.cwd;
-  var source = sourceControlSource();
+  var source = sessionSourceControlSource(record.cwd);
   if (source != null) {
    var nearest:Null<scm.ScmRepository> = null;
    for (repository in source.repositories())
@@ -1732,12 +1739,11 @@ class ExosuitApp implements DesktopUiApplication {
  }
 
  function nearestSessionGitRepository(resource:String, root:String):Null<scm.ScmRepository> {
-  var record = sessionRecord(resource, root), source = sourceControlSource();
+  var record = sessionRecord(resource, root), source = record == null ? null : sessionSourceControlSource(record.cwd);
   if (record == null || source == null || !source.connected()) return null;
-  var nearest:Null<scm.ScmRepository> = null;
+  var nearest:Null<scm.ScmRepository> = null, local = sessionLocalFiles();
   for (repository in source.repositories()) if (repository.providerId == "git"
-    && workspace.client.SessionLinkTarget.relativeWithin(repository.root, record.cwd) != null
-    && workspace.client.SessionLinkTarget.relativeWithin(root, repository.root) != null
+    && workspace.client.SessionFileScope.allowsRepository(root, record.cwd, repository.root, local, workspace.client.SessionLinkTarget.relativeWithin)
     && (nearest == null || repository.root.length > nearest.root.length)) nearest = repository;
   return nearest;
  }
@@ -1752,7 +1758,7 @@ class ExosuitApp implements DesktopUiApplication {
  }
 
  function sessionBranchLabel(resource:String, root:String):String {
-  var repository = nearestSessionGitRepository(resource, root), source = sourceControlSource();
+  var repository = nearestSessionGitRepository(resource, root), source = sessionScmSource(resource, root);
   if (repository == null || source == null) return "Branch unavailable";
   var snapshot = source.snapshot(repository.id);
   if (snapshot == null) return "Branch unavailable";
@@ -1767,12 +1773,12 @@ class ExosuitApp implements DesktopUiApplication {
   return sessionRecord(resource, root) != null && client != null && client.canControlAgents() && !client.agentBusy()
    && view != null && ["idle", "completed", "failed", "interrupted"].indexOf(view.record.state) >= 0
    && (view.connectionState == null || view.connectionState == "connected") && view.requests.length == 0
-   && repository != null && canCheckoutScmRepository(repository);
+   && repository != null && canCheckoutScmRepository(repository, sessionScmSource(resource, root));
  }
 
  function selectSessionBranch(resource:String, root:String):Void {
   if (!sessionBranchSelectable(resource, root)) return;
-  var client = workbenchClient, source = sourceControlSource(), record = sessionRecord(resource, root);
+  var client = workbenchClient, source = sessionScmSource(resource, root), record = sessionRecord(resource, root);
   var repository = nearestSessionGitRepository(resource, root);
   var agents = client == null ? null : client.agentService(), catalog = agents == null ? null : agents.agents();
   var terminals = client == null ? null : client.terminalCatalog();
@@ -1785,13 +1791,13 @@ class ExosuitApp implements DesktopUiApplication {
    var currentCatalog = currentAgents == null ? null : currentAgents.agents();
    var currentTerminals = workbenchClient == null ? null : workbenchClient.terminalCatalog();
    var current = sessionRecord(resource, root), selected = nearestSessionGitRepository(resource, root);
-   return workbenchClient == client && currentAgents == agents && sourceControlSource() == source
+   return workbenchClient == client && currentAgents == agents && sessionScmSource(resource, root) == source
     && currentCatalog != null && currentCatalog.instance == instance && currentCatalog.root == root
     && currentTerminals != null && currentTerminals.instance == terminalInstance && currentTerminals.workspaceRoot == root
     && current != null && current.thread == thread && current.cwd == cwd && current.group == group && current.provider == provider
     && selected != null && selected.id == repositoryId && sessionBranchSelectable(resource, root);
   }
-  if (valid()) scmBranches.open(repository, valid);
+  if (valid()) scmBranches.open(repository, valid, source);
  }
 
  function canSelectSessionDirectory(resource:String, root:String):Bool {
@@ -1812,7 +1818,7 @@ class ExosuitApp implements DesktopUiApplication {
   if (client == null || record == null) return;
   var catalog:Null<workspace.service.WorkspaceTerminalProtocol.TerminalCatalog> = client.terminalCatalog();
   if (catalog == null) return;
-  var source = sourceControlSource(), owner = catalog.instance;
+  var source = sessionSourceControlSource(record.cwd), owner = catalog.instance;
   var thread = record.thread, cwd = record.cwd, provider = record.provider, group = record.group;
   var entries:Array<commandview.CommandViewEntry> = [];
   var offered:Map<String,{cwd:String, stamp:String}> = [];
@@ -1828,7 +1834,7 @@ class ExosuitApp implements DesktopUiApplication {
   host.openCommandView(new commandview.CommandViewProvider("New session directory: ", entries, function(_) {}, function(entry, _, _) {
    host.closeCommandView();
    var current = sessionRecord(resource, root), latest = client.terminalCatalog();
-   if (entry == null || workbenchClient != client || sourceControlSource() != source || current == null
+   if (entry == null || workbenchClient != client || current == null || sessionSourceControlSource(current.cwd) != source
      || current.thread != thread || current.cwd != cwd || current.provider != provider || current.group != group
      || latest == null || latest.instance != owner || latest.workspaceRoot != root || !canSelectSessionDirectory(resource, root)) return;
    if (entry.value == "@new") { if (sessionWorktreeRepository(resource, root) != null) createSessionWorktree(resource, root); return; }
@@ -1846,39 +1852,38 @@ class ExosuitApp implements DesktopUiApplication {
  }
 
  function sessionCommitRepository(resource:String, root:String):Null<scm.ScmRepository> {
-  var record = sessionRecord(resource, root), source = sourceControlSource();
+  var record = sessionRecord(resource, root), source = record == null ? null : sessionSourceControlSource(record.cwd);
   if (record == null || source == null || !source.connected()) return null;
-  var nearest:Null<scm.ScmRepository> = null;
+  var nearest:Null<scm.ScmRepository> = null, local = sessionLocalFiles();
   for (repository in source.repositories()) if (repository.providerId == "git" && source.canWrite(repository.id)
-    && workspace.client.SessionLinkTarget.relativeWithin(repository.root, record.cwd) != null
-    && workspace.client.SessionLinkTarget.relativeWithin(root, repository.root) != null
+    && workspace.client.SessionFileScope.allowsRepository(root, record.cwd, repository.root, local, workspace.client.SessionLinkTarget.relativeWithin)
     && source.snapshot(repository.id) != null && (nearest == null || repository.root.length > nearest.root.length)) nearest = repository;
   return nearest;
  }
 
  function sessionWorktreeRepository(resource:String, root:String):Null<scm.ScmRepository> {
-  var record = sessionRecord(resource, root), source = sourceControlSource(), client = workbenchClient;
+  var record = sessionRecord(resource, root), client = workbenchClient;
+  var source = record == null ? null : sessionSourceControlSource(record.cwd), local = sessionLocalFiles();
   if (record == null || source == null || client == null || !source.connected() || !client.canEditGroups()
     || client.terminalCatalogBusy() || !client.agentService().canControlAgents() || client.agentService().agentCreation() != null) return null;
   var nearest:Null<scm.ScmRepository> = null;
   for (repository in source.repositories()) {
    var features = source.features(repository.id);
    if (repository.providerId == "git" && features != null && features.worktrees && source.canWrite(repository.id)
-     && workspace.client.SessionLinkTarget.relativeWithin(repository.root, record.cwd) != null
-     && workspace.client.SessionLinkTarget.relativeWithin(root, repository.root) != null
+     && workspace.client.SessionFileScope.allowsRepository(root, record.cwd, repository.root, local, workspace.client.SessionLinkTarget.relativeWithin)
      && source.snapshot(repository.id) != null && (nearest == null || repository.root.length > nearest.root.length)) nearest = repository;
   }
   return nearest;
  }
 
  function createSessionWorktree(resource:String, root:String):Void {
-  var record = sessionRecord(resource, root), repository = sessionWorktreeRepository(resource, root), source = sourceControlSource();
+  var record = sessionRecord(resource, root), repository = sessionWorktreeRepository(resource, root), source = sessionScmSource(resource, root);
   var client = workbenchClient, catalog = client == null ? null : client.terminalCatalog();
   if (record == null || repository == null || source == null || client == null || catalog == null) return;
   var owner = catalog.instance, provider = record.provider == null ? "codex" : record.provider;
   function valid():Bool {
    var current = client.terminalCatalog(), session = sessionRecord(resource, root);
-   return workbenchClient == client && sourceControlSource() == source && session != null
+   return workbenchClient == client && session != null && sessionSourceControlSource(session.cwd) == source
     && session.cwd == record.cwd && session.thread == record.thread && session.provider == record.provider && session.group == record.group
     && current != null && current.instance == owner;
   }
@@ -1921,7 +1926,7 @@ class ExosuitApp implements DesktopUiApplication {
   try {
    if (!application.workspace.fileSystem.exists(path) || application.workspace.fileSystem.isDirectory(path)) return null;
    path = application.workspace.fileSystem.normalize(path);
-   if (scmRelativePath(root, path) == null) return null;
+   if (!workspace.client.SessionFileScope.allows(root, record.cwd, path, true, scmRelativePath)) return null;
    var metadata = sys.FileSystem.metadata(path);
    return metadata != null && metadata.size <= 4 * 1024 * 1024 ? path : null;
   } catch (_:Dynamic) return null;
@@ -1991,8 +1996,12 @@ class ExosuitApp implements DesktopUiApplication {
   // A response is workspace content: never resolve a stale/remote host path locally.
   var attachment = workspaceAttachment;
   var remote = attachment != null && !attachment.hasLocalFileAccess();
-  var relative = remote ? workspace.client.SessionLinkTarget.relativeWithin(root, path) : scmRelativePath(root, path);
-  if (relative == null) { application.reportError("agent", "This file link is outside the session’s workspace"); return; }
+  // Locally the session's own folder counts too: a group folder may lie outside the workspace. A remote attachment's
+  // file service shares only the workspace root.
+  var allowed = remote
+   ? workspace.client.SessionFileScope.allows(root, record.cwd, path, false, workspace.client.SessionLinkTarget.relativeWithin)
+   : workspace.client.SessionFileScope.allows(root, record.cwd, path, true, scmRelativePath);
+  if (!allowed) { application.reportError("agent", "This file link is outside the session’s workspace"); return; }
   if (remote) {
    var client = attachment.fileClient(), scope = attachment.fileScope();
    if (client == null || scope == null) { application.reportError("agent", "Workspace file service is unavailable"); return; }
@@ -4357,6 +4366,36 @@ class ExosuitApp implements DesktopUiApplication {
 		return editorScm.get(application.scm, roots, false);
 	}
 
+	/**
+		The source behind an Agent session's branch, commit, worktree and GitHub controls. It never narrows to the Workbench
+		selection: it covers the active context's folders and the session's folder `cwd`, so the controls describe the
+		session's own folder whichever group is selected (see SessionScmSources). A workspace without local file access
+		uses its own source.
+	**/
+	function sessionSourceControlSource(cwd:String):Null<ScmSource> {
+		if (workspaceAttachment != null && !workspaceAttachment.hasLocalFileAccess()) {
+			sessionScm.clear();
+			return workspaceAttachment.sourceControlSource();
+		}
+		if (!capabilities.supports(HostCapability.SourceControl)) { sessionScm.clear(); return null; }
+		var roots = [for (root in application.activeContext.roots) if (controller.SavedWorkspaceController.available(root)) root];
+		var folder = normalizedPath(cwd);
+		if (!controller.SavedWorkspaceController.available(folder)) folder = "";
+		return sessionScm.get(application.scm, roots, folder, Sys.time(), function(_) {
+			// A group folder may be any folder; discover it unless a discovered root already covers it.
+			if (folder != "" && application.scm.repositories(folder).length == 0) application.scm.discover(folder, _ -> requestFrame());
+		});
+	}
+
+	/** The session's source (see sessionSourceControlSource); null without a session record. */
+	function sessionScmSource(resource:String, root:String):Null<ScmSource> {
+		var record = sessionRecord(resource, root);
+		return record == null ? null : sessionSourceControlSource(record.cwd);
+	}
+
+	/** Whether the session's files are on this machine (no remote attachment without local file access). */
+	function sessionLocalFiles():Bool return workspaceAttachment == null || workspaceAttachment.hasLocalFileAccess();
+
 	function syncScmSidebar():Void {
 		var remoteRead = workspaceAttachment != null && !workspaceAttachment.hasLocalFileAccess()
 			&& workspaceAttachment.sourceControlSource() != null;
@@ -4838,8 +4877,9 @@ class ExosuitApp implements DesktopUiApplication {
 		showContextMenu(entries, event, function() return true);
 	}
 
-	function canCheckoutScmRepository(repository:Null<scm.ScmRepository>):Bool {
-		var source = sourceControlSource();
+	/** Whether branches can be switched in `repository` (the first one when null) through `through`, or the panel's source. */
+	function canCheckoutScmRepository(repository:Null<scm.ScmRepository>, ?through:ScmSource):Bool {
+		var source = through != null ? through : sourceControlSource();
 		if (source == null) return false;
 		var target = repository;
 		if (target == null) {

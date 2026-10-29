@@ -104,12 +104,13 @@ class SessionChatUiTestMain {
 		require(ui.SessionGroupDirectory.resolve(groups,"C:/workspace","child","codex") == null, "Out-of-workspace ancestor was offered");
         var staleBranchSourceReads=0;
         var staleBranch=new ui.ScmBranchController(null,function() {staleBranchSourceReads++;throw "Stale scope reached source";},
-          function(_) throw "Stale scope checked repository",function(_) {},function() {},function(_) {},function() return "test");
+          function(_, _) throw "Stale scope checked repository",function(_) {},function() {},function(_) {},function() return "test");
         staleBranch.open(null,function() return false);
         staleBranch.createPrompt(null,function() return false);
         staleBranch.checkout(null,null,"refs/heads/main",function() return false);
         staleBranch.create(null,null,"new-branch",function() return false);
         require(staleBranchSourceReads==0,"Stale branch operation accessed its source");
+		sessionScmSources();
 		for (remote in ["https://github.com/example/project.git", "git@github.com:example/project.git", "ssh://git@github.com/example/project"])
 			require(scm.GithubRemote.repository(remote) == "https://github.com/example/project", "GitHub origin parsing failed");
 		for (remote in ["https://user:secret@github.com/example/project", "https://github.com.evil.test/example/project", "https://github.com/example/project?token=x", "file:///tmp/project"])
@@ -772,5 +773,56 @@ class SessionChatUiTestMain {
 		fonts.dispose();
 		trace("PASS: session rendering and provider actions across themes and widths");
 		return 0;
+	}
+
+	/**
+		A session's SCM controls read an unnarrowed source of their own: with the Agents layout narrowed to another group's
+		folder inside the same repository, the session still sees worktree support, and changing the selection keeps the
+		same source, so a prompt opened for the session stays valid.
+	**/
+	static function sessionScmSources():Void {
+		var base = Sys.getEnv("TEMP");
+		if (base == null || base.length == 0) base = Sys.getEnv("TMPDIR");
+		if (base == null || base.length == 0) base = "/tmp";
+		var folder = StringTools.replace(sys.FileSystem.fullPath(base), "\\", "/") + "/exosuit-session-scm-" + Std.int(Sys.time() * 1000) + "-" + Std.random(1000000);
+		var repositoryRoot = folder + "/repo", groupA = repositoryRoot + "/group-a", groupB = repositoryRoot + "/group-b", outside = folder + "/outside";
+		for (path in [folder, repositoryRoot, groupA, groupB, outside]) sys.FileSystem.createDirectory(path);
+		var scheduler = new jobs.JobScheduler(), fake = new scm.fake.FakeScmProvider(scheduler);
+		var snapshot = new scm.ScmSnapshot(haxe.Int64.ofInt(1), new scm.ScmHead("main", null, false, null, 0, 0, false, scm.ScmHeadOperation.None), []);
+		fake.add(new scm.fake.FakeScmRepositoryScript(new scm.ScmRepository("session-repo", "git", repositoryRoot, scm.ScmRepositoryKind.Worktree, null, true),
+			new scm.ScmFeatures(true, false, false, true, false, false, true), [snapshot], 0));
+		var service = new scm.ScmService(new process.ProcessManager(), scheduler, null, 10000, 0, true, folder + "/trust.json", null, fake);
+		var discovered = false;
+		service.discover(repositoryRoot, function(_) discovered = true);
+		var deadline = Sys.time() + 10;
+		while (!discovered && Sys.time() < deadline) { service.update(Sys.time()); scheduler.update(32); Sys.sleep(0.001); }
+		require(discovered && service.repository("session-repo") != null, "Fake session repository was not discovered");
+		var narrowed = new scm.LocalScmSource(service, groupB, [groupB], true);
+		var narrowedFeatures = narrowed.features("session-repo");
+		require(narrowedFeatures != null && !narrowedFeatures.worktrees, "Narrowed panel source unexpectedly offered worktrees");
+		var sources = new ui.SessionScmSources();
+		var session = sources.get(service, [repositoryRoot], groupA, 0);
+		var features = session == null ? null : session.features("session-repo");
+		require(session != null && features != null && features.worktrees && session.repositories().length == 1,
+			"Session source lost worktrees while the selected group narrowed the panel");
+		require(sources.get(service, [repositoryRoot], groupA, 1) == session, "Session source changed with the Workbench selection");
+		var away = sources.get(service, [repositoryRoot], outside, 1);
+		require(away != null && away != session && sources.count() == 2, "A session outside the workspace shared another session's source");
+		require(ui.SessionScmSources.roots([repositoryRoot], outside).length == 2
+			&& ui.SessionScmSources.roots([repositoryRoot], groupA).length == 1, "Session roots did not add only an uncovered folder");
+		sources.get(service, [repositoryRoot], groupA, 1 + ui.SessionScmSources.IDLE_SECONDS);
+		require(away != null && !away.connected() && session.connected() && sources.count() == 1, "Idle session source was not disposed");
+		sources.clear();
+		require(!session.connected() && sources.count() == 0, "Clearing session sources left one connected");
+		narrowed.dispose();
+		service.dispose();
+		removeTree(folder);
+	}
+
+	static function removeTree(path:String):Void {
+		if (!sys.FileSystem.exists(path)) return;
+		if (!sys.FileSystem.isDirectory(path)) { sys.FileSystem.deleteFile(path); return; }
+		for (name in sys.FileSystem.readDirectory(path)) removeTree(path + "/" + name);
+		sys.FileSystem.deleteDirectory(path);
 	}
 }
