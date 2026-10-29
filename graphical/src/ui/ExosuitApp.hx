@@ -1790,8 +1790,8 @@ class ExosuitApp implements DesktopUiApplication {
   if (client == null || record == null || catalog == null || catalog.workspaceRoot != root
    || !client.agentService().canControlAgents() || client.agentService().agentCreation() != null) return false;
   if (sessionWorktreeRepository(resource, root) != null) return true;
-  for (candidate in catalog.groups) if (candidate.cwd != null && candidate.cwd != ""
-   && workspace.client.SessionLinkTarget.relativeWithin(root, candidate.cwd) != null) return true;
+  for (candidate in catalog.groups)
+   if (SessionGroupDirectory.resolve(catalog.groups, root, candidate.id, record.provider) != null) return true;
   return false;
  }
 
@@ -1805,13 +1805,14 @@ class ExosuitApp implements DesktopUiApplication {
   var source = sourceControlSource(), owner = catalog.instance;
   var thread = record.thread, cwd = record.cwd, provider = record.provider, group = record.group;
   var entries:Array<commandview.CommandViewEntry> = [];
-  var offered:Map<String,{cwd:String, revision:Int}> = [];
+  var offered:Map<String,{cwd:String, stamp:String}> = [];
   if (sessionWorktreeRepository(resource, root) != null)
    entries.push(new commandview.CommandViewEntry("New worktree…", "Create a worktree and start a new session", "@new"));
-  for (candidate in catalog.groups) if (candidate.cwd != null && candidate.cwd != ""
-    && workspace.client.SessionLinkTarget.relativeWithin(root, candidate.cwd) != null) {
-   offered.set(candidate.id, {cwd:candidate.cwd, revision:candidate.revision});
-   entries.push(new commandview.CommandViewEntry("New session in " + candidate.name, candidate.cwd, "group:" + candidate.id));
+  for (candidate in catalog.groups) {
+   var resolved = SessionGroupDirectory.resolve(catalog.groups, root, candidate.id, provider);
+   if (resolved == null) continue;
+   offered.set(candidate.id, resolved);
+   entries.push(new commandview.CommandViewEntry("New session in " + candidate.name, resolved.cwd, "group:" + candidate.id));
   }
   if (entries.length == 0) return;
   host.openCommandView(new commandview.CommandViewProvider("New session directory: ", entries, function(_) {}, function(entry, _, _) {
@@ -1825,7 +1826,8 @@ class ExosuitApp implements DesktopUiApplication {
    var id = entry.value.substr(6);
    var candidate = offered.get(id);
    if (candidate != null) {
-    for (fresh in latest.groups) if (fresh.id == id && fresh.cwd == candidate.cwd && fresh.revision == candidate.revision) {
+    var fresh = SessionGroupDirectory.resolve(latest.groups, root, id, provider);
+    if (fresh != null && fresh.cwd == candidate.cwd && fresh.stamp == candidate.stamp) {
      createIntegratedAgent(provider == null ? "codex" : provider, id); return;
     }
    }

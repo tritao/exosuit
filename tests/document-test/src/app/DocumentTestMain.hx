@@ -180,15 +180,28 @@ class DocumentTestMain {
 			require(syntaxes.findFence(pair[0]).name == pair[1], "fence language selection failed: " + pair[0]);
 		require(syntaxes.findFence("HAXEON").name == "Haxe" && syntaxes.findFence("../file.hx") == syntaxes.plainText
 			&& syntaxes.findFence("unknown") == syntaxes.plainText, "unsafe or unknown fence hint selected a syntax");
+		var haxeOverride = new syntax.SyntaxDefinition("Plugin Haxe", [".hx"], true);
+		syntaxes.add(haxeOverride, "haxe-override");
+		require(syntaxes.find("snippet.hx") == haxeOverride && syntaxes.findFence("hx") == haxeOverride
+			&& syntaxes.findFence("haxe") == haxeOverride && syntaxes.findFence("haxeon") == haxeOverride,
+			"fence aliases ignored the newer extension syntax");
+		syntaxes.removeOwner("haxe-override");
+		require(syntaxes.findFence("haxeon").name == "Haxe" && syntaxes.findFence("hx").name == "Haxe",
+			"removing override did not restore built-in alias resolution");
 		var custom = new syntax.SyntaxDefinition("Custom", [".demo"], true);
 		syntaxes.add(custom, "plugin-definition"); syntaxes.addFenceAlias("custom-alias", custom, "plugin-alias");
+		syntaxes.addFenceExtensionAlias("demo-alias", "demo", "extension-alias");
 		require(syntaxes.findFence("custom-alias") == custom && syntaxes.findFence("demo") == custom, "plugin fence selection failed");
 		syntaxes.removeOwner("plugin-definition");
-		require(syntaxes.findFence("custom-alias") == syntaxes.plainText, "removed definition retained fence alias");
+		require(syntaxes.findFence("custom-alias") == syntaxes.plainText && syntaxes.findFence("demo-alias") == syntaxes.plainText,
+			"removed definition retained fence alias");
 		var replacement = new syntax.SyntaxDefinition("Replacement", [".demo"], true);
 		syntaxes.add(replacement, "replacement"); syntaxes.addFenceAlias("custom-alias", replacement, "replacement");
 		syntaxes.removeOwner("plugin-alias");
-		require(syntaxes.findFence("custom-alias") == replacement, "removing stale alias owner removed a replacement");
+		require(syntaxes.findFence("custom-alias") == replacement && syntaxes.findFence("demo-alias") == replacement,
+			"removing stale alias owner removed a replacement");
+		syntaxes.removeOwner("extension-alias");
+		require(syntaxes.findFence("demo-alias") == syntaxes.plainText, "removed extension alias owner retained alias");
 		syntaxes.removeOwner("replacement");
 		editingPolicy(syntaxes);
 		IndentationTests.run(syntaxes);

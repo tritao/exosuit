@@ -6,6 +6,7 @@ class SyntaxRegistry {
 	final grammars:Map<String, TextMateGrammar> = [];
 	final grammarOwners:Map<String, Array<String>> = [];
 	final fenceAliases:Map<String, SyntaxDefinition> = [];
+	final fenceExtensionAliases:Map<String, String> = [];
 	final fenceAliasOwners:Map<String, Array<String>> = [];
 	final fenceAliasOwner:Map<String, String> = [];
 	public final plainText = new SyntaxDefinition("Plain Text", [], false);
@@ -32,7 +33,7 @@ class SyntaxRegistry {
 		owners.remove(owner);
 		var ownedAliases = fenceAliasOwners.get(owner);
 		if (ownedAliases != null) for (alias in ownedAliases) if (fenceAliasOwner.get(alias) == owner) {
-			fenceAliases.remove(alias); fenceAliasOwner.remove(alias);
+			fenceAliases.remove(alias); fenceExtensionAliases.remove(alias); fenceAliasOwner.remove(alias);
 		}
 		fenceAliasOwners.remove(owner);
 		var ownedGrammars = grammarOwners.get(owner);
@@ -64,9 +65,22 @@ class SyntaxRegistry {
 		var key = alias == null ? "" : alias.toLowerCase();
 		if (!~/^[a-z0-9][a-z0-9_+.-]{0,63}$/.match(key) || definition == null || definitions.indexOf(definition) < 0)
 			throw "Invalid syntax fence alias";
-		if (fenceAliases.exists(key)) throw 'syntax fence alias "${key}" is already registered';
+		if (fenceAliasOwner.exists(key)) throw 'syntax fence alias "${key}" is already registered';
 		fenceAliases.set(key, definition);
 		fenceAliasOwner.set(key, owner);
+		var owned = fenceAliasOwners.get(owner);
+		if (owned == null) { owned = []; fenceAliasOwners.set(owner, owned); }
+		owned.push(key);
+	}
+
+	/** Resolve an alias through the latest registered extension, including plugin overrides. */
+	public function addFenceExtensionAlias(alias:String, extension:String, owner:String = "core"):Void {
+		var key = alias == null ? "" : alias.toLowerCase();
+		var suffix = extension == null ? "" : extension.toLowerCase();
+		if (!~/^[a-z0-9][a-z0-9_+.-]{0,63}$/.match(key) || !~/^[a-z0-9][a-z0-9_+-]{0,63}$/.match(suffix))
+			throw "Invalid syntax fence alias";
+		if (fenceAliasOwner.exists(key)) throw 'syntax fence alias "${key}" is already registered';
+		fenceExtensionAliases.set(key, suffix); fenceAliasOwner.set(key, owner);
 		var owned = fenceAliasOwners.get(owner);
 		if (owned == null) { owned = []; fenceAliasOwners.set(owner, owned); }
 		owned.push(key);
@@ -78,6 +92,16 @@ class SyntaxRegistry {
 		if (!~/^[a-z0-9][a-z0-9_+.-]{0,63}$/.match(key)) return plainText;
 		var alias = fenceAliases.get(key);
 		if (alias != null) return alias;
+		var suffix = fenceExtensionAliases.get(key);
+		if (suffix != null) {
+			var index = definitions.length;
+			while (index > 0) {
+				index--;
+				for (extension in definitions[index].extensions)
+					if (extension.toLowerCase() == "." + suffix) return definitions[index];
+			}
+			return plainText;
+		}
 		var index = definitions.length;
 		while (index > 0) {
 			index--;
