@@ -92,6 +92,11 @@ SQLITEKIT_API const char *sqlitekit_column_text(sqlitekit_stmt *stmt, int column
     SQLITEKIT_BORROWED;
 SQLITEKIT_API int64_t sqlitekit_changes(sqlitekit_db *db);
 SQLITEKIT_API int64_t sqlitekit_last_insert_rowid(sqlitekit_db *db);
+/**
+ * Copies one consistent snapshot of `source` to a new file at `destination`, even while another process writes to it.
+ * Reads without the writer lock; `destination` must not exist.
+ */
+SQLITEKIT_API int sqlitekit_snapshot(const char *source SQLITEKIT_UTF8, const char *destination SQLITEKIT_UTF8);
 
 #ifdef __cplusplus
 }

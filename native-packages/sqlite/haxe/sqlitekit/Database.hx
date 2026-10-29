@@ -19,6 +19,11 @@ class Database {
         return new Database(opened.out_db);
     }
 
+    /** A consistent copy of the database at `source`, even one another process has open; `destination` must not exist. */
+    public static function snapshot(source:String, destination:String):Void {
+        check(SqliteKit.sqlitekit_snapshot(source, destination), "snapshot");
+    }
+
     public function exec(sql:String):Void {
         check(SqliteKit.sqlitekit_exec(live(), sql), "exec");
     }

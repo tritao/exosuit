@@ -86,6 +86,23 @@ int main(void) {
     assert(sqlitekit_changes(db) == 0);
     ok(sqlitekit_finalize(stmt));
 
+    // A snapshot reads past the writer lock and refuses to overwrite.
+    char copy[sizeof(path) + 16];
+    snprintf(copy, sizeof(copy), "%s.copy", path);
+    remove(copy);
+    ok(sqlitekit_snapshot(path, copy));
+    assert(sqlitekit_snapshot(path, copy) == SQLITEKIT_INVALID_ARGUMENT);
+    ok(sqlitekit_open(copy, 100, &other));
+    ok(sqlitekit_prepare(other, "SELECT rev FROM item WHERE id = 1", &stmt));
+    assert(sqlitekit_step(stmt) == SQLITEKIT_ROW);
+    assert(sqlitekit_column_int64(stmt, 0) == 2);
+    ok(sqlitekit_finalize(stmt));
+    ok(sqlitekit_close(other));
+    remove(copy);
+    char copy_sidecar[sizeof(copy) + 32];
+    snprintf(copy_sidecar, sizeof(copy_sidecar), "%s.sqlitekit-lock", copy);
+    remove(copy_sidecar);
+
     ok(sqlitekit_prepare(db, "SELECT 1", &stmt));
     assert(sqlitekit_close(db) == 5); // SQLITE_BUSY keeps lock and db live.
     ok(sqlitekit_finalize(stmt));

@@ -49,6 +49,11 @@ interface SqliteKit @target("portable-abi64") @library("sqlitekit") {
 	extern fn sqlitekit_reset(stmt: ptr<sqlitekit_stmt>) -> c_int;
 	extern fn sqlitekit_rollback(db: ptr<sqlitekit_db>) -> c_int;
 	/**
+	 * Copies one consistent snapshot of `source` to a new file at `destination`, even while another process writes to it.
+	 * Reads without the writer lock; `destination` must not exist.
+	 */
+	extern fn sqlitekit_snapshot(source: utf8, destination: utf8) -> c_int;
+	/**
 	 * Returns SQLITEKIT_ROW or SQLITEKIT_DONE on success.
 	 */
 	extern fn sqlitekit_step(stmt: ptr<sqlitekit_stmt>) -> c_int;

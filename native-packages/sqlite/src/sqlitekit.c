@@ -320,3 +320,51 @@ SQLITEKIT_API int64_t sqlitekit_changes(sqlitekit_db *db) {
 SQLITEKIT_API int64_t sqlitekit_last_insert_rowid(sqlitekit_db *db) {
     return db ? sqlite3_last_insert_rowid(db->handle) : 0;
 }
+
+SQLITEKIT_API int sqlitekit_snapshot(const char *source, const char *destination) {
+    if (!source || !*source || !destination || !*destination)
+        return error_with(SQLITEKIT_INVALID_ARGUMENT, "source and destination are required");
+    sqlite3 *from = NULL, *to = NULL;
+    int rc = sqlite3_open_v2(source, &from, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, NULL);
+    if (rc == SQLITE_OK)
+        rc = sqlite3_busy_timeout(from, 5000);
+    if (rc != SQLITE_OK) {
+        error_with(rc, from ? sqlite3_errmsg(from) : sqlite3_errstr(rc));
+        sqlite3_close(from);
+        return rc;
+    }
+    // SQLITE_OPEN_EXCLUSIVE is not a VFS flag here; refuse an existing destination before creating it.
+    sqlite3 *probe = NULL;
+    if (sqlite3_open_v2(destination, &probe, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK) {
+        sqlite3_close(probe);
+        sqlite3_close(from);
+        return error_with(SQLITEKIT_INVALID_ARGUMENT, "snapshot destination already exists");
+    }
+    sqlite3_close(probe);
+    rc = sqlite3_open_v2(destination, &to, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, NULL);
+    if (rc == SQLITE_OK) {
+        sqlite3_backup *backup = sqlite3_backup_init(to, "main", from, "main");
+        if (!backup) {
+            rc = sqlite3_errcode(to);
+            error_with(rc, sqlite3_errmsg(to));
+        } else {
+            // One step of all pages holds one read transaction, so the copy is a single snapshot.
+            int attempts = 0;
+            do {
+                rc = sqlite3_backup_step(backup, -1);
+                if (rc == SQLITE_BUSY || rc == SQLITE_LOCKED)
+                    sqlite3_sleep(50);
+            } while ((rc == SQLITE_BUSY || rc == SQLITE_LOCKED) && ++attempts < 100);
+            const int finished = sqlite3_backup_finish(backup);
+            if (rc == SQLITE_DONE)
+                rc = finished;
+            if (rc != SQLITE_OK)
+                error_with(rc, sqlite3_errstr(rc));
+        }
+    } else {
+        error_with(rc, to ? sqlite3_errmsg(to) : sqlite3_errstr(rc));
+    }
+    sqlite3_close(to);
+    sqlite3_close(from);
+    return rc;
+}
