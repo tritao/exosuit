@@ -15,7 +15,7 @@ import workspace.transport.NativeRpcTransport;
 
 private typedef MachineRequest = {
 	var message:Dynamic;
-	var done:Null<(Null<Dynamic>, Null<String>) -> Void>;
+	var answer:Null<(Null<Dynamic>, Null<String>) -> Void>;
 }
 
 /**
@@ -97,7 +97,7 @@ class MachineClient {
 				done(null, "suit is off (EXOSUIT_SUIT=off), so this machine has no workspaces");
 			return;
 		}
-		queue.push({message: message, done: done});
+		queue.push({message: message, answer: done});
 	}
 
 	/** Moves requests along; call every frame. */
@@ -191,7 +191,7 @@ class MachineClient {
 			error = problem;
 		revision++;
 		if (request != null) {
-			var callback:Null<(Null<Dynamic>, Null<String>) -> Void> = request.done;
+			var callback:Null<(Null<Dynamic>, Null<String>) -> Void> = request.answer;
 			if (callback != null)
 				callback(problem == null ? reply : null, problem);
 		}
