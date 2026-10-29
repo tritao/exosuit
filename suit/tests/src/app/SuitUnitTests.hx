@@ -186,6 +186,7 @@ class SuitUnitTests {
 		var temp = Sys.systemName() == "Windows" ? Sys.getEnv("TEMP") : "/tmp";
 		var base = haxe.io.Path.join([temp, "suit-machine-" + Sys.getPid() + "-" + Std.int(Sys.time())]);
 		var one = haxe.io.Path.join([base, "one"]), two = haxe.io.Path.join([base, "two"]), gone = haxe.io.Path.join([base, "gone"]);
+		sys.FileSystem.createDirectory(base);
 		sys.FileSystem.createDirectory(one);
 		sys.FileSystem.createDirectory(two);
 		var file = haxe.io.Path.join([base, "home", "machine.json"]);
