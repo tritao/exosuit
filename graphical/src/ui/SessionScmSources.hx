@@ -11,8 +11,9 @@ import workspace.PathKey;
 	selected, and stay the same source (a prompt opened for it stays valid) while the selection changes.
 **/
 class SessionScmSources {
-	/** A source unused for this many seconds is disposed: its session closed or moved to another folder. */
-	public static final IDLE_SECONDS:Float = 30;
+	/** A source unused for this many seconds is disposed: its session closed or moved to another folder. Generous, so a
+		prompt left open behind a hidden session keeps its source. */
+	public static final IDLE_SECONDS:Float = 300;
 
 	final caches:Map<String, LocalScmSourceCache> = [];
 	final used:Map<String, Float> = [];
