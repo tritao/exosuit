@@ -119,6 +119,10 @@ class ExosuitApp implements DesktopUiApplication {
 	var remoteAccessPanel:Null<RemoteAccessPanel>;
 	var pairingRevision:Int = -1;
 	var machineWorkspaces:Null<workspace.client.MachineWorkspaces>;
+	var machineClient:Null<workspace.client.MachineClient>;
+	var machineSection:Null<WorkbenchMachineSection>;
+	var machineClientRevision = -1;
+	var machineRefreshAt:Float = 0;
 	var machinePanel:Null<MachinePanel>;
 	var machineRevision:Int = -1;
 	var lastTerminalCatalogRevision:Int = -1;
@@ -1520,6 +1524,7 @@ class ExosuitApp implements DesktopUiApplication {
 			requestFrame();
 		};
 		workbenchPanel.closeTerminal = closeCatalogTerminal;
+		workbenchPanel.machineSection = machineSection;
 		workbenchPanel.chooseFolder = function() application.savedWorkspaces.addPicker();
 		workbenchPanel.hasFolder = function() return application.savedWorkspaces.isOpen();
 		host.onActiveTabChanged = syncWorkbenchSessionSelection;
@@ -1574,6 +1579,58 @@ class ExosuitApp implements DesktopUiApplication {
 		}, requestFrame);
 		registerSidebarDestination("machine", IconName.Cube, function() return machinePanel,
 			new haxeon.ui.widgets.sidebar.SidebarModeOptions("Machine", 35, true));
+	}
+
+	/**
+		This machine's workspaces at the top of the Workbench, from suit (docs/architecture/0005-machines-and-workspaces.md).
+		With suit off there is no machine, and the Workbench works on the open folders as before.
+	**/
+	public function attachMachineWorkspaces(machine:workspace.client.MachineClient):Void {
+		machineClient = machine;
+		if (!machine.enabled) return;
+		machine.refresh();
+		var report = function(failure:Null<String>):Bool {
+			if (failure == null) return false;
+			application.reportError("workspace", failure);
+			requestFrame();
+			return true;
+		};
+		var open = function(entry:suit.MachineCatalog.MachineWorkspace):Void {
+			application.savedWorkspaces.restore(new workspace.SavedWorkspace(entry.id, entry.name, entry.folders), "");
+			requestFrame();
+		};
+		var openWorkspace = function():Null<String> {
+			var current = application.savedWorkspaces.current;
+			if (current != null) return current.id;
+			var roots = application.savedWorkspaces.roots();
+			var found = roots.length == 1 ? machine.workspaceFor(roots[0]) : null;
+			return found == null ? null : found.id;
+		};
+		var chooseFolder = function(title:String, chosen:String->Void):Void {
+			if (desktop != null) desktop.selectDirectory(function(accepted, paths) if (accepted && paths.length > 0) chosen(paths[0]), title);
+			else host.openCommandView(new commandview.CommandViewProvider(title + ": ", [], function(_) {}, function(_, value, _) {
+				host.closeCommandView();
+				if (value != null && StringTools.trim(value).length > 0) chosen(StringTools.trim(value));
+			}));
+		};
+		machineSection = new WorkbenchMachineSection(machine, {
+			openWorkspace: openWorkspace,
+			open: open,
+			create: function() chooseFolder("New Workspace", function(folder) machine.create(null, folder, function(created, failure) {
+				if (!report(failure) && created != null) open(created);
+			})),
+			rename: function(entry) host.openCommandView(new commandview.CommandViewProvider("Rename workspace " + entry.name + ": ", [],
+				function(_) {}, function(_, value, _) {
+					host.closeCommandView();
+					if (value != null && StringTools.trim(value).length > 0) machine.rename(entry.id, value, function(_, failure) report(failure));
+				})),
+			addFolder: function(entry) chooseFolder("Add Folder to " + entry.name, function(folder) machine.addFolder(entry.id, folder,
+				function(updated, failure) if (!report(failure) && updated != null && openWorkspace() == entry.id) open(updated))),
+			remove: function(entry) machine.delete(entry.id, function(_, failure) report(failure)),
+			showMenu: showWorkbenchMenu
+		});
+		if (workbenchPanel != null) workbenchPanel.machineSection = machineSection;
+		requestFrame();
 	}
 
 	/** Opens `root` as the workspace unless it already is; its clients then follow the folder's manager choice. */
@@ -2644,6 +2701,20 @@ class ExosuitApp implements DesktopUiApplication {
 			}
 		}
 		remoteFileSearch.update(Sys.time());
+		var workspaces = machineClient;
+		if (workspaces != null && workspaces.enabled) {
+			// Another window or suit's CLI may change the list; look again every few seconds while the Workbench shows it.
+			var now = Sys.time();
+			if (sidebar.visible && sidebar.activeId == "workbench" && now >= machineRefreshAt && !workspaces.busy()) {
+				machineRefreshAt = now + 5;
+				workspaces.refresh();
+			}
+			workspaces.poll();
+			if (machineClientRevision != workspaces.revision) {
+				machineClientRevision = workspaces.revision;
+				requestFrame();
+			}
+		}
 		var machine = machineWorkspaces;
 		if (machine != null) {
 			machine.poll(sidebar.visible && sidebar.activeId == "machine" ? 3000 : 0);

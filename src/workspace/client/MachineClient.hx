@@ -128,14 +128,15 @@ class MachineClient {
 			}
 		}
 		if (failure != null) {
+			// suit starts on demand: the editor asks once, then retries connecting until the deadline.
 			if (!started) {
-				// suit starts on demand; the editor asks once, then retries this request.
 				started = true;
 				SuitClient.ensureDaemon();
-				close();
+				deadline = now + TIMEOUT;
+			}
+			if (transport == null && now + RETRY < deadline) {
 				current = null;
 				retryAt = now + RETRY;
-				deadline = now + TIMEOUT;
 				return;
 			}
 			finish(null);

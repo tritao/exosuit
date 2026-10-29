@@ -191,6 +191,8 @@ class GraphicalMain {
 					instance.attachWorkspace(workspaceClient);
 					instance.attachWorkbench(workspaceClient);
 					instance.attachRemoteAccess(workspaceClient);
+					instance.attachMachineWorkspaces(new workspace.client.MachineClient(context.events,
+						function() return NativeKit.nk_time_seconds() * 1000));
 					instance.attachMachine(new workspace.client.MachineWorkspaces(instance.application.processes,
 						workspace.client.LocalWorkspaceClient.findLauncher(), function() return NativeKit.nk_time_seconds() * 1000), workspaceClient);
 				}

@@ -45,7 +45,9 @@ class WorkbenchPanel implements View {
 	public var onError:Null<String->Void>;
 	/** Closes a catalog terminal and its views; selection actions use it. */
 	public var closeTerminal:Null<TerminalRecord->Void>;
-	/** Opens a folder picker; with `hasFolder`, the empty Workbench offers it when no folder is open. */
+	/** This machine and its workspaces, above the groups; null when suit is off. */
+	public var machineSection:Null<View>;
+	/** Opens a folder picker; with `hasFolder` and no machine section, the empty Workbench offers it when no folder is open. */
 	public var chooseFolder:Null<Void->Void>;
 	public var hasFolder:Null<Void->Bool>;
 	var lastReportedError:Null<String>;
@@ -673,7 +675,7 @@ class WorkbenchPanel implements View {
 		var choose = chooseFolder, folder = hasFolder;
 		var style = new LayoutStyle(); style.width = LayoutAxis.stretch(); style.childGap = 8; style.padding = new Insets(12, 8, 12, 8);
 		var hint = haxeon.ui.core.TextStyleOverride.text(12);
-		if (catalog == null && choose != null && folder != null && !folder()) {
+		if (catalog == null && machineSection == null && choose != null && folder != null && !folder()) {
 			var button = new Button("Open Folder…", null, function() choose(), "workbench-open-folder");
 			button.variant = ButtonVariant.Primary;
 			return new Column("workbench-empty", [
@@ -697,7 +699,10 @@ class WorkbenchPanel implements View {
 	public function build(context:BuildContext):RenderNode {
 		syncState();
 		var selected = groupFor(tree.selectedKey);
-		var rows:Array<KeyedView> = [new KeyedView("tree", tree)];
+		var rows:Array<KeyedView> = [];
+		var section = machineSection;
+		if (section != null) rows.push(new KeyedView("machine", section));
+		rows.push(new KeyedView("tree", tree));
 		var start = emptyState();
 		if (start != null) rows.push(new KeyedView("empty-state", start));
 		var error = draftError == null ? client.terminalCatalogError() : draftError;
