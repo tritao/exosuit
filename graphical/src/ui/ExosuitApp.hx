@@ -1607,7 +1607,7 @@ class ExosuitApp implements DesktopUiApplication {
 			return found == null ? null : found.id;
 		};
 		var chooseFolder = function(title:String, chosen:String->Void):Void {
-			if (desktop != null) desktop.selectDirectory(function(accepted, paths) if (accepted && paths.length > 0) chosen(paths[0]), title);
+			if (desktop != null) desktop.selectDirectory(function(accepted, paths) { if (accepted && paths.length > 0) chosen(paths[0]); }, title);
 			else host.openCommandView(new commandview.CommandViewProvider(title + ": ", [], function(_) {}, function(_, value, _) {
 				host.closeCommandView();
 				if (value != null && StringTools.trim(value).length > 0) chosen(StringTools.trim(value));
@@ -1625,7 +1625,7 @@ class ExosuitApp implements DesktopUiApplication {
 					if (value != null && StringTools.trim(value).length > 0) machine.rename(entry.id, value, function(_, failure) report(failure));
 				})),
 			addFolder: function(entry) chooseFolder("Add Folder to " + entry.name, function(folder) machine.addFolder(entry.id, folder,
-				function(updated, failure) if (!report(failure) && updated != null && openWorkspace() == entry.id) open(updated))),
+				function(updated, failure) { if (!report(failure) && updated != null && openWorkspace() == entry.id) open(updated); })),
 			remove: function(entry) machine.delete(entry.id, function(_, failure) report(failure)),
 			showMenu: showWorkbenchMenu
 		});
