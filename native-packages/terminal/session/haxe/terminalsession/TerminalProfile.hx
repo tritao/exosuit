@@ -49,7 +49,9 @@ class TerminalProfile {
                 var processor = Sys.getEnv("ComSpec");
                 if (processor == null || !absolute(processor)) throw "Command processor is unavailable";
                 if (arguments.length > 0) throw "Script overrides require an executable rather than a command shim";
-                return new TerminalProfile(processor, ["/d", "/s", "/c", '""' + resolved + '""'], cwd);
+                // NativeKit quotes each argument for the C runtime (a path with spaces becomes "path"), and cmd /c keeps
+                // a lone quoted program path. Hand-written ""path"" quoting reached cmd escaped as \"\" and failed.
+                return new TerminalProfile(processor, ["/d", "/c", resolved], cwd);
             }
             return new TerminalProfile(resolved, arguments, cwd);
         }
