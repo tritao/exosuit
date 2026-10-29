@@ -464,6 +464,8 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       if (request == null) {agentActionError = "Refresh this session before submitting a message";agentsRevision++;return;}
     }
     var mutate = action != "read";
+    // These replace the catalog record, and their callers read it, so they are accepted once it is in place.
+    var updatesRecord = action == "rename" || action == "move" || action == "inspect-name" || action == "rename-native";
     if (mutate ? agentMutation
       : agentReadCount >= 4 || agentReadPending.exists(id) || (agentMutation && agentMutationId == id)) return;
     if (mutate) {
@@ -498,16 +500,17 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       }
       var current=agentViews.get(id);
       if (current != null && inputToken != null) current.inputToken=inputToken;
-      if (accepted != null) accepted();
+      if (accepted != null && !updatesRecord) accepted();
       if (mutate) agentActionError=null; else agentsError=null;
       agentsRevision++;
     },function(value) {
       if (rpc()!=connection || instance()!=generation || agentTokens.get(id)!=selected) return;
-      if ((action == "rename" || action == "move" || action == "inspect-name" || action == "rename-native") && agentCatalog != null) {
+      if (updatesRecord && agentCatalog != null) {
         agentsRequestToken++; agentsPending=false; agentsNext=0;
         for (index in 0...agentCatalog.records.length) if (agentCatalog.records[index].id == id) agentCatalog.records[index]=value.record;
       }
       publishLatestAgentView(connection,id,selected,value);
+      if (accepted != null && updatesRecord) accepted();
     },function(error,acknowledged) {
       if (rpc()!=connection || instance()!=generation || agentTokens.get(id)!=selected) return;
       var errorsBefore=agentsError+"\n"+agentActionError;
