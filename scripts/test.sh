@@ -75,6 +75,7 @@ check workspace-scm python3 "$root_dir/scripts/test-workspace-scm.py"
 check relay bash "$root_dir/scripts/test-relay.sh"
 check workspace-persistence bash "$root_dir/scripts/test-workspace-persistence.sh"
 check workspace-attachment bash "$root_dir/scripts/test-workspace-attachment.sh"
+check workspace-manager-choice python3 "$root_dir/scripts/test-workspace-manager-choice.py"
 check relay-setup python3 "$root_dir/scripts/test-relay-setup.py"
 run_test workspace-lifecycle
 check service-updates python3 "$root_dir/scripts/test-service-updates.py"
