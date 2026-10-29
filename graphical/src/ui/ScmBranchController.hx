@@ -6,7 +6,8 @@ import scm.ScmSource;
 class ScmBranchController {
 	final host:UiWorkbenchHost;
 	final sourceControlSource:Void->Null<ScmSource>;
-	final canCheckoutScmRepository:Null<scm.ScmRepository>->Bool;
+	/** Whether branches can be switched in a repository through a source (null: the panel's). */
+	final canCheckoutScmRepository:(Null<scm.ScmRepository>, Null<ScmSource>)->Bool;
 	final activateSidebarDestination:String->Void;
 	final requestFrame:Void->Void;
 	final reportError:String->Void;
@@ -15,7 +16,7 @@ class ScmBranchController {
 	var scmBranchRequestToken:Int = 0;
 
 	public function new(host:UiWorkbenchHost, sourceControlSource:Void->Null<ScmSource>,
-			canCheckoutScmRepository:Null<scm.ScmRepository>->Bool, activateSidebarDestination:String->Void,
+			canCheckoutScmRepository:(Null<scm.ScmRepository>, Null<ScmSource>)->Bool, activateSidebarDestination:String->Void,
 			requestFrame:Void->Void, reportError:String->Void, nextOperationId:Void->String) {
 		this.host = host;
 		this.sourceControlSource = sourceControlSource;
@@ -26,7 +27,13 @@ class ScmBranchController {
 		this.nextOperationId = nextOperationId;
 	}
 
-	function isScmSourceActive(identity:String):Bool {
+	/**
+		Whether a request through `source` still stands. A request through the panel's source lapses when that source
+		changes; one through a pinned source (a session's, see open) lasts while it is connected, and its `scopeValid`
+		decides the rest.
+	**/
+	function isScmSourceActive(identity:String, ?pinned:ScmSource):Bool {
+		if (pinned != null) return pinned.connected() && pinned.identity() == identity;
 		var source = sourceControlSource();
 		return source != null && source.identity() == identity;
 	}
@@ -45,9 +52,13 @@ class ScmBranchController {
 		requestFrame();
 	}
 
-	public function open(repository:Null<scm.ScmRepository>, ?scopeValid:Void->Bool):Void {
+	/**
+		Shows the branches of `repository` (the source's first when null). `through` pins the source the picker reads and
+		acts through, instead of the panel's (an Agent session's own source); `scopeValid` then guards the request.
+	**/
+	public function open(repository:Null<scm.ScmRepository>, ?scopeValid:Void->Bool, ?through:ScmSource):Void {
 		if (scopeValid != null && !scopeValid()) return;
-		var source = sourceControlSource();
+		var source = through != null ? through : sourceControlSource();
 		if (source == null) { showUnavailable("No source control repository is available."); return; }
 		var target = repository;
 		if (target == null) {
@@ -57,7 +68,7 @@ class ScmBranchController {
 		if (target == null) { showUnavailable("Repository discovery is still in progress."); return; }
 		if (!source.connected()) { showUnavailable("Reconnect the workspace to switch branches."); return; }
 		var error = source.error(target.id);
-		if (!canCheckoutScmRepository(target)) {
+		if (!canCheckoutScmRepository(target, through)) {
 			var features = source.features(target.id);
 			showUnavailable(error != null ? error.message : !target.trusted ? "Trust this repository before switching branches." :
 				features == null ? "Repository capabilities are still loading." : !features.branches ? "This source control provider does not support branch switching." :
@@ -70,7 +81,7 @@ class ScmBranchController {
 		var identity = source.identity();
 		requestFrame();
 		var job = source.branches(selectedRepository.id, function(result) {
-			if (token != scmBranchRequestToken || !isScmSourceActive(identity)) return;
+			if (token != scmBranchRequestToken || !isScmSourceActive(identity, through)) return;
 			scmBranchJob = null;
 			if (scopeValid != null && !scopeValid()) { host.closeCommandView(); return; }
 			if (result.error != null) {
@@ -78,12 +89,13 @@ class ScmBranchController {
 				requestFrame();
 				return;
 			}
-			showBranches(source, selectedRepository, result.value == null ? [] : result.value, scopeValid);
+			showBranches(source, selectedRepository, result.value == null ? [] : result.value, scopeValid, through);
 		});
 		if (!job.complete && !job.cancelled) scmBranchJob = job;
 	}
 
-	function showBranches(source:ScmSource, repository:scm.ScmRepository, branches:Array<scm.ScmBranch>, ?scopeValid:Void->Bool):Void {
+	function showBranches(source:ScmSource, repository:scm.ScmRepository, branches:Array<scm.ScmBranch>, ?scopeValid:Void->Bool,
+			?through:ScmSource):Void {
 		var entries:Array<commandview.CommandViewEntry> = [
 			new commandview.CommandViewEntry("Create Branch…", "Create a branch from the current HEAD", "@create", null,
 				"create branch new", "Actions"),
@@ -96,53 +108,55 @@ class ScmBranchController {
 			entries.push(new commandview.CommandViewEntry(branch.name, detail, branch.reference, null,
 				branch.name + " " + branch.reference + " " + detail, section));
 		}
-		var valid = function() return (scopeValid == null || scopeValid()) && isScmSourceActive(source.identity())
-			&& canCheckoutScmRepository(repository);
+		var valid = function() return (scopeValid == null || scopeValid()) && isScmSourceActive(source.identity(), through)
+			&& canCheckoutScmRepository(repository, through);
 		host.openCommandView(new commandview.CommandViewProvider("Switch Branch: ", entries, function(_) {}, function(entry, _, _) {
 			if (!valid()) { host.closeCommandView(); return; }
 			host.closeCommandView();
 			if (entry == null) return;
-			if (entry.value == "@create") createPrompt(repository, scopeValid);
+			if (entry.value == "@create") createPrompt(repository, scopeValid, through);
 			else if (entry.value == "@source-control") activateSidebarDestination("scm");
-			else checkout(source, repository, entry.value, scopeValid);
+			else checkout(source, repository, entry.value, scopeValid, through);
 		}, function() cancel()));
 	}
 
-	public function createPrompt(repository:Null<scm.ScmRepository>, ?scopeValid:Void->Bool):Void {
+	public function createPrompt(repository:Null<scm.ScmRepository>, ?scopeValid:Void->Bool, ?through:ScmSource):Void {
 		if (scopeValid != null && !scopeValid()) return;
-		var source = sourceControlSource();
+		var source = through != null ? through : sourceControlSource();
 		if (source == null) return;
 		var target = repository;
 		if (target == null) {
 			var repositories = source.repositories();
 			target = repositories.length == 0 ? null : repositories[0];
 		}
-		if (target == null || !canCheckoutScmRepository(target)) return;
+		if (target == null || !canCheckoutScmRepository(target, through)) return;
 		var selectedRepository:scm.ScmRepository = cast target;
 		var identity = source.identity();
 		var selected = selectedRepository;
 		host.openCommandView(new commandview.CommandViewProvider("New Branch: ", [], function(_) {}, function(_, name, _) {
 			host.closeCommandView();
-			if (!isScmSourceActive(identity) || (scopeValid != null && !scopeValid())) return;
-			create(source, selected, name, scopeValid);
+			if (!isScmSourceActive(identity, through) || (scopeValid != null && !scopeValid())) return;
+			create(source, selected, name, scopeValid, through);
 		}, function() {}));
 	}
 
-	function checkout(source:ScmSource, repository:scm.ScmRepository, reference:String, ?scopeValid:Void->Bool):Void {
-		apply(source, repository, scm.ScmOperation.Checkout(reference), "Switched branch", scopeValid);
+	function checkout(source:ScmSource, repository:scm.ScmRepository, reference:String, ?scopeValid:Void->Bool, ?through:ScmSource):Void {
+		apply(source, repository, scm.ScmOperation.Checkout(reference), "Switched branch", scopeValid, through);
 	}
 
-	function create(source:ScmSource, repository:scm.ScmRepository, name:String, ?scopeValid:Void->Bool):Void {
+	function create(source:ScmSource, repository:scm.ScmRepository, name:String, ?scopeValid:Void->Bool, ?through:ScmSource):Void {
 		var branch = StringTools.trim(name);
 		if (branch.length == 0) {
 			reportError("Enter a branch name");
 			return;
 		}
-		apply(source, repository, scm.ScmOperation.CreateBranch(branch), "Created branch " + branch, scopeValid);
+		apply(source, repository, scm.ScmOperation.CreateBranch(branch), "Created branch " + branch, scopeValid, through);
 	}
 
-	function apply(source:ScmSource, repository:scm.ScmRepository, operation:scm.ScmOperation, label:String, ?scopeValid:Void->Bool):Void {
-		if ((scopeValid != null && !scopeValid()) || !isScmSourceActive(source.identity()) || !canCheckoutScmRepository(repository)) return;
+	function apply(source:ScmSource, repository:scm.ScmRepository, operation:scm.ScmOperation, label:String, ?scopeValid:Void->Bool,
+			?through:ScmSource):Void {
+		if ((scopeValid != null && !scopeValid()) || !isScmSourceActive(source.identity(), through)
+			|| !canCheckoutScmRepository(repository, through)) return;
 		var snapshot = source.snapshot(repository.id);
 		if (snapshot == null) {
 			reportError("Refresh the repository before changing branches");

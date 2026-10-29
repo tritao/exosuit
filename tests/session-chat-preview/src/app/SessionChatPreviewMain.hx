@@ -14,6 +14,7 @@ import ui.CodexSessionPanel;
 class SessionChatPreviewMain {
  static function main():Int {
   var args = Sys.args();
+  if (args.indexOf("--whole-ide") >= 0) isolateState();
   var dark = args.indexOf("--light") < 0;
   var superwide = args.indexOf("--superwide") >= 0;
   var ultra = args.indexOf("--ultrawide") >= 0;
@@ -24,6 +25,21 @@ class SessionChatPreviewMain {
   options.applicationId = "Exosuit.UiExploration";
   options.width = width; options.height = superwide || ultra ? 1440 : fullHd ? 1080 : 900;
   return DesktopUiHost.run(options, function(host) return new PreviewApplication(host, dark, args));
+ }
+
+ /**
+  The whole IDE restores and saves its settings and window session under PRAGTICAL_PORTABLE, else the user's own
+  state folder. Unless the caller gave one, use a fresh temporary folder so a preview never overwrites real state.
+ **/
+ static function isolateState():Void {
+  var given = Sys.getEnv("PRAGTICAL_PORTABLE");
+  if (given != null && given.length > 0) return;
+  var base = Sys.getEnv("TEMP");
+  if (base == null || base.length == 0) base = Sys.getEnv("TMPDIR");
+  if (base == null || base.length == 0) base = "/tmp";
+  var folder = base + "/exosuit-session-chat-preview-" + Std.int(Sys.time() * 1000) + "-" + Std.random(1000000);
+  sys.FileSystem.createDirectory(folder);
+  Sys.putEnv("PRAGTICAL_PORTABLE", folder);
  }
 }
 

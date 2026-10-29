@@ -1,8 +1,34 @@
 import workspace.client.SessionLinkTarget;
 import workspace.client.CodexMarkdown;
+import workspace.client.SessionFileScope;
 
 class SessionLinksMain {
   static function require(value:Bool, message:String):Void { if (!value) throw message; }
+  /** A session in a group folder outside the workspace reaches its own folder locally, and only the root remotely. */
+  static function sessionFileScope():Void {
+    var within = SessionLinkTarget.relativeWithin;
+    var root = "C:/work", cwd = "D:/groups/feature";
+    var link = SessionLinkTarget.parse("notes/plan.md:3");
+    var linked = link == null ? "" : link.resolve(cwd);
+    require(linked == "D:/groups/feature/notes/plan.md", "Session link did not resolve against its own folder");
+    require(SessionFileScope.allows(root, cwd, linked, true, within), "Local link under the session folder was refused");
+    require(!SessionFileScope.allows(root, cwd, linked, false, within), "Remote link outside the workspace root was accepted");
+    var image = SessionLinkTarget.parse("..\\feature\\assets\\shot.png");
+    var imagePath = image == null ? "" : image.resolve(cwd);
+    require(SessionFileScope.allows(root, cwd, imagePath, true, within), "Local image under the session folder was refused");
+    require(!SessionFileScope.allows(root, cwd, imagePath, false, within), "Remote image outside the workspace root was accepted");
+    require(SessionFileScope.allows(root, cwd, "C:/work/src/Main.hx", false, within)
+      && SessionFileScope.allows(root, cwd, "c:/work/src/Main.hx", true, within), "Workspace file was refused");
+    var escape = SessionLinkTarget.parse("../secret.png");
+    require(!SessionFileScope.allows(root, cwd, escape == null ? "" : escape.resolve(cwd), true, within), "Traversal out of the session folder was accepted");
+    require(!SessionFileScope.allows(root, cwd, "D:/groups/feature-other/a.md", true, within), "Session folder prefix collision was accepted");
+    require(!SessionFileScope.allows(root, "", "D:/groups/feature/a.md", true, within), "An empty session folder widened the scope");
+    require(SessionFileScope.allowsRepository(root, "C:/work/sub", "C:/work", false, within), "Workspace repository was refused");
+    require(!SessionFileScope.allowsRepository(root, "C:/work/sub", "C:/", true, within), "Repository above the workspace was accepted");
+    require(SessionFileScope.allowsRepository(root, cwd, "D:/groups", true, within), "Local repository holding the session folder was refused");
+    require(!SessionFileScope.allowsRepository(root, cwd, "D:/groups", false, within), "Remote repository outside the workspace was accepted");
+    require(!SessionFileScope.allowsRepository(root, cwd, "C:/work", true, within), "Repository not holding the session folder was accepted");
+  }
   static function main():Void {
     for (value in ["javascript:alert(1)", "file:///etc/passwd", "data:text/html,hi", "command:run", "//server/share", "\\\\server\\share", "#anchor", "src/a.hx\n"])
       require(SessionLinkTarget.parse(value) == null, "Accepted invalid link: " + value);
@@ -69,6 +95,7 @@ class SessionLinksMain {
       "Malformed hunk invented removed-line attribution");
     require(invalidHunk[2].newLine == 1 && invalidHunk[3].newLine == 2,
       "Malformed row corrupted subsequent valid hunk counters");
+    sessionFileScope();
     trace("PASS: session link targets, locations, schemes, streaming, source fidelity and hunk bounds");
   }
 }
