@@ -50,7 +50,9 @@ directory. A workspace or a group does not. Tying the other two jobs to a folder
   switching groups is instant and swaps the tabs with it (M18.4's per-context layouts, keyed by workspace and group).
 - **Every window sees the whole machine.** Several editor windows or instances can be open, each focused on its own
   workspace and group. Each still shows every workspace on the machine with its groups, sessions and terminals,
-  updated live. Focus and tabs belong to a window; the workspaces, groups and sessions are shared.
+  updated live. Focus and tabs belong to a window; the workspaces, groups and sessions are shared. On restart, each
+  group's tabs come from the last window that saved them (stored per group, so windows never overwrite each other's
+  other groups). The last window closed is the one reopened.
 
 ### A workspace service per workspace
 

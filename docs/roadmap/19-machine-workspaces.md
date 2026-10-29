@@ -40,6 +40,9 @@ per-context layouts) and suit. Read [EXECUTION.md](EXECUTION.md) first, and reco
 
 ## Phase 0: protocol, agreed with the mobile-app branch
 
+Mobile-app work is paused (2026-10-29) while the workspace concept changes. Phase 0 is settled on this side first,
+and the mobile app resumes against the agreed protocol.
+
 - [ ] Write the wire types in `src/workspace/service/` with frozen vectors in `tests/haxeon-rpc`:
   - `WorkspaceRef {machine, workspace}` names a workspace in every request. A folder becomes an attribute.
   - `CatalogWatch`: a subscription to one service's lightweight catalog (groups, sessions, terminals, status and
@@ -194,8 +197,18 @@ them exactly.
 - [ ] Each window registers with suit (it already does) with its focused workspace and group, so the tree can show
   "open in another window".
 - [ ] "Open in New Window" on a workspace or group starts another editor instance focused there.
-- [ ] Two windows on the same group each keep their own tabs and both see the same sessions live. Input to a
-  session from one window shows in the other.
+- [ ] **Tabs belong to the window.** Two windows on the same group each keep their own tabs, and both see the same
+  sessions live. Input to a session from one window shows in the other.
+- [ ] **Restore: the last write wins, per group.**
+  - A window saves a group's tab snapshot when it switches away from that group, when it closes, and periodically,
+    so a crash loses little.
+  - Snapshots are stored one file per `machine/workspace/group`, written atomically. Two windows therefore never
+    overwrite each other's other groups, and the most recent writer of a group wins for that group.
+  - On restart exosuit opens one window, the last one closed: its focus, and its tabs for that group. Every other
+    group restores from its most recent snapshot, whichever window wrote it. Other windows are not reopened
+    automatically; Open in New Window brings back any workspace or group.
+  - This replaces the single `session.conf` tab section for contexts. The window-level chrome (window size and the
+    last focused context) stays in one small file written by the window that closes last.
 - [ ] The same file open in two windows: the existing file-safety rules (external change detection and save
   conflicts) apply. Add a test.
 - [ ] suit's orphan rules and Quit already handle several editors. Check that per-workspace services stay up while
@@ -203,8 +216,12 @@ them exactly.
 - [ ] Tests: two editor processes, different workspaces. Each sees the other's new group and session. Closing one
   leaves the other's services running.
 
-Acceptance: two windows work in parallel on different workspaces; each sees all of the machine's state live; neither
-disturbs the other's focus or tabs.
+Acceptance:
+- Two windows work in parallel on different workspaces. Each sees all of the machine's state live, and neither
+  disturbs the other's focus or tabs.
+- Two windows on the same group change their tabs differently and then close in order A, B. After a restart, the
+  window shows B's tabs for that group, and A's tabs for any group only A touched.
+- Killing a window mid-session loses at most the last periodic save.
 
 ## Phase 9: remote clients by workspace (ADR 0005 steps 6 and 7)
 
@@ -237,6 +254,7 @@ Phases 1–3 can go in parallel after 0. Phase 4 is the critical path, and it st
 - **Connection fan-out**, with every window connected to every service. Mitigations: catalog-only connections,
   measured limits, and idle services shown from suit's list without connecting.
 - **Switch latency** depends on views staying attached. Mitigations: a warm-group cap and a measured budget.
-- **The mobile app** is built concurrently. Phase 0 comes first; nothing before Phase 9 changes what it relies on.
+- **The mobile app** is paused until Phase 0 is agreed. When it resumes, nothing before Phase 9 changes what it
+  relies on.
 - **Platform API migration** (haxeon `56c690f4`) is pending. Doing it before Phase 4 avoids changing these files
   twice.
