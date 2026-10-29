@@ -93,6 +93,22 @@ phone shows.
   create one: it asks for a name and the first folder on that machine. **Add folder** adds more.
 - **Agent mode** opens on the Workbench. Selecting a workspace attaches to each of its folders' services and shows
   their groups, one section per folder. New group asks which folder when the workspace has more than one.
+- **One tree.** Groups and sessions nest under their workspace, not in a separate list below the workspaces:
+
+  ```
+  cube · this machine
+    ▸ exosuit
+    ▾ resume-2026
+        ▾ Work
+            Codex · Terminal
+    ▸ eon-series
+    + New Workspace…
+  ```
+
+  First, only the open workspace is expanded: expanding another opens it, and the previous one collapses. Later
+  (with step 3 and the remote view), every expanded workspace shows its groups at once, which needs a client per
+  workspace's folder services, the same attachment remote clients need. The first Workbench (step 2) still shows the
+  open workspace's groups as a list under the workspace list; users read that list as unrelated to the workspaces.
 - **Editor mode** stays folder-first. Opening a folder uses a workspace whose only folder it is, and creates one if
   none exists. **Add Folder to Workspace** writes to suit's list.
 - A saved `.workspace` file becomes a pointer to the machine and workspace id, with name and folders as a fallback
