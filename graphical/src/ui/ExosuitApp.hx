@@ -5366,6 +5366,7 @@ class ExosuitApp implements DesktopUiApplication {
 	function clearLocalScmSource():Void {
 		if (panelScm.clear()) scmBranches.cancel();
 		editorScm.clear();
+		sessionScm.clear();
 	}
 
 	static function normalizedLocalRoot(path:String):String {
