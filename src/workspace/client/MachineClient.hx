@@ -190,8 +190,9 @@ class MachineClient {
 		if (request != null && request.message.op == "machine" || problem == null)
 			error = problem;
 		revision++;
-		if (request != null && request.done != null)
-			request.done(problem == null ? reply : null, problem);
+		var done = request == null ? null : request.done;
+		if (done != null)
+			done(problem == null ? reply : null, problem);
 	}
 
 	function close():Void {
