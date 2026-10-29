@@ -32,9 +32,11 @@ class SessionScmSources {
 	**/
 	public function get(service:ScmService, contextRoots:Array<String>, cwd:String, now:Float,
 			?created:LocalScmSource->Void):Null<LocalScmSource> {
-		prune(now);
 		var folders = roots(contextRoots, cwd);
 		var key = PathKey.of(cwd == null ? "" : cwd);
+		// Mark this folder used first, so pruning never disposes the source about to be returned.
+		if (caches.exists(key)) used.set(key, now);
+		prune(now);
 		if (folders.length == 0) { remove(key); return null; }
 		var cache = caches.get(key);
 		if (cache == null) { cache = new LocalScmSourceCache(); caches.set(key, cache); }
