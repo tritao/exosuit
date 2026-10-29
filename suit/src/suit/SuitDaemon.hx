@@ -54,6 +54,7 @@ class SuitDaemon {
 	final idleSeconds:Float;
 	final relay:SuitRelayHosting;
 	var shownRelay:String = "";
+	var catalog:Null<MachineCatalog> = null;
 	/** Started at login: stays up with nothing to track, so the tray icon stays. */
 	final resident:Bool;
 
@@ -307,6 +308,23 @@ class SuitDaemon {
 					tray = new SuitTray(tooltip(), findIcon());
 				menuRequested = true;
 				return {ok: true};
+			case "machine":
+				return {ok: true, machine: machine().json()};
+			case "workspace-create":
+				var created = machine().create(SuitRecords.stringField(request, "name"), SuitRecords.stringField(request, "folder"));
+				return {ok: true, workspace: created, machine: machine().json()};
+			case "workspace-rename":
+				var renamed = machine().rename(SuitRecords.stringField(request, "workspace"), SuitRecords.stringField(request, "name"));
+				return {ok: true, workspace: renamed, machine: machine().json()};
+			case "workspace-delete":
+				machine().delete(SuitRecords.stringField(request, "workspace"));
+				return {ok: true, machine: machine().json()};
+			case "workspace-add-folder":
+				var added = machine().addFolder(SuitRecords.stringField(request, "workspace"), SuitRecords.stringField(request, "folder"));
+				return {ok: true, workspace: added, machine: machine().json()};
+			case "workspace-remove-folder":
+				var removed = machine().removeFolder(SuitRecords.stringField(request, "workspace"), SuitRecords.stringField(request, "folder"));
+				return {ok: true, workspace: removed, machine: machine().json()};
 			case "login-toggle":
 				// As the tray's checkbox does: in the background, answered at once.
 				SuitLogin.toggleInBackground();
@@ -315,6 +333,13 @@ class SuitDaemon {
 				var relayReply = relay.handle(request);
 				return relayReply != null ? relayReply : {ok: false, error: "unknown request"};
 		}
+	}
+
+	/** This machine's workspaces, loaded on first use so a damaged machine.json fails requests, not the daemon. */
+	function machine():MachineCatalog {
+		if (catalog == null)
+			catalog = new MachineCatalog(MachineCatalog.file(), MachineCatalog.existingFolders());
+		return catalog;
 	}
 
 	function findIcon():Null<String> {

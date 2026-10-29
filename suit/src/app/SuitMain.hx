@@ -34,6 +34,10 @@ class SuitMain {
 		"  relay disconnect <client>  end one remote client's session (id or a prefix of 4+ characters); it is refused for 60 s",
 		"  relay retry <workspace>   try again to host a workspace that failed",
 		"  relay forget <workspace>  stop hosting it from suit and forget its record (needed after moving a build)",
+		"  machine [--json]          this machine and its workspaces (the daemon must be running)",
+		"  workspace new <folder> [--name <name>]       add a workspace with one folder",
+		"  workspace rename <id> <name> | delete <id>   rename or remove a workspace (its folders are untouched)",
+		"  workspace add-folder|remove-folder <id> <folder>  change a workspace's folders",
 		"  login [on|off|status]     start suit at login (off by default; Windows Run key, XDG autostart elsewhere)",
 		"  quit                      quit Exosuit: stop everything, editors asked to close first",
 		"  start                     start the daemon if it is not running",
@@ -238,6 +242,43 @@ class SuitMain {
 				}
 				var inventory = new SuitInventory();
 				print(StringTools.trim(SuitReport.results(new SuitTerminator(inventory, SuitActions.everything(inventory)).run())));
+				return 0;
+			case "machine":
+				var reply = SuitControl.request({op: "machine"});
+				if (reply == null)
+					throw "suit daemon is not running (suit start)";
+				if (reply.ok != true)
+					throw reply.error;
+				if (json) {
+					print(Json.stringify(reply.machine));
+					return 0;
+				}
+				var lines = ['${reply.machine.name} · this machine'];
+				for (workspace in (reply.machine.workspaces : Array<Dynamic>))
+					lines.push('  ${workspace.name}  (${workspace.id})
+    ' + (workspace.folders : Array<String>).join("
+    "));
+				if ((reply.machine.workspaces : Array<Dynamic>).length == 0)
+					lines.push("  no workspaces");
+				print(lines.join("
+"));
+				return 0;
+			case "workspace":
+				var request:Dynamic = switch rest.length > 0 ? rest[0] : "" {
+					case "new" if (rest.length == 2 || rest.length == 4 && rest[2] == "--name"):
+						{op: "workspace-create", folder: rest[1], name: rest.length == 4 ? rest[3] : null};
+					case "rename" if (rest.length == 3): {op: "workspace-rename", workspace: rest[1], name: rest[2]};
+					case "delete" if (rest.length == 2): {op: "workspace-delete", workspace: rest[1]};
+					case "add-folder" if (rest.length == 3): {op: "workspace-add-folder", workspace: rest[1], folder: rest[2]};
+					case "remove-folder" if (rest.length == 3): {op: "workspace-remove-folder", workspace: rest[1], folder: rest[2]};
+					default: throw USAGE;
+				}
+				var reply = SuitControl.request(request);
+				if (reply == null)
+					throw "suit daemon is not running (suit start)";
+				if (reply.ok != true)
+					throw reply.error;
+				print(Json.stringify(reply.workspace == null ? reply.machine : reply.workspace));
 				return 0;
 			case "start":
 				if (SuitControl.request({op: "status"}, 1) != null) {

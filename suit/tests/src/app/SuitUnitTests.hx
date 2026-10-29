@@ -7,6 +7,7 @@ import suit.SuitClock;
 import suit.SuitInventory;
 import suit.SuitLineage;
 import suit.SuitPaths;
+import suit.MachineCatalog;
 
 /**
 	suit's ownership rules over made-up processes: which descendants a stop may kill, what suit adopts,
@@ -31,6 +32,7 @@ class SuitUnitTests {
 		registryTimes();
 		deniedProcessKeepsItsRecord();
 		temporaryStateIsDisposable();
+		machineCatalog();
 		if (failures > 0) {
 			Sys.println('FAIL: $failures suit unit check(s)');
 			Sys.exit(1);
@@ -177,6 +179,50 @@ class SuitUnitTests {
 		check(!SuitClient.underTemp(temp + "-elsewhere/settings"), "a sibling of the temp folder is not");
 		check(!SuitClient.underTemp(Sys.systemName() == "Windows" ? "C:/Users/someone/AppData/Local/exosuit" : "/home/someone/.local/state"),
 			"a user's own state is not disposable");
+	}
+
+	/** The machine's workspaces: first-start import, edits, persistence, and the rules each edit keeps. */
+	static function machineCatalog():Void {
+		var temp = Sys.systemName() == "Windows" ? Sys.getEnv("TEMP") : "/tmp";
+		var base = haxe.io.Path.join([temp, "suit-machine-" + Std.random(1000000000)]);
+		var one = haxe.io.Path.join([base, "one"]), two = haxe.io.Path.join([base, "two"]), gone = haxe.io.Path.join([base, "gone"]);
+		sys.FileSystem.createDirectory(one);
+		sys.FileSystem.createDirectory(two);
+		var file = haxe.io.Path.join([base, "home", "machine.json"]);
+		try {
+			var catalog = new MachineCatalog(file, [one, one, gone]);
+			check(catalog.state.workspaces.length == 1 && catalog.state.workspaces[0].name == "one",
+				"a new machine imports each existing folder once, named after it, and skips folders that are gone");
+			check(catalog.state.name.length > 0 && StringTools.startsWith(catalog.state.id, "machine-"), "a new machine has a name and an id");
+			var created = catalog.create(null, two);
+			check(created.name == "two" && created.folders.length == 1, "a workspace defaults to its folder's name");
+			check(fails(function() catalog.create("x", gone)), "a workspace's folder must exist");
+			check(fails(function() catalog.create("x", "relative/folder")), "a workspace's folder must be absolute");
+			var both = catalog.addFolder(created.id, one);
+			check(both.folders.length == 2, "a folder is added");
+			check(fails(function() catalog.addFolder(created.id, one + "/")), "a folder is added once, however it is spelled");
+			catalog.removeFolder(created.id, one);
+			check(fails(function() catalog.removeFolder(created.id, two)), "a workspace keeps its last folder");
+			check(catalog.rename(created.id, "  Renamed  ").name == "Renamed", "names are trimmed");
+			check(fails(function() catalog.rename(created.id, " ")), "a workspace needs a name");
+			check(fails(function() catalog.rename("workspace-missing", "x")), "an unknown workspace is an error");
+			var reloaded = new MachineCatalog(file, [two]);
+			check(reloaded.state.id == catalog.state.id && reloaded.state.workspaces.length == 2
+				&& reloaded.state.workspaces[1].name == "Renamed", "the catalog persists, and an existing one imports nothing");
+			reloaded.delete(created.id);
+			check(new MachineCatalog(file).state.workspaces.length == 1, "a deleted workspace is gone after reload");
+			sys.io.File.saveContent(file, "{\"version\":1,\"id\":\"m\",\"name\":\"x\",\"workspaces\":[{\"id\":\"w\",\"name\":\"n\",\"folders\":[]}]}");
+			check(fails(function() new MachineCatalog(file)), "a damaged catalog is an error, not replaced");
+		} catch (error:Dynamic) {
+			check(false, "machine catalog: " + Std.string(error));
+		}
+		for (path in [file, haxe.io.Path.join([base, "home"]), one, two, base])
+			try (sys.FileSystem.isDirectory(path) ? sys.FileSystem.deleteDirectory(path) : sys.FileSystem.deleteFile(path)) catch (_:Dynamic) {}
+	}
+
+	static function fails(action:Void->Void):Bool {
+		try action() catch (_:Dynamic) return true;
+		return false;
 	}
 
 	static function check(condition:Bool, message:String):Void {
