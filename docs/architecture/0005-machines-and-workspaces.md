@@ -43,7 +43,8 @@ What that costs:
 ### Vocabulary
 
 - **Machine**: a computer the user runs Exosuit on, such as `cube`, with a stable id and a name (the host name,
-  renameable). **suit is the machine's process.**
+  renameable). **suit is the machine's process.** A machine serves zero or more workspaces; a fresh machine has
+  none, and its first offer is New workspace.
 - **Folder service**: today's workspace service, unchanged: one folder, its groups, terminals and agent sessions.
   A machine provides any number of them.
 - **Workspace**: a named, ordered list of one or more folders on one machine. suit keeps the list. A workspace's
@@ -75,7 +76,7 @@ Folder services do not change: same state folders, same pipes, same catalogs, sa
 
 ### 2. What the editor shows
 
-- **Agent mode** opens on the machine's workspace list. **New workspace** asks for a name and the first folder,
+- **Agent mode** opens on the machine's workspace list, which may be empty. **New workspace** asks for a name and the first folder,
   **Add folder** adds more. Selecting a workspace attaches to each of its folders' services and shows their groups,
   one section per folder. New group asks which folder when the workspace has more than one.
 - **Editor mode** stays folder-first. Opening a folder uses a workspace whose only folder it is, and creates one if
