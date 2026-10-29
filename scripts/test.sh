@@ -171,10 +171,10 @@ run_test session-links
 run_test session-chat-ui
 run_test session-diff-regression
 run_test agent-snapshot-client
-# Agent state fixtures take a scratch folder each.
+# Agent state fixtures take a scratch folder each. agent-image-staging is not run here: it reads
+# graphical/assets/icons/exosuit-16.png relative to its working directory, and `haxeon run` starts it in its project folder.
 agent_state=$(mktemp -d)
-mkdir "$agent_state/image-staging" "$agent_state/content-store" "$agent_state/codex-history"
-run_test agent-image-staging "$agent_state/image-staging"
+mkdir "$agent_state/content-store" "$agent_state/codex-history"
 run_test agent-content-store "$agent_state/content-store"
 # The native Codex adapter and proxy bridge against the deterministic fake peer; never a real inference turn.
 run_test codex-history "$agent_state/codex-history" python3 "$root_dir/scripts/run-codex-proxy.py" \
