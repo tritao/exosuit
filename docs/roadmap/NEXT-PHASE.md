@@ -77,6 +77,20 @@ Live mode and suit:
 - Starting a Claude session asks to trust the folder in Claude's own terminal UI, and Codex shows its own trust prompt.
   Consider passing the workspace's trust decision through, or explaining the prompt.
 
+### From the session-scope review (2026-10-28)
+
+- The session Commit button finds the repository through the session's own source, but hands it to the panel's source
+  (`ExosuitApp.hx` around 1562). When the session folder is outside the narrowed panel scope, the button focuses a commit
+  box that cannot commit. Disable it there, or point the panel at the session source.
+- A group folder can be any existing folder, including a drive root or the home folder, and session links, context and
+  images then reach everything under it. Consider refusing filesystem roots.
+- `sessionSourceControlSource` resolves the session folder and checks every context root about ten times per session
+  per frame. Cache the normalized folder per `cwd`.
+- `FileSystemService.normalize` does not resolve Windows junctions, so a junction inside a session folder can point
+  outside it (the workspace root already had this gap).
+- `agent-image-staging` reads an icon relative to its working directory, so it cannot run from `scripts/test.sh` yet.
+- "New session in …" does not offer groups whose folder is outside the workspace (`SessionGroupDirectory.resolve`).
+
 ## Low
 
 ### suit
