@@ -79,6 +79,12 @@ class MachineCatalog {
 		return copy(workspace);
 	}
 
+	/** Names this machine, as other machines' and devices' lists will show it. */
+	public function renameMachine(name:String):Void {
+		state.name = validName(name);
+		save();
+	}
+
 	/** Removes the workspace from the list; its folders and their services are untouched. */
 	public function delete(id:String):Void {
 		state.workspaces.remove(require(id));
@@ -200,9 +206,12 @@ class MachineCatalog {
 			var name = Sys.getEnv("COMPUTERNAME");
 			return name == null || name.length == 0 ? "this machine" : name.toLowerCase();
 		}
+		// macOS does not export HOSTNAME and has no /etc/hostname: such a machine is named with `suit machine rename`.
 		var name = Sys.getEnv("HOSTNAME");
 		if (name == null || name.length == 0)
-			try name = StringTools.trim(new sys.io.Process("hostname", ["-s"]).stdout.readAll().toString()) catch (_:Dynamic) {}
+			try name = StringTools.trim(File.getContent("/etc/hostname")) catch (_:Dynamic) {}
+		if (name != null && name.indexOf(".") > 0)
+			name = name.substr(0, name.indexOf("."));
 		return name == null || name.length == 0 ? "this machine" : name;
 	}
 

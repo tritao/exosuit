@@ -310,6 +310,9 @@ class SuitDaemon {
 				return {ok: true};
 			case "machine":
 				return {ok: true, machine: machine().json()};
+			case "machine-rename":
+				machine().renameMachine(SuitRecords.stringField(request, "name"));
+				return {ok: true, machine: machine().json()};
 			case "workspace-create":
 				var created = machine().create(SuitRecords.stringField(request, "name"), SuitRecords.stringField(request, "folder"));
 				return {ok: true, workspace: created, machine: machine().json()};

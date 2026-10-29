@@ -35,6 +35,7 @@ class SuitMain {
 		"  relay retry <workspace>   try again to host a workspace that failed",
 		"  relay forget <workspace>  stop hosting it from suit and forget its record (needed after moving a build)",
 		"  machine [--json]          this machine and its workspaces (the daemon must be running)",
+		"  machine rename <name>     name this machine",
 		"  workspace new <folder> [--name <name>]       add a workspace with one folder",
 		"  workspace rename <id> <name> | delete <id>   rename or remove a workspace (its folders are untouched)",
 		"  workspace add-folder|remove-folder <id> <folder>  change a workspace's folders",
@@ -244,7 +245,8 @@ class SuitMain {
 				print(StringTools.trim(SuitReport.results(new SuitTerminator(inventory, SuitActions.everything(inventory)).run())));
 				return 0;
 			case "machine":
-				var reply = SuitControl.request({op: "machine"});
+				var renaming = args.length == 3 && args[1] == "rename";
+				var reply = SuitControl.request(renaming ? {op: "machine-rename", name: args[2]} : {op: "machine"});
 				if (reply == null)
 					throw "suit daemon is not running (suit start)";
 				if (reply.ok != true)
