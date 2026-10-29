@@ -74,11 +74,25 @@ and a local RPC surface on its existing control pipe:
 
 Folder services do not change: same state folders, same pipes, same catalogs, same per-build choice.
 
-### 2. What the editor shows
+### 2. One client model: machines, then workspaces, then groups
 
-- **Agent mode** opens on the machine's workspace list, which may be empty. **New workspace** asks for a name and the first folder,
-  **Add folder** adds more. Selecting a workspace attaches to each of its folders' services and shows their groups,
-  one section per folder. New group asks which folder when the workspace has more than one.
+The desktop editor, the web client and the Android app are the same kind of client. Each shows a list of machines,
+each machine's workspaces, and each workspace's groups and sub-groups. They differ only in how they reach a machine:
+
+- the desktop editor reaches its own machine through suit's local pipe;
+- every client reaches other machines through the relay, as a paired device. The editor on cube pairs with octa
+  (a MacBook running suit) exactly as a phone does.
+
+So suit runs on every machine the user works on, Windows and macOS, and the editor's Workbench shows the same tree the
+phone shows.
+
+### 3. What the editor shows
+
+- **The Workbench's top level is machines**, this machine first, then paired ones, online or offline. Under each,
+  its workspaces, which may be none. **New workspace** is in the Workbench, on any machine where this client may
+  create one: it asks for a name and the first folder on that machine. **Add folder** adds more.
+- **Agent mode** opens on the Workbench. Selecting a workspace attaches to each of its folders' services and shows
+  their groups, one section per folder. New group asks which folder when the workspace has more than one.
 - **Editor mode** stays folder-first. Opening a folder uses a workspace whose only folder it is, and creates one if
   none exists. **Add Folder to Workspace** writes to suit's list.
 - A saved `.workspace` file becomes a pointer to the machine and workspace id, with name and folders as a fallback
@@ -88,7 +102,7 @@ Folder services do not change: same state folders, same pipes, same catalogs, sa
 The client change is attaching to several folder services at once. Today `LocalWorkspaceClient` serves one folder;
 the Workbench gets one client per folder of the workspace.
 
-### 3. Remote: devices pair with the machine
+### 4. Remote: devices pair with the machine
 
 - **Identity.** suit holds one relay identity per machine: the machine id, and the Noise static key and relay bearer
   in the OS credential store under it. One machine socket per machine.
@@ -107,13 +121,13 @@ This reverses one rule of the suit-relay design (16-remote-workspaces.md, "Relay
 the Noise key, device pins and grants. That rule kept secrets with the process that owned the pairings; the machine's
 pairings are now suit's.
 
-### 4. Builds
+### 5. Builds
 
 Unchanged. Each build runs its own folder services on its own state folders, and the Machine view picks which one
 the editor uses per folder. suit lists them all (`machine.services`). Devices reach the default build's folder
 services only.
 
-### 5. Migration
+### 6. Migration
 
 - suit creates the machine id and name on first start, and one workspace per existing folder service state folder
   (`workspaces/<hash>`), named after the folder. Nothing in the folder services moves.
@@ -122,19 +136,26 @@ services only.
 
 ## Build order
 
-Each step is shippable and tested on its own.
+Each step is shippable and tested on its own. The mobile app is built concurrently on its own branch, so the protocol
+comes first and both sides build against it.
 
-1. **suit's machine catalog and RPC** (section 1), with migration of existing folders into workspaces.
-2. **Workbench over several folder services**: one client per folder, groups shown per folder.
-3. **Agent mode workspace list**, New workspace, Add folder.
+0. **Protocol.** Define `machine.identity`, `workspace.*` and the folder-stream open as Haxe protocol types with
+   wire vectors (as in RPC-VECTORS.md), and agree them with the mobile-app branch before either side implements.
+   Until step 6, the mobile app keeps using today's per-folder pairing; nothing it relies on changes earlier.
+1. **suit's machine catalog and local RPC** (section 1), with migration of existing folders into workspaces.
+2. **Workbench top level: this machine and its workspaces**, with New workspace and Add folder. This is what lets
+   a fresh editor start work without opening a folder.
+3. **Workbench over several folder services**: one client per folder, groups shown per folder.
 4. **Editor mode**: open folder and Add Folder go through suit; `.workspace` files become pointers.
 5. **Machine view** reads `machine.services` from suit; `--machine` stays for scripts.
-6. **suit relay identity per machine**, devices and grants in suit, channel forwarding (section 3).
-7. **Remote clients**: machine list, workspace list and group tree in web and Android; one device, many machines.
+6. **suit relay identity per machine**, devices and grants in suit, channel forwarding (section 4).
+7. **Other machines in every client**: the editor pairs with octa; web and Android show machines, workspaces and
+   groups; one device, many machines.
 
 ## Consequences
 
-- suit becomes required for workspaces and remote access, but not for editing a folder.
+- suit becomes required for workspaces and remote access, but not for editing a folder. It must run on macOS as
+  well as Windows.
 - suit holds secrets it did not before. Its private-file and pipe checks (16-remote-workspaces.md, "Attach checks")
   now guard the machine's keys.
 - A group can still point anywhere its folder service allows today. Workspaces do not narrow that.
