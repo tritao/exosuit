@@ -167,6 +167,19 @@ PRAGTICAL_PORTABLE="$active_context_fixture/state" run_test active-context "$act
 run_test layout-controls
 run_test layout-modes
 run_test agent-scope
+run_test session-links
+run_test session-chat-ui
+run_test session-diff-regression
+run_test agent-snapshot-client
+# Agent state fixtures take a scratch folder each.
+agent_state=$(mktemp -d)
+mkdir "$agent_state/image-staging" "$agent_state/content-store" "$agent_state/codex-history"
+run_test agent-image-staging "$agent_state/image-staging"
+run_test agent-content-store "$agent_state/content-store"
+# The native Codex adapter and proxy bridge against the deterministic fake peer; never a real inference turn.
+run_test codex-history "$agent_state/codex-history" python3 "$root_dir/scripts/run-codex-proxy.py" \
+	"$root_dir/tests/workspace-agents/fake-codex.py"
+rm -rf "$agent_state"
 run_test path-key
 run_test project-scan-yield
 chmod 600 "$workspace_root/unreadable.txt"
