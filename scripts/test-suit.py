@@ -495,6 +495,40 @@ def test_daemon(fixture: Fixture) -> None:
     wait_until(lambda: "not running" in fixture.suit("status"), 30, "daemon did not stop")
 
 
+def test_machine(fixture: Fixture, directory: Path) -> None:
+    """The machine's workspaces through the daemon: first-start import, edits, and machine.json surviving a restart."""
+    state = directory / "agent-state"; folder = directory / "imported"; other = directory / "second"
+    for path in (folder, other):
+        path.mkdir(parents=True)
+    # A folder with a workspace service on its default state, as a new machine finds it.
+    default_state = state / "workspaces" / ("0" * 20)
+    default_state.mkdir(parents=True)
+    (default_state / "workspace.json").write_text(json.dumps({"root": str(folder)}))
+    fixture.environment["EXOSUIT_AGENT_STATE_HOME"] = str(state)
+    assert "started" in fixture.suit("start")
+    machine = json.loads(fixture.suit("machine", "--json"))
+    assert machine["name"] and machine["id"].startswith("machine-"), machine
+    # The fixture folder is under the temp folder, so the import leaves it out, as it does a test's.
+    assert machine["workspaces"] == [], machine
+    created = json.loads(fixture.suit("workspace", "new", str(other), "--name", "Second"))
+    assert created["name"] == "Second" and len(created["folders"]) == 1, created
+    added = json.loads(fixture.suit("workspace", "add-folder", created["id"], str(folder)))
+    assert len(added["folders"]) == 2, added
+    failed = subprocess.run([str(HL), str(SUIT), "workspace", "new", str(directory / "missing")], env=fixture.environment,
+                            capture_output=True, text=True, timeout=60)
+    assert failed.returncode != 0 and "Folder not found" in failed.stdout + failed.stderr, failed
+    fixture.suit("machine", "rename", "cube-test")
+    assert "stopped" in fixture.suit("stop")
+    wait_until(lambda: "not running" in fixture.suit("status"), 30, "daemon did not stop")
+    assert "started" in fixture.suit("start")
+    machine = json.loads(fixture.suit("machine", "--json"))
+    assert machine["name"] == "cube-test" and [w["name"] for w in machine["workspaces"]] == ["Second"], machine
+    fixture.suit("workspace", "delete", created["id"])
+    assert json.loads(fixture.suit("machine", "--json"))["workspaces"] == []
+    assert "stopped" in fixture.suit("stop")
+    wait_until(lambda: "not running" in fixture.suit("status"), 30, "daemon did not stop")
+
+
 def test_real_manager(fixture: Fixture, directory: Path) -> None:
     sys.path.insert(0, str(ROOT / "scripts"))
     from agent_test_runtime import manager_command, manager_environment, launcher_path
@@ -646,7 +680,8 @@ def main() -> int:
                  ("quit spares terminals", test_quit_spares_terminals),
                  ("hosted workspace", lambda f: test_hosted_workspace(f, directory / "h")),
                  ("late child", lambda f: test_late_child(f, directory / "l")),
-                 ("ownership", lambda f: test_ownership(f, directory / "o")), ("daemon", test_daemon)]
+                 ("ownership", lambda f: test_ownership(f, directory / "o")), ("daemon", test_daemon),
+                 ("machine", lambda f: test_machine(f, directory / "m"))]
         if options.real_manager:
             tests.append(("real manager", lambda f: test_real_manager(f, directory / "r")))
             tests.append(("EXOSUIT_SUIT switch", lambda f: test_suit_switch(f, directory / "w")))
