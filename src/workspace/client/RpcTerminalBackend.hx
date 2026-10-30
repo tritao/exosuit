@@ -61,6 +61,14 @@ class RpcTerminalBackend implements TerminalBackend {
   var snapshotOnly:Bool = false;
   var snapshotPending:Bool = false;
   var replayAfterResize:Bool = false;
+  // Geometry of the service's recorded stream, as last applied to the emulator.
+  var streamColumns:Int = 0;
+  var streamRows:Int = 0;
+  // Local view geometry of an ended terminal (0 = follows the stream). No PTY or
+  // future output depends on it, so the saved history is drawn at the pane's size
+  // without rewriting the service's record for other viewers.
+  var viewColumns:Int = 0;
+  var viewRows:Int = 0;
 
   public function new(provider:Void -> Null<WorkspaceRpcEndpoint>, terminalId:String, root:String, create:Bool, ?group:String, ?directory:String, autoClaimControl:Bool = false, requireGeometry:Bool = false) {
     this.provider = provider;
@@ -185,6 +193,7 @@ class RpcTerminalBackend implements TerminalBackend {
     controller = info.controller == true;
     controlled = info.controlled == true;
     resizePending = terminalState == "running" && controller && (columns != observedColumns || rows != observedRows);
+    if (terminalState == "running" || terminalState == "starting") restoreStreamGeometry();
     if (attached && !controller) {
       writes.resize(0);
       writeBytes = 0;
@@ -265,7 +274,27 @@ class RpcTerminalBackend implements TerminalBackend {
     geometryReady = true;
     this.columns = columns;
     this.rows = rows;
-    resizePending = controller && (columns != observedColumns || rows != observedRows);
+    resizePending = controller && terminalState == "running" && (columns != observedColumns || rows != observedRows);
+  }
+  function ended():Bool return terminalState != "running" && terminalState != "starting";
+  /** Put the emulator back on the recorded grid before more recorded events reach it. */
+  function restoreStreamGeometry():Void {
+    if (viewColumns == 0) return;
+    viewColumns = 0; viewRows = 0;
+    // Before any recorded geometry arrives, the service's current grid is the stream's.
+    output.push(streamColumns > 0 ? TerminalEvent.geometry(streamColumns, streamRows)
+      : TerminalEvent.geometry(observedColumns, observedRows));
+  }
+  /** An ended terminal has no PTY to resize; fit its view to the pane locally. */
+  function fitEndedView():Void {
+    // Wait for the whole catch-up, so a multi-page replay is not refitted between pages.
+    if (!synchronized || !ended() || pending || replayDirty || output.length > 0 || snapshotPending) return;
+    var currentColumns = viewColumns > 0 ? viewColumns : streamColumns;
+    var currentRows = viewColumns > 0 ? viewRows : streamRows;
+    if (columns == currentColumns && rows == currentRows) return;
+    if (columns == streamColumns && rows == streamRows) { restoreStreamGeometry(); return; }
+    viewColumns = columns; viewRows = rows;
+    output.push(TerminalEvent.geometry(columns, rows));
   }
   public function requestReplay(offset:Int64):Void {
     // Byte offsets cannot identify geometry-only records. Recover atomically.
@@ -372,6 +401,7 @@ class RpcTerminalBackend implements TerminalBackend {
         // input queued for the old shell. Its replay has an independent cursor.
         writes.resize(0); writeBytes = 0;
         position = 0; replayCursor = 0;
+        viewColumns = 0; viewRows = 0; streamColumns = 0; streamRows = 0;
         output = [TerminalEvent.resetReplay()];
         snapshotOnly = false; snapshotPending = false; replayAfterResize = false;
         replayDirty = true; nextRead = 0;
@@ -460,6 +490,12 @@ class RpcTerminalBackend implements TerminalBackend {
       synchronizationPending = false;
       synchronized = true;
     }
+    fitEndedView();
+    if (output.length > 0) {
+      var local = output;
+      output = [];
+      for (event in local) emit(event);
+    }
   }
   // Keep polling for asynchronous shell echo after input, then resume idle backoff.
   function idleReadDelay():Float return eventDriven || Sys.time() < interactiveUntil ? 0 : 0.05;
@@ -497,8 +533,12 @@ class RpcTerminalBackend implements TerminalBackend {
       if (bytes > 65536 || nextOffset > value.terminal.end) { fail("Invalid terminal replay bounds"); return; }
       if (!observe(value.terminal)) return;
       terminalsession.TerminalLatencyTrace.mark("terminal.replay.received");
-      for (event in value.events) output.push(event.data.length == 0
-        ? TerminalEvent.geometry(event.columns, event.rows) : TerminalEvent.output(event.offset, event.data));
+      if (value.events.length > 0) restoreStreamGeometry();
+      for (event in value.events) {
+        if (event.data.length == 0) { streamColumns = event.columns; streamRows = event.rows; }
+        output.push(event.data.length == 0
+          ? TerminalEvent.geometry(event.columns, event.rows) : TerminalEvent.output(event.offset, event.data));
+      }
       position = nextOffset;
       replayCursor = value.next;
       if (value.next < value.end) replayDirty = true;
@@ -547,6 +587,9 @@ class RpcTerminalBackend implements TerminalBackend {
       synchronizationPending = true;
       replayAfterResize = false;
       position = value.terminal.end;
+      // The snapshot carries its own grid and replaces any local view geometry.
+      viewColumns = 0; viewRows = 0;
+      streamColumns = value.terminal.columns; streamRows = value.terminal.rows;
       output.push(TerminalEvent.screenSnapshot(position, value.data));
       output.push(TerminalEvent.status(value.terminal.state, value.terminal.exitCode));
       nextRead = Sys.time() + (snapshotOnly ? idleReadDelay() : 0);
