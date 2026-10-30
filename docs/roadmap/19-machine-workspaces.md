@@ -43,7 +43,8 @@ per-context layouts) and suit. Read [EXECUTION.md](EXECUTION.md) first, and reco
 Mobile-app work is paused (2026-10-29) while the workspace concept changes. Phase 0 is settled on this side first,
 and the mobile app resumes against the agreed protocol.
 
-- [ ] Write the wire types in `src/workspace/service/` with frozen vectors in `tests/haxeon-rpc`:
+- [x] Write the wire types in `src/workspace/service/` with frozen vectors in `tests/haxeon-rpc`
+  (`WorkspaceCatalogProtocol.hx`, `RpcCompatibilityTests.catalogVectors`, `SuitUnitTests.machineReply`):
   - `WorkspaceRef {machine, workspace}` names a workspace in every request. A folder becomes an attribute.
   - `CatalogWatch`: a subscription to one service's lightweight catalog (groups, sessions, terminals, status and
     attention counts; no content), with resume tokens. `watch` on terminal open already exists, so reuse its
@@ -51,7 +52,8 @@ and the mobile app resumes against the agreed protocol.
   - Sessions and terminals carry `directory` (the resolved working directory) on create and in the catalog.
   - suit's `machine` reply in a v2 shape: workspaces with `folders` (possibly empty), `scratch`, `service`
     (endpoint, pid, running) and `revision`.
-- [ ] Review with the mobile-app session, and record the agreed shape in `RPC-VECTORS.md`.
+- [ ] Review with the mobile-app session, and record the agreed shape in `RPC-VECTORS.md`. The proposed shape, and what the
+  mobile branch would change, are in `RPC-VECTORS.md` under "Workspace refs and the catalog watch".
 
 Acceptance: vectors are frozen and both branches build against them. Nothing changes behaviour yet.
 

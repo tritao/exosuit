@@ -149,3 +149,131 @@ older-item omission (field 6). It also checks legacy views with no items and a
 structured round trip on each supported wire target. Item retention is capped at
 8192 total characters across fields, in addition to the existing activity and
 request bounds.
+
+
+## Workspace refs and the catalog watch (M19 Phase 0)
+
+Status: **proposed, pending the mobile-app review.** The ids below are reserved and frozen by
+`RpcCompatibilityTests.catalogVectors`. No service implements them yet, so nothing changes behaviour.
+
+`WorkspaceRef {1 machine, 2 workspace}` names a workspace by suit's machine id and the workspace's id in that
+machine's catalog ([ADR 0006](../architecture/0006-workspaces-without-folders.md)). Folders are attributes of a
+workspace, not its name. Every new request carries a ref. Existing requests (methods 100–169) keep their
+`workspace:String` field 1 unchanged: today every client sends `"workspace"`, meaning the connection's service.
+From M19 Phase 4 that field carries `ref.workspace`, and `"workspace"` stays an alias for the connection's own
+service. No existing method or field id changes.
+
+The catalog watch is negotiated as `workspace.catalog` (`WorkspaceCatalogProtocol.hx`):
+
+| Id | Kind | Shape |
+| --- | --- | --- |
+| 170 | method `CATALOG` | `CatalogQuery {1 ref, 2 resume:Null<String>, 3 watch:Bool}` → `WorkspaceCatalog` |
+| 171 | method `UNWATCH` | `WorkspaceRef` → `WorkspaceRef` |
+| 172 | notification `CHANGED` | `CatalogChange {1 ref, 2 token}` |
+
+`WorkspaceCatalog` fields: 1 ref, 2 instance, 3 token, 4 reset, 5 more, 6 name, 7 folders (possibly empty),
+8 scratch (nullable), 9 status, 10 attention, 11 groups (`WorkspaceGroup`), 12 sessions, 13 terminals,
+14 removedGroups, 15 removedSessions, 16 removedTerminals, 17 watching.
+`CatalogSession`: 1 id, 2 name, 3 group, 4 directory, 5 provider (null is Codex), 6 state, 7 attention.
+`CatalogTerminal`: 1 id, 2 name, 3 group, 4 directory, 5 state, 6 exitCode, 7 available, 8 revision (Int64),
+9 agentProvider, 10 attention.
+
+Rules:
+
+- A catalog holds no content: no activity, output or file data. Clients read those with the existing methods.
+- No `resume`, or a token the service does not know (another instance, or trimmed), gives `reset: true`: the
+  reply replaces everything the client holds. A known token gives what changed after it: records to upsert and
+  ids to remove. `token` resumes after the page it came with. Tokens are opaque and at most 128 characters.
+- Pages reach devices through the relay, whose messages are at most `RelaySocketLink.MAX_MESSAGE_BYTES` (about
+  64 KiB). So an encoded page is at most `PAGE_BYTES` (48 KiB), and holds at most `PAGE_LIMIT` (24) folders,
+  groups, sessions, terminals and removals together. The service adds items while `fits(page)`. The workspace's
+  own fields and one worst-case item of every kind fit one page, so every page makes progress.
+- `more: true` means call again with the new token at once. `reset` is set only on the first page of a reset;
+  the pages that follow it through `more` belong to the same reset.
+- `folders` is sent only in a reset, split across its pages when it does not fit one (sixteen folders at the
+  4096-byte path bound do not), and the client joins the pages' folders. Any change to the workspace's name,
+  folders or scratch folder makes the next read a reset. Outside a reset `folders` is empty and means nothing.
+- `watch: true` registers the connection for `CHANGED`. These are the same connection-scoped notifications as
+  terminal open's `watch` (139): coalesced per service tick, only a hint, and removed by `UNWATCH` or
+  disconnect. A client that receives a token equal to its own skips the read.
+- `directory` is the working directory resolved when the session or terminal was created. It goes in as agent
+  create field 11 or terminal open field 8, and the service keeps it as `AgentRecord.cwd` or
+  `TerminalRecord.cwd`.
+- A session's `attention` counts its pending requests, plus one when its state is `needs-attention`. The page's
+  `attention` counts the whole workspace.
+- A ref with an empty or over-long id, or an empty or over-long `resume`, is `invalid_request` (`validQuery`). A ref the service does not serve is
+  `unknown_workspace`. Until clients learn workspace ids (the editor from suit, devices in Phase 9), a service
+  treats workspace id `"workspace"` on its own machine as itself and replies with its real ref.
+
+| Value | Canonical hex |
+| --- | --- |
+| ref m/w (also `UNWATCH`) | `8201a16d02a177` |
+| catalog query m/w, no resume, watch | `83018201a16d02a17702c003c3` |
+| change m/w, token t | `82018201a16d02a17702a174` |
+| agent create w/i/a/g/Codex, directory /d | `8b01a17702a16903a16104a16705a5436f64657806c007c008c009c00ac00ba22f64` |
+| catalog m/w, instance i, token t, reset, name N, no folders, scratch /s, running, attention 1, one session a/A/g, /d, codex, idle, watching | `de0011018201a16d02a17702a16903a17404c305c206a14e079008a22f7309a772756e6e696e670a010b900c918701a16102a14103a16704a22f6405a5636f64657806a469646c6507000d900e900f90109011c3` |
+
+The fixtures also fill a page with worst-case records of every kind (ids and names at their bounds in
+three-byte characters, folders at 4096 bytes) and check that it fits `PAGE_BYTES` and, in its response envelope,
+the relay's message bound.
+
+### suit's `machine` reply, version 2
+
+suit's control endpoint answers JSON, not MessagePack. `machine`, and every op that returns `machine`, replies:
+
+```json
+{"ok": true, "machine": {"version": 2, "id": "machine-…", "name": "cube", "workspaces": [
+  {"id": "workspace-…", "name": "Notes", "folders": [], "scratch": "C:\\Users\\me\\Exosuit\\Notes",
+   "revision": 3, "service": null},
+  {"id": "workspace-…", "name": "exosuit", "folders": ["C:\\Users\\me\\projects\\exosuit"], "scratch": null,
+   "revision": 1, "service": {"endpoint": "\\\\.\\pipe\\exosuit-…", "pid": 4242, "running": true}}]}}
+```
+
+- `folders` may be empty. `scratch` is null until suit has made the scratch folder.
+- `revision` counts changes to that workspace (rename, folders, scratch). A version 1 file, or a reply without
+  it, reads as 0.
+- `service` is the workspace's service, or null when suit does not know one. Phase 0 always reports null. suit
+  fills it in once services are keyed by workspace (Phase 4). `MachineCatalog.decodeService` reads it.
+- `version` is the reply's own version (`MachineCatalog.REPLY_VERSION`), not machine.json's.
+- Clients ignore fields they do not know. `SuitUnitTests.machineReply` freezes this shape.
+
+### Phase 0 and the mobile app
+
+The paused `mobile-app` branch has two clients. Both pair with one workspace service through the relay.
+
+The Kotlin client (`android/app/.../remote/WorkspaceRpcClient.kt`) It handshakes as `exosuit-editor/1`, offering `workspace.read`, `workspace.identity`
+and `workspace.agents.read`/`control`. It sends `"workspace"` as field 1 of every request, reads the root and
+instance from identity (104), and polls groups (100) and the agent list (120) every second while in the
+foreground. It reads and drives sessions with 121–123 and 127/128. It drops every notification envelope
+(`if (kind == 8) continue` in `call`), and reads only inside a call.
+
+The Haxe client (`android/haxe-remote/src/`) runs the shared Workbench. `RemoteWorkbench.hx` polls QUERY (100)
+every 1000 ms and lists terminals with the terminal catalog (115). `SavedRemoteWorkspace.hx` takes the identity
+root (104) as the workspace's one folder: it scopes files (`fileScope`), source control (`"workspace:" + root`)
+and, through `RpcWorkspaceWorkbenchClient`, the agent delivery state by that root.
+
+Phase 0 changes none of that. To adopt it, the mobile branch would:
+
+1. Offer `workspace.catalog`. When it is negotiated, replace the one-second polls (100 and 120 in Kotlin, 100
+   and 115 in Haxe) with `CATALOG` (`watch: true`), and read again with the last token on `CHANGED`. Keep the
+   polls for services without it. The Kotlin client first needs a receive loop that delivers notifications
+   between calls instead of dropping them; the Haxe client already has one (`RpcConnection`, as terminal watch
+   uses).
+2. Send `WorkspaceRef {machine: the paired machine id, workspace: "workspace"}` until it knows the workspace's
+   id, then the `ref` from the reply.
+3. Build `RemoteWorkspaceSnapshot` from the catalog. Use the workspace's `name` and `folders` instead of a label
+   derived from the identity root (a workspace may have no folders), use `CatalogSession.directory` instead of
+   `AgentRecord.cwd`, and show `attention`.
+4. In the Haxe client, key saved state by the ref instead of the root: delivery state and the source control
+   identity by `ref`, file and source control scope by each of `folders`, and a workspace with no folders shows
+   the empty state with its `scratch` folder as where new sessions start. The identity root stays the folder of
+   the service the connection reaches until Phase 4.
+5. Leave session views, prompts, snapshots and discovery (121–128) as they are.
+
+Open questions for the mobile review:
+
+- Should `CATALOG` also be how a device learns the workspaces on a machine (one connection per machine through
+  suit, Phase 9), or stay one connection per workspace service as now?
+- Do sessions need a last-activity time for sorting, and terminals a source of attention (bell, exit)?
+- Are three removal lists better than one list of `{kind, id}`?
+- Should identity (104) return the ref too? That would change its frozen vector, so for now it does not.
