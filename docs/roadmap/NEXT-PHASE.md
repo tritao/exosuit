@@ -91,6 +91,15 @@ Live mode and suit:
 - `agent-image-staging` reads an icon relative to its working directory, so it cannot run from `scripts/test.sh` yet.
 - "New session in …" does not offer groups whose folder is outside the workspace (`SessionGroupDirectory.resolve`).
 
+### M19 Phases 1–3 review: deferred
+
+- Workspace rows have no running/idle marker yet (Phase 3 asks for one; Phase 6 knows which services run).
+- The Workbench tree has no type-to-find.
+- No PrintWindow capture test of the Workbench tree.
+- Session and terminal directory failures are strings and loose codes (`invalid_directory`, `invalid_request`);
+  give them an error-code enum.
+- The other judgement-call smells from that review: go through them with the next change in those files.
+
 ## Low
 
 ### suit
@@ -158,3 +167,25 @@ Hard violations:
 
 The review also flagged about 35 judgement-call smells (naming, duplicated shapes, data clumps). Go through them with
 the next round of changes in those files, not as a separate pass.
+
+## Build times (measured 2026-10-29)
+
+`scripts/build-windows.ps1 -SkipBootstrap` on cube, in a fresh worktree:
+
+| Build | Time | Where it goes |
+|---|---|---|
+| Cold | 1,291 s (21.5 min) | about 1,140 s native C/C++; Haxe: editor 125 s (13,765 functions), agent 18 s, suit 7 s |
+| Nothing changed | 42 s | per-project MSBuild up-to-date checks; every step was a fingerprint match |
+
+The machine was loaded at the time: the Android emulator held about 6 cores, and a WSL job was running. Even so,
+the structure is the main cost. In order of payoff:
+
+1. **NativeKit and its vendored libraries are built three times.** The agent, suit and editor each build their own
+   copy in their own build folder. terminalkit and haxeon-credentials are each built twice. Build each native
+   package once, and share the result between the apps.
+2. **Use Ninja instead of the Visual Studio generator** for the apps' native packages. Haxeon's own presets already
+   use Ninja. It parallelizes better, and a no-op takes well under a second instead of about 40 s.
+3. **Share a native build cache across worktrees**, so that a new worktree, or a parallel worker, does not start
+   cold. Each of three parallel workers paid about 12 minutes.
+4. **Profile the editor's 125 s Haxe compile.** The live session patches incrementally, but a full compile at this
+   size needs a profile.
