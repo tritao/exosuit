@@ -74,3 +74,39 @@ An unsupported language feature requiring a larger design becomes a recorded
 compiler subtask with prerequisites. Continue independent editor work if possible.
 Never leave a workaround marked as a completed permanent solution. Do not fix
 unrelated compiler issues discovered incidentally unless they block this plan.
+
+## Recorded defects
+
+Defects found while doing editor work and not fixed yet. An editor workaround names its entry here.
+
+### Default argument values do not resolve package paths
+
+Found 2026-10-29 by `tests/workbench-tree`. A fully qualified path in a default argument value resolves only when
+some module of that package is already loaded. The same path in a function body resolves. `graphical`'s
+`TabTooltip` has `delaySeconds:Float = config.Settings.DEFAULT_TOOLTIP_DELAY`, so a program that reaches
+`TabTooltip` without loading `config` fails. The editor loads `config` anyway; `WorkbenchTreeTestMain` imports
+`config.Settings` only to load it.
+
+Minimal repro, three files in one project with `app.Main` as its entry:
+
+```haxe
+// conf/Limits.hx
+package conf;
+class Limits { public static inline final DELAY = 0.5; }
+
+// ui/Tip.hx
+package ui;
+class Tip {
+	public final delay:Float;
+	public function new(delay:Float = conf.Limits.DELAY) this.delay = delay;
+}
+
+// app/Main.hx
+package app;
+import ui.Tip;
+class Main { static function main():Void Sys.println("delay " + new Tip().delay); }
+```
+
+`ui/Tip.hx:5:36: E1005: Unknown variable "conf"`. With `import conf.Limits;` in `Main`, or with the same path in
+the constructor's body, it prints `delay 0.5`. Responsible layer: declaration resolution of default values, which
+does not load a package named by a path the way body typing does.
