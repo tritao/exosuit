@@ -45,9 +45,9 @@ class WorkbenchPanel implements View {
 	public var onError:Null<String->Void>;
 	/** Closes a catalog terminal and its views; selection actions use it. */
 	public var closeTerminal:Null<TerminalRecord->Void>;
-	/** This machine and its workspaces, above the groups; null when suit is off. */
-	public var machineSection:Null<View>;
-	/** Opens a folder picker; with `hasFolder` and no machine section, the empty Workbench offers it when no folder is open. */
+	/** This machine and its workspaces, the tree's top level; null when suit is off, and the tree is the groups alone. */
+	public var machine:Null<WorkbenchMachineActions>;
+	/** Opens a folder picker; with `hasFolder` and no machine, the empty Workbench offers it when no folder is open. */
 	public var chooseFolder:Null<Void->Void>;
 	public var hasFolder:Null<Void->Bool>;
 	var lastReportedError:Null<String>;
@@ -82,6 +82,10 @@ class WorkbenchPanel implements View {
     var pendingSessionSelection:Null<{var key:String; var workspaceRoot:String;}>;
     var observedWorkspaceRoot:Null<String>;
     var observedWorkspaceInstance:Null<String>;
+    // The machine rows' inputs at the last projection, and the last catalog, kept through transport recovery.
+    var machineKey = "";
+    var retainedCatalog:Null<TerminalCatalog>;
+    var observedOpenRow:Null<String>;
 
 	public function new(client:WorkspaceWorkbenchClient, open:TerminalRecord->Bool, createTerminal:String->Void,
 		edit:(WorkspaceGroup, String)->Void, openFolder:String->Void, terminalActions:TerminalRecord->Array<MenuItem>, requestFrame:Void->Void,
@@ -104,12 +108,26 @@ class WorkbenchPanel implements View {
 		tree.onExpandedChanged = function(_, _) requestFrame();
 		tree.onItemContextMenu = function(key, event) {
             event.preventDefault(); event.stopPropagation();
-            menu(groupFor(key), event, key);
+            if (WorkbenchRowKey.isMachineRow(key)) machineMenu(key, event);
+            else menu(groupFor(key), event, key);
         };
+		// Every workspace row can expand; expanding one that is not open opens it here, and it expands once it is.
+		tree.hasChildrenHint = model.expandable;
+		tree.onExpansionRequested = function(key, expanded, _) {
+			var id = WorkbenchRowKey.workspaceId(key);
+			if (id == null || !expanded || key == model.openRow) return true;
+			openWorkspace(id);
+			return false;
+		};
+		tree.onItemActivatedWithEvent = function(key, event) {
+			// A click already ran New Workspace… on its first press.
+			if (key == WorkbenchRowKey.NEW_WORKSPACE && event.kind != haxeon.ui.core.UiEventKind.Click) createWorkspace();
+		};
         model.groupEditor = function(id) return draft != null && draft.id == id ? inlineEditor : null;
 		model.agentEditor = function(id) return agentDraft != null && agentDraft.id == id ? agentEditor : null;
-		tree.onItemClicked = function(key, _) {
+		tree.onItemClicked = function(key, count) {
 			if (agentDraft != null || draft != null) return;
+			if (key == WorkbenchRowKey.NEW_WORKSPACE && count == 1) { createWorkspace(); return; }
 			var row = WorkbenchRowKey.parse(key);
 			if (row == null) return;
 			if (row.kind == WorkbenchRowKind.Agent) {
@@ -120,6 +138,39 @@ class WorkbenchPanel implements View {
 				if (terminal != null) open(terminal);
 			}
 		};
+	}
+
+	function openWorkspace(id:String):Void {
+		var actions = machine, entry = model.workspaces.get(id);
+		if (actions != null && entry != null) actions.open(entry);
+	}
+
+	function createWorkspace():Void {
+		var actions = machine;
+		if (actions != null && !actions.busy()) actions.create();
+	}
+
+	/** The menu of a machine row: a workspace's own actions, then New Workspace…. */
+	function machineMenu(key:String, event:UiEvent):Void {
+		var actions = machine;
+		if (actions == null) return;
+		var id = WorkbenchRowKey.workspaceId(key);
+		var entry = id == null ? null : model.workspaces.get(id);
+		var idle = !actions.busy();
+		var items:Array<MenuItem> = [];
+		if (entry != null) {
+			var target = entry;
+			items.push(new MenuItem("machine-workspace-open", "Open", function() actions.open(target), key != model.openRow));
+			items.push(new MenuItem("machine-workspace-rename", "Rename…", function() actions.rename(target), idle, "F2", true));
+			items.push(new MenuItem("machine-workspace-attach-folder", "Attach Folder…", function() actions.attachFolder(target), idle));
+			items.push(new MenuItem("machine-workspace-remove", "Remove from This Machine", function() actions.remove(target), idle, null, true));
+		}
+		items.push(new MenuItem("machine-new-workspace", "New Workspace…", function() actions.create(), idle, null, entry != null));
+		showMenu(items, event, function() {
+			if (id == null) return true;
+			var state = actions.view().machine;
+			return state != null && Lambda.exists(state.workspaces, function(candidate) return candidate.id == id);
+		});
 	}
 
 	function canDragNode(key:String):Bool {
@@ -391,7 +442,8 @@ class WorkbenchPanel implements View {
         draft = group; creating = create; draftName = group.name;
         draftOwner = catalog.instance; draftError = null;
         inlineEditor = new WorkbenchNameEditor(group.id, draftName, function(value) draftName = value, saveGroup, cancelGroup);
-        model.update(catalog, client.agentService().agents(), creating ? draft : null);
+        var actions = machine;
+        model.update(catalog, client.agentService().agents(), creating ? draft : null, actions == null ? null : actions.view());
         revealNode(WorkbenchRowKey.group(group.id));
         applyPendingReveal();
         requestFrame();
@@ -451,6 +503,12 @@ class WorkbenchPanel implements View {
 
     /** Expands `groupId` and every group above it so a row inside shows; false when the chain is broken. */
     function expandAncestors(groupId:Null<String>):Bool {
+        // Nested under the open workspace, the groups show only while it and the machine are expanded.
+        var nesting = model.groupParent;
+        if (nesting != null) {
+            tree.setExpanded(WorkbenchRowKey.MACHINE, true);
+            tree.setExpanded(nesting, true);
+        }
         var ancestors:Array<String> = [];
         var visited:Map<String, Bool> = [];
         var parent = groupId;
@@ -598,20 +656,41 @@ class WorkbenchPanel implements View {
 		var agents = client.agentService().agents();
 		if (agents != null && (catalog == null || agents.root != catalog.workspaceRoot)) agents = null;
 		var nextAgentKey = client.agentService().agentRevision();
+		var actions = machine;
+		var view = actions == null ? null : actions.view();
+		var nextMachineKey = view == null ? "" : view.revision + "\n" + view.openWorkspace + "\n" + view.openRoots.join("\n");
+		if (catalog != null) retainedCatalog = catalog;
 		// Keep the last projection during transport recovery so TreeView does not
 		// discard its selection, expansion and scroll state for an empty catalog.
-		if (catalog != null && (refreshModel || catalogRevision != client.terminalCatalogRevision() || nextAgentKey != agentKey)) {
-            refreshModel = false;
+		// The machine rows show without a catalog; the last one stays under its workspace meanwhile.
+		var shown = catalog != null ? catalog : view != null ? retainedCatalog : null;
+		if ((catalog != null && (refreshModel || catalogRevision != client.terminalCatalogRevision() || nextAgentKey != agentKey))
+			|| (view != null && nextMachineKey != machineKey) || (view == null && machineKey != "")) {
+            refreshModel = false; machineKey = nextMachineKey;
 			catalogRevision = client.terminalCatalogRevision(); agentKey = nextAgentKey;
-			if (retainedAgents != null && (retainedAgents.root != catalog.workspaceRoot
+			if (retainedAgents != null && shown != null && (retainedAgents.root != shown.workspaceRoot
 				|| (client.canReadTerminals() && !client.agentService().canReadAgents()))) retainedAgents = null;
 			if (agents != null) retainedAgents = agents;
-			model.update(catalog, retainedAgents, creating ? draft : null);
+			model.update(shown, retainedAgents, creating ? draft : null, view);
+			followOpenWorkspace();
 		}
         applyPendingReveal();
 		applyPendingSessionSelection();
 		runBatch();
     }
+
+	/** When this window opens another workspace, the previous one collapses and the new one expands. */
+	function followOpenWorkspace():Void {
+		var open = model.openRow;
+		if (open == observedOpenRow) return;
+		var previous = observedOpenRow;
+		observedOpenRow = open;
+		if (previous != null) tree.setExpanded(previous, false);
+		if (open != null) {
+			tree.setExpanded(WorkbenchRowKey.MACHINE, true);
+			tree.setExpanded(open, true);
+		}
+	}
 
 	public function headerActions(availableWidth:Float = 260):View return new WorkbenchHeaderActions(this, availableWidth);
 
@@ -675,7 +754,7 @@ class WorkbenchPanel implements View {
 		var choose = chooseFolder, folder = hasFolder;
 		var style = new LayoutStyle(); style.width = LayoutAxis.stretch(); style.childGap = 8; style.padding = new Insets(12, 8, 12, 8);
 		var hint = haxeon.ui.core.TextStyleOverride.text(12);
-		if (catalog == null && machineSection == null && choose != null && folder != null && !folder()) {
+		if (catalog == null && machine == null && choose != null && folder != null && !folder()) {
 			var button = new Button("Open Folder…", null, function() choose(), "workbench-open-folder");
 			button.variant = ButtonVariant.Primary;
 			return new Column("workbench-empty", [
@@ -689,7 +768,7 @@ class WorkbenchPanel implements View {
 			button.variant = ButtonVariant.Primary;
 			button.enabled = !pending;
 			return new Column("workbench-empty", [
-				new KeyedView("text", new Text("No groups yet. A group holds agent sessions and terminals for a folder.", null, null, hint)),
+				new KeyedView("text", new Text("No groups yet. A group holds agent sessions and terminals.", null, null, hint)),
 				new KeyedView("new", button)
 			], style);
 		}
@@ -700,8 +779,6 @@ class WorkbenchPanel implements View {
 		syncState();
 		var selected = groupFor(tree.selectedKey);
 		var rows:Array<KeyedView> = [];
-		var section = machineSection;
-		if (section != null) rows.push(new KeyedView("machine", section));
 		rows.push(new KeyedView("tree", tree));
 		var start = emptyState();
 		if (start != null) rows.push(new KeyedView("empty-state", start));
@@ -732,7 +809,12 @@ class WorkbenchPanel implements View {
         node.on(haxeon.ui.core.UiEventKind.KeyDown, function(event) {
             if (event.key == haxeon.ui.core.UiKey.F2 && draft == null && agentDraft == null) {
 				var key = tree.selectedKey, agentId = WorkbenchRowKey.idOf(key, WorkbenchRowKind.Agent);
-				if (agentId != null) {
+				var workspaceId = WorkbenchRowKey.workspaceId(key), actions = machine;
+				var renamed = workspaceId == null ? null : model.workspaces.get(workspaceId);
+				if (renamed != null && actions != null) {
+					event.preventDefault(); event.stopPropagation();
+					if (!actions.busy()) actions.rename(renamed);
+				} else if (agentId != null) {
 					event.preventDefault(); event.stopPropagation(); beginAgentRename(agentId, canRenameNative(agentId));
 				} else if (WorkbenchRowKey.isKind(key, WorkbenchRowKind.Group) && selected != null && client.canEditGroups()) {
 					event.preventDefault(); event.stopPropagation(); beginGroup(selected, false);

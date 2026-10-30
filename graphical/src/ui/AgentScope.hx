@@ -41,8 +41,8 @@ class AgentScope {
 				if (parent != null) return parent;
 			}
 		}
-		for (index in 0...model.rootCount()) {
-			var first = scopeFor(model, WorkbenchRowKey.groupOf(model, model.rootKeyAt(index)));
+		for (key in model.groupRoots) {
+			var first = scopeFor(model, WorkbenchRowKey.groupOf(model, key));
 			if (first != null) return first;
 		}
 		return null;

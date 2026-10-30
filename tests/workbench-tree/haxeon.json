@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "package": {"name": "exosuit-workbench-tree-test"},
+  "entry": "app.WorkbenchTreeTestMain",
+  "sourceRoots": ["src"],
+  "scopeSourceRoots": false,
+  "dependencies": {"exosuit-graphical": {"path": "../../graphical"}},
+  "target": "host",
+  "outputDir": "build"
+}

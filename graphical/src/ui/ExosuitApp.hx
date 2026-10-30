@@ -121,7 +121,7 @@ class ExosuitApp implements DesktopUiApplication {
 	var machineWorkspaces:Null<workspace.client.MachineWorkspaces>;
 	var machineClient:Null<workspace.client.MachineClient>;
 	var sessionFolderChooser:Null<SessionFolderChooser>;
-	var machineSection:Null<WorkbenchMachineSection>;
+	var machineActions:Null<WorkbenchMachineActions>;
 	var machineClientRevision = -1;
 	var machineRefreshAt:Float = 0;
 	var machinePanel:Null<MachinePanel>;
@@ -1527,7 +1527,7 @@ class ExosuitApp implements DesktopUiApplication {
 			requestFrame();
 		};
 		workbenchPanel.closeTerminal = closeCatalogTerminal;
-		workbenchPanel.machineSection = machineSection;
+		workbenchPanel.machine = machineActions;
 		workbenchPanel.chooseFolder = function() application.savedWorkspaces.addPicker();
 		workbenchPanel.hasFolder = function() return application.savedWorkspaces.isOpen();
 		host.onActiveTabChanged = syncWorkbenchSessionSelection;
@@ -1585,7 +1585,7 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	/**
-		This machine's workspaces at the top of the Workbench, from suit (docs/architecture/0005-machines-and-workspaces.md).
+		This machine's workspaces as the Workbench tree's top level, from suit (docs/architecture/0006-workspaces-without-folders.md).
 		With suit off there is no machine, and the Workbench works on the open folders as before.
 	**/
 	public function attachMachineWorkspaces(machine:workspace.client.MachineClient):Void {
@@ -1598,9 +1598,24 @@ class ExosuitApp implements DesktopUiApplication {
 			requestFrame();
 			return true;
 		};
+		// A workspace opens its attached folders. Until its service is keyed by workspace id (M19 Phase 4), one with no
+		// folders opens its scratch folder instead, and one that kept its scratch folder (see attachFolder) opens it
+		// last: the Workbench follows the last folder opened, so the scratch folder's groups and sessions stay shown.
 		var open = function(entry:suit.MachineCatalog.MachineWorkspace):Void {
-			application.savedWorkspaces.restore(new workspace.SavedWorkspace(entry.id, entry.name, entry.folders), "");
-			requestFrame();
+			if (entry.folders.length > 0) {
+				var scratch = entry.scratch, roots:Array<String> = [], scratchRoot:Null<String> = null;
+				for (folder in entry.folders)
+					if (scratch != null && PathKey.same(folder, scratch)) scratchRoot = folder; else roots.push(folder);
+				if (scratchRoot != null) roots.push(scratchRoot);
+				application.savedWorkspaces.restore(new workspace.SavedWorkspace(entry.id, entry.name, roots), "");
+				requestFrame();
+				return;
+			}
+			machine.scratch(entry.id, function(path, failure) {
+				if (report(failure) || path == null) return;
+				application.savedWorkspaces.restore(new workspace.SavedWorkspace(entry.id, entry.name, [path]), "");
+				requestFrame();
+			});
 		};
 		var openWorkspace = function():Null<String> {
 			var current = application.savedWorkspaces.current;
@@ -1616,23 +1631,41 @@ class ExosuitApp implements DesktopUiApplication {
 				if (value != null && StringTools.trim(value).length > 0) chosen(StringTools.trim(value));
 			}));
 		};
-		machineSection = new WorkbenchMachineSection(machine, {
-			openWorkspace: openWorkspace,
+		var askName = function(label:String, named:String->Void):Void {
+			host.openCommandView(new commandview.CommandViewProvider(label + ": ", [], function(_) {}, function(_, value, _) {
+				host.closeCommandView();
+				if (value != null && StringTools.trim(value).length > 0) named(StringTools.trim(value));
+			}));
+		};
+		machineActions = {
+			view: function() return {machine: machine.machine, error: machine.error, openWorkspace: openWorkspace(),
+				openRoots: application.savedWorkspaces.roots(), revision: machine.revision},
+			busy: machine.busy,
 			open: open,
-			create: function() chooseFolder("New Workspace", function(folder) machine.create(null, [folder], function(created, failure) {
+			create: function() askName("New workspace name", function(name) machine.create(name, [], function(created, failure) {
 				if (!report(failure) && created != null) open(created);
 			})),
-			rename: function(entry) host.openCommandView(new commandview.CommandViewProvider("Rename workspace " + entry.name + ": ", [],
-				function(_) {}, function(_, value, _) {
-					host.closeCommandView();
-					if (value != null && StringTools.trim(value).length > 0) machine.rename(entry.id, value, function(_, failure) report(failure));
-				})),
-			addFolder: function(entry) chooseFolder("Add Folder to " + entry.name, function(folder) machine.addFolder(entry.id, folder,
-				function(updated, failure) { if (!report(failure) && updated != null && openWorkspace() == entry.id) open(updated); })),
-			remove: function(entry) machine.delete(entry.id, function(_, failure) report(failure)),
-			showMenu: showWorkbenchMenu
-		});
-		if (workbenchPanel != null) workbenchPanel.machineSection = machineSection;
+			rename: function(entry) askName("Rename workspace " + entry.name, function(name) {
+				machine.rename(entry.id, name, function(_, failure) { report(failure); });
+			}),
+			attachFolder: function(entry) chooseFolder("Attach Folder to " + entry.name, function(folder) {
+				var attach = function() machine.addFolder(entry.id, folder, function(updated, failure) {
+					if (!report(failure) && updated != null && openWorkspace() == entry.id) open(updated);
+				});
+				// A folderless workspace's groups and sessions live in its scratch folder's service until M19 Phase 4
+				// merges services by workspace id. Its first real folder keeps the scratch folder attached, so they
+				// stay in the tree.
+				// The tree's entry may predate the scratch folder, so ask suit for it when this window runs on it.
+				if (entry.folders.length > 0 || (entry.scratch == null && openWorkspace() != entry.id)) { attach(); return; }
+				machine.scratch(entry.id, function(scratch, failure) {
+					if (report(failure) || scratch == null) return;
+					if (PathKey.same(scratch, folder)) { attach(); return; }
+					machine.addFolder(entry.id, scratch, function(_, refused) { if (!report(refused)) attach(); });
+				});
+			}),
+			remove: function(entry) machine.delete(entry.id, function(_, failure) { report(failure); })
+		};
+		if (workbenchPanel != null) workbenchPanel.machine = machineActions;
 		requestFrame();
 	}
 

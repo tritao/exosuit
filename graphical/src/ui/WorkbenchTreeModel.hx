@@ -4,12 +4,30 @@ import haxeon.ui.core.View;
 import haxeon.ui.widgets.collections.TreeViewModel;
 import haxeon.ui.widgets.collections.TreeRootMetadata;
 import haxeon.ui.widgets.text.Text;
+import suit.MachineCatalog.MachineWorkspace;
+import workspace.PathKey;
+import workspace.service.GroupFolders;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceTerminalProtocol;
 
-/** Projection only: grouping/status belong to the service, expansion/selection to TreeView. */
+/**
+	Projection only: grouping/status belong to the service, expansion/selection to TreeView.
+
+	With suit on, the tree is one tree (docs/architecture/0006-workspaces-without-folders.md): this machine, then its
+	workspaces, status lines and New Workspace…; the open workspace's groups, sessions and terminals nest under its row.
+	With suit off it is the group tree alone.
+**/
 class WorkbenchTreeModel implements TreeViewModel {
 	public final groups:Map<String, WorkspaceGroup> = [];
+	/** The machine's workspaces by id; empty when suit is off. */
+	public final workspaces:Map<String, MachineWorkspace> = [];
+	/** The top-level groups' rows, wherever they sit. */
+	public final groupRoots:Array<String> = [];
+	/** The row the top-level groups sit under: the open workspace's, or null when they are roots. */
+	public var groupParent(default, null):Null<String>;
+	/** The open workspace's row, attached or not; null without one. */
+	public var openRow(default, null):Null<String>;
+	public var machine(default, null):Null<WorkbenchMachineView>;
 	public final agents:Map<String, workspace.service.WorkspaceAgentProtocol.AgentRecord> = [];
 	public final terminals:Map<String, TerminalRecord> = [];
 
@@ -22,16 +40,84 @@ class WorkbenchTreeModel implements TreeViewModel {
 
 	public function new() {}
 
-	public function update(catalog:Null<TerminalCatalog>, ?agentCatalog:workspace.service.WorkspaceAgentProtocol.AgentCatalog, ?draft:WorkspaceGroup):Void {
+	public function update(catalog:Null<TerminalCatalog>, ?agentCatalog:workspace.service.WorkspaceAgentProtocol.AgentCatalog, ?draft:WorkspaceGroup,
+			?machine:WorkbenchMachineView):Void {
 		agents.clear();
 		groups.clear();
 		terminals.clear();
 		children.clear();
 		roots.resize(0);
+		groupRoots.resize(0);
+		workspaces.clear();
+		groupParent = null;
+		openRow = null;
+		this.machine = machine;
 		version++;
 		workspaceRoot = catalog == null ? null : catalog.workspaceRoot;
+		if (catalog != null)
+			projectGroups(catalog, agentCatalog, draft);
+		if (machine == null) {
+			for (key in groupRoots) roots.push(key);
+			return;
+		}
+		projectMachine(machine, catalog);
+	}
+
+	/** The machine row, its workspaces and status lines; the groups go under the open workspace once its service is attached. */
+	function projectMachine(view:WorkbenchMachineView, catalog:Null<TerminalCatalog>):Void {
+		var rows:Array<String> = [];
+		roots.push(WorkbenchRowKey.MACHINE);
+		children.set(WorkbenchRowKey.MACHINE, rows);
+		var state = view.machine;
+		if (state != null)
+			for (entry in state.workspaces) {
+				var key = WorkbenchRowKey.machineWorkspace(entry.id);
+				workspaces.set(entry.id, entry);
+				rows.push(key);
+				children.set(key, []);
+				if (entry.id == view.openWorkspace) openRow = key;
+			}
+		if (state != null && state.workspaces.length == 0)
+			rows.push(WorkbenchRowKey.status("empty"));
+		else if (state == null && view.error == null)
+			rows.push(WorkbenchRowKey.status("loading"));
+		if (view.error != null)
+			rows.push(WorkbenchRowKey.status("error"));
+		rows.push(WorkbenchRowKey.NEW_WORKSPACE);
 		if (catalog == null)
 			return;
+		var open = openRow;
+		if (open == null) {
+			// This window's folders are none of the machine's workspaces (or suit has not answered): the groups follow the machine.
+			for (key in groupRoots) roots.push(key);
+			return;
+		}
+		// While a switch is under way the service still holds the previous workspace's groups; they wait.
+		// A service too old to name its folder is taken to serve this window's.
+		var served = catalog.workspaceRoot;
+		if (served != null && !Lambda.exists(view.openRoots, function(root) return PathKey.same(root, served)))
+			return;
+		groupParent = open;
+		var nested = groupRoots.copy();
+		var id = WorkbenchRowKey.workspaceId(open);
+		var entry = id == null ? null : workspaces.get(id);
+		if (entry != null && keptScratch(entry))
+			nested.unshift(WorkbenchRowKey.status("split"));
+		children.set(open, nested);
+	}
+
+	/**
+		Whether a workspace kept its scratch folder beside a real one when it got its first folder. Until M19 Phase 4
+		gives a workspace one service, the tree shows the scratch folder's groups and not the other folders'.
+	**/
+	public static function keptScratch(entry:MachineWorkspace):Bool {
+		var scratch = entry.scratch;
+		if (scratch == null || entry.folders.length < 2) return false;
+		for (folder in entry.folders) if (PathKey.same(folder, scratch)) return true;
+		return false;
+	}
+
+	function projectGroups(catalog:TerminalCatalog, agentCatalog:Null<workspace.service.WorkspaceAgentProtocol.AgentCatalog>, draft:Null<WorkspaceGroup>):Void {
 		var ordered = catalog.groups.copy();
         if (draft != null && !Lambda.exists(ordered, function(g) return g.id == draft.id)) ordered.push(draft);
 		ordered.sort(function(a, b) {
@@ -43,7 +129,7 @@ class WorkbenchTreeModel implements TreeViewModel {
 			children.set(WorkbenchRowKey.group(g.id), []);
 		}
 		for (g in ordered) {
-			var siblings = g.parent == null ? roots : children.get(WorkbenchRowKey.group(g.parent));
+			var siblings = g.parent == null ? groupRoots : children.get(WorkbenchRowKey.group(g.parent));
 			if (siblings != null)
 				siblings.push(WorkbenchRowKey.group(g.id));
 		}
@@ -87,7 +173,17 @@ class WorkbenchTreeModel implements TreeViewModel {
 	}
 
 	public function initiallyExpanded(key:String):Bool
-		return roots.indexOf(key) >= 0;
+		return key == WorkbenchRowKey.MACHINE || key == openRow || groupRoots.indexOf(key) >= 0;
+
+	/** True for a row the tree draws as expandable even without children: every workspace, open or not. */
+	public function expandable(key:String):Bool
+		return childCount(key) > 0 || WorkbenchRowKey.workspaceId(key) != null;
+
+	/** The workspace whose groups the tree shows, or null. */
+	public function groupWorkspace():Null<MachineWorkspace> {
+		var id = WorkbenchRowKey.workspaceId(groupParent);
+		return id == null ? null : workspaces.get(id);
+	}
 
 	public function estimatedExtent():Float
 		return WorkbenchSessionLabel.ROW_HEIGHT;
@@ -111,6 +207,7 @@ class WorkbenchTreeModel implements TreeViewModel {
 	}
 
 	public function buildItem(key:String):View {
+		if (WorkbenchRowKey.isMachineRow(key)) return machineItem(key);
 		var row = WorkbenchRowKey.parse(key);
 		if (row == null) return new Text("");
 		var editing:Null<View> = null;
@@ -120,7 +217,10 @@ class WorkbenchTreeModel implements TreeViewModel {
 		switch row.kind {
 			case WorkbenchRowKind.Group:
 				var group = groups.get(row.id);
-				if (group != null) return new WorkbenchGroupLabel(group.name, directory(group), workspaceRoot);
+				if (group != null) {
+					var owner = groupWorkspace();
+					return new WorkbenchGroupLabel(group.name, directory(group), workspaceRoot, owner == null ? null : owner.name);
+				}
 			case WorkbenchRowKind.Agent:
 				var a = agents.get(row.id);
 				if (a != null) return new WorkbenchSessionLabel(a.name, a.state, agentStateLabel(a.state));
@@ -131,14 +231,32 @@ class WorkbenchTreeModel implements TreeViewModel {
 		return new Text("");
 	}
 
-	public function directory(group:WorkspaceGroup):Null<String> {
-		var current:Null<WorkspaceGroup> = group;
-		while (current != null) {
-			if (current.cwd != null)
-				return current.cwd;
-			current = current.parent == null ? null : groups.get(current.parent);
+	function machineItem(key:String):View {
+		var view = machine;
+		if (view == null) return new Text("");
+		if (key == WorkbenchRowKey.MACHINE) {
+			var state = view.machine;
+			return WorkbenchMachineLabel.machine(state == null ? "This machine" : state.name + " · this machine");
 		}
-		return workspaceRoot;
+		if (key == WorkbenchRowKey.NEW_WORKSPACE) return WorkbenchMachineLabel.newWorkspace();
+		var id = WorkbenchRowKey.workspaceId(key);
+		if (id != null) {
+			var entry = workspaces.get(id);
+			return entry == null ? new Text("") : WorkbenchMachineLabel.workspace(entry, key == openRow);
+		}
+		var error = view.error;
+		return switch WorkbenchRowKey.statusKind(key) {
+			case "empty": WorkbenchMachineLabel.status("No workspaces yet. Make one to hold groups, sessions and terminals.");
+			case "loading": WorkbenchMachineLabel.status("Looking for this machine's workspaces…");
+			case "error": WorkbenchMachineLabel.status(error == null ? "" : error, true);
+			case "split": WorkbenchMachineLabel.status("Split across folders until workspaces get one service: these groups are the scratch folder's.");
+			default: new Text("");
+		};
+	}
+
+	public function directory(group:WorkspaceGroup):Null<String> {
+		var folder = GroupFolders.nearest(groups, group);
+		return folder == null ? workspaceRoot : folder;
 	}
 
 	public function nextOrder(parent:Null<String>):Int {

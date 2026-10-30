@@ -4,7 +4,9 @@ import workspace.service.WorkspaceProtocol.WorkspaceGroup;
 
 /**
 	A Workbench tree row: what it shows and that thing's id. The tree stores rows as strings (`g:`, `t:` or `a:` plus the
-	id); this is the one place that writes and reads that spelling.
+	id); this is the one place that writes and reads that spelling. Above the groups, the machine's rows use `m:`
+	(this machine), `w:` plus a workspace id, `s:` (a status line) and `n:` (New Workspace…); `parse` returns null for
+	them, so group, session and terminal code ignores them.
 **/
 class WorkbenchRowKey {
 	public final kind:WorkbenchRowKind;
@@ -17,6 +19,25 @@ class WorkbenchRowKey {
 	public static function group(id:String):String return "g:" + id;
 	public static function terminal(id:String):String return "t:" + id;
 	public static function agent(id:String):String return "a:" + id;
+
+	/** This machine's row, the tree's root when suit is on. */
+	public static inline final MACHINE = "m:this";
+	/** The last row under the machine. */
+	public static inline final NEW_WORKSPACE = "n:new-workspace";
+	public static function machineWorkspace(id:String):String return "w:" + id;
+	public static function status(kind:String):String return "s:" + kind;
+
+	/** The workspace id of a `w:` row, else null. */
+	public static function workspaceId(key:Null<String>):Null<String>
+		return key != null && StringTools.startsWith(key, "w:") && key.length > 2 ? key.substring(2) : null;
+
+	/** The kind of an `s:` status row, else null. */
+	public static function statusKind(key:Null<String>):Null<String>
+		return key != null && StringTools.startsWith(key, "s:") && key.length > 2 ? key.substring(2) : null;
+
+	/** True for the machine's rows: the machine, its workspaces, status lines and New Workspace…. */
+	public static function isMachineRow(key:Null<String>):Bool
+		return key != null && key.length > 2 && key.charAt(1) == ":" && "mwsn".indexOf(key.charAt(0)) >= 0;
 
 	/** The row a tree key names, or null for a key that is not a Workbench row. */
 	public static function parse(key:Null<String>):Null<WorkbenchRowKey> {

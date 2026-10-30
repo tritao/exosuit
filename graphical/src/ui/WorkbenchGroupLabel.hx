@@ -15,13 +15,14 @@ import haxeon.ui.widgets.text.Text;
 import haxeon.ui.widgets.text.MiddleEllipsisText;
 import workspace.PathKey;
 
-/** One-line group name and subdued directory; accessibility keeps the complete path. */
+/** One-line group name and subdued directory; accessibility keeps the complete path and names the workspace. */
 class WorkbenchGroupLabel implements View {
 	final name:String;
 	final directory:Null<String>;
 	final root:Null<String>;
-	public function new(name:String, directory:Null<String>, root:Null<String>) {
-		this.name = name; this.directory = directory; this.root = root;
+	final workspaceName:Null<String>;
+	public function new(name:String, directory:Null<String>, root:Null<String>, ?workspaceName:String) {
+		this.name = name; this.directory = directory; this.root = root; this.workspaceName = workspaceName;
 	}
 	public function build(context:BuildContext):RenderNode {
 		var style = new LayoutStyle(); style.width = LayoutAxis.stretch(); style.childGap = 6;
@@ -39,7 +40,8 @@ class WorkbenchGroupLabel implements View {
 		tooltip.fillAnchor = true;
 		var node = tooltip.build(context);
 		node.semantics = new Semantics(AccessibilityRole.Text);
-		node.semantics.label = name + (directory == null ? "" : " · " + directory);
+		node.semantics.label = "Group " + name + (workspaceName == null ? "" : " in workspace " + workspaceName)
+			+ (directory == null ? "" : " · " + directory);
 		return node;
 	}
 
