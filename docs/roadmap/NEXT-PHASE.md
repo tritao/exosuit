@@ -177,24 +177,64 @@ Hard violations:
 The review also flagged about 35 judgement-call smells (naming, duplicated shapes, data clumps). Go through them with
 the next round of changes in those files, not as a separate pass.
 
-## Build times (measured 2026-10-29)
+## Build times (measured 2026-10-29, after the build-speed changes 2026-10-30)
 
-`scripts/build-windows.ps1 -SkipBootstrap` on cube, in a fresh worktree:
+`scripts/build-windows.ps1 -SkipBootstrap` on cube. On 2026-10-29, in a fresh worktree on a loaded machine (the
+Android emulator held about 6 cores, and a WSL job was running):
 
 | Build | Time | Where it goes |
 |---|---|---|
 | Cold | 1,291 s (21.5 min) | about 1,140 s native C/C++; Haxe: editor 125 s (13,765 functions), agent 18 s, suit 7 s |
 | Nothing changed | 42 s | per-project MSBuild up-to-date checks; every step was a fingerprint match |
 
-The machine was loaded at the time: the Android emulator held about 6 cores, and a WSL job was running. Even so,
-the structure is the main cost. In order of payoff:
+On 2026-10-30 the machine was quieter (another worker was building), so the baseline was taken again before the
+changes, at f73024b. Times are the "Exosuit build" step; `scripts/build.py` now prints each app's time.
 
-1. **NativeKit and its vendored libraries are built three times.** The agent, suit and editor each build their own
-   copy in their own build folder. terminalkit and haxeon-credentials are each built twice. Build each native
-   package once, and share the result between the apps.
-2. **Use Ninja instead of the Visual Studio generator** for the apps' native packages. Haxeon's own presets already
-   use Ninja. It parallelizes better, and a no-op takes well under a second instead of about 40 s.
-3. **Share a native build cache across worktrees**, so that a new worktree, or a parallel worker, does not start
-   cold. Each of three parallel workers paid about 12 minutes.
-4. **Profile the editor's 125 s Haxe compile.** The live session patches incrementally, but a full compile at this
-   size needs a profile.
+| Build | Before (Visual Studio generator) | After (Ninja, ccache, module-only packages) |
+|---|---|---|
+| Cold, build folders deleted | 429 s | 104 s (agent 33 s, suit 33 s, editor 37 s) |
+| Cold, nothing in the compiler cache for these paths | 429 s | 130 s in a fresh second worktree (39, 37, 53 s) |
+| Nothing changed | 9 s (13 s with the script) | 3 s (6 s with the script) |
+
+What changed, in Haxeon (pinned by this branch):
+
+- **Ninja on Windows.** MSVC builds of CMake packages use Ninja instead of the Visual Studio generator, which compiled
+  a project's files one at a time and ran MSBuild's up-to-date check on every project. Haxeon loads the newest Visual
+  Studio's environment itself when the build is not in a developer prompt, so `scripts/run.py` from a plain shell gets
+  Ninja too. Switching between such a shell and `build-windows.ps1` (whose PATH differs) reconfigures the trees.
+- **ccache on Windows.** The bootstrap pins it (optional: offline it warns), and the Ninja builds compile through it,
+  keyed by the MSVC toolset, SDK and include path rather than cl.exe's size and time. It has no base directory on
+  Windows: ccache hands cl the relative paths it keys by, and cl fails on paths over 260 characters, which deep build
+  trees reach. So the cache reuses objects of the same build tree only: a reconfigured tree, or build folders that were
+  deleted (104 s with it, 194 s without, one measurement each).
+- **haxeon-credentials and haxeon-filesystem build only their NativeKit module**, not all of NativeKit, which cost
+  each a libwebsockets configure (65 compiler checks) and a WebView2 download for one or two source files.
+
+What is left, in order of payoff:
+
+1. **NativeKit is still configured and built three times**, by the agent, suit and editor. Configuring it is now the
+   largest cost: libwebsockets' 65 checks take about 30 s, one at a time, in each. Sharing it needs one CMake tree for
+   the three apps, such as Haxeon's workspace builds already make (they share a tree per CMake source and target), and
+   the agent and suit to use one native source for it. The apps' runtime library paths assume one folder per app.
+2. **Build the apps side by side.** Tried: 162 s against 132 s one after another, as their configures contended. Worth
+   another look once NativeKit is configured once.
+3. **A compiler cache shared across worktrees on Windows** needs paths that stay under 260 characters (a short build
+   root) or a cache that normalizes paths without rewriting the compile command.
+4. **Profile the editor's Haxe compile** (about 50 s now, overlapping the native builds). The live session patches
+   incrementally, but a full compile at this size needs a profile.
+5. One cold build, without ccache, failed once with "Access violation" in the Haxeon CLI while it ran configures in
+   parallel. The likely cause, launches restoring environment values that `Sys.putEnv` had freed, is fixed in the
+   pinned Haxeon; watch for it again.
+
+From the review of the build-speed fixes (2026-10-30), none blocking:
+
+- Planning can hang: `HostCommand` (vcvarsall, vswhere, `ninja --version`) has no timeout, never drains stderr and
+  leaks the process on an exception, and the bootstrap's downloads (ccache and the others) have no
+  `INACTIVITY_TIMEOUT`. Merge `HostCommand` into `ProcessRunner.capture`, which already does this job, with a timeout.
+- `MsvcEnvironment` calls `Sys.putEnv` outside the launch lock. It runs before executor threads start today; take
+  the lock anyway so a resident session or the live warmup cannot race it.
+- `NativeCMakeProvider` caches `ninja --version` under the bare name. Asked before vcvars puts Visual Studio's Ninja
+  on PATH, the empty answer turns Ninja off for the whole build.
+- A Visual Studio install path containing `&` or `^` breaks the `cmd /u` command that reads its environment.
+- `nativekit-module.cmake` skips NativeKit's `if(ANDROID) set(NK_BUILD_SHARED ON)`.
+- The ProcessRunner regression test can pass without the fix, because freed memory often keeps its bytes.
