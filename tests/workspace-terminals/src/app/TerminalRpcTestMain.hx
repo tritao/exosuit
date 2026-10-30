@@ -43,6 +43,7 @@ class TerminalRpcTestMain {
     if (mode == "contracts") {
       TerminalCapabilitiesTests.run();
       TerminalReplayTests.run();
+      TerminalResizeTests.run(root);
       TerminalThemeTests.run(root);
       TerminalAgentTests.run(root);
       TerminalHistoryTests.run(root);
