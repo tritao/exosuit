@@ -2,7 +2,7 @@ Run with `haxeon/scripts/haxeon run --project tests/workbench-drag/haxeon.json`.
 
 Checks moving Workbench groups, terminals and agent sessions into groups, including hierarchy cycles, unchanged destinations and workspace ownership. Real TreeView pointer sequences cover click preservation, selection, declarative rebuilds, cancellation, release validation, hover expansion and edge scrolling.
 
-With suit on (machine, workspace, then groups), the real Workbench panel drags a terminal and an agent session out of a sub-group onto a top-level group and checks that each sends the same service call as Move to Group… (terminal rename with the new group, agent `move`). Drops onto the item's own group, onto other workspace rows and the machine row, and while the terminal catalog is busy send nothing; pressing another row ends an open rename unsaved before the drag starts.
+With suit on (workspaces, then groups), the real Workbench panel drags a terminal and an agent session out of a sub-group onto a top-level group and checks that each sends the same service call as Move to Group… (terminal rename with the new group, agent `move`). Drops onto the item's own group, onto other workspace rows and New Workspace…, and while the terminal catalog is busy send nothing; pressing another row ends an open rename unsaved before the drag starts.
 
 The open workspace's row is the workspace root (`WorkspaceProtocol.ROOT_GROUP`, no group): dropping a terminal or session on it moves it there, dropping one already there is refused, and the terminal service loads, keeps and moves root terminals.
 

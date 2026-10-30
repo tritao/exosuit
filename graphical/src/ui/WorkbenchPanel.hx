@@ -524,12 +524,9 @@ class WorkbenchPanel implements View {
 
     /** Expands `groupId` and every group above it so a row inside shows; false when the chain is broken. */
     function expandAncestors(groupId:Null<String>):Bool {
-        // Nested under the open workspace, the groups show only while it and the machine are expanded.
+        // Nested under the open workspace, the groups show only while it is expanded.
         var nesting = model.groupParent;
-        if (nesting != null) {
-            tree.setExpanded(WorkbenchRowKey.MACHINE, true);
-            tree.setExpanded(nesting, true);
-        }
+        if (nesting != null) tree.setExpanded(nesting, true);
         var ancestors:Array<String> = [];
         var visited:Map<String, Bool> = [];
         var parent = groupId;
@@ -707,10 +704,7 @@ class WorkbenchPanel implements View {
 		var previous = observedOpenRow;
 		observedOpenRow = open;
 		if (previous != null) tree.setExpanded(previous, false);
-		if (open != null) {
-			tree.setExpanded(WorkbenchRowKey.MACHINE, true);
-			tree.setExpanded(open, true);
-		}
+		if (open != null) tree.setExpanded(open, true);
 	}
 
 	public function headerActions(availableWidth:Float = 260):View return new WorkbenchHeaderActions(this, availableWidth);
@@ -799,6 +793,10 @@ class WorkbenchPanel implements View {
 		syncState();
 		var selected = groupFor(tree.selectedKey);
 		var rows:Array<KeyedView> = [];
+		var machineActions = machine;
+		// With suit on, the machine is chosen above the tree; this machine is the only choice for now.
+		if (machineActions != null)
+			rows.push(new KeyedView("machine", new WorkbenchMachineSelector(machineActions.view(), function(_) {})));
 		rows.push(new KeyedView("tree", tree));
 		var start = emptyState();
 		if (start != null) rows.push(new KeyedView("empty-state", start));

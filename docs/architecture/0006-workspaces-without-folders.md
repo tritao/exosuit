@@ -15,7 +15,12 @@ a group, or an item in one, is selected; new catalogs still seed a Work group.
 Downgrade risk: a service from before this change cannot open a catalog that holds a root terminal. It rejects the
 stored record ("Invalid persisted terminal record") and does not start. Creating or moving an item to the root
 against such a service fails with "Unknown group". An editor and its service ship together, so this only bites when
-going back to an older build. Editors from before this change do not show root items.
+going back to an older build. Editors from before this change do not show root items, and a terminal such an editor
+starts without a group (Ctrl+`) now lands at the root, where it cannot see it.
+
+Amended 2026-10-30: **the Workbench tree starts at the workspaces.** The machine is no longer a tree row. A dropdown
+above the tree names it ("cube · this machine"); it lists this machine only, and remote machines join it as further
+choices later. New Workspace… stays the last row of the workspace list. With suit off the tree is unchanged.
 
 ## Context
 
@@ -111,8 +116,8 @@ A single global daemon was considered and rejected:
      `ScmFolderScope`); this extends it to every root.
 5. **Editor:**
    - The Workbench creates a workspace with a name only. Attaching a folder is a separate, optional action.
-   - The Workbench shows one tree of machine, workspaces, groups and sessions. With no folders, Files, Search and
-     Changes show an empty state with "Attach Folder…".
+   - The Workbench shows one tree of workspaces, groups and sessions, below a dropdown that chooses the machine.
+     With no folders, Files, Search and Changes show an empty state with "Attach Folder…".
    - Editor mode opens a folder by attaching it to a workspace (ADR 0005, step 4).
 6. **Protocol and clients:** requests name the workspace by id; a folder becomes an optional attribute. This is
    agreed with the mobile-app branch before either side builds it, as ADR 0005 step 0 requires.

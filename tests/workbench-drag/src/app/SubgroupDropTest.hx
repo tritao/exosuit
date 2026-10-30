@@ -71,8 +71,11 @@ class SubgroupDropTest {
    context.pointerUp(120,target.y+target.height/2,0);pump();submit();
   }
   submit();panel.tree.setExpanded("g:sub",true);submit();
+  var machinePicker=false;
+  root.walk(function(node) {var sem=node.semantics;if(sem!=null && sem.label=="Machine") machinePicker=true;});
+  require(machinePicker && panel.model.rootKeyAt(0)=="w:resume","the machine is not chosen above a tree of workspaces");
   require(panel.model.openRow=="w:resume" && panel.model.groupParent=="w:resume","groups did not sit under the open workspace");
-  for(target in ["g:sub","w:elsewhere","m:this"]) {
+  for(target in ["g:sub","w:elsewhere","n:new-workspace"]) {
    drag("t:term",target);drag("a:agent",target);
    require(renames.length==0 && moves.length==0,"drop onto "+target+" was accepted");
   }

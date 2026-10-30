@@ -13,9 +13,9 @@ import workspace.service.WorkspaceTerminalProtocol;
 /**
 	Projection only: grouping/status belong to the service, expansion/selection to TreeView.
 
-	With suit on, the tree is one tree (docs/architecture/0006-workspaces-without-folders.md): this machine, then its
-	workspaces, status lines and New Workspace…; the open workspace's groups, sessions and terminals nest under its row.
-	With suit off it is the group tree alone.
+	With suit on, the tree is one tree (docs/architecture/0006-workspaces-without-folders.md): the machine's workspaces,
+	status lines and New Workspace…; the open workspace's groups, sessions and terminals nest under its row. The machine
+	itself is chosen above the tree (WorkbenchMachineSelector). With suit off it is the group tree alone.
 **/
 class WorkbenchTreeModel implements TreeViewModel {
 	public final groups:Map<String, WorkspaceGroup> = [];
@@ -67,11 +67,9 @@ class WorkbenchTreeModel implements TreeViewModel {
 		projectMachine(machine, catalog);
 	}
 
-	/** The machine row, its workspaces and status lines; the groups go under the open workspace once its service is attached. */
+	/** The machine's workspaces and status lines; the groups go under the open workspace once its service is attached. */
 	function projectMachine(view:WorkbenchMachineView, catalog:Null<TerminalCatalog>):Void {
-		var rows:Array<String> = [];
-		roots.push(WorkbenchRowKey.MACHINE);
-		children.set(WorkbenchRowKey.MACHINE, rows);
+		var rows = roots;
 		var state = view.machine;
 		if (state != null)
 			for (entry in state.workspaces) {
@@ -146,7 +144,7 @@ class WorkbenchTreeModel implements TreeViewModel {
 	public function rootRange(start:Int, count:Int):Array<TreeRootMetadata>
 		return [
 			for (index in start...Std.int(Math.min(roots.length, start + count)))
-				new TreeRootMetadata(roots[index], true)
+				new TreeRootMetadata(roots[index], initiallyExpanded(roots[index]))
 		];
 
 	public function rootKeyAt(index:Int):String
@@ -165,7 +163,7 @@ class WorkbenchTreeModel implements TreeViewModel {
 	}
 
 	public function initiallyExpanded(key:String):Bool
-		return key == WorkbenchRowKey.MACHINE || key == openRow || WorkbenchRowKey.isKind(key, WorkbenchRowKind.Group) && groupRoots.indexOf(key) >= 0;
+		return key == openRow || WorkbenchRowKey.isKind(key, WorkbenchRowKind.Group) && groupRoots.indexOf(key) >= 0;
 
 	/** True for a row the tree draws as expandable even without children: every workspace, open or not. */
 	public function expandable(key:String):Bool
@@ -226,10 +224,6 @@ class WorkbenchTreeModel implements TreeViewModel {
 	function machineItem(key:String):View {
 		var view = machine;
 		if (view == null) return new Text("");
-		if (key == WorkbenchRowKey.MACHINE) {
-			var state = view.machine;
-			return WorkbenchMachineLabel.machine(state == null ? "This machine" : state.name + " · this machine");
-		}
 		if (key == WorkbenchRowKey.NEW_WORKSPACE) return WorkbenchMachineLabel.newWorkspace();
 		var id = WorkbenchRowKey.workspaceId(key);
 		if (id != null) {

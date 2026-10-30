@@ -10,7 +10,8 @@ per-context layouts) and suit. Read [EXECUTION.md](EXECUTION.md) first, and reco
 - A machine (suit) serves any number of workspaces. A workspace is a name with zero or more attached folders.
 - Each workspace has one service, which holds its sessions, terminals and groups. Sessions and terminals belong to
   the workspace itself or to a group; a group is an optional collection of them, with an optional folder.
-- The Workbench is one tree: machine, then workspaces, then groups and sub-groups, then sessions and terminals.
+- The Workbench is one tree: workspaces, then groups and sub-groups, then sessions and terminals. A dropdown above it
+  chooses the machine.
 - Selecting a group switches to it instantly, and its open tabs come with it.
 - Several editor windows or instances can be open, each focused on its own workspace and group. Every window sees
   the whole machine, live.
@@ -94,8 +95,9 @@ session shows its folder.
 The model and the UI land first, on today's services. A workspace's groups appear once its service is attached;
 Phase 6 makes every workspace live.
 
-- [ ] `WorkbenchTreeModel` gets a top level: machine, then workspaces (from `MachineClient`), then groups and
-  sub-groups, then sessions and terminals.
+- [ ] `WorkbenchTreeModel` gets a top level: workspaces (from `MachineClient`), then groups and sub-groups, then
+  sessions and terminals. The machine is chosen in a dropdown above the tree, not shown as a row (decided
+  2026-10-30, ADR 0006 amendment); it lists this machine until remote machines are added later.
   - Workspace rows: expand and collapse, a running/idle state, and the context menu (Rename, Attach Folder…,
     Remove from This Machine, Open in New Window, from Phase 8).
   - Group rows keep today's menus.

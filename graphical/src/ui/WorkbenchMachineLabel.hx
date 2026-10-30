@@ -16,7 +16,7 @@ import haxeon.ui.widgets.text.MiddleEllipsisText;
 import haxeon.ui.widgets.text.Text;
 import suit.MachineCatalog.MachineWorkspace;
 
-/** The Workbench tree's machine rows: this machine, a workspace, a status line, New Workspace…. */
+/** The Workbench tree's machine rows: a workspace, a status line, New Workspace…. */
 class WorkbenchMachineLabel implements View {
 	final icon:Null<IconName>;
 	final text:String;
@@ -29,9 +29,6 @@ class WorkbenchMachineLabel implements View {
 		this.icon = icon; this.text = text; this.detail = detail; this.description = description;
 		this.muted = muted; this.warning = warning;
 	}
-
-	public static function machine(title:String):WorkbenchMachineLabel
-		return new WorkbenchMachineLabel(IconName.Cube, title, null, title, true, false);
 
 	/** The open workspace says so; its accessibility label names its folders, or that it has none. */
 	public static function workspace(entry:MachineWorkspace, open:Bool):WorkbenchMachineLabel {
