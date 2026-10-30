@@ -7,7 +7,7 @@ import haxeon.wire.JsonWire;
 import process.ProcessManager;
 import process.OwnedProcess;
 import sys.FileSystem;
-import haxeon.platform.NativeKitEvents;
+import haxeon.platform.event.EventPump;
 import workspace.transport.NativeRpcHub;
 import workspace.transport.NativeRpcConnector;
 import workspace.service.WorkspaceProtocol;
@@ -97,7 +97,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   var recoveringUntil:Float = 0;
 
   public function new(
-    events:NativeKitEvents,
+    events:EventPump,
     processes:ProcessManager,
     launcher:String,
     clock:Void -> Float,

@@ -1,18 +1,19 @@
 package ui;
 
 import haxeon.platform.NativeKitError;
-import haxeon.platform.NativeKitEvents;
-import haxeon.platform.NativeKitFileWatch;
+import haxeon.platform.event.EventPump;
+import haxeon.platform.FileWatch;
+import haxeon.platform.FileWatchEvent;
 
 /** Observes visited directories so stable explorers need no filesystem scans. */
 class ExplorerDirectoryWatch {
 	final model:DirectoryTreeModel;
-	var watch:Null<NativeKitFileWatch>;
+	var watch:Null<FileWatch>;
 
-	public function new(model:DirectoryTreeModel, events:NativeKitEvents) {
+	public function new(model:DirectoryTreeModel, events:EventPump) {
 		this.model = model;
 		try {
-			watch = NativeKitFileWatch.create(events, onEvent);
+			watch = FileWatch.create(events, onEvent);
 			model.observeDirectory = addDirectory;
 			for (path in model.visitedDirectories()) addDirectory(path);
 			model.watchChanges = watch != null;

@@ -18,7 +18,7 @@ import terminalsession.TerminalProfileRegistry;
 import terminalsession.TerminalSession;
 import terminalsession.LocalPtyBackend;
 import terminalkit.Emulator;
-import haxeon.platform.NativeKitRuntime;
+import haxeon.platform.Runtime;
 
 class SampleCompletionProvider implements CompletionProvider {
 	public function new() {}
@@ -139,7 +139,7 @@ class PluginTestMain {
 		var entry = profiles.find("sample", "shell");
 		if (entry == null) throw "terminal profile lookup failed";
 		require(entry.id() == "sample:shell", "terminal profile identity failed");
-		var runtime = NativeKitRuntime.start();
+		var runtime = Runtime.start();
 		var session = new TerminalSession(LocalPtyBackend.spawn(entry.profile, 40, 4), Emulator.open(40, 4));
 		var deadline = Sys.time() + 5;
 		while (Sys.time() < deadline && session.status != "exited") {

@@ -2,7 +2,7 @@ package workspace.client;
 
 import haxe.Json;
 import haxe.io.Bytes;
-import haxeon.platform.NativeKitEvents;
+import haxeon.platform.event.EventPump;
 import haxeon.rpc.RpcConnectResult;
 import suit.MachineCatalog;
 import suit.MachineCatalog.MachineState;
@@ -46,7 +46,7 @@ class MachineClient {
 	/** False when suit is off: the editor then has no machine and works on open folders only. */
 	public final enabled:Bool;
 
-	public function new(events:NativeKitEvents, clock:Void->Float) {
+	public function new(events:EventPump, clock:Void->Float) {
 		hub = new NativeRpcHub(events);
 		this.clock = clock;
 		enabled = SuitClient.current() != Off;

@@ -4,7 +4,7 @@ import suit.SuitRecord.SuitRecords;
 import haxe.Json;
 import haxe.io.Bytes;
 import haxe.io.Path;
-import haxeon.platform.NativeKitEvents;
+import haxeon.platform.event.EventPump;
 import haxeon.wire.MessagePackFrame;
 import processkit.Processes;
 import suit.SuitClient;
@@ -105,7 +105,7 @@ class SuitRelayBridge {
 	var startedAt:Float = -1e9;
 	var disposed:Bool = false;
 
-	public function new(events:NativeKitEvents, hub:NativeRpcHub, host:SuitRelayHost, paused:Bool) {
+	public function new(events:EventPump, hub:NativeRpcHub, host:SuitRelayHost, paused:Bool) {
 		this.host = host;
 		this.paused = paused;
 		dialer = new RelayMachineDialer(new RelayMachineConnector(events, hub, Sys.getEnv("EXOSUIT_RELAY_ALLOW_LOOPBACK_HTTP") == "1"), 1,

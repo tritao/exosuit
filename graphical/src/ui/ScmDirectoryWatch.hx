@@ -1,8 +1,9 @@
 package ui;
 
 import haxeon.platform.NativeKitError;
-import haxeon.platform.NativeKitEvents;
-import haxeon.platform.NativeKitFileWatch;
+import haxeon.platform.event.EventPump;
+import haxeon.platform.FileWatch;
+import haxeon.platform.FileWatchEvent;
 import scm.ScmService;
 
 /**
@@ -14,7 +15,7 @@ import scm.ScmService;
 **/
 class ScmDirectoryWatch {
 	final scm:ScmService;
-	final events:NativeKitEvents;
+	final events:EventPump;
 	/** Shared watches by the directories and exclusions they cover (see signature). */
 	final watches:Map<String, SharedScmWatch> = [];
 	/** Each watched root's shared watch, by root key. */
@@ -22,7 +23,7 @@ class ScmDirectoryWatch {
 	var disposed:Bool = false;
 	public var lastError(default, null):Null<String>;
 
-	public function new(scm:ScmService, events:NativeKitEvents) {
+	public function new(scm:ScmService, events:EventPump) {
 		this.scm = scm;
 		this.events = events;
 	}
@@ -34,7 +35,7 @@ class ScmDirectoryWatch {
 	public function update(root:String, paths:Array<String>, ?excluded:Array<String>):Void {
 		if (disposed) return;
 		lastError = null;
-		var rootKey = NativeKitFileWatch.pathKey(root), current = rootWatches.get(rootKey);
+		var rootKey = FileWatch.pathKey(root), current = rootWatches.get(rootKey);
 		if (paths == null || paths.length == 0) {
 			if (current != null) detach(rootKey, root, current);
 			return;
@@ -51,7 +52,7 @@ class ScmDirectoryWatch {
 			shared = new SharedScmWatch(key);
 			try {
 				var created = shared;
-				shared.watch = NativeKitFileWatch.create(events, event -> onEvent(created, event));
+				shared.watch = FileWatch.create(events, event -> onEvent(created, event));
 				for (path in exclusions) shared.watch.exclude(path);
 				for (path in selected) shared.watch.add(path, true);
 			} catch (error:NativeKitError) {
@@ -68,7 +69,7 @@ class ScmDirectoryWatch {
 	}
 
 	public function isWatching(root:String):Bool {
-		var shared = rootWatches.get(NativeKitFileWatch.pathKey(root));
+		var shared = rootWatches.get(FileWatch.pathKey(root));
 		return shared != null && !shared.watch.isDisposed() && shared.watch.directories().length > 0;
 	}
 
@@ -125,7 +126,7 @@ class ScmDirectoryWatch {
 	}
 
 	static function signature(paths:Array<String>, excluded:Array<String>):String {
-		var pathKeys = [for (path in paths) NativeKitFileWatch.pathKey(path)], excludedKeys = [for (path in excluded) NativeKitFileWatch.pathKey(path)];
+		var pathKeys = [for (path in paths) FileWatch.pathKey(path)], excludedKeys = [for (path in excluded) FileWatch.pathKey(path)];
 		var byText = (a:String, b:String) -> a < b ? -1 : a > b ? 1 : 0;
 		pathKeys.sort(byText);
 		excludedKeys.sort(byText);
@@ -135,10 +136,10 @@ class ScmDirectoryWatch {
 	/** The paths not under another one, so a directory already watched recursively is not walked again. */
 	static function outermost(paths:Array<String>):Array<String> {
 		var ordered = paths.copy(), selected:Array<String> = [];
-		ordered.sort((a, b) -> NativeKitFileWatch.pathKey(a).length - NativeKitFileWatch.pathKey(b).length);
+		ordered.sort((a, b) -> FileWatch.pathKey(a).length - FileWatch.pathKey(b).length);
 		for (path in ordered) {
 			var covered = false;
-			for (parent in selected) if (NativeKitFileWatch.within(parent, path)) { covered = true; break; }
+			for (parent in selected) if (FileWatch.within(parent, path)) { covered = true; break; }
 			if (!covered) selected.push(path);
 		}
 		return selected;
@@ -147,7 +148,7 @@ class ScmDirectoryWatch {
 
 private class SharedScmWatch {
 	public final key:String;
-	public var watch:NativeKitFileWatch;
+	public var watch:FileWatch;
 	/** The roots using this watch, by root key. */
 	public final roots:Map<String, String> = [];
 

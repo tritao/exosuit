@@ -4,8 +4,8 @@ import suit.SuitRecord.SuitRecords;
 import haxe.Json;
 import haxe.io.Bytes;
 import haxe.io.Path;
-import haxeon.platform.NativeKitRuntime;
-import haxeon.platform.NativeKitEventValue;
+import haxeon.platform.Runtime;
+import haxeon.platform.event.PlatformEvent;
 import nativekit.ffi.NativeKitTypes;
 import sys.FileSystem;
 import suit.SuitInventory.SuitProcess;
@@ -39,7 +39,7 @@ extern function releaseLock(lock:SuitLockHandle):Void;
 class SuitDaemon {
 	static inline var REFRESH_SECONDS:Float = 10;
 
-	final runtime:NativeKitRuntime;
+	final runtime:Runtime;
 	final hub:NativeRpcHub;
 	final clients:Array<NativeRpcTransport> = [];
 	final jobs:Array<SuitTerminator> = [];
@@ -87,7 +87,7 @@ class SuitDaemon {
 		var configured = Std.parseFloat(Sys.getEnv("EXOSUIT_SUIT_IDLE_SECONDS"));
 		idleSeconds = Math.isNaN(configured) || configured < 1 ? 120 : configured;
 		idleSince = Sys.time();
-		runtime = NativeKitRuntime.start();
+		runtime = Runtime.start();
 		hub = new NativeRpcHub(runtime.events);
 		var listenError = listen();
 		if (listenError != null) {
@@ -171,7 +171,7 @@ class SuitDaemon {
 			tray.setTooltip(tooltip());
 	}
 
-	function onEvent(value:NativeKitEventValue):Void {
+	function onEvent(value:PlatformEvent):Void {
 		switch value {
 			case Raw(kind, source, _, _, _, _, data):
 				var current = tray;

@@ -1,7 +1,7 @@
 package app;
 
 import haxe.io.Bytes;
-import haxeon.platform.NativeKitRuntime;
+import haxeon.platform.Runtime;
 import nativekit.ffi.NativeKit;
 import workspace.transport.*;
 import workspace.service.*;
@@ -10,7 +10,7 @@ import haxeon.rpc.*;
 
 class BrowserRpcMain {
 	static final key = Bytes.alloc(64);
-	static var runtime:Null<NativeKitRuntime>;
+	static var runtime:Null<Runtime>;
 	static var hub:Null<NativeRpcHub>;
 	static var connector:Null<SessionRpcConnector>;
 	static var client:Null<RpcClient>;
@@ -42,7 +42,7 @@ class BrowserRpcMain {
 	}
 
 	@:expose public static function start(port:Int):Void {
-		runtime = NativeKitRuntime.start();
+		runtime = Runtime.start();
 		hub = new NativeRpcHub(runtime.events);
 		var clock = function() return NativeKit.nk_time_seconds() * 1000;
 		connector = new SessionRpcConnector(new NativeRpcConnector(hub, NativeRpcHub.websocket(port)), key.toString(), clock);

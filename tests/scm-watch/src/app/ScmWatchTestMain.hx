@@ -1,6 +1,6 @@
 package app;
 
-import haxeon.platform.NativeKitRuntime;
+import haxeon.platform.Runtime;
 import jobs.JobScheduler;
 import process.ProcessManager;
 import scm.ScmGroupId;
@@ -19,7 +19,7 @@ class ScmWatchTestMain {
 		if (!condition) throw message;
 	}
 
-	static function pumpNative(runtime:NativeKitRuntime, service:Null<ScmService>, scheduler:JobScheduler,
+	static function pumpNative(runtime:Runtime, service:Null<ScmService>, scheduler:JobScheduler,
 			complete:Void->Bool, message:String, timeout:Float = 8.0):Void {
 		var deadline = Sys.time() + timeout;
 		while (!complete() && Sys.time() < deadline) {
@@ -31,7 +31,7 @@ class ScmWatchTestMain {
 		require(complete(), message);
 	}
 
-	static function runGit(git:GitProcess, runtime:NativeKitRuntime, scheduler:JobScheduler, args:Array<String>, cwd:String,
+	static function runGit(git:GitProcess, runtime:Runtime, scheduler:JobScheduler, args:Array<String>, cwd:String,
 			generation:Int):scm.git.GitCommandResult {
 		var result:Null<ScmJobResult<scm.git.GitCommandResult>> = null;
 		git.run(args, cwd, generation, value -> result = value, false);
@@ -74,7 +74,7 @@ class ScmWatchTestMain {
 			Sys.println("PENDING: SCM native-watch runtime test needs Git 2.25 or newer");
 			return 0;
 		}
-		var runtime = NativeKitRuntime.start();
+		var runtime = Runtime.start();
 		var service:Null<ScmService> = null, watcher:Null<ScmDirectoryWatch> = null;
 		try {
 			runGit(git, runtime, scheduler, ["init"], root, 2);

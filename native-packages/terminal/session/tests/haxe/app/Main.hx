@@ -7,7 +7,7 @@ import terminalsession.TerminalEvent;
 import terminalsession.TerminalSession;
 import terminalsession.LocalPtyBackend;
 import terminalsession.TerminalProfile;
-import haxeon.platform.NativeKitRuntime;
+import haxeon.platform.Runtime;
 
 class FakeBackend implements TerminalBackend {
     public function id():String return "remote-test";
@@ -158,7 +158,7 @@ class Main {
     }
 
     static function localPtySmoke():Void {
-        var runtime = NativeKitRuntime.start();
+        var runtime = Runtime.start();
         var profile = new TerminalProfile("/bin/sh", ["-c",
             "stty -echo; printf 'READY:%s:%s\\r\\n' \"$TERM\" \"${NO_COLOR-unset}\"; " +
             "IFS= read -r line; printf 'GOT:%s\\r\\n' \"$line\""], "/tmp");
@@ -185,7 +185,7 @@ class Main {
         if (!okay) throw "NativeKit PTY terminal session did not round-trip";
     }
     static function drainExitSmoke():Void {
-        var runtime=NativeKitRuntime.start();
+        var runtime=Runtime.start();
         var backend=LocalPtyBackend.spawn(new TerminalProfile("/usr/bin/python3",["-c",
             "import os; os.write(1,b'x'*262144+b'END'); raise SystemExit(7)"],"/tmp"),80,24);
         var received=0, exited=false, code=0;

@@ -56,10 +56,7 @@ class GraphicalMain {
 		var profile = allocationProfile;
 		if (profile != null) {
 			hl.Gc.censusStop();
-			var encoded = haxe.io.Bytes.ofString(profile);
-			var terminated = haxe.io.Bytes.alloc(encoded.length + 1);
-			terminated.blit(0, encoded, 0, encoded.length);
-			hl.Gc.censusDump(AllocationProfileBytes.data(terminated));
+			hl.Gc.censusDump(profile);
 		}
 		return current.close();
 	}
@@ -268,9 +265,4 @@ class GraphicalMain {
 			return true;
 		}
 	}
-}
-
-private extern class AllocationProfileBytes {
-	@:hlNative("haxeon_runtime", "__bytes_get_data")
-	public static function data(bytes:haxe.io.Bytes):hl.Bytes;
 }

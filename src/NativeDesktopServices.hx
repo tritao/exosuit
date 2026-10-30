@@ -1,8 +1,15 @@
 import haxeon.ui.host.DesktopUiHostContext;
 import nativekit.ffi.NativeKit;
 import nativekit.ffi.NativeKitTypes;
-import haxeon.platform.NativeKitEventValue;
+import haxeon.platform.async.Future;
+import haxeon.platform.async.Outcome;
+import haxeon.platform.event.PlatformEvent;
 import haxe.io.Bytes;
+
+private typedef PendingDialog = {
+	var request:haxe.Int64;
+	var future:Future<PlatformEvent>;
+}
 
 /**
  * NativeKit-backed desktop services (file/folder dialogs, clipboard, and
@@ -16,7 +23,7 @@ import haxe.io.Bytes;
  */
 class NativeDesktopServices implements platform.HostFileDialogs {
 	final host:DesktopUiHostContext;
-	final pending:Array<haxe.Int64> = [];
+	final pending:Array<PendingDialog> = [];
 
 	public function new(host:DesktopUiHostContext) {
 		this.host = host;
@@ -28,10 +35,7 @@ class NativeDesktopServices implements platform.HostFileDialogs {
 		options.set_kind(MessageKind.Warning);
 		options.set_buttons(MessageButtons.Save | MessageButtons.DontSave | MessageButtons.Cancel);
 		options.set_message('Do you want to save the changes you made to "' + filename + '"?\n\nYour changes will be lost if you don’t save them.');
-		var request = NativeKit.nk_dialog_message_checked(parentHandle(), options);
-		pending.push(request);
-		host.events.requests.track(request, function(value) {
-			pending.remove(request);
+		dialog(NativeKit.nk_dialog_message_checked(parentHandle(), options), function(value) {
 			var answer = switch value {
 				case DialogMessage(_, result, button, _) if (result == Result.Ok):
 					button == MessageResult.Yes ? "save" : button == MessageResult.No ? "discard" : "cancel";
@@ -52,10 +56,7 @@ class NativeDesktopServices implements platform.HostFileDialogs {
 		var name = haxe.io.Path.withoutDirectory(path);
 		var subject = sys.FileSystem.isDirectory(path) ? '"' + name + '" and its contents' : '"' + name + '"';
 		options.set_message('Are you sure you want to delete ' + subject + '?\n\nYou can restore this from the Trash.');
-		var request = NativeKit.nk_dialog_message_checked(parentHandle(), options);
-		pending.push(request);
-		host.events.requests.track(request, function(value) {
-			pending.remove(request);
+		dialog(NativeKit.nk_dialog_message_checked(parentHandle(), options), function(value) {
 			switch value {
 				case DialogMessage(_, result, button, checked):
 					var confirmed = result == Result.Ok && button == MessageResult.Yes;
@@ -101,10 +102,25 @@ class NativeDesktopServices implements platform.HostFileDialogs {
 		return request;
 	}
 
+	/**
+		Tracks a native dialog; `done` gets its completion event. A dialog still open at shutdown is cancelled, and `done`
+		is not called for it.
+	**/
+	function dialog(request:haxe.Int64, done:PlatformEvent->Void):Void {
+		var future = host.events.requests.trackNative(request, function(value):Outcome<PlatformEvent> return Success(value));
+		var entry:PendingDialog = {request: request, future: future};
+		pending.push(entry);
+		future.onComplete(function(outcome) {
+			pending.remove(entry);
+			switch outcome {
+				case Success(value): done(value);
+				case _:
+			}
+		});
+	}
+
 	function track(request:haxe.Int64, handler:Null<Array<String>>->Void):Void {
-		pending.push(request);
-		host.events.requests.track(request, function(value) {
-			pending.remove(request);
+		dialog(request, function(value) {
 			switch value {
 				case Resources(_, _, result, accepted, items):
 					if (result != Result.Ok || !accepted || items.length == 0) { handler(null); return; }
@@ -120,9 +136,12 @@ class NativeDesktopServices implements platform.HostFileDialogs {
 
 	public function readClipboardText(handler:String->Void):haxe.Int64 {
 		var request = NativeKit.nk_clipboard_read_text_checked();
-		host.events.requests.track(request, function(value) switch value {
-			case ClipboardText(_, result, text): handler(result == Result.Ok ? text : "");
-			case _: handler("");
+		host.events.requests.trackNative(request, function(value):Outcome<String> return switch value {
+			case ClipboardText(_, result, text): Success(result == Result.Ok ? text : "");
+			case _: Success("");
+		}).onComplete(function(outcome) switch outcome {
+			case Success(text): handler(text);
+			case _:
 		});
 		return request;
 	}
@@ -140,9 +159,9 @@ class NativeDesktopServices implements platform.HostFileDialogs {
 		require(NativeKit.nk_shell_reveal_file(path), "reveal file");
 
 	public function shutdown():Void {
-		for (request in pending.copy()) {
-			host.events.requests.cancel(request);
-			NativeKit.nk_dialog_cancel(request);
+		for (entry in pending.copy()) {
+			entry.future.stopObserving();
+			NativeKit.nk_dialog_cancel(entry.request);
 		}
 		pending.resize(0);
 	}

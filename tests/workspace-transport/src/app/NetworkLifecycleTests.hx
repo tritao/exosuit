@@ -1,7 +1,7 @@
 package app;
 
 import haxe.io.Bytes;
-import haxeon.platform.NativeKitRuntime;
+import haxeon.platform.Runtime;
 import haxeon.rpc.*;
 import haxeon.wire.MessagePack;
 import workspace.service.*;
@@ -16,7 +16,7 @@ class NetworkLifecycleTests {
 			throw message;
 	}
 
-	static function events(runtime:NativeKitRuntime):Void {
+	static function events(runtime:Runtime):Void {
 		runtime.events.wait(0.001);
 		for (_ in 0...128)
 			if (!runtime.events.poll())
@@ -36,12 +36,12 @@ class NetworkLifecycleTests {
 			}
 		]);
 
-	public static function run(runtime:NativeKitRuntime, hub:NativeRpcHub, path:String, clock:Void->Float):Void {
+	public static function run(runtime:Runtime, hub:NativeRpcHub, path:String, clock:Void->Float):Void {
 		capabilities(runtime, hub, path, clock);
 		slowConsumer(runtime, hub, path, clock);
 	}
 
-	static function capabilities(runtime:NativeKitRuntime, hub:NativeRpcHub, path:String, clock:Void->Float):Void {
+	static function capabilities(runtime:Runtime, hub:NativeRpcHub, path:String, clock:Void->Float):Void {
 		var catalog = service();
 		var all = [WorkspaceProtocol.READ, WorkspaceProtocol.WRITE];
 		var host = new WorkspaceRpcServer(catalog, clock, all);
@@ -128,7 +128,7 @@ class NetworkLifecycleTests {
 
 	// Two real sockets share a service. The slow peer never drains its incoming bytes
 	// after admission; real native/RPC queues must reject it without closing its sibling.
-	static function slowConsumer(runtime:NativeKitRuntime, hub:NativeRpcHub, path:String, clock:Void->Float):Void {
+	static function slowConsumer(runtime:Runtime, hub:NativeRpcHub, path:String, clock:Void->Float):Void {
 		var catalog = service();
 		var admitted:Array<NativeRpcTransport> = [];
 		var listener = hub.listen(NativeRpcHub.local(path), function(stream) {

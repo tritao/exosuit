@@ -1,7 +1,7 @@
 package workspace.transport;
 
 import haxe.io.Bytes;
-import haxeon.platform.NativeKitEvents;
+import haxeon.platform.event.EventPump;
 import haxeon.rpc.MessageTransport;
 import haxeon.rpc.RpcConnectAttempt;
 import haxeon.rpc.RpcConnectResult;
@@ -146,7 +146,7 @@ class DeviceRpcConnector implements RpcConnector {
 	final pending:Array<DeviceConnectAttempt> = [];
 	var disposed:Bool = false;
 
-	public function new(events:NativeKitEvents, hub:NativeRpcHub, clock:Void->Float,
+	public function new(events:EventPump, hub:NativeRpcHub, clock:Void->Float,
 		endpoint:RelayMachineEndpoint, machineId:String, deviceId:String, deviceToken:String,
 		privateKey:Bytes, machineKey:Bytes, ?first:MessageTransport) {
 		if (events == null || hub == null || clock == null || endpoint == null

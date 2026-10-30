@@ -1,6 +1,6 @@
 package app;
 
-import haxeon.platform.NativeKitRuntime;
+import haxeon.platform.Runtime;
 import nativekit.ffi.NativeKit;
 import haxe.io.Path;
 import sys.FileSystem;
@@ -59,7 +59,7 @@ class AgentMain {
 		var token = sys.io.File.getContent(args[2]);
 		SessionPreflight.validateToken(token);
 		var processes = new process.ProcessManager();
-		var runtime = NativeKitRuntime.start(),
+		var runtime = Runtime.start(),
 			hub = new NativeRpcHub(runtime.events);
 		var clock = function() return NativeKit.nk_time_seconds() * 1000;
 		// HTTP remains rejected by RelayMachineEndpoint except for loopback. This

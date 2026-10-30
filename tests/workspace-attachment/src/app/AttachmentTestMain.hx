@@ -1,6 +1,6 @@
 package app;
 
-import haxeon.platform.NativeKitRuntime;
+import haxeon.platform.Runtime;
 import nativekit.ffi.NativeKit;
 import platform.Platform;
 import process.ProcessManager;
@@ -14,7 +14,7 @@ class AttachmentTestMain {
   static function main():Void {
     var args = Sys.args(), mode = args[0], root = args[1], launcher = args[2];
     if (mode == "cleanup-relay") {
-      var cleanupRuntime = NativeKitRuntime.start();
+      var cleanupRuntime = Runtime.start();
       for (account in ["relay:" + launcher + "/machine/" + root, "noise-static:" + root]) {
         var value:haxe.io.Bytes = haxeon.credentials.Credentials.get("com.exosuit.workspace-relay", account);
         if (value != null) {
@@ -26,7 +26,7 @@ class AttachmentTestMain {
       return;
     }
 
-    var runtime = NativeKitRuntime.start(), processes = new ProcessManager();
+    var runtime = Runtime.start(), processes = new ProcessManager();
     var clock = function() return NativeKit.nk_time_seconds() * 1000;
     if (mode == "terminal-legacy-inspect") {
       var legacy = new LocalWorkspaceClient(runtime.events, processes, launcher, clock);
@@ -375,7 +375,7 @@ class AttachmentTestMain {
     attaches without offering it an update, starts its own from a copy, switches back, and never starts its build on a
     state folder that is not its own.
   **/
-  static function managerChoice(runtime:NativeKitRuntime, processes:ProcessManager, clock:Void->Float, root:String, launcher:String):Void {
+  static function managerChoice(runtime:Runtime, processes:ProcessManager, clock:Void->Float, root:String, launcher:String):Void {
     var choices = new workspace.client.WorkspaceManagerChoices(null);
     var client = new LocalWorkspaceClient(runtime.events, processes, launcher, clock, null, choices);
     var machine = new workspace.client.MachineWorkspaces(processes, launcher, clock);

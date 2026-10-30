@@ -4,10 +4,9 @@ import haxeon.rpc.RpcConnectAttempt;
 import haxeon.rpc.RpcConnectResult;
 import nativekit.ffi.NativeKit;
 import nativekit.ffi.NativeKitTypes;
-import haxeon.platform.NativeKitEvents;
-import haxeon.platform.NativeKitEvents.NativeKitEventSubscription;
-import haxeon.platform.NativeKitEventValue;
-import haxeon.platform.NativeKitEventBytes;
+import haxeon.platform.event.EventPump;
+import haxeon.platform.event.EventSubscription;
+import haxeon.platform.event.PlatformEvent;
 
 private class CompletedAttempt implements RpcConnectAttempt {
 	public function new() {}
@@ -42,10 +41,10 @@ class NativeRpcHub {
 	final streams:Map<Int, NativeKitByteStream> = [];
 	final pending:Map<Int, Pending> = [];
 	final listeners:Map<Int, {owned:OwnedListenerHandle, callback:NativeRpcTransport->Void}> = [];
-	final subscription:NativeKitEventSubscription;
+	final subscription:EventSubscription;
 	var disposed:Bool = false;
 
-	public function new(events:NativeKitEvents) {
+	public function new(events:EventPump) {
 		subscription = events.listen(onEvent);
 	}
 
@@ -106,7 +105,7 @@ class NativeRpcHub {
 		return count;
 	}
 
-	function onEvent(value:NativeKitEventValue):Void {
+	function onEvent(value:PlatformEvent):Void {
 		switch value {
 			case Raw(kind, source, _, result, _, _, data):
 				var key = source.rawValue();

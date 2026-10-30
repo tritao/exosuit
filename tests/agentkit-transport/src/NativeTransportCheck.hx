@@ -1,6 +1,6 @@
 import haxeon.agent.*;
 import haxeon.agent.nativekit.NativeKitHttpTransport;
-import haxeon.platform.NativeKitRuntime;
+import haxeon.platform.Runtime;
 
 private class UpperTool extends AgentTool {
 	public function new()
@@ -17,7 +17,7 @@ private class UpperTool extends AgentTool {
 class NativeTransportCheck {
 	static function main():Void {
 		var port = Sys.args()[0];
-		var runtime = NativeKitRuntime.start();
+		var runtime = Runtime.start();
 		var transport = new NativeKitHttpTransport(runtime.events, true);
 		var provider = new AnthropicProvider(transport, "sk-local", "http://127.0.0.1:" + port);
 		var agent = new Agent(new AgentOptions(provider, "mock-model", "be terse", [new UpperTool()], new SupervisedPolicy()));

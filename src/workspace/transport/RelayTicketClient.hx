@@ -1,9 +1,9 @@
 package workspace.transport;
 
 import haxe.io.Bytes;
-import haxeon.platform.NativeKitEvents;
-import haxeon.platform.NativeKitEvents.NativeKitEventSubscription;
-import haxeon.platform.NativeKitEventValue;
+import haxeon.platform.event.EventPump;
+import haxeon.platform.event.EventSubscription;
+import haxeon.platform.event.PlatformEvent;
 import nativekit.ffi.NativeKitNet;
 import nativekit.ffi.NativeKitNetConstants;
 import nativekit.ffi.NativeKitNetTypes.HttpClientOptions;
@@ -16,18 +16,18 @@ import nativekit.ffi.NativeKitTypes.Result;
 
 private typedef TicketPending = {
 	var attempt:RelayTicketAttempt;
-	var complete:Null<haxeon.platform.NativeKitHttpResponse>->Null<String>->Void;
+	var complete:Null<haxeon.platform.http.HttpResponse>->Null<String>->Void;
 }
 
 /** Fetches short-lived relay WebSocket tickets without exposing reusable credentials in URLs. */
 class RelayTicketClient {
 	final owner:OwnedHttpClientHandle;
-	final subscription:NativeKitEventSubscription;
+	final subscription:EventSubscription;
 	final pending:Map<String, TicketPending> = [];
 	final allowLoopbackHttp:Bool;
 	var disposed:Bool = false;
 
-	public function new(events:NativeKitEvents, allowLoopbackHttp:Bool = false) {
+	public function new(events:EventPump, allowLoopbackHttp:Bool = false) {
 		if (events == null)
 			throw "Relay ticket client requires the shared NativeKit event pump";
 		var options = new HttpClientOptions();
@@ -156,7 +156,7 @@ class RelayTicketClient {
 	}
 
 	function send(endpoint:RelayMachineEndpoint, machineToken:String, url:String, method:HttpMethod, body:String,
-		complete:Null<haxeon.platform.NativeKitHttpResponse>->Null<String>->Void):RelayTicketAttempt {
+		complete:Null<haxeon.platform.http.HttpResponse>->Null<String>->Void):RelayTicketAttempt {
 		var requestId:Null<haxe.Int64> = null;
 		var key:Null<String> = null;
 		var attempt = new RelayTicketAttempt(function() {
@@ -233,7 +233,7 @@ class RelayTicketClient {
 		return count;
 	}
 
-	function onEvent(value:NativeKitEventValue):Void {
+	function onEvent(value:PlatformEvent):Void {
 		switch value {
 			case HttpComplete(_, id, result, response):
 				// Buffered HTTP events have no source handle. NativeKit allocates request

@@ -1,7 +1,7 @@
 package app;
 
 import haxe.io.Bytes;
-import haxeon.platform.NativeKitRuntime;
+import haxeon.platform.Runtime;
 import nativekit.ffi.NativeKit;
 import workspace.transport.*;
 import workspace.service.*;
@@ -57,7 +57,7 @@ class TransportTestMain {
 			throw "Expected private socket, port, credential file and private relay config";
 		var token = sys.io.File.getContent(args[2]);
 		var relayConfig:Dynamic = haxe.Json.parse(sys.io.File.getContent(args[3]));
-		var runtime = NativeKitRuntime.start(),
+		var runtime = Runtime.start(),
 			hub = new NativeRpcHub(runtime.events);
 		testPairingRelayHttp(runtime, relayConfig);
 		var clock = function() return NativeKit.nk_time_seconds() * 1000;
@@ -402,7 +402,7 @@ class TransportTestMain {
 		Sys.println("PASS: authentication refusal is terminal before privileged dispatch");
 	}
 
-	static function testPairingRelayHttp(runtime:NativeKitRuntime, config:Dynamic):Void {
+	static function testPairingRelayHttp(runtime:Runtime, config:Dynamic):Void {
 		var origin:String = Reflect.field(config, "origin");
 		var machineId:String = Reflect.field(config, "machineId");
 		var machineToken:String = Reflect.field(config, "machineToken");
@@ -437,7 +437,7 @@ class TransportTestMain {
 		Sys.println("PASS: Haxe relay pairing creation, device registration and revocation HTTP paths");
 	}
 
-	static function waitForRelayHttp(runtime:NativeKitRuntime, finished:Void->Bool):Void {
+	static function waitForRelayHttp(runtime:Runtime, finished:Void->Bool):Void {
 		var deadline = NativeKit.nk_time_seconds() * 1000 + 5000;
 		while (!finished()) {
 			require(NativeKit.nk_time_seconds() * 1000 < deadline, "Haxe relay pairing HTTP request timed out");

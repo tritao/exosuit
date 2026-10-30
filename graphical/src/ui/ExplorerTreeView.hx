@@ -1,6 +1,6 @@
 package ui;
 
-import haxeon.platform.NativeKitEvents;
+import haxeon.platform.event.EventPump;
 
 import haxeon.ui.core.BuildContext;
 import haxeon.ui.core.Key;
@@ -14,12 +14,12 @@ class ExplorerTreeView implements View {
 	final tree:TreeView;
 	final model:ExplorerTreeModel;
 	final dark:Bool;
-	final events:Null<NativeKitEvents>;
+	final events:Null<EventPump>;
 	final onTreeFocus:Null<Void->Void>;
 	final runCommand:Null<String->Void>;
 	final rename:Null<ExplorerRename>;
 
-	public function new(tree:TreeView, model:ExplorerTreeModel, dark:Bool, ?events:NativeKitEvents, ?rename:ExplorerRename,
+	public function new(tree:TreeView, model:ExplorerTreeModel, dark:Bool, ?events:EventPump, ?rename:ExplorerRename,
 		?onTreeFocus:Void->Void, ?runCommand:String->Void) {
 		this.tree = tree;
 		this.model = model;

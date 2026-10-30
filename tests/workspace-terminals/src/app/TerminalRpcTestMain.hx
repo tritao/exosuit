@@ -1,6 +1,6 @@
 package app;
 
-import haxeon.platform.NativeKitRuntime;
+import haxeon.platform.Runtime;
 import nativekit.ffi.NativeKit;
 import platform.Platform;
 import process.ProcessManager;
@@ -32,14 +32,14 @@ class TerminalRpcTestMain {
     var args = Sys.args(), mode = args[0], root = args[1], launcher = args[2];
 
     if (mode == "files-only") {
-      var fileRuntime = NativeKitRuntime.start();
+      var fileRuntime = Runtime.start();
       WorkspaceFileTests.run(root);
       fileRuntime.dispose();
       Sys.println("PASS: workspace file-service contract on the current filesystem");
       return;
     }
 
-    var runtime = NativeKitRuntime.start(), processes = new ProcessManager();
+    var runtime = Runtime.start(), processes = new ProcessManager();
     if (mode == "contracts") {
       TerminalCapabilitiesTests.run();
       TerminalReplayTests.run();

@@ -2,7 +2,7 @@ package app;
 
 import haxe.io.Path;
 import haxeon.agent.nativekit.NativeKitHttpTransport;
-import haxeon.platform.NativeKitRuntime;
+import haxeon.platform.Runtime;
 import haxeon.rpc.MemoryTransport;
 import haxeon.rpc.RpcConnection;
 import sys.FileSystem;
@@ -25,7 +25,7 @@ class AgentKitProviderTestMain {
 	static function main():Void {
 		var args = Sys.args(), root = FileSystem.fullPath(args[0]), port = args[1];
 		var clock = function() return Sys.time() * 1000;
-		var runtime = NativeKitRuntime.start();
+		var runtime = Runtime.start();
 		var directories = new WorkspaceDirectories(root);
 		var seed = new WorkspaceService("w", "e", [{id: "work", name: "Work", cwd: root, revision: 1}]);
 		var store = new WorkspaceSqliteStore(root + "/agents.sqlite", "w", seed.snapshot(), 32, root);

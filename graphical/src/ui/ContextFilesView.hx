@@ -18,14 +18,14 @@ class ContextFilesView implements View {
 	final host:UiWorkbenchHost;
 	final changed:Void->Void;
 	final dark:Void->Bool;
-	final events:Null<haxeon.platform.NativeKitEvents>;
+	final events:Null<haxeon.platform.event.EventPump>;
 	var model:Null<ExplorerTreeModel>;
 	var tree:Null<TreeView>;
 	var key:String = "";
 	var nextRefresh:Float = 0;
 	public function new(roots:Void->Array<String>, identity:Void->String, createModel:Array<String>->ExplorerTreeModel,
 		open:(ExplorerTreeModel, String, Bool)->Void, host:UiWorkbenchHost, changed:Void->Void,
-		dark:Void->Bool, ?events:haxeon.platform.NativeKitEvents) {
+		dark:Void->Bool, ?events:haxeon.platform.event.EventPump) {
 		this.roots = roots; this.identity = identity; this.createModel = createModel; this.open = open;
 		this.host = host; this.changed = changed; this.dark = dark; this.events = events;
 	}

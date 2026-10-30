@@ -38,8 +38,8 @@ import haxeon.ui.docking.DockDropZone;
 import haxeon.ui.docking.DockWorkspaceModel;
 import haxeon.ui.host.DesktopUiApplication;
 import haxeon.ui.host.UiHostContext;
-import haxeon.platform.NativeKitEventValue;
-import haxeon.platform.NativeKitEvents.NativeKitEventSubscription;
+import haxeon.platform.event.PlatformEvent;
+import haxeon.platform.event.EventSubscription;
 import nativekit.ffi.NativeKitTypes;
 import platform.HostFileDialogs;
 import haxeon.ui.icons.IconName;
@@ -149,7 +149,7 @@ class ExosuitApp implements DesktopUiApplication {
 	var saveAsHandler:Null<(Null<String>, Bool)->Void>;
 	final hostContext:Null<UiHostContext>;
 	var scmDirectoryWatch:Null<ScmDirectoryWatch>;
-	var scmFocusSubscription:Null<NativeKitEventSubscription>;
+	var scmFocusSubscription:Null<EventSubscription>;
 	final dock:DockWorkspaceModel;
 	final layoutControls:WorkbenchLayoutControls;
 	final layoutModes:WorkbenchLayoutModes;
@@ -1501,10 +1501,11 @@ class ExosuitApp implements DesktopUiApplication {
 				if (node.semantics != null && node.semantics.role == haxeon.ui.semantics.AccessibilityRole.TreeItem &&
 					node.semantics.label == explorerReturnPath) target = node;
 			});
-			if (target != null) {
+			var returned = target;
+			if (returned != null) {
 				explorerReturnPath = null;
 				host.focusExplorer();
-				ui.focusWidget(target.id);
+				ui.focusWidget(returned.id);
 			}
 		}
 		return root;

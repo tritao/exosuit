@@ -3,7 +3,7 @@ package suit.relay;
 import haxe.Json;
 import haxe.io.Bytes;
 import haxe.io.Path;
-import haxeon.platform.NativeKitEvents;
+import haxeon.platform.event.EventPump;
 import processkit.Processes;
 import sys.FileSystem;
 import sys.io.AtomicFile;
@@ -39,7 +39,7 @@ class SuitRelayHosting {
 	/** A state file older than this is from a suit that is no longer running. */
 	static inline var STATE_FRESH_SECONDS:Float = 90;
 
-	final events:NativeKitEvents;
+	final events:EventPump;
 	final hub:NativeRpcHub;
 	final bridges:Array<SuitRelayBridge> = [];
 	/** Refused attaches, kept open briefly so the refusal reaches the daemon before the pipe closes. */
@@ -47,7 +47,7 @@ class SuitRelayHosting {
 	var writtenState:String = "";
 	var writtenAt:Float = -1e9;
 
-	public function new(events:NativeKitEvents, hub:NativeRpcHub) {
+	public function new(events:EventPump, hub:NativeRpcHub) {
 		this.events = events;
 		this.hub = hub;
 		for (host in SuitRelayHosts.load())

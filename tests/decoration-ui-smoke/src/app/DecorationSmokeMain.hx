@@ -23,7 +23,7 @@ import haxeon.ui.core.UiKey;
 import haxeon.ui.core.UiModifier;
 import haxeon.ui.widgets.text.TextEditorState;
 import nativekit.ffi.NativeKitTypes.TextEditAction;
-import haxeon.platform.NativeKitEventValue.NativeKitTextEdit;
+import haxeon.platform.input.TextEdit;
 
 /** Warms the editor's retained layout before editing or clearing its decorations. */
 class DecorationSmokeApp extends ExosuitApp {
@@ -799,7 +799,7 @@ class DecorationSmokeApp extends ExosuitApp {
 			var view = host.activeView();
 			if (view == null) throw "popup fixture lost active document";
 			if (phase == "popup-ime") {
-				ui.text(UiEventKind.TextEdit, "日", new NativeKitTextEdit(TextEditAction.Compose, "日", 0, 0, 1, 1, 0, 1));
+				ui.text(UiEventKind.TextEdit, "日", new TextEdit(TextEditAction.Compose, "日", 0, 0, 1, 1, 0, 1));
 				if (host.isLanguagePopupVisible() || view.document.buffer.line(0) != "日") throw "completion popup lost IME composition handoff: visible=" + host.isLanguagePopupVisible() + " text=" + view.document.buffer.line(0);
 			} else if (phase == "popup-live-completion") {
 				ui.text(UiEventKind.TextInput, "al");
@@ -834,7 +834,7 @@ class DecorationSmokeApp extends ExosuitApp {
 				throw "graphical completion failed to accept narrowed suggestion";
 		}
 		if (frames == 6 && phase == "popup-ime") {
-			ui.text(UiEventKind.TextEdit, "日本", new NativeKitTextEdit(TextEditAction.Commit, "日本", 0, 1, 2, 2, -1, -1));
+			ui.text(UiEventKind.TextEdit, "日本", new TextEdit(TextEditAction.Commit, "日本", 0, 1, 2, 2, -1, -1));
 			var view = host.activeView();
 			if (view == null || view.document.buffer.line(0) != "日本") throw "IME handoff lost or duplicated committed text";
 		}

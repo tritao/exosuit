@@ -1,6 +1,6 @@
 package workspace.transport;
 
-import haxeon.platform.NativeKitEvents;
+import haxeon.platform.event.EventPump;
 
 /** Gets a one-use machine ticket, then opens the single outbound relay socket. */
 class RelayMachineConnector {
@@ -9,7 +9,7 @@ class RelayMachineConnector {
 	final attempts:Array<RelayMachineConnectAttempt> = [];
 	var disposed:Bool = false;
 
-	public function new(events:NativeKitEvents, hub:NativeRpcHub, allowLoopbackHttp:Bool = false) {
+	public function new(events:EventPump, hub:NativeRpcHub, allowLoopbackHttp:Bool = false) {
 		if (hub == null)
 			throw "Relay machine connector requires the native transport hub";
 		this.hub = hub;

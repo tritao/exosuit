@@ -95,7 +95,7 @@ class SuitMain {
 				return 0;
 			case "tray-check":
 				// Creates the tray icon and builds the native menu without showing it, then removes both.
-				var runtime = haxeon.platform.NativeKitRuntime.start();
+				var runtime = haxeon.platform.Runtime.start();
 				var inventory = new SuitInventory();
 				var tray = new suit.SuitTray(inventory.summary(), null);
 				var items = tray.build(function(menu) SuitMenuModel.build(menu, inventory,

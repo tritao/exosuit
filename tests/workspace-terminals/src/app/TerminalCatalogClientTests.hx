@@ -1,7 +1,7 @@
 package app;
 import workspace.client.LocalWorkspaceClient;
 import workspace.service.WorkspaceTerminalProtocol;
-import haxeon.platform.NativeKitRuntime;
+import haxeon.platform.Runtime;
 import nativekit.ffi.NativeKit;
 
 /** Real native client aggregation and metadata actions across multiple RPC pages. */
@@ -9,7 +9,7 @@ class TerminalCatalogClientTests {
   static function require(v:Bool, message:String):Void {
     if (!v) throw message;
   }
-  public static function run(client:LocalWorkspaceClient, runtime:NativeKitRuntime):Void {
+  public static function run(client:LocalWorkspaceClient, runtime:Runtime):Void {
     var deadline = Sys.time() + 20;
     var step = function() {
       require(Sys.time() < deadline, "Native terminal catalog timed out");

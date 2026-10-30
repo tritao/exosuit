@@ -1,7 +1,6 @@
 package app;
 
 import haxe.Json;
-import haxe.io.Bytes;
 import sys.FileSystem;
 import sys.io.File;
 
@@ -26,14 +25,6 @@ class StartupMemory {
 		if (Sys.getEnv("EXOSUIT_STARTUP_MEMORY_STOP_AT") == stage) Sys.exit(0);
 	}
 	public static function dump(directory:String):Void {
-		var path = Bytes.ofString(directory + "/startup.heap");
-		var terminated = Bytes.alloc(path.length + 1);
-		terminated.blit(0, path, 0, path.length);
-		hl.Gc.dump(StartupMemoryBytes.data(terminated));
+		hl.Gc.dump(directory + "/startup.heap");
 	}
-}
-
-private extern class StartupMemoryBytes {
-	@:hlNative("haxeon_runtime", "__bytes_get_data")
-	public static function data(value:Bytes):hl.Bytes;
 }

@@ -46,7 +46,7 @@ class TerminalHistoryTests {
     return lines.join("\n");
   }
   /** Separate client and daemon processes exercise the actual durable boundary. */
-  public static function process(client:workspace.client.LocalWorkspaceClient, runtime:haxeon.platform.NativeKitRuntime, root:String, create:Bool):Void {
+  public static function process(client:workspace.client.LocalWorkspaceClient, runtime:haxeon.platform.Runtime, root:String, create:Bool):Void {
     var backend = new RpcTerminalBackend(function() return client,"process-history-shell",root,create);
     var session = new TerminalSession(backend,Emulator.open(80,24,1000,"xterm-256color",false),false);
     var step = function() {

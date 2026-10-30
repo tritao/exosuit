@@ -1,7 +1,7 @@
 package workspace.runtime;
 
 import haxe.Json;
-import haxeon.platform.NativeKitEvents;
+import haxeon.platform.event.EventPump;
 import suit.relay.SuitRelayAttach;
 import suit.relay.SuitRelayProtocol;
 import suit.relay.SuitRelayProtocol.SuitRelayAttachRequest;
@@ -53,7 +53,7 @@ class WorkspaceRelayHost implements WorkspacePairingRelay {
 	var reportedClients:String = "";
 	var disposed:Bool = false;
 
-	public function new(events:NativeKitEvents, hub:NativeRpcHub, settings:WorkspaceRelaySettings,
+	public function new(events:EventPump, hub:NativeRpcHub, settings:WorkspaceRelaySettings,
 		allowLoopbackHttp:Bool = false, ?suit:SuitRelayAttachRequest) {
 		if (settings == null)
 			throw "Workspace relay settings are required";

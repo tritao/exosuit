@@ -8,9 +8,9 @@ import haxeon.filesystem.FileSystemRoot;
 import haxeon.filesystem.FileSystemDirectory;
 import haxeon.filesystem.FileSystemDirectory.FileSystemDirectoryEntry;
 import haxeon.filesystem.FileSystemFile;
-import haxeon.platform.NativeKitEvents;
-import haxeon.platform.NativeKitEvents.NativeKitEventSubscription;
-import haxeon.platform.NativeKitEventValue;
+import haxeon.platform.event.EventPump;
+import haxeon.platform.event.EventSubscription;
+import haxeon.platform.event.PlatformEvent;
 import nativekit.ffi.NativeKit;
 import nativekit.ffi.NativeKitFilesystemTypes.FileSystemEntry;
 import nativekit.ffi.NativeKitTypes;
@@ -904,11 +904,11 @@ class WorkspaceFileService {
 	final dirtyRoots:Map<String, Bool> = [];
 	final clock:Void->Float;
 	var fileWatch:Null<OwnedFileWatch>;
-	var eventSubscription:Null<NativeKitEventSubscription>;
+	var eventSubscription:Null<EventSubscription>;
 	var nextWatchFlush:Float = 0.0;
 	var disposed:Bool = false;
 
-	public function new(workspace:String, rootPaths:Array<String>, clock:Void->Float, ?events:NativeKitEvents) {
+	public function new(workspace:String, rootPaths:Array<String>, clock:Void->Float, ?events:EventPump) {
 		if (workspace == null || workspace.length == 0 || workspace.length > 128 || clock == null
 			|| rootPaths == null || rootPaths.length == 0 || rootPaths.length > MAX_ROOTS)
 			throw "Invalid workspace filesystem identity";
@@ -978,7 +978,7 @@ class WorkspaceFileService {
 		}
 	}
 
-	function startWatcher(events:Null<NativeKitEvents>):Void {
+	function startWatcher(events:Null<EventPump>):Void {
 		if (events == null || events.isDisposed()) return;
 		try {
 			var options = new FileWatchOptions();
@@ -996,7 +996,7 @@ class WorkspaceFileService {
 		}
 	}
 
-	function onNativeEvent(event:NativeKitEventValue):Void {
+	function onNativeEvent(event:PlatformEvent):Void {
 		try switch event {
 			case Raw(kind, source, _, _, _, _, data) if (fileWatch != null
 				&& source.rawValue() == fileWatch.borrow().rawValue()):

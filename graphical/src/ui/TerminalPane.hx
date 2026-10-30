@@ -14,7 +14,7 @@ import haxeon.ui.TextStyle;
 import haxeon.ui.TextWrap;
 import haxe.io.Bytes;
 import haxeon.ui.core.BuildContext;
-import haxeon.platform.NativeKitEventValue.NativeKitTextEdit;
+import haxeon.platform.input.TextEdit;
 import nativekit.ffi.NativeKitTypes.TextEditAction;
 import haxeon.ui.widgets.text.TextInputWindow;
 import haxeon.ui.core.CachePolicy;
@@ -658,7 +658,7 @@ class TerminalPane implements AgentTerminalPanel {
 			}
 		});
 		node.on(UiEventKind.TextEdit, function(event:UiEvent) {
-			var edit:NativeKitTextEdit = cast event.data;
+			var edit:TextEdit = cast event.data;
 			// Composition previews stay with the platform IME. Only committed text
 			// enters the PTY; sending previews would execute unfinished input.
 			if (edit != null && edit.action == TextEditAction.Commit &&

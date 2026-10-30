@@ -1,18 +1,18 @@
 package workspace.client;
 
-import haxeon.platform.NativeKitEvents;
+import haxeon.platform.event.EventPump;
 import process.ProcessManager;
 
 /** Keeps terminal attachments independent of the currently selected project. */
 class LocalTerminalWorkspacePool {
     final clients:Map<String, LocalWorkspaceClient> = [];
-    final events:NativeKitEvents;
+    final events:EventPump;
     final processes:ProcessManager;
     final launcher:String;
     final clock:Void->Float;
     var disposed:Bool = false;
 
-    public function new(events:NativeKitEvents, processes:ProcessManager, launcher:String, clock:Void->Float) {
+    public function new(events:EventPump, processes:ProcessManager, launcher:String, clock:Void->Float) {
         this.events = events;
         this.processes = processes;
         this.launcher = launcher;

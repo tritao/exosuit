@@ -3,7 +3,7 @@ package app;
 import haxe.Json;
 import haxe.io.Bytes;
 import haxeon.credentials.Credentials;
-import haxeon.platform.NativeKitRuntime;
+import haxeon.platform.Runtime;
 import haxeon.rpc.RpcClient;
 import haxeon.rpc.RpcConnection;
 import haxeon.rpc.RpcPeerOptions;
@@ -65,7 +65,7 @@ class BrowserPairingHostMain {
 		var seed = new WorkspaceService("workspace", "browser-pairing-epoch", [
 			{id: "work", name: "Browser pairing test", cwd: directories.root, revision: 1}
 		]);
-		var runtime = NativeKitRuntime.start(), hub = new NativeRpcHub(runtime.events),
+		var runtime = Runtime.start(), hub = new NativeRpcHub(runtime.events),
 			clock = function() return NativeKit.nk_time_seconds() * 1000,
 			endpoint = new RelayMachineEndpoint(origin, machineId),
 			relay = new WorkspaceRelayHost(runtime.events, hub, new WorkspaceRelaySettings(endpoint, machineToken), true),
@@ -210,7 +210,7 @@ class BrowserPairingHostMain {
 			statusPath:String = config.statusPath, decisionPath:String = config.decisionPath,
 			successPath:String = config.successPath, fileChangePath:String = config.fileChangePath,
 			localSocket:String = config.localSocket;
-		var runtime = NativeKitRuntime.start(), hub = new NativeRpcHub(runtime.events),
+		var runtime = Runtime.start(), hub = new NativeRpcHub(runtime.events),
 			clock = function() return NativeKit.nk_time_seconds() * 1000;
 		var localConnection:Null<RpcConnection> = null;
 		var client = new RpcClient(new NativeRpcConnector(hub, NativeRpcHub.local(localSocket)), clock,
@@ -348,7 +348,7 @@ class BrowserPairingHostMain {
 	}
 
 	static function cleanupTestCredentials(machineId:String, origin:String):Void {
-		var runtime = NativeKitRuntime.start();
+		var runtime = Runtime.start();
 		for (account in ["noise-static:" + machineId, "relay:" + origin + "/machine/" + machineId]) {
 			var secret = Credentials.get("com.exosuit.workspace-relay", account);
 			if (secret != null) {

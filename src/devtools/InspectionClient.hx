@@ -3,7 +3,7 @@ package devtools;
 import haxe.io.Bytes;
 import haxeon.rpc.RpcConnectAttempt;
 import haxeon.rpc.MessageTransport;
-import haxeon.platform.NativeKitEvents;
+import haxeon.platform.event.EventPump;
 import workspace.transport.NativeRpcHub;
 
 /** Nonblocking inspection session, independent of its UI. One outstanding request bounds traffic. */
@@ -33,7 +33,7 @@ class InspectionClient {
 	var pendingSelectionGeneration = 0;
 	final frames:Array<Dynamic> = [];
 
-	public function new(events:NativeKitEvents, endpoint:String) {
+	public function new(events:EventPump, endpoint:String) {
 		hub = new NativeRpcHub(events); this.endpoint = endpoint;
 	}
 

@@ -2,7 +2,7 @@ package suit;
 
 import haxe.Json;
 import haxe.io.Bytes;
-import haxeon.platform.NativeKitRuntime;
+import haxeon.platform.Runtime;
 import haxeon.rpc.RpcConnectResult;
 import workspace.transport.NativeRpcHub;
 import workspace.transport.NativeRpcTransport;
@@ -11,7 +11,7 @@ import workspace.transport.NativeRpcTransport;
 class SuitControl {
 	/** Returns the daemon's reply, or null when no daemon answers within `timeoutSeconds`. */
 	public static function request(message:Dynamic, timeoutSeconds:Float = 3):Null<Dynamic> {
-		var runtime = NativeKitRuntime.start();
+		var runtime = Runtime.start();
 		var hub = new NativeRpcHub(runtime.events);
 		var transport:Null<NativeRpcTransport> = null;
 		var failed = false;

@@ -3,7 +3,7 @@ package app;
 import haxe.Json;
 import haxe.io.Bytes;
 import haxeon.rpc.RpcClientState;
-import haxeon.platform.NativeKitEvents;
+import haxeon.platform.event.EventPump;
 import haxeon.rpc.RpcClient;
 import haxeon.rpc.RpcConnection;
 import haxeon.rpc.RpcPeerOptions;
@@ -57,7 +57,7 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 	public var revision(default, null):Int = 0;
 
 	final hub:NativeRpcHub;
-	final events:NativeKitEvents;
+	final events:EventPump;
 	final clock:Void->Float;
 	final changed:Void->Void;
 	var operationGeneration:Int = 0;
@@ -99,7 +99,7 @@ class BrowserRemoteWorkspaceClient implements WorkspaceAttachment implements Wor
 	final workbench:RpcWorkspaceWorkbenchClient;
 	var disposed:Bool = false;
 
-	public function new(events:NativeKitEvents, clock:Void->Float, changed:Void->Void) {
+	public function new(events:EventPump, clock:Void->Float, changed:Void->Void) {
 		if (events == null || clock == null || changed == null) throw "Browser remote access needs host services";
 		this.events = events;
 		this.clock = clock;
