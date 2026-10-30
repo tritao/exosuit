@@ -10,6 +10,7 @@ import workspace.service.WorkspaceAgentProtocol;
 import workspace.service.WorkspaceFileProtocol;
 import workspace.service.WorkspaceFileProtocol.FileSearchMatch;
 import workspace.service.WorkspaceFileProtocol.FileSearchPageResult;
+import workspace.service.WorkspaceCatalogProtocol;
 
 /** Frozen independent MessagePack vectors: both bytes and semantic decode are checked. */
 class RpcCompatibilityTests {
@@ -207,9 +208,140 @@ class RpcCompatibilityTests {
 		require(legacy.cwd == null && legacy.revision == 1, "Missing nullable cwd default changed");
 		require(WorkspaceProtocol.RENAME.decodeRequest(bytes("8606a34e6577050104a16703a26f7002a16501a177")).operation == "op",
 			"Input map order became significant");
+		catalogVectors();
 		versionRefusal();
 		methodErrors();
 		missingIdentity();
+	}
+
+	/** M19 Phase 0: workspace refs, the catalog watch and session directories (proposed, pending mobile review). */
+	static function catalogVectors():Void {
+		var ref:WorkspaceRef = {machine: "m", workspace: "w"};
+		var refBytes = bytes("8201a16d02a177");
+		require(WorkspaceCatalogProtocol.encodeRef(ref).compare(refBytes) == 0, "Workspace ref vector changed");
+		require(WorkspaceCatalogProtocol.UNWATCH.encodeRequest(ref).compare(refBytes) == 0, "Catalog unwatch vector changed");
+		var decodedRef = WorkspaceCatalogProtocol.decodeRef(refBytes);
+		require(decodedRef.machine == "m" && decodedRef.workspace == "w", "Workspace ref decode changed");
+		require(WorkspaceCatalogProtocol.validRef(ref) && !WorkspaceCatalogProtocol.validRef(WorkspaceCatalogProtocol.decodeRef(bytes("8101a16d")))
+			&& !WorkspaceCatalogProtocol.validRef(null), "Workspace ref validation changed");
+		require(WorkspaceCatalogProtocol.CATALOG.id == 170 && WorkspaceCatalogProtocol.UNWATCH.id == 171 && WorkspaceCatalogProtocol.CHANGED == 172,
+			"Catalog method ids changed");
+		var query:CatalogQuery = {ref: ref, resume: null, watch: true};
+		var queryBytes = bytes("83018201a16d02a17702c003c3");
+		require(WorkspaceCatalogProtocol.CATALOG.encodeRequest(query).compare(queryBytes) == 0, "Catalog query vector changed");
+		var decodedQuery = WorkspaceCatalogProtocol.CATALOG.decodeRequest(queryBytes);
+		require(decodedQuery.resume == null && decodedQuery.watch && decodedQuery.ref.workspace == "w", "Catalog query decode changed");
+		rejects(function() {
+			WorkspaceCatalogProtocol.CATALOG.decodeRequest(bytes("8202c003c3"));
+		}, "Catalog query without a workspace ref accepted");
+		var change:CatalogChange = {ref: ref, token: "t"};
+		var changeBytes = bytes("82018201a16d02a17702a174");
+		require(WorkspaceCatalogProtocol.encodeChange(change).compare(changeBytes) == 0
+			&& WorkspaceCatalogProtocol.decodeChange(changeBytes).token == "t", "Catalog change notification vector changed");
+		var session:CatalogSession = {id: "a", name: "A", group: "g", directory: "/d", provider: "codex", state: "idle", attention: 0};
+		var catalog:WorkspaceCatalog = {ref: ref, instance: "i", token: "t", reset: true, more: false, name: "N", folders: [],
+			scratch: "/s", status: "running", attention: 1, groups: [], sessions: [session], terminals: [], removedGroups: [],
+			removedSessions: [], removedTerminals: [], watching: true};
+		var catalogBytes = bytes("de0011018201a16d02a17702a16903a17404c305c206a14e079008a22f7309a772756e6e696e670a010b900c91"
+			+ "8701a16102a14103a16704a22f6405a5636f64657806a469646c6507000d900e900f901090" + "11c3");
+		require(WorkspaceCatalogProtocol.CATALOG.encodeResponse(catalog).compare(catalogBytes) == 0, "Catalog page vector changed");
+		var page = WorkspaceCatalogProtocol.CATALOG.decodeResponse(catalogBytes);
+		require(page.reset && !page.more && page.folders.length == 0 && page.scratch == "/s" && page.sessions[0].directory == "/d"
+			&& page.watching, "Catalog page decode changed");
+		// Agent create field 11 is the session's directory.
+		var directed:AgentCreate = {workspace: "w", instance: "i", id: "a", group: "g", name: "Codex", thread: null, directory: "/d"};
+		require(WorkspaceAgentProtocol.CREATE.encodeRequest(directed).compare(bytes("8b01a17702a16903a16104a16705a5436f64657806c007c008c009c00ac00ba22f64")) == 0,
+			"Agent create directory vector changed");
+		// Catalog entries take the directory from the records the service already keeps.
+		var record:AgentRecord = {id: "a", name: "A", group: "g", cwd: "/d", thread: "t", state: "needs-attention", turn: null, workspaceRoot: "/w"};
+		var entry = WorkspaceCatalogProtocol.session(record, WorkspaceCatalogProtocol.sessionAttention(record, 2));
+		require(entry.directory == "/d" && entry.attention == 3 && entry.provider == null, "Catalog session entry changed");
+		var terminalRecord:TerminalRecord = {id: "t", name: "T", group: "g", cwd: "/d", instance: "i", state: "running", exitCode: 0,
+			available: true, revision: haxe.Int64.make(1, 2)};
+		var terminal = WorkspaceCatalogProtocol.terminal(terminalRecord, 0);
+		catalog.terminals = [terminal];
+		var restored = WorkspaceCatalogProtocol.CATALOG.decodeResponse(WorkspaceCatalogProtocol.CATALOG.encodeResponse(catalog));
+		require(restored.terminals[0].directory == "/d" && restored.terminals[0].revision == haxe.Int64.make(1, 2),
+			"Catalog terminal round trip changed");
+		catalogPageBounds();
+	}
+
+	/**
+		Catalog pages reach devices through the relay, so every page must fit its message bound. Worst case: every id
+		and name at its bound in three-byte characters, and every folder at 4096 bytes.
+	**/
+	static function catalogPageBounds():Void {
+		var wideId = "", wideName = "", wideToken = "", wideFolder = "";
+		for (_ in 0...WorkspaceCatalogProtocol.ID_LIMIT) wideId += "界";
+		for (_ in 0...200) wideName += "界";
+		for (_ in 0...WorkspaceCatalogProtocol.TOKEN_LIMIT) wideToken += "界";
+		for (_ in 0...1024) wideFolder += "😀";
+		var maxRevision = haxe.Int64.make(0x7fffffff, 0xffffffff);
+		var header = function():WorkspaceCatalog {
+			return {ref: {machine: wideId, workspace: wideId}, instance: wideId, token: wideToken, reset: true, more: true, name: wideName,
+				folders: [], scratch: wideFolder, status: wideId, attention: 0x7fffffff, groups: [], sessions: [], terminals: [],
+				removedGroups: [], removedSessions: [], removedTerminals: [], watching: true};
+		};
+		var group:WorkspaceGroup = {id: wideId, name: wideName, cwd: wideFolder, revision: 0x7fffffff, parent: wideId, order: 0x7fffffff};
+		var session:CatalogSession = {id: wideId, name: wideName, group: wideId, directory: wideFolder, provider: wideId, state: wideId,
+			attention: 0x7fffffff};
+		var terminal:CatalogTerminal = {id: wideId, name: wideName, group: wideId, directory: wideFolder, state: wideId, exitCode: 0x7fffffff,
+			available: true, revision: maxRevision, agentProvider: wideId, attention: 0x7fffffff};
+		var relayBound = workspace.transport.RelaySocketLink.MAX_MESSAGE_BYTES;
+		var envelope = function(page:WorkspaceCatalog):Int {
+			return RpcProtocol.encode(Response(0x7fffffff, WorkspaceCatalogProtocol.CATALOG.encodeResponse(page)), 262144).length;
+		};
+		require(WorkspaceCatalogProtocol.PAGE_BYTES + 64 <= relayBound, "Catalog page budget exceeds the relay message bound");
+		// One item of each kind fits with the workspace's own fields, so a page always makes progress.
+		var single = header();
+		single.folders = [wideFolder];
+		single.groups = [group];
+		single.sessions = [session];
+		single.terminals = [terminal];
+		single.removedGroups = [wideId];
+		single.removedSessions = [wideId];
+		single.removedTerminals = [wideId];
+		require(WorkspaceCatalogProtocol.fits(single), "A worst-case item of every kind does not fit one catalog page");
+		// Fill a page in turn with every kind until the next item would not fit.
+		var page = header();
+		var items = 0, full = false;
+		while (!full && items < WorkspaceCatalogProtocol.PAGE_LIMIT) {
+			var kind = items % 7;
+			if (kind == 0) page.folders.push(wideFolder);
+			else if (kind == 1) page.groups.push(group);
+			else if (kind == 2) page.sessions.push(session);
+			else if (kind == 3) page.terminals.push(terminal);
+			else if (kind == 4) page.removedGroups.push(wideId);
+			else if (kind == 5) page.removedSessions.push(wideId);
+			else page.removedTerminals.push(wideId);
+			if (WorkspaceCatalogProtocol.fits(page)) {
+				items++;
+				continue;
+			}
+			full = true;
+			if (kind == 0) page.folders.pop();
+			else if (kind == 1) page.groups.pop();
+			else if (kind == 2) page.sessions.pop();
+			else if (kind == 3) page.terminals.pop();
+			else if (kind == 4) page.removedGroups.pop();
+			else if (kind == 5) page.removedSessions.pop();
+			else page.removedTerminals.pop();
+		}
+		require(full && page.terminals.length > 0 && page.removedTerminals.length > 0, "Worst-case catalog page did not hold every kind");
+		require(WorkspaceCatalogProtocol.fits(page) && envelope(page) <= relayBound, "Worst-case catalog page exceeds the relay message bound");
+		// suit's sixteen folders at the path bound do not fit one page; a reset splits them.
+		var folders = header();
+		folders.folders = [for (_ in 0...16) wideFolder];
+		require(!WorkspaceCatalogProtocol.fits(folders), "Sixteen maximum folders unexpectedly fit one catalog page");
+		// Resume tokens are bounded like refs.
+		var query:CatalogQuery = {ref: {machine: "m", workspace: "w"}, resume: wideToken, watch: false};
+		require(WorkspaceCatalogProtocol.validQuery(query), "A bounded resume token was rejected");
+		query.resume = wideToken + "x";
+		require(!WorkspaceCatalogProtocol.validQuery(query), "An over-long resume token was accepted");
+		query.resume = "";
+		require(!WorkspaceCatalogProtocol.validQuery(query), "An empty resume token was accepted");
+		query.resume = null;
+		require(WorkspaceCatalogProtocol.validQuery(query), "A query without a resume token was rejected");
 	}
 
 	static function methodErrors():Void {
