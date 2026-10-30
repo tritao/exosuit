@@ -834,7 +834,7 @@ class ExosuitApp implements DesktopUiApplication {
 			if (root == null && catalog != null) root = catalog.workspaceRoot;
 			if (root == null) { application.reportError("terminal", "Workspace is not connected"); return null; }
 			if (group == null && application.activeContext.kind == workspace.ContextKind.Group) group = application.activeContext.id;
-			// The service resolves a missing group to Work (or its first group),
+			// The service puts a terminal with no group at the workspace root,
 			// and resolves the group's inherited directory against the workspace root.
 			if (!client.canCreateGroupedTerminals()) group = null;
 			var cwd = application.activeContext.kind == workspace.ContextKind.Group ? application.activeContext.cwd : root;
@@ -1527,6 +1527,7 @@ class ExosuitApp implements DesktopUiApplication {
 			requestFrame();
 		};
 		workbenchPanel.closeTerminal = closeCatalogTerminal;
+		workbenchPanel.moveAgent = moveAgentGroup;
 		workbenchPanel.machine = machineActions;
 		workbenchPanel.chooseFolder = function() application.savedWorkspaces.addPicker();
 		workbenchPanel.hasFolder = function() return application.savedWorkspaces.isOpen();
@@ -2296,34 +2297,38 @@ class ExosuitApp implements DesktopUiApplication {
 		requestFrame();
 	}
 
-	function editWorkspaceGroup(group:workspace.service.WorkspaceProtocol.WorkspaceGroup, action:String):Void {
+	/** `target` null is the workspace root, which takes only "new-agent" and "new-terminal". */
+	function editWorkspaceGroup(target:Null<workspace.service.WorkspaceProtocol.WorkspaceGroup>, action:String):Void {
 		var client = workbenchClient;
 		var catalog = client == null ? null : client.terminalCatalog();
 		if (client == null || catalog == null) return;
+		var into = target == null ? workspace.service.WorkspaceProtocol.ROOT_GROUP : target.id;
 		if (action == "new-agent") {
 			if (!canCreateAgentSession()) { application.reportError("agent", "Wait for the current workspace operation to finish before creating an agent session"); return; }
 			var providers = [for (provider in ["codex", "claude", "pi", "agentkit"])
 				{label: provider == "codex" ? "Codex" : provider == "claude" ? "Claude" : provider == "pi" ? "Pi" : "Exosuit", value: provider}];
 			var chooser = sessionFolders();
-			chooser.newAgentSession(providers, SessionFolderChooser.preview(catalog.groups, group.id, chooser.firstFolder(catalog.workspaceRoot), catalog.workspaceRoot),
+			chooser.newAgentSession(providers, SessionFolderChooser.preview(catalog.groups, into, chooser.firstFolder(catalog.workspaceRoot), catalog.workspaceRoot),
 				function(provider, directory) {
 				if (client != workbenchClient) { application.reportError("agent", "The workspace changed. Choose New Agent Session again."); return; }
 				var current = client.terminalCatalog();
 				if (current == null || current.instance != catalog.instance) { application.reportError("agent", "The workspace connection changed. Choose New Agent Session again."); return; }
-				for (candidate in current.groups) if (candidate.id == group.id) { createProviderAgentIn(provider, group.id, directory); return; }
+				if (workspace.service.WorkspaceProtocol.knownGroup(into, current.groups)) { createProviderAgentIn(provider, into, directory); return; }
 				application.reportError("agent", "The selected group no longer exists. Choose another group.");
 			});
 			requestFrame(); return;
 		}
 		if (action == "new-terminal") {
 			var chooser = sessionFolders();
-			chooser.newTerminal(SessionFolderChooser.preview(catalog.groups, group.id, chooser.firstFolder(catalog.workspaceRoot), catalog.workspaceRoot), function(directory) {
+			chooser.newTerminal(SessionFolderChooser.preview(catalog.groups, into, chooser.firstFolder(catalog.workspaceRoot), catalog.workspaceRoot), function(directory) {
 				if (client != workbenchClient) { application.reportError("terminal", "The workspace changed. Choose New Terminal again."); return; }
-				var terminal = newTerminalTab(group.id, null, directory);
+				var terminal = newTerminalTab(into, null, directory);
 				if (terminal != null) showTerminalInEditor(terminal);
 			});
 			requestFrame(); return;
 		}
+		if (target == null) return;
+		var group = target;
 		var valid = function() {
 			if (client != workbenchClient || !client.canEditGroups() || client.terminalCatalogBusy()) return false;
 			var current = client.terminalCatalog();
@@ -2477,20 +2482,44 @@ class ExosuitApp implements DesktopUiApplication {
 	function moveCatalogTerminalGroup(record:workspace.service.WorkspaceTerminalProtocol.TerminalRecord):Void {
 		var catalog = workbenchClient == null ? null : workbenchClient.terminalCatalog();
 		if (catalog == null) return;
-		var entries = [for (group in catalog.groups) new commandview.CommandViewEntry(group.name,
-			group.id == record.group ? "Current group" : "Move " + record.name + " here", group.id)];
+		var entries = groupChoices(record.group, record.name, catalog.groups);
 		host.openCommandView(new commandview.CommandViewProvider("Move Terminal to Group: ", entries, function(_) {}, function(entry, _, _) {
 			if (entry == null) return;
 			host.closeCommandView();
 			if (!currentCatalogTerminal(record, catalog.instance) || !workbenchClient.canControlTerminals() || workbenchClient.terminalCatalogBusy()) return;
 			var current = workbenchClient.terminalCatalog();
-			if (current != null) for (group in current.groups) if (group.id == entry.value) {
-				if (group.id != record.group) workbenchClient.renameTerminal(record, record.name, group.id);
-				break;
-			}
+			if (current != null && entry.value != record.group && workspace.service.WorkspaceProtocol.knownGroup(entry.value, current.groups))
+				workbenchClient.renameTerminal(record, record.name, entry.value);
 			requestFrame();
 		}));
 		requestFrame();
+	}
+
+	/** A session's Move to Group…: the same choices as a terminal's, sent as the agent move. */
+	function moveAgentGroup(record:workspace.service.WorkspaceAgentProtocol.AgentRecord):Void {
+		var client = workbenchClient;
+		var catalog = client == null ? null : client.terminalCatalog();
+		if (client == null || catalog == null) return;
+		var entries = groupChoices(record.group, record.name, catalog.groups);
+		host.openCommandView(new commandview.CommandViewProvider("Move Session to Group: ", entries, function(_) {}, function(entry, _, _) {
+			if (entry == null) return;
+			host.closeCommandView();
+			var current = client.terminalCatalog(), service = client.agentService();
+			if (client != workbenchClient || current == null || current.instance != catalog.instance || service.agentBusy()) return;
+			if (entry.value != record.group && workspace.service.WorkspaceProtocol.knownGroup(entry.value, current.groups))
+				service.agentAction(record.id, "move", entry.value, record.group);
+			requestFrame();
+		}));
+		requestFrame();
+	}
+
+	/** Move to Group… choices: the workspace root, then every group, with `current` marked. */
+	static function groupChoices(current:String, name:String, groups:Array<workspace.service.WorkspaceProtocol.WorkspaceGroup>):Array<commandview.CommandViewEntry> {
+		var root = workspace.service.WorkspaceProtocol.ROOT_GROUP;
+		var entries = [new commandview.CommandViewEntry("Workspace", current == root ? "Current group" : "Move " + name + " out of its group", root)];
+		for (group in groups) entries.push(new commandview.CommandViewEntry(group.name,
+			group.id == current ? "Current group" : "Move " + name + " here", group.id));
+		return entries;
 	}
 
 	function placeTerminal(terminal:UiTerminalTab, editor:Bool):Void {

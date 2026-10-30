@@ -5,6 +5,18 @@ Status: accepted (2026-10-29; agreed with tritao). Plan of work: [M19](../roadma
 Amends [ADR 0005](0005-machines-and-workspaces.md), which keeps one workspace service per folder and makes a
 workspace "one or more folders".
 
+Amended 2026-10-30: **the workspace is its own root group.** Sessions and terminals can sit directly under the
+workspace, in no named group; named groups such as Work are optional sub-folders. A root item's group is the empty id
+(`WorkspaceProtocol.ROOT_GROUP`). No group can have that id, so the wire types and stored records are unchanged and
+existing groups and items need no migration. A root session starts in the workspace's first folder, else its scratch
+folder (which the editor passes as the explicit folder until Phase 4). New sessions and terminals go to the root unless
+a group, or an item in one, is selected; new catalogs still seed a Work group.
+
+Downgrade risk: a service from before this change cannot open a catalog that holds a root terminal. It rejects the
+stored record ("Invalid persisted terminal record") and does not start. Creating or moving an item to the root
+against such a service fails with "Unknown group". An editor and its service ship together, so this only bites when
+going back to an older build. Editors from before this change do not show root items.
+
 ## Context
 
 A folder does three jobs today:

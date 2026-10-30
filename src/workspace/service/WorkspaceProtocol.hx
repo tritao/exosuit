@@ -107,6 +107,26 @@ class WorkspaceProtocol {
 	public static inline final REMOVE = "workspace.groups.remove";
 	public static inline final WRITE = "workspace.groups.write";
 	public static inline final IDENTITY_CAPABILITY = "workspace.identity";
+	/**
+		The group of a session or terminal that sits directly under the workspace, in no named group. No group can have
+		this id, since group ids are never empty, so the root needs no record and existing groups and items are unchanged.
+	**/
+	public static inline final ROOT_GROUP = "";
+
+	/** Whether `group` is the workspace root rather than a named group. */
+	public static inline function isRoot(group:Null<String>):Bool
+		return group == ROOT_GROUP;
+
+	/** Whether a session or terminal can be in `group`: one of `groups`, or the workspace root. */
+	public static function knownGroup(group:Null<String>, groups:Array<WorkspaceGroup>):Bool {
+		if (isRoot(group)) return true;
+		for (candidate in groups) if (candidate.id == group) return true;
+		return false;
+	}
+
+	/** The parent a group record takes to sit in `destination`: none (top level) for the workspace root. */
+	public static function parentFor(destination:String):Null<String>
+		return isRoot(destination) ? null : destination;
 	public static inline final CHANGED = 200;
 	public static final QUERY = new RpcMethod<WorkspaceQuery, WorkspaceSnapshot>(100, function(value:WorkspaceQuery) return MessagePack.encode(value),
 		function(bytes:Bytes):WorkspaceQuery return MessagePack.decode(bytes), function(value:WorkspaceSnapshot) return MessagePack.encode(value),

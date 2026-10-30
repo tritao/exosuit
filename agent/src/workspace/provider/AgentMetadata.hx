@@ -20,7 +20,7 @@ class AgentMetadata {
  public static function move(record:AgentRecord, expected:Null<String>, target:String,
    groups:Array<WorkspaceGroup>, save:Void->Void):Null<String> {
   if (expected != record.group) return "conflict";
-  if (!Lambda.exists(groups, function(group) return group.id == target)) return "unknown_group";
+  if (!workspace.service.WorkspaceProtocol.knownGroup(target, groups)) return "unknown_group";
   if (record.group == target) return null;
   var previous = record.group;
   record.group = target;

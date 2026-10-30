@@ -140,5 +140,8 @@ class WorkspaceDirectoriesTestMain {
 		require(path("vanished", null) == null, "A group whose folder vanished fell back silently");
 		require(path("vanished", outside) == outside, "An explicit folder did not rescue a group whose folder vanished");
 		require(path("unknown", null) == null && path("unknown", outside) == null, "An unknown group resolved a directory");
+		// The workspace root is no group: its sessions start in the first folder, or an explicit one (the scratch folder).
+		require(path(workspace.service.WorkspaceProtocol.ROOT_GROUP, null) == root, "A workspace root session did not start in the first folder");
+		require(path(workspace.service.WorkspaceProtocol.ROOT_GROUP, outside) == outside, "A workspace root session ignored its explicit folder");
 	}
 }

@@ -4,6 +4,7 @@ import sys.FileSystem;
 import haxe.io.Path;
 import haxeon.rpc.RpcError;
 import workspace.service.GroupFolders;
+import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceProtocol.WorkspaceGroup;
 
 /** A new session's resolved working directory, or why none could be chosen. */
@@ -57,8 +58,9 @@ class WorkspaceDirectories {
 		}
 		var map = GroupFolders.byId(groups);
 		var current = map.get(group);
-		if (current == null) return refused("Unknown group: " + group);
-		if (chosen == null) {
+		if (!WorkspaceProtocol.knownGroup(group, groups)) return refused("Unknown group: " + group);
+		// The workspace root has no folder of its own, so its sessions take the first folder.
+		if (chosen == null && current != null) {
 			var found = GroupFolders.owner(map, current);
 			if (found.cycle) return refused("The group's parents form a cycle");
 			var owner = found.group;

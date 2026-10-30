@@ -30,7 +30,8 @@ class WorkbenchPanel implements View {
 	final open:TerminalRecord->Bool;
 	final createTerminal:String->Void;
 	final openAgent:String->Void;
-	final edit:(WorkspaceGroup, String)->Void;
+	/** A group action; null is the workspace root, for the actions that create in it ("new-agent", "new-terminal"). */
+	final edit:(Null<WorkspaceGroup>, String)->Void;
 	final openFolder:String->Void;
 	final terminalActions:TerminalRecord->Array<MenuItem>;
 	final requestFrame:Void->Void;
@@ -45,6 +46,8 @@ class WorkbenchPanel implements View {
 	public var onError:Null<String->Void>;
 	/** Closes a catalog terminal and its views; selection actions use it. */
 	public var closeTerminal:Null<TerminalRecord->Void>;
+	/** Asks which group (or the workspace root) a session moves to: its Move to Group…. */
+	public var moveAgent:Null<WorkspaceAgentProtocol.AgentRecord->Void>;
 	/** This machine and its workspaces, the tree's top level; null when suit is off, and the tree is the groups alone. */
 	public var machine:Null<WorkbenchMachineActions>;
 	/** Opens a folder picker; with `hasFolder` and no machine, the empty Workbench offers it when no folder is open. */
@@ -161,6 +164,13 @@ class WorkbenchPanel implements View {
 		if (entry != null) {
 			var target = entry;
 			items.push(new MenuItem("machine-workspace-open", "Open", function() actions.open(target), key != model.openRow));
+			if (key == model.groupParent) {
+				// Sessions and terminals made here sit in the workspace root, in no group.
+				if (canCreateAgent())
+					items.push(new MenuItem("new-agent", "New Agent Session…", function() { edit(null, "new-agent"); }, true, null, true));
+				if (client.canCreateGroupedTerminals())
+					items.push(new MenuItem("new-terminal", "New Terminal…", function() { edit(null, "new-terminal"); }, !client.terminalCatalogBusy()));
+			}
 			items.push(new MenuItem("machine-workspace-rename", "Rename…", function() actions.rename(target), idle, "F2", true));
 			items.push(new MenuItem("machine-workspace-attach-folder", "Attach Folder…", function() actions.attachFolder(target), idle));
 			items.push(new MenuItem("machine-workspace-remove", "Remove from This Machine", function() actions.remove(target), idle, null, true));
@@ -188,7 +198,7 @@ class WorkbenchPanel implements View {
 		var catalog = client.terminalCatalog();
 		if (catalog == null || catalog.instance != observedWorkspaceInstance || catalog.workspaceRoot != observedWorkspaceRoot
 			|| !canDragNode(source)) return false;
-		return WorkbenchDropRules.canDrop(source, target, catalog, client.agentService().agents());
+		return WorkbenchDropRules.canDrop(source, target, catalog, client.agentService().agents(), model.groupParent);
 	}
 
 	function dropNode(source:String, target:String):Void {
@@ -204,20 +214,22 @@ class WorkbenchPanel implements View {
 		if (!canDropNode(source, target)) return;
 		var catalog = client.terminalCatalog();
 		if (catalog == null) return;
-		var targetId = WorkbenchRowKey.idOf(target, WorkbenchRowKind.Group), row = WorkbenchRowKey.parse(source);
-		if (targetId == null || row == null) return;
+		// A group id, or the workspace root for the open workspace's row.
+		var into = WorkbenchDropRules.destination(target, model.groupParent), row = WorkbenchRowKey.parse(source);
+		if (into == null || row == null) return;
 		var id = row.id;
 		switch row.kind {
 			case WorkbenchRowKind.Group:
+				var parent = WorkspaceProtocol.parentFor(into);
 				for (group in catalog.groups) if (group.id == id)
-					client.changeGroup(catalog.instance, group, group.name, targetId, group.cwd, model.nextOrder(targetId), false);
+					client.changeGroup(catalog.instance, group, group.name, parent, group.cwd, model.nextOrder(parent), false);
 			case WorkbenchRowKind.Terminal:
-				for (terminal in catalog.terminals) if (terminal.id == id) client.renameTerminal(terminal, terminal.name, targetId);
+				for (terminal in catalog.terminals) if (terminal.id == id) client.renameTerminal(terminal, terminal.name, into);
 			case WorkbenchRowKind.Agent:
 				var agents = client.agentService().agents();
 				if (agents == null) return;
 				for (agent in agents.records) if (agent.id == id)
-					client.agentService().agentAction(id, "move", targetId, agent.group);
+					client.agentService().agentAction(id, "move", into, agent.group);
 		}
 	}
 
@@ -321,10 +333,17 @@ class WorkbenchPanel implements View {
 		return group == null ? null : group.id;
 	}
 
-	/** The selected row's group; without one, the default "work" group. */
-	function groupFor(key:Null<String>):Null<WorkspaceGroup> {
-		var group = WorkbenchRowKey.groupOf(model, key);
-		return group != null ? group : model.groups.get("work");
+	/** The selected row's group: a group row's own, a session's or terminal's; null for the workspace root or no row. */
+	function groupFor(key:Null<String>):Null<WorkspaceGroup>
+		return WorkbenchRowKey.groupOf(model, key);
+
+	/**
+		Where New terminal and New Codex create: the selected group, or the group of the selected session or terminal;
+		otherwise (nothing selected, a root item, a workspace row) the workspace root.
+	**/
+	function createTarget(key:Null<String>):String {
+		var group = groupFor(key);
+		return group == null ? WorkspaceProtocol.ROOT_GROUP : group.id;
 	}
 
 	function agentCanBeRemoved(agent:Null<WorkspaceAgentProtocol.AgentRecord>):Bool {
@@ -378,15 +397,17 @@ class WorkbenchPanel implements View {
 				function() beginAgentRename(agent.id,nativeName), canRename, "F2"));
 			if(nativeName) items.push(new MenuItem("rename-agent-label", "Rename in Workbench…",
 				function() beginAgentRename(agent.id,false),canRename));
+			var move = moveAgent;
+			if (move != null && client.agentService().canControlAgents())
+				items.push(new MenuItem("move-agent", "Move to Group…", function() { move(agent); }, !client.agentService().agentBusy()));
 			if (client.agentService().canControlAgents() && agentCanBeRemoved(agent))
 				items.push(new MenuItem("delete-codex-leaf", "Remove from Workbench", function() removeAgent(agent.id), !client.agentService().agentBusy()));
 			showMenu(items, event, valid);
 			return;
 		}
-		if (group != null) {
-			if (canCreateAgent()) items.push(new MenuItem("new-agent", "New Agent Session…", function() edit(group, "new-agent")));
-			if (client.canCreateGroupedTerminals()) items.push(new MenuItem("new-terminal", "New Terminal…", function() edit(group, "new-terminal"), !client.terminalCatalogBusy()));
-		}
+		// Without a group (no row selected), they create at the workspace root.
+		if (canCreateAgent()) items.push(new MenuItem("new-agent", "New Agent Session…", function() { edit(group, "new-agent"); }));
+		if (client.canCreateGroupedTerminals()) items.push(new MenuItem("new-terminal", "New Terminal…", function() { edit(group, "new-terminal"); }, !client.terminalCatalogBusy()));
 		if (client.canEditGroups()) {
 			items.push(new MenuItem("new-group", "New group", function() beginGroup({id: workspace.client.WorkspaceIds.create("group"),
 				name: "", cwd: null, revision: 0, parent: group == null ? null : group.id,
@@ -696,16 +717,15 @@ class WorkbenchPanel implements View {
 
 	public function buildHeaderActions(context:BuildContext, availableWidth:Float):RenderNode {
 		syncState();
-		var selected = groupFor(tree.selectedKey);
+		var selected = groupFor(tree.selectedKey), into = createTarget(tree.selectedKey);
 		var terminal = toolbarButton("New terminal", IconName.Terminal, function() {
-			if (selected != null) createTerminal(selected.id);
+			createTerminal(into);
 		}, "workbench-new-terminal");
-		terminal.enabled = selected != null && client.canCreateGroupedTerminals()
-			&& !client.terminalCatalogBusy();
+		terminal.enabled = client.canCreateGroupedTerminals() && !client.terminalCatalogBusy();
 		var agent = toolbarButton("New Codex", IconName.Plus, function() {
-			if (selected != null) createProvider("codex", selected.id);
+			createProvider("codex", into);
 		}, "workbench-new-codex");
-		agent.enabled = selected != null && canCreateAgent();
+		agent.enabled = canCreateAgent();
 		var selectedAgentId = WorkbenchRowKey.idOf(tree.selectedKey, WorkbenchRowKind.Agent);
 		var selectedAgent = selectedAgentId == null ? null : model.agents.get(selectedAgentId);
 		var selection = tree.selectedKeys();
@@ -720,7 +740,7 @@ class WorkbenchPanel implements View {
 			: agentCanBeRemoved(selectedAgent) && client.agentService().canControlAgents() && !client.agentService().agentBusy();
 		var overflow:Array<MenuItem> = [];
 		if (availableWidth < 210) overflow.push(new MenuItem("new-codex", "New Codex", function() {
-			if (selected != null) createProvider("codex", selected.id);
+			createProvider("codex", into);
 		}, agent.enabled));
 		if (availableWidth < 260 && (selectedAgent != null || multiple))
 			overflow.push(new MenuItem("delete-selected-agent", multiple ? closeSelectionLabel(selection, removable) : "Remove from Workbench",
@@ -762,13 +782,13 @@ class WorkbenchPanel implements View {
 				new KeyedView("open", button)
 			], style);
 		}
-		if (catalog != null && catalog.groups.length == 0 && draft == null && client.canEditGroups()) {
+		if (catalog != null && catalog.groups.length == 0 && catalog.terminals.length == 0 && draft == null && client.canEditGroups()) {
 			var button = new Button("New group", null, function() beginGroup({id: workspace.client.WorkspaceIds.create("group"),
 				name: "", cwd: null, revision: 0, parent: null, order: model.nextOrder(null)}, true), "workbench-first-group");
 			button.variant = ButtonVariant.Primary;
 			button.enabled = !pending;
 			return new Column("workbench-empty", [
-				new KeyedView("text", new Text("No groups yet. A group holds agent sessions and terminals.", null, null, hint)),
+				new KeyedView("text", new Text("Nothing here yet. Sessions and terminals go in the workspace; groups sort them.", null, null, hint)),
 				new KeyedView("new", button)
 			], style);
 		}

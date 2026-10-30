@@ -21,7 +21,10 @@ class WorkbenchTreeModel implements TreeViewModel {
 	public final groups:Map<String, WorkspaceGroup> = [];
 	/** The machine's workspaces by id; empty when suit is off. */
 	public final workspaces:Map<String, MachineWorkspace> = [];
-	/** The top-level groups' rows, wherever they sit. */
+	/**
+		The rows directly in the workspace, wherever they sit: its top-level groups, then the sessions and terminals at
+		its root (in no group).
+	**/
 	public final groupRoots:Array<String> = [];
 	/** The row the top-level groups sit under: the open workspace's, or null when they are roots. */
 	public var groupParent(default, null):Null<String>;
@@ -36,7 +39,8 @@ class WorkbenchTreeModel implements TreeViewModel {
 	var version:Int = 0;
 	public var groupEditor:Null<String->Null<View>>;
 	public var agentEditor:Null<String->Null<View>>;
-	var workspaceRoot:Null<String>;
+	/** The open workspace's first folder, as the service serves it; null without a catalog. */
+	public var workspaceRoot(default, null):Null<String>;
 
 	public function new() {}
 
@@ -119,18 +123,22 @@ class WorkbenchTreeModel implements TreeViewModel {
 		}
 		for (t in catalog.terminals) {
 			terminals.set(t.id, t);
-			var siblings = children.get(WorkbenchRowKey.group(t.group));
+			var siblings = itemsOf(t.group);
 			if (siblings != null)
 				siblings.push(WorkbenchRowKey.terminal(t.id));
 		}
 		if (agentCatalog != null)
 			for (a in agentCatalog.records) {
 				agents.set(a.id, a);
-				var siblings = children.get(WorkbenchRowKey.group(a.group));
+				var siblings = itemsOf(a.group);
 				if (siblings != null)
 					siblings.push(WorkbenchRowKey.agent(a.id));
 			}
 	}
+
+	/** The rows a session or terminal in `group` joins: the group's, or the workspace's own (`groupRoots`) at its root. */
+	function itemsOf(group:String):Null<Array<String>>
+		return WorkspaceProtocol.isRoot(group) ? groupRoots : children.get(WorkbenchRowKey.group(group));
 
 	public function rootCount():Int
 		return roots.length;
@@ -157,7 +165,7 @@ class WorkbenchTreeModel implements TreeViewModel {
 	}
 
 	public function initiallyExpanded(key:String):Bool
-		return key == WorkbenchRowKey.MACHINE || key == openRow || groupRoots.indexOf(key) >= 0;
+		return key == WorkbenchRowKey.MACHINE || key == openRow || WorkbenchRowKey.isKind(key, WorkbenchRowKind.Group) && groupRoots.indexOf(key) >= 0;
 
 	/** True for a row the tree draws as expandable even without children: every workspace, open or not. */
 	public function expandable(key:String):Bool

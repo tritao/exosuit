@@ -47,6 +47,8 @@ class ActiveContext {
 	public function openSessionGroup(id:String, groups:Array<workspace.service.WorkspaceProtocol.WorkspaceGroup>, root:String):Bool {
 		var selected:Null<workspace.service.WorkspaceProtocol.WorkspaceGroup> = null;
 		for (group in groups) if (group.id == id) selected = group;
+		// A session at the workspace root works in the workspace itself.
+		if (selected == null && workspace.service.WorkspaceProtocol.isRoot(id)) { useWorkspace(); return true; }
 		if (selected == null) return false;
 		var current = selected;
 		var visited:Map<String, Bool> = [];

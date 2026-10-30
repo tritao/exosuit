@@ -108,6 +108,16 @@ Live mode and suit:
     the directory error codes.
   - `WorkspaceDirectories.choose` takes a scratch folder that only tests pass until Phase 4 resolves it in the
     service; `createProviderAgent` stays a forwarder because the Workbench takes it as a two-argument function.
+- The workspace root group (2026-10-30), deferred:
+  - Creating or moving an item to the root against a service from before the change fails with "Unknown group: "
+    (or `invalid_request`); there is no capability check yet. A service from before it cannot open a catalog holding
+    a root terminal (ADR 0006, downgrade risk).
+  - Per-group tab snapshots (Phase 8) need a file name for the root's empty id.
+  - Re-ordering sessions and terminals within a group: a stored sort order per item, plus drop targets between rows.
+  - New catalogs still seed a Work group: `scripts/test-workbench-actions-ui.py`, `scripts/test-workbench-groups-ui.py`
+    and `scripts/import-sakura.py` (default `--parent work`) rely on it.
+  - In the `workbench-drag` panel test, a right-click on a session row after some drags opened the background menu
+    (key null) instead of the session's; the cause is not known, and the test uses F2 instead.
 
 ## Low
 

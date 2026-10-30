@@ -20,6 +20,7 @@ class WorkbenchDragTestMain {
   AgentNameSyncTest.run();
   AgentMoveTest.run();
   SubgroupDropTest.run();
+  TerminalRootTest.run();
   WorkbenchFeedbackTest.run();
   var catalog:TerminalCatalog = {instance:"owner",workspaceRoot:"/workspace",next:null,
    groups:[{id:"one",name:"One",parent:null,cwd:null,revision:1},
@@ -30,16 +31,21 @@ class WorkbenchDragTestMain {
   var record:AgentRecord = {id:"agent",name:"Agent",group:"one",cwd:"/original",thread:"thread",state:"disconnected",
    turn:null,workspaceRoot:"/workspace"};
   var agents:AgentCatalog = {instance:"owner",root:"/workspace",records:[record],status:""};
-  function canDrop(a:String,b:String):Bool return WorkbenchDropRules.canDrop(a,b,catalog,agents);
+  function canDrop(a:String,b:String):Bool return WorkbenchDropRules.canDrop(a,b,catalog,agents,null);
   require(canDrop("t:term","g:two") && canDrop("a:agent","g:two") && canDrop("g:one","g:two"),"valid moves rejected");
   require(!canDrop("g:one","g:child") && !canDrop("g:one","g:one"),"group cycle accepted");
   require(!canDrop("t:term","g:one") && !canDrop("a:agent","g:missing") && !canDrop("g:one","t:term"),"invalid destination accepted");
   agents.instance="other"; require(!canDrop("a:agent","g:two"),"foreign catalog accepted"); agents.instance="owner";
+  function canDropRoot(a:String,b:String):Bool { return WorkbenchDropRules.canDrop(a,b,catalog,agents,"w:open"); }
+  require(canDropRoot("t:term","w:open") && canDropRoot("a:agent","w:open") && canDropRoot("g:child","w:open"),"workspace root drops rejected");
+  require(!canDropRoot("g:one","w:open") && !canDrop("t:term","w:open") && !canDropRoot("t:term","w:other"),"root drop accepted for a top-level group, without a root row or onto another workspace");
   var saves=0;
   require(AgentMetadata.move(record,"one","two",catalog.groups,function() saves++) == null && saves==1,"agent move not persisted");
   require(record.cwd=="/original" && record.thread=="thread", "move changed native session identity");
   require(AgentMetadata.move(record,"one","one",catalog.groups,function() saves++)=="conflict","stale move accepted");
   require(AgentMetadata.move(record,"two","missing",catalog.groups,function() saves++)=="unknown_group","missing group accepted");
+  require(AgentMetadata.move(record,"two","",catalog.groups,function() { saves++; }) == null && record.group=="" && saves==2,"move to the workspace root refused");
+  require(AgentMetadata.move(record,"","two",catalog.groups,function() { saves++; }) == null && record.group=="two","move out of the workspace root refused");
   var failed=false;
   try AgentMetadata.move(record,"two","one",catalog.groups,function() {throw "storage failure";}) catch (_:Dynamic) failed=true;
   require(failed && record.group=="two", "failed persistence changed live grouping");

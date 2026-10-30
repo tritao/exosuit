@@ -16,6 +16,7 @@ import ui.WorkbenchMachineView;
 import ui.WorkbenchRowKey;
 import ui.WorkbenchTreeModel;
 import workspace.service.WorkspaceAgentProtocol.AgentCatalog;
+import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceProtocol.WorkspaceGroup;
 import workspace.service.WorkspaceTerminalProtocol.TerminalCatalog;
 
@@ -59,6 +60,7 @@ class WorkbenchTreeTestMain {
 		ordering();
 		emptyAndLoading();
 		suitOff();
+		workspaceRoot();
 		switching();
 		rendered();
 		Sys.println("workbench-tree: ok");
@@ -116,6 +118,30 @@ class WorkbenchTreeTestMain {
 		var attached = [workspaceEntry("eon", "eon-series", ["C:/src/eon"], "C:/Users/me/Exosuit/eon-series")];
 		model.update(catalog("C:/src/eon"), null, null, view(attached, "eon", ["C:/src/eon"]));
 		require(children(model, "w:eon").join(",") == "g:work,g:apps", "an attached folder's groups: " + children(model, "w:eon"));
+	}
+
+	/** Sessions and terminals in no group sit directly under the workspace, after its top-level groups. */
+	static function workspaceRoot():Void {
+		var terminals = catalog("C:/work/resume"), sessions = agents("C:/work/resume");
+		terminals.terminals[0].group = WorkspaceProtocol.ROOT_GROUP;
+		sessions.records[0].group = WorkspaceProtocol.ROOT_GROUP;
+		var model = new WorkbenchTreeModel();
+		model.update(terminals, sessions, null, view(machineWorkspaces, "resume", ["C:/work/resume"]));
+		require(children(model, "w:resume").join(",") == "g:work,g:apps,t:t1,a:a1", "workspace root items: " + children(model, "w:resume"));
+		require(children(model, "g:work").join(",") == "g:drafts", "a root item stayed in its old group");
+		require(WorkbenchRowKey.groupOf(model, "t:t1") == null && WorkbenchRowKey.parentGroupId(model, "a:a1") == WorkspaceProtocol.ROOT_GROUP,
+			"a root item has a group");
+		// A root item, or the workspace row, scopes the right panel to the workspace; the scope then stays.
+		var scope = AgentScope.resolve(model, "a:a1", null);
+		require(scope != null && WorkspaceProtocol.isRoot(scope.groupId) && scope.label == "resume-2026" && scope.directory == "C:/work/resume",
+			"a root item did not scope to the workspace");
+		require(scope.equals(AgentScope.resolve(model, null, scope)) && scope.equals(AgentScope.resolve(model, "w:resume", null)),
+			"the workspace scope did not stay or the workspace row did not choose it");
+		var group = AgentScope.resolve(model, "g:drafts", scope);
+		require(group != null && group.groupId == "drafts", "a group row did not take over from the workspace scope");
+		model.update(terminals, sessions);
+		require(roots(model).join(",") == "g:work,g:apps,t:t1,a:a1", "suit off root items: " + roots(model));
+		require(!model.initiallyExpanded("t:t1") && !model.expandable("a:a1"), "a root item expands");
 	}
 
 	/** With suit off there is no machine: the tree is today's group tree. */

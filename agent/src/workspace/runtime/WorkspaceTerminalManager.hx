@@ -92,10 +92,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
       catalog.set(record.id, record);
     }
   }
-  function knownGroup(id:String):Bool {
-    for (group in groups()) if (group.id == id) return true;
-    return false;
-  }
+  function knownGroup(id:String):Bool return WorkspaceProtocol.knownGroup(id, groups());
   function validName(name:String):Bool return name != null && StringTools.trim(name).length > 0
     && name.length <= 128 && name.indexOf("\t") < 0 && name.indexOf("\n") < 0 && name.indexOf("\r") < 0;
   static function validTheme(theme:Null<TerminalTheme>):Bool return theme == null
@@ -388,11 +385,8 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
           return;
         }
         var groupList = groups();
-        if (groupList.length == 0) {
-          c.fail(error("unknown_group"));
-          return;
-        }
-        var selectedGroup = r.group == null ? (knownGroup("work") ? "work" : groupList[0].id) : r.group;
+        // Without a group the terminal goes to the workspace root.
+        var selectedGroup = r.group != null ? r.group : WorkspaceProtocol.ROOT_GROUP;
         if (!knownGroup(selectedGroup)) { c.fail(error("unknown_group")); return; }
         // The explicit directory, else the group's or nearest ancestor's folder, else the root (ADR 0006).
         var chosen = new WorkspaceDirectories(root).forSession(groupList, selectedGroup, r.directory);

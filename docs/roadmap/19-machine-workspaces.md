@@ -8,8 +8,8 @@ per-context layouts) and suit. Read [EXECUTION.md](EXECUTION.md) first, and reco
 ## Goal
 
 - A machine (suit) serves any number of workspaces. A workspace is a name with zero or more attached folders.
-- Each workspace has one service, which holds its groups. A group is a collection of agent sessions, chats and
-  terminals, with an optional folder.
+- Each workspace has one service, which holds its sessions, terminals and groups. Sessions and terminals belong to
+  the workspace itself or to a group; a group is an optional collection of them, with an optional folder.
 - The Workbench is one tree: machine, then workspaces, then groups and sub-groups, then sessions and terminals.
 - Selecting a group switches to it instantly, and its open tabs come with it.
 - Several editor windows or instances can be open, each focused on its own workspace and group. Every window sees
@@ -23,10 +23,10 @@ per-context layouts) and suit. Read [EXECUTION.md](EXECUTION.md) first, and reco
 | Machine | one computer, one suit | suit (`machine.json`) |
 | Workspace | id, name, attached folders (0..n), scratch folder | suit's catalog lists it; its service holds its work |
 | Workspace service | one process per workspace (`agent --manager`), by workspace id | started by suit or an editor |
-| Group | id, name, parent, order, optional folder; holds sessions and terminals | the workspace service |
+| Group | id, name, parent, order, optional folder; optional, sorts sessions and terminals (those in no group belong to the workspace itself, its root) | the workspace service |
 | Session | an agent chat or terminal; always has a working directory | the workspace service |
 | Window | one editor instance. Focus (its context) and tab sets are per window | the editor |
-| Context | the window's focus: one workspace and group | the editor (M18 `ActiveContext`) |
+| Context | the window's focus: one workspace, and a group or the workspace root | the editor (M18 `ActiveContext`) |
 
 ## Principles
 
@@ -106,6 +106,12 @@ Phase 6 makes every workspace live.
   group.
 - [ ] Tests: tree model unit tests (the `workbench-drag` and `sidebar-layout` style), and a PrintWindow capture of
   the tree.
+- [x] The workspace is its own root group (decided 2026-10-30, ADR 0006 amendment). Sessions and terminals in no
+  group (`WorkspaceProtocol.ROOT_GROUP`, the empty id) sit under the workspace row after its groups. New Agent
+  Session… and New Terminal… on the open workspace's row create there, and so do the header's New terminal and New
+  Codex unless a group or an item in one is selected. Dragging an item onto that row, or choosing Workspace in Move to
+  Group… (terminals and sessions), moves it there; dragging a sub-group onto it makes it top level. Selecting a root
+  item scopes the right panel to the workspace.
 
 Acceptance: the Workbench shows one tree; a workspace's groups and sessions are nested under it; nothing is drawn
 as a separate list.
