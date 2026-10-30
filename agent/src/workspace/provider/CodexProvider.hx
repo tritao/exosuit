@@ -888,7 +888,7 @@ class CodexProvider implements AgentMessageSource {
 		if (previous != null) {
 			if (previous.record.group != q.group
 				|| previous.record.name != q.name
-				|| (q.directory != null && previous.record.cwd != cwd)
+				|| directories.differs(q.directory, previous.record.cwd)
 				|| (q.thread != null && previous.record.thread != q.thread)) {
 				ctx.fail({code: "conflict", message: "Agent id already belongs to another resource", ambiguous: false});
 				return;

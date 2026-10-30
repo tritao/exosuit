@@ -228,7 +228,7 @@ class MachineCatalog {
 			throw 'Could not create $directory';
 	}
 
-	static function copy(workspace:MachineWorkspace):MachineWorkspace
+	public static function copy(workspace:MachineWorkspace):MachineWorkspace
 		return {id: workspace.id, name: workspace.name, folders: workspace.folders.copy(), scratch: workspace.scratch};
 
 	/** Validates a stored catalog; a corrupt one is an error, never silently replaced. */

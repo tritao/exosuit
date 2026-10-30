@@ -841,8 +841,8 @@ class ExosuitApp implements DesktopUiApplication {
 			if (group != null && workbenchPanel != null) {
 				var selected = workbenchPanel.model.groups.get(group);
 				if (selected != null) {
-					var directory = workbenchPanel.model.directory(selected);
-					if (directory != null) cwd = directory;
+					var groupFolder = workbenchPanel.model.directory(selected);
+					if (groupFolder != null) cwd = groupFolder;
 				}
 			}
 			if (directory != null) cwd = directory;

@@ -322,7 +322,7 @@ class SuitDaemon {
 				var workspace:Null<MachineCatalog.MachineWorkspace> = null;
 				for (entry in machine().state.workspaces)
 					if (entry.id == id)
-						workspace = MachineCatalog.decodeWorkspace(entry);
+						workspace = MachineCatalog.copy(entry);
 				return {ok: true, scratch: scratch, workspace: workspace, machine: machine().json()};
 			case "workspace-rename":
 				var renamed = machine().rename(SuitRecords.stringField(request, "workspace"), SuitRecords.stringField(request, "name"));
