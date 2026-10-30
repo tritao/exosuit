@@ -4,13 +4,16 @@ Builds Exosuit on Windows with the Visual Studio 2026 toolchain.
 
 .DESCRIPTION
 Loads the x64 environment of the newest Visual Studio 2026 (18.x) install, puts its
-bundled CMake first on PATH, and pins the CMake generator to Visual Studio 2026.
-Then it runs the Haxeon toolchain bootstrap (pinned Haxe, libffi, HashLink, Haxeon
-native) and builds the agent and the graphical app.
+bundled CMake first on PATH, and pins the default CMake generator to Visual Studio 2026.
+Then it runs the Haxeon toolchain bootstrap (pinned Haxe, libffi, HashLink, ccache,
+Haxeon native) and builds the agent, suit and the graphical app.
 
-The bundled CMake matters: a system CMake older than 4.2 does not know the 2026
-generator and silently falls back to Visual Studio 2022 for the app's native
-packages, while the bootstrap's Ninja builds use the 2026 compiler.
+The apps' native packages build with Ninja in this environment, through ccache
+(Haxeon's NativeCMakeProvider). A build started without it, such as scripts/run.py
+from a plain shell, has Haxeon load the newest Visual Studio's environment itself.
+The bundled CMake matters for builds that use the default generator: a system CMake
+older than 4.2 does not know the 2026 generator and silently falls back to Visual
+Studio 2022.
 
 .PARAMETER Clean
 Removes every ignored build directory in Exosuit, plus Haxeon's out/ and .tools/,
@@ -59,7 +62,8 @@ function Enter-VisualStudio2026 {
 
     $cmakeDir = Join-Path $install "Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin"
     $env:PATH = "$cmakeDir;$env:PATH"
-    # Only builds that pick no generator use this; Haxeon's own Ninja presets keep theirs.
+    # Only builds that pick no generator use this, such as the apps' native packages with
+    # HAXEON_CMAKE_GENERATOR=default; Haxeon's presets and native packages pick Ninja.
     # CMAKE_GENERATOR_INSTANCE is left unset because it breaks those Ninja configures.
     $env:CMAKE_GENERATOR = "Visual Studio 18 2026"
 
