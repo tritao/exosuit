@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Build the graphical app with the Haxeon CLI."""
+"""Build the agent, suit and the graphical app with the Haxeon CLI."""
 
 from __future__ import annotations
 
 import os
 import sys
+import time
 from pathlib import Path
 
 from haxeon_cli import ensure_language_server, run_cli
@@ -14,36 +15,26 @@ from prepare_agent_naming import prepare
 def main() -> int:
     root_dir = Path(__file__).resolve().parent.parent
     self_hosted = os.environ.get("HAXEON_SELF_HOSTED", "0") == "1"
-    agent_arguments = [
-        "build",
-        "--project",
-        str(root_dir / "agent" / "haxeon.json"),
-    ]
-    if self_hosted:
-        agent_arguments.append("--self-hosted")
-    agent_arguments.extend(sys.argv[1:])
+    # suit is the per-user tray daemon that tracks the processes editors and workspaces start. The projects build one
+    # after another: built side by side, their CMake configures contended and the whole build took longer.
+    projects = ["agent", "suit", "graphical"]
 
     try:
         prepare(root_dir)
         status = ensure_language_server(root_dir)
         if status != 0:
             return status
-        status = run_cli(root_dir, agent_arguments)
-        if status != 0:
-            return status
-        # suit, the per-user tray daemon that tracks the processes editors and workspaces start.
-        suit_arguments = ["build", "--project", str(root_dir / "suit" / "haxeon.json")]
-        if self_hosted:
-            suit_arguments.append("--self-hosted")
-        suit_arguments.extend(sys.argv[1:])
-        status = run_cli(root_dir, suit_arguments)
-        if status != 0:
-            return status
-        arguments = ["build", "--project", str(root_dir / "graphical" / "haxeon.json")]
-        if self_hosted:
-            arguments.append("--self-hosted")
-        arguments.extend(sys.argv[1:])
-        return run_cli(root_dir, arguments)
+        for project in projects:
+            arguments = ["build", "--project", str(root_dir / project / "haxeon.json")]
+            if self_hosted:
+                arguments.append("--self-hosted")
+            arguments.extend(sys.argv[1:])
+            started = time.monotonic()
+            status = run_cli(root_dir, arguments)
+            if status != 0:
+                return status
+            print(f"== {project} built in {time.monotonic() - started:.0f} s", flush=True)
+        return 0
     except (OSError, RuntimeError) as error:
         print(f"Unable to prepare the Haxeon CLI: {error}", file=sys.stderr)
         return 127
