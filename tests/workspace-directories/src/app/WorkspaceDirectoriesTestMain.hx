@@ -101,7 +101,44 @@ class WorkspaceDirectoriesTestMain {
 		var group = service.snapshot().groups[0];
 		require(group.revision == 7 && group.cwd == null, "Service snapshot did not follow the changes");
 		var flowOutside:String = cast outsideFolder;
+		sessionDirectories(directories, base, flowOutside);
 		GroupFlowTests.run(directories, flowOutside);
 		remove(base);
+	}
+
+	/** ADR 0006: explicit, else the group's folder or nearest ancestor's, else the first folder, else the scratch folder. */
+	static function sessionDirectories(directories:WorkspaceDirectories, base:String, outside:String):Void {
+		require(WorkspaceDirectories.choose("/e", "/g", "/f", "/s") == "/e", "Explicit directory did not come first");
+		require(WorkspaceDirectories.choose(null, "/g", "/f", "/s") == "/g", "Group folder did not come second");
+		require(WorkspaceDirectories.choose(null, null, "/f", "/s") == "/f", "First folder did not come third");
+		require(WorkspaceDirectories.choose(null, null, null, "/s") == "/s", "Scratch folder was not the last resort");
+		require(WorkspaceDirectories.choose(null, null, null, null) == null, "A workspace with nothing resolved a directory");
+
+		var root = directories.root, resume:String = cast directories.resolve("resume");
+		FileSystem.createDirectory(base + "/vanishing");
+		var groups:Array<WorkspaceGroup> = [
+			{id: "plain", name: "Plain", cwd: null, revision: 1},
+			{id: "own", name: "Own", cwd: resume, revision: 1},
+			{id: "child", name: "Child", cwd: null, revision: 1, parent: "own"},
+			{id: "grandchild", name: "Grandchild", cwd: null, revision: 1, parent: "child"},
+			{id: "vanished", name: "Vanished", cwd: base + "/vanishing", revision: 1}
+		];
+		FileSystem.deleteDirectory(base + "/vanishing");
+		function path(group:String, explicit:Null<String>):Null<String> return directories.forSession(groups, group, explicit).path;
+		require(path("plain", null) == root, "A group with no folder did not start in the workspace's first folder");
+		require(path("own", null) == resume, "A group's own folder was not used");
+		require(path("grandchild", null) == resume, "The nearest ancestor's folder was not inherited");
+		require(directories.forGroup(groups, "grandchild") == resume, "forGroup no longer follows the session order");
+		require(path("plain", outside) == outside, "An explicit folder outside the workspace was not used");
+		require(path("own", outside) == outside, "An explicit folder did not override the group's folder");
+		var refused = directories.forSession(groups, "plain", root + "/missing");
+		require(refused.path == null && refused.error != null && refused.error.indexOf("existing folder") >= 0,
+			"A missing explicit folder was not refused clearly: " + refused.error);
+		require(path("plain", "resume") == resume, "A relative explicit folder was not resolved against the root");
+		require(path("plain", "missing") == null, "A missing relative explicit folder was accepted");
+		require(path("plain", "") == null, "An empty explicit folder was accepted");
+		require(path("vanished", null) == null, "A group whose folder vanished fell back silently");
+		require(path("vanished", outside) == outside, "An explicit folder did not rescue a group whose folder vanished");
+		require(path("unknown", null) == null && path("unknown", outside) == null, "An unknown group resolved a directory");
 	}
 }

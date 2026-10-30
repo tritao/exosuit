@@ -313,7 +313,8 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       provider:defaults == null ? null : defaults.provider,thread:thread,
       defaultModel:thread == null && defaults != null ? defaults.model : null,
       defaultEffort:thread == null && defaults != null ? defaults.effort : null,
-      permissionProfile:thread == null && defaults != null ? defaults.permissionProfile : null};
+      permissionProfile:thread == null && defaults != null ? defaults.permissionProfile : null,
+      directory:defaults == null ? null : defaults.directory};
     creation=new WorkspaceAgentCreation(query,connection,workspaceRoot,clock()+60000,created);
     agentsRevision++;continueAgentCreate();
   }

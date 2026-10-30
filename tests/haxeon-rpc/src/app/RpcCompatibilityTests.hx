@@ -48,13 +48,14 @@ class RpcCompatibilityTests {
   var legacyCreateBytes = bytes("8601a17702a16903a16104a16705a5436f64657806c0");
   require(WorkspaceAgentProtocol.CREATE.decodeRequest(legacyCreateBytes).id == "a",
     "Legacy Agent create vector no longer decodes");
-  require(WorkspaceAgentProtocol.CREATE.encodeRequest(agentCreate).compare(bytes("8a01a17702a16903a16104a16705a5436f64657806c007c008c009c00ac0")) == 0,
+  require(WorkspaceAgentProtocol.CREATE.encodeRequest(agentCreate).compare(bytes("8b01a17702a16903a16104a16705a5436f64657806c007c008c009c00ac00bc0")) == 0,
     "Agent create vector changed");
   var configuredCreate:AgentCreate={workspace:"w",instance:"i",id:"b",group:"g",name:"Codex",thread:null,
-    defaultModel:"fixture-model",defaultEffort:"high",permissionProfile:"read-only"};
+    defaultModel:"fixture-model",defaultEffort:"high",permissionProfile:"read-only",directory:"C:\\Users\\me"};
   var restoredCreate=WorkspaceAgentProtocol.CREATE.decodeRequest(WorkspaceAgentProtocol.CREATE.encodeRequest(configuredCreate));
   require(restoredCreate.defaultModel=="fixture-model" && restoredCreate.defaultEffort=="high"
-    && restoredCreate.permissionProfile=="read-only", "Agent creation defaults did not survive RPC encoding");
+    && restoredCreate.permissionProfile=="read-only" && restoredCreate.directory=="C:\\Users\\me",
+    "Agent creation defaults did not survive RPC encoding");
   var agentAction:AgentAction={workspace:"w",instance:"i",id:"a",action:"prompt",text:"hi",request:null};
   require(WorkspaceAgentProtocol.ACTION.decodeRequest(bytes("8601a17702a16903a16104a670726f6d707405a2686906c0")).action == "prompt",
     "Legacy Agent prompt vector no longer decodes");

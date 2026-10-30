@@ -882,15 +882,13 @@ class CodexProvider implements AgentMessageSource {
 			ctx.fail({code: "invalid_request", message: "Invalid agent identity", ambiguous: false});
 			return;
 		}
-		var cwd = directory(q.group);
-		if (cwd == null) {
-			ctx.fail({code: "invalid_request", message: "Invalid agent directory or group", ambiguous: false});
-			return;
-		}
+		var cwd = directories.forAgent(groups(), q.group, q.directory, ctx.fail);
+		if (cwd == null) return;
 		var previous = sessions.get(q.id);
 		if (previous != null) {
 			if (previous.record.group != q.group
 				|| previous.record.name != q.name
+				|| (q.directory != null && previous.record.cwd != cwd)
 				|| (q.thread != null && previous.record.thread != q.thread)) {
 				ctx.fail({code: "conflict", message: "Agent id already belongs to another resource", ambiguous: false});
 				return;
@@ -1279,7 +1277,8 @@ class CodexProvider implements AgentMessageSource {
 			s.record.state = "working";
 			s.error = null;
 			append(s, "\nYou: " + q.text + "\n");
-                var params:Dynamic = {threadId: s.record.thread, input: turnInput(q.text, imagePaths)};
+                // The session's directory is the sandbox's workspace root for read-only and workspace-write turns.
+                var params:Dynamic = {threadId: s.record.thread, input: turnInput(q.text, imagePaths), cwd: s.record.cwd};
                 if (effectiveModel != null) Reflect.setField(params, "model", effectiveModel);
                 if (effectiveEffort != null) Reflect.setField(params, "effort", effectiveEffort);
                 if (s.record.approvalPolicy != null) Reflect.setField(params, "approvalPolicy", s.record.approvalPolicy);

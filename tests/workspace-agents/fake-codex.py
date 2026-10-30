@@ -108,6 +108,7 @@ for line in messages():
   ], 'nextCursor':None})
  elif method=='turn/start':
   v=load();t=v['threads'][params['threadId']];v['prompts']+=1
+  assert params.get('cwd')==t['cwd'],'Turn did not run in the session directory'
   turn={'id':'turn-'+str(v['prompts']),'status':'inProgress'}
   t['turn']=turn;t['status']={'type':'active'};save(v)
   text=params['input'][0]['text']

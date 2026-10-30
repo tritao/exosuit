@@ -27,7 +27,8 @@ class AgentKitProviderTestMain {
 		var clock = function() return Sys.time() * 1000;
 		var runtime = Runtime.start();
 		var directories = new WorkspaceDirectories(root);
-		var seed = new WorkspaceService("w", "e", [{id: "work", name: "Work", cwd: root, revision: 1}]);
+		var seed = new WorkspaceService("w", "e", [{id: "work", name: "Work", cwd: root, revision: 1},
+			{id: "plain", name: "Plain", cwd: null, revision: 1}]);
 		var store = new WorkspaceSqliteStore(root + "/agents.sqlite", "w", seed.snapshot(), 32, root);
 		var transport = new NativeKitHttpTransport(runtime.events, true);
 		var state = Path.join([root, "state"]);
@@ -132,6 +133,47 @@ class AgentKitProviderTestMain {
 		require(code == "", "duplicate create must be idempotent: " + code);
 		create("bad", "root");
 		require(code == "invalid_permissions", "unknown permission mode must be refused: " + code);
+
+		// The session's directory (ADR 0006): explicit, else the group's folder, else the workspace's first folder.
+		var made:Null<AgentRecord> = null;
+		function createIn(id:String, group:String, directory:Null<String>):Void {
+			var done = false;
+			code = "";
+			made = null;
+			client.call(WorkspaceAgentProtocol.CREATE, {workspace: "w", instance: "owner", id: id, name: "Agent " + id, group: group,
+				thread: null, provider: "agentkit", directory: directory}, 5000, function(r) {
+				made = r;
+				done = true;
+			}, function(e) {
+				code = e.code;
+				done = true;
+			});
+			wait(function() return done);
+		}
+		function madeCwd():String {
+			require(made != null, "session was not created: " + code);
+			var record:AgentRecord = cast made;
+			return record.cwd;
+		}
+		createIn("plain", "plain", null);
+		require(madeCwd() == directories.root, "a group with no folder must start in the workspace's first folder");
+		var chosen = Path.join([Path.directory(root), "agentkit-chosen-" + port]);
+		FileSystem.createDirectory(chosen);
+		createIn("chosen", "work", chosen);
+		require(madeCwd() == FileSystem.fullPath(chosen), "an explicit folder outside the workspace must be used");
+		createIn("chosen", "work", chosen);
+		require(madeCwd() == FileSystem.fullPath(chosen), "creating with the same folder again must be idempotent");
+		createIn("chosen", "work", root);
+		require(code == "conflict", "the same session id with another folder must conflict: " + code);
+		createIn("missing", "plain", Path.join([root, "missing"]));
+		require(code == "invalid_directory" && made == null, "a missing folder must be refused: " + code);
+		createIn("relative", "plain", "missing-relative");
+		require(code == "invalid_directory" && made == null, "a missing relative folder must be refused: " + code);
+		for (id in ["plain", "chosen"]) {
+			act("delete", "", null, null, id);
+			require(code == "", "removing " + id + " failed: " + code);
+		}
+		FileSystem.deleteDirectory(chosen);
 		act("read");
 		require(current().record.provider == "agentkit" && current().record.permissionMode == "supervised" && current().connectionState == "connected",
 			"fresh session is idle and supervised");

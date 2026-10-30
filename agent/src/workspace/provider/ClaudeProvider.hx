@@ -235,13 +235,14 @@ class ClaudeProvider implements AgentMessageSource {
   }
   var previous=sessions.get(q.id);
   if(previous != null) {
-   if(previous.record.name != q.name || previous.record.group != q.group || (q.thread != null && previous.record.thread != q.thread))
+   if(previous.record.name != q.name || previous.record.group != q.group || (q.thread != null && previous.record.thread != q.thread)
+    || directories.differs(q.directory,previous.record.cwd))
     ctx.fail({code:"conflict",message:"Agent identity is already reserved",ambiguous:false});
    else ctx.respond(copy(previous.record));
    return;
   }
-  var cwd=directories.forGroup(groups(),q.group);
-  if(cwd == null) {ctx.fail({code:"invalid_request",message:"Invalid agent group directory",ambiguous:false});return;}
+  var cwd=directories.forAgent(groups(),q.group,q.directory,ctx.fail);
+  if(cwd == null) return;
   var selected=q.permissionProfile == null ? "default" : q.permissionProfile;
   if(!mode(selected)) {ctx.fail({code:"invalid_permissions",message:"Choose default, acceptEdits or plan",ambiguous:false});return;}
   if(q.thread != null) for(s in sessions) if(s.record.thread == q.thread) {ctx.fail({code:"conflict",message:"Session is already attached",ambiguous:false});return;}

@@ -91,6 +91,8 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(8) var defaultEffort:Null<String>;
 	@:optional @:id(9) var permissionProfile:Null<String>;
 	@:optional @:id(10) var provider:Null<String>;
+	/** The session's working directory, an existing folder by its full path or relative to the workspace root; null resolves it from the group (ADR 0006). */
+	@:optional @:id(11) var directory:Null<String>;
 }
 
 @:wire typedef AgentModel = {

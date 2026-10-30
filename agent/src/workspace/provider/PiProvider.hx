@@ -164,7 +164,7 @@ class PiProvider implements AgentMessageSource {
   if(s.record.thread != "" && !FileSystem.exists(s.record.thread) && s.record.nativeSessionRequired == true) {fail(s,"Pi session file is missing; refusing to create a replacement conversation");return;}
   try {
    if(!FileSystem.isDirectory(extensionDirectory)) throw "Pi extension directory is unavailable";
-   var source=PiPermissionExtension.source(s.record.permissionMode);
+   var source=PiPermissionExtension.source(s.record.permissionMode,s.record.cwd);
    var extension=extensionDirectory + "/pi-permissions-" + haxe.crypto.Sha256.encode(source).substr(0,16) + ".mjs";
    if(!FileSystem.exists(extension) || File.getContent(extension) != source) File.saveContent(extension,source);
    var args=prefix.concat(["--mode","rpc","--extension",extension]);
@@ -483,11 +483,12 @@ class PiProvider implements AgentMessageSource {
   }
   var previous=sessions.get(q.id);
   if(previous != null) {
-   if(previous.record.name != q.name || previous.record.group != q.group) ctx.fail({code:"conflict",message:"Agent identity is reserved",ambiguous:false});
+   if(previous.record.name != q.name || previous.record.group != q.group || directories.differs(q.directory,previous.record.cwd))
+    ctx.fail({code:"conflict",message:"Agent identity is reserved",ambiguous:false});
    else ctx.respond(copy(previous.record));return;
   }
-  var cwd=directories.forGroup(groups(),q.group);
-  if(cwd == null) {ctx.fail({code:"invalid_request",message:"Invalid Pi group directory",ambiguous:false});return;}
+  var cwd=directories.forAgent(groups(),q.group,q.directory,ctx.fail);
+  if(cwd == null) return;
   var s=session({id:q.id,name:q.name,group:q.group,cwd:cwd,thread:"",state:"disconnected",turn:null,workspaceRoot:directories.root,
    provider:"pi",permissionMode:selected,preferredModel:q.defaultModel,preferredEffort:q.defaultEffort});
   try save(s) catch(_:Dynamic) {ctx.fail({code:"storage_unavailable",message:"Pi reservation failed",ambiguous:false});return;}

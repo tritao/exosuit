@@ -183,20 +183,23 @@ class WorkspaceGroupTests {
 			function(e) throw e.message);
 		pump();
 		require(listing != null && listing.terminals[0].cwd == child, "Moving group changed running cwd");
-		var invalid = "";
-		client.call(WorkspaceTerminalProtocol.OPEN, {
-			workspace: "w",
-			instance: "owner",
-			id: "outside",
-			create: true,
-			columns: 80,
-			rows: 24,
-			group: "nested",
-			directory: root + "/../"
-		}, 1000, function(_) throw "Outside terminal launched",
-			function(e) invalid = e.code);
-		pump();
-		require(invalid == "invalid_directory", "Outside override was accepted");
+		// An explicit directory must be an existing folder, by its full path or relative to the root.
+		for (refused in [root + "/missing-folder", "missing-folder"]) {
+			var invalid = "";
+			client.call(WorkspaceTerminalProtocol.OPEN, {
+				workspace: "w",
+				instance: "owner",
+				id: "refused",
+				create: true,
+				columns: 80,
+				rows: 24,
+				group: "nested",
+				directory: refused
+			}, 1000, function(_) throw "Terminal launched in " + refused,
+				function(e) invalid = e.code);
+			pump();
+			require(invalid == "invalid_directory", "Invalid override was accepted: " + refused);
+		}
 		var overrideInfo:Null<TerminalInfo> = null;
 		client.call(WorkspaceTerminalProtocol.OPEN, {
 			workspace: "w",

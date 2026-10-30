@@ -287,17 +287,15 @@ class AgentKitProvider implements LocalAgentProvider {
 		}
 		var previous = sessions.get(q.id);
 		if (previous != null) {
-			if (previous.record.name != q.name || previous.record.group != q.group)
+			if (previous.record.name != q.name || previous.record.group != q.group
+				|| directories.differs(q.directory, previous.record.cwd))
 				ctx.fail({code: "conflict", message: "Agent identity is already reserved", ambiguous: false});
 			else
 				ctx.respond(copy(previous.record));
 			return;
 		}
-		var cwd = directories.forGroup(groups(), q.group);
-		if (cwd == null) {
-			ctx.fail({code: "invalid_request", message: "Invalid agent group directory", ambiguous: false});
-			return;
-		}
+		var cwd = directories.forAgent(groups(), q.group, q.directory, ctx.fail);
+		if (cwd == null) return;
 		var selected = q.permissionProfile == null ? "supervised" : q.permissionProfile;
 		if (!mode(selected)) {
 			ctx.fail({code: "invalid_permissions", message: "Choose supervised, acceptEdits or fullAccess", ambiguous: false});

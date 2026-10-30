@@ -394,19 +394,10 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         }
         var selectedGroup = r.group == null ? (knownGroup("work") ? "work" : groupList[0].id) : r.group;
         if (!knownGroup(selectedGroup)) { c.fail(error("unknown_group")); return; }
-        var directory = r.directory;
-        var parent:Null<String> = selectedGroup;
-        var visited:Map<String, Bool> = [];
-        while (directory == null && parent != null) {
-          if (visited.exists(parent)) { c.fail(error("invalid_group")); return; }
-          visited.set(parent, true);
-          var group = Lambda.find(groupList, function(g) return g.id == parent);
-          if (group == null) { c.fail(error("unknown_group")); return; }
-          directory = group.cwd;
-          parent = group.parent;
-        }
-        var resolved = new WorkspaceDirectories(root).resolve(directory == null ? root : directory);
-        if (resolved == null) { c.fail(error("invalid_directory")); return; }
+        // The explicit directory, else the group's or nearest ancestor's folder, else the root (ADR 0006).
+        var chosen = new WorkspaceDirectories(root).forSession(groupList, selectedGroup, r.directory);
+        if (chosen.path == null) { c.fail({code: "invalid_directory", message: chosen.error, ambiguous: false}); return; }
+        var resolved = chosen.path;
         var record:TerminalRecord = {
           id: r.id,
           name: r.agentProvider == null ? nextTerminalName() : (r.agentProvider == "claude" ? "Claude Code" : r.agentProvider == "codex" ? "Codex" : "Pi") + " · Terminal",
