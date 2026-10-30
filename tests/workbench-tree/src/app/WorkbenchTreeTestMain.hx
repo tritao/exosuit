@@ -37,7 +37,7 @@ class WorkbenchTreeTestMain {
 			{id: "a1", name: "Codex", group: "work", cwd: root, thread: "", state: "idle", turn: null, workspaceRoot: root}]};
 
 	static function workspaceEntry(id:String, name:String, folders:Array<String>, ?scratch:String):MachineWorkspace
-		return {id: id, name: name, folders: folders, scratch: scratch};
+		return {id: id, name: name, folders: folders, scratch: scratch, revision: 1};
 
 	static function view(workspaces:Null<Array<MachineWorkspace>>, open:Null<String>, roots:Array<String>, ?error:String):WorkbenchMachineView
 		return {machine: workspaces == null ? null : {id: "m", name: "cube", workspaces: workspaces}, error: error,

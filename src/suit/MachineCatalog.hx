@@ -16,6 +16,15 @@ typedef MachineWorkspace = {
 	var name:String;
 	var folders:Array<String>;
 	var scratch:Null<String>;
+	/** Counts this workspace's changes; 0 for one read from a version 1 file or a reply without it. */
+	var revision:Int;
+}
+
+/** The service that holds a workspace's groups, sessions and terminals, as a `machine` reply reports it. */
+typedef MachineService = {
+	var endpoint:String;
+	var pid:Int;
+	var running:Bool;
 }
 
 /** This machine and its workspaces, as suit keeps them and `machine` requests report them. */
@@ -33,6 +42,8 @@ typedef MachineState = {
 **/
 class MachineCatalog {
 	public static inline final VERSION = 2;
+	/** The `machine` reply's shape, separate from machine.json's VERSION. */
+	public static inline final REPLY_VERSION = 2;
 	public static inline final FOLDER_LIMIT = 16;
 	public static inline final NAME_LIMIT = 200;
 	static inline final FILE_LIMIT = 1048576;
@@ -56,7 +67,7 @@ class MachineCatalog {
 				try {
 					var normal = folderPath(folder);
 					if (find(normal) == null)
-						state.workspaces.push({id: newId("workspace"), name: folderName(normal), folders: [normal], scratch: null});
+						state.workspaces.push({id: newId("workspace"), name: folderName(normal), folders: [normal], scratch: null, revision: 1});
 				} catch (_:Dynamic) {}
 		save();
 	}
@@ -64,9 +75,19 @@ class MachineCatalog {
 	public static function file():String
 		return Path.join([SuitPaths.home(), "machine.json"]);
 
-	/** The reply to a `machine` request. */
-	public function json():Dynamic
-		return {id: state.id, name: state.name, workspaces: [for (workspace in state.workspaces) copy(workspace)]};
+	/**
+		The reply to a `machine` request, version 2: each workspace with its folders (possibly none), scratch folder,
+		revision and `service`. `service` is null when `services` does not know one (M19 Phase 0: suit does not report
+		services yet).
+	**/
+	public function json(?services:MachineWorkspace->Null<MachineService>):Dynamic {
+		var lookup:Null<MachineWorkspace->Null<MachineService>> = services;
+		var workspaces:Array<Dynamic> = [];
+		for (workspace in state.workspaces)
+			workspaces.push({id: workspace.id, name: workspace.name, folders: workspace.folders.copy(), scratch: workspace.scratch,
+				revision: workspace.revision, service: lookup == null ? null : lookup(workspace)});
+		return {version: REPLY_VERSION, id: state.id, name: state.name, workspaces: workspaces};
+	}
 
 	/** Adds a workspace with these folders, which may be none; its name defaults to the first folder's. */
 	public function create(name:Null<String>, folders:Array<String>):MachineWorkspace {
@@ -82,7 +103,7 @@ class MachineCatalog {
 		if (unnamed && normals.length == 0)
 			throw "A workspace needs a name";
 		var workspace:MachineWorkspace = {id: newId("workspace"), name: unnamed ? folderName(normals[0]) : validName(name), folders: normals,
-			scratch: null};
+			scratch: null, revision: 1};
 		state.workspaces.push(workspace);
 		save();
 		return copy(workspace);
@@ -109,6 +130,7 @@ class MachineCatalog {
 		var full = Sys.systemName() == "Windows" ? StringTools.replace(candidate, "/", "\\") : candidate;
 		createDirectories(full);
 		workspace.scratch = full;
+		workspace.revision++;
 		save();
 		return full;
 	}
@@ -155,6 +177,7 @@ class MachineCatalog {
 	public function rename(id:String, name:String):MachineWorkspace {
 		var workspace = require(id);
 		workspace.name = validName(name);
+		workspace.revision++;
 		save();
 		return copy(workspace);
 	}
@@ -179,6 +202,7 @@ class MachineCatalog {
 		if (workspace.folders.length >= FOLDER_LIMIT)
 			throw 'A workspace has at most $FOLDER_LIMIT folders';
 		workspace.folders.push(normal);
+		workspace.revision++;
 		save();
 		return copy(workspace);
 	}
@@ -193,6 +217,7 @@ class MachineCatalog {
 		if (index < 0)
 			throw "The workspace does not have this folder";
 		workspace.folders.splice(index, 1);
+		workspace.revision++;
 		save();
 		return copy(workspace);
 	}
@@ -229,7 +254,8 @@ class MachineCatalog {
 	}
 
 	public static function copy(workspace:MachineWorkspace):MachineWorkspace
-		return {id: workspace.id, name: workspace.name, folders: workspace.folders.copy(), scratch: workspace.scratch};
+		return {id: workspace.id, name: workspace.name, folders: workspace.folders.copy(), scratch: workspace.scratch,
+			revision: workspace.revision};
 
 	/** Validates a stored catalog; a corrupt one is an error, never silently replaced. */
 	public static function decode(text:String):MachineState {
@@ -258,7 +284,24 @@ class MachineCatalog {
 		var scratch:Dynamic = Reflect.field(entry, "scratch");
 		if (scratch != null && !Std.isOfType(scratch, String))
 			throw "Invalid workspace scratch folder";
-		return {id: workspaceId, name: workspaceName, folders: list, scratch: SuitRecord.SuitRecords.stringField(entry, "scratch")};
+		var revision:Dynamic = Reflect.field(entry, "revision");
+		var count = revision == null ? 0 : SuitRecord.SuitRecords.intField(entry, "revision");
+		if (count == null || count < 0)
+			throw "Invalid workspace revision";
+		return {id: workspaceId, name: workspaceName, folders: list, scratch: SuitRecord.SuitRecords.stringField(entry, "scratch"),
+			revision: count};
+	}
+
+	/** A workspace's `service` from a `machine` reply: null when absent, an error when malformed. */
+	public static function decodeService(entry:Dynamic):Null<MachineService> {
+		var service:Dynamic = entry == null ? null : Reflect.field(entry, "service");
+		if (service == null)
+			return null;
+		var endpoint = SuitRecord.SuitRecords.stringField(service, "endpoint");
+		var pid = SuitRecord.SuitRecords.intField(service, "pid"), running:Dynamic = Reflect.field(service, "running");
+		if (endpoint == null || endpoint.length == 0 || pid == null || !Std.isOfType(running, Bool))
+			throw "Invalid workspace service";
+		return {endpoint: endpoint, pid: pid, running: running == true};
 	}
 
 	/** An existing folder's absolute, normalized path. A folder that is gone later stays listed, shown as missing. */

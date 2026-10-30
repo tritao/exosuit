@@ -255,6 +255,7 @@ class SuitUnitTests {
 			old.rename("w", "n2");
 			var written:Dynamic = haxe.Json.parse(sys.io.File.getContent(file));
 			check(written.version == 2 && new MachineCatalog(file).state.workspaces[0].name == "n2", "a version 1 catalog is written back as version 2");
+			machineReply(file, twoInJson);
 			sys.io.File.saveContent(file, "{\"version\":1,\"id\":\"m\",\"name\":\"x\",\"workspaces\":[{\"id\":\"w\",\"name\":\"n\",\"folders\":\"x\"}]}");
 			check(fails(function() new MachineCatalog(file)), "a damaged catalog is an error, not replaced");
 			sys.io.File.saveContent(file, "{\"version\":3,\"id\":\"m\",\"name\":\"x\",\"workspaces\":[]}");
@@ -264,6 +265,45 @@ class SuitUnitTests {
 		}
 		Sys.putEnv("EXOSUIT_SCRATCH_HOME", previousScratchHome == null ? "" : previousScratchHome);
 		deleteTree(base);
+	}
+
+	/**
+		The `machine` reply, version 2 (M19 Phase 0; proposed, pending the mobile-app review): every workspace has
+		folders (possibly none), a scratch folder or null, a revision and a service or null.
+	**/
+	static function machineReply(file:String, twoInJson:String):Void {
+		sys.io.File.saveContent(file, '{"version":2,"id":"m","name":"cube","workspaces":[{"id":"w1","name":"Notes","folders":[],'
+			+ '"scratch":"/s/Notes","revision":3},{"id":"w2","name":"two","folders":["$twoInJson"],"scratch":null}]}');
+		var catalog = new MachineCatalog(file);
+		var services = function(entry:MachineWorkspace):Null<MachineService> {
+			return entry.id == "w2" ? {endpoint: "pipe-w2", pid: 42, running: true} : null;
+		};
+		var reply:Dynamic = haxe.Json.parse(haxe.Json.stringify({ok: true, machine: catalog.json(services)})).machine;
+		check(keys(reply) == "id,name,version,workspaces" && reply.version == 2 && reply.id == "m" && reply.name == "cube",
+			"a machine reply is version 2, got " + keys(reply));
+		var workspaces:Array<Dynamic> = reply.workspaces;
+		check(workspaces.length == 2 && keys(workspaces[0]) == "folders,id,name,revision,scratch,service" && keys(workspaces[1]) == keys(workspaces[0]),
+			"a reply's workspace has folders, id, name, revision, scratch and service, got " + keys(workspaces[0]));
+		var notes = workspaces[0], two = workspaces[1];
+		check((notes.folders : Array<Dynamic>).length == 0 && notes.scratch == "/s/Notes" && notes.revision == 3 && notes.service == null
+			&& MachineCatalog.decodeService(notes) == null, "a folderless workspace's reply has its scratch folder, revision and no service");
+		var service = MachineCatalog.decodeService(two);
+		check(two.scratch == null && two.revision == 0 && service != null && service.endpoint == "pipe-w2" && service.pid == 42 && service.running,
+			"a workspace's service is its endpoint, pid and whether it runs; a revision missing from the file is 0");
+		check(fails(function() MachineCatalog.decodeService(haxe.Json.parse('{"service":{"endpoint":"p","pid":"42","running":true}}'))),
+			"a malformed service is an error");
+		check(MachineCatalog.decodeWorkspace(notes).revision == 3, "a reply's workspace decodes its revision");
+		check(catalog.rename("w1", "Journal").revision == 4 && catalog.scratch("w2") != null && catalog.state.workspaces[1].revision == 1,
+			"every change to a workspace counts in its revision");
+		var unknown:Array<Dynamic> = catalog.json().workspaces;
+		check(unknown[0].service == null && unknown[1].service == null, "suit reports no service until it knows one");
+	}
+
+	/** An object's field names, sorted and joined. */
+	static function keys(value:Dynamic):String {
+		var names = Reflect.fields(value);
+		names.sort(Reflect.compare);
+		return names.join(",");
 	}
 
 	static function deleteTree(path:String):Void {
