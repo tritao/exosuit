@@ -1599,15 +1599,10 @@ class ExosuitApp implements DesktopUiApplication {
 			return true;
 		};
 		// A workspace opens its attached folders. Until its service is keyed by workspace id (M19 Phase 4), one with no
-		// folders opens its scratch folder instead, and one that kept its scratch folder (see attachFolder) opens it
-		// last: the Workbench follows the last folder opened, so the scratch folder's groups and sessions stay shown.
+		// folders opens its scratch folder instead.
 		var open = function(entry:suit.MachineCatalog.MachineWorkspace):Void {
 			if (entry.folders.length > 0) {
-				var scratch = entry.scratch, roots:Array<String> = [], scratchRoot:Null<String> = null;
-				for (folder in entry.folders)
-					if (scratch != null && PathKey.same(folder, scratch)) scratchRoot = folder; else roots.push(folder);
-				if (scratchRoot != null) roots.push(scratchRoot);
-				application.savedWorkspaces.restore(new workspace.SavedWorkspace(entry.id, entry.name, roots), "");
+				application.savedWorkspaces.restore(new workspace.SavedWorkspace(entry.id, entry.name, entry.folders), "");
 				requestFrame();
 				return;
 			}
@@ -1648,19 +1643,11 @@ class ExosuitApp implements DesktopUiApplication {
 			rename: function(entry) askName("Rename workspace " + entry.name, function(name) {
 				machine.rename(entry.id, name, function(_, failure) { report(failure); });
 			}),
+			// The scratch folder stays apart from the attached folders (ADR 0006). Until M19 Phase 4 merges services by
+			// workspace id, the groups made in it show only while the workspace has no folders.
 			attachFolder: function(entry) chooseFolder("Attach Folder to " + entry.name, function(folder) {
-				var attach = function() machine.addFolder(entry.id, folder, function(updated, failure) {
+				machine.addFolder(entry.id, folder, function(updated, failure) {
 					if (!report(failure) && updated != null && openWorkspace() == entry.id) open(updated);
-				});
-				// A folderless workspace's groups and sessions live in its scratch folder's service until M19 Phase 4
-				// merges services by workspace id. Its first real folder keeps the scratch folder attached, so they
-				// stay in the tree.
-				// The tree's entry may predate the scratch folder, so ask suit for it when this window runs on it.
-				if (entry.folders.length > 0 || (entry.scratch == null && openWorkspace() != entry.id)) { attach(); return; }
-				machine.scratch(entry.id, function(scratch, failure) {
-					if (report(failure) || scratch == null) return;
-					if (PathKey.same(scratch, folder)) { attach(); return; }
-					machine.addFolder(entry.id, scratch, function(_, refused) { if (!report(refused)) attach(); });
 				});
 			}),
 			remove: function(entry) machine.delete(entry.id, function(_, failure) { report(failure); })

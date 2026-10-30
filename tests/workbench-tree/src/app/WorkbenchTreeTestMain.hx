@@ -112,12 +112,10 @@ class WorkbenchTreeTestMain {
 		// A folderless workspace, open on its scratch folder, nests its groups like any other.
 		model.update(catalog("C:/Users/me/Exosuit/eon-series"), null, null, view(machineWorkspaces, "eon", ["C:/Users/me/Exosuit/eon-series"]));
 		require(children(model, "w:eon").join(",") == "g:work,g:apps", "a scratch-folder workspace's groups");
-		// Its first real folder keeps the scratch folder, whose groups the tree shows under a note until M19 Phase 4.
-		var scratch = "C:/Users/me/Exosuit/eon-series";
-		var kept = [workspaceEntry("eon", "eon-series", [scratch, "C:/src/eon"], scratch)];
-		model.update(catalog(scratch), null, null, view(kept, "eon", ["C:/src/eon", scratch]));
-		require(children(model, "w:eon").join(",") == "s:split,g:work,g:apps", "a kept scratch folder's note: " + children(model, "w:eon"));
-		require(!WorkbenchTreeModel.keptScratch(workspaceEntry("eon", "eon-series", [scratch], scratch)), "a scratch folder alone is not split");
+		// Once it has a folder, it opens on that folder; the scratch folder stays apart and the groups nest plainly.
+		var attached = [workspaceEntry("eon", "eon-series", ["C:/src/eon"], "C:/Users/me/Exosuit/eon-series")];
+		model.update(catalog("C:/src/eon"), null, null, view(attached, "eon", ["C:/src/eon"]));
+		require(children(model, "w:eon").join(",") == "g:work,g:apps", "an attached folder's groups: " + children(model, "w:eon"));
 	}
 
 	/** With suit off there is no machine: the tree is today's group tree. */

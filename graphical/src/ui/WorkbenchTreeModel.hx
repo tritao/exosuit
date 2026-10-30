@@ -98,23 +98,7 @@ class WorkbenchTreeModel implements TreeViewModel {
 		if (served != null && !Lambda.exists(view.openRoots, function(root) return PathKey.same(root, served)))
 			return;
 		groupParent = open;
-		var nested = groupRoots.copy();
-		var id = WorkbenchRowKey.workspaceId(open);
-		var entry = id == null ? null : workspaces.get(id);
-		if (entry != null && keptScratch(entry))
-			nested.unshift(WorkbenchRowKey.status("split"));
-		children.set(open, nested);
-	}
-
-	/**
-		Whether a workspace kept its scratch folder beside a real one when it got its first folder. Until M19 Phase 4
-		gives a workspace one service, the tree shows the scratch folder's groups and not the other folders'.
-	**/
-	public static function keptScratch(entry:MachineWorkspace):Bool {
-		var scratch = entry.scratch;
-		if (scratch == null || entry.folders.length < 2) return false;
-		for (folder in entry.folders) if (PathKey.same(folder, scratch)) return true;
-		return false;
+		children.set(open, groupRoots.copy());
 	}
 
 	function projectGroups(catalog:TerminalCatalog, agentCatalog:Null<workspace.service.WorkspaceAgentProtocol.AgentCatalog>, draft:Null<WorkspaceGroup>):Void {
@@ -249,7 +233,6 @@ class WorkbenchTreeModel implements TreeViewModel {
 			case "empty": WorkbenchMachineLabel.status("No workspaces yet. Make one to hold groups, sessions and terminals.");
 			case "loading": WorkbenchMachineLabel.status("Looking for this machine's workspaces…");
 			case "error": WorkbenchMachineLabel.status(error == null ? "" : error, true);
-			case "split": WorkbenchMachineLabel.status("Split across folders until workspaces get one service: these groups are the scratch folder's.");
 			default: new Text("");
 		};
 	}
