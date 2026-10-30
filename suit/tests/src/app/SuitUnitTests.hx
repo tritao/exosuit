@@ -190,38 +190,91 @@ class SuitUnitTests {
 		sys.FileSystem.createDirectory(one);
 		sys.FileSystem.createDirectory(two);
 		var file = haxe.io.Path.join([base, "home", "machine.json"]);
+		// Scratch folders go under the test's folder, never the user's home.
+		var scratchHome = haxe.io.Path.join([base, "scratch"]);
+		var previousScratchHome = Sys.getEnv("EXOSUIT_SCRATCH_HOME");
+		Sys.putEnv("EXOSUIT_SCRATCH_HOME", scratchHome);
 		try {
 			var catalog = new MachineCatalog(file, [one, one, gone]);
 			check(catalog.state.workspaces.length == 1 && catalog.state.workspaces[0].name == "one",
 				"a new machine imports each existing folder once, named after it, and skips folders that are gone");
 			check(catalog.state.name.length > 0 && StringTools.startsWith(catalog.state.id, "machine-"), "a new machine has a name and an id");
-			var created = catalog.create(null, two);
-			check(created.name == "two" && created.folders.length == 1, "a workspace defaults to its folder's name");
+			var created = catalog.create(null, [two]);
+			check(created.name == "two" && created.folders.length == 1 && created.scratch == null, "a workspace defaults to its folder's name");
 			var replied = MachineCatalog.decodeWorkspace(haxe.Json.parse(haxe.Json.stringify({ok: true, workspace: created})).workspace);
 			check(replied.id == created.id && replied.folders[0] == created.folders[0], "a reply's workspace decodes into a record");
-			check(fails(function() MachineCatalog.decodeWorkspace(haxe.Json.parse('{"id":"x","name":"x","folders":[]}'))), "a workspace has a folder");
-			check(fails(function() catalog.create("x", gone)), "a workspace's folder must exist");
-			check(fails(function() catalog.create("x", "relative/folder")), "a workspace's folder must be absolute");
+			var bare = MachineCatalog.decodeWorkspace(haxe.Json.parse('{"id":"x","name":"x","folders":[]}'));
+			check(bare.folders.length == 0 && bare.scratch == null, "a workspace may have no folders, and no scratch folder yet");
+			check(fails(function() MachineCatalog.decodeWorkspace(haxe.Json.parse('{"id":"x","name":"x","folders":[],"scratch":3}'))),
+				"a scratch folder is a path");
+			check(fails(function() catalog.create("x", [gone])), "a workspace's folder must exist");
+			check(fails(function() catalog.create("x", ["relative/folder"])), "a workspace's folder must be absolute");
+			check(fails(function() catalog.create(" ", [])), "a workspace without folders needs a name");
 			var both = catalog.addFolder(created.id, one);
 			check(both.folders.length == 2, "a folder is added");
 			check(fails(function() catalog.addFolder(created.id, one + "/")), "a folder is added once, however it is spelled");
 			catalog.removeFolder(created.id, one);
-			check(fails(function() catalog.removeFolder(created.id, two)), "a workspace keeps its last folder");
+			check(catalog.removeFolder(created.id, two).folders.length == 0, "a workspace's last folder can be removed");
 			check(catalog.rename(created.id, "  Renamed  ").name == "Renamed", "names are trimmed");
 			check(fails(function() catalog.rename(created.id, " ")), "a workspace needs a name");
 			check(fails(function() catalog.rename("workspace-missing", "x")), "an unknown workspace is an error");
+
+			// Scratch folders: named after the workspace, made valid, suffixed when taken, and recorded.
+			check(MachineCatalog.scratchName(" a<b>c:d\"e/f\\g|h?i*j. . ") == "abcdefghij" && MachineCatalog.scratchName("?. ") == "Workspace"
+				&& MachineCatalog.scratchName("con.txt") == "Workspace", "a scratch folder's name is valid on Windows");
+			var notes = catalog.create("My: Notes.", []);
+			check(notes.folders.length == 0 && notes.scratch == null, "a workspace is created with a name only");
+			sys.FileSystem.createDirectory(scratchHome);
+			sys.FileSystem.createDirectory(haxe.io.Path.join([scratchHome, "My Notes"]));
+			var scratch = catalog.scratch(notes.id);
+			check(haxe.io.Path.withoutDirectory(StringTools.replace(scratch, "\\", "/")) == "My Notes 2" && sys.FileSystem.isDirectory(scratch),
+				'a scratch folder whose name is taken gets a suffix, got $scratch');
+			check(catalog.scratch(notes.id) == scratch, "a workspace keeps its scratch folder");
+			catalog.rename(notes.id, "Journal");
+			check(catalog.scratch(notes.id) == scratch, "renaming a workspace does not move its scratch folder");
+			var same = catalog.create("My Notes", []);
+			var third = catalog.scratch(same.id);
+			check(haxe.io.Path.withoutDirectory(StringTools.replace(third, "\\", "/")) == "My Notes 3", 'another workspace\'s scratch folder is skipped, got $third');
+			sys.FileSystem.deleteDirectory(scratch);
+			check(catalog.scratch(notes.id) == scratch && sys.FileSystem.isDirectory(scratch), "a deleted scratch folder is made again where it was");
+
 			var reloaded = new MachineCatalog(file, [two]);
-			check(reloaded.state.id == catalog.state.id && reloaded.state.workspaces.length == 2
-				&& reloaded.state.workspaces[1].name == "Renamed", "the catalog persists, and an existing one imports nothing");
+			check(reloaded.state.id == catalog.state.id && reloaded.state.workspaces.length == 4
+				&& reloaded.state.workspaces[1].name == "Renamed" && reloaded.state.workspaces[1].folders.length == 0,
+				"the catalog persists, folderless workspaces too, and an existing one imports nothing");
+			check(reloaded.state.workspaces[2].scratch == scratch && reloaded.scratch(notes.id) == scratch, "a scratch folder persists");
+			check(haxe.Json.parse(sys.io.File.getContent(file)).version == 2, "machine.json is written as version 2");
 			reloaded.delete(created.id);
-			check(new MachineCatalog(file).state.workspaces.length == 1, "a deleted workspace is gone after reload");
-			sys.io.File.saveContent(file, "{\"version\":1,\"id\":\"m\",\"name\":\"x\",\"workspaces\":[{\"id\":\"w\",\"name\":\"n\",\"folders\":[]}]}");
+			check(new MachineCatalog(file).state.workspaces.length == 3, "a deleted workspace is gone after reload");
+
+			var twoInJson = StringTools.replace(MachineCatalog.folderPath(two), "\\", "\\\\");
+			sys.io.File.saveContent(file, '{"version":1,"id":"m","name":"x","workspaces":[{"id":"w","name":"n","folders":["$twoInJson"]}]}');
+			var old = new MachineCatalog(file);
+			check(old.state.id == "m" && old.state.workspaces.length == 1 && old.state.workspaces[0].folders.length == 1
+				&& old.state.workspaces[0].scratch == null, "a version 1 catalog is read unchanged");
+			old.rename("w", "n2");
+			var written:Dynamic = haxe.Json.parse(sys.io.File.getContent(file));
+			check(written.version == 2 && new MachineCatalog(file).state.workspaces[0].name == "n2", "a version 1 catalog is written back as version 2");
+			sys.io.File.saveContent(file, "{\"version\":1,\"id\":\"m\",\"name\":\"x\",\"workspaces\":[{\"id\":\"w\",\"name\":\"n\",\"folders\":\"x\"}]}");
 			check(fails(function() new MachineCatalog(file)), "a damaged catalog is an error, not replaced");
+			sys.io.File.saveContent(file, "{\"version\":3,\"id\":\"m\",\"name\":\"x\",\"workspaces\":[]}");
+			check(fails(function() new MachineCatalog(file)), "a newer catalog version is an error");
 		} catch (error:Dynamic) {
 			check(false, "machine catalog: " + Std.string(error));
 		}
-		for (path in [file, haxe.io.Path.join([base, "home"]), one, two, base])
-			try (sys.FileSystem.isDirectory(path) ? sys.FileSystem.deleteDirectory(path) : sys.FileSystem.deleteFile(path)) catch (_:Dynamic) {}
+		Sys.putEnv("EXOSUIT_SCRATCH_HOME", previousScratchHome == null ? "" : previousScratchHome);
+		deleteTree(base);
+	}
+
+	static function deleteTree(path:String):Void {
+		try {
+			if (sys.FileSystem.isDirectory(path)) {
+				for (name in sys.FileSystem.readDirectory(path))
+					deleteTree(haxe.io.Path.join([path, name]));
+				sys.FileSystem.deleteDirectory(path);
+			} else
+				sys.FileSystem.deleteFile(path);
+		} catch (_:Dynamic) {}
 	}
 
 	static function fails(action:Void->Void):Bool {

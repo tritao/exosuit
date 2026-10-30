@@ -1617,7 +1617,7 @@ class ExosuitApp implements DesktopUiApplication {
 		machineSection = new WorkbenchMachineSection(machine, {
 			openWorkspace: openWorkspace,
 			open: open,
-			create: function() chooseFolder("New Workspace", function(folder) machine.create(null, folder, function(created, failure) {
+			create: function() chooseFolder("New Workspace", function(folder) machine.create(null, [folder], function(created, failure) {
 				if (!report(failure) && created != null) open(created);
 			})),
 			rename: function(entry) host.openCommandView(new commandview.CommandViewProvider("Rename workspace " + entry.name + ": ", [],

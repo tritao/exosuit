@@ -55,9 +55,23 @@ class MachineClient {
 	public function refresh():Void
 		request({op: "machine"});
 
-	/** Creates a workspace with one folder; `done` gets it, or the error. */
-	public function create(name:Null<String>, folder:String, ?done:(Null<MachineWorkspace>, Null<String>) -> Void):Void
-		request({op: "workspace-create", name: name, folder: folder}, workspaceReply(done));
+	/** Creates a workspace with these folders, which may be none if it has a name; `done` gets it, or the error. */
+	public function create(name:Null<String>, folders:Array<String>, ?done:(Null<MachineWorkspace>, Null<String>) -> Void):Void
+		request({op: "workspace-create", name: name, folders: folders.copy()}, workspaceReply(done));
+
+	/** The workspace's scratch folder, which suit creates on first request; `done` gets its path, or the error. */
+	public function scratch(id:String, done:(Null<String>, Null<String>) -> Void):Void
+		request({op: "workspace-scratch", workspace: id}, function(reply, failure) {
+			var path:Null<String> = null;
+			if (reply != null) {
+				var value:Dynamic = Reflect.field(reply, "scratch");
+				if (Std.isOfType(value, String) && (value : String).length > 0)
+					path = value;
+				else if (failure == null)
+					failure = "suit sent no scratch folder";
+			}
+			done(path, failure);
+		});
 
 	public function rename(id:String, name:String, ?done:(Null<MachineWorkspace>, Null<String>) -> Void):Void
 		request({op: "workspace-rename", workspace: id, name: name}, workspaceReply(done));

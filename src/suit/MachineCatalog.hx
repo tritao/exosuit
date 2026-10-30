@@ -2,15 +2,20 @@ package suit;
 
 import haxe.Json;
 import haxe.io.Path;
+import platform.UserFolders;
 import sys.FileSystem;
 import sys.io.File;
 import workspace.PathKey;
 
-/** One workspace on this machine: a name and one or more folders. */
+/**
+	One workspace on this machine: a name, its folders (none or more), and its scratch folder once one was asked
+	for (docs/architecture/0006-workspaces-without-folders.md).
+**/
 typedef MachineWorkspace = {
 	var id:String;
 	var name:String;
 	var folders:Array<String>;
+	var scratch:Null<String>;
 }
 
 /** This machine and its workspaces, as suit keeps them and `machine` requests report them. */
@@ -23,10 +28,11 @@ typedef MachineState = {
 /**
 	The machine suit runs on and its workspaces (docs/architecture/0005-machines-and-workspaces.md), kept in
 	`machine.json` in suit's home. Only the daemon writes it. A workspace's work lives in its folders' own
-	services; this list only says which folders make up which workspace.
+	services; this list only says which folders make up which workspace. Version 1 files (no scratch folders) are
+	read unchanged and written back as version 2.
 **/
 class MachineCatalog {
-	public static inline final VERSION = 1;
+	public static inline final VERSION = 2;
 	public static inline final FOLDER_LIMIT = 16;
 	public static inline final NAME_LIMIT = 200;
 	static inline final FILE_LIMIT = 1048576;
@@ -50,7 +56,7 @@ class MachineCatalog {
 				try {
 					var normal = folderPath(folder);
 					if (find(normal) == null)
-						state.workspaces.push({id: newId("workspace"), name: folderName(normal), folders: [normal]});
+						state.workspaces.push({id: newId("workspace"), name: folderName(normal), folders: [normal], scratch: null});
 				} catch (_:Dynamic) {}
 		save();
 	}
@@ -62,14 +68,88 @@ class MachineCatalog {
 	public function json():Dynamic
 		return {id: state.id, name: state.name, workspaces: [for (workspace in state.workspaces) copy(workspace)]};
 
-	/** Adds a workspace with one folder; its name defaults to the folder's. */
-	public function create(name:Null<String>, folder:String):MachineWorkspace {
-		var normal = folderPath(folder);
-		var workspace = {id: newId("workspace"), name: name == null || StringTools.trim(name).length == 0 ? folderName(normal) : validName(name),
-			folders: [normal]};
+	/** Adds a workspace with these folders, which may be none; its name defaults to the first folder's. */
+	public function create(name:Null<String>, folders:Array<String>):MachineWorkspace {
+		var normals:Array<String> = [];
+		for (folder in folders) {
+			var normal = folderPath(folder);
+			if (!Lambda.exists(normals, function(existing) return PathKey.same(existing, normal)))
+				normals.push(normal);
+		}
+		if (normals.length > FOLDER_LIMIT)
+			throw 'A workspace has at most $FOLDER_LIMIT folders';
+		var unnamed = name == null || StringTools.trim(name).length == 0;
+		if (unnamed && normals.length == 0)
+			throw "A workspace needs a name";
+		var workspace:MachineWorkspace = {id: newId("workspace"), name: unnamed ? folderName(normals[0]) : validName(name), folders: normals,
+			scratch: null};
 		state.workspaces.push(workspace);
 		save();
 		return copy(workspace);
+	}
+
+	/**
+		The workspace's scratch folder, `<home>/Exosuit/<name>`, created on first request and recorded, so it stays
+		put when the workspace is renamed. A name some other folder already has gets " 2", " 3", and so on. One
+		that was recorded and then deleted is created again where it was.
+	**/
+	public function scratch(id:String):String {
+		var workspace = require(id);
+		var recorded = workspace.scratch;
+		if (recorded != null) {
+			createDirectories(recorded);
+			return recorded;
+		}
+		var base = scratchHome(), name = scratchName(workspace.name);
+		var candidate = Path.join([base, name]), suffix = 1;
+		while (FileSystem.exists(candidate) || scratchTaken(candidate)) {
+			suffix++;
+			candidate = Path.join([base, '$name $suffix']);
+		}
+		var full = Sys.systemName() == "Windows" ? StringTools.replace(candidate, "/", "\\") : candidate;
+		createDirectories(full);
+		workspace.scratch = full;
+		save();
+		return full;
+	}
+
+	/** Whether a workspace already recorded `folder` as its scratch folder (it may have been deleted since). */
+	function scratchTaken(folder:String):Bool {
+		for (workspace in state.workspaces) {
+			var recorded = workspace.scratch;
+			if (recorded != null && PathKey.same(recorded, folder))
+				return true;
+		}
+		return false;
+	}
+
+	/** Where scratch folders go: `<home>/Exosuit`, or EXOSUIT_SCRATCH_HOME (tests). */
+	public static function scratchHome():String {
+		var configured = Sys.getEnv("EXOSUIT_SCRATCH_HOME");
+		if (configured != null && configured.length > 0)
+			return configured;
+		var home = UserFolders.home();
+		if (home == null)
+			throw "No home folder for scratch folders";
+		return Path.join([home, "Exosuit"]);
+	}
+
+	/** A workspace name as a folder name that is valid on every system suit runs on, or "Workspace". */
+	public static function scratchName(name:String):String {
+		var buffer = new StringBuf();
+		for (i in 0...name.length) {
+			var code = StringTools.fastCodeAt(name, i);
+			if (code >= 32 && "<>:\"/\\|?*".indexOf(String.fromCharCode(code)) < 0)
+				buffer.addChar(code);
+		}
+		var result = StringTools.trim(buffer.toString());
+		while (result.length > 0 && (StringTools.endsWith(result, ".") || StringTools.endsWith(result, " ")))
+			result = result.substr(0, result.length - 1);
+		// Windows reserves device names, with or without an extension.
+		var stem = result.indexOf(".") >= 0 ? result.substr(0, result.indexOf(".")) : result;
+		if (~/^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/i.match(StringTools.trim(stem)))
+			result = "";
+		return result.length == 0 ? "Workspace" : result;
 	}
 
 	public function rename(id:String, name:String):MachineWorkspace {
@@ -103,7 +183,7 @@ class MachineCatalog {
 		return copy(workspace);
 	}
 
-	/** A workspace keeps at least one folder; delete it instead. */
+	/** Removing the last folder leaves a workspace without folders, which is allowed. */
 	public function removeFolder(id:String, folder:String):MachineWorkspace {
 		var workspace = require(id);
 		var index = -1;
@@ -112,8 +192,6 @@ class MachineCatalog {
 				index = i;
 		if (index < 0)
 			throw "The workspace does not have this folder";
-		if (workspace.folders.length == 1)
-			throw "A workspace needs at least one folder; remove the workspace instead";
 		workspace.folders.splice(index, 1);
 		save();
 		return copy(workspace);
@@ -151,14 +229,15 @@ class MachineCatalog {
 	}
 
 	static function copy(workspace:MachineWorkspace):MachineWorkspace
-		return {id: workspace.id, name: workspace.name, folders: workspace.folders.copy()};
+		return {id: workspace.id, name: workspace.name, folders: workspace.folders.copy(), scratch: workspace.scratch};
 
 	/** Validates a stored catalog; a corrupt one is an error, never silently replaced. */
 	public static function decode(text:String):MachineState {
 		if (text.length > FILE_LIMIT)
 			throw "machine.json is too large";
 		var value:Dynamic = Json.parse(text);
-		if (value == null || Reflect.field(value, "version") != VERSION)
+		var version:Dynamic = value == null ? null : Reflect.field(value, "version");
+		if (version != 1 && version != VERSION)
 			throw "Unsupported machine.json version";
 		var id = SuitRecord.SuitRecords.stringField(value, "id"), name = SuitRecord.SuitRecords.stringField(value, "name");
 		var entries:Dynamic = Reflect.field(value, "workspaces");
@@ -174,9 +253,12 @@ class MachineCatalog {
 		if (workspaceId == null || workspaceId.length == 0 || workspaceName == null || !Std.isOfType(folders, Array))
 			throw "Invalid workspace";
 		var list = [for (folder in (folders : Array<Dynamic>)) if (Std.isOfType(folder, String)) (folder : String)];
-		if (list.length == 0 || list.length > FOLDER_LIMIT)
+		if (list.length > FOLDER_LIMIT)
 			throw "Invalid workspace folders";
-		return {id: workspaceId, name: workspaceName, folders: list};
+		var scratch:Dynamic = Reflect.field(entry, "scratch");
+		if (scratch != null && !Std.isOfType(scratch, String))
+			throw "Invalid workspace scratch folder";
+		return {id: workspaceId, name: workspaceName, folders: list, scratch: SuitRecord.SuitRecords.stringField(entry, "scratch")};
 	}
 
 	/** An existing folder's absolute, normalized path. A folder that is gone later stays listed, shown as missing. */

@@ -36,7 +36,8 @@ class SuitMain {
 		"  relay forget <workspace>  stop hosting it from suit and forget its record (needed after moving a build)",
 		"  machine [--json]          this machine and its workspaces (the daemon must be running)",
 		"  machine rename <name>     name this machine",
-		"  workspace new <folder> [--name <name>]       add a workspace with one folder",
+		"  workspace new [--name <name>] [<folder>...]  add a workspace; a name is needed when no folder is given",
+		"  workspace scratch <id> [--json]              the workspace's scratch folder (~/Exosuit/<name>), created if needed",
 		"  workspace rename <id> <name> | delete <id>   rename or remove a workspace (its folders are untouched)",
 		"  workspace add-folder|remove-folder <id> <folder>  change a workspace's folders",
 		"  login [on|off|status]     start suit at login (off by default; Windows Run key, XDG autostart elsewhere)",
@@ -256,19 +257,26 @@ class SuitMain {
 					return 0;
 				}
 				var lines = ['${reply.machine.name} · this machine'];
-				for (workspace in (reply.machine.workspaces : Array<Dynamic>))
-					lines.push('  ${workspace.name}  (${workspace.id})
-    ' + (workspace.folders : Array<String>).join("
-    "));
+				for (workspace in (reply.machine.workspaces : Array<Dynamic>)) {
+					lines.push('  ${workspace.name}  (${workspace.id})');
+					var folders:Array<String> = workspace.folders;
+					for (folder in folders)
+						lines.push('    $folder');
+					if (folders.length == 0)
+						lines.push("    no folders");
+					if (workspace.scratch != null)
+						lines.push('    scratch: ${workspace.scratch}');
+				}
 				if ((reply.machine.workspaces : Array<Dynamic>).length == 0)
 					lines.push("  no workspaces");
 				print(lines.join("
 "));
 				return 0;
 			case "workspace":
+				rest = [for (word in rest) if (word != "--json") word];
 				var request:Dynamic = switch rest.length > 0 ? rest[0] : "" {
-					case "new" if (rest.length == 2 || rest.length == 4 && rest[2] == "--name"):
-						{op: "workspace-create", folder: rest[1], name: rest.length == 4 ? rest[3] : null};
+					case "new": newWorkspace(rest.slice(1));
+					case "scratch" if (rest.length == 2): {op: "workspace-scratch", workspace: rest[1]};
 					case "rename" if (rest.length == 3): {op: "workspace-rename", workspace: rest[1], name: rest[2]};
 					case "delete" if (rest.length == 2): {op: "workspace-delete", workspace: rest[1]};
 					case "add-folder" if (rest.length == 3): {op: "workspace-add-folder", workspace: rest[1], folder: rest[2]};
@@ -280,7 +288,10 @@ class SuitMain {
 					throw "suit daemon is not running (suit start)";
 				if (reply.ok != true)
 					throw reply.error;
-				print(Json.stringify(reply.workspace == null ? reply.machine : reply.workspace));
+				if (request.op == "workspace-scratch" && !json)
+					print(reply.scratch);
+				else
+					print(Json.stringify(reply.workspace == null ? reply.machine : reply.workspace));
 				return 0;
 			case "start":
 				if (SuitControl.request({op: "status"}, 1) != null) {
@@ -311,6 +322,27 @@ class SuitMain {
 				Sys.stderr().writeString(USAGE + "\n");
 				return 2;
 		}
+	}
+
+	/** `workspace new [--name <name>] [<folder>...]`; the older `workspace new <folder> --name <name>` still parses. */
+	static function newWorkspace(words:Array<String>):Dynamic {
+		var name:Null<String> = null;
+		var folders:Array<String> = [];
+		var i = 0;
+		while (i < words.length) {
+			if (words[i] == "--name") {
+				if (i + 1 >= words.length || name != null)
+					throw USAGE;
+				name = words[i + 1];
+				i += 2;
+				continue;
+			}
+			folders.push(words[i]);
+			i++;
+		}
+		if (name == null && folders.length == 0)
+			throw USAGE;
+		return {op: "workspace-create", name: name, folders: folders};
 	}
 
 	static function print(text:String):Void

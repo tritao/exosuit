@@ -496,7 +496,8 @@ def test_daemon(fixture: Fixture) -> None:
 
 
 def test_machine(fixture: Fixture, directory: Path) -> None:
-    """The machine's workspaces through the daemon: first-start import, edits, and machine.json surviving a restart."""
+    """The machine's workspaces through the daemon: first-start import, edits, workspaces without folders, scratch
+    folders, and machine.json surviving a restart."""
     state = directory / "agent-state"; folder = directory / "imported"; other = directory / "second"
     for path in (folder, other):
         path.mkdir(parents=True)
@@ -505,6 +506,9 @@ def test_machine(fixture: Fixture, directory: Path) -> None:
     default_state.mkdir(parents=True)
     (default_state / "workspace.json").write_text(json.dumps({"root": str(folder)}))
     fixture.environment["EXOSUIT_AGENT_STATE_HOME"] = str(state)
+    # Scratch folders go under the test's folder, never the user's home; the daemon inherits this.
+    scratch_home = directory / "scratch"
+    fixture.environment["EXOSUIT_SCRATCH_HOME"] = str(scratch_home)
     assert "started" in fixture.suit("start")
     machine = json.loads(fixture.suit("machine", "--json"))
     assert machine["name"] and machine["id"].startswith("machine-"), machine
@@ -517,14 +521,35 @@ def test_machine(fixture: Fixture, directory: Path) -> None:
     failed = subprocess.run([str(HL), str(SUIT), "workspace", "new", str(directory / "missing")], env=fixture.environment,
                             capture_output=True, text=True, timeout=60)
     assert failed.returncode != 0 and "Folder not found" in failed.stdout + failed.stderr, failed
+    # A workspace by name only, then its scratch folder, made on first request under EXOSUIT_SCRATCH_HOME.
+    notes = json.loads(fixture.suit("workspace", "new", "--name", "Notes?"))
+    assert notes["name"] == "Notes?" and notes["folders"] == [] and notes["scratch"] is None, notes
+    nameless = subprocess.run([str(HL), str(SUIT), "workspace", "new"], env=fixture.environment, capture_output=True,
+                              text=True, timeout=60)
+    assert nameless.returncode != 0, nameless
+    (scratch_home / "Notes").mkdir(parents=True)
+    scratch = fixture.suit("workspace", "scratch", notes["id"]).strip()
+    assert Path(scratch) == scratch_home / "Notes 2" and Path(scratch).is_dir(), scratch
+    replied = json.loads(fixture.suit("workspace", "scratch", notes["id"], "--json"))
+    assert replied["scratch"] == scratch and replied["folders"] == [], replied
+    # The last folder can be removed.
+    fixture.suit("workspace", "remove-folder", created["id"], str(folder))
+    emptied = json.loads(fixture.suit("workspace", "remove-folder", created["id"], str(other)))
+    assert emptied["folders"] == [], emptied
     fixture.suit("machine", "rename", "cube-test")
     assert "stopped" in fixture.suit("stop")
     wait_until(lambda: "not running" in fixture.suit("status"), 30, "daemon did not stop")
     assert "started" in fixture.suit("start")
     machine = json.loads(fixture.suit("machine", "--json"))
-    assert machine["name"] == "cube-test" and [w["name"] for w in machine["workspaces"]] == ["Second"], machine
+    assert machine["name"] == "cube-test" and [w["name"] for w in machine["workspaces"]] == ["Second", "Notes?"], machine
+    kept = {w["id"]: w for w in machine["workspaces"]}
+    assert kept[notes["id"]]["scratch"] == scratch and kept[notes["id"]]["folders"] == [], machine
+    assert kept[created["id"]]["folders"] == [] and kept[created["id"]]["scratch"] is None, machine
+    assert json.loads((fixture.home / "machine.json").read_text())["version"] == 2
     fixture.suit("workspace", "delete", created["id"])
+    fixture.suit("workspace", "delete", notes["id"])
     assert json.loads(fixture.suit("machine", "--json"))["workspaces"] == []
+    assert Path(scratch).is_dir(), "deleting a workspace leaves its scratch folder alone"
     assert "stopped" in fixture.suit("stop")
     wait_until(lambda: "not running" in fixture.suit("status"), 30, "daemon did not stop")
 

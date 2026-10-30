@@ -314,8 +314,16 @@ class SuitDaemon {
 				machine().renameMachine(SuitRecords.stringField(request, "name"));
 				return {ok: true, machine: machine().json()};
 			case "workspace-create":
-				var created = machine().create(SuitRecords.stringField(request, "name"), SuitRecords.stringField(request, "folder"));
+				var created = machine().create(SuitRecords.stringField(request, "name"), requestFolders(request));
 				return {ok: true, workspace: created, machine: machine().json()};
+			case "workspace-scratch":
+				var id = SuitRecords.stringField(request, "workspace");
+				var scratch = machine().scratch(id);
+				var workspace:Null<MachineCatalog.MachineWorkspace> = null;
+				for (entry in machine().state.workspaces)
+					if (entry.id == id)
+						workspace = MachineCatalog.decodeWorkspace(entry);
+				return {ok: true, scratch: scratch, workspace: workspace, machine: machine().json()};
 			case "workspace-rename":
 				var renamed = machine().rename(SuitRecords.stringField(request, "workspace"), SuitRecords.stringField(request, "name"));
 				return {ok: true, workspace: renamed, machine: machine().json()};
@@ -343,6 +351,24 @@ class SuitDaemon {
 		if (catalog == null)
 			catalog = new MachineCatalog(MachineCatalog.file(), MachineCatalog.existingFolders());
 		return catalog;
+	}
+
+	/** A `workspace-create` request's folders: `folders` (possibly empty), or the older single `folder`. */
+	static function requestFolders(request:Dynamic):Array<String> {
+		var folders:Dynamic = Reflect.field(request, "folders");
+		if (folders == null) {
+			var folder = SuitRecords.stringField(request, "folder");
+			return folder == null ? [] : [folder];
+		}
+		if (!Std.isOfType(folders, Array))
+			throw "folders must be a list of folders";
+		var list:Array<String> = [];
+		for (folder in (folders : Array<Dynamic>)) {
+			if (!Std.isOfType(folder, String))
+				throw "folders must be a list of folders";
+			list.push(folder);
+		}
+		return list;
 	}
 
 	function findIcon():Null<String> {
