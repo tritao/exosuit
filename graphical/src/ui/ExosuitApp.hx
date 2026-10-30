@@ -120,6 +120,7 @@ class ExosuitApp implements DesktopUiApplication {
 	var pairingRevision:Int = -1;
 	var machineWorkspaces:Null<workspace.client.MachineWorkspaces>;
 	var machineClient:Null<workspace.client.MachineClient>;
+	var sessionFolderChooser:Null<SessionFolderChooser>;
 	var machineSection:Null<WorkbenchMachineSection>;
 	var machineClientRevision = -1;
 	var machineRefreshAt:Float = 0;
@@ -823,7 +824,7 @@ class ExosuitApp implements DesktopUiApplication {
         requestFrame();
     }
 
-	function newTerminalTab(?group:String, ?agentProvider:String):Null<UiTerminalTab> {
+	function newTerminalTab(?group:String, ?agentProvider:String, ?directory:String):Null<UiTerminalTab> {
 		var failure = terminalCreationFailure();
 		if (failure != null) { application.reportError("terminal", failure); return null; }
 		var client = workbenchClient;
@@ -844,9 +845,10 @@ class ExosuitApp implements DesktopUiApplication {
 					if (directory != null) cwd = directory;
 				}
 			}
+			if (directory != null) cwd = directory;
 			var resource = workspace.client.WorkspaceIds.create("workspace-terminal");
 			return createTerminalTab(ResourceViewIdentity.view(root, resource), agentProvider == null ? "Terminal" : agentProvider,
-				cwd, false, true, resource, root, group, null, agentProvider);
+				cwd, false, true, resource, root, group, directory, agentProvider);
 		}
 		var number = allocateTerminalNumber(), title = "Terminal " + number;
 		var id = createWorkspaceTerminal != null && application.workspace.activeProject != null
@@ -2158,23 +2160,26 @@ class ExosuitApp implements DesktopUiApplication {
   return client.agentService().canControlAgents() && client.agentService().agentCreation() == null;
  }
 
- function createProviderAgent(provider:String, group:String):Void {
+ function createProviderAgent(provider:String, group:String):Void createProviderAgentIn(provider, group, null);
+
+ /** `directory` is the folder chosen with Change… or the scratch folder; null lets the service resolve it. */
+ function createProviderAgentIn(provider:String, group:String, directory:Null<String>):Void {
   if (!canCreateAgentSession()) {
    application.reportError("agent", "Cannot create an agent session while the workspace is disconnected or another session operation is in progress. Wait and try again.");
    requestFrame(); return;
   }
   // The built-in agent has no CLI to host in a terminal, so it is always an integrated conversation.
-  if (provider != "agentkit" && application.settings.current.agentSessionMode == "terminal") { createAgentTerminal(provider, group); return; }
-  createIntegratedAgent(provider, group);
+  if (provider != "agentkit" && application.settings.current.agentSessionMode == "terminal") { createAgentTerminal(provider, group, directory); return; }
+  createIntegratedAgent(provider, group, directory);
  }
 
- function createIntegratedAgent(provider:String, group:String):Void {
+ function createIntegratedAgent(provider:String, group:String, ?directory:String):Void {
   var client=workbenchClient;
   if(client == null || !client.agentService().canControlAgents() || client.agentService().agentCreation() != null) {
    application.reportError("agent", "The worktree group is ready; connect to start an integrated session"); return;
   }
   var defaults:workspace.client.AgentSessionDefaults={provider:provider,model:null,effort:null,
-   permissionProfile:provider == "claude" ? "default" : "supervised"};
+   permissionProfile:provider == "claude" ? "default" : "supervised",directory:directory};
   if(provider == "codex") {
    var settings=application.settings.current,model=StringTools.trim(settings.codexDefaultModel);
    defaults.model=model == "" ? null : model;
@@ -2184,12 +2189,12 @@ class ExosuitApp implements DesktopUiApplication {
   client.agentService().createAgent(group,null,openCreatedAgent,defaults);
  }
 
- function createAgentTerminal(provider:String, group:String):Void {
+ function createAgentTerminal(provider:String, group:String, ?directory:String):Void {
   var client = workbenchClient, catalog = client == null ? null : client.terminalCatalog();
   if (catalog == null || catalog.agentProviders == null || catalog.agentProviders.indexOf(provider) < 0) {
    application.reportError("agent", "Update the workspace service to launch interactive agent terminals"); return;
   }
-  var terminal = newTerminalTab(group, provider);
+  var terminal = newTerminalTab(group, provider, directory);
   if (terminal != null) showTerminalInEditor(terminal);
  }
 
@@ -2225,6 +2230,27 @@ class ExosuitApp implements DesktopUiApplication {
 		if (terminal != null) showTerminalInEditor(terminal);
 	}
 
+	function sessionFolders():SessionFolderChooser {
+		var chooser = sessionFolderChooser;
+		if (chooser != null) return chooser;
+		var created = new SessionFolderChooser({host: host, desktop: desktop,
+			localFiles: function() return workspaceAttachment == null || workspaceAttachment.hasLocalFileAccess(),
+			machine: function() return machineClient,
+			workspaceId: function() { var saved = application.savedWorkspaces.current; return saved == null ? null : saved.id; },
+			report: function(message) { application.reportError("agent", message); requestFrame(); }});
+		sessionFolderChooser = created;
+		return created;
+	}
+
+	/** The folder an agent or terminal tab's session runs in, as its service reports it. */
+	function sessionFolder(resource:String, root:String, terminal:Bool):Null<String> {
+		if (!terminal) { var record = sessionRecord(resource, root); return record == null ? null : record.cwd; }
+		var catalog = workbenchClient == null ? null : workbenchClient.terminalCatalog();
+		if (catalog == null || catalog.workspaceRoot != root) return null;
+		for (record in catalog.terminals) if (record.id == resource) return record.cwd;
+		return null;
+	}
+
 	function attachCodexThread(group:workspace.service.WorkspaceProtocol.WorkspaceGroup):Void {
 		if (workbenchClient == null || workbenchPanel == null) return;
 		var cwd = workbenchPanel.model.directory(group);
@@ -2256,17 +2282,26 @@ class ExosuitApp implements DesktopUiApplication {
 		if (client == null || catalog == null) return;
 		if (action == "new-agent") {
 			if (!canCreateAgentSession()) { application.reportError("agent", "Wait for the current workspace operation to finish before creating an agent session"); return; }
-			var entries = [for (provider in ["codex", "claude", "pi", "agentkit"])
-				new commandview.CommandViewEntry(provider == "codex" ? "Codex" : provider == "claude" ? "Claude" : provider == "pi" ? "Pi" : "Exosuit", "New agent session", provider)];
-			host.openCommandView(new commandview.CommandViewProvider("New Agent Session: ", entries, function(_) {}, function(entry, _, _) {
-				if (entry == null) return;
-				host.closeCommandView();
+			var providers = [for (provider in ["codex", "claude", "pi", "agentkit"])
+				{label: provider == "codex" ? "Codex" : provider == "claude" ? "Claude" : provider == "pi" ? "Pi" : "Exosuit", value: provider}];
+			var chooser = sessionFolders();
+			chooser.newAgentSession(providers, SessionFolderChooser.preview(catalog.groups, group.id, chooser.firstFolder(catalog.workspaceRoot), catalog.workspaceRoot),
+				function(provider, directory) {
 				if (client != workbenchClient) { application.reportError("agent", "The workspace changed. Choose New Agent Session again."); return; }
 				var current = client.terminalCatalog();
 				if (current == null || current.instance != catalog.instance) { application.reportError("agent", "The workspace connection changed. Choose New Agent Session again."); return; }
-				for (candidate in current.groups) if (candidate.id == group.id) { createProviderAgent(entry.value, group.id); return; }
+				for (candidate in current.groups) if (candidate.id == group.id) { createProviderAgentIn(provider, group.id, directory); return; }
 				application.reportError("agent", "The selected group no longer exists. Choose another group.");
-			}));
+			});
+			requestFrame(); return;
+		}
+		if (action == "new-terminal") {
+			var chooser = sessionFolders();
+			chooser.newTerminal(SessionFolderChooser.preview(catalog.groups, group.id, chooser.firstFolder(catalog.workspaceRoot), catalog.workspaceRoot), function(directory) {
+				if (client != workbenchClient) { application.reportError("terminal", "The workspace changed. Choose New Terminal again."); return; }
+				var terminal = newTerminalTab(group.id, null, directory);
+				if (terminal != null) showTerminalInEditor(terminal);
+			});
 			requestFrame(); return;
 		}
 		var valid = function() {
@@ -3950,6 +3985,7 @@ class ExosuitApp implements DesktopUiApplication {
    var agent=UiEditorTabs.agent(item);
    if(agent!=null) {
     var key=UiEditorTabs.key(item), tab=new TabItem(key,agent.title,agent.panel,true,IconName.Terminal);
+    tooltips.set(key, SessionFolderChooser.tooltip(agent.title, sessionFolder(agent.resource, agent.workspaceRoot, false)));
     tab.onClose=function() host.closeTab(item,paneId,true);
     items.push(tab);continue;
    }
@@ -3974,6 +4010,8 @@ class ExosuitApp implements DesktopUiApplication {
 					function(bounds, id) host.editorResolved(paneId, bounds, id),
 					function(event) showTerminalContextMenu(terminal, event), terminalCommandSkipsShell), true, IconName.Terminal);
 				terminalTab.onClose = function() host.closeTab(item, paneId, true);
+				tooltips.set(terminalKey, SessionFolderChooser.tooltip(terminal.title, terminal.remote
+					? sessionFolder(terminal.resourceId, terminal.workspaceRoot, true) : terminal.cwd));
 				items.push(terminalTab);
 				continue;
 			}

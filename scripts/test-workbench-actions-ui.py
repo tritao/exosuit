@@ -81,7 +81,7 @@ with tempfile.TemporaryDirectory(prefix='exactions-') as temporary:
                 # The group row is near the toolbar, with no permanent attachment form above it.
                 groups = [node for node in nodes if node.get('label') == 'g:work' and node['visible']]
                 assert groups and groups[0]['bounds']['y'] < 150, (groups, json.loads((fixture / str(index) / 'app-state.json').read_text()))
-            if index == 1: assert all(label in labels for label in ['New Agent Session…', 'New terminal', 'New group', 'Rename group', 'Change Working Directory…', 'Change Sort Order…', 'Open folder', 'Refresh Workbench']), labels
+            if index == 1: assert all(label in labels for label in ['New Agent Session…', 'New Terminal…', 'New group', 'Rename group', 'Change Working Directory…', 'Change Sort Order…', 'Open folder', 'Refresh Workbench']), labels
             if index == 2:
                 assert 'Existing work' in labels and 'Other directory' not in labels and 'Existing Codex thread id' in labels, labels
                 assert (project / 'fake-codex.json').exists()
@@ -94,7 +94,7 @@ with tempfile.TemporaryDirectory(prefix='exactions-') as temporary:
             if index == 5:
                 # Group actions sit directly in the menu; an occupied top-level group cannot move or be removed.
                 assert not any(label in labels for label in ['More Group Actions…', 'Remove Group', 'Move to Group…', 'Refresh Workbench', 'New Pi session', 'New Claude session']), labels
-                assert all(label in labels for label in ['New Agent Session…', 'New terminal', 'New group', 'Rename group', 'Change Working Directory…', 'Change Sort Order…']), labels
+                assert all(label in labels for label in ['New Agent Session…', 'New Terminal…', 'New group', 'Rename group', 'Change Working Directory…', 'Change Sort Order…']), labels
             if index == 7:
                 # Choosing the item runs the action itself: the menu closes into the sort-order prompt.
                 assert 'Change Sort Order…' not in labels and 'Rename group' not in labels, labels

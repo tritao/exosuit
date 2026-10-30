@@ -334,7 +334,7 @@ class WorkbenchPanel implements View {
 		}
 		if (group != null) {
 			if (canCreateAgent()) items.push(new MenuItem("new-agent", "New Agent Session…", function() edit(group, "new-agent")));
-			if (client.canCreateGroupedTerminals()) items.push(new MenuItem("new-terminal", "New terminal", function() createTerminal(groupId), !client.terminalCatalogBusy()));
+			if (client.canCreateGroupedTerminals()) items.push(new MenuItem("new-terminal", "New Terminal…", function() edit(group, "new-terminal"), !client.terminalCatalogBusy()));
 		}
 		if (client.canEditGroups()) {
 			items.push(new MenuItem("new-group", "New group", function() beginGroup({id: workspace.client.WorkspaceIds.create("group"),

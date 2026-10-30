@@ -144,7 +144,7 @@ class WorkbenchFeedbackTest {
    require(more!=null && actions==(width>=260 ? 4 : width>=210 ? 3 : width>=170 ? 2 : 1),"header actions did not adapt to width");
    var box=more.globalBounds();context.pointerDown(box.x+12,box.y+12,0);context.pointerUp(box.x+12,box.y+12,0);
    function hasAction(label:String):Bool {for(item in menuItems) if(item.label==label) return true;return false;}
-   require(hasAction("New terminal"),"overflow lost terminal creation");
+   require(hasAction("New Terminal…"),"overflow lost terminal creation");
    if(width<210) require(hasAction("New Codex"),"overflow lost the hidden Codex action");
    if(width<260) require(hasAction("Remove from Workbench"),"overflow lost selected-session removal");
   }
