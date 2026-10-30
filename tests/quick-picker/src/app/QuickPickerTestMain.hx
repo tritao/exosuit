@@ -22,6 +22,53 @@ class QuickPickerTestMain {
 		if (found == null) throw "Missing result " + label;
 		return found;
 	}
+	static function descendantText(root:RenderNode, value:String):RenderNode {
+		var found:RenderNode = null;
+		root.walk(function(node) { if (node.layout.text == value) found = node; });
+		if (found == null) throw "Missing text " + value;
+		return found;
+	}
+	static function commandHover(fonts:FontCollection):Void {
+		var ui = new UiContext(null, fonts);
+		var model = new CommandView();
+		var provider = new CommandViewProvider("> ", [
+			new CommandViewEntry("First command", "", "first", "Ctrl+A"),
+			new CommandViewEntry("Second command", "", "second", "Ctrl+Shift+B")
+		], function(_) {}, function(_, _, _) {});
+		model.open(provider);
+		var changes = 0;
+		var picker = new QuickPickView(model, provider, function() {}, function() changes++, function(_) {});
+		var frame = new LayoutFrame(800, 600);
+		var root = ui.submit(picker, frame);
+		root = ui.submit(picker, frame);
+		var row = result(root, "Second command");
+		var bounds = row.globalBounds();
+		ui.pointerMove(bounds.x + 10, bounds.y + bounds.height / 2);
+		root = ui.submit(picker, frame);
+		var plus = descendantText(result(root, "Second command"), "+").globalBounds();
+		ui.pointerMove(plus.x + plus.width / 2, plus.y + plus.height / 2);
+		root = ui.submit(picker, frame);
+		var settledChanges = changes;
+		for (_ in 0...8) root = ui.submit(picker, frame);
+		check(changes == settledChanges, "Stationary shortcut hover kept rebuilding the picker");
+		var label = descendantText(result(root, "Second command"), "Shift").globalBounds();
+		ui.pointerMove(label.x + label.width / 2, label.y + label.height / 2);
+		root = ui.submit(picker, frame);
+		check(changes == settledChanges, "Moving between shortcut children changed row hover");
+		var gearFound = false;
+		result(root, "Second command").walk(function(node) {
+			if (node.semantics != null && node.semantics.label == "Configure Keybinding") gearFound = true;
+		});
+		check(gearFound, "Hovering shortcut children hid the row action");
+		ui.pointerMove(0, 590);
+		root = ui.submit(picker, frame);
+		gearFound = false;
+		result(root, "Second command").walk(function(node) {
+			if (node.semantics != null && node.semantics.label == "Configure Keybinding") gearFound = true;
+		});
+		check(!gearFound, "Leaving the command row retained its hover action");
+		ui.dispose();
+	}
 	static function main():Int {
 		var fonts = FontCollection.create(); fonts.addSystemFallbacks();
 		var ui = new UiContext(null, fonts);
@@ -54,8 +101,10 @@ class QuickPickerTestMain {
 		ui.pointerDown(bounds.x + 30, bounds.y + bounds.height / 2, 0);
 		ui.pointerUp(bounds.x + 30, bounds.y + bounds.height / 2, 0);
 		check(accepted == "49999" && !model.active, "Filtered file activation did not reach the app model");
-		ui.dispose(); fonts.dispose();
-		Sys.println("PASS: Exosuit file picker icons, virtualization, query/navigation adapter, resize/reveal and activation");
+		ui.dispose();
+		commandHover(fonts);
+		fonts.dispose();
+		Sys.println("PASS: Exosuit picker virtualization, query/navigation, resize/reveal, activation and stable shortcut hover");
 		return 0;
 	}
 }
