@@ -99,6 +99,15 @@ Live mode and suit:
 - Session and terminal directory failures are strings and loose codes (`invalid_directory`, `invalid_request`);
   give them an error-code enum.
 - The other judgement-call smells from that review: go through them with the next change in those files.
+- Second review (2026-10-30), deferred:
+  - Expanding a workspace row switches the whole window to it. Phase 3 asks for expansion to attach the workspace's
+    service and leave the window alone; that needs Phase 6's per-window attach.
+  - Change… in `SessionFolderChooser` is its own flow rather than the group folder picker's; share one.
+  - `SessionFolderChooser.newAgentSession` and `newTerminal` repeat one shape.
+  - Workbench status rows and row-key prefixes are bare strings (`"empty"`, `"mwsn"`…); give them types along with
+    the directory error codes.
+  - `WorkspaceDirectories.choose` takes a scratch folder that only tests pass until Phase 4 resolves it in the
+    service; `createProviderAgent` stays a forwarder because the Workbench takes it as a two-argument function.
 
 ## Low
 
