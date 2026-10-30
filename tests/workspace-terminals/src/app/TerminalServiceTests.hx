@@ -226,11 +226,13 @@ class TerminalServiceTests {
       require(clock() < deadline, "Terminal screen snapshot timed out");
       step();
     }
-    require(screen.cursor != null && screen.cursor > batch.next && screen.terminal.end >= 100000 && screen.data.length >= 64
-      && screen.data.length <= 3 * 1024 * 1024,
+    var shot = screen;
+    if (shot == null) throw "Terminal screen snapshot timed out";
+    require(shot.cursor != null && shot.cursor > batch.next && shot.terminal.end >= 100000 && shot.data.length >= 64
+      && shot.data.length <= 3 * 1024 * 1024,
       "Terminal screen snapshot was not bounded at the current output offset");
     var restored = Emulator.open(10, 3, 8, "xterm-256color", false);
-    restored.restoreScreenSnapshot(screen.data);
+    restored.restoreScreenSnapshot(shot.data);
     restored.snapshot();
     var outputVisible = false;
     for (row in 0...restored.rows()) if (restored.rowText(row).indexOf("x") >= 0

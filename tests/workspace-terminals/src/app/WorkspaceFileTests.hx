@@ -194,14 +194,15 @@ class WorkspaceFileTests {
 		files.searchStart("workspace", WorkspaceFileService.ROOT_ID, "name", "never-match", true,
 			function(value) cancelledHandle = value, function(error) throw error.code, 1000);
 		poll(client, server);
-		if (cancelledHandle == null) throw "Cancellable workspace search did not start";
+		var cancelled = cancelledHandle;
+		if (cancelled == null) throw "Cancellable workspace search did not start";
 		var cancelledResult:Null<workspace.service.WorkspaceFileProtocol.FileSearchCancelResult> = null;
-		files.searchCancel("workspace", cancelledHandle.root, cancelledHandle.searchId,
+		files.searchCancel("workspace", cancelled.root, cancelled.searchId,
 			function(value) cancelledResult = value, function(error) throw error.code, 1000);
 		poll(client, server);
 		require(cancelledResult != null && cancelledResult.cancelled, "Workspace search cancellation did not release its cursor");
 		var cancelledPageError = "";
-		files.searchPage("workspace", cancelledHandle.root, cancelledHandle.searchId, 1,
+		files.searchPage("workspace", cancelled.root, cancelled.searchId, 1,
 			function(_) throw "Cancelled workspace search remained available", function(error) cancelledPageError = error.code, 1000);
 		poll(client, server);
 		require(cancelledPageError == "invalid_handle", "Cancelled workspace search returned an unexpected handle result");
@@ -248,10 +249,11 @@ class WorkspaceFileTests {
 			{workspace: "workspace", root: WorkspaceFileService.ROOT_ID + "-1", path: "read.raw"}, 1000,
 			function(value) rawStat = value, function(error) throw error.code);
 		poll(client, server);
-		if (rawStat == null)
+		var rawEntry = rawStat;
+		if (rawEntry == null)
 			throw "Binary file stat failed";
 		var opened:Null<FileReadOpenResult> = null;
-		files.openRead("workspace", WorkspaceFileService.ROOT_ID + "-1", "read.raw", rawStat.entry.revision,
+		files.openRead("workspace", WorkspaceFileService.ROOT_ID + "-1", "read.raw", rawEntry.entry.revision,
 			function(value) opened = value, function(error) throw error.code, 1000, 32);
 		poll(client, server);
 		if (opened == null)
@@ -265,7 +267,7 @@ class WorkspaceFileTests {
 			function(error) invalidInitialLimit = error.code, 1000, WorkspaceFileService.READ_CHUNK_BYTES + 1);
 		poll(client, server);
 		require(invalidInitialLimit == "invalid_range", "Initial byte limit was not bounded");
-		require(readHandle.size == Int64.ofInt(rawContent.length) && readHandle.revision == rawStat.entry.revision,
+		require(readHandle.size == Int64.ofInt(rawContent.length) && readHandle.revision == rawEntry.entry.revision,
 			"File open did not preserve the listed identity and byte size");
 		var rawFirst:Null<FileReadChunkResult> = null;
 		files.readChunk("workspace", readHandle.handle, Int64.ofInt(0), 3,
@@ -441,19 +443,21 @@ class WorkspaceFileTests {
 		poll(client, server);
 		if (changingStat == null)
 			throw "Changing file stat failed";
+		var changingRevision = changingStat.entry.revision;
 		var changingOpen:Null<FileReadOpenResult> = null;
 		client.call(WorkspaceFileProtocol.READ_OPEN,
 			{workspace: "workspace", root: WorkspaceFileService.ROOT_ID, path: "changing.txt",
-				expectedRevision: changingStat.entry.revision}, 1000,
+				expectedRevision: changingRevision}, 1000,
 			function(value) changingOpen = value, function(error) throw error.code);
 		poll(client, server);
 		if (changingOpen == null)
 			throw "Changing file open failed";
+		var changingHandle = changingOpen.handle;
 		Sys.sleep(0.01);
 		File.saveContent(rootPath + "/changing.txt", "after!");
 		var changedDuringRead = "";
 		client.call(WorkspaceFileProtocol.READ_CHUNK,
-			{workspace: "workspace", handle: changingOpen.handle, offset: Int64.ofInt(0), length: 4}, 1000,
+			{workspace: "workspace", handle: changingHandle, offset: Int64.ofInt(0), length: 4}, 1000,
 			function(_) throw "Read handle mixed bytes after its file revision changed",
 			function(error) changedDuringRead = error.code);
 		poll(client, server);
@@ -461,7 +465,7 @@ class WorkspaceFileTests {
 		var staleOpen = "";
 		client.call(WorkspaceFileProtocol.READ_OPEN,
 			{workspace: "workspace", root: WorkspaceFileService.ROOT_ID, path: "changing.txt",
-				expectedRevision: changingStat.entry.revision}, 1000,
+				expectedRevision: changingRevision}, 1000,
 			function(_) throw "Read open accepted a stale expected revision", function(error) staleOpen = error.code);
 		poll(client, server);
 		require(staleOpen == "revision_changed", "Stale expected revision was not rejected");
@@ -481,6 +485,7 @@ class WorkspaceFileTests {
 		poll(client, server);
 		if (expiringRead == null)
 			throw "Expiring file read handle was missing";
+		var expiringHandle = expiringRead.handle;
 		var expiringSearch:Null<FileSearchHandle> = null;
 		files.searchStart("workspace", WorkspaceFileService.ROOT_ID, "name", "expiry-search", true,
 			function(value) expiringSearch = value, function(error) throw error.code, 1000);
@@ -490,7 +495,7 @@ class WorkspaceFileTests {
 		now += 31000;
 		var expiredRead = "";
 		client.call(WorkspaceFileProtocol.READ_CHUNK,
-			{workspace: "workspace", handle: expiringRead.handle, offset: Int64.ofInt(0), length: 1}, 1000,
+			{workspace: "workspace", handle: expiringHandle, offset: Int64.ofInt(0), length: 1}, 1000,
 			function(_) throw "Expired file read handle was accepted", function(error) expiredRead = error.code);
 		poll(client, server);
 		require(expiredRead == "invalid_handle", "Idle file read handle expiry was not explicit");
