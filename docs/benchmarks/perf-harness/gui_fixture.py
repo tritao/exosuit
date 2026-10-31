@@ -41,7 +41,7 @@ def main():
         "EXOSUIT_AGENT_STATE_HOME": str(out / "agent-state"), "EXOSUIT_SCRATCH_HOME": str(out / "scratch"),
         "EXOSUIT_AUTOMATION_DIR": str(out / "automation"),
     }
-    for key in ("state", "agent-state", "scratch", "automation", "result"):
+    for key in ("state", "agent-state", "scratch", "result"):  # the app makes the automation folder itself, owner-only
         (out / key).mkdir(parents=True, exist_ok=True)
     folders = {}
     for name in fixture["workspaces"]:
