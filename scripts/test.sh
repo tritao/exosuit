@@ -187,6 +187,7 @@ run_test codex-history "$agent_state/codex-history" python3 "$root_dir/scripts/r
 rm -rf "$agent_state"
 run_test path-key
 run_test workspace-target
+run_test workspace-catalog-pool
 run_test project-scan-yield
 chmod 600 "$workspace_root/unreadable.txt"
 

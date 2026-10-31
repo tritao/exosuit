@@ -12,7 +12,12 @@ import haxeon.ui.semantics.AccessibilityRole;
 import haxeon.ui.widgets.collections.TreeView;
 import suit.MachineCatalog.MachineWorkspace;
 import ui.AgentScope;
+import ui.CatalogThrottle;
+import ui.WorkbenchMachineLabel;
 import ui.WorkbenchMachineView;
+import ui.WorkbenchMachineView.WorkbenchWorkspaceState;
+import ui.WorkbenchRowKind;
+import workspace.client.WorkspaceCatalogMirror;
 import ui.WorkbenchRowKey;
 import ui.WorkbenchTreeModel;
 import workspace.service.WorkspaceAgentProtocol.AgentCatalog;
@@ -58,6 +63,10 @@ class WorkbenchTreeTestMain {
 
 	static function main():Void {
 		ordering();
+		foreignWorkspaces();
+		cyclicGroups();
+		foreignProjection();
+		catalogThrottle();
 		emptyAndLoading();
 		suitOff();
 		workspaceRoot();
@@ -100,6 +109,148 @@ class WorkbenchTreeTestMain {
 		// Windows paths compare the Windows way.
 		model.update(catalog("c:\\work\\resume"), null, null, view(machineWorkspaces, "resume", ["C:/work/resume"]));
 		require(model.groupParent == "w:resume", "a differently spelled root kept the groups out");
+	}
+
+	/** A workspace the window is not attached to shows its catalog's groups, sessions and terminals, read-only; an idle one shows a marker. */
+	static function foreignWorkspaces():Void {
+		var mirror = new WorkspaceCatalogMirror();
+		mirror.apply({ref: {machine: "m", workspace: "exo"}, instance: "i", token: "t1", reset: true, more: false, name: "exosuit", folders: ["C:/src/exosuit"],
+			scratch: null, status: "running", attention: 2,
+			groups: [group("build", "Build", null, 1), group("lint", "Lint", "build", 0), group("docs", "Docs", null, 0)],
+			sessions: [{id: "s1", name: "Fix tests", group: "build", directory: "C:/src/exosuit", provider: null, state: "working", attention: 1},
+				{id: "s2", name: "Loose session", group: "", directory: "C:/src/exosuit", provider: null, state: "idle", attention: 0}],
+			terminals: [{id: "t1", name: "Shell", group: "lint", directory: "C:/src/exosuit", state: "running", exitCode: 0, available: true,
+				revision: Int64.ofInt(1), agentProvider: null, attention: 0}],
+			removedGroups: [], removedSessions: [], removedTerminals: [], watching: true});
+		var watched:Map<String, WorkbenchWorkspaceState> = [];
+		watched.set("exo", {running: true, live: true, starting: false, catalog: mirror});
+		watched.set("resume", {running: true, live: true, starting: false, catalog: null});
+		watched.set("eon", {running: false, live: false, starting: false, catalog: null});
+		var shown = view(machineWorkspaces, "resume", ["C:/work/resume"]);
+		shown.watched = watched;
+		shown.watchRevision = 1;
+		var model = new WorkbenchTreeModel();
+		model.update(catalog("C:/work/resume"), agents("C:/work/resume"), null, shown);
+		require(roots(model).join(",") == "w:exo,w:resume,w:eon,n:new-workspace", "foreign catalogs changed the roots: " + roots(model));
+		var top = children(model, "w:exo");
+		require(top.join(",") == "f:gexo|docs,f:gexo|build,f:aexo|s2", "foreign workspace's top level: " + top);
+		var build = children(model, "f:gexo|build");
+		require(build.join(",") == "f:gexo|lint,f:aexo|s1", "foreign group's contents: " + build);
+		require(children(model, "f:gexo|lint").join(",") == "f:texo|t1", "foreign sub-group: " + children(model, "f:gexo|lint"));
+		require(model.childCount("w:eon") == 0 && model.expandable("w:eon"), "an idle workspace has no rows but expands");
+		require(model.childCount("w:resume") == 2 && model.groupParent == "w:resume", "the attached workspace still shows its own groups");
+		// Foreign rows are not the attached workspace's rows, so drag, menus and scope code pass over them.
+		require(WorkbenchRowKey.parse("f:gexo|build") == null && WorkbenchRowKey.isForeign("f:aexo|s1") && !WorkbenchRowKey.isMachineRow("f:aexo|s1"),
+			"foreign rows are group rows");
+		var parsed = WorkbenchRowKey.parseForeign("f:aexo|s1");
+		require(parsed != null && parsed.kind == WorkbenchRowKind.Agent && parsed.workspace == "exo" && parsed.id == "s1", "foreign row parse");
+		require(WorkbenchRowKey.foreign(WorkbenchRowKind.Terminal, "exo", "t1") == "f:texo|t1" && WorkbenchRowKey.parseForeign("g:work") == null, "foreign row spelling");
+		var own = model.terminals.get("t1");
+		require(!model.groups.exists("build") && !model.agents.exists("s1") && own != null && own.name == "Terminal",
+			"foreign rows leaked into the attached workspace's maps");
+		for (key in top.concat(build)) model.buildItem(key);
+		model.buildItem("w:eon");
+		model.buildItem("w:exo");
+		// The marker says what a workspace is doing.
+		require(WorkbenchMachineLabel.stateMarker(watched.get("exo")) == "running" && WorkbenchMachineLabel.stateMarker(watched.get("eon")) == "idle",
+			"running and idle markers");
+		require(WorkbenchMachineLabel.stateMarker({running: true, live: false, starting: false, catalog: null}) == "reconnecting"
+			&& WorkbenchMachineLabel.stateMarker({running: false, live: false, starting: true, catalog: null}) == "starting…"
+			&& WorkbenchMachineLabel.stateMarker(null) == null, "reconnecting and starting markers");
+		// The window's own workspace is read through its full client, never its catalog.
+		watched.set("resume", {running: true, live: true, starting: false, catalog: mirror});
+		model.update(catalog("C:/work/resume"), agents("C:/work/resume"), null, shown);
+		require(children(model, "w:resume").join(",") == "g:work,g:apps", "the attached workspace's own catalog drew foreign rows: " + children(model, "w:resume"));
+	}
+
+	/** A catalog change alone waits out 100 ms and then applies, last change included; a structure change applies at once. */
+	static function catalogThrottle():Void {
+		var throttle = new CatalogThrottle();
+		require(throttle.due("s1", "s1
+1", 0.0), "the first inputs apply");
+		throttle.took("s1", "s1
+1", 0.0);
+		require(!throttle.due("s1", "s1
+2", 0.05) && throttle.waiting, "a catalog change within 100 ms is held and asks for another frame");
+		require(!throttle.due("s1", "s1
+3", 0.08) && throttle.waiting, "a newer one is held too");
+		require(throttle.due("s1", "s1
+3", 0.11) && !throttle.waiting, "after 100 ms the last change applies");
+		throttle.took("s1", "s1
+3", 0.11);
+		require(!throttle.due("s1", "s1
+3", 0.5) && !throttle.waiting, "nothing is pending afterwards");
+		require(throttle.due("s2", "s2
+3", 0.12), "a structure change does not wait");
+	}
+
+	/** Only expanded workspaces project their catalogs, and a projection is rebuilt only when its catalog changed. */
+	static function foreignProjection():Void {
+		var page = function(token:String, reset:Bool, name:String):workspace.service.WorkspaceCatalogProtocol.WorkspaceCatalog return {ref: {machine: "m", workspace: "exo"}, instance: "i",
+			token: token, reset: reset, more: false, name: "exosuit", folders: [], scratch: null, status: "running", attention: 0, groups: [group("g", name, null, 0)],
+			sessions: [{id: "s", name: "Session", group: "g", directory: "/d", provider: null, state: "idle", attention: 0}], terminals: [],
+			removedGroups: [], removedSessions: [], removedTerminals: [], watching: true};
+		var exo = new WorkspaceCatalogMirror(), other = new WorkspaceCatalogMirror();
+		exo.apply(page("t1", true, "Build"));
+		var otherPage = page("t1", true, "Other");
+		otherPage.ref.workspace = "resume";
+		other.apply(otherPage);
+		var watched:Map<String, WorkbenchWorkspaceState> = [];
+		watched.set("exo", {running: true, live: true, starting: false, catalog: exo});
+		watched.set("eon", {running: true, live: true, starting: false, catalog: other});
+		var shown = view(machineWorkspaces, "resume", ["C:/work/resume"]);
+		shown.watched = watched;
+		shown.watchRevision = 1;
+		var model = new WorkbenchTreeModel();
+		var expanded:Map<String, Bool> = [];
+		model.expandedRows = expanded;
+		model.update(catalog("C:/work/resume"), agents("C:/work/resume"), null, shown);
+		require(model.childCount("w:exo") == 0 && model.childCount("w:eon") == 0 && model.projectionBuilds == 0, "nothing is projected while every workspace is collapsed");
+		expanded.set("w:exo", true);
+		model.update(catalog("C:/work/resume"), agents("C:/work/resume"), null, shown);
+		require(children(model, "w:exo").join(",") == "f:gexo|g" && model.childCount("w:eon") == 0 && model.projectionBuilds == 1, "only the expanded workspace projects");
+		model.update(catalog("C:/work/resume"), agents("C:/work/resume"), null, shown);
+		require(model.projectionBuilds == 1 && children(model, "f:gexo|g").join(",") == "f:aexo|s", "an unchanged catalog reuses its projection");
+		expanded.set("w:eon", true);
+		model.update(catalog("C:/work/resume"), agents("C:/work/resume"), null, shown);
+		require(model.projectionBuilds == 2, "expanding another workspace builds only that one");
+		var change = page("t2", false, "Renamed");
+		exo.apply(change);
+		model.update(catalog("C:/work/resume"), agents("C:/work/resume"), null, shown);
+		require(model.projectionBuilds == 3, "one workspace's change rebuilds that workspace alone: " + model.projectionBuilds);
+		expanded.remove("w:eon");
+		model.update(catalog("C:/work/resume"), agents("C:/work/resume"), null, shown);
+		require(model.childCount("w:eon") == 0 && model.childCount("w:exo") == 1, "collapsing hides a workspace's rows");
+	}
+
+	/** A group naming itself, a descendant, or a missing group as its parent sits at the workspace root; the tree is finite. */
+	static function cyclicGroups():Void {
+		var mirror = new WorkspaceCatalogMirror();
+		mirror.apply({ref: {machine: "m", workspace: "exo"}, instance: "i", token: "t1", reset: true, more: false, name: "exosuit", folders: [],
+			scratch: null, status: "running", attention: 0,
+			groups: [group("a", "Self", "a", 0), group("b", "Loop one", "c", 1), group("c", "Loop two", "b", 2), group("d", "Under the loop", "b", 3),
+				group("o", "Orphan", "missing", 4), group("k", "Kid", "o", 5)],
+			sessions: [], terminals: [], removedGroups: [], removedSessions: [], removedTerminals: [], watching: true});
+		var watched:Map<String, WorkbenchWorkspaceState> = [];
+		watched.set("exo", {running: true, live: true, starting: false, catalog: mirror});
+		var shown = view(machineWorkspaces, "resume", ["C:/work/resume"]);
+		shown.watched = watched;
+		shown.watchRevision = 1;
+		var model = new WorkbenchTreeModel();
+		model.update(catalog("C:/work/resume"), agents("C:/work/resume"), null, shown);
+		var top = children(model, "w:exo");
+		for (id in ["a", "b", "c", "d", "o"])
+			require(top.indexOf("f:g" + "exo|" + id) >= 0, "group " + id + " sits at the workspace root: " + top);
+		require(top.indexOf("f:gexo|k") < 0 && children(model, "f:gexo|o").join(",") == "f:gexo|k", "an ordinary child stays under an orphan");
+		var reached = 0;
+		var walk:String->Int->Void = null;
+		walk = function(key, depth) {
+			reached++;
+			require(depth < 10, "the tree does not end under " + key);
+			for (index in 0...model.childCount(key)) walk(model.childKeyAt(key, index), depth + 1);
+		};
+		walk("w:exo", 0);
+		require(reached == 7, "every group is reached once: " + reached);
 	}
 
 	/** No workspaces, suit still answering, and suit failing are rows of the tree, above New Workspace…. */

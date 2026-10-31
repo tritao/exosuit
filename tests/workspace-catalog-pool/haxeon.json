@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "package": {"name": "exosuit-workspace-catalog-pool-test"},
+  "entry": "app.WorkspaceCatalogTestMain",
+  "sourceRoots": ["src"],
+  "scopeSourceRoots": false,
+  "dependencies": {"pragtical_hx": {"path": "../.."}},
+  "target": "host",
+  "outputDir": "build"
+}

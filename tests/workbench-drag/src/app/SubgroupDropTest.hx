@@ -54,7 +54,7 @@ class SubgroupDropTest {
    function(_,group) { created.push(group); },function() { return true; });
   var view:ui.WorkbenchMachineView={machine:{id:"m",name:"cube",workspaces:[{id:"resume",name:"resume-2026",folders:["/workspace"],scratch:null,revision:1},
    {id:"elsewhere",name:"elsewhere",folders:["/elsewhere"],scratch:null,revision:1}]},error:null,openWorkspace:"resume",openRoots:["/workspace"],revision:1};
-  panel.machine={view:function() { return view; },busy:function() { return false; },open:function(_) {},create:function() {},
+  panel.machine={view:function() { return view; },busy:function() { return false; },open:function(_) {},start:function(_) {},create:function() {},
    rename:function(_) {},attachFolder:function(_) {},detachFolder:function(_) {},remove:function(_) {}};
   var fonts=haxeon.ui.FontCollection.create();fonts.add("../../haxeon/packages/ui/vendor/skribidi/example/data/IBMPlexSans-Regular.ttf");
   var context=new UiContext(null,fonts),frame=new haxeon.ui.LayoutFrame(320,600);
