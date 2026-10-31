@@ -17,6 +17,9 @@ import haxeon.ui.core.UiContext;
 
 	Positions come from here, never from fixed pixels. The driver is `docs/benchmarks/perf-harness/gui_driver.py`.
 **/
+@:hlNative("haxeon_runtime", "__host_prepare_private_directory")
+extern function preparePrivateDirectory(path:String):Bool;
+
 class AutomationProbe {
 	public static inline var ELEMENT_LIMIT = 4000;
 
@@ -26,6 +29,7 @@ class AutomationProbe {
 	var seq = 0;
 	var lastAt = 0.0;
 	var lastText = "";
+	var usable = true;
 
 	public static function directoryFromEnvironment():Null<String> {
 		var value = Sys.getEnv("EXOSUIT_AUTOMATION_DIR");
@@ -51,11 +55,13 @@ class AutomationProbe {
 
 	public function new(directory:String, ui:UiContext, state:Void->Dynamic) {
 		this.directory = directory; this.ui = ui; this.state = state;
-		try sys.FileSystem.createDirectory(directory) catch (_:Dynamic) {}
+		// The snapshot holds the app's state and file names: the folder is owner-only, or nothing is written.
+		try usable = preparePrivateDirectory(directory) catch (_:Dynamic) usable = false;
 	}
 
 	/** Called from the host's poll; cheap when it is not time. */
 	public function poll():Void {
+		if (!usable) return;
 		var now = Sys.time();
 		if (now - lastAt < 0.1) return;
 		lastAt = now;
@@ -81,17 +87,16 @@ class AutomationProbe {
 				});
 			}
 			var metrics = ui.frameMetrics;
-			var payload:Dynamic = {seq: 0, at: 0.0, frame: metrics == null ? -1 : metrics.frameNumber, viewport: {width: width, height: height},
-				elements: elements, state: state()};
-			// Only a change is written; `seq` counts writes, so a driver can wait for "a snapshot newer than my last input".
-			var body = haxe.Json.stringify({frame: payload.frame, viewport: payload.viewport, elements: elements, state: payload.state});
+			// One serialization per change; only a change is written, and `seq` counts writes, so a driver can wait for
+			// "a snapshot newer than my last input".
+			var body = haxe.Json.stringify({frame: metrics == null ? -1 : metrics.frameNumber, viewport: {width: width, height: height},
+				elements: elements, state: state()});
 			if (body == lastText) return;
 			lastText = body;
-			payload.seq = ++seq; payload.at = now;
-			var temporary = directory + "/snapshot.tmp", target = directory + "/snapshot.json";
-			sys.io.File.saveContent(temporary, haxe.Json.stringify(payload));
-			if (sys.FileSystem.exists(target)) sys.FileSystem.deleteFile(target); // rename does not replace on Windows
-			sys.FileSystem.rename(temporary, target);
+			var text = '{"seq":' + (++seq) + ',"at":' + now + ',' + body.substr(1);
+			// An atomic replace: readers see the old snapshot or the new one, never none.
+			var target = directory + "/snapshot.json";
+			if (sys.FileSystem.exists(target)) sys.io.AtomicFile.write(target, text); else sys.io.AtomicFile.create(target, text);
 		} catch (error:Dynamic) {
 			try sys.io.File.saveContent(directory + "/probe-error.txt", Std.string(error)) catch (_:Dynamic) {}
 		}
