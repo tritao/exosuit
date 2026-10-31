@@ -182,7 +182,8 @@ private class GutterLabels {
 				}
 				var highlighted = index == activeLine;
 				if (label.highlighted != highlighted) {
-					label.layout.setColor(highlighted ? activeColor : color);
+					var target = highlighted ? activeColor : color;
+					if (target != null) label.layout.setColor(target);
 					label.highlighted = highlighted;
 				}
 				canvas.drawText(label.layout, 1.0, originY + label.y - label.baseline);
