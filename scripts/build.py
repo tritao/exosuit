@@ -16,24 +16,35 @@ def main() -> int:
     root_dir = Path(__file__).resolve().parent.parent
     self_hosted = os.environ.get("HAXEON_SELF_HOSTED", "0") == "1"
     # suit is the per-user tray daemon that tracks the processes editors and workspaces start. The projects build one
-    # after another: built side by side, their CMake configures contended and the whole build took longer.
+    # after another: they share the CMake trees of the native packages they have in common (haxeon/out/native-cache),
+    # which a lock lets only one build use at a time, so the later projects find those packages built.
     projects = ["agent", "suit", "graphical"]
-    # `--only agent,suit` builds just those, for a quick loop on one part.
+    # `--only agent,suit` (or `--only=agent,suit`) builds just those, for a quick loop on one part.
     passed = sys.argv[1:]
-    if "--only" in passed:
-        index = passed.index("--only")
-        if index + 1 >= len(passed) or not set(passed[index + 1].split(",")) <= set(projects):
-            print(f"--only takes a comma-separated list of {', '.join(projects)}", file=sys.stderr)
-            return 2
-        chosen = passed[index + 1].split(",")
-        projects = [project for project in projects if project in chosen]
-        passed = passed[:index] + passed[index + 2:]
+    for index, argument in enumerate(passed):
+        if argument == "--only" or argument.startswith("--only="):
+            if argument == "--only":
+                value = passed[index + 1] if index + 1 < len(passed) else ""
+                end = index + 2
+            else:
+                value = argument[len("--only="):]
+                end = index + 1
+            chosen = value.split(",")
+            if not value or not set(chosen) <= set(projects):
+                print(f"--only takes a comma-separated list of {', '.join(projects)}", file=sys.stderr)
+                return 2
+            projects = [project for project in projects if project in chosen]
+            passed = passed[:index] + passed[end:]
+            break
 
     try:
-        prepare(root_dir)
-        status = ensure_language_server(root_dir)
-        if status != 0:
-            return status
+        # The Claude naming adapter belongs to the agent, and the language server to the editor (graphical).
+        if "agent" in projects:
+            prepare(root_dir)
+        if "graphical" in projects:
+            status = ensure_language_server(root_dir)
+            if status != 0:
+                return status
         for project in projects:
             arguments = ["build", "--project", str(root_dir / project / "haxeon.json")]
             if self_hosted:
