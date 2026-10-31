@@ -9,6 +9,8 @@ import workspace.service.WorkspaceTerminalProtocol;
 import workspace.service.WorkspaceAgentProtocol;
 import workspace.service.WorkspaceFileProtocol;
 import workspace.service.WorkspaceFileProtocol.FileSearchMatch;
+import workspace.service.WorkspaceFileProtocol.FileRootDescriptor;
+import workspace.service.WorkspaceFoldersProtocol;
 import workspace.service.WorkspaceFileProtocol.FileSearchPageResult;
 import workspace.service.WorkspaceCatalogProtocol;
 import workspace.service.WorkspaceLifecycleProtocol;
@@ -139,9 +141,49 @@ class RpcCompatibilityTests {
 		var searchPage:FileSearchPageResult = {workspace: "w", root: "r", searchId: "s", matches: [searchMatch],
 			complete: true, truncated: false, scannedFiles: 1, scannedBytes: 12, skippedEntries: 2, scannedEntries: 3};
 		var searchPageBytes = bytes("8a01a17702a17203a17304918701a5612e74787402a466696c6503a372657604020505060607a66e6565646c6505c306c20701080c09020a03");
-		require(WorkspaceFileProtocol.SEARCH_PAGE.encodeResponse(searchPage).compare(searchPageBytes) == 0
-			&& WorkspaceFileProtocol.SEARCH_PAGE.decodeResponse(searchPageBytes).matches[0].column == 5,
+		// Pre-Phase 5 bytes (no match root) still decode; a match without a root now encodes it as nil (field 8).
+		require(WorkspaceFileProtocol.SEARCH_PAGE.decodeResponse(searchPageBytes).matches[0].column == 5
+			&& WorkspaceFileProtocol.SEARCH_PAGE.decodeResponse(searchPageBytes).matches[0].root == null,
 			"Workspace search result field ids or byte-column vector changed");
+		require(WorkspaceFileProtocol.SEARCH_PAGE.encodeResponse(searchPage).compare(bytes("8a01a17702a17203a17304918801a5612e74787402a466696c6503a372657604020505060607a66e6565646c6508c005c306c20701080c09020a03")) == 0,
+			"Workspace search result encoding changed");
+		// M19 Phase 5: a search match names its root (field 8) and a root descriptor its folder (field 4); older peers skip both.
+		var rootedMatch:FileSearchMatch = {path: "a.txt", kind: "file", revision: "rev", line: 2, column: 5, length: 6, preview: "needle", root: "r"};
+		var rootedMatchBytes = bytes("8801a5612e74787402a466696c6503a372657604020505060607a66e6565646c6508a172");
+		var decodedMatch:FileSearchMatch = haxeon.wire.MessagePack.decode(rootedMatchBytes);
+		require(haxeon.wire.MessagePack.encode(rootedMatch).compare(rootedMatchBytes) == 0 && decodedMatch.root == "r",
+			"Search match root field vector changed");
+		var rootDescriptor:FileRootDescriptor = {id: "r", name: "n", capabilities: ["stat"], path: "/p"};
+		var rootDescriptorBytes = bytes("8401a17202a16e0391a47374617404a22f70");
+		var decodedDescriptor:FileRootDescriptor = haxeon.wire.MessagePack.decode(rootDescriptorBytes);
+		require(haxeon.wire.MessagePack.encode(rootDescriptor).compare(rootDescriptorBytes) == 0 && decodedDescriptor.path == "/p",
+			"Root descriptor path field vector changed");
+		require(WorkspaceFoldersProtocol.SET.id == 153 && WorkspaceFoldersProtocol.CAPABILITY == "workspace.folders.manage",
+			"Workspace folders method id or capability changed");
+		// A method id registered twice makes a service throw when a local admin connects ("Duplicate RPC method id").
+		var methodIds:Array<Int> = [
+			WorkspaceAgentProtocol.MODELS.id, WorkspaceAgentProtocol.DISCOVER.id, WorkspaceAgentProtocol.LIST.id, WorkspaceAgentProtocol.CREATE.id,
+			WorkspaceAgentProtocol.ACTION.id, WorkspaceAgentProtocol.MESSAGE_CONTENT.id, WorkspaceAgentProtocol.MESSAGE_IMAGE.id, WorkspaceAgentProtocol.IMAGE_UPLOAD.id,
+			WorkspaceAgentProtocol.ACTION_SNAPSHOT.id, WorkspaceAgentProtocol.SNAPSHOT_READ.id, WorkspaceCatalogProtocol.CATALOG.id, WorkspaceCatalogProtocol.UNWATCH.id,
+			WorkspaceFileProtocol.ROOTS.id, WorkspaceFileProtocol.STAT.id, WorkspaceFileProtocol.LIST.id, WorkspaceFileProtocol.READ_OPEN.id,
+			WorkspaceFileProtocol.READ_CHUNK.id, WorkspaceFileProtocol.READ_CLOSE.id, WorkspaceFileProtocol.WATCH.id, WorkspaceFileProtocol.UNWATCH.id,
+			WorkspaceFileProtocol.SEARCH_START.id, WorkspaceFileProtocol.SEARCH_PAGE.id, WorkspaceFileProtocol.SEARCH_CANCEL.id, WorkspaceFoldersProtocol.SET.id,
+			WorkspaceLifecycleProtocol.STATUS.id, WorkspaceLifecycleProtocol.UPDATE.id, WorkspacePairingProtocol.STATUS.id, WorkspacePairingProtocol.SET_GRANTS.id,
+			WorkspacePairingProtocol.CREATE.id, WorkspacePairingProtocol.LIST.id, WorkspacePairingProtocol.APPROVE.id, WorkspacePairingProtocol.REJECT.id,
+			WorkspacePairingProtocol.REVOKE.id, WorkspaceProtocol.QUERY.id, WorkspaceProtocol.WATCH.id, WorkspaceProtocol.RENAME.id,
+			WorkspaceProtocol.GROUP.id, WorkspaceProtocol.OPERATION.id, WorkspaceProtocol.IDENTITY.id, WorkspaceScmProtocol.REPOSITORIES.id,
+			WorkspaceScmProtocol.SNAPSHOT.id, WorkspaceScmProtocol.WATCH.id, WorkspaceScmProtocol.UNWATCH.id, WorkspaceScmProtocol.ORIGINAL.id,
+			WorkspaceScmProtocol.APPLY.id, WorkspaceScmProtocol.TRUST.id, WorkspaceScmProtocol.BRANCHES.id, WorkspaceScmProtocol.ORIGIN.id,
+			WorkspaceTerminalProtocol.RESTART.id, WorkspaceTerminalProtocol.UNWATCH.id, WorkspaceTerminalProtocol.LIST.id, WorkspaceTerminalProtocol.RENAME.id,
+			WorkspaceTerminalProtocol.FORGET.id, WorkspaceTerminalProtocol.OPEN.id, WorkspaceTerminalProtocol.OUTPUT.id, WorkspaceTerminalProtocol.INPUT.id,
+			WorkspaceTerminalProtocol.RESIZE.id, WorkspaceTerminalProtocol.TERMINATE.id, WorkspaceTerminalProtocol.SET_CONTROL.id, WorkspaceTerminalProtocol.REPLAY.id,
+			WorkspaceTerminalProtocol.SNAPSHOT.id
+		];
+		for (index in 0...methodIds.length)
+			require(methodIds.indexOf(methodIds[index]) == index, "RPC method id " + methodIds[index] + " is used twice");
+		require(WorkspaceFoldersProtocol.SET.encodeRequest({folders: ["/a"]}).compare(bytes("810191a22f61")) == 0
+			&& WorkspaceFoldersProtocol.SET.encodeResponse({folders: ["/a"], roots: 1}).compare(bytes("820191a22f610201")) == 0,
+			"Workspace folders vectors changed");
         var catalogQuery:TerminalCatalogQuery={workspace:"w",instance:"i",after:null};
         require(WorkspaceTerminalProtocol.LIST.encodeRequest(catalogQuery).compare(bytes("8301a17702a16903c0"))==0,"Terminal catalog query vector changed");
         var renameTerminal:TerminalRename={workspace:"w",instance:"i",id:"t",name:"N",group:"w",expectedRevision:haxe.Int64.make(1,2)};

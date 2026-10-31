@@ -59,7 +59,8 @@ class ScmWatchTestMain {
 			root = temporaryDirectory + "/exosuit-scm-watch-" + fixtureId;
 		// fullPath resolves only an existing path on POSIX, so the directory is made first.
 		FileSystem.createDirectory(root);
-		root = FileSystem.fullPath(root);
+		// Git and the watch report `/` paths, so the fixture root is spelled that way on Windows too.
+		root = StringTools.replace(FileSystem.fullPath(root), "\\", "/");
 		var hooks = root + "/empty-hooks";
 		FileSystem.createDirectory(hooks);
 		var scheduler = new JobScheduler(), processes = new ProcessManager(), git = new GitProcess(processes, scheduler),
@@ -131,6 +132,30 @@ class ScmWatchTestMain {
 			require(Sys.time() - fallbackStarted < 4.0,
 				"SCM polling fallback exceeded its recovery bound after watch registration failed");
 
+			// Another attached folder and a group folder outside both are their own repositories with their own watches,
+			// and one leaving stops only its own.
+			for (folder in [root + "-second", root + "-outside"]) {
+				FileSystem.createDirectory(folder);
+				runGit(git, runtime, scheduler, ["init"], folder, 3);
+				var found:Null<ScmJobResult<Array<ScmRepository>>> = null;
+				service.discover(folder, value -> found = value);
+				pumpNative(runtime, service, scheduler, () -> found != null, "SCM discovery of " + folder + " timed out");
+				if (found == null || found.value == null || found.value.length != 1) throw "No repository under " + folder;
+				var other = found.value[0];
+				pumpNative(runtime, service, scheduler, () -> service.watchDirectories(folder).length > 0, "No watch directories for " + folder);
+				watcher.update(folder, service.watchDirectories(folder), service.watchExclusions(folder));
+				require(watcher.isWatching(folder), "NativeKit did not arm the watcher of " + folder + ": " + watcher.lastError);
+				pumpNative(runtime, service, scheduler, () -> service.snapshot(other.id) != null, "Initial status of " + folder + " timed out");
+				File.saveContent(folder + "/watch-other.txt", "other
+");
+				pumpNative(runtime, service, scheduler, () -> contains(service.snapshot(other.id), "watch-other.txt"),
+					"A change under " + folder + " did not refresh its snapshot");
+			}
+			require(watcher.watchCount() == 3, "Three roots did not hold three native watches: " + watcher.watchCount());
+			watcher.update(root + "-second", []);
+			require(!watcher.isWatching(root + "-second") && watcher.isWatching(root + "-outside") && watcher.isWatching(nested)
+				&& watcher.watchCount() == 2, "A folder leaving stopped another folder's watch");
+
 			watcher.dispose();
 			watcher = null;
 			service.dispose();
@@ -138,7 +163,9 @@ class ScmWatchTestMain {
 			processes.shutdown();
 			runtime.dispose();
 			deleteTree(root);
-			Sys.println("PASS: NativeKit SCM watch delivery, re-arm and polling fallback recovery");
+			deleteTree(root + "-second");
+			deleteTree(root + "-outside");
+			Sys.println("PASS: NativeKit SCM watch delivery, re-arm, polling fallback recovery and per-folder watches");
 			return 0;
 		} catch (error:Dynamic) {
 			if (watcher != null) watcher.dispose();
@@ -146,6 +173,8 @@ class ScmWatchTestMain {
 			processes.shutdown();
 			runtime.dispose();
 			deleteTree(root);
+			deleteTree(root + "-second");
+			deleteTree(root + "-outside");
 			throw error;
 		}
 	}

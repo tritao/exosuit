@@ -40,6 +40,8 @@ class WorkspaceScmTestMain {
 		compatibility();
 		serviceAndClient(args[0], args[1]);
 		cancellation(args[0] + "-fake", args[1] + ".fake");
+		changingRoots(args[0] + "-roots", args[1] + ".roots");
+		changingFolders(args[0] + "-folders", args[1] + ".folders");
 		Sys.println("PASS: workspace SCM wire compatibility, local-only trust, read/write grants, operation deduplication, stale revisions, original reads and reconnect recovery");
 	}
 
@@ -340,6 +342,91 @@ class WorkspaceScmTestMain {
 			"transport revocation cancels the in-flight SCM apply");
 		require(!operationCompleted, "a cancelled RPC operation does not publish a stale completion");
 		server.dispose();
+		scm.dispose();
+		processes.shutdown();
+	}
+
+	/** Two attached folders and a group folder outside both, each its own repository, attached and detached live. */
+	static function changingRoots(parent:String, trustPath:String):Void {
+		var folders = [for (name in ["first", "second", "outside"]) parent + "/" + name];
+		for (folder in folders) {
+			sys.FileSystem.createDirectory(folder);
+			require(Sys.command(gitPath(), ["init", "-q", folder]) == 0, "git init of " + folder);
+		}
+		var processes = new ProcessManager();
+		var scm = new WorkspaceScmService("workspace", [folders[0], folders[1]], processes, gitPath(), null, trustPath);
+		require(scm.rootPath("root") == normalize(folders[0]) && scm.rootPath("root-1") == normalize(folders[1]), "initial roots");
+		scm.setRoots(folders);
+		require(scm.rootPath("root") == normalize(folders[0]) && scm.rootPath("root-1") == normalize(folders[1])
+			&& scm.rootPath("root-2") == normalize(folders[2]), "an attached folder joins with the others' ids intact");
+		for (id in ["root", "root-1", "root-2"]) {
+			var done = false;
+			scm.discover(id, function(_) done = true);
+			var deadline = Sys.time() + 12;
+			while (!done && Sys.time() < deadline) { scm.poll(); Sys.sleep(0.001); }
+			require(done && scm.repositories(id).length == 1, "repository discovered under " + id);
+		}
+		var detached = scm.repositories("root-1")[0].id;
+		scm.setRoots([folders[0], folders[2]]);
+		require(scm.rootPath("root-1") == null && scm.rootPath("root-2") == normalize(folders[2]), "a detached folder lost its root only");
+		require(scm.repositories("root-1").length == 0 && scm.repository(detached) == null, "a detached folder's repositories are gone");
+		require(scm.repositories("root-2").length == 1, "another root kept its repositories");
+		scm.setRoots(folders);
+		require(scm.rootPath("root-1") == null && scm.rootPath("root-3") == normalize(folders[1]), "a folder attached again gets a new id");
+		// Detaching the first folder hands `root` to the next, with its repositories.
+		scm.setRoots([folders[1], folders[2]]);
+		require(scm.rootPath("root") == normalize(folders[1]) && scm.rootPath("root-3") == null, "the first detach did not promote the next");
+		var promoted = false;
+		scm.discover("root", function(_) promoted = true);
+		var promotedDeadline = Sys.time() + 12;
+		while (!promoted && Sys.time() < promotedDeadline) { scm.poll(); Sys.sleep(0.001); }
+		require(promoted && scm.repositories("root").length == 1, "the promoted root has its repository");
+		scm.dispose();
+		processes.shutdown();
+	}
+
+	/** A folder change serves the usable folders, reports the rest, records them, and a failed one changes nothing. */
+	static function changingFolders(parent:String, trustPath:String):Void {
+		if (!sys.FileSystem.exists(parent)) sys.FileSystem.createDirectory(parent);
+		var names = ["alpha", "beta", "gamma"];
+		var folders = [for (name in names) parent + "/" + name];
+		for (folder in folders) sys.FileSystem.createDirectory(folder);
+		var nested = folders[0] + "/nested";
+		sys.FileSystem.createDirectory(nested);
+		var state = parent + "/state";
+		require(AgentManagerNative.prepareDirectory(state), "the state folder is private");
+		var identityPath = haxe.io.Path.join([sys.FileSystem.fullPath(state), "workspace.json"]);
+		AgentStateIdentity.forWorkspace("workspace-id", [folders[0], folders[1]], null).write(identityPath);
+		var processes = new ProcessManager();
+		var files = new workspace.runtime.WorkspaceFileService("workspace", [folders[0], folders[1]], function() return 1000.0);
+		var scm = new WorkspaceScmService("workspace", [folders[0], folders[1]], processes, gitPath(), null, trustPath);
+		var change = function(requested:Array<String>) return workspace.runtime.WorkspaceFolderChange.apply(requested, sys.FileSystem.fullPath(state), folders[0], files, scm);
+		// A nested and a deleted folder are left out; the others are served and recorded.
+		var result = change([folders[0], nested, parent + "/deleted", folders[2]]);
+		require(result.folders.length == 2 && result.skipped.length == 2, "the usable folders are served and the rest reported");
+		require(files.paths().length == 2 && scm.rootPath("root") == normalize(folders[0]) && scm.rootPath("root-1") == null
+			&& scm.rootPath("root-2") == normalize(folders[2]), "the usable folders are served, ids intact for the one that stayed");
+		var recorded = AgentStateIdentity.read(identityPath);
+		require(recorded.folders.length == 2 && recorded.folders[1] == result.folders[1], "the served folders are recorded");
+		// A failure while the file service builds the new set restores the identity and changes no root.
+		var idBefore = scm.rootPath("root-2");
+		var pathsBefore = files.paths();
+		files.beforeCommit = function() throw "injected failure";
+		var injected = false;
+		try change([folders[0], folders[1]]) catch (_:Dynamic) injected = true;
+		files.beforeCommit = null;
+		var kept = AgentStateIdentity.read(identityPath);
+		require(injected && files.paths().join("|") == pathsBefore.join("|") && scm.rootPath("root-2") == idBefore
+			&& scm.rootPath("root-1") == null && kept.folders.join("|") == recorded.folders.join("|"),
+			"a failed file service change left roots, ids or the identity altered");
+		// A failure before anything changes leaves the roots, their ids and the file alone.
+		sys.io.File.saveContent(identityPath, "not json");
+		var failed = false;
+		try change([folders[0], folders[1]]) catch (_:Dynamic) failed = true;
+		require(failed, "an unreadable identity refuses the change");
+		require(files.paths().length == 2 && scm.rootPath("root-2") == idBefore && scm.rootPath("root-1") == null,
+			"a refused change left the roots and their ids as they were");
+		files.dispose();
 		scm.dispose();
 		processes.shutdown();
 	}

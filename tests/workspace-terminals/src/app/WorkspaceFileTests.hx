@@ -32,6 +32,167 @@ class WorkspaceFileTests {
 		try client.poll() catch (error:Dynamic) throw "Client RPC response poll failed: " + Std.string(error);
 	}
 
+	static function listRoots(files:WorkspaceFileClient, client:RpcConnection, server:RpcConnection):FileRootsResult {
+		var result:Null<FileRootsResult> = null;
+		files.roots("workspace", function(value) result = value, function(error) throw error.code, 1000);
+		poll(client, server);
+		if (result == null) throw "Workspace roots were missing";
+		return result;
+	}
+
+	/** Two attached folders plus a group folder outside both, attached and detached while the service runs. */
+	static function dynamicRoots(parent:String):Void {
+		var first = parent + "/dynamic-first", second = parent + "/dynamic-second", outside = parent + "/dynamic-outside";
+		for (folder in [first, second, outside]) {
+			FileSystem.createDirectory(folder);
+			File.saveContent(folder + "/note.txt", "needle in " + folder);
+		}
+		var clock = function() return 1000.0;
+		var service = new WorkspaceFileService("workspace", [first, second], clock);
+		var pair = MemoryTransport.pair();
+		var client = new RpcConnection(pair.client, clock);
+		var server = new RpcConnection(pair.server, clock);
+		var files = new WorkspaceFileClient(client);
+		var revoke = service.bind(server, [WorkspaceFileProtocol.READ]);
+
+		var listed = listRoots(files, client, server);
+		require(listed.roots.length == 2 && listed.roots[0].path == first && listed.roots[1].path == second,
+			"Root descriptors did not carry their folders");
+		var secondId = listed.roots[1].id;
+
+		service.setRoots([first, second, outside]);
+		listed = listRoots(files, client, server);
+		require(listed.roots.length == 3 && listed.roots[0].id == WorkspaceFileService.ROOT_ID && listed.roots[1].id == secondId
+			&& listed.roots[2].name == "dynamic-outside", "An attached folder did not join with the others' ids intact");
+		var outsideId = listed.roots[2].id;
+		var handle:Null<FileSearchHandle> = null;
+		files.searchStart("workspace", outsideId, "content", "needle", true, function(value) handle = value, function(error) throw error.code, 1000);
+		poll(client, server);
+		if (handle == null) throw "Search of the attached folder did not start";
+		var started = handle;
+		var page:Null<FileSearchPageResult> = null;
+		files.searchPage("workspace", started.root, started.searchId, 10, function(value) page = value, function(error) throw error.code, 1000);
+		poll(client, server);
+		if (page == null) throw "Search page of the attached folder was missing";
+		require(page.matches.length == 1 && page.matches[0].root == outsideId, "A search match did not name its root");
+
+		// A search under a detached folder ends, and the other folders keep their ids.
+		var detachedSearch:Null<FileSearchHandle> = null;
+		files.searchStart("workspace", secondId, "content", "needle", true, function(value) detachedSearch = value, function(error) throw error.code, 1000);
+		poll(client, server);
+		if (detachedSearch == null) throw "Search of the folder to detach did not start";
+		var pending = detachedSearch;
+		service.setRoots([first, outside]);
+		listed = listRoots(files, client, server);
+		require(listed.roots.length == 2 && listed.roots[1].id == outsideId, "A detached folder changed another's id");
+		var gone = "";
+		files.searchPage("workspace", pending.root, pending.searchId, 10, function(_) throw "A search outlived its folder",
+			function(error) gone = error.code, 1000);
+		poll(client, server);
+		require(gone == "unknown_root", "A search under a detached folder did not say unknown_root: " + gone);
+		var startGone = "";
+		files.searchStart("workspace", secondId, "content", "needle", true, function(_) throw "A detached root started a search",
+			function(error) startGone = error.code, 1000);
+		poll(client, server);
+		require(startGone == "unknown_root", "Starting a search on a detached root did not say unknown_root: " + startGone);
+		var stale = "";
+		files.stat("workspace", secondId, "note.txt", function(_) throw "A detached root answered", function(error) stale = error.code, 1000);
+		poll(client, server);
+		require(stale == "invalid_request", "A detached root was still addressable");
+
+		service.setRoots([first, second, outside]);
+		listed = listRoots(files, client, server);
+		require(listed.roots.length == 3 && listed.roots[1].id != secondId && listed.roots[2].id == outsideId,
+			"A folder attached again did not get a new id");
+		revoke();
+		client.close();
+		server.close();
+		service.dispose();
+	}
+
+	/** The first folder leaving hands the id `root` to the next, so callers that name `root` keep working. */
+	static function detachFirst(parent:String):Void {
+		var first = parent + "/detach-first-a", second = parent + "/detach-first-b";
+		for (folder in [first, second]) {
+			FileSystem.createDirectory(folder);
+			File.saveContent(folder + "/note.txt", "in " + folder);
+		}
+		var clock = function() return 1000.0;
+		var service = new WorkspaceFileService("workspace", [first, second], clock);
+		var pair = MemoryTransport.pair();
+		var client = new RpcConnection(pair.client, clock);
+		var server = new RpcConnection(pair.server, clock);
+		var files = new WorkspaceFileClient(client);
+		var revoke = service.bind(server, [WorkspaceFileProtocol.READ]);
+		service.setRoots([second]);
+		var listed = listRoots(files, client, server);
+		require(listed.roots.length == 1 && listed.roots[0].id == WorkspaceFileService.ROOT_ID && listed.roots[0].path == second,
+			"The folder left after detaching the first did not become root");
+		var statted = false;
+		files.stat("workspace", WorkspaceFileService.ROOT_ID, "note.txt", function(value) statted = value.path == "note.txt", function(error) throw error.code, 1000);
+		poll(client, server);
+		require(statted, "root did not serve the remaining folder");
+		service.setRoots([first, second]);
+		listed = listRoots(files, client, server);
+		require(listed.roots.length == 2 && listed.roots[0].path == first && listed.roots[0].id != WorkspaceFileService.ROOT_ID
+			&& listed.roots[1].id == WorkspaceFileService.ROOT_ID && listed.roots[1].path == second, "Attaching a folder again moved root");
+		revoke();
+		client.close();
+		server.close();
+		service.dispose();
+	}
+
+	/** A failure before the swap leaves the served folders and their ids as they were. */
+	static function failedChange(parent:String):Void {
+		var a = parent + "/failed-a", b = parent + "/failed-b", c = parent + "/failed-c";
+		for (folder in [a, b, c]) FileSystem.createDirectory(folder);
+		var service = new WorkspaceFileService("workspace", [a, b], function() return 1000.0);
+		var before = service.paths();
+		service.beforeCommit = function() throw "injected failure";
+		var failed = false;
+		try service.setRoots([b, c]) catch (_:Dynamic) failed = true;
+		require(failed, "The injected failure did not surface");
+		var after = service.paths();
+		require(after.length == before.length && after[0] == before[0] && after[1] == before[1], "A failed change altered the served folders");
+		service.beforeCommit = null;
+		service.setRoots([a, b]);
+		require(service.paths().length == 2, "The service did not take a change after a failed one");
+		service.dispose();
+	}
+
+	/** The rules for the folder list, folder labels and the reconcile check. */
+	static function folderRules(parent:String):Void {
+		var outer = parent + "/rules-outer", inner = outer + "/inner", plain = parent + "/rules-plain";
+		for (folder in [outer, inner, plain]) FileSystem.createDirectory(folder);
+		// One bad entry is left out and reported; the usable folders are still served.
+		var skips = function(folders:Array<String>, served:Int, needle:String):Void {
+			var selection = workspace.WorkspaceFolders.select(folders);
+			require(selection.folders.length == served && selection.skipped.length > 0 && selection.skipped.join(";").indexOf(needle) >= 0,
+				"Folders " + folders.join(",") + " gave " + selection.folders.length + " served, skipped: " + selection.skipped.join(";"));
+		};
+		skips([plain, "relative/folder"], 1, "absolute");
+		skips([outer, inner, plain], 2, "inside");
+		skips([inner, outer, plain], 2, "holds");
+		var gone = parent + "/rules-deleted";
+		skips([outer, gone, plain], 2, "not available");
+		var many = [for (i in 0...17) parent + "/rules-cap" + i];
+		for (folder in many) FileSystem.createDirectory(folder);
+		skips(many, 16, "at most");
+		var kept = workspace.WorkspaceFolders.select([outer, plain, outer]);
+		require(kept.folders.length == 2 && kept.skipped.length == 0, "A valid list was not kept once per folder");
+		// Reconcile compares against the usable folders only, so a bad entry does not look like a difference forever.
+		var usable = workspace.WorkspaceFolders.select([outer, inner, gone, plain]).folders;
+		require(!workspace.client.FolderReconcile.differs(usable, usable, null), "Served usable folders differed");
+		var delay = 5.0;
+		for (_ in 0...10) delay = workspace.client.FolderReconcile.nextDelay(delay);
+		require(delay == 60.0 && workspace.client.FolderReconcile.nextDelay(5.0) == 10.0, "Retry delay did not double up to a minute");
+		var labels = workspace.FolderLabels.labels(["/a/app", "/b/app", "/c/lib"]);
+		require(labels[0] == "a/app" && labels[1] == "b/app" && labels[2] == "lib", "Folder labels were " + labels.join(","));
+		require(!workspace.client.FolderReconcile.differs(["/x", "/y"], ["/y", "/x"], null), "The same folders in another order differed");
+		require(workspace.client.FolderReconcile.differs(["/x"], ["/x", "/y"], null), "A missing folder did not differ");
+		require(!workspace.client.FolderReconcile.differs(["/s"], [], "/s"), "The scratch folder differed");
+	}
+
 	public static function run(parent:String):Void {
 		var rootPath = parent + "/file-service-contract";
 		var secondRootPath = parent + "/second-file-service-contract";
@@ -533,6 +694,10 @@ class WorkspaceFileTests {
 		deniedClient.close();
 		deniedServer.close();
 		service.dispose();
+		dynamicRoots(parent);
+		detachFirst(parent);
+		folderRules(parent);
+		failedChange(parent);
 		Sys.println("PASS: workspace file/search grants, stable paging, UTF-8 locations, search limits/cancellation, expiry and revocation");
 	}
 }
