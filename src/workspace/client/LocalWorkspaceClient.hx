@@ -223,10 +223,17 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     Tells the service to serve exactly `folders` now, with no restart (see WorkspaceFoldersProtocol). `done` gets the
     failure, or null once the service has changed its roots and watchers.
   **/
+  /** The failure for a service that does not offer folder changes at all (as opposed to one not connected now). */
+  public static inline final CANNOT_SET_FOLDERS = "The workspace service cannot change its folders; restart it to pick them up.";
+
   public function setServedFolders(folders:Array<String>, done:Null<String>->Void):Void {
     var connection = rpc();
-    if (connection == null || !hasCapability(workspace.service.WorkspaceFoldersProtocol.CAPABILITY)) {
-      done("The workspace service cannot change its folders; restart it to pick them up.");
+    if (connection == null) {
+      done("The workspace service is not connected.");
+      return;
+    }
+    if (!hasCapability(workspace.service.WorkspaceFoldersProtocol.CAPABILITY)) {
+      done(CANNOT_SET_FOLDERS);
       return;
     }
     connection.call(workspace.service.WorkspaceFoldersProtocol.SET, {folders: folders}, 5000, function(_) done(null),

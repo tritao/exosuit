@@ -691,6 +691,21 @@ class AgentManager {
 		return reason;
 	}
 
+	/** The exit status of a manager that found another one owning the workspace state. */
+	static inline final WORKSPACE_IN_USE = 3;
+
+	/** The endpoint of the manager that owns the state, once it is ready; null when none appears before `deadline`. */
+	static function waitForOtherManager(directory:String, key:String, deadline:Float):Null<Dynamic> {
+		while (Sys.time() < deadline) {
+			try {
+				var endpoint = readDiscovery(directory, key);
+				if (endpoint != null) return endpoint;
+			} catch (_:Dynamic) {}
+			Sys.sleep(0.05);
+		}
+		return null;
+	}
+
 	static function startDetached(options:ManagerOptions, directory:String):Int {
 		var launcher = managerBytecode();
 		var generation = AgentManagerNative.randomToken().substr(0, 32);
@@ -711,6 +726,16 @@ class AgentManager {
 				if (status >= 0) {
 					result = status;
 					complete = true;
+					if (status == WORKSPACE_IN_USE) {
+						// Another start (the window's, or the Workbench tree's) owns the state and is still coming up: wait
+						// for its endpoint instead of failing, whoever began first.
+						var running = waitForOtherManager(directory, options.identity.key(), deadline);
+						if (running == null) throw lastFailure(logPath);
+						Sys.stderr().flush();
+						emitDiscovery(running, options.wire);
+						result = 0;
+						break;
+					}
 					if (status != 0) throw lastFailure(logPath);
 					break;
 				}
@@ -782,7 +807,7 @@ class AgentManager {
 		if (lock == null) {
 			Sys.stderr().writeString("workspace_in_use: another manager owns this workspace state\n");
 			Sys.stderr().flush();
-			return 3;
+			return WORKSPACE_IN_USE;
 		}
 		var stableLease:Null<String> = null;
 		AgentManagerNative.installStopSignals();
@@ -812,6 +837,9 @@ class AgentManager {
 			}
 			if (generation.length == 0) generation = AgentManagerNative.randomToken().substr(0, 32);
 			prepareLog(logPath);
+			options.identity = catalogIdentity(options.identity);
+			if (options.identity.workspace != null && (options.identity.folders.length > 0 || options.identity.scratch != null))
+				options.root = options.identity.primaryRoot();
 			ensureIdentity(identityPath, options.identity);
 			var notices = AgentWorkspaceMigration.run(options.identity, directory);
 			AgentWorkspaceMigration.writeNotices(directory, notices);
@@ -928,6 +956,22 @@ class AgentManager {
 		if (stableLease != null && FileSystem.exists(stableLease))
 			try FileSystem.deleteFile(stableLease) catch (_:Dynamic) { exitCode = 1; }
 		return exitCode;
+	}
+
+	/**
+		A workspace's identity with the folders and scratch folder suit's catalog has for it now. The manager's own
+		arguments are those of the start that launched it, and the folders may have changed since (see
+		WorkspaceFoldersProtocol), so each spawn takes them from the catalog; without a catalog entry the arguments stand.
+	**/
+	static function catalogIdentity(identity:AgentStateIdentity):AgentStateIdentity {
+		var id = identity.workspace;
+		var file = suit.MachineCatalog.file();
+		if (id == null || !FileSystem.exists(file)) return identity;
+		var found:Null<suit.MachineCatalog.MachineWorkspace> = null;
+		try {
+			for (entry in new suit.MachineCatalog(file).state.workspaces) if (entry.id == id) found = entry;
+		} catch (_:Dynamic) {}
+		return found == null ? identity : AgentStateIdentity.forWorkspace(id, found.folders, found.scratch);
 	}
 
 	/**

@@ -1569,6 +1569,188 @@ class ExosuitApp implements DesktopUiApplication {
 			new haxeon.ui.widgets.sidebar.SidebarModeOptions("Remote Access", 30, true));
 	}
 
+	var reconciledClient:Null<workspace.client.WorkspaceFileClient>;
+	var reconciledWorkspace:Null<String>;
+	var reconcilePending = false;
+	var reconcileRetryAt = 0.0;
+	var reconcileBackoff = 5.0;
+	var reconcileReported:Null<String>;
+	var servedRefreshAt = 0.0;
+	var servedRefreshDelay = 1.5;
+	var servedRefreshUntil = 0.0;
+	var servedRefreshPending = false;
+	var reconcileKey:Null<String>;
+	/** The folders the open workspace's service serves, as last listed, and the client that listed them. */
+	var servedRoots:Array<{id:String, path:String}> = [];
+	var servedRootsClient:Null<workspace.client.WorkspaceFileClient>;
+
+	/** The folder behind the root id `root`: the first attached folder that is still there, which can change on detach. */
+	function primaryScope(attachment:Null<workspace.client.WorkspaceAttachment>):Null<String> {
+		if (attachment == null) return null;
+		if (servedRootsClient != null && servedRootsClient == attachment.fileClient())
+			for (root in servedRoots) if (root.id == "root") return root.path;
+		return attachment.fileScope();
+	}
+
+	/**
+		Finds the root the service serves `file`'s folder under, by path rather than by the id the tab was opened with,
+		and re-keys the tab if that id changed. False when the folder is known not to be attached. Without a listing
+		the tab keeps its id, as long as `root` still means the scope it was opened with.
+	**/
+	function resolveFileRoot(attachment:Null<workspace.client.WorkspaceAttachment>, file:UiWorkspaceFileTab):Bool {
+		if (attachment == null) return false;
+		var client = attachment.fileClient();
+		if (client != null && servedRootsClient == client && servedRoots.length > 0) {
+			for (root in servedRoots) if (PathKey.same(root.path, file.scope)) {
+				if (root.id != file.root) file.rekey(root.id);
+				return true;
+			}
+			return false;
+		}
+		var scope = attachment.fileScope();
+		return scope == null || file.root != "root" || scope == file.scope;
+	}
+
+	/** Shows a failure or a skipped-folders note once per distinct text, so a retry cannot repeat the toast. */
+	function reportOnce(text:Null<String>):Void {
+		if (text == null || text == reconcileReported) return;
+		reconcileReported = text;
+		application.reportError("workspace", text);
+	}
+
+	/**
+		Records the folders `listed` as served. Editor tabs follow their folder by path: one whose folder is now served
+		under another id (it became `root`) takes that id, and one whose folder was detached closes.
+	**/
+	function noteServedRoots(fileClient:workspace.client.WorkspaceFileClient, workspaceId:String,
+			listed:Array<workspace.service.WorkspaceFileProtocol.FileRootDescriptor>):Void {
+		var before = servedRootsClient == fileClient ? servedRoots : [];
+		var now:Array<{id:String, path:String}> = [];
+		for (root in listed) if (root.path != null) now.push({id: root.id, path: root.path});
+		servedRoots = now;
+		servedRootsClient = fileClient;
+		host.reconcileWorkspaceFiles(workspaceId, function(scope) {
+			for (root in now) if (PathKey.same(root.path, scope)) return root.id;
+			for (root in before) if (PathKey.same(root.path, scope)) return null;
+			return "";
+		});
+	}
+
+	/** The machine catalog's entry for the open workspace, when there is one. */
+	function catalogEntry():Null<suit.MachineCatalog.MachineWorkspace> {
+		var machine = machineClient, current = application.savedWorkspaces.current;
+		var state = machine == null ? null : machine.machine;
+		if (current == null || state == null) return null;
+		for (candidate in state.workspaces) if (candidate.id == current.id) return candidate;
+		return null;
+	}
+
+	/** Asks the service which folders it serves now; `done` is told whether they are the catalog's usable folders. */
+	function refreshServedRoots(attached:workspace.client.WorkspaceAttachment, ?done:Bool->Void):Void {
+		var fileClient = attached.fileClient();
+		if (fileClient == null) { if (done != null) done(false); return; }
+		var workspaceId = attached.fileWorkspace();
+		fileClient.roots(workspaceId, function(listed) {
+			var ok = listed != null && listed.roots != null && attached.fileClient() == fileClient;
+			if (ok) noteServedRoots(fileClient, workspaceId, listed.roots);
+			var entry = catalogEntry();
+			var matches = ok && (entry == null || servedMatchesCatalog(entry));
+			if (done != null) done(matches);
+		}, function(_) { if (done != null) done(false); });
+	}
+
+	/** Whether the folders last listed are the usable ones of the catalog entry. */
+	function servedMatchesCatalog(entry:suit.MachineCatalog.MachineWorkspace):Bool {
+		var served = [for (root in servedRoots) root.path];
+		return !workspace.client.FolderReconcile.differs(served, workspace.WorkspaceFolders.select(entry.folders).folders, entry.scratch);
+	}
+
+	/**
+		After the catalog changes (here or in another window) the service follows a moment later, from whichever window
+		made the change. Lists the served folders again, with a growing delay, until they are the catalog's or two
+		minutes have passed, so the cached `root` cannot stay stale.
+	**/
+	function pollServedRoots(attached:workspace.client.WorkspaceAttachment):Void {
+		if (servedRefreshAt <= 0 || servedRefreshPending || Sys.time() < servedRefreshAt) return;
+		servedRefreshPending = true;
+		refreshServedRoots(attached, function(matches) {
+			servedRefreshPending = false;
+			var now = Sys.time();
+			if (matches || now > servedRefreshUntil) { servedRefreshAt = 0; return; }
+			servedRefreshAt = now + servedRefreshDelay;
+			servedRefreshDelay = Math.min(30.0, servedRefreshDelay * 2);
+		});
+	}
+
+	function startServedRefresh():Void {
+		servedRefreshDelay = 1.5;
+		servedRefreshAt = Sys.time() + servedRefreshDelay;
+		servedRefreshUntil = Sys.time() + 120;
+	}
+
+	/**
+		A service that was already running when this window attached may serve other folders than the machine catalog
+		gives its workspace (a folder attached or detached while no window was open, or a failed earlier change). Once per
+		service, and again after a failure, the app asks it to serve the catalog's folders. Folders that cannot be served
+		(nested, missing) are left out of the comparison and reported once, so one bad entry cannot keep this retrying;
+		failures retry with a doubling delay, up to a minute.
+	**/
+	function reconcileServedFolders(attached:workspace.client.WorkspaceAttachment, fileClient:Null<workspace.client.WorkspaceFileClient>):Void {
+		var machine = machineClient;
+		if (reconcilePending || fileClient == null || machine == null || Sys.time() < reconcileRetryAt) return;
+		if (!Std.isOfType(attached, workspace.client.LocalWorkspaceClient)) return;
+		var current = application.savedWorkspaces.current;
+		var entry = catalogEntry();
+		if (current == null || entry == null) return;
+		// Another workspace, or other folders in the catalog, start over: nothing from the last try carries across.
+		var key = current.id + "|" + entry.folders.join("|") + "|" + entry.scratch;
+		if (key != reconcileKey) {
+			reconcileKey = key;
+			reconciledClient = null;
+			reconcileReported = null;
+			reconcileBackoff = 5.0;
+			reconcileRetryAt = 0.0;
+		}
+		if (Sys.time() < reconcileRetryAt) return;
+		if (reconciledClient == fileClient && reconciledWorkspace == current.id) return;
+		var wanted = entry;
+		var local:workspace.client.LocalWorkspaceClient = cast attached;
+		var workspaceId = attached.fileWorkspace();
+		reconcilePending = true;
+		var settled = function(note:Null<String>):Void {
+			reconcilePending = false;
+			reconciledClient = fileClient;
+			reconciledWorkspace = wanted.id;
+			reconcileBackoff = 5.0;
+			reportOnce(note);
+		};
+		var retry = function(failure:String):Void {
+			reconcilePending = false;
+			reconcileRetryAt = Sys.time() + reconcileBackoff;
+			reconcileBackoff = workspace.client.FolderReconcile.nextDelay(reconcileBackoff);
+			reportOnce(failure);
+		};
+		fileClient.roots(workspaceId, function(listed) {
+			var served:Array<String> = [];
+			var known = listed != null && listed.roots != null;
+			if (known) for (root in listed.roots) if (root.path == null) known = false; else served.push(root.path);
+			if (known) noteServedRoots(fileClient, workspaceId, listed.roots);
+			var selection = workspace.WorkspaceFolders.select(wanted.folders);
+			var skipped = selection.skipped.length == 0 ? null : "Folders not served: " + selection.skipped.join("; ");
+			if (!known || !workspace.client.FolderReconcile.differs(served, selection.folders, wanted.scratch)) {
+				settled(skipped);
+				return;
+			}
+			local.setServedFolders(wanted.folders, function(failure) {
+				if (failure == null) {
+					settled(skipped);
+					refreshServedRoots(attached);
+				} else if (failure == workspace.client.LocalWorkspaceClient.CANNOT_SET_FOLDERS) settled(failure);
+				else retry(failure);
+			});
+		}, function(_) { retry("The workspace service did not list its folders."); });
+	}
+
 	/** The Machine view: this machine's workspace services, and which one `client` uses for each folder. */
 	public function attachMachine(machine:workspace.client.MachineWorkspaces, client:workspace.client.LocalWorkspaceClient):Void {
 		machineWorkspaces = machine;
@@ -1645,7 +1827,13 @@ class ExosuitApp implements DesktopUiApplication {
 			var attached = workspaceAttachment;
 			if (attached == null || !Std.isOfType(attached, workspace.client.LocalWorkspaceClient) || openWorkspace() != entry.id) return;
 			var local:workspace.client.LocalWorkspaceClient = cast attached;
-			local.setServedFolders(entry.folders, function(failure) { report(failure); });
+			var skipped = workspace.WorkspaceFolders.select(entry.folders).skipped;
+			local.setServedFolders(entry.folders, function(failure) {
+				if (!report(failure)) {
+					if (skipped.length > 0) application.reportError("workspace", "Folders not served: " + skipped.join("; "));
+					refreshServedRoots(attached);
+				}
+			});
 		};
 		var chooseFolder = function(title:String, chosen:String->Void):Void {
 			if (desktop != null) desktop.selectDirectory(function(accepted, paths) { if (accepted && paths.length > 0) chosen(paths[0]); }, title);
@@ -1887,7 +2075,7 @@ class ExosuitApp implements DesktopUiApplication {
    return workspaceAttachment == attachment && current != null && current.cwd == record.cwd && current.thread == record.thread;
   }
   if (attachment != null && !attachment.hasLocalFileAccess()) {
-   var client = attachment.fileClient(), scope = attachment.fileScope();
+   var client = attachment.fileClient(), scope = primaryScope(attachment);
    var relative = scope == null ? null : workspace.client.SessionLinkTarget.relativeWithin(scope, path);
    if (client == null || relative == null) { done(null, "Workspace file service is unavailable"); return; }
    var workspaceId = attachment.fileWorkspace();
@@ -2167,7 +2355,7 @@ class ExosuitApp implements DesktopUiApplication {
    done(null, "Image preview is unavailable for this location"); return;
   }
   var cwd = record.cwd, thread = record.thread, path = target.resolve(cwd);
-  var scope = attachment.fileScope(), client = attachment.fileClient();
+  var scope = primaryScope(attachment), client = attachment.fileClient();
   var relative = scope == null ? null : workspace.client.SessionLinkTarget.relativeWithin(scope, path);
   if (client == null || relative == null || workspace.client.SessionLinkTarget.relativeWithin(root, path) == null) {
    done(null, "Image is outside the connected workspace"); return;
@@ -2176,7 +2364,7 @@ class ExosuitApp implements DesktopUiApplication {
   function wanted():Bool {
    var current = sessionRecord(resource, root);
    return workspaceAttachment == attachment && current != null && current.cwd == cwd && current.thread == thread
-    && attachment.fileClient() == client && attachment.fileWorkspace() == workspaceId && attachment.fileScope() == scope;
+    && attachment.fileClient() == client && attachment.fileWorkspace() == workspaceId && primaryScope(attachment) == scope;
   }
   WorkspaceImageReader.read(client, workspaceId, "root", relative, done, wanted);
  }
@@ -2205,7 +2393,7 @@ class ExosuitApp implements DesktopUiApplication {
    : workspace.client.SessionFileScope.allows(root, record.cwd, path, true, scmRelativePath);
   if (!allowed) { application.reportError("agent", "This file link is outside the session’s workspace"); return; }
   if (remote) {
-   var client = attachment.fileClient(), scope = attachment.fileScope();
+   var client = attachment.fileClient(), scope = primaryScope(attachment);
    if (client == null || scope == null) { application.reportError("agent", "Workspace file service is unavailable"); return; }
    var scopedPath = workspace.client.SessionLinkTarget.relativeWithin(scope, path);
    if (scopedPath == null) { application.reportError("agent", "This file is outside the connected file root"); return; }
@@ -2867,6 +3055,8 @@ class ExosuitApp implements DesktopUiApplication {
 			if (!waiting && !byWorkspace) attachment.select(project == null ? null : project.root);
 			attachment.poll();
 			var fileClient = attachment.fileClient();
+			reconcileServedFolders(attachment, fileClient);
+			pollServedRoots(attachment);
 			if (fileClient != searchFileClient) {
 				searchFileClient = fileClient;
 				searchPanel.workspaceAttachmentChanged();
@@ -2892,6 +3082,8 @@ class ExosuitApp implements DesktopUiApplication {
 			workspaces.poll();
 			if (machineClientRevision != workspaces.revision) {
 				machineClientRevision = workspaces.revision;
+				// Another window may have attached or detached a folder; its change reaches the service shortly after.
+				startServedRefresh();
 				requestFrame();
 			}
 		}
@@ -3285,18 +3477,28 @@ class ExosuitApp implements DesktopUiApplication {
 		var scope = contextScope(), panel = workbenchPanel;
 		if (scope == null || panel == null) return application.activeContext.roots;
 		if (!scope.isWorkspace()) return [scope.directory];
+		// The panel asks on every frame; the folders are worked out again only when their inputs change.
+		var attached = application.activeContext.roots;
+		var key = panel.model.revision() + "|" + scope.directory + "|" + attached.join("|");
+		if (key == contextRootsKey) return contextRootsValue;
 		// The workspace itself works in every attached folder and in each group folder outside them.
-		var attached = application.activeContext.roots.copy(), own = scope.directory;
-		if (!Lambda.exists(attached, function(root) return PathKey.within(root, own))) attached.push(own);
-		return AgentScope.workspaceFolders(panel.model, attached, normalizedContextFolder);
+		var folders = attached.copy(), own = scope.directory;
+		if (!Lambda.exists(folders, function(root) return PathKey.within(root, own))) folders.push(own);
+		contextRootsValue = AgentScope.workspaceFolders(panel.model, folders, normalizedContextFolder);
+		contextRootsKey = key;
+		return contextRootsValue;
 	}
 
+	var contextRootsKey:Null<String>;
+	var contextRootsValue:Array<String> = [];
 	var contextFolders:Map<String, String> = [];
 
 	/** A group folder as the file system spells it; remembered, since the panel asks on every frame. */
 	function normalizedContextFolder(path:String):String {
 		var known = contextFolders.get(path);
 		if (known != null) return known;
+		// Bounded: a long session with many group folders must not grow it without end.
+		if (Lambda.count(contextFolders) >= 256) contextFolders = [];
 		var value = path;
 		try value = application.workspace.fileSystem.normalize(path) catch (_:Dynamic) value = path;
 		contextFolders.set(path, value);
@@ -3921,7 +4123,7 @@ class ExosuitApp implements DesktopUiApplication {
 			application.reportError("search", "Workspace file service is not connected");
 			return;
 		}
-		var scope = attachment.fileScope();
+		var scope = primaryScope(attachment);
 		var root = match.root == null ? "root" : match.root;
 		// A result under another of the workspace's folders is scoped to that folder.
 		var matchFolder = remoteFileSearch.rootPath(match);
@@ -3991,7 +4193,7 @@ class ExosuitApp implements DesktopUiApplication {
 		workspaceFileLoader.load(key, revision, function(complete, wanted) {
 			var client = attachment == null ? null : attachment.fileClient();
 			if (workspaceAttachment != attachment || client == null || attachment.fileWorkspace() != file.workspace ||
-				attachment.fileScope() != null && file.root == "root" && attachment.fileScope() != file.scope) {
+				!resolveFileRoot(attachment, file)) {
 				complete({contents: null, revision: null, sizeBytes: 0, error: "Workspace file service is not connected"});
 				return;
 			}
@@ -4033,7 +4235,7 @@ class ExosuitApp implements DesktopUiApplication {
 		var attachment = workspaceAttachment;
 		var client = attachment == null ? null : attachment.fileClient();
 		if (client == null || attachment.fileWorkspace() != file.workspace
-			|| attachment.fileScope() != null && attachment.fileScope() != file.scope) {
+			|| !resolveFileRoot(attachment, file)) {
 			file.refreshError = "Workspace is disconnected; showing the last loaded snapshot";
 			requestFrame();
 			return;
@@ -4815,7 +5017,7 @@ class ExosuitApp implements DesktopUiApplication {
 				var relative = resource.pathBytes.getString(0, resource.pathBytes.length);
 				var path:String;
 				if (source.isRemote()) {
-					var scope = workspaceAttachment == null ? null : workspaceAttachment.fileScope();
+					var scope = workspaceAttachment == null ? null : primaryScope(workspaceAttachment);
 					var repoRelative = scope == null ? null : pathUnderScope(scope, repository.root);
 					if (repoRelative == null) continue;
 					path = repoRelative.length == 0 ? relative : repoRelative + "/" + relative;
@@ -5083,7 +5285,7 @@ class ExosuitApp implements DesktopUiApplication {
 		complete:Null<String>->Null<String>->Null<editor.Document>->Void):Void {
 		if (source.isRemote()) {
 			var attachment = workspaceAttachment, client = attachment == null ? null : attachment.fileClient();
-			var scope = attachment == null ? null : attachment.fileScope();
+			var scope = attachment == null ? null : primaryScope(attachment);
 			if (attachment == null || client == null || scope == null) { complete(null, null, null); return; }
 			var repoRelative = pathUnderScope(scope, repository.root);
 			if (repoRelative == null) { complete(null, null, null); return; }
@@ -5114,7 +5316,7 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function openRemoteScmFile(repository:scm.ScmRepository, relative:String, line:Int):Void {
 		var attachment = workspaceAttachment, client = attachment == null ? null : attachment.fileClient();
-		var scope = attachment == null ? null : attachment.fileScope();
+		var scope = attachment == null ? null : primaryScope(attachment);
 		if (attachment == null || client == null || scope == null) { reportScmReadError("Workspace file service is unavailable"); return; }
 		var repoRelative = pathUnderScope(scope, repository.root);
 		if (repoRelative == null) { reportScmReadError("Repository is outside the workspace file root"); return; }

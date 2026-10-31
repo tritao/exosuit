@@ -199,6 +199,10 @@ class MachineCatalog {
 		for (existing in workspace.folders)
 			if (PathKey.same(existing, normal))
 				throw "The workspace already has this folder";
+			else if (PathKey.within(existing, normal))
+				throw normal + " is inside " + existing + "; attach one of them";
+			else if (PathKey.within(normal, existing))
+				throw existing + " is inside " + normal + "; attach one of them";
 		if (workspace.folders.length >= FOLDER_LIMIT)
 			throw 'A workspace has at most $FOLDER_LIMIT folders';
 		workspace.folders.push(normal);

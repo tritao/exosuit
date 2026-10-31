@@ -963,6 +963,9 @@ class WorkspaceFileService {
 		return root;
 	}
 
+	/** Test hook: runs once every new folder is open and before the old set changes; throwing aborts the change. */
+	public var beforeCommit:Null<Void->Void>;
+
 	/** The folders served now, in order. */
 	public function paths():Array<String> return [for (root in roots) root.path];
 
@@ -978,6 +981,7 @@ class WorkspaceFileService {
 		opened. The first folder always has the id `root`.
 	**/
 	public function setRoots(paths:Array<String>):Void {
+		// Everything that can fail happens above the line where the old set is first touched; below it nothing throws.
 		if (disposed || paths == null || paths.length > MAX_ROOTS) throw "Invalid workspace filesystem roots";
 		for (path in paths) if (path == null || path.length == 0) throw "Invalid workspace filesystem root";
 		var fresh:Map<String, FileSystemRoot> = [];
@@ -986,6 +990,7 @@ class WorkspaceFileService {
 				var key = PathKey.of(path);
 				if (rootFor(path) == null && !fresh.exists(key)) fresh.set(key, new FileSystemRoot(path));
 			}
+			if (beforeCommit != null) beforeCommit();
 		} catch (error:Dynamic) {
 			for (handle in fresh) try handle.close() catch (_:Dynamic) {}
 			throw error;
@@ -1014,8 +1019,8 @@ class WorkspaceFileService {
 	/** The first folder takes the freed id `root`; what clients held under its old id ends. */
 	function promote(root:WorkspaceFileRoot):Void {
 		var old = root.id;
-		endWatch(old);
-		for (binding in bindings.copy()) binding.rootRemoved(old);
+		try endWatch(old) catch (_:Dynamic) {}
+		for (binding in bindings.copy()) try binding.rootRemoved(old) catch (_:Dynamic) {}
 		var wasUnwatched = unwatched.exists(old);
 		unwatched.remove(old);
 		if (wasUnwatched) unwatched.set(WorkspaceRootIds.PRIMARY, true);
@@ -1038,7 +1043,7 @@ class WorkspaceFileService {
 	}
 
 	function removeRoot(root:WorkspaceFileRoot):Void {
-		endWatch(root.id);
+		try endWatch(root.id) catch (_:Dynamic) {}
 		roots.remove(root);
 		unwatched.remove(root.id);
 		rootsById.remove(root.id);
@@ -1046,7 +1051,7 @@ class WorkspaceFileService {
 		dirtyRoots.remove(root.id);
 		rootIds.forget(root.path);
 		if (fileWatch != null) NativeKit.nk_file_watch_remove_directory(fileWatch.borrow(), root.path);
-		for (binding in bindings.copy()) binding.rootRemoved(root.id);
+		for (binding in bindings.copy()) try binding.rootRemoved(root.id) catch (_:Dynamic) {}
 		try root.handle.close() catch (_:Dynamic) {}
 	}
 

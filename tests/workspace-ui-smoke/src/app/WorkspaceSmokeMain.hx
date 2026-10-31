@@ -931,10 +931,11 @@ class WorkspaceSmokeApp extends ExosuitApp {
 			ui.root.walk(function(child) {
 				if (child.styleKey != null && StringTools.startsWith(child.styleKey,"gutter:"+activeSettingsView.document.id+":markers:")) gutter = child;
 			});
-			if (gutter == null) throw "Settings test missing retained gutter";
+			var gutterNode = gutter;
+			if (gutterNode == null) throw "Settings test missing retained gutter";
 			var gutterProbe = TextLayout.create(testFonts, Std.string(activeSettingsView.document.buffer.lineCount()), 1.0,
 				new TextStyle(22.0, FontFamily.Monospace), new ParagraphStyle(TextWrap.None));
-			var gutterGeometry = gutter.resolved;
+			var gutterGeometry = gutterNode.resolved;
 			if (gutterGeometry == null) throw "Settings test missing gutter geometry";
 			require(Math.abs(gutterGeometry.width - (gutterProbe.measure().width + 12.0)) < 0.01,
 				"gutter font size did not follow editor font size");

@@ -1,7 +1,8 @@
-package workspace.runtime;
+package workspace;
 
 import sys.FileSystem;
-import workspace.PathKey;
+
+typedef FolderSelection = {folders:Array<String>, skipped:Array<String>}
 
 /** The rules for the folders a workspace service is asked to serve. */
 class WorkspaceFolders {
@@ -20,25 +21,28 @@ class WorkspaceFolders {
 	}
 
 	/**
-		The folders as the file system spells them, in order, or a thrown message naming the first fault: more than
-		LIMIT folders (checked before the file system is touched), a relative path, a path that is not a directory, or a
-		folder inside another. The same folder twice is kept once. Nothing is changed.
+		The folders a service serves out of `requested`, in order, as the file system spells them, and a line for each
+		that was left out and why: a relative path, one that is not a directory, one inside (or holding) a folder
+		listed before it, or one past LIMIT. The same folder twice is kept once. Never throws for a bad entry, so one
+		bad folder cannot stop the others from being served. Pure of side effects.
 	**/
-	public static function validate(requested:Array<String>):Array<String> {
+	public static function select(requested:Array<String>):FolderSelection {
 		if (requested == null) throw "Invalid folder list";
-		if (requested.length > LIMIT) throw "A workspace can have at most " + LIMIT + " folders";
-		for (folder in requested)
-			if (!absolute(folder)) throw "Folder must be an absolute path: " + folder;
-		var result:Array<String> = [];
+		var folders:Array<String> = [], skipped:Array<String> = [];
 		for (folder in requested) {
-			if (!FileSystem.exists(folder) || !FileSystem.isDirectory(folder)) throw "Folder is not available: " + folder;
+			if (!absolute(folder)) { skipped.push(folder + ": must be an absolute path"); continue; }
+			if (folders.length >= LIMIT) { skipped.push(folder + ": a workspace can have at most " + LIMIT + " folders"); continue; }
+			if (!FileSystem.exists(folder) || !FileSystem.isDirectory(folder)) { skipped.push(folder + ": is not available"); continue; }
 			var full = FileSystem.fullPath(folder);
-			if (Lambda.exists(result, function(known) return PathKey.same(known, full))) continue;
-			for (known in result)
-				if (PathKey.within(known, full)) throw full + " is inside " + known + "; attach one of them";
-				else if (PathKey.within(full, known)) throw known + " is inside " + full + "; attach one of them";
-			result.push(full);
+			var reason:Null<String> = null, duplicate = false;
+			for (known in folders)
+				if (PathKey.same(known, full)) duplicate = true;
+				else if (PathKey.within(known, full)) reason = "is inside " + known;
+				else if (PathKey.within(full, known)) reason = "holds " + known;
+			if (duplicate) continue;
+			if (reason != null) { skipped.push(folder + ": " + reason + "; attach one of them"); continue; }
+			folders.push(full);
 		}
-		return result;
+		return {folders: folders, skipped: skipped};
 	}
 }
