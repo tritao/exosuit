@@ -103,7 +103,8 @@ Phase 6 makes every workspace live.
   - Group rows keep today's menus.
 - [ ] Remove `WorkbenchMachineSection`'s separate list; the empty states move into the tree.
 - [ ] Expanding a workspace attaches its service, which is started by suit if needed. The tree keeps expanded
-  state per window.
+  state per window. (Phase 6 does this through catalog connections: expanding starts an idle workspace's service and
+  shows its catalog; it no longer switches the window. Enter or a double click on a workspace row opens it.)
 - [ ] Keyboard: arrows, Enter to focus, type-to-find. The tree's accessibility labels name the workspace and
   group.
 - [ ] Tests: tree model unit tests (the `workbench-drag` and `sidebar-layout` style), and a PrintWindow capture of
@@ -184,18 +185,42 @@ labelled, and narrow when a sub-group is selected.
 
 ## Phase 6: every window sees the whole machine
 
-- [ ] Every window holds a `CatalogWatch` connection to every running workspace service. suit's `machine` reply
-  says which are running.
-- [ ] Workspaces that aren't running show as idle from suit's list. Expanding one starts it.
-- [ ] A catalog connection carries no session content. Session and terminal streams attach only for open tabs, and a
-  terminal not shown is not streamed.
-- [ ] One `WorkspaceConnections` pool per window: connect, resume, back off, and drop when suit says a service
-  stopped. It reuses `NativeRpcHub` and the existing reconnect fencing.
-- [ ] Tests: two workspace services, one window. A session created by another client appears in the tree within
-  one catalog event. Killing a service shows it idle; restarting it brings it back.
+Client side (done 2026-10-31, branch `m19-machine-view`); the service side (answering CATALOG, UNWATCH and CHANGED, and
+suit's `machine` reply filling `service`) lands separately.
+
+The catalog watch is local-only for now: only local connections are offered `workspace.catalog`. Remote peers (devices
+through the relay) get it with the mobile adaptation; the service already filters a connection's catalog by its grants.
+
+- [x] Every window holds a `CatalogWatch` connection to every running workspace service. suit's `machine` reply
+  says which are running. (`WorkspaceCatalogWatch`; the window's own attached workspace keeps its full client and
+  gets no second connection, and a window holds at most `WorkspaceConnections.LIMIT` (64).)
+- [x] Workspaces that aren't running show as idle from suit's list. Expanding one starts it. (`WorkspaceStarter`
+  runs `--manager --workspace ID ... --detach`; the row says idle, starting, running or reconnecting, and how many
+  items need attention. Expanding a running workspace only expands it.)
+- [x] A catalog connection carries no session content. Session and terminal streams attach only for open tabs, and a
+  terminal not shown is not streamed. (The pool speaks only CATALOG, UNWATCH and CHANGED, and offers only the
+  `workspace.catalog` capability. Tabs attach through `LocalTerminalWorkspacePool` and the attached client as before,
+  so a row that is not open streams nothing. Opening an item of another workspace switches the window to it and opens
+  the item once attached; Phase 7 makes that instant.)
+- [x] One `WorkspaceConnections` pool per window: connect, resume, back off, and drop when suit says a service
+  stopped. It reuses `NativeRpcHub` and the existing reconnect fencing. (`RpcClient` backoff; a lost connection
+  resumes from its token; a changed pid or endpoint replaces the watch; a down connection makes the window ask suit
+  again after 1.5 s instead of 5 s.)
+- [x] Tests: two workspace services, one window. A session created by another client appears in the tree within
+  one catalog event. Killing a service shows it idle; restarting it brings it back. (`tests/workspace-catalog` runs
+  the pool against fake services over in-memory transports; `workbench-tree` covers the projection. A test against
+  two real services follows the service side.)
 
 Acceptance: every workspace's groups, sessions and terminals are in the tree and update live. Memory and connection
 counts stay bounded with ten workspaces; measure and record them.
+
+Measured (`tests/workspace-catalog`, ten fake services of 6 groups, 30 sessions and 12 terminals each, in one HashLink
+process, in-memory transports): the window holds 10 connections (one per workspace; 0 after dispose) and mirrors 480
+catalog items. The heap grows 38 KiB per watched workspace (384 KiB for ten), counting both ends of each connection
+because the fakes share the process, so the editor's share is smaller. One change on one service costs one CATALOG
+read on one connection; the other nine are untouched, and a CHANGED with our own token costs none. Paged catalogs
+(seven items at three per page) arrive as three reads and replace the old copy only at the last page. Real pipes add
+the OS handles and the service's per-connection state, which the service-side change measures.
 
 ## Phase 7: instant group switching, with tabs
 
