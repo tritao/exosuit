@@ -5,6 +5,9 @@ import process.ProcessManager;
 
 /** One running workspace manager on this machine, as `--machine` reports it. */
 typedef MachineManager = {
+	/** The id of the workspace it serves (M19 Phase 4); empty for a folder's service. */
+	var workspace:String;
+	/** The folder it started in. */
 	var root:String;
 	var stateDir:String;
 	/** On the folder's default state, the one an editor attaches to unless told otherwise. */
@@ -21,7 +24,7 @@ typedef MachineListing = {
 	var machine:String;
 	/** The launcher that answered: this editor's own. */
 	var launcher:String;
-	/** The folder holding the default state folders, `workspaces/<hash>`. */
+	/** The folder holding the default state folders: `workspaces/<hash of the folder>`, or `workspaces/<workspace id>`. */
 	var stateBase:String;
 	var managers:Array<MachineManager>;
 }
@@ -115,7 +118,7 @@ class MachineWorkspaces {
 			if (root.length == 0 || stateDir.length == 0) continue;
 			var pid:Dynamic = Reflect.field(entry, "managerPid"), started:Dynamic = Reflect.field(entry, "startedAt");
 			managers.push({
-				root: root, stateDir: stateDir, defaultState: Reflect.field(entry, "defaultState") == true,
+				workspace: text(entry, "workspace"), root: root, stateDir: stateDir, defaultState: Reflect.field(entry, "defaultState") == true,
 				managerPid: Std.isOfType(pid, Int) ? pid : 0, generation: text(entry, "generation"), launcher: text(entry, "launcher"),
 				startedAt: Std.isOfType(started, Float) || Std.isOfType(started, Int) ? started : null
 			});
@@ -129,13 +132,15 @@ class MachineWorkspaces {
 	}
 
 	/**
-		The state folder a manager on `launcher`'s build uses for `root` when the editor starts its own: beside the
-		folder's default state, keyed by the launcher too, so each build tree keeps its own.
+		The state folder a manager on `launcher`'s build uses for `root` (or for `workspace`, when it names one) when the
+		editor starts its own: beside the default state, keyed by the launcher too, so each build tree keeps its own.
 	**/
-	public static function ownState(listing:MachineListing, root:String, launcher:String):String {
+	public static function ownState(listing:MachineListing, root:String, launcher:String, ?workspace:String):String {
 		// Never a relative folder, which would land inside the workspace: an agent too old to report its base cannot do this.
 		if (!haxe.io.Path.isAbsolute(listing.stateBase)) throw "Update this editor's workspace agent to start a service on its build";
-		var key = haxe.crypto.Sha256.encode(root).substr(0, 20) + "-" + launcherKey(launcher);
+		// A workspace's service is named by its id, as its default state is: `workspaces/<id>-<launcher>`.
+		var name = workspace != null && workspace.length > 0 ? workspace : haxe.crypto.Sha256.encode(root).substr(0, 20);
+		var key = name + "-" + launcherKey(launcher);
 		return haxe.io.Path.join([listing.stateBase, "workspaces", key]);
 	}
 

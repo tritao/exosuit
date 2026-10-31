@@ -31,6 +31,8 @@ import workspace.service.WorkspacePairingProtocol.PairingList;
 @:id(10) var credentialFile:String;
 @:optional @:id(11) var expectedBuild:Null<String>;
 @:optional @:id(12) var launcher:Null<String>;
+/** The id of the workspace a service is keyed by; absent for a folder's service. */
+@:optional @:id(13) var workspaceId:Null<String>;
 }
 
 /** Nonblocking native attachment. Closing a client never owns/stops the shared daemon. */
@@ -66,6 +68,9 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   var retryAt:Float = 0;
   var selection:Int = 0;
   var selectedPath:Null<String>;
+  /** The workspace whose service this attaches to by id, or null for the folder's. */
+  var serviceTarget:Null<WorkspaceServiceTarget>;
+  var selectedTarget:Null<String>;
   var verified:Bool = false;
   var wasReady:Bool = false;
   var spawned:Bool = false;
@@ -199,8 +204,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
       var executable:String;
       var arguments:Array<String>;
       executable = Sys.executablePath();
-      var target:String = root;
-      arguments = [launcher, "--manager", target].concat(stateArguments());
+      arguments = managerArguments().concat(stateArguments());
       if (managed) {
         arguments.push("--prepare-update");
       } else {
@@ -248,7 +252,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     } else {
       try {
         var endpoint:LocalWorkspaceEndpoint = JsonWire.decode(updateOutput);
-        if (endpoint.root != root) throw "Update helper returned another workspace";
+        var problem = WorkspaceServiceTarget.endpointProblem(serviceTarget, root, endpoint.workspaceId, endpoint.root);
+        if (problem != null) throw "Update helper returned another workspace";
         expectedBuild = endpoint.expectedBuild == null ? "" : endpoint.expectedBuild;
         if (endpoint.generation != updateInstance) {
           stopConnection(); retryAt = clock() + 100; recoveringUntil = clock() + 120000;
@@ -498,8 +503,9 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   }
 
   public function select(path:Null<String>):Void {
-    if (disposed || path == selectedPath) return;
+    if (disposed || path == selectedPath && serviceTarget == null) return;
     selectedPath = path;
+    selectedTarget = null;
     var canonical:Null<String> = null;
     try canonical = path == null ? null : FileSystem.fullPath(path) catch (failure : Dynamic) {
       selection++;
@@ -509,8 +515,45 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
       fail(Std.string(failure));
       return;
     }
-    if (canonical == root) return;
+    if (canonical == root && serviceTarget == null) return;
+    serviceTarget = null;
     attach(canonical, canonical == null ? null : choices.stateFor(canonical));
+  }
+
+  /**
+    Attaches to the service of a machine workspace, by its id: one service for all of its folders. It starts in the
+    first folder, or the scratch folder of a workspace with none.
+  **/
+  public function selectWorkspace(next:WorkspaceServiceTarget):Void {
+    var signature = next.signature();
+    if (disposed || signature == selectedTarget) return;
+    selectedTarget = signature;
+    selectedPath = null;
+    serviceTarget = next;
+    var primary = next.root();
+    if (primary == null) {
+      selection++;
+      stopConnection();
+      stopHelper();
+      root = null;
+      fail("This workspace has no folder yet. Attach one, or turn on suit for a scratch folder.");
+      return;
+    }
+    attach(primary, choices.stateFor(next.choiceKey()));
+  }
+
+  /** What manager choices and the machine view call this attachment's service: the workspace, else the folder. */
+  function choiceKey():Null<String> {
+    var active = serviceTarget;
+    return active == null ? root : active.choiceKey();
+  }
+
+  /** The launcher and `--manager` arguments naming this attachment's service. */
+  function managerArguments():Array<String> {
+    var active = serviceTarget, path = root;
+    if (active != null) return [launcher].concat(active.managerArguments());
+    if (path == null) throw "No workspace selected";
+    return [launcher, "--manager", path];
   }
 
   /** Starts over on `path`'s manager on `state` (null: the default state). */
@@ -594,10 +637,12 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     errors = "";
     helperMode = mode;
     try {
-      suit.SuitClient.editorUsesRoot(path);
-      var target:String = path;
-      var arguments = [launcher, "--manager", target].concat(stateArguments());
-      var seed = stateDir == null ? null : choices.seedFor(path);
+      var active = serviceTarget;
+      if (active != null) suit.SuitClient.editorUsesWorkspace(active.workspace);
+      else suit.SuitClient.editorUsesRoot(path);
+      var arguments = managerArguments().concat(stateArguments());
+      var key = choiceKey();
+      var seed = stateDir == null || key == null ? null : choices.seedFor(key);
       if (mode == "launch" && seed != null) arguments = arguments.concat(["--seed-from", seed]);
       if (mode == "configure-relay") {
         arguments.push("--configure-relay");
@@ -669,8 +714,12 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   function install(endpoint:LocalWorkspaceEndpoint):Void {
     var path = root;
     if (path == null || endpoint.version != 1 || endpoint.protocol != 1 || endpoint.codec != 1
-      || endpoint.workspace != "workspace" || endpoint.root != path || endpoint.generation.length != 32
+      || endpoint.workspace != "workspace" || endpoint.generation.length != 32
       || endpoint.socket.length == 0) throw "Invalid workspace discovery descriptor";
+    var problem = WorkspaceServiceTarget.endpointProblem(serviceTarget, path, endpoint.workspaceId, endpoint.root);
+    if (problem != null) throw problem;
+    // A workspace's service keeps the root it started in, which later changes to the workspace's folders do not move.
+    if (serviceTarget != null) { root = endpoint.root; path = endpoint.root; }
     var expectedInstance = endpoint.generation, expectedRoot = path, selected = selection;
     instance = expectedInstance;
     expectedBuild = endpoint.expectedBuild == null ? "" : endpoint.expectedBuild;
@@ -726,7 +775,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
           return;
         }
         verified = true;
-        if (stateDir != null) choices.connected(expectedRoot);
+        var key = choiceKey();
+        if (stateDir != null && key != null) choices.connected(key);
         deadline = clock() + 6000;
         spawned = false;
         var view = replica;
@@ -747,7 +797,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     workbench.poll();
     if (!disposed && root != null && choices.revision != choiceRevision) {
       choiceRevision = choices.revision;
-      var chosen = choices.stateFor(root);
+      var key = choiceKey();
+      var chosen = key == null ? null : choices.stateFor(key);
       if (chosen != stateDir) attach(root, chosen);
     }
     if (disposed || root == null || error != null) return;

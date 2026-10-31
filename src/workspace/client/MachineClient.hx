@@ -45,6 +45,8 @@ class MachineClient {
 	public var revision(default, null):Int = 0;
 	/** False when suit is off: the editor then has no machine and works on open folders only. */
 	public final enabled:Bool;
+	/** Scratch folders suit made on request, until a listing reports them. */
+	final scratches:Map<String, String> = [];
 
 	public function new(events:EventPump, clock:Void->Float) {
 		hub = new NativeRpcHub(events);
@@ -57,7 +59,7 @@ class MachineClient {
 
 	/** Creates a workspace with these folders, which may be none if it has a name; `done` gets it, or the error. */
 	public function create(name:Null<String>, folders:Array<String>, ?done:(Null<MachineWorkspace>, Null<String>) -> Void):Void
-		request({op: "workspace-create", name: name, folders: folders.copy()}, workspaceReply(done));
+		request({op: "workspace-create", name: name, folders: folders.copy()}, workspaceReply(done, false));
 
 	/** The workspace's scratch folder, which suit creates on first request; `done` gets its path, or the error. */
 	public function scratch(id:String, done:(Null<String>, Null<String>) -> Void):Void
@@ -70,20 +72,21 @@ class MachineClient {
 				else if (failure == null)
 					failure = "suit sent no scratch folder";
 			}
+			if (path != null) scratches.set(id, path);
 			done(path, failure);
 		});
 
 	public function rename(id:String, name:String, ?done:(Null<MachineWorkspace>, Null<String>) -> Void):Void
-		request({op: "workspace-rename", workspace: id, name: name}, workspaceReply(done));
+		request({op: "workspace-rename", workspace: id, name: name}, workspaceReply(done, false));
 
 	public function delete(id:String, ?done:(Null<MachineWorkspace>, Null<String>) -> Void):Void
-		request({op: "workspace-delete", workspace: id}, workspaceReply(done));
+		request({op: "workspace-delete", workspace: id}, workspaceReply(done, true));
 
 	public function addFolder(id:String, folder:String, ?done:(Null<MachineWorkspace>, Null<String>) -> Void):Void
-		request({op: "workspace-add-folder", workspace: id, folder: folder}, workspaceReply(done));
+		request({op: "workspace-add-folder", workspace: id, folder: folder}, workspaceReply(done, false));
 
 	public function removeFolder(id:String, folder:String, ?done:(Null<MachineWorkspace>, Null<String>) -> Void):Void
-		request({op: "workspace-remove-folder", workspace: id, folder: folder}, workspaceReply(done));
+		request({op: "workspace-remove-folder", workspace: id, folder: folder}, workspaceReply(done, false));
 
 	/** The workspace whose only folder is `folder`, if the machine has one. */
 	public function workspaceFor(folder:String):Null<MachineWorkspace> {
@@ -96,19 +99,83 @@ class MachineClient {
 		return null;
 	}
 
+	/** The workspace with this id, if the machine has one. */
+	public function workspaceById(id:String):Null<MachineWorkspace> {
+		var state = machine;
+		if (state == null)
+			return null;
+		for (workspace in state.workspaces)
+			if (workspace.id == id)
+				return workspace;
+		return null;
+	}
+
+	/** The workspace that has `folder` among its folders, or as its scratch folder. */
+	public function workspaceHolding(folder:String):Null<MachineWorkspace> {
+		var state = machine;
+		if (state == null)
+			return null;
+		for (workspace in state.workspaces) {
+			var scratch = scratchOf(workspace);
+			if (scratch != null && PathKey.same(scratch, folder))
+				return workspace;
+			for (attached in workspace.folders)
+				if (PathKey.same(attached, folder))
+					return workspace;
+		}
+		return null;
+	}
+
+	/** The workspace's scratch folder if suit already made one, as a listing or a scratch request reported it. */
+	public function scratchOf(workspace:MachineWorkspace):Null<String>
+		return workspace.scratch != null ? workspace.scratch : scratches.get(workspace.id);
+
+	/**
+		The service a workspace's folder belongs to when workspaces have services of their own: null until the machine's
+		workspaces are known (check `machine`), and for a folder no workspace holds.
+	**/
+	public function serviceTargetFor(folder:String):Null<WorkspaceServiceTarget> {
+		var workspace = workspaceHolding(folder);
+		return workspace == null ? null : serviceTarget(workspace);
+	}
+
+	public function serviceTarget(workspace:MachineWorkspace):WorkspaceServiceTarget
+		return WorkspaceServiceTarget.forWorkspace(workspace.id, workspace.folders, scratchOf(workspace));
+
 	public function busy():Bool
 		return current != null || queue.length > 0;
 
-	function workspaceReply(done:Null<(Null<MachineWorkspace>, Null<String>) -> Void>):(Null<Dynamic>, Null<String>) -> Void
+	/** `removed`: the request deletes the workspace, otherwise the reply's workspace replaces what is known of it. */
+	function workspaceReply(done:Null<(Null<MachineWorkspace>, Null<String>) -> Void>, removed:Bool):(Null<Dynamic>, Null<String>) -> Void
 		return function(reply, failure) {
-			if (done == null)
-				return;
 			var workspace:Null<MachineWorkspace> = null;
 			var entry:Dynamic = reply == null ? null : Reflect.field(reply, "workspace");
 			if (entry != null)
 				try workspace = MachineCatalog.decodeWorkspace(entry) catch (error:Dynamic) failure = "suit sent an invalid workspace: " + Std.string(error);
-			done(workspace, failure);
+			if (workspace != null && failure == null)
+				know(workspace, removed);
+			if (done != null)
+				done(workspace, failure);
 		};
+
+	/** Keeps the listing current between refreshes: the service a workspace's folders belong to follows its folders. */
+	function know(workspace:MachineWorkspace, removed:Bool):Void {
+		var state = machine;
+		if (state == null)
+			return;
+		var found = -1;
+		for (index in 0...state.workspaces.length)
+			if (state.workspaces[index].id == workspace.id)
+				found = index;
+		if (removed) {
+			if (found >= 0)
+				state.workspaces.splice(found, 1);
+		} else if (found >= 0)
+			state.workspaces[found] = workspace;
+		else
+			state.workspaces.push(workspace);
+		revision++;
+	}
 
 	function request(message:Dynamic, ?done:(Null<Dynamic>, Null<String>) -> Void):Void {
 		if (!enabled) {
