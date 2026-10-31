@@ -156,8 +156,9 @@ class ScmService {
 		if (!enabled) return failed([], complete, "disabled", "Source control is disabled in settings");
 		var normalized:String;
 		try normalized = normalize(root) catch (failure:Dynamic) return failed([], complete, "invalid_root", Std.string(failure));
-		var state = roots.get(normalized);
-		if (state == null) { state = new ScmRootState(normalized); roots.set(normalized, state); }
+		var known = roots.get(normalized);
+		var state = known != null ? known : new ScmRootState(normalized);
+		if (known == null) roots.set(normalized, state);
 		if (state.detectJob != null) state.detectJob.cancel();
 		state.detectGeneration = nextGeneration++;
 		var generation = state.detectGeneration;
