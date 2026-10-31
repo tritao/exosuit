@@ -171,8 +171,7 @@ Live mode and suit:
 
 ### Haxeon compiler
 
-- Declaring a local function partway through a function ends null narrowing for locals declared before it
-  (`mutationDiscovery` in `ScmGitTestMain`). There is no minimal repro yet.
+Compiler bugs are recorded in [haxeon-compiler-bugs.md](../haxeon-compiler-bugs.md).
 
 ## Standards cleanup
 
