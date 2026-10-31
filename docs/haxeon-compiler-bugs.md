@@ -16,7 +16,24 @@ and the status.
   Lambda.exists(folders, function(existing) return existing == folder) ... }`. Stock Haxe accepts it.
 - **Found:** 2026-10-31, M19 Phase 4 (`AgentManager.parse`).
 - **Workaround:** no closure: `folders.indexOf(folder) < 0`.
-- **Status:** being fixed on haxeon branch `fix-switch-case-capture`.
+- **Cause:** an or-pattern arm (`case "a" | "b":`, `case 1, 2:`) is typed once per pattern, and each copy
+  declares its own locals. Lambdas were cached by position alone, so the second copy's closure reused the first
+  copy's, which captures the first copy's locals.
+- **Status:** fixed in haxeon `76b31d20` ("Typer: type a lambda once per set of captured bindings"), which keys
+  the cache by the captured bindings too.
+
+### "Unreachable statement" after an exhaustive or-pattern switch
+
+- **Symptom:** `E1012: Unreachable statement` on the `return 0`. Stock Haxe accepts it.
+- **Repro:**
+  ```haxe
+  enum E { A(x:Int); B(x:Int); }
+  function f(e:E):Int { switch e { case A(n) | B(n): return n; } return 0; }
+  ```
+- **Suspected cause:** the reachability analysis treats an enum switch that covers every constructor as always
+  returning. It is unchecked whether a switch without an or-pattern does the same.
+- **Workaround:** drop the trailing statement.
+- **Status:** open.
 
 ### Declaring a local function ends null narrowing for earlier locals
 
