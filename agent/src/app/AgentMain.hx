@@ -40,6 +40,44 @@ class AgentMain {
 		return FileSystem.exists(path) ? AgentStateIdentity.read(path).workspace : null;
 	}
 
+	/** The folders to serve at start: the state's workspace folders that exist, else the single `root`. */
+	static function startFolders(stateDirectory:String, root:String):Array<String> {
+		var path = Path.join([stateDirectory, "workspace.json"]);
+		if (!FileSystem.exists(path)) return [root];
+		var identity = AgentStateIdentity.read(path);
+		if (identity.workspace == null) return [root];
+		var listed = [for (folder in identity.folders) if (FileSystem.exists(folder) && FileSystem.isDirectory(folder)) FileSystem.fullPath(folder)];
+		return listed.length > 0 ? listed : [root];
+	}
+
+	/**
+		Serves `requested` instead of the current folders and records them in the state's `workspace.json`. Everything
+		is checked and read first (see WorkspaceFolders.validate), so a bad list or an unreadable identity changes
+		nothing; if the services or the write fail midway, the old folders are served again. With no folders the service
+		falls back to `fallback` (the workspace's scratch folder) but still records the empty list.
+	**/
+	static function applyFolders(requested:Array<String>, stateDirectory:String, fallback:String, files:workspace.runtime.WorkspaceFileService,
+			scm:workspace.runtime.WorkspaceScmService):Array<String> {
+		var next = workspace.runtime.WorkspaceFolders.validate(requested);
+		var path = Path.join([stateDirectory, "workspace.json"]);
+		var identity = FileSystem.exists(path) ? AgentStateIdentity.read(path) : null;
+		var served = next.length > 0 ? next : [fallback];
+		var previous = files.paths();
+		try {
+			files.setRoots(served);
+			scm.setRoots(served);
+			var id = identity == null ? null : identity.workspace;
+			if (identity != null && id != null) AgentStateIdentity.forWorkspace(id, next, identity.scratch).write(path);
+		} catch (error:Dynamic) {
+			try {
+				files.setRoots(previous);
+				scm.setRoots(previous);
+			} catch (_:Dynamic) {}
+			throw error;
+		}
+		return next;
+	}
+
 	static function main():Void {
 		var args = Sys.args();
 		AgentManagerNative.guardChildLock();
@@ -103,8 +141,10 @@ class AgentMain {
 			} catch (error:Dynamic) relaySetupError = Std.string(error);
 		}
 		var directories = new workspace.runtime.WorkspaceDirectories(args.length >= 6 ? args[5] : Sys.getCwd());
-		var files = new workspace.runtime.WorkspaceFileService("workspace", [directories.root], clock, runtime.events);
-		var scm = new workspace.runtime.WorkspaceScmService("workspace", [directories.root], processes, Sys.getEnv("EXOSUITE_GIT_BIN"));
+		var stateDirectory = haxe.io.Path.directory(args[2]);
+		var folders = startFolders(stateDirectory, directories.root);
+		var files = new workspace.runtime.WorkspaceFileService("workspace", folders, clock, runtime.events);
+		var scm = new workspace.runtime.WorkspaceScmService("workspace", folders, processes, Sys.getEnv("EXOSUITE_GIT_BIN"));
 		// The seed epoch is used only when creating a new catalog. Reopening preserves it.
 		var seed = new WorkspaceService("workspace", args[3], [
 			{
@@ -169,6 +209,7 @@ class AgentMain {
 			args.length >= 7 ? {workspace: "workspace", root: directories.root, instance: args[6]} : null,
 			terminals, agents, pairingManager, files, scm);
 		serverRef = server;
+		server.enableFolders(function(requested) return applyFolders(requested, stateDirectory, directories.root, files, scm));
 		var updates = new workspace.service.WorkspaceUpdatePolicy();
 		var build = Sys.getEnv("EXOSUIT_AGENT_BUILD_ID");
 		var updateRequestedAt:Float = 0;
@@ -197,7 +238,6 @@ class AgentMain {
 		});
 		Sys.println("READY: exosuit-agent local and loopback WebSocket");
 		Sys.stdout().flush();
-		var stateDirectory = haxe.io.Path.directory(args[2]);
 		suit.SuitClient.registerWorkspaceService(suit.SuitKind.WorkspaceHost, {root: directories.root, stateDir: stateDirectory,
 			generation: args.length >= 7 ? args[6] : null, workspace: stateWorkspace(stateDirectory)});
 		var relayStatus = new WorkspaceRelayStatusFile(stateDirectory);

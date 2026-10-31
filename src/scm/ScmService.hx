@@ -447,6 +447,17 @@ class ScmService {
 		}
 	}
 
+	/** Stops watching and polling `root`: its work is cancelled and its repositories are closed. */
+	public function forgetRoot(root:String):Void {
+		if (disposed) return;
+		var normalized:String;
+		try normalized = normalize(root) catch (_:Dynamic) return;
+		var state = roots.get(normalized);
+		if (state == null) return;
+		cancelState(state);
+		roots.remove(normalized);
+	}
+
 	public function dispose():Void {
 		if (disposed) return;
 		disposed = true;

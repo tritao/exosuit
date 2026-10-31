@@ -70,6 +70,7 @@ class WorkspaceScmService {
 	final core:ScmService;
 	final roots:Array<ScmRootStream> = [];
 	final rootsById:Map<String, ScmRootStream> = [];
+	final rootIds = new WorkspaceRootIds();
 	final repositoryRoots:Map<String, Array<String>> = [];
 	final operations:Map<String, ScmOperationRecord> = [];
 	final operationOrder:Array<String> = [];
@@ -85,21 +86,91 @@ class WorkspaceScmService {
 		this.workspace = workspace;
 		scheduler = jobScheduler == null ? new JobScheduler() : jobScheduler;
 		core = new ScmService(processes, scheduler, gitPath, 10000, 3, true, trustStorePath, null, provider);
-		for (index in 0...rootPaths.length) {
-			var path = normalize(rootPaths[index]);
-			if (path.length == 0) throw "Invalid workspace SCM root";
-			var root:ScmRootStream = {
-				id: index == 0 ? "root" : "root-" + index,
-				path: path,
-				epoch: newEpoch(path),
-				sequence: 0,
-				history: [],
-				listeners: []
-			};
-			roots.push(root);
-			rootsById.set(root.id, root);
-		}
+		for (path in rootPaths) addRoot(path);
 		releaseSnapshots = core.subscribe(onSnapshot);
+	}
+
+	function addRoot(rootPath:String):ScmRootStream {
+		var path = normalize(rootPath);
+		if (path.length == 0) throw "Invalid workspace SCM root";
+		var root:ScmRootStream = {
+			id: rootIds.idFor(path),
+			path: path,
+			epoch: newEpoch(path),
+			sequence: 0,
+			history: [],
+			listeners: []
+		};
+		roots.push(root);
+		rootsById.set(root.id, root);
+		return root;
+	}
+
+	/** The normalized folders of `paths`, or a thrown message when setRoots would refuse them; changes nothing. */
+	public function checkRoots(paths:Array<String>):Array<String> {
+		if (disposed || paths == null || paths.length > 16) throw "Invalid workspace SCM roots";
+		var normalized = [for (path in paths) normalize(path)];
+		for (path in normalized) if (key(path) == "") throw "Invalid workspace SCM root";
+		return normalized;
+	}
+
+	/**
+		Serves exactly `paths`, in order. A folder that stays keeps its root id and its watch stream; a dropped one loses
+		its stream, the repositories only it held, and the core's watching and polling of it; a new one needs a
+		`discover` to find its repositories. The first folder always has the id `root`.
+	**/
+	public function setRoots(paths:Array<String>):Void {
+		var normalized = checkRoots(paths);
+		var wanted = [for (path in normalized) key(path)];
+		for (root in roots.copy()) {
+			if (wanted.indexOf(key(root.path)) >= 0) continue;
+			endStream(root);
+			roots.remove(root);
+			rootsById.remove(root.id);
+			root.listeners.resize(0);
+			unmapRoot(root.id);
+			rootIds.forget(root.path);
+			core.forgetRoot(root.path);
+		}
+		var ordered:Array<ScmRootStream> = [];
+		for (path in normalized) {
+			var existing = rootsById.get(rootIds.idFor(path));
+			var root = existing == null ? addRoot(path) : existing;
+			if (ordered.indexOf(root) < 0) ordered.push(root);
+		}
+		roots.resize(0);
+		for (root in ordered) roots.push(root);
+		if (roots.length > 0 && !rootsById.exists(WorkspaceRootIds.PRIMARY)) promote(roots[0]);
+	}
+
+	/**
+		Watchers get one last event (no repository) when their root goes or changes meaning; asking for the root's
+		repositories again then tells them what is there now.
+	**/
+	function endStream(root:ScmRootStream):Void {
+		if (root.sequence == 0x7fffffff) return;
+		root.sequence++;
+		var event:ScmWatchEvent = {workspace: workspace, root: root.id, epoch: root.epoch, sequence: root.sequence, repository: "",
+			revision: haxe.Int64.ofInt(0)};
+		for (listener in root.listeners.copy()) listener(copyEvent(event));
+	}
+
+	/** The first folder takes the freed id `root`; its watchers start over under it. */
+	function promote(root:ScmRootStream):Void {
+		var old = root.id;
+		endStream(root);
+		rootsById.remove(old);
+		root.id = WorkspaceRootIds.PRIMARY;
+		rootIds.promote(root.path);
+		rootsById.set(root.id, root);
+		root.listeners.resize(0);
+		root.epoch = newEpoch(root.path);
+		root.sequence = 0;
+		root.history.resize(0);
+		for (mapped in repositoryRoots) {
+			var at = mapped.indexOf(old);
+			if (at >= 0) mapped[at] = root.id;
+		}
 	}
 
 	public function poll():Void {
@@ -122,6 +193,12 @@ class WorkspaceScmService {
 		if (disposed || root == null)
 			return failed([], complete, disposed ? "service_closed" : "invalid_root", "Workspace SCM root is unavailable");
 		return core.discover(root.path, function(result) {
+			// The folder may have been detached while this ran: its repositories are no longer ours to map.
+			if (rootsById.get(rootId) != root) {
+				complete(new ScmJobResult<Array<ScmRepository>>(result.generation, null,
+					new ScmError("invalid_root", "Workspace SCM root was detached")));
+				return;
+			}
 			if (result.value != null) {
 				unmapRoot(rootId);
 				for (repository in result.value) {

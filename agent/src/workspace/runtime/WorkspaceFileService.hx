@@ -44,6 +44,7 @@ import workspace.service.WorkspaceFileProtocol.FileSearchMatch;
 import workspace.service.WorkspaceFileProtocol.FileSearchCancelResult;
 import workspace.service.WorkspaceProtocol.WorkspaceQuery;
 import search.LiteralSearch;
+import workspace.PathKey;
 
 private typedef FileListSnapshot = {
 	var id:String;
@@ -81,6 +82,8 @@ private class WorkspaceFileBinding {
 	static inline final MAX_ACTIVE_SEARCHES = 2;
 	static inline final MAX_SEARCH_QUERY_BYTES = 256;
 	static inline final MAX_SEARCH_PAGE_SIZE = 100;
+	/** The error code of a search request naming a root that was detached; clients with other roots queued skip it. */
+	public static inline final UNKNOWN_ROOT = "unknown_root";
 	static inline final MAX_SEARCH_RESULTS = 1000;
 	static inline final MAX_SEARCH_FILE_BYTES = 4 * 1024 * 1024;
 	static inline final MAX_SEARCH_BYTES = 64 * 1024 * 1024;
@@ -141,7 +144,8 @@ private class WorkspaceFileBinding {
 		context.respond({workspace: service.workspace, roots: [for (root in service.roots) {
 			id: root.id,
 			name: root.name,
-			capabilities: service.watchAvailable() ? ["stat", "list", "read", "watch", "search"] : ["stat", "list", "read", "search"]
+			path: root.path,
+			capabilities: service.watching(root.id) ? ["stat", "list", "read", "watch", "search"] : ["stat", "list", "read", "search"]
 		}]});
 	}
 
@@ -320,7 +324,7 @@ private class WorkspaceFileBinding {
 			context.fail({code: "invalid_request", message: "Invalid workspace file watch", ambiguous: false});
 			return;
 		}
-		if (!service.watchAvailable()) {
+		if (!service.watching(request.root)) {
 			context.fail({code: "unsupported", message: "Workspace file watching is unavailable", ambiguous: false});
 			return;
 		}
@@ -343,6 +347,10 @@ private class WorkspaceFileBinding {
 
 	function onSearchStart(request:FileSearchStartRequest, context:RpcContext<FileSearchHandle>):Void {
 		if (!authorized(context)) return;
+		if (request != null && service.rootGone(request.workspace, request.root)) {
+			context.fail({code: UNKNOWN_ROOT, message: "Workspace root is not attached", ambiguous: false});
+			return;
+		}
 		if (request == null || !service.validRef(request.workspace, request.root)
 			|| request.mode != "name" && request.mode != "content" || request.query == null
 			|| request.query.length == 0 || Bytes.ofString(request.query).length > MAX_SEARCH_QUERY_BYTES
@@ -384,6 +392,10 @@ private class WorkspaceFileBinding {
 
 	function onSearchPage(request:FileSearchPageRequest, context:RpcContext<FileSearchPageResult>):Void {
 		if (!authorized(context)) return;
+		if (request != null && service.rootGone(request.workspace, request.root)) {
+			context.fail({code: UNKNOWN_ROOT, message: "Workspace root is not attached", ambiguous: false});
+			return;
+		}
 		if (request == null || request.workspace != service.workspace || request.searchId == null
 			|| request.searchId.length == 0 || request.searchId.length > 128 || request.limit < 1
 			|| request.limit > MAX_SEARCH_PAGE_SIZE || !service.validRef(request.workspace, request.root)) {
@@ -505,7 +517,7 @@ private class WorkspaceFileBinding {
 				if (nameColumn >= 0)
 					queueSearchMatch(state, {path: path, kind: entry.kind, revision: entry.revision,
 						line: -1, column: -1, length: -1,
-						preview: boundedSearchPreview(path, nameColumn, state.query.length)});
+						preview: boundedSearchPreview(path, nameColumn, state.query.length), root: state.root});
 			}
 		}
 		return matches;
@@ -605,7 +617,7 @@ private class WorkspaceFileBinding {
 			byteCursor = match.column + match.length;
 			queueSearchMatch(state, {path: path, kind: "file", revision: beforeRevision,
 				line: match.line, column: column, length: length,
-				preview: boundedSearchPreview(line, match.column, match.length)});
+				preview: boundedSearchPreview(line, match.column, match.length), root: state.root});
 		}
 	}
 
@@ -841,6 +853,17 @@ private class WorkspaceFileBinding {
 		return id;
 	}
 
+	/** A folder left the service: its searches, listings and reads end, and its watch is dropped. */
+	public function rootRemoved(rootId:String):Void {
+		watchedRoots.remove(rootId);
+		var searchStates = [for (state in searches) if (state.root == rootId) state];
+		for (state in searchStates) closeSearch(state);
+		var stale = [for (id => snapshot in snapshots) if (snapshot.root == rootId) id];
+		for (id in stale) dropSnapshot(id);
+		var handles = [for (handle => state in readHandles) if (state.root == rootId) handle];
+		for (handle in handles) closeReadHandle(handle);
+	}
+
 	function revoke():Void {
 		active = false;
 		for (root in watchedRoots.keys()) service.unsubscribe(root, this);
@@ -900,10 +923,14 @@ class WorkspaceFileService {
 	final workspace:String;
 	final roots:Array<WorkspaceFileRoot> = [];
 	final rootsById:Map<String, WorkspaceFileRoot> = [];
+	final rootIds = new WorkspaceRootIds();
+	final bindings:Array<WorkspaceFileBinding> = [];
 	final watchStates:Map<String, FileWatchState> = [];
 	final dirtyRoots:Map<String, Bool> = [];
 	final clock:Void->Float;
 	var fileWatch:Null<OwnedFileWatch>;
+	/** Roots whose directory watch could not be added while the watcher runs. */
+	final unwatched:Map<String, Bool> = [];
 	var eventSubscription:Null<EventSubscription>;
 	var nextWatchFlush:Float = 0.0;
 	var disposed:Bool = false;
@@ -915,24 +942,7 @@ class WorkspaceFileService {
 		this.workspace = workspace;
 		this.clock = clock;
 		try {
-			for (index in 0...rootPaths.length) {
-				var path = rootPaths[index];
-				if (path == null || path.length == 0)
-					throw "Invalid workspace filesystem root";
-				var root:WorkspaceFileRoot = {
-					id: index == 0 ? ROOT_ID : ROOT_ID + "-" + index,
-					name: displayName(path),
-					path: path,
-					handle: new FileSystemRoot(path)
-				};
-				roots.push(root);
-				rootsById.set(root.id, root);
-				watchStates.set(root.id, {
-					epoch: Sha256.encode(workspace + ":" + clock() + ":" + Math.random() + ":" + root.id),
-					cursor: 0,
-					listeners: []
-				});
-			}
+			for (path in rootPaths) addRoot(path);
 		} catch (error:Dynamic) {
 			for (root in roots)
 				try root.handle.close() catch (_:Dynamic) {}
@@ -941,11 +951,113 @@ class WorkspaceFileService {
 		startWatcher(events);
 	}
 
+	function addRoot(path:String, ?opened:FileSystemRoot):WorkspaceFileRoot {
+		if (path == null || path.length == 0)
+			throw "Invalid workspace filesystem root";
+		var id = rootIds.idFor(path);
+		var handle = opened == null ? new FileSystemRoot(path) : opened;
+		var root:WorkspaceFileRoot = {id: id, name: displayName(path), path: path, handle: handle};
+		roots.push(root);
+		rootsById.set(id, root);
+		watchStates.set(id, {epoch: newWatchEpoch(id), cursor: 0, listeners: []});
+		return root;
+	}
+
+	/** The folders served now, in order. */
+	public function paths():Array<String> return [for (root in roots) root.path];
+
+	function rootFor(path:String):Null<WorkspaceFileRoot> {
+		var key = PathKey.of(path);
+		for (root in roots) if (PathKey.of(root.path) == key) return root;
+		return null;
+	}
+
+	/**
+		Serves exactly `paths`, in order: new folders get a root and a watch, dropped ones lose both and their clients'
+		searches, reads and watches end. A folder that stays keeps its root id. Nothing changes if a new folder cannot be
+		opened. The first folder always has the id `root`.
+	**/
+	public function setRoots(paths:Array<String>):Void {
+		if (disposed || paths == null || paths.length > MAX_ROOTS) throw "Invalid workspace filesystem roots";
+		for (path in paths) if (path == null || path.length == 0) throw "Invalid workspace filesystem root";
+		var fresh:Map<String, FileSystemRoot> = [];
+		try {
+			for (path in paths) {
+				var key = PathKey.of(path);
+				if (rootFor(path) == null && !fresh.exists(key)) fresh.set(key, new FileSystemRoot(path));
+			}
+		} catch (error:Dynamic) {
+			for (handle in fresh) try handle.close() catch (_:Dynamic) {}
+			throw error;
+		}
+		var wanted = [for (path in paths) PathKey.of(path)];
+		for (root in roots.copy())
+			if (wanted.indexOf(PathKey.of(root.path)) < 0) removeRoot(root);
+		var ordered:Array<WorkspaceFileRoot> = [];
+		for (path in paths) {
+			var existing = rootFor(path);
+			if (existing != null) {
+				if (ordered.indexOf(existing) < 0) ordered.push(existing);
+				continue;
+			}
+			var added = addRoot(path, fresh.get(PathKey.of(path)));
+			// Only a root whose watch cannot start loses change events; the others keep theirs.
+			if (fileWatch != null && NativeKit.nk_file_watch_add_directory(fileWatch.borrow(), added.path, true) != Result.Ok)
+				unwatched.set(added.id, true);
+			ordered.push(added);
+		}
+		roots.resize(0);
+		for (root in ordered) roots.push(root);
+		if (roots.length > 0 && !rootsById.exists(WorkspaceRootIds.PRIMARY)) promote(roots[0]);
+	}
+
+	/** The first folder takes the freed id `root`; what clients held under its old id ends. */
+	function promote(root:WorkspaceFileRoot):Void {
+		var old = root.id;
+		endWatch(old);
+		for (binding in bindings.copy()) binding.rootRemoved(old);
+		var wasUnwatched = unwatched.exists(old);
+		unwatched.remove(old);
+		if (wasUnwatched) unwatched.set(WorkspaceRootIds.PRIMARY, true);
+		rootsById.remove(old);
+		watchStates.remove(old);
+		dirtyRoots.remove(old);
+		root.id = WorkspaceRootIds.PRIMARY;
+		rootIds.promote(root.path);
+		rootsById.set(root.id, root);
+		watchStates.set(root.id, {epoch: newWatchEpoch(root.id), cursor: 0, listeners: []});
+	}
+
+	/** Watchers get one last change; listing the folder again then tells them what it is now (gone, or another folder). */
+	function endWatch(rootId:String):Void {
+		var state = watchStates.get(rootId);
+		if (state == null) return;
+		state.cursor++;
+		var event:FileChangeEvent = {workspace: workspace, root: rootId, epoch: state.epoch, cursor: state.cursor};
+		for (listener in state.listeners.copy()) listener.notifyFileChanged(event);
+	}
+
+	function removeRoot(root:WorkspaceFileRoot):Void {
+		endWatch(root.id);
+		roots.remove(root);
+		unwatched.remove(root.id);
+		rootsById.remove(root.id);
+		watchStates.remove(root.id);
+		dirtyRoots.remove(root.id);
+		rootIds.forget(root.path);
+		if (fileWatch != null) NativeKit.nk_file_watch_remove_directory(fileWatch.borrow(), root.path);
+		for (binding in bindings.copy()) binding.rootRemoved(root.id);
+		try root.handle.close() catch (_:Dynamic) {}
+	}
+
 	public function watchAvailable():Bool return fileWatch != null;
+
+	/** Whether change events can be promised for `rootId`: the watcher runs and this root's watch started. */
+	public function watching(rootId:String):Bool return fileWatch != null && !unwatched.exists(rootId);
 
 	public function subscribe(rootId:String, listener:WorkspaceFileBinding, epoch:Null<String>, cursor:Int):FileWatchResult {
 		var state = watchStates.get(rootId);
-		if (state == null || listener == null || !watchAvailable())
+		if (state == null || listener == null || !watching(rootId))
 			throw "Workspace file watcher is unavailable";
 		if (state.listeners.indexOf(listener) < 0) state.listeners.push(listener);
 		return {workspace: workspace, root: rootId, epoch: state.epoch, cursor: state.cursor,
@@ -986,10 +1098,8 @@ class WorkspaceFileService {
 			var created = NativeKit.nk_file_watch_create(options);
 			if (created.status != Result.Ok) return;
 			fileWatch = created.out_watch;
-			for (root in roots) if (NativeKit.nk_file_watch_add_directory(fileWatch.borrow(), root.path, true) != Result.Ok) {
-				stopWatcher();
-				return;
-			}
+			for (root in roots) if (NativeKit.nk_file_watch_add_directory(fileWatch.borrow(), root.path, true) != Result.Ok)
+				unwatched.set(root.id, true);
 			eventSubscription = events.listen(onNativeEvent);
 		} catch (_:Dynamic) {
 			stopWatcher();
@@ -1048,10 +1158,17 @@ class WorkspaceFileService {
 		eventSubscription = null;
 		if (fileWatch != null) fileWatch.close();
 		fileWatch = null;
+		unwatched.clear();
 	}
 
 	public function bind(connection:RpcConnection, capabilities:Array<String>):Void->Void {
-		return new WorkspaceFileBinding(this, connection, capabilities).start();
+		var binding = new WorkspaceFileBinding(this, connection, capabilities);
+		bindings.push(binding);
+		var revoke = binding.start();
+		return function() {
+			bindings.remove(binding);
+			revoke();
+		};
 	}
 
 	function readSnapshot(rootId:String, path:String):FileListSnapshot {
@@ -1147,6 +1264,10 @@ class WorkspaceFileService {
 		addHashField(revision, Int64.toStr(entry.get_file_id_low()));
 		return Sha256.encode(revision.toString());
 	}
+
+	/** True for a request in this workspace that names a root that is not (or no longer) attached. */
+	function rootGone(requestWorkspace:Null<String>, requestRoot:Null<String>):Bool
+		return requestWorkspace == workspace && requestRoot != null && !rootsById.exists(requestRoot);
 
 	function validRef(requestWorkspace:Null<String>, requestRoot:Null<String>):Bool
 		return requestWorkspace == null || requestRoot == null ? false
