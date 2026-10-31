@@ -7,6 +7,8 @@ interface WorkspaceTerminalCatalogClient {
   public function canCreateTerminals():Bool;
   public function canCreateGroupedTerminals():Bool;
   public function canEditGroups():Bool;
+  /** Whether the service stores the position of sessions and terminals; without it re-ordering would revert. */
+  public function canReorder():Bool;
   public function canRemoveGroups():Bool;
   public function terminalCatalog():Null<TerminalCatalog>;
   public function terminalCatalogError():Null<String>;

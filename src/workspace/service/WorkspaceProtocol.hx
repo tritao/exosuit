@@ -108,6 +108,11 @@ class WorkspaceProtocol {
 	public static inline final WRITE = "workspace.groups.write";
 	public static inline final IDENTITY_CAPABILITY = "workspace.identity";
 	/**
+		Offered by services that store the position of sessions and terminals (the `order` fields). Not a permission: a
+		client re-orders only where it is negotiated, since an older service ignores the fields and the order would revert.
+	**/
+	public static inline final ORDER = "workspace.order";
+	/**
 		The group of a session or terminal that sits directly under the workspace, in no named group. No group can have
 		this id, since group ids are never empty, so the root needs no record and existing groups and items are unchanged.
 	**/
@@ -155,7 +160,7 @@ class WorkspaceProtocol {
 	public static function order(value:Null<Int>):Int return value == null ? 0 : value;
 
 	/** The largest position a group, session or terminal can hold. */
-	public static inline final MAX_ORDER = 1000000;
+	public static inline final MAX_ORDER = 1000000000;
 
 	/** Whether a service accepts `value` as a position: absent (unchanged, or not yet placed) or within 0...MAX_ORDER. */
 	public static function validOrder(value:Null<Int>):Bool

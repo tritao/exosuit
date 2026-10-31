@@ -835,6 +835,8 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
 
   public function canRemoveGroups():Bool return canEditGroups() && has(WorkspaceProtocol.REMOVE);
 
+  public function canReorder():Bool return rpc() != null && has(WorkspaceProtocol.ORDER);
+
   public function canReadTerminals():Bool return rpc() != null && has(WorkspaceTerminalProtocol.READ);
 
   public function canControlTerminals():Bool return rpc() != null

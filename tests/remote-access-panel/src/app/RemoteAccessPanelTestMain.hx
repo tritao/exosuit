@@ -110,12 +110,13 @@ class RemoteAccessPanelTestMain {
   require(enabledApprovals == 0, "Approval was enabled before code confirmation");
   panel.confirmed.set("one", true); labels();
   require(enabledApprovals == 1, "Code confirmation must enable only its own request");
-		require(panel.grants("one").length == 9 && panel.grants("two").length == 9,
-			"New devices must default to read-only grants, including source control review");
+		require(panel.grants("one").length == 10 && panel.grants("two").length == 10,
+			"New devices must default to read-only grants, including source control review and workspace ordering");
+		require(panel.grants("one").indexOf(workspace.service.WorkspaceProtocol.ORDER) >= 0, "Every grant set must include workspace.order");
 		panel.setPreset("one", "read");
-		require(panel.grants("one").length == 9 && panel.grants("two").length == 9, "Presets must not change another request");
-		panel.setPreset("one", "edit"); require(panel.grants("one").length == 10, "Edit files preset grants excess access");
-		panel.setPreset("one", "all"); require(panel.grants("one").length == 14, "All permissions preset incomplete");
+		require(panel.grants("one").length == 10 && panel.grants("two").length == 10, "Presets must not change another request");
+		panel.setPreset("one", "edit"); require(panel.grants("one").length == 11, "Edit files preset grants excess access");
+		panel.setPreset("one", "all"); require(panel.grants("one").length == 15, "All permissions preset incomplete");
 		fixture.list.devices = [{deviceId:"paired", grants:[workspace.service.WorkspaceScmProtocol.READ], revoked:false, connected:true}];
 		var pairedLabels = labels().join("\n");
 		require(pairedLabels.indexOf("Edit permissions") >= 0, "Approved devices must expose grant editing");

@@ -75,7 +75,7 @@ class RemoteAccessPanel implements View {
 
 	function grants(id:String):Array<String> {
 		var selected = selection(id);
-		var result:Array<String> = [WorkspaceProtocol.IDENTITY_CAPABILITY];
+		var result:Array<String> = [WorkspaceProtocol.IDENTITY_CAPABILITY, WorkspaceProtocol.ORDER];
 		for (option in grantOptions) if (selected.get(option.id) == true) result.push(option.grant);
 		if (selected.get("files") == true) result.push(workspace.service.WorkspaceFileProtocol.READ);
 		return result;

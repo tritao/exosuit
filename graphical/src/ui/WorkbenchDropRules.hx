@@ -13,6 +13,16 @@ class WorkbenchDropRules {
 	public static function destination(target:String, rootRow:Null<String>):Null<String>
 		return rootRow != null && target == rootRow ? WorkspaceProtocol.ROOT_GROUP : WorkbenchRowKey.idOf(target, WorkbenchRowKind.Group);
 
+	/**
+		The zone of a row `offset` pixels below its centre. A row that takes drops (a group) gives its upper and lower
+		quarters to the edges and the middle to a move into it; any other row is split in halves.
+	**/
+	public static function zone(offset:Float, height:Float, takesDrops:Bool):WorkbenchDropZone {
+		if (Math.isNaN(offset) || height <= 0) return takesDrops ? WorkbenchDropZone.Into : WorkbenchDropZone.After;
+		var edge = takesDrops ? height / 4 : 0.0;
+		return offset < -edge ? WorkbenchDropZone.Before : offset > edge ? WorkbenchDropZone.After : takesDrops ? WorkbenchDropZone.Into : WorkbenchDropZone.After;
+	}
+
 	public static function canDrop(source:String, target:String, catalog:TerminalCatalog, agents:Null<AgentCatalog>, rootRow:Null<String>):Bool {
 		var into = destination(target, rootRow), row = WorkbenchRowKey.parse(source);
 		if (into == null || row == null || !WorkspaceProtocol.knownGroup(into, catalog.groups)) return false;

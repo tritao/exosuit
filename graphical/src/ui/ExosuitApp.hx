@@ -2381,9 +2381,9 @@ class ExosuitApp implements DesktopUiApplication {
 					catch (_:Dynamic) promptDirectory();
 				} else promptDirectory();
 			case "order":
-				host.openCommandView(new commandview.CommandViewProvider("Group Sort Order (0–1000000): ", [], function(_) {}, function(_, value, _) {
+				host.openCommandView(new commandview.CommandViewProvider("Group Sort Order (0–" + workspace.service.WorkspaceProtocol.MAX_ORDER + "): ", [], function(_) {}, function(_, value, _) {
 					var order = Std.parseInt(value);
-					if (!~/^[0-9]+$/.match(value) || order == null || order < 0 || order > 1000000) return;
+					if (!~/^[0-9]+$/.match(value) || order == null || order < 0 || order > workspace.service.WorkspaceProtocol.MAX_ORDER) return;
 					host.closeCommandView(); save(group.parent,group.cwd,order);
 				}));
 				host.commandViewTextInput(Std.string(workspace.service.WorkspaceProtocol.order(group.order)));

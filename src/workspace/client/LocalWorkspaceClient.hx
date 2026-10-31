@@ -450,6 +450,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   public function canControlTerminals():Bool return workbench.canControlTerminals();
   public function canCreateTerminals():Bool return workbench.canCreateTerminals();
   public function canCreateGroupedTerminals():Bool return workbench.canCreateGroupedTerminals();
+  public function canReorder():Bool return workbench.canReorder();
   public function terminalCatalog():Null<TerminalCatalog> return workbench.terminalCatalog();
   public function terminalCatalogError():Null<String> return workbench.terminalCatalogError();
   public function terminalCatalogRevision():Int return workbench.terminalCatalogRevision();
@@ -681,6 +682,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     caps.push(WorkspaceProtocol.WRITE);
     caps.push(WorkspaceProtocol.TREE);
     caps.push(WorkspaceProtocol.REMOVE);
+    caps.push(WorkspaceProtocol.ORDER);
     caps.push(WorkspaceTerminalProtocol.CATALOG);
     caps.push(WorkspaceAgentProtocol.READ);
     caps.push(WorkspaceAgentProtocol.CONTROL);

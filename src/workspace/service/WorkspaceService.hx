@@ -53,7 +53,7 @@ class WorkspaceService {
 				throw "Invalid workspace group";
 			groups.set(group.id, WorkspaceProtocol.copyGroup(group));
 		}
-		for (group in groups) if (!validHierarchy(group.id, group.parent) || WorkspaceProtocol.order(group.order) < 0 || WorkspaceProtocol.order(group.order) > 1000000) throw "Invalid workspace hierarchy";
+		for (group in groups) if (!validHierarchy(group.id, group.parent) || WorkspaceProtocol.order(group.order) < 0 || WorkspaceProtocol.order(group.order) > WorkspaceProtocol.MAX_ORDER) throw "Invalid workspace hierarchy";
 		if (stored != null)
 			restore(stored);
 	}
@@ -298,7 +298,7 @@ class WorkspaceService {
 				order: tree ? WorkspaceProtocol.order(request.order) : (group == null ? 0 : WorkspaceProtocol.order(group.order)),
 				revision: (group == null ? 0 : group.revision) + 1
 			};
-			if (!validHierarchy(updated.id, updated.parent) || WorkspaceProtocol.order(updated.order) < 0 || WorkspaceProtocol.order(updated.order) > 1000000
+			if (!validHierarchy(updated.id, updated.parent) || WorkspaceProtocol.order(updated.order) < 0 || WorkspaceProtocol.order(updated.order) > WorkspaceProtocol.MAX_ORDER
 				|| updated.cwd != null && (updated.cwd.length == 0 || updated.cwd.length > 1024)) {
 				context.fail({code: "invalid_group", message: "Invalid parent or workspace directory", ambiguous: false}); return;
 			}

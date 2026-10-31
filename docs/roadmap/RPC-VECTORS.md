@@ -124,7 +124,8 @@ exit ordering, bounded retention, snapshot recovery and legacy daemons.
 Groups, sessions and terminals in one group share one order, so a session can sit between two sub-groups. Groups
 already carry `order` (field 5 of the tree request, field 6 of the record). The other two kinds gain it as appended
 optional fields; legacy peers skip the unknown ids, and an absent order means the item is not yet placed (it sorts after
-every placed sibling, in catalog order). A service accepts 0 to 1000000 and refuses anything else.
+every placed sibling, in catalog order). A service accepts 0 to 1000000000 (`WorkspaceProtocol.MAX_ORDER`) and refuses anything else; clients space positions 1024 apart. A service
+from before the limit was widened refuses above 1000000, and one from before the field drops it when it rewrites a record.
 
 | Value | Field |
 | --- | --- |
@@ -132,6 +133,11 @@ every placed sibling, in catalog order). A service accepts 0 to 1000000 and refu
 | Terminal rename (method 116) | `order`, id 7; absent leaves the position unchanged |
 | Agent action `move` (method 122) | `order`, id 12; the destination may be the current group, and absent leaves the position unchanged |
 | Catalog session, catalog terminal | `order`, ids 8 and 11 |
+
+A service that stores these offers the capability `workspace.order` (a feature flag, not a permission: the daemon offers
+it by default, the desktop client requests it, and device grants include it with `workspace.identity`). A client
+re-orders only where it is negotiated, because an older service would ignore the fields and the order would revert;
+moving into a group needs no capability.
 
 Appending a field adds a trailing nil to every encoded request of that shape, so the terminal rename and agent prompt
 vectors above grew by one entry; the legacy forms still decode (`order` reads as absent). Vectors:

@@ -19,6 +19,7 @@ import haxeon.ui.widgets.layout.Column;
 import haxeon.ui.widgets.layout.Row;
 import haxeon.ui.widgets.overlays.MenuItem;
 import haxeon.ui.widgets.text.Text;
+import ui.WorkbenchOrder;
 import workspace.client.WorkspaceWorkbenchClient;
 import workspace.service.WorkspaceAgentProtocol;
 import workspace.service.WorkspaceProtocol;
@@ -57,6 +58,13 @@ class WorkbenchPanel implements View {
 	// Selection actions run one step at a time: the service drops a mutation while another is in flight.
 	var batchKeys:Array<String> = [];
 	var batchTarget:Null<String>;
+	var batchPlan:Array<PlaceStep> = [];
+	// A drag in progress, seen from the panel's capture handlers: where the pointer is, and whether it left the press.
+	var dragSource:Null<String>;
+	var pressX = 0.0;
+	var pressY = 0.0;
+	var pointerY = Math.NaN;
+	var dragMoved = false;
 	var batchOwner = "";
 	var batchTerminalError:Null<String>;
 	var batchAgentError:Null<String>;
@@ -183,7 +191,11 @@ class WorkbenchPanel implements View {
 		});
 	}
 
-	function canDragNode(key:String):Bool {
+	/** Asked on every hover, so it only answers. */
+	function canDragNode(key:String):Bool
+		return canDragRow(key);
+
+	function canDragRow(key:String):Bool {
 		if (draft != null || agentDraft != null || pending || client.terminalCatalogBusy()) return false;
 		var row = WorkbenchRowKey.parse(key);
 		if (row == null) return false;
@@ -194,42 +206,160 @@ class WorkbenchPanel implements View {
 		};
 	}
 
-	function canDropNode(source:String, target:String):Bool {
+	/** Whether the pointer is over the middle of `target` now; only that moves a row into it, the edges place it between rows. */
+	function canDropNode(source:String, target:String):Bool
+		return rowZone(target) == WorkbenchDropZone.Into && canMoveInto(source, target);
+
+	/** Whether `source` may move into `target` by the live catalog, permissions and mutation state; says nothing of the pointer. */
+	function canMoveInto(source:String, target:String):Bool {
 		var catalog = client.terminalCatalog();
 		if (catalog == null || catalog.instance != observedWorkspaceInstance || catalog.workspaceRoot != observedWorkspaceRoot
-			|| !canDragNode(source)) return false;
+			|| !canDragRow(source)) return false;
 		return WorkbenchDropRules.canDrop(source, target, catalog, client.agentService().agents(), model.groupParent);
+	}
+
+	/** Where the pointer is on `key`'s row; onto it when the row or the pointer is not known. */
+	function rowZone(key:String):WorkbenchDropZone {
+		var row = WorkbenchRowKey.parse(key), centre = model.centreOf(key);
+		if (row == null || centre == null) return WorkbenchDropZone.Into;
+		return WorkbenchDropRules.zone(pointerY - centre, WorkbenchSessionLabel.ROW_HEIGHT, row.kind == WorkbenchRowKind.Group);
 	}
 
 	function dropNode(source:String, target:String):Void {
 		var keys = tree.isSelected(source) ? outermost(tree.selectedKeys()).filter(function(key) return key != target) : [source];
-		if (keys.length > 1) startBatch(keys, target);
-		else moveNode(source, target);
+		var movable = keys.filter(function(key) return canDropNode(key, target));
+		reportSkipped(keys.length - movable.length);
+		if (movable.length > 1) startBatch(movable, target);
+		else if (movable.length == 1) moveNode(movable[0], target);
 		tree.setExpanded(target, true);
 		requestFrame();
 	}
 
+	/** Rows of a multi-row drop that could not go there stay where they are, and the user is told. */
+	function reportSkipped(count:Int):Void {
+		if (count > 0) reportError(plural(count, "selected row") + " could not be moved there and " + (count == 1 ? "was" : "were") + " left in place");
+	}
+
+	/** The rows a drag started on `source` carries: the selection when it is selected, else the row alone. */
+	function dragKeys(source:String):Array<String>
+		return tree.isSelected(source) ? outermost(tree.selectedKeys()) : [source];
+
+	/** Where a drop at height `y` would put the dragged rows between siblings, or null for a position that places nothing. */
+	function placementAt(source:String, y:Float):Null<Placement> {
+		var catalog = client.terminalCatalog(), hit = model.rowAt(y);
+		if (!client.canReorder() || catalog == null || hit == null || catalog.instance != observedWorkspaceInstance || catalog.workspaceRoot != observedWorkspaceRoot
+			|| !canDragRow(source)) return null;
+		var row = WorkbenchRowKey.parse(hit.key);
+		if (row == null) return null;
+		var zone = WorkbenchDropRules.zone(y - hit.centre, WorkbenchSessionLabel.ROW_HEIGHT, row.kind == WorkbenchRowKind.Group);
+		if (zone == WorkbenchDropZone.Into) return null;
+		var anchor = hit.key, after = zone == WorkbenchDropZone.After;
+		if (after && row.kind == WorkbenchRowKind.Group && tree.isExpanded(hit.key)) {
+			// The lower edge of an open group is the upper edge of its first row.
+			var inside = model.siblings(row.id);
+			if (inside.length > 0) { anchor = inside[0]; after = false; }
+		}
+		return WorkbenchOrder.plan(model, catalog, client.agentService().agents(), dragKeys(source), anchor, after, canWriteRow);
+	}
+
+	/** Whether this client can write `key`'s group or position now; a write it cannot make is dropped silently by the client. */
+	function canWriteRow(key:String):Bool {
+		var catalog = client.terminalCatalog(), row = WorkbenchRowKey.parse(key);
+		if (catalog == null || row == null) return false;
+		return switch row.kind {
+			case WorkbenchRowKind.Group: client.canEditGroups() && model.groups.exists(row.id);
+			case WorkbenchRowKind.Terminal:
+				var terminal = model.terminals.get(row.id);
+				client.canControlTerminals() && terminal != null && terminal.workspaceRoot == catalog.workspaceRoot;
+			case WorkbenchRowKind.Agent:
+				var service = client.agentService(), agents = service.agents();
+				service.canControlAgents() && agents != null && agents.canMove == true && agents.instance == catalog.instance
+					&& agents.root == catalog.workspaceRoot && model.agents.exists(row.id);
+		};
+	}
+
+	/** Alt+Up and Alt+Down move the selected row one place among its siblings. */
+	function nudge(delta:Int):Bool {
+		var key = tree.selectedKey, catalog = client.terminalCatalog();
+		if (key == null || catalog == null || !client.canReorder() || !batchIdle() || !canDragRow(key) || tree.selectedKeys().length != 1) return false;
+		var group = model.groupOfRow(key);
+		if (group == null) return false;
+		var siblings = model.siblings(group), at = siblings.indexOf(key), to = at + delta;
+		if (at < 0 || to < 0 || to >= siblings.length) return false;
+		var plan = WorkbenchOrder.plan(model, catalog, client.agentService().agents(), [key], siblings[to], delta > 0, canWriteRow);
+		if (plan == null) return false;
+		if (plan.refusal != null) { reportError(plan.refusal); return true; }
+		startPlan(plan.steps);
+		return true;
+	}
+
+	function startPlan(steps:Array<PlaceStep>):Void {
+		var catalog = client.terminalCatalog();
+		if (catalog == null || steps.length == 0 || batchKeys.length > 0 || batchPlan.length > 0) return;
+		batchPlan = steps.copy(); batchOwner = catalog.instance;
+		batchTerminalError = client.terminalCatalogError(); batchAgentError = client.agentService().agentError();
+		runBatch();
+	}
+
+	/** Writes one step of a placement against the catalogs as they are now. */
+	function placeNode(step:PlaceStep):Void {
+		var catalog = client.terminalCatalog(), row = WorkbenchRowKey.parse(step.key);
+		if (catalog == null || row == null) return;
+		var id = row.id;
+		switch row.kind {
+			case WorkbenchRowKind.Group:
+				for (group in catalog.groups) if (group.id == id)
+					client.changeGroup(catalog.instance, group, group.name, WorkspaceProtocol.parentFor(step.group), group.cwd, step.order, false);
+			case WorkbenchRowKind.Terminal:
+				for (terminal in catalog.terminals) if (terminal.id == id) client.renameTerminal(terminal, terminal.name, step.group, step.order);
+			case WorkbenchRowKind.Agent:
+				var agents = client.agentService().agents();
+				if (agents == null) return;
+				for (agent in agents.records) if (agent.id == id)
+					client.agentService().agentAction(id, "move", step.group, agent.group, null, null, null, null, null, step.order);
+		}
+	}
+
+	/** The pointer moved with a row held: show where it would land between rows. */
+	function dragMovedTo(y:Float):Void {
+		var source = dragSource;
+		if (source == null) return;
+		var placement = placementAt(source, y);
+		if (placement == null || placement.refusal != null) model.setInsertion(null);
+		else model.setInsertion(placement.anchor, placement.after);
+		requestFrame();
+	}
+
+	static function overPanel(node:RenderNode, x:Float, y:Float):Bool {
+		var bounds = node.globalBounds();
+		return x >= bounds.x && x <= bounds.x + bounds.width && y >= bounds.y && y <= bounds.y + bounds.height;
+	}
+
+	function endDrag():Void {
+		dragSource = null; dragMoved = false;
+		model.setInsertion(null);
+	}
+
 	function moveNode(source:String, target:String):Void {
-		// Recheck the live catalog at release, including permissions and mutation state.
-		if (!canDropNode(source, target)) return;
+		// The zone was decided once at release; a batch step rechecks only the live catalog, permissions and mutation state.
+		if (!canMoveInto(source, target)) return;
 		var catalog = client.terminalCatalog();
 		if (catalog == null) return;
 		// A group id, or the workspace root for the open workspace's row.
 		var into = WorkbenchDropRules.destination(target, model.groupParent), row = WorkbenchRowKey.parse(source);
 		if (into == null || row == null) return;
-		var id = row.id;
+		var id = row.id, parent = WorkspaceProtocol.parentFor(into);
 		switch row.kind {
 			case WorkbenchRowKind.Group:
-				var parent = WorkspaceProtocol.parentFor(into);
 				for (group in catalog.groups) if (group.id == id)
 					client.changeGroup(catalog.instance, group, group.name, parent, group.cwd, model.nextOrder(parent), false);
 			case WorkbenchRowKind.Terminal:
-				for (terminal in catalog.terminals) if (terminal.id == id) client.renameTerminal(terminal, terminal.name, into);
+				for (terminal in catalog.terminals) if (terminal.id == id) client.renameTerminal(terminal, terminal.name, into, model.nextOrder(parent));
 			case WorkbenchRowKind.Agent:
 				var agents = client.agentService().agents();
 				if (agents == null) return;
 				for (agent in agents.records) if (agent.id == id)
-					client.agentService().agentAction(id, "move", into, agent.group);
+					client.agentService().agentAction(id, "move", into, agent.group, null, null, null, null, null, model.nextOrder(parent));
 		}
 	}
 
@@ -272,7 +402,7 @@ class WorkbenchPanel implements View {
 	}
 
 	function batchIdle():Bool
-		return batchKeys.length == 0 && !client.terminalCatalogBusy() && !client.agentService().agentBusy();
+		return batchKeys.length == 0 && batchPlan.length == 0 && !client.terminalCatalogBusy() && !client.agentService().agentBusy();
 
 	/** Removes (null target) or moves rows in order, each against the catalog current at its turn. */
 	function startBatch(keys:Array<String>, target:Null<String>):Void {
@@ -284,16 +414,21 @@ class WorkbenchPanel implements View {
 	}
 
 	function runBatch():Void {
-		if (batchKeys.length == 0) return;
+		if (batchKeys.length == 0 && batchPlan.length == 0) return;
 		var catalog = client.terminalCatalog(), service = client.agentService();
-		if (catalog == null || catalog.instance != batchOwner) { batchKeys = []; return; }
+		if (catalog == null || catalog.instance != batchOwner) { batchKeys = []; batchPlan = []; return; }
 		if (client.terminalCatalogBusy() || service.agentBusy()) return;
 		// A failed step stops the rest; the panel already reports its error.
 		var terminalError = client.terminalCatalogError(), agentError = service.agentError();
 		if ((terminalError != null && terminalError != batchTerminalError) || (agentError != null && agentError != batchAgentError)) {
-			batchKeys = []; return;
+			batchKeys = []; batchPlan = []; return;
 		}
 		batchTerminalError = terminalError; batchAgentError = agentError;
+		if (batchPlan.length > 0) {
+			placeNode(batchPlan.shift());
+			requestFrame();
+			return;
+		}
 		var key = batchKeys.shift(), target = batchTarget;
 		if (target == null) removeNode(key); else moveNode(key, target);
 		requestFrame();
@@ -815,6 +950,7 @@ class WorkbenchPanel implements View {
 		var style = new LayoutStyle(); style.width = LayoutAxis.stretch(); style.height = LayoutAxis.grow();
 		var node = new Column("workbench", rows, style).build(context);
         node.onResolved(function(_) {
+            model.layoutChanged(node);
             var target = scrollTarget;
             if (target != null && scrollPasses > 0) {
                 // A second layout uses the expanded tree's updated scroll extent.
@@ -824,6 +960,51 @@ class WorkbenchPanel implements View {
                 requestFrame();
             }
         });
+        // The tree owns the drag; these only watch it from the capture phase to place rows between their siblings.
+        node.on(haxeon.ui.core.UiEventKind.PointerDown, function(event) {
+            if (event.button != 0) return;
+            pressX = event.x; pressY = event.y; pointerY = event.y; dragMoved = false;
+            // The row under the press is the one a drag would carry; hover queries of the tree must not decide that.
+            var pressed = model.rowAt(event.y);
+            dragSource = pressed != null && canDragRow(pressed.key) ? pressed.key : null;
+        }, "capture");
+        node.on(haxeon.ui.core.UiEventKind.PointerMove, function(event) {
+            pointerY = event.y;
+            if (dragSource == null) return;
+            if (!dragMoved) {
+                var dx = event.x - pressX, dy = event.y - pressY;
+                if (dx * dx + dy * dy < 36) return;
+                dragMoved = true;
+            }
+            // Outside the panel nothing would be placed, so no line is shown there.
+            if (overPanel(node, event.x, event.y)) dragMovedTo(event.y);
+            else if (model.insertion != null) { model.setInsertion(null); requestFrame(); }
+        }, "capture");
+        node.on(haxeon.ui.core.UiEventKind.PointerUp, function(event) {
+            pointerY = event.y;
+            var source = dragSource, moved = dragMoved;
+            if (event.button != 0 || source == null) return;
+            var placement = moved && overPanel(node, event.x, event.y) ? placementAt(source, event.y) : null;
+            endDrag();
+            if (placement == null) return;
+            // The rows go between siblings, not into a row, so the tree sees no valid drop and leaves the rest to us.
+            var refusal = placement.refusal;
+            if (refusal != null) { reportError(refusal); requestFrame(); return; }
+            reportSkipped(placement.skipped);
+            startPlan(placement.steps);
+            requestFrame();
+        }, "capture");
+        node.on(haxeon.ui.core.UiEventKind.PointerCancel, function(_) endDrag(), "capture");
+        node.on(haxeon.ui.core.UiEventKind.KeyDown, function(event) {
+            if (event.key == haxeon.ui.core.UiKey.Escape && dragSource != null) {
+                // The tree's own drag ends too, so a release after Escape cannot still move a row into a group.
+                endDrag(); tree.cancelDrag(); event.cancelPointerCapture();
+            }
+            else if ((event.key == haxeon.ui.core.UiKey.Up || event.key == haxeon.ui.core.UiKey.Down) && (event.modifiers & haxeon.ui.core.UiModifier.Alt) != 0
+                && draft == null && agentDraft == null && nudge(event.key == haxeon.ui.core.UiKey.Up ? -1 : 1)) {
+                event.preventDefault(); event.stopPropagation();
+            }
+        }, "capture");
         node.on(haxeon.ui.core.UiEventKind.KeyDown, function(event) {
             if (event.key == haxeon.ui.core.UiKey.F2 && draft == null && agentDraft == null) {
 				var key = tree.selectedKey, agentId = WorkbenchRowKey.idOf(key, WorkbenchRowKind.Agent);
