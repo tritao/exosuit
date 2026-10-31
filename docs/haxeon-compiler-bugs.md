@@ -114,7 +114,8 @@ Standard Haxe APIs haxeon's standard library does not have yet. Each one forced 
 - **`Date` has only `now()` and `getTime()`:** no `getFullYear`, `getMonth`, `getDate`, `getHours` and so on.
   `AgentWorkspaceMigration.timestamp` computes the calendar date from the epoch time by hand.
 - **No `DateTools`** (`DateTools.format` and the rest).
-
+- **`Bytes` has no `toHex`:** a hex
+  fingerprint is a hand-written loop (`WorkspaceCatalogService.hex`).
 - **No fsync / flush-to-disk for ordinary file writes, and no `FileOutput.flush` to disk.** `File.saveBytes` and
   `FileOutput` give no durability. Only `sys.io.AtomicFile` flushes (fsync, or FlushFileBuffers, plus the parent
   directory on POSIX), and it publishes a whole file from memory. The migration's backups therefore go through

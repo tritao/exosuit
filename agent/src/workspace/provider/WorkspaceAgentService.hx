@@ -64,7 +64,7 @@ class WorkspaceAgentService implements WorkspaceAgents {
   for(provider in providers) if(provider.owns(id)) return provider;
   return null;
  }
- function records():Array<AgentRecord> {
+ public function records():Array<AgentRecord> {
   var found:Array<AgentRecord>=[];
   for(provider in providers) found=found.concat(provider.records());
   return found;
