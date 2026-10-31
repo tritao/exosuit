@@ -13,6 +13,8 @@ import workspace.service.WorkspaceProtocol.WorkspaceUnwatchResult;
 	@:id(1) var id:String;
 	@:id(2) var name:String;
 	@:id(3) var capabilities:Array<String>;
+	/** The folder this root serves, on the service's machine. Absent from older agents. */
+	@:optional @:id(4) var path:Null<String>;
 }
 
 @:wire typedef FileRootsResult = {
@@ -156,6 +158,8 @@ typedef FileUnwatchResult = WorkspaceUnwatchResult;
 	@:id(5) var column:Int;
 	@:id(6) var length:Int;
 	@:id(7) var preview:String;
+	/** The root the match is under. A search is per root, so it equals the page's root; absent from older agents. */
+	@:optional @:id(8) var root:Null<String>;
 }
 
 @:wire typedef FileSearchPageResult = {

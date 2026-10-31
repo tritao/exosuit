@@ -11,6 +11,9 @@ import workspace.service.WorkspaceFileProtocol;
 import workspace.service.WorkspaceFileProtocol.FileSearchMatch;
 import workspace.service.WorkspaceFileProtocol.FileSearchPageResult;
 import workspace.service.WorkspaceCatalogProtocol;
+import workspace.service.WorkspaceLifecycleProtocol;
+import workspace.service.WorkspacePairingProtocol;
+import workspace.service.WorkspaceScmProtocol;
 
 /** Frozen independent MessagePack vectors: both bytes and semantic decode are checked. */
 class RpcCompatibilityTests {

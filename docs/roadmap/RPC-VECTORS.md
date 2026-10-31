@@ -303,3 +303,25 @@ Open questions for the mobile review:
 - Do sessions need a last-activity time for sorting, and terminals a source of attention (bell, exit)?
 - Are three removal lists better than one list of `{kind, id}`?
 - Should identity (104) return the ref too? That would change its frozen vector, so for now it does not.
+
+## Several folders in one service (M19 Phase 5)
+
+A workspace service serves every folder attached to its workspace; the file and source control services already
+addressed folders by root id. These additions are optional fields and one new method. Existing ids are unchanged.
+
+- `FileRootDescriptor` (140 reply) field 4 `path`: the folder the root serves. `8401a17202a16e0391a47374617404a22f70`
+  is `{id: r, name: n, capabilities: [stat], path: /p}`.
+- `FileSearchMatch` field 8 `root`: the root a match is under (a search is per root, so it equals the page's root).
+  `8801a5612e74787402a466696c6503a372657604020505060607a66e6565646c6508a172` is the existing match with root `r`.
+- `workspace.folders.manage` (same-user local peers only, like the lifecycle capability) and method 153 `SET`:
+  request `{folders}` (`810191a22f61` for `["/a"]`), reply `{folders, roots}` (`820191a22f610201`). The service
+  serves exactly those folders, starts and stops their file watches, and records them in `workspace.json`.
+- A folder keeps its root id while attached; an id is never reused for another folder, and a folder attached
+  again gets a new one. The first root is still `root` while its folder stays.
+
+Compatibility: an older agent does not offer the capability (the editor tells the user to restart the service), and
+an older client ignores the new fields. Two `@:wire` typedefs of the same shape make the compiler fail (see
+`docs/haxeon-compiler-bugs.md`), so the reply has a second field.
+
+A `FileSearchMatch` with no root now encodes field 8 as nil, so the search page vector in `RpcCompatibilityTests`
+gains `08c0` in its match (header `88`). Older bytes still decode, and older decoders skip the field.

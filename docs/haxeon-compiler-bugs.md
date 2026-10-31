@@ -35,6 +35,16 @@ and the status.
 - **Workaround:** drop the trailing statement.
 - **Status:** open.
 
+### Two `@:wire` typedefs of the same shape fail with "Body typing contexts must be left in stack order"
+
+- **Symptom:** `Body typing contexts must be left in stack order`, no file or line, while compiling any project that
+  loads the protocol file.
+- **Repro:** `@:wire typedef A = {@:id(1) var folders:Array<String>;}` and `@:wire typedef B = {@:id(1) var folders:Array<String>;}`
+  as the request and reply of one `RpcMethod<A, B>`. Giving B a second field avoids it.
+- **Found:** 2026-10-31, M19 Phase 5 (`WorkspaceFoldersProtocol`). Took ten builds to find, since the message names nothing.
+- **Workaround:** make the two shapes differ.
+- **Status:** open. The message should name the declaration being typed.
+
 ### Declaring a local function ends null narrowing for earlier locals
 
 - **Symptom:** a local that was null-checked before a `function` declaration later in the same function loses its

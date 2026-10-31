@@ -19,6 +19,7 @@ class WorkspaceRpcServer {
 	public var remoteAccessStatus:Null<Void->workspace.service.WorkspacePairingProtocol.RemoteAccessStatus>;
 	var serviceStatus:Null<Void->workspace.service.WorkspaceLifecycleProtocol.WorkspaceServiceStatus>;
 	var updateService:Null<String->Bool>;
+	var setFolders:Null<Array<String>->Array<String>>;
 	final files:Null<workspace.runtime.WorkspaceFileService>;
 	final scm:Null<workspace.runtime.WorkspaceScmService>;
 	final peers:Array<Peer> = [];
@@ -32,6 +33,37 @@ class WorkspaceRpcServer {
 		offered.push(workspace.service.WorkspaceLifecycleProtocol.CAPABILITY);
 		localOptions = new RpcPeerOptions(options.application, offered, [], options.timeoutMs,
 			options.maxMessageBytes, options.maxCalls, options.maxQueuedBytes, options.protocol, options.codec);
+	}
+
+	/** Lets same-user peers change the folders served; `change` returns the folders now served, or throws a message. */
+	public function enableFolders(change:Array<String>->Array<String>):Void {
+		setFolders = change;
+		var offered = localOptions.offered();
+		offered.push(workspace.service.WorkspaceFoldersProtocol.CAPABILITY);
+		localOptions = new RpcPeerOptions(options.application, offered, [], options.timeoutMs,
+			options.maxMessageBytes, options.maxCalls, options.maxQueuedBytes, options.protocol, options.codec);
+	}
+
+	function registerFolders(connection:haxeon.rpc.RpcConnection, grants:Array<String>, localAdmin:Bool):Void {
+		var setter = setFolders;
+		if (!localAdmin || setter == null || grants.indexOf(workspace.service.WorkspaceFoldersProtocol.CAPABILITY) < 0) return;
+		connection.register(workspace.service.WorkspaceFoldersProtocol.SET, function(request, context) {
+			answerFolders(setter, request, context);
+		});
+	}
+
+	static function answerFolders(change:Array<String>->Array<String>, request:workspace.service.WorkspaceFoldersProtocol.FoldersSetRequest,
+			context:haxeon.rpc.RpcContext<workspace.service.WorkspaceFoldersProtocol.FoldersSetResult>):Void {
+		if (request == null || request.folders == null) {
+			context.fail({code: "invalid_request", message: "Invalid folder list", ambiguous: false});
+			return;
+		}
+		try {
+			var folders = change(request.folders);
+			context.respond({folders: folders, roots: folders.length == 0 ? 1 : folders.length});
+		} catch (error:Dynamic) {
+			context.fail({code: "invalid_folders", message: Std.string(error), ambiguous: false});
+		}
 	}
 
 	public function enablePairing(admin:workspace.service.WorkspacePairingAdmin):Void {
@@ -194,6 +226,7 @@ class WorkspaceRpcServer {
 						peer.connection.register(workspace.service.WorkspaceLifecycleProtocol.UPDATE, function(request, context)
 							context.respond({accepted: update(request.mode)}));
 					}
+					registerFolders(peer.connection, grants, peer.localAdmin);
 					if (peer.localAdmin && grants.indexOf(workspace.service.WorkspacePairingProtocol.STATUS_CAPABILITY) >= 0)
 						peer.connection.register(workspace.service.WorkspacePairingProtocol.STATUS, function(_, context) {
 							context.respond(remoteAccessStatus == null
