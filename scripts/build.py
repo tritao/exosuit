@@ -18,6 +18,16 @@ def main() -> int:
     # suit is the per-user tray daemon that tracks the processes editors and workspaces start. The projects build one
     # after another: built side by side, their CMake configures contended and the whole build took longer.
     projects = ["agent", "suit", "graphical"]
+    # `--only agent,suit` builds just those, for a quick loop on one part.
+    passed = sys.argv[1:]
+    if "--only" in passed:
+        index = passed.index("--only")
+        if index + 1 >= len(passed) or not set(passed[index + 1].split(",")) <= set(projects):
+            print(f"--only takes a comma-separated list of {', '.join(projects)}", file=sys.stderr)
+            return 2
+        chosen = passed[index + 1].split(",")
+        projects = [project for project in projects if project in chosen]
+        passed = passed[:index] + passed[index + 2:]
 
     try:
         prepare(root_dir)
@@ -28,7 +38,7 @@ def main() -> int:
             arguments = ["build", "--project", str(root_dir / project / "haxeon.json")]
             if self_hosted:
                 arguments.append("--self-hosted")
-            arguments.extend(sys.argv[1:])
+            arguments.extend(passed)
             started = time.monotonic()
             status = run_cli(root_dir, arguments)
             if status != 0:
