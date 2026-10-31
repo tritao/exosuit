@@ -111,6 +111,10 @@ class AttachmentTestMain {
       managerChoice(runtime, processes, clock, root, launcher);
       return;
     }
+    if (mode == "workspace-identity") {
+      workspaceIdentity(runtime, processes, clock, root, launcher, args[3], args[4], args[5]);
+      return;
+    }
     var a = new LocalWorkspaceClient(runtime.events, processes, launcher, clock);
     var b = new LocalWorkspaceClient(runtime.events, processes, launcher, clock);
     var step = function() {
@@ -437,5 +441,60 @@ class AttachmentTestMain {
 
     machine.dispose(); client.dispose(); processes.shutdown(); runtime.dispose();
     Sys.println("PASS: the editor uses, copies and switches between this machine's managers for one folder (own " + own + ")");
+  }
+
+  /**
+    Two folders of one workspace, as the editor's terminals reach them (args: first folder, launcher, second folder,
+    phase, the previous run's service generation). With EXOSUIT_WORKSPACE_IDENTITY=workspace both roots attach to one
+    service keyed by the workspace id, whose groups outlive the service; without it each folder has a service of its own.
+  **/
+  static function workspaceIdentity(runtime:Runtime, processes:ProcessManager, clock:Void->Float, first:String, launcher:String,
+      second:String, phase:String, previous:String):Void {
+    var enabled = workspace.client.WorkspaceServiceTarget.enabled();
+    var resolve = function(folder:String):Null<workspace.client.WorkspaceServiceTarget> {
+      return enabled && (folder == first || folder == second) ? workspace.client.WorkspaceServiceTarget.forWorkspace("ws1", [first, second], null) : null;
+    };
+    var pool = new workspace.client.LocalTerminalWorkspacePool(runtime.events, processes, launcher, clock, resolve);
+    var tick = function() {
+      runtime.events.wait(0.005);
+      for (_ in 0...128) if (!runtime.events.poll()) break;
+      pool.poll();
+    };
+    var one:LocalWorkspaceClient = cast pool.endpoint(first), two:LocalWorkspaceClient = cast pool.endpoint(second);
+    require(enabled ? one == two : one != two, "Roots of a workspace share a service only with the flag: " + enabled);
+    var deadline = clock() + 100000;
+    while ((!one.ready || !two.ready) && clock() < deadline) {
+      require(one.error == null && two.error == null, "Attachment failed: " + one.error + " / " + two.error);
+      tick();
+    }
+    require(one.ready && two.ready, "Did not attach to the workspace's service");
+    var same = workspace.client.MachineWorkspaces.normalPath;
+    require(same(one.rootPath()) == same(first), "The service did not start in the first folder: " + one.rootPath());
+    var generation = one.serviceGeneration();
+    require(phase != "check" || generation != previous, "The service did not restart");
+    if (phase == "create") {
+      one.refreshTerminals(true);
+      deadline = clock() + 10000;
+      while (one.terminalCatalog() == null && clock() < deadline) tick();
+      require(one.terminalCatalog() != null, "Terminal catalog did not load");
+      var created = false;
+      one.changeGroup(generation, {id: "kept", name: "Kept", cwd: null, revision: 0, parent: null, order: 5}, "Kept", null, second, 5, true,
+        function(group, error) created = group != null);
+      deadline = clock() + 10000;
+      while (!created && clock() < deadline) tick();
+      require(created, "Group was not created");
+    }
+    var kept = [for (group in one.view()) if (group.id == "kept") group];
+    require(kept.length == 1 && same(kept[0].cwd) == same(second), "Group did not survive: " + kept.length);
+    // Roots keep their client while they stay in use, and the workspace's service goes when none is.
+    if (enabled) {
+      pool.retainRoots([second]);
+      require(one.rpcConnection() != null, "A workspace's service was released while a root of it is in use");
+      pool.retainRoots([]);
+      require(one.rpcConnection() == null, "An unused workspace's client was kept");
+    }
+    pool.dispose(); processes.shutdown(); runtime.dispose();
+    Sys.println("GENERATION " + generation);
+    Sys.println("PASS: " + (enabled ? "both folders of the workspace attach to one service keyed by its id" : "each folder keeps a service of its own"));
   }
 }

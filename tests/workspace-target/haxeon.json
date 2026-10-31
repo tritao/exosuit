@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "package": {"name": "exosuit-workspace-target-test"},
+  "entry": "app.WorkspaceTargetTestMain",
+  "sourceRoots": ["src"],
+  "scopeSourceRoots": false,
+  "dependencies": {"pragtical_hx": {"path": "../.."}},
+  "target": "host",
+  "outputDir": "build"
+}
