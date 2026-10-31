@@ -10,22 +10,23 @@ import time
 
 ROOT=Path(__file__).resolve().parent.parent
 from agent_test_runtime import launcher_path, manager_command, manager_environment
+from haxeon_cli import run_cli
 
 MANAGER=launcher_path(ROOT)
 MANAGER_COMMAND=manager_command(ROOT)
-HAXEON=os.environ.get('HAXEON_BIN',str(Path(os.environ.get('HAXEON_ROOT',str(ROOT/'haxeon')))/'scripts/haxeon'))
 MODE=['--self-hosted'] if os.environ.get('HAXEON_SELF_HOSTED')=='1' else []
 PROJECT=ROOT/'tests/workspace-terminals/haxeon.json'
 HAXEON_ROOT=Path(os.environ.get('HAXEON_ROOT',str(ROOT/'haxeon'))).resolve()
 OUTPUT=PROJECT.parent/'build/host'
-RUNNER=[str(HAXEON_ROOT/'.tools/hashlink/hl'),str(OUTPUT/'main.hl')]
-subprocess.run([HAXEON,'build','--project',str(PROJECT),*MODE],check=True)
+RUNNER=[str(HAXEON_ROOT/'.tools/hashlink'/('hl.exe' if os.name=='nt' else 'hl')),str(OUTPUT/'main.hl')]
+if run_cli(ROOT,['build','--project',str(PROJECT),*MODE])!=0: sys.exit('build failed')
 with tempfile.TemporaryDirectory(prefix='extty-') as temporary:
     fixture=Path(temporary); root=fixture/'project'; root.mkdir(); state=fixture/'state'
-    environment=dict(manager_environment(ROOT, MANAGER),XDG_STATE_HOME=str(state),SHELL='/bin/sh')
+    environment=dict(manager_environment(ROOT, MANAGER),XDG_STATE_HOME=str(state),EXOSUIT_AGENT_STATE_HOME=str(state/'exosuit'),SHELL='/bin/sh')
     environment.pop('EXOSUIT_AGENT_ALWAYS_AVAILABLE',None)
     libraries=[HAXEON_ROOT/'out',HAXEON_ROOT/'.tools/hashlink',*sorted(path for path in (OUTPUT/'native').iterdir() if path.is_dir())]
-    environment['LD_LIBRARY_PATH']=':'.join(str(path) for path in libraries)+(':'+environment['LD_LIBRARY_PATH'] if environment.get('LD_LIBRARY_PATH') else '')
+    variable='PATH' if os.name=='nt' else 'LD_LIBRARY_PATH'
+    environment[variable]=os.pathsep.join(str(path) for path in libraries)+(os.pathsep+environment[variable] if environment.get(variable) else '')
     def endpoints(): return list(state.glob('exosuit/workspaces/*/endpoint.json'))
     subprocess.run([*RUNNER,'contracts',str(root),str(MANAGER)],env=environment,check=True,timeout=40)
     with (fixture/'manager.log').open('w') as log:

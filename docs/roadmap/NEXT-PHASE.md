@@ -71,10 +71,18 @@ Live mode and suit:
   self-updating builders are kept. An edit to a custom paint handler's body may not show until its key changes.
 - The workspace service keeps its state in `%LOCALAPPDATA%\Exosuit\workspaces\<hash>`, which `PRAGTICAL_PORTABLE`
   does not cover, so editor sessions on a test workspace leave state there.
-- `scripts/test-workspace-agents.py` is POSIX-only (the bash `haxeon` wrapper, symlinks, `LD_LIBRARY_PATH`, running
-  `fake-codex.py` directly). A Windows run works with a `.cmd` wrapper around the fake, `;`-joined `PATH` entries and
-  `hl.exe`; make the script do that.
+- `scripts/test-workspace-agents.py` and the contract phase of `scripts/test-workspace-terminals.py` now run on
+  Windows (`hl.exe`, `;`-joined `PATH`, a `.cmd` wrapper around the fake Codex, PowerShell commands typed into the
+  fixture shells through `TestShell`). `TerminalThemeTests` is skipped there: it needs termios and `/dev/tty`.
+- The daemon phase of `scripts/test-workspace-terminals.py` fails on Windows. The `catalog` client mode (a separate
+  `hl` process attaching to the manager process over its named pipe) throws "Native terminal catalog timed out", and
+  the process then exits with 0xC0000409 (fail-fast), which is the crash once blamed on `TerminalAgentTests`; that
+  suite passes in the `contracts` run. Find why the client never receives the catalog, then why the uncaught-exception
+  exit path fail-fasts. The driver also cannot delete its temporary folder while the manager holds `agent.lock`.
 - Starting a Claude session asks to trust the folder in Claude's own terminal UI, and Codex shows its own trust prompt.
+- `tests/agentkit-provider` (run through a Windows copy of `run.py`) prints "PASS: agentkit provider" and then the
+  process exits with 0xC0000409 at shutdown, so the script reports a failure. It also happens on `daily` without the
+  catalog changes, so it is not new; the shutdown path, not a test, is what fail-fasts. `run.py` itself is POSIX-only.
   Consider passing the workspace's trust decision through, or explaining the prompt.
 
 ### From the session-scope review (2026-10-28)
