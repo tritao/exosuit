@@ -11,12 +11,12 @@ import sys.FileSystem;
 @:access(app.AgentManager)
 class AgentManagerSeed {
 	/** Copies `source`'s catalog into `directory`, whose manager lock the caller holds. A source with no catalog yet copies nothing. */
-	public static function copyCatalog(source:String, directory:String, root:String):Void {
+	public static function copyCatalog(source:String, directory:String, key:String):Void {
 		if (source == directory) throw "A workspace state cannot start from itself";
 		if (!FileSystem.exists(source) || !AgentManagerNative.privateDirectory(source))
 			throw "The state to copy must be private and owned by this user";
-		var identity = AgentManager.readPrivateJson(Path.join([source, "workspace.json"]), 16384);
-		if (AgentManager.intField(identity, "version") != 1 || AgentManager.stringField(identity, "root") != root)
+		var identity = AgentStateIdentity.read(Path.join([source, "workspace.json"]));
+		if (identity.migratedTo != null || identity.key() != key)
 			throw "The state to copy belongs to another workspace";
 		var catalog = Path.join([source, "catalog.sqlite"]);
 		if (!FileSystem.exists(catalog)) return;

@@ -10,6 +10,9 @@ import sys.io.ChildProcess;
 import sys.io.File;
 
 private typedef ManagerOptions = {
+	/** Whose state this is: a workspace's id and folders, or (before M19 Phase 4) one folder. */
+	var identity:AgentStateIdentity;
+	/** The folder the service starts in: the folder, or the workspace's first folder or scratch folder. */
 	var root:String;
 	var stateDir:Null<String>;
 	var port:Int;
@@ -29,7 +32,7 @@ private typedef ManagerOptions = {
 
 /** Exosuit workspace daemon supervisor and discovery launcher. */
 class AgentManager {
-	static final DISCOVERY_FIELDS = ["version", "protocol", "codec", "workspace", "root", "managerPid", "generation", "socket", "websocket", "credentialFile", "expectedBuild", "launcher"];
+	static final DISCOVERY_FIELDS = ["version", "protocol", "codec", "workspace", "root", "managerPid", "generation", "socket", "websocket", "credentialFile", "expectedBuild", "launcher", "workspaceId"];
 	static final MAX_OUTPUT_LINE = 1048576;
 
 	public static function run(arguments:Array<String>):Int {
@@ -37,27 +40,28 @@ class AgentManager {
 			AgentManagerNative.setPrivateUmask();
 			var options = parse(arguments);
 			var directory = stateDirectory(options);
+			var key = options.identity.key();
 			if (options.configureRelay != null) {
-				var endpoint = existingWorkspace(directory, options.root);
+				var endpoint = existingWorkspace(directory, key);
 				configureRelay(directory, options.configureRelay);
 				emitDiscovery(endpoint, options.wire);
 				return 0;
 			}
 			if (options.prepareUpdate) {
-				var endpoint = existingWorkspace(directory, options.root);
+				var endpoint = existingWorkspace(directory, key);
 				prepareUpdate(directory, options.root);
 				emitDiscovery(endpoint, options.wire);
 				return 0;
 			}
 			if (options.restart) {
-				var endpoint = existingWorkspace(directory, options.root);
+				var endpoint = existingWorkspace(directory, key);
 				var previousGeneration = stringField(endpoint, "generation");
 				if (previousGeneration != options.expectedGeneration)
 					throw "Workspace service changed; refresh before restarting";
 				prepareUpdate(directory, options.root);
-				var managerRestartsItself = restartManager(directory, options.root, options.expectedGeneration);
+				var managerRestartsItself = restartManager(directory, key, options.expectedGeneration);
 				if (managerRestartsItself) {
-					var restarted = waitForNewWorkspace(directory, options.root, previousGeneration);
+					var restarted = waitForNewWorkspace(directory, key, previousGeneration);
 					emitDiscovery(restarted, options.wire);
 					return 0;
 				}
@@ -67,7 +71,7 @@ class AgentManager {
 				if (!FileSystem.exists(directory)) return 4;
 				if (!AgentManagerNative.privateDirectory(directory))
 					throw "Workspace state directory must be private and owned by this user";
-				var endpoint = readDiscovery(directory, options.root);
+				var endpoint = readDiscovery(directory, key);
 				if (endpoint == null) return 4;
 				emitDiscovery(endpoint, options.wire);
 				return 0;
@@ -87,22 +91,50 @@ class AgentManager {
 	}
 
 	static function parse(arguments:Array<String>):ManagerOptions {
-		if (arguments.length == 0) throw "Usage: exosuit-agent.hl --manager WORKSPACE [--discover|--detach] [--wire]";
-		var root = FileSystem.fullPath(arguments[0]);
-		if (!FileSystem.isDirectory(root)) throw "Workspace root is not a directory";
+		if (arguments.length == 0)
+			throw "Usage: exosuit-agent.hl --manager (FOLDER | --workspace ID [--folder FOLDER]... [--scratch FOLDER] | --from-state DIR) "
+				+ "[--discover|--detach] [--wire]";
+		var workspace:Null<String> = null, root = "", index = 1;
+		var folders:Array<String> = [], scratch:Null<String> = null, fromState:Null<String> = null;
+		if (arguments[0] == "--workspace") {
+			if (arguments.length < 2 || !AgentStateIdentity.validWorkspaceId(arguments[1])) throw "--workspace requires a workspace id";
+			workspace = arguments[1];
+			index = 2;
+		} else if (arguments[0] == "--from-state") {
+			// The service whose state this is, as its workspace.json names it: how suit starts a hosted workspace.
+			if (arguments.length < 2) throw "--from-state requires a state directory";
+			fromState = absoluteStatePath(arguments[1]);
+			var recorded = AgentStateIdentity.read(Path.join([fromState, "workspace.json"]));
+			if (recorded.migratedTo != null) throw "This state was moved into a workspace";
+			workspace = recorded.workspace;
+			if (workspace == null) root = directoryArgument(recorded.key());
+			else {
+				folders = [for (folder in recorded.folders) if (FileSystem.exists(folder) && FileSystem.isDirectory(folder)) folder];
+				scratch = recorded.scratch;
+			}
+			index = 2;
+		} else {
+			root = directoryArgument(arguments[0]);
+		}
 		var options:ManagerOptions = {
-			root: root, stateDir: null, port: 0, idleSeconds: 60,
+			identity: AgentStateIdentity.forFolder(root), root: root, stateDir: null, port: 0, idleSeconds: 60,
 			alwaysAvailable: Sys.getEnv("EXOSUIT_AGENT_ALWAYS_AVAILABLE") == "1",
 			discover: false, configureRelay: null, prepareUpdate: false,
 			restart: false, expectedGeneration: null,
 			detach: false, background: false, wire: false, generation: null, seedFrom: null
 		};
-		var index = 1;
 		while (index < arguments.length) {
 			var value = arguments[index++];
 			switch value {
+				case "--folder" | "--scratch":
+					if (workspace == null || fromState != null) throw '$value requires --workspace';
+					if (index >= arguments.length) throw '$value requires a directory';
+					var folder = directoryArgument(arguments[index++]);
+					if (value == "--scratch") scratch = folder;
+					else if (folders.indexOf(folder) < 0) folders.push(folder);
 				case "--state-dir":
 					if (index >= arguments.length) throw "--state-dir requires a directory";
+					if (fromState != null) throw "--from-state names the state directory";
 					options.stateDir = absoluteStatePath(arguments[index++]);
 				case "--port":
 					if (index >= arguments.length) throw "--port requires a value";
@@ -138,6 +170,11 @@ class AgentManager {
 				default: throw 'Unknown workspace manager option: $value';
 			}
 		}
+		if (workspace != null) {
+			options.identity = AgentStateIdentity.forWorkspace(workspace, folders, scratch);
+			options.root = options.identity.primaryRoot();
+		}
+		if (fromState != null) options.stateDir = fromState;
 		var maintenanceModes = (options.configureRelay != null ? 1 : 0) + (options.prepareUpdate ? 1 : 0) + (options.restart ? 1 : 0);
 		if (maintenanceModes > 1 || maintenanceModes > 0 && (options.discover || options.detach || options.background))
 			throw "Workspace maintenance cannot be combined with another manager mode";
@@ -154,10 +191,25 @@ class AgentManager {
 		return options;
 	}
 
+	static function directoryArgument(path:String):String {
+		var full = FileSystem.fullPath(path);
+		if (full == null || !FileSystem.isDirectory(full)) throw 'Workspace folder is not a directory: $path';
+		return full;
+	}
+
 	static function stateDirectory(options:ManagerOptions):String {
 		if (options.stateDir != null) return options.stateDir;
-		return absoluteStatePath(Path.join([stateBase(), "workspaces", Sha256.encode(options.root).substr(0, 20)]));
+		var workspace = options.identity.workspace;
+		return workspace == null ? folderStateDirectory(options.root) : workspaceStateDirectory(workspace);
 	}
+
+	/** A folder's default state, before M19 Phase 4: `workspaces/<hash of the folder>`. */
+	public static function folderStateDirectory(root:String):String
+		return absoluteStatePath(Path.join([stateBase(), "workspaces", Sha256.encode(root).substr(0, 20)]));
+
+	/** A workspace's default state: `workspaces/<workspace id>`. */
+	public static function workspaceStateDirectory(workspace:String):String
+		return absoluteStatePath(Path.join([stateBase(), "workspaces", workspace]));
 
 	/** The per-user folder holding `workspaces` (each root's default state) and `managers` (this machine's registry). */
 	public static function stateBase():String {
@@ -205,10 +257,10 @@ class AgentManager {
 		if (!FileSystem.isDirectory(path)) throw 'Could not create directory: $path';
 	}
 
-	static function existingWorkspace(directory:String, root:String):Dynamic {
+	static function existingWorkspace(directory:String, key:String):Dynamic {
 		if (!FileSystem.exists(directory) || !AgentManagerNative.privateDirectory(directory))
 			throw "Workspace state directory must be private and owned by this user";
-		var endpoint = readDiscovery(directory, root);
+		var endpoint = readDiscovery(directory, key);
 		if (endpoint == null) throw "Workspace service is not running";
 		return endpoint;
 	}
@@ -257,19 +309,19 @@ class AgentManager {
 		return relay.origin;
 	}
 
-	static function restartManager(directory:String, root:String, expectedGeneration:Null<String>):Bool {
+	static function restartManager(directory:String, key:String, expectedGeneration:Null<String>):Bool {
 		if (expectedGeneration == null) throw "Restart requires the expected service generation";
-		var endpoint = existingWorkspace(directory, root);
+		var endpoint = existingWorkspace(directory, key);
 		if (stringField(endpoint, "generation") != expectedGeneration)
 			throw "Workspace service changed; refresh before restarting";
 		var pid = intField(endpoint, "managerPid");
-		var kind = managerProcessKind(pid, root);
+		var kind = managerProcessKind(pid, key);
 		if (kind == "haxe") {
 			var requestPath = Path.join([directory, "restart-request.json"]);
 			AtomicFile.write(requestPath, Json.stringify({version: 1, generation: expectedGeneration}) + "\n");
 			if (waitForManagerStop(directory, expectedGeneration, 5)) return true;
 			var endpointPath = Path.join([directory, "endpoint.json"]);
-			var current = readDiscovery(directory, root);
+			var current = readDiscovery(directory, key);
 			if (current != null && stringField(current, "generation") != expectedGeneration) return true;
 			if (current == null) {
 				if (!FileSystem.exists(endpointPath)) return true;
@@ -282,7 +334,7 @@ class AgentManager {
 			if (process == null) throw "Workspace manager process identity could not be verified";
 			var restarted:Bool;
 			try {
-				restarted = restartHaxeManagerWithProcess(directory, root, expectedGeneration, pid, process);
+				restarted = restartHaxeManagerWithProcess(directory, key, expectedGeneration, pid, process);
 			} catch (error:Dynamic) {
 				AgentManagerNative.closeProcessIdentity(process);
 				throw error;
@@ -295,9 +347,9 @@ class AgentManager {
 		if (process == null) throw "Safe legacy restart requires Linux pidfd support";
 		var terminated = false;
 		try {
-			if (managerProcessKind(pid, root) != "legacy")
+			if (managerProcessKind(pid, key) != "legacy")
 				throw "Workspace manager process identity could not be verified";
-			var current = existingWorkspace(directory, root);
+			var current = existingWorkspace(directory, key);
 			if (stringField(current, "generation") != expectedGeneration || intField(current, "managerPid") != pid)
 				throw "Workspace service changed before restart";
 			terminated = AgentManagerNative.terminateProcess(process);
@@ -315,12 +367,12 @@ class AgentManager {
 		return false;
 	}
 
-	static function restartHaxeManagerWithProcess(directory:String, root:String, generation:String, pid:Int,
+	static function restartHaxeManagerWithProcess(directory:String, key:String, generation:String, pid:Int,
 		process:AgentProcessIdentityHandle):Bool {
 		// Older Haxe managers do not consume restart-request.json; preserve the
 		// cooperative path and force-stop only after confirming the old generation remains.
 		var endpointPath = Path.join([directory, "endpoint.json"]);
-		var current = readDiscovery(directory, root);
+		var current = readDiscovery(directory, key);
 		if (current != null && stringField(current, "generation") != generation) return true;
 		if (current == null) {
 			if (!FileSystem.exists(endpointPath)) return true;
@@ -328,7 +380,7 @@ class AgentManager {
 			cleanupStoppedEndpoint(directory, generation, pid);
 			return false;
 		}
-		if (intField(current, "managerPid") != pid || managerProcessKind(pid, root) != "haxe")
+		if (intField(current, "managerPid") != pid || managerProcessKind(pid, key) != "haxe")
 			throw "Workspace service changed before restart";
 		if (!AgentManagerNative.terminateProcess(process)) {
 			if (waitForManagerStop(directory, generation, 5)) return true;
@@ -378,11 +430,11 @@ class AgentManager {
 			FileSystem.deleteFile(path);
 	}
 
-	static function waitForNewWorkspace(directory:String, root:String, previousGeneration:String):Dynamic {
+	static function waitForNewWorkspace(directory:String, key:String, previousGeneration:String):Dynamic {
 		var deadline = Sys.time() + 90;
 		while (Sys.time() < deadline) {
 			try {
-				var endpoint = readDiscovery(directory, root);
+				var endpoint = readDiscovery(directory, key);
 				if (endpoint != null && stringField(endpoint, "generation") != previousGeneration) return endpoint;
 			} catch (_:Dynamic) {}
 			Sys.sleep(0.05);
@@ -390,7 +442,8 @@ class AgentManager {
 		throw "Timed out waiting for the restarted workspace service";
 	}
 
-	static function managerProcessKind(pid:Int, root:String):String {
+	/** `key` is the service's key: a manager started for it has it among its arguments, as a folder or a workspace id. */
+	static function managerProcessKind(pid:Int, key:String):String {
 		if (Sys.systemName() == "Windows" || Sys.systemName() == "Mac") return "haxe";
 		var path = '/proc/$pid/cmdline';
 		var arguments:Array<String>;
@@ -408,7 +461,7 @@ class AgentManager {
 		var legacy = false, haxeManager = false, hasRoot = false, hasManagerFlag = false;
 		var launcher = managerBytecode();
 		for (argument in arguments) {
-			if (argument == root) hasRoot = true;
+			if (argument == key) hasRoot = true;
 			if (argument == "--manager") hasManagerFlag = true;
 			if (Path.withoutDirectory(StringTools.replace(argument, "\\", "/")) == "run-agent.py") legacy = true;
 			if (FileSystem.exists(argument)) {
@@ -560,12 +613,13 @@ class AgentManager {
 		return result.toLowerCase();
 	}
 
-	static function readDiscovery(directory:String, root:String):Null<Dynamic> {
+	/** The running service's endpoint for `key` (a workspace id, or a folder for a folder-keyed service), or null. */
+	static function readDiscovery(directory:String, key:String):Null<Dynamic> {
 		var endpointPath = Path.join([directory, "endpoint.json"]);
 		if (!FileSystem.exists(endpointPath)) return null;
 		var endpoint = readPrivateJson(endpointPath, 16384);
 		if (!isObject(endpoint) || intField(endpoint, "version") != 1 || intField(endpoint, "protocol") != 1 ||
-			intField(endpoint, "codec") != 1 || stringField(endpoint, "root") != root ||
+			intField(endpoint, "codec") != 1 || endpointKey(endpoint) != key ||
 			stringField(endpoint, "workspace") != "workspace")
 			throw "Unsupported workspace descriptor";
 		var generation = stringField(endpoint, "generation");
@@ -573,7 +627,7 @@ class AgentManager {
 		var socket = stringField(endpoint, "socket");
 		var credential = stringField(endpoint, "credentialFile");
 		var websocket = stringField(endpoint, "websocket");
-		var expectedSocket = localEndpoint(directory, pipeKey(root, directory));
+		var expectedSocket = localEndpoint(directory, pipeKey(key, directory));
 		if (!isHex(generation, 32) || managerPid <= 0 || socket != expectedSocket ||
 			credential != Path.join([directory, "credential"]))
 			throw "Workspace descriptor identity mismatch";
@@ -581,9 +635,8 @@ class AgentManager {
 		if (!url.match(websocket)) throw "Invalid workspace loopback endpoint";
 		var port = Std.parseInt(url.matched(1));
 		if (port == null || port < 1 || port > 65535) throw "Invalid workspace loopback endpoint";
-		var identityPath = Path.join([directory, "workspace.json"]);
-		var identity = readPrivateJson(identityPath, 16384);
-		if (!isObject(identity) || intField(identity, "version") != 1 || stringField(identity, "root") != root)
+		var identity = AgentStateIdentity.read(Path.join([directory, "workspace.json"]));
+		if (identity.migratedTo != null || identity.key() != key)
 			throw "Workspace state directory identity mismatch";
 		if (!AgentManagerNative.privateFile(credential)) throw "Invalid session credential file";
 		var token = File.getContent(credential);
@@ -594,6 +647,12 @@ class AgentManager {
 			return null;
 		}
 		return endpoint;
+	}
+
+	/** A descriptor's key: `workspaceId` for a workspace's service, else its folder. */
+	static function endpointKey(endpoint:Dynamic):String {
+		var workspace = stringField(endpoint, "workspaceId");
+		return workspace != "" ? workspace : stringField(endpoint, "root");
 	}
 
 	static function readPrivateJson(path:String, limit:Int):Dynamic {
@@ -608,8 +667,8 @@ class AgentManager {
 		var generation = AgentManagerNative.randomToken().substr(0, 32);
 		var logPath = Path.join([directory, "manager.log"]);
 		prepareLog(logPath);
-		var command = [launcher, "--manager", options.root, "--state-dir", directory, "--port", Std.string(options.port),
-			"--idle-seconds", Std.string(options.idleSeconds), "--generation", generation, "--background"];
+		var command = [launcher, "--manager"].concat(identityArguments(options.identity)).concat(["--state-dir", directory, "--port", Std.string(options.port),
+			"--idle-seconds", Std.string(options.idleSeconds), "--generation", generation, "--background"]);
 		if (options.alwaysAvailable) command.push("--always-available");
 		if (options.seedFrom != null) command = command.concat(["--seed-from", options.seedFrom]);
 		var child = sys.io.Process.spawn(Sys.executablePath(), command, options.root, null, null, true);
@@ -622,7 +681,7 @@ class AgentManager {
 				copyOutput(child, buffer, true, logPath);
 				if (status >= 0) { result = status; complete = true; break; }
 				try {
-					var endpoint = readDiscovery(directory, options.root);
+					var endpoint = readDiscovery(directory, options.identity.key());
 					if (endpoint != null && endpoint.generation == generation) {
 						emitDiscovery(endpoint, options.wire);
 						result = 0;
@@ -641,6 +700,17 @@ class AgentManager {
 			throw error;
 		}
 		child.close();
+		return result;
+	}
+
+	/** The arguments after `--manager` that name `identity`'s service. */
+	public static function identityArguments(identity:AgentStateIdentity):Array<String> {
+		var workspace = identity.workspace;
+		if (workspace == null) return [identity.key()];
+		var result = ["--workspace", workspace];
+		for (folder in identity.folders) result = result.concat(["--folder", folder]);
+		var scratch = identity.scratch;
+		if (scratch != null) result = result.concat(["--scratch", scratch]);
 		return result;
 	}
 
@@ -682,9 +752,9 @@ class AgentManager {
 			}
 			if (generation.length == 0) generation = AgentManagerNative.randomToken().substr(0, 32);
 			prepareLog(logPath);
-			ensureIdentity(identityPath, options.root);
+			ensureIdentity(identityPath, options.identity);
 			if (options.seedFrom != null && !FileSystem.exists(database))
-				AgentManagerSeed.copyCatalog(options.seedFrom, directory, options.root);
+				AgentManagerSeed.copyCatalog(options.seedFrom, directory, options.identity.key());
 			prepareEndpointForLaunch(endpointPath);
 			clearRestartRequest(directory);
 			ensureCredential(credentialPath);
@@ -693,7 +763,7 @@ class AgentManager {
 				if (FileSystem.exists(path) && !AgentManagerNative.privateFile(path))
 					throw 'Workspace state file is not private: $path';
 			var port = options.port == 0 ? choosePort() : options.port;
-			var socket = localEndpoint(directory, pipeKey(options.root, directory));
+			var socket = localEndpoint(directory, pipeKey(options.identity.key(), directory));
 			if (Sys.systemName() != "Windows" && socket.length > 100)
 				throw "State directory path is too long for a local socket; use --state-dir";
 			var launcher = managerBytecode();
@@ -735,12 +805,14 @@ class AgentManager {
 							websocket: "ws://127.0.0.1:" + port + "/workspace", credentialFile: credentialPath,
 							launcher: launcher
 						};
+						var workspaceId = options.identity.workspace;
+						if (workspaceId != null) Reflect.setField(descriptor, "workspaceId", workspaceId);
 						AtomicFile.write(endpointPath, Json.stringify(descriptor) + "\n");
 						ready = true;
-						registryRecord = AgentMachine.register(stateBase(), options.root, directory, generation, launcher);
+						registryRecord = AgentMachine.register(stateBase(), options.identity, directory, generation, launcher);
 						// Fire-and-forget: suit (the tray daemon) lists, and can cooperatively stop, this manager.
 						suit.SuitClient.registerWorkspaceService(suit.SuitKind.WorkspaceManager,
-							{root: options.root, stateDir: directory, generation: generation});
+							{root: options.root, stateDir: directory, generation: generation, workspace: options.identity.workspace});
 						if (options.background) suit.SuitClient.ensureDaemon();
 						if (!options.background) emitDiscovery(descriptor, options.wire);
 					}
@@ -794,14 +866,22 @@ class AgentManager {
 		return exitCode;
 	}
 
-	static function ensureIdentity(path:String, root:String):Void {
-		if (FileSystem.exists(path)) {
-			var identity = readPrivateJson(path, 16384);
-			if (!isObject(identity) || intField(identity, "version") != 1 || stringField(identity, "root") != root)
-				throw "Workspace state directory identity mismatch";
-		} else {
-			AtomicFile.create(path, Json.stringify({version: 1, root: root}) + "\n");
+	/**
+		Checks that the state folder is `identity`'s, or claims a new one. A workspace's folders are rewritten each
+		start: the workspace's id is its identity, and its folders may change between starts.
+	**/
+	static function ensureIdentity(path:String, identity:AgentStateIdentity):Void {
+		if (!FileSystem.exists(path)) {
+			identity.write(path);
+			return;
 		}
+		var existing = AgentStateIdentity.read(path);
+		var movedTo = existing.migratedTo;
+		if (movedTo != null)
+			throw 'This folder\'s workspace state moved to workspace $movedTo. Open that workspace from the Workbench; '
+				+ "an editor from before workspaces were keyed by id cannot open it";
+		if (existing.key() != identity.key()) throw "Workspace state directory identity mismatch";
+		if (identity.workspace != null) identity.write(path);
 	}
 
 	static function prepareEndpointForLaunch(path:String):Void {

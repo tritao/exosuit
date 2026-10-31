@@ -40,6 +40,7 @@ class SuitClient {
 	public static inline var TEMPORARY_STATE_MESSAGE:String = "suit disabled: state folder is temporary (set EXOSUIT_SUIT=on to enable)";
 
 	static var editorRoots:Array<String> = [];
+	static var editorWorkspaces:Array<String> = [];
 	static var registeredKind:Null<SuitKind> = null;
 	static var daemonRequested:Bool = false;
 	static var resolved:Null<SuitMode> = null;
@@ -151,6 +152,15 @@ class SuitClient {
 			writeRecord(SuitKind.Editor, null);
 	}
 
+	/** Records that this editor uses workspace `id`, so its service (keyed by id) is not shown as orphaned. */
+	public static function editorUsesWorkspace(id:Null<String>):Void {
+		if (id == null || id.length == 0 || editorWorkspaces.indexOf(id) >= 0)
+			return;
+		editorWorkspaces.push(id);
+		if (registeredKind == SuitKind.Editor)
+			writeRecord(SuitKind.Editor, null);
+	}
+
 	/**
 		Registers a workspace manager or daemon. It belongs to every editor that uses its root, not to the
 		editor that happened to start it, so it is not passed any editor's pid.
@@ -177,10 +187,13 @@ class SuitClient {
 			if (!SuitPaths.prepare())
 				return;
 			var record = SuitRecords.create(Sys.getPid(), kind);
-			if (kind == SuitKind.Editor)
+			if (kind == SuitKind.Editor) {
 				record.roots = editorRoots.copy();
+				record.workspaces = editorWorkspaces.copy();
+			}
 			if (workspace != null) {
 				record.root = workspace.root;
+				record.workspace = workspace.workspace;
 				record.stateDir = workspace.stateDir;
 				record.generation = workspace.generation;
 			}

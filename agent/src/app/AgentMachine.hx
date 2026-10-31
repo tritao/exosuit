@@ -17,18 +17,21 @@ class AgentMachine {
 	static inline var RECORD_LIMIT = 16384;
 
 	/** Records a ready manager. Returns the record's path, or null when none was written. */
-	public static function register(base:String, root:String, stateDir:String, generation:String, launcher:String):Null<String> {
+	public static function register(base:String, identity:AgentStateIdentity, stateDir:String, generation:String, launcher:String):Null<String> {
 		// Temporary state is a test's or a fixture's. With EXOSUIT_AGENT_STATE_HOME set the registry is the caller's own.
 		if (AgentManager.nonempty(Sys.getEnv("EXOSUIT_AGENT_STATE_HOME")) == null && suit.SuitClient.underTemp(stateDir))
 			return null;
 		try {
 			var directory = Path.join([base, "managers"]);
 			AgentManager.ensureStateDirectory(directory);
-			var path = Path.join([directory, AgentManager.pipeKey(root, stateDir) + ".json"]);
-			AtomicFile.write(path, Json.stringify({
-				version: 1, root: root, stateDir: stateDir, managerPid: Sys.getPid(), generation: generation,
+			var path = Path.join([directory, AgentManager.pipeKey(identity.key(), stateDir) + ".json"]);
+			var record:Dynamic = {
+				version: 1, root: identity.primaryRoot(), stateDir: stateDir, managerPid: Sys.getPid(), generation: generation,
 				launcher: launcher, startedAt: Date.now().getTime()
-			}) + "\n");
+			};
+			var workspace = identity.workspace;
+			if (workspace != null) Reflect.setField(record, "workspace", workspace);
+			AtomicFile.write(path, Json.stringify(record) + "\n");
 			return path;
 		} catch (_:Dynamic) return null;
 	}
@@ -59,14 +62,15 @@ class AgentMachine {
 					try {
 						var record = AgentManager.readPrivateJson(path, RECORD_LIMIT);
 						var root = AgentManager.stringField(record, "root"), stateDir = AgentManager.stringField(record, "stateDir");
+						var workspace = AgentManager.stringField(record, "workspace");
 						if (AgentManager.intField(record, "version") != 1 || root == "" || stateDir == "") continue;
-						var endpoint = AgentManager.readDiscovery(stateDir, root);
+						var endpoint = AgentManager.readDiscovery(stateDir, workspace != "" ? workspace : root);
 						if (endpoint == null || AgentManager.stringField(endpoint, "generation") != AgentManager.stringField(record, "generation")) {
 							FileSystem.deleteFile(path);
 							continue;
 						}
 						var startedAt:Dynamic = Reflect.field(record, "startedAt");
-						managers.push(entry(base, root, stateDir, endpoint, AgentManager.stringField(record, "launcher"),
+						managers.push(entry(base, workspace, root, stateDir, endpoint, AgentManager.stringField(record, "launcher"),
 							Std.isOfType(startedAt, Float) || Std.isOfType(startedAt, Int) ? startedAt : null));
 						seen.set(stateDir, true);
 					} catch (_:Dynamic) {}
@@ -78,9 +82,12 @@ class AgentMachine {
 					var stateDir = AgentManager.absoluteStatePath(Path.join([workspaces, name]));
 					if (seen.exists(stateDir) || !FileSystem.isDirectory(stateDir)) continue;
 					try {
-						var root = AgentManager.stringField(AgentManager.readPrivateJson(Path.join([stateDir, "workspace.json"]), RECORD_LIMIT), "root");
-						var endpoint = root == "" ? null : AgentManager.readDiscovery(stateDir, root);
-						if (endpoint != null) managers.push(entry(base, root, stateDir, endpoint, AgentManager.stringField(endpoint, "launcher"), null));
+						var identity = AgentStateIdentity.read(Path.join([stateDir, "workspace.json"]));
+						if (identity.migratedTo != null) continue;
+						var endpoint = AgentManager.readDiscovery(stateDir, identity.key());
+						if (endpoint != null)
+							managers.push(entry(base, identity.workspace == null ? "" : identity.workspace, AgentManager.stringField(endpoint, "root"),
+								stateDir, endpoint, AgentManager.stringField(endpoint, "launcher"), null));
 					} catch (_:Dynamic) {}
 				}
 			}
@@ -95,10 +102,13 @@ class AgentMachine {
 		}
 	}
 
-	static function entry(base:String, root:String, stateDir:String, endpoint:Dynamic, launcher:String, startedAt:Null<Float>):Dynamic {
-		var defaultState = AgentManager.absoluteStatePath(Path.join([base, "workspaces", Sha256.encode(root).substr(0, 20)]));
+	/** A listed manager; `workspace` is its workspace's id, or "" for a folder's service. */
+	static function entry(base:String, workspace:String, root:String, stateDir:String, endpoint:Dynamic, launcher:String,
+		startedAt:Null<Float>):Dynamic {
+		var stateName = workspace != "" ? workspace : Sha256.encode(root).substr(0, 20);
+		var defaultState = AgentManager.absoluteStatePath(Path.join([base, "workspaces", stateName]));
 		return {
-			root: root, stateDir: stateDir, defaultState: stateDir == defaultState,
+			workspace: workspace, root: root, stateDir: stateDir, defaultState: stateDir == defaultState,
 			managerPid: AgentManager.intField(endpoint, "managerPid"), generation: AgentManager.stringField(endpoint, "generation"),
 			launcher: launcher, startedAt: startedAt
 		};

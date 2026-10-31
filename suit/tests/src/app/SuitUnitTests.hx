@@ -146,7 +146,7 @@ class SuitUnitTests {
 		Sys.putEnv("EXOSUIT_SUIT_HOME", temp + "/suit-unit-" + Std.random(1000000) + "/a/b/home");
 		Sys.putEnv("EXOSUIT_SUIT_AUTOSTART", "0");
 		check(SuitClient.resolve(temp + "/suit-test/state") == SuitMode.On, "resolve() keeps an explicit on");
-		SuitClient.registerWorkspaceService(suit.SuitKind.WorkspaceManager, {root: temp, stateDir: temp + "/suit-test/state", generation: "g"});
+		SuitClient.registerWorkspaceService(suit.SuitKind.WorkspaceManager, {root: temp, stateDir: temp + "/suit-test/state", generation: "g", workspace: null});
 		check(sys.FileSystem.exists(suit.SuitRecord.SuitRecords.path(SuitPaths.registry(), Sys.getPid())),
 			"an explicit on registers, creating the home's missing parent folders");
 		SuitClient.unregister();

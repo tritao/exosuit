@@ -7,6 +7,7 @@ typedef SuitClassification = {
 	var root:Null<String>;
 	var stateDir:Null<String>;
 	var generation:Null<String>;
+	var workspace:Null<String>;
 }
 
 /** Recognizes exosuit processes from their command lines, for processes that never registered. */
@@ -32,11 +33,19 @@ class SuitClassifier {
 			if (manager > program) {
 				var stateIndex = arguments.indexOf("--state-dir");
 				var generationIndex = arguments.indexOf("--generation");
+				// `--manager FOLDER`, `--manager --workspace ID [--folder F]... [--scratch S]`, or `--manager --from-state DIR`.
+				var workspace = at(arguments, manager + 1) == "--workspace" ? at(arguments, manager + 2) : null;
+				var root = workspace == null ? at(arguments, manager + 1) : firstFolder(arguments);
+				if (root == "--from-state") {
+					root = null;
+					stateIndex = manager + 1;
+				}
 				return {
 					kind: SuitKind.WorkspaceManager,
-					root: at(arguments, manager + 1),
+					root: root,
 					stateDir: stateIndex > 0 ? at(arguments, stateIndex + 1) : null,
-					generation: generationIndex > 0 ? at(arguments, generationIndex + 1) : null
+					generation: generationIndex > 0 ? at(arguments, generationIndex + 1) : null,
+					workspace: workspace
 				};
 			}
 			// The daemon: SOCKET PORT CREDENTIAL SEED [DATABASE [ROOT [INSTANCE ...]]].
@@ -45,7 +54,8 @@ class SuitClassifier {
 				kind: SuitKind.WorkspaceHost,
 				root: at(arguments, program + 6),
 				stateDir: credential == null ? null : Path.directory(credential),
-				generation: at(arguments, program + 7)
+				generation: at(arguments, program + 7),
+				workspace: null
 			};
 		}
 		if (programIndex(arguments, ["graphical/build/host/main.hl", "tools/exosuit.hl"]) >= 0 || exe == "exosuit.exe" || exe == "exosuit")
@@ -54,7 +64,14 @@ class SuitClassifier {
 	}
 
 	static function result(kind:SuitKind):SuitClassification
-		return {kind: kind, root: null, stateDir: null, generation: null};
+		return {kind: kind, root: null, stateDir: null, generation: null, workspace: null};
+
+	/** A workspace manager's first `--folder`, else its `--scratch`: the folder it starts in. */
+	static function firstFolder(arguments:Array<String>):Null<String> {
+		var folder = arguments.indexOf("--folder");
+		if (folder < 0) folder = arguments.indexOf("--scratch");
+		return folder < 0 ? null : at(arguments, folder + 1);
+	}
 
 	static function at(arguments:Array<String>, index:Int):Null<String>
 		return index >= 0 && index < arguments.length && arguments[index].length > 0 ? arguments[index] : null;

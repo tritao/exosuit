@@ -25,6 +25,21 @@ import suit.relay.SuitRelayProtocol.SuitRelayReportedDevice;
 
 /** Catalog daemon. The managed launcher owns exclusive startup and discovery. */
 class AgentMain {
+	/**
+		Whom the catalog belongs to, as its `workspace_meta.root` records it: a workspace's key when the state folder is a
+		workspace's (its folders may change between starts), else the folder.
+	**/
+	static function catalogOwner(credentialFile:String, root:String):String {
+		var workspace = stateWorkspace(Path.directory(credentialFile));
+		return workspace == null ? root : AgentStateIdentity.catalogOwner(workspace);
+	}
+
+	/** The id of the workspace whose state folder this is, or null for a folder's state (or a test's, with no identity). */
+	static function stateWorkspace(stateDirectory:String):Null<String> {
+		var path = Path.join([stateDirectory, "workspace.json"]);
+		return FileSystem.exists(path) ? AgentStateIdentity.read(path).workspace : null;
+	}
+
 	static function main():Void {
 		var args = Sys.args();
 		AgentManagerNative.guardChildLock();
@@ -99,7 +114,7 @@ class AgentMain {
 				revision: 1
 			}
 		]);
-		var store = args.length >= 5 ? new WorkspaceSqliteStore(args[4], "workspace", seed.snapshot(), 32, directories.root) : null;
+		var store = args.length >= 5 ? new WorkspaceSqliteStore(args[4], "workspace", seed.snapshot(), 32, catalogOwner(args[2], directories.root)) : null;
 		var service = new WorkspaceService("workspace", args[3], seed.snapshot().groups, 32, 256, 16, store, directories.resolve);
 		var terminals = new WorkspaceTerminalManager("workspace", args.length >= 7 ? args[6] : args[3], directories.root,16777216,store,function() return service.snapshot().groups);
 		var executable = Sys.getEnv("EXOSUIT_CODEX_BIN");
@@ -184,7 +199,7 @@ class AgentMain {
 		Sys.stdout().flush();
 		var stateDirectory = haxe.io.Path.directory(args[2]);
 		suit.SuitClient.registerWorkspaceService(suit.SuitKind.WorkspaceHost, {root: directories.root, stateDir: stateDirectory,
-			generation: args.length >= 7 ? args[6] : null});
+			generation: args.length >= 7 ? args[6] : null, workspace: stateWorkspace(stateDirectory)});
 		var relayStatus = new WorkspaceRelayStatusFile(stateDirectory);
 		var clientReportAt:Float = 0;
 		while (true) {

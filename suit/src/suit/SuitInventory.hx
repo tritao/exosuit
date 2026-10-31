@@ -21,6 +21,10 @@ typedef SuitProcess = {
 	var source:SuitSource;
 	var root:Null<String>;
 	var roots:Array<String>;
+	/** A workspace service's workspace id, when it is keyed by one. */
+	var workspace:Null<String>;
+	/** The workspaces an editor uses, by id. */
+	var workspaces:Array<String>;
 	var stateDir:Null<String>;
 	var generation:Null<String>;
 	var owner:Null<Int>;
@@ -200,6 +204,8 @@ class SuitInventory {
 				source: record.adopted ? Adopted : Registered,
 				root: record.root,
 				roots: record.roots,
+				workspace: record.workspace,
+				workspaces: record.workspaces,
 				stateDir: record.stateDir,
 				generation: record.generation,
 				owner: record.owner,
@@ -244,6 +250,8 @@ class SuitInventory {
 				source: owner == null ? Scanned : Adopted,
 				root: found.root,
 				roots: [],
+				workspace: found.workspace,
+				workspaces: [],
 				stateDir: found.stateDir,
 				generation: found.generation,
 				owner: owner,
@@ -263,6 +271,7 @@ class SuitInventory {
 		try {
 			var record = SuitRecords.create(process.pid, process.kind);
 			record.root = process.root;
+			record.workspace = process.workspace;
 			record.stateDir = process.stateDir;
 			record.generation = process.generation;
 			record.owner = process.owner;
@@ -288,6 +297,9 @@ class SuitInventory {
 				for (root in process.roots)
 					if (!claimed.exists(rootKey(root)))
 						claimed.set(rootKey(root), process);
+				for (workspace in process.workspaces)
+					if (!claimed.exists(workspaceKey(workspace)))
+						claimed.set(workspaceKey(workspace), process);
 				haxeonInUse = true;
 			}
 			if (process.kind == SuitKind.LiveSession || process.kind == SuitKind.LiveHost)
@@ -309,7 +321,7 @@ class SuitInventory {
 					process.orphaned = false;
 					holder = SuitKinds.headsOwnGroup(process.kind) ? process : null;
 				case NoEditorUsesRoot:
-					holder = process.root == null ? null : claimed.get(rootKey(process.root));
+					holder = claimant(process, claimed);
 					process.orphaned = holder == null && !keptByHosting(process, hostedWorkspaces);
 				case NoHaxeonUser:
 					process.orphaned = !haxeonInUse;
@@ -351,6 +363,18 @@ class SuitInventory {
 			return hostedWorkspaces.exists("state:" + rootKey(process.stateDir));
 		return process.root != null && hostedWorkspaces.exists("root:" + rootKey(process.root));
 	}
+
+	/** The editor that uses a workspace service's workspace: by id when the service is keyed by one, else by its root. */
+	static function claimant(process:SuitProcess, claimed:Map<String, SuitProcess>):Null<SuitProcess> {
+		var workspace = process.workspace;
+		if (workspace != null)
+			return claimed.get(workspaceKey(workspace));
+		return process.root == null ? null : claimed.get(rootKey(process.root));
+	}
+
+	/** A workspace id's key among roots' keys, which are paths and so never start with "workspace:". */
+	static function workspaceKey(id:String):String
+		return "workspace:" + id;
 
 	public static function rootKey(root:String):String {
 		var normalized = StringTools.replace(root, "\\", "/");

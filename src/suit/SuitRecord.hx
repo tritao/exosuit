@@ -5,11 +5,15 @@ import haxe.io.Path;
 import sys.FileSystem;
 import sys.io.File;
 
-/** The workspace a service serves. Root, state directory and generation always travel together. */
+/**
+	The workspace a service serves. Root, state directory and generation always travel together. `workspace` is the
+	workspace's id for a service keyed by it (M19 Phase 4), else null; `root` is then its first folder or scratch folder.
+**/
 typedef SuitWorkspace = {
 	var root:String;
 	var stateDir:String;
 	var generation:Null<String>;
+	var workspace:Null<String>;
 }
 
 /**
@@ -30,8 +34,12 @@ typedef SuitRecord = {
 	/** An editor's workspace roots. */
 	var roots:Array<String>;
 
-	/** A workspace service's root, state directory and generation (from its SuitWorkspace). */
+	/** The ids of the workspaces an editor uses, whose services are keyed by id. */
+	var workspaces:Array<String>;
+
+	/** A workspace service's root, state directory, generation and workspace id (from its SuitWorkspace). */
 	var root:Null<String>;
+	var workspace:Null<String>;
 	var stateDir:Null<String>;
 	var generation:Null<String>;
 
@@ -58,7 +66,9 @@ class SuitRecords {
 			registeredAt: SuitClock.now(),
 			version: VERSION,
 			roots: [],
+			workspaces: [],
 			root: null,
+			workspace: null,
 			stateDir: null,
 			generation: null,
 			owner: null,
@@ -77,7 +87,9 @@ class SuitRecords {
 			kind: (record.kind : String),
 			registeredAt: record.registeredAt,
 			roots: record.roots,
+			workspaces: record.workspaces,
 			root: record.root,
+			workspace: record.workspace,
 			stateDir: record.stateDir,
 			generation: record.generation,
 			owner: record.owner,
@@ -100,24 +112,30 @@ class SuitRecords {
 		var pid = intField(document, "pid"), registeredAt = floatField(document, "registeredAt"), version = intField(document, "version");
 		if (pid == null || pid <= 0 || registeredAt == null)
 			return null;
-		var roots:Array<String> = [];
-		var listed:Dynamic = Reflect.field(document, "roots");
-		if (Std.isOfType(listed, Array))
-			for (value in (listed : Array<Dynamic>))
-				if (Std.isOfType(value, String))
-					roots.push(value);
 		return {
 			pid: pid,
 			kind: SuitKind.SuitKinds.parse(stringField(document, "kind")),
 			registeredAt: registeredAt,
 			version: version == null ? 1 : version,
-			roots: roots,
+			roots: strings(document, "roots"),
+			workspaces: strings(document, "workspaces"),
 			root: stringField(document, "root"),
+			workspace: stringField(document, "workspace"),
 			stateDir: stringField(document, "stateDir"),
 			generation: stringField(document, "generation"),
 			owner: intField(document, "owner"),
 			adopted: Reflect.field(document, "adopted") == true
 		};
+	}
+
+	static function strings(document:Dynamic, field:String):Array<String> {
+		var result:Array<String> = [];
+		var listed:Dynamic = Reflect.field(document, field);
+		if (Std.isOfType(listed, Array))
+			for (value in (listed : Array<Dynamic>))
+				if (Std.isOfType(value, String))
+					result.push(value);
+		return result;
 	}
 
 	public static function stringField(value:Dynamic, field:String):Null<String> {
