@@ -157,18 +157,27 @@ right workspace after migration. A second run changes nothing. The backups resto
 
 ## Phase 5: several roots in one service; the right panel shows everything
 
-- [ ] File search, file watching and the file service run per attached folder. Replies carry the root, and the UI
+- [x] File search, file watching and the file service run per attached folder. Replies carry the root, and the UI
   labels them.
-- [ ] Source control discovers repositories under every root and every group or session folder (it extends
+- [x] Source control discovers repositories under every root and every group or session folder (it extends
   `ScmFolderScope` and session SCM sources).
-- [ ] The right panel shows a selected group's folder even when it is outside every attached folder.
-- [ ] Attach and detach a folder without restarting the service; watchers start and stop with the folder.
-- [ ] Tests: `workspace-files`, `workspace-scm` and `scm-watch` with two roots plus an outside group folder.
+- [x] The right panel shows a selected group's folder even when it is outside every attached folder.
+- [x] Attach and detach a folder without restarting the service; watchers start and stop with the folder.
+- [x] Tests: `workspace-files`, `workspace-scm` and `scm-watch` with two roots plus an outside group folder.
 
-Detaching a folder: the first folder always has the id `root` (the next one takes it when the first leaves), the 
-service sends watchers one last change event for the folder, and a search queued over several roots skips one that 
-goes away. Known gap: the protocol has no explicit "root removed" notification, so a watcher learns the folder is 
-gone only when its next listing fails.
+Detaching a folder: `root` means the first surviving attached folder, so its folder can change when the first one is
+detached (the next folder takes the id; other ids never change). Watchers of a detached or promoted root get one last
+change event, and editor tabs follow their folder by path: a tab whose folder is now `root` is re-keyed, one whose
+folder left is closed. A search queued over several roots skips one that goes away (error code `unknown_root`) and
+shows any other error. The folder list is applied leniently: nested, missing and relative folders are skipped and
+reported, the rest are served.
+
+Known gaps:
+
+- Reordering the folders does not change which one is `root`; only a detach does.
+- The nesting check compares paths as spelled; symlinks and junctions are not resolved.
+- A folder attached while a search runs is missed by that search.
+- There is no explicit "root removed" message; a watcher learns by the final change event and its next listing.
 
 Acceptance: with two folders attached and a group folder elsewhere, Files, Search and Changes show all three,
 labelled, and narrow when a sub-group is selected.
