@@ -274,9 +274,19 @@ class WorkbenchPanel implements View {
 		showMenu(items, event, function() return model.workspaces.exists(owner));
 	}
 
+	/** The workspace a recent open asked for and when: Enter and a double click can both activate one row. */
+	var lastOpenId:Null<String>;
+	var lastOpenAt:Float = 0;
+	static inline final OPEN_REPEAT_SECONDS = 2.0;
+
+	/** Opens the workspace here, once: a repeat of the same request within a moment (a double activation) is dropped. */
 	function openWorkspace(id:String):Void {
 		var actions = machine, entry = model.workspaces.get(id);
-		if (actions != null && entry != null) actions.open(entry);
+		if (actions == null || entry == null) return;
+		var now = Sys.time();
+		if (lastOpenId == id && now - lastOpenAt < OPEN_REPEAT_SECONDS) return;
+		lastOpenId = id; lastOpenAt = now;
+		actions.open(entry);
 	}
 
 	function createWorkspace():Void {
