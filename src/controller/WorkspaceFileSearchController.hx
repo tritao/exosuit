@@ -6,7 +6,11 @@ import workspace.service.WorkspaceFileProtocol.FileSearchHandle;
 import workspace.service.WorkspaceFileProtocol.FileSearchMatch;
 import workspace.service.WorkspaceFileProtocol.FileSearchPageResult;
 
-/** Owns the cancellable, paged RPC lifecycle for a connected workspace search. */
+/**
+	Owns the cancellable, paged RPC lifecycle for a connected workspace search. A workspace serving several folders is
+	searched one root after another, the results kept in root order; `rootLabel` names the folder of a result when there
+	is more than one.
+**/
 class WorkspaceFileSearchController {
 	static inline final SEARCH_ROOT = "root";
 	static inline final PAGE_SIZE = 100;
@@ -35,6 +39,14 @@ class WorkspaceFileSearchController {
 	var activeWorkspace:String = "";
 	var activeRoot:String = SEARCH_ROOT;
 	var searchId:Null<String>;
+	/** The roots still to search after the active one, and every root's name and folder from the service's `roots`. */
+	var queuedRoots:Array<String> = [];
+	var rootNames:Map<String, String> = [];
+	var rootPaths:Map<String, String> = [];
+	var rootCount:Int = 1;
+	/** What earlier roots of this query scanned, which a page's own counts do not include. */
+	var scannedBefore:Int = 0;
+	var skippedBefore:Int = 0;
 
 	public function new(attachmentProvider:Void->Null<WorkspaceAttachment>, changed:Void->Void) {
 		if (attachmentProvider == null || changed == null) throw "Invalid workspace file search controller";
@@ -78,6 +90,9 @@ class WorkspaceFileSearchController {
 		activeClient = client;
 		activeWorkspace = attachment.fileWorkspace();
 		activeRoot = SEARCH_ROOT;
+		queuedRoots = [];
+		scannedBefore = 0;
+		skippedBefore = 0;
 		if (query.length > 0) {
 			complete = false;
 			pendingSearch = true;
@@ -102,6 +117,46 @@ class WorkspaceFileSearchController {
 			search(query, mode, caseSensitive);
 			return;
 		}
+		client.roots(activeWorkspace, function(listed) {
+			if (!isCurrent(token, attachment, client)) return;
+			var ids:Array<String> = [];
+			rootNames = [];
+			rootPaths = [];
+			if (listed != null && listed.workspace == activeWorkspace && listed.roots != null)
+				for (root in listed.roots) {
+					if (root == null || root.id == null || root.id.length == 0) continue;
+					ids.push(root.id);
+					rootNames.set(root.id, root.name == null ? root.id : root.name);
+					if (root.path != null) rootPaths.set(root.id, root.path);
+				}
+			if (ids.length == 0) ids.push(SEARCH_ROOT);
+			rootCount = ids.length;
+			activeRoot = ids.shift();
+			queuedRoots = ids;
+			startRoot(token, attachment, client);
+		}, function(_) {
+			// An agent without a roots answer serves the one root.
+			if (!isCurrent(token, attachment, client)) return;
+			rootCount = 1;
+			startRoot(token, attachment, client);
+		});
+	}
+
+	/** The name of the folder a result is under when the workspace serves more than one, else null. */
+	public function rootLabel(match:FileSearchMatch):Null<String> {
+		if (rootCount < 2 || match == null) return null;
+		var id = match.root == null ? SEARCH_ROOT : match.root;
+		var name = rootNames.get(id);
+		return name == null ? id : name;
+	}
+
+	/** The folder of the root a result is under, on the service's machine, when it said so. */
+	public function rootPath(match:FileSearchMatch):Null<String> {
+		var id = match == null || match.root == null ? SEARCH_ROOT : match.root;
+		return rootPaths.get(id);
+	}
+
+	function startRoot(token:Int, attachment:WorkspaceAttachment, client:WorkspaceFileClient):Void {
 		client.searchStart(activeWorkspace, activeRoot, mode, query, caseSensitive, function(handle:FileSearchHandle) {
 			if (!isCurrent(token, attachment, client)) {
 				cancelHandle(client, handle);
@@ -146,15 +201,23 @@ class WorkspaceFileSearchController {
 			for (match in page.matches) {
 				if (match == null || match.path == null || match.path.length == 0
 					|| match.kind != "file" && match.kind != "directory") continue;
+				if (match.root == null) match.root = root;
 				results.push(match);
 			}
-			complete = page.complete;
-			truncated = page.truncated;
-			scannedEntries = page.scannedEntries;
-			skippedEntries = page.skippedEntries;
+			var more = queuedRoots.length > 0;
+			complete = page.complete && !more;
+			truncated = truncated || page.truncated;
+			scannedEntries = scannedBefore + page.scannedEntries;
+			skippedEntries = skippedBefore + page.skippedEntries;
 			if (page.complete) searchId = null;
 			changed();
 			if (!page.complete) requestPage(token, attachment, client, id);
+			else if (more) {
+				scannedBefore = scannedEntries;
+				skippedBefore = skippedEntries;
+				activeRoot = queuedRoots.shift();
+				startRoot(token, attachment, client);
+			}
 		}, function(rpcError) {
 			if (!isCurrent(token, attachment, client)) return;
 			fail(token, rpcError == null ? "Workspace search failed" : rpcError.message);

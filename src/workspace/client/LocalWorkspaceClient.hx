@@ -219,6 +219,20 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     pairingsRevision++;
   }
 
+  /**
+    Tells the service to serve exactly `folders` now, with no restart (see WorkspaceFoldersProtocol). `done` gets the
+    failure, or null once the service has changed its roots and watchers.
+  **/
+  public function setServedFolders(folders:Array<String>, done:Null<String>->Void):Void {
+    var connection = rpc();
+    if (connection == null || !hasCapability(workspace.service.WorkspaceFoldersProtocol.CAPABILITY)) {
+      done("The workspace service cannot change its folders; restart it to pick them up.");
+      return;
+    }
+    connection.call(workspace.service.WorkspaceFoldersProtocol.SET, {folders: folders}, 5000, function(_) done(null),
+      function(failure) done(failure.message));
+  }
+
   function sendServiceUpdate(mode:String):Void {
     var connection = rpc();
     if (connection == null || !hasCapability(workspace.service.WorkspaceLifecycleProtocol.CAPABILITY)) return;
@@ -741,6 +755,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     caps.push(WorkspacePairingProtocol.ADMIN);
     caps.push(WorkspacePairingProtocol.STATUS_CAPABILITY);
     caps.push(workspace.service.WorkspaceLifecycleProtocol.CAPABILITY);
+    caps.push(workspace.service.WorkspaceFoldersProtocol.CAPABILITY);
     deadline = clock() + 12000;
     client = new RpcClient(new NativeRpcConnector(hub,
       NativeRpcHub.local(endpoint.socket)), clock, function() return Math.random(), new RpcPeerOptions(
