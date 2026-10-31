@@ -34,7 +34,7 @@ private typedef ClaudeSession = {
 }
 
 /** One native CLI process per session, owned by the workspace daemon, not an editor attachment. */
-class ClaudeProvider implements AgentMessageSource {
+class ClaudeProvider implements AgentMessageSource implements AgentRequestCounts {
  public var imageUploadAvailable:Bool=false;
  public var imagePrepare:Null<(String,Array<String>,Null<String>,Null<String>)->Null<Array<Dynamic>>>;
  public var imageHold:Null<(String,String,String,String,Array<String>)->Bool>;
@@ -97,6 +97,15 @@ class ClaudeProvider implements AgentMessageSource {
  public function owns(id:String):Bool return sessions.exists(id);
  public function summary():String return "Claude: " + [for(s in sessions) true].length + " sessions";
  public function records():Array<AgentRecord> return [for(s in sessions) copy(s.record)];
+ public function requestCounts():Map<String,Int> {
+  var counts = new Map<String,Int>();
+  for(id=>s in sessions) {
+   var waiting=0;
+   for(_ in s.approvals) waiting++;
+   if(waiting>0) counts.set(id,waiting);
+  }
+  return counts;
+ }
  static function copy(r:AgentRecord):AgentRecord {
   var result:AgentRecord = cast Reflect.copy(r);
   // Replay is returned through paged views, never in the catalog.

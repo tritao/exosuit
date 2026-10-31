@@ -47,6 +47,7 @@ class AgentMain {
 	static function catalogService(stateDirectory:String, instance:String, root:String, clock:Void->Float,
 			groups:Void->Array<workspace.service.WorkspaceProtocol.WorkspaceGroup>,
 			sessions:Void->Array<workspace.service.WorkspaceAgentProtocol.AgentRecord>,
+			requests:Void->Map<String, Int>,
 			terminals:Void->Array<workspace.service.WorkspaceTerminalProtocol.TerminalRecord>):workspace.runtime.WorkspaceCatalogService {
 		var path = Path.join([stateDirectory, "workspace.json"]);
 		var watch = new AgentIdentityWatch(path, function() return AgentStateIdentity.forFolder(root));
@@ -57,7 +58,7 @@ class AgentMain {
 			return {name: name, folders: identity.folders.copy(), scratch: identity.scratch};
 		};
 		return new workspace.runtime.WorkspaceCatalogService(id == null ? "workspace" : id, instance, description, groups,
-			sessions, terminals, function() return clock() / 1000);
+			sessions, requests, terminals, function() return clock() / 1000);
 	}
 
 	/** The folders to serve at start: the usable ones of the state's workspace folders (see WorkspaceFolders.select), else the single `root`. */
@@ -202,7 +203,7 @@ class AgentMain {
 			terminals, agents, pairingManager, files, scm);
 		serverRef = server;
 		var catalog = catalogService(Path.directory(args[2]), args.length >= 7 ? args[6] : args[3], directories.root, clock,
-			function() return service.snapshot().groups, agents.records, function() return terminals.snapshot().terminals);
+			function() return service.snapshot().groups, agents.records, agents.requestCounts, function() return terminals.snapshot().terminals);
 		server.enableCatalog(catalog.bind);
 		server.enableFolders(function(requested) return workspace.runtime.WorkspaceFolderChange.apply(requested, stateDirectory, directories.root, files, scm).folders);
 		var updates = new workspace.service.WorkspaceUpdatePolicy();

@@ -60,7 +60,7 @@ private class KitSession {
 	There is no child process; the model conversation lives in the daemon and the
 	NativeKit event pump delivers every response, so `poll` has nothing to do.
 **/
-class AgentKitProvider implements LocalAgentProvider {
+class AgentKitProvider implements LocalAgentProvider implements AgentRequestCounts {
 	static inline var MaxPrompt = 8192;
 	static inline var MaxHistoryBytes = 4194304;
 	static final modes = ["supervised", "acceptEdits", "fullAccess"];
@@ -113,6 +113,16 @@ class AgentKitProvider implements LocalAgentProvider {
 
 	public function owns(id:String):Bool
 		return sessions.exists(id);
+
+	public function requestCounts():Map<String, Int> {
+		var counts = new Map<String, Int>();
+		for (id => s in sessions) {
+			var waiting = 0;
+			for (_ in s.approvals) waiting++;
+			if (waiting > 0) counts.set(id, waiting);
+		}
+		return counts;
+	}
 
 	public function records():Array<AgentRecord>
 		return [for (s in sessions) copy(s.record)];

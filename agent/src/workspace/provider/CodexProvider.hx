@@ -32,7 +32,7 @@ private typedef Session = {
 private typedef PendingApproval = {var wireId:Dynamic; var method:String; var detail:String; var reviewable:Bool; var questions:Array<String>; var structured:Null<Array<AgentQuestion>>;}
 
 /** Shared-daemon adapter. All policy/protocol interpretation stays on the owning machine. */
-class CodexProvider implements AgentMessageSource {
+class CodexProvider implements AgentMessageSource implements AgentRequestCounts {
 	public var imageUploadAvailable:Bool = false;
 	public var imageIdentity:Null<(String,String,String,String)->Null<String>>;
 	function imageFor(session:String):(String,String,String)->Null<String> {
@@ -780,6 +780,16 @@ class CodexProvider implements AgentMessageSource {
 	public function summary():String return status;
 	public function owns(id:String):Bool return sessions.exists(id);
 	public function records():Array<AgentRecord> return [for (s in sessions) copy(s.record)];
+
+	public function requestCounts():Map<String, Int> {
+		var counts = new Map<String, Int>();
+		for (id => s in sessions) {
+			var waiting = 0;
+			for (_ in s.requests) waiting++;
+			if (waiting > 0) counts.set(id, waiting);
+		}
+		return counts;
+	}
 
 	public function modelCatalog(q:AgentModelsQuery, ctx:RpcContext<AgentModelsPage>):Void {
 		if (storageFailed) {

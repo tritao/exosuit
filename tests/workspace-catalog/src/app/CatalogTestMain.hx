@@ -1,14 +1,22 @@
 package app;
 
 import haxe.Int64;
+import app.AgentIdentityWatch;
+import app.AgentStateIdentity;
 import haxeon.rpc.MemoryTransport;
 import haxeon.rpc.RpcConnection;
 import haxeon.rpc.RpcError;
 import workspace.runtime.WorkspaceCatalogService;
+import workspace.service.WorkspaceAgentProtocol;
 import workspace.service.WorkspaceAgentProtocol.AgentRecord;
 import workspace.service.WorkspaceCatalogProtocol;
+import workspace.service.WorkspaceCatalogProtocol.CatalogTerminal;
+import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceProtocol.WorkspaceGroup;
+import workspace.service.WorkspaceTerminalProtocol;
 import workspace.service.WorkspaceTerminalProtocol.TerminalRecord;
+
+private typedef Link = {var client:RpcConnection; var server:RpcConnection;}
 
 private typedef Outcome = {
 	var page:Null<WorkspaceCatalog>;
@@ -29,6 +37,9 @@ class CatalogTestMain {
 	static var server:RpcConnection;
 	static var service:WorkspaceCatalogService;
 	static var changes:Array<String> = [];
+	static var sessions:Array<AgentRecord> = [];
+	static var requests:Map<String, Int> = new Map();
+	static var cleanup:Void->Void = function() {};
 
 	static function main():Void {
 		try {
@@ -37,7 +48,17 @@ class CatalogTestMain {
 			resume();
 			unknownTokens();
 			watching();
+			grants();
+			removedAndReadded();
+			hostileTokens();
+			identityWatch();
+			sessionRecords();
+			oversized();
+			hints();
+			ringOverflow();
+			planCleanup();
 			errors();
+			large();
 		} catch (error:Dynamic) {
 			fail("uncaught: " + Std.string(error));
 		}
@@ -61,12 +82,14 @@ class CatalogTestMain {
 	static function id(index:Int):String
 		return "t" + (index < 10 ? "0" : "") + index;
 
-	static function connect():Void {
+	static var everything = [WorkspaceCatalogProtocol.CAPABILITY, WorkspaceProtocol.READ, WorkspaceAgentProtocol.READ, WorkspaceTerminalProtocol.READ];
+
+	static function connect(?grants:Array<String>):Void {
 		var pair = MemoryTransport.pair(1024 * 1024, 128);
 		var clock = function() return now;
 		client = new RpcConnection(pair.client, clock);
 		server = new RpcConnection(pair.server, clock);
-		service.bind(server, [WorkspaceCatalogProtocol.CAPABILITY]);
+		cleanup = service.bind(server, grants == null ? everything : grants);
 		client.onNotification(WorkspaceCatalogProtocol.CHANGED, WorkspaceCatalogProtocol.decodeChange, function(change) changes.push(change.token));
 	}
 
@@ -74,7 +97,7 @@ class CatalogTestMain {
 		for (index in 0...30) terminals.push(terminal(id(index)));
 		var clock = function() return now;
 		service = new WorkspaceCatalogService("ws1", "inst1", function() return {name: name, folders: folders.copy(), scratch: null},
-			function():Array<WorkspaceGroup> return [{id: "g", name: "G", cwd: null, revision: 1}], function():Array<AgentRecord> return [],
+			function():Array<WorkspaceGroup> return [{id: "g", name: "G", cwd: null, revision: 1}], function() return sessions, function() return requests,
 			function() return terminals, clock);
 		connect();
 	}
@@ -90,6 +113,7 @@ class CatalogTestMain {
 		return {machine: "m", workspace: workspace};
 
 	static function read(resume:Null<String>, watch = false, workspace:String = "ws1"):Outcome {
+		now += 1;
 		var outcome:Outcome = {page: null, error: null};
 		client.call(WorkspaceCatalogProtocol.CATALOG, {ref: ref(workspace), resume: resume, watch: watch}, 1000, function(page) outcome.page = page,
 			function(error:RpcError) outcome.error = error.code);
@@ -114,13 +138,277 @@ class CatalogTestMain {
 			pages.push(next);
 			token = next.token;
 			if (!next.more) return pages;
-			if (pages.length > 10) throw "too many pages";
+			if (pages.length > 200) throw "too many pages";
 		}
 	}
 
 	static function terminalIds(value:WorkspaceCatalog):String
 		return [for (t in value.terminals) t.id].join(",");
 
+
+	static function use(link:Link):Void {
+		client = link.client;
+		server = link.server;
+	}
+
+	/** A connection granted only the catalog sees the workspace's own fields and nothing else. */
+	static function grants():Void {
+		connect([WorkspaceCatalogProtocol.CAPABILITY]);
+		var bare = readAll(null);
+		var listed = 0;
+		for (value in bare) listed += value.groups.length + value.terminals.length + value.sessions.length;
+		check(listed == 0 && bare[0].folders.length == 2 && bare[0].reset, "grants: a catalog-only grant lists no groups, sessions or terminals");
+		check(bare[0].attention == 0, "grants: nor does it count their attention");
+		connect([WorkspaceCatalogProtocol.CAPABILITY, WorkspaceTerminalProtocol.READ]);
+		var some = readAll(null);
+		var terminalCount = 0, groupCount = 0;
+		for (value in some) {
+			terminalCount += value.terminals.length;
+			groupCount += value.groups.length;
+		}
+		check(terminalCount == terminals.length && groupCount == 0, "grants: terminals come with the terminals' read grant only");
+		terminals.push(terminal("t200"));
+		var narrow = page(some[some.length - 1].token);
+		terminals.pop();
+		check(terminalIds(narrow) == "t200", "grants: a granted kind still resumes");
+		var gone = page(narrow.token);
+		check(gone.removedTerminals.join(",") == "t200", "grants: and its removals");
+		connect([WorkspaceCatalogProtocol.CAPABILITY, WorkspaceProtocol.READ]);
+		var groupsOnly = readAll(null);
+		check(groupsOnly[0].groups.length == 1 && groupsOnly[0].terminals.length == 0, "grants: groups come with the workspace read grant only");
+		connect();
+	}
+
+	/** A key that is removed and comes back is an upsert: a client resuming from before both gets no removal of it. */
+	static function removedAndReadded():Void {
+		var pages = readAll(null);
+		var token = pages[pages.length - 1].token;
+		var removed = terminals.splice(3, 1)[0];
+		read(null);
+		terminals.insert(3, removed);
+		var diff = page(token);
+		check(terminalIds(diff) == "t03" && diff.removedTerminals.length == 0, "readd: an upsert, no stale removal, got " + terminalIds(diff) + " / "
+			+ diff.removedTerminals.join(","));
+	}
+
+	/** Tokens come from clients: nothing in one may throw, reach another connection's read, or lose a read to other reads. */
+	static function hostileTokens():Void {
+		var first = page(null);
+		check(first.more, "hostile: the first page of a long read has more");
+		check(page(first.token).reset == false, "hostile: the real token continues");
+		for (template in ["inst1.0.0.%P.-1", "inst1.0.0.%P.9999", "inst1.5.2.%P.1", "inst1.0.99999.%P.1", "inst1.-1", "inst1.1x",
+				"inst1.0.0.p0.0.0", "inst1..", "inst1.99999999999", "inst1.0.0.%P.1x"]) {
+			var fresh = page(null);
+			var bad = StringTools.replace(template, "%P", fresh.token.split(".")[3]);
+			var outcome = read(bad);
+			check(outcome.page != null && outcome.page.reset, "hostile: " + bad + " resets, got " + outcome.error);
+		}
+		// Another connection's plan id is not mine to read.
+		var mine = {client: client, server: server};
+		var firstAgain = page(null);
+		connect();
+		var theirs = {client: client, server: server};
+		check(page(firstAgain.token).reset, "hostile: another connection's plan id resets");
+		use(mine);
+		check(!page(firstAgain.token).reset, "hostile: and leaves the plan to its owner");
+		// A connection keeps two paged reads; a third first page evicts the oldest only.
+		var one = page(null), two = page(null), three = page(null);
+		check(!page(three.token).reset && !page(two.token).reset, "plans: the newer two continue");
+		check(page(one.token).reset, "plans: the oldest of three paged reads is gone, and the read starts over");
+		// Reads on other connections never take this one's plans.
+		var held = page(null);
+		for (i in 0...20) {
+			use(theirs);
+			page(null);
+			page(null);
+			use(mine);
+		}
+		check(!page(held.token).reset, "plans: other connections' reads do not evict mine");
+		// A reset that interrupts a paged read: the pages that follow go on, and the next read resets.
+		var begun = page(null);
+		name = "Interrupted";
+		var rest = page(begun.token);
+		check(rest.name == begun.name, "interrupt: the pages that follow carry the identity their read began with");
+		check(!rest.reset && rest.terminals.length > 0, "interrupt: the pages that follow continue the read");
+		check(!rest.more && page(rest.token).reset && page(rest.token).name == "Interrupted", "interrupt: and the next read is a reset");
+		var again = page(null);
+		check(again.reset && again.folders.length == 2, "interrupt: a new read is a reset with its folders");
+		name = "Demo";
+	}
+
+	static function session(id:String, state:String = "idle"):AgentRecord
+		return {id: id, name: "Session " + id, group: "g", cwd: "/work/a", thread: "th", state: state, turn: null, workspaceRoot: "/work/a"};
+
+	/** Sessions are listed, and the requests waiting on one count toward its attention and the page's total. */
+	static function sessionRecords():Void {
+		connect();
+		var pages = readAll(null);
+		var token = pages[pages.length - 1].token;
+		var baseline = pages[0].attention;
+		sessions.push(session("s1"));
+		sessions.push(session("s2", WorkspaceCatalogProtocol.NEEDS_ATTENTION));
+		var diff = page(token);
+		check(diff.sessions.length == 2 && diff.sessions[0].attention == 0 && diff.sessions[1].attention == 1, "sessions: listed with their attention");
+		check(diff.attention == baseline + 1, "sessions: the page total counts them");
+		requests.set("s1", 2);
+		var waiting = page(diff.token);
+		check(waiting.sessions.length == 1 && waiting.sessions[0].id == "s1" && waiting.sessions[0].attention == 2, "sessions: pending requests change the item");
+		check(waiting.attention == baseline + 3, "sessions: and the total, got " + waiting.attention);
+		connect([WorkspaceCatalogProtocol.CAPABILITY, WorkspaceProtocol.READ]);
+		check(page(null).attention == 0, "sessions: a connection that cannot see sessions does not count them");
+		sessions = [];
+		requests = new Map();
+		connect();
+		read(null);
+	}
+
+	/** An item too big for a page has its display name shortened (never a path), else it is left out; it never blocks the catalog. */
+	static function oversized():Void {
+		var huge = StringTools.rpad("", "x", 200000);
+		var longName = terminal("t-big");
+		longName.name = huge;
+		var longPath = terminal("t-path");
+		longPath.cwd = huge;
+		terminals.push(longName);
+		terminals.push(longPath);
+		var before = service.omitted;
+		connect();
+		var pages = readAll(null);
+		var name:Null<CatalogTerminal> = null, path:Null<CatalogTerminal> = null;
+		for (value in pages) {
+			check(WorkspaceCatalogProtocol.fits(value), "oversized: every page fits");
+			for (t in value.terminals) {
+				if (t.id == "t-big") name = t;
+				if (t.id == "t-path") path = t;
+			}
+		}
+		check(name != null && name.name.length == 256 && StringTools.endsWith(name.name, "…") && name.directory == "/work/a",
+			"oversized: a long display name is shortened and marked, its directory untouched: " + (name == null ? "missing" : name.name.length + " " + name.directory));
+		check(path == null && service.omitted == before + 1, "oversized: a path that cannot fit is left out, never cut, and counted");
+		terminals.pop();
+		terminals.pop();
+		read(null);
+	}
+
+	/** Hints reach a watcher only for what its grants let it see, and no faster than ten a second. */
+	static function hints():Void {
+		var token = readAll(null).pop().token;
+		connect([WorkspaceCatalogProtocol.CAPABILITY, WorkspaceProtocol.READ]);
+		changes = [];
+		page(token, true);
+		terminals.push(terminal("t300"));
+		now += 1;
+		service.poll();
+		pump();
+		check(changes.length == 0, "hints: a change to terminals does not reach a connection that cannot see terminals");
+		name = "Hinted";
+		now += 1;
+		service.poll();
+		pump();
+		check(changes.length == 1, "hints: a change to the workspace itself reaches everyone, got " + changes.length);
+		connect();
+		changes = [];
+		page(null, true);
+		now += 1;
+		service.poll();
+		terminals.push(terminal("t301"));
+		now += 0.11;
+		service.poll();
+		terminals.push(terminal("t302"));
+		now += 0.11;
+		service.poll();
+		pump();
+		check(changes.length == 2, "hints: one per change after the interval, got " + changes.length);
+		terminals.push(terminal("t303"));
+		now += 0.11;
+		service.poll();
+		terminals.push(terminal("t304"));
+		now += 0.05;
+		service.poll();
+		pump();
+		check(changes.length == 3, "hints: a second change inside the interval waits, got " + changes.length);
+		now += 0.2;
+		service.poll();
+		pump();
+		check(changes.length == 4, "hints: and is sent when it is over, got " + changes.length);
+		terminals.splice(terminals.length - 6, 6);
+		name = "Demo";
+		read(null);
+	}
+
+	/** Removals spread over several refreshes outgrow the ring: older tokens reset, newer ones still resume. */
+	static function ringOverflow():Void {
+		var oldest = readAll(null).pop().token;
+		var first = [for (i in 0...600) terminal("r" + i)], second = [for (i in 0...600) terminal("q" + i)];
+		for (t in first) terminals.push(t);
+		for (t in second) terminals.push(t);
+		var both = readAll(null).pop().token;
+		terminals.splice(terminals.length - 1200, 600);
+		var afterFirst = readAll(null).pop().token;
+		terminals.splice(terminals.length - 600, 600);
+		var afterSecond = readAll(null).pop().token;
+		check(page(oldest).reset, "ring: a token from before every removal resets");
+		check(page(both).reset, "ring: so does one whose removals have left the ring");
+		var resumed = readAll(afterFirst), removedCount = 0;
+		for (value in resumed) removedCount += value.removedTerminals.length;
+		check(!resumed[0].reset && removedCount == 600, "ring: a token inside the ring resumes with its removals, got " + removedCount);
+		check(!page(afterSecond).reset, "ring: a token after them resumes");
+	}
+
+	/** A paged read's plans are dropped with its connection. */
+	static function planCleanup():Void {
+		connect();
+		var others = service.planCount();
+		page(null);
+		check(service.planCount() > others, "cleanup: a paged read keeps a plan");
+		var done = cleanup;
+		done();
+		check(service.planCount() == others, "cleanup: and the connection's cleanup drops it");
+	}
+
+	/** A large catalog reads in linear time. */
+	static function large():Void {
+		var saved = terminals;
+		terminals = [for (i in 0...2000) terminal("L" + i)];
+		connect();
+		var start = Sys.time();
+		var pages = readAll(null);
+		var seconds = Sys.time() - start;
+		var count = 0;
+		for (value in pages) count += value.terminals.length;
+		Sys.println("large catalog: " + count + " terminals in " + pages.length + " pages, " + Std.int(seconds * 1000) + " ms");
+		check(count == 2000 && seconds < 20, "large: every item arrives, in time");
+		terminals = saved;
+	}
+
+	/** workspace.json changes while the service runs: a torn file keeps the last good identity and is tried again. */
+	static function identityWatch():Void {
+		var directory = haxe.io.Path.join([Sys.getEnv("TEMP") != null ? Sys.getEnv("TEMP") : "/tmp", "exosuit-catalog-identity-" + Std.int(Sys.time())]);
+		if (!AgentManagerNative.prepareDirectory(directory)) throw "cannot create " + directory;
+		var path = haxe.io.Path.join([directory, "workspace.json"]);
+		var id = "workspace-" + StringTools.rpad("", "a", 32);
+		function write(folder:String):Void
+			AgentStateIdentity.forWorkspace(id, [folder], null).write(path);
+		function folders(watch:AgentIdentityWatch):String
+			return watch.current().folders.join(",");
+		write("/aa");
+		var later = Sys.time() + 1000;
+		var watch = new AgentIdentityWatch(path, function() return AgentStateIdentity.forFolder("/x"), function() return later);
+		check(folders(watch) == "/aa", "identity: read at start");
+		sys.io.AtomicFile.write(path, "{\"version\":2,\"workspace\":\"" + id + "\",\"fol");
+		check(folders(watch) == "/aa", "identity: a torn file keeps the last good identity");
+		sys.io.AtomicFile.write(path, "garbage that is not json at all");
+		check(folders(watch) == "/aa", "identity: so does garbage");
+		write("/bb");
+		check(folders(watch) == "/bb", "identity: the next good file is read, the failed one having been tried again");
+		// A rewrite of the same size inside the clock's granularity is still seen while the file is young.
+		var young = new AgentIdentityWatch(path, function() return AgentStateIdentity.forFolder("/x"), function() return Sys.time());
+		check(folders(young) == "/bb", "identity: young file read");
+		write("/cc");
+		check(folders(young) == "/cc", "identity: a same-size rewrite of a young file is seen");
+		sys.FileSystem.deleteFile(path);
+		sys.FileSystem.deleteDirectory(directory);
+	}
 	static function pagedReset():Void {
 		var pages = readAll(null);
 		var ids:Array<String> = [], seen:Array<String> = [];

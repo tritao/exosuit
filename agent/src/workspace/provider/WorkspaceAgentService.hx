@@ -64,6 +64,14 @@ class WorkspaceAgentService implements WorkspaceAgents {
   for(provider in providers) if(provider.owns(id)) return provider;
   return null;
  }
+ public function requestCounts():Map<String,Int> {
+  var counts = new Map<String,Int>();
+  for(provider in providers) {
+   var source:Null<AgentRequestCounts> = Std.isOfType(provider, AgentRequestCounts) ? cast provider : null;
+   if(source != null) for(id=>waiting in source.requestCounts()) counts.set(id,waiting);
+  }
+  return counts;
+ }
  public function records():Array<AgentRecord> {
   var found:Array<AgentRecord>=[];
   for(provider in providers) found=found.concat(provider.records());

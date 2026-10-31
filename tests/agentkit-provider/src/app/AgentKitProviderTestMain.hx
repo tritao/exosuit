@@ -190,6 +190,8 @@ class AgentKitProviderTestMain {
 		act("prompt", "edit it");
 		until("needs-attention");
 		require(current().requests.length == 1 && File.getContent(file("hello.txt")) == "hello world\n", "edit waits for approval without touching the file");
+		var counts = service.requestCounts();
+		require(counts.get(current().record.id) == 1 && !counts.exists("nobody"), "the service counts the pending request through the provider");
 		var requestId = current().requests[0].id;
 		act("approve", "", requestId);
 		require(code == "", "approve failed: " + code);
