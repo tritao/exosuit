@@ -445,8 +445,8 @@ class AttachmentTestMain {
 
   /**
     Two folders of one workspace, as the editor's terminals reach them (args: first folder, launcher, second folder,
-    phase, the previous run's service generation). With EXOSUIT_WORKSPACE_IDENTITY=workspace both roots attach to one
-    service keyed by the workspace id, whose groups outlive the service; without it each folder has a service of its own.
+    phase, the previous run's service generation). Both roots attach to one service keyed by the workspace id, whose
+    groups outlive the service; with EXOSUIT_WORKSPACE_IDENTITY=folder each folder has a service of its own.
   **/
   static function workspaceIdentity(runtime:Runtime, processes:ProcessManager, clock:Void->Float, first:String, launcher:String,
       second:String, phase:String, previous:String):Void {

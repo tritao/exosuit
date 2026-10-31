@@ -1664,8 +1664,8 @@ class ExosuitApp implements DesktopUiApplication {
 			rename: function(entry) askName("Rename workspace " + entry.name, function(name) {
 				machine.rename(entry.id, name, function(_, failure) { report(failure); });
 			}),
-			// The scratch folder stays apart from the attached folders (ADR 0006). Without a service per workspace
-			// (EXOSUIT_WORKSPACE_IDENTITY=workspace), the groups made in it show only while the workspace has no folders.
+			// The scratch folder stays apart from the attached folders (ADR 0006). With a service per folder
+			// (EXOSUIT_WORKSPACE_IDENTITY=folder), the groups made in it show only while the workspace has no folders.
 			attachFolder: function(entry) chooseFolder("Attach Folder to " + entry.name, function(folder) {
 				machine.addFolder(entry.id, folder, function(updated, failure) {
 					if (!report(failure) && updated != null && openWorkspace() == entry.id) open(updated);
@@ -1686,7 +1686,7 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	/**
-		The service the window attaches to by workspace id (EXOSUIT_WORKSPACE_IDENTITY=workspace): the open machine
+		The service the window attaches to by workspace id: the open machine
 		workspace's, else the one that holds the active project's folder. `target` is null when the window follows a
 		folder's own service: the flag is off, suit is off, or suit knows no workspace for it. `waiting` is true
 		while suit's answer is awaited, which decides between those.
@@ -1714,7 +1714,7 @@ class ExosuitApp implements DesktopUiApplication {
 			&& machine.error == null;
 	}
 
-	/** The workspace service a terminal root belongs to (EXOSUIT_WORKSPACE_IDENTITY=workspace), or null for a folder's own. */
+	/** The workspace service a terminal root belongs to, or null for a folder's own. */
 	public function terminalServiceTarget(root:String):Null<workspace.client.WorkspaceServiceTarget> {
 		var machine = machineClient;
 		return machine == null || !machine.enabled || !workspace.client.WorkspaceServiceTarget.enabled() ? null : machine.serviceTargetFor(root);

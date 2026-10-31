@@ -120,8 +120,9 @@ as a separate list.
 
 ## Phase 4: one service per workspace (identity by workspace id) and migration
 
-This is the riskiest phase. It ships behind `EXOSUIT_WORKSPACE_IDENTITY=workspace` until migration is proven on
-real state, and then becomes the default.
+This is the riskiest phase. It shipped behind a flag until the migration was rehearsed on a copy of real state
+(`scripts/rehearse-workspace-migration.py`, 2026-10-31), and is now the default; `EXOSUIT_WORKSPACE_IDENTITY=folder`
+goes back to a service per folder.
 
 - [x] `AgentManager`:
   - `--manager --workspace <id> [--folder F]...`;

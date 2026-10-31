@@ -78,11 +78,11 @@ with tempfile.TemporaryDirectory(prefix="exosuit-wsid-", ignore_cleanup_errors=T
         stop_managers(home)
         client(on, first, second, "check", generation)
         assert states(home) == ["ws1"], states(home)
-        # Without the flag: a service per folder, as before.
+        # With EXOSUIT_WORKSPACE_IDENTITY=folder: a service per folder, as before.
         home = directory / "state-off"
         home.mkdir(mode=0o700)
         off = dict(base, EXOSUIT_AGENT_STATE_HOME=str(home))
-        off.pop("EXOSUIT_WORKSPACE_IDENTITY", None)
+        off["EXOSUIT_WORKSPACE_IDENTITY"] = "folder"
         client(off, first, second, "create")
         names = states(home)
         assert len(names) == 2 and all(re.fullmatch(r"[0-9a-f]{20}", name) for name in names), names

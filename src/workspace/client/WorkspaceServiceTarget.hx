@@ -3,15 +3,15 @@ package workspace.client;
 import sys.FileSystem;
 
 /**
-	Which workspace service an attachment follows. Before M19 Phase 4 that is always a folder's. With
-	`EXOSUIT_WORKSPACE_IDENTITY=workspace` the editor follows a workspace in suit's machine catalog by its id: one
-	service for all of its folders (docs/architecture/0006-workspaces-without-folders.md).
+	Which workspace service an attachment follows: a workspace in suit's machine catalog, by its id, with one service
+	for all of its folders (docs/architecture/0006-workspaces-without-folders.md). `EXOSUIT_WORKSPACE_IDENTITY=folder`
+	goes back to a service per folder, as before M19 Phase 4.
 **/
 class WorkspaceServiceTarget {
 	public static inline final FLAG = "EXOSUIT_WORKSPACE_IDENTITY";
 
-	/** Whether machine workspaces get a service of their own, keyed by id. */
-	public static function enabled():Bool return Sys.getEnv(FLAG) == "workspace";
+	/** Whether machine workspaces get a service of their own, keyed by id: unless EXOSUIT_WORKSPACE_IDENTITY=folder. */
+	public static function enabled():Bool return Sys.getEnv(FLAG) != "folder";
 
 	/** The workspace's id in suit's catalog. */
 	public final workspace:String;
