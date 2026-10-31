@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "package": { "name": "exosuit-context-switching-test" },
+  "entry": "app.ContextSwitchingTestMain",
+  "sourceRoots": ["src"],
+  "scopeSourceRoots": false,
+  "dependencies": { "exosuit-graphical": { "path": "../../graphical" } },
+  "target": "host",
+  "outputDir": "build"
+}
