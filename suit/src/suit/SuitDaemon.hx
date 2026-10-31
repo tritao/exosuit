@@ -309,13 +309,13 @@ class SuitDaemon {
 				menuRequested = true;
 				return {ok: true};
 			case "machine":
-				return {ok: true, machine: machine().json()};
+				return {ok: true, machine: machine().json(services)};
 			case "machine-rename":
 				machine().renameMachine(SuitRecords.stringField(request, "name"));
-				return {ok: true, machine: machine().json()};
+				return {ok: true, machine: machine().json(services)};
 			case "workspace-create":
 				var created = machine().create(SuitRecords.stringField(request, "name"), requestFolders(request));
-				return {ok: true, workspace: created, machine: machine().json()};
+				return {ok: true, workspace: created, machine: machine().json(services)};
 			case "workspace-scratch":
 				var id = SuitRecords.stringField(request, "workspace");
 				var scratch = machine().scratch(id);
@@ -323,19 +323,19 @@ class SuitDaemon {
 				for (entry in machine().state.workspaces)
 					if (entry.id == id)
 						workspace = MachineCatalog.copy(entry);
-				return {ok: true, scratch: scratch, workspace: workspace, machine: machine().json()};
+				return {ok: true, scratch: scratch, workspace: workspace, machine: machine().json(services)};
 			case "workspace-rename":
 				var renamed = machine().rename(SuitRecords.stringField(request, "workspace"), SuitRecords.stringField(request, "name"));
-				return {ok: true, workspace: renamed, machine: machine().json()};
+				return {ok: true, workspace: renamed, machine: machine().json(services)};
 			case "workspace-delete":
 				machine().delete(SuitRecords.stringField(request, "workspace"));
-				return {ok: true, machine: machine().json()};
+				return {ok: true, machine: machine().json(services)};
 			case "workspace-add-folder":
 				var added = machine().addFolder(SuitRecords.stringField(request, "workspace"), SuitRecords.stringField(request, "folder"));
-				return {ok: true, workspace: added, machine: machine().json()};
+				return {ok: true, workspace: added, machine: machine().json(services)};
 			case "workspace-remove-folder":
 				var removed = machine().removeFolder(SuitRecords.stringField(request, "workspace"), SuitRecords.stringField(request, "folder"));
-				return {ok: true, workspace: removed, machine: machine().json()};
+				return {ok: true, workspace: removed, machine: machine().json(services)};
 			case "login-toggle":
 				// As the tray's checkbox does: in the background, answered at once.
 				SuitLogin.toggleInBackground();
@@ -352,6 +352,10 @@ class SuitDaemon {
 			catalog = new MachineCatalog(MachineCatalog.file(), MachineCatalog.existingFolders());
 		return catalog;
 	}
+
+	/** The running service of a workspace, as a `machine` reply reports it. */
+	function services(workspace:MachineCatalog.MachineWorkspace):Null<MachineCatalog.MachineService>
+		return SuitInventory.serviceFor(inventory.owned(), workspace.id);
 
 	/** A `workspace-create` request's folders: `folders` (possibly empty), or the older single `folder`. */
 	static function requestFolders(request:Dynamic):Array<String> {

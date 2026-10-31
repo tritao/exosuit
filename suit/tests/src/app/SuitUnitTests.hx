@@ -5,6 +5,9 @@ import suit.SuitClient;
 import suit.SuitClient.SuitMode;
 import suit.SuitClock;
 import suit.SuitInventory;
+import suit.SuitInventory.SuitProcess;
+import suit.SuitGroup;
+import suit.SuitKind;
 import suit.SuitLineage;
 import suit.SuitPaths;
 import suit.MachineCatalog;
@@ -146,7 +149,7 @@ class SuitUnitTests {
 		Sys.putEnv("EXOSUIT_SUIT_HOME", temp + "/suit-unit-" + Std.random(1000000) + "/a/b/home");
 		Sys.putEnv("EXOSUIT_SUIT_AUTOSTART", "0");
 		check(SuitClient.resolve(temp + "/suit-test/state") == SuitMode.On, "resolve() keeps an explicit on");
-		SuitClient.registerWorkspaceService(suit.SuitKind.WorkspaceManager, {root: temp, stateDir: temp + "/suit-test/state", generation: "g", workspace: null});
+		SuitClient.registerWorkspaceService(WorkspaceManager, {root: temp, stateDir: temp + "/suit-test/state", generation: "g", workspace: null});
 		check(sys.FileSystem.exists(suit.SuitRecord.SuitRecords.path(SuitPaths.registry(), Sys.getPid())),
 			"an explicit on registers, creating the home's missing parent folders");
 		SuitClient.unregister();
@@ -256,6 +259,7 @@ class SuitUnitTests {
 			var written:Dynamic = haxe.Json.parse(sys.io.File.getContent(file));
 			check(written.version == 2 && new MachineCatalog(file).state.workspaces[0].name == "n2", "a version 1 catalog is written back as version 2");
 			machineReply(file, twoInJson);
+			serviceReply(base);
 			sys.io.File.saveContent(file, "{\"version\":1,\"id\":\"m\",\"name\":\"x\",\"workspaces\":[{\"id\":\"w\",\"name\":\"n\",\"folders\":\"x\"}]}");
 			check(fails(function() new MachineCatalog(file)), "a damaged catalog is an error, not replaced");
 			sys.io.File.saveContent(file, "{\"version\":3,\"id\":\"m\",\"name\":\"x\",\"workspaces\":[]}");
@@ -297,6 +301,40 @@ class SuitUnitTests {
 			"every change to a workspace counts in its revision");
 		var unknown:Array<Dynamic> = catalog.json().workspaces;
 		check(unknown[0].service == null && unknown[1].service == null, "suit reports no service until it knows one");
+	}
+
+	/** A workspace's service in a `machine` reply: its running service process, with the socket its endpoint.json names. */
+	static function serviceReply(base:String):Void {
+		var state = base + "/service-state";
+		sys.FileSystem.createDirectory(state);
+		function record(pid:Int, kind:SuitKind, workspace:Null<String>, stateDir:Null<String>, started:Float, generation:Null<String>):SuitProcess
+			return {pid: pid, started: started, parent: 1, kind: kind, source: Registered, root: null, roots: [], workspace: workspace, workspaces: [],
+				stateDir: stateDir, generation: generation, owner: null, commandLine: "", orphaned: false, group: OtherGroup, relay: null};
+		function endpoint(pid:Int, generation:String):Void
+			sys.io.File.saveContent(state + "/endpoint.json", "{\"socket\":\"pipe-w1\",\"workspaceId\":\"w1\",\"managerPid\":" + pid + ",\"generation\":\"" + generation + "\"}");
+		var processes = [record(7, Editor, "w1", state, 1, null), record(8, WorkspaceManager, "w2", state, 1, null),
+			record(9, WorkspaceManager, "w1", state, 5, "g2")];
+		check(SuitInventory.serviceFor(processes, "w1") == null, "a service whose endpoint.json is missing is not reported");
+		endpoint(9, "g2");
+		var found = SuitInventory.serviceFor(processes, "w1");
+		check(found != null && found.endpoint == "pipe-w1" && found.pid == 9 && found.running, "a running workspace service is reported with its socket");
+		endpoint(4, "g1");
+		check(SuitInventory.serviceFor(processes, "w1") == null, "a stale endpoint.json of a service that is gone does not pair with a new pid");
+		// A child that shares the generation is not the service; a manager that does is, when the pid is stale.
+		var child = record(12, WorkspaceHost, "w1", state, 6, "g1");
+		check(SuitInventory.serviceFor(processes.concat([child]), "w1") == null, "a process that is not a manager does not match by generation");
+		var manager = record(13, WorkspaceManager, "w1", state, 7, "g1");
+		manager.commandLine = "hl.exe C:/x/agent/build/host/main.hl --manager C:/root";
+		var viaGeneration = SuitInventory.serviceFor(processes.concat([manager]), "w1");
+		check(viaGeneration != null && viaGeneration.pid == 13, "a manager matches its endpoint.json by generation");
+		// The pid the file names wins over a newer process that shares its generation.
+		endpoint(9, "g2");
+		var newer = record(10, WorkspaceManager, "w1", state, 9, "g2");
+		newer.commandLine = "hl.exe C:/x/agent/build/host/main.hl --manager C:/root";
+		var preferred = SuitInventory.serviceFor(processes.concat([newer]), "w1");
+		check(preferred != null && preferred.pid == 9, "the process named by pid wins");
+		check(SuitInventory.serviceFor(processes, "w3") == null, "a workspace without a service has none");
+		check(SuitInventory.serviceFor(processes, "w3") == null, "a workspace without a service has none");
 	}
 
 	/** An object's field names, sorted and joined. */

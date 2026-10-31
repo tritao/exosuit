@@ -5,6 +5,7 @@ import haxe.io.Path;
 import processkit.Processes;
 import suit.SuitGroup;
 import suit.SuitKind;
+import suit.MachineCatalog.MachineService;
 import suit.SuitRecord.SuitRecords;
 import sys.FileSystem;
 import sys.io.File;
@@ -389,6 +390,51 @@ class SuitInventory {
 			return false;
 		var info = lookup(pid);
 		return info != null && SuitClock.startedBefore(info.started, childStarted);
+	}
+
+	/**
+		The running service of a workspace, for a `machine` reply: a workspace service process keyed by this id that its
+		state folder's endpoint.json names: by the manager's pid, else by generation for a manager. A leftover endpoint.json from a crashed
+		or earlier service names a process that is not running, so it matches nothing. The newest matching process wins.
+	**/
+	public static function serviceFor(processes:Array<SuitProcess>, workspace:String):Null<MachineService> {
+		var candidates = [for (process in processes) if (process.workspace == workspace && process.stateDir != null && SuitKinds.isWorkspaceService(process.kind)) process];
+		candidates.sort(function(a, b) return a.started < b.started ? 1 : a.started > b.started ? -1 : 0);
+		// One read of each state folder's endpoint.json, however many processes name it.
+		var endpoints = new Map<String, Null<{socket:String, managerPid:Int, generation:Null<String>}>>();
+		function endpointOf(stateDir:String):Null<{socket:String, managerPid:Int, generation:Null<String>}> {
+			if (!endpoints.exists(stateDir)) endpoints.set(stateDir, readEndpoint(stateDir));
+			return endpoints.get(stateDir);
+		}
+		// The process the file names by pid is the service; a generation match counts only for a manager (a child that
+		// shares the generation is not the service).
+		for (process in candidates) {
+			var stateDir = process.stateDir;
+			var endpoint = stateDir == null ? null : endpointOf(stateDir);
+			if (endpoint != null && endpoint.managerPid == process.pid) return {endpoint: endpoint.socket, pid: process.pid, running: true};
+		}
+		for (process in candidates) {
+			var stateDir = process.stateDir, generation = process.generation;
+			var endpoint = stateDir == null ? null : endpointOf(stateDir);
+			if (endpoint != null && generation != null && endpoint.generation == generation && process.commandLine.indexOf("--manager") >= 0)
+				return {endpoint: endpoint.socket, pid: process.pid, running: true};
+		}
+		return null;
+	}
+
+
+	/** The socket, manager pid and generation of a state folder's `endpoint.json`, or null. */
+	public static function readEndpoint(stateDir:String):Null<{socket:String, managerPid:Int, generation:Null<String>}> {
+		var path = Path.join([stateDir, "endpoint.json"]);
+		try {
+			var metadata = FileSystem.exists(path) ? FileSystem.metadata(path) : null;
+			if (metadata == null || metadata.size >= 16384) return null;
+			var value:Dynamic = Json.parse(File.getContent(path));
+			var socket = SuitRecords.stringField(value, "socket"), pid = SuitRecords.intField(value, "managerPid");
+			if (socket == null || socket.length == 0 || pid == null) return null;
+			return {socket: socket, managerPid: pid, generation: SuitRecords.stringField(value, "generation")};
+		} catch (_:Dynamic) {}
+		return null;
 	}
 
 	/** Reads `relay-status.json`, which a hosting workspace daemon rewrites while it runs. */
