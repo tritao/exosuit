@@ -43,6 +43,60 @@ and the status.
 - **Workaround:** copy the local into a new one after the declaration, or declare the function first.
 - **Status:** open.
 
+### A function type ending in a parenthesised function type does not parse
+
+- **Symptom:** `E0002: Expected Arrow, got Greater` at the closing `>`.
+- **Repro:** `var binding:Null<A->B->(Void->Void)>;` fails with `Expected Arrow, got Greater`, and
+  `typedef T = A->B->(Void->Void);` with `Expected Arrow, got Semicolon`. Stock Haxe accepts both. The parser seems to
+  read `(Void->Void)` as the argument list of a new-style `(args)->Ret` type.
+- **Found:** 2026-10-31, M19 Phase 6 (`WorkspaceRpcServer`).
+- **Workaround:** name the inner function type: `typedef CatalogCleanup = Void->Void;` and then
+  `A->B->CatalogCleanup`.
+- **Status:** open.
+
+### MessagePack cannot encode an anonymous structure type
+
+- **Symptom:** `E1024: MessagePack does not support type TAnonymous {folders,name,scratch}`.
+- **Shape:** `MessagePack.encode(value)` where `value` is a plain `typedef` of fields without `@:wire` and `@:id`.
+  Stock Haxe has no MessagePack, so this is a limit of haxeon's, not a divergence; the message could say to add
+  `@:wire`.
+- **Found:** 2026-10-31, M19 Phase 6 (`WorkspaceCatalogService`).
+- **Workaround:** fingerprint the fields as joined strings, or mark the typedef `@:wire` with `@:id`s.
+- **Status:** open (message only).
+
+### A String made from MessagePack bytes fails at run time
+
+- **Symptom:** `HashLink String cannot contain NUL; use Bytes for binary data`, thrown by `Bytes.toString()` on encoded
+  MessagePack. It is deliberate, but nothing at compile time says that `toString()` is unsafe for binary data.
+- **Found:** 2026-10-31, M19 Phase 6 (`WorkspaceCatalogService` compared encoded items as strings).
+- **Workaround:** `WorkspaceCatalogService.hex` turns the bytes into hex digits.
+- **Status:** open.
+
+### A default parameter value from an `inline final` without a type is unresolved
+
+- **Symptom:** `E1020: Unresolved inferred type` at `function refresh(minAge = REFRESH_SECONDS)` where
+  `static inline final REFRESH_SECONDS = 0.1;`. Stock Haxe infers `Float`.
+- **Found:** 2026-10-31, M19 Phase 6 review fixes (`WorkspaceCatalogService`).
+- **Workaround:** type the parameter (`minAge:Float = 0.1`).
+- **Status:** open.
+
+### A cast null in an anonymous structure literal fails CFG generation
+
+- **Symptom:** `CFG generation failed for ...resumeFrom: Uncoerced null literal typed as TNull`.
+- **Shape:** `var start = {since: -1, plan: (null : Null<CatalogPlan>)};` (an inferred anonymous structure).
+- **Found:** 2026-10-31, M19 Phase 6 review fixes.
+- **Workaround:** declare a typedef and type the variable (`var start:CatalogResume = {..., plan: null}`).
+- **Status:** open.
+
+### Stack trace names the last line of the function, not the failing statement
+
+- **Symptom:** an uncaught `Array index out of bounds` in `AgentContentStorageTest.run` is reported at
+  `AgentContentStorageTest.hx:61`, the closing brace area of the function. The failing statement is
+  `Sys.args()[0]` on line 12 (the test was started without its directory argument).
+- **Same in:** `PersistenceTestMain.main` (reported at 347, failing line 188) and `ActiveContextTestMain`.
+- **Effect:** three suites looked broken for a day; it was only a missing argument.
+- **Status:** open. A stack trace should name the line of the faulting access.
+
 ## Standard library gaps
 
 Standard Haxe APIs haxeon's standard library does not have yet. Each one forced a hand-written replacement.
@@ -57,7 +111,6 @@ Standard Haxe APIs haxeon's standard library does not have yet. Each one forced 
   `AtomicFile.createBytes`, one file at a time. There is no directory fsync for a created directory.
 - **No `sys.io.File.copy`.** Workaround: `File.saveBytes(to, File.getBytes(from))`, which reads the whole file into
   memory.
-
 ## Unclear: bug or deliberate
 
 These are stricter than stock Haxe. Each needs a decision, and a better message if it is deliberate.
