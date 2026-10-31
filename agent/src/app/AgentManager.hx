@@ -28,6 +28,7 @@ private typedef ManagerOptions = {
 	var wire:Bool;
 	var generation:Null<String>;
 	var seedFrom:Null<String>;
+	var restoreMigration:Bool;
 }
 
 /** Exosuit workspace daemon supervisor and discovery launcher. */
@@ -67,6 +68,7 @@ class AgentManager {
 				}
 				return startDetached(options, directory);
 			}
+			if (options.restoreMigration) return restoreMigration(directory, options.identity.workspace);
 			if (options.discover) {
 				if (!FileSystem.exists(directory)) return 4;
 				if (!AgentManagerNative.privateDirectory(directory))
@@ -108,10 +110,6 @@ class AgentManager {
 			if (recorded.migratedTo != null) throw "This state was moved into a workspace";
 			workspace = recorded.workspace;
 			if (workspace == null) root = directoryArgument(recorded.key());
-			else {
-				folders = [for (folder in recorded.folders) if (FileSystem.exists(folder) && FileSystem.isDirectory(folder)) folder];
-				scratch = recorded.scratch;
-			}
 			index = 2;
 		} else {
 			root = directoryArgument(arguments[0]);
@@ -121,7 +119,7 @@ class AgentManager {
 			alwaysAvailable: Sys.getEnv("EXOSUIT_AGENT_ALWAYS_AVAILABLE") == "1",
 			discover: false, configureRelay: null, prepareUpdate: false,
 			restart: false, expectedGeneration: null,
-			detach: false, background: false, wire: false, generation: null, seedFrom: null
+			detach: false, background: false, wire: false, generation: null, seedFrom: null, restoreMigration: false
 		};
 		while (index < arguments.length) {
 			var value = arguments[index++];
@@ -160,6 +158,7 @@ class AgentManager {
 					if (index >= arguments.length) throw "--expected-generation requires a value";
 					options.expectedGeneration = arguments[index++];
 				case "--detach": options.detach = true;
+				case "--restore-migration": options.restoreMigration = true;
 				case "--background": options.background = true;
 				case "--wire": options.wire = true;
 				case "--generation":
@@ -170,11 +169,20 @@ class AgentManager {
 				default: throw 'Unknown workspace manager option: $value';
 			}
 		}
-		if (workspace != null) {
-			options.identity = AgentStateIdentity.forWorkspace(workspace, folders, scratch);
-			options.root = options.identity.primaryRoot();
-		}
 		if (fromState != null) options.stateDir = fromState;
+		if (workspace != null) {
+			if (folders.length == 0 && scratch == null) {
+				// Named by its id alone: the folders it had at its last start, those that still exist.
+				var recorded = recordedWorkspace(options.stateDir != null ? options.stateDir : workspaceStateDirectory(workspace), workspace);
+				if (recorded != null) {
+					folders = [for (folder in recorded.folders) if (FileSystem.exists(folder) && FileSystem.isDirectory(folder)) folder];
+					scratch = recorded.scratch;
+				}
+			}
+			options.identity = AgentStateIdentity.forWorkspace(workspace, folders, scratch);
+			// Discovery and restoring need no folder: only starting a service does.
+			options.root = folders.length > 0 || scratch != null || !options.discover && !options.restoreMigration ? options.identity.primaryRoot() : "";
+		}
 		var maintenanceModes = (options.configureRelay != null ? 1 : 0) + (options.prepareUpdate ? 1 : 0) + (options.restart ? 1 : 0);
 		if (maintenanceModes > 1 || maintenanceModes > 0 && (options.discover || options.detach || options.background))
 			throw "Workspace maintenance cannot be combined with another manager mode";
@@ -184,11 +192,23 @@ class AgentManager {
 			throw "--expected-generation requires --restart";
 		if (options.seedFrom != null && (options.discover || maintenanceModes > 0))
 			throw "--seed-from applies only when starting a manager";
+		if (options.restoreMigration && (options.identity.workspace == null || maintenanceModes > 0 || options.discover || options.detach
+			|| options.background))
+			throw "--restore-migration applies only to a workspace, alone";
 		if (options.discover && (options.detach || options.background))
 			throw "Discovery cannot be combined with manager startup";
 		if (options.detach && options.background)
 			throw "Detached startup cannot run as a background manager";
 		return options;
+	}
+
+	/** The identity a workspace's state recorded at its last start, or null when it has none yet. */
+	static function recordedWorkspace(directory:String, workspace:String):Null<AgentStateIdentity> {
+		var path = Path.join([directory, "workspace.json"]);
+		if (!FileSystem.exists(path)) return null;
+		var recorded = AgentStateIdentity.read(path);
+		if (recorded.workspace != workspace) throw "Workspace state directory identity mismatch";
+		return recorded;
 	}
 
 	static function directoryArgument(path:String):String {
@@ -662,6 +682,15 @@ class AgentManager {
 		try return Json.parse(File.getContent(path)) catch (_:Dynamic) throw 'Invalid JSON file: $path';
 	}
 
+	/** Why a background manager stopped, from the last "Workspace startup failed" line of its log. */
+	static function lastFailure(logPath:String):String {
+		var reason = "Workspace manager exited before it was ready; inspect manager.log";
+		try for (line in File.getContent(logPath).split("\n"))
+			if (StringTools.startsWith(line, "Workspace startup failed: ")) reason = StringTools.trim(line.substr("Workspace startup failed: ".length))
+		catch (_:Dynamic) {}
+		return reason;
+	}
+
 	static function startDetached(options:ManagerOptions, directory:String):Int {
 		var launcher = managerBytecode();
 		var generation = AgentManagerNative.randomToken().substr(0, 32);
@@ -679,10 +708,17 @@ class AgentManager {
 				var status = child.pollExit();
 				copyOutput(child, buffer, false, logPath);
 				copyOutput(child, buffer, true, logPath);
-				if (status >= 0) { result = status; complete = true; break; }
+				if (status >= 0) {
+					result = status;
+					complete = true;
+					if (status != 0) throw lastFailure(logPath);
+					break;
+				}
 				try {
 					var endpoint = readDiscovery(directory, options.identity.key());
 					if (endpoint != null && endpoint.generation == generation) {
+						for (notice in AgentWorkspaceMigration.readNotices(directory)) Sys.stderr().writeString("Workspace start warning: " + notice + "\n");
+						Sys.stderr().flush();
 						emitDiscovery(endpoint, options.wire);
 						result = 0;
 						complete = true;
@@ -701,6 +737,30 @@ class AgentManager {
 		}
 		child.close();
 		return result;
+	}
+
+	/**
+		`--restore-migration`: undoes a workspace's migration of its folders' old state (AgentWorkspaceMigration.restore)
+		while its service is stopped, and sets the workspace's state aside. Prints the folders restored.
+	**/
+	static function restoreMigration(directory:String, workspace:Null<String>):Int {
+		if (workspace == null) throw "--restore-migration applies only to a workspace";
+		if (!FileSystem.exists(directory)) throw "This workspace has no state";
+		var lock = AgentManagerNative.acquireLock(Path.join([directory, "agent.lock"]));
+		if (lock == null) throw "Stop the workspace's service before restoring its folders' state";
+		var restored:Array<AgentWorkspaceMigration.MigratedFolder>;
+		try restored = AgentWorkspaceMigration.restore(directory, workspace) catch (error:Dynamic) {
+			AgentManagerNative.releaseLock(lock);
+			throw error;
+		}
+		AgentManagerNative.releaseLock(lock);
+		var aside = directory + ".restored-" + AgentWorkspaceMigration.timestamp();
+		FileSystem.rename(directory, aside);
+		Sys.stderr().writeString("Warning: anything done in workspace " + workspace + " after its folders' state was migrated (sessions, terminals and settings "
+			+ "changed since) is not in the restored folders. It was set aside, not deleted, in " + aside + "\n");
+		Sys.stderr().flush();
+		Sys.println(Json.stringify({restored: [for (entry in restored) entry.root], workspaceState: aside}));
+		return 0;
 	}
 
 	/** The arguments after `--manager` that name `identity`'s service. */
@@ -753,6 +813,10 @@ class AgentManager {
 			if (generation.length == 0) generation = AgentManagerNative.randomToken().substr(0, 32);
 			prepareLog(logPath);
 			ensureIdentity(identityPath, options.identity);
+			var notices = AgentWorkspaceMigration.run(options.identity, directory);
+			AgentWorkspaceMigration.writeNotices(directory, notices);
+			for (notice in notices) Sys.stderr().writeString("Workspace start warning: " + notice + "\n");
+			Sys.stderr().flush();
 			if (options.seedFrom != null && !FileSystem.exists(database))
 				AgentManagerSeed.copyCatalog(options.seedFrom, directory, options.identity.key());
 			prepareEndpointForLaunch(endpointPath);

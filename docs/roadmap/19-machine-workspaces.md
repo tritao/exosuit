@@ -123,13 +123,13 @@ as a separate list.
 This is the riskiest phase. It ships behind `EXOSUIT_WORKSPACE_IDENTITY=workspace` until migration is proven on
 real state, and then becomes the default.
 
-- [ ] `AgentManager`:
+- [x] `AgentManager`:
   - `--manager --workspace <id> [--folder F]...`;
   - the state folder is `workspaces/<workspace id>/`;
   - the pipe is `exosuit-<hash of workspace id and state>`;
   - the lock and generation are per workspace.
   - Today these come from a hash of the folder: `AgentManager.hx:557` and `:904-907`.
-- [ ] Re-key everything else the folder keyed:
+- [x] Re-key everything else the folder keyed:
   - the suit record (`workspace`, `folders`);
   - `WorkspaceStopRequest`;
   - `SuitKinds.orphanRule` (used while an editor has the workspace open, or suit hosts it);
@@ -137,7 +137,7 @@ real state, and then becomes the default.
   - `AgentImageStaging`;
   - relay identity and settings;
   - the content stores.
-- [ ] Migration, run once per old state folder, with this procedure:
+- [x] Migration, run once per old state folder, with this procedure:
   1. lock the folder;
   2. back it up (`<state>.bak-<time>`);
   3. move it into the workspace's state;
@@ -146,7 +146,7 @@ real state, and then becomes the default.
 
   Anything it doesn't recognise makes it refuse, and the old state is left in place. A workspace with several old
   folder states merges them, with each folder's groups under a top-level group named after the folder.
-- [ ] Tests:
+- [x] Tests:
   - migration fixtures made from copies of real states (single folder, two folders, a corrupt catalog);
   - restart idempotence;
   - an old editor build attaching to a migrated workspace is refused with a clear message.
