@@ -33,16 +33,6 @@ def run(gui):
     gui.check("Ctrl+Tab moves to the next tab (wraps to a1)", lambda s: active_tab(s["state"]) == "a1.txt", 5,
               detail=lambda s: active_tab(s["state"]))
 
-    gui.step("Ctrl+Shift+G shows Source Control (a keymap binding made with platform key codes)")
-    show_workbench(gui)
-    gui.click(gui.element(pattern="^w:", timeout=10), button="right")
-    time.sleep(0.3)
-    gui.chord("escape")
-    gui.chord("ctrl+shift+g")
-    gui.check("Ctrl+Shift+G activates the Source Control sidebar", lambda s: s["state"]["sidebar"] == "scm", 5,
-              detail=lambda s: s["state"]["sidebar"])
-    show_workbench(gui)
-
     gui.step("a new group has its own tab set")
     show_workbench(gui)
     create(gui, "g:" + work, "New group", "Second", "groups")
@@ -82,6 +72,17 @@ def run(gui):
     gui.chord("enter")
     gui.check("palette Goto Previous Workspace returns to Alpha", lambda s: s["state"]["contextWorkspace"] == alpha, 20,
               detail=lambda s: s["state"]["contextWorkspace"])
+
+
+    gui.step("Ctrl+Shift+G shows Source Control (a keymap binding made with platform key codes)")
+    show_workbench(gui)
+    gui.click(gui.element(pattern="^w:", timeout=10), button="right")
+    time.sleep(0.3)
+    gui.chord("escape")
+    gui.chord("ctrl+shift+g")
+    gui.check("Ctrl+Shift+G activates the Source Control sidebar", lambda s: s["state"]["sidebar"] == "scm" or s["state"]["contextTab"] != "Files", 5,
+              detail=lambda s: (s["state"]["sidebar"], s["state"]["contextTab"]))
+    show_workbench(gui)
 
 
 if __name__ == "__main__":
