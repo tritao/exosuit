@@ -431,8 +431,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
       ?defaults:AgentSessionDefaults):Void
     workbench.createAgent(group, thread, created, defaults);
   public function deleteAgent(id:String, ?deleted:Void->Void):Void workbench.deleteAgent(id, deleted);
-  public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String, ?accepted:Void->Void, ?expectedNativeName:String, ?imageIds:Array<String>):Void
-    workbench.agentAction(id, action, text, request, model, effort, accepted, expectedNativeName, imageIds);
+  public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String, ?accepted:Void->Void, ?expectedNativeName:String, ?imageIds:Array<String>, ?order:Int):Void
+    workbench.agentAction(id, action, text, request, model, effort, accepted, expectedNativeName, imageIds, order);
   public function uploadAgentImage(id:String, bytes:haxe.io.Bytes, done:(Null<String>, Null<String>)->Void):Void workbench.uploadAgentImage(id, bytes, done);
   public function removeAgentImage(id:String, upload:String):Void workbench.removeAgentImage(id, upload);
   public function loadAgentContent(id:String, turn:String, item:String, token:String, done:(Null<String>, Bool, Null<String>)->Void):Void workbench.loadAgentContent(id,turn,item,token,done);
@@ -455,8 +455,8 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   public function terminalCatalogRevision():Int return workbench.terminalCatalogRevision();
   public function terminalCatalogBusy():Bool return workbench.terminalCatalogBusy();
   public function refreshTerminals(force:Bool):Void workbench.refreshTerminals(force);
-  public function renameTerminal(record:TerminalRecord, name:String, group:String):Void
-    workbench.renameTerminal(record, name, group);
+  public function renameTerminal(record:TerminalRecord, name:String, group:String, ?order:Int):Void
+    workbench.renameTerminal(record, name, group, order);
   public function canRemoveGroups():Bool return workbench.canRemoveGroups();
   public function removeGroup(owner:String, group:WorkspaceGroup):Void workbench.removeGroup(owner, group);
   public function changeGroup(owner:String, group:WorkspaceGroup, name:String, parent:Null<String>,

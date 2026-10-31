@@ -13,7 +13,8 @@ interface WorkspaceTerminalCatalogClient {
   public function terminalCatalogRevision():Int;
   public function terminalCatalogBusy():Bool;
   public function refreshTerminals(force:Bool):Void;
-  public function renameTerminal(record:TerminalRecord, name:String, group:String):Void;
+  /** Renames and moves a terminal; with `order`, also places it among the siblings of `group`. */
+  public function renameTerminal(record:TerminalRecord, name:String, group:String, ?order:Int):Void;
   public function changeGroup(owner:String, group:workspace.service.WorkspaceProtocol.WorkspaceGroup, name:String, parent:Null<String>, cwd:Null<String>, order:Int, create:Bool, ?done:(Null<workspace.service.WorkspaceProtocol.WorkspaceGroup>, Null<String>)->Void):Void;
   public function removeGroup(owner:String, group:workspace.service.WorkspaceProtocol.WorkspaceGroup):Void;
   public function stopTerminal(record:TerminalRecord):Void;

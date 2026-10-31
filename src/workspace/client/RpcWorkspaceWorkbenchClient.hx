@@ -440,7 +440,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     });
   }
 
-  public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String, ?accepted:Void->Void, ?expectedNativeName:String, ?imageIds:Array<String>):Void {
+  public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String, ?accepted:Void->Void, ?expectedNativeName:String, ?imageIds:Array<String>, ?order:Int):Void {
     var connection = rpc();
     if (connection == null ||(action == "read" ? !canReadAgents() : !canControlAgents())) return;
     if ((action == "move" && (agentCatalog == null || agentCatalog.canMove != true))
@@ -492,7 +492,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     }
     var generation=instance();
     var query:AgentAction = {workspace:"workspace",instance:generation,id:id,action:action,text:text,request:request,
-      model:model,effort:effort,expectedNativeName:expectedNativeName,imageIds:imageIds};
+      model:model,effort:effort,expectedNativeName:expectedNativeName,imageIds:imageIds,order:order};
     requestAgentView(connection,id,selected,generation,query,function(inputToken) {
       if (mutate) {
         agentMutation=false; agentMutationId=null;
@@ -980,7 +980,7 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     refreshTerminals(false);
   }
 
-  public function renameTerminal(record:WorkspaceTerminalProtocol.TerminalRecord, name:String, group:String):Void {
+  public function renameTerminal(record:WorkspaceTerminalProtocol.TerminalRecord, name:String, group:String, ?order:Int):Void {
     var connection = rpc();
     if (record.workspaceRoot != root() || connection == null || !catalogReady()) return;
     connection.call(
@@ -991,7 +991,8 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       id: record.id,
       name: name,
       group: group,
-      expectedRevision: record.revision
+      expectedRevision: record.revision,
+      order: order
     },
       2000,
       function(_) catalogCompleted(connection),
