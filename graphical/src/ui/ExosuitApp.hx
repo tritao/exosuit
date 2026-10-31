@@ -511,13 +511,14 @@ class ExosuitApp implements DesktopUiApplication {
 			CommandBridge.refreshShortcuts(ui.commands, application.commands, application.keymap);
 			requestFrame();
 		});
-		host.initializeContext(session.ContextLayoutStore.key(application.activeContext.kind, application.activeContext.id));
+		host.initializeContext(application.activeContext.key());
+		host.migrateContextKey = function(key) return workspace.ContextKey.migrate(key, application.activeContext.machineId, application.activeContext.contextWorkspaceId);
 		host.beforeContextRestore = function() {
 			phoneLayoutActive = false; responsiveRightHidden = false; desktopDockRoot = null; desktopDockActivePanel = null; phoneContentRoot = null;
 			contextMenu = null;
 		};
 		application.activeContext.subscribe(function() {
-			var key = session.ContextLayoutStore.key(application.activeContext.kind, application.activeContext.id);
+			var key = application.activeContext.key();
 			if (contextLayoutsReady) { host.switchContext(key); pendingTerminalFocus = dock.activePanelId == "terminal"; }
 			else host.initializeContext(key);
 			var roots = filesUseWorkspaceRoots ? application.savedWorkspaces.roots() : application.activeContext.roots;
@@ -525,8 +526,14 @@ class ExosuitApp implements DesktopUiApplication {
 			clearExplorerModel(); clearLocalScmSource();
 			for (root in roots) if (controller.SavedWorkspaceController.available(root)) application.scm.discover(root, _ -> requestFrame());
 			requestFrame();
+			applyPendingContextTarget(true);
+			for (id in pendingForgetWorkspaces.copy()) forgetDeletedWorkspace(id);
 		});
-		application.savedWorkspaces.onIdentityAssigned = function(previous, next) host.renameContext(session.ContextLayoutStore.key(workspace.ContextKind.Workspace, previous), session.ContextLayoutStore.key(workspace.ContextKind.Workspace, next));
+		application.savedWorkspaces.onIdentityAssigned = function(previous, next) {
+			application.activeContext.renameWorkspace(previous, next);
+			host.renameWorkspace(application.activeContext.machineId, previous, next);
+		};
+		application.activeContext.onMachineAssigned = function(id) host.renameMachine(id);
 		application.savedWorkspaces.onChanged = function() {
 			var roots = filesUseWorkspaceRoots ? application.savedWorkspaces.roots() : application.activeContext.roots;
 			explorerRoot = roots.length == 0 ? null : roots[0];
@@ -1240,6 +1247,11 @@ class ExosuitApp implements DesktopUiApplication {
 			if (source != null && repository != null) commitScmMessage(source, repository, application.scmCommitDrafts.get(repository.id), false, true);
 		}, function(_) return canCommitAllCurrentScmRepository());
 		application.keymap.add(UiKey.Enter, UiModifier.Control, ["scm:commit"]);
+		application.commands.add("context:previous", function(_) switchToPreviousContext(), function(_) return previousContext() != null, "Goto Previous Workspace");
+		application.commands.add("context:switch", function(_) openContextSwitcher(), null, "Switch Workspace or Group…");
+		// The keymap takes platform key codes; UiKey.A (65) matches nothing, so these chords did nothing until now.
+		application.keymap.add(platform.Platform.KEY_D, platform.Platform.MOD_CTRL | platform.Platform.MOD_SHIFT, ["context:previous"]);
+		application.keymap.add(platform.Platform.KEY_A, platform.Platform.MOD_CTRL | platform.Platform.MOD_SHIFT, ["context:switch"]);
 		application.commands.add("settings:open", function(_) openSettings());
 		ui.commands.register(new Command("preferences.open", "Settings", openSettings,
 			new Shortcut(UiKey.Comma, UiModifier.Control)));
@@ -1795,9 +1807,12 @@ class ExosuitApp implements DesktopUiApplication {
 		machineClient = machine;
 		if (!machine.enabled) return;
 		machine.refresh();
-		var report = function(failure:Null<String>):Bool {
+		var report = function(failure:Null<String>, ?workspaceId:String):Bool {
 			if (failure == null) return false;
 			application.reportError("workspace", failure);
+			// Only a failure to open the workspace being waited for ends the wait.
+			var waiting = pendingContextTarget;
+			if (waiting != null && workspaceId != null && waiting.workspace == workspaceId) pendingContextTarget = null;
 			requestFrame();
 			return true;
 		};
@@ -1807,7 +1822,7 @@ class ExosuitApp implements DesktopUiApplication {
 		var open = function(entry:suit.MachineCatalog.MachineWorkspace):Void {
 			if (workspace.client.WorkspaceServiceTarget.enabled() && entry.folders.length == 0) {
 				machine.scratch(entry.id, function(path, failure) {
-					if (report(failure) || path == null) return;
+					if (report(failure, entry.id) || path == null) return;
 					application.savedWorkspaces.restore(new workspace.SavedWorkspace(entry.id, entry.name, []), "");
 					requestFrame();
 				});
@@ -1819,7 +1834,7 @@ class ExosuitApp implements DesktopUiApplication {
 				return;
 			}
 			machine.scratch(entry.id, function(path, failure) {
-				if (report(failure) || path == null) return;
+				if (report(failure, entry.id) || path == null) return;
 				application.savedWorkspaces.restore(new workspace.SavedWorkspace(entry.id, entry.name, [path]), "");
 				requestFrame();
 			});
@@ -1915,7 +1930,9 @@ class ExosuitApp implements DesktopUiApplication {
 						});
 					}));
 			},
-			remove: function(entry) machine.delete(entry.id, function(_, failure) { report(failure); })
+			remove: function(entry) machine.delete(entry.id, function(_, failure) {
+				if (!report(failure)) removeWorkspaceContexts(entry.id);
+			})
 		};
 		if (workbenchPanel != null) workbenchPanel.machine = machineActions;
 		requestFrame();
@@ -1980,6 +1997,147 @@ class ExosuitApp implements DesktopUiApplication {
 	public function attachWorkspaceConnections(pool:workspace.client.WorkspaceConnections, starter:workspace.client.WorkspaceStarter):Void {
 		catalogConnections = pool;
 		workspaceStarter = starter;
+	}
+
+	var pendingContextTarget:Null<workspace.ContextInfo>;
+	var pendingContextTargetUntil:Float = 0;
+	static inline final CONTEXT_TARGET_SECONDS = 15.0;
+
+	/** Deleted workspaces still on screen; their contexts close once the window has left them. */
+	final pendingForgetWorkspaces:Array<String> = [];
+
+	/**
+		A switch to a group of another workspace waits for that workspace to be open and its groups to be loaded, then
+		focuses the group if it still exists. The wait ends when another workspace opened instead (`published`), when the
+		open failed (`report`), or after CONTEXT_TARGET_SECONDS.
+	**/
+	function applyPendingContextTarget(published:Bool):Void {
+		var target = pendingContextTarget;
+		if (target == null) return;
+		if (Sys.time() > pendingContextTargetUntil) { pendingContextTarget = null; return; }
+		if (application.activeContext.contextWorkspaceId != target.workspace) {
+			if (published) pendingContextTarget = null;
+			return;
+		}
+		if (target.isRoot()) { pendingContextTarget = null; return; }
+		var client = workbenchClient, catalog = client == null ? null : client.terminalCatalog();
+		if (catalog == null) return;
+		var exists = false;
+		for (group in catalog.groups) if (group.id == target.group) exists = true;
+		if (!exists) return;
+		pendingContextTarget = null;
+		application.activeContext.openSessionGroup(target.group, catalog.groups, catalog.workspaceRoot);
+	}
+
+	/** A deleted workspace: leave it first if it is on screen, then close its contexts, keeping every unsaved tab. */
+	function removeWorkspaceContexts(id:String):Void {
+		var active = application.activeContext;
+		if (active.contextWorkspaceId == id) {
+			if (pendingForgetWorkspaces.indexOf(id) < 0) pendingForgetWorkspaces.push(id);
+			var other = previousContext(id);
+			if (other != null) switchToContext(other); else application.savedWorkspaces.close();
+		}
+		forgetDeletedWorkspace(id);
+	}
+
+	function forgetDeletedWorkspace(id:String):Void {
+		if (application.activeContext.contextWorkspaceId == id) return;
+		pendingForgetWorkspaces.remove(id);
+		var moved = host.forgetWorkspaceContexts(id);
+		application.activeContext.forgetWorkspace(id);
+		if (moved > 0) host.getNotifications().publish(moved + (moved == 1 ? " unsaved tab" : " unsaved tabs") + " from the deleted workspace moved to this one.", feedback.NotificationKind.Warning, "workspace");
+		requestFrame();
+	}
+
+	/** Switching across workspaces is the same operation as within one: the key changes and the tabs follow. */
+	public function switchToContext(info:workspace.ContextInfo):Void {
+		var active = application.activeContext;
+		pendingContextTarget = null;
+		if (info.workspace == active.contextWorkspaceId) {
+			if (info.isRoot()) active.useWorkspace();
+			else if (info.directory.length > 0) active.focusGroup(info.group, info.label, info.directory);
+		} else {
+			var known = machineClient == null ? null : machineClient.workspaceById(info.workspace);
+			var actions = machineActions;
+			if (known == null || actions == null) return;
+			pendingContextTarget = info; pendingContextTargetUntil = Sys.time() + CONTEXT_TARGET_SECONDS;
+			actions.open(known);
+		}
+		requestFrame();
+	}
+
+	/** Ctrl+Tab: back to the context used before this one. */
+	public function switchToPreviousContext():Void {
+		var target = previousContext();
+		if (target != null) switchToContext(target);
+	}
+
+	/** The most recent context before this one that can still be entered; stale entries are skipped. */
+	function previousContext(?excludingWorkspace:String):Null<workspace.ContextInfo> {
+		var active = application.activeContext, activeKey = active.key();
+		for (info in active.recent) {
+			if (info.key() == activeKey || excludingWorkspace != null && info.workspace == excludingWorkspace) continue;
+			if (contextStillExists(info) && (info.workspace == active.contextWorkspaceId || machineClient != null && machineClient.workspaceById(info.workspace) != null)) return info;
+		}
+		return null;
+	}
+
+	/**
+		Whether a remembered context can still be entered: its workspace was not deleted (listed by the catalog before, not
+		now) and a group's folder exists. A workspace the catalog never listed stays.
+	**/
+	function contextStillExists(info:workspace.ContextInfo):Bool {
+		return application.activeContext.stillExists(info, function(path) return sys.FileSystem.exists(path));
+	}
+
+	/** Forgets recents of deleted workspaces and vanished group folders; runs whenever the catalog changes. */
+	function pruneRecentContexts():Void {
+		var machine = machineClient == null ? null : machineClient.machine;
+		if (machine == null) return;
+		application.activeContext.catalogChanged([for (entry in machine.workspaces) entry.id], function(path) return sys.FileSystem.exists(path));
+	}
+
+	/** The quick switch: recent contexts first, then the machine's workspaces and the current workspace's groups. */
+	public function openContextSwitcher():Void {
+		var entries:Array<commandview.CommandViewEntry> = [];
+		var active = application.activeContext, activeKey = active.key();
+		var recent = active.recent;
+		for (index in 0...recent.length) {
+			var info = recent[index];
+			if (info.key() == activeKey || !contextStillExists(info)) continue;
+			var name = info.isRoot() ? info.workspaceLabel : info.workspaceLabel + " / " + info.label;
+			entries.push(new commandview.CommandViewEntry(name, host.contextIsWarm(info.key()) ? "open" : "", "ctx:" + info.key(), null, null, "Recent"));
+		}
+		var machine = machineClient == null ? null : machineClient.machine;
+		if (machine != null) for (entry in machine.workspaces)
+			entries.push(new commandview.CommandViewEntry(entry.name, "workspace", "ws:" + entry.id, null, null, "Workspaces"));
+		for (key in host.recoveredContextKeys())
+			entries.push(new commandview.CommandViewEntry("Recovered: " + key.split("#")[0], host.recoveredSummary(key), "rec:" + key, null, null, "Recovered"));
+		var client = workbenchClient, catalog = client == null ? null : client.terminalCatalog();
+		if (catalog != null) for (group in catalog.groups)
+			entries.push(new commandview.CommandViewEntry(group.name, "group", "grp:" + group.id, null, null, "Groups"));
+		host.openCommandView(new commandview.CommandViewProvider("Switch to: ", entries, function(_) {}, function(entry, _, _) {
+			if (entry == null) return;
+			host.closeCommandView();
+			var value = entry.value;
+			if (StringTools.startsWith(value, "rec:")) {
+				// Opening a recovered layout merges its tabs into the context on screen.
+				var moved = host.mergeContext(value.substr(4), false);
+				host.getNotifications().publish(moved + (moved == 1 ? " recovered tab" : " recovered tabs") + " opened here.", feedback.NotificationKind.Information, "workspace");
+			} else if (StringTools.startsWith(value, "ctx:")) {
+				for (info in application.activeContext.recent) if ("ctx:" + info.key() == value) { switchToContext(info); break; }
+			} else if (StringTools.startsWith(value, "ws:")) {
+				var id = value.substr(3);
+				var root:Null<workspace.ContextInfo> = null;
+				for (info in application.activeContext.recent) if (info.workspace == id && info.isRoot()) root = info;
+				var known = machineClient == null ? null : machineClient.workspaceById(id);
+				if (root != null) switchToContext(root);
+				else if (known != null) switchToContext(new workspace.ContextInfo(active.machineId, id, "", known.name, known.name, ""));
+			} else if (StringTools.startsWith(value, "grp:") && catalog != null) {
+				application.activeContext.openSessionGroup(value.substr(4), catalog.groups, catalog.workspaceRoot);
+			}
+			requestFrame();
+		}));
 	}
 
 	/** Opens the machine workspace `id` unless it is open; its clients then follow the workspace's manager choice. */
@@ -3186,10 +3344,17 @@ class ExosuitApp implements DesktopUiApplication {
 				}
 			}
 			if (starter != null) starter.poll();
+			applyPendingContextTarget(false);
 			if (machineClientRevision != workspaces.revision) {
 				machineClientRevision = workspaces.revision;
+				var named = workspaces.machine;
+				if (named != null && named.id.length > 0 && named.id != application.activeContext.machineId) {
+					// Saved contexts move from the placeholder machine to the catalog's id before anything switches.
+					application.activeContext.assignMachine(named.id);
+				}
 				// Another window may have attached or detached a folder; its change reaches the service shortly after.
 				startServedRefresh();
+				pruneRecentContexts();
 				requestFrame();
 			}
 		}

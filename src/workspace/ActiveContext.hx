@@ -79,6 +79,24 @@ class ActiveContext {
 		var seen:Map<String, Bool> = [];
 		for (info in recent.copy()) if (seen.exists(info.key())) recent.remove(info); else seen.set(info.key(), true);
 	}
+	/** Workspace ids the machine catalog has listed in this run, and the ids it lists now. */
+	final seenWorkspaces:Map<String, Bool> = [];
+	var catalogIds:Array<String> = [];
+	/**
+		A remembered context is gone when its workspace was listed by the catalog and no longer is (deleted), or when a
+		group's folder is gone. A workspace the catalog never listed (opened from a file) is never gone for that reason.
+	**/
+	public function stillExists(info:ContextInfo, folderExists:String->Bool):Bool {
+		if (info.key() == key()) return true;
+		if (info.workspace != contextWorkspaceId && seenWorkspaces.exists(info.workspace) && catalogIds.indexOf(info.workspace) < 0) return false;
+		return info.isRoot() || info.directory.length > 0 && folderExists(info.directory);
+	}
+	/** The catalog changed: note its workspaces and drop recents that are gone. */
+	public function catalogChanged(ids:Array<String>, folderExists:String->Bool):Void {
+		catalogIds = ids.copy();
+		for (id in ids) seenWorkspaces.set(id, true);
+		for (info in recent.copy()) if (!stillExists(info, folderExists)) recent.remove(info);
+	}
 	/** The workspace was deleted: its contexts leave the recent list. */
 	public function forgetWorkspace(id:String):Void {
 		for (entry in recent.copy()) if (entry.workspace == id && entry.workspace != contextWorkspaceId) recent.remove(entry);
