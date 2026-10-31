@@ -31,8 +31,10 @@ class NarrowTabsTestMain {
 			var context = new UiContext(session, fonts, ui.ExosuitPalette.theme(dark));
 			var labels = ["Terminal 1", "Terminal 2", "Terminal 3", "Terminal with a very long descriptive session title"];
 			var style = new LayoutStyle(); style.width = LayoutAxis.grow(); style.height = LayoutAxis.grow();
-			var tabs = new Tabs("terminal-sessions", [for (label in labels) new TabItem(label, label, new Text("page: " + label))],
-				labels[0], null, style, null, null, null, null, TabsSelectionMode.Controlled);
+			var tabs:Tabs = null;
+			// A controlled Tabs reports the requested key to its owner, which stores it (upstream 70c42495).
+			tabs = new Tabs("terminal-sessions", [for (label in labels) new TabItem(label, label, new Text("page: " + label))],
+				labels[0], function(key) tabs.selectedKey = key, style, null, null, null, null, TabsSelectionMode.Controlled);
 			tabs.headerRevision = function() return "stable";
 			for (width in [180.0, 120.0, 700.0, 90.0, 320.0]) for (label in labels) {
 				tabs.selectedKey = label;
