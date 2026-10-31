@@ -11,11 +11,37 @@ import haxeon.ui.style.StyleState;
 /** Shared workbench colors. Keep terminal defaults and chrome in one scheme. */
 class ExosuitPalette {
 	public static inline final WORKBENCH_TEXT_SIZE:Float = 14.0;
+	/** Copies every token in place. Reflect.setField on a struct-valued field crashes (see docs/haxeon-compiler-bugs.md), so the list is explicit: add new ThemeTokens fields here. */
+	public static function copyTokens(from:haxeon.ui.theme.ThemeTokens, to:haxeon.ui.theme.ThemeTokens):Void {
+		to.accent = from.accent; to.text = from.text; to.mutedText = from.mutedText; to.disabledText = from.disabledText;
+		to.buttonText = from.buttonText; to.disabledButtonText = from.disabledButtonText;
+		to.buttonBackground = from.buttonBackground; to.buttonHover = from.buttonHover; to.buttonPressed = from.buttonPressed;
+		to.buttonFocused = from.buttonFocused; to.buttonSelected = from.buttonSelected; to.buttonDisabled = from.buttonDisabled;
+		to.navigationBackground = from.navigationBackground; to.navigationHover = from.navigationHover;
+		to.navigationPressed = from.navigationPressed; to.navigationFocused = from.navigationFocused;
+		to.navigationSelected = from.navigationSelected; to.navigationDisabled = from.navigationDisabled;
+		to.controlSelected = from.controlSelected; to.controlUnselected = from.controlUnselected;
+		to.controlDisabled = from.controlDisabled; to.progressTrack = from.progressTrack; to.progressFill = from.progressFill;
+		to.selectionField = from.selectionField; to.selectionHover = from.selectionHover;
+		to.selectionPressed = from.selectionPressed; to.selectionHighlight = from.selectionHighlight;
+		to.selectionBorder = from.selectionBorder; to.selectionPopupShadow = from.selectionPopupShadow;
+		to.panelBackground = from.panelBackground; to.overlayBackdrop = from.overlayBackdrop;
+		to.tooltipBackground = from.tooltipBackground; to.tooltipFontSize = from.tooltipFontSize;
+		to.tabHeaderHeight = from.tabHeaderHeight; to.tabHeaderFontSize = from.tabHeaderFontSize;
+		to.radiusSmall = from.radiusSmall; to.radiusMedium = from.radiusMedium; to.radiusLarge = from.radiusLarge;
+		to.spacingSmall = from.spacingSmall; to.spacingMedium = from.spacingMedium; to.spacingLarge = from.spacingLarge;
+		to.accentHover = from.accentHover; to.accentPressed = from.accentPressed;
+		to.textPrimary = from.textPrimary; to.textSecondary = from.textSecondary; to.textDisabled = from.textDisabled;
+		to.textOnAccent = from.textOnAccent; to.surface = from.surface; to.surfaceRaised = from.surfaceRaised;
+		to.surfaceSunken = from.surfaceSunken; to.surfaceHover = from.surfaceHover; to.border = from.border;
+		to.borderStrong = from.borderStrong; to.focusRing = from.focusRing; to.info = from.info; to.success = from.success;
+		to.warning = from.warning; to.danger = from.danger; to.selection = from.selection;
+	}
+
 	public static function theme(dark:Bool, ?target:Theme):Theme {
 		var result = dark ? Theme.dark() : Theme.light();
 		if (target != null) {
-			for (field in Reflect.fields(result.tokens))
-				Reflect.setField(target.tokens, field, Reflect.field(result.tokens, field));
+			copyTokens(result.tokens, target.tokens);
 			target.textSelectionInactive = result.textSelectionInactive;
 			target.body = result.body;
 			target.heading = result.heading;
