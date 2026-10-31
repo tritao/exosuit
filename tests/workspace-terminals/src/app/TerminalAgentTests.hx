@@ -48,7 +48,6 @@ class TerminalAgentTests {
   restored.store.set("workbench/agents/session_mode",haxeon.ui.properties.PropertyValue.Enum("integrated"));
   var project=restored.forProject(root+"/project-agent-mode.json");
   require(project.current.agentSessionMode=="integrated" && !project.registry.exists("workbench/agents/session_mode"),"Agent mode was not a single global default");
-  if (Sys.systemName()=="Windows") return; // Native process integration below uses the fixture's POSIX Python.
   for (provider in ["codex","claude","pi"]) providerContract(root,provider);
   Sys.println("PASS: global integrated/terminal preference; provider CLI PTYs, detach, durable identity and provider-preserving restart");
  }
@@ -57,14 +56,14 @@ class TerminalAgentTests {
   sys.io.File.saveContent(script,"import os,sys,pathlib\np=pathlib.Path("+haxe.Json.stringify(count)+")\np.write_text(str(int(p.read_text())+1) if p.exists() else '1')\nprint('TUI_"+provider+":'+str(len(sys.argv))+':'+os.getcwd(),flush=True)\nfor line in sys.stdin:\n if line.strip()=='exit': break\n print('RECEIVED:'+line.strip(),flush=True)\n");
   var binaryKey="EXOSUIT_"+provider.toUpperCase()+"_BIN", scriptKey="EXOSUIT_"+provider.toUpperCase()+"_SCRIPT";
   var oldBinary=Sys.getEnv(binaryKey), oldScript=Sys.getEnv(scriptKey);
-  Sys.putEnv(binaryKey,"/usr/bin/python3");Sys.putEnv(scriptKey,script);
+  Sys.putEnv(binaryKey,Sys.systemName()=="Windows"?"python":"/usr/bin/python3");Sys.putEnv(scriptKey,script);
   try runProvider(root,provider,count) catch (failure:Dynamic) {
    Sys.putEnv(binaryKey,oldBinary);Sys.putEnv(scriptKey,oldScript);throw failure;
   }
   Sys.putEnv(binaryKey,oldBinary);Sys.putEnv(scriptKey,oldScript);
  }
  static function runProvider(root:String,provider:String,countPath:String):Void {
-  var directory=root+"/cli-"+provider;sys.FileSystem.createDirectory(directory);
+  var directory=root+"/cli-"+provider;sys.FileSystem.createDirectory(directory);directory=sys.FileSystem.fullPath(directory);
   var seed:WorkspaceSnapshot={epoch:"agent-terminal",cursor:0,groups:[{id:"work",name:"Work",cwd:directory,revision:1}]};
   var path=root+"/agent-terminal-"+provider+".sqlite";
   var store=new WorkspaceSqliteStore(path,"workspace",seed);
@@ -94,13 +93,13 @@ class TerminalAgentTests {
   require(manager.snapshot().terminals[0].agentProvider==provider && manager.activeCount()==1,"Interactive agent identity was not recorded");
   var rejected=false;try backend.configureAgent("claude") catch (_:Dynamic) rejected=true;
   require(rejected,"Existing terminal mode changed after attachment");
-  session.write(Bytes.ofString("hello\n"));until(function() return screen(session.emulator).indexOf("RECEIVED:hello")>=0,"Interactive agent did not receive terminal input");
+  session.write(TestShell.line("hello"));until(function() return screen(session.emulator).indexOf("RECEIVED:hello")>=0,"Interactive agent did not receive terminal input");
   session.close();connect("first");
   backend=new RpcTerminalBackend(function() return endpoint,"interactive-agent",root,false);
   session=new TerminalSession(backend,Emulator.open(120,24),false);
   until(function() return backend.isSynchronized(),"Interactive agent did not reconnect");
   require(sys.io.File.getContent(countPath)=="1" && manager.activeCount()==1,"View reconnection restarted the CLI");
-  session.write(Bytes.ofString("exit\n"));until(function() return session.status=="exited","Interactive CLI did not exit");
+  session.write(TestShell.line("exit"));until(function() return session.status=="exited","Interactive CLI did not exit");
   require(backend.controlAction()=="Restart Terminal","CLI session offered a shell replacement");
   manager.dispose();store.close();
   store=new WorkspaceSqliteStore(path,"workspace",seed);
