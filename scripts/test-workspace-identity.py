@@ -105,6 +105,10 @@ with tempfile.TemporaryDirectory(prefix="exosuit-identity-") as temporary:
     assert refused.returncode != 0
     refused = run(environment, first, "--manager", "--workspace", "../escape", "--discover", check=False)
     assert refused.returncode != 0 and "workspace id" in refused.stderr, refused.stderr
+    # Ids name a folder: a Windows device name (lower case passes the character rules, so this is the name rule), or an upper-case spelling that would share a folder with the lower-case one.
+    for bad in ("nul", "con", "com1", "lpt9", "aux", "prn", "NUL", "Lpt9", "workspace-ABC", "con.txt"):
+        refused = run(environment, first, "--manager", "--workspace", bad, "--discover", check=False)
+        assert refused.returncode != 0 and "workspace id" in refused.stderr, (bad, refused.stderr)
     # Named by its id alone, it starts with the folders it last had; a workspace never started has none.
     recalled = start(environment, scratch, "--workspace", WORKSPACE)
     assert same(recalled["root"], scratch), recalled
@@ -113,4 +117,36 @@ with tempfile.TemporaryDirectory(prefix="exosuit-identity-") as temporary:
     assert refused.returncode != 0 and "scratch folder" in refused.stderr, refused.stderr
     missing = run(environment, first, "--manager", "--workspace", "workspace-new", "--discover", check=False)
     assert missing.returncode == 4, missing
+
+    # A folder's old service state moves into the workspace when the workspace starts, and the folder's own
+    # service, as an editor from before workspaces were keyed by id starts it, is refused with a clear message.
+    legacy = home.parent / "legacy"
+    legacy.mkdir()
+    old = start(environment, legacy, str(legacy))
+    old_state = next(m["stateDir"] for m in json.loads(run(environment, legacy, "--machine").stdout)["managers"] if m["workspace"] == "")
+    stop(old_state, old)
+    other = "workspace-legacy"
+    moved = start(environment, legacy, "--workspace", other, "--folder", str(legacy))
+    other_state = home / "workspaces" / other
+    assert json.loads((Path(old_state) / "workspace.json").read_text())["migratedTo"] == other
+    assert [entry["root"] for entry in json.loads((other_state / "migration.json").read_text())["folders"]] == [moved["root"]]
+    stop(other_state, moved)
+    # Another workspace claiming the same folder is told where its sessions are, not left to find an empty folder.
+    claim_id = "workspace-claim"
+    claim = run(environment, legacy, "--manager", "--workspace", claim_id, "--folder", str(legacy), "--detach", "--idle-seconds", "60")
+    assert "sessions are in workspace " + other in claim.stderr, claim.stderr
+    claim_state = home / "workspaces" / claim_id
+    notices = json.loads((claim_state / "start-notices.json").read_text())["notices"]
+    assert len(notices) == 1 and "sessions are in workspace " + other in notices[0], notices
+    assert "sessions are in workspace " + other in (claim_state / "manager.log").read_text()
+    stop(claim_state, json.loads(claim.stdout))
+    refused = run(environment, legacy, "--manager", str(legacy), "--detach", check=False)
+    assert refused.returncode != 0 and "moved to workspace " + other in refused.stderr, refused.stderr
+    restore_run = run(environment, legacy, "--manager", "--workspace", other, "--restore-migration")
+    assert "set aside" in restore_run.stderr and "restored" in restore_run.stderr, restore_run.stderr
+    restored = json.loads(restore_run.stdout)
+    assert len(restored["restored"]) == 1 and not other_state.exists(), restored
+    back = start(environment, legacy, str(legacy))
+    assert "workspaceId" not in back
+    stop(old_state, back)
 print("workspace identity: ok")
