@@ -459,6 +459,11 @@ class SuitRelayBridge {
 			fail("service_start_failed_repeatedly");
 			return;
 		}
+		if (!SuitRelayHosts.stateUsable(host)) {
+			// The state moved into a workspace, or is another workspace's now: never start a service from it.
+			fail("workspace_state_changed");
+			return;
+		}
 		startedAt = now;
 		startTimes.push(now);
 		starts++;
@@ -466,8 +471,11 @@ class SuitRelayBridge {
 			// The manager finds its daemon bytecode through EXOSUIT_AGENT_LAUNCHER, as when an editor starts it.
 			var keys = [SuitClient.libraryVariable(), "EXOSUIT_AGENT_LAUNCHER"];
 			var values = [SuitClient.nativePath(host.launcher), host.launcher];
-			var child = sys.io.Process.spawn(host.executable,
-				[host.launcher, "--manager", host.root, "--state-dir", host.stateDir, "--detach"], host.root, keys, values, true);
+			// A workspace keyed by id is started from its state folder (`--from-state`), which names its folders; older
+			// agents know only a folder's service.
+			var service = SuitRelayHosts.keyedById(host.stateDir) ? ["--from-state", host.stateDir] : [host.root, "--state-dir", host.stateDir];
+			var child = sys.io.Process.spawn(host.executable, [host.launcher, "--manager"].concat(service).concat(["--detach"]), host.root, keys,
+				values, true);
 			child.close();
 		} catch (error:Dynamic) {
 			lastError = "service_start_failed";

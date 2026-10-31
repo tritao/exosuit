@@ -26,6 +26,8 @@ typedef SuitRelayHost = {
 	var origin:String;
 	var executable:String;
 	var launcher:String;
+	/** The workspace id of a state keyed by id, taken from its workspace.json and checked at each attach; null for a folder's state. */
+	var workspace:Null<String>;
 }
 
 /**
@@ -51,7 +53,7 @@ class SuitRelayHosts {
 			var path = Path.join([folder, name]);
 			var host:Null<SuitRelayHost> = null;
 			try host = parse(readPrivateJson(path)) catch (_:Dynamic) {}
-			if (host == null || readSettings(host.stateDir) == null) {
+			if (host == null || readSettings(host.stateDir) == null || !stateUsable(host)) {
 				try FileSystem.deleteFile(path) catch (_:Dynamic) {}
 				continue;
 			}
@@ -74,7 +76,7 @@ class SuitRelayHosts {
 				continue;
 			var host:Null<SuitRelayHost> = null;
 			try host = parse(readPrivateJson(Path.join([folder, name]))) catch (_:Dynamic) {}
-			if (host != null && readSettings(host.stateDir) != null && !isPaused(host.stateDir))
+			if (host != null && readSettings(host.stateDir) != null && stateUsable(host) && !isPaused(host.stateDir))
 				result.push(host);
 		}
 		return result;
@@ -91,7 +93,8 @@ class SuitRelayHosts {
 			machineId: host.machineId,
 			origin: host.origin,
 			executable: host.executable,
-			launcher: host.launcher
+			launcher: host.launcher,
+			workspace: host.workspace
 		}) + "\n");
 	}
 
@@ -122,14 +125,26 @@ class SuitRelayHosts {
 		if (!PathKey.same(caller, host.executable) || !trustedAgent(host.executable, host.launcher)
 			|| !FileSystem.exists(host.executable) || !FileSystem.exists(host.launcher))
 			throw "relay_attach_untrusted";
-		if (recorded != null && !sameHost(recorded, host))
-			throw "relay_host_changed";
 		if (!FileSystem.exists(host.stateDir) || !FileSystem.isDirectory(host.stateDir) || !preparePrivateRelayDirectory(host.stateDir))
 			throw "workspace_state_not_private";
 		var identity:Dynamic = null;
 		try identity = readPrivateJson(Path.join([host.stateDir, "workspace.json"])) catch (_:Dynamic) {}
-		var identityRoot = identity == null ? null : SuitRecords.stringField(identity, "root");
-		if (identityRoot == null || !PathKey.same(identityRoot, host.root))
+		// A workspace keyed by id (M19 Phase 4) starts in its first folder, which changes as folders are attached and
+		// detached: its state folder identifies it. A folder's service is identified by that folder.
+		// A folder's old state that moved into a workspace is only a marker; the workspace hosts, never this state.
+		if (movedAway(identity))
+			throw "workspace_state_migrated";
+		var keyedById = keyedByIdentity(identity);
+		if (recorded != null && !sameHost(recorded, host, keyedById))
+			throw "relay_host_changed";
+		// A workspace keyed by id is hosted as that workspace: the state must still be the one the host was recorded for.
+		var stateWorkspace:Null<String> = keyedById ? SuitRecords.stringField(identity, "workspace") : null;
+		if (keyedById && (stateWorkspace == null || stateWorkspace.length == 0))
+			throw "workspace_mismatch";
+		if (recorded != null && recorded.workspace != null && recorded.workspace != stateWorkspace)
+			throw "relay_host_changed";
+		host.workspace = stateWorkspace;
+		if (!keyedById && (identity == null || !PathKey.same(SuitRecords.stringField(identity, "root"), host.root)))
 			throw "workspace_mismatch";
 		var settings = readSettings(host.stateDir);
 		if (settings == null)
@@ -148,7 +163,8 @@ class SuitRelayHosts {
 		host.origin = configured.origin;
 		if (recorded != null) {
 			// Keep the recorded spelling, so records and bridges compare alike.
-			host.root = recorded.root;
+			if (!keyedById)
+				host.root = recorded.root;
 			host.stateDir = recorded.stateDir;
 		}
 		return host;
@@ -170,9 +186,44 @@ class SuitRelayHosts {
 		return false;
 	}
 
-	public static function sameHost(left:SuitRelayHost, right:SuitRelayHost):Bool
-		return left.machineId == right.machineId && PathKey.same(left.root, right.root) && PathKey.same(left.stateDir, right.stateDir)
-			&& PathKey.same(left.executable, right.executable) && PathKey.same(left.launcher, right.launcher);
+	/** Whether the service whose state is `stateDir` is a workspace's keyed by its id (M19 Phase 4), not a folder's. */
+	public static function keyedById(stateDir:String):Bool {
+		var identity:Dynamic = null;
+		try identity = readPrivateJson(Path.join([stateDir, "workspace.json"])) catch (_:Dynamic) {}
+		return keyedByIdentity(identity);
+	}
+
+	/** Whether a parsed workspace.json says the state moved into a workspace (M19 Phase 4's `migratedTo`). */
+	static function movedAway(identity:Dynamic):Bool {
+		if (identity == null)
+			return false;
+		var target = SuitRecords.stringField(identity, "migratedTo");
+		return target != null && target.length > 0;
+	}
+
+	/**
+		Whether suit may still host `host` from its state: not a state that moved into a workspace, and, for a workspace
+		keyed by id, still that workspace's. An unreadable workspace.json is left to the checks at attach.
+	**/
+	public static function stateUsable(host:SuitRelayHost):Bool {
+		var identity:Dynamic = null;
+		try identity = readPrivateJson(Path.join([host.stateDir, "workspace.json"])) catch (_:Dynamic) {}
+		if (movedAway(identity))
+			return false;
+		var recorded = host.workspace;
+		if (recorded == null || identity == null)
+			return true;
+		return SuitRecords.stringField(identity, "workspace") == recorded;
+	}
+
+	static function keyedByIdentity(identity:Dynamic):Bool
+		return identity != null && SuitRecords.stringField(identity, "workspace") != null;
+
+	/** Whether two records name the same host; `ignoreRoot` for a workspace keyed by id, whose root follows its folders. */
+	public static function sameHost(left:SuitRelayHost, right:SuitRelayHost, ignoreRoot = false):Bool
+		return left.machineId == right.machineId && (ignoreRoot || PathKey.same(left.root, right.root))
+			&& PathKey.same(left.stateDir, right.stateDir) && PathKey.same(left.executable, right.executable)
+			&& PathKey.same(left.launcher, right.launcher);
 
 	/** The recorded host for a machine id, or null. */
 	public static function find(machineId:String):Null<SuitRelayHost> {
@@ -234,7 +285,8 @@ class SuitRelayHosts {
 			machineId: SuitRecords.stringField(value, "machineId"),
 			origin: SuitRecords.stringField(value, "origin"),
 			executable: SuitRecords.stringField(value, "executable"),
-			launcher: SuitRecords.stringField(value, "launcher")
+			launcher: SuitRecords.stringField(value, "launcher"),
+			workspace: SuitRecords.stringField(value, "workspace")
 		};
 		for (field in [host.root, host.stateDir, host.machineId, host.origin, host.executable, host.launcher])
 			if (field == null || field.length == 0)

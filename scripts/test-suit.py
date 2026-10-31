@@ -327,6 +327,13 @@ def test_hosted_workspace(fixture: Fixture, directory: Path) -> None:
     settings.write_text(json.dumps({"version": 1, "origin": "http://127.0.0.1:1", "hosting": "paused"}))
     listing = fixture.listing()
     assert all(find(listing, service.pid)["orphaned"] for service in (manager, host)), listing
+    # A state that moved into a workspace (M19 Phase 4) is never hosted, whatever settings it still has.
+    settings.write_text(json.dumps({"version": 1, "origin": "http://127.0.0.1:1"}))
+    listing = fixture.listing()
+    assert not any(find(listing, service.pid)["orphaned"] for service in (manager, host)), listing
+    write_private(state / "workspace.json", json.dumps({"version": 2, "root": str(root), "migratedTo": "workspace-" + "0" * 32}))
+    listing = fixture.listing()
+    assert all(find(listing, service.pid)["orphaned"] for service in (manager, host)), listing
 
 
 def test_late_child(fixture: Fixture, directory: Path) -> None:
