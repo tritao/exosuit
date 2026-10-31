@@ -1246,7 +1246,7 @@ class ExosuitApp implements DesktopUiApplication {
 			var source = sourceControlSource(), repository = source == null ? null : scmCommitRepository(source);
 			if (source != null && repository != null) commitScmMessage(source, repository, application.scmCommitDrafts.get(repository.id), false, true);
 		}, function(_) return canCommitAllCurrentScmRepository());
-		application.keymap.add(UiKey.Enter, UiModifier.Control, ["scm:commit"]);
+		application.keymap.add(platform.Platform.KEY_ENTER, platform.Platform.MOD_CTRL, ["scm:commit"]);
 		application.commands.add("context:previous", function(_) switchToPreviousContext(), function(_) return previousContext() != null, "Goto Previous Workspace");
 		application.commands.add("context:switch", function(_) openContextSwitcher(), null, "Switch Workspace or Group…");
 		// The keymap takes platform key codes; UiKey.A (65) matches nothing, so these chords did nothing until now.
@@ -2138,7 +2138,7 @@ class ExosuitApp implements DesktopUiApplication {
 			panes: panes,
 			sessionLines: host.sessionLines(),
 			notifications: [for (entry in host.getNotifications().history()) entry.source + ": " + entry.message],
-			workspaceStatus: workspaceStatus, workspaceError: workspaceError, watched: [for (id => w in watchedStates) {workspace: id, running: w.running, live: w.live, starting: w.starting, hasCatalog: w.catalog != null, groups: w.catalog == null ? -1 : w.catalog.groupList().length, terminals: w.catalog == null ? -1 : w.catalog.terminalList().length}],
+			sidebar: sidebar.activeId, workspaceStatus: workspaceStatus, workspaceError: workspaceError, watched: [for (id => w in watchedStates) {workspace: id, running: w.running, live: w.live, starting: w.starting, hasCatalog: w.catalog != null, groups: w.catalog == null ? -1 : w.catalog.groupList().length, terminals: w.catalog == null ? -1 : w.catalog.terminalList().length}],
 			commandViewActive: host.isCommandViewActive()
 		};
 	}
@@ -5251,7 +5251,7 @@ class ExosuitApp implements DesktopUiApplication {
 		}
 		if (enabled && application != null && !application.commands.contains("sidebar:scm")) {
 			application.commands.add("sidebar:scm", function(_) { activateSidebarDestination("scm"); requestFrame(); });
-			application.keymap.add(UiKey.G, UiModifier.Control | UiModifier.Shift, ["sidebar:scm"]);
+			application.keymap.add(platform.Platform.KEY_G, platform.Platform.MOD_CTRL | platform.Platform.MOD_SHIFT, ["sidebar:scm"]);
 		}
 	}
 
