@@ -191,10 +191,11 @@ class AgentProviderTestMain {
 		id="";mode="hold";
 		client.createAgent("work",null,function(_) opened++);pump();
 		if(held==null || query==null) throw "Creation fixture was not held";
+		var heldQuery=query;
 		// A generation can change before its transport object is replaced.
 		endpoint.generation="new-generation";client.poll();
 		require(client.agentCreation()==null,"In-flight creation survived a scope change");
-		var result:AgentRecord={id:query.id,name:query.name,group:query.group,cwd:"C:/work",thread:query.id,state:"idle",turn:null,workspaceRoot:"C:/work"};
+		var result:AgentRecord={id:heldQuery.id,name:heldQuery.name,group:heldQuery.group,cwd:"C:/work",thread:heldQuery.id,state:"idle",turn:null,workspaceRoot:"C:/work"};
 		held.respond(result);connection.poll();require(opened==0,"Late completion opened a session in another generation");
 		client.dispose();connection.close();server.close();
 		Sys.println("PASS: stable creation reservations, explicit startup, duplicate fencing, ambiguous failure and generation-safe handoff");
