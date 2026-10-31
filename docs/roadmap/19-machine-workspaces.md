@@ -227,17 +227,27 @@ the OS handles and the service's per-connection state, which the service-side ch
 M18.4 already keeps per-context layouts and switches them in memory (`UiWorkbenchHost.switchContext`), and saves
 them per context.
 
-- [ ] The context key becomes `machine/workspace/group`. Switching across workspaces is the same operation as
+- [x] The context key becomes `machine/workspace/group`. Switching across workspaces is the same operation as
   switching within one.
-- [ ] Keep each recently used group's views attached: detach on switch, don't dispose. The last N groups stay warm,
+- [x] Keep each recently used group's views attached: detach on switch, don't dispose. The last N groups stay warm,
   and older ones are rebuilt from their saved snapshot.
-- [ ] Switching never waits on the network. Tabs whose session isn't loaded yet show their last content (snapshot)
+- [x] Switching never waits on the network. Tabs whose session isn't loaded yet show their last content (snapshot)
   until the stream catches up.
-- [ ] Quick switch: a palette entry listing workspaces and groups, plus Ctrl+Tab between the last groups.
+- [x] Quick switch: a palette entry listing workspaces and groups, plus a key back to the last one.
 - [ ] A budget, measured with the input-latency tools (`docs/benchmarks/input-latency`): click or key to first frame
   of the new group ≤ 2 frames for a warm group, ≤ 100 ms for a cold one.
-- [ ] Tests: a per-context tab round trip across two workspaces (dirty buffers, carets, scroll kept), and a capture
-  measuring the switch.
+- [x] Tests: a per-context tab round trip across two workspaces (dirty buffers, carets, scroll kept).
+- [ ] A capture measuring the switch.
+
+What landed: `ContextKey` (`src/workspace/ContextKey.hx`) builds and parses `machine/workspace/group` and migrates
+the old `workspace:<id>` and `group:<id>` keys on restore. The host keeps `warmLimit` (4) inactive contexts attached;
+older ones with only plain document tabs are rebuilt from their snapshot, while contexts with a terminal, agent or
+diff stay attached. Remote-session tabs keep their last content because nothing in a switch waits on the network.
+Quick switch is "Switch Workspace or Group..." (`context:switch`, Ctrl+Shift+A); "Goto Previous Workspace"
+(`context:previous`, Ctrl+Shift+D) goes back to the last workspace or group. Ctrl+Tab and Ctrl+Shift+Tab still switch
+tabs. Measured in process by `tests/context-switching` (the host times each
+`switchContext`): warm about 35 us, cold (rebuilt from the snapshot) about 0.5 ms for a two-document group on
+HashLink. The click-to-frame capture through `docs/benchmarks/input-latency` has not been run.
 
 Acceptance: switching between groups in different workspaces is instant and swaps the tabs; switching back restores
 them exactly.
