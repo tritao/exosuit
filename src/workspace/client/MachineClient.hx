@@ -5,6 +5,7 @@ import haxe.io.Bytes;
 import haxeon.platform.event.EventPump;
 import haxeon.rpc.RpcConnectResult;
 import suit.MachineCatalog;
+import suit.MachineCatalog.MachineService;
 import suit.MachineCatalog.MachineState;
 import suit.MachineCatalog.MachineWorkspace;
 import suit.SuitClient;
@@ -37,6 +38,8 @@ class MachineClient {
 	var deadline:Float = 0;
 	var started = false;
 	var retryAt:Float = 0;
+	/** The last `machine` reply as JSON, to tell a reply that changes nothing. */
+	var lastSignature:Null<String>;
 
 	public var machine(default, null):Null<MachineState>;
 	/** Why the last request failed; null after one succeeds. */
@@ -47,6 +50,8 @@ class MachineClient {
 	public final enabled:Bool;
 	/** Scratch folders suit made on request, until a listing reports them. */
 	final scratches:Map<String, String> = [];
+	/** The service of each workspace suit reported one for (M19 Phase 6). */
+	final services:Map<String, MachineService> = [];
 
 	public function new(events:EventPump, clock:Void->Float) {
 		hub = new NativeRpcHub(events);
@@ -269,13 +274,23 @@ class MachineClient {
 			queue.remove(request);
 		current = null;
 		deadline = 0;
+		var signature:Null<String> = null;
+		var before = error;
 		if (reply != null && reply.ok == true && Reflect.hasField(reply, "machine")) {
 			try machine = MachineCatalog.decode(Json.stringify({version: MachineCatalog.VERSION, id: reply.machine.id,
 				name: reply.machine.name, workspaces: reply.machine.workspaces})) catch (error:Dynamic) problem = Std.string(error);
+			if (problem == null) {
+				readServices(reply.machine.workspaces);
+				signature = Json.stringify(reply.machine);
+			}
 		}
 		if (request != null && request.message.op == "machine" || problem == null)
 			error = problem;
-		revision++;
+		// A reply that says what the last one did, with the same error, changes nothing: no revision, so nothing re-syncs.
+		var unchanged = signature != null && signature == lastSignature && error == before;
+		lastSignature = signature;
+		if (!unchanged)
+			revision++;
 		if (request != null) {
 			var callback:Null<(Null<Dynamic>, Null<String>) -> Void> = request.answer;
 			// A failing callback must not take the editor's frame loop down with it.
@@ -286,6 +301,29 @@ class MachineClient {
 				}
 		}
 	}
+
+	/** The services suit reports in a `machine` reply; one that is malformed counts as none. */
+	function readServices(entries:Dynamic):Void {
+		services.clear();
+		if (!Std.isOfType(entries, Array))
+			return;
+		for (entry in (entries : Array<Dynamic>)) {
+			var id:Dynamic = Reflect.field(entry, "id");
+			if (!Std.isOfType(id, String))
+				continue;
+			var service:Null<MachineService> = null;
+			try service = MachineCatalog.decodeService(entry) catch (_:Dynamic) {}
+			// The window connects to what suit reports, so only an endpoint of the agent's own shape counts.
+			if (service != null && !WorkspaceConnections.validEndpoint(service.endpoint, Sys.systemName() == "Windows"))
+				service = null;
+			if (service != null)
+				services.set(id, service);
+		}
+	}
+
+	/** The service suit last reported for workspace `id`: null when it reported none. */
+	public function serviceOf(id:String):Null<MachineService>
+		return services.get(id);
 
 	function close():Void {
 		var stream = transport;
