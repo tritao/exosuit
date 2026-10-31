@@ -694,19 +694,49 @@ class AgentManager {
 	/** The exit status of a manager that found another one owning the workspace state. */
 	static inline final WORKSPACE_IN_USE = 3;
 
-	/** The endpoint of the manager that owns the state, once it is ready; null when none appears before `deadline`. */
-	static function waitForOtherManager(directory:String, key:String, deadline:Float):Null<Dynamic> {
-		while (Sys.time() < deadline) {
-			try {
-				var endpoint = readDiscovery(directory, key);
-				if (endpoint != null) return endpoint;
-			} catch (_:Dynamic) {}
-			Sys.sleep(0.05);
-		}
-		return null;
+	/**
+		True while a process with this id exists. Windows has no cheap check from here (managerProcessKind makes the same
+		assumption), so it answers true there and relies on the held lock.
+	**/
+	static function processAlive(pid:Int):Bool {
+		if (pid <= 0) return false;
+		if (Sys.systemName() == "Windows") return true;
+		try return Sys.command("kill", ["-0", Std.string(pid)]) == 0 catch (_:Dynamic) return true;
 	}
 
-	static function startDetached(options:ManagerOptions, directory:String):Int {
+	/**
+		Another manager owns the state: waits for its endpoint. The endpoint counts only when the lock is held and its
+		manager pid is alive, so a file left by a crashed manager is never returned. Returns null when the lock is free
+		(the owner died before it was ready) and `died` is set; a timeout throws. An unreadable descriptor is logged once.
+	**/
+	static function waitForOtherManager(directory:String, key:String, deadline:Float, died:Array<Bool>):Null<Dynamic> {
+		var lockPath = Path.join([directory, "agent.lock"]);
+		var reported = "";
+		while (Sys.time() < deadline) {
+			var probe = AgentManagerNative.acquireLock(lockPath);
+			if (probe != null) {
+				AgentManagerNative.releaseLock(probe);
+				died[0] = true;
+				return null;
+			}
+			try {
+				var endpoint = readDiscovery(directory, key);
+				if (endpoint != null && processAlive(intField(endpoint, "managerPid"))) return endpoint;
+			} catch (error:Dynamic) {
+				var message = Std.string(error);
+				if (message != reported) {
+					reported = message;
+					Sys.stderr().writeString("Workspace start warning: the other manager's descriptor is not usable yet: " + message + "
+");
+					Sys.stderr().flush();
+				}
+			}
+			Sys.sleep(0.05);
+		}
+		throw "Timed out waiting for another manager of this workspace to become ready; inspect manager.log";
+	}
+
+	static function startDetached(options:ManagerOptions, directory:String, retry:Bool = true):Int {
 		var launcher = managerBytecode();
 		var generation = AgentManagerNative.randomToken().substr(0, 32);
 		var logPath = Path.join([directory, "manager.log"]);
@@ -729,8 +759,14 @@ class AgentManager {
 					if (status == WORKSPACE_IN_USE) {
 						// Another start (the window's, or the Workbench tree's) owns the state and is still coming up: wait
 						// for its endpoint instead of failing, whoever began first.
-						var running = waitForOtherManager(directory, options.identity.key(), deadline);
-						if (running == null) throw lastFailure(logPath);
+						var died = [false];
+						var running = waitForOtherManager(directory, options.identity.key(), deadline, died);
+						if (running == null) {
+							// The owner exited before it was ready and its lock is free: start once more ourselves.
+							child.close();
+							if (retry) return startDetached(options, directory, false);
+							throw lastFailure(logPath);
+						}
 						Sys.stderr().flush();
 						emitDiscovery(running, options.wire);
 						result = 0;
