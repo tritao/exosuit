@@ -73,7 +73,7 @@ class TerminalResizeTests {
     until(function() return grid(150,60),"Live terminal did not follow its pane");
     var live = recorded();
     require(live.columns==150 && live.rows==60,"Pane resize did not reach the service's PTY");
-    session.write(Bytes.ofString("exit\r\n"));
+    session.write(TestShell.line("exit"));
     until(function() return session.status=="exited" && backend.isSynchronized(),"Shell did not exit");
     // An ended terminal has no PTY: the view fits the pane, the saved record keeps its grid.
     session.resize(200,70);

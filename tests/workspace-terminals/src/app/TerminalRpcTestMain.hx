@@ -85,14 +85,14 @@ class TerminalRpcTestMain {
     require(backend.usesNotifications(), "Daemon did not negotiate event-driven terminal output");
     require(backend.name != null && backend.name != "", "Attachment did not expose the service terminal name");
     if (mode == "create") {
-      session.write(Bytes.ofString("KEEP=alive; printf 'DAEMON_%s:%s\\n' PID $$\n"));
+      session.write(TestShell.identify());
       while (marker(session.emulator, "DAEMON_PID:") == "") {
         require(clock() < deadline, "Shell output missing");
         step();
       }
       var pid = marker(session.emulator, "DAEMON_PID:");
       sys.io.File.saveContent(root + "/shell-pid", pid);
-      session.write(Bytes.ofString("sleep 3; printf 'DETACHED_%s\\n' OUTPUT\n"));
+      session.write(TestShell.delayed());
       // Pump until queued input has been acknowledged before closing the client process.
       var flushUntil = clock() + 500;
       while (clock() < flushUntil) step();
@@ -108,7 +108,7 @@ class TerminalRpcTestMain {
       session.resize(96, 32);
       var resizeUntil = clock() + 300;
       while (clock() < resizeUntil) step();
-      session.write(Bytes.ofString("printf 'REATTACHED_%s:%s\\n' \"$KEEP\" $$; stty size\n"));
+      session.write(TestShell.reattached());
       while (marker(session.emulator, "REATTACHED_alive:") == "") {
         require(clock() < deadline, "Reattached shell did not respond");
         step();
@@ -121,7 +121,7 @@ class TerminalRpcTestMain {
         require(clock() < deadline, "PTY resize not applied");
         step();
       }
-      session.write(Bytes.ofString("exit 7\n"));
+      session.write(TestShell.line("exit 7"));
       while (session.status != "exited") {
         require(clock() < deadline, "Terminal exit was not delivered");
         step();

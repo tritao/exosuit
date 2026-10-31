@@ -34,6 +34,8 @@ class TerminalThemeTests {
     return StringTools.replace([for (row in 0...e.rows()) e.rowText(row)].join("")," ","");
   }
   public static function run(root:String):Void {
+    // The fixture shells query the controlling terminal through termios and /dev/tty, which Windows lacks.
+    if (Sys.systemName()=="Windows") { Sys.println("SKIP: terminal theme queries need POSIX termios and /dev/tty"); return; }
     var script=root+"/query-terminal-colors.py";
     sys.io.File.saveContent(script,
       "import os,sys,termios,tty,select,time\n"

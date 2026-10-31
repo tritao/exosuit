@@ -60,7 +60,8 @@ class TerminalHistoryTests {
     };
     until(function() return backend.isSynchronized(),"Process history did not attach");
     if (create) {
-      session.write(Bytes.ofString("KEEP=previous; i=0; while [ $i -lt 60 ]; do printf 'PROCESS_%03d\\n' $i; i=$((i+1)); done\n"));
+      session.write(TestShell.line(TestShell.assign("KEEP","previous")));
+      session.write(TestShell.counted("PROCESS_",60));
       until(function() return allText(session.emulator).indexOf("PROCESS_059")>=0,"Process output missing");
       var flushUntil = Sys.time()+2.3;
       while (Sys.time()<flushUntil) step();
@@ -70,11 +71,11 @@ class TerminalHistoryTests {
       require(text.indexOf("PROCESS_000")>=0 && text.indexOf("PROCESS_059")>=0,"Daemon process restart lost durable scrollback");
       backend.activateControl();
       until(function() return backend.canControl() && session.status=="running","Replacement shell did not start");
-      session.write(Bytes.ofString("printf 'FRESH_ENV:%s\\n' \"${KEEP-unset}\"\n"));
+      session.write(TestShell.variable("FRESH_ENV:","KEEP"));
       until(function() return allText(session.emulator).indexOf("FRESH_ENV:unset")>=0,"Replacement shell inherited dead shell state");
       text = allText(session.emulator);
       require(text.indexOf("PROCESS_000")>=0 && text.indexOf("Shell restarted")>=0,"Replacement shell lost saved output");
-      session.write(Bytes.ofString("exit\n"));
+      session.write(TestShell.line("exit"));
       until(function() return session.status=="exited","Replacement shell did not exit");
       Sys.println("PASS: actual daemon process restart preserves scrollback; explicit replacement shell retains output with fresh shell state");
     }
@@ -108,7 +109,7 @@ class TerminalHistoryTests {
       while (!check()) { require(Sys.time()<deadline,message); step(); Sys.sleep(0.005); }
     };
     until(function() return backend.isSynchronized(),"Initial shell did not synchronize");
-    session.write(Bytes.ofString("i=0; while [ $i -lt 60 ]; do printf 'SAVED_%03d 界\\n' $i; i=$((i+1)); done\n"));
+    session.write(TestShell.counted("SAVED_",60," 界"));
     until(function() return allText(session.emulator).indexOf("SAVED_059")>=0,"Shell output missing");
     // A daemon shutdown flushes dirty history even inside the periodic save interval.
     manager.dispose(); store.close();
@@ -141,7 +142,7 @@ class TerminalHistoryTests {
     require(allText(session.emulator).indexOf("Shell restarted")>=0,"Restart separator missing");
     // Shell startup programs often clear their new screen. Old output must
     // already be in scrollback before that happens.
-    session.write(Bytes.ofString("printf '\\033[2J\\033[H'; printf 'NEW_%s\\n' SHELL\n"));
+    session.write(TestShell.clearedJoined("NEW_","SHELL"));
     until(function() return allText(session.emulator).indexOf("NEW_SHELL")>=0,"New shell did not accept input");
     text = allText(session.emulator);
     require(text.indexOf("SAVED_000")>=0 && text.indexOf("SAVED_059")>=0,"Restart or shell startup clear discarded old history");
@@ -150,7 +151,7 @@ class TerminalHistoryTests {
     endpoint.connection.call(WorkspaceTerminalProtocol.RESTART,{workspace:"workspace",instance:"history-second",id:"history-shell"},1000,
       function(_) { throw "Running shell restarted twice"; },function(e) error=e.code);
     step(); step(); require(error=="terminal_running","Duplicate restart replaced running shell");
-    session.write(Bytes.ofString("exit\n"));
+    session.write(TestShell.line("exit"));
     until(function() return session.status=="exited","Replacement shell did not exit");
     manager.dispose(); store.close();
     store = new WorkspaceSqliteStore(path,"workspace",seed);
@@ -186,7 +187,7 @@ class TerminalHistoryTests {
       "Metadata-only terminal lacks an honest explanation or restart action");
     backend.activateControl();
     until(function() return backend.canControl() && session.status=="running","Metadata-only terminal could not restart explicitly");
-    session.write(Bytes.ofString("printf 'RECOVERED_%s\\n' LEGACY\n"));
+    session.write(TestShell.joined("RECOVERED_","LEGACY"));
     until(function() return allText(session.emulator).indexOf("RECOVERED_LEGACY")>=0,"Recovered shell did not accept input");
     require(manager.snapshot().terminals[0].id=="legacy-shell" && manager.activeCount()==1,"Recovery changed terminal identity");
     session.close();client.close();server.close();manager.dispose();store.close();

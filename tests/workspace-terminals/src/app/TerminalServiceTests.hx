@@ -175,7 +175,7 @@ class TerminalServiceTests {
       instance: "instance",
       id: "bounded",
       sequence: 1,
-      data: Bytes.ofString("head -c 150000 /dev/zero | tr '\\000' x; printf DONE\\n\n")
+      data: TestShell.flood()
     };
     client.call(WorkspaceTerminalProtocol.INPUT, input, 1000, function(_) done = true, function(e) {
       throw e.code;

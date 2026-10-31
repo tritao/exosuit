@@ -116,7 +116,8 @@ class TerminalCatalogTests {
       [
         WorkspaceTerminalProtocol.READ,
         WorkspaceTerminalProtocol.CONTROL,
-        WorkspaceTerminalProtocol.CATALOG
+        WorkspaceTerminalProtocol.CATALOG,
+        WorkspaceProtocol.TREE
       ]
     );
     var step = function() {
@@ -131,6 +132,7 @@ class TerminalCatalogTests {
       instance: "first",
       id: "catalog-shell",
       create: true,
+      group: "work",
       columns: 80,
       rows: 24
     };
@@ -248,7 +250,8 @@ class TerminalCatalogTests {
       [
         WorkspaceTerminalProtocol.READ,
         WorkspaceTerminalProtocol.CONTROL,
-        WorkspaceTerminalProtocol.CATALOG
+        WorkspaceTerminalProtocol.CATALOG,
+        WorkspaceProtocol.TREE
       ]
     );
     open.instance = "second";

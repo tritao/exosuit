@@ -17,8 +17,9 @@ class WorkspaceGroupTests {
 	}
 
 	public static function run(root:String):Void {
-		var child = root + "/group dir";
-		FileSystem.createDirectory(child);
+		FileSystem.createDirectory(root + "/group dir");
+		// The form the service reports, which uses the platform's separators.
+		var child = FileSystem.fullPath(root + "/group dir");
 		var directories = new WorkspaceDirectories(root);
 		require(directories.resolve("group dir") == child, "Relative directory did not resolve inside root");
 		require(directories.resolve(root + "/../") != null, "An existing folder outside the workspace was refused");
@@ -157,7 +158,7 @@ class WorkspaceGroupTests {
 			instance: "owner",
 			id: "inherited",
 			sequence: 1,
-			data: Bytes.ofString("printf 'GROUP_CWD:'; pwd\n")
+			data: TestShell.workingDirectory("GROUP_CWD:")
 		}, 1000, function(_) {}, function(e) throw e.message);
 		pump();
 		var output = "", deadline = clock() + 3000;
