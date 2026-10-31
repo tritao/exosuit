@@ -6,6 +6,11 @@ import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceTerminals;
 import workspace.service.WorkspaceTerminalProtocol;
 
+/** Registers the catalog watch on a connection with its grants; returns the connection's cleanup. */
+typedef CatalogBinding = RpcConnection->Array<String>->CatalogCleanup;
+
+typedef CatalogCleanup = Void->Void;
+
 private typedef Peer = {var transport:MessageTransport; var options:RpcPeerOptions; var localAdmin:Bool; var preflight:Null<SessionPreflight>; var handshake:Null<RpcHandshake>; var connection:Null<RpcConnection>; var cleanup:Array<Void->Void>;}
 
 /** Bounded headless service loop, shared by daemon and transport tests. */
@@ -18,6 +23,7 @@ class WorkspaceRpcServer {
 	var pairingAdmin:Null<workspace.service.WorkspacePairingAdmin>;
 	public var remoteAccessStatus:Null<Void->workspace.service.WorkspacePairingProtocol.RemoteAccessStatus>;
 	var serviceStatus:Null<Void->workspace.service.WorkspaceLifecycleProtocol.WorkspaceServiceStatus>;
+	var catalogBinding:Null<CatalogBinding>;
 	var updateService:Null<String->Bool>;
 	var setFolders:Null<Array<String>->Array<String>>;
 	final files:Null<workspace.runtime.WorkspaceFileService>;
@@ -31,6 +37,19 @@ class WorkspaceRpcServer {
 		serviceStatus = status; updateService = update;
 		var offered = localOptions.offered();
 		offered.push(workspace.service.WorkspaceLifecycleProtocol.CAPABILITY);
+		localOptions = new RpcPeerOptions(options.application, offered, [], options.timeoutMs,
+			options.maxMessageBytes, options.maxCalls, options.maxQueuedBytes, options.protocol, options.codec);
+	}
+
+	/**
+		Offers the catalog watch (`workspace.catalog`, M19 Phase 6) on local connections; `bind` registers it on each
+		and returns the connection's cleanup.
+	**/
+	public function enableCatalog(bind:CatalogBinding):Void {
+		catalogBinding = bind;
+		var offered = localOptions.offered();
+		if (offered.indexOf(workspace.service.WorkspaceCatalogProtocol.CAPABILITY) < 0)
+			offered.push(workspace.service.WorkspaceCatalogProtocol.CAPABILITY);
 		localOptions = new RpcPeerOptions(options.application, offered, [], options.timeoutMs,
 			options.maxMessageBytes, options.maxCalls, options.maxQueuedBytes, options.protocol, options.codec);
 	}
@@ -285,6 +304,8 @@ class WorkspaceRpcServer {
 					if (agents != null) agents.bind(peer.connection, grants);
 					if (files != null) peer.cleanup.push(files.bind(peer.connection, grants));
 					if (scm != null) peer.cleanup.push(scm.bind(peer.connection, grants, peer.localAdmin));
+					var catalog = catalogBinding;
+					if (catalog != null) peer.cleanup.push(catalog(peer.connection, grants));
 				}
 			}
 			if (peer.connection != null)

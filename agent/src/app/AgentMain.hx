@@ -40,6 +40,26 @@ class AgentMain {
 		return FileSystem.exists(path) ? AgentStateIdentity.read(path).workspace : null;
 	}
 
+	/**
+		The catalog watch over this service's groups, sessions and terminals. A workspace's service answers to its id and
+		describes its folders; a folder's service answers to "workspace" and describes its folder.
+	**/
+	static function catalogService(stateDirectory:String, instance:String, root:String, clock:Void->Float,
+			groups:Void->Array<workspace.service.WorkspaceProtocol.WorkspaceGroup>,
+			sessions:Void->Array<workspace.service.WorkspaceAgentProtocol.AgentRecord>,
+			terminals:Void->Array<workspace.service.WorkspaceTerminalProtocol.TerminalRecord>):workspace.runtime.WorkspaceCatalogService {
+		var path = Path.join([stateDirectory, "workspace.json"]);
+		var watch = new AgentIdentityWatch(path, function() return AgentStateIdentity.forFolder(root));
+		var id = watch.current().workspace;
+		var name = Path.withoutDirectory(StringTools.replace(root, "\\", "/"));
+		var description = function():workspace.runtime.WorkspaceCatalogService.CatalogDescription {
+			var identity = watch.current();
+			return {name: name, folders: identity.folders.copy(), scratch: identity.scratch};
+		};
+		return new workspace.runtime.WorkspaceCatalogService(id == null ? "workspace" : id, instance, description, groups,
+			sessions, terminals, function() return clock() / 1000);
+	}
+
 	/** The folders to serve at start: the usable ones of the state's workspace folders (see WorkspaceFolders.select), else the single `root`. */
 	static function startFolders(stateDirectory:String, root:String):Array<String> {
 		var path = Path.join([stateDirectory, "workspace.json"]);
@@ -181,6 +201,9 @@ class AgentMain {
 			args.length >= 7 ? {workspace: "workspace", root: directories.root, instance: args[6]} : null,
 			terminals, agents, pairingManager, files, scm);
 		serverRef = server;
+		var catalog = catalogService(Path.directory(args[2]), args.length >= 7 ? args[6] : args[3], directories.root, clock,
+			function() return service.snapshot().groups, agents.records, function() return terminals.snapshot().terminals);
+		server.enableCatalog(catalog.bind);
 		server.enableFolders(function(requested) return workspace.runtime.WorkspaceFolderChange.apply(requested, stateDirectory, directories.root, files, scm).folders);
 		var updates = new workspace.service.WorkspaceUpdatePolicy();
 		var build = Sys.getEnv("EXOSUIT_AGENT_BUILD_ID");
@@ -251,6 +274,7 @@ class AgentMain {
 					open: {terminals: terminals.activeCount(), agents: agents.activeCount()}});
 			}
 			server.poll();
+			catalog.poll();
 			files.poll();
 			scm.poll();
 			// Runtime ownership survives client disconnects.
