@@ -184,7 +184,8 @@ class GraphicalMain {
 					workspaceClient = new workspace.client.LocalWorkspaceClient(context.events, instance.application.processes,
 						workspace.client.LocalWorkspaceClient.findLauncher(), function() return NativeKit.nk_time_seconds() * 1000);
 					terminalWorkspaces = new workspace.client.LocalTerminalWorkspacePool(context.events, instance.application.processes,
-						workspace.client.LocalWorkspaceClient.findLauncher(), function() return NativeKit.nk_time_seconds() * 1000);
+						workspace.client.LocalWorkspaceClient.findLauncher(), function() return NativeKit.nk_time_seconds() * 1000,
+						function(root) return instance.terminalServiceTarget(root), function() return instance.machineWorkspacesPending());
 					instance.attachWorkspace(workspaceClient);
 					instance.attachWorkbench(workspaceClient);
 					instance.attachRemoteAccess(workspaceClient);

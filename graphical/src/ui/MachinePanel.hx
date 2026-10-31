@@ -15,20 +15,28 @@ import haxeon.ui.widgets.layout.Column;
 import haxeon.ui.widgets.scroll.ScrollView;
 import haxeon.ui.widgets.text.Text;
 import workspace.client.MachineWorkspaces;
+import workspace.client.MachineWorkspaces.MachineManager;
+import workspace.client.WorkspaceServiceTarget;
 
 /** What the Machine view shows and does; ExosuitApp supplies it. */
 typedef MachineViewActions = {
 	/** The workspace manager this editor is attached to, by generation; empty when none. */
 	var attachedGeneration:Void->String;
-	/** Attaches to `root`'s manager on `stateDir`, opening `root` when it is not the open folder. */
-	var attach:(root:String, stateDir:String, defaultState:Bool) -> Void;
-	/** Starts a manager on this editor's build for `root`, from a copy of the catalog of the one on `fromState`. */
-	var startOwn:(root:String, fromState:String) -> Void;
+	/**
+		Attaches to a manager on `stateDir`, opening what it serves when that is not open: the folder `root`, or the
+		workspace `workspace` (empty for a folder's service).
+	**/
+	var attach:(root:String, workspace:String, stateDir:String, defaultState:Bool) -> Void;
+	/** Starts a manager on this editor's build for `root` or `workspace`, from a copy of the catalog of the one on `fromState`. */
+	var startOwn:(root:String, workspace:String, fromState:String) -> Void;
+	/** A workspace's name from suit's catalog, or empty when it is not known. */
+	var workspaceName:String->String;
 }
 
 /**
-	The Machine view: this machine and every workspace manager running on it, grouped by folder, with the build each
-	runs. One machine can run several managers for one folder; this is where the editor picks which it uses.
+	The Machine view: this machine and every workspace manager running on it, grouped by workspace (or by folder, for a
+	folder's service), with the build each runs. One machine can run several managers for one; this is where the editor
+	picks which it uses.
 **/
 class MachinePanel implements View {
 	final machine:MachineWorkspaces;
@@ -80,10 +88,10 @@ class MachinePanel implements View {
 				+ "pick the one this editor uses.", context, true)));
 			if (listing.managers.length == 0) rows.push(new KeyedView("empty", line("No workspace services are running.", context, true)));
 			var attached = actions.attachedGeneration();
-			var roots:Array<String> = [];
-			for (manager in listing.managers) if (roots.indexOf(manager.root) < 0) roots.push(manager.root);
-			roots.sort(function(a, b) return Reflect.compare(folderName(a).toLowerCase(), folderName(b).toLowerCase()));
-			for (root in roots) rows.push(new KeyedView("root:" + root, folder(root, listing, attached, context)));
+			var keys:Array<String> = [];
+			for (manager in listing.managers) if (keys.indexOf(serves(manager)) < 0) keys.push(serves(manager));
+			keys.sort(function(a, b) return Reflect.compare(heading(a, listing).toLowerCase(), heading(b, listing).toLowerCase()));
+			for (key in keys) rows.push(new KeyedView("root:" + key, folder(key, listing, attached, context)));
 			if (machine.error != null) rows.push(new KeyedView("error", line(machine.error, context)));
 		}
 		var refresh = new Button("Refresh", null, function() { machine.refresh(); requestFrame(); }, "machine-refresh");
@@ -98,12 +106,27 @@ class MachinePanel implements View {
 		return new ScrollView("machine-scroll", new Column("machine-content", rows, style), viewport).build(context);
 	}
 
-	function folder(root:String, listing:MachineListing, attached:String, context:BuildContext):Column {
+	/** What a manager serves: its workspace, else its folder. */
+	static function serves(manager:MachineManager):String
+		return WorkspaceServiceTarget.choiceKeyOf(manager.workspace, manager.root);
+
+	function heading(key:String, listing:MachineListing):String {
+		for (manager in listing.managers) if (serves(manager) == key) {
+			if (manager.workspace.length == 0) return folderName(manager.root);
+			var name = actions.workspaceName(manager.workspace);
+			return name.length > 0 ? name : "Workspace " + manager.workspace.substr(0, 12);
+		}
+		return key;
+	}
+
+	function folder(key:String, listing:MachineListing, attached:String, context:BuildContext):Column {
+		var managers = [for (manager in listing.managers) if (serves(manager) == key) manager];
+		var root = managers.length > 0 ? managers[0].root : key;
+		var workspace = managers.length > 0 ? managers[0].workspace : "";
 		var children:Array<KeyedView> = [
-			new KeyedView("name", line(folderName(root), context)),
-			new KeyedView("path", line(root, context, true, 12))
+			new KeyedView("name", line(heading(key, listing), context)),
+			new KeyedView("path", line(workspace.length > 0 ? "Workspace service, started in " + root : root, context, true, 12))
 		];
-		var managers = [for (manager in listing.managers) if (manager.root == root) manager];
 		// The default state first: it is the one an editor finds unless told otherwise.
 		managers.sort(function(a, b) return a.defaultState == b.defaultState ? a.managerPid - b.managerPid : a.defaultState ? -1 : 1);
 		var own = false, source:Null<String> = null;
@@ -120,7 +143,7 @@ class MachinePanel implements View {
 			else {
 				var target = manager;
 				rowChildren.push(new KeyedView("attach", new Button("Use this one", null, function() {
-					actions.attach(target.root, target.stateDir, target.defaultState);
+					actions.attach(target.root, target.workspace, target.stateDir, target.defaultState);
 					requestFrame();
 				}, "machine-attach-" + manager.generation)));
 			}
@@ -129,13 +152,13 @@ class MachinePanel implements View {
 		if (!own && source != null) {
 			var from = source;
 			var start = new Button("Start one on this editor's build", null, function() {
-				actions.startOwn(root, from);
+				actions.startOwn(root, workspace, from);
 				requestFrame();
-			}, "machine-start-own-" + haxe.crypto.Sha256.encode(root).substr(0, 12));
+			}, "machine-start-own-" + haxe.crypto.Sha256.encode(key).substr(0, 12));
 			start.variant = ButtonVariant.Primary;
 			children.push(new KeyedView("start-own", start));
 			children.push(new KeyedView("start-own-hint", line("Starts from a copy of its groups and sessions. The services then change independently.", context, true, 12)));
 		}
-		return group("machine-root-" + haxe.crypto.Sha256.encode(root).substr(0, 12), children, 8);
+		return group("machine-root-" + haxe.crypto.Sha256.encode(key).substr(0, 12), children, 8);
 	}
 }

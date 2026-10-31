@@ -883,6 +883,12 @@ class ExosuitApp implements DesktopUiApplication {
 		var create = createTerminal;
 		var remote = createWorkspaceTerminal;
 		if (isRemote ? remote == null : create == null) return null;
+		// A terminal of a workspace with a service of its own belongs to that service, whichever of the workspace's
+		// folders it was made under: the service names its own root.
+		if (isRemote && workspaceRoot != null) {
+			var service = terminalServiceTarget(workspaceRoot), serviceRoot = service == null ? null : service.root();
+			if (serviceRoot != null) workspaceRoot = serviceRoot;
+		}
 		var number = StringTools.startsWith(id, "terminal-") ? Std.parseInt(id.substring(9)) : null;
 		if (number != null && number >= nextTerminalId) nextTerminalId = number + 1;
 		var localDirectory = isRemote ? cwd : FileSystem.exists(cwd) && FileSystem.isDirectory(cwd) ? cwd : Sys.getCwd();
@@ -1569,16 +1575,21 @@ class ExosuitApp implements DesktopUiApplication {
 		var choices = workspace.client.WorkspaceManagerChoices.instance();
 		machinePanel = new MachinePanel(machine, {
 			attachedGeneration: function() return client.workspaceConnected() ? client.serviceGeneration() : "",
-			attach: function(root, stateDir, defaultState) {
-				choices.choose(root, defaultState ? null : stateDir);
-				openMachineRoot(root);
+			attach: function(root, workspaceId, stateDir, defaultState) {
+				choices.choose(workspace.client.WorkspaceServiceTarget.choiceKeyOf(workspaceId, root), defaultState ? null : stateDir);
+				if (workspaceId.length > 0) openMachineWorkspace(workspaceId) else openMachineRoot(root);
 			},
-			startOwn: function(root, fromState) {
+			startOwn: function(root, workspaceId, fromState) {
 				var listing = machine.listing;
 				if (listing == null) return;
-				try choices.chooseCopy(root, workspace.client.MachineWorkspaces.ownState(listing, root, listing.launcher), fromState)
+				try choices.chooseCopy(workspace.client.WorkspaceServiceTarget.choiceKeyOf(workspaceId, root),
+					workspace.client.MachineWorkspaces.ownState(listing, root, listing.launcher, workspaceId), fromState)
 				catch (failure:Dynamic) { application.reportError("workspace", Std.string(failure)); return; }
-				openMachineRoot(root);
+				if (workspaceId.length > 0) openMachineWorkspace(workspaceId) else openMachineRoot(root);
+			},
+			workspaceName: function(id) {
+				var known = machineClient == null ? null : machineClient.workspaceById(id);
+				return known == null ? "" : known.name;
 			}
 		}, requestFrame);
 		registerSidebarDestination("machine", IconName.Cube, function() return machinePanel,
@@ -1599,9 +1610,18 @@ class ExosuitApp implements DesktopUiApplication {
 			requestFrame();
 			return true;
 		};
-		// A workspace opens its attached folders. Until its service is keyed by workspace id (M19 Phase 4), one with no
-		// folders opens its scratch folder instead.
+		// A workspace opens its attached folders. With a service of its own, keyed by id, a workspace with none runs in
+		// its scratch folder, which is asked for first so the service can be started there. Otherwise a workspace with
+		// no folders opens its scratch folder as a folder.
 		var open = function(entry:suit.MachineCatalog.MachineWorkspace):Void {
+			if (workspace.client.WorkspaceServiceTarget.enabled() && entry.folders.length == 0) {
+				machine.scratch(entry.id, function(path, failure) {
+					if (report(failure) || path == null) return;
+					application.savedWorkspaces.restore(new workspace.SavedWorkspace(entry.id, entry.name, []), "");
+					requestFrame();
+				});
+				return;
+			}
 			if (entry.folders.length > 0) {
 				application.savedWorkspaces.restore(new workspace.SavedWorkspace(entry.id, entry.name, entry.folders), "");
 				requestFrame();
@@ -1644,8 +1664,8 @@ class ExosuitApp implements DesktopUiApplication {
 			rename: function(entry) askName("Rename workspace " + entry.name, function(name) {
 				machine.rename(entry.id, name, function(_, failure) { report(failure); });
 			}),
-			// The scratch folder stays apart from the attached folders (ADR 0006). Until M19 Phase 4 merges services by
-			// workspace id, the groups made in it show only while the workspace has no folders.
+			// The scratch folder stays apart from the attached folders (ADR 0006). Without a service per workspace
+			// (EXOSUIT_WORKSPACE_IDENTITY=workspace), the groups made in it show only while the workspace has no folders.
 			attachFolder: function(entry) chooseFolder("Attach Folder to " + entry.name, function(folder) {
 				machine.addFolder(entry.id, folder, function(updated, failure) {
 					if (!report(failure) && updated != null && openWorkspace() == entry.id) open(updated);
@@ -1655,6 +1675,49 @@ class ExosuitApp implements DesktopUiApplication {
 		};
 		if (workbenchPanel != null) workbenchPanel.machine = machineActions;
 		requestFrame();
+	}
+
+	/** Opens the machine workspace `id` unless it is open; its clients then follow the workspace's manager choice. */
+	function openMachineWorkspace(id:String):Void {
+		var current = application.savedWorkspaces.current, known = machineClient == null ? null : machineClient.workspaceById(id);
+		var actions = machineActions;
+		if ((current == null || current.id != id) && known != null && actions != null) actions.open(known);
+		requestFrame();
+	}
+
+	/**
+		The service the window attaches to by workspace id (EXOSUIT_WORKSPACE_IDENTITY=workspace): the open machine
+		workspace's, else the one that holds the active project's folder. `target` is null when the window follows a
+		folder's own service: the flag is off, suit is off, or suit knows no workspace for it. `waiting` is true
+		while suit's answer is awaited, which decides between those.
+	**/
+	function workspaceServiceTarget(projectRoot:Null<String>):{target:Null<workspace.client.WorkspaceServiceTarget>, waiting:Bool} {
+		var open = application.savedWorkspaces.current, machine = machineClient;
+		var none:{target:Null<workspace.client.WorkspaceServiceTarget>, waiting:Bool} = {target: null, waiting: false};
+		if (machine == null || !machine.enabled || !workspace.client.WorkspaceServiceTarget.enabled()) return none;
+		if (machine.machine == null) return {target: null, waiting: machine.error == null && (open != null || projectRoot != null)};
+		var known:Null<suit.MachineCatalog.MachineWorkspace> = open == null ? null : machine.workspaceById(open.id);
+		if (known == null && projectRoot != null) known = machine.workspaceHolding(projectRoot);
+		if (known == null) return none;
+		if (known.folders.length == 0 && machine.scratchOf(known) == null) {
+			var id = known.id;
+			if (!machine.busy()) machine.scratch(id, function(_, failure) { if (failure != null) application.reportError("workspace", failure); });
+			return {target: null, waiting: true};
+		}
+		return {target: machine.serviceTarget(known), waiting: false};
+	}
+
+	/** Whether the machine's workspaces are not known yet, so a root cannot say yet which service it belongs to. */
+	public function machineWorkspacesPending():Bool {
+		var machine = machineClient;
+		return machine != null && machine.enabled && workspace.client.WorkspaceServiceTarget.enabled() && machine.machine == null
+			&& machine.error == null;
+	}
+
+	/** The workspace service a terminal root belongs to (EXOSUIT_WORKSPACE_IDENTITY=workspace), or null for a folder's own. */
+	public function terminalServiceTarget(root:String):Null<workspace.client.WorkspaceServiceTarget> {
+		var machine = machineClient;
+		return machine == null || !machine.enabled || !workspace.client.WorkspaceServiceTarget.enabled() ? null : machine.serviceTargetFor(root);
 	}
 
 	/** Opens `root` as the workspace unless it already is; its clients then follow the folder's manager choice. */
@@ -2769,7 +2832,16 @@ class ExosuitApp implements DesktopUiApplication {
 		var attachment = workspaceAttachment;
 		if (attachment != null) {
 			var project = application.workspace.activeProject;
-			attachment.select(project == null ? null : project.root);
+			var local:Null<workspace.client.LocalWorkspaceClient> = null;
+			if (Std.isOfType(attachment, workspace.client.LocalWorkspaceClient)) local = cast attachment;
+			var waiting = false, byWorkspace = false;
+			if (local != null) {
+				var service = workspaceServiceTarget(project == null ? null : project.root);
+				var serviceTarget = service.target;
+				waiting = service.waiting;
+				if (serviceTarget != null) { local.selectWorkspace(serviceTarget); byWorkspace = true; }
+			}
+			if (!waiting && !byWorkspace) attachment.select(project == null ? null : project.root);
 			attachment.poll();
 			var fileClient = attachment.fileClient();
 			if (fileClient != searchFileClient) {
