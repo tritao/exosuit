@@ -5,6 +5,8 @@ stops it, waits for the trace, and writes metrics. Only one measurement runs at 
 because the scenario moves the real mouse.
 
 .EXAMPLE
+pwsh -NoProfile -File docs/benchmarks/perf-harness/measure.ps1 -Name m19-workspaces -Drive m19_workspaces
+(GUI check: output in runs/<Name>/result/results.json and screenshots; exit 0 when every check passed, 1 when one failed.)
 pwsh -NoProfile -File docs/benchmarks/perf-harness/measure.ps1 -Name baseline
 pwsh -NoProfile -File docs/benchmarks/perf-harness/measure.ps1 -Name longline -File graphical/src/app/ApplicationIcons.hx -Profile instrument
 
@@ -24,7 +26,11 @@ param(
 	# Optional deterministic native fixture; capture its uniquely titled window without input.
 	[string]$UiPreviewExecutable = '',
 	[string[]]$UiPreviewArgs = @(),
-	[string]$UiPreviewTitle = 'Exosuit UI exploration'
+	[string]$UiPreviewTitle = 'Exosuit UI exploration',
+	# Drive the editor with a GUI scenario (gui_scenarios/<Drive>.py, gui_driver.py) instead of the profiler scenario:
+	# real OS input, positions and state from the app's automation snapshot, isolated state; no trace or metrics.
+	[string]$Drive = '',
+	[int]$DriveSeconds = 100
 )
 $ErrorActionPreference = 'Stop'
 # A whole capture takes at most 7 minutes. Instrumented runs build and export more slowly; after a clean build, build
@@ -36,6 +42,10 @@ $editorSeconds = 120
 Import-Module (Join-Path $PSScriptRoot 'guard.psm1') -Force
 $root = if ($Root) { (Resolve-Path $Root).Path } else { (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path }
 $out = Join-Path $PSScriptRoot "runs\$Name"
+# A stopped run's manager or suit can hold its files for a moment; retry before giving up.
+for ($attempt = 0; (Test-Path $out) -and $attempt -lt 30; $attempt++) {
+	try { Remove-Item -Recurse -Force $out -ErrorAction Stop } catch { Start-Sleep -Seconds 2 }
+}
 if (Test-Path $out) { Remove-Item -Recurse -Force $out }
 New-Item -ItemType Directory -Force (Join-Path $out 'state') | Out-Null
 function Note([string]$text) { $line = "[{0:HH:mm:ss}] {1}" -f (Get-Date), $text; Add-Content (Join-Path $out 'measure.log') $line; Write-Host $line }
@@ -126,6 +136,53 @@ public static class PreviewWindowBounds {
 		if (-not $preview.captured) { Note "preview screenshot failed: $($preview.error)"; exit 1 }
 		Note "captured $(Join-Path $out 'frame.png')"
 		exit 0
+	}
+	if ($Drive) {
+		$driveScript = Join-Path $PSScriptRoot "gui_scenarios\$Drive.py"
+		if (-not (Test-Path $driveScript)) { Note "no scenario $driveScript"; exit 2 }
+		$fx = Invoke-Guarded -FilePath python -ArgumentList @('-I', (Join-Path $PSScriptRoot 'gui_fixture.py'), '--root', $root, '--out', $out, '--scenario', $Drive) `
+			-WorkingDirectory $root -TimeoutSeconds 120 -LogPath (Join-Path $out 'fixture.log')
+		if ($fx.ExitCode -ne 0) { Note "fixture failed: $(Format-GuardResult $fx)"; exit 1 }
+		$cfg = Get-Content (Join-Path $out 'ENV.json') -Raw | ConvertFrom-Json
+		foreach ($p in $cfg.env.PSObject.Properties) { Set-Item -Path "env:$($p.Name)" -Value $p.Value }
+		Note "driving $root with $Drive (isolated state under $out)"
+		$runArgs = @('scripts/run.py') + @($cfg.appArgs) + @($cfg.open)
+		$log = Join-Path $out 'run.log'
+		$state = @{ editor = $null; editorAt = 0; scenario = $null; stopped = $false }
+		$appPattern = [regex]::Escape(($root -replace '\\', '/')) + '/graphical/build[^/]*/host/'
+		$tickDrive = {
+			param($process, $elapsed, $tree)
+			if (-not $state.editor) {
+				$state.editor = Get-CimInstance Win32_Process -Filter "Name='hl.exe'" |
+					Where-Object { $tree.Contains([int]$_.ProcessId) -and ($_.CommandLine -replace '\\', '/') -match $appPattern -and $_.CommandLine -notmatch 'haxeon[\\/]compiler|--output' } |
+					Select-Object -First 1
+				if ($state.editor) {
+					$state.editorAt = $elapsed
+					Note "editor started: pid $($state.editor.ProcessId) after $([int]$elapsed) s"
+					$state.scenario = Start-Process python -ArgumentList @('-I', $driveScript, '--pid', $state.editor.ProcessId, '--dir', (Join-Path $out 'automation'),
+						'--out', (Join-Path $out 'result'), '--deadline', $DriveSeconds, '--wait-window', '60') `
+						-RedirectStandardOutput (Join-Path $out 'scenario.log') -RedirectStandardError (Join-Path $out 'scenario.err') -PassThru -WindowStyle Hidden
+				}
+			}
+			if (-not $state.editor -and $elapsed -gt $editorLimit) { return "no editor process recognized after $editorLimit s" }
+			if ($state.editor -and -not $state.stopped -and $elapsed - $state.editorAt -gt $editorSeconds) { return "the editor ran over $editorSeconds s" }
+			if ($state.scenario -and -not $state.stopped -and $state.scenario.HasExited) {
+				Note "scenario finished (exit $($state.scenario.ExitCode)); stopping the editor"
+				Stop-Process -Id $state.editor.ProcessId -Force -ErrorAction SilentlyContinue
+				$state.stopped = $true
+				return 'scenario done'
+			}
+			return $null
+		}
+		$result = Invoke-Guarded -FilePath python -ArgumentList $runArgs -WorkingDirectory $root -TimeoutSeconds $DeadlineSeconds -LogPath $log -OnTick $tickDrive
+		Format-GuardResult $result | Set-Content (Join-Path $out 'guard.txt')
+		Note (Format-GuardResult $result)
+		if ($state.scenario -and -not $state.scenario.HasExited) { Stop-Process -Id $state.scenario.Id -Force -ErrorAction SilentlyContinue }
+		if ($state.scenario) { Get-Content (Join-Path $out 'scenario.log') -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_ } }
+		if ($result.ExitCode -in 124, 125) { Note "run ended by the guard (exit $($result.ExitCode))" }
+		$code = if ($state.scenario -and $state.scenario.HasExited) { $state.scenario.ExitCode } else { 3 }
+		Note "scenario exit $code"
+		exit $code
 	}
 	# Parallel builds skew a capture; wait (bounded) for the machine to be quiet, and record the load either way.
 	$quietDeadline = (Get-Date).AddMinutes(10)

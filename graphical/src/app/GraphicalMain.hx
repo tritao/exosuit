@@ -22,6 +22,7 @@ class GraphicalMain {
 	static var terminalWorkspaces:Null<workspace.client.LocalTerminalWorkspacePool> = null;
 	static var allocationProfile:Null<String> = null;
 	static var inspection:Null<devtools.InspectionAgent> = null;
+	static var automation:Null<devtools.AutomationProbe> = null;
 	static var devtoolsProcess:Null<sys.io.ChildProcess> = null;
 	static final devtoolsOutput:haxe.io.Bytes = haxe.io.Bytes.alloc(4096);
 
@@ -226,7 +227,10 @@ class GraphicalMain {
 						toolArguments, projectRoot);
 				} catch (error:Dynamic) instance.application.reportError("devtools", Std.string(error));
 			}));
+			var automationDirectory = devtools.AutomationProbe.directoryFromEnvironment();
+			if (automationDirectory != null) automation = new devtools.AutomationProbe(automationDirectory, instance.context(), instance.automationState);
 			context.onPoll = function() {
+				if (automation != null) automation.poll();
 				if (inspection != null) inspection.poll();
 				if (devtoolsProcess != null) {
 					devtoolsProcess.readStdout(devtoolsOutput, 0, devtoolsOutput.length);

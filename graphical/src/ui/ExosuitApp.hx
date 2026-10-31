@@ -1854,7 +1854,9 @@ class ExosuitApp implements DesktopUiApplication {
 			});
 		};
 		var chooseFolder = function(title:String, chosen:String->Void):Void {
-			if (desktop != null) desktop.selectDirectory(function(accepted, paths) { if (accepted && paths.length > 0) chosen(paths[0]); }, title);
+			var automated = devtools.AutomationProbe.takeFolderAnswer();
+			if (automated != null) chosen(automated);
+			else if (desktop != null) desktop.selectDirectory(function(accepted, paths) { if (accepted && paths.length > 0) chosen(paths[0]); }, title);
 			else host.openCommandView(new commandview.CommandViewProvider(title + ": ", [], function(_) {}, function(_, value, _) {
 				host.closeCommandView();
 				if (value != null && StringTools.trim(value).length > 0) chosen(StringTools.trim(value));
@@ -2095,6 +2097,50 @@ class ExosuitApp implements DesktopUiApplication {
 		var machine = machineClient == null ? null : machineClient.machine;
 		if (machine == null) return;
 		application.activeContext.catalogChanged([for (entry in machine.workspaces) entry.id], function(path) return sys.FileSystem.exists(path));
+	}
+
+	/**
+		The app's state for a test driver (EXOSUIT_AUTOMATION_DIR, see devtools.AutomationProbe): what is open, per
+		context, and what the tree and the right panel show. Plain data; nothing here changes the app.
+	**/
+	public function automationState():Dynamic {
+		var active = application.activeContext, current = application.savedWorkspaces.current;
+		var machine = machineClient == null ? null : machineClient.machine;
+		var client = workbenchClient, catalog = client == null ? null : client.terminalCatalog();
+		var agents = client == null ? null : client.agentService().agents();
+		var panes:Array<Dynamic> = [];
+		for (pane in host.panes) {
+			var tabs:Array<Dynamic> = [];
+			for (item in pane.items) {
+				var title = "", kind = "";
+				switch item {
+					case Document(view): kind = "document"; title = view.document.hasBackingPath() ? view.document.requirePath() : "(untitled)";
+					case Terminal(terminal): kind = "terminal"; title = terminal.title;
+					case Agent(agent): kind = "agent"; title = agent.title;
+					case WorkspaceFile(file): kind = "workspace-file"; title = file.root + "|" + file.path;
+					case Settings(_): kind = "settings";
+					case Image(_): kind = "image";
+					case UnsupportedFile(_): kind = "unsupported";
+				}
+				tabs.push({kind: kind, title: title});
+			}
+			panes.push({id: pane.id, active: pane.activeIndex, tabs: tabs});
+		}
+		return {
+			context: active.key(), hostContext: host.layoutContextKey, contextWorkspace: active.contextWorkspaceId,
+			openWorkspace: machineClient == null ? null : currentWorkspaceId(machineClient), savedWorkspace: current == null ? null : {id: current.id, name: current.name},
+			machineWorkspaces: machine == null ? [] : [for (entry in machine.workspaces) {id: entry.id, name: entry.name, folders: entry.folders}],
+			groups: catalog == null ? [] : [for (group in catalog.groups) {id: group.id, name: group.name, parent: group.parent, order: group.order, cwd: group.cwd}],
+			terminals: catalog == null ? [] : [for (terminal in catalog.terminals) {id: terminal.id, name: terminal.name, group: terminal.group, order: terminal.order, state: terminal.state}],
+			agents: agents == null ? [] : [for (record in agents.records) {id: record.id, name: record.name, group: record.group, state: record.state}],
+			recent: [for (info in active.recent) info.key()],
+			filesRoots: try contextRoots() catch (_:Dynamic) [],
+			panes: panes,
+			sessionLines: host.sessionLines(),
+			notifications: [for (entry in host.getNotifications().history()) entry.source + ": " + entry.message],
+			workspaceStatus: workspaceStatus, workspaceError: workspaceError, watched: [for (id => w in watchedStates) {workspace: id, running: w.running, live: w.live, starting: w.starting, hasCatalog: w.catalog != null, groups: w.catalog == null ? -1 : w.catalog.groupList().length, terminals: w.catalog == null ? -1 : w.catalog.terminalList().length}],
+			commandViewActive: host.isCommandViewActive()
+		};
 	}
 
 	/** The quick switch: recent contexts first, then the machine's workspaces and the current workspace's groups. */
