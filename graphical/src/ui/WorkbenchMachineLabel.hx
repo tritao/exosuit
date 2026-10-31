@@ -15,6 +15,7 @@ import haxeon.ui.widgets.layout.Row;
 import haxeon.ui.widgets.text.MiddleEllipsisText;
 import haxeon.ui.widgets.text.Text;
 import suit.MachineCatalog.MachineWorkspace;
+import ui.WorkbenchMachineView.WorkbenchWorkspaceState;
 
 /** The Workbench tree's machine rows: a workspace, a status line, New Workspace…. */
 class WorkbenchMachineLabel implements View {
@@ -31,10 +32,24 @@ class WorkbenchMachineLabel implements View {
 	}
 
 	/** The open workspace says so; its accessibility label names its folders, or that it has none. */
-	public static function workspace(entry:MachineWorkspace, open:Bool):WorkbenchMachineLabel {
+	public static function workspace(entry:MachineWorkspace, open:Bool, ?state:WorkbenchWorkspaceState):WorkbenchMachineLabel {
 		var folders = entry.folders.length == 0 ? "no folders attached" : entry.folders.join(", ");
-		return new WorkbenchMachineLabel(open ? IconName.FolderOpen : IconName.FolderClosed, entry.name, open ? "this window" : null,
-			"Workspace " + entry.name + (open ? ", open in this window" : "") + " · " + folders, false, false);
+		var marker = open ? "this window" : stateMarker(state);
+		var catalog = state == null ? null : state.catalog;
+		// A stopped workspace shows the attention it had when its service last ran, which is no longer true.
+		var attention = catalog == null || open || state == null || !state.running ? 0 : catalog.attention;
+		var shown = attention > 0 && marker != null ? marker + " · " + attention : marker;
+		var said = open ? ", open in this window" : marker == null ? "" : ", " + marker + (attention > 0 ? ", " + attention + " need attention" : "");
+		return new WorkbenchMachineLabel(open ? IconName.FolderOpen : IconName.FolderClosed, entry.name, shown,
+			"Workspace " + entry.name + said + " · " + folders, false, false);
+	}
+
+	/** What a workspace this window is not attached to is doing: idle (its service is not running), starting, running, or reconnecting. */
+	public static function stateMarker(state:Null<WorkbenchWorkspaceState>):Null<String> {
+		if (state == null) return null;
+		if (state.starting) return "starting…";
+		if (!state.running) return "idle";
+		return state.live ? "running" : "reconnecting";
 	}
 
 	public static function newWorkspace():WorkbenchMachineLabel

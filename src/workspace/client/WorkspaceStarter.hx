@@ -3,8 +3,37 @@ package workspace.client;
 import process.OwnedProcess;
 import process.ProcessManager;
 
+/** What the starter needs of a launched service process; the default wraps an OwnedProcess, tests supply their own. */
+interface StartedProcess {
+	function running():Bool;
+	function exitStatus():Int;
+	function readStdout():String;
+	function readStderr():String;
+	function release():Void;
+}
+
+private class OwnedStarted implements StartedProcess {
+	final processes:ProcessManager;
+	final process:OwnedProcess;
+
+	public function new(processes:ProcessManager, process:OwnedProcess) {
+		this.processes = processes;
+		this.process = process;
+	}
+
+	public function running():Bool return process.running();
+
+	public function exitStatus():Int return process.exitStatus();
+
+	public function readStdout():String return process.readStdout();
+
+	public function readStderr():String return process.readStderr();
+
+	public function release():Void processes.release(process);
+}
+
 private typedef Start = {
-	var process:Null<OwnedProcess>;
+	var process:Null<StartedProcess>;
 	var target:WorkspaceServiceTarget;
 	var done:Null<String>->Void;
 	var deadline:Float;
@@ -27,17 +56,20 @@ class WorkspaceStarter {
 	/** Service processes launched at once; further starts wait their turn. */
 	public static inline final MAX_CONCURRENT = 2;
 
-	final processes:ProcessManager;
+	final processes:Null<ProcessManager>;
 	final launcher:String;
 	final clock:Void->Float;
 	final environment:Null<Map<String, String>>;
+	final spawn:Null<(WorkspaceServiceTarget, String)->StartedProcess>;
 	final starts:Map<String, Start> = [];
 	/** Starts in the order they were asked for; a start launches when fewer than MAX_CONCURRENT run. */
 	final order:Array<Start> = [];
 	/** The longest the launch call (CreateProcess) blocked the caller, in seconds: it runs on the frame that polls. */
 	public var slowestLaunch(default, null):Float = 0;
 
-	public function new(processes:ProcessManager, launcher:String, clock:Void->Float, ?environment:Map<String, String>) {
+	public function new(processes:Null<ProcessManager>, launcher:String, clock:Void->Float, ?environment:Map<String, String>,
+			?spawn:(WorkspaceServiceTarget, String)->StartedProcess) {
+		this.spawn = spawn;
 		this.processes = processes;
 		this.launcher = launcher;
 		this.clock = clock;
@@ -62,6 +94,18 @@ class WorkspaceStarter {
 		};
 		starts.set(target.workspace, entry);
 		order.push(entry);
+	}
+
+	/**
+		Drops a start that has not launched yet (the user collapsed the workspace, or left it); `done` gets null, as nothing failed.
+		A start already launched runs on: the service is detached and suit will report it. True when a queued start was dropped.
+	**/
+	public function cancel(workspace:String):Bool {
+		var entry = starts.get(workspace);
+		if (entry == null || entry.launched)
+			return false;
+		finish(entry, null);
+		return true;
 	}
 
 	/** Workspaces waiting for a free slot. */
@@ -91,7 +135,13 @@ class WorkspaceStarter {
 			arguments.push("--detach");
 			arguments.push("--wire");
 			entry.errors = "";
-			entry.process = processes.start(Sys.executablePath(), arguments, root, LocalWorkspaceClient.agentEnvironment(launcher, environment));
+			var make = spawn, manager = processes;
+			if (make != null)
+				entry.process = make(entry.target, root);
+			else if (manager != null)
+				entry.process = new OwnedStarted(manager, manager.start(Sys.executablePath(), arguments, root, LocalWorkspaceClient.agentEnvironment(launcher, environment)));
+			else
+				throw "No process manager";
 		} catch (failure:Dynamic)
 			finish(entry, Std.string(failure));
 		slowestLaunch = Math.max(slowestLaunch, Sys.time() - began);
@@ -103,7 +153,7 @@ class WorkspaceStarter {
 		var process = entry.process;
 		entry.process = null;
 		if (process != null)
-			processes.release(process);
+			process.release();
 		entry.done(failure);
 	}
 
@@ -144,7 +194,7 @@ class WorkspaceStarter {
 			else if (code == BUSY) {
 				// Another client is starting it; ask again shortly.
 				entry.process = null;
-				processes.release(process);
+				process.release();
 				entry.retryAt = now + 250;
 			} else
 				finish(entry, entry.errors.length > 0 ? StringTools.trim(entry.errors) : "The workspace service did not start");

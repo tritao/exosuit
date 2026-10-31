@@ -34,9 +34,46 @@ class SavedWorkspaceController {
 		app.commands.add("workspace:recent", _ -> recentPicker(), null, "Open Recent Workspace…");
 		app.commands.add("workspace:close", _ -> close(), _ -> isOpen(), "Close Workspace");
 	}
+	/** The machine workspace this window's folder opened from the command line belongs to, once suit's catalog names it. */
+	var machineId:Null<String>;
+	var machineName:String = "Workspace";
+
+	/**
+		A window opened on a workspace's folder (not on a saved workspace file) works in that machine workspace: its
+		context takes the workspace's id, and the contexts saved under the placeholder id follow, as when a workspace is saved.
+	**/
+	public function adoptMachineWorkspace(id:String, name:String):Void {
+		if (current != null) return;
+		if (machineId == id) {
+			// The catalog renamed the workspace: the context's label follows.
+			if (machineName != name) { machineName = name; changed(); }
+			return;
+		}
+		var previous = machineId != null ? machineId : "workspace";
+		machineId = id; machineName = name;
+		onIdentityAssigned(previous, id);
+		changed();
+	}
+
+	/**
+		The window no longer shows exactly one machine workspace's folder (another folder was added, the folder was
+		removed or the workspace closed): the adopted id goes and the context goes back under the placeholder.
+	**/
+	public function releaseMachineWorkspace():Void {
+		if (machineId == null) return;
+		var previous:String = machineId;
+		machineId = null; machineName = "Workspace";
+		if (current == null) onIdentityAssigned(previous, "workspace");
+		changed();
+	}
+
+	/** The id contexts are saved under now: the saved workspace's, else the adopted machine workspace's, else the placeholder. */
+	function contextWorkspaceId():String
+		return current != null ? current.id : machineId != null ? machineId : "workspace";
 	function changed():Void {
 		if (restoring) return;
-		app.activeContext.updateWorkspace(current == null ? "workspace" : current.id, current == null ? "Workspace" : current.name, roots());
+		app.activeContext.updateWorkspace(current != null ? current.id : machineId != null ? machineId : "workspace",
+			current != null ? current.name : machineId != null ? machineName : "Workspace", roots());
 		onChanged();
 	}
 	public function roots():Array<String>
@@ -55,6 +92,7 @@ class SavedWorkspaceController {
 			for (project in app.workspace.projects.copy()) app.workspace.removeProject(project);
 			current = null;
 			for (root in record.roots) if (available(root)) app.openArgument(root);
+			machineId = null; machineName = "Workspace";
 			current = record.copy(); path = file; dirty = false; savedContent = content;
 			app.activeContext.updateWorkspace(record.id, record.name, record.roots);
 		} catch (error:Dynamic) {
@@ -81,7 +119,8 @@ class SavedWorkspaceController {
 			if (target != path) record.name = name;
 			var content = record.encode();
 			if (FileSystem.exists(target)) sys.io.AtomicFile.write(target, content); else sys.io.AtomicFile.create(target, content);
-			var previousId = current == null ? "workspace" : current.id;
+			var previousId = contextWorkspaceId();
+			machineId = null; machineName = "Workspace";
 			current = record; path = target; savedContent = content; dirty = false;
 			if (previousId != record.id) onIdentityAssigned(previousId, record.id);
 			recents.add(target); changed(); return true;
@@ -98,7 +137,10 @@ class SavedWorkspaceController {
 	}
 	public function close():Void {
 		for (project in app.workspace.projects.copy()) app.workspace.removeProject(project);
-		current = null; path = ""; savedContent = ""; dirty = false; changed();
+		var adopted = machineId;
+		current = null; path = ""; savedContent = ""; dirty = false;
+		if (adopted != null) { releaseMachineWorkspace(); return; }
+		changed();
 	}
 	public static function available(root:String):Bool return FileSystem.exists(root) && FileSystem.isDirectory(root);
 	function prompt(label:String, action:String->Bool):Void {

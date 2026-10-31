@@ -9,6 +9,10 @@ typedef WorkbenchMachineActions = {
 	var busy:Void->Bool;
 	/** Opens the workspace in this window, switching from the one open now. */
 	var open:MachineWorkspace->Void;
+	/** Starts an idle workspace's service without opening it here; its catalog then appears in the tree. */
+	var start:MachineWorkspace->Void;
+	/** Drops a start that is still queued (the workspace was collapsed); one already launched runs on. */
+	@:optional var cancelStart:MachineWorkspace->Void;
 	/** Asks for a name, creates a workspace with no folders, then opens it. */
 	var create:Void->Void;
 	var rename:MachineWorkspace->Void;

@@ -19,7 +19,9 @@ import haxeon.ui.widgets.layout.Column;
 import haxeon.ui.widgets.layout.Row;
 import haxeon.ui.widgets.overlays.MenuItem;
 import haxeon.ui.widgets.text.Text;
+import ui.WorkbenchMachineView.WorkbenchWorkspaceState;
 import ui.WorkbenchOrder;
+import ui.WorkbenchRowKey.ForeignRow;
 import workspace.client.WorkspaceWorkbenchClient;
 import workspace.service.WorkspaceAgentProtocol;
 import workspace.service.WorkspaceProtocol;
@@ -94,7 +96,12 @@ class WorkbenchPanel implements View {
     var observedWorkspaceRoot:Null<String>;
     var observedWorkspaceInstance:Null<String>;
     // The machine rows' inputs at the last projection, and the last catalog, kept through transport recovery.
-    var machineKey = "";
+    final throttle = new CatalogThrottle();
+	/** The workspace rows the tree has open, which are the ones whose catalogs the model projects. */
+	final expandedWorkspaces:Map<String, Bool> = [];
+	var expandRevision = 0;
+    /** An item of another workspace the user clicked: opened once the window is attached to that workspace. */
+    var pendingForeign:Null<{workspace:String, kind:WorkbenchRowKind, id:String, from:Null<String>, until:Float}>;
     var retainedCatalog:Null<TerminalCatalog>;
     var observedOpenRow:Null<String>;
 
@@ -116,18 +123,47 @@ class WorkbenchPanel implements View {
 		tree.canDropItem = canDropNode;
 		tree.onItemDrop = dropNode;
 		tree.onSelectionChanged = function(_) requestFrame();
-		tree.onExpandedChanged = function(_, _) requestFrame();
+		tree.onExpandedChanged = function(key, expanded) {
+			if (WorkbenchRowKey.workspaceId(key) != null) {
+				if (expanded) expandedWorkspaces.set(key, true);
+				else expandedWorkspaces.remove(key);
+				if (!expanded) cancelStart(WorkbenchRowKey.workspaceId(key));
+				expandRevision++;
+			}
+			requestFrame();
+		};
 		tree.onItemContextMenu = function(key, event) {
             event.preventDefault(); event.stopPropagation();
-            if (WorkbenchRowKey.isMachineRow(key)) machineMenu(key, event);
+            if (WorkbenchRowKey.isForeign(key)) foreignMenu(key, event);
+            else if (WorkbenchRowKey.isMachineRow(key)) machineMenu(key, event);
             else menu(groupFor(key), event, key);
         };
-		// Every workspace row can expand; expanding one that is not open opens it here, and it expands once it is.
+		// Every workspace row can expand. One with a running service just expands, showing its groups, sessions and terminals
+		// from its catalog; an idle one starts its service (a kept catalog shows meanwhile), and its catalog then updates.
+		// Without catalog connections, expanding a workspace that is not open opens it here, as before Phase 6.
 		tree.hasChildrenHint = model.expandable;
 		tree.onExpansionRequested = function(key, expanded, _) {
 			var id = WorkbenchRowKey.workspaceId(key);
 			if (id == null || !expanded || key == model.openRow) return true;
-			openWorkspace(id);
+			var watching = watched(), state = watching == null ? null : watching.get(id);
+			if (watching == null) {
+				openWorkspace(id);
+				return false;
+			}
+			if (state != null && !state.running && !state.starting) startWorkspace(id);
+			return true;
+		};
+		// Enter, Space or a double click. A workspace row is a branch the tree would only toggle, so open it here; another
+		// workspace's terminal or session opens too. Groups, and the row of the open workspace, keep the default toggle.
+		tree.onActivate = function(key, _) {
+			var id = WorkbenchRowKey.workspaceId(key);
+			if (id != null) {
+				if (key == model.openRow) return false;
+				openWorkspace(id);
+				return true;
+			}
+			var foreign = WorkbenchRowKey.parseForeign(key);
+			if (foreign != null && foreign.kind != WorkbenchRowKind.Group) { openForeign(foreign); return true; }
 			return false;
 		};
 		tree.onItemActivatedWithEvent = function(key, event) {
@@ -139,16 +175,103 @@ class WorkbenchPanel implements View {
 		tree.onItemClicked = function(key, count) {
 			if (agentDraft != null || draft != null) return;
 			if (key == WorkbenchRowKey.NEW_WORKSPACE && count == 1) { createWorkspace(); return; }
+			// A single click on another workspace's item only selects it; Enter or a double click opens it (see onItemActivatedWithEvent).
+			if (WorkbenchRowKey.isForeign(key)) return;
 			var row = WorkbenchRowKey.parse(key);
-			if (row == null) return;
-			if (row.kind == WorkbenchRowKind.Agent) {
-				client.agentService().agentAction(row.id, "read", "", null);
-				openAgent(row.id);
-			} else if (row.kind == WorkbenchRowKind.Terminal) {
-				var terminal = model.terminals.get(row.id);
-				if (terminal != null) open(terminal);
-			}
+			if (row != null) openItem(row.kind, row.id);
 		};
+	}
+
+	function openItem(kind:WorkbenchRowKind, id:String):Void {
+		if (kind == WorkbenchRowKind.Agent) {
+			client.agentService().agentAction(id, "read", "", null);
+			openAgent(id);
+		} else if (kind == WorkbenchRowKind.Terminal) {
+			var terminal = model.terminals.get(id);
+			if (terminal != null) open(terminal);
+		}
+	}
+
+	/**
+		A session or terminal of another workspace opens in a tab. That needs the window attached to its workspace, so
+		the window switches to it first and opens the item once the workspace's tree is attached (Phase 7 makes the
+		switch instant).
+	**/
+	function openForeign(row:ForeignRow):Void {
+		if (row.kind == WorkbenchRowKind.Group) return;
+		pendingForeign = {workspace: row.workspace, kind: row.kind, id: row.id, from: model.openRow, until: Sys.time() + 60};
+		openWorkspace(row.workspace);
+	}
+
+	/**
+		Opens the item a click on another workspace asked for, once this window is attached to that workspace. The wish
+		ends, with a short message when the user is owed one, if the window attaches somewhere else, the attach fails or
+		takes too long, or the item is gone by the time the workspace is attached.
+	**/
+	function resolveForeign():Void {
+		var wanted = pendingForeign;
+		if (wanted == null) return;
+		var target = WorkbenchRowKey.machineWorkspace(wanted.workspace);
+		var owner = model.workspaces.get(wanted.workspace);
+		var where = owner == null ? "that workspace" : owner.name;
+		var what = wanted.kind == WorkbenchRowKind.Agent ? "session" : "terminal";
+		var open = model.openRow;
+		if (open != target) {
+			// The window moved on to another workspace (or this one left the machine): the click no longer applies.
+			if (open != wanted.from || owner == null) pendingForeign = null;
+			else if (Sys.time() > wanted.until) {
+				pendingForeign = null;
+				reportError("Could not switch to " + where + " to open the " + what);
+			}
+			return;
+		}
+		if (model.groupParent != open) {
+			var failure = client.terminalCatalogError();
+			if (failure != null) {
+				pendingForeign = null;
+				reportError("Could not open " + where + ": " + failure);
+			} else if (Sys.time() > wanted.until) {
+				pendingForeign = null;
+				reportError("Opening " + where + " took too long");
+			}
+			return;
+		}
+		var loaded = wanted.kind == WorkbenchRowKind.Agent ? client.agentService().agents() != null : true;
+		var present = wanted.kind == WorkbenchRowKind.Agent ? model.agents.exists(wanted.id) : model.terminals.exists(wanted.id);
+		if (!present && !loaded && Sys.time() <= wanted.until) return;
+		pendingForeign = null;
+		if (present) openItem(wanted.kind, wanted.id);
+		else reportError("That " + what + " is no longer in " + where);
+	}
+
+	function watched():Null<Map<String, WorkbenchWorkspaceState>> {
+		var actions = machine;
+		return actions == null ? null : actions.view().watched;
+	}
+
+	/** Collapsing a workspace drops its start if it is still waiting for a slot. */
+	function cancelStart(id:Null<String>):Void {
+		var actions = machine, entry = id == null ? null : model.workspaces.get(id);
+		var cancel = actions == null ? null : actions.cancelStart;
+		if (cancel != null && entry != null) cancel(entry);
+	}
+
+	function startWorkspace(id:String):Void {
+		var actions = machine, entry = model.workspaces.get(id);
+		if (actions != null && entry != null) actions.start(entry);
+	}
+
+	/** The menu of a row of another workspace: open the workspace here, which is what opening its items does too. */
+	function foreignMenu(key:String, event:UiEvent):Void {
+		var row = WorkbenchRowKey.parseForeign(key);
+		var actions = machine;
+		if (row == null || actions == null) return;
+		var entry = model.workspaces.get(row.workspace);
+		if (entry == null) return;
+		var target = entry;
+		var items = [new MenuItem("machine-workspace-open", "Open Workspace", function() actions.open(target), true)];
+		var owner = row.workspace;
+		showMenu(items, event, function() return model.workspaces.exists(owner));
 	}
 
 	function openWorkspace(id:String):Void {
@@ -172,6 +295,9 @@ class WorkbenchPanel implements View {
 		if (entry != null) {
 			var target = entry;
 			items.push(new MenuItem("machine-workspace-open", "Open", function() actions.open(target), key != model.openRow));
+			var watching = watched(), state = watching == null ? null : watching.get(target.id);
+			if (state != null && !state.running && !state.starting && key != model.openRow)
+				items.push(new MenuItem("machine-workspace-start", "Start Service", function() actions.start(target), idle));
 			if (key == model.groupParent) {
 				// Sessions and terminals made here sit in the workspace root, in no group.
 				if (canCreateAgent())
@@ -812,15 +938,21 @@ class WorkbenchPanel implements View {
 		var nextAgentKey = client.agentService().agentRevision();
 		var actions = machine;
 		var view = actions == null ? null : actions.view();
-		var nextMachineKey = view == null ? "" : view.revision + "\n" + view.openWorkspace + "\n" + view.openRoots.join("\n");
+		// What the machine rows depend on besides catalogs, and the catalogs' revision: a catalog change alone can wait a moment.
+		var nextStructure = view == null ? "" : view.revision + "\n" + view.openWorkspace + "\n" + view.openRoots.join("\n") + "\n" + expandRevision;
+		var nextMachineKey = view == null ? "" : nextStructure + "\n" + view.watchRevision;
 		if (catalog != null) retainedCatalog = catalog;
 		// Keep the last projection during transport recovery so TreeView does not
 		// discard its selection, expansion and scroll state for an empty catalog.
 		// The machine rows show without a catalog; the last one stays under its workspace meanwhile.
 		var shown = catalog != null ? catalog : view != null ? retainedCatalog : null;
+		var now = Sys.time();
+		var machineDue = view != null && throttle.due(nextStructure, nextMachineKey, now);
+		if (throttle.waiting) requestFrame();
 		if ((catalog != null && (refreshModel || catalogRevision != client.terminalCatalogRevision() || nextAgentKey != agentKey))
-			|| (view != null && nextMachineKey != machineKey) || (view == null && machineKey != "")) {
-            refreshModel = false; machineKey = nextMachineKey;
+			|| machineDue || (view == null && throttle.key != "")) {
+            refreshModel = false; throttle.took(nextStructure, nextMachineKey, now);
+			model.expandedRows = expandedWorkspaces;
 			catalogRevision = client.terminalCatalogRevision(); agentKey = nextAgentKey;
 			if (retainedAgents != null && shown != null && (retainedAgents.root != shown.workspaceRoot
 				|| (client.canReadTerminals() && !client.agentService().canReadAgents()))) retainedAgents = null;
@@ -828,6 +960,8 @@ class WorkbenchPanel implements View {
 			model.update(shown, retainedAgents, creating ? draft : null, view);
 			followOpenWorkspace();
 		}
+		// Each frame, not only when the tree changed: the wish times out on its own.
+		resolveForeign();
         applyPendingReveal();
 		applyPendingSessionSelection();
 		runBatch();

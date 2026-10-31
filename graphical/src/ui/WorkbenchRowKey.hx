@@ -37,6 +37,38 @@ class WorkbenchRowKey {
 	public static function isMachineRow(key:Null<String>):Bool
 		return key != null && key.length > 2 && key.charAt(1) == ":" && "wsn".indexOf(key.charAt(0)) >= 0;
 
+	/**
+		A row of a workspace this window is not attached to, from its catalog (M19 Phase 6): `f:` plus a kind letter
+		(`g`, `t` or `a`), the workspace id, `|` and the item's id. `parse` returns null for them, so the group, session
+		and terminal code that works on the attached workspace ignores them.
+	**/
+	public static function foreign(kind:WorkbenchRowKind, workspace:String, id:String):String
+		return "f:" + kindLetter(kind) + workspace + "|" + id;
+
+	static function kindLetter(kind:WorkbenchRowKind):String
+		return switch kind {
+			case WorkbenchRowKind.Group: "g";
+			case WorkbenchRowKind.Terminal: "t";
+			case WorkbenchRowKind.Agent: "a";
+		};
+
+	public static function isForeign(key:Null<String>):Bool
+		return key != null && key.length > 4 && StringTools.startsWith(key, "f:") && key.indexOf("|") > 3;
+
+	/** The workspace and item of an `f:` row, else null. */
+	public static function parseForeign(key:Null<String>):Null<ForeignRow> {
+		if (!isForeign(key) || key == null) return null;
+		var bar = key.indexOf("|");
+		var kind:Null<WorkbenchRowKind> = switch key.charAt(2) {
+			case "g": WorkbenchRowKind.Group;
+			case "t": WorkbenchRowKind.Terminal;
+			case "a": WorkbenchRowKind.Agent;
+			default: null;
+		};
+		if (kind == null) return null;
+		return new ForeignRow(kind, key.substring(3, bar), key.substring(bar + 1));
+	}
+
 	/** The row a tree key names, or null for a key that is not a Workbench row. */
 	public static function parse(key:Null<String>):Null<WorkbenchRowKey> {
 		if (key == null || key.length < 3 || key.charAt(1) != ":") return null;
@@ -88,4 +120,15 @@ class WorkbenchRowKey {
 		case WorkbenchRowKind.Terminal: terminal(id);
 		case WorkbenchRowKind.Agent: agent(id);
 	};
+}
+
+/** An item of a workspace this window is not attached to: what it is, which workspace holds it, and its id there. */
+class ForeignRow {
+	public final kind:WorkbenchRowKind;
+	public final workspace:String;
+	public final id:String;
+
+	public function new(kind:WorkbenchRowKind, workspace:String, id:String) {
+		this.kind = kind; this.workspace = workspace; this.id = id;
+	}
 }

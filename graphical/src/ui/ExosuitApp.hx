@@ -124,6 +124,15 @@ class ExosuitApp implements DesktopUiApplication {
 	var machineActions:Null<WorkbenchMachineActions>;
 	var machineClientRevision = -1;
 	var machineRefreshAt:Float = 0;
+	/** Catalog connections to every running workspace but the attached one, and the starter for idle ones (M19 Phase 6). */
+	var catalogConnections:Null<workspace.client.WorkspaceConnections>;
+	var workspaceStarter:Null<workspace.client.WorkspaceStarter>;
+	var catalogSyncKey = "";
+	var catalogRevision = -1;
+	var startingWorkspaces:Map<String, Bool> = [];
+	var startingRevision = 0;
+	var watchedKey = "";
+	var watchedStates:Map<String, WorkbenchWorkspaceState> = [];
 	var machinePanel:Null<MachinePanel>;
 	var machineRevision:Int = -1;
 	var lastTerminalCatalogRevision:Int = -1;
@@ -1815,13 +1824,7 @@ class ExosuitApp implements DesktopUiApplication {
 				requestFrame();
 			});
 		};
-		var openWorkspace = function():Null<String> {
-			var current = application.savedWorkspaces.current;
-			if (current != null) return current.id;
-			var roots = application.savedWorkspaces.roots();
-			var found = roots.length == 1 ? machine.workspaceFor(roots[0]) : null;
-			return found == null ? null : found.id;
-		};
+		var openWorkspace = function():Null<String> { return currentWorkspaceId(machine); };
 		// The open workspace's service follows its folders at once, with no restart: file roots, watchers and repositories.
 		var serveFolders = function(entry:suit.MachineCatalog.MachineWorkspace):Void {
 			var attached = workspaceAttachment;
@@ -1849,10 +1852,40 @@ class ExosuitApp implements DesktopUiApplication {
 			}));
 		};
 		machineActions = {
-			view: function() return {machine: machine.machine, error: machine.error, openWorkspace: openWorkspace(),
-				openRoots: application.savedWorkspaces.roots(), revision: machine.revision},
+			view: function() return machineView(machine, openWorkspace()),
 			busy: machine.busy,
 			open: open,
+			// An idle workspace's service starts without opening it here; suit then reports it and its catalog appears.
+			start: function(entry) {
+				var starter = workspaceStarter;
+				if (starter == null || starter.starting(entry.id)) return;
+				var begin = function():Void {
+					var known = machine.workspaceById(entry.id);
+					var target = machine.serviceTarget(known == null ? entry : known);
+					startingWorkspaces.set(entry.id, true);
+					startingRevision++;
+					starter.start(target, function(failure) {
+						startingWorkspaces.remove(entry.id);
+						startingRevision++;
+						report(failure);
+						machine.refresh();
+						machineRefreshAt = 0;
+						requestFrame();
+					});
+					requestFrame();
+				};
+				if (entry.folders.length == 0 && machine.scratchOf(entry) == null)
+					machine.scratch(entry.id, function(path, failure) {
+						if (report(failure) || path == null) return;
+						begin();
+					});
+				else
+					begin();
+			},
+			cancelStart: function(entry) {
+				var starter = workspaceStarter;
+				if (starter != null) starter.cancel(entry.id);
+			},
 			create: function() askName("New workspace name", function(name) machine.create(name, [], function(created, failure) {
 				if (!report(failure) && created != null) open(created);
 			})),
@@ -1886,6 +1919,67 @@ class ExosuitApp implements DesktopUiApplication {
 		};
 		if (workbenchPanel != null) workbenchPanel.machine = machineActions;
 		requestFrame();
+	}
+
+	/** The tree's view of the machine: its workspaces, and for the ones this window is not attached to, what the pool knows. */
+	function machineView(machine:workspace.client.MachineClient, open:Null<String>):WorkbenchMachineView {
+		var pool = catalogConnections, state = machine.machine;
+		var key = machine.revision + ":" + (pool == null ? 0 : pool.revision()) + ":" + startingRevision + ":" + open;
+		if (key != watchedKey) {
+			watchedKey = key;
+			watchedStates = [];
+			if (pool != null && state != null)
+				for (entry in state.workspaces) {
+					var service = machine.serviceOf(entry.id), watch = pool.watchOf(entry.id);
+					var mirror = pool.mirrorOf(entry.id);
+					watchedStates.set(entry.id, {running: service != null && service.running, live: watch != null && watch.live,
+						starting: startingWorkspaces.exists(entry.id), catalog: mirror});
+				}
+		}
+		return {machine: state, error: machine.error, openWorkspace: open, openRoots: application.savedWorkspaces.roots(),
+			revision: machine.revision, watched: pool == null ? null : watchedStates,
+			watchRevision: (pool == null ? 0 : pool.revision()) + startingRevision};
+	}
+
+	/** Follows suit's list of running services: connect to new ones, drop the ones that stopped, skip the attached workspace. */
+	function syncCatalogConnections(machine:workspace.client.MachineClient, pool:workspace.client.WorkspaceConnections):Void {
+		var state = machine.machine;
+		if (state == null) return;
+		var attached = currentWorkspaceId(machine);
+		// A window opened on a folder takes the id of the machine workspace that holds it, once the catalog names it. Two
+		// workspaces with the same single folder are ambiguous: none is adopted (the window still attaches to the first,
+		// as before), and the context stays under the placeholder id.
+		if (application.savedWorkspaces.current == null) {
+			var roots = application.savedWorkspaces.roots();
+			var matches = roots.length != 1 ? [] : [for (entry in state.workspaces) if (entry.folders.length == 1 && PathKey.same(entry.folders[0], roots[0])) entry];
+			if (matches.length == 1) application.savedWorkspaces.adoptMachineWorkspace(matches[0].id, matches[0].name);
+			else application.savedWorkspaces.releaseMachineWorkspace();
+		}
+		var key = machine.revision + ":" + attached;
+		if (key == catalogSyncKey) return;
+		catalogSyncKey = key;
+		var services:Array<workspace.client.WorkspaceConnections.WatchedService> = [];
+		for (entry in state.workspaces) {
+			var service = machine.serviceOf(entry.id);
+			if (service != null)
+				services.push({workspace: entry.id, endpoint: service.endpoint, pid: service.pid, running: service.running});
+		}
+		pool.sync(state.id, services, attached, [for (entry in state.workspaces) entry.id]);
+	}
+
+	/** The machine workspace attached in this window: the open saved workspace, else the one whose only folder is open. */
+	function currentWorkspaceId(machine:workspace.client.MachineClient):Null<String> {
+		var current = application.savedWorkspaces.current;
+		if (current != null) return current.id;
+		var roots = application.savedWorkspaces.roots();
+		var found = roots.length == 1 ? machine.workspaceFor(roots[0]) : null;
+		return found == null ? null : found.id;
+	}
+
+	/** Gives the window its catalog connections and the starter for idle workspaces (M19 Phase 6). */
+	public function attachWorkspaceConnections(pool:workspace.client.WorkspaceConnections, starter:workspace.client.WorkspaceStarter):Void {
+		catalogConnections = pool;
+		workspaceStarter = starter;
 	}
 
 	/** Opens the machine workspace `id` unless it is open; its clients then follow the workspace's manager choice. */
@@ -3075,11 +3169,23 @@ class ExosuitApp implements DesktopUiApplication {
 		if (workspaces != null && workspaces.enabled) {
 			// Another window or suit's CLI may change the list; look again every few seconds while the Workbench shows it.
 			var now = Sys.time();
-			if (sidebar.visible && sidebar.activeId == "workbench" && now >= machineRefreshAt && !workspaces.busy()) {
-				machineRefreshAt = now + 5;
+			var pool = catalogConnections, starter = workspaceStarter;
+			// A connection that went down, or a service being started, asks suit again sooner: suit knows whether it stopped.
+			var eager = pool != null && pool.anyDown() || startingWorkspaces.keys().hasNext();
+			if ((sidebar.visible && sidebar.activeId == "workbench" || eager) && now >= machineRefreshAt && !workspaces.busy()) {
+				machineRefreshAt = now + (eager ? 1.5 : 5);
 				workspaces.refresh();
 			}
 			workspaces.poll();
+			if (pool != null) {
+				syncCatalogConnections(workspaces, pool);
+				pool.poll();
+				if (catalogRevision != pool.revision()) {
+					catalogRevision = pool.revision();
+					requestFrame();
+				}
+			}
+			if (starter != null) starter.poll();
 			if (machineClientRevision != workspaces.revision) {
 				machineClientRevision = workspaces.revision;
 				// Another window may have attached or detached a folder; its change reaches the service shortly after.
@@ -3191,6 +3297,7 @@ class ExosuitApp implements DesktopUiApplication {
 		clearExplorerModel();
 		remoteFileSearch.cancel();
 		if (workspaceAttachment != null) workspaceAttachment.dispose();
+		if (catalogConnections != null) catalogConnections.dispose();
 		application.shutdown();
 		host.dispose();
 		if (desktop != null) desktop.shutdown();
