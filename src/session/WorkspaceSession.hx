@@ -17,6 +17,10 @@ class WorkspaceSession {
 	public var groupId:String = "";
 	public var groupLabel:String = "";
 	public var groupDirectory:String = "";
+	/** The machine id the saved contexts are keyed by; empty before the catalog ever named one. */
+	public var machineId:String = "";
+	/** Recently active contexts, newest first, so the quick switch knows cold ones after a restart. */
+	public final recent:Array<workspace.ContextInfo> = [];
 	public final layout:Array<String> = [];
 	public final expanded:Array<String> = [];
 	public final scmCommitDrafts:Map<String, String> = [];
@@ -31,6 +35,8 @@ class WorkspaceSession {
 			result.groupId = application.activeContext.id; result.groupLabel = application.activeContext.label;
 			result.groupDirectory = application.activeContext.cwd;
 		}
+		for (info in application.activeContext.recent) result.recent.push(info);
+		if (application.activeContext.machineId != workspace.ContextKey.DEFAULT_MACHINE) result.machineId = application.activeContext.machineId;
 		for (project in application.workspace.projects) {
 			if (safeValue(project.root)) result.projects.push(project.root);
 			for (path in project.expandedPaths()) if (safeValue(path)) result.expanded.push(path);
@@ -59,9 +65,12 @@ class WorkspaceSession {
 			var message = scmCommitDrafts.get(repositoryId);
 			if (message != null) application.scmCommitDrafts.set(repositoryId, message);
 		}
+		// Saved contexts are keyed by the machine id of the last run; adopt it before anything is keyed or restored.
+		if (machineId.length > 0) application.activeContext.assignMachine(machineId);
 		if (savedWorkspace != null) application.savedWorkspaces.restore(savedWorkspace, workspaceFile);
 		else for (root in projects)
 			if (FileSystem.exists(root) && FileSystem.isDirectory(root)) application.openArgument(root);
+		application.activeContext.restoreRecent(recent);
 		for (project in application.workspace.projects) project.restoreExpanded(expanded);
 		if (groupId.length > 0 && groupDirectory.length > 0) application.activeContext.focusGroup(groupId, groupLabel, groupDirectory);
 		// Populate the sidebar before restoring the saved dock selection and focus.
@@ -98,6 +107,10 @@ class WorkspaceSession {
 			output += "workspace=" + haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(savedWorkspace.encode())) + "\n";
 			output += "workspaceFile=" + haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(workspaceFile)) + "\n";
 		}
+		if (machineId.length > 0) output += "contextMachine=" + haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(machineId)) + "
+";
+		for (info in recent) output += "contextRecent=" + [for (value in [info.machine, info.workspace, info.group, info.label, info.workspaceLabel, info.directory])
+			haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(value))].join(":") + "\n";
 		if (groupId.length > 0) output += "contextGroup=" + [for (value in [groupId, groupLabel, groupDirectory]) haxe.crypto.Base64.encode(haxe.io.Bytes.ofString(value))].join(":") + "\n";
 		for (project in projects) output += "project=" + clean(project) + "\n";
 		for (document in documents) output += "document=" + clean(document) + "\n";
@@ -124,6 +137,18 @@ class WorkspaceSession {
 			if (key == "version") version = Std.parseInt(value);
 			else if (key == "workspace") result.savedWorkspace = workspace.SavedWorkspace.decode(haxe.crypto.Base64.decode(value).toString());
 			else if (key == "workspaceFile") result.workspaceFile = haxe.crypto.Base64.decode(value).toString();
+			else if (key == "contextRecent" && value.length <= 32768 && result.recent.length < workspace.ActiveContext.RECENT_LIMIT) {
+				var fields = value.split(":");
+				if (fields.length == 6) try {
+					var values = [for (field in fields) haxe.crypto.Base64.decode(field).toString()];
+					if (values[0].length > 0 && values[1].length > 0 && safeValue(values[0]) && safeValue(values[1]) && safeValue(values[2]) && safeValue(values[5]))
+						result.recent.push(new workspace.ContextInfo(values[0], values[1], values[2], values[3], values[4], values[5]));
+				} catch (_:Dynamic) {}
+			}
+			else if (key == "contextMachine" && value.length <= 8192) try {
+				var id = haxe.crypto.Base64.decode(value).toString();
+				if (id.length > 0 && id.length <= 4096 && safeValue(id)) result.machineId = id;
+			} catch (_:Dynamic) {}
 			else if (key == "contextGroup" && value.length <= 32768) {
 				var fields = value.split(":");
 				if (fields.length == 3) try {

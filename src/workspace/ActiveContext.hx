@@ -8,6 +8,15 @@ class ActiveContext {
 	public var roots(default, null):Array<String> = [];
 	public var cwd(default, null):String = Sys.getCwd();
 	public var revision(default, null):Int = 0;
+	/** The machine this window works on; the catalog's id once suit has answered, a placeholder before. */
+	public var machineId(default, null):String = ContextKey.DEFAULT_MACHINE;
+	/** The workspace the active context belongs to: the saved workspace's id, also for a group of it. */
+	public var contextWorkspaceId(default, null):String = "workspace";
+	/** Recently active contexts, newest first. Ctrl+Tab and the quick switch read it. */
+	public final recent:Array<ContextInfo> = [];
+	public static inline final RECENT_LIMIT = 32;
+	/** Called after `assignMachine` changed the id, so holders of saved contexts can re-key them. */
+	public var onMachineAssigned:String->Void = function(_) {};
 	final workspace:Workspace;
 	final listeners:Array<Void->Void> = [];
 	final groupProjects:Map<String, Project> = [];
@@ -22,21 +31,65 @@ class ActiveContext {
 			workspaceRoots = [for (project in workspace.projects) project.root];
 			if (kind == ContextKind.Workspace && workspaceUpdateDepth == 0) publish(ContextKind.Workspace, workspaceId, workspaceLabel, workspaceRoots);
 		});
+		remember(new ContextInfo(machineId, workspaceId, "", workspaceLabel, workspaceLabel, cwd));
 	}
 	public function subscribe(listener:Void->Void):Void->Void {
 		listeners.push(listener);
 		return function() { listeners.remove(listener); };
 	}
 	public function updateWorkspace(id:String, label:String, roots:Array<String>):Void {
+		// An identity assignment calls renameWorkspace first, so only another workspace opening counts as moved.
+		var moved = workspaceId != id;
 		workspaceId = id; workspaceLabel = label; workspaceRoots = roots.copy();
-		if (kind == ContextKind.Workspace && workspaceUpdateDepth == 0) useWorkspace();
+		// A group belongs to its workspace: another workspace shows its own root context.
+		if (workspaceUpdateDepth == 0 && (kind == ContextKind.Workspace || moved)) useWorkspace();
+	}
+	/** `machine/workspace/group` of the active context. */
+	public function key():String
+		return ContextKey.make(machineId, contextWorkspaceId, kind == ContextKind.Group ? id : "");
+	/** Contexts remembered by an earlier run: the cold ones the quick switch should still know. */
+	public function restoreRecent(infos:Array<ContextInfo>):Void {
+		var known:Map<String, Bool> = [];
+		for (info in recent) known.set(info.key(), true);
+		for (info in infos) {
+			info.machine = machineId == ContextKey.DEFAULT_MACHINE ? info.machine : machineId;
+			if (recent.length >= RECENT_LIMIT) break;
+			if (!known.exists(info.key())) { known.set(info.key(), true); recent.push(info); }
+		}
+	}
+	/**
+		The catalog named this machine. Saved keys move to it by `ContextKey.withMachine`; the context itself does
+		not change, so nothing is published.
+	**/
+	public function assignMachine(id:String):Void {
+		if (id == machineId || id.length == 0) return;
+		machineId = id;
+		for (info in recent) info.machine = id;
+		onMachineAssigned(id);
+	}
+	/**
+		A workspace got its real id (it was saved): the active context, a focused group included, keeps its place under
+		the new id instead of being treated as another workspace opening.
+	**/
+	public function renameWorkspace(previous:String, next:String):Void {
+		if (previous == next) return;
+		if (workspaceId == previous) workspaceId = next;
+		if (contextWorkspaceId == previous) contextWorkspaceId = next;
+		for (info in recent) if (info.workspace == previous) info.workspace = next;
+		var seen:Map<String, Bool> = [];
+		for (info in recent.copy()) if (seen.exists(info.key())) recent.remove(info); else seen.set(info.key(), true);
+	}
+	/** The workspace was deleted: its contexts leave the recent list. */
+	public function forgetWorkspace(id:String):Void {
+		for (entry in recent.copy()) if (entry.workspace == id && entry.workspace != contextWorkspaceId) recent.remove(entry);
 	}
 	/** Replacing a saved definition publishes one final context, never temporary roots/identity. */
 	public function beginWorkspaceUpdate():Void workspaceUpdateDepth++;
 	public function endWorkspaceUpdate():Void {
 		if (workspaceUpdateDepth == 0) throw "Unbalanced workspace context update";
 		workspaceUpdateDepth--;
-		if (workspaceUpdateDepth == 0 && kind == ContextKind.Workspace) useWorkspace();
+		// A group of the old workspace must not outlive the move: another workspace shows its own root context.
+		if (workspaceUpdateDepth == 0 && (kind == ContextKind.Workspace || contextWorkspaceId != workspaceId)) useWorkspace();
 	}
 	public function useWorkspace():Void publish(ContextKind.Workspace, workspaceId, workspaceLabel, workspaceRoots);
 	public function focusGroup(id:String, label:String, directory:String):Void {
@@ -67,10 +120,19 @@ class ActiveContext {
 
 	function publish(kind:ContextKind, id:String, label:String, roots:Array<String>):Void {
 		var cwd = roots.length == 0 ? Sys.getCwd() : roots[0];
-		if (this.kind == kind && this.id == id && this.label == label && this.roots.join("\n") == roots.join("\n") && this.cwd == cwd) return;
+		if (this.kind == kind && this.id == id && this.label == label && this.roots.join("\n") == roots.join("\n") && this.cwd == cwd
+			&& contextWorkspaceId == workspaceId) return;
 		this.kind = kind; this.id = id; this.label = label; this.roots = roots.copy(); this.cwd = cwd;
+		contextWorkspaceId = workspaceId;
+		remember(new ContextInfo(machineId, workspaceId, kind == ContextKind.Group ? id : "", label, workspaceLabel, cwd));
 		revision++;
 		for (listener in listeners.copy()) listener();
+	}
+	function remember(info:ContextInfo):Void {
+		var key = info.key();
+		for (entry in recent.copy()) if (entry.key() == key) recent.remove(entry);
+		recent.unshift(info);
+		while (recent.length > RECENT_LIMIT) recent.pop();
 	}
 	public function contains(path:String):Bool {
 		for (root in roots) if (path == root || StringTools.startsWith(path, root + "/")) return true;

@@ -36,6 +36,7 @@ import haxeon.ui.docking.DockDropZone;
 import haxeon.ui.docking.DockNode;
 import haxeon.ui.docking.DockNodeTools;
 import haxeon.ui.core.WidgetId;
+import workspace.ContextKey;
 import workspace.Workspace;
 import workspace.UnsupportedTextFile;
 
@@ -67,12 +68,26 @@ class UiWorkbenchHost implements WorkbenchHost {
 	final requestFrame:Void->Void;
 	final dockActions:DockActions;
 	final defaultDockLayout:DockNode;
-	var contextKey:String = "workspace:workspace";
+	var contextKey:String = ContextKey.make(ContextKey.DEFAULT_MACHINE, "workspace", "");
 	public var layoutContextKey(get, never):String;
 	function get_layoutContextKey():String return contextKey;
+	/**
+		How many inactive contexts keep their views attached; older ones are rebuilt from their snapshot. A soft
+		limit: a context with a live terminal, agent or diff cannot be rebuilt and stays attached beyond it.
+	**/
+	public var warmLimit:Int = 4;
+	/** Inactive contexts, most recently left first. */
+	final contextUse:Array<String> = [];
+	/** Seconds the last `switchContext` took, and whether it rebuilt the target from a snapshot. */
+	public var lastSwitchSeconds(default, null):Float = 0;
+	public var lastSwitchCold(default, null):Bool = false;
+	public var coldSwitches(default, null):Int = 0;
+	/** Maps a saved context key to the current scheme; set by the app, which knows the machine and workspace. */
+	public var migrateContextKey:String->String = function(key) return key;
 	final contextLayouts:Map<String, UiContextLayout> = [];
 	final pendingContextLayouts:Map<String, Array<String>> = [];
 	final contextDocumentRefs:Map<String, Document> = [];
+	final evictedSelections:Map<String, editor.SelectionSnapshot> = [];
 	var contextResolver:Null<(String, String)->Null<Document>>;
 	var defaultContextLines:Array<String> = [];
 	public var beforeContextRestore:Void->Void = function() {};
@@ -1316,14 +1331,321 @@ class UiWorkbenchHost implements WorkbenchHost {
 	}
 
 	public function renameContext(previous:String, next:String):Void {
-		if (contextKey == previous) {
+		if (previous == next) return;
+		var wasCurrent = contextKey == previous;
+		var live = contextLayouts.get(previous), pending = pendingContextLayouts.get(previous);
+		// Never overwrite: what already sits under `next` moves to a parked key, so no tabs are lost, and the
+		// active context is never replaced.
+		if (wasCurrent || live != null || pending != null) {
+			if (contextKey == next) next = freeParkedKey(next);
+			else parkContext(next);
+		}
+		if (wasCurrent) {
 			for (view in allViews()) view.restoreScroll(view.scrollX(), view.scrollY());
 			contextKey = next;
 		}
-		var live = contextLayouts.get(previous);
 		if (live != null) { contextLayouts.remove(previous); contextLayouts.set(next, live); }
-		var pending = pendingContextLayouts.get(previous);
 		if (pending != null) { pendingContextLayouts.remove(previous); pendingContextLayouts.set(next, pending); }
+		var used = contextUse.indexOf(previous);
+		if (used >= 0) contextUse[used] = next;
+		for (selectionKey in [for (k in evictedSelections.keys()) k]) if (StringTools.startsWith(selectionKey, previous + "|")) {
+			evictedSelections.set(next + selectionKey.substr(previous.length), evictedSelections.get(selectionKey));
+			evictedSelections.remove(selectionKey);
+		}
+	}
+
+	/** Moves whatever is saved under `key` (not the active context) to `key#parked<n>`; it stays saved and listed. */
+	function parkContext(key:String):Void {
+		if (key == contextKey) return;
+		var live = contextLayouts.get(key), pending = pendingContextLayouts.get(key);
+		if (live == null && pending == null) return;
+		renameContext(key, freeParkedKey(key));
+		pruneContextBookkeeping();
+	}
+
+	function freeParkedKey(key:String):String {
+		var n = 1;
+		while (contextLayouts.exists(key + "#parked" + n) || pendingContextLayouts.exists(key + "#parked" + n)) n++;
+		return key + "#parked" + n;
+	}
+
+	/** A workspace got its real id: every context under the old one follows, groups included. */
+	public function renameWorkspace(machine:String, previous:String, next:String):Void {
+		if (previous == next) return;
+		for (key in knownContextKeys()) {
+			var parsed = ContextKey.parse(key);
+			if (parsed != null && parsed.machine == machine && parsed.workspace == previous) renameContext(key, ContextKey.withWorkspace(key, next));
+		}
+	}
+
+	/**
+		A context was closed: its views and snapshot go, and so do the bookkeeping entries only it needed. Dirty and
+		untitled tabs never go: they move to the active context first. Returns how many moved.
+	**/
+	public function forgetContext(key:String):Int {
+		if (key == contextKey) return 0;
+		var rescued = mergeContext(key, true);
+		var state = contextLayouts.get(key);
+		contextLayouts.remove(key); pendingContextLayouts.remove(key); contextUse.remove(key);
+		for (selectionKey in [for (k in evictedSelections.keys()) k]) if (StringTools.startsWith(selectionKey, key + "|")) evictedSelections.remove(selectionKey);
+		if (state != null) {
+			for (terminal in state.panelTerminals.concat(state.hiddenTerminals)) terminal.dispose();
+			for (pane in state.panes) for (item in pane.items) UiEditorTabs.dispose(item);
+		}
+		pruneContextBookkeeping();
+		return rescued;
+	}
+
+	/** The workspace was removed: all its contexts close, except the one on screen. Returns the unsaved tabs moved here. */
+	public function forgetWorkspaceContexts(workspaceId:String):Int {
+		var rescued = 0;
+		for (key in knownContextKeys()) {
+			var parsed = ContextKey.parse(key);
+			if (parsed != null && parsed.workspace == workspaceId) rescued += forgetContext(key);
+		}
+		return rescued;
+	}
+
+	static function recovered(key:String):Bool return key.indexOf("#parked") >= 0 || key.indexOf("#legacy") >= 0;
+
+	/** Layouts set aside by a rename or migration collision; the quick switch offers them as "Recovered". */
+	public function recoveredContextKeys():Array<String> {
+		var keys = [for (key in knownContextKeys()) if (recovered(key) && key != contextKey) key];
+		keys.sort(Reflect.compare);
+		return keys;
+	}
+
+	/** "3 tabs, 1 unsaved" for a recovered layout. */
+	public function recoveredSummary(key:String):String {
+		var tabs = 0, unsaved = 0;
+		var live = contextLayouts.get(key);
+		if (live != null) {
+			for (pane in live.panes) for (item in pane.items) {
+				tabs++;
+				var view = UiEditorTabs.document(item);
+				if (view == null || view.document.dirty || !view.document.hasBackingPath()) unsaved++;
+			}
+		} else {
+			var lines = pendingContextLayouts.get(key);
+			var named:Array<String> = lines == null ? [] : tabRefs(lines);
+			if (lines != null) for (line in lines) {
+				var fields = line.split("\t");
+				if (fields.length == 9 && (fields[0] == "V" || fields[0] == "T") && (fields[0] == "V" || named.indexOf("V:" + fields[7] + ":" + fields[8]) < 0)) { tabs++; if (fields[7] == "R") unsaved++; }
+				else if (fields[0] == "X" || fields[0] == "C") { tabs++; unsaved++; }
+			}
+		}
+		return tabs + (tabs == 1 ? " tab" : " tabs") + (unsaved > 0 ? ", " + unsaved + " unsaved" : "");
+	}
+
+	static function unsavedDocument(document:Document):Bool return document.dirty || !document.hasBackingPath();
+
+	/** The documents named by V lines. A T line is the older flat form of a tab; it counts only when no V line names the same one. */
+	static function tabRefs(lines:Array<String>):Array<String> {
+		var result:Array<String> = [];
+		for (line in lines) {
+			var fields = line.split("\t");
+			if (fields.length == 9 && fields[0] == "V") result.push("V:" + fields[7] + ":" + fields[8]);
+		}
+		return result;
+	}
+
+	/**
+		Moves the tabs of `key` into the active context: with `dirtyOnly`, only dirty and untitled documents; otherwise
+		everything that can move (live tabs and terminals as they are, snapshot tabs by reopening their documents).
+		What moved leaves `key`; the entry goes once nothing of it is left, and a recovered entry with nothing
+		unsaved goes either way. Returns the number of tabs moved.
+	**/
+	public function mergeContext(key:String, dirtyOnly:Bool):Int {
+		if (key == contextKey) return 0;
+		var moved = 0, first = -1;
+		var live = contextLayouts.get(key);
+		if (live != null) {
+			var present:Map<String, Bool> = [];
+			for (pane in panes) for (item in pane.items) present.set(UiEditorTabs.key(item), true);
+			for (pane in live.panes) for (item in pane.items.copy()) {
+				var view = UiEditorTabs.document(item);
+				var wanted = dirtyOnly ? view != null && view.diffDocument == null && unsavedDocument(view.document) : view == null || view.diffDocument == null;
+				if (!wanted) continue;
+				pane.items.remove(item);
+				// Already open here: by document for text, by tab id for files and images. A shell is never merged away.
+				var duplicate = view != null ? hasDocumentTab(view.document) : UiEditorTabs.terminal(item) == null && present.exists(UiEditorTabs.key(item));
+				if (duplicate) { UiEditorTabs.dispose(item); continue; }
+				present.set(UiEditorTabs.key(item), true);
+				activePane.items.push(item);
+				if (first < 0) first = activePane.items.length - 1;
+				moved++;
+			}
+			if (!dirtyOnly) {
+				// Tabs left behind (diffs) go with the entry.
+				for (pane in live.panes) for (item in pane.items) UiEditorTabs.dispose(item);
+				for (terminal in live.panelTerminals) if (!terminal.disposed) panelTerminals.push(terminal);
+				for (terminal in live.hiddenTerminals) if (!terminal.disposed) hiddenTerminals.push(terminal);
+				contextLayouts.remove(key);
+			}
+		}
+		var lines = pendingContextLayouts.get(key);
+		if (lines != null) {
+			var rest:Array<String> = [];
+			var named = tabRefs(lines);
+			for (line in lines) {
+				var fields = line.split("\t");
+				var isTab = fields.length == 9 && (fields[0] == "V" || fields[0] == "T");
+				if (!isTab) { rest.push(line); continue; }
+				// A T line next to a V line for the same document is the same tab; alone it is a tab of its own.
+				if (fields[0] == "T" && named.indexOf("V:" + fields[7] + ":" + fields[8]) >= 0) continue;
+				var document = resolveContextDocument(fields[7], fields[8]);
+				if (document == null) { rest.push(line); continue; }
+				if (dirtyOnly && !unsavedDocument(document)) continue;
+				if (hasDocumentTab(document)) continue;
+				var view = openDocumentTab(document, false, false);
+				var column = Std.parseInt(fields[4]), row = Std.parseInt(fields[3]);
+				if (row != null && column != null) view.restoreCursor(row, column);
+				if (first < 0) first = activePane.items.length - 1;
+				moved++;
+			}
+			var left = false;
+			for (line in rest) if (line.length > 1 && line.charAt(1) == "\t" && "VTXCYIB".indexOf(line.charAt(0)) >= 0) left = true;
+			if (!left) pendingContextLayouts.remove(key); else pendingContextLayouts.set(key, rest);
+		}
+		pruneContextBookkeeping();
+		if (first >= 0) setActiveIndex(first, false);
+		if (moved > 0) requestFrame();
+		return moved;
+	}
+
+	function hasDocumentTab(document:Document):Bool {
+		for (pane in panes) for (view in pane.tabs) if (view.document == document) return true;
+		return false;
+	}
+
+	/** True when the layout still names something that cannot be recreated from files: unsaved text, shells or agents. */
+	function holdsUnsaved(key:String):Bool {
+		var live = contextLayouts.get(key);
+		if (live != null) {
+			if (live.panelTerminals.length > 0 || live.hiddenTerminals.length > 0) return true;
+			for (pane in live.panes) for (item in pane.items) {
+				var view = UiEditorTabs.document(item);
+				if (view == null) { if (UiEditorTabs.unsupportedFile(item) == null && UiEditorTabs.image(item) == null) return true; }
+				else if (view.diffDocument == null && unsavedDocument(view.document)) return true;
+			}
+			return false;
+		}
+		var lines = pendingContextLayouts.get(key);
+		if (lines == null) return false;
+		for (line in lines) {
+			var fields = line.split("\t");
+			if (fields[0] == "X" || fields[0] == "C" || fields[0] == "Y") return true;
+			if (fields.length == 9 && (fields[0] == "V" || fields[0] == "T") && fields[7] == "R") {
+				var document = resolveContextDocument("R", fields[8]);
+				if (document == null || unsavedDocument(document)) return true;
+			}
+		}
+		return false;
+	}
+
+	/** Keeps `contextDocumentRefs` to documents some snapshot still names, and `contextUse` to contexts that hold data. */
+	function pruneContextBookkeeping():Void {
+		var named:Map<String, Bool> = [];
+		for (layout in pendingContextLayouts) for (line in layout) {
+			var fields = line.split("	");
+			if (fields.length == 9 && (fields[0] == "V" || fields[0] == "T")) named.set(fields[7] + ":" + fields[8], true);
+		}
+		for (ref in [for (k in contextDocumentRefs.keys()) k]) {
+			var document = contextDocumentRefs.get(ref);
+			if (!named.exists(ref) || document == null || workspace.documents.documents.indexOf(document) < 0) contextDocumentRefs.remove(ref);
+		}
+		for (key in contextUse.copy()) if (!contextLayouts.exists(key) && !pendingContextLayouts.exists(key)) contextUse.remove(key);
+		// A recovered layout with nothing unsaved in it has done its job.
+		for (key in knownContextKeys()) if (recovered(key) && key != contextKey && !holdsUnsaved(key)) {
+			var state = contextLayouts.get(key);
+			contextLayouts.remove(key); pendingContextLayouts.remove(key); contextUse.remove(key);
+			if (state != null) for (pane in state.panes) for (item in pane.items) UiEditorTabs.dispose(item);
+		}
+		// Selection ranges are kept only for contexts that are snapshotted.
+		for (selectionKey in [for (k in evictedSelections.keys()) k]) {
+			var cut = selectionKey.lastIndexOf("|");
+			cut = cut > 0 ? selectionKey.lastIndexOf("|", cut - 1) : -1;
+			if (cut < 0 || !pendingContextLayouts.exists(selectionKey.substr(0, cut))) evictedSelections.remove(selectionKey);
+		}
+	}
+
+	/** The catalog named the machine: every saved context moves from the placeholder to its id. */
+	public function renameMachine(machine:String):Void {
+		var keys = [contextKey];
+		for (key in contextLayouts.keys()) keys.push(key);
+		for (key in pendingContextLayouts.keys()) if (keys.indexOf(key) < 0) keys.push(key);
+		for (key in keys) {
+			var next = ContextKey.withMachine(key, machine);
+			if (next != key) renameContext(key, next);
+		}
+	}
+
+	/** Contexts held in memory or snapshotted, for the quick switch. */
+	public function knownContextKeys():Array<String> {
+		var keys = [contextKey];
+		for (key in contextUse) if (keys.indexOf(key) < 0) keys.push(key);
+		for (key in contextLayouts.keys()) if (keys.indexOf(key) < 0) keys.push(key);
+		for (key in pendingContextLayouts.keys()) if (keys.indexOf(key) < 0) keys.push(key);
+		return keys;
+	}
+
+	public function contextIsWarm(key:String):Bool return key == contextKey || contextLayouts.exists(key);
+
+	/**
+		Inactive contexts beyond `warmLimit` give up their views. Only plain document tabs go: terminals, agents and
+		diffs hold live sessions that a snapshot cannot rebuild, so a context with one stays attached. This runs
+		synchronously right after the switch's first frame is requested, which is fine: disposing views is cheap and
+		touches no network or document state.
+	**/
+	function trimWarmContexts():Void {
+		var index = contextUse.length, evicted = false;
+		while (contextLayouts.keys().hasNext() && countWarm() > warmLimit && index > 0) {
+			index--;
+			var key = contextUse[index], state = contextLayouts.get(key);
+			if (state == null || !evictable(state)) continue;
+			var lines = layoutLines(state);
+			for (pane in state.panes) for (view in pane.tabs) {
+				var document = view.document;
+				var kind = document.dirty || !document.hasBackingPath() ? "R" : "P";
+				contextDocumentRefs.set(kind + ":" + (kind == "R" ? document.recoveryId : document.requirePath()), document);
+			}
+			// The snapshot lines hold the caret and scroll; a range selection is kept beside them.
+			for (pane in state.panes) for (view in pane.tabs) if (view.selection.hasSelection())
+				evictedSelections.set(key + "|" + pane.id + "|" + view.document.id, view.selection.snapshot());
+			pendingContextLayouts.set(key, lines);
+			contextLayouts.remove(key);
+			for (pane in state.panes) for (item in pane.items) UiEditorTabs.dispose(item);
+			evicted = true;
+		}
+		if (evicted) pruneContextBookkeeping();
+	}
+
+	function restoreEvictedSelections(key:String):Void {
+		for (pane in panes) for (view in pane.tabs) {
+			var selectionKey = key + "|" + pane.id + "|" + view.document.id, snapshot = evictedSelections.get(selectionKey);
+			if (snapshot == null) continue;
+			evictedSelections.remove(selectionKey);
+			var x = view.scrollX(), y = view.scrollY();
+			try {
+				view.selection.restoreSnapshot(view.document.buffer, snapshot);
+				view.restoreScroll(x, y);
+			} catch (_:Dynamic) {}
+		}
+	}
+
+	function countWarm():Int {
+		var count = 0;
+		for (key in contextLayouts.keys()) count++;
+		return count;
+	}
+
+	function evictable(state:UiContextLayout):Bool {
+		if (state.panelTerminals.length > 0 || state.hiddenTerminals.length > 0) return false;
+		for (pane in state.panes) for (item in pane.items) {
+			var view = UiEditorTabs.document(item);
+			if (view == null || view.diffDocument != null) return false;
+		}
+		return true;
 	}
 
 	public function initializeContext(key:String):Void {
@@ -1387,6 +1709,9 @@ class UiWorkbenchHost implements WorkbenchHost {
 	/** A context switch detaches views, never closes their documents or shells. */
 	public function switchContext(key:String):Void {
 		if (key == contextKey) return;
+		var started = Sys.time();
+		contextUse.remove(contextKey); contextUse.unshift(contextKey);
+		contextUse.remove(key);
 		contextLayouts.set(contextKey, new UiContextLayout(panes, activePane, panelTerminals, hiddenTerminals,
 			activePanelTerminalIndex, chromeLines(layoutLines())));
 		beforeContextDetach();
@@ -1399,6 +1724,8 @@ class UiWorkbenchHost implements WorkbenchHost {
 		beforeContextRestore();
 		var saved = contextLayouts.get(key);
 		contextLayouts.remove(key);
+		lastSwitchCold = saved == null;
+		if (lastSwitchCold) coldSwitches++;
 		if (saved != null) {
 			for (pane in saved.panes) {
 				for (item in pane.items.copy()) { var terminal = UiEditorTabs.terminal(item); if (terminal != null && terminal.disposed) pane.items.remove(item); }
@@ -1415,9 +1742,13 @@ class UiWorkbenchHost implements WorkbenchHost {
 			var lines = pendingContextLayouts.get(key);
 			pendingContextLayouts.remove(key);
 			restoreLayoutLines(lines == null ? defaultContextLines : lines, resolveContextDocument);
+			restoreEvictedSelections(key);
 		}
 		var editorFocused = dockActions.model.activePanelId == activePane.id;
 		pendingEditorFocus = editorFocused; focus.activate(editorFocused ? activeView() : null); notifyActiveTabChanged(); afterContextRestore(); requestFrame();
+		// Eviction follows the switch: the new context's first frame never waits for another one's teardown.
+		lastSwitchSeconds = Sys.time() - started;
+		trimWarmContexts();
 	}
 
 	function resolveContextDocument(kind:String, reference:String):Null<Document> {
@@ -1432,10 +1763,20 @@ class UiWorkbenchHost implements WorkbenchHost {
 		restoreWindowLayout(lines);
 		var stored = session.ContextLayoutStore.read(lines);
 		contextResolver = resolver;
-		for (key in stored.layouts.keys()) {
+		// Current-format keys first, then migrated legacy ones, each in key order: a legacy key that lands on an
+		// existing one is parked beside it (`#legacy<n>`) instead of replacing it or being dropped.
+		var storedKeys = [for (key in stored.layouts.keys()) key];
+		var legacyKey = function(key:String):Bool return migrateContextKey(key) != key;
+		storedKeys.sort(function(a, b) {
+			var la = legacyKey(a), lb = legacyKey(b);
+			return la != lb ? (la ? 1 : -1) : Reflect.compare(a, b);
+		});
+		for (key in storedKeys) {
 			var layout = stored.layouts.get(key);
 			if (layout == null) continue;
-			pendingContextLayouts.set(key, layout);
+			var target = migrateContextKey(key), free = target, taken = 0;
+			while (pendingContextLayouts.exists(free)) { taken++; free = target + "#legacy" + taken; }
+			pendingContextLayouts.set(free, layout);
 			// Hydrate documents now so Save All, recovery and rename also see inactive tabs.
 			for (line in layout) {
 				var fields = line.split("\t");
@@ -1446,9 +1787,28 @@ class UiWorkbenchHost implements WorkbenchHost {
 		}
 		var selected = pendingContextLayouts.get(contextKey);
 		pendingContextLayouts.remove(contextKey);
-		if (selected == null) selected = stored.activeKey == null || stored.activeKey == contextKey ? lines : defaultContextLines;
+		if (selected == null) selected = stored.activeKey == null || sameContextIgnoringMachine(migrateContextKey(stored.activeKey), contextKey) ? lines : defaultContextLines;
 		restoreLayoutLines(selected, resolveContextDocument);
+		normalizeMachines();
+		pruneContextBookkeeping();
 		afterContextRestore();
+	}
+
+	/** Saved keys under another machine id move to the current one (parking on a collision), so none linger. */
+	function normalizeMachines():Void {
+		var current = ContextKey.parse(contextKey);
+		if (current == null) return;
+		for (key in [for (k in pendingContextLayouts.keys()) k]) {
+			var next = ContextKey.withMachine(key, current.machine);
+			if (next != key) renameContext(key, next);
+		}
+	}
+
+	/** The machine segment may still be the placeholder when a session saved under the real id is restored. */
+	function sameContextIgnoringMachine(saved:String, current:String):Bool {
+		if (saved == current) return true;
+		var a = ContextKey.parse(saved), b = ContextKey.parse(current);
+		return a != null && b != null && a.workspace == b.workspace && a.group == b.group;
 	}
 
 	function retainedViews():Array<UiDocumentView> {
