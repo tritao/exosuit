@@ -121,7 +121,16 @@ Live mode and suit:
     (or `invalid_request`); there is no capability check yet. A service from before it cannot open a catalog holding
     a root terminal (ADR 0006, downgrade risk).
   - Per-group tab snapshots (Phase 8) need a file name for the root's empty id.
-  - Re-ordering sessions and terminals within a group: a stored sort order per item, plus drop targets between rows.
+  - Re-ordering (2026-10-31, done): sessions, terminals and groups share one order within a group, stored by the
+    services (`order` on terminal and session records; RPC-VECTORS.md, "Position among siblings"). Dropping on the
+    upper or lower part of a row places between siblings with an insertion line; Alt+Up/Down moves the selected row.
+    Positions are spaced 1024 apart: a move writes only the moved rows, at the middle between their neighbours, and
+    siblings are renumbered only when no gap is left or a neighbour has no position yet. A placement that would
+    renumber rows the client may not write is refused with the reason. Re-ordering needs the `workspace.order`
+    capability. Compatibility: an old client that moves a row into a group sends no position, so the row keeps the
+    position it had in the group it left; an old service drops the positions of any record it rewrites (and refuses
+    positions above 1000000, which a new client reaches after about a thousand appends); a client that has not placed
+    a row sorts it after the placed ones.
   - New catalogs still seed a Work group: `scripts/test-workbench-actions-ui.py`, `scripts/test-workbench-groups-ui.py`
     and `scripts/import-sakura.py` (default `--parent work`) rely on it.
   - In the `workbench-drag` panel test, a right-click on a session row after some drags opened the background menu
@@ -144,8 +153,8 @@ Live mode and suit:
 ### Workbench and Agent Mode
 
 - Groups cannot be closed in bulk.
-- A multi-row drop silently skips rows it cannot move.
-- Sort orders can tie after a batch move.
+- A multi-row drop reports the rows it cannot move (fixed with re-ordering); sort orders no longer tie,
+  because a placement leaves room between neighbours and renumbers with that room when there is none.
 - An Activity Rail drag swallows the next keyboard activation.
 - Search can index a very large scoped folder with no limit.
 - Collapsing a group drops the selection.
