@@ -107,6 +107,22 @@ and the status.
 - **Effect:** three suites looked broken for a day; it was only a missing argument.
 - **Status:** open. A stack trace should name the line of the faulting access.
 
+### E1005 blames a closure for a local that no closure assigns
+
+- **Symptom:** `E1005: Field "detectGeneration" requires an object: "state" is assigned by a closure, so a call that may run an escaped closure clears its null check.` at `ScmService.discover`, after haxeon `a6ac2ba9` ("Track the effects of fresh object construction"). Stock Haxe accepts the code, and haxeon before `a6ac2ba9` did too.
+- **Shape:** `var state = roots.get(key); if (state == null) { state = new ScmRootState(key); roots.set(key, state); }
+  if (state.detectJob != null) state.detectJob.cancel(); state.detectGeneration = nextGeneration++;`, and a closure
+  declared later that reads `state` and assigns its fields (`state.detectJob = null`). `state` is only assigned outside
+  the closure, so "assigned by a closure" is wrong; the closure assigns fields of the object, not the local. The
+  constructor of `ScmRootState` is impure (field initializers), which `a6ac2ba9` now treats as an unknown call.
+- **Repro:** none yet. A reduced version (a `State` class with a `Null<Job>` field, an impure constructor, a closure
+  that reads `state` and assigns `state.job`) compiles without error, so the trigger is something else in
+  `ScmRootState` (many initialized fields) or in the surrounding method.
+- **Found:** 2026-10-31, building the M19 stack against haxeon `1fd91b54`.
+- **Workaround:** build the local without reassigning it (`var known = roots.get(key); var state = known != null ? known : new ScmRootState(key);`).
+- **Status:** open. The message should say which call cleared the check, and not claim that a closure assigns a local
+  it only reads. Related to the "Unclear" entry on closure-assigned locals below.
+
 ## Standard library gaps
 
 Standard Haxe APIs haxeon's standard library does not have yet. Each one forced a hand-written replacement.
