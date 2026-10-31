@@ -207,6 +207,12 @@ The catalog watch is negotiated as `workspace.catalog` (`WorkspaceCatalogProtoco
 Rules:
 
 - A catalog holds no content: no activity, output or file data. Clients read those with the existing methods.
+- What a read lists follows the connection's other grants, not `workspace.catalog` alone: groups need
+  `workspace.read`, sessions `workspace.agents.read` and terminals `workspace.terminals.read`. A connection holding
+  only `workspace.catalog` gets the workspace's own fields and no items. The editor's catalog pool therefore
+  requests the three read capabilities together with `workspace.catalog` (it never asks for a write or control
+  capability). A listing-level grant (a `catalog` grant that lists ids and names without the read grants) is a
+  possible later refinement for devices that should see the tree but not read content; it is not defined.
 - No `resume`, or a token the service does not know (another instance, or trimmed), gives `reset: true`: the
   reply replaces everything the client holds. A known token gives what changed after it: records to upsert and
   ids to remove. `token` resumes after the page it came with. Tokens are opaque and at most 128 characters.

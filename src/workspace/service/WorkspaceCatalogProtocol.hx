@@ -100,6 +100,11 @@ import workspace.service.WorkspaceTerminalProtocol.TerminalRecord;
 /**
 	Permanent ids for the catalog watch (M19 Phase 0), behind the negotiated CAPABILITY. Proposed, pending the
 	mobile-app review (docs/roadmap/RPC-VECTORS.md). Never reuse ids.
+
+	The listing is filtered by the connection's read grants: groups need `workspace.read`, sessions
+	`workspace.agents.read`, terminals `workspace.terminals.read`. A connection with only CAPABILITY sees the
+	workspace's own fields and no items, so the editor's pool (WorkspaceCatalogWatch) requests the three read
+	capabilities with it. A catalog-only "list" grant is a possible later refinement.
 **/
 class WorkspaceCatalogProtocol {
 	public static inline final CAPABILITY = "workspace.catalog";
