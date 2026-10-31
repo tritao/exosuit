@@ -68,6 +68,7 @@ check core "$haxeon" run --project "$root_dir/haxeon.json" "${self_hosted[@]}"
 run_test plugin-host
 run_test command-clipboard
 run_test haxeon-rpc
+run_test workspace-catalog
 run_test workspace-migration
 run_test scm-git
 run_test scm-watch
