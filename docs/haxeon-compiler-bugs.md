@@ -26,6 +26,21 @@ and the status.
 - **Workaround:** copy the local into a new one after the declaration, or declare the function first.
 - **Status:** open.
 
+## Standard library gaps
+
+Standard Haxe APIs haxeon's standard library does not have yet. Each one forced a hand-written replacement.
+
+- **`Date` has only `now()` and `getTime()`:** no `getFullYear`, `getMonth`, `getDate`, `getHours` and so on.
+  `AgentWorkspaceMigration.timestamp` computes the calendar date from the epoch time by hand.
+- **No `DateTools`** (`DateTools.format` and the rest).
+
+- **No fsync / flush-to-disk for ordinary file writes, and no `FileOutput.flush` to disk.** `File.saveBytes` and
+  `FileOutput` give no durability. Only `sys.io.AtomicFile` flushes (fsync, or FlushFileBuffers, plus the parent
+  directory on POSIX), and it publishes a whole file from memory. The migration's backups therefore go through
+  `AtomicFile.createBytes`, one file at a time. There is no directory fsync for a created directory.
+- **No `sys.io.File.copy`.** Workaround: `File.saveBytes(to, File.getBytes(from))`, which reads the whole file into
+  memory.
+
 ## Unclear: bug or deliberate
 
 These are stricter than stock Haxe. Each needs a decision, and a better message if it is deliberate.
