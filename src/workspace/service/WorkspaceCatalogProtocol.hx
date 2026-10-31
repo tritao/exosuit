@@ -39,6 +39,8 @@ import workspace.service.WorkspaceTerminalProtocol.TerminalRecord;
 	@:id(6) var state:String;
 	/** Requests waiting for an answer, plus one when the session's state needs attention. */
 	@:id(7) var attention:Int;
+	/** Position among the siblings in its group; absent means not yet placed. */
+	@:optional @:id(8) var order:Null<Int>;
 }
 
 @:wire typedef CatalogTerminal = {
@@ -53,6 +55,8 @@ import workspace.service.WorkspaceTerminalProtocol.TerminalRecord;
 	@:id(8) var revision:Int64;
 	@:id(9) var agentProvider:Null<String>;
 	@:id(10) var attention:Int;
+	/** Position among the siblings in its group; absent means not yet placed. */
+	@:optional @:id(11) var order:Null<Int>;
 }
 
 /**
@@ -162,7 +166,8 @@ class WorkspaceCatalogProtocol {
 			directory: record.cwd,
 			provider: record.provider,
 			state: record.state,
-			attention: attention
+			attention: attention,
+			order: record.order
 		};
 
 	/** A terminal's catalog entry; its directory is the record's resolved cwd. */
@@ -177,6 +182,7 @@ class WorkspaceCatalogProtocol {
 			available: record.available,
 			revision: record.revision,
 			agentProvider: record.agentProvider,
-			attention: attention
+			attention: attention,
+			order: record.order
 		};
 }

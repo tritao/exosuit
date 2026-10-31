@@ -21,6 +21,7 @@ class WorkbenchDragTestMain {
   AgentMoveTest.run();
   SubgroupDropTest.run();
   TerminalRootTest.run();
+  TerminalOrderTest.run();
   WorkbenchFeedbackTest.run();
   var catalog:TerminalCatalog = {instance:"owner",workspaceRoot:"/workspace",next:null,
    groups:[{id:"one",name:"One",parent:null,cwd:null,revision:1},

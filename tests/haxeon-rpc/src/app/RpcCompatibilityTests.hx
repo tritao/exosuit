@@ -60,7 +60,7 @@ class RpcCompatibilityTests {
   var agentAction:AgentAction={workspace:"w",instance:"i",id:"a",action:"prompt",text:"hi",request:null};
   require(WorkspaceAgentProtocol.ACTION.decodeRequest(bytes("8601a17702a16903a16104a670726f6d707405a2686906c0")).action == "prompt",
     "Legacy Agent prompt vector no longer decodes");
-  require(WorkspaceAgentProtocol.ACTION.encodeRequest(agentAction).compare(bytes("8b01a17702a16903a16104a670726f6d707405a2686906c007c008c009c00ac00bc0"))==0,"Agent prompt vector changed");
+  require(WorkspaceAgentProtocol.ACTION.encodeRequest(agentAction).compare(bytes("8c01a17702a16903a16104a670726f6d707405a2686906c007c008c009c00ac00bc00cc0"))==0,"Agent prompt vector changed");
   var agentWideRoot="";for(_ in 0...1024) agentWideRoot+="😀";
   var agentWideName="";for(_ in 0...256) agentWideName+="😀";
   var agents:Array<AgentRecord> = [];
@@ -142,7 +142,7 @@ class RpcCompatibilityTests {
         var catalogQuery:TerminalCatalogQuery={workspace:"w",instance:"i",after:null};
         require(WorkspaceTerminalProtocol.LIST.encodeRequest(catalogQuery).compare(bytes("8301a17702a16903c0"))==0,"Terminal catalog query vector changed");
         var renameTerminal:TerminalRename={workspace:"w",instance:"i",id:"t",name:"N",group:"w",expectedRevision:haxe.Int64.make(1,2)};
-        var renameTerminalBytes=bytes("8601a17702a16903a17404a14e05a17706d30000000100000002");
+        var renameTerminalBytes=bytes("8701a17702a16903a17404a14e05a17706d3000000010000000207c0");
         require(WorkspaceTerminalProtocol.RENAME.encodeRequest(renameTerminal).compare(renameTerminalBytes)==0,"Terminal metadata vector changed");
         require(WorkspaceTerminalProtocol.RENAME.decodeRequest(renameTerminalBytes).expectedRevision==haxe.Int64.make(1,2),"Terminal revision truncated");
 
@@ -209,9 +209,47 @@ class RpcCompatibilityTests {
 		require(WorkspaceProtocol.RENAME.decodeRequest(bytes("8606a34e6577050104a16703a26f7002a16501a177")).operation == "op",
 			"Input map order became significant");
 		catalogVectors();
+		orderVectors();
 		versionRefusal();
 		methodErrors();
 		missingIdentity();
+	}
+
+	/** Re-ordering within a group: appended optional fields only; an older peer sees none of them. */
+	static function orderVectors():Void {
+		var rename:TerminalRename = {workspace: "w", instance: "i", id: "t", name: "n", group: "g", expectedRevision: haxe.Int64.ofInt(1), order: 3};
+		var renameBytes = bytes("8701a17702a16903a17404a16e05a16706010703");
+		require(WorkspaceTerminalProtocol.RENAME.encodeRequest(rename).compare(renameBytes) == 0, "Terminal rename order vector changed");
+		require(WorkspaceTerminalProtocol.RENAME.decodeRequest(renameBytes).order == 3, "Terminal rename order decode changed");
+		require(WorkspaceTerminalProtocol.RENAME.decodeRequest(bytes("8601a17702a16903a17404a16e05a1670601")).order == null,
+			"A terminal rename without order gained one");
+		var action:AgentAction = {workspace: "w", instance: "i", id: "a", action: "move", text: "g", request: "h", order: 2};
+		var actionBytes = bytes("8c01a17702a16903a16104a46d6f766505a16706a16807c008c009c00ac00bc00c02");
+		require(WorkspaceAgentProtocol.ACTION.encodeRequest(action).compare(actionBytes) == 0, "Agent move order vector changed");
+		require(WorkspaceAgentProtocol.ACTION.decodeRequest(actionBytes).order == 2, "Agent move order decode changed");
+		require(WorkspaceAgentProtocol.ACTION.decodeRequest(bytes("8601a17702a16903a16104a670726f6d707405a2686906c0")).order == null,
+			"An agent prompt gained an order");
+		// Records carry their position; a record from before the field has none, and so is not yet placed.
+		var terminal:TerminalRecord = {id: "t", name: "T", group: "g", cwd: "/d", instance: "i", state: "running", exitCode: 0, available: true,
+			revision: haxe.Int64.ofInt(1), order: 4};
+		var terminalBytes = WorkspaceTerminalProtocol.LIST.encodeResponse({instance: "i", groups: [], terminals: [terminal], next: null});
+		require(WorkspaceTerminalProtocol.LIST.decodeResponse(terminalBytes).terminals[0].order == 4, "Terminal record order round trip changed");
+		terminal.order = null;
+		var unplaced = WorkspaceTerminalProtocol.LIST.encodeResponse({instance: "i", groups: [], terminals: [terminal], next: null});
+		require(WorkspaceTerminalProtocol.LIST.decodeResponse(unplaced).terminals[0].order == null, "An unplaced terminal gained an order");
+		var record:AgentRecord = {id: "a", name: "A", group: "g", cwd: "/d", thread: "t", state: "idle", turn: null, workspaceRoot: "/w", order: 5};
+		var catalog = WorkspaceAgentProtocol.LIST.encodeResponse({instance: "i", root: "/w", records: [record], status: ""});
+		require(WorkspaceAgentProtocol.LIST.decodeResponse(catalog).records[0].order == 5, "Agent record order round trip changed");
+		record.order = null;
+		var legacy = WorkspaceAgentProtocol.LIST.encodeResponse({instance: "i", root: "/w", records: [record], status: ""});
+		require(WorkspaceAgentProtocol.LIST.decodeResponse(legacy).records[0].order == null, "An unplaced session gained an order");
+		// Catalog entries carry the same position.
+		require(WorkspaceCatalogProtocol.terminal({id: "t", name: "T", group: "g", cwd: "/d", instance: "i", state: "running", exitCode: 0, available: true,
+			revision: haxe.Int64.ofInt(1), order: 6}, 0).order == 6, "Catalog terminal lost its order");
+		require(WorkspaceCatalogProtocol.session({id: "a", name: "A", group: "g", cwd: "/d", thread: "t", state: "idle", turn: null, workspaceRoot: "/w",
+			order: 7}, 0).order == 7, "Catalog session lost its order");
+		require(WorkspaceProtocol.validOrder(null) && WorkspaceProtocol.validOrder(0) && WorkspaceProtocol.validOrder(WorkspaceProtocol.MAX_ORDER)
+			&& !WorkspaceProtocol.validOrder(-1) && !WorkspaceProtocol.validOrder(WorkspaceProtocol.MAX_ORDER + 1), "Order bounds changed");
 	}
 
 	/** M19 Phase 0: workspace refs, the catalog watch and session directories (proposed, pending mobile review). */
@@ -243,7 +281,7 @@ class RpcCompatibilityTests {
 			scratch: "/s", status: "running", attention: 1, groups: [], sessions: [session], terminals: [], removedGroups: [],
 			removedSessions: [], removedTerminals: [], watching: true};
 		var catalogBytes = bytes("de0011018201a16d02a17702a16903a17404c305c206a14e079008a22f7309a772756e6e696e670a010b900c91"
-			+ "8701a16102a14103a16704a22f6405a5636f64657806a469646c6507000d900e900f901090" + "11c3");
+			+ "8801a16102a14103a16704a22f6405a5636f64657806a469646c65070008c00d900e900f901090" + "11c3");
 		require(WorkspaceCatalogProtocol.CATALOG.encodeResponse(catalog).compare(catalogBytes) == 0, "Catalog page vector changed");
 		var page = WorkspaceCatalogProtocol.CATALOG.decodeResponse(catalogBytes);
 		require(page.reset && !page.more && page.folders.length == 0 && page.scratch == "/s" && page.sessions[0].directory == "/d"

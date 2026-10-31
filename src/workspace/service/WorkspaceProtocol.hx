@@ -154,6 +154,13 @@ class WorkspaceProtocol {
 
 	public static function order(value:Null<Int>):Int return value == null ? 0 : value;
 
+	/** The largest position a group, session or terminal can hold. */
+	public static inline final MAX_ORDER = 1000000;
+
+	/** Whether a service accepts `value` as a position: absent (unchanged, or not yet placed) or within 0...MAX_ORDER. */
+	public static function validOrder(value:Null<Int>):Bool
+		return value == null || value >= 0 && value <= MAX_ORDER;
+
 	public static function copyGroup(value:WorkspaceGroup):WorkspaceGroup
 		return {
 			id: value.id,

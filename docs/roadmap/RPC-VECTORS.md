@@ -81,8 +81,8 @@ Terminal catalog vectors (methods 115–117 use permanent identities):
 
 - First page query, workspace `w`, instance `i`, null after cursor:
   `8301a17702a16903c0`.
-- Rename terminal `t` to `N`, group `w`, expected Int64 revision 4294967298:
-  `8601a17702a16903a17404a14e05a17706d30000000100000002`.
+- Rename terminal `t` to `N`, group `w`, expected Int64 revision 4294967298 (field 7, order, absent):
+  `8701a17702a16903a17404a14e05a17706d3000000010000000207c0`.
 
 These run in the same native, Wasm32 and Wasm GC compatibility fixtures.
 
@@ -118,6 +118,26 @@ ignore the new OPEN field and retain the polling/snapshot fallback.
 geometry-only events, coalescing, reconnect, read-only viewers, malformed batches,
 exit ordering, bounded retention, snapshot recovery and legacy daemons.
 
+
+## Position among siblings
+
+Groups, sessions and terminals in one group share one order, so a session can sit between two sub-groups. Groups
+already carry `order` (field 5 of the tree request, field 6 of the record). The other two kinds gain it as appended
+optional fields; legacy peers skip the unknown ids, and an absent order means the item is not yet placed (it sorts after
+every placed sibling, in catalog order). A service accepts 0 to 1000000 and refuses anything else.
+
+| Value | Field |
+| --- | --- |
+| Terminal record, session record | `order`, ids 12 and 22 |
+| Terminal rename (method 116) | `order`, id 7; absent leaves the position unchanged |
+| Agent action `move` (method 122) | `order`, id 12; the destination may be the current group, and absent leaves the position unchanged |
+| Catalog session, catalog terminal | `order`, ids 8 and 11 |
+
+Appending a field adds a trailing nil to every encoded request of that shape, so the terminal rename and agent prompt
+vectors above grew by one entry; the legacy forms still decode (`order` reads as absent). Vectors:
+
+- Rename terminal `t` to `n`, group `g`, revision 1, order 3: `8701a17702a16903a17404a16e05a16706010703`.
+- Agent `move` of `a` from group `h` to `g`, order 2: `8c01a17702a16903a16104a46d6f766505a16706a16807c008c009c00ac00bc00c02`.
 
 ## Group tree extension
 
@@ -211,7 +231,7 @@ Rules:
 | catalog query m/w, no resume, watch | `83018201a16d02a17702c003c3` |
 | change m/w, token t | `82018201a16d02a17702a174` |
 | agent create w/i/a/g/Codex, directory /d | `8b01a17702a16903a16104a16705a5436f64657806c007c008c009c00ac00ba22f64` |
-| catalog m/w, instance i, token t, reset, name N, no folders, scratch /s, running, attention 1, one session a/A/g, /d, codex, idle, watching | `de0011018201a16d02a17702a16903a17404c305c206a14e079008a22f7309a772756e6e696e670a010b900c918701a16102a14103a16704a22f6405a5636f64657806a469646c6507000d900e900f90109011c3` |
+| catalog m/w, instance i, token t, reset, name N, no folders, scratch /s, running, attention 1, one session a/A/g, /d, codex, idle, watching | `de0011018201a16d02a17702a16903a17404c305c206a14e079008a22f7309a772756e6e696e670a010b900c918801a16102a14103a16704a22f6405a5636f64657806a469646c65070008c00d900e900f90109011c3` |
 
 The fixtures also fill a page with worst-case records of every kind (ids and names at their bounds in
 three-byte characters, folders at 4096 bytes) and check that it fits `PAGE_BYTES` and, in its response envelope,

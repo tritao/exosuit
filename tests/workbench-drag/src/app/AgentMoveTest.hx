@@ -2,6 +2,7 @@ package app;
 
 import workspace.provider.*;
 import workspace.service.WorkspaceAgentProtocol;
+import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceProtocol.WorkspaceGroup;
 import workspace.service.WorkspaceAgentPersistence;
 import workspace.runtime.WorkspaceDirectories;
@@ -43,9 +44,9 @@ class AgentMoveTest {
    server.poll();client.poll();
    require(advertised != null && advertised.canMove == true && advertised.canRename == true,kind+" omitted move support negotiation");
    var value:Null<AgentView> = null, code = "";
-   function action(kind:String,expected:String,target:String):Void {
+   function action(kind:String,expected:String,target:String,?order:Int):Void {
     value=null;code="";
-    client.call(WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"agent",action:kind,text:target,request:expected},1000,
+    client.call(WorkspaceAgentProtocol.ACTION,{workspace:"w",instance:"owner",id:"agent",action:kind,text:target,request:expected,order:order},1000,
      function(result) value=result,function(error) code=error.code);
     server.poll();client.poll();
    }
@@ -71,6 +72,25 @@ class AgentMoveTest {
    bind(true);
    move("two","one");require(value != null && value.record.group=="one",kind+" lost grouping across restart");
    require(value != null && value.record.name=="Plan α",kind+" lost renamed session across restart");
+   // A move names the position too, and may stay in the same group to re-order; no order leaves the position alone.
+   require(store.record.order==null,kind+" placed a session nobody ordered");
+   action("move","one","one",3);
+   require(value != null && value.record.order==3 && store.record.order==3 && store.record.group=="one",kind+" did not persist an order within its group");
+   action("move","one","one",-1);require(code=="invalid_order" && store.record.order==3,kind+" accepted a negative order");
+   action("move","one","one",WorkspaceProtocol.MAX_ORDER+1);require(code=="invalid_order" && store.record.order==3,kind+" accepted an order past the limit");
+   action("move","one","two",1);
+   require(store.record.group=="two" && store.record.order==1,kind+" did not place a session in the group it moved to");
+   action("move","two","one");
+   require(store.record.group=="one" && store.record.order==1,kind+" lost its position when moved without one");
+   action("move","one","one",3);
+   store.fail=true;action("move","one","one",9);
+   require(code=="storage_unavailable" && store.record.order==3,kind+" kept an order it could not save");
+   store.fail=false;service.dispose();
+   service=new WorkspaceAgentService("w","owner",directories.root,[make()],store);bind(true);
+   var listed:Null<AgentCatalog>=null;
+   client.call(WorkspaceAgentProtocol.LIST,{workspace:"w",instance:"owner"},1000,function(catalog) listed=catalog,function(error) throw error.message);
+   server.poll();client.poll();
+   require(listed != null && listed.records.length==1 && listed.records[0].order==3,kind+" lost its position across restart");
    store.fail=true;move("one","two");require(code=="storage_unavailable" && store.record.group=="one",kind+" accepted failed storage");
    store.fail=false;service.dispose();
    service=new WorkspaceAgentService("w","owner",directories.root,[make()],store);bind(true);

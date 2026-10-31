@@ -190,7 +190,8 @@ class CodexProvider implements AgentMessageSource {
 			permissionProfile: r.permissionProfile,
 			preferredModel: r.preferredModel,
 			preferredEffort: r.preferredEffort,
-			nameMetadata:r.nameMetadata
+			nameMetadata:r.nameMetadata,
+			order: r.order
 		};
 
 	function view(s:Session, ?before:Int):AgentView {
@@ -1066,7 +1067,7 @@ class CodexProvider implements AgentMessageSource {
 		if (q.action == "move" || q.action == "rename") {
 			try {
 				var error = q.action == "move"
-					? AgentMetadata.move(s.record, q.request, q.text, groups(), function() save(s))
+					? AgentMetadata.move(s.record, q.request, q.text, groups(), function() save(s), q.order)
 					: AgentMetadata.rename(s.record, q.request, q.text, function() save(s));
 				if (error != null) {
 					ctx.fail({code: error, message: "Session metadata changed or the new name or destination is invalid", ambiguous: false});

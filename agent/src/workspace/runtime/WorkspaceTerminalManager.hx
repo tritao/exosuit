@@ -108,7 +108,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
   static function profile(record:TerminalRecord):TerminalProfile return record.agentProvider == null
     ? TerminalProfile.shell(record.cwd) : TerminalProfile.agent(record.agentProvider, record.cwd);
   function validRecord(r:TerminalRecord):Bool return r != null && validAgentProvider(r.agentProvider) && r.id != null && r.id.length > 0
-    && r.id.length <= 128 && validName(r.name) && knownGroup(r.group) && r.workspaceRoot == root && r.cwd != null && r.cwd.length > 0 && r.cwd.length <= 1024 && r.instance != null
+    && r.id.length <= 128 && validName(r.name) && knownGroup(r.group) && WorkspaceProtocol.validOrder(r.order) && r.workspaceRoot == root && r.cwd != null && r.cwd.length > 0 && r.cwd.length <= 1024 && r.instance != null
     && r.instance.length > 0 && r.instance.length <= 128 && r.revision > 0 && r.revision < Int64.make(
       0x7fffffff,
       0xffffffff
@@ -140,7 +140,8 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
     available: true,
     revision: r.revision,
     workspaceRoot: root,
-    agentProvider: r.agentProvider
+    agentProvider: r.agentProvider,
+    order: r.order
   };
   function save(r:TerminalRecord):Void {
     if (storageFailed) throw "Terminal metadata storage unavailable";
@@ -269,7 +270,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         c.fail(error("unauthorized"));
         return;
       }
-      if (!valid(r.workspace, r.instance, r.id) || !validName(r.name) || !knownGroup(r.group)) {
+      if (!valid(r.workspace, r.instance, r.id) || !validName(r.name) || !knownGroup(r.group) || !WorkspaceProtocol.validOrder(r.order)) {
         c.fail(error("invalid_request"));
         return;
       }
@@ -285,6 +286,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
       var updated = copy(old);
       updated.name = StringTools.trim(r.name);
       updated.group = r.group;
+      if (r.order != null) updated.order = r.order;
       updated.revision += 1;
       try {
         save(updated);

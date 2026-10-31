@@ -349,7 +349,7 @@ class AgentKitProvider implements LocalAgentProvider {
 		switch q.action {
 			case "move", "rename":
 				try {
-					var problem = q.action == "move" ? AgentMetadata.move(s.record, q.request, q.text, groups(), function() save(s)) : AgentMetadata.rename(s.record,
+					var problem = q.action == "move" ? AgentMetadata.move(s.record, q.request, q.text, groups(), function() save(s), q.order) : AgentMetadata.rename(s.record,
 						q.request, q.text, function() save(s));
 					if (problem != null) {
 						error(problem, "Session metadata changed or the new name or destination is invalid");

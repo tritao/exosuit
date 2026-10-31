@@ -44,6 +44,8 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(19) var inputMessages:Null<Array<AgentInputMessage>>;
 	@:optional @:id(20) var queuePaused:Null<Bool>;
 	@:optional @:id(21) var nameMetadata:Null<AgentNameMetadata>;
+	/** Position among the siblings in its group (groups, sessions and terminals share one order); absent means not yet placed. */
+	@:optional @:id(22) var order:Null<Int>;
 }
 
 @:wire typedef AgentQuery = {
@@ -146,6 +148,8 @@ import haxeon.wire.MessagePack;
 	@:optional @:id(10) var expectedNativeName:Null<String>;
 	/** Opaque host-staged image IDs; accepted only by providers advertising support. */
 	@:optional @:id(11) var imageIds:Null<Array<String>>;
+	/** Move only: the position in the destination group, which may be the current one. Absent leaves it unchanged. */
+	@:optional @:id(12) var order:Null<Int>;
 }
 
 @:wire typedef AgentImageUpload = {

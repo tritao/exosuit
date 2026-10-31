@@ -122,6 +122,8 @@ import haxeon.wire.MessagePack;
 @:id(9) var revision:Int64;
 @:optional @:id(10) var workspaceRoot:Null<String>;
 @:optional @:id(11) var agentProvider:Null<String>;
+/** Position among the siblings in its group (groups, sessions and terminals share one order); absent means not yet placed. */
+@:optional @:id(12) var order:Null<Int>;
 }
 @:wire typedef TerminalCatalog = {@: id(1) var instance: String;
 @:id(2) var groups:Array<workspace.service.WorkspaceProtocol.WorkspaceGroup>;
@@ -137,6 +139,8 @@ import haxeon.wire.MessagePack;
 @:id(4) var name:String;
 @:id(5) var group:String;
 @:id(6) var expectedRevision:Int64;
+/** Absent leaves the position unchanged. */
+@:optional @:id(7) var order:Null<Int>;
 }
 @:wire typedef TerminalForget = {@: id(1) var workspace: String;
 @:id(2) var instance:String;
