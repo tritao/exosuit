@@ -181,6 +181,7 @@ class WorkbenchPanel implements View {
 			}
 			items.push(new MenuItem("machine-workspace-rename", "Rename…", function() actions.rename(target), idle, "F2", true));
 			items.push(new MenuItem("machine-workspace-attach-folder", "Attach Folder…", function() actions.attachFolder(target), idle));
+			items.push(new MenuItem("machine-workspace-detach-folder", "Detach Folder…", function() actions.detachFolder(target), idle && target.folders.length > 0));
 			items.push(new MenuItem("machine-workspace-remove", "Remove from This Machine", function() actions.remove(target), idle, null, true));
 		}
 		items.push(new MenuItem("machine-new-workspace", "New Workspace…", function() actions.create(), idle, null, entry != null));

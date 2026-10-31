@@ -1,5 +1,6 @@
 package ui;
 
+import workspace.PathKey;
 import workspace.service.WorkspaceProtocol;
 import workspace.service.WorkspaceProtocol.WorkspaceGroup;
 
@@ -79,6 +80,26 @@ class AgentScope {
 			parent = next == null ? null : next.parent;
 		}
 		return new AgentScope(group.id, group.name, directory, ancestors);
+	}
+
+	/** Whether this scope is the workspace itself (its root row), which works in every attached folder. */
+	public function isWorkspace():Bool return WorkspaceProtocol.isRoot(groupId);
+
+	/**
+		What the workspace's scope shows: the `attached` folders, then each group's folder that lies outside all of
+		them, in group order. A group inside an attached folder adds nothing.
+	**/
+	public static function workspaceFolders(model:WorkbenchTreeModel, attached:Array<String>, normalize:String->String):Array<String> {
+		var result = attached.copy();
+		var groups = [for (group in model.groups) if (!WorkspaceProtocol.isRoot(group.id)) group];
+		groups.sort(function(a, b) return a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+		for (group in groups) {
+			var directory = model.directory(group);
+			if (directory == null || directory.length == 0) continue;
+			var folder = normalize(directory);
+			if (!Lambda.exists(result, function(root) return PathKey.within(root, folder))) result.push(folder);
+		}
+		return result;
 	}
 
 	/** The panel's one-line caption: `name — path`. */

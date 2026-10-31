@@ -404,6 +404,24 @@ class UiWorkbenchHost implements WorkbenchHost {
 		return null;
 	}
 
+	/**
+		Keeps the workspace's file tabs on the folder they were opened from when root ids change. `rootFor` gets a tab's
+		folder (its scope) and answers the root id that folder is served under now, `null` when it was detached (the tab
+		closes), or `""` when nothing is known (the tab stays as it is).
+	**/
+	public function reconcileWorkspaceFiles(workspaceId:String, rootFor:String->Null<String>):Void {
+		var closing:Array<{item:UiEditorTab, paneId:String}> = [];
+		for (pane in panes) for (item in pane.items) {
+			var file = UiEditorTabs.workspaceFile(item);
+			if (file == null || file.workspace != workspaceId) continue;
+			var id = rootFor(file.scope);
+			if (id == null) closing.push({item: item, paneId: pane.id});
+			else if (id.length > 0 && id != file.root) file.rekey(id);
+		}
+		for (target in closing) closeTab(target.item, target.paneId, true);
+		if (closing.length > 0) requestFrame();
+	}
+
 	public function canOpenWorkspaceFile(scope:String, root:String, path:String, sizeBytes:Int):Bool {
 		if (sizeBytes < 0 || sizeBytes > WorkspaceFileReader.MAX_PREVIEW_BYTES) return false;
 		var count = 0, totalBytes = 0;

@@ -1640,6 +1640,13 @@ class ExosuitApp implements DesktopUiApplication {
 			var found = roots.length == 1 ? machine.workspaceFor(roots[0]) : null;
 			return found == null ? null : found.id;
 		};
+		// The open workspace's service follows its folders at once, with no restart: file roots, watchers and repositories.
+		var serveFolders = function(entry:suit.MachineCatalog.MachineWorkspace):Void {
+			var attached = workspaceAttachment;
+			if (attached == null || !Std.isOfType(attached, workspace.client.LocalWorkspaceClient) || openWorkspace() != entry.id) return;
+			var local:workspace.client.LocalWorkspaceClient = cast attached;
+			local.setServedFolders(entry.folders, function(failure) { report(failure); });
+		};
 		var chooseFolder = function(title:String, chosen:String->Void):Void {
 			if (desktop != null) desktop.selectDirectory(function(accepted, paths) { if (accepted && paths.length > 0) chosen(paths[0]); }, title);
 			else host.openCommandView(new commandview.CommandViewProvider(title + ": ", [], function(_) {}, function(_, value, _) {
@@ -1668,9 +1675,25 @@ class ExosuitApp implements DesktopUiApplication {
 			// (EXOSUIT_WORKSPACE_IDENTITY=folder), the groups made in it show only while the workspace has no folders.
 			attachFolder: function(entry) chooseFolder("Attach Folder to " + entry.name, function(folder) {
 				machine.addFolder(entry.id, folder, function(updated, failure) {
-					if (!report(failure) && updated != null && openWorkspace() == entry.id) open(updated);
+					if (report(failure) || updated == null) return;
+					serveFolders(updated);
+					if (openWorkspace() == entry.id) open(updated);
 				});
 			}),
+			detachFolder: function(entry) {
+				var entries = [for (folder in entry.folders) new commandview.CommandViewEntry(haxe.io.Path.withoutDirectory(folder), folder, folder)];
+				if (entries.length == 0) return;
+				host.openCommandView(new commandview.CommandViewProvider("Detach folder from " + entry.name + ": ", entries, function(_) {},
+					function(chosen, _, _) {
+						host.closeCommandView();
+						if (chosen == null) return;
+						machine.removeFolder(entry.id, chosen.value, function(updated, failure) {
+							if (report(failure) || updated == null) return;
+							serveFolders(updated);
+							if (openWorkspace() == entry.id) open(updated);
+						});
+					}));
+			},
 			remove: function(entry) machine.delete(entry.id, function(_, failure) { report(failure); })
 		};
 		if (workbenchPanel != null) workbenchPanel.machine = machineActions;
@@ -3192,11 +3215,13 @@ class ExosuitApp implements DesktopUiApplication {
 				}
 			}, host, requestFrame, function() return darkPalette, hostContext == null ? null : hostContext.events);
 		if (scopedSearch == null) scopedSearch = new ScopedSearchPanel(application.workspace, function() {
-			var scope = contextScope(); return scope == null ? null : scope.directory;
+			return contextScope() == null ? [] : contextRoots();
 		}, openScopedSearchResult, requestFrame, function() return application.settings.current.searchMaxResults);
 		var scope = contextScope();
 		var style = fillStyle(); style.childGap = 4;
-		var caption = scope == null ? application.activeContext.label : scope.caption();
+		var folders = scope != null && scope.isWorkspace() ? contextRoots() : [];
+		var caption = scope == null ? application.activeContext.label
+			: folders.length > 1 ? scope.label + " — " + folders.length + " folders" : scope.caption();
 		// Search here follows the scope; outside the Agents layout it is the workspace's Search, unless the sidebar shows it.
 		var searchContent:View = scope != null ? scopedSearch : sidebar.visible && sidebar.activeId == "search"
 			? new Text("Search is open in the sidebar.", null, theme.tokens.textSecondary, TextStyleOverride.text(12)) : searchPanel;
@@ -3257,8 +3282,25 @@ class ExosuitApp implements DesktopUiApplication {
 
 	/** Folders the right panel's Files and Changes show: the Agents scope's folder, else the active context's roots. */
 	function contextRoots():Array<String> {
-		var scope = contextScope();
-		return scope == null ? application.activeContext.roots : [scope.directory];
+		var scope = contextScope(), panel = workbenchPanel;
+		if (scope == null || panel == null) return application.activeContext.roots;
+		if (!scope.isWorkspace()) return [scope.directory];
+		// The workspace itself works in every attached folder and in each group folder outside them.
+		var attached = application.activeContext.roots.copy(), own = scope.directory;
+		if (!Lambda.exists(attached, function(root) return PathKey.within(root, own))) attached.push(own);
+		return AgentScope.workspaceFolders(panel.model, attached, normalizedContextFolder);
+	}
+
+	var contextFolders:Map<String, String> = [];
+
+	/** A group folder as the file system spells it; remembered, since the panel asks on every frame. */
+	function normalizedContextFolder(path:String):String {
+		var known = contextFolders.get(path);
+		if (known != null) return known;
+		var value = path;
+		try value = application.workspace.fileSystem.normalize(path) catch (_:Dynamic) value = path;
+		contextFolders.set(path, value);
+		return value;
 	}
 
 	/**
@@ -3880,9 +3922,12 @@ class ExosuitApp implements DesktopUiApplication {
 			return;
 		}
 		var scope = attachment.fileScope();
+		var root = match.root == null ? "root" : match.root;
+		// A result under another of the workspace's folders is scoped to that folder.
+		var matchFolder = remoteFileSearch.rootPath(match);
+		if (root != "root" && matchFolder != null) scope = matchFolder;
 		if (scope == null || scope.length == 0) scope = explorerRoot;
 		if (scope == null || scope.length == 0) scope = attachment.fileWorkspace();
-		var root = "root";
 		if (host.activateWorkspaceFile(scope, root, match.path, false)) {
 			var existing = host.workspaceFile(scope, root, match.path);
 			if (existing != null && match.line >= 0) existing.selectSearchMatch(match.line, match.column, match.length);
@@ -3946,7 +3991,7 @@ class ExosuitApp implements DesktopUiApplication {
 		workspaceFileLoader.load(key, revision, function(complete, wanted) {
 			var client = attachment == null ? null : attachment.fileClient();
 			if (workspaceAttachment != attachment || client == null || attachment.fileWorkspace() != file.workspace ||
-				attachment.fileScope() != null && attachment.fileScope() != file.scope) {
+				attachment.fileScope() != null && file.root == "root" && attachment.fileScope() != file.scope) {
 				complete({contents: null, revision: null, sizeBytes: 0, error: "Workspace file service is not connected"});
 				return;
 			}
@@ -4616,13 +4661,15 @@ class ExosuitApp implements DesktopUiApplication {
 			clearLocalScmSource();
 			return null;
 		}
-		var scope = contextScope(), narrow = scope != null;
+		// A group's folder narrows to itself; the workspace's scope covers its folders whole.
+		var scope = contextScope(), narrow = scope != null && !scope.isWorkspace();
 		var roots = [for (root in contextRoots()) if (controller.SavedWorkspaceController.available(root)) root];
 		if (roots.length == 0) { clearLocalScmSource(); return null; }
 		return panelScm.get(application.scm, roots, narrow, function(_) {
-			// A group folder may be any folder: outside the workspace, its own repository, or none. Discover it unless a
+			// A group folder may be any folder: outside the workspace, its own repository, or none. Discover each unless a
 			// discovered root already covers it, which would only duplicate that root's polling.
-			if (narrow && application.scm.repositories(roots[0]).length == 0) application.scm.discover(roots[0], _ -> requestFrame());
+			if (scope != null) for (root in roots)
+				if (application.scm.repositories(root).length == 0) application.scm.discover(root, _ -> requestFrame());
 		});
 	}
 
@@ -4635,8 +4682,8 @@ class ExosuitApp implements DesktopUiApplication {
 		var panel = sourceControlSource(), scope = contextScope();
 		if (scope == null || panel == null || panel.isRemote()) { editorScm.clear(); return panel; }
 		var roots = [for (root in application.activeContext.roots) if (controller.SavedWorkspaceController.available(root)) root];
-		var folder = scope.directory;
-		if (!Lambda.exists(roots, function(root) return PathKey.within(root, folder))) roots.push(folder);
+		for (folder in contextRoots())
+			if (!Lambda.exists(roots, function(root) return PathKey.within(root, folder))) roots.push(folder);
 		return editorScm.get(application.scm, roots, false);
 	}
 

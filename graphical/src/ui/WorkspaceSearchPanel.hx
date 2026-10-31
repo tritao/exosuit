@@ -99,7 +99,8 @@ class WorkspaceSearchPanel implements View {
 					var match = remoteSearch.results[index];
 					var location = match.line < 0 ? "" : ":" + (match.line + 1);
 					var preview = match.line < 0 ? "" : "  " + match.preview;
-					var label = (match.kind == "directory" ? "Folder · " : "") + displayPath(match.path) + location + preview;
+					var folder = remoteSearch.rootLabel(match);
+					var label = (folder == null ? "" : folder + " · ") + (match.kind == "directory" ? "Folder · " : "") + displayPath(match.path) + location + preview;
 					var button = new Button(label, rowStyle(48), function() {
 						if (generation != -remoteSearch.generation - 1 || !remoteSearch.active) return;
 						if (openRemoteResult != null) openRemoteResult(match);

@@ -1,5 +1,6 @@
 package controller;
 
+import workspace.FolderLabels;
 import workspace.client.WorkspaceAttachment;
 import workspace.client.WorkspaceFileClient;
 import workspace.service.WorkspaceFileProtocol.FileSearchHandle;
@@ -130,6 +131,16 @@ class WorkspaceFileSearchController {
 					if (root.path != null) rootPaths.set(root.id, root.path);
 				}
 			if (ids.length == 0) ids.push(SEARCH_ROOT);
+			// Folders that share a name are told apart by their parents.
+			var shown:Array<String> = [];
+			for (id in ids) {
+				var path = rootPaths.get(id);
+				if (path != null) shown.push(path);
+			}
+			if (shown.length == ids.length) {
+				var distinct = FolderLabels.labels(shown);
+				for (index in 0...ids.length) rootNames.set(ids[index], distinct[index]);
+			}
 			rootCount = ids.length;
 			activeRoot = ids.shift();
 			queuedRoots = ids;
@@ -171,6 +182,7 @@ class WorkspaceFileSearchController {
 			requestPage(token, attachment, client, handle.searchId);
 		}, function(rpcError) {
 			if (!isCurrent(token, attachment, client)) return;
+			if (rootGone(rpcError) && skipRoot(token, attachment, client)) return;
 			fail(token, rpcError == null ? "Workspace search could not start" : rpcError.message);
 		});
 	}
@@ -220,8 +232,27 @@ class WorkspaceFileSearchController {
 			}
 		}, function(rpcError) {
 			if (!isCurrent(token, attachment, client)) return;
+			if (rootGone(rpcError) && skipRoot(token, attachment, client)) return;
 			fail(token, rpcError == null ? "Workspace search failed" : rpcError.message);
 		});
+	}
+
+	/** The service says the root is not attached (it was detached mid-search); any other error is a real failure. */
+	static function rootGone(rpcError:Null<haxeon.rpc.RpcError>):Bool
+		return rpcError != null && rpcError.code == "unknown_root";
+
+	/**
+		A root that was detached while others are queued is left out and the search goes on with the next. True when it
+		did.
+	**/
+	function skipRoot(token:Int, attachment:WorkspaceAttachment, client:WorkspaceFileClient):Bool {
+		if (queuedRoots.length == 0 || !isCurrent(token, attachment, client)) return false;
+		searchId = null;
+		scannedBefore = scannedEntries;
+		skippedBefore = skippedEntries;
+		activeRoot = queuedRoots.shift();
+		startRoot(token, attachment, client);
+		return true;
 	}
 
 	function fail(token:Int, message:String):Void {

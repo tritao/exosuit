@@ -6,9 +6,9 @@ import haxeon.ui.widgets.text.TextSelection;
 
 /** Immutable remote file contents displayed in a workbench preview tab. */
 class UiWorkspaceFileTab {
-	public final id:String;
+	public var id(default, null):String;
 	public final workspace:String;
-	public final root:String;
+	public var root(default, null):String;
 	public final scope:String;
 	public final rootName:String;
 	public final path:String;
@@ -38,6 +38,12 @@ class UiWorkspaceFileTab {
 		this.preview = preview;
 		var slash = path.lastIndexOf("/");
 		this.title = slash < 0 ? path : path.substring(slash + 1);
+		this.id = "workspace-file:" + scope + ":" + root + ":" + path;
+	}
+
+	/** The folder this tab belongs to is now served under another root id (see UiWorkbenchHost.reconcileWorkspaceFiles). */
+	public function rekey(root:String):Void {
+		this.root = root;
 		this.id = "workspace-file:" + scope + ":" + root + ":" + path;
 	}
 

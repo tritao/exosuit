@@ -16,19 +16,21 @@ import haxeon.ui.widgets.text.Text;
 import search.SearchMatch;
 import search.SearchOptions;
 import search.WorkspaceSearch;
+import workspace.FolderLabels;
 import workspace.PathKey;
 import workspace.Project;
 import workspace.ProjectNode;
 import workspace.Workspace;
 
 /**
-	Search over one folder for the Agents layout's right panel. It has its own query and results, so the editor
-	workspace's Search keeps its own; files come from an open project that holds the folder, else from a window-owned
-	index of the folder that is never added to the workspace.
+	Search over the Agents layout's scope folders for the right panel: one group's folder, or every attached folder and
+	group folder outside them, each result labelled by its folder when there are several. It has its own query and
+	results, so the editor workspace's Search keeps its own; files come from an open project that holds a folder, else
+	from a window-owned index of the folder that is never added to the workspace.
 **/
 class ScopedSearchPanel implements View {
 	final workspace:Workspace;
-	final directory:Void->Null<String>;
+	final directories:Void->Array<String>;
 	final open:SearchMatch->Void;
 	final requestFrame:Void->Void;
 	final maximum:Void->Int;
@@ -36,8 +38,8 @@ class ScopedSearchPanel implements View {
 	public final scroll = new ScrollController();
 	public var focusQuery:Bool = false;
 	var query:String = "";
-	var searchedDirectory:Null<String>;
-	var ownProject:Null<Project>;
+	var searchedDirectories:String = "";
+	final ownProjects:Map<String, Project> = [];
 	/** The query ran over a folder index that was still filling, so it runs again once the index is complete. */
 	var searchedPartial:Bool = false;
 	/** The query's text input from the last build, so a focus request goes straight to it. */
@@ -47,8 +49,8 @@ class ScopedSearchPanel implements View {
 	public function releaseRetained():Void
 		queryInput = null;
 
-	public function new(workspace:Workspace, directory:Void->Null<String>, open:SearchMatch->Void, requestFrame:Void->Void, maximum:Void->Int) {
-		this.workspace = workspace; this.directory = directory; this.open = open; this.requestFrame = requestFrame; this.maximum = maximum;
+	public function new(workspace:Workspace, directories:Void->Array<String>, open:SearchMatch->Void, requestFrame:Void->Void, maximum:Void->Int) {
+		this.workspace = workspace; this.directories = directories; this.open = open; this.requestFrame = requestFrame; this.maximum = maximum;
 		search = new WorkspaceSearch(workspace, workspace.jobs, requestFrame, scopedFiles);
 	}
 
@@ -59,55 +61,82 @@ class ScopedSearchPanel implements View {
 
 	public function dispose():Void {
 		search.cancel();
-		if (ownProject != null) ownProject.cancelIndex();
-		ownProject = null;
+		keepProjects([]);
+	}
+
+	/** Stops indexing, and forgets, the window-owned indexes of folders not in `keep`. */
+	function keepProjects(keep:Array<String>):Void {
+		var wanted = [for (folder in keep) PathKey.of(folder)];
+		for (key in [for (key in ownProjects.keys()) key]) {
+			if (wanted.indexOf(key) >= 0) continue;
+			var project = ownProjects.get(key);
+			if (project != null) project.cancelIndex();
+			ownProjects.remove(key);
+		}
 	}
 
 	function run(value:String):Void {
 		query = value == null ? "" : value;
-		searchedDirectory = directory();
+		searchedDirectories = directories().join("
+");
 		searchedPartial = false;
 		search.request(query, new SearchOptions(), maximum());
 		scroll.jumpTo(0, 0);
 		requestFrame();
 	}
 
-	/** Files of the scope folder: an open project's files under it, or the window-owned index of the folder. */
+	/** Files of the scope folders: for each, an open project's files under it, or the window-owned index of the folder. */
 	function scopedFiles():Array<ProjectNode> {
-		var root = directory();
-		if (root == null) return [];
+		var result:Array<ProjectNode> = [], folders = directories();
+		keepProjects(folders);
+		var partial = false;
+		for (root in folders) {
+			var files = filesOf(root);
+			if (indexing(root)) partial = true;
+			for (file in files) result.push(file);
+		}
+		searchedPartial = partial;
+		return result;
+	}
+
+	function filesOf(root:String):Array<ProjectNode> {
 		for (project in workspace.projects) {
 			if (PathKey.same(project.root, root)) return project.files();
 			if (PathKey.within(project.root, root)) return [for (file in project.files()) if (PathKey.within(root, file.path)) file];
 		}
-		if (ownProject == null || !PathKey.same(ownProject.root, root)) {
-			if (ownProject != null) ownProject.cancelIndex();
-			ownProject = null;
-			try {
-				ownProject = new Project(root, workspace.fileSystem, workspace.jobs);
-			} catch (_:Dynamic) {
-				return [];
-			}
+		var key = PathKey.of(root);
+		var own = ownProjects.get(key);
+		if (own == null) {
+			try own = new Project(root, workspace.fileSystem, workspace.jobs) catch (_:Dynamic) own = null;
+			if (own == null) return [];
+			ownProjects.set(key, own);
 		}
-		var project = ownProject;
-		if (project == null) return [];
-		searchedPartial = project.indexing();
-		return project.files();
+		return own.files();
+	}
+
+	/** Whether the window-owned index of `root` is still filling. */
+	function indexing(root:String):Bool {
+		var own = ownProjects.get(PathKey.of(root));
+		return own != null && own.indexing();
+	}
+
+	function anyIndexing(folders:Array<String>):Bool {
+		for (root in folders) if (indexing(root)) return true;
+		return false;
 	}
 
 	public function build(context:BuildContext):RenderNode {
-		var current = directory();
+		var current = directories();
 		// A new scope reruns the query there instead of showing another folder's results.
-		var partial = ownProject;
-		if (query.length > 0 && (current != searchedDirectory || searchedPartial && partial != null && !partial.indexing())) run(query);
+		if (query.length > 0 && (current.join("
+") != searchedDirectories || searchedPartial && !anyIndexing(current))) run(query);
 		var style = fill(); style.padding = new Insets(6, 8, 6, 8); style.childGap = 4;
 		var rows:Array<KeyedView> = [new KeyedView("query", new QueryField(new SearchField("scoped-search-query", query, run, null, "Search in folder"),
 			function(input) queryInput = input))];
-		var status = current == null ? "No folder to search" : query.length == 0 ? "Search this folder" : search.complete
+		var status = current.length == 0 ? "No folder to search" : query.length == 0 ? (current.length > 1 ? "Search these folders" : "Search this folder") : search.complete
 			? search.results.length + " results" : "Searching… " + search.results.length + " results";
 		if (search.capped) status += " (limit reached)";
-		var indexed = ownProject;
-		if (indexed != null && indexed.indexing() && current != null && PathKey.same(indexed.root, current)) status += " · indexing folder";
+		if (anyIndexing(current)) status += " · indexing folder";
 		if (search.errors.length > 0) status += " — " + search.errors.length + " skipped";
 		rows.push(new KeyedView("status", new Text(status)));
 		var generation = search.generation;
@@ -127,9 +156,15 @@ class ScopedSearchPanel implements View {
 		return node;
 	}
 
-	static function relative(root:Null<String>, path:String):String {
-		var inside = root == null ? null : PathKey.relative(root, path);
-		return inside == null || inside == "" ? path : inside;
+	/** The path inside its scope folder; with several folders it starts with the folder's name. */
+	static function relative(roots:Array<String>, path:String):String {
+		for (root in roots) {
+			var inside = PathKey.relative(root, path);
+			if (inside == null) continue;
+			var shown = inside == "" ? path : inside;
+			return roots.length > 1 ? FolderLabels.labels(roots)[roots.indexOf(root)] + "/" + shown : shown;
+		}
+		return path;
 	}
 
 	static function rowStyle(height:Float):LayoutStyle {

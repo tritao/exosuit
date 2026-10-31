@@ -13,5 +13,7 @@ typedef WorkbenchMachineActions = {
 	var create:Void->Void;
 	var rename:MachineWorkspace->Void;
 	var attachFolder:MachineWorkspace->Void;
+	/** Asks which of the workspace's folders to detach, then detaches it. */
+	var detachFolder:MachineWorkspace->Void;
 	var remove:MachineWorkspace->Void;
 }

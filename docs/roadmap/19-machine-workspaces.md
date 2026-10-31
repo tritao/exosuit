@@ -165,6 +165,11 @@ right workspace after migration. A second run changes nothing. The backups resto
 - [ ] Attach and detach a folder without restarting the service; watchers start and stop with the folder.
 - [ ] Tests: `workspace-files`, `workspace-scm` and `scm-watch` with two roots plus an outside group folder.
 
+Detaching a folder: the first folder always has the id `root` (the next one takes it when the first leaves), the 
+service sends watchers one last change event for the folder, and a search queued over several roots skips one that 
+goes away. Known gap: the protocol has no explicit "root removed" notification, so a watcher learns the folder is 
+gone only when its next listing fails.
+
 Acceptance: with two folders attached and a group folder elsewhere, Files, Search and Changes show all three,
 labelled, and narrow when a sub-group is selected.
 
