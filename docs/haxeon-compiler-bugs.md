@@ -123,6 +123,26 @@ and the status.
 - **Status:** open. The message should say which call cleared the check, and not claim that a closure assigns a local
   it only reads. Related to the "Unclear" entry on closure-assigned locals below.
 
+### `Reflect.setField` on a struct-valued field crashes with an access violation
+
+- **Symptom:** `Uncaught exception: Access violation` at `Reflect.reflectSetField`, on the first `Color` field.
+- **Shape:** `for (field in Reflect.fields(from)) Reflect.setField(to, field, Reflect.field(from, field));` where the
+  class has `haxeon.ui.Color` fields (`ThemeTokens`; `Color` is a `struct` since haxeon `30f034c5`). Valid in stock Haxe.
+- **Found:** 2026-10-31, moving exosuit to haxeon `8b953dd0` (`ExosuitPalette.theme(dark, target)`).
+- **Workaround:** copy the fields by name (`ExosuitPalette.copyTokens`).
+- **Cause:** not investigated; presumably the boxed struct from `Reflect.field` is stored into the inline field
+  without unboxing.
+- **Status:** open.
+
+### A conditional over two `Null<Color>` values reports "Type mismatch for conditional branch"
+
+- **Symptom:** `E1003: Type mismatch for conditional branch` at `label.layout.setColor(highlighted ? activeColor : color)`
+  with both locals `Null<Color>`.
+- **Found:** 2026-10-31, `EditorGutter`, after `30f034c5` (`setColor` takes a non-null `Color`).
+- **Workaround:** `var target = highlighted ? activeColor : color; if (target != null) label.layout.setColor(target);`
+- **Status:** open. The rejection is right (`Null<Color>` is not a `Color`), but the message blames the branches. It
+  should name the argument mismatch.
+
 ## Standard library gaps
 
 Standard Haxe APIs haxeon's standard library does not have yet. Each one forced a hand-written replacement.
