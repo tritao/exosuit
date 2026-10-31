@@ -10,7 +10,7 @@ import workspace.ContextKind;
 class ActiveContextTestMain {
 	static function require(value:Bool, message:String):Void { if (!value) throw message; }
 	static function main():Int {
-		var base = Sys.args()[0]; FileSystem.createDirectory(base); base = FileSystem.fullPath(base);
+		var base = Sys.args()[0]; FileSystem.createDirectory(base); base = StringTools.replace(FileSystem.fullPath(base), "\\", "/");
 		var first = base + "/workspace", group = base + "/group";
 		for (root in [first, group]) { FileSystem.createDirectory(root); File.saveContent(root + "/file.txt", "needle\n"); }
 		FileSystem.createDirectory(group + "/.pragtical");
