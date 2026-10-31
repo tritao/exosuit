@@ -129,7 +129,14 @@ class StatusBarView implements View {
 				rightItemsNode = rightItems.build(context);
 				root.add(rightItemsNode);
 			}
-			var apply = function(next:StatusBarSizes) {
+			var apply = function(next:StatusBarSizes, announce:Bool) {
+				// Once mounted these nodes belong to the submitted tree: announce each in-place edit (BuildContext.willEditRetained).
+				if (announce) {
+					for (node in [root, documentNode, messageNode, indentationNode, bellNode, remoteNode,
+							remoteNode == null ? null : remoteNode.children[0], remoteLabel, dismissNode, leftItemsNode, rightItemsNode])
+						if (node != null) context.willEditRetained(node);
+					if (data.unread > 0) context.willEditRetained(bellNode.children[1]);
+				}
 				root.layout.style.childGap = next.gap;
 				root.layout.style.padding = new Insets(next.left, 0, next.right, 0);
 				sizeSlot(documentNode, next.document);
@@ -154,13 +161,13 @@ class StatusBarView implements View {
 				if (leftItemsNode != null) sizeSlot(leftItemsNode, next.leftItems);
 				if (rightItemsNode != null) sizeSlot(rightItemsNode, next.rightItems);
 			};
-			apply(sizes);
+			apply(sizes, false);
 			var lastWidth = context.viewportWidth;
 			root.onResolved(function(geometry) {
 				if (lastWidth == geometry.width) return;
 				lastWidth = geometry.width;
 				apply(allocate(geometry.width, remote, showToast, data.unread, hasIndentation,
-					leftItemsWidth, rightItemsWidth));
+					leftItemsWidth, rightItemsWidth), true);
 				context.requestLayoutFeedback();
 			});
 			return root;
