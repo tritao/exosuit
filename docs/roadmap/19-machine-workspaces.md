@@ -5,6 +5,11 @@ Implements [ADR 0005](../architecture/0005-machines-and-workspaces.md) and
 per-context layouts) and suit. Read [EXECUTION.md](EXECUTION.md) first, and record evidence in
 [STATUS.md](STATUS.md).
 
+Status (2026-11-01): Phases 1–7 are on `main` (exosuit `757db3f1`, haxeon `fd2a332c`). Phase 0 waits on the
+mobile-app review; Phase 7's latency budget and capture are not done; Phases 8 and 9 are not started. Nine real-input
+GUI scenarios (`docs/benchmarks/perf-harness/gui_scenarios/m19_*.py`, run through `measure.ps1 -Drive`) cover
+Phases 3–7 on Windows. Open problems found after landing are in NEXT-PHASE.md under "M19 after landing".
+
 ## Goal
 
 - A machine (suit) serves any number of workspaces. A workspace is a name with zero or more attached folders.
@@ -60,15 +65,18 @@ Acceptance: vectors are frozen and both branches build against them. Nothing cha
 
 ## Phase 1: suit, workspaces without folders, scratch folders
 
-- [ ] `MachineCatalog` v2:
+Done 2026-10-29 (`d9e44abb`).
+
+- [x] `MachineCatalog` v2:
   - `folders` may be empty, and removing the last folder is allowed;
   - add `scratch`, created on first use at `~/Exosuit/<name>`, with a numeric suffix if the name is taken, and
     recorded so it never moves;
   - read v1 unchanged.
-- [ ] Ops: `workspace-create {name, folders?}` and `workspace-scratch {workspace}`, which creates and returns the
-  scratch folder. CLI: `suit workspace new --name N [folder...]`.
-- [ ] `MachineClient` exposes the v2 shape.
-- [ ] Tests: unit tests (no folders, scratch creation, suffixes, v1 read) and `test-suit.py` machine scenarios.
+  (v1 files are read and rewritten as v2 on the next change; `EXOSUIT_SCRATCH_HOME` overrides `~/Exosuit` for tests.)
+- [x] Ops: `workspace-create {name, folders?}` and `workspace-scratch {workspace}`, which creates and returns the
+  scratch folder. CLI: `suit workspace new --name N [folder...]` and `suit workspace scratch <id> [--json]`.
+- [x] `MachineClient` exposes the v2 shape (`create` takes a folder list; `scratch` reads the scratch reply).
+- [x] Tests: `SuitUnitTests` cover no folders, scratch creation, suffixes and the v1 read.
 
 Acceptance: the Workbench's New Workspace asks only for a name. A folderless workspace survives a suit restart.
 
@@ -76,16 +84,19 @@ Acceptance: the Workbench's New Workspace asks only for a name. A folderless wor
 
 This works inside today's per-folder service, so it is useful before the identity change.
 
-- [ ] Resolve a session's directory in the service (`WorkspaceAgentService`, terminal open), in this order: the
+Done 2026-10-29 (`e2adae9a` service, `4c60737a` editor).
+
+- [x] Resolve a session's directory in the service (`WorkspaceAgentService`, terminal open), in this order: the
   explicit directory, then the group's folder, then the nearest ancestor's, then the workspace's first folder, then
-  the scratch folder (from suit). Record it on the session.
-- [ ] New Agent Session… and New terminal show "Folder: <resolved>" with **Change…**. Change… uses the existing folder
-  picker (the one group folders use, `desktop.selectDirectory` with the command-view fallback); the home folder is
-  one of the choices.
-- [ ] Permission profiles take the resolved directory: Codex `read-only`/`workspace-write` roots, and Pi's
-  permission extension.
-- [ ] Tests: resolution order (the workspace-agents and terminals harnesses), and a session in a group with no
-  folder.
+  the scratch folder (from suit). Record it on the session. (`GroupFolders` holds the walk so the editor shows the
+  same answer; an asked-for folder that does not exist is refused with `invalid_directory`. The scratch folder came
+  from suit through the editor until Phase 4 keyed the service by workspace.)
+- [x] New Agent Session… and New Terminal… show "Folder: <resolved>" with **Change…**: "Choose folder…" (the native
+  picker), "Home folder" and "Current", or a typed full path. Tabs show their session's folder in the tooltip.
+- [x] Permission profiles take the resolved directory: Codex, Claude, Pi, the built-in agent and terminals start in
+  it, and Pi's acceptEdits mode approves edits only inside it.
+- [x] Tests: resolution order (`tests/workspace-directories`, the workspace-agents and terminals harnesses), and a
+  session in a group with no folder.
 
 Acceptance: a group with no folder starts sessions in the scratch folder; Change… starts one in the home folder; the
 session shows its folder.
@@ -95,20 +106,25 @@ session shows its folder.
 The model and the UI land first, on today's services. A workspace's groups appear once its service is attached;
 Phase 6 makes every workspace live.
 
-- [ ] `WorkbenchTreeModel` gets a top level: workspaces (from `MachineClient`), then groups and sub-groups, then
+Done 2026-10-29 (`a8ff1dc1`), except type-to-find and a PrintWindow capture of the tree (NEXT-PHASE.md, "M19 Phases
+1–3 review: deferred").
+
+- [x] `WorkbenchTreeModel` gets a top level: workspaces (from `MachineClient`), then groups and sub-groups, then
   sessions and terminals. The machine is chosen in a dropdown above the tree, not shown as a row (decided
   2026-10-30, ADR 0006 amendment); it lists this machine until remote machines are added later.
   - Workspace rows: expand and collapse, a running/idle state, and the context menu (Rename, Attach Folder…,
     Remove from This Machine, Open in New Window, from Phase 8).
   - Group rows keep today's menus.
-- [ ] Remove `WorkbenchMachineSection`'s separate list; the empty states move into the tree.
-- [ ] Expanding a workspace attaches its service, which is started by suit if needed. The tree keeps expanded
+- [x] Remove `WorkbenchMachineSection`'s separate list; the empty states move into the tree.
+- [x] Expanding a workspace attaches its service, which is started by suit if needed. The tree keeps expanded
   state per window. (Phase 6 does this through catalog connections: expanding starts an idle workspace's service and
   shows its catalog; it no longer switches the window. Enter or a double click on a workspace row opens it.)
 - [ ] Keyboard: arrows, Enter to focus, type-to-find. The tree's accessibility labels name the workspace and
-  group.
+  group. (Arrows and Enter work, and Enter or a double click opens a row through `TreeView.onActivate`; type-to-find
+  is not built.)
 - [ ] Tests: tree model unit tests (the `workbench-drag` and `sidebar-layout` style), and a PrintWindow capture of
-  the tree.
+  the tree. (`tests/workbench-tree` covers the projection, and real-input GUI scenarios drive the tree
+  (`docs/benchmarks/perf-harness/gui_scenarios/m19_*.py`); there is no PrintWindow capture.)
 - [x] The workspace is its own root group (decided 2026-10-30, ADR 0006 amendment). Sessions and terminals in no
   group (`WorkspaceProtocol.ROOT_GROUP`, the empty id) sit under the workspace row after its groups. New Agent
   Session… and New Terminal… on the open workspace's row create there, and so do the header's New terminal and New
@@ -185,8 +201,9 @@ labelled, and narrow when a sub-group is selected.
 
 ## Phase 6: every window sees the whole machine
 
-Client side (done 2026-10-31, branch `m19-machine-view`); the service side (answering CATALOG, UNWATCH and CHANGED, and
-suit's `machine` reply filling `service`) lands separately.
+Done 2026-10-31: the client side (`41456449`, `9e7d4b56`), and the service side (`6a0aa70d`, `186709fd`, `2f52ed26`):
+the workspace service answers CATALOG and UNWATCH with a resumable, paged catalog filtered by the connection's read
+grants, and suit's `machine` reply fills `service` (`c8b07c93`).
 
 The catalog watch is local-only for now: only local connections are offered `workspace.catalog`. Remote peers (devices
 through the relay) get it with the mobile adaptation; the service already filters a connection's catalog by its grants.

@@ -1,5 +1,54 @@
 # Execution ledger
 
+## M19 — machine workspaces, Phases 1–7 (2026-10-29 to 2026-11-01)
+
+Plan and per-phase detail: [19-machine-workspaces.md](19-machine-workspaces.md). Phases 1–3 landed 2026-10-29/30;
+Phases 4–7 landed on `main` 2026-11-01 as exosuit `757db3f1` (65 commits on `4174534`) with haxeon `fd2a332c`
+(upstream `281c9422` plus 11 commits).
+
+Behaviour delivered:
+
+- Phase 1: folderless workspaces and scratch folders in suit (`machine.json` v2, `workspace-create`,
+  `workspace-scratch`, `suit workspace new|scratch`).
+- Phase 2: sessions and terminals run in a resolved folder; New Agent Session… and New Terminal… show it, with
+  Change….
+- Phase 3: the Workbench is one tree: machine dropdown, workspaces, groups, sessions and terminals; the workspace is
+  its own root group.
+- Phase 4: one service per workspace, keyed by workspace id (`workspaces/<id>/`), and a one-time migration of each
+  per-folder state (lock, back up to `<state>.bak-<time>`, move, verify, marker; refuses on anything unknown).
+  Rehearsed on a copy of this machine's state (`scripts/rehearse-workspace-migration.py`) before becoming the default;
+  `EXOSUIT_WORKSPACE_IDENTITY=folder` goes back.
+- Phase 5: one service serves every attached folder; search, watching, files and SCM per root; attach and detach
+  without a restart; the right panel shows every folder plus group folders outside them.
+- Phase 6: each window keeps a catalog-only connection to every running workspace service (at most 64); idle
+  workspaces start on expand; the service answers CATALOG and UNWATCH paged and resumable, filtered by read grants.
+- Phase 7: contexts keyed `machine/workspace/group`, 4 warm contexts kept attached, switching never waits on the
+  network; Ctrl+Shift+A (Switch Workspace or Group…) and Ctrl+Shift+D (previous).
+- Also: drag to re-order sessions and terminals (positions stored by the services), an opt-in automation snapshot
+  and a real-input GUI driver, the agent manager restarting once when its starting process dies, Windows runs of
+  the workspace terminal and agent tests.
+- haxeon: a typer fix for closures in switch cases, a shared locked native-package cache (a test project's first
+  build 37 s to 11 s), TextField select-all on Ctrl+A only, `TreeView.onActivate`, atomic writes on Windows by
+  rename with share-delete reads, and the tooltip lift that fixed a hover crash after upstream's struct change.
+
+Commands and results on the pushed build (Windows, 2026-11-01):
+
+- `scripts/build-windows.ps1` (with bootstrap): exit 0.
+- `haxeon/scripts/check-self-hosting.sh` (Git Bash): PASS, fixed point in 98 s.
+- Real-input scenarios through `docs/benchmarks/perf-harness/measure.ps1 -Drive m19_*`: 9 of 9 pass, 69 checks, 0
+  failed (guard 5, workspaces_tree 11, workspaces 10, groups 12, sessions_drag 13, folders 8, folders_open 3,
+  open_idle 2, phase6 5).
+- On the previous upstream base (haxeon `9b1cb3eb`) the headless UI and catalog suites passed: button-theme,
+  status-bar, narrow-tabs, session-chat-ui, workbench-tree, workbench-drag, tab-tooltip, sidebar-layout,
+  workspace-catalog-pool, context-switching. They were not rerun on `fd2a332c`.
+
+Measured: ten workspaces held 10 catalog connections and 480 items, about 38 KiB of heap per watched workspace; a
+warm context switch about 35 us, a cold one about 0.5 ms (in process, `tests/context-switching`).
+
+Remaining work: Phase 0 review with the mobile app, Phase 7's latency budget and capture, Phases 8–9, and the
+open items in NEXT-PHASE.md under "M19 after landing" (first: the right panel listing a folder the workspace does
+not have).
+
 ## M18 — workspace, context and layout implementation
 
 Work starts on `m18-workspace-context-layout`, preserving existing local
@@ -3797,6 +3846,7 @@ The later browser host/terminal record above supersedes pending checks here.
 | M13 | Not started | Depends on M11.2 |
 | M14 | Not started | Depends on M11–M13 |
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
+| M19 | Phases 1–7 on `main` (2026-11-01) | Real-input GUI scenarios pass on Windows; Phase 0 review, Phase 7 latency capture and Phases 8–9 remain |
 
 ## Implementation records
 

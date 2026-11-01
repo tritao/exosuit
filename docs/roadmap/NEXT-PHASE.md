@@ -101,15 +101,15 @@ Live mode and suit:
 
 ### M19 Phases 1–3 review: deferred
 
-- Workspace rows have no running/idle marker yet (Phase 3 asks for one; Phase 6 knows which services run).
+- Done in Phase 6: workspace rows show idle, starting, running or reconnecting, and how many items need attention.
 - The Workbench tree has no type-to-find.
 - No PrintWindow capture test of the Workbench tree.
 - Session and terminal directory failures are strings and loose codes (`invalid_directory`, `invalid_request`);
   give them an error-code enum.
 - The other judgement-call smells from that review: go through them with the next change in those files.
 - Second review (2026-10-30), deferred:
-  - Expanding a workspace row switches the whole window to it. Phase 3 asks for expansion to attach the workspace's
-    service and leave the window alone; that needs Phase 6's per-window attach.
+  - Done in Phase 6: expanding a workspace row starts its service if idle and shows its catalog without switching the
+    window; Enter or a double click opens it.
   - Change… in `SessionFolderChooser` is its own flow rather than the group folder picker's; share one.
   - `SessionFolderChooser.newAgentSession` and `newTerminal` repeat one shape.
   - Workbench status rows and row-key prefixes are bare strings (`"empty"`, `"mwsn"`…); give them types along with
@@ -135,6 +135,29 @@ Live mode and suit:
     and `scripts/import-sakura.py` (default `--parent work`) rely on it.
   - In the `workbench-drag` panel test, a right-click on a session row after some drags opened the background menu
     (key null) instead of the session's; the cause is not known, and the test uses F2 instead.
+
+### M19 after landing (2026-11-01)
+
+Phases 4–7 landed on `main` on 2026-11-01 (exosuit `757db3f1`, haxeon `fd2a332c`). Open:
+
+- **The right panel lists a folder the workspace does not have.** Seen in daily use: workspace `eon-series` (one
+  folder) showed "eon-series — 2 folders", with `projects\exosuit` first. The window's title still said
+  `resume-2026`, and its tabs came from three workspaces. The machine catalog, the workspace's `workspace.json` and
+  its catalog hold only `eon-series`. Cause found so far: `ActiveContext` takes the workspace's roots from every open
+  project (`src/workspace/ActiveContext.hx`, the `workspace.subscribe` callback), not from the open workspace's
+  folders, and `contextRoots()` in `ExosuitApp` starts from those roots. What opened `exosuit` as a project in that
+  window is not confirmed; a tab of another workspace is the suspect. Next: reproduce with a real-input scenario, then
+  take the panel's folders from the open workspace's own folders.
+- No test exercises the agent manager's restart when the process that started it dies (`startDetached`).
+- `processAlive` always returns true on Windows.
+- The key-chords test runs only on Linux.
+- Phase 6: no test runs the catalog watch against two real services; `tests/workspace-catalog` uses fakes.
+- Phase 7: the click-to-frame budget and its capture through `docs/benchmarks/input-latency` are not done.
+- The hover crash fixed in haxeon `fd2a332c` (tooltips a patch builds) has no headless regression test; only the
+  real-input scenarios cover it.
+- 9 of the 15 fixture-argument test projects fail on Windows as they did before (a hard-coded `/bin/sh`,
+  `chmod 000`).
+- The status-bar test hung once on its first run after a rebuild and did not reproduce in 17 more runs.
 
 ## Low
 
