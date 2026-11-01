@@ -32,7 +32,7 @@ class ButtonThemeTestMain {
 			}
 			require(Theme.contrastRatio(t.textOnAccent, t.accent) >= 4.5, "Accent label lacks contrast");
 			var tab = new StyleResolver().resolve(new StyleTarget("button", "tab", "tab", ["tab-header"], ["button"], StyleState.Selected), null, palette.styles);
-			var fill = tab.get(StyleProperty.Background);
+			var fill = tab.getColor(StyleProperty.Background);
 			var expected = ExosuitPalette.hex(dark ? style.WorkbenchColors.darkEditorBackground : style.WorkbenchColors.lightEditorBackground);
 			require(fill.red == expected.red && fill.green == expected.green && fill.blue == expected.blue,
 				"Selected tab does not match editor canvas");
@@ -41,14 +41,14 @@ class ButtonThemeTestMain {
 			var hovered = resolver.resolve(new StyleTarget("button", "chrome", "chrome", ["navigation", "chrome-action"], ["button"], StyleState.Hovered), null, palette.styles);
 			var selectedChrome = resolver.resolve(new StyleTarget("button", "chrome", "chrome", ["navigation", "chrome-action"], ["button"], StyleState.Selected), null, palette.styles);
 			var focused = resolver.resolve(new StyleTarget("button", "chrome", "chrome", ["navigation", "chrome-action"], ["button"], StyleState.Focused), null, palette.styles);
-			require(quiet.get(StyleProperty.Background).alpha == 0 && hovered.get(StyleProperty.Background).alpha > 0,
+			require(quiet.getColor(StyleProperty.Background).alpha == 0 && hovered.getColor(StyleProperty.Background).alpha > 0,
 				"Chrome action must be quiet until hovered");
-			require(focused.get(StyleProperty.BorderWidth) > 0, "Chrome action lost keyboard focus outline");
-			var selectedFill = selectedChrome.get(StyleProperty.Background);
+			require(focused.getNumber(StyleProperty.BorderWidth) > 0, "Chrome action lost keyboard focus outline");
+			var selectedFill = selectedChrome.getColor(StyleProperty.Background);
 			require(selectedFill.red == t.surfaceHover.red && selectedFill.green == t.surfaceHover.green && selectedFill.blue == t.surfaceHover.blue,
 				"Chrome selection should use a neutral surface");
 			var popup = resolver.resolve(new StyleTarget("selection-popup", "options", "options", null, ["selection-popup"], 0), null, palette.styles);
-			require(popup.get(StyleProperty.Decorations).decorations.length > 0, "Selection popup lost elevation");
+			require(popup.getDecorations().decorations.length > 0, "Selection popup lost elevation");
 		}
 		var live = ExosuitPalette.theme(false);
 		var liveFonts = haxeon.ui.FontCollection.create();
@@ -61,7 +61,7 @@ class ButtonThemeTestMain {
 			var chrome = new Button("Action", null, function() {}, "live-chrome");
 			chrome.variant = ButtonVariant.Navigation; chrome.classes.push("chrome-action"); chrome.selected = true;
 			var node = liveContext.submit(chrome, new haxeon.ui.LayoutFrame(200, 80));
-			var background = node.computedStyle.get(StyleProperty.Background);
+			var background = node.computedStyle.getColor(StyleProperty.Background);
 			require(background.red == live.tokens.surfaceHover.red && background.green == live.tokens.surfaceHover.green
 				&& background.blue == live.tokens.surfaceHover.blue, "Live theme refresh lost chrome selection styling");
 		}
@@ -102,16 +102,16 @@ class ButtonThemeTestMain {
 				var normal = resolver.resolve(new StyleTarget("button", "normal", "normal", classes, ["button"], 0), null, theme.styles);
 				for (state in states) {
 					var computed = resolver.resolve(new StyleTarget("button", "probe", "probe", classes, ["button"], state), null, theme.styles);
-					var background = computed.get(StyleProperty.Background);
+					var background = computed.getColor(StyleProperty.Background);
 					var disabled = state == StyleState.Disabled;
 					var foreground = theme.buttonLabelColor(!disabled, background,
 						variant == "primary" ? theme.tokens.textOnAccent : theme.tokens.textPrimary);
 					if (!disabled) require(Theme.contrastRatio(foreground, background) >= 4.5,
 						variant + " state " + state + " has unreadable foreground");
 					if (state == StyleState.Focused) {
-						var base = normal.get(StyleProperty.Background);
+						var base = normal.getColor(StyleProperty.Background);
 						require(background.red == base.red && background.green == base.green && background.blue == base.blue && background.alpha == base.alpha, "Focus replaced " + variant + " background");
-						require(computed.get(StyleProperty.BorderWidth) > 0,
+						require(computed.getNumber(StyleProperty.BorderWidth) > 0,
 							"Focus outline is missing for " + variant);
 					}
 					context.interactionStates.set(buttonId, state);

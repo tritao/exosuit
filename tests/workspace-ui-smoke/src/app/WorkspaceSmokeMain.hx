@@ -1849,7 +1849,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		if (frames == 5 || frames == 6) {
 			var divider = dockDivider(ui.root);
 			if (divider == null) throw "missing dock divider";
-			var color:haxeon.ui.Color = divider.computedStyle.get(haxeon.ui.style.StyleProperty.Background);
+			var color:haxeon.ui.Color = divider.computedStyle.getColor(haxeon.ui.style.StyleProperty.Background);
 			var expected = frames == 5 ? theme.tokens.accentHover : theme.tokens.accentPressed;
 			require(color.red == expected.red && color.green == expected.green && color.blue == expected.blue,
 				"divider highlight missing at frame " + frames + ": color=" + color.red + "," + color.green + "," + color.blue + " expected=" + expected.red + "," + expected.green + "," + expected.blue + " states=" + divider.states);
@@ -1866,7 +1866,7 @@ class WorkspaceSmokeApp extends ExosuitApp {
 		if (frames == 8) {
 			var divider = dockDivider(ui.root);
 			if (divider == null) throw "missing dock divider";
-			var color:haxeon.ui.Color = divider.computedStyle.get(haxeon.ui.style.StyleProperty.Background);
+			var color:haxeon.ui.Color = divider.computedStyle.getColor(haxeon.ui.style.StyleProperty.Background);
 			require(color.red == theme.tokens.textPrimary.red && color.green == theme.tokens.textPrimary.green && color.blue == theme.tokens.textPrimary.blue && color.alpha == 0.14,
 				"divider did not return to neutral border");
 			trace("PASS: hairline dock separator keeps resize target, hover, drag, and neutral resting color");

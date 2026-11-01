@@ -159,7 +159,7 @@ class TabTooltipTestMain {
 			var labels = 0;
 			root.walk(function(node) {
 				if (node.styleType == "tooltip") {
-					var border = node.computedStyle.get(haxeon.ui.style.StyleProperty.BorderColor);
+					var border = node.computedStyle.getColor(haxeon.ui.style.StyleProperty.BorderColor);
 					require(border.red == theme.tokens.border.red && border.green == theme.tokens.border.green && border.blue == theme.tokens.border.blue,
 						"tooltip border is not the subtle theme border");
 				}
@@ -276,11 +276,11 @@ class TabTooltipTestMain {
 			if (node.styleType != "tooltip") return;
 			require(node.layout.visualKind == haxeon.ui.LayoutVisualKind.Custom,
 				"tooltip surface cannot host its themed paint decorations");
-			var decorations = node.computedStyle.get(haxeon.ui.style.StyleProperty.Decorations);
+			var decorations = node.computedStyle.getDecorations();
 			require(decorations != null && decorations.decorations.length == 2
 				&& decorations.decorations[1].kind == haxeon.ui.style.DecorationKind.Border,
 				"tooltip theme did not attach a painted border");
-			var effects = node.computedStyle.get(haxeon.ui.style.StyleProperty.Effects);
+			var effects = node.computedStyle.getEffects(haxeon.ui.style.StyleProperty.Effects);
 			require(effects != null && effects.effects.length == 1
 				&& effects.effects[0].kind == haxeon.ui.style.EffectKind.DropShadow,
 				"tooltip theme did not attach a painted drop shadow");
