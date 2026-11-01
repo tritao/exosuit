@@ -88,8 +88,14 @@ class Gui:
             time.sleep(0.5)
         raise Failure("no editor window for pid %d" % self.pid)
 
-    def focus(self):
+    def focus(self, seconds=5.0):
+        """Brings the editor to the front. Windows can refuse while the window is still coming up, so ask again until
+        it is in front or `seconds` pass; the input guards still refuse if it is not."""
+        deadline = time.time() + seconds
         driver.foreground(self.hwnd)
+        while self._foreground_pid() != self.pid and time.time() < deadline:
+            time.sleep(0.2)
+            driver.foreground(self.hwnd)
 
     def client(self):
         """(left, top, width, height) of the window's client area in physical screen pixels."""
