@@ -148,6 +148,19 @@ Phases 4–7 landed on `main` on 2026-11-01 (exosuit `757db3f1`, haxeon `fd2a332
   folders, and `contextRoots()` in `ExosuitApp` starts from those roots. What opened `exosuit` as a project in that
   window is not confirmed; a tab of another workspace is the suspect. Next: reproduce with a real-input scenario, then
   take the panel's folders from the open workspace's own folders.
+- **The title bar names a workspace the window is not on.** In the same session the title said "resume-2026 ·
+  Workspace connected" while the tree marked `eon-series`, and later `exosuit`, as "this window". Likely the same
+  mixed window state as the item above.
+- **Removing the "Work" group in `exosuit` left an empty-state message beside a session, and moved the Activity
+  Rail.** After the group was removed, the workspace's root still held "Android live acceptance", yet the Workbench
+  showed "Nothing here yet. Sessions and terminals go in the workspace; groups sort them." with New group. At the
+  same moment the Activity Rail's destinations (Files, Search, Changes, Remote, Extensions) came back to the left
+  rail. The user expected neither. Not investigated; a guess is that the window left the group's context and the
+  layout mode (Agents layout moves those destinations to the right panel) changed with it. Check what removing the
+  focused group does to the context and the layout mode, and make the empty state count root items.
+- **Workspaces take a long time to show as connected.** Not measured. Time it from launch and from opening a
+  workspace to "Workspace connected" and to the catalog rows appearing (suit's `machine` reply, the manager start,
+  the first CATALOG read), and find where the time goes.
 - No test exercises the agent manager's restart when the process that started it dies (`startDetached`).
 - `processAlive` always returns true on Windows.
 - The key-chords test runs only on Linux.
