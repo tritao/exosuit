@@ -143,6 +143,16 @@ and the status.
 - **Status:** open. The rejection is right (`Null<Color>` is not a `Color`), but the message blames the branches. It
   should name the argument mismatch.
 
+### The compiler worker reports negative allocation bytes for a large compile
+
+- **Symptom:** `worker allocations: bytes=-2147483648 count=459867574 heap=-2147483648` after the graphical app's
+  compile. The driver's own report for the same compile says `compile-bytes=17795267928`.
+- **Found:** 2026-11-01, clean Windows build on `daily`.
+- **Cause:** `CompilerServer` formats the values with `Math.round`, which returns a 32-bit `Int`, so anything past
+  2 GiB clamps to `-2147483648` (`src/compiler/tools/CompilerServer.hx`, the `worker allocations` message).
+- **Workaround:** none needed; only the report is wrong.
+- **Status:** open. Format with `Math.fround` or as a `Float` instead.
+
 ## Standard library gaps
 
 Standard Haxe APIs haxeon's standard library does not have yet. Each one forced a hand-written replacement.
