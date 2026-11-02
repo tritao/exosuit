@@ -47,6 +47,10 @@ class WorkbenchPanel implements View {
 	public final model = new WorkbenchTreeModel();
 	public final tree:TreeView;
 	public var onError:Null<String->Void>;
+	/** Makes the group the window's context (a click or Enter on its row); set by the app, which owns the context. */
+	public var focusGroup:Null<String->Void>;
+	/** Makes the open workspace's root the window's context (a click or Enter on its row). */
+	public var focusRoot:Null<Void->Void>;
 	/** Closes a catalog terminal and its views; selection actions use it. */
 	public var closeTerminal:Null<TerminalRecord->Void>;
 	/** Asks which group (or the workspace root) a session moves to: its Move to Group…. */
@@ -158,12 +162,13 @@ class WorkbenchPanel implements View {
 		tree.onActivate = function(key, _) {
 			var id = WorkbenchRowKey.workspaceId(key);
 			if (id != null) {
-				if (key == model.openRow) return false;
+				if (key == model.openRow) { enterRow(key); return true; }
 				openWorkspace(id);
 				return true;
 			}
 			var foreign = WorkbenchRowKey.parseForeign(key);
 			if (foreign != null && foreign.kind != WorkbenchRowKind.Group) { openForeign(foreign); return true; }
+			if (enterRow(key)) return true;
 			return false;
 		};
 		tree.onItemActivatedWithEvent = function(key, event) {
@@ -177,9 +182,23 @@ class WorkbenchPanel implements View {
 			if (key == WorkbenchRowKey.NEW_WORKSPACE && count == 1) { createWorkspace(); return; }
 			// A single click on another workspace's item only selects it; Enter or a double click opens it (see onItemActivatedWithEvent).
 			if (WorkbenchRowKey.isForeign(key)) return;
+			// The row of a group or of the open workspace enters it; the chevron expands it. Other rows keep expanding on a click.
+			tree.expandOnSingleClick = !enterRow(key);
 			var row = WorkbenchRowKey.parse(key);
 			if (row != null) openItem(row.kind, row.id);
 		};
+	}
+
+	/** A group row or the open workspace's row: makes it the window's context. False for any other row. */
+	function enterRow(key:String):Bool {
+		if (key == model.openRow && WorkbenchRowKey.workspaceId(key) != null) {
+			if (focusRoot != null) focusRoot();
+			return true;
+		}
+		var group = WorkbenchRowKey.idOf(key, WorkbenchRowKind.Group);
+		if (group == null || WorkbenchRowKey.isForeign(key)) return false;
+		if (focusGroup != null) focusGroup(group);
+		return true;
 	}
 
 	function openItem(kind:WorkbenchRowKind, id:String):Void {

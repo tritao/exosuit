@@ -1571,6 +1571,12 @@ class ExosuitApp implements DesktopUiApplication {
 			requestFrame();
 		};
 		workbenchPanel.closeTerminal = closeCatalogTerminal;
+		workbenchPanel.focusRoot = function() { application.activeContext.useWorkspace(); requestFrame(); };
+		workbenchPanel.focusGroup = function(id) {
+			var catalog = workbenchClient == null ? null : workbenchClient.terminalCatalog();
+			if (catalog != null) application.activeContext.openSessionGroup(id, catalog.groups, catalog.workspaceRoot);
+			requestFrame();
+		};
 		workbenchPanel.moveAgent = moveAgentGroup;
 		workbenchPanel.machine = machineActions;
 		workbenchPanel.chooseFolder = function() application.savedWorkspaces.addPicker();

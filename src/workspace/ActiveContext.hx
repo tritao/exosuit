@@ -1,6 +1,9 @@
 package workspace;
 
-/** Window-local scope. Selecting a tree row never changes this object. */
+/**
+	Window-local scope. Selecting a tree row never changes this object; entering one does: a click or Enter on a group row
+	(`focusGroup`) or on the open workspace's row (`useWorkspace`).
+**/
 class ActiveContext {
 	public var kind(default, null):ContextKind = ContextKind.Workspace;
 	public var id(default, null):String = "workspace";
