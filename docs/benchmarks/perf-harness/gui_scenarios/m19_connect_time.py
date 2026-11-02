@@ -92,6 +92,7 @@ def run(gui):
     gui.click(gui.element("w:" + beta), count=2)
     attached(gui, "Beta")
     healthy(gui, "after opening Beta")
+    show_workbench(gui)  # the catalog rows are read for the tree, which a switch may leave hidden
     opened = gui.wait("open event", lambda s: after(s["state"]["timeline"], mark, lambda e: e["event"] == "open-workspace" and e["workspace"] == beta), 10)
     status, rows = connected_and_rows(gui, "Beta", beta, opened)
     record(gui, "open", timeline(gui), opened, [("connected", status), ("rows", rows)])
@@ -100,6 +101,8 @@ def run(gui):
     show_workbench(gui)
     mark = len(timeline(gui))
     gui.click(gui.element("w:" + alpha), count=2)
+    attached(gui, "Alpha")
+    show_workbench(gui)
     opened = gui.wait("open event", lambda s: after(s["state"]["timeline"], mark, lambda e: e["event"] == "open-workspace" and e["workspace"] == alpha), 10)
     status, rows = connected_and_rows(gui, "Alpha", alpha, opened)
     record(gui, "back", timeline(gui), opened, [("connected", status), ("rows", rows)])
