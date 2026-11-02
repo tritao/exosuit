@@ -2185,6 +2185,7 @@ class ExosuitApp implements DesktopUiApplication {
 			agents: agents == null ? [] : [for (record in agents.records) {id: record.id, name: record.name, group: record.group, state: record.state}],
 			recent: [for (info in active.recent) info.key()],
 			filesRoots: try contextRoots() catch (_:Dynamic) [],
+			title: workspaceTitleText(), contextRoots: active.roots.copy(), projectRoots: [for (project in application.workspace.projects) project.root],
 			panes: panes,
 			sessionLines: host.sessionLines(),
 			notifications: [for (entry in host.getNotifications().history()) entry.source + ": " + entry.message],
@@ -2998,7 +2999,9 @@ class ExosuitApp implements DesktopUiApplication {
 					host.commandView.input.selectAll();
 				};
 				var local = workspaceAttachment == null || workspaceAttachment.hasLocalFileAccess();
-				if (desktop != null && local) {
+				var automated = devtools.AutomationProbe.takeFolderAnswer();
+				if (automated != null) save(group.parent,automated,workspace.service.WorkspaceProtocol.order(group.order));
+				else if (desktop != null && local) {
 					try desktop.selectDirectory(function(accepted, paths) {
 						if (accepted && paths.length > 0) save(group.parent,paths[0],workspace.service.WorkspaceProtocol.order(group.order));
 					}, "Choose Group Working Directory", workbenchPanel == null ?
@@ -3871,6 +3874,14 @@ class ExosuitApp implements DesktopUiApplication {
 	function contextPanelProvidesDestinations():Bool
 		return dock.get("context-panel") != null && !phoneLayoutActive && !responsiveRightHidden && !remoteAgentsLayout();
 
+	/** The title bar's workspace name. */
+	function workspaceTitleText():String {
+		var savedWorkspace = application.savedWorkspaces.current;
+		if (application.activeContext.kind == workspace.ContextKind.Group) return application.activeContext.label;
+		return savedWorkspace == null ? (explorerRoot == null ? "" : haxe.io.Path.withoutDirectory(explorerRoot)) :
+			savedWorkspace.name + (application.savedWorkspaces.dirty ? " *" : "");
+	}
+
 	/** Folders the right panel's Files and Changes show: the Agents scope's folder, else the active context's roots. */
 	function contextRoots():Array<String> {
 		var scope = contextScope(), panel = workbenchPanel;
@@ -4049,11 +4060,8 @@ class ExosuitApp implements DesktopUiApplication {
 		if (actions >= 2) items.push(new KeyedView("save", toolbarButton("Save", IconName.Save,
 			function() application.commands.perform("doc:save", application.context))));
 		var workspaceTitleStyle = new LayoutStyle(); workspaceTitleStyle.width = LayoutAxis.grow();
-		var savedWorkspace = application.savedWorkspaces.current;
-		var workspaceTitle = savedWorkspace == null ? (explorerRoot == null ? "" : haxe.io.Path.withoutDirectory(explorerRoot)) :
-			savedWorkspace.name + (application.savedWorkspaces.dirty ? " *" : "");
+		var workspaceTitle = workspaceTitleText();
 		if (application.activeContext.kind == workspace.ContextKind.Group) {
-			workspaceTitle = application.activeContext.label;
 			var back = new Button("Back to Workspace", null, function() {
 				application.activeContext.useWorkspace(); requestFrame();
 			}, "context-back-to-workspace");
