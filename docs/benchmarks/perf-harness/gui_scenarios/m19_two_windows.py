@@ -41,6 +41,8 @@ def run(gui):
         second_pid = gui.wait("window 2 registered, focused on Beta",
                               lambda s: next((w["pid"] for w in s["state"]["otherWindows"] if "/" + beta + "/" in w["context"]), None), 60)
         gui.check("window 1 knows window 2's focus (suit's windows list)", lambda s: others(s["state"], beta), 5)
+        gui.check("starting the window blocked the frame under 50 ms", lambda s: 0 < s["state"]["newWindowMs"] < 50, 5,
+                  detail=lambda s: s["state"]["newWindowMs"])
         two = Gui(second_pid, os.path.join(os.path.dirname(gui.dir), "automation-2"), os.path.join(gui.out, "window2"),
                   max(10, gui.deadline - time.monotonic()), 30)
         two.wait("window 2 attached to Beta", lambda s: s["state"]["openWorkspace"] == beta and s["state"]["groups"] is not None, 40)
