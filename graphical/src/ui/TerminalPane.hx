@@ -516,7 +516,12 @@ class TerminalPane implements AgentTerminalPanel {
 			var key = entry.paintKey;
 			if (index == cursorRow && cursorMode != 1) key += '-cursor-$cursorColumn-$cursorMode-$focusGeneration';
 			var view = new CanvasView('terminal-row-$serial', function(canvas:Canvas, geometry) {
-				canvas.fillRectIfPositive(new Rect(0.0, 0.0, geometry.width, geometry.height), background);
+				// Rows tile the grid without overlapping: nothing a row draws (cell
+				// backgrounds, glyph ink taller than a cell, cursor) may reach another
+				// row, whatever order the rows are composited in.
+				canvas.save();
+				canvas.clip(new Rect(0.0, 0.0, geometry.width, rowHeight));
+				canvas.fillRectIfPositive(new Rect(0.0, 0.0, geometry.width, rowHeight), background);
 				for (fill in renderedRows[index].fills) canvas.fillRectIfPositive(new Rect(8.0 + fill.start * cellWidth,
 					0.0, (fill.end - fill.start) * cellWidth, rowHeight), fill.color);
 				// A line's height and baseline follow the tallest font it uses, so a
@@ -537,6 +542,7 @@ class TerminalPane implements AgentTerminalPanel {
 						canvas.fillRectIfPositive(new Rect(x + width - 1.0, 1.0, 1.0, rowHeight - 2.0), cursorOutlineColor);
 					}
 				}
+				canvas.restore();
 			}, rowStyle, null, false, CachePolicy.None, key);
 			layers.push(new StackChild('row-$serial', view, 0.0, terminalTop + index * rowHeight,
 				1, LayoutAxis.grow(), LayoutAxis.fixed(rowHeight)));
