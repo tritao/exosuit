@@ -143,6 +143,19 @@ and the status.
 - **Status:** open. The rejection is right (`Null<Color>` is not a `Color`), but the message blames the branches. It
   should name the argument mismatch.
 
+### Every live patch was rejected: a packed type hashed differently from HashLink
+
+- **Symptom:** every live edit fell back to a full module reload, also the first one after a fresh start:
+  `HashLink rejected the patch transaction (status 4): Patch symbol prefix hash does not match module`. The reload
+  recreates the app's window, which then moved, lost its size and opened behind other windows.
+- **Found:** 2026-11-01, daily use of the editor in live mode.
+- **Cause:** `HlPatchWriter.hashTypes` hashed a `Parameterized(Packed, p)` type's kind and parameter, while
+  `hash_type_prefix` in `vendor/hashlink/src/hlpatch.c` hashes only the kind of an `HPACKED` type (parameters only for
+  `HREF`/`HNULL`). It began once the editor's module had packed field types (value-struct fields; the live module had
+  12), probably with upstream `86f7d0b1` "Convert UI data records to value structs" (not bisected).
+- **Status:** fixed in haxeon `59b9c786` (cherry-picked from `bb576ede`): a packed type's kind only. Regression test
+  `HotReloadMain.testPackedTypeInPrefix`. The runtime is unchanged.
+
 ### The compiler worker reports negative allocation bytes for a large compile
 
 - **Symptom:** `worker allocations: bytes=-2147483648 count=459867574 heap=-2147483648` after the graphical app's
