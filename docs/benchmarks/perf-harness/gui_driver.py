@@ -33,7 +33,7 @@ user32.GetAncestor.restype = wt.HWND
 
 VK = {"ctrl": 0x11, "shift": 0x10, "alt": 0x12, "enter": 0x0D, "return": 0x0D, "esc": 0x1B, "escape": 0x1B, "tab": 0x09,
       "up": 0x26, "down": 0x28, "left": 0x25, "right": 0x27, "home": 0x24, "end": 0x23, "delete": 0x2E, "backspace": 0x08,
-      "space": 0x20, "f2": 0x71, "f5": 0x74, "pageup": 0x21, "pagedown": 0x22}
+      "space": 0x20, "f2": 0x71, "f4": 0x73, "f5": 0x74, "pageup": 0x21, "pagedown": 0x22}
 for c in "abcdefghijklmnopqrstuvwxyz":
     VK[c] = ord(c.upper())
 for c in "0123456789":
