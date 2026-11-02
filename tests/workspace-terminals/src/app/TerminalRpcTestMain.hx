@@ -42,6 +42,8 @@ class TerminalRpcTestMain {
     var runtime = Runtime.start(), processes = new ProcessManager();
     if (mode == "contracts") {
       TerminalCapabilitiesTests.run();
+      TerminalSnapshotTests.run();
+      TerminalSnapshotTests.service(root);
       TerminalReplayTests.run();
       TerminalResizeTests.run(root);
       TerminalThemeTests.run(root);
