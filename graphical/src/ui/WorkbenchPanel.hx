@@ -314,6 +314,10 @@ class WorkbenchPanel implements View {
 					items.push(new MenuItem("new-agent", "New Agent Session…", function() { edit(null, "new-agent"); }, true, null, true));
 				if (client.canCreateGroupedTerminals())
 					items.push(new MenuItem("new-terminal", "New Terminal…", function() { edit(null, "new-terminal"); }, !client.terminalCatalogBusy()));
+				if (client.canEditGroups())
+					items.push(new MenuItem("new-group", "New Group…", function() beginGroup({id: workspace.client.WorkspaceIds.create("group"),
+						name: "", cwd: null, revision: 0, parent: null, order: model.nextOrder(null)}, true),
+						!client.terminalCatalogBusy() && !pending));
 			}
 			items.push(new MenuItem("machine-workspace-rename", "Rename…", function() actions.rename(target), idle, "F2", true));
 			items.push(new MenuItem("machine-workspace-attach-folder", "Attach Folder…", function() actions.attachFolder(target), idle));
