@@ -565,40 +565,74 @@ class RpcTerminalBackend implements TerminalBackend {
     if (closed || connection != c || pending) return;
     pending = true;
     replayDirty = false;
+    requestSnapshotPage(c, null, null, 0);
+  }
+  /** Reads the snapshot page by page: `head` is its first page, `data` holds the `offset` bytes read so far. */
+  function requestSnapshotPage(c:RpcConnection, head:Null<WorkspaceTerminalProtocol.TerminalScreenSnapshot>, data:Null<Bytes>, offset:Int):Void {
+    var token = head == null ? 0 : head.token;
     c.call(WorkspaceTerminalProtocol.SNAPSHOT, {
-      workspace: "workspace", instance: instance, id: terminalId
+      workspace: "workspace", instance: instance, id: terminalId, token: token, offset: offset
     }, 3000, function(value) {
       if (closed || connection != c) return;
-      pending = false;
-      if (value.terminal == null || value.terminal.id != terminalId
-          || value.terminal.end < position || value.terminal.end < value.terminal.start
-          || value.data == null || value.data.length < 64 || value.data.length > 3 * 1024 * 1024
-          || value.terminal.columns < 1 || value.terminal.columns > 512
-          || value.terminal.rows < 1 || value.terminal.rows > 256) {
+      if (value.total == null) {
+        // Older daemons send the whole snapshot in one reply.
+        pending = false;
+        if (head != null) fail("Invalid terminal screen snapshot");
+        else applyScreenSnapshot(value, value.data);
+        return;
+      }
+      var first = head == null ? value : head;
+      var total:Int = first.total == null ? -1 : first.total;
+      var pageToken:Int = value.token == null ? -1 : value.token;
+      if (value.data == null || pageToken < 0 || value.token != first.token || value.offset != offset
+          || value.total != total || total < 64 || total > 3 * 1024 * 1024
+          || value.data.length == 0 || value.data.length > total - offset
+          || (offset + value.data.length < total && pageToken == 0)) {
+        pending = false;
         fail("Invalid terminal screen snapshot");
         return;
       }
-      if (!snapshotOnly && (value.cursor == null || value.cursor < replayCursor)) {
-        fail("Invalid terminal snapshot cursor"); return;
-      }
-      if (!observe(value.terminal)) return;
-      if (value.cursor != null) replayCursor = value.cursor;
-      snapshotPending = false;
-      synchronizationPending = true;
-      replayAfterResize = false;
-      position = value.terminal.end;
-      // The snapshot carries its own grid and replaces any local view geometry.
-      viewColumns = 0; viewRows = 0;
-      streamColumns = value.terminal.columns; streamRows = value.terminal.rows;
-      output.push(TerminalEvent.screenSnapshot(position, value.data));
-      output.push(TerminalEvent.status(value.terminal.state, value.terminal.exitCode));
-      nextRead = Sys.time() + (snapshotOnly ? idleReadDelay() : 0);
+      var bytes = data == null ? Bytes.alloc(total) : data;
+      bytes.blit(offset, value.data, 0, value.data.length);
+      var filled = offset + value.data.length;
+      if (filled < total) { requestSnapshotPage(c, first, bytes, filled); return; }
+      pending = false;
+      applyScreenSnapshot(first, bytes);
     }, function(error) {
       if (connection != c) return;
       pending = false;
       replayDirty = true;
-      if (!closed && !retryable(error.code)) fail(error.code == "snapshot_unavailable"
+      // A replaced or expired snapshot is taken again on the next poll.
+      if (!closed && error.code != "snapshot_expired" && !retryable(error.code)) fail(error.code == "snapshot_unavailable"
         ? "Terminal screen snapshot is unavailable" : error.code);
     });
+  }
+  /** The viewer shows the service's screen as of the snapshot, then replays from the cursor it was taken at. */
+  function applyScreenSnapshot(value:WorkspaceTerminalProtocol.TerminalScreenSnapshot, data:Bytes):Void {
+    if (value.terminal == null || value.terminal.id != terminalId
+        || value.terminal.end < position || value.terminal.end < value.terminal.start
+        || data == null || data.length < 64 || data.length > 3 * 1024 * 1024
+        || value.terminal.columns < 1 || value.terminal.columns > 512
+        || value.terminal.rows < 1 || value.terminal.rows > 256) {
+      fail("Invalid terminal screen snapshot");
+      return;
+    }
+    // Daemons without a snapshot cursor have no ordered replay either: they are read by snapshots alone.
+    if (value.cursor == null) snapshotOnly = true;
+    else if (value.cursor < replayCursor) { fail("Invalid terminal snapshot cursor"); return; }
+    if (!observe(value.terminal)) return;
+    if (value.cursor != null) replayCursor = value.cursor;
+    snapshotPending = false;
+    synchronizationPending = true;
+    replayAfterResize = false;
+    position = value.terminal.end;
+    // The snapshot carries its own grid and replaces any local view geometry.
+    viewColumns = 0; viewRows = 0;
+    streamColumns = value.terminal.columns; streamRows = value.terminal.rows;
+    output.push(TerminalEvent.screenSnapshot(position, data));
+    output.push(TerminalEvent.status(value.terminal.state, value.terminal.exitCode));
+    // Output recorded after the snapshot follows by replay.
+    if (!snapshotOnly) replayDirty = true;
+    nextRead = Sys.time() + (snapshotOnly ? idleReadDelay() : 0);
   }
 }

@@ -4,6 +4,7 @@ import haxe.Int64;
 import haxeon.rpc.*;
 import workspace.service.WorkspaceTerminalProtocol;
 import workspace.service.TerminalReplayLog;
+import workspace.service.TerminalSnapshotPages;
 import workspace.service.WorkspaceTerminals;
 import workspace.service.WorkspaceTerminalPersistence;
 import workspace.service.WorkspaceProtocol;
@@ -52,6 +53,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
   final terminals:Map<String, RuntimeTerminal> = [];
   final controllers:Map<String, RpcConnection> = [];
   final watchers:Array<{connection:RpcConnection, id:String, stamp:String}> = [];
+  final snapshotPages = new TerminalSnapshotPages();
   final historyLimit:Int;
   var count:Int = 0;
   final catalog:Map<String, TerminalRecord> = [];
@@ -515,9 +517,22 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         c.fail(error("unknown_terminal"));
         return;
       }
+      var token:Int = r.token == null ? -1 : r.token;
+      if (token > 0) {
+        var page = snapshotPages.next(connection, t.id, token, r.offset == null ? 0 : r.offset, Sys.time());
+        if (page == null) c.fail(error("snapshot_expired"));
+        else c.respond(page);
+        return;
+      }
+      var value:TerminalScreenSnapshot;
       try {
-        c.respond({terminal: info(t, connection), data: t.emulator.screenSnapshot(), cursor: t.replay.endCursor});
-      } catch (_:Dynamic) {
+        var data = t.emulator.screenSnapshot(), current = info(t, connection);
+        value = token < 0 ? {terminal: current, data: data, cursor: t.replay.endCursor}
+          : snapshotPages.start(connection, t.id, data, current, t.replay.endCursor, Sys.time());
+        // An older client reads the whole snapshot in one reply; a large grid's does not fit one message.
+        c.respond(value);
+      } catch (failure:Dynamic) {
+        Sys.println("Terminal screen snapshot failed for " + t.id + ": " + Std.string(failure));
         c.fail(error("snapshot_unavailable"));
       }
     });
@@ -707,6 +722,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
   }
   public function poll():Void {
     for (id in [for (id in controllers.keys()) id]) controller(id);
+    snapshotPages.prune(Sys.time());
     for (t in terminals) {
       if (t.state != "running") {
         if (t.historyDirty && Sys.time() >= t.nextHistorySave)
@@ -759,6 +775,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
     terminals.clear();
     controllers.clear();
     watchers.resize(0);
+    snapshotPages.clear();
     count = 0;
   }
 }

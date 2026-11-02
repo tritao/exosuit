@@ -52,9 +52,21 @@ import haxeon.wire.MessagePack;
 @:id(2) var offset:Int64;
 @:id(3) var data:Bytes;
 }
+/** Paged reads carry `token`: 0 takes a new snapshot, otherwise `offset` continues that one. Without it the whole
+    snapshot comes in one reply, which a large grid's snapshot does not fit. */
+@:wire typedef TerminalSnapshotQuery = {@: id(1) var workspace: String;
+@:id(2) var instance:String;
+@:id(3) var id:String;
+@:optional @:id(4) var token:Null<Int>;
+@:optional @:id(5) var offset:Null<Int>;
+}
+/** `data` is the page at `offset` of a `total`-byte snapshot; older daemons send no `total` and the whole snapshot. */
 @:wire typedef TerminalScreenSnapshot = {@: id(1) var terminal:TerminalInfo;
 @:id(2) var data:Bytes;
 @:optional @:id(3) var cursor:Null<Int64>;
+@:optional @:id(4) var token:Null<Int>;
+@:optional @:id(5) var offset:Null<Int>;
+@:optional @:id(6) var total:Null<Int>;
 }
 /** Cursor counts immutable records, including resizes with no output between them. */
 @:wire typedef TerminalReplayQuery = {
@@ -236,10 +248,10 @@ class WorkspaceTerminalProtocol {
     function(v:TerminalReplay) return MessagePack.encode(v),
     function(b:Bytes):TerminalReplay return MessagePack.decode(b)
   );
-  public static final SNAPSHOT = new RpcMethod<TerminalTarget, TerminalScreenSnapshot>(
+  public static final SNAPSHOT = new RpcMethod<TerminalSnapshotQuery, TerminalScreenSnapshot>(
     119,
-    function(v:TerminalTarget) return MessagePack.encode(v),
-    function(b:Bytes):TerminalTarget return MessagePack.decode(b),
+    function(v:TerminalSnapshotQuery) return MessagePack.encode(v),
+    function(b:Bytes):TerminalSnapshotQuery return MessagePack.decode(b),
     function(v:TerminalScreenSnapshot) return MessagePack.encode(v),
     function(b:Bytes):TerminalScreenSnapshot return MessagePack.decode(b)
   );
