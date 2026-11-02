@@ -1573,9 +1573,7 @@ class ExosuitApp implements DesktopUiApplication {
 		workbenchPanel.closeTerminal = closeCatalogTerminal;
 		workbenchPanel.focusRoot = function() { application.activeContext.useWorkspace(); requestFrame(); };
 		workbenchPanel.focusGroup = function(id) {
-			var catalog = workbenchClient == null ? null : workbenchClient.terminalCatalog();
-			if (catalog != null) application.activeContext.openSessionGroup(id, catalog.groups, catalog.workspaceRoot);
-			requestFrame();
+			focusGroupById(id);
 		};
 		workbenchPanel.moveAgent = moveAgentGroup;
 		workbenchPanel.machine = machineActions;
@@ -3934,9 +3932,11 @@ class ExosuitApp implements DesktopUiApplication {
 		"Open folder" on a group: the window works in that group's folder (its context), as a switch to the group does. It
 		never adds the folder to the open workspace, which keeps the folders it was given.
 	**/
-	function focusGroupFolder(group:workspace.service.WorkspaceProtocol.WorkspaceGroup):Void {
+	function focusGroupFolder(group:workspace.service.WorkspaceProtocol.WorkspaceGroup):Void focusGroupById(group.id);
+
+	function focusGroupById(id:String):Void {
 		var client = workbenchClient, catalog = client == null ? null : client.terminalCatalog();
-		if (catalog != null) application.activeContext.openSessionGroup(group.id, catalog.groups, catalog.workspaceRoot);
+		if (catalog != null) application.activeContext.openSessionGroup(id, catalog.groups, catalog.workspaceRoot);
 		requestFrame();
 	}
 
