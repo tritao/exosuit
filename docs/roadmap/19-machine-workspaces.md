@@ -291,7 +291,10 @@ A window's folders are its workspace's own. The right panel, the context's roots
 workspace's folders (`SavedWorkspaceController.roots()`), never from whichever projects happen to be open. A tab or tree
 row of another workspace belongs to that workspace's context: opening it switches the window to that workspace. Opening a
 folder that is not one of the workspace's replaces the workspace (the machine workspace that holds exactly that folder
-opens in its place); only Add Folder and Attach Folder add one. "Open folder" on a group focuses the group's context.
+opens in its place); only Add Folder, Attach Folder, the Machine view's Attach and folders given on the command line
+add one. Leaving a workspace keeps its tabs and contexts under its own id: they come back with the workspace and never
+appear in the next one (`m19_foreign_tabs`). An adopted machine workspace lists the catalog's folders, not every open
+project. "Open folder" on a group focuses the group's context.
 
 ## Phase 8: many windows and instances in parallel
 

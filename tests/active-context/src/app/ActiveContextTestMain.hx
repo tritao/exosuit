@@ -76,9 +76,16 @@ class ActiveContextTestMain {
 		require(app.savedWorkspaces.current == null && app.activeContext.roots.length == 1 && app.activeContext.roots[0] == other,
 			"opening another folder joined the open workspace instead of replacing it: " + app.activeContext.roots.join(","));
 		app.savedWorkspaces.close(); app.openArgument(first);
-		app.savedWorkspaces.adoptMachineWorkspace("machine-ws", "Machine");
+		app.savedWorkspaces.adoptMachineWorkspace("machine-ws", "Machine", [first]);
 		require(app.savedWorkspaces.workspaceId() == "machine-ws" && app.activeContext.roots.length == 1, "machine workspace was not adopted");
+		// A project that got in some other way is not one of the adopted workspace's folders.
+		app.workspace.addProject(other);
+		require(app.savedWorkspaces.roots().length == 1 && app.savedWorkspaces.roots()[0] == first, "adopted workspace listed a foreign open project");
+		app.workspace.removeProject(app.workspace.projects[app.workspace.projects.length - 1]);
+		var renames = 0;
+		app.savedWorkspaces.onIdentityAssigned = function(_, _) renames++;
 		app.openArgument(other);
+		require(renames == 0, "leaving an adopted workspace renamed its contexts");
 		require(app.savedWorkspaces.workspaceId() == null && app.activeContext.roots.length == 1 && app.activeContext.roots[0] == other,
 			"opening another folder joined the adopted machine workspace: " + app.activeContext.roots.join(","));
 		app.shutdown();

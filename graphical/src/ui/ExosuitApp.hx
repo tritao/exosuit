@@ -578,7 +578,7 @@ class ExosuitApp implements DesktopUiApplication {
 		}
 		application.session.start();
 		contextLayoutsReady = true;
-		if (openPath != null) openArgument(openPath);
+		if (openPath != null) openArgument(openPath, true);
 		if (dock.isOpen("terminal") && host.panelTerminals.length == 0) openTerminal();
 		layoutModes.start(application.settings.current.layoutMode);
 	}
@@ -2000,7 +2000,7 @@ class ExosuitApp implements DesktopUiApplication {
 		if (application.savedWorkspaces.current == null) {
 			var roots = application.savedWorkspaces.roots();
 			var matches = roots.length != 1 ? [] : [for (entry in state.workspaces) if (entry.folders.length == 1 && PathKey.same(entry.folders[0], roots[0])) entry];
-			if (matches.length == 1) application.savedWorkspaces.adoptMachineWorkspace(matches[0].id, matches[0].name);
+			if (matches.length == 1) application.savedWorkspaces.adoptMachineWorkspace(matches[0].id, matches[0].name, matches[0].folders);
 			else application.savedWorkspaces.releaseMachineWorkspace();
 		}
 		var key = machine.revision + ":" + attached;
@@ -2319,7 +2319,7 @@ class ExosuitApp implements DesktopUiApplication {
 	function openMachineRoot(root:String):Void {
 		var project = application.workspace.activeProject;
 		var normal = workspace.client.MachineWorkspaces.normalPath;
-		if (project == null || normal(project.root) != normal(root)) openArgument(root);
+		if (project == null || normal(project.root) != normal(root)) openArgument(root, true);
 		requestFrame();
 	}
 
@@ -5250,14 +5250,15 @@ class ExosuitApp implements DesktopUiApplication {
 		return new Text(message, style, theme.tokens.textSecondary, TextStyleOverride.text(13.0));
 	}
 
-	function openArgument(path:String):Void {
+	/** `join`: the folder is added to what is open (startup arguments, Machine attach); otherwise it replaces an open workspace. */
+	function openArgument(path:String, join:Bool = false):Void {
 		if (FileSystem.exists(path) && FileSystem.isDirectory(path)) {
-			if (openFolderAsMachineWorkspace(path)) return;
+			if (!join && openFolderAsMachineWorkspace(path)) return;
 			explorerRoot = application.workspace.fileSystem.normalize(path);
 			clearExplorerModel();
 			filesScroll.jumpTo(0, 0);
 			openExplorer();
-			application.openArgument(path);
+			if (join) application.attachFolder(path); else application.openArgument(path);
 			return;
 		}
 		if (explorerRoot == null) {
