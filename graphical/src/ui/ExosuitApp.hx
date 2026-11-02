@@ -2031,6 +2031,22 @@ class ExosuitApp implements DesktopUiApplication {
 		application.activeContext.openSessionGroup(target.group, catalog.groups, catalog.workspaceRoot);
 	}
 
+	/**
+		A group context whose group the workspace no longer has goes back to the workspace. The group was removed, or
+		an earlier run saved it and it is gone now; otherwise the window keeps the group's name as its title and offers
+		"Back to Workspace" from a group that does not exist. Only a fully loaded catalog can tell, and a switch to a
+		group of another workspace (`pendingContextTarget`) is left to finish.
+	**/
+	function leaveMissingGroup():Void {
+		var active = application.activeContext;
+		if (active.kind != workspace.ContextKind.Group || pendingContextTarget != null) return;
+		var client = workbenchClient, catalog = client == null ? null : client.terminalCatalog();
+		if (catalog == null || catalog.next != null) return;
+		for (group in catalog.groups) if (group.id == active.id) return;
+		active.useWorkspace();
+		requestFrame();
+	}
+
 	/** A deleted workspace: leave it first if it is on screen, then close its contexts, keeping every unsaved tab. */
 	function removeWorkspaceContexts(id:String):Void {
 		var active = application.activeContext;
@@ -3367,6 +3383,7 @@ class ExosuitApp implements DesktopUiApplication {
 				workspaceStatus = label;
 				requestFrame();
 			}
+			leaveMissingGroup();
 		}
 		remoteFileSearch.update(Sys.time());
 		var workspaces = machineClient;
