@@ -1571,9 +1571,12 @@ class ExosuitApp implements DesktopUiApplication {
 			requestFrame();
 		};
 		workbenchPanel.closeTerminal = closeCatalogTerminal;
-		workbenchPanel.focusRoot = function() { application.activeContext.useWorkspace(); requestFrame(); };
+		// A switch made from a tree row leaves the keyboard on the row, whatever the context's saved focus was.
+		workbenchPanel.focusRoot = function() { host.keepFocusOnSwitch = true; application.activeContext.useWorkspace(); host.keepFocusOnSwitch = false; requestFrame(); };
 		workbenchPanel.focusGroup = function(id) {
+			host.keepFocusOnSwitch = true;
 			focusGroupById(id);
+			host.keepFocusOnSwitch = false;
 		};
 		workbenchPanel.moveAgent = moveAgentGroup;
 		workbenchPanel.machine = machineActions;

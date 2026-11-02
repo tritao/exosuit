@@ -1711,6 +1711,9 @@ class UiWorkbenchHost implements WorkbenchHost {
 		for (pane in panes) if (!dockActions.model.isOpen(pane.id)) dockActions.model.open(pane.id);
 	}
 
+	/** Set around a switch the user made from a sidebar row: the editor does not take the keyboard from the row. */
+	public var keepFocusOnSwitch = false;
+
 	/** A context switch detaches views, never closes their documents or shells. */
 	public function switchContext(key:String):Void {
 		if (key == contextKey) return;
@@ -1749,7 +1752,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 			restoreLayoutLines(lines == null ? defaultContextLines : lines, resolveContextDocument);
 			restoreEvictedSelections(key);
 		}
-		var editorFocused = dockActions.model.activePanelId == activePane.id;
+		var editorFocused = !keepFocusOnSwitch && dockActions.model.activePanelId == activePane.id;
 		pendingEditorFocus = editorFocused; focus.activate(editorFocused ? activeView() : null); notifyActiveTabChanged(); afterContextRestore(); requestFrame();
 		// Eviction follows the switch: the new context's first frame never waits for another one's teardown.
 		lastSwitchSeconds = Sys.time() - started;

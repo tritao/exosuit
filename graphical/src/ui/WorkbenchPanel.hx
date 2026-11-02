@@ -193,11 +193,14 @@ class WorkbenchPanel implements View {
 	function enterRow(key:String):Bool {
 		if (key == model.openRow && WorkbenchRowKey.workspaceId(key) != null) {
 			if (focusRoot != null) focusRoot();
+			tree.focusItem(key);
 			return true;
 		}
 		var group = WorkbenchRowKey.idOf(key, WorkbenchRowKind.Group);
 		if (group == null || WorkbenchRowKey.isForeign(key)) return false;
 		if (focusGroup != null) focusGroup(group);
+		// Entering a context rebuilds the window's views, which drops focus; keep the keyboard on this row.
+		tree.focusItem(key);
 		return true;
 	}
 

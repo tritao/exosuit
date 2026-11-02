@@ -64,6 +64,7 @@ def run(gui):
     time.sleep(0.7)
     gui.chord("enter")
     gui.shot("after-enter")
+    gui.step("focus after Down: %s" % gui.snapshot().get("focus"))
     gui.check("Enter enters the selected group", lambda s: s["state"]["context"] != root_key, 8, detail=lambda s: s["state"]["context"],
               known_bug="the tree loses keyboard focus after an arrow key moved the selection, so Enter after it reaches no row (NEXT-PHASE)")
     gui.shot("done")
