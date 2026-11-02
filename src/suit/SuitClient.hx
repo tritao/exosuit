@@ -50,7 +50,11 @@ class SuitClient {
 	static var windowId:Null<String> = null;
 	static var windowContext:Null<String> = null;
 	/** Serialises record writes: the focus is written on another thread. */
-	static final writeLock:sys.thread.Mutex = new sys.thread.Mutex();
+	/** The newest editor record not yet written: the frame loop fills it, the writer thread empties it. */
+	static var pendingRecord:Null<SuitRecord> = null;
+	static var writerStarted:Bool = false;
+	static var writerStop:Bool = false;
+	static final slotLock:sys.thread.Mutex = new sys.thread.Mutex();
 
 	/**
 		This process's mode from its environment; `stateDir` is a workspace service's state directory, when
@@ -163,7 +167,7 @@ class SuitClient {
 			return;
 		windowContext = context;
 		if (registeredKind == SuitKind.Editor)
-			haxeon.Threads.create("exo.suit.focus", function() writeRecord(SuitKind.Editor, null));
+			editorChanged();
 	}
 
 	/** Records that this editor uses a workspace root, so that workspace's services are not shown as orphaned. */
@@ -172,7 +176,7 @@ class SuitClient {
 			return;
 		editorRoots.push(root);
 		if (registeredKind == SuitKind.Editor)
-			writeRecord(SuitKind.Editor, null);
+			editorChanged();
 	}
 
 	/** Records that this editor uses workspace `id`, so its service (keyed by id) is not shown as orphaned. */
@@ -181,7 +185,7 @@ class SuitClient {
 			return;
 		editorWorkspaces.push(id);
 		if (registeredKind == SuitKind.Editor)
-			writeRecord(SuitKind.Editor, null);
+			editorChanged();
 	}
 
 	/**
@@ -195,6 +199,7 @@ class SuitClient {
 	public static function unregister():Void {
 		if (registeredKind == null)
 			return;
+		writerStop = true;
 		try {
 			var path = SuitRecords.path(SuitPaths.registry(), Sys.getPid());
 			if (FileSystem.exists(path))
@@ -204,33 +209,63 @@ class SuitClient {
 	}
 
 	static function writeRecord(kind:SuitKind, workspace:Null<SuitWorkspace>):Void {
-		writeLock.acquire();
-		try writeRecordLocked(kind, workspace) catch (_:Dynamic) {}
-		writeLock.release();
-	}
-
-	static function writeRecordLocked(kind:SuitKind, workspace:Null<SuitWorkspace>):Void {
 		if (resolve(workspace == null ? null : workspace.stateDir) == Off)
 			return;
 		try {
 			if (!SuitPaths.prepare())
 				return;
-			var record = SuitRecords.create(Sys.getPid(), kind);
-			if (kind == SuitKind.Editor) {
-				record.roots = editorRoots.copy();
-				record.workspaces = editorWorkspaces.copy();
-				record.window = windowId;
-				record.context = windowContext;
-			}
-			if (workspace != null) {
-				record.root = workspace.root;
-				record.workspace = workspace.workspace;
-				record.stateDir = workspace.stateDir;
-				record.generation = workspace.generation;
-			}
-			SuitRecords.write(SuitPaths.registry(), record);
+			SuitRecords.write(SuitPaths.registry(), recordFor(kind, workspace));
 			registeredKind = kind;
 		} catch (_:Dynamic) {}
+	}
+
+	static function recordFor(kind:SuitKind, workspace:Null<SuitWorkspace>):SuitRecord {
+		var record = SuitRecords.create(Sys.getPid(), kind);
+		if (kind == SuitKind.Editor) {
+			record.roots = editorRoots.copy();
+			record.workspaces = editorWorkspaces.copy();
+			record.window = windowId;
+			record.context = windowContext;
+		}
+		if (workspace != null) {
+			record.root = workspace.root;
+			record.workspace = workspace.workspace;
+			record.stateDir = workspace.stateDir;
+			record.generation = workspace.generation;
+		}
+		return record;
+	}
+
+	/**
+		The editor's record changed: snapshot it here, on the calling thread, and leave the newest snapshot for the one
+		writer thread. The caller never waits for the disk, and a burst of changes writes only the last record.
+	**/
+	static function editorChanged():Void {
+		if (resolve(null) == Off)
+			return;
+		var record = recordFor(SuitKind.Editor, null);
+		slotLock.acquire();
+		pendingRecord = record;
+		slotLock.release();
+		if (writerStarted)
+			return;
+		writerStarted = true;
+		haxeon.Threads.create("exo.suit.writer", function() {
+			while (!writerStop) {
+				slotLock.acquire();
+				var next = pendingRecord;
+				pendingRecord = null;
+				slotLock.release();
+				if (next == null) {
+					Sys.sleep(0.05);
+					continue;
+				}
+				try {
+					if (!writerStop && SuitPaths.prepare())
+						SuitRecords.write(SuitPaths.registry(), next);
+				} catch (_:Dynamic) {}
+			}
+		});
 	}
 
 	/**

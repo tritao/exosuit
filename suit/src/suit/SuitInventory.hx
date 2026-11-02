@@ -106,17 +106,28 @@ class SuitInventory {
 	public function editors():Array<SuitProcess>
 		return [for (process in processes) if (process.source != Scanned && process.kind == SuitKind.Editor) process];
 
+	static inline final WINDOWS_CACHE_SECONDS = 0.25;
+	static var windowsCache:Null<Array<WindowFocus>> = null;
+	static var windowsCachedAt:Float = 0;
+
 	/**
 		The focused context of each running editor window (M19 Phase 8), for a `machine` reply. Read straight from the
 		registry, not from a scan: a focus must reach the other windows within a refresh or two, and a scan is seconds old.
-		Records of processes that are gone are skipped here and pruned by the next scan.
+		Records of processes that are gone are skipped here and pruned by the next scan. Stops reading at
+		WindowFocuses.LIMIT records, and answers from the last read for a quarter second (several windows poll at once).
 	**/
 	public static function liveWindows():Array<WindowFocus> {
+		if (windowsCache != null && Sys.time() - windowsCachedAt < WINDOWS_CACHE_SECONDS)
+			return windowsCache;
 		var result:Array<WindowFocus> = [];
+		windowsCache = result;
+		windowsCachedAt = Sys.time();
 		var directory = SuitPaths.registry();
 		if (!FileSystem.exists(directory))
 			return result;
 		for (name in FileSystem.readDirectory(directory)) {
+			if (result.length >= WindowFocuses.LIMIT)
+				break;
 			if (!StringTools.endsWith(name, ".json"))
 				continue;
 			var record = SuitRecords.read(Path.join([directory, name]));
@@ -125,8 +136,7 @@ class SuitInventory {
 			var started = Processes.started(record.pid);
 			if (started < 0 || started > 0 && !SuitClock.registeredAfterStart(started, record.registeredAt, record.version))
 				continue;
-			if (result.length < WindowFocuses.LIMIT)
-				result.push({window: record.window, pid: record.pid, context: record.context});
+			result.push({window: record.window, pid: record.pid, context: record.context});
 		}
 		result.sort(function(left, right) return Reflect.compare(left.window, right.window));
 		return result;

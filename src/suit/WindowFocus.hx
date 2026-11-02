@@ -32,19 +32,20 @@ class WindowFocuses {
 		return result;
 	}
 
+	/** The windows other than `own`. */
+	public static function others(windows:Array<WindowFocus>, own:Null<String>):Array<WindowFocus>
+		return [for (focus in windows) if (focus.window != own) focus];
+
 	/** The windows other than `own` that focus `workspace` (and `group` when given). */
 	public static function elsewhere(windows:Array<WindowFocus>, own:Null<String>, workspace:String, ?group:String):Array<WindowFocus> {
 		var found:Array<WindowFocus> = [];
 		for (focus in windows) {
 			if (focus.window == own)
 				continue;
-			var parsed = parseKey(focus.context);
+			var parsed = workspace.ContextKey.parse(focus.context);
 			if (parsed != null && parsed.workspace == workspace && (group == null || parsed.group == group))
 				found.push(focus);
 		}
 		return found;
 	}
-
-	static function parseKey(key:String):Null<{machine:String, workspace:String, group:String}>
-		return workspace.ContextKey.parse(key);
 }
