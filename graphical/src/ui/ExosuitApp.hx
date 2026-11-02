@@ -5281,6 +5281,8 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function openFolderDialog():Void {
 		if (desktop == null) { application.workbench.openPathCommandView(true); requestFrame(); return; }
+		var automated = devtools.AutomationProbe.takeFolderAnswer();
+		if (automated != null) { openArgument(automated); requestFrame(); return; }
 		desktop.selectDirectory(function(accepted, paths) {
 			if (accepted && paths.length > 0 && openFolderAsMachineWorkspace(paths[0])) {
 				requestFrame();
