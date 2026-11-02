@@ -1977,7 +1977,7 @@ class ExosuitApp implements DesktopUiApplication {
 				for (entry in state.workspaces) {
 					var service = machine.serviceOf(entry.id), watch = pool.watchOf(entry.id);
 					var mirror = pool.mirrorOf(entry.id);
-					if (mirror != null) workspace.client.ConnectTimeline.markOnce("rows:" + entry.id, "rows-visible", entry.id, "other");
+					if (mirror != null) workspace.client.ConnectTimeline.markOnce("rows-other:" + entry.id, "rows-visible", entry.id, "other");
 					watchedStates.set(entry.id, {running: service != null && service.running, live: watch != null && watch.live,
 						starting: startingWorkspaces.exists(entry.id), catalog: mirror});
 				}
@@ -3472,9 +3472,10 @@ class ExosuitApp implements DesktopUiApplication {
 			workspaceError = failure;
 			var label = attachment.statusLabel();
 			if (workbenchClient != null && workbenchClient.terminalCatalog() != null)
-				workspace.client.ConnectTimeline.markOnce("rows:" + currentWorkspaceName(), "rows-visible", currentWorkspaceName(), "own");
+				workspace.client.ConnectTimeline.markOnce("rows-own:" + currentWorkspaceName(), "rows-visible", currentWorkspaceName(), "own");
 			if (workspaceStatus != label) {
 				workspace.client.ConnectTimeline.mark("status", currentWorkspaceName(), label);
+				if (StringTools.startsWith(label, "Connecting")) workspace.client.ConnectTimeline.rearm("rows-own:" + currentWorkspaceName());
 				workspaceStatus = label;
 				requestFrame();
 			}

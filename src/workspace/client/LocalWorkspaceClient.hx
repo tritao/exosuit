@@ -604,7 +604,6 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     retryAt = 0;
     if (path == null) return;
     startupDeadline = clock() + 120000;
-    ConnectTimeline.rearm("rows:" + timelineName());
     ConnectTimeline.mark("attach", timelineName(), path);
     startHelper("discover");
   }

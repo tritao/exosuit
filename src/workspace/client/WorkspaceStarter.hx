@@ -94,7 +94,7 @@ class WorkspaceStarter {
 			output: "",
 			launched: false
 		};
-		ConnectTimeline.rearm("rows:" + target.workspace);
+		ConnectTimeline.rearm("rows-other:" + target.workspace);
 		ConnectTimeline.mark("starter-queued", target.workspace);
 		starts.set(target.workspace, entry);
 		order.push(entry);
