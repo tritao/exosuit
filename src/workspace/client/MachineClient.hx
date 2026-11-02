@@ -10,6 +10,8 @@ import suit.MachineCatalog.MachineState;
 import suit.MachineCatalog.MachineWorkspace;
 import suit.SuitClient;
 import suit.SuitPaths;
+import suit.WindowFocus;
+import suit.WindowFocus.WindowFocuses;
 import workspace.PathKey;
 import workspace.transport.NativeRpcHub;
 import workspace.transport.NativeRpcTransport;
@@ -42,6 +44,8 @@ class MachineClient {
 	var lastSignature:Null<String>;
 
 	public var machine(default, null):Null<MachineState>;
+	/** Where each editor window is focused, as suit last reported (M19 Phase 8); empty from an older suit. */
+	public var windows(default, null):Array<WindowFocus> = [];
 	/** Why the last request failed; null after one succeeds. */
 	public var error(default, null):Null<String>;
 	/** Changes whenever `machine` or `error` does. */
@@ -281,7 +285,10 @@ class MachineClient {
 				name: reply.machine.name, workspaces: reply.machine.workspaces})) catch (error:Dynamic) problem = Std.string(error);
 			if (problem == null) {
 				readServices(reply.machine.workspaces);
-				signature = Json.stringify(reply.machine);
+				// Only a `machine` reply lists windows; the replies to changes carry the machine alone.
+				if (Reflect.hasField(reply, "windows"))
+					windows = WindowFocuses.decode(reply);
+				signature = Json.stringify(reply.machine) + Json.stringify(windows);
 			}
 		}
 		if (request != null && request.message.op == "machine" || problem == null)

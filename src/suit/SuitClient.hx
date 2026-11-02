@@ -46,6 +46,11 @@ class SuitClient {
 	static var resolved:Null<SuitMode> = null;
 	static var offForTemporaryState:Bool = false;
 	static var noticeTaken:Bool = false;
+	/** This editor window's id and focused context, written into its record (M19 Phase 8). */
+	static var windowId:Null<String> = null;
+	static var windowContext:Null<String> = null;
+	/** Serialises record writes: the focus is written on another thread. */
+	static final writeLock:sys.thread.Mutex = new sys.thread.Mutex();
 
 	/**
 		This process's mode from its environment; `stateDir` is a workspace service's state directory, when
@@ -139,8 +144,26 @@ class SuitClient {
 	/** Registers the editor and starts suit. Call once at editor startup. */
 	public static function announceEditor():Void {
 		resolve();
+		windowId = "w" + Sys.getPid() + "-" + Std.int(Sys.time());
 		writeRecord(SuitKind.Editor, null);
 		ensureDaemon();
+	}
+
+	/** This editor window's id as it registered it (M19 Phase 8); null before the editor announced itself. */
+	public static function windowIdentity():Null<String>
+		return windowId;
+
+	/**
+		Records the context (`machine/workspace/group`) this editor window has focused, for suit to tell the other windows.
+		One small atomic file write on another thread, so the frame loop never waits for the disk; none when the
+		context did not change.
+	**/
+	public static function editorFocus(context:String):Void {
+		if (context == windowContext)
+			return;
+		windowContext = context;
+		if (registeredKind == SuitKind.Editor)
+			haxeon.Threads.create("exo.suit.focus", function() writeRecord(SuitKind.Editor, null));
 	}
 
 	/** Records that this editor uses a workspace root, so that workspace's services are not shown as orphaned. */
@@ -181,6 +204,12 @@ class SuitClient {
 	}
 
 	static function writeRecord(kind:SuitKind, workspace:Null<SuitWorkspace>):Void {
+		writeLock.acquire();
+		try writeRecordLocked(kind, workspace) catch (_:Dynamic) {}
+		writeLock.release();
+	}
+
+	static function writeRecordLocked(kind:SuitKind, workspace:Null<SuitWorkspace>):Void {
 		if (resolve(workspace == null ? null : workspace.stateDir) == Off)
 			return;
 		try {
@@ -190,6 +219,8 @@ class SuitClient {
 			if (kind == SuitKind.Editor) {
 				record.roots = editorRoots.copy();
 				record.workspaces = editorWorkspaces.copy();
+				record.window = windowId;
+				record.context = windowContext;
 			}
 			if (workspace != null) {
 				record.root = workspace.root;

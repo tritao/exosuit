@@ -43,6 +43,14 @@ typedef SuitRecord = {
 	var stateDir:Null<String>;
 	var generation:Null<String>;
 
+	/**
+		An editor window's id and focused context (`machine/workspace/group`, ContextKey), so other windows can show
+		"open in another window" (M19 Phase 8). Null for other kinds, and for an editor that has not focused one.
+		Additive: a reader that does not know the fields ignores them.
+	**/
+	var window:Null<String>;
+	var context:Null<String>;
+
 	/** The registered process this one belongs to; set for adopted processes. */
 	var owner:Null<Int>;
 
@@ -71,6 +79,8 @@ class SuitRecords {
 			workspace: null,
 			stateDir: null,
 			generation: null,
+			window: null,
+			context: null,
 			owner: null,
 			adopted: false
 		};
@@ -92,6 +102,8 @@ class SuitRecords {
 			workspace: record.workspace,
 			stateDir: record.stateDir,
 			generation: record.generation,
+			window: record.window,
+			context: record.context,
 			owner: record.owner,
 			adopted: record.adopted
 		};
@@ -123,6 +135,8 @@ class SuitRecords {
 			workspace: stringField(document, "workspace"),
 			stateDir: stringField(document, "stateDir"),
 			generation: stringField(document, "generation"),
+			window: stringField(document, "window"),
+			context: stringField(document, "context"),
 			owner: intField(document, "owner"),
 			adopted: Reflect.field(document, "adopted") == true
 		};

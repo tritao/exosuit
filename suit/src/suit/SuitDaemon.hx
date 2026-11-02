@@ -309,7 +309,8 @@ class SuitDaemon {
 				menuRequested = true;
 				return {ok: true};
 			case "machine":
-				return {ok: true, machine: machine().json(services)};
+				// `windows`: where each editor window is focused, for the Workbench's "open in another window" (M19 Phase 8).
+				return {ok: true, machine: machine().json(services), windows: SuitInventory.liveWindows()};
 			case "machine-rename":
 				machine().renameMachine(SuitRecords.stringField(request, "name"));
 				return {ok: true, machine: machine().json(services)};
