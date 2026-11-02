@@ -678,21 +678,28 @@ class TerminalPane implements AgentTerminalPanel {
 				event.preventDefault();
 				return;
 			}
+			var chord = event.modifiers & (UiModifier.Control | UiModifier.Shift | UiModifier.Alt | UiModifier.Super);
+			// Ctrl+Shift+V always pastes. On Windows plain Ctrl+V pastes too, as in Windows
+			// Terminal; Win+V clipboard history also lands here as an injected Ctrl+V.
+			var controlV = event.key == UiKey.V && chord == UiModifier.Control && Sys.systemName() == "Windows";
 			var paste = event.key == UiKey.V &&
-				(event.modifiers & (UiModifier.Control | UiModifier.Shift)) ==
-				(UiModifier.Control | UiModifier.Shift);
+				(controlV || chord == (UiModifier.Control | UiModifier.Shift));
 			if (paste) {
-				if (!canSendInput()) { event.preventDefault(); return; }
-				var generation = focusGeneration;
-				context.clipboard.readText(function(text) {
-					if (!focused || generation != focusGeneration || session.status != "running" || text.length == 0 || !canSendInput()) return;
+				event.preventDefault();
+				if (!canSendInput()) return;
+				// The clipboard is read now, when the key arrives. The key was delivered to this
+				// terminal, so the paste belongs here even if focus flickers before completion.
+				try context.clipboard.readText(function(text) {
+					if (closed || session.status != "running" || !canSendInput()) return;
 					prepareInput();
-					session.emulator.paste(Bytes.ofString(text));
+					if (text.length > 0) session.emulator.paste(Bytes.ofString(text));
+					// No text (an image, say): pass ^V through so programs read the clipboard themselves.
+					else if (controlV) session.write(Bytes.ofString("\x16"));
+					else return;
 					session.flushInput();
 					session.pollEvents();
 					requestFrame();
-				});
-				event.preventDefault();
+				}) catch (e:Dynamic) {}
 			} else handleKey(event);
 		});
 		node.on(UiEventKind.KeyRepeat, function(event) { if (event.target == node.id) handleKey(event); });
