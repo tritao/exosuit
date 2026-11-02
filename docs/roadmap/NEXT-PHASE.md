@@ -158,25 +158,41 @@ Phases 4–7 landed on `main` on 2026-11-01 (exosuit `757db3f1`, haxeon `fd2a332
 - **Workspaces take a long time to show as connected. Measured and mostly fixed (2026-11-02).** The editor keeps a
   connect timeline (`src/workspace/client/ConnectTimeline.hx`, shown as `timeline` in the automation state; with
   `EXOSUIT_CONNECT_LOG` set it also goes to stderr, and the launcher adds its own phases to the helper's exit event).
-  `m19_connect_time` runs four cases with real input and writes the times to `results.json`. Milliseconds, one run
-  each on a quiet machine, source checkout, isolated suit:
+  `m19_connect_time` runs four cases with real input and writes the times to `results.json`. Milliseconds. "Before" is
+  one run on a quiet machine (source checkout, isolated suit). "After" is the median and range of three runs of the
+  final stack (2026-11-02, a busier machine; the first run of a fresh state home, which has to build the identity cache
+  and start a cold manager, took 11600 to connect on launch and is the top of that range):
 
-  | Case | Before | After |
+  | Case | Before | After, median (range of 3) |
   |---|---|---|
-  | Launch to "Workspace connected" (cold service) | 6600 | 4400 |
-  | Launch to catalog rows | 6700 | 4500 |
-  | Expand an idle workspace to its rows in the tree | 3800 to 10700 (varies with suit) | 2500 |
-  | Double click an idle workspace to connected | 5800 | 2900 |
-  | Double click a running workspace to connected | 3000 | 1400 |
-  | suit `machine` reply | 450 to 600 | unchanged |
+  | Launch to "Workspace connected" (cold service) | 6600 | 4140 (3790 to 11620) |
+  | Launch to catalog rows | 6700 | 4240 (3910 to 11740) |
+  | Expand an idle workspace to its rows in the tree | 3800 to 10700 (varies with suit) | 2400 (2400 to 2660) |
+  | Double click an idle workspace to connected | 5800 | 2560 (2530 to 2590) |
+  | Double click an idle workspace to its own rows | not measured | 4070 (4070 to 4090) |
+  | Double click a running workspace to connected | 3000 | 1450 (1370 to 1480) |
+  | Double click a running workspace to its own rows | not measured | 1550 (1480 to 1600) |
+  | suit `machine` reply | 450 to 600 | 440 to 490 |
+
+  The first CATALOG read of the attached workspace is now a timeline event (`catalog-first-read`). It came 120 ms after
+  "Workspace connected" on launch (the Workbench is shown from the start), 1470 ms after it in "open" (connected at 2560,
+  first read at 4070), and 30 to 150 ms after it in "back".
 
   Where the time went: (1) every launcher run in a source checkout hashed every source file for the build identity
   (2.6 to 3 s) before printing its answer, so a discovery of a running service took 2.5 s and a cold start 3 s more;
   the identity is now cached by file names, sizes and times and the listing does fewer lookups (about 0.8 s left, in
   the file walk). (2) A service started from the tree was reached only when suit's next listing named it, 5 to 10 s
   later; the window now connects to the endpoint the starter's launcher printed. Not changed: a cold manager still
-  takes about 2 s to come up, the discovery helper is still a process of its own (about 0.2 s), and in the scenario the catalog rows of
-  the attached workspace appeared only once the Workbench was shown (not confirmed as a rule). Remaining idea: walk the file list once per
+  takes about 2 s to come up and the discovery helper is still a process of its own (about 0.2 s).
+  The attached workspace's catalog rows do need the Workbench panel shown (confirmed): `ExosuitApp` calls
+  `refreshTerminals(false)` every tick only `if (sidebar.visible && sidebar.activeId == "workbench")`
+  (`ExosuitApp.hx` ~3440), and the client throttles it to one read per second; other triggers are a context menu on a
+  remote terminal, terminal creation and an explicit refresh. A hidden Workbench reads no catalog until it is shown.
+  Nothing in the code or commit message (`c0602eba`) says this is intended: it reads as a saving that was never
+  revisited. Not changed here (it affects what the tree and Agent Mode show for a workspace nobody is looking at).
+  The 1.5 s between "connected" and the first read in the "open" case, with the panel already shown, is not explained:
+  it is more than the one-second throttle. Needs a look at when the sidebar becomes active after a switch.
+  Remaining idea: walk the file list once per
   state home per minute, or let the manager report its build identity, to drop the last 0.8 s.
 - **A click on a group row in the Workbench tree did not switch to the group.** Fixed (2026-11-02, `group-entry`): a
   single click or Enter on a group row enters the group, on the open workspace's row its root; the chevron expands.
