@@ -527,9 +527,9 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
       var value:TerminalScreenSnapshot;
       try {
         var data = t.emulator.screenSnapshot(), current = info(t, connection);
+        // Older clients ask for the whole snapshot in one reply, which a large grid's does not fit.
         value = token < 0 ? {terminal: current, data: data, cursor: t.replay.endCursor}
           : snapshotPages.start(connection, t.id, data, current, t.replay.endCursor, Sys.time());
-        // An older client reads the whole snapshot in one reply; a large grid's does not fit one message.
         c.respond(value);
       } catch (failure:Dynamic) {
         Sys.println("Terminal screen snapshot failed for " + t.id + ": " + Std.string(failure));

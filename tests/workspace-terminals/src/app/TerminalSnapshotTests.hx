@@ -77,9 +77,12 @@ class TerminalSnapshotTests {
 		}
 		require(joined.compare(shot) == 0, "Pages did not reassemble the snapshot");
 		require(pages.next(viewer, "t", int(first.token), TerminalSnapshotPages.PAGE_BYTES, 1) == null, "Finished snapshot kept");
-		var replaced = pages.start(viewer, "t", shot, info, 7, 2);
-		pages.start(viewer, "t", shot, info, 8, 3);
-		require(pages.next(viewer, "t", int(replaced.token), TerminalSnapshotPages.PAGE_BYTES, 3) == null, "Replaced snapshot kept");
+		// Two views of one terminal on one connection read their own snapshots side by side.
+		var one = pages.start(viewer, "t", shot, info, 7, 2), two = pages.start(viewer, "t", shot, info, 8, 2);
+		require(pages.next(viewer, "t", int(one.token), TerminalSnapshotPages.PAGE_BYTES, 2) != null
+			&& pages.next(viewer, "t", int(two.token), TerminalSnapshotPages.PAGE_BYTES, 2) != null, "A second snapshot replaced the first");
+		for (_ in 0...8) pages.start(viewer, "t", shot, info, 9, 3);
+		require(pages.next(viewer, "t", int(one.token), 2 * TerminalSnapshotPages.PAGE_BYTES, 3) == null, "Snapshots are unbounded");
 		var idle = pages.start(viewer, "t", shot, info, 9, 4);
 		pages.prune(100);
 		require(pages.next(viewer, "t", int(idle.token), TerminalSnapshotPages.PAGE_BYTES, 100) == null, "Idle snapshot kept");
