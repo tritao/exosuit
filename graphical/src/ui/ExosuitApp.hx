@@ -2185,17 +2185,22 @@ class ExosuitApp implements DesktopUiApplication {
 		for (pane in host.panes) {
 			var tabs:Array<Dynamic> = [];
 			for (item in pane.items) {
-				var title = "", kind = "";
+				var title = "", kind = "", lines:Null<Array<String>> = null;
 				switch item {
 					case Document(view): kind = "document"; title = view.document.hasBackingPath() ? view.document.requirePath() : "(untitled)";
-					case Terminal(terminal): kind = "terminal"; title = terminal.title;
+					case Terminal(terminal):
+						kind = "terminal"; title = terminal.title;
+						// What the terminal shows, so a test can see input from another window arrive.
+						if (Std.isOfType(terminal.panel, TerminalPane)) lines = cast(terminal.panel, TerminalPane).diagnosticState().lines;
 					case Agent(agent): kind = "agent"; title = agent.title;
 					case WorkspaceFile(file): kind = "workspace-file"; title = file.root + "|" + file.path;
 					case Settings(_): kind = "settings";
 					case Image(_): kind = "image";
 					case UnsupportedFile(_): kind = "unsupported";
 				}
-				tabs.push({kind: kind, title: title});
+				var tab:Dynamic = {kind: kind, title: title};
+				if (lines != null) tab.lines = lines;
+				tabs.push(tab);
 			}
 			panes.push({id: pane.id, active: pane.activeIndex, tabs: tabs});
 		}
