@@ -95,7 +95,8 @@ class WorkbenchPanel implements View {
     var pendingReveal:Null<String>;
     /** The row that entered a context: the tree's selection is kept per context, so the entered context's own selection must yield to it. */
     var pendingEnterKey:Null<String>;
-    var pendingEnterUntil = 0.0;
+    /** Updates left in which the re-keyed tree may still come back with the old selection. */
+    var pendingEnterFrames = 0;
     var revealRoot:Null<String>;
     var scrollTarget:Null<String>;
     var scrollPasses = 0;
@@ -210,16 +211,19 @@ class WorkbenchPanel implements View {
 	}
 
 	function selectAfterEnter(key:String):Void {
-		pendingEnterKey = key; pendingEnterUntil = Sys.time() + 0.6;
+		pendingEnterKey = key; pendingEnterFrames = 3;
 		requestFrame();
 	}
 
-	/** The re-keyed tree comes back with the selection the entered context last had; the row that was entered wins. */
+	/**
+		The re-keyed tree comes back with the selection the entered context last had; the row that was entered wins. Only
+		for the few updates the switch takes, so a selection made after it (by the user or by code) is never overridden.
+	**/
 	function applyPendingEnterSelection():Void {
 		var key = pendingEnterKey;
 		if (key == null) return;
-		if (Sys.time() > pendingEnterUntil) { pendingEnterKey = null; return; }
-		if (tree.selectedKey == key) return;
+		if (--pendingEnterFrames < 0) { pendingEnterKey = null; return; }
+		if (tree.selectedKey == key) { requestFrame(); return; }
 		pendingEnterKey = null;
 		try tree.select(key, false) catch (_:Dynamic) {}
 		requestFrame();
