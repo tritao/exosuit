@@ -172,6 +172,11 @@ class GraphicalMain {
 			}
 			return true;
 		};
+		if (devtools.SwitchTrace.enabled())
+			host.onFrameRendered = function() {
+				var current = app;
+				devtools.SwitchTrace.mark("R", current == null ? "-" : current.host.layoutContextKey);
+			};
 		session = DesktopUiHost.open(host, function(context) {
 			var dark = prefersDark(themeChoice);
 			var workspaceClient:Null<workspace.client.LocalWorkspaceClient> = null;

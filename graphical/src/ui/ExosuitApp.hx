@@ -519,7 +519,11 @@ class ExosuitApp implements DesktopUiApplication {
 		};
 		application.activeContext.subscribe(function() {
 			var key = application.activeContext.key();
-			if (contextLayoutsReady) { host.switchContext(key); pendingTerminalFocus = dock.activePanelId == "terminal"; }
+			devtools.SwitchTrace.mark("S", key);
+			if (contextLayoutsReady) {
+				host.switchContext(key); pendingTerminalFocus = dock.activePanelId == "terminal";
+				devtools.SwitchTrace.mark("E", key + " " + (host.lastSwitchCold ? "1" : "0"));
+			}
 			else host.initializeContext(key);
 			var roots = filesUseWorkspaceRoots ? application.savedWorkspaces.roots() : application.activeContext.roots;
 			explorerRoot = roots.length == 0 ? null : roots[0];
