@@ -192,8 +192,11 @@ Phases 4–7 landed on `main` on 2026-11-01 (exosuit `757db3f1`, haxeon `fd2a332
 - `tests/document-test` stops on Windows at "Save As did not assign identity after successful persistence" (the
   comparison of `untitled.path` and `FileSystem.fullPath(saveAsPath)`); it did before this work. Checks after it in that
   file do not run there.
-- No test exercises the agent manager's restart when the process that started it dies (`startDetached`).
-- `processAlive` always returns true on Windows.
+- Manager restart (resolved): `scripts/test-manager-owner-death.py` kills the process that started a detached manager, checks
+  the manager survives, kills the manager, and checks the next start replaces it; two starts at once agree on one manager.
+  suit's orphan view is not covered.
+- `processAlive` (resolved): `AgentManagerNative.processAlive` opens the process, checks its exit status and that its image is the
+  same runtime file name, so an exited manager or a reused id is not taken for a live one, on Windows too.
 - The key-chords test runs only on Linux.
 - Phase 6: no test runs the catalog watch against two real services; `tests/workspace-catalog` uses fakes.
 - Phase 7: the click-to-frame budget is measured for the quick switch and Goto Previous (`m19_switch_latency`); the

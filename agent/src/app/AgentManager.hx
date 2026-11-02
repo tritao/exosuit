@@ -746,15 +746,11 @@ class AgentManager {
 	/** The exit status of a manager that found another one owning the workspace state. */
 	static inline final WORKSPACE_IN_USE = 3;
 
-	/**
-		True while a process with this id exists. Windows has no cheap check from here (managerProcessKind makes the same
-		assumption), so it answers true there and relies on the held lock.
-	**/
-	static function processAlive(pid:Int):Bool {
-		if (pid <= 0) return false;
-		if (Sys.systemName() == "Windows") return true;
-		try return Sys.command("kill", ["-0", Std.string(pid)]) == 0 catch (_:Dynamic) return true;
+	/** True while a manager process with this id runs. Its image must be this executable (every manager runs it, see startDetached), so a reused id does not count. */
+	public static function processAlive(pid:Int):Bool {
+		return pid > 0 && AgentManagerNative.processAlive(pid, Sys.executablePath());
 	}
+
 
 	/**
 		Another manager owns the state: waits for its endpoint. The endpoint counts only when the lock is held and its

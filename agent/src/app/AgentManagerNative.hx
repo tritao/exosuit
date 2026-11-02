@@ -45,6 +45,9 @@ extern function nativeFileIdentity(path:String):Null<String>;
 @:hlNative("haxeon_runtime", "__host_process_identity_open")
 extern function nativeProcessOpen(pid:Int, expectedExecutable:String):Null<AgentProcessIdentityHandle>;
 
+@:hlNative("haxeon_runtime", "__host_process_alive")
+extern function nativeProcessAlive(pid:Int, expectedExecutable:Null<String>):Bool;
+
 @:hlNative("haxeon_runtime", "__host_process_identity_terminate")
 extern function nativeProcessTerminate(handle:AgentProcessIdentityHandle):Bool;
 
@@ -53,6 +56,10 @@ extern function nativeProcessClose(handle:AgentProcessIdentityHandle):Void;
 
 /** Narrow host primitives used by the Haxe workspace manager. */
 class AgentManagerNative {
+	/** True while the process runs; with an executable, only if that is its image (a reused id is another process). */
+	public static inline function processAlive(pid:Int, ?expectedExecutable:String):Bool
+		return nativeProcessAlive(pid, expectedExecutable);
+
 	public static inline function prepareDirectory(path:String):Bool
 		return nativePrepareDirectory(path);
 
