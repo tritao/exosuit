@@ -53,8 +53,14 @@ class ActiveContextTestMain {
 		require(app.activeContext.revision == revision, "reopening same group republished context");
 		require(!app.activeContext.openSessionGroup("missing", groups, first) && app.activeContext.id == "child", "missing group changed context");
 		require(app.activeContext.openSessionGroup("default", groups, first) && app.activeContext.cwd == first, "default group did not use catalog root");
+		// A group with the workspace's own folder is still a context of its own: keyed by id, never by folder.
+		var defaultKey = app.activeContext.key();
 		app.activeContext.useWorkspace();
 		require(app.activeContext.kind == ContextKind.Workspace && app.activeContext.roots.length == 2, "back lost saved workspace roots");
+		require(defaultKey != app.activeContext.key() && StringTools.endsWith(defaultKey, "/default") && !StringTools.endsWith(app.activeContext.key(), "/default"),
+			"a group with the workspace folder shares the root's context key: " + defaultKey + " vs " + app.activeContext.key());
+		require(app.activeContext.openSessionGroup("default", groups, first) && app.activeContext.key() == defaultKey, "the group's key changed between visits");
+		app.activeContext.useWorkspace();
 		// A workspace's folders come from its definition: Add Folder joins, opening another folder replaces the workspace.
 		var other = base + "/other"; FileSystem.createDirectory(other);
 		app.savedWorkspaces.restore(workspace.SavedWorkspace.create("One root", [first]), "");
