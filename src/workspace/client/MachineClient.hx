@@ -56,6 +56,9 @@ class MachineClient {
 	final scratches:Map<String, String> = [];
 	/** The service of each workspace suit reported one for (M19 Phase 6). */
 	final services:Map<String, MachineService> = [];
+	/** A service the editor started itself, until suit's listing names it: suit learns of a service some seconds after it is up. */
+	final provisional:Map<String, {service:MachineService, until:Float}> = [];
+	static inline final PROVISIONAL_SECONDS = 20000.0;
 
 	public function new(events:EventPump, clock:Void->Float) {
 		hub = new NativeRpcHub(events);
@@ -332,8 +335,34 @@ class MachineClient {
 	}
 
 	/** The service suit last reported for workspace `id`: null when it reported none. */
-	public function serviceOf(id:String):Null<MachineService>
-		return services.get(id);
+	public function serviceOf(id:String):Null<MachineService> {
+		var listed = services.get(id);
+		if (listed != null && listed.running) {
+			provisional.remove(id);
+			return listed;
+		}
+		var guess = provisional.get(id);
+		if (guess == null)
+			return null;
+		if (clock() >= guess.until) {
+			provisional.remove(id);
+			return null;
+		}
+		return guess.service;
+	}
+
+	/**
+		Records a service this editor just started, which suit's listing does not name yet; `serviceOf` reports it until suit does or a
+		short while passes. The endpoint must have the agent's own shape.
+	**/
+	public function noteService(id:String, endpoint:String, pid:Int):Void {
+		var listed = services.get(id);
+		if (listed != null && listed.running || !WorkspaceConnections.validEndpoint(endpoint, Sys.systemName() == "Windows"))
+			return;
+		provisional.set(id, {service: {endpoint: endpoint, pid: pid, running: true}, until: clock() + PROVISIONAL_SECONDS});
+		ConnectTimeline.mark("service-noted", id);
+		revision++;
+	}
 
 	function close():Void {
 		var stream = transport;

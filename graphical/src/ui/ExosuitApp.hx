@@ -2038,6 +2038,10 @@ class ExosuitApp implements DesktopUiApplication {
 	public function attachWorkspaceConnections(pool:workspace.client.WorkspaceConnections, starter:workspace.client.WorkspaceStarter):Void {
 		catalogConnections = pool;
 		workspaceStarter = starter;
+		starter.started = function(target, endpoint) {
+			var machine = machineClient;
+			if (machine != null) machine.noteService(target.workspace, endpoint.socket, endpoint.managerPid);
+		};
 	}
 
 	var pendingContextTarget:Null<workspace.ContextInfo>;
