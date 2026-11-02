@@ -9,6 +9,8 @@ package devtools;
 
 	  S key        the active context changed to `key` (the app is about to switch its views)
 	  E key cold   the views switched; `cold` is 1 when the target was rebuilt from its snapshot
+	  T warm pinned evicted   after the switch: contexts kept attached, how many cannot be evicted, whether one was
+	                        (only the host's trim writes it)
 	  R key        a frame was rendered (drawn into the surface) while the host showed `key`
 **/
 class SwitchTrace {

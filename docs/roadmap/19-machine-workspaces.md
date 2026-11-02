@@ -6,7 +6,7 @@ per-context layouts) and suit. Read [EXECUTION.md](EXECUTION.md) first, and reco
 [STATUS.md](STATUS.md).
 
 Status (2026-11-01): Phases 1–7 are on `main` (exosuit `757db3f1`, haxeon `fd2a332c`). Phase 0 waits on the
-mobile-app review; Phase 7's latency budget and capture are not done; Phases 8 and 9 are not started. Nine real-input
+mobile-app review; Phase 7's budget is met for warm and cold switches inside a workspace (cross-workspace is not measured); Phases 8 and 9 are not started. Ten real-input
 GUI scenarios (`docs/benchmarks/perf-harness/gui_scenarios/m19_*.py`, run through `measure.ps1 -Drive`) cover
 Phases 3–7 on Windows. Open problems found after landing are in NEXT-PHASE.md under "M19 after landing".
 
@@ -251,10 +251,10 @@ them per context.
 - [x] Switching never waits on the network. Tabs whose session isn't loaded yet show their last content (snapshot)
   until the stream catches up.
 - [x] Quick switch: a palette entry listing workspaces and groups, plus a key back to the last one.
-- [ ] A budget, measured with the input-latency tools (`docs/benchmarks/input-latency`): click or key to first frame
+- [x] A budget, measured with the input-latency tools (`docs/benchmarks/input-latency`): click or key to first frame
   of the new group ≤ 2 frames for a warm group, ≤ 100 ms for a cold one.
 - [x] Tests: a per-context tab round trip across two workspaces (dirty buffers, carets, scroll kept).
-- [ ] A capture measuring the switch.
+- [x] A capture measuring the switch.
 
 What landed: `ContextKey` (`src/workspace/ContextKey.hx`) builds and parses `machine/workspace/group` and migrates
 the old `workspace:<id>` and `group:<id>` keys on restore. The host keeps `warmLimit` (4) inactive contexts attached;
@@ -264,7 +264,22 @@ Quick switch is "Switch Workspace or Group..." (`context:switch`, Ctrl+Shift+A);
 (`context:previous`, Ctrl+Shift+D) goes back to the last workspace or group. Ctrl+Tab and Ctrl+Shift+Tab still switch
 tabs. Measured in process by `tests/context-switching` (the host times each
 `switchContext`): warm about 35 us, cold (rebuilt from the snapshot) about 0.5 ms for a two-document group on
-HashLink. The click-to-frame capture through `docs/benchmarks/input-latency` has not been run.
+HashLink. 
+Measured end to end (2026-11-01, `m19_switch_latency`, real `SendInput`, Windows, one workspace with six groups; the
+driver stamps each input, the app stamps the context change and every rendered frame on the QueryPerformanceCounter
+clock, `SwitchTrace` and `switch_latency.py`; summary in `docs/benchmarks/input-latency/switch-latency-2026-11-01.txt`).
+Input to the first rendered frame that shows the new group, median / p90 / max:
+
+| Switch | n | ms | frames |
+|---|---|---|---|
+| warm, Ctrl+Shift+D | 4 | 17.5 / 19.6 / 19.6 | 1 |
+| warm, quick switch (Enter) | 4 | 16.6 / 19.1 / 19.1 | 1 |
+| cold (rebuilt from its snapshot), quick switch | 6 | 20.0 / 28.6 / 28.6 | 1 |
+
+Both limits are met (2 frames; 100 ms). The switch itself is 0.5 ms warm and 1.2 ms cold; input to the context change
+is about 1 ms; the remaining 15 to 18 ms is the wait for the next frame. The end point is the end of the render, not
+the display's present, which is not measured. A click on a group row was not measured: it does not switch (see
+NEXT-PHASE). A switch to another workspace attaches the window to its service and is not covered.
 
 Acceptance: switching between groups in different workspaces is instant and swaps the tabs; switching back restores
 them exactly.

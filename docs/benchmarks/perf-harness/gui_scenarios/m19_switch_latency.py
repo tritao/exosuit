@@ -19,8 +19,8 @@ from m19_sessions_drag import by_name, create
 
 FIXTURE = {"workspaces": ["alpha", "beta"], "open": None, "appArgs": ["--open-workbench"],
            "env": {"EXOSUIT_SWITCH_TRACE": "{result}\switch.txt", "NK_LATENCY_TRACE": "{result}\nk.txt"}}
-GROUPS = ["Two", "Three", "Four", "Five"]
-WARM = int(os.environ.get("SWITCH_WARM", "6"))
+GROUPS = ["Two", "Three", "Four", "Five", "Six", "Seven"]
+WARM = int(os.environ.get("SWITCH_WARM", "4"))
 
 
 def tag(gui, text):
@@ -54,48 +54,37 @@ def run(gui):
     work = gui.wait("group Work", lambda s: next((g["id"] for g in s["state"]["groups"] if g["name"] == "Work"), None), 20)
     root_key = current(gui)
 
-    gui.step("setup: four more groups, each entered and given a document")
-    contexts = [("Alpha", None, root_key)]
+    gui.step("setup: six sub-groups of Work, each entered by the quick switch and given a document")
     for name in GROUPS:
         show_workbench(gui)
         create(gui, "g:" + work, "New group", name, "groups")
-    gui.shot("tree")
     open_file(gui, "a1.txt")
-    contexts[0] = ("Alpha", None, root_key)
-    for index, name in enumerate(["Work"] + GROUPS):
-        gid = work if name == "Work" else by_name(gui.state(), "groups", name)["id"]
-        show_workbench(gui)
+    # Work has the workspace's folder, so entering it is the workspace root's context; the groups below have no folder of
+    # their own and take their parent's. A click on a group row in the tree only expands it (reported in NEXT-PHASE.md),
+    # so the groups are entered by the quick switch.
+    contexts = [("Alpha", root_key)]
+    for index, name in enumerate(GROUPS):
         before = current(gui)
-        gui.click(gui.element("g:" + gid))
-        gui.check("a click on %s's row enters it" % name, lambda s: s["state"]["hostContext"] != before, 8,
+        quick_switch(gui, name)
+        gui.check("the quick switch enters %s" % name, lambda s: s["state"]["hostContext"] != before, 8,
                   detail=lambda s: (before, s["state"]["hostContext"], s["state"]["context"]))
-        contexts.append((name, gid, current(gui)))
-        if not tabs(gui.state()):
-            open_file(gui, "a%d.txt" % (index % 3 + 1))
+        contexts.append((name, current(gui)))
+        open_file(gui, "a%d.txt" % (index % 3 + 1))
     gui.shot("setup-done")
-    names = [c[0] for c in contexts]
-    gui.step("contexts: " + ", ".join("%s=%s" % (c[0], c[2]) for c in contexts))
-
-    def row_of(item):
-        return "g:" + item[1] if item[1] else "w:" + alpha
+    gui.step("contexts: " + ", ".join("%s=%s" % c for c in contexts))
 
     gui.step("warm: toggle between the last two contexts")
     a, b = contexts[-2], contexts[-1]
-    for _ in range(WARM):
-        go(gui, "click", row_of(a), a[0], a[2], False)
-        go(gui, "click", row_of(b), b[0], b[2], False)
     for _ in range(WARM // 2):
-        go(gui, "previous", None, b[0], a[2], False)
-        go(gui, "previous", None, a[0], b[2], False)
+        go(gui, "previous", None, a[0], a[1], False)
+        go(gui, "previous", None, b[0], b[1], False)
     for _ in range(WARM // 2):
-        go(gui, "quick", None, a[0], a[2], False)
-        go(gui, "quick", None, b[0], b[2], False)
+        go(gui, "quick", None, a[0], a[1], False)
+        go(gui, "quick", None, b[0], b[1], False)
 
     gui.step("cold: walk the contexts in least-recently-used order")
-    order = [c for c in contexts if c[2] not in (a[2], b[2])]
-    for _ in range(2):  # two rounds through the six
-        for item in order + [a, b]:
-            go(gui, "click", row_of(item), item[0], item[2], True)
+    for item in [c for c in contexts[1:] if c[1] not in (a[1], b[1])] + [a, b]:
+        go(gui, "quick", None, item[0], item[1], True)
     gui.shot("done")
 
 

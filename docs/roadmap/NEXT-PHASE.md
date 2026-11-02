@@ -161,11 +161,17 @@ Phases 4–7 landed on `main` on 2026-11-01 (exosuit `757db3f1`, haxeon `fd2a332
 - **Workspaces take a long time to show as connected.** Not measured. Time it from launch and from opening a
   workspace to "Workspace connected" and to the catalog rows appearing (suit's `machine` reply, the manager start,
   the first CATALOG read), and find where the time goes.
+- **A click on a group row in the Workbench tree does not switch to the group.** It only expands or selects the row
+  (`WorkbenchPanel.tree.onItemClicked` opens sessions and terminals, `onActivate` leaves groups to the tree's toggle),
+  although Phase 7 says "selecting a group switches to it". A group is entered through the quick switch ("Switch
+  Workspace or Group...") or by opening one of its sessions. Found by `m19_switch_latency`. A group with no folder of its
+  own takes its parent's folder; Work, which has the workspace folder, shares the workspace root's context key.
 - No test exercises the agent manager's restart when the process that started it dies (`startDetached`).
 - `processAlive` always returns true on Windows.
 - The key-chords test runs only on Linux.
 - Phase 6: no test runs the catalog watch against two real services; `tests/workspace-catalog` uses fakes.
-- Phase 7: the click-to-frame budget and its capture through `docs/benchmarks/input-latency` are not done.
+- Phase 7: the click-to-frame budget is measured for the quick switch and Goto Previous (`m19_switch_latency`); the
+  cross-workspace switch, which attaches the window to another service, is not.
 - The hover crash fixed in haxeon `fd2a332c` (tooltips a patch builds) has no headless regression test; only the
   real-input scenarios cover it.
 - 9 of the 15 fixture-argument test projects fail on Windows as they did before (a hard-coded `/bin/sh`,

@@ -1618,6 +1618,11 @@ class UiWorkbenchHost implements WorkbenchHost {
 			evicted = true;
 		}
 		if (evicted) pruneContextBookkeeping();
+		if (devtools.SwitchTrace.enabled()) {
+			var pinned = 0;
+			for (key => state in contextLayouts) if (!evictable(state)) pinned++;
+			devtools.SwitchTrace.mark("T", countWarm() + " " + pinned + " " + (evicted ? 1 : 0));
+		}
 	}
 
 	function restoreEvictedSelections(key:String):Void {
