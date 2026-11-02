@@ -94,6 +94,17 @@ class ContextSnapshotsTestMain {
 		var machine = "m1";
 		var g1 = ContextKey.make(machine, "ws", "g1"), g2 = ContextKey.make(machine, "ws", "g2"), g3 = ContextKey.make(machine, "ws", "g3");
 
+		// Open in New Window: the command line of the new window, plain and under `run.py --live`.
+		var plain = workspace.NewWindow.arguments("main.hl", g1);
+		require(plain.join("|") == "main.hl|--context=" + g1, "plain command line: " + plain.join("|"));
+		var live = workspace.NewWindow.arguments("LiveHost.hl", g1, "C:/x/live.hl", "app.GraphicalMain");
+		require(live.length == 4 && live[0] == "LiveHost.hl" && live[1] == "C:/x/live.hl" && live[2] == "app.GraphicalMain", "live command line: " + live.join("|"));
+		var liveArguments:Array<String> = haxe.Json.parse(live[3]);
+		require(workspace.NewWindow.contextOf(liveArguments) == g1, "the live host's arguments do not carry the context: " + live[3]);
+		require(workspace.NewWindow.arguments("main.hl", g1, "", null).join("|") == plain.join("|"), "an unset live module changed the plain command line");
+		require(workspace.NewWindow.automationDirectory(null, 1) == "" && workspace.NewWindow.automationDirectory("d", 1) == "d"
+			&& workspace.NewWindow.automationDirectory("d", 2) == "d-2", "automation folders of new windows");
+
 		// File names: stable, safe, distinct, and not confused by case.
 		require(ContextSnapshotStore.fileName(g1) == ContextSnapshotStore.fileName(g1), "file name is not stable");
 		require(ContextSnapshotStore.fileName(g1) != ContextSnapshotStore.fileName(g2), "two groups share a file");
