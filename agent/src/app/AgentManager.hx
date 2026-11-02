@@ -630,7 +630,7 @@ class AgentManager {
 				for (path in files) {
 					var info = FileSystem.metadata(path);
 					if (info == null) throw "unreadable";
-					seen.addString(path + "\t" + info.size + "\t" + info.modified + "	" + info.changed + "\n");
+					seen.addString(path + "\t" + info.size + "\t" + info.modified + "\t" + info.changed + "\n");
 				}
 				fingerprint = hexOf(Sha256.make(seen.getBytes()));
 				cachePath = Path.join([stateBase(), "build-id.cache"]);
@@ -658,21 +658,20 @@ class AgentManager {
 			material.addByte(0);
 			material.addBytes(bytes, 0, bytes.length);
 		}
-		var digest = Sha256.make(material.getBytes());
-		var result = "";
-		for (index in 0...digest.length) result += StringTools.hex(digest.get(index), 2);
-		result = result.toLowerCase();
+		var result = hexOf(Sha256.make(material.getBytes()));
 		if (cachePath != null) {
+			var temporary = cachePath + "." + Std.random(1000000000) + ".tmp";
 			try {
-				var temporary = cachePath + "." + Std.random(1000000000) + ".tmp";
 				File.saveContent(temporary, fingerprint + "\n" + result + "\n");
 				FileSystem.rename(temporary, cachePath);
-			} catch (_:Dynamic) {}
+			} catch (_:Dynamic) {
+				// A failed cache write only costs the next run its hashing; do not leave the temporary file behind.
+				try FileSystem.deleteFile(temporary) catch (_:Dynamic) {}
+			}
 		}
 		return result;
 	}
 
-	/** The running service's endpoint for `key` (a workspace id, or a folder for a folder-keyed service), or null. */
 	static var phaseStart:Float = Sys.time();
 	static final phaseLog:Bool = Sys.getEnv("EXOSUIT_CONNECT_LOG") != null;
 
@@ -681,6 +680,7 @@ class AgentManager {
 		if (phaseLog) Sys.stderr().writeString("[" + Std.int((Sys.time() - phaseStart) * 1000) + "ms " + label + "] ");
 	}
 
+	/** The running service's endpoint for `key` (a workspace id, or a folder for a folder-keyed service), or null. */
 	static function readDiscovery(directory:String, key:String):Null<Dynamic> {
 		var endpointPath = Path.join([directory, "endpoint.json"]);
 		if (!FileSystem.exists(endpointPath)) return null;
