@@ -223,6 +223,54 @@ class ContextSnapshotsTestMain {
 		for (line in twice) if (StringTools.startsWith(line, "Z\tcontext\t")) zCount++;
 		require(zCount == 2, "files plus old conf lines doubled the contexts: " + zCount);
 
+		// Off the asking turn: request/pump write on a background thread; nothing is written by request itself.
+		var asyncFolder = root + "/contexts-async";
+		var asyncStore = new ContextSnapshotStore(asyncFolder);
+		var asyncLines = scratch.contexts.get(scratch.activeKey);
+		var asyncKey = ContextKey.make(machine, "ws", "async");
+		var requested:Map<String, Array<String>> = [asyncKey => asyncLines];
+		asyncStore.request(requested);
+		require(!FileSystem.exists(asyncFolder), "request wrote on the asking turn");
+		asyncStore.pump();
+		var waited = 0.0;
+		while (asyncStore.busy() && waited < 10) { Sys.sleep(0.01); waited += 0.01; asyncStore.pump(); }
+		require(FileSystem.exists(asyncStore.pathFor(asyncKey)), "the background writer did not write");
+		asyncStore.request(new Map<String, Array<String>>());
+		asyncStore.pump();
+		while (asyncStore.busy() && waited < 10) { Sys.sleep(0.01); waited += 0.01; asyncStore.pump(); }
+		require(!FileSystem.exists(asyncStore.pathFor(asyncKey)), "the background writer did not delete");
+
+		// Failures are reported once per context and retried: the folder cannot be created under a file.
+		var blocker = root + "/blocker.txt";
+		File.saveContent(blocker, "x");
+		var failing = new ContextSnapshotStore(blocker + "/contexts");
+		var reports = 0;
+		failing.onError = function(_, _) reports++;
+		failing.sync(requested);
+		failing.sync(requested);
+		require(reports == 1, "a failed write was reported " + reports + " times");
+		var tooBig = new ContextSnapshotStore(root + "/contexts-big");
+		var huge = asyncLines.copy();
+		for (i in 0...Std.int(ContextSnapshotStore.MAX_FILE_CHARS / 8) + 10) huge.push("Q\teditor");
+		var bigReports = 0;
+		tooBig.onError = function(_, _) bigReports++;
+		tooBig.sync([asyncKey => huge]);
+		require(bigReports == 1 && !FileSystem.exists(tooBig.pathFor(asyncKey)), "an oversize layout was written or not reported");
+
+		// No session.conf, only files: the newest file's context is the focus and every group comes back.
+		var onlyFiles = root + "/contexts-only";
+		var seed = window(workspace, onlyFiles, g1);
+		seed.host.openFile(file("a"), false);
+		var s1 = new WorkspaceSession(); s1.takeLayout(seed.host.sessionLines());
+		go(seed.host, g2).openFile(file("b"), false);
+		var s2 = new WorkspaceSession(); s2.takeLayout(seed.host.sessionLines());
+		var seeding = new ContextSnapshotStore(onlyFiles);
+		seeding.write(g1, s1.contexts.get(s1.activeKey));
+		Sys.sleep(0.05);
+		seeding.write(g2, s2.contexts.get(s2.activeKey));
+		var fromFiles = restart(workspace, onlyFiles, new WorkspaceSession(), g2);
+		require(fromFiles.layoutContextKey == g2 && tabs(fromFiles, g2).join(",") == file("b"), "the newest file's context was not the focus");
+		require(tabs(fromFiles, g1).join(",") == file("a"), "the other file's context did not come back");
 		trace("PASS: one file per group, last write wins per group, other groups kept, crash loses only unsaved edits, migration from session.conf");
 		return 0;
 	}

@@ -336,13 +336,16 @@ opens in its place); only Add Folder and Attach Folder add one. "Open folder" on
     changed, and on close. It writes only the contexts whose content changed since it last read or wrote them, and
     deletes only files of contexts it knew and then closed, and only if the file still holds what it last read or wrote (another window's rewrite survives). So it never touches a group another window changed, and
     a window that merely restored a group never becomes its latest writer. A crash loses at most the last period.
+    The file work runs on a background thread (one job at a time, the latest request wins), never on the frame of a
+    switch; close waits for it. A failed write is reported once per group and retried the next period. Files over 4 MB
+    are not read or written, and at most 200 files are read.
   - After the catalog names the machine, a window re-keys its contexts and so rewrites all of them: it becomes the latest writer of each.
-  - On start the focused context comes from `session.conf` (the window that closed last); every other context comes
+  - On start the focused context comes from `session.conf` (the window that closed last; with no `session.conf`, the
+    newest file's context); every other context comes
     from its own file. Old `session.conf` files migrate on the first start: their context lines are used when the
     folder has no file for that key (or no files at all, for keys in the older `workspace:`/`group:` scheme), and
     the first save writes them out as files. The old lines stay in `session.conf` until it is next saved, so an older
     build still reads them; nothing is deleted.
-  - Not built: reopening the focused context from its file when `session.conf` is missing.
 - [x] The same file open in two windows: the existing file-safety rules (external change detection and save
   conflicts) apply. (`tests/document-test`, `sameFileInTwoWindows`: two documents on one path; a save in one reloads
   the clean other, makes the dirty other `Changed` and refuses its save until forced, and the forced save is a conflict
