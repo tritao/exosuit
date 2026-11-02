@@ -71,16 +71,13 @@ class WorkspaceSession {
 		var split = ContextLayoutStore.read(lines);
 		if (split.activeKey != null) activeKey = split.activeKey;
 		for (key in split.layouts.keys()) contexts.set(key, split.layouts.get(key));
-		var active:Array<String> = [], dock = false, pane = false;
+		var active:Array<String> = [];
 		for (line in lines) {
 			if (contextLine(line)) continue;
 			layout.push(line);
-			if (StringTools.startsWith(line, "Z\t") || StringTools.startsWith(line, "M\t")) continue;
-			active.push(line);
-			if (StringTools.startsWith(line, "D\tdock\t1\t")) dock = true;
-			if (StringTools.startsWith(line, "P\t")) pane = true;
+			if (!StringTools.startsWith(line, "Z\t") && !StringTools.startsWith(line, "M\t")) active.push(line);
 		}
-		if (activeKey.length > 0 && dock && pane) contexts.set(activeKey, active);
+		if (activeKey.length > 0 && ContextLayoutStore.complete(active)) contexts.set(activeKey, active);
 	}
 
 	/**
@@ -102,6 +99,15 @@ class WorkspaceSession {
 		}
 		// Oldest first, so on a duplicate key the newest writer is read last.
 		snapshots.sort(function(a, b) return a.written < b.written ? -1 : a.written > b.written ? 1 : 0);
+		// No session.conf layout (it is gone or never had one): the newest file's context is the focus, and its lines
+		// are the focused layout as well as a context of their own.
+		var hasFocus = false;
+		for (line in result) if (StringTools.startsWith(line, "Z\tactive\t")) hasFocus = true;
+		if (!hasFocus && snapshots.length > 0) {
+			var newest = snapshots[snapshots.length - 1];
+			for (line in newest.lines) result.push(line);
+			result.push(ContextLayoutStore.activeLine(newest.key));
+		}
 		for (snapshot in snapshots) result.push(ContextLayoutStore.layoutLine(snapshot.key, snapshot.lines));
 		return result;
 	}

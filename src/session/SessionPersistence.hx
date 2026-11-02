@@ -32,19 +32,20 @@ class SessionPersistence {
 		changedAt = -1.0;
 		activeKey = session.activeKey;
 		lastContextSync = now == null ? Sys.time() : now;
-		// Writes what the files lack (contexts migrated from an old session.conf) and nothing else.
-		if (store != null) store.sync(session.contexts);
+		// Writes what the files lack (contexts migrated from an old session.conf) and nothing else, off this turn.
+		if (store != null) store.request(session.contexts);
 	}
 
 	public function update(application:Application, now:Float):Bool {
 		if (lastChecked >= 0 && now - lastChecked < CHECK_INTERVAL_SECONDS) return false;
 		lastChecked = now;
+		if (store != null) store.pump();
 		var session = WorkspaceSession.capture(application);
 		var current = session.encode();
 		if (store != null && (session.activeKey != activeKey || now - lastContextSync >= CONTEXT_PERIOD_SECONDS)) {
 			activeKey = session.activeKey;
 			lastContextSync = now;
-			store.sync(session.contexts);
+			store.request(session.contexts);
 		}
 		if (current != observed) {
 			observed = current;

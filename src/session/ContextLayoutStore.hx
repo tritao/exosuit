@@ -14,6 +14,15 @@ class ContextLayoutStore {
 	static function encoded(value:String):String return Base64.encode(Bytes.ofString(value));
 	public static function activeLine(key:String):String return "Z\tactive\t1\t" + encoded(key);
 	public static function layoutLine(key:String, lines:Array<String>):String return "Z\tcontext\t1\t" + encoded(key) + "\t" + encoded("context-layout=1\n" + lines.join("\n"));
+	/** A layout can be restored from only when it names the dock and at least one editor pane. */
+	public static function complete(lines:Array<String>):Bool {
+		var dock = false, pane = false;
+		for (line in lines) {
+			if (StringTools.startsWith(line, "D\tdock\t1\t")) dock = true;
+			else if (StringTools.startsWith(line, "P\t")) pane = true;
+		}
+		return dock && pane;
+	}
 	public static function read(lines:Array<String>):ContextLayoutStore {
 		var result = new ContextLayoutStore(), count = 0;
 		for (line in lines) {
@@ -27,13 +36,9 @@ class ContextLayoutStore {
 				else if (fields[1] == "context" && fields.length == 5 && count < MAX_LAYOUTS) {
 					var payload = Base64.decode(fields[4]).toString().split("\n");
 					if (payload.shift() != "context-layout=1" || payload.length > 20000) continue;
-					var valid = true, dock = false, pane = false;
-					for (entry in payload) {
-						if (StringTools.startsWith(entry, "Z\t") || !WorkspaceSession.validLayout(entry)) { valid = false; break; }
-						if (StringTools.startsWith(entry, "D\tdock\t1\t")) dock = true;
-						if (StringTools.startsWith(entry, "P\t")) pane = true;
-					}
-					if (valid && dock && pane) { result.layouts.set(key, payload); count++; }
+					var valid = true;
+					for (entry in payload) if (StringTools.startsWith(entry, "Z\t") || !WorkspaceSession.validLayout(entry)) { valid = false; break; }
+					if (valid && complete(payload)) { result.layouts.set(key, payload); count++; }
 				}
 			} catch (_:Dynamic) { /* Optional records fall back independently. */ }
 		}
