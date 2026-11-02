@@ -155,9 +155,29 @@ Phases 4–7 landed on `main` on 2026-11-01 (exosuit `757db3f1`, haxeon `fd2a332
   layout mode (Agents layout moves those destinations to the right panel) changed with it. Fixed on branch `group-remove`
   (window moves to the root, the Agents layout stays, the empty state counts root sessions); the GUI scenario
   `m19_group_remove` fails without the fix and passes with it.
-- **Workspaces take a long time to show as connected.** Not measured. Time it from launch and from opening a
-  workspace to "Workspace connected" and to the catalog rows appearing (suit's `machine` reply, the manager start,
-  the first CATALOG read), and find where the time goes.
+- **Workspaces take a long time to show as connected. Measured and mostly fixed (2026-11-02).** The editor keeps a
+  connect timeline (`src/workspace/client/ConnectTimeline.hx`, shown as `timeline` in the automation state; with
+  `EXOSUIT_CONNECT_LOG` set it also goes to stderr, and the launcher adds its own phases to the helper's exit event).
+  `m19_connect_time` runs four cases with real input and writes the times to `results.json`. Milliseconds, one run
+  each on a quiet machine, source checkout, isolated suit:
+
+  | Case | Before | After |
+  |---|---|---|
+  | Launch to "Workspace connected" (cold service) | 6600 | 4400 |
+  | Launch to catalog rows | 6700 | 4500 |
+  | Expand an idle workspace to its rows in the tree | 3800 to 10700 (varies with suit) | 2500 |
+  | Double click an idle workspace to connected | 5800 | 2900 |
+  | Double click a running workspace to connected | 3000 | 1400 |
+  | suit `machine` reply | 450 to 600 | unchanged |
+
+  Where the time went: (1) every launcher run in a source checkout hashed every source file for the build identity
+  (2.6 to 3 s) before printing its answer, so a discovery of a running service took 2.5 s and a cold start 3 s more;
+  the identity is now cached by file names, sizes and times and the listing does fewer lookups (about 0.8 s left, in
+  the file walk). (2) A service started from the tree was reached only when suit's next listing named it, 5 to 10 s
+  later; the window now connects to the endpoint the starter's launcher printed. Not changed: a cold manager still
+  takes about 2 s to come up, the discovery helper is still a process of its own (about 0.2 s), and in the scenario the catalog rows of
+  the attached workspace appeared only once the Workbench was shown (not confirmed as a rule). Remaining idea: walk the file list once per
+  state home per minute, or let the manager report its build identity, to drop the last 0.8 s.
 - **A click on a group row in the Workbench tree did not switch to the group.** Fixed (2026-11-02, `group-entry`): a
   single click or Enter on a group row enters the group, on the open workspace's row its root; the chevron expands.
   `m19_group_entry` failed before (the click only expanded) and passes. The note that Work shares the workspace
