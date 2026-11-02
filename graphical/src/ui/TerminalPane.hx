@@ -55,6 +55,8 @@ class TerminalPane implements AgentTerminalPanel {
 	var background:Color;
 	var cellWidth:Float;
 	var rowHeight:Float;
+	/** Baseline of a primary-font row; every row's text is drawn onto it. */
+	var gridBaseline:Float = 0.0;
 	var fontSize:Float;
 	var fontRevision:Int = 0;
 	var rowSerial:Int = 0;
@@ -231,6 +233,7 @@ class TerminalPane implements AgentTerminalPanel {
 		var metrics = probe.measure();
 		cellWidth = Math.max(1.0, metrics.width);
 		rowHeight = Math.max(1.0, Math.ceil(metrics.height + 2.0));
+		gridBaseline = 0.0; // Measured from the new face on the next row paint.
 		probe.dispose();
 		for (revision in revisions) if (revision >= fontRevision) fontRevision = revision + 1;
 		for (row in renderedRows) row.layout.dispose();
@@ -494,6 +497,11 @@ class TerminalPane implements AgentTerminalPanel {
 		var visibleRows = resolvedHeight > 0 && (remoteBackend == null || remoteBackend.isSynchronized())
 			? Std.int(Math.min(renderedRows.length, Math.max(0, Math.ceil((resolvedHeight - terminalTop) / rowHeight))))
 			: 0;
+		if (gridBaseline <= 0.0) {
+			var baselineProbe = TextLayout.create(fonts, "M", 64.0, gridTextStyle(), new ParagraphStyle(TextWrap.None));
+			gridBaseline = baselineProbe.caret(new haxeon.ui.TextLayout.TextPosition(0, 0)).y;
+			baselineProbe.dispose();
+		}
 		// Row display lists and glyphs are already retained. An extra raster target
 		// per row adds offscreen rendering and compositing work during updates.
 		for (row in 0...visibleRows) {
@@ -511,7 +519,12 @@ class TerminalPane implements AgentTerminalPanel {
 				canvas.fillRectIfPositive(new Rect(0.0, 0.0, geometry.width, geometry.height), background);
 				for (fill in renderedRows[index].fills) canvas.fillRectIfPositive(new Rect(8.0 + fill.start * cellWidth,
 					0.0, (fill.end - fill.start) * cellWidth, rowHeight), fill.color);
-				canvas.drawText(renderedRows[index].layout, 8.0, 0.0);
+				// A line's height and baseline follow the tallest font it uses, so a
+				// fallback glyph (spinner, arrow, ellipsis) pushes the whole row's text
+				// down past its cell, where the next row's background covers it. Put
+				// every row on the grid baseline measured from the primary face.
+				var layout = renderedRows[index].layout;
+				canvas.drawText(layout, 8.0, gridBaseline - layout.caret(new haxeon.ui.TextLayout.TextPosition(0, 0)).y);
 				if (index == cursorRow && cursorMode != 1) {
 					var x = 8.0 + cursorColumn * cellWidth;
 					if (focused)
