@@ -1785,9 +1785,16 @@ class UiWorkbenchHost implements WorkbenchHost {
 				if (document != null) contextDocumentRefs.set(fields[7] + ":" + fields[8], document);
 			}
 		}
+		// The window that closed last saved its focused context in `lines`; a snapshot file for the same context is
+		// that window's own copy or older, so it does not replace `lines`.
+		var activeSaved = stored.activeKey == null || sameContextIgnoringMachine(migrateContextKey(stored.activeKey), contextKey);
 		var selected = pendingContextLayouts.get(contextKey);
 		pendingContextLayouts.remove(contextKey);
-		if (selected == null) selected = stored.activeKey == null || sameContextIgnoringMachine(migrateContextKey(stored.activeKey), contextKey) ? lines : defaultContextLines;
+		if (activeSaved) {
+			selected = lines;
+			for (key in [for (k in pendingContextLayouts.keys()) k]) if (sameContextIgnoringMachine(key, contextKey)) pendingContextLayouts.remove(key);
+		}
+		if (selected == null) selected = defaultContextLines;
 		restoreLayoutLines(selected, resolveContextDocument);
 		normalizeMachines();
 		pruneContextBookkeeping();
