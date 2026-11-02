@@ -119,6 +119,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     this.environment = environment;
     this.choices = choices == null ? WorkspaceManagerChoices.instance() : choices;
     this.workbench = new RpcWorkspaceWorkbenchClient(this, clock);
+    workbench.timelineName = timelineName;
   }
 
   /** The workspace this attachment's events are filed under in the ConnectTimeline. */

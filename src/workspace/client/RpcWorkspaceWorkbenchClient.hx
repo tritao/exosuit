@@ -20,6 +20,8 @@ private typedef PendingModelList = {
 class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements WorkspaceAgentClient {
   final endpoint:WorkspaceRpcEndpoint;
   final clock:Void -> Float;
+  /** The name the ConnectTimeline files this client's events under; the folder when unset. */
+  public var timelineName:Null<Void -> String> = null;
   var disposed:Bool = false;
   var observedConnection:Null<RpcConnection>;
   var observedGeneration:Null<String>;
@@ -934,8 +936,8 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       for (group in value.groups) key += "|g:" + group.id + ":" + group.revision;
       for (record in records) key += "|t:" + record.id + ":" + record.revision + ":" + record.available;
       if (catalog == null) {
-        var local = Std.downcast(endpoint, LocalWorkspaceClient);
-        ConnectTimeline.mark("catalog-first-read", local == null ? workspaceRoot : local.timelineName(), records.length + " terminals");
+        var name = timelineName;
+        ConnectTimeline.mark("catalog-first-read", name == null ? workspaceRoot : name(), records.length + " terminals");
       }
       catalog = value;
       // A refresh that clears an error must redraw even when the catalog itself is unchanged.
