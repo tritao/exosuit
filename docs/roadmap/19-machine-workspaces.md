@@ -286,9 +286,15 @@ them exactly.
 
 ## Phase 8: many windows and instances in parallel
 
-- [ ] Each window registers with suit (it already does) with its focused workspace and group, so the tree can show
-  "open in another window".
-- [ ] "Open in New Window" on a workspace or group starts another editor instance focused there.
+- [x] Each window registers with suit (it already does) with its focused workspace and group, so the tree can show
+  "open in another window". (The editor's suit record carries `window` and `context`, written on another thread after
+  a 0.3 s debounce; a `machine` reply lists them in `windows`, read from the registry. The tree marks workspace and
+  group rows with "another window". Unit vectors in `SuitUnitTests`, tree check in `tests/workbench-tree`.)
+- [ ] "Open in New Window" on a workspace or group starts another editor instance focused there. (Built: context menus,
+  palette "Open Current Workspace or Group in New Window", `--context=<key>`. The real-input scenario `m19_two_windows`
+  is written but has not run yet: starting a detached process fails with "Could not start process: 5" in the
+  agent sandbox. It also checks each window sees the other's new group and terminal, and that closing one leaves
+  the services running.)
 - [ ] **Tabs belong to the window.** Two windows on the same group each keep their own tabs, and both see the same
   sessions live. Input to a session from one window shows in the other.
 - [x] **Restore: the last write wins, per group.** (Storage and restore are built and tested headless
@@ -325,7 +331,8 @@ them exactly.
 - [ ] The same file open in two windows: the existing file-safety rules (external change detection and save
   conflicts) apply. Add a test.
 - [ ] suit's orphan rules and Quit already handle several editors. Check that per-workspace services stay up while
-  any window uses them.
+  any window uses them. (Read, not yet run: nothing stops a service when an editor exits; only suit's Stop and Quit do. An editor claims every
+  workspace it attached to for its whole life, so a service is orphaned only when no running editor ever used it.)
 - [ ] Tests: two editor processes, different workspaces. Each sees the other's new group and session. Closing one
   leaves the other's services running.
 
