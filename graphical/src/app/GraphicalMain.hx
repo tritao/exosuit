@@ -25,6 +25,9 @@ class GraphicalMain {
 	static var automation:Null<devtools.AutomationProbe> = null;
 	static var devtoolsProcess:Null<sys.io.ChildProcess> = null;
 	static final devtoolsOutput:haxe.io.Bytes = haxe.io.Bytes.alloc(4096);
+	/** Where the window was last time; null for benchmark and capture runs, which keep the system's placement. */
+	static var placementFile:Null<WindowPlacementFile> = null;
+	static var placementReader:Null<Void->Null<haxeon.ui.host.WindowPlacement>> = null;
 
 	static function main():Int {
 		open(Sys.args());
@@ -37,12 +40,16 @@ class GraphicalMain {
 
 	@:keep public static function tick():Int {
 		var current = session;
+		if (current != null && placementFile != null) placementFile.update(placementReader);
 		return current != null && current.tick() ? 1 : 0;
 	}
 
 	@:keep public static function close():Int {
 		var current = session;
 		if (current == null) return 0;
+		// A live reload closes and reopens the window: it must come back where it was, like a new run.
+		if (placementFile != null) placementFile.update(placementReader, true);
+		placementReader = null;
 		session = null;
 		app = null;
 		suit.SuitClient.unregister();
@@ -144,6 +151,10 @@ class GraphicalMain {
 		host.captureSeconds = captureSeconds;
 		host.recordPath = recordPath;
 		host.inputScriptPath = inputScriptPath;
+		var benchmark = captureDirectory != null || recordPath != null || inputScriptPath != null
+			|| titleOverride != null && titleOverride.length > 0;
+		placementFile = benchmark ? null : new WindowPlacementFile();
+		if (placementFile != null) host.placement = placementFile.load();
 		allocationProfile = Sys.getEnv("EXOSUIT_ALLOCATION_PROFILE");
 		var profileFrames = 0;
 		var reportedFirstFrame = false;
@@ -173,6 +184,7 @@ class GraphicalMain {
 			return true;
 		};
 		session = DesktopUiHost.open(host, function(context) {
+			placementReader = context.windowPlacement;
 			var dark = prefersDark(themeChoice);
 			var workspaceClient:Null<workspace.client.LocalWorkspaceClient> = null;
 			var instance = new ExosuitApp(context.fonts, ExosuitPalette.theme(dark), context,
