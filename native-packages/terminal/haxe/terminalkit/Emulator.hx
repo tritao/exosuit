@@ -188,7 +188,9 @@ class Emulator {
         writeU32(output, 2);
         writeU32(output, columns());
         writeU32(output, rows());
-        writeU32(output, position.column);
+        // A wide character written in the last column leaves the cursor one past the grid's end (a pending
+        // wrap). The restore accepts at most `columns`, the ordinary pending-wrap position.
+        writeU32(output, position.column > columns() ? columns() : position.column);
         writeU32(output, position.row);
         writeU32(output, position.mode);
         writeU32(output, modes.cursor_keys);

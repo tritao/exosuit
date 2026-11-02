@@ -43,6 +43,18 @@ class TerminalSnapshotTests {
 		require(sameScreen(source, copy), "Restored Claude Code screen differs");
 		copy.close();
 
+		// A wide character in the last column leaves the cursor past the grid; the snapshot must still restore.
+		for (input in ["\x1b[999C🤖", "\x1b[?7l\x1b[999C\x1b[?1049h日本語"]) {
+			var edge = Emulator.open(47, 5, 1000, "xterm-256color", false);
+			edge.feedString(input);
+			var restored = Emulator.open(10, 3, 8, "xterm-256color", false);
+			try restored.restoreScreenSnapshot(edge.screenSnapshot()) catch (failure:Dynamic)
+				throw "Snapshot with a wide character in the last column did not restore: " + Std.string(failure);
+			restored.snapshot(); edge.snapshot();
+			require(restored.rowText(0) == edge.rowText(0), "Last-column wide character was not restored");
+			restored.close(); edge.close();
+		}
+
 		// Pages reassemble the snapshot exactly; a finished or replaced snapshot cannot be read again.
 		var pair = MemoryTransport.pair(), clock = function() return Sys.time() * 1000;
 		var viewer = new RpcConnection(pair.server, clock), other = new RpcConnection(MemoryTransport.pair().server, clock);
