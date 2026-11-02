@@ -276,7 +276,8 @@ them exactly.
 - [ ] "Open in New Window" on a workspace or group starts another editor instance focused there.
 - [ ] **Tabs belong to the window.** Two windows on the same group each keep their own tabs, and both see the same
   sessions live. Input to a session from one window shows in the other.
-- [ ] **Restore: the last write wins, per group.**
+- [x] **Restore: the last write wins, per group.** (Storage and restore are built and tested headless
+  (`tests/context-snapshots`); no real-input scenario restarts the editor yet.)
   - A window saves a group's tab snapshot when it switches away from that group, when it closes, and periodically,
     so a crash loses little.
   - Snapshots are stored one file per `machine/workspace/group`, written atomically. Two windows therefore never
@@ -286,6 +287,26 @@ them exactly.
     automatically; Open in New Window brings back any workspace or group.
   - This replaces the single `session.conf` tab section for contexts. The window-level chrome (window size and the
     last focused context) stays in one small file written by the window that closes last.
+  - File layout, under the editor's state folder (`PRAGTICAL_PORTABLE` or the platform state root, the same one as
+    `session.conf`):
+    - `contexts/<prefix>-<sha256 of key>.json`, one per context key. The name is stable and safe on every file system
+      (the readable prefix keeps letters, digits and `-`; the hash keeps two keys apart, also on case-insensitive
+      disks). The key itself is inside the file.
+    - The file is `{"version":1,"key":..., "written":<ms>, "layout":[<the layout lines the host restores from>]}`,
+      written atomically (`sys.io.AtomicFile`). A damaged or unknown file is skipped and left alone.
+    - `session.conf` keeps the window chrome, the focused context's key and its layout, and the recent list. It no
+      longer carries other contexts' tabs.
+  - When a window writes: right after it switches context (the one it left), every 30 seconds while anything
+    changed, and on close. It writes only the contexts whose content changed since it last read or wrote them, and
+    deletes only files of contexts it knew and then closed, and only if the file still holds what it last read or wrote (another window's rewrite survives). So it never touches a group another window changed, and
+    a window that merely restored a group never becomes its latest writer. A crash loses at most the last period.
+  - After the catalog names the machine, a window re-keys its contexts and so rewrites all of them: it becomes the latest writer of each.
+  - On start the focused context comes from `session.conf` (the window that closed last); every other context comes
+    from its own file. Old `session.conf` files migrate on the first start: their context lines are used when the
+    folder has no file for that key (or no files at all, for keys in the older `workspace:`/`group:` scheme), and
+    the first save writes them out as files. The old lines stay in `session.conf` until it is next saved, so an older
+    build still reads them; nothing is deleted.
+  - Not built: reopening the focused context from its file when `session.conf` is missing.
 - [ ] The same file open in two windows: the existing file-safety rules (external change detection and save
   conflicts) apply. Add a test.
 - [ ] suit's orphan rules and Quit already handle several editors. Check that per-workspace services stay up while

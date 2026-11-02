@@ -108,6 +108,7 @@ rm -rf "$terminal_context_state"
 run_test sidebar-layout
 run_test workbench-drag
 run_test workbench-tree
+run_test context-snapshots
 run_test remote-access-panel
 run_test browser-pairing-url
 
