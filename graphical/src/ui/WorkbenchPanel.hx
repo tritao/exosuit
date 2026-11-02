@@ -93,6 +93,9 @@ class WorkbenchPanel implements View {
     var inlineEditor:Null<WorkbenchNameEditor>;
     var refreshModel = false;
     var pendingReveal:Null<String>;
+    /** The row that entered a context: the tree's selection is kept per context, so the entered context's own selection must yield to it. */
+    var pendingEnterKey:Null<String>;
+    var pendingEnterUntil = 0.0;
     var revealRoot:Null<String>;
     var scrollTarget:Null<String>;
     var scrollPasses = 0;
@@ -194,6 +197,7 @@ class WorkbenchPanel implements View {
 		if (key == model.openRow && WorkbenchRowKey.workspaceId(key) != null) {
 			if (focusRoot != null) focusRoot();
 			tree.focusItem(key);
+			selectAfterEnter(key);
 			return true;
 		}
 		var group = WorkbenchRowKey.idOf(key, WorkbenchRowKind.Group);
@@ -201,7 +205,24 @@ class WorkbenchPanel implements View {
 		if (focusGroup != null) focusGroup(group);
 		// Entering a context rebuilds the window's views, which drops focus; keep the keyboard on this row.
 		tree.focusItem(key);
+		selectAfterEnter(key);
 		return true;
+	}
+
+	function selectAfterEnter(key:String):Void {
+		pendingEnterKey = key; pendingEnterUntil = Sys.time() + 0.6;
+		requestFrame();
+	}
+
+	/** The re-keyed tree comes back with the selection the entered context last had; the row that was entered wins. */
+	function applyPendingEnterSelection():Void {
+		var key = pendingEnterKey;
+		if (key == null) return;
+		if (Sys.time() > pendingEnterUntil) { pendingEnterKey = null; return; }
+		if (tree.selectedKey == key) return;
+		pendingEnterKey = null;
+		try tree.select(key, false) catch (_:Dynamic) {}
+		requestFrame();
 	}
 
 	function openItem(kind:WorkbenchRowKind, id:String):Void {
@@ -1003,6 +1024,7 @@ class WorkbenchPanel implements View {
 		resolveForeign();
         applyPendingReveal();
 		applyPendingSessionSelection();
+		applyPendingEnterSelection();
 		runBatch();
     }
 
