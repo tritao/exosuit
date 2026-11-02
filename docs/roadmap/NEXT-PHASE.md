@@ -187,9 +187,12 @@ Phases 4–7 landed on `main` on 2026-11-01 (exosuit `757db3f1`, haxeon `fd2a332
   re-keys the whole workspace view, so every row node gets a new id and focus is dropped. Partly fixed (`group-entry`):
   `TreeView.focusItem` gives the entered row focus on the build that creates it, and a switch from a row no longer
   hands the keyboard to the editor (`UiWorkbenchHost.keepFocusOnSwitch`). Down, Down, Up, Enter now work after a
-  switch from Work to the root. Still open: in `m19_group_entry`, returning to the root from the new group Second
-  (root has a tab) leaves no focus, and the tree selection jumps to Work, so Enter after Down does nothing there; the
-  cause was not found. The automation snapshot now has `focus` (label of the focused widget, `-` for none).
+  switch from Work to the root. Still open: in `m19_group_entry`, entering a context restored from its saved layout
+  (the root again, Work again; both have tabs) leaves no focus on the row, so Down and Enter reach nothing. A context
+  entered for the first time keeps focus. The editor does not take the focus (no editorResolved focus follows these
+  switches), so the row's own request is lost or consumed too early on that path; not found. The selection half is fixed:
+  the tree keeps its selection per context, so the re-keyed tree came back with the entered context's old selection (Work
+  after clicking the root), and `WorkbenchPanel.selectAfterEnter` now selects the entered row. The automation snapshot now has `focus` (label of the focused widget, `-` for none).
 - **Open in New Window on the group Work (resolved).** The tree and quick switch key Work by its own id since the group-entry
   change, so the window's key and the `--context=` key of a new window on Work agree. `tests/active-context` checks that
   the key of a group with the workspace folder is stable, differs from the root's and survives the `--context` round trip.
