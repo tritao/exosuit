@@ -70,12 +70,15 @@ class AgentManager {
 			}
 			if (options.restoreMigration) return restoreMigration(directory, options.identity.workspace);
 			if (options.discover) {
+				phase("discover begins");
 				if (!FileSystem.exists(directory)) return 4;
 				if (!AgentManagerNative.privateDirectory(directory))
 					throw "Workspace state directory must be private and owned by this user";
+				phase("directory private");
 				var endpoint = readDiscovery(directory, key);
 				if (endpoint == null) return 4;
 				emitDiscovery(endpoint, options.wire);
+				phase("emitted");
 				return 0;
 			}
 			ensureStateDirectory(directory);
@@ -567,6 +570,12 @@ class AgentManager {
 		return null;
 	}
 
+	static function hexOf(digest:haxe.io.Bytes):String {
+		var result = "";
+		for (index in 0...digest.length) result += StringTools.hex(digest.get(index), 2);
+		return result.toLowerCase();
+	}
+
 	static function agentBuildId():String {
 		var overridePath = nonempty(Sys.getEnv("EXOSUIT_AGENT_BUILD_ID_FILE"));
 		if (overridePath != null) {
@@ -611,6 +620,28 @@ class AgentManager {
 		}
 		files.sort(Reflect.compare);
 		var identityRoot = repository == null ? installRoot : repository;
+		// Hashing every source file takes seconds, and every launcher run (each discovery, each start) asks. A source
+		// checkout therefore keeps the answer keyed by the files' names, sizes and times, which a stat reads in a moment.
+		var cachePath:Null<String> = null, fingerprint = "";
+		if (repository != null) {
+			try {
+				var seen = new haxe.io.BytesBuffer();
+				seen.addString("exosuit-agent-build-cache-v1\n");
+				for (path in files) {
+					var info = FileSystem.metadata(path);
+					if (info == null) throw "unreadable";
+					seen.addString(path + "\t" + info.size + "\t" + info.modified + "	" + info.changed + "\n");
+				}
+				fingerprint = hexOf(Sha256.make(seen.getBytes()));
+				cachePath = Path.join([stateBase(), "build-id.cache"]);
+				if (FileSystem.exists(cachePath)) {
+					var lines = File.getContent(cachePath).split("\n");
+					if (lines.length >= 2 && lines[0] == fingerprint && isHex(StringTools.trim(lines[1]), 64)) return StringTools.trim(lines[1]);
+				}
+			} catch (_:Dynamic) {
+				cachePath = null;
+			}
+		}
 		var material = new haxe.io.BytesBuffer();
 		material.addString("exosuit-agent-build-v2");
 		material.addByte(0);
@@ -630,14 +661,32 @@ class AgentManager {
 		var digest = Sha256.make(material.getBytes());
 		var result = "";
 		for (index in 0...digest.length) result += StringTools.hex(digest.get(index), 2);
-		return result.toLowerCase();
+		result = result.toLowerCase();
+		if (cachePath != null) {
+			try {
+				var temporary = cachePath + "." + Std.random(1000000000) + ".tmp";
+				File.saveContent(temporary, fingerprint + "\n" + result + "\n");
+				FileSystem.rename(temporary, cachePath);
+			} catch (_:Dynamic) {}
+		}
+		return result;
 	}
 
 	/** The running service's endpoint for `key` (a workspace id, or a folder for a folder-keyed service), or null. */
+	static var phaseStart:Float = Sys.time();
+	static final phaseLog:Bool = Sys.getEnv("EXOSUIT_CONNECT_LOG") != null;
+
+	/** With EXOSUIT_CONNECT_LOG set, writes how long the launcher has run to stderr at a named step (the editor shows it in its connect timeline). */
+	static function phase(label:String):Void {
+		if (phaseLog) Sys.stderr().writeString("[" + Std.int((Sys.time() - phaseStart) * 1000) + "ms " + label + "] ");
+	}
+
 	static function readDiscovery(directory:String, key:String):Null<Dynamic> {
 		var endpointPath = Path.join([directory, "endpoint.json"]);
 		if (!FileSystem.exists(endpointPath)) return null;
+		phase("endpoint file found");
 		var endpoint = readPrivateJson(endpointPath, 16384);
+		phase("endpoint read");
 		if (!isObject(endpoint) || intField(endpoint, "version") != 1 || intField(endpoint, "protocol") != 1 ||
 			intField(endpoint, "codec") != 1 || endpointKey(endpoint) != key ||
 			stringField(endpoint, "workspace") != "workspace")
@@ -656,12 +705,15 @@ class AgentManager {
 		var port = Std.parseInt(url.matched(1));
 		if (port == null || port < 1 || port > 65535) throw "Invalid workspace loopback endpoint";
 		var identity = AgentStateIdentity.read(Path.join([directory, "workspace.json"]));
+		phase("identity read");
 		if (identity.migratedTo != null || identity.key() != key)
 			throw "Workspace state directory identity mismatch";
 		if (!AgentManagerNative.privateFile(credential)) throw "Invalid session credential file";
 		var token = File.getContent(credential);
 		if (!isHex(token, 64)) throw "Invalid session credential";
+		phase("credential read");
 		var probe = AgentManagerNative.acquireLock(Path.join([directory, "agent.lock"]));
+		phase("lock probed");
 		if (probe != null) {
 			AgentManagerNative.releaseLock(probe);
 			return null;

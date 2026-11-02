@@ -852,7 +852,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
       output += process.readStdout();
       errors += process.readStderr();
       var code = process.exitStatus(), mode = helperMode;
-      ConnectTimeline.mark("helper-exit", timelineName(), mode + " code " + code);
+      ConnectTimeline.mark("helper-exit", timelineName(), mode + " code " + code + (errors.length > 0 && errors.length < 400 ? " " + errors : ""));
       stopHelper();
       if (output.length > 16384 || errors.length > 16384) {
         fail("Workspace discovery exceeds its limit");
