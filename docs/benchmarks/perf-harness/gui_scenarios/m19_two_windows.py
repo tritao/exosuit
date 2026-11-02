@@ -51,6 +51,7 @@ def run(gui):
         gui.check("window 1's tree marks Beta: open in another window", lambda s: gui.find(s, pattern=r"^Workspace Beta.*open in another window"), 15,
                   detail=lambda s: [e["label"][:60] for e in s["elements"] if e["label"].startswith("Workspace")])
         gui.shot("window1")
+        two.focus()
         show_workbench(two)
         two.check("window 2's tree marks Alpha: open in another window", lambda s: two.find(s, pattern=r"^Workspace Alpha.*open in another window"), 15,
                   detail=lambda s: [e["label"][:60] for e in s["elements"] if e["label"].startswith("Workspace")])
