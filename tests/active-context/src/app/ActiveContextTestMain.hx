@@ -60,6 +60,10 @@ class ActiveContextTestMain {
 		require(defaultKey != app.activeContext.key() && StringTools.endsWith(defaultKey, "/default") && !StringTools.endsWith(app.activeContext.key(), "/default"),
 			"a group with the workspace folder shares the root's context key: " + defaultKey + " vs " + app.activeContext.key());
 		require(app.activeContext.openSessionGroup("default", groups, first) && app.activeContext.key() == defaultKey, "the group's key changed between visits");
+		// Open in New Window on this group starts a window with --context=<this key>: the window must resolve it to the same context.
+		var opened = workspace.ContextKey.parse(workspace.ContextKey.make(app.activeContext.machineId, app.activeContext.contextWorkspaceId, "default"));
+		require(opened != null && opened.group == "default" && workspace.ContextKey.make(opened.machine, opened.workspace, opened.group) == defaultKey,
+			"a new window on the group would key it differently from the window it was opened from: " + defaultKey);
 		app.activeContext.useWorkspace();
 		// A workspace's folders come from its definition: Add Folder joins, opening another folder replaces the workspace.
 		var other = base + "/other"; FileSystem.createDirectory(other);
