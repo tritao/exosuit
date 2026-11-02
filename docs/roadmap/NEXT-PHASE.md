@@ -158,11 +158,14 @@ Phases 4–7 landed on `main` on 2026-11-01 (exosuit `757db3f1`, haxeon `fd2a332
 - **Workspaces take a long time to show as connected.** Not measured. Time it from launch and from opening a
   workspace to "Workspace connected" and to the catalog rows appearing (suit's `machine` reply, the manager start,
   the first CATALOG read), and find where the time goes.
-- **A click on a group row in the Workbench tree does not switch to the group.** It only expands or selects the row
-  (`WorkbenchPanel.tree.onItemClicked` opens sessions and terminals, `onActivate` leaves groups to the tree's toggle),
-  although Phase 7 says "selecting a group switches to it". A group is entered through the quick switch ("Switch
-  Workspace or Group...") or by opening one of its sessions. Found by `m19_switch_latency`. A group with no folder of its
-  own takes its parent's folder; Work, which has the workspace folder, shares the workspace root's context key.
+- **A click on a group row in the Workbench tree did not switch to the group.** Fixed (2026-11-02, `group-entry`): a
+  single click or Enter on a group row enters the group, on the open workspace's row its root; the chevron expands.
+  `m19_group_entry` failed before (the click only expanded) and passes. The note that Work shares the workspace
+  root's context key did not reproduce: the key is `machine/workspace/group id`, Work's key differs from the root's
+  and the two keep separate tabs (`m19_group_entry`, and a check in `tests/active-context`).
+- **The Workbench tree loses keyboard focus after an arrow key moves the selection.** A second arrow key does not move
+  it and Enter reaches no row, so keyboard entry of a group works only on the row that has focus. Seen by
+  `m19_group_entry` (marked KNOWN-BUG there). Not investigated.
 - No test exercises the agent manager's restart when the process that started it dies (`startDetached`).
 - `processAlive` always returns true on Windows.
 - The key-chords test runs only on Linux.

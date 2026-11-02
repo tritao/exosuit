@@ -6,7 +6,7 @@ per-context layouts) and suit. Read [EXECUTION.md](EXECUTION.md) first, and reco
 [STATUS.md](STATUS.md).
 
 Status (2026-11-01): Phases 1–7 are on `main` (exosuit `757db3f1`, haxeon `fd2a332c`). Phase 0 waits on the
-mobile-app review; Phase 7's budget is met for warm and cold switches inside a workspace (cross-workspace is not measured); Phases 8 and 9 are not started. Ten real-input
+mobile-app review; Phase 7's budget is met for warm and cold switches inside a workspace (cross-workspace is not measured); Phases 8 and 9 are not started. Eleven real-input
 GUI scenarios (`docs/benchmarks/perf-harness/gui_scenarios/m19_*.py`, run through `measure.ps1 -Drive`) cover
 Phases 3–7 on Windows. Open problems found after landing are in NEXT-PHASE.md under "M19 after landing".
 
@@ -123,7 +123,9 @@ Done 2026-10-29 (`a8ff1dc1`), except type-to-find and a PrintWindow capture of t
   shows its catalog; it no longer switches the window. Enter or a double click on a workspace row opens it.)
 - [ ] Keyboard: arrows, Enter to focus, type-to-find. The tree's accessibility labels name the workspace and
   group. (Arrows and Enter work, and Enter or a double click opens a row through `TreeView.onActivate`; type-to-find
-  is not built.)
+  is not built. A single click or Enter on a group row enters that group, on the open workspace's row its root; the
+  chevron expands. `m19_group_entry` drives it. After an arrow key the tree loses keyboard focus, so Enter after an
+  arrow reaches no row: see NEXT-PHASE.)
 - [ ] Tests: tree model unit tests (the `workbench-drag` and `sidebar-layout` style), and a PrintWindow capture of
   the tree. (`tests/workbench-tree` covers the projection, and real-input GUI scenarios drive the tree
   (`docs/benchmarks/perf-harness/gui_scenarios/m19_*.py`); there is no PrintWindow capture.)
@@ -280,8 +282,7 @@ Input to the first rendered frame that shows the new group, median / p90 / max:
 
 Both limits are met (2 frames; 100 ms). The switch itself is 0.5 ms warm and 1.2 ms cold; input to the context change
 is about 1 ms; the remaining 15 to 18 ms is the wait for the next frame. The end point is the end of the render, not
-the display's present, which is not measured. A click on a group row was not measured: it does not switch (see
-NEXT-PHASE). A switch to another workspace attaches the window to its service and is not covered.
+the display's present, which is not measured. A click on a group row enters the group and takes the same path; it was not measured separately. A switch to another workspace attaches the window to its service and is not covered.
 
 Acceptance: switching between groups in different workspaces is instant and swaps the tabs; switching back restores
 them exactly.
