@@ -5,10 +5,12 @@ Implements [ADR 0005](../architecture/0005-machines-and-workspaces.md) and
 per-context layouts) and suit. Read [EXECUTION.md](EXECUTION.md) first, and record evidence in
 [STATUS.md](STATUS.md).
 
-Status (2026-11-01): Phases 1–7 are on `main` (exosuit `757db3f1`, haxeon `fd2a332c`). Phase 0 waits on the
-mobile-app review; Phase 7's budget is met for warm and cold switches inside a workspace (cross-workspace is not measured); Phases 8 and 9 are not started. Eleven real-input
-GUI scenarios (`docs/benchmarks/perf-harness/gui_scenarios/m19_*.py`, run through `measure.ps1 -Drive`) cover
-Phases 3–7 on Windows. Open problems found after landing are in NEXT-PHASE.md under "M19 after landing".
+Status (2026-11-02): Phases 1–7 are on `main` (exosuit `757db3f1`, haxeon `fd2a332c`). Phase 8 and the fixes for
+what daily use found after landing are on branch `m19-after` (not pushed yet). Phase 7's budget is met for warm and
+cold switches inside a workspace; the switch across workspaces is not measured. Phase 0 waits on the mobile-app
+review and Phase 9 has not started; both wait on a decision. Eighteen real-input GUI scenarios
+(`docs/benchmarks/perf-harness/gui_scenarios/m19_*.py`, run through `measure.ps1 -Drive`) cover Phases 3–8 on
+Windows. Open problems are in NEXT-PHASE.md under "M19 after landing".
 
 ## Goal
 
@@ -256,7 +258,8 @@ them per context.
   until the stream catches up.
 - [x] Quick switch: a palette entry listing workspaces and groups, plus a key back to the last one.
 - [x] A budget, measured with the input-latency tools (`docs/benchmarks/input-latency`): click or key to first frame
-  of the new group ≤ 2 frames for a warm group, ≤ 100 ms for a cold one.
+  of the new group ≤ 2 frames for a warm group, ≤ 100 ms for a cold one. Met within a workspace (`m19_switch_latency`:
+  warm about 17 ms, one frame; cold 20 to 29 ms); the switch across workspaces is not measured.
 - [x] Tests: a per-context tab round trip across two workspaces (dirty buffers, carets, scroll kept).
 - [x] A capture measuring the switch.
 

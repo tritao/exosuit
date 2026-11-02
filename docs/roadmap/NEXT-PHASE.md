@@ -216,6 +216,10 @@ Phases 4–7 landed on `main` on 2026-11-01 (exosuit `757db3f1`, haxeon `fd2a332
   suit's orphan view is not covered.
 - `processAlive` (resolved): `AgentManagerNative.processAlive` opens the process, checks its exit status and that its image is the
   same runtime file name, so an exited manager or a reused id is not taken for a live one, on Windows too.
+- **A click on New Workspace… in the tree sometimes did nothing (fixed 2026-11-02).** `MachineClient.busy()` counted
+  the Workbench's periodic `machine` refresh (every 5 s, 1.5 s while a service starts), and the panel drops changes
+  while busy. `m19_workspaces_tree` failed twice at "timed out waiting for name prompt" on the final stack. `busy()` now
+  means a change is pending, and `refresh()` keeps at most one refresh queued.
 - The key-chords test runs only on Linux.
 - Phase 6: no test runs the catalog watch against two real services; `tests/workspace-catalog` uses fakes.
 - Phase 7: the click-to-frame budget is measured for the quick switch and Goto Previous (`m19_switch_latency`); the
