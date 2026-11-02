@@ -183,16 +183,12 @@ Phases 4–7 landed on `main` on 2026-11-01 (exosuit `757db3f1`, haxeon `fd2a332
   `m19_group_entry` failed before (the click only expanded) and passes. The note that Work shares the workspace
   root's context key did not reproduce: the key is `machine/workspace/group id`, Work's key differs from the root's
   and the two keep separate tabs (`m19_group_entry`, and a check in `tests/active-context`).
-- **The Workbench tree loses keyboard focus after a click or Enter on a row that switches context.** Cause: a switch
-  re-keys the whole workspace view, so every row node gets a new id and focus is dropped. Partly fixed (`group-entry`):
-  `TreeView.focusItem` gives the entered row focus on the build that creates it, and a switch from a row no longer
-  hands the keyboard to the editor (`UiWorkbenchHost.keepFocusOnSwitch`). Down, Down, Up, Enter now work after a
-  switch from Work to the root. Still open: in `m19_group_entry`, entering a context restored from its saved layout
-  (the root again, Work again; both have tabs) leaves no focus on the row, so Down and Enter reach nothing. A context
-  entered for the first time keeps focus. The editor does not take the focus (no editorResolved focus follows these
-  switches), so the row's own request is lost or consumed too early on that path; not found. The selection half is fixed:
-  the tree keeps its selection per context, so the re-keyed tree came back with the entered context's old selection (Work
-  after clicking the root), and `WorkbenchPanel.selectAfterEnter` now selects the entered row. The automation snapshot now has `focus` (label of the focused widget, `-` for none).
+- The Workbench tree keyboard focus after a switch from a row (resolved). A switch re-keys the window's views, so rows
+  get new ids. `TreeView.focusItem` asks for the row's focus when it is built; a context restored from its saved layout keeps
+  earlier rows and discards that build, so the id asked for never exists. The request now also carries the row's
+  accessibility label, and `UiContext` focuses the eligible node with that label when the id is gone. `m19_group_entry`'s
+  Enter check is a real check. `WorkbenchPanel.selectAfterEnter` keeps the selection on the entered row (the tree
+  keeps one selection per context).
 - **Open in New Window on the group Work (resolved).** The tree and quick switch key Work by its own id since the group-entry
   change, so the window's key and the `--context=` key of a new window on Work agree. `tests/active-context` checks that
   the key of a group with the workspace folder is stable, differs from the root's and survives the `--context` round trip.

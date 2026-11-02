@@ -65,8 +65,7 @@ def run(gui):
     gui.chord("enter")
     gui.shot("after-enter")
     gui.step("focus after Down: %s" % gui.snapshot().get("focus"))
-    gui.check("Enter enters the selected group", lambda s: s["state"]["context"] != root_key, 8, detail=lambda s: s["state"]["context"],
-              known_bug="a context restored from its saved layout (with tabs) leaves no keyboard focus on the entered row, so Down and Enter reach nothing (NEXT-PHASE)")
+    gui.check("Enter enters the selected group", lambda s: s["state"]["context"] != root_key, 8, detail=lambda s: s["state"]["context"])
     gui.shot("done")
 
 
