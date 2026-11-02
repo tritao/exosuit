@@ -66,8 +66,13 @@ class MachineClient {
 		enabled = SuitClient.current() != Off;
 	}
 
-	public function refresh():Void
+	public function refresh():Void {
+		// One queued refresh is enough; one already sent may predate the change this one asks about.
+		for (pending in queue)
+			if (pending.message.op == "machine")
+				return;
 		request({op: "machine"});
+	}
 
 	/** Creates a workspace with these folders, which may be none if it has a name; `done` gets it, or the error. */
 	public function create(name:Null<String>, folders:Array<String>, ?done:(Null<MachineWorkspace>, Null<String>) -> Void):Void
@@ -154,8 +159,15 @@ class MachineClient {
 	public function serviceTarget(workspace:MachineWorkspace):WorkspaceServiceTarget
 		return WorkspaceServiceTarget.forWorkspace(workspace.id, workspace.folders, scratchOf(workspace));
 
-	public function busy():Bool
-		return current != null || queue.length > 0;
+	/** A change to the workspaces is on its way. A pending `machine` refresh does not count: a change queues behind it. */
+	public function busy():Bool {
+		if (current != null && current.message.op != "machine")
+			return true;
+		for (request in queue)
+			if (request.message.op != "machine")
+				return true;
+		return false;
+	}
 
 	/** `removed`: the request deletes the workspace, otherwise the reply's workspace replaces what is known of it. */
 	function workspaceReply(done:Null<(Null<MachineWorkspace>, Null<String>) -> Void>, removed:Bool):(Null<Dynamic>, Null<String>) -> Void
