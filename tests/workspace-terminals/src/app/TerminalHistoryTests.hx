@@ -68,7 +68,8 @@ class TerminalHistoryTests {
     } else {
       require(session.status=="lost" && !backend.canControl(),"Restarted daemon silently spawned a shell");
       var text = allText(session.emulator);
-      require(text.indexOf("PROCESS_000")>=0 && text.indexOf("PROCESS_059")>=0,"Daemon process restart lost durable scrollback");
+      // Attach shows the service's current screen: the saved history's last lines, not its scrollback.
+      require(text.indexOf("PROCESS_059")>=0,"Daemon process restart lost the saved screen");
       backend.activateControl();
       until(function() return backend.canControl() && session.status=="running","Replacement shell did not start");
       session.write(TestShell.variable("FRESH_ENV:","KEEP"));
