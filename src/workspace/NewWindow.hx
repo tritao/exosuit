@@ -13,6 +13,8 @@ class NewWindow {
 	public static inline final ARGUMENT = "--context=";
 	public static inline final AUTOMATION_VARIABLE = "EXOSUIT_NEW_WINDOW_AUTOMATION_DIR";
 	static var opened = 0;
+	/** The longest `open` blocked its caller, in seconds: the spawn runs on the frame that asked. */
+	public static var slowestOpen:Float = 0;
 
 	/** Set by `haxeon run --live`'s host (LiveHost) in the process it starts: the application module it runs and its entry class. */
 	public static inline final LIVE_MODULE_VARIABLE = "HAXEON_LIVE_MODULE";
@@ -48,6 +50,7 @@ class NewWindow {
 
 	/** Starts the window; null when it started, else why not. */
 	public static function open(key:String):Null<String> {
+		var began = Sys.time();
 		try {
 			var program = Sys.programPath();
 			var configured = Sys.getEnv(AUTOMATION_VARIABLE);
@@ -55,6 +58,7 @@ class NewWindow {
 			var child = sys.io.Process.spawn(Sys.executablePath(), arguments(program, key, Sys.getEnv(LIVE_MODULE_VARIABLE), Sys.getEnv(LIVE_ENTRY_VARIABLE)),
 				Sys.getCwd(), keys, values, true);
 			child.close();
+			slowestOpen = Math.max(slowestOpen, Sys.time() - began);
 			return null;
 		} catch (error:Dynamic)
 			return "Could not start another window: " + Std.string(error);

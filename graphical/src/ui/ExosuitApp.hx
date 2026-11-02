@@ -1982,9 +1982,8 @@ class ExosuitApp implements DesktopUiApplication {
 						starting: startingWorkspaces.exists(entry.id), catalog: mirror});
 				}
 		}
-		var own = suit.SuitClient.windowIdentity();
 		return {machine: state, error: machine.error, openWorkspace: open, openRoots: application.savedWorkspaces.roots(),
-			windows: [for (focus in machine.windows) if (focus.window != own) focus],
+			windows: otherWindows(),
 			revision: machine.revision, watched: pool == null ? null : watchedStates,
 			watchRevision: (pool == null ? 0 : pool.revision()) + startingRevision};
 	}
@@ -2129,6 +2128,10 @@ class ExosuitApp implements DesktopUiApplication {
 		else { pendingContextTarget = target; pendingContextTargetUntil = Sys.time() + CONTEXT_TARGET_SECONDS; applyPendingContextTarget(false); }
 	}
 
+	/** The focus of every editor window but this one. */
+	function otherWindows():Array<suit.WindowFocus>
+		return machineClient == null ? [] : suit.WindowFocus.WindowFocuses.others(machineClient.windows, suit.SuitClient.windowIdentity());
+
 	/** Starts another editor window on a workspace, or on one of its groups (Open in New Window). */
 	function openContextInNewWindow(workspaceId:String, group:Null<String>):Void {
 		var failure = workspace.NewWindow.open(workspace.ContextKey.make(application.activeContext.machineId, workspaceId, group == null ? "" : group));
@@ -2219,7 +2222,7 @@ class ExosuitApp implements DesktopUiApplication {
 			notifications: [for (entry in host.getNotifications().history()) entry.source + ": " + entry.message],
 			sidebar: sidebar.activeId, contextTab: Std.string(contextTab), workspaceStatus: workspaceStatus, workspaceError: workspaceError, timeline: workspace.client.ConnectTimeline.snapshot(), watched: [for (id => w in watchedStates) {workspace: id, running: w.running, live: w.live, starting: w.starting, hasCatalog: w.catalog != null, groups: w.catalog == null ? -1 : w.catalog.groupList().length, terminals: w.catalog == null ? -1 : w.catalog.terminalList().length}],
 			commandViewActive: host.isCommandViewActive(),
-			windowId: suit.SuitClient.windowIdentity(), otherWindows: machineClient == null ? [] : [for (focus in machineClient.windows) if (focus.window != suit.SuitClient.windowIdentity()) {window: focus.window, pid: focus.pid, context: focus.context}],
+			windowId: suit.SuitClient.windowIdentity(), otherWindows: otherWindows(), newWindowMs: Std.int(workspace.NewWindow.slowestOpen * 1000 * 10) / 10,
 			contextKind: Std.string(active.kind), layoutMode: layoutModes.current.id, railHidden: layoutModes.hiddenOnRail().copy(),
 			workbenchEmptyState: workbenchPanel != null && workbenchPanel.showsEmptyState()
 		};
