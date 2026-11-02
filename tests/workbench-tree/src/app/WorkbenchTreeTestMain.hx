@@ -18,6 +18,7 @@ import ui.WorkbenchMachineView;
 import ui.WorkbenchMachineView.WorkbenchWorkspaceState;
 import ui.WorkbenchRowKind;
 import workspace.client.WorkspaceCatalogMirror;
+import ui.WorkbenchPanel;
 import ui.WorkbenchRowKey;
 import ui.WorkbenchTreeModel;
 import workspace.service.WorkspaceAgentProtocol.AgentCatalog;
@@ -68,11 +69,26 @@ class WorkbenchTreeTestMain {
 		foreignProjection();
 		catalogThrottle();
 		emptyAndLoading();
+		emptyStateCountsRootItems();
 		suitOff();
 		workspaceRoot();
 		switching();
 		rendered();
 		Sys.println("workbench-tree: ok");
+	}
+
+	/** The "Nothing here yet" start is for a workspace with no group, terminal or session; sessions in the root count. */
+	static function emptyStateCountsRootItems():Void {
+		var root = "C:/work/resume";
+		var none:TerminalCatalog = {instance: "i", next: null, workspaceRoot: root, groups: [], terminals: []};
+		var noAgents:AgentCatalog = {instance: "i", root: root, status: "ready", next: null, records: []};
+		var rootSession:AgentCatalog = {instance: "i", root: root, status: "ready", next: null, records: [
+			{id: "a2", name: "Android live acceptance", group: null, cwd: root, thread: "", state: "idle", turn: null, workspaceRoot: root}]};
+		require(WorkbenchPanel.workspaceIsEmpty(none, noAgents), "a workspace with nothing is not empty");
+		require(WorkbenchPanel.workspaceIsEmpty(none, null), "agents not loaded yet should not hide the start");
+		require(!WorkbenchPanel.workspaceIsEmpty(none, rootSession), "a session in the workspace root does not count");
+		require(!WorkbenchPanel.workspaceIsEmpty(catalog(root), noAgents), "groups and terminals do not count");
+		require(!WorkbenchPanel.workspaceIsEmpty(null, noAgents), "an unloaded catalog is empty");
 	}
 
 	/** Workspaces in suit's order, then New Workspace…; groups (by order), then their terminals and sessions. */

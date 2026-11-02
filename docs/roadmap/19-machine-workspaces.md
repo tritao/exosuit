@@ -18,6 +18,8 @@ Phases 3–7 on Windows. Open problems found after landing are in NEXT-PHASE.md 
 - The Workbench is one tree: workspaces, then groups and sub-groups, then sessions and terminals. A dropdown above it
   chooses the machine.
 - Selecting a group switches to it instantly, and its open tabs come with it.
+- A group can be removed only when it is empty. Removing the group a window works in moves that window to the
+  workspace root and keeps its layout mode.
 - Several editor windows or instances can be open, each focused on its own workspace and group. Every window sees
   the whole machine, live.
 - Remote clients (the phone, octa) use the same model through suit, later.

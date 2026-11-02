@@ -156,8 +156,9 @@ Phases 4–7 landed on `main` on 2026-11-01 (exosuit `757db3f1`, haxeon `fd2a332
   showed "Nothing here yet. Sessions and terminals go in the workspace; groups sort them." with New group. At the
   same moment the Activity Rail's destinations (Files, Search, Changes, Remote, Extensions) came back to the left
   rail. The user expected neither. Not investigated; a guess is that the window left the group's context and the
-  layout mode (Agents layout moves those destinations to the right panel) changed with it. Check what removing the
-  focused group does to the context and the layout mode, and make the empty state count root items.
+  layout mode (Agents layout moves those destinations to the right panel) changed with it. Fixed on branch `group-remove`
+  (window moves to the root, the Agents layout stays, the empty state counts root sessions); the GUI scenario
+  `m19_group_remove` fails without the fix and passes with it.
 - **Workspaces take a long time to show as connected.** Not measured. Time it from launch and from opening a
   workspace to "Workspace connected" and to the catalog rows appearing (suit's `machine` reply, the manager start,
   the first CATALOG read), and find where the time goes.

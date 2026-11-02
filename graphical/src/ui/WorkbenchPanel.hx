@@ -1049,6 +1049,18 @@ class WorkbenchPanel implements View {
 		return new Row("workbench-header-actions", actions, toolbarStyle).build(context);
 	}
 
+	/** No group, terminal or session anywhere in the workspace: sessions and terminals in the workspace root count too. */
+	public static function workspaceIsEmpty(catalog:Null<TerminalCatalog>, agents:Null<WorkspaceAgentProtocol.AgentCatalog>):Bool {
+		if (catalog == null || catalog.groups.length != 0 || catalog.terminals.length != 0) return false;
+		return agents == null || agents.records.length == 0;
+	}
+
+	/** Whether the "Nothing here yet" start is on screen (a test seam for the automation snapshot). */
+	public function showsEmptyState():Bool {
+		var start = emptyState();
+		return start != null && workspaceIsEmpty(client.terminalCatalog(), client.agentService().agents());
+	}
+
 	/** What to do first when the Workbench has nothing: open a folder, or make the first group. */
 	function emptyState():Null<View> {
 		var catalog = client.terminalCatalog();
@@ -1063,7 +1075,7 @@ class WorkbenchPanel implements View {
 				new KeyedView("open", button)
 			], style);
 		}
-		if (catalog != null && catalog.groups.length == 0 && catalog.terminals.length == 0 && draft == null && client.canEditGroups()) {
+		if (workspaceIsEmpty(catalog, client.agentService().agents()) && draft == null && client.canEditGroups()) {
 			var button = new Button("New group", null, function() beginGroup({id: workspace.client.WorkspaceIds.create("group"),
 				name: "", cwd: null, revision: 0, parent: null, order: model.nextOrder(null)}, true), "workbench-first-group");
 			button.variant = ButtonVariant.Primary;
@@ -1074,12 +1086,6 @@ class WorkbenchPanel implements View {
 			], style);
 		}
 		return null;
-	}
-
-	/** Whether the "Nothing here yet" start is on screen (a test seam for the automation snapshot). */
-	public function showsEmptyState():Bool {
-		var catalog = client.terminalCatalog();
-		return catalog != null && emptyState() != null && catalog.groups.length == 0 && catalog.terminals.length == 0;
 	}
 
 	public function build(context:BuildContext):RenderNode {

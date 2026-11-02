@@ -144,6 +144,11 @@ class ExosuitApp implements DesktopUiApplication {
 	var machineRevision:Int = -1;
 	var lastTerminalCatalogRevision:Int = -1;
 	var workbenchPanel:Null<WorkbenchPanel>;
+	/** The catalog instance that last had a group (the Agents layout stays while that workspace is open). */
+	var agentsLayoutInstance:String = "";
+	/** Group ids the last complete catalog of `knownGroupsInstance` listed; a focused group that left it was removed. */
+	var knownGroupsInstance:String = "";
+	final knownGroups:Map<String, Bool> = [];
 
  var codexPoll:Float=0;
  var nextActiveCodexRead:Float=0;
@@ -3279,7 +3284,27 @@ class ExosuitApp implements DesktopUiApplication {
 	function syncLayoutService():Void {
 		var client = workbenchClient;
 		var catalog = client == null ? null : client.terminalCatalog();
-		layoutModes.setServiceAvailable(client != null && client.canReadTerminals() && catalog != null && catalog.groups.length > 0);
+		// The Agents layout belongs to a workspace that has groups. Once it had one, removing the last group does not
+		// take the layout (and the Activity Rail's destinations) away: the workspace still has its sessions.
+		if (client == null || catalog == null || !client.canReadTerminals()) { layoutModes.setServiceAvailable(false); return; }
+		var hasGroups = catalog.groups.length > 0;
+		if (hasGroups) agentsLayoutInstance = catalog.instance;
+		layoutModes.setServiceAvailable(hasGroups || catalog.instance == agentsLayoutInstance);
+		leaveRemovedGroup(client, catalog);
+	}
+
+	/** The group the window works in was removed (here or from another window): the window moves to the workspace root. */
+	function leaveRemovedGroup(client:Null<workspace.client.WorkspaceWorkbenchClient>, catalog:Null<workspace.service.WorkspaceTerminalProtocol.TerminalCatalog>):Void {
+		if (client == null || catalog == null || catalog.next != null || client != workbenchClient) return;
+		var active = application.activeContext;
+		if (catalog.instance == knownGroupsInstance && active.kind == workspace.ContextKind.Group && knownGroups.exists(active.id)) {
+			var present = false;
+			for (group in catalog.groups) if (group.id == active.id) present = true;
+			if (!present) { active.useWorkspace(); requestFrame(); }
+		}
+		knownGroupsInstance = catalog.instance;
+		knownGroups.clear();
+		for (group in catalog.groups) knownGroups.set(group.id, true);
 	}
 
 	/** Drain services without requesting a render merely because they are running. */
