@@ -126,6 +126,9 @@ class ExosuitApp implements DesktopUiApplication {
 	var presence:workspace.WindowPresence = new workspace.WindowPresence(function() return Sys.time(), function(key) suit.SuitClient.editorFocus(key));
 	/** The context a window opened by Open in New Window was asked for (`--context=`), until it is applied. */
 	var startContext:Null<workspace.ContextInfo>;
+	var presenceRevision = -1;
+	var presenceWorkspace:Null<String>;
+	var presenceMachine:Null<String>;
 	var machineClientRevision = -1;
 	var machineRefreshAt:Float = 0;
 	/** Catalog connections to every running workspace but the attached one, and the starter for idle ones (M19 Phase 6). */
@@ -3412,7 +3415,12 @@ class ExosuitApp implements DesktopUiApplication {
 			}
 		}
 		remoteFileSearch.update(Sys.time());
-		presence.focus(application.activeContext.key());
+		// O(1) per frame: the key (strings built and escaped) is made only when the context, workspace or machine id changed.
+		var shown = application.activeContext;
+		if (shown.revision != presenceRevision || shown.contextWorkspaceId != presenceWorkspace || shown.machineId != presenceMachine) {
+			presenceRevision = shown.revision; presenceWorkspace = shown.contextWorkspaceId; presenceMachine = shown.machineId;
+			presence.focus(shown.key());
+		}
 		presence.poll();
 		var workspaces = machineClient;
 		if (workspaces != null && workspaces.enabled) {

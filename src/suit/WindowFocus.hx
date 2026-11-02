@@ -13,7 +13,7 @@ typedef WindowFocus = {
 /** The `windows` field of a `machine` reply. Additive: an older suit sends none, an older editor ignores it. */
 class WindowFocuses {
 	/** The most windows a reply lists; more is junk. */
-	public static inline final LIMIT = 256;
+	public static inline final LIMIT = 64;
 
 	/** The reply's `windows`: entries that are malformed are left out, and a reply without the field has none. */
 	public static function decode(reply:Dynamic):Array<WindowFocus> {

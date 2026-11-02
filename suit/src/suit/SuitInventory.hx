@@ -125,7 +125,8 @@ class SuitInventory {
 			var started = Processes.started(record.pid);
 			if (started < 0 || started > 0 && !SuitClock.registeredAfterStart(started, record.registeredAt, record.version))
 				continue;
-			result.push({window: record.window, pid: record.pid, context: record.context});
+			if (result.length < WindowFocuses.LIMIT)
+				result.push({window: record.window, pid: record.pid, context: record.context});
 		}
 		result.sort(function(left, right) return Reflect.compare(left.window, right.window));
 		return result;
