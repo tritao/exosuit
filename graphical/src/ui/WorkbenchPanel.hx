@@ -1076,6 +1076,12 @@ class WorkbenchPanel implements View {
 		return null;
 	}
 
+	/** Whether the "Nothing here yet" start is on screen (a test seam for the automation snapshot). */
+	public function showsEmptyState():Bool {
+		var catalog = client.terminalCatalog();
+		return catalog != null && emptyState() != null && catalog.groups.length == 0 && catalog.terminals.length == 0;
+	}
+
 	public function build(context:BuildContext):RenderNode {
 		syncState();
 		var selected = groupFor(tree.selectedKey);
