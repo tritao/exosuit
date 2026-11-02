@@ -39,6 +39,11 @@ private class ReplayFixture {
   public final session:TerminalSession;
   var server:RpcConnection;
   public var snapshots = 0;
+  /** Continuation pages read after a snapshot's first page. */
+  public var snapshotPages = 0;
+  /** REPLAY requests from cursor 0: an attach that replays all history. */
+  public var replaysFromStart = 0;
+  final pages = new workspace.service.TerminalSnapshotPages();
   public var openedColumns = 0;
   public var openedRows = 0;
   public var replayRequests = 0;
@@ -51,11 +56,12 @@ private class ReplayFixture {
   var watched = false;
   var stamp = "";
   public var unwatches = 0;
-  public function new(legacy:Bool = false, limit:Int = 65536, requireGeometry:Bool = false, notifications:Bool = true) {
+  public function new(legacy:Bool = false, limit:Int = 65536, requireGeometry:Bool = false, notifications:Bool = true,
+      columns:Int = 80, rows:Int = 24) {
     this.notifications = notifications;
     this.legacy = legacy;
-    emulator = Emulator.open(80, 24, 1000, "xterm-256color", false);
-    log = new TerminalReplayLog(80, 24, limit);
+    emulator = Emulator.open(columns, rows, 1000, "xterm-256color", false);
+    log = new TerminalReplayLog(columns, rows, limit);
     endpoint = new ReplayEndpoint(null);
     connect();
     backend = new RpcTerminalBackend(function() return endpoint, "fixture", "/fixture", false, null, null, false, requireGeometry);
@@ -68,8 +74,9 @@ private class ReplayFixture {
     if (endpoint.connection != null) { endpoint.connection.close(); server.close(); }
     watched = false; stamp = "";
     var pair = MemoryTransport.pair(), clock = function() return Sys.time() * 1000;
-    endpoint.connection = new RpcConnection(pair.client, clock);
-    server = new RpcConnection(pair.server, clock);
+    // Production message limits: a large screen's snapshot must arrive in pages.
+    endpoint.connection = new RpcConnection(pair.client, clock, 262144, 32, 1048576);
+    server = new RpcConnection(pair.server, clock, 262144, 32, 1048576);
     server.register(WorkspaceTerminalProtocol.OPEN, function(r, c) { openedColumns = r.columns; openedRows = r.rows; watched = r.watch == true && notifications && !legacy; c.respond(info()); });
     server.register(WorkspaceTerminalProtocol.RESIZE, function(r, c) { resize(r.columns, r.rows); c.respond(info()); });
     server.register(WorkspaceTerminalProtocol.UNWATCH, function(r, c) { watched = false; unwatches++; c.respond(r); });
@@ -80,6 +87,7 @@ private class ReplayFixture {
     server.register(WorkspaceTerminalProtocol.SET_CONTROL, function(r, c) { controller = r.claim; c.respond(info()); });
     if (!legacy) server.register(WorkspaceTerminalProtocol.REPLAY, function(r, c) {
       replayRequests++;
+      if (r.cursor == 0) replaysFromStart++;
       if (r.cursor < log.startCursor) { c.fail({code:"replay_gap", message:"trimmed", ambiguous:false}); return; }
       var batch = log.read(r.cursor);
       var events = batch.events;
@@ -87,11 +95,25 @@ private class ReplayFixture {
         data:event.data, columns:event.columns, rows:event.rows}];
       c.respond({terminal:info(), events:events, next:batch.next, end:log.endCursor});
     });
-    server.register(WorkspaceTerminalProtocol.SNAPSHOT, function(_, c) {
-      snapshots++;
-      var value:TerminalScreenSnapshot = {terminal:info(), data:emulator.screenSnapshot()};
-      if (!legacy) value.cursor = log.endCursor;
-      c.respond(value);
+    var serving = server;
+    server.register(WorkspaceTerminalProtocol.SNAPSHOT, function(r, c) {
+      // Older daemons ignore paging and send the whole snapshot without a cursor.
+      if (legacy || r.token == null) {
+        snapshots++;
+        var value:TerminalScreenSnapshot = {terminal:info(), data:emulator.screenSnapshot()};
+        if (!legacy) value.cursor = log.endCursor;
+        c.respond(value);
+        return;
+      }
+      if (r.token == 0) {
+        snapshots++;
+        c.respond(pages.start(serving, "fixture", emulator.screenSnapshot(), info(), log.endCursor, Sys.time()));
+        return;
+      }
+      snapshotPages++;
+      var page = pages.next(serving, "fixture", r.token, r.offset == null ? 0 : r.offset, Sys.time());
+      if (page == null) c.fail({code:"snapshot_expired", message:"expired", ambiguous:false});
+      else c.respond(page);
     });
   }
   public function output(text:String):Void {
@@ -143,14 +165,31 @@ class TerminalReplayTests {
     atomic.output("prompt$ ");
     for (_ in 0...8) {
       atomic.step(false);
-      if (atomic.replayRequests > 0) break;
+      if (atomic.snapshots > 0) break;
     }
-    require(atomic.replayRequests > 0 && atomic.session.offset == 0 && !atomic.backend.isSynchronized(),
+    require(atomic.snapshots > 0 && atomic.session.offset == 0 && !atomic.backend.isSynchronized(),
       "RPC receipt exposed readiness before emulator application");
     atomic.session.pollEvents();
     require(atomic.backend.isSynchronized() && equal(atomic.emulator, atomic.session.emulator),
-      "Applied replay did not publish readiness");
+      "Applied snapshot did not publish readiness");
+    require(atomic.replaysFromStart == 0, "Attach replayed history from the start");
     atomic.close();
+
+    // A Claude Code screen on a wide window: its history was trimmed long ago and its snapshot does not fit one
+    // message. Attaching shows the service's current screen, then replays what follows.
+    var wide = new ReplayFixture(false, 65536, false, true, 277, 65);
+    wide.output(ClaudeScreen.history(4));
+    wide.output(ClaudeScreen.frame(277, 65, 1));
+    require(wide.log.startCursor > 0 && wide.emulator.screenSnapshot().length > 262144,
+      "Fixture did not trim history or fit the snapshot in one message");
+    wide.pump();
+    require(wide.backend.isSynchronized() && wide.backend.isAvailable() && wide.snapshots == 1 && wide.snapshotPages > 0,
+      "Large screen snapshot was not read in pages");
+    require(wide.replaysFromStart == 0 && equal(wide.emulator, wide.session.emulator),
+      "Attach after trimmed history did not show the current screen");
+    wide.output(ClaudeScreen.frame(277, 65, 2)); wide.pump();
+    require(equal(wide.emulator, wide.session.emulator), "Replay did not continue after the paged snapshot");
+    wide.close();
 
     var typing = new ReplayFixture(false, 65536, false, false);
     typing.output("prompt$ ");
@@ -257,7 +296,11 @@ class TerminalReplayTests {
     fixture.resize(25, 5); fixture.output("\r\nnext"); fixture.resize(80, 24);
     fixture.output("\x1b[?1049l"); fixture.pump();
     require(equal(fixture.emulator, fixture.session.emulator), "Alternate-screen replay diverged");
-    fixture.connect(); fixture.resize(30, 6); fixture.output("\r\nreconnected"); fixture.pump();
+    // Reattach takes a snapshot of the visible screen. Columns libtsm hid when the grid shrank are not in it, so
+    // attach at the size the view asks for before the service grid changes again.
+    fixture.connect(); fixture.pump();
+    require(fixture.replaysFromStart == 0 && equal(fixture.emulator, fixture.session.emulator), "Reattach did not show the current screen");
+    fixture.resize(30, 6); fixture.output("\r\nreconnected"); fixture.pump();
     require(equal(fixture.emulator, fixture.session.emulator), "Reconnect lost replay cursor or geometry");
     // Output history and geometry metadata are both bounded. Recover from a gap
     // using a coherent screen/cursor snapshot, then resume ordered replay.
@@ -276,29 +319,26 @@ class TerminalReplayTests {
     viewer.close();
 
     var exited = new ReplayFixture(false, 262144);
+    exited.pump();
     exited.output([for (_ in 0...100000) "z"].join("")); exited.state = "exited";
-    for (_ in 0...8) { if (exited.replayRequests > 0) break; exited.step(); }
-    require(!exited.backend.isSynchronized() && exited.session.status == "running" && exited.session.offset < exited.log.endOffset,
+    var exitReads = exited.replayRequests;
+    for (_ in 0...8) { if (exited.replayRequests > exitReads) break; exited.step(); }
+    require(exited.session.status == "running" && exited.session.offset < exited.log.endOffset,
       "Exit was delivered before the last replay batch");
     exited.pump();
     require(exited.backend.isSynchronized() && exited.session.status == "exited" && equal(exited.emulator, exited.session.emulator), "Exit lost trailing replay output");
     exited.close();
 
-    // A long history can contain many intermediate screens. None is ready to paint.
+    // A long history can contain many intermediate screens. Attach paints only the current one.
     var loading = new ReplayFixture(false, 262144);
     loading.output([for (_ in 0...30000) "p\r\n"].join("") + "\x1b[2J\x1b[Hprompt$ ");
-    for (_ in 0...12) {
-      loading.step();
-      if (loading.session.offset > 0) break;
-    }
-    require(loading.session.offset > 0 && loading.session.offset < loading.log.endOffset
-      && !loading.backend.isSynchronized(), "Partial history was exposed as a ready terminal");
     loading.pump();
-    require(loading.backend.isSynchronized() && equal(loading.emulator, loading.session.emulator),
-      "Final terminal screen did not replace intermediate history");
+    require(loading.backend.isSynchronized() && loading.session.offset == loading.log.endOffset
+      && loading.replaysFromStart == 0 && equal(loading.emulator, loading.session.emulator),
+      "Attach did not start from the current screen");
     loading.close();
 
-    var invalid = new ReplayFixture(); invalid.output("must not be applied"); invalid.corrupt = true;
+    var invalid = new ReplayFixture(); invalid.pump(); invalid.output("must not be applied"); invalid.corrupt = true;
     var refused = false;
     try invalid.pump() catch (_:Dynamic) refused = true;
     require(refused && invalid.session.offset == 0, "Out-of-order replay was partially applied");

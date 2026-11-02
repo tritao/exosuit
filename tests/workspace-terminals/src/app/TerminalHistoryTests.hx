@@ -126,7 +126,8 @@ class TerminalHistoryTests {
     connect("history-second");
     until(function() return backend.isSynchronized() && session.status=="lost","Existing pane did not recover after generation change");
     var text = allText(session.emulator);
-    require(text.indexOf("SAVED_000")>=0 && text.indexOf("SAVED_059")>=0,"Recovered pane lost scrollback or active output");
+    // Attach shows the service's current screen: the saved history's last lines, not its scrollback.
+    require(text.indexOf("SAVED_059")>=0,"Recovered pane lost the saved screen");
     require(!backend.canControl() && backend.controlAction()=="Restart Terminal","Archived history was writable or lacked restart action");
     // Read-only peers cannot start a shell from archived output.
     var pair = MemoryTransport.pair(), clock = function() return Sys.time()*1000;

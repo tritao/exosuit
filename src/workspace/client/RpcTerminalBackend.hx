@@ -403,7 +403,7 @@ class RpcTerminalBackend implements TerminalBackend {
         position = 0; replayCursor = 0;
         viewColumns = 0; viewRows = 0; streamColumns = 0; streamRows = 0;
         output = [TerminalEvent.resetReplay()];
-        snapshotOnly = false; snapshotPending = false; replayAfterResize = false;
+        snapshotOnly = false; snapshotPending = true; replayAfterResize = false;
         replayDirty = true; nextRead = 0;
       }
       instance = client.serviceGeneration();
@@ -438,8 +438,10 @@ class RpcTerminalBackend implements TerminalBackend {
           attached = true;
           eventDriven = info.notifications == true && releaseEvents != null;
           create = false;
+          // Every attach starts from the service's current screen; replay continues from its cursor.
+          snapshotPending = true;
           if (!observe(info)) return;
-          // Lifecycle follows drained replay, including when attaching after exit.
+          // Lifecycle follows the applied snapshot, including when attaching after exit.
         }, function(e) {
           if (!closed && connection == c) {
             pending = false;
