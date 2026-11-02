@@ -35,7 +35,7 @@ class WorkbenchPanel implements View {
 	final openAgent:String->Void;
 	/** A group action; null is the workspace root, for the actions that create in it ("new-agent", "new-terminal"). */
 	final edit:(Null<WorkspaceGroup>, String)->Void;
-	final openFolder:String->Void;
+	final openFolder:WorkspaceGroup->Void;
 	final terminalActions:TerminalRecord->Array<MenuItem>;
 	final requestFrame:Void->Void;
 	final showMenu:(Array<MenuItem>, UiEvent, Void->Bool)->Void;
@@ -106,7 +106,7 @@ class WorkbenchPanel implements View {
     var observedOpenRow:Null<String>;
 
 	public function new(client:WorkspaceWorkbenchClient, open:TerminalRecord->Bool, createTerminal:String->Void,
-		edit:(WorkspaceGroup, String)->Void, openFolder:String->Void, terminalActions:TerminalRecord->Array<MenuItem>, requestFrame:Void->Void,
+		edit:(WorkspaceGroup, String)->Void, openFolder:WorkspaceGroup->Void, terminalActions:TerminalRecord->Array<MenuItem>, requestFrame:Void->Void,
 		openAgent:String->Void, showMenu:(Array<MenuItem>, UiEvent, Void->Bool)->Void, attach:WorkspaceGroup->Void,
 		closeAgentTab:(String, String)->Void, createProvider:(String, String)->Void, canCreateAgent:Void->Bool, ?tooltipDelay:Void->Float) {
 		this.client = client; this.open = open; this.createTerminal = createTerminal; this.edit = edit;
@@ -701,7 +701,7 @@ class WorkbenchPanel implements View {
 				items.push(new MenuItem("group-order", "Change Sort Order…", function() edit(group, "order"), editable, null, moveSeparator));
 			}
 		}
-		if (cwd != null) items.push(new MenuItem("open-folder", "Open folder", function() openFolder(cwd), true, null, group != null));
+		if (cwd != null && group != null) items.push(new MenuItem("open-folder", "Open folder", function() openFolder(group), true, null, true));
 		var groupOwner = model.groupWorkspace(), newWindow = machine == null ? null : machine.openInNewWindow;
 		if (group != null && groupOwner != null && newWindow != null)
 			items.push(new MenuItem("group-new-window", "Open in New Window", function() newWindow(groupOwner, group.id), true));

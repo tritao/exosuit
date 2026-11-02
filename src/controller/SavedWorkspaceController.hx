@@ -23,6 +23,7 @@ class SavedWorkspaceController {
 	var savedContent:String = "";
 	public function new(app:Application) {
 		this.app = app;
+		app.activeContext.workspaceFolders = roots;
 		recents = new session.RecentWorkspaces(config.ConfigurationPaths.configurationRoot() + "/recent-workspaces.conf");
 		if (recents.error != null) app.reportError("workspace", recents.error);
 		if (!app.capabilities.supports(platform.HostCapability.Filesystem)) return;
@@ -76,11 +77,20 @@ class SavedWorkspaceController {
 			current != null ? current.name : machineId != null ? machineName : "Workspace", roots());
 		onChanged();
 	}
+	/** The workspace's name for the title bar: the saved or machine workspace the window is on; null for a plain folder. */
+	public function displayName():Null<String>
+		return current != null ? current.name + (dirty ? " *" : "") : machineId != null ? machineName : null;
+	/** The workspace the window is on: the saved workspace's id, else the adopted machine workspace's, else null (a plain folder). */
+	public function workspaceId():Null<String>
+		return current != null ? current.id : machineId;
 	public function roots():Array<String>
 		return current == null ? [for (project in app.workspace.projects) project.root] : current.roots.copy();
 	/** True while the window shows any workspace folder or a named workspace. */
 	public function isOpen():Bool return current != null || roots().length > 0;
-	public function hasRoot(folder:String):Bool return roots().indexOf(folder) >= 0;
+	public function hasRoot(folder:String):Bool {
+		for (root in roots()) if (workspace.PathKey.same(root, folder)) return true;
+		return false;
+	}
 	public function folderOpened(root:String):Void {
 		if (current != null && current.roots.indexOf(root) < 0) { current.roots.push(root); dirty = true; }
 		changed();
@@ -128,7 +138,7 @@ class SavedWorkspaceController {
 	}
 	public function addFolder(folder:String):Bool {
 		if (!available(folder)) { app.reportError("workspace", 'Folder is unavailable: "' + folder + '"'); return false; }
-		app.openArgument(folder); return true;
+		app.attachFolder(folder); return true;
 	}
 	public function removeFolder(folder:String):Void {
 		for (project in app.workspace.projects.copy()) if (project.root == folder) app.workspace.removeProject(project);

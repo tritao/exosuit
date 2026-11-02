@@ -55,6 +55,22 @@ class ActiveContextTestMain {
 		require(app.activeContext.openSessionGroup("default", groups, first) && app.activeContext.cwd == first, "default group did not use catalog root");
 		app.activeContext.useWorkspace();
 		require(app.activeContext.kind == ContextKind.Workspace && app.activeContext.roots.length == 2, "back lost saved workspace roots");
+		// A workspace's folders come from its definition: Add Folder joins, opening another folder replaces the workspace.
+		var other = base + "/other"; FileSystem.createDirectory(other);
+		app.savedWorkspaces.restore(workspace.SavedWorkspace.create("One root", [first]), "");
+		require(app.activeContext.roots.length == 1 && app.activeContext.roots[0] == first, "workspace did not start with its own folder");
+		app.attachFolder(other);
+		require(app.activeContext.roots.length == 2 && app.savedWorkspaces.current != null, "Add Folder did not join the workspace");
+		app.savedWorkspaces.removeFolder(other);
+		app.openArgument(other);
+		require(app.savedWorkspaces.current == null && app.activeContext.roots.length == 1 && app.activeContext.roots[0] == other,
+			"opening another folder joined the open workspace instead of replacing it: " + app.activeContext.roots.join(","));
+		app.savedWorkspaces.close(); app.openArgument(first);
+		app.savedWorkspaces.adoptMachineWorkspace("machine-ws", "Machine");
+		require(app.savedWorkspaces.workspaceId() == "machine-ws" && app.activeContext.roots.length == 1, "machine workspace was not adopted");
+		app.openArgument(other);
+		require(app.savedWorkspaces.workspaceId() == null && app.activeContext.roots.length == 1 && app.activeContext.roots[0] == other,
+			"opening another folder joined the adopted machine workspace: " + app.activeContext.roots.join(","));
 		app.shutdown();
 		trace("PASS: workspace default, coherent context event, independent group indexes, scoped search/build tasks and stale-result cancellation");
 		return 0;

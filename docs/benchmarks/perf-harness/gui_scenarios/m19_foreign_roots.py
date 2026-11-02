@@ -54,7 +54,8 @@ def run(gui):
     alpha_folder = [norm(os.path.join(fixture, "alpha"))]
     gui.check("Alpha's open projects are still just Alpha's folder", lambda s: [norm(r) for r in s["state"]["projectRoots"]] == alpha_folder, 10,
               detail=lambda s: {k: s["state"][k] for k in ("filesRoots", "contextRoots", "projectRoots")})
-    gui.check("the title still names Alpha", lambda s: s["state"]["title"] == "Alpha", 10, detail=lambda s: s["state"]["title"])
+    # The window is in the group's context now, whose title is the group's name.
+    gui.check("the title names Alpha or its group, not Gamma", lambda s: s["state"]["title"] in ("Alpha", "Work"), 10, detail=lambda s: s["state"]["title"])
     gui.shot("after-open-folder")
     # The group's folder is outside Alpha's, so it shows in the panel while the group is focused (Phase 5); the window
     # must work in Alpha's own folders again once back at the workspace root.

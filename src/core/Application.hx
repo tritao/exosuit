@@ -217,17 +217,24 @@ class Application {
 	public function openArgument(path:String):Null<View> {
 		if (StringTools.endsWith(path, ".exosuit-workspace")) { savedWorkspaces.open(path); return null; }
 		if (FileSystem.isDirectory(path)) {
-			var normalized = workspace.fileSystem.normalize(path);
-			var projectSettings = settings.forProject(ConfigurationPaths.projectSettings(normalized));
-			var project = workspace.addProject(normalized, projectSettings.current.excludedNames);
-			project.setSettings(projectSettings);
-			scm.discover(normalized, _ -> {});
-			configuration.apply(projectSettings.current);
-			recentProjects.add(normalized);
-			savedWorkspaces.folderOpened(normalized);
+			// Opening a folder that is not one of the open workspace's replaces it; Add Folder (attachFolder) joins it.
+			if (savedWorkspaces.workspaceId() != null && !savedWorkspaces.hasRoot(workspace.fileSystem.normalize(path))) savedWorkspaces.close();
+			attachFolder(path);
 			return null;
 		}
 		return open(path);
+	}
+
+	/** Adds a folder to the open projects; with a workspace open it becomes one of the workspace's folders. */
+	public function attachFolder(path:String):Void {
+		var normalized = workspace.fileSystem.normalize(path);
+		var projectSettings = settings.forProject(ConfigurationPaths.projectSettings(normalized));
+		var project = workspace.addProject(normalized, projectSettings.current.excludedNames);
+		project.setSettings(projectSettings);
+		scm.discover(normalized, _ -> {});
+		configuration.apply(projectSettings.current);
+		recentProjects.add(normalized);
+		savedWorkspaces.folderOpened(normalized);
 	}
 
 	public function add(document:Document):View

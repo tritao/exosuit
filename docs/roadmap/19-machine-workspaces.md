@@ -286,6 +286,12 @@ NEXT-PHASE). A switch to another workspace attaches the window to its service an
 Acceptance: switching between groups in different workspaces is instant and swaps the tabs; switching back restores
 them exactly.
 
+A window's folders are its workspace's own. The right panel, the context's roots and the title bar come from the open
+workspace's folders (`SavedWorkspaceController.roots()`), never from whichever projects happen to be open. A tab or tree
+row of another workspace belongs to that workspace's context: opening it switches the window to that workspace. Opening a
+folder that is not one of the workspace's replaces the workspace (the machine workspace that holds exactly that folder
+opens in its place); only Add Folder and Attach Folder add one. "Open folder" on a group focuses the group's context.
+
 ## Phase 8: many windows and instances in parallel
 
 - [x] Each window registers with suit (it already does) with its focused workspace and group, so the tree can show

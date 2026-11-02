@@ -210,7 +210,11 @@ class GraphicalMain {
 					instance.application.reportError("workspace", Std.string(failure));
 			}
 			instance.startInContext(startContext);
-			for (index in 1...openPaths.length) instance.application.openArgument(openPaths[index]);
+			// Folders given on the command line join the restored workspace, as they always did.
+			for (index in 1...openPaths.length) {
+				if (sys.FileSystem.exists(openPaths[index]) && sys.FileSystem.isDirectory(openPaths[index])) instance.application.attachFolder(openPaths[index]);
+				else instance.application.openArgument(openPaths[index]);
+			}
 			if (openTerminal) instance.openTerminal();
 			if (openTerminalBrowser) instance.openWorkspaceTerminals();
 			if (openWorkbench) instance.showSidebarMode("workbench");

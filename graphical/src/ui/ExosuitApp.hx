@@ -1561,7 +1561,7 @@ class ExosuitApp implements DesktopUiApplication {
 		layoutModes.suspend();
 		workbenchClient = client;
 		workbenchPanel = new WorkbenchPanel(client, openCatalogTerminal, newGroupedTerminal, editWorkspaceGroup,
-			function(path) application.openArgument(path), catalogTerminalActions, requestFrame, openCodexAgent, showWorkbenchMenu,
+			focusGroupFolder, catalogTerminalActions, requestFrame, openCodexAgent, showWorkbenchMenu,
 			attachCodexThread, function(resource, workspaceRoot) host.closeAgentTabs(resource, workspaceRoot),
 			createProviderAgent, canCreateAgentSession, function() return application.settings.current.tabTooltipDelay);
 		workbenchPanel.onError = function(message) {
@@ -2289,6 +2289,19 @@ class ExosuitApp implements DesktopUiApplication {
 		var normal = workspace.client.MachineWorkspaces.normalPath;
 		if (project == null || normal(project.root) != normal(root)) openArgument(root);
 		requestFrame();
+	}
+
+	/**
+		Opening a folder while a workspace is open: the machine workspace that holds exactly this folder opens in its
+		place; the folder never joins the workspace. True when a workspace took it.
+	**/
+	function openFolderAsMachineWorkspace(path:String):Bool {
+		var currentId = application.savedWorkspaces.workspaceId(), machine = machineClient, actions = machineActions;
+		if (currentId == null || machine == null || !machine.enabled || actions == null) return false;
+		var found = machine.workspaceFor(application.workspace.fileSystem.normalize(path));
+		if (found == null) return false;
+		if (found.id != currentId) actions.open(found);
+		return true;
 	}
 
  function makeAgentTab(id:String,resource:String,root:String,title:String):UiAgentTab {
@@ -3876,10 +3889,20 @@ class ExosuitApp implements DesktopUiApplication {
 
 	/** The title bar's workspace name. */
 	function workspaceTitleText():String {
-		var savedWorkspace = application.savedWorkspaces.current;
 		if (application.activeContext.kind == workspace.ContextKind.Group) return application.activeContext.label;
-		return savedWorkspace == null ? (explorerRoot == null ? "" : haxe.io.Path.withoutDirectory(explorerRoot)) :
-			savedWorkspace.name + (application.savedWorkspaces.dirty ? " *" : "");
+		var named = application.savedWorkspaces.displayName();
+		if (named != null) return named;
+		return explorerRoot == null ? "" : haxe.io.Path.withoutDirectory(explorerRoot);
+	}
+
+	/**
+		"Open folder" on a group: the window works in that group's folder (its context), as a switch to the group does. It
+		never adds the folder to the open workspace, which keeps the folders it was given.
+	**/
+	function focusGroupFolder(group:workspace.service.WorkspaceProtocol.WorkspaceGroup):Void {
+		var client = workbenchClient, catalog = client == null ? null : client.terminalCatalog();
+		if (catalog != null) application.activeContext.openSessionGroup(group.id, catalog.groups, catalog.workspaceRoot);
+		requestFrame();
 	}
 
 	/** Folders the right panel's Files and Changes show: the Agents scope's folder, else the active context's roots. */
@@ -5191,6 +5214,7 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function openArgument(path:String):Void {
 		if (FileSystem.exists(path) && FileSystem.isDirectory(path)) {
+			if (openFolderAsMachineWorkspace(path)) return;
 			explorerRoot = application.workspace.fileSystem.normalize(path);
 			clearExplorerModel();
 			filesScroll.jumpTo(0, 0);
@@ -5220,6 +5244,10 @@ class ExosuitApp implements DesktopUiApplication {
 	function openFolderDialog():Void {
 		if (desktop == null) { application.workbench.openPathCommandView(true); requestFrame(); return; }
 		desktop.selectDirectory(function(accepted, paths) {
+			if (accepted && paths.length > 0 && openFolderAsMachineWorkspace(paths[0])) {
+				requestFrame();
+				return;
+			}
 			if (accepted && paths.length > 0) {
 				explorerRoot = application.workspace.fileSystem.normalize(paths[0]);
 				clearExplorerModel();

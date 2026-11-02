@@ -140,17 +140,13 @@ Live mode and suit:
 
 Phases 4–7 landed on `main` on 2026-11-01 (exosuit `757db3f1`, haxeon `fd2a332c`). Open:
 
-- **The right panel lists a folder the workspace does not have.** Seen in daily use: workspace `eon-series` (one
-  folder) showed "eon-series — 2 folders", with `projects\exosuit` first. The window's title still said
-  `resume-2026`, and its tabs came from three workspaces. The machine catalog, the workspace's `workspace.json` and
-  its catalog hold only `eon-series`. Cause found so far: `ActiveContext` takes the workspace's roots from every open
-  project (`src/workspace/ActiveContext.hx`, the `workspace.subscribe` callback), not from the open workspace's
-  folders, and `contextRoots()` in `ExosuitApp` starts from those roots. What opened `exosuit` as a project in that
-  window is not confirmed; a tab of another workspace is the suspect. Next: reproduce with a real-input scenario, then
-  take the panel's folders from the open workspace's own folders.
-- **The title bar names a workspace the window is not on.** In the same session the title said "resume-2026 ·
-  Workspace connected" while the tree marked `eon-series`, and later `exosuit`, as "this window". Likely the same
-  mixed window state as the item above.
+- **The right panel lists a folder the workspace does not have; the title names the wrong workspace.** Fixed on
+  branch `foreign-roots`: `ActiveContext` took its roots from every open project, `Application.openArgument` added
+  any folder to the open workspace (the group menu's "Open folder", the Machine view's attach, the toolbar's Open
+  Folder), and the title came from the last folder opened. Roots now come from the workspace's folders, opening
+  another folder replaces the workspace, "Open folder" on a group focuses the group, and the title names the open
+  (or adopted machine) workspace. The exact path that fired in the user's window was not seen; the scenario
+  `m19_foreign_roots` (group menu "Open folder") failed before the fix and passes after.
 - **Removing the "Work" group in `exosuit` left an empty-state message beside a session, and moved the Activity
   Rail.** After the group was removed, the workspace's root still held "Android live acceptance", yet the Workbench
   showed "Nothing here yet. Sessions and terminals go in the workspace; groups sort them." with New group. At the
