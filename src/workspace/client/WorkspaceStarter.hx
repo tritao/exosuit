@@ -39,6 +39,7 @@ private typedef Start = {
 	var deadline:Float;
 	var retryAt:Float;
 	var errors:String;
+	var output:String;
 	/** Launched at least once, so it holds a slot between BUSY retries. */
 	var launched:Bool;
 }
@@ -90,8 +91,11 @@ class WorkspaceStarter {
 			deadline: 0,
 			retryAt: 0,
 			errors: "",
+			output: "",
 			launched: false
 		};
+		ConnectTimeline.rearm("rows:" + target.workspace);
+		ConnectTimeline.mark("starter-queued", target.workspace);
 		starts.set(target.workspace, entry);
 		order.push(entry);
 	}
@@ -124,6 +128,7 @@ class WorkspaceStarter {
 			return;
 		}
 		entry.launched = true;
+		ConnectTimeline.mark("starter-launch", entry.target.workspace);
 		var began = Sys.time();
 		try {
 			var arguments = [launcher].concat(entry.target.managerArguments());
@@ -135,6 +140,7 @@ class WorkspaceStarter {
 			arguments.push("--detach");
 			arguments.push("--wire");
 			entry.errors = "";
+			entry.output = "";
 			var make = spawn, manager = processes;
 			if (make != null)
 				entry.process = make(entry.target, root);
@@ -154,6 +160,7 @@ class WorkspaceStarter {
 		entry.process = null;
 		if (process != null)
 			process.release();
+		ConnectTimeline.mark("starter-done", entry.target.workspace, failure);
 		entry.done(failure);
 	}
 
@@ -180,7 +187,7 @@ class WorkspaceStarter {
 				continue;
 			}
 			entry.errors += process.readStderr();
-			process.readStdout();
+			entry.output += process.readStdout();
 			if (now >= entry.deadline) {
 				finish(entry, "The workspace service did not start in time");
 				continue;
@@ -188,6 +195,7 @@ class WorkspaceStarter {
 			if (process.running())
 				continue;
 			entry.errors += process.readStderr();
+			entry.output += process.readStdout();
 			var code = process.exitStatus();
 			if (code == 0)
 				finish(entry, null);

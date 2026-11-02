@@ -1843,6 +1843,7 @@ class ExosuitApp implements DesktopUiApplication {
 		// its scratch folder, which is asked for first so the service can be started there. Otherwise a workspace with
 		// no folders opens its scratch folder as a folder.
 		var open = function(entry:suit.MachineCatalog.MachineWorkspace):Void {
+			workspace.client.ConnectTimeline.mark("open-workspace", entry.id, entry.name);
 			if (workspace.client.WorkspaceServiceTarget.enabled() && entry.folders.length == 0) {
 				machine.scratch(entry.id, function(path, failure) {
 					if (report(failure, entry.id) || path == null) return;
@@ -1899,6 +1900,7 @@ class ExosuitApp implements DesktopUiApplication {
 			start: function(entry) {
 				var starter = workspaceStarter;
 				if (starter == null || starter.starting(entry.id)) return;
+				workspace.client.ConnectTimeline.mark("start-requested", entry.id, entry.name);
 				var begin = function():Void {
 					var known = machine.workspaceById(entry.id);
 					var target = machine.serviceTarget(known == null ? entry : known);
@@ -1975,6 +1977,7 @@ class ExosuitApp implements DesktopUiApplication {
 				for (entry in state.workspaces) {
 					var service = machine.serviceOf(entry.id), watch = pool.watchOf(entry.id);
 					var mirror = pool.mirrorOf(entry.id);
+					if (mirror != null) workspace.client.ConnectTimeline.markOnce("rows:" + entry.id, "rows-visible", entry.id, "other");
 					watchedStates.set(entry.id, {running: service != null && service.running, live: watch != null && watch.live,
 						starting: startingWorkspaces.exists(entry.id), catalog: mirror});
 				}
@@ -2010,6 +2013,16 @@ class ExosuitApp implements DesktopUiApplication {
 				services.push({workspace: entry.id, endpoint: service.endpoint, pid: service.pid, running: service.running});
 		}
 		pool.sync(state.id, services, attached, [for (entry in state.workspaces) entry.id]);
+	}
+
+	/** The name the ConnectTimeline files the attached workspace under: its id once the attachment knows it. */
+	function currentWorkspaceName():String {
+		var attached = workspaceAttachment;
+		if (attached != null && Std.isOfType(attached, workspace.client.LocalWorkspaceClient)) {
+			var local:workspace.client.LocalWorkspaceClient = cast attached;
+			return local.timelineName();
+		}
+		return "";
 	}
 
 	/** The machine workspace attached in this window: the open saved workspace, else the one whose only folder is open. */
@@ -2195,7 +2208,7 @@ class ExosuitApp implements DesktopUiApplication {
 			panes: panes,
 			sessionLines: host.sessionLines(),
 			notifications: [for (entry in host.getNotifications().history()) entry.source + ": " + entry.message],
-			sidebar: sidebar.activeId, contextTab: Std.string(contextTab), workspaceStatus: workspaceStatus, workspaceError: workspaceError, watched: [for (id => w in watchedStates) {workspace: id, running: w.running, live: w.live, starting: w.starting, hasCatalog: w.catalog != null, groups: w.catalog == null ? -1 : w.catalog.groupList().length, terminals: w.catalog == null ? -1 : w.catalog.terminalList().length}],
+			sidebar: sidebar.activeId, contextTab: Std.string(contextTab), workspaceStatus: workspaceStatus, workspaceError: workspaceError, timeline: workspace.client.ConnectTimeline.snapshot(), watched: [for (id => w in watchedStates) {workspace: id, running: w.running, live: w.live, starting: w.starting, hasCatalog: w.catalog != null, groups: w.catalog == null ? -1 : w.catalog.groupList().length, terminals: w.catalog == null ? -1 : w.catalog.terminalList().length}],
 			commandViewActive: host.isCommandViewActive(),
 			windowId: suit.SuitClient.windowIdentity(), otherWindows: machineClient == null ? [] : [for (focus in machineClient.windows) if (focus.window != suit.SuitClient.windowIdentity()) {window: focus.window, pid: focus.pid, context: focus.context}],
 			contextKind: Std.string(active.kind), layoutMode: layoutModes.current.id, railHidden: layoutModes.hiddenOnRail().copy(),
@@ -3458,7 +3471,10 @@ class ExosuitApp implements DesktopUiApplication {
 			if (failure != null && failure != workspaceError) application.reportError("workspace", failure);
 			workspaceError = failure;
 			var label = attachment.statusLabel();
+			if (workbenchClient != null && workbenchClient.terminalCatalog() != null)
+				workspace.client.ConnectTimeline.markOnce("rows:" + currentWorkspaceName(), "rows-visible", currentWorkspaceName(), "own");
 			if (workspaceStatus != label) {
+				workspace.client.ConnectTimeline.mark("status", currentWorkspaceName(), label);
 				workspaceStatus = label;
 				requestFrame();
 			}

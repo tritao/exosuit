@@ -192,6 +192,7 @@ class MachineClient {
 				done(null, "suit is off (EXOSUIT_SUIT=off), so this machine has no workspaces");
 			return;
 		}
+		ConnectTimeline.mark("suit-queued", null, Std.string(message.op));
 		queue.push({message: message, answer: done});
 	}
 
@@ -243,6 +244,7 @@ class MachineClient {
 
 	function begin(request:MachineRequest, now:Float):Void {
 		current = request;
+		ConnectTimeline.mark("suit-begin", null, Std.string(request.message.op));
 		failure = null;
 		sent = false;
 		transport = null;
@@ -269,6 +271,7 @@ class MachineClient {
 	function finish(reply:Null<Dynamic>):Void {
 		var request = current;
 		var problem:Null<String> = null;
+		ConnectTimeline.mark("suit-reply", null, (request == null ? "" : Std.string(request.message.op)) + (reply == null ? " none" : " ok"));
 		if (reply == null)
 			problem = failure != null ? failure : "suit did not answer";
 		else if (reply.ok != true)

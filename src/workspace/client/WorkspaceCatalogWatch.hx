@@ -82,6 +82,7 @@ class WorkspaceCatalogWatch {
 			return;
 		}
 		connection = established;
+		ConnectTimeline.mark("watch-connected", ref.workspace);
 		reading = false;
 		dirty = false;
 		staging = null;
@@ -184,6 +185,7 @@ class WorkspaceCatalogWatch {
 			return;
 		}
 		live = true;
+		ConnectTimeline.mark("watch-live", ref.workspace, pages + " pages");
 		error = null;
 		retryDelay = RETRY_MIN_MS;
 		if (dirty)
