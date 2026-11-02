@@ -303,11 +303,17 @@ opens in its place); only Add Folder and Attach Folder add one. "Open folder" on
   palette "Open Current Workspace or Group in New Window", `--context=<key>`; the new window inherits the environment,
   so it shares the state folder and suit. Proven with real input by `m19_two_windows`: right-click Beta, Open in New
   Window, a second editor appears on Beta. Needs the haxeon detached-start fix for job objects that forbid breakaway.
-  Not run: `--live`, where `Sys.programPath()` is `live.hl`.)
-- [ ] **Tabs belong to the window.** Two windows on the same group each keep their own tabs, and both see the same
-  sessions live. Input to a session from one window shows in the other.
+  Under `run.py --live` `Sys.programPath()` is the live host, which takes the module, entry and arguments as JSON, so
+  the new window runs `LiveHost.hl <module> <entry> <json>`, with the module and entry from `HAXEON_LIVE_MODULE` and
+  `HAXEON_LIVE_ENTRY` that LiveHost sets. Proven: `m19_two_windows` passes 9/9 with `measure.ps1 -Live`
+  (`p8-two-windows-live`), and `tests/context-snapshots` checks both command lines.)
+- [x] **Tabs belong to the window.** Two windows on the same group each keep their own tabs, and both see the same
+  sessions live. Input to a session from one window shows in the other. (`m19_two_windows_tabs`, 10 checks: two windows
+  on one group open a1.txt and a2.txt and each keeps only its own; a terminal made in one is typed into in one window
+  and shows in the other, then the other window takes control, types, and the first shows it. Only one client controls
+  a terminal; the other is read-only until it takes control. Agent sessions were not run: they need credentials.)
 - [x] **Restore: the last write wins, per group.** (Storage and restore are built and tested headless
-  (`tests/context-snapshots`); no real-input scenario restarts the editor yet.)
+  (`tests/context-snapshots`); `m19_two_windows_restart` restarts the editor with real input, see Acceptance.)
   - A window saves a group's tab snapshot when it switches away from that group, when it closes, and periodically,
     so a crash loses little.
   - Snapshots are stored one file per `machine/workspace/group`, written atomically. Two windows therefore never
@@ -337,13 +343,18 @@ opens in its place); only Add Folder and Attach Folder add one. "Open folder" on
     the first save writes them out as files. The old lines stay in `session.conf` until it is next saved, so an older
     build still reads them; nothing is deleted.
   - Not built: reopening the focused context from its file when `session.conf` is missing.
-- [ ] The same file open in two windows: the existing file-safety rules (external change detection and save
-  conflicts) apply. Add a test.
-- [ ] suit's orphan rules and Quit already handle several editors. Check that per-workspace services stay up while
+- [x] The same file open in two windows: the existing file-safety rules (external change detection and save
+  conflicts) apply. (`tests/document-test`, `sameFileInTwoWindows`: two documents on one path; a save in one reloads
+  the clean other, makes the dirty other `Changed` and refuses its save until forced, and the forced save is a conflict
+  for the first in turn. The rules held. Two documents in one process stand for two windows: each window has its own
+  `Document`, and the check reads the file, so a second process behaves the same.)
+- [x] suit's orphan rules and Quit already handle several editors. Check that per-workspace services stay up while
   any window uses them. (Checked by code and by the last steps of `m19_two_windows`: after window 2 is killed, both
   workspaces' services still run. Nothing stops a service when an editor exits; only suit's Stop and Quit do. An
   editor claims every workspace it attached to for its whole life, so a service is orphaned only when no running
-  editor ever used it. Not run: Quit with several editors.)
+  editor ever used it. `scripts/test-suit.py` "workspace ids with several editors": two editors share w1's service,
+  one also uses w2's; after the second exits w1's service is kept and w2's is orphaned, and nothing is stopped by an
+  editor exiting; Quit with two editors stops the services and leaves editors that have no window to close.)
 - [x] Tests: two editor processes, different workspaces. Each sees the other's new group and session. Closing one
   leaves the other's services running. (`m19_two_windows`, 9 checks: markers in both trees, a group and terminal
   made in each window show in the other, window 2 killed leaves both services running and drops out of the list.
@@ -353,7 +364,10 @@ Acceptance:
 - Two windows work in parallel on different workspaces. Each sees all of the machine's state live, and neither
   disturbs the other's focus or tabs.
 - Two windows on the same group change their tabs differently and then close in order A, B. After a restart, the
-  window shows B's tabs for that group, and A's tabs for any group only A touched.
+  window shows B's tabs for that group, and A's tabs for any group only A touched. (Proven by
+  `m19_two_windows_restart`, 11 checks: A and B on Second; A opens a1.txt in Second, goes to Third and opens a3.txt;
+  B opens a2.txt in Second; Alt+F4 closes A, then B; a new editor on the same state opens on Second with a2.txt, and
+  Third has a3.txt. Run `p8-restart-8`.)
 - Killing a window mid-session loses at most the last periodic save.
 
 ## Phase 9: remote clients by workspace (ADR 0005 steps 6 and 7)

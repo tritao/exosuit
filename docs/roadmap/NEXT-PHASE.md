@@ -186,6 +186,14 @@ Phases 4–7 landed on `main` on 2026-11-01 (exosuit `757db3f1`, haxeon `fd2a332
 - **The Workbench tree loses keyboard focus after an arrow key moves the selection.** A second arrow key does not move
   it and Enter reaches no row, so keyboard entry of a group works only on the row that has focus. Seen by
   `m19_group_entry` (marked KNOWN-BUG there). Not investigated.
+- **Open in New Window on the group Work opens another context than the window's own.** Work has the workspace's
+  folder and is the workspace root's context in the window (quick switch, tree), but the new window gets
+  `--context=<machine/workspace/work-id>`: a key of its own, so its tabs and snapshot file differ from the root's.
+  Found while writing `m19_two_windows_tabs`; that scenario and `m19_two_windows_restart` use groups with a key of
+  their own. Recorded before the group-entry fix, which keys Work by its own id in the tree and quick switch too; recheck.
+- `tests/document-test` stops on Windows at "Save As did not assign identity after successful persistence" (the
+  comparison of `untitled.path` and `FileSystem.fullPath(saveAsPath)`); it did before this work. Checks after it in that
+  file do not run there.
 - No test exercises the agent manager's restart when the process that started it dies (`startDetached`).
 - `processAlive` always returns true on Windows.
 - The key-chords test runs only on Linux.
