@@ -166,7 +166,8 @@ class WorkspaceStarter {
 			var endpoint:LocalWorkspaceEndpoint = haxeon.wire.JsonWire.decode(entry.output);
 			ConnectTimeline.mark("starter-endpoint", entry.target.workspace);
 			callback(entry.target, endpoint);
-		} catch (_:Dynamic) {}
+		} catch (failure:Dynamic)
+			ConnectTimeline.mark("starter-endpoint-unreadable", entry.target.workspace, Std.string(failure));
 	}
 
 	function finish(entry:Start, failure:Null<String>):Void {

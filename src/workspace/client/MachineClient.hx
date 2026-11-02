@@ -58,7 +58,7 @@ class MachineClient {
 	final services:Map<String, MachineService> = [];
 	/** A service the editor started itself, until suit's listing names it: suit learns of a service some seconds after it is up. */
 	final provisional:Map<String, {service:MachineService, until:Float}> = [];
-	static inline final PROVISIONAL_SECONDS = 20000.0;
+	static inline final PROVISIONAL_MS = 20000.0;
 
 	public function new(events:EventPump, clock:Void->Float) {
 		hub = new NativeRpcHub(events);
@@ -359,7 +359,7 @@ class MachineClient {
 		var listed = services.get(id);
 		if (listed != null && listed.running || !WorkspaceConnections.validEndpoint(endpoint, Sys.systemName() == "Windows"))
 			return;
-		provisional.set(id, {service: {endpoint: endpoint, pid: pid, running: true}, until: clock() + PROVISIONAL_SECONDS});
+		provisional.set(id, {service: {endpoint: endpoint, pid: pid, running: true}, until: clock() + PROVISIONAL_MS});
 		ConnectTimeline.mark("service-noted", id);
 		revision++;
 	}
