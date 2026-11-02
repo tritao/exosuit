@@ -933,6 +933,10 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       var key = value.instance;
       for (group in value.groups) key += "|g:" + group.id + ":" + group.revision;
       for (record in records) key += "|t:" + record.id + ":" + record.revision + ":" + record.available;
+      if (catalog == null) {
+        var local = Std.downcast(endpoint, LocalWorkspaceClient);
+        ConnectTimeline.mark("catalog-first-read", local == null ? workspaceRoot : local.timelineName(), records.length + " terminals");
+      }
       catalog = value;
       // A refresh that clears an error must redraw even when the catalog itself is unchanged.
       var errorCleared = catalogError != null;

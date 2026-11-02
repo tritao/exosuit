@@ -114,6 +114,8 @@ class WorkspaceCatalogWatch {
 			dirty = false;
 		}
 		reading = true;
+		if (!continuing)
+			ConnectTimeline.mark("catalog-read", ref.workspace, mirror.token == null ? "first" : "again");
 		var staged = staging;
 		var resume = staged != null ? staged.token : mirror.token;
 		source.call(WorkspaceCatalogProtocol.CATALOG, {ref: ref, resume: resume, watch: true}, CALL_TIMEOUT, function(page) {
