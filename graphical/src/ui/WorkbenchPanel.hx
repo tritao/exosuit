@@ -1056,7 +1056,9 @@ class WorkbenchPanel implements View {
 				new KeyedView("open", button)
 			], style);
 		}
-		if (catalog != null && catalog.groups.length == 0 && catalog.terminals.length == 0 && draft == null && client.canEditGroups()) {
+		var agents = client.agentService().agents();
+		if (catalog != null && catalog.groups.length == 0 && catalog.terminals.length == 0
+			&& (agents == null || agents.records.length == 0) && draft == null && client.canEditGroups()) {
 			var button = new Button("New group", null, function() beginGroup({id: workspace.client.WorkspaceIds.create("group"),
 				name: "", cwd: null, revision: 0, parent: null, order: model.nextOrder(null)}, true), "workbench-first-group");
 			button.variant = ButtonVariant.Primary;
