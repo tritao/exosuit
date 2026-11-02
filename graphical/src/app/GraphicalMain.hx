@@ -98,6 +98,7 @@ class GraphicalMain {
 		var themeChoice = "system";
 		var titleOverride:Null<String> = null;
 		var openPaths:Array<String> = [];
+		var startContext:Null<String> = null;
 		for (argument in arguments) {
 			if (StringTools.startsWith(argument, "--input-script="))
 				inputScriptPath = argument.substring(15);
@@ -121,6 +122,8 @@ class GraphicalMain {
 				themeChoice = argument.substring(8);
 			else if (StringTools.startsWith(argument, "--title="))
 				titleOverride = argument.substring(8);
+			else if (StringTools.startsWith(argument, workspace.NewWindow.ARGUMENT))
+				startContext = workspace.NewWindow.contextOf([argument]);
 			else if (!StringTools.startsWith(argument, "--"))
 				openPaths.push(argument);
 		}
@@ -206,6 +209,7 @@ class GraphicalMain {
 				catch (failure:Dynamic)
 					instance.application.reportError("workspace", Std.string(failure));
 			}
+			instance.startInContext(startContext);
 			for (index in 1...openPaths.length) instance.application.openArgument(openPaths[index]);
 			if (openTerminal) instance.openTerminal();
 			if (openTerminalBrowser) instance.openWorkspaceTerminals();

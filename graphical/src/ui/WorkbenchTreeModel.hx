@@ -454,7 +454,7 @@ class WorkbenchTreeModel implements TreeViewModel {
 				var group = groups.get(row.id);
 				if (group != null) {
 					var owner = groupWorkspace();
-					return new WorkbenchGroupLabel(group.name, directory(group), workspaceRoot, owner == null ? null : owner.name);
+					return new WorkbenchGroupLabel(group.name, directory(group), workspaceRoot, owner == null ? null : owner.name, anotherWindow(owner == null ? null : owner.id, group.id));
 				}
 			case WorkbenchRowKind.Agent:
 				var a = agents.get(row.id);
@@ -475,7 +475,7 @@ class WorkbenchTreeModel implements TreeViewModel {
 				var group = foreignGroups.get(key);
 				if (group != null) {
 					var owner = workspaces.get(group.workspace);
-					return new WorkbenchGroupLabel(group.group.name, group.group.cwd, null, owner == null ? null : owner.name);
+					return new WorkbenchGroupLabel(group.group.name, group.group.cwd, null, owner == null ? null : owner.name, anotherWindow(group.workspace, group.group.id));
 				}
 			case WorkbenchRowKind.Agent:
 				var session = foreignSessions.get(key);
@@ -487,6 +487,16 @@ class WorkbenchTreeModel implements TreeViewModel {
 		return new Text("");
 	}
 
+	/**
+		Whether another editor window (not this one) has the workspace focused, or its group `group` when given
+		(M19 Phase 8). Suit lists every window's focus; this window's own is left out of the view.
+	**/
+	public function anotherWindow(workspaceId:Null<String>, ?group:String):Bool {
+		var view = machine;
+		if (view == null || view.windows == null || workspaceId == null) return false;
+		return suit.WindowFocus.WindowFocuses.elsewhere(view.windows, null, workspaceId, group).length > 0;
+	}
+
 	function machineItem(key:String):View {
 		var view = machine;
 		if (view == null) return new Text("");
@@ -496,7 +506,7 @@ class WorkbenchTreeModel implements TreeViewModel {
 			var entry = workspaces.get(id);
 			if (entry == null) return new Text("");
 			var watched = view.watched, state = watched == null ? null : watched.get(id);
-			return WorkbenchMachineLabel.workspace(entry, key == openRow, state);
+			return WorkbenchMachineLabel.workspace(entry, key == openRow, state, anotherWindow(id, null));
 		}
 		var error = view.error;
 		return switch WorkbenchRowKey.statusKind(key) {

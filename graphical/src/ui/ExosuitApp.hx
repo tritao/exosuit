@@ -122,6 +122,10 @@ class ExosuitApp implements DesktopUiApplication {
 	var machineClient:Null<workspace.client.MachineClient>;
 	var sessionFolderChooser:Null<SessionFolderChooser>;
 	var machineActions:Null<WorkbenchMachineActions>;
+	/** Tells suit which context this window shows, so other windows can mark it (M19 Phase 8). */
+	var presence:workspace.WindowPresence = new workspace.WindowPresence(function() return Sys.time(), function(key) suit.SuitClient.editorFocus(key));
+	/** The context a window opened by Open in New Window was asked for (`--context=`), until it is applied. */
+	var startContext:Null<workspace.ContextInfo>;
 	var machineClientRevision = -1;
 	var machineRefreshAt:Float = 0;
 	/** Catalog connections to every running workspace but the attached one, and the starter for idle ones (M19 Phase 6). */
@@ -1253,6 +1257,7 @@ class ExosuitApp implements DesktopUiApplication {
 		application.keymap.add(platform.Platform.KEY_ENTER, platform.Platform.MOD_CTRL, ["scm:commit"]);
 		application.commands.add("context:previous", function(_) switchToPreviousContext(), function(_) return previousContext() != null, "Goto Previous Workspace");
 		application.commands.add("context:switch", function(_) openContextSwitcher(), null, "Switch Workspace or Group…");
+		application.commands.add("context:new-window", function(_) openActiveContextInNewWindow(), function(_) return machineClient != null && machineClient.enabled, "Open Current Workspace or Group in New Window");
 		// The keymap takes platform key codes; UiKey.A (65) matches nothing, so these chords did nothing until now.
 		application.keymap.add(platform.Platform.KEY_D, platform.Platform.MOD_CTRL | platform.Platform.MOD_SHIFT, ["context:previous"]);
 		application.keymap.add(platform.Platform.KEY_A, platform.Platform.MOD_CTRL | platform.Platform.MOD_SHIFT, ["context:switch"]);
@@ -1938,7 +1943,8 @@ class ExosuitApp implements DesktopUiApplication {
 			},
 			remove: function(entry) machine.delete(entry.id, function(_, failure) {
 				if (!report(failure)) removeWorkspaceContexts(entry.id);
-			})
+			}),
+			openInNewWindow: function(entry, group) openContextInNewWindow(entry.id, group)
 		};
 		if (workbenchPanel != null) workbenchPanel.machine = machineActions;
 		requestFrame();
@@ -1959,7 +1965,9 @@ class ExosuitApp implements DesktopUiApplication {
 						starting: startingWorkspaces.exists(entry.id), catalog: mirror});
 				}
 		}
+		var own = suit.SuitClient.windowIdentity();
 		return {machine: state, error: machine.error, openWorkspace: open, openRoots: application.savedWorkspaces.roots(),
+			windows: [for (focus in machine.windows) if (focus.window != own) focus],
 			revision: machine.revision, watched: pool == null ? null : watchedStates,
 			watchRevision: (pool == null ? 0 : pool.revision()) + startingRevision};
 	}
@@ -2070,6 +2078,36 @@ class ExosuitApp implements DesktopUiApplication {
 			actions.open(known);
 		}
 		requestFrame();
+	}
+
+	/** The editor window `--context=` asked for: once suit lists the machine's workspaces, opens that workspace and group. */
+	public function startInContext(key:Null<String>):Void {
+		var parsed = key == null ? null : workspace.ContextKey.parse(key);
+		if (parsed != null) startContext = new workspace.ContextInfo(parsed.machine, parsed.workspace, parsed.group, "", "", "");
+	}
+
+	function applyStartContext():Void {
+		var target = startContext, machine = machineClient;
+		if (target == null || machine == null) return;
+		if (machine.machine == null) { if (machine.error != null) startContext = null; return; }
+		startContext = null;
+		if (machine.workspaceById(target.workspace) == null) { application.reportError("workspace", "This workspace is not on this machine."); return; }
+		var active = application.activeContext;
+		if (active.contextWorkspaceId != target.workspace) switchToContext(target);
+		else if (target.isRoot()) active.useWorkspace();
+		else { pendingContextTarget = target; pendingContextTargetUntil = Sys.time() + CONTEXT_TARGET_SECONDS; applyPendingContextTarget(false); }
+	}
+
+	/** Starts another editor window on a workspace, or on one of its groups (Open in New Window). */
+	function openContextInNewWindow(workspaceId:String, group:Null<String>):Void {
+		var failure = workspace.NewWindow.open(workspace.ContextKey.make(application.activeContext.machineId, workspaceId, group == null ? "" : group));
+		if (failure != null) application.reportError("workspace", failure);
+		requestFrame();
+	}
+
+	function openActiveContextInNewWindow():Void {
+		var active = application.activeContext;
+		openContextInNewWindow(active.contextWorkspaceId, active.kind == workspace.ContextKind.Group ? active.id : null);
 	}
 
 	/** Ctrl+Tab: back to the context used before this one. */
@@ -3373,6 +3411,8 @@ class ExosuitApp implements DesktopUiApplication {
 			}
 		}
 		remoteFileSearch.update(Sys.time());
+		presence.focus(application.activeContext.key());
+		presence.poll();
 		var workspaces = machineClient;
 		if (workspaces != null && workspaces.enabled) {
 			// Another window or suit's CLI may change the list; look again every few seconds while the Workbench shows it.
@@ -3394,6 +3434,7 @@ class ExosuitApp implements DesktopUiApplication {
 				}
 			}
 			if (starter != null) starter.poll();
+			applyStartContext();
 			applyPendingContextTarget(false);
 			if (machineClientRevision != workspaces.revision) {
 				machineClientRevision = workspaces.revision;

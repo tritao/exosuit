@@ -19,6 +19,10 @@ import ui.WorkbenchMachineView.WorkbenchWorkspaceState;
 
 /** The Workbench tree's machine rows: a workspace, a status line, New Workspace…. */
 class WorkbenchMachineLabel implements View {
+	/** The marker of a workspace or group another editor window has focused, and its tooltip. */
+	public static inline final OTHER_WINDOW = "another window";
+	public static inline final OTHER_WINDOW_TIP = "Open in another window";
+
 	final icon:Null<IconName>;
 	final text:String;
 	final detail:Null<String>;
@@ -32,14 +36,16 @@ class WorkbenchMachineLabel implements View {
 	}
 
 	/** The open workspace says so; its accessibility label names its folders, or that it has none. */
-	public static function workspace(entry:MachineWorkspace, open:Bool, ?state:WorkbenchWorkspaceState):WorkbenchMachineLabel {
+	public static function workspace(entry:MachineWorkspace, open:Bool, ?state:WorkbenchWorkspaceState, anotherWindow:Bool = false):WorkbenchMachineLabel {
 		var folders = entry.folders.length == 0 ? "no folders attached" : entry.folders.join(", ");
 		var marker = open ? "this window" : stateMarker(state);
 		var catalog = state == null ? null : state.catalog;
 		// A stopped workspace shows the attention it had when its service last ran, which is no longer true.
 		var attention = catalog == null || open || state == null || !state.running ? 0 : catalog.attention;
 		var shown = attention > 0 && marker != null ? marker + " · " + attention : marker;
+		if (anotherWindow) shown = shown == null ? OTHER_WINDOW : shown + " · " + OTHER_WINDOW;
 		var said = open ? ", open in this window" : marker == null ? "" : ", " + marker + (attention > 0 ? ", " + attention + " need attention" : "");
+		if (anotherWindow) said += ", " + OTHER_WINDOW_TIP.toLowerCase();
 		return new WorkbenchMachineLabel(open ? IconName.FolderOpen : IconName.FolderClosed, entry.name, shown,
 			"Workspace " + entry.name + said + " · " + folders, false, false);
 	}

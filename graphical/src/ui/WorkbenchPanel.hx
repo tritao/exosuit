@@ -270,6 +270,8 @@ class WorkbenchPanel implements View {
 		if (entry == null) return;
 		var target = entry;
 		var items = [new MenuItem("machine-workspace-open", "Open Workspace", function() actions.open(target), true)];
+		var newWindow = actions.openInNewWindow;
+		if (newWindow != null) items.push(new MenuItem("machine-workspace-new-window", row.kind == WorkbenchRowKind.Group ? "Open Group in New Window" : "Open in New Window", function() newWindow(target, row.kind == WorkbenchRowKind.Group ? row.id : null), true));
 		var owner = row.workspace;
 		showMenu(items, event, function() return model.workspaces.exists(owner));
 	}
@@ -305,6 +307,8 @@ class WorkbenchPanel implements View {
 		if (entry != null) {
 			var target = entry;
 			items.push(new MenuItem("machine-workspace-open", "Open", function() actions.open(target), key != model.openRow));
+			var newWindow = actions.openInNewWindow;
+			if (newWindow != null) items.push(new MenuItem("machine-workspace-new-window", "Open in New Window", function() newWindow(target, null), true));
 			var watching = watched(), state = watching == null ? null : watching.get(target.id);
 			if (state != null && !state.running && !state.starting && key != model.openRow)
 				items.push(new MenuItem("machine-workspace-start", "Start Service", function() actions.start(target), idle));
@@ -698,6 +702,9 @@ class WorkbenchPanel implements View {
 			}
 		}
 		if (cwd != null) items.push(new MenuItem("open-folder", "Open folder", function() openFolder(cwd), true, null, group != null));
+		var groupOwner = model.groupWorkspace(), newWindow = machine == null ? null : machine.openInNewWindow;
+		if (group != null && groupOwner != null && newWindow != null)
+			items.push(new MenuItem("group-new-window", "Open in New Window", function() newWindow(groupOwner, group.id), true));
 		if (group != null && client.agentService().canControlAgents())
 			items.push(new MenuItem("attach-codex", "Attach existing Codex thread…", function() attach(group)));
 		// Shown whenever the service can remove groups; disabled, with the reason, while this one still has contents.

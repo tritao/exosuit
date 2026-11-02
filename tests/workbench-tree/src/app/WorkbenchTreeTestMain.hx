@@ -377,5 +377,20 @@ class WorkbenchTreeTestMain {
 		model.update(catalog("C:/src/exosuit"), null, null, view(machineWorkspaces, "exo", ["C:/src/exosuit"]));
 		submit();
 		require(!tree.isExpanded("w:exo") && visible().join(",") == "w:exo,w:resume,w:eon,n:new-workspace", "collapse did not stick");
+		// Another window's focus marks its workspace and its group (M19 Phase 8); a window on a group marks the group and its workspace.
+		var withWindows = view(machineWorkspaces, "resume", ["C:/work/resume"]);
+		withWindows.windows = [{window: "w2", pid: 9, context: "m/eon/"}, {window: "w3", pid: 10, context: "m/resume/work"}];
+		model.update(catalog("C:/work/resume"), null, null, withWindows);
+		tree.setExpanded("w:resume", true);
+		submit();
+		text = labels();
+		require(text.indexOf("Workspace eon-series, open in another window · no folders attached") >= 0, "workspace in another window: " + text);
+		require(text.indexOf("Workspace resume-2026, open in this window, open in another window · C:/work/resume") >= 0, "a window on a group of a workspace marks the workspace too: " + text);
+		require(Lambda.exists(text, function(label) return StringTools.startsWith(label, "Group Work in workspace resume-2026") && StringTools.endsWith(label, ", open in another window")), "group in another window: " + text);
+		require(!Lambda.exists(text, function(label) return StringTools.startsWith(label, "Group Drafts") && label.indexOf("another window") >= 0), "an unfocused group is not marked: " + text);
+		model.update(catalog("C:/work/resume"), null, null, view(machineWorkspaces, "resume", ["C:/work/resume"]));
+		tree.setExpanded("w:resume", true);
+		submit();
+		require(!Lambda.exists(labels(), function(label) return label.indexOf("another window") >= 0), "no other window, no marker: " + labels());
 	}
 }
