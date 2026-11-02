@@ -55,6 +55,8 @@ class SuitClient {
 	static var writerStarted:Bool = false;
 	static var writerStop:Bool = false;
 	static final slotLock:sys.thread.Mutex = new sys.thread.Mutex();
+	/** Released by whoever leaves work in the slot (or stops the writer); the writer thread waits on it. */
+	static final wake:sys.thread.Lock = new sys.thread.Lock();
 
 	/**
 		This process's mode from its environment; `stateDir` is a workspace service's state directory, when
@@ -200,6 +202,7 @@ class SuitClient {
 		if (registeredKind == null)
 			return;
 		writerStop = true;
+		wake.release();
 		try {
 			var path = SuitRecords.path(SuitPaths.registry(), Sys.getPid());
 			if (FileSystem.exists(path))
@@ -247,21 +250,23 @@ class SuitClient {
 		slotLock.acquire();
 		pendingRecord = record;
 		slotLock.release();
+		wake.release();
 		if (writerStarted)
 			return;
 		writerStarted = true;
 		haxeon.Threads.create("exo.suit.writer", function() {
 			while (!writerStop) {
+				wake.wait();
+				if (writerStop)
+					break;
 				slotLock.acquire();
 				var next = pendingRecord;
 				pendingRecord = null;
 				slotLock.release();
-				if (next == null) {
-					Sys.sleep(0.05);
+				if (next == null)
 					continue;
-				}
 				try {
-					if (!writerStop && SuitPaths.prepare())
+					if (SuitPaths.prepare())
 						SuitRecords.write(SuitPaths.registry(), next);
 				} catch (_:Dynamic) {}
 			}
