@@ -79,6 +79,9 @@ class SourceControlPanel implements View {
 		model = new ScmTreeModel(source, theme, changed, mutationAction, this.trustAction);
 	}
 
+	/** Whether this panel shows `value` itself: a replacement source can carry the same identity. */
+	public function shows(value:ScmSource):Bool return source == value;
+
 	public function dispose():Void {
 		if (disposed) return;
 		disposed = true;

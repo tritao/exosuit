@@ -5437,7 +5437,9 @@ class ExosuitApp implements DesktopUiApplication {
 			return new Text(explorerRoot == null && contextScope() == null ? "Open a folder to view source control" : "Source control access is unavailable",
 				null, theme.tokens.textSecondary, new TextStyleOverride(null, 13.0, null, haxeon.ui.TextWrap.WordCharacter));
 		}
-		if (sourceControlPanelValue == null || sourceControlPanelIdentity != source.identity()) {
+		// Compare the source itself: the local source cache replaces a disposed source with one of the same identity, and a
+		// panel kept on the disposed one shows "disconnected" and "Loading repositories…" for good.
+		if (sourceControlPanelValue == null || sourceControlPanelIdentity != source.identity() || !sourceControlPanelValue.shows(source)) {
 			clearSourceControlPanel();
 			sourceControlPanelIdentity = source.identity();
 			sourceControlPanelValue = new SourceControlPanel(source, theme, function() {
