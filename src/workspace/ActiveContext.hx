@@ -1,6 +1,9 @@
 package workspace;
 
-/** Window-local scope. Selecting a tree row never changes this object. */
+/**
+	Window-local scope. Selecting a tree row never changes this object; entering one does: a click or Enter on a group row
+	(`focusGroup`) or on the open workspace's row (`useWorkspace`).
+**/
 class ActiveContext {
 	public var kind(default, null):ContextKind = ContextKind.Workspace;
 	public var id(default, null):String = "workspace";
@@ -17,6 +20,11 @@ class ActiveContext {
 	public static inline final RECENT_LIMIT = 32;
 	/** Called after `assignMachine` changed the id, so holders of saved contexts can re-key them. */
 	public var onMachineAssigned:String->Void = function(_) {};
+	/**
+		The open workspace's own folders. Set once a workspace definition owns them (SavedWorkspaceController); without
+		it the roots are the open projects. A project opened for another reason never becomes one of the workspace's roots.
+	**/
+	public var workspaceFolders:Null<Void->Array<String>>;
 	final workspace:Workspace;
 	final listeners:Array<Void->Void> = [];
 	final groupProjects:Map<String, Project> = [];
@@ -28,7 +36,8 @@ class ActiveContext {
 		this.workspace = workspace;
 		workspace.activeContext = this;
 		workspace.subscribe(function() {
-			workspaceRoots = [for (project in workspace.projects) project.root];
+			var owned = workspaceFolders;
+			workspaceRoots = owned != null ? owned() : [for (project in workspace.projects) project.root];
 			if (kind == ContextKind.Workspace && workspaceUpdateDepth == 0) publish(ContextKind.Workspace, workspaceId, workspaceLabel, workspaceRoots);
 		});
 		remember(new ContextInfo(machineId, workspaceId, "", workspaceLabel, workspaceLabel, cwd));

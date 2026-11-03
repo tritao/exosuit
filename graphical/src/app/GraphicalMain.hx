@@ -105,6 +105,7 @@ class GraphicalMain {
 		var themeChoice = "system";
 		var titleOverride:Null<String> = null;
 		var openPaths:Array<String> = [];
+		var startContext:Null<String> = null;
 		for (argument in arguments) {
 			if (StringTools.startsWith(argument, "--input-script="))
 				inputScriptPath = argument.substring(15);
@@ -128,6 +129,8 @@ class GraphicalMain {
 				themeChoice = argument.substring(8);
 			else if (StringTools.startsWith(argument, "--title="))
 				titleOverride = argument.substring(8);
+			else if (StringTools.startsWith(argument, workspace.NewWindow.ARGUMENT))
+				startContext = workspace.NewWindow.contextOf([argument]);
 			else if (!StringTools.startsWith(argument, "--"))
 				openPaths.push(argument);
 		}
@@ -183,6 +186,11 @@ class GraphicalMain {
 			}
 			return true;
 		};
+		if (devtools.SwitchTrace.enabled())
+			host.onFrameRendered = function() {
+				var current = app;
+				devtools.SwitchTrace.mark("R", current == null ? "-" : current.host.layoutContextKey);
+			};
 		session = DesktopUiHost.open(host, function(context) {
 			placementReader = context.windowPlacement;
 			var dark = prefersDark(themeChoice);
@@ -213,7 +221,12 @@ class GraphicalMain {
 				catch (failure:Dynamic)
 					instance.application.reportError("workspace", Std.string(failure));
 			}
-			for (index in 1...openPaths.length) instance.application.openArgument(openPaths[index]);
+			instance.startInContext(startContext);
+			// Folders given on the command line join the restored workspace, as they always did.
+			for (index in 1...openPaths.length) {
+				if (sys.FileSystem.exists(openPaths[index]) && sys.FileSystem.isDirectory(openPaths[index])) instance.application.attachFolder(openPaths[index]);
+				else instance.application.openArgument(openPaths[index]);
+			}
 			if (openTerminal) instance.openTerminal();
 			if (openTerminalBrowser) instance.openWorkspaceTerminals();
 			if (openWorkbench) instance.showSidebarMode("workbench");

@@ -140,32 +140,90 @@ Live mode and suit:
 
 Phases 4–7 landed on `main` on 2026-11-01 (exosuit `757db3f1`, haxeon `fd2a332c`). Open:
 
-- **The right panel lists a folder the workspace does not have.** Seen in daily use: workspace `eon-series` (one
-  folder) showed "eon-series — 2 folders", with `projects\exosuit` first. The window's title still said
-  `resume-2026`, and its tabs came from three workspaces. The machine catalog, the workspace's `workspace.json` and
-  its catalog hold only `eon-series`. Cause found so far: `ActiveContext` takes the workspace's roots from every open
-  project (`src/workspace/ActiveContext.hx`, the `workspace.subscribe` callback), not from the open workspace's
-  folders, and `contextRoots()` in `ExosuitApp` starts from those roots. What opened `exosuit` as a project in that
-  window is not confirmed; a tab of another workspace is the suspect. Next: reproduce with a real-input scenario, then
-  take the panel's folders from the open workspace's own folders.
-- **The title bar names a workspace the window is not on.** In the same session the title said "resume-2026 ·
-  Workspace connected" while the tree marked `eon-series`, and later `exosuit`, as "this window". Likely the same
-  mixed window state as the item above.
+- **The right panel lists a folder the workspace does not have; the title names the wrong workspace.** Fixed on
+  branch `foreign-roots`: `ActiveContext` took its roots from every open project, `Application.openArgument` added
+  any folder to the open workspace (the group menu's "Open folder", the Machine view's attach, the toolbar's Open
+  Folder), and the title came from the last folder opened. Roots now come from the workspace's folders, opening
+  another folder replaces the workspace, "Open folder" on a group focuses the group, and the title names the open
+  (or adopted machine) workspace. The exact path that fired in the user's window was not seen; the scenario
+  `m19_foreign_roots` (group menu "Open folder") failed before the fix and passes after.
 - **Removing the "Work" group in `exosuit` left an empty-state message beside a session, and moved the Activity
   Rail.** After the group was removed, the workspace's root still held "Android live acceptance", yet the Workbench
   showed "Nothing here yet. Sessions and terminals go in the workspace; groups sort them." with New group. At the
   same moment the Activity Rail's destinations (Files, Search, Changes, Remote, Extensions) came back to the left
   rail. The user expected neither. Not investigated; a guess is that the window left the group's context and the
-  layout mode (Agents layout moves those destinations to the right panel) changed with it. Check what removing the
-  focused group does to the context and the layout mode, and make the empty state count root items.
-- **Workspaces take a long time to show as connected.** Not measured. Time it from launch and from opening a
-  workspace to "Workspace connected" and to the catalog rows appearing (suit's `machine` reply, the manager start,
-  the first CATALOG read), and find where the time goes.
-- No test exercises the agent manager's restart when the process that started it dies (`startDetached`).
-- `processAlive` always returns true on Windows.
+  layout mode (Agents layout moves those destinations to the right panel) changed with it. Fixed on branch `group-remove`
+  (window moves to the root, the Agents layout stays, the empty state counts root sessions); the GUI scenario
+  `m19_group_remove` fails without the fix and passes with it.
+- **Workspaces take a long time to show as connected. Measured and mostly fixed (2026-11-02).** The editor keeps a
+  connect timeline (`src/workspace/client/ConnectTimeline.hx`, shown as `timeline` in the automation state; with
+  `EXOSUIT_CONNECT_LOG` set it also goes to stderr, and the launcher adds its own phases to the helper's exit event).
+  `m19_connect_time` runs four cases with real input and writes the times to `results.json`. Milliseconds. "Before" is
+  one run on a quiet machine (source checkout, isolated suit). "After" is the median and range of three runs of the
+  final stack (2026-11-02, a busier machine; the first run of a fresh state home, which has to build the identity cache
+  and start a cold manager, took 11600 to connect on launch and is the top of that range):
+
+  | Case | Before | After, median (range of 3) |
+  |---|---|---|
+  | Launch to "Workspace connected" (cold service) | 6600 | 4140 (3790 to 11620) |
+  | Launch to catalog rows | 6700 | 4240 (3910 to 11740) |
+  | Expand an idle workspace to its rows in the tree | 3800 to 10700 (varies with suit) | 2400 (2400 to 2660) |
+  | Double click an idle workspace to connected | 5800 | 2560 (2530 to 2590) |
+  | Double click an idle workspace to its own rows | not measured | 4070 (4070 to 4090) |
+  | Double click a running workspace to connected | 3000 | 1450 (1370 to 1480) |
+  | Double click a running workspace to its own rows | not measured | 1550 (1480 to 1600) |
+  | suit `machine` reply | 450 to 600 | 440 to 490 |
+
+  The first CATALOG read of the attached workspace is now a timeline event (`catalog-first-read`). It came 120 ms after
+  "Workspace connected" on launch (the Workbench is shown from the start), 1470 ms after it in "open" (connected at 2560,
+  first read at 4070), and 30 to 150 ms after it in "back".
+
+  Where the time went: (1) every launcher run in a source checkout hashed every source file for the build identity
+  (2.6 to 3 s) before printing its answer, so a discovery of a running service took 2.5 s and a cold start 3 s more;
+  the identity is now cached by file names, sizes and times and the listing does fewer lookups (about 0.8 s left, in
+  the file walk). (2) A service started from the tree was reached only when suit's next listing named it, 5 to 10 s
+  later; the window now connects to the endpoint the starter's launcher printed. Not changed: a cold manager still
+  takes about 2 s to come up and the discovery helper is still a process of its own (about 0.2 s).
+  The attached workspace's catalog rows do need the Workbench panel shown (confirmed): `ExosuitApp` calls
+  `refreshTerminals(false)` every tick only `if (sidebar.visible && sidebar.activeId == "workbench")`
+  (`ExosuitApp.hx` ~3440), and the client throttles it to one read per second; other triggers are a context menu on a
+  remote terminal, terminal creation and an explicit refresh. A hidden Workbench reads no catalog until it is shown.
+  Nothing in the code or commit message (`c0602eba`) says this is intended: it reads as a saving that was never
+  revisited. Not changed here (it affects what the tree and Agent Mode show for a workspace nobody is looking at).
+  The 1.5 s between "connected" and the first read in the "open" case, with the panel already shown, is not explained:
+  it is more than the one-second throttle. Needs a look at when the sidebar becomes active after a switch.
+  Remaining idea: walk the file list once per
+  state home per minute, or let the manager report its build identity, to drop the last 0.8 s.
+- **A click on a group row in the Workbench tree did not switch to the group.** Fixed (2026-11-02, `group-entry`): a
+  single click or Enter on a group row enters the group, on the open workspace's row its root; the chevron expands.
+  `m19_group_entry` failed before (the click only expanded) and passes. The note that Work shares the workspace
+  root's context key did not reproduce: the key is `machine/workspace/group id`, Work's key differs from the root's
+  and the two keep separate tabs (`m19_group_entry`, and a check in `tests/active-context`).
+- The Workbench tree keyboard focus after a switch from a row (resolved). A switch re-keys the window's views, so rows
+  get new ids. `TreeView.focusItem` asks for the row's focus when it is built; a context restored from its saved layout keeps
+  earlier rows and discards that build, so the id asked for never exists. The request now also carries the row's
+  accessibility label, and `UiContext` focuses the eligible node with that label when the id is gone. `m19_group_entry`'s
+  Enter check is a real check. `WorkbenchPanel.selectAfterEnter` keeps the selection on the entered row (the tree
+  keeps one selection per context).
+- **Open in New Window on the group Work (resolved).** The tree and quick switch key Work by its own id since the group-entry
+  change, so the window's key and the `--context=` key of a new window on Work agree. `tests/active-context` checks that
+  the key of a group with the workspace folder is stable, differs from the root's and survives the `--context` round trip.
+- `tests/document-test` stops on Windows at "Save As did not assign identity after successful persistence" (the
+  comparison of `untitled.path` and `FileSystem.fullPath(saveAsPath)`); it did before this work. Checks after it in that
+  file do not run there.
+- Manager restart (resolved): `scripts/test-manager-owner-death.py` kills the process that started a detached manager, checks
+  the manager survives, kills the manager, and checks the next start replaces it; two starts at once agree on one manager.
+  suit's orphan view is not covered.
+- `processAlive` (resolved): `AgentManagerNative.processAlive` opens the process, checks its exit status and that its image is the
+  same runtime file name, so an exited manager or a reused id is not taken for a live one, on Windows too.
+- **A click on New Workspace… in the tree sometimes did nothing (fixed 2026-11-02).** `MachineClient.busy()` counted
+  the Workbench's periodic `machine` refresh (every 5 s, 1.5 s while a service starts), and the panel drops changes
+  while busy. `m19_workspaces_tree` failed twice at "timed out waiting for name prompt" on the final stack. `busy()` now
+  means a change is pending, and `refresh()` keeps at most one refresh queued.
 - The key-chords test runs only on Linux.
 - Phase 6: no test runs the catalog watch against two real services; `tests/workspace-catalog` uses fakes.
-- Phase 7: the click-to-frame budget and its capture through `docs/benchmarks/input-latency` are not done.
+- Phase 7: the click-to-frame budget is measured for the quick switch and Goto Previous (`m19_switch_latency`); the
+  cross-workspace switch, which attaches the window to another service, is not.
 - The hover crash fixed in haxeon `fd2a332c` (tooltips a patch builds) has no headless regression test; only the
   real-input scenarios cover it.
 - 9 of the 15 fixture-argument test projects fail on Windows as they did before (a hard-coded `/bin/sh`,

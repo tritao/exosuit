@@ -3,7 +3,7 @@ scenario starts with. Writes ENV.json (environment for the editor) and prints no
 
     python -I gui_fixture.py --root CHECKOUT --out RUNDIR --scenario NAME
 
-A scenario module may define FIXTURE = {"workspaces": ["alpha", "beta"], "open": "alpha"}: each name is a folder under
+A scenario module may define FIXTURE = {"workspaces": ["alpha", "beta"], "open": "alpha"} (and "env": {NAME: value} and "settings": {preference: value} for the editor): each name is a folder under
 RUNDIR/fixture holding a1.txt, a2.txt, ... and becomes a suit workspace called Alpha, Beta, ...; `open` is the folder
 the editor starts in. Nothing here touches the user's suit, agent state, scratch folders or sessions: every root is under
 RUNDIR, and suit runs in `isolated` mode with its own home."""
@@ -41,8 +41,14 @@ def main():
         "EXOSUIT_AGENT_STATE_HOME": str(out / "agent-state"), "EXOSUIT_SCRATCH_HOME": str(out / "scratch"),
         "EXOSUIT_AUTOMATION_DIR": str(out / "automation"),
     }
+    # A scenario may add variables: {out} is the run folder, {result} its result folder, {root} the checkout, {python} this interpreter.
+    for key, value in fixture.get("env", {}).items():
+        env[key] = (value.replace("{result}", str(out / "result")).replace("{out}", str(out))
+                    .replace("{root}", str(root)).replace("{python}", sys.executable))
     for key in ("state", "agent-state", "scratch", "result"):  # the app makes the automation folder itself, owner-only
         (out / key).mkdir(parents=True, exist_ok=True)
+    if fixture.get("settings"):  # preference values the editor starts with, e.g. {"workbench/agents/session_mode": "integrated"}
+        (out / "state" / "settings.json").write_text(json.dumps({"values": fixture["settings"]}))
     folders = {}
     for name in fixture["workspaces"]:
         folder = out / "fixture" / name

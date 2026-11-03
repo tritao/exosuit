@@ -1618,6 +1618,11 @@ class UiWorkbenchHost implements WorkbenchHost {
 			evicted = true;
 		}
 		if (evicted) pruneContextBookkeeping();
+		if (devtools.SwitchTrace.enabled()) {
+			var pinned = 0;
+			for (key => state in contextLayouts) if (!evictable(state)) pinned++;
+			devtools.SwitchTrace.mark("T", countWarm() + " " + pinned + " " + (evicted ? 1 : 0));
+		}
 	}
 
 	function restoreEvictedSelections(key:String):Void {
@@ -1706,6 +1711,9 @@ class UiWorkbenchHost implements WorkbenchHost {
 		for (pane in panes) if (!dockActions.model.isOpen(pane.id)) dockActions.model.open(pane.id);
 	}
 
+	/** Set around a switch the user made from a sidebar row: the editor does not take the keyboard from the row. */
+	public var keepFocusOnSwitch = false;
+
 	/** A context switch detaches views, never closes their documents or shells. */
 	public function switchContext(key:String):Void {
 		if (key == contextKey) return;
@@ -1744,7 +1752,7 @@ class UiWorkbenchHost implements WorkbenchHost {
 			restoreLayoutLines(lines == null ? defaultContextLines : lines, resolveContextDocument);
 			restoreEvictedSelections(key);
 		}
-		var editorFocused = dockActions.model.activePanelId == activePane.id;
+		var editorFocused = !keepFocusOnSwitch && dockActions.model.activePanelId == activePane.id;
 		pendingEditorFocus = editorFocused; focus.activate(editorFocused ? activeView() : null); notifyActiveTabChanged(); afterContextRestore(); requestFrame();
 		// Eviction follows the switch: the new context's first frame never waits for another one's teardown.
 		lastSwitchSeconds = Sys.time() - started;
@@ -1785,9 +1793,16 @@ class UiWorkbenchHost implements WorkbenchHost {
 				if (document != null) contextDocumentRefs.set(fields[7] + ":" + fields[8], document);
 			}
 		}
+		// The window that closed last saved its focused context in `lines`; a snapshot file for the same context is
+		// that window's own copy or older, so it does not replace `lines`.
+		var activeSaved = stored.activeKey == null || sameContextIgnoringMachine(migrateContextKey(stored.activeKey), contextKey);
 		var selected = pendingContextLayouts.get(contextKey);
 		pendingContextLayouts.remove(contextKey);
-		if (selected == null) selected = stored.activeKey == null || sameContextIgnoringMachine(migrateContextKey(stored.activeKey), contextKey) ? lines : defaultContextLines;
+		if (activeSaved) {
+			selected = lines;
+			for (key in [for (k in pendingContextLayouts.keys()) k]) if (sameContextIgnoringMachine(key, contextKey)) pendingContextLayouts.remove(key);
+		}
+		if (selected == null) selected = defaultContextLines;
 		restoreLayoutLines(selected, resolveContextDocument);
 		normalizeMachines();
 		pruneContextBookkeeping();

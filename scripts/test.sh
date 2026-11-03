@@ -83,6 +83,7 @@ run_test workspace-lifecycle
 check service-updates python3 "$root_dir/scripts/test-service-updates.py"
 check agent-idle python3 "$root_dir/scripts/test-agent-idle.py"
 check agent-machine python3 "$root_dir/scripts/test-agent-machine.py"
+check manager-owner-death python3 "$root_dir/scripts/test-manager-owner-death.py"
 check workspace-terminals python3 "$root_dir/scripts/test-workspace-terminals.py"
 check workspace-agents python3 "$root_dir/scripts/test-workspace-agents.py"
 check claude-agents python3 "$root_dir/scripts/test-claude-agents.py"
@@ -108,6 +109,7 @@ rm -rf "$terminal_context_state"
 run_test sidebar-layout
 run_test workbench-drag
 run_test workbench-tree
+run_test context-snapshots
 run_test remote-access-panel
 run_test browser-pairing-url
 

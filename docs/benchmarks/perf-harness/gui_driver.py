@@ -33,7 +33,7 @@ user32.GetAncestor.restype = wt.HWND
 
 VK = {"ctrl": 0x11, "shift": 0x10, "alt": 0x12, "enter": 0x0D, "return": 0x0D, "esc": 0x1B, "escape": 0x1B, "tab": 0x09,
       "up": 0x26, "down": 0x28, "left": 0x25, "right": 0x27, "home": 0x24, "end": 0x23, "delete": 0x2E, "backspace": 0x08,
-      "space": 0x20, "f2": 0x71, "f5": 0x74, "pageup": 0x21, "pagedown": 0x22}
+      "space": 0x20, "f2": 0x71, "f4": 0x73, "f5": 0x74, "pageup": 0x21, "pagedown": 0x22}
 for c in "abcdefghijklmnopqrstuvwxyz":
     VK[c] = ord(c.upper())
 for c in "0123456789":
@@ -41,6 +41,21 @@ for c in "0123456789":
 EXTENDED = {0x26, 0x28, 0x25, 0x27, 0x24, 0x23, 0x2E, 0x21, 0x22}
 KEYEVENTF_EXTENDEDKEY, KEYEVENTF_UNICODE, KEYEVENTF_KEYUP = 0x1, 0x4, 0x2
 MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP = 0x8, 0x10
+
+
+_counter = ctypes.c_int64()
+
+
+def qpc():
+    """QueryPerformanceCounter ticks: the clock of the input hook, NativeKit's NK_LATENCY_TRACE and the app's switch trace."""
+    kernel32.QueryPerformanceCounter(ctypes.byref(_counter))
+    return _counter.value
+
+
+def qpc_frequency():
+    frequency = ctypes.c_int64()
+    kernel32.QueryPerformanceFrequency(ctypes.byref(frequency))
+    return frequency.value
 
 
 class Failure(Exception):
@@ -59,6 +74,7 @@ class Gui:
         self.log_lines = []
         self.held_keys = []
         self.held_buttons = []
+        self.sent = []  # (kind, qpc, detail) taken just before each SendInput: sent.txt in the result folder
         driver.winmm.timeBeginPeriod(1)
         self.hwnd = self._find_window(time.time() + wait_window)
         self.focus()
@@ -269,6 +285,7 @@ class Gui:
         flags = {("left", True): driver.MOUSEEVENTF_LEFTDOWN, ("left", False): driver.MOUSEEVENTF_LEFTUP,
                  ("right", True): MOUSEEVENTF_RIGHTDOWN, ("right", False): MOUSEEVENTF_RIGHTUP}[(button, down)]
         i.u.mi = driver.MOUSEINPUT(0, 0, 0, flags, 0, 0)
+        self.sent.append(("up" if not down else "down", qpc(), button))
         driver.send(i)
 
     def drag(self, source, target, source_fy=0.5, target_fy=0.5, hold=0.25):
@@ -314,6 +331,7 @@ class Gui:
         i = driver.INPUT(type=driver.INPUT_KEYBOARD)
         flags = (0 if down else KEYEVENTF_KEYUP) | (KEYEVENTF_EXTENDEDKEY if vk in EXTENDED else 0)
         i.u.ki = driver.KEYBDINPUT(vk, user32.MapVirtualKeyW(vk, 0), flags, 0, 0)
+        self.sent.append(("keydown" if down else "keyup", qpc(), vk))
         driver.send(i)
 
     def type_text(self, text, delay=0.03):
@@ -393,6 +411,11 @@ class Gui:
         print("step: " + text, flush=True)
 
     def _save(self):
+        if self.sent:
+            with open(os.path.join(self.out, "sent.txt"), "w") as f:
+                f.write("# driver sends clock=qpc frequency=%d\n" % qpc_frequency())
+                for kind, ticks, detail in self.sent:
+                    f.write("%s %d %s\n" % (kind, ticks, detail))
         with open(os.path.join(self.out, "results.json"), "w") as f:
             json.dump({"results": self.results, "seconds": round(time.monotonic() - self.started, 1)}, f, indent=1)
 

@@ -296,6 +296,41 @@ def test_shared_workspace(fixture: Fixture, directory: Path) -> None:
     assert alive(manager) and alive(host), "--dry-run stopped something"
 
 
+def test_workspace_ids_with_several_editors(fixture: Fixture, directory: Path) -> None:
+    """M19 Phase 8: a workspace's service (keyed by workspace id) stays up while any editor uses it, an editor
+    exiting stops nothing, and Quit stops the services when asked and leaves editors that have no window to close."""
+    one, two = fixture.spawn(), fixture.spawn()
+    fixture.register(one.pid, "editor", roots=[], workspaces=["w1"])
+    fixture.register(two.pid, "editor", roots=[], workspaces=["w1", "w2"])
+    services = {}
+    for workspace in ("w1", "w2"):
+        service = fixture.spawn()
+        fixture.register(service.pid, "workspace-manager", workspace=workspace, root=None)
+        services[workspace] = service
+    listing = fixture.listing()
+    assert not any(find(listing, s.pid)["orphaned"] for s in services.values()), listing
+    two.kill(); two.wait()
+    listing = fixture.listing()
+    assert find(listing, services["w1"].pid)["orphaned"] is False, "w1's service lost its editor while another editor uses w1"
+    assert find(listing, services["w2"].pid)["orphaned"] is True, "w2's service is used by no running editor"
+    planned = fixture.suit("kill", "--orphans", "--dry-run")
+    assert f"{services['w2'].pid} workspace-manager: would stop" in planned and str(services["w1"].pid) not in planned, planned
+    assert all(alive(s) for s in services.values()) and alive(one), "an editor exiting, or --dry-run, stopped something"
+    one.kill(); one.wait()
+    listing = fixture.listing()
+    assert all(find(listing, s.pid)["orphaned"] for s in services.values()), listing
+    assert all(alive(s) for s in services.values()), "services stop only when asked, not when the last editor exits"
+    # Quit with several editors: the services stop, the editors (fixture processes without a window) are left alone.
+    third, fourth = fixture.spawn(), fixture.spawn()
+    fixture.register(third.pid, "editor", roots=[], workspaces=["w1"])
+    fixture.register(fourth.pid, "editor", roots=[], workspaces=["w2"])
+    assert "started" in fixture.suit("start", timeout=60)
+    assert "Quitting Exosuit" in fixture.suit("quit")
+    wait_until(lambda: not any(alive(s) for s in services.values()), 15, "quit left a workspace service running")
+    assert alive(third) and alive(fourth), "quit killed an editor that was not asked to close"
+    wait_until(lambda: "not running" in fixture.suit("status"), 30, "daemon did not exit after quit")
+
+
 def test_hosted_workspace(fixture: Fixture, directory: Path) -> None:
     """Services suit starts for a workspace it hosts are in use while hosting is on: not orphaned, and
     Terminate orphaned leaves them. Paused hosting makes them ordinary orphans again."""
@@ -710,6 +745,7 @@ def main() -> int:
         tests = [("registry and termination", lambda f: test_registry_and_termination(f, directory / "a")),
                  ("shared workspace", lambda f: test_shared_workspace(f, directory / "s")),
                  ("quit spares terminals", test_quit_spares_terminals),
+                 ("workspace ids with several editors", lambda f: test_workspace_ids_with_several_editors(f, directory / "i")),
                  ("hosted workspace", lambda f: test_hosted_workspace(f, directory / "h")),
                  ("late child", lambda f: test_late_child(f, directory / "l")),
                  ("ownership", lambda f: test_ownership(f, directory / "o")), ("daemon", test_daemon),

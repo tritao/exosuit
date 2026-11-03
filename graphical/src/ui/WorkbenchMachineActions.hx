@@ -20,4 +20,6 @@ typedef WorkbenchMachineActions = {
 	/** Asks which of the workspace's folders to detach, then detaches it. */
 	var detachFolder:MachineWorkspace->Void;
 	var remove:MachineWorkspace->Void;
+	/** Starts another editor window on the workspace, or on its group `group` (null for the workspace itself). */
+	@:optional var openInNewWindow:(MachineWorkspace, Null<String>)->Void;
 }

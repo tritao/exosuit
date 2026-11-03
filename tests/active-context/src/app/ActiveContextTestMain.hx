@@ -53,8 +53,41 @@ class ActiveContextTestMain {
 		require(app.activeContext.revision == revision, "reopening same group republished context");
 		require(!app.activeContext.openSessionGroup("missing", groups, first) && app.activeContext.id == "child", "missing group changed context");
 		require(app.activeContext.openSessionGroup("default", groups, first) && app.activeContext.cwd == first, "default group did not use catalog root");
+		// A group with the workspace's own folder is still a context of its own: keyed by id, never by folder.
+		var defaultKey = app.activeContext.key();
 		app.activeContext.useWorkspace();
 		require(app.activeContext.kind == ContextKind.Workspace && app.activeContext.roots.length == 2, "back lost saved workspace roots");
+		require(defaultKey != app.activeContext.key() && StringTools.endsWith(defaultKey, "/default") && !StringTools.endsWith(app.activeContext.key(), "/default"),
+			"a group with the workspace folder shares the root's context key: " + defaultKey + " vs " + app.activeContext.key());
+		require(app.activeContext.openSessionGroup("default", groups, first) && app.activeContext.key() == defaultKey, "the group's key changed between visits");
+		// Open in New Window on this group starts a window with --context=<this key>: the window must resolve it to the same context.
+		var opened = workspace.ContextKey.parse(workspace.ContextKey.make(app.activeContext.machineId, app.activeContext.contextWorkspaceId, "default"));
+		require(opened != null && opened.group == "default" && workspace.ContextKey.make(opened.machine, opened.workspace, opened.group) == defaultKey,
+			"a new window on the group would key it differently from the window it was opened from: " + defaultKey);
+		app.activeContext.useWorkspace();
+		// A workspace's folders come from its definition: Add Folder joins, opening another folder replaces the workspace.
+		var other = base + "/other"; FileSystem.createDirectory(other);
+		app.savedWorkspaces.restore(workspace.SavedWorkspace.create("One root", [first]), "");
+		require(app.activeContext.roots.length == 1 && app.activeContext.roots[0] == first, "workspace did not start with its own folder");
+		app.attachFolder(other);
+		require(app.activeContext.roots.length == 2 && app.savedWorkspaces.current != null, "Add Folder did not join the workspace");
+		app.savedWorkspaces.removeFolder(other);
+		app.openArgument(other);
+		require(app.savedWorkspaces.current == null && app.activeContext.roots.length == 1 && app.activeContext.roots[0] == other,
+			"opening another folder joined the open workspace instead of replacing it: " + app.activeContext.roots.join(","));
+		app.savedWorkspaces.close(); app.openArgument(first);
+		app.savedWorkspaces.adoptMachineWorkspace("machine-ws", "Machine", [first]);
+		require(app.savedWorkspaces.workspaceId() == "machine-ws" && app.activeContext.roots.length == 1, "machine workspace was not adopted");
+		// A project that got in some other way is not one of the adopted workspace's folders.
+		app.workspace.addProject(other);
+		require(app.savedWorkspaces.roots().length == 1 && app.savedWorkspaces.roots()[0] == first, "adopted workspace listed a foreign open project");
+		app.workspace.removeProject(app.workspace.projects[app.workspace.projects.length - 1]);
+		var renames = 0;
+		app.savedWorkspaces.onIdentityAssigned = function(_, _) renames++;
+		app.openArgument(other);
+		require(renames == 0, "leaving an adopted workspace renamed its contexts");
+		require(app.savedWorkspaces.workspaceId() == null && app.activeContext.roots.length == 1 && app.activeContext.roots[0] == other,
+			"opening another folder joined the adopted machine workspace: " + app.activeContext.roots.join(","));
 		app.shutdown();
 		trace("PASS: workspace default, coherent context event, independent group indexes, scoped search/build tasks and stale-result cancellation");
 		return 0;

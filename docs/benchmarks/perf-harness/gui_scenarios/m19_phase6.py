@@ -26,6 +26,10 @@ def run(gui):
     gui.click(gui.element("w:" + alpha), count=2)
     attached(gui, "Alpha")
     show_workbench(gui)
+    # Alpha's own rows appear after the connection: they push Beta's rows down, so a click aimed before that lands on another row.
+    gui.wait("Alpha's own rows are in the tree", lambda s: s["state"]["workspaceStatus"] == "Workspace connected" and
+             gui.find(s, pattern=r"^Group .* in workspace Alpha"), 30, settle=0.5)
+    show_workbench(gui)
     gui.check("Beta's row says running", lambda s: gui.find(s, pattern=r"^Workspace Beta, running"), 20,
               detail=lambda s: [e["label"][:40] for e in s["elements"] if e["label"].startswith("Workspace")])
     foreign_group = "f:g" + beta + "|" + work

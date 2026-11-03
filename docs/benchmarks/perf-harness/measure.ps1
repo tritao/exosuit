@@ -146,7 +146,7 @@ public static class PreviewWindowBounds {
 		$cfg = Get-Content (Join-Path $out 'ENV.json') -Raw | ConvertFrom-Json
 		foreach ($p in $cfg.env.PSObject.Properties) { Set-Item -Path "env:$($p.Name)" -Value $p.Value }
 		Note "driving $root with $Drive (isolated state under $out)"
-		$runArgs = @('scripts/run.py') + @($cfg.appArgs) + @($cfg.open)
+		$runArgs = @('scripts/run.py') + $(if ($Live) { @('--live') } else { @() }) + @($cfg.appArgs) + @($cfg.open)
 		$log = Join-Path $out 'run.log'
 		$state = @{ editor = $null; editorAt = 0; scenario = $null; stopped = $false }
 		$appPattern = [regex]::Escape(($root -replace '\\', '/')) + '/graphical/build[^/]*/host/'

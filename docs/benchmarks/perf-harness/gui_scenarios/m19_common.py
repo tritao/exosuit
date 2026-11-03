@@ -76,3 +76,12 @@ def show_workbench(gui):
         return
     gui.click(gui.element("Workbench", role="1"))
     gui.wait("Workbench tree visible", lambda s: gui.find(s, "n:new-workspace"), 5)
+
+
+def reveal(gui, parent_id, child_id):
+    """Makes the row of group `child_id` visible: selects its parent group's row and expands it with Right."""
+    if gui.find(gui.snapshot(), "g:" + child_id):
+        return
+    gui.click(gui.element("g:" + parent_id))
+    gui.chord("right")
+    gui.wait("row of group " + child_id, lambda s: gui.find(s, "g:" + child_id), 5)

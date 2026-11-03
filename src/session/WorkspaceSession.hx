@@ -24,8 +24,13 @@ class WorkspaceSession {
 	public final layout:Array<String> = [];
 	public final expanded:Array<String> = [];
 	public final scmCommitDrafts:Map<String, String> = [];
+	/** Layout lines of every context this window knows, the focused one included, by context key. Not in session.conf; see ContextSnapshotStore. */
+	public final contexts:Map<String, Array<String>> = [];
+	public var activeKey:String = "";
 
 	public function new() {}
+
+	static function contextLine(line:String):Bool return StringTools.startsWith(line, "Z\tcontext\t");
 
 	public static function capture(application:Application):WorkspaceSession {
 		var result = new WorkspaceSession();
@@ -49,7 +54,7 @@ class WorkspaceSession {
 			var active = view.getDocument();
 			if (active != null && active.hasBackingPath()) result.activeDocument = active.requirePath();
 		}
-		for (line in application.root.sessionLines()) result.layout.push(line);
+		result.takeLayout(application.root.sessionLines());
 		for (repositoryId in application.scmCommitDrafts.keys()) {
 			var message = application.scmCommitDrafts.get(repositoryId);
 			if (repositoryId != null && repositoryId.length > 0 && message != null)
@@ -58,7 +63,56 @@ class WorkspaceSession {
 		return result;
 	}
 
-	public function restore(application:Application, ?recovery:RecoveryStore):Void {
+	/**
+		Splits the host's session lines: per-context tabs (the focused context's included) go to `contexts`, to be
+		written one file each; `layout` keeps the window chrome and the focused context, which is session.conf.
+	**/
+	public function takeLayout(lines:Array<String>):Void {
+		var split = ContextLayoutStore.read(lines);
+		if (split.activeKey != null) activeKey = split.activeKey;
+		for (key in split.layouts.keys()) contexts.set(key, split.layouts.get(key));
+		var active:Array<String> = [];
+		for (line in lines) {
+			if (contextLine(line)) continue;
+			layout.push(line);
+			if (!StringTools.startsWith(line, "Z\t") && !StringTools.startsWith(line, "M\t")) active.push(line);
+		}
+		if (activeKey.length > 0 && ContextLayoutStore.complete(active)) contexts.set(activeKey, active);
+	}
+
+	/**
+		The layout lines to restore from: this file's own plus the context files. A context file wins over a context
+		line in session.conf with the same key. Context lines in session.conf (written before the files existed) are
+		migrated: kept when the folder has no files yet, or for keys no file has. The first save then writes them out.
+	**/
+	public function mergedLayout(store:Null<ContextSnapshotStore>):Array<String> {
+		if (store == null) return layout;
+		var snapshots = store.readAll(), byKey:Map<String, Bool> = [], result:Array<String> = [];
+		for (snapshot in snapshots) byKey.set(snapshot.key, true);
+		for (line in layout) {
+			if (contextLine(line) && snapshots.length > 0) {
+				var keys = [for (key in ContextLayoutStore.read([line]).layouts.keys()) key];
+				// A key in an older scheme (workspace:/group:) cannot be compared to a file's; the files are newer.
+				if (keys.length == 1 && (byKey.exists(keys[0]) || workspace.ContextKey.legacy(keys[0]))) continue;
+			}
+			result.push(line);
+		}
+		// Oldest first, so on a duplicate key the newest writer is read last.
+		snapshots.sort(function(a, b) return a.written < b.written ? -1 : a.written > b.written ? 1 : 0);
+		// No session.conf layout (it is gone or never had one): the newest file's context is the focus, and its lines
+		// are the focused layout as well as a context of their own.
+		var hasFocus = false;
+		for (line in result) if (StringTools.startsWith(line, "Z\tactive\t")) hasFocus = true;
+		if (!hasFocus && snapshots.length > 0) {
+			var newest = snapshots[snapshots.length - 1];
+			for (line in newest.lines) result.push(line);
+			result.push(ContextLayoutStore.activeLine(newest.key));
+		}
+		for (snapshot in snapshots) result.push(ContextLayoutStore.layoutLine(snapshot.key, snapshot.lines));
+		return result;
+	}
+
+	public function restore(application:Application, ?recovery:RecoveryStore, ?store:ContextSnapshotStore):Void {
 		for (repositoryId in [for (repositoryId in application.scmCommitDrafts.keys()) repositoryId])
 			application.scmCommitDrafts.remove(repositoryId);
 		for (repositoryId in scmCommitDrafts.keys()) {
@@ -75,11 +129,12 @@ class WorkspaceSession {
 		if (groupId.length > 0 && groupDirectory.length > 0) application.activeContext.focusGroup(groupId, groupLabel, groupDirectory);
 		// Populate the sidebar before restoring the saved dock selection and focus.
 		application.root.showProjectSidebar();
-		if (layout.length > 0) {
+		var merged = mergedLayout(store);
+		if (merged.length > 0) {
 			var snapshots:Map<String, RecoverySnapshot> = [], restored:Map<String, Document> = [];
 			if (recovery != null)
 				for (snapshot in recovery.load()) snapshots.set(snapshot.id, snapshot);
-			application.root.restoreSessionLines(layout, function(kind, reference) {
+			application.root.restoreSessionLines(merged, function(kind, reference) {
 				var cached = restored.get(kind + ":" + reference);
 				if (cached != null) return cached;
 				var document:Null<Document> = null;

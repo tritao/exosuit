@@ -7,6 +7,7 @@ import config.ConfigurationPaths;
 import core.Application;
 import core.WorkbenchHost;
 import recovery.RecoveryStore;
+import session.ContextSnapshotStore;
 import session.SessionPersistence;
 import session.WorkspaceSession;
 import workspace.Workspace;
@@ -37,9 +38,13 @@ class SessionController {
 		if (started) return;
 		var sessionPath = ConfigurationPaths.session();
 		var saved = WorkspaceSession.load(sessionPath);
-		if (saved != null) saved.restore(application, recovery);
+		var contexts = new ContextSnapshotStore(ConfigurationPaths.contexts());
+		contexts.onError = reportError;
+		// No session.conf but snapshot files: restore from the files, focusing the newest one.
+		if (saved == null && contexts.hasFiles()) saved = new WorkspaceSession();
+		if (saved != null) saved.restore(application, recovery, contexts);
 		for (diagnostic in recovery.diagnostics) reportError("recovery", diagnostic);
-		persistence = new SessionPersistence(sessionPath);
+		persistence = new SessionPersistence(sessionPath, contexts);
 		persistence.begin(application);
 		lastRecoverySave = Sys.time();
 		started = true;

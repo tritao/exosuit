@@ -21,8 +21,10 @@ class WorkbenchGroupLabel implements View {
 	final directory:Null<String>;
 	final root:Null<String>;
 	final workspaceName:Null<String>;
-	public function new(name:String, directory:Null<String>, root:Null<String>, ?workspaceName:String) {
-		this.name = name; this.directory = directory; this.root = root; this.workspaceName = workspaceName;
+	/** Another editor window has this group focused (M19 Phase 8). */
+	final anotherWindow:Bool;
+	public function new(name:String, directory:Null<String>, root:Null<String>, ?workspaceName:String, anotherWindow:Bool = false) {
+		this.name = name; this.directory = directory; this.root = root; this.workspaceName = workspaceName; this.anotherWindow = anotherWindow;
 	}
 	public function build(context:BuildContext):RenderNode {
 		var style = new LayoutStyle(); style.width = LayoutAxis.stretch(); style.childGap = 6;
@@ -33,15 +35,17 @@ class WorkbenchGroupLabel implements View {
 				haxeon.ui.core.TextStyleOverride.text(ExosuitPalette.WORKBENCH_TEXT_SIZE)))
 		];
 		if (directory != null) children.push(new KeyedView("directory", new MutedDirectory(shortDirectory(directory, root))));
+		if (anotherWindow) children.push(new KeyedView("window", new MutedDirectory(WorkbenchMachineLabel.OTHER_WINDOW)));
 		var row = new Row("workbench-group-label", children, style);
 		var tooltip = new haxeon.ui.widgets.overlays.Tooltip("group-directory-tooltip", row,
-			new Text(directory == null ? name : name + "\n" + directory), 0, 28);
+			new Text((directory == null ? name : name + "\n" + directory) + (anotherWindow ? "\n" + WorkbenchMachineLabel.OTHER_WINDOW_TIP : "")), 0, 28);
 		tooltip.requirePointerMovement = true;
 		tooltip.fillAnchor = true;
 		var node = tooltip.build(context);
 		node.semantics = new Semantics(AccessibilityRole.Text);
 		node.semantics.label = "Group " + name + (workspaceName == null ? "" : " in workspace " + workspaceName)
 			+ (directory == null ? "" : " · " + directory);
+		if (anotherWindow) node.semantics.label += ", " + WorkbenchMachineLabel.OTHER_WINDOW_TIP.toLowerCase();
 		return node;
 	}
 

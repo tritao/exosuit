@@ -134,6 +134,40 @@ class DocumentTestMain {
 		FileSystem.deleteFile(path);
 	}
 
+	/** M19 Phase 8: the same file open in two windows. Each window has its own Document on the path. A save in one is an
+		external change for the other: a clean copy reloads, a dirty copy refuses to save over it until forced, and the
+		first window then sees the second's forced save the same way. */
+	static function sameFileInTwoWindows(path:String, syntaxes:SyntaxRegistry):Void {
+		File.saveContent(path, "base
+");
+		Sys.sleep(2.1);
+		var a = Document.open(path, syntaxes), b = Document.open(path, syntaxes), aSelection = new BufferSelection(), bSelection = new BufferSelection();
+		a.insert(aSelection, "A ");
+		require(a.save() && File.getContent(path) == "A base
+", "window A could not save");
+		var seen = b.checkExternal();
+		require(seen == ExternalState.Current && b.buffer.text == "A base
+" && !b.dirty,
+			"window B did not reload A's save: " + Std.string(seen) + " " + haxe.Json.stringify(b.buffer.text) + " dirty=" + b.dirty);
+		b.insert(bSelection, "B ");
+		a.insert(aSelection, "again ");
+		require(a.save() && File.getContent(path) == "A again base
+", "window A's second save failed");
+		require(b.checkExternal() == ExternalState.Changed && b.dirty, "window B, dirty, did not see A's save as a conflict");
+		require(!b.save() && File.getContent(path) == "A again base
+", "window B overwrote A's save without being asked");
+		require(b.buffer.text == "B A base
+" && b.dirty, "a refused save changed window B's buffer");
+		require(b.save(true) && File.getContent(path) == "B A base
+", "window B's explicit overwrite failed");
+		require(b.checkExternal() == ExternalState.Current && !b.dirty, "window B stayed in conflict after its own save");
+		a.insert(aSelection, "late ");
+		require(a.checkExternal() == ExternalState.Changed && !a.save() && File.getContent(path) == "B A base
+",
+			"window A, dirty, overwrote B's save without being asked");
+		FileSystem.deleteFile(path);
+	}
+
 	/** A file opened in the background is read on another thread and delivered by poll: one load and one document
 		however many ask, a document already open at once, and a failure as an error. */
 	static function backgroundOpens(path:String, syntaxes:SyntaxRegistry):Void {
@@ -546,6 +580,7 @@ class DocumentTestMain {
 			"empty pathless recovery lost its unsaved state");
 		var arguments = Sys.args();
 		if (arguments.length > 0) {
+			sameFileInTwoWindows(arguments[0] + ".two-windows", syntaxes);
 			var saveAsPath = arguments[0] + ".save-as";
 			if (FileSystem.exists(saveAsPath)) FileSystem.deleteFile(saveAsPath);
 			var manager = new DocumentManager(syntaxes), untitled = manager.createUntitled(), untitledSelection = new BufferSelection();

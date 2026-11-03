@@ -122,6 +122,13 @@ class ExosuitApp implements DesktopUiApplication {
 	var machineClient:Null<workspace.client.MachineClient>;
 	var sessionFolderChooser:Null<SessionFolderChooser>;
 	var machineActions:Null<WorkbenchMachineActions>;
+	/** Tells suit which context this window shows, so other windows can mark it (M19 Phase 8). */
+	var presence:workspace.WindowPresence = new workspace.WindowPresence(function() return Sys.time(), function(key) suit.SuitClient.editorFocus(key));
+	/** The context a window opened by Open in New Window was asked for (`--context=`), until it is applied. */
+	var startContext:Null<workspace.ContextInfo>;
+	var presenceRevision = -1;
+	var presenceWorkspace:Null<String>;
+	var presenceMachine:Null<String>;
 	var machineClientRevision = -1;
 	var machineRefreshAt:Float = 0;
 	/** Catalog connections to every running workspace but the attached one, and the starter for idle ones (M19 Phase 6). */
@@ -137,6 +144,11 @@ class ExosuitApp implements DesktopUiApplication {
 	var machineRevision:Int = -1;
 	var lastTerminalCatalogRevision:Int = -1;
 	var workbenchPanel:Null<WorkbenchPanel>;
+	/** The catalog instance that last had a group (the Agents layout stays while that workspace is open). */
+	var agentsLayoutInstance:String = "";
+	/** Group ids the last complete catalog of `knownGroupsInstance` listed; a focused group that left it was removed. */
+	var knownGroupsInstance:String = "";
+	final knownGroups:Map<String, Bool> = [];
 
  var codexPoll:Float=0;
  var nextActiveCodexRead:Float=0;
@@ -519,7 +531,11 @@ class ExosuitApp implements DesktopUiApplication {
 		};
 		application.activeContext.subscribe(function() {
 			var key = application.activeContext.key();
-			if (contextLayoutsReady) { host.switchContext(key); pendingTerminalFocus = dock.activePanelId == "terminal"; }
+			devtools.SwitchTrace.mark("S", key);
+			if (contextLayoutsReady) {
+				host.switchContext(key); pendingTerminalFocus = dock.activePanelId == "terminal";
+				devtools.SwitchTrace.mark("E", key + " " + (host.lastSwitchCold ? "1" : "0"));
+			}
 			else host.initializeContext(key);
 			var roots = filesUseWorkspaceRoots ? application.savedWorkspaces.roots() : application.activeContext.roots;
 			explorerRoot = roots.length == 0 ? null : roots[0];
@@ -562,7 +578,7 @@ class ExosuitApp implements DesktopUiApplication {
 		}
 		application.session.start();
 		contextLayoutsReady = true;
-		if (openPath != null) openArgument(openPath);
+		if (openPath != null) openArgument(openPath, true);
 		if (dock.isOpen("terminal") && host.panelTerminals.length == 0) openTerminal();
 		layoutModes.start(application.settings.current.layoutMode);
 	}
@@ -1249,6 +1265,7 @@ class ExosuitApp implements DesktopUiApplication {
 		application.keymap.add(platform.Platform.KEY_ENTER, platform.Platform.MOD_CTRL, ["scm:commit"]);
 		application.commands.add("context:previous", function(_) switchToPreviousContext(), function(_) return previousContext() != null, "Goto Previous Workspace");
 		application.commands.add("context:switch", function(_) openContextSwitcher(), null, "Switch Workspace or Group…");
+		application.commands.add("context:new-window", function(_) openActiveContextInNewWindow(), function(_) return machineClient != null && machineClient.enabled, "Open Current Workspace or Group in New Window");
 		// The keymap takes platform key codes; UiKey.A (65) matches nothing, so these chords did nothing until now.
 		application.keymap.add(platform.Platform.KEY_D, platform.Platform.MOD_CTRL | platform.Platform.MOD_SHIFT, ["context:previous"]);
 		application.keymap.add(platform.Platform.KEY_A, platform.Platform.MOD_CTRL | platform.Platform.MOD_SHIFT, ["context:switch"]);
@@ -1544,7 +1561,7 @@ class ExosuitApp implements DesktopUiApplication {
 		layoutModes.suspend();
 		workbenchClient = client;
 		workbenchPanel = new WorkbenchPanel(client, openCatalogTerminal, newGroupedTerminal, editWorkspaceGroup,
-			function(path) application.openArgument(path), catalogTerminalActions, requestFrame, openCodexAgent, showWorkbenchMenu,
+			focusGroupFolder, catalogTerminalActions, requestFrame, openCodexAgent, showWorkbenchMenu,
 			attachCodexThread, function(resource, workspaceRoot) host.closeAgentTabs(resource, workspaceRoot),
 			createProviderAgent, canCreateAgentSession, function() return application.settings.current.tabTooltipDelay);
 		workbenchPanel.onError = function(message) {
@@ -1554,6 +1571,13 @@ class ExosuitApp implements DesktopUiApplication {
 			requestFrame();
 		};
 		workbenchPanel.closeTerminal = closeCatalogTerminal;
+		// A switch made from a tree row leaves the keyboard on the row, whatever the context's saved focus was.
+		workbenchPanel.focusRoot = function() { host.keepFocusOnSwitch = true; application.activeContext.useWorkspace(); host.keepFocusOnSwitch = false; requestFrame(); };
+		workbenchPanel.focusGroup = function(id) {
+			host.keepFocusOnSwitch = true;
+			focusGroupById(id);
+			host.keepFocusOnSwitch = false;
+		};
 		workbenchPanel.moveAgent = moveAgentGroup;
 		workbenchPanel.machine = machineActions;
 		workbenchPanel.chooseFolder = function() application.savedWorkspaces.addPicker();
@@ -1820,6 +1844,7 @@ class ExosuitApp implements DesktopUiApplication {
 		// its scratch folder, which is asked for first so the service can be started there. Otherwise a workspace with
 		// no folders opens its scratch folder as a folder.
 		var open = function(entry:suit.MachineCatalog.MachineWorkspace):Void {
+			workspace.client.ConnectTimeline.mark("open-workspace", entry.id, entry.name);
 			if (workspace.client.WorkspaceServiceTarget.enabled() && entry.folders.length == 0) {
 				machine.scratch(entry.id, function(path, failure) {
 					if (report(failure, entry.id) || path == null) return;
@@ -1876,6 +1901,7 @@ class ExosuitApp implements DesktopUiApplication {
 			start: function(entry) {
 				var starter = workspaceStarter;
 				if (starter == null || starter.starting(entry.id)) return;
+				workspace.client.ConnectTimeline.mark("start-requested", entry.id, entry.name);
 				var begin = function():Void {
 					var known = machine.workspaceById(entry.id);
 					var target = machine.serviceTarget(known == null ? entry : known);
@@ -1934,7 +1960,8 @@ class ExosuitApp implements DesktopUiApplication {
 			},
 			remove: function(entry) machine.delete(entry.id, function(_, failure) {
 				if (!report(failure)) removeWorkspaceContexts(entry.id);
-			})
+			}),
+			openInNewWindow: function(entry, group) openContextInNewWindow(entry.id, group)
 		};
 		if (workbenchPanel != null) workbenchPanel.machine = machineActions;
 		requestFrame();
@@ -1951,11 +1978,13 @@ class ExosuitApp implements DesktopUiApplication {
 				for (entry in state.workspaces) {
 					var service = machine.serviceOf(entry.id), watch = pool.watchOf(entry.id);
 					var mirror = pool.mirrorOf(entry.id);
+					if (mirror != null) workspace.client.ConnectTimeline.markOnce("rows-other:" + entry.id, "rows-visible", entry.id, "other");
 					watchedStates.set(entry.id, {running: service != null && service.running, live: watch != null && watch.live,
 						starting: startingWorkspaces.exists(entry.id), catalog: mirror});
 				}
 		}
 		return {machine: state, error: machine.error, openWorkspace: open, openRoots: application.savedWorkspaces.roots(),
+			windows: otherWindows(),
 			revision: machine.revision, watched: pool == null ? null : watchedStates,
 			watchRevision: (pool == null ? 0 : pool.revision()) + startingRevision};
 	}
@@ -1971,7 +2000,7 @@ class ExosuitApp implements DesktopUiApplication {
 		if (application.savedWorkspaces.current == null) {
 			var roots = application.savedWorkspaces.roots();
 			var matches = roots.length != 1 ? [] : [for (entry in state.workspaces) if (entry.folders.length == 1 && PathKey.same(entry.folders[0], roots[0])) entry];
-			if (matches.length == 1) application.savedWorkspaces.adoptMachineWorkspace(matches[0].id, matches[0].name);
+			if (matches.length == 1) application.savedWorkspaces.adoptMachineWorkspace(matches[0].id, matches[0].name, matches[0].folders);
 			else application.savedWorkspaces.releaseMachineWorkspace();
 		}
 		var key = machine.revision + ":" + attached;
@@ -1984,6 +2013,16 @@ class ExosuitApp implements DesktopUiApplication {
 				services.push({workspace: entry.id, endpoint: service.endpoint, pid: service.pid, running: service.running});
 		}
 		pool.sync(state.id, services, attached, [for (entry in state.workspaces) entry.id]);
+	}
+
+	/** The name the ConnectTimeline files the attached workspace under: its id once the attachment knows it. */
+	function currentWorkspaceName():String {
+		var attached = workspaceAttachment;
+		if (attached != null && Std.isOfType(attached, workspace.client.LocalWorkspaceClient)) {
+			var local:workspace.client.LocalWorkspaceClient = cast attached;
+			return local.timelineName();
+		}
+		return "";
 	}
 
 	/** The machine workspace attached in this window: the open saved workspace, else the one whose only folder is open. */
@@ -1999,6 +2038,10 @@ class ExosuitApp implements DesktopUiApplication {
 	public function attachWorkspaceConnections(pool:workspace.client.WorkspaceConnections, starter:workspace.client.WorkspaceStarter):Void {
 		catalogConnections = pool;
 		workspaceStarter = starter;
+		starter.started = function(target, endpoint) {
+			var machine = machineClient;
+			if (machine != null) machine.noteService(target.workspace, endpoint.socket, endpoint.managerPid);
+		};
 	}
 
 	var pendingContextTarget:Null<workspace.ContextInfo>;
@@ -2084,6 +2127,40 @@ class ExosuitApp implements DesktopUiApplication {
 		requestFrame();
 	}
 
+	/** The editor window `--context=` asked for: once suit lists the machine's workspaces, opens that workspace and group. */
+	public function startInContext(key:Null<String>):Void {
+		var parsed = key == null ? null : workspace.ContextKey.parse(key);
+		if (parsed != null) startContext = new workspace.ContextInfo(parsed.machine, parsed.workspace, parsed.group, "", "", "");
+	}
+
+	function applyStartContext():Void {
+		var target = startContext, machine = machineClient;
+		if (target == null || machine == null) return;
+		if (machine.machine == null) { if (machine.error != null) startContext = null; return; }
+		startContext = null;
+		if (machine.workspaceById(target.workspace) == null) { application.reportError("workspace", "This workspace is not on this machine."); return; }
+		var active = application.activeContext;
+		if (active.contextWorkspaceId != target.workspace) switchToContext(target);
+		else if (target.isRoot()) active.useWorkspace();
+		else { pendingContextTarget = target; pendingContextTargetUntil = Sys.time() + CONTEXT_TARGET_SECONDS; applyPendingContextTarget(false); }
+	}
+
+	/** The focus of every editor window but this one. */
+	function otherWindows():Array<suit.WindowFocus>
+		return machineClient == null ? [] : suit.WindowFocus.WindowFocuses.others(machineClient.windows, suit.SuitClient.windowIdentity());
+
+	/** Starts another editor window on a workspace, or on one of its groups (Open in New Window). */
+	function openContextInNewWindow(workspaceId:String, group:Null<String>):Void {
+		var failure = workspace.NewWindow.open(workspace.ContextKey.make(application.activeContext.machineId, workspaceId, group == null ? "" : group));
+		if (failure != null) application.reportError("workspace", failure);
+		requestFrame();
+	}
+
+	function openActiveContextInNewWindow():Void {
+		var active = application.activeContext;
+		openContextInNewWindow(active.contextWorkspaceId, active.kind == workspace.ContextKind.Group ? active.id : null);
+	}
+
 	/** Ctrl+Tab: back to the context used before this one. */
 	public function switchToPreviousContext():Void {
 		var target = previousContext();
@@ -2128,17 +2205,22 @@ class ExosuitApp implements DesktopUiApplication {
 		for (pane in host.panes) {
 			var tabs:Array<Dynamic> = [];
 			for (item in pane.items) {
-				var title = "", kind = "";
+				var title = "", kind = "", lines:Null<Array<String>> = null;
 				switch item {
 					case Document(view): kind = "document"; title = view.document.hasBackingPath() ? view.document.requirePath() : "(untitled)";
-					case Terminal(terminal): kind = "terminal"; title = terminal.title;
+					case Terminal(terminal):
+						kind = "terminal"; title = terminal.title;
+						// What the terminal shows, so a test can see input from another window arrive.
+						if (Std.isOfType(terminal.panel, TerminalPane)) lines = cast(terminal.panel, TerminalPane).diagnosticState().lines;
 					case Agent(agent): kind = "agent"; title = agent.title;
 					case WorkspaceFile(file): kind = "workspace-file"; title = file.root + "|" + file.path;
 					case Settings(_): kind = "settings";
 					case Image(_): kind = "image";
 					case UnsupportedFile(_): kind = "unsupported";
 				}
-				tabs.push({kind: kind, title: title});
+				var tab:Dynamic = {kind: kind, title: title};
+				if (lines != null) tab.lines = lines;
+				tabs.push(tab);
 			}
 			panes.push({id: pane.id, active: pane.activeIndex, tabs: tabs});
 		}
@@ -2151,11 +2233,15 @@ class ExosuitApp implements DesktopUiApplication {
 			agents: agents == null ? [] : [for (record in agents.records) {id: record.id, name: record.name, group: record.group, state: record.state}],
 			recent: [for (info in active.recent) info.key()],
 			filesRoots: try contextRoots() catch (_:Dynamic) [],
+			title: workspaceTitleText(), contextRoots: active.roots.copy(), projectRoots: [for (project in application.workspace.projects) project.root],
 			panes: panes,
 			sessionLines: host.sessionLines(),
 			notifications: [for (entry in host.getNotifications().history()) entry.source + ": " + entry.message],
-			sidebar: sidebar.activeId, contextTab: Std.string(contextTab), workspaceStatus: workspaceStatus, workspaceError: workspaceError, watched: [for (id => w in watchedStates) {workspace: id, running: w.running, live: w.live, starting: w.starting, hasCatalog: w.catalog != null, groups: w.catalog == null ? -1 : w.catalog.groupList().length, terminals: w.catalog == null ? -1 : w.catalog.terminalList().length}],
-			commandViewActive: host.isCommandViewActive()
+			sidebar: sidebar.activeId, contextTab: Std.string(contextTab), workspaceStatus: workspaceStatus, workspaceError: workspaceError, timeline: workspace.client.ConnectTimeline.snapshot(), watched: [for (id => w in watchedStates) {workspace: id, running: w.running, live: w.live, starting: w.starting, hasCatalog: w.catalog != null, groups: w.catalog == null ? -1 : w.catalog.groupList().length, terminals: w.catalog == null ? -1 : w.catalog.terminalList().length}],
+			commandViewActive: host.isCommandViewActive(),
+			windowId: suit.SuitClient.windowIdentity(), otherWindows: otherWindows(), newWindowMs: Std.int(workspace.NewWindow.slowestOpen * 1000 * 10) / 10,
+			contextKind: Std.string(active.kind), layoutMode: layoutModes.current.id, railHidden: layoutModes.hiddenOnRail().copy(),
+			workbenchEmptyState: workbenchPanel != null && workbenchPanel.showsEmptyState()
 		};
 	}
 
@@ -2249,8 +2335,21 @@ class ExosuitApp implements DesktopUiApplication {
 	function openMachineRoot(root:String):Void {
 		var project = application.workspace.activeProject;
 		var normal = workspace.client.MachineWorkspaces.normalPath;
-		if (project == null || normal(project.root) != normal(root)) openArgument(root);
+		if (project == null || normal(project.root) != normal(root)) openArgument(root, true);
 		requestFrame();
+	}
+
+	/**
+		Opening a folder while a workspace is open: the machine workspace that holds exactly this folder opens in its
+		place; the folder never joins the workspace. True when a workspace took it.
+	**/
+	function openFolderAsMachineWorkspace(path:String):Bool {
+		var currentId = application.savedWorkspaces.workspaceId(), machine = machineClient, actions = machineActions;
+		if (currentId == null || machine == null || !machine.enabled || actions == null) return false;
+		var found = machine.workspaceFor(application.workspace.fileSystem.normalize(path));
+		if (found == null) return false;
+		if (found.id != currentId) actions.open(found);
+		return true;
 	}
 
  function makeAgentTab(id:String,resource:String,root:String,title:String):UiAgentTab {
@@ -2961,7 +3060,9 @@ class ExosuitApp implements DesktopUiApplication {
 					host.commandView.input.selectAll();
 				};
 				var local = workspaceAttachment == null || workspaceAttachment.hasLocalFileAccess();
-				if (desktop != null && local) {
+				var automated = devtools.AutomationProbe.takeFolderAnswer();
+				if (automated != null) save(group.parent,automated,workspace.service.WorkspaceProtocol.order(group.order));
+				else if (desktop != null && local) {
 					try desktop.selectDirectory(function(accepted, paths) {
 						if (accepted && paths.length > 0) save(group.parent,paths[0],workspace.service.WorkspaceProtocol.order(group.order));
 					}, "Choose Group Working Directory", workbenchPanel == null ?
@@ -3247,7 +3348,27 @@ class ExosuitApp implements DesktopUiApplication {
 	function syncLayoutService():Void {
 		var client = workbenchClient;
 		var catalog = client == null ? null : client.terminalCatalog();
-		layoutModes.setServiceAvailable(client != null && client.canReadTerminals() && catalog != null && catalog.groups.length > 0);
+		// The Agents layout belongs to a workspace that has groups. Once it had one, removing the last group does not
+		// take the layout (and the Activity Rail's destinations) away: the workspace still has its sessions.
+		if (client == null || catalog == null || !client.canReadTerminals()) { layoutModes.setServiceAvailable(false); return; }
+		var hasGroups = catalog.groups.length > 0;
+		if (hasGroups) agentsLayoutInstance = catalog.instance;
+		layoutModes.setServiceAvailable(hasGroups || catalog.instance == agentsLayoutInstance);
+		leaveRemovedGroup(client, catalog);
+	}
+
+	/** The group the window works in was removed (here or from another window): the window moves to the workspace root. */
+	function leaveRemovedGroup(client:Null<workspace.client.WorkspaceWorkbenchClient>, catalog:Null<workspace.service.WorkspaceTerminalProtocol.TerminalCatalog>):Void {
+		if (client == null || catalog == null || catalog.next != null || client != workbenchClient) return;
+		var active = application.activeContext;
+		if (catalog.instance == knownGroupsInstance && active.kind == workspace.ContextKind.Group && knownGroups.exists(active.id)) {
+			var present = false;
+			for (group in catalog.groups) if (group.id == active.id) present = true;
+			if (!present) { active.useWorkspace(); requestFrame(); }
+		}
+		knownGroupsInstance = catalog.instance;
+		knownGroups.clear();
+		for (group in catalog.groups) knownGroups.set(group.id, true);
 	}
 
 	/** Drain services without requesting a render merely because they are running. */
@@ -3379,13 +3500,24 @@ class ExosuitApp implements DesktopUiApplication {
 			if (failure != null && failure != workspaceError) application.reportError("workspace", failure);
 			workspaceError = failure;
 			var label = attachment.statusLabel();
+			if (workbenchClient != null && workbenchClient.terminalCatalog() != null)
+				workspace.client.ConnectTimeline.markOnce("rows-own:" + currentWorkspaceName(), "rows-visible", currentWorkspaceName(), "own");
 			if (workspaceStatus != label) {
+				workspace.client.ConnectTimeline.mark("status", currentWorkspaceName(), label);
+				if (StringTools.startsWith(label, "Connecting")) workspace.client.ConnectTimeline.rearm("rows-own:" + currentWorkspaceName());
 				workspaceStatus = label;
 				requestFrame();
 			}
 			leaveMissingGroup();
 		}
 		remoteFileSearch.update(Sys.time());
+		// O(1) per frame: the key (strings built and escaped) is made only when the context, workspace or machine id changed.
+		var shown = application.activeContext;
+		if (shown.revision != presenceRevision || shown.contextWorkspaceId != presenceWorkspace || shown.machineId != presenceMachine) {
+			presenceRevision = shown.revision; presenceWorkspace = shown.contextWorkspaceId; presenceMachine = shown.machineId;
+			presence.focus(shown.key());
+		}
+		presence.poll();
 		var workspaces = machineClient;
 		if (workspaces != null && workspaces.enabled) {
 			// Another window or suit's CLI may change the list; look again every few seconds while the Workbench shows it.
@@ -3407,6 +3539,7 @@ class ExosuitApp implements DesktopUiApplication {
 				}
 			}
 			if (starter != null) starter.poll();
+			applyStartContext();
 			applyPendingContextTarget(false);
 			if (machineClientRevision != workspaces.revision) {
 				machineClientRevision = workspaces.revision;
@@ -3807,6 +3940,26 @@ class ExosuitApp implements DesktopUiApplication {
 	function contextPanelProvidesDestinations():Bool
 		return dock.get("context-panel") != null && !phoneLayoutActive && !responsiveRightHidden && !remoteAgentsLayout();
 
+	/** The title bar's workspace name. */
+	function workspaceTitleText():String {
+		if (application.activeContext.kind == workspace.ContextKind.Group) return application.activeContext.label;
+		var named = application.savedWorkspaces.displayName();
+		if (named != null) return named;
+		return explorerRoot == null ? "" : haxe.io.Path.withoutDirectory(explorerRoot);
+	}
+
+	/**
+		"Open folder" on a group: the window works in that group's folder (its context), as a switch to the group does. It
+		never adds the folder to the open workspace, which keeps the folders it was given.
+	**/
+	function focusGroupFolder(group:workspace.service.WorkspaceProtocol.WorkspaceGroup):Void focusGroupById(group.id);
+
+	function focusGroupById(id:String):Void {
+		var client = workbenchClient, catalog = client == null ? null : client.terminalCatalog();
+		if (catalog != null) application.activeContext.openSessionGroup(id, catalog.groups, catalog.workspaceRoot);
+		requestFrame();
+	}
+
 	/** Folders the right panel's Files and Changes show: the Agents scope's folder, else the active context's roots. */
 	function contextRoots():Array<String> {
 		var scope = contextScope(), panel = workbenchPanel;
@@ -3985,11 +4138,8 @@ class ExosuitApp implements DesktopUiApplication {
 		if (actions >= 2) items.push(new KeyedView("save", toolbarButton("Save", IconName.Save,
 			function() application.commands.perform("doc:save", application.context))));
 		var workspaceTitleStyle = new LayoutStyle(); workspaceTitleStyle.width = LayoutAxis.grow();
-		var savedWorkspace = application.savedWorkspaces.current;
-		var workspaceTitle = savedWorkspace == null ? (explorerRoot == null ? "" : haxe.io.Path.withoutDirectory(explorerRoot)) :
-			savedWorkspace.name + (application.savedWorkspaces.dirty ? " *" : "");
+		var workspaceTitle = workspaceTitleText();
 		if (application.activeContext.kind == workspace.ContextKind.Group) {
-			workspaceTitle = application.activeContext.label;
 			var back = new Button("Back to Workspace", null, function() {
 				application.activeContext.useWorkspace(); requestFrame();
 			}, "context-back-to-workspace");
@@ -5117,13 +5267,15 @@ class ExosuitApp implements DesktopUiApplication {
 		return new Text(message, style, theme.tokens.textSecondary, TextStyleOverride.text(13.0));
 	}
 
-	function openArgument(path:String):Void {
+	/** `join`: the folder is added to what is open (startup arguments, Machine attach); otherwise it replaces an open workspace. */
+	function openArgument(path:String, join:Bool = false):Void {
 		if (FileSystem.exists(path) && FileSystem.isDirectory(path)) {
+			if (!join && openFolderAsMachineWorkspace(path)) return;
 			explorerRoot = application.workspace.fileSystem.normalize(path);
 			clearExplorerModel();
 			filesScroll.jumpTo(0, 0);
 			openExplorer();
-			application.openArgument(path);
+			if (join) application.attachFolder(path); else application.openArgument(path);
 			return;
 		}
 		if (explorerRoot == null) {
@@ -5147,7 +5299,13 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function openFolderDialog():Void {
 		if (desktop == null) { application.workbench.openPathCommandView(true); requestFrame(); return; }
+		var automated = devtools.AutomationProbe.takeFolderAnswer();
+		if (automated != null) { openArgument(automated); requestFrame(); return; }
 		desktop.selectDirectory(function(accepted, paths) {
+			if (accepted && paths.length > 0 && openFolderAsMachineWorkspace(paths[0])) {
+				requestFrame();
+				return;
+			}
 			if (accepted && paths.length > 0) {
 				explorerRoot = application.workspace.fileSystem.normalize(paths[0]);
 				clearExplorerModel();

@@ -87,10 +87,16 @@ class AutomationProbe {
 				});
 			}
 			var metrics = ui.frameMetrics;
+			// The widget with keyboard focus: its id and, when it has one, its label ("-" when nothing has focus).
+			var focusedId = ui.focus.focusedId, focusLabel = "-";
+			if (focusedId != null && ui.root != null) {
+				var focused = ui.root.find(focusedId);
+				focusLabel = focused == null ? "(gone)" : focused.semantics != null && focused.semantics.label != null ? focused.semantics.label.substr(0, 80) : "(unlabelled)";
+			}
 			// One serialization per change; only a change is written, and `seq` counts writes, so a driver can wait for
 			// "a snapshot newer than my last input".
 			var body = haxe.Json.stringify({frame: metrics == null ? -1 : metrics.frameNumber, viewport: {width: width, height: height},
-				elements: elements, state: state()});
+				focus: focusLabel, elements: elements, state: state()});
 			if (body == lastText) return;
 			lastText = body;
 			var text = '{"seq":' + (++seq) + ',"at":' + now + ',' + body.substr(1);

@@ -23,6 +23,7 @@ class SavedWorkspaceController {
 	var savedContent:String = "";
 	public function new(app:Application) {
 		this.app = app;
+		app.activeContext.workspaceFolders = roots;
 		recents = new session.RecentWorkspaces(config.ConfigurationPaths.configurationRoot() + "/recent-workspaces.conf");
 		if (recents.error != null) app.reportError("workspace", recents.error);
 		if (!app.capabilities.supports(platform.HostCapability.Filesystem)) return;
@@ -37,13 +38,16 @@ class SavedWorkspaceController {
 	/** The machine workspace this window's folder opened from the command line belongs to, once suit's catalog names it. */
 	var machineId:Null<String>;
 	var machineName:String = "Workspace";
+	/** The adopted machine workspace's own folders, from the catalog; null while unknown (then the open projects stand in). */
+	var machineFolders:Null<Array<String>>;
 
 	/**
 		A window opened on a workspace's folder (not on a saved workspace file) works in that machine workspace: its
 		context takes the workspace's id, and the contexts saved under the placeholder id follow, as when a workspace is saved.
 	**/
-	public function adoptMachineWorkspace(id:String, name:String):Void {
+	public function adoptMachineWorkspace(id:String, name:String, ?folders:Array<String>):Void {
 		if (current != null) return;
+		if (folders != null) machineFolders = folders.copy();
 		if (machineId == id) {
 			// The catalog renamed the workspace: the context's label follows.
 			if (machineName != name) { machineName = name; changed(); }
@@ -59,11 +63,12 @@ class SavedWorkspaceController {
 		The window no longer shows exactly one machine workspace's folder (another folder was added, the folder was
 		removed or the workspace closed): the adopted id goes and the context goes back under the placeholder.
 	**/
-	public function releaseMachineWorkspace():Void {
+	public function releaseMachineWorkspace(rename:Bool = true):Void {
 		if (machineId == null) return;
 		var previous:String = machineId;
-		machineId = null; machineName = "Workspace";
-		if (current == null) onIdentityAssigned(previous, "workspace");
+		machineId = null; machineName = "Workspace"; machineFolders = null;
+		// Leaving for another workspace passes rename = false: the workspace keeps its contexts under its own id.
+		if (current == null && rename) onIdentityAssigned(previous, "workspace");
 		changed();
 	}
 
@@ -76,12 +81,24 @@ class SavedWorkspaceController {
 			current != null ? current.name : machineId != null ? machineName : "Workspace", roots());
 		onChanged();
 	}
+	/** The workspace's name for the title bar: the saved or machine workspace the window is on; null for a plain folder. */
+	public function displayName():Null<String>
+		return current != null ? current.name + (dirty ? " *" : "") : machineId != null ? machineName : null;
+	/** The workspace the window is on: the saved workspace's id, else the adopted machine workspace's, else null (a plain folder). */
+	public function workspaceId():Null<String>
+		return current != null ? current.id : machineId;
 	public function roots():Array<String>
-		return current == null ? [for (project in app.workspace.projects) project.root] : current.roots.copy();
+		return current != null ? current.roots.copy() : machineId != null && machineFolders != null ? machineFolders.copy()
+			: [for (project in app.workspace.projects) project.root];
 	/** True while the window shows any workspace folder or a named workspace. */
 	public function isOpen():Bool return current != null || roots().length > 0;
-	public function hasRoot(folder:String):Bool return roots().indexOf(folder) >= 0;
+	public function hasRoot(folder:String):Bool {
+		for (root in roots()) if (workspace.PathKey.same(root, folder)) return true;
+		return false;
+	}
 	public function folderOpened(root:String):Void {
+		// A folder joining an adopted machine workspace makes the window a plain multi-folder one, as it always did.
+		if (current == null && machineId != null && !hasRoot(root)) releaseMachineWorkspace();
 		if (current != null && current.roots.indexOf(root) < 0) { current.roots.push(root); dirty = true; }
 		changed();
 	}
@@ -90,9 +107,9 @@ class SavedWorkspaceController {
 		app.activeContext.beginWorkspaceUpdate(); restoring = true;
 		try {
 			for (project in app.workspace.projects.copy()) app.workspace.removeProject(project);
-			current = null;
-			for (root in record.roots) if (available(root)) app.openArgument(root);
-			machineId = null; machineName = "Workspace";
+			// The window moves to the record's identity; the workspace it leaves keeps its contexts under its own id.
+			current = null; machineId = null; machineName = "Workspace"; machineFolders = null;
+			for (root in record.roots) if (available(root)) app.attachFolder(root);
 			current = record.copy(); path = file; dirty = false; savedContent = content;
 			app.activeContext.updateWorkspace(record.id, record.name, record.roots);
 		} catch (error:Dynamic) {
@@ -128,7 +145,7 @@ class SavedWorkspaceController {
 	}
 	public function addFolder(folder:String):Bool {
 		if (!available(folder)) { app.reportError("workspace", 'Folder is unavailable: "' + folder + '"'); return false; }
-		app.openArgument(folder); return true;
+		app.attachFolder(folder); return true;
 	}
 	public function removeFolder(folder:String):Void {
 		for (project in app.workspace.projects.copy()) if (project.root == folder) app.workspace.removeProject(project);
@@ -139,7 +156,7 @@ class SavedWorkspaceController {
 		for (project in app.workspace.projects.copy()) app.workspace.removeProject(project);
 		var adopted = machineId;
 		current = null; path = ""; savedContent = ""; dirty = false;
-		if (adopted != null) { releaseMachineWorkspace(); return; }
+		if (adopted != null) { releaseMachineWorkspace(false); return; }
 		changed();
 	}
 	public static function available(root:String):Bool return FileSystem.exists(root) && FileSystem.isDirectory(root);

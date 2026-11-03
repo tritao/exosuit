@@ -45,6 +45,11 @@ class ConfigurationPaths {
 		return child(xdg == null ? child(home, ".local/state") : xdg, "pragtical-haxeon");
 	}
 
+	/** One snapshot file per context (`machine/workspace/group`); see session.ContextSnapshotStore. */
+	public static function contexts():String {
+		return child(stateRoot(), "contexts");
+	}
+
 	public static function recovery():String {
 		var sessionPath = session(), separator = sessionPath.lastIndexOf("/");
 		return separator < 0 ? "recovery.conf" : sessionPath.substring(0, separator + 1) + "recovery.conf";

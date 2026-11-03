@@ -35,7 +35,7 @@ class WorkbenchPanel implements View {
 	final openAgent:String->Void;
 	/** A group action; null is the workspace root, for the actions that create in it ("new-agent", "new-terminal"). */
 	final edit:(Null<WorkspaceGroup>, String)->Void;
-	final openFolder:String->Void;
+	final openFolder:WorkspaceGroup->Void;
 	final terminalActions:TerminalRecord->Array<MenuItem>;
 	final requestFrame:Void->Void;
 	final showMenu:(Array<MenuItem>, UiEvent, Void->Bool)->Void;
@@ -47,6 +47,10 @@ class WorkbenchPanel implements View {
 	public final model = new WorkbenchTreeModel();
 	public final tree:TreeView;
 	public var onError:Null<String->Void>;
+	/** Makes the group the window's context (a click or Enter on its row); set by the app, which owns the context. */
+	public var focusGroup:Null<String->Void>;
+	/** Makes the open workspace's root the window's context (a click or Enter on its row). */
+	public var focusRoot:Null<Void->Void>;
 	/** Closes a catalog terminal and its views; selection actions use it. */
 	public var closeTerminal:Null<TerminalRecord->Void>;
 	/** Asks which group (or the workspace root) a session moves to: its Move to Group…. */
@@ -89,6 +93,10 @@ class WorkbenchPanel implements View {
     var inlineEditor:Null<WorkbenchNameEditor>;
     var refreshModel = false;
     var pendingReveal:Null<String>;
+    /** The row that entered a context: the tree's selection is kept per context, so the entered context's own selection must yield to it. */
+    var pendingEnterKey:Null<String>;
+    /** Updates left in which the re-keyed tree may still come back with the old selection. */
+    var pendingEnterFrames = 0;
     var revealRoot:Null<String>;
     var scrollTarget:Null<String>;
     var scrollPasses = 0;
@@ -106,7 +114,7 @@ class WorkbenchPanel implements View {
     var observedOpenRow:Null<String>;
 
 	public function new(client:WorkspaceWorkbenchClient, open:TerminalRecord->Bool, createTerminal:String->Void,
-		edit:(WorkspaceGroup, String)->Void, openFolder:String->Void, terminalActions:TerminalRecord->Array<MenuItem>, requestFrame:Void->Void,
+		edit:(WorkspaceGroup, String)->Void, openFolder:WorkspaceGroup->Void, terminalActions:TerminalRecord->Array<MenuItem>, requestFrame:Void->Void,
 		openAgent:String->Void, showMenu:(Array<MenuItem>, UiEvent, Void->Bool)->Void, attach:WorkspaceGroup->Void,
 		closeAgentTab:(String, String)->Void, createProvider:(String, String)->Void, canCreateAgent:Void->Bool, ?tooltipDelay:Void->Float) {
 		this.client = client; this.open = open; this.createTerminal = createTerminal; this.edit = edit;
@@ -158,12 +166,13 @@ class WorkbenchPanel implements View {
 		tree.onActivate = function(key, _) {
 			var id = WorkbenchRowKey.workspaceId(key);
 			if (id != null) {
-				if (key == model.openRow) return false;
+				if (key == model.openRow) { enterRow(key); return true; }
 				openWorkspace(id);
 				return true;
 			}
 			var foreign = WorkbenchRowKey.parseForeign(key);
 			if (foreign != null && foreign.kind != WorkbenchRowKind.Group) { openForeign(foreign); return true; }
+			if (enterRow(key)) return true;
 			return false;
 		};
 		tree.onItemActivatedWithEvent = function(key, event) {
@@ -177,9 +186,47 @@ class WorkbenchPanel implements View {
 			if (key == WorkbenchRowKey.NEW_WORKSPACE && count == 1) { createWorkspace(); return; }
 			// A single click on another workspace's item only selects it; Enter or a double click opens it (see onItemActivatedWithEvent).
 			if (WorkbenchRowKey.isForeign(key)) return;
+			// The row of a group or of the open workspace enters it; the chevron expands it. Other rows keep expanding on a click.
+			tree.expandOnSingleClick = !enterRow(key);
 			var row = WorkbenchRowKey.parse(key);
 			if (row != null) openItem(row.kind, row.id);
 		};
+	}
+
+	/** A group row or the open workspace's row: makes it the window's context. False for any other row. */
+	function enterRow(key:String):Bool {
+		if (key == model.openRow && WorkbenchRowKey.workspaceId(key) != null) {
+			if (focusRoot != null) focusRoot();
+			tree.focusItem(key);
+			selectAfterEnter(key);
+			return true;
+		}
+		var group = WorkbenchRowKey.idOf(key, WorkbenchRowKind.Group);
+		if (group == null || WorkbenchRowKey.isForeign(key)) return false;
+		if (focusGroup != null) focusGroup(group);
+		// Entering a context rebuilds the window's views, which drops focus; keep the keyboard on this row.
+		tree.focusItem(key);
+		selectAfterEnter(key);
+		return true;
+	}
+
+	function selectAfterEnter(key:String):Void {
+		pendingEnterKey = key; pendingEnterFrames = 3;
+		requestFrame();
+	}
+
+	/**
+		The re-keyed tree comes back with the selection the entered context last had; the row that was entered wins. Only
+		for the few updates the switch takes, so a selection made after it (by the user or by code) is never overridden.
+	**/
+	function applyPendingEnterSelection():Void {
+		var key = pendingEnterKey;
+		if (key == null) return;
+		if (--pendingEnterFrames < 0) { pendingEnterKey = null; return; }
+		if (tree.selectedKey == key) { requestFrame(); return; }
+		pendingEnterKey = null;
+		try tree.select(key, false) catch (_:Dynamic) {}
+		requestFrame();
 	}
 
 	function openItem(kind:WorkbenchRowKind, id:String):Void {
@@ -270,6 +317,8 @@ class WorkbenchPanel implements View {
 		if (entry == null) return;
 		var target = entry;
 		var items = [new MenuItem("machine-workspace-open", "Open Workspace", function() actions.open(target), true)];
+		var newWindow = actions.openInNewWindow;
+		if (newWindow != null) items.push(new MenuItem("machine-workspace-new-window", row.kind == WorkbenchRowKind.Group ? "Open Group in New Window" : "Open in New Window", function() newWindow(target, row.kind == WorkbenchRowKind.Group ? row.id : null), true));
 		var owner = row.workspace;
 		showMenu(items, event, function() return model.workspaces.exists(owner));
 	}
@@ -305,6 +354,8 @@ class WorkbenchPanel implements View {
 		if (entry != null) {
 			var target = entry;
 			items.push(new MenuItem("machine-workspace-open", "Open", function() actions.open(target), key != model.openRow));
+			var newWindow = actions.openInNewWindow;
+			if (newWindow != null) items.push(new MenuItem("machine-workspace-new-window", "Open in New Window", function() newWindow(target, null), true));
 			var watching = watched(), state = watching == null ? null : watching.get(target.id);
 			if (state != null && !state.running && !state.starting && key != model.openRow)
 				items.push(new MenuItem("machine-workspace-start", "Start Service", function() actions.start(target), idle));
@@ -701,7 +752,10 @@ class WorkbenchPanel implements View {
 				items.push(new MenuItem("group-order", "Change Sort Order…", function() edit(group, "order"), editable, null, moveSeparator));
 			}
 		}
-		if (cwd != null) items.push(new MenuItem("open-folder", "Open folder", function() openFolder(cwd), true, null, group != null));
+		if (cwd != null && group != null) items.push(new MenuItem("open-folder", "Open folder", function() openFolder(group), true, null, true));
+		var groupOwner = model.groupWorkspace(), newWindow = machine == null ? null : machine.openInNewWindow;
+		if (group != null && groupOwner != null && newWindow != null)
+			items.push(new MenuItem("group-new-window", "Open in New Window", function() newWindow(groupOwner, group.id), true));
 		if (group != null && client.agentService().canControlAgents())
 			items.push(new MenuItem("attach-codex", "Attach existing Codex thread…", function() attach(group)));
 		// Shown whenever the service can remove groups; disabled, with the reason, while this one still has contents.
@@ -978,6 +1032,7 @@ class WorkbenchPanel implements View {
 		resolveForeign();
         applyPendingReveal();
 		applyPendingSessionSelection();
+		applyPendingEnterSelection();
 		runBatch();
     }
 
@@ -1046,6 +1101,18 @@ class WorkbenchPanel implements View {
 		return new Row("workbench-header-actions", actions, toolbarStyle).build(context);
 	}
 
+	/** No group, terminal or session anywhere in the workspace: sessions and terminals in the workspace root count too. */
+	public static function workspaceIsEmpty(catalog:Null<TerminalCatalog>, agents:Null<WorkspaceAgentProtocol.AgentCatalog>):Bool {
+		if (catalog == null || catalog.groups.length != 0 || catalog.terminals.length != 0) return false;
+		return agents == null || agents.records.length == 0;
+	}
+
+	/** Whether the "Nothing here yet" start is on screen (a test seam for the automation snapshot). */
+	public function showsEmptyState():Bool {
+		var start = emptyState();
+		return start != null && workspaceIsEmpty(client.terminalCatalog(), client.agentService().agents());
+	}
+
 	/** What to do first when the Workbench has nothing: open a folder, or make the first group. */
 	function emptyState():Null<View> {
 		var catalog = client.terminalCatalog();
@@ -1060,9 +1127,7 @@ class WorkbenchPanel implements View {
 				new KeyedView("open", button)
 			], style);
 		}
-		var agents = client.agentService().agents();
-		if (catalog != null && catalog.groups.length == 0 && catalog.terminals.length == 0
-			&& (agents == null || agents.records.length == 0) && draft == null && client.canEditGroups()) {
+		if (workspaceIsEmpty(catalog, client.agentService().agents()) && draft == null && client.canEditGroups()) {
 			var button = new Button("New group", null, function() beginGroup({id: workspace.client.WorkspaceIds.create("group"),
 				name: "", cwd: null, revision: 0, parent: null, order: model.nextOrder(null)}, true), "workbench-first-group");
 			button.variant = ButtonVariant.Primary;

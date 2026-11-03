@@ -33,4 +33,6 @@ typedef WorkbenchMachineView = {
 	@:optional var watched:Map<String, WorkbenchWorkspaceState>;
 	/** Changes whenever a catalog connection or a catalog does. */
 	@:optional var watchRevision:Int;
+	/** Where the other editor windows are focused (M19 Phase 8): this window's own is left out. */
+	@:optional var windows:Array<suit.WindowFocus>;
 }

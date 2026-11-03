@@ -20,6 +20,13 @@ class BuildFileCollector {
 		files.push(canonical);
 	}
 
+	/** A file found by listing a directory that `collect` already resolved: its path is canonical and a file, so no further lookups. */
+	function addListed(path:String):Void {
+		if (knownFiles.exists(path)) return;
+		knownFiles.set(path, true);
+		files.push(path);
+	}
+
 	public function collect(root:String, runtime:Bool = false):Void {
 		var pending = [root];
 		while (pending.length > 0) {
@@ -47,7 +54,7 @@ class BuildFileCollector {
 							|| lower.indexOf(".so.") >= 0 || lower.indexOf(".dylib.") >= 0
 						: ["hx", "c", "h", "cpp", "json", "hxi", "hxmap", "inc", "in", "cmake", "hxml", "def", "rc"].contains(extension)
 							|| name == "CMakeLists.txt";
-					if (included) add(path);
+					if (included) addListed(path);
 				}
 			}
 		}

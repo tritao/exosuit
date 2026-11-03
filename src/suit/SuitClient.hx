@@ -46,6 +46,17 @@ class SuitClient {
 	static var resolved:Null<SuitMode> = null;
 	static var offForTemporaryState:Bool = false;
 	static var noticeTaken:Bool = false;
+	/** This editor window's id and focused context, written into its record (M19 Phase 8). */
+	static var windowId:Null<String> = null;
+	static var windowContext:Null<String> = null;
+	/** Serialises record writes: the focus is written on another thread. */
+	/** The newest editor record not yet written: the frame loop fills it, the writer thread empties it. */
+	static var pendingRecord:Null<SuitRecord> = null;
+	static var writerStarted:Bool = false;
+	static var writerStop:Bool = false;
+	static final slotLock:sys.thread.Mutex = new sys.thread.Mutex();
+	/** Released by whoever leaves work in the slot (or stops the writer); the writer thread waits on it. */
+	static final wake:sys.thread.Lock = new sys.thread.Lock();
 
 	/**
 		This process's mode from its environment; `stateDir` is a workspace service's state directory, when
@@ -139,8 +150,26 @@ class SuitClient {
 	/** Registers the editor and starts suit. Call once at editor startup. */
 	public static function announceEditor():Void {
 		resolve();
+		windowId = "w" + Sys.getPid() + "-" + Std.int(Sys.time());
 		writeRecord(SuitKind.Editor, null);
 		ensureDaemon();
+	}
+
+	/** This editor window's id as it registered it (M19 Phase 8); null before the editor announced itself. */
+	public static function windowIdentity():Null<String>
+		return windowId;
+
+	/**
+		Records the context (`machine/workspace/group`) this editor window has focused, for suit to tell the other windows.
+		One small atomic file write on another thread, so the frame loop never waits for the disk; none when the
+		context did not change.
+	**/
+	public static function editorFocus(context:String):Void {
+		if (context == windowContext)
+			return;
+		windowContext = context;
+		if (registeredKind == SuitKind.Editor)
+			editorChanged();
 	}
 
 	/** Records that this editor uses a workspace root, so that workspace's services are not shown as orphaned. */
@@ -149,7 +178,7 @@ class SuitClient {
 			return;
 		editorRoots.push(root);
 		if (registeredKind == SuitKind.Editor)
-			writeRecord(SuitKind.Editor, null);
+			editorChanged();
 	}
 
 	/** Records that this editor uses workspace `id`, so its service (keyed by id) is not shown as orphaned. */
@@ -158,7 +187,7 @@ class SuitClient {
 			return;
 		editorWorkspaces.push(id);
 		if (registeredKind == SuitKind.Editor)
-			writeRecord(SuitKind.Editor, null);
+			editorChanged();
 	}
 
 	/**
@@ -172,6 +201,8 @@ class SuitClient {
 	public static function unregister():Void {
 		if (registeredKind == null)
 			return;
+		writerStop = true;
+		wake.release();
 		try {
 			var path = SuitRecords.path(SuitPaths.registry(), Sys.getPid());
 			if (FileSystem.exists(path))
@@ -186,20 +217,60 @@ class SuitClient {
 		try {
 			if (!SuitPaths.prepare())
 				return;
-			var record = SuitRecords.create(Sys.getPid(), kind);
-			if (kind == SuitKind.Editor) {
-				record.roots = editorRoots.copy();
-				record.workspaces = editorWorkspaces.copy();
-			}
-			if (workspace != null) {
-				record.root = workspace.root;
-				record.workspace = workspace.workspace;
-				record.stateDir = workspace.stateDir;
-				record.generation = workspace.generation;
-			}
-			SuitRecords.write(SuitPaths.registry(), record);
+			SuitRecords.write(SuitPaths.registry(), recordFor(kind, workspace));
 			registeredKind = kind;
 		} catch (_:Dynamic) {}
+	}
+
+	static function recordFor(kind:SuitKind, workspace:Null<SuitWorkspace>):SuitRecord {
+		var record = SuitRecords.create(Sys.getPid(), kind);
+		if (kind == SuitKind.Editor) {
+			record.roots = editorRoots.copy();
+			record.workspaces = editorWorkspaces.copy();
+			record.window = windowId;
+			record.context = windowContext;
+		}
+		if (workspace != null) {
+			record.root = workspace.root;
+			record.workspace = workspace.workspace;
+			record.stateDir = workspace.stateDir;
+			record.generation = workspace.generation;
+		}
+		return record;
+	}
+
+	/**
+		The editor's record changed: snapshot it here, on the calling thread, and leave the newest snapshot for the one
+		writer thread. The caller never waits for the disk, and a burst of changes writes only the last record.
+	**/
+	static function editorChanged():Void {
+		if (resolve(null) == Off)
+			return;
+		var record = recordFor(SuitKind.Editor, null);
+		slotLock.acquire();
+		pendingRecord = record;
+		slotLock.release();
+		wake.release();
+		if (writerStarted)
+			return;
+		writerStarted = true;
+		haxeon.Threads.create("exo.suit.writer", function() {
+			while (!writerStop) {
+				wake.wait();
+				if (writerStop)
+					break;
+				slotLock.acquire();
+				var next = pendingRecord;
+				pendingRecord = null;
+				slotLock.release();
+				if (next == null)
+					continue;
+				try {
+					if (SuitPaths.prepare())
+						SuitRecords.write(SuitPaths.registry(), next);
+				} catch (_:Dynamic) {}
+			}
+		});
 	}
 
 	/**

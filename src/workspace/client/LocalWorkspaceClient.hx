@@ -119,6 +119,13 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     this.environment = environment;
     this.choices = choices == null ? WorkspaceManagerChoices.instance() : choices;
     this.workbench = new RpcWorkspaceWorkbenchClient(this, clock);
+    workbench.timelineName = timelineName;
+  }
+
+  /** The workspace this attachment's events are filed under in the ConnectTimeline. */
+  public function timelineName():String {
+    var active = serviceTarget;
+    return active == null ? (root == null ? "" : root) : active.workspace;
   }
 
   function get_ready():Bool return verified
@@ -598,6 +605,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     retryAt = 0;
     if (path == null) return;
     startupDeadline = clock() + 120000;
+    ConnectTimeline.mark("attach", timelineName(), path);
     startHelper("discover");
   }
 
@@ -679,6 +687,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
         helperEnvironment()
       );
       helperDeadline = clock() + 95000;
+      ConnectTimeline.mark("helper-start", timelineName(), mode);
     } catch (failure:Dynamic) {
       fail(Std.string(failure));
     }
@@ -764,6 +773,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     caps.push(workspace.service.WorkspaceLifecycleProtocol.CAPABILITY);
     caps.push(workspace.service.WorkspaceFoldersProtocol.CAPABILITY);
     deadline = clock() + 12000;
+    ConnectTimeline.mark("discovered", timelineName());
     client = new RpcClient(new NativeRpcConnector(hub,
       NativeRpcHub.local(endpoint.socket)), clock, function() return Math.random(), new RpcPeerOptions(
         "exosuit-editor/1",
@@ -797,6 +807,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
           return;
         }
         verified = true;
+        ConnectTimeline.mark("identity-verified", timelineName());
         var key = choiceKey();
         if (stateDir != null && key != null) choices.connected(key);
         deadline = clock() + 6000;
@@ -842,6 +853,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
       output += process.readStdout();
       errors += process.readStderr();
       var code = process.exitStatus(), mode = helperMode;
+      ConnectTimeline.mark("helper-exit", timelineName(), mode + " code " + code + (errors.length > 0 && errors.length < 400 ? " " + errors : ""));
       stopHelper();
       if (output.length > 16384 || errors.length > 16384) {
         fail("Workspace discovery exceeds its limit");
@@ -896,6 +908,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
       }
     }
     if (ready) {
+      if (!wasReady) ConnectTimeline.mark("ready", timelineName());
       recoveringUntil = 0;
       refreshServiceStatus();
       wasReady = true;

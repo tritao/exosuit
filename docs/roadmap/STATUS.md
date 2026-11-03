@@ -1,5 +1,42 @@
 # Execution ledger
 
+## M19 — after landing: daily-use fixes, Phase 7 budget, Phase 8 (2026-11-02, branch `m19-after`)
+
+On branch `m19-after` (exosuit, on `4346cbf9`) with haxeon `m19-after` (on `fd2a332c`); not pushed yet.
+
+Behaviour delivered:
+
+- A window's right panel and title come from its own workspace; opening another folder replaces the workspace instead
+  of adding to it. Leaving a workspace no longer renames its contexts to the placeholder, which carried one
+  workspace's tabs into the next.
+- Removing the focused group moves the window to the workspace root; the Agents layout stays and the empty state counts
+  root sessions.
+- "Workspace connected": the launcher caches the build identity instead of hashing every source file, and the window
+  connects to the endpoint its own starter printed. Launch to connected went from 6.6 s to about 4.1 s, reopening a
+  running workspace from 3.0 s to about 1.45 s (table in NEXT-PHASE.md).
+- Phase 7: warm switch about 17 ms (one frame), cold 20 to 29 ms, within a workspace (`m19_switch_latency`).
+- Phase 8: windows report their focus to suit, the tree marks other windows, Open in New Window, tabs belong to the
+  window, context snapshots restore with the last write winning per group.
+- A click on a group row enters it; tree keyboard focus survives a switch; New Workspace… is no longer dropped during a
+  machine refresh.
+- haxeon: detached starts work inside a job that forbids breakaway (why GUI runs from a sandboxed shell failed with
+  "Could not start process: 5"), tooltips take no pointer input, `processAlive` on Windows, `TreeView.focusItem`,
+  LiveHost module/entry overrides, a QPC tick source for traces.
+
+Commands and results (Windows, 2026-11-02):
+
+- `scripts/build-windows.ps1`: exit 0.
+- `haxeon/scripts/check-self-hosting.sh` (Git Bash): PASS in 111 s.
+- `scripts/test.sh`: the 28 steps that fail on the base also fail here (Windows harness: POSIX fixtures, the Store
+  python stub); no other step fails. Three that failed on the first run were fixed and pass rerun.
+- Real-input scenarios: 18 of 18 pass on the first try, 178 checks, 0 failed (guard 5, workspaces 10, workspaces_tree
+  11, folders 8, folders_open 3, groups 12, sessions_drag 13, open_idle 2, phase6 5, group_remove 9, group_entry 14,
+  foreign_roots 14, foreign_tabs 6, connect_time 5, switch_latency 26, two_windows 10, two_windows_tabs 10,
+  two_windows_restart 5).
+
+Remaining: Phase 0 review and Phase 9 (both wait on a decision), the switch across workspaces (unmeasured), and the
+open items in NEXT-PHASE.md under "M19 after landing".
+
 ## M19 — machine workspaces, Phases 1–7 (2026-10-29 to 2026-11-01)
 
 Plan and per-phase detail: [19-machine-workspaces.md](19-machine-workspaces.md). Phases 1–3 landed 2026-10-29/30;
@@ -3846,7 +3883,7 @@ The later browser host/terminal record above supersedes pending checks here.
 | M13 | Not started | Depends on M11.2 |
 | M14 | Not started | Depends on M11–M13 |
 | M15 | Accepted on Linux/Chrome | Both guest targets, typed capabilities, Unicode editing/save/URL/reload, matching C imports and opt-in browser CI |
-| M19 | Phases 1–7 on `main` (2026-11-01) | Real-input GUI scenarios pass on Windows; Phase 0 review, Phase 7 latency capture and Phases 8–9 remain |
+| M19 | Phases 1–7 on `main`; Phase 8 on `m19-after` (2026-11-02) | 18 real-input GUI scenarios pass on Windows; Phase 0 review, Phase 9 and the cross-workspace switch time remain |
 
 ## Implementation records
 

@@ -18,6 +18,7 @@ import ui.WorkbenchMachineView;
 import ui.WorkbenchMachineView.WorkbenchWorkspaceState;
 import ui.WorkbenchRowKind;
 import workspace.client.WorkspaceCatalogMirror;
+import ui.WorkbenchPanel;
 import ui.WorkbenchRowKey;
 import ui.WorkbenchTreeModel;
 import workspace.service.WorkspaceAgentProtocol.AgentCatalog;
@@ -68,11 +69,26 @@ class WorkbenchTreeTestMain {
 		foreignProjection();
 		catalogThrottle();
 		emptyAndLoading();
+		emptyStateCountsRootItems();
 		suitOff();
 		workspaceRoot();
 		switching();
 		rendered();
 		Sys.println("workbench-tree: ok");
+	}
+
+	/** The "Nothing here yet" start is for a workspace with no group, terminal or session; sessions in the root count. */
+	static function emptyStateCountsRootItems():Void {
+		var root = "C:/work/resume";
+		var none:TerminalCatalog = {instance: "i", next: null, workspaceRoot: root, groups: [], terminals: []};
+		var noAgents:AgentCatalog = {instance: "i", root: root, status: "ready", next: null, records: []};
+		var rootSession:AgentCatalog = {instance: "i", root: root, status: "ready", next: null, records: [
+			{id: "a2", name: "Android live acceptance", group: null, cwd: root, thread: "", state: "idle", turn: null, workspaceRoot: root}]};
+		require(WorkbenchPanel.workspaceIsEmpty(none, noAgents), "a workspace with nothing is not empty");
+		require(WorkbenchPanel.workspaceIsEmpty(none, null), "agents not loaded yet should not hide the start");
+		require(!WorkbenchPanel.workspaceIsEmpty(none, rootSession), "a session in the workspace root does not count");
+		require(!WorkbenchPanel.workspaceIsEmpty(catalog(root), noAgents), "groups and terminals do not count");
+		require(!WorkbenchPanel.workspaceIsEmpty(null, noAgents), "an unloaded catalog is empty");
 	}
 
 	/** Workspaces in suit's order, then New Workspace…; groups (by order), then their terminals and sessions. */
@@ -377,5 +393,20 @@ class WorkbenchTreeTestMain {
 		model.update(catalog("C:/src/exosuit"), null, null, view(machineWorkspaces, "exo", ["C:/src/exosuit"]));
 		submit();
 		require(!tree.isExpanded("w:exo") && visible().join(",") == "w:exo,w:resume,w:eon,n:new-workspace", "collapse did not stick");
+		// Another window's focus marks its workspace and its group (M19 Phase 8); a window on a group marks the group and its workspace.
+		var withWindows = view(machineWorkspaces, "resume", ["C:/work/resume"]);
+		withWindows.windows = [{window: "w2", pid: 9, context: "m/eon/"}, {window: "w3", pid: 10, context: "m/resume/work"}];
+		model.update(catalog("C:/work/resume"), null, null, withWindows);
+		tree.setExpanded("w:resume", true);
+		submit();
+		text = labels();
+		require(text.indexOf("Workspace eon-series, open in another window · no folders attached") >= 0, "workspace in another window: " + text);
+		require(text.indexOf("Workspace resume-2026, open in this window, open in another window · C:/work/resume") >= 0, "a window on a group of a workspace marks the workspace too: " + text);
+		require(Lambda.exists(text, function(label) return StringTools.startsWith(label, "Group Work in workspace resume-2026") && StringTools.endsWith(label, ", open in another window")), "group in another window: " + text);
+		require(!Lambda.exists(text, function(label) return StringTools.startsWith(label, "Group Drafts") && label.indexOf("another window") >= 0), "an unfocused group is not marked: " + text);
+		model.update(catalog("C:/work/resume"), null, null, view(machineWorkspaces, "resume", ["C:/work/resume"]));
+		tree.setExpanded("w:resume", true);
+		submit();
+		require(!Lambda.exists(labels(), function(label) return label.indexOf("another window") >= 0), "no other window, no marker: " + labels());
 	}
 }

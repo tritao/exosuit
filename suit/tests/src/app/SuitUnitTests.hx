@@ -36,6 +36,7 @@ class SuitUnitTests {
 		deniedProcessKeepsItsRecord();
 		temporaryStateIsDisposable();
 		machineCatalog();
+		windowFocus();
 		if (failures > 0) {
 			Sys.println('FAIL: $failures suit unit check(s)');
 			Sys.exit(1);
@@ -303,13 +304,48 @@ class SuitUnitTests {
 		check(unknown[0].service == null && unknown[1].service == null, "suit reports no service until it knows one");
 	}
 
+	/**
+		Window focus (M19 Phase 8): an editor's record carries its window and context; a `machine` reply lists them in
+		`windows`, next to `machine`. Frozen: the reply's shape, the entry's fields, an old record without them, junk entries.
+	**/
+	static function windowFocus():Void {
+		var base = haxe.io.Path.join([Sys.getEnv("TEMP") != null ? Sys.getEnv("TEMP") : ".", "suit-unit-window-" + Sys.getPid()]);
+		sys.FileSystem.createDirectory(base);
+		var record = suit.SuitRecord.SuitRecords.create(4242, SuitKind.Editor);
+		record.window = "w4242-1";
+		record.context = "m1/ws%2F1/g1";
+		suit.SuitRecord.SuitRecords.write(base, record);
+		var read = suit.SuitRecord.SuitRecords.read(suit.SuitRecord.SuitRecords.path(base, 4242));
+		check(read != null && read.window == "w4242-1" && read.context == "m1/ws%2F1/g1", "an editor record keeps its window and context");
+		var document:Dynamic = haxe.Json.parse(sys.io.File.getContent(suit.SuitRecord.SuitRecords.path(base, 4242)));
+		check(document.window == "w4242-1" && document.context == "m1/ws%2F1/g1" && document.version == 2, "the record's JSON names the fields window and context");
+		sys.io.File.saveContent(suit.SuitRecord.SuitRecords.path(base, 4243), '{"version":2,"pid":4243,"kind":"editor","registeredAt":1,"roots":[],"workspaces":[]}');
+		var old = suit.SuitRecord.SuitRecords.read(suit.SuitRecord.SuitRecords.path(base, 4243));
+		check(old != null && old.window == null && old.context == null, "a record written before windows registered none reads without them");
+		deleteTree(base);
+
+		var reply:Dynamic = haxe.Json.parse(haxe.Json.stringify({ok: true, machine: {}, windows: [{window: "w7-1", pid: 7, context: "m/w1/g1"}]}));
+		check(keys(reply) == "machine,ok,windows" && keys((reply.windows : Array<Dynamic>)[0]) == "context,pid,window", "a machine reply lists windows beside machine, got " + keys(reply));
+		var windows = suit.WindowFocus.WindowFocuses.decode(haxe.Json.parse('{"ok":true,"windows":[{"window":"a","pid":1,"context":"m/w1/g1"},{"window":"b","pid":2,"context":"m/w1/"},'
+			+ '{"window":"c","pid":0,"context":"m/w2/"},{"window":7,"pid":3,"context":"x"},"junk",{"pid":4,"context":"m/w1/g1"}]}'));
+		check(windows.length == 2 && windows[0].window == "a" && windows[1].context == "m/w1/", "malformed window entries are left out, got " + windows.length);
+		check(suit.WindowFocus.WindowFocuses.decode(haxe.Json.parse('{"ok":true,"machine":{}}')).length == 0, "a reply from a suit without windows has none");
+		check(suit.WindowFocus.WindowFocuses.decode(null).length == 0, "no reply has no windows");
+		var all = [{window: "a", pid: 1, context: "m/w1/g1"}, {window: "b", pid: 2, context: "m/w1/"}, {window: "c", pid: 3, context: "m/w2/g9"}];
+		check(suit.WindowFocus.WindowFocuses.elsewhere(all, "a", "w1").length == 1, "a workspace is marked by the other windows on it, not this one");
+		check(suit.WindowFocus.WindowFocuses.elsewhere(all, "a", "w1", "g1").length == 0 && suit.WindowFocus.WindowFocuses.elsewhere(all, "x", "w1", "g1").length == 1,
+			"a group is marked by the windows on that group");
+		check(suit.WindowFocus.WindowFocuses.elsewhere(all, "x", "w1", "").length == 1 && suit.WindowFocus.WindowFocuses.elsewhere(all, "x", "w3").length == 0,
+			"the workspace root is a group with an empty id; another workspace has no marker");
+	}
+
 	/** A workspace's service in a `machine` reply: its running service process, with the socket its endpoint.json names. */
 	static function serviceReply(base:String):Void {
 		var state = base + "/service-state";
 		sys.FileSystem.createDirectory(state);
 		function record(pid:Int, kind:SuitKind, workspace:Null<String>, stateDir:Null<String>, started:Float, generation:Null<String>):SuitProcess
 			return {pid: pid, started: started, parent: 1, kind: kind, source: Registered, root: null, roots: [], workspace: workspace, workspaces: [],
-				stateDir: stateDir, generation: generation, owner: null, commandLine: "", orphaned: false, group: OtherGroup, relay: null};
+				stateDir: stateDir, generation: generation, window: null, context: null, owner: null, commandLine: "", orphaned: false, group: OtherGroup, relay: null};
 		function endpoint(pid:Int, generation:String):Void
 			sys.io.File.saveContent(state + "/endpoint.json", "{\"socket\":\"pipe-w1\",\"workspaceId\":\"w1\",\"managerPid\":" + pid + ",\"generation\":\"" + generation + "\"}");
 		var processes = [record(7, Editor, "w1", state, 1, null), record(8, WorkspaceManager, "w2", state, 1, null),

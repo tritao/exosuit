@@ -10,6 +10,8 @@ import suit.MachineCatalog.MachineState;
 import suit.MachineCatalog.MachineWorkspace;
 import suit.SuitClient;
 import suit.SuitPaths;
+import suit.WindowFocus;
+import suit.WindowFocus.WindowFocuses;
 import workspace.PathKey;
 import workspace.transport.NativeRpcHub;
 import workspace.transport.NativeRpcTransport;
@@ -42,6 +44,8 @@ class MachineClient {
 	var lastSignature:Null<String>;
 
 	public var machine(default, null):Null<MachineState>;
+	/** Where each editor window is focused, as suit last reported (M19 Phase 8); empty from an older suit. */
+	public var windows(default, null):Array<WindowFocus> = [];
 	/** Why the last request failed; null after one succeeds. */
 	public var error(default, null):Null<String>;
 	/** Changes whenever `machine` or `error` does. */
@@ -52,6 +56,9 @@ class MachineClient {
 	final scratches:Map<String, String> = [];
 	/** The service of each workspace suit reported one for (M19 Phase 6). */
 	final services:Map<String, MachineService> = [];
+	/** A service the editor started itself, until suit's listing names it: suit learns of a service some seconds after it is up. */
+	final provisional:Map<String, {service:MachineService, until:Float}> = [];
+	static inline final PROVISIONAL_MS = 20000.0;
 
 	public function new(events:EventPump, clock:Void->Float) {
 		hub = new NativeRpcHub(events);
@@ -59,8 +66,13 @@ class MachineClient {
 		enabled = SuitClient.current() != Off;
 	}
 
-	public function refresh():Void
+	public function refresh():Void {
+		// One queued refresh is enough; one already sent may predate the change this one asks about.
+		for (pending in queue)
+			if (pending.message.op == "machine")
+				return;
 		request({op: "machine"});
+	}
 
 	/** Creates a workspace with these folders, which may be none if it has a name; `done` gets it, or the error. */
 	public function create(name:Null<String>, folders:Array<String>, ?done:(Null<MachineWorkspace>, Null<String>) -> Void):Void
@@ -147,8 +159,15 @@ class MachineClient {
 	public function serviceTarget(workspace:MachineWorkspace):WorkspaceServiceTarget
 		return WorkspaceServiceTarget.forWorkspace(workspace.id, workspace.folders, scratchOf(workspace));
 
-	public function busy():Bool
-		return current != null || queue.length > 0;
+	/** A change to the workspaces is on its way. A pending `machine` refresh does not count: a change queues behind it. */
+	public function busy():Bool {
+		if (current != null && current.message.op != "machine")
+			return true;
+		for (request in queue)
+			if (request.message.op != "machine")
+				return true;
+		return false;
+	}
 
 	/** `removed`: the request deletes the workspace, otherwise the reply's workspace replaces what is known of it. */
 	function workspaceReply(done:Null<(Null<MachineWorkspace>, Null<String>) -> Void>, removed:Bool):(Null<Dynamic>, Null<String>) -> Void
@@ -188,6 +207,7 @@ class MachineClient {
 				done(null, "suit is off (EXOSUIT_SUIT=off), so this machine has no workspaces");
 			return;
 		}
+		ConnectTimeline.mark("suit-queued", null, Std.string(message.op));
 		queue.push({message: message, answer: done});
 	}
 
@@ -239,6 +259,7 @@ class MachineClient {
 
 	function begin(request:MachineRequest, now:Float):Void {
 		current = request;
+		ConnectTimeline.mark("suit-begin", null, Std.string(request.message.op));
 		failure = null;
 		sent = false;
 		transport = null;
@@ -265,6 +286,7 @@ class MachineClient {
 	function finish(reply:Null<Dynamic>):Void {
 		var request = current;
 		var problem:Null<String> = null;
+		ConnectTimeline.mark("suit-reply", null, (request == null ? "" : Std.string(request.message.op)) + (reply == null ? " none" : " ok"));
 		if (reply == null)
 			problem = failure != null ? failure : "suit did not answer";
 		else if (reply.ok != true)
@@ -281,7 +303,10 @@ class MachineClient {
 				name: reply.machine.name, workspaces: reply.machine.workspaces})) catch (error:Dynamic) problem = Std.string(error);
 			if (problem == null) {
 				readServices(reply.machine.workspaces);
-				signature = Json.stringify(reply.machine);
+				// Only a `machine` reply lists windows; the replies to changes carry the machine alone.
+				if (Reflect.hasField(reply, "windows"))
+					windows = WindowFocuses.decode(reply);
+				signature = Json.stringify(reply.machine) + Json.stringify(windows);
 			}
 		}
 		if (request != null && request.message.op == "machine" || problem == null)
@@ -322,8 +347,34 @@ class MachineClient {
 	}
 
 	/** The service suit last reported for workspace `id`: null when it reported none. */
-	public function serviceOf(id:String):Null<MachineService>
-		return services.get(id);
+	public function serviceOf(id:String):Null<MachineService> {
+		var listed = services.get(id);
+		if (listed != null && listed.running) {
+			provisional.remove(id);
+			return listed;
+		}
+		var guess = provisional.get(id);
+		if (guess == null)
+			return null;
+		if (clock() >= guess.until) {
+			provisional.remove(id);
+			return null;
+		}
+		return guess.service;
+	}
+
+	/**
+		Records a service this editor just started, which suit's listing does not name yet; `serviceOf` reports it until suit does or a
+		short while passes. The endpoint must have the agent's own shape.
+	**/
+	public function noteService(id:String, endpoint:String, pid:Int):Void {
+		var listed = services.get(id);
+		if (listed != null && listed.running || !WorkspaceConnections.validEndpoint(endpoint, Sys.systemName() == "Windows"))
+			return;
+		provisional.set(id, {service: {endpoint: endpoint, pid: pid, running: true}, until: clock() + PROVISIONAL_MS});
+		ConnectTimeline.mark("service-noted", id);
+		revision++;
+	}
 
 	function close():Void {
 		var stream = transport;
