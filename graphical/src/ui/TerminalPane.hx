@@ -499,7 +499,10 @@ class TerminalPane implements AgentTerminalPanel {
 			: 0;
 		if (gridBaseline <= 0.0) {
 			var baselineProbe = TextLayout.create(fonts, "M", 64.0, gridTextStyle(), new ParagraphStyle(TextWrap.None));
-			gridBaseline = baselineProbe.caret(new haxeon.ui.TextLayout.TextPosition(0, 0)).y;
+			// A row is the line plus at least 2 px. Split that spare space above and below the text, so glyphs sit
+			// in the middle of the cell their background and the cursor fill; whole pixels keep glyphs crisp.
+			var spare = Math.max(0.0, rowHeight - baselineProbe.measure().height);
+			gridBaseline = baselineProbe.caret(new haxeon.ui.TextLayout.TextPosition(0, 0)).y + Math.round(spare / 2.0);
 			baselineProbe.dispose();
 		}
 		// Row display lists and glyphs are already retained. An extra raster target
