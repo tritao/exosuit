@@ -861,6 +861,12 @@ class TerminalPane implements AgentTerminalPanel {
 			if (event.key >= UiKey.A && event.key <= UiKey.Z)
 				bytes = String.fromCharCode(event.key - UiKey.A + 1);
 		}
+		// Alt+letter is Meta: ESC, then the letter, as xterm sends it (Alt+V pastes an image in Claude Code,
+		// Alt+B/F move by word). Not with Ctrl (AltGr types characters on some layouts), and not on macOS,
+		// where Option types characters.
+		if (bytes == null && (event.modifiers & (UiModifier.Alt | UiModifier.Control | UiModifier.Super)) == UiModifier.Alt
+			&& event.key >= UiKey.A && event.key <= UiKey.Z && Sys.systemName() != "Mac")
+			bytes = "\x1b" + String.fromCharCode(((event.modifiers & UiModifier.Shift) != 0 ? 65 : 97) + event.key - UiKey.A);
 		if (bytes != null) {
 			prepareInput();
 			session.write(Bytes.ofString(bytes));
