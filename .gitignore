@@ -13,3 +13,11 @@
 **/__pycache__/
 
 /agent/naming/node_modules/
+
+/android/build/
+/android/app/build/
+/android/.gradle/
+/android/.kotlin/
+/android/local.properties
+/android/nativekit/src/
+/android/**/build/

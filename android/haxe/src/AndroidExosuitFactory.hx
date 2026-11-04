@@ -1,0 +1,95 @@
+import haxe.io.Bytes;
+import haxe.io.Path;
+import haxeon.ui.host.UiApplication;
+import haxeon.ui.host.UiHostContext;
+import nativekit.ffi.NativeKit;
+import platform.HostCapabilities;
+import platform.HostCapability;
+import sys.FileSystem;
+import ui.ExosuitApp;
+import ui.ExosuitPalette;
+import haxeon.ui.icons.IconName;
+import workspace.service.WorkspaceFileProtocol;
+import workspace.service.WorkspaceTerminalProtocol;
+
+/** Builds the same ExosuitApp the desktop runs, with the capabilities a phone has, attached to its paired workspace. */
+class AndroidExosuitFactory {
+	/** The phone's remote attachment, once the app exists; the Activity's debug commands (pair, confirm) go to it. */
+	public static var remote(default, null):Null<PhoneRemote>;
+	/** The app, for the live-patch hooks (UiBridge.liveRelease, liveRebuild). */
+	public static var app(default, null):Null<ExosuitApp>;
+
+	public static function create(context:UiHostContext, appFilesRoot:String, credentialDocument:Null<Bytes>):UiApplication {
+		if (!Path.isAbsolute(appFilesRoot) || !FileSystem.isDirectory(appFilesRoot))
+			throw "An existing absolute app-files directory is required";
+		var root = appFilesRoot;
+		while (root.length > 1 && (StringTools.endsWith(root, "/") || StringTools.endsWith(root, "\\"))) root = root.substr(0, root.length - 1);
+		// The app keeps its settings and state in its private files directory, and never starts a local suit.
+		Sys.putEnv("PRAGTICAL_PORTABLE", root);
+		Sys.putEnv("EXOSUIT_SUIT", "off");
+		var app:Null<ExosuitApp> = null;
+		var redraw = function() {
+			if (app == null) context.requestFrame(); else app.requestFrame();
+		};
+		var credentials = new PhoneCredentials();
+		credentials.load(credentialDocument);
+		if (credentialDocument != null) for (index in 0...credentialDocument.length) credentialDocument.set(index, 0);
+		var phone = new PhoneRemote(context.events, function() return NativeKit.nk_time_seconds() * 1000, credentials, redraw);
+		// A workspace terminal is a service-owned PTY the phone attaches to (never a local shell); the pane gets the touch
+		// extra-keys row and finger scrolling because this host's primary input is touch.
+		var openTerminal = function(id:String, cwd:String, restored:Bool, requestFrame:Void->Void, palette:ui.TerminalPalette, group:Null<String>,
+				directory:Null<String>):ui.TerminalPanel {
+			var panel = ui.TerminalPane.openRemote(function() return phone, id, cwd, restored, requestFrame, palette, group, directory, null, true);
+			cast(panel, ui.TerminalPane).touchKeys = true;
+			cast(panel, ui.TerminalPane).substituteGlyphs = true;
+			return panel;
+		};
+		var created = new ExosuitApp(context.fonts, ExosuitPalette.theme(false), context, null, new HostCapabilities([HostCapability.Filesystem]), null,
+			false, null, openTerminal);
+		app = created;
+		AndroidExosuitFactory.app = created;
+		// A phone is about 50 terminal columns wide at 11 px; the desktop default (14) leaves 40. A user's own choice stays.
+		var settings = created.application.settings.store;
+		if (settings.isDefault("terminal/fonts/font_size")) settings.set("terminal/fonts/font_size", haxeon.ui.properties.PropertyValue.Int(11));
+		remote = phone;
+		var panel = new PhonePanel(phone, redraw);
+		created.registerSidebarDestination("remote-access", IconName.Radar, function() return panel,
+			new haxeon.ui.widgets.sidebar.SidebarModeOptions("Remote", 30, true));
+		var filesAttached = false, workbenchAttached = false;
+		var applicationPoll = context.onPoll;
+		// Debug builds with files/automation.on (see ExosuitActivity): the labelled elements and the app's state for the test scripts.
+		var automationDirectory = devtools.AutomationProbe.directoryFromEnvironment();
+		var automation = automationDirectory == null ? null : new devtools.AutomationProbe(automationDirectory, created.context(), function() {
+			var state:Dynamic = created.automationState();
+			state.phone = phone.automationState();
+			return state;
+		});
+		context.onPoll = function() {
+			if (applicationPoll != null) applicationPoll();
+			if (automation != null) automation.poll();
+			phone.poll();
+			var identified = phone.fileScope() != null;
+			var filesAvailable = identified && phone.hasCapability(WorkspaceFileProtocol.READ);
+			if (filesAvailable && !filesAttached) {
+				filesAttached = true;
+				created.attachWorkspace(phone);
+			} else if (!filesAvailable && filesAttached) {
+				filesAttached = false;
+				created.detachWorkspace(phone);
+			}
+			var workbenchAvailable = identified && phone.hasCapability(WorkspaceTerminalProtocol.READ) && phone.hasCapability(WorkspaceTerminalProtocol.CATALOG);
+			if (workbenchAvailable && !workbenchAttached) {
+				workbenchAttached = true;
+				created.attachWorkbench(phone.workbenchService());
+				created.showSidebarMode("workbench");
+			} else if (!workbenchAvailable && workbenchAttached) {
+				workbenchAttached = false;
+				created.detachWorkbench(phone.workbenchService());
+				created.showSidebarMode("remote-access");
+			}
+		};
+		created.showSidebarMode("remote-access");
+		phone.connectSaved();
+		return created;
+	}
+}
