@@ -62,4 +62,11 @@ class TestShell {
   public static function flood():Bytes {
     return line(windows() ? "[Console]::Out.Write('x' * 150000); 'DONE'" : "head -c 150000 /dev/zero | tr '\\000' x; printf DONE\\n");
   }
+
+  /** Paints `rows` x `columns` cells, each with its own truecolor foreground and background (about 40 bytes a cell). */
+  public static function mosaic(rows:Int, columns:Int):Bytes {
+    return line(windows()
+      ? "$e=[char]27; $s=[Text.StringBuilder]::new(); foreach($r in 1.." + rows + "){foreach($c in 1.." + columns + "){[void]$s.Append(\"$e[$r;${c}H$e[38;2;$(($r*37+$c*59)%256);$(($r*13)%256);$(($c*29)%256);48;2;$(($c*71)%256);$(($r*11+$c)%256);$((255-$c))mX\")}}; [Console]::Out.Write($s.ToString())"
+      : "awk 'BEGIN{for(r=1;r<=" + rows + ";r++)for(c=1;c<=" + columns + ";c++)printf \"\\033[%d;%dH\\033[38;2;%d;%d;%d;48;2;%d;%d;%dmX\",r,c,(r*37+c*59)%256,(r*13)%256,(c*29)%256,(c*71)%256,(r*11+c)%256,255-c}'");
+  }
 }

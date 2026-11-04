@@ -1,6 +1,7 @@
 package app;
 
 import haxeon.rpc.MemoryTransport;
+import haxeon.rpc.RpcClient;
 import haxeon.rpc.RpcConnectAttempt;
 import haxeon.rpc.RpcConnectResult;
 import haxeon.rpc.RpcConnection;
@@ -146,7 +147,8 @@ private class FakeService {
 
 	function setup(connection:RpcConnection):Void {
 		connection.register(WorkspaceCatalogProtocol.CATALOG, function(query:CatalogQuery, context) {
-			if (query.ref.workspace != id) {
+			// A service answers to its own id and to the alias "workspace", and names its real id in the reply.
+			if (query.ref.workspace != id && query.ref.workspace != "workspace") {
 				context.fail({code: "unknown_workspace", message: "unknown_workspace", ambiguous: false});
 				return;
 			}
@@ -345,6 +347,7 @@ class WorkspaceCatalogTestMain {
 
 	static function main():Void {
 		mirrorOrder();
+		sharedWatch();
 		bounds();
 		bigWorkspace();
 		unwatchNeverAnswered();
@@ -559,6 +562,55 @@ class WorkspaceCatalogTestMain {
 		require(injected && watch.live && watch.mirror.groups.exists("0early") && Lambda.count(watch.mirror.sessions) == 12, "the change made during the read arrived: " + watch.error);
 		pool.dispose();
 		print("PASS: a CHANGED during a multi-page read is read after it");
+	}
+
+	/**
+		A device has one connection per relay route, so its catalog watch follows the connection its own client holds
+		(`WorkspaceCatalogWatch.shared`): started on the alias it learns the workspace's id, follows changes, and after a
+		restart of the service attaches to the new connection and reads again.
+	**/
+	static function sharedWatch():Void {
+		var network = new Network();
+		var a = new FakeService("A", "ia", clock);
+		network.add(a, ep("A"));
+		a.addSession("s1", "One");
+		var watch = WorkspaceCatalogWatch.shared({machine: "m", workspace: "workspace"}, clock, true);
+		var granted = [WorkspaceCatalogProtocol.CAPABILITY, workspace.service.WorkspaceProtocol.READ, workspace.service.WorkspaceAgentProtocol.READ,
+			workspace.service.WorkspaceTerminalProtocol.READ];
+		var attached = 0;
+		var client = new RpcClient(network.connector(ep("A")), clock, function() return 0.5,
+			new RpcPeerOptions("exosuit-editor/1", granted, granted, 2000, 262144, 8, 1048576), function(connection, _, _) {
+				attached++;
+				watch.attach(connection);
+			}, 100, 5000, 5000);
+		function spin(rounds:Int):Void {
+			for (round in 0...rounds) {
+				client.poll();
+				watch.poll();
+				a.poll();
+			}
+		}
+		spin(60);
+		require(watch.live && attached == 1, "the shared watch reads on the client's connection: " + watch.error);
+		require(watch.ref.workspace == "A" && watch.ref.machine == "m", "the watch adopted the service's real id: " + watch.ref.workspace);
+		require(Lambda.count(watch.mirror.sessions) == 1, "the first page holds the session");
+		var readsBefore = watch.reads;
+		a.addSession("s2", "Two");
+		spin(60);
+		require(Lambda.count(watch.mirror.sessions) == 2 && watch.reads == readsBefore + 1, "a CHANGED reads once");
+		// The service goes away and comes back as another instance: the watch keeps its copy while down, then resets.
+		a.kill();
+		spin(60);
+		require(!watch.live && Lambda.count(watch.mirror.sessions) == 2, "down: not live, copy kept");
+		a.restart("ib");
+		for (round in 0...80) {
+			now += 100;
+			spin(1);
+		}
+		require(watch.live && attached == 2 && watch.mirror.instance == "ib", "after the restart it attached to the new connection and read again");
+		watch.dispose();
+		client.close();
+		print("PASS: a shared catalog watch learns the id, follows changes and reattaches after a restart");
 	}
 
 	/** CHANGED does not read before a failed read's delay is over. */

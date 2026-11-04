@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "package": {
+    "name": "exosuit-machine-remote-test"
+  },
+  "entry": "app.MachineRemoteTestMain",
+  "sourceRoots": [
+    "src"
+  ],
+  "scopeSourceRoots": false,
+  "dependencies": {
+    "exosuit-agent": {
+      "path": "../../agent"
+    }
+  },
+  "target": "host",
+  "outputDir": "build"
+}

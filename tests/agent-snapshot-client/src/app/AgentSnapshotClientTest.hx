@@ -60,7 +60,9 @@ class AgentSnapshotClientTest {
   client.agentAction("a","prompt","reject",null,null,null,function() accepted++);server.poll();conn.poll();
   require(accepted==3 && client.agentError()=="Rejected" && actions==4, "Rejected action was acknowledged or replayed");
   client.agentAction("a","prompt","scope",null,null,null,function() accepted++);server.poll();conn.poll();
-  require(accepted==3 && actions==5, "Invalid snapshot scope acknowledged an action");
+  require(accepted==3 && actions==5 && client.agentDeliveryUncertain("a"), "Invalid snapshot scope was not treated as uncertain");
+  client.agentAction("a","read","",null);server.poll();conn.poll();
+  require(client.agentDeliveryReviewReady("a") && client.acknowledgeAgentDelivery("a"),"Refreshed view did not permit review");
   client.agentAction("a","prompt","page",null,null,null,function() accepted++);server.poll();conn.poll();
   current=cast client.agentView("a");
   require(accepted==4 && current.items != null && current.items.length==1 && client.agentHistory("a").hasOlder, "Initial snapshot did not publish only its first page");
@@ -95,10 +97,41 @@ class AgentSnapshotClientTest {
   require(assembler.view().activity==longText,"Large view was not assembled losslessly");
   client.dispose();conn.close();server.close();
   for (mode in ["token","offset","total","oversize","generation","connection","session"]) malformedImage(mode);
+  lostReplyRecovery();
   AgentHistoryClientTest.run();
   disposalDuringSnapshot();
   realServiceRoundTrip();
   Sys.println("PASS: negotiated snapshot acknowledgement, stale fencing, errors and bounded assembly");
+ }
+ /** A reply lost to a dropped connection blocks sends until the conversation is re-read and the user confirms. */
+ static function lostReplyRecovery():Void {
+  var clock=function() return 1000.0,pair=MemoryTransport.pair(),conn=new RpcConnection(pair.client,clock),server=new RpcConnection(pair.server,clock);
+  var endpoint=new SnapshotEndpoint(conn),client=new workspace.client.RpcWorkspaceWorkbenchClient(endpoint,clock),applied=0,accepted=0;
+  var workspaceId="ws-1";
+  client.workspaceIdentity=function() return workspaceId;
+  client.poll();client.agentCatalog={instance:"test",root:"/fixture",records:[],status:"ready"};
+  server.register(WorkspaceAgentProtocol.ACTION,function(q,ctx) {if(q.action!="read") applied++;ctx.respond(view("token","current"));});
+  pair.server.loseNext();client.agentAction("a","prompt","once",null,null,null,function() accepted++);server.poll();
+  require(applied==1 && accepted==0,"fixture did not lose an applied reply");
+  endpoint.conn=null;conn.close();client.poll();
+  require(client.agentDeliveryUncertain("a") && !client.agentDeliveryReviewReady("a"),"lost reply did not persist uncertainty");
+  var replacement=MemoryTransport.pair(),next=new RpcConnection(replacement.client,clock),nextServer=new RpcConnection(replacement.server,clock);
+  endpoint.conn=next;endpoint.generation="new-service";client.poll();
+  nextServer.register(WorkspaceAgentProtocol.ACTION,function(q,ctx) {if(q.action!="read") applied++;ctx.respond(view("token","refreshed"));});
+  client.agentCatalog={instance:"new-service",root:"/fixture",records:[],status:"ready"};
+  client.agentAction("a","prompt","once",null);nextServer.poll();next.poll();
+  require(applied==1 && !client.acknowledgeAgentDelivery("a"),"reconnect allowed unreviewed retry");
+  client.agentAction("a","queue","once",null,null,null);nextServer.poll();next.poll();
+  client.agentAction("a","steer","once",null,null,null);nextServer.poll();next.poll();
+  require(applied==1,"queue or steer was sent while delivery was uncertain");
+  workspaceId="ws-2";
+  require(!client.agentDeliveryUncertain("a"),"uncertainty leaked to another workspace's session with the same id");
+  workspaceId="ws-1";
+  client.agentAction("a","read","",null);nextServer.poll();next.poll();
+  require(client.agentDeliveryUncertain("a") && client.agentDeliveryReviewReady("a"),"refresh silently cleared uncertainty");
+  require(client.acknowledgeAgentDelivery("a"),"explicit review did not unlock retry");
+  client.agentAction("a","prompt","retry",null);nextServer.poll();next.poll();require(applied==2,"reviewed manual retry failed");
+  client.dispose();next.close();nextServer.close();server.close();
  }
  static function malformedImage(mode:String):Void {
   var clock=function() return 1000.0,pair=MemoryTransport.pair(),conn=new RpcConnection(pair.client,clock),server=new RpcConnection(pair.server,clock);

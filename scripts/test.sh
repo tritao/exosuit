@@ -107,6 +107,7 @@ terminal_context_state=$(mktemp -d)
 PRAGTICAL_PORTABLE="$terminal_context_state" run_test terminal-context-menu
 rm -rf "$terminal_context_state"
 run_test sidebar-layout
+run_test terminal-keys
 run_test workbench-drag
 run_test workbench-tree
 run_test context-snapshots

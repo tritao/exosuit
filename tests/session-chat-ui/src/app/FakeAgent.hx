@@ -5,6 +5,14 @@ import workspace.client.AgentSessionDefaults;
 import workspace.service.WorkspaceAgentProtocol;
 
 class FakeAgent implements WorkspaceAgentClient {
+	public var deliveryUncertain:Bool = false;
+	public var deliveryReviewReady:Bool = false;
+	public function agentDeliveryUncertain(id:String):Bool return deliveryUncertain;
+	public function agentDeliveryReviewReady(id:String):Bool return deliveryReviewReady;
+	public function acknowledgeAgentDelivery(id:String):Bool {
+		if (!deliveryUncertain || !deliveryReviewReady) return false;
+		deliveryUncertain = false; deliveryReviewReady = false; return true;
+	}
 	public var record:AgentRecord = {id:"session", name:"Session", group:"group", cwd:"/repo", thread:"thread", state:"idle", turn:null, workspaceRoot:"/repo", provider:"codex"};
 	public var view:AgentView;
 	public var actions:Array<String> = [];

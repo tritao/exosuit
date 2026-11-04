@@ -239,6 +239,57 @@ class TerminalServiceTests {
       || restored.rowText(row).indexOf("DONE") >= 0) outputVisible = true;
     restored.close();
     require(outputVisible, "Terminal screen snapshot did not restore the live viewport");
+    // A phone reaches the service through a relay: no answer may be bigger than one stream frame, whatever the screen holds.
+    var frame = workspace.service.MachineDirectoryProtocol.MachineStreamFrame.MAX_PAYLOAD;
+    // A screen where every cell has its own colours: the snapshot is bigger than one frame and arrives in pages.
+    var drawn = false, resized = false;
+    // A desktop-sized terminal (a phone observing it gets that grid): 160 x 50 cells of mosaic is far more than 48 KiB.
+    client.call(WorkspaceTerminalProtocol.RESIZE, {workspace:"w", instance:"instance", id:"bounded", columns:160, rows:50}, 1000,
+      function(_) resized = true, function(e) throw e.code);
+    deadline = clock() + 5000;
+    while (!resized) { require(clock() < deadline, "Resize timed out"); step(); }
+    client.call(WorkspaceTerminalProtocol.INPUT, {workspace:"w", instance:"instance", id:"bounded", sequence:2, data:TestShell.mosaic(50, 160)},
+      1000, function(_) drawn = true, function(e) throw e.code);
+    // Reads a whole snapshot page by page as a client does; every page must fit a frame.
+    var readSnapshot = function():{pages:Int, data:Bytes} {
+      var offset = 0, total = 0, pages = 0, token = 0, joined:Null<Bytes> = null;
+      while (true) {
+        var page:Null<TerminalScreenSnapshot> = null;
+        client.call(WorkspaceTerminalProtocol.SNAPSHOT, {workspace:"w", instance:"instance", id:"bounded", token:token, offset:offset},
+          1000, function(value) page = value, function(e) throw e.code);
+        var until = clock() + 2000;
+        while (page == null) { require(clock() < until, "Snapshot page timed out"); step(); }
+        var got:TerminalScreenSnapshot = cast page;
+        require(WorkspaceTerminalProtocol.SNAPSHOT.encodeResponse(got).length <= frame, "A snapshot page is bigger than one relay frame");
+        pages++;
+        if (got.total == null) { require(offset == 0, "A snapshot ended in the middle"); return {pages:pages, data:got.data}; }
+        if (offset == 0) { total = got.total; token = got.token == null ? -1 : got.token; joined = Bytes.alloc(total); }
+        var target:Bytes = cast joined;
+        require(offset + got.data.length <= total && got.data.length > 0, "A snapshot page overran the snapshot");
+        target.blit(offset, got.data, 0, got.data.length);
+        offset += got.data.length;
+        if (offset == total) return {pages:pages, data:target};
+      }
+    };
+    deadline = clock() + 15000;
+    var shotPages = 0, lastSize = 0, lastPages = 0;
+    var mosaicData:Null<Bytes> = null;
+    while (mosaicData == null) {
+      require(clock() < deadline, "The colour mosaic never reached the screen (drawn " + drawn + ", last snapshot " + lastSize + " bytes in " + lastPages + " pages)");
+      step();
+      Sys.sleep(0.1);
+      if (!drawn) continue;
+      var read = readSnapshot();
+      lastSize = read.data.length; lastPages = read.pages;
+      // The shell paints for a while: wait until the snapshot shows the mosaic (capital X cells, the flood before it was lower case) in a middle row.
+      var probe = Emulator.open(160, 50, 8, "xterm-256color", false);
+      probe.restoreScreenSnapshot(read.data);
+      probe.snapshot();
+      var painted = probe.rowText(10).indexOf("XXXXXXX") >= 0;
+      probe.close();
+      if (read.pages > 1 && painted) { shotPages = read.pages; mosaicData = read.data; }
+    }
+    require(shotPages > 1, "The paged colour mosaic snapshot did not restore (" + shotPages + " pages)");
     var peer = MemoryTransport.pair();
     var viewer = new RpcConnection(peer.client, clock), viewerServer = new RpcConnection(peer.server, clock);
     manager.bind(viewerServer, [WorkspaceTerminalProtocol.READ, WorkspaceTerminalProtocol.CONTROL]);

@@ -421,6 +421,20 @@ class WorkbenchTreeTestMain {
 		require(text.indexOf("Workspace resume-2026, open in this window · C:/work/resume") >= 0, "workspace label: " + text);
 		require(text.indexOf("Workspace eon-series · no folders attached") >= 0, "folderless workspace label: " + text);
 		require(text.indexOf("Group Work in workspace resume-2026 · C:/work/resume") >= 0, "group label names its workspace: " + text);
+		// The keyboard: with the open workspace's row selected and focused, Down selects its first group and Enter activates that row.
+		var activated:Array<String> = [];
+		tree.onActivate = function(key, _) { activated.push(key); return true; }
+		tree.select("w:resume", false);
+		tree.focusItem("w:resume");
+		submit();
+		context.key(haxeon.ui.core.UiEventKind.KeyDown, haxeon.ui.core.UiKey.Down, 0);
+		submit();
+		require(tree.selectedKey == "g:work", "Down from the workspace row selected " + tree.selectedKey);
+		context.key(haxeon.ui.core.UiEventKind.KeyDown, haxeon.ui.core.UiKey.Enter, 0);
+		submit();
+		require(activated.join(",") == "g:work", "Enter activated " + activated);
+		tree.select("w:resume", false);
+		submit();
 		// Expanding a closed workspace asks to open it instead, and leaves it closed until it is.
 		tree.setExpanded("w:exo", true);
 		submit();

@@ -75,7 +75,29 @@ class SettingsUiTests {
   check(store.getString("workbench/codex/default_model") == "", "model picker preserves default storage semantics");
  }
 
+
+ static function relayUrl():Void {
+  var store = new SettingsStore(PreferencesRegistry.create());
+  check(store.getString(config.RelayUrl.SETTING) == "" && config.RelayUrl.resolve(store.getString(config.RelayUrl.SETTING)) == config.RelayUrl.DEFAULT,
+   "the relay URL defaults to the shared relay");
+  check(store.set(config.RelayUrl.SETTING, PropertyValue.Text("https://my-relay.example.workers.dev/")) == null, "a custom https relay is accepted");
+  check(config.RelayUrl.resolve(store.getString(config.RelayUrl.SETTING)) == "https://my-relay.example.workers.dev", "the custom relay is used, without its trailing slash");
+  check(PreferencesRegistry.snapshot(store).relayUrl == "https://my-relay.example.workers.dev/", "the typed settings carry the relay URL");
+  check(store.set(config.RelayUrl.SETTING, PropertyValue.Text("http://relay.example")) != null, "a plain http relay is refused");
+  check(store.set(config.RelayUrl.SETTING, PropertyValue.Text("not a url")) != null, "text that is not a URL is refused");
+  check(store.getString(config.RelayUrl.SETTING) == "https://my-relay.example.workers.dev/", "a refused value leaves the setting unchanged");
+  check(store.set(config.RelayUrl.SETTING, PropertyValue.Text("")) == null && config.RelayUrl.resolve("") == config.RelayUrl.DEFAULT, "empty goes back to the default");
+  check(config.RelayUrl.resolve("garbage") == config.RelayUrl.DEFAULT, "an invalid saved value falls back to the default");
+  var file = "/tmp/exosuit-relay-url-" + Sys.getPid() + ".json";
+  var saved = new SettingsStore(PreferencesRegistry.create(), file);
+  saved.set(config.RelayUrl.SETTING, PropertyValue.Text("https://persisted.example"));
+  var reloaded = new SettingsStore(PreferencesRegistry.create(), file);
+  check(reloaded.getString(config.RelayUrl.SETTING) == "https://persisted.example", "the relay URL persists in settings.json");
+  sys.FileSystem.deleteFile(file);
+ }
+
  public static function main():Int {
+  relayUrl();
   var store = new SettingsStore(PreferencesRegistry.create());
   var panel = new ExosuitSettingsPanel(store, function() return [], function() {});
   var definition:haxeon.ui.settings.SettingDefinition = cast store.registry.get("files/explorer/excluded_names");

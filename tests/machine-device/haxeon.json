@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "package": {"name": "exosuit-machine-device-test"},
+  "entry": "app.MachineDeviceTestMain",
+  "sourceRoots": ["src"],
+  "scopeSourceRoots": false,
+  "dependencies": {"pragtical_hx": {"path": "../.."}},
+  "target": "host",
+  "outputDir": "build"
+}

@@ -13,6 +13,9 @@ import workspace.service.WorkspaceFileProtocol.FileRootDescriptor;
 import workspace.service.WorkspaceFoldersProtocol;
 import workspace.service.WorkspaceFileProtocol.FileSearchPageResult;
 import workspace.service.WorkspaceCatalogProtocol;
+import workspace.service.MachineDirectoryProtocol;
+import workspace.service.MachineDirectoryProtocol.MachineDirectory;
+import workspace.service.MachineDirectoryProtocol.MachineStreamFrame;
 import workspace.service.WorkspaceLifecycleProtocol;
 import workspace.service.WorkspacePairingProtocol;
 import workspace.service.WorkspaceScmProtocol;
@@ -108,13 +111,17 @@ class RpcCompatibilityTests {
 		var target:TerminalTarget = {workspace:"w",instance:"i",id:"t"};
 		require(WorkspaceTerminalProtocol.SNAPSHOT.id == 119,
 			"Terminal screen snapshot method id changed");
-		var snapshotRequest = WorkspaceTerminalProtocol.SNAPSHOT.encodeRequest(target);
+		var snapshotRequest = WorkspaceTerminalProtocol.SNAPSHOT.encodeRequest({workspace:"w",instance:"i",id:"t"});
+		// A paged-snapshot query writes its optional token and offset as nil; a request from an older client (the bare
+		// terminal target) still decodes, with no token, as a request for the whole snapshot.
 		require(RpcProtocol.encode(Request(1, 119, 1000, snapshotRequest), 4096)
-			.compare(bytes("8104940177cd03e8c40a8301a17702a16903a174")) == 0,
+			.compare(bytes("8104940177cd03e8c40e8501a17702a16903a17404c005c0")) == 0,
 			"Terminal screen snapshot RPC vector changed");
+		var olderQuery = WorkspaceTerminalProtocol.SNAPSHOT.decodeRequest(bytes("8301a17702a16903a174"));
+		require(olderQuery.id == "t" && olderQuery.token == null && olderQuery.offset == null, "An older snapshot request no longer decodes");
 		require(WorkspaceTerminalProtocol.TERMINATE.encodeRequest(target).compare(bytes("8301a17702a16903a174"))==0,"Terminal target vector changed");
 		var control:TerminalControl={workspace:"w",instance:"i",id:"t",claim:true,takeover:true};
-		var controlBytes=bytes("8501a17702a16903a17404c305c3");
+		var controlBytes=bytes("8601a17702a16903a17404c305c306c0");
 		require(WorkspaceTerminalProtocol.SET_CONTROL.encodeRequest(control).compare(controlBytes)==0,"Terminal controller lease vector changed");
 		require(WorkspaceTerminalProtocol.SET_CONTROL.decodeRequest(controlBytes).takeover,"Terminal controller takeover decode changed");
 		var terminalRead:TerminalRead = {workspace:"w",instance:"i",id:"t",offset:haxe.Int64.make(1,2)};
@@ -234,7 +241,7 @@ class RpcCompatibilityTests {
 		var createGroup:RenameGroup={workspace:"w",epoch:"e",operation:"op",group:"g",expectedRevision:0,name:"N",action:"create",parent:"work",cwd:null,order:2};
 		require(WorkspaceProtocol.GROUP.encodeRequest(createGroup).compare(bytes("8a01a17702a16503a26f7004a167050006a14e07a663726561746508a4776f726b09c00a02"))==0,"Group tree mutation vector changed");
 		var groupedOpen:TerminalOpen={workspace:"w",instance:"i",id:"t",create:true,columns:80,rows:24,group:"g",directory:"/w"};
-		require(WorkspaceTerminalProtocol.OPEN.encodeRequest(groupedOpen).compare(bytes("8b01a17702a16903a17404c30550061807a16708a22f7709c00ac00bc0"))==0,"Grouped terminal open vector changed");
+		require(WorkspaceTerminalProtocol.OPEN.encodeRequest(groupedOpen).compare(bytes("8c01a17702a16903a17404c30550061807a16708a22f7709c00ac00bc00cc0"))==0,"Grouped terminal open vector changed");
 
 		require(MessagePackFrame.pack(query).compare(bytes("484d504b0100000000048101a177")) == 0, "Frame vector changed");
 		// Unknown map fields are skipped even when they contain nested values; scalar/collection wire defaults remain domain-validated.
@@ -254,6 +261,7 @@ class RpcCompatibilityTests {
 		require(WorkspaceProtocol.RENAME.decodeRequest(bytes("8606a34e6577050104a16703a26f7002a16501a177")).operation == "op",
 			"Input map order became significant");
 		catalogVectors();
+		machineDirectoryVectors();
 		orderVectors();
 		versionRefusal();
 		methodErrors();
@@ -295,6 +303,49 @@ class RpcCompatibilityTests {
 			order: 7}, 0).order == 7, "Catalog session lost its order");
 		require(WorkspaceProtocol.validOrder(null) && WorkspaceProtocol.validOrder(0) && WorkspaceProtocol.validOrder(WorkspaceProtocol.MAX_ORDER)
 			&& !WorkspaceProtocol.validOrder(-1) && !WorkspaceProtocol.validOrder(WorkspaceProtocol.MAX_ORDER + 1), "Order bounds changed");
+	}
+
+	/** M19 Phase 9: the machine directory and the stream frames a paired device's channel carries. */
+	static function machineDirectoryVectors():Void {
+		require(MachineDirectoryProtocol.DIRECTORY.id == 180 && MachineDirectoryProtocol.OPEN.id == 181 && MachineDirectoryProtocol.CLOSE.id == 182
+			&& MachineDirectoryProtocol.CHANGED == 183, "Machine directory method ids changed");
+		var query = bytes("8101a16d");
+		require(MachineDirectoryProtocol.DIRECTORY.encodeRequest({machine: "m"}).compare(query) == 0, "Machine query vector changed");
+		require(MachineDirectoryProtocol.DIRECTORY.decodeRequest(query).machine == "m", "Machine query decode changed");
+		require(MachineDirectoryProtocol.DIRECTORY.encodeRequest({machine: null}).compare(bytes("8101c0")) == 0, "Machine query without a machine changed");
+		require(MachineDirectoryProtocol.DIRECTORY.decodeRequest(bytes("80")).machine == null, "An absent machine in a query became a value");
+		var directory:MachineDirectory = {machine: "m", name: "N", revision: 1, workspaces: [{workspace: "w", name: "W", status: "running", grants: ["workspace.read"]}]};
+		var directoryBytes = bytes("84" + "01a16d" + "02a14e" + "0301" + "0491" + "84" + "01a177" + "02a157" + "03a772756e6e696e67" + "0491ae776f726b73706163652e72656164");
+		require(MachineDirectoryProtocol.DIRECTORY.encodeResponse(directory).compare(directoryBytes) == 0, "Machine directory vector changed");
+		var decoded = MachineDirectoryProtocol.DIRECTORY.decodeResponse(directoryBytes);
+		require(decoded.machine == "m" && decoded.revision == 1 && decoded.workspaces.length == 1 && decoded.workspaces[0].status == "running"
+			&& decoded.workspaces[0].grants[0] == "workspace.read", "Machine directory decode changed");
+		var open = bytes("81018201a16d02a177");
+		require(MachineDirectoryProtocol.OPEN.encodeRequest({ref: {machine: "m", workspace: "w"}}).compare(open) == 0, "Open workspace vector changed");
+		require(MachineDirectoryProtocol.validOpen(MachineDirectoryProtocol.OPEN.decodeRequest(open)), "Open workspace decode changed");
+		rejects(function() {
+			MachineDirectoryProtocol.OPEN.decodeRequest(bytes("80"));
+		}, "Open without a workspace ref accepted");
+		var stream = bytes("83018201a16d02a17702050391ae776f726b73706163652e72656164");
+		require(MachineDirectoryProtocol.OPEN.encodeResponse({ref: {machine: "m", workspace: "w"}, stream: 5, grants: ["workspace.read"]}).compare(stream) == 0,
+			"Workspace stream vector changed");
+		require(MachineDirectoryProtocol.OPEN.decodeResponse(stream).stream == 5, "Workspace stream decode changed");
+		require(MachineDirectoryProtocol.CLOSE.encodeRequest({stream: 3}).compare(bytes("810103")) == 0, "Close workspace vector changed");
+		require(MachineDirectoryProtocol.encodeChange({revision: 7}).compare(bytes("810107")) == 0
+			&& MachineDirectoryProtocol.decodeChange(bytes("810107")).revision == 7, "Directory change vector changed");
+		var data = bytes("0000000000ab");
+		require(MachineStreamFrame.encode(MachineStreamFrame.DATA, 0, bytes("ab")).compare(data) == 0, "Stream data frame vector changed");
+		require(MachineStreamFrame.kind(data) == MachineStreamFrame.DATA && MachineStreamFrame.stream(data) == 0
+			&& MachineStreamFrame.payload(data).compare(bytes("ab")) == 0, "Stream data frame decode changed");
+		var close = bytes("0100000003");
+		require(MachineStreamFrame.encode(MachineStreamFrame.CLOSE, 3, null).compare(close) == 0, "Stream close frame vector changed");
+		require(MachineStreamFrame.kind(close) == MachineStreamFrame.CLOSE && MachineStreamFrame.stream(close) == 3, "Stream close frame decode changed");
+		require(MachineStreamFrame.stream(bytes("00ffffffff")) == -1, "Stream ids are 32-bit two's complement");
+		require(MachineStreamFrame.kind(bytes("00000000")) == -1 && MachineStreamFrame.kind(bytes("0200000000")) == -1
+			&& MachineStreamFrame.kind(bytes("010000000300")) == -1, "A malformed stream frame was accepted");
+		require(MachineStreamFrame.kind(Bytes.alloc(MachineStreamFrame.HEADER_BYTES + MachineStreamFrame.MAX_PAYLOAD)) == MachineStreamFrame.DATA
+			&& MachineStreamFrame.kind(Bytes.alloc(MachineStreamFrame.HEADER_BYTES + MachineStreamFrame.MAX_PAYLOAD + 1)) == -1,
+			"The stream payload bound changed");
 	}
 
 	/** M19 Phase 0: workspace refs, the catalog watch and session directories (proposed, pending mobile review). */

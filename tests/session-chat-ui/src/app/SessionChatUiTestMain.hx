@@ -173,6 +173,35 @@ class SessionChatUiTestMain {
 			require(client.actions.indexOf("decline::approval") >= 0, "Decline did not reach provider");
 			context.dispose();
 		}
+		{
+			// A send whose reply was lost blocks the composer until the user confirms, then sending works again.
+			var client = new FakeAgent(), focusAllowed = false;
+			client.deliveryUncertain = true;
+			var context = new UiContext(null, fonts, ui.ExosuitPalette.theme(true));
+			context.setStyleSheet(ui.ExosuitPalette.styleSheet(context.buildContext.theme, true));
+			var panel = new CodexSessionPanel(function() return client, "session", "/repo", function() {},
+				new style.Theme(), new syntax.SyntaxRegistry(), function(_, _, _) {}, function(_) {}, null,
+				{context:function() return "Project", explore:function() {}, reviewChanges:function() {}}, function() return focusAllowed);
+			function build():RenderNode return context.submit(panel, new LayoutFrame(420, 900));
+			var root = build();
+			find(root, "The last message may have been sent. Refreshing the conversation before review…");
+			var field = find(root, "Codex prompt");
+			require(context.focus.focusedId == null || !context.focus.focusedId.equals(field.id), "autoFocusPrompt=false still focused the composer");
+			require(context.focusWidget(field.id), "Cannot focus composer");
+			context.text(UiEventKind.TextInput, "Again");
+			root = build();
+			require(!find(root, "Send").enabled, "Send was enabled while delivery was uncertain");
+			require(!find(root, "I checked the conversation").enabled, "Confirmation was enabled before the conversation was re-read");
+			client.deliveryReviewReady = true;
+			root = build();
+			find(root, "The last message may have been sent. Check the conversation before sending it again.");
+			activate(context, find(root, "I checked the conversation"));
+			require(!client.deliveryUncertain, "Confirmation did not clear delivery uncertainty");
+			root = build();
+			activate(context, find(root, "Send"));
+			require(client.actions.indexOf("prompt:Again:null") >= 0, "Send after confirmation did not reach the provider");
+			context.dispose();
+		}
 		for (provider in ["claude", "pi"]) {
 			var client = new FakeAgent(); client.record.provider = provider;
 			client.record.permissionMode = provider == "pi" ? "supervised" : "default";

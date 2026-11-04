@@ -117,6 +117,15 @@ for line in messages():
   if text=='disconnect': sys.exit()
   if text=='oversize':
    send_payload(b'x'*300000);continue
+  if os.environ.get('FAKE_CODEX_REPLY'):
+   # Phone test hosts (scripts/mobile-machine-host.py, scripts/e2e-local.ps1): echo the prompt and finish the turn at once.
+   reply(i,{'turn':turn})
+   event('turn/started',{'threadId':t['id'],'turn':turn})
+   event('item/started',{'threadId':t['id'],'turnId':turn['id'],'item':{'id':'message','type':'agentMessage','text':''}})
+   event('item/completed',{'threadId':t['id'],'turnId':turn['id'],'item':{'id':'message','type':'agentMessage','text':'FAKE-REPLY: '+text}})
+   v=load();t=v['threads'][params['threadId']];t['turn']['status']='completed';t['status']={'type':'idle'};save(v)
+   event('turn/completed',{'threadId':t['id'],'turn':t['turn']})
+   continue
   reply(i,{'turn':turn})
   event('turn/started',{'threadId':t['id'],'turn':turn})
   event('item/started',{'threadId':t['id'],'turnId':turn['id'],'item':{'id':'message','type':'agentMessage','text':''}})

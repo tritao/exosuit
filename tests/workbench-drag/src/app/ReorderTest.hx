@@ -76,7 +76,8 @@ class ReorderTest {
   panel.onError=function(message) errors.push(message);
   var view:ui.WorkbenchMachineView={machine:{id:"m",name:"cube",workspaces:[{id:"resume",name:"resume-2026",folders:["/workspace"],scratch:null,revision:1}]},
    error:null,openWorkspace:"resume",openRoots:["/workspace"],revision:1};
-  panel.machine={view:function() { return view; },busy:function() { return false; },open:function(_) {},start:function(_) {},create:function() {},
+  var opened:Array<String>=[];
+  panel.machine={view:function() { return view; },busy:function() { return false; },open:function(entry) { opened.push(entry.id); },start:function(_) {},create:function() {},
    rename:function(_) {},attachFolder:function(_) {},detachFolder:function(_) {},remove:function(_) {}};
   var fonts=haxeon.ui.FontCollection.create();fonts.add("../../haxeon/packages/ui/vendor/skribidi/example/data/IBMPlexSans-Regular.ttf");
   var context=new UiContext(null,fonts),frame=new haxeon.ui.LayoutFrame(320,600);
@@ -253,6 +254,30 @@ class ReorderTest {
   dragTo(first,"g:sub",0.5);
   var inSub=panel.model.siblings("sub");
   require(inSub.indexOf(first)>=0 && inSub.indexOf(second)>=0 && errors.length==0,"a multi-row drop lost a row when the layout shifted: "+order("sub")+" "+errors.join("|"));
+
+  // The keyboard and the double click on the tree (M19 group_entry): a click on the open workspace's row enters the root; Down then
+  // selects the next row without entering it; Enter enters that row. A double click on another workspace's row opens it.
+  var focusedGroups:Array<String>=[],focusedRoots=0;
+  panel.focusRoot=function() focusedRoots++;
+  panel.focusGroup=function(id) focusedGroups.push(id);
+  var machineState=view.machine;if(machineState==null) throw "no machine";machineState.workspaces.push({id:"eon",name:"eon-series",folders:["/eon"],scratch:null,revision:1});
+  view.revision++;settle();
+  panel.tree.setExpanded("w:resume",true);submit();
+  function centreOf(key:String):Float {var bounds=row(key);return bounds.y+bounds.height/2;}
+  function click(key:String):Void {var y=centreOf(key);context.pointerDown(120,y,0);context.pointerUp(120,y,0);submit();}
+  click("w:resume");
+  require(focusedRoots==1 && panel.tree.selectedKey=="w:resume","a click on the open workspace's row did not enter the root: "+focusedRoots+" "+panel.tree.selectedKey);
+  var next=panel.model.childKeyAt("w:resume",0);
+  context.key(UiEventKind.KeyDown,UiKey.Down);submit();
+  require(panel.tree.selectedKey==next,"Down from the workspace row selected "+panel.tree.selectedKey+", not "+next);
+  require(focusedGroups.length==0,"an arrow key entered a group");
+  for (_ in 0...5) {now+=1000;pump();submit();}
+  require(panel.tree.selectedKey==next,"the selection moved back to "+panel.tree.selectedKey+" after Down");
+  context.key(UiEventKind.KeyDown,UiKey.Enter);submit();
+  require(focusedGroups.join(",")==next.substr(2),"Enter did not enter the selected group: "+focusedGroups.join(","));
+  var eonY=centreOf("w:eon");
+  context.pointerDown(120,eonY,0);context.pointerUp(120,eonY,0);context.pointerDown(120,eonY,0);context.pointerUp(120,eonY,0);submit();
+  require(opened.join(",")=="eon","a double click on another workspace's row did not open it: "+opened.join(","));
 
   context.dispose();fonts.dispose();client.dispose();connection.close();server.close();
   trace("PASS: re-ordering in the Workbench: insertion line, upper and lower drop zones, sessions, terminals and groups, moves between groups, the open group's first row, skipped rows reported, Alt+Up/Down, and the service's order after a reload");

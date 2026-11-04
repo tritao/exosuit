@@ -344,6 +344,38 @@ class TerminalReplayTests {
     require(refused && invalid.session.offset == 0, "Out-of-order replay was partially applied");
     invalid.close();
 
+    // A TUI that turned on mouse tracking, bracketed paste and application cursor keys before this pane attached:
+    // the pane must see the same input modes whether it replays the record or restores a snapshot, as a viewer too.
+    var tui = "\x1b[?1049h\x1b[?1h\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h\x1b[?2004h\x1b[?1004hTUI";
+    for (mode in ["replay", "viewer replay", "snapshot only", "viewer snapshot only", "trimmed history", "viewer trimmed history"]) {
+      var late = new ReplayFixture(mode.indexOf("snapshot only") >= 0);
+      late.controller = mode.indexOf("viewer") < 0;
+      late.output(tui);
+      // The mode switches fall out of the bounded record, so the pane recovers from a snapshot.
+      if (mode.indexOf("trimmed") >= 0) late.output([for (_ in 0...70000) "t"].join(""));
+      late.pump();
+      require(late.emulator.mouseMode() == 4, mode + ": fixture lost mouse tracking");
+      require(late.session.emulator.inputModes() == late.emulator.inputModes(),
+        mode + ": pane input modes differ: " + late.session.emulator.inputModes() + " / " + late.emulator.inputModes());
+      require(late.session.emulator.mouseMode() == 4, mode + ": pane lost mouse tracking");
+      late.close();
+    }
+
+    // Every REPLAY answer must fit one relay frame (65487 bytes), whatever the program printed in one burst.
+    var framed = new TerminalReplayLog(80, 24, 1 << 22);
+    var burst = Bytes.alloc(400000);
+    for (index in 0...burst.length) burst.set(index, 0x41 + index % 26);
+    framed.output(burst, burst.length);
+    var walkCursor:haxe.Int64 = 0, batches = 0;
+    while (walkCursor < framed.endCursor) {
+      var part = framed.read(walkCursor);
+      var terminal:TerminalInfo = {id:"fixture", cwd:"/fixture", state:"running", exitCode:0, columns:80, rows:24, start:framed.startOffset, end:framed.endOffset};
+      var encoded = WorkspaceTerminalProtocol.REPLAY.encodeResponse({terminal:terminal, events:part.events, next:part.next, end:framed.endCursor});
+      require(encoded.length <= workspace.service.MachineDirectoryProtocol.MachineStreamFrame.MAX_PAYLOAD, "A replay batch is bigger than one relay frame: " + encoded.length);
+      walkCursor = part.next;
+      batches++;
+    }
+    require(batches >= 8, "A 400000 byte burst was not cut into frame-sized batches (" + batches + ")");
     var log = new TerminalReplayLog(80, 24, 65536);
     for (i in 0...5000) log.geometry(20 + i % 2, 4);
     require(log.startCursor > 0 && log.read(log.startCursor).events.length <= 128, "Geometry-only history is unbounded");

@@ -50,6 +50,7 @@ class TerminalRpcTestMain {
       TerminalAgentTests.run(root);
       TerminalHistoryTests.run(root);
       TerminalServiceTests.run(root);
+      TerminalControlTests.run(root);
       TerminalCatalogTests.run(root);
       TerminalCloseServiceTests.run(root);
       WorkspaceGroupTests.run(root);

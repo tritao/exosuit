@@ -75,7 +75,7 @@ class TerminalHistoryTests {
       session.write(TestShell.variable("FRESH_ENV:","KEEP"));
       until(function() return allText(session.emulator).indexOf("FRESH_ENV:unset")>=0,"Replacement shell inherited dead shell state");
       text = allText(session.emulator);
-      require(text.indexOf("PROCESS_000")>=0 && text.indexOf("Shell restarted")>=0,"Replacement shell lost saved output");
+      require(text.indexOf("PROCESS_000")>=0 && text.indexOf("Shell restarted")>=0,"Replacement shell lost saved output: scrollback=" + (text.indexOf("PROCESS_000")>=0) + " separator=" + (text.indexOf("Shell restarted")>=0));
       session.write(TestShell.line("exit"));
       until(function() return session.status=="exited","Replacement shell did not exit");
       Sys.println("PASS: actual daemon process restart preserves scrollback; explicit replacement shell retains output with fresh shell state");
