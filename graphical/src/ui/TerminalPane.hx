@@ -813,6 +813,56 @@ class TerminalPane implements AgentTerminalPanel {
 		return true;
 	}
 
+	/** UiModifier bits as the terminal emulator wants them: Shift 1, Control 4, Alt 8, Super 16. */
+	static function terminalModifiers(modifiers:Int):Int
+		return ((modifiers & UiModifier.Shift) != 0 ? 1 : 0) | ((modifiers & UiModifier.Control) != 0 ? 4 : 0)
+			| ((modifiers & UiModifier.Alt) != 0 ? 8 : 0) | ((modifiers & UiModifier.Super) != 0 ? 16 : 0);
+
+	/**
+		Bytes for a cursor, editing or function key, as xterm sends them, or null for any other key. With Shift, Alt or
+		Control held the key carries a parameter, 1 + Shift 1 + Alt 2 + Control 4: arrows, Home, End and F1-F4 become
+		`ESC [ 1 ; <m> <final>`, the others `ESC [ <n> ; <m> ~`. Programs read Ctrl+Left and Ctrl+Right as word jumps
+		from this. Function keys use GLFW key codes (F1 = 290).
+	**/
+	static function encodeKey(key:Int, modifiers:Int):Null<String> {
+		var parameter = 1 + ((modifiers & UiModifier.Shift) != 0 ? 1 : 0) + ((modifiers & UiModifier.Alt) != 0 ? 2 : 0)
+			+ ((modifiers & UiModifier.Control) != 0 ? 4 : 0);
+		var letter = switch key {
+			case UiKey.Up: "A";
+			case UiKey.Down: "B";
+			case UiKey.Right: "C";
+			case UiKey.Left: "D";
+			case UiKey.Home: "H";
+			case UiKey.End: "F";
+			case 290: "P";
+			case 291: "Q";
+			case 292: "R";
+			case 293: "S";
+			default: null;
+		};
+		if (letter != null) {
+			if (parameter > 1) return "\x1b[1;" + parameter + letter;
+			return key >= 290 ? "\x1bO" + letter : "\x1b[" + letter;
+		}
+		var number = switch key {
+			case UiKey.Insert: 2;
+			case UiKey.Delete: 3;
+			case UiKey.PageUp: 5;
+			case UiKey.PageDown: 6;
+			case 294: 15;
+			case 295: 17;
+			case 296: 18;
+			case 297: 19;
+			case 298: 20;
+			case 299: 21;
+			case 300: 23;
+			case 301: 24;
+			default: 0;
+		};
+		if (number == 0) return null;
+		return "\x1b[" + number + (parameter > 1 ? ";" + parameter : "") + "~";
+	}
+
 	function handleKey(event:UiEvent):Void {
 		if (!canSendInput()) { event.preventDefault(); return; }
 		if ((event.key == UiKey.V || event.key == UiKey.C) &&
@@ -838,7 +888,7 @@ class TerminalPane implements AgentTerminalPanel {
 			default: null;
 		};
 		if (name != null) prepareInput();
-		if (name != null && session.emulator.key(name, event.modifiers)) {
+		if (name != null && session.emulator.key(name, terminalModifiers(event.modifiers))) {
 			session.flushInput();
 			session.pollEvents();
 			event.preventDefault();
@@ -849,16 +899,7 @@ class TerminalPane implements AgentTerminalPanel {
 			case UiKey.Backspace: "\x7f";
 			case UiKey.Tab: "\t";
 			case UiKey.Escape: "\x1b";
-			case UiKey.Up: "\x1b[A";
-			case UiKey.Down: "\x1b[B";
-			case UiKey.Right: "\x1b[C";
-			case UiKey.Left: "\x1b[D";
-			case UiKey.Home: "\x1b[H";
-			case UiKey.End: "\x1b[F";
-			case UiKey.Delete: "\x1b[3~";
-			case UiKey.PageUp: "\x1b[5~";
-			case UiKey.PageDown: "\x1b[6~";
-			default: null;
+			default: encodeKey(event.key, event.modifiers);
 		};
 		if (bytes == null && (event.modifiers & UiModifier.Control) != 0) {
 			if (event.key >= UiKey.A && event.key <= UiKey.Z)
