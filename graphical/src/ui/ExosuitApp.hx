@@ -802,6 +802,16 @@ class ExosuitApp implements DesktopUiApplication {
 		var active = host.activeTab(), terminal = active == null ? null : UiEditorTabs.terminal(active);
 		return terminal == null ? host.activePanelTerminal() : terminal;
 	}
+	function terminalPaneOf(terminal:Null<UiTerminalTab>):Null<TerminalPane>
+		return terminal == null || terminal.disposed ? null : Std.downcast(terminal.panel, TerminalPane);
+	function canCopyTerminalSelection():Bool {
+		var pane = terminalPaneOf(activeTerminal());
+		return pane != null && pane.selectedText() != null;
+	}
+	function copyTerminalSelection():Void {
+		var pane = terminalPaneOf(activeTerminal());
+		if (pane != null) pane.copySelection(ui.buildContext.clipboard);
+	}
 	function canTerminateTerminal():Bool {
 		var terminal = activeTerminal();
 		return terminal != null && (!terminal.remote || (workbenchClient != null && workbenchClient.canControlTerminals()));
@@ -1204,6 +1214,7 @@ class ExosuitApp implements DesktopUiApplication {
 					requestFrame();
 				}
 			}, null, canTerminateTerminal));
+			ui.commands.register(new Command("terminal:copy-selection", "Copy Selection", copyTerminalSelection, null, canCopyTerminalSelection));
 			application.commands.add("terminal:move-to-editor", function(_) moveTerminalToEditor(),
 				function(_) return host.activePanelTerminal() != null);
 			application.commands.add("terminal:move-to-panel", function(_) moveTerminalToPanel(),
@@ -3280,6 +3291,12 @@ class ExosuitApp implements DesktopUiApplication {
 				terminal.retainOnClose=false;closeTerminalView(terminal);
 			} catch (failure:Dynamic) application.reportError("terminal",Std.string(failure));
 		},true,null,true));
+		var pane = terminalPaneOf(terminal);
+		if (pane != null && pane.selectedText() != null) {
+			var clipboard = ui.buildContext.clipboard;
+			if (items.length > 0) items[0] = new MenuItem(items[0].key, items[0].label, items[0].onSelect, items[0].enabled, items[0].shortcut, true);
+			items.unshift(new MenuItem("terminal-copy", "Copy Selection", function() pane.copySelection(clipboard), true, "Ctrl+Shift+C"));
+		}
 		var selectedRecord = record;
 		var owner = catalog == null ? null : catalog.instance;
 		showWorkbenchMenu(items, event, function() return !terminal.disposed &&

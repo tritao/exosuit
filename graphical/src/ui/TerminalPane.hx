@@ -701,6 +701,12 @@ class TerminalPane implements AgentTerminalPanel {
 				return;
 			}
 			var chord = event.modifiers & (UiModifier.Control | UiModifier.Shift | UiModifier.Alt | UiModifier.Super);
+			// A terminal that takes no input (ended, read only) has no use for ^C: copy instead.
+			if (event.key == UiKey.C && chord == UiModifier.Control && (!canSendInput() || session.status != "running")) {
+				copySelection(context.clipboard);
+				event.preventDefault();
+				return;
+			}
 			// Ctrl+Shift+V always pastes. On Windows plain Ctrl+V pastes too, as in Windows
 			// Terminal; Win+V clipboard history also lands here as an injected Ctrl+V.
 			var controlV = event.key == UiKey.V && chord == UiModifier.Control && Sys.systemName() == "Windows";
@@ -942,6 +948,21 @@ class TerminalPane implements AgentTerminalPanel {
 	/** Input before a remote terminal attaches is queued; a failed one (detached too) takes none. */
 	function canSendInput():Bool
 		return !closed && (remoteBackend == null || remoteBackend.isAvailable() && (!remoteBackend.isAttached() || remoteBackend.canControl()));
+
+	/** The selected text, or null when nothing is selected. */
+	public function selectedText():Null<String> {
+		if (closed) return null;
+		var selected = session.emulator.selectionText();
+		return selected == null || selected.length == 0 ? null : selected;
+	}
+
+	/** Copies the selection to the clipboard; false when nothing is selected. */
+	public function copySelection(clipboard:haxeon.ui.core.ClipboardService):Bool {
+		var selected = selectedText();
+		if (selected == null) return false;
+		clipboard.writeText(selected);
+		return true;
+	}
 
 	public function close():Void {
 		if (closed) return;
