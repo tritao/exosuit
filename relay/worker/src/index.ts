@@ -89,10 +89,11 @@ const worker = {
       return preflightResponse(request, env, origin);
     }
 
-    const browserRequest = route.action === "pairing" ||
-      ((route.action === "connect" || isTicketRoute) && origin !== null);
-    if ((route.action === "pairing" && !origin) ||
-      (browserRequest && !isAllowedOrigin(origin, env))) {
+    // A request with an Origin header comes from a web page and must come from an allowed origin. A native client
+    // (the Android app) sends none; the one-use pairing secret and the device ticket authorise it.
+    const browserRequest = origin !== null &&
+      (route.action === "pairing" || route.action === "connect" || isTicketRoute);
+    if (browserRequest && !isAllowedOrigin(origin, env)) {
       return jsonResponse({ error: "origin_not_allowed" }, 403);
     }
 

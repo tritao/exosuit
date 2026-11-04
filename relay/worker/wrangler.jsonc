@@ -1,7 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "exosuit-relay",
-  "account_id": "9f733f114bd1814ccd3a0a9483948b93",
   "workers_dev": true,
   "preview_urls": false,
   "vars": {

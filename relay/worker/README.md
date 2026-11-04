@@ -1,6 +1,7 @@
 # Exosuit relay Worker
 
-This is the M16 relay. The current deployment is
+This is the M16 relay. It is not tied to an account: deploy it to your own with `scripts/deploy-own.ps1`
+(`docs/mobile/own-relay.md`). The original deployment was
 `https://exosuit-relay.joao-9f7.workers.dev`. One SQLite-backed Durable Object
 is addressed by each random machine ID. A native workspace service opens the
 machine WebSocket; pairing browsers and approved devices open their own
@@ -107,8 +108,8 @@ controlled workspace use; it is not a generally available public relay service.
 
 ## Deployment
 
-The project-local Wrangler deploys `exosuit-relay` to account
-`9f733f114bd1814ccd3a0a9483948b93`, using the `MachineRelay` SQLite Durable
+The project-local Wrangler deploys `exosuit-relay` to the account you are logged in to (`wrangler login`,
+`CLOUDFLARE_API_TOKEN`, or `CLOUDFLARE_ACCOUNT_ID` when there are several; `wrangler.jsonc` names no account), using the `MachineRelay` SQLite Durable
 Object binding and migration `v1`. Browser origins currently allowed are
 `http://127.0.0.1:8081` and `http://localhost:8081`; add the exact hosted web
 app origin before using a hosted browser client. Preview URLs and observability
@@ -116,8 +117,8 @@ logs are disabled. Deployment does not change the account's plan.
 
 ```sh
 npm run check
-npx --no-install wrangler deploy --dry-run
-npx --no-install wrangler deploy
+pwsh -NoProfile -File scripts/deploy-own.ps1 -DryRun   # bundle and validate, no login needed
+pwsh -NoProfile -File scripts/deploy-own.ps1           # checks `wrangler whoami`, deploys, probes, prints the URLs
 ```
 
 Version `d20a653e-470c-4659-9abd-37ff23624119` was deployed on 2026-10-07.

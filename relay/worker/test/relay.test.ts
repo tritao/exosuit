@@ -326,6 +326,23 @@ describe("bounded channel forwarding", () => {
     machine.close();
   });
 
+  it("accepts a native pairing socket without an Origin, and refuses a page from an unlisted origin", async () => {
+    const id = nextMachineId();
+    const machineToken = secret(62);
+    const channelId = idFromNumber(1312);
+    const inviteSecret = secret(63);
+    await registerMachine(id, machineToken);
+    const machine = await openMachine(id, machineToken);
+    await createPairing(id, machineToken, channelId, inviteSecret, 60);
+    const url = `${machinePath(id, `pair/${channelId}`)}?secret=${inviteSecret}`;
+    const page = await worker.fetch(new Request(url, { headers: websocketHeaders(undefined, "https://evil.test") }), env);
+    expect(page.status).toBe(403);
+    const native = await worker.fetch(new Request(url, { headers: websocketHeaders(undefined) }), env);
+    expect(native.status).toBe(101);
+    socketOf(native).close(1000, "done");
+    machine.close();
+  });
+
   it("closes a device socket the machine disconnects, without a reset back", async () => {
     const id = nextMachineId();
     const machineToken = secret(62);
