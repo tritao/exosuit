@@ -51,6 +51,12 @@ class Emulator {
     public function focusReporting():Bool
         return TerminalKit.terminalkit_focus_reporting(live()) != 0;
     public function mouseMode():Int return TerminalKit.terminalkit_mouse_mode(live());
+    /** The DEC private modes that change what input the application expects, as one comparable string. */
+    public function inputModes():String {
+        var modes = TerminalKit.terminalkit_modes(live());
+        return "cursorKeys=" + modes.cursor_keys + " keypad=" + modes.keypad + " mouse=" + modes.mouse_tracking
+            + " encoding=" + modes.mouse_encoding + " paste=" + modes.paste + " focus=" + modes.focus;
+    }
     /** Whether the application asked for keys as Win32 key events (the Windows pseudoconsole does). */
     public function win32InputMode():Bool
         return TerminalKit.terminalkit_win32_input_mode(live()) != 0;
