@@ -279,6 +279,7 @@ class ExosuitApp implements DesktopUiApplication {
 		this.createWorkspaceTerminal = createWorkspaceTerminal;
 		this.capabilities = capabilities == null ? HostCapabilities.desktop() : capabilities;
 		this.hostContext = hostContext;
+		if (hostContext != null) hostContext.onBack = phoneBack;
 		darkPalette = dark == null ? true : dark;
 		this.theme = theme == null ? ExosuitPalette.theme(darkPalette) : theme;
 		terminalPalette = new TerminalPalette(darkPalette);
@@ -645,6 +646,25 @@ class ExosuitApp implements DesktopUiApplication {
 		dock.activate("explorer"); requestFrame(); return true;
 	}
 
+	/**
+		System Back on a touch host: dismiss the topmost surface, then return from phone content to the sidebar. False
+		means nothing is left to go back to and the host may leave the app.
+	**/
+	public function phoneBack():Bool {
+		if (saveAsHandler != null) { resolveSaveAs(true); return true; }
+		if (saveConfirmation != null) { resolveSaveConfirmation("cancel"); return true; }
+		if (trashConfirmation != null) { resolveTrashConfirmation(false); return true; }
+		if (settingsClosePending) { settingsClosePending = false; closingSettingsTab = null; requestFrame(); return true; }
+		if (contextMenu != null) { contextMenu = null; requestFrame(); return true; }
+		if (agentAttach != null) { agentAttach = null; requestFrame(); return true; }
+		if (layoutMenu != null) { layoutMenu = null; requestFrame(); return true; }
+		if (notificationsVisible) { hideNotifications(); return true; }
+		if (host.overlayView() != null) { ui.key(UiEventKind.KeyDown, UiKey.Escape); requestFrame(); return true; }
+		if (!phoneLayoutActive || sidebar.visible) return false;
+		ui.clearFocus();
+		return showSidebarMode(sidebar.find("workbench") == null ? "files" : "workbench");
+	}
+
 	function syncSidebar():Void {
 		viewRevision++;
 		layoutModes.invalidateRail();
@@ -682,9 +702,38 @@ class ExosuitApp implements DesktopUiApplication {
 
 	function syncResponsiveRightLayout():Void {
 		if (phoneLayoutActive) { responsiveRightHidden = true; return; }
-		var available = preferredContentWidth(dock.root,Math.max(0,viewportWidth-ActivityBar.WIDTH));
-		responsiveRightHidden = dock.isOpen("context-panel") && available < MINIMUM_CONTENT_WIDTH
-			+ (responsiveRightHidden ? RESPONSIVE_RESTORE_MARGIN : 0);
+		var margin = responsiveRightHidden ? RESPONSIVE_RESTORE_MARGIN : 0;
+		var open = dock.isOpen("context-panel");
+		var workspaceWidth = Math.max(0,viewportWidth-ActivityBar.WIDTH);
+		var available = preferredContentWidth(dock.root,workspaceWidth);
+		// The panel's split cannot give either side less than DockWorkspace.MinimumHorizontalExtent, so the panel
+		// needs room for its own minimum beside a usable content area; otherwise it would overflow the window.
+		var region = contextRegionWidth(dock.root,workspaceWidth,workspaceWidth);
+		responsiveRightHidden = open && (available < MINIMUM_CONTENT_WIDTH + margin
+			|| region < MINIMUM_CONTENT_WIDTH + DockWorkspace.DividerExtent + DockWorkspace.MinimumHorizontalExtent + margin);
+	}
+
+	/** The width of the split that holds the right panel, after the splits above it (the sidebar) took their share. */
+	function contextRegionWidth(node:DockNode, width:Float, parentWidth:Float):Float {
+		return switch node {
+			case Split(axis, ratio, first, second):
+				var inFirst = haxeon.ui.docking.DockNodeTools.contains(first,"context-panel");
+				if (!inFirst && !haxeon.ui.docking.DockNodeTools.contains(second,"context-panel")) return width;
+				var firstWidth = width;
+				var secondWidth = width;
+				if (axis == DockSplitAxis.Horizontal) {
+					var extent = switch first { case Panel("explorer"): sidebar.width; case _: ratio * width; };
+					firstWidth = Math.max(DockWorkspace.MinimumHorizontalExtent,
+						Math.min(extent,Math.max(DockWorkspace.MinimumHorizontalExtent,width-DockWorkspace.MinimumHorizontalExtent)));
+					secondWidth = Math.max(0,width-firstWidth-DockWorkspace.DividerExtent);
+				}
+				var child = inFirst ? first : second;
+				switch child {
+					case Split(_, _, _, _): contextRegionWidth(child,inFirst ? firstWidth : secondWidth,width);
+					case _: width;
+				}
+			case _: parentWidth;
+		};
 	}
 
 	/** At phone width, show the sidebar or editor as one full-width workspace. */
@@ -1345,6 +1394,9 @@ class ExosuitApp implements DesktopUiApplication {
 	function workbenchAvailableWidth():Float
 		return Math.max(0, viewportWidth - ActivityBar.WIDTH - (phoneLayoutActive ? 0 : WorkbenchSurface.INSET * 2));
 
+	function hasSafeArea():Bool
+		return hostContext != null && (hostContext.safeLeft > 0 || hostContext.safeTop > 0 || hostContext.safeRight > 0 || hostContext.safeBottom > 0);
+
 	public function view():View {
 		pruneStaleEditorPanes(host.allViews());
 		for (pane in host.panes) {
@@ -1378,8 +1430,15 @@ class ExosuitApp implements DesktopUiApplication {
 		], fillStyle());
 		var shellStyle = fillStyle();
 		shellStyle.background = theme.tokens.surface;
-		var layers:Array<StackChild> = [new StackChild("shell", new AppShell("exosuit-shell", body,
-			topBar(), null, null, shellStyle), 0.0, 0.0, 0, LayoutAxis.grow(), LayoutAxis.grow())];
+		var shell:View = new AppShell("exosuit-shell", body, topBar(), null, null, shellStyle);
+		var safe = hostContext;
+		var shellChild = new StackChild("shell", shell, 0.0, 0.0, 0, LayoutAxis.grow(), LayoutAxis.grow());
+		if (safe != null && hasSafeArea()) {
+			// System bars, a display cutout or the keyboard cover part of the surface: the shell stays inside what is left.
+			shellChild = new StackChild("shell", shell, safe.safeLeft, safe.safeTop, 0,
+				LayoutAxis.fixed(viewportWidth), LayoutAxis.fixed(viewportHeight));
+		}
+		var layers:Array<StackChild> = [shellChild];
 		if (notificationsVisible && notificationPanel != null) {
 			var width = Math.min(560.0, Math.max(240.0, viewportWidth - 24));
 			var height = Math.min(Math.max(64.0, notificationPanel.preferredHeight),
@@ -1520,9 +1579,12 @@ class ExosuitApp implements DesktopUiApplication {
 		}
 		if (hostContext != null && hostContext.repaintOnly && submittedBuildKey != null)
 			return ui.submitCached(view, frame, submittedBuildKey);
-		var widthChanged = viewportWidth != frame.width;
-		viewportWidth = frame.width;
-		viewportHeight = frame.height;
+		// The application's viewport is the safe area: system bars, a cutout and the keyboard are not ours to draw under.
+		var safeWidth = hostContext == null ? frame.width : Math.max(1.0, frame.width - hostContext.safeLeft - hostContext.safeRight);
+		var safeHeight = hostContext == null ? frame.height : Math.max(1.0, frame.height - hostContext.safeTop - hostContext.safeBottom);
+		var widthChanged = viewportWidth != safeWidth;
+		viewportWidth = safeWidth;
+		viewportHeight = safeHeight;
 		layoutModes.suspend();
 		syncResponsiveDockLayout();
 		keepSidebarFullHeight();
@@ -1534,7 +1596,7 @@ class ExosuitApp implements DesktopUiApplication {
 		syncResponsiveRightLayout();
 		layoutModes.resume();
 		dock.setPanelBadge("problems", host.getProblems().values().length);
-		var key = (hostContext == null || hostContext.windowControls == null ? 0 : hostContext.windowControls.revision) + ":" + viewRevision + ":" + dock.revision + ":" +
+		var key = (hostContext == null ? 0 : hostContext.safeAreaRevision) + "/" + (hostContext == null || hostContext.windowControls == null ? 0 : hostContext.windowControls.revision) + ":" + viewRevision + ":" + dock.revision + ":" +
 			(explorerModel == null ? -1 : explorerModel.revision()) + ":" +
 			application.settings.current.minimapEnabled + ":problems=" + host.getProblems().revision + ":prefs=" + application.settings.store.revision +
 			":decorations=" + host.getPluginDecorations().revision + ":gutter-markers=" + host.getPluginGutterMarkers().revision +
@@ -1626,8 +1688,23 @@ class ExosuitApp implements DesktopUiApplication {
 				return true;
 			} catch (_:Dynamic) return false;
 		});
+		remoteAccessPanel.relayUrlSetting = function() return application.settings.store.getString(config.RelayUrl.SETTING);
+		remoteAccessPanel.saveRelayUrl = function(origin) {
+			// A relay the user typed is remembered; choosing the default again leaves the setting alone.
+			if (origin == config.RelayUrl.resolve(application.settings.store.getString(config.RelayUrl.SETTING))) return;
+			var error = application.settings.store.set(config.RelayUrl.SETTING, haxeon.ui.properties.PropertyValue.Text(origin == config.RelayUrl.DEFAULT ? "" : origin));
+			if (error != null) application.reportError("remote-access", "Could not save the relay URL: " + error);
+		};
 		registerSidebarDestination("remote-access", IconName.Radar, function() return remoteAccessPanel,
 			new haxeon.ui.widgets.sidebar.SidebarModeOptions("Remote Access", 30, true));
+		useMachineRemoteAccess();
+	}
+
+	/** With suit on, remote access belongs to the machine: devices pair with it and are granted workspaces (ADR 0005 section 4). */
+	function useMachineRemoteAccess():Void {
+		var panel = remoteAccessPanel, machine = machineClient;
+		if (panel == null || machine == null || !machine.enabled || panel.machine != null) return;
+		panel.machine = new workspace.client.MachineRemoteAccess(machine, requestFrame);
 	}
 
 	var reconciledClient:Null<workspace.client.WorkspaceFileClient>;
@@ -1846,6 +1923,7 @@ class ExosuitApp implements DesktopUiApplication {
 	public function attachMachineWorkspaces(machine:workspace.client.MachineClient):Void {
 		machineClient = machine;
 		if (!machine.enabled) return;
+		useMachineRemoteAccess();
 		machine.refresh();
 		var report = function(failure:Null<String>, ?workspaceId:String):Bool {
 			if (failure == null) return false;
@@ -2262,7 +2340,8 @@ class ExosuitApp implements DesktopUiApplication {
 			commandViewActive: host.isCommandViewActive(),
 			windowId: suit.SuitClient.windowIdentity(), otherWindows: otherWindows(), newWindowMs: Std.int(workspace.NewWindow.slowestOpen * 1000 * 10) / 10,
 			contextKind: Std.string(active.kind), layoutMode: layoutModes.current.id, railHidden: layoutModes.hiddenOnRail().copy(),
-			workbenchEmptyState: workbenchPanel != null && workbenchPanel.showsEmptyState()
+			workbenchEmptyState: workbenchPanel != null && workbenchPanel.showsEmptyState(),
+			remoteAccess: remoteAccessPanel == null ? null : remoteAccessPanel.automationState()
 		};
 	}
 
@@ -2415,7 +2494,7 @@ class ExosuitApp implements DesktopUiApplication {
      if (!SessionArtifactPreview.open(desktopHost.window.rawValue(), source))
       application.reportError("agent", "Static artifact preview is unavailable or the source exceeds 512 KiB");
     } : null
-   }));
+   }, function() return hostContext == null || !hostContext.touchPrimary));
  }
 
  function sessionGithubSource(resource:String, root:String):Null<{source:scm.ScmRemoteReader, repository:scm.ScmRepository}> {
@@ -4139,7 +4218,8 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function buildTopBar():View {
-		var custom = hostContext != null && hostContext.windowControls != null;
+		// A touch host has no hover labels: toolbar buttons are icons at every width, so the bar fits a phone and an unfolded screen.
+		var custom = hostContext != null && (hostContext.windowControls != null || hostContext.touchPrimary);
 		var actions = toolbarActionCapacity();
 		var style = new LayoutStyle();
 		style.width = LayoutAxis.grow();
@@ -4184,8 +4264,8 @@ class ExosuitApp implements DesktopUiApplication {
 				new TextStyleOverride(null, 12, null, haxeon.ui.TextWrap.None, null, null, null, theme.tokens.textSecondary))));
 		} else items.push(new KeyedView("workspace-title", new Text(workspaceTitle, workspaceTitleStyle, theme.tokens.textSecondary,
 			new TextStyleOverride(null, 12, null, haxeon.ui.TextWrap.None))));
-		if (!custom && workspaceStatus.length > 0)
-			items.push(new KeyedView("workspace-status", new Text(workspaceStatus, null, theme.tokens.textSecondary, TextStyleOverride.text(12.0))));
+		if (!custom && !phoneLayoutActive && workspaceStatus.length > 0)
+			items.push(new KeyedView("workspace-status", new Text(workspaceStatus, null, theme.tokens.textSecondary, new TextStyleOverride(null, 12, null, haxeon.ui.TextWrap.None))));
 		items.push(new KeyedView("palette", toolbarButton("Commands", IconName.Search, togglePalette)));
 		if (!phoneLayoutActive) {
 			items.push(new KeyedView("layout-left", layoutButton("left", "Toggle Left Sidebar", "exosuit.workbench:toggle-sidebar", dock.isOpen("explorer"))));
@@ -4200,6 +4280,7 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function toolbarActionCapacity():Int {
+		if (phoneLayoutActive) return 0;
 		if (hostContext == null || hostContext.windowControls == null) return 5;
 		var available = viewportWidth - haxeon.ui.widgets.WindowTitleBar.CONTROLS_WIDTH - (phoneLayoutActive ? 0 : 4 * (TOOLBAR_BUTTON_WIDTH + TOOLBAR_GAP));
 		// Brand, horizontal padding, Commands, two gaps and a small title area.
@@ -4208,7 +4289,7 @@ class ExosuitApp implements DesktopUiApplication {
 	}
 
 	function toolbarButton(label:String, icon:IconName, action:Void->Void):View {
-		var custom = hostContext != null && hostContext.windowControls != null;
+		var custom = phoneLayoutActive || hostContext != null && (hostContext.touchPrimary || hostContext.windowControls != null);
 		var style = new LayoutStyle();
 		if (custom) { style.width = LayoutAxis.fixed(TOOLBAR_BUTTON_WIDTH); style.height = LayoutAxis.fixed(28); style.padding = new Insets(8, 0, 8, 0); }
 		var button = new Button(custom ? "" : label, style, action, "toolbar-" + label);

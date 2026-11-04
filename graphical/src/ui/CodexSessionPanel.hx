@@ -57,6 +57,7 @@ class CodexSessionPanel implements View {
   final openLink:Null<String->Void>;
   final workspaceActions:Null<SessionWorkspaceActions>;
   final transcriptScroll = new ScrollController();
+  final sessionScroll:SessionScroll;
   var requestAnchor:Null<RenderNode> = null;
   var transcriptViewport:Null<RenderNode> = null;
   var historyNodes:Map<String, RenderNode> = [];
@@ -81,6 +82,8 @@ class CodexSessionPanel implements View {
   var expandedRequestDetails:Map<String, Bool> = [];
   var copiedMessages:Map<String, String> = [];
   var promptFocusRequested = false;
+  /** Whether the prompt takes keyboard focus by itself; a phone answers false so the keyboard does not pop up. */
+  final autoFocusPrompt:Void->Bool;
   var suggestionIndex = 0;
   var dismissSuggestions = false;
   var addingContext = false;
@@ -191,7 +194,7 @@ class CodexSessionPanel implements View {
 
   public function new(getClient:Void -> Null<WorkspaceAgentClient>, resource:String, root:String, frame:Void -> Void,
       editorPalette:style.Theme, syntaxes:SyntaxRegistry, showMenu:(Array<MenuItem>, UiEvent, Void->Bool)->Void, createReplacement:String->Void,
-      ?openLink:String->Void, ?workspaceActions:SessionWorkspaceActions) {
+      ?openLink:String->Void, ?workspaceActions:SessionWorkspaceActions, ?autoFocusPrompt:Void->Bool) {
     this.getClient = getClient;
     this.resource = resource;
     this.root = root;
@@ -202,6 +205,8 @@ class CodexSessionPanel implements View {
     this.createReplacement = createReplacement;
     this.openLink = openLink;
     this.workspaceActions = workspaceActions;
+    this.autoFocusPrompt = autoFocusPrompt == null ? function() return true : autoFocusPrompt;
+    sessionScroll = new SessionScroll(this.autoFocusPrompt);
   }
 
   static function findModel(models:Null<Array<AgentModel>>, slug:String):Null<AgentModel> {
@@ -310,10 +315,11 @@ class CodexSessionPanel implements View {
           ? "disconnected" : "connected")
       : view.connectionState;
     var connectionReady = connectionState == "connected";
-    var canSend = control && connectionReady && !working && view.requests.length == 0;
+    var deliveryUncertain = client.agentDeliveryUncertain(id);
+    var canSend = control && connectionReady && !working && view.requests.length == 0 && !deliveryUncertain;
     var piActive = view.supportsQueue == true && (working || view.record.state == "needs-attention");
-    var canQueue = control && connectionReady && view.supportsQueue == true && view.inputToken != null;
-    var canSteer = control && connectionReady && view.supportsSteering == true && view.inputToken != null && view.inputBusy != true;
+    var canQueue = control && connectionReady && view.supportsQueue == true && view.inputToken != null && !deliveryUncertain;
+    var canSteer = control && connectionReady && view.supportsSteering == true && view.inputToken != null && view.inputBusy != true && !deliveryUncertain;
     var recovery = recoveryPresentation(view.recoveryReason);
     var stateLabel = view.record.state == "reconnecting" ? "Reconnecting…"
       : view.record.state == "reconnect-failed" ? recovery.label : view.record.state;
@@ -351,6 +357,8 @@ class CodexSessionPanel implements View {
       suggestionIndex = 0;dismissSuggestions = false;
       frame();
     }, inputStyle, null, null, null, true);
+    // Enter sends (Shift+Enter is the newline), so the on-screen keyboard's action key is Send.
+    field.imeAction = 5;
     field.label = providerName(view.record.provider) + " prompt";
     field.placeholder = "Message " + providerName(view.record.provider) + "…";
     field.enabled = client.canControlAgents() && connectionReady;
@@ -930,6 +938,20 @@ class CodexSessionPanel implements View {
         }, "agent-review-request"))
       ], noticeStyle)));
     }
+    if (deliveryUncertain) {
+      var reviewReady = client.agentDeliveryReviewReady(id);
+      var review = quietButton("I checked the conversation", function() {
+        if (client.acknowledgeAgentDelivery(id)) frame();
+      }, "agent-delivery-review");
+      review.enabled = reviewReady;
+      var notice = new LayoutStyle(); notice.width = LayoutAxis.grow(); notice.childGap = 8; notice.padding = new Insets(8, 8, 8, 8);
+      rows.push(new KeyedView("delivery-uncertain", new Column("agent-delivery-uncertain", [
+        new KeyedView("message", paragraph(reviewReady
+          ? "The last message may have been sent. Check the conversation before sending it again."
+          : "The last message may have been sent. Refreshing the conversation before review…")),
+        new KeyedView("review", review)
+      ], notice)));
+    }
     rows.push(new KeyedView("activity", new AgentTranscript(new Column("codex-items", activity, activityStyle), style, transcriptScroll, frame,
       function(node) transcriptViewport = node, historyAnchor != null, historyReturnToLatest,
       function() historyReturnToLatest = false)));
@@ -962,7 +984,7 @@ class CodexSessionPanel implements View {
     send.leadingIcon = IconName.ArrowUp; send.iconSize = 16;
     send.variant = ButtonVariant.Primary;
     send.enabled = (piActive ? canQueue : canSend) && imagesSupported && !contextLoading && !imageUploading && promptBytes <= submitLimit && (StringTools.trim(prompt) != "" || imageDrafts.length > 0);
-    var hint = new Text((piActive ? (view.requests.length > 0 ? "Answer the request, or use Queue / Steer" : "Enter to queue · Shift+Enter for newline") : "Enter to send · Shift+Enter for newline") + (view.commands == null ? "" : " · / commands · $ skills"), paragraph("").style, tokens.mutedText);
+    var hint = new Text(deliveryUncertain ? "Sending is paused until you confirm the last message" : (piActive ? (view.requests.length > 0 ? "Answer the request, or use Queue / Steer" : "Enter to queue · Shift+Enter for newline") : "Enter to send · Shift+Enter for newline") + (view.commands == null ? "" : " · / commands · $ skills"), paragraph("").style, tokens.mutedText);
     var footerControls:Array<KeyedView> = [];
     if (piActive) {
       var steer = new Button("Steer now",null,function() submitAction("steer"),"agent-steer");
@@ -1080,7 +1102,7 @@ class CodexSessionPanel implements View {
     promptNode.walk(function(child) {
       if (child.focusable && child.semantics != null && (child.semantics.label == "Codex prompt" || child.semantics.label == "Claude prompt" || child.semantics.label == "Pi prompt" || child.semantics.label == "Exosuit prompt")) {
         child.onResolved(function(_) {
-          if (!promptFocusRequested && child.enabled) promptFocusRequested = context.requestFocus(child.id);
+          if (!promptFocusRequested && child.enabled && autoFocusPrompt()) promptFocusRequested = context.requestFocus(child.id);
         });
       }
     });
@@ -1261,9 +1283,28 @@ class CodexSessionPanel implements View {
     scrollStyle.height = LayoutAxis.grow();
     scrollStyle.width = LayoutAxis.grow();
     scrollStyle.background = tokens.surface;
-    var session = new ScrollView("codex-session-viewport", new Column("codex-session", rows, viewport), scrollStyle);
+    var session = new ScrollView("codex-session-viewport", new Column("codex-session", rows, viewport), scrollStyle,
+      haxeon.ui.widgets.scroll.ScrollAxis.Vertical, sessionScroll);
     session.fillViewport = true;
     return session.build(context);
+  }
+}
+
+/**
+ * The whole session scrolls when header and composer do not fit. On a touch host (no automatic prompt focus) the keyboard
+ * shrinks the viewport by a large step: the composer, the last row, is then scrolled into view instead of left below it.
+ */
+private class SessionScroll extends ScrollController {
+  static inline final KEYBOARD_STEP:Float = 120;
+  final touchHost:Void->Bool;
+  public function new(autoFocusPrompt:Void->Bool) {
+    super();
+    touchHost = function() return !autoFocusPrompt();
+  }
+  override function updateMetrics(viewportWidth:Float, viewportHeight:Float, contentWidth:Float, contentHeight:Float):Void {
+    var shrank = hasMetrics && viewportHeight < this.viewportHeight - KEYBOARD_STEP && touchHost();
+    super.updateMetrics(viewportWidth, viewportHeight, contentWidth, contentHeight);
+    if (shrank) jumpTo(offsetX, maxScrollY);
   }
 }
 

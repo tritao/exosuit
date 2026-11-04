@@ -41,6 +41,28 @@ private typedef TerminalRow = {
 /** Retained terminal rows; each row reuses a display list and shaped text. */
 class TerminalPane implements AgentTerminalPanel {
 	static inline final CONTROL_BAR_HEIGHT:Float = 26.0;
+	/** Height of the extra-keys row a touch host adds under the grid. */
+	static inline final TOUCH_KEYS_HEIGHT:Float = 40.0;
+	/** A finger moving this far (logical pixels) is a scroll, not a tap. */
+	static inline final TOUCH_SLOP:Float = 10.0;
+	/**
+		A touch host (a phone) has no Esc, Tab, Ctrl or arrows on its keyboard: this adds a row of them under the grid, makes a
+		finger drag scroll the history (or send wheel events to a program that asked for the mouse), and a tap bring the keyboard up.
+		Desktop panes leave it off and are unchanged.
+	**/
+	public var touchKeys:Bool = false;
+	/** Draw stand-ins for symbols the host's fonts lack (Android); see TerminalGlyphs. */
+	public var substituteGlyphs:Bool = false;
+	var ctrlSticky:Bool = false;
+	/** Touch pointer ids are negative (the platform's own), so a separate flag says a finger is down. */
+	var touchActive:Bool = false;
+	var touchPointer:Int = 0;
+	var touchStartY:Float = 0.0;
+	var touchLastY:Float = 0.0;
+	var touchRemainder:Float = 0.0;
+	var touchMoved:Bool = false;
+	var paneNode:Null<RenderNode> = null;
+	var pasteContext:Null<BuildContext> = null;
 	public final session:TerminalSession;
 	final requestFrame:Void->Void;
 	final fonts:FontCollection;
@@ -72,6 +94,8 @@ class TerminalPane implements AgentTerminalPanel {
 	var focusGeneration:Int = 0;
 	var closed:Bool = false;
 	var selectionPointer:Int = -1;
+	/** A drag the program would have copied itself, but this pane cannot send input: copy it here on release. */
+	var selectionCopiesOnRelease = false;
 	var selectionColumn:Int = 0;
 	var selectionRow:Int = 0;
 	var selectionMoved:Bool = false;
@@ -158,7 +182,8 @@ class TerminalPane implements AgentTerminalPanel {
 		if (ownsFonts) {
 			// The first monospace face present on this host; system fallbacks are proportional.
 			for (mono in [Sys.getEnv("EXOSUIT_TERMINAL_FONT"), "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-					"/System/Library/Fonts/Menlo.ttc", "C:/Windows/Fonts/consola.ttf"])
+					"/System/Library/Fonts/Menlo.ttc", "C:/Windows/Fonts/consola.ttf", "/system/fonts/DroidSansMono.ttf",
+					"/system/fonts/CutiveMono.ttf"])
 				if (mono != null && mono.length > 0 && FileSystem.exists(mono)) {
 					fonts.add(mono, FontFamily.Monospace);
 					break;
@@ -348,6 +373,7 @@ class TerminalPane implements AgentTerminalPanel {
 				var cell:Cell = cells[column];
 				if (cell.width == 0) continue;
 				var content = cell.text.length == 0 ? " " : cell.text;
+				if (substituteGlyphs) content = TerminalGlyphs.substitute(content);
 				buffer.add(content);
 				var count = codepoints(content);
 				if (!gridRequired && (count != 1 || content.charCodeAt(0) >= 127)) {
@@ -438,6 +464,121 @@ class TerminalPane implements AgentTerminalPanel {
 		session.flushInput();
 	}
 
+	/** Typed text; with the sticky Ctrl of the extra-keys row set, one letter becomes its control character. */
+	function sendTyped(text:String):Void {
+		if (ctrlSticky) {
+			ctrlSticky = false;
+			requestFrame();
+			var code = text.length == 1 ? text.toUpperCase().charCodeAt(0) : 0;
+			if (code >= 65 && code <= 90) {
+				session.write(Bytes.ofString(String.fromCharCode(code - 64)));
+				return;
+			}
+		}
+		sendText(text);
+	}
+
+	static function isTouch(event:UiEvent):Bool return Std.isOfType(event.data, haxeon.ui.core.UiTouchData);
+
+	function bottomInset():Float return touchKeys ? TOUCH_KEYS_HEIGHT + 4.0 : 0.0;
+
+	/** A finger moved `lines` rows down (positive) or up: older output comes into view, or a wheel event goes to the program. */
+	function touchScroll(lines:Int, event:UiEvent):Void {
+		if (session.emulator.mouseMode() != 0 && canSendInput()) {
+			for (_ in 0...Std.int(Math.min(5, Math.abs(lines)))) reportMouse(event, lines > 0 ? 64 : 65, 1);
+			return;
+		}
+		var current = session.emulator.scrollback(-1).current;
+		session.emulator.scrollback(Std.int(Math.max(0, current + lines)));
+		refreshRows(false);
+		requestFrame();
+	}
+
+	function touchKeysStyle():LayoutStyle {
+		var style = new LayoutStyle();
+		style.width = LayoutAxis.grow();
+		style.height = LayoutAxis.fixed(TOUCH_KEYS_HEIGHT);
+		style.direction = haxeon.ui.LayoutDirection.LeftToRight;
+		style.childAlignY = haxeon.ui.LayoutAlignmentY.Center;
+		style.childGap = 3;
+		style.padding = new haxeon.ui.Insets(3, 2, 3, 2);
+		style.background = Color.rgba(palette.foreground.red, palette.foreground.green, palette.foreground.blue, 0.10);
+		return style;
+	}
+
+	/** Esc, Tab, Shift+Tab, a sticky Ctrl, arrows, Enter and Paste: what a phone keyboard lacks for shells and Claude Code. */
+	function touchKeyButtons():Array<haxeon.ui.widgets.KeyedView> {
+		var keys = [
+			{id: "esc", label: "Esc"}, {id: "tab", label: "Tab"}, {id: "shift-tab", label: "S-Tab"}, {id: "ctrl", label: "Ctrl"},
+			{id: "left", label: "\u2190"}, {id: "down", label: "\u2193"}, {id: "up", label: "\u2191"}, {id: "right", label: "\u2192"},
+			{id: "paste", label: "Paste"}, {id: "enter", label: "\u23CE"}
+		];
+		var result:Array<haxeon.ui.widgets.KeyedView> = [];
+		for (key in keys) {
+			var style = new LayoutStyle();
+			style.width = LayoutAxis.grow();
+			style.height = LayoutAxis.fixed(TOUCH_KEYS_HEIGHT - 6.0);
+			style.padding = new haxeon.ui.Insets(0, 0, 0, 0);
+			var id = key.id;
+			var button = new TouchKeyButton(key.label, style, function() touchKey(id), "touch-key-" + id);
+			button.accessibilityLabel = id == "shift-tab" ? "Shift Tab" : key.label;
+			button.labelView = new haxeon.ui.widgets.text.Text(key.label, null, null, new haxeon.ui.core.TextStyleOverride(null, 12, null, TextWrap.None, haxeon.ui.TextAlignment.Center, null, null, null));
+			button.selected = id == "ctrl" && ctrlSticky;
+			result.push(new haxeon.ui.widgets.KeyedView(id, button));
+		}
+		return result;
+	}
+
+	function touchKey(id:String):Void {
+		if (id == "ctrl") {
+			ctrlSticky = !ctrlSticky;
+			requestFrame();
+			return;
+		}
+		if (id == "paste") {
+			pasteClipboard(false);
+			return;
+		}
+		if (!canSendInput() || paneNode == null) return;
+		var modifiers = ctrlSticky ? UiModifier.Control : 0;
+		ctrlSticky = false;
+		if (id == "shift-tab") {
+			// The terminfo back-tab, sent as is so no emulator mapping can turn it into a plain Tab.
+			prepareInput();
+			session.write(Bytes.ofString("\x1b[Z"));
+			requestFrame();
+			return;
+		}
+		var key = switch id {
+			case "esc": UiKey.Escape;
+			case "tab": UiKey.Tab;
+			case "left": UiKey.Left;
+			case "down": UiKey.Down;
+			case "up": UiKey.Up;
+			case "right": UiKey.Right;
+			default: UiKey.Enter;
+		};
+		handleKey(new UiEvent(UiEventKind.KeyDown, paneNode.id, 0.0, 0.0, 0.0, 0.0, 0, key, modifiers));
+		session.flushInput();
+		requestFrame();
+	}
+
+	/** Reads the clipboard and pastes it (bracketed when the program asked for that); with no text it passes ^V on when asked. */
+	function pasteClipboard(passControlV:Bool):Void {
+		var reader = pasteContext;
+		if (reader == null || !canSendInput()) return;
+		try reader.clipboard.readText(function(text) {
+			if (closed || session.status != "running" || !canSendInput()) return;
+			prepareInput();
+			if (text.length > 0) session.emulator.paste(Bytes.ofString(text));
+			else if (passControlV) session.write(Bytes.ofString("\x16"));
+			else return;
+			session.flushInput();
+			session.pollEvents();
+			requestFrame();
+		}) catch (e:Dynamic) {}
+	}
+
 	static function codepoints(value:String):Int {
 		var bytes = Bytes.ofString(value);
 		var count = 0;
@@ -493,9 +634,15 @@ class TerminalPane implements AgentTerminalPanel {
 				LayoutAxis.grow(), LayoutAxis.fixed(CONTROL_BAR_HEIGHT)));
 		}
 		var terminalTop = showControlNotice() ? CONTROL_BAR_HEIGHT + 4.0 : 4.0;
+		pasteContext = context;
+		if (touchKeys && resolvedHeight > 0) {
+			var keys = new haxeon.ui.widgets.layout.Row("terminal-touch-keys", touchKeyButtons(), touchKeysStyle());
+			layers.push(new StackChild("touch-keys", keys, 0.0, Math.max(0.0, resolvedHeight - TOUCH_KEYS_HEIGHT), 4,
+				LayoutAxis.grow(), LayoutAxis.fixed(TOUCH_KEYS_HEIGHT)));
+		}
 		// Remote observers retain the sender's grid; build only rows intersecting our viewport.
 		var visibleRows = resolvedHeight > 0 && (remoteBackend == null || remoteBackend.isSynchronized())
-			? Std.int(Math.min(renderedRows.length, Math.max(0, Math.ceil((resolvedHeight - terminalTop) / rowHeight))))
+			? Std.int(Math.min(renderedRows.length, Math.max(0, Math.ceil((resolvedHeight - terminalTop - bottomInset()) / rowHeight))))
 			: 0;
 		if (gridBaseline <= 0.0) {
 			var baselineProbe = TextLayout.create(fonts, "M", 64.0, gridTextStyle(), new ParagraphStyle(TextWrap.None));
@@ -552,6 +699,7 @@ class TerminalPane implements AgentTerminalPanel {
 		}
 		var node = new Stack("terminal-pane", layers, fill).build(context);
 		terminalNode = node;
+		paneNode = node;
 		node.commandShortcutFilter = function(id) return TerminalShortcutPolicy.allows(id);
 		// A terminal is an input stream, not an editable copy of its screen. Publish
 		// an empty surrounding document so IME edits cannot target the last editor.
@@ -591,9 +739,25 @@ class TerminalPane implements AgentTerminalPanel {
 		node.on(UiEventKind.PointerDown, function(event) {
 			if (closed) return;
 			if (showControlNotice() && event.localY >= 0 && event.localY < CONTROL_BAR_HEIGHT) return;
+			if (bottomInset() > 0 && event.localY >= resolvedHeight - bottomInset()) return;
 			context.requestFocus(node.id);
-			if ((event.modifiers & UiModifier.Shift) != 0 || session.emulator.mouseMode() == 0) {
+			if (isTouch(event)) {
+				// A finger scrolls; a tap (see releaseMouse) brings the keyboard up. Selecting by touch is not offered.
+				if (!touchActive) {
+					touchActive = true;
+					touchPointer = event.pointerId;
+					touchStartY = touchLastY = event.y;
+					touchRemainder = 0.0;
+					touchMoved = false;
+					event.capturePointer();
+				}
+				event.preventDefault();
+				return;
+			}
+			// A read-only pane cannot report the mouse, so a drag selects locally even when the program tracks it.
+			if ((event.modifiers & UiModifier.Shift) != 0 || session.emulator.mouseMode() == 0 || !canSendInput()) {
 				if (event.button != 0 || selectionPointer >= 0) return;
+				selectionCopiesOnRelease = session.emulator.mouseMode() != 0 && (event.modifiers & UiModifier.Shift) == 0;
 				var cell = pointerCell(event);
 				selectionPointer = event.pointerId;
 				selectionColumn = cell.column;
@@ -637,6 +801,21 @@ class TerminalPane implements AgentTerminalPanel {
 			}
 		});
 		node.on(UiEventKind.PointerMove, function(event) {
+			if (touchActive) {
+				if (event.pointerId != touchPointer || closed) return;
+				if (!touchMoved && Math.abs(event.y - touchStartY) > TOUCH_SLOP) touchMoved = true;
+				if (touchMoved) {
+					touchRemainder += event.y - touchLastY;
+					var lines = Std.int(touchRemainder / rowHeight);
+					if (lines != 0) {
+						touchRemainder -= lines * rowHeight;
+						touchScroll(lines, event);
+					}
+				}
+				touchLastY = event.y;
+				event.preventDefault();
+				return;
+			}
 			if (selectionPointer >= 0) {
 				if (event.pointerId != selectionPointer || closed) return;
 				selectionGesture.cancelIfMoved(event.x, event.y);
@@ -650,6 +829,18 @@ class TerminalPane implements AgentTerminalPanel {
 				reportMouse(event, mouseButton >= 0 ? mouseButton + 32 : 0, 4);
 		});
 		var releaseMouse = function(event:UiEvent) {
+			if (touchActive && touchPointer == event.pointerId) {
+				var tapped = !touchMoved && event.kind == UiEventKind.PointerUp;
+				touchActive = false;
+				touchMoved = false;
+				event.releasePointer();
+				event.preventDefault();
+				if (tapped) {
+					context.requestFocus(node.id);
+					context.textInput.activate(node.id);
+				}
+				return;
+			}
 			if (selectionPointer == event.pointerId) {
 				if (!closed && event.kind != UiEventKind.PointerCancel) updateSelection(event);
 				selectionDrag.stop();
@@ -657,6 +848,11 @@ class TerminalPane implements AgentTerminalPanel {
 				else selectionGesture.complete(event.x, event.y);
 				selectionPointer = -1;
 				if (!selectionMoved) clearSelection();
+				else if (selectionCopiesOnRelease) {
+					var selected = session.emulator.selectionText();
+					if (selected != null && selected.length > 0) context.clipboard.writeText(selected);
+				}
+				selectionCopiesOnRelease = false;
 				event.releasePointer();
 				event.preventDefault();
 				event.stopPropagation();
@@ -675,7 +871,7 @@ class TerminalPane implements AgentTerminalPanel {
 			if (event.text != null && event.text.length > 0) {
 				if (!canSendInput()) { event.preventDefault(); return; }
 				prepareInput();
-				sendText(event.text);
+				sendTyped(event.text);
 				event.preventDefault();
 			}
 		});
@@ -686,7 +882,7 @@ class TerminalPane implements AgentTerminalPanel {
 			if (edit != null && edit.action == TextEditAction.Commit &&
 				edit.text != null && edit.text.length > 0 && canSendInput()) {
 				prepareInput();
-				sendText(edit.text);
+				sendTyped(edit.text);
 			}
 			event.preventDefault();
 		});
@@ -935,7 +1131,7 @@ class TerminalPane implements AgentTerminalPanel {
 	}
 
 	function resizeToViewport(width:Float, height:Float):Void {
-		var topInset = showControlNotice() ? CONTROL_BAR_HEIGHT + 8.0 : 8.0;
+		var topInset = (showControlNotice() ? CONTROL_BAR_HEIGHT + 8.0 : 8.0) + bottomInset();
 		if (closed || width < 16.0 + cellWidth || height < topInset + rowHeight) return;
 		if (width == viewportWidth && height == viewportHeight) return;
 		viewportWidth = width;

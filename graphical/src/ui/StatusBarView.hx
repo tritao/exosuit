@@ -23,6 +23,7 @@ import haxeon.ui.widgets.controls.CountBadge;
 import haxeon.ui.widgets.text.MiddleEllipsisText;
 import haxeon.ui.widgets.text.Text;
 import haxeon.ui.widgets.KeyedView;
+import haxeon.ui.widgets.overlays.Tooltip;
 import haxeon.ui.widgets.layout.Row;
 import plugin.PluginStatusItem;
 import plugin.PluginStatusSide;
@@ -47,7 +48,7 @@ class StatusBarView implements View {
 			var rightItemsWidth = contributionWidth(statusItems, Right);
 			var sizes = allocate(context.viewportWidth, remote, showToast, data.unread, hasIndentation,
 				leftItemsWidth, rightItemsWidth);
-			var remoteNode:RenderNode = null, remoteLabel:RenderNode = null;
+			var remoteNode:RenderNode = null, remoteButton:RenderNode = null, remoteLabel:RenderNode = null;
 			var dismissNode:RenderNode = null;
 
 			var style = new LayoutStyle();
@@ -72,7 +73,9 @@ class StatusBarView implements View {
 				connection.accessibilityLabel = data.remoteDetails + ". Open Remote Access";
 				remoteNode = tooltip("remote", connection, data.remoteDetails).build(context);
 				remoteNode.layout.style.width = LayoutAxis.fixed(sizes.remote);
-				remoteLabel = remoteNode.children[0].children[1];
+				// Without hover tooltips (touch hosts) the tooltip draws only its anchor: the node is the button itself.
+				remoteButton = Tooltip.hoverEnabled ? remoteNode.children[0] : remoteNode;
+				remoteLabel = remoteButton.children[1];
 				root.add(remoteNode);
 			}
 			var leftItemsNode:Null<RenderNode> = null;
@@ -133,7 +136,7 @@ class StatusBarView implements View {
 				// Once mounted these nodes belong to the submitted tree: announce each in-place edit (BuildContext.willEditRetained).
 				if (announce) {
 					for (node in [root, documentNode, messageNode, indentationNode, bellNode, remoteNode,
-							remoteNode == null ? null : remoteNode.children[0], remoteLabel, dismissNode, leftItemsNode, rightItemsNode])
+							remoteButton, remoteLabel, dismissNode, leftItemsNode, rightItemsNode])
 						if (node != null) context.willEditRetained(node);
 					if (data.unread > 0) context.willEditRetained(bellNode.children[1]);
 				}
@@ -151,7 +154,7 @@ class StatusBarView implements View {
 				}
 				if (remoteNode != null && remoteLabel != null) {
 					sizeSlot(remoteNode, next.remote);
-					remoteNode.children[0].layout.style.childGap = next.compact ? 0 : 6;
+					remoteButton.layout.style.childGap = next.compact ? 0 : 6;
 					remoteLabel.layout.style.visible = !next.compact;
 					remoteLabel.layout.style.width = next.compact ? LayoutAxis.fixed(0) : LayoutAxis.fit();
 				}
