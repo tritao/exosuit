@@ -30,6 +30,8 @@ user32.WindowFromPoint.argtypes = [wt.POINT]
 user32.WindowFromPoint.restype = wt.HWND
 user32.GetAncestor.argtypes = [wt.HWND, wt.UINT]
 user32.GetAncestor.restype = wt.HWND
+user32.PrintWindow.argtypes = [wt.HWND, wt.HDC, wt.UINT]
+user32.PrintWindow.restype = wt.BOOL
 
 VK = {"ctrl": 0x11, "shift": 0x10, "alt": 0x12, "enter": 0x0D, "return": 0x0D, "esc": 0x1B, "escape": 0x1B, "tab": 0x09,
       "up": 0x26, "down": 0x28, "left": 0x25, "right": 0x27, "home": 0x24, "end": 0x23, "delete": 0x2E, "backspace": 0x08,
@@ -272,6 +274,18 @@ class Gui:
             time.sleep(0.07)
         time.sleep(0.15)
 
+    def scroll(self, element, notches=-3):
+        """Mouse wheel over an element (negative notches scroll down), the pointer guard applied first."""
+        x, y = self.screen_point(element)
+        self.glide(x, y)
+        self._guard_button()
+        for _ in range(abs(notches)):
+            i = driver.INPUT(type=driver.INPUT_MOUSE)
+            i.u.mi = driver.MOUSEINPUT(0, 0, ctypes.c_ulong(120 if notches > 0 else -120 & 0xFFFFFFFF).value, 0x800, 0, 0)
+            driver.send(i)
+            time.sleep(0.08)
+        time.sleep(0.3)
+
     def _button(self, button, down):
         if down:
             self._guard_button()
@@ -376,6 +390,51 @@ class Gui:
         def chunk(tag, body):
             return struct.pack(">I", len(body)) + tag + body + struct.pack(">I", zlib.crc32(tag + body))
         png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)) \
+            + chunk(b"IDAT", zlib.compress(bytes(raw), 3)) + chunk(b"IEND", b"")
+        self.shots += 1
+        path = os.path.join(self.out, "%02d-%s.png" % (self.shots, name))
+        with open(path, "wb") as f:
+            f.write(png)
+        return path
+
+    def shot_window(self, name):
+        """The editor window's own pixels through PrintWindow (PW_RENDERFULLCONTENT), not a copy of the screen: whatever
+        covers the window is not in it. Falls back to `shot` when the window yields nothing (an all-black result)."""
+        left, top, w, h = self.client()
+        window = wt.RECT()
+        user32.GetWindowRect(self.hwnd, ctypes.byref(window))
+        ww, wh = window.right - window.left, window.bottom - window.top
+        screen = user32.GetDC(0)
+        mem = gdi32.CreateCompatibleDC(screen)
+        bitmap = gdi32.CreateCompatibleBitmap(screen, ww, wh)
+        gdi32.SelectObject(mem, bitmap)
+        ok = user32.PrintWindow(self.hwnd, mem, 2)
+
+        class BMI(ctypes.Structure):
+            _fields_ = [("size", wt.DWORD), ("w", wt.LONG), ("h", wt.LONG), ("planes", wt.WORD), ("bits", wt.WORD),
+                        ("comp", wt.DWORD), ("img", wt.DWORD), ("x", wt.LONG), ("y", wt.LONG), ("u", wt.DWORD), ("i", wt.DWORD)]
+        info = BMI(ctypes.sizeof(BMI), ww, -wh, 1, 32, 0, 0, 0, 0, 0, 0)
+        buf = ctypes.create_string_buffer(ww * wh * 4)
+        gdi32.GetDIBits(mem, bitmap, 0, wh, buf, ctypes.byref(info), 0)
+        gdi32.DeleteObject(bitmap)
+        gdi32.DeleteDC(mem)
+        user32.ReleaseDC(0, screen)
+        data = buf.raw
+        if not ok or not any(data[i] for i in range(0, len(data), 4099)):
+            print("PrintWindow gave no pixels; using the screen copy", flush=True)
+            return self.shot(name)
+        row = ww * 4
+        raw = bytearray()
+        for y in range(wh):
+            raw.append(0)
+            line = data[y * row:(y + 1) * row]
+            rgb = bytearray(ww * 3)
+            rgb[0::3], rgb[1::3], rgb[2::3] = line[2::4], line[1::4], line[0::4]
+            raw += rgb
+
+        def chunk(tag, body):
+            return struct.pack(">I", len(body)) + tag + body + struct.pack(">I", zlib.crc32(tag + body))
+        png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", ww, wh, 8, 2, 0, 0, 0)) \
             + chunk(b"IDAT", zlib.compress(bytes(raw), 3)) + chunk(b"IEND", b"")
         self.shots += 1
         path = os.path.join(self.out, "%02d-%s.png" % (self.shots, name))
