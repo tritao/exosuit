@@ -319,6 +319,10 @@ Deployment/publication requires separate authorization under EXECUTION.md.
 
 ### Relay hosting under suit
 
+> **Reversed by ADR 0005 section 4 (M19 Phase 9).** suit now holds the Noise key, the device pins and the grants for the
+> machine (`suit/src/suit/remote`); devices pair with the machine and are granted workspaces. The per-workspace relay
+> hosting below remains only for devices paired the old way, which pair again.
+
 suit is the per-user tray daemon (see [suit/README.md](../../suit/README.md)).
 
 **Visibility and control: done.**

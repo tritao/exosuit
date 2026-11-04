@@ -9,6 +9,29 @@ and the status.
 
 ## Open
 
+### A small edit "retypes ~15000 functions" (investigated, not an invalidation bug)
+
+- **Symptom:** `build-windows.ps1` (and a cold Android build) report `15087 functions retyped` and a 40 to 70 s compile after a
+  one-line edit; the frontend log says `restarted: devtools.InspectionAgent.poll needs haxeon.DynamicOps`.
+- **Finding 1, the count is the whole program, so the worker was cold.** On the resident worker the same project retypes 3 to 9
+  functions for a one-line edit (Android, 2026-11-04: first compile 56 s / 15064 retyped, then 9, 3, 3). Older build logs show
+  warm compiles of other projects at 1.8k to 4.1k and graphical cold ones at 15006 to 15099 (39 to 73 s). The worker exits after
+  90 s idle (`HAXEON_COMPILER_IDLE_SECONDS`) and its identity includes `PATH`, and the scripts start minutes apart with
+  differing `PATH`, so almost every scripted build starts a cold worker. There is no evidence of an edit invalidating the whole
+  program.
+- **Finding 2, a cold compile types the frontend twice.** `FrontendCompilation.includeTypedRuntimeDependencies` learns about the
+  implicit dependency on `haxeon.DynamicOps` only while typing `devtools.InspectionAgent.poll`, adds it to the owning module's
+  dependencies and restarts the whole frontend (`frontendRestarts`). Seeding that dependency before the first pass would remove
+  the second pass (not done; untested estimate: a third to half of the cold compile).
+- **Finding 3, a warm tiny edit still spends ~10 s in IR assembly.** Android, 3 functions retyped: prepare 3.8 s, compile 13.8 s
+  of which ir-assembly 10.2 s. The desktop editor in `--live` of this checkout (2026-11-04, one label in `ExosuitApp.hx`, 102
+  functions retyped) spent 23 s to the published patch: prepare 4.5 s, compile 18.5 s with ir-assembly 11.4 s, patch applied in
+  42 ms. The 3.4 s a developer's editor shows was not reproduced. IR assembly looks proportional to the program, not to the
+  edit: the same 10 to 11 s on both projects.
+- **Remedies in place:** `build.ps1` no longer deletes `build/haxe`; `dev.ps1 -Live` keeps the worker resident
+  (`docs/mobile/android.md`); the desktop loop is the editor in `--live` (`docs/mobile/e2e-local.md`).
+- **Status:** findings only. Open items: seed the DynamicOps dependency; make IR assembly incremental.
+
 ### A closure in a switch case cannot capture a local declared in that case
 
 - **Symptom:** `CFG generation failed for app.AgentManager.parse: Local "$l11:folder" used before definition`.
@@ -134,6 +157,17 @@ and the status.
   without unboxing.
 - **Status:** open.
 
+### Nested `Map<String, Map<String, Array<String>>>` misbehaved in a store: lookups failed, once an access violation
+
+- **Symptom:** in `MachineDeviceStore` (suit), a `Map<String, Map<String, Array<String>>>` filled and read back
+  inside one process gave wrong answers (a grant set just stored was not found) and, intermittently, `Access violation`
+  in the unit test run. Not isolated to a small reproduction; the same logic over an `Array<{device, workspace, grants}>`
+  passed every run.
+- **Found:** 2026-11-03, M19 Phase 9.
+- **Workaround:** a flat array of records (`DeviceWorkspaceGrant`).
+- **Status:** open, **unconfirmed**: no minimal reproduction yet, so it may have been a mistake in the store that the
+  rewrite happened to remove. Worth a small test of nested map values (`map.get(a).set(b, array)`) before relying on it.
+
 ### A conditional over two `Null<Color>` values reports "Type mismatch for conditional branch"
 
 - **Symptom:** `E1003: Type mismatch for conditional branch` at `label.layout.setColor(highlighted ? activeColor : color)`
@@ -166,10 +200,24 @@ and the status.
 - **Workaround:** none needed; only the report is wrong.
 - **Status:** open. Format with `Math.fround` or as a `Float` instead.
 
+## Runtime: hl.exe exits with 0xC0000409 after an uncaught exception (Windows)
+
+- **Seen:** `scripts/test-workspace-terminals.py` stage `history-restore` (and once `contracts`). The Haxe stack of the
+  uncaught exception prints, then `hl.exe` exits with 3221226505 (STATUS_STACK_BUFFER_OVERRUN, a fail-fast) instead of
+  exit 1, so the failure looks like a crash. The test client holds native terminalkit/sqlite handles and a PTY child.
+- **Not the cause of the test failure.** The failure was the product bug fixed in `WorkspaceTerminalManager` (a Windows
+  ConPTY clears the visible page on start, erasing the "Shell restarted" separator; it now goes into scrollback). The
+  exit code only accompanied that exception: no run with a passing test crashed.
+- **Status:** open, not diagnosed further (no minidump taken). If it recurs on a passing run, capture a dump with
+  WER LocalDumps for `hl.exe` and look at which native library's `/GS` cookie check fails during teardown.
+
 ## Standard library gaps
 
 Standard Haxe APIs haxeon's standard library does not have yet. Each one forced a hand-written replacement.
 
+- **No `haxe.io.Bytes.toHex()`, and the error does not say so.** `bytes.toHex()` fails with "E1007: Cannot call method
+  on non-object" naming the receiver, even when it is a local typed `Bytes` (seen 2026-11-06 in
+  tests/haxeon-rpc RpcCompatibilityTests). Workaround: `[for (i in 0...b.length) StringTools.hex(b.get(i), 2)].join("")`.
 - **`Date` has only `now()` and `getTime()`:** no `getFullYear`, `getMonth`, `getDate`, `getHours` and so on.
   `AgentWorkspaceMigration.timestamp` computes the calendar date from the epoch time by hand.
 - **No `DateTools`** (`DateTools.format` and the rest).

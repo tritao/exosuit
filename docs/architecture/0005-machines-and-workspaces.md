@@ -1,6 +1,6 @@
 # ADR 0005: suit is the machine; a machine's workspaces are lists of folder services
 
-Status: proposed
+Status: proposed. Section 4 (remote) is built on the server side as of M19 Phase 9; see "Status of section 4" below.
 
 ## Context
 
@@ -184,3 +184,33 @@ comes first and both sides build against it.
 2. **Workspace names.** Unique per machine, or free text with the id as identity? Default: free text.
 3. **Remote access to other builds.** Should a device reach a worktree build's folder services through suit?
    Default: no, until needed.
+
+## Status of section 4 (M19 Phase 9, server side)
+
+Built: suit (`suit/src/suit/remote`) holds one relay identity per machine (the machine id in `machine-relay.json`, the
+Noise key and relay bearer in the credential store), one machine socket, the paired devices and their grants
+(`machine-devices.json`). Decisions taken while building it:
+
+- **One channel, many streams.** A device has one relay channel to the machine. It carries stream frames
+  (`kind(1) | stream(4) | payload`, `MachineStreamFrame`). Stream 0 is an RPC connection with suit
+  (`exosuit-machine/1`, capability `machine.directory`: `DIRECTORY`, `OPEN`, `CLOSE`, `CHANGED`). `OPEN` names a
+  workspace by `ref` and returns a stream that suit forwards, unread, to that workspace's service over its local pipe.
+  suit starts an idle service on `OPEN` (clients should allow 30 s).
+- **Pairing grants only `machine.directory`.** Workspace grants are kept separately in suit and chosen by the owner at
+  approval (presets read, edit, all, or an explicit list). The `ref.machine` and the directory's `machine` are suit's
+  catalog id (`machine-<hex>`); the relay machine id is the hex part.
+- **Enforcement stays in the service.** suit sends the service an `EXFW` intro as the first message on its existing
+  local pipe (`{version, device, grants}`); the service intersects those grants with what it offers and enforces them per
+  request. Any other first message is an ordinary local client. A workspace that is not granted answers
+  `unknown_workspace`, the same as one that does not exist.
+- **Grants are live.** Changing or removing a workspace grant closes that device's streams to it; revoking the device
+  closes its channel. `CHANGED` tells the device the directory moved.
+- **Migration: devices pair again.** Per-service Noise keys cannot be taken over, and only development devices exist.
+  The per-workspace daemon relay hosting and pairing stay for old devices until they are retired; a device paired with
+  the machine does not use them.
+- **Editor.** Remote Access (`RemoteAccessPanel`) uses suit's `remote-*` control ops when suit is on: approve a pending
+  device, pick workspaces and a preset for each, edit or revoke later. With suit off it pairs with the open workspace's
+  service as before.
+
+Tests: `scripts/test-machine-remote.py` (two services under one suit, a fake device, a loopback Worker),
+`suit/tests` (`MachineRemoteUnitTests`), the frozen vectors in `docs/roadmap/RPC-VECTORS.md`.

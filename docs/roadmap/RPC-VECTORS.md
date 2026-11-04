@@ -249,6 +249,63 @@ The fixtures also fill a page with worst-case records of every kind (ids and nam
 three-byte characters, folders at 4096 bytes) and check that it fits `PAGE_BYTES` and, in its response envelope,
 the relay's message bound.
 
+## The machine directory and workspace streams (M19 Phase 9)
+
+Status: **proposed for the phone-side worker; frozen by `RpcCompatibilityTests.machineDirectoryVectors`.**
+`MachineDirectoryProtocol.hx`. ADR 0005 section 4: a device pairs once with the machine (suit's relay identity), is
+granted workspaces, and reaches them through suit. Pairing itself is unchanged (invitation, Noise XX-style
+handshake, code comparison, approval) but its peer is suit and its `machineId` is the machine's.
+
+**Channel framing.** After pairing (and on every reconnect) the Noise channel carries stream frames, not bare RPC
+messages: `kind:1 | stream:4 big-endian | payload`. Kind 0 is one RPC message of the stream, kind 1 closes the
+stream (no payload). Stream 0 is the machine stream and is always open; other streams are made by `OPEN`. A frame's
+payload is at most 65487 bytes, so the whole frame fits one Noise message (65492 bytes). A data frame for a stream
+that is not open is dropped and answered with a close frame. A device holds at most 16 streams.
+
+**Machine stream (stream 0).** An ordinary RPC connection with suit: application `exosuit-machine/1`, one capability,
+`machine.directory`, which the pairing grants (so the device-granted list in the pairing record is just that one
+name). The methods:
+
+| Id | Kind | Shape |
+| --- | --- | --- |
+| 180 | method `DIRECTORY` | `MachineQuery {1 machine:Null<String>}` -> `MachineDirectory {1 machine, 2 name, 3 revision, 4 workspaces}` |
+| 181 | method `OPEN` | `OpenWorkspace {1 ref}` -> `WorkspaceStream {1 ref, 2 stream, 3 grants}` |
+| 182 | method `CLOSE` | `CloseWorkspace {1 stream}` -> `CloseWorkspace` |
+| 183 | notification `CHANGED` | `DirectoryChange {1 revision}` |
+
+`MachineWorkspaceEntry`: 1 workspace (id), 2 name, 3 status (`running` or `idle`), 4 grants (capability names).
+
+Rules:
+
+- The directory lists exactly the workspaces granted to the asking device, never any other; a freshly paired device
+  gets an empty list until the owner grants workspaces. `revision` changes when the device's view changes (a grant,
+  a name, or a status change); `CHANGED` is a hint to list again, sent on stream 0 when it does. Status is read when
+  listed; a status change alone sends no hint.
+- `machine`, when set in a query, must be the machine's id (else `machine_mismatch`). `ref.machine` in `OPEN` is
+  checked the same way. A `ref.workspace` that is not granted to the device gets `unknown_workspace`, the same
+  answer as for an id the machine does not have.
+- `OPEN` starts the workspace's service when it is idle. When the service does not come up, `workspace_unavailable`
+  (the device may retry). On success the stream speaks the ordinary workspace protocol (`exosuit-agent/1`, handshake
+  and all) with the service; the capabilities the service offers are the intersection of `WorkspaceStream.grants` and
+  what that build of the service supports. The catalog watch (170-172) and every method 100-169 work unchanged on
+  a stream, with `"workspace"` accepted as the alias of the stream's own service, and `ref.machine` the machine's id.
+- Changing or revoking a device's grants for a workspace closes that workspace's streams (the device sees a close
+  frame); revoking the device closes the channel.
+- Errors: `machine_mismatch`, `unknown_workspace`, `workspace_unavailable`, `too_many_streams`, `invalid_request`.
+  Never reuse ids.
+
+| Value | Canonical hex |
+| --- | --- |
+| directory query m | `8101a16d` |
+| directory query, any machine | `8101c0` |
+| directory m/N, revision 1, one workspace w/W/running/[workspace.read] | `8401a16d02a14e030104918401a17702a15703a772756e6e696e670491ae776f726b73706163652e72656164` |
+| open m/w | `81018201a16d02a177` |
+| stream for m/w, id 5, [workspace.read] | `83018201a16d02a17702050391ae776f726b73706163652e72656164` |
+| close stream 3 | `810103` |
+| directory changed, revision 7 | `810107` |
+| data frame, stream 0, payload `ab` | `0000000000ab` |
+| close frame, stream 3 | `0100000003` |
+
 ### suit's `machine` reply, version 2
 
 suit's control endpoint answers JSON, not MessagePack. `machine`, and every op that returns `machine`, replies:

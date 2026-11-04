@@ -381,8 +381,13 @@ Acceptance:
 
 ## Phase 9: remote clients by workspace (ADR 0005 steps 6 and 7)
 
-- [ ] suit holds the machine's relay identity, devices and per-workspace grants, and routes a device's stream to a
-  workspace service by id.
+- [x] suit holds the machine's relay identity, devices and per-workspace grants, and routes a device's stream to a
+  workspace service by id. Evidence: `scripts/test-machine-remote.py` (22 checks: two workspace services under one
+  suit and a loopback Worker; a fake device pairs once, is granted A only, sees A and not B, opens A and reads its
+  catalog, B appears and opens when granted, closes when dropped, the device reconnects, revoke ends the channel and
+  refuses a new one); `suit/tests` `MachineRemoteUnitTests`; frozen vectors in `RPC-VECTORS.md`;
+  `RemoteAccessPanel` picks workspaces and presets per device (`tests/remote-access-panel`). Devices re-pair with
+  the machine (ADR 0005 section 6). The phone side is not done: see "Phase 9 gaps" in `docs/mobile/android.md`.
 - [ ] Web and Android show machine, workspaces, groups and sessions with the Phase 0 protocol; one device pairs with
   many machines.
 
