@@ -73,6 +73,8 @@ title=Terminal
         self.assertEqual(result.returncode, 0, result.stderr)
         plan = json.loads(result.stdout)
         self.assertEqual(plan["groups"][0]["name"], "Tools % # literal")
+        # Without --parent, Sakura's root children go to the workspace root.
+        self.assertIsNone(plan["groups"][0]["parent"])
         self.assertEqual(plan["groups"][1]["parent"], plan["groups"][0]["id"])
         self.assertEqual(plan["terminals"][0]["group"], plan["groups"][1]["id"])
         self.assertEqual(self.db.execute("SELECT count(*) FROM workspace_groups").fetchone()[0], 1)

@@ -8,7 +8,7 @@ Example directory remapping (repeat --map as needed):
     --map /old/projects=/home/me/projects
 
 Imports nested groups, names, order, directories and group-owned shell metadata.
-Sakura root children go under --parent (default: work). Every directory must
+Sakura root children go under --parent (default: the workspace root). Every directory must
 exist inside the catalog's authorized root after mapping. Initialize the target
 workspace in Exosuit first. Stop its managed agent before applying; the script
 holds the same agent.lock through backup and commit.
@@ -140,7 +140,8 @@ def make_plan(source, db, mappings, parent):
     root = Path(meta[1]).resolve(strict=True)
     require(str(root) == meta[1] and root.is_dir(), "Workspace root is not canonical")
     existing = {r[0] for r in db.execute("SELECT id FROM workspace_groups")}
-    require(parent in existing, f"Destination group {parent!r} does not exist")
+    # "" is the workspace root, which has no group record.
+    require(parent == "" or parent in existing, f"Destination group {parent!r} does not exist")
     mapping = []
     for item in mappings:
         old, sep, new = item.partition("=")
@@ -189,7 +190,7 @@ def make_plan(source, db, mappings, parent):
         require(0 <= order <= 1000000, "Invalid sibling order")
         groups.append(dict(id=ids[row["id"]], name=name(row.get("title", "")),
                            cwd=directory(row.get("directory")), revision=1,
-                           parent=parent if row.get("parent", "root") == "root" else ids[row["parent"]], order=order))
+                           parent=(parent or None) if row.get("parent", "root") == "root" else ids[row["parent"]], order=order))
     for row in rows["Terminal"]:
         if (row.get("kind", "shell") != "shell" or row.get("agent_provider")
                 or row.get("parent", "root") in task_ids):
@@ -250,7 +251,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("session", type=Path)
     parser.add_argument("--database", required=True, type=Path, help="Existing managed catalog.sqlite")
-    parser.add_argument("--parent", default="work", help="Destination group for Sakura root children")
+    parser.add_argument("--parent", default="", help="Destination group for Sakura root children (default: the workspace root)")
     parser.add_argument("--map", action="append", default=[], metavar="OLD=NEW", help="Directory prefix mapping (repeatable)")
     parser.add_argument("--apply", action="store_true", help="Back up and import; default is read-only preview")
     parser.add_argument("--allow-lossy", action="store_true", help="Accept all skipped fields/resources shown in the preview")
