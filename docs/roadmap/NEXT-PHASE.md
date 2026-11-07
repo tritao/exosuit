@@ -131,8 +131,9 @@ Live mode and suit:
     position it had in the group it left; an old service drops the positions of any record it rewrites (and refuses
     positions above 1000000, which a new client reaches after about a thousand appends); a client that has not placed
     a row sorts it after the placed ones.
-  - New catalogs still seed a Work group: `scripts/test-workbench-actions-ui.py`, `scripts/test-workbench-groups-ui.py`
-    and `scripts/import-sakura.py` (default `--parent work`) rely on it.
+  - New catalogs no longer seed a Work group, and a start removes an old one (ADR 0006, amended 2026-11-06).
+    `scripts/test-workbench-actions-ui.py` and `scripts/test-workbench-groups-ui.py` (Xvfb, Linux only) make their own
+    group with the Workbench controls and no longer click `g:work`; they have not been run since that change.
   - In the `workbench-drag` panel test, a right-click on a session row after some drags opened the background menu
     (key null) instead of the session's; the cause is not known, and the test uses F2 instead.
 

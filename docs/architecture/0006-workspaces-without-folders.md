@@ -10,7 +10,14 @@ workspace, in no named group; named groups such as Work are optional sub-folders
 (`WorkspaceProtocol.ROOT_GROUP`). No group can have that id, so the wire types and stored records are unchanged and
 existing groups and items need no migration. A root session starts in the workspace's first folder, else its scratch
 folder (which the editor passes as the explicit folder until Phase 4). New sessions and terminals go to the root unless
-a group, or an item in one, is selected; new catalogs still seed a Work group.
+a group, or an item in one, is selected.
+
+Amended 2026-11-06: **no catalog has a seeded Work group.** A new catalog starts with no groups. A service that opens a
+catalog still holding the group that older services seeded (id `work`) moves its sessions, terminals and child groups
+to its parent (the workspace root), after the rows already there, and removes it (`WorkspaceSqliteStore.retireSeedGroup`).
+Group operations and events are dropped and the epoch renewed, as when a migration merges catalogs, so clients load the
+catalog afresh. Items keep their own folders; a child group without a folder keeps the Work group's folder when it was
+not the workspace's.
 
 Downgrade risk: a service from before this change cannot open a catalog that holds a root terminal. It rejects the
 stored record ("Invalid persisted terminal record") and does not start. Creating or moving an item to the root
