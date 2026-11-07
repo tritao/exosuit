@@ -1,0 +1,119 @@
+import haxe.Json;
+import sys.FileSystem;
+import sys.io.File;
+import ui.ExosuitApp;
+import ui.UiEditorTabs;
+
+/**
+	Remembers the phone's last view (machine, workspace, and the terminal or session that was open) in the app's
+	private files, and reopens it after a cold start. A target that is gone falls back to the machine list.
+
+	Polled once per frame. While a saved view is waiting to be restored nothing is written, so a start that never
+	reaches the target does not overwrite it; once the restore finished (or gave up) the view that is on screen is
+	what gets saved, and leaving the workspace clears it.
+**/
+class PhoneLastView {
+	/** Seconds a restore waits for the machine, its directory and the workspace catalog before giving up. */
+	static inline final RESTORE_SECONDS = 40.0;
+
+	final path:String;
+	final remote:PhoneRemote;
+	final app:ExosuitApp;
+	final clock:Void->Float;
+	var pending:Null<{machine:String, workspace:String, kind:String, id:String}>;
+	var startedAt = -1.0;
+	var saved = "";
+	var terminalShown = false;
+
+	public function new(filesRoot:String, remote:PhoneRemote, app:ExosuitApp, clock:Void->Float) {
+		this.path = filesRoot + "/last-view.json";
+		this.remote = remote;
+		this.app = app;
+		this.clock = clock;
+		try {
+			if (FileSystem.exists(path)) {
+				var value:Dynamic = Json.parse(File.getContent(path));
+				if (value != null && value.machine != null && value.workspace != null) {
+					pending = {machine: value.machine, workspace: value.workspace, kind: value.kind == null ? "" : value.kind, id: value.id == null ? "" : value.id};
+					saved = File.getContent(path);
+				}
+			}
+		} catch (_:Dynamic) pending = null;
+	}
+
+	public function poll():Void {
+		releaseKeyboard();
+		if (pending != null) restore();
+		else save();
+	}
+
+	/** Closing the terminal view must close the soft keyboard: the terminal's blur does not run when its view leaves the tree. */
+	function releaseKeyboard():Void {
+		var tab = app.host.activeTab();
+		var shown = tab != null && UiEditorTabs.terminal(tab) != null && !app.sidebar.visible;
+		if (terminalShown && !shown) app.context().textInput.deactivate();
+		terminalShown = shown;
+	}
+
+	function give_up():Void pending = null;
+
+	function restore():Void {
+		var wanted = pending;
+		if (wanted == null) return;
+		if (startedAt < 0) startedAt = clock();
+		if (clock() - startedAt > RESTORE_SECONDS * 1000) return give_up();
+		var machine:Null<PhoneMachine> = null;
+		for (candidate in remote.machines) if (candidate.device.machineId == wanted.machine) machine = candidate;
+		if (machine == null) return give_up();
+		var directory = machine.machine.directory;
+		if (directory == null) return;
+		if (remote.open == null) {
+			if (machine.machine.workspaceById(wanted.workspace) == null) return give_up();
+			remote.openWorkspace(machine, wanted.workspace);
+			return;
+		}
+		if (remote.open.id != wanted.workspace) return give_up();   // the user chose something else meanwhile
+		if (wanted.kind == "") return give_up();
+		var client = remote.workbenchService();
+		if (wanted.kind == "terminal") {
+			var catalog = client.terminalCatalog();
+			if (catalog == null || !client.canReadTerminals()) return;
+			for (record in catalog.terminals) if (record.id == wanted.id) {
+				if (app.openCatalogTerminal(record)) give_up();
+				return;
+			}
+			give_up();
+		} else if (wanted.kind == "agent") {
+			var agents = client.agentService().agents();
+			if (agents == null) return;
+			for (record in agents.records) if (record.id == wanted.id) {
+				app.openCodexAgent(record.id);
+				return give_up();
+			}
+			give_up();
+		} else give_up();
+	}
+
+	function save():Void {
+		var open = remote.open;
+		var machine = remote.openMachine;
+		var text = "";
+		if (open != null && machine != null) {
+			var kind = "", id = "";
+			var tab = app.host.activeTab();
+			if (tab != null) {
+				var terminal = UiEditorTabs.terminal(tab);
+				var agent = UiEditorTabs.agent(tab);
+				if (terminal != null && terminal.remote) { kind = "terminal"; id = terminal.resourceId; }
+				else if (agent != null) { kind = "agent"; id = agent.resource; }
+			}
+			text = Json.stringify({machine: machine.device.machineId, workspace: open.id, kind: kind, id: id});
+		}
+		if (text == saved) return;
+		saved = text;
+		try {
+			if (text == "") { if (FileSystem.exists(path)) FileSystem.deleteFile(path); }
+			else File.saveContent(path, text);
+		} catch (_:Dynamic) {}
+	}
+}

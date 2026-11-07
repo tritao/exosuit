@@ -3027,7 +3027,7 @@ class ExosuitApp implements DesktopUiApplication {
   requestFrame();
  }
 
- function openCodexAgent(resource:String):Void {
+ public function openCodexAgent(resource:String):Void {
   var client=workbenchClient,catalog=client == null ? null : client.agentService().agents();
   if(catalog == null) return;
   for(record in catalog.records) if(record.id == resource) {openCreatedAgent(record);return;}

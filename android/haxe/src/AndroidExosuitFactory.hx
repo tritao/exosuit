@@ -56,6 +56,7 @@ class AndroidExosuitFactory {
 		created.registerSidebarDestination("remote-access", IconName.Radar, function() return panel,
 			new haxeon.ui.widgets.sidebar.SidebarModeOptions("Remote", 30, true));
 		var filesAttached = false, workbenchAttached = false;
+		var lastView = new PhoneLastView(root, phone, created, function() return NativeKit.nk_time_seconds() * 1000);
 		var applicationPoll = context.onPoll;
 		// Debug builds with files/automation.on (see ExosuitActivity): the labelled elements and the app's state for the test scripts.
 		var automationDirectory = devtools.AutomationProbe.directoryFromEnvironment();
@@ -68,6 +69,7 @@ class AndroidExosuitFactory {
 			if (applicationPoll != null) applicationPoll();
 			if (automation != null) automation.poll();
 			phone.poll();
+			lastView.poll();
 			var identified = phone.fileScope() != null;
 			var filesAvailable = identified && phone.hasCapability(WorkspaceFileProtocol.READ);
 			if (filesAvailable && !filesAttached) {
