@@ -805,13 +805,15 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
       }
       connection.call(WorkspaceProtocol.IDENTITY, {workspace: "workspace"}, 2000, function(identity) {
         if (selected != selection || !current.isCurrent(token)) return;
-        if (identity.workspace != "workspace" || identity.root != expectedRoot) {
-          fail("Workspace service identity mismatch");
-          return;
-        }
+        // Another generation means the descriptor was stale (a service restarted on the same pipe, perhaps in another
+        // of its workspace's folders): discover it again. Only the generation it named may disagree about its root.
         if (identity.instance != expectedInstance) {
           stopConnection();
           retryAt = clock() + 100;
+          return;
+        }
+        if (identity.workspace != "workspace" || identity.root != expectedRoot) {
+          fail("Workspace service identity mismatch");
           return;
         }
         verified = true;
