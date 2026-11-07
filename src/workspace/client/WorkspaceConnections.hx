@@ -48,6 +48,8 @@ class WorkspaceConnections {
 	final blocked:Map<String, Blocked> = [];
 	/** Dropped watches whose UNWATCH is still on its way out. */
 	final retiring:Array<WorkspaceCatalogWatch> = [];
+	final acceptEndpoint:String->Bool;
+	final limit:Int;
 	var disposed = false;
 	var structure = 0;
 	var machine = "";
@@ -57,8 +59,10 @@ class WorkspaceConnections {
 	var lastWorkspaces:Null<Array<String>>;
 
 	/** `connect` makes a connector for a service endpoint; the native pool uses `WorkspaceConnections.native`. */
-	public function new(connect:String->RpcConnector, clock:Void->Float, ?random:Void->Float) {
+	public function new(connect:String->RpcConnector, clock:Void->Float, ?random:Void->Float, ?acceptEndpoint:String->Bool, limit:Int = LIMIT) {
 		this.connect = connect;
+		this.acceptEndpoint = acceptEndpoint == null ? platformEndpoint : acceptEndpoint;
+		this.limit = limit;
 		this.clock = clock;
 		this.random = random == null ? function() return Math.random() : random;
 	}
@@ -121,18 +125,9 @@ class WorkspaceConnections {
 	}
 
 	function reconcile():Void {
-		if (workspacesKnown()) {
-			var known = lastWorkspaces;
-			if (known != null)
-				for (id in [for (key in kept.keys()) key])
-					if (known.indexOf(id) < 0) {
-						kept.remove(id);
-						structure++;
-					}
-		}
 		var wanted:Map<String, WatchedService> = [];
 		for (service in lastServices)
-			if (service.running && service.workspace != lastAttached && platformEndpoint(service.endpoint))
+			if (service.running && service.workspace != lastAttached && acceptEndpoint(service.endpoint))
 				wanted.set(service.workspace, service);
 		for (id in [for (key in blocked.keys()) key]) {
 			var service = wanted.get(id), entry = blocked.get(id);
@@ -146,10 +141,20 @@ class WorkspaceConnections {
 			else if (watch.ended())
 				endedByItself(id, identity(service));
 		}
+		// After the drops above, so a copy kept from a watch dropped now goes too when its workspace left the machine.
+		if (workspacesKnown()) {
+			var known = lastWorkspaces;
+			if (known != null)
+				for (id in [for (key in kept.keys()) key])
+					if (known.indexOf(id) < 0) {
+						kept.remove(id);
+						structure++;
+					}
+		}
 		var count = Lambda.count(watches);
 		var now = clock();
 		for (id => service in wanted) {
-			if (watches.exists(id) || count >= LIMIT)
+			if (watches.exists(id) || count >= limit)
 				continue;
 			var wait = blocked.get(id);
 			if (wait != null && now < wait.until)
@@ -262,7 +267,7 @@ class WorkspaceConnections {
 			if (watch.ended())
 				retry = true;
 		}
-		var room = Lambda.count(watches) < LIMIT;
+		var room = Lambda.count(watches) < limit;
 		if (room)
 			for (id => wait in blocked)
 				if (now >= wait.until && !watches.exists(id))

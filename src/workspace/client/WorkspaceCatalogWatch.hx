@@ -32,7 +32,8 @@ class WorkspaceCatalogWatch {
 	/** How long a watch that is not live counts as starting or reconnecting (the window then asks suit more often). */
 	public static inline final TRYING_MS = 15000.0;
 
-	public final ref:WorkspaceRef;
+	/** The workspace this watch follows. A shared watch that started on the alias "workspace" adopts the service's real ref from its first page. */
+	public var ref(default, null):WorkspaceRef;
 	/** The last complete copy; a reset is built aside and replaces it only when its last page arrives. */
 	public var mirror(default, null):WorkspaceCatalogMirror = new WorkspaceCatalogMirror();
 	/** True while connected with a complete copy. A dropped connection keeps `mirror` and clears this. */
@@ -48,9 +49,13 @@ class WorkspaceCatalogWatch {
 	/** The delay a failed read waits now; it doubles per failure. */
 	public var retryDelay(default, null):Float = RETRY_MIN_MS;
 
-	final client:RpcClient;
+	/** Null for a shared watch, which follows a connection its owner's client established (see `shared`). */
+	final client:Null<RpcClient>;
 	final clock:Void->Float;
+	final learning:Bool;
 	var connection:Null<RpcConnection>;
+	/** A shared watch only: whether `connection` is the owner's current one; the owner sets it with `attach` and `detach`. */
+	var sharedOpen = false;
 	var staging:Null<WorkspaceCatalogMirror>;
 	var reading = false;
 	var dirty = false;
@@ -62,10 +67,15 @@ class WorkspaceCatalogWatch {
 	var pages = 0;
 	var downSince:Float;
 
-	public function new(ref:WorkspaceRef, connector:RpcConnector, clock:Void->Float, random:Void->Float) {
+	public function new(ref:WorkspaceRef, connector:Null<RpcConnector>, clock:Void->Float, random:Null<Void->Float>, learning:Bool = false) {
 		this.ref = ref;
 		this.clock = clock;
+		this.learning = learning;
 		downSince = clock();
+		if (connector == null) {
+			client = null;
+			return;
+		}
 		// The service lists groups, sessions and terminals only to a connection that holds their read grants
 		// (WorkspaceCatalogService.bind), so ask for the three reads along with the catalog. Nothing here can write.
 		var capabilities = [WorkspaceCatalogProtocol.CAPABILITY, workspace.service.WorkspaceProtocol.READ,
@@ -74,10 +84,47 @@ class WorkspaceCatalogWatch {
 			1048576), function(established, _, _) { hello(established); }, 100, 5000, 5000);
 	}
 
+	/**
+		A watch on a connection the owner already holds. A device has one connection per relay route, so it cannot open a
+		second one for the catalog: its client calls `attach` with each connection it establishes and `detach` when that
+		one goes away. With `learning`, `ref.workspace` may be the alias "workspace": the first page names the real id and
+		the watch adopts it (the machine must match), so the owner can store the workspace by id.
+	**/
+	public static function shared(ref:WorkspaceRef, clock:Void->Float, learning:Bool):WorkspaceCatalogWatch
+		return new WorkspaceCatalogWatch(ref, null, clock, null, learning);
+
+	/** Starts (or restarts after a reconnect) reading on `established`; resumes from the last token. */
+	public function attach(established:RpcConnection):Void {
+		if (client != null)
+			throw "Only a shared watch takes a connection";
+		sharedOpen = true;
+		hello(established);
+	}
+
+	/** The owner's connection is gone: keep the copy, clear `live`, and wait for the next `attach`. */
+	public function detach():Void {
+		if (client != null || closed)
+			return;
+		lostConnection();
+	}
+
+	function lostConnection():Void {
+		connection = null;
+		sharedOpen = false;
+		reading = false;
+		staging = null;
+		if (live) {
+			live = false;
+			downSince = clock();
+			revision++;
+		}
+	}
+
 	function hello(established:RpcConnection):Void {
 		if (closed)
 			return;
-		if (client.remoteApplication != "exosuit-agent/1") {
+		var owned = client;
+		if (owned != null && owned.remoteApplication != "exosuit-agent/1") {
 			fail("Unexpected workspace service");
 			return;
 		}
@@ -143,6 +190,8 @@ class WorkspaceCatalogWatch {
 	function receive(source:RpcConnection, page:WorkspaceCatalog, sent:Null<String>):Void {
 		reads++;
 		pages++;
+		if (learning && ref.workspace == "workspace" && page.ref.machine == ref.machine && page.ref.workspace.length > 0)
+			ref = page.ref;
 		if (!WorkspaceCatalogProtocol.sameRef(page.ref, ref)) {
 			fail("Workspace service answered for another workspace");
 			return;
@@ -204,23 +253,22 @@ class WorkspaceCatalogWatch {
 	public function poll():Void {
 		if (closed)
 			return;
-		client.poll();
-		if (client.state == Closed) {
-			// A terminal handshake error (unauthorized, a missing capability) ends the client for good.
-			var last = client.lastError;
-			fail(last == null ? "Workspace connection closed" : last.code);
-			return;
-		}
+		var owned = client;
 		var current = connection;
-		if (current != null && client.current() != current) {
-			connection = null;
-			reading = false;
-			staging = null;
-			if (live) {
-				live = false;
-				downSince = clock();
-				revision++;
+		if (owned != null) {
+			owned.poll();
+			if (owned.state == Closed) {
+				// A terminal handshake error (unauthorized, a missing capability) ends the client for good.
+				var last = owned.lastError;
+				fail(last == null ? "Workspace connection closed" : last.code);
+				return;
 			}
+			if (current != null && owned.current() != current) {
+				lostConnection();
+				return;
+			}
+		} else if (current != null && !current.isOpen()) {
+			lostConnection();
 			return;
 		}
 		if (current != null && !reading && retryAt > 0 && clock() >= retryAt) {
@@ -245,8 +293,9 @@ class WorkspaceCatalogWatch {
 			revision++;
 		live = false;
 		connection = null;
-		if (closeClient)
-			client.close();
+		var owned = client;
+		if (closeClient && owned != null)
+			owned.close();
 	}
 
 	/**
@@ -259,25 +308,32 @@ class WorkspaceCatalogWatch {
 			return;
 		var current = connection;
 		closeNow(false);
-		if (current != null && current.isOpen() && client.current() == current) {
+		var owned = client;
+		if (owned == null) {
+			if (current != null && current.isOpen())
+				current.call(WorkspaceCatalogProtocol.UNWATCH, ref, Std.int(LINGER_MS), function(_) {}, function(_) {});
+			return;
+		}
+		if (current != null && current.isOpen() && owned.current() == current) {
 			retiring = true;
 			answered = false;
 			lingerUntil = clock() + LINGER_MS;
 			current.call(WorkspaceCatalogProtocol.UNWATCH, ref, Std.int(LINGER_MS), function(_) { answered = true; }, function(_) { answered = true; });
 			return;
 		}
-		client.close();
+		owned.close();
 	}
 
 	/** After `dispose`: moves the UNWATCH along and closes the connection once it is answered or late. True when closed. */
 	public function drain():Bool {
-		if (!retiring)
+		var owned = client;
+		if (!retiring || owned == null)
 			return true;
-		client.poll();
-		if (!answered && clock() < lingerUntil && client.state != Closed)
+		owned.poll();
+		if (!answered && clock() < lingerUntil && owned.state != Closed)
 			return false;
 		retiring = false;
-		client.close();
+		owned.close();
 		return true;
 	}
 }

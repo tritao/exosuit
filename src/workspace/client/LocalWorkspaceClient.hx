@@ -120,6 +120,7 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
     this.choices = choices == null ? WorkspaceManagerChoices.instance() : choices;
     this.workbench = new RpcWorkspaceWorkbenchClient(this, clock);
     workbench.timelineName = timelineName;
+    workbench.workspaceIdentity = function() return serviceTarget == null ? null : serviceTarget.workspace;
   }
 
   /** The workspace this attachment's events are filed under in the ConnectTimeline. */
@@ -482,6 +483,9 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
       ?defaults:AgentSessionDefaults):Void
     workbench.createAgent(group, thread, created, defaults);
   public function deleteAgent(id:String, ?deleted:Void->Void):Void workbench.deleteAgent(id, deleted);
+  public function agentDeliveryUncertain(id:String):Bool return workbench.agentDeliveryUncertain(id);
+  public function agentDeliveryReviewReady(id:String):Bool return workbench.agentDeliveryReviewReady(id);
+  public function acknowledgeAgentDelivery(id:String):Bool return workbench.acknowledgeAgentDelivery(id);
   public function agentAction(id:String, action:String, text:String, request:Null<String>, ?model:String, ?effort:String, ?accepted:Void->Void, ?expectedNativeName:String, ?imageIds:Array<String>, ?order:Int):Void
     workbench.agentAction(id, action, text, request, model, effort, accepted, expectedNativeName, imageIds, order);
   public function uploadAgentImage(id:String, bytes:haxe.io.Bytes, done:(Null<String>, Null<String>)->Void):Void workbench.uploadAgentImage(id, bytes, done);

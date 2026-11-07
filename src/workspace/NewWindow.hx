@@ -54,7 +54,7 @@ class NewWindow {
 		try {
 			var program = Sys.programPath();
 			var configured = Sys.getEnv(AUTOMATION_VARIABLE);
-			var keys:Array<String> = ["EXOSUIT_AUTOMATION_DIR"], values:Array<String> = [automationDirectory(configured, ++opened)];
+			var keys:Array<String> = ["EXOSUIT_AUTOMATION_DIR", "EXOSUIT_TERMINAL_CLIENT_KEY"], values:Array<String> = [automationDirectory(configured, ++opened), ""];
 			var child = sys.io.Process.spawn(Sys.executablePath(), arguments(program, key, Sys.getEnv(LIVE_MODULE_VARIABLE), Sys.getEnv(LIVE_ENTRY_VARIABLE)),
 				Sys.getCwd(), keys, values, true);
 			child.close();

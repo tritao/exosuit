@@ -80,6 +80,18 @@ class RpcTerminalBackend implements TerminalBackend {
     this.group = group;
     this.directory = directory;
   }
+  static final CLIENT_KEY = "EXOSUIT_TERMINAL_CLIENT_KEY";
+  /** Names this client process, so the service can tell a pane that replaced an old attachment from another client.
+      Random and kept in the process environment: statics do not survive a live module reload, the environment does.
+      A window started by this process gets an empty value, so it makes its own key. */
+  static function clientKey():String {
+    var key = Sys.getEnv(CLIENT_KEY);
+    if (key == null || key == "") {
+      key = haxe.crypto.Sha256.encode(Sys.time() + ":" + Math.random() + ":" + Sys.getPid()).substr(0, 32);
+      Sys.putEnv(CLIENT_KEY, key);
+    }
+    return key;
+  }
   public function id():String return terminalId;
   public function configureAgent(provider:String):Void {
     if (!create || attached || pending || ["codex","claude","pi"].indexOf(provider) < 0)
@@ -156,7 +168,7 @@ class RpcTerminalBackend implements TerminalBackend {
     controlPending = true;
     c.call(WorkspaceTerminalProtocol.SET_CONTROL, {
       workspace: "workspace", instance: instance, id: terminalId,
-      claim: claim, takeover: claim && takeover
+      claim: claim, takeover: claim && takeover, clientKey: clientKey()
     }, 2000, function(info) {
       if (closed || connection != c) {
         if (info.controller == true && c.isOpen()) c.call(WorkspaceTerminalProtocol.SET_CONTROL, {
@@ -426,7 +438,8 @@ class RpcTerminalBackend implements TerminalBackend {
           create: create,
           columns: columns,
           rows: rows,
-          group: group, directory: directory, watch: true, theme: theme, agentProvider: agentProvider
+          group: group, directory: directory, watch: true, theme: theme, agentProvider: agentProvider,
+          clientKey: autoClaimControl ? clientKey() : null
         }, 2000, function(info) {
           // The daemon owns the resource even if its view closed before the reply.
           // Keep this on the captured connection's router across reconnects.

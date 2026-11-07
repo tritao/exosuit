@@ -9,6 +9,12 @@ interface WorkspaceAgentClient {
  public function agentBusy():Bool;
  public function agentCreation():Null<workspace.client.WorkspaceAgentCreation.AgentCreationStatus>;
  public function agentRevision():Int;
+ /** A prompt, queue or steer may have reached the service without an acknowledgement; sending is blocked until reviewed. */
+ public function agentDeliveryUncertain(id:String):Bool;
+ /** The conversation was read again since the uncertainty began, so `acknowledgeAgentDelivery` is allowed. */
+ public function agentDeliveryReviewReady(id:String):Bool;
+ /** The user checked the conversation: clears the uncertainty. False while review is not ready. */
+ public function acknowledgeAgentDelivery(id:String):Bool;
 	public function agents():Null<AgentCatalog>;
 	public function agentError():Null<String>;
 	public function refreshAgents():Void;

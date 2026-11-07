@@ -29,6 +29,8 @@ private typedef MachineRequest = {
 class MachineClient {
 	static inline final TIMEOUT = 5000.0;
 	static inline final RETRY = 1000.0;
+	/** Remote access steps wait for the relay (a pairing invitation, an approval), which takes longer than a catalog edit. */
+	static inline final REMOTE_TIMEOUT = 20000.0;
 
 	final hub:NativeRpcHub;
 	final clock:Void->Float;
@@ -104,6 +106,43 @@ class MachineClient {
 
 	public function removeFolder(id:String, folder:String, ?done:(Null<MachineWorkspace>, Null<String>) -> Void):Void
 		request({op: "workspace-remove-folder", workspace: id, folder: folder}, workspaceReply(done, false));
+
+	// ---- Remote access (ADR 0005 section 4): the machine's relay identity, paired devices and their workspaces.
+	// Each reply is suit's JSON as sent (docs/roadmap/19-machine-workspaces.md, Phase 9); `done` gets it or the error.
+
+	/** Whether remote access is set up, its relay and whether the machine socket is connected. */
+	public function remoteStatus(done:(Null<Dynamic>, Null<String>) -> Void):Void
+		request({op: "remote-status"}, done);
+
+	/** Sets up remote access with this relay (an https origin; a loopback http one only for a development Worker). */
+	public function remoteEnable(origin:String, done:(Null<Dynamic>, Null<String>) -> Void):Void
+		request({op: "remote-enable", origin: origin}, done);
+
+	/** Stops using the relay and forgets its address, so `remoteEnable` can name another. */
+	public function remoteDisable(done:(Null<Dynamic>, Null<String>) -> Void):Void
+		request({op: "remote-disable"}, done);
+
+	/** A one-time pairing invitation: `invitation` has the pairing URL. */
+	public function remoteInvite(ttlSeconds:Int, done:(Null<Dynamic>, Null<String>) -> Void):Void
+		request({op: "remote-invite", ttl: ttlSeconds}, done);
+
+	/** Pending pairings, paired devices with the workspaces each is granted, and the machine's workspaces. */
+	public function remoteDevices(done:(Null<Dynamic>, Null<String>) -> Void):Void
+		request({op: "remote-devices"}, done);
+
+	/** Approves a pending device with these workspaces: each `{workspace, preset}` or `{workspace, grants}`; none grants nothing yet. */
+	public function remoteApprove(deviceId:String, workspaces:Array<Dynamic>, done:(Null<Dynamic>, Null<String>) -> Void):Void
+		request({op: "remote-approve", deviceId: deviceId, workspaces: workspaces}, done);
+
+	/** Replaces the workspaces a paired device is granted. */
+	public function remoteGrant(deviceId:String, workspaces:Array<Dynamic>, done:(Null<Dynamic>, Null<String>) -> Void):Void
+		request({op: "remote-grant", deviceId: deviceId, workspaces: workspaces}, done);
+
+	public function remoteReject(deviceId:String, done:(Null<Dynamic>, Null<String>) -> Void):Void
+		request({op: "remote-reject", deviceId: deviceId}, done);
+
+	public function remoteRevoke(deviceId:String, done:(Null<Dynamic>, Null<String>) -> Void):Void
+		request({op: "remote-revoke", deviceId: deviceId}, done);
 
 	/** The workspace whose only folder is `folder`, if the machine has one. */
 	public function workspaceFor(folder:String):Null<MachineWorkspace> {
@@ -264,7 +303,7 @@ class MachineClient {
 		sent = false;
 		transport = null;
 		if (deadline <= now)
-			deadline = now + TIMEOUT;
+			deadline = now + (Std.string(request.message.op).indexOf("remote-") == 0 ? REMOTE_TIMEOUT : TIMEOUT);
 		try {
 			hub.connect(NativeRpcHub.local(SuitPaths.endpoint()), function(result:RpcConnectResult) {
 				switch result {

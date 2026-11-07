@@ -22,6 +22,8 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   final clock:Void -> Float;
   /** The name the ConnectTimeline files this client's events under; the folder when unset. */
   public var timelineName:Null<Void -> String> = null;
+  /** The id of the workspace this client follows, or null when it follows a folder's service; keys delivery uncertainty. */
+  public var workspaceIdentity:Null<Void -> Null<String>> = null;
   var disposed:Bool = false;
   var observedConnection:Null<RpcConnection>;
   var observedGeneration:Null<String>;
@@ -49,6 +51,12 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   var agentsRequestToken:Int = 0;
   var agentsNext:Float = 0;
   var agentMutation:Bool = false;
+  /** Sessions whose last prompt, queue or steer may have reached the service without a reply, by deliveryKey. In memory only. */
+  final uncertainAgentDeliveries:Map<String,String> = [];
+  /** Uncertain sessions whose conversation was read again since the connection changed. */
+  final deliveryReviewReady:Map<String,Bool> = [];
+  var pendingDelivery:Null<String>;
+  var pendingDeliveryAction:Null<String>;
   var agentMutationId:Null<String>;
   var agentSelection:Int = 0;
   var agentsRevision:Int = 0;
@@ -80,6 +88,12 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
         cancelled.done(null, "Workspace connection changed");
       }
       var lost = observedConnection != null;
+      // The connection went away while a send was waiting for its reply: the service may have applied it.
+      if (pendingDelivery != null) {
+        uncertainAgentDeliveries.set(pendingDelivery, pendingDeliveryAction == null ? "prompt" : pendingDeliveryAction);
+        pendingDelivery = null; pendingDeliveryAction = null;
+      }
+      deliveryReviewReady.clear();
       observedConnection = current;
       observedGeneration = generation;
       catalogActionError = null;
@@ -152,6 +166,19 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   public function agentService():WorkspaceAgentClient return this;
   public function canReadAgents():Bool return rpc() != null && has(WorkspaceAgentProtocol.READ);
   public function canControlAgents():Bool return canReadAgents() && has(WorkspaceAgentProtocol.CONTROL);
+  /** Workspace identity plus session id, so a reconnect or a new service for the same workspace keeps the flag. */
+  function deliveryKey(id:String):String {
+    var identity = workspaceIdentity == null ? null : workspaceIdentity();
+    var scope = identity != null && identity.length > 0 ? "workspace:" + identity : "root:" + (root() == null ? "" : root());
+    return scope.length + ":" + scope + id;
+  }
+  public function agentDeliveryUncertain(id:String):Bool return uncertainAgentDeliveries.exists(deliveryKey(id));
+  public function agentDeliveryReviewReady(id:String):Bool return deliveryReviewReady.exists(deliveryKey(id));
+  public function acknowledgeAgentDelivery(id:String):Bool {
+    var key = deliveryKey(id);
+    if (rpc() == null || !agentViews.exists(id) || !uncertainAgentDeliveries.exists(key) || !deliveryReviewReady.exists(key)) return false;
+    uncertainAgentDeliveries.remove(key); deliveryReviewReady.remove(key); agentsRevision++; return true;
+  }
   public function agentBusy():Bool return agentMutation;
   public function agentCreation():Null<AgentCreationStatus> return creation == null ? null : creation.status();
   public function agentRevision():Int return agentsRevision;
@@ -195,9 +222,17 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
   }
   public function discoveredAgents():Null < WorkspaceAgentProtocol.AgentDiscovery > return discovery;
 
+  /**
+    When set, the session list is read again only when this says the workspace changed (a catalog watch's token moved), or
+    after an action that asked for a fresh list, instead of on a timer. It is consumed when a read starts.
+  **/
+  public var agentsStale:Null<Void -> Bool> = null;
+
   public function refreshAgents():Void {
     var connection = rpc();
     if (connection == null || !has(WorkspaceAgentProtocol.READ) || agentsPending || clock() < agentsNext) return;
+    var stale = agentsStale;
+    if (stale != null && agentCatalog != null && agentsNext != 0 && !stale()) return;
     agentsPending = true;
     var requestToken = ++agentsRequestToken;
     agentsNext = clock() + 1000;
@@ -466,6 +501,9 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
       request = current == null ? null : current.inputToken;
       if (request == null) {agentActionError = "Refresh this session before submitting a message";agentsRevision++;return;}
     }
+    var deliveryAction = action == "prompt" || action == "queue" || action == "steer";
+    if (deliveryAction && agentDeliveryUncertain(id)) return;
+    var delivery = deliveryAction ? deliveryKey(id) : null;
     var mutate = action != "read";
     // These replace the catalog record, and their callers read it, so they are accepted once it is in place.
     var updatesRecord = action == "rename" || action == "move" || action == "inspect-name" || action == "rename-native";
@@ -495,7 +533,9 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
     var generation=instance();
     var query:AgentAction = {workspace:"workspace",instance:generation,id:id,action:action,text:text,request:request,
       model:model,effort:effort,expectedNativeName:expectedNativeName,imageIds:imageIds,order:order};
+    if (delivery != null) { pendingDelivery = delivery; pendingDeliveryAction = action; }
     requestAgentView(connection,id,selected,generation,query,function(inputToken) {
+      if (delivery != null && pendingDelivery == delivery) { pendingDelivery = null; pendingDeliveryAction = null; }
       if (mutate) {
         agentMutation=false; agentMutationId=null;
         // Keep assembly as a preemptible background read. New mutations invalidate it.
@@ -513,9 +553,16 @@ class RpcWorkspaceWorkbenchClient implements WorkspaceWorkbenchClient implements
         for (index in 0...agentCatalog.records.length) if (agentCatalog.records[index].id == id) agentCatalog.records[index]=value.record;
       }
       publishLatestAgentView(connection,id,selected,value);
+      if (action == "read" && agentDeliveryUncertain(id)) { deliveryReviewReady.set(deliveryKey(id), true); agentsRevision++; }
       if (accepted != null && updatesRecord) accepted();
     },function(error,acknowledged) {
       if (rpc()!=connection || instance()!=generation || agentTokens.get(id)!=selected) return;
+      if (delivery != null && pendingDelivery == delivery) {
+        pendingDelivery = null; pendingDeliveryAction = null;
+        if (!acknowledged && (error.ambiguous || error.code == "invalid_snapshot")) {
+          uncertainAgentDeliveries.set(delivery, action); deliveryReviewReady.remove(delivery);
+        }
+      }
       // The service applied it but its view did not arrive: the edit happened, so its editor must not stay open.
       if (acknowledged && accepted != null && updatesRecord && action != "inspect-name") accepted();
       var errorsBefore=agentsError+"\n"+agentActionError;
