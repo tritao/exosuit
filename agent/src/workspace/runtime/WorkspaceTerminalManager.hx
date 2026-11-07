@@ -78,8 +78,8 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
     if (historyLimit < 65536 || historyLimit > 16777216) throw "Invalid terminal history limit";
     this.historyLimit = historyLimit;
     this.persistence = persistence;
-    this.groups = groups == null ? function() return [{id : "work", name : "Work", cwd : root, revision : 1}
-    ]:groups;
+    // Without a group source the workspace has no groups: terminals sit in the workspace root.
+    this.groups = groups == null ? function() return [] : groups;
     var stored = persistence == null ?[] : persistence.loadTerminals();
     if (stored.length > 256) throw "Terminal catalog exceeds limit";
     if (persistence != null) for (record in stored) {

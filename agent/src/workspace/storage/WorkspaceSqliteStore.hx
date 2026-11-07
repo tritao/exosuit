@@ -17,6 +17,10 @@ import workspace.service.WorkspaceTerminalProtocol;
  * The manager owns the exclusive process lock. SQL cursor/revision CAS fences stale writers. */
 class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceTerminalPersistence implements workspace.service.WorkspaceAgentPersistence implements workspace.service.WorkspaceDevicePersistence implements WorkspaceAgentContentPersistence {
 	static inline final MAX_DEVICES:Int = 64;
+	/** The id of the group services once seeded into every new catalog (see `retireSeedGroup`). User groups never have it. */
+	public static inline final SEED_GROUP = "work";
+	/** The spacing of rows `retireSeedGroup` moves, as the Workbench spaces appended rows (WorkbenchOrder.STEP). */
+	static inline final SEED_ORDER_STEP = 1024;
 	static inline final CONTENT_TABLE = "CREATE TABLE workspace_agent_content (seq INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT NOT NULL, session TEXT NOT NULL, turn TEXT NOT NULL, item TEXT NOT NULL, payload BLOB NOT NULL CHECK(length(payload)<=262144), partial INTEGER NOT NULL CHECK(partial IN (0,1)), UNIQUE(provider,session,turn,item))";
 	static inline final CONTENT_META = "CREATE TABLE workspace_agent_content_meta (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL CHECK(version>=1))";
 	static inline final CONTENT_INDEX = "CREATE INDEX workspace_agent_content_session ON workspace_agent_content(session)";
@@ -244,6 +248,102 @@ class WorkspaceSqliteStore implements WorkspacePersistence implements WorkspaceT
 			});
 		});
 		return {snapshot: {epoch: epoch, cursor: cursor, groups: groups}, operations: operations, events: events};
+	}
+
+	/**
+		Removes the "Work" group that services seeded into every new catalog until the workspace itself became the
+		default group. Its sessions and terminals move to its parent (the workspace root for a top-level "Work") and its
+		child groups to that parent too, after the parent's existing rows, keeping their order among themselves. Their
+		own records (folders, histories, stored content) are untouched. A child group without a folder of its own keeps
+		the folder it had through "Work" when that is not `root`, the folder the workspace root's work runs in.
+
+		The group operations and events are dropped, the cursor restarts and the epoch becomes `epoch`, as when a
+		migration merges catalogs: they describe edits to groups that no longer exist as recorded, so restoring them
+		would fail, and a client holding the old epoch loads the catalog afresh. Returns whether the group was there; a
+		catalog without it is not changed, so this runs at every start.
+	**/
+	public function retireSeedGroup(epoch:String, root:String):Bool {
+		if (epoch == null || epoch.length == 0 || epoch.length > 128) throw "Invalid workspace epoch";
+		var retired = false;
+		transaction(function() {
+			var groups:Array<WorkspaceGroup> = [];
+			statement("SELECT payload,length(payload) FROM workspace_groups ORDER BY id", function(row) {
+				while (row.step()) {
+					var group:WorkspaceGroup = MessagePack.decode(blob(row, 0, integer(row.columnInt64(1))));
+					groups.push(group);
+				}
+			});
+			var seed = Lambda.find(groups, function(group) return group.id == SEED_GROUP);
+			if (seed == null) return;
+			retired = true;
+			var destination = seed.parent == null ? WorkspaceProtocol.ROOT_GROUP : seed.parent;
+			var agents = loadAgents(), terminals = loadTerminals();
+			// Rows already in the destination keep their places; the moved rows follow the last of them.
+			var next = 0;
+			function after(order:Null<Int>):Void {
+				var value = WorkspaceProtocol.order(order);
+				if (value + SEED_ORDER_STEP > next) next = value + SEED_ORDER_STEP;
+			}
+			for (group in groups)
+				if (group.id != SEED_GROUP && (group.parent == null ? WorkspaceProtocol.ROOT_GROUP : group.parent) == destination) after(group.order);
+			for (agent in agents) if (agent.group == destination) after(agent.order);
+			for (terminal in terminals) if (terminal.group == destination) after(terminal.order);
+			var moving:Array<{order:Int, kind:Int, id:String}> = [];
+			for (group in groups) if (group.parent == SEED_GROUP) moving.push({order: WorkspaceProtocol.order(group.order), kind: 0, id: group.id});
+			for (agent in agents) if (agent.group == SEED_GROUP) moving.push({order: WorkspaceProtocol.order(agent.order), kind: 1, id: agent.id});
+			for (terminal in terminals) if (terminal.group == SEED_GROUP) moving.push({order: WorkspaceProtocol.order(terminal.order), kind: 2, id: terminal.id});
+			moving.sort(function(a, b) return a.order != b.order ? a.order - b.order : a.kind != b.kind ? a.kind - b.kind : Reflect.compare(a.id, b.id));
+			var placed:Map<String, Int> = [];
+			for (entry in moving) {
+				placed.set(entry.kind + ":" + entry.id, next > WorkspaceProtocol.MAX_ORDER ? WorkspaceProtocol.MAX_ORDER : next);
+				next += SEED_ORDER_STEP;
+			}
+			var inherited = seed.cwd != null && !workspace.PathKey.same(seed.cwd, root) ? seed.cwd : null;
+			for (group in groups) if (group.parent == SEED_GROUP) {
+				group.parent = WorkspaceProtocol.parentFor(destination);
+				group.order = placed.get("0:" + group.id);
+				if (group.cwd == null) group.cwd = inherited;
+				group.revision++;
+				statement("UPDATE workspace_groups SET revision=?2,payload=?3 WHERE id=?1", function(row) {
+					row.bindText(1, group.id);
+					row.bindInt64(2, Int64.ofInt(group.revision));
+					row.bindBlob(3, MessagePack.encode(group));
+					row.step();
+				});
+			}
+			for (agent in agents) if (agent.group == SEED_GROUP) {
+				agent.group = destination;
+				agent.order = placed.get("1:" + agent.id);
+				var bytes = MessagePack.encode(agent);
+				statement("UPDATE workspace_agents SET payload=?2 WHERE id=?1", function(row) {
+					row.bindText(1, agent.id);
+					row.bindBlob(2, bytes);
+					row.step();
+				});
+			}
+			for (terminal in terminals) if (terminal.group == SEED_GROUP) {
+				terminal.group = destination;
+				terminal.order = placed.get("2:" + terminal.id);
+				terminal.revision = Int64.add(terminal.revision, Int64.ofInt(1));
+				var bytes = MessagePack.encode(terminal);
+				statement("UPDATE workspace_terminals SET payload=?2 WHERE id=?1", function(row) {
+					row.bindText(1, terminal.id);
+					row.bindBlob(2, bytes);
+					row.step();
+				});
+			}
+			statement("DELETE FROM workspace_groups WHERE id=?1", function(row) {
+				row.bindText(1, SEED_GROUP);
+				row.step();
+			});
+			db.exec("DELETE FROM workspace_operations");
+			db.exec("DELETE FROM workspace_events");
+			statement("UPDATE workspace_meta SET epoch=?1,cursor=0 WHERE id=1", function(row) {
+				row.bindText(1, epoch);
+				row.step();
+			});
+		});
+		return retired;
 	}
 
 	public function commit(request:RenameGroup, outcome:RenameResult, event:WorkspaceEvent):Void {

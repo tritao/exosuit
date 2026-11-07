@@ -138,16 +138,12 @@ class AgentMain {
 		var folders = startFolders(stateDirectory, directories.root);
 		var files = new workspace.runtime.WorkspaceFileService("workspace", folders, clock, runtime.events);
 		var scm = new workspace.runtime.WorkspaceScmService("workspace", folders, processes, Sys.getEnv("EXOSUITE_GIT_BIN"));
-		// The seed epoch is used only when creating a new catalog. Reopening preserves it.
-		var seed = new WorkspaceService("workspace", args[3], [
-			{
-				id: "work",
-				name: "Work",
-				cwd: directories.root,
-				revision: 1
-			}
-		]);
+		// The seed epoch is used only when creating a new catalog. Reopening preserves it. A new catalog has no groups:
+		// the workspace itself holds sessions and terminals until groups are made.
+		var seed = new WorkspaceService("workspace", args[3], []);
 		var store = args.length >= 5 ? new WorkspaceSqliteStore(args[4], "workspace", seed.snapshot(), 32, catalogOwner(args[2], directories.root)) : null;
+		// Catalogs from before that still have the seeded "Work" group; its contents move to the workspace (once).
+		if (store != null) store.retireSeedGroup(args[3], directories.root);
 		var service = new WorkspaceService("workspace", args[3], seed.snapshot().groups, 32, 256, 16, store, directories.resolve);
 		var terminals = new WorkspaceTerminalManager("workspace", args.length >= 7 ? args[6] : args[3], directories.root,16777216,store,function() return service.snapshot().groups);
 		var executable = Sys.getEnv("EXOSUIT_CODEX_BIN");

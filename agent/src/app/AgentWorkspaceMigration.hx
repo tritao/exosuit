@@ -701,7 +701,7 @@ class AgentWorkspaceMigration {
 	**/
 	static function upgrade(source:String, owner:String):Void {
 		var seed = new workspace.service.WorkspaceService("workspace", AgentManagerNative.randomToken().substr(0, 32),
-			[{id: "work", name: "Work", cwd: owner, revision: 1}]).snapshot();
+			[]).snapshot();
 		new workspace.storage.WorkspaceSqliteStore(source, "workspace", seed, 32, owner).close();
 	}
 
