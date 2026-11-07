@@ -57,6 +57,16 @@ with tempfile.TemporaryDirectory(prefix="exosuit-machine-") as temporary:
     assert listing["managers"][0]["defaultState"], listing
     assert len(list((home / "managers").glob("*.json"))) == 1
 
+    # A new catalog has no groups; give the source one so the copy has something to keep. The group is written as the
+    # service would store it (WorkspaceProtocol.WorkspaceGroup: 1 id, 2 name, 3 cwd, 4 revision).
+    database = sqlite3.connect(Path(default_state) / "catalog.sqlite")
+    try:
+        assert database.execute("SELECT count(*) FROM workspace_groups").fetchone()[0] == 0, "a new catalog has groups"
+        database.execute("INSERT INTO workspace_groups VALUES('tools', 1, ?)", (bytes([0x84, 1, 0xa5]) + b"tools" + bytes([2, 0xa5]) + b"Tools" + bytes([3, 0xc0, 4, 1]),))
+        database.commit()
+    finally:
+        database.close()
+
     own = home / "workspaces" / "own"
     second = json.loads(run(environment, root, "--manager", str(root), "--detach", "--idle-seconds", "8",
                             "--state-dir", str(own), "--seed-from", default_state).stdout)

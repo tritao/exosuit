@@ -168,7 +168,7 @@ class TerminalHistoryTests {
   static function legacyRecovery(root:String):Void {
     var seed:WorkspaceSnapshot = {epoch:"legacy-recovery",cursor:0,groups:[{id:"work",name:"Work",cwd:root,revision:1}]};
     var store = new WorkspaceSqliteStore(root+"/legacy-terminal-history.sqlite","workspace",seed);
-    store.saveTerminal({id:"legacy-shell",name:"Legacy shell",group:"work",cwd:root,workspaceRoot:root,
+    store.saveTerminal({id:"legacy-shell",name:"Legacy shell",group:"",cwd:root,workspaceRoot:root,
       instance:"previous-service",state:"running",exitCode:0,available:false,revision:1});
     var manager = new WorkspaceTerminalManager("workspace","legacy-current",root,16777216,store);
     require(manager.snapshot().terminals[0].available,"Metadata-only terminal cannot open its recovery view");

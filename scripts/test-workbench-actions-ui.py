@@ -34,7 +34,38 @@ with tempfile.TemporaryDirectory(prefix='exactions-') as temporary:
     def click(window, bounds):
         subprocess.run(['xdotool', 'mousemove', '--window', window,
                         str(round(bounds['x'] + bounds['width'] / 2)), str(round(bounds['y'] + bounds['height'] / 2)), 'click', '1'], check=True)
+    def launch(capture, steps):
+        global app
+        with (fixture / ('app-' + capture + '.log')).open('w') as log:
+            app = subprocess.Popen([*RUNNER, str(project), '--open-workbench',
+                                    '--capture-dir=' + str(fixture / capture), '--capture-seconds=9'],
+                                   cwd=ROOT, env=environment, stdout=log, stderr=subprocess.STDOUT)
+            window = subprocess.check_output(['timeout', '60', 'xdotool', 'search', '--sync', '--onlyvisible', '--name', '^exosuit$'], text=True).splitlines()[0]
+            subprocess.run(['xdotool', 'windowfocus', '--sync', window], check=True); time.sleep(2)
+            steps(window)
+            assert app.wait(timeout=90) == 0, (fixture / ('app-' + capture + '.log')).read_text()[-4000:]
+            app = None
     try:
+        # A new workspace has no groups (ADR 0006): make the group the steps below act on with the real controls.
+        launch('seed0', lambda window: None)
+        def open_new_group(window):
+            click(window, locate(layout('seed0'), 'Workbench actions')); time.sleep(.3)
+            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Home', 'Down', 'Down', 'Return'], check=True); time.sleep(.5)
+        launch('seed1', open_new_group)
+        def name_group(window):
+            open_new_group(window)
+            editor = layout('seed1')
+            field = next(n for n in editor if n.get('label') == 'Group name' and n.get('focusable') and n['visible'])['bounds']
+            click(window, field)
+            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+a'], check=True)
+            subprocess.run(['xdotool', 'type', '--clearmodifiers', '--delay', '1', 'Work'], check=True)
+            subprocess.run(['xdotool', 'key', '--clearmodifiers', 'Return'], check=True)
+        launch('seed2', name_group)
+        seeded = json.loads((fixture / 'seed2/app-state.json').read_text())['terminalCatalog']['groups']
+        assert len(seeded) == 1 and seeded[0]['name'] == 'Work', seeded
+        group_id = seeded[0]['id']; group_label = 'g:' + group_id
+        def select_group(window, nodes):
+            click(window, locate(nodes, group_label)); time.sleep(.3)
         for index in range(9):
             with (fixture / ('app-' + str(index) + '.log')).open('w') as log:
                 app = subprocess.Popen([*RUNNER, str(project), '--open-workbench',
@@ -43,6 +74,7 @@ with tempfile.TemporaryDirectory(prefix='exactions-') as temporary:
                 window = subprocess.check_output(['timeout', '60', 'xdotool', 'search', '--sync', '--onlyvisible', '--name', '^exosuit$'], text=True).splitlines()[0]
                 subprocess.run(['xdotool', 'windowfocus', '--sync', window], check=True); time.sleep(2)
                 if 1 <= index <= 4:
+                    select_group(window, layout(0))
                     click(window, locate(layout(0), 'Workbench actions')); time.sleep(.3)
                 if 2 <= index <= 4:
                     click(window, locate(layout(1), 'Attach existing Codex thread…')); time.sleep(1)
@@ -53,7 +85,7 @@ with tempfile.TemporaryDirectory(prefix='exactions-') as temporary:
                     click(window, locate(layout(2), 'Existing work'))
                 if index in (5, 6, 7):
                     nodes = layout(0)
-                    group = next(n for n in nodes if n.get('label') == 'g:work' and n['visible'])['bounds']
+                    group = next(n for n in nodes if n.get('label') == group_label and n['visible'])['bounds']
                     subprocess.run(['xdotool', 'mousemove', '--window', window, str(round(group['x'] + group['width']/2)), str(round(group['y'] + group['height']/2)), 'click', '3'], check=True)
                     time.sleep(.4)
                     if index == 7: click(window, locate(layout(5), 'Change Sort Order…'))
@@ -79,7 +111,7 @@ with tempfile.TemporaryDirectory(prefix='exactions-') as temporary:
                 assert not any(label and ('codex-tui/' in label or 'Codex · on demand' in label) for label in labels), labels
                 assert 'New group' not in labels and 'Manage terminals…' not in labels and 'Existing Codex thread id' not in labels
                 # The group row is near the toolbar, with no permanent attachment form above it.
-                groups = [node for node in nodes if node.get('label') == 'g:work' and node['visible']]
+                groups = [node for node in nodes if node.get('label') == group_label and node['visible']]
                 assert groups and groups[0]['bounds']['y'] < 150, (groups, json.loads((fixture / str(index) / 'app-state.json').read_text()))
             if index == 1: assert all(label in labels for label in ['New Agent Session…', 'New Terminal…', 'New group', 'Rename group', 'Change Working Directory…', 'Change Sort Order…', 'Open folder', 'Refresh Workbench']), labels
             if index == 2:
@@ -89,7 +121,7 @@ with tempfile.TemporaryDirectory(prefix='exactions-') as temporary:
             if index == 4:
                 diagnostic = json.loads((fixture / str(index) / 'app-state.json').read_text())
                 records = diagnostic['agentCatalog']['records']
-                assert len(records) == 1 and records[0]['thread'] == 'existing' and records[0]['group'] == 'work', diagnostic
+                assert len(records) == 1 and records[0]['thread'] == 'existing' and records[0]['group'] == group_id, diagnostic
                 assert len(diagnostic['agentTabs']) == 1, diagnostic
             if index == 5:
                 # Group actions sit directly in the menu; an occupied top-level group cannot move or be removed.
@@ -104,7 +136,7 @@ with tempfile.TemporaryDirectory(prefix='exactions-') as temporary:
             if index == 6:
                 diagnostic = json.loads((fixture / str(index) / 'app-state.json').read_text())
                 assert len(diagnostic['agentCatalog']['records']) == 2, diagnostic
-                assert all(record['group'] == 'work' for record in diagnostic['agentCatalog']['records']), diagnostic
+                assert all(record['group'] == group_id for record in diagnostic['agentCatalog']['records']), diagnostic
                 created = next(record for record in diagnostic['agentCatalog']['records'] if record['thread'] != 'existing')
                 assert diagnostic['workbenchSelectedNode'] == 'a:' + created['id'], diagnostic
                 assert any(node.get('label') == 'Codex prompt' and node.get('focused') for node in nodes), nodes

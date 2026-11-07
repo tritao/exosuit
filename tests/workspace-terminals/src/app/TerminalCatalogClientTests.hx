@@ -52,6 +52,9 @@ class TerminalCatalogClientTests {
     var catalog = client.terminalCatalog();
     if (catalog == null) throw "Catalog missing";
     require(catalog.terminals.length == 9, "Native client did not aggregate all pages");
+    // A new catalog has no groups: terminals opened without one sit in the workspace itself.
+    require(catalog.groups.length == 0, "A new workspace catalog has groups");
+    for (terminal in catalog.terminals) require(terminal.group == workspace.service.WorkspaceProtocol.ROOT_GROUP, "A terminal is not in the workspace root");
     var first = catalog.terminals[0];
     while (first.state != "exited") {
       client.refreshTerminals(false);
@@ -59,7 +62,7 @@ class TerminalCatalogClientTests {
       catalog = client.terminalCatalog();
       if (catalog != null) first = catalog.terminals[0];
     }
-    client.renameTerminal(first, "Discovery probe", "work");
+    client.renameTerminal(first, "Discovery probe", workspace.service.WorkspaceProtocol.ROOT_GROUP);
     while (client.terminalCatalogBusy()) step();
     while (true) {
       step();

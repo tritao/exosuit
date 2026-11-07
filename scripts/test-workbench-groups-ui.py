@@ -119,11 +119,11 @@ with tempfile.TemporaryDirectory(prefix="exgroupsui-") as temporary:
                 catalog = diagnostic["terminalCatalog"]
                 assert catalog is not None, diagnostic
                 if index in (2, 10):
-                    created_group = next(g for g in catalog["groups"] if g["id"] != "work")
+                    created_group = catalog["groups"][0]
                     assert diagnostic["workbenchSelectedNode"] == "g:" + created_group["id"], diagnostic
-                assert len(catalog["groups"]) == 2, catalog
+                assert len(catalog["groups"]) == 1, catalog  # no seeded Work group (ADR 0006)
                 groups = [g for g in catalog["groups"] if g["name"] == ("Tools renamed" if index >= 10 else "Tools")]
-                assert len(groups) == 1 and groups[0]["cwd"] == (str(child) if index >= 4 else None) and groups[0]["parent"] == "work", groups
+                assert len(groups) == 1 and groups[0]["cwd"] == (str(child) if index >= 4 else None) and not groups[0].get("parent"), groups  # a top-level group: no parent
                 if index >= 5:
                     terminals = [t for t in catalog["terminals"] if t["group"] == groups[0]["id"]]
                     assert len(terminals) == 1 and terminals[0]["cwd"] == str(child), terminals
