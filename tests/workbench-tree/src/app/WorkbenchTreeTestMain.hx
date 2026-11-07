@@ -62,7 +62,18 @@ class WorkbenchTreeTestMain {
 		workspaceEntry("eon", "eon-series", [])
 	];
 
+	/** A workspace row shows its first folder, else its scratch folder, shortened as a group row's folder is. */
+	static function workspaceFolder():Void {
+		require(WorkbenchMachineLabel.folder(workspaceEntry("a", "a", ["C:/src/a", "C:/src/b"], "C:/Users/me/Exosuit/a")) == "C:/src/a",
+			"a workspace with folders shows its first");
+		var scratch = WorkbenchMachineLabel.folder(workspaceEntry("eon", "eon-series", [], "C:\\Users\\me\\Exosuit\\eon-series"));
+		require(scratch == "C:\\Users\\me\\Exosuit\\eon-series" && ui.WorkbenchGroupLabel.shortDirectory("C:\\Users\\me\\Exosuit\\eon-series", null) == "…\\Exosuit\\eon-series",
+			"a folderless workspace shows its scratch folder: " + scratch);
+		require(WorkbenchMachineLabel.folder(workspaceEntry("old", "old", [])) == null, "a workspace with neither shows none");
+	}
+
 	static function main():Void {
+		workspaceFolder();
 		ordering();
 		foreignWorkspaces();
 		cyclicGroups();

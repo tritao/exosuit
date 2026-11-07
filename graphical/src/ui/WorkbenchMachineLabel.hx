@@ -25,17 +25,22 @@ class WorkbenchMachineLabel implements View {
 
 	final icon:Null<IconName>;
 	final text:String;
+	/** A workspace's folder, shown short beside its name as a group row shows its folder. */
+	final directory:Null<String>;
 	final detail:Null<String>;
 	final description:String;
 	final muted:Bool;
 	final warning:Bool;
 
-	function new(icon:Null<IconName>, text:String, detail:Null<String>, description:String, muted:Bool, warning:Bool) {
-		this.icon = icon; this.text = text; this.detail = detail; this.description = description;
+	function new(icon:Null<IconName>, text:String, detail:Null<String>, description:String, muted:Bool, warning:Bool, ?directory:String) {
+		this.icon = icon; this.text = text; this.detail = detail; this.description = description; this.directory = directory;
 		this.muted = muted; this.warning = warning;
 	}
 
-	/** The open workspace says so; its accessibility label names its folders, or that it has none. */
+	/**
+		A workspace row: its name, its folder (`folder`), and what it is doing. The open workspace says so; its
+		accessibility label names its folders, or that it has none.
+	**/
 	public static function workspace(entry:MachineWorkspace, open:Bool, ?state:WorkbenchWorkspaceState, anotherWindow:Bool = false):WorkbenchMachineLabel {
 		var folders = entry.folders.length == 0 ? "no folders attached" : entry.folders.join(", ");
 		var marker = open ? "this window" : stateMarker(state);
@@ -46,9 +51,15 @@ class WorkbenchMachineLabel implements View {
 		if (anotherWindow) shown = shown == null ? OTHER_WINDOW : shown + " · " + OTHER_WINDOW;
 		var said = open ? ", open in this window" : marker == null ? "" : ", " + marker + (attention > 0 ? ", " + attention + " need attention" : "");
 		if (anotherWindow) said += ", " + OTHER_WINDOW_TIP.toLowerCase();
-		return new WorkbenchMachineLabel(open ? IconName.FolderOpen : IconName.FolderClosed, entry.name, shown,
-			"Workspace " + entry.name + said + " · " + folders, false, false);
+		var directory = folder(entry);
+		var description = "Workspace " + entry.name + said + " · " + folders;
+		if (entry.folders.length == 0 && directory != null) description += " · " + directory;
+		return new WorkbenchMachineLabel(open ? IconName.FolderOpen : IconName.FolderClosed, entry.name, shown, description, false, false, directory);
 	}
+
+	/** The folder a workspace row shows: its first attached folder, else its scratch folder (the one its work runs in). */
+	public static function folder(entry:MachineWorkspace):Null<String>
+		return entry.folders.length > 0 ? entry.folders[0] : entry.scratch;
 
 	/** What a workspace this window is not attached to is doing: idle (its service is not running), starting, running, or reconnecting. */
 	public static function stateMarker(state:Null<WorkbenchWorkspaceState>):Null<String> {
@@ -73,6 +84,10 @@ class WorkbenchMachineLabel implements View {
 		if (glyph != null) children.push(new KeyedView("icon", new Icon("machine-row-icon", glyph, 14, warning ? tokens.warning : null)));
 		var label = new MiddleEllipsisText("machine-row-text", text, false, TextStyleOverride.text(ExosuitPalette.WORKBENCH_TEXT_SIZE));
 		children.push(new KeyedView("text", muted ? new Muted(label) : label));
+		var folder = directory;
+		if (folder != null)
+			children.push(new KeyedView("directory", new Muted(new MiddleEllipsisText("machine-row-directory",
+				WorkbenchGroupLabel.shortDirectory(folder, null), true, new TextStyleOverride(null, 12)))));
 		var note = detail;
 		if (note != null) children.push(new KeyedView("detail", new Muted(new Text(note, null, null, TextStyleOverride.text(12)))));
 		var row = new Row("workbench-machine-row", children, style);
