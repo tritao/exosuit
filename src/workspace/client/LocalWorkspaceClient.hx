@@ -136,6 +136,14 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   public function rpc():Null < RpcConnection > return ready && client != null ? client.current() : null;
 
   public function rootPath():Null<String> return root;
+  /**
+    The machine workspace whose service this client is attached to, or null for a folder's own service or while not
+    attached. Its `rootPath()` is then the folder that service started in, which need not be one of the workspace's folders now.
+  **/
+  public function servedWorkspace():Null<String> {
+    var target = serviceTarget;
+    return ready && target != null ? target.workspace : null;
+  }
   public function serviceGeneration():String return instance;
   var terminalEventRouter:Null<WorkspaceTerminalEvents>;
   public function terminalEvents():Null<WorkspaceTerminalEvents> {

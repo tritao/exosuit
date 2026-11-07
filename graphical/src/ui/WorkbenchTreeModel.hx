@@ -149,7 +149,9 @@ class WorkbenchTreeModel implements TreeViewModel {
 		// While a switch is under way the service still holds the previous workspace's groups; they wait.
 		// A service too old to name its folder is taken to serve this window's.
 		var served = catalog.workspaceRoot;
-		if (served != null && !Lambda.exists(view.openRoots, function(root) return PathKey.same(root, served)))
+		var ownService = view.servedRoot;
+		if (served != null && !(ownService != null && PathKey.same(ownService, served))
+				&& !Lambda.exists(view.openRoots, function(root) return PathKey.same(root, served)))
 			return;
 		groupParent = open;
 		children.set(open, groupRoots.copy());

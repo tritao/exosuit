@@ -27,6 +27,11 @@ typedef WorkbenchMachineView = {
 	var openWorkspace:Null<String>;
 	/** This window's folders: the attached service's groups are the open workspace's while it serves one of them. */
 	var openRoots:Array<String>;
+	/**
+		The root of the open workspace's own service once this window is attached to it, else null. That service keeps the folder
+		it started in (a scratch folder, or a folder detached since), so its groups are the open workspace's whatever this window's folders are now.
+	**/
+	@:optional var servedRoot:Null<String>;
 	/** Changes whenever `machine` or `error` does. */
 	var revision:Int;
 	/** Per workspace id (M19 Phase 6); absent in a view that knows only the attached workspace. */

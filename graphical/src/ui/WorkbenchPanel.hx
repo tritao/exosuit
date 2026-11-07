@@ -1007,7 +1007,7 @@ class WorkbenchPanel implements View {
 		var actions = machine;
 		var view = actions == null ? null : actions.view();
 		// What the machine rows depend on besides catalogs, and the catalogs' revision: a catalog change alone can wait a moment.
-		var nextStructure = view == null ? "" : view.revision + "\n" + view.openWorkspace + "\n" + view.openRoots.join("\n") + "\n" + expandRevision;
+		var nextStructure = view == null ? "" : view.revision + "\n" + view.openWorkspace + "\n" + view.openRoots.join("\n") + "\n" + view.servedRoot + "\n" + expandRevision;
 		var nextMachineKey = view == null ? "" : nextStructure + "\n" + view.watchRevision;
 		if (catalog != null) retainedCatalog = catalog;
 		// Keep the last projection during transport recovery so TreeView does not

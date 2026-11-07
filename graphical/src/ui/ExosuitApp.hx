@@ -1994,7 +1994,12 @@ class ExosuitApp implements DesktopUiApplication {
 						starting: startingWorkspaces.exists(entry.id), catalog: mirror});
 				}
 		}
-		return {machine: state, error: machine.error, openWorkspace: open, openRoots: application.savedWorkspaces.roots(),
+		var attachment = workspaceAttachment, servedRoot:Null<String> = null;
+		if (open != null && Std.isOfType(attachment, workspace.client.LocalWorkspaceClient)) {
+			var local:workspace.client.LocalWorkspaceClient = cast attachment;
+			if (local.servedWorkspace() == open) servedRoot = local.rootPath();
+		}
+		return {machine: state, error: machine.error, openWorkspace: open, openRoots: application.savedWorkspaces.roots(), servedRoot: servedRoot,
 			windows: otherWindows(),
 			revision: machine.revision, watched: pool == null ? null : watchedStates,
 			watchRevision: (pool == null ? 0 : pool.revision()) + startingRevision};
