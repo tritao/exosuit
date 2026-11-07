@@ -3370,10 +3370,11 @@ class ExosuitApp implements DesktopUiApplication {
 	function syncLayoutService():Void {
 		var client = workbenchClient;
 		var catalog = client == null ? null : client.terminalCatalog();
-		// The Agents layout belongs to a workspace that has groups. Once it had one, removing the last group does not
-		// take the layout (and the Activity Rail's destinations) away: the workspace still has its sessions.
+		// The Agents layout belongs to a workspace service that holds groups, even with none yet: the workspace itself
+		// takes sessions and terminals. Once it had one, removing the last group does not take the layout (and the
+		// Activity Rail's destinations) away: the workspace still has its sessions.
 		if (client == null || catalog == null || !client.canReadTerminals()) { layoutModes.setServiceAvailable(false); return; }
-		var hasGroups = catalog.groups.length > 0;
+		var hasGroups = catalog.groups.length > 0 || client.canEditGroups();
 		if (hasGroups) agentsLayoutInstance = catalog.instance;
 		layoutModes.setServiceAvailable(hasGroups || catalog.instance == agentsLayoutInstance);
 		leaveRemovedGroup(client, catalog);
