@@ -1,6 +1,7 @@
 package workspace.runtime;
 
 import haxe.Int64;
+import haxe.io.Bytes;
 import haxeon.rpc.*;
 import workspace.service.WorkspaceTerminalProtocol;
 import workspace.service.TerminalReplayLog;
@@ -52,6 +53,8 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
   final root:String;
   final terminals:Map<String, RuntimeTerminal> = [];
   final controllers:Map<String, RpcConnection> = [];
+  /** Who holds each lease: the client process behind the connection, when it said so. */
+  final controllerKeys:Map<String, String> = [];
   final watchers:Array<{connection:RpcConnection, id:String, stamp:String}> = [];
   final snapshotPages = new TerminalSnapshotPages();
   final historyLimit:Int;
@@ -193,11 +196,25 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
   function controller(id:String):Null<RpcConnection> {
     var owner = controllers.get(id);
     if (owner != null && !owner.isOpen()) {
-      controllers.remove(id);
+      clearController(id);
       return null;
     }
     return owner;
   }
+  function setController(id:String, connection:RpcConnection, key:Null<String>):Void {
+    controllers.set(id, connection);
+    if (key == null) controllerKeys.remove(id); else controllerKeys.set(id, key);
+  }
+  function clearController(id:String):Void {
+    controllers.remove(id);
+    controllerKeys.remove(id);
+  }
+  /** A client process is named by its scope (local or remote peer) and the key it sends; no key means unknown. */
+  static function clientKey(scope:String, key:Null<String>):Null<String>
+    return key == null || key == "" || key.length > 128 ? null : scope + "/" + key;
+  /** The lease is held by another connection of the same client process: a replaced or leaked attachment. */
+  function sameClient(id:String, key:Null<String>):Bool
+    return key != null && controllerKeys.get(id) == key;
   function info(t:RuntimeTerminal, viewer:RpcConnection):TerminalInfo {
     var owner = controller(t.id);
     var record = catalog.get(t.id);
@@ -224,7 +241,8 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
   function valid(workspace:String, instance:String, id:String):Bool return workspace == this.workspace
     && instance == this.instance && id != null && id.length > 0 && id.length <= 128;
   function size(columns:Int, rows:Int):Bool return columns >= 1 && columns <= 512 && rows >= 1 && rows <= 256;
-  public function bind(connection:RpcConnection, capabilities:Array<String>):Void {
+  public function bind(connection:RpcConnection, capabilities:Array<String>, ?scope:String):Void {
+    if (scope == null) scope = "";
     var read = capabilities.indexOf(WorkspaceTerminalProtocol.READ) >= 0;
     var control = capabilities.indexOf(WorkspaceTerminalProtocol.CONTROL) >= 0;
     var catalogGrant = capabilities.indexOf(WorkspaceTerminalProtocol.CATALOG) >= 0;
@@ -338,7 +356,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         terminals.remove(r.id);
         count--;
       }
-      controllers.remove(r.id);
+      clearController(r.id);
       notifyChanges();
       c.respond({workspace: r.workspace, instance: r.instance, id: r.id}
       );
@@ -454,7 +472,8 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         terminals.set(r.id, created);
         count++;
       }
-      if (control && t.state == "running" && controller(r.id) == null) controllers.set(r.id, connection);
+      var openKey = clientKey(scope, r.clientKey);
+      if (control && t.state == "running" && (controller(r.id) == null || sameClient(r.id, openKey))) setController(r.id, connection, openKey);
       var openingTheme:Null<TerminalTheme> = r.theme;
       if (openingTheme != null && controller(r.id) == connection)
         applyTheme(t, openingTheme);
@@ -553,9 +572,10 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
       if (t.state != "running") { c.respond(info(t, connection)); return; }
       var owner = controller(r.id);
       if (r.claim) {
-        if (owner == null || owner == connection || r.takeover) controllers.set(r.id, connection);
+        var claimKey = clientKey(scope, r.clientKey);
+        if (owner == null || owner == connection || r.takeover || sameClient(r.id, claimKey)) setController(r.id, connection, claimKey);
       } else if (owner == connection) {
-        controllers.remove(r.id);
+        clearController(r.id);
       }
       c.respond(info(t, connection));
     }
@@ -664,11 +684,14 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         t.emulator.feed(normalized);
         t.replay.output(normalized, normalized.length);
         // Move the entire old viewport into scrollback before a fresh shell's
-        // startup code can clear its screen. Keep the separator on a fresh page.
+        // startup code can clear its screen, then move the separator into scrollback
+        // too: a Windows ConPTY starts by clearing the visible page, which would erase
+        // a separator left on it. The fresh shell gets a blank page.
         var boundary = new StringBuf();
         boundary.add('\033[${t.rows};1H');
         for (_ in 0...t.rows) boundary.add("\r\n");
-        boundary.add("\033[H── Shell restarted ──\r\n");
+        boundary.add("\033[H── Shell restarted ──");
+        boundary.add('\033[${t.rows};1H\r\n\033[H');
         var separator = haxe.io.Bytes.ofString(boundary.toString());
         t.emulator.feed(separator);
         t.emulator.takeReplies();
@@ -686,7 +709,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
         t.state = "running"; t.exitCode = 0;
         var running = copy(starting); running.state = "running"; running.revision += 1;
         save(running);
-        controllers.set(r.id, connection);
+        setController(r.id, connection, null);
         c.respond(info(t, connection));
       } catch (_:Dynamic) {
         if (t != null) {
@@ -774,6 +797,7 @@ class WorkspaceTerminalManager implements WorkspaceTerminals {
     }
     terminals.clear();
     controllers.clear();
+    controllerKeys.clear();
     watchers.resize(0);
     snapshotPages.clear();
     count = 0;

@@ -37,6 +37,7 @@ class SuitUnitTests {
 		temporaryStateIsDisposable();
 		machineCatalog();
 		windowFocus();
+		failures += MachineRemoteUnitTests.run();
 		if (failures > 0) {
 			Sys.println('FAIL: $failures suit unit check(s)');
 			Sys.exit(1);

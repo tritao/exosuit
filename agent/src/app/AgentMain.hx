@@ -177,7 +177,7 @@ class AgentMain {
 			noiseIdentity = new WorkspaceNoiseIdentity(relayHost.endpoint.machineId, WorkspaceCredentialStores.relay());
 			var activeStore = store, activeRelay = relayHost, activeIdentity = noiseIdentity;
 			pairingManager = new WorkspacePairingManager(activeStore, activeRelay, activeIdentity.privateKeyForHandshake(),
-				function() return serverRef == null ? [] : serverRef.options.offered(), clock,
+				function() return serverRef == null ? [] : serverRef.remoteOffered(), clock,
 				function(secure, grants) {
 					var current = serverRef;
 					if (current == null)

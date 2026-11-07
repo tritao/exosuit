@@ -54,6 +54,8 @@ class Settings {
 	public var searchMaxResults:Int = 10000;
 	public var scmEnabled:Bool = true;
 	public var scmGitPath:String = "";
+	/** Relay for remote access; empty means `RelayUrl.DEFAULT`. */
+	public var relayUrl:String = "";
 	public var scmUntrackedLimit:Int = 10000;
 	public var scmDiffSizeLimit:Int = 16 * 1024 * 1024;
 	public var scmNestedScanDepth:Int = 3;
@@ -125,6 +127,7 @@ class Settings {
 		result.searchMaxResults = searchMaxResults;
 		result.scmEnabled = scmEnabled;
 		result.scmGitPath = scmGitPath;
+		result.relayUrl = relayUrl;
 		result.scmUntrackedLimit = scmUntrackedLimit;
 		result.scmDiffSizeLimit = scmDiffSizeLimit;
 		result.scmNestedScanDepth = scmNestedScanDepth;

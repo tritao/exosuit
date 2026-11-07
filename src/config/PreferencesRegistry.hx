@@ -357,6 +357,12 @@ class PreferencesRegistry {
 			options.tooltip = "How new Codex, Claude Code and Pi sessions open. Integrated uses Exosuit's structured interface. Terminal runs the interactive CLI with its own model and approval settings. Existing sessions keep their mode.";
 			registry.define("workbench/agents/session_mode", PropertyType.Enum, PropertyValue.Enum(defaults.agentSessionMode), options);
 		}
+		if (!projectOnly) {
+			var options = new SettingOptions();
+			options.label = "Relay URL";
+			options.tooltip = "HTTPS address of the relay Worker that carries remote access (phone, browser). Empty uses the default. Changing it applies to the next \"Enable remote access\"; a machine already set up must be disconnected first (Remote Access panel, \"Use a different relay\").";
+			registry.add(new RelayUrlSettingDefinition(RelayUrl.SETTING, PropertyType.Text, PropertyValue.Text(""), options));
+		}
 		return registry;
 	}
 
@@ -424,6 +430,7 @@ class PreferencesRegistry {
 		if (store.registry.exists("appearance/colors/error") && (base == null || !store.isDefault("appearance/colors/error"))) value.error = store.getInt("appearance/colors/error");
 		if (store.registry.exists("appearance/colors/scrollbar") && (base == null || !store.isDefault("appearance/colors/scrollbar"))) value.scrollbar = store.getInt("appearance/colors/scrollbar");
 		if (store.registry.exists("editor/keyboard/keybindings") && (base == null || !store.isDefault("editor/keyboard/keybindings"))) value.keybindings = bindings(store.getString("editor/keyboard/keybindings"));
+		if (store.registry.exists(RelayUrl.SETTING)) value.relayUrl = StringTools.trim(store.getString(RelayUrl.SETTING));
 		if (value.haxeonCommand.length > 0 && value.haxeonCommand[0].length == 0) throw "Language server executable cannot be empty";
 		if (store.registry.exists("terminal/fonts/font_size")) value.terminalFontSize = store.getInt("terminal/fonts/font_size");
 		if (store.registry.exists("terminal/keyboard/commands_to_skip_shell") && (base == null || !store.isDefault("terminal/keyboard/commands_to_skip_shell")))
@@ -507,5 +514,16 @@ private class ArraySettingDefinition extends SettingDefinition {
 				} catch (error:Dynamic) { return Std.string(error); }
 			default: return "Expected a JSON array of strings";
 		}
+	}
+}
+
+private class RelayUrlSettingDefinition extends SettingDefinition {
+	override public function validate(value:PropertyValue):Null<String> {
+		var error = super.validate(value);
+		if (error != null) return error;
+		return switch (value) {
+			case Text(text): RelayUrl.validate(text);
+			default: "Expected text";
+		};
 	}
 }

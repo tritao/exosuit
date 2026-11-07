@@ -8,7 +8,7 @@ import haxeon.ui.core.UiContext;
 	`EXOSUIT_AUTOMATION_DIR` names a folder. It writes `snapshot.json` there, atomically, whenever the picture or the
 	app's state changes (at most ten times a second):
 
-	  seq, at, frame        a counter, `Sys.time()`, and the UI frame number
+	  seq, at, frame        a counter, `Sys.time()` (renewed at least once a second), and the UI frame number
 	  viewport              {width, height}: the UI's size in logical pixels (the driver divides the window's client
 	                        size by it to get the display scale)
 	  elements              every visible node with an accessibility label: {id, role, label, x, y, w, h} in logical
@@ -29,6 +29,7 @@ class AutomationProbe {
 	var seq = 0;
 	var lastAt = 0.0;
 	var lastText = "";
+	var lastWrite = 0.0;
 	var usable = true;
 
 	public static function directoryFromEnvironment():Null<String> {
@@ -97,12 +98,20 @@ class AutomationProbe {
 			// "a snapshot newer than my last input".
 			var body = haxe.Json.stringify({frame: metrics == null ? -1 : metrics.frameNumber, viewport: {width: width, height: height},
 				focus: focusLabel, elements: elements, state: state()});
-			if (body == lastText) return;
-			lastText = body;
+			// An unchanged picture is rewritten once a second, so `at` says how fresh the snapshot is.
+			if (body == lastText && now - lastWrite < 1.0) return;
+			lastText = body; lastWrite = now;
 			var text = '{"seq":' + (++seq) + ',"at":' + now + ',' + body.substr(1);
 			// An atomic replace: readers see the old snapshot or the new one, never none.
 			var target = directory + "/snapshot.json";
-			if (sys.FileSystem.exists(target)) sys.io.AtomicFile.write(target, text); else sys.io.AtomicFile.create(target, text);
+			try {
+				if (sys.FileSystem.exists(target)) sys.io.AtomicFile.write(target, text); else sys.io.AtomicFile.create(target, text);
+			} catch (_:Dynamic) {
+				// Android refuses the runtime's atomic publish in the app's files directory; a rename is as atomic on POSIX.
+				var staged = target + ".tmp";
+				sys.io.File.saveContent(staged, text);
+				sys.FileSystem.rename(staged, target);
+			}
 		} catch (error:Dynamic) {
 			try sys.io.File.saveContent(directory + "/probe-error.txt", Std.string(error)) catch (_:Dynamic) {}
 		}

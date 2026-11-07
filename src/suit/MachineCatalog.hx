@@ -380,7 +380,7 @@ class MachineCatalog {
 	}
 
 	/** Where workspace services keep their state: the agent's `AgentManager.stateBase`. */
-	static function agentStateBase():String {
+	public static function agentStateBase():String {
 		var configured = Sys.getEnv("EXOSUIT_AGENT_STATE_HOME");
 		if (configured != null && configured.length > 0)
 			return configured;

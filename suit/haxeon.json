@@ -18,6 +18,9 @@
     },
     "processkit": {
       "path": "../native-packages/processes"
+    },
+    "noisekit": {
+      "path": "../native-packages/noise"
     }
   },
   "native": {

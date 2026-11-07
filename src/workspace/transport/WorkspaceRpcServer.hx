@@ -11,7 +11,7 @@ typedef CatalogBinding = RpcConnection->Array<String>->CatalogCleanup;
 
 typedef CatalogCleanup = Void->Void;
 
-private typedef Peer = {var transport:MessageTransport; var options:RpcPeerOptions; var localAdmin:Bool; var preflight:Null<SessionPreflight>; var handshake:Null<RpcHandshake>; var connection:Null<RpcConnection>; var cleanup:Array<Void->Void>;}
+private typedef Peer = {var transport:MessageTransport; var probeUntil:Float; var options:RpcPeerOptions; var localAdmin:Bool; var preflight:Null<SessionPreflight>; var handshake:Null<RpcHandshake>; var connection:Null<RpcConnection>; var cleanup:Array<Void->Void>;}
 
 /** Bounded headless service loop, shared by daemon and transport tests. */
 class WorkspaceRpcServer {
@@ -52,6 +52,14 @@ class WorkspaceRpcServer {
 			offered.push(workspace.service.WorkspaceCatalogProtocol.CAPABILITY);
 		localOptions = new RpcPeerOptions(options.application, offered, [], options.timeoutMs,
 			options.maxMessageBytes, options.maxCalls, options.maxQueuedBytes, options.protocol, options.codec);
+	}
+
+	/** What a paired device may be granted: the service's offered set, plus the catalog watch when it is enabled (a device reads its workspace with it). */
+	public function remoteOffered():Array<String> {
+		var offered = options.offered();
+		if (catalogBinding != null && offered.indexOf(workspace.service.WorkspaceCatalogProtocol.CAPABILITY) < 0)
+			offered.push(workspace.service.WorkspaceCatalogProtocol.CAPABILITY);
+		return offered;
 	}
 
 	/** Lets same-user peers change the folders served; `change` returns the folders now served, or throws a message. */
@@ -148,13 +156,13 @@ class WorkspaceRpcServer {
 
 	/** NativeKit validates same-user peers and private paths on local sockets. */
 	public function acceptLocal(transport:NativeRpcTransport):Void {
-		accept(transport, null, localOptions, true);
+		accept(transport, null, localOptions, true, true);
 	}
 
 	/** In-memory transport seam for the authenticated-local-origin RPC fixture. */
 	@:allow(app.WorkspaceScmTestMain)
 	private function acceptTestLocal(transport:MessageTransport):Void {
-		accept(transport, null, localOptions, true);
+		accept(transport, null, localOptions, true, true);
 	}
 
 	public function acceptWebSocket(transport:NativeRpcTransport, token:String):Void {
@@ -169,7 +177,7 @@ class WorkspaceRpcServer {
 		}
 		var allowed:Array<String> = [];
 		for (grant in grants) {
-			if (grant == null || allowed.indexOf(grant) >= 0 || options.offered().indexOf(grant) < 0) {
+			if (grant == null || allowed.indexOf(grant) >= 0 || remoteOffered().indexOf(grant) < 0) {
 				transport.close();
 				return;
 			}
@@ -183,7 +191,44 @@ class WorkspaceRpcServer {
 		accept(transport, null, remoteOptions, false);
 	}
 
-	function accept(transport:MessageTransport, preflight:Null<SessionPreflight>, peerOptions:RpcPeerOptions, localAdmin:Bool):Void {
+	/**
+		What a stream suit forwards for a paired device may do on this service: the grants it names, less any this
+		build of the service does not offer (suit cannot know them while the service is idle).
+	**/
+	function forwardedOptions(grants:Array<String>):RpcPeerOptions {
+		var offered = remoteOffered(), allowed:Array<String> = [];
+		for (grant in grants)
+			if (offered.indexOf(grant) >= 0 && allowed.indexOf(grant) < 0)
+				allowed.push(grant);
+		// The stream frame's header takes part of the Noise message, so a message here is smaller than a direct remote's.
+		var maxMessageBytes = Std.int(Math.min(options.maxMessageBytes, ForwardedStream.MAX_MESSAGE_BYTES));
+		return new RpcPeerOptions(options.application, allowed, [], options.timeoutMs, maxMessageBytes, options.maxCalls,
+			options.maxQueuedBytes < maxMessageBytes ? maxMessageBytes : options.maxQueuedBytes, options.protocol, options.codec);
+	}
+
+	/** Waits for a local connection's first message: suit's intro makes it a forwarded device stream; anything else is a normal client's hello. */
+	function classify(peer:Peer):Void {
+		var first = peer.transport.receive();
+		if (first == null) {
+			if (clock() >= peer.probeUntil)
+				peer.transport.close();
+			return;
+		}
+		peer.probeUntil = 0;
+		if (ForwardedStream.isIntro(first)) {
+			var intro = ForwardedStream.parse(first);
+			if (intro == null) {
+				peer.transport.close();
+				return;
+			}
+			peer.options = forwardedOptions(intro.grants);
+			peer.localAdmin = false;
+		} else
+			peer.transport = new PushbackTransport(first, peer.transport);
+		peer.handshake = RpcHandshake.server(peer.transport, clock, peer.options);
+	}
+
+	function accept(transport:MessageTransport, preflight:Null<SessionPreflight>, peerOptions:RpcPeerOptions, localAdmin:Bool, probe:Bool = false):Void {
 		prune();
 		if (peers.length >= 16) {
 			transport.close();
@@ -194,7 +239,8 @@ class WorkspaceRpcServer {
 			options: peerOptions,
 			localAdmin: localAdmin,
 			preflight: preflight,
-			handshake: preflight == null ? RpcHandshake.server(transport, clock, peerOptions) : null,
+			probeUntil: probe ? clock() + 5000 : 0,
+			handshake: preflight == null && !probe ? RpcHandshake.server(transport, clock, peerOptions) : null,
 			connection: null,
 			cleanup: []
 		});
@@ -227,6 +273,11 @@ class WorkspaceRpcServer {
 				}
 				peer.preflight = null;
 				peer.handshake = RpcHandshake.server(peer.transport, clock, peer.options);
+			}
+			if (peer.probeUntil > 0) {
+				classify(peer);
+				if (peer.handshake == null)
+					continue;
 			}
 			var handshake = peer.handshake;
 			if (handshake != null) {
@@ -300,7 +351,7 @@ class WorkspaceRpcServer {
 							context.respond({workspace: currentIdentity.workspace, root: currentIdentity.root, instance: currentIdentity.instance});
 						});
 					peer.cleanup.push(service.bind(peer.connection, grants));
-					if (terminals != null) terminals.bind(peer.connection, grants);
+					if (terminals != null) terminals.bind(peer.connection, grants, peer.localAdmin ? "local" : "remote");
 					if (agents != null) agents.bind(peer.connection, grants);
 					if (files != null) peer.cleanup.push(files.bind(peer.connection, grants));
 					if (scm != null) peer.cleanup.push(scm.bind(peer.connection, grants, peer.localAdmin));

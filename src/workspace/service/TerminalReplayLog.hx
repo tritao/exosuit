@@ -6,6 +6,13 @@ import workspace.service.WorkspaceTerminalProtocol.TerminalReplayEvent;
 
 /** Bounded, immutable output/geometry journal in the daemon emulator's application order. */
 class TerminalReplayLog {
+  /**
+    One journal record and one REPLAY answer stay well under a relay frame (the machine stream's payload is at most 65487
+    bytes, and the answer carries the terminal's info and per-event fields besides the bytes). A burst is cut into
+    records of at most `CHUNK_BYTES`; an answer holds at most `BATCH_BYTES` of output.
+  **/
+  public static inline final CHUNK_BYTES = 24576;
+  public static inline final BATCH_BYTES = 49152;
   public var startOffset(default, null):Int64 = 0;
   public var endOffset(default, null):Int64 = 0;
   public var startCursor(default, null):Int64 = 0;
@@ -27,7 +34,7 @@ class TerminalReplayLog {
     if (bytes == null || length < 0 || length > bytes.length) throw "Invalid terminal output";
     var consumed = 0;
     while (consumed < length) {
-      var take = Std.int(Math.min(65536, length - consumed));
+      var take = Std.int(Math.min(CHUNK_BYTES, length - consumed));
       append(bytes.sub(consumed, take), 0, 0);
       consumed += take;
     }
@@ -50,7 +57,7 @@ class TerminalReplayLog {
     var result:Array<TerminalReplayEvent> = [], size = 0, next = cursor;
     for (entry in entries) {
       if (entry.sequence < cursor) continue;
-      if (result.length >= 128 || (result.length > 0 && size + entry.data.length > 65536)) break;
+      if (result.length >= 128 || (result.length > 0 && size + entry.data.length > BATCH_BYTES)) break;
       result.push(entry);
       size += entry.data.length;
       next = entry.sequence + 1;
@@ -60,7 +67,7 @@ class TerminalReplayLog {
   /** Compatibility for byte-only readers. New clients use read(). */
   public function readBytes(offset:Int64):Bytes {
     if (offset < startOffset || offset > endOffset) throw "Invalid terminal output offset";
-    var length = Int64.toInt(endOffset - offset > 65536 ? Int64.ofInt(65536) : endOffset - offset);
+    var length = Int64.toInt(endOffset - offset > BATCH_BYTES ? Int64.ofInt(BATCH_BYTES) : endOffset - offset);
     var bytes = Bytes.alloc(length), copied = 0;
     for (entry in entries) {
       if (copied == length) break;

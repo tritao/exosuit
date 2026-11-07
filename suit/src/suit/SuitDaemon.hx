@@ -9,6 +9,8 @@ import haxeon.platform.event.PlatformEvent;
 import nativekit.ffi.NativeKitTypes;
 import sys.FileSystem;
 import suit.SuitInventory.SuitProcess;
+import suit.remote.MachineRemote;
+import suit.remote.MachineRemote.DeferredReply;
 import suit.relay.SuitRelayHosting;
 import suit.relay.SuitRelayHosting.SuitRelayStopPlan;
 import workspace.transport.NativeRpcHub;
@@ -53,6 +55,9 @@ class SuitDaemon {
 	var menuRequested:Bool = false;
 	final idleSeconds:Float;
 	final relay:SuitRelayHosting;
+	final remote:MachineRemote;
+	/** Clients waiting for a pairing step to finish: they send nothing until their reply arrives. */
+	final waiting:Array<{client:NativeRpcTransport, reply:DeferredReply}> = [];
 	var shownRelay:String = "";
 	var catalog:Null<MachineCatalog> = null;
 	/** Started at login: stays up with nothing to track, so the tray icon stays. */
@@ -97,6 +102,7 @@ class SuitDaemon {
 			throw "suit's control endpoint " + SuitPaths.endpoint() + " is held by another process; suit will not share it (" + listenError + ")";
 		}
 		relay = new SuitRelayHosting(runtime.events, hub);
+		remote = new MachineRemote(runtime.events, hub, machine);
 		runtime.events.listen(onEvent);
 		inventory = new SuitInventory(true);
 		refreshedAt = Sys.time();
@@ -119,7 +125,7 @@ class SuitDaemon {
 
 	function loop():Void {
 		while (stopAt < 0 || Sys.time() < stopAt) {
-			runtime.events.wait(jobs.length > 0 || clients.length > 0 || relay.busy() ? 0.1 : 1.0);
+			runtime.events.wait(jobs.length > 0 || clients.length > 0 || relay.busy() || remote.busy() ? 0.1 : 1.0);
 			for (_ in 0...128)
 				if (!runtime.events.poll())
 					break;
@@ -131,6 +137,7 @@ class SuitDaemon {
 			}
 			serveClients();
 			relay.poll();
+			remote.poll();
 			SuitLogin.poll();
 			var relayRevision = relay.revision();
 			if (relayRevision != shownRelay) {
@@ -148,7 +155,7 @@ class SuitDaemon {
 				refresh();
 			if (stopAfterJobs && jobs.length == 0 && stopAt < 0)
 				stopAt = Sys.time() + 0.3;
-			if (inventory.owned().length > 0 || clients.length > 0 || jobs.length > 0 || relay.hostingCount() > 0 || resident)
+			if (inventory.owned().length > 0 || clients.length > 0 || jobs.length > 0 || relay.hostingCount() > 0 || remote.hosting() || resident)
 				idleSince = Sys.time();
 			else if (Sys.time() - idleSince >= idleSeconds)
 				break;
@@ -235,6 +242,16 @@ class SuitDaemon {
 	}
 
 	function serveClients():Void {
+		var held = waiting.length;
+		while (held-- > 0) {
+			var item = waiting[held];
+			if (!item.client.isOpen())
+				waiting.splice(held, 1);
+			else if (item.reply.reply != null) {
+				waiting.splice(held, 1);
+				item.client.send(Bytes.ofString(Json.stringify(item.reply.reply)));
+			}
+		}
 		var index = clients.length;
 		while (index-- > 0) {
 			var client = clients[index];
@@ -242,6 +259,8 @@ class SuitDaemon {
 				clients.splice(index, 1);
 				continue;
 			}
+			if (Lambda.exists(waiting, function(item) return item.client == client))
+				continue;
 			var message:Null<Bytes> = null;
 			try message = client.receive() catch (_:Dynamic) {
 				client.close();
@@ -259,6 +278,10 @@ class SuitDaemon {
 			}
 			var reply:Dynamic;
 			try reply = handle(request) catch (error:Dynamic) reply = {ok: false, error: Std.string(error)};
+			if (Std.isOfType(reply, DeferredReply)) {
+				waiting.push({client: client, reply: cast reply});
+				continue;
+			}
 			client.send(Bytes.ofString(Json.stringify(reply)));
 		}
 	}
@@ -330,6 +353,7 @@ class SuitDaemon {
 				return {ok: true, workspace: renamed, machine: machine().json(services)};
 			case "workspace-delete":
 				machine().delete(SuitRecords.stringField(request, "workspace"));
+				remote.workspaceDeleted(SuitRecords.stringField(request, "workspace"));
 				return {ok: true, machine: machine().json(services)};
 			case "workspace-add-folder":
 				var added = machine().addFolder(SuitRecords.stringField(request, "workspace"), SuitRecords.stringField(request, "folder"));
@@ -342,6 +366,9 @@ class SuitDaemon {
 				SuitLogin.toggleInBackground();
 				return {ok: true};
 			default:
+				var remoteReply = remote.handle(request);
+				if (remoteReply != null)
+					return remoteReply;
 				var relayReply = relay.handle(request);
 				return relayReply != null ? relayReply : {ok: false, error: "unknown request"};
 		}
@@ -397,6 +424,7 @@ class SuitDaemon {
 		tray = null;
 		for (client in clients)
 			client.close();
+		remote.dispose();
 		relay.dispose();
 		hub.dispose();
 		runtime.dispose();

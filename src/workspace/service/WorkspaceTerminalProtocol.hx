@@ -23,6 +23,9 @@ import haxeon.wire.MessagePack;
 @:optional @:id(10) var theme:Null<TerminalTheme>;
 /** Fixed provider command, resolved on the workspace host; never shell text. */
 @:optional @:id(11) var agentProvider:Null<String>;
+/** Names the client process behind this connection. A later attachment from the same process replaces the one
+    it left behind as the terminal controller; any other client has to ask for control. */
+@:optional @:id(12) var clientKey:Null<String>;
 }
 @:wire typedef TerminalInfo = {@: id(1) var id: String;
 @:id(2) var cwd:String;
@@ -117,6 +120,7 @@ import haxeon.wire.MessagePack;
 @:id(3) var id:String;
 @:id(4) var claim:Bool;
 @:id(5) var takeover:Bool;
+@:optional @:id(6) var clientKey:Null<String>;
 }
 @:wire typedef TerminalCatalogQuery = {@: id(1) var workspace: String;
 @:id(2) var instance:String;

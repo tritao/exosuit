@@ -51,6 +51,8 @@ class WorkspacePairingManager implements WorkspacePairingAdmin {
 	final active:Map<String, NoiseMessageTransport> = [];
 	final activeRecords:Map<String, WorkspaceDeviceRecord> = [];
 	final relayRevocations:Map<String, Bool> = [];
+	/** The device whose channel `onAuthenticated` is being called with; null at any other time. */
+	public var authenticating(default, null):Null<String> = null;
 	var nextAudit:Float;
 	var disposed:Bool = false;
 
@@ -182,14 +184,17 @@ class WorkspacePairingManager implements WorkspacePairingAdmin {
 	function activate(deviceId:String, record:WorkspaceDeviceRecord, transport:NoiseMessageTransport):Bool {
 		active.set(deviceId, transport);
 		activeRecords.set(deviceId, record);
+		authenticating = deviceId;
 		try
 			onAuthenticated(transport, record.grants.copy())
 		catch (_:Dynamic) {
+			authenticating = null;
 			active.remove(deviceId);
 			activeRecords.remove(deviceId);
 			transport.close();
 			return false;
 		}
+		authenticating = null;
 		if (!transport.isOpen()) {
 			active.remove(deviceId);
 			activeRecords.remove(deviceId);
@@ -299,7 +304,8 @@ class WorkspacePairingManager implements WorkspacePairingAdmin {
 		if (pending.get(candidate.deviceId) != candidate
 			|| candidate.state != "delivering" && candidate.state != "awaiting_confirmation")
 			return;
-		if (!candidate.transport.isOpen()) {
+		// The device may send its confirmation and let go in one breath: read what arrived before judging the close.
+		if (!candidate.transport.isOpen() && candidate.state == "delivering") {
 			rollback(candidate, "pairing_disconnected");
 			return;
 		}
@@ -318,8 +324,10 @@ class WorkspacePairingManager implements WorkspacePairingAdmin {
 			return;
 		}
 		var confirmation = candidate.transport.receive();
-		if (confirmation == null)
+		if (confirmation == null) {
+			if (!candidate.transport.isOpen()) rollback(candidate, "pairing_disconnected");
 			return;
+		}
 		if (!isValidConfirmation(confirmation, candidate)) {
 			rollback(candidate, "pairing_confirmation_invalid");
 			return;
