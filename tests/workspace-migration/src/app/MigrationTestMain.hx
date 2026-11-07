@@ -82,18 +82,45 @@ class MigrationTestMain {
 
 	static function twoFolders():Void {
 		var first = folder("first"), second = folder("second");
-		oldState(first, ["a"], 1, 1);
+		var firstState = oldState(first, ["a"], 1, 2);
+		// The first folder's service had committed group edits: its cursor counts them.
+		var edited = Database.open(Path.join([firstState, "catalog.sqlite"]), 1000);
+		edited.exec("UPDATE workspace_meta SET cursor=3 WHERE id=1");
+		edited.close();
 		oldState(second, ["b", "c"], 1, 2);
 		var state = workspaceState("workspace-two");
 		AgentWorkspaceMigration.run(AgentStateIdentity.forWorkspace("workspace-two", [first, second], null), state);
 		var path = Path.join([state, "catalog.sqlite"]);
 		var catalog = counts(path);
 		// Each catalog: Work plus its own groups; one group per folder on top.
-		check(catalog.groups == 2 + 3 + 2 && catalog.agents == 2 && catalog.terminals == 3 && catalog.histories == 3, "two folders: everything arrived " + catalog);
+		check(catalog.groups == 2 + 3 + 2 && catalog.agents == 2 && catalog.terminals == 4 && catalog.histories == 4, "two folders: everything arrived " + catalog);
 		var top = topLevel(path);
 		check(top.length == 2 && top.indexOf("first") >= 0 && top.indexOf("second") >= 0, "two folders: one top-level group per folder " + top);
 		check(nestedWork(path) == 2, "two folders: each folder's Work group kept, under its folder");
 		check(ungrouped(path) == 0, "two folders: nothing is left at the root");
+		// The merge drops the group operations, so the cursor restarts with them and the service restores the catalog.
+		check(metaField(path, "cursor") == "0", "two folders: the cursor restarts with the dropped operations");
+		var seed = new WorkspaceService("workspace", "unused", []).snapshot();
+		var groupsBefore = counts(path).groups;
+		var store = new WorkspaceSqliteStore(path, "workspace", seed, 32, "workspace:workspace-two");
+		try {
+			// A start then removes the seeded group with id "work" (the first folder's; the second's was renamed on
+			// collision), moving its contents to its parent, the first folder's group.
+			check(store.retireSeedGroup("renewed", first), "two folders: the first folder's Work group is found");
+			var service = new WorkspaceService("workspace", "unused", seed.groups, 32, 256, 16, store);
+			var restored = service.snapshot().groups;
+			check(restored.length == groupsBefore - 1 && !Lambda.exists(restored, function(g) return g.id == "work"),
+				"two folders: the service restores without the Work group");
+			var firstGroup = "";
+			for (group in restored) if (group.name == "first" && group.parent == null) firstGroup = group.id;
+			var moved = [for (t in store.loadTerminals()) if (t.group == firstGroup) t].length;
+			// One terminal was at the first folder's root, one in its Work group: both are now in its folder's group.
+			check(moved == 2, "two folders: the first folder's Work terminal is in its folder's group, not the root");
+		} catch (error:Dynamic) {
+			store.close();
+			throw error;
+		}
+		store.close();
 	}
 
 	static function refusals():Void {

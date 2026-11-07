@@ -576,9 +576,10 @@ class AgentWorkspaceMigration {
 				database.commit();
 			} else {
 				var mapping = fresh ? nestInPlace(database, folder) : merge(database, source, folder);
-				// A new epoch: a client holding the old one loads the catalog afresh instead of resuming into it.
+				// A new epoch: a client holding the old one loads the catalog afresh instead of resuming into it. The cursor
+				// restarts with the dropped operations: a service refuses a catalog whose cursor counts operations it lacks.
 				var epoch = AgentManagerNative.randomToken().substr(0, 32);
-				exec(database, "UPDATE workspace_meta SET epoch=?1 WHERE id=1", function(row) {
+				exec(database, "UPDATE workspace_meta SET epoch=?1,cursor=0 WHERE id=1", function(row) {
 					row.bindText(1, epoch);
 				});
 				database.exec("DELETE FROM workspace_operations");
