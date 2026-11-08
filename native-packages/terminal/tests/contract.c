@@ -208,7 +208,51 @@ static int history_contract(void) {
     return 0;
 }
 
+/* VS16 (U+FE0F) makes a narrow character two columns wide, as ConPTY measures it ("➡️" in Claude Code's answers).
+   Counted as one column, every later cursor move on the row landed one column off and left stale characters. */
+static int emoji_presentation_contract(void) {
+    terminalkit_handle *kit = NULL, *restored = NULL;
+    REQUIRE(terminalkit_open(20, 3, 16, "xterm-256color", &kit));
+    int col = -1, row = -1, mode = -1;
+    REQUIRE(feed(kit, "\xe2\x9e\xa1\xef\xb8\x8f") >= 0);            /* ➡️ */
+    REQUIRE(terminalkit_cursor(kit, &col, &row, &mode) && col == 2 && row == 0);
+    REQUIRE(feed(kit, " Use all\r\n\xe2\x9e\xa1 X") >= 0);           /* plain ➡ stays narrow */
+    REQUIRE(terminalkit_cursor(kit, &col, &row, &mode) && col == 3 && row == 1);
+    REQUIRE(feed(kit, "\r\nA\xef\xb8\x8f!") >= 0);                    /* ConPTY widens any narrow base */
+    REQUIRE(terminalkit_cursor(kit, &col, &row, &mode) && col == 3 && row == 2);
+    /* A program that measured ➡️ as two columns rewrites "all" in place: no stale letter is left. */
+    REQUIRE(feed(kit, "\x1b[1;8Hall") >= 0);   /* "➡️ Use " is 7 columns: "all" starts in column 8 */
+    REQUIRE(terminalkit_snapshot(kit) >= 0);
+    const terminalkit_cell *cells = terminalkit_cells(kit);
+    const uint8_t *text = terminalkit_text(kit);
+    REQUIRE(cells[0].width == 2 && cells[1].width == 0);
+    REQUIRE(cells[3].text_length == 1 && text[cells[3].text_offset] == 'U');
+    REQUIRE(cells[5].text_length == 1 && text[cells[5].text_offset] == 'e');
+    REQUIRE(cells[6].text_length == 0 || text[cells[6].text_offset] == ' ');
+    REQUIRE(cells[7].text_length == 1 && text[cells[7].text_offset] == 'a');
+    REQUIRE(cells[10].text_length == 0 || text[cells[10].text_offset] == ' ');
+    REQUIRE(cells[20].width == 1 && cells[40].width == 2);
+    /* Saved history and checkpoints restore the widened cells. */
+    uint32_t length = 0;
+    REQUIRE(terminalkit_history_copy(kit, NULL, &length) == 1);
+    uint8_t *history = malloc((size_t)length);
+    REQUIRE(history && terminalkit_history_copy(kit, history, &length) == 0);
+    REQUIRE(terminalkit_open(20, 3, 16, "xterm-256color", &restored));
+    REQUIRE(terminalkit_feed(restored, history, length) >= 0);
+    REQUIRE(same_screen(kit, restored));
+    free(history); terminalkit_close(restored); restored = NULL;
+    uint64_t size = terminalkit_checkpoint_size(kit), written = 0;
+    void *checkpoint = malloc((size_t)size);
+    REQUIRE(checkpoint && terminalkit_checkpoint(kit, checkpoint, size, &written) && written == size);
+    REQUIRE(terminalkit_open(20, 3, 16, "xterm-256color", &restored));
+    REQUIRE(terminalkit_restore(restored, checkpoint, size));
+    REQUIRE(same_screen(kit, restored));
+    free(checkpoint); terminalkit_close(restored); terminalkit_close(kit);
+    return 0;
+}
+
 int main(void) {
+    REQUIRE(emoji_presentation_contract() == 0);
     REQUIRE(default_colors_contract() == 0);
     REQUIRE(theme_notifications_contract() == 0);
     terminalkit_handle *sync = NULL;

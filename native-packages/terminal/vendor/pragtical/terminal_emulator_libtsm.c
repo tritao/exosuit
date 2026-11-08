@@ -750,13 +750,16 @@ static int snapshot_validate_text(const uint8_t* data, size_t size,
   if (width > 2 || size == 0) return 0;
   size_t offset = 0;
   uint32_t codepoint = 0;
-  if (!snapshot_codepoint(data, size, &offset, &codepoint)
-      || tsm_ucs4_get_width(codepoint) != width) return 0;
+  if (!snapshot_codepoint(data, size, &offset, &codepoint)) return 0;
+  uint32_t expected = tsm_ucs4_get_width(codepoint);
+  if (expected == 0) return 0;
   while (offset < size) {
     if (!snapshot_codepoint(data, size, &offset, &codepoint)
         || tsm_ucs4_get_width(codepoint) != 0) return 0;
+    /* VS16 widens a narrow character to two columns, as the screen does. */
+    if (codepoint == 0xfe0f && expected == 1) expected = 2;
   }
-  return 1;
+  return expected == width;
 }
 
 static void snapshot_color(uint32_t packed, int foreground,
