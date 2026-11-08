@@ -456,7 +456,7 @@ class WorkbenchTreeModel implements TreeViewModel {
 				var group = groups.get(row.id);
 				if (group != null) {
 					var owner = groupWorkspace();
-					return new WorkbenchGroupLabel(group.name, directory(group), workspaceRoot, owner == null ? null : owner.name, anotherWindow(owner == null ? null : owner.id, group.id));
+					return new WorkbenchGroupLabel(group.name, directory(group), firstFolder(), owner == null ? null : owner.name, anotherWindow(owner == null ? null : owner.id, group.id));
 				}
 			case WorkbenchRowKind.Agent:
 				var a = agents.get(row.id);
@@ -521,7 +521,17 @@ class WorkbenchTreeModel implements TreeViewModel {
 
 	public function directory(group:WorkspaceGroup):Null<String> {
 		var folder = GroupFolders.nearest(groups, group);
-		return folder == null ? workspaceRoot : folder;
+		return folder == null ? firstFolder() : folder;
+	}
+
+	/**
+		The open workspace's first folder, where its root and folderless groups work: the catalog's first attached folder,
+		else the service's root. A service keeps the folder it started in, so a workspace started in its scratch folder
+		still names that after a folder is attached.
+	**/
+	public function firstFolder():Null<String> {
+		var owner = groupWorkspace();
+		return owner != null && owner.folders.length > 0 ? owner.folders[0] : workspaceRoot;
 	}
 
 	/** The position after every placed row in `parent` (null for the workspace root): one step past the last, or 0 in a group with none. */

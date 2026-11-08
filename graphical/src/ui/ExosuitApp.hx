@@ -926,9 +926,14 @@ class ExosuitApp implements DesktopUiApplication {
 		var remote = createWorkspaceTerminal;
 		if (isRemote ? remote == null : create == null) return null;
 		// A terminal of a workspace with a service of its own belongs to that service, whichever of the workspace's
-		// folders it was made under: the service names its own root.
+		// folders it was made under: the service names its own root. That is the folder the running service started in
+		// (a scratch folder, say, before a folder was attached), once this window is attached to it.
 		if (isRemote && workspaceRoot != null) {
 			var service = terminalServiceTarget(workspaceRoot), serviceRoot = service == null ? null : service.root();
+			if (service != null && Std.isOfType(workspaceAttachment, workspace.client.LocalWorkspaceClient)) {
+				var local:workspace.client.LocalWorkspaceClient = cast workspaceAttachment;
+				if (local.servedWorkspace() == service.workspace && local.rootPath() != null) serviceRoot = local.rootPath();
+			}
 			if (serviceRoot != null) workspaceRoot = serviceRoot;
 		}
 		var number = StringTools.startsWith(id, "terminal-") ? Std.parseInt(id.substring(9)) : null;
@@ -3011,8 +3016,10 @@ class ExosuitApp implements DesktopUiApplication {
 			var providers = [for (provider in ["codex", "claude", "pi", "agentkit"])
 				{label: provider == "codex" ? "Codex" : provider == "claude" ? "Claude" : provider == "pi" ? "Pi" : "Exosuit", value: provider}];
 			var chooser = sessionFolders();
-			chooser.newAgentSession(providers, SessionFolderChooser.preview(catalog.groups, into, chooser.firstFolder(catalog.workspaceRoot), catalog.workspaceRoot),
+			var resolved = SessionFolderChooser.preview(catalog.groups, into, chooser.firstFolder(catalog.workspaceRoot), catalog.workspaceRoot);
+			chooser.newAgentSession(providers, resolved,
 				function(provider, directory) {
+				if (directory == null) directory = SessionFolderChooser.explicitFor(catalog.groups, into, resolved, catalog.workspaceRoot);
 				if (client != workbenchClient) { application.reportError("agent", "The workspace changed. Choose New Agent Session again."); return; }
 				var current = client.terminalCatalog();
 				if (current == null || current.instance != catalog.instance) { application.reportError("agent", "The workspace connection changed. Choose New Agent Session again."); return; }
@@ -3023,7 +3030,9 @@ class ExosuitApp implements DesktopUiApplication {
 		}
 		if (action == "new-terminal") {
 			var chooser = sessionFolders();
-			chooser.newTerminal(SessionFolderChooser.preview(catalog.groups, into, chooser.firstFolder(catalog.workspaceRoot), catalog.workspaceRoot), function(directory) {
+			var resolved = SessionFolderChooser.preview(catalog.groups, into, chooser.firstFolder(catalog.workspaceRoot), catalog.workspaceRoot);
+			chooser.newTerminal(resolved, function(directory) {
+				if (directory == null) directory = SessionFolderChooser.explicitFor(catalog.groups, into, resolved, catalog.workspaceRoot);
 				if (client != workbenchClient) { application.reportError("terminal", "The workspace changed. Choose New Terminal again."); return; }
 				var terminal = newTerminalTab(into, null, directory);
 				if (terminal != null) showTerminalInEditor(terminal);

@@ -36,7 +36,7 @@ import workspace.service.WorkspacePairingProtocol.PairingList;
 }
 
 /** Nonblocking native attachment. Closing a client never owns/stops the shared daemon. */
-class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRpcEndpoint implements workspace.client.WorkspaceWorkbenchClient implements workspace.client.WorkspaceAgentClient implements workspace.client.WorkspacePairingClient {
+class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRpcEndpoint implements ServedRoots implements workspace.client.WorkspaceWorkbenchClient implements workspace.client.WorkspaceAgentClient implements workspace.client.WorkspacePairingClient {
   public var root(default, null):Null<String>;
   public var error(default, null):Null<String>;
   public var instance(default, null):String = "";
@@ -143,6 +143,16 @@ class LocalWorkspaceClient implements WorkspaceAttachment implements WorkspaceRp
   public function servedWorkspace():Null<String> {
     var target = serviceTarget;
     return ready && target != null ? target.workspace : null;
+  }
+  /**
+    Whether a terminal keyed by `path` belongs to the service this client attaches to: its root, or, for a machine
+    workspace's service, any of the workspace's folders (the service keeps the folder it started in).
+  **/
+  public function servesRoot(path:String):Bool {
+    if (root == null) return false;
+    if (root == path) return true;
+    var target = serviceTarget;
+    return target != null && (target.folders.indexOf(path) >= 0 || target.scratch == path);
   }
   public function serviceGeneration():String return instance;
   var terminalEventRouter:Null<WorkspaceTerminalEvents>;

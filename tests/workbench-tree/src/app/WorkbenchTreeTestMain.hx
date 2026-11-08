@@ -72,8 +72,40 @@ class WorkbenchTreeTestMain {
 		require(WorkbenchMachineLabel.folder(workspaceEntry("old", "old", [])) == null, "a workspace with neither shows none");
 	}
 
+	/**
+		A workspace made with New Workspace starts its service in the scratch folder, which the service keeps after a
+		folder is attached: the tree, the right panel's scope, the chooser and the terminal backend use the attached folder.
+	**/
+	static function scratchStarted():Void {
+		var scratch = "C:/Users/me/Exosuit/eon", folder = "C:/src/eon";
+		var model = new WorkbenchTreeModel();
+		var attached = view([workspaceEntry("eon", "eon-series", [folder, "C:/src/other"], scratch)], "eon", [folder]);
+		attached.servedRoot = scratch;
+		model.update(catalog(scratch), null, null, attached);
+		require(model.workspaceRoot == scratch && model.firstFolder() == folder, "firstFolder is the attached folder, not the service root: " + model.firstFolder());
+		require(model.directory(group("loose", "Loose")) == folder, "a folderless group works in the attached folder: " + model.directory(group("loose", "Loose")));
+		var scope = AgentScope.resolve(model, "w:eon", null);
+		require(scope != null && scope.directory == folder, "the workspace scope lists the attached folder: " + (scope == null ? "none" : scope.directory));
+		// Without an attached folder the service's root (the scratch folder) is all there is.
+		var bare = view([workspaceEntry("eon", "eon-series", [], scratch)], "eon", []);
+		bare.servedRoot = scratch;
+		model.update(catalog(scratch), null, null, bare);
+		require(model.firstFolder() == scratch, "no folder attached falls back to the service root: " + model.firstFolder());
+		// The chooser sends the attached folder when the service would place the session in its own root.
+		var groups = [group("loose", "Loose")];
+		require(ui.SessionFolderChooser.explicitFor(groups, "loose", folder, scratch) == folder, "a root session started in the scratch folder is sent the attached folder");
+		require(ui.SessionFolderChooser.explicitFor(groups, "loose", scratch, scratch) == null, "no folder is sent when the service would choose it anyway");
+		require(ui.SessionFolderChooser.explicitFor(groups, "loose", null, scratch) == null, "a folderless workspace sends none");
+		// A terminal keyed by the attached folder belongs to the service that started in the scratch folder.
+		function status(endpoint:workspace.client.WorkspaceRpcEndpoint):String
+			return new workspace.client.RpcTerminalBackend(function() return endpoint, "t", folder, false).controlStatus();
+		require(status(new FakeEndpoint(scratch, true)) == "Connecting to workspace terminal…", "terminal rejected a served folder: " + status(new FakeEndpoint(scratch, true)));
+		require(status(new FakeEndpoint(scratch, false)).indexOf("Open this terminal's workspace to reconnect") == 0, "terminal accepted a service that serves another root");
+	}
+
 	static function main():Void {
 		workspaceFolder();
+		scratchStarted();
 		ordering();
 		foreignWorkspaces();
 		cyclicGroups();
@@ -420,4 +452,20 @@ class WorkbenchTreeTestMain {
 		submit();
 		require(!Lambda.exists(labels(), function(label) return label.indexOf("another window") >= 0), "no other window, no marker: " + labels());
 	}
+}
+
+/** A service endpoint rooted in `root`; with `serving`, it answers for the workspace's attached folder too. */
+private class FakeEndpoint implements workspace.client.WorkspaceRpcEndpoint implements workspace.client.ServedRoots {
+	final root:String;
+	final serving:Bool;
+	public function new(root:String, serving:Bool) { this.root = root; this.serving = serving; }
+	public function servesRoot(path:String):Bool return serving && path == "C:/src/eon";
+	public function rootPath():Null<String> return root;
+	public function serviceGeneration():String return "g";
+	public function terminalEvents():Null<workspace.client.WorkspaceTerminalEvents> return null;
+	public function rpcConnection():Null<haxeon.rpc.RpcConnection> return null;
+	public function failureReason():Null<String> return null;
+	public function supportsWorkspaceGroups():Bool return true;
+	public function workspaceEpoch():Null<String> return "e";
+	public function hasCapability(capability:String):Bool return true;
 }

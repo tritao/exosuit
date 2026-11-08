@@ -53,12 +53,23 @@ class SessionFolderChooser {
 		return folder == null || folder == "" ? title : title + "\n" + folder;
 
 	/**
-		The workspace's first folder, as the service sees it: `serviceRoot`, unless the open machine workspace has no
-		folders, in which case there is none and sessions without a group folder use the scratch folder.
+		The workspace's first folder: the open machine workspace's first folder, else `serviceRoot` when the window is on
+		no machine workspace. Null when the workspace has no folders: sessions without a group folder use the scratch folder.
 	**/
 	public function firstFolder(serviceRoot:Null<String>):Null<String> {
 		var entry = openWorkspace();
-		return entry != null && entry.folders.length == 0 ? null : serviceRoot;
+		return entry == null ? serviceRoot : entry.folders.length == 0 ? null : entry.folders[0];
+	}
+
+	/**
+		The directory to send for a session the service would otherwise place: null to let it resolve one, or `resolved`
+		when the service would pick another folder. A service keeps the folder it started in, so one started in the
+		scratch folder puts root sessions there even after a folder is attached.
+	**/
+	public static function explicitFor(groups:Array<WorkspaceGroup>, group:String, resolved:Null<String>, serviceRoot:Null<String>):Null<String> {
+		if (resolved == null) return null;
+		var serviceChoice = preview(groups, group, serviceRoot, serviceRoot);
+		return serviceChoice != null && workspace.PathKey.same(serviceChoice, resolved) ? null : resolved;
 	}
 
 	/**

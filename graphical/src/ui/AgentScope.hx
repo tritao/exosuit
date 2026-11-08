@@ -62,7 +62,7 @@ class AgentScope {
 
 	/** The workspace root's scope: the workspace's first folder, named after the workspace. */
 	static function rootScope(model:WorkbenchTreeModel):Null<AgentScope> {
-		var directory = model.workspaceRoot;
+		var directory = model.firstFolder();
 		if (directory == null || directory.length == 0) return null;
 		var owner = model.groupWorkspace();
 		return new AgentScope(WorkspaceProtocol.ROOT_GROUP, owner == null ? "Workspace" : owner.name, directory);

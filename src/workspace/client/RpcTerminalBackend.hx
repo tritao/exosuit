@@ -103,7 +103,7 @@ class RpcTerminalBackend implements TerminalBackend {
     if (failure != null) return "Terminal unavailable: " + failure;
     if (!attached) {
       var endpoint = provider();
-      if (endpoint != null && endpoint.rootPath() != null && endpoint.rootPath() != root)
+      if (endpoint != null && endpoint.rootPath() != null && !serves(endpoint))
         return "Open this terminal's workspace to reconnect: " + root;
       return "Connecting to workspace terminal…";
     }
@@ -201,6 +201,13 @@ class RpcTerminalBackend implements TerminalBackend {
     if (autoClaimControl && !controlReleased && attached && !controlled && info.state == "running")
       setControl(true);
     return true;
+  }
+  /** Whether `endpoint`'s service holds this terminal: same root, or a workspace service serving this root among its folders. */
+  function serves(endpoint:WorkspaceRpcEndpoint):Bool {
+    if (endpoint.rootPath() == root) return true;
+    if (!Std.isOfType(endpoint, ServedRoots)) return false;
+    var served:ServedRoots = cast endpoint;
+    return served.servesRoot(root);
   }
   static function retryable(code:String):Bool return code == "timeout" || code == "disconnected";
   function fail(message:String):Void {
@@ -367,7 +374,7 @@ class RpcTerminalBackend implements TerminalBackend {
       fail(clientFailure);
       return;
     }
-    var c = client.rootPath() == root ? client.rpcConnection() : null;
+    var c = serves(client) ? client.rpcConnection() : null;
     if (c != connection) {
       if (writing) {
         fail("Terminal input delivery uncertain after disconnect");
