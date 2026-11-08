@@ -871,6 +871,16 @@ class TerminalPane implements AgentTerminalPanel {
 
 	function handleKey(event:UiEvent):Void {
 		if (!canSendInput()) { event.preventDefault(); return; }
+		// Ctrl+Backspace deletes a word. Plain Backspace is DEL (0x7f), so it must differ: as Windows Terminal does, a
+		// Win32 key record with Ctrl held while ConPTY asked for those (DECSET 9001), else BS (0x08), as xterm sends it.
+		if (event.key == UiKey.Backspace
+				&& (event.modifiers & (UiModifier.Control | UiModifier.Shift | UiModifier.Alt | UiModifier.Super)) == UiModifier.Control) {
+			prepareInput();
+			// ESC [ Vk ; Sc ; Uc ; Kd ; Cs ; Rc _ : VK_BACK, scan code 14, char 0x7f, down then up, LEFT_CTRL_PRESSED.
+			session.write(Bytes.ofString(session.emulator.win32InputMode() ? "\x1b[8;14;127;1;8;1_\x1b[8;14;127;0;8;1_" : "\x08"));
+			event.preventDefault();
+			return;
+		}
 		if ((event.key == UiKey.V || event.key == UiKey.C) &&
 			(event.modifiers & (UiModifier.Control | UiModifier.Shift)) ==
 			(UiModifier.Control | UiModifier.Shift)) {
