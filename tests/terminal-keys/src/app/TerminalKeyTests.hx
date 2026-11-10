@@ -93,6 +93,19 @@ class TerminalKeyTests {
 			require(backend.replies == "\x1b[1;5D\x1b[1;5C\x1b[3;6~\x1b[1;4H",
 				"Modified keys reached the PTY as " + show(backend.replies) + " (application cursor " + applicationCursor + ")");
 		}
+		// Ctrl+Backspace deletes a word, so it must differ from Backspace (DEL): BS, or a Win32 key record under DECSET 9001.
+		emulator.feedString("\x1b[?9001l");
+		backend.replies = "";
+		fixture.key(UiKey.Backspace, control);
+		require(backend.replies == "\x08", "Ctrl+Backspace reached the PTY as " + show(backend.replies) + ", expected BS");
+		emulator.feedString("\x1b[?9001h");
+		backend.replies = "";
+		fixture.key(UiKey.Backspace, control);
+		require(backend.replies == "\x1b[8;14;127;1;8;1_\x1b[8;14;127;0;8;1_",
+			"Ctrl+Backspace in win32-input-mode reached the PTY as " + show(backend.replies));
+		backend.replies = "";
+		fixture.key(UiKey.Backspace, control | shift);
+		require(backend.replies.indexOf("\x1b[8;14;127;1;8;1_") < 0, "Ctrl+Shift+Backspace was taken for Ctrl+Backspace");
 		fixture.dispose();
 	}
 
