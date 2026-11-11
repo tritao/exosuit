@@ -297,11 +297,12 @@ class ScmGitTestMain {
 		pumpService(service, scheduler, () -> discovery != null, 'SCM benchmark discovery timed out for "$label"', 60.0);
 		if (discovery == null || discovery.error != null || discovery.value == null || discovery.value.length == 0)
 			throw 'SCM benchmark root "$label" is not a Git repository: ' + (discovery == null || discovery.error == null ? "no repository" : discovery.error.message);
+		var discovered = discovery.value;
 		var repository:Null<ScmRepository> = null;
 		var fullRoot = StringTools.replace(FileSystem.fullPath(root), "\\", "/");
 		while (StringTools.endsWith(fullRoot, "/") && fullRoot.length > 1) fullRoot = fullRoot.substr(0, fullRoot.length - 1);
-		for (candidate in discovery.value) if (candidate.root == fullRoot) { repository = candidate; break; }
-		if (repository == null) repository = discovery.value[0];
+		for (candidate in discovered) if (candidate.root == fullRoot) { repository = candidate; break; }
+		if (repository == null) repository = discovered[0];
 		var repositoryId = repository.id;
 		service.refreshNow(repositoryId);
 		var statusStarted = Sys.time(), maxFrameMillis = 0.0, maxServiceMillis = 0.0, maxSchedulerMillis = 0.0,
@@ -605,10 +606,11 @@ class ScmGitTestMain {
 		var discoveryJob = provider.detect(discoveryRoot, 72, value -> discovered = value);
 		pump(gitScheduler, () -> discovered != null, "Git repository discovery timed out");
 		if (discovered == null || discovered.value == null) throw "Git repository discovery returned no handle list";
+		var discoveredHandles = discovered.value;
 		require(discoveryJob.complete && discovered.error == null && discovered.value.length == 2,
 			"Git discovery did not find the root and nested repositories");
 		var rootHandle:Null<ScmRepositoryHandle> = null, nestedHandle:Null<ScmRepositoryHandle> = null;
-		for (handle in discovered.value) {
+		for (handle in discoveredHandles) {
 			if (handle.repository().root == StringTools.replace(FileSystem.fullPath(discoveryRoot), "\\", "/")) rootHandle = handle;
 			if (handle.repository().root == StringTools.replace(FileSystem.fullPath(nestedRoot), "\\", "/")) nestedHandle = handle;
 		}
@@ -635,9 +637,10 @@ class ScmGitTestMain {
 		rootHandle.refresh(73, value -> firstSnapshot = value);
 		pump(gitScheduler, () -> firstSnapshot != null, "Git status refresh timed out");
 		if (firstSnapshot == null || firstSnapshot.value == null) throw "Git status refresh returned no snapshot";
+		var firstSnapshotError = firstSnapshot.error;
 		var firstSnapshotValue:ScmSnapshot = cast firstSnapshot.value;
 		var untrackedGroup = snapshotGroup(firstSnapshotValue, ScmGroupId.Untracked);
-		require(firstSnapshot.error == null && firstSnapshotValue.truncated
+		require(firstSnapshotError == null && firstSnapshotValue.truncated
 			&& untrackedGroup != null && untrackedGroup.resources.length == 1
 			&& snapshotGroup(firstSnapshotValue, ScmGroupId.WorkingTree) != null,
 			"Git untracked limit did not mark a truncated status snapshot");
@@ -702,7 +705,8 @@ class ScmGitTestMain {
 		pump(gitScheduler, () -> mutationDiscovery != null, "Git mutation repository discovery timed out");
 		if (mutationDiscovery == null || mutationDiscovery.value == null || mutationDiscovery.value.length != 1)
 			throw "Git mutation fixture returned no repository handle";
-		var mutationHandle = mutationDiscovery.value[0];
+		var mutationHandles = mutationDiscovery.value;
+		var mutationHandle = mutationHandles[0];
 		var initialBranches:Null<ScmJobResult<Array<scm.ScmBranch>>> = null;
 		mutationHandle.branches(7651, value -> initialBranches = value);
 		pump(gitScheduler, () -> initialBranches != null, "Git branch listing timed out");
@@ -999,7 +1003,7 @@ class ScmGitTestMain {
 		require(createdBranch.error == null && runGit(git, gitScheduler, ["branch", "--show-current"], mutationRoot, 783).stdout.toString() == "scm-operation-test\n",
 			"the SCM create-branch operation did not check out the new branch");
 		mutationHandle.dispose();
-		for (handle in mutationDiscovery.value) handle.dispose();
+		for (handle in mutationHandles) handle.dispose();
 		var mutationService = new ScmService(processManager, gitScheduler, git.executable, 100, 0, true,
 			fixtureBase + "/real-operation-trust.json", emptyHooks), mutationServiceDiscovery:Null<ScmJobResult<Array<ScmRepository>>> = null;
 		mutationService.discover(mutationRoot, value -> mutationServiceDiscovery = value);
@@ -1007,8 +1011,9 @@ class ScmGitTestMain {
 			&& mutationService.snapshot(mutationServiceDiscovery.value[0].id) != null, "Git mutation service discovery timed out");
 		if (mutationServiceDiscovery == null || mutationServiceDiscovery.value == null || mutationServiceDiscovery.value.length != 1)
 			throw "Git mutation service did not discover its repository";
+		var mutationServiceRepositories = mutationServiceDiscovery.value;
 		var serviceBranchResult:Null<ScmJobResult<ScmApplyResult>> = null;
-		mutationService.apply(mutationServiceDiscovery.value[0].id, ScmOperation.CreateBranch("scm-service-operation"), 784,
+		mutationService.apply(mutationServiceRepositories[0].id, ScmOperation.CreateBranch("scm-service-operation"), 784,
 			value -> serviceBranchResult = value);
 		pumpService(mutationService, gitScheduler, () -> serviceBranchResult != null, "Git service branch operation timed out");
 		require(serviceBranchResult != null && serviceBranchResult.error == null
@@ -1038,7 +1043,7 @@ class ScmGitTestMain {
 		pump(gitScheduler, () -> remoteDiscovery != null, "Bare-remote fixture discovery timed out");
 		if (remoteDiscovery == null || remoteDiscovery.value == null || remoteDiscovery.value.length != 1)
 			throw "Bare-remote fixture returned no repository handle";
-		var remoteHandle = remoteDiscovery.value[0], remoteInitial:Null<ScmJobResult<ScmSnapshot>> = null;
+		var remoteHandles = remoteDiscovery.value, remoteHandle = remoteHandles[0], remoteInitial:Null<ScmJobResult<ScmSnapshot>> = null;
 		remoteHandle.refresh(797, value -> remoteInitial = value);
 		pump(gitScheduler, () -> remoteInitial != null, "Bare-remote initial refresh timed out");
 		var firstPush = applyOperation(remoteHandle, gitScheduler, ScmOperation.Push, 798);
@@ -1119,7 +1124,7 @@ class ScmGitTestMain {
 			"SCM fake-SSH failure did not explain non-interactive authentication (code="
 				+ (rejectedAuth.error == null ? "none" : rejectedAuth.error.code) + ", message="
 				+ (rejectedAuth.error == null ? "none" : rejectedAuth.error.message) + ")");
-		for (handle in remoteDiscovery.value) handle.dispose();
+		for (handle in remoteHandles) handle.dispose();
 		var linkedRoot = discoveryRoot + "/linked";
 		runGit(git, gitScheduler, ["worktree", "add", "-b", "scm-linked-fixture", linkedRoot, "HEAD"], discoveryRoot, 77);
 		var submoduleSource = fixtureBase + "/submodule-source";
@@ -1131,10 +1136,11 @@ class ScmGitTestMain {
 		provider.detect(discoveryRoot, 81, value -> completeDetection = value);
 		pump(gitScheduler, () -> completeDetection != null, "Git worktree and submodule discovery timed out");
 		if (completeDetection == null || completeDetection.value == null) throw "Git worktree discovery returned no handles";
+		var completeHandles = completeDetection.value;
 		require(completeDetection.error == null && completeDetection.value.length == 4,
 			"Git discovery did not find all nested repositories, linked worktrees and submodules");
 		var linkedHandle:Null<ScmRepositoryHandle> = null, submoduleHandle:Null<ScmRepositoryHandle> = null;
-		for (handle in completeDetection.value) {
+		for (handle in completeHandles) {
 			if (handle.repository().root == StringTools.replace(FileSystem.fullPath(linkedRoot), "\\", "/")) linkedHandle = handle;
 			if (handle.repository().root == StringTools.replace(FileSystem.fullPath(discoveryRoot + "/submodule"), "\\", "/")) submoduleHandle = handle;
 		}
@@ -1144,8 +1150,8 @@ class ScmGitTestMain {
 			&& submoduleHandle.repository().kind == scm.ScmRepositoryKind.Submodule
 			&& submoduleHandle.repository().parentId == rootHandle.repository().id,
 			"Git discovery did not classify linked worktree and submodule relationships");
-		for (handle in discovered.value) handle.dispose();
-		for (handle in completeDetection.value) handle.dispose();
+		for (handle in discoveredHandles) handle.dispose();
+		for (handle in completeHandles) handle.dispose();
 		var service = new ScmService(processManager, gitScheduler, git.executable, 1, 2, true,
 			fixtureBase + "/trust.json", emptyHooks), serviceResult:Null<ScmJobResult<Array<scm.ScmRepository>>> = null,
 			serviceEvents = 0;
