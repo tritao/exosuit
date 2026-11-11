@@ -8,6 +8,8 @@ class RelayMachineConnector {
 	final tickets:RelayTicketClient;
 	final attempts:Array<RelayMachineConnectAttempt> = [];
 	var disposed:Bool = false;
+	/** Proves the machine's key when its relay id turns out registered by someone else (null: no proof possible). */
+	public var prover:Null<RelayRegistrationProver> = null;
 
 	public function new(events:EventPump, hub:NativeRpcHub, allowLoopbackHttp:Bool = false) {
 		if (hub == null)
@@ -32,9 +34,21 @@ class RelayMachineConnector {
 			return attempt;
 		}
 		attempts.push(attempt);
-		var registrationAttempt = tickets.register(endpoint, machineToken, function(error) {
+		var proving = prover;
+		var registered:Null<String>->Void = null;
+		registered = function(error) {
 			if (!attempt.isActive())
 				return;
+			// Someone else registered this machine's relay id first: a machine whose id is derived from its key proves the key
+			// and takes the id back. A relay that cannot check proofs keeps the conflict.
+			if (error == "machine_identity_conflict" && proving != null) {
+				var proof = proving;
+				proving = null;
+				attempt.useTicket(tickets.registerProven(endpoint, machineToken, proof, function(provenError) {
+					registered(provenError == "relay_registration_unproven" ? "machine_identity_conflict" : provenError);
+				}));
+				return;
+			}
 			if (error != null) {
 				if (attempt.finish())
 					complete(null, error);
@@ -70,8 +84,8 @@ class RelayMachineConnector {
 				attempt.useSocket(socketAttempt);
 			});
 			attempt.useTicket(ticketAttempt);
-		});
-		attempt.useTicket(registrationAttempt);
+		};
+		attempt.useTicket(tickets.register(endpoint, machineToken, registered));
 		return attempt;
 	}
 

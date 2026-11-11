@@ -73,6 +73,10 @@ class WorkspaceRelayHost implements WorkspacePairingRelay {
 	public function activeCount():Int
 		return disposed || permanentFailure || paused || viaSuit ? 0 : 1;
 
+	/** Lets registration prove the machine's key when its relay id is taken (`RelayRegistrationProver`). */
+	public function proveIdentityWith(prover:Null<workspace.transport.RelayRegistrationProver>):Void
+		connector.prover = prover;
+
 	public function pairingEndpoint():RelayMachineEndpoint
 		return endpoint;
 

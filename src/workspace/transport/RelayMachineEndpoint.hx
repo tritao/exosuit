@@ -31,6 +31,10 @@ class RelayMachineEndpoint {
 	public function registrationUrl():String
 		return origin + "/v1/machines/" + machineId + "/register";
 
+	/** Proven registration's one-use challenge (relay Workers from 2026-11 on). */
+	public function registrationChallengeUrl():String
+		return origin + "/v1/machines/" + machineId + "/register/challenge";
+
 	public function pairingsUrl():String
 		return origin + "/v1/machines/" + machineId + "/pairings";
 

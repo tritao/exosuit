@@ -4,6 +4,12 @@ const MAX_JSON_BYTES = 4 * 1024;
 const MAX_FRAME_BYTES = 64 * 1024;
 const MAX_PAIRING_TTL_SECONDS = 5 * 60;
 const SOCKET_TICKET_TTL_SECONDS = 60;
+/** A registration challenge key lives this long and is used once. */
+const REGISTER_CHALLENGE_TTL_SECONDS = 60;
+const MAX_REGISTER_CHALLENGES = 8;
+/** docs/mobile/relay-identity.md; MachineKeys.hx computes the same. */
+const RELAY_ID_CONTEXT = "exosuit-relay-id/1";
+const PROOF_CONTEXT = "exosuit-relay-register/1";
 const MAX_PENDING_PAIRINGS = 8;
 const MAX_PENDING_TICKETS_PER_PRINCIPAL = 8;
 const MAX_ACTIVE_DEVICES = 128;
@@ -35,6 +41,19 @@ interface PairingRequest {
   channelId: string;
   secret: string;
   ttlSeconds: number;
+}
+
+/** A proven registration: the machine's Noise public key, the challenge it answers and the proof (all hex). */
+interface ProvenRegistration {
+  publicKey?: unknown;
+  challenge?: unknown;
+  proof?: unknown;
+}
+
+interface ChallengeRow {
+  [key: string]: SqlStorageValue;
+  private_key: string;
+  expires_at: number;
 }
 
 interface DeviceRequest {
@@ -120,6 +139,12 @@ export class MachineRelay extends DurableObject<Env> {
     ctx.storage.sql.exec(
       "CREATE TABLE IF NOT EXISTS socket_ticket (token_hash TEXT PRIMARY KEY, role TEXT NOT NULL, device_id TEXT, expires_at INTEGER NOT NULL)",
     );
+    ctx.storage.sql.exec(
+      "CREATE TABLE IF NOT EXISTS register_challenge (public_key TEXT PRIMARY KEY, private_key TEXT NOT NULL, expires_at INTEGER NOT NULL)",
+    );
+    ctx.storage.sql.exec(
+      "CREATE TABLE IF NOT EXISTS machine_key (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), public_key TEXT NOT NULL)",
+    );
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -127,7 +152,10 @@ export class MachineRelay extends DurableObject<Env> {
     if (!route) return jsonResponse({ error: "not_found" }, 404);
 
     if (route.action === "register" && request.method === "POST") {
-      return this.registerMachine(request);
+      return this.registerMachine(request, route.machineId);
+    }
+    if (route.action === "register-challenge" && request.method === "POST") {
+      return this.createRegisterChallenge(request);
     }
 
     if (!(await this.authorizeMachine(request))) {
@@ -263,10 +291,44 @@ export class MachineRelay extends DurableObject<Env> {
     if (machine) sendFrame(machine, resetFrame(attachment.channelId));
   }
 
-  private async registerMachine(request: Request): Promise<Response> {
+  /**
+   * A one-use X25519 key for a proven registration (docs/mobile/relay-identity.md). Anyone may ask; a challenge proves
+   * nothing by itself, and at most MAX_REGISTER_CHALLENGES live at once.
+   */
+  private async createRegisterChallenge(request: Request): Promise<Response> {
+    // The body means nothing here; it is read (bounded) so the runtime does not fail on an unread request stream.
+    await discardBody(request);
+    const now = Date.now();
+    this.ctx.storage.sql.exec("DELETE FROM register_challenge WHERE expires_at <= ?", now);
+    const count = this.ctx.storage.sql.exec<{ total: number }>(
+      "SELECT COUNT(*) AS total FROM register_challenge",
+    ).toArray()[0]?.total ?? 0;
+    if (count >= MAX_REGISTER_CHALLENGES) return jsonResponse({ error: "challenge_limit" }, 429);
+    const pair = await crypto.subtle.generateKey({ name: "X25519" }, true, ["deriveBits"]) as CryptoKeyPair;
+    const publicKey = bytesToHex(new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey) as ArrayBuffer));
+    const privateKey = bytesToHex(new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey) as ArrayBuffer));
+    this.ctx.storage.sql.exec(
+      "INSERT INTO register_challenge (public_key, private_key, expires_at) VALUES (?, ?, ?)",
+      publicKey,
+      privateKey,
+      now + REGISTER_CHALLENGE_TTL_SECONDS * 1000,
+    );
+    return jsonResponse({ challenge: publicKey, expiresInSeconds: REGISTER_CHALLENGE_TTL_SECONDS }, 201);
+  }
+
+  /**
+   * Plain registration: the first bearer claims the id, the same bearer again is idempotent, another gets 409. Proven
+   * registration (a JSON body with publicKey, challenge and proof) also checks that the id is derived from the key and
+   * the proof made with it; it then claims the id even from another bearer, ending every pairing, device and socket of
+   * the previous claimant. Afterwards plain registration answers only to the proven bearer.
+   */
+  private async registerMachine(request: Request, machineId: string): Promise<Response> {
     const token = readBearer(request);
     if (!token) return jsonResponse({ error: "invalid_credential" }, 401);
     const tokenHash = await sha256Hex(token);
+    const proven = await readProvenRegistration(request);
+    if (proven instanceof Response) return proven;
+    if (proven) return this.registerProven(machineId, token, tokenHash, proven);
     const existing = this.ctx.storage.sql.exec<{ token_hash: string }>(
       "SELECT token_hash FROM machine_credential WHERE singleton = 1",
     ).toArray()[0];
@@ -283,6 +345,58 @@ export class MachineRelay extends DurableObject<Env> {
       return jsonResponse({ error: "machine_already_registered" }, 409);
     }
     return emptyResponse(204);
+  }
+
+  private async registerProven(
+    machineId: string,
+    token: string,
+    tokenHash: string,
+    value: ProvenRegistration,
+  ): Promise<Response> {
+    const { publicKey, challenge, proof } = value;
+    if (typeof publicKey !== "string" || !isHexSecret(publicKey) || typeof challenge !== "string" ||
+      !isHexSecret(challenge) || typeof proof !== "string" || !isHexSecret(proof)) {
+      return jsonResponse({ error: "invalid_registration" }, 400);
+    }
+    const keyBytes = hexToBytes(publicKey);
+    if (await relayIdOf(keyBytes) !== machineId) return jsonResponse({ error: "machine_id_not_derived" }, 400);
+    const row = this.ctx.storage.sql.exec<ChallengeRow>(
+      "SELECT private_key, expires_at FROM register_challenge WHERE public_key = ?",
+      challenge,
+    ).toArray()[0];
+    this.ctx.storage.sql.exec("DELETE FROM register_challenge WHERE public_key = ?", challenge);
+    if (!row || row.expires_at <= Date.now()) return jsonResponse({ error: "invalid_challenge" }, 401);
+
+    let expected: string | null = null;
+    try {
+      const shared = await x25519(hexToBytes(row.private_key), keyBytes);
+      if (!shared.every((byte) => byte === 0)) {
+        expected = await registrationProof(shared, machineId, hexToBytes(challenge), token);
+      }
+    } catch {
+      expected = null;
+    }
+    if (expected === null || !constantTimeEqual(expected, proof)) return jsonResponse({ error: "invalid_proof" }, 401);
+
+    const existing = this.ctx.storage.sql.exec<{ token_hash: string }>(
+      "SELECT token_hash FROM machine_credential WHERE singleton = 1",
+    ).toArray()[0];
+    this.ctx.storage.sql.exec(
+      "INSERT INTO machine_key (singleton, public_key) VALUES (1, ?) ON CONFLICT (singleton) DO UPDATE SET public_key = excluded.public_key",
+      publicKey,
+    );
+    if (existing && constantTimeEqual(existing.token_hash, tokenHash)) return emptyResponse(204);
+    if (existing) {
+      // The id was claimed by a bearer that never proved the key: everything it set up goes.
+      this.ctx.storage.sql.exec("UPDATE machine_credential SET token_hash = ? WHERE singleton = 1", tokenHash);
+      this.ctx.storage.sql.exec("DELETE FROM pairing");
+      this.ctx.storage.sql.exec("DELETE FROM device");
+      this.ctx.storage.sql.exec("DELETE FROM socket_ticket");
+      for (const socket of this.ctx.getWebSockets()) closeSocket(socket, 1008, "machine identity reclaimed");
+      return jsonResponse({ registered: true, reclaimed: true }, 201);
+    }
+    this.ctx.storage.sql.exec("INSERT INTO machine_credential (singleton, token_hash) VALUES (1, ?)", tokenHash);
+    return jsonResponse({ registered: true }, 201);
   }
 
   private async authorizeMachine(request: Request): Promise<boolean> {
@@ -548,6 +662,9 @@ function parseRoute(pathname: string): Route | null {
   if (parts.length === 4 && parts[3] === "register") {
     return { machineId: parts[2], action: "register" };
   }
+  if (parts.length === 5 && parts[3] === "register" && parts[4] === "challenge") {
+    return { machineId: parts[2], action: "register-challenge" };
+  }
   if (parts.length === 4 && parts[3] === "pairings") {
     return { machineId: parts[2], action: "pairings" };
   }
@@ -681,6 +798,78 @@ async function readJson<T>(request: Request): Promise<JsonRead<T> | JsonReadErro
 async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return bytesToHex(new Uint8Array(digest));
+}
+
+/** The proven-registration fields; null for a plain registration (no JSON body, or one without a proof); or an error. */
+async function readProvenRegistration(request: Request): Promise<ProvenRegistration | null | Response> {
+  if (!request.body || !request.headers.get("Content-Type")) return null;
+  const parsed = await readJson<ProvenRegistration>(request);
+  if (!parsed.ok) return parsed.response;
+  return parsed.value.proof === undefined ? null : parsed.value;
+}
+
+async function discardBody(request: Request): Promise<void> {
+  if (!request.body) return;
+  const reader = request.body.getReader();
+  let length = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      length += value.byteLength;
+      if (length > MAX_JSON_BYTES) {
+        await reader.cancel();
+        return;
+      }
+    }
+  } catch {
+    // A body that fails to arrive changes nothing.
+  }
+}
+
+function hexToBytes(value: string): Uint8Array<ArrayBuffer> {
+  const bytes = new Uint8Array(value.length / 2);
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = Number.parseInt(value.slice(index * 2, index * 2 + 2), 16);
+  }
+  return bytes;
+}
+
+function concatBytes(...parts: Uint8Array<ArrayBuffer>[]): Uint8Array<ArrayBuffer> {
+  const result = new Uint8Array(parts.reduce((total, part) => total + part.byteLength, 0));
+  let offset = 0;
+  for (const part of parts) {
+    result.set(part, offset);
+    offset += part.byteLength;
+  }
+  return result;
+}
+
+/** X25519 of a PKCS #8 private key and a raw public key. */
+export async function x25519(privatePkcs8: Uint8Array<ArrayBuffer>, publicRaw: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
+  const ownKey = await crypto.subtle.importKey("pkcs8", privatePkcs8, { name: "X25519" }, false, ["deriveBits"]);
+  const peerKey = await crypto.subtle.importKey("raw", publicRaw, { name: "X25519" }, false, []);
+  const algorithm = { name: "X25519", public: peerKey } as unknown as SubtleCryptoDeriveKeyAlgorithm;
+  return new Uint8Array(await crypto.subtle.deriveBits(algorithm, ownKey, 256));
+}
+
+/** The relay id a machine key gives: the first 16 bytes of SHA-256("exosuit-relay-id/1" + key), as hex. */
+export async function relayIdOf(publicKey: Uint8Array<ArrayBuffer>): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", concatBytes(new TextEncoder().encode(RELAY_ID_CONTEXT), publicKey));
+  return bytesToHex(new Uint8Array(digest).subarray(0, 16));
+}
+
+/** HMAC-SHA256 keyed with the X25519 secret over the context, relay id, challenge key and SHA-256 of the bearer. */
+export async function registrationProof(
+  shared: Uint8Array<ArrayBuffer>,
+  relayId: string,
+  challenge: Uint8Array<ArrayBuffer>,
+  token: string,
+): Promise<string> {
+  const tokenDigest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)));
+  const key = await crypto.subtle.importKey("raw", shared, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const message = concatBytes(new TextEncoder().encode(PROOF_CONTEXT), hexToBytes(relayId), challenge, tokenDigest);
+  return bytesToHex(new Uint8Array(await crypto.subtle.sign("HMAC", key, message)));
 }
 
 function constantTimeEqual(left: string, right: string): boolean {

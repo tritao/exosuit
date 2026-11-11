@@ -30,6 +30,7 @@ import workspace.transport.ForwardedStream;
 import workspace.transport.MachineKeys;
 import workspace.transport.NativeRpcHub;
 import workspace.transport.RelayMachineEndpoint;
+import workspace.transport.RelayRegistrationProver;
 
 /** A reply a control request gets later, when the pairing step it started completes. */
 class DeferredReply {
@@ -151,10 +152,13 @@ class MachineRemote implements MachineSessionHost {
 		var token = stored.toString();
 		wipe(stored);
 		endpoint = target;
-		identity = new WorkspaceNoiseIdentity(id, credentials);
+		var own = new WorkspaceNoiseIdentity(id, credentials);
+		identity = own;
 		var relay = new WorkspaceRelayHost(events, hub, new WorkspaceRelaySettings(target, token), allowLoopbackHttp, null);
 		host = relay;
-		var pairing = new WorkspacePairingManager(store, relay, identity.privateKeyForHandshake(), function() return [MachineDirectoryProtocol.CAPABILITY],
+		// A relay id derived from the machine key can be proven to the relay, so an id someone else registered first is taken back.
+		relay.proveIdentityWith(RelayRegistrationProver.forKey(id, own.privateKeyForHandshake(), own.publicKey));
+		var pairing = new WorkspacePairingManager(store, relay, own.privateKeyForHandshake(), function() return [MachineDirectoryProtocol.CAPABILITY],
 			now, onAuthenticated);
 		manager = pairing;
 		relay.onChannel = function(channel) pairing.acceptChannel(channel.channelId, channel);
@@ -564,7 +568,8 @@ class MachineRemote implements MachineSessionHost {
 	/** Relay errors the owner has to act on, said in words; the code stays at the front. */
 	static function explainRelayError(error:Null<String>):Null<String> {
 		if (error == "machine_identity_conflict")
-			// The relay id is the catalog id, which every invitation shows: someone else may have registered it first.
+			// A relay id that is the catalog id (relays set up before each relay got its own) is in every invitation, so someone
+			// else may have registered it first; a derived id is proven and taken back, unless the relay predates proofs.
 			return error + ": this relay already has this machine's id registered with another credential, so it cannot be "
 				+ "used for this machine. Turn remote access off and use another relay (or your own).";
 		return error;

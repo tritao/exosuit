@@ -65,6 +65,8 @@ random 16-byte value encoded as lowercase hex.
 | Operation | Request | Purpose |
 | --- | --- | --- |
 | Claim machine route | `POST /register`, `Authorization: Bearer {machineToken}` | First use stores the machine-token hash; repeat use is idempotent. |
+| Registration challenge | `POST /register/challenge` | A one-use X25519 key (60 s, at most 8 outstanding) for proven registration. |
+| Proven registration | `POST /register`, machine bearer, JSON `{publicKey, challenge, proof}` | The id must be derived from `publicKey` and the proof made with its private key; claims the id even from another bearer (whose devices, invitations, tickets and sockets go). See `docs/mobile/relay-identity.md`. |
 | Create pairing | `POST /pairings`, machine bearer, JSON `{channelId, secret, ttlSeconds}` | Stores only the invitation-secret hash, with a maximum five-minute lifetime. |
 | Pairing socket | `wss://…/pair/{channelId}?secret={secret}` | Browser presents the single-use invitation capability. Requires an allowed `Origin` and an online machine socket. |
 | Register approved device | `PUT /devices/{deviceId}`, machine bearer, JSON `{token}` | Stores a hash after the service has completed Noise verification and desktop approval. |

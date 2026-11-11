@@ -63,6 +63,62 @@ class RelayTicketClient {
 	}
 
 	/**
+		Registers the bearer with a proof that this machine holds the key its relay id is derived from: asks the relay for a
+		one-use challenge key, then registers with the proof (`RelayRegistrationProver`). A relay that accepts it gives the id
+		to this machine even when another bearer registered it first. A relay without proven registration (the Worker before
+		it) answers the challenge with 404: then `relay_registration_unproven`.
+	**/
+	public function registerProven(endpoint:RelayMachineEndpoint, machineToken:String, prover:RelayRegistrationProver,
+		complete:Null<String>->Void):RelayTicketAttempt {
+		if (complete == null || prover == null)
+			throw "Relay proven registration needs a prover and a callback";
+		var current:Null<RelayTicketAttempt> = null;
+		var outer = new RelayTicketAttempt(function() {
+			if (current != null)
+				current.cancel();
+		});
+		current = send(endpoint, machineToken, endpoint == null ? "" : endpoint.registrationChallengeUrl(), HttpMethod.Post, "{}", function(response, error) {
+			if (error != null || response == null) {
+				outer.finish();
+				complete(error == null ? "ticket_transport_failed" : error);
+				return;
+			}
+			if (response.statusCode == 404 || response.statusCode == 405) {
+				outer.finish();
+				complete("relay_registration_unproven");
+				return;
+			}
+			if (response.statusCode != 201) {
+				outer.finish();
+				complete(statusError(response.statusCode));
+				return;
+			}
+			var body:Null<String> = null;
+			try {
+				var value:Dynamic = haxe.Json.parse(response.body.toString());
+				var challenge:Dynamic = value == null ? null : Reflect.field(value, "challenge");
+				if (Std.isOfType(challenge, String) && ~/^[0-9a-f]{64}$/.match(challenge))
+					body = prover.body(challenge, machineToken);
+			} catch (_:Dynamic) {}
+			if (body == null) {
+				outer.finish();
+				complete("invalid_relay_challenge");
+				return;
+			}
+			current = send(endpoint, machineToken, endpoint.registrationUrl(), HttpMethod.Post, body, function(proven, provenError) {
+				outer.finish();
+				if (provenError != null || proven == null)
+					complete(provenError == null ? "ticket_transport_failed" : provenError);
+				else if (proven.statusCode == 201 || proven.statusCode == 204)
+					complete(null);
+				else
+					complete(statusError(proven.statusCode));
+			});
+		});
+		return outer;
+	}
+
+	/**
 		Starts one authenticated POST. The machine bearer is copied into the request
 		header by NativeKit and is never put into the WebSocket URL or diagnostics.
 	*/
