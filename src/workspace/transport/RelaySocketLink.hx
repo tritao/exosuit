@@ -163,6 +163,18 @@ class RelaySocketLink {
 		return sendPacket(RelayFrameCodec.encodeClose(channelId));
 	}
 
+	/**
+		Ends a channel at both ends: the Worker closes the client's socket on it (disconnected_by_host), so a phone learns at
+		once that the machine let go, then the channel closes here. Used when the machine gives up a pairing.
+	**/
+	public function disconnectChannel(channelId:String):Void {
+		var channel = channels.get(channelId);
+		if (isOpen())
+			sendPacket(RelayFrameCodec.encodeClose(channelId));
+		if (channel != null)
+			channel.close();
+	}
+
 	function sendPacket(packet:Bytes):Bool {
 		var sent = stream.send(packet);
 		var reason = stream.failureReason();

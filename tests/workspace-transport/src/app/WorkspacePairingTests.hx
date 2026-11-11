@@ -55,6 +55,7 @@ private class MemoryPairingRelay implements WorkspacePairingRelay {
 	public var registrationError:Null<String>;
 	public var registered:Map<String, String> = [];
 	public var revoked:Array<String> = [];
+	public var ended:Array<String> = [];
 	public var invitations:Map<String, String> = [];
 
 	public function new() {
@@ -86,6 +87,9 @@ private class MemoryPairingRelay implements WorkspacePairingRelay {
 		registered.remove(channelId);
 		complete(null);
 	}
+
+	public function endPairingChannel(channelId:String):Void
+		ended.push(channelId);
 }
 
 class WorkspacePairingTests {
@@ -229,7 +233,8 @@ class WorkspacePairingTests {
 		}
 		require(rejectedSecure != null && pairing.listPending().length == 1, 'candidate reaches approval without RPC');
 		require(pairing.reject(rejectedInvite.deviceId) && !rejectedPair.server.isOpen()
-			&& store.loadDevices().length == 0 && relay.registered.get(rejectedInvite.deviceId) == null,
+			&& store.loadDevices().length == 0 && relay.registered.get(rejectedInvite.deviceId) == null
+			&& relay.ended.indexOf(rejectedInvite.deviceId) >= 0,
 			'rejection closes candidate without storing or registering a device');
 
 		var reuseInvite = invitation(pairing), abandoned = MemoryTransport.pair(), replay = MemoryTransport.pair();
@@ -262,7 +267,8 @@ class WorkspacePairingTests {
 		nowValue += 120001;
 		pairing.poll();
 		require(pairing.listPending().length == 0 && !pendingPair.server.isOpen()
-			&& store.loadDevices().length == 0 && relay.registered.get(pendingInvite.deviceId) == null,
+			&& store.loadDevices().length == 0 && relay.registered.get(pendingInvite.deviceId) == null
+			&& relay.ended.indexOf(pendingInvite.deviceId) >= 0,
 			'unapproved candidate expires and closes without relay registration');
 
 		// The owner approves first and the device's user confirms the code much later, inside the pending window.
@@ -285,7 +291,7 @@ class WorkspacePairingTests {
 			pairing.poll();
 		}
 		require(lateError == 'callback_missing' && latePair.server.isOpen() && pairing.awaitingConfirmation(lateInvite.deviceId)
-			&& relay.revoked.indexOf(lateInvite.deviceId) < 0,
+			&& relay.revoked.indexOf(lateInvite.deviceId) < 0 && relay.ended.indexOf(lateInvite.deviceId) < 0,
 			'an approved device that has not confirmed yet is kept for 110 s');
 		var lateApproved:Dynamic = Json.parse(lateApproval.toString());
 		require(lateSecure.send(Bytes.ofString(Json.stringify({version: 1, type: 'pairing-confirmed',
@@ -312,8 +318,8 @@ class WorkspacePairingTests {
 		pairing.poll();
 		require(confirmationError == 'pairing_expired' && !confirmationPair.server.isOpen()
 			&& store.loadDevices().length == 1 && relay.registered.get(confirmationInvite.deviceId) == null
-			&& relay.revoked.indexOf(confirmationInvite.deviceId) >= 0,
-			'missing receipt confirmation expires, closes the channel and rolls back local/relay trust');
+			&& relay.revoked.indexOf(confirmationInvite.deviceId) >= 0 && relay.ended.indexOf(confirmationInvite.deviceId) >= 0,
+			'missing receipt confirmation expires after 120 s, closes the channel at both ends and rolls back local/relay trust');
 		pairing.dispose();
 		wipe(machine.privateKey);
 		wipe(rejectedDevice.privateKey);

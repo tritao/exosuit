@@ -102,6 +102,16 @@ class WorkspaceRelayHost implements WorkspacePairingRelay {
 	public function revokeDevice(channelId:String, complete:Null<String>->Void):Void
 		connector.revokeDevice(endpoint, machineToken, channelId, complete);
 
+	/**
+		On a socket of its own (suit's machine socket is one) the Worker is asked to close the client's socket. Through suit's
+		link it is not: suit's bridge takes only data frames from a daemon, so the pairing manager's own close is all there is.
+	**/
+	public function endPairingChannel(channelId:String):Void {
+		var current = link;
+		if (current != null && suitStream == null)
+			current.disconnectChannel(channelId);
+	}
+
 	function get_connected():Bool {
 		var current = link, stream = suitStream;
 		return current != null && current.isOpen() && (stream == null || stream.relayConnected);

@@ -388,6 +388,8 @@ class WorkspacePairingManager implements WorkspacePairingAdmin {
 		if (pending.get(candidate.deviceId) != candidate)
 			return;
 		pending.remove(candidate.deviceId);
+		// Tell the device too: closing only this end would leave the phone on its code or "Confirm" with a channel nobody reads.
+		try relay.endPairingChannel(candidate.deviceId) catch (_:Dynamic) {}
 		candidate.transport.close();
 		if (findDevice(candidate.deviceId) != null)
 			try store.deleteDevice(candidate.deviceId) catch (_:Dynamic) {}
