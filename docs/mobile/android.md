@@ -133,8 +133,9 @@ The phone uses the same shared clients as the desktop and the browser build. The
   whose inbox overflows or whose message cannot fit a frame, and closes the channel on a malformed frame.
 - `client/DeviceMachine` is the directory client: it dials the channel through a connector (`DeviceRpcConnector`), runs
   stream 0 (`exosuit-machine/1`) under an `RpcClient` (reconnect with backoff), reads `DIRECTORY` when connected, on
-  `CHANGED` and every 15 s (a status change alone sends no hint), pins the machine's own id from the first answer (it
-  must be the relay id or `machine-<relay id>`), and gives `workspaceConnector(id)`: a connector whose every connect
+  `CHANGED` and every 15 s (a status change alone sends no hint), pins the machine's own id from the first answer (its `relay`
+  field must be the relay id the phone paired under; a machine that sends no `relay` must answer with the relay id or
+  `machine-<relay id>` as its id), and gives `workspaceConnector(id)`: a connector whose every connect
   issues `OPEN` (30 s: it starts an idle service) and hands the new stream to the ordinary `RpcClient`. A dropped channel
   ends every stream, and the clients above reconnect through `OPEN`.
 - `client/WorkspaceConnections` (the desktop's catalog pool) takes an endpoint check and a limit, so the phone keys it by

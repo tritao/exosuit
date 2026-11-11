@@ -27,6 +27,11 @@ import workspace.service.WorkspaceCatalogProtocol.WorkspaceRef;
 	/** Counts changes to this device's view (grants, names, status); a new value means list again. */
 	@:id(3) var revision:Int;
 	@:id(4) var workspaces:Array<MachineWorkspaceEntry>;
+	/**
+		The relay id the device paired under (32 hex digits), which need not be derived from `machine`. A machine that
+		sends none is an older one whose relay id is its own id, or `machine` without the `machine-` prefix.
+	**/
+	@:optional @:id(5) var relay:Null<String>;
 }
 
 /** Opens a stream to one granted workspace's service. */

@@ -12,6 +12,7 @@ import workspace.service.MachineDirectoryProtocol;
 import workspace.service.MachineDirectoryProtocol.MachineDirectory;
 import workspace.service.MachineDirectoryProtocol.MachineWorkspaceEntry;
 import workspace.service.MachineDirectoryProtocol.WorkspaceStream;
+import workspace.service.WorkspaceCatalogProtocol;
 import workspace.service.WorkspaceCatalogProtocol.WorkspaceRef;
 import workspace.transport.StreamMultiplexer;
 
@@ -108,9 +109,9 @@ class DeviceMachine {
 	/** OPEN starts an idle workspace's service, which takes a while. */
 	public static inline final OPEN_TIMEOUT = 30000;
 
-	/** The id the device pairs under: the machine's relay id (32 hex digits). */
+	/** The id the device pairs under: the machine's relay id (32 hex digits), which the directory names in `relay`. */
 	public final relayId:String;
-	/** The machine's own id, as its directory names it (the relay id, or "machine-" and the relay id); pinned by the first directory. */
+	/** The machine's own id, as its directory names it; pinned by the first directory (see `answersFor`). */
 	public var machineId(default, null):Null<String>;
 	/** The last directory the machine sent, or null before the first. Stays after a disconnect. */
 	public var directory(default, null):Null<MachineDirectory>;
@@ -209,9 +210,7 @@ class DeviceMachine {
 			reading = false;
 			refreshAt = clock() + REFRESH_MS;
 			// The first answer names the machine; it must be the one this device paired with, and every later answer the same one.
-			var known = machineId;
-			var ours = known != null ? value.machine == known : value.machine == relayId || value.machine == "machine-" + relayId;
-			if (!ours) {
+			if (!answersFor(value, relayId, machineId)) {
 				error = "The machine answered for another machine id";
 				revision++;
 				connection.close("machine_identity_conflict");
@@ -238,6 +237,23 @@ class DeviceMachine {
 			if (failure.code == "timeout")
 				connection.close("directory_timeout");
 		});
+	}
+
+	/**
+		Whether a directory comes from the machine this device paired with under `relayId`. A machine that names its relay
+		id (`relay`) must name this one, and its own id is then free (suit gives each relay its own id). An older machine
+		names none: its id must then be the relay id, or `machine-` and the relay id. Once `pinned` (the first accepted
+		answer's id), every later answer must keep it.
+	**/
+	public static function answersFor(value:Null<MachineDirectory>, relayId:String, pinned:Null<String>):Bool {
+		if (value == null || value.machine == null || value.machine.length == 0 || value.machine.length > WorkspaceCatalogProtocol.ID_LIMIT)
+			return false;
+		var relay = value.relay;
+		if (relay != null && relay != relayId)
+			return false;
+		if (pinned != null)
+			return value.machine == pinned;
+		return relay != null || value.machine == relayId || value.machine == "machine-" + relayId;
 	}
 
 	static function sameDirectory(left:Null<MachineDirectory>, right:MachineDirectory):Bool {

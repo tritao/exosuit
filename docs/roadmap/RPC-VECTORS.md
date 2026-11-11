@@ -268,7 +268,7 @@ name). The methods:
 
 | Id | Kind | Shape |
 | --- | --- | --- |
-| 180 | method `DIRECTORY` | `MachineQuery {1 machine:Null<String>}` -> `MachineDirectory {1 machine, 2 name, 3 revision, 4 workspaces}` |
+| 180 | method `DIRECTORY` | `MachineQuery {1 machine:Null<String>}` -> `MachineDirectory {1 machine, 2 name, 3 revision, 4 workspaces, 5 relay:Null<String>}` |
 | 181 | method `OPEN` | `OpenWorkspace {1 ref}` -> `WorkspaceStream {1 ref, 2 stream, 3 grants}` |
 | 182 | method `CLOSE` | `CloseWorkspace {1 stream}` -> `CloseWorkspace` |
 | 183 | notification `CHANGED` | `DirectoryChange {1 revision}` |
@@ -281,6 +281,11 @@ Rules:
   gets an empty list until the owner grants workspaces. `revision` changes when the device's view changes (a grant,
   a name, or a status change); `CHANGED` is a hint to list again, sent on stream 0 when it does. Status is read when
   listed; a status change alone sends no hint.
+- `relay` (field 5, added after the freeze, optional) is the relay id the device paired under: the id in the
+  invitation URL. suit gives each relay its own id, so it need not be `machine` or its hex part. A device accepts the
+  first directory when `relay` is its relay id, or, from a machine that sends no `relay`, when `machine` is the relay id
+  or `machine-` and the relay id; it then pins `machine`. Older devices ignore field 5 and keep the second rule, so
+  they work only with relays set up before relay ids were separate.
 - `machine`, when set in a query, must be the machine's id (else `machine_mismatch`). `ref.machine` in `OPEN` is
   checked the same way. A `ref.workspace` that is not granted to the device gets `unknown_workspace`, the same
   answer as for an id the machine does not have.
@@ -298,7 +303,9 @@ Rules:
 | --- | --- |
 | directory query m | `8101a16d` |
 | directory query, any machine | `8101c0` |
-| directory m/N, revision 1, one workspace w/W/running/[workspace.read] | `8401a16d02a14e030104918401a17702a15703a772756e6e696e670491ae776f726b73706163652e72656164` |
+| directory m/N, revision 1, one workspace w/W/running/[workspace.read] | `8501a16d02a14e030104918401a17702a15703a772756e6e696e670491ae776f726b73706163652e7265616405c0` |
+| the same, relay id r | `8501a16d02a14e030104918401a17702a15703a772756e6e696e670491ae776f726b73706163652e7265616405a172` |
+| the same from a machine before field 5 (decodes with no relay id) | `8401a16d02a14e030104918401a17702a15703a772756e6e696e670491ae776f726b73706163652e72656164` |
 | open m/w | `81018201a16d02a177` |
 | stream for m/w, id 5, [workspace.read] | `83018201a16d02a17702050391ae776f726b73706163652e72656164` |
 | close stream 3 | `810103` |

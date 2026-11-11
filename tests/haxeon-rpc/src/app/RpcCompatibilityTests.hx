@@ -315,11 +315,19 @@ class RpcCompatibilityTests {
 		require(MachineDirectoryProtocol.DIRECTORY.encodeRequest({machine: null}).compare(bytes("8101c0")) == 0, "Machine query without a machine changed");
 		require(MachineDirectoryProtocol.DIRECTORY.decodeRequest(bytes("80")).machine == null, "An absent machine in a query became a value");
 		var directory:MachineDirectory = {machine: "m", name: "N", revision: 1, workspaces: [{workspace: "w", name: "W", status: "running", grants: ["workspace.read"]}]};
-		var directoryBytes = bytes("84" + "01a16d" + "02a14e" + "0301" + "0491" + "84" + "01a177" + "02a157" + "03a772756e6e696e67" + "0491ae776f726b73706163652e72656164");
+		var entryHex = "84" + "01a177" + "02a157" + "03a772756e6e696e67" + "0491ae776f726b73706163652e72656164";
+		var directoryBytes = bytes("85" + "01a16d" + "02a14e" + "0301" + "0491" + entryHex + "05c0");
 		require(MachineDirectoryProtocol.DIRECTORY.encodeResponse(directory).compare(directoryBytes) == 0, "Machine directory vector changed");
 		var decoded = MachineDirectoryProtocol.DIRECTORY.decodeResponse(directoryBytes);
 		require(decoded.machine == "m" && decoded.revision == 1 && decoded.workspaces.length == 1 && decoded.workspaces[0].status == "running"
-			&& decoded.workspaces[0].grants[0] == "workspace.read", "Machine directory decode changed");
+			&& decoded.workspaces[0].grants[0] == "workspace.read" && decoded.relay == null, "Machine directory decode changed");
+		// Field 5, the relay id the device paired under, was added later: a directory from before it has none.
+		var legacy = MachineDirectoryProtocol.DIRECTORY.decodeResponse(bytes("84" + "01a16d" + "02a14e" + "0301" + "0491" + entryHex));
+		require(legacy.machine == "m" && legacy.workspaces.length == 1 && legacy.relay == null, "A directory without a relay id gained one");
+		directory.relay = "r";
+		var withRelay = bytes("85" + "01a16d" + "02a14e" + "0301" + "0491" + entryHex + "05a172");
+		require(MachineDirectoryProtocol.DIRECTORY.encodeResponse(directory).compare(withRelay) == 0, "Machine directory relay vector changed");
+		require(MachineDirectoryProtocol.DIRECTORY.decodeResponse(withRelay).relay == "r", "Machine directory relay decode changed");
 		var open = bytes("81018201a16d02a177");
 		require(MachineDirectoryProtocol.OPEN.encodeRequest({ref: {machine: "m", workspace: "w"}}).compare(open) == 0, "Open workspace vector changed");
 		require(MachineDirectoryProtocol.validOpen(MachineDirectoryProtocol.OPEN.decodeRequest(open)), "Open workspace decode changed");

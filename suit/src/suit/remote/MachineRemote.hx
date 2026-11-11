@@ -296,7 +296,8 @@ class MachineRemote implements MachineSessionHost {
 				listed.push({workspace: entry.id, name: entry.name, status: running(entry.id) == null ? MachineDirectoryProtocol.IDLE : MachineDirectoryProtocol.RUNNING,
 					grants: grants});
 		}
-		return {machine: machine.id, name: machine.name, revision: revision(), workspaces: listed};
+		// The relay id names the pairing to the device, apart from the machine's own id (the catalog's).
+		return {machine: machine.id, name: machine.name, revision: revision(), workspaces: listed, relay: endpoint == null ? null : endpoint.machineId};
 	}
 
 	static function stateDirOf(workspace:String):String
