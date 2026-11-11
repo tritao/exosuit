@@ -124,7 +124,8 @@ JNIEXPORT jint JNICALL Java_com_exosuit_mobile_HaxeonRuntime_load(JNIEnv *env, j
         goto cleanup;
     }
     pthread_mutex_lock(&lock);
-    if (module) goto unlock;
+    /* Loaded by an earlier Activity instance in this process: the module and its init already ran, so loading is a no-op. */
+    if (module) { answer = 0; goto unlock; }
     if (!runtime_ready) {
         hl_global_init();
         hl_setup.file_path = (pchar *)"ui.hl";

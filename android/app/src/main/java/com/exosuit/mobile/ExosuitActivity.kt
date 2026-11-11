@@ -36,6 +36,12 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        if (runtimeBound) {
+            // An earlier instance of this Activity in this process already bound the runtime to its own views and surface
+            // (Android recreated the Activity without ending the process). That binding cannot move, so start a fresh process.
+            restartProcess()
+            return
+        }
         root = FrameLayout(this)
         content = FrameLayout(this)
         root.addView(content, FrameLayout.LayoutParams(-1, -1))
@@ -51,6 +57,7 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
             check(HaxeonRuntime.load(assets, if (debuggable) File(filesDir, "dev").path else null) == 0) { "Haxeon module load failed" }
             loaded = true
             queueIntentCommands(intent)
+            runtimeBound = true
             host = NativeKitHost(content)
             observeInsets()
             // Back (gesture, button or key) goes to ExosuitApp first; the Activity finishes only at the top level.
@@ -270,14 +277,26 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
     override fun onDestroy() {
         active = false
         Choreographer.getInstance().removeFrameCallback(this)
-        if (isFinishing) {
+        if (!isChangingConfigurations) {
             // Tearing the runtime down in a process that lives on does not work: NativeKit's host close spins when a
             // surface still has a frame in flight or sampled images (found with Back at the root, before moveTaskToBack), and
             // the next launch then sat on the splash icon for ever. Everything durable is already on disk or in the
-            // Keystore, so the process ends and the next start is a clean one.
+            // Keystore, so the process ends and the next start is a clean one. This covers a destroy without finishing too
+            // ("Don't keep activities"); a recreation for a configuration change restarts the process in the next onCreate.
             android.os.Process.killProcess(android.os.Process.myPid())
         }
         super.onDestroy()
+    }
+
+    /**
+     * Starts this Activity again in a new process: RestartActivity, in its own process, waits for this one to be gone and
+     * then launches a fresh task. This process ends now, so nothing of the old runtime is reused.
+     */
+    private fun restartProcess() {
+        Log.i(TAG, "Activity recreated in a process whose runtime belongs to an earlier instance; restarting the process")
+        startActivity(Intent(this, RestartActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            .putExtra(RestartActivity.EXTRA_PID, android.os.Process.myPid()))
+        android.os.Process.killProcess(android.os.Process.myPid())
     }
 
     private fun fail(error: Throwable) {
@@ -293,5 +312,7 @@ class ExosuitActivity : Activity(), Choreographer.FrameCallback {
     private companion object {
         const val TAG = "Exosuit"
         const val REQUEST_SAVE_CREDENTIALS = 1
+        /** The process's runtime is bound to an Activity instance's views (one per process; see restartProcess). */
+        @Volatile var runtimeBound = false
     }
 }

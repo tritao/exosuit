@@ -13,7 +13,8 @@ object HaxeonRuntime {
 
     /**
      * Loads ui.hl, ui.hli and ui.entries into the HashLink runtime; 0 on success. A file in [overrideDirectory]
-     * (debug builds only, null otherwise) replaces the APK asset of the same name.
+     * (debug builds only, null otherwise) replaces the APK asset of the same name. Once a module is loaded, later calls in
+     * the same process return 0 without loading or initialising it again.
      */
     external fun load(assets: AssetManager, overrideDirectory: String?): Int
 
