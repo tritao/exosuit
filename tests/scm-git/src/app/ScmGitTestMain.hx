@@ -712,8 +712,9 @@ class ScmGitTestMain {
 		pump(gitScheduler, () -> initialBranches != null, "Git branch listing timed out");
 		if (initialBranches == null || initialBranches.error != null || initialBranches.value == null)
 			throw "Git branch listing failed: " + (initialBranches == null || initialBranches.error == null ? "unknown" : initialBranches.error.message);
+		var initialBranchList = initialBranches.value;
 		var currentReference:Null<String> = null;
-		for (branch in initialBranches.value) if (branch.current && !branch.remote) currentReference = branch.reference;
+		for (branch in initialBranchList) if (branch.current && !branch.remote) currentReference = branch.reference;
 		require(currentReference != null, "Git branch listing did not identify the current local branch");
 		var originalBranchReference:String = cast currentReference;
 		require(mutationHandle.features().worktrees, "Trusted Git repository did not advertise worktrees");
@@ -1160,11 +1161,12 @@ class ScmGitTestMain {
 		pump(gitScheduler, () -> serviceResult != null, "SCM service discovery timed out");
 		if (serviceResult == null || serviceResult.value == null || serviceResult.value.length != 4)
 			throw "SCM service did not publish discovered repositories";
+		var serviceDiscovered = serviceResult.value;
 		var serviceWatchPaths = service.watchDirectories(discoveryRoot);
 		require(serviceWatchPaths.length > 1
 			&& serviceWatchPaths[0] == StringTools.replace(FileSystem.fullPath(discoveryRoot), "\\", "/"),
 			"SCM service did not expose the project and Git metadata directories for host watches");
-		var serviceRepositories:Array<ScmRepository> = cast serviceResult.value;
+		var serviceRepositories:Array<ScmRepository> = cast serviceDiscovered;
 		var serviceRepository = serviceRepositories[0];
 		service.update(Sys.time());
 		pump(gitScheduler, function() {
@@ -1219,7 +1221,8 @@ class ScmGitTestMain {
 		pumpService(operationService, gitScheduler, () -> operationDiscovery != null, "Fake SCM operation service discovery timed out");
 		if (operationDiscovery == null || operationDiscovery.value == null || operationDiscovery.value.length != 1)
 			throw "Fake SCM operation service returned no repository";
-		var operationRepository = operationDiscovery.value[0];
+		var operationRepositoryList = operationDiscovery.value;
+		var operationRepository = operationRepositoryList[0];
 		operationService.setWatchAvailable(operationRoot, true);
 		pumpService(operationService, gitScheduler, () -> operationService.snapshot(operationRepository.id) != null,
 			"Fake SCM operation service initial refresh timed out");
@@ -1301,7 +1304,8 @@ class ScmGitTestMain {
 		pumpService(operationService, gitScheduler, () -> burstDiscovery != null, "Fake SCM burst service discovery timed out");
 		if (burstDiscovery == null || burstDiscovery.value == null || burstDiscovery.value.length != 1)
 			throw "Fake SCM burst service returned no repository";
-		var burstRepository = burstDiscovery.value[0];
+		var burstRepositoryList = burstDiscovery.value;
+		var burstRepository = burstRepositoryList[0];
 		operationService.setWatchAvailable(burstRoot, true);
 		pumpService(operationService, gitScheduler, () -> operationService.snapshot(burstRepository.id) != null,
 			"Fake SCM burst service initial refresh timed out");
@@ -1351,7 +1355,8 @@ class ScmGitTestMain {
 		pumpService(operationService, gitScheduler, () -> narrowDiscovery != null, "Fake SCM narrowed discovery timed out");
 		if (narrowDiscovery == null || narrowDiscovery.value == null || narrowDiscovery.value.length != 1)
 			throw "Fake SCM narrowed service returned no repository";
-		var narrowRepository = narrowDiscovery.value[0];
+		var narrowRepositoryList = narrowDiscovery.value;
+		var narrowRepository = narrowRepositoryList[0];
 		operationService.setWatchAvailable(narrowRoot, true);
 		pumpService(operationService, gitScheduler, () -> operationService.snapshot(narrowRepository.id) != null,
 			"Fake SCM narrowed initial refresh timed out");
@@ -1422,7 +1427,8 @@ class ScmGitTestMain {
 		pumpService(mergeService, gitScheduler, () -> mergeDiscovery != null, "Merge-conflict service discovery timed out");
 		if (mergeDiscovery == null || mergeDiscovery.value == null || mergeDiscovery.value.length != 1)
 			throw "Merge-conflict service returned no repository";
-		var mergeRepository = mergeDiscovery.value[0];
+		var mergeRepositoryList = mergeDiscovery.value;
+		var mergeRepository = mergeRepositoryList[0];
 		mergeService.setWatchAvailable(mergeRoot, true);
 		pumpService(mergeService, gitScheduler, () -> mergeService.snapshot(mergeRepository.id) != null,
 			"Merge-conflict service refresh timed out");
@@ -1491,7 +1497,8 @@ class ScmGitTestMain {
 		deadline = Sys.time() + 10.0;
 		while (gitScheduler.activeCount() > 0 && Sys.time() < deadline) { gitScheduler.update(32); Sys.sleep(0.001); }
 		if (repositoryRootResult == null || repositoryRootResult.value == null) throw "could not locate the fixture repository for process cancellation";
-		var repositoryRoot = StringTools.trim(repositoryRootResult.value.stdout.toString()), statusResult:Null<ScmJobResult<scm.git.GitCommandResult>> = null;
+		var repositoryRootValue = repositoryRootResult.value;
+		var repositoryRoot = StringTools.trim(repositoryRootValue.stdout.toString()), statusResult:Null<ScmJobResult<scm.git.GitCommandResult>> = null;
 		git.run(["status", "--porcelain=v2", "-z", "--branch"], repositoryRoot, 55, value -> statusResult = value);
 		deadline = Sys.time() + 10.0;
 		while (gitScheduler.activeCount() > 0 && Sys.time() < deadline) { gitScheduler.update(32); Sys.sleep(0.001); }

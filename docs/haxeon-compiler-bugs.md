@@ -143,6 +143,7 @@ and the status.
   `ScmRootState` (many initialized fields) or in the surrounding method.
 - **Found:** 2026-10-31, building the M19 stack against haxeon `1fd91b54`.
 - **Workaround:** build the local without reassigning it (`var known = roots.get(key); var state = known != null ? known : new ScmRootState(key);`).
+- **Update 2026-11-11:** the same error fires for any closure-assigned local (`value -> x = value`) whose field is read after a call; tests/scm-git needed `var copy = x.value;` at every such site. Reading a field in the same expression as the null check does not trip it.
 - **Status:** open. The message should say which call cleared the check, and not claim that a closure assigns a local
   it only reads. Related to the "Unclear" entry on closure-assigned locals below.
 
