@@ -199,6 +199,12 @@ private class Fixture {
 		tab = new ui.UiTerminalTab("keys", "Terminal", "/", new ui.TerminalPane(session, function() {}, new ui.TerminalPalette(true), fonts));
 		var view = new ui.TerminalTabView(tab, function() {}, function(_, _) {}, null,
 			function(id) return ui.TerminalShortcutPolicy.allows(id, []));
+		// The pane learns its size while the first frame is laid out and asks for more, as the app does (size, then focus); the
+		// retention check (HAXEON_UI_VERIFY_RETENTION) compares settled frames only.
+		var verify = context.verifyRetentionEvery;
+		context.verifyRetentionEvery = 0;
+		for (_ in 0...3) context.submit(view, new LayoutFrame(640, 400));
+		context.verifyRetentionEvery = verify;
 		var root = context.submit(view, new LayoutFrame(640, 400));
 		if (!context.focus.focus(root.id)) throw "Terminal key fixture did not focus";
 	}
