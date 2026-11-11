@@ -196,6 +196,25 @@ class MachineRemoteUnitTests {
 			return got != null;
 		});
 		check(got == "from-service", "service frames reach the device on the stream");
+		// A device holds at most STREAMS_PER_WORKSPACE streams in one workspace, so it cannot fill the service's connections.
+		var extra = 0;
+		failure = null;
+		for (_ in 1...MachineDeviceSession.STREAMS_PER_WORKSPACE) {
+			var answered = false;
+			device.call(MachineDirectoryProtocol.OPEN, {ref: {machine: "machine-1", workspace: "w1"}}, 2000, function(_) {
+				extra++;
+				answered = true;
+			}, function(error) {
+				failure = error.code;
+				answered = true;
+			});
+			pump(function() return answered);
+		}
+		check(extra == MachineDeviceSession.STREAMS_PER_WORKSPACE - 1 && failure == null, "a device may open several streams to one workspace");
+		device.call(MachineDirectoryProtocol.OPEN, {ref: {machine: "machine-1", workspace: "w1"}}, 2000, function(_) {}, function(error) failure = error.code);
+		pump(function() return failure != null);
+		check(failure == "too_many_streams", "one more stream to that workspace is refused");
+		failure = null;
 		// Removing the grant closes the stream on both ends.
 		granted = new Map<String, Array<String>>();
 		revision++;

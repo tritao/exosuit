@@ -11,10 +11,15 @@ typedef CatalogBinding = RpcConnection->Array<String>->CatalogCleanup;
 
 typedef CatalogCleanup = Void->Void;
 
-private typedef Peer = {var transport:MessageTransport; var probeUntil:Float; var options:RpcPeerOptions; var localAdmin:Bool; var preflight:Null<SessionPreflight>; var handshake:Null<RpcHandshake>; var connection:Null<RpcConnection>; var cleanup:Array<Void->Void>;}
+private typedef Peer = {var transport:MessageTransport; var probeUntil:Float; var options:RpcPeerOptions; var localAdmin:Bool; var forwarded:Bool; var preflight:Null<SessionPreflight>; var handshake:Null<RpcHandshake>; var connection:Null<RpcConnection>; var cleanup:Array<Void->Void>;}
 
 /** Bounded headless service loop, shared by daemon and transport tests. */
 class WorkspaceRpcServer {
+	/** Connections other than forwarded device streams: the owner's editors and clients, and direct remote peers. */
+	static inline final PEER_LIMIT = 16;
+	/** Device streams suit forwards, for all devices together. */
+	static inline final FORWARDED_PEER_LIMIT = 16;
+
 	final service:WorkspaceService;
 	final clock:Void->Float;
 	final identity:Null<WorkspaceIdentity>;
@@ -217,12 +222,13 @@ class WorkspaceRpcServer {
 		peer.probeUntil = 0;
 		if (ForwardedStream.isIntro(first)) {
 			var intro = ForwardedStream.parse(first);
-			if (intro == null) {
+			if (intro == null || forwardedCount() >= FORWARDED_PEER_LIMIT) {
 				peer.transport.close();
 				return;
 			}
 			peer.options = forwardedOptions(intro.grants);
 			peer.localAdmin = false;
+			peer.forwarded = true;
 		} else
 			peer.transport = new PushbackTransport(first, peer.transport);
 		peer.handshake = RpcHandshake.server(peer.transport, clock, peer.options);
@@ -230,7 +236,8 @@ class WorkspaceRpcServer {
 
 	function accept(transport:MessageTransport, preflight:Null<SessionPreflight>, peerOptions:RpcPeerOptions, localAdmin:Bool, probe:Bool = false):Void {
 		prune();
-		if (peers.length >= 16) {
+		// Device streams suit forwards have a pool of their own, so devices cannot take the slots the owner's editor needs.
+		if (peers.length - forwardedCount() >= PEER_LIMIT) {
 			transport.close();
 			return;
 		}
@@ -238,12 +245,21 @@ class WorkspaceRpcServer {
 			transport: transport,
 			options: peerOptions,
 			localAdmin: localAdmin,
+			forwarded: false,
 			preflight: preflight,
 			probeUntil: probe ? clock() + 5000 : 0,
 			handshake: preflight == null && !probe ? RpcHandshake.server(transport, clock, peerOptions) : null,
 			connection: null,
 			cleanup: []
 		});
+	}
+
+	function forwardedCount():Int {
+		var count = 0;
+		for (peer in peers)
+			if (peer.forwarded)
+				count++;
+		return count;
 	}
 
 	function prune():Void {

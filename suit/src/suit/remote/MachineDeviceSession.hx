@@ -70,6 +70,11 @@ private typedef ServiceStream = {
 class MachineDeviceSession {
 	static inline final OUTBOX_LIMIT = 256;
 	static inline final FRAMES_PER_POLL = 64;
+	/**
+		Streams one device may hold in one workspace, open or opening. Each is a connection to the workspace's service, and
+		the service has a bounded pool of them for all devices.
+	**/
+	public static inline final STREAMS_PER_WORKSPACE = 6;
 
 	public final deviceId:String;
 	final secure:MessageTransport;
@@ -78,6 +83,8 @@ class MachineDeviceSession {
 	final machineStream:MachineStreamTransport;
 	final streams:Map<Int, ServiceStream> = [];
 	final opening:Array<Int> = [];
+	/** The workspace of each OPEN still in progress (one entry per OPEN). */
+	final openingIn:Array<String> = [];
 	final outbox:Array<Bytes> = [];
 	var handshake:Null<RpcHandshake>;
 	var connection:Null<RpcConnection>;
@@ -108,6 +115,18 @@ class MachineDeviceSession {
 		var count = 0;
 		for (_ in streams)
 			count++;
+		return count;
+	}
+
+	/** The streams to `workspace`, open or opening. */
+	function streamsIn(workspace:String):Int {
+		var count = 0;
+		for (stream in streams)
+			if (stream.workspace == workspace)
+				count++;
+		for (opened in openingIn)
+			if (opened == workspace)
+				count++;
 		return count;
 	}
 
@@ -267,14 +286,17 @@ class MachineDeviceSession {
 				context.fail({code: "unknown_workspace", message: "No such workspace", ambiguous: false});
 				return;
 			}
-			if (streamCount() + opening.length >= MachineDirectoryProtocol.STREAM_LIMIT - 1) {
+			if (streamCount() + opening.length >= MachineDirectoryProtocol.STREAM_LIMIT - 1
+				|| streamsIn(ref.workspace) >= STREAMS_PER_WORKSPACE) {
 				context.fail({code: "too_many_streams", message: "Too many open workspaces", ambiguous: false});
 				return;
 			}
 			var id = nextStream++;
 			opening.push(id);
+			openingIn.push(ref.workspace);
 			host.openService(deviceId, ref.workspace, grants, function(pipe, error) {
 				opening.remove(id);
+				openingIn.remove(ref.workspace);
 				if (pipe == null || closed) {
 					if (pipe != null)
 						pipe.close();
